@@ -581,6 +581,7 @@ version has, so a client can find out before it relies on it: `{"param_check": [
 `control.capabilities` ``; a feature added later is listed here too. `plugin_tools: true`
 advertises the `plugin.tools` command. Clients query that command only when advertised;
 an absent or false flag means there are no plugin tools to list or call.
+`joint_drive: true` advertises [interactive joint driving](#driving-a-joint-interactively).
 
 Any request's `params` may carry `allow_paths: ["/abs/folder", …]`: every file that request
 reads, writes or deletes (command paths such as `file.export`'s `path` or `doc.recovery_*`'s
@@ -677,6 +678,32 @@ Commands never open dialogs when run this way. `solidcraft-cli commands` prints 
 `document.export`, `document.import` and `document.saved` are control methods, not commands: they
 act on the app's open design rather than on an engine session, and they are not among the methods
 the agent chat may use.
+
+### Driving a joint interactively
+
+Keep one authenticated desktop control connection open for all requests of a movement.
+Get the active `document_id` from `document.revision` and the numeric joint ID from
+`joint.inspect`. The optional `index` selects one coordinate and defaults to zero.
+
+| `control.joint_drive` params | Result |
+|---|---|
+| `{action: "begin", document_id, joint, index?}` | `{movement}`, the ID for this movement |
+| `{action: "update", movement, value}` | The `joint.drive` result, with the values the joint reached and any stop |
+| `{action: "finish", movement}` | `{changed}`, true when the final pose became an Undo step |
+| `{action: "cancel", movement}` | `{cancelled: true}` |
+
+Each update previews an absolute value in degrees or millimetres, solving from the pose at
+Begin. Joint limits, motion links, contact and loop stops use the ordinary `joint.drive` solver.
+A failed update leaves the last successful preview available. Wait for the reply before sending
+another request. The design and `design.changed` follow the committed pose. Read back an update
+in its reply.
+
+Finish keeps the last successful pose as one edit. Undo restores the starting pose, including
+joints moved by its couplings. If there was no change, Finish keeps the existing Undo and Redo
+history. Another edit keeps its own history and discards any pending movement. A selection
+change, a local editing tool or dialog, leaving the design tab, and Cancel also discard the
+preview. The movement ID expires. Closing the connection without sending Finish discards the
+preview. A Finish already running can still commit. Reconnect with a fresh Begin.
 
 ### Following the design
 
@@ -926,7 +953,7 @@ no box selection.
 | `ui.click` | `x`, `y` (screen points), `button?`: left/right/middle, `shift?`, `ctrl?`, `double?` | real pointer input |
 | `ui.move` | `x`, `y`, `shift?`, `alt?`, `ctrl?`, `cmd?` | pointer movement without a button; modifiers apply until the next synthetic move/click; a move with omitted modifiers releases them. With `nav: "touchpad"`, Shift pans and Alt/Option orbits. |
 | `ui.drag` | `x0`, `y0`, `x1`, `y1`, `via?`, `button?`, `shift?`, `ctrl?`, `steps?`, `hold?`, `hold_end?` | press, move, release; `via` is a list of `[x, y]` points passed through on the way (`steps` moves to each); a left drag on the model is a box selection (left to right: window, right to left: crossing), or with `lassoSelect` on (`ui.set`, the SELECT panel's Lasso) a freehand lasso that takes what is wholly inside it; with OpenSCAD navigation, plain left-drag on empty space orbits, Shift+left-drag box-selects, and drags starting on sketch geometry edit it; `hold` keeps the button down that many frames first (a right press-and-hold opens the marking menu, releasing over a direction picks it), `hold_end` that many frames at the end (a sketch drag shows its snap) |
-| `ui.menu` | `x?`, `y?`, `target?`, `close?` | with a point: open a context menu there as a right-click would (the viewport's marking menu, a browser menu with `target: {"type": "body", "name"} \| {"type": "sketch", "id"} \| {"type": "component", "id"}`, or a History bar feature's with `{"type": "timeline", "feature": id}`); a target the design doesn't have is refused (`no body \`Name\``); without: the open menu (`radial` and `items`: id, label, shortcut, enabled, icon, placeholder, and `children` for a row that opens a flyout; blank icons on headings/separators have `placeholder: false`) |
+| `ui.menu` | `x?`, `y?`, `target?`, `close?` | with a point: open a context menu there as a right-click would (the viewport's marking menu, a browser menu with `target: {"type": "body", "name"} \| {"type": "sketch", "id"} \| {"type": "component", "id"}`, or a History bar feature's with `{"type": "timeline", "feature": id}`; on a drawing's sheet, the sheet's menu on the view, dimension or note there: Edit, Delete, the tools, Undo and Redo); a target the design doesn't have is refused (`no body \`Name\``); without: the open menu (`radial` and `items`: id, label, shortcut, enabled, icon, placeholder, and `children` for a row that opens a flyout; blank icons on headings/separators have `placeholder: false`) |
 | `ui.icon_audit` | `reset?`, `stop?` | `reset: true` enables collection on the UI thread and clears previous requests; returns `{requested: [{name, master, placeholder}]}` sorted by requested id. Each read drains names collected since the previous read/reset. Collection stays enabled until `stop: true` (which returns pending names before disabling it). Includes aliases, variable/table ids and cached paints. |
 | `ui.menuPick` | `item`: id or label | runs an item of the open menu or of any of its flyouts, as clicking it does; a row that only opens a flyout is refused |
 | `ui.selectOther` | `x?`, `y?`, `pick?`, `add?`, `hover?`, `close?` | Select Other: with a point, list compatible hidden and visible geometry near the pointer by default (as holding the left button does; disable `select_other_hidden` for the original visible-only list); the popup fits the available window space and scrolls only for overflow; `pick`: select row `pick` (`add`: as Shift-click; with a dialog open, into its active input); `hover`: light a row up; without: the open list (`open`, `at`, `total`: everything under the cursor, `rows`: label, icon, sel, at most 20 per kind, nearest first) |
@@ -1013,7 +1040,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `angle_decimals`
 - `assembly_move_handles` (default true): explicit Assembly Move uses the permitted joint-motion handles; false keeps the previous Move panel.
 - `auto_operation` (default true: feature windows choose Join, New Body or Cut from what their material touches until one is picked; false: each keeps the operation it opens with, Extrude its own Join or Cut)
-- `background_image` (string, default empty: a picture's file, shown behind the model and covering the window from its centre).
+- `background_image` (string, default empty: a picture's file, shown behind the model and covering the window from its centre; a photo stored turned by its EXIF orientation is shown upright, #19138).
 - `browser_arrow_keys` (default true: while the Browser has the keyboard, which a click on one of its rows gives it and a click elsewhere takes back, Up/Down move the selection through its rows, Left/Right fold or unfold the row, Enter opens it and F2 renames it, and the plain arrows do not turn the view; false: the arrows always turn the view, as before #17931; the Browser also lets them go while its name editor is open)
 - `browser_bodies_folders` (`several` (default): a component with one body and no groups lists it straight under the component in the browser, without a Bodies folder; `always`; `never`: components list their bodies and groups straight under them, and the folder's menu items are on the component's menu; the design's own Bodies folder, and one hidden with its eye, always show; #4217)
 - `browser_components_open` (default false: each component placement in the browser starts closed until it is opened, by its fold arrow, Expand All or Find in Browser; true: every placement starts open, as before #9274)
@@ -1071,6 +1098,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `logo_accent` (bool, default false: the application bar's logo in shades of the theme's accent instead of the theme's logo colours)
 - `look_at_anim`
 - `look_at_speed`
+- `mark_orbit_point` (default true: while an orbit turns about the origin or the model point under the cursor (`orbit_around` `origin` or `cursor`), a small dot, like a sketch point, marks that point; false draws nothing)
 - `max_design_file_mb` (default 256): the largest design file opened, in MB, from the default up to 16384 (16 GB) (Preferences › General › Largest file to open, #4086; a `--max-file-size` launch flag overrides both for that run; the web app keeps the defaults and refuses other values; [large files](book/src/guide/files.md#large-files))
 - `max_step_file_mb` (default 512): the largest STEP or import file opened, in MB, from the default up to 16384 (16 GB) (Preferences › General › Largest file to open, #4086; a `--max-file-size` launch flag overrides both for that run; the web app keeps the defaults and refuses other values; [large files](book/src/guide/files.md#large-files))
 - `maya_horizontal_zoom`: Maya Alt+right drag zooms horizontally (right in, left out), default `true`; `false` restores vertical drag zoom. Other presets and the fixed Zoom tool are unchanged.

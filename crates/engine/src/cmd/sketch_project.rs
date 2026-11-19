@@ -500,6 +500,9 @@ fn add_link_unless_present(
         None => Vec::new(),
     };
     let link = sk.add_link_with_wires(kind, r.source, &r.geom, &r.wires)?;
+    // A face's curves keep the names of the edges they stand for, which find them again when
+    // the face is read in another order (#18711).
+    sk.set_link_curve_edges(&link, &r.geom, &r.edge_names);
     // The wires' exact curves, as a refresh of the link gives them (an included edge's record
     // curve): a link made now is the one its sketch would resolve.
     sk.set_link_wire_curves(&link, &r.exact)?;
@@ -631,7 +634,7 @@ pub(super) fn project_operands(s: &mut Session, p: &Value, cmd: &str, keys: &[&s
     if !keys.iter().any(|k| p.get(*k).is_some_and(|v| model_ref(v) || middle_of(v).is_some())) {
         return Ok(p.clone());
     }
-    if s.open_drawing.is_some() {
+    if s.sheet_sketching() {
         return Err(bad(cmd, "not supported yet: model projection in a sheet sketch; use exact sheet-local geometry"));
     }
     let id = sketch_store::target(s, p, cmd)?;
@@ -692,7 +695,7 @@ pub(super) fn project_entities(s: &mut Session, p: &Value, cmd: &str) -> Result<
     if !entities.iter().any(model_ref) {
         return Ok(p.clone());
     }
-    if s.open_drawing.is_some() {
+    if s.sheet_sketching() {
         return Err(bad(cmd, "not supported yet: model projection in a sheet sketch; use exact sheet-local geometry"));
     }
     let id = sketch_store::target(s, p, cmd)?;
@@ -888,7 +891,7 @@ fn curve_intersection_arg(v: &Value, cmd: &str) -> Result<Option<(String, String
 pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
     // A sheet may be open while the model retains its own active sketch. Never
     // project into that model or reinterpret its new local ids as sheet points.
-    let sheet = s.open_drawing.is_some();
+    let sheet = s.sheet_sketching();
     let target = if sheet { None } else { sketch_store::active(s) };
     if !sheet && target.is_none() {
         return Ok(p.clone());
@@ -1030,6 +1033,7 @@ pub(super) fn project_internal_faces(s: &mut Session, id: u64, body: &str, indic
     for &index in indices {
         let resolved = solidcraft_doc::project::resolve_face_indices(&state, &plane, LinkKind::Project, body, &[index])?;
         let link = sk.add_link_with_wires(LinkKind::Project, resolved.source, &resolved.geom, &resolved.wires)?;
+        sk.set_link_curve_edges(&link, &resolved.geom, &resolved.edge_names);
         if let Some(entry) = sk.links.iter_mut().find(|entry| entry.id == link) {
             entry.face_name = names.get(index).cloned();
         }
@@ -1060,6 +1064,7 @@ pub(super) fn auto_project_face(s: &mut Session, id: u64, _at: Vec3) -> Result<O
     let resolved = solidcraft_doc::project::resolve_anchored_face(&doc, &state, &plane, LinkKind::Project, &anchor)?;
     let mut sk = sketch_store::read(&doc, id)?.clone();
     let link = sk.add_link_with_wires(LinkKind::Project, resolved.source, &resolved.geom, &resolved.wires)?;
+    sk.set_link_curve_edges(&link, &resolved.geom, &resolved.edge_names);
     if let Some(link) = sk.links.iter_mut().find(|entry| entry.id == link) {
         link.face_name = Some(anchor.target.name.clone());
         link.auto_face = true;

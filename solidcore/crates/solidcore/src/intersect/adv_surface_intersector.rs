@@ -243,7 +243,8 @@ pub struct AdvSurfaceIntersector<'s, 't, O> {
     /// Not upstream (the fork's `m_vTangentSeeds`, opt-in
     /// `Kernel::fixes.ssi_tangent_curve_tracer`, WR-75): the UV pairs where
     /// [`AdvSurfaceIntersector::find_interior_curves`] found the normals (nearly)
-    /// parallel, seeds of the tangential curve pass.
+    /// parallel, seeds of the tangential curve pass (none where that pass does not run,
+    /// [`AdvSurfaceIntersector::trivial_solution_in_both_domains`]).
     pub(crate) tangent_curve_seeds: Vec<[Point2; 2]>,
 }
 
@@ -622,6 +623,10 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
         // r/R, so loops above the tolerance on surfaces curved at model scale stay above
         // tol/modelSize, while tangent curves and tangent points fall below it.
         let min_loop_angle_rad = self.min_loop_angle_rad(k)?;
+        // (WR-75, opt-in) seeds of the tangential curve pass, which does not run where a self
+        // intersection's trivial solution lies in both domains (#18930)
+        let collect_tangent_curve_seeds =
+            k.fixes.ssi_tangent_curve_tracer && !self.trivial_solution_in_both_domains();
 
         // Now for each node pair do a test to see if produces a unique start point
         for sol in solutions.as_slice() {
@@ -648,7 +653,7 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
                 if angle_rad * (180.0 / PI) < 5.0 {
                     self.push_tangent_seed(&mut tangent_seeds, node1, node2)?;
                     // (WR-75, opt-in) a seed of the tangential curve pass
-                    if k.fixes.ssi_tangent_curve_tracer {
+                    if collect_tangent_curve_seeds {
                         self.tangent_curve_seeds.push([uv_guess1, uv_guess2]);
                     }
                     low_angle_start = true;
@@ -692,7 +697,7 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
                 if angle_rad * (180.0 / PI) < 2.0 {
                     self.push_tangent_seed(&mut tangent_seeds, node1, node2)?;
                     // (WR-75, opt-in) a seed of the tangential curve pass
-                    if k.fixes.ssi_tangent_curve_tracer {
+                    if collect_tangent_curve_seeds {
                         self.tangent_curve_seeds.push([uv, uv2]);
                     }
                     low_angle_start = true;
@@ -816,6 +821,18 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
             *self.patch(1, node2)?.aux.uv_domain(),
         ]);
         Ok(())
+    }
+
+    /// Not upstream (#18930): whether the trivial solution of a self intersection, a point of
+    /// the surface with itself at equal parameters, lies in both intersected domains: a self
+    /// intersection whose two domains overlap or touch (the patch pairs
+    /// [`Self::find_interior_curves`] rejects for the same reason). Every such point solves the
+    /// tangential curve pass's equations (`S(x) - S(x) = 0`, equal normals), so that pass is
+    /// not run there. Two disjoint domains of one surface hold no such point: the pass keeps
+    /// each solve in its own domain.
+    pub(crate) fn trivial_solution_in_both_domains(&self) -> bool {
+        let [d1, d2] = &self.base.uv_domains;
+        self.base.doing_self_intersection && !d1.are_disjoint(d2, 0.0)
     }
 
     /// The WR-79 fix's (#396 part 2) smallest normal angle worth tracing from:

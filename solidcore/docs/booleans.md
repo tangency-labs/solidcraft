@@ -497,6 +497,24 @@ Read with the tolerance the vertex had when the circle was asked (1e-5), the two
 second edges and the two slivers of the box face between them (5.5e-10 each) faces of the
 intersection and the difference, whose edges the face check takes for coincident.
 
+**An edge in a face, off it by more than the zone tolerance.** An edge of one operand can lie in
+a face of the other within its own tolerance but further than the system zone tolerance from it:
+a revolved tool's rim (radius 2.1000073) in a 2.1 mm hole's wall, the revolve axis 1.2e-5 off the
+hole's, so the rim is 4.6e-6 to 1.9e-5 from the wall (#17527). Both of the tool's faces at the rim
+meet the wall along it, each in a curve of its own (the disc's plane in the wall's circle, the
+cone's in a marched curve), and their proto edges overlap. `ResolveOverlappingProtoEdges` replaces
+the overlapping ones with the rim's own curve classified against the wall. Upstream classifies it
+within the proto topology's tolerance, half the zone tolerance, where the rim lies in the wall
+nowhere: the overlapping pieces were deleted, nothing replaced them, and the cut failed in
+`make_faceuse`. The rim is now classified within its own tolerance where that is the larger, as
+the face pairs classified it. The replacement then holds every piece of the rim in the wall, so
+a piece of the same rim and wall that the overlap test (ends dropped within the zone tolerance)
+did not find goes with the group too; left beside its replacement, it was imprinted twice and the
+rim was related to both copies ("another entity is already related to the other one";
+`absorb_pieces_of_edge_in_face`, `proto_topology/p3.rs`). A rim further off than its tolerance
+somewhere is still not one edge with the wall: with the axis 1.3e-5 off, the cut leaves a sliver
+face that fails the check.
+
 **Seams and poles.** A tolerance band says where a boundary of material may lie. A seam (an edge
 with the same face on both sides: `face_on_both_sides`, `topology/edge.rs`) and a pole (a vertex
 all of whose edges are such seams: `inside_face`, `topology/vertex.rs`) bound no material: they
@@ -534,6 +552,15 @@ reach counts: the seam edge that then stands for the curve has to hold it within
 A classification reads the reach of its two surfaces (`SetIntersectData`) the first time it meets
 a seam or a pole (`source_reach_in`); the face intersection sets it for its curves
 (`intersection_curve_reach`, `topology/face/p3.rs`).
+
+A face without a seam has no pole either: a pole's edges are all seams of the face. The face
+intersection finds once whether each face has a seam edge (`face_has_seam`, `query/face/p2.rs`)
+and keeps the answer while the face's B-rep is unchanged (`FaceIntersectCaches`); on a face
+without one, its curves' classifications ask no edge whether it is a seam and no vertex whether
+it is a pole (`face_known_seam_free`, `intersect/curve_class/p1.rs`). Asking for every curve
+grew with the curves times the face's edges, the square of a face that meets as many faces as it
+has edges (`WorkCounters::seam_tests`, counted in
+`a_plate_joined_onto_its_top_tests_each_face_for_a_seam_once`).
 
 A stretch of the curve along a seam is what the curve/edge intersector finds within the reach. It
 reports a stretch only where all of it lies within the distance it is given, and the seam's end is
@@ -683,9 +710,13 @@ volume, the same edges on the round, and every such edge on S within its own tol
 - A traced SSI curve's UV curves are cubic Hermite interpolants, checked at samples and not certified
   ([ssi.md](ssi.md) §6.1); the imprint passes a copy of them to `MakeEdgeInFace`
   (`topology_intersector/p1.rs`, "Intersection trims").
-- A face B gives to A is built without B's own trims and gets new ones, unless
-  `keep_operand_uv_trims` copies them where the new edge runs on a copy of B's edge curve
-  (`merge/p2.rs`).
+- A face B gives to A is built without B's own trims; they are copied over where the new edge
+  runs on a copy of B's edge curve over the same interval (`merge/p2.rs`), and the other edge
+  uses get new ones. The copy is made only onto an edge `MergeEdge` copied from B's own edge
+  (an edge the intersection made keeps its dropped trim, unless B's trim ends at a
+  singularity of the surface, where the drop finds no parameter), only when the new edge's
+  tolerance is at least B's, never for a line edge on a plane (`Plane::drop_curve` is exact
+  there), and only when the surface copy keeps B's parameterisation.
 
 ## 8. Failure modes and refusals
 
@@ -752,8 +783,8 @@ A reviewer can check each of these on a change to the boolean.
 - The rig: 130 boolean cases in `solidcore/tests/kernel_cases/booleans/`, two listed in
   `known_failing.json` (the two 3012 sliver cases: the kernel absorbs the 1e-4 wide faces, so it
   returns 8 faces, 18 edges and 12 vertices instead of 10, 24 and 16; #15669).
-- Opt-in fix for the cases in §5, §6 and §8: `keep_operand_uv_trims`
-  (`solidcore/src/kernel.rs`). Always on: the union's solid-leak refusal (WR-619), a boolean
+- No opt-in fixes are left for the cases in §5, §6 and §8. Always on: the operand's exact trims on
+  a face B gives to A (WR-361), the union's solid-leak refusal (WR-619), a boolean
   vertex placed again by a later edge crossing with a smaller misplacement bound (gap over sine) only
   where a certificate proves the move stays one point (WR-410, §5), the outer shell first, the clean-up of slits and the split of a coincident
   definition across a split point (WR-533). Every boolean, 3D included, skips the face pairs

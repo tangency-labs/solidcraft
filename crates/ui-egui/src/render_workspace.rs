@@ -3354,6 +3354,7 @@ pub fn gpu_scene_cached(
                 look,
                 levels: Vec::new(),
                 closed: true,
+                edges: None,
             });
             gpu.instanced.len() - 1
         });
@@ -3711,7 +3712,7 @@ fn paint_product_kind(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, c
         if feedback {
             ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, solidcraft_viewport_egui::ProductHighlightCallback(frame)));
         } else {
-            crate::blur::viewport(ui.painter(), rect, ViewportCallback(frame), rect, [background.viewport_top, background.viewport_bottom]);
+            ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, ViewportCallback(frame)));
         }
         Ok(())
     })();

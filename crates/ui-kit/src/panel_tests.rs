@@ -851,7 +851,7 @@ fn blur_zero_has_no_marker_or_tint_override() {
     let mut state = crate::blur::State::default();
     state.set_radius(0.0).unwrap();
     let ctx = crate::test_support::context();
-    let _scope = state.begin(&ctx, true);
+    let _scope = state.begin(&ctx);
     assert!(!crate::blur::enabled());
     let fill = egui::Color32::from_rgba_unmultiplied(40, 80, 100, 180);
     assert_eq!(crate::blur::panel_fill(fill), fill);
