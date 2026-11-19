@@ -55,6 +55,7 @@
 //!   [`BLEND_MAX_DEPTH`] deep (the fork's cap, checked at [`ProceduralBlend::create`]),
 //!   so every walk over the supports is bounded by 3.
 
+pub mod bead;
 pub mod chamfer;
 pub mod convert;
 pub mod corner;

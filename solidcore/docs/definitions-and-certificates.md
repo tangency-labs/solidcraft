@@ -114,7 +114,8 @@ vanishes, and each coefficient is checked against the rounding of computing it (
 Fixed-radius rolling-ball rounds of the configurations Dahl and Krasauskas classify are rational
 [2, 12]. `ExactClass` (`surface/procedural_blend/exact.rs`) names them: `Line` (the cylinder about
 a straight spine), `Circle` (the section turned about a common axis), `Point` (a piece of the
-ball), `Chord` (a chamfer between planes: the plane through the feet), `Conic`, `ConicPair` and
+ball), `Chord` (a chamfer between planes: the plane through the feet; with a sagitta, a weld bead's
+arc: the circular cylinder through the feet's lines, `fillet_exact::arc_section_implicit`), `Conic`, `ConicPair` and
 `NodalQuartic` (canal surfaces on those spines). `ExactClass::of_spine` maps the classifier's
 `BlendSpine`; `BlendSpine::Traced` has no exact class and is built as a procedural blend.
 
@@ -353,7 +354,7 @@ Every face is in one of three classes:
 
 | class | meaning | ε | kinds |
 |---|---|---|---|
-| **exact** | B is S; proved by an identity on control points | 0 | analytic forms; `ExactClass` rounds and chamfers between planes; `BallPatch`; Swept, End and Setback corners; Natural extensions of analytic kinds and ball patches |
+| **exact** | B is S; proved by an identity on control points | 0 | analytic forms; `ExactClass` rounds, and chamfers and weld beads (the chord with a sagitta) between planes; `BallPatch`; Swept, End and Setback corners; Natural extensions of analytic kinds and ball patches |
 | **certified** | B is within a proved ε of S | > 0, stored | `ProceduralBlend` (traced spines, Gⁿ sections, radius laws, rounds on rounds); `ProceduralSweep`; Mixed corners (the construction's tolerance); B-spline extensions past a side (§6) |
 | **refused** | no B is proved within the bound | none | the construction returns a typed error naming the cause and, where one exists, the size that builds |
 
@@ -515,7 +516,9 @@ A reviewer checks each of these on a change that touches a definition, a net or 
 8. **Records are files.** A definition persists as plain data: the database type
    (`PROCEDURAL_BLEND_TYPE`, `ProceduralBlend::read_from_db`) and the serde records of
    `surface::procedural_blend::record` (`ProceduralBlendRecord`, `ExactRoundRecord`,
-   `CornerRecord`), every number as stored. `convert::rebuild`, `exact_rebuild` and
+   `CornerRecord`), every number as stored. A chord with a sagitta (a weld bead's) has no record
+   yet: `exact_to_record` refuses it (`Unsupported`) rather than write it as the flat chord.
+   `convert::rebuild`, `exact_rebuild` and
    `corner_rebuild` make the definition exactly and certify the net again before it is an operand
 (or take the proof the kernel already finished for the same record, §4.5).
 9. **A record rebuilds bit for bit.** Written, read back and rebuilt, a definition evaluates as the
