@@ -4041,8 +4041,10 @@ mod tests {
         let mut k = Kernel::default();
         let mut breps = read_part_file(&mut k, "ss_plane_sph1.smp");
         let b = breps.first_mut().unwrap();
-        // (the part file's cover raises: its sheet's trims run off their edges)
-        assert!(!b.trim_cover_raises().edges.is_empty());
+        // (the sheet's sphere keeps the file's NURB, so its kept trims are the file's on
+        // their own surface: each is within its edge's tolerance as read, proved below, and
+        // the cover raises nothing)
+        assert!(b.trim_cover_raises().edges.is_empty());
         let mut widest = 0.0_f64;
         let mut failures = Vec::new();
         for eu in edgeuses(b, None).unwrap() {

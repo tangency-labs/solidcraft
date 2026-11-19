@@ -121,6 +121,32 @@ fn range(c: &[Ivl], rho: f64) -> Ivl {
     c.first().copied().unwrap_or_else(zero) + Ivl::new(-rest, rest)
 }
 
+/// The values of the quotient `x / w` over `|δ| ≤ ρ`, enclosed; not finite where `w` is not
+/// proved positive (or negative) there.
+///
+/// Two enclosures both hold, and the result is their intersection: the plain quotient
+/// `range(x) / range(w)`, and the centred form `x0 + range(x − x0 w) / range(w)` (`x0` any
+/// number, here the quotient's value at `δ = 0`). The plain one's width is first order in `ρ`
+/// through `w'` even where the quotient itself is stationary (`x / w` constant, or tangent to
+/// a knot line or the net's end); the centred one's numerator has the coefficients of
+/// `w (x / w − x0)`, so its first-order width is that of the quotient's own derivative. A
+/// trim running along a knot line or ending tangent to the net's end (`ss_plane_sph1.smp`'s
+/// sphere sheet) then stays on its side of it on all but the pieces next to the tangency,
+/// instead of reaching across it (into another cell, or past the end with the
+/// continuation's first-order slack) on every piece within `√ρ` of it.
+fn quotient_range(x: &[Ivl], w: &[Ivl], rho: f64) -> Ivl {
+    let den = range(w, rho);
+    let plain = range(x, rho) / den;
+    let head = |c: &[Ivl]| c.first().copied().unwrap_or_else(zero);
+    let x0 = (head(x) / head(w)).mid();
+    if !x0.is_finite() {
+        return plain;
+    }
+    let centred = Ivl::from(x0) + range(&sub(x, &mul(&[Ivl::from(x0)], w)), rho) / den;
+    // (each holds the true values, so they meet; a NaN end fails `is_finite` downstream)
+    Ivl::new(plain.lo.max(centred.lo), plain.hi.min(centred.hi))
+}
+
 /// `c(x)`, enclosed (Horner).
 fn at(c: &[Ivl], x: Ivl) -> Ivl {
     c.iter().rev().fold(zero(), |acc, &cj| acc * x + cj)
@@ -443,10 +469,7 @@ fn polynomial_piece(
     let w = curve_taylor(wn, kw, m);
     let [wu, wv, _, ww] = &w;
     let uv_over = |x: Ivl| (at(wu, x) / at(ww, x), at(wv, x) / at(ww, x));
-    let (bu, bv) = (
-        range(wu, rho) / range(ww, rho),
-        range(wv, rho) / range(ww, rho),
-    );
+    let (bu, bv) = (quotient_range(wu, ww, rho), quotient_range(wv, ww, rho));
     if !(bu.is_finite() && bv.is_finite()) {
         return None;
     }
@@ -952,6 +975,32 @@ mod tests {
         accept: f64,
     ) -> Result<Option<f64>> {
         trim_distance_bound(k, curve, [0.0, 1.0], uv, trim, s, floor, accept)
+    }
+
+    /// A stationary quotient's enclosure is as narrow as its own variation, not as wide as its
+    /// denominator's: `x / w` with `x = w / 2` and `w = 1 + δ` is `1/2` everywhere, enclosed
+    /// to rounding over `|δ| ≤ 0.1` (the plain quotient `range(x) / range(w)` is about `0.2`
+    /// wide there); and `(1 + 2δ + δ²) / (1 + δ)`, which is `1 + δ`, is enclosed over the
+    /// same range, every sampled value inside and the enclosure narrower than the plain
+    /// quotient's.
+    #[test]
+    fn a_stationary_quotient_is_enclosed_by_its_own_variation() {
+        let iv = |c: &[f64]| c.iter().map(|&x| Ivl::from(x)).collect::<Vec<_>>();
+        let rho = 0.1;
+        let w = iv(&[1.0, 1.0]);
+        let half = quotient_range(&iv(&[0.5, 0.5]), &w, rho);
+        assert!(half.lo <= 0.5 && 0.5 <= half.hi, "{half:?}");
+        assert!(half.hi - half.lo < 1e-14, "{half:?}");
+        let plain = range(&iv(&[0.5, 0.5]), rho) / range(&w, rho);
+        assert!(plain.hi - plain.lo > 0.19, "{plain:?}");
+        let line = quotient_range(&iv(&[1.0, 2.0, 1.0]), &w, rho);
+        for j in 0..=1000 {
+            let d = -rho + 2.0 * rho * f64::from(j) / 1000.0;
+            assert!(line.lo <= 1.0 + d && 1.0 + d <= line.hi, "{d}: {line:?}");
+        }
+        // (centred: 1 + [-0.11, 0.11] / [0.9, 1.1], about 0.244 wide; plain: [0.79, 1.21] /
+        // [0.9, 1.1], about 0.627)
+        assert!(line.hi - line.lo < 0.245, "{line:?}");
     }
 
     /// The plane z = 0 over x, y in 0..1 as a bilinear net cut at 0.5 both ways (four cells).
