@@ -5,8 +5,6 @@
 1080-fillet-sloped-basin-1-mm-rim-r4-2-edges [fail] continuity_order: got {'body': 'Slab', 'edges': 'blend', 'order': 'g0',  want >= g1 at every blend seam
 1080-fillet-sloped-basin-1-mm-rim-r4-4-edges [fail] continuity_order: got {'body': 'Slab', 'edges': 'blend', 'order': 'g0',  want >= g1 at every blend seam
 4782-fillet-bar-edge-wider-than-both-faces [fail] continuity_order: got Box: no null seams want >= g1 at every blend seam
-9-fillet-corner-curvature-with-reduce-fit [unsupported] solid.fillet builds `corner: g2` with `fit: exact` only
-9-fillet-corner-curvature-with-taper-fit [unsupported] solid.fillet builds `corner: g2` with `fit: exact` only
 cov-fillet-g2-corner-beside-a-cylinder [fail] step 6 (solid.fillet): the open setback corner is not a closed solid, as on SMLib d01d7b0
 cov-fillet-g2-five-edge-apex-corner [fail] step 12 (solid.fillet): invalid input: the setback must be more than 3.5056 mm at the corner (-0.000, 0.000, 30.000): the rounds' contact lines meet 3
 cov-fillet-g2-four-edge-apex-corner [fail] step 11 (solid.fillet): invalid input: the setback must be more than 3.9027 mm at the corner (0.000, 0.000, 30.000): the rounds' contact lines meet 3.

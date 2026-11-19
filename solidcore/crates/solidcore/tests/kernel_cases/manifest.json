@@ -104,7 +104,7 @@
       "ungraded": {}
     },
     "fillets": {
-      "cases": 312,
+      "cases": 311,
       "chain": {
         "1": 11,
         "13": 8,
@@ -115,13 +115,12 @@
         "4": 258,
         "5": 6,
         "7": 2,
-        "8": 1
+        "8": 2
       },
-      "expressible": 89,
-      "not_expressible": 16,
-      "operation_expressible": 296,
+      "expressible": 90,
+      "not_expressible": 14,
+      "operation_expressible": 297,
       "reasons": {
-        "SolidCraft has no command for it yet": 2,
         "refused or failed in SolidCraft, not in a kernel operation": 14
       },
       "ungraded": {
@@ -923,18 +922,6 @@
       "case": "fillets/896-fillet-smooth-seam-refused",
       "why": [
         "the failure is SolidCraft's, not a kernel operation's: step 3 (solid.fillet): invalid input: the edge at (20.000, 3.000, 20.000) is smooth: its faces meet tangentially, so there is nothing to round"
-      ]
-    },
-    {
-      "case": "fillets/9-fillet-corner-curvature-with-reduce-fit",
-      "why": [
-        "SolidCraft has no command for it yet: solid.fillet builds `corner: g2` with `fit: exact` only"
-      ]
-    },
-    {
-      "case": "fillets/9-fillet-corner-curvature-with-taper-fit",
-      "why": [
-        "SolidCraft has no command for it yet: solid.fillet builds `corner: g2` with `fit: exact` only"
       ]
     },
     {

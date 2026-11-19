@@ -573,7 +573,7 @@ keyword_param!(
     "corner",
     &["rolling", "g2"],
     "rolling or g2",
-    "What fills a corner where three rounded edges meet: rolling (the default), the rolling ball's sphere, or g2, a set-back patch meeting the rounds to the second order (type: constant, fit: exact only). Matching ignores case."
+    "What fills a corner where three rounded edges meet: rolling (the default), the rolling ball's sphere, or g2, a set-back patch meeting the rounds to the second order (type: constant only; with fit: reduce every edge and corner takes the largest single radius that fits, and fit: taper builds only where the radius fits). Matching ignores case."
 );
 keyword_param!(
     /// `solid.fillet`'s `turn`.
