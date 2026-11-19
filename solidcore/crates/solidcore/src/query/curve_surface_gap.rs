@@ -2223,13 +2223,17 @@ pub fn trim_image_gap_bound_within(
     }
     let curve_kinks = kinks(&cn, r0, r1);
     let trim_kinks = kinks(&wn, r0, r1);
-    // (the bound of the curve data `cn` against the net `net`, the curve's slack added, with
-    // the pieces closing at `enough`)
-    let run = |cn: &NurbsCurve, net: &NetSurface, enough: f64| -> Result<Option<f64>> {
+    // (the bound of the curve data `cn` against the net `net` through the reparametrisation
+    // `psi`, the curve's slack added, with the pieces closing at `enough`)
+    let run = |psi: &NurbsCurve,
+               cn: &NurbsCurve,
+               net: &NetSurface,
+               enough: f64|
+     -> Result<Option<f64>> {
         let sides = Sides {
             curve: cn,
             trim: &wn,
-            psi: &psi,
+            psi,
             curve_kinks: curve_kinks.clone(),
             trim_kinks: trim_kinks.clone(),
             range,
@@ -2262,8 +2266,26 @@ pub fn trim_image_gap_bound_within(
         let bound = (Ivl::from(gap) + Ivl::from(c_slack)).hi;
         Ok(bound.is_finite().then_some(bound))
     };
-    let first = run(&cn, &net, enough)?;
-    let Some(bound) = recentred_retry(first, [enough, over], &cn, &net, run)? else {
+    let with_psi = |psi: &NurbsCurve| -> Result<Option<f64>> {
+        let first = run(psi, &cn, &net, enough)?;
+        recentred_retry(first, [enough, over], &cn, &net, |cn, net, enough| {
+            run(psi, cn, net, enough)
+        })
+    };
+    let mut bound = with_psi(&psi)?;
+    // Any reparametrisation gives a bound. A line's against a trim of degree 1 corresponds
+    // by their common parameter as it stands (on a plane, the image is the line itself), and
+    // the fitted `psi` only adds its own steps, each as long as the curve's speed makes it:
+    // `primitive.api_primitives` gen1108, a line 5.5e8 long bounded at 1.4e-3 and 1e4 against
+    // its trims, 1e-7 by samples. The identity is tried there too, the smaller bound kept.
+    if cn.p == 1 && wn.p == 1 && !bound.is_some_and(|g| g <= enough) {
+        if let Some(identity) = hermite_psi(&[(r0, r0), (r1, r1)], range) {
+            if let Some(g) = with_psi(&identity)? {
+                bound = Some(bound.map_or(g, |b| b.min(g)));
+            }
+        }
+    }
+    let Some(bound) = bound else {
         return Ok(None);
     };
     // (the cutoff applies to the bound returned, the curve's slack included: a gap at most
