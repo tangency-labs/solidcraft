@@ -8,6 +8,7 @@
 
 // Components: each takes plain data and returns the action chosen.
 pub mod app_bar;
+pub mod app_bar_layout;
 pub mod blur;
 pub mod browser;
 pub mod frame;
@@ -28,6 +29,8 @@ mod actions;
 mod assistant;
 mod assistant_entry;
 mod attention;
+#[cfg(not(target_arch = "wasm32"))]
+mod blur_plan;
 mod checks;
 mod choice;
 mod color;
@@ -169,6 +172,8 @@ pub use tree::*;
 pub use value_focus::*;
 pub use viewport_status::*;
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod blur_plan_tests;
 #[cfg(any(test, feature = "test-support"))]
 #[path = "gallery_tests.rs"]
 pub mod gallery;

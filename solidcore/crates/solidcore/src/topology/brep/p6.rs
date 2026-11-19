@@ -978,7 +978,14 @@ fn build_face(
     // Next - see if new Face splits the existing region - move shell children
     // appropriately
     if !options.edge_loops.is_empty() {
-        let split = test_closure_split_region_attempt_with_state(k, brep, marks, env, true, fu2)?;
+        let split = test_closure_split_region_attempt_with_state(
+            k,
+            brep,
+            marks,
+            env,
+            InfiniteHalf::Searched,
+            fu2,
+        )?;
         out.shell = split.shell;
         out.region = split.region;
         split.status?;
@@ -1369,6 +1376,32 @@ pub fn test_closure_split_region(
     Ok((attempt.shell, attempt.region))
 }
 
+/// How a split of the infinite region tells which of its two halves is the infinite one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InfiniteHalf {
+    /// It does not: the region that was split stays the infinite one
+    /// (`bDoInfiniteRegionTesting = FALSE`).
+    Stays,
+    /// `FindAndSetInfiniteRegion`: a ray fired at the new shell
+    /// (`bDoInfiniteRegionTesting = TRUE`).
+    Searched,
+    /// Not upstream. The half this face use is in: its maker knows the face use to lie on
+    /// the outside of the solid whose shell closed (a primitive knows it from the surface
+    /// it made). No ray is fired. A face use the edit has since removed is in neither
+    /// half, and the split searches.
+    Of(FaceuseId),
+}
+
+impl InfiniteHalf {
+    const fn testing(do_infinite_region_testing: bool) -> Self {
+        if do_infinite_region_testing {
+            Self::Searched
+        } else {
+            Self::Stays
+        }
+    }
+}
+
 /// Native status and outputs written by `TestClosureSplitRegion` before it exits.
 #[derive(Debug)]
 pub struct RegionSplitAttempt {
@@ -1410,12 +1443,32 @@ pub fn test_closure_split_region_attempt(
     do_infinite_region_testing: bool,
     start: FaceuseId,
 ) -> Result<RegionSplitAttempt> {
+    test_closure_split_region_attempt_telling(
+        k,
+        brep,
+        marks,
+        env,
+        InfiniteHalf::testing(do_infinite_region_testing),
+        start,
+    )
+}
+
+/// [`test_closure_split_region_attempt`] for a caller that says how a split of the
+/// infinite region tells its infinite half ([`InfiniteHalf`]).
+pub(crate) fn test_closure_split_region_attempt_telling(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    marks: &mut Marks,
+    env: &mut NotifyEnv<'_>,
+    infinite_half: InfiniteHalf,
+    start: FaceuseId,
+) -> Result<RegionSplitAttempt> {
     test_closure_split_region_attempt_with_state(
         k,
         brep,
         marks,
         &mut NotifyState::from_env(env),
-        do_infinite_region_testing,
+        infinite_half,
         start,
     )
 }
@@ -1425,7 +1478,7 @@ fn test_closure_split_region_attempt_with_state(
     brep: &mut Brep,
     marks: &mut Marks,
     env: &mut NotifyState<'_>,
-    do_infinite_region_testing: bool,
+    infinite_half: InfiniteHalf,
     start: FaceuseId,
 ) -> Result<RegionSplitAttempt> {
     let mut attempt = RegionSplitAttempt {
@@ -1433,15 +1486,7 @@ fn test_closure_split_region_attempt_with_state(
         shell: None,
         region: None,
     };
-    let status = split_region_into(
-        k,
-        brep,
-        marks,
-        env,
-        do_infinite_region_testing,
-        start,
-        &mut attempt,
-    );
+    let status = split_region_into(k, brep, marks, env, infinite_half, start, &mut attempt);
     finish_split_attempt(attempt, status)
 }
 
@@ -1450,7 +1495,7 @@ fn split_region_into(
     brep: &mut Brep,
     marks: &mut Marks,
     env: &mut NotifyState<'_>,
-    do_infinite_region_testing: bool,
+    infinite_half: InfiniteHalf,
     start: FaceuseId,
     attempt: &mut RegionSplitAttempt,
 ) -> Result<()> {
@@ -1464,16 +1509,7 @@ fn split_region_into(
         return Ok(());
     }
     let mut lock = MarkLock::new(std::slice::from_mut(&mut k.context), 0, ALL_MARKS)?;
-    let result = split_closed(
-        k,
-        brep,
-        marks,
-        env,
-        do_infinite_region_testing,
-        start,
-        &lock,
-        attempt,
-    );
+    let result = split_closed(k, brep, marks, env, infinite_half, start, &lock, attempt);
     lock.release(std::slice::from_mut(&mut k.context))?;
     result
 }
@@ -1484,7 +1520,7 @@ fn split_closed(
     brep: &mut Brep,
     marks: &mut Marks,
     env: &mut NotifyState<'_>,
-    do_infinite_region_testing: bool,
+    infinite_half: InfiniteHalf,
     start: FaceuseId,
     lock: &MarkLock,
     attempt: &mut RegionSplitAttempt,
@@ -1582,16 +1618,37 @@ fn split_closed(
 
     // If the oldRegion was the infiniteRegion,
     // figure out which child is the new InfiniteRegion, if requested.
-    if do_infinite_region_testing && Some(old_region) == brep.infinite_region() {
-        // Find and set the actual InfiniteRegion (using the cached bbox).
-        brep_p5::find_and_set_infinite_region(
-            k,
-            brep,
-            &query,
-            Some(new_shell),
-            SetRegionVoidType::InfiniteRegionSwap,
-            Some(&brep_bbox),
-        )?;
+    if infinite_half != InfiniteHalf::Stays && Some(old_region) == brep.infinite_region() {
+        // (not upstream) the half the caller's outside face use is in
+        let known = match infinite_half {
+            InfiniteHalf::Of(outside) => brep
+                .faceuse(outside)
+                .ok()
+                .and_then(|faceuse| faceuse.shell)
+                .and_then(|shell| brep.shell(shell).ok())
+                .and_then(|shell| shell.region)
+                .filter(|region| [old_region, new_region].contains(region)),
+            _ => None,
+        };
+        if let Some(region) = known {
+            // set as the search sets the half it finds
+            crate::topology::brep::p1::reset_infinite_region(
+                k,
+                brep,
+                Some(region),
+                SetRegionVoidType::InfiniteRegionSwap,
+            )?;
+        } else {
+            // Find and set the actual InfiniteRegion (using the cached bbox).
+            brep_p5::find_and_set_infinite_region(
+                k,
+                brep,
+                &query,
+                Some(new_shell),
+                SetRegionVoidType::InfiniteRegionSwap,
+                Some(&brep_bbox),
+            )?;
+        }
     }
 
     // new_shell holds `replaced` (connected to start through edge uses, marked);

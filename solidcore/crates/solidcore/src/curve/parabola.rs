@@ -135,6 +135,17 @@ pub struct Parabola {
 }
 
 impl Parabola {
+    /// Not upstream: the same parabola by definition, exactly (IEEE `==`; a NaN
+    /// refuses): the same B-spline part ([`BSplineCurve::same_definition`]), and
+    /// placement, domain and focal distance equal.
+    #[must_use]
+    pub fn same_definition(&self, other: &Self) -> bool {
+        self.base.same_definition(&other.base)
+            && self.position == other.position
+            && self.anal_domain == other.anal_domain
+            && self.focal_dist == other.focal_dist
+    }
+
     /// Exact evaluation copy without the B-spline copy constructor's knot fix-up.
     pub(crate) fn clone_exact_bounded(&self) -> Self {
         Self {

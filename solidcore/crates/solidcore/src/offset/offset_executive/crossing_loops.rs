@@ -51,6 +51,8 @@
 //! where it crosses itself and closed into simple loops (`classify_one_loop`); those whose
 //! signed area is negative are regions turned inside out, kept reversed where they are the
 //! cavity's floor and dropped otherwise, by the same rule as fork 1b016ca's.
+//! Source correspondence follows the face builder's input-curve owners, so a
+//! shortened stretch retains its source without a nearest-midpoint selection.
 //!
 //! Not in the fork (solidcore#3329): such a region is the cavity's floor only under an
 //! opening. One that lies within a wall (every stretch round it bounds an offset wall) is
@@ -62,7 +64,6 @@ use std::collections::BTreeMap;
 
 use super::p1::{OffsetExecutive, OffsetOperation};
 use super::p2::OffsetNotifications;
-use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::Curve;
 use crate::error::{EntityRef, Result, SolidError};
@@ -84,11 +85,14 @@ use crate::nurbs::knots::Side;
 use crate::query::brep::BrepQuery;
 use crate::query::edge::closest_point;
 use crate::query::r#loop::contains_uv_point;
+use crate::surface::surface::exact_pieces::{common_trim_interval, trim_unsnapped};
 use crate::surface::surface::p1::{map_to_2d, zone_tol_3d};
 use crate::surface::surface::p4::NoObject;
 use crate::topology::brep::p1 as bp1;
 use crate::topology::brep::p3::{delete_face_with_body_identity, DeleteFaceOptions};
-use crate::topology::brep::p7::{make_face_with_curves_with_kernel_context, FaceCurvesInput};
+use crate::topology::brep::p7::{
+    make_face_with_curve_owners, make_face_with_curves_with_kernel_context, FaceCurvesInput,
+};
 use crate::topology::brep::p9::make_vertex_split_edge_with_state;
 use crate::topology::edge::{self, NotificationStores, NotifyState};
 use crate::topology::edgeuse::{p1 as eu, p3 as eu3};
@@ -527,26 +531,6 @@ fn vertex_point(b: &Brep, v: Option<crate::topology::VertexId>) -> Result<Point3
     Ok(b.vertex(required(v)?)?.point)
 }
 
-/// `SmEdge::ClosestPoint`: `(found, distance)` of the nearest point of the edge's curve
-/// over its interval (a minimising global point solve at the edge's tolerance).
-fn edge_closest_distance(k: &Kernel, b: &Brep, e: EdgeId, point: Point3) -> Result<Option<f64>> {
-    let record = b.edge(e)?;
-    let curve = required(record.curve.as_ref())?;
-    let solutions = curve.global_point_solve(
-        k,
-        &record.interval,
-        SolverOperation::Minimize,
-        point,
-        record.tolerance,
-        SolutionRequested::All,
-        &GlobalPointSolveOptions::<NoObject>::default(),
-    )?;
-    Ok(solutions
-        .as_slice()
-        .first()
-        .map(|solution| solution.start.solution_value))
-}
-
 /// (not in the fork, solidcraft#18374) A crossing of the loops of an offset face: where it
 /// is, and the two edge uses of the face it cuts.
 struct Crossing {
@@ -730,7 +714,7 @@ impl OffsetExecutive {
     /// curve trimmed to it, on a copy of its surface; the new faces, edges and vertices
     /// take the attributes and offset-map places of those they come from.
     #[allow(clippy::too_many_lines)] // one fork routine
-    fn resolve_crossing_loops_of_face(
+    pub(super) fn resolve_crossing_loops_of_face(
         &mut self,
         kernel: &mut Kernel,
         original: &mut Brep,
@@ -1137,6 +1121,7 @@ impl OffsetExecutive {
         // it.
         let uv_domain = b.face(f)?.uv_domain;
         let mut new_faces: Vec<FaceId> = Vec::new();
+        let mut edge_sources: BTreeMap<EdgeId, EdgeuseId> = BTreeMap::new();
         for order in &face_loops {
             let mut input = FaceCurvesInput {
                 loop_points: if new_faces.is_empty() {
@@ -1148,6 +1133,7 @@ impl OffsetExecutive {
             };
             let mut curves_3d = Vec::new();
             let mut uv_curves = Vec::new();
+            let mut curve_sources = Vec::new();
             for &ll in order {
                 let chain = at(&new_loops, ll)?;
                 input.loops.push(chain.len());
@@ -1155,12 +1141,17 @@ impl OffsetExecutive {
                     let stretch = at(&stretches, ss)?;
                     let e = edge_of(b, stretch.edgeuse)?;
                     let mut curve_3d = edge_curve(b, e)?.copy(kernel)?;
-                    let mut ivl_3d = Extent1d::from_min_max(stretch.lo, stretch.hi);
-                    curve_3d.trim(kernel, &mut ivl_3d, TrimMode::Notify)?;
-                    curves_3d.push(Some(curve_3d));
                     let mut uv_curve = at(&uvs, stretch.uv)?.copy(kernel)?;
-                    let mut ivl_uv = Extent1d::from_min_max(stretch.lo, stretch.hi);
-                    uv_curve.trim(kernel, &mut ivl_uv, TrimMode::Notify)?;
+                    let interval = common_trim_interval(
+                        kernel,
+                        &[&curve_3d, &uv_curve],
+                        Extent1d::from_min_max(stretch.lo, stretch.hi),
+                        OP,
+                    )?;
+                    trim_unsnapped(kernel, &mut curve_3d, interval, OP)?;
+                    trim_unsnapped(kernel, &mut uv_curve, interval, OP)?;
+                    curves_3d.push(Some(curve_3d));
+                    curve_sources.push(stretch.edgeuse);
                     uv_curves.push(uv_curve);
                     input
                         .orientations
@@ -1177,18 +1168,38 @@ impl OffsetExecutive {
                 attributes: &mut *notifications.attributes,
                 key_of,
             };
-            let made = make_face_with_curves_with_kernel_context(
+            let mut owners = Vec::new();
+            let made = NotifyState::from_kernel_stores(&mut stores).with_kernel_env(
                 kernel,
-                b,
-                region,
-                input,
-                new_surface,
-                &uv_domain,
-                OrientType::Same,
-                None,
-                &|face| key_of(EntityRef::Face(face)),
-                &mut stores,
+                |kernel, env| {
+                    make_face_with_curve_owners(
+                        kernel,
+                        b,
+                        region,
+                        input,
+                        new_surface,
+                        &uv_domain,
+                        OrientType::Same,
+                        Some(true),
+                        &|face| key_of(EntityRef::Face(face)),
+                        &mut owners,
+                        env,
+                    )
+                },
             )?;
+            if owners.len() != curve_sources.len() {
+                return Err(unresolved(LoopCrossing::StretchUnclassified));
+            }
+            for (owner, source) in owners.into_iter().zip(curve_sources) {
+                // Discarded degenerate slots own no edge. Every retained edge
+                // is still required to have a source below.
+                let Some(owner) = owner else { continue };
+                if let Some(previous) = edge_sources.insert(owner, source) {
+                    if edge_of(b, previous)? != edge_of(b, source)? {
+                        return Err(unresolved(LoopCrossing::StretchUnclassified));
+                    }
+                }
+            }
             new_faces.push(required(made.face)?);
         }
 
@@ -1201,16 +1212,22 @@ impl OffsetExecutive {
             input.loops.push(chain.len());
             let mut curves_3d = Vec::new();
             let mut uv_curves = Vec::new();
+            let mut curve_sources = Vec::new();
             for &ss in chain {
                 let stretch = at(&stretches, ss)?;
                 let e = edge_of(b, stretch.edgeuse)?;
                 let mut curve_3d = edge_curve(b, e)?.copy(kernel)?;
-                let mut ivl_3d = Extent1d::from_min_max(stretch.lo, stretch.hi);
-                curve_3d.trim(kernel, &mut ivl_3d, TrimMode::Notify)?;
-                curves_3d.push(Some(curve_3d));
                 let mut uv_curve = at(&uvs, stretch.uv)?.copy(kernel)?;
-                let mut ivl_uv = Extent1d::from_min_max(stretch.lo, stretch.hi);
-                uv_curve.trim(kernel, &mut ivl_uv, TrimMode::Notify)?;
+                let interval = common_trim_interval(
+                    kernel,
+                    &[&curve_3d, &uv_curve],
+                    Extent1d::from_min_max(stretch.lo, stretch.hi),
+                    OP,
+                )?;
+                trim_unsnapped(kernel, &mut curve_3d, interval, OP)?;
+                trim_unsnapped(kernel, &mut uv_curve, interval, OP)?;
+                curves_3d.push(Some(curve_3d));
+                curve_sources.push(stretch.edgeuse);
                 uv_curves.push(uv_curve);
                 input
                     .orientations
@@ -1241,18 +1258,38 @@ impl OffsetExecutive {
                 attributes: &mut *notifications.attributes,
                 key_of,
             };
-            let made = make_face_with_curves_with_kernel_context(
+            let mut owners = Vec::new();
+            let made = NotifyState::from_kernel_stores(&mut stores).with_kernel_env(
                 kernel,
-                b,
-                region,
-                input,
-                new_surface,
-                &uv_domain,
-                OrientType::Opposite,
-                None,
-                &|face| key_of(EntityRef::Face(face)),
-                &mut stores,
+                |kernel, env| {
+                    make_face_with_curve_owners(
+                        kernel,
+                        b,
+                        region,
+                        input,
+                        new_surface,
+                        &uv_domain,
+                        OrientType::Opposite,
+                        Some(true),
+                        &|face| key_of(EntityRef::Face(face)),
+                        &mut owners,
+                        env,
+                    )
+                },
             )?;
+            if owners.len() != curve_sources.len() {
+                return Err(unresolved(LoopCrossing::StretchUnclassified));
+            }
+            for (owner, source) in owners.into_iter().zip(curve_sources) {
+                // Discarded degenerate slots own no edge. Every retained edge
+                // is still required to have a source below.
+                let Some(owner) = owner else { continue };
+                if let Some(previous) = edge_sources.insert(owner, source) {
+                    if edge_of(b, previous)? != edge_of(b, source)? {
+                        return Err(unresolved(LoopCrossing::StretchUnclassified));
+                    }
+                }
+            }
             new_faces.push(required(made.face)?);
             // its edges come from them
             for &ss in chain {
@@ -1287,17 +1324,9 @@ impl OffsetExecutive {
                 )
             })?;
             for new_edge in face_edges(b, new_face)? {
-                // the stretch whose middle lies on it
-                let mut from = None;
-                for stretch in stretches.iter().filter(|s| s.keep) {
-                    if let Some(dist) = edge_closest_distance(kernel, b, new_edge, stretch.mid)? {
-                        if dist <= tol_3d {
-                            from = Some(stretch.edgeuse);
-                            break;
-                        }
-                    }
-                }
-                let old_eu = required(from)?;
+                // The builder reports the edge that owns each input curve slot;
+                // provenance is that slot's source, not a nearest midpoint.
+                let old_eu = *required(edge_sources.get(&new_edge))?;
                 let old_edge = edge_of(b, old_eu)?;
                 let new_vertices = [
                     edge::start_vertex(b, new_edge)?,
