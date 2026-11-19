@@ -47,7 +47,13 @@ or finest, as for STL). A mesh body has its mesh alone, and so has a body whose 
 cannot hold exactly yet, with a warning naming it. Looks become `UsdPreviewSurface` materials named after them, with their colour,
 opacity (a transparent look stays transparent), metallic, roughness and index of refraction; a face with a
 look of its own gets that material. The stage is in metres with Z up and says so in its metadata.
-Textures, joints, masses and collision shapes are not written yet.
+With `physics: true`, an export of the whole design also writes OpenUSD physics for a simulator: its
+rigid, revolute, slider, cylindrical, planar and ball joints (revolute and slider joints keep their limits;
+the others are written without them, with a warning), each grounded placement fixed to the world, each
+placement of a component as a rigid body, each component's mass, centre of mass and principal inertia from
+its bodies' materials, and a physics scene. Other joint kinds, suppressed joints and motion links are left
+out with a warning. With bodies chosen, or a placement that is not rigid, no physics is written, and a
+warning says why. Textures and collision shapes are not written yet.
 
 **File → Export Rhino…** (`file.export` with a `.3dm` path) writes a Rhino 8 file through cadmpeg, from
 the design directly. cadmpeg's Rhino writer does not write assemblies yet, so every body is written where

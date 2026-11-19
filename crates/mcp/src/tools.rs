@@ -350,6 +350,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                     "velocity": {"type": "number", "description": "urdf: joint velocity limit, m/s or rad/s (default 10)"},
                     "hierarchy": {"type": "boolean", "description": "glb: false writes every body flat under the root in world coordinates, as SolidCraft 0.40 did (default true: a named node per occurrence)"},
                     "images": {"type": "boolean", "description": "urdf: also write each picture shown on the model as a textured visual (default false)"},
+                    "physics": {"type": "boolean", "description": "usd: also write the joints, grounded parts and each component's mass as OpenUSD physics, for a simulator (default false)"},
                     "name": string("sdf: the model's name (default: the folder's name)"),
                     "static": {"type": "boolean", "description": "sdf: scenery Gazebo never moves (default true); false gives it the bodies' mass"},
                     "model_uris": {"type": "boolean", "description": "sdf: name files as model://<folder>/<file> (default false: relative to model.sdf)"},
@@ -1082,7 +1083,7 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
         "export" => exec(
             b,
             "file.export",
-            pick(a, &["path", "format", "bodies", "mesh_prefix", "effort", "velocity", "hierarchy", "images", "name", "static", "model_uris"]),
+            pick(a, &["path", "format", "bodies", "mesh_prefix", "effort", "velocity", "hierarchy", "images", "physics", "name", "static", "model_uris"]),
         ),
         "crash_reports" => match a.get("id") {
             Some(_) => exec(b, "diagnostics.crash_report", pick(a, &["id"])),
@@ -1352,7 +1353,7 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
         "redo" => mapped("edit.redo", json!({})),
         "export" => mapped(
             "file.export",
-            pick(a, &["path", "format", "bodies", "mesh_prefix", "effort", "velocity", "hierarchy", "images", "name", "static", "model_uris"]),
+            pick(a, &["path", "format", "bodies", "mesh_prefix", "effort", "velocity", "hierarchy", "images", "physics", "name", "static", "model_uris"]),
         ),
         "save" => mapped("file.save", pick(a, &["path", "format", "overwrite"])),
         "open" => mapped("doc.open", pick(a, &["path", "up", "names", "geometry"])),

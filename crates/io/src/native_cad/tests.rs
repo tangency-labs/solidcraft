@@ -1457,7 +1457,8 @@ fn a_hidden_body_rhino_writes_as_a_mesh_is_said_to_be_shown() {
     let model = evaluated(&doc);
     let names: Vec<String> = model.state().bodies.iter().map(|b| b.name.clone()).collect();
     let world = solidcraft_doc::world_state(&doc, &model.state()).unwrap();
-    let options = crate::CadmpegOptions { hidden: crate::Hidden { bodies: names.iter().cloned().collect(), ..Default::default() } };
+    let options =
+        crate::CadmpegOptions { hidden: crate::Hidden { bodies: names.iter().cloned().collect(), ..Default::default() }, ..Default::default() };
     let (bytes, warnings) =
         cadmpeg_export(&doc, &model.state(), &world, &[], &options, "parts.3dm", crate::MeshQuality::Standard, crate::Format::Rhino).unwrap();
     let shown = |name: &str| warnings.iter().any(|w| w.starts_with(&format!("{name}: hidden, but written shown")));
