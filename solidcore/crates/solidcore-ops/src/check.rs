@@ -93,8 +93,8 @@ impl Refusal {
 impl crate::session::Answer
     for std::result::Result<solidcore::topology::brep::validation::BrepCheck, Refusal>
 {
-    fn refusal(&self) -> Option<String> {
-        self.as_ref().err().map(|r| r.error().to_string())
+    fn refusal(&self) -> Option<Error> {
+        self.as_ref().err().map(Refusal::error)
     }
 }
 
