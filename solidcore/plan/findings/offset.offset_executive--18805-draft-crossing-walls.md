@@ -93,7 +93,7 @@ intersection trimming and region selection need a design; the
 arrangement/cell-selection/extraction stages remain open in
 `docs/offset-and-shell.md` section 5.1.
 
-## Evidence and scope
+## Historical evidence and initial scope
 
 The installed SolidCraft CLI 0.44.1 reproduces both reported refusal
 messages. It also builds equivalent expected geometry by drafting the
@@ -107,16 +107,46 @@ with the independent closed form above. These reordered recipes establish
 an observable target, not an expected value derived from the buggy call.
 The installed binary does not establish the current source's results.
 
-The existing ops draft test file contains both minimal reproductions.
-No tolerance, validity gate, production construction, golden or kernel
-case expectation is changed. Completing the issue requires the local
-operation's oriented boundary selection and same-side wall-intersection
-construction, not a recipe-specific Boolean sequence. The literature
-and construction references already recorded in `docs/offset-and-shell.md`
-sections 5 and 11 are the starting point; external literature could not
-be fetched because this environment cannot resolve public hosts.
+At this initial investigation stage, the existing ops draft test file
+contained both minimal reproductions. No tolerance, validity gate,
+production construction, golden or kernel-case expectation had changed.
+The initial conclusion was that completing the issue required oriented
+boundary selection and same-side wall-intersection construction, rather
+than a recipe-specific Boolean sequence. The later exact construction
+below supersedes this no-production-change scope. The literature and
+construction references recorded in `docs/offset-and-shell.md` sections
+5 and 11 were the starting point; external literature could not be
+fetched because this environment could not resolve public hosts.
 
-## Source verification
+## Final construction and case status
+
+The implemented first construction step selects a complete outward
+cylindrical wall with fixed perpendicular end planes and a coaxial inward
+draft whose affine radius satisfies 0 < r(z) <= R. For its axial slab
+[z0, z1], it constructs the exact radial removal volume
+
+    W = { (rho, theta, z): z0 <= z <= z1, r(z) <= rho <= R }
+
+and takes the regularized difference B minus W. The Boolean creates the
+required cone/hole-wall intersections through their interiors. This
+construction preserves the draft definition, source attributes and final
+validity gates. It uses no fallback or widened tolerance. The supporting
+cap and translation corrections, construction limits and verification
+are recorded in [Exact radial removal for a complete cylindrical draft](topology.brep_local_operation--18805-radial-sweep-step.md).
+
+S8075 now passes its original regression,
+`a_cylinder_with_three_blind_holes_drafts_through_the_hole_walls`, and its
+ignore attribute has been removed. S1767 remains ignored: its joined
+Boolean input fails the draft input-solid precondition with `Argument`.
+The prior input diagnostic reported three bad loop orientations. The
+underside-selection explanation above remains a hypothesis for the
+installed binary; the current source input fails before drafting.
+
+## Historical source verification
+
+These commands and the two-ignored-tests status describe the initial
+investigation, before the production construction and final focused
+result linked above.
 
 On worktree head b81b7feed, the targeted source run
 
@@ -135,8 +165,10 @@ draft. The Boolean-built input does not pass that solid precondition.
 This is an earlier blocker than the installed CLI's non-manifold result;
 the suspected underside-selection cause is not confirmed on this source
 input. The input construction has not been nudged or repaired to bypass
-that precondition. Both unresolved recipe tests are explicitly ignored
-with their issue and reason, following the existing test file's pattern.
+that precondition. At that stage, both unresolved recipe tests were
+explicitly ignored with their issue and reason, following the existing
+test file's pattern. S8075's later passing, active status supersedes that
+two-ignored-tests conclusion; S1767's input blocker remains.
 
 Crate clippy (`-p solidcore-ops --all-targets -- -D warnings`) passed, as
 did formatting and format checks for both workspaces. All cargo commands
@@ -159,6 +191,6 @@ passed (each exit 0):
     buildq run solidcraft . -- cargo fmt --manifest-path solidcore/Cargo.toml -p solidcore-ops --check
     git diff --check
 
-The full suite, wasm, repository guards, and full goldens remain for CI
-when the owner pushes. No commit, staging, push, or other git metadata
-write was performed.
+At that stage, the full suite, wasm, repository guards, and full goldens
+remained for CI when the owner pushed. No commit, staging, push, or other
+git metadata write had been performed during that investigation.

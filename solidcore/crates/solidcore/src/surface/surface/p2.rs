@@ -4577,12 +4577,12 @@ fn ellipse_plane_canvas(
     frame: Axis2Placement,
     extent: crate::geom::extent3d::Extent3d,
 ) -> Result<Surface> {
+    use crate::blend::fillet_section::interval::Ivl;
     let sphere = extent.sphere_bound();
     let (face_center, face_radius) = (sphere.center, sphere.radius);
     let box_expansion = 1.1;
     // The old bounding canvas expansion is retained; only the support S
     // changes. Its origin and axes are the analytic curve's stored ones.
-    use crate::blend::fillet_section::interval::Ivl;
     let components = |v: Vec3| [Ivl::from(v.x), Ivl::from(v.y), Ivl::from(v.z)];
     let norm = |v: [Ivl; 3]| {
         v.into_iter()
@@ -4644,11 +4644,11 @@ fn common_ellipse_plane(curves: &[Curve]) -> Result<Option<Axis2Placement>> {
             return Err(bad());
         };
         let other = ellipse.position();
-        let in_plane =
-            exact::det3(x, y, other.origin()).map(|d| exact::is_zero(&exact::sub(&d, &origin)));
-        if in_plane != Some(true)
-            || exact::det3(x, y, other.x_axis()).map(|d| exact::is_zero(&d)) != Some(true)
-            || exact::det3(x, y, other.y_axis()).map(|d| exact::is_zero(&d)) != Some(true)
+        let in_plane = exact::det3(x, y, other.origin())
+            .is_some_and(|d| exact::is_zero(&exact::sub(&d, &origin)));
+        if !in_plane
+            || exact::det3(x, y, other.x_axis()).is_none_or(|d| !exact::is_zero(&d))
+            || exact::det3(x, y, other.y_axis()).is_none_or(|d| !exact::is_zero(&d))
         {
             return Err(bad());
         }

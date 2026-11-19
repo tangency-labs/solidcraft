@@ -114,7 +114,7 @@ pub(crate) fn contract_complete_cylinder(
         c.rev.position.x_axis(),
         c.rev.position.y_axis(),
     )?;
-    if sense.map(|sign| (sign > 0.0) == same) != Some(true) {
+    if sense.is_none_or(|sign| (sign > 0.0) != same) {
         return Ok(None);
     }
     let sweep = exact::sub(
@@ -1666,9 +1666,12 @@ mod tests {
     /// the sheets are stitched. At the hinge the circular edge closes without a cap.
     #[test]
     fn radial_sweeps_close_at_the_hinge_or_on_two_annular_caps() {
+        use crate::geom::attribute::{Attribute, AttributeValue, Behavior};
         use crate::offset::draft::{draft_surface, Draft};
-        let mut k = Kernel::default();
-        k.fixes = UpstreamFixes::all();
+        let mut k = Kernel {
+            fixes: UpstreamFixes::all(),
+            ..Kernel::default()
+        };
         let mut b =
             crate::primitive::api_primitives::create_cylinder(&mut k, Point3::ZERO, 10.0, 20.0)
                 .unwrap();
@@ -1682,7 +1685,6 @@ mod tests {
                 )
             })
             .unwrap();
-        use crate::geom::attribute::{Attribute, AttributeValue, Behavior};
         b.add_attribute(
             EntityRef::Face(f),
             Attribute::long(62001, 7, Behavior::Copy),

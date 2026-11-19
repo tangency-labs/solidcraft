@@ -45,7 +45,8 @@
 //! Deviations:
 //! - **Exact iso heights.** A circular iso's centre uses the cone's analytic
 //!   axial parameter map, retaining stored endpoint heights exactly. Averaging
-//!   projected NURB samples must not replace that plane (#18805).
+//!   projected NURB samples must not replace that plane (#18805). A transform
+//!   scales that height map before rebuilding the stored polar circle.
 //! - **Derived classes.** `SmCone` derives from `SmSurfOfRevolution`; the base object
 //!   is the [`Cone::rev`] field. `SmCylinder` adds no data: it is a [`Cone`] with
 //!   [`Cone::is_cylinder_class`] set (its type, `IsCylinder` and
@@ -1978,10 +1979,10 @@ impl Cone {
     // ---- transform ------------------------------------------------------------------
 
     /// Moves the cone by `rotate_n_move` after an optional uniform scale about the
-    /// origin (`Transform`): nothing for the identity; the base surface of revolution
-    /// is transformed, the base radius and height domain scaled, and a generator line
-    /// whose STEP span no longer matches the height span gets the semi-angle's speed
-    /// and the height domain.
+    /// origin (`Transform`): nothing for the identity; the height domain is scaled
+    /// before transforming the base surface of revolution, then the base radius is
+    /// scaled. A generator line whose STEP span no longer matches the height span
+    /// gets the semi-angle's speed and the height domain.
     ///
     /// # Errors
     ///
@@ -2031,6 +2032,15 @@ impl Cone {
             scale = s.x;
         }
 
+        // Scale the defining height interval before the parent's polar-converter
+        // rebuild reads it to locate a circle on the transformed net.
+        if (scale - 1.0).abs() > EFF_ZERO {
+            // Scale it about v==0: that's where the base is.
+            let mut domain_v = self.rev.anal_uv_domain.v_interval();
+            domain_v.scale(scale);
+            self.rev.anal_uv_domain.set_v_interval(&domain_v);
+        }
+
         // finish the call in the parent function (status ignored upstream), whose
         // polar-converter rebuild reaches the cone's iso curves (the virtual
         // CreateIsoParametricCurve)
@@ -2045,14 +2055,6 @@ impl Cone {
 
         // update cone size
         self.base_radius *= scale;
-
-        // Our analytical v-domain is a linear distance, so we have to scale it.
-        if (scale - 1.0).abs() > EFF_ZERO {
-            // Scale it about v==0: that's where the base is.
-            let mut domain_v = self.rev.anal_uv_domain.v_interval();
-            domain_v.scale(scale);
-            self.rev.anal_uv_domain.set_v_interval(&domain_v);
-        }
 
         // change the GenCurve so that it shares the same analytic domain as the
         // height domain and has a LineScale determined by the semi-angle
@@ -2369,6 +2371,45 @@ mod tests {
         assert!(line.curve.is_kind_of(LINE_TYPE));
         assert!(line.uv_iso_curve.is_some());
         assert!(!line.curve.is_kind_of(ELLIPSE_TYPE));
+    }
+
+    /// Uniform scale doubles the frustum's top height and radius: (h, r)
+    /// changes from (3, 2) to (6, 4). Inside out, that top is the first NURB
+    /// height and therefore supplies the stored polar circle.
+    #[test]
+    fn scaled_inside_out_cones_keep_the_polar_circle_on_the_transformed_net() {
+        let k = k();
+        for swap in [false, true] {
+            let mut cone =
+                Cone::create_canonical(&k, &std_placement(), 1.0, 2.0, 3.0, swap, true).unwrap();
+            cone.transform(
+                &k,
+                &Axis2Placement::IDENTITY,
+                Some(Vec3::new(2.0, 2.0, 2.0)),
+            )
+            .unwrap();
+            assert_eq!(cone.top_height(), 6.0);
+            let circle = cone.rev().polar_curve().unwrap();
+            assert_eq!(circle.position().origin(), Vec3::new(0.0, 0.0, 6.0));
+            assert_eq!(circle.x_radius(), 4.0);
+            assert_eq!(circle.y_radius(), 4.0);
+            let domain = cone.rev().base().natural_uv_domain();
+            for t in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                let uv = if swap {
+                    domain.evaluate(0.0, t)
+                } else {
+                    domain.evaluate(t, 0.0)
+                };
+                let net = cone.rev().base().evaluate_point(uv).unwrap();
+                let polar = circle.evaluate_step_point(360.0 * t).unwrap();
+                // The analytic circle has the exact height above; rational net
+                // evaluation rounds, so compare it with the existing point bound.
+                assert!(
+                    close(polar, net),
+                    "swap={swap}, t={t}: {polar:?} vs {net:?}"
+                );
+            }
+        }
     }
 
     #[test]
