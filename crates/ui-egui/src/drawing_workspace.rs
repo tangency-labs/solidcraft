@@ -60,7 +60,8 @@ pub fn active(app: &SolveApp) -> bool {
 
 pub fn enter(app: &mut SolveApp, drawing: bool) -> Result<(), String> {
     if drawing {
-        if app.session.active_sketch.is_some() || app.tool.is_some() || app.dialog.is_some() || app.file_load.busy() {
+        let preserved_sketch = app.preferences.workspace_follows_view && app.session.active_sketch.is_some();
+        if (!preserved_sketch && (app.session.active_sketch.is_some() || app.tool.is_some())) || app.dialog.is_some() || app.file_load.busy() {
             return Err("Finish the current operation before entering Drawing".into());
         }
         if !active(app) {
@@ -116,10 +117,14 @@ fn open_a_drawing(app: &mut SolveApp) {
 /// workspace being left: picking on a sheet never changes what Design has selected, and the
 /// reverse. Drawing's own is kept only while its objects are still there.
 pub(crate) fn swap_selection(app: &mut SolveApp) {
-    if app.drawing_workspace.selection_is_drawings == active(app) {
+    select_receiver(app, active(app));
+}
+
+pub(crate) fn select_receiver(app: &mut SolveApp, drawings: bool) {
+    if app.drawing_workspace.selection_is_drawings == drawings {
         return;
     }
-    app.drawing_workspace.selection_is_drawings = active(app);
+    app.drawing_workspace.selection_is_drawings = drawings;
     let mut back = std::mem::take(&mut app.drawing_workspace.selection_away);
     let session = &app.session;
     back.retain(|item| match item {
@@ -134,7 +139,11 @@ pub(crate) fn swap_selection(app: &mut SolveApp) {
 /// Undo and redo take the steps of the workspace shown: the open drawing's in Drawing, the
 /// model's everywhere else, a drawing open or not.
 pub(crate) fn sync_history(app: &mut SolveApp) {
-    app.session.model_focus = !active(app);
+    sync_history_for(app, active(app));
+}
+
+pub(crate) fn sync_history_for(app: &mut SolveApp, drawing: bool) {
+    app.session.model_focus = !drawing;
 }
 
 pub fn reset_document(app: &mut SolveApp) {
@@ -1267,6 +1276,7 @@ mod tests {
 
     /// A box in Drawing, with a drawing of one base view open: its id.
     fn drawing_with_a_view(h: &mut Harness) -> Option<u64> {
+        h.app.preferences.workspace_follows_view = false;
         h.app.home.open = false;
         h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
         crate::workspace::enter(&mut h.app, "drawing").unwrap();
@@ -1297,9 +1307,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Leaving Drawing leaves the drawing open: the model changes in Design with it open, and coming
-    /// back finds the same drawing. Undo takes the steps of the workspace shown: the drawing's in
-    /// Drawing, the model's in Design and Render.
+    /// Leaving Drawing retains its document; undo follows the workspace receiving the command.
     #[test]
     fn leaving_drawing_keeps_the_drawing_open_and_each_workspace_undoes_its_own() {
         let mut h = Harness::new();
@@ -1404,34 +1412,30 @@ mod tests {
         assert_eq!(h.app.session.open_drawing, Some(first), "a fresh start opens the design's first drawing");
     }
 
-    /// A sheet sketch being edited never holds Design: Drawing can be left with it open, the
-    /// model's commands and sketch tools work on the model there, undo takes the model's steps, and
-    /// back in Drawing the sheet sketch is still being edited.
+    /// Leaving Drawing changes focus only; starting a model edit finishes its sheet sketch.
     #[test]
-    fn a_sheet_sketch_stays_open_in_drawing_while_design_changes_the_model() {
+    fn a_sheet_sketch_stays_open_when_leaving_drawing_then_finishes_before_a_model_edit() {
         let mut h = Harness::new();
         let drawing = drawing_with_a_view(&mut h);
         let sheet = h.app.session.drawing("test").unwrap().sheets[0].id;
         h.app.run("drawing.sketch.create", serde_json::json!({"owner": solidcraft_engine::doc::ids::encode(sheet)})).unwrap();
-        let sketch = h.app.session.active_sheet_sketch.clone();
         crate::workspace::enter(&mut h.app, "design").unwrap();
         assert!(!active(&h.app));
         assert_eq!(h.app.session.open_drawing, drawing);
+        assert!(h.app.session.active_sheet_sketch.is_some(), "focus changes do not finish a sketch");
         let features = h.app.session.doc.features.len();
         h.app.run("solid.box", serde_json::json!({"length":5,"width":5,"height":5})).unwrap();
-        assert_eq!(h.app.session.doc.features.len(), features + 1, "the model changes with the sheet sketch open");
+        assert!(h.app.session.active_sheet_sketch.is_none(), "slice3 one-edit authority finishes the sheet sketch");
+        assert_eq!(h.app.session.open_drawing, drawing);
+        assert_eq!(h.app.session.doc.features.len(), features + 1);
         h.app.run("edit.undo", serde_json::json!({})).unwrap();
-        assert_eq!(h.app.session.doc.features.len(), features, "undo in Design takes back the model's step");
-        assert_eq!(h.app.session.active_sheet_sketch, sketch, "and leaves the sheet sketch being edited");
-        h.app.run("sketch.create", serde_json::json!({"plane": "XY"})).unwrap();
-        h.app.run("sketch.circle.center", serde_json::json!({"center": [0, 0], "radius": 3})).unwrap();
+        assert_eq!(h.app.session.doc.features.len(), features, "undo in Design still takes the model's step");
+        h.app.run("sketch.create", serde_json::json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.circle.center", serde_json::json!({"center":[0,0],"radius":3})).unwrap();
         h.app.run("sketch.finish", serde_json::json!({})).unwrap();
-        assert!(h.app.session.active_sketch.is_none(), "Finish in Design finishes the model's sketch");
-        assert_eq!(h.app.session.active_sheet_sketch, sketch, "and leaves the sheet sketch alone");
+        assert!(h.app.session.active_sketch.is_none() && h.app.session.active_sheet_sketch.is_none());
         crate::workspace::enter(&mut h.app, "drawing").unwrap();
-        assert!(h.app.session.sheet_sketching(), "back in Drawing the sheet sketch is still being edited");
-        h.app.run("sketch.finish", serde_json::json!({})).unwrap();
-        assert!(h.app.session.active_sheet_sketch.is_none());
+        assert_eq!(h.app.session.open_drawing, drawing, "returning to Drawing keeps the original drawing document");
     }
 
     #[test]
