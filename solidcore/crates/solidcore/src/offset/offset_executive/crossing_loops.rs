@@ -90,7 +90,9 @@ use crate::surface::surface::p1::{map_to_2d, zone_tol_3d};
 use crate::surface::surface::p4::NoObject;
 use crate::topology::brep::p1 as bp1;
 use crate::topology::brep::p3::{delete_face_with_body_identity, DeleteFaceOptions};
-use crate::topology::brep::p7::{make_face_with_curve_owners, FaceCurvesInput};
+use crate::topology::brep::p7::{
+    make_face_with_curve_owners, make_face_with_curves_with_kernel_context, FaceCurvesInput,
+};
 use crate::topology::brep::p9::make_vertex_split_edge_with_state;
 use crate::topology::edge::{self, NotificationStores, NotifyState};
 use crate::topology::edgeuse::{p1 as eu, p3 as eu3};
