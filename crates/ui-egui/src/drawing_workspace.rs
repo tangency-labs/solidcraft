@@ -1396,6 +1396,14 @@ mod tests {
         h.step(&json!({"key":"M"})).unwrap();
         h.frames(2);
         assert!(placing_dimension(&h.app), "the key Sketch Dimension was rebound to does");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+
+        // A chord too, and the chords the app keeps for itself stay its own.
+        h.call("ui.shortcut", json!({"command": "sketch.dimension", "key": "Ctrl+M"}));
+        h.step(&json!({"key":"M", "cmd": true})).unwrap();
+        h.frames(2);
+        assert!(placing_dimension(&h.app), "Ctrl+M starts it once Sketch Dimension is bound to it");
     }
 
     #[test]
