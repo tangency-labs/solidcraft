@@ -39,7 +39,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.corner_patch_face_side_twist = true;
     k.fixes.fillet_patch_keeps_fillet_edges = true;
     k.fixes.fillet_knife_edge_rounds = true;
-    k.fixes.keep_operand_uv_trims = true;
     k.fixes.proto_vertex_miss_is_false = true;
     k.fixes.revolve_analytic_profile_faces = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;
