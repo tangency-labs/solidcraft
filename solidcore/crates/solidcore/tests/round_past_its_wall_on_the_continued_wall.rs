@@ -184,7 +184,11 @@ fn a_round_ending_on_a_curved_face_is_refused() {
         let body = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 20.0, 30.0).unwrap();
         let c = create_cylinder(&mut k, Point3::new(5.0, 30.0, -1.0), 12.0, 32.0).unwrap();
         let body = boolean_difference(&mut k, body, c).unwrap();
-        let a = outcome(&mut k, body, [10.0, 9.0, 30.0], r);
-        assert!(a.is_err(), "r {r} refused: {a:?}");
+        let mut body = body;
+        let err = round(&mut k, &mut body, [10.0, 9.0, 30.0], r).expect_err("refused");
+        let SolidError::FilletRefused { reason, .. } = err else {
+            panic!("r {r}: {err:?}");
+        };
+        assert_eq!(reason, Some(NoRoomReason::CliffEndFaceNotPlanar), "r {r}");
     }
 }

@@ -850,8 +850,12 @@ impl ConcaveFill {
     /// every stretch between events that the station lies in (`tol` beyond its ends), so
     /// the section meets the part alike all along a stretch inside the round.
     fn covers(&self, band: &Band, events: &[f64], s: f64, tol: f64) -> bool {
-        let cos = self.dir.dot(band.dir);
-        let off = (1.0 - cos * cos).max(0.0).sqrt();
+        // the sine of the angle between the edges, from the cross product of the two unit
+        // directions: exact to a few units of rounding however near parallel they are (not
+        // `sqrt(1 - cos²)`, which turns the dot product's last-bit rounding into ~2e-8 for
+        // two equal directions), counted at 8 u (each unit direction is off unit length by
+        // at most a few u, and each component of the cross product rounds twice)
+        let off = self.dir.cross(band.dir).length() + 8.0 * f64::EPSILON;
         if !(off * (band.span[1] - band.span[0]) <= tol) {
             return false;
         }
@@ -1168,6 +1172,7 @@ impl Band {
         }
         let mut out = vec![self.span[0], self.span[1]];
         for e in &cache.edges {
+            k.check_cancelled(OP)?;
             if e.bbox.as_ref().is_some_and(|b| self.misses(b, tol)) {
                 continue;
             }
@@ -1181,6 +1186,7 @@ impl Band {
             }
         }
         for f in &cache.faces {
+            k.check_cancelled(OP)?;
             if f.bbox.as_ref().is_some_and(|b| self.misses(b, tol)) {
                 continue;
             }
@@ -2016,6 +2022,7 @@ pub(crate) fn band_breaks_through_the_part_cached(
     let mut out: Option<BandCut> = None;
     let mut near: Option<TsectPnt> = None;
     for t in stations {
+        k.check_cancelled(OP)?;
         faces.usable.clear();
         if let Some((band, events)) = &band {
             let s = band.along(curve.evaluate_point(k, t)?);
@@ -2102,8 +2109,43 @@ pub(crate) fn band_breaks_through_the_part_cached(
 
 #[cfg(test)]
 mod tests {
-    use super::{least_on_arc, segment_enters_triangle};
-    use crate::math::Point3;
+    use super::{least_on_arc, segment_enters_triangle, Band, ConcaveFill, SectionShape};
+    use crate::math::{Point3, Vec3};
+    use crate::topology::FaceId;
+
+    /// A fill along an edge parallel to the band's covers it however the two run: along
+    /// (1, 1, 0) / sqrt2 stored as the same rounded unit vector, whose dot product with
+    /// itself rounds to 1 - 2u (`sqrt(1 - cos²)` read 2.1e-8 there, 2.1e-6 over the
+    /// 100 mm band, past the 1e-6 tolerance). A fill turned 1e-6 rad off the band's edge
+    /// (1e-4 over its length) does not.
+    #[test]
+    fn a_parallel_fill_covers_whatever_its_direction_and_a_skew_one_does_not() {
+        let dir = Vec3::new(1.0, 1.0, 0.0).unitize().unwrap();
+        assert!(dir.dot(dir) < 1.0, "the rounding this test is about");
+        let o = Point3::new(0.0, 0.0, 0.0);
+        let band = Band {
+            shape: SectionShape::Chord,
+            rails: [o, o],
+            at: o,
+            dir,
+            span: [-50.0, 50.0],
+            phi: 0.0,
+        };
+        let fill = |dir: Vec3| ConcaveFill {
+            edge: o,
+            centre: o,
+            rails: [o, o],
+            dir,
+            radius: 1.0,
+            span: [-60.0, 60.0],
+            faces: [FaceId::from_index(0), FaceId::from_index(1)],
+        };
+        let tol = 1e-6;
+        assert!(fill(dir).covers(&band, &[-50.0, 50.0], 0.0, tol));
+        let (c, s) = (1e-6_f64.cos(), 1e-6_f64.sin());
+        let skew = Vec3::new(c * dir.x - s * dir.y, s * dir.x + c * dir.y, 0.0);
+        assert!(!fill(skew).covers(&band, &[-50.0, 50.0], 0.0, tol));
+    }
 
     /// `least_on_arc` is the least of `a + b cos θ + c sin θ`: inside the arc at the angle
     /// of `-(b, c)`, `a - sqrt(b² + c²)`; at an end otherwise; and NaN where an input is.

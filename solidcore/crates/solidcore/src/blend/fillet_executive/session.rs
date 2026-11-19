@@ -3985,7 +3985,13 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
         if self.roll_over_ends.is_empty() {
             let mut edges = Vec::new();
             for (index, solver) in self.solvers.iter().enumerate() {
-                let Some(solver) = solver.as_ref() else {
+                // only a solver the executive loaded (`LoadFilletSolver` binds it to the
+                // executive): one allocated but never loaded is never built, so its round
+                // adds nothing
+                let Some(solver) = solver
+                    .as_ref()
+                    .filter(|solver| solver.base().fillet_executive().is_some())
+                else {
                     continue;
                 };
                 if let Some(edge) = solver

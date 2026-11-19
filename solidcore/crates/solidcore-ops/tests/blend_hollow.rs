@@ -381,7 +381,7 @@ fn an_inside_round_ending_on_an_oblique_face_is_no_fill() {
 }
 
 /// What a session on #1668's box with the top and inside edges rounded R7 says, with `setup`
-/// run on it first: whether it built, and its no-room reason.
+/// run on it first: whether it built, the error code it noted, and its no-room reason.
 fn session_on_thin_wall(
     setup: impl FnOnce(
         &mut solidcore::blend::fillet_executive::session::FilletSession,
@@ -389,6 +389,7 @@ fn session_on_thin_wall(
     ),
 ) -> (
     bool,
+    i32,
     Option<solidcore::blend::fillet_executive::p3::NoRoomReason>,
 ) {
     use solidcore::blend::fillet_executive::session::FilletSession;
@@ -407,7 +408,8 @@ fn session_on_thin_wall(
         .unwrap();
     setup(&mut session, end);
     let done = session.do_fillet(&mut k);
-    (done.is_ok(), session.error_info().no_room_reason())
+    let info = session.error_info();
+    (done.is_ok(), info.code, info.no_room_reason())
 }
 
 /// The inside round counts as a fill neither in the Roll-over's second pass (whose concave
@@ -420,20 +422,59 @@ fn session_on_thin_wall(
 #[test]
 fn an_inside_round_is_no_fill_in_a_roll_over_pass_or_at_a_set_back_end() {
     use solidcore::blend::fillet_executive::p3::NoRoomReason;
+    use solidcore::blend::fillet_geom::p1::FilletErrorType;
     all_fixes();
-    assert_eq!(session_on_thin_wall(|_, _| {}), (true, None));
+    let no_room = FilletErrorType::NoRoom as i32;
+    assert_eq!(session_on_thin_wall(|_, _| {}), (true, 0, None));
     assert_eq!(
         session_on_thin_wall(|s, end| s.set_roll_over_pass(vec![end])),
-        (false, Some(NoRoomReason::BreaksThrough))
+        (false, no_room, Some(NoRoomReason::BreaksThrough))
     );
     assert_eq!(
         session_on_thin_wall(|s, end| {
             s.add_set_back_vertex(end);
         }),
-        (false, Some(NoRoomReason::BreaksThrough))
+        (false, no_room, Some(NoRoomReason::BreaksThrough))
     );
     assert_eq!(
         session_on_thin_wall(|s, end| s.set_set_back_fill(end, 3.0, 0.0, false)),
-        (false, None)
+        (false, FilletErrorType::CornerUnsupported as i32, None)
+    );
+}
+
+/// A round whose solver the session allocated (offsets and a circular generator) but never
+/// loaded is never built, so it fills nothing: #1668's R7 on the top edge alone, with such a
+/// solver R7 on the inside edge, is refused for breaking through, as without it.
+#[test]
+fn an_inside_round_never_loaded_is_no_fill() {
+    use solidcore::blend::fillet_executive::p3::NoRoomReason;
+    use solidcore::blend::fillet_executive::session::FilletSession;
+    use solidcore::blend::fillet_solver::p1::FilletSurfaceGenerator;
+    all_fixes();
+    let wall = thin_walled();
+    let top = edge_at(&wall, [0.0, 32.0, 42.0]);
+    let inside = edge_at(&wall, [0.0, 30.0, 40.0]);
+    let (mut k, mut brep) = kernel_copy(&wall);
+    let (top, inside) = (brep.edge_list()[top], brep.edge_list()[inside]);
+    let mut session = FilletSession::new(&mut k, &mut brep).unwrap();
+    session
+        .prepare_constant_radius_edges(&mut k, &[top], 7.0, 1, 1, 1.0)
+        .unwrap();
+    let generator = session
+        .add_surface_generator(FilletSurfaceGenerator::circular(
+            false, 1.0e-3, false, false,
+        ))
+        .unwrap();
+    let edgeuse = session.blend_edgeuse(&k, inside).unwrap().unwrap();
+    let tol = session.target().tolerance();
+    let degree = std::f64::consts::PI / 180.0;
+    let solver = session
+        .new_constant_radius_solver(&k, edgeuse, 7.0, tol, 30.0 * degree, 2.0 * degree)
+        .unwrap();
+    session.set_solver_generator(solver, generator).unwrap();
+    assert!(session.do_fillet(&mut k).is_err());
+    assert_eq!(
+        session.error_info().no_room_reason(),
+        Some(NoRoomReason::BreaksThrough)
     );
 }
