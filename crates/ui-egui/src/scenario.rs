@@ -212,6 +212,12 @@ impl Harness {
         self.frame_with_pen(events, None);
     }
 
+    /// One frame with these keys held (Shift, Ctrl, Alt) while `events` come in.
+    pub fn frame_with_modifiers(&mut self, events: Vec<egui::Event>, modifiers: egui::Modifiers) {
+        let raw = egui::RawInput { modifiers, ..self.input(events) };
+        self.frame_with_raw(raw, Default::default());
+    }
+
     /// One frame with a release identified as a pen tip by the platform.
     pub fn frame_with_pen(&mut self, events: Vec<egui::Event>, pen_release: Option<egui::Pos2>) {
         self.frame_with_taps(events, crate::pencil::PlatformTaps { pen_release, ..Default::default() });
@@ -219,7 +225,11 @@ impl Harness {
 
     /// One frame with what the platform says about its taps (a pen tip lifted, a finger down).
     pub fn frame_with_taps(&mut self, events: Vec<egui::Event>, taps: crate::pencil::PlatformTaps) {
-        let mut raw = self.input(events);
+        let raw = self.input(events);
+        self.frame_with_raw(raw, taps);
+    }
+
+    fn frame_with_raw(&mut self, mut raw: egui::RawInput, taps: crate::pencil::PlatformTaps) {
         self.app.raw_input_hook_with_taps(&self.ctx, &mut raw, taps);
         let app = &mut self.app;
         let mut out = self.ctx.run_ui(raw, |ui| {
