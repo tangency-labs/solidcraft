@@ -638,6 +638,7 @@ fn rust(i: &Inputs) -> Result<Dump, HarnessError> {
                     Vec::new()
                 }
             };
+            crate::trim_hook::observe(&mut b);
             let g2 = Graph::walk(&b).map_err(|e| harness(e.to_string()))?;
             out.push(Item::Int(faces.len() as i64));
             for f in faces {

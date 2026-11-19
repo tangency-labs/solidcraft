@@ -191,7 +191,7 @@ pub use continuity_order::{Construction, Continuity};
 pub use corner_g2::{CURVATURE_SHARE, DEFAULT_SETBACK_FACTOR};
 pub use curvature_comb::{CombTooth, MAX_COMB_TEETH, MIN_COMB_TEETH, comb_edge_near, edge_comb, edge_distance, iso_comb};
 pub use delete_face::delete_faces;
-pub use distance::{BodyDistance, DistanceShape, Members, body_distance, edges_closest, point_closest};
+pub use distance::{BodyDistance, DistanceShape, Members, body_distance, edges_closest, faces_closest, point_closest};
 pub use draft_corners::{CornerFill, CornerOption, CornerRefusal, CornerReport, DraftCorner, draft_corners};
 pub use emboss::{cylinder_emboss_anchor, emboss_cylinder, emboss_cylinder_at, has_cylinder_emboss_wall, infer_cylinder_emboss};
 pub use fair::{
@@ -233,7 +233,7 @@ pub use splitface::{SplitTool, face_split_if_on_face, has_cap_at, split_body, sp
 pub use step::{step_export, step_export_with_face_ids};
 /// The largest STEP text the importer parses; `solidcraft_io::limits` keeps it at the limit in force (#13329).
 pub use step_in::p21::{max_bytes as step_max_bytes, set_max_bytes as set_step_max_bytes};
-pub use step_in::records::{ImportRecords, RecordBody, import_trims, records_import, records_import_shared, records_text};
+pub use step_in::records::{ImportRecords, RecordBody, import_trims, records_import, records_import_shared, records_noted, records_text};
 pub use step_in::{
     HealedBody, ImportChecks, ImportHeals, ImportIssue, ImportReport, ImportedBody, IssueKind, LeftOut, StepImport, StepNode, StepReading,
     step_cache_alive, step_import, step_import_shared, step_orientation_errors, step_validate,

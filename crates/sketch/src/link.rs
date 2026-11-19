@@ -1516,6 +1516,7 @@ impl Sketch {
                     || o.outputs.iter().any(curve)
                     || o.topology.as_ref().is_some_and(|t| t.roles.iter().any(|r| curve(&r.output) || point(&r.start) || point(&r.end)))
             }) || self.freeform_offsets.iter().any(|o| curve(&o.source) || curve(&o.output))
+                || self.freeform_chain_offsets.iter().any(|o| o.sources.iter().any(|(id, _)| curve(id)) || o.outputs.iter().any(curve))
             {
                 return false;
             }

@@ -37,15 +37,12 @@ use solidcore::Brep;
 
 const INPUT: &[u8] = include_bytes!("data/issue_2368_solidcraft_together_r2.smb");
 
-/// SolidCraft's rig set: every fix on but the one it holds back
-/// (`fillet_refuse_rounds_breaking_through`).
+/// SolidCraft's rig set: every fix on.
 fn kernel() -> Kernel {
-    let mut k = Kernel {
+    Kernel {
         fixes: UpstreamFixes::all(),
         ..Kernel::default()
-    };
-    k.fixes.fillet_refuse_rounds_breaking_through = false;
-    k
+    }
 }
 
 /// A SolidCraft file, read under the notification naming as SolidCraft reads it.
