@@ -566,6 +566,7 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     rows.push(row("file.export_view_dxf", app.tr_label("Export Current View as DXF…"), "", "export", shown));
     rows.push(row("file.export_obj", app.tr_label("Export OBJ…"), &key("file.export_obj"), "export", shown));
     rows.push(row("export_glb", &format!("{}…", app.tr("ui.export_glb")), "", "export", shown));
+    rows.push(row("export_usd", &format!("{}…", app.tr("ui.export_usd")), "", "export", shown));
     rows.push(row("file.export_urdf", app.tr_label("Export URDF…"), &key("file.export_urdf"), "export", shown));
     rows.push(row("file.export_sdf", app.tr_label("Export SDF Model…"), &key("file.export_sdf"), "export", shown));
     rows.push(row("export_json", app.tr_label("Export Design as JSON…"), "", "export", true));
@@ -639,6 +640,7 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
             }
         }
         "export_glb" => FileAction::Export("glb").run(app),
+        "export_usd" => FileAction::Export("usd").run(app),
         "export_json" => FileAction::Export("json").run(app),
         "install" => {
             if let Some(offer) = crate::install::offered(app) {
@@ -785,7 +787,10 @@ fn export_as(app: &mut SolveApp, ext: &str, format: Option<&str>) {
     let body = crate::export_name::first_body(app);
     let name = format!("{}.{ext}", crate::export_name::offered(app, body.as_deref(), &app.session.doc.name));
     let format = format.map(str::to_string);
-    app.pick_save(&name, &[ext], move |app, path| {
+    // OpenUSD: the extension chosen picks binary (`.usd`, `.usdc`), text (`.usda`) or a package
+    // (`.usdz`).
+    let exts: &[&str] = if solidcraft_engine::io::is_usd_path(&name) { &solidcraft_engine::io::USD_EXTS } else { std::slice::from_ref(&ext) };
+    app.pick_save(&name, exts, move |app, path| {
         let Some(path) = path else { return };
         let mut params = json!({"path": path});
         if let Some(format) = format {
@@ -2656,10 +2661,10 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     // A theme pasted on the Interface page is a theme, not copied components (#8226).
     crate::prefs::take_theme_paste(app, ctx);
     // Home hides the design: only New, Open and Preferences work there.
-    // An empty Drawing workspace has no drawing history, selection or camera. Shortcuts
-    // must not silently edit the source design behind it. Explicit source editors retain
-    // their existing shortcuts while open. With a drawing open, undo and redo step through that
-    // drawing's own history only, so Ctrl+Z and Ctrl+Y pass.
+    // Model shortcuts must not silently edit the source design behind a drawing. An open
+    // drawing takes the shared selection keys (Escape, Delete, Select All) on its own objects,
+    // and undo and redo step through that drawing's own history only, so Ctrl+Z and Ctrl+Y pass.
+    // Explicit source editors retain their existing shortcuts while open.
     let drawing =
         crate::drawing_workspace::active(app) && app.bom.is_none() && app.design_properties.is_none() && !crate::dialogs_sheet::flat_active(app);
     let shown = design_shown(app) && !drawing;
@@ -2675,14 +2680,24 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
             app.start("ui.palette");
             continue;
         }
+        // Escape as in the model: the tool or drag under way first, then the selection.
         if drawing && k == Key::Escape {
             // As in a sketch: the first Esc drops the Dimension tool's picks, the next leaves it.
-            if crate::drawing_workspace::dimension::clear_picks(app)
+            if cancel_unfinished(app)
+                || crate::drawing_workspace::dimension::clear_picks(app)
                 || crate::drawing_workspace::close_panel(app)
                 || crate::drawing_sheet_page::clear_view_selection(app)
             {
                 app.esc_handled = true;
+            } else if !app.session.selection.is_empty() {
+                app.esc_handled = true;
+                let _ = app.run("select.clear", json!({}));
             }
+            continue;
+        }
+        // Delete and Backspace delete the selection through the model's own path.
+        if drawing_history && matches!(k, Key::Delete | Key::Backspace) && !mods.command && !mods.alt {
+            crate::viewport::delete_selection(app);
             continue;
         }
         // Only Esc pressed twice in a row finishes a sketch: any other key in between resets it.
@@ -2716,7 +2731,13 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                         }
                     });
                 }
-                _ if !shown && !(drawing_history && matches!(k, Key::Z | Key::Y)) => {}
+                // Select All's key (Ctrl+A by default) works on the drawing's sheet.
+                _ if !shown && !(drawing_history && matches!(k, Key::Z | Key::Y)) => {
+                    let key = crate::keymap::key_name(k, mods);
+                    if drawing_history && crate::keymap::command_for(app, &key) == Some("select.all") {
+                        crate::keymap::press(app, &key, repeat);
+                    }
+                }
                 // Ctrl+W closes the view shown, and the design with it when that is its only view;
                 // Ctrl+Shift+W closes the design shown. A design is closed asking first when it is
                 // unsaved; closing the last one shows the start page (#5366).
@@ -4784,6 +4805,9 @@ mod app_bar_tests {
             }
         }
         h.app.ui.tab = "MODEL".into();
+        // Tall enough for the whole File menu, so the plugin's row at its foot is on screen
+        // without scrolling the menu.
+        h.call("ui.resize", json!({"width":1600,"height":1400}));
         h.frames(3);
         h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
         h.step(&json!({"widget":"Workshop helper · measure"})).unwrap();
