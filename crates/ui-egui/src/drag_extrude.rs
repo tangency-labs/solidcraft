@@ -69,10 +69,17 @@ pub fn started(app: &SolveApp) -> bool {
     app.viewport.drag_extrude.gesture.as_ref().is_some_and(|g| g.started)
 }
 
+/// Drop a press that has not turned into a pull yet, as when an edge drag claims it.
+pub fn forget(app: &mut SolveApp) {
+    if !started(app) {
+        app.viewport.drag_extrude.gesture = None;
+    }
+}
+
 /// Note a press at `at` when it is on a planar face or a profile.
 pub fn press(app: &mut SolveApp, proj: &Proj, at: Pos2) {
     app.viewport.drag_extrude.gesture = None;
-    if !app.preferences.direct_interaction {
+    if !app.preferences.direct_interaction && !crate::creative_mode::on(app) {
         return;
     }
     let hits = crate::viewport::pick(app, proj, at);
@@ -162,9 +169,16 @@ pub fn to(app: &mut SolveApp, proj: &Proj, p: Pos2) {
     };
 }
 
-/// The button is up: the window stays open for the user to adjust and confirm.
+/// The button is up: the window stays open for the user to adjust and confirm, or, in Creative
+/// Mode, the release applies the pull as OK would.
 pub fn end(app: &mut SolveApp) {
-    app.viewport.drag_extrude.gesture = None;
+    let pulled = app.viewport.drag_extrude.gesture.take().is_some_and(|g| g.started);
+    if pulled
+        && crate::creative_mode::on(app)
+        && let Some(d) = app.dialog.as_mut().filter(|d| matches!(d.kind, Kind::Extrude { .. }))
+    {
+        d.confirm = true;
+    }
 }
 
 /// Forget the last pull's step once the window is gone.

@@ -1030,6 +1030,21 @@ fn a_box_from_points_holds_them_and_grows() {
     assert!(b.intersection(&far).is_empty());
 }
 
+/// A line meets a box when it passes through it or along a side, never when it passes by, and
+/// never an empty box or a zero direction.
+#[test]
+fn a_line_meets_a_box_it_passes_through() {
+    let b = Aabb3 { min: Vec3::new(0.0, 0.0, 0.0), max: Vec3::new(20.0, 20.0, 20.0) };
+    assert!(b.meets_line(Vec3::new(10.0, 10.0, -50.0), Vec3::Z), "upright through the middle");
+    assert!(b.meets_line(Vec3::new(-5.0, 10.0, 10.0), Vec3::new(1.0, 1.0, 0.0)), "slanted through");
+    assert!(b.meets_line(Vec3::new(20.0, 10.0, 0.0), Vec3::Z), "along a side");
+    assert!(!b.meets_line(Vec3::new(30.0, 10.0, 0.0), Vec3::Z), "beside it");
+    // A millionth of the box's size beyond a side still counts, a ten-thousandth does not.
+    assert!(b.meets_line(Vec3::new(20.00001, 10.0, 0.0), Vec3::Z), "just past a side");
+    assert!(!b.meets_line(Vec3::new(20.002, 10.0, 0.0), Vec3::Z), "clear of a side");
+    assert!(!b.meets_line(Vec3::new(10.0, 10.0, 0.0), Vec3::ZERO) && !Aabb3::EMPTY.meets_line(Vec3::ZERO, Vec3::Z));
+}
+
 /// One segment of each kind: a line, an arc, a cubic, a conic and a quintic Bézier.
 fn every_kind_of_segment() -> [Seg2; 5] {
     let mut p = [Vec2::ZERO; MAX_BEZIER_CTRL];

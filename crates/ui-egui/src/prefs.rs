@@ -1190,6 +1190,9 @@ preference_settings! {
     quick_menu_after_selection: bool = false, PAGE_NAVIGATION => check_tr("prefs.quick_menu_after_selection");
     /// Work on the model directly in the viewport (pull a face to extrude or cut); off by default.
     direct_interaction: bool = false, PAGE_TOOLS;
+    /// Creative Mode: pulls apply on release and a command pill floats above the selection
+    /// (`creative_mode`); off by default.
+    creative_mode: bool = false, PAGE_TOOLS;
     /// Mouse gestures: a ring of tools on the right button.
     mouse_gestures: crate::mouse_gesture::Config = Default::default(), PAGE_NAVIGATION;
     /// The wheel zooms out when turned forward.

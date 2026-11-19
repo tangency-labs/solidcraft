@@ -79,6 +79,23 @@ impl Aabb3 {
     pub fn intersection(&self, o: &Aabb3) -> Aabb3 {
         Aabb3 { min: self.min.max(o.min), max: self.max.min(o.max) }
     }
+    /// Whether the endless line through `o` along `d` meets the box, its sides included (never an
+    /// empty box, never a zero direction). Each side counts a millionth of the box's size (at
+    /// least 1e-6) beyond it, so a line read back from a body's own face still meets its box. The
+    /// kernel clips the line ([`Extent3d::intersect_line`]).
+    ///
+    /// [`Extent3d::intersect_line`]: solidcore::geom::extent3d::Extent3d::intersect_line
+    pub fn meets_line(&self, o: Vec3, d: Vec3) -> bool {
+        use solidcore::geom::extent3d::{Extent3d, LineHit};
+        if self.is_empty() {
+            return false;
+        }
+        let size = self.max - self.min;
+        let tol = Vec3::new(size.x.abs().max(1.0), size.y.abs().max(1.0), size.z.abs().max(1.0)) * 1e-6;
+        let k = |v: Vec3| solidcore::Vec3::new(v.x, v.y, v.z);
+        let grown = Extent3d::from_points(k(self.min - tol), k(self.max + tol));
+        matches!(grown.intersect_line(k(o), k(d)), Ok(LineHit::Touch { .. } | LineHit::Through { .. }))
+    }
     /// Whether the two boxes share a point (never when either is empty).
     pub fn meets(&self, o: &Aabb3) -> bool {
         self.min.x <= o.max.x

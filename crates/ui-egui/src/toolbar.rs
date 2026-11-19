@@ -345,7 +345,12 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let badge_right = update.map_or(out.controls_left, |u| u.left().min(out.controls_left)) - 6.0;
             let badge_span = Rect::from_min_max(out.offer.min, pos2(badge_right.max(out.offer.min.x), out.offer.max.y));
             let badge = crate::policy::badge(app, ui, badge_span, out.offer_labeled);
-            let tabs_end = badge.or(update).map_or(out.controls_left, |u| u.left()) - 8.0;
+            // The Creative switch sits left of both and of the link pills, at the right of the free
+            // space that remains.
+            let switch_right = badge.or(update).map_or(out.controls_left, |u| u.left().min(out.controls_left)) - 6.0;
+            let span = Rect::from_min_max(out.offer.min, pos2(switch_right.max(out.offer.min.x), out.offer.max.y));
+            let creative = if design_shown(app) { crate::creative_mode::bar_switch(app, ui, span) } else { None };
+            let tabs_end = creative.or(badge).or(update).map_or(out.controls_left, |u| u.left()) - 8.0;
             // Narrow title bars can fit only part of the tab strip. Its hit regions must not
             // extend into the persistent report and window controls.
             let tabs_rect = Rect::from_min_max(pos2(out.tabs_start.min(tabs_end), r.top()), pos2(tabs_end, r.bottom()));

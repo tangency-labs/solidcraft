@@ -1163,7 +1163,17 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                     let _ = app.run("component.revert_position", json!({ "occurrences": revertible }));
                 }
             } else {
-                extra_options(ui, "move_options", &mut d.extra, &[("Create Copy", "copy")]);
+                // Keep Axes With Body takes along axes that run through the moved bodies (a
+                // Center Pole); it shows on every move (not a copy) so it can be found before a
+                // pole is added.
+                let copying = d.extra.get("copy").and_then(Value::as_bool).unwrap_or(false);
+                let mut choices = vec![("Create Copy", "copy")];
+                if !copying {
+                    let keep = crate::dialogs_move::keeps_axes(app, d);
+                    d.extra.insert("keep_axes".into(), json!(keep));
+                    choices.push((app.tr("move.keep_axes"), "keep_axes"));
+                }
+                extra_options(ui, "move_options", &mut d.extra, &choices);
             }
         }
         Kind::Primitive { cmd, fields, operation, at, .. } => {
