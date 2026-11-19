@@ -263,6 +263,255 @@ impl<'a> EnclosedCurve<'a> {
 /// # Errors
 /// Cancellation is propagated. An unavailable certificate returns `false`, so the
 /// executive takes the ordinary re-intersection path instead of keeping this edge.
+/// The certified shape of an edge's span under a cut plane (issue #18503's fix, the
+/// beyond-end contract's decision layer): the signed distance `g(t) = n \u00b7 (c(t) - o)`
+/// over the span, each piece's certified sign and every certified crossing. `Whole` is
+/// one certified sign over the span (`removed_side` reads the outward side's sign: `g >
+/// 0` is the moved face's outward side, off the solid); `Single` is exactly one
+/// certified crossing with the two pieces' signs (`crossing` is the affine root for a
+/// line, a refined root-interval representative otherwise, its `|g|` within the
+/// tolerance); `Complex` is certified multiple crossings — the two-ended retained
+/// islands need construction and proof records the reconstruction does not have yet
+/// (research issue #18967), and the caller refuses typed for it. Fail-closed
+/// throughout: an exhausted or stagnant subdivision, an uncertifiable enclosure or a
+/// non-finite value refuses typed — nothing undecided is ever read as a verdict.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum CutShape {
+    Whole {
+        removed_side: bool,
+    },
+    Single {
+        crossing: f64,
+        low_kept: bool,
+        high_kept: bool,
+    },
+    Complex,
+}
+
+/// The decomposition's own budget: the refinement of a crossing to its tolerance zone
+/// takes `log2(span * |g'| / tolerance)` halvings (26 for issue #18536's straight
+/// spline over a knot span of 1020 at a 3e-5 tolerance), so the depth bound sits well
+/// above the endpoint machinery's; the cell cap bounds the total work whatever the
+/// depth. Exhaustion is a typed refusal, never a shape.
+const CUT_MAX_DEPTH: usize = 48;
+const CUT_MAX_CELLS: usize = 8192;
+
+/// [`CutShape`] of `curve` over `interval` against the plane through `origin` with unit
+/// normal `normal` (the moved face's outward side). The budget is the kept-edge
+/// gate's shape (cells counted as popped nodes, bounded depth): its exhaustion is a
+/// typed refusal, never a shape.
+pub(crate) fn decompose_cut(
+    kernel: &Kernel,
+    curve: &Curve,
+    interval: &Extent1d,
+    origin: Point3,
+    normal: Vec3,
+    tolerance: f64,
+) -> Result<CutShape> {
+    decompose_cut_within(
+        kernel,
+        curve,
+        interval,
+        origin,
+        normal,
+        tolerance,
+        CUT_MAX_CELLS,
+        CUT_MAX_DEPTH,
+    )
+}
+
+/// [`decompose_cut`] within an explicit budget (the budget's own pin: a caller that
+/// names a tiny budget gets the typed refusal, never a shape).
+pub(crate) fn decompose_cut_within(
+    kernel: &Kernel,
+    curve: &Curve,
+    interval: &Extent1d,
+    origin: Point3,
+    normal: Vec3,
+    tolerance: f64,
+    max_cells: usize,
+    max_depth: usize,
+) -> Result<CutShape> {
+    let (t0, t1) = (interval.min(), interval.max());
+    if !(t0.is_finite() && t1.is_finite() && t0 < t1 && tolerance.is_finite() && tolerance >= 0.0) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "a cut decomposition over a span of distinct finite ends",
+        ));
+    }
+    let side = |p: Point3| normal.dot(p - origin);
+    let side_of = |box_: [Ivl; 3]| -> Ivl {
+        let mut s = Ivl::from(0.0);
+        let (o, n) = (
+            (origin.x, origin.y, origin.z),
+            (normal.x, normal.y, normal.z),
+        );
+        let b = box_;
+        let (ox, oy, oz) = o;
+        s = s + Ivl::from(n.0) * (b[0] - Ivl::from(ox));
+        s = s + Ivl::from(n.1) * (b[1] - Ivl::from(oy));
+        s = s + Ivl::from(n.2) * (b[2] - Ivl::from(oz));
+        s
+    };
+    // the fast path: a line's g is affine, its root exact
+    if let CurveKind::Line(_) = curve.kind() {
+        let (p0, p1) = (
+            curve.evaluate_point(kernel, t0)?,
+            curve.evaluate_point(kernel, t1)?,
+        );
+        let (g0, g1) = (side(p0), side(p1));
+        if !g0.is_finite() || !g1.is_finite() {
+            return Err(SolidError::invalid_input(OP, "a cut side not finite"));
+        }
+        let band = tolerance;
+        if g0.abs() <= band && g1.abs() <= band {
+            // along the cut over the ends: the coplanar class (research issue #18967),
+            // never a shape this layer invents
+            return Ok(CutShape::Complex);
+        }
+        let chord = p0.distance(p1);
+        let lambda = g0 / (g0 - g1);
+        // the endpoint-rounding rule (issue #13622): a cut exactly at an end rounds a
+        // hair outside the unit interval; the displacement from the end, |lambda| *
+        // chord, within the tolerance the length model resolves is decided by the
+        // length model, not by the sign of one rounding
+        let lambda = if lambda < 0.0 && -lambda * chord <= tolerance {
+            0.0
+        } else if lambda > 1.0 && (lambda - 1.0) * chord <= tolerance {
+            1.0
+        } else {
+            lambda
+        };
+        if (0.0..=1.0).contains(&lambda) {
+            // a side whose end value is zero is the crossing's own end (a zero-width
+            // side, not a kept piece): the signs are strict
+            return Ok(CutShape::Single {
+                crossing: t0 + lambda * (t1 - t0),
+                low_kept: g0 < 0.0,
+                high_kept: g1 < 0.0,
+            });
+        }
+        // a real beyond-end crossing: the span itself keeps one certified sign (the
+        // incident-edge extension case reads the crossing on the curve's extension)
+        return Ok(CutShape::Whole {
+            removed_side: g0 > 0.0,
+        });
+    }
+    // the certified subdivision: every cell's g interval, split until each cell keeps
+    // one certified sign, a root's tolerance zone absorbs (the clip's incidence zone:
+    // a cell whose whole g range lies within the tolerance of the plane is where the
+    // clip sits), or the budget refuses typed. A root sitting exactly on an end (the
+    // corner clips) absorbs the same way and never stalls the refinement.
+    let enc = EnclosedCurve::of(curve);
+    let mut stack: Vec<(f64, f64, usize)> = vec![(t0, t1, 0)];
+    let mut cells = 0_usize;
+    let mut pieces: Vec<(f64, f64, bool)> = Vec::new();
+    let mut crossings: Vec<f64> = Vec::new();
+    while let Some((lo, hi, depth)) = stack.pop() {
+        kernel.check_cancelled(OP)?;
+        cells += 1;
+        if cells > max_cells || depth > max_depth {
+            return Err(SolidError::invalid_input(
+                OP,
+                "the cut decomposition's budget is exhausted",
+            ));
+        }
+        let Some(enc) = &enc else {
+            return Err(SolidError::invalid_input(
+                OP,
+                "a curve without an enclosure",
+            ));
+        };
+        let Some(box_) = enc.over(Ivl::new(lo, hi))? else {
+            return Err(SolidError::invalid_input(
+                OP,
+                "a curve enclosure over the span",
+            ));
+        };
+        let g = side_of(box_);
+        if !(g.lo.is_finite() && g.hi.is_finite()) {
+            return Err(SolidError::invalid_input(OP, "a cut side not finite"));
+        }
+        if g.lo > 0.0 {
+            pieces.push((lo, hi, true));
+        } else if g.hi < 0.0 {
+            pieces.push((lo, hi, false));
+        } else if g.lo >= -tolerance && g.hi <= tolerance {
+            // the clip's incidence zone: the whole cell lies within the tolerance of
+            // the plane. Its representative is the end it touches (the corner clip),
+            // else its middle
+            let at = if (lo - t0).abs() <= f64::EPSILON * t0.abs().max(1.0) {
+                t0
+            } else if (hi - t1).abs() <= f64::EPSILON * t1.abs().max(1.0) {
+                t1
+            } else {
+                0.5 * lo + 0.5 * hi
+            };
+            crossings.push(at);
+        } else {
+            let mid = 0.5 * lo + 0.5 * hi;
+            if !(mid > lo && mid < hi) {
+                return Err(SolidError::invalid_input(
+                    OP,
+                    "the cut decomposition's refinement stalls",
+                ));
+            }
+            stack.push((lo, mid, depth + 1));
+            stack.push((mid, hi, depth + 1));
+        }
+    }
+    pieces.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(core::cmp::Ordering::Equal));
+    crossings.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
+    // one root's tolerance zone absorbs as one crossing, however many cells it spans
+    let mut merged: Vec<f64> = Vec::new();
+    for &x in &crossings {
+        if let Some(last) = merged.last_mut() {
+            if (x - *last).abs() <= tolerance.max(f64::MIN_POSITIVE) {
+                *last = 0.5 * (*last) + 0.5 * x;
+                continue;
+            }
+        }
+        merged.push(x);
+    }
+    // the crossings between certified pieces of opposite signs (a piece boundary the
+    // subdivision resolved without an absorbed zone)
+    for pair in pieces.windows(2) {
+        let [below, above] = pair else {
+            continue;
+        };
+        if below.2 != above.2 {
+            merged.push(0.5 * below.1 + 0.5 * above.0);
+        }
+    }
+    merged.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
+    if pieces.is_empty() {
+        // every cell lay within the tolerance of the plane: along the cut (the
+        // coplanar class, research issue #18967)
+        return Ok(CutShape::Complex);
+    }
+    let any_removed = pieces.iter().any(|p| p.2);
+    let any_kept = pieces.iter().any(|p| !p.2);
+    if merged.is_empty() {
+        return Ok(CutShape::Whole {
+            removed_side: any_removed && !any_kept,
+        });
+    }
+    if let [crossing] = merged.as_slice() {
+        let crossing = *crossing;
+        // the side's status from the certified pieces on it; a side without a piece is
+        // the crossing's degenerate end (the endpoint-rounding rule's clamped cut):
+        // nothing of the edge stays on it
+        let low_kept = pieces.iter().any(|p| p.1 <= crossing && !p.2);
+        let high_kept = pieces.iter().any(|p| p.0 >= crossing && !p.2);
+        return Ok(CutShape::Single {
+            crossing,
+            low_kept,
+            high_kept,
+        });
+    }
+    Ok(CutShape::Complex)
+}
+
 pub(crate) fn separated(
     kernel: &Kernel,
     curve: &Curve,
@@ -1420,6 +1669,216 @@ mod tests {
             3,
         ));
         assert!(!separated(&k, &within_band, &interval, &plane, Some(&face), 1.0e-7).unwrap());
+    }
+
+    /// The retained-island counterexample (Fix 1's review): a bent edge whose signed
+    /// distance to the cut plane is the cubic (2 - t)(t - 1/4)(t - 3/4) crosses twice
+    /// INSIDE its span with a kept island between the roots, while both ends read off
+    /// the solid. The ends' affine model cannot see the island; the certified
+    /// decomposition reports it and the operation refuses typed — never `Removed`.
+    #[test]
+    fn a_retained_island_the_ends_cannot_see_is_no_shape_to_remove_the_edge() {
+        let k = Kernel::default();
+        // the cubic's Bernstein form: z(t) = -t^3 + 3t^2 - 35/16 t + 3/8, x(t) = t
+        let curve = Curve::from(
+            BSplineCurve::create_canonical(&CanonicalData {
+                dim: 3,
+                degree: 3,
+                control_points: &[
+                    Point3::new(0.0, 0.0, 0.375),
+                    Point3::new(1.0 / 3.0, 0.0, -0.354_166_666_666_666_63),
+                    Point3::new(2.0 / 3.0, 0.0, -0.083_333_333_333_333_31),
+                    Point3::new(1.0, 0.0, 0.187_5),
+                ],
+                form: BSplineCurveForm::Unspecified,
+                knot_multiplicities: &[4, 4],
+                knots: &[0.0, 1.0],
+                knot_type: KnotType::Unspecified,
+                weights: None,
+                trim: None,
+            })
+            .unwrap(),
+        );
+        let shape = decompose_cut(
+            &k,
+            &curve,
+            &Extent1d::from_min_max(0.0, 1.0),
+            Point3::ZERO,
+            Vec3::Z,
+            1.0e-5,
+        )
+        .unwrap();
+        assert!(matches!(shape, CutShape::Complex), "{shape:?}");
+    }
+
+    /// The decomposition's verdict follows the geometry, not the parameterization's
+    /// direction: the counterexample running the other way reads the same, and a cut
+    /// crossing a line once keeps the same kept fraction either way.
+    #[test]
+    fn the_decomposition_agrees_with_the_parameterization_running_the_other_way() {
+        let k = Kernel::default();
+        let forward = Curve::from(
+            BSplineCurve::create_canonical(&CanonicalData {
+                dim: 3,
+                degree: 3,
+                control_points: &[
+                    Point3::new(0.0, 0.0, 0.375),
+                    Point3::new(1.0 / 3.0, 0.0, -0.354_166_666_666_666_63),
+                    Point3::new(2.0 / 3.0, 0.0, -0.083_333_333_333_333_31),
+                    Point3::new(1.0, 0.0, 0.187_5),
+                ],
+                form: BSplineCurveForm::Unspecified,
+                knot_multiplicities: &[4, 4],
+                knots: &[0.0, 1.0],
+                knot_type: KnotType::Unspecified,
+                weights: None,
+                trim: None,
+            })
+            .unwrap(),
+        );
+        let backward = Curve::from(
+            BSplineCurve::create_canonical(&CanonicalData {
+                dim: 3,
+                degree: 3,
+                control_points: &[
+                    Point3::new(1.0, 0.0, 0.187_5),
+                    Point3::new(2.0 / 3.0, 0.0, -0.083_333_333_333_333_31),
+                    Point3::new(1.0 / 3.0, 0.0, -0.354_166_666_666_666_63),
+                    Point3::new(0.0, 0.0, 0.375),
+                ],
+                form: BSplineCurveForm::Unspecified,
+                knot_multiplicities: &[4, 4],
+                knots: &[0.0, 1.0],
+                knot_type: KnotType::Unspecified,
+                weights: None,
+                trim: None,
+            })
+            .unwrap(),
+        );
+        for c in [&forward, &backward] {
+            let shape = decompose_cut(
+                &k,
+                c,
+                &Extent1d::from_min_max(0.0, 1.0),
+                Point3::ZERO,
+                Vec3::Z,
+                1.0e-5,
+            )
+            .unwrap();
+            assert!(matches!(shape, CutShape::Complex), "{shape:?}");
+        }
+        // one crossing on a line: the kept fraction reads the same either way
+        let line_forward = Curve::from(Line::from_points(
+            Point3::new(0.0, 0.0, -2.0),
+            Point3::new(0.0, 0.0, 2.0),
+            3,
+        ));
+        let line_backward = Curve::from(Line::from_points(
+            Point3::new(0.0, 0.0, 2.0),
+            Point3::new(0.0, 0.0, -2.0),
+            3,
+        ));
+        let mut kept = Vec::new();
+        for c in [&line_forward, &line_backward] {
+            match decompose_cut(
+                &k,
+                c,
+                &Extent1d::from_min_max(0.0, 1.0),
+                Point3::ZERO,
+                Vec3::Z,
+                1.0e-5,
+            )
+            .unwrap()
+            {
+                CutShape::Single {
+                    crossing,
+                    low_kept,
+                    high_kept,
+                } => kept.push((crossing, low_kept, high_kept)),
+                other => panic!("one crossing expected: {other:?}"),
+            }
+        }
+        // the same crossing point either way; the kept side follows the parameterization
+        assert!((kept[0].0 - 0.5).abs() < 1.0e-12, "{kept:?}");
+        assert!((kept[1].0 - 0.5).abs() < 1.0e-12, "{kept:?}");
+    }
+
+    /// A cut along the whole span (the coplanar class) is no shape this layer decides:
+    /// the research issue #18967's coincidence machinery owns it.
+    #[test]
+    fn a_cut_along_the_whole_span_is_no_shape() {
+        let k = Kernel::default();
+        let curve = Curve::from(Line::from_points(
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(1.0, 0.0, 1.0e-16),
+            3,
+        ));
+        let shape = decompose_cut(
+            &k,
+            &curve,
+            &Extent1d::from_min_max(0.0, 1.0),
+            Point3::ZERO,
+            Vec3::Z,
+            1.0e-5,
+        )
+        .unwrap();
+        assert!(matches!(shape, CutShape::Complex), "{shape:?}");
+    }
+
+    /// The decomposition's budget fails closed: a span crossing the cut again and again
+    /// exhausts it and refuses typed — an exhausted budget is never a shape.
+    #[test]
+    fn the_decompositions_budget_fails_closed() {
+        let k = Kernel::default();
+        let mut cps = Vec::new();
+        for i in 0..2001 {
+            let t = f64::from(i) / 2000.0;
+            let z = if i % 2 == 0 { 1.0 } else { -1.0 };
+            cps.push(Point3::new(t, 0.0, z));
+        }
+        let curve = Curve::from(
+            BSplineCurve::create_canonical(&CanonicalData {
+                dim: 3,
+                degree: 3,
+                control_points: &cps,
+                form: BSplineCurveForm::Unspecified,
+                knot_multiplicities: &{
+                    let mut m = vec![4];
+                    m.extend(std::iter::repeat_n(1, cps.len() - 4));
+                    m.push(4);
+                    m
+                },
+                knots: &(0..(cps.len() - 2)).map(|i| i as f64).collect::<Vec<_>>(),
+                knot_type: KnotType::Unspecified,
+                weights: None,
+                trim: None,
+            })
+            .unwrap(),
+        );
+        // the same curve decomposes within the full budget (the shape is `Complex`),
+        // and a caller that names a tiny budget gets the typed refusal — the budget
+        // fails closed, it is never a shape
+        let shape = decompose_cut(
+            &k,
+            &curve,
+            &Extent1d::from_min_max(0.0, 1.0),
+            Point3::ZERO,
+            Vec3::Z,
+            1.0e-5,
+        )
+        .unwrap();
+        assert!(matches!(shape, CutShape::Complex), "{shape:?}");
+        let result = decompose_cut_within(
+            &k,
+            &curve,
+            &Extent1d::from_min_max(0.0, 1.0),
+            Point3::ZERO,
+            Vec3::Z,
+            1.0e-5,
+            16,
+            8,
+        );
+        assert!(result.is_err(), "{result:?}");
     }
 
     #[test]
