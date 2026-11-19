@@ -323,6 +323,56 @@ fn local_operation_recorded(
     // obligations below. A caller that provides no eligibility — an offset or a shell —
     // defers nothing.
     executive.set_reconstruction_eligibility(crossable.clone());
+    // (issue #18503's hook) the cut-ownership classifier beside it: the gap pass asks
+    // whether the moved faces' cut removes a vanish's edge before deferring it, and only
+    // a certified `Removed` is dischargeable as the obligation's certified removal (the
+    // contract) — it alone owns the vanish. A vanish the cut does not remove is the gap
+    // pass's own close and takes the squeeze as on the base (the owner's parity rule:
+    // build where the base builds). A classification that cannot certify (an
+    // uncertifiable clip, a non-planar moved face) is not proof of ownership: the
+    // vanish stays the gap pass's own close there too. A cancellation is never
+    // swallowed.
+    executive.set_reconstruction_classifier(Box::new(|k, b, moved_faces, descendants| {
+        // (issue #18503's hook) the cut-ownership classifier: does the moved faces' cut
+        // remove the vanish's edge? Answered on the RESULT descendants the executive's
+        // correspondence names (the cut may extend or re-cut them; the removal reads
+        // those spans — the discharge classifies the same set). Only a certified
+        // `Removed` is the dischargeable removal the obligation's contract names. A
+        // classification that cannot certify is not proof of ownership: the vanish stays
+        // the gap pass's own close there (the parity rule — the base builds such cases).
+        // A cancellation is never swallowed. The moved faces are named by their ids:
+        // their marks are copied back only after the executive goes.
+        let cuts = match cuts_for_faces(k, b, moved_faces) {
+            Ok(cuts) => cuts,
+            Err(err) if err.is_cancelled() => return Err(err),
+            Err(_) => return Ok(false),
+        };
+        for &x in descendants {
+            let Some(record) = b.edges().iter().find(|(y, _)| *y == x).map(|(_, r)| r) else {
+                continue;
+            };
+            let Some(curve) = record.curve.clone() else {
+                continue;
+            };
+            let interval = record.interval;
+            let edge_tolerance = record.tolerance;
+            for face in &cuts {
+                let tolerance = (crate::blend::fillet_section::interval::Ivl::from(edge_tolerance)
+                    + crate::blend::fillet_section::interval::Ivl::from(face.moved.tolerance))
+                .hi;
+                let crossing =
+                    match classify_edge_crossing(k, &curve, &interval, face, tolerance, x) {
+                        Ok(crossing) => crossing,
+                        Err(err) if err.is_cancelled() => return Err(err),
+                        Err(_) => return Ok(false),
+                    };
+                if matches!(crossing.event, CrossEvent::Removed { .. }) {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }));
 
     // (not upstream) `b`'s own attributes go to the offset under the original
     // identities, as upstream's live on the faces it copies (`SM_NO_COPY` of each
@@ -1623,6 +1673,76 @@ fn moved_result_faces(k: &mut Kernel, b: &mut Brep) -> Result<Vec<MovedFaceCut>>
         if !has_mark {
             continue;
         }
+        let surface = face_ops::surface(b, face)?
+            .ok_or_else(|| null("the face's surface"))?
+            .clone();
+        let mut uv_box: Option<Extent2d> = None;
+        for l in face_ops::loops(b, face, false, None)? {
+            let Some(span) = crate::topology::loopuse::loop_uv_span(k, b, l)? else {
+                uv_box = None;
+                break;
+            };
+            uv_box = Some(uv_box.map_or(span, |u| u.union(&span)));
+        }
+        // the trimmed region: the primary face use's loops, each its edge uses' UV trim
+        // curves (the other face use's loops are the same region read the other way, and
+        // parity over both would count every crossing twice)
+        let mut region = TrimRegion { loops: Vec::new() };
+        let primary = b.face(face)?.faceuse;
+        let (fu_a, fu_z) = face_ops::faceuses(b, face)?;
+        for fu in [fu_a, fu_z].into_iter().flatten() {
+            if Some(fu) != primary {
+                continue;
+            }
+            for lu in eu1::faceuse_loopuses(b, fu, false, None)? {
+                let mut segments = Vec::new();
+                for eu in eu1::loopuse_edgeuses(b, lu)? {
+                    if eu1::uv_trim_curve(b, eu)?.0.is_none() {
+                        eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?.status?;
+                    }
+                    let Some(curve) = eu1::uv_trim_curve(b, eu)?.0 else {
+                        continue;
+                    };
+                    // the segment covers the trim curve's own parameter range (the UV
+                    // trim is built over the edge use's span)
+                    segments.push(TrimSegment {
+                        interval: curve.natural_interval(),
+                        curve: curve.clone(),
+                    });
+                }
+                region.loops.push(TrimLoop { segments });
+            }
+        }
+        let primary = primary.ok_or_else(|| null("the face's face use"))?;
+        let outward_same = eu1::faceuse_orientation(b, primary)?
+            == crate::nurbs::b_spline_surface_n_lib::OrientType::Same;
+        let plane = PlaneCut::of(&surface, outward_same);
+        out.push(MovedFaceCut {
+            face,
+            moved: MovedFace {
+                surface,
+                uv_box,
+                tolerance: b.face(face)?.tolerance.max(b.tolerance()),
+            },
+            region,
+            plane,
+        });
+    }
+    Ok(out)
+}
+
+/// The moved faces' cuts for the faces named (issue #18503's hook: the gap pass's
+/// cut-ownership classifier asks before the marks are copied back, so the moved faces
+/// are named by their ids, not found by their marks), built as
+/// [`moved_result_faces`] builds them.
+fn cuts_for_faces(k: &mut Kernel, b: &mut Brep, faces: &[FaceId]) -> Result<Vec<MovedFaceCut>> {
+    use crate::offset::offset_executive::clearance::endpoint_contact::{
+        TrimLoop, TrimRegion, TrimSegment,
+    };
+    use crate::topology::edgeuse::p1 as eu1;
+    use crate::topology::edgeuse::p3 as eu3;
+    let mut out = Vec::new();
+    for &face in faces {
         let surface = face_ops::surface(b, face)?
             .ok_or_else(|| null("the face's surface"))?
             .clone();
@@ -3271,9 +3391,13 @@ fn reconstruct_crossed_boundaries(
                         }
                     };
                 match crossing.event {
-                    CrossEvent::Clear => {}
                     CrossEvent::Removed { .. } => removal = true,
-                    CrossEvent::Trimmed { .. } => return Err(deferred_edge_vanish(pending)),
+                    // (issue #18503) a trimmed descendant is not the certified removal
+                    // the obligation needs: the scan completes before deciding — a later
+                    // `Removed` certifies the removal and the surviving trim falls to
+                    // the all-descendants-severed check below; without a removal the
+                    // refusal at the end stands
+                    CrossEvent::Clear | CrossEvent::Trimmed { .. } => {}
                 }
             }
         }

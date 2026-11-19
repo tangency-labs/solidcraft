@@ -34,7 +34,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::p1::{forget_seconds, OffsetExecutive, OffsetOperation};
+use super::p1::{forget_seconds, DeferredGap, OffsetExecutive, OffsetOperation};
 use super::p2::OffsetNotifications;
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::{Curve, CurveKind};
@@ -385,6 +385,12 @@ impl OffsetExecutive {
             }
             return Err(failure);
         }
+        // (issue #18503's hook, the parity rule) the deferred vanishes the moved
+        // faces' cut does not remove are the gap pass's own closes: the WR-566 squeeze,
+        // taken here — after every extension pass, so the cut-ownership answer is the
+        // one the reconstruction's discharge will find — with the closed-edge
+        // bookkeeping the removal below completes
+        self.settle_deferred_vanishes(kernel, original, b, notifications, &mut closed_edges)?;
         if !closed_edges.is_empty() {
             self.remove_closed_faces(kernel, original, b, &closed_edges, notifications)?;
         }
@@ -711,8 +717,30 @@ impl OffsetExecutive {
                     // again ([`deferred_edge_vanish`]). It decides before the WR-566
                     // squeeze: the reconstruction certifies the edge's removal and
                     // rebuilds the corner, and a squeeze here would leave the closed
-                    // edge's face unexplained below.
+                    // edge's face unexplained below. (issue #18503's hook, the parity
+                    // rule) Only a vanish the moved faces' cut removes is the
+                    // reconstruction's to discharge: one the cut leaves alone is the gap
+                    // pass's own close and takes the squeeze below as it always did. The
+                    // classifier is the reconstruction's own
+                    // ([`Self::set_reconstruction_classifier`]); without one, an eligible
+                    // vanish is taken as the cut's.
                     if let Some(owned) = self.owned_vanishing_edge(original, b, u)? {
+                        // (issue #18503's hook, the parity rule) whether the moved
+                        // faces' cut removes this vanish is settled at the executive's
+                        // tail ([`Self::settle_deferred_vanishes`]), after every
+                        // extension pass: only there does the classification match the
+                        // one the reconstruction's discharge will make. The gap's
+                        // context is recorded for the WR-566 squeeze there; until then
+                        // the edge and the gap stay untouched, no progress claimed.
+                        self.deferred_gaps.insert(
+                            owned,
+                            DeferredGap {
+                                face: f,
+                                use_id: u,
+                                vertex_point,
+                                tolerance: tol,
+                            },
+                        );
                         self.pending_vanishes.insert(owned);
                         return Ok(GapOutcome::Deferred);
                     }
@@ -838,6 +866,110 @@ impl OffsetExecutive {
     /// `face` and the original face across it (`None` where the edge use maps to no single
     /// original edge use); `false` (nothing done) otherwise.
     #[allow(clippy::too_many_arguments)] // one fork branch
+    /// (issue #18503's hook) The deferred vanish obligations, settled at the tail of
+    /// the gap pass (the parity rule: build where the base builds). For each recorded
+    /// gap, the moved faces' cut is asked of the vanish's complete descendant group —
+    /// the executive's correspondence, final after every extension pass, the same set
+    /// the reconstruction's discharge classifies. A cut that removes a descendant keeps
+    /// the obligation: the reconstruction certifies the removal or refuses typed. A cut
+    /// that does not is the gap pass's own close and takes the WR-566 squeeze here, on
+    /// the body the gap pass left untouched (the recorded ids are this body's, still
+    /// current); where the squeeze declines, the gap pass's own failure stands, named
+    /// as it always was.
+    fn settle_deferred_vanishes(
+        &mut self,
+        kernel: &mut Kernel,
+        original: &Brep,
+        b: &mut Brep,
+        notifications: &mut OffsetNotifications<'_>,
+        closed_edges: &mut Vec<(FaceId, Option<FaceId>)>,
+    ) -> Result<()> {
+        let recorded: Vec<(EdgeId, DeferredGap)> =
+            self.deferred_gaps.iter().map(|(o, g)| (*o, *g)).collect();
+        // the moved faces' offset copies, through the executive's own relation (the
+        // ids the gap pass sees are this body's; the moved faces are named in the
+        // original's)
+        let mut moved_copies: Vec<FaceId> = Vec::new();
+        for (f, _) in b.faces().iter() {
+            let is_moved = self.faceuse_to_faces.firsts(f).into_iter().any(|fu| {
+                eu::faceuse_face(original, fu)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|orig| self.moved_faces.contains(&orig))
+            });
+            if is_moved {
+                moved_copies.push(f);
+            }
+        }
+        for (owned, gap) in recorded {
+            let mut descendants: Vec<EdgeId> = Vec::new();
+            for (x, _) in b.edges().iter() {
+                let uses = edge::edgeuses(b, x, None, None)?;
+                let maps_to_owned = uses.iter().any(|&use_of_edge| {
+                    self.edgeuse_to_edgeuses
+                        .firsts(use_of_edge)
+                        .into_iter()
+                        .any(|ou| eu::edge(original, ou).ok().flatten() == Some(owned))
+                });
+                if maps_to_owned {
+                    descendants.push(x);
+                }
+            }
+            let cut_owned = match &self.reconstruction_classifier {
+                Some(classify) => classify.classify(kernel, b, &moved_copies, &descendants)?,
+                None => true,
+            };
+            if cut_owned {
+                continue;
+            }
+            // Every collapsed descendant of the group is squeezed, not only the
+            // recorded one: an original's offset can carry a descendant per face it
+            // bounds (the wall's own copy beside the side's, `a_draft_moves_a_face`'s
+            // and the step wall's twins), and the wall only closes to nothing when its
+            // own copies go too. A descendant whose far end is not at the vanished
+            // point is a survivor of the group (its own fate), not a squeeze target.
+            let mut squeezed_any = false;
+            for &x in &descendants {
+                let uses = edge::edgeuses(b, x, None, None)?;
+                let Some(&ux) = uses.first() else {
+                    continue;
+                };
+                let Some(face_x) = eu::face(b, ux)? else {
+                    continue;
+                };
+                let Ok(at_v) = edgeuse_vertex(b, ux) else {
+                    continue;
+                };
+                let at_start = b
+                    .vertex(at_v)
+                    .is_ok_and(|v| v.point.distance(gap.vertex_point) <= gap.tolerance);
+                if self.squeeze_closed_edge(
+                    kernel,
+                    original,
+                    b,
+                    face_x,
+                    ux,
+                    x,
+                    at_start,
+                    gap.vertex_point,
+                    gap.tolerance,
+                    notifications,
+                    closed_edges,
+                )? {
+                    squeezed_any = true;
+                }
+            }
+            if squeezed_any {
+                self.pending_vanishes.remove(&owned);
+                self.deferred_gaps.remove(&owned);
+            } else {
+                let input_edge = self.original_edge(original, b, gap.use_id).ok().flatten();
+                return Err(self.edge_vanishes(original, gap.face, input_edge));
+            }
+        }
+        Ok(())
+    }
+
     fn squeeze_closed_edge(
         &mut self,
         kernel: &mut Kernel,

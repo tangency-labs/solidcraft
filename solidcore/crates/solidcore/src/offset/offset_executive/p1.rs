@@ -189,6 +189,45 @@ pub struct VertexOffset {
 /// kernels' namespaces, which share no attribute store with an offset executive.
 const DELETE_FACES_NAMESPACE: u32 = 0x00f5_e700;
 
+/// Not upstream (issue #18503's hook): the reconstruction's cut-ownership classifier
+/// ([`OffsetExecutive::set_reconstruction_classifier`]): whether the moved faces' cut
+/// removes a vanish's edge. Its `Debug` names the closure only — the closure is the
+/// reconstruction's own classification, supplied beside the eligibility provider.
+/// (issue #18503's hook) A deferred vanish's gap, recorded at the deferral for the
+/// executive's tail settlement ([`super::step_gaps`]): the gap trim's context, the
+/// WR-566 squeeze's own parameters, on the offset body the gap pass left untouched.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct DeferredGap {
+    pub(crate) face: FaceId,
+    pub(crate) use_id: EdgeuseId,
+    pub(crate) vertex_point: crate::math::Point3,
+    pub(crate) tolerance: f64,
+}
+
+/// The cut-ownership classifier's closure type (issue #18503's hook): whether the moved
+/// faces' cut removes a vanish's edge's whole descendant group.
+type CutOwnershipFn = Box<dyn Fn(&mut Kernel, &mut Brep, &[FaceId], &[EdgeId]) -> Result<bool>>;
+
+pub(crate) struct CutOwnershipClassifier(pub(super) CutOwnershipFn);
+
+impl CutOwnershipClassifier {
+    pub(super) fn classify(
+        &self,
+        k: &mut Kernel,
+        b: &mut Brep,
+        moved_faces: &[FaceId],
+        descendants: &[EdgeId],
+    ) -> Result<bool> {
+        (self.0)(k, b, moved_faces, descendants)
+    }
+}
+
+impl core::fmt::Debug for CutOwnershipClassifier {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("CutOwnershipClassifier(..)")
+    }
+}
+
 /// Topological offset state. Original ids and result ids belong to separate B-reps.
 /// Geometry-creator parameters are an immutable scalar snapshot; this executive does
 /// not retain a creator reference or implement its offset-geometry algorithms.
@@ -224,7 +263,7 @@ pub struct OffsetExecutive {
     /// Not upstream: the faces of a local operation that move to surfaces of their own
     /// (the others keep theirs), for their neighbours' reach
     /// ([`super::reach::local_extension_reach`]).
-    moved_faces: Vec<FaceId>,
+    pub(super) moved_faces: Vec<FaceId>,
     /// Not upstream: the original edges of a local operation that keep their geometry
     /// (their faces, and every face at their vertices, keep their surfaces), and their
     /// edge uses ([`Self::keep_unmoved_edges`]).
@@ -236,6 +275,19 @@ pub struct OffsetExecutive {
     /// `crate::topology::brep::local_operation`). `None` — an offset or a shell, no
     /// eligibility provider — owns no vanish: one is refused as it always was.
     pub(super) reconstruction_eligible: Option<BTreeSet<EdgeId>>,
+    /// Not upstream (issue #18503's hook): the cut-ownership classifier, supplied
+    /// beside the eligibility provider ([`Self::set_reconstruction_classifier`]): asked
+    /// at the gap pass's vanish decision whether the moved faces' cut removes the
+    /// vanish's edge. Only a certified removal is the reconstruction's to discharge
+    /// (the obligation's contract); a vanish the cut leaves alone is the gap pass's own
+    /// close and takes the squeeze as it always did (the base behavior). `None` — a
+    /// caller with no reconstruction classifier — takes every eligible vanish as the
+    /// cut's, as before.
+    pub(super) reconstruction_classifier: Option<CutOwnershipClassifier>,
+    /// Not upstream (issue #18503's hook): each deferred vanish's gap record (the
+    /// original edge's id to its [`DeferredGap`]), the executive's tail settlement's
+    /// input.
+    pub(super) deferred_gaps: BTreeMap<EdgeId, DeferredGap>,
     /// Not upstream (issue #13622's hook): the vanish obligations the gap pass deferred
     /// (`offset::offset_executive::step_gaps`, `close_loop_gap`), one per original edge
     /// (id order, deduped). The reconstruction discharges each one or refuses typed; the
@@ -328,6 +380,8 @@ impl OffsetExecutive {
             kept_edges: BTreeSet::new(),
             kept_edgeuses: BTreeSet::new(),
             reconstruction_eligible: None,
+            reconstruction_classifier: None,
+            deferred_gaps: BTreeMap::new(),
             pending_vanishes: BTreeSet::new(),
             crossing_edgeuses: BTreeSet::new(),
             collapsed_faces: Vec::new(),
@@ -550,6 +604,17 @@ impl OffsetExecutive {
     /// set (an offset or a shell) defers nothing.
     pub(crate) fn set_reconstruction_eligibility(&mut self, eligible: BTreeSet<EdgeId>) {
         self.reconstruction_eligible = Some(eligible);
+    }
+
+    /// Not upstream (issue #18503's hook): the cut-ownership classifier the gap pass
+    /// asks at its vanish decision (`offset::offset_executive::step_gaps`,
+    /// `close_loop_gap`): `true` — the moved faces' cut removes the vanish's edge, the
+    /// reconstruction owns the event — defers the dischargeable obligation;
+    /// `false` — the cut does not remove it — leaves the vanish to the gap pass's own
+    /// close (the base behavior). The caller that owns the reconstruction supplies it
+    /// (`crate::topology::brep::local_operation`), beside the eligibility provider.
+    pub(crate) fn set_reconstruction_classifier(&mut self, classifier: CutOwnershipFn) {
+        self.reconstruction_classifier = Some(CutOwnershipClassifier(classifier));
     }
 
     /// Not upstream (issue #13622's hook): the vanish obligations the gap pass deferred
