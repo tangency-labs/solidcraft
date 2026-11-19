@@ -9675,7 +9675,6 @@ fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
             .input(|i| i.pointer.hover_pos())
             .filter(|p| ui.is_enabled() && ui.rect_contains_pointer(rect) && !crate::shell::covered(app, *p) && !on_axes_arrow(app, rect, *p)),
         orbiting,
-        snap_hint: !app.preferences.free_orbit,
         home_label: solidcraft_ui_text::tr_label("Home view").to_owned(),
     };
     // The compass returns a tip or Home; its drag came from `axis_view_orbit` above.

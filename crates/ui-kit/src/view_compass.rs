@@ -79,8 +79,6 @@ pub struct Compass {
     pub hover: Option<Pos2>,
     /// A drag on it is turning the view (no tip lights while it does).
     pub orbiting: bool,
-    /// The tip's hover text mentions holding Shift to snap.
-    pub snap_hint: bool,
     pub home_label: String,
 }
 
@@ -226,12 +224,8 @@ pub fn show(ui: &mut egui::Ui, compass: &Compass) -> Option<ViewAction> {
     if let Some(i) = hovered
         && let Some((name, d, _, _)) = tips.get(i)
     {
+        // The label names the view; the tip has no hover text of its own.
         solidcraft_ui_registry::publish_handle(&format!("axis_view_hover:{name}"), hover.unwrap_or(c));
-        ui.interact(Rect::from_center_size(hover.unwrap_or(c), vec2(2.0, 2.0)), ui.scope_id().with("axis_view_tip"), Sense::hover())
-            .backing_on_hover_text(solidcraft_ui_text::format(
-                if compass.snap_hint { "ui.view_compass_tip_snap" } else { "ui.view_compass_tip" },
-                &[("axis", &name.to_uppercase())],
-            ));
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         if ui.input(|i| i.pointer.primary_clicked()) {
             action = Some(ViewAction::Snap { axis: name, direction: *d });
@@ -353,7 +347,6 @@ mod tests {
                     axes: FRONT,
                     hover,
                     orbiting: orbit.orbiting,
-                    snap_hint: true,
                     home_label: "Home".into(),
                 };
                 out = (show(ui, &compass), orbit);
