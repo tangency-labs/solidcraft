@@ -336,7 +336,7 @@ pub struct SessionCall {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Refusal {
     /// [`Error::TooLarge`]: the largest size that builds, what it sizes, a point at the
-    /// middle of the edge it was found for, and why there is no room.
+    /// middle of the edge it was found for, a point on the limiting face, and why there is no room.
     TooLarge {
         /// The largest size that builds it.
         size: f64,
@@ -344,6 +344,8 @@ pub enum Refusal {
         kind: FitKind,
         /// A point at the middle of the edge it was found for.
         at: Option<[f64; 3]>,
+        /// An exact point on the face that limits the size, when the kernel names it.
+        face: Option<[f64; 3]>,
         /// Why there is no room.
         why: Option<RoomReason>,
     },
@@ -371,11 +373,13 @@ impl From<Refusal> for Error {
                 size,
                 kind,
                 at,
+                face,
                 why,
             } => Error::TooLarge {
                 size,
                 kind,
                 at,
+                face,
                 why,
             },
             Refusal::SetbackTooShort {
@@ -414,13 +418,18 @@ impl SessionRefusal {
         Ok(match (self.refusal, self.edge) {
             (
                 Refusal::TooLarge {
-                    size, kind, why, ..
+                    size,
+                    kind,
+                    face,
+                    why,
+                    ..
                 },
                 Some(edge),
             ) => Refusal::TooLarge {
                 size,
                 kind,
                 at: edge_point(k, b, edge)?,
+                face,
                 why,
             },
             (r, _) => r,
@@ -504,10 +513,13 @@ pub fn session_refusal(
                 KernelFit::Chord => FitKind::Chord,
             };
             let why = reason.and_then(room_reason);
+            let site = s.error_site();
+            let face = site.face.and(site.at).map(|p| [p.x, p.y, p.z]);
             let refusal = Refusal::TooLarge {
                 size: fit.size,
                 kind,
                 at: None,
+                face,
                 why,
             };
             return Ok(SessionRefusal {
@@ -534,14 +546,16 @@ fn blend_failure(
 ) -> (Error, Option<EdgeId>) {
     if let SolidError::BlendRefused { refusal, .. } = &e {
         if let Some(error) = refused(s, refusal) {
-            return (error, None);
+            return (crate::session::noted(&e, error), None);
         }
     }
-    match session_refusal(s, e, call) {
+    let (kind, operation) = (e.kind().code(), e.operation());
+    let (error, edge) = match session_refusal(s, e, call) {
         Ok(r) => (r.refusal.into(), r.edge),
         // a failure the kernel states in words says what the session noted of the step too
         Err(e) => (session_failure(s, &e).unwrap_or_else(|| status(e)), None),
-    }
+    };
+    (crate::session::noted_as(kind, operation, error), edge)
 }
 
 /// The refusal of a swept turn the corners step noted at its vertex (the blend corner's
@@ -656,6 +670,7 @@ fn chamfer_sized(
             size,
             kind: FitKind::Radius,
             at,
+            face,
             why,
         } if chamfer => {
             let fit = KernelFitSize {
@@ -668,6 +683,7 @@ fn chamfer_sized(
                     size,
                     kind: FitKind::Distance,
                     at,
+                    face,
                     why,
                 },
                 None => Refusal::NoRoom,
@@ -681,7 +697,11 @@ fn chamfer_sized(
 /// found for. An edge or point that cannot be read leaves the size without a point.
 fn sized_on(k: &Kernel, b: &Brep, edge: Option<EdgeId>, e: Error) -> solidcore::Result<Error> {
     let Error::TooLarge {
-        size, kind, why, ..
+        size,
+        kind,
+        face,
+        why,
+        ..
     } = e
     else {
         return Ok(e);
@@ -693,6 +713,7 @@ fn sized_on(k: &Kernel, b: &Brep, edge: Option<EdgeId>, e: Error) -> solidcore::
         size,
         kind,
         at: edge_point(k, b, edge)?,
+        face,
         why,
     })
 }
@@ -2356,7 +2377,9 @@ pub struct CarriedFace {
     /// The unit direction in the face's plane square to the edge; `along` × `across` is the
     /// face's outward normal.
     pub across: [f64; 3],
-    /// The slab's rectangle in (`along`, `across`) from `origin`.
+    /// The slab's outline in (`along`, `across`) from `origin`: the edge from its first side
+    /// to its second, each end along the trace of the face that ends the round there. A
+    /// rectangle between ends square to the edge.
     pub outline: [[f64; 2]; 4],
     /// The slab's extent along the outward normal, up to the face's plane.
     pub depth: [f64; 2],
@@ -2373,7 +2396,9 @@ pub struct CarriedFace {
 /// edge on the body with that face carried on as a slab and keeping what the round adds
 /// within the face's outline. None where that does not give the round of an unbounded face:
 /// the edge is not straight and concave, no face of it is flat, or an end of it has no flat
-/// face square to it.
+/// face that ends the round there (one whose plane holds the carried face's normal: a face
+/// square to the edge, or one leaning up to 60 degrees from that, which then carries on only
+/// the face of the edge whose normal its plane holds).
 ///
 /// # Errors
 /// [`Error::Argument`] for an index past the edges or a radius not finite, positive and at
@@ -2711,6 +2736,27 @@ fn chamfer_sides_impl(
             contract,
         };
         if let Err(e) = pass_or_refuse(k, b, p)? {
+            // A fixed angle scales both setbacks with the first distance. Explicit
+            // two-distance input keeps its common scale, since neither distance is primary.
+            let e = match (second, e) {
+                (
+                    ChamferSecond::Angle(_),
+                    Error::TooLarge {
+                        size,
+                        kind: FitKind::Scale,
+                        at,
+                        face,
+                        why,
+                    },
+                ) => Error::TooLarge {
+                    size: crate::import_geometry::scale_value(distance, size),
+                    kind: FitKind::Distance,
+                    at,
+                    face,
+                    why,
+                },
+                (_, e) => e,
+            };
             return Ok(Err(e));
         }
         done(k, b, expect, contract)

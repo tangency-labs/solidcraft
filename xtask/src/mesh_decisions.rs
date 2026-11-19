@@ -98,6 +98,7 @@ pub const SKIPPED_FUNCTIONS: &[(&str, &str)] = &[
     ("crates/kernel/src/body.rs:Body::mesh_untimed", "the mesher: a body's tessellation"),
     ("crates/kernel/src/body.rs:Body::retained_bytes", "the evaluation cache's memory estimate"),
     ("crates/kernel/src/body.rs:Body::unmeshed_faces", "the mesher's report of faces it left out"),
+    ("crates/kernel/src/step_in/records.rs:mesh_part", "mesh bodies: an imported part given as triangles, checked and made a mesh body"),
 ];
 
 /// What a function does with a mesh, the patterns the check matches:

@@ -1523,6 +1523,36 @@ fn offset_chain_mirror_patterns_move_scale() {
     assert!(sk.center(sk.curve_index(&cp).unwrap()).unwrap().dist(Vec2::new(-110.0, 0.0)) < 1e-7);
 }
 
+/// #15697: the Transform tool turns a rounded square about its middle. Picked by its sides and
+/// corner arcs, with a corner drawn on the origin, it turns whole: every point of its curves and
+/// its centre point land where the rotation puts them, so the square does not come out as a
+/// trapezoid (the corner's hold on the origin is let go, as Move does).
+#[test]
+fn rotation_turns_a_rounded_square_whole() {
+    for command in ["sketch.transform", "sketch.move"] {
+        for angle in [45.0, 30.0] {
+            let at = format!("{command} {angle}");
+            let mut s = new_sketch();
+            let r = run(&mut s, "sketch.rectangle.rounded", json!({"p0": [0, 0], "p1": [20, 20], "radius": 3}));
+            let source = ids(&r["curves"]);
+            assert_eq!(source.len(), 8, "four sides and four corner arcs: {r}");
+            let before = sketch(&s);
+            let mut shape: Vec<usize> = source.iter().flat_map(|id| before.curves[before.curve_index(id).unwrap()].kind.point_ids()).collect();
+            shape.push(before.points.iter().position(|p| Some(p.id.as_str()) == r["centre"].as_str()).unwrap());
+            let out = run(&mut s, command, json!({"entities": source, "angle": angle, "center": [10, 10]}));
+            assert_eq!(out["sketch"]["solved"], true, "{at}: {out}");
+            let after = sketch(&s);
+            let (sin, cos) = f64::to_radians(angle).sin_cos();
+            let c = Vec2::new(10.0, 10.0);
+            for i in shape {
+                let (p, q) = (before.points[i].pos - c, after.points[i].pos);
+                let expected = c + Vec2::new(p.x * cos - p.y * sin, p.x * sin + p.y * cos);
+                assert!(q.dist(expected) < 1e-6, "{at}: point {} at {q:?}, expected {expected:?}", before.points[i].id);
+            }
+        }
+    }
+}
+
 /// #4645: rotating a constrained 40 × 10 rectangle turns it at its size. Horizontal and vertical
 /// relations and dimensions swap at odd quarter turns, stay at half turns and go at other angles;
 /// lengths stay. A rotated copy is unconstrained and leaves the original as it was.
@@ -3173,7 +3203,7 @@ fn periodic_fit_creator_keeps_legacy_and_refuses_hostile_intent_atomically() {
     let before = s.doc.to_json();
     let history = s.undo.len();
     for (cmd, p) in [
-        ("sketch.spline.control_point", p),
+        ("sketch.spline.control_point", json!({"points":[[0,0],[4,0],[3,2]],"periodic":true})),
         ("sketch.spline.fit_point", json!({"points":[[0,0],[1,0],[0,0],[1,0]],"periodic":true})),
         ("sketch.spline.fit_point", json!({"points":[[0,0],[1,0],[1,1]],"periodic":"yes"})),
     ] {
@@ -4727,11 +4757,13 @@ fn freeform_offsets_trim_folds_and_round_chain_corners_into_an_extrudable_wall()
     let out = run(&mut s, "sketch.offset", json!({"curves": ["s1"], "distance": 1.26}));
     let curves = ids(&out["curves"]);
     assert!(!curves.is_empty(), "{out}");
-    assert_eq!(out["param"], Value::Null, "a trimmed offset has no distance to drive: {out}");
+    assert!(out["param"].is_string(), "the trimmed offset is driven by its distance: {out}");
     assert_eq!(out["sketch"]["dof"], source_dof, "the offset adds no freedom: {out}");
-    assert_eq!(s.doc.params.len(), params, "no orphan distance parameter");
+    assert_eq!(s.doc.params.len(), params + 1, "the distance parameter drives the offset");
     let sk = sketch(&s);
-    assert!(sk.freeform_offsets.is_empty() && !sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::OffsetDistance { .. })));
+    assert!(sk.freeform_offsets.is_empty(), "a trimmed offset is not a linked one");
+    assert_eq!(sk.freeform_chain_offsets.len(), 1, "the trimmed offset keeps its sources");
+    assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::OffsetDistance { .. })), "the trimmed offset has a driving dimension");
     // The source and its offset bound the inner region and the wall around it.
     let areas = profiles(&s);
     assert_eq!(areas.len(), 2, "{areas:?}");
@@ -4982,6 +5014,26 @@ fn coincident_count(sk: &solidcraft_sketch::Sketch) -> usize {
 
 fn point_at(sk: &solidcraft_sketch::Sketch, id: &str) -> Vec2 {
     sk.point(sk.resolve_point(id).expect("a point")).expect("its position")
+}
+
+/// The distance an offset runs at: the nearest its curves come to the line that closes the
+/// chain, which the offset of that line runs one distance away from.
+fn offset_gap(s: &Session, offset: &[String], line: &str) -> f64 {
+    let sk = sketch(s);
+    let source = sk.curve_index(line).expect("the source line");
+    let ends = sk.curves[source].kind.point_ids();
+    let (a, b) = (sk.point(ends[0]).expect("its start"), sk.point(ends[1]).expect("its end"));
+    let along = b - a;
+    offset
+        .iter()
+        .filter_map(|id| sk.curve_index(id))
+        .flat_map(|index| sk.curves[index].kind.point_ids())
+        .filter_map(|point| sk.point(point))
+        .map(|at| {
+            let t = ((at - a).dot(along) / along.len2()).clamp(0.0, 1.0);
+            at.dist(a + along * t)
+        })
+        .fold(f64::INFINITY, f64::min)
 }
 
 #[test]
@@ -6385,19 +6437,27 @@ fn a_far_away_point_does_not_keep_a_constraint_the_move_broke() {
     assert_eq!(r["released"], json!([{"id": level, "kind": "Horizontal"}]), "{r}");
 }
 
-/// #12294: a spline offset together with a line is trimmed and unlinked, so a distance that names a
-/// parameter drives nothing. The reply says so; a linked offset of the same parameter does not.
+/// #12294: the offset of a chain that includes a spline is trimmed, but it is kept with the
+/// sources it was made from, so the distance that names a parameter drives it: changing the
+/// parameter rebuilds the offset at the new distance.
 #[test]
-fn an_unlinked_offset_says_its_parameter_drives_nothing() {
+fn a_chain_offset_with_a_spline_follows_its_distance_parameter() {
     let mut s = new_sketch();
     run(&mut s, "parameters.add", json!({"name": "wall", "expression": "1 mm"}));
     let sp = ids(&run(&mut s, "sketch.spline.fit_point", json!({"points": [[-20, 0], [-10, 15], [10, 15], [20, 0]]}))["curves"])[0].clone();
-    run(&mut s, "sketch.line", json!({"points": [[20, 0], [-20, 0]]}));
+    let line = ids(&run(&mut s, "sketch.line", json!({"points": [[20, 0], [-20, 0]]}))["curves"])[0].clone();
     let r = run(&mut s, "sketch.offset", json!({"curves": [sp], "distance": "wall", "side": [0, 5], "param": "w_in"}));
-    assert!(r["param"].is_null(), "{r}");
-    let warning = r["warning"].as_str().unwrap_or_default();
-    assert!(warning.contains("not linked to its source"), "{r}");
-    // A rectangle's offset is linked: its parameter drives it and nothing is said.
+    // The offset gets the dimension its distance names.
+    assert_eq!(r["param"], "w_in", "{r}");
+    let curves = ids(&r["curves"]);
+    assert!(!curves.is_empty(), "{r}");
+    assert!((offset_gap(&s, &curves, &line) - 1.0).abs() < 0.01, "the offset runs at the parameter's distance");
+    // Changing the parameter rebuilds the offset at the new distance, in place.
+    run(&mut s, "parameters.change", json!({"name": "wall", "expression": "2 mm"}));
+    let sk = sketch(&s);
+    assert!(curves.iter().all(|id| sk.curve_index(id).is_some()), "the offset keeps its curves");
+    assert!((offset_gap(&s, &curves, &line) - 2.0).abs() < 0.01, "the offset follows the parameter");
+    // A rectangle's offset is driven the same way.
     let mut s = new_sketch();
     run(&mut s, "parameters.add", json!({"name": "wall", "expression": "1 mm"}));
     let lines: Vec<String> = [[[0, 0], [20, 0]], [[20, 0], [20, 10]], [[20, 10], [0, 10]], [[0, 10], [0, 0]]]
@@ -6406,7 +6466,6 @@ fn an_unlinked_offset_says_its_parameter_drives_nothing() {
         .collect();
     let r = run(&mut s, "sketch.offset", json!({"curves": lines, "distance": "wall", "side": [10, 5]}));
     assert!(r["param"].is_string(), "{r}");
-    assert!(r.get("warning").is_none(), "{r}");
 }
 
 fn side_directions(s: &Session, sides: &[String]) -> Vec<Vec2> {
@@ -6554,4 +6613,48 @@ fn the_move_of_a_projected_or_fixed_point_says_which_one_it_is() {
     // The origin is fixed by the sketch itself.
     let e = s.execute("sketch.move", &json!({"entities": ["origin"], "translate": [6.0, 0.0]})).unwrap_err().to_string();
     assert!(e.contains("point `origin` is fixed and cannot move"), "{e}");
+}
+
+/// Area of the closed cubic B-spline over `cv`, from the textbook closed form with indices wrapped
+/// (Piegl & Tiller, the uniform basis), sampled on every span.
+fn closed_cubic_area(cv: &[[f64; 2]]) -> f64 {
+    let n = cv.len() as isize;
+    let p = |k: isize| cv[k.rem_euclid(n) as usize];
+    let mut pts = Vec::new();
+    for i in 0..n {
+        for k in 0..200 {
+            let t = k as f64 / 200.0;
+            let b = [
+                (-t * t * t + 3.0 * t * t - 3.0 * t + 1.0) / 6.0,
+                (3.0 * t * t * t - 6.0 * t * t + 4.0) / 6.0,
+                (-3.0 * t * t * t + 3.0 * t * t + 3.0 * t + 1.0) / 6.0,
+                t * t * t / 6.0,
+            ];
+            pts.push([0, 1, 2, 3].map(|j| p(i - 1 + j)).iter().zip(b).fold([0.0, 0.0], |acc, (q, w)| [acc[0] + q[0] * w, acc[1] + q[1] * w]));
+        }
+    }
+    let m = pts.len();
+    ((0..m).map(|j| pts[j][0] * pts[(j + 1) % m][1] - pts[(j + 1) % m][0] * pts[j][1]).sum::<f64>() / 2.0).abs()
+}
+
+/// #19337: a closed control-point spline draws, solves and extrudes to one closed profile whose
+/// area and volume are those of the closed cubic B-spline over its control points, and a closed
+/// control spline with fewer than degree + 1 points is refused.
+#[test]
+fn closed_control_point_spline_draws_and_extrudes_to_one_profile() {
+    let cv = [[0.0, 0.0], [12.0, -2.0], [20.0, 8.0], [10.0, 16.0], [-3.0, 12.0], [-6.0, 3.0]];
+    let area = closed_cubic_area(&cv);
+    let mut s = new_sketch();
+    run(&mut s, "sketch.spline.control_point", json!({"points": cv, "periodic": true}));
+    let areas = profiles(&s);
+    assert_eq!(areas.len(), 1, "{areas:?}");
+    assert!((areas[0] - area).abs() < 1e-4 * area, "profile {} mm² vs B-spline {area} mm²", areas[0]);
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 10}));
+    let measured = run(&mut s, "inspect.measure", json!({}));
+    let volume = measured["total"]["volume_mm3"].as_f64().unwrap();
+    assert!((volume - 10.0 * area).abs() < 1e-4 * 10.0 * area, "volume {volume} mm³ vs {} mm³", 10.0 * area);
+    let mut few = new_sketch();
+    let refused = few.execute("sketch.spline.control_point", &json!({"points": [[0, 0], [10, 0], [10, 10]], "periodic": true}));
+    assert!(refused.is_err(), "three control points cannot close a cubic spline: {refused:?}");
 }

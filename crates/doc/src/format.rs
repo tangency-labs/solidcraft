@@ -579,6 +579,7 @@ pub(crate) fn check_raw(v: &Value, version: u32) -> Result<Vec<(usize, usize)>> 
     validate_versioned_geometry(v)?;
     validate_emboss_targets(v)?;
     validate_freeform_offsets(v)?;
+    validate_freeform_chain_offsets(v)?;
     validate_sketch_sizes(v)?;
     crate::format_offsets::validate_raw(v)?;
     validate_wires(v, version)
@@ -703,6 +704,7 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
     for feature in &d.features {
         if let crate::FeatureKind::Sketch { sketch, .. } = &feature.kind {
             sketch.validate_freeform_offsets().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
+            sketch.validate_freeform_chain_offsets().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_wires().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_wire_constraints().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_patterns().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
@@ -1039,11 +1041,21 @@ fn validate_versioned_geometry(value: &Value) -> Result<()> {
             }
             let indices = curve.get("pts").and_then(Value::as_array).ok_or_else(invalid)?;
             work = work.saturating_add(indices.len());
-            if !(4..=solidcraft_sketch::MAX_SPLINE_POINTS).contains(&indices.len())
-                || work > 1_000_000
-                || curve.get("control").is_some_and(|control| control.as_bool() != Some(false))
-                || curve.get("degree").is_some_and(|degree| degree.as_u64() != Some(3))
-            {
+            let control = match curve.get("control") {
+                None => false,
+                Some(control) => control.as_bool().ok_or_else(invalid)?,
+            };
+            let degree = match curve.get("degree") {
+                None => 3,
+                Some(degree) => degree.as_u64().and_then(|degree| u8::try_from(degree).ok()).ok_or_else(invalid)?,
+            };
+            if work > 1_000_000 {
+                return Err(invalid());
+            }
+            if control {
+                // A closed control spline: its own degree and count rule.
+                solidcraft_sketch::validate_closed_control(indices.len(), degree).map_err(|_| invalid())?;
+            } else if !(4..=solidcraft_sketch::MAX_SPLINE_POINTS).contains(&indices.len()) || degree != 3 {
                 return Err(invalid());
             }
             let count = points.ok_or_else(invalid)?.len();
@@ -1146,6 +1158,56 @@ fn validate_freeform_offsets(value: &Value) -> Result<()> {
                 return Err(invalid());
             }
             resolved.insert(output);
+        }
+    }
+    Ok(())
+}
+
+/// The trimmed chain offsets of a design's sketches: the sources each was made from, the
+/// curves it made and the distance it runs at.
+fn validate_freeform_chain_offsets(value: &Value) -> Result<()> {
+    let Some(features) = value.get("features").and_then(Value::as_array) else { return Ok(()) };
+    for feature in features {
+        if feature.get("type").and_then(Value::as_str) != Some("sketch") {
+            continue;
+        }
+        let Some(records) = feature.get("sketch").and_then(|sketch| sketch.get("freeform_chain_offsets")) else { continue };
+        let invalid = || DocError::Invalid("damaged design: invalid trimmed chain offset metadata".into());
+        let records = records.as_array().ok_or_else(invalid)?;
+        if records.len() > 128 {
+            return Err(invalid());
+        }
+        let mut outputs = std::collections::BTreeSet::new();
+        for record in records {
+            let object = record.as_object().ok_or_else(invalid)?;
+            if object.len() != 3 || object.keys().any(|key| !matches!(key.as_str(), "sources" | "outputs" | "distance")) {
+                return Err(invalid());
+            }
+            let sources = record.get("sources").and_then(Value::as_array).ok_or_else(invalid)?;
+            let made = record.get("outputs").and_then(Value::as_array).ok_or_else(invalid)?;
+            if sources.is_empty() || sources.len() > 512 || made.is_empty() || made.len() > 512 {
+                return Err(invalid());
+            }
+            for source in sources {
+                let pair = source.as_array().ok_or_else(invalid)?;
+                if pair.len() != 2 {
+                    return Err(invalid());
+                }
+                let id = pair[0].as_str().ok_or_else(invalid)?;
+                if id.is_empty() || id.len() > 512 || id.chars().any(char::is_control) || pair[1].as_bool().is_none() {
+                    return Err(invalid());
+                }
+            }
+            for output in made {
+                let id = output.as_str().ok_or_else(invalid)?;
+                if id.is_empty() || id.len() > 512 || id.chars().any(char::is_control) || !outputs.insert(id) {
+                    return Err(invalid());
+                }
+            }
+            let distance = record.get("distance").and_then(Value::as_f64).ok_or_else(invalid)?;
+            if !distance.is_finite() || !(1e-9..=MAX_REAL).contains(&distance.abs()) {
+                return Err(invalid());
+            }
         }
     }
     Ok(())
@@ -2115,7 +2177,7 @@ mod tests {
         assert!(validate_versioned_geometry(&make(curve.clone())).is_ok());
         for (key, malformed) in [
             ("periodic", serde_json::json!("true")),
-            ("control", serde_json::json!(true)),
+            ("control", serde_json::json!("yes")),
             ("degree", serde_json::json!(2)),
             ("pts", serde_json::json!([0, 1, 2])),
             ("pts", serde_json::json!([0, 1, 2, u64::MAX])),
@@ -2125,10 +2187,14 @@ mod tests {
             damaged[key] = malformed;
             assert!(validate_versioned_geometry(&make(damaged)).is_err(), "{key}");
         }
-        let mut legacy = curve;
+        let mut legacy = curve.clone();
         legacy.as_object_mut().unwrap().remove("periodic");
         legacy["control"] = Value::Bool(true);
         assert!(validate_versioned_geometry(&make(legacy)).is_ok());
+        // A closed control spline (#19337) of degree 3 over four points is a valid design.
+        let mut closed = curve;
+        closed["control"] = Value::Bool(true);
+        assert!(validate_versioned_geometry(&make(closed)).is_ok());
         for convention in [serde_json::json!(null), serde_json::json!(false), serde_json::json!("unknown")] {
             assert!(validate_versioned_geometry(&serde_json::json!({"features":[{"type":"revolve", "convention":convention}]})).is_err());
         }
