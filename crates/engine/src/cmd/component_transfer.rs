@@ -109,7 +109,7 @@ fn finish(s: &mut Session, scratch: &mut Session, features: &[u64], cmd: &str) -
             return Err(bad(cmd, error));
         }
     }
-    s.accept_computed(std::mem::take(scratch));
+    s.accept_computed(std::mem::take(scratch))?;
     Ok(())
 }
 

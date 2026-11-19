@@ -713,7 +713,7 @@ fn a_design_closed_while_its_history_computes_holds_up_nothing() {
     let (job, late) = crate::deferred::Deferred::never_done("timeline.roll_to", json!({"position": 1}), h.app.session.revision);
     h.app.deferred = Some(job);
     h.app.deferred_queue.push(("timeline.roll_to".into(), json!({"position": 2}), 0));
-    h.app.start_after_roll = Some(("solid.extrude".into(), 1));
+    h.app.start_after_roll = Some(("solid.extrude".into(), Some(1)));
     crate::documents::close(&mut h.app, 0, true);
     assert!(h.app.computing_since().is_none(), "the blank design has nothing computing");
     assert!(h.app.deferred.is_none() && h.app.deferred_queue.is_empty() && h.app.start_after_roll.is_none());
