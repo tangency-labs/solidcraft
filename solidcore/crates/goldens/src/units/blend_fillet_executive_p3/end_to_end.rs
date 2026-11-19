@@ -2705,13 +2705,13 @@ mod wr455_certificates {
     }
 }
 
-/// #18930: with the tangent curve tracer on, the round of edge 8 of `bottle.smb` at r 0.1
-/// (`stubs4-delete-edge-bottle-e8-r0.1`) failed (status 1001). In two intersections of a
-/// round with its support face the tracer reported 16 and 11 touching points, all on the
-/// rail, on the edge of the round's domain, where the marcher returns a tangent curve:
-/// contacts on that one curve, taken for nodes where crossing branches meet. The round
-/// builds a manifold body of 31 vertices, 47 edges and 18 faces, the counts the row
-/// records (the row holds the rest of the body).
+/// #18930: with the tangent curve tracer (then the opt-in `ssi_tangent_curve_tracer`) on,
+/// the round of edge 8 of `bottle.smb` at r 0.1 (`stubs4-delete-edge-bottle-e8-r0.1`) failed
+/// (status 1001). In two intersections of a round with its support face the tracer
+/// reported 16 and 11 touching points, all on the rail, on the edge of the round's domain,
+/// where the marcher returns a tangent curve: contacts on that one curve, taken for nodes
+/// where crossing branches meet. The round builds a manifold body of 31 vertices, 47 edges
+/// and 18 faces, the counts the row records (the row holds the rest of the body).
 #[cfg(test)]
 mod wr75_rail_contacts {
     use super::{apply, build, RealSolid};
@@ -2727,7 +2727,6 @@ mod wr75_rail_contacts {
         let inputs: super::super::Inputs = case.parse().expect("inputs");
         let input: RealSolid = inputs.real_solid.expect("a real_solid case");
         let mut k = Kernel::default();
-        k.fixes.ssi_tangent_curve_tracer = true;
         let mut body = build(&mut k, &input).expect("fixture").expect("bottle");
         let edges = p1::edges(&body, None).expect("edges");
         let selected: Vec<_> = input

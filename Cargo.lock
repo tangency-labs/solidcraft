@@ -5979,6 +5979,7 @@ dependencies = [
 name = "solidcore-ops"
 version = "0.1.0"
 dependencies = [
+ "serde",
  "solidcore",
  "solidcore-convert",
  "solidcore-record",
