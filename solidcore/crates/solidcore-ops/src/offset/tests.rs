@@ -141,6 +141,39 @@ fn a_half_torus_keeps_a_periodic_seam_when_its_offsets_still_meet() {
         rel(actual, 47.498_020_998_403_7) < 1e-9,
         "shell volume {actual:.17}"
     );
+    let (record, _) = body.to_record().unwrap();
+    let cavity_faces: Vec<_> = record
+        .faces
+        .iter()
+        .enumerate()
+        .filter_map(|(i, f)| {
+            matches!(
+                f.surface,
+                solidcore_record::brep::Surface::Torus { minor_radius, .. } if minor_radius < 8.0
+            )
+            .then_some(i)
+        })
+        .collect();
+    assert_eq!(cavity_faces.len(), 1, "one inset torus face");
+    let cavity = cavity_faces[0];
+    let query = crate::query::Query::new(&record);
+    // The short seam has two distinct ends beyond the drill centre, x = 37.
+    // The other meridian ends on the cap at x < 37; the outer rim is closed.
+    let seam_edges: Vec<_> = record
+        .edges
+        .iter()
+        .enumerate()
+        .filter(|(i, e)| {
+            query.edge_faces(*i).contains(&cavity)
+                && e.vertices[0] != e.vertices[1]
+                && e.vertices
+                    .iter()
+                    .all(|&v| record.vertices[v as usize].point[0] > 37.0)
+        })
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(seam_edges.len(), 1, "one retained outer-rim seam");
+    assert_eq!(query.edge_faces(seam_edges[0]), [cavity, cavity]);
 }
 
 /// The Dutchman stress corpus's Shell family (S0003, S0012, S0061): a feature no wider than

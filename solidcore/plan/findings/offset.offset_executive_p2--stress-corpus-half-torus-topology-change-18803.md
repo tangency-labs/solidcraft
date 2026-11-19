@@ -5,7 +5,17 @@ commit is `1c1a3e7c7`). S1983 needs boundary reconstruction when a periodic seam
 disappears. Existing gap closure and curve continuation do not provide it.
 This finding does not establish a shared cause for all 17 reported items.
 
-## Reproduction
+This is the historical baseline investigation, before the boundary construction.
+For the subsequent implementation and passing validation, see the
+[periodic-boundary construction addendum](offset.offset_executive_p2--periodic-boundary-construction-18803.md#validation).
+The regression is now a normal `#[test]`; `--ignored` skips it. The current
+focused command, which runs both half-torus tests, is:
+
+```sh
+buildq run solidcraft . -- cargo test --manifest-path solidcore/Cargo.toml -p solidcore-ops --lib a_half_torus_ -- --nocapture
+```
+
+## Baseline reproduction
 
 The public stress corpus's `items.jsonl`, item S1983, specifies an upper half
 torus about Z, major radius 30 mm and minor radius 8 mm. A cylinder of radius
@@ -21,8 +31,9 @@ The reproduction belongs to the existing
 `crates/solidcore-ops/src/offset/tests.rs` test file:
 `a_half_torus_with_a_blind_hole_shells_open_at_its_bottom`.
 The test expects a valid shell and the independently derived volume below.
-It is explicitly ignored pending #18803; run it with `--ignored` to reproduce.
-On this checkout both operand booleans succeed, then the shell fails with
+At the baseline revision, the test was explicitly ignored pending #18803;
+`--ignored` selected it to reproduce the failure there. Both operand booleans
+succeeded at that revision, then the shell failed with
 `OffsetRefused { face: None, why: Phrase { class: StageFailed, defect: true,
 phrase: "stage_failed" } }`. This differs from the report's older
 `LoopGapUncertified` refusal; the test does not claim to reproduce that exact
@@ -37,7 +48,7 @@ the report's exact error at step 6 (`solid.shell`):
 This is additional reproduction evidence, not validation of the current checkout.
 The captured bottom view and rim close-up were rendered by that CLI from the
 five-step script before the shell, using `solidcraft-cli snapshot`; no changed
-result is shown because there is no completed fix.
+result was shown because the baseline investigation had no completed fix.
 
 An independent reference construction succeeds in CLI 0.44.1: take the upper
 half torus of minor radius 7.2, subtract a cylinder of radius 1.75 ending at
@@ -196,13 +207,16 @@ redesign is necessary, or that every case in #18803 has the same cause.
 
 No tolerance increase, straight chord on a curved face, retry or alternate
 construction is justified. No production geometry or golden is changed by this
-investigation. The implementation is blocked on the missing disappearing-seam
-boundary construction; the pending regression and analytic oracle preserve
-the evidence without accepting an invalid shell.
+baseline investigation. At that stage, implementation was blocked on the missing
+disappearing-seam boundary construction; the pending regression and analytic
+oracle preserved the evidence without accepting an invalid shell. The addendum
+records the subsequent construction and validation.
 
-## Validation
+## Baseline validation
 
-All Cargo commands ran from the worktree root through `buildq run solidcraft . --`.
+The commands and statuses below describe the baseline investigation, before
+the construction in the addendum. All Cargo commands ran from the worktree
+root through `buildq run solidcraft . --`.
 The first focused regression failed before any production edit, with the
 `OffsetRefused` / `StageFailed` quoted above. The corrected endpoint diagnostic
 also failed there; its temporary tracing is removed from both source files.
@@ -218,7 +232,9 @@ Result: **42 passed, 1 failed**, exit 101. The sole failure is
 `offset::tests::a_half_torus_with_a_blind_hole_shells_open_at_its_bottom`, at
 the shell call, after its input-validity assertion passes. The unrelated
 pre-existing ignored #17608 full-check test was excluded explicitly. The
-pending #18803 test remains ignored in normal runs; this command runs it.
+pending #18803 test was ignored in normal runs at the baseline revision; this
+historical command included it. The current test has no ignore marker; use
+the normal command above and the addendum's validation results.
 
 These checks passed (exit 0):
 
@@ -229,5 +245,6 @@ buildq run solidcraft . -- cargo clippy --manifest-path solidcore/Cargo.toml -p 
 git diff --check
 ```
 
-No production source or golden is changed. Full suites, wasm and goldens remain
-for CI under the lane's test policy; this record does not claim a completed fix.
+The baseline investigation changed no production source or golden. Full suites,
+wasm and goldens remained for CI under the lane's test policy. This historical
+record does not claim a completed fix; see the addendum for the later result.
