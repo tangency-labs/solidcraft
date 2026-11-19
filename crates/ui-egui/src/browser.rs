@@ -1074,6 +1074,22 @@ fn sel_of_key(k: &str) -> Option<Sel> {
     if let Some((_, id)) = k.rsplit_once("/s:") {
         return id.parse().ok().map(|id| Sel::Feature { id });
     }
+    if let Some(name) = k.strip_prefix("origin:") {
+        return match name {
+            "O" => Some(Sel::Vertex { body: String::new(), point: solidcore_record::Vec3::ZERO }),
+            "X" | "Y" | "Z" => Some(Sel::Axis { name: name.to_string() }),
+            "XY" | "XZ" | "YZ" => Some(Sel::Plane { name: name.to_string() }),
+            _ => None,
+        };
+    }
+    if let Some((_, item)) = solidcraft_engine::origins::item(k) {
+        return match item {
+            "O" => Some(Sel::ConstructionPoint { name: k.to_string() }),
+            "X" | "Y" | "Z" => Some(Sel::Axis { name: k.to_string() }),
+            "XY" | "XZ" | "YZ" => Some(Sel::Plane { name: k.to_string() }),
+            _ => None,
+        };
+    }
     if let Some(p) = k.strip_prefix("o:") {
         let path: Option<Vec<u64>> = p.split('/').map(|id| id.parse().ok()).collect();
         return path.filter(|p| !p.is_empty()).map(|path| Sel::Occurrence { path });
@@ -2167,9 +2183,10 @@ fn doc_settings(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize) {
 
 /// The origin point, axes and planes, as `(key, icon, thing lit for it)`.
 fn origin_things() -> [(&'static str, &'static str, Option<Thing>); 7] {
-    let (axis, plane) = (|k: &str| Some(Thing::Axis(k.into())), |k: &str| Some(Thing::Plane(k.into())));
+    let (point, axis, plane) =
+        (|k: &str| Some(Thing::Point(k.into())), |k: &str| Some(Thing::Axis(k.into())), |k: &str| Some(Thing::Plane(k.into())));
     [
-        ("O", "point", None),
+        ("O", "point", point("O")),
         ("X", "axis", axis("X")),
         ("Y", "axis", axis("Y")),
         ("Z", "axis", axis("Z")),
@@ -2271,10 +2288,10 @@ fn origin_rows_at(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: &
             _ => Some(Sel::Vertex { body: String::new(), point: solidcore_record::Vec3::ZERO }),
         };
         let (selected, mark) = lit_row(lit(&thing));
-        let item_key = format!("{key}:{name}");
+        let item_key = if component { name.clone() } else { format!("origin:{name}") };
         let r = node_row(
             rows,
-            Spec { key: &item_key, ..Default::default() },
+            Spec { key: &item_key, item: true, ..Default::default() },
             // Faded when hidden itself or with the whole Origin. A renamed plane's label is already
             // in the interface's language (`name`).
             Row {
@@ -2282,7 +2299,7 @@ fn origin_rows_at(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: &
                 eye: Some(visible),
                 icon,
                 label,
-                handle: component.then_some(name.as_str()),
+                handle: Some(name.as_str()),
                 name: label != k,
                 selected,
                 dim: !visible || faded,
@@ -2298,6 +2315,7 @@ fn origin_rows_at(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: &
             let target = match icon {
                 "plane" => Some(Target::OriginPlane { name: name.clone() }),
                 "axis" => Some(Target::OriginAxis { name: name.clone() }),
+                "point" => Some(Target::OriginPoint { name: name.clone() }),
                 _ => None,
             };
             if let Some(target) = target {
@@ -2313,10 +2331,14 @@ fn origin_rows_at(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: &
         if r.hovered && app.preferences.browser_hover_shows_origin {
             acts.hover_origin = Some(name);
         }
-        if r.clicked
-            && let Some(x) = sel
-        {
-            pick_from_browser(app, x);
+        if r.clicked {
+            if app.dialog.is_some() {
+                if let Some(x) = sel {
+                    pick_from_browser(app, x);
+                }
+            } else {
+                click_select(app, r.how.as_ref(), sel);
+            }
         }
     }
 }
@@ -2599,10 +2621,14 @@ pub fn canvas_items(app: &SolveApp, id: u64) -> Vec<Item> {
     // A locked canvas (#12310) is not moved, calibrated or deleted until it is unlocked.
     let locked = canvas.is_some_and(|c| c.locked);
     let why = locked.then(|| solidcraft_ui_text::tr("browser.canvas_locked").to_string());
+    // An anchored canvas is placed by its sketch's points: change the sketch instead.
+    let follows = canvas.is_some_and(|c| c.anchor.is_some()).then(|| solidcraft_ui_text::tr("browser.canvas_anchored").to_string());
+    let placed = why.clone().or(follows);
     vec![
         Item::action("ui.editCanvas", "Edit Canvas", "canvas").with(json!({ "canvas": id })).off_because(why.clone()),
-        Item::action("ui.calibrateCanvas", "Calibrate", "measure").with(json!({ "canvas": id })).off_because(why.clone()),
-        Item::action("ui.straightenCanvas", "Straighten", "canvas").with(json!({ "canvas": id })).off_because(why.clone()),
+        Item::action("ui.calibrateCanvas", "Calibrate", "measure").with(json!({ "canvas": id })).off_because(placed.clone()),
+        Item::action("ui.straightenCanvas", "Straighten", "canvas").with(json!({ "canvas": id })).off_because(placed.clone()),
+        Item::action("canvas.frame_sketch", "Frame Sketch", "canvas").with(json!({ "canvas": id })).off_because(placed),
         Item::action("canvas.to_sketch", "Canvas to Sketch", "canvas").with(json!({ "canvas": id })),
         Item::sep(),
         Item::action("ui.delete", "Delete", "delete").with(json!({ "canvases": [id] })).off_because(why),
@@ -2734,8 +2760,7 @@ fn pick_from_browser(app: &mut SolveApp, x: Sel) {
         Sel::Plane { name } => crate::viewport::Hit::Plane { name: name.clone(), point: solidcore_record::Vec3::ZERO },
         Sel::Axis { name } => crate::viewport::Hit::Axis { name: name.clone() },
         Sel::ConstructionPoint { name } => crate::viewport::Hit::ConstructionPoint { name: name.clone() },
-        // The origin point goes only into a dialog input that takes it.
-        Sel::Vertex { body, point } if body.is_empty() && app.dialog.is_some() => crate::viewport::Hit::Vertex { body: String::new(), point: *point },
+        Sel::Vertex { body, point } if body.is_empty() => crate::viewport::Hit::Vertex { body: String::new(), point: *point },
         _ => return,
     };
     if let Some(mut d) = app.dialog.take() {
