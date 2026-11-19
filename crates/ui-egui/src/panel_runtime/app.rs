@@ -548,11 +548,15 @@ impl AppPanelRuntime {
         use super::native_ui::WindowAction;
 
         let (Some(desktop), Some(state)) = (self.desktop.clone(), self.production.clone()) else { return Ok(()) };
+        // In the app's own look, a panel window's title bar holds the grip that drags the panel back.
+        let title_bar = crate::window_chrome::TitleBar { traffic_lights: app.integrated_titlebar, caption_buttons: app.custom_titlebar };
+        desktop.set_title_bar(window_title_bar(&app.preferences, title_bar));
         self.show_drop_window(ctx, &desktop);
         if !self.runtime.layout().layout().sections.iter().any(|section| section.location.zone() == Zone::Window) {
             return Ok(());
         }
         self.reconcile(&app.session)?;
+        let card = card_window(&desktop, self.host.as_ref().and_then(|host| host.frame()));
         let measure = self.host.as_ref().and_then(|host| host.frame()).and_then(|frame| frame.layout.geometry_policy.measure.clone());
         let windows: Vec<_> = self
             .runtime
@@ -601,8 +605,12 @@ impl AppPanelRuntime {
                             }
                             desktop.observe(ui.ctx(), &host, active);
                             let _blur = content.app.blur.begin(ui.ctx());
+                            let root = self.host.as_ref();
+                            let menu = |runtime: &PanelRuntime, instance: &InstanceId| {
+                                root.map_or_else(Vec::new, |root| root.window_menu(runtime, instance))
+                            };
                             let painted = solidcraft_ui_registry::isolated(|| {
-                                super::native_ui::paint(&mut self.runtime, &mut services, &mut content, &host, &section, ui, enabled)
+                                super::native_ui::paint(&mut self.runtime, &mut services, &mut content, &host, &section, ui, enabled, &menu, card)
                             });
                             // A window dropped before its panel measured its content fits
                             // it once measured, as the app's side cards do.
@@ -617,15 +625,8 @@ impl AppPanelRuntime {
                                     .is_some_and(|spec| !spec.header_actions.is_empty());
                                 let inner = ui.input(|input| input.viewport().inner_rect);
                                 let needed = inner.and_then(|inner| {
-                                    Some((
-                                        inner,
-                                        content_height(
-                                            measure.as_deref(),
-                                            active,
-                                            inner.width(),
-                                            super::native_ui::window_chrome(ui.ctx(), actions),
-                                        )?,
-                                    ))
+                                    let chrome = super::native_ui::window_chrome(ui.ctx(), card, actions);
+                                    Some((inner, content_height(measure.as_deref(), active, inner.width(), chrome)?))
                                 });
                                 if let Some((inner, needed)) = needed {
                                     let fitted = portrait(Size { width: inner.width(), height: needed }).height;
@@ -652,6 +653,19 @@ impl AppPanelRuntime {
                     WindowAction::Expand(section) => Mutation::Collapse { section, collapsed: false },
                     WindowAction::Content(instance, action) => Mutation::HeaderAction { instance, action },
                     WindowAction::Redock => Mutation::NativeClose { host },
+                    WindowAction::Layout(action) => {
+                        self.dispatch(&app.session, action)?;
+                        ctx.request_repaint_of(egui::ViewportId::ROOT);
+                        return Ok(());
+                    }
+                    WindowAction::Drag(event) => {
+                        // The app's host shows the drop place and commits the drop.
+                        if let Some(root) = self.host.as_mut() {
+                            root.queue_window_drag(event);
+                        }
+                        ctx.request_repaint_of(egui::ViewportId::ROOT);
+                        return Ok(());
+                    }
                 };
                 if let Err(reason) = self.dispatch(&app.session, LayoutAction::Apply { expected_revision: None, mutations: vec![mutation] }) {
                     if close {
@@ -686,6 +700,7 @@ impl AppPanelRuntime {
                 ctx.send_viewport_cmd_to(viewport, egui::ViewportCommand::Focus);
             }
         }
+        let card = card_window(desktop, host.frame());
         let Some((instance, corner)) = host.window_landing_preview() else {
             desktop.end_drop();
             return;
@@ -704,7 +719,8 @@ impl AppPanelRuntime {
         let landing = layout.layout().containing(&instance).ok().zip(layout.layout().instance(&instance).ok()).and_then(|(section, panel)| {
             let spec = layout.registry().get(&panel.kind).ok()?;
             let bounds = spec.size_bounds(Zone::Window);
-            chrome = super::native_ui::window_chrome(ctx, !spec.header_actions.is_empty());
+            let actions = !spec.header_actions.is_empty();
+            chrome = super::native_ui::drop_chrome(ctx, card, actions, side.is_some());
             let size = match in_app {
                 None => window_size(section.size, bounds),
                 Some((zone, size, header, column, measure)) => {
@@ -712,11 +728,12 @@ impl AppPanelRuntime {
                     // From the bottom strip, the window is as long as the panel's measured
                     // content needs; unmeasured, it starts at the dock's height and fits
                     // once measured, as a side card does.
-                    let fitted = (zone == Zone::Bottom).then(|| content_height(measure.as_deref(), &instance, width, chrome)).flatten();
+                    let fitted = (zone == Zone::Bottom)
+                        .then(|| content_height(measure.as_deref(), &instance, width, super::native_ui::window_chrome(ctx, card, actions)))
+                        .flatten();
                     bootstrap = zone == Zone::Bottom && fitted.is_none();
                     let size = match side {
-                        // A side card is painted with its actions in it.
-                        Some((size, header)) => drop_window_size(Zone::Left, size, header, 0.0, width, column),
+                        Some((size, header)) => drop_window_size(Zone::Left, size, header, chrome, width, column),
                         None => drop_window_size(zone, size, header, chrome, width, fitted.map_or(column, |needed| needed.min(column))),
                     };
                     if zone == Zone::Bottom { portrait(size) } else { size }
@@ -727,13 +744,14 @@ impl AppPanelRuntime {
         self.drop_fit = bootstrap;
         let Some(outer) = landing else { return };
         let title = self.runtime.instance_presentation(&instance).map(|presentation| presentation.title).unwrap_or_default();
-        let (viewport, builder) = desktop.drop_window(&instance, title, outer);
+        let rtl = self.runtime.environment().direction == Direction::Rtl;
+        let (viewport, builder) = desktop.drop_window(&instance, title.clone(), outer);
         // Drawing needs the OS window: until it exists, nothing is shown.
         if !desktop.drop_ready(ctx, &builder).unwrap_or(false) {
             return;
         }
         let shown = ctx.show_viewport_immediate(viewport, builder, |ui, class| {
-            super::native_ui::paint_drop(ui, host.window_card(), if side.is_some() { 0.0 } else { chrome });
+            super::native_ui::paint_drop(ui, host.window_card(), chrome, card, &instance, &title, rtl);
             class != egui::ViewportClass::EmbeddedWindow && ui.input(|input| input.viewport().native_pixels_per_point.is_some())
         });
         // The OS reports the window where it was before this frame's move, so
@@ -1323,6 +1341,25 @@ pub(super) fn ensure_production(app: &mut crate::SolveApp) -> PanelResult<()> {
         super::production::enable_production(app)?;
     }
     Ok(())
+}
+
+/// The title bar panel windows show: the app's own (`title_bar`), which brings
+/// the panel's grip and menu and the docked card's layout with it, unless the
+/// preference keeps the system's window.
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn window_title_bar(
+    preferences: &crate::prefs::Prefs,
+    title_bar: crate::window_chrome::TitleBar,
+) -> Option<crate::window_chrome::TitleBar> {
+    preferences.panel_window_title_bar.then_some(title_bar)
+}
+
+/// The app's own look for panel windows, where the desktop adapter gives them
+/// the app's title bar (`frame` holds the metrics of the app's panel cards).
+/// `None` leaves them the system's windows.
+#[cfg(not(target_arch = "wasm32"))]
+fn card_window(desktop: &super::native::DesktopNativeAdapter, frame: Option<&super::workspace::HostFrame>) -> Option<super::native_ui::CardWindow> {
+    desktop.title_bar().map(|title_bar| super::native_ui::CardWindow::of(title_bar, frame))
 }
 
 /// A window from the bottom strip stays taller than wide (at least 4:3), so its

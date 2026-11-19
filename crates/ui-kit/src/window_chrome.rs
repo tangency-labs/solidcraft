@@ -48,16 +48,17 @@ pub const RESIZE_BORDER_AT_96_DPI: f32 = 8.0;
 /// app's; `custom_titlebar` drops the OS decorations so the app's bar is the title bar. On macOS
 /// the OS title bar is hidden and the content runs under it. The app adds its own icon.
 pub fn viewport(title: &str, app_id: &str, custom_titlebar: bool) -> ViewportBuilder {
-    ViewportBuilder::default()
-        .with_title(title)
-        .with_inner_size([1600.0, 1000.0])
-        .with_min_inner_size([960.0, 600.0])
-        .with_drag_and_drop(true)
-        .with_decorations(!custom_titlebar)
-        .with_fullsize_content_view(true)
-        .with_titlebar_shown(false)
-        .with_title_shown(false)
-        .with_app_id(app_id)
+    own_titlebar(
+        ViewportBuilder::default().with_title(title).with_inner_size([1600.0, 1000.0]).with_min_inner_size([960.0, 600.0]).with_drag_and_drop(true),
+        custom_titlebar,
+    )
+    .with_app_id(app_id)
+}
+
+/// The settings that make the app's bar a window's title bar: on macOS the OS title bar is
+/// hidden and the content runs under it; `custom_titlebar` drops the OS decorations.
+pub fn own_titlebar(builder: ViewportBuilder, custom_titlebar: bool) -> ViewportBuilder {
+    builder.with_decorations(!custom_titlebar).with_fullsize_content_view(true).with_titlebar_shown(false).with_title_shown(false)
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]

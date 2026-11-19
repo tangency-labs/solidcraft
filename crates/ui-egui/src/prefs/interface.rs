@@ -399,6 +399,14 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 &mut app.preferences.live_panel_drag_preview,
                 "live_panel_drag_preview",
             );
+            #[cfg(not(target_arch = "wasm32"))]
+            layout_check(
+                ui,
+                app.tr("prefs.panel_window_title_bar"),
+                app.tr("prefs.panel_window_title_bar_help"),
+                &mut app.preferences.panel_window_title_bar,
+                "panel_window_title_bar",
+            );
             layout_check(
                 ui,
                 app.tr("prefs.history_in_browser"),

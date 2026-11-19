@@ -356,6 +356,18 @@ docks the panel where it was. Where the platform does not report the app
 window's screen position, or on the web, a drag past the app's edge keeps the
 panel in the app.
 
+With the Layout preference **Use the app's title bar in panel windows** (desktop
+only, on by default), a panel window has the app's own title bar (the shared
+window chrome) in place of the system's. That title bar holds the panel's title
+with its grip: dragging the grip over the app shows the normal dock target, and
+release docks the panel there. At its trailing end it has the panel's menu with
+the dock places and the app's panels to join, as the docked menu offers them,
+then Close. The window lays out the panel's actions and body as its docked card
+does, with the same metrics and content inset. The window shown while a panel is
+dragged out has the same title bar and layout, so nothing moves on release. With
+that preference off, a panel window is the system's window with the earlier
+layout, also during a drag out.
+
 Panels in the workspace use the ribbon's theme fill and backdrop blur. The
 system's Reduce Transparency setting keeps the panels opaque. Explicit opacity
 overrides use the panel contrast check. Captured `paint_alpha` and `contrast`

@@ -1457,6 +1457,10 @@ preference_settings! {
     layout: crate::ui_kit::LayoutMode = Default::default(), PAGE_LAYOUT;
     /// Preview panel placement and reflow while dragging. Off shows the drop outline.
     live_panel_drag_preview: bool = true, PAGE_LAYOUT;
+    /// Panel windows show the app's own title bar, with a grip that drags them back over the
+    /// app and the panel's menu, and lay out like the docked panel. Off: the system's title
+    /// bar and the earlier layout. Desktop only.
+    panel_window_title_bar: bool = true, PAGE_LAYOUT;
     /// Ordered view controls and their appearance.
     #[serde(default)]
     navigation_bar: crate::navigation_bar::NavigationBar = Default::default(), PAGE_LAYOUT;
@@ -7254,6 +7258,7 @@ mod tests {
             ("ui_font", json!("test font"), PAGE_APPEARANCE),
             ("layout", json!("compact"), PAGE_LAYOUT),
             ("live_panel_drag_preview", json!(false), PAGE_LAYOUT),
+            ("panel_window_title_bar", json!(false), PAGE_LAYOUT),
             ("ribbon_labels", json!(false), PAGE_LAYOUT),
             ("persistent_ribbon_pressed", json!(false), PAGE_LAYOUT),
             ("viewport_analysis_status", json!(false), PAGE_GRAPHICS),

@@ -10,6 +10,7 @@ use solidcraft_engine::panels::{
 };
 
 use super::NativeHostAdapter;
+use crate::window_chrome::TitleBar;
 
 const MAX_MONITORS: usize = 64;
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(2);
@@ -53,6 +54,8 @@ struct DesktopState {
     /// A drag asked where a window would land since the last refresh: the
     /// monitors are needed before any panel window is open.
     landing_asked: bool,
+    /// Panel windows show the app's own title bar (with the drag-back grip), not the OS's.
+    title_bar: Option<TitleBar>,
     /// The window a drag shows for a panel; the panel's window keeps it on release.
     drop: Option<(InstanceId, egui::ViewportId)>,
     /// When this drag started asking the OS for that window.
@@ -126,14 +129,8 @@ impl DesktopNativeAdapter {
         let registration = state.hosts.get(host)?;
         let min = egui::vec2(min.width, min.height);
         let max = egui::vec2(max.width, max.height);
-        // The window a drag showed becomes an ordinary window again here.
-        let builder = egui::ViewportBuilder::default()
-            .with_title(title)
-            .with_min_inner_size(min)
-            .with_max_inner_size(max)
-            .with_visible(true)
-            .with_mouse_passthrough(false)
-            .with_window_level(egui::WindowLevel::Normal);
+        let builder =
+            state.chrome(egui::ViewportBuilder::default().with_title(title).with_min_inner_size(min).with_max_inner_size(max).with_visible(true));
         if registration.ready {
             return Some(builder);
         }
@@ -257,6 +254,26 @@ impl DesktopNativeAdapter {
         state.remember(instance, Placement { size, decoration, monitor });
     }
 
+    /// Panel windows show the app's own title bar (with the OS's window controls
+    /// it names), or the OS's. A window keeps the title bar it was created with,
+    /// so on a change the open panel windows are opened anew, at their places.
+    pub fn set_title_bar(&self, title_bar: Option<TitleBar>) {
+        let mut state = self.0.borrow_mut();
+        if state.title_bar == title_bar {
+            return;
+        }
+        state.title_bar = title_bar;
+        for (host, registration) in &mut state.hosts {
+            registration.viewport = next_viewport_id(host);
+            registration.startup = None;
+            registration.ready = false;
+        }
+    }
+
+    pub fn title_bar(&self) -> Option<TitleBar> {
+        self.0.borrow().title_bar
+    }
+
     /// The window a drag shows at `outer` for `instance`: the same window it
     /// will open in, but passed through by the pointer, above other windows and
     /// not activated while the drag lasts.
@@ -270,8 +287,8 @@ impl DesktopNativeAdapter {
             }
         };
         state.drop = Some((instance.clone(), viewport));
-        let builder = egui::ViewportBuilder::default()
-            .with_title(title)
+        let builder = state
+            .chrome(egui::ViewportBuilder::default().with_title(title))
             .with_position(outer.min)
             .with_inner_size(outer.size() - state.decoration(instance))
             .with_visible(true)
@@ -326,9 +343,24 @@ impl DesktopNativeAdapter {
 }
 
 impl DesktopState {
-    /// The OS frame around a panel's content: as last seen for it, else a typical one.
+    /// The OS frame around a panel's content: none where the app's bar is the
+    /// title bar, else as last seen for it, else a typical one.
     fn decoration(&self, instance: &InstanceId) -> egui::Vec2 {
+        if self.title_bar.is_some_and(|bar| bar.traffic_lights || bar.caption_buttons) {
+            return egui::Vec2::ZERO;
+        }
         self.placement.get(instance).map_or(DEFAULT_DECORATION, |saved| saved.decoration)
+    }
+
+    /// The window settings of a panel window: with the app's own title bar,
+    /// those that make it the window's. The window a drag showed becomes an
+    /// ordinary window again here.
+    fn chrome(&self, builder: egui::ViewportBuilder) -> egui::ViewportBuilder {
+        let builder = match self.title_bar {
+            Some(bar) => crate::window_chrome::own_titlebar(builder, bar.caption_buttons),
+            None => builder,
+        };
+        builder.with_mouse_passthrough(false).with_window_level(egui::WindowLevel::Normal)
     }
 
     fn remember(&mut self, instance: &InstanceId, placement: Placement) {

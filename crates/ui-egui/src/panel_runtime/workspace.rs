@@ -193,6 +193,17 @@ enum HostMenu {
     Tabs(SectionId),
 }
 
+/// A grip drag in a panel's desktop window, in screen points. Only desktop
+/// windows have the grip.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+pub(crate) enum WindowDragEvent {
+    Begin { instance: InstanceId, at: Point },
+    Move { at: Point },
+    Release { at: Point },
+    Cancel,
+}
+
 enum HostCommand {
     Contextual(ContextualPanelAction, egui::Id),
     Layout(LayoutAction),
@@ -282,6 +293,10 @@ pub struct WorkspacePanelHost {
     /// What `leaving_side_card` was projected for: the panel, the layout revision,
     /// the capacity and the content measurements. It is kept while they stay.
     side_card_key: Option<(InstanceId, u64, LogicalRect, u64)>,
+    /// A popped-out panel dragged back by its window's grip. Its own capture:
+    /// focus is in that window, which would cancel this host's pointer capture.
+    window_drag: HostInteraction,
+    window_drag_events: Vec<WindowDragEvent>,
     drag_paint: DragPaint,
     pending_escape: bool,
     last_rejection: Option<PanelError>,
@@ -445,6 +460,65 @@ impl WorkspacePanelHost {
         self.window_landing.take()
     }
 
+    /// A grip drag in a panel's desktop window; this host's next paint handles it.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn queue_window_drag(&mut self, event: WindowDragEvent) {
+        if self.window_drag_events.len() < 64 {
+            self.window_drag_events.push(event);
+        }
+    }
+
+    /// Feed queued grip drags to their own capture, in this host's coordinates,
+    /// and show its preview. A drag that cannot continue cancels.
+    fn window_drag_input(
+        &mut self,
+        ui: &egui::Ui,
+        runtime: &PanelRuntime,
+        scope: &LocalScope,
+        frame: &mut HostFrame,
+        commands: &mut Vec<HostCommand>,
+        blocked: bool,
+    ) {
+        let events = std::mem::take(&mut self.window_drag_events);
+        let origin = ui.input(|input| input.viewport().inner_rect).filter(|rect| rect.is_finite()).map(|rect| rect.min);
+        let Some(origin) = origin.filter(|_| !blocked) else {
+            self.window_drag.cancel();
+            return;
+        };
+        let local = |at: Point| Point { x: at.x - origin.x, y: at.y - origin.y };
+        let service = runtime.layout();
+        let mut updates = Vec::new();
+        for event in events {
+            let pointer = match event {
+                WindowDragEvent::Begin { instance, at } => match self.window_drag.begin_window_move(service, scope, &frame.layout, &instance) {
+                    Ok(()) => HostPointerEvent::Move { at: local(at) },
+                    Err(reason) => {
+                        frame.events.push(HostEvent::Rejected { action: None, error: reason });
+                        continue;
+                    }
+                },
+                WindowDragEvent::Move { at } => HostPointerEvent::Move { at: local(at) },
+                WindowDragEvent::Release { at } => HostPointerEvent::Release { at: local(at) },
+                WindowDragEvent::Cancel => HostPointerEvent::Cancel,
+            };
+            updates.push(self.window_drag.update(service, scope, &frame.layout, pointer));
+        }
+        if updates.is_empty() && self.window_drag.is_captured() {
+            updates.push(self.window_drag.update(service, scope, &frame.layout, HostPointerEvent::Reconcile));
+        }
+        for update in updates {
+            if let Some(candidate) = update.candidate {
+                commands.push(HostCommand::Prepared(Box::new(candidate)));
+            }
+            if let Some(error) = update.rejection {
+                frame.events.push(HostEvent::Rejected { action: None, error });
+            }
+        }
+        if self.window_drag.is_captured() {
+            frame.preview = self.window_drag.preview().cloned();
+        }
+    }
+
     pub(crate) fn set_gap(&mut self, gap: f32) -> PanelResult<()> {
         let metrics = HostMetrics { gap, ..self.options.metrics };
         metrics.validate()?;
@@ -487,6 +561,8 @@ impl WorkspacePanelHost {
             window_card: None,
             leaving_side_card: None,
             side_card_key: None,
+            window_drag: HostInteraction::default(),
+            window_drag_events: Vec::new(),
             drag_paint: DragPaint::default(),
             pending_escape: false,
             last_rejection: None,
@@ -756,6 +832,9 @@ impl WorkspacePanelHost {
     pub(crate) fn invalidate_context(&mut self) {
         self.drag_paint.clear();
         self.invalidate_geometry();
+        // A grip drag from another context must not start in this one.
+        self.window_drag_events.clear();
+        self.window_drag.cancel();
         self.content_focus = None;
         self.content_bookmarks.clear();
         self.content_reports.clear();
@@ -1460,6 +1539,10 @@ impl WorkspacePanelHost {
         } else if !ui.is_enabled() || !ui.is_visible() || !ui.input(|input| input.focused) {
             self.interaction.cancel();
             frame.preview = None;
+        }
+        if !self.window_drag_events.is_empty() || self.window_drag.is_captured() {
+            let blocked = stale || hard_modal || mount.is_err() || !ui.is_enabled() || !ui.is_visible();
+            self.window_drag_input(ui, runtime, &scope, &mut frame, &mut commands, blocked);
         }
         if let Some(preview) = &frame.preview
             && !(self.live_drag && self.interaction.move_source().is_some())
@@ -3051,9 +3134,7 @@ fn render_slot(
     if failure.is_some() || bounds.size.width <= 0.0 || bounds.size.height <= 0.0 {
         return;
     }
-    let bounds = egui_rect(bounds);
-    let t = solidcraft_theme::Tokens::get();
-    let inset = bounds.shrink2(egui::vec2(t.space_4.min(bounds.width().max(0.0) / 2.0), t.space_2.min(bounds.height().max(0.0) / 2.0)));
+    let inset = content_inset(egui_rect(bounds));
     let clip = ui.clip_rect().intersect(inset);
     if !clip.is_positive() {
         return;
@@ -3485,6 +3566,70 @@ impl WorkspacePanelHost {
             });
             self.menu_reveal = None;
         });
+    }
+}
+
+/// Where a panel's content draws inside its body, docked or in a window.
+pub(super) fn content_inset(bounds: egui::Rect) -> egui::Rect {
+    let t = solidcraft_theme::Tokens::get();
+    bounds.shrink2(egui::vec2(t.space_4.min(bounds.width().max(0.0) / 2.0), t.space_2.min(bounds.height().max(0.0) / 2.0)))
+}
+
+/// An entry of a panel window's menu: its label, icon and checked layout action.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) struct WindowMenuEntry {
+    pub label: String,
+    pub icon: ui_kit::Icon<'static>,
+    pub action: LayoutAction,
+}
+
+impl WorkspacePanelHost {
+    /// The menu of `instance`'s desktop window: the dock places and the app's
+    /// panels it can join, then Close, each admitted as the docked panel menu
+    /// admits it. Each inner list is one group of the menu.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn window_menu(&self, runtime: &PanelRuntime, instance: &InstanceId) -> Vec<Vec<WindowMenuEntry>> {
+        let Some(frame) = self.frame() else { return Vec::new() };
+        let locale = solidcraft_ui_text::Locale::for_language(solidcraft_ui_text::language());
+        let metadata: BTreeMap<_, _> = runtime
+            .layout()
+            .layout()
+            .instances
+            .iter()
+            .filter_map(|panel| Some((panel.id.clone(), runtime.instance_presentation(&panel.id).ok()?)))
+            .collect();
+        let mut placement: Vec<_> = [Zone::Left, Zone::Right, Zone::Bottom, Zone::Floating].into_iter().map(HostSharedAction::Move).collect();
+        placement.extend(
+            frame
+                .layout
+                .sections
+                .iter()
+                .filter(|card| !card.peek && intersect_rect(card.outer, frame.layout.capacity).is_some())
+                .map(|card| HostSharedAction::Join(card.section.clone())),
+        );
+        [placement, vec![HostSharedAction::Close]]
+            .into_iter()
+            .map(|group| {
+                group
+                    .into_iter()
+                    .filter_map(|shared| {
+                        let action = shared_action(
+                            runtime,
+                            instance,
+                            &shared,
+                            &self.native_capabilities,
+                            frame.layout.capacity,
+                            &frame.layout.geometry_policy.identity_reservations,
+                        )
+                        .ok()?;
+                        prepare_host_layout(runtime.layout(), &runtime_scope(runtime), &frame.layout, action.clone()).ok()?;
+                        let label = shared_label(&shared, instance, runtime, &metadata, locale);
+                        Some(WindowMenuEntry { label, icon: shared_menu_icon(&shared, false, frame.layout.direction), action })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .filter(|group| !group.is_empty())
+            .collect()
     }
 }
 

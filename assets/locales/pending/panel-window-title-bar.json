@@ -1,0 +1,42 @@
+{
+  "ar": {
+    "prefs.panel_window_title_bar": "استخدام شريط عنوان التطبيق في نوافذ اللوحات",
+    "prefs.panel_window_title_bar_help": "تحصل اللوحات المنبثقة على شريط عنوان التطبيق، مع مقبض لسحبها مجددًا فوق التطبيق وقائمة لإرسائها، وتحتفظ بالتخطيط الذي لها داخل التطبيق. عند الإيقاف، تستخدم شريط عنوان النظام والتخطيط السابق.",
+    "ui.panel_host.dock_grip": "اسحب فوق التطبيق لإرساء اللوحة"
+  },
+  "de": {
+    "prefs.panel_window_title_bar": "Titelleiste der App in Bereichsfenstern verwenden",
+    "prefs.panel_window_title_bar_help": "Ausgelagerte Bereiche erhalten die Titelleiste der App, mit einem Griff, um sie zurück über die App zu ziehen, und einem Menü zum Andocken, und behalten ihr Layout aus der App. Ist die Option aus, verwenden sie die Titelleiste des Systems und das bisherige Layout.",
+    "ui.panel_host.dock_grip": "Zum Andocken über die App ziehen"
+  },
+  "en": {
+    "prefs.panel_window_title_bar": "Use the app's title bar in panel windows",
+    "prefs.panel_window_title_bar_help": "Popped-out panels get the app's own title bar, with a grip to drag them back over the app and a menu to dock them, and keep the layout they have in the app. When off, they use the system's title bar and the earlier layout.",
+    "ui.panel_host.dock_grip": "Drag over the app to dock"
+  },
+  "he": {
+    "prefs.panel_window_title_bar": "שימוש בשורת הכותרת של היישום בחלונות חלוניות",
+    "prefs.panel_window_title_bar_help": "חלוניות שנפתחו בחלון מקבלות את שורת הכותרת של היישום, עם ידית לגרירתן בחזרה אל היישום ותפריט לעיגונן, ושומרות על הפריסה שיש להן ביישום. כשהאפשרות כבויה, הן משתמשות בשורת הכותרת של המערכת ובפריסה הקודמת.",
+    "ui.panel_host.dock_grip": "גררו אל היישום כדי לעגן"
+  },
+  "ja": {
+    "prefs.panel_window_title_bar": "パネルウィンドウでアプリのタイトルバーを使う",
+    "prefs.panel_window_title_bar_help": "別ウィンドウにしたパネルにアプリ独自のタイトルバーを付けます。グリップでアプリの上にドラッグして戻したり、メニューからドッキングしたりでき、レイアウトはアプリ内と同じです。オフにすると、システムのタイトルバーと以前のレイアウトを使います。",
+    "ui.panel_host.dock_grip": "アプリの上までドラッグしてドッキング"
+  },
+  "ko": {
+    "prefs.panel_window_title_bar": "패널 창에 앱 제목 표시줄 사용",
+    "prefs.panel_window_title_bar_help": "분리된 패널에 앱 자체의 제목 표시줄을 사용합니다. 손잡이로 앱 위로 다시 끌어 놓거나 메뉴로 도킹할 수 있으며, 앱 안에서와 같은 레이아웃을 유지합니다. 끄면 시스템 제목 표시줄과 이전 레이아웃을 사용합니다.",
+    "ui.panel_host.dock_grip": "앱 위로 끌어 도킹"
+  },
+  "vi": {
+    "prefs.panel_window_title_bar": "Dùng thanh tiêu đề của ứng dụng trong cửa sổ bảng",
+    "prefs.panel_window_title_bar_help": "Các bảng được tách ra dùng thanh tiêu đề riêng của ứng dụng, có tay nắm để kéo chúng trở lại trên ứng dụng và menu để gắn chúng vào lại, đồng thời giữ bố cục như trong ứng dụng. Khi tắt, chúng dùng thanh tiêu đề của hệ thống và bố cục trước đây.",
+    "ui.panel_host.dock_grip": "Kéo lên trên ứng dụng để gắn vào lại"
+  },
+  "zh": {
+    "prefs.panel_window_title_bar": "在面板窗口中使用应用的标题栏",
+    "prefs.panel_window_title_bar_help": "弹出的面板使用应用自己的标题栏，可通过手柄将其拖回应用上方，或通过菜单停靠，并保持与应用内相同的布局。关闭后，使用系统标题栏和以前的布局。",
+    "ui.panel_host.dock_grip": "拖到应用上方以停靠"
+  }
+}

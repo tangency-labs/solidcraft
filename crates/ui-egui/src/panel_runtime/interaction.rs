@@ -959,6 +959,47 @@ impl HostInteraction {
         }
     }
 
+    /// Drag a popped-out panel back by the grip in its desktop window. The press
+    /// happened in that window, so the drag is already past its threshold; the
+    /// drop targets are this host's, and release commits only a shown one.
+    pub(super) fn begin_window_move(
+        &mut self,
+        service: &LayoutService,
+        scope: &LocalScope,
+        layout: &HostLayout,
+        instance: &InstanceId,
+    ) -> PanelResult<()> {
+        self.cancel();
+        validate_context(service, scope, layout)?;
+        service.availability(instance).require()?;
+        let section = service.layout().containing(instance)?;
+        if section.location.zone() != Zone::Window {
+            return Err(error(Rule::Placement, "only a panel in a desktop window drags back by its grip"));
+        }
+        self.capture = Some(Gesture {
+            kind: GestureKind::Move {
+                instance: instance.clone(),
+                section: section.id.clone(),
+                click_activates: false,
+                targets: host_drop_targets(service, layout, instance)?,
+                detached: None,
+            },
+            scope: scope.clone(),
+            revision: layout.revision,
+            direction: layout.direction,
+            capacity: layout.capacity,
+            metrics: layout.metrics,
+            render_domain: layout.render_domain,
+            chrome_obstacles: layout.chrome_obstacles.clone(),
+            policy: layout.geometry_policy.clone(),
+            reference: layout.clone(),
+            pressed_target: HostPointerTarget::Header { instance: instance.clone() },
+            start: layout.capacity.origin,
+            dragging: true,
+        });
+        Ok(())
+    }
+
     /// The panel and the screen point where its desktop window would open.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn window_landing(&self) -> Option<(&InstanceId, Point)> {
@@ -1274,10 +1315,14 @@ fn validate_capture(capture: &Gesture, service: &LayoutService, scope: &LocalSco
     match &capture.kind {
         GestureKind::Move { instance, section, .. } => {
             service.availability(instance).require()?;
-            if service.layout().containing(instance)?.id != *section
-                || !layout.sections.iter().any(|presented| {
-                    presented.section == *section && (presented.instance == *instance || presented.tabs.iter().any(|tab| tab.instance == *instance))
-                })
+            let source = service.layout().containing(instance)?;
+            // A desktop window presents its own panel, not this host.
+            if source.id != *section
+                || (source.location.zone() != Zone::Window
+                    && !layout.sections.iter().any(|presented| {
+                        presented.section == *section
+                            && (presented.instance == *instance || presented.tabs.iter().any(|tab| tab.instance == *instance))
+                    }))
             {
                 return Err(error(Rule::MissingTarget, "pointer source is no longer presented"));
             }
