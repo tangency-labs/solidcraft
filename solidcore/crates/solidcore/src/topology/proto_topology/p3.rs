@@ -44,6 +44,19 @@
 //!   to the face at either point (`COINCIDENT_TANGENT_SINE`, the coincidence check's angle) runs in
 //!   the face there: those two points are the ends of a stretch the edge and the face share and
 //!   stay two.
+//! - **An edge lying in a face, off it by more than the system zone tolerance** (not
+//!   upstream, #17527). Two face pairs at an edge of one B-rep that lies within its tolerance
+//!   of a face of the other (a revolved tool's rim in a hole's wall, its axis 1.2e-5 off the
+//!   hole's) each give their own curve along the edge, and the proto edges of the two overlap.
+//!   `ResolveOverlappingProtoEdges` replaces such a group with the edge's curve classified
+//!   against the face. Upstream classifies it within the manager's tolerance (half the zone
+//!   tolerance), where the edge lies in the face nowhere: the group was deleted and nothing
+//!   replaced it, and the loop stayed open. Here the curve is classified within the edge's own
+//!   tolerance where that is the larger, as the face pairs classified it, and the group takes in
+//!   every other proto edge all of whose definitions come from the same edge and face
+//!   ([`ProtoTopologyManager::absorb_pieces_of_edge_in_face`]): the replacement holds every
+//!   piece of the edge in the face, so a piece left out was imprinted twice and related to one
+//!   edge of the other B-rep twice ("another entity is already related to the other one").
 //! - **Removed proto edges** (SolidCraft fix, tangency-labs/smlib 93efd6d, UB-239).
 //!   Upstream's `SplitIntersectingProtoEdges` deletes the combined-away proto edge while
 //!   other proto edges (overlap lists) still name it (`CombineProtoEdge` hands its
@@ -1832,7 +1845,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             .saturating_add(MAX_OVERLAP_GROUPS_BASE);
         // repeat the index when the list was changed by removing a group
         while let Some(&pe) = self.proto_edges().get(ii) {
-            let group = self.overlapping_pe_group(pe)?;
+            let mut group = self.overlapping_pe_group(pe)?;
             let found_group = !group.is_empty();
 
             // skip PEs not in a Overlapping PE Group
@@ -1880,6 +1893,12 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     topo2 = t2;
                 }
             }
+
+            // Not upstream (#17527): a group on an edge of one B-rep and a face of the other
+            // is replaced by the edge's curve classified against that face, every piece of the
+            // edge that lies in the face. Every other proto edge all of whose definitions lie on
+            // that edge and in that face is one of those pieces again, and goes with the group.
+            self.absorb_pieces_of_edge_in_face(&mut group, topo1, topo2)?;
 
             // PFs keep a list of coincident PEs. Check every ProtoFace: the group can be
             // coincident with more than one, and its PEs are deleted below.
@@ -2081,8 +2100,14 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 let ivl = geometry
                     .edge_interval(edge)
                     .ok_or(dangling("edge is unknown"))?;
-                let mut cc1 = new_curve_classification(k, handle, ivl, tol)?;
-                let mut cc2 = new_curve_classification(k, handle, ivl, tol)?;
+                // Not upstream (#17527): the edge's curve is classified within the edge's
+                // own tolerance where that is the larger (see the module's Deviations).
+                let edge_tol = geometry
+                    .topology_tolerance(edge)
+                    .ok_or(dangling("edge is unknown"))?;
+                let curve_tol = max2(tol, edge_tol);
+                let mut cc1 = new_curve_classification(k, handle, ivl, curve_tol)?;
+                let mut cc2 = new_curve_classification(k, handle, ivl, curve_tol)?;
 
                 // Pick a SrcFace object for the SrcEdge object
                 let faces = geometry.edge_faces(edge)?;
@@ -2167,6 +2192,67 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         }
 
         Ok(deleted_curves)
+    }
+}
+
+impl<O: ClassObject> ProtoTopologyManager<O> {
+    /// Not upstream (#17527): adds to an overlapping proto edge `group` whose lowest source
+    /// topology is an edge in one B-rep and a face in the other (`topo1`, `topo2`, either
+    /// way round) every other listed proto edge that has definitions and all of whose
+    /// definitions come from that edge and that face. Each such definition was classified
+    /// on the edge and in the face; [`Self::resolve_overlapping_proto_edges`] replaces the
+    /// group with every piece of the edge that lies in the face, so a piece left out would
+    /// stand beside its own replacement, and the two would be related to one edge of the
+    /// other B-rep. Overlap is found by the ends of one piece dropped on the other within the
+    /// zone tolerance, so where the edge lies further than that from the face's own curve
+    /// (an edge within its tolerance of the face, off it by more than the system zone
+    /// tolerance) a piece can share the edge and the face with the group without being
+    /// found overlapping it. Groups of any other kind are left as they are.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for a deleted proto edge or edge definition.
+    fn absorb_pieces_of_edge_in_face(
+        &self,
+        group: &mut Vec<ProtoEdgeId>,
+        topo1: Option<O>,
+        topo2: Option<O>,
+    ) -> Result<()> {
+        let (Some(t1), Some(t2)) = (topo1, topo2) else {
+            return Ok(());
+        };
+        let kinds = (t1.class_kind(), t2.class_kind());
+        if kinds != (ClassObjectKind::Edge, ClassObjectKind::Face)
+            && kinds != (ClassObjectKind::Face, ClassObjectKind::Edge)
+        {
+            return Ok(());
+        }
+        for &pe in self.proto_edges() {
+            if group.contains(&pe) {
+                continue;
+            }
+            let eds = self
+                .proto_edge(pe)
+                .ok_or(dangling("proto edge is deleted"))?
+                .edge_definitions();
+            if eds.is_empty() {
+                continue;
+            }
+            let mut all = true;
+            for &ed in eds {
+                let d = self
+                    .edge_def(ed)
+                    .ok_or(dangling("edge definition is deleted"))?;
+                if as_topology(d.src_topo(1)) != topo1 || as_topology(d.src_topo(2)) != topo2 {
+                    all = false;
+                    break;
+                }
+            }
+            if all {
+                group.push(pe);
+            }
+        }
+        Ok(())
     }
 }
 
