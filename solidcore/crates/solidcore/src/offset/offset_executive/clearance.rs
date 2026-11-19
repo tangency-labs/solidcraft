@@ -5,6 +5,7 @@
 //! |------|----------|
 //! | [`separated`], [`all_clear`] | none |
 //! | [`endpoint_contact::separated_ending_on_face`] | none |
+//! | [`endpoint_contact::removed_ending_on_face`] | none |
 //!
 //! What is tested (issue #2971's certified bound): a kept edge's whole curve against the
 //! trimmed domain of each moved result face, the surface restricted to the box of the
@@ -27,6 +28,17 @@
 //! slabs excluded or subdivided); and outside the window every cell proves no further
 //! contact (a plane's signed side, a general surface's certified distance bound over the
 //! face's UV box less the cell's ball radius). Nothing unproved is ever accepted.
+//!
+//! What is tested (issue #18503's removal end): the cut removes an edge entirely and
+//! the corner its incident edges trace is its clip on the moved face's plane. The
+//! whole-interval removal proof is the classifier's certified decomposition of the
+//! span; [`endpoint_contact::removed_ending_on_face`] proves the corner itself: the
+//! contact is within the tolerance of the curve (stage 1 as above), within the
+//! tolerance of the cut plane (rounded interval evaluation — the stages above project
+//! onto the plane and discard the displacement normal to it, so this obligation is
+//! made explicit here), and in-or-on the face's trimmed region. Only `Proved`
+//! authorizes a removal: a clip certified off the region is a typed refusal
+//! ([`endpoint_contact::ContactRefusal::OffRegion`]), never a removal.
 //!
 //! Deviations: no recursion; at most 4096 curve-cell nodes — every node popped from the
 //! stack counts, so a completed binary subdivision carries at most 2048 leaves — and
@@ -669,6 +681,9 @@ pub(crate) mod endpoint_contact {
         RegionBudget,
         /// A region cell proved nothing within its halvings.
         RegionUnresolved,
+        /// The contact's UV is certified off the face's trimmed region: a removed
+        /// edge's clip must be in-or-on it.
+        OffRegion,
         /// The contact's UV is not strictly interior to the grown loop enclosures, or the
         /// contact box cannot be sized around it.
         IsolationGeometry,
@@ -1204,6 +1219,75 @@ pub(crate) mod endpoint_contact {
         pub(crate) tolerance: f64,
     }
 
+    /// The guarded extractions both endpoint-contact certificates share: the request's
+    /// inputs (every value finite, `contact_t` within the interval), the curve's
+    /// enclosure, the face's plane and the region's trim segments (each segment's
+    /// interval open, no loop without segments). `Refused` names the first thing that
+    /// fails; nothing is extracted from a refused request.
+    enum ContactContext<'a> {
+        /// The extractions hold.
+        Ready {
+            /// The edge's curve's enclosure.
+            curve: EnclosedCurve<'a>,
+            /// The moved face's plane.
+            plane: PlaneOver,
+            /// The region's trim segments' enclosures and intervals.
+            segments: Vec<(EnclosedCurve<'a>, Extent1d)>,
+        },
+        /// Nothing is extracted; the certificate refuses named.
+        Refused(ContactRefusal),
+    }
+
+    fn contact_context<'a>(request: &ContactRequest<'a>) -> ContactContext<'a> {
+        // ---- the inputs
+        let (t0, t1) = (request.interval.min(), request.interval.max());
+        let inputs_ok = t0.is_finite()
+            && t1.is_finite()
+            && t0 < t1
+            && request.contact_t.is_finite()
+            && request.contact_t >= t0
+            && request.contact_t <= t1
+            && request.contact_point.x.is_finite()
+            && request.contact_point.y.is_finite()
+            && request.contact_point.z.is_finite()
+            && request.tolerance.is_finite()
+            && request.tolerance >= 0.0;
+        if !inputs_ok {
+            return ContactContext::Refused(ContactRefusal::Inputs);
+        }
+        // ---- the guarded extractions
+        let Some(curve) = EnclosedCurve::of(request.curve) else {
+            return ContactContext::Refused(ContactRefusal::NoCurveEnclosure);
+        };
+        let Some(plane) = PlaneOver::of(&request.face.surface) else {
+            return ContactContext::Refused(ContactRefusal::SurfaceUncertified);
+        };
+        let mut segments: Vec<(EnclosedCurve<'_>, Extent1d)> = Vec::new();
+        for loop_ in &request.region.loops {
+            if loop_.segments.is_empty() {
+                return ContactContext::Refused(ContactRefusal::RegionMissing);
+            }
+            for segment in &loop_.segments {
+                let Some(enc) = EnclosedCurve::of(&segment.curve) else {
+                    return ContactContext::Refused(ContactRefusal::NoCurveEnclosure);
+                };
+                let (slo, shi) = (segment.interval.min(), segment.interval.max());
+                if !(slo.is_finite() && shi.is_finite() && slo < shi) {
+                    return ContactContext::Refused(ContactRefusal::Inputs);
+                }
+                segments.push((enc, segment.interval));
+            }
+        }
+        if segments.is_empty() {
+            return ContactContext::Refused(ContactRefusal::RegionMissing);
+        }
+        ContactContext::Ready {
+            curve,
+            plane,
+            segments,
+        }
+    }
+
     /// The ENDPOINT-CONTACT certificate (issue #13622): a rebuilt edge may legitimately END
     /// ON a moved face, which [`separated`](super::separated) refuses. `Proved` iff the edge's contact at
     /// the request's `contact_t` (the point `contact_point`) is proved to be its only contact with the
@@ -1236,15 +1320,6 @@ pub(crate) mod endpoint_contact {
         window: f64,
         budget: usize,
     ) -> Result<ContactProof> {
-        let ContactRequest {
-            curve,
-            interval,
-            contact_t,
-            contact_point,
-            face,
-            region,
-            tolerance,
-        } = request;
         let budget = budget.min(CONTACT_BUDGET);
         let mut report = ContactReport {
             incidence: f64::INFINITY,
@@ -1253,64 +1328,30 @@ pub(crate) mod endpoint_contact {
             region_boxes: 0,
             root_t: None,
         };
-        // ---- the inputs and the guarded extractions
-        let (t0, t1) = (interval.min(), interval.max());
-        let inputs_ok = t0.is_finite()
-            && t1.is_finite()
-            && t0 < t1
-            && contact_t.is_finite()
-            && contact_t >= t0
-            && contact_t <= t1
-            && contact_point.x.is_finite()
-            && contact_point.y.is_finite()
-            && contact_point.z.is_finite()
-            && tolerance.is_finite()
-            && tolerance >= 0.0
-            && window.is_finite()
-            && window > 0.0;
-        if !inputs_ok {
+        // ---- the window's own input, then the guarded extractions both certificates
+        // share
+        if !(window.is_finite() && window > 0.0) {
             return Ok(ContactProof::Unproved(ContactRefusal::Inputs, report));
         }
-        let Some(curve) = EnclosedCurve::of(curve) else {
-            return Ok(ContactProof::Unproved(
-                ContactRefusal::NoCurveEnclosure,
-                report,
-            ));
-        };
-        let Some(plane) = PlaneOver::of(&face.surface) else {
-            return Ok(ContactProof::Unproved(
-                ContactRefusal::SurfaceUncertified,
-                report,
-            ));
-        };
-        let mut segments: Vec<(EnclosedCurve<'_>, Extent1d)> = Vec::new();
-        for loop_ in &region.loops {
-            if loop_.segments.is_empty() {
-                return Ok(ContactProof::Unproved(
-                    ContactRefusal::RegionMissing,
-                    report,
-                ));
+        let (curve, plane, segments) = match contact_context(&request) {
+            ContactContext::Ready {
+                curve,
+                plane,
+                segments,
+            } => (curve, plane, segments),
+            ContactContext::Refused(reason) => {
+                return Ok(ContactProof::Unproved(reason, report));
             }
-            for segment in &loop_.segments {
-                let Some(enc) = EnclosedCurve::of(&segment.curve) else {
-                    return Ok(ContactProof::Unproved(
-                        ContactRefusal::NoCurveEnclosure,
-                        report,
-                    ));
-                };
-                let (slo, shi) = (segment.interval.min(), segment.interval.max());
-                if !(slo.is_finite() && shi.is_finite() && slo < shi) {
-                    return Ok(ContactProof::Unproved(ContactRefusal::Inputs, report));
-                }
-                segments.push((enc, segment.interval));
-            }
-        }
-        if segments.is_empty() {
-            return Ok(ContactProof::Unproved(
-                ContactRefusal::RegionMissing,
-                report,
-            ));
-        }
+        };
+        let ContactRequest {
+            interval,
+            contact_t,
+            contact_point,
+            face,
+            tolerance,
+            ..
+        } = request;
+        let (t0, t1) = (interval.min(), interval.max());
         // ---- 1. INCIDENCE
         kernel.check_cancelled(OP)?;
         let Some(f_a) = curve.over_ext(Ivl::from(contact_t))? else {
@@ -1604,13 +1645,127 @@ pub(crate) mod endpoint_contact {
         }
         Ok(ContactProof::Proved(report))
     }
+
+    /// The REMOVAL-END certificate (issue #18503): a cut removes an edge entirely —
+    /// nothing of it stays — and the corner its incident edges trace is its clip on the
+    /// moved face. The whole-interval removal proof is the classifier's certified
+    /// decomposition of the span ([`decompose_cut`](super::decompose_cut)); the retained
+    /// part this certificate's sibling scans is empty, so the isolation and remainder
+    /// obligations have nothing to quantify over and this certificate proves the corner
+    /// itself:
+    ///
+    /// 1. INCIDENCE: `|F(contact_t) - contact_point| <= tolerance`, rounded interval
+    ///    evaluation ([`separated_ending_on_face`]'s stage 1).
+    /// 2. PLANE INCIDENCE: the contact point lies within `tolerance` of the cut plane,
+    ///    rounded interval evaluation ([`PlaneOver::side`]) — the isolation stage's
+    ///    surface-root evidence, made explicit: the stages above project onto the plane
+    ///    and discard the displacement normal to it, so a contact on its curve but off
+    ///    the plane would pass them. Together with 1 the contact's curve point lies
+    ///    within `2 * tolerance` of the plane, certified by the triangle.
+    /// 3. REGION MEMBERSHIP: the contact's UV is certified in-or-on the face's trimmed
+    ///    region ([`region_membership`]). A certified `Outside` is a typed refusal here
+    ///    ([`ContactRefusal::OffRegion`]): only `Proved` authorizes a removal.
+    ///
+    /// Anything unproved refuses (`Unproved` names the certificate): a cap exceeded
+    /// never accepts. `budget` caps the region stage's boxes (at most
+    /// [`CONTACT_BUDGET`]).
+    ///
+    /// # Errors
+    /// Cancellation is propagated; every other failure proves nothing (`Unproved`).
+    pub(crate) fn removed_ending_on_face(
+        kernel: &Kernel,
+        request: ContactRequest<'_>,
+        budget: usize,
+    ) -> Result<ContactProof> {
+        let budget = budget.min(CONTACT_BUDGET);
+        let mut report = ContactReport {
+            incidence: f64::INFINITY,
+            isolation_boxes: 0,
+            remainder_boxes: 0,
+            region_boxes: 0,
+            root_t: None,
+        };
+        let (curve, plane, segments) = match contact_context(&request) {
+            ContactContext::Ready {
+                curve,
+                plane,
+                segments,
+            } => (curve, plane, segments),
+            ContactContext::Refused(reason) => {
+                return Ok(ContactProof::Unproved(reason, report));
+            }
+        };
+        // ---- 1. INCIDENCE (as separated_ending_on_face)
+        kernel.check_cancelled(OP)?;
+        let Some(f_a) = curve.over_ext(Ivl::from(request.contact_t))? else {
+            return Ok(ContactProof::Unproved(
+                ContactRefusal::NoCurveEnclosure,
+                report,
+            ));
+        };
+        let Some(incidence) = point_distance_hi(f_a, request.contact_point) else {
+            return Ok(ContactProof::Unproved(
+                ContactRefusal::NoCurveEnclosure,
+                report,
+            ));
+        };
+        report.incidence = incidence;
+        if incidence > request.tolerance {
+            return Ok(ContactProof::Unproved(ContactRefusal::Incidence, report));
+        }
+        // ---- 2. PLANE INCIDENCE: the contact point lies within the tolerance of the
+        // cut plane (a contact on its curve but off the plane is no corner of the cut)
+        kernel.check_cancelled(OP)?;
+        let g = plane.side([
+            Ivl::from(request.contact_point.x),
+            Ivl::from(request.contact_point.y),
+            Ivl::from(request.contact_point.z),
+        ]);
+        if !(g.lo.is_finite() && g.hi.is_finite())
+            || g.lo < 0.0 - request.tolerance
+            || g.hi > request.tolerance
+        {
+            return Ok(ContactProof::Unproved(ContactRefusal::Incidence, report));
+        }
+        // ---- 3. REGION MEMBERSHIP: in-or-on only — a removed edge's clip off the
+        // trimmed region is a typed refusal, never a removal
+        kernel.check_cancelled(OP)?;
+        let p = plane.uv_of(request.contact_point);
+        if p.iter()
+            .any(|x| !(x.lo.is_finite() && x.hi.is_finite() && x.lo <= x.hi))
+        {
+            return Ok(ContactProof::Unproved(
+                ContactRefusal::SurfaceUncertified,
+                report,
+            ));
+        }
+        let verdict = region_membership(
+            kernel,
+            &segments,
+            &plane,
+            p,
+            request.tolerance,
+            budget,
+            &mut report.region_boxes,
+        )?;
+        match verdict {
+            RegionVerdict::Inside | RegionVerdict::Boundary => {}
+            RegionVerdict::Outside => {
+                return Ok(ContactProof::Unproved(ContactRefusal::OffRegion, report));
+            }
+            RegionVerdict::Refused(reason) => {
+                return Ok(ContactProof::Unproved(reason, report));
+            }
+        }
+        Ok(ContactProof::Proved(report))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::endpoint_contact::{
-        remainder_clearance, separated_ending_on_face, ContactProof, ContactRefusal,
-        ContactRequest, TrimLoop, TrimRegion, TrimSegment,
+        remainder_clearance, removed_ending_on_face, separated_ending_on_face, ContactProof,
+        ContactRefusal, ContactRequest, TrimLoop, TrimRegion, TrimSegment,
     };
     use super::*;
     use crate::math::{Point2, Vec3};
@@ -2095,6 +2250,29 @@ mod tests {
         ))
     }
 
+    /// The named edge bent to cross the face region again at s = 1/2 (T2's edge):
+    /// `F(s) = (0, 1 + s, 2 s^2)`, the same value and tangent at A = (0, 1, 0).
+    fn named_bent_edge() -> Curve {
+        Curve::from(
+            BSplineCurve::create_canonical(&CanonicalData {
+                dim: 3,
+                degree: 2,
+                control_points: &[
+                    Point3::new(0.0, 1.0, 0.0),
+                    Point3::new(0.0, 1.5, 0.0),
+                    Point3::new(0.0, 2.0, 2.0),
+                ],
+                form: BSplineCurveForm::Unspecified,
+                knot_multiplicities: &[3, 3],
+                knots: &[0.0, 1.0],
+                knot_type: KnotType::Unspecified,
+                weights: None,
+                trim: None,
+            })
+            .unwrap(),
+        )
+    }
+
     /// The named case's tolerances (measured on the repaired body: the corner vertex
     /// 1.00001 after the glue, the body 1e-5): the pre-tightened sum and the
     /// post-tightened one.
@@ -2173,24 +2351,7 @@ mod tests {
         let surface = named_face();
         let region = named_region(&surface);
         let face = named_moved_face(&surface);
-        let bent = Curve::from(
-            BSplineCurve::create_canonical(&CanonicalData {
-                dim: 3,
-                degree: 2,
-                control_points: &[
-                    Point3::new(0.0, 1.0, 0.0),
-                    Point3::new(0.0, 1.5, 0.0),
-                    Point3::new(0.0, 2.0, 2.0),
-                ],
-                form: BSplineCurveForm::Unspecified,
-                knot_multiplicities: &[3, 3],
-                knots: &[0.0, 1.0],
-                knot_type: KnotType::Unspecified,
-                weights: None,
-                trim: None,
-            })
-            .unwrap(),
-        );
+        let bent = named_bent_edge();
         let interval = Extent1d::from_min_max(0.0, 1.0);
         let a = Point3::new(0.0, 1.0, 0.0);
         // the constructed geometry: F(0) = A with F'(0) = (0, 1, 0) as the real edge,
@@ -2255,6 +2416,289 @@ mod tests {
             ),
             "{narrow:?}"
         );
+    }
+
+    /// T-removal (issue #18503): the removal-end certificate proves the corner the
+    /// incident edges trace where the retained-edge certificate cannot isolate it — the
+    /// bent edge's second crossing exhausts the isolation stage over the retained span
+    /// (T2's measurement), while a removed edge has no retained span to scan and its
+    /// corner proves by incidence, plane incidence and region membership alone. This is
+    /// `a_cut_balls`'s edge 6 class.
+    #[test]
+    fn a_removed_edges_clip_proves_the_corner_the_retained_certificate_cannot_isolate() {
+        let k = Kernel::default();
+        let surface = named_face();
+        let region = named_region(&surface);
+        let face = named_moved_face(&surface);
+        let bent = named_bent_edge();
+        let interval = Extent1d::from_min_max(0.0, 1.0);
+        let a = Point3::new(0.0, 1.0, 0.0);
+        let request = ContactRequest {
+            curve: &bent,
+            interval: &interval,
+            contact_t: 0.0,
+            contact_point: a,
+            face: &face,
+            region: &region,
+            tolerance: T_POST,
+        };
+        // the retained-edge certificate refuses over the whole span (T2's coarse
+        // measurement: the second crossing is never excluded)
+        let retained_proof = separated_ending_on_face(&k, request, 1.0, 4096).unwrap();
+        assert!(
+            matches!(&retained_proof, ContactProof::Unproved(..)),
+            "{retained_proof:?}"
+        );
+        // the removal certificate proves the corner
+        let request = ContactRequest {
+            curve: &bent,
+            interval: &interval,
+            contact_t: 0.0,
+            contact_point: a,
+            face: &face,
+            region: &region,
+            tolerance: T_POST,
+        };
+        let proof = removed_ending_on_face(&k, request, 4096).unwrap();
+        let ContactProof::Proved(report) = &proof else {
+            panic!("{proof:?}");
+        };
+        assert!(report.incidence <= T_POST, "{report:?}");
+        assert_eq!(report.root_t, None, "{report:?}");
+    }
+
+    /// T-removal-plane (issue #18503's plane incidence): a contact ON its curve but
+    /// OFF the cut plane passes the certificate's first stage (`F(contact_t)` is the
+    /// contact point exactly) and the region stage projects onto the plane, discarding
+    /// the displacement normal to it. The plane-incidence obligation refuses it typed:
+    /// without it a removed edge's clip could be certified as a corner off the cut.
+    #[test]
+    fn a_removed_edges_clip_on_its_curve_but_off_the_plane_is_not_proved() {
+        let k = Kernel::default();
+        let surface = named_face();
+        let region = named_region(&surface);
+        let face = named_moved_face(&surface);
+        let edge = named_edge();
+        let interval = Extent1d::from_min_max(0.0, 1.0);
+        // F(1/2) = (0, 3/2, 0): on the edge's curve exactly, off the plane by
+        // 1/(2 sqrt(3)) — far beyond any tolerance
+        let off = Point3::new(0.0, 1.5, 0.0);
+        assert_eq!(edge.evaluate_point(&k, 0.5).unwrap(), off);
+        assert!(signed_side(&surface, off).abs() > 0.1);
+        let proof = removed_ending_on_face(
+            &k,
+            ContactRequest {
+                curve: &edge,
+                interval: &interval,
+                contact_t: 0.5,
+                contact_point: off,
+                face: &face,
+                region: &region,
+                tolerance: T_POST,
+            },
+            4096,
+        )
+        .unwrap();
+        assert!(
+            matches!(proof, ContactProof::Unproved(ContactRefusal::Incidence, _)),
+            "{proof:?}"
+        );
+    }
+
+    /// T-removal-region (issue #18503): a clip certified OFF the trimmed region is a
+    /// typed refusal ([`ContactRefusal::OffRegion`]) — only `Proved` authorizes a
+    /// removal. The contact is on its curve and on the cut plane (the in-plane line
+    /// from A away from the pentagon), so only region membership decides.
+    #[test]
+    fn a_removed_edges_clip_off_the_trimmed_region_is_not_proved() {
+        let k = Kernel::default();
+        let surface = named_face();
+        let region = named_region(&surface);
+        let face = named_moved_face(&surface);
+        // the plane's line through A in the direction (-1, 1, 0), away from the
+        // pentagon: every point of it is on the plane
+        let away = Curve::from(Line::from_points(
+            Point3::new(0.0, 1.0, 0.0),
+            Point3::new(-1.0, 2.0, 0.0),
+            3,
+        ));
+        let interval = Extent1d::from_min_max(0.0, 1.0);
+        let off_region = away.evaluate_point(&k, 0.9).unwrap();
+        assert!(signed_side(&surface, off_region).abs() < 1.0e-12);
+        let proof = removed_ending_on_face(
+            &k,
+            ContactRequest {
+                curve: &away,
+                interval: &interval,
+                contact_t: 0.9,
+                contact_point: off_region,
+                face: &face,
+                region: &region,
+                tolerance: T_POST,
+            },
+            4096,
+        )
+        .unwrap();
+        assert!(
+            matches!(proof, ContactProof::Unproved(ContactRefusal::OffRegion, _)),
+            "{proof:?}"
+        );
+    }
+
+    /// T-removal-hole (issue #18503): a clip inside a hole of the trimmed region (the
+    /// inner loop's parity) is off the face's material too and refuses the same way,
+    /// while the same contact on the plain region proves. P = (1, 1, 1) is the
+    /// pentagon's vertex mean: on the plane and strictly inside it.
+    #[test]
+    fn a_removed_edges_clip_in_a_hole_is_not_proved() {
+        let k = Kernel::default();
+        let surface = named_face();
+        let region = named_region(&surface);
+        let face = named_moved_face(&surface);
+        // the plane's line C to E through P (its middle): C = (2, 0, 1), E = (0, 2, 1)
+        let through = Curve::from(Line::from_points(
+            Point3::new(2.0, 0.0, 1.0),
+            Point3::new(0.0, 2.0, 1.0),
+            3,
+        ));
+        let interval = Extent1d::from_min_max(0.0, 1.0);
+        let p = through.evaluate_point(&k, 0.5).unwrap();
+        assert_eq!(p, Point3::new(1.0, 1.0, 1.0));
+        assert!(signed_side(&surface, p).abs() < 1.0e-12);
+        let request = ContactRequest {
+            curve: &through,
+            interval: &interval,
+            contact_t: 0.5,
+            contact_point: p,
+            face: &face,
+            region: &region,
+            tolerance: T_POST,
+        };
+        // positive control: on the plain region the corner proves
+        let plain = removed_ending_on_face(&k, request, 4096).unwrap();
+        assert!(matches!(&plain, ContactProof::Proved(_)), "{plain:?}");
+        // the same contact in a hole of the region refuses
+        let centre = uv_on(&surface, p);
+        let mut hole = Vec::new();
+        let corners = [
+            Point2::new(centre.x - 0.2, centre.y - 0.2),
+            Point2::new(centre.x + 0.2, centre.y - 0.2),
+            Point2::new(centre.x + 0.2, centre.y + 0.2),
+            Point2::new(centre.x - 0.2, centre.y + 0.2),
+        ];
+        for i in 0..corners.len() {
+            let a = corners[i];
+            let b = corners[(i + 1) % corners.len()];
+            hole.push(TrimSegment {
+                curve: Curve::from(Line::from_points(
+                    Point3::new(a.x, a.y, 0.0),
+                    Point3::new(b.x, b.y, 0.0),
+                    3,
+                )),
+                interval: Extent1d::from_min_max(0.0, 1.0),
+            });
+        }
+        let mut loops = region.loops.clone();
+        loops.push(TrimLoop { segments: hole });
+        let holed = TrimRegion { loops };
+        let proof = removed_ending_on_face(
+            &k,
+            ContactRequest {
+                curve: &through,
+                interval: &interval,
+                contact_t: 0.5,
+                contact_point: p,
+                face: &face,
+                region: &holed,
+                tolerance: T_POST,
+            },
+            4096,
+        )
+        .unwrap();
+        assert!(
+            matches!(proof, ContactProof::Unproved(ContactRefusal::OffRegion, _)),
+            "{proof:?}"
+        );
+    }
+
+    /// T-removal-hostile (issue #18503): malformed inputs are `Unproved(Inputs)` —
+    /// nothing uncertain is built on a bad request — and a cancelled kernel propagates
+    /// its cancellation, stopping the certificate where it stands.
+    #[test]
+    fn a_removed_edge_certificate_refuses_hostile_inputs_and_propagates_cancellation() {
+        let mut k = Kernel::default();
+        let surface = named_face();
+        let region = named_region(&surface);
+        let face = named_moved_face(&surface);
+        let edge = named_edge();
+        let interval = Extent1d::from_min_max(0.0, 1.0);
+        let a = Point3::new(0.0, 1.0, 0.0);
+        let bad = |contact_t: f64, contact_point: Point3, tolerance: f64| {
+            removed_ending_on_face(
+                &k,
+                ContactRequest {
+                    curve: &edge,
+                    interval: &interval,
+                    contact_t,
+                    contact_point,
+                    face: &face,
+                    region: &region,
+                    tolerance,
+                },
+                4096,
+            )
+            .unwrap()
+        };
+        // a non-finite contact parameter, a non-finite point, a negative tolerance
+        assert!(matches!(
+            bad(f64::NAN, a, T_POST),
+            ContactProof::Unproved(ContactRefusal::Inputs, _)
+        ));
+        assert!(matches!(
+            bad(0.0, Point3::new(f64::NAN, 1.0, 0.0), T_POST),
+            ContactProof::Unproved(ContactRefusal::Inputs, _)
+        ));
+        assert!(matches!(
+            bad(0.0, a, -1.0),
+            ContactProof::Unproved(ContactRefusal::Inputs, _)
+        ));
+        // an interval without length
+        let flat = Extent1d::from_min_max(1.0, 1.0);
+        let proof = removed_ending_on_face(
+            &k,
+            ContactRequest {
+                curve: &edge,
+                interval: &flat,
+                contact_t: 1.0,
+                contact_point: a,
+                face: &face,
+                region: &region,
+                tolerance: T_POST,
+            },
+            4096,
+        )
+        .unwrap();
+        assert!(
+            matches!(proof, ContactProof::Unproved(ContactRefusal::Inputs, _)),
+            "{proof:?}"
+        );
+        // a cancelled kernel propagates
+        k.set_cancel_token(crate::kernel::CancelToken::after_polls(0));
+        let err = removed_ending_on_face(
+            &k,
+            ContactRequest {
+                curve: &edge,
+                interval: &interval,
+                contact_t: 0.0,
+                contact_point: a,
+                face: &face,
+                region: &region,
+                tolerance: T_POST,
+            },
+            4096,
+        )
+        .unwrap_err();
+        assert!(err.is_cancelled(), "{err:?}");
     }
 
     /// T3 (task A): contact at A plus a tangential touch of the face away from A —

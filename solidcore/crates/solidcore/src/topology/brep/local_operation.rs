@@ -1863,7 +1863,6 @@ fn classify_edge_crossing(
     tolerance: f64,
     edge: crate::topology::EdgeId,
 ) -> Result<EdgeCrossing> {
-    use crate::geom::extent1d::Extent1d;
     let clear = EdgeCrossing {
         event: CrossEvent::Clear,
         proof: None,
@@ -2008,7 +2007,12 @@ fn classify_edge_crossing(
         }
         let clip_t = t0 + lambda * (t1 - t0);
         let clip = clip_point(k, curve, t0, t1, clip_t)?;
-        let proof = contact_proof(
+        // the removal-end certificate (issue #18503): the retained part is empty, so
+        // the certificate proves the corner itself — incidence, plane incidence and
+        // region membership — and only `Proved` authorizes the removal. The request's
+        // interval carries the span for the contact's extraction; the whole-interval
+        // removal proof is `removing_span` above
+        let proof = removal_proof(
             k,
             &ContactProofRequest {
                 curve,
@@ -2026,8 +2030,8 @@ fn classify_edge_crossing(
         });
     }
     // the trimmed case: the retained interval keeps one side of the clip. The
-    // decomposition must show that side as the one kept piece of a single crossing —
-    // no island on the kept side, no second crossing the model cannot see
+    // certified shape must hold the claim on the model's own intervals (issue #18503's
+    // claim gate): the kept side's one kept piece, no island, no second crossing
     let removes_low = unit_clamp(lo) > 0.0;
     let clip_fraction = if removes_low {
         unit_clamp(lo)
@@ -2038,33 +2042,12 @@ fn classify_edge_crossing(
     // empty removed interval: the claim is then that the whole span stays, certified
     // piece by piece, and a zero-length piece side proves nothing
     let clip_at_end = clip_fraction == 0.0 || clip_fraction == 1.0;
-    let trim_claim = match shape {
-        clearance::CutShape::Complex => false,
-        clearance::CutShape::Single {
-            crossing,
-            low_kept,
-            high_kept,
-        } => {
-            if clip_at_end {
-                (crossing <= t0 || low_kept) && (crossing >= t1 || high_kept)
-            } else if removes_low {
-                high_kept && !low_kept
-            } else {
-                low_kept && !high_kept
-            }
-        }
-        clearance::CutShape::Whole { removed_side } => clip_at_end && !removed_side,
-    };
-    if !trim_claim {
+    if !trim_claim_holds(shape, t0, t1, clip_at_end, removes_low) {
         return Err(refusal(ReconstructionRefusal::ClipUncertified { edge }));
     }
     let clip_t = t0 + clip_fraction * (t1 - t0);
     let clip = clip_point(k, curve, t0, t1, clip_t)?;
-    let retained = if removes_low {
-        Extent1d::from_min_max(clip_t, t1)
-    } else {
-        Extent1d::from_min_max(t0, clip_t)
-    };
+    let retained = retained_interval(interval, clip_t, removes_low);
     let proof = contact_proof(
         k,
         &ContactProofRequest {
@@ -2090,6 +2073,88 @@ fn classify_edge_crossing(
 /// The refusal of an uncertifiable clip.
 fn refusal(why: ReconstructionRefusal) -> SolidError {
     Failure::new(OP, OffsetFailure::Reconstruction { why }).into_error()
+}
+
+/// The trim claim on the model's proposed intervals (issue #18503's claim gate): the
+/// certified shape of the span ([`clearance::decompose_cut`]) must hold the event the
+/// model decides — a trim keeps the one kept piece on its kept side and removes the one
+/// on the other, with no island anywhere a model reading only the ends could not see (a
+/// [`clearance::CutShape::Complex`] span holds no claim this layer reads). The
+/// degenerate end trim (`clip_at_end`: the clip clamped to its very end, an empty
+/// removed interval) claims the whole span stays, certified piece by piece — a
+/// zero-length piece side proves nothing.
+fn trim_claim_holds(
+    shape: clearance::CutShape,
+    t0: f64,
+    t1: f64,
+    clip_at_end: bool,
+    removes_low: bool,
+) -> bool {
+    match shape {
+        clearance::CutShape::Complex => false,
+        clearance::CutShape::Single {
+            crossing,
+            low_kept,
+            high_kept,
+        } => {
+            if clip_at_end {
+                (crossing <= t0 || low_kept) && (crossing >= t1 || high_kept)
+            } else if removes_low {
+                high_kept && !low_kept
+            } else {
+                low_kept && !high_kept
+            }
+        }
+        clearance::CutShape::Whole { removed_side } => clip_at_end && !removed_side,
+    }
+}
+
+/// The clip's placement against the certified crossing (issue #18503's proposed
+/// interval): the clip sits at the crossing within the tolerance the length model
+/// resolves (a fraction of the span's chord), so the kept interval never keeps
+/// certified-removed material. A clip at a span end is the degenerate end trim and
+/// holds; a whole-sign span has no crossing to sit at and holds (the claim gate reads
+/// it).
+fn clip_placement_holds(
+    shape: clearance::CutShape,
+    t0: f64,
+    t1: f64,
+    clip_t: f64,
+    tolerance: f64,
+    chord: f64,
+) -> bool {
+    if clip_t == t0 || clip_t == t1 {
+        return true;
+    }
+    match shape {
+        clearance::CutShape::Single { crossing, .. } => {
+            ((crossing - clip_t).abs() / (t1 - t0)) * chord <= tolerance
+        }
+        _ => true,
+    }
+}
+
+/// The interval the certificate scans (issue #18503's proposed interval): the span
+/// the retrim keeps (`removes_low` drops the low end, [`retrim_edge`]'s own formulas),
+/// and the WHOLE span where the clip sits at a span end — in either orientation. An
+/// end clip removes nothing measurable: the survivor keeps its whole span, which the
+/// claim gate ([`trim_claim_holds`], `clip_at_end`) certifies piece by piece or refuses
+/// typed — a zero-length side of a retrim's construction proves nothing and is never
+/// read as the retained interval. An interior clip's kept side is the scan.
+fn retained_interval(
+    interval: &crate::geom::extent1d::Extent1d,
+    clip_t: f64,
+    removes_low: bool,
+) -> crate::geom::extent1d::Extent1d {
+    use crate::geom::extent1d::Extent1d;
+    if clip_t == interval.min() || clip_t == interval.max() {
+        return Extent1d::from_min_max(interval.min(), interval.max());
+    }
+    if removes_low {
+        Extent1d::from_min_max(clip_t, interval.max())
+    } else {
+        Extent1d::from_min_max(interval.min(), clip_t)
+    }
 }
 
 /// `x` clamped to `[0, 1]`.
@@ -2185,6 +2250,41 @@ fn contact_proof(
     Ok(proof)
 }
 
+/// The removal-end certificate of a cut's removed edge (issue #18503): only `Proved`
+/// authorizes the removal — `Outside` (a clip certified off the trimmed region) and
+/// `Unproved` refuse typed ([`ReconstructionRefusal::ClipUncertified`]). The request's
+/// `retained` carries the edge's span (the certificate extracts the contact's context
+/// from it); the whole-interval removal proof is the classifier's certified
+/// decomposition.
+fn removal_proof(
+    k: &Kernel,
+    request: &ContactProofRequest<'_>,
+) -> Result<clearance::endpoint_contact::ContactProof> {
+    use crate::error::offset::ReconstructionRefusal;
+    use crate::offset::offset_executive::clearance::endpoint_contact::{
+        removed_ending_on_face, ContactProof, ContactRequest,
+    };
+    let proof = removed_ending_on_face(
+        k,
+        ContactRequest {
+            curve: request.curve,
+            interval: request.retained,
+            contact_t: request.clip_t,
+            contact_point: request.clip,
+            face: &request.face.moved,
+            region: &request.face.region,
+            tolerance: request.tolerance,
+        },
+        usize::MAX,
+    )?;
+    if !matches!(proof, ContactProof::Proved(_)) {
+        return Err(refusal(ReconstructionRefusal::ClipUncertified {
+            edge: request.edge,
+        }));
+    }
+    Ok(proof)
+}
+
 /// The group's decided clip read on edge `e`'s OWN curve and interval (issue #13622):
 /// the clip's parameter on the edge's own ends ([`clip_param`]), the retained side from
 /// those ends' sides on the moved face's cut, and the endpoint-contact certificate on
@@ -2232,11 +2332,39 @@ fn certify_clip_on_edge(
     let lambda = (clip_t - interval.min()) / (interval.max() - interval.min());
     let grows = g1 > g0;
     let removes_low = !grows && unit_clamp(lambda) > 0.0;
+    // the proposed interval (issue #18503): the certificate scans the span the retrim
+    // keeps, never the part it discards; an end clip (either end, either orientation)
+    // removes nothing measurable and scans the whole span — the claim gate certifies
+    // that the survivor keeps it
+    let retained = retained_interval(&interval, clip_t, removes_low);
+    // the survivor's own whole-span claim (issue #18503): the certified decomposition
+    // of its span must hold the proposed trim — no kept island in the discarded part,
+    // no second crossing the model cannot see — and the clip must sit at the certified
+    // crossing within the length model's tolerance, so the kept interval never keeps
+    // certified-removed material. A complex or undecided decomposition refuses typed:
+    // nothing uncertified decides
+    let shape =
+        match clearance::decompose_cut(k, &curve, &interval, plane.origin, plane.normal, tolerance)
+        {
+            Ok(shape) => shape,
+            Err(err) if err.is_cancelled() => return Err(err),
+            Err(_) => {
+                return Err(refusal(ReconstructionRefusal::ClipUncertified { edge: e }));
+            }
+        };
+    let (t0, t1) = (interval.min(), interval.max());
+    let clip_at_end = clip_t == t0 || clip_t == t1;
+    let chord = end_side_chord(k, &curve, t0, t1)?;
+    if !trim_claim_holds(shape, t0, t1, clip_at_end, removes_low)
+        || !clip_placement_holds(shape, t0, t1, clip_t, tolerance, chord)
+    {
+        return Err(refusal(ReconstructionRefusal::ClipUncertified { edge: e }));
+    }
     let proof = contact_proof(
         k,
         &ContactProofRequest {
             curve: &curve,
-            retained: &interval,
+            retained: &retained,
             clip_t,
             clip,
             face,
@@ -6503,6 +6631,7 @@ mod tests {
     /// on the plane is never guessed at (issue #13622).
     #[test]
     fn an_uncertifiable_clip_refuses_the_reconstruction() {
+        use crate::error::offset::ReconstructionRefusal;
         use crate::geom::extent1d::Extent1d;
         use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
         use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -7057,6 +7186,177 @@ mod tests {
                 ))
             ),
             "a clip off the member's curve was not refused typed"
+        );
+    }
+
+    /// The proposed interval's four endpoint/orientation combinations (issue #18503):
+    /// an end clip — either end, either orientation — removes nothing measurable and
+    /// the certificate scans the whole span (the claim gate certifies that the survivor
+    /// keeps it), and an interior clip scans the kept side the clip leaves. The
+    /// retrim's own construction ([`retrim_edge`]) reads the same clip and side.
+    #[test]
+    fn the_proposed_interval_reads_an_end_clip_as_the_whole_span() {
+        use crate::geom::extent1d::Extent1d;
+        let interval = Extent1d::from_min_max(0.5, 1.0);
+        for (clip_t, removes_low) in [(0.5, true), (0.5, false), (1.0, true), (1.0, false)] {
+            let kept = retained_interval(&interval, clip_t, removes_low);
+            assert_eq!(
+                (kept.min(), kept.max()),
+                (0.5, 1.0),
+                "{clip_t} {removes_low}"
+            );
+        }
+        // an interior clip: the kept side
+        let kept = retained_interval(&interval, 0.75, true);
+        assert_eq!((kept.min(), kept.max()), (0.75, 1.0));
+        let kept = retained_interval(&interval, 0.75, false);
+        assert_eq!((kept.min(), kept.max()), (0.5, 0.75));
+    }
+
+    /// The trim claim's shapes (issue #18503's claim gate): a degenerate end clip
+    /// claims the whole span stays and every positive-length certified piece must be
+    /// kept (a zero-length piece side proves nothing), a real trim claims its kept
+    /// side's one kept piece and no island, and a complex span holds no claim.
+    #[test]
+    fn the_trim_claim_reads_the_kept_pieces_and_no_island() {
+        use clearance::CutShape;
+        let (t0, t1) = (0.5_f64, 1.0_f64);
+        // the end clip: the kept-whole claim, piece by piece
+        let end_kept = CutShape::Single {
+            crossing: t1,
+            low_kept: true,
+            high_kept: false,
+        };
+        assert!(trim_claim_holds(end_kept, t0, t1, true, false));
+        // an end clip whose span has a removed piece keeps nothing and claims nothing
+        let end_removed = CutShape::Single {
+            crossing: 0.75,
+            low_kept: true,
+            high_kept: false,
+        };
+        assert!(!trim_claim_holds(end_removed, t0, t1, true, false));
+        // a whole-sign span: the end clip keeps it when the sign is the kept one
+        assert!(trim_claim_holds(
+            CutShape::Whole {
+                removed_side: false
+            },
+            t0,
+            t1,
+            true,
+            false
+        ));
+        assert!(!trim_claim_holds(
+            CutShape::Whole { removed_side: true },
+            t0,
+            t1,
+            true,
+            false
+        ));
+        // a real trim: the kept side's one kept piece, no island
+        let trim_high = CutShape::Single {
+            crossing: 0.75,
+            low_kept: false,
+            high_kept: true,
+        };
+        assert!(trim_claim_holds(trim_high, t0, t1, false, true));
+        assert!(!trim_claim_holds(trim_high, t0, t1, false, false));
+        let trim_low = CutShape::Single {
+            crossing: 0.75,
+            low_kept: true,
+            high_kept: false,
+        };
+        assert!(trim_claim_holds(trim_low, t0, t1, false, false));
+        // a kept island between two crossings (the counterexample's shape): no claim
+        assert!(!trim_claim_holds(CutShape::Complex, t0, t1, false, true));
+        assert!(!trim_claim_holds(CutShape::Complex, t0, t1, true, false));
+    }
+
+    /// The clip's placement (issue #18503's proposed interval): the clip sits at the
+    /// certified crossing within the tolerance the length model resolves, so the kept
+    /// interval never keeps certified-removed material; an end clip holds.
+    #[test]
+    fn the_clips_placement_sits_at_the_certified_crossing() {
+        use clearance::CutShape;
+        let (t0, t1) = (0.0_f64, 1.0_f64);
+        let shape = CutShape::Single {
+            crossing: 0.5,
+            low_kept: false,
+            high_kept: true,
+        };
+        // at the crossing: holds
+        assert!(clip_placement_holds(shape, t0, t1, 0.5, 1.0e-5, 1.0));
+        // beyond the length model's tolerance: refuses
+        assert!(!clip_placement_holds(shape, t0, t1, 0.6, 1.0e-5, 1.0));
+        // an end clip holds whatever the crossing
+        assert!(clip_placement_holds(shape, t0, t1, 1.0, 1.0e-5, 1.0));
+    }
+
+    /// The merged-survivor path (issue #18503): a survivor whose span holds another
+    /// crossing and a kept island between the roots — the review's counterexample,
+    /// g(t) = (2 - t)(t - 1/4)(t - 3/4), both ends off the solid — takes no proposed
+    /// trim this layer certifies. [`follow_merged_clips`] re-derives and re-certifies
+    /// every followed record through [`certify_clip_on_edge`], this same gate, so the
+    /// merged twin's clip cannot smuggle the island past the whole-span claim.
+    #[test]
+    fn a_merged_survivors_claim_refuses_an_island_the_ends_cannot_see() {
+        use crate::geom::extent1d::Extent1d;
+        use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        let mut k = Kernel::default();
+        let (mut b, front, left, _right) = coincident_squares(&mut k);
+        // the counterexample as the survivor's own curve over [0, 1]: its cubic
+        // z(t) = (2 - t)(t - 1/4)(t - 3/4), x(t) = t, against the cut plane z = 0
+        let cubic = Curve::from(
+            BSplineCurve::create_canonical(&CanonicalData {
+                dim: 3,
+                degree: 3,
+                control_points: &[
+                    Point3::new(0.0, 0.0, 0.375),
+                    Point3::new(1.0 / 3.0, 0.0, -0.354_166_666_666_666_63),
+                    Point3::new(2.0 / 3.0, 0.0, -0.083_333_333_333_333_31),
+                    Point3::new(1.0, 0.0, 0.187_5),
+                ],
+                form: BSplineCurveForm::Unspecified,
+                knot_multiplicities: &[4, 4],
+                knots: &[0.0, 1.0],
+                knot_type: KnotType::Unspecified,
+                weights: None,
+                trim: None,
+            })
+            .unwrap(),
+        );
+        let (survivor, merged) = (front[0], left[0]);
+        b.edge_mut(survivor).unwrap().curve = Some(cubic.clone());
+        b.edge_mut(survivor).unwrap().interval = Extent1d::from_min_max(0.0, 1.0);
+        // the cut whose plane the span crosses twice
+        let face = cut_face(
+            FaceId::from_index(0),
+            Surface::from(Plane::from_normal(Point3::ZERO, Vec3::Z)),
+            Extent2d::from_bounds(-10.0, -10.0, 10.0, 10.0),
+        );
+        // the merged twin's clip record, on the curve well inside the island's removed
+        // side
+        let clip = cubic.evaluate_point(&k, 0.9).unwrap();
+        let mut clips = vec![ClipRecord {
+            edge: merged,
+            face: face.face,
+            clip,
+            clip_t: 0.9,
+            removes_low: false,
+            proof: None,
+        }];
+        let r = follow_merged_clips(&k, &b, &mut clips, survivor, merged, &[face]);
+        let err = r.unwrap_err();
+        assert!(
+            matches!(
+                err.failure().map(|f| &f.reason),
+                Some(crate::error::Reason::Offset(
+                    OffsetFailure::Reconstruction {
+                        why: ReconstructionRefusal::ClipUncertified { .. }
+                    }
+                ))
+            ),
+            "{err:?}"
         );
     }
 
