@@ -72,6 +72,30 @@ fn round_as_tall_as_a_disc_uses_up_its_wall() {
     assert!(rel(volume(&mut s), expect) < 2e-4, "{} vs {expect}", volume(&mut s));
 }
 
+/// #19187: R1 rounds where a sphere clips the four ruled walls of a twisted tower.
+#[test]
+fn sphere_meets_twisted_ruled_faces_r1_rounds_build() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"S0"}));
+    run(&mut s, "sketch.line", json!({"points":[[20,20],[-20,20],[-20,-20],[20,-20]],"closed":true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane":{"origin":[0,0,100],"x_dir":[1,0,0],"y_dir":[0,1,0]},"name":"S1"}));
+    run(&mut s, "sketch.line", json!({"points":[[0,28.284271247462],[-28.284271247462,0],[0,-28.284271247462],[28.284271247462,0]],"closed":true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.loft", json!({"sections":[{"sketch":"S0"},{"sketch":"S1"}],"operation":"new","body_name":"Part"}));
+    run(&mut s, "solid.cylinder", json!({"radius":18.47,"height":102,"base":[0,0,-1],"operation":"cut","targets":["Part"]}));
+    run(&mut s, "solid.sphere", json!({"radius":55,"center":[0,0,50],"operation":"intersect","targets":["Part"]}));
+    run(
+        &mut s,
+        "solid.fillet",
+        json!({"edges":[[18.727901831,20.184356381,2.388473554],[-0.093587256,27.534229441,97.611526446],[-19.40346417,19.535816536,2.388473554],[-27.515121653,1.029868889,97.611526446],[-20.184356381,18.727901831,2.388473554],[-27.534229441,-0.093587256,97.611526446],[-19.535816536,-19.40346417,2.388473554],[-1.029868889,-27.515121653,97.611526446],[-18.727901831,-20.184356381,2.388473554],[0.093587256,-27.534229441,97.611526446],[19.40346417,-19.535816536,2.388473554],[27.515121653,-1.029868889,97.611526446],[20.184356381,-18.727901831,2.388473554],[27.534229441,0.093587256,97.611526446],[19.535816536,19.40346417,2.388473554],[1.029868889,27.515121653,97.611526446]],"radius":1,"body":"Part"}),
+    );
+    let state = s.model.state();
+    assert_eq!(state.bodies.len(), 1);
+    let body = &state.body("Part").unwrap().body;
+    assert!(body.validity().is_empty(), "{:?}", body.validity());
+}
+
 /// #783: an edge pick far from every edge (beside the body, above it, inside it, or on another
 /// body than the one named) is refused and adds nothing, instead of rounding the nearest edge;
 /// a pick on an edge, or a little off it as a click lands, still works.
