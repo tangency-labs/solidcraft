@@ -507,23 +507,40 @@ mod tests {
         assert!(len(*c) < 1e-12 && dist(*a, v(1.0, 0.0)) < 1e-12 && dist(*b, v(0.0, 1.0)) < 1e-12);
         let m = std::f64::consts::FRAC_PI_4;
         assert!(near(arc, v(m.cos(), m.sin()), 1e-12));
-        assert!(!near(arc, v(-1.0, 0.0), 1e-6), "the other side of the circle");
+        assert!(
+            !near(arc, v(-1.0, 0.0), 1e-6),
+            "the other side of the circle"
+        );
     }
 
     #[test]
     fn a_rational_spline_with_double_knots_is_its_conic_spans() {
         let (a, b) = (quarter(0.0), quarter(std::f64::consts::FRAC_PI_2));
-        let (Piece::Conic { a: p0, apex: p1, b: p2, rho }, Piece::Conic { apex: p3, b: p4, .. }) = (&a, &b) else {
+        let (
+            Piece::Conic {
+                a: p0,
+                apex: p1,
+                b: p2,
+                rho,
+            },
+            Piece::Conic {
+                apex: p3, b: p4, ..
+            },
+        ) = (&a, &b)
+        else {
             unreachable!()
         };
         let w = rho / (1.0 - rho);
-        // End weights of 2 on the shared point: the same curve, its spans' ends brought to one.
+        // Two quarter conics as one spline with a double knot between them.
         let spline = Piece::Spline {
             pts: vec![*p0, *p1, *p2, *p3, *p4],
             control: true,
             degree: 2,
             periodic: false,
-            nurbs: Some((vec![0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0], vec![1.0, w, 1.0, w, 1.0])),
+            nurbs: Some((
+                vec![0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0],
+                vec![1.0, w, 1.0, w, 1.0],
+            )),
         };
         let spans = conic_spans(spline);
         assert_eq!(spans.len(), 2, "{spans:?}");
@@ -553,8 +570,13 @@ mod tests {
             b: v(2.0, 0.0),
             rho: 0.4,
         });
-        let Piece::Line(p, q) = g else { panic!("{g:?}") };
-        assert!(dist(p, v(0.0, 0.0)) < 1e-12 && q.x > 2.0 && q.y.abs() < 1e-12, "{g:?}");
+        let Piece::Line(p, q) = g else {
+            panic!("{g:?}")
+        };
+        assert!(
+            dist(p, v(0.0, 0.0)) < 1e-12 && q.x > 2.0 && q.y.abs() < 1e-12,
+            "{g:?}"
+        );
     }
 
     #[test]
