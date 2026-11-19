@@ -665,7 +665,8 @@ fn renamed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: Vec3
 /// another extrude's footprint names the walls it joins differently, and can leave two faces of
 /// that stem). The candidates are the edges between faces answering to the name's two faces: each
 /// exactly (see [`exactly`]) or, for a face named with its qualifier, by its stem where that face
-/// too is named with a qualifier (another one: a face whole again is not it), at least one
+/// too is named with a qualifier (another one: a face whole again is not it) or where the name's
+/// qualifier lists only faces named by their index (those tell no piece apart now), at least one
 /// side of them by a qualifier that is not that face's own (a piece of the named face split since
 /// is not a renamed face: the edge split with it and the name asks again). Of those, the one edge
 /// whose exact curve the reference's point `near` lies on (within the pick reach, as
@@ -684,7 +685,9 @@ fn resuffixed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: V
         }
         // By its stem only where the face is still named after its neighbours, others than the name's:
         // a face whole again is not one the name told apart by a face it never touches (#11731).
-        (level == Match::Stem && qualified(x) && faces.faces.get(f).is_some_and(|n| qualified(n))).then_some(true)
+        // A name told apart only by faces named by their index may name a piece that has no
+        // qualifier now: such faces no longer tell pieces apart (#19455).
+        (level == Match::Stem && qualified(x) && faces.faces.get(f).is_some_and(|n| qualified(n) || told_apart_by_index_only(x))).then_some(true)
     };
     let mut cands: Vec<usize> = Vec::new();
     for (i, fs) in m.edge_faces.iter().enumerate() {
@@ -719,6 +722,14 @@ fn resuffixed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: V
 /// Whether face name `x` names its face with the faces around it (`F2:top#[F4:side:l1]`).
 fn qualified(x: &str) -> bool {
     crate::piece_names::piece_parts(x).is_some_and(|(_, around)| !around.is_empty())
+}
+
+/// Whether face name `x` is told apart only by faces named by their index
+/// (`F5:side:l1#[F2:face:6,F3:face:7]`, a sphere's faces). Names saved before such faces stopped
+/// telling pieces apart hold them; the piece they named is named without them now.
+fn told_apart_by_index_only(x: &str) -> bool {
+    crate::piece_names::piece_parts(x)
+        .is_some_and(|(_, around)| !around.is_empty() && around.iter().all(|a| crate::history_names::named_by_index(strip_piece(a))))
 }
 
 /// The point of face `face` of a mesh nearest `p`, and how far it is.
