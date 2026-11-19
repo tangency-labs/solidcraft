@@ -37,6 +37,7 @@ use crate::blend::fillet_geom::p5::FilletEdgeContext;
 use crate::blend::fillet_solver::p1::{FilletSolverOffsetsData, OffsetSurfaceSlot};
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::Curve;
+use crate::error::blend::CrossingInput;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::intersect::surface_intersector::p1::TsectPnt;
 use crate::math::{Point3, Vec3, EFF_ZERO_SQRT};
@@ -203,7 +204,9 @@ pub(super) trait RecoveryOps {
     fn tangent(&mut self, c: &mut Recovery<'_>, side: EdgeId, point: Point3) -> Result<bool> {
         let tolerance = c.solver.rollover_tolerance(c.k, c.target)?;
         let curve = edge::curve(c.target, side)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the side edge's curve"))?;
+            .ok_or_else(|| {
+                SolidError::blend_crossing_input_missing(OP, CrossingInput::SideEdgeCurve)
+            })?;
         let (parameter, _) = super::super::p3::drop_param(
             c.k,
             curve,
@@ -211,7 +214,9 @@ pub(super) trait RecoveryOps {
             point,
             false,
         )?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the rollover event on the side edge"))?;
+        .ok_or_else(|| {
+            SolidError::blend_crossing_input_missing(OP, CrossingInput::CrossingOnSideEdge)
+        })?;
         super::super::p1::test_manifold_tangent_rollover_at(
             c.k, c.target, side, parameter, tolerance,
         )

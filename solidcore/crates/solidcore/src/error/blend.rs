@@ -23,7 +23,8 @@
 //! | [`BlendFailure::BallsNest`]            | [`ErrorKind::BallsFold`] (105)                |
 //! | [`BlendFailure::CreasePieceEndUnbuildable`] | [`ErrorKind::Unsupported`] (5)           |
 //! | [`BlendFailure::NotCertified`]         | [`ErrorKind::NotWithinTolerance`] (9): neither defect nor refusal |
-//! | [`BlendFailure::BandInputMissing`]     | [`ErrorKind::Missing`]: neither defect nor refusal |
+//! | [`BlendFailure::BandInputMissing`], [`BlendFailure::CrossingInputMissing`] | [`ErrorKind::Missing`]: neither defect nor refusal |
+//! | [`BlendFailure::CrossingNotFinite`]    | [`ErrorKind::StageFailed`] (127)              |
 //! | the phrase causes ([`BlendFailure::Failed`], [`BlendFailure::Missing`], ...) | their status's kind, as before the record; neither defect nor refusal |
 //!
 //! **Statuses.** Each failure also records, for difftest and the goldens only, the status
@@ -33,9 +34,9 @@
 //!
 //! | Rust                                   | Status difftest compares          |
 //! |----------------------------------------|-----------------------------------|
-//! | [`BlendFailure::NoRoom`], [`BlendFailure::RemovalRefused`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`], [`BlendFailure::SkinPastStationCap`], [`BlendFailure::SkinMeasureNotFinite`], [`BlendFailure::BallsNest`], [`BlendFailure::CreasePieceEndUnbuildable`] | `SM_ERR` |
+//! | [`BlendFailure::NoRoom`], [`BlendFailure::RemovalRefused`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`], [`BlendFailure::SkinPastStationCap`], [`BlendFailure::SkinMeasureNotFinite`], [`BlendFailure::BallsNest`], [`BlendFailure::CreasePieceEndUnbuildable`], [`BlendFailure::CrossingNotFinite`] | `SM_ERR` |
 //! | [`BlendFailure::Failed`]               | `SM_ERR`                          |
-//! | [`BlendFailure::Missing`], [`BlendFailure::BandInputMissing`] | `SM_ERR_NULL_POINTER` |
+//! | [`BlendFailure::Missing`], [`BlendFailure::BandInputMissing`], [`BlendFailure::CrossingInputMissing`] | `SM_ERR_NULL_POINTER` |
 //! | [`BlendFailure::InvalidValue`]        | `SM_ERR_INVALID_INPUT`            |
 //! | [`BlendFailure::Inconsistent`]         | `SM_ERR_ASSERT_FAILURE`           |
 //! | [`BlendFailure::BadIntersections`]     | `SM_ERR_BAD_INTERSECTIONS`        |
@@ -221,6 +222,42 @@ pub enum BlendFailure {
     /// kind of that status ([`ErrorKind::Missing`]), as the phrase cause it replaces; typed,
     /// so not a phrase cause ([`BlendFailure::is_phrase`]).
     BandInputMissing(BandInput),
+    /// An input a rail's crossing of an edge is judged from is not there (the crossing's
+    /// budget, an edge use's radial, the side edge's curve, the crossing's place on it): the
+    /// input named. Status `SM_ERR_NULL_POINTER` and the kind of that status
+    /// ([`ErrorKind::Missing`]); typed, so not a phrase cause ([`BlendFailure::is_phrase`]).
+    CrossingInputMissing(CrossingInput),
+    /// What a rail's crossing of an edge is judged from (a face normal or binormal at the
+    /// crossing) was not a finite number, so the crossing is neither classed concave nor
+    /// convex (#17016). A defect ([`ErrorKind::StageFailed`]), status `SM_ERR`.
+    CrossingNotFinite,
+}
+
+/// Which input of a rail crossing's judgement is missing ([`BlendFailure::CrossingInputMissing`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CrossingInput {
+    /// The tangency budget of the round a sheet face belongs to.
+    SheetFaceTangencyBudget,
+    /// The radial edge use of the edge use that bounds material.
+    MaterialEdgeUseRadial,
+    /// The curve of the side edge a rail crosses.
+    SideEdgeCurve,
+    /// The place on the side edge where the rail crosses it.
+    CrossingOnSideEdge,
+}
+
+impl CrossingInput {
+    /// What is missing, as a phrase ("the side edge's curve").
+    #[must_use]
+    pub const fn what(self) -> &'static str {
+        match self {
+            Self::SheetFaceTangencyBudget => "the sheet face's tangency budget",
+            Self::MaterialEdgeUseRadial => "the material edge use's radial",
+            Self::SideEdgeCurve => "the side edge's curve",
+            Self::CrossingOnSideEdge => "the rollover event on the side edge",
+        }
+    }
 }
 
 /// Which input of the planar-band contact query is missing ([`BlendFailure::BandInputMissing`]).
@@ -444,9 +481,12 @@ impl BlendFailure {
             | Self::SkinMeasureNotFinite { .. }
             | Self::BallsNest { .. }
             | Self::CreasePieceEndUnbuildable { .. }
+            | Self::CrossingNotFinite
             | Self::NotCertified { .. }
             | Self::Failed(_) => SM_ERR,
-            Self::Missing(_) | Self::BandInputMissing(_) => SM_ERR_NULL_POINTER,
+            Self::Missing(_) | Self::BandInputMissing(_) | Self::CrossingInputMissing(_) => {
+                SM_ERR_NULL_POINTER
+            }
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
             Self::BadIntersections(_) => SM_ERR_BAD_INTERSECTIONS,
@@ -482,7 +522,8 @@ impl BlendFailure {
             }
             Self::BallsNest { .. } => ErrorKind::BallsFold,
             Self::CreasePieceEndUnbuildable { .. } => ErrorKind::Unsupported,
-            Self::BandInputMissing(_) => ErrorKind::Missing,
+            Self::BandInputMissing(_) | Self::CrossingInputMissing(_) => ErrorKind::Missing,
+            Self::CrossingNotFinite => ErrorKind::StageFailed,
             Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -514,6 +555,8 @@ impl BlendFailure {
             | Self::BallsNest { .. }
             | Self::CreasePieceEndUnbuildable { .. }
             | Self::BandInputMissing(_)
+            | Self::CrossingInputMissing(_)
+            | Self::CrossingNotFinite
             | Self::NotCertified { .. } => false,
             Self::Failed(_)
             | Self::Missing(_)
@@ -548,6 +591,8 @@ impl BlendFailure {
             | Self::BallsNest { .. }
             | Self::CreasePieceEndUnbuildable { .. }
             | Self::BandInputMissing(_)
+            | Self::CrossingInputMissing(_)
+            | Self::CrossingNotFinite
             | Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -625,6 +670,12 @@ impl core::fmt::Display for BlendFailure {
             | Self::PassedOn { what, .. } => f.write_str(what),
             Self::Missing(what) => write!(f, "{what} is missing"),
             Self::BandInputMissing(input) => write!(f, "{} is missing", input.what()),
+            Self::CrossingInputMissing(input) => write!(f, "{} is missing", input.what()),
+            Self::CrossingNotFinite => write!(
+                f,
+                "{}: the rail's crossing of an edge is not judged from finite values",
+                self.class()
+            ),
             Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
             Self::NotCertified { halvings, stations } => write!(
                 f,
@@ -679,6 +730,17 @@ impl crate::SolidError {
     #[track_caller]
     pub(crate) fn blend_band_input_missing(operation: &'static str, input: BandInput) -> Self {
         Self::blend(operation, BlendFailure::BandInputMissing(input))
+    }
+
+    /// [`crate::SolidError::Failed`] for an input of a rail crossing's judgement that is not
+    /// there ([`BlendFailure::CrossingInputMissing`]), with status [`SM_ERR_NULL_POINTER`].
+    #[must_use]
+    #[track_caller]
+    pub(crate) fn blend_crossing_input_missing(
+        operation: &'static str,
+        input: CrossingInput,
+    ) -> Self {
+        Self::blend(operation, BlendFailure::CrossingInputMissing(input))
     }
 
     /// [`crate::SolidError::Failed`] for a value a blend routine is given or computes with
@@ -1307,6 +1369,8 @@ mod tests {
             | BlendFailure::BallsNest { .. }
             | BlendFailure::CreasePieceEndUnbuildable { .. }
             | BlendFailure::BandInputMissing(_)
+            | BlendFailure::CrossingInputMissing(_)
+            | BlendFailure::CrossingNotFinite
             | BlendFailure::NotCertified { .. } => None,
             BlendFailure::Failed(_) => Some("BlendFailure::Failed("),
             BlendFailure::Missing(_) => Some("BlendFailure::Missing("),
@@ -1356,6 +1420,8 @@ mod tests {
                 t: 0.0,
             },
             BlendFailure::BandInputMissing(BandInput::SharedFace),
+            BlendFailure::CrossingInputMissing(CrossingInput::SideEdgeCurve),
+            BlendFailure::CrossingNotFinite,
             BlendFailure::TrimLoopOpen,
             BlendFailure::TrimLoopDoesNotSeparate,
             BlendFailure::RemovalRefused(RemovalRefusal::FaceGrowsPastDomain),

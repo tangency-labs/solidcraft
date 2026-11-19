@@ -35,6 +35,7 @@ use crate::blend::fillet_solver::p1::{
     test_manifold_tangent_rollover_at, FilletSolver, FilletSolverOps,
 };
 use crate::curve::curve::Curve;
+use crate::error::blend::{BlendFailure, CrossingInput};
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::SolverOperation;
@@ -161,7 +162,9 @@ fn is_concave_edge_at(
         return Ok(false);
     };
     let radial = eu::radial(target, use_)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the material edge use's radial"))?;
+        .ok_or_else(|| {
+            SolidError::blend_crossing_input_missing(OP, CrossingInput::MaterialEdgeUseRadial)
+        })?;
     let options = eu2::StepOffOptions::default();
     let first = eu2::evaluate_binormal_step_off(k, target, use_, parameter, 0.0, &options)?;
     let second = eu2::evaluate_binormal_step_off(k, target, radial, parameter, 0.0, &options)?;
@@ -177,13 +180,10 @@ fn is_concave_edge_at(
 ///
 /// # Errors
 ///
-/// `SM_ERR` for a non-finite dot product.
+/// [`BlendFailure::CrossingNotFinite`] for a non-finite dot product.
 pub(super) fn concave_from_dots(first_dot: f64, second_dot: f64) -> Result<bool> {
     if !first_dot.is_finite() || !second_dot.is_finite() {
-        return Err(SolidError::blend_failed(
-            OP,
-            "the radial sector test at a crossing is not finite",
-        ));
+        return Err(SolidError::blend(OP, BlendFailure::CrossingNotFinite));
     }
     Ok(!(first_dot > -crate::math::EFF_ZERO && second_dot > -crate::math::EFF_ZERO))
 }
