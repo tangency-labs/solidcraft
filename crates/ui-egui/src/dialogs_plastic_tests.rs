@@ -220,7 +220,7 @@ fn heat_insert_from_face_picks() {
     let p = &c[0].1;
     assert_eq!(p["position"], json!([10.0, 10.0, 10.0]));
     assert_eq!((p["size"].as_str(), p["body"].as_str()), (Some("M3x5.7"), Some("Block")));
-    assert!(p.get("chamfer").is_none() && p.get("check").is_none(), "{p}");
+    assert!(p.get("chamfer").is_none() && p.get("part").is_none() && p.get("check").is_none(), "{p}");
     // A second pick on the same face adds a second insert there; a pick on an insert takes it out.
     let pick = |app: &SolveApp, d: &mut crate::dialogs::Dialog, x: f64| {
         let sel = face_sel(&app.session, Vec3::new(x, 10.0, 10.0)).unwrap();
@@ -231,17 +231,21 @@ fn heat_insert_from_face_picks() {
     pick(&app, &mut d, 20.5);
     assert_eq!(crate::hole_place::several_places(&app.session, &d.inputs[0].items).len(), 2, "the pick on the insert at x 20 took it out");
     let m4 = solidcraft_engine::cmd::heat_insert_sizes().position(|z| z.id == "M4x8.1").unwrap();
-    if let Kind::Plastic(Pl::HeatInsert { size, chamfer, warn, .. }) = &mut d.kind {
-        (*size, *chamfer, *warn) = (m4, true, true);
+    if let Kind::Plastic(Pl::HeatInsert { size, chamfer, part, warn, .. }) = &mut d.kind {
+        (*size, *chamfer, *part, *warn) = (m4, true, true, true);
     }
     let c = apply_commands(&app, &d).unwrap();
     let p = &c[0].1;
     assert_eq!(p["position"], json!([[10.0, 10.0, 10.0], [30.0, 10.0, 10.0]]));
-    assert_eq!((p["size"].as_str(), p["chamfer"].as_bool(), p["check"].as_str()), (Some("M4x8.1"), Some(true), Some("warn")));
+    assert_eq!(
+        (p["size"].as_str(), p["chamfer"].as_bool(), p["part"].as_bool(), p["check"].as_str()),
+        (Some("M4x8.1"), Some(true), Some(true), Some("warn"))
+    );
     let holes = |app: &SolveApp| app.session.doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::Hole { .. })).count();
     let before = holes(&app);
     run_all(&mut app, c);
     assert_eq!(holes(&app), before + 1, "one Heat-Set Insert feature for the picks of one face");
+    assert!(app.session.doc.parts.values().any(|p| p.family == "heat_set_insert"), "the inserts are placed as a standard part");
     // A chamfer width and a depth given: the command takes them in mm; left empty, its defaults.
     let mut sized = d.clone();
     if let Kind::Plastic(Pl::HeatInsert { chamfer_size, depth, .. }) = &mut sized.kind {
@@ -294,27 +298,30 @@ fn heat_insert_at_sketch_points() {
 }
 
 /// Edit Feature on a Heat-Set Insert opens its own dialog with the feature's size, places and
-/// options; OK rebuilds that one feature.
+/// options; OK rebuilds that one feature and its insert parts follow.
 #[test]
 fn heat_insert_edits_as_one_feature() {
     let mut app = app_with(&[
         ("solid.box", json!({"length": 40, "width": 20, "height": 12, "body_name": "Block"})),
-        ("plastic.heat_insert", json!({"position": [[10, 10, 12], [30, 10, 12]], "size": "M3", "chamfer": true})),
+        ("plastic.heat_insert", json!({"position": [[10, 10, 12], [30, 10, 12]], "size": "M3", "part": true, "chamfer": true})),
     ]);
     let f = app.session.doc.features.iter().find(|f| matches!(f.kind, FeatureKind::Hole { .. })).unwrap().clone();
     let mut e = edit_dialog(&app, f.id, None).unwrap();
     let m3 = solidcraft_engine::cmd::heat_insert_sizes().position(|z| z.id == "M3x5.7").unwrap();
-    let Kind::Plastic(Pl::HeatInsert { size, chamfer, chamfer_size, depth, .. }) = &mut e.kind else { panic!("{:?}", e.kind) };
-    assert_eq!((*size, *chamfer, chamfer_size.as_str(), depth.as_str()), (m3, true, "", ""), "the size's own values show as empty");
+    let Kind::Plastic(Pl::HeatInsert { size, chamfer, chamfer_size, depth, part, .. }) = &mut e.kind else { panic!("{:?}", e.kind) };
+    assert_eq!((*size, *chamfer, chamfer_size.as_str(), depth.as_str(), *part), (m3, true, "", "", true), "the size's own values show as empty");
     assert_eq!(crate::hole_place::several_places(&app.session, &e.inputs[0].items).len(), 2, "both places come back");
     *size = solidcraft_engine::cmd::heat_insert_sizes().position(|z| z.id == "M4x8.1").unwrap();
     let c = apply_commands(&app, &e).unwrap();
     let ids: Vec<&str> = c.iter().map(|(id, _)| id.as_str()).collect();
-    assert_eq!(ids, ["timeline.redefine"]);
+    assert_eq!(ids, ["timeline.redefine", "plastic.heat_insert_parts"]);
     run_all(&mut app, c);
     let holes: Vec<_> = app.session.doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::Hole { .. })).collect();
     assert_eq!(holes.len(), 1, "still one feature");
-    assert!(matches!(&holes[0].kind, FeatureKind::Hole { insert: Some(i), .. } if i.size == "M4x8.1"));
+    assert!(matches!(&holes[0].kind, FeatureKind::Hole { insert: Some(i), .. } if i.size == "M4x8.1" && i.component.is_some()));
+    let m4_parts = app.session.doc.parts.values().filter(|p| p.family == "heat_set_insert" && p.size == "M4x8.1").count();
+    let m3_parts = app.session.doc.parts.values().filter(|p| p.family == "heat_set_insert" && p.size != "M4x8.1").count();
+    assert_eq!((m4_parts, m3_parts), (1, 0), "one M4 part placed twice; the M3 part is gone");
 }
 
 /// A click on a sketch point lands on the face under it, exactly at the point: the insert is bound

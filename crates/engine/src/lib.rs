@@ -805,6 +805,10 @@ pub struct Session {
     stop: solidcraft_kernel::Stop,
     /// A copy of a design ([`Session::scratch`]), sharing its token.
     is_copy: bool,
+    /// A copy that only shows features: the one Edit Feature (`timeline.redefine`) tries a
+    /// feature's new definition on, and a live preview's. Commands leave out what they do beside
+    /// their feature (a Heat-Set Insert's parts).
+    features_only: bool,
     world_cache: std::sync::Mutex<Option<WorldCache>>,
     /// The design the joints were last solved for, as the solve left it, and the model it read
     /// (see [`Session::solve_joints`]).
@@ -1223,6 +1227,7 @@ impl Session {
         Session {
             stop: Default::default(),
             is_copy: false,
+            features_only: false,
             saved: doc.clone(),
             doc,
             model,
@@ -2949,6 +2954,7 @@ impl Session {
         Session {
             stop: self.stop.clone(),
             is_copy: true,
+            features_only: false,
             doc: self.doc.clone(),
             model: self.model.clone(),
             undo: Vec::new(),
@@ -3446,6 +3452,7 @@ impl Session {
     }
 
     fn preview_in_place(mut self, commands: &[(String, Value)], step: Option<&std::sync::atomic::AtomicUsize>) -> Result<(Self, Vec<Value>)> {
+        self.features_only = true;
         if commands.is_empty() {
             return Err(EngineError::Other("nothing to preview".into()));
         }

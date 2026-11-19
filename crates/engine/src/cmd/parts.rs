@@ -50,7 +50,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "family (socket_head_cap_screw | button_head_cap_screw | countersunk_socket_screw | hex_bolt | hex_nut | washer | set_screw | dowel_pin | bearing | \
          hex_bolt_gost | socket_head_cap_screw_gost | set_screw_gost | hex_nut_gost | hex_nut_thin_gost | washer_gost | washer_large_gost | \
-         dowel_pin_gost | hex_cap_screw_inch | hex_nut_inch | washer_sae | washer_uss); size (\"M6\", \"608\" for bearings, \"1/2-13 UNC\" for inch screws and nuts, \
+         dowel_pin_gost | hex_cap_screw_inch | hex_nut_inch | washer_sae | washer_uss | heat_set_insert); size (\"M6\", \"608\" for bearings, \"1/2-13 UNC\" for inch screws and nuts, \"M3x5.7\" for heat-set inserts, \
          \"1/2\" for inch washers); length? (mm, inch parts too; screws, bolts, set screws, pins; default a standard length near 2.5 d); \
          at?: [x,y,z] on a hole's rim or wall (the part seats on the hole's face with a rigid joint, head on the picked face and \
          shank into the hole, whichever way the face points) or on a flat face (seated at that point, head out of the face), or a list of \
@@ -85,6 +85,7 @@ const FAMILIES: &[(&str, &str, &str)] = &[
     ("set_screw", "Hex socket set screw, flat point", "ISO 4026"),
     ("dowel_pin", "Parallel pin (dowel)", "ISO 8734"),
     ("bearing", "Deep groove ball bearing (envelope)", "ISO 15 (6000/6200/600 series)"),
+    ("heat_set_insert", "Heat-set threaded insert", ""),
     ("hex_bolt_gost", "Hex head bolt", "GOST 7798-70"),
     ("socket_head_cap_screw_gost", "Socket head cap screw", "GOST 11738-84"),
     ("set_screw_gost", "Hex socket set screw, flat point", "GOST 11074-93"),
@@ -581,6 +582,17 @@ fn size_with_length(family: &str, size: &str, len: f64) -> String {
     }
 }
 
+/// A heat-set insert's bore: its thread's major diameter (metric from the table, inch from the
+/// unified catalogue), or three quarters of its hole where the thread isn't catalogued.
+fn insert_bore(z: &super::heat_insert::InsertSize) -> f64 {
+    metric(z.thread)
+        .map(|m| m.0)
+        .or_else(|| unified(&format!("{} UNC", z.thread.trim_start_matches('#'))).map(|u| u.1))
+        .or_else(|| unified(&format!("{} UNC", z.thread)).map(|u| u.1))
+        .unwrap_or(0.75 * z.hole)
+        .min(z.hole)
+}
+
 fn metric(size: &str) -> Option<(f64, f64)> {
     METRIC.iter().find(|(s, _, _)| s.eq_ignore_ascii_case(size)).map(|(_, d, p)| (*d, *p))
 }
@@ -623,6 +635,8 @@ enum Shape {
     Ring { d_in: f64, d_out: f64, h: f64 },
     /// A cylinder down −z with a socket in its top (set screw), or plain (pin).
     Rod { d: f64, pitch: Option<f64>, len: f64, socket: Option<(f64, f64)> },
+    /// A sleeve down −z with a bore through it (heat-set insert), its top at z = 0.
+    Sleeve { d_in: f64, d_out: f64, len: f64 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -769,6 +783,10 @@ fn shape(family: &str, size: &str, length: Option<f64>) -> std::result::Result<S
             let (_, bore, od, w) = BEARINGS.iter().find(|r| r.0 == size.trim()).copied().ok_or_else(|| need("bearing"))?;
             Shape::Ring { d_in: bore, d_out: od, h: w }
         }
+        "heat_set_insert" => {
+            let z = super::heat_insert::find_size(size).ok_or_else(|| need("heat-set insert"))?;
+            Shape::Sleeve { d_in: insert_bore(z), d_out: z.outer, len: z.length }
+        }
         o => return Err(format!("unknown part family `{o}` (parts.library lists them)")),
     })
 }
@@ -905,6 +923,9 @@ fn build(s: &mut Session, sh: &Shape, body_name: Option<&str>) -> Result<()> {
         Shape::Ring { d_in, d_out, h } => {
             revolve(s, &[(d_in / 2.0, 0.0), (d_out / 2.0, 0.0), (d_out / 2.0, h), (d_in / 2.0, h)], "new", body_name)?;
         }
+        Shape::Sleeve { d_in, d_out, len } => {
+            revolve(s, &[(d_in / 2.0, -len), (d_out / 2.0, -len), (d_out / 2.0, 0.0), (d_in / 2.0, 0.0)], "new", body_name)?;
+        }
         Shape::Rod { d, pitch, len, socket } => {
             revolve(s, &[(0.0, -len), (d / 2.0, -len), (d / 2.0, 0.0), (0.0, 0.0)], "new", body_name)?;
             if let Some((af, t)) = socket {
@@ -942,6 +963,9 @@ fn library(_s: &mut Session, p: &Value) -> Result<Value> {
                 table.iter().map(|r| json!({"size": r.0, "inner": r.1, "outer": r.2, "thickness": r.3})).collect()
             }
             "dowel_pin_gost" => GOST_PIN.iter().map(|d| json!({"size": format!("{d}"), "d": d})).collect(),
+            "heat_set_insert" => super::heat_insert::all_sizes()
+                .map(|z| json!({"size": z.id, "outer": z.outer, "length": z.length, "hole_diameter": z.hole, "min_wall": z.min_wall, "bore": insert_bore(z)}))
+                .collect(),
             "hex_cap_screw_inch" => INCH_HEX_CAP
                 .iter()
                 .flat_map(|r| unified_sizes(r.0).into_iter().map(move |t| json!({"size": t.designation, "d": t.major_diameter, "pitch": t.pitch, "across_flats": r.1 * INCH, "head_height": r.2 * INCH})))
@@ -1031,6 +1055,8 @@ fn identity(family: &str, size: &str, sh: &Shape) -> (String, String) {
         "hex_cap_screw_inch" => "ASME B18.2.1",
         "hex_nut_inch" => "ASME B18.2.2",
         "washer_sae" | "washer_uss" => "ANSI B18.22.1",
+        // No standard: the kind of part leads its number instead.
+        "heat_set_insert" => "Heat-set insert",
         _ => "",
     };
     let series = match family {
@@ -1078,6 +1104,7 @@ fn label(family: &str) -> &'static str {
         "hex_nut_inch" => "Hex Nut",
         "washer_sae" => "SAE Washer",
         "washer_uss" => "USS Washer",
+        "heat_set_insert" => "Heat-Set Insert",
         _ => "Bearing",
     }
 }
@@ -1094,7 +1121,7 @@ fn length_param(p: &Value, cmd: &str) -> Result<Option<f64>> {
 
 /// Building the part and seating it runs many feature and joint commands: as in
 /// [`resize_atomic`], they run on a scratch session and the insert is one undo step.
-fn insert_atomic(s: &mut Session, p: &Value) -> Result<Value> {
+pub(super) fn insert_atomic(s: &mut Session, p: &Value) -> Result<Value> {
     let mut computed = s.scratch();
     let result = insert(&mut computed, p)?;
     computed.undo.clear();
@@ -1129,7 +1156,15 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     // Hardware is fitted to other parts: it starts free even as the design's first part (#2804).
     let c = run(s, "component.create", json!({"name": name, "grounded": false}))?;
     let (comp, occ) = (c["component"].as_u64().unwrap_or(0), c["occurrence"].as_u64().unwrap_or(0));
+    let before: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
     build(s, &sh, None)?;
+    // A heat-set insert is brass: its weight and look in the design follow.
+    if matches!(sh, Shape::Sleeve { .. }) {
+        let made: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).filter(|n| !before.contains(n)).collect();
+        if !made.is_empty() {
+            run(s, "material.assign", json!({"bodies": made, "material": "Brass"}))?;
+        }
+    }
     s.doc_mut().parts.insert(comp, solidcraft_doc::StandardPart { family: family.clone(), size: size.clone(), length: shape_len(&sh) });
     set_identity(s, comp, identity(&family, &size, &sh), None);
     run(s, "component.activate", json!({"component": active}))?;

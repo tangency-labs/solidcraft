@@ -29,11 +29,13 @@ pub struct PartsInsertParams {
     /// The family, as `parts.library` lists it: socket_head_cap_screw, button_head_cap_screw,
     /// countersunk_socket_screw, hex_bolt, hex_nut, washer, set_screw, dowel_pin, bearing, hex_bolt_gost,
     /// socket_head_cap_screw_gost, set_screw_gost, hex_nut_gost, hex_nut_thin_gost, washer_gost,
-    /// washer_large_gost, dowel_pin_gost, hex_cap_screw_inch, hex_nut_inch, washer_sae or washer_uss.
+    /// washer_large_gost, dowel_pin_gost, hex_cap_screw_inch, hex_nut_inch, washer_sae, washer_uss or
+    /// heat_set_insert.
     #[serde(deserialize_with = "family")]
     pub family: String,
     /// The size, as `parts.library` lists it: `M6`, `608` for a bearing, `1/2-13 UNC` for an
-    /// inch screw or nut, `1/2` for an inch washer.
+    /// inch screw or nut, `1/2` for an inch washer, `M3x5.7` or `M3` for a heat-set insert (as
+    /// `plastic.heat_insert_sizes` lists them).
     #[serde(deserialize_with = "size")]
     pub size: String,
     #[serde(default, deserialize_with = "length")]

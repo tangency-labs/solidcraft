@@ -2382,7 +2382,7 @@ fn joint_menu(
 fn timeline_joint_items(app: &SolveApp, ids: Option<&[u64]>) -> Vec<(u64, String, JointKind, bool)> {
     let members: std::collections::BTreeSet<u64> = match ids {
         Some(ids) => ids.iter().copied().collect(),
-        None => app.session.doc.timeline_groups.iter().flat_map(|group| group.joints.iter().copied()).collect(),
+        None => app.session.doc.timeline_groups.iter().flat_map(|group| group.joints.iter().copied()).chain(insert_joints(app)).collect(),
     };
     app.session
         .doc
@@ -2496,11 +2496,36 @@ fn joint_group_button(
 /// Joints after the features in the timeline, except those a feature folder holds (`held`):
 /// double-click edits, the menu drives, suppresses or deletes. Returns the x after them.
 pub fn timeline_joints(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter, x: f32, r: egui::Rect, held: &HashSet<u64>) -> f32 {
-    let loose: Vec<u64> = app.session.doc.assembly.joints.iter().map(|j| j.id).filter(|id| !held.contains(id)).collect();
+    let inserts = insert_joints(app);
+    let loose: Vec<u64> = app.session.doc.assembly.joints.iter().map(|j| j.id).filter(|id| !held.contains(id) && !inserts.contains(id)).collect();
     if loose.is_empty() {
         return x;
     }
     joint_chips(app, ui, p, x + 8.0, r, &loose, JointRun::Loose)
+}
+
+/// The joints that seat the brass parts a Heat-Set Insert feature keeps: the feature is their one
+/// entry in the History, so they stay out of it as the parts' own history does, until the History
+/// shows its hidden entries.
+fn insert_joints(app: &SolveApp) -> HashSet<u64> {
+    let doc = &app.session.doc;
+    if app.tree.history_show_hidden || doc.assembly.joints.is_empty() {
+        return HashSet::new();
+    }
+    let kept: HashSet<u64> = doc
+        .features
+        .iter()
+        .filter_map(|f| match &f.kind {
+            solidcraft_engine::doc::FeatureKind::Hole { insert: Some(insert), .. } => insert.component,
+            _ => None,
+        })
+        .filter(|c| doc.component_history_hidden(*c))
+        .collect();
+    if kept.is_empty() {
+        return HashSet::new();
+    }
+    let seats = |o: &solidcraft_engine::doc::joints::JointOrigin| doc.occurrences.iter().any(|x| x.id == o.occurrence && kept.contains(&x.component));
+    doc.assembly.joints.iter().filter(|j| seats(&j.a) || seats(&j.b)).map(|j| j.id).collect()
 }
 
 /// The joints `ids` as chips from `x` on, grouped into one chip (open to show each) when there

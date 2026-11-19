@@ -6118,7 +6118,9 @@ pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>
                 }
             }
         }
-        return Ok(vec![("timeline.redefine".into(), json!({"feature": id, "command": cmd, "params": params}))]);
+        // A Heat-Set Insert's parts follow its edit: the size, the holes and whether it has them.
+        let parts = (cmd == "plastic.heat_insert").then(|| ("plastic.heat_insert_parts".to_string(), json!({"feature": id})));
+        return Ok(std::iter::once(("timeline.redefine".into(), json!({"feature": id, "command": cmd, "params": params}))).chain(parts).collect());
     }
     Ok(cmds)
 }

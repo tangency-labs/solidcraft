@@ -137,6 +137,11 @@ pub struct HeatInsertParams {
     /// a 90° countersink. Default: none.
     #[serde(default)]
     pub chamfer: Option<ChamferParam>,
+    /// Also place the inserts themselves in the holes: a brass part from the size table
+    /// (`parts.insert`'s `heat_set_insert` family), one component placed once per hole and seated
+    /// with a rigid joint, so the bill of materials counts them. Needs `size`. Default: false.
+    #[serde(default)]
+    pub part: Option<bool>,
     /// What a wall or a floor thinner than its least value does. Default: stop.
     #[serde(default)]
     pub check: Option<InsertCheck>,
@@ -196,6 +201,15 @@ pub struct HeatInsertResult {
     pub min_floor: f64,
     /// Whether the walls and the floors were checked (false with `check: off`).
     pub checked: bool,
+    /// With `part`: the insert part's component.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub component: Option<u64>,
+    /// With `part`: the insert part's occurrences, one per hole in the order of `holes`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub occurrences: Option<Vec<u64>>,
+    /// With `part`: the rigid joints that seat the insert part, one per hole.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub joints: Option<Vec<u64>>,
     /// With `check: warn`: each wall or floor that is thinner than asked.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
@@ -245,9 +259,33 @@ pub struct HeatInsertSizesResult {
     pub param_warnings: Vec<String>,
 }
 
+/// Make the insert parts of a Heat-Set Insert match it after an edit: the component it placed
+/// before goes, and with its `part` on, one of its size is placed once in each of its holes.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct HeatInsertPartsParams {
+    /// The Heat-Set Insert feature, by id or name.
+    pub feature: IdOrName,
+}
+
+/// What `plastic.heat_insert_parts` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct HeatInsertPartsResult {
+    /// The insert parts' component; absent when the feature places none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub component: Option<u64>,
+    /// Its occurrences, one per hole.
+    pub occurrences: Vec<u64>,
+    /// The rigid joints that seat them, one per hole.
+    pub joints: Vec<u64>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{HeatInsertParams, HeatInsertSizesParams};
+    use super::{HeatInsertParams, HeatInsertPartsParams, HeatInsertSizesParams};
     use crate::schema::input_schema_for;
     use crate::schema::tests::assert_keys;
 
@@ -267,6 +305,7 @@ mod tests {
                 "min_wall",
                 "name",
                 "outer_diameter",
+                "part",
                 "points",
                 "position",
                 "size",
@@ -274,5 +313,6 @@ mod tests {
             ],
         );
         assert_keys(input_schema_for::<HeatInsertSizesParams>(), &["thread"]);
+        assert_keys(input_schema_for::<HeatInsertPartsParams>(), &["feature"]);
     }
 }

@@ -1,0 +1,66 @@
+{
+  "en": {
+    "cmd.plastic_heat_insert_parts": "Update Heat-Set Insert Parts",
+    "parts.dimension.hole_diameter": "Hole diameter",
+    "parts.dimension.length": "Length",
+    "parts.dimension.min_wall": "Least wall",
+    "parts.family.heat_set_insert": "Heat-set threaded insert",
+    "ui.heat_insert.part": "Place Insert Parts"
+  },
+  "de": {
+    "cmd.plastic_heat_insert_parts": "Gewindeeinsatz-Teile aktualisieren",
+    "parts.dimension.hole_diameter": "Lochdurchmesser",
+    "parts.dimension.length": "Länge",
+    "parts.dimension.min_wall": "Mindestwand",
+    "parts.family.heat_set_insert": "Gewindeeinsatz zum Einschmelzen",
+    "ui.heat_insert.part": "Einsätze als Teile einfügen"
+  },
+  "ja": {
+    "cmd.plastic_heat_insert_parts": "熱圧入インサート部品を更新",
+    "parts.dimension.hole_diameter": "穴径",
+    "parts.dimension.length": "長さ",
+    "parts.dimension.min_wall": "最小肉厚",
+    "parts.family.heat_set_insert": "熱圧入ねじインサート",
+    "ui.heat_insert.part": "インサート部品を配置"
+  },
+  "zh": {
+    "cmd.plastic_heat_insert_parts": "更新热熔螺母零件",
+    "parts.dimension.hole_diameter": "孔径",
+    "parts.dimension.length": "长度",
+    "parts.dimension.min_wall": "最小壁厚",
+    "parts.family.heat_set_insert": "热熔螺纹螺母",
+    "ui.heat_insert.part": "放置螺母零件"
+  },
+  "ko": {
+    "cmd.plastic_heat_insert_parts": "열융착 인서트 부품 업데이트",
+    "parts.dimension.hole_diameter": "구멍 지름",
+    "parts.dimension.length": "길이",
+    "parts.dimension.min_wall": "최소 벽 두께",
+    "parts.family.heat_set_insert": "열융착 나사 인서트",
+    "ui.heat_insert.part": "인서트 부품 배치"
+  },
+  "ar": {
+    "cmd.plastic_heat_insert_parts": "تحديث قطع الحشوات الملولبة بالحرارة",
+    "parts.dimension.hole_diameter": "قطر الثقب",
+    "parts.dimension.length": "الطول",
+    "parts.dimension.min_wall": "أقل سماكة للجدار",
+    "parts.family.heat_set_insert": "حشوة ملولبة تُثبَّت بالحرارة",
+    "ui.heat_insert.part": "وضع الحشوات كقطع"
+  },
+  "he": {
+    "cmd.plastic_heat_insert_parts": "עדכון חלקי תותבי הברגה בחום",
+    "parts.dimension.hole_diameter": "קוטר חור",
+    "parts.dimension.length": "אורך",
+    "parts.dimension.min_wall": "דופן מינימלית",
+    "parts.family.heat_set_insert": "תותב הברגה המותקן בחום",
+    "ui.heat_insert.part": "הוספת התותבים כחלקים"
+  },
+  "vi": {
+    "cmd.plastic_heat_insert_parts": "Cập nhật chi tiết đai ốc cấy nhiệt",
+    "parts.dimension.hole_diameter": "Đường kính lỗ",
+    "parts.dimension.length": "Chiều dài",
+    "parts.dimension.min_wall": "Thành tối thiểu",
+    "parts.family.heat_set_insert": "Đai ốc ren cấy nhiệt",
+    "ui.heat_insert.part": "Đặt đai ốc như chi tiết"
+  }
+}

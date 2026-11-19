@@ -2581,6 +2581,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     // Run the constructor on a scratch session: failed edits must not disturb sketch mode,
     // selections, component authoring state or the original feature's definition.
     let mut trial = s.scratch();
+    trial.features_only = true;
     // What the trial computes is kept for the session's own evaluation at the end: the cache may
     // hold only the last few states of a large design, which would be computed twice.
     let kept = s.model.kept();
@@ -2634,6 +2635,11 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         *sketch = Some(*before);
         *profiles = picked.clone();
+    }
+    // A Heat-Set Insert keeps the insert parts it placed through an edit; `plastic.heat_insert_parts`
+    // then makes them match it.
+    if let (FeatureKind::Hole { insert: Some(before), .. }, FeatureKind::Hole { insert: Some(after), .. }) = (&old.kind, &mut new.kind) {
+        after.component = before.component;
     }
     // An old design's Join To Object keeps the body it runs to apart through an edit (#8151).
     if let (FeatureKind::Extrude { extent: before, .. }, FeatureKind::Extrude { extent: after, .. }) = (&old.kind, &mut new.kind)

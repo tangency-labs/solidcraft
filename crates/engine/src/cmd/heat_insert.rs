@@ -9,19 +9,23 @@
 
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
+use solidcraft_doc::FeatureKind;
+use solidcraft_doc::expr::Kind;
 use solidcraft_geom::prelude::*;
 use solidcraft_kernel::{Body, PointClass};
 
 use super::CommandSpec;
 use crate::params::{bad, num, str_, string_list, vec3};
 use crate::schema::heat_insert::{
-    HeatInsertParams, HeatInsertResult, HeatInsertSizesParams, HeatInsertSizesResult, InsertHole, InsertSizeInfo, MAX_INSERTS,
+    HeatInsertParams, HeatInsertPartsParams, HeatInsertPartsResult, HeatInsertResult, HeatInsertSizesParams, HeatInsertSizesResult, InsertHole,
+    InsertSizeInfo, MAX_INSERTS,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 const HEAT_INSERT_CONTRACT: TypedContract<HeatInsertParams> = TypedContract::new();
 const HEAT_INSERT_SIZES_CONTRACT: TypedContract<HeatInsertSizesParams> = TypedContract::new();
+const HEAT_INSERT_PARTS_CONTRACT: TypedContract<HeatInsertPartsParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("plastic.heat_insert", "Heat-Set Insert", crate::checked!("plastic.heat_insert", heat_insert))
@@ -32,9 +36,15 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "position: [x,y,z] on a flat face, or a list of them | sketch + points? (the sketch's points; one Hole feature that follows them); size?: \"M3x5.7\", \"#4-40x5.7\", \"M3\" (see plastic.heat_insert_sizes); body?; \
              outer_diameter?, length?, hole_diameter?, min_wall?, min_floor? (default min_wall); extra_depth? (default 1) | depth?; \
+             part?: bool (also place a brass insert part in each hole: one component the BOM counts, placed once per hole; needs size); \
              chamfer?: width in mm | true (a 45° lead-in at the mouth, at most half the hole's depth; true: out to the insert's outer diameter; one wider than the insert is part of the wall check); \
              check?: stop|warn|off (default stop: refuse a thin wall or floor; every point is checked before any hole is drilled); name? → holes: [{position, body, feature, name, wall?, floor?}]",
         ),
+    CommandSpec::new("plastic.heat_insert_parts", "Update Heat-Set Insert Parts", crate::checked!("plastic.heat_insert_parts", heat_insert_parts))
+        .icon("heat_insert")
+        .contract(&HEAT_INSERT_PARTS_CONTRACT)
+        .output(output_schema_for::<HeatInsertPartsResult>)
+        .params("feature: id|name of a Heat-Set Insert → component?, occurrences, joints: replaces the insert parts it placed to match it (size, holes); none with its `part` off"),
     CommandSpec::new("plastic.heat_insert_sizes", "Heat-Set Insert Sizes", crate::checked!("plastic.heat_insert_sizes", sizes))
         .icon("inspect")
         .noundo()
@@ -177,6 +187,13 @@ fn heat_insert(s: &mut Session, p: &Value) -> Result<Value> {
             _ => return Err(bad(cmd, "`chamfer` must be true or a width in mm, more than 0")),
         },
     };
+    // The inserts themselves, placed in the holes as one part of its own (a component the bill
+    // of materials counts, placed once per hole): from the size table, so it needs a size.
+    let part = match p.get("part") {
+        None | Some(Value::Null) | Some(Value::Bool(false)) => None,
+        Some(Value::Bool(true)) => Some(size.ok_or_else(|| bad(cmd, "`part` needs a `size` (the part is built from the size table)"))?),
+        Some(_) => return Err(bad(cmd, "`part` must be true or false")),
+    };
     let check = match str_(p, "check").map(str::to_ascii_lowercase).as_deref() {
         None | Some("stop") => Some(true),
         Some("warn") => Some(false),
@@ -229,13 +246,15 @@ fn heat_insert(s: &mut Session, p: &Value) -> Result<Value> {
         }
         hp
     };
-    // What the feature keeps of the insert: the check it runs whenever it is built.
+    // What the feature keeps of the insert: the check it runs whenever it is built, and the parts.
     let spec = solidcraft_doc::HeatInsert {
         size: size.map(|z| z.id.to_string()).unwrap_or_default(),
         outer_diameter: outer,
         length: insert_length,
         min_wall,
         min_floor,
+        part: part.is_some(),
+        component: None,
     };
     let made = |r: &Value| {
         (r.get("feature").and_then(Value::as_u64).unwrap_or_default(), r.get("name").and_then(Value::as_str).unwrap_or_default().to_string())
@@ -282,6 +301,23 @@ fn heat_insert(s: &mut Session, p: &Value) -> Result<Value> {
             }
         }
     }
+    // The insert parts, placed by each feature; not while Edit Feature tries the new definition
+    // on a copy of the design (`timeline.redefine`, which `plastic.heat_insert_parts` follows),
+    // nor in a live preview.
+    let mut inserted = (None, Vec::new(), Vec::new());
+    if part.is_some() && !s.features_only {
+        let mut done: Vec<u64> = Vec::new();
+        for (f, _) in &features {
+            if done.contains(f) {
+                continue;
+            }
+            done.push(*f);
+            let (c, o, j) = sync_parts(s, *f)?;
+            inserted.0 = inserted.0.or(c);
+            inserted.1.extend(o);
+            inserted.2.extend(j);
+        }
+    }
     let first_feature = features.first().map(|f| f.0).unwrap_or_default();
     let holes = placed
         .into_iter()
@@ -301,10 +337,85 @@ fn heat_insert(s: &mut Session, p: &Value) -> Result<Value> {
         min_floor,
         checked: check.is_some(),
         feature: first_feature,
+        component: inserted.0,
+        occurrences: (!inserted.1.is_empty()).then_some(inserted.1),
+        joints: (!inserted.2.is_empty()).then_some(inserted.2),
         warnings,
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+/// Make the insert parts of Heat-Set Insert `feature` match it: the component it placed before
+/// goes, and with `part` on, one component of its size is placed once in each of its holes, seated
+/// on a point of each hole's wall. The feature keeps the new component. Returns it, its
+/// occurrences and its joints.
+fn sync_parts(s: &mut Session, feature: u64) -> Result<(Option<u64>, Vec<u64>, Vec<u64>)> {
+    let cmd = "plastic.heat_insert_parts";
+    let f = s.doc.feature(feature).cloned().ok_or_else(|| bad(cmd, format!("no feature {feature}")))?;
+    let FeatureKind::Hole { insert: Some(spec), position, more, points, direction, diameter, depth, hole: kind, .. } = &f.kind else {
+        return Err(bad(cmd, format!("`{}` is not a Heat-Set Insert", f.name)));
+    };
+    if let Some(old) = spec.component.filter(|c| s.doc.components.iter().any(|x| x.id == *c)) {
+        super::component::delete(s, &json!({"component": old}))?;
+    }
+    let set = |s: &mut Session, component: Option<u64>| {
+        if let Some(FeatureKind::Hole { insert: Some(spec), .. }) = s.doc_mut().feature_mut(feature).map(|f| &mut f.kind) {
+            spec.component = component;
+        }
+    };
+    if !spec.part {
+        set(s, None);
+        return Ok((None, Vec::new(), Vec::new()));
+    }
+    if spec.size.is_empty() {
+        return Err(bad(cmd, "the insert parts need a size from the table"));
+    }
+    let hole = s.doc.eval(diameter, Kind::Length).map_err(|e| bad(cmd, e.to_string()))?;
+    let depth = match depth {
+        Some(d) => s.doc.eval(d, Kind::Length).map_err(|e| bad(cmd, e.to_string()))?,
+        None => spec.length + 1.0,
+    };
+    let chamfer = match kind {
+        solidcraft_doc::HoleKind::Countersink { cs_diameter, .. } => s.doc.eval(cs_diameter, Kind::Length).ok().map(|c| (c - hole) / 2.0),
+        _ => None,
+    };
+    let into = direction.0;
+    let at: Vec<Vec3> = match points {
+        Some(sp) if !sp.single => {
+            let st = s.model.state();
+            let ss = st.sketch(sp.sketch.0).ok_or_else(|| bad(cmd, "the feature's sketch is not evaluated"))?;
+            sp.ids.iter().filter_map(|id| ss.sketch.points.iter().find(|q| &q.id == id)).map(|q| ss.plane.to_world(q.pos)).collect()
+        }
+        _ => std::iter::once(position.0).chain(more.iter().map(|m| m.0)).collect(),
+    };
+    // A point on each hole's wall, below a chamfer, as Insert Part seats a screw.
+    let across = into.cross(if into.x.abs() < 0.9 { Vec3::X } else { Vec3::Y }).normalized().unwrap_or(Vec3::X);
+    let walls: Vec<[f64; 3]> =
+        at.iter().map(|a| *a + into * (chamfer.unwrap_or(0.0) + (depth / 2.0).min(0.5)) + across * (hole / 2.0)).map(|w| [w.x, w.y, w.z]).collect();
+    let r = super::parts::insert_atomic(s, &json!({"family": "heat_set_insert", "size": spec.size, "at": walls}))?;
+    let component = r.get("component").and_then(Value::as_u64);
+    let ids = |k: &str| r.get(k).and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_u64).collect::<Vec<_>>()).unwrap_or_default();
+    // The feature is the one entry in the History: how the brass part is built stays out of it.
+    if let Some(c) = component.and_then(|c| s.doc_mut().components.iter_mut().find(|x| x.id == c)) {
+        c.history_hidden = true;
+    }
+    set(s, component);
+    Ok((component, ids("occurrences"), ids("joints")))
+}
+
+fn heat_insert_parts(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "plastic.heat_insert_parts";
+    let key = match p.get("feature") {
+        Some(Value::Number(n)) => n.to_string(),
+        Some(Value::String(t)) => t.clone(),
+        _ => return Err(bad(cmd, "`feature` must be the Heat-Set Insert's id or name")),
+    };
+    let feature = s.doc.find_feature(&key).map(|f| f.id).ok_or_else(|| bad(cmd, format!("no feature `{key}`")))?;
+    // A live preview shows the feature alone.
+    let (component, occurrences, joints) = if s.features_only { (None, Vec::new(), Vec::new()) } else { sync_parts(s, feature)? };
+    serde_json::to_value(HeatInsertPartsResult { component, occurrences, joints, param_warnings: Vec::new() })
+        .map_err(|e| EngineError::Other(e.to_string()))
 }
 
 /// Where the inserts go, in world coordinates: the points of `position`, or of `sketch` (its
@@ -577,6 +688,46 @@ mod tests {
     }
 
     #[test]
+    fn with_part_each_hole_gets_a_brass_insert_the_bill_of_materials_counts() {
+        use std::f64::consts::PI;
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 10, "body_name": "Block"}));
+        let undo = s.undo.len();
+        let r = run(&mut s, "plastic.heat_insert", json!({"position": [[10, 10, 10], [30, 10, 10]], "size": "M3", "part": true}));
+        assert_eq!(s.undo.len(), undo + 1, "the holes and their parts are one undo step");
+        assert!(r["component"].as_u64().is_some(), "{r}");
+        assert_eq!(r["occurrences"].as_array().map(Vec::len), Some(2), "one placement per hole: {r}");
+        assert_eq!(r["joints"].as_array().map(Vec::len), Some(2), "{r}");
+        // The feature is the History's one entry: the part's sketch and revolve stay out of it.
+        let part = r["component"].as_u64().and_then(|c| s.doc.components.iter().find(|x| x.id == c));
+        assert!(part.is_some_and(|c| c.history_hidden), "{r}");
+        // One row for the two inserts, counted twice.
+        let bom = run(&mut s, "assembly.bom", json!({}));
+        let rows = bom["rows"].as_array().cloned().unwrap_or_default();
+        let insert: Vec<&serde_json::Value> = rows.iter().filter(|r| r["part_number"] == "Heat-set insert M3x5.7").collect();
+        assert_eq!(insert.len(), 1, "{bom}");
+        assert_eq!(insert.first().map(|r| r["count"].clone()), Some(json!(2)), "{bom}");
+        assert_eq!(insert.first().map(|r| r["description"].clone()), Some(json!("Heat-set threaded insert M3x5.7")), "{bom}");
+        // Each insert is a brass sleeve, Ø4.6 outside and Ø3 bore, 5.7 long.
+        let m = run(&mut s, "inspect.measure", json!({}));
+        let sleeves: Vec<&serde_json::Value> =
+            m["bodies"].as_array().into_iter().flatten().filter(|b| b["material"].as_str().is_some_and(|x| x == "Brass")).collect();
+        assert!(!sleeves.is_empty(), "{m}");
+        let expected = PI * (2.3 * 2.3 - 1.5 * 1.5) * 5.7;
+        for b in sleeves {
+            let v = b["volume_mm3"].as_f64().unwrap_or(f64::NAN);
+            assert!((v - expected).abs() / expected < 1e-3, "{v} vs {expected}: {b}");
+        }
+        // With a chamfer, the insert is seated below it.
+        run(&mut s, "plastic.heat_insert", json!({"position": [20, 10, 10], "size": "M3", "part": true, "chamfer": true}));
+        let e = s.execute(
+            "plastic.heat_insert",
+            &json!({"position": [20, 5, 10], "outer_diameter": 5, "length": 5, "hole_diameter": 4.2, "min_wall": 1, "part": true}),
+        );
+        assert!(e.is_err_and(|e| e.to_string().contains("size")));
+    }
+
+    #[test]
     fn edit_feature_changes_the_size_of_every_hole() {
         use std::f64::consts::PI;
         let mut s = Session::default();
@@ -594,6 +745,42 @@ mod tests {
         let removed = before - volume(&mut s);
         let expected = 2.0 * PI * 2.8 * 2.8 * 9.1;
         assert!((removed - expected).abs() / expected < 1e-3, "{removed} vs {expected}");
+    }
+
+    #[test]
+    fn edit_feature_changes_the_size_and_the_parts_follow() {
+        use std::f64::consts::PI;
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 12, "body_name": "Block"}));
+        let block = |s: &mut Session| run(s, "inspect.measure", json!({"bodies": ["Block"]}))["total"]["volume_mm3"].as_f64().unwrap_or(f64::NAN);
+        let before = block(&mut s);
+        let r = run(&mut s, "plastic.heat_insert", json!({"position": [[10, 10, 12], [30, 10, 12]], "size": "M3", "part": true}));
+        let feature = r["feature"].as_u64().unwrap();
+        let first = r["component"].as_u64().unwrap();
+        // Edit Feature: M4 instead of M3, as the dialog's OK sends it.
+        let params = json!({"position": [[10, 10, 12], [30, 10, 12]], "size": "M4", "part": true});
+        run(&mut s, "timeline.redefine", json!({"feature": feature, "command": "plastic.heat_insert", "params": params}));
+        let parts = run(&mut s, "plastic.heat_insert_parts", json!({"feature": feature}));
+        // Still one feature, now drilling two Ø5.6 holes 9.1 deep.
+        let holes = s.doc.features.iter().filter(|f| matches!(f.kind, solidcraft_doc::FeatureKind::Hole { .. })).count();
+        assert_eq!(holes, 1);
+        let removed = before - block(&mut s);
+        let expected = 2.0 * PI * 2.8 * 2.8 * 9.1;
+        assert!((removed - expected).abs() / expected < 1e-3, "{removed} vs {expected}");
+        // The M3 parts are gone; one M4 part is placed in both holes, and the feature keeps it.
+        let second = parts["component"].as_u64().unwrap();
+        assert!(second != first && !s.doc.components.iter().any(|c| c.id == first));
+        assert_eq!(parts["occurrences"].as_array().map(Vec::len), Some(2), "{parts}");
+        let bom = run(&mut s, "assembly.bom", json!({}));
+        assert!(bom["rows"].as_array().into_iter().flatten().any(|r| r["part_number"] == "Heat-set insert M4x8.1" && r["count"] == 2), "{bom}");
+        assert!(
+            matches!(&s.doc.feature(feature).unwrap().kind, solidcraft_doc::FeatureKind::Hole { insert: Some(i), .. } if i.component == Some(second))
+        );
+        // Parts off: the feature takes them away.
+        let params = json!({"position": [[10, 10, 12], [30, 10, 12]], "size": "M4"});
+        run(&mut s, "timeline.redefine", json!({"feature": feature, "command": "plastic.heat_insert", "params": params}));
+        run(&mut s, "plastic.heat_insert_parts", json!({"feature": feature}));
+        assert!(!s.doc.components.iter().any(|c| c.id == second));
     }
 
     #[test]

@@ -2884,6 +2884,12 @@ pub struct HeatInsert {
     pub min_wall: f64,
     /// The least floor below the hole.
     pub min_floor: f64,
+    /// Place the insert itself in each hole, as a part the bill of materials counts.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub part: bool,
+    /// The component of the insert parts this feature placed, which it replaces when it changes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub component: Option<u64>,
 }
 
 /// Points of a sketch, by id.

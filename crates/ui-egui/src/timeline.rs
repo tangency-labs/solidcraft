@@ -1560,6 +1560,30 @@ mod tests {
     }
 
     #[test]
+    fn a_heat_set_insert_with_its_parts_is_one_entry_in_both_history_layouts() {
+        for left in [false, true] {
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            h.app.run("view.history_layout", json!({"dock":if left { "left" } else { "bottom" }})).unwrap();
+            h.app.preferences.history_group_joints = false;
+            h.app.run("solid.box", json!({ "length": 40, "width": 20, "height": 12, "name": "Block" })).unwrap();
+            h.app.run("plastic.heat_insert", json!({ "position": [[10, 10, 12], [30, 10, 12]], "size": "M3", "part": true })).unwrap();
+            assert_eq!(h.app.session.doc.assembly.joints.len(), 2, "a brass part seated in each hole");
+            let doc = h.app.session.doc.clone();
+            let names =
+                |view: crate::timeline_fold::View| view.indices(0, view.len()).iter().map(|i| doc.features[*i].name.clone()).collect::<Vec<_>>();
+            assert_eq!(names(crate::timeline_fold::View::of(&doc, None, false)), ["Block", "HeatInsert1"], "the part's sketch and revolve stay out");
+            h.frames(4);
+            assert!(crate::scenario::handles("timeline-joint:").is_empty(), "the joints seating the parts stay out, left={left}");
+            // Showing the hidden entries shows how the parts are built and seated.
+            h.app.tree.history_show_hidden = true;
+            assert!(names(crate::timeline_fold::View::of(&doc, None, true)).len() > 2);
+            h.frames(4);
+            assert_eq!(crate::scenario::handles("timeline-joint:").len(), 2, "left={left}");
+        }
+    }
+
+    #[test]
     fn history_hiding_a_component_leaves_its_features_out_of_the_bar() {
         use crate::context_menu::{self, Target};
         use crate::scenario::handle_at;

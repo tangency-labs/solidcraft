@@ -73,12 +73,14 @@ crate::dialog_descriptor::dialog_descriptors! {
             },
             /// Heat-Set Insert: the size (index into the engine's size table), a lead-in chamfer
             /// and its width (empty: out to the insert's outer diameter), the hole's depth (empty:
-            /// the insert's length plus 1 mm), and drilling anyway where a wall is too thin.
+            /// the insert's length plus 1 mm), the inserts placed as parts, and drilling anyway
+            /// where a wall is too thin.
             HeatInsert {
                 size: usize,
                 chamfer: bool,
                 chamfer_size: String,
                 depth: String,
+                part: bool,
                 warn: bool,
             },
         }
@@ -135,7 +137,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "plastic.assign_rule" => (Pl::Assign { rule: 1 }, vec![SelInput::new("Bodies", BODIES, true)]),
         "plastic.heat_insert" => {
             let size = solidcraft_engine::cmd::heat_insert_sizes().position(|z| z.id == DEFAULT_INSERT).unwrap_or(0);
-            let kind = Pl::HeatInsert { size, chamfer: false, chamfer_size: String::new(), depth: String::new(), warn: false };
+            let kind = Pl::HeatInsert { size, chamfer: false, chamfer_size: String::new(), depth: String::new(), part: false, warn: false };
             // Points on faces, and sketch points, which the holes then follow.
             (kind, vec![SelInput::new("ui.heat_insert.positions", PLANAR_FACES | POINTS | EXTERNAL_POINTS, true)])
         }
@@ -285,7 +287,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pl, inputs: &[SelInpu
                 }
             }
         }
-        Pl::HeatInsert { size, chamfer, chamfer_size, depth, warn } => {
+        Pl::HeatInsert { size, chamfer, chamfer_size, depth, part, warn } => {
             let sizes: Vec<&solidcraft_engine::cmd::HeatInsertSize> = solidcraft_engine::cmd::heat_insert_sizes().collect();
             let names: Vec<&str> = sizes.iter().map(|z| z.id).collect();
             choice_row(ui, "ui.heat_insert.size", "pl_insert_size", size, &names);
@@ -307,6 +309,9 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pl, inputs: &[SelInpu
             }
             if *chamfer {
                 enter |= hint_row(ui, "ui.heat_insert.chamfer_size", chamfer_size, &default(wide));
+            }
+            if crate::ui_kit::checkbox_row(ui, "pl_insert_part", "ui.heat_insert.part", *part) {
+                *part = !*part;
             }
             let mut thin = usize::from(*warn);
             choice_row(ui, "ui.heat_insert.thin", "pl_insert_thin", &mut thin, &["ui.heat_insert.stop", "ui.heat_insert.warn"]);
@@ -397,7 +402,7 @@ pub fn commands(app: &SolveApp, k: &Pl, inputs: &[SelInput], extra: &Map<String,
             let p = crate::rule_editor::params(rules.get(*pick).map(|r| r.name.as_str()), name, *active, fields)?;
             ("plastic.manage_rules", p)
         }
-        Pl::HeatInsert { size, chamfer, chamfer_size, depth, warn } => {
+        Pl::HeatInsert { size, chamfer, chamfer_size, depth, part, warn } => {
             let id = solidcraft_engine::cmd::heat_insert_sizes().nth(*size).map(|z| z.id).ok_or("choose a size")?;
             let mut base = json!({"size": id});
             // An optional length: empty is the command's default, anything else must be a length.
@@ -412,6 +417,9 @@ pub fn commands(app: &SolveApp, k: &Pl, inputs: &[SelInput], extra: &Map<String,
             }
             if *chamfer {
                 base["chamfer"] = length(chamfer_size, "chamfer size")?.map_or(json!(true), |c| json!(c));
+            }
+            if *part {
+                base["part"] = json!(true);
             }
             if *warn {
                 base["check"] = json!("warn");
@@ -564,7 +572,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                 .filter(|v| (*v - (ins.length + 1.0)).abs() > 1e-9)
                 .map(mm)
                 .unwrap_or_default();
-            let kind = Pl::HeatInsert { size, chamfer: cs.is_some(), chamfer_size, depth, warn: false };
+            let kind = Pl::HeatInsert { size, chamfer: cs.is_some(), chamfer_size, depth, part: ins.part, warn: false };
             if let Some(i) = inputs.first_mut() {
                 i.items = match points {
                     Some(sp) if !sp.single => sp.ids.iter().map(|p| Sel::SketchPoint { id: format!("{}:{p}", sp.sketch.0) }).collect(),
