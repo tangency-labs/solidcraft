@@ -25,6 +25,7 @@ use solidcore::Brep;
 use solidcore::Result as KernelResult;
 
 use crate::body::{finish_under, Body, Contract, Expect, Outward, Proof};
+use crate::rigor::{self, Certify, Rigor};
 use crate::session::run_taking;
 use crate::{Error, Result};
 
@@ -139,10 +140,44 @@ fn result(d: Done, empty: Result<Option<Body>>) -> Result<Option<Body>> {
 /// [`Error::NotSolid`] when solid operands give a body that is not closed (solids touching
 /// along an edge or at a vertex are closed).
 ///
+/// Within a rigor ([`crate::rigor::within`]) the boolean is certified as the rigor says
+/// ([`boolean_certified`]), and a call its time budget stopped gives [`Error::OutOfTime`] (the
+/// session's, as every call's).
+/// Outside every rigor scope, or within [`Rigor::LEGACY`], it is exactly the call it was.
+///
 /// # Errors
-/// [`Error::NotSolid`]; the kernel's error.
+/// [`Error::NotSolid`]; the kernel's error; within a rigor, [`Error::OutOfTime`].
 pub fn boolean(a: Body, b: Body, op: BooleanOp) -> Result<Option<Body>> {
-    boolean_with(a, b, op, Contract::Closed)
+    match rigor::current() {
+        None => boolean_with(a, b, op, Contract::Closed),
+        Some(r) => boolean_certified(a, b, op, r.certify),
+    }
+}
+
+/// [`boolean`] within `rigor` ([`crate::rigor::within`]): its certification, and its time
+/// budget over the call. [`Rigor::LEGACY`] is [`boolean`] outside every scope, to the bit.
+///
+/// # Errors
+/// As [`boolean_certified`]; [`Error::OutOfTime`] past the budget; [`Error::Argument`] for a
+/// rigor that fails [`Rigor::check`].
+pub fn boolean_under(a: Body, b: Body, op: BooleanOp, rigor: &Rigor) -> Result<Option<Body>> {
+    rigor.check()?;
+    rigor::within(rigor, || boolean(a, b, op))
+}
+
+/// [`boolean`] certified as `certify` says: [`Certify::Off`] tests nothing of the operands and
+/// takes any result with faces; [`Certify::Closed`] and [`Certify::Proved`] are
+/// [`boolean_with`] under [`Contract::Closed`] and [`Contract::Proved`].
+///
+/// # Errors
+/// As [`boolean_with`]; under [`Certify::Off`], the kernel's error only.
+pub fn boolean_certified(
+    a: Body,
+    b: Body,
+    op: BooleanOp,
+    certify: Certify,
+) -> Result<Option<Body>> {
+    boolean_expecting(a, b, op, certify.contract(), certify == Certify::Off)
 }
 
 /// [`boolean`] under `contract`.
@@ -151,12 +186,28 @@ pub fn boolean(a: Body, b: Body, op: BooleanOp) -> Result<Option<Body>> {
 /// As [`boolean`]; under [`Contract::Proved`], [`Error::NotSolid`] too for a result of proved
 /// solids that is not proved valid and facing out.
 pub fn boolean_with(a: Body, b: Body, op: BooleanOp, contract: Contract) -> Result<Option<Body>> {
+    boolean_expecting(a, b, op, contract, false)
+}
+
+/// [`boolean_with`], its operands untested and any result with faces taken when `untested`
+/// ([`Certify::Off`]).
+fn boolean_expecting(
+    a: Body,
+    b: Body,
+    op: BooleanOp,
+    contract: Contract,
+    untested: bool,
+) -> Result<Option<Body>> {
     let both = [a, b];
     usable("SmApiBoolean", &both)?;
     let d = run_taking("SmApiBoolean", &operands(&both), |k| {
         let [a, b] = &both;
         let mut operands = [take(a), take(b)];
-        let expect = expect_of(k, &mut operands, contract)?;
+        let expect = if untested {
+            Expect::FACES
+        } else {
+            expect_of(k, &mut operands, contract)?
+        };
         let [(mut ca, _), (mut cb, _)] = operands;
         matched_tolerances(k, &mut ca, &mut cb)?;
         let mut r = sm::boolean(k, ca, cb, operation(op))?.result;

@@ -1855,6 +1855,10 @@ fn fingerprint(doc: &Document, prev: u64, f: &Feature, vals: &BTreeMap<String, V
     if let Some(heals) = steps.heals(f.id) {
         heals.digest().hash(&mut h);
     }
+    // its rigor, when it is not legacy: a design that records none fingerprints as before
+    if let Some(rigor) = doc.rigor.digest(f.id) {
+        rigor.hash(&mut h);
+    }
     for n in param_names(f) {
         n.hash(&mut h);
         match (vals.get(&n), doc.text_param(&n)) {
@@ -4268,7 +4272,11 @@ impl Model {
                         let _val_guard = EvalValidationGuard::new(validation);
                         let (r, deferred) = kernel::validating(validation, || {
                             IMPORT_HEALS.with(|h| *h.borrow_mut() = self.import_digests.heals(f.id).cloned());
-                            let r = eval_feature(doc, &vals, f, &mut next, &mut warning, &mut import_report, &mut repair, heal);
+                            // the rigor it is built with (none opened at legacy: the calls as they were)
+                            let rigor = solidcore_ops::Rigor::from(doc.rigor.built(f.id));
+                            let r = solidcore_ops::rigor::within(&rigor, || {
+                                eval_feature(doc, &vals, f, &mut next, &mut warning, &mut import_report, &mut repair, heal)
+                            });
                             IMPORT_HEALS.with(|h| *h.borrow_mut() = None);
                             r
                         });

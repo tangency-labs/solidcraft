@@ -92,6 +92,7 @@ pub mod render_resources;
 pub mod render_settings;
 pub mod render_surface;
 pub mod render_texture_resources;
+pub mod rigor;
 pub mod sheet;
 pub mod sheet_library;
 mod sheet_surface;

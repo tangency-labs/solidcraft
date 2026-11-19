@@ -269,6 +269,12 @@ pub enum Error {
     },
     /// The application cancelled the call.
     Cancelled,
+    /// The call ran past the time budget of the rigor it ran within ([`crate::rigor`]): no
+    /// result, never a different one. The budget it was given.
+    OutOfTime {
+        /// The budget it ran past.
+        budget: std::time::Duration,
+    },
     /// A body built from a record whose blend face's net its definition does not certify (the
     /// kernel's `DefinitionNotCertified`): the face, by its index in the body's face order, and
     /// the bound ε its definition states.
@@ -901,6 +907,11 @@ impl std::fmt::Display for Error {
                 "contact with body {other} is undecided: the boundary distance is in [{lower}, {upper}]"
             ),
             Error::Cancelled => write!(f, "cancelled"),
+            Error::OutOfTime { budget } => write!(
+                f,
+                "ran out of time: the operation is allowed {} ms",
+                budget.as_millis()
+            ),
             Error::Reentered => write!(
                 f,
                 "solidcore-ops was called from inside a call or the failure callback"

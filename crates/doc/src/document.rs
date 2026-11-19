@@ -3882,6 +3882,10 @@ pub struct Document {
     /// each in its own entry.
     #[serde(skip_deserializing, skip_serializing_if = "Vec::is_empty")]
     pub drawings: Vec<std::sync::Arc<crate::drawing::Drawing>>,
+    /// How hard each operation works: the design default and the operations that override it
+    /// ([`crate::rigor`]). None saved: every operation as before rigor existed.
+    #[serde(default, skip_serializing_if = "crate::rigor::Rigors::is_empty")]
+    pub rigor: crate::rigor::Rigors,
     /// Plugin data, by `<plugin-id>/<path>`, base64: kept and saved back untouched, plugin or no
     /// plugin ([`crate::plugin_data`]). A container keeps each under `plugins/` beside the design.
     /// Shared, so an edit that copies the design does not copy a plugin's large files.
@@ -4187,6 +4191,7 @@ impl Document {
             notes: Vec::new(),
             visibility: Visibility::default(),
             drawings: Vec::new(),
+            rigor: Default::default(),
             plugin_data: Default::default(),
         }
     }
