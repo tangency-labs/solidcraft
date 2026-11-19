@@ -28,6 +28,9 @@ use crate::{
 };
 
 const COMMAND: &str = "drawing.dimension.add";
+/// How finely a preview's curves and letters are flattened, on paper: finer than the sheet needs at
+/// any zoom it shows a dimension being placed at.
+const PREVIEW_TOLERANCE_MM: f64 = 0.01;
 /// How far the pointer moves on paper, in screen points, before the preview is laid out again.
 const RELAYOUT_PX: f64 = 1.0;
 /// Two lines whose directions' cross product is under this are parallel.
@@ -74,10 +77,11 @@ pub(crate) enum Shape {
     Other,
 }
 
-/// The dimension the picks make with the pointer at `at`, as `drawing.dimension.add` dry run answered it.
+/// The dimension the picks make with the pointer at `at`, drawn as it will be placed.
 struct Preview {
     at: Vec2,
-    answer: Result<Value, String>,
+    /// The dimension alone on its sheet, as the sheet will draw it once placed.
+    marks: Option<crate::drawing_sheet_page::Marks>,
 }
 
 /// What a stroke drawn on paper is: one line (its pieces on one line, as hidden-line removal
@@ -213,6 +217,11 @@ pub(super) fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 }
 
+/// Whether the tool has picked something for the dimension it is making.
+pub(crate) fn has_picks(app: &SolveApp) -> bool {
+    app.drawing_workspace.dimension.as_ref().is_some_and(|draft| !draft.picks.is_empty())
+}
+
 /// Drops the tool's picks, keeping the tool: the first Esc, as in the sketch. Whether there were any.
 pub(crate) fn clear_picks(app: &mut SolveApp) -> bool {
     app.drawing_workspace.dimension.take().is_some_and(|draft| !draft.picks.is_empty())
@@ -237,40 +246,12 @@ fn params_for(app: &SolveApp, draft: &Draft, at: Vec2) -> Option<Value> {
     Some(params)
 }
 
+/// The dimension the picks make with the pointer at `at`, drawn as the placed one will be: the same
+/// group from the same layout, at its paper size, so the preview is what the click places.
 fn preview(app: &mut SolveApp, draft: &Draft, at: Vec2) -> Option<Preview> {
-    let mut dry = params_for(app, draft, at)?;
-    dry["dry_run"] = json!(true);
-    Some(Preview { at, answer: app.run(COMMAND, dry) })
-}
-
-fn points(value: &Value) -> Vec<Vec2> {
-    value.as_array().into_iter().flatten().filter_map(|p| serde_json::from_value::<[f64; 2]>(p.clone()).ok().map(Vec2::from)).collect()
-}
-
-/// Paints an answer's layout: its lines, arrowheads and text, as it will sit once placed.
-fn paint_layout(painter: &egui::Painter, at: OnScreen, answer: &Value) {
-    let tokens = Tokens::get();
-    let stroke = egui::Stroke::new(1.0, tokens.accent);
-    let layout = &answer["layout"];
-    for line in ["extension_lines", "dimension_lines"].iter().flat_map(|key| layout[*key].as_array().into_iter().flatten()) {
-        let line: Vec<egui::Pos2> = points(line).into_iter().map(|p| at.screen(p)).collect();
-        painter.add(egui::Shape::line(line, stroke));
-    }
-    for arrow in layout["arrows"].as_array().into_iter().flatten() {
-        let (Some(tip), Some(dir)) = (points(&json!([arrow["tip"]])).first().copied(), points(&json!([arrow["points"]])).first().copied()) else {
-            continue;
-        };
-        let back = dir * -3.0;
-        let side = dir.perp() * 1.0;
-        let shape = [tip, tip + back + side, tip + back - side].map(|p| at.screen(p));
-        painter.add(egui::Shape::convex_polygon(shape.to_vec(), tokens.accent, egui::Stroke::NONE));
-    }
-    let text = answer["text"].as_str().unwrap_or_default();
-    let centre = layout["text_boxes"].as_array().and_then(|boxes| boxes.first()).map(points).filter(|corners| corners.len() == 4);
-    if let Some(corners) = centre {
-        let middle = corners.iter().fold(Vec2::ZERO, |sum, p| sum + *p) * 0.25;
-        painter.text(at.screen(middle), egui::Align2::CENTER_CENTER, text, egui::FontId::proportional(tokens.font_small), tokens.accent);
-    }
+    let params = params_for(app, draft, at)?;
+    let scene = solidcraft_engine::cmd::drawing_dimension_preview(&app.session, &params).ok();
+    Some(Preview { at, marks: scene.map(|scene| crate::drawing_sheet_page::Marks::of(&scene, 0, PREVIEW_TOLERANCE_MM)) })
 }
 
 /// Paints a picked edge's stroke, so the picks show.
@@ -360,8 +341,9 @@ pub(crate) fn on_sheet(app: &mut SolveApp, painter: &egui::Painter, at: OnScreen
         for picked in &d.picks {
             paint_pick(painter, at, picked.shape, &picked.stroke);
         }
-        if let Some(Preview { answer: Ok(answer), .. }) = &d.preview {
-            paint_layout(painter, at, answer);
+        // In the accent colour, as every preview on the sheet is; otherwise just as it will print.
+        if let Some(marks) = d.preview.as_ref().and_then(|p| p.marks.as_ref()) {
+            at.paint_preview(painter, marks, Vec2::ZERO, Tokens::get().accent);
         }
         painter.ctx().request_repaint();
     }

@@ -240,8 +240,7 @@ pub struct AdvSurfaceIntersector<'s, 't, O> {
     /// Nesting depth of [`GlobalSolve::solve_branch`] (bounds the recursion on cyclic
     /// tree links).
     solve_depth: usize,
-    /// Not upstream (the fork's `m_vTangentSeeds`, opt-in
-    /// `Kernel::fixes.ssi_tangent_curve_tracer`, WR-75): the UV pairs where
+    /// Not upstream (the fork's `m_vTangentSeeds`, WR-75): the UV pairs where
     /// [`AdvSurfaceIntersector::find_interior_curves`] found the normals (nearly)
     /// parallel, seeds of the tangential curve pass (none where that pass does not run,
     /// [`AdvSurfaceIntersector::trivial_solution_in_both_domains`]).
@@ -623,10 +622,9 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
         // r/R, so loops above the tolerance on surfaces curved at model scale stay above
         // tol/modelSize, while tangent curves and tangent points fall below it.
         let min_loop_angle_rad = self.min_loop_angle_rad(k)?;
-        // (WR-75, opt-in) seeds of the tangential curve pass, which does not run where a self
+        // (WR-75) seeds of the tangential curve pass, which does not run where a self
         // intersection's trivial solution lies in both domains (#18930)
-        let collect_tangent_curve_seeds =
-            k.fixes.ssi_tangent_curve_tracer && !self.trivial_solution_in_both_domains();
+        let collect_tangent_curve_seeds = !self.trivial_solution_in_both_domains();
 
         // Now for each node pair do a test to see if produces a unique start point
         for sol in solutions.as_slice() {
@@ -652,7 +650,7 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
                 }
                 if angle_rad * (180.0 / PI) < 5.0 {
                     self.push_tangent_seed(&mut tangent_seeds, node1, node2)?;
-                    // (WR-75, opt-in) a seed of the tangential curve pass
+                    // (WR-75) a seed of the tangential curve pass
                     if collect_tangent_curve_seeds {
                         self.tangent_curve_seeds.push([uv_guess1, uv_guess2]);
                     }
@@ -696,7 +694,7 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
                 }
                 if angle_rad * (180.0 / PI) < 2.0 {
                     self.push_tangent_seed(&mut tangent_seeds, node1, node2)?;
-                    // (WR-75, opt-in) a seed of the tangential curve pass
+                    // (WR-75) a seed of the tangential curve pass
                     if collect_tangent_curve_seeds {
                         self.tangent_curve_seeds.push([uv, uv2]);
                     }

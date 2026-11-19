@@ -32,7 +32,13 @@ pub(super) struct Unplaced {
 /// The bodies and product tree of `ir`'s occurrences, from `read` (each body as read), with what
 /// could not be placed in `warnings`. `product` names the root that holds the bodies no
 /// occurrence reaches.
-pub(super) fn placed(ir: &CadIr, product: &str, read: Vec<Unplaced>, warnings: &mut Vec<String>) -> (Vec<RecordBody>, Vec<StepNode>, Vec<Origin>) {
+pub(super) fn placed(
+    ir: &CadIr,
+    product: &str,
+    read: Vec<Unplaced>,
+    layers: &super::HiddenLayers,
+    warnings: &mut Vec<String>,
+) -> (Vec<RecordBody>, Vec<StepNode>, Vec<Origin>) {
     let mut walk = Walk {
         definitions: ir.model.product_definitions.iter().map(|d| (d.id.as_str(), d)).collect(),
         children: HashMap::new(),
@@ -41,6 +47,7 @@ pub(super) fn placed(ir: &CadIr, product: &str, read: Vec<Unplaced>, warnings: &
         bodies: Vec::new(),
         origins: Vec::new(),
         first: HashMap::new(),
+        layers,
         visits: 0,
         full: false,
         warnings,
@@ -125,6 +132,8 @@ struct Walk<'a, 'w> {
     bodies: Vec<RecordBody>,
     /// Where each of `bodies` came from: its neutral-model body and its occurrence's placement.
     origins: Vec<Origin>,
+    /// What the file's hidden layers hide.
+    layers: &'a super::HiddenLayers,
     /// The read bodies some occurrence placed, each with the body its first placement is: later
     /// placements are copies of that one.
     first: HashMap<usize, usize>,
@@ -181,7 +190,10 @@ impl Walk<'_, '_> {
             return node;
         };
         node.transform = column_major(&local);
-        let hidden = hidden || o.visible == Some(false);
+        // Hidden by the file: the occurrence itself, or a hidden layer it or its part is on.
+        let on_hidden_layer = self.layers.occurrences.contains(o.id.as_str())
+            || matches!(&o.prototype, PrototypeReference::Local { definition } if self.layers.definitions.contains(definition.as_str()));
+        let hidden = hidden || o.visible == Some(false) || on_hidden_layer;
         let mut path = path.to_vec();
         path.push(name.clone());
         match (&o.prototype, definition) {

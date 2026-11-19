@@ -62,6 +62,7 @@ pub mod file;
 pub mod fit_projection;
 pub mod hatch;
 pub mod heal;
+pub mod hlr;
 pub mod import_geometry;
 pub mod joint_turn;
 pub mod label;
@@ -107,8 +108,8 @@ pub use boolean::BooleanOp;
 pub use check::{CheckLevel, CheckReport};
 pub use contact::Gap;
 pub use error::{
-    Error, FitKind, OffsetRefusal, RecordEntity, Result, RoomReason, SolidTest, Unblendable,
-    Unsoundness,
+    Error, FailureCode, FitKind, OffsetRefusal, RecordEntity, Result, RoomReason, SolidTest,
+    Unblendable, Unsoundness,
 };
 pub use measure::{
     point_displacement, point_distance, point_set_summary, points_meet, Distance, EdgeCurve,
