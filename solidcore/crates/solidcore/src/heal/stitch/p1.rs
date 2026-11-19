@@ -942,40 +942,14 @@ pub struct Stitch<'c> {
 }
 
 /// Not upstream (#18166): the cover one join leaves pending until its operation ends
-/// ([`Stitch::finish_joins`]): the faces the join gave the kept edge, each with a proved
-/// bound on its distance from the kept curve as it was at the join.
-///
-/// The join's bound is the two curves' proved distance plus the deleted edge's tolerance:
-/// a proof on the condition that the deleted edge's tolerance covered its own curve on
-/// that face, as the input B-rep's tolerances state. The face's own enclosure, where it is
-/// smaller, needs no such condition.
+/// ([`Stitch::finish_joins`]): the faces the join gave the kept edge, whose distance from
+/// the kept curve the edge's tolerance need not cover.
 #[derive(Debug, Clone)]
 struct JoinCover {
     /// The kept edge, or a piece split from it.
     edge: EdgeId,
-    /// The kept edge's curve at the join (its kind's `Debug` text; `None` without one).
-    curve: Option<String>,
-    /// The kept edge's interval at the join.
-    interval: crate::geom::extent1d::Extent1d,
-    /// Each face the join gave the edge, with the bound (infinite where none holds).
-    faces: Vec<(FaceId, f64)>,
-}
-
-impl JoinCover {
-    /// Whether the bounds still hold for the edge: its curve is the one they were taken on
-    /// and its interval lies inside theirs, so its points are among those they bound.
-    fn holds_on(&self, b: &Brep) -> Result<bool> {
-        let rec = b.edge(self.edge)?;
-        Ok(self.curve.is_some()
-            && curve_shape(rec.curve.as_ref()) == self.curve
-            && rec.interval.min() >= self.interval.min()
-            && rec.interval.max() <= self.interval.max())
-    }
-}
-
-/// A curve's kind as `Debug` text, which compares its every defining value exactly.
-fn curve_shape(curve: Option<&Curve>) -> Option<String> {
-    curve.map(|c| format!("{:?}", c.kind()))
+    /// Each face the join gave the edge.
+    faces: Vec<FaceId>,
 }
 
 impl Stitch<'_> {
@@ -1130,7 +1104,7 @@ impl<'c> Stitch<'c> {
         let pending = if keep == delete {
             None
         } else {
-            Some(self.join_cover(b, keep, delete)?)
+            Some(Self::join_cover(b, keep, delete)?)
         };
         // (an edit context's glue searches at each closed shell, as upstream)
         if let Some(edits) = self.edits.as_deref_mut() {
@@ -1145,60 +1119,20 @@ impl<'c> Stitch<'c> {
     /// Not upstream (#18166): the cover a join of `delete` into `keep` leaves pending. The
     /// join keeps `keep`'s curve for the deleted edge's faces and raises the tolerance to the
     /// two curves' distance only (`UpdateObjectTolerance`), which need not cover that curve's
-    /// distance to those faces. Each face gets a proved bound on that distance: the two
-    /// curves' Hausdorff distance (`coincidence_bound`) plus the deleted curve's own bound on
-    /// the face, which is the deleted edge's tolerance (the tolerance covers its faces), or,
-    /// for a face an earlier join gave the deleted edge and whose cover is still pending,
-    /// that join's bound, while the deleted edge's curve is still the one it was taken on
-    /// (infinite otherwise: the tolerance need not cover such a face).
+    /// distance to those faces: the cover proves that distance when the operation ends.
     ///
     /// # Errors
     ///
     /// [`SolidError::NotFound`] for a dangling id.
-    fn join_cover(&self, b: &Brep, keep: EdgeId, delete: EdgeId) -> Result<JoinCover> {
-        let (kr, dr) = (b.edge(keep)?, b.edge(delete)?);
-        let apart = match (kr.curve.as_ref(), dr.curve.as_ref()) {
-            (Some(kc), Some(dc)) => {
-                crate::boolean::api_brep::coincidence_bound(kc, &kr.interval, dc, &dr.interval)
-            }
-            _ => None,
-        };
-        let mut faces = Vec::new();
-        for f in edge::faces(b, delete, None)? {
-            let base = self.pending_bound(b, delete, f)?.unwrap_or(dr.tolerance);
-            let reach = apart.map_or(f64::INFINITY, |h| (h + base) * (1.0 + 4.0 * f64::EPSILON));
-            faces.push((f, reach));
-        }
+    fn join_cover(b: &Brep, keep: EdgeId, delete: EdgeId) -> Result<JoinCover> {
         Ok(JoinCover {
             edge: keep,
-            curve: curve_shape(kr.curve.as_ref()),
-            interval: kr.interval,
-            faces,
+            faces: edge::faces(b, delete, None)?,
         })
     }
 
-    /// Not upstream (#18166): the smallest bound a pending cover holds for the distance of
-    /// `e`'s curve from face `f`, where one holds `f` for `e` (infinite where none of those
-    /// is still taken on `e`'s curve); `None` where no pending cover holds `f` for `e`.
-    fn pending_bound(&self, b: &Brep, e: EdgeId, f: FaceId) -> Result<Option<f64>> {
-        let mut bound = None;
-        for cover in self.pending_covers.iter().filter(|c| c.edge == e) {
-            let Some(&(_, reach)) = cover.faces.iter().find(|(g, _)| *g == f) else {
-                continue;
-            };
-            let reach = if cover.holds_on(b)? {
-                reach
-            } else {
-                f64::INFINITY
-            };
-            bound = Some(bound.map_or(reach, |r: f64| r.min(reach)));
-        }
-        Ok(bound)
-    }
-
     /// Not upstream (#18166): a split of `e` into `pieces` gives each piece `e`'s pending
-    /// covers. A piece's curve is checked against the one each cover was taken on when the
-    /// cover runs ([`JoinCover::holds_on`]).
+    /// covers.
     fn split_pending_covers(&mut self, e: EdgeId, pieces: [Option<EdgeId>; 2]) {
         let of_e: Vec<JoinCover> = self
             .pending_covers
@@ -1236,14 +1170,12 @@ impl<'c> Stitch<'c> {
         if matches!(&outcome, Err(err) if err.is_unported_or_cancelled()) {
             return outcome;
         }
-        // (the faces of each live edge, each with its smallest bound still taken on the
-        // edge's curve, in the order the joins ran)
-        let mut edges: Vec<(EdgeId, Vec<(FaceId, f64)>)> = Vec::new();
+        // (the faces of each live edge, once each, in the order the joins ran)
+        let mut edges: Vec<(EdgeId, Vec<FaceId>)> = Vec::new();
         for cover in &pending {
             if b.edge(cover.edge).is_err() {
                 continue;
             }
-            let holds = cover.holds_on(b)?;
             let at = if let Some(at) = edges.iter().position(|(e, _)| *e == cover.edge) {
                 at
             } else {
@@ -1253,11 +1185,9 @@ impl<'c> Stitch<'c> {
             let Some((_, faces)) = edges.get_mut(at) else {
                 continue;
             };
-            for &(f, reach) in &cover.faces {
-                let reach = if holds { reach } else { f64::INFINITY };
-                match faces.iter_mut().find(|(g, _)| *g == f) {
-                    Some(slot) => slot.1 = slot.1.min(reach),
-                    None => faces.push((f, reach)),
+            for &f in &cover.faces {
+                if !faces.contains(&f) {
+                    faces.push(f);
                 }
             }
         }

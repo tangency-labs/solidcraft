@@ -1889,15 +1889,13 @@ fn other_trims_bound(
 /// face joined 2.43e-4 from the kept curve under a tolerance of 2.18e-4). A face with no
 /// finite bound, or whose bound is within the tolerance, is left as upstream leaves it.
 ///
-/// Each face comes with a second bound on the same distance, from the join: the two curves'
-/// proved distance plus the deleted curve's bound on the face (its edge's tolerance), infinite
-/// where it does not hold. The tolerance is raised to the smaller of the two bounds: the
-/// face's alone can be the enclosure's slack (`primitive.api_primitives` gen0353: a face
-/// 1.2e-7 from the kept curve by samples, bounded at 4.76e4 where its nearest points are not
-/// followed), and the join's alone holds where the face's is not enclosed. The join's own
-/// distance is no bound: the stitch samples it (five or ten points, none for two lines), and
-/// on `cov_tjunc8` it is 0 under a deleted-edge tolerance of 1e-5, where the kept curve is
-/// 2.43e-4 from the face.
+/// The tolerance is raised to the face's proved bound only, whatever it is (a raise covers a
+/// proved distance, never an assumed one: `primitive.api_primitives` gen0353, an ellipse at
+/// `z = 4.5e8` 1.2e-7 from its faces by samples, is bounded far from the origin only at
+/// 4.76e4, and to 1e-6 by the enclosure moved to the curve, `query::curve_surface_gap`
+/// `recentred_retry`). The join's own distance is no bound: the stitch samples it (five or
+/// ten points, none for two lines), and on `cov_tjunc8` it is 0 under a deleted-edge
+/// tolerance of 1e-5, where the kept curve is 2.43e-4 from the face.
 ///
 /// After a raise, the faces' own bounds are settled at the raised tolerance
 /// ([`settle_face_bounds`]): each bound is cut to a thousandth of the fit, and the fit after
@@ -1911,7 +1909,7 @@ pub(crate) fn cover_joined_faces(
     k: &Kernel,
     b: &mut Brep,
     e: EdgeId,
-    faces: &[(FaceId, f64)],
+    faces: &[FaceId],
 ) -> Result<()> {
     let mut trimmed: Vec<FaceId> = Vec::new();
     for &x in &b.edge(e)?.edgeuses {
@@ -1925,10 +1923,10 @@ pub(crate) fn cover_joined_faces(
         }
     }
     let mut done: Vec<FaceId> = Vec::new();
-    // (the faces whose own bound is below their join bound, and whether any face raised)
+    // (the faces with a proved bound, and whether any face raised)
     let mut settle: Vec<(FaceId, f64)> = Vec::new();
     let mut raised = false;
-    for &(f, reach) in faces {
+    for &f in faces {
         if done.contains(&f) || trimmed.contains(&f) {
             continue;
         }
@@ -1938,21 +1936,74 @@ pub(crate) fn cover_joined_faces(
         }
         let tol = b.edge(e)?.tolerance;
         let fit = fit_tolerance(k, b, e)?;
-        // (the smaller of the two bounds; `reach` where the face's is not enclosed or passes it)
-        let gap = match edge_face_gap_bound(k, b, e, f, fit, [tol, reach])? {
-            Some(gap) if gap.is_finite() && gap < reach => {
-                settle.push((f, reach));
-                gap
-            }
-            _ => reach,
+        let Some(gap) = edge_face_gap_bound(k, b, e, f, fit, [tol, f64::INFINITY])?
+            .filter(|g| g.is_finite())
+        else {
+            continue;
         };
-        if gap.is_finite() && gap > tol {
+        settle.push((f, f64::INFINITY));
+        if gap > tol {
             crate::topology::edge::set_tolerance(b, e, gap, true, true)?;
             raised = true;
         }
     }
     if raised {
         settle_face_bounds(k, b, e, &settle)?;
+        cover_vertex_ends(k, b, e)?;
+    }
+    Ok(())
+}
+
+/// Not upstream (#18166): raises each vertex of `e` to cover its distance to the ends of all
+/// its edges, after the cover raised `e` ([`cover_joined_faces`]): a vertex stands for the
+/// ends of its edges, and the stitch's joins can leave an edge's end farther from its vertex
+/// than the vertex's tolerance (`heal.stitch_p1` `cov_tjunc9_into_shell`: a vertex 1.02 from
+/// the end of an edge the stitch joined, under a tolerance of 1.1e-3). Each distance is the
+/// end point's distance plus the evaluation's rounding, `gamma(8)` of the larger coordinate
+/// in each of three coordinates, rounded up.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; those of the curves' evaluation.
+fn cover_vertex_ends(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
+    use crate::blend::fillet_section::interval::Ivl;
+    let (v0, v1) = crate::topology::edge::start_end_vertices(b, e)?;
+    let mut vertices: Vec<crate::topology::VertexId> = Vec::new();
+    for v in [v0, v1].into_iter().flatten() {
+        if !vertices.contains(&v) {
+            vertices.push(v);
+        }
+    }
+    for v in vertices {
+        let at = b.vertex(v)?.point;
+        let mut reach = 0.0_f64;
+        for x in crate::topology::vertex::edges(b, v, None)? {
+            let rec = b.edge(x)?;
+            let Some(curve) = rec.curve.as_ref() else {
+                continue;
+            };
+            let (s0, s1) = crate::topology::edge::start_end_vertices(b, x)?;
+            for (end, t) in [
+                (s0, rec.interval.evaluate(0.0)),
+                (s1, rec.interval.evaluate(1.0)),
+            ] {
+                if end != Some(v) {
+                    continue;
+                }
+                let p = curve.evaluate_point(k, t)?;
+                let size = at.max_dimension().max(p.max_dimension());
+                let rounding = Ivl::from(crate::nurbs::math::gamma(8))
+                    * Ivl::from(size)
+                    * Ivl::from(3.0_f64.sqrt());
+                let far = (Ivl::from(at.distance(p)) + rounding).hi;
+                if far.is_finite() {
+                    reach = reach.max(far);
+                }
+            }
+        }
+        if reach > b.vertex(v)?.tolerance {
+            crate::topology::vertex::set_tolerance(b, v, reach, true, true)?;
+        }
     }
     Ok(())
 }
@@ -2054,12 +2105,11 @@ const SETTLE_ROUNDS: usize = 8;
 
 /// Not upstream (#18166): after a raise of `e`, makes its tolerance cover each face of
 /// `faces` (each with a bound past which it is not raised) by the face's own bound, as that
-/// bound
-/// comes out at the raised tolerance: the bound is cut to a thousandth of the fit, and the
+/// bound comes out at the raised tolerance: the bound is cut to a thousandth of the fit, and the
 /// fit after the raise is the raised tolerance ([`edge_face_gap_bound`] with the tolerance as
 /// both fit and target), at which a bound can come out a rounding above the one found before
-/// (the bisection stops at a coarser floor). Raised again to such a bound (below the face's
-/// join bound, or the cap [`keep_trimless_faces_covered`] gives) for at most
+/// (the bisection stops at a coarser floor). Raised again to such a bound (below the
+/// face's cap: none for a joined face, the one [`keep_trimless_faces_covered`] gives) for at most
 /// [`SETTLE_ROUNDS`] rounds; each bound is proved, so each raise covers a proved distance.
 ///
 /// # Errors

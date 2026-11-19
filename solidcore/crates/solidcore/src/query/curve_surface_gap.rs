@@ -127,6 +127,24 @@ impl NetSurface {
         Ok(Some(me))
     }
 
+    /// Not upstream (#18166): the net moved by `-t` ([`translated_pw`]), with the slack no
+    /// moved control point is farther than from the exact moved one. The continuations are
+    /// directions only ([`Self::of`] keeps no apex), so they move unchanged.
+    fn translated(&self, t: [f64; 3]) -> Option<(Self, f64)> {
+        let (pw, slack) = translated_pw(&self.net.pw, t)?;
+        let net = Nurbs {
+            pw,
+            ..self.net.clone()
+        };
+        Some((
+            Self {
+                net,
+                ends: self.ends,
+            },
+            slack,
+        ))
+    }
+
     /// The knot lines strictly inside `u x v` across which the net is not C^1 (a knot of
     /// multiplicity at least the degree): the `u` values, then the `v` values, each sorted
     /// and once. A box cut at them has each part's second partials enclosed by
@@ -1029,64 +1047,70 @@ pub fn curve_face_gap_bound_within(
     let Some(net) = NetSurface::of(k, &surface, &feet)? else {
         return Ok(None);
     };
-    // (each piece with its ends' nearest points, its depth and its parent's slack, infinite
-    // for a first piece)
-    let mut stack: Vec<(f64, f64, [Point2; 2], u32, f64)> = Vec::new();
-    for (ts, ws) in cuts.windows(2).zip(feet.windows(2)) {
-        if let ([a, b], [wa, wb]) = (ts, ws) {
-            stack.push((*a, *b, [*wa, *wb], 0, f64::INFINITY));
+    // (the bound of the curve data `cn` against the net `net`, with the pieces closing at
+    // `enough`; infinite past `over`)
+    let run = |cn: &NurbsCurve, net: &NetSurface, enough: f64| -> Result<Option<f64>> {
+        // (each piece with its ends' nearest points, its depth and its parent's slack, infinite
+        // for a first piece)
+        let mut stack: Vec<(f64, f64, [Point2; 2], u32, f64)> = Vec::new();
+        for (ts, ws) in cuts.windows(2).zip(feet.windows(2)) {
+            if let ([a, b], [wa, wb]) = (ts, ws) {
+                stack.push((*a, *b, [*wa, *wb], 0, f64::INFINITY));
+            }
         }
-    }
-    stack.reverse();
-    let mut worst = 0.0_f64;
-    let mut made = stack.len();
-    let mut seen = f64::NEG_INFINITY;
-    while let Some((a, b, ends, depth, parent)) = stack.pop() {
-        k.check_cancelled(OP)?;
-        let mid = 0.5 * (a + b);
-        let last = depth >= MAX_DEPTH || !(a < mid && mid < b) || made + 2 > MAX_PIECES;
-        let mut slack = f64::INFINITY;
-        match surface_piece(&cn, [a, b], &net, ends, a, b) {
-            Ok(Some(p)) => {
-                let bound = (Ivl::from(p.ends) + Ivl::from(p.with_slack)).hi;
-                seen = seen.max(p.ends);
-                if seen > over {
-                    return Ok(Some(f64::INFINITY));
-                }
-                // (while the bound may still be at most `enough`, a piece above it is cut on)
-                let (relative, at_least) = if seen <= enough {
-                    (0.0, 0.0)
-                } else {
-                    (CLOSE_RELATIVE, floor)
-                };
-                let closed =
-                    bound <= enough || bound <= seen || p.closes(parent, relative, at_least);
-                if last || closed {
-                    if bound > over {
+        stack.reverse();
+        let mut worst = 0.0_f64;
+        let mut made = stack.len();
+        let mut seen = f64::NEG_INFINITY;
+        while let Some((a, b, ends, depth, parent)) = stack.pop() {
+            k.check_cancelled(OP)?;
+            let mid = 0.5 * (a + b);
+            let last = depth >= MAX_DEPTH || !(a < mid && mid < b) || made + 2 > MAX_PIECES;
+            let mut slack = f64::INFINITY;
+            match surface_piece(cn, [a, b], net, ends, a, b) {
+                Ok(Some(p)) => {
+                    let bound = (Ivl::from(p.ends) + Ivl::from(p.with_slack)).hi;
+                    seen = seen.max(p.ends);
+                    if seen > over {
                         return Ok(Some(f64::INFINITY));
                     }
-                    worst = worst.max(bound);
-                    continue;
+                    // (while the bound may still be at most `enough`, a piece above it is cut on)
+                    let (relative, at_least) = if seen <= enough {
+                        (0.0, 0.0)
+                    } else {
+                        (CLOSE_RELATIVE, floor)
+                    };
+                    let closed =
+                        bound <= enough || bound <= seen || p.closes(parent, relative, at_least);
+                    if last || closed {
+                        if bound > over {
+                            return Ok(Some(f64::INFINITY));
+                        }
+                        worst = worst.max(bound);
+                        continue;
+                    }
+                    slack = p.slack;
                 }
-                slack = p.slack;
-            }
-            Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            // a box past the net, on a knot line of too low a continuity: a smaller piece may
-            // clear it; at the bottom the gap is not enclosed
-            Ok(None) | Err(_) => {
-                if last {
-                    return Ok(None);
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                // a box past the net, on a knot line of too low a continuity: a smaller piece may
+                // clear it; at the bottom the gap is not enclosed
+                Ok(None) | Err(_) => {
+                    if last {
+                        return Ok(None);
+                    }
                 }
             }
+            let [wa, wb] = ends;
+            let straight = Point2::new(0.5 * (wa.x + wb.x), 0.5 * (wa.y + wb.y));
+            let wm = drop_at(mid, Some(straight))?.unwrap_or(straight);
+            made += 2;
+            stack.push((mid, b, [wm, wb], depth + 1, slack));
+            stack.push((a, mid, [wa, wm], depth + 1, slack));
         }
-        let [wa, wb] = ends;
-        let straight = Point2::new(0.5 * (wa.x + wb.x), 0.5 * (wa.y + wb.y));
-        let wm = drop_at(mid, Some(straight))?.unwrap_or(straight);
-        made += 2;
-        stack.push((mid, b, [wm, wb], depth + 1, slack));
-        stack.push((a, mid, [wa, wm], depth + 1, slack));
-    }
-    Ok(worst.is_finite().then_some(worst))
+        Ok(worst.is_finite().then_some(worst))
+    };
+    let first = run(&cn, &net, enough)?;
+    recentred_retry(first, [enough, over], &cn, &net, run)
 }
 
 /// The correspondence `W` of `curve` over `[lo, hi]` on `surface` (module docs): a cubic
@@ -2121,46 +2145,185 @@ pub fn trim_image_gap_bound_within(
     if !kinks(&psi, r0, r1).is_empty() {
         return Ok(None);
     }
-    let sides = Sides {
-        curve: &cn,
-        trim: &wn,
-        psi: &psi,
-        curve_kinks: kinks(&cn, r0, r1),
-        trim_kinks: kinks(&wn, r0, r1),
-        range,
+    let curve_kinks = kinks(&cn, r0, r1);
+    let trim_kinks = kinks(&wn, r0, r1);
+    // (the bound of the curve data `cn` against the net `net`, the curve's slack added, with
+    // the pieces closing at `enough`)
+    let run = |cn: &NurbsCurve, net: &NetSurface, enough: f64| -> Result<Option<f64>> {
+        let sides = Sides {
+            curve: cn,
+            trim: &wn,
+            psi: &psi,
+            curve_kinks: curve_kinks.clone(),
+            trim_kinks: trim_kinks.clone(),
+            range,
+        };
+        // (the bound adds the curve's slack, at least 0, to the gap: a gap above `over` is
+        // enough; a piece across a corner is bounded to first order by
+        // `piece_reparametrised`, so the first pieces need no cut there)
+        // (a gap at most `enough` less the curve's slack, rounded down, has a bound at most
+        // `enough`: the sum's exact value is at most `enough`, so rounding it up stays there)
+        let enough_gap = (Ivl::from(enough) - Ivl::from(c_slack)).lo;
+        let Some(gap) = bisect(
+            range,
+            FIRST_PIECES,
+            &[],
+            CLOSE_RELATIVE,
+            floor,
+            [enough_gap, over],
+            budget,
+            |a, b| {
+                k.check_cancelled(OP)?;
+                piece_reparametrised(&sides, net, a, b)
+            },
+        )?
+        else {
+            return Ok(None);
+        };
+        if gap == f64::INFINITY {
+            return Ok(Some(gap));
+        }
+        let bound = (Ivl::from(gap) + Ivl::from(c_slack)).hi;
+        Ok(bound.is_finite().then_some(bound))
     };
-    // (the bound adds the curve's slack, at least 0, to the gap: a gap above `over` is enough;
-    // a piece across a corner is bounded to first order by `piece_reparametrised`, so the
-    // first pieces need no cut there)
-    // (a gap at most `enough` less the curve's slack, rounded down, has a bound at most
-    // `enough`: the sum's exact value is at most `enough`, so rounding it up stays there)
-    let enough_gap = (Ivl::from(enough) - Ivl::from(c_slack)).lo;
-    let Some(gap) = bisect(
-        range,
-        FIRST_PIECES,
-        &[],
-        CLOSE_RELATIVE,
-        floor,
-        [enough_gap, over],
-        budget,
-        |a, b| {
-            k.check_cancelled(OP)?;
-            piece_reparametrised(&sides, &net, a, b)
-        },
-    )?
-    else {
+    let first = run(&cn, &net, enough)?;
+    let Some(bound) = recentred_retry(first, [enough, over], &cn, &net, run)? else {
         return Ok(None);
     };
-    if gap == f64::INFINITY {
-        return Ok(Some(gap));
-    }
-    let bound = (Ivl::from(gap) + Ivl::from(c_slack)).hi;
-    if !bound.is_finite() {
-        return Ok(None);
-    }
     // (the cutoff applies to the bound returned, the curve's slack included: a gap at most
     // `over` whose slack takes it past `over` is above it too)
     Ok(Some(if bound > over { f64::INFINITY } else { bound }))
+}
+
+/// Not upstream (#18166): the bound `first` of a curve against a surface (`None` where it is
+/// not enclosed), tightened where it is above `enough` (or not enclosed) and the curve lies
+/// far from the origin for its size ([`recentre`]): `run` bounds the same pair with both moved
+/// by `-T`, `T` the middle of the curve's control points, and the smaller bound is kept.
+///
+/// Far from the origin the interval enclosures widen with the coordinates themselves, not
+/// with the geometry: a rational curve's derivative `(A' - w' C) / w` encloses `A'` and
+/// `w' C` apart, each as wide as the coordinate `C` is large, so the second-order term of a
+/// piece stops shrinking with it, and the bisection runs out of pieces with the bound held
+/// there (`primitive.api_primitives` gen0353: an ellipse at `z = 4.5e8`, 1.2e-7 from its
+/// faces by samples, bounded at 4.76e4; gen0748: lines at 6e9, 9.5e-7 by samples, bounded
+/// at 1.2e-4). A translation keeps every distance, so it only moves the coordinates the
+/// enclosures widen with.
+///
+/// The moved data are rounded ([`translated_pw`]): each control point lands within its
+/// slack of the exact moved point, so each moved NURBS (positive weights: its points are
+/// convex combinations of the control points) is within its largest slack of the exact
+/// moved curve or surface, and the bound of the moved pair plus both slacks bounds the
+/// distance of the given pair. `run` is given `enough` less those slacks; a moved bound that
+/// is not finite, or past `over`, keeps `first`.
+///
+/// # Errors
+///
+/// Those of `run`.
+fn recentred_retry(
+    first: Option<f64>,
+    [enough, over]: [f64; 2],
+    cn: &NurbsCurve,
+    net: &NetSurface,
+    run: impl FnOnce(&NurbsCurve, &NetSurface, f64) -> Result<Option<f64>>,
+) -> Result<Option<f64>> {
+    if first.is_some_and(|g| g <= enough) {
+        return Ok(first);
+    }
+    let Some(t) = recentre(cn) else {
+        return Ok(first);
+    };
+    let (Some((moved_curve, curve_slack)), Some((moved_net, net_slack))) =
+        (translated_curve(cn, t), net.translated(t))
+    else {
+        return Ok(first);
+    };
+    let slack = (Ivl::from(curve_slack) + Ivl::from(net_slack)).hi;
+    let moved_enough = (Ivl::from(enough) - Ivl::from(slack)).lo;
+    let Some(moved) = run(&moved_curve, &moved_net, moved_enough)? else {
+        return Ok(first);
+    };
+    let moved = (Ivl::from(moved) + Ivl::from(slack)).hi;
+    if !(moved.is_finite() && moved <= over) {
+        return Ok(first);
+    }
+    Ok(Some(first.map_or(moved, |g| g.min(moved))))
+}
+
+/// The middle `T` of the box of `cn`'s control points, where some coordinate of it is larger
+/// than the box's diagonal (the curve lies farther from the origin than its size, so its
+/// coordinates, not its shape, set the enclosures' width: [`recentred_retry`]); `None` near
+/// the origin, or for data that are not finite or a weight that is not positive.
+fn recentre(cn: &NurbsCurve) -> Option<[f64; 3]> {
+    let mut lo = [f64::INFINITY; 3];
+    let mut hi = [f64::NEG_INFINITY; 3];
+    for p in cn.pw.chunks_exact(4) {
+        let [x, y, z, w] = [*p.first()?, *p.get(1)?, *p.get(2)?, *p.get(3)?];
+        if !(w.is_finite() && w > 0.0) {
+            return None;
+        }
+        for (i, c) in [x, y, z].into_iter().enumerate() {
+            let c = c / w;
+            if !c.is_finite() {
+                return None;
+            }
+            let (l, h) = (lo.get_mut(i)?, hi.get_mut(i)?);
+            *l = l.min(c);
+            *h = h.max(c);
+        }
+    }
+    let [l0, l1, l2] = lo;
+    let [h0, h1, h2] = hi;
+    let t = [0.5 * (l0 + h0), 0.5 * (l1 + h1), 0.5 * (l2 + h2)];
+    let size = ((h0 - l0).powi(2) + (h1 - l1).powi(2) + (h2 - l2).powi(2)).sqrt();
+    let far = t.iter().fold(0.0_f64, |m, c| m.max(c.abs()));
+    (far.is_finite() && size.is_finite() && far > size).then_some(t)
+}
+
+/// The homogeneous control points `pw` (`(x w, y w, z w, w)` each) moved by `-t`, rounded,
+/// with a slack no moved point is farther than from the exact moved point `x - t`.
+///
+/// Each moved coordinate is `X' = fl(X - fl(w t))`, so `|X' - (X - w t)| <= u |w t| +
+/// u |X'| / (1 - u)` (`u` the unit roundoff), and the moved point's coordinate `X' / w` is
+/// within `u (|t| + |X'| / w / (1 - u))` of `x - t`: bounded by `(|t| + fl(|X'| / w)) * 2u`
+/// (twice `u` covers the quotient's rounding and the `1 / (1 - u)`), the three coordinates'
+/// norm rounded up. `None` for data that are not finite or a weight that is not positive.
+fn translated_pw(pw: &[f64], t: [f64; 3]) -> Option<(Vec<f64>, f64)> {
+    let mut out = Vec::with_capacity(pw.len());
+    let mut slack = 0.0_f64;
+    for p in pw.chunks_exact(4) {
+        let [x, y, z, w] = [*p.first()?, *p.get(1)?, *p.get(2)?, *p.get(3)?];
+        if !(w.is_finite() && w > 0.0) {
+            return None;
+        }
+        let mut sq = Ivl::from(0.0);
+        for (c, tc) in [x, y, z].into_iter().zip(t) {
+            let moved = c - w * tc;
+            if !moved.is_finite() {
+                return None;
+            }
+            out.push(moved);
+            let e = (Ivl::from(tc.abs()) + Ivl::from(moved.abs()) / Ivl::from(w))
+                * Ivl::from(f64::EPSILON);
+            sq = sq + e * e;
+        }
+        out.push(w);
+        slack = slack.max(sq.sqrt().hi);
+    }
+    (out.len() == pw.len() && slack.is_finite()).then_some((out, slack))
+}
+
+/// `cn` moved by `-t` ([`translated_pw`]), with its slack.
+fn translated_curve(cn: &NurbsCurve, t: [f64; 3]) -> Option<(NurbsCurve, f64)> {
+    let (pw, slack) = translated_pw(&cn.pw, t)?;
+    Some((
+        NurbsCurve {
+            p: cn.p,
+            n: cn.n,
+            u: cn.u.clone(),
+            pw,
+        },
+        slack,
+    ))
 }
 
 #[cfg(test)]
