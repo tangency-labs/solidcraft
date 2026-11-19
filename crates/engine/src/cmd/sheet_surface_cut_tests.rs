@@ -753,6 +753,34 @@ fn a_notch_cut_across_a_bend_from_the_flats_edge_folds_with_the_sheet() {
     assert!((exact_volume(&s) - want).abs() < 1e-6 * want, "{} vs {want}", exact_volume(&s));
 }
 
+/// A fold beside a flange whose bend a notch took away, cut while the sheet was unfolded, is
+/// made: its line, run on, meets the bend's line only where the notch took the bend (#17543).
+/// The sheet weighs what it does with the same notch drawn on its flat.
+#[test]
+fn a_fold_whose_line_meets_a_bend_only_where_a_notch_took_it_is_made() {
+    let base = |outline: Value| {
+        let mut s = session();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Flat"}));
+        run(&mut s, "sketch.line", json!({"points": outline, "closed": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sheet.flange", json!({"type": "base", "sketch": "Flat"}));
+        run(&mut s, "sheet.fold", json!({"points": [[0, 20, 2.5], [100, 20, 2.5]], "angle": "90 deg", "fixed": [40, 70, 2.5]}));
+        s
+    };
+    // The second fold, along x = 85: its line, run on, meets the first bend at (85, 20).
+    let fold = json!({"points": [[85, 40, 2.5], [85, 100, 2.5]], "angle": "90 deg", "fixed": [40, 70, 2.5]});
+    let mut drawn = base(json!([[0, 0], [70, 0], [70, 30], [100, 30], [100, 100], [0, 100]]));
+    run(&mut drawn, "sheet.fold", fold.clone());
+    let want = volume(&mut drawn);
+    let mut cut = base(json!([[0, 0], [100, 0], [100, 100], [0, 100]]));
+    run(&mut cut, "sheet.unfold", json!({}));
+    run(&mut cut, "solid.box", json!({"corner": [70, -1, -1], "length": 31, "width": 31, "height": 6, "operation": "cut"}));
+    run(&mut cut, "sheet.refold", json!({}));
+    run(&mut cut, "sheet.fold", fold);
+    let v = volume(&mut cut);
+    assert!((v - want).abs() < 1e-6 * want, "{v} vs {want} with the notch drawn");
+}
+
 /// What such a cut from the flat's edge can't be is refused, and the sheet stays as it was: a
 /// drill at a slant through the bend's end, its walls leaning, and the notch stopping 1 inside
 /// the thickness, cut by a box or by Combine.
