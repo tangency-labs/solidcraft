@@ -1798,6 +1798,39 @@ mod drafts {
         assert!(rel(volume(&c), v) < 1e-9, "{} {v}", volume(&c));
     }
 
+    /// Acid-6's needle: R = 0.5, h = 1000, neutral at z = -1600, theta = 0.02 degrees.
+    /// r(z) = R - (z + 1600) tan(theta), so the frustum volume is
+    /// pi h (R^2 + R r_top + r_top^2) / 3 = 364.684642297274456 mm^3;
+    /// r_top = 0.150934135423594902 mm.
+    #[test]
+    fn a_long_thin_cylinder_drafts_to_a_frustum() {
+        all_fixes();
+        let base = [0.0, 0.0, -1600.0];
+        let c = make_cylinder(base, 0.5, 1000.0).unwrap();
+        let o = order(&c);
+        // 0.02 pi / 180 and tan(0.02 pi / 180), rounded to doubles.
+        let angle = 0.000_349_065_850_398_865_93;
+        let slope = 0.000_349_065_864_576_405_1;
+        draft(&c, &o, &[curved(&c, &o)], base, Z, Z, angle).unwrap();
+        let small = 0.5 - 1000.0 * slope;
+        let want = PI * 1000.0 * (0.25 + 0.5 * small + small * small) / 3.0;
+        let got = volume(&c);
+        assert!(rel(got, want) < 1e-9, "{got} {want}");
+        assert!(c.is_manifold_solid().unwrap());
+        assert_eq!(c.check(crate::CheckLevel::All).unwrap().failures, 0);
+        assert_eq!(c.counts().unwrap(), [3, 3, 2]);
+        // At z = -601 the radius is about 0.1513; at -1599 it is about 0.4997.
+        for (point, class) in [
+            ([0.0, 0.0, -601.0], crate::PointClass::Inside),
+            ([0.2, 0.0, -601.0], crate::PointClass::Outside),
+            ([0.2, 0.0, -1599.0], crate::PointClass::Inside),
+            ([0.0, 0.0, -1601.0], crate::PointClass::Outside),
+            ([0.0, 0.0, -599.0], crate::PointClass::Outside),
+        ] {
+            assert_eq!(c.classify_point(point).unwrap(), class, "{point:?}");
+        }
+    }
+
     /// A cone r 10 at its base to 8 at its top, 20 tall, drafted 5 degrees about its base turns
     /// its generators 5 degrees more: r 10 + 20 tan(atan(-0.1) - 5 degrees) at the top.
     #[test]
