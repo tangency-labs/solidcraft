@@ -1778,3 +1778,25 @@ fn move_drawn_line_along_itself_by_its_length() {
     near(fit[0], end);
     near(fit[1], end + x * 10.0);
 }
+
+#[test]
+fn move_drawn_curve_with_a_fixed_point_is_refused() {
+    let (mut s, _, _, _) = second_frame();
+    let line = run(&mut s, "sketch.line3d", json!({"points":[[10,30,40],[10,30,50]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{line}.start")}));
+    let before = s.doc.to_json();
+    let e = s.execute("sketch.move", &json!({"entities":[line],"translate":[3,0]})).unwrap_err().to_string();
+    assert!(e.contains("fixed"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn move_drawn_curve_that_breaks_a_3d_constraint_is_refused() {
+    let (mut s, _) = plane_3d_sketch();
+    let line = run(&mut s, "sketch.line3d", json!({"points":[[0,0,5],[10,0,5]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.along_axis", json!({"line": line, "axis": "x"}));
+    let before = s.doc.to_json();
+    let e = s.execute("sketch.move", &json!({"entities":[line],"angle":90})).unwrap_err().to_string();
+    assert!(e.contains("cannot hold"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
