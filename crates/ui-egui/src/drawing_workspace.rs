@@ -327,6 +327,34 @@ pub(crate) fn edit_in_place(app: &mut SolveApp, object: u64, at: egui::Pos2) -> 
     true
 }
 
+/// A double-click on a text cell of the sheet's title block edits what the cell shows, where it
+/// is, in the box a dimension's or a note's text is typed in (true: the box opened at `at`).
+/// `point` is the pointer on paper. A cell that shows a logo or the projection symbol has no text.
+pub(crate) fn edit_title_cell(app: &mut SolveApp, sheet: u64, point: Vec2, at: egui::Pos2) -> bool {
+    use solidcraft_engine::doc::ids::encode;
+    use solidcraft_engine::geom::title_block::CellKind;
+    let Ok(drawing) = app.session.drawing("drawing.inspect").cloned() else { return false };
+    let Some(record) = drawing.sheets.iter().find(|record| record.id == sheet) else { return false };
+    let (Some(block), Ok(Some(placed))) = (&record.title_block, record.title_block_layout()) else { return false };
+    let Some(cell) = block.cells.iter().zip(&placed.cells).find(|(_, placed)| placed.rect.contains(point)).map(|(cell, _)| cell) else {
+        return false;
+    };
+    if !matches!(cell.kind, CellKind::Text(_)) {
+        return false;
+    }
+    let Ok(read) = app.run("drawing.inspect", serde_json::json!({})) else { return false };
+    let text = read["sheets"]
+        .as_array()
+        .and_then(|sheets| sheets.iter().find(|s| s["id"].as_str() == Some(encode(sheet).as_str())))
+        .and_then(|s| s["title_block_cells"].as_array()?.iter().find(|c| c["name"].as_str() == Some(cell.name.as_str())))
+        .and_then(|c| c["text"].as_str().map(str::to_owned));
+    let Some(text) = text.filter(|text| !text.contains('\n')) else { return false };
+    let title = cell.label.as_ref().map_or(cell.name.as_str(), |label| label.text.as_str()).to_owned();
+    close_panel(app);
+    crate::dim_view::edit_sheet_text(crate::dim_view::SheetText::TitleCell { sheet, cell: cell.name.clone() }, &title, text, at);
+    true
+}
+
 pub(super) fn edit_object(app: &mut SolveApp, kind: &str, object: u64) {
     let tool = match kind {
         "view" => Tool::Edit(Some(object)),
@@ -1245,7 +1273,18 @@ mod tests {
         assert_eq!(hover["outlined"], true);
         h.step(&json!({"click":[x,y]})).unwrap();
         h.frames(3);
-        assert!(crate::scenario::handle_at("drawing:view_selection:project").is_some());
+        // Selected, with its options on the right and nothing floating over the sheet: what the
+        // card offered is in the right-click menu.
+        assert_eq!(h.app.session.selection, [solidcraft_engine::Sel::Drawing { drawing: h.app.session.open_drawing.unwrap(), object: id }]);
+        assert!(crate::scenario::handle_at("drawing:view_selection:project").is_none(), "no card over the view");
+        assert_eq!(inspector_title(&h.app), "Edit View");
+        h.step(&json!({"click":[x,y], "button":"right"})).unwrap();
+        h.frames(3);
+        let menu = crate::context_menu::describe(&h.app);
+        let rows: Vec<&str> = menu["items"].as_array().unwrap().iter().filter_map(|item| item["label"].as_str()).collect();
+        assert_eq!(&rows[..3], ["Edit View", "Projected View", "Delete"], "{rows:?}");
+        crate::context_menu::close(&mut h.app);
+        h.frames(2);
 
         let before = h.app.session.undo.len();
         h.step(&json!({"drag":[[x,y],[x+60.0,y+24.0]]})).unwrap();
@@ -1256,6 +1295,17 @@ mod tests {
         assert_eq!(h.app.session.undo.len(), before + 1);
         h.app.run("edit.undo", json!({})).unwrap();
         assert_eq!(centre(&h), Vec2::new(175.0, 140.0));
+
+        // Delete is the Delete key's, with no question of the drawing's own, and Ctrl+Z undoes it.
+        h.frames(3);
+        h.step(&json!({"click":[x,y]})).unwrap();
+        h.frames(3);
+        h.step(&json!({"key":"Delete"})).unwrap();
+        h.frames(4);
+        assert!(h.app.session.drawing("drawing.inspect").unwrap().view(id).is_none(), "the view is deleted at once");
+        h.step(&json!({"key":"Z", "cmd": true})).unwrap();
+        h.settle();
+        assert!(h.app.session.drawing("drawing.inspect").unwrap().view(id).is_some(), "and Ctrl+Z brings it back");
     }
 
     /// A blank sheet's ribbon offers every tool that has a working panel: a click opens it.

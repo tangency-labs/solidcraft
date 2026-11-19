@@ -15,7 +15,7 @@
 //! - **100 % is true size**: one paper millimetre is (96 / 25.4) × calibration / UI zoom points, so
 //!   the UI scale never changes it ([`true_size`]). The calibration is a preference, set against a
 //!   100 mm bar ([`calibration_bar`]).
-//! - **Sheet colour** (Follows the theme, White, Blueprint, Prussian Blue) is a screen preference
+//! - **Sheet colour** (White unless chosen: Follows the theme, Blueprint, Prussian Blue) is a screen preference
 //!   (D25 of `docs/design/drawing-ui/decisions.md`). The paper keeps its colour on a neutral stage
 //!   that moves away from it to stand off ([`stage_and_paper`]), and has a very slight rounded corner
 //!   (D29). Nothing here
@@ -60,7 +60,8 @@ const HOVER_BAND: f64 = 6.0;
 /// The paper's corner radius on screen, in points: very slight (D29).
 const PAPER_CORNER: u8 = 4;
 
-/// The sheet's colour on screen (Preferences › Design › Drawings › Sheet colour).
+/// The sheet's colour on screen (Preferences › Design › Drawings › Sheet colour). White unless
+/// another is chosen: paper is white, whatever the theme.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SheetColour {
     /// Follows the theme: White in a light theme, the theme's dark paper in a dark one (a theme
@@ -76,14 +77,19 @@ impl SheetColour {
     /// In the order Preferences lists them.
     pub const ALL: [SheetColour; 4] = [SheetColour::Auto, SheetColour::White, SheetColour::Blueprint, SheetColour::PrussianBlue];
 
+    /// The colour stored as `s`. `auto` was the default's name while the default followed the
+    /// theme: a setting saved then was never chosen, and reads as today's default, White.
     pub fn parse(s: &str) -> Option<SheetColour> {
+        if s == "auto" {
+            return Some(SheetColour::White);
+        }
         SheetColour::ALL.into_iter().find(|c| c.id() == s)
     }
 
     /// Its stored name.
     pub fn id(self) -> &'static str {
         match self {
-            SheetColour::Auto => "auto",
+            SheetColour::Auto => "theme",
             SheetColour::White => "white",
             SheetColour::Blueprint => "blueprint",
             SheetColour::PrussianBlue => "prussian_blue",
@@ -156,7 +162,7 @@ pub fn stage_and_paper(paper: Color32, backdrop: Color32) -> (Color32, Color32) 
 /// The stage, paper and ink the page draws in, now.
 pub fn sheet_colours(app: &SolveApp) -> (Color32, Color32, Color32) {
     let t = Tokens::get();
-    let colour = SheetColour::parse(&app.preferences.drawing_sheet_colour).unwrap_or(SheetColour::Auto);
+    let colour = SheetColour::parse(&app.preferences.drawing_sheet_colour).unwrap_or(SheetColour::White);
     let (paper, ink) = colour.paper(&t, solidcraft_theme::is_dark());
     let (stage, paper) = stage_and_paper(paper, t.viewport_top);
     (stage, paper, ink)
@@ -370,21 +376,27 @@ fn framed(canvas: Rect, area: Rect, size: Vec2, true_size: f64) -> (Vec2, f64) {
 fn free_area(app: &SolveApp, canvas: Rect) -> Rect {
     let mut area = crate::shell::workspace_content(app, crate::shell::content_rect(app, canvas));
     // The ribbon, the Browser and the History float over the canvas in the classic layout: the
-    // sheet is framed beside them, not under them (#19070). Each takes the side it lies on.
+    // sheet is framed beside them, not under them (#19070). Each takes the side that costs the paper the least room.
     let around = area;
     for cover in app.shell.cards.iter().copied().chain(app.shell.browser.filter(|_| app.ui.show_browser)).chain(app.shell.history) {
         if !cover.is_finite() || !cover.is_positive() || !cover.intersects(area) {
             continue;
         }
-        let (dx, dy) = (cover.center().x - around.center().x, cover.center().y - around.center().y);
-        // A wide strip (the ribbon, the History) takes the top or the bottom; a tall one (the
-        // Browser) takes the left or the right.
-        if cover.width() >= cover.height() {
-            if dy < 0.0 { area.min.y = area.min.y.max(cover.bottom()) } else { area.max.y = area.max.y.min(cover.top()) }
-        } else if dx < 0.0 {
-            area.min.x = area.min.x.max(cover.right());
-        } else {
-            area.max.x = area.max.x.min(cover.left());
+        // The cover takes the side that costs the paper the least room, whatever its shape: a
+        // short or folded side Browser is wider than tall, yet still takes the left, and the
+        // ribbon, which reaches the right edge too, takes the top.
+        let cost = [
+            (cover.right() - area.min.x).max(0.0) * area.height(),
+            (area.max.x - cover.left()).max(0.0) * area.height(),
+            (cover.bottom() - area.min.y).max(0.0) * area.width(),
+            (area.max.y - cover.top()).max(0.0) * area.width(),
+        ];
+        let nearest = (0..4).min_by(|&a, &b| cost[a].total_cmp(&cost[b])).unwrap_or(0);
+        match nearest {
+            0 => area.min.x = area.min.x.max(cover.right()),
+            1 => area.max.x = area.max.x.min(cover.left()),
+            2 => area.min.y = area.min.y.max(cover.bottom()),
+            _ => area.max.y = area.max.y.min(cover.top()),
         }
     }
     if !area.is_positive() {
@@ -562,6 +574,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
         {
             crate::drawing_workspace::edit_object(app, kind, hit.object);
         }
+    }
+    // A text cell of the title block likewise: what it shows is typed where it is.
+    if response.double_clicked()
+        && !placing
+        && !hit.is_some_and(|hit| drawing.has_object(hit.object) || hit.kind == ObjectKind::PartsList)
+        && let (Some(point), Some(at)) = (on_paper, response.interact_pointer_pos())
+    {
+        crate::drawing_workspace::edit_title_cell(app, sheet, point, at);
     }
     crate::dim_view::show_sheet_editor(app, ui.ctx());
     if let Some(hit) = hit
@@ -839,7 +859,7 @@ pub(crate) fn backdrop_choice(app: &mut SolveApp, ui: &mut egui::Ui) {
 /// Preferences' Sheet colour choice.
 pub(crate) fn colour_choice(app: &mut SolveApp, ui: &mut egui::Ui) {
     let labels: Vec<&str> = SheetColour::ALL.iter().map(|c| app.tr(c.label())).collect();
-    let current = SheetColour::parse(&app.preferences.drawing_sheet_colour).unwrap_or(SheetColour::Auto);
+    let current = SheetColour::parse(&app.preferences.drawing_sheet_colour).unwrap_or(SheetColour::White);
     let mut selected = SheetColour::ALL.iter().position(|c| *c == current).unwrap_or(3);
     let response = ui_kit::dropdown(ui, "pref_drawing_sheet_colour", &mut selected, &labels);
     crate::scenario::publish_target("prefs:drawing_sheet_colour", response.rect);

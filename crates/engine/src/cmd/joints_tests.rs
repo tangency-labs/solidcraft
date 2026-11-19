@@ -1569,6 +1569,46 @@ fn a_loop_in_a_group_over_the_solvers_values_still_closes_and_drives() {
     }
 }
 
+/// #18880: a chain of links closed into a ring ties its loops into one group with more values
+/// than the loop solver moves at once. The group cannot be narrowed (every loop of it runs
+/// through the value that moves), so it stayed a conflict and nothing in it moved: the model
+/// locked up as soon as the loop was closed. The ring turns now, and the links follow.
+#[test]
+fn a_ring_of_links_closes_and_drives() {
+    let mut s = Session::default();
+    let n = 66usize;
+    for i in 0..n {
+        run(&mut s, "component.create", json!({"name": format!("L{i}"), "grounded": i == 0}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+    }
+    // The links on a circle, each joined to the next at the point between them.
+    let radius = n as f64 * 30.0 / (2.0 * std::f64::consts::PI);
+    let pin_point = |i: usize| {
+        let th = 2.0 * std::f64::consts::PI * (i as f64 + 0.5) / n as f64;
+        Vec3::new(radius * th.cos(), radius * th.sin(), 0.0)
+    };
+    for i in 0..n {
+        let j = (i + 1) % n;
+        let p = pin_point(i);
+        let side = |o: &str| json!({"occurrence": o, "point": [p.x, p.y, p.z], "z": [0.0, 0.0, 1.0]});
+        let r = run(
+            &mut s,
+            "joint.create",
+            json!({"type": "revolute", "a": side(&format!("L{i}")), "b": side(&format!("L{j}")), "flip": true, "name": format!("H{i}")}),
+        );
+        assert_eq!(r["conflicts"].as_array().map(Vec::len), Some(0), "H{i}: {r}");
+    }
+    // The ring is one loop: the drive turns the first link and the rest follow it.
+    let before = place(&s, "L1", Vec3::ZERO);
+    let r = run(&mut s, "joint.drive", json!({"joint": "H0", "value": 10}));
+    assert_eq!(r["moved"], true, "{r}");
+    assert!(r["stopped_by_loop"].is_null(), "{r}");
+    assert_eq!(r["conflicts"].as_array().map(Vec::len), Some(0), "{r}");
+    assert!((r["values"][0]["value"].as_f64().unwrap_or(f64::NAN) - 10.0).abs() < 1e-9, "{r}");
+    let after = place(&s, "L1", Vec3::ZERO);
+    assert!(after.dist(before) > 1.0, "the link did not move: {before:?} to {after:?}");
+}
+
 /// A slider-crank: crank 15 about the origin, rod 40, a piston sliding along X. Returns the crank
 /// pin and the wrist pin.
 fn slider_crank() -> (Session, Vec3, Vec3) {

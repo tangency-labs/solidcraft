@@ -1383,22 +1383,24 @@ fn run_case_with_records(
                     bodies.insert(name.to_owned(), body);
                 }
             }
-            // A handled refusal is an attempt, not the case's outcome. Keep checking the
-            // later operations and final geometry; an unmarked refusal still ends the case.
-            (Err(_), Some(_)) if continued => {}
             (Err(x), Some(_)) => {
-                write_smb(e, &ins);
                 // An entry may name the refusal it expects (`refused_as`, a part of the
                 // error's text): any other error, such as a blend that fails inside instead of
-                // being refused, does not stand for it.
+                // being refused, does not stand for it, whether the refusal was handled or not.
                 if let Some(kind) = c.get("refused_as").and_then(Value::as_str) {
                     if !x.contains(kind) {
+                        write_smb(e, &ins);
                         return Err(Stop::Fail(format!(
                             "call {i} ({op}) failed where the rig's was refused as \"{kind}\": {x}"
                         )));
                     }
                 }
-                return Ok(None);
+                // A handled refusal is an attempt, not the case's outcome. Keep checking the
+                // later operations and final geometry; an unmarked refusal still ends the case.
+                if !continued {
+                    write_smb(e, &ins);
+                    return Ok(None);
+                }
             }
             (Err(x), None) => {
                 write_smb(e, &ins);
@@ -1977,6 +1979,21 @@ fn a_named_refusal_kind_must_match_the_replayed_error() {
     assert!(
         matches!(run_case(Path::new("unused.json"), &e), Err(Stop::Fail(why)) if why.contains("refused as \"no room\""))
     );
+}
+
+#[test]
+fn a_handled_refusal_checks_its_named_kind() {
+    let mut e = handled_refusal_case();
+    e["calls"][0]["refused_as"] = serde_json::json!("no room");
+    assert!(
+        matches!(run_case(Path::new("unused.json"), &e), Err(Stop::Fail(why)) if why.contains("refused as \"no room\""))
+    );
+    // a kind the replayed error does have lets the case go on to the final geometry
+    e["calls"][0]["refused_as"] = serde_json::json!("invalid argument");
+    assert!(matches!(
+        run_case(Path::new("unused.json"), &e),
+        Ok(Some(_))
+    ));
 }
 
 #[test]
