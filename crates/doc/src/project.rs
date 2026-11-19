@@ -2455,8 +2455,18 @@ fn drop_coincident(geom: Vec<LinkGeom>, tol: f64) -> Vec<LinkGeom> {
         (LinkGeom::Ellipse { c, major, minor }, LinkGeom::Ellipse { c: c2, major: m2, minor: n2 }) => {
             same(*c, *c2) && (minor - n2).abs() <= tol && (same(*major, *m2) || same(*major, *c2 * 2.0 - *m2))
         }
-        (LinkGeom::Spline { pts, .. }, LinkGeom::Spline { pts: p2, .. }) => {
-            pts.len() == p2.len() && (pts.iter().zip(p2).all(|(p, q)| same(*p, *q)) || pts.iter().zip(p2.iter().rev()).all(|(p, q)| same(*p, *q)))
+        // The same spline: the same kind, degree, knots and weights over the same points (a
+        // uniform one also the other way round).
+        (
+            LinkGeom::Spline { pts, control, degree, periodic, nurbs },
+            LinkGeom::Spline { pts: p2, control: c2, degree: d2, periodic: o2, nurbs: n2 },
+        ) => {
+            pts.len() == p2.len()
+                && control == c2
+                && degree == d2
+                && periodic == o2
+                && nurbs == n2
+                && (pts.iter().zip(p2).all(|(p, q)| same(*p, *q)) || (nurbs.is_none() && pts.iter().zip(p2.iter().rev()).all(|(p, q)| same(*p, *q))))
         }
         _ => false,
     };

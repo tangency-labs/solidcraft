@@ -944,7 +944,8 @@ pub struct Silhouette {
     /// Lines and conic arcs where the curve is exact, chords between `points` otherwise.
     pub geometry: Vec<Seg2>,
     pub accuracy: CurveAccuracy,
-    /// Exact points along it, from its start to its end.
+    /// Points along it, from its start to its end: on the curve itself where `accuracy` is
+    /// analytic, on its sampled approximation (within `accuracy`) otherwise.
     pub points: Vec<[f64; 2]>,
 }
 
@@ -957,6 +958,17 @@ pub struct Silhouette {
 /// # Errors
 /// An invalid placement or view, or a budget of `opts` exceeded.
 pub fn silhouettes(def: &Prepared, p: &Placement, view: &View, opts: &Options) -> Result<Vec<Silhouette>, HlrError> {
+    // A view is an orthonormal frame, as View::new makes it.
+    let unit = |v: Vec3| v.is_finite() && (v.len() - 1.).abs() < 1e-9;
+    if !(unit(view.x)
+        && unit(view.y)
+        && unit(view.d)
+        && view.x.dot(view.y).abs() < 1e-9
+        && view.x.dot(view.d).abs() < 1e-9
+        && view.y.dot(view.d).abs() < 1e-9)
+    {
+        return Err(HlrError::Invalid("view"));
+    }
     let defs = std::slice::from_ref(def);
     let given = [Placement { body: 0, ..*p }];
     // Worked in a frame centred on the body, as hidden_lines works.
