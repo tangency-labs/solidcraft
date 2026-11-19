@@ -238,11 +238,7 @@ impl Resources {
         let evaluated = [Some(planned_layout()), Some(color_layout())];
         let placed = [Some(shared_layout()), Some(instance_layout())];
         let target = |format| [Some(wgpu::ColorTargetState { format, blend: None, write_mask: wgpu::ColorWrites::RED })];
-        // The prepass's depth (as bits) and normal.
-        let depth_and_normal = [
-            Some(wgpu::ColorTargetState { format: wgpu::TextureFormat::R32Uint, blend: None, write_mask: wgpu::ColorWrites::RED }),
-            Some(wgpu::ColorTargetState { format: NORMAL_FORMAT, blend: None, write_mask: wgpu::ColorWrites::ALL }),
-        ];
+        let depth_and_normal = prepass_targets();
         let opaque = |label, layout: &wgpu::PipelineLayout, fragment: &str, depth_write_enabled, compare| {
             let pipeline = |source: TriSource| {
                 device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -390,6 +386,15 @@ impl Resources {
     }
 }
 
+/// The prepass's two targets: its depth (as bits) and its normal. Both have the same write mask
+/// and no blend. OpenGL below 4.0 has one write mask and one blend for all of a pipeline's targets
+/// (NVIDIA's Linux driver gives wgpu OpenGL 3.3), and wgpu refuses a pipeline whose targets differ
+/// there. `R32Uint` has the red channel alone, so writing every channel writes the same values.
+fn prepass_targets() -> [Option<wgpu::ColorTargetState>; 2] {
+    let target = |format| Some(wgpu::ColorTargetState { format, blend: None, write_mask: wgpu::ColorWrites::ALL });
+    [target(wgpu::TextureFormat::R32Uint), target(NORMAL_FORMAT)]
+}
+
 fn target_size(enabled: bool, pixels: [f32; 2], device_limit: u32) -> [u32; 2] {
     if !enabled {
         return [1, 1];
@@ -402,7 +407,16 @@ fn target_size(enabled: bool, pixels: [f32; 2], device_limit: u32) -> [u32; 2] {
 
 #[cfg(test)]
 mod tests {
-    use super::{GroundAo, target_size};
+    use super::{GroundAo, prepass_targets, target_size};
+
+    /// OpenGL below 4.0 cannot give a pipeline's targets different write masks or blends, and
+    /// wgpu refuses such a pipeline there, as on NVIDIA's Linux driver (OpenGL 3.3).
+    #[test]
+    fn the_prepass_targets_share_one_write_mask_and_blend() {
+        let [depth, normal] = prepass_targets().map(|target| target.expect("the prepass has two targets"));
+        assert_eq!(depth.write_mask, normal.write_mask);
+        assert_eq!(depth.blend, normal.blend);
+    }
 
     #[test]
     fn receiver_visibility_follows_the_camera_side_in_both_up_axes() {
