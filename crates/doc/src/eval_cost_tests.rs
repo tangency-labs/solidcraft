@@ -25,13 +25,14 @@ use crate::*;
 /// direction, joins made of bodies that are all apart without running the kernel's union, the
 /// holes whose tools were built (not moved from another copy's), the imported files read for an
 /// import feature, the tight boxes the kernel was asked for, the flats of sheets made from
-/// surfaces laid out (their pieces cut), the blends the kernel was asked for, and the searches
-/// for the radius that fits.
+/// surfaces laid out (their pieces cut), the blends the kernel was asked for, the searches for
+/// the radius that fits, and the meshes a cam's profile was read from.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub(super) struct Counts {
+pub(crate) struct Counts {
     pub moved: usize,
     pub digested: usize,
     pub imports_read: usize,
+    pub cam_meshes: usize,
     pub mesh_digested: usize,
     pub joint_faces: usize,
     pub faces_at: usize,
@@ -64,6 +65,7 @@ thread_local! {
             moved: 0,
             digested: 0,
             imports_read: 0,
+            cam_meshes: 0,
             mesh_digested: 0,
             joint_faces: 0,
             faces_at: 0,
@@ -92,7 +94,7 @@ thread_local! {
     };
 }
 
-pub(super) fn count(f: impl FnOnce(&mut Counts)) {
+pub(crate) fn count(f: impl FnOnce(&mut Counts)) {
     COUNTS.with(|c| {
         let mut n = c.get();
         f(&mut n);
@@ -133,7 +135,7 @@ fn searched(f: impl FnOnce()) -> usize {
 }
 
 /// The work `f` does on this thread.
-pub(super) fn counted(f: impl FnOnce()) -> Counts {
+pub(crate) fn counted(f: impl FnOnce()) -> Counts {
     COUNTS.with(|c| c.set(Counts::default()));
     f();
     COUNTS.with(Cell::get)
@@ -741,6 +743,61 @@ fn place(doc: &mut Document, comp: u64, m: Mat) {
 
 fn volume(model: &Model, body: &str) -> f64 {
     kernel::measure(&model.state().body(body).unwrap().body).unwrap().volume
+}
+
+/// A cam's profile is read from the cam's bodies, and their meshes are made once: a solve that
+/// moves the parts does not mesh them again. Every turn of the cam worked the profile out again,
+/// and the mesh of every body of the cam's component was the cost of it (#3389).
+#[test]
+fn a_cams_profile_is_meshed_once() {
+    use crate::joints::cam::CamProfile;
+    use crate::joints::{Joint, JointKind, JointOrigin, Snap};
+    let mut doc = Document::new("cam");
+    let comp = doc.add_component(Some("Cam"), 0).unwrap();
+    // The cam's body: a cylinder in the cam's own component.
+    let kind = FeatureKind::Cylinder {
+        base: point_expr(Vec3::ZERO),
+        axis: Dir(Vec3::Z),
+        radius: "5".into(),
+        height: "10".into(),
+        operation: Operation::NewBody,
+        references: Vec::new(),
+    };
+    let id = doc.add_feature(kind, None).unwrap();
+    doc.feature_mut(id).unwrap().component = comp;
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    let st = model.state();
+    let occurrence = doc.occurrences.iter().find(|o| o.component == comp).unwrap().id;
+    // The joint that turns the cam, and the profile picked on the cam's body.
+    let origin = |occ: u64| JointOrigin::new(occ, Snap::Point { point: Vec3::ZERO, z: None, x: None });
+    let joint = Joint {
+        id: 1,
+        name: "Cam".into(),
+        kind: JointKind::Revolute,
+        a: origin(0),
+        b: origin(occurrence),
+        values: Vec::new(),
+        limits: Vec::new(),
+        flip: false,
+        offset: 0.0,
+        angle: 0.0,
+        suppressed: false,
+        exprs: Default::default(),
+        offset_xy: [0.0; 2],
+        captured: None,
+        constraint: None,
+    };
+    let profile = CamProfile::Edges { occurrence, picks: vec![Vec3::new(5.0, 0.0, 10.0)], names: Vec::new() };
+    let work = counted(|| {
+        crate::joints::cam::profile_points(&doc, &st, &profile, &joint, (&crate::IDENTITY, &crate::IDENTITY)).unwrap();
+    });
+    assert_eq!(work.cam_meshes, 1, "the cam's body is meshed once: {work:?}");
+    let work = counted(|| {
+        crate::joints::cam::profile_points(&doc, &st, &profile, &joint, (&crate::IDENTITY, &crate::IDENTITY)).unwrap();
+    });
+    assert_eq!(work.cam_meshes, 0, "the mesh of the cam's body is kept: {work:?}");
 }
 
 #[test]
