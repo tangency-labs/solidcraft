@@ -4,6 +4,9 @@
 //! `A`, for every outline (each section at height `h sin t` is the outline scaled by `cos t`
 //! about the centroid); a circle's elliptical dome is the half-ellipsoid, a circle's spherical
 //! dome the spherical cap.
+#![allow(
+    clippy::disallowed_methods, // closed-form oracles, not ops geometry
+)]
 
 use std::f64::consts::{FRAC_PI_2, PI};
 
@@ -153,7 +156,11 @@ fn a_box_top_domed_ten_millimetres_is_exact_and_valid() {
         volume(&domed)
     );
     // the apex is exactly 10 above the top
-    assert!((top_z(&domed) - 20.0).abs() <= 1e-9, "top {}", top_z(&domed));
+    assert!(
+        (top_z(&domed) - 20.0).abs() <= 1e-9,
+        "top {}",
+        top_z(&domed)
+    );
     assert!(domed.is_manifold_solid().unwrap());
     domed.check_solid().unwrap();
 }
@@ -161,7 +168,7 @@ fn a_box_top_domed_ten_millimetres_is_exact_and_valid() {
 #[test]
 fn a_pentagon_top_domed_matches_two_thirds_a_h() {
     all_fixes();
-    let b = prism(&pentagon(10.0, 10.0), 10.0);
+    let b = prism(&pentagon(10.0, 0.0), 10.0);
     let o = order(&b);
     let top = flat_at(&b, &o, 10.0);
     let domed = dome(&b, &o, top, 10.0, DomeShape::Elliptical, false).unwrap();
@@ -175,12 +182,13 @@ fn a_pentagon_top_domed_matches_two_thirds_a_h() {
     );
     assert!((top_z(&domed) - 20.0).abs() <= 1e-9);
     assert!(domed.is_manifold_solid().unwrap());
+    domed.check_solid().unwrap();
 }
 
 #[test]
 fn a_slot_top_domed_matches_two_thirds_a_h() {
     all_fixes();
-    let b = prism(&slot(10.0), 10.0);
+    let b = prism(&slot(0.0), 10.0);
     let o = order(&b);
     let top = flat_at(&b, &o, 10.0);
     let domed = dome(&b, &o, top, 4.0, DomeShape::Elliptical, false).unwrap();
@@ -193,6 +201,7 @@ fn a_slot_top_domed_matches_two_thirds_a_h() {
     );
     assert!((top_z(&domed) - 14.0).abs() <= 1e-9);
     assert!(domed.is_manifold_solid().unwrap());
+    domed.check_solid().unwrap();
 }
 
 #[test]
@@ -211,6 +220,7 @@ fn a_circular_top_elliptical_is_the_half_ellipsoid() {
     );
     assert!((top_z(&domed) - 16.0).abs() <= 1e-9);
     assert!(domed.is_manifold_solid().unwrap());
+    domed.check_solid().unwrap();
 }
 
 #[test]
@@ -232,10 +242,27 @@ fn a_circular_top_spherical_is_the_spherical_cap() {
     );
     assert!((top_z(&domed) - 13.0).abs() <= 1e-9);
     assert!(domed.is_manifold_solid().unwrap());
+    domed.check_solid().unwrap();
 }
 
 #[test]
-fn a_dome_keeps_the_outline_and_adds_one_seam_edge() {
+fn a_dome_on_a_circle_keeps_the_face_count_and_adds_one_seam_edge() {
+    all_fixes();
+    let b = make_cylinder([0.0; 3], 5.0, 10.0).unwrap();
+    let o = order(&b);
+    let top = flat_at(&b, &o, 10.0);
+    let before = b.counts().unwrap();
+    let domed = dome(&b, &o, top, 6.0, DomeShape::Elliptical, false).unwrap();
+    let after = domed.counts().unwrap();
+    // an outline without corners is one smooth run: one cap face for the top face, its seam the
+    // one edge added, the apex the one vertex
+    assert_eq!(after[0], before[0], "faces {after:?}");
+    assert_eq!(after[1], before[1] + 1, "edges {after:?}");
+    assert_eq!(after[2], before[2] + 1, "vertices {after:?}");
+}
+
+#[test]
+fn a_dome_on_a_box_top_has_a_face_per_side_and_an_edge_per_corner() {
     all_fixes();
     let b = make_box([0.0; 3], [30.0, 20.0, 10.0]).unwrap();
     let o = order(&b);
@@ -243,10 +270,11 @@ fn a_dome_keeps_the_outline_and_adds_one_seam_edge() {
     let before = b.counts().unwrap();
     let domed = dome(&b, &o, top, 10.0, DomeShape::Elliptical, false).unwrap();
     let after = domed.counts().unwrap();
-    // the top face goes and the cap comes: the same count of faces; the four outline edges
-    // are shared with the sides, and the cap's seam is the one edge added
-    assert_eq!(after[0], before[0], "faces {after:?}");
-    assert_eq!(after[1], before[1] + 1, "edges {after:?}");
+    // a face's surface must be smooth across its knots, so the cap is one face per smooth run of
+    // the outline: four for the top face, a meridian edge from each corner to the apex
+    assert_eq!(after[0], before[0] + 3, "faces {after:?}");
+    assert_eq!(after[1], before[1] + 4, "edges {after:?}");
+    assert_eq!(after[2], before[2] + 1, "vertices {after:?}");
 }
 
 #[test]
@@ -273,17 +301,61 @@ fn a_dome_on_a_face_with_a_hole_is_refused() {
     let o = order(&holed);
     let top = flat_at(&holed, &o, 10.0);
     let err = dome(&holed, &o, top, 4.0, DomeShape::Elliptical, false).err();
-    assert!(matches!(err, Some(Error::Dome(DomeRefusal::Holes))), "{err:?}");
+    assert!(
+        matches!(err, Some(Error::Dome(DomeRefusal::Holes))),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn a_teardrop_top_domed_matches_two_thirds_a_h() {
+    all_fixes();
+    // a circle of radius 5 about the origin and the two tangents to it from (0, -10): the
+    // tangent points are at -30 and 210 degrees, the tangents sqrt(75) long
+    let r = 5.0_f64;
+    let (from, to) = (-PI / 6.0, 7.0 * PI / 6.0);
+    let start = [r * from.cos(), r * from.sin()];
+    let end = [r * to.cos(), r * to.sin()];
+    let profile = vec![
+        line([0.0, -10.0], start, 0.0),
+        Curve::Arc {
+            center: [0.0, 0.0, 0.0],
+            axis: [0.0, 0.0, 1.0],
+            reference: [1.0, 0.0, 0.0],
+            radius: r,
+            start: from,
+            end: to,
+        },
+        line(end, [0.0, -10.0], 0.0),
+    ];
+    let b = prism(&profile, 10.0);
+    let o = order(&b);
+    let top = flat_at(&b, &o, 10.0);
+    let domed = dome(&b, &o, top, 4.0, DomeShape::Elliptical, false).unwrap();
+    // the kite of the two tangents and two radii, r sqrt(75), plus the 240 degree sector
+    let area = r * 75.0_f64.sqrt() + (2.0 / 3.0) * PI * r * r;
+    let exact = area * 10.0 + (2.0 / 3.0) * area * 4.0;
+    assert!(
+        (volume(&domed) - exact).abs() <= exact * 1e-9,
+        "volume {:.12} vs {exact}",
+        volume(&domed)
+    );
+    assert!((top_z(&domed) - 14.0).abs() <= 1e-9);
+    assert!(domed.is_manifold_solid().unwrap());
+    domed.check_solid().unwrap();
 }
 
 #[test]
 fn a_dome_on_an_outline_the_centroid_does_not_see_round_is_refused() {
     all_fixes();
-    let b = prism(&u_shape(10.0), 10.0);
+    let b = prism(&u_shape(0.0), 10.0);
     let o = order(&b);
     let top = flat_at(&b, &o, 10.0);
     let err = dome(&b, &o, top, 4.0, DomeShape::Elliptical, false).err();
-    assert!(matches!(err, Some(Error::Dome(DomeRefusal::NotStar))), "{err:?}");
+    assert!(
+        matches!(err, Some(Error::Dome(DomeRefusal::NotStar))),
+        "{err:?}"
+    );
 }
 
 #[test]

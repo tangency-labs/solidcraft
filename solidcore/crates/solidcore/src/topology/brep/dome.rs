@@ -1,8 +1,11 @@
 //! A dome on a planar face (#19532): the face raised along its outward normal into a cap of
 //! height `h` whose outline is the face's own edges.
 //!
-//! The cap is one face on the full box of a rational tensor product, the same shape a sphere
-//! or a cone has at its pole. With `C` the face's centroid, `n` its outward unit normal, `B(t)`
+//! The cap is one face per smooth run of the outline, each on the full box of its own rational
+//! tensor product, the same shape a sphere or a cone has at its pole. A face's surface must be
+//! G1 across its knots, and a corner of the outline is a kink of the `s = 0` iso line, so the
+//! runs between corners meet along meridians instead. With `C` the face's centroid, `n` its
+//! outward unit normal, `B(t)`
 //! the outline (its edges chained end to end, each trimmed to its interval) and a meridian of
 //! three weighted points `(x_j, y_j, w_j)`, the cap is
 //!
@@ -29,22 +32,25 @@
 //! The volume of a dome is `(2/3) A h` for any star-shaped outline, because the section at
 //! height `h sin s` is the outline scaled by `cos s` about `C`.
 
+use crate::curve::curve::p2::evaluate_continuity;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::EntityRef;
-use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::geom::extent1d::Extent1d;
+use crate::geom::geom_utility::p2::ContinuityType;
+use crate::geom::tol::ANG_TOL_DEG;
 use crate::geom::tol::USE_DEFAULT;
 use crate::kernel::Kernel;
 use crate::mass::integrator::properties::face_centroid;
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::BSplineSurface;
+use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::math::{CPoint, NOW};
 use crate::query::api_queries::{edge_curve_copy, face_normal_at_edge};
 use crate::surface::surface::Surface;
+use crate::topology::brep::p2::ArenaNotifyState;
 use crate::topology::brep::p3::new_brep;
 use crate::topology::brep::p4::stitch_faces;
-use crate::topology::brep::p2::ArenaNotifyState;
 use crate::topology::brep::p7::{make_face_with_curves, FaceCurvesInput};
 use crate::topology::face::p2 as face_p2;
 use crate::topology::loopuse;
@@ -58,6 +64,9 @@ const CENTROID_ACCURACY: f64 = 1e-12;
 
 /// The v-knots of the cap's rational quadratic meridian.
 const MERIDIAN_KNOTS: [f64; 6] = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+
+/// A homogeneous control point: its weighted coordinates `H` and its weight `w`.
+type HPoint = ([f64; 3], f64);
 
 /// How many times a Bezier span whose sign is not yet proved is split in two, at most.
 const MAX_SUBDIVISIONS: usize = 8;
@@ -93,10 +102,11 @@ pub enum DomeRefusal {
     ReverseNotSupported,
 }
 
-/// A dome's cap: one face on the full box of its surface, with its outline the face's own.
+/// A dome's cap: one face per smooth run of the outline, each on the full box of its surface,
+/// with the outline the face's own.
 #[derive(Debug)]
 pub struct DomeCap {
-    /// The cap as a sheet of one face.
+    /// The cap as a sheet of one face per smooth run.
     pub sheet: Brep,
     /// The apex, `h` above the centroid along the outward normal.
     pub apex: [f64; 3],
@@ -175,16 +185,28 @@ pub fn dome_cap(
             None => return Ok(Err(DomeRefusal::SphericalNeedsCircle)),
         },
     };
-    let (curve, pieces) = join_pieces(outline.pieces)?;
-    let surface = cap_surface(&curve, centre, normal, &meridian)?;
-    let seam = seam_curve(&curve, centre, normal, &meridian)?;
     let mut sheet = new_brep(k, USE_DEFAULT, USE_DEFAULT)?;
-    cap_face(k, &mut sheet, surface, &pieces, &seam)?;
+    for run in smooth_runs(k, outline.pieces)? {
+        let (curve, pieces) = join_pieces(run)?;
+        let surface = cap_surface(&curve, centre, normal, &meridian)?;
+        let points = curve.control_points()?;
+        let (Some(first), Some(last)) = (points.first(), points.last()) else {
+            return Err(SolidError::invalid_input(
+                OP,
+                "an outline run without control points",
+            ));
+        };
+        let down = meridian_curve(first, centre, normal, &meridian)?;
+        let up = meridian_curve(last, centre, normal, &meridian)?;
+        cap_face(k, &mut sheet, surface, &pieces, &up, &down)?;
+    }
     sheet.refresh_cached_topology();
     let tol = sheet.tolerance();
     stitch_faces(k, &mut sheet, tol, None, false)?;
     sheet.refresh_cached_topology();
-    let apex: [f64; 3] = std::array::from_fn(|i| centre[i] + height * normal[i]);
+    let [cx, cy, cz] = centre;
+    let [nx, ny, nz] = normal;
+    let apex = [cx + height * nx, cy + height * ny, cz + height * nz];
     Ok(Ok(DomeCap { sheet, apex }))
 }
 
@@ -209,26 +231,27 @@ fn outline(
         edges.push(e);
     }
     let tol = b.tolerance();
-    let mut parts: Vec<BSplineCurve> = Vec::with_capacity(edges.len());
-    let mut turns: Vec<Option<Turn>> = Vec::with_capacity(edges.len());
+    let mut parts: Vec<BSplineCurve> = Vec::new();
+    let mut turns: Vec<Option<Turn>> = Vec::new();
     let mut circle_radius = None;
     for &e in &edges {
         let (curve, interval) = edge_curve_copy(k, b, e)?;
-        let (mut part, turn) = match natural_turn(k, &curve, interval, centre, normal)? {
-            Some((part, turn)) => (part, turn),
-            None => return Ok(Err(DomeRefusal::OpenOutline)),
+        let Some((mut part, turn)) = natural_turn(k, &curve, interval, centre, normal)? else {
+            return Ok(Err(DomeRefusal::OpenOutline));
         };
-        if parts.len() == 1 {
+        if let ([first], [first_turn]) = (parts.as_mut_slice(), turns.as_mut_slice()) {
             // the second edge may meet the first at the first's start: the first then runs the
             // other way round the loop
-            let head = parts[0].ends()?;
+            let head = first.ends()?;
             let ends = part.ends()?;
-            let meets_start = distance(head.start, ends.start) <= tol || distance(head.start, ends.end) <= tol;
-            let meets_end = distance(head.end, ends.start) <= tol || distance(head.end, ends.end) <= tol;
+            let meets_start =
+                distance(head.start, ends.start) <= tol || distance(head.start, ends.end) <= tol;
+            let meets_end =
+                distance(head.end, ends.start) <= tol || distance(head.end, ends.end) <= tol;
             if meets_start && !meets_end {
-                let natural = parts[0].natural_interval();
-                parts[0].reverse_parameterization(&natural)?;
-                turns[0] = turns[0].map(Turn::flipped);
+                let natural = first.natural_interval();
+                first.reverse_parameterization(&natural)?;
+                *first_turn = (*first_turn).map(Turn::flipped);
             }
         }
         if let Some(last) = parts.last() {
@@ -277,7 +300,10 @@ fn circle_about(
     b: &Brep,
     centre: [f64; 3],
 ) -> Result<Option<f64>> {
-    let (curve, _) = edge_curve_copy(k, b, edges[0])?;
+    let [edge] = edges else {
+        return Ok(None);
+    };
+    let (curve, _) = edge_curve_copy(k, b, *edge)?;
     let CurveKind::Ellipse(ell) = curve.kind() else {
         return Ok(None);
     };
@@ -316,8 +342,15 @@ fn natural_turn(
 /// The sign of `g` on a B-spline, from the Bernstein coefficients of `g` on each Bezier span.
 /// The spans are made by inserting every interior knot up to the curve's degree; `None` when a
 /// span stays undecided, or when the curve is not clamped, so it has no Bezier spans to read.
-fn bezier_turn(part: &mut BSplineCurve, centre: [f64; 3], normal: [f64; 3]) -> Result<Option<Turn>> {
+fn bezier_turn(
+    part: &mut BSplineCurve,
+    centre: [f64; 3],
+    normal: [f64; 3],
+) -> Result<Option<Turn>> {
     let degree = part.degree()?;
+    if degree == 0 {
+        return Err(SolidError::invalid_input(OP, "an edge curve of degree 0"));
+    }
     let (knots, multiplicities) = part.knots(None)?;
     let (Some(&first), Some(&last)) = (knots.first(), knots.last()) else {
         return Ok(None);
@@ -333,17 +366,17 @@ fn bezier_turn(part: &mut BSplineCurve, centre: [f64; 3], normal: [f64; 3]) -> R
         }
     }
     part.insert_knots(&new_knots)?;
-    let points: Vec<([f64; 3], f64)> = part
-        .control_points()?
-        .iter()
-        .map(homogeneous)
-        .collect();
+    let points: Vec<([f64; 3], f64)> = part.control_points()?.iter().map(homogeneous).collect();
     let mut sign = None;
-    for span in points.windows(degree + 1).step_by(degree) {
+    // the spans start every `degree` points and run `degree + 1` points, the last one ending at
+    // the curve's end; `get` stops the walk at the first span that would run past it
+    let mut start = 0;
+    while let Some(span) = points.get(start..=start + degree) {
         match piece_turn(span, centre, normal, 0) {
             Some(turn) if sign.is_none_or(|s| s == turn) => sign = Some(turn),
             _ => return Ok(None),
         }
+        start += degree;
     }
     Ok(sign)
 }
@@ -362,12 +395,7 @@ fn homogeneous(p: &CPoint) -> ([f64; 3], f64) {
 /// The triple product of Bernstein bases is a Bernstein basis of degree `3p - 1` with the
 /// coefficient `C(p,i) C(p-1,j) C(p,m) / C(3p-1,k)`, `k = i + j + m`; the convex hull property
 /// gives the sign. Undecided pieces are split in two, to [`MAX_SUBDIVISIONS`].
-fn piece_turn(
-    pts: &[([f64; 3], f64)],
-    centre: [f64; 3],
-    normal: [f64; 3],
-    depth: usize,
-) -> Option<Turn> {
+fn piece_turn(pts: &[HPoint], centre: [f64; 3], normal: [f64; 3], depth: usize) -> Option<Turn> {
     let p = pts.len().checked_sub(1)?;
     if p == 0 || pts.iter().any(|&(_, w)| w <= 0.0) {
         return None;
@@ -383,13 +411,24 @@ fn piece_turn(
                     continue;
                 }
                 let m = k - i - j;
-                let coeff = binomial(p, i) * binomial(p - 1, j) * binomial(p, m) / binomial(total, k);
-                let (hi, wi) = pts[i];
-                let (h0, w0) = pts[j];
-                let (h1, w1) = pts[j + 1];
-                let (hm, wm) = pts[m];
-                let rel: [f64; 3] = std::array::from_fn(|d| hi[d] - centre[d] * wi);
-                let diff: [f64; 3] = std::array::from_fn(|d| (h1[d] - h0[d]) * wm - hm[d] * (w1 - w0));
+                let coeff =
+                    binomial(p, i) * binomial(p - 1, j) * binomial(p, m) / binomial(total, k);
+                let &(hi, wi) = pts.get(i)?;
+                let &(h0, w0) = pts.get(j)?;
+                let &(h1, w1) = pts.get(j + 1)?;
+                let &(hm, wm) = pts.get(m)?;
+                let [hix, hiy, hiz] = hi;
+                let [h0x, h0y, h0z] = h0;
+                let [h1x, h1y, h1z] = h1;
+                let [hmx, hmy, hmz] = hm;
+                let [cx, cy, cz] = centre;
+                let dw = w1 - w0;
+                let rel = [hix - cx * wi, hiy - cy * wi, hiz - cz * wi];
+                let diff = [
+                    (h1x - h0x) * wm - hmx * dw,
+                    (h1y - h0y) * wm - hmy * dw,
+                    (h1z - h0z) * wm - hmz * dw,
+                ];
                 sum += coeff * dot(cross(rel, diff), normal);
             }
         }
@@ -406,32 +445,34 @@ fn piece_turn(
     if depth >= MAX_SUBDIVISIONS {
         return None;
     }
-    let (left, right) = split_piece(pts);
+    let (left, right) = split_piece(pts)?;
     let a = piece_turn(&left, centre, normal, depth + 1)?;
     let b = piece_turn(&right, centre, normal, depth + 1)?;
     (a == b).then_some(a)
 }
 
 /// The two Bezier pieces of `pts` split at the middle of its parameter range (de Casteljau).
-/// Homogeneous points split linearly, so the weights go with the points.
-fn split_piece(pts: &[([f64; 3], f64)]) -> (Vec<([f64; 3], f64)>, Vec<([f64; 3], f64)>) {
+/// Homogeneous points split linearly, so the weights go with the points. `None` for no points.
+fn split_piece(pts: &[HPoint]) -> Option<(Vec<HPoint>, Vec<HPoint>)> {
     let mut row = pts.to_vec();
-    let mut left = vec![row[0]];
-    let mut right = vec![row[row.len() - 1]];
+    let mut left = vec![*row.first()?];
+    let mut right = vec![*row.last()?];
     while row.len() > 1 {
         row = row
-            .windows(2)
-            .map(|pair| {
-                let (a, b) = (pair[0], pair[1]);
-                let point = std::array::from_fn(|d| 0.5 * (a.0[d] + b.0[d]));
-                (point, 0.5 * (a.1 + b.1))
+            .iter()
+            .zip(row.iter().skip(1))
+            .map(|(&(a, aw), &(b, bw))| {
+                let [ax, ay, az] = a;
+                let [bx, by, bz] = b;
+                let point = [0.5 * (ax + bx), 0.5 * (ay + by), 0.5 * (az + bz)];
+                (point, 0.5 * (aw + bw))
             })
             .collect();
-        left.push(row[0]);
-        right.push(row[row.len() - 1]);
+        left.push(*row.first()?);
+        right.push(*row.last()?);
     }
     right.reverse();
-    (left, right)
+    Some((left, right))
 }
 
 /// The binomial coefficient `C(n, k)` as a float, for the small degrees a dome uses.
@@ -456,7 +497,6 @@ fn outward_normal(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<[f64; 3]> {
     let frame = face_normal_at_edge(k, b, e, f, fu)?;
     Ok(point_of_vec(frame.normal.value))
 }
-
 
 /// The meridian of the elliptical dome: the quarter ellipse from the rim to the apex, as the
 /// control points `(x, y, w)` of the cap (`x` scales the outline about the centroid, `y` is the
@@ -504,7 +544,7 @@ fn cap_surface(
 ) -> Result<BSplineSurface> {
     let points = outline.control_points()?;
     let degree = outline.degree()?;
-    let (knots, _) = outline.knots(None)?;
+    let knots = full_knots(outline)?;
     let rows: Vec<Vec<CPoint>> = points
         .iter()
         .map(|p| {
@@ -515,8 +555,12 @@ fn cap_surface(
                 .collect()
         })
         .collect();
-    let n = points.len() - 1;
-    let r = knots.len() - 1;
+    let (Some(n), Some(r)) = (points.len().checked_sub(1), knots.len().checked_sub(1)) else {
+        return Err(SolidError::invalid_input(
+            OP,
+            "an outline without control points or knots",
+        ));
+    };
     BSplineSurface::from_data(n, 2, degree, 2, r, 5, &rows, &knots, &MERIDIAN_KNOTS)
 }
 
@@ -537,7 +581,6 @@ fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 }
 
-
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
@@ -552,26 +595,81 @@ fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
 
 /// The cap's control point on meridian point `[x, y, mw]` for the outline's control point with
 /// homogeneous coordinates `h` and weight `w`: `mw (w C + x (h - w C) + y w n)`, weight `mw w`.
-fn cap_point(h: [f64; 3], w: f64, centre: [f64; 3], normal: [f64; 3], [x, y, mw]: [f64; 3]) -> CPoint {
-    let xyz: [f64; 3] = std::array::from_fn(|d| {
-        mw * (w * centre[d] + x * (h[d] - w * centre[d]) + y * w * normal[d])
-    });
+fn cap_point(
+    h: [f64; 3],
+    w: f64,
+    centre: [f64; 3],
+    normal: [f64; 3],
+    [x, y, mw]: [f64; 3],
+) -> CPoint {
+    let [hx, hy, hz] = h;
+    let [cx, cy, cz] = centre;
+    let [nx, ny, nz] = normal;
+    let lane = |h: f64, c: f64, n: f64| mw * (w * c + x * (h - w * c) + y * w * n);
     CPoint {
-        x: xyz[0],
-        y: xyz[1],
-        z: xyz[2],
+        x: lane(hx, cx, nx),
+        y: lane(hy, cy, ny),
+        z: lane(hz, cz, nz),
         w: mw * w,
     }
 }
 
-/// The cap's meridian at the outline's start: the iso curve `u = 0` of the cap, the seam.
-fn seam_curve(
-    curve: &BSplineCurve,
+/// The outline's pieces grouped into its smooth runs: a run ends where the outline turns a
+/// corner, a joint the kernel does not read as G1 ([`ANG_TOL_DEG`], the angle of the surface
+/// check a face's surface must pass across its knots). An outline with corners starts its
+/// first run at one; an outline without any is one run.
+fn smooth_runs(k: &Kernel, pieces: Vec<BSplineCurve>) -> Result<Vec<Vec<BSplineCurve>>> {
+    if pieces.is_empty() {
+        return Err(SolidError::invalid_input(OP, "an outline without pieces"));
+    }
+    let mut corner_after = Vec::new();
+    for (piece, next) in pieces.iter().zip(pieces.iter().cycle().skip(1)) {
+        let joint = evaluate_continuity(
+            k,
+            piece,
+            piece.natural_interval().max(),
+            true,
+            next,
+            next.natural_interval().min(),
+            false,
+            ANG_TOL_DEG,
+        )?;
+        corner_after.push((joint.continuity as i32) < (ContinuityType::G1 as i32));
+    }
+    // the outline turned to start just after its last corner
+    let start = corner_after
+        .iter()
+        .rposition(|&corner| corner)
+        .map_or(0, |i| i + 1);
+    let turn = if start < pieces.len() { start } else { 0 };
+    let (before, from_turn): (Vec<_>, Vec<_>) = pieces
+        .into_iter()
+        .zip(corner_after)
+        .enumerate()
+        .partition(|(i, _)| *i < turn);
+    let mut runs = Vec::new();
+    let mut run = Vec::new();
+    for (piece, corner) in from_turn.into_iter().chain(before).map(|(_, pc)| pc) {
+        run.push(piece);
+        if corner {
+            runs.push(std::mem::take(&mut run));
+        }
+    }
+    if !run.is_empty() {
+        runs.push(run);
+    }
+    Ok(runs)
+}
+
+/// The cap's meridian through the outline's control point `point`: an iso curve of the cap
+/// at a run's end.
+fn meridian_curve(
+    point: &CPoint,
     centre: [f64; 3],
     normal: [f64; 3],
     meridian: &[[f64; 3]; 3],
 ) -> Result<BSplineCurve> {
-    let (h, w) = homogeneous(&curve.control_points()?[0]);
+    let (h, w) = homogeneous(point);
     let points: Vec<CPoint> = meridian
         .iter()
         .map(|&m| cap_point(h, w, centre, normal, m))
@@ -579,7 +677,7 @@ fn seam_curve(
     bspline(&points, 2, &MERIDIAN_KNOTS)
 }
 
-/// The outline's pieces joined into one curve over `[0, m]` (the piece `i` on `[i, i+1]`),
+/// A run's pieces joined into one curve over `[0, m]` (the piece `i` on `[i, i+1]`),
 /// by an affine reparametrisation of each piece and the knot and control point layout of a
 /// clamped B-spline: the joints are knots of multiplicity `degree` (continuous), and each
 /// later piece drops its first control point, which the joint shares. Returns the joined curve
@@ -601,10 +699,23 @@ fn join_pieces(mut pieces: Vec<BSplineCurve>) -> Result<(BSplineCurve, Vec<BSpli
     for (i, piece) in pieces.iter().enumerate() {
         let full = full_knots(piece)?;
         let first_knot = if i == 0 { 0 } else { degree + 1 };
-        let end_knot = if i + 1 == count { full.len() } else { full.len() - 1 };
-        knots.extend_from_slice(&full[first_knot..end_knot]);
-        let first_point = if i == 0 { 0 } else { 1 };
-        points.extend(piece.control_points()?[first_point..].iter().map(rational));
+        let end_knot = if i + 1 == count {
+            full.len()
+        } else {
+            full.len().saturating_sub(1)
+        };
+        let Some(run) = full.get(first_knot..end_knot) else {
+            return Err(SolidError::invalid_input(OP, "a piece without knots"));
+        };
+        knots.extend_from_slice(run);
+        let first_point = usize::from(i != 0);
+        let Some(tail) = piece.control_points()?.get(first_point..) else {
+            return Err(SolidError::invalid_input(
+                OP,
+                "a piece without control points",
+            ));
+        };
+        points.extend(tail.iter().map(rational));
     }
     let joined = bspline(&points, degree, &knots)?;
     Ok((joined, pieces))
@@ -637,42 +748,54 @@ fn rational(p: &CPoint) -> CPoint {
 /// A straight parameter-space segment from `a` to `b` over `[t0, t1]`, as a pcurve.
 fn uv_line(a: [f64; 2], b: [f64; 2], t0: f64, t1: f64) -> Result<Curve> {
     let points = vec![
-        CPoint { x: a[0], y: a[1], z: 0.0, w: 1.0 },
-        CPoint { x: b[0], y: b[1], z: 0.0, w: 1.0 },
+        CPoint {
+            x: a[0],
+            y: a[1],
+            z: 0.0,
+            w: 1.0,
+        },
+        CPoint {
+            x: b[0],
+            y: b[1],
+            z: 0.0,
+            w: 1.0,
+        },
     ];
     Ok(Curve::from(bspline(&points, 1, &[t0, t0, t1, t1])?))
 }
 
-/// The cap's one face, made from explicit loop uses: the outline's pieces along `v = 0`, the seam
-/// up at `u = m`, a degenerate pole use with no 3D curve (its neighbours share the apex vertex,
-/// as the STEP reader's collapsed side does), and the seam down at `u = 0`, `v` from 1 to 0.
-/// The seam curve is used twice, once in each direction.
+/// One face of the cap, made from explicit loop uses: a run's pieces along `v = 0`, the meridian
+/// up at the run's end `u = m`, a degenerate pole use with no 3D curve (its neighbours share the
+/// apex vertex, as the STEP reader's collapsed side does), and the meridian down at the run's
+/// start `u = 0`, `v` from 1 to 0. On an outline without corners the two meridians are the same
+/// curve and become one seam edge.
 fn cap_face(
     k: &mut Kernel,
     b: &mut Brep,
     surface: BSplineSurface,
     pieces: &[BSplineCurve],
-    seam: &BSplineCurve,
+    up: &BSplineCurve,
+    down: &BSplineCurve,
 ) -> Result<()> {
     let surface = Surface::from(surface);
     let bx = surface.natural_uv_domain_with_nurb(k)?;
     let top = pieces.len() as f64;
-    let mut curves: Vec<Option<Curve>> = Vec::with_capacity(pieces.len() + 3);
-    let mut uvs: Vec<Curve> = Vec::with_capacity(pieces.len() + 3);
-    let mut orientations = Vec::with_capacity(pieces.len() + 3);
+    let mut curves: Vec<Option<Curve>> = Vec::new();
+    let mut uvs: Vec<Curve> = Vec::new();
+    let mut orientations = Vec::new();
     for (i, piece) in pieces.iter().enumerate() {
         let (lo, hi) = (i as f64, (i + 1) as f64);
         curves.push(Some(Curve::from(piece.clone())));
         uvs.push(uv_line([lo, 0.0], [hi, 0.0], lo, hi)?);
         orientations.push(OrientType::Same);
     }
-    curves.push(Some(Curve::from(seam.clone())));
+    curves.push(Some(Curve::from(up.clone())));
     uvs.push(uv_line([top, 0.0], [top, 1.0], 0.0, 1.0)?);
     orientations.push(OrientType::Same);
     curves.push(None);
     uvs.push(uv_line([top, 1.0], [0.0, 1.0], 0.0, 1.0)?);
     orientations.push(OrientType::Same);
-    curves.push(Some(Curve::from(seam.clone())));
+    curves.push(Some(Curve::from(down.clone())));
     uvs.push(uv_line([0.0, 0.0], [0.0, 1.0], 0.0, 1.0)?);
     orientations.push(OrientType::Opposite);
     let input = FaceCurvesInput {
@@ -704,5 +827,11 @@ fn cap_face(
 
 /// The B-spline of `points` (homogeneous, `dim` 3) of `degree` over `knots`, clamped.
 fn bspline(points: &[CPoint], degree: usize, knots: &[f64]) -> Result<BSplineCurve> {
-    BSplineCurve::from_data(3, points.len() - 1, knots.len() - 1, degree, points, knots)
+    let (Some(n), Some(r)) = (points.len().checked_sub(1), knots.len().checked_sub(1)) else {
+        return Err(SolidError::invalid_input(
+            OP,
+            "a B-spline without control points or knots",
+        ));
+    };
+    BSplineCurve::from_data(3, n, r, degree, points, knots)
 }
