@@ -199,6 +199,54 @@ fn tangent_end_rib_point(
     Ok(None)
 }
 
+/// Not upstream (#17744): the rib point `(alpha, end uv, x)` of [`tangent_end_rib_point`]
+/// at `sigma`, its Newton steps continued until they settle (`geom::krawczyk::newton`), or
+/// the point as it is where they do not move it or fail. The residual stop leaves alpha off
+/// by the residual over the Jacobian's least singular value, which vanishes toward the
+/// tangent end: on a G3 round's rib 4e-5 along the rail, which the certificate sees at the
+/// stations. Only a rib on enclosed faces takes it; one on a face not enclosed keeps
+/// upstream's point.
+///
+/// # Errors
+///
+/// A cancellation.
+fn settled_point(
+    k: &Kernel,
+    fillet: &Surface,
+    end: &Surface,
+    section: usize,
+    sigma: f64,
+    (a, e, x): (f64, Point2, Point3),
+) -> Result<(f64, Point2, Point3)> {
+    let settle = |y: [f64; 3]| -> Result<Linearised<3>> {
+        let [a, u, v] = y;
+        let fil_uv = if section == 0 {
+            Point2::new(sigma, a)
+        } else {
+            Point2::new(a, sigma)
+        };
+        let (Ok((f, f_u, f_v)), Ok((x, e_u, e_v))) = (
+            first_derivs(k, fillet, fil_uv),
+            first_derivs(k, end, Point2::new(u, v)),
+        ) else {
+            return Ok(None);
+        };
+        let f_a = if section == 0 { f_v } else { f_u };
+        let r = f - x;
+        let col = |c: Vec3| [c.x, c.y, c.z];
+        Ok(Some(([r.x, r.y, r.z], [col(f_a), col(-e_u), col(-e_v)])))
+    };
+    let start = [a, e.x, e.y];
+    Ok(match newton(start, &settle, &inverse_of_columns3)? {
+        Some([a1, u, v]) if [a1, u, v] != start => {
+            let e1 = Point2::new(u, v);
+            let x1 = first_derivs(k, end, e1).ok().map(|(x1, _, _)| x1);
+            x1.map_or((a, e, x), |x1| (a1, e1, x1))
+        }
+        _ => (a, e, x),
+    })
+}
+
 /// The curves of [`tangent_end_rib`].
 #[derive(Debug, Clone)]
 pub struct TangentEndRib {
@@ -214,9 +262,9 @@ pub struct TangentEndRib {
     /// inside a scope that answers by its net is that net; one evaluated by its definition
     /// is the definition. `None` where the rib makes no claim:
     ///
-    /// - a face is not enclosed (a STEP, offset, curve-bounded or in-volume face, a face in
-    ///   power-basis form, or a definition of contact order 2): the rib is built as upstream builds it, on its
-    ///   spans' midpoints;
+    /// - a face is not enclosed (a STEP, offset, curve-bounded or in-volume face, a cone or
+    ///   cylinder, a face in power-basis form, or a definition of contact order 2): the rib
+    ///   is built as upstream builds it, on upstream's points and its spans' midpoints;
     /// - the faces are enclosed, but near the tangent end, `[0, t*]`, the rib is not bounded
     ///   within the tolerance (`t*` where the certificate's graded pieces stop): every other
     ///   part of the rib is certified within the tolerance as for `Some`, the first span is
@@ -454,53 +502,6 @@ pub fn tangent_end_rib(
         BSplineCurve::interpolate_points(pts, Some(ts), 3, None, None, false, ParamMethod::Uniform)
     };
 
-    // the exact rib point at t, from a guess; on the other end's side of the tangent end
-    // Not upstream (#17744): the point's Newton steps go on until they settle
-    // (`geom::krawczyk::newton`). Its residual stop leaves alpha off by the residual over
-    // the Jacobian's least singular value, which vanishes toward the tangent end: on a G3
-    // round's rib 4e-5 along the rail, which the certificate sees at the stations.
-    let settle = |sigma: f64, y: [f64; 3]| -> Result<Linearised<3>> {
-        let [a, u, v] = y;
-        let fil_uv = if section == 0 {
-            Point2::new(sigma, a)
-        } else {
-            Point2::new(a, sigma)
-        };
-        let (Ok((f, f_u, f_v)), Ok((x, e_u, e_v))) = (
-            first_derivs(k, fillet, fil_uv),
-            first_derivs(k, end, Point2::new(u, v)),
-        ) else {
-            return Ok(None);
-        };
-        let f_a = if section == 0 { f_v } else { f_u };
-        let r = f - x;
-        let col = |c: Vec3| [c.x, c.y, c.z];
-        Ok(Some(([r.x, r.y, r.z], [col(f_a), col(-e_u), col(-e_v)])))
-    };
-    let solve = |t: f64, alpha: f64, uv: Point2| -> Result<Option<(f64, Point2, Point3)>> {
-        let sigma = sigma_at(t);
-        let Some((a, e, x)) = tangent_end_rib_point(k, fillet, end, section, sigma, alpha, uv)?
-        else {
-            return Ok(None);
-        };
-        let start = [a, e.x, e.y];
-        let settled = newton(start, &|y| settle(sigma, y), &inverse_of_columns3)?;
-        let found = match settled {
-            Some([a1, u, v]) if [a1, u, v] != start => {
-                let e1 = Point2::new(u, v);
-                let x1 = first_derivs(k, end, e1).ok().map(|(x1, _, _)| x1);
-                x1.map_or((a, e, x), |x1| (a1, e1, x1))
-            }
-            _ => (a, e, x),
-        };
-        // (`<= 0.0` fails the point; a NaN product keeps it, as upstream's test)
-        #[allow(clippy::neg_cmp_op_on_partial_ord)]
-        Ok(Some(found).filter(|&(a, _, _)| !((a - alpha0) * (alpha1 - alpha0) <= 0.0)))
-    };
-    let rib_newton = |t: f64, y: [f64; 3]| -> Result<Option<[f64; 3]>> {
-        let [a, u, v] = y;
-        Ok(solve(t, a, Point2::new(u, v))?.map(|(a, e, _)| [a, e.x, e.y]))
-    };
     // the faces as the certificate encloses them (#17744): the surfaces the kernel
     // evaluates; where one is not enclosed, the rib is built as upstream builds it, its
     // spans' midpoints against the exact points there, with no bound
@@ -510,6 +511,29 @@ pub fn tangent_end_rib(
     ) {
         (Some(f), Some(e)) => Some((f, e)),
         _ => None,
+    };
+    let certified = faces.is_some();
+
+    // the exact rib point at t, from a guess; on the other end's side of the tangent end;
+    // settled where both faces are enclosed (#17744, [`settled_point`]), upstream's point
+    // where a face is not
+    let solve = |t: f64, alpha: f64, uv: Point2| -> Result<Option<(f64, Point2, Point3)>> {
+        let sigma = sigma_at(t);
+        let Some(point) = tangent_end_rib_point(k, fillet, end, section, sigma, alpha, uv)? else {
+            return Ok(None);
+        };
+        let found = if certified {
+            settled_point(k, fillet, end, section, sigma, point)?
+        } else {
+            point
+        };
+        // (`<= 0.0` fails the point; a NaN product keeps it, as upstream's test)
+        #[allow(clippy::neg_cmp_op_on_partial_ord)]
+        Ok(Some(found).filter(|&(a, _, _)| !((a - alpha0) * (alpha1 - alpha0) <= 0.0)))
+    };
+    let rib_newton = |t: f64, y: [f64; 3]| -> Result<Option<[f64; 3]>> {
+        let [a, u, v] = y;
+        Ok(solve(t, a, Point2::new(u, v))?.map(|(a, e, _)| [a, e.x, e.y]))
     };
 
     // The stations, and the exact points there. A regular rib's stations are
@@ -719,7 +743,10 @@ pub fn tangent_end_rib(
         }
 
         if !zero_speed {
-            halvings += spans;
+            // (only a fit the loop attempts counts: none past `max_spans`)
+            if spans < max_spans {
+                halvings += spans;
+            }
             spans *= 2;
             stations = false;
             continue;
@@ -1067,6 +1094,82 @@ mod tests {
         assert_eq!(rib.bound, None);
         let worst = farthest_off(&k, &rib, &fillet, &end);
         assert!(worst <= tol, "{worst:e}");
+    }
+
+    /// A rib on a face not enclosed keeps upstream's points (bherbruck on #18674): only a
+    /// rib on enclosed faces settles them ([`settled_point`]). The large round of
+    /// [`tangent_end_surfaces`] (radius 40) with its end surface as a zero offset of itself,
+    /// which is not enclosed: at each station the 3D curve passes through the point
+    /// [`tangent_end_rib_point`] solves from upstream's guess (within 1e-13), as on `main`, where
+    /// settling would have moved a station by more than 1e-12.
+    #[test]
+    fn a_rib_on_a_face_not_enclosed_keeps_upstreams_points() {
+        use crate::surface::offset_surface::{OffsetSurface, SS_UNKNOWN};
+        let k = Kernel::default();
+        let tol = 1e-5;
+        let (fillet, base, other) = tangent_end_surfaces(40.0);
+        let end = Surface::from(OffsetSurface::new(&k, 0.0, base, true, SS_UNKNOWN).unwrap());
+        assert!(certificate::Face::of(&k, &end).unwrap().is_none());
+        let p = Point3::new(0.0, 0.0, 0.0);
+        let rib = tangent_end_rib(&k, &fillet, &end, 2, p, other, None, false, tol).unwrap();
+        assert_eq!(rib.bound, None);
+        // upstream's stations t = j / n (a cubic through n + 1 points has n + 1 control
+        // points), each solved from the chord's guess, then the last two points carried
+        // on, the last from the other end's
+        let n = rib.curve_3d.number_control_points().unwrap() - 1;
+        let opts = DropPointOptions::default();
+        let drop = |s: &Surface, x: Point3| {
+            let dom = s.natural_uv_domain_with_nurb(&k).unwrap();
+            s.drop_point::<crate::surface::surface::p4::NoObject>(&k, x, &dom, &opts)
+                .unwrap()
+                .result_uv
+        };
+        let (f0, f1, e0, e1) = (
+            drop(&fillet, p),
+            drop(&fillet, other),
+            drop(&end, p),
+            drop(&end, other),
+        );
+        // the section along u: sigma is u, alpha v
+        assert!(
+            f0.x.abs() < 1e-9 && (f1.x - 1.0).abs() < 1e-9,
+            "{f0:?} {f1:?}"
+        );
+        let (mut alphas, mut es) = (vec![f0.y], vec![e0]);
+        let (mut off_main, mut moved) = (0.0_f64, 0.0_f64);
+        for j in 1..=n {
+            #[allow(clippy::cast_precision_loss)]
+            let t = j as f64 / n as f64;
+            let (alpha, uv) = if j == n {
+                (f1.y, e1)
+            } else if j == 1 {
+                (
+                    f0.y + (f1.y - f0.y) * t,
+                    Point2::new(e0.x + (e1.x - e0.x) * t, e0.y + (e1.y - e0.y) * t),
+                )
+            } else {
+                let (a1, a2, u1, u2) = (alphas[j - 1], alphas[j - 2], es[j - 1], es[j - 2]);
+                (
+                    2.0 * a1 - a2,
+                    Point2::new(2.0 * u1.x - u2.x, 2.0 * u1.y - u2.y),
+                )
+            };
+            let sigma = f0.x + (f1.x - f0.x) * t;
+            let point = tangent_end_rib_point(&k, &fillet, &end, 0, sigma, alpha, uv)
+                .unwrap()
+                .unwrap();
+            let (a, e, x) = point;
+            alphas.push(a);
+            es.push(e);
+            let settled = settled_point(&k, &fillet, &end, 0, sigma, point).unwrap();
+            moved = moved.max(settled.2.distance(x));
+            if j < n {
+                off_main = off_main.max(rib.curve_3d.evaluate_point(t).unwrap().distance(x));
+            }
+        }
+        println!("stations {n}: off main's points {off_main:e}, settling moves {moved:e}");
+        assert!(off_main <= 1e-13, "{off_main:e}");
+        assert!(moved > 1e-12, "{moved:e}");
     }
 
     /// The rib point at `t` of [`tangent_end_surfaces`]: the section `sigma = t` gives the
