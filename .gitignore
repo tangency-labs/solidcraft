@@ -3,30 +3,28 @@
 .code/
 .vscode/
 
-# AI agents
-.claude/
-.agents/
-
 # Python venv and cache
 .venv/
 venv/
 __pycache__/
 *.pyc
 
-# Local/Personal files
-local/
-tmp/
+# AI Agents
+.claude/worktrees/
+.claude/settings.local.json
 
-# Compiled binaries
+# Compiled target
 /target*/
+/target-snapshot
 /plan/
 /dist/
 
-# OS stuff
+# OS files
 *~
 .DS_Store
+
+# Temporary files
 *.swp
-/target-snapshot
 
 # cargo-mutants output (docs/mutation-testing.md)
 mutants.out*/
