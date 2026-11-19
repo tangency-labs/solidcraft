@@ -297,11 +297,15 @@ impl ContactGeometry {
         Self::frame_in(body, &s.doc)
     }
 
+    /// Where `body` stands in the world of `doc`: the occurrences of its path, one after the other,
+    /// then the body's offset. It takes a design and not the session because `travel` compares two.
     fn frame_in(body: &CachedBody, doc: &Document) -> Result<Mat> {
         let mut frame = IDENTITY;
-        for id in &body.path {
+        for (k, id) in body.path.iter().enumerate() {
             let occurrence = doc.occurrences.iter().find(|o| o.id == *id).ok_or_else(|| limit("contact occurrence disappeared"))?;
-            frame = mat_mul(&frame, &occurrence.transform);
+            // Where the world shows it: inside a flexible occurrence of a linked subassembly,
+            // where that occurrence has its own copy.
+            frame = mat_mul(&frame, &doc.posed_local(body.path.get(..=k).unwrap_or_default(), occurrence));
         }
         Ok(mat_mul(&frame, &body.offset))
     }
