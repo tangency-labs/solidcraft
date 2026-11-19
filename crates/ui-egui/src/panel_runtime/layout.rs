@@ -272,6 +272,8 @@ pub struct HostMetrics {
     pub sash_width: f32,
     /// Docked sashes draw `sash_width` but grab this wide; zero grabs only what is drawn.
     pub docked_grab_width: f32,
+    /// Zero keeps a floating card's single bottom-right handle.
+    pub floating_grab_reach: f32,
     pub control_extent: f32,
     pub tab_min_width: f32,
     /// Single-row Wide composition threshold, bounded by the shared contract.
@@ -295,6 +297,7 @@ impl Default for HostMetrics {
             gap: t.space_4,
             sash_width: t.space_4,
             docked_grab_width: DOCKED_GRAB_WIDTH,
+            floating_grab_reach: FLOATING_GRAB_REACH,
             control_extent: t.control_height,
             tab_min_width: t.control_height * 2.0,
             inline_max_height: (t.control_height * 2.0 + t.space_4).min(88.0),
@@ -325,6 +328,9 @@ impl HostMetrics {
         }
         if !self.docked_grab_width.is_finite() || !(0.0..=DOCKED_GRAB_WIDTH).contains(&self.docked_grab_width) {
             return Err(error(Rule::Bounds, "invalid docked grab width"));
+        }
+        if !self.floating_grab_reach.is_finite() || !(0.0..=FLOATING_GRAB_REACH).contains(&self.floating_grab_reach) {
+            return Err(error(Rule::Bounds, "invalid floating grab reach"));
         }
         if !self.inline_max_height.is_finite() || !(0.0..=88.0).contains(&self.inline_max_height) {
             return Err(error(Rule::Bounds, "invalid inline row threshold"));
@@ -1478,13 +1484,13 @@ fn append_section(
     out.occlusion.extend(&painted);
     out.input.extend(&painted);
     add_control(out, HostPointerTarget::Surface { instance: instance.clone() }, outer, InputRole::Surface, "ui.panel_host.surface");
-    let floating_open = section.location.zone() == Zone::Floating && !section.collapsed;
+    let floating_open = section.location.zone() == Zone::Floating && !section.collapsed && metrics.floating_grab_reach > 0.0;
     if let Some(title) = title {
         add_control(out, HostPointerTarget::Header { instance: instance.clone() }, title, InputRole::Header, "ui.panel_host.header");
     }
     // Handles over the header sit above the draggable title and below every other header control.
     if floating_open {
-        for (edge, grab) in floating_resize_handles(outer, header).into_iter().filter(|(_, grab)| touches_header(*grab, header)) {
+        for (edge, grab) in floating_resize_handles(outer, header, metrics.floating_grab_reach).into_iter().filter(|(_, grab)| touches_header(*grab, header)) {
             add_floating_handle(out, section, edge, grab, outer, metrics.sash_width);
         }
     }
@@ -1509,11 +1515,12 @@ fn append_section(
     // reverse hit-testing must choose the same owner at their edges.
     let (min, max) = tab_bounds(proposed, service.registry(), section)?;
     if floating_open {
-        for (edge, grab) in floating_resize_handles(outer, header).into_iter().filter(|(_, grab)| !touches_header(*grab, header)) {
+        for (edge, grab) in floating_resize_handles(outer, header, metrics.floating_grab_reach).into_iter().filter(|(_, grab)| !touches_header(*grab, header)) {
             add_floating_handle(out, section, edge, grab, outer, metrics.sash_width);
         }
     } else if !section.collapsed && !(section.location.zone() == Zone::Bottom && min.height == max.height) {
         let edge = match section.location.zone() {
+            Zone::Floating => HostResizeEdge::BottomRight,
             Zone::Bottom => HostResizeEdge::Top,
             Zone::Left => HostResizeEdge::Right,
             _ => HostResizeEdge::Left,
@@ -1685,9 +1692,8 @@ fn add_floating_handle(out: &mut HostLayout, section: &Section, edge: HostResize
 
 /// The inward reach on each axis is capped by the tokens `render_slot` insets by.
 /// Side bands start below the header.
-fn floating_resize_handles(outer: LogicalRect, header: LogicalRect) -> [(HostResizeEdge, LogicalRect); 8] {
+fn floating_resize_handles(outer: LogicalRect, header: LogicalRect, reach: f32) -> [(HostResizeEdge, LogicalRect); 8] {
     let t = solidcraft_theme::Tokens::get();
-    let reach = FLOATING_GRAB_REACH;
     let (in_x, in_y) = (reach.min(t.space_4), reach.min(t.space_2));
     let (x, y) = (outer.origin.x, outer.origin.y);
     let (r, b) = (right(outer), bottom(outer));

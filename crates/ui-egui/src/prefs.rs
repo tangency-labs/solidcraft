@@ -1457,7 +1457,8 @@ preference_settings! {
     layout: crate::ui_kit::LayoutMode = Default::default(), PAGE_LAYOUT;
     /// Preview panel placement and reflow while dragging. Off shows the drop outline.
     live_panel_drag_preview: bool = true, PAGE_LAYOUT;
-    /// Docked sashes grab wider than they draw. Off grabs only the drawn sash.
+    /// Docked sashes and floating card edges grab wider than they draw. Off grabs only the
+    /// drawn sash and a floating card's bottom-right corner.
     wide_panel_grab: bool = true, PAGE_LAYOUT;
     /// Ordered view controls and their appearance.
     #[serde(default)]

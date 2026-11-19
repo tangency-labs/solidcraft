@@ -8785,6 +8785,20 @@ fn a_short_wide_floating_card_creates_every_handle_it_shares_with_the_header_bef
 }
 
 #[test]
+fn with_wide_grab_off_a_floating_card_keeps_only_its_bottom_right_handle_inside_the_card() {
+    let mut raw = raw_floating_card(1.0, false, false, false);
+    raw.host.set_wide_grab(false);
+    raw.frame(Vec::new(), false);
+    let layout = raw.host.frame().unwrap().layout.clone();
+    let card = floating_card_outer(&raw);
+    let handles: Vec<_> = layout.controls.iter().filter(|control| matches!(control.target, HostPointerTarget::Resize { .. })).collect();
+    assert_eq!(handles.len(), 1);
+    assert!(matches!(handles[0].target, HostPointerTarget::Resize { edge: HostResizeEdge::BottomRight, .. }));
+    assert!(card.contains_rect(handles[0].bounds));
+    assert_eq!(handles[0].bounds, handles[0].ink);
+}
+
+#[test]
 fn a_floating_card_publishes_eight_named_handles_and_one_tab_stop() {
     let mut raw = raw_floating_card(1.0, false, false, false);
     let (_, output) = raw.frame(Vec::new(), false);

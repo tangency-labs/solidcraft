@@ -369,10 +369,12 @@ impl WorkspacePanelHost {
     }
 
     pub(crate) fn set_wide_grab(&mut self, wide: bool) {
-        let docked_grab_width = if wide { super::layout::DOCKED_GRAB_WIDTH } else { 0.0 };
-        if docked_grab_width != self.options.metrics.docked_grab_width {
+        let (docked_grab_width, floating_grab_reach) =
+            if wide { (super::layout::DOCKED_GRAB_WIDTH, super::layout::FLOATING_GRAB_REACH) } else { (0.0, 0.0) };
+        if (docked_grab_width, floating_grab_reach) != (self.options.metrics.docked_grab_width, self.options.metrics.floating_grab_reach) {
             self.invalidate_geometry();
             self.options.metrics.docked_grab_width = docked_grab_width;
+            self.options.metrics.floating_grab_reach = floating_grab_reach;
         }
     }
 
@@ -2494,7 +2496,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
         });
         let content_context = paint_context.as_ref().unwrap_or(context);
         let start = self.drag_cards.as_ref().map(|_| shape_count(self.ui.ctx(), layer));
-        let reach = if section.zone == Zone::Floating && !section.collapsed { super::layout::FLOATING_GRAB_REACH } else { 0.0 };
+        let reach = if section.zone == Zone::Floating && !section.collapsed { self.layout.metrics.floating_grab_reach } else { 0.0 };
         ui_kit::panel_host_surface_reaching(
             self.ui,
             panel_id,
@@ -2529,6 +2531,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
                     paint_drop_tabs(ui, paint_section, dragged, index, order, self.metadata, self.layout.direction);
                 }
                 let floating = section.zone == Zone::Floating;
+                let floating_reach = if floating { self.layout.metrics.floating_grab_reach } else { 0.0 };
                 let mut top_handles_done = false;
                 for control in self.controls.iter() {
                     let HostControlTarget::Pointer(target) = &control.target else {
@@ -2558,6 +2561,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
                             chrome_offset,
                             true,
                             floating,
+                            floating_reach,
                         );
                     }
                     if tab_drop.is_some() && matches!(target, HostPointerTarget::Tab { .. } | HostPointerTarget::TabOverflow { .. }) {
@@ -2906,6 +2910,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
                         chrome_offset,
                         true,
                         floating,
+                        floating_reach,
                     );
                 }
                 paint_resize_handles(
@@ -2917,6 +2922,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
                     chrome_offset,
                     false,
                     floating,
+                    floating_reach,
                 );
                 if let Some(focused) = ui.memory(|memory| memory.focused())
                     && let Some(bookmark) = self
@@ -3452,10 +3458,11 @@ fn paint_resize_handles(
     chrome_offset: egui::Vec2,
     header_side: bool,
     floating: bool,
+    floating_reach: f32,
 ) {
     let clip = ui.clip_rect();
-    if floating {
-        ui.set_clip_rect(clip.expand(super::layout::FLOATING_GRAB_REACH));
+    if floating_reach > 0.0 {
+        ui.set_clip_rect(clip.expand(floating_reach));
     }
     let mut before_menu = true;
     for control in controls {
