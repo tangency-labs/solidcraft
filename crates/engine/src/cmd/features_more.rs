@@ -64,6 +64,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("sketch, profiles?; depth; mode?: emboss|deboss; targets?; face?: world point [x,y,z] selecting a planar or complete cylindrical wall, outside or a bore (inferred when exactly one supported tangent cylinder matches the selected profiles)"),
     CommandSpec::new("solid.dome", "Dome", crate::checked!("solid.dome", dome))
         .at("SOLID", "CREATE")
+        .icon("dome")
         .contract(&DOME_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .from_selection(super::model_selection::body_faces)

@@ -1,0 +1,32 @@
+{
+  "en": {
+    "ui.dome_elliptical": "Elliptical",
+    "ui.dome_spherical": "Spherical",
+    "ui.dome_reverse": "Reverse"
+  },
+  "ar": {
+    "ui.dome_elliptical": "إهليلجي",
+    "ui.dome_spherical": "كروي",
+    "ui.dome_reverse": "عكس الاتجاه"
+  },
+  "he": {
+    "ui.dome_elliptical": "אליפטי",
+    "ui.dome_spherical": "כדורי",
+    "ui.dome_reverse": "הפוך"
+  },
+  "ja": {
+    "ui.dome_elliptical": "楕円",
+    "ui.dome_spherical": "球面",
+    "ui.dome_reverse": "反転"
+  },
+  "vi": {
+    "ui.dome_elliptical": "Elip",
+    "ui.dome_spherical": "Hình cầu",
+    "ui.dome_reverse": "Đảo ngược"
+  },
+  "zh": {
+    "ui.dome_elliptical": "椭圆",
+    "ui.dome_spherical": "球面",
+    "ui.dome_reverse": "反向"
+  }
+}
