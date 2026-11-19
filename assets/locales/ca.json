@@ -6542,6 +6542,7 @@
   "ui.export_keymap_tip": "Les tecles, els favorits de la cerca S i la barra d'eines, com a fitxer",
   "ui.export_selects_only_body": "Seleccionar l'únic cos en exportar una malla",
   "ui.export_selects_only_body_tip": "Exportar STL, Exportar 3MF i Enviar al laminador comencen amb el cos del disseny seleccionat quan només n'hi ha un.",
+  "ui.export_usd": "Exportar OpenUSD",
   "ui.extend": "Estendre",
   "ui.extent": "Extensió",
   "ui.extent_type": "Tipus d'extensió",
