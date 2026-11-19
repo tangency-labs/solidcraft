@@ -161,8 +161,12 @@ fn report(info: &wgpu::AdapterInfo) -> AdapterReport {
 }
 
 fn instance() -> wgpu::Instance {
+    instance_of(native_backends())
+}
+
+fn instance_of(backends: wgpu::Backends) -> wgpu::Instance {
     let mut desc = crate::instance_descriptor_from_env();
-    desc.backends = native_backends();
+    desc.backends = backends;
     wgpu::Instance::new(desc)
 }
 
@@ -177,10 +181,41 @@ fn retain_vulkan_instance(instance: &wgpu::Instance, found: &[wgpu::Adapter]) {
     }
 }
 
+/// Listing GL adapters opens an OpenGL context through EGL, and Mesa's OpenGL driver (radeonsi,
+/// Mesa 25.2) can then hang in `glDebugMessageCallback` or `eglDestroyContext` when several
+/// threads do that at once, as the GPU tests do. So the process lists, picks and drops the
+/// adapters it did not pick one caller at a time, and [`pick`] lists GL only when it must.
+#[cfg(not(target_arch = "wasm32"))]
+static LISTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Run `list` while no other thread lists adapters ([`LISTING`]). A caller with an instance of
+/// its own lists through this too, and drops what it doesn't keep before it returns.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn one_listing_at_a_time<T>(list: impl FnOnce() -> T) -> T {
+    let _listing = LISTING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    list()
+}
+
 /// Every adapter the native backends offer, best first.
 #[cfg(not(target_arch = "wasm32"))]
 fn adapters(instance: &wgpu::Instance) -> Vec<wgpu::Adapter> {
-    let mut all = pollster::block_on(instance.enumerate_adapters(native_backends()));
+    adapters_of(instance, native_backends())
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Listings on this thread that took in GL, for tests.
+    pub(crate) static GL_LISTINGS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Every adapter `backends` offer, best first.
+#[cfg(not(target_arch = "wasm32"))]
+fn adapters_of(instance: &wgpu::Instance, backends: wgpu::Backends) -> Vec<wgpu::Adapter> {
+    #[cfg(test)]
+    if backends.contains(wgpu::Backends::GL) {
+        GL_LISTINGS.with(|n| n.set(n.get() + 1));
+    }
+    let mut all = pollster::block_on(instance.enumerate_adapters(backends));
     #[cfg(target_os = "windows")]
     retain_vulkan_instance(instance, &all);
     all.sort_by_key(|a| std::cmp::Reverse(rank(a.get_info().device_type)));
@@ -200,7 +235,7 @@ pub struct Survey {
 /// Every adapter the native backends offer, best first, and which one `policy` picks.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn survey(policy: Policy) -> Survey {
-    let found: Vec<AdapterReport> = adapters(&instance()).iter().map(|a| report(&a.get_info())).collect();
+    let found: Vec<AdapterReport> = one_listing_at_a_time(|| adapters(&instance()).iter().map(|a| report(&a.get_info())).collect());
     let chosen = found.iter().position(|r| policy.admits(r.tier));
     let lands_on = policy.lands_on(chosen.and_then(|i| found.get(i)).map(|r| r.tier));
     Survey { backends: format!("{:?}", native_backends()), adapters: found, chosen, lands_on }
@@ -238,9 +273,26 @@ pub fn pick_path(policy: Policy, keep: impl Fn(&wgpu::AdapterInfo) -> bool) -> O
 }
 
 /// The adapter `policy` picks, with its report; `None` when no adapter qualifies.
+///
+/// The backends other than GL are asked first. A GL adapter keeps an OpenGL context for as long
+/// as its instance lives, and a picked adapter keeps its instance alive, so listing GL beside a
+/// Vulkan GPU leaves a context behind that nothing uses ([`LISTING`]). Their pick stands when it is
+/// a GPU, or a software adapter that `software` asked for; otherwise every native backend is
+/// listed as before. The one pick this changes is a discrete GPU with a GL driver and no Vulkan
+/// one beside an integrated GPU with Vulkan: the integrated GPU is picked.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn pick(policy: Policy) -> Option<(wgpu::Adapter, AdapterReport)> {
-    pick_among(adapters(&instance()), policy)
+    one_listing_at_a_time(|| {
+        let all = native_backends();
+        let first = all - wgpu::Backends::GL;
+        if first != all && !first.is_empty() {
+            let found = pick_among(adapters_of(&instance_of(first), first), policy);
+            if let Some(found) = found.filter(|(_, r)| r.tier == Tier::Hardware || policy == Policy::Software) {
+                return Some(found);
+            }
+        }
+        pick_among(adapters(&instance()), policy)
+    })
 }
 
 /// The adapter `policy` picks among `found`, as [`pick`] picks among the native backends' (best

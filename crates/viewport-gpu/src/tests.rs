@@ -42,6 +42,30 @@ fn out_of_memory_is_reported_before_secondary_validation_errors() {
     assert_eq!(buffer.map(|b| b.size()).map_err(|e| e.to_string()), Ok(wgpu::COPY_BUFFER_ALIGNMENT));
 }
 
+/// A pick that finds a GPU among the backends other than GL never lists GL. A GL listing leaves
+/// an OpenGL context alive for as long as the picked adapter, and with Mesa's radeonsi (25.2)
+/// threads that created and dropped those contexts together hung: the GPU tests stopped at random.
+#[test]
+fn a_pick_that_finds_a_gpu_without_gl_never_lists_gl() {
+    let first = select::native_backends() - wgpu::Backends::GL;
+    let gpu_without_gl = !first.is_empty()
+        && pollster::block_on(
+            wgpu::Instance::new(wgpu::InstanceDescriptor { backends: first, ..instance_descriptor_from_env() }).enumerate_adapters(first),
+        )
+        .iter()
+        .any(|a| select::tier_of(a.get_info().device_type) == select::Tier::Hardware);
+    if !gpu_without_gl {
+        eprintln!("skipped: no GPU outside GL here");
+        return;
+    }
+    let before = select::GL_LISTINGS.with(std::cell::Cell::get);
+    for policy in [select::Policy::Auto, select::Policy::Hardware] {
+        let picked = select::pick(policy).map(|(a, _)| a.get_info().backend);
+        assert!(picked.is_some_and(|b| b != wgpu::Backend::Gl), "{policy:?} picked {picked:?}");
+    }
+    assert_eq!(select::GL_LISTINGS.with(std::cell::Cell::get), before, "a pick listed GL beside a GPU it did not need GL for");
+}
+
 #[test]
 fn the_hlsl_for_fxc_has_no_arrays_fxc_must_unroll_loops_for() {
     use naga::back::hlsl;
