@@ -34,11 +34,15 @@ pub struct Ticks {
     pub screenshot: bool,
     pub design: bool,
     pub crash: bool,
+    /// The failing operation's kernel case: only the geometry it took, as a rig entry. Off until
+    /// ticked, like the design.
+    #[serde(default)]
+    pub kernel_case: bool,
 }
 
 impl Default for Ticks {
     fn default() -> Self {
-        Self { system: true, repro: true, log: true, screenshot: true, design: false, crash: false }
+        Self { system: true, repro: true, log: true, screenshot: true, design: false, crash: false, kernel_case: false }
     }
 }
 
@@ -88,6 +92,9 @@ pub struct Evidence {
     pub design_from: Option<&'static str>,
     /// A crash report: its id and JSON.
     pub crash: Option<(String, String)>,
+    /// The failed operation rebuilt as a kernel rig case ([`solidcraft_engine::kernel_case`]):
+    /// the geometry the failing operation took, not the design.
+    pub kernel_case: Option<solidcraft_engine::kernel_case::KernelCase>,
 }
 
 /// One file to upload.
@@ -203,6 +210,7 @@ pub fn build_via(form: &Form, ticks: Ticks, evidence: &Evidence, client: &str, v
         screenshot: ticks.screenshot && evidence.screenshot.is_some(),
         design: ticks.design && evidence.design.is_some(),
         crash: ticks.crash && evidence.crash.is_some(),
+        kernel_case: ticks.kernel_case && evidence.kernel_case.is_some(),
     };
     let kinds: Vec<&str> = [
         (ticks.system, "system"),
@@ -211,6 +219,7 @@ pub fn build_via(form: &Form, ticks: Ticks, evidence: &Evidence, client: &str, v
         (ticks.screenshot, "screenshot"),
         (ticks.design, "design"),
         (ticks.crash, "crash"),
+        (ticks.kernel_case, "kernel_case"),
     ]
     .into_iter()
     .filter_map(|(on, k)| on.then_some(k))
@@ -243,6 +252,17 @@ pub fn build_via(form: &Form, ticks: Ticks, evidence: &Evidence, client: &str, v
     if ticks.repro {
         ticket["repro"] = repro_json(evidence, ticks.design);
     }
+    // The kernel case goes with what names it; the ticket's repro says which build it ran on.
+    if ticks.kernel_case
+        && let Some(case) = &evidence.kernel_case
+    {
+        let (solidcraft, solidcore) = commits(case);
+        let meta = json!({"name": case.name, "solidcraft": solidcraft, "solidcore": solidcore});
+        match ticket.get_mut("repro").and_then(|r| r.get_mut("failing")) {
+            Some(failing) => failing["kernel_case"] = meta,
+            None => ticket["repro"]["failing"] = json!({"kernel_case": meta}),
+        }
+    }
     let mut files = Vec::new();
     let mut add = |name: String, content_type: &str, kind: &str, bytes: Vec<u8>| {
         // The server takes no empty file.
@@ -269,7 +289,20 @@ pub fn build_via(form: &Form, ticks: Ticks, evidence: &Evidence, client: &str, v
     {
         add(format!("crash-{id}.json"), "application/json", "crash", json.clone().into_bytes());
     }
+    if ticks.kernel_case
+        && let Some(case) = &evidence.kernel_case
+    {
+        add(case.entry_name(), "application/json", "kernel_case", case.entry.clone());
+        add(case.bodies_name(), "application/gzip", "kernel_case", case.bodies.clone());
+    }
     Outgoing { ticket, files, filed: None }
+}
+
+/// The SolidCraft and solidcore commits a kernel case ran on, as its entry names them.
+fn commits(case: &solidcraft_engine::kernel_case::KernelCase) -> (String, String) {
+    let entry: Value = serde_json::from_slice(&case.entry).unwrap_or_default();
+    let text = |k: &str| entry.get(k).and_then(Value::as_str).unwrap_or_default().to_owned();
+    (text("solidcraft"), text("solidcore"))
 }
 
 /// A size as people read it.

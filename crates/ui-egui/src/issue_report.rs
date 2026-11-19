@@ -2489,7 +2489,7 @@ mod tests {
     #[test]
     fn ticket_report_payload_carries_only_the_ticked_boxes() {
         let evidence = evidence_with_design();
-        let ticks = payload::Ticks { system: false, repro: false, log: true, screenshot: false, design: false, crash: false };
+        let ticks = payload::Ticks { system: false, repro: false, log: true, screenshot: false, design: false, crash: false, kernel_case: false };
         let out = payload::build(&form(), ticks, &evidence, "solidcraft test");
         let t = &out.ticket;
         assert!(t.get("system").is_none() && t.get("appVersion").is_none() && t.get("os").is_none(), "system info unticked: {t}");
@@ -2499,7 +2499,7 @@ mod tests {
         assert_eq!((t["consent"]["via"].as_str(), t["consent"]["client"].as_str()), (Some("dialog"), Some("solidcraft test")));
         assert_eq!((t["app"].as_str(), t["type"].as_str(), t["title"].as_str()), (Some("solidcraft"), Some("bug"), Some("Fillet fails")));
 
-        let all = payload::Ticks { system: true, repro: true, log: true, screenshot: true, design: true, crash: true };
+        let all = payload::Ticks { system: true, repro: true, log: true, screenshot: true, design: true, crash: true, kernel_case: true };
         let out = payload::build(&form(), all, &evidence, "solidcraft test");
         assert_eq!(out.ticket["system"]["text"], json!(evidence.system), "the exact text the dialog shows");
         let failing = &out.ticket["repro"]["failing"];
@@ -2844,7 +2844,7 @@ mod tests {
         let sent = |app: &mut SolveApp, error: &str| {
             let draft = draft_for(app, None, Some(error));
             let t = ticket::new_ticket(app, &draft, None);
-            let all = payload::Ticks { system: true, repro: true, log: true, screenshot: true, design: true, crash: true };
+            let all = payload::Ticks { system: true, repro: true, log: true, screenshot: true, design: true, crash: true, kernel_case: true };
             payload::build(&t.form, all, &t.evidence, "solidcraft test").ticket["repro"]["failing"].clone()
         };
         let as_json = |c: &solidcraft_engine::kernel::ErrorCode| json!({"call": c.call, "kind": c.kind, "operation": c.operation});
@@ -2870,6 +2870,56 @@ mod tests {
         // a failure no kernel call made
         let failing = sent(&mut app, "Synthetic command error");
         assert!(failing.get("code").is_none(), "{failing}");
+    }
+
+    /// #17926: a report of a refused fillet made from its dialog offers the failing operation as
+    /// a kernel case, its box unticked; without that box ticked nothing of it is sent, and ticked,
+    /// its entry and records go as two private `kernel_case` files, consented to, named in the
+    /// repro; an agent's ask never ticks it.
+    #[test]
+    fn a_kernel_case_goes_only_with_its_box_ticked() {
+        let mut s = Session::default();
+        for (c, p) in [
+            ("sketch.create", json!({"plane":"XY", "name":"Wall"})),
+            ("sketch.rectangle.two_point", json!({"p0":[0,0], "p1":[30,2]})),
+            ("sketch.finish", json!({})),
+            ("solid.extrude", json!({"distance":"10 mm", "body_name":"Wall"})),
+        ] {
+            s.execute(c, &p).unwrap();
+        }
+        let params = json!({"edges": [[15, 0, 10], [15, 2, 10]], "radius": "1.5 mm"});
+        let e = s.execute("solid.fillet", &params).unwrap_err();
+        let mut app = SolveApp::new(s, Default::default());
+        let mut draft = draft_for(&app, None, Some(&e.to_string()));
+        draft.failed_command = Some(("solid.fillet".into(), params));
+        let t = ticket::new_ticket(&mut app, &draft, None);
+        let case = t.evidence.kernel_case.clone().expect("the failed fillet rebuilds as a kernel case");
+        assert!(!t.ticks.kernel_case, "off until the person ticks it");
+        assert_eq!(case.code.as_ref(), e.error_code());
+
+        let without = payload::build(&t.form, t.ticks, &t.evidence, "solidcraft test");
+        assert!(without.files.iter().all(|f| f.kind != "kernel_case"), "no case without consent");
+        assert!(!without.ticket["consent"]["kinds"].as_array().unwrap().contains(&json!("kernel_case")));
+        assert!(without.ticket["repro"]["failing"].get("kernel_case").is_none(), "{}", without.ticket);
+
+        let ticked = payload::Ticks { kernel_case: true, ..t.ticks };
+        let with = payload::build(&t.form, ticked, &t.evidence, "solidcraft test");
+        let files: Vec<(&str, &str)> =
+            with.files.iter().filter(|f| f.kind == "kernel_case").map(|f| (f.name.as_str(), f.content_type.as_str())).collect();
+        assert_eq!(files, [(case.entry_name().as_str(), "application/json"), (case.bodies_name().as_str(), "application/gzip")]);
+        assert!(with.ticket["consent"]["kinds"].as_array().unwrap().contains(&json!("kernel_case")));
+        assert_eq!(with.ticket["repro"]["failing"]["kernel_case"]["name"], case.name.as_str());
+        assert!(with.ticket["repro"]["failing"]["code"].is_object(), "{}", with.ticket);
+
+        // an agent asks with every box: the kernel case stays the person's to tick
+        let mut draft = draft;
+        draft.agent = Some(crate::tickets::agent::Ask {
+            id: "r-1".into(),
+            ticks: payload::Ticks { kernel_case: true, design: true, crash: true, ..Default::default() },
+            kind: payload::Kind::Bug,
+            app: "solidcraft".into(),
+        });
+        assert!(!ticket::new_ticket(&mut app, &draft, None).ticks.kernel_case);
     }
 
     #[test]
