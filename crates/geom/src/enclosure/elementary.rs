@@ -26,11 +26,12 @@ use super::{Interval, Proven, Unproven};
 const MAX_TRIG: f64 = 4_194_304.0;
 /// `asinh` and `acosh` switch to their large-argument forms above 2²⁶, where `x² ± 1` would round.
 const LARGE: f64 = 67_108_864.0;
-/// Terms of each series.
-const EXP_TERMS: u32 = 22;
-const ATANH_TERMS: u32 = 24;
-const TRIG_TERMS: u32 = 14;
-const ATAN_TERMS: u32 = 16;
+/// Terms of each series: the fewest whose remainder, at the widest reduced argument, is far below
+/// an ulp of the result (about 10⁻²⁰ relative), so more would only cost time.
+const EXP_TERMS: u32 = 15;
+const ATANH_TERMS: u32 = 12;
+const TRIG_TERMS: u32 = 8;
+const ATAN_TERMS: u32 = 9;
 
 /// `i`, when both of its bounds are finite.
 pub(super) fn finite(i: Interval) -> Proven<Interval> {
@@ -43,12 +44,14 @@ fn n(x: u32) -> Interval {
 
 /// `[−b, b]` for `b = ρᵖ/p!` rounded up: what a series leaves out, before any factor.
 fn tail(rho: f64, p: u32) -> Interval {
-    let rho = Interval::point(rho);
-    let mut t = Interval::ONE;
-    for i in 1..=p {
-        t = t * rho / n(i);
-    }
+    let t = powi_at(rho, u64::from(p)) / Interval::point(factorial(p));
     Interval::new(-t.hi, t.hi)
+}
+
+/// `p!`, exact as a float for `p ≤ 22`: its odd part fits in 53 bits.
+fn factorial(p: u32) -> f64 {
+    debug_assert!(p <= 22, "{p}! does not fit a float exactly");
+    (1..=u128::from(p)).product::<u128>() as f64
 }
 
 /// `eʳ − 1` for `|r| ≤ ln 2`.
@@ -104,11 +107,7 @@ fn atanh_series(z: Interval) -> Interval {
     let rho = z.mag();
     let p = 2 * ATANH_TERMS + 1;
     // |z|^p / (p (1 − z²)), rounded up.
-    let mut b = Interval::ONE;
-    for _ in 0..p {
-        b = b * Interval::point(rho);
-    }
-    let b = b / (n(p) * (Interval::ONE - Interval::point(rho).sqr()));
+    let b = powi_at(rho, u64::from(p)) / (n(p) * (Interval::ONE - Interval::point(rho).sqr()));
     z * t + Interval::new(-b.hi, b.hi)
 }
 
@@ -121,41 +120,52 @@ fn ln_at(x: f64) -> Interval {
     k * Interval::point(LN_2_HEAD) + k * LN_2_TAIL + atanh_series(z).scale2(1)
 }
 
-/// `sin r` and `cos r` for `|r| ≤ 0.8`.
-fn sin_cos_series(r: Interval) -> (Interval, Interval) {
+/// `sin r` for `|r| ≤ 0.8`: r(1 − w/(2·3)(1 − w/(4·5)(…))) to degree 2N+1, `w = r²`.
+fn sin_series(r: Interval) -> Interval {
     let w = r.sqr();
-    let rho = r.mag();
-    // sin r = r(1 − w/(2·3)(1 − w/(4·5)(…))), to degree 2N+1.
     let mut s = Interval::ONE;
     for k in (1..=TRIG_TERMS).rev() {
         s = Interval::ONE - w * s / n((2 * k) * (2 * k + 1));
     }
-    // cos r = 1 − w/(1·2)(1 − w/(3·4)(…)), to degree 2N.
+    r * s + tail(r.mag(), 2 * TRIG_TERMS + 3)
+}
+
+/// `cos r` for `|r| ≤ 0.8`: 1 − w/(1·2)(1 − w/(3·4)(…)) to degree 2N, `w = r²`.
+fn cos_series(r: Interval) -> Interval {
+    let w = r.sqr();
     let mut c = Interval::ONE;
     for k in (1..=TRIG_TERMS).rev() {
         c = Interval::ONE - w * c / n((2 * k - 1) * (2 * k));
     }
-    (r * s + tail(rho, 2 * TRIG_TERMS + 3), c + tail(rho, 2 * TRIG_TERMS + 2))
+    c + tail(r.mag(), 2 * TRIG_TERMS + 2)
 }
 
-/// `sin x` and `cos x` at one number, `|x| ≤ 2²²`.
-fn sin_cos_at(x: f64) -> Proven<(Interval, Interval)> {
+/// `x = k·π/2 + r` for `|x| ≤ 2²²`, with `k mod 4`.
+fn quadrant(x: f64) -> Proven<(i64, Interval)> {
     if !(x.abs() <= MAX_TRIG) {
         return Err(Unproven::Uncertified);
     }
     let k = (x * FRAC_2_PI).round();
-    let r = reduce(x, k, HALF_PI_HEAD, HALF_PI_TAIL);
-    let (s, c) = sin_cos_series(r);
-    let unit = Interval { lo: -1.0, hi: 1.0 };
-    let clamp = |i: Interval| i.meet(unit).ok_or(Unproven::Uncertified);
     // |k| < 2²²: fits.
-    let (s, c) = match (k as i64).rem_euclid(4) {
-        0 => (s, c),
-        1 => (c, -s),
-        2 => (-s, -c),
-        _ => (-c, s),
+    Ok(((k as i64).rem_euclid(4), reduce(x, k, HALF_PI_HEAD, HALF_PI_TAIL)))
+}
+
+/// `sin x`, or `cos x` (`sin` a quarter turn on), at one number, `|x| ≤ 2²²`: only the series
+/// the quadrant needs.
+fn sin_or_cos_at(x: f64, cos: bool) -> Proven<Interval> {
+    let (q, r) = quadrant(x)?;
+    let v = match (q + i64::from(cos)) % 4 {
+        0 => sin_series(r),
+        1 => cos_series(r),
+        2 => -sin_series(r),
+        _ => -cos_series(r),
     };
-    Ok((clamp(s)?, clamp(c)?))
+    v.meet(Interval { lo: -1.0, hi: 1.0 }).ok_or(Unproven::Uncertified)
+}
+
+/// `sin x` and `cos x` at one number, `|x| ≤ 2²²`.
+fn sin_cos_at(x: f64) -> Proven<(Interval, Interval)> {
+    Ok((sin_or_cos_at(x, false)?, sin_or_cos_at(x, true)?))
 }
 
 /// `atan z` for `0 ≤ z ≤ 0.1`, the series alternating with shrinking terms.
@@ -167,11 +177,7 @@ fn atan_series(z: Interval) -> Interval {
         t = Interval::ONE / n(2 * k + 1) - w * t;
     }
     let p = 2 * ATAN_TERMS + 1;
-    let mut b = Interval::ONE;
-    for _ in 0..p {
-        b = b * Interval::point(z.mag());
-    }
-    let b = b / n(p);
+    let b = powi_at(z.mag(), u64::from(p)) / n(p);
     z * t + Interval::new(-b.hi, b.hi)
 }
 
@@ -263,7 +269,7 @@ fn trig(x: Interval, cos: bool) -> Proven<Interval> {
     if x.width() >= 8.0 {
         return Ok(unit);
     }
-    let pick = |v: f64| sin_cos_at(v).map(|(s, c)| if cos { c } else { s });
+    let pick = |v: f64| sin_or_cos_at(v, cos);
     let mut out = pick(x.lo)?.hull(pick(x.hi)?);
     // sin peaks at π/2 + jπ, cos at jπ, at (−1)ʲ.
     let (c, f) = if cos { (Interval::ZERO, 0.0) } else { (half_pi(), FRAC_PI_2) };
@@ -345,12 +351,17 @@ pub(super) fn atan2(y: Interval, x: Interval) -> Proven<Interval> {
     Ok(out)
 }
 
+/// `sinh x = (M + M/(1 + M))/2` with `M = expm1|x|` (`expm1(−a) = −M/(1 + M)`); odd. One series.
 fn sinh_at(x: f64) -> Proven<Interval> {
-    finite((expm1_at(x)? - expm1_at(-x)?).scale2(-1))
+    let m = expm1_at(x.abs())?;
+    let s = finite((m + m / (Interval::ONE + m)).scale2(-1))?;
+    Ok(if x < 0.0 { -s } else { s })
 }
 
+/// `cosh x = (E + 1/E)/2` with `E = e^|x|`; even. One series.
 fn cosh_at(x: f64) -> Proven<Interval> {
-    finite((exp_at(x)? + exp_at(-x)?).scale2(-1))
+    let e = exp_at(x.abs())?;
+    finite((e + Interval::ONE / e).scale2(-1))
 }
 
 /// `tanh x = −E/(2 + E)` with `E = expm1(−2x)` for `x ≥ 0`; odd.

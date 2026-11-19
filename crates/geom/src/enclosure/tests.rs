@@ -328,10 +328,20 @@ impl Lcg {
     }
 }
 
-/// Whether `want` is in `got`, allowing only for the reference's own error.
+/// Whether `want` is in `got`, allowing only for the reference's own error: both of its words,
+/// so a reference just outside a bound by less than an ulp of its high word is caught.
 fn holds(got: Interval, want: Dd) -> bool {
     let slack = want.0.abs() * 1e-26 + 1e-300;
-    got.lo - slack <= want.0 && want.0 <= got.hi + slack
+    let above_lo = got.lo == f64::NEG_INFINITY || want.sub(Dd::of(got.lo)).0 >= -slack;
+    let below_hi = got.hi == f64::INFINITY || Dd::of(got.hi).sub(want).0 >= -slack;
+    above_lo && below_hi
+}
+
+#[test]
+fn a_reference_a_low_word_outside_is_not_held() {
+    assert!(holds(Interval::point(1.0), Dd::of(1.0)));
+    assert!(!holds(Interval::point(1.0), Dd(1.0, 2f64.powi(-54))));
+    assert!(!holds(Interval::point(1.0), Dd(1.0, -(2f64.powi(-54)))));
 }
 
 /// At single numbers, each function's enclosure holds the reference value, and is a few units
