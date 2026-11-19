@@ -19,7 +19,7 @@
 //! `Θ` the largest, over `t` in `[lo, hi]`, of the acute angle between the normals at the
 //! two sides' nearest points in their boxes (fact 1b narrows the feet to boxes of those).
 //!
-//! **The proof.** Two facts, each enclosed in outward-rounded interval arithmetic
+//! **The proof.** Facts 1 and 2 (with 3 and 4 below), each enclosed in outward-rounded interval arithmetic
 //! ([`crate::blend::fillet_section::interval`]). The curve's and the correspondences' values
 //! come from `curve_derivs_over`, the surfaces' partials over a box from
 //! `NetSurface::partials` (each part of the box on its own polynomial piece, the parts
@@ -62,9 +62,15 @@
 //!    both). It is tried only where facts 1 and 2 do not prove the cones: far from the
 //!    point it does not close (the fan turns across the strip), so trying it everywhere
 //!    costs every piece and station a strip of failing hulls.
+//! 4. *Along the seam* (`seam_piece_upper`, a piece only): the two sides' normals at
+//!    their correspondences, `f(t) = n_1(t) − σ n_2(t)`, enclosed as `f(m) + [−h, h] [f']`
+//!    over the piece, plus each side's foot term `D ρ` (facts 1 and 2). The sides' turns
+//!    along the seam cancel in `f'`, so long pieces close where the sides turn together,
+//!    where facts 2 and 3's per-side cones need the turn per piece below the bound.
 //!
-//! A piece's bound is the largest over its pairs of parts of the pair's upper angle plus
-//! their `δ`s (at most `π / 2`, the acute angle's largest); a station's lower bound is the
+//! A piece's bound is fact 4's where that is at most `below`, else the least of fact 4's
+//! and the largest over its pairs of parts of the pair's upper angle plus their `δ`s (at
+//! most `π / 2`, the acute angle's largest); a station's lower bound is the
 //! least over its pairs of the pair's lower angle less their `δ`s. `upper` is the largest
 //! piece bound. The pieces start between the seam check's stations
 //! ([`super::continuity::SEAM_PARTS`]) and are bisected while a piece's bound is above the

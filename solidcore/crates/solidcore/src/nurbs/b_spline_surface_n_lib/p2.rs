@@ -123,8 +123,7 @@ use crate::surface::surface::Surface as SmSurface;
 
 use super::p1::{
     create_nlib_curve, create_nlib_surface, create_non_rational_curve_with_context, make_knots,
-    COONS_APEX_BOTTOM, COONS_APEX_LEFT, COONS_APEX_RIGHT, COONS_APEX_TOP, COONS_FACE_BOTTOM,
-    COONS_FACE_LEFT, COONS_FACE_RIGHT, COONS_FACE_TOP,
+    COONS_FACE_BOTTOM, COONS_FACE_LEFT, COONS_FACE_RIGHT, COONS_FACE_TOP,
 };
 use crate::intersect::surface_drop_lib::p3::DropSolveContext;
 
@@ -2222,60 +2221,43 @@ fn corner_blend_4(
     if face_sides & (1 << TOP) != 0 {
         coons_face_sides |= COONS_FACE_TOP;
     }
-    // Not upstream (WR-613): the side without a surface (a triangular patch's apex) in
-    // bounds' order, whose cross-tangent fan takes its neighbours' cross-tangent
-    // derivatives at its ends, so the apex is G1 to both of them
-    let mut coons_apex = 0;
-    for (ii, bit) in [
-        (LEFT, COONS_APEX_LEFT),
-        (RIGHT, COONS_APEX_RIGHT),
-        (BOT, COONS_APEX_BOTTOM),
-        (TOP, COONS_APEX_TOP),
-    ] {
-        if at(surfaces, ii, OP)?.is_none() {
-            coons_apex |= bit;
-        }
-    }
-    // the face-sided patch's sides, before the mean-twist patch consumes them
-    let face_sided =
-        (coons_face_sides != 0 && !create_bilinear_patch).then(|| (bounds.clone(), tans.clone()));
-    let mut coons = BSplineSurface::create_coons_patch_on_faces(
+    // the face-sided patch's sides, before the mean-twist patch consumes them. Only where
+    // every side has a surface: the guard proves each side's seam with that side's
+    // surface, and a side without one (a triangular patch's) would be left unheld
+    let surfaced = (0..4).all(|ii| matches!(surfaces.get(ii), Some(Some(_))));
+    let face_sided = (coons_face_sides != 0 && !create_bilinear_patch && surfaced)
+        .then(|| (bounds.clone(), tans.clone()));
+    let coons = BSplineSurface::create_coons_patch_on_faces(
         tol,
         create_bilinear_patch,
         &mut bounds,
         &mut tans,
-        coons_apex,
+        0,
     )?;
     if create_bilinear_patch {
         return Ok(vec![coons]);
     }
-    collapse_apex_rows(&mut coons, coons_apex)?;
 
     // Not upstream (WR-547; tangency-labs/smlib@cae8618): the patch tangent to its sides'
     // surfaces
-    let mut tangent =
+    let tangent =
         make_coons_patch_tangent_to_sides(k, &coons, &uv_crvs, surfaces, tangency_tol_radians)?;
-    if let Some(t) = tangent.as_mut() {
-        collapse_apex_rows(t, coons_apex)?;
-    }
 
     // Not upstream (WR-613): a patch that meets its face sides exactly, where it is proved
     // closer to tangent than the patch that ships otherwise, on every side
     if let Some((mut face_bounds, mut face_tans)) = face_sided {
-        let mut twisted = BSplineSurface::create_coons_patch_on_faces(
+        let twisted = BSplineSurface::create_coons_patch_on_faces(
             tol,
             false,
             &mut face_bounds,
             &mut face_tans,
-            coons_face_sides | coons_apex,
+            coons_face_sides,
         )?;
-        collapse_apex_rows(&mut twisted, coons_apex)?;
         let sides = CoonsSides {
             curves: originals,
             uv_curves: &uv_crvs,
             surfaces,
             face_sides,
-            apex: coons_apex,
         };
         let bar = tangent.as_ref().unwrap_or(&coons);
         // the seam check's tangent angle (`make_coons_patch_tangent_to_sides`' target)
@@ -3460,8 +3442,6 @@ struct CoonsSides<'c, 's> {
     surfaces: &'c [Option<&'s SmSurface>],
     /// The sides on faces of the body.
     face_sides: u32,
-    /// The collapsed side, if any (a triangular patch's apex; [`COONS_APEX_LEFT`] ..).
-    apex: u32,
 }
 
 /// The most times [`face_sided_patch`] halves a candidate's first knot span toward a
@@ -3544,7 +3524,6 @@ fn face_sided_patch(
             refine_to_spans(&mut attempt, SurfParamType::V, spans)?;
             grade_corner_spans(&mut attempt, face_sides, grade)?;
             project_coons_side_rows(k, &mut attempt, uv_curves, surfaces, face_sides)?;
-            collapse_apex_rows(&mut attempt, sides.apex)?;
             if taken(&attempt)? {
                 return Ok(Some(attempt));
             }
@@ -3630,48 +3609,6 @@ fn coons_side_seams(
         }
     }
     Ok(out)
-}
-
-/// Not upstream (WR-613): each collapsed side's row of control points of the non-rational
-/// `surface` (`apex`: [`COONS_APEX_LEFT`] .., the Coons patch's sides, left and right at
-/// constant u) set to the row's first point. The Coons sum, knot insertion and the
-/// tangency adjustment leave the row's points within rounding of one point; made one, the
-/// side is a point exactly, `S_u` vanishes along it identically, and the normal near it is
-/// `(v - v_1) M` with `M` the fan's `S_uv x S_v` (as [`crate::query::seam_bound`] encloses
-/// it).
-fn collapse_apex_rows(surface: &mut BSplineSurface, apex: u32) -> Result<()> {
-    if apex == 0 || surface.is_rational() {
-        return Ok(());
-    }
-    let nu = surface.number_control_points(SurfParamType::U);
-    let nv = surface.number_control_points(SurfParamType::V);
-    let (Some(lu), Some(lv)) = (nu.checked_sub(1), nv.checked_sub(1)) else {
-        return Ok(());
-    };
-    let form = ControlPointForm::NonRational;
-    let mut rows: Vec<Vec<(usize, usize)>> = Vec::new();
-    if apex & COONS_APEX_LEFT != 0 {
-        rows.push((0..nv).map(|j| (0, j)).collect());
-    }
-    if apex & COONS_APEX_RIGHT != 0 {
-        rows.push((0..nv).map(|j| (lu, j)).collect());
-    }
-    if apex & COONS_APEX_BOTTOM != 0 {
-        rows.push((0..nu).map(|i| (i, 0)).collect());
-    }
-    if apex & COONS_APEX_TOP != 0 {
-        rows.push((0..nu).map(|i| (i, lv)).collect());
-    }
-    for row in rows {
-        let Some(&(i0, j0)) = row.first() else {
-            continue;
-        };
-        let (point, _) = surface.control_point(form, i0, j0)?;
-        for &(i, j) in row.iter().skip(1) {
-            surface.set_control_point(form, i, j, point, 1.0)?;
-        }
-    }
-    Ok(())
 }
 
 /// Not the fork's (WR-613): whether `cand` reads every side with a surface at or below
@@ -4560,7 +4497,6 @@ mod tests {
             uv_curves: &uvs,
             surfaces: &surfaces,
             face_sides: 0,
-            apex: 0,
         };
         let seams = [Read(Some(0.0)), Free, Free, Free];
         let limit = 1.0e-3;
