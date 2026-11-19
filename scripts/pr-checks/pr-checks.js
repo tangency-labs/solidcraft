@@ -73,7 +73,8 @@ const DEFAULTS_HELP =
   'Add one line to the description: `Changes a default: no`, ' +
   '`Changes a default: yes — <what>, old behaviour kept behind preference <name>`, or, on a PR ' +
   `labelled ${OWNER_LABEL}, \`Changes a default: yes — <what>, approved by the owner\`. ` +
-  '(UX defaults only; a kernel result change is \'no\'.)';
+  '(UX defaults only: a kernel result change, a bug fix or a new button, command or tool is \'no\'; ' +
+  'see "What counts as a default" in .agents/skills/solidcraft-preferences/SKILL.md.)';
 
 function isBot(user) {
   return !!user && (user.type === 'Bot' || BOT_LOGINS.has(user.login) || /\[bot\]$/.test(user.login || ''));

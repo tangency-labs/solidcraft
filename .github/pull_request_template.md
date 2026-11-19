@@ -6,7 +6,7 @@ Start with what this is, in plain words someone new to the project would underst
 
 Changes a default: no
 
-<!-- Required line, replace "no" if this changes what a user gets out of the box (a default value, key binding, setting, tool behaviour; a UX default only, a kernel result change is 'no'):
+<!-- Required line, replace "no" if this changes what a user gets out of the box (a default value, key binding, setting, tool behaviour; a UX default only, a kernel result change is 'no'; a new button, command or tool is not a default change; see "What counts as a default" in .agents/skills/solidcraft-preferences/SKILL.md):
 Changes a default: yes — <what>, old behaviour kept behind preference <name>
 A change the owner approved with no preference to keep the old behaviour (the PR has the owner-approved label):
 Changes a default: yes — <what>, approved by the owner
