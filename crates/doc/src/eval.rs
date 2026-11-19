@@ -64,6 +64,10 @@ pub struct ModelBody {
     faces: Arc<std::sync::Mutex<MeasuredFaces>>,
     /// Lazy canonical reference triangles for a proper rigid occurrence placement.
     mesh_placement: Option<Arc<placed_mesh::PlacedMesh>>,
+    /// The mesh a cam's profile is read from: the body's edges at the cam's own tolerance. Made
+    /// once and kept, so a solve that works the cam's table out again does not mesh the body
+    /// again (#3389).
+    cam_mesh: Arc<OnceLock<Arc<Mesh>>>,
     /// For a mirrored copy: its faces as a world state shows them, a rigid move of the source's
     /// [`placed_mesh::OppositeHand`]. Display only: the model reads the copy's own triangles.
     mirrored_mesh: Option<Arc<placed_mesh::PlacedMesh>>,
@@ -221,6 +225,7 @@ impl ModelBody {
             joint_faces: Arc::new(OnceLock::new()),
             faces: Default::default(),
             mesh_placement: None,
+            cam_mesh: Arc::new(OnceLock::new()),
             mirrored_mesh: None,
             opposite_hand: Arc::new(OnceLock::new()),
             plan: Arc::new(Default::default()),
@@ -651,6 +656,23 @@ impl ModelBody {
     /// Already computed display geometry; saving must not trigger cold tessellation.
     pub fn cached_mesh(&self) -> Option<Arc<Mesh>> {
         self.mesh.get().cloned()
+    }
+
+    /// The mesh a cam's profile is read from: the body's edges at the cam's own tolerance (finer
+    /// than the display mesh, as the profile follows the body's outline). The cam reads its
+    /// profile from it, and it is kept with the body, so that a solve which works the cam's
+    /// table out again does not mesh the body again (#3389). `make` meshes the body: the
+    /// profile is a decision made on a mesh (`xtask/mesh-decisions.txt`), so the meshing stays
+    /// with the cam.
+    pub(crate) fn cam_mesh(&self, make: impl FnOnce() -> kernel::Result<Mesh>) -> Result<Arc<Mesh>> {
+        if let Some(mesh) = self.cam_mesh.get() {
+            return Ok(mesh.clone());
+        }
+        #[cfg(test)]
+        cost_tests::count(|c| c.cam_meshes += 1);
+        let mesh = Arc::new(make()?);
+        // Another thread may have made it first: the mesh is the same either way.
+        Ok(self.cam_mesh.get_or_init(|| mesh).clone())
     }
 
     /// The isoparametric curves of face `face` for Isocurve Analysis: `count` each way, evenly
@@ -6704,9 +6726,14 @@ const LEFT_SHARP_SAMPLES: usize = 7;
 /// Points along each edge that `picks` run on into tangentially beyond the picked edges
 /// themselves ([`kernel::tangent_chain_beyond_points`]), on `body` before the blend: the edges a
 /// blend with tangent propagation would take with them, [`LEFT_SHARP_SAMPLES`] points each.
-/// Empty when the chain cannot be walked; the blend then reports its own failure.
-fn chain_beyond_picks(body: &Body, picks: &[Vec3]) -> Vec<Vec<Vec3>> {
-    kernel::tangent_chain_beyond_points(body, picks, LEFT_SHARP_SAMPLES).unwrap_or_default()
+/// The kernel's error when it cannot give them. A chain it cannot walk (a pick that finds no
+/// edge, a smoothness test it cannot decide) fails the blend too, which walks the same chain
+/// first. Points along a chain edge it cannot work out (an edge without a curve, a curve it will
+/// not evaluate, a point that is not finite) are never asked for by the blend, which can then
+/// succeed: [`left_sharp_note`] says the check could not run, rather than nothing, which would
+/// read as "no edge was left sharp" (#19246).
+fn chain_beyond_picks(body: &Body, picks: &[Vec3]) -> kernel::Result<Vec<Vec<Vec3>>> {
+    kernel::tangent_chain_beyond_points(body, picks, LEFT_SHARP_SAMPLES)
 }
 
 /// The note for a blend that did not follow tangent chains, when its `picked` edges run on
@@ -6718,13 +6745,31 @@ fn chain_beyond_picks(body: &Body, picks: &[Vec3]) -> Vec<Vec<Vec3>> {
 /// end of its edge takes part of the next edge and leaves the rest sharp, so the middle alone
 /// does not tell. Without the note the result looks right: the volume changes a little and
 /// nothing says the rest of the visible edge stayed sharp. The note does not promise a way to
-/// blend those edges: a separate feature or tangent propagation may fail where they meet.
-fn left_sharp_note(blended: &Body, beyond: &[Vec<Vec3>], picked: usize, kind: &FeatureKind) -> Option<String> {
+/// blend those edges: a separate feature or tangent propagation may fail where they meet. When
+/// the check cannot run (`beyond` is the kernel's error, or the result's points cannot be
+/// classified) the note says so with the kernel's reason; the blend itself stands.
+fn left_sharp_note(blended: &Body, beyond: &kernel::Result<Vec<Vec<Vec3>>>, picked: usize, kind: &FeatureKind) -> Option<String> {
+    let (feature, why) = match kind {
+        FeatureKind::Chamfer { .. } => ("chamfer", "tangent_chain: false chamfers only the picked edges"),
+        FeatureKind::Fillet { style: crate::FilletStyle::Variable { .. } | crate::FilletStyle::Spline { .. }, .. } => {
+            ("fillet", "a variable or spline round runs along its picked edge only")
+        }
+        _ => ("fillet", "tangent_chain: false rounds only the picked edges"),
+    };
+    let from = if picked == 1 { "the picked edge runs" } else { "the picked edges run" };
+    let unchecked = |e: &kernel::KernelError| format!("could not check whether {from} on smoothly into edges this {feature} left sharp ({e})");
+    let beyond = match beyond {
+        Ok(beyond) => beyond,
+        Err(e) => return Some(unchecked(e)),
+    };
     let points: Vec<Vec3> = beyond.iter().flatten().copied().collect();
     if points.is_empty() {
         return None;
     }
-    let classes = blended.classify_points(&points).ok()?;
+    let classes = match blended.classify_points(&points) {
+        Ok(classes) => classes,
+        Err(e) => return Some(unchecked(&e)),
+    };
     let mut start = 0;
     let n = beyond
         .iter()
@@ -6738,14 +6783,6 @@ fn left_sharp_note(blended: &Body, beyond: &[Vec<Vec3>], picked: usize, kind: &F
     if n == 0 {
         return None;
     }
-    let (feature, why) = match kind {
-        FeatureKind::Chamfer { .. } => ("chamfer", "tangent_chain: false chamfers only the picked edges"),
-        FeatureKind::Fillet { style: crate::FilletStyle::Variable { .. } | crate::FilletStyle::Spline { .. }, .. } => {
-            ("fillet", "a variable or spline round runs along its picked edge only")
-        }
-        _ => ("fillet", "tangent_chain: false rounds only the picked edges"),
-    };
-    let from = if picked == 1 { "the picked edge runs" } else { "the picked edges run" };
     let (edges, are, them) = if n == 1 { ("1 edge".to_string(), "is", "it") } else { (format!("{n} edges"), "are", "them") };
     Some(format!(
         "{edges} that {from} on into smoothly {are} still sharp because {why} (to blend {them} too, pick {them} in another {feature}, which may fail where the edges meet)"
@@ -12413,7 +12450,7 @@ fn eval_feature_kind(
             for (ti, edges) in without_smooth(st, picks, &mut notes)? {
                 let Some(mb) = st.bodies.get(ti) else { return Err(DocError::Invalid("body".into())) };
                 let picked = edges.len();
-                let beyond = if chain { Vec::new() } else { chain_beyond_picks(&mb.body, &edges) };
+                let beyond = if chain { Ok(Vec::new()) } else { chain_beyond_picks(&mb.body, &edges) };
                 let edges = if chain { kernel::tangent_chain(&mb.body, &edges)? } else { edges };
                 let mut note = None;
                 let propagated = edges.len() > picked;
@@ -14226,6 +14263,20 @@ mod chain_tests {
         assert_ne!(boss, step);
         assert!(b.mesh().tangent_chain(boss, solidcraft_geom::TANGENT_CHAIN).contains(&step), "the mesh walk took the step");
         assert_eq!(b.blend_chain(boss, Vec3::new(20.0, 0.0, 30.0)), vec![boss]);
+    }
+
+    /// When the kernel cannot give the points along the edges a blend's picks run on into (here
+    /// a mesh body, which has no tangent chain), the note says the check could not run and why,
+    /// instead of saying nothing, which reads as "no edge was left sharp" (#19246).
+    #[test]
+    fn a_left_sharp_check_that_cannot_run_says_so() {
+        let mesh = kernel::mesh_body(&[Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::Z], &[[0, 1, 2], [0, 1, 3], [1, 2, 3], [0, 2, 3]]).unwrap();
+        let beyond = chain_beyond_picks(&mesh, &[Vec3::new(0.5, 0.0, 0.0)]);
+        let Err(e) = &beyond else { panic!("a mesh body has no tangent chain: {beyond:?}") };
+        let note = left_sharp_note(&mesh, &beyond, 1, &fillet(Vec3::new(0.5, 0.0, 0.0), "0.1", false)).expect("a note");
+        assert_eq!(note, format!("could not check whether the picked edge runs on smoothly into edges this fillet left sharp ({e})"));
+        // A check that ran and found nothing beyond the picks still says nothing.
+        assert_eq!(left_sharp_note(&mesh, &Ok(Vec::new()), 1, &fillet(Vec3::new(0.5, 0.0, 0.0), "0.1", false)), None);
     }
 
     fn fillet(at: Vec3, radius: &str, tangent_chain: bool) -> FeatureKind {

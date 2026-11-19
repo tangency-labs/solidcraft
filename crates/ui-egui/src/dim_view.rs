@@ -90,8 +90,12 @@ struct Edit {
 }
 
 /// What on a drawing's sheet the inline editor's text belongs to.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum SheetText {
+    /// A text cell of a sheet's title block, by the sheet and the cell's name:
+    /// `drawing.sheet.set`'s `title_block_overrides` (nothing, or the cell's own value typed back,
+    /// shows that value again).
+    TitleCell { sheet: u64, cell: String },
     /// A dimension's text: `drawing.dimension.edit`'s `override_text` (nothing, or its measured
     /// number typed back, shows the number again).
     Dimension(u64),
@@ -731,7 +735,7 @@ pub(crate) fn edit_sheet_text(target: SheetText, title: &str, text: String, at: 
 
 /// What on a drawing's sheet the inline editor is open on, if anything.
 pub(crate) fn sheet_editing() -> Option<SheetText> {
-    EDIT.with(|e| e.borrow().as_ref().and_then(|e| e.sheet))
+    EDIT.with(|e| e.borrow().as_ref().and_then(|e| e.sheet.clone()))
 }
 
 /// The inline editor's box on a drawing's sheet (a sketch's is drawn by [`show`]).
@@ -776,6 +780,24 @@ fn change_sheet_text(app: &mut SolveApp, target: SheetText, typed: &str) -> Resu
                 let _ = app.run("edit.undo", json!({}));
             }
             changed
+        }
+        SheetText::TitleCell { sheet, cell } => {
+            // As the sheet shows the cell now, and the value a typed text hides.
+            let read = app.run("drawing.inspect", json!({}))?;
+            let shown = read["sheets"]
+                .as_array()
+                .and_then(|sheets| sheets.iter().find(|s| s["id"].as_str() == Some(encode(sheet).as_str())))
+                .and_then(|s| s["title_block_cells"].as_array()?.iter().find(|c| c["name"].as_str() == Some(cell.as_str())))
+                .cloned()
+                .unwrap_or_default();
+            if shown["text"].as_str() == Some(typed) || (typed.is_empty() && shown["value"].is_null()) {
+                return Ok(read);
+            }
+            let own = typed.is_empty() || shown["value"].as_str() == Some(typed);
+            let mut texts = serde_json::Map::new();
+            texts.insert(cell, if own { serde_json::Value::Null } else { json!(typed) });
+            app.run("drawing.sheet.set", json!({"sheet": encode(sheet), "title_block_overrides": texts}))
+                .map_err(|err| shown_error("drawing.sheet.set", &err))
         }
         SheetText::Note(id) => {
             app.run("drawing.note.edit", json!({"note": encode(id), "set": {"content": typed}})).map_err(|err| shown_error("drawing.note.edit", &err))
@@ -1474,7 +1496,7 @@ fn settle(app: &mut SolveApp, mut e: Edit, done: Option<bool>, escaped: bool) {
     e.fresh = e.fresh.saturating_sub(1);
     match done {
         Some(true) => {
-            let result = if let Some(target) = e.sheet {
+            let result = if let Some(target) = e.sheet.clone() {
                 change_sheet_text(app, target, &e.expr)
             } else if let Some(draft) = &e.draft {
                 if draft.valid(app) {
