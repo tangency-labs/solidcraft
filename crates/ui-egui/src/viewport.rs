@@ -7106,7 +7106,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         preparing_note(app, &painter, rect);
     }
     let overlay_rect = crate::shell::bottom_readout_rect(app, rect);
-    crate::viewport_details::legacy_legends(app, ui, overlay_rect);
+    let legends = crate::viewport_details::legacy_legends(app, ui, overlay_rect);
     placement_note(app, &painter, overlay_rect);
     crate::frame_rate::paint(app, ui, &painter, overlay_rect);
 
@@ -7813,6 +7813,18 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let readout = quick_measure_readout(app, ui, overlay_rect);
     let mut toasts = transient_messages(app, ui, rect, readout);
     toasts.extend(app.operations.rect);
+    // The scale bar in the opposite corner, clear of all of the above (#375).
+    let scale_bar = {
+        let mut taken = crate::shell::covered_rects(app);
+        if let Some(layout) = &app.viewport.layout {
+            taken.extend([layout.navigation, layout.axis_view]);
+        }
+        taken.extend(readout);
+        taken.extend(toasts.iter().copied());
+        taken.extend(legends);
+        crate::scale_bar::show(app, ui, &proj, crate::shell::content_rect(app, overlay_rect), &taken)
+    };
+    toasts.extend(scale_bar);
     if app.preferences.space_mouse_in_view
         && app.space_mouse.calibrating.is_none()
         && let Some(device) = &app.space_mouse.device
@@ -8070,6 +8082,7 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
     {
         crate::scenario::publish_rect("toast:placement", r);
         obstacles.push(r);
+        shown.push(r);
         free.max.y = r.top() - t.space_8;
     }
     if let Some((msg, at, error)) = app.status.clone() {

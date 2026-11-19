@@ -231,7 +231,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         });
         ui_kit::settings_section(ui, "in_view", app.tr("prefs.graphics_page.in_view"), |ui| {
             let width = ((ui.available_width() - t.space_10 * 3.0) / 4.0).max(t.space_24 * 5.0 + t.space_10).min(ui.available_width());
-            let tiles: [(_, _, _, _, fn(&egui::Painter, egui::Rect)); 4] = [
+            let tiles: [(_, _, _, _, fn(&egui::Painter, egui::Rect)); 5] = [
                 ("show_view_angles", "ui.view_angles", "ui.view_angles_help", app.preferences.show_view_angles, ui_kit::paint_view_angles),
                 (
                     "vertex_markers",
@@ -247,6 +247,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     app.preferences.quick_measure,
                     ui_kit::paint_quick_measure,
                 ),
+                ("scale_bar", "prefs.graphics_page.scale_bar", "prefs.scale_bar_note", app.preferences.scale_bar, ui_kit::paint_scale_bar),
                 ("show_frame_rate", "ui.frame_rate", "settings.frame_rate_note", app.preferences.show_frame_rate, ui_kit::paint_frame_rate),
             ];
             ui.horizontal_wrapped(|ui| {
@@ -284,6 +285,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                             }
                             "vertex_markers" => app.preferences.vertex_markers = !selected,
                             "quick_measure" => app.preferences.quick_measure = !selected,
+                            "scale_bar" => app.preferences.scale_bar = !selected,
                             _ => app.preferences.show_frame_rate = !selected,
                         }
                     }
