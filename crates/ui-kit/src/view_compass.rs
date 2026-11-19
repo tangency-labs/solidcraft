@@ -414,7 +414,7 @@ mod tests {
         assert_eq!((opposite("x"), opposite("-x"), opposite("z"), opposite("-y")), ("-x", "x", "-z", "y"));
         let ctx = crate::test_support::context();
         crate::test_support::raw_frame(&ctx, RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 400.0))), ..Default::default() }, |ui| {
-            let c = pos2(370.0, 200.0);
+            let c = pos2(350.0, 200.0);
             let clip = Rect::from_min_size(Pos2::ZERO, vec2(400.0, 400.0));
             let x = tips(&FRONT, c).into_iter().find(|t| t.0 == "x").unwrap();
             let pill = label(ui.painter(), clip, c, x, Tokens::get());
