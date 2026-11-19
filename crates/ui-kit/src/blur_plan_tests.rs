@@ -118,7 +118,7 @@ fn members_get_their_padded_region_inside_the_screen() {
     let a = px(10, 10, 60, 60);
     let runs = plan(&[Some(a)], &[marker(0, a)], 25, SCREEN);
     assert_eq!(runs[0].members[0].region, px(0, 0, 85, 85));
-    assert_eq!(runs[0].region_area(), 85 * 85);
+    assert_eq!(runs[0].members[0].region.area(), 85 * 85);
 }
 
 #[test]

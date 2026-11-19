@@ -80,14 +80,6 @@ pub struct Run {
     pub members: Vec<Member>,
 }
 
-impl Run {
-    /// Pixels the run's first pyramid level draws, the unit of the per-frame budget.
-
-    pub fn region_area(&self) -> u64 {
-        self.members.iter().fold(0_u64, |sum, m| sum.saturating_add(m.region.area()))
-    }
-}
-
 /// Split `markers` into runs. `jobs[i]` is the pixel extent of paint job `i` with its clip
 /// applied (`None` when it paints nothing). `pad` is the blur's reach in pixels. Markers whose
 /// job is outside `jobs`, or that have no area on screen, are dropped.
