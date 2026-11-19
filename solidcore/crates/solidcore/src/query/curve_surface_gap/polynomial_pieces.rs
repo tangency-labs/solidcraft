@@ -811,7 +811,7 @@ pub(crate) fn trim_distance_bound(
     let mut ends = vec![lo];
     ends.extend(cuts);
     ends.push(hi);
-    let mut images = Vec::with_capacity(ends.len());
+    let mut images = Vec::new();
     for &s in &ends {
         let Some(t) = nearest(s, normalised(s))? else {
             return Ok(None);
