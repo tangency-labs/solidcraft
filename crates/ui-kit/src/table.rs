@@ -153,7 +153,7 @@ const MANUAL_MIN_WIDTH: f32 = 24.0;
 
 /// Each column's width in points for a table `available` points wide: dragged columns keep their
 /// width, fixed columns measure their heading and controls, and flexible columns share the rest by
-/// weight, each frozen at its minimum before the others divide what remains.
+/// weight between each column's minimum and cap ([`share_by_weight`]).
 fn column_widths(ui: &Ui, columns: &[Column<'_>], available: f32) -> Vec<f32> {
     let t = Tokens::get();
     let mut widths: Vec<_> = columns
@@ -169,47 +169,9 @@ fn column_widths(ui: &Ui, columns: &[Column<'_>], available: f32) -> Vec<f32> {
         })
         .collect();
     let fixed: f32 = columns.iter().zip(&widths).filter(|(c, _)| !c.shares()).map(|(_, w)| *w).sum();
-    let mut remaining = (available - fixed - t.space_8 * (columns.len().saturating_sub(1) + 2) as f32).max(0.0);
-    let mut sharing: Vec<_> = columns.iter().map(|c| c.shares() && dimension(c.width) > 0.0).collect();
-    // Freeze columns at their control minimum before sharing the remaining width. The bounded
-    // passes also keep a hostile design with many columns from creating an unbounded loop.
-    for _ in 0..columns.len().min(64) {
-        let weight: f32 = columns.iter().zip(&sharing).filter(|(_, share)| **share).map(|(c, _)| dimension(c.width)).sum();
-        if weight <= 0.0 {
-            break;
-        }
-        let available = remaining;
-        let portion = |column: &Column<'_>| available * dimension(column.width) / weight;
-        // Columns whose minimum is above their portion keep the minimum first. Caps are applied
-        // only in a pass that froze no minimum, because each minimum frozen shrinks the other
-        // portions and could take them back under their caps.
-        let mut frozen = false;
-        for ((column, width), share) in columns.iter().zip(&mut widths).zip(&mut sharing) {
-            if *share && *width > portion(column) {
-                *share = false;
-                remaining = (remaining - *width).max(0.0);
-                frozen = true;
-            }
-        }
-        if !frozen {
-            for ((column, width), share) in columns.iter().zip(&mut widths).zip(&mut sharing) {
-                if let Some(cap) = column.share_cap().filter(|cap| *share && portion(column) > *cap) {
-                    *width = cap;
-                    *share = false;
-                    remaining = (remaining - cap).max(0.0);
-                    frozen = true;
-                }
-            }
-        }
-        if !frozen {
-            for ((column, width), share) in columns.iter().zip(&mut widths).zip(&sharing) {
-                if *share {
-                    *width = remaining * dimension(column.width) / weight;
-                }
-            }
-            break;
-        }
-    }
+    let remaining = (available - fixed - t.space_8 * (columns.len().saturating_sub(1) + 2) as f32).max(0.0);
+    let sharing: Vec<_> = columns.iter().map(|c| c.shares() && dimension(c.width) > 0.0).collect();
+    share_by_weight(columns, &sharing, &mut widths, remaining);
     // Round cumulative column edges, not each width independently: independent rounding
     // can add a pixel to an otherwise exactly fitting grid and create a scrollbar.
     let ppp = ui.ctx().pixels_per_point().max(0.5);
@@ -222,6 +184,43 @@ fn column_widths(ui: &Ui, columns: &[Column<'_>], available: f32) -> Vec<f32> {
         rounded_edge = next;
     }
     widths
+}
+
+/// Share `remaining` points among the `sharing` columns by weight. Each column gets weight × rate,
+/// held between its minimum (its width on entry) and its cap, at the one rate where the widths add
+/// up to `remaining`. A column held at its minimum or cap leaves its portion to the others, and
+/// width a cap gives back reaches every other column, including one that was at its minimum. If
+/// the minimums alone overfill the space every column keeps its minimum (the table scrolls); if
+/// every column is capped, the rest of the space stays empty.
+fn share_by_weight(columns: &[Column<'_>], sharing: &[bool], widths: &mut [f32], remaining: f32) {
+    let members: Vec<_> = (0..columns.len())
+        .filter(|&i| sharing[i])
+        .map(|i| {
+            let weight = dimension(columns[i].width);
+            let low = widths[i];
+            let high = columns[i].share_cap().map_or(f32::INFINITY, |cap| cap.max(low));
+            (i, weight, low, high)
+        })
+        .collect();
+    if members.is_empty() {
+        return;
+    }
+    let total = |rate: f32| members.iter().map(|&(_, w, low, high)| (w * rate).clamp(low, high)).sum::<f32>();
+    // The total grows linearly between the rates where a column leaves its minimum or meets its
+    // cap, so find the segment that reaches `remaining` and solve within it.
+    let mut rates: Vec<f32> = members.iter().flat_map(|&(_, w, low, high)| [low / w, high / w]).filter(|r| r.is_finite()).collect();
+    rates.sort_by(f32::total_cmp);
+    rates.dedup();
+    // The total only grows with the rate, so a binary search finds the segment: O(n log n) even
+    // for a design with a great many columns.
+    let reached = rates.partition_point(|&r| total(r) < remaining);
+    let previous = if reached == 0 { 0.0 } else { rates[reached - 1] };
+    let next = rates.get(reached).copied().unwrap_or(f32::INFINITY);
+    let slope: f32 = members.iter().filter(|&&(_, w, low, high)| low / w <= previous && high / w >= next).map(|&(_, w, _, _)| w).sum();
+    let rate = if slope > 0.0 { previous + (remaining - total(previous)).max(0.0) / slope } else { previous };
+    for &(i, weight, low, high) in &members {
+        widths[i] = (weight * rate).clamp(low, high);
+    }
 }
 
 impl Table<'_> {

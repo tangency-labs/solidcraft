@@ -469,6 +469,18 @@ fn capped_columns_stop_growing_and_leave_a_wider_table_to_the_uncapped_one() {
 }
 
 #[test]
+fn width_a_cap_gives_back_reaches_a_column_held_at_its_minimum() {
+    // The light column's portion is under its minimum, so it starts at the minimum; the heavy
+    // column is then capped, and the width it gives back must go to the light column.
+    let m = 60.0_f32.max(Tokens::get().control_height);
+    let columns = [Column::new("Comment", 1.0).flex().min_content_width(m), Column::new("Name", 9.0).flex().min_content_width(m).max_width(Some(m))];
+    let spacing = Tokens::get().space_8 * 3.0;
+    let widths = widths_at(&columns, 5.0 * m + spacing);
+    assert!((widths[1] - m).abs() <= 0.5, "{widths:?}");
+    assert!((widths[0] - 4.0 * m).abs() <= 1.0, "{widths:?}");
+}
+
+#[test]
 fn a_cap_never_takes_a_column_under_its_content_minimum() {
     let columns = [Column::new("Name", 1.0).flex().min_content_width(200.0).max_width(Some(120.0)), Column::new("Comment", 1.0).flex()];
     let widths = widths_at(&columns, 900.0);

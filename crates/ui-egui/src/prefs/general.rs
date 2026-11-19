@@ -184,6 +184,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::scenario::publish_target("prefs:right_click_confirms", right_click.rect);
             let first_letter = setting::dialog_first_letter_buttons(app, ui).backing_on_hover_text(app.tr("prefs.dialog_first_letter_buttons_help"));
             crate::scenario::publish_target("prefs:dialog_first_letter_buttons", first_letter.rect);
+            let comment_fills = setting::params_comment_fills(app, ui);
+            crate::scenario::publish_target("prefs:params_comment_fills", comment_fills.rect);
         });
         ui_kit::settings_section(ui, "community", app.tr("prefs.community"), |ui| {
             let donate = setting::show_donate_button(app, ui).backing_on_hover_text(app.tr("prefs.show_donate_button_help"));
