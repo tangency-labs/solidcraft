@@ -88,7 +88,8 @@
 //! proved; [`seam_angle_lower_bound`] gives `None` there). `asin` is widened by a relative
 //! [`ASIN_ROUNDING`] for the library function's error.
 //!
-//! Not enclosed (`None`): a side whose surface has no net, a sample with no nearest point, or
+//! Not enclosed (`None`): a side whose surface has no net or is a procedural blend (it
+//! evaluates by its definition, its net only approximates it, and the facts bound the net), a sample with no nearest point, or
 //! a piece at the deepest bisection with no bound (a box too far past a net's end, a knot
 //! line of continuity below C^0, a zero normal or `σ` away from a collapsed side, a foot bound
 //! that does not close, more than [`MAX_PARTS`] parts).
@@ -1179,6 +1180,14 @@ fn prepare(
     };
     let mut prepared: Vec<Side> = Vec::with_capacity(2);
     for s in sides {
+        // a procedural blend evaluates by its definition, and its net is only that
+        // definition's approximation: the facts bound the net, so nothing is proved of it
+        if matches!(
+            s.kind(),
+            crate::surface::surface::SurfaceKind::ProceduralBlend(_)
+        ) {
+            return Ok(None);
+        }
         let s = s.clone_for_evaluation()?;
         let domain = s.natural_uv_domain_with_nurb(k)?;
         let Some((net, w)) = correspondence(k, &s, &domain, curve, [lo, hi])? else {

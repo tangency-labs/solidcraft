@@ -2268,13 +2268,14 @@ fn corner_blend_4(
 /// a candidate is taken, else `bar` (the patch that ships otherwise) bit for bit.
 ///
 /// The attempt is an addition to the shipped patch, so it never fails a corner the shipped
-/// patch builds: an error anywhere in it (building the face-sided patch, refining or
+/// patch builds, save for work given up ([`keep_bar_on_error`]): an error anywhere in it (building the face-sided patch, refining or
 /// grading a candidate, projecting its rows, reading or proving a seam) keeps `bar`, as
 /// no candidate taken would ([`keep_bar_on_error`]).
 ///
 /// # Errors
 ///
-/// The kernel's unported and cancelled statuses from the attempt.
+/// The statuses [`SolidError::is_unported_or_cancelled`] passes on (an unported call, a
+/// cancellation, face trims unavailable, a spent certification budget) from the attempt.
 fn face_sided_or_bar(
     k: &crate::kernel::Kernel,
     tol: f64,
@@ -2298,10 +2299,10 @@ fn face_sided_or_bar(
 }
 
 /// Not the fork's (WR-613): the face-sided attempt's outcome ([`face_sided_or_bar`]), with
-/// every error other than the kernel's unported and cancelled statuses
-/// ([`SolidError::is_unported_or_cancelled`]) read as no candidate taken, so the caller
-/// keeps the patch that ships otherwise. Those two are passed on: work given up never
-/// becomes a result.
+/// every error other than those [`SolidError::is_unported_or_cancelled`] passes on (an
+/// unported call, a cancellation, face trims unavailable, a spent certification budget)
+/// read as no candidate taken, so the caller keeps the patch that ships otherwise. Those
+/// are passed on: work given up never becomes a result.
 fn keep_bar_on_error(attempt: Result<Option<BSplineSurface>>) -> Result<Option<BSplineSurface>> {
     match attempt {
         Err(e) if e.is_unported_or_cancelled() => Err(e),

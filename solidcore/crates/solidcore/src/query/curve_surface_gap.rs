@@ -83,7 +83,9 @@ impl NetSurface {
     /// the kinds [`as_b_spline`] returns whose evaluation is their own net (a B-spline
     /// surface, and the analytic kinds through their exact base B-spline); the probe checks
     /// the agreement only at `probe` (to `1e-9` relative), so it catches a parameterisation
-    /// mismatch but is no proof of agreement between the probes.
+    /// mismatch but is no proof of agreement between the probes. A procedural blend's net
+    /// only approximates its definition, by which it evaluates: not exact by construction
+    /// (`query::seam_bound` refuses it).
     pub(crate) fn of(k: &Kernel, surface: &Surface, probe: &[Point2]) -> Result<Option<Self>> {
         let Some(bs) = as_b_spline(k, surface)? else {
             return Ok(None);
