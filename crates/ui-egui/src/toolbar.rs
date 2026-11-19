@@ -300,6 +300,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     .map(|release| measure(&solidcraft_ui_text::format("update.button_version", &[("version", release.version())]))),
                 managed: app.policy.managed_by().map(|label| measure(&label)),
             };
+            let card_shapes = customizing.then(|| [ui.painter().add(egui::Shape::Noop), ui.painter().add(egui::Shape::Noop)]);
             let mut out = ui
                 .add_enabled_ui(!customizing, |ui| {
                     if customizing {
@@ -313,7 +314,16 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 out.actions.push(action);
             }
             if let Some(rect) = out.leading {
-                app_bar::paint_motion(ui, "leading", rect, |ui| crate::library::app_bar_toggle(app, ui, rect));
+                app_bar::paint_motion(ui, "documents", rect, |ui| {
+                    app_bar::movable_shadow(ui, rect, "documents");
+                    if customizing {
+                        let response = ui.interact(rect, ui.scope_id().with("documents_preview"), egui::Sense::hover());
+                        app_bar::paint_control(ui, rect, app_bar::Control::Documents, &response, app_bar::item_opacity(ui.ctx(), "documents"));
+                        crate::scenario::publish_target("library:toggle", rect);
+                    } else {
+                        crate::library::app_bar_toggle(app, ui, rect);
+                    }
+                });
             }
             ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_file_menu_x"), out.file.left()));
             let editing = customizing;
@@ -387,13 +397,16 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             app_bar::paint_motion(&mut tabs_ui, "tabs", tabs_rect, |ui| {
                 ui.add_enabled_ui(!bar_context_click && !customizing, |ui| {
                     if customizing {
-                        ui.set_opacity(1.0);
+                        ui.set_opacity(0.55);
                     }
                     crate::documents::tabs(app, ui, r, out.tabs_start, tabs_end);
                 });
             });
             if let Some(at) = out.assistant {
                 assistant_button(app, ui, at);
+            }
+            if let Some(shapes) = card_shapes {
+                crate::app_bar_custom::backing(ui, content, &out, shapes);
             }
             crate::app_bar_custom::bar(app, ui, content, &out);
             crate::app_bar_custom::menu(app, ui, content, &out);
@@ -4956,6 +4969,89 @@ mod dropdown_toggle_tests {
 mod app_bar_tests {
     use super::*;
 
+    #[test]
+    fn app_bar_edit_cards_keep_normal_fit_and_visible_report_version() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1280,"height":720}));
+        h.frames(6);
+        let keys = ["appbar:file", "appbar:home", "appbar:save", "titlebar:preferences", "titlebar:report", "titlebar:version"];
+        let before: Vec<_> = keys.iter().map(|key| crate::scenario::handle_at(key).unwrap()).collect();
+        let saved = h.app.toolbar_custom.app_bar.clone();
+        h.app.start("ui.appBarCustomize");
+        h.frames(6);
+        let after: Vec<_> = keys.iter().map(|key| crate::scenario::handle_at(key).unwrap()).collect();
+        assert_eq!(before, after, "cards and elevation cannot change final positions or overflow");
+        assert_eq!(h.app.toolbar_custom.app_bar, saved);
+        let mut leaves = Vec::new();
+        for clipped in &h.shapes {
+            tray_paint_leaves(&clipped.shape, &mut leaves);
+        }
+        for label in [h.app.tr("ui.report_a_bug").to_owned(), format!("v{}", crate::update::current_version())] {
+            assert!(
+                leaves.iter().any(|shape| matches!(shape, egui::Shape::Text(text) if text.pos.y < app_bar::HEIGHT && text.galley.job.text == label)),
+                "{label} still paints in the lit bar"
+            );
+        }
+        for (zone, ids) in [("start", &["file", "home", "save"][..]), ("end", &["settings", "help", "report", "version"][..])] {
+            let card = crate::scenario::rect_of(&format!("appbar:zone:{zone}")).unwrap();
+            for id in ids {
+                let item = crate::scenario::handle_at(&format!("appbar:edit:{id}")).unwrap();
+                assert!(card.contains(item), "{id} is inside its section card");
+            }
+            if let Some(tab) = crate::scenario::rect_of("tab:close:0") {
+                assert!(!card.intersects(tab));
+            }
+        }
+    }
+
+    #[test]
+    fn app_bar_repeatable_separator_and_documents_tray_edits_persist() {
+        use ui_kit::app_bar_items::{Layout, Preset, Zone};
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":1200}));
+        crate::app_bar_custom::run(&mut h.app, &json!({"item":"documents","action":"hide"}));
+        h.app.start("ui.appBarCustomize");
+        h.frames(4);
+        h.step(&json!({"click":{"handle":"appbar:tile:documents"}})).unwrap();
+        h.frames(3);
+        let documents = h.app.toolbar_custom.app_bar.items.iter().find(|p| p.id == "documents").unwrap();
+        assert!(documents.shown && documents.zone == Zone::End);
+        for _ in 0..2 {
+            h.step(&json!({"click":{"handle":"appbar:tile:separator"}})).unwrap();
+            h.frames(3);
+        }
+        assert_eq!(h.app.toolbar_custom.app_bar.items.iter().filter(|p| p.id.starts_with("separator:")).count(), 2);
+        assert!(crate::scenario::rect_of("appbar:badge:separator").is_none(), "repeatable tile never gets checked");
+        let tile = crate::scenario::handle_at("appbar:tile:separator").unwrap();
+        let settings = crate::scenario::handle_at("titlebar:preferences").unwrap();
+        h.step(&json!({"drag":[[tile.x,tile.y],[settings.x,settings.y]]})).unwrap();
+        h.frames(4);
+        let ids: Vec<_> = h.app.toolbar_custom.app_bar.items.iter().filter(|p| p.id.starts_with("separator:")).map(|p| p.id.clone()).collect();
+        assert_eq!(ids.len(), 3, "dragging the template creates another unique object");
+        let id = ids.last().unwrap();
+        let separator = crate::scenario::handle_at(&format!("appbar:edit:{id}")).unwrap();
+        h.step(&json!({"drag":[[separator.x,separator.y],[separator.x,650.0]]})).unwrap();
+        h.frames(4);
+        assert!(!h.app.toolbar_custom.app_bar.items.iter().any(|p| &p.id == id));
+        assert_eq!(h.app.toolbar_custom.app_bar.preset(&Layout::default()), Preset::Custom);
+        let before = h.app.toolbar_custom.app_bar.clone();
+        h.step(&json!({"click":{"handle":"appbar:preset:Custom"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.toolbar_custom.app_bar, before);
+        let mut loaded = crate::toolbar_custom::ToolbarCustom::default();
+        loaded.load(&h.app.toolbar_custom.prefs());
+        assert_eq!(loaded.app_bar, before);
+        h.step(&json!({"click":{"handle":"appbar:preset:Compact"}})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.toolbar_custom.app_bar.preset(&Layout::default()), Preset::Compact);
+        assert!(!h.app.toolbar_custom.app_bar.items.iter().any(|p| p.id.starts_with("separator:")));
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(!h.app.toolbar_custom.app_bar_customizing);
+    }
+
     fn tray_paint_leaves<'a>(shape: &'a egui::Shape, out: &mut Vec<&'a egui::Shape>) {
         if let egui::Shape::Vec(shapes) = shape {
             for shape in shapes {
@@ -4983,9 +5079,9 @@ mod app_bar_tests {
             assert!((card.top() - 46.0).abs() <= 1.0);
             let mut tiles = Vec::new();
             for (column, ids) in [
-                (0, &["file", "home", "save", "undo", "redo", "assistant", "report", "settings", "help"][..]),
-                (1, &["version"][..]),
-                (2, &["donate", "discord"][..]),
+                (0, &["file", "documents", "home", "save", "undo", "redo", "assistant", "settings", "help"][..]),
+                (1, &["report", "donate", "discord", "version"][..]),
+                (2, &["separator"][..]),
             ] {
                 let bounds = rect_of(&format!("appbar:column:{column}")).unwrap();
                 assert!(card.contains_rect(bounds));

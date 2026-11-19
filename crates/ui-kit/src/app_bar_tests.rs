@@ -2,38 +2,113 @@
 use super::*;
 
 #[test]
-fn app_bar_rounded_dash_geometry_is_closed_clamped_and_safe_for_tiny_rectangles() {
-    let rect = Rect::from_min_size(pos2(10.0, 20.0), vec2(100.0, 30.0));
-    let path = rounded_rect_path(rect, 7.0);
-    assert_eq!(path.first(), path.last());
-    assert!(path.len() > 25);
-    assert!(path.iter().all(|p| p.is_finite() && rect.contains(*p)));
-    assert!(!path.contains(&rect.left_top()) && !path.contains(&rect.right_top()));
-    for (width, height, radius) in [(0.0, 0.0, 9.0), (0.001, 0.002, 100.0), (1.0, 1.0, 0.0), (10.0, 20.0, f32::NAN)] {
-        let tiny = Rect::from_min_size(Pos2::ZERO, vec2(width, height));
-        let path = rounded_rect_path(tiny, radius);
-        assert!(path.iter().all(|p| p.is_finite() && tiny.contains(*p)));
-        assert!(split_dashes(&path, 4.0, 3.0).iter().flatten().all(|p| p.is_finite()));
-    }
-    assert!(rounded_rect_path(Rect::from_min_max(pos2(f32::NAN, 0.0), pos2(30.0, 30.0)), 7.0).is_empty());
-    assert!(rounded_rect_path(Rect::from_min_max(pos2(-f32::MAX, 0.0), pos2(f32::MAX, 30.0)), 7.0).is_empty());
-    for id in ["save", "file", "donate", "discord", "report", "version"] {
-        let (outline, radius) = item_outline(id, rect);
-        assert_eq!(radius, if matches!(id, "save" | "file") { 7.0 } else { outline.height() / 2.0 });
+fn app_bar_documents_migrate_move_and_hide() {
+    use crate::app_bar_items::{Layout, Zone};
+    let defaults = Layout::default();
+    let mut legacy = defaults.clone();
+    legacy.items.retain(|p| p.id != "documents" && p.id != "file");
+    assert_eq!(Layout::from_value(&legacy.to_value(), &defaults), defaults);
+    let mut saved = defaults.clone();
+    assert!(saved.move_before("documents", Zone::End, Some("settings"), &defaults));
+    assert!(saved.set_shown("documents", false, &defaults));
+    assert_eq!(Layout::from_value(&saved.to_value(), &defaults), saved);
+    assert!(saved.set_shown("documents", true, &defaults));
+    assert_eq!(saved.items.iter().find(|p| p.id == "documents").unwrap().zone, Zone::End);
+}
+
+#[test]
+fn app_bar_separators_repeat_renumber_remove_and_bound_hostile_input() {
+    use crate::app_bar_items::{DragRelease, ItemId, Layout, MAX_ITEMS, Placement, Preset, Zone, drag_release};
+    let defaults = Layout::default();
+    let mut saved = defaults.clone();
+    let first = saved.add_separator(Zone::Start, Some("save"), &defaults).unwrap();
+    let second = saved.add_separator(Zone::End, None, &defaults).unwrap();
+    assert_ne!(first, second);
+    assert!(saved.move_before(&first, Zone::End, Some(&second), &defaults));
+    assert_eq!(drag_release(&first, true, true, false, false), DragRelease::Remove);
+    assert_eq!(drag_release("separator", false, false, true, false), DragRelease::Insert);
+    assert_eq!(drag_release("separator", false, true, false, false), DragRelease::Return);
+    assert!(saved.set_shown(&first, false, &defaults));
+    assert!(!saved.items.iter().any(|p| p.id == first));
+    saved.items.extend((0..1000).map(|_| Placement { id: second.clone(), zone: Zone::Start, shown: true }));
+    saved.items.push(Placement { id: "separator:hostile".into(), zone: Zone::End, shown: true });
+    saved.sanitize(&defaults);
+    assert_eq!(saved.items.len(), MAX_ITEMS);
+    let ids: std::collections::BTreeSet<_> = saved.items.iter().map(|p| &p.id).collect();
+    assert_eq!(ids.len(), saved.items.len());
+    assert!(saved.items.iter().filter(|p| p.id.starts_with("separator:")).all(|p| matches!(ItemId::parse(&p.id), Some(ItemId::Separator(_)))));
+    assert!(saved.add_separator(Zone::End, None, &defaults).is_none());
+    assert_eq!(Layout::from_value(&saved.to_value(), &defaults), saved);
+    let mut malformed = Layout { items: vec![Placement { id: "separator:NaN".into(), zone: Zone::Start, shown: true }] };
+    malformed.sanitize(&defaults);
+    assert!(malformed.items.iter().any(|p| p.id == "separator:0"));
+    for preset in [Preset::Default, Preset::Minimal, Preset::Full, Preset::Compact] {
+        let mut reset = saved.clone();
+        reset.set_preset(preset, &defaults);
+        assert!(!reset.items.iter().any(|p| p.id.starts_with("separator:")), "presets create no separator instances");
     }
 }
 
 #[test]
-fn app_bar_dash_phase_crosses_vertices_and_hostile_input_is_bounded() {
-    let dashes = split_dashes(&[pos2(0.0, 0.0), pos2(3.0, 0.0), pos2(3.0, 6.0)], 4.0, 3.0);
-    assert_eq!(dashes, vec![vec![pos2(0.0, 0.0), pos2(3.0, 0.0), pos2(3.0, 1.0)], vec![pos2(3.0, 4.0), pos2(3.0, 6.0)]]);
-    for (dash, gap) in [(0.0, 3.0), (f32::NAN, 3.0), (4.0, -1.0), (4.0, f32::INFINITY)] {
-        assert!(split_dashes(&[Pos2::ZERO, pos2(10.0, 10.0)], dash, gap).is_empty());
+fn app_bar_full_separator_inventory_keeps_file_and_overflows_separators_first() {
+    use crate::app_bar_items::{Layout, Zone};
+    use crate::app_bar_layout::application::spec_with_items;
+    let defaults = Layout::default();
+    let mut saved = defaults.clone();
+    while saved.add_separator(Zone::Start, Some("file"), &defaults).is_some() {}
+    saved.move_before("file", Zone::End, None, &defaults);
+    for width in [480.0, 1280.0, 3840.0] {
+        let spec = spec_with_items((width, 0.0, 138.0), measured_bar(), &saved, &["save", "undo", "redo"], &[], &["donate", "discord"]);
+        let placed = layout(&spec);
+        assert_sound(&spec, &placed);
+        assert!(placed.placements[index_of(&spec, "file")].is_some());
+        if placed.overflow.iter().any(|id| !id.starts_with("separator:")) {
+            assert!(spec.items.iter().zip(&placed.placements).filter(|(item, _)| item.id.starts_with("separator:")).all(|(_, p)| p.is_none()));
+        }
     }
-    assert!(split_dashes(&[Pos2::ZERO, Pos2::ZERO], 4.0, 3.0).is_empty());
-    let huge = split_dashes(&[pos2(-f32::MAX, 0.0), pos2(f32::MAX, 0.0)], 4.0, 3.0);
-    assert!(huge.len() <= 8192);
-    assert!(huge.iter().flatten().all(|p| p.is_finite()));
+}
+
+#[test]
+fn app_bar_preset_selection_is_derived_with_first_match_winning() {
+    use crate::app_bar_items::{Layout, Placement, Preset, Zone};
+    // A hidden default also proves Full independently of the all-shown default's alias.
+    for hidden_default in [false, true] {
+        let mut defaults = Layout::default();
+        defaults.items.iter_mut().find(|p| p.id == "version").unwrap().shown = !hidden_default;
+        for value in [Preset::Default, Preset::Minimal, Preset::Full, Preset::Compact] {
+            let mut current = defaults.clone();
+            current.set_preset(value, &defaults);
+            let expected = if value == Preset::Full && !hidden_default { Preset::Default } else { value };
+            assert_eq!(current.preset(&defaults), expected);
+            current.items.push(Placement { id: "future:item".into(), zone: Zone::End, shown: true });
+            assert_eq!(current.preset(&defaults), expected);
+            let before = current.clone();
+            current.set_preset(Preset::Custom, &defaults);
+            assert_eq!(current, before);
+            assert!(!current.set_shown("file", false, &defaults));
+            assert_eq!(current.preset(&defaults), expected);
+            current.move_before("file", Zone::End, None, &defaults);
+            assert_eq!(current.preset(&defaults), Preset::Custom);
+            current.set_preset(value, &defaults);
+            current.add_separator(Zone::Start, None, &defaults);
+            assert_eq!(current.preset(&defaults), Preset::Custom);
+        }
+    }
+}
+
+#[test]
+fn app_bar_edit_mode_keeps_normal_fit_and_report_version_geometry() {
+    let rig = BarRig::new(1280.0);
+    let snapshot =
+        |out: &BarOut| (out.edit_items.iter().map(|p| (p.id.clone(), p.zone, p.left, p.right, p.locked)).collect::<Vec<_>>(), out.overflow.clone());
+    rig.frame(Vec::new());
+    let before = snapshot(rig.out.borrow().as_ref().unwrap());
+    editing(&rig.ctx, true, None);
+    rig.frame(Vec::new());
+    let after = snapshot(rig.out.borrow().as_ref().unwrap());
+    assert_eq!(before, after, "edit elevation has no layout inputs");
+    assert!(after.0.iter().any(|p| p.0 == "report"));
+    assert!(after.0.iter().any(|p| p.0 == "version"));
 }
 
 #[test]
@@ -112,7 +187,7 @@ fn app_bar_tray_badges_use_the_shared_tick_and_a_neutral_lock_backing() {
         assert_eq!(badge.top(), cell.top() - 6.0);
         tray_badge(ui, cell.translate(vec2(100.0, 0.0)), true);
     });
-    assert!(output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Path(p) if p.points.len() == 3 && matches!(p.stroke.color, egui::epaint::ColorMode::Solid(ink) if ink == t.on_accent))), "the badge paints a tick, not an unresolved icon placeholder");
+    assert!(output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Path(p) if p.points.len() == 3 && matches!(p.stroke.color, egui::epaint::ColorMode::Solid(ink) if ink == tray_accent().1))), "the badge paints a tick, not an unresolved icon placeholder");
     assert!(
         output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Circle(c) if c.fill == t.control_fill.to_opaque())),
         "File's lock uses a neutral backing"
@@ -123,7 +198,7 @@ fn app_bar_tray_badges_use_the_shared_tick_and_a_neutral_lock_backing() {
 fn app_bar_file_migrates_moves_but_never_disappears() {
     use crate::app_bar_items::{Layout, Preset, Zone, can_remove};
     let defaults = Layout::default();
-    assert_eq!(defaults.items.iter().take(5).map(|p| p.id.as_str()).collect::<Vec<_>>(), ["home", "file", "save", "undo", "redo"]);
+    assert_eq!(defaults.items.iter().take(6).map(|p| p.id.as_str()).collect::<Vec<_>>(), ["documents", "home", "file", "save", "undo", "redo"]);
     let mut legacy = defaults.clone();
     legacy.items.retain(|p| p.id != "file");
     assert_eq!(Layout::from_value(&legacy.to_value(), &defaults), defaults);
@@ -167,7 +242,7 @@ fn app_bar_edit_moves_before_after_and_between_zones() {
     assert!(layout.move_before("redo", Zone::Start, Some("save"), &defaults));
     assert_eq!(
         layout.items.iter().filter(|p| p.zone == Zone::Start).map(|p| p.id.as_str()).collect::<Vec<_>>(),
-        ["home", "file", "redo", "save", "undo", "quick:solid.box"]
+        ["documents", "home", "file", "redo", "save", "undo", "quick:solid.box"]
     );
     assert!(layout.move_after("redo", "undo", &defaults));
     assert!(layout.move_before("save", Zone::End, Some("settings"), &defaults));
@@ -206,8 +281,8 @@ fn app_bar_edit_presets_and_hostile_operations_keep_sanitize_guarantees() {
         layout.set_preset(preset, &defaults);
         let shown: Vec<_> = layout.items.iter().filter(|p| p.shown).map(|p| p.id.as_str()).collect();
         match preset {
-            Preset::Minimal => assert_eq!(shown, ["file", "save", "undo", "redo", "search", "settings", "help"]),
-            Preset::Full | Preset::Default => assert!(defaults.items.iter().all(|p| shown.contains(&p.id.as_str()))),
+            Preset::Minimal => assert_eq!(shown, ["file", "save", "undo", "redo", "settings", "help"]),
+            Preset::Full | Preset::Default | Preset::Custom => assert!(defaults.items.iter().all(|p| shown.contains(&p.id.as_str()))),
             Preset::Compact => assert!(["donate", "discord", "report", "version"].iter().all(|id| !shown.contains(id))),
         }
         assert!(layout.items.iter().any(|p| p.id == "future:0" && !p.shown));
@@ -1536,7 +1611,7 @@ mod app_bar_items {
     fn defaults_match_the_actual_drawing_order() {
         let layout = Layout::default_for(["solid.box", "solid.fillet"]);
         let ids = |zone| layout.items.iter().filter(|p| p.zone == zone).map(|p| p.id.as_str()).collect::<Vec<_>>();
-        assert_eq!(ids(Zone::Start), ["home", "file", "save", "undo", "redo", "quick:solid.box", "quick:solid.fillet"]);
+        assert_eq!(ids(Zone::Start), ["documents", "home", "file", "save", "undo", "redo", "quick:solid.box", "quick:solid.fillet"]);
         assert_eq!(ids(Zone::End), ["donate", "discord", "assistant", "search", "settings", "help", "report", "version"]);
         assert!(layout.items.iter().all(|p| p.shown));
         for item in &layout.items {
@@ -1672,6 +1747,8 @@ fn app_bar_random_sanitized_layouts_never_overlap() {
         saved.items.push(Placement { id: "future:item".into(), zone: SavedZone::End, shown: true });
         saved.items.push(saved.items[0].clone());
         saved.items.remove(random() as usize % saved.items.len());
+        saved.add_separator(SavedZone::Start, None, &defaults);
+        saved.add_separator(SavedZone::End, None, &defaults);
         saved.sanitize(&defaults);
         assert!(saved.items.iter().any(|p| p.id == "file" && p.shown), "random hide/removal attempts cannot lose File");
         for width in 200..=3840 {

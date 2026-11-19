@@ -8,6 +8,8 @@ pub const MAX_ID_CHARS: usize = 100;
 /// Stable ids, independent of the measured layout engine's slot ids.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ItemId {
+    Documents,
+    Separator(u64),
     File,
     Home,
     Save,
@@ -32,6 +34,7 @@ impl ItemId {
             return None;
         }
         Some(match id {
+            "documents" => Self::Documents,
             "file" => Self::File,
             "home" => Self::Home,
             "save" => Self::Save,
@@ -46,12 +49,15 @@ impl ItemId {
             "settings" => Self::Settings,
             "help" => Self::Help,
             "version" => Self::Version,
+            _ if id.starts_with("separator:") => Self::Separator(id.strip_prefix("separator:")?.parse().ok()?),
             _ => Self::Quick(id.strip_prefix("quick:").filter(|s| !s.is_empty())?.to_string()),
         })
     }
 
     pub fn id(&self) -> String {
         match self {
+            Self::Documents => "documents".into(),
+            Self::Separator(n) => format!("separator:{n}"),
             Self::File => "file".into(),
             Self::Quick(id) => format!("quick:{id}"),
             Self::Home => "home".into(),
@@ -84,6 +90,7 @@ pub enum Preset {
     Minimal,
     Full,
     Compact,
+    Custom,
 }
 
 /// A measured hit region. Locked regions reject drops rather than shifting fixed controls.
@@ -235,6 +242,10 @@ impl Layout {
         if !self.editable(id) || (!shown && !can_remove(id)) {
             return false;
         }
+        if !shown && matches!(ItemId::parse(id), Some(ItemId::Separator(_))) {
+            self.items.retain(|p| p.id != id);
+            return true;
+        }
         if let Some(item) = self.items.iter_mut().find(|p| p.id == id) {
             let changed = item.shown != shown;
             item.shown = shown;
@@ -245,14 +256,17 @@ impl Layout {
 
     /// Presets only edit the saved list. Unknown future entries keep their state.
     pub fn set_preset(&mut self, preset: Preset, defaults: &Self) {
+        if preset == Preset::Custom {
+            return;
+        }
         self.sanitize(defaults);
-        let future: Vec<_> = self.items.iter().filter(|p| !defaults.items.iter().any(|d| d.id == p.id)).cloned().collect();
+        let future: Vec<_> = self.items.iter().filter(|p| ItemId::parse(&p.id).is_none()).cloned().collect();
         *self = defaults.clone();
         for item in &mut self.items {
             item.shown = match preset {
-                Preset::Default => item.shown,
+                Preset::Default | Preset::Custom => item.shown,
                 Preset::Full => true,
-                Preset::Minimal => matches!(item.id.as_str(), "save" | "undo" | "redo" | "search" | "settings" | "help"),
+                Preset::Minimal => matches!(item.id.as_str(), "file" | "save" | "undo" | "redo" | "settings" | "help"),
                 Preset::Compact => item.shown && !matches!(item.id.as_str(), "donate" | "discord" | "report" | "version"),
             };
         }
@@ -260,11 +274,38 @@ impl Layout {
         self.sanitize(defaults);
     }
 
+    /// Derived selection: unknown future ids do not affect a preset match.
+    pub fn preset(&self, defaults: &Self) -> Preset {
+        let mut current = self.clone();
+        current.sanitize(defaults);
+        let known = |layout: &Self| layout.items.iter().filter(|p| ItemId::parse(&p.id).is_some()).cloned().collect::<Vec<_>>();
+        for preset in [Preset::Default, Preset::Minimal, Preset::Full, Preset::Compact] {
+            let mut expected = defaults.clone();
+            expected.set_preset(preset, defaults);
+            if known(&current) == known(&expected) {
+                return preset;
+            }
+        }
+        Preset::Custom
+    }
+
+    /// Allocate a repeatable layout object without reusing any live identity.
+    pub fn add_separator(&mut self, zone: Zone, before: Option<&str>, defaults: &Self) -> Option<String> {
+        self.sanitize(defaults);
+        if self.items.len() >= MAX_ITEMS || before.is_some_and(|id| !self.items.iter().any(|p| p.id == id && p.zone == zone && self.editable(id))) {
+            return None;
+        }
+        let id = (0..=MAX_ITEMS).map(|n| format!("separator:{n}")).find(|id| !self.items.iter().any(|p| &p.id == id))?;
+        self.items.push(Placement { id: id.clone(), zone, shown: true });
+        self.move_before(&id, zone, before, defaults);
+        Some(id)
+    }
+
     /// Today's actual drawing order. Update and Managed are transient, locked slots, never
     /// placements. Legacy visibility preferences remain an additional draw-time condition.
     pub fn default_for<'a>(quick: impl IntoIterator<Item = &'a str>) -> Self {
         let mut items = Vec::new();
-        for id in ["home", "file", "save", "undo", "redo"] {
+        for id in ["documents", "home", "file", "save", "undo", "redo"] {
             items.push(Placement { id: id.into(), zone: Zone::Start, shown: true });
         }
         for id in quick.into_iter().take(24) {
@@ -290,7 +331,22 @@ impl Layout {
         let mut kept: Vec<Placement> = Vec::new();
         let mut unknown = 0;
         for p in self.items.iter().take(4096) {
-            if !placement_id(&p.id) || kept.iter().any(|k| k.id == p.id) {
+            if !placement_id(&p.id) {
+                continue;
+            }
+            let mut p = p.clone();
+            if p.id.starts_with("separator:") {
+                if let Some(ItemId::Separator(n)) = ItemId::parse(&p.id) {
+                    p.id = format!("separator:{n}");
+                }
+                if !matches!(ItemId::parse(&p.id), Some(ItemId::Separator(_))) || kept.iter().any(|k| k.id == p.id) {
+                    let Some(id) = (0..=MAX_ITEMS).map(|n| format!("separator:{n}")).find(|id| !kept.iter().any(|p| &p.id == id)) else { continue };
+                    p.id = id;
+                }
+                if !p.shown {
+                    continue;
+                }
+            } else if kept.iter().any(|k| k.id == p.id) {
                 continue;
             }
             if !known.iter().any(|k| k.id == p.id) {
@@ -299,7 +355,7 @@ impl Layout {
                 }
                 unknown += 1;
             }
-            kept.push(p.clone());
+            kept.push(p);
         }
         for (i, p) in known.iter().enumerate() {
             if kept.iter().any(|k| k.id == p.id) {

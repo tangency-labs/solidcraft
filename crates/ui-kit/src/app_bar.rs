@@ -10,111 +10,6 @@ use crate::BackingTooltipExt as _;
 use egui::{Align2, FontId, Painter, Pos2, Rect, Sense, Stroke, pos2, vec2};
 use solidcraft_theme::Tokens;
 
-/// A closed, clockwise rounded rectangle. Work is bounded even for hostile dimensions.
-pub fn rounded_rect_path(rect: Rect, radius: f32) -> Vec<Pos2> {
-    let (w, h) = (rect.width(), rect.height());
-    if !rect.is_finite() || !w.is_finite() || !h.is_finite() || w <= 0.0 || h <= 0.0 {
-        return Vec::new();
-    }
-    let radius = if radius.is_finite() { radius.max(0.0).min(w / 2.0).min(h / 2.0) } else { 0.0 };
-    if radius == 0.0 {
-        return vec![rect.left_top(), rect.right_top(), rect.right_bottom(), rect.left_bottom(), rect.left_top()];
-    }
-    let steps = (radius.ceil() as usize).clamp(4, 24);
-    let mut path = Vec::with_capacity((steps + 1) * 4 + 1);
-    for (centre, start) in [
-        (pos2(rect.right() - radius, rect.top() + radius), -std::f64::consts::FRAC_PI_2),
-        (pos2(rect.right() - radius, rect.bottom() - radius), 0.0),
-        (pos2(rect.left() + radius, rect.bottom() - radius), std::f64::consts::FRAC_PI_2),
-        (pos2(rect.left() + radius, rect.top() + radius), std::f64::consts::PI),
-    ] {
-        for i in 0..=steps {
-            let angle = start + std::f64::consts::FRAC_PI_2 * i as f64 / steps as f64;
-            path.push(pos2(
-                (f64::from(centre.x) + f64::from(radius) * angle.cos()).clamp(f64::from(rect.left()), f64::from(rect.right())) as f32,
-                (f64::from(centre.y) + f64::from(radius) * angle.sin()).clamp(f64::from(rect.top()), f64::from(rect.bottom())) as f32,
-            ));
-        }
-    }
-    if let Some(first) = path.first().copied() {
-        path.push(first);
-    }
-    path
-}
-
-/// Split a polyline without resetting the dash phase at vertices, including arc samples.
-pub fn split_dashes(path: &[Pos2], dash: f32, gap: f32) -> Vec<Vec<Pos2>> {
-    if !dash.is_finite() || dash <= 0.0 || !gap.is_finite() || gap < 0.0 {
-        return Vec::new();
-    }
-    let mut result = Vec::new();
-    let mut current = Vec::new();
-    let (mut drawing, mut remaining, mut budget) = (true, f64::from(dash), 8192usize);
-    for pair in path.windows(2).take(512) {
-        let (Some(&from), Some(&to)) = (pair.first(), pair.get(1)) else { continue };
-        if !from.is_finite() || !to.is_finite() {
-            continue;
-        }
-        let (dx, dy) = (f64::from(to.x) - f64::from(from.x), f64::from(to.y) - f64::from(from.y));
-        let length = dx.hypot(dy);
-        if length <= 1e-12 {
-            continue;
-        }
-        let mut at = 0.0;
-        while at < length && budget > 0 {
-            budget -= 1;
-            let next = (at + remaining).min(length);
-            let point =
-                |distance: f64| pos2((f64::from(from.x) + dx * (distance / length)) as f32, (f64::from(from.y) + dy * (distance / length)) as f32);
-            if drawing {
-                if current.is_empty() {
-                    current.push(point(at));
-                }
-                current.push(point(next));
-            }
-            remaining -= next - at;
-            at = next;
-            if remaining <= 1e-9 {
-                if drawing && current.len() > 1 {
-                    result.push(std::mem::take(&mut current));
-                }
-                if gap == 0.0 {
-                    drawing = true;
-                    remaining = f64::from(dash);
-                } else {
-                    drawing = !drawing;
-                    remaining = f64::from(if drawing { dash } else { gap });
-                }
-            }
-        }
-        if budget == 0 {
-            break;
-        }
-    }
-    if current.len() > 1 {
-        result.push(current);
-    }
-    result
-}
-
-/// The shared edit outline: one-pixel dashes with continuous four/three-pixel phase.
-pub fn dashed_rounded_rect(painter: &Painter, rect: Rect, radius: f32, ink: egui::Color32) {
-    painter
-        .extend(split_dashes(&rounded_rect_path(rect, radius), 4.0, 3.0).into_iter().map(|points| egui::Shape::line(points, Stroke::new(1.0, ink))));
-}
-
-/// The editing outline follows the actual button or capsule, independently of its hit target.
-pub fn item_outline(id: &str, hit: Rect) -> (Rect, f32) {
-    let height = match id {
-        "file" | "version" => 26.0,
-        "donate" | "discord" | "report" => PILL_HEIGHT,
-        _ => hit.height(),
-    };
-    let rect = Rect::from_center_size(hit.center(), vec2(hit.width(), height)).shrink(0.5);
-    let radius = if matches!(id, "donate" | "discord" | "report" | "version") { rect.height() / 2.0 } else { 7.0 };
-    (rect, radius)
-}
-
 /// Cubic ease-out from an origin to its target, with elapsed time `dt`. Invalid timing snaps;
 /// invalid positions produce a finite fallback. Double precision keeps hostile deltas finite.
 pub fn animated_step(from: f32, to: f32, dt: f32, duration: f32) -> f32 {
@@ -295,8 +190,44 @@ pub fn paint_item(ui: &mut egui::Ui, rect: Rect, control: Control<'_>, response:
     if opacity <= 0.0 {
         paint_control(ui, rect, control, response, opacity);
     } else {
-        paint_motion(ui, id, rect, |ui| paint_control(ui, rect, control, response, opacity));
+        paint_motion(ui, id, rect, |ui| {
+            movable_shadow(ui, rect, id);
+            paint_control(ui, rect, control, response, opacity);
+        });
     }
+}
+
+/// Paint-only elevation: never reserves space or changes the measured rectangle.
+pub fn movable_shadow(ui: &egui::Ui, rect: Rect, id: &str) {
+    if editing_active(ui.ctx()) && id != "overflow" && item_opacity(ui.ctx(), id) > 0.0 {
+        let t = Tokens::get();
+        let radius = if matches!(id, "donate" | "discord" | "report" | "version") { rect.height() / 2.0 } else { 7.0 };
+        let shadow = egui::Shadow { offset: [0, 2], blur: 4, spread: 0, color: t.figure_shadow.gamma_multiply(0.35) };
+        ui.painter().add(shadow.as_shape(rect, egui::CornerRadius::same(radius.min(255.0) as u8)));
+    }
+}
+
+/// Strong primary fill, rather than the softer workspace button surface.
+pub fn tray_done(ui: &mut egui::Ui, rect: Rect, label: &str) -> egui::Response {
+    let t = Tokens::get();
+    let response = ui.interact(rect, ui.scope_id().with("tray_done"), Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
+    let (fill, ink) = tray_accent();
+    ui.painter().rect_filled(rect, t.control_radius, fill);
+    ui.painter().text(rect.center(), Align2::CENTER_CENTER, label, FontId::proportional(t.font_label), ink);
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    if response.has_focus() {
+        ui.painter().rect_stroke(rect.expand(2.0), t.control_radius, Stroke::new(1.0, fill), egui::StrokeKind::Outside);
+    }
+    response
+}
+
+/// The strong primary accent used by File chrome remains distinct from muted workspace
+/// accents (for example Onyx). The requested white foreground uses the base theme's token.
+pub fn tray_accent() -> (egui::Color32, egui::Color32) {
+    (Tokens::get().file_primary_border, Tokens::dark().on_accent)
 }
 
 /// The bar's height: the window's title bar on desktop builds.
@@ -424,6 +355,8 @@ pub struct Version<'a> {
 /// One bar control's drawing, shared by its live widget, tray tile and lifted preview.
 #[derive(Clone, Copy)]
 pub enum Control<'a> {
+    Separator,
+    Documents,
     Icon { icon: &'a str, size: f32, enabled: bool },
     Command { icon: &'a str, enabled: bool },
     File { label: &'a str, enabled: bool, open: bool },
@@ -447,12 +380,12 @@ pub fn tray_badge(ui: &egui::Ui, cell: Rect, locked: bool) -> Rect {
     let t = Tokens::get();
     let radius = t.space_8;
     let badge = Rect::from_center_size(cell.right_top() + vec2(-t.space_2, t.space_2), vec2(radius * 2.0, radius * 2.0));
-    ui.painter().circle_filled(badge.center(), radius, if locked { t.control_fill.to_opaque() } else { t.accent });
+    ui.painter().circle_filled(badge.center(), radius, if locked { t.control_fill.to_opaque() } else { tray_accent().0 });
     if locked {
         ui.painter().circle_stroke(badge.center(), radius, Stroke::new(1.0, t.border));
         crate::icons::glyphs::badge(ui.painter(), badge.shrink(t.space_3), "lock", t.text);
     } else {
-        crate::checks::paint_check_glyph(ui.painter(), badge.shrink(t.space_2), false, t.on_accent);
+        crate::checks::paint_check_glyph(ui.painter(), badge.shrink(t.space_2), false, tray_accent().1);
     }
     badge
 }
@@ -485,7 +418,9 @@ pub fn item_opacity(ctx: &egui::Context, id: &str) -> f32 {
 
 /// No feature-owned lookalikes: all bar/tray painting goes through this function.
 pub fn paint_control(ui: &mut egui::Ui, rect: Rect, control: Control<'_>, response: &egui::Response, opacity: f32) {
-    ui.scope(|ui| {
+    {
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+        let ui = &mut child;
         let editing = editing_active(ui.ctx());
         if editing {
             ui.set_opacity(opacity);
@@ -496,6 +431,15 @@ pub fn paint_control(ui: &mut egui::Ui, rect: Rect, control: Control<'_>, respon
         let p = ui.painter();
         let hot = response.hovered() || response.has_focus();
         match control {
+            Control::Separator => {
+                p.vline(rect.center().x, rect.center().y - 10.0..=rect.center().y + 10.0, Stroke::new(1.0, t.app_bar_separator));
+            }
+            Control::Documents => {
+                if hot {
+                    p.rect_filled(rect, 4, t.app_bar_hover);
+                }
+                crate::icons::paint_app_bar(p, rect.shrink(4.0), "document_browser", 1.0);
+            }
             Control::Icon { icon, size, enabled } => {
                 let enabled = enabled || editing;
                 if enabled && hot {
@@ -566,20 +510,22 @@ pub fn paint_control(ui: &mut egui::Ui, rect: Rect, control: Control<'_>, respon
             }
             Control::Assistant { state, open } => crate::assistant_entry(ui, response, state, open, ui.ctx().global_style().animation_time > 0.0),
         }
-    });
+    }
 }
 
 pub fn control_size(ctx: &egui::Context, control: Control<'_>) -> egui::Vec2 {
     let t = Tokens::get();
     let text = |s: &str, size| ctx.fonts_mut(|f| f.layout_no_wrap(s.into(), FontId::proportional(size), t.app_bar_text)).size().x;
     let width = match control {
+        Control::Separator => 9.0,
+        Control::Documents => 26.0,
         Control::File { label, .. } => text(label, t.font_button) + 16.0,
         Control::Pill { data, .. } => pill_width(ctx, &data),
         Control::Report { label, labelled: true } => REPORT_TEXT_X + text(label, t.font_button) + 11.0,
         Control::Version(label) => text(label, t.font_small) + 4.0,
         _ => 32.0,
     };
-    vec2(width.max(1.0), 32.0)
+    vec2(width.max(1.0), if matches!(control, Control::Documents) { 26.0 } else { 32.0 })
 }
 
 /// Render the very same widget into a fitted cell. Lifted controls are tessellated and rotated
@@ -596,7 +542,7 @@ pub fn preview_control(ui: &mut egui::Ui, cell: Rect, control: Control<'_>, opac
         let t = Tokens::get();
         let host = crate::Container::new(ui.ctx(), crate::Surface::Window);
         let mut frame = host.frame(ui.ctx(), t.app_bar, crate::frame::Side::Left);
-        frame.stroke = Stroke::new(1.0, if warning { t.warning } else { t.accent });
+        frame.stroke = Stroke::new(1.0, if warning { t.warning } else { t.form_primary });
         host.paint_background(child.painter(), frame, native.expand(t.space_3));
     }
     let response = child.interact(native, child.scope_id().with("preview"), Sense::hover());
@@ -947,7 +893,11 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
     };
     let mut actions = Vec::new();
     if visible("logo") {
-        (data.mark)(ui.painter(), pos2(r.left() + geometry.mark, r.center().y));
+        let mut painter = ui.painter().clone();
+        if editing_active(ui.ctx()) {
+            painter.set_opacity(0.55);
+        }
+        (data.mark)(&painter, pos2(r.left() + geometry.mark, r.center().y));
     }
     if geometry.name_visible {
         ui.painter().text(
@@ -955,7 +905,7 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
             Align2::LEFT_CENTER,
             data.name,
             crate::type_face::semibold(t.font_heading),
-            t.app_bar_text,
+            if editing_active(ui.ctx()) { t.app_bar_text.gamma_multiply(0.55) } else { t.app_bar_text },
         );
     }
     let leading = geometry.leading.zip(data.leading).map(|(span, size)| rect(span, size.y));
@@ -1147,12 +1097,20 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
     edit_item("file".into(), file, false);
     edit_item("tabs".into(), Rect::from_min_max(pos2(tabs_start, r.top()), pos2(r.left() + geometry.tabs_end, r.bottom())), true);
     if let Some(br) = leading {
-        edit_item("leading".into(), br, true);
+        edit_item("documents".into(), br, false);
     }
     if let Some(br) = overflow_button {
         edit_item("more".into(), br, true);
     }
     for (item, p) in spec.items.iter().zip(&placed.placements) {
+        if item.id.starts_with("separator:")
+            && let Some(p) = p
+        {
+            let br = Rect::from_center_size(pos2(r.left() + p.x + p.width / 2.0, r.center().y), vec2(p.width, 32.0));
+            let response = ui.interact(br, ui.scope_id().with(&item.id), Sense::hover());
+            paint_item(ui, br, Control::Separator, &response, item_opacity(ui.ctx(), &item.id), &item.id);
+            edit_item(item.id.clone(), br, false);
+        }
         if matches!(item.id.as_str(), "logo" | "managed" | "offered")
             && let Some(p) = p
         {
@@ -1233,7 +1191,7 @@ pub enum ViewState {
     Normal,
     /// The design a sheet draws from changed: a hollow dot.
     SourceChanged,
-    /// The sheet was deleted (Undo restores it): a dashed outline.
+    /// The sheet was deleted (Undo restores it): a subdued outline.
     Deleted,
 }
 
@@ -1815,7 +1773,7 @@ fn menu_rows(ui: &mut egui::Ui, rows: &[TabMenuRow], keys: bool, others: bool, o
 }
 
 /// Every view as a menu row (a check mark on the shown one, a hollow dot on one whose source
-/// changed, a dashed outline on a deleted one): the place of the one chosen. Rows are published
+/// changed, a subdued outline on a deleted one): the place of the one chosen. Rows are published
 /// under `prefix` and their place.
 fn view_list(ui: &mut egui::Ui, views: &[ViewTab], prefix: &str) -> Option<usize> {
     let t = Tokens::get();
@@ -1833,7 +1791,12 @@ fn view_list(ui: &mut egui::Ui, views: &[ViewTab], prefix: &str) -> Option<usize
                 ui.painter().circle_stroke(pos2(resp.rect.right() - 32.0, resp.rect.center().y), 3.25, Stroke::new(1.5, t.warning));
             }
             ViewState::Deleted => {
-                dashed_rounded_rect(ui.painter(), resp.rect.shrink(1.0), 7.0, t.app_bar_separator.gamma_multiply(0.7));
+                ui.painter().rect_stroke(
+                    resp.rect.shrink(1.0),
+                    7,
+                    Stroke::new(1.0, t.app_bar_separator.gamma_multiply(0.7)),
+                    egui::StrokeKind::Inside,
+                );
             }
             ViewState::Normal => {}
         }
@@ -1924,7 +1887,7 @@ fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: 
         painter.rect_filled(vr, VIEW_RADIUS, t.app_bar_hover);
     }
     if deleted {
-        dashed_rounded_rect(&painter, vr.shrink(0.5), f32::from(VIEW_RADIUS), t.app_bar_separator.gamma_multiply(0.7));
+        painter.rect_stroke(vr.shrink(0.5), VIEW_RADIUS, Stroke::new(1.0, t.app_bar_separator.gamma_multiply(0.7)), egui::StrokeKind::Inside);
     }
     if resp.has_focus() {
         painter.rect_stroke(vr.expand(1.0), VIEW_RADIUS + 1, Stroke::new(2.0, t.accent), egui::StrokeKind::Outside);
@@ -2629,6 +2592,9 @@ pub fn overflow_menu(ctx: &egui::Context, rows: &[OverflowItem], button: Option<
     let menu_rows: Vec<FileRow> = rows
         .iter()
         .map(|row| {
+            if row.id.starts_with("separator:") {
+                return FileRow::Separator;
+            }
             FileRow::Item(FileItem {
                 id: format!("appbar:overflow:{}", row.id),
                 label: row.label.clone(),

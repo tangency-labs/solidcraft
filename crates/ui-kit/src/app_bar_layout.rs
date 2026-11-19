@@ -183,6 +183,9 @@ fn layout_row(spec: &Spec) -> Placed {
     let room = (width - left - right).max(0.0);
 
     let mut seen = std::collections::HashSet::new();
+    // A saved list is bounded to 64 movable objects. Application chrome has its own
+    // small allowance so a full list of separators cannot truncate File or the tabs.
+    let limit = MAX_ITEMS + if spec.application.is_some() { 8 } else { 0 };
     let mut centre_taken = false;
     let mut work: Vec<Work> = spec
         .items
@@ -198,8 +201,7 @@ fn layout_row(spec: &Spec) -> Placed {
                 *width = width.min(previous);
                 previous = *width;
             }
-            // Only the first MAX_ITEMS items take part, so `seen` stays small.
-            let taken = index < MAX_ITEMS && seen.insert(item.id.as_str());
+            let taken = index < limit && seen.insert(item.id.as_str());
             let second_centre = taken && item.zone == Zone::Centre && std::mem::replace(&mut centre_taken, true);
             let state = if taken && !second_centre { State::Placed } else { State::Out };
             Work {
@@ -616,13 +618,15 @@ pub mod application {
         let mut saved = saved.clone();
         saved.sanitize(&defaults);
         let (width, left, right) = dimensions;
-        if [SavedZone::Start, SavedZone::End].into_iter().all(|zone| {
-            saved
-                .items
-                .iter()
-                .filter(|p| p.zone == zone && defaults.items.iter().any(|d| d.id == p.id))
-                .eq(defaults.items.iter().filter(|p| p.zone == zone))
-        }) {
+        if !saved.items.iter().any(|p| p.id.starts_with("separator:"))
+            && [SavedZone::Start, SavedZone::End].into_iter().all(|zone| {
+                saved
+                    .items
+                    .iter()
+                    .filter(|p| p.zone == zone && defaults.items.iter().any(|d| d.id == p.id))
+                    .eq(defaults.items.iter().filter(|p| p.zone == zone))
+            })
+        {
             return spec(width, left, right, m);
         }
         let established = established_spec(width, left, right, m.clone());
@@ -630,6 +634,9 @@ pub mod application {
         let mut spec = fitted_spec(width, left, right, m, policy);
         let slots = std::mem::take(&mut spec.items);
         let stable = |id: &str| -> String {
+            if id == "leading" {
+                return "documents".into();
+            }
             if let Some(i) = id.strip_prefix("action:").and_then(|s| s.parse::<usize>().ok()) {
                 return action_ids.get(i).copied().unwrap_or("").to_string();
             }
@@ -647,9 +654,12 @@ pub mod application {
                 .iter()
                 .filter(move |p| p.zone == zone && p.shown)
                 .filter_map(|p| {
+                    if p.id.starts_with("separator:") {
+                        return Some(Item::new(&p.id, if zone == SavedZone::Start { Zone::Start } else { Zone::End }, &[9.0], 0));
+                    }
                     let mut item = slots
                         .iter()
-                        .find(|s| stable(&s.id) == p.id && !matches!(s.id.as_str(), "logo" | "leading" | "brand" | "tabs" | "managed" | "offered"))?
+                        .find(|s| stable(&s.id) == p.id && !matches!(s.id.as_str(), "logo" | "brand" | "tabs" | "managed" | "offered"))?
                         .clone();
                     item.zone = match zone {
                         SavedZone::Start => Zone::Start,
@@ -659,7 +669,7 @@ pub mod application {
                 })
                 .collect::<Vec<_>>()
         };
-        spec.items.extend(slots.iter().filter(|s| matches!(s.id.as_str(), "logo" | "leading")).cloned());
+        spec.items.extend(slots.iter().filter(|s| s.id == "logo").cloned());
         spec.items.extend(slots.iter().filter(|s| s.id == "brand").cloned());
         spec.items.extend(movable(SavedZone::Start));
         spec.items.extend(slots.iter().filter(|s| matches!(s.id.as_str(), "tabs" | "managed")).cloned());
