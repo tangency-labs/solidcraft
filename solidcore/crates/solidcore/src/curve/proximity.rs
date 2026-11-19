@@ -990,6 +990,47 @@ mod tests {
     use crate::math::Point3;
 
     #[test]
+    fn subnormal_split_rounding_cannot_prove_crossing_curves_disjoint() {
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::CPoint;
+
+        let k = Kernel::default();
+        let domain = Extent1d::from_min_max(0.0, 1.0);
+        let left = Extent1d::from_min_max(0.0, 0.5);
+        let crossing = Curve::from(Line::from_points(
+            Point3::new(3.0 / 10.0, 1.0 / 40.0, 0.0),
+            Point3::new(9.0 / 20.0, 1.0 / 40.0, 0.0),
+            3,
+        ));
+        for weight in [f64::from_bits(16), f64::MIN_POSITIVE, 1.0] {
+            // Equal weights define exactly (u, u/16, 0). At the smallest
+            // weight, splitting at 1/2 rounds the weighted y = 2^-1075 to zero.
+            let curve = Curve::from(BSplineCurve::from_nurb(
+                NurbCurve::new(
+                    vec![
+                        CPoint::new(0.0, 0.0, 0.0, weight),
+                        CPoint::new(weight, weight / 16.0, 0.0, weight),
+                    ],
+                    1,
+                    vec![0.0, 0.0, 1.0, 1.0],
+                )
+                .unwrap(),
+                3,
+                false,
+            ));
+            if let Some(bounds) = native_piece_box(&curve, &left) {
+                assert!(
+                    bounds.contains_point(Point3::new(0.5, 1.0 / 32.0, 0.0), 0.0),
+                    "weight {weight}: {bounds:?} misses the exact endpoint"
+                );
+            }
+            // At the stored horizontal y = fl(1/40), x = 16y is strictly inside
+            // both pieces. This is an exact intersection of the stored inputs.
+            assert!(!curve.proved_disjoint(&k, left, &crossing, domain).unwrap());
+        }
+    }
+
+    #[test]
     fn disjoint_curves_need_whole_span_separation() {
         use crate::nurbs::b_spline_curve::BSplineCurve;
         use crate::nurbs::crv_basic::Curve as NurbCurve;

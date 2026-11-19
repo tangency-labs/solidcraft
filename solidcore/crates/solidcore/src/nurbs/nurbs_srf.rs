@@ -1177,7 +1177,8 @@ pub fn srf_span_boxes(sur: &Surface) -> Option<Vec<Extent3d>> {
 ///
 /// `None`, meaning no certified box, when `sur` is not clamped, under the conditions of
 /// [`srf_span_boxes`], when the rectangle is not finite, is empty in u or v or reaches
-/// outside the natural domain, or when a split fails.
+/// outside the natural domain, when a knot-span subtraction is not finite, or when a
+/// split fails.
 ///
 /// Not upstream.
 #[must_use]
@@ -1192,7 +1193,12 @@ pub fn srf_piece_box(sur: &Surface, u: (f64, f64), v: (f64, f64)) -> Option<Exte
     let (u_first, u_last) = (*u_knots.first()?, *u_knots.last()?);
     let (v_first, v_last) = (*v_knots.first()?, *v_knots.last()?);
     let inside = |(lo, hi): (f64, f64), first: f64, last: f64| {
-        lo.is_finite() && hi.is_finite() && first <= lo && lo <= hi && hi <= last
+        lo.is_finite()
+            && hi.is_finite()
+            && (last - first).is_finite()
+            && first <= lo
+            && lo <= hi
+            && hi <= last
     };
     if !inside(u, u_first, u_last) || !inside(v, v_first, v_last) {
         return None;
@@ -1264,13 +1270,19 @@ pub struct SurfaceCover {
 }
 
 impl SurfaceCover {
-    /// The cover of `sur`, to be refined `depth` times; `None` as for [`srf_span_boxes`].
+    /// The cover of `sur`, to be refined `depth` times; `None` as for [`srf_span_boxes`],
+    /// or when either total knot-span subtraction is not finite.
     #[must_use]
     pub fn new(sur: &Surface, depth: usize) -> Option<Self> {
         let coarse = srf_span_boxes(sur)?;
         let (p, q) = sur.degrees();
         let nu = nonempty_spans(sur.u_knots(), p, sur.n())?.len();
         let nv = nonempty_spans(sur.v_knots(), q, sur.m())?.len();
+        for knots in [sur.u_knots(), sur.v_knots()] {
+            if !(knots.last()? - knots.first()?).is_finite() {
+                return None;
+            }
+        }
         let spans = (0..nu)
             .flat_map(|iu| (0..nv).map(move |iv| (iu, iv)))
             .collect();

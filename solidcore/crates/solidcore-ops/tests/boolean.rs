@@ -3185,12 +3185,88 @@ fn a_notch_beside_a_half_torus_seam_keeps_its_boundary_on_the_seam() {
                     depth,
                 );
                 let target = round_tripped(&prepared);
+                let (before, _) = target.to_record().unwrap();
+                // The outer meridian is the seam with the outer-equator endpoint.
+                // The holes' seams and the closed cavity's seam cannot reach it.
+                let meridians: Vec<_> = before
+                    .edges
+                    .iter()
+                    .filter(|edge| {
+                        edge.uses.len() == 2
+                            && edge.uses[0].face == edge.uses[1].face
+                            && edge
+                                .vertices
+                                .iter()
+                                .any(|&v| before.vertices[v as usize].point == [outer, 0.0, 0.0])
+                    })
+                    .collect();
+                assert_eq!(
+                    meridians.len(),
+                    1,
+                    "major {major} preparation {preparation}"
+                );
+                let meridian = meridians[0];
+                // These are whole-curve identities, not points sampled along it:
+                // the source meridian's definition and native form lie in y = 0.
+                let on_meridian_plane = |curve: &solidcore_record::brep::Curve| match curve {
+                    solidcore_record::brep::Curve::Circle { frame, .. }
+                    | solidcore_record::brep::Curve::Ellipse { frame, .. } => {
+                        frame.origin[1] == 0.0 && frame.x_axis[1] == 0.0 && frame.y_axis[1] == 0.0
+                    }
+                    solidcore_record::brep::Curve::Spline { points, .. } => {
+                        points.iter().all(|p| p[1] == 0.0)
+                    }
+                    solidcore_record::brep::Curve::RationalSpline { homogeneous, .. } => {
+                        homogeneous.iter().all(|p| p[1] == 0.0 && p[3] > 0.0)
+                    }
+                    _ => false,
+                };
+                assert!(on_meridian_plane(&meridian.curve), "{meridian:?}");
+                if let Some(native) = &meridian.nurbs {
+                    assert!(on_meridian_plane(native), "{native:?}");
+                }
                 let result = boolean(target, round_tripped(&notch), BooleanOp::Subtract)
                     .unwrap_or_else(|e| panic!("major {major} d {d}: {e:?}"))
                     .unwrap();
                 let report = result.check(CheckLevel::All).unwrap();
                 assert!(report.is_valid(), "major {major} d {d}: {}", report.text);
                 assert_eq!(result.solid_count().unwrap(), 1, "major {major} d {d}");
+                // The near notch corner shares the original seam vertex under
+                // the existing contact rule: its gap is strictly below d, which
+                // is at most the two vertex tolerances' sum. Thus the notch adds
+                // [1, 2, 1]. Each blind hole or closed void adds [2, 3, 2].
+                // See plan/findings/seam-boundary-review-18804.md for the derivation.
+                let counts = match preparation {
+                    1 => [9, 14, 9],
+                    2 => [5, 8, 5],
+                    _ => [3, 5, 3],
+                };
+                assert_eq!(
+                    result.counts().unwrap(),
+                    counts,
+                    "major {major} preparation {preparation} d {d}"
+                );
+                let (after, _) = result.to_record().unwrap();
+                let retained: Vec<_> = after
+                    .edges
+                    .iter()
+                    .filter(|edge| {
+                        edge.curve == meridian.curve
+                            && edge.nurbs == meridian.nurbs
+                            && edge.interval == meridian.interval
+                            && edge.vertices.map(|v| after.vertices[v as usize].point)
+                                == meridian.vertices.map(|v| before.vertices[v as usize].point)
+                    })
+                    .collect();
+                assert_eq!(
+                    retained.len(),
+                    1,
+                    "major {major} preparation {preparation} d {d}: the whole meridian changed"
+                );
+                // It remains one boundary edge used twice on the same face,
+                // with its complete original curve and parameter interval.
+                assert_eq!(retained[0].uses.len(), 2);
+                assert_eq!(retained[0].uses[0].face, retained[0].uses[1].face);
                 assert!(
                     near(volume(&result), want - prior_removed),
                     "major {major} d {d}: {} vs {}",
