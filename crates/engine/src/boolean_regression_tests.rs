@@ -2250,3 +2250,40 @@ fn two_sided_revolve_cut_tangent_to_a_bore_matches_the_other_order() {
     let got = volume(&s, "Cube");
     assert!((got - want).abs() < 1e-6 * want, "{got} vs {want}");
 }
+
+/// #18558: a boss joined to the top of an extruded closed spline outline, with its side a hair
+/// inside the outline's rim, failed SMLib's result check ("Face has partially Coincident Edges").
+/// The issue's 4 mm outline and the same outline 600 times larger, each with the boss's side
+/// 1e-4, 1e-5 and 1e-6 mm inside the rim, join into one valid body that holds both volumes.
+#[test]
+fn a_boss_a_hair_inside_a_spline_outlines_rim_joins() {
+    let outline = [[2.0, 0.0], [1.51, 1.14], [0.0, 1.35], [-1.51, 1.14], [-2.0, 0.0], [-1.31, -0.986], [0.0, -1.65], [1.31, -0.986]];
+    for scale in [1.0, 600.0] {
+        for inset in [1e-4, 1e-5, 1e-6] {
+            let points: Vec<[f64; 2]> = outline.iter().map(|[x, y]| [x * scale, y * scale]).collect();
+            let (height, radius) = (2.0 * scale, 0.145 * scale);
+            let mut s = Session::default();
+            for (command, params) in [
+                ("sketch.create", json!({"plane": "XY", "name": "Outline"})),
+                ("sketch.spline.fit_point", json!({"points": points, "periodic": true})),
+                ("sketch.finish", json!({})),
+                ("solid.extrude", json!({"sketch": "Outline", "distance": height, "operation": "new", "body_name": "Base"})),
+            ] {
+                s.execute(command, &params).unwrap_or_else(|e| panic!("{command}: {e}"));
+            }
+            let base = volume(&s, "Base");
+            let boss = json!({"diameter": 2.0 * radius, "height": 2.0 * radius, "base": [2.0 * scale - radius - inset, 0, height],
+                "axis": [0, 0, 1], "operation": "join", "targets": ["Base"]});
+            let case = format!("scale {scale}, boss side {inset} mm inside the rim");
+            s.execute("solid.cylinder", &boss).unwrap_or_else(|e| panic!("{case}: {e}"));
+            let state = s.model.state();
+            assert_eq!(state.bodies.len(), 1, "{case}");
+            let b = state.body("Base").unwrap_or_else(|| panic!("{case}: no Base"));
+            assert!(b.body.validity().is_empty(), "{case}: {:?}", b.body.validity());
+            solidcraft_kernel::check_kept(&b.body).unwrap_or_else(|e| panic!("{case}: {e}"));
+            let want = base + std::f64::consts::PI * radius * radius * 2.0 * radius;
+            let got = volume(&s, "Base");
+            assert!((got - want).abs() < 1e-6 * want, "{case}: {got} vs {want} mm³");
+        }
+    }
+}
