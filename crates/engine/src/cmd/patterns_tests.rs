@@ -1351,9 +1351,8 @@ const BOTH: [&str; 2] = ["BoxA", "BoxB"];
 
 /// Two 40 × 40 × 10 parts: BoxA in A at x −20..20, y −20..20, z 0..10, not placed, and BoxB in B
 /// at x −10..30, y −20..20, z 0..10 in its own frame, B turned `angle` degrees about Z and lifted
-/// `lift`. A root cut of x 1..7, y 5..10, sketched 5 mm above B's floor, runs down through
-/// `targets`.
-fn root_cut_into_a_placed_part(angle: f64, lift: f64, targets: &[&str]) -> Session {
+/// `lift`.
+fn placed_parts(angle: f64, lift: f64) -> Session {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "center": [0, 0, 5], "body_name": "BoxA"}));
     run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [-10, -20, 0], "operation": "new", "body_name": "BoxB"}));
@@ -1364,6 +1363,13 @@ fn root_cut_into_a_placed_part(angle: f64, lift: f64, targets: &[&str]) -> Sessi
     let turn = json!({"occurrence": "B:1", "axis": [0, 0, 1], "angle": format!("{angle} deg"), "origin": [0, 0, 0], "translate": [0, 0, lift]});
     run(&mut s, "occurrence.move", turn);
     run(&mut s, "component.capture_position", json!({}));
+    s
+}
+
+/// [`placed_parts`] and a root cut of x 1..7, y 5..10, sketched 5 mm above B's floor, down through
+/// `targets`.
+fn root_cut_into_a_placed_part(angle: f64, lift: f64, targets: &[&str]) -> Session {
+    let mut s = placed_parts(angle, lift);
     run(&mut s, "sketch.create", json!({"plane": "XY", "offset": lift + 5.0, "name": "CutSketch"}));
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [1, 5], "p1": [7, 10]}));
     run(&mut s, "sketch.finish", json!({}));
@@ -1463,6 +1469,38 @@ fn a_patterned_cut_into_a_turned_and_lifted_part_lands_at_its_world_copy() {
     assert!(rel(b, 16000.0 - 2.0 * 150.0) < 1e-9 && b_faces == 16, "{case}");
     let want = [[-6.0, 7.5, 25.0], [4.0, 7.5, 25.0]];
     assert!(b_ends.len() == 2 && b_ends.iter().zip(want).all(|((area, at), w)| rel(*area, 30.0) < 1e-9 && near(*at, w)), "{case}");
+}
+
+/// #19451: a root mirror of a hole at a root sketch's point, 5 mm into B's top where it is shown,
+/// drills the world image of the hole: bores ending at x 2 and x 8, y 7.5, z 25.
+#[test]
+fn a_mirrored_sketch_point_hole_into_a_turned_and_lifted_part_lands_at_its_world_image() {
+    let mut s = placed_parts(180.0, 20.0);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 30, "name": "HoleSketch"}));
+    run(&mut s, "sketch.point", json!({"point": [2, 7.5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "HoleSketch", "points": ["p1"], "diameter": 2, "depth": 5, "targets": ["BoxB"], "name": "Hole"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "YZ", "offset": 5, "name": "MirrorPlane"}));
+    let r = run(&mut s, "solid.mirror", json!({"features": ["Hole"], "plane": "MirrorPlane"}));
+    assert!(r["warning"].is_null(), "{r}");
+    let (b, _, ends) = pockets(&mut s, "BoxB");
+    let want = [[2.0, 7.5, 25.0], [8.0, 7.5, 25.0]];
+    assert!(rel(b, 16000.0 - 10.0 * PI) < 1e-6 && ends.len() == 2 && ends.iter().zip(want).all(|((_, at), w)| near(*at, w)), "{b} {ends:?}");
+}
+
+/// #19451: a root mirror of a root rib standing on B's top where it is shown stands there too:
+/// two walls 3 long, 2 thick and 5 tall, down from the line at z 35 to the top at z 30.
+#[test]
+fn a_mirrored_rib_on_a_turned_and_lifted_part_stands_on_it_where_it_is_shown() {
+    let mut s = placed_parts(180.0, 20.0);
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "RibSketch"}));
+    run(&mut s, "sketch.line", json!({"points": [[1, 35], [4, 35]], "ids": ["l1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.rib", json!({"sketch": "RibSketch", "curves": ["l1"], "thickness": 2, "participants": ["BoxB"], "name": "Rib"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "YZ", "offset": 5, "name": "MirrorPlane"}));
+    run(&mut s, "solid.mirror", json!({"features": ["Rib"], "plane": "MirrorPlane"}));
+    let b = pockets(&mut s, "BoxB").0;
+    assert!(rel(b, 16000.0 + 2.0 * 30.0) < 1e-9, "{b}");
 }
 
 /// A disc with an off-centre hole whose top and bottom edges are chamfered.

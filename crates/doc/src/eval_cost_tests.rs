@@ -1572,6 +1572,37 @@ fn looking_bodies_up_once_keeps_every_placement_digest() {
     }
 }
 
+/// #19451: a mirror of a cut that names a further placement's body (`Plate (Part:2)`, not in the
+/// model) reads every placement, as the cut does (#20040): moving that placement evaluates both
+/// again.
+#[test]
+fn a_mirror_of_a_cut_naming_a_further_placements_body_reads_every_placement() {
+    let mut doc = Document::new("mirror");
+    let part = doc.add_component(Some("Part"), 0).unwrap();
+    let plate = plate_with_holes(&mut doc, part, 0, 1);
+    let cut = doc.features.last().unwrap().id;
+    doc.feature_mut(cut).unwrap().participants = vec![format!("{plate} (Part:2)")];
+    let second = doc.add_occurrence(part, 0, rigid(Vec3::new(50.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0)).unwrap();
+    let kind = FeatureKind::Mirror {
+        features: vec![FeatureId(cut)],
+        plane: PlaneRef::Origin { name: "YZ".into() },
+        bodies: Vec::new(),
+        combine: false,
+        placements: Vec::new(),
+    };
+    let mirror = doc.add_feature(kind, None).unwrap();
+    let digests = |doc: &Document| {
+        let mut model = Model::new();
+        model.evaluate(doc);
+        [cut, mirror].map(|id| placement_digest(doc, doc.feature(id).unwrap(), Some(&model.state_before(id))))
+    };
+    let before = digests(&doc);
+    doc.occurrences.iter_mut().find(|o| o.id == second).unwrap().transform = rigid(Vec3::new(80.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0);
+    let after = digests(&doc);
+    assert_ne!(after[0], before[0], "the cut reads the moved placement");
+    assert_ne!(after[1], before[1], "so does its mirror");
+}
+
 /// #19451: a mirror of a root cut into a placed part cuts the part where it is placed, so it is
 /// evaluated again when that part moves, not when another does.
 #[test]
