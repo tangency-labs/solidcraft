@@ -1070,3 +1070,138 @@ fn a_squeeze_whose_neighbour_misses_a_vertex_is_refused() {
         assert!(b.edge(e).is_ok(), "far {far}: the edge stays");
     }
 }
+
+/// A 10 mm box whose front top edge, (0, 0, 10) to (10, 0, 10), is a quadratic B-spline with
+/// its middle control point `2 bow` above the edge's midpoint, in the front face's plane y = 0:
+/// the edge lies on the front face, and its height over the top face z = 10 is
+/// `4 bow t (1 - t)`, so its gap to the top face is `bow`, at its middle. Its x is `10 t`, so the
+/// top face's straight pcurve is the curve's foot at every parameter, and the front face's
+/// pcurve is the same quadratic in that plane's parameters.
+fn box_with_a_bowed_top_edge(bow: f64, tols: Tols) -> Record {
+    let corners = [
+        [0.0, 0.0, 0.0],
+        [10.0, 0.0, 0.0],
+        [10.0, 10.0, 0.0],
+        [0.0, 10.0, 0.0],
+        [0.0, 0.0, 10.0],
+        [10.0, 0.0, 10.0],
+        [10.0, 10.0, 10.0],
+        [0.0, 10.0, 10.0],
+    ];
+    let cycles: [&[usize]; 6] = [
+        &[0, 3, 2, 1],
+        &[4, 5, 6, 7],
+        &[0, 1, 5, 4],
+        &[1, 2, 6, 5],
+        &[2, 3, 7, 6],
+        &[3, 0, 4, 7],
+    ];
+    let mut rec = polyhedron(&corners, &cycles, tols);
+    let (p, q) = (corners[4], corners[5]);
+    let e = rec
+        .edges
+        .iter()
+        .position(|e| matches!(e.curve, Curve::Line { start, end } if (start, end) == (p, q) || (start, end) == (q, p)))
+        .unwrap();
+    let Curve::Line { start: a, end: b } = rec.edges[e].curve.clone() else {
+        unreachable!()
+    };
+    let middle = [
+        (a[0] + b[0]) / 2.0,
+        (a[1] + b[1]) / 2.0,
+        (a[2] + b[2]) / 2.0 + 2.0 * bow,
+    ];
+    let points = vec![a, middle, b];
+    let knots = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+    rec.edges[e].curve = Curve::Spline {
+        knots: knots.clone(),
+        points: points.clone(),
+    };
+    for u in rec.edges[e].uses.clone() {
+        let face = &mut rec.faces[u.face as usize];
+        let Surface::Plane {
+            origin,
+            u_axis,
+            v_axis,
+        } = face.surface
+        else {
+            unreachable!()
+        };
+        let uv = |p: [f64; 3]| [dot(sub(p, origin), u_axis), dot(sub(p, origin), v_axis)];
+        let normal = cross(u_axis, v_axis);
+        // on the top face (normal z) the pcurve is the straight foot; on the front face the
+        // quadratic itself
+        let pcurve = if normal[2].abs() > 0.5 {
+            Curve2::Spline {
+                knots: vec![0.0, 0.0, 1.0, 1.0],
+                points: vec![uv(a), uv(b)],
+            }
+        } else {
+            Curve2::Spline {
+                knots: knots.clone(),
+                points: points.iter().map(|&p| uv(p)).collect(),
+            }
+        };
+        // the face's domain holds the pcurve (its control points bound it)
+        if let Curve2::Spline { points, .. } = &pcurve {
+            for p in points {
+                for (range, &x) in face.domain.iter_mut().zip(p) {
+                    range[0] = range[0].min(x);
+                    range[1] = range[1].max(x);
+                }
+            }
+        }
+        let Loop::Edges { edges } = &mut face.loops[u.r#loop as usize] else {
+            unreachable!()
+        };
+        edges[u.position as usize].pcurve = pcurve;
+    }
+    rec
+}
+
+/// SMLib's healer (`Fix_TolSizes`, run by `Body::from_record(rec, false)`) gives an edge
+/// `1.1 g - 1e-5` for a sampled edge/face gap `g`. An imported edge whose gap is under the limit
+/// the pointer check holds an edge to (1000 times the body's 1e-5, `SmBrep` test 59), but over
+/// 0.91 of it, was given a tolerance the check refuses, and its end vertices with it (test 82).
+/// Its tolerance is now the certified bound of the gap, which is the bow: covered, and under the
+/// limit. Where the formula stays under the limit nothing changes, and a gap past the limit is
+/// still refused.
+#[test]
+fn an_edge_whose_gap_is_under_the_check_limit_heals_to_a_tolerance_under_it() {
+    let limit = 1000.0 * 1e-5;
+    let zone_of = |body: &Body, bow: f64| {
+        let (healed, _) = body.to_record().unwrap();
+        // the bowed edge: the one whose curve is the quadratic (a record holds twice the zone)
+        let e = healed
+            .edges
+            .iter()
+            .find(|e| matches!(&e.curve, Curve::Spline { points, .. } if points.len() == 3))
+            .unwrap_or_else(|| panic!("bow {bow}: no bowed edge in {:?}", healed.edges));
+        e.tolerance / 2.0
+    };
+
+    // 0.95 of the limit: the formula's 1.1 * 9.5e-3 - 1e-5 = 1.044e-2 is past it
+    let bow = 0.95 * limit;
+    let (body, _) = Body::from_record(&box_with_a_bowed_top_edge(bow, TOLS), false).unwrap();
+    assert_eq!(failed(&body), Vec::<u32>::new());
+    let zone = zone_of(&body, bow);
+    assert!(bow <= zone && zone < limit, "zone {zone}");
+    // the bound's own scale is a hundredth of the limit
+    assert!(zone <= bow + limit / 100.0, "zone {zone}");
+
+    // half the limit: the formula, unchanged
+    let bow = 0.5 * limit;
+    let (body, _) = Body::from_record(&box_with_a_bowed_top_edge(bow, TOLS), false).unwrap();
+    assert_eq!(failed(&body), Vec::<u32>::new());
+    let zone = zone_of(&body, bow);
+    let formula = 1.1 * bow - 1e-5;
+    assert!(
+        (zone - formula).abs() <= 1e-3 * formula,
+        "zone {zone}, formula {formula}"
+    );
+
+    // 1.05 of the limit: the gap itself is past it, and the check still refuses the edge
+    let bow = 1.05 * limit;
+    let (body, _) = Body::from_record(&box_with_a_bowed_top_edge(bow, TOLS), false).unwrap();
+    assert!(failed(&body).contains(&59), "{:?}", failed(&body));
+}

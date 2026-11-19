@@ -207,6 +207,115 @@ fn double_click_edits_a_dimensions_or_a_notes_text_in_place() {
     assert!(!crate::dim_view::editing() && crate::drawing_workspace::inspector_visible(&h.app));
 }
 
+/// The one thing selected shows its options in the right panel, where a tool shows its own, and
+/// one Esc clears the selection and the panel with it, as in a sketch. A dimension's options apply:
+/// its offset changes in one undo step.
+#[test]
+fn the_selected_object_shows_its_options_and_a_dimensions_apply() {
+    let (mut h, _) = plate_sheet();
+    let encode = solidcraft_engine::doc::ids::encode;
+    let dimension = h.app.session.drawing("drawing.inspect").unwrap().dimensions[0].id;
+    let screen = |x: f64, y: f64| {
+        let paper = crate::scenario::rect_of("sheet:paper").unwrap();
+        [paper.left() + paper.width() * x as f32 / 420.0, paper.bottom() - paper.height() * y as f32 / 297.0]
+    };
+    let read = |h: &mut Harness| h.app.run("drawing.dimension.inspect", json!({"dimension": encode(dimension)})).unwrap();
+    let corners: Vec<[f64; 2]> = serde_json::from_value(read(&mut h)["layout"]["text_boxes"][0].clone()).unwrap();
+    let (x, y) = corners.iter().fold((0.0, 0.0), |sum, p| (sum.0 + p[0] / 4.0, sum.1 + p[1] / 4.0));
+    assert!(!crate::drawing_workspace::inspector_visible(&h.app));
+
+    h.step(&json!({"click": screen(x, y)})).unwrap();
+    h.frames(4);
+    assert!(crate::drawing_workspace::inspector_visible(&h.app), "the selected dimension's options show");
+    assert_eq!(crate::drawing_workspace::inspector_title(&h.app), "Dimension");
+    let offset = read(&mut h)["record"]["offset_mm"].as_f64().unwrap();
+    let field = h.widget(&format!("{offset} mm")).expect("the Offset field shows the dimension's offset");
+    let undo = h.app.session.undo.len();
+    h.step(&json!({"click": field})).unwrap();
+    h.step(&json!({"key": "A", "cmd": true})).unwrap();
+    h.step(&json!({"text": format!("{}", offset * 2.0)})).unwrap();
+    let apply = h.widget("Apply").unwrap();
+    h.step(&json!({"click": apply})).unwrap();
+    h.frames(4);
+    assert_eq!(read(&mut h)["record"]["offset_mm"].as_f64(), Some(offset * 2.0), "Apply moves the dimension line");
+    assert_eq!(h.app.session.undo.len(), undo + 1, "in one undo step");
+    assert!(crate::drawing_workspace::inspector_visible(&h.app), "Apply keeps the panel");
+
+    // One Esc, as in a sketch: the selection goes, and its options with it.
+    h.step(&json!({"click": screen(300.0, 250.0)})).unwrap();
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(4);
+    assert!(h.app.session.selection.is_empty());
+    assert!(!crate::drawing_workspace::inspector_visible(&h.app));
+
+    // A view's options likewise; two things selected have no one panel.
+    h.step(&json!({"click": screen(140.0, 180.0)})).unwrap();
+    h.frames(4);
+    assert_eq!(crate::drawing_workspace::inspector_title(&h.app), "Edit View");
+    let corners: Vec<[f64; 2]> = serde_json::from_value(read(&mut h)["layout"]["text_boxes"][0].clone()).unwrap();
+    let (x, y) = corners.iter().fold((0.0, 0.0), |sum, p| (sum.0 + p[0] / 4.0, sum.1 + p[1] / 4.0));
+    h.step(&json!({"click": screen(x, y), "shift": true})).unwrap();
+    h.frames(4);
+    assert_eq!(h.app.session.selection.len(), 2);
+    assert!(!crate::drawing_workspace::inspector_visible(&h.app));
+
+    // A tool in hand keeps its own panel whatever is selected.
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(2);
+    assert!(crate::drawing_workspace::start(&mut h.app, "drawing.note"));
+    h.frames(2);
+    assert_eq!(crate::drawing_workspace::inspector_title(&h.app), "Note");
+    assert!(crate::drawing_workspace::placing_note(&h.app));
+}
+
+/// A double-click on a text cell of the title block edits what it shows, in the box a dimension's
+/// text is typed in: Enter keeps the text over the cell's own value in one undo step, and nothing
+/// typed shows the cell's own value again. The projection symbol's cell has no text to edit.
+#[test]
+fn double_click_edits_a_title_block_cells_text_in_place() {
+    use solidcraft_engine::geom::title_block::CellKind;
+    let (mut h, _) = plate_sheet();
+    let centre = |h: &Harness, text: bool| {
+        let drawing = h.app.session.drawing("drawing.inspect").unwrap();
+        let record = &drawing.sheets[0];
+        let (block, placed) = (record.title_block.as_ref().unwrap(), record.title_block_layout().unwrap().unwrap());
+        let at =
+            block.cells.iter().position(|cell| if text { cell.name == "title" } else { matches!(cell.kind, CellKind::ProjectionSymbol) }).unwrap();
+        let rect = placed.cells[at].rect;
+        let paper = crate::scenario::rect_of("sheet:paper").unwrap();
+        let (x, y) = ((rect.min.x + rect.max.x) / 2.0, (rect.min.y + rect.max.y) / 2.0);
+        [paper.left() + paper.width() * x as f32 / 420.0, paper.bottom() - paper.height() * y as f32 / 297.0]
+    };
+    let typed = |h: &Harness| h.app.session.drawing("drawing.inspect").unwrap().sheets[0].title_block_overrides.get("title").cloned();
+    let type_over = |h: &mut Harness, text: &str| {
+        h.step(&json!({"click": centre(h, true), "double": true})).unwrap();
+        h.frames(4);
+        assert!(crate::dim_view::editing(), "the double-click opens the box on the Title cell");
+        h.step(&json!({"key": "A", "cmd": true})).unwrap();
+        if text.is_empty() {
+            h.step(&json!({"key": "Delete"})).unwrap();
+        } else {
+            h.step(&json!({"text": text})).unwrap();
+        }
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(4);
+        assert!(!crate::dim_view::editing());
+    };
+    assert_eq!(typed(&h), None);
+    let undo = h.app.session.undo.len();
+    type_over(&mut h, "MOUNTING PLATE");
+    assert_eq!(typed(&h).as_deref(), Some("MOUNTING PLATE"));
+    assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
+    type_over(&mut h, "MOUNTING PLATE");
+    assert_eq!(h.app.session.undo.len(), undo + 1, "the same text again is no step");
+    type_over(&mut h, "");
+    assert_eq!(typed(&h), None, "nothing typed shows the cell's own value again");
+
+    h.step(&json!({"click": centre(&h, false), "double": true})).unwrap();
+    h.frames(4);
+    assert!(!crate::dim_view::editing(), "the projection symbol has no text");
+}
+
 #[test]
 fn dimension_tool_places_a_view_edge_length() {
     let (mut h, front) = plate_sheet();
@@ -320,6 +429,55 @@ fn dimension_tool_escape_drops_picks_then_the_tool() {
     assert!(!crate::drawing_workspace::placing_dimension(&h.app));
 }
 
+/// Paper millimetres (`x`, `y`) of the A3 sheet on screen.
+fn on_screen(x: f64, y: f64) -> [f32; 2] {
+    let paper = crate::scenario::rect_of("sheet:paper").unwrap();
+    [paper.left() + paper.width() * x as f32 / 420.0, paper.bottom() - paper.height() * y as f32 / 297.0]
+}
+
+/// The text centre of drawing dimension `id`, as inspect lays it out, and the whole answer.
+fn text_of(h: &mut Harness, id: u64) -> (Vec2, Value) {
+    let read = h.app.run("drawing.dimension.inspect", json!({"dimension": solidcraft_engine::doc::ids::encode(id)})).unwrap();
+    let corners: Vec<[f64; 2]> = serde_json::from_value(read["layout"]["text_boxes"][0].clone()).unwrap();
+    let centre = corners.iter().fold(Vec2::ZERO, |sum, p| sum + Vec2::new(p[0], p[1])) * 0.25;
+    (centre, read)
+}
+
+/// A placed dimension's text drags, as a sketch dimension's does: it follows the pointer by the
+/// same drag (`dim_view`), and the whole drag is one undo step.
+#[test]
+fn a_drawing_dimensions_text_drags_like_a_sketch_dimensions() {
+    let (mut h, _) = plate_sheet();
+    let id = h.app.session.drawing("drawing.inspect").unwrap().dimensions[0].id;
+    let (from, before) = text_of(&mut h, id);
+    let undo = h.app.session.undo.len();
+    h.step(&json!({"drag": [on_screen(from.x, from.y), on_screen(from.x + 15.0, from.y + 12.0)], "steps": 6})).unwrap();
+    h.frames(2);
+    assert!(crate::dim_view::dragged().is_none(), "the drag ended");
+    let (to, after) = text_of(&mut h, id);
+    assert!((to - (from + Vec2::new(15.0, 12.0))).len() < 1.0, "the text followed the pointer: {from:?} -> {to:?}\n{after}");
+    assert!(number(&after["record"]["offset_mm"]) > number(&before["record"]["offset_mm"]) + 10.0, "{before}\n{after}");
+    assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step for the whole drag");
+    h.app.run("edit.undo", json!({})).unwrap();
+    let (back, _) = text_of(&mut h, id);
+    assert!((back - from).len() < 1e-6, "undo puts it back: {from:?} {back:?}");
+}
+
+/// What the pointer is over, and what is selected, is lit in the accent colour as in a sketch,
+/// with no box round it.
+#[test]
+fn hover_lights_a_drawing_dimension_as_a_sketch_does() {
+    let (mut h, _) = plate_sheet();
+    let id = h.app.session.drawing("drawing.inspect").unwrap().dimensions[0].id;
+    let (text, _) = text_of(&mut h, id);
+    let at = on_screen(text.x, text.y);
+    h.step(&json!({"move": at})).unwrap();
+    h.frames(2);
+    let hover = &page(&mut h)["hover"];
+    assert_eq!(hover["kind"], "dimension", "{hover}");
+    assert_eq!(hover["lit"], true, "{hover}");
+}
+
 /// Frames until no view or dimension is waiting to be drawn.
 fn settle(h: &mut Harness) {
     for _ in 0..5_000 {
@@ -401,6 +559,24 @@ fn fit_sheet_keeps_the_paper_clear_of_the_ribbon_browser_and_history() {
     for (what, rect) in covers.into_iter().filter(|(_, r)| r.intersects(canvas)) {
         assert!(!paper.intersects(rect), "the paper {paper:?} is under {what} {rect:?}");
     }
+}
+
+/// A short Browser (folded, or on a small window) is wider than tall, yet lies against the left
+/// edge: the paper is framed to its right, not below it.
+#[test]
+fn fit_sheet_frames_beside_a_short_browser_not_under_it() {
+    let (mut h, _) = plate_sheet();
+    h.call("ui.resize", json!({"width": 1280, "height": 720}));
+    h.frames(6);
+    let canvas = h.app.viewport.rect.unwrap();
+    let short = Rect::from_min_size(canvas.min + vec2(8.0, 180.0), vec2(260.0, 60.0));
+    h.app.shell.browser = Some(short);
+    h.app.ui.show_browser = true;
+    h.app.run("view.home", json!({})).unwrap();
+    h.frames(4);
+    let paper = crate::scenario::rect_of("sheet:paper").unwrap();
+    assert!(!paper.intersects(short), "the paper {paper:?} is under the short Browser {short:?}");
+    assert!(paper.min.x >= short.right() - 1.0, "the paper {paper:?} is framed beside the Browser {short:?}");
 }
 
 /// Fit Sheet shows the whole sheet, and comes back after any zoom; typed and wheeled zooms stay
@@ -608,6 +784,30 @@ fn a_drawing_exports_the_same_on_a_4k_and_a_1080p_screen() {
 }
 
 /// Every choice, in either theme, stands off the stage behind it, and White is never pure white.
+/// The sheet is white paper unless another colour is chosen, in a dark theme too: Follows the
+/// theme is a choice, not the default. A setting saved while the default followed the theme
+/// (`auto`) was never chosen, and reads as White.
+#[test]
+fn the_sheet_is_white_unless_follows_the_theme_is_chosen() {
+    let t = Tokens::dark();
+    assert_eq!(crate::prefs::Prefs::default().drawing_sheet_colour, "white");
+    let default = SheetColour::parse(&crate::prefs::Prefs::default().drawing_sheet_colour).unwrap();
+    assert_eq!(default.paper(&t, true), (t.paper_white, t.paper_ink), "white paper in a dark theme");
+    assert_eq!(SheetColour::parse("auto"), Some(SheetColour::White), "the old default's name");
+    let follows = SheetColour::parse("theme").unwrap();
+    assert_eq!(follows.paper(&t, true), (t.paper_dark, t.paper_dark_ink), "chosen, it follows a dark theme");
+    assert_eq!(follows.paper(&t, false), (t.paper_white, t.paper_ink));
+    for colour in SheetColour::ALL {
+        assert_eq!(SheetColour::parse(colour.id()), Some(colour));
+    }
+
+    let (mut h, _) = plate_sheet();
+    assert_eq!(h.call("ui.prefs", json!({"drawing_sheet_colour": "theme"}))["ok"], true);
+    assert_eq!(h.call("ui.prefs", json!({"drawing_sheet_colour": "auto"}))["ok"], true, "a saved file's old name still loads");
+    h.frames(2);
+    assert_eq!(page(&mut h)["paper"], json!(hex(stage_and_paper(Tokens::get().paper_white, Tokens::get().viewport_top).1)));
+}
+
 #[test]
 fn every_sheet_colour_stands_off_the_backdrop() {
     crate::test_support::host_data();

@@ -52,8 +52,9 @@ pub enum Error {
     WallsTouch,
     /// A blend larger than its faces allow, refused with the largest size that builds it
     /// (solidcore's fit, `SolidError::FilletRefused`): the size, what it sizes, a point at the
-    /// middle of the edge it was found for, and why there is no room, when the refusal names them.
-    TooLarge { size: f64, kind: FitKind, at: Option<[f64; 3]>, why: Option<RoomReason> },
+    /// middle of the edge it was found for, a point on the limiting face, and why there is no room,
+    /// when the refusal names them.
+    TooLarge { size: f64, kind: FitKind, at: Option<[f64; 3]>, face: Option<[f64; 3]>, why: Option<RoomReason> },
     /// A corner's setback too short for its fill: solidcore's `BlendRefusal::SetbackTooShort`
     /// from the fill's test, the corner's fill not certified at the setback asked. `least` is
     /// the least setback solidcore's fill takes, `at` the corner's point when solidcore gives
@@ -125,10 +126,13 @@ impl std::fmt::Display for Error {
             Error::Ambiguous { point } => write!(f, "selection point {} is equally near to two edges or faces", point + 1),
             Error::NoRoom => write!(f, "there is no room for it: an offset leaves none inside the body, or a blend is larger than its faces allow"),
             Error::WallsTouch => write!(f, "the offset's walls would meet along a line, which leaves no solid there"),
-            Error::TooLarge { size, kind, at, why } => {
+            Error::TooLarge { size, kind, at, face, why } => {
                 write!(f, "the blend is larger than its faces allow")?;
                 if let Some([x, y, z]) = at {
                     write!(f, " at the edge at ({x:.3}, {y:.3}, {z:.3})")?;
+                }
+                if let Some([x, y, z]) = face {
+                    write!(f, ", limited by the face containing ({x:.3}, {y:.3}, {z:.3})")?;
                 }
                 if let Some(why) = why {
                     write!(f, ": {}", why.words_for(*kind))?;

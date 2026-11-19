@@ -4459,6 +4459,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             let body = |ui: &mut egui::Ui| {
                 d.sync_fillet_chain(&app.session);
                 crate::hole_presets::rows(ui, &mut d, &mut app.preferences.hole_presets, &app.session.doc, reset_scroll);
+                let can_export = !app.preferences.personal_sheet_rules.is_empty();
+                crate::sheet_rule_library::rows(ui, &mut d, &app.session.doc, can_export, reset_scroll);
                 crate::personal_sheet_rules::rows(ui, &mut d, &mut app.preferences.personal_sheet_rules, &app.session.doc, reset_scroll);
                 let (accepted, fields) = crate::ui_kit::value_fields(ctx, || dense::rows(app, ctx, &mut d, ui));
                 enter |= accepted;
@@ -4557,6 +4559,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // Each prompt draws only for its own dialog, so both run (`|`, not `||`).
     let preset_prompt = crate::hole_presets::name_prompt(ctx, &mut d, &mut app.preferences.hole_presets, &app.session.doc)
         | crate::personal_sheet_rules::name_prompt(ctx, &mut d, &mut app.preferences.personal_sheet_rules, &app.session.doc);
+    crate::sheet_rule_library::run_request(ctx, app);
     if preset_prompt {
         enter = false;
         ok = false;

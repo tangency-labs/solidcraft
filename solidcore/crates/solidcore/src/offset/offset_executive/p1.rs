@@ -3487,6 +3487,47 @@ mod tests {
         OffsetExecutive::new(OffsetOperation::SolidOffset, 0.125, 1.0e-6)
     }
 
+    #[test]
+    fn periodic_events_keep_distinct_supports_and_roots() {
+        use super::super::periodic_boundary::{record_boundary_end, BoundaryEnd};
+
+        let first = BoundaryEnd {
+            edgeuse: EdgeuseId::from_index(0),
+            vertex: VertexId::from_index(0),
+            seam: EdgeuseId::from_index(1),
+            across: EdgeuseId::from_index(2),
+            point: Vec3::new(1.0, 0.0, 0.0),
+        };
+        let other_support = BoundaryEnd {
+            across: EdgeuseId::from_index(3),
+            ..first
+        };
+        let other_root = BoundaryEnd {
+            point: Vec3::new(2.0, 0.0, 0.0),
+            ..first
+        };
+        // The other use of the same seam observes an otherwise identical event.
+        let duplicate = BoundaryEnd {
+            seam: EdgeuseId::from_index(4),
+            ..first
+        };
+        for observations in [
+            [first, other_support, other_root, duplicate],
+            [duplicate, other_root, other_support, first],
+        ] {
+            let mut events = Vec::new();
+            for event in observations {
+                record_boundary_end(&mut events, event);
+            }
+            assert_eq!(events.len(), 3);
+            for expected in [first, other_support, other_root] {
+                assert!(events.iter().any(|event| {
+                    event.across == expected.across && event.point == expected.point
+                }));
+            }
+        }
+    }
+
     fn add_use(brep: &mut Brep, min: f64, max: f64, length: f64) -> EdgeuseId {
         let mut curve = Line::from_points(Vec3::ZERO, Vec3::new(length, 0.0, 0.0), 3);
         let interval = Extent1d::from_raw(min, max);

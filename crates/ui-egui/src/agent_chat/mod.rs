@@ -185,7 +185,7 @@ fn decode_picture(bytes: &[u8]) -> Option<egui::ColorImage> {
     limits.max_image_height = Some(20_000);
     limits.max_alloc = Some(1 << 30);
     reader.limits(limits);
-    let rgba = reader.decode().ok()?.to_rgba8();
+    let rgba = solidcraft_engine::upright_image::decode_upright(reader).ok()?.0.to_rgba8();
     let size = [usize::try_from(rgba.width()).ok()?, usize::try_from(rgba.height()).ok()?];
     Some(egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw()))
 }
@@ -2126,7 +2126,10 @@ pub fn approve_always(app: &mut SolveApp, id: u64) {
     });
     if let Some(tool) = tool {
         let agent = app.agent_chat.running_id.clone();
-        agents::remember(&mut app.preferences, &agent, &tool);
+        // A batch's card holds one line per command that asked: each is remembered on its own.
+        for key in tool.lines().filter(|k| !k.is_empty()) {
+            agents::remember(&mut app.preferences, &agent, key);
+        }
     }
     approve(app, id, true);
 }
@@ -2347,7 +2350,17 @@ fn pump_tools(app: &mut SolveApp) {
         let always = agents::always_allowed(&app.preferences, &app.agent_chat.running_id, &tool);
         // Plugin runs, named tools and importers ask in every mode, alone or as a batch step.
         let plugin_run = gate::runs_plugin(&req.method, &req.params) || crate::plugins::runs_plugin_code(&app.session, &req.method, &req.params);
-        let verdict = match gate::request(&req.method, &req.params, undo_left) {
+        let judged = gate::request(&req.method, &req.params, undo_left);
+        // A question the gate asks is covered only by answers for each command that asks it (a
+        // batch's file steps by their own ids), never by an answer for some other batch.
+        let (tool, always) = if matches!(judged, gate::Verdict::Ask(_)) {
+            let keys = gate::asking_keys(&req.method, &req.params, undo_left);
+            let always = keys.iter().all(|k| agents::always_allowed(&app.preferences, &app.agent_chat.running_id, k));
+            (keys.join("\n"), always)
+        } else {
+            (tool, always)
+        };
+        let verdict = match judged {
             gate::Verdict::Ask(_) if !plugin_run && (mode == agents::Mode::All || always) => gate::Verdict::Run { change: true },
             gate::Verdict::Run { change: true } if mode == agents::Mode::Ask && !always => {
                 gate::Verdict::Ask(gate::describe(&req.method, &req.params))

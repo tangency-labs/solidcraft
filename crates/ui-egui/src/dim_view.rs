@@ -90,8 +90,12 @@ struct Edit {
 }
 
 /// What on a drawing's sheet the inline editor's text belongs to.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum SheetText {
+    /// A text cell of a sheet's title block, by the sheet and the cell's name:
+    /// `drawing.sheet.set`'s `title_block_overrides` (nothing, or the cell's own value typed back,
+    /// shows that value again).
+    TitleCell { sheet: u64, cell: String },
     /// A dimension's text: `drawing.dimension.edit`'s `override_text` (nothing, or its measured
     /// number typed back, shows the number again).
     Dimension(u64),
@@ -512,8 +516,9 @@ fn placement_preview(app: &SolveApp) -> Option<(String, DimensionDraft)> {
 
 thread_local! {
     static DRAWN: RefCell<Vec<Drawn>> = const { RefCell::new(Vec::new()) };
-    /// A text being dragged: dimension id, undo depth at the start, grab offset (sketch).
-    static DRAG: RefCell<Option<(String, usize, Vec2)>> = const { RefCell::new(None) };
+    /// A text being dragged: which dimension, undo depth at the start, grab offset (sketch, or
+    /// paper for a drawing's).
+    static DRAG: RefCell<Option<(Dragged, usize, Vec2)>> = const { RefCell::new(None) };
     static EDIT: RefCell<Option<Edit>> = const { RefCell::new(None) };
     /// Solves made for drafts so far: each preview's number, which the sketch scene is keyed on.
     static SOLVES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
@@ -731,7 +736,7 @@ pub(crate) fn edit_sheet_text(target: SheetText, title: &str, text: String, at: 
 
 /// What on a drawing's sheet the inline editor is open on, if anything.
 pub(crate) fn sheet_editing() -> Option<SheetText> {
-    EDIT.with(|e| e.borrow().as_ref().and_then(|e| e.sheet))
+    EDIT.with(|e| e.borrow().as_ref().and_then(|e| e.sheet.clone()))
 }
 
 /// The inline editor's box on a drawing's sheet (a sketch's is drawn by [`show`]).
@@ -776,6 +781,24 @@ fn change_sheet_text(app: &mut SolveApp, target: SheetText, typed: &str) -> Resu
                 let _ = app.run("edit.undo", json!({}));
             }
             changed
+        }
+        SheetText::TitleCell { sheet, cell } => {
+            // As the sheet shows the cell now, and the value a typed text hides.
+            let read = app.run("drawing.inspect", json!({}))?;
+            let shown = read["sheets"]
+                .as_array()
+                .and_then(|sheets| sheets.iter().find(|s| s["id"].as_str() == Some(encode(sheet).as_str())))
+                .and_then(|s| s["title_block_cells"].as_array()?.iter().find(|c| c["name"].as_str() == Some(cell.as_str())))
+                .cloned()
+                .unwrap_or_default();
+            if shown["text"].as_str() == Some(typed) || (typed.is_empty() && shown["value"].is_null()) {
+                return Ok(read);
+            }
+            let own = typed.is_empty() || shown["value"].as_str() == Some(typed);
+            let mut texts = serde_json::Map::new();
+            texts.insert(cell, if own { serde_json::Value::Null } else { json!(typed) });
+            app.run("drawing.sheet.set", json!({"sheet": encode(sheet), "title_block_overrides": texts}))
+                .map_err(|err| shown_error("drawing.sheet.set", &err))
         }
         SheetText::Note(id) => {
             app.run("drawing.note.edit", json!({"note": encode(id), "set": {"content": typed}})).map_err(|err| shown_error("drawing.note.edit", &err))
@@ -834,6 +857,16 @@ fn change_value(app: &mut SolveApp, param: &str, typed: &str) -> Result<serde_js
     app.run("parameters.change", json!({"name": param, "expression": expression})).map_err(|err| shown_error("parameters.change", &err))
 }
 
+/// The dimension whose text a drag moves: one drag for sketch and drawing dimensions alike, each
+/// moved by its own command, one undo step for the whole drag.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Dragged {
+    /// A sketch dimension, by its constraint id: `sketch.dimension_text`.
+    Sketch(String),
+    /// A drawing dimension, by its id: `drawing.dimension.edit` with `text_to_mm`, on paper.
+    Drawing(u64),
+}
+
 /// Start dragging the text of the dimension under `press` (true: a dimension took the drag).
 /// Its lines take it only off sketch geometry (`on_geometry`: a point or curve is under `press`).
 pub fn drag_start(app: &SolveApp, press: Pos2, press_sketch: Vec2, on_geometry: bool) -> bool {
@@ -843,8 +876,14 @@ pub fn drag_start(app: &SolveApp, press: Pos2, press_sketch: Vec2, on_geometry: 
     }) else {
         return false;
     };
-    DRAG.with(|g| *g.borrow_mut() = Some((d.id, app.session.undo.len(), d.at - press_sketch)));
+    begin_drag(app, Dragged::Sketch(d.id), d.at, press_sketch);
     true
+}
+
+/// Start dragging `dragged`'s text, which is at `text` now, from the pointer at `press` (both in
+/// the sketch's coordinates, or on paper for a drawing's).
+pub(crate) fn begin_drag(app: &SolveApp, dragged: Dragged, text: Vec2, press: Vec2) {
+    DRAG.with(|g| *g.borrow_mut() = Some((dragged, app.session.undo.len(), text - press)));
 }
 
 /// Is a dimension text being dragged?
@@ -852,12 +891,23 @@ pub fn dragging() -> bool {
     DRAG.with(|g| g.borrow().is_some())
 }
 
+/// The dimension being dragged, if any.
+pub(crate) fn dragged() -> Option<Dragged> {
+    DRAG.with(|g| g.borrow().as_ref().map(|(d, ..)| d.clone()))
+}
+
 /// Move the dragged text so it follows the pointer (at `to`, sketch coordinates); one undo
 /// step for the whole drag.
 pub fn drag_to(app: &mut SolveApp, to: Vec2) {
-    let Some((id, depth, off)) = DRAG.with(|g| g.borrow().clone()) else { return };
+    let Some((dragged, depth, off)) = DRAG.with(|g| g.borrow().clone()) else { return };
     let at = to + off;
-    if app.session.execute("sketch.dimension_text", &json!({"dimension": id, "at": [at.x, at.y]})).is_ok() {
+    let moved = match &dragged {
+        Dragged::Sketch(id) => app.session.execute("sketch.dimension_text", &json!({"dimension": id, "at": [at.x, at.y]})),
+        Dragged::Drawing(id) => app
+            .session
+            .execute("drawing.dimension.edit", &json!({"dimension": solidcraft_engine::doc::ids::encode(*id), "set": {"text_to_mm": [at.x, at.y]}})),
+    };
+    if moved.is_ok() {
         app.session.undo.truncate(depth + 1);
     }
 }
@@ -1474,7 +1524,7 @@ fn settle(app: &mut SolveApp, mut e: Edit, done: Option<bool>, escaped: bool) {
     e.fresh = e.fresh.saturating_sub(1);
     match done {
         Some(true) => {
-            let result = if let Some(target) = e.sheet {
+            let result = if let Some(target) = e.sheet.clone() {
                 change_sheet_text(app, target, &e.expr)
             } else if let Some(draft) = &e.draft {
                 if draft.valid(app) {

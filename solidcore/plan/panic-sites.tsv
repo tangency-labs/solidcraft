@@ -305,7 +305,6 @@ crates/solidcore/src/blend/fillet_executive/session/keep_features.rs	FilletSessi
 crates/solidcore/src/blend/fillet_executive/session/keep_features.rs	FilletSession::keep_features_on	with_capacity	2	open	Vec::with_capacity(2 * rim_curves.len())	
 crates/solidcore/src/blend/fillet_executive/session/keep_features.rs	FilletSession::keep_features_on	with_capacity	3	proven	Vec::with_capacity(sheet_faces.len())	sheet_faces.len(), an in-memory collection
 crates/solidcore/src/blend/fillet_executive/session/keep_features.rs	FilletSession::keep_features_on	with_capacity	4	proven	Vec::with_capacity(blended_edges.len())	blended_edges.len(), an in-memory collection
-crates/solidcore/src/blend/fillet_executive/session/outline_rims.rs	FilletSession::end_round_on_outline	with_capacity	1	proven	Vec::with_capacity(2)	constant capacity
 crates/solidcore/src/blend/fillet_executive/session/surface.rs	SessionObjects::allocate_surface_surface_solver	with_capacity	1	proven	Vec::with_capacity(2)	constant capacity
 crates/solidcore/src/blend/fillet_executive/session/two_offsets.rs	FilletSession::prepare_chamfers_along	f64::clamp	1	proven	clamp(-1.0, 1.0)	constant bounds, min <= max
 crates/solidcore/src/blend/fillet_geom/p2.rs	FilletBrep::calc_rail_rail_interpolation_with_solvers	int-rem	1	open	(index + 2) % total_edges	
@@ -350,10 +349,6 @@ crates/solidcore/src/blend/fillet_intersector/skin_bound.rs	BallFamily::radius_v
 crates/solidcore/src/blend/fillet_intersector/skin_bound.rs	BallFamily::radius_vanishes_on	f64::clamp	2	proven	clamp(lo, hi)	range is [lo, hi] with lo < hi: BallFamily::through returns None unless above(hi, lo), which a NaN fails
 crates/solidcore/src/blend/fillet_intersector/skin_bound.rs	BallFamily::through	with_capacity	1	proven	Vec::with_capacity(nodes.len())	n = nodes.len(), an existing slice (at most five balls); f64 is no larger than a Ball
 crates/solidcore/src/blend/fillet_intersector/skin_bound.rs	linear_through	Ord::clamp	1	proven	clamp(1, n.saturating_sub(1).max(1))	min 1 <= max, which is at least 1
-crates/solidcore/src/blend/fillet_outline.rs	decide	with_capacity	1	proven	Vec::with_capacity(2)	constant capacity
-crates/solidcore/src/blend/fillet_outline.rs	decide	with_capacity	2	proven	Vec::with_capacity(2)	constant capacity
-crates/solidcore/src/blend/fillet_outline.rs	decide	with_capacity	3	proven	Vec::with_capacity(2)	constant capacity
-crates/solidcore/src/blend/fillet_outline.rs	outline_supports	with_capacity	1	proven	Vec::with_capacity(2)	constant capacity
 crates/solidcore/src/blend/fillet_overflow.rs	extend	Vec::insert	1	proven	insert(0, (q, rev))	index 0 is never past the end
 crates/solidcore/src/blend/fillet_overflow.rs	twice_area	int-rem	1	proven	(p + 1) % uv.len()	inside uv.iter().enumerate(), so uv.len() > 0
 crates/solidcore/src/blend/fillet_removal.rs	relink	Vec::remove	1	proven	remove(at)	at is position() in the same Vec

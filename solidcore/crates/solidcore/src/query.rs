@@ -23,6 +23,7 @@ pub mod normal;
 pub mod point_identity;
 pub mod poly;
 pub mod poly_properties;
+pub mod seam_bound;
 pub mod tangent_edge;
 pub mod tess;
 pub mod thread_face;
