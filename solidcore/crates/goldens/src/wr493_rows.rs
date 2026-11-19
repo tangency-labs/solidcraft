@@ -913,3 +913,170 @@ fn box_w_slot_geometry_moves_only_on_the_found_spheres() {
     }
     assert!(sampled > 0, "{CASE}: no sphere face moved");
 }
+
+/// `check_brep` level 2's lines for `b`, sorted.
+fn level2(k: &mut solidcore::Kernel, b: &mut solidcore::topology::Brep) -> Vec<String> {
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+    let mut lines = check_brep(k, b, CheckLevel::Level2).unwrap().lines();
+    lines.sort();
+    lines
+}
+
+/// The level 2 lines `now` reports more often than `main` (as multisets).
+fn level2_excess(now: &[String], main: &[String]) -> Vec<String> {
+    let mut left: Vec<&String> = main.iter().collect();
+    let mut excess = Vec::new();
+    for l in now {
+        match left.iter().position(|m| *m == l) {
+            Some(i) => {
+                left.remove(i);
+            }
+            None => excess.push(l.clone()),
+        }
+    }
+    excess
+}
+
+/// Asserts that the body this branch builds reports no level 2 line, counted with its
+/// repeats, beyond those main's build (the fitted sphere put back) reports: clean where
+/// main's is clean.
+fn assert_level2_no_worse(what: &str, now: &[String], main: &[String]) {
+    eprintln!(
+        "{what}: level 2 lines now {}, main {}",
+        now.len(),
+        main.len()
+    );
+    if now != main {
+        eprintln!("{what}: now {now:#?}\nmain {main:#?}");
+    }
+    let excess = level2_excess(now, main);
+    assert!(
+        excess.is_empty(),
+        "{what}: level 2 lines beyond main's: {excess:?}"
+    );
+}
+
+/// Every body the WR-493 retirement moves passes `check_brep` level 2 wherever main's
+/// passes it, and reports nothing main's does not:
+/// - every upstream test file whose read finds a sphere (the files are swept, so no read
+///   is left out; the refit seam reports the found spheres), read as the runners read
+///   it, with and without `bRebuildUVTrimCurves`;
+/// - the result body of each moved `blend.fillet_executive_p3` case, but for the mirror
+///   pair `sphere_diff_3cylinders-e1-r0.5` / `-e4-r0.5`, whose lines swap between the two
+///   cases (asserted exactly: each reports the other's lines on main).
+///
+/// The lines main's builds already report are those of the files and of main's rounds
+/// (`Test #15`, `Test #36` and the like); this branch adds none.
+///
+/// Main's body is the same build with upstream's fitted NURB put back
+/// ([`crate::refit::with_fitted_spheres`]), which `refit::replay` shows to be main's
+/// build bit for bit.
+#[test]
+fn wr493_moved_bodies_pass_level_2() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(crate::fixtures::UPSTREAM_TEST_FILES);
+    let mut files = Vec::new();
+    let mut stack = vec![root.clone()];
+    while let Some(dir) = stack.pop() {
+        for e in std::fs::read_dir(&dir).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if p.extension().is_some_and(|x| x == "smb") {
+                files.push(p);
+            }
+        }
+    }
+    files.sort();
+    let mut found = Vec::new();
+    for path in &files {
+        let name = path.strip_prefix(&root).unwrap().display().to_string();
+        let p = path.to_str().unwrap();
+        for rebuild in [false, true] {
+            let mut k_main = crate::runner_kernel();
+            let (main, replaced) = crate::refit::with_fitted_spheres(|| {
+                crate::own_reader::read_file_rebuild(&mut k_main, p, rebuild).unwrap()
+            });
+            if replaced == 0 {
+                continue;
+            }
+            let mut k = crate::runner_kernel();
+            let now = crate::own_reader::read_file_rebuild(&mut k, p, rebuild).unwrap();
+            let what = format!("{name} rebuild {rebuild}");
+            let (mut now, mut main) = match (now, main) {
+                (Ok(n), Ok(m)) => (n, m),
+                (n, m) => {
+                    assert_eq!(n.is_ok(), m.is_ok(), "{what}: {:?} {:?}", n.err(), m.err());
+                    continue;
+                }
+            };
+            let (ln, lm) = (level2(&mut k, &mut now), level2(&mut k_main, &mut main));
+            assert_level2_no_worse(&what, &ln, &lm);
+            found.push(what);
+        }
+    }
+    eprintln!("files with a found sphere: {found:?}");
+    for f in [
+        "Fillet/box_w_slot.smb",
+        "Fillet/sphere_diff_3cylinders.smb",
+        "Fillet/sphere_plane.smb",
+        "Solids/nurb_fillet.smb",
+        "Solids/revolution_360.smb",
+        "Solids/revolution_mold.smb",
+        "sphere.smb",
+        "surf_sphere150.smb",
+    ] {
+        assert!(
+            found.iter().any(|w| w.starts_with(f)),
+            "{f}: no found sphere read"
+        );
+    }
+
+    let mut pair = Vec::new();
+    for case in [
+        "source-file-box_w_slot-all-edges",
+        "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
+        "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
+        "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1",
+        "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
+        "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
+        "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1",
+        "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5",
+        "stubs4-sphere_plane-e3-r0.5",
+        "sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1",
+        "sweep4-sphere_diff_3cylinders-all-r0.1",
+        "sweep5-sphere_diff_3cylinders-e29-r1.0",
+    ] {
+        let mut k = solidcore::Kernel::default();
+        let mut now = blend_fillet_executive_p3::result_body_of(&mut k, case);
+        let mut k_main = solidcore::Kernel::default();
+        let (mut main, replaced) = crate::refit::with_fitted_spheres(|| {
+            blend_fillet_executive_p3::result_body_of(&mut k_main, case)
+        });
+        assert!(replaced > 0, "{case}");
+        let (ln, lm) = (level2(&mut k, &mut now), level2(&mut k_main, &mut main));
+        if [E1_R05.0, E4_R05.0].contains(&case) {
+            pair.push((ln, lm));
+        } else {
+            assert_level2_no_worse(case, &ln, &lm);
+        }
+    }
+    // The mirror pair `e1-r0.5` / `e4-r0.5` swaps its round edge's end between the two
+    // cases (`sphere_diff_r05_round_end_gaps_swap_between_the_mirror_cases`), and with it
+    // two `Test #15` lines (internal coincident control points of a B-spline curve, the
+    // round's), which main reports on `e1` and this branch on `e4`: each case's lines are
+    // the other's on main, so the pair reports exactly main's lines.
+    let [(n1, m1), (n4, m4)] = <[_; 2]>::try_from(pair).unwrap();
+    assert_eq!(n1, m4, "e1-r0.5 now, e4-r0.5 on main");
+    assert_eq!(n4, m1, "e4-r0.5 now, e1-r0.5 on main");
+    let excess = level2_excess(&n4, &m4);
+    assert_eq!(excess.len(), 2, "{excess:?}");
+    assert!(
+        excess
+            .iter()
+            .all(|l| l.starts_with("SmBSplineCurve::Test #15 ")),
+        "{excess:?}"
+    );
+    assert!(level2_excess(&n1, &m1).is_empty());
+}

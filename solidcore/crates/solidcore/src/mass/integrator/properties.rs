@@ -2008,6 +2008,7 @@ pub fn brep_properties_in_box(
 ///
 /// Those of [`brep_properties_in_box`]; [`SolidError::Unsupported`] for a body with a
 /// shell vertex, whose ball is not recorded as a summand.
+#[doc(hidden)] // (for the goldens' rounding bounds; the kernel itself does not call it)
 pub fn brep_properties_in_box_terms(
     k: &Kernel,
     b: &mut Brep,
@@ -3101,6 +3102,54 @@ mod tests {
         .unwrap();
         assert_eq!(p.volume, 20_000.0, "{p:?}");
         assert_eq!(p.area, 20_800.0, "{p:?}");
+    }
+
+    /// [`brep_properties_in_box_terms`] returns [`brep_properties_in_box`]'s total bit for
+    /// bit with two summands per face use of a box, and refuses a body with a shell vertex,
+    /// whose ball it does not record.
+    #[test]
+    fn properties_terms_match_the_total_and_refuse_a_shell_vertex() {
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_box(
+            &mut k,
+            Point3::new(-3.0, 5.0, 1.0),
+            7.0,
+            2.0,
+            3.0,
+        )
+        .unwrap();
+        let bbox = crate::query::api_queries::brep_bounding_box(&k, &b, true).unwrap();
+        let store = no_attributes();
+        let attrs = PropertyAttributes {
+            store: &store,
+            key_of: &|_| ObjectKey(0),
+        };
+        let behavior = MassPropertyBehavior::default();
+        let p =
+            brep_properties_in_box(&k, &mut b, 1e-8, bbox.mid(), behavior, &attrs, &bbox).unwrap();
+        let (total, terms) =
+            brep_properties_in_box_terms(&k, &mut b, 1e-8, bbox.mid(), behavior, &attrs, &bbox)
+                .unwrap();
+        assert_eq!(total.volume.to_bits(), p.volume.to_bits());
+        assert_eq!(total.area.to_bits(), p.area.to_bits());
+        // (each of the 6 face uses, then its closure strips and corners)
+        assert_eq!(terms.len(), 12, "{terms:?}");
+        let mut sum = PreciseProperties::default();
+        for t in &terms {
+            add(&mut sum, t, 1.0);
+        }
+        assert_eq!(sum.volume.to_bits(), p.volume.to_bits());
+        assert_eq!(sum.area.to_bits(), p.area.to_bits());
+
+        crate::topology::brep::p2::make_shell_vertex_topology(&mut b, None).unwrap();
+        let refused =
+            brep_properties_in_box_terms(&k, &mut b, 1e-8, bbox.mid(), behavior, &attrs, &bbox);
+        assert!(
+            matches!(refused, Err(SolidError::Unsupported { .. })),
+            "{refused:?}"
+        );
+        // (the total alone still measures it)
+        brep_properties_in_box(&k, &mut b, 1e-8, bbox.mid(), behavior, &attrs, &bbox).unwrap();
     }
     fn no_attributes() -> AttributeStore {
         AttributeStore::default()
