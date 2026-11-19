@@ -197,9 +197,13 @@ pub struct EquationCurveResult {
     pub points: usize,
     /// The curve ends where it starts and closes smoothly there.
     pub closed: bool,
-    /// How far (mm) the spline may be from the formulas: a bound proven between its points, so
-    /// the curve is within it everywhere (#10414).
+    /// How far (mm) the spline may be from the formulas, within the tolerance: a bound proven all
+    /// along the curve when `proven`, otherwise the estimate from the formulas a quarter, a half
+    /// and three quarters of the way between its points (#10414).
     pub deviation: f64,
+    /// Whether `deviation` is proven: false when the proof didn't settle in its few milliseconds,
+    /// and the curve is built from the estimate.
+    pub proven: bool,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
     /// What it added: `{points, curves, constraints, dimensions}`.
@@ -219,9 +223,13 @@ pub struct EquationEditResult {
     pub points: usize,
     /// The curve ends where it starts and closes smoothly there.
     pub closed: bool,
-    /// How far (mm) the spline may be from the formulas: a bound proven between its points, so
-    /// the curve is within it everywhere (#10414).
+    /// How far (mm) the spline may be from the formulas, within the tolerance: a bound proven all
+    /// along the curve when `proven`, otherwise the estimate from the formulas a quarter, a half
+    /// and three quarters of the way between its points (#10414).
     pub deviation: f64,
+    /// Whether `deviation` is proven: false when the proof didn't settle in its few milliseconds,
+    /// and the curve is built from the estimate.
+    pub proven: bool,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
     /// What the edit added (the new points in between): `{points, curves, constraints, dimensions}`.
