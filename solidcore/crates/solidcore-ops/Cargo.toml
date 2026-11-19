@@ -50,6 +50,8 @@ path = "tests/round_between_crossing_cylinders.rs"
 solidcore = { path = "../solidcore" }
 solidcore-record = { path = "../solidcore-record" }
 solidcore-convert = { path = "../solidcore-convert" }
+# The hidden-line drawing's types are written out as JSON by the apps (`hlr`).
+serde = { version = "1", features = ["derive"] }
 
 [features]
 # Each ops call's kernel profile (`session::profiled`): the kernel's profiler (solidcore's
@@ -60,7 +62,6 @@ profile = ["solidcore/profile"]
 # (tests/kernel_cases.rs) and by the unit tests' corpus cases (src/test_corpus.rs).
 [dev-dependencies]
 flate2 = "1.1"
-serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 
 [lints]

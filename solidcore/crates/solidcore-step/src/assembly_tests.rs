@@ -27,6 +27,11 @@ const FACES: [([usize; 4], [f64; 3], [f64; 3]); 6] = [
 /// The box assembled, its edge from corner 0 to corner 1 written with its line running from 1
 /// to 0 while its vertices are given as (0, 1).
 fn assembled_box() -> R<(Solid, Vec<bool>)> {
+    assembled_box_as(Kind::Solid)
+}
+
+/// [`assembled_box`] finished as a record of `kind`.
+fn assembled_box_as(kind: Kind) -> R<(Solid, Vec<bool>)> {
     let mut asm = Assembly::new(1e-6, None);
     let mut vertices = Vec::new();
     for c in 0..8 {
@@ -60,7 +65,7 @@ fn assembled_box() -> R<(Solid, Vec<bool>)> {
         let plane = BSurface::Plane { origin: corner(corners[0]), u_axis, v_axis };
         faces.push((asm.add_face(f as u64, plane, vec![Bound::Edges(uses)], Some(0), true)?, true));
     }
-    Ok((asm.finish(0, "box".into(), vec![faces], Kind::Solid)?, alongs))
+    Ok((asm.finish(0, "box".into(), vec![faces], kind)?, alongs))
 }
 
 #[test]
@@ -79,6 +84,19 @@ fn a_box_assembled_from_its_parts_is_a_closed_solid_record() {
     origins.sort_unstable();
     assert_eq!(origins, vec![0, 1, 2, 3, 4, 5]);
     assert!(solid.turned.is_empty(), "no face disagrees with its loops: {:?}", solid.turned);
+}
+
+/// A solid's shell still closed when faces are left out bounds a region of its own: the
+/// material inside it where it is the outer shell, a cavity where it is a void, and a cavity
+/// still where it is a void left first because every face of the outer shell was left out.
+#[test]
+fn a_closed_shell_of_an_open_solid_keeps_its_role() {
+    for (voids, outer, void) in [(false, true, false), (true, true, false), (true, false, true)] {
+        let (solid, _) = assembled_box_as(Kind::Open { voids, outer }).unwrap();
+        assert!(solid.sheet);
+        let bounded: Vec<bool> = solid.brep.regions.iter().skip(1).map(|r| r.void).collect();
+        assert_eq!(bounded, vec![void], "voids {voids}, outer {outer}");
+    }
 }
 
 /// Two diagonal 1 × 1 × 2 lobes touch along x = y = 0, 0 <= z <= 1. A unit

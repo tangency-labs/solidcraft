@@ -13,14 +13,16 @@ use super::component::{MatrixParam, MatrixTolerance, refusal};
 use super::file::{CloudUnits, MaxPoints, OpenPath};
 use super::types::IdOrName;
 
-/// Insert a point cloud: the points of a `.ply`, `.xyz` or `.pts` file join the design as a
-/// reference to model from. They are drawn as points and never become a body; a PLY's red, green
-/// and blue become the cloud's colours, its other properties can colour and filter the points, and
-/// its edge and face elements become segments and triangles.
+/// Insert a point cloud: the points of a `.ply`, `.pcd`, `.xyz`, `.pts` or `.asc` file join the
+/// design as a reference to model from. They are drawn as points and never become a body; a PLY's
+/// red, green and blue or a PCD's packed `rgb` become the cloud's colours, the other properties of
+/// a PLY or PCD can colour and filter the points, and a PLY's edge and face elements become
+/// segments and triangles.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct PointCloudInsertParams {
-    /// The file to read: a `.ply`, `.xyz` or `.pts` file. Any other file is refused.
+    /// The file to read: a `.ply`, `.pcd`, `.xyz`, `.pts` or `.asc` file. Any other file is
+    /// refused.
     pub path: OpenPath,
     /// The cloud's name in the design. Default: the file's name without its extension, with
     /// ` (2)` and so on added when another cloud already has that name.
