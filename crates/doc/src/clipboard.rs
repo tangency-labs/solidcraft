@@ -1,7 +1,7 @@
 //! Copies of features (timeline Copy / Paste): references to sketches and features inside the
 //! copied set are moved to the copies.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::persistent_name::{Base, EdgeName, FaceName, FeatureId, Rounds, Suffix};
 use crate::{FeatureKind, PlaneRef};
@@ -210,6 +210,8 @@ pub fn clone_expression(source: &str, parameters: &BTreeMap<String, String>) -> 
 /// The occurrence IDs allocated for a component copy and the root of the copied subtree.
 pub struct ClonePlacements<'a> {
     pub occurrences: &'a BTreeMap<u64, u64>,
+    /// All occurrences of the source root definition, including the one used to author a feature.
+    pub source_roots: &'a BTreeSet<u64>,
     pub root: u64,
     pub doc: &'a crate::Document,
 }
@@ -304,8 +306,8 @@ fn remap_occurrence_path(path: &mut Vec<u64>, placements: Option<&ClonePlacement
     let placements = placements.ok_or_else(outside)?;
     let mapped = path
         .iter()
-        .skip_while(|id| !placements.occurrences.contains_key(id))
-        .map(|id| placements.occurrences.get(id).copied())
+        .map(|id| if placements.source_roots.contains(id) { Some(placements.root) } else { placements.occurrences.get(id).copied() })
+        .skip_while(Option::is_none)
         .collect::<Option<Vec<_>>>()
         .filter(|path| !path.is_empty())
         .ok_or_else(outside)?;

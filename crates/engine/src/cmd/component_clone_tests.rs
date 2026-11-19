@@ -1021,7 +1021,7 @@ fn pasted_coil_and_datum_keep_the_selected_ancestor_occurrences() {
     use solidcraft_doc::construct::{AxisDef, GeoRef};
     use solidcraft_doc::{AxisRef, FeatureKind};
 
-    for (repeated, different_parent) in [(false, false), (true, false), (true, true)] {
+    for (repeated, different_parent, second_assembly) in [(false, false, false), (true, false, false), (true, true, false), (true, false, true)] {
         let mut s = Session::default();
         let assembly = component(&mut s, "Assembly");
         let assembly_occ = s.doc.occurrence_of(assembly).unwrap().id;
@@ -1051,6 +1051,12 @@ fn pasted_coil_and_datum_keep_the_selected_ancestor_occurrences() {
             let target_occ = s.doc.occurrence_of(target).unwrap().id;
             let cloned = run(&mut s, "component.paste_new", json!({"component":assembly,"parent":target,"translate":[20,0,0]}));
             (cloned, vec![target_occ])
+        } else if second_assembly {
+            let source = run(&mut s, "occurrence.copy", json!({"component":assembly,"parent":0,"translate":[0,35,0]}));
+            let occurrence = source["occurrence"].as_u64().unwrap();
+            let cloned =
+                run(&mut s, "component.paste_new", json!({"component":assembly,"occurrence":occurrence,"path":[occurrence],"translate":[20,0,0]}));
+            (cloned, Vec::new())
         } else {
             (copy(&mut s, assembly), Vec::new())
         };

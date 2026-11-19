@@ -515,6 +515,7 @@ pub(super) fn build(
             }
         }
     }
+    let source_roots = source.occurrences.iter().filter(|o| o.component == component).map(|o| o.id).collect();
     for old in &feats {
         let mut f = old.clone();
         f.id = *features.get(&old.id).ok_or_else(|| bad(CMD, "missing feature mapping"))?;
@@ -527,7 +528,8 @@ pub(super) fn build(
         } else if f.body_names.is_empty() {
             f.body_names = outputs.get(&old.id).cloned().unwrap_or_default();
         }
-        let placements = solidcraft_doc::ClonePlacements { occurrences: &occurrences, root: root_occurrence, doc: &scratch.doc };
+        let placements =
+            solidcraft_doc::ClonePlacements { occurrences: &occurrences, source_roots: &source_roots, root: root_occurrence, doc: &scratch.doc };
         f.remap_clone(&features, &names, &bodies, &parameters, Some(&placements))?;
         for (name, original) in f.face_names.iter_mut().chain(&mut f.edge_names).zip(old.face_names.iter().chain(&old.edge_names)) {
             *name = solidcraft_doc::remap_topology_faces(original, &features, &bodies, &frozen_faces)?;

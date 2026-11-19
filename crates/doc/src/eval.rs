@@ -697,10 +697,24 @@ fn fillet_fitted(
     fit: crate::FilletFit,
     turn: kernel::FilletTurn,
 ) -> std::result::Result<(kernel::Body, Option<Vec<f64>>, Vec<Vec3>), kernel::KernelError> {
+    #[cfg(test)]
+    cost_tests::count(|c| c.blends += 1);
     match kernel::fillet_removing(body, edges, r, turn) {
         Ok((b, gone)) => Ok((b, None, gone)),
+        // A refusal the kernel could not size names no radius to try, and the search for the
+        // largest radius that fits cannot be guided by it: it then halves the radius from the
+        // middle down and blends every edge again for each of the sizes it tries. On the design
+        // of #4282 (a cube with a hole through each axis, a 2 mm round of every edge) those ten
+        // blends of the forty-one edges took 77 s, fifteen times the blend that failed, and they
+        // found nothing: the round fails at any radius there. The refusal is reported as the
+        // kernel stated it.
+        Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Exact && kernel::named_fit(&why).is_none() => {
+            Err(kernel::KernelError::TooLarge(why))
+        }
         Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Exact => Err({
             let hint = kernel::named_fit(&why);
+            #[cfg(test)]
+            cost_tests::count(|c| c.fit_searches += 1);
             with_largest_fit(why, "radius", || kernel::fillet_max_why(body, edges, r, turn, hint))
         }),
         Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Reduce => match kernel::fillet_max_each(body, edges, r, turn)? {
@@ -8553,10 +8567,11 @@ fn feature_tools_with_constructor(
             profiles,
             ..
         } => {
-            let line_from_world = |origin, direction| {
-                let inverse = crate::mat_inverse(&doc.component_transform(f.component))
-                    .ok_or_else(|| DocError::Invalid("the feature's component frame is invalid".into()))?;
-                Ok::<_, DocError>((crate::apply_point(&inverse, origin), crate::apply_vector(&inverse, direction)))
+            let line_from_world = |origin: Vec3, direction: Vec3| {
+                let (origin, direction) =
+                    solidcore_ops::affine::line_in_frame(&doc.component_transform(f.component), origin.into(), direction.into())
+                        .map_err(|_| DocError::Invalid("the feature's component frame is invalid".into()))?;
+                Ok::<_, DocError>((Vec3::from(origin), Vec3::from(direction)))
             };
             let (base, direction) = match axis_ref {
                 Some(AxisRef::Construction { name }) => construction_axis_in(Some(doc), st, name, f.component)?,

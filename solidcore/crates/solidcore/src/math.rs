@@ -549,6 +549,15 @@ impl Transform {
         )
     }
 
+    /// Map a point on a line and its direction. Translation affects only the point.
+    #[must_use]
+    pub fn transform_line(&self, point: Point3, direction: Vec3) -> (Point3, Vec3) {
+        (
+            self.transform_point(point),
+            self.transform_vector(direction),
+        )
+    }
+
     /// Not upstream: how far the linear part of this map (its rows 0 to 2, no translation) takes
     /// the point `pivot` from where it was, as the move it adds to the map's turn about `pivot`:
     /// `pivot - transform_vector(pivot)`. A turn about the origin followed by this move is the
