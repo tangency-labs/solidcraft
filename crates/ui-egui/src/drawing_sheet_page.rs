@@ -950,13 +950,31 @@ impl Marks {
     /// The marks of the objects in `lit` again, over the sheet, in `accent`: a hovered or selected
     /// object, as a sketch shows its hovered and selected dimensions and curves, with no box round it.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn paint_lit(&self, painter: &egui::Painter, at: &OnScreen, visible: Aabb2, ppp: f32, pictures: &PictureTextures, lit: &[u64], accent: Color32) {
+    pub(crate) fn paint_lit(
+        &self,
+        painter: &egui::Painter,
+        at: &OnScreen,
+        visible: Aabb2,
+        ppp: f32,
+        pictures: &PictureTextures,
+        lit: &[u64],
+        accent: Color32,
+    ) {
         self.paint_some(painter, at, visible, accent, ppp, pictures, Some(lit));
     }
 
     /// Every mark, or with `only` the marks of those objects, in `ink`.
     #[allow(clippy::too_many_arguments)]
-    fn paint_some(&self, painter: &egui::Painter, at: &OnScreen, visible: Aabb2, ink: Color32, ppp: f32, pictures: &PictureTextures, only: Option<&[u64]>) {
+    fn paint_some(
+        &self,
+        painter: &egui::Painter,
+        at: &OnScreen,
+        visible: Aabb2,
+        ink: Color32,
+        ppp: f32,
+        pictures: &PictureTextures,
+        only: Option<&[u64]>,
+    ) {
         let hair = 1.0 / ppp.max(0.1);
         let mut mesh = egui::Mesh::default();
         for (index, mark) in self.marks.iter().enumerate() {

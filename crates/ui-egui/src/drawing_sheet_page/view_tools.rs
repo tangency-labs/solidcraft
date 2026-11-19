@@ -8,7 +8,7 @@ use solidcraft_engine::{
     Sel,
     doc::{drawing::Drawing, ids::encode},
     drawing_scene::{self, SheetObject},
-    geom::{Aabb2, paper::ObjectKind},
+    geom::paper::ObjectKind,
 };
 use solidcraft_theme::Tokens;
 

@@ -903,10 +903,9 @@ pub fn drag_to(app: &mut SolveApp, to: Vec2) {
     let at = to + off;
     let moved = match &dragged {
         Dragged::Sketch(id) => app.session.execute("sketch.dimension_text", &json!({"dimension": id, "at": [at.x, at.y]})),
-        Dragged::Drawing(id) => app.session.execute(
-            "drawing.dimension.edit",
-            &json!({"dimension": solidcraft_engine::doc::ids::encode(*id), "set": {"text_to_mm": [at.x, at.y]}}),
-        ),
+        Dragged::Drawing(id) => app
+            .session
+            .execute("drawing.dimension.edit", &json!({"dimension": solidcraft_engine::doc::ids::encode(*id), "set": {"text_to_mm": [at.x, at.y]}})),
     };
     if moved.is_ok() {
         app.session.undo.truncate(depth + 1);
