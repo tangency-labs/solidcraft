@@ -932,6 +932,14 @@ fn member_locate<'de, D: Deserializer<'de>>(d: D) -> Result<Option<[f64; 2]>, D:
     Ok(Some([x, y]))
 }
 
+fn member_locate_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"anyOf": [
+        {"type": "null"},
+        {"type": "array", "minItems": 2, "maxItems": 2,
+         "items": {"type": "number", "minimum": -frame::MAX_PROFILE_SIZE, "maximum": frame::MAX_PROFILE_SIZE}}
+    ]})
+}
+
 /// One group's explicit lines and independent placement, in the feature's shared section.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -944,7 +952,7 @@ pub struct MemberGroupParams {
     /// The profile point on each line, [x, y] in mm from the profile's own origin. Takes
     /// precedence over `anchor`.
     #[serde(default, deserialize_with = "member_locate")]
-    #[schemars(with = "Option<[f64; 2]>")]
+    #[schemars(schema_with = "member_locate_schema")]
     pub locate: Option<[f64; 2]>,
     /// The profile's rotation about each line. Default: zero.
     #[serde(default)]
@@ -1247,8 +1255,9 @@ impl<'de> Deserialize<'de> for FrameMemberParams {
         let mut value = Value::deserialize(d)?;
         if let Some(keys) = value.as_object_mut() {
             if keys.get("groups").is_some_and(|groups| !groups.is_null())
-                && let Some(key) =
-                    ["lines", "anchor", "locate", "angle", "mirror", "body_name"].iter().find(|key| keys.get(**key).is_some_and(|v| !v.is_null()))
+                && let Some(key) = ["lines", "anchor", "locate", "angle", "mirror", "body_name", "continuous"]
+                    .iter()
+                    .find(|key| keys.get(**key).is_some_and(|v| !v.is_null()))
             {
                 return Err(D::Error::custom(whole(format!("give `{key}` in each of `groups`, not beside them"))));
             }

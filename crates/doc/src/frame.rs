@@ -943,7 +943,8 @@ pub fn placed(region: &Region2, anchor: Vec2, at: Vec2, angle: f64) -> Region2 {
 }
 
 /// One group of a frame member feature: lines whose members share a placement on the profile
-/// (#4003). Per-group finishing, such as how the group's corners are treated, belongs here too.
+/// (#4003). This records placement; joined finishing across several groups is explicitly
+/// unsupported until its per-group joint rules are defined.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 pub struct MemberGroup {
     /// The lines, by curve id; none (only in a feature's single group): every straight line drawn

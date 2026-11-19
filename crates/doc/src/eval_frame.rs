@@ -39,7 +39,9 @@ const STRAIGHT_TOL: f64 = 1e-3;
 /// ([`pieces_by_line`]).
 pub(super) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
     if let Some(groups) = frame::group_features(f)? {
-        let FeatureKind::FrameMember { profile, names, .. } = &f.kind else { return Ok(()) };
+        let FeatureKind::FrameMember { profile, names, .. } = &f.kind else {
+            return Err(DocError::Invalid("not a frame member feature".into()));
+        };
         let (ids, _) = member_parts(st, &f.kind)?;
         let default = profile_regions(vals, st, profile)?.1;
         let bases = group_bases(&f.kind, &default, ids.len());

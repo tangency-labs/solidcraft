@@ -779,6 +779,35 @@ fn groups_are_in_the_contract_and_run_in_strict_mode() {
 }
 
 #[test]
+fn the_group_contract_retains_flat_corner_and_pair_options_and_refuses_joined_groups() {
+    let schema = input_schema_for::<FrameMemberParams>();
+    let valid = |p: &Value| conforms(schema.as_value(), schema.as_value(), p);
+    let groups = json!([{"lines": ["a"]}, {"lines": ["b"]}]);
+    assert!(valid(&json!({"sketch": 1, "profile": tube(), "groups": groups, "corner": "none"})));
+    for extra in [
+        json!({"corner": "auto"}),
+        json!({"corner": "butt"}),
+        json!({"fit_ends": true}),
+        json!({"coped": true}),
+        json!({"flip": true}),
+        json!({"gap": "0 mm"}),
+        json!({"pairs": [{"a": {"type": "origin"}, "b": {"vertex": [0, 0, 10]}}]}),
+    ] {
+        let mut p = json!({"sketch": 1, "profile": tube(), "groups": groups});
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        assert!(!valid(&p), "{p}");
+    }
+    // Main's normal sketch-or-pairs and profile alternatives remain in allOf.
+    assert!(valid(
+        &json!({"profile": tube(), "pairs": [{"a": {"type": "origin"}, "b": {"vertex": [0, 0, 10]}}], "corner": "auto", "fit_ends": true, "coped": true, "gap": "2 mm"})
+    ));
+    assert!(valid(&json!({"sketch": 1, "profile": tube(), "groups": [{"lines": ["a"]}], "corner": "auto"})));
+    assert!(!valid(&json!({"profile": tube(), "groups": groups})));
+    assert!(!valid(&json!({"sketch": 1, "groups": groups})));
+    assert!(!valid(&json!({"sketch": 1, "profile": tube(), "profile_sketch": 2, "groups": groups})));
+}
+
+#[test]
 fn the_group_schema_requires_lines_and_refuses_mixed_placement() {
     let schema = input_schema_for::<FrameMemberParams>();
     for (extra, takes) in [
@@ -797,12 +826,19 @@ fn the_group_schema_requires_lines_and_refuses_mixed_placement() {
         (json!({"groups": [{"lines": ["l1"]}], "angle": "90 deg"}), false),
         (json!({"groups": [{"lines": ["l1"]}], "lines": ["l2"]}), false),
         (json!({"groups": [{"lines": ["l1"]}], "mirror": false}), false),
+        (json!({"groups": [{"lines": ["l1"]}], "continuous": true}), false),
+        (json!({"groups": [{"lines": ["l1"]}], "continuous": false}), false),
         (json!({"groups": [{"lines": ["l1"]}], "anchor": "origin"}), false),
         (json!({"groups": [{"lines": ["l1"]}], "body_name": "Rail"}), false),
         (json!({"groups": [{"lines": ["l1"]}], "locate": [0, 0]}), false),
         (json!({"groups": [{"lines": ["l1"], "locate": [10, 5]}]}), true),
         (json!({"groups": [{"lines": ["l1"], "locate": null}]}), true),
         (json!({"groups": [{"lines": ["l1"], "locate": [frame::MAX_PROFILE_SIZE, -frame::MAX_PROFILE_SIZE]}]}), true),
+        (json!({"groups": [{"lines": ["l1"], "locate": [-frame::MAX_PROFILE_SIZE, frame::MAX_PROFILE_SIZE]}]}), true),
+        (json!({"groups": [{"lines": ["l1"], "locate": [frame::MAX_PROFILE_SIZE + 1.0, 0]}]}), false),
+        (json!({"groups": [{"lines": ["l1"], "locate": [-frame::MAX_PROFILE_SIZE - 1.0, 0]}]}), false),
+        (json!({"groups": [{"lines": ["l1"], "locate": [0, frame::MAX_PROFILE_SIZE + 1.0]}]}), false),
+        (json!({"groups": [{"lines": ["l1"], "locate": [0, -frame::MAX_PROFILE_SIZE - 1.0]}]}), false),
         (json!({"groups": [{"lines": ["l1"], "locate": [10]}]}), false),
         (json!({"groups": [{"lines": ["l1"], "locate": [0, 0, 0]}]}), false),
         (json!({"groups": [{"lines": ["l1"]}], "angle": null, "mirror": null}), true),

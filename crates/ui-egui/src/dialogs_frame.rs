@@ -1259,8 +1259,11 @@ pub fn commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<Str
     {
         return Err("not supported yet: frame member groups with joined corners; use corner none without corner overrides".into());
     }
-    if m.flip || m.coped || !m.gap.trim().is_empty() {
+    if m.flip || m.coped || !m.gap.trim().is_empty() || extra.get("fit_ends").and_then(Value::as_bool) == Some(true) {
         return Err("not supported yet: frame member groups with finishing options; use separate Frame Members for finishing".into());
+    }
+    if extra.get("pairs").and_then(Value::as_array).is_some_and(|a| !a.is_empty()) {
+        return Err("not supported yet: frame member groups with point pairs; use a separate Frame Member for pairs".into());
     }
     let mut common: Option<Value> = None;
     let mut grouped = Vec::new();
@@ -1647,12 +1650,22 @@ pub fn for_feature(app: &SolveApp, feature: &solidcraft_engine::doc::Feature) ->
     }
     if !groups.is_empty() {
         let path = path_sketch.as_ref()?;
+        // Keep unsupported saved settings visible to command validation rather than dropping
+        // them when the shown group's line picks replace the flat path input.
+        if !pairs.is_empty() {
+            extra.insert("pairs".into(), json!(pairs));
+            extra.insert("next_pair".into(), json!(next_pair));
+        }
+        if *fit_ends {
+            extra.insert("fit_ends".into(), json!(true));
+        }
         m.groups = groups
             .iter()
             .map(|g| {
                 let value = serde_json::to_value(g.anchor).ok();
+                let ids = if g.lines.is_empty() { frame::member_line_ids(&st, kind).unwrap_or_default() } else { g.lines.clone() };
                 Group {
-                    lines: g.lines.iter().map(|id| Sel::ExternalSketchCurve { sketch: path.0, id: id.clone() }).collect(),
+                    lines: ids.into_iter().map(|id| Sel::ExternalSketchCurve { sketch: path.0, id }).collect(),
                     anchor: ANCHORS.iter().position(|(a, _)| value.as_ref().and_then(Value::as_str) == Some(*a)).unwrap_or(0),
                     locate: g.locate,
                     angle: g.angle.as_deref().map(|a| shown_expr(a, ValueKind::Angle)).unwrap_or_default(),
@@ -1662,7 +1675,7 @@ pub fn for_feature(app: &SolveApp, feature: &solidcraft_engine::doc::Feature) ->
             })
             .collect();
         m.current = usize::MAX;
-        m.all = false;
+        m.all = matches!(groups.as_slice(), [one] if one.lines.is_empty());
         m.show(0, &mut inputs);
         extra.remove("locate");
     }

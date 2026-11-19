@@ -39,13 +39,19 @@ the selected body (or the last body of the active component).
   dimensions follow; optional ones left empty take their defaults.
 - **Corner Type**, **Flip** and **Corner Overrides** cut the members where two of them meet, as
   under Corners below, and **Gap** leaves a weld gap at each welded end (see Multi-trim and the weld
-  gap). A new Frame Member starts on Auto (see Auto below); the command's own default stays None.
+  gap). A new Frame Member and the command both start on None.
 - **Anchor**, **Angle** and **Mirror** place the section on each line, as below. **Name** names
   the members (default: after the profile).
 - **Groups**: one feature can lay several groups of lines in the same profile, each with its own
   lines, **Anchor**, **Angle**, **Mirror** and **Name** (uprights turned one way, rails another).
   **New Group** starts an empty group and shows it; click a group to show and edit it, **Remove
   Group** removes the one shown. A line belongs to one group only.
+  Several groups currently require **None**, with no corner overrides, point pairs, **Flip**,
+  **Fit Ends**, **Coped** or weld gap. Unsupported combinations report an error and keep the
+  selected settings; they are not silently dropped. Use separate Frame Members for joined
+  corners or point pairs. A single group uses the normal flat form and retains all corner,
+  pair and finishing options. Later flat frames can fit their ends to earlier grouped members,
+  using each group's actual anchor, mirror and rotation.
 - The preview shows the members as you change the values. **Edit Feature** reopens the dialog with
   the feature's values; the members keep their names through the edit, and a new **Name**
   renames them all. A member made with a whole profile sketch keeps it (the **Section** row shows

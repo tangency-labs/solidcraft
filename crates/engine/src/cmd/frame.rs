@@ -353,7 +353,7 @@ fn member_pairs(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<MemberPair>, u
 
 /// The keys of one group of members, given beside `profile` for a feature's single group or in
 /// each of its `groups`.
-const GROUP_KEYS: [&str; 6] = ["lines", "anchor", "locate", "angle", "mirror", "body_name"];
+const GROUP_KEYS: [&str; 7] = ["lines", "anchor", "locate", "angle", "mirror", "body_name", "continuous"];
 
 /// One group of members as `p` (the command's parameters, or one of its `groups`) gives it; `at`
 /// names the group in errors, and a group of several must list its lines.

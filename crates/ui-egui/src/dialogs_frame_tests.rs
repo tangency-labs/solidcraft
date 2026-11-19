@@ -2913,3 +2913,29 @@ fn removing_the_shown_group_keeps_its_neighbours_values() {
     run_all(&mut app, c);
     assert_eq!(body_names(&app), ["Kept"]);
 }
+
+#[test]
+fn adding_groups_refuses_joined_corners_without_resetting_flat_frame_controls() {
+    let mut app = frame_app();
+    let lines = frame_lines(&app);
+    let mut d = dialog_on(&mut app, &lines[..1]);
+    let Kind::Frame(m) = &mut d.kind else { panic!("not a frame member") };
+    m.corner = corner_type("auto");
+    m.coped = true;
+    m.gap = "2 mm".into();
+    m.add_group(&mut d.inputs);
+    let err = apply_commands(&app, &d).unwrap_err();
+    assert!(err.contains("not supported yet: frame member groups with joined corners"), "{err}");
+    let Kind::Frame(m) = &mut d.kind else { panic!("not a frame member") };
+    assert_eq!(m.corner, corner_type("auto"));
+    assert!(m.coped);
+    assert_eq!(m.gap, "2 mm");
+    m.remove_group(&mut d.inputs);
+    let commands = apply_commands(&app, &d).unwrap();
+    let p = &commands[0].1;
+    assert!(p.get("groups").is_none());
+    assert_eq!(p["corner"], "auto");
+    assert_eq!(p["coped"], true);
+    assert_eq!(p["gap"], "2 mm");
+    assert_eq!(p["fit_ends"], true);
+}

@@ -6739,6 +6739,223 @@ fn bad_groups_are_refused() {
     assert!(bodies(&mut s).is_empty(), "nothing was made");
 }
 
+#[test]
+fn groups_refuse_flat_continuous_even_without_parameter_checks() {
+    for level in [crate::schema::ParamCheck::Off, crate::schema::ParamCheck::Warn, crate::schema::ParamCheck::Strict] {
+        let mut s = Session { param_check: level, ..Session::default() };
+        rectangle_frame(&mut s);
+        let (rails, posts) = rails_and_posts(&s);
+        let before = s.doc.to_json();
+        for continuous in [json!(true), json!(false), json!(0), json!("yes")] {
+            let mut p = grouped(&rails, &posts);
+            p["continuous"] = continuous;
+            let err = s.execute("frame.member", &p).unwrap_err().to_string();
+            let placement_error = "give `continuous` in each of `groups`, not beside them";
+            let expected = if level == crate::schema::ParamCheck::Strict { "unknown key `continuous`" } else { placement_error };
+            assert!(err.contains(expected), "{p}: {err}");
+            assert!(crate::schema::issues("frame.member", &p).iter().any(|i| i.message == placement_error));
+            assert_eq!(s.doc.to_json(), before, "a refused call changes nothing");
+        }
+        // The handler still treats null as absent. Until continuous is supported, the normal
+        // unknown-key policy in Strict mode remains unchanged.
+        if level == crate::schema::ParamCheck::Off {
+            let mut p = grouped(&rails, &posts);
+            p["continuous"] = Value::Null;
+            run(&mut s, "frame.member", p);
+        }
+    }
+}
+
+#[test]
+fn groups_refuse_unsupported_finishing_and_pairs_without_changing_the_design() {
+    for level in [crate::schema::ParamCheck::Off, crate::schema::ParamCheck::Warn, crate::schema::ParamCheck::Strict] {
+        let mut s = Session { param_check: level, ..Session::default() };
+        rectangle_frame(&mut s);
+        let (rails, posts) = rails_and_posts(&s);
+        let sketch = s.doc.find_feature("Frame").unwrap().id;
+        let points: Vec<String> = s.doc.sketch(sketch).unwrap().points.iter().map(|p| p.id.clone()).collect();
+        let pair = json!({"a": {"sketch": sketch, "point": points[0]}, "b": {"sketch": sketch, "point": points[1]}});
+        let before = s.doc.to_json();
+        for extra in [
+            json!({"corner": "auto"}),
+            json!({"corner": "mitre"}),
+            json!({"corner": "butt"}),
+            json!({"corners": [{"members": [&rails[0], &posts[0]], "kind": "none"}]}),
+            json!({"flip": true}),
+            json!({"fit_ends": true}),
+            json!({"coped": true}),
+            json!({"gap": "0 mm"}),
+            json!({"gap": "2 mm"}),
+            json!({"pairs": [pair]}),
+        ] {
+            let mut p = grouped(&rails, &posts);
+            p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            let err = s.execute("frame.member", &p).unwrap_err().to_string();
+            assert!(err.contains("not supported yet: frame member groups"), "{p}: {err}");
+            assert_eq!(s.doc.to_json(), before, "refusing an unsupported combination is atomic");
+        }
+    }
+}
+
+#[test]
+fn copied_grouped_members_keep_global_names_and_the_surviving_groups_names() {
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    let (rails, posts) = rails_and_posts(&s);
+    let id = run(&mut s, "frame.member", grouped(&rails, &posts))["feature"].as_u64().unwrap();
+    // Copies name bodies by position. Group boundaries must not restart that position.
+    s.doc_mut().feature_mut(id).unwrap().body_names = ["Copy Rail A", "Copy Rail B", "Copy Post A", "Copy Post B"].map(String::from).to_vec();
+    s.refresh();
+    let before = boxes(&mut s);
+    assert_eq!(before.keys().map(String::as_str).collect::<Vec<_>>(), ["Copy Post A", "Copy Post B", "Copy Rail A", "Copy Rail B"]);
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(boxes(&mut reopened), before);
+    let mut p = grouped(&rails, &posts);
+    p["groups"] = json!([p["groups"][1].clone()]);
+    run(&mut reopened, "timeline.redefine", json!({"feature": id, "command": "frame.member", "params": p}));
+    let after = boxes(&mut reopened);
+    assert_eq!(after.keys().map(String::as_str).collect::<Vec<_>>(), ["Copy Post A", "Copy Post B"]);
+    for name in ["Copy Post A", "Copy Post B"] {
+        assert!(same_box(after[name], before[name]), "{name}");
+    }
+}
+
+#[test]
+fn group_rotations_keep_their_parameter_names_after_reordering_or_removing_an_earlier_group() {
+    fn rotations(s: &Session, id: u64) -> Vec<(String, String)> {
+        let f = s.doc.feature(id).unwrap();
+        f.kind
+            .inputs()
+            .into_iter()
+            .zip(&f.param_names)
+            .filter(|((label, _, _), _)| *label == "Rotation")
+            .map(|((_, expression, _), name)| (name.clone(), expression))
+            .collect()
+    }
+    fn value(s: &mut Session, name: &str) -> f64 {
+        let list = run(s, "parameters.list", json!({}));
+        list["parameters"].as_array().unwrap().iter().find(|p| p["name"] == name).and_then(|p| p["value"].as_f64()).unwrap()
+    }
+    for remove_earlier in [false, true] {
+        let mut s = Session::default();
+        rectangle_frame(&mut s);
+        let (rails, posts) = rails_and_posts(&s);
+        let mut p = grouped(&rails, &posts);
+        p["groups"][0]["angle"] = json!("15 deg");
+        run(&mut s, "frame.member", p.clone());
+        let id = s.doc.features.last().unwrap().id;
+        let names = rotations(&s, id);
+        assert_eq!(names.len(), 2);
+        for (i, name) in ["RailRotation", "PostRotation"].iter().enumerate() {
+            run(&mut s, "parameters.rename", json!({"name": names[i].0, "new_name": name}));
+        }
+        run(&mut s, "parameters.add", json!({"name": "FollowPost", "expression": "PostRotation", "unit": "deg"}));
+        // Reopen before the edit, too: the identity is derived from saved groups and line ids.
+        s = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        let groups = p["groups"].as_array_mut().unwrap();
+        if remove_earlier {
+            groups.remove(0);
+        } else {
+            groups.reverse();
+            // Line order within the same group does not change its identity either.
+            groups[0]["lines"].as_array_mut().unwrap().reverse();
+        }
+        run(&mut s, "timeline.redefine", json!({"feature": id, "command": "frame.member", "params": p}));
+        let expected = if remove_earlier {
+            vec![("PostRotation".to_string(), "90 deg".to_string())]
+        } else {
+            vec![("PostRotation".to_string(), "90 deg".to_string()), ("RailRotation".to_string(), "15 deg".to_string())]
+        };
+        for _ in 0..2 {
+            assert_eq!(rotations(&s, id), expected);
+            assert_eq!(value(&mut s, "PostRotation"), 90.0);
+            assert_eq!(value(&mut s, "FollowPost"), 90.0, "expressions still read the surviving group's angle");
+            if !remove_earlier {
+                assert_eq!(value(&mut s, "RailRotation"), 15.0);
+            }
+            s = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        }
+        run(&mut s, "parameters.change", json!({"name": "PostRotation", "expression": "75 deg"}));
+        assert_eq!(rotations(&s, id)[0], ("PostRotation".to_string(), "75 deg".to_string()));
+        assert_eq!(value(&mut s, "FollowPost"), 75.0);
+    }
+}
+
+#[test]
+fn a_flat_member_keeps_its_rotation_name_when_its_line_selection_changes() {
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    let (rails, posts) = rails_and_posts(&s);
+    run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": tube(), "lines": rails, "angle": "15 deg"}));
+    let f = s.doc.features.last().unwrap();
+    let id = f.id;
+    let index = f.kind.inputs().iter().position(|(label, _, _)| *label == "Rotation").unwrap();
+    let name = f.param_names[index].clone();
+    run(&mut s, "parameters.rename", json!({"name": name, "new_name": "RailRotation"}));
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": id, "command": "frame.member", "params": {
+            "sketch": "Frame", "profile": tube(), "lines": posts, "angle": "30 deg"
+        }}),
+    );
+    let f = s.doc.feature(id).unwrap();
+    let inputs = f.kind.inputs();
+    let index = inputs.iter().position(|(label, _, _)| *label == "Rotation").unwrap();
+    assert_eq!(f.param_names[index], "RailRotation");
+    assert_eq!(inputs[index].1, "30 deg");
+}
+
+#[test]
+fn a_flat_member_keeps_its_named_rotation_and_references_when_switching_path_sketches() {
+    fn check(s: &mut Session, id: u64, expression: &str, value: f64) {
+        let f = s.doc.feature(id).unwrap();
+        let inputs = f.kind.inputs();
+        let index = inputs.iter().position(|(label, _, _)| *label == "Rotation").unwrap();
+        assert_eq!(f.param_names[index], "MemberRotation");
+        assert_eq!(inputs[index].1, expression);
+        let list = run(s, "parameters.list", json!({}));
+        for name in ["MemberRotation", "FollowRotation"] {
+            let row = list["parameters"].as_array().unwrap().iter().find(|p| p["name"] == name).unwrap();
+            assert_eq!(row["value"].as_f64(), Some(value), "{name}: {row}");
+        }
+    }
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    // Both paths precede the member in the timeline, so the new path is a valid dependency.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Other frame"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [1000, 0], "p1": [1600, 400]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let other_path = s.doc.find_feature("Other frame").unwrap().id;
+    run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": tube(), "angle": "15 deg"}));
+    let f = s.doc.features.last().unwrap();
+    let id = f.id;
+    let index = f.kind.inputs().iter().position(|(label, _, _)| *label == "Rotation").unwrap();
+    let name = f.param_names[index].clone();
+    run(&mut s, "parameters.rename", json!({"name": name, "new_name": "MemberRotation"}));
+    run(&mut s, "parameters.add", json!({"name": "FollowRotation", "expression": "MemberRotation", "unit": "deg"}));
+    check(&mut s, id, "15 deg", 15.0);
+    s = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    check(&mut s, id, "15 deg", 15.0);
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": id, "command": "frame.member", "params": {
+            "sketch": "Other frame", "profile": tube(), "angle": "30 deg"
+        }}),
+    );
+    assert!(matches!(&s.doc.feature(id).unwrap().kind,
+        solidcraft_doc::FeatureKind::FrameMember { path_sketch, groups, .. }
+            if path_sketch.as_ref().is_some_and(|sketch| sketch.0 == other_path) && groups.is_empty()));
+    check(&mut s, id, "30 deg", 30.0);
+    s = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    check(&mut s, id, "30 deg", 30.0);
+    run(&mut s, "parameters.change", json!({"name": "MemberRotation", "expression": "75 deg"}));
+    check(&mut s, id, "75 deg", 75.0);
+    s = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    check(&mut s, id, "75 deg", 75.0);
+}
+
 /// A design's groups survive saving and reopening; an edit keeps every member's name but those of
 /// a group given another name, and a member renamed by hand keeps its new name.
 #[test]
