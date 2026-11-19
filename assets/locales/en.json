@@ -6746,7 +6746,7 @@
   "ui.fillet_turn": "Turns",
   "ui.fillet_turn_mitre": "Mitre",
   "ui.fillet_turn_swept": "Swept",
-  "ui.fillet_turn_tip": "Where two rounds turn round a sharp corner edge between them, such as the rounds along a boss's base at its upright edges.\nMitre: the rounds run on until they meet in a mitre.\nSwept: the rounds stop at the corner edge and turn round it, the corner a torus tangent to both. Only for rounds of one radius round a straight, convex corner edge.",
+  "ui.fillet_turn_tip": "Where two rounds turn round a sharp corner edge between them, such as the rounds along a boss's base at its upright edges.\nAuto: each corner swept where Swept can make it, and mitred everywhere else.\nMitre: the rounds run on until they meet in a mitre.\nSwept: the rounds stop at the corner edge and turn round it, the corner a torus tangent to both. Only for rounds of one radius round a straight corner edge the ball can pass: a convex edge for rounds that add material, a concave edge for rounds that take it off.",
   "ui.fillet_type_choices_tip": "Constant radius: one radius all along the edge.\nChord length: the width across the round stays the same, whatever angle the faces meet at.\nVariable radius: a radius at each end, and more along the edge if you add them.\nCurvature continuous: a section without a kink in reflections where it meets flat faces (G2).\nSpline: the radius along the edge follows control radii you set.",
   "ui.fillet_type_curvature": "Curvature continuous",
   "ui.fillet_type_tip": "The section across the edge. Curvature continuous: a curvature-continuous (G2) section between planar faces, so reflections run from the faces into the round without a kink.",

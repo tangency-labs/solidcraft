@@ -149,20 +149,24 @@ fn fillet_corner_tip() -> String {
 /// radius and narrow it only where the faces run out.
 const FILLET_FITS: [(&str, &str); 3] = [("ui.fillet_fit_exact", "exact"), ("ui.fillet_fit_reduce", "reduce"), ("ui.fillet_fit_taper", "taper")];
 
-/// How two rounds turn where they meet at a sharp corner edge (`turn`): in a mitre (the
-/// default) or swept round the edge.
-const FILLET_TURNS: [(&str, &str); 2] = [("ui.fillet_turn_mitre", "mitre"), ("ui.fillet_turn_swept", "swept")];
+/// How two rounds turn where they meet at a sharp corner edge (`turn`): swept round the edge
+/// where the rolling ball can pass it and mitred elsewhere (the default, `auto`, not sent), in a
+/// mitre, or swept round the edge.
+const FILLET_TURNS: [(&str, &str); 3] = [("ui.fillet_turn_auto", "auto"), ("ui.fillet_turn_mitre", "mitre"), ("ui.fillet_turn_swept", "swept")];
 
 /// Which fillet options apply together, exactly as `solid.fillet` takes them (`fillet` in
 /// crates/engine/src/cmd/features.rs):
 ///
-/// | Type          | Face limits (`fit`)     | Corners (`corner`)                  | Setback (`setbacks`) | Turns (`turn`)                  |
-/// |---------------|-------------------------|-------------------------------------|----------------------|---------------------------------|
-/// | Constant      | exact, reduce or taper  | tangent; curvature with exact only  | with curvature only  | mitre; swept without taper, g2  |
-/// | any other     | exact (not sent)        | tangent (not sent)                  | none                 | mitre (not sent)                |
+/// | Type          | Face limits (`fit`)     | Corners (`corner`)                  | Setback (`setbacks`) | Turns (`turn`)                                  |
+/// |---------------|-------------------------|-------------------------------------|----------------------|-------------------------------------------------|
+/// | Constant      | exact, reduce or taper  | tangent; curvature with exact only  | with curvature only  | auto (not sent), mitre; swept without taper, g2 |
+/// | any other     | exact (not sent)        | tangent (not sent)                  | none                 | auto (not sent)                                 |
 ///
 /// The dialog shows an option's row only where it applies and sends the option only then, and a
 /// choice that rules another out puts that one back to its default ([`settle_fillet_options`]).
+/// Where the Turns row is hidden, the default `auto` mitres every turn: a turn is swept only
+/// between constant equal circular rounds, which a tapered radius, a curvature corner and the
+/// other types are not.
 pub(super) fn fillet_option_applies(extra: &serde_json::Map<String, Value>, key: &str) -> bool {
     let constant = extra.get("type").and_then(Value::as_str).is_none_or(|t| t == "constant");
     let exact = extra.get("fit").and_then(Value::as_str).is_none_or(|fit| fit == "exact");
@@ -1877,24 +1881,53 @@ mod tests {
         let mut h = fillet_harness();
         set_edges(&mut h, 3);
         assert!(scenario::handle_at("dialog:ui.fillet_turn").is_some());
-        assert!(parameters(&h).get("turn").is_none(), "Mitre is the default, not sent");
+        assert!(parameters(&h).get("turn").is_none(), "Auto is the default, not sent");
         choose(&mut h, "ui.fillet_turn", "ui.fillet_turn_swept");
         assert_eq!(parameters(&h)["turn"], json!("swept"));
         choose(&mut h, "ui.fillet_fit", "ui.fillet_fit_reduce");
         assert_eq!((parameters(&h)["turn"].clone(), parameters(&h)["fit"].clone()), (json!("swept"), json!("reduce")));
         choose(&mut h, "ui.fillet_fit", "ui.fillet_fit_taper");
-        assert!(parameters(&h).get("turn").is_none(), "a narrowed radius puts Turns back to Mitre");
+        assert!(parameters(&h).get("turn").is_none(), "a narrowed radius puts Turns back to the default");
         choose(&mut h, "ui.fillet_turn", "ui.fillet_turn_swept");
         assert!(parameters(&h).get("fit").is_none(), "Swept puts Face limits back to Exact radius");
         choose(&mut h, "ui.corners", Continuity::G2.label_id());
-        assert!(parameters(&h).get("turn").is_none(), "a curvature corner puts Turns back to Mitre");
+        assert!(parameters(&h).get("turn").is_none(), "a curvature corner puts Turns back to the default");
         choose(&mut h, "ui.fillet_turn", "ui.fillet_turn_swept");
         assert!(parameters(&h).get("corner").is_none(), "Swept puts Corners back to Tangent");
         choose(&mut h, "ui.fillet_turn", "ui.fillet_turn_mitre");
-        assert!(parameters(&h).get("turn").is_none(), "Mitre is not sent");
+        assert_eq!(parameters(&h)["turn"], json!("mitre"), "Mitre is sent: it is not the default");
+        choose(&mut h, "ui.fillet_turn", "ui.fillet_turn_auto");
+        assert!(parameters(&h).get("turn").is_none(), "the default is not sent");
         choose(&mut h, "ui.fillet_turn", "ui.fillet_turn_swept");
         choose(&mut h, "Type", "Chord length");
         assert!(parameters(&h).get("turn").is_none() && scenario::handle_at("dialog:ui.fillet_turn").is_none(), "Turns is for Constant radius only");
+    }
+
+    /// Editing a fillet keeps its turn. A mitred fillet, as every fillet saved before the
+    /// rolling-ball default is, gives `turn: mitre` again, so it stays mitred rather than taking
+    /// the new default; a fillet made with the default gives none (the default again); a swept
+    /// one gives `turn: swept`.
+    #[test]
+    fn editing_a_fillet_keeps_its_turn() {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":1400,"height":1000}));
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        // a top edge of the box each: a front, the back and a side
+        for (edge, turn, sent) in
+            [([20, 0, 20], Some("mitre"), Some("mitre")), ([20, 30, 20], None, None), ([0, 15, 20], Some("swept"), Some("swept"))]
+        {
+            let mut p = json!({"edges": [edge], "radius": "1", "tangent_chain": false});
+            if let Some(t) = turn {
+                p["turn"] = json!(t);
+            }
+            h.app.run("solid.fillet", p).unwrap();
+            let saved = h.app.session.doc.features.last().unwrap().id;
+            h.app.edit_feature(saved);
+            h.frames(4);
+            assert_eq!(redefined(&h).get("turn").and_then(Value::as_str), sent, "{turn:?}");
+            h.step(&json!({"widget":"Cancel"})).unwrap();
+            h.frames(2);
+        }
     }
 
     /// The dialog follows the option model (`fillet_option_applies`): through every type, fit and
