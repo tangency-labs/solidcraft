@@ -143,18 +143,24 @@ in it; change them and click **OK**.
   number above about 4 million (2²²) can't be proven either. Narrow the range to one side of the
   jump, or use a rule without it.
 - **"Even 500 points don't keep the spline within the tolerance".** A point of the rule is proven
-  further off than the tolerance: the rule bends faster than 500 points can follow, such as a very
-  fine wave. Raise the tolerance or narrow the range.
+  further off than the tolerance, by at least the distance quoted: the rule bends faster than 500
+  points can follow, such as a very fine wave. Raise the tolerance or narrow the range.
 - **"Even 500 points can't be shown to keep the spline within the tolerance".** The curve may be
   close enough or may not, but neither can be proven: a wave so fine that the spline through 500
-  points crisscrosses it, say, or one with so many wiggles that the proof runs out of work. Raise
-  the tolerance or narrow the range.
-- **A sketch warns "with these values its points leave the formulas' point … further than the
+  points crisscrosses it, say. Raise the tolerance or narrow the range.
+- **"… can't be shown … before the check's work runs out".** The rule is long and wiggles so much
+  that proving it would take too long, so the curve is refused after a few seconds instead. Raise
+  the tolerance, narrow the range or write the rule more simply.
+- **A sketch warns "with these values its points leave the formulas' point … past the
   tolerance".** A parameter the rule uses changed (a wave made finer, a curve made much larger),
   or the design was saved by an older SolidCraft that drew the curve without proving it: the
   points no longer follow the rule closely enough, and the curve is drawn as they are. Edit the
   curve (applying it unchanged is enough) to fit it with enough points; if even 500 can't, the
   edit says so, and a larger tolerance or a narrower range fits it.
+- **A sketch warns "its formulas have no value at … between its points".** The rule can't be
+  worked out somewhere between two of the curve's points (a square root of a negative number,
+  say), and the spline is drawn across that gap. Change the rule or its range so it has a value
+  all along.
 
 ## For scripts and agents
 

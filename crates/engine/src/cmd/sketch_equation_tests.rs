@@ -274,7 +274,7 @@ fn a_parameter_that_makes_a_curve_too_fine_for_its_points_warns() {
     let r = s.model.results.iter().find(|r| r.name == "S").unwrap();
     assert!(r.error.is_none(), "{:?}", r.error);
     let warning = r.warning.as_deref().unwrap_or_default();
-    assert!(warning.contains(&format!("equation curve {id}")) && warning.contains("further than the tolerance of 0.01 mm"), "{warning}");
+    assert!(warning.contains(&format!("equation curve {id}")) && warning.contains("past the tolerance of 0.01 mm"), "{warning}");
     assert!(curve_points(&s, &id).iter().all(|p| p.y.abs() < 1e-9), "the samples are the wave's zeros");
     run(&mut s, "parameters.change", json!({"name": "k", "expression": "0 mm"}));
     no_trouble(&s);
