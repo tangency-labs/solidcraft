@@ -8718,41 +8718,58 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
             q = if mirrored { offset - q } else { q + offset };
             let from = grab.map_or(q, |point| if mirrored { offset - point } else { point + offset });
             let with = dragged_with(app, &id);
-            // Snap the dragged point (or the line's ends) to other geometry, like drawing.
-            let snap = {
+            let q_raw = q;
+            // Snap the dragged point (or the line's ends / curve tangency) near the cursor.
+            let (snap, snap_mm_px) = {
                 let st = crate::open_meshing::shown_world(app);
-                crate::sketch_view::active_sketch(app).and_then(|s| st.sketch(s)).and_then(|ss| {
+                let found = crate::sketch_view::active_sketch(app).and_then(|s| st.sketch(s)).and_then(|ss| {
                     let sk = &ss.sketch;
                     let (own, exclude) = crate::drag_snap::moving_points(sk, std::iter::once(id.as_str()).chain(with.iter().map(String::as_str)));
                     if own.iter().any(|&p| sk.point_locked(p)) {
-                        return crate::drag_snap::find(sk, &[], &[], 0.0);
+                        return Some((crate::drag_snap::find(sk, &[], &[], 0.0), 0.0));
                     }
-                    let a = proj.to_screen(ss.plane.to_world(q))?;
-                    let b = proj.to_screen(ss.plane.to_world(q + Vec2::X))?;
+                    let a = proj.to_screen(ss.plane.to_world(q_raw))?;
+                    let b = proj.to_screen(ss.plane.to_world(q_raw + Vec2::X))?;
                     let mm_px = 1.0 / (a.distance(b) as f64).max(1e-9);
-                    let d = q - from;
+                    let d = q_raw - from;
                     let moving: Vec<(usize, Vec2)> =
-                        own.iter().filter_map(|&p| if grab.is_some() { sk.point(p).map(|x| (p, x + d)) } else { Some((p, q)) }).collect();
-                    crate::drag_snap::find(sk, &moving, &exclude, mm_px)
-                })
+                        own.iter().filter_map(|&p| if grab.is_some() { sk.point(p).map(|x| (p, x + d)) } else { Some((p, q_raw)) }).collect();
+                    Some((crate::drag_snap::find_for_drag(sk, &id, q_raw, d, &moving, &exclude, mm_px), mm_px))
+                });
+                found.unwrap_or((None, 0.0))
             };
-            if let Some(s) = snap {
+            if let Some(s) = &snap {
                 q += s.offset;
             }
             // Each frame re-solves the sketch only (`live`); the model follows when the drag ends.
-            let params = json!({"entity": id, "with": with, "from": [from.x, from.y], "to": [q.x, q.y], "live": true});
-            let at = match app.session.execute("sketch.drag", &params) {
-                Ok(r) => {
-                    app.session.undo.truncate(depth + 1);
-                    // Budget-limited progress continues even when the mouse stops. A stalled
-                    // search asks for no more frames; release gets one bounded final attempt.
-                    if r.get("retry").and_then(serde_json::Value::as_bool) == Some(true) && !resp.drag_stopped() {
-                        ui.ctx().request_repaint();
+            let run_drag = |app: &mut SolveApp, drag_from: Vec2, target: Vec2| -> Vec2 {
+                let params = json!({"entity": id, "with": with, "from": [drag_from.x, drag_from.y], "to": [target.x, target.y], "live": true});
+                match app.session.execute("sketch.drag", &params) {
+                    Ok(r) => {
+                        app.session.undo.truncate(depth + 1);
+                        // Budget-limited progress continues even when the mouse stops. A stalled
+                        // search asks for no more frames; release gets one bounded final attempt.
+                        if r.get("retry").and_then(serde_json::Value::as_bool) == Some(true) && !resp.drag_stopped() {
+                            ui.ctx().request_repaint();
+                        }
+                        r.get("at").and_then(solidcraft_engine::params::vec2).unwrap_or(target)
                     }
-                    r.get("at").and_then(solidcraft_engine::params::vec2).unwrap_or(q)
+                    Err(_) => drag_from,
                 }
-                Err(_) => from,
             };
+            let mut at = run_drag(app, from, q);
+            // If an existing constraint prevented the geometry from reaching the snap target,
+            // fall back to the unsnapped drag position and drop the snap so it never flickers.
+            if let Some(s) = &snap {
+                let st = crate::open_meshing::session_world(&app.session);
+                let satisfied = crate::sketch_view::active_sketch(app)
+                    .and_then(|sid| st.sketch(sid))
+                    .is_some_and(|ss| crate::drag_snap::satisfied_after_drag(&ss.sketch, s, snap_mm_px));
+                if !satisfied {
+                    crate::drag_snap::clear();
+                    at = run_drag(app, at, q_raw);
+                }
+            }
             // The grab stays on the geometry: what it could not follow this frame it catches up
             // with on the next one instead of lagging the cursor for the rest of the drag.
             // `grab` is where the pointer is, `at` where the point got to: back through the offset

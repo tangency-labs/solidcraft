@@ -742,7 +742,7 @@ fn add_constraints_at_point(
         {
             state.push_label("H");
             state.push_point(l.at);
-            if allow_lined {
+            if allow_lined && !lined.iter().any(|existing| existing.horizontal) {
                 lined.push(l);
             }
         }
@@ -751,7 +751,7 @@ fn add_constraints_at_point(
         {
             state.push_label("V");
             state.push_point(pl.at);
-            if allow_lined {
+            if allow_lined && !lined.iter().any(|existing| !existing.horizontal) {
                 lined.push(pl);
             }
         }
@@ -889,7 +889,8 @@ pub fn refine_snap(
             crate::inference::clear();
             if crate::inference::direction_line(sk, pr, &i).is_none() {
                 let target = SnapTarget::Curve(i.curve.clone());
-                locked = Some((i.at, i.label(), None, vec![target], Some(i)));
+                let arg = Some(format!("on:{}:{},{}", i.curve, i.at.x, i.at.y));
+                locked = Some((i.at, i.label(), arg, vec![target], Some(i)));
             }
         }
         if locked.is_none()
@@ -913,6 +914,9 @@ pub fn refine_snap(
             }
         }
         if let Some(inf) = inf {
+            if matches!(inf.kind, crate::inference::Kind::Tangent) && arg.as_deref().is_some_and(|a| a.starts_with("on:")) {
+                state.push_label("On");
+            }
             crate::inference::set_pending(inf);
         }
         // Where two guides meet, the point lines up with the two references the guides come from:
@@ -3196,6 +3200,43 @@ mod glyph_zoom_tests {
         let obstacle = egui::Rect::from_center_size(default_center, egui::vec2(glyph, glyph));
         assert!(!preview_rect.intersects(obstacle), "preview {preview_rect:?} overlaps obstacle glyph {obstacle:?} (orig {glyph_center:?})");
         h.app.tool = None;
+    }
+
+    #[test]
+    fn line_tangent_to_circle_previews_and_commits_both_tangent_and_coincident() {
+        use serde_json::json;
+        use solidcore_record::Vec2;
+        use solidcraft_engine::sketch::ConstraintKind;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.circle.center", json!({"center": [20, 0], "radius": 10})).unwrap();
+        h.call("ui.view", json!({"view": "top"}));
+        h.settle();
+
+        // Start a line at (0, 0): the upper tangent point on circle(center=(20,0), r=10) is
+        // at (15, 5*sqrt(3)) = (15, 8.660254...).
+        h.step(&json!({"start": "sketch.line"})).unwrap();
+        h.step(&json!({"click": {"sketch": [0.0, 0.0]}})).unwrap();
+        let tan = Vec2::new(15.0, 5.0 * 3.0_f64.sqrt());
+        h.step(&json!({"move": {"sketch": [tan.x, tan.y]}})).unwrap();
+        h.frames(2);
+
+        let snap = super::SNAP.with(|s| s.borrow().clone()).expect("tangent snap active");
+        assert!(snap.labels.contains(&"T"), "expected Tangent badge, got {:?}", snap.labels);
+        assert!(snap.labels.contains(&"On"), "expected Coincident/On badge alongside Tangent, got {:?}", snap.labels);
+
+        h.step(&json!({"click": {"sketch": [tan.x, tan.y]}})).unwrap();
+        h.frames(2);
+        let st = crate::open_meshing::session_world(&h.app.session);
+        let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Tangent { .. })), "Tangent constraint missing: {:?}", sk.constraints);
+        assert!(
+            sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::PointOnCurve { .. })),
+            "PointOnCurve/Coincident constraint missing: {:?}",
+            sk.constraints
+        );
+        h.step(&json!({"key": "Escape"})).unwrap();
     }
 }
 
