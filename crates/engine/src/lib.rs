@@ -55,6 +55,7 @@ pub mod status_details;
 pub mod status_items;
 pub mod timing;
 pub mod title_block_text;
+pub mod upright_image;
 pub mod view;
 
 use solidcraft_geom::prelude::*;
@@ -268,7 +269,7 @@ impl Sel {
     pub(crate) fn body_name(&self) -> Option<&str> {
         match self {
             Sel::Body { name } => Some(name),
-            Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => Some(body),
+            Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } if !body.is_empty() => Some(body),
             _ => None,
         }
     }

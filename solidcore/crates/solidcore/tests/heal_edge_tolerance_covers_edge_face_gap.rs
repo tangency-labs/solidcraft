@@ -262,7 +262,11 @@ fn corpus_key(e: solidcore::EntityRef) -> solidcore::geom::object::ObjectRef {
 }
 
 /// Reads a corpus file as `corpus.parity` does (`rebuild` false), or with the UV trims
-/// rebuilt (`bRebuildUVTrimCurves`, `topology.face_p3`'s `_rebuild` rows).
+/// rebuilt (`bRebuildUVTrimCurves`, `topology.face_p3`'s `_rebuild` rows), with the
+/// tolerances the read's kept-trim cover raised after the healer put back as the healer
+/// left them ([`undo_trim_cover`]): the replay is of the healer's gap cover, against
+/// main's reads before the kept-trim cover (tangency-labs/solidcraft#19295), whose own
+/// raises are replayed by goldens' `tolsub::replay`.
 fn read_corpus(k: &mut Kernel, name: &str, rebuild: bool) -> Brep {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../upstream/TestFiles/pt_TestFiles")
@@ -279,7 +283,25 @@ fn read_corpus(k: &mut Kernel, name: &str, rebuild: bool) -> Brep {
         next_key: 1 << 62,
     };
     read_from_file(k, &mut b, bytes, FileType::Ascii, rebuild, &mut env).unwrap();
+    undo_trim_cover(&mut b);
     b
+}
+
+/// Puts back every edge and vertex tolerance the read's kept-trim cover raised
+/// ([`Brep::trim_cover_raises`]) to the value the read had made before it, checking each
+/// still holds the raised value.
+fn undo_trim_cover(b: &mut Brep) {
+    let raises = b.trim_cover_raises().clone();
+    for (e, (before, after)) in raises.edges {
+        let r = b.edge_mut(e).unwrap();
+        assert_eq!(r.tolerance.to_bits(), after.to_bits(), "{e:?}");
+        r.tolerance = before;
+    }
+    for (v, (before, after)) in raises.vertices {
+        let r = b.vertex_mut(v).unwrap();
+        assert_eq!(r.tolerance.to_bits(), after.to_bits(), "{v:?}");
+        r.tolerance = before;
+    }
 }
 
 /// FNV-1a over the bits of the values fed to it.
@@ -1744,7 +1766,9 @@ fn fillet_result(name: &str, edge: usize, radius: f64) -> (u64, Vec<u64>) {
 /// [`MAIN`]): only the surface points sampled along face 15's trims move. Every vertex,
 /// edge and tolerance of the read is bit for bit main's
 /// ([`bottle_read_moves_only_face_15s_net_and_one_rebuilt_uv_at_rounding`]); entry 14's mass
-/// is bit for bit main's (MEASURED).
+/// is bit for bit main's (MEASURED). Since #18918 entry 14 is that PR's: its near-knot rail
+/// trim (WR-664) moves a rail's cut onto the rail's nearby knot, which moves this fillet's
+/// geometry within the zone tolerance.
 const FILLET_MAIN: [u64; 29] = [
     0x24f613f551b1b3ab,
     0x241377ca06fbe761,
@@ -1760,7 +1784,7 @@ const FILLET_MAIN: [u64; 29] = [
     0xb5382d964fe60518,
     0xb5382d964fe60518,
     0xb5382d964fe60518,
-    0x902afd170f1e23a9,
+    0x6c4db4a115acc49e,
     0xb5382d964fe60518,
     0xb5382d964fe60518,
     0xb5382d964fe60518,
@@ -1781,8 +1805,10 @@ const FILLET_MAIN: [u64; 29] = [
 /// `source-file-corner_box-edge4`, `-edge8`, `-edge9` and
 /// `stubs4-delete-edge-bottle-e8-r0.1` ([`FILLETS`] 1, 2, 3 and 14). Entry 14's are main's
 /// (see [`FILLET_MAIN`]) with the mass integrator's knot-line split, which moved that row
-/// since; its entries are classified against a certified enclosure in goldens'
-/// `mass_knot_line_moved_rows_are_classified`.
+/// since (its entries are classified against a certified enclosure in goldens'
+/// `mass_knot_line_moved_rows_are_classified`), and #18918's near-knot rail trim, which
+/// moves them within the zone tolerance (the row's certified mass enclosure in goldens'
+/// `round_definition_rows` holds the new values).
 const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
     (
         1,
@@ -1838,18 +1864,18 @@ const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
     (
         14,
         [
-            0x40408bcce093b407,
-            0x402621896ddff25f,
-            0x402621896ddff25f,
-            0x3f10d1d4e45e4676,
-            0x3f13efa0c2fbe9dc,
-            0x4000a10fe9b1ffd5,
-            0x4050316570dd030e,
-            0x4050a9c381d79ffa,
-            0x40151aaab4b869fc,
-            0x3f6aed519268bff5,
-            0x3f66b6ad970f60ae,
-            0xbf3c98793964b142,
+            0x40408bccdfac28b0,
+            0x402621896ddff26a,
+            0x402621896ddff26a,
+            0x3f10d1d4e45e263c,
+            0x3f13efa0c2faa159,
+            0x4000a10fe9b1ffdc,
+            0x4050316570dd0323,
+            0x4050a9c381d7a010,
+            0x40151aaab4b86a08,
+            0x3f6aed5192670272,
+            0x3f66b6ad970f2ece,
+            0xbf3c9879396462ce,
         ],
     ),
 ];

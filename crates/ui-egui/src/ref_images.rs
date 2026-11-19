@@ -1,13 +1,11 @@
 //! Canvases and decals: the design's reference images. With the GPU viewport they are textured
 //! quads in the 3D pass (the model hides them); the CPU viewport draws them over its image.
 
-use solidcraft_engine::geom::prelude::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use egui::{Color32, Mesh, Shape, TextureHandle, TextureId, pos2};
-use solidcore_record::Vec2;
 use solidcraft_engine::doc::canvas::Canvas;
 
 use crate::SolveApp;
@@ -79,9 +77,10 @@ pub fn gpu_images(app: &SolveApp) -> Vec<GpuImage> {
         .iter()
         .filter(|c| c.visible && c.opacity > 0.0)
         .filter_map(|c| {
-            let plane = doc.canvas_plane(&vals, c, &state).ok()?;
+            // An anchored canvas follows its sketch's points.
+            let corners = doc.canvas_corners(&vals, c, &state).ok()?;
             let (_, version, size, rgba) = pixels(c)?;
-            let corners = c.world_corners(&plane).map(|p| [p.x as f32, p.y as f32, p.z as f32]);
+            let corners = corners.map(|p| [p.x as f32, p.y as f32, p.z as f32]);
             Some(GpuImage { id: c.id, version, size, rgba, corners, opacity: c.opacity.clamp(0.0, 1.0) as f32 })
         })
         .collect()
@@ -117,18 +116,19 @@ pub fn show(app: &SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &Proj)
     let (vals, _) = doc.param_values();
     let state = app.session.model.state();
     for c in doc.canvases.iter().filter(|c| c.visible) {
-        let Ok(plane) = doc.canvas_plane(&vals, c, &state) else { continue };
+        let Ok([bl, br, _, tl]) = doc.canvas_corners(&vals, c, &state) else { continue };
         let Some(tex) = texture(ui.ctx(), c) else { continue };
-        let [bl, br, _, tl] = c.corners();
-        let (u, v) = (br - bl, tl - bl);
+        let arr = |p: solidcore_record::Vec3| [p.x, p.y, p.z];
+        let (corner, u, v) = (arr(bl), arr(br - bl), arr(tl - bl));
         let tint = Color32::from_white_alpha((c.opacity.clamp(0.0, 1.0) * 255.0) as u8);
         let mut mesh = Mesh::with_texture(tex);
         let mut ok = true;
         for j in 0..=CELLS {
             for i in 0..=CELLS {
                 let (s, t) = (i as f64 / CELLS as f64, j as f64 / CELLS as f64);
-                let p: Vec2 = bl + u * s + v * t;
-                let Some(q) = proj.to_screen(plane.to_world(p)) else {
+                // The point on the image's quad, from the kernel.
+                let [x, y, z] = solidcore_ops::affine::parallelogram_point(corner, u, v, s, t);
+                let Some(q) = proj.to_screen(solidcore_record::Vec3::new(x, y, z)) else {
                     ok = false;
                     continue;
                 };
