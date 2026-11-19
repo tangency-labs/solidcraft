@@ -765,6 +765,12 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
         )
     });
     let hover = hover.filter(|p| !crate::frame::dock_dragging(ui.ctx()) && !crate::shell::covered(app, *p));
+    // A button pressed this frame starts its drag where it went down: the pointer's motion before
+    // it (frames skipped over a still view, #17104, bring it all in one) is not the drag's (#19477).
+    let delta = ui
+        .input(|i| i.pointer.any_pressed().then(|| i.pointer.press_origin().zip(i.pointer.latest_pos()).map(|(from, to)| to - from)).flatten())
+        .filter(|d| d.is_finite())
+        .unwrap_or(delta);
     let delta = unwrapped_delta(app, delta);
     // The right button belongs to the marking menu while it is open.
     let secondary_down = secondary_down && app.viewport.context_menu.is_none();
