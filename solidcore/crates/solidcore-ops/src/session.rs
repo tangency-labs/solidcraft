@@ -67,8 +67,10 @@ static IDLE: Mutex<Vec<Kernel>> = Mutex::new(Vec::new());
 static STEP: OnceLock<f64> = OnceLock::new();
 static FIXES: Mutex<Option<UpstreamFixes>> = Mutex::new(None);
 
-/// A failed call, as the failure callback sees it.
+/// A failed call, as the failure callback sees it. More fields come (the call's arguments,
+/// `docs/failure-codes-and-reproduction.md` 3.2): read it by its fields, never build it.
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct Failure<'a> {
     /// The call's name.
     pub call: &'a str,
@@ -279,7 +281,9 @@ thread_local! {
 /// the call's answer refuses with an error of `r`'s variant (`r` itself, or `r` with what the
 /// call adds to it, a point, an index), its [`FailureCode`] is `e`'s kind and operation, not a
 /// failure ops decided itself. Every place ops types a kernel error into an [`Error`] passes it
-/// here; outside a call it is `r`, untouched.
+/// here; outside a call it is `r`, untouched. The last note wins: a call that types two kernel
+/// errors into one variant, drops one and refuses with the other, reports the later one's code,
+/// so a call that tries and gives up something puts its earlier note back ([`note_back`]).
 pub(crate) fn noted(e: &SolidError, r: Error) -> Error {
     noted_as(e.kind().code(), e.operation(), r)
 }
