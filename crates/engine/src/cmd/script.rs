@@ -210,8 +210,9 @@ fn export_script(s: &mut Session, p: &Value) -> Result<Value> {
     // `path` echoes the call, as it did before #18838 (#19248). `absolute_path` names the file in full:
     // a relative path resolves against this process's folder, which an agent talking to the
     // app over MCP can't see. It is left out where it can't be worked out: with no such folder
-    // (browser storage), or when the folder's name isn't valid UTF-8. A ".." stays in it:
-    // taking it out by the text alone names another file when the folder before it is a link.
+    // (browser storage), or when the folder's name isn't valid UTF-8. On Linux and macOS a ".."
+    // stays in it: taking it out by the text alone names another file when the folder before it
+    // is a link. Windows removes it, and resolves the path the same way when opening it.
     let absolute_path = path.and_then(|p| std::path::absolute(p).ok()).and_then(|a| a.to_str().map(str::to_string));
     let path = path.map(str::to_string);
     serde_json::to_value(ExportScriptResult { omitted, path, absolute_path, bytes, script, steps, param_warnings: Vec::new() })
