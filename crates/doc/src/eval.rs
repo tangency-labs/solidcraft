@@ -2973,6 +2973,10 @@ impl Feature {
                 for link in &sketch.links {
                     link_reads(st, &link.source, &mut read)?;
                 }
+                // A face held by a 3D constraint is read even without a projected curve.
+                for plane in sketch.wire_constraints.iter().filter_map(|c| c.kind.model_plane()) {
+                    link_reads(st, &plane.source, &mut read)?;
+                }
                 read.bodies.sort_unstable();
                 read.bodies.dedup();
                 read.sketches.sort_unstable();
@@ -3536,6 +3540,10 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
             }
             for link in &sketch.links {
                 reads.link(doc, st, &link.source);
+            }
+            // The face's placement can move independently of the sketch's component.
+            for plane in sketch.wire_constraints.iter().filter_map(|c| c.kind.model_plane()) {
+                reads.link(doc, st, &plane.source);
             }
         }
         // Each end is read as a sketch on a face is: in the frame it was capped in, its member

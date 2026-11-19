@@ -204,10 +204,13 @@ fn the_types_read_each_key_like_the_handler() {
         json!([{"vertex": [1, 2, 3]}, {"edge": {"x": 1, "y": 2, "z": 3}}]),
         // Forms the handler passes on to the design: a body, a sketch or a plane in place of a point.
         json!([{"edge": 5, "body": "B"}]),
+        // A 3D dimension takes a model face as its plane; the handler checks the sketch context.
+        json!([{"face": [1, 2, 3]}]),
+        json!(["w1.start", {"face": [1, 2, 3], "body": "Flange"}]),
     ] {
         assert!(parses(json!({"entities": entities})), "{entities}");
     }
-    for entities in [json!(5), json!([5]), json!([null]), json!([{"face": [1, 2, 3]}]), json!([{}]), json!({"edge": [1, 2, 3]}), json!([["a"]])] {
+    for entities in [json!(5), json!([5]), json!([null]), json!([{}]), json!({"edge": [1, 2, 3]}), json!([["a"]])] {
         assert!(!parses(json!({"entities": entities})), "{entities}");
     }
     // The count is the handler's: one or two.
