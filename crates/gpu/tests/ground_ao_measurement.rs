@@ -40,6 +40,7 @@ fn ao_comparison(ground: u32) -> Result<(), Box<dyn std::error::Error>> {
         samples: 4,
         tess: false,
         oit: false,
+        edges: false,
     };
     let mut session = solidcraft_engine::Session::default();
     for corner in [[-65, -10, 0], [45, -10, 0]] {

@@ -1218,6 +1218,7 @@ impl SolveApp {
             samples: samples.max(1),
             tess: false,
             oit: false,
+            edges: false,
         };
         let built = Self::build_wgpu(rs, target, target, !self.cpu_meshing);
         self.adopt_wgpu(rs, built);
@@ -1244,8 +1245,9 @@ impl SolveApp {
             samples: samples.max(1),
             tess: false,
             oit: false,
+            edges: false,
         };
-        let window = crate::gpu::GpuTarget { format: rs.target_format, depth: None, samples: 1, tess: false, oit: false };
+        let window = crate::gpu::GpuTarget { format: rs.target_format, depth: None, samples: 1, tess: false, oit: false, edges: false };
         Self::build_wgpu(rs, scene, window, gpu_meshing)
     }
 
@@ -1576,6 +1578,7 @@ impl SolveApp {
             solidcraft_engine::slicers::set_chosen_programs(&self.preferences.custom_slicers);
         }
         self.session.set_validation(self.preferences.validation);
+        drawing_workspace::sync_history(self);
         print_face_ui::sync(&mut self.session, &self.preferences);
         if id == "timeline.play" {
             let reply = self.session.execute(id, &params).map_err(|e| e.to_string())?;
@@ -3377,6 +3380,11 @@ impl SolveApp {
         self.cam.set_view(StandardView::Iso);
         self.fit_view();
         stand_up::offer(self, path, &[], Some(&r));
+        // The import's warnings, as the desktop's open says them (`file_load`), before the
+        // notices that follow it there too.
+        if let Some(summary) = timeline::import_warning_status(self, &r) {
+            self.set_status(summary, false);
+        }
         self.say_newer_file();
         self.say_plugin_data();
         self.say_signature(&r);
@@ -3466,10 +3474,8 @@ impl SolveApp {
         let r = self.run(cmd, params)?;
         self.fit_view();
         stand_up::offer(self, path, &before, Some(&r));
-        if let Some(summary) = timeline::import_status(self, &r) {
+        if let Some(summary) = timeline::import_warning_status(self, &r) {
             self.set_status(summary, false);
-        } else if let Some(w) = r["warnings"].as_array().filter(|w| !w.is_empty()) {
-            self.set_status(format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or("")), false);
         }
         Ok(())
     }
