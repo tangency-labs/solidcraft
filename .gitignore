@@ -12,6 +12,7 @@ __pycache__/
 # AI Agents
 .claude/worktrees/
 .claude/settings.local.json
+.claude/*.sh
 
 # Compiled target
 /target*/
