@@ -4091,9 +4091,6 @@ fn blur_availability_for(app: &SolveApp, offered: bool) -> crate::theme_options:
     if reduced == Some(true) {
         return Unavailable("prefs.blur_reduce_transparency");
     }
-    if app.home.open || crate::render_workspace::result_active(app) {
-        return Unavailable("prefs.blur_source");
-    }
     match capability {
         crate::blur::Capability::Available => Available,
         crate::blur::Capability::Unavailable(_) => Unavailable("prefs.blur_device"),

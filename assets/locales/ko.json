@@ -2329,7 +2329,6 @@
   "prefs.blur_off": "끄기",
   "prefs.blur_reduce_transparency": "시스템의 투명도 줄이기 설정에 의해 비활성화됨",
   "prefs.blur_software": "소프트웨어 그래픽에서는 사용할 수 없습니다 (gpu-software)",
-  "prefs.blur_source": "이 작업 공간 보기에서는 사용할 수 없습니다",
   "prefs.blur_web": "이 웹 렌더링 경로에서는 사용할 수 없습니다",
   "prefs.bodies_folders": "바디 폴더",
   "prefs.bodies_folders_always": "항상 표시",

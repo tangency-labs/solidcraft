@@ -2531,7 +2531,6 @@
   "prefs.blur_off": "關閉",
   "prefs.blur_reduce_transparency": "已被系統的降低透明度設置禁用",
   "prefs.blur_software": "軟體圖形算圖不支持此功能 (gpu-software)",
-  "prefs.blur_source": "此工作區視圖不支持此功能",
   "prefs.blur_web": "此網頁算圖路徑不支持此功能",
   "prefs.bodies_folders": "實體資料夾",
   "prefs.bodies_folders_always": "始終顯示",

@@ -2857,7 +2857,6 @@
   "prefs.blur_off": "Izslēgts",
   "prefs.blur_reduce_transparency": "Atspējots ar sistēmas iestatījumu Samazināt caurspīdīgumu",
   "prefs.blur_software": "Nav pieejams ar programmatūras grafiku (gpu-software)",
-  "prefs.blur_source": "Nav pieejams šajā darbvietas skatā",
   "prefs.blur_web": "Nav pieejams šajā tīmekļa renderēšanas ceļā",
   "prefs.bodies_folders": "Ķermeņu mapes",
   "prefs.bodies_folders_always": "Vienmēr",

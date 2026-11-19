@@ -3110,7 +3110,6 @@
   "prefs.blur_off": "إيقاف",
   "prefs.blur_reduce_transparency": "معطّل بسبب إعداد تقليل الشفافية في النظام",
   "prefs.blur_software": "غير متاح مع الرسوميات البرمجية (gpu-software)",
-  "prefs.blur_source": "غير متاح في عرض مساحة العمل هذا",
   "prefs.blur_web": "غير متاح في مسار عرض الويب هذا",
   "prefs.bodies_folders": "مجلدات الأجسام",
   "prefs.bodies_folders_always": "دائمًا",
