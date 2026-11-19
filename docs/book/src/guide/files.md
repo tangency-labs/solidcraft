@@ -89,8 +89,8 @@ constant display colour, become the body's appearance. Scaled or mirrored prims 
 meshes. Invisible prims, NURBS patches, B-rep with no mesh, curves, intrinsic shapes such as `Cube`,
 and references to other files are left out with a warning.
 
-With `geometry: "exact"` (on `doc.open` and `file.insert_mesh`; the import option **Geometry › Exact
-B-rep where the file has it**), an OpenUSD file comes in by its exact geometry instead, as a FreeCAD or
+With the `geometry: "exact"` parameter (on the `doc.open` and `file.insert_mesh` commands, and the
+MCP tools that call them), an OpenUSD file comes in by its exact geometry instead, as a FreeCAD or
 Rhino file read with cadmpeg does: each B-rep (a `BrepArray` prim's solids and shells, such as
 SolidCraft's own exports carry) becomes a B-rep body of one Import feature, with exact faces and edges
 to pick, fillet and measure, and only a mesh with no B-rep beside it becomes a mesh body of that
