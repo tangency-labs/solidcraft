@@ -1894,6 +1894,13 @@ preference_settings! {
     construction_line_classic: bool = false, PAGE_SKETCH;
     /// Use the only straight construction line in the preselection as Mirror's reference.
     sketch_mirror_auto_line: bool = true, PAGE_SKETCH;
+    /// An image (Canvas or Decal) placed on the plane of the sketch being edited gets a
+    /// construction rectangle around it in that sketch and follows it, so the sketch's constraints
+    /// and dimensions place and size the image (#18405). A mode of the Canvas and Decal tools, set
+    /// in the Sketch Palette while one runs and kept for the next time; no Preferences page shows
+    /// or resets it. Off by default, so placing an image works as it always has: on its own, with
+    /// Frame Sketch to tie it to a rectangle when asked.
+    frame_images_in_sketch: bool = false;
     /// Pressing an active tool or dialog's shortcut again closes it, as Esc does. Off: the key
     /// starts the tool or dialog again.
     shortcut_again_ends_tool: bool = true, PAGE_SKETCH;
@@ -4090,9 +4097,6 @@ fn blur_availability_for(app: &SolveApp, offered: bool) -> crate::theme_options:
     }
     if reduced == Some(true) {
         return Unavailable("prefs.blur_reduce_transparency");
-    }
-    if app.home.open || crate::render_workspace::result_active(app) {
-        return Unavailable("prefs.blur_source");
     }
     match capability {
         crate::blur::Capability::Available => Available,

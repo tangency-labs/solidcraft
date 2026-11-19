@@ -48,6 +48,31 @@ pub(crate) fn show(app: &mut SolveApp, rows: &mut Rows<'_>) {
     rows.ui().add_space(t.space_4);
 }
 
+/// Whether `object` of `drawing` is part of the selection: its row is drawn selected, as a
+/// selected body's is in the design's browser.
+fn picked(app: &SolveApp, drawing: &Drawing, object: u64) -> bool {
+    app.session.selection.iter().any(|s| matches!(s, solidcraft_engine::Sel::Drawing { drawing: d, object: o } if *d == drawing.id && *o == object))
+}
+
+/// The row of something on a sheet takes the clicks its place on the sheet takes: a click
+/// selects it (Shift and Ctrl add and toggle, as in the model), and a right-click opens the
+/// sheet's menu on it. A double-click is the caller's: it opens the object's options.
+fn object_clicks(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, sheet: u64, object: u64, hit: &RowOut) {
+    if !drawing.has_object(object) {
+        return;
+    }
+    let sel = solidcraft_engine::Sel::Drawing { drawing: drawing.id, object };
+    let held = crate::tool_modifiers::Held::from_modifiers(rows.ui().input(|input| input.modifiers));
+    if let Some(at) = hit.secondary {
+        select_sheet(app, sheet);
+        crate::context_menu::open_on_sheet(app, at, held, Some(sel));
+    } else if hit.clicked && !hit.double {
+        select_sheet(app, sheet);
+        let (add, toggle) = crate::tool_modifiers::selection_click(held, app.preferences.selection_shift_add_only);
+        crate::viewport::select(app, Some(sel), add, toggle);
+    }
+}
+
 fn row(rows: &mut Rows<'_>, key: &str, row: Row<'_>, menu: NodeMenu<'_>) -> RowOut {
     let publish = matches!(menu, NodeMenu::Host);
     let result = rows.row(Node { id: crate::browser::node_id(key), key, row, menu, ..Node::default() });
@@ -148,9 +173,10 @@ fn show_objects(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, shee
             let hit = row(
                 rows,
                 &format!("{key}:{kind}:{}", encode(object)),
-                Row { depth: 2, label: &label, icon, name: true, ..Row::default() },
-                NodeMenu::None,
+                Row { depth: 2, label: &label, icon, name: true, selected: picked(app, drawing, object), ..Row::default() },
+                NodeMenu::Host,
             );
+            object_clicks(app, rows, drawing, sheet.id, object, &hit);
             if let Some(editor) = editor
                 && hit.events.iter().any(|event| matches!(event, Event::Open(_)))
             {
@@ -179,9 +205,18 @@ fn show_views(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, sheet:
         let hit = row(
             rows,
             &key,
-            Row { depth, fold: nested.as_ref().map(|_| open), icon: "drawing_base_view", label: &label, name: true, ..Row::default() },
-            NodeMenu::None,
+            Row {
+                depth,
+                fold: nested.as_ref().map(|_| open),
+                icon: "drawing_base_view",
+                label: &label,
+                name: true,
+                selected: picked(app, drawing, view.id),
+                ..Row::default()
+            },
+            NodeMenu::Host,
         );
+        object_clicks(app, rows, drawing, sheet, view.id, &hit);
         let mut open = open;
         for event in hit.events {
             match event {

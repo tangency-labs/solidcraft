@@ -412,7 +412,13 @@ fn profile_not_on_cam_error(doc: &Document, cam: &super::Joint, profile_occ: Opt
 /// The profile's points in its component's coordinates, the occurrence placing them, and the
 /// profile's size. `fa`, `fb`: the cam joint's frames (picked edges continue along the edges in
 /// the plane square to the cam's axis).
-fn profile_points(doc: &Document, st: &ModelState, p: &CamProfile, cam: &super::Joint, (fa, fb): (&Mat, &Mat)) -> Result<(Vec<Vec3>, u64, f64)> {
+pub(crate) fn profile_points(
+    doc: &Document,
+    st: &ModelState,
+    p: &CamProfile,
+    cam: &super::Joint,
+    (fa, fb): (&Mat, &Mat),
+) -> Result<(Vec<Vec3>, u64, f64)> {
     let bad = |m: &str| DocError::Invalid(format!("cam: {m}"));
     match p {
         CamProfile::Sketch { sketch, curves } => {
@@ -431,7 +437,7 @@ fn profile_points(doc: &Document, st: &ModelState, p: &CamProfile, cam: &super::
             let lp = &sketch_profile(sk, curves).ok_or_else(|| bad("the sketch has no closed profile (or the cam's profile is gone)"))?.region.outer;
             let too_many = || bad(&format!("the profile is too detailed (more than {MAX_PROFILE_POINTS} points)"));
             let size = bounds_2d(&sampled(lp, 0.1).ok_or_else(too_many)?);
-            let pts = sampled(lp, tolerance(size)).ok_or_else(too_many)?;
+            let pts = sampled(lp, profile_tolerance(size)).ok_or_else(too_many)?;
             let pl = &sk.plane;
             Ok((pts.iter().map(|q| pl.origin + pl.x * q.x + pl.y * q.y).collect(), occ, size))
         }
@@ -449,11 +455,12 @@ fn profile_points(doc: &Document, st: &ModelState, p: &CamProfile, cam: &super::
                 return Err(bad("the cam has no body"));
             }
             // Each body sampled to its own size (a large part beside the cam leaves the cam fine).
-            // Each body's edges with the faces beside them.
-            let meshes: Vec<solidcraft_geom::Mesh> = bodies
+            // Each body's edges with the faces beside them. The mesh of a body is made once and
+            // kept with it, so a solve that reads the profile again does not mesh it again.
+            let meshes: Vec<std::sync::Arc<solidcraft_geom::Mesh>> = bodies
                 .iter()
-                .map(|b| b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(tolerance(b.body.size()))))
-                .collect::<std::result::Result<_, _>>()?;
+                .map(|b| b.cam_mesh(|| b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(profile_tolerance(b.body.size())))))
+                .collect::<crate::Result<_>>()?;
             let edges: Vec<(usize, &Vec<Vec3>, &[u32])> = meshes
                 .iter()
                 .enumerate()
@@ -636,7 +643,8 @@ fn bounds_2d(pts: &[Vec2]) -> f64 {
 }
 
 /// The chord error a profile is sampled to: 0.1 µm per 100 mm of its size, at least 0.1 µm.
-fn tolerance(size: f64) -> f64 {
+/// The mesh a cam's profile is read from is made at that error.
+pub(crate) fn profile_tolerance(size: f64) -> f64 {
     1e-4 * (size / 100.0).max(1.0)
 }
 

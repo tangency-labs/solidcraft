@@ -13,16 +13,11 @@ use solidcraft_engine::{
 use solidcraft_theme::Tokens;
 
 use super::{HOVER_BAND, OnScreen};
-use crate::{
-    SolveApp, drawing_workspace,
-    ui_kit::{self, BackingTooltipExt as _, Container, toast},
-};
+use crate::{SolveApp, drawing_workspace};
 
 #[derive(Default)]
 pub(super) struct State {
     drag: Option<Drag>,
-    delete: Option<u64>,
-    undo: Option<(u64, f64, &'static str)>,
 }
 
 #[derive(Clone, Copy)]
@@ -54,12 +49,9 @@ pub(super) fn owns_drag(app: &SolveApp, response: &egui::Response, at: OnScreen,
             || (response.dragged_by(PointerButton::Primary) && origin(app, response, at, objects).is_some()))
 }
 
-/// Cancel a view's drag or its delete confirmation; the selection stays (Escape clears it next).
+/// Cancel a view's drag; the selection stays (Escape clears it next).
 pub(super) fn clear(app: &mut SolveApp) -> bool {
-    let state = &mut app.drawing_workspace.page.view_tools;
-    let dragging = state.drag.take().is_some();
-    let deleting = state.delete.take().is_some();
-    dragging || deleting
+    app.drawing_workspace.page.view_tools.drag.take().is_some()
 }
 
 /// The objects of drawing `drawing` selected now.
@@ -166,7 +158,7 @@ impl Canvas<'_> {
                 crate::viewport::select(app, Some(pick(self.drawing.id, view)), false, false);
             }
             state.drag = Some(Drag { view, from, pointer, revision: app.session.revision });
-        } else if self.response.clicked() && state.delete.is_none() {
+        } else if self.response.clicked() {
             // The model's click: replace, or add and toggle with Shift and Ctrl; nothing clears.
             let hover = self.response.hover_pos().filter(|point| !crate::shell::covered(app, *point));
             let hit = hover
@@ -185,25 +177,15 @@ impl Canvas<'_> {
                 self.preview(drag, target, cursor);
                 if self.response.drag_stopped_by(PointerButton::Primary) {
                     state.drag = None;
-                    let revision = app.session.revision;
-                    match app.run("drawing.view.move", json!({"view":encode(drag.view),"to_mm":[target.x,target.y]})) {
-                        Ok(_) if app.session.revision != revision => self.notice(app, &mut state, "ui.drawing_view_selection.moved"),
-                        Ok(_) => {}
-                        Err(error) => app.set_status(error, true),
+                    // One undo step, undone with Ctrl+Z as any other.
+                    if let Err(error) = app.run("drawing.view.move", json!({"view":encode(drag.view),"to_mm":[target.x,target.y]})) {
+                        app.set_status(error, true);
                     }
                 }
             } else if !ui.input(|input| input.pointer.primary_down()) {
                 state.drag = None;
             }
-        } else if !placing
-            && let [one] = selected(app, self.drawing.id)[..]
-            && let Some(object) = self.objects.iter().find(|object| object.object == one && object.kind == ObjectKind::View)
-        {
-            self.card(app, &mut state, *object);
         }
-
-        self.confirm_delete(app, ui, &mut state);
-        self.undo(app, ui, &mut state);
         app.drawing_workspace.page.view_tools = state;
     }
 
@@ -254,120 +236,5 @@ impl Canvas<'_> {
             &[("x", &format!("{:+.1}", offset.x)), ("y", &format!("{:+.1}", offset.y))],
         );
         self.painter.text(destination + egui::vec2(t.space_8, t.space_8), Align2::LEFT_TOP, text, egui::FontId::proportional(t.font_label), t.accent);
-    }
-
-    fn card(&self, app: &mut SolveApp, state: &mut State, object: SheetObject) {
-        let t = Tokens::get();
-        let r = self.at.rect(&object.boundary_mm.unwrap_or(object.bounds_mm)).expand(t.space_2);
-        self.painter.rect_stroke(r, t.radius_sm, Stroke::new(2.0, t.accent), egui::StrokeKind::Outside);
-        for handle in [r.left_center(), r.right_center(), r.center_bottom()] {
-            self.painter.circle_filled(handle, t.space_4, t.panel);
-            self.painter.circle_stroke(handle, t.space_4, Stroke::new(1.0, t.accent));
-        }
-        if !r.intersects(self.free) {
-            return;
-        }
-        let tr = solidcraft_ui_text::tr;
-        let index = self.drawing.views.iter().filter(|view| view.sheet == self.sheet).position(|view| view.id == object.object).unwrap_or_default();
-        let name = self.drawing.view(object.object).and_then(|view| view.label.as_ref()).map_or_else(
-            || solidcraft_ui_text::format("ui.drawing_browser_view", &[("number", &(index + 1).to_string())]),
-            |label| label.name.clone(),
-        );
-        let can_project = self.drawing.can_project_from(object.object).is_ok();
-        let ctx = self.painter.ctx();
-        let anchor = pos2(r.center().x.clamp(self.free.left(), self.free.right()), r.top() - t.space_8);
-        let response = Container::selection_card(ctx, egui::Id::unique("drawing_view_selection_card"), anchor, self.free, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = t.space_2;
-                ui.add_space(t.space_4);
-                ui_kit::workspace_chip(ui, &name);
-                ui.separator();
-                for (action, icon, label, enabled) in [
-                    ("edit", "edit", tr("ui.drawing_panel.edit"), true),
-                    ("project", "plus", tr("ui.drawing_view_selection.project"), can_project),
-                    ("section", "drawing_section_view", tr("ui.drawing_view_selection.section"), false),
-                    ("delete", "delete", tr("ui.drawing_view_selection.delete"), true),
-                ] {
-                    let response = ui
-                        .add_enabled_ui(enabled, |ui| {
-                            let size = t.control_height - t.space_2;
-                            let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
-                            ui_kit::icon_button_at(ui, rect, icon, label)
-                        })
-                        .inner;
-                    crate::scenario::publish_target(&format!("drawing:view_selection:{action}"), response.rect);
-                    if response.clicked() {
-                        return Some(action);
-                    }
-                    if !enabled {
-                        response.backing_on_disabled_hover_text(tr("ui.drawing_panel.planned"));
-                    }
-                }
-                ui.add_space(t.space_4);
-                None
-            })
-            .inner
-        });
-        match response.inner {
-            Some("edit") => drawing_workspace::edit_object(app, "view", object.object),
-            Some("project") => {
-                drawing_workspace::start_projected(app, object.object);
-            }
-            Some("delete") => state.delete = Some(object.object),
-            _ => {}
-        }
-    }
-
-    fn confirm_delete(&self, app: &mut SolveApp, ui: &egui::Ui, state: &mut State) {
-        let Some(view) = state.delete else { return };
-        let tr = solidcraft_ui_text::tr;
-        let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("drawing_delete_view"), "delete", tr("ui.drawing_view_selection.delete"))
-            .actions(tr("ui.drawing_view_selection.delete"), tr("ui.cancel"), None)
-            .show(ui.ctx(), true, |ui| {
-                ui.label(tr("ui.drawing_view_selection.delete_prompt"));
-            });
-        if matches!(action, ui_kit::Action::Ok) {
-            match app.run(
-                "selection.delete",
-                json!({
-                    "items":[{"type":"drawing","drawing":encode(self.drawing.id),"object":encode(view)}],
-                    "contents":"delete"
-                }),
-            ) {
-                Ok(_) => {
-                    self.notice(app, state, "ui.drawing_view_selection.deleted");
-                }
-                Err(error) => app.set_status(error, true),
-            }
-        }
-        if closed || !matches!(action, ui_kit::Action::None) {
-            state.delete = None;
-        }
-    }
-
-    fn notice(&self, app: &SolveApp, state: &mut State, message: &'static str) {
-        state.undo = Some((app.session.revision, self.painter.ctx().input(|input| input.time) + 6.0, message));
-    }
-
-    fn undo(&self, app: &mut SolveApp, ui: &egui::Ui, state: &mut State) {
-        let Some((revision, expires, message)) = state.undo else { return };
-        let remaining = expires - ui.input(|input| input.time);
-        if revision != app.session.revision || remaining <= 0.0 {
-            state.undo = None;
-            return;
-        }
-        ui.ctx().request_repaint_after(std::time::Duration::from_millis(60));
-        let actions = [(solidcraft_ui_text::tr("ui.undo"), toast::Action::Primary)];
-        let extras = toast::Extras { close: Some("drawing-view"), countdown: Some(((remaining / 6.0) as f32, 6.0)), ..Default::default() };
-        if let Some(shown) = toast::show(ui, self.free, toast::Place::Centre, app.tr(message).to_owned(), toast::Lead::Dot(false), &actions, extras) {
-            if shown.clicked == Some(0) {
-                if let Err(error) = app.run("edit.undo", json!({})) {
-                    app.set_status(error, true);
-                }
-                state.undo = None;
-            } else if shown.closed {
-                state.undo = None;
-            }
-        }
     }
 }
