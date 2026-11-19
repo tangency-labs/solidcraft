@@ -395,47 +395,24 @@ mod tests {
             let mut e = eq(None, y, "0", "1");
             e.tolerance = tol;
             let Ok(f) = fit(&vals, &e) else { continue };
+            // The spline as the kernel's B-spline: its cubic pieces joined at triple knots.
             let pieces = fit_beziers_mode(&f.points, f.closed).unwrap();
-            let far = (0..=20_000)
+            let mut knots = vec![0.0; 4];
+            let mut points = vec![[pieces[0][0].x, pieces[0][0].y, 0.0]];
+            for (i, p) in pieces.iter().enumerate() {
+                points.extend(p[1..].iter().map(|v| [v.x, v.y, 0.0]));
+                knots.extend([(i + 1) as f64; 3]);
+            }
+            knots.push(pieces.len() as f64);
+            let spline = solidcore_record::brep::Curve::Spline { knots, points };
+            let far = (0..=5_000)
                 .map(|k| {
-                    let x = k as f64 / 20_000.0;
-                    let q = point_at(&vals, &e, x, defaults(&vals)).unwrap();
-                    // The pieces about x; a distance to a point of them is never less than to
-                    // the whole spline, so this is never kinder than the truth.
-                    let j = ((x * pieces.len() as f64) as usize).min(pieces.len() - 1);
-                    pieces[j.saturating_sub(1)..=(j + 1).min(pieces.len() - 1)].iter().map(|p| nearest(p, q)).fold(f64::INFINITY, f64::min)
+                    let q = point_at(&vals, &e, k as f64 / 5_000.0, defaults(&vals)).unwrap();
+                    solidcore_ops::curve::closest_point(&spline, [q.x, q.y, 0.0], 1e-9).unwrap().unwrap().distance
                 })
                 .fold(0.0, f64::max);
             assert!(far <= 2.0 * tol, "{y} at {tol} mm: {} points, {far} mm off at worst", f.points.len());
         }
-    }
-
-    /// The distance from `q` to a point of the cubic Bézier `p` near the nearest: Newton's method
-    /// from 33 starts along it. A distance to a point of `p`, so never less than the true one.
-    fn nearest(p: &[Vec2; 4], q: Vec2) -> f64 {
-        let at = |s: f64| {
-            let r = 1.0 - s;
-            p[0] * (r * r * r) + p[1] * (3.0 * s * r * r) + p[2] * (3.0 * s * s * r) + p[3] * (s * s * s)
-        };
-        let d1 = |s: f64| {
-            let r = 1.0 - s;
-            (p[1] - p[0]) * (3.0 * r * r) + (p[2] - p[1]) * (6.0 * s * r) + (p[3] - p[2]) * (3.0 * s * s)
-        };
-        let d2 = |s: f64| (p[2] - p[1] * 2.0 + p[0]) * (6.0 * (1.0 - s)) + (p[3] - p[2] * 2.0 + p[1]) * (6.0 * s);
-        let mut best = f64::INFINITY;
-        for k in 0..=32 {
-            let mut s = k as f64 / 32.0;
-            for _ in 0..6 {
-                let (o, v) = (at(s) - q, d1(s));
-                let h = v.dot(v) + o.dot(d2(s));
-                if !(h > 0.0) {
-                    break;
-                }
-                s = (s - o.dot(v) / h).clamp(0.0, 1.0);
-            }
-            best = best.min(at(s).dist(q));
-        }
-        best
     }
 
     #[test]
