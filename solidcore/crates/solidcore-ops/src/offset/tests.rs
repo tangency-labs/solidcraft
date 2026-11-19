@@ -1952,8 +1952,8 @@ mod drafts {
 
     /// Acid-6's needle: R = 0.5, h = 1000, neutral at z = -1600, theta = 0.02 degrees.
     /// r(z) = R - (z + 1600) tan(theta), so the frustum volume is
-    /// pi h (R^2 + R r_top + r_top^2) / 3 = 364.684642297274456 mm^3;
-    /// r_top = 0.150934135423594902 mm.
+    /// `pi h (R^2 + R r_top + r_top^2) / 3` = 364.684642297274456 mm^3;
+    /// `r_top` = 0.150934135423594902 mm.
     #[test]
     fn a_long_thin_cylinder_drafts_to_a_frustum() {
         all_fixes();
