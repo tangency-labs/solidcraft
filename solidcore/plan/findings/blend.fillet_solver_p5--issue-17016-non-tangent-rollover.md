@@ -234,3 +234,55 @@ authorises crease trimming. The two dot products are now tested for finiteness
 first and a non-finite one is a typed blend failure. The regression is
 `a_non_finite_radial_sector_dot_is_refused_not_concave` in the existing
 `fillet_solver/p5.rs` tests.
+
+## Narrowed to the loft: what main's tests pin (maintainer review)
+
+Three tests that pass on main failed on the PR's head:
+`a_refused_trim_at_creases_leaves_a_body_that_saves_its_surfaces`
+(`issue_2715_refused_fillet_keeps_geometry`),
+`a_round_onto_a_tangent_round_fits_where_its_rail_stays_on_the_top` (`wr696_fit_sizes`) and
+`tangent_rollover::a_convex_round_larger_than_the_round_beyond_is_not_rolled_over`.
+
+Taking the section-gap tangency budget out left the trim tests failing the same way, so it
+was not the cause; logging the trim's edges showed the cause, the crease trim's
+`CreaseAcrossTangentEdge` test. On main it asks, for every edge of the face a crease
+lies in, whether the face across it is a tangent round the blend rolls on (tested at 0.34
+of the edge, against the solvers' tangency tolerance). The PR asked it only of the edges a
+crease run ended on, where the crease crosses them. In the backed block (a 20 x 10 x 10
+block, back top edge rounded 3, front top edge rounded 9) the crease runs along the top and
+ends on the two side edges; the tangent edge to the back round is not an event, so nothing
+asked about it and the round of 9 was built, where main refuses it.
+
+Now the edges a crease crosses are tested where it crosses them, against the budget of
+the round the face belongs to (a spline seam's tangency varies along it, which is what the
+loft needs); every other edge of the face is tested as on main. The three tests and both
+loft regressions pass. No tolerance was added: both budgets existed.
+
+## Three goldens rows that move, and why
+
+`blend.fillet_executive_p3`: `issue-880-half-arc-rim-0-setbacks-1-2`,
+`issue-880-half-arc-rim-0-setbacks-1-1` and `source-file-nurb_box-edge0` still move after
+the narrowing (`-1-2`: first term of `result_geometry.block` 1.1e-8 relative, third term
+4.5e-9; `-1-1`: first mass term 1.1e-9; the box edge: 2.0e-9 and 4.4e-10).
+Taking out the kept UV tangents (`BoundaryPolicy::Preserve`, `fix_boundary_tangents`
+skipped) returns all three to their old values; taking out each of the other changes,
+alone or together with it, does not move them. They are the intended change. In these
+three the drop runs on a surface evaluated from its procedural definition (the only
+surfaces `Preserve` is used on), where upstream's fix-up has no bound on what it moves.
+Logging what the fix-up would have done on the same runs:
+
+- `source-file-nurb_box-edge0`: the dropped UV curves lie on the domain's v = 0 side (v from
+  1e-14 down to 8e-23) with a cross-boundary tangent component of at most 7e-13 against a
+  unit tangent along u. The polygon fix-up would move nothing (0). In four spans a tangent of
+  up to 7e-13 is zeroed on main and kept now. The input differs by rounding noise; the 2e-9 on the
+  result is that noise carried through a mass integral taken to 1e-4. This last step is an
+  inference from the size of the input change, not measured.
+- `issue-880-half-arc-rim-0-setbacks-1-1` and `-1-2`: ten distinct spans end on the v = 1 side at
+  3.6e-8, 2.0e-8, 8.1e-8, 3.3e-7, 1.3e-6 and 5.2e-6 short of it, heading to it with slopes
+  of 5.3e-5 to 8.5e-4. Main zeroes those slopes (a flattening of a near-boundary oblique
+  crossing, the same as in #17016's loft) and its polygon fix-up moves two curves' control
+  polygons by up to 3.5e-6 and 2.2e-5 in UV. The exact jets are kept now, proved inside the
+  domain instead of snapped to it.
+
+The rows are re-blessed with those numbers; no other row of the unit changed (798 cases,
+5 known failing, as before).
