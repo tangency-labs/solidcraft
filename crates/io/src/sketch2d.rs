@@ -28,6 +28,14 @@ pub enum Geom2 {
         control: bool,
         degree: u8,
     },
+    /// Spline over the control points with its own clamped knots (`pts.len() + degree + 1`)
+    /// and weights (empty: all 1), as a DXF SPLINE gives it (#9355).
+    Nurbs {
+        pts: Vec<Vec2>,
+        degree: u8,
+        knots: Vec<f64>,
+        weights: Vec<f64>,
+    },
     /// Quadratic Bézier / conic.
     Conic {
         a: Vec2,
