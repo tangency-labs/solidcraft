@@ -1498,30 +1498,35 @@ fn run_case_with_records(
 }
 
 /// The cases whose volume moved off the rig's when `brep_volume` began closing tolerant
-/// edges' gaps (#16735), with their volume now. The rig's records stay as measured (its
+/// edges' gaps (#16735), with their volume now. The three peg cases a second round runs along
+/// are at their volume since a round is fitted as finely as its edge is known: nearer the
+/// volume they converge to as the fit tightens than before (each listed with the sequence). The rig's records stay as measured (its
 /// integrator leaked through the gaps as this one did); each case is graded on its volume
 /// now, and the move from the rig's is checked within the old leak's bound on the result
 /// ([`moved_from_the_rig`]).
 const CLOSED_GAP_VOLUMES: [(&str, f64); 5] = [
-    // rig 9440.034329164451
+    // rig 9440.034329164451; the fit at 1/4, 1/10 and 3/100 of this one gives .0337164,
+    // .0337117, .0337089 (before: .0336361, farther from where they go)
     (
         "report-peg-concave-round-r3-then-front-round-r1-5",
-        9_440.033_636_074_577,
+        9_440.033_737_473_757,
     ),
     // rig 9404.790032915605
     (
         "report-peg-concave-round-then-front-round-r2",
         9_404.789_833_109_295,
     ),
-    // rig 9432.862095990427
+    // rig 9432.862095990427; the fit at 1/4, 1/10 and 3/100 of this one gives .862192,
+    // .862211, .862224 (before: .861780, farther from where they go)
     (
         "report-peg-front-round-r1-5-then-concave-round-r3",
-        9_432.861_779_882_673,
+        9_432.862_047_183_242,
     ),
-    // rig 9399.383292771683
+    // rig 9399.383292771683; the fit at 1/4, 1/10 and 3/100 of this one gives .383242,
+    // .383255, .383262 (before: .383030, farther from where they go)
     (
         "report-peg-front-round-then-concave-round-r2",
-        9_399.383_029_676_488,
+        9_399.383_180_752_53,
     ),
     // rig 112506.83949124035
     (
