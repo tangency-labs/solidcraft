@@ -423,7 +423,7 @@ point. The fork's fixes; the rows named by a flag are opt-in, the others always 
 | fix or flag (record, issue) | what it adds | file |
 |---|---|---|
 | singular-point splits (WR-77, #393) | samples \|n1 × n2\| along each crossing curve, refines each sharp minimum by golden section, and splits the curve where the sine is below 1e-6 and rises above 1e-3 on both sides, more than ten approximation tolerances from its ends | `surface_intersector/singular_splits.rs` |
-| `ssi_tangent_curve_tracer` (WR-75, #395) | traces tangent curves the marcher cannot follow: Levenberg-Marquardt on S1 − S2 = 0 with n1 ∥ n2, directions probed on a small circle in the tangent plane; traces crossing branches through tangent contact nodes and reports the nodes | `surface_intersector/tangent_curves.rs`, `tangent_tracer.rs` |
+| `ssi_tangent_curve_tracer` (WR-75, #395) | traces tangent curves the marcher cannot follow: Levenberg-Marquardt on S1 − S2 = 0 with n1 ∥ n2, directions probed on a small circle in the tangent plane; traces crossing branches through tangent contact nodes and reports the nodes. Not in a self intersection whose two domains overlap or touch, where every point solves these equations at equal parameters | `surface_intersector/tangent_curves.rs`, `tangent_tracer.rs` |
 | tangential contact points (WR-74, #394) | Newton on a 4 × 4 system (the gap along S2's tangents, S1's tangents against n2) from the leaf pairs the interior search skips, plus the poles; a root is a touch point when the gap is below 1e-7 of the tolerance and the normals agree to 1e-4 rad | `adv_surface_intersector/tangent_contacts.rs` |
 | tangent curves traced once (WR-76, #392) | one start point per cluster of tangent boundary start points, so an open tangent curve is traced once | `surface_intersector/p5.rs` |
 | pole point keeps its tangent (WR-550) | a point at a pole keeps its exact limit tangent when stepping back | `surface_intersector/p1.rs` |
@@ -609,7 +609,7 @@ and why the approximation tolerance is half of it.
 
 | mode | what goes wrong | port today | `ssi` | open |
 |---|---|---|---|---|
-| tangent curve (#17 gap 4) | n1 × n2 = 0 along it; the marcher has no direction | collapses to its end points (#395); fixed with `ssi_tangent_curve_tracer` | a proved valley of the field, or of a Taylor field | flag on by default |
+| tangent curve (#17 gap 4) | n1 × n2 = 0 along it; the marcher has no direction | collapses to its end points (#395); fixed with `ssi_tangent_curve_tracer`, except a surface touching itself within one domain | a proved valley of the field, or of a Taylor field | flag on by default |
 | touch point inside both faces (#17 gap 1) | no boundary start, normals within 5° at every seed | missed (#394); found by the tangential contact search (WR-74) | a proved extremum of g at zero | always on |
 | branch point (#17 gap 3) | the marcher steps straight through; one curve where two end | wrong topology (#393); fixed by the singular-point split | a proved saddle; branches joined through it, vertex reported | #393 |
 | small loop, nearly tangent (#17 gap 2) | every seed below the 5°/2° thresholds | missed (#396); found by the start points on probation (WR-79) | loop-free pairs cannot hide it; closed form for plane/sphere and degree-2 | always on |

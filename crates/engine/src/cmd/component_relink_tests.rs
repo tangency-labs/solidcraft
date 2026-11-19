@@ -1245,3 +1245,54 @@ fn replace_with_link_by_path_does_not_reuse_a_pinned_configuration() {
     assert_variant_length(&mut s, local_occurrence, 30.0);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn insert_design_accepts_matrix_and_rotation_placement() {
+    let dir = folder("placement-test");
+    let file = dir.join("part.sc");
+    part(&file, 20);
+
+    let mut s = Session::default();
+
+    // 1. Insert with to_matrix (row-major 3x4).
+    let to_m = [0.0, 1.0, 0.0, 100.0, -1.0, 0.0, 0.0, 50.0, 0.0, 0.0, 1.0, 25.0];
+    let res1 = run(&mut s, "component.insert_design", json!({"path": file, "name": "PlacedMatrix", "to_matrix": to_m}));
+    let occ1_id = res1["occurrence"].as_u64().unwrap();
+    let occ1 = s.doc.occurrences.iter().find(|o| o.id == occ1_id).unwrap();
+    assert!((occ1.transform[1][0] - 1.0).abs() < 1e-6);
+    assert!((occ1.transform[0][1] - (-1.0)).abs() < 1e-6);
+    assert_eq!(occ1.transform[3], [100.0, 50.0, 25.0, 1.0]);
+
+    // 2. Reuse with to_matrix.
+    let to_m2 = [1.0, 0.0, 0.0, 10.0, 0.0, 1.0, 0.0, 20.0, 0.0, 0.0, 1.0, 30.0];
+    let res2 = run(&mut s, "component.insert_design", json!({"path": file, "reuse": true, "to_matrix": to_m2}));
+    let occ2_id = res2["occurrence"].as_u64().unwrap();
+    let occ2 = s.doc.occurrences.iter().find(|o| o.id == occ2_id).unwrap();
+    assert_eq!(occ2.transform[3], [10.0, 20.0, 30.0, 1.0]);
+
+    // 3. Insert with axis, angle and translate.
+    let res3 = run(
+        &mut s,
+        "component.insert_design",
+        json!({"path": file, "name": "PlacedTurn", "axis": [0, 0, 1], "angle": "90 deg", "translate": [5, 10, 15]}),
+    );
+    let occ3_id = res3["occurrence"].as_u64().unwrap();
+    let occ3 = s.doc.occurrences.iter().find(|o| o.id == occ3_id).unwrap();
+    assert!((occ3.transform[0][1] - 1.0).abs() < 1e-6);
+    assert!((occ3.transform[1][0] - (-1.0)).abs() < 1e-6);
+    assert_eq!(occ3.transform[3], [5.0, 10.0, 15.0, 1.0]);
+
+    // 4. Matrix with length expression in translation column.
+    let expr_m = json!([1, 0, 0, "40 mm", 0, 1, 0, "60 mm", 0, 0, 1, 0]);
+    let res4 = run(&mut s, "component.insert_design", json!({"path": file, "reuse": true, "matrix": expr_m}));
+    let occ4_id = res4["occurrence"].as_u64().unwrap();
+    let occ4 = s.doc.occurrences.iter().find(|o| o.id == occ4_id).unwrap();
+    assert_eq!(occ4.transform[3], [40.0, 60.0, 0.0, 1.0]);
+
+    // 5. Conflicting parameters refused.
+    assert!(s.execute("component.insert_design", &json!({"path": file, "to_matrix": to_m, "matrix": to_m})).is_err());
+    assert!(s.execute("component.insert_design", &json!({"path": file, "to_matrix": to_m, "translate": [1, 0, 0]})).is_err());
+    assert!(s.execute("component.insert_design", &json!({"path": file, "matrix": to_m, "axis": [0, 0, 1]})).is_err());
+
+    let _ = std::fs::remove_dir_all(dir);
+}

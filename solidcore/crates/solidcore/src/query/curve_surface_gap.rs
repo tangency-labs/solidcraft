@@ -321,7 +321,18 @@ fn piece(
 /// to some 1e-8 of a parameter, which the bound carries as well). A piece that cannot be cut
 /// further is bounded as it stands, so the result is a bound however the pieces ended; `None`
 /// when some piece has no bound at all.
+///
+/// The first pieces are also cut at every [`kinks`] of `C` and of `W` inside `[lo, hi]`:
+/// the second-order term bounds `|g − ℓ|` (`ℓ` the chord of the end values) by `h² / 8 sup
+/// |g''|` only where `g` is C¹, and the spans' second derivatives, hulled over a piece,
+/// know nothing of a jump in the first (a corner of `C` between two pieces' ends would be
+/// missed). No piece then has a corner of either inside it: it ends on the corner instead.
+///
+/// # Errors
+///
+/// Cancellation (polled at every piece), and the unported statuses of the evaluations.
 fn certified_gap(
+    k: &Kernel,
     curve: &BSplineCurve,
     uv: &BSplineCurve,
     surface: &NetSurface,
@@ -338,22 +349,32 @@ fn certified_gap(
     if !(lo.is_finite() && hi.is_finite() && d0 <= lo && lo < hi && hi <= d1) || first_pieces == 0 {
         return Ok(None);
     }
-    let mut stack: Vec<(f64, f64, u32)> = (0..first_pieces)
-        .rev()
-        .map(|i| {
-            let f = |j: usize| {
-                if j == first_pieces {
-                    hi
-                } else {
-                    lo + (hi - lo) * (j as f64) / (first_pieces as f64)
-                }
-            };
-            (f(i), f(i + 1), 0)
-        })
-        .collect();
+    let mut corners = kinks(&cn, lo, hi);
+    corners.extend(kinks(&wn, lo, hi));
+    corners.sort_by(f64::total_cmp);
+    corners.dedup();
+    let f = |j: usize| {
+        if j == first_pieces {
+            hi
+        } else {
+            lo + (hi - lo) * (j as f64) / (first_pieces as f64)
+        }
+    };
+    let mut stack: Vec<(f64, f64, u32)> = Vec::new();
+    for i in 0..first_pieces {
+        let (mut a, b) = (f(i), f(i + 1));
+        let start = a;
+        for &x in corners.iter().filter(|&&x| start < x && x < b) {
+            stack.push((a, x, 0));
+            a = x;
+        }
+        stack.push((a, b, 0));
+    }
+    stack.reverse();
     let mut worst = 0.0_f64;
     let mut made = stack.len();
     while let Some((a, b, depth)) = stack.pop() {
+        k.check_cancelled(OP)?;
         let mid = 0.5 * (a + b);
         // (a piece that cannot be cut further is bounded as it is: the bound holds whether or
         // not the second term has shrunk, closing only makes it tight)
@@ -380,6 +401,63 @@ fn certified_gap(
         stack.push((a, mid, depth + 1));
     }
     Ok(worst.is_finite().then_some(worst))
+}
+
+/// The parameters strictly inside `(lo, hi)` where the curve `cn` may not be C¹: its
+/// interior knots of multiplicity at least its degree (a span's polynomial meets the next
+/// only in its value there), in increasing order.
+fn kinks(cn: &NurbsCurve, lo: f64, hi: f64) -> Vec<f64> {
+    let Some(knots) = cn.u.get(cn.p..=cn.n) else {
+        return Vec::new();
+    };
+    knots
+        .chunk_by(|a, b| a == b)
+        .filter(|run| run.len() >= cn.p.max(1))
+        .filter_map(|run| run.first().copied())
+        .filter(|&x| lo < x && x < hi)
+        .collect()
+}
+
+/// A proved upper bound on `sup |C(t) − S(W(t))|` over `t` in `range`, for the 3D curve
+/// `curve` (`C`), a B-spline `uv` of parameters `(u, v, 0)` on the same parameter (`W`: a
+/// UV curve or trim of `C` on the surface), and `surface`'s net (`S`): how far the curve
+/// strays from the surface's image of its UV curve, the bound [`certified_gap`] encloses
+/// (not upstream, tangency-labs/solidcraft#18166). For a surface kept as the net of a
+/// definition (a blend's or a sweep's), `S` is the net: the caller adds the net's own bound.
+/// `floor` is the caller's scale, as for [`curve_face_gap_bound`].
+///
+/// `None` when the gap is not enclosed: an empty, unordered or not finite `range`, a
+/// surface that is not a NURBS net or whose net's parameters are not the surface's
+/// ([`NetSurface::of`], probed at `W`'s ends and middle), a `W` that cannot be evaluated,
+/// or a piece the bisection cannot bound.
+///
+/// # Errors
+///
+/// The kernel's unported and cancelled statuses.
+pub(crate) fn curve_uv_gap_bound(
+    k: &Kernel,
+    curve: &BSplineCurve,
+    uv: &BSplineCurve,
+    surface: &Surface,
+    range: [f64; 2],
+    floor: f64,
+) -> Result<Option<f64>> {
+    let [lo, hi] = range;
+    if !(lo.is_finite() && hi.is_finite() && lo < hi && floor.is_finite() && floor >= 0.0) {
+        return Ok(None);
+    }
+    let mut probe = Vec::new();
+    for t in [lo, 0.5 * (lo + hi), hi] {
+        let Ok(w) = uv.evaluate_point(t) else {
+            return Ok(None);
+        };
+        probe.push(Point2::new(w.x, w.y));
+    }
+    let surface = surface.clone_for_evaluation()?;
+    let Some(net) = NetSurface::of(k, &surface, &probe)? else {
+        return Ok(None);
+    };
+    certified_gap(k, curve, uv, &net, range, FIRST_PIECES, floor)
 }
 
 /// A proved upper bound on the distance from every point of `curve` over its parameters
@@ -485,7 +563,7 @@ pub fn curve_face_gap_bound(
     ) else {
         return Ok(None);
     };
-    certified_gap(curve, &correspondence, &net, range, FIRST_PIECES, floor)
+    certified_gap(k, curve, &correspondence, &net, range, FIRST_PIECES, floor)
 }
 
 // ---- a curve piece against a point, a surface or a curve ------------------------------------
@@ -838,6 +916,100 @@ mod tests {
                 .unwrap()
                 .is_none()
         ));
+    }
+
+    /// [`curve_uv_gap_bound`] of a line `lift` above the bilinear plane patch z = 0 (x, y
+    /// in 0..1), at the UV line under it with the same parameters: at least `lift` and no
+    /// more than rounding above it. The same line read at the UV line's reversed parameters
+    /// (the same image, other points) is bounded by its true gap, which at either end is
+    /// the shadow's whole length (about 0.5831); an empty range encloses nothing. A corner of
+    /// the curve inside a first piece (a spike to 1e-3 between two ends on the plane) is
+    /// seen: the pieces are cut there.
+    #[test]
+    fn a_line_over_its_uv_line_is_bounded_by_its_height() {
+        use crate::nurbs::b_spline_curve::KnotType;
+        use crate::nurbs::b_spline_surface::{
+            BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData,
+        };
+        let k = Kernel::default();
+        let plane = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 1,
+            v_degree: 1,
+            control_points: &[
+                Point3::new(0.0, 0.0, 0.0),
+                Point3::new(0.0, 1.0, 0.0),
+                Point3::new(1.0, 0.0, 0.0),
+                Point3::new(1.0, 1.0, 0.0),
+            ],
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[2, 2],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&[1.0; 4]),
+            uv_domain: None,
+        })
+        .unwrap();
+        let surface = Surface::from(plane);
+        let line = |a: [f64; 3], b: [f64; 3]| {
+            let c = NurbCurve::new(
+                vec![
+                    CPoint::new(a[0], a[1], a[2], NOW),
+                    CPoint::new(b[0], b[1], b[2], NOW),
+                ],
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+            )
+            .unwrap();
+            BSplineCurve::from_nurb(c, 3, false)
+        };
+        let lift = 4.2e-7;
+        let curve = line([0.2, 0.3, lift], [0.7, 0.6, lift]);
+        let uv = line([0.2, 0.3, 0.0], [0.7, 0.6, 0.0]);
+        let g = curve_uv_gap_bound(&k, &curve, &uv, &surface, [0.0, 1.0], 1e-9)
+            .unwrap()
+            .unwrap();
+        assert!(g >= lift && g <= lift * (1.0 + 1e-6), "{g:e}");
+        let reversed = line([0.7, 0.6, 0.0], [0.2, 0.3, 0.0]);
+        let g = curve_uv_gap_bound(&k, &curve, &reversed, &surface, [0.0, 1.0], 1e-9)
+            .unwrap()
+            .unwrap();
+        // (at either end the curve is the shadow's length from its image: the whole gap, not
+        // a part of it; its rounding is far below the 1e-12 allowed)
+        let full = (0.5_f64 * 0.5 + 0.3 * 0.3 + lift * lift).sqrt();
+        assert!(g >= full * (1.0 - 1e-12), "{g:e} against {full:e}");
+        let empty = curve_uv_gap_bound(&k, &curve, &uv, &surface, [0.5, 0.5], 1e-9).unwrap();
+        assert_eq!(empty, None);
+        // (a corner of the curve inside a first piece, `[0, 1/32]`: the line over its UV
+        // line but for a spike to 1e-3 at t = 1/64, back at t = 1/32; the piece's ends and
+        // the spans' second derivatives are all 0, so only a cut at the corner sees it)
+        let at = |t: f64| CPoint::new(0.2 + 0.5 * t, 0.3 + 0.3 * t, 0.0, NOW);
+        let mut spike = at(1.0 / 64.0);
+        spike.z = 1e-3;
+        let c = NurbCurve::new(
+            vec![at(0.0), spike, at(1.0 / 32.0), at(1.0)],
+            1,
+            vec![0.0, 0.0, 1.0 / 64.0, 1.0 / 32.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let spiked = BSplineCurve::from_nurb(c, 3, false);
+        let g = curve_uv_gap_bound(&k, &spiked, &uv, &surface, [0.0, 1.0], 1e-9)
+            .unwrap()
+            .unwrap();
+        assert!(g >= 1e-3, "{g:e}");
+        // (a cancelled kernel stops the bisection: cancellation, not an unenclosed gap)
+        let token = crate::kernel::CancelToken::default();
+        token.cancel();
+        let cancelled = Kernel {
+            cancel: Some(token),
+            ..Kernel::default()
+        };
+        let stopped = curve_uv_gap_bound(&cancelled, &curve, &uv, &surface, [0.0, 1.0], 1e-9);
+        assert!(
+            matches!(&stopped, Err(e) if e.is_cancelled()),
+            "{stopped:?}"
+        );
     }
 
     /// The top face (`z = 3`) of a 1 x 2 x 3 box: its surface, a plane with a net.

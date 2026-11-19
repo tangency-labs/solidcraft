@@ -20,11 +20,12 @@ use crate::*;
 /// measured, bodies searched for by name, features searched for by id, bodies a cut (or
 /// intersect) ran its booleans on, bodies searched for the cylinder a tap marking lies on,
 /// bodies whose faces a tapped hole read for its wall, intersects run to find a pattern's copies
-/// that cut nothing, and the tools a cut of many tools is made with (one when they are cut in one
+/// that cut nothing, the tools a cut of many tools is made with (one when they are cut in one
 /// go), unions run to tell the tools of a cut apart, face surfaces classified for a hole's
-/// direction, joins made of bodies that are all apart without running the kernel's union, and the
-/// holes whose tools were built (not moved from another copy's), and the tight boxes the kernel
-/// was asked for.
+/// direction, joins made of bodies that are all apart without running the kernel's union, the
+/// holes whose tools were built (not moved from another copy's), the tight boxes the kernel was
+/// asked for, the flats of sheets made from surfaces laid out (their pieces cut), the blends the
+/// kernel was asked for, and the searches for the radius that fits.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Counts {
     pub moved: usize,
@@ -42,6 +43,7 @@ pub(super) struct Counts {
     pub cut_tools: usize,
     pub apart_unions: usize,
     pub surfaces: usize,
+    pub flats: usize,
     pub joined_apart: usize,
     pub kept_checks: usize,
     pub detached_checks: usize,
@@ -50,6 +52,8 @@ pub(super) struct Counts {
     pub grouped_thread_fallbacks: usize,
     pub hole_tools: usize,
     pub tight_boxes: usize,
+    pub blends: usize,
+    pub fit_searches: usize,
 }
 
 thread_local! {
@@ -70,6 +74,7 @@ thread_local! {
             cut_tools: 0,
             apart_unions: 0,
             surfaces: 0,
+            flats: 0,
             joined_apart: 0,
             kept_checks: 0,
             detached_checks: 0,
@@ -78,6 +83,8 @@ thread_local! {
             grouped_thread_fallbacks: 0,
             hole_tools: 0,
             tight_boxes: 0,
+            blends: 0,
+            fit_searches: 0,
         })
     };
 }
@@ -109,6 +116,11 @@ fn written(f: impl FnOnce()) -> usize {
 /// A search on this thread through all of a design's features for one.
 pub(crate) fn count_feature_search() {
     count(|c| c.feature_searches += 1);
+}
+
+/// The flat of a sheet made from surfaces laid out on this thread: its pieces cut.
+pub(crate) fn count_flat() {
+    count(|c| c.flats += 1);
 }
 
 /// The searches `f` makes on this thread through all features or all bodies.
@@ -2329,7 +2341,7 @@ fn hole(position: Vec3, direction: Vec3, diameter: f64) -> FeatureKind {
 
 /// The sheet metal bodies of a model.
 fn sheet_bodies(model: &Model) -> Vec<String> {
-    model.state().sheets.iter().map(|s| s.body.clone()).collect()
+    model.state().surface_sheets.iter().map(|s| s.body.clone()).collect()
 }
 
 /// A cut leaves the sheets it cannot reach as they were, without checking that it would leave
@@ -2399,7 +2411,10 @@ fn a_hole_leaves_sheets_it_cannot_reach_as_they_were() {
     assert!(volume(&work.model, "Plate") < 43_200.0 - 300.0, "and the plate is drilled");
 }
 
-/// A hole drilled into a sheet's rim still bores that sheet, beside sheets it cannot reach.
+/// A hole drilled into a sheet's rim still bores that sheet, beside sheets it cannot reach. The
+/// sheet takes the drill as a bore of the panel it runs along and builds its body again (see
+/// `surface_hole_cut`), so no body goes through a boolean: on main the flat sheet was cut and read
+/// back, one boolean. The far sheets are left as they were.
 #[test]
 fn a_hole_into_a_rim_still_bores_its_sheet_beside_far_ones() {
     let mut doc = Document::new("rim");
@@ -2408,18 +2423,64 @@ fn a_hole_into_a_rim_still_bores_its_sheet_beside_far_ones() {
     }
     let mut model = Model::new();
     model.evaluate(&doc);
-    let near = sheet_bodies(&model)[0].clone();
+    // The sheet the drill runs along: the one at the origin, which holds the middle of its run, 30
+    // along it and halfway through the 2.5 mm.
+    let mid = Vec3::new(30.0, 20.0, 1.25);
+    let holds = |m: &Model, name: &str| m.state().body(name).is_some_and(|b| matches!(b.body.classify_point(mid), Ok(kernel::PointClass::Inside)));
+    let near = sheet_bodies(&model).into_iter().find(|b| holds(&model, b.as_str())).expect("the sheet at the origin");
     let whole = volume(&model, &near);
+    // Into its rim at x = 60, along it (-x) through all, 1.5 across, halfway through its thickness.
     let d = 1.5;
     let work = cut_work(&mut doc, hole(Vec3::new(60.0, 20.0, 1.25), Vec3::new(-1.0, 0.0, 0.0), d));
-    assert_eq!(work.cut, 1, "only the sheet the drill meets is bored");
-    assert_eq!(work.kept, sheet_bodies(&work.model)[1..]);
+    assert_eq!(work.cut, 0, "the sheet bores itself: no body goes through a boolean");
+    let mut far: Vec<String> = sheet_bodies(&work.model).into_iter().filter(|b| *b != near).collect();
+    let mut kept = work.kept.clone();
+    far.sort();
+    kept.sort();
+    assert!(far.len() == 3 && kept == far, "the far sheets are left as they were: {kept:?} of {far:?}");
     let state = work.model.state();
-    let sheet = state.sheets.iter().find(|s| s.body == near).unwrap();
-    assert_eq!(sheet.bores.len(), 1, "kept as a bore of the sheet");
+    let sheet = state.surface_sheets.iter().find(|s| s.body == near).expect("the drilled sheet");
+    assert!(sheet.bores.len() == 1 && (sheet.bores[0].radius - d / 2.0).abs() < 1e-12, "kept as a bore of the sheet: {:?}", sheet.bores);
+    // It takes the bore's cylinder through the plate's 60: π (d/2)² 60 = 106.03 mm³ (to 2 %, as on
+    // main).
     let removed = whole - volume(&work.model, &near);
     let bore = std::f64::consts::PI * (d / 2.0).powi(2) * 60.0;
     assert!((removed - bore).abs() < 0.02 * bore, "removed {removed} of {bore}");
+}
+
+/// A flange on a sheet made from surfaces lays the sheet's flat out once, however many flanges
+/// the sheet already has: naming its pick (the model's name for the edge), finding the sheet and
+/// the edge again by that name, and keying the panels it makes lay nothing out. Each of them laid
+/// the whole sheet out again, five flats for every flange built (#6748).
+#[test]
+fn a_flange_lays_its_sheet_out_once() {
+    let mut doc = Document::new("flanges");
+    flat_sheet(&mut doc, Vec2::new(0.0, 0.0), 150.0, 100.0);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let flange = |p: Vec3| FeatureKind::SheetFlange {
+        edges: vec![FlangeEdge::at(p)],
+        height: "20 mm".into(),
+        angle: "90 deg".into(),
+        radius: None,
+        position: "inside".into(),
+        flip: false,
+        body: None,
+        corner_relief_shape: None,
+        corner_relief: None,
+        height_from: None,
+    };
+    for p in [Vec3::new(75.0, 0.0, 2.5), Vec3::new(75.0, 100.0, 2.5), Vec3::new(0.0, 50.0, 2.5), Vec3::new(150.0, 50.0, 2.5)] {
+        // The pick is named as the engine names it, on the model as it is.
+        let mut names = Vec::new();
+        let naming = counted(|| names = crate::sheet::sheet_edge_names(&model.state(), &[p])).flats;
+        assert!(names.first().is_some_and(|n| n.contains('|')), "the model's name for the edge: {names:?}");
+        let id = doc.add_feature(flange(p), None).unwrap();
+        doc.feature_mut(id).unwrap().edge_names = names;
+        let built = counted(|| model.evaluate(&doc)).flats;
+        assert_eq!(model.result(id).unwrap().error, None, "the flange at {p:?} builds");
+        assert_eq!((naming, built), (0, 1), "the flange at {p:?}: flats laid out naming its pick, and building it");
+    }
 }
 
 /// A 1.5 mm disc of 50 mm radius with a 3.5 mm through hole at `radius` on X, patterned `count`
@@ -3022,8 +3083,8 @@ fn an_ambiguous_target_is_refused_before_a_sheet_is_machined() {
     let err = model.result(cut).and_then(|r| r.error.clone()).expect("the cut is refused");
     assert!(err.contains("ambiguous") && err.contains("`Encoder`"), "{err}");
     let st = model.state();
-    let sheet = st.sheets.iter().find(|s| s.body == "Plate").expect("the linked sheet");
-    assert!(sheet.holes.is_empty(), "the linked sheet is not machined");
+    let sheet = st.surface_sheets.iter().find(|s| s.body == "Plate").expect("the linked sheet");
+    assert!(sheet.sheet.panels.iter().all(|p| p.region.holes.is_empty()), "the linked sheet is not machined");
 }
 
 /// A hole's look at the material over its entry face (#10695) is best effort: when the kernel
@@ -3103,6 +3164,219 @@ fn a_join_of_bodies_that_are_all_apart_runs_no_union() {
     assert!((kernel::measure(&st.bodies[0].body).unwrap().volume - 20.0).abs() < 1e-9);
 }
 
+/// When an import's background checks end having healed a part, the model takes the healed
+/// body in the import's place: settling marks the import and what follows it stale, the next
+/// evaluation reads the healed body under another fingerprint, and settling the same heal again
+/// changes nothing. Another model of the same design, whose checks healed nothing, keeps the
+/// file's bodies.
+#[test]
+fn an_imports_healed_parts_replace_its_bodies_once_its_checks_end() {
+    // the heal preference is the process's: held on for the whole test (under `cargo test`)
+    let _on = kernel::heal_preference_for_tests(true);
+    let mut doc = placed_imports(1);
+    let later = doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(10.0, 1.0)), None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()));
+    let volumes = |m: &Model| {
+        let mut v = m.state().bodies.iter().map(|b| b.body.volume_at(1e-6).unwrap().round()).collect::<Vec<_>>();
+        v.sort_by(f64::total_cmp);
+        v
+    };
+    assert_eq!(volumes(&model), [125.0, 1000.0]);
+    let fingerprints = |m: &Model| m.results.iter().map(|r| r.fingerprint).collect::<Vec<_>>();
+    let before = fingerprints(&model);
+    let import = doc.features[0].id;
+    let issue = kernel::ImportIssue {
+        kind: kernel::IssueKind::Repaired,
+        item: Some(1),
+        part: String::new(),
+        faces: 0,
+        times: 1,
+        detail: "healed SMLib's check failures".into(),
+    };
+    let healed = kernel::box_solid(Vec3::ZERO, Vec3::new(3.0, 3.0, 3.0)).unwrap();
+    let face_origin = vec![0; healed.face_count()];
+    // Each healed face says which face of the body as read it was: here in reverse order.
+    let face_source: Vec<usize> = (0..healed.face_count()).rev().collect();
+    let body_of = |m: &Model, volume: f64| {
+        let st = m.state();
+        let b = st.bodies.iter().find(|b| b.body.volume_at(1e-6).unwrap().round() == volume).unwrap().clone();
+        crate::naming::face_names(&b)
+    };
+    let names_before = body_of(&model, 1000.0);
+    let checks = kernel::ImportChecks::ended_for_tests(
+        vec![issue],
+        vec![kernel::HealedBody { index: 0, body: healed, face_origin, face_source: face_source.clone() }],
+    );
+    let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
+    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), checks: checks.clone() }));
+
+    assert!(model.settle_import_checks(), "a heal changes the import");
+    assert!(model.settle_import_checks(), "until an evaluation brings it in, it is still owed");
+    assert!(model.results.iter().all(|r| r.stale), "the import and what follows it are stale");
+    model.evaluate(&doc);
+    assert_eq!(volumes(&model), [27.0, 125.0], "the healed part replaces the file's");
+    // A reference to a face of the body as read finds the face it became.
+    let names_after = body_of(&model, 27.0);
+    assert_eq!(names_after.len(), face_source.len());
+    for (k, &from) in face_source.iter().enumerate() {
+        assert_eq!(names_after[k], names_before[from], "healed face {k} is read face {from}");
+    }
+    let after = fingerprints(&model);
+    assert!(after.iter().zip(&before).all(|(a, b)| a != b), "no result keeps an unhealed fingerprint");
+    assert!(model.result(later).unwrap().error.is_none());
+
+    // The same heal settled again: nothing to do.
+    let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
+    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), checks }));
+    assert!(!model.settle_import_checks());
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 0);
+    assert_eq!(fingerprints(&model), after);
+
+    let mut other = Model::new();
+    other.evaluate(&doc);
+    assert_eq!(volumes(&other), [125.0, 1000.0], "another model keeps the file's bodies");
+    assert_eq!(fingerprints(&other), before);
+}
+
+/// #17708 review: the evaluation that brings an import's healed parts in reads the file again,
+/// and that read's checks heal it again. When they end with the heals the model already has,
+/// the import is not news: the window is told of the heal once, and nothing goes stale.
+#[test]
+fn a_heal_the_next_read_finds_again_is_told_once() {
+    // the heal preference is the process's: held on for the whole test (under `cargo test`)
+    let _on = kernel::heal_preference_for_tests(true);
+    let doc = placed_imports(1);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let import = doc.features[0].id;
+    let issue = kernel::ImportIssue {
+        kind: kernel::IssueKind::Repaired,
+        item: Some(1),
+        part: String::new(),
+        faces: 0,
+        times: 1,
+        detail: "healed SMLib's check failures".into(),
+    };
+    // A run of the import's checks that healed its first part (each run its own, as each read
+    // starts one).
+    let run = || {
+        let healed = kernel::box_solid(Vec3::ZERO, Vec3::new(3.0, 3.0, 3.0)).unwrap();
+        let n = healed.face_count();
+        kernel::ImportChecks::ended_for_tests(
+            vec![issue.clone()],
+            vec![kernel::HealedBody { index: 0, body: healed, face_origin: vec![0; n], face_source: (0..n).collect() }],
+        )
+    };
+    let ended = |model: &mut Model, checks: kernel::ImportChecks| {
+        let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
+        r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), checks }));
+    };
+    ended(&mut model, run());
+    assert!(model.settle_import_checks());
+    assert_eq!(model.take_import_notices(), [import], "the heal is news once");
+    model.evaluate(&doc);
+    let fingerprints: Vec<u64> = model.results.iter().map(|r| r.fingerprint).collect();
+    // The checks of the read that brought the heal in end with the same heals.
+    ended(&mut model, run());
+    assert!(!model.settle_import_checks(), "the same heals owe no evaluation");
+    assert!(model.take_import_notices().is_empty(), "the same heal found again is not news");
+    assert!(model.results.iter().all(|r| !r.stale));
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 0);
+    assert_eq!(model.results.iter().map(|r| r.fingerprint).collect::<Vec<_>>(), fingerprints);
+}
+
+/// The tolerance heal preference is part of an import's and a Repair's fingerprint, and of no
+/// other feature's: turned off, the model is not current and evaluates both again (the import
+/// read as it is, the Repair without its heal); turned back on, it comes back to the first
+/// fingerprints.
+#[test]
+fn turning_the_heal_preference_off_evaluates_imports_and_repair_again() {
+    let mut doc = placed_imports(1);
+    let mut model = Model::new();
+    {
+        let _on = kernel::heal_preference_for_tests(true);
+        model.evaluate(&doc);
+    }
+    let body = model.state().bodies[0].name.clone();
+    let repair = doc.add_feature(FeatureKind::Repair { body: body.into(), gap: "0.2 mm".into(), patch_holes: false }, None).unwrap();
+    let import = doc.features[0].id;
+    let fingerprint_of = |m: &Model, id: u64| m.result(id).unwrap().fingerprint;
+    let (on_import, on_repair) = {
+        let _on = kernel::heal_preference_for_tests(true);
+        model.evaluate(&doc);
+        assert!(model.heals() && model.is_current(&doc));
+        (fingerprint_of(&model, import), fingerprint_of(&model, repair))
+    };
+    {
+        let _off = kernel::heal_preference_for_tests(false);
+        assert!(!model.is_current(&doc), "the preference turned off: the model is owed an evaluation");
+        model.evaluate(&doc);
+        assert!(!model.heals());
+        assert!(model.last_recomputed >= 2, "the import and the Repair evaluated again: {}", model.last_recomputed);
+        assert_ne!(fingerprint_of(&model, import), on_import);
+        assert_ne!(fingerprint_of(&model, repair), on_repair);
+        assert!(model.is_current(&doc));
+    }
+    let _on = kernel::heal_preference_for_tests(true);
+    assert!(!model.is_current(&doc), "turned back on: owed again");
+    model.evaluate(&doc);
+    assert_eq!((fingerprint_of(&model, import), fingerprint_of(&model, repair)), (on_import, on_repair));
+
+    // A feature that is neither keeps its fingerprint either way.
+    let sketch = doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(10.0, 1.0)), None).unwrap();
+    let f = doc.feature(sketch).unwrap();
+    let off = super::ImportDigests { heal_off: true, ..super::ImportDigests::default() };
+    let print = |steps: &super::ImportDigests| super::fingerprint(&doc, 7, f, &BTreeMap::new(), false, steps);
+    assert_eq!(print(&off), print(&super::ImportDigests::default()));
+    let r = doc.feature(repair).unwrap();
+    assert_ne!(
+        super::fingerprint(&doc, 7, r, &BTreeMap::new(), false, &off),
+        super::fingerprint(&doc, 7, r, &BTreeMap::new(), false, &super::ImportDigests::default())
+    );
+}
+
+/// A background heal that ends after the preference was turned off is not taken, nor its note:
+/// the import keeps no "healed" warning or report over the part as read, nothing is told, and
+/// the import and what follows it are stale, owed an evaluation that reads it again.
+#[test]
+fn a_heal_that_ends_after_the_preference_turned_off_leaves_no_healed_note() {
+    let mut doc = placed_imports(1);
+    doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(10.0, 1.0)), None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let import = doc.features[0].id;
+    let issue = kernel::ImportIssue {
+        kind: kernel::IssueKind::Repaired,
+        item: Some(1),
+        part: String::new(),
+        faces: 0,
+        times: 1,
+        detail: "healed SMLib's check failures".into(),
+    };
+    let healed = kernel::box_solid(Vec3::ZERO, Vec3::new(3.0, 3.0, 3.0)).unwrap();
+    let n = healed.face_count();
+    let checks = kernel::ImportChecks::ended_for_tests(
+        vec![issue],
+        vec![kernel::HealedBody { index: 0, body: healed, face_origin: vec![0; n], face_source: (0..n).collect() }],
+    );
+    let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
+    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), checks }));
+
+    assert!(model.settle_import_checks_under(false), "an evaluation is owed: the import is read again");
+    assert!(!model.has_import_heals(), "the heal is not taken");
+    assert!(model.take_import_notices().is_empty(), "nothing is told of a heal not taken");
+    let r = model.result(import).unwrap();
+    assert!(!r.warning.as_deref().unwrap_or("").contains("healed"), "{:?}", r.warning);
+    assert!(r.import_report.as_ref().is_none_or(|i| i.current().issues.iter().all(|i| !i.detail.contains("healed"))), "{:?}", r.import_report);
+    assert!(model.settle_import_checks_under(false), "settled again: still owed");
+    assert!(!model.has_import_heals() && model.take_import_notices().is_empty());
+    assert!(model.results.iter().all(|r| r.stale), "the import and what follows it are stale");
+}
+
 /// A cut measures the tight box of its tool, and the body's only when the box can show
 /// the tool apart of it (#18821): the kernel takes minutes to work out the tight box of
 /// a body with many faces (347 s for the cup of the report), against 30 s for the cut
@@ -3154,4 +3428,97 @@ fn a_cut_measures_the_tight_box_of_its_tool_only() {
     assert_eq!(st.bodies.len(), 1);
     // The tool crosses the top face: it takes 500 mm3 of the block with it.
     assert!((kernel::measure(&st.bodies[0].body).unwrap().volume - (8000.0 - 500.0)).abs() < 1e-6);
+}
+
+/// The design of #4282: a cube with a hole through it along each of the three axes, all of
+/// them through the cube's centre, and a round on every edge of the result.
+fn holed_cube(doc: &mut Document, size: f64, hole: f64) {
+    block(doc, "Cube", Vec3::new(-size / 2.0, -size / 2.0, 0.0), [size, size, size]);
+    // The three holes: a hole along each axis, its axis through the cube's centre.
+    for (base, axis) in
+        [(Vec3::new(-size / 2.0, 0.0, size / 2.0), Vec3::X), (Vec3::new(0.0, -size / 2.0, size / 2.0), Vec3::Y), (Vec3::new(0.0, 0.0, 0.0), Vec3::Z)]
+    {
+        let kind = FeatureKind::Cylinder {
+            base: point_expr(base),
+            axis: Dir(axis),
+            radius: (hole / 2.0).to_string().into(),
+            height: size.to_string().into(),
+            operation: Operation::Cut,
+            references: Vec::new(),
+        };
+        doc.add_feature(kind, None).unwrap();
+    }
+}
+
+/// The middle of every edge of the body, the points a round of all of them is picked with.
+fn every_edge(body: &kernel::Body) -> Vec<Vec3> {
+    let tol = (body.size() * 1e-3).max(1e-3);
+    body.edges(tol).unwrap().iter().map(|e| e.mid).collect()
+}
+
+/// A round of every edge of the body, with `radius`, and the feature it makes.
+fn round_of_every_edge(doc: &mut Document, body: &kernel::Body, radius: &str) -> u64 {
+    let edges = every_edge(body);
+    let kind = FeatureKind::Fillet {
+        edges: edges.into_iter().map(Position).collect(),
+        radius: radius.into(),
+        body: None,
+        style: Default::default(),
+        fit: Default::default(),
+        corner: Default::default(),
+        setbacks: Vec::new(),
+        turn: Default::default(),
+        tangent_chain: true,
+        edge_radii: Vec::new(),
+    };
+    doc.add_feature(kind, None).unwrap()
+}
+
+/// A round the kernel refuses without naming a radius that fits does not make the document
+/// search for the largest radius that fits (#4282): the search cannot be guided then, and it
+/// blends every edge again for each of the sizes it tries. On the design of #4282 (a cube with
+/// a hole through each axis, a 2 mm round of every edge) those ten blends of the forty-one edges
+/// took 77 s, fifteen times the blend that failed, and they found nothing: the round fails at
+/// any radius there.
+#[test]
+fn a_refused_round_that_names_no_radius_to_try_does_not_search_for_one() {
+    // The design of #4282 at a third of its size (the round and the holes keep their
+    // proportions): a cube with a hole through each axis, a round of every one of its edges.
+    // The kernel refuses the radius and cannot size the refusal.
+    let mut doc = Document::new("holed cube");
+    holed_cube(&mut doc, 10.0, 10.0 / 3.0);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().map(|r| &r.error).collect::<Vec<_>>());
+    let body = model.state().bodies[0].body.clone();
+    let fillet = round_of_every_edge(&mut doc, &body, &format!("{} mm", 2.0 / 3.0));
+    let work = counted(|| model.evaluate(&doc));
+    let r = model.result(fillet);
+    let error = r.and_then(|r| r.error.clone()).unwrap_or_default();
+    assert!(error.contains("larger than the faces beside its edges allow"), "{error}");
+    // The blend the kernel refused, and no search for a radius that fits.
+    assert_eq!(work.blends, 1, "{work:?}");
+    assert_eq!(work.fit_searches, 0, "{work:?}");
+}
+
+/// A round the kernel refuses naming the radius that fits still searches for it: the search is
+/// guided by that radius and settles in two or three blends, and the refusal names the largest
+/// radius that fits.
+#[test]
+fn a_refused_round_that_names_a_radius_to_try_searches_for_it() {
+    // A 10 mm box with a 6 mm round of all its edges: the radius is too large and the kernel
+    // names the largest that fits (4.99 mm).
+    let mut doc = Document::new("a box");
+    block(&mut doc, "A", Vec3::ZERO, [10.0, 10.0, 10.0]);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let body = model.state().bodies[0].body.clone();
+    let fillet = round_of_every_edge(&mut doc, &body, "6");
+    let work = counted(|| model.evaluate(&doc));
+    let r = model.result(fillet);
+    let error = r.and_then(|r| r.error.clone()).unwrap_or_default();
+    assert!(error.contains("larger than the faces beside its edges allow"), "{error}");
+    // The blend that was refused, and the search for the radius that fits.
+    assert_eq!(work.blends, 1, "{work:?}");
+    assert_eq!(work.fit_searches, 1, "{work:?}");
 }
