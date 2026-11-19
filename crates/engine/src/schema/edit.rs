@@ -855,6 +855,9 @@ pub struct FeatureInfo {
     pub inputs: Vec<FeatureInput>,
     /// Why the feature fails to build; null when it doesn't.
     pub error: Option<String>,
+    /// The stable code of the kernel call it fails with; present only when it fails with one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<super::inspect::ErrorCodeReply>,
     /// A warning the feature built with; null when there is none.
     pub warning: Option<String>,
 }
