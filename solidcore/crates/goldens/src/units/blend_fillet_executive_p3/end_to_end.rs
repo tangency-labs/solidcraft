@@ -3065,12 +3065,15 @@ mod wr664_near_knot_trims {
     /// the face's UV space: at each vertex the start of an edge use's UV trim curve and the
     /// end of its clockwise neighbour's are no farther apart than `EFF_ZERO * (1 + |uv|)`,
     /// the gap below which the face builder counts a loop corner as closed
-    /// (`topology::face::p3`'s `create_uv_trim_curves_body`, `uv_scaled_zero`). Where a rail
-    /// meets the blend's end curve, both ends are the rail's trimmed end on the fillet
-    /// surface, so they agree to rounding. The near-knot snap moves a rail's end along it by
-    /// up to the zone tolerance after the end curve is built; an end curve left where it was
-    /// opens the loop there by that much, and the volume enclosure of the body can then no
-    /// longer prove its volume positive (`round_definition_rows`).
+    /// (`topology::face::p3`'s `create_uv_trim_curves_body`, `uv_scaled_zero`). The near-knot
+    /// snap moves a rail's end along it by about the zone tolerance after the end curve is
+    /// built; an end curve left where it was opens the loop there by that much, and the
+    /// volume enclosure of the body can then no longer prove its volume positive
+    /// (`round_definition_rows`). Where the snap moved the rail's end, the end curve's end is
+    /// set to it, so the two agree to rounding. Where no end snaps, they differ by the
+    /// drop's accuracy (4.2e-9 in u on main's e1 r0.1), more than this bound: on these five
+    /// rows every corner of a rolled blend face closes (MEASURED), so a corner that stops
+    /// snapping fails here and needs its own look.
     ///
     /// The bottle's other blend face, a patch without a definition, is not checked: three of
     /// its corners are open by 1.4e-10 to 3.9e-6 on main as well.

@@ -1783,8 +1783,10 @@ const FILLET_MAIN: [u64; 29] = [
 /// `source-file-corner_box-edge4`, `-edge8`, `-edge9` and
 /// `stubs4-delete-edge-bottle-e8-r0.1` ([`FILLETS`] 1, 2, 3 and 14). Entry 14's are main's
 /// (see [`FILLET_MAIN`]) with the mass integrator's knot-line split, which moved that row
-/// since, and #18918's near-knot rail trim; its entries are classified against a certified enclosure in goldens'
-/// `mass_knot_line_moved_rows_are_classified`.
+/// since (its entries are classified against a certified enclosure in goldens'
+/// `mass_knot_line_moved_rows_are_classified`), and #18918's near-knot rail trim, which
+/// moves them within the zone tolerance (the row's certified mass enclosure in goldens'
+/// `round_definition_rows` holds the new values).
 const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
     (
         1,

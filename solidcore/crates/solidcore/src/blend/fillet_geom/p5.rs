@@ -46,7 +46,11 @@
 //! - **Near-knot rail trims (not upstream).** As the fork does (WR-664,
 //!   tangency-labs/smlib@7d79866), `TrimRailCurves` trims a rail at its knot next to a
 //!   vertex's drop when the rail between the two is no longer than the target B-rep's zone
-//!   tolerance (`snap_rail_end_to_knot`).
+//!   tolerance (`snap_rail_end_to_knot`). The fork reads that tolerance through the solver's
+//!   first edge use; it is read from `target`, where those edge uses live, so a solver
+//!   without edge uses trims too. Where the snap moves a rail end, the geometry's end
+//!   curves at that vertex follow it (`end_curves_follow_rail_end`); upstream's end curves
+//!   stay where the vertex is.
 //! - **Object model.** As in `blend.fillet_geom_p1` / `_p4`, a fillet vertex, edge or
 //!   geometry is an id of the [`FilletBrep`] (`self`, upstream's pseudo B-rep
 //!   `pPseudoBrep`). `GetFilletSolver()` is an opaque [`FilletSolverId`] resolved in
@@ -2981,19 +2985,22 @@ impl FilletBrep {
         Ok(())
     }
 
-    /// Not upstream (#18918): the UV trim curves of geometry `g` on its fillet surface that
-    /// end at the rail's end vertex `v` (its end curves and cross sections, other than the
-    /// rail `rail` itself) end at `uv`, the rail's end the near-knot snap moved. They were
-    /// built before `TrimRailCurves` and end at the vertex; the drop of the vertex onto the
-    /// rail finds that end to the solve's accuracy, and the snap then moves the rail's end
-    /// along it by up to the zone tolerance. A curve left at the vertex opens the fillet
+    /// Not upstream (WR-664): the UV trim curves of geometry `g` on its fillet surface that
+    /// end at the rail's end vertex `v` (its end curves and cross sections; none of its
+    /// rails, `rail` among them) end at `uv`, the rail's end the near-knot snap moved. They
+    /// were built before `TrimRailCurves` and end at the vertex; the drop of the vertex onto
+    /// the rail finds that end to the solve's accuracy, and the snap then moves the rail's
+    /// end along it by a rail length of about the zone tolerance (the snap's length test is
+    /// accurate to 1 % of it). A curve left at the vertex opens the fillet
     /// face's loop at that corner by as much: the face builder closes a loop corner on
     /// whichever side it meets first (`sm_FixUVTrimCurves`), and a rail's UV curve is
     /// later dropped again from its trimmed 3D curve, so only a curve that ends where the
     /// rail does keeps the loop closed.
     ///
     /// # Errors
-    /// [`SolidError::NotFound`] for a dangling id; those of the curve edit.
+    /// [`SolidError::NotFound`] for a dangling id; `SM_ERR_NULL_POINTER` for an edge use
+    /// without vertex use or vertex; those of the curve edit (a UV curve that is not a
+    /// B-spline or line); cancellation.
     fn end_curves_follow_rail_end(
         &mut self,
         k: &Kernel,
@@ -3003,6 +3010,9 @@ impl FilletBrep {
         uv: Point2,
     ) -> Result<()> {
         let geom = self.geom(g)?;
+        let mut rails: Vec<EdgeId> = vec![rail];
+        rails.extend([geom.rail(0), geom.rail(1)].into_iter().flatten());
+        rails.extend(geom.other_rails1.iter().chain(&geom.other_rails2));
         let mut uses = geom.side_eus.clone();
         for &eu in &geom.ref_eus {
             if !uses.contains(&eu) {
@@ -3010,8 +3020,9 @@ impl FilletBrep {
             }
         }
         for eu in uses {
+            k.check_cancelled(OP_TRIM)?;
             let rec = self.brep().edgeuse(eu)?;
-            let Some(e) = rec.edge.filter(|&e| e != rail) else {
+            let Some(e) = rec.edge.filter(|e| !rails.contains(e)) else {
                 continue;
             };
             if rec.uv_trim_curve.is_none() {
