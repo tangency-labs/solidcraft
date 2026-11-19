@@ -1281,7 +1281,7 @@ impl SessionObjects<'_> {
         let mut sheet = self
             .intermediate
             .take()
-            .ok_or_else(|| SolidError::blend_missing(OP, "the intermediate body"))?;
+            .ok_or_else(|| SolidError::blend(OP, BlendFailure::StageFailed))?;
         let bounded = (|| {
             // the ends the corners left uncut, cut off by their end faces' surfaces continued
             // (an end's event: the end face cuts the blend whatever lies past it, a lip over a
@@ -1818,6 +1818,8 @@ impl FilletSession<'_> {
             .take()
             .ok_or_else(|| SolidError::blend_missing(OP, "the intermediate body"))?;
 
+        // These ends were already built and capped before sewing. Losing their solver
+        // topology or section here is a stage defect, not a geometric refusal.
         let mut section_ends = Vec::new();
         for end in self.executive.open_ends.iter().filter(|end| end.section) {
             let FilletObject::Solver(id) = end.solver else {
@@ -1832,13 +1834,12 @@ impl FilletSession<'_> {
                 .solver(id)?
                 .base()
                 .edgeuse(0)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
+                .ok_or_else(|| SolidError::blend(OP, BlendFailure::StageFailed))?;
             let edge = eu1::edge(self.objects.target, eu)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
+                .ok_or_else(|| SolidError::blend(OP, BlendFailure::StageFailed))?;
             section_ends.push(
-                section_end(k, self.objects.target, edge, v)?.ok_or_else(|| {
-                    SolidError::blend_failed(OP, "no section through the end vertex")
-                })?,
+                section_end(k, self.objects.target, edge, v)?
+                    .ok_or_else(|| SolidError::blend(OP, BlendFailure::StageFailed))?,
             );
         }
         let mut note = None;
