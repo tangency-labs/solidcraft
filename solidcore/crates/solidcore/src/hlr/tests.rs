@@ -43,6 +43,17 @@ fn hidden_lines(
     hidden_lines_on(defs, scene, view, opts, cancel, &Threads)
 }
 
+/// The tests' worker context, on as many threads as `opts` asks for.
+fn context<'a>(
+    defs: &'a [Prepared],
+    scene: &'a [Placement],
+    view: &View,
+    opts: &Options,
+    cancel: &'a (dyn Fn() -> bool + Sync),
+) -> Result<Ctx<'a>, HlrError> {
+    super::context(defs, scene, view, opts, cancel, &Threads)
+}
+
 /// The length of a screen point and the distance between two.
 trait V2 {
     fn len(self) -> f64;
