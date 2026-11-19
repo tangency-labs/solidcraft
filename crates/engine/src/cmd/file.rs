@@ -118,7 +118,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&EXPORT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::FileExportResult>)
-        .params("allow_missing?: bool (default false: a body that cannot mesh fails the export; true skips it and reports its body and face in warnings); path; format?: stl|stla|obj|step|3mf|3mf-tagged|glb|urdf|json (default from extension; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic and roughness as materials; a transparent body or face, or a body a render setup gives an image texture or optics, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10), images?: bool (default false; true: each shown canvas and decal is written as a textured quad, its image next to the URDF); quality?: standard|fine|finest (STL, OBJ, 3MF and GLB: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies)"),
+        .params("allow_missing?: bool (default false: a body that cannot mesh fails the export; true skips it and reports its body and face in warnings); path; format?: stl|stla|obj|step|3mf|3mf-tagged|glb|urdf|sdf|json (default from extension; sdf: a Gazebo model folder, as file.export_sdf (the path is the folder, a `.sdf` ending dropped; name?, static?, model_uris?, quality?); docs/sdf.md; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic and roughness as materials; a transparent body or face, or a body a render setup gives an image texture or optics, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10), images?: bool (default false; true: each shown canvas and decal is written as a textured quad, its image next to the URDF); quality?: standard|fine|finest (STL, OBJ, 3MF and GLB: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies)"),
     // One command per format, so each File › Export item can have a key of its own; started
     // from a key or command search, the app opens the save picker (the mesh dialog for STL and
     // 3MF). Each takes `file.export`'s parameters for its format, without `format`.
@@ -152,6 +152,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&EXPORT_URDF_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::UrdfExportResult>)
         .params("path; mesh_prefix?; effort? (default 1000); velocity? (default 10) → {path, format, files, links, joints, warnings}: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md"),
+    CommandSpec::new("file.export_sdf", "Export SDF Model", crate::checked!("file.export_sdf", export_sdf_cmd))
+        .icon("export")
+        .noundo()
+        .contract(&EXPORT_SDF_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::file::SdfExportResult>)
+        .params("path: the model folder (made if missing; a `.sdf` ending is dropped); name? (default: the folder's name); static?: bool (default true; false gives the link the bodies' mass and inertia); model_uris?: bool (default false: files named relative to model.sdf; true: model://<name>/<file>); bodies?: [names] (default: every body); quality?: standard|fine|finest → {path, format, name, files, bodies, decals, warnings}: a Gazebo model folder with model.config, model.sdf, an STL per body and each shown decal's image on a textured COLLADA quad, the image also the visual's PBR albedo map; docs/sdf.md"),
     CommandSpec::new("file.save_mesh", "Save As Mesh", crate::checked!("file.save_mesh", save_mesh))
         .at("INSERT", "FILES")
         .icon("mesh_export")
@@ -240,6 +246,7 @@ const EXPORT_3MF_CONTRACT: crate::schema::TypedContract<crate::schema::file::Exp
 const EXPORT_OBJ_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportMeshParams> = crate::schema::TypedContract::new();
 const SLICERS_CONTRACT: TypedContract<SlicersParams> = TypedContract::new();
 const EXPORT_URDF_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportUrdfParams> = crate::schema::TypedContract::new();
+const EXPORT_SDF_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportSdfParams> = crate::schema::TypedContract::new();
 const SAVE_MESH_CONTRACT: crate::schema::TypedContract<crate::schema::save_mesh::SaveMeshParams> = crate::schema::TypedContract::new();
 
 fn path_arg<'a>(p: &'a Value, cmd: &str) -> Result<&'a str> {
@@ -2561,6 +2568,9 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         }
         return export_urdf(s, cmd, path, p);
     }
+    if format == Format::Sdf {
+        return export_sdf(s, cmd, path, p);
+    }
     let quality = mesh_quality(p, cmd)?;
     let parts = mesh_parts(s, p, cmd, format)?;
     let bodies = string_list(cmd, p, "bodies")?;
@@ -2606,6 +2616,11 @@ fn export_obj_cmd(s: &mut Session, p: &Value) -> Result<Value> {
 fn export_urdf_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.export_urdf";
     export_urdf(s, cmd, path_arg(p, cmd)?, p)
+}
+
+fn export_sdf_cmd(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "file.export_sdf";
+    export_sdf(s, cmd, path_arg(p, cmd)?, p)
 }
 
 /// The OBJ export: the mesh file and the material library beside it, with the colours of the
@@ -2668,11 +2683,19 @@ fn export_glb(s: &Session, cmd: &str, path: &str, bodies: &[String], quality: so
     Ok(json!({"path": path, "bytes": bytes.len(), "format": format!("{:?}", Format::Glb)}))
 }
 
-/// The images the design shows (canvases and decals alike) for a URDF export: each one's corners
-/// where it is shown (following its sketch when anchored), in its component's frame, and its
-/// image. A hidden image is left out; one that can't be placed or whose image is damaged is left
-/// out with a warning.
-fn urdf_decals(doc: &solidcraft_doc::Document, st: &solidcraft_doc::ModelState, warnings: &mut Vec<String>) -> Vec<solidcraft_io::urdf::UrdfDecal> {
+/// An image the design shows on the model: its corners in the world (following its sketch when
+/// anchored), its component and its image.
+struct ShownDecal {
+    name: String,
+    component: u64,
+    corners: [solidcore_record::Vec3; 4],
+    image: Vec<u8>,
+}
+
+/// The images the design shows, canvases and decals alike, for an export. A hidden image is left
+/// out; one that can't be placed or whose image is damaged is left out with a warning; one whose
+/// sketch can't place it is written where its own centre, width and angle do, with a warning.
+fn shown_decals(doc: &solidcraft_doc::Document, st: &solidcraft_doc::ModelState, warnings: &mut Vec<String>) -> Vec<ShownDecal> {
     let (vals, _) = doc.param_values();
     let mut decals = Vec::new();
     for c in doc.canvases.iter().filter(|c| c.visible) {
@@ -2687,29 +2710,116 @@ fn urdf_decals(doc: &solidcraft_doc::Document, st: &solidcraft_doc::ModelState, 
                 continue;
             }
         };
-        let Ok(to_component) = solidcore_ops::affine::inverse(&doc.component_transform(c.component)) else {
-            warnings.push(format!("decal `{}`: its component's placement is degenerate: left out", c.name));
-            continue;
-        };
         if let Some(anchor) = &c.anchor
             && let Err(e) = doc.canvas_anchor_corners(c, anchor, st)
         {
             warnings.push(format!("decal `{}`: {e}: exported where its own centre, width and angle place it", c.name));
         }
         if c.opacity < 1.0 {
-            warnings.push(format!("decal `{}` is partly transparent in SolidCraft: exported opaque, its image's own alpha kept", c.name));
+            warnings.push(format!("decal `{}` is partly transparent in SolidCraft: exported opaque", c.name));
         }
-        decals.push(solidcraft_io::urdf::UrdfDecal {
-            name: c.name.clone(),
-            component: c.component,
-            corners: corners.map(|p| {
-                let [x, y, z] = solidcore_ops::affine::apply_point(&to_component, [p.x, p.y, p.z]);
-                solidcore_record::Vec3::new(x, y, z)
-            }),
-            image,
-        });
+        decals.push(ShownDecal { name: c.name.clone(), component: c.component, corners, image });
     }
     decals
+}
+
+/// The design's shown decals for a URDF export, each in its component's frame.
+fn urdf_decals(doc: &solidcraft_doc::Document, st: &solidcraft_doc::ModelState, warnings: &mut Vec<String>) -> Vec<solidcraft_io::urdf::UrdfDecal> {
+    let mut decals = Vec::new();
+    for d in shown_decals(doc, st, warnings) {
+        let Ok(to_component) = solidcore_ops::affine::inverse(&doc.component_transform(d.component)) else {
+            warnings.push(format!("decal `{}`: its component's placement is degenerate: left out", d.name));
+            continue;
+        };
+        let corners = d.corners.map(|p| {
+            let [x, y, z] = solidcore_ops::affine::apply_point(&to_component, [p.x, p.y, p.z]);
+            solidcore_record::Vec3::new(x, y, z)
+        });
+        decals.push(solidcraft_io::urdf::UrdfDecal { name: d.name, component: d.component, corners, image: d.image });
+    }
+    decals
+}
+
+/// The model folder `path` names: the path, less a `.sdf` ending (the save picker adds one).
+fn sdf_folder(path: &str) -> std::path::PathBuf {
+    let p = std::path::Path::new(path);
+    if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("sdf")) { p.with_extension("") } else { p.to_path_buf() }
+}
+
+/// The design as a Gazebo model folder (docs/sdf.md): bodies where the design places them (an
+/// exploded view is shown only), with their colours, and each shown decal where it is shown.
+/// Every path is checked and the package made before anything is written; the folder is made if
+/// missing, the meshes and images go first and `model.sdf` last.
+fn export_sdf(s: &Session, cmd: &str, path: &str, p: &Value) -> Result<Value> {
+    let flag = |key: &str, default: bool| match p.get(key) {
+        None | Some(Value::Null) => Ok(default),
+        Some(Value::Bool(b)) => Ok(*b),
+        Some(_) => Err(bad(cmd, format!("`{key}` must be true or false"))),
+    };
+    let (is_static, model_uris) = (flag("static", true)?, flag("model_uris", false)?);
+    let folder = sdf_folder(path);
+    let name = match p.get("name") {
+        None | Some(Value::Null) => folder.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(),
+        Some(Value::String(n)) => n.trim().to_string(),
+        Some(_) => return Err(bad(cmd, "`name` must be text")),
+    };
+    if name.is_empty() {
+        return Err(bad(cmd, "the model needs a name: give `name`, or a path that ends in the model's folder"));
+    }
+    let quality = mesh_quality(p, cmd)?;
+    let bodies = string_list(cmd, p, "bodies")?;
+    let st = s.model.state();
+    let world = solidcraft_doc::world_state(&s.doc, &st)?;
+    let mut warnings = Vec::new();
+    if !s.uncaptured_moves().is_empty() {
+        warnings.push("components moved but not captured are exported where the design places them".to_string());
+    }
+    let decals = shown_decals(&s.doc, &st, &mut warnings)
+        .into_iter()
+        .map(|d| solidcraft_io::SdfDecal { name: d.name, corners: d.corners, image: d.image })
+        .collect();
+    let options = solidcraft_io::SdfOptions {
+        name: name.clone(),
+        is_static,
+        model_uris,
+        folder: folder.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| name.clone()),
+        quality,
+        bodies,
+        decals,
+        description: format!("Exported by SolidCraft from the design {}", s.doc.name),
+    };
+    let pkg = solidcraft_io::sdf_model(&s.doc, &s.doc.painted(&world), &options)?;
+    warnings.extend(pkg.warnings);
+    let dir = folder.to_string_lossy().to_string();
+    if solidcraft_io::vfs::is_file(&dir) {
+        return Err(bad(cmd, format!("{dir} is a file: the model is written as a folder")));
+    }
+    let targets: Vec<(String, &[u8])> = pkg.files.iter().map(|(n, b)| (folder.join(n).to_string_lossy().to_string(), b.as_slice())).collect();
+    for t in std::iter::once(&dir).chain(targets.iter().map(|(t, _)| t)) {
+        solidcraft_io::vfs::check_new(t).map_err(|e| EngineError::Other(format!("{t}: {e}")))?;
+    }
+    // Missing folders above the model folder are made too: checked as a new destination, as the
+    // files were above, so an allowed folder's new subfolders are in scope.
+    solidcraft_io::vfs::create_new_dir_all(&dir).map_err(|e| EngineError::Other(format!("{dir}: {e}")))?;
+    let mut written: Vec<String> = Vec::new();
+    for (t, bytes) in &targets {
+        if let Err(e) = solidcraft_io::vfs::write(t, bytes) {
+            let before = if written.is_empty() { "none".to_string() } else { written.join(", ") };
+            return Err(EngineError::Other(format!("{t}: {e} (this file may be incomplete; written before it: {before})")));
+        }
+        written.push(t.clone());
+    }
+    let reply = crate::schema::file::SdfExportResult {
+        path: dir,
+        format: "Sdf".into(),
+        name,
+        files: written,
+        bodies: pkg.bodies,
+        decals: pkg.decals,
+        warnings,
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 /// The OpenUSD encoding a name or extension asks for: text, binary or package.
@@ -2969,6 +3079,10 @@ fn recovery_discard(_s: &mut Session, p: &Value) -> Result<Value> {
     }
     serde_json::to_value(RecoveryDiscardResult { discarded: ids, param_warnings: Vec::new() }).map_err(|e| EngineError::Other(format!("{cmd}: {e}")))
 }
+
+#[cfg(test)]
+#[path = "sdf_tests.rs"]
+mod sdf_tests;
 
 #[cfg(test)]
 #[path = "urdf_tests.rs"]
