@@ -78,6 +78,38 @@ fn round_as_tall_as_a_disc_uses_up_its_wall() {
     assert!(rel(volume(&mut s), expect) < 2e-4, "{} vs {expect}", volume(&mut s));
 }
 
+/// #18629 (the acid tests' acid-7, stage 3): a draft that moves the side of a cylinder past a
+/// hole near its rim opens the hole into the side, as if the hole were cut after the draft. The
+/// stage in its smallest form: a Ø3 × 4 mm cylinder, a Ø0.3 mm hole 1.2 mm deep whose far side is
+/// 1.4 mm from the axis, and a 3° draft about the XY plane. At the hole's bottom (z = 2.8) the
+/// drafted side is 1.5 − 2.8 · tan 3° = 1.3531 mm from the axis, so the hole's wall crosses it.
+/// The kernel refuses the draft (solidcore#3352), so this test is listed in
+/// tests/KNOWN_FAILING_TESTS until the offset cuts the walls where they cross.
+#[test]
+fn a_draft_that_moves_the_side_past_a_hole_opens_the_hole_into_it() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"diameter": 3, "height": 4, "operation": "new", "body_name": "Base"}));
+    run(&mut s, "solid.hole", json!({"position": [-1.25, 0, 4], "diameter": 0.3, "depth": 1.2, "targets": ["Base"]}));
+    run(&mut s, "solid.draft", json!({"faces": [[1.5, 0, 2]], "angle": "3 deg", "neutral": "XY", "body": "Base"}));
+    let state = s.model.state();
+    assert_eq!(state.bodies.len(), 1, "one body");
+    let body = &state.bodies[0].body;
+    assert!(body.validity().is_empty(), "{:?}", body.validity());
+    let at = |x: f64, y: f64, z: f64| body.classify_point(solidcore_record::Vec3::new(x, y, z)).unwrap();
+    // The hole opens into the drafted side: its own axis is void where the hole is, and the
+    // material under it and beside it is there.
+    assert_eq!(at(-1.25, 0.0, 2.9), solidcraft_kernel::PointClass::Outside, "the hole");
+    assert_eq!(at(-1.25, 0.0, 2.0), solidcraft_kernel::PointClass::Inside, "under the hole");
+    assert_eq!(at(-0.5, 0.0, 2.0), solidcraft_kernel::PointClass::Inside, "the wall");
+    // The frustum the draft makes, from r = 1.5 at z = 0 to r = 1.5 − 4 · tan 3° at z = 4, less
+    // the part of the hole's cylinder that is inside it (0.0663 mm³: the hole's cross-section is
+    // the part of the disc of radius 0.15 about (−1.25, 0) inside the circle of radius r(z), and
+    // r(z) shrinks from 1.3533 to 1.2904 over the hole's depth).
+    let r = 1.5 - 4.0 * (3.0_f64).to_radians().tan();
+    let expect = PI * 4.0 / 3.0 * (1.5 * 1.5 + 1.5 * r + r * r) - 0.0663;
+    assert!(rel(volume(&mut s), expect) < 1e-3, "{} vs {expect}", volume(&mut s));
+}
+
 /// #783: an edge pick far from every edge (beside the body, above it, inside it, or on another
 /// body than the one named) is refused and adds nothing, instead of rounding the nearest edge;
 /// a pick on an edge, or a little off it as a click lands, still works.
