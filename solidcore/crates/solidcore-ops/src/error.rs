@@ -43,7 +43,8 @@ pub enum Error {
     WallsTouch,
     /// A blend larger than its faces allow, refused with the largest size that builds it
     /// (the kernel's fit, `SolidError::FilletRefused`): the size, what it sizes, a point at the
-    /// middle of the edge it was found for, and why there is no room, when the refusal names them.
+    /// middle of the edge it was found for, a point on the limiting face, and why there is no room,
+    /// when the refusal names them.
     TooLarge {
         /// The largest size that builds it.
         size: f64,
@@ -51,6 +52,8 @@ pub enum Error {
         kind: FitKind,
         /// A point at the middle of the edge it was found for.
         at: Option<[f64; 3]>,
+        /// An exact point on the face that limits the size, when the kernel names it.
+        face: Option<[f64; 3]>,
         /// Why there is no room.
         why: Option<RoomReason>,
     },
@@ -693,7 +696,7 @@ pub enum RoomReason {
 pub enum FitKind {
     /// A round's radius.
     Radius,
-    /// An equal chamfer's distance.
+    /// A chamfer's first distance, for equal distances or a fixed angle.
     Distance,
     /// A factor on a chamfer's two distances.
     Scale,

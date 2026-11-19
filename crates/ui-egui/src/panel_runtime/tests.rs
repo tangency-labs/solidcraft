@@ -10748,6 +10748,13 @@ fn raw_full_envelope_reservations_skip_quarantine_and_native_return_ids_and_canc
     assert!(!raw.host.interaction().is_captured());
     assert!(raw.host.frame().unwrap().preview.is_none());
     assert_eq!(raw.content.runtime.layout().inspect(), before);
+    raw.frame(Vec::new(), false);
+    let reservations = &raw.host.frame().unwrap().layout.geometry_policy.identity_reservations;
+    assert!(
+        reservations.columns.contains(&ColumnId::new("review.changed.return.column").unwrap()),
+        "the identities of a layout remembered anew are read again"
+    );
+    assert!(!reservations.columns.contains(&reserved_column), "and the ones read from the layout it replaced are let go");
 }
 
 #[test]

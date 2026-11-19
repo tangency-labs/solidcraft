@@ -118,7 +118,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&EXPORT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::FileExportResult>)
-        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|glb|urdf|json (default from extension; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic and roughness as materials; a transparent body or face, or a body a render setup gives an image texture or optics, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10); quality?: standard|fine|finest (STL, OBJ, 3MF and GLB: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies)"),
+        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|glb|urdf|json (default from extension; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic and roughness as materials; a transparent body or face, or a body a render setup gives an image texture or optics, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10), images?: bool (default false; true: each shown canvas and decal is written as a textured quad, its image next to the URDF); quality?: standard|fine|finest (STL, OBJ, 3MF and GLB: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies)"),
     // One command per format, so each File › Export item can have a key of its own; started
     // from a key or command search, the app opens the save picker (the mesh dialog for STL and
     // 3MF). Each takes `file.export`'s parameters for its format, without `format`.
@@ -1449,7 +1449,8 @@ fn reads_natively(path: &str) -> bool {
 /// Why a file read as a design could not be: with a design's own extension, what the reader said;
 /// with any other, that SolidCraft does not open that kind of file (#18465). A file of another
 /// CAD program reaches the design reader because nothing else claims it, and its words about a
-/// "design container" or an environment resource say nothing of that.
+/// "design container" or an environment resource say nothing of that. An importer plugin can add
+/// support for the format (Preferences › Plugins) (#19238).
 fn unreadable_design(path: &str, reason: &str) -> EngineError {
     let extension = std::path::Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or_default();
     if matches!(extension.to_ascii_lowercase().as_str(), "sc" | "solidcraft" | "json") {
@@ -1457,7 +1458,7 @@ fn unreadable_design(path: &str, reason: &str) -> EngineError {
     }
     let kind = if extension.is_empty() { "this file".to_string() } else { format!(".{extension} files") };
     EngineError::Other(format!(
-        "{path}: SolidCraft can't open {kind}; export STEP (or another format it opens) from the program that made it ({reason})"
+        "{path}: SolidCraft can't open {kind}; export STEP (or another format it opens) from the program that made it, or an importer plugin can add this format (Preferences › Plugins) ({reason})"
     ))
 }
 
@@ -2640,6 +2641,50 @@ fn export_glb(s: &Session, cmd: &str, path: &str, bodies: &[String], quality: so
     Ok(json!({"path": path, "bytes": bytes.len(), "format": format!("{:?}", Format::Glb)}))
 }
 
+/// The images the design shows (canvases and decals alike) for a URDF export: each one's corners
+/// where it is shown (following its sketch when anchored), in its component's frame, and its
+/// image. A hidden image is left out; one that can't be placed or whose image is damaged is left
+/// out with a warning.
+fn urdf_decals(doc: &solidcraft_doc::Document, st: &solidcraft_doc::ModelState, warnings: &mut Vec<String>) -> Vec<solidcraft_io::urdf::UrdfDecal> {
+    let (vals, _) = doc.param_values();
+    let mut decals = Vec::new();
+    for c in doc.canvases.iter().filter(|c| c.visible) {
+        let Some(image) = c.bytes() else {
+            warnings.push(format!("decal `{}`: its image is damaged: left out", c.name));
+            continue;
+        };
+        let corners = match doc.canvas_corners(&vals, c, st) {
+            Ok(corners) => corners,
+            Err(e) => {
+                warnings.push(format!("decal `{}`: {e}: left out", c.name));
+                continue;
+            }
+        };
+        let Ok(to_component) = solidcore_ops::affine::inverse(&doc.component_transform(c.component)) else {
+            warnings.push(format!("decal `{}`: its component's placement is degenerate: left out", c.name));
+            continue;
+        };
+        if let Some(anchor) = &c.anchor
+            && let Err(e) = doc.canvas_anchor_corners(c, anchor, st)
+        {
+            warnings.push(format!("decal `{}`: {e}: exported where its own centre, width and angle place it", c.name));
+        }
+        if c.opacity < 1.0 {
+            warnings.push(format!("decal `{}` is partly transparent in SolidCraft: exported opaque, its image's own alpha kept", c.name));
+        }
+        decals.push(solidcraft_io::urdf::UrdfDecal {
+            name: c.name.clone(),
+            component: c.component,
+            corners: corners.map(|p| {
+                let [x, y, z] = solidcore_ops::affine::apply_point(&to_component, [p.x, p.y, p.z]);
+                solidcore_record::Vec3::new(x, y, z)
+            }),
+            image,
+        });
+    }
+    decals
+}
+
 /// The OpenUSD encoding a name or extension asks for: text, binary or package.
 fn usd_encoding(name: &str) -> &'static str {
     match name.rsplit('.').next().unwrap_or(name).to_ascii_lowercase().as_str() {
@@ -2680,7 +2725,13 @@ fn export_urdf(s: &Session, cmd: &str, path: &str, p: &Value) -> Result<Value> {
     };
     // `io::urdf` refuses a prefix XML cannot hold.
     let mesh_prefix = str_(p, "mesh_prefix").unwrap_or("").to_string();
-    let options = solidcraft_io::UrdfOptions { mesh_prefix, effort: positive("effort")?, velocity: positive("velocity")? };
+    let mut options = solidcraft_io::UrdfOptions { mesh_prefix, effort: positive("effort")?, velocity: positive("velocity")?, decals: Vec::new() };
+    // The pictures shown on the model are written only when asked for, so an export made the
+    // usual way writes what it always has.
+    let images = match p.get("images") {
+        None | Some(Value::Null) => false,
+        Some(v) => v.as_bool().ok_or_else(|| bad(cmd, "`images` must be true or false"))?,
+    };
     let file = std::path::Path::new(path);
     let stem = file.file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
     // Occurrences where they are shown, uncaptured moves included, except those the joint solver
@@ -2704,7 +2755,12 @@ fn export_urdf(s: &Session, cmd: &str, path: &str, p: &Value) -> Result<Value> {
         }
         std::borrow::Cow::Owned(doc)
     };
+    let mut decal_warnings = Vec::new();
+    if images {
+        options.decals = urdf_decals(&doc, &st, &mut decal_warnings);
+    }
     let mut pkg = solidcraft_io::urdf(&doc, &doc.painted(&st), &stem, &options)?;
+    pkg.warnings.extend(decal_warnings);
     for name in held {
         pkg.warnings.push(format!("`{name}` was moved but the move is not captured: exported where its joints place it"));
     }
