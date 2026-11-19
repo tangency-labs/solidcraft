@@ -619,20 +619,35 @@ fn trims(flat: View, n_edgeuses: usize) -> Res<Vec<Option<b::Curve2>>> {
 
 /// A trim along its edge, its parameter moved onto the edge record's ([`TrimMap`]): one whose
 /// edgeuse runs against the edge (`same` false) reversed exactly (points reversed, knots
-/// t ↦ a + b − t), then the knots mapped. SMLib keeps a trim on its edge's interval; where the
-/// ends differ by the rounding of SMLib's own or this remap (10⁻⁹ of the interval's magnitude,
-/// no floor: a micro edge on knots spanning 10⁻⁷ lies on [0, 6e-12]), or by more but at one point
-/// of the edge within its tolerance (`on_edge`: a circle on its NURBS form ending a rounding past
-/// its trim's quarter line), every knot within that of an end is that end, and the end spans left
-/// without length go with their control points. Farther is an error, as is an interval of at most
-/// `SM_EFF_ZERO` (10⁻¹², SMLib's absolute knot resolution: no trim fits on it).
+/// t ↦ a + b − t on its domain [a, b], whose ends swap exactly), then the knots mapped. SMLib
+/// keeps a trim on its edge's interval; where the ends differ by the rounding of SMLib's own or
+/// this remap (10⁻⁹ of the interval's magnitude, no floor: a micro edge on knots spanning 10⁻⁷
+/// lies on [0, 6e-12]), or by more but at one point of the edge within its tolerance (`on_edge`:
+/// a circle on its NURBS form ending a rounding past its trim's quarter line), every knot within
+/// that of an end is that end, and the end spans left without length go with their control
+/// points. Farther is an error, as is an interval of at most `SM_EFF_ZERO` (10⁻¹², SMLib's
+/// absolute knot resolution: no trim fits on it).
 fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f64; 2], on_edge: &dyn Fn(f64, f64) -> bool) -> Res<b::Curve2> {
     fn along<T: Clone>(knots: &[f64], points: &[T], same: bool) -> (Vec<f64>, Vec<T>) {
         if same {
             return (knots.to_vec(), points.to_vec());
         }
-        let (a, b) = (knots.first().copied().unwrap_or(0.0), knots.last().copied().unwrap_or(0.0));
-        (knots.iter().rev().map(|t| a + b - t).collect(), points.iter().rev().cloned().collect())
+        // About the domain [a, b], whose ends swap exactly (as SMLib's `reverse_knots` swaps
+        // them): (a + b) − b is a only to the precision of b, so a start at 4.3e-12 on a domain
+        // ending at 3e-4 came back 1e-20 lower, off the edge's curve where it starts on the
+        // curve's first knot, and the whole solid was refused.
+        let degree = knots.len().saturating_sub(points.len() + 1);
+        let (a, b) = (knots.get(degree).copied().unwrap_or(0.0), knots.get(points.len()).copied().unwrap_or(0.0));
+        let reversed = |t: f64| {
+            if t == a {
+                b
+            } else if t == b {
+                a
+            } else {
+                a + b - t
+            }
+        };
+        (knots.iter().rev().map(|t| reversed(*t)).collect(), points.iter().rev().cloned().collect())
     }
     // The knots mapped, and the points with them: a knot within the slack of an end of the edge's
     // interval, inside or past it, is that end, and the end spans that leaves without length are
