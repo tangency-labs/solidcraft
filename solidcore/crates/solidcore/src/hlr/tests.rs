@@ -13,6 +13,36 @@ mod k {
     pub(super) use crate::hlr::body::{Brep, Edge, Face, Loop, OrientedEdge, Vertex};
 }
 
+/// Worker threads for the tests: the kernel starts none itself.
+struct Threads;
+
+impl Workers for Threads {
+    fn run(&self, count: usize, work: &(dyn Fn() + Sync)) -> bool {
+        std::thread::scope(|scope| {
+            let started: Vec<_> = (0..count)
+                .filter_map(|_| std::thread::Builder::new().spawn_scoped(scope, work).ok())
+                .collect();
+            let any = !started.is_empty();
+            for worker in started {
+                // A panic is the kernel's to report: the worker's items are missing.
+                let _ = worker.join();
+            }
+            any
+        })
+    }
+}
+
+/// The tests' hidden lines, on as many threads as `opts` asks for.
+fn hidden_lines(
+    defs: &[Prepared],
+    scene: &[Placement],
+    view: &View,
+    opts: &Options,
+    cancel: &(dyn Fn() -> bool + Sync),
+) -> Result<Drawing, HlrError> {
+    hidden_lines_on(defs, scene, view, opts, cancel, &Threads)
+}
+
 /// The length of a screen point and the distance between two.
 trait V2 {
     fn len(self) -> f64;

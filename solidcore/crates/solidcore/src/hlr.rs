@@ -622,9 +622,10 @@ pub struct Options {
     pub max_tracks: usize,
     /// Most visibility rays in the whole call, counted over all worker threads.
     pub max_rays: usize,
-    /// Worker threads: 0 uses one per core (small views stay on the calling thread), 1 runs
-    /// on the calling thread, a larger number caps the workers (at most [`MAX_THREADS`]). The
-    /// browser build always runs on the calling thread. The drawing is the same either way.
+    /// Worker threads the [`Workers`] given to [`hidden_lines_on`] may run: 0 uses one per core
+    /// (small views stay on the calling thread), 1 runs on the calling thread, a larger number
+    /// caps the workers (at most [`MAX_THREADS`]). [`hidden_lines`] and [`silhouettes`] start
+    /// no threads and run on the calling thread. The drawing is the same either way.
     pub threads: usize,
 }
 
@@ -653,6 +654,26 @@ pub const MAX_TRIM_SAMPLES: usize = 4096;
 pub const MAX_COORDINATE: f64 = 1e12;
 /// Most worker threads.
 pub const MAX_THREADS: usize = 64;
+
+/// Runs hidden-line work on more than one thread. The kernel starts no threads itself (library
+/// code starts none, `AGENTS.md`), so a caller that may start them hands one to
+/// [`hidden_lines_on`]. The drawing is the same on any number of threads.
+pub trait Workers: Sync {
+    /// Runs `work` on `count` threads at once (at least 2) and returns once every one has
+    /// returned, catching a panic rather than passing it on: whether any ran. When none could be
+    /// started the kernel does the work on the calling thread.
+    fn run(&self, count: usize, work: &(dyn Fn() + Sync)) -> bool;
+}
+
+/// [`Workers`] that start no threads: the work runs on the calling thread.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Serial;
+
+impl Workers for Serial {
+    fn run(&self, _count: usize, _work: &(dyn Fn() + Sync)) -> bool {
+        false
+    }
+}
 
 /// Whether a piece is seen.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -813,6 +834,8 @@ struct Ctx<'a> {
     /// Set by the first worker that fails or panics: the others stop as if cancelled.
     stop: AtomicBool,
     cancel: &'a (dyn Fn() -> bool + Sync),
+    /// What runs the workers.
+    runner: &'a dyn Workers,
 }
 
 impl Ctx<'_> {
@@ -838,28 +861,23 @@ impl Ctx<'_> {
                 f(item)
             }
         };
-        #[cfg(not(target_arch = "wasm32"))]
         if let Some(out) = self.map_on_threads(items, grain, &one) {
             return out;
         }
-        // The browser build has no threads.
-        #[cfg(target_arch = "wasm32")]
-        let _ = (grain, self.workers, self.auto_workers);
         items.iter().map(one).collect()
     }
 
-    /// [`Ctx::map`] on worker threads. Every item runs on a spawned worker while the calling
-    /// thread waits, so a worker's panic is caught when it is joined; it also stops the other
-    /// workers, like a failure. `None` when one thread is enough or none could be started.
-    #[cfg(not(target_arch = "wasm32"))]
+    /// [`Ctx::map`] on the runner's workers. Every item runs on a worker while the calling
+    /// thread waits, and the runner catches a worker's panic; it also stops the other workers,
+    /// like a failure. `None` when one thread is enough or none could be started.
     fn map_on_threads<T: Sync, R: Send>(
         &self,
         items: &[T],
         grain: usize,
         one: &(impl Fn(&T) -> Result<R, HlrError> + Sync),
     ) -> Option<Result<Vec<R>, HlrError>> {
-        // Threads are started per phase, at tens of microseconds each. A pool kept for the
-        // whole call would pay that once, should small views ever need parallel work.
+        // A runner that starts threads starts them per phase, at tens of microseconds each. A
+        // pool kept for the whole call would pay that once, should small views ever need it.
         let workers = if self.auto_workers {
             self.workers.min(items.len() / grain.max(1))
         } else {
@@ -870,6 +888,8 @@ impl Ctx<'_> {
         }
         let next = AtomicUsize::new(0);
         let first = std::sync::Mutex::new(None);
+        // Each worker's results, added when it finishes: a worker that panics adds none.
+        let finished = std::sync::Mutex::new(Vec::new());
         // Dropped while a worker unwinds: the call fails anyway, so the others stop too.
         struct StopOnPanic<'s>(&'s AtomicBool);
         impl Drop for StopOnPanic<'_> {
@@ -898,28 +918,21 @@ impl Ctx<'_> {
                     }
                 }
             }
-            done
+            finished
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(done);
         };
-        let joined: Vec<_> = std::thread::scope(|scope| {
-            let helpers: Vec<_> = (0..workers)
-                .filter_map(|_| {
-                    std::thread::Builder::new()
-                        .name("solidcraft-hlr".into())
-                        .spawn_scoped(scope, work)
-                        .ok()
-                })
-                .collect();
-            helpers.into_iter().map(|h| h.join()).collect()
-        });
-        if joined.is_empty() {
+        if !self.runner.run(workers, &work) {
             return None;
         }
         let mut out: Vec<Option<R>> = std::iter::repeat_with(|| None).take(items.len()).collect();
-        for done in joined {
-            // A worker that panicked lost its item: an error, never a partial drawing.
-            let Ok(done) = done else {
-                return Some(Err(HlrError::Internal("a worker thread")));
-            };
+        // A worker that panicked lost its items: their slots stay empty, an error below, never
+        // a partial drawing.
+        for done in finished
+            .into_inner()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        {
             for (i, r) in done {
                 if let Some(slot) = out.get_mut(i) {
                     *slot = Some(r);
@@ -943,6 +956,7 @@ fn context<'a>(
     view: &View,
     opts: &Options,
     cancel: &'a (dyn Fn() -> bool + Sync),
+    runner: &'a dyn Workers,
 ) -> Result<Ctx<'a>, HlrError> {
     let mut boxes = Vec::new();
     let (mut wlo, mut whi) = (
@@ -1005,11 +1019,13 @@ fn context<'a>(
         auto_workers: opts.threads == 0,
         stop: AtomicBool::new(false),
         cancel,
+        runner,
     })
 }
 
 /// The hidden-line drawing of the scene `scene` of the bodies `defs` in `view`: every edge and
 /// silhouette split where they cross on screen, each piece classified by rays toward the viewer.
+/// It runs on the calling thread ([`hidden_lines_on`] with [`Serial`]).
 ///
 /// # Errors
 /// An invalid placement or view, a budget of `opts` exceeded, or cancelled.
@@ -1019,6 +1035,22 @@ pub fn hidden_lines(
     view: &View,
     opts: &Options,
     cancel: &(dyn Fn() -> bool + Sync),
+) -> Result<Drawing, HlrError> {
+    hidden_lines_on(defs, scene, view, opts, cancel, &Serial)
+}
+
+/// [`hidden_lines`] with its work spread over the threads `workers` runs, up to
+/// [`Options::threads`]. The drawing is the same on any number of threads.
+///
+/// # Errors
+/// As [`hidden_lines`].
+pub fn hidden_lines_on(
+    defs: &[Prepared],
+    scene: &[Placement],
+    view: &View,
+    opts: &Options,
+    cancel: &(dyn Fn() -> bool + Sync),
+    workers: &dyn Workers,
 ) -> Result<Drawing, HlrError> {
     if scene.len() > MAX_ITEMS {
         return Err(HlrError::Budget("placement"));
@@ -1036,7 +1068,7 @@ pub fn hidden_lines(
         .collect();
     let scene = local.as_slice();
     let shift = view.screen(origin);
-    let ctx = context(defs, scene, view, opts, cancel)?;
+    let ctx = context(defs, scene, view, opts, cancel, workers)?;
     let scale = ctx.scale;
     let mut stats = Stats::default();
     let mut unsupported = Vec::new();
@@ -1323,7 +1355,7 @@ pub fn silhouettes(
     }];
     let shift = view.screen(origin);
     let never = || false;
-    let ctx = context(defs, &local, view, opts, &never)?;
+    let ctx = context(defs, &local, view, opts, &never, &Serial)?;
     let Some(placed) = local.first() else {
         return Ok(Vec::new());
     };

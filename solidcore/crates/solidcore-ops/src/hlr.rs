@@ -13,8 +13,8 @@ use solidcore_record::brep::{Brep, Loop, Surface};
 use solidcore_record::{Seg2, Vec3};
 
 pub use k::{
-    EdgeKind, HlrError, Options, PrepareReport, Prepared, Source, Stats, Unsupported, Visibility,
-    MAX_COORDINATE, MAX_ITEMS, MAX_THREADS, MAX_TRIM_SAMPLES,
+    EdgeKind, HlrError, Options, PrepareReport, Prepared, Serial, Source, Stats, Unsupported,
+    Visibility, Workers, MAX_COORDINATE, MAX_ITEMS, MAX_THREADS, MAX_TRIM_SAMPLES,
 };
 
 /// How exactly a drawn curve stands for its source.
@@ -274,8 +274,8 @@ pub fn prepare_cancellable(
     k::prepare_cancellable(&kernel_body(b)?, opts, cancel)
 }
 
-/// The hidden-line drawing of the scene `scene` of the bodies `defs` in `view`
-/// ([`k::hidden_lines`]).
+/// The hidden-line drawing of the scene `scene` of the bodies `defs` in `view`, on the calling
+/// thread ([`k::hidden_lines`]).
 ///
 /// # Errors
 /// The kernel's refusal: an invalid placement or view, a budget exceeded, cancelled.
@@ -286,8 +286,23 @@ pub fn hidden_lines(
     opts: &Options,
     cancel: &(dyn Fn() -> bool + Sync),
 ) -> Result<Drawing, HlrError> {
+    hidden_lines_on(defs, scene, view, opts, cancel, &Serial)
+}
+
+/// [`hidden_lines`] on the threads `workers` runs ([`k::hidden_lines_on`]).
+///
+/// # Errors
+/// As [`hidden_lines`].
+pub fn hidden_lines_on(
+    defs: &[Prepared],
+    scene: &[Placement],
+    view: &View,
+    opts: &Options,
+    cancel: &(dyn Fn() -> bool + Sync),
+    workers: &dyn Workers,
+) -> Result<Drawing, HlrError> {
     let scene: Vec<k::Placement> = scene.iter().map(kernel_placement).collect();
-    let d = k::hidden_lines(defs, &scene, &kernel_view(view), opts, cancel)?;
+    let d = k::hidden_lines_on(defs, &scene, &kernel_view(view), opts, cancel, workers)?;
     Ok(Drawing {
         lines: d
             .lines
