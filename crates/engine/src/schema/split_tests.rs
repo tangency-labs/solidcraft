@@ -278,6 +278,35 @@ fn split_body_cuts_with_picked_faces_or_the_whole_surface_body() {
     }
 }
 
+/// #9305 review: tool faces used as they are cut where the tool is shown. The sheet is built in a
+/// component moved 2 mm along y, so it runs along y = 7 and its crease is at x = 5; the root
+/// cube under it keeps 10 · (5 · 7 + ∫ (7 + (x - 5) / 2) dx over x 5…10) = 762.5 mm³ and
+/// 237.5 mm³ above, not the 562.5 and 437.5 of the sheet's own frame. The tool points are where
+/// the faces are shown.
+#[test]
+fn split_body_by_faces_meets_a_moved_tool_where_it_is_shown() {
+    let near = |v: &[f64], want: [f64; 2]| v.len() == 2 && v.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-6);
+    for (sheet, extra) in [("faces", json!({"tool_faces": [[9, 9, 10]]})), ("body", json!({}))] {
+        let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+        let mut run = |id: &str, p: Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+        run("solid.box", json!({"corner": [0, 0, 5], "length": 10, "width": 10, "height": 10, "body_name": "Cube"}));
+        run("component.create", json!({"name": "Part", "grounded": false}));
+        run("sketch.create", json!({"plane": "XY", "name": "Bend"}));
+        let curves = run("sketch.line", json!({"points": [[-3, 5], [5, 5], [13, 9]]}))["created"]["curves"].clone();
+        run("sketch.finish", json!({}));
+        run("surface.extrude", json!({"sketch": "Bend", "curves": curves, "distance": 20, "body_name": "Sheet"}));
+        run("component.activate", json!({"component": "root"}));
+        run("occurrence.move", json!({"occurrence": "Part:1", "translate": [0, 2, 0]}));
+        run("component.capture_position", json!({}));
+        let mut p = json!({"body": "Cube", "tool": {"body": "Sheet", "point": [1, 7, 10]}, "tool_sheet": sheet});
+        if let (Some(p), Some(extra)) = (p.as_object_mut(), extra.as_object()) {
+            p.extend(extra.clone());
+        }
+        run("solid.split_body", p.clone());
+        assert!(near(&cube_parts(&s), [237.5, 762.5]), "{p}: {:?}", cube_parts(&s));
+    }
+}
+
 /// #9305: what Split Body by faces refuses, each leaving the design as it was: the first face
 /// alone (it ends inside the cube), `tool_faces` without `tool_sheet` "faces", a point off the
 /// tool, the whole of a solid, an infinite plane with a sheet, and a mode it does not know.

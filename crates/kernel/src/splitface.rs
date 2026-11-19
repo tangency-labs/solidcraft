@@ -581,9 +581,9 @@ pub fn split_body(body: &Body, tool: &SplitTool) -> Result<Vec<Body>> {
 
 /// Split a body with faces of another body exactly as they are, bounded where they end and never
 /// extended (#9305): `faces` (in `sheet`'s face order) and `face` are the tool, and `face` gives
-/// the sides (parts on its back first, as [`split_body`]). The faces need not be joined. Faces
-/// that do not cut the body into closed solids (they end inside it, or miss it) are refused, so
-/// the body never comes back with a slit. Each part's history is over `[body]`.
+/// the sides (parts on its back first, as [`split_body`]). The faces must join into one sheet:
+/// picks in separate pieces are refused. Faces that do not cut the body into closed solids (they
+/// end inside it, or miss it) are refused, so the body never comes back with a slit. Each part's history is over `[body]`.
 pub fn split_body_by_faces(body: &Body, sheet: &Body, face: usize, faces: &[usize]) -> Result<Vec<Body>> {
     let _span = solidcraft_profile::span("kernel", "split_body_by_faces");
     body.require_brep(SPLIT_BODY)?;
