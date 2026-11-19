@@ -45,6 +45,19 @@ fn jpeg(w: usize, h: usize, paint: impl Fn(usize, usize) -> [u8; 3]) -> Vec<u8> 
     jpeg_q(w, h, 90, paint)
 }
 
+/// `jpeg` with an EXIF orientation of `orientation` (1 to 8) put right after its start marker:
+/// an APP1 segment, "Exif\0\0", then a big-endian TIFF with the one tag 0x0112.
+fn tagged(jpeg: &[u8], orientation: u8) -> Vec<u8> {
+    let tiff = [b'M', b'M', 0, 42, 0, 0, 0, 8, 0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, orientation, 0, 0, 0, 0, 0, 0];
+    let length = u16::try_from(2 + 6 + tiff.len()).expect("a short segment");
+    let mut with_exif = vec![0xFF, 0xD8, 0xFF, 0xE1];
+    with_exif.extend(length.to_be_bytes());
+    with_exif.extend(b"Exif\0\0");
+    with_exif.extend(tiff);
+    with_exif.extend(&jpeg[2..]);
+    with_exif
+}
+
 fn jpeg_q(w: usize, h: usize, q: u8, paint: impl Fn(usize, usize) -> [u8; 3]) -> Vec<u8> {
     let mut img = image::RgbaImage::new(w as u32, h as u32);
     for y in 0..h {
@@ -510,7 +523,7 @@ fn an_exif_orientation_is_applied_to_the_reference() {
     };
     let plain = reference("upright.jpg", &jpeg(200, 280, part(20, 20, 180, 260)));
     // The same part as it is stored turned a quarter: 280 wide, 200 tall.
-    let stored = crate::upright_image::tagged(&jpeg(280, 200, part(20, 20, 260, 180)), 6);
+    let stored = tagged(&jpeg(280, 200, part(20, 20, 260, 180)), 6);
     let turned = reference("exif6.jpg", &stored);
     let mut size = |path: &str| {
         let out = run(&mut s, "inspect.compare_picture", json!({"reference": path, "view": "front", "overlay": false}));
