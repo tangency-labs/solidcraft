@@ -85,11 +85,15 @@
 //! explicit stack, no recursion); once the largest angle is shown above `below` (a station's
 //! lower bound, or a piece's bound at the limits) cutting stops, since no cut can then bring
 //! `upper` to `below`, and the pieces left keep their bounds uncut. `lower` is the largest station lower bound (0 where none is
-//! proved; [`seam_angle_lower_bound`] gives `None` there). `asin` is widened by a relative
-//! [`ASIN_ROUNDING`] for the library function's error.
+//! proved; [`seam_angle_lower_bound`] gives `None` there). Each `asin` and `atan` is
+//! checked: the library's value, widened by [`ASIN_ROUNDING`], is kept only where `sin` of it
+//! (or `tan`), enclosed by its series with outward rounding, proves it on the right side
+//! of the exact value (no library accuracy is assumed).
 //!
-//! Not enclosed (`None`): a side whose surface has no net or is a procedural blend (it
-//! evaluates by its definition, its net only approximates it, and the facts bound the net), a sample with no nearest point, or
+//! Not enclosed (`None`): a side whose surface has no net, is a procedural blend (it
+//! evaluates by its definition, its net only approximates it, and the facts bound the net)
+//! or keeps a definition its net is certified only within a nonzero bound of (a sweep's),
+//! a sample with no nearest point, or
 //! a piece at the deepest bisection with no bound (a box too far past a net's end, a knot
 //! line of continuity below C^0, a zero normal or `σ` away from a collapsed side, a foot bound
 //! that does not close, more than [`MAX_PARTS`] parts).
@@ -121,7 +125,12 @@ pub const MAX_PIECES: usize = 1 << 16;
 pub const FOOT_GROWTHS: u32 = 4;
 /// The most parts a box of feet is cut into at the knot lines it crosses.
 pub const MAX_PARTS: usize = 16;
-/// The relative widening of a computed `asin` (the library's error, a few ulps at most).
+/// The first relative widening of a computed `asin` or `atan` before it is checked
+/// (`CHECK_WIDENINGS`): the guess an upper (lower) bound starts from, kept only where `sin`
+/// (`tan`) of it, enclosed by its series, is proved on the right side (`asin_above`,
+/// `asin_below`, `atan_above`).
+/// No library function's accuracy is assumed: a guess that fails the check gives the
+/// bound `π` (an angle) or `π / 2` (a cone), or `0` for a lower bound.
 pub const ASIN_ROUNDING: f64 = 1.0e-14;
 
 /// A proved enclosure of the largest acute normal angle along a seam (module docs), radians.
@@ -138,7 +147,7 @@ pub struct SeamAngleEnclosure {
 struct Side {
     net: NetSurface,
     w: NurbsCurve,
-    collapsed: Vec<(bool, bool, V3<f64>)>,
+    collapsed: Vec<(bool, bool, V3<Ivl>)>,
 }
 
 /// A part of a box of feet (fact 2): the unit normal at its centre and the angle `δ` within
@@ -208,22 +217,134 @@ fn norm_lo(v: V3<Ivl>) -> Option<f64> {
     (finite(v) && lo.is_finite()).then_some(lo.max(0.0))
 }
 
-/// `2 asin(c / 2)` rounded up: the angle of a chord `c` between unit vectors (π past 2).
+/// `2 asin(c / 2)` rounded up: the angle of a chord `c` between unit vectors (above π
+/// past 2, or where no bound is proved).
 fn chord_angle_hi(c: f64) -> f64 {
     let half = round_up(0.5 * c);
     if half.is_nan() || half >= 1.0 {
-        return std::f64::consts::PI;
+        return ABOVE_PI;
     }
-    round_up(2.0 * half.max(0.0).asin() * (1.0 + ASIN_ROUNDING))
+    let half = half.max(0.0);
+    if half <= TINY_ARGUMENT {
+        // asin(h) <= h (1 + h^2) for 0 <= h <= 1/2, and round_up adds at least an ulp
+        // (2^-53 relative) here, above h^2 <= 1e-16 (the series' absolute floor would
+        // refuse every guess)
+        return round_up(2.0 * round_up(half));
+    }
+    let y = half.asin();
+    CHECK_WIDENINGS
+        .iter()
+        .find_map(|w| asin_above(half, round_up(y * (1.0 + w))))
+        .map_or(ABOVE_PI, |y| round_up(2.0 * y))
 }
 
-/// `2 asin(c / 2)` rounded down.
+/// `2 asin(c / 2)` rounded down (0 where no bound is proved).
 fn chord_angle_lo(c: f64) -> f64 {
     let half = round_down(0.5 * c);
     if half <= 0.0 {
         return 0.0;
     }
-    round_down(2.0 * half.min(1.0).asin() * (1.0 - ASIN_ROUNDING)).max(0.0)
+    let half = half.min(1.0);
+    let y = half.asin();
+    CHECK_WIDENINGS
+        .iter()
+        .find_map(|w| asin_below(half, round_down(y * (1.0 - w)).max(0.0)))
+        .map_or(0.0, |y| round_down(2.0 * y).max(0.0))
+}
+
+/// The relative widenings of a library `asin` or `atan` tried, in order, until the check
+/// proves one ([`asin_above`], [`asin_below`], [`atan_above`]): the first,
+/// [`ASIN_ROUNDING`], passes wherever the enclosure of `sin` is narrower than the step it
+/// makes; the wider ones pass where `cos` is small (near `π / 2`, where a step in the
+/// angle moves `sin` little). Each is only a guess: the check is the proof.
+const CHECK_WIDENINGS: [f64; 4] = [ASIN_ROUNDING, 1.0e-12, 1.0e-10, 1.0e-8];
+
+/// `atan(t)` rounded up, `t >= 0` (above π / 2 where no bound is proved).
+fn atan_hi(t: f64) -> f64 {
+    if (0.0..=TINY_ARGUMENT).contains(&t) {
+        // atan(t) <= t for t >= 0
+        return t;
+    }
+    let y = t.atan();
+    CHECK_WIDENINGS
+        .iter()
+        .find_map(|w| atan_above(t, round_up(y * (1.0 + w))))
+        .unwrap_or(ABOVE_HALF_PI)
+}
+
+/// Below this an argument's `asin` (`atan`) is bounded from above by the argument itself,
+/// widened ([`chord_angle_hi`], [`atan_hi`]): its square is under [`round_up`]'s relative
+/// widening (it adds at least one ulp, at least 2^-53 ≈ 1.1e-16 relative, above `h^2 <=
+/// 1e-16`).
+const TINY_ARGUMENT: f64 = 1.0e-8;
+
+/// The double just above π / 2 (`FRAC_PI_2` is just below it): the cap of an acute angle's
+/// upper bound, and the bound where none smaller is proved (#18640 review).
+const ABOVE_RIGHT_ANGLE: f64 = 1.570_796_326_794_896_8;
+
+/// A double above π: the upper bound where none smaller is proved.
+const ABOVE_PI: f64 = 4.0;
+/// A double above π / 2: [`atan_above`]'s bound where none smaller is proved.
+const ABOVE_HALF_PI: f64 = 2.0;
+
+/// `sin y` enclosed for `0 <= y <= 2` by its Taylor series (`sum (-1)^n y^(2n+1) /
+/// (2n+1)!`, alternating, each term at most `y^2 / 6 < 1` of the one before:
+/// [`alternating`] encloses it with the first term left out); the whole line elsewhere.
+/// Only `+`, `-`, `*` and `/` rounded outward: no library function's accuracy is assumed.
+///
+/// [`alternating`]: crate::surface::procedural_sweep::alternating
+fn sin_enclosed(y: f64) -> Ivl {
+    if !(0.0..=2.0).contains(&y) {
+        return Ivl::whole();
+    }
+    let yi = Ivl::from(y);
+    let inv_fact = |n: u32| {
+        // 1 / (2n + 1)!
+        let mut f = Ivl::from(1.0);
+        for i in 2..=(2 * n + 1) {
+            f = f / Ivl::from(f64::from(i));
+        }
+        f
+    };
+    crate::surface::procedural_sweep::alternating(yi, yi * yi, inv_fact)
+}
+
+/// `guess` where it is proved at least `asin(h)` (`0 <= h < 1`): `0 <= guess <= π / 2` (the
+/// double below π / 2) and `sin guess >= h` enclosed ([`sin_enclosed`]; `sin` rises on
+/// `[0, π / 2]`). `None` where it is not: the library's `asin`, which gives the guess, has
+/// no accuracy the proof leans on.
+fn asin_above(h: f64, guess: f64) -> Option<f64> {
+    let inside = (0.0..=std::f64::consts::FRAC_PI_2).contains(&guess);
+    // asin(0) = 0: any guess in range is above it (the enclosure's absolute widening
+    // would refuse a guess as small as a widened 0)
+    (inside && h.is_finite() && (h <= 0.0 || sin_enclosed(guess).lo >= h)).then_some(guess)
+}
+
+/// `guess` where it is proved at most `asin(h)` (`0 <= h <= 1`): `0 <= guess <= π / 2` and
+/// `sin guess <= h` enclosed. `None` where it is not.
+fn asin_below(h: f64, guess: f64) -> Option<f64> {
+    let inside = (0.0..=std::f64::consts::FRAC_PI_2).contains(&guess);
+    // a guess of 0 is below asin(h) for any h >= 0
+    (inside && h.is_finite() && h >= 0.0 && (guess <= 0.0 || sin_enclosed(guess).hi <= h))
+        .then_some(guess)
+}
+
+/// `guess` where it is proved at least `atan(t)` (`t >= 0`): `0 <= guess <= π / 2` and
+/// `tan guess >= t`, that is `sin guess >= t cos guess` with `cos = sqrt(1 - sin^2)` on
+/// `[0, π / 2]`, both enclosed ([`sin_enclosed`]). `None` where it is not.
+fn atan_above(t: f64, guess: f64) -> Option<f64> {
+    let inside = (0.0..=std::f64::consts::FRAC_PI_2).contains(&guess);
+    if !(inside && t.is_finite() && t >= 0.0) {
+        return None;
+    }
+    if t == 0.0 {
+        // atan(0) = 0
+        return Some(guess);
+    }
+    let s = sin_enclosed(guess);
+    let cos = (Ivl::from(1.0) - s * s).sqrt();
+    let need = (Ivl::from(t) * cos).hi;
+    (need.is_finite() && s.lo >= need).then_some(guess)
 }
 
 /// The surface's partials up to `lk` over the parameter box `u x v`, with the slack of a box
@@ -701,7 +822,8 @@ fn partials_hull_over(
     Ok(out)
 }
 
-/// The cones over the feet near a side of the net collapsed to the point `apex` (fact 3;
+/// The cones over the feet near a side of the net collapsed to the point `A`, enclosed by
+/// `a` (fact 3;
 /// `side`: `(across_u, at_max, apex)` as `NetSurface::collapsed_sides`), for a
 /// correspondence sweeping `w` (a `(u, v)` box) with gap at most `gap` and curve points in
 /// `c`; `None` where they are not proved.
@@ -730,7 +852,7 @@ fn partials_hull_over(
 /// [`FOOT_GROWTHS`] strips.
 fn apex_cones(
     net: &NetSurface,
-    (across_u, at_max, apex): (bool, bool, V3<f64>),
+    (across_u, at_max, a): (bool, bool, V3<Ivl>),
     (wu, wv): (Ivl, Ivl),
     gap: f64,
     c: V3<Ivl>,
@@ -762,11 +884,6 @@ fn apex_cones(
     if !(w_off.is_finite() && w_across.lo >= across.lo && w_across.hi <= across.hi) {
         return Ok(None);
     }
-    let a = V3 {
-        x: Ivl::from(apex.x),
-        y: Ivl::from(apex.y),
-        z: Ivl::from(apex.z),
-    };
     let Some(ca) = norm_hi(v_sub(c, a)) else {
         return Ok(None);
     };
@@ -885,7 +1002,7 @@ fn apex_cones(
         if !tan.is_finite() {
             return Ok(None);
         }
-        let delta = round_up(tan.atan() * (1.0 + ASIN_ROUNDING));
+        let delta = atan_hi(tan);
         out.push(Cone { n, delta });
     }
     Ok(Some(out))
@@ -1000,9 +1117,9 @@ fn cone_piece_upper(cn: &NurbsCurve, sides: &[Side; 2], a: f64, b: f64) -> Resul
         for q in &c2 {
             let hi = match line_angle(p.n, q.n) {
                 Some((_, hi)) => round_up(round_up(hi + p.delta) + q.delta),
-                None => std::f64::consts::FRAC_PI_2,
+                None => ABOVE_RIGHT_ANGLE,
             };
-            upper = upper.max(hi.min(std::f64::consts::FRAC_PI_2));
+            upper = upper.max(hi.min(ABOVE_RIGHT_ANGLE));
         }
     }
     Ok(upper.is_finite().then_some(upper))
@@ -1136,9 +1253,7 @@ fn seam_piece_upper(cn: &NurbsCurve, sides: &[Side; 2], a: f64, b: f64) -> Resul
         return Ok(None);
     };
     let upper = round_up(round_up(chord_angle_hi(chord) + s1.feet) + s2.feet);
-    Ok(upper
-        .is_finite()
-        .then_some(upper.min(std::f64::consts::FRAC_PI_2)))
+    Ok(upper.is_finite().then_some(upper.min(ABOVE_RIGHT_ANGLE)))
 }
 
 /// The seam check's stations over `interval` ([`SEAM_PARTS`]), sorted, each once.
@@ -1182,10 +1297,7 @@ fn prepare(
     for s in sides {
         // a procedural blend evaluates by its definition, and its net is only that
         // definition's approximation: the facts bound the net, so nothing is proved of it
-        if matches!(
-            s.kind(),
-            crate::surface::surface::SurfaceKind::ProceduralBlend(_)
-        ) {
+        if net_only_approximates(s) {
             return Ok(None);
         }
         let s = s.clone_for_evaluation()?;
@@ -1205,10 +1317,27 @@ fn prepare(
     Ok(Some((cn, sides)))
 }
 
+/// Whether `s`'s net is not the surface itself, so the facts (which bound the net) prove
+/// nothing of it: a procedural blend (it evaluates by its definition, the net only
+/// approximates it), or a net kept with a definition it is certified only within a bound
+/// of (a sweep's, [`Surface::procedural_definition`]) other than an exact 0.
+fn net_only_approximates(s: &Surface) -> bool {
+    matches!(
+        s.kind(),
+        crate::surface::surface::SurfaceKind::ProceduralBlend(_)
+    ) || s.procedural_definition().is_some_and(|d| d.bound() != 0.0)
+}
+
 /// The largest station lower bound, `None` where no station's is proved.
-fn stations_lower(cn: &NurbsCurve, sides: &[Side; 2], ts: &[f64]) -> Result<Option<f64>> {
+fn stations_lower(
+    k: &Kernel,
+    cn: &NurbsCurve,
+    sides: &[Side; 2],
+    ts: &[f64],
+) -> Result<Option<f64>> {
     let mut lower: Option<f64> = None;
     for &t in ts {
+        k.check_cancelled(OP)?;
         if let Some(l) = station_lower(cn, sides, t)? {
             lower = Some(lower.map_or(l, |m| m.max(l)));
         }
@@ -1233,7 +1362,7 @@ pub fn seam_angle_lower_bound(
     let Some((cn, sides)) = prepare(k, curve, interval, sides)? else {
         return Ok(None);
     };
-    stations_lower(&cn, &sides, &stations(interval))
+    stations_lower(k, &cn, &sides, &stations(interval))
 }
 
 /// A proved enclosure of the largest acute normal angle between `sides` along `curve` over
@@ -1257,7 +1386,7 @@ pub fn seam_angle_enclosure(
         return Ok(None);
     };
     let ts = stations(interval);
-    let lower = stations_lower(&cn, &sides, &ts)?.unwrap_or(0.0);
+    let lower = stations_lower(k, &cn, &sides, &ts)?.unwrap_or(0.0);
     let mut stack: Vec<(f64, f64, u32)> = ts
         .windows(2)
         .rev()
@@ -1269,6 +1398,7 @@ pub fn seam_angle_enclosure(
     let mut made = stack.len();
     let mut upper = 0.0_f64;
     while let Some((a, b, depth)) = stack.pop() {
+        k.check_cancelled(OP)?;
         let mid = 0.5 * (a + b);
         // once the largest angle is shown above `below` (a station's lower bound, or a piece
         // that stopped above it), no cut can bring `upper` to `below`: stop cutting
@@ -1342,6 +1472,7 @@ pub fn seam_angle_within(
         if spent >= budget {
             return Ok(false);
         }
+        k.check_cancelled(OP)?;
         spent += 1;
         if let Some(bound) = piece_upper(&cn, &sides, a, b, limit)? {
             if bound <= limit {
@@ -1468,6 +1599,118 @@ mod tests {
             "{e:?} against {alpha:e}"
         );
         assert!(e.upper - e.lower < 1.0e-9, "{e:?}");
+    }
+
+    /// The proof polls the kernel's cancel token at every station and piece (#18640 review),
+    /// so a cancellation after the sides are prepared stops it with `Cancelled`.
+    #[test]
+    fn the_proof_stops_when_cancelled() {
+        let (flat, tilted) = (leaning(0.0, 0.0), leaning(1.0e-3, 0.0));
+        let run = |token: crate::kernel::CancelToken| {
+            let mut k = Kernel::default();
+            k.set_cancel_token(token.clone());
+            let within = seam_angle_within(
+                &k,
+                &x_axis(),
+                Extent1d::from_min_max(0.0, 1.0),
+                [&flat, &tilted],
+                1.0e-2,
+                CERTIFY_TEST_BUDGET,
+            );
+            (within, token.polls().unwrap())
+        };
+        let (within, polls) = run(crate::kernel::CancelToken::after_polls(u64::MAX));
+        assert!(within.unwrap());
+        assert!(polls >= WITHIN_PIECES as u64, "{polls} polls");
+        // cancelled at the last poll: the proof's own, after every preparing poll
+        let (within, _) = run(crate::kernel::CancelToken::after_polls(polls));
+        assert!(
+            matches!(within, Err(SolidError::Cancelled { .. })),
+            "{within:?}"
+        );
+    }
+
+    /// A side whose net is kept with a sweep's definition it is certified only within a
+    /// nonzero bound of is refused (#18640 review): the facts bound the net, not the
+    /// definition the surface is. The same net with no definition is proved.
+    #[test]
+    fn a_net_certified_only_near_its_definition_is_refused() {
+        use crate::surface::procedural_sweep::{ProceduralSweep, ScrewMotion};
+        let k = Kernel::default();
+        let flat = leaning(0.0, 0.0);
+        let mut swept = leaning(1.0e-3, 0.0);
+        let within = |tilted: &Surface| {
+            seam_angle_within(
+                &k,
+                &x_axis(),
+                Extent1d::from_min_max(0.0, 1.0),
+                [&flat, tilted],
+                1.0e-2,
+                CERTIFY_TEST_BUDGET,
+            )
+            .unwrap()
+        };
+        assert!(within(&swept));
+        let profile = BSplineCurve::create_line_segment(
+            3,
+            Point3::new(4.0, 0.0, 0.0),
+            Point3::new(5.0, 0.0, 1.0),
+        )
+        .unwrap();
+        let motion = ScrewMotion::new(
+            Point3::ZERO,
+            crate::math::Vec3::new(0.0, 0.0, 1.0),
+            1.5,
+            None,
+        )
+        .unwrap();
+        let sweep = ProceduralSweep::create(&profile, motion, &[0.0, 0.5, 1.0], 0.25).unwrap();
+        assert!(sweep.bound() > 0.0);
+        swept.set_sweep_definition(sweep);
+        assert!(swept.procedural_definition().is_some());
+        assert!(!within(&swept));
+    }
+
+    /// The test budget of piece bounds for [`seam_angle_within`].
+    const CERTIFY_TEST_BUDGET: usize = 2048;
+
+    /// The inverse trig bounds keep the library's value only where `sin` (`tan`) of it,
+    /// enclosed by the series, proves it (#18640 review): a guess on the wrong side of the
+    /// exact value, as a library a few ulps off would give past the widening, is refused,
+    /// and the bounds then fall back to `π` (or `π / 2`, or 0).
+    #[test]
+    fn inverse_trig_bounds_are_checked_not_assumed() {
+        for h in [0.0_f64, 1.0e-12, 1.0e-3, 0.3, 0.5, 0.9, 0.999_999] {
+            let y = h.asin();
+            let e = sin_enclosed(y);
+            assert!(
+                e.lo <= h + 1.0e-15 && h <= e.hi + 1.0e-15 && e.hi - e.lo < 1.0e-14,
+                "{h}: {e:?}"
+            );
+            // the bounds hold the angle, tight (no fallback)
+            let (hi, lo) = (chord_angle_hi(2.0 * h), chord_angle_lo(2.0 * h));
+            assert!(
+                hi >= 2.0 * y && hi <= 2.0 * y * (1.0 + 1.0e-7) + 1.0e-299,
+                "{h}: {hi}"
+            );
+            assert!(lo <= 2.0 * y && lo >= 2.0 * y * (1.0 - 1.0e-7), "{h}: {lo}");
+            if h > 0.0 {
+                // a guess 1e-10 relative short of asin(h), or past it, is refused
+                assert_eq!(asin_above(h, y * (1.0 - 1.0e-10)), None, "{h}");
+                assert_eq!(asin_below(h, y * (1.0 + 1.0e-10)), None, "{h}");
+            }
+        }
+        for t in [0.0_f64, 1.0e-9, 1.0e-3, 0.5, 1.0, 3.0, 100.0] {
+            let y = t.atan();
+            let hi = atan_hi(t);
+            assert!(hi >= y && hi <= y * (1.0 + 1.0e-7) + 1.0e-299, "{t}: {hi}");
+            if t > 0.0 {
+                assert_eq!(atan_above(t, y * (1.0 - 1.0e-10)), None, "{t}");
+            }
+        }
+        // a chord between opposite unit vectors, or no bound: past π
+        assert!(chord_angle_hi(2.0) > std::f64::consts::PI);
+        assert!(chord_angle_hi(f64::NAN) > std::f64::consts::PI);
     }
 
     /// A plane and a surface whose normal leans by `atan(a + b x^2)` along the x-axis: the
@@ -1629,8 +1872,9 @@ mod tests {
     }
 
     /// Faces at a right angle: the normals' dot product straddles 0, so no station's lower
-    /// bound is proved (0) and the upper bound is the acute angle's largest, `π / 2`; a
-    /// reversed interval is an input error.
+    /// bound is proved (0) and the upper bound is the acute angle's largest, `π / 2`, as
+    /// the double just above it (`FRAC_PI_2` is just below π / 2, so it is no upper bound);
+    /// a reversed interval is an input error.
     #[test]
     fn a_right_angle_is_held_by_the_largest_acute_angle() {
         let mut k = Kernel::default();
@@ -1638,11 +1882,14 @@ mod tests {
             .unwrap();
         let e = crate::query::api_queries::get_edges(&b).unwrap()[0];
         let right = std::f64::consts::FRAC_PI_2;
+        // FRAC_PI_2 is the double just below π / 2 = 1.5707963267948966192...; the cap
+        // is the next double up
+        assert_eq!(ABOVE_RIGHT_ANGLE.to_bits(), right.to_bits() + 1);
         assert_eq!(
             edge_seam_angle_enclosure(&k, &b, e, right).unwrap(),
             Some(SeamAngleEnclosure {
                 lower: 0.0,
-                upper: right
+                upper: ABOVE_RIGHT_ANGLE
             })
         );
         let flat = leaning(0.0, 0.0);

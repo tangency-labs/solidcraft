@@ -9,9 +9,10 @@
 //! - `check_brep` Level 2 reports nothing and the body is one closed manifold solid;
 //! - the corner-patch sides on plane faces number [`Row::face_sides`], and the corner
 //!   patches' seam edges are main's;
-//! - a corner patch whose seams all read main's readings bit for bit is main's patch
-//!   (EQUAL); a row with every patch so is a kept row ([`Row::moved`] false), and its
-//!   volume and next-row distance are main's bit for bit too;
+//! - a corner patch whose seams all read main's readings bit for bit and whose face sides
+//!   do not hold the tangency certificate (as main's mean-twist patch's do not) is main's
+//!   patch (EQUAL); a row with every patch so is a kept row ([`Row::moved`] false), and
+//!   its volume and next-row distance are main's bit for bit too;
 //! - any other corner patch is a face-sided patch: each of its face sides holds the
 //!   tangency certificate of [`patch_sides`] (its next control row in the plane to
 //!   [`IN_PLANE`], the net on one side of it), and every one of its seams is proved
@@ -354,9 +355,16 @@ fn check(name: &str) {
     assert_eq!(ours, main_patches, "{name}: the corner patches' seams, by patch");
     let mut moved = 0;
     for ((f, certified, seams), &(_, main_lower)) in patches.iter().zip(row.main_patches) {
-        let kept = seams.iter().all(|&i| {
-            reading(i).map(f64::to_bits) == main_reading(i).map(f64::to_bits)
-        });
+        // main's patch: its seams read main's bit for bit, and it is not face-sided by its
+        // own geometry (its face sides do not hold the tangency certificate, as main's
+        // mean-twist patch's do not). Equal readings alone do not show the patch is
+        // main's (a candidate could keep its boundary rows and change its interior,
+        // #18640 review): a patch whose face sides hold the certificate is proved
+        // whatever it reads.
+        let kept = !*certified
+            && seams.iter().all(|&i| {
+                reading(i).map(f64::to_bits) == main_reading(i).map(f64::to_bits)
+            });
         if kept {
             eprintln!("{name}: patch {f:?} (seams {seams:?}): main's patch kept, readings bit-equal");
             continue;

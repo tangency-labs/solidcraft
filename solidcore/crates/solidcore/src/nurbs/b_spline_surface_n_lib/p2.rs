@@ -2221,12 +2221,15 @@ fn corner_blend_4(
     if face_sides & (1 << TOP) != 0 {
         coons_face_sides |= COONS_FACE_TOP;
     }
-    // the face-sided patch's sides, before the mean-twist patch consumes them. Only where
-    // every side has a surface: the guard proves each side's seam with that side's
-    // surface, and a side without one (a triangular patch's) would be left unheld
-    let surfaced = (0..4).all(|ii| matches!(surfaces.get(ii), Some(Some(_))));
-    let face_sided = (coons_face_sides != 0 && !create_bilinear_patch && surfaced)
-        .then(|| (bounds.clone(), tans.clone()));
+    // the face-sided patch's sides, before the mean-twist patch consumes them
+    let face_sided = face_sided_eligible(
+        k,
+        coons_face_sides,
+        create_bilinear_patch,
+        originals,
+        surfaces,
+    )?
+    .then(|| (bounds.clone(), tans.clone()));
     let coons = BSplineSurface::create_coons_patch_on_faces(
         tol,
         create_bilinear_patch,
@@ -2260,6 +2263,39 @@ fn corner_blend_4(
     let target = (ANG_TOL_DEG * (PI / 180.0)).min(tangency_tol_radians);
     let patch = face_sided_or_bar(k, tol, face_sided, coons_face_sides, &sides, bar, target)?;
     Ok(vec![patch])
+}
+
+/// Not the fork's (WR-613): whether the face-sided patch is tried ([`face_sided_or_bar`]):
+/// some side is on a face of the body (`coons_face_sides`), the patch is not bilinear, and
+/// every side has a surface and a given 3D curve (`originals`, before the patch's sides
+/// are reversed, made compatible or elevated, none of which keeps a point exactly one)
+/// that is not degenerate to [`EFF_ZERO`], upstream's test of a degenerate side here. The
+/// proof holds each side's seam with that side's surface along its curve: a side without
+/// a surface would be left unheld, and so would a side collapsed to a point (a triangular
+/// corner padded with its apex's point curve, which has a surface where the apex is on a
+/// face, #18640 review), where the patch's normal turns about the apex with no seam to
+/// bound.
+///
+/// # Errors
+///
+/// Those of [`SmCurve::is_degenerate`].
+fn face_sided_eligible(
+    k: &crate::kernel::Kernel,
+    coons_face_sides: u32,
+    create_bilinear_patch: bool,
+    originals: &[SmCurve],
+    surfaces: &[Option<&SmSurface>],
+) -> Result<bool> {
+    let surfaced = (0..4).all(|ii| matches!(surfaces.get(ii), Some(Some(_))));
+    if coons_face_sides == 0 || create_bilinear_patch || !surfaced || originals.len() != 4 {
+        return Ok(false);
+    }
+    for c in originals {
+        if c.is_degenerate(k, EFF_ZERO, None)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// Not the fork's (WR-613): the face-sided corner patch ([`face_sided_patch`]) built from
@@ -3223,10 +3259,14 @@ fn refinement_knots(knots: &[f64], spans: usize) -> Vec<f64> {
 /// Not the fork's (WR-613): `face_sides` marks the sides on a face of the body (bit
 /// `i` for side `i`: left, bottom, right, top), as `CreateCornerBlend`'s `lFaceSides`.
 /// A point next to exactly one marked side and one unmarked side goes into the marked
-/// side's plane alone, as the Coons corner twist there is the unmarked side's: the patch
-/// keeps its tangency to the body's face exactly and the blend side takes the miss. On
-/// the mean plane the point stood off the face's tangent plane by half the two planes'
-/// separation there, so a patch along a plane face crossed it.
+/// side's plane alone, as the Coons corner twist there is the unmarked side's. The plane
+/// is the one through the side's own control point next to it, with the face's normal at
+/// the station: a constraint on that control point, so the patch's cross derivative at
+/// the side's control point is perpendicular to the face's normal and the blend side
+/// takes the miss. It makes the seam tangent where the side's row lies on the face (the
+/// seam is proved, not assumed, by [`face_sided_patch`]). On the mean plane the point
+/// stood off that plane by half the two planes' separation there, so a patch along a
+/// plane face crossed it.
 fn project_coons_side_rows(
     k: &crate::kernel::Kernel,
     patch: &mut BSplineSurface,
@@ -3581,7 +3621,9 @@ fn face_sided_patch(
 /// largest angle along its sides is at least that bound, so a candidate proved within it
 /// on every side has no larger largest angle (the error is not moved from one side to
 /// another past what ships). `None` where the bound is not positive (nothing proved of
-/// that patch, or a NaN).
+/// that patch, or a NaN), or `target` is not finite (a NaN target would otherwise lose
+/// to the bound in `min`; `corner_blend_4`'s target is finite, as its `min` with the seam
+/// check's angle drops a NaN tolerance, so this guards the function itself).
 /// `surfaced[i]`: side `i` has a surface.
 fn seam_limit(target: f64, bar_lower: &[Option<f64>; 4], surfaced: [bool; 4]) -> Option<f64> {
     let mut most = 0.0_f64;
@@ -3589,6 +3631,9 @@ fn seam_limit(target: f64, bar_lower: &[Option<f64>; 4], surfaced: [bool; 4]) ->
         if let (Some(lower), true) = (*lower, on) {
             most = most.max(lower);
         }
+    }
+    if !target.is_finite() {
+        return None;
     }
     let limit = target.min(most);
     (limit > 0.0).then_some(limit)
@@ -4225,9 +4270,46 @@ mod tests {
         assert!(r.is_err());
     }
 
+    /// WR-613: the face-sided patch is tried only where every side has a surface and a
+    /// curve: a triangular corner padded with its apex's point curve is not, even where the
+    /// apex is on a face and so has a surface (#18640 review), nor a side with no surface,
+    /// no face side, or a bilinear patch.
+    #[test]
+    fn wr_613_a_padded_triangle_is_not_face_sided() {
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::surface::plane::Plane;
+        let k = crate::Kernel::default();
+        let plane = SmSurface::from(Plane::create_canonical(&Axis2Placement::default()).unwrap());
+        let line = |a: Point3, b: Point3| {
+            SmCurve::from(BSplineCurve::create_line_segment(3, a, b).unwrap())
+        };
+        let (p0, p1, p2, p3) = (
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(1.0, 0.0, 0.0),
+            Point3::new(1.0, 1.0, 0.0),
+            Point3::new(0.0, 1.0, 0.0),
+        );
+        let quad = vec![line(p0, p3), line(p1, p2), line(p0, p1), line(p3, p2)];
+        let surfaced = [Some(&plane); 4];
+        let eligible = |sides: u32, bilinear: bool, c: &[SmCurve], s: &[Option<&SmSurface>]| {
+            face_sided_eligible(&k, sides, bilinear, c, s).unwrap()
+        };
+        assert!(eligible(COONS_FACE_LEFT, false, &quad, &surfaced));
+        let mut triangle = quad.clone();
+        triangle[3] = SmCurve::from(BSplineCurve::create_point_curve(p2).unwrap());
+        assert!(!eligible(COONS_FACE_LEFT, false, &triangle, &surfaced));
+        let mut free = surfaced;
+        free[3] = None;
+        assert!(!eligible(COONS_FACE_LEFT, false, &quad, &free));
+        assert!(!eligible(0, false, &quad, &surfaced));
+        assert!(!eligible(COONS_FACE_LEFT, true, &quad, &surfaced));
+    }
+
     /// WR-613: a corner control point next to a side on a face of the body and a blend
-    /// side goes into the face side's tangent plane, so the patch keeps its tangency to
-    /// the face exactly; next to two sides of one kind it goes onto their mean plane.
+    /// side goes into the plane through that side's control point next to it with the
+    /// face side's normal (the face side's plane alone; the side's row here is off the
+    /// face, so the check is of the constraint on the control point, not of a seam); next
+    /// to two sides of one kind it goes onto their mean plane.
     #[test]
     fn wr_613_corner_point_goes_into_the_face_sides_plane() {
         use crate::geom::axis2_placement::Axis2Placement;
@@ -4439,6 +4521,11 @@ mod tests {
             seam_limit(target, &[Some(f64::NAN), None, None, None], surfaced),
             None
         );
+        // a target not finite gives no limit, whatever is proved of the shipped patch
+        // (#18640 review: NaN.min(bound) is the bound)
+        for t in [f64::NAN, f64::INFINITY] {
+            assert_eq!(seam_limit(t, &bar, surfaced), None, "{t}");
+        }
         // the screen: every side with a surface read at or below the limit; a side may
         // rise (here the blend side, to the limit) while the largest angle falls
         let limit = 6.2e-3;

@@ -337,7 +337,7 @@ pub struct ProceduralSweep {
 /// `2^-64` of the sum or after [`SERIES_TERMS`] terms, widened by the first term left out,
 /// which bounds the rest. `p0` and `r` are intervals, so the sum holds for every series
 /// they hold.
-fn alternating(p0: Ivl, r: Ivl, c: impl Fn(u32) -> Ivl) -> Ivl {
+pub(crate) fn alternating(p0: Ivl, r: Ivl, c: impl Fn(u32) -> Ivl) -> Ivl {
     let mut power = p0;
     let mut sum = Ivl::from(0.0);
     let mut n = 0;

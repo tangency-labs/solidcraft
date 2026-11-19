@@ -130,14 +130,15 @@ impl NetSurface {
     pub(crate) fn low_lines(&self, u: Ivl, v: Ivl) -> (Vec<f64>, Vec<f64>) {
         let n = &self.net;
         let lines = |knots: &[f64], p: usize, lo: f64, hi: f64| {
+            // one pass over the runs of equal knots (the vector is non-decreasing)
             let mut out: Vec<f64> = Vec::new();
-            for &x in knots {
-                if x > lo && x < hi && out.last() != Some(&x) {
-                    let m = knots.iter().filter(|&&y| y == x).count();
-                    if m >= p {
-                        out.push(x);
-                    }
+            let mut rest = knots;
+            while let Some(&x) = rest.first() {
+                let m = rest.iter().take_while(|&&y| y == x).count().max(1);
+                if x > lo && x < hi && m >= p {
+                    out.push(x);
                 }
+                rest = rest.get(m..).unwrap_or(&[]);
             }
             out.sort_by(f64::total_cmp);
             out.dedup();
@@ -159,10 +160,12 @@ impl NetSurface {
     /// coordinates, weight included) is one point exactly, so the surface is that point all
     /// along the side. Each is `(across_u, at_max, point)`: `across_u` for a side at
     /// constant u (the first or last column), `at_max` for the last row or column, and the
-    /// point (`None` from a net with a zero weight there). Only an end whose knots are
+    /// point enclosed: exact for a weight of 1, else the quotient `x / w` rounded outward
+    /// (#18640 review: a proof bounds distances from it). A row with a weight not finite
+    /// and positive gives no side. Only an end whose knots are
     /// clamped (the first or last `degree + 1` equal) is a side: the surface's edge there
     /// is that row; an unclamped end's row is not on the surface, and gives no side.
-    pub(crate) fn collapsed_sides(&self) -> Vec<(bool, bool, V3<f64>)> {
+    pub(crate) fn collapsed_sides(&self) -> Vec<(bool, bool, V3<Ivl>)> {
         let n = &self.net;
         // the end of a knot vector (degree `p`, `count` control points) is clamped
         let clamped = |kn: &[f64], p: usize, count: usize, at_max: bool| -> bool {
@@ -213,13 +216,20 @@ impl NetSurface {
             if !(w.is_finite() && w > 0.0 && x.is_finite() && y.is_finite() && z.is_finite()) {
                 continue;
             }
+            let quotient = |c: f64| {
+                if w == 1.0 {
+                    Ivl::from(c)
+                } else {
+                    Ivl::from(c) / Ivl::from(w)
+                }
+            };
             out.push((
                 across_u,
                 at_max,
                 V3 {
-                    x: x / w,
-                    y: y / w,
-                    z: z / w,
+                    x: quotient(x),
+                    y: quotient(y),
+                    z: quotient(z),
                 },
             ));
         }
@@ -1017,6 +1027,47 @@ mod tests {
     use crate::math::Point3;
     use crate::nurbs::crv_basic::Curve as NurbCurve;
     use crate::nurbs::math::{CPoint, NOW};
+
+    /// A rational net's side collapsed to the homogeneous point `(1, 0, 0, 10)` gives the
+    /// apex `x = 1/10` enclosed, not rounded to a double (#18640 review: the seam proof
+    /// bounds distances from it); a weight-1 side's apex is its exact point.
+    #[test]
+    fn a_collapsed_side_of_weight_not_one_is_enclosed() {
+        let k = Kernel::default();
+        let net_of = |w: f64| {
+            let apex = CPoint::new(1.0, 0.0, 0.0, w);
+            let rows = vec![
+                vec![CPoint::new(0.0, 0.0, 0.0, 1.0), apex],
+                vec![CPoint::new(0.0, 1.0, 0.0, 1.0), apex],
+            ];
+            let s = crate::nurbs::srf_basic::Surface::new(
+                rows,
+                1,
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+                vec![0.0, 0.0, 1.0, 1.0],
+            )
+            .unwrap();
+            let s = Surface::from(crate::nurbs::b_spline_surface::BSplineSurface::from_nurb(
+                s, false,
+            ));
+            NetSurface::of(&k, &s, &[])
+                .unwrap()
+                .unwrap()
+                .collapsed_sides()
+        };
+        let sides = net_of(10.0);
+        let [(_, _, apex)] = sides.as_slice() else {
+            panic!("{sides:?}");
+        };
+        assert!(apex.x.lo < apex.x.hi, "{apex:?}");
+        assert!(apex.x.lo <= 0.1 && 0.1 <= apex.x.hi, "{apex:?}");
+        let sides = net_of(1.0);
+        let [(_, _, apex)] = sides.as_slice() else {
+            panic!("{sides:?}");
+        };
+        assert_eq!((apex.x.lo, apex.x.hi), (1.0, 1.0));
+    }
 
     /// A line `lift` above a box's top face, inside it: its gap to the top face's plane is
     /// `lift` everywhere, so the bound is at least `lift` and, the line and the plane being

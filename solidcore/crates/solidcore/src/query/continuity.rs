@@ -387,8 +387,8 @@ fn resolve_sides<'b>(sides: [(&'b Brep, FaceuseId); 2]) -> Result<[(&'b Surface,
 ///
 /// # Errors
 ///
-/// [`SolidError::InvalidInput`] for a `t` that is not finite; those of the evaluations and the
-/// drops.
+/// [`SolidError::InvalidInput`] for a `t` that is not finite or a sense other than `+1` or
+/// `-1`; those of the evaluations and the drops.
 pub fn continuity_on_surfaces(
     k: &Kernel,
     curve: &Curve,
@@ -400,6 +400,15 @@ pub fn continuity_on_surfaces(
         return Err(SolidError::invalid_input(
             OP,
             "an edge parameter that is not finite",
+        ));
+    }
+    if sides
+        .iter()
+        .any(|&(_, sense)| sense != 1.0 && sense != -1.0)
+    {
+        return Err(SolidError::invalid_input(
+            OP,
+            "a normal sense other than +1 or -1",
         ));
     }
     let d = curve.evaluate(k, t, 1, true, false)?;
@@ -930,5 +939,49 @@ mod tests {
             (pr.k1 - 1.0).abs() < 1e-9 && (pr.k2 + 1.0).abs() < 1e-9,
             "{pr:?}"
         );
+    }
+    /// A normal sense other than `+1` or `-1` (a NaN, a 0, a 2) is refused as an input
+    /// error at the surface query, not read as a station with no measure (#18640 review);
+    /// `+1` and `-1` measure the seam.
+    #[test]
+    fn a_normal_sense_other_than_one_is_refused() {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        let k = Kernel::new(&KernelOptions::default());
+        let plane = |z: f64| {
+            Surface::from(
+                BSplineSurface::create_bilinear_surface(
+                    Point3::new(-1.0, -1.0, -z),
+                    Point3::new(1.0, -1.0, -z),
+                    Point3::new(-1.0, 1.0, z),
+                    Point3::new(1.0, 1.0, z),
+                )
+                .unwrap(),
+            )
+        };
+        let (a, b) = (plane(0.0), plane(1.0e-3));
+        let line = Curve::from(
+            BSplineCurve::create_line_segment(
+                3,
+                Point3::new(-0.5, 0.0, 0.0),
+                Point3::new(0.5, 0.0, 0.0),
+            )
+            .unwrap(),
+        );
+        let at = |sa: f64, sb: f64| {
+            continuity_on_surfaces(&k, &line, 0.5, [(&a, sa), (&b, sb)], [None, None])
+        };
+        for sense in [f64::NAN, 0.0, 2.0, f64::INFINITY] {
+            assert!(
+                matches!(at(1.0, sense), Err(SolidError::InvalidInput { .. })),
+                "{sense}"
+            );
+            assert!(
+                matches!(at(sense, -1.0), Err(SolidError::InvalidInput { .. })),
+                "{sense}"
+            );
+        }
+        assert!(at(1.0, 1.0).unwrap().is_some());
+        assert!(at(1.0, -1.0).unwrap().is_some());
     }
 }
