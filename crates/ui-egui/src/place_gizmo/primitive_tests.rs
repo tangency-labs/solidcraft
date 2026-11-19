@@ -686,3 +686,40 @@ fn editing_a_cylinder_with_an_expression_axis_keeps_its_axis_and_reference_edges
     let FeatureKind::Cylinder { axis, .. } = &kind else { panic!("a Cylinder: {kind:?}") };
     assert_eq!(axis.clone().map(|e| e.to_string()), ["sin(t)", "0", "cos(t)"], "the floating cylinder keeps its axis");
 }
+
+/// A cylinder tilted off its face by its axis expressions (#18822), whose reference edge has
+/// moved since it was made, still edits: OK finds the edge by its name where it is now, rather
+/// than refusing because nothing is left at the point it was picked at. It sends nothing the
+/// command doesn't take, so it also passes a strict parameter check.
+#[test]
+fn editing_a_tilted_cylinder_follows_its_moved_reference_edge() {
+    for strict in [false, true] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("parameters.add", json!({"name": "t", "expression": "20 deg"})).unwrap();
+        h.app.run("parameters.add", json!({"name": "dx", "expression": "0 mm"})).unwrap();
+        h.app.run("solid.box", json!({"length": "80 mm + dx", "width": 50, "height": 10, "corner": ["-dx", 0, 0]})).unwrap();
+        let made = h
+            .app
+            .run(
+                "solid.cylinder",
+                json!({"radius": 4, "height": 8, "base": [30, 25, 10], "axis": ["0", "sin(t)", "cos(t)"],
+                       "references": [{"edge": [0, 20, 10], "distance": "30 mm"}], "operation": "join"}),
+            )
+            .unwrap();
+        let name = made["name"].as_str().unwrap().to_string();
+        h.app.run("parameters.change", json!({"name": "dx", "expression": "25 mm"})).unwrap();
+        h.settle();
+        if strict {
+            h.app.session.param_check = solidcraft_engine::schema::ParamCheck::Strict;
+        }
+        h.step(&json!({"call": "ui.editFeature", "params": {"feature": name}})).unwrap();
+        h.settle();
+        ok(&mut h);
+        let f = h.app.session.doc.find_feature(&name).expect("the cylinder");
+        let FeatureKind::Cylinder { axis, references, .. } = &f.kind else { panic!("a Cylinder: {:?}", f.kind) };
+        assert_eq!(axis.clone().map(|e| e.to_string()), ["0", "sin(t)", "cos(t)"], "strict {strict}");
+        assert_eq!(references.len(), 1, "strict {strict}: {references:?}");
+        assert!((references[0].edge.0.x + 25.0).abs() < 1e-6, "strict {strict}: the edge where it is now: {:?}", references[0].edge);
+        assert_eq!(references[0].distance.to_string(), "30 mm", "strict {strict}");
+    }
+}
