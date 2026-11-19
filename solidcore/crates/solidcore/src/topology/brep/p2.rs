@@ -4007,11 +4007,13 @@ mod tests {
         let mut kept = 0;
         let mut failures = Vec::new();
         let mut loose = Vec::new();
+        let mut held = Vec::new();
         for eu in edgeuses(&b, None).unwrap() {
             let Some(gap) = independent_gap(&k, &b, eu) else {
                 continue;
             };
             kept += 1;
+            held.push(eu.index());
             let e = eu1::edge(&b, eu).unwrap().unwrap();
             let tol = edge::tolerance(&b, e).unwrap();
             if gap <= tol {
@@ -4041,6 +4043,8 @@ mod tests {
         }
         assert!(kept > 0, "no trims kept");
         assert!(failures.is_empty(), "{failures:#?}");
+        // (the regression's two trims are still kept, and proved by the hull bound)
+        assert!(held.contains(&242) && held.contains(&246), "{held:?}");
         assert!(!loose.contains(&242) && !loose.contains(&246), "{loose:?}");
     }
 
@@ -4050,13 +4054,18 @@ mod tests {
     /// round trip through a B-rep file agree.
     ///
     /// The face's area, enclosed, is then that of the region the edges' own 3D curves bound,
-    /// 25.144566844852648 (the edges' curves, within 1e-7 of the sphere, projected radially
-    /// onto it and the region between them integrated, computed apart from the kernel's
-    /// face integrator): each trim's image lies within its edge's tolerance of the edge's
-    /// curve (the cover's proved bound, checked here by [`independent_gap`]), so the two
-    /// regions differ by a strip at most that wide along a boundary no longer than the
-    /// sphere's great circle, `4 pi`, with the curves' 1e-7 off the sphere added to the
-    /// width. Before the cover the face read 25.215347, 0.0708 off.
+    /// `EDGES_AREA`: each trim's image lies within its edge's tolerance of the edge's curve
+    /// (the cover's proved bound, checked here by [`independent_gap`]), so the two regions
+    /// differ by a strip at most that wide along the loop, with the curves' 1e-7 off the
+    /// sphere added to the width. The loop is no longer than `6 pi`: the cut circle on the
+    /// sphere of radius 2 (at most a great circle, `4 pi`) and the seam, a meridian half
+    /// (`pi`), traversed twice. Before the cover the face read 25.215347, 0.0708 off.
+    ///
+    /// `EDGES_AREA` (25.144566844852648) was computed outside the kernel (review r1 of
+    /// tangency-labs/solidcraft#19295): each edge's 3D curve (within 1e-7 of the sphere about
+    /// (10, 2, 2) of radius 2) projected radially onto the sphere, and the region the
+    /// projected loop bounds integrated by quadrature in the sphere's angles. The same
+    /// quadrature over the trims' images gives 25.14456696, a second value within 1.2e-7.
     #[test]
     fn the_plane_sphere_sheet_area_is_bounded_by_its_edges() {
         const EDGES_AREA: f64 = 25.144566844852648;
@@ -4071,7 +4080,7 @@ mod tests {
         }
         let faces: Vec<FaceId> = b.faces().iter().map(|(f, _)| f).collect();
         let area = crate::mass::enclosure::enclose_face_area_relative(&k, b, &faces, 1e-9).unwrap();
-        let strip = 4.0 * PI * (widest + 1e-7);
+        let strip = 6.0 * PI * (widest + 1e-7);
         assert!(
             area.lo - strip <= EDGES_AREA && EDGES_AREA <= area.hi + strip,
             "[{}, {}] strip {strip:e}",
@@ -4101,6 +4110,34 @@ mod tests {
             area.hi
         );
         assert!(area.hi < 605.252490899, "[{}, {}]", area.lo, area.hi);
+    }
+
+    /// `Solids/boolean_trees.smp`'s sixth B-rep: a part file's read covers its kept trims, so
+    /// the direct read's area is the round trip's (390.10306724368655 at the base already),
+    /// where it was 390.27351283975315 before. Every kept trim is proved within its edge's
+    /// tolerance ([`independent_gap`]), and the area enclosed for those trims holds the area
+    /// the goldens record (390.10306724368695) and not the one before.
+    #[test]
+    fn the_boolean_trees_area_is_enclosed_for_its_proved_trims() {
+        let mut k = Kernel::default();
+        let mut breps = read_part_file(&mut k, "Solids/boolean_trees.smp");
+        let b = breps.get_mut(5).unwrap();
+        let (kept, failures) = trims_over_tolerance(&k, b);
+        assert!(kept > 0 && failures.is_empty(), "{kept}: {failures:#?}");
+        let faces: Vec<FaceId> = b.faces().iter().map(|(f, _)| f).collect();
+        let area = crate::mass::enclosure::enclose_face_area_relative(&k, b, &faces, 1e-8).unwrap();
+        assert!(
+            area.lo <= 390.103_067_243_686_95 && 390.103_067_243_686_95 <= area.hi,
+            "[{}, {}]",
+            area.lo,
+            area.hi
+        );
+        assert!(
+            area.hi < 390.273_512_839_753_15,
+            "[{}, {}]",
+            area.lo,
+            area.hi
+        );
     }
 
     /// A seam's trim moved a whole period along `u` (its image the same, its parameters past
