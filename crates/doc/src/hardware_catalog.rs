@@ -5,7 +5,8 @@
 use crate::{TappedThreadFamily, parse_tapped_thread};
 
 /// The kinds of press-in hardware, in table order.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum HardwareKind {
     /// A self-clinching nut: its head stands proud of the sheet on the side it is pressed in from.
     Nut,
