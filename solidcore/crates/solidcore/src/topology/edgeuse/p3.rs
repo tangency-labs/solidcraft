@@ -1752,8 +1752,9 @@ pub fn get_or_create_uv_trim_curve(
 /// upstream.
 ///
 /// `B` is taken only where the tolerance it leaves still covers the proved distance of every
-/// other UV trim of the edge (`other_trims_bound`); otherwise, or where one of them is not
-/// enclosed, `upstream`. A trim set without a raise (read from a file, or attached by an
+/// other UV trim of the edge, and the edge curve's proved distance to the surface of every
+/// other face of the edge that holds no trim (`other_trims_bound`); otherwise, or where one
+/// of them is not enclosed, `upstream`. A trim set without a raise (read from a file, or attached by an
 /// operation that does not raise) may be covered by upstream's larger raise only, and a
 /// smaller raise must not uncover it. Such a trim is not covered by raising further: its
 /// bound can be loose by orders of magnitude, and a tolerance raised to it changes what
@@ -1804,9 +1805,10 @@ pub(crate) fn trim_raise_distance(
 }
 
 /// Not upstream (#18162): the largest [`trim_deviation_bound`] of the UV trims of `eu`'s
-/// edge other than the one `eu` and its mate share (the one being replaced), `0` without
-/// any; `None` where one is not enclosed or is above `lowered` (the caller only asks whether
-/// they are all within it).
+/// edge other than the one `eu` and its mate share (the one being replaced), and of the edge
+/// curve's distance to the surface of each other face of the edge whose uses hold no trim
+/// ([`edge_face_gap_bound`]), `0` without any; `None` where one is not enclosed or is above
+/// `lowered` (the caller only asks whether they are all within it).
 ///
 /// # Errors
 ///
@@ -1835,7 +1837,84 @@ fn other_trims_bound(
             _ => return Ok(None),
         }
     }
+    // A face of the edge none of whose uses holds a trim (other than `eu`'s, which the new
+    // trim covers) is covered only by the edge curve's own distance to its surface: upstream's
+    // larger raise may be all that covers it, as for a trim set without a raise (#18166:
+    // `primitive.api_primitives` gen0083, `heal.stitch_p2` cov_cube2_do).
+    let own = match faceuse(b, eu)? {
+        Some(fu) => faceuse_face(b, fu)?,
+        None => None,
+    };
+    let mut faces: Vec<(FaceId, bool)> = Vec::new();
+    for &x in &b.edge(e)?.edgeuses {
+        let Some(fu) = faceuse(b, x)? else {
+            continue;
+        };
+        let Some(f) = faceuse_face(b, fu)? else {
+            continue;
+        };
+        if Some(f) == own {
+            continue;
+        }
+        let trimmed = b.edgeuse(x)?.uv_trim_curve.is_some();
+        match faces.iter_mut().find(|(g, _)| *g == f) {
+            Some(slot) => slot.1 |= trimmed,
+            None => faces.push((f, trimmed)),
+        }
+    }
+    for (f, _) in faces.into_iter().filter(|(_, trimmed)| !trimmed) {
+        match edge_face_gap_bound(k, b, e, f, fit)? {
+            Some(gap) if gap.is_finite() && gap <= lowered => worst = worst.max(gap),
+            _ => return Ok(None),
+        }
+    }
     Ok(Some(worst))
+}
+
+/// Not upstream (#18166): a proved bound on the distance from `e`'s curve over its interval to
+/// the surface of its face `f` (`curve_face_gap_bound`, cut to a thousandth of `fit` as
+/// [`trim_deviation_bound`]), plus the rounding of a line's analytic evaluation against its
+/// NURBS data (`line_evaluation_slack`); `None` where it is not enclosed or the curve is not a
+/// B-spline, an ellipse or a line.
+///
+/// # Errors
+///
+/// Those of `curve_face_gap_bound`.
+fn edge_face_gap_bound(
+    k: &Kernel,
+    b: &Brep,
+    e: EdgeId,
+    f: FaceId,
+    fit: f64,
+) -> Result<Option<f64>> {
+    let rec = b.edge(e)?;
+    let Some(curve) = rec.curve.as_ref() else {
+        return Ok(None);
+    };
+    let line;
+    let (bs, slack) = match curve.kind() {
+        CurveKind::BSpline(bs) => (bs, 0.0),
+        CurveKind::Ellipse(el) => (el.base(), 0.0),
+        CurveKind::Line(l) => {
+            line = l.base_with_nurb()?;
+            let Some(slack) = crate::query::curve_surface_gap::line_evaluation_slack(l, false)
+            else {
+                return Ok(None);
+            };
+            (&*line, slack)
+        }
+        _ => return Ok(None),
+    };
+    let ivl = rec.interval;
+    let gap = crate::query::curve_surface_gap::curve_face_gap_bound(
+        k,
+        b,
+        f,
+        bs,
+        [ivl.min(), ivl.max()],
+        TRIM_BOUND_FLOOR * fit,
+    )?;
+    Ok(gap.map(|g| (g + slack) * (1.0 + 4.0 * f64::EPSILON)))
 }
 
 /// Not upstream (#18162): a proved upper bound on how far the image of `trim` (a UV trim of
