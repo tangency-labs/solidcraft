@@ -5979,6 +5979,7 @@ dependencies = [
 name = "solidcore-ops"
 version = "0.1.0"
 dependencies = [
+ "serde",
  "solidcore",
  "solidcore-convert",
  "solidcore-record",
@@ -6187,6 +6188,7 @@ dependencies = [
  "solidcraft-geom",
  "solidcraft-io",
  "solidcraft-kernel",
+ "solidcraft-panel-layout",
  "solidcraft-profile",
  "solidcraft-render",
  "solidcraft-sketch",
@@ -6346,6 +6348,16 @@ name = "solidcraft-mcp-server"
 version = "0.45.0-rc.4"
 dependencies = [
  "serde_json",
+]
+
+[[package]]
+name = "solidcraft-panel-layout"
+version = "0.45.0-rc.4"
+dependencies = [
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
