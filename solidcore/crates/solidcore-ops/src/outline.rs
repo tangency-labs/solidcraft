@@ -172,6 +172,10 @@ pub fn tidy_silhouette(geom: Vec<Piece>) -> Vec<Piece> {
 /// Whether `p` lies within `tol` of the piece `g` ([`k::near`]).
 #[must_use]
 pub fn near(g: &Piece, p: Vec2, tol: f64) -> bool {
+    // A point or a spline never holds it: not copied for the kernel to say so.
+    if matches!(g, Piece::Point(_) | Piece::Spline { .. }) {
+        return false;
+    }
     k::near(&to_kernel(g.clone()), vec2(p), tol)
 }
 
