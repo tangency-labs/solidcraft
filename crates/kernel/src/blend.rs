@@ -2100,6 +2100,52 @@ mod tests {
         }
     }
 
+    /// A wall on a plate of two tiles with rounded rims (#19454): two 20 x 20 x 10 tiles side by
+    /// side, each with its four top edges rounded 5, and on them the box from (3, 3, 5) to
+    /// (37, 17, 15) with its upright edges rounded 1. Six faces of each tile less the two that
+    /// meet and the two tops under the wall, their eight rounds, and the wall's top, four sides
+    /// and four corners: 24 faces. The foot of the wall's front on the second tile, picked at
+    /// (25, 3, 9.6), with its tangent chain: the line from that tile's ridge at x = 23 and the
+    /// half of the wall's corner arc it runs on into, up to the ridge of the plate's corner.
+    ///
+    /// The round ends on that ridge on the plate's next round, which falls away under it. Its
+    /// contact line on the wall reaches that round's surface only up to the radius 1/2 (the
+    /// kernel's test of it derives that): under it the round builds, and from it on the round
+    /// is refused as too large, saying why and naming a radius under 1/2, where it failed
+    /// with status 1001 before ("Fillet Face Creation Error" at 0.5, "Vertex Computation
+    /// Failure" at 1 and 2).
+    #[test]
+    fn a_round_passing_over_the_face_it_ends_on_names_the_radius_that_fits() {
+        let tile = |x: f64| {
+            let b = crate::build::box_solid(Vec3::new(x, 0.0, 0.0), Vec3::new(x + 20.0, 20.0, 10.0)).unwrap();
+            let rim = [(x + 10.0, 0.0), (x + 10.0, 20.0), (x, 10.0), (x + 20.0, 10.0)].map(|(x, y)| Vec3::new(x, y, 10.0));
+            fillet(&b, &rim, 5.0).unwrap()
+        };
+        let plate = crate::boolean(&tile(0.0), &tile(20.0), crate::BoolOp::Union).unwrap().unwrap();
+        let wall = crate::build::box_solid(Vec3::new(3.0, 3.0, 5.0), Vec3::new(37.0, 17.0, 15.0)).unwrap();
+        let uprights = [(3.0, 3.0), (37.0, 3.0), (37.0, 17.0), (3.0, 17.0)].map(|(x, y)| Vec3::new(x, y, 10.0));
+        let wall = fillet(&wall, &uprights, 1.0).unwrap();
+        let body = crate::boolean(&plate, &wall, crate::BoolOp::Union).unwrap().unwrap();
+        let before = crate::measure(&body).unwrap();
+        assert_eq!((before.faces, before.shells), (24, 1));
+        let picks = tangent_chain(&body, &[Vec3::new(25.0, 3.0, 9.6)]).unwrap();
+        assert_eq!(picks.len(), 2, "the line and the corner arc's half: {picks:?}");
+        for r in [0.5, 1.0, 2.0] {
+            match fillet(&body, &picks, r) {
+                Err(KernelError::TooLarge(why)) => {
+                    assert!(why.contains("the round passes over the face it ends on"), "{r}: {why}");
+                    let fits = named_fit(&why).unwrap_or_else(|| panic!("{r}: no radius named: {why}"));
+                    assert!(fits < 0.5 && fits > 0.45, "{r}: {why}");
+                }
+                other => panic!("{r}: not refused as too large: {:?}", other.map(|b| crate::measure(&b).map(|m| m.volume))),
+            }
+        }
+        let rounded = fillet(&body, &picks, 0.4).unwrap();
+        let m = crate::measure(&rounded).unwrap();
+        assert!(m.shells == 1 && m.volume > before.volume, "{} against {}", m.volume, before.volume);
+        assert!(rounded.validity().is_empty(), "{:?}", rounded.validity());
+    }
+
     /// What carrying the face on leaves out of a chamfer with contacts `p` on the plate and `q`
     /// on the boss: the part of its section past the r16 corner's arc, none where `p` is short of
     /// x 32.5. At x = 32.5 + u the section is as thick as the chamfer's line stands off the plate

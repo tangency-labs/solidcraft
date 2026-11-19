@@ -3433,6 +3433,149 @@ fn a_pocket_floor_round_past_its_walls_keeps_its_refusal() {
     assert_eq!(b.volume(1e-12).unwrap().to_bits(), before.to_bits());
 }
 
+/// A plate of `tiles` 20 x 20 x 10 tiles side by side along x, each with its four top edges
+/// rounded 5 before they are joined, and a wall standing on it: the box from (3, 3, 5) to
+/// (20 tiles - 3, 17, 15) with its four upright edges rounded 1, joined on.
+///
+/// The rounds are mitred at a tile's sharp upright edges, so two of them meet in a ridge
+/// at each corner (in the plane x = y at the origin's), and between two tiles the rounds
+/// leave a valley down to z = 5 at x = 20. The wall's front (y = 3) meets the front rounds
+/// (their axis y = 5, z = 5) along z = 5 + sqrt 21. Its foot crosses a ridge on each
+/// corner arc of the wall and, with two tiles, where its front runs down into the valley
+/// (at x = 17 and x = 23).
+fn wall_on_rounded_tiles(tiles: usize) -> Body {
+    let mut plate: Option<Body> = None;
+    for i in 0..tiles {
+        let x = 20.0 * i as f64;
+        let tile = make_box([x, 0.0, 0.0], [20.0, 20.0, 10.0]).unwrap();
+        let rim: Vec<usize> = [
+            [x + 10.0, 0.0],
+            [x + 10.0, 20.0],
+            [x, 10.0],
+            [x + 20.0, 10.0],
+        ]
+        .iter()
+        .map(|p| nearest_edge(&tile, [p[0], p[1], 10.0]))
+        .collect();
+        blend(&tile, Blend::Round, &rim, &[5.0], &[], Corners::Filled).unwrap();
+        plate = Some(match plate {
+            None => tile,
+            Some(joined) => {
+                solidcore_ops::boolean::boolean(joined, tile, solidcore_ops::BooleanOp::Union)
+                    .unwrap()
+                    .unwrap()
+            }
+        });
+    }
+    let far = 20.0 * tiles as f64 - 3.0;
+    let wall = make_box([3.0, 3.0, 5.0], [far - 3.0, 14.0, 10.0]).unwrap();
+    let uprights: Vec<usize> = [[3.0, 3.0], [far, 3.0], [far, 17.0], [3.0, 17.0]]
+        .iter()
+        .map(|p| nearest_edge(&wall, [p[0], p[1], 10.0]))
+        .collect();
+    blend(&wall, Blend::Round, &uprights, &[1.0], &[], Corners::Filled).unwrap();
+    solidcore_ops::boolean::boolean(plate.unwrap(), wall, solidcore_ops::BooleanOp::Union)
+        .unwrap()
+        .unwrap()
+}
+
+/// The refusal of a round that passes over the face it ends on, as `blend` gives it: its
+/// size, which lies under `limit` by the fit margin, a thousand tolerances of the edge
+/// `ending` whose round ends there.
+fn passes_over_its_end_face<T: std::fmt::Debug>(
+    b: &Body,
+    got: Result<T, Error>,
+    limit: f64,
+    ending: usize,
+) -> f64 {
+    let (_, brep) = kernel_copy(b);
+    let margin = 1000.0 * edge::tolerance(&brep, brep.edge_list()[ending]).unwrap();
+    match got {
+        Err(Error::TooLarge {
+            size,
+            kind: FitKind::Radius,
+            why: Some(solidcore_ops::RoomReason::EndPassesOverEndFace),
+            ..
+        }) => {
+            assert!(margin > 0.0 && margin < 0.1 * limit, "{margin}");
+            assert!(
+                (size - (limit - margin)).abs() < 1e-6,
+                "{size} under {limit} by {margin}"
+            );
+            size
+        }
+        other => panic!("not the too-large refusal: {other:?}"),
+    }
+}
+
+/// The foot of the wall's front, rounded as a tangent chain: the front's line and the two
+/// corner arcs' halves it runs on into, each up to the ridge of the plate's corner. The round
+/// ends there on the next plate round E (its axis x = 5, z = 5), which falls away under it:
+/// E's surface crosses the wall's corner cylinder below the round's contact line, and that
+/// line ends on E only where a ball touching the cylinder on that crossing also touches the
+/// front round G. The crossing rises from the ridge to the corner arc's end, the tangent
+/// line x = 4, y = 3, where it is 5 + sqrt 24 up. The ball touching the wall there, centre
+/// (4, 3 - rho, 5 + sqrt 24), touches G where (2 + rho)^2 + 24 = (5 + rho)^2: rho = 1/2.
+/// So a round under 1/2 builds, and one over it is refused as too large, naming the radius
+/// that fits under 1/2, where it failed with a bare status before. At 1/2 itself the round's
+/// end takes its whole corner arc and its edges fail: refused the same way. The body is left
+/// as it was, and the size named builds a valid body.
+#[test]
+fn a_round_passing_over_the_face_it_ends_on_is_refused_naming_the_radius_that_fits() {
+    rig_fixes();
+    let b = wall_on_rounded_tiles(1);
+    let before = b.volume(1e-12).unwrap();
+    let foot = 5.0 + 21.0_f64.sqrt();
+    // a corner arc's half, an eighth of a turn from the front's line about the corner's axis
+    let (s, c) = (PI / 8.0).sin_cos();
+    let on_arc = 5.0 + (25.0 - (1.0 + c) * (1.0 + c)).sqrt();
+    let chain = [
+        nearest_edge(&b, [10.0, 3.0, foot]),
+        nearest_edge(&b, [4.0 - s, 4.0 - c, on_arc]),
+        nearest_edge(&b, [16.0 + s, 4.0 - c, on_arc]),
+    ];
+    let mut fits = 0.0;
+    for r in [1.0, 0.5] {
+        let got = blend(&b, Blend::Round, &chain, &[r], &[], Corners::Filled);
+        fits = passes_over_its_end_face(&b, got, 0.5, chain[1]);
+        assert_eq!(b.volume(1e-12).unwrap().to_bits(), before.to_bits());
+    }
+    blend(&b, Blend::Round, &chain, &[fits], &[], Corners::Filled).unwrap();
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    assert!(b.volume(1e-12).unwrap() > before);
+}
+
+/// On two tiles the wall's front runs down into the valley between them, and the line of its
+/// foot on the second tile ends on that tile's ridge at x = 23, where the wall's front goes
+/// on down the tile's valley round E (its axis x = 25, z = 5). Rounded alone, the line's
+/// round ends there on E, which crosses the wall's front along z = 5 + sqrt(25 - (x - 25)^2):
+/// highest, 10 up, at x = 25. The ball touching the front there, centre (25, 3 - rho, 10),
+/// touches the front round where (2 + rho)^2 + 25 = (5 + rho)^2: rho = 2/3, the largest
+/// along the crossing (an inner one). So a round over 2/3 is refused naming a radius under
+/// 2/3, which builds. Rounded with the corner arc it runs on into at its other end, the limit
+/// is that end's 1/2, and at 1/2 itself the arc's round has no extent, so its face fails:
+/// refused the same way.
+#[test]
+fn a_round_ending_on_a_ridge_names_the_largest_ball_along_its_end_faces_crossing() {
+    rig_fixes();
+    let b = wall_on_rounded_tiles(2);
+    let before = b.volume(1e-12).unwrap();
+    let foot = 5.0 + 21.0_f64.sqrt();
+    let line = nearest_edge(&b, [29.5, 3.0, foot]);
+    let got = blend(&b, Blend::Round, &[line], &[1.0], &[], Corners::Filled);
+    let fits = passes_over_its_end_face(&b, got, 2.0 / 3.0, line);
+    assert_eq!(b.volume(1e-12).unwrap().to_bits(), before.to_bits());
+    let (s, c) = (PI / 8.0).sin_cos();
+    let on_arc = 5.0 + (25.0 - (1.0 + c) * (1.0 + c)).sqrt();
+    let chain = [line, nearest_edge(&b, [36.0 + s, 4.0 - c, on_arc])];
+    let got = blend(&b, Blend::Round, &chain, &[0.5], &[], Corners::Filled);
+    passes_over_its_end_face(&b, got, 0.5, chain[1]);
+    assert_eq!(b.volume(1e-12).unwrap().to_bits(), before.to_bits());
+    blend(&b, Blend::Round, &[line], &[fits], &[], Corners::Filled).unwrap();
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    assert!(b.volume(1e-12).unwrap() > before);
+}
+
 /// In the Roll-over's second pass only the corner at V (where the concave chain meets the
 /// cliff) looks for its rail ends across the cliff's tangent seam: on the stair twin's chain
 /// (E1 rounded first), the corner at V = (0, 0, -1) carries the Roll-over's search and the
