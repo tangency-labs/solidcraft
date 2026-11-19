@@ -82,7 +82,7 @@
 //!   tolerance), it is raised to the edited trim's proved distance from the edge curve
 //!   when that is larger and at most twice the tolerance (`keep_trim_covered`: a larger
 //!   bound is the enclosure's slack as often as the trim's move, and stays upstream's);
-//!   it is never lowered. Both bounds bisect into at most `KEEP_COVERED_PIECES` (2048)
+//!   it is never lowered. Both bounds bisect into at most `KEEP_COVERED_PIECES` (64)
 //!   pieces; a trim not enclosed within them raises nothing.
 //! - **Not upstream (#14257): the end move is spread.** Upstream moves each trim's end
 //!   control point alone onto the vertex's UV point, which turns the end control leg by
@@ -3536,9 +3536,9 @@ struct TrimBefore {
     fit: f64,
 }
 
-/// The most pieces [`keep_trim_covered`]'s bounds bisect a trim into (a sixteenth of the
-/// bisection's own budget): about 5 ms a trim.
-const KEEP_COVERED_PIECES: usize = 1 << 11;
+/// The most pieces [`keep_trim_covered`]'s bounds bisect a trim into: the bisection's 32 first
+/// pieces cut once more (about 70 µs a piece on a dense loft net).
+const KEEP_COVERED_PIECES: usize = 64;
 
 /// Not upstream (#18162): after [`fix_uv_trim_curves_notified`] edited the UV trim held at
 /// `holder` for `eu`, raises the edge's tolerance to the trim's enclosed distance from the
@@ -3561,10 +3561,10 @@ const KEEP_COVERED_PIECES: usize = 1 << 11;
 /// `crashes/2992` rig case bounds over a thousand such trims, all still covered).
 ///
 /// Both bounds stop at [`KEEP_COVERED_PIECES`] pieces, and a trim not enclosed within them
-/// raises nothing (the tolerance stays upstream's). A trim lying just within its tolerance
-/// along its whole length cannot be closed below it, and bounding it to the full budget took
-/// 80 ms a trim, over 200 trims of the same rig case; the bound reached when the pieces run
-/// out is not one to raise a tolerance to.
+/// raises nothing (the tolerance stays upstream's): the bound reached when the pieces run out
+/// is not one to raise a tolerance to. A trim lying within 2% of its tolerance along its whole
+/// length is closed below it only by fine pieces: in the same rig case 260 such trims took
+/// about 1150 pieces and 80 ms each, 20 s of the union's 26 s, and none of them raised.
 fn keep_trim_covered(
     k: &Kernel,
     b: &mut Brep,
