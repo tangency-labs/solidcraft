@@ -709,19 +709,31 @@ fn cylinder_emboss_persists_selection_and_replays_radial_depth() {
 }
 
 #[test]
-fn cylinder_deboss_is_connected_and_unsupported_profile_failure_is_atomic() {
+fn cylinder_deboss_is_connected_a_circle_wraps_and_a_profile_past_the_wall_fails_atomically() {
     let mut s = cylinder_badge();
     let before = exact_cylinder_volume(&s);
     run(&mut s, "solid.emboss", json!({"sketch":"Badge","face":[0,10,7.5],"depth":1,"mode":"deboss","targets":["Sleeve"]}));
     assert!((exact_cylinder_volume(&s) - before + 19.0).abs() < 0.02);
     assert_eq!(s.model.state().body("Sleeve").unwrap().body.shell_count(), 1);
+    // A circle wraps round the wall (#5358): its area times (11² - 10²) / 20.
+    let mut round = cylinder_badge();
+    run(&mut round, "sketch.create", json!({"plane":{"origin":[0,10,0],"x_dir":[-1,0,0],"y_dir":[0,0,1]},"name":"Circle Badge"}));
+    run(&mut round, "sketch.circle.center", json!({"center":[0,7.5],"radius":1}));
+    run(&mut round, "sketch.finish", json!({}));
+    let v = exact_cylinder_volume(&round);
+    run(&mut round, "solid.emboss", json!({"sketch":"Circle Badge","face":[0,10,7.5],"depth":1,"targets":["Sleeve"]}));
+    let added = exact_cylinder_volume(&round) - v;
+    assert!((added - std::f64::consts::PI * 21. / 20.).abs() < 0.02, "{added}");
+    assert_eq!(round.model.state().body("Sleeve").unwrap().body.shell_count(), 1);
+    // A profile running past the top endcap is refused, leaving the design as it was.
     let mut bad = cylinder_badge();
-    run(&mut bad, "sketch.create", json!({"plane":{"origin":[0,10,0],"x_dir":[-1,0,0],"y_dir":[0,0,1]},"name":"Circle Badge"}));
-    run(&mut bad, "sketch.circle.center", json!({"center":[0,7.5],"radius":1}));
+    run(&mut bad, "sketch.create", json!({"plane":{"origin":[0,10,0],"x_dir":[-1,0,0],"y_dir":[0,0,1]},"name":"Tall Badge"}));
+    run(&mut bad, "sketch.rectangle.two_point", json!({"p0":[-2,15],"p1":[2,25]}));
     run(&mut bad, "sketch.finish", json!({}));
     let saved = bad.doc.to_json();
     let v = exact_cylinder_volume(&bad);
-    assert!(bad.execute("solid.emboss", &json!({"sketch":"Circle Badge","face":[0,10,7.5],"depth":1,"targets":["Sleeve"]})).is_err());
+    let error = bad.execute("solid.emboss", &json!({"sketch":"Tall Badge","face":[0,10,7.5],"depth":1,"targets":["Sleeve"]})).unwrap_err().to_string();
+    assert!(error.contains("endcap"), "{error}");
     assert_eq!(bad.doc.to_json(), saved);
     assert_eq!(exact_cylinder_volume(&bad), v);
 }
