@@ -42,27 +42,40 @@ fn main() {
     }
 }
 
-/// `$OUT_DIR/locales/<id>.json`: each catalog in `assets/locales` plus the messages of
-/// `assets/locales/pending/*.json` (`{"<locale>": {"<id>": "<text>"}}`, one file per change, folded
-/// into the catalogs on main), so a pull request's new strings work before they are folded. An id
-/// a catalog already has, or a locale without a catalog, fails the build, as `cargo xtask lists`
-/// does.
+/// `$OUT_DIR/locales/<id>.json`: each catalog in `assets/locales` and the shared crates' catalogs
+/// in `crates/ui-text/locales` (the words of the kit's Preferences window and pages), merged per
+/// language, plus the messages of `assets/locales/pending/*.json` (`{"<locale>": {"<id>": "<text>"}}`,
+/// one file per change, folded into the catalogs on main), so a pull request's new strings work
+/// before they are folded. An id a catalog already has, or a locale without a catalog, fails the
+/// build, as `cargo xtask lists` does.
 fn merged_locales() -> Result<(), String> {
     use serde_json::{Map, Value};
     let dir = std::path::Path::new("../../assets/locales");
-    println!("cargo:rerun-if-changed={}", dir.display());
+    let shared = std::path::Path::new("../ui-text/locales");
     let mut catalogs: std::collections::BTreeMap<String, Map<String, Value>> = std::collections::BTreeMap::new();
-    for entry in std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?.filter_map(Result::ok) {
-        let path = entry.path();
-        if path.extension().is_none_or(|x| x != "json") {
-            continue;
+    for dir in [dir, shared] {
+        println!("cargo:rerun-if-changed={}", dir.display());
+        for entry in std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?.filter_map(Result::ok) {
+            let path = entry.path();
+            if path.extension().is_none_or(|x| x != "json") {
+                continue;
+            }
+            let Some(id) = path.file_stem().and_then(|s| s.to_str()) else { continue };
+            let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+            let map = match serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))? {
+                Value::Object(map) => map,
+                _ => return Err(format!("{}: a catalog must be a JSON object", path.display())),
+            };
+            if dir == shared && !catalogs.contains_key(id) {
+                return Err(format!("{}: `{id}` has no catalog assets/locales/{id}.json", path.display()));
+            }
+            let merged = catalogs.entry(id.to_string()).or_default();
+            for (key, value) in map {
+                if merged.insert(key.clone(), value).is_some() {
+                    return Err(format!("{}: `{key}` is already in another catalog for {id}", path.display()));
+                }
+            }
         }
-        let Some(id) = path.file_stem().and_then(|s| s.to_str()) else { continue };
-        let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-        match serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))? {
-            Value::Object(map) => catalogs.insert(id.to_string(), map),
-            _ => return Err(format!("{}: a catalog must be a JSON object", path.display())),
-        };
     }
     let pending = dir.join("pending");
     println!("cargo:rerun-if-changed={}", pending.display());
