@@ -657,7 +657,7 @@ mod tests {
             compressed(1, 2, 12, &[0, 0]),
             compressed(1, 3, 12, &[0x20, 0, 0]),
             compressed(1, 4, 12, &[0xE0, 0xFF, 0, 0]),
-            // Two bytes said to expand to two gigabytes: over the limit, and more than LZF can make.
+            // Two bytes said to expand to two gigabytes: over the limit, more than LZF can make.
             compressed(178_956_970, 2, 2_147_483_640, &[0, 0]),
             b"FIELDS x y z\nSIZE 4 4 4\nTYPE F F F\nPOINTS 1\nDATA binary_compressed\n\x01\x00\x00".to_vec(),
         ];
