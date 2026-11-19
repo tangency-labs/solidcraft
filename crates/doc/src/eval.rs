@@ -697,10 +697,24 @@ fn fillet_fitted(
     fit: crate::FilletFit,
     turn: kernel::FilletTurn,
 ) -> std::result::Result<(kernel::Body, Option<Vec<f64>>, Vec<Vec3>), kernel::KernelError> {
+    #[cfg(test)]
+    cost_tests::count(|c| c.blends += 1);
     match kernel::fillet_removing(body, edges, r, turn) {
         Ok((b, gone)) => Ok((b, None, gone)),
+        // A refusal the kernel could not size names no radius to try, and the search for the
+        // largest radius that fits cannot be guided by it: it then halves the radius from the
+        // middle down and blends every edge again for each of the sizes it tries. On the design
+        // of #4282 (a cube with a hole through each axis, a 2 mm round of every edge) those ten
+        // blends of the forty-one edges took 77 s, fifteen times the blend that failed, and they
+        // found nothing: the round fails at any radius there. The refusal is reported as the
+        // kernel stated it.
+        Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Exact && kernel::named_fit(&why).is_none() => {
+            Err(kernel::KernelError::TooLarge(why))
+        }
         Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Exact => Err({
             let hint = kernel::named_fit(&why);
+            #[cfg(test)]
+            cost_tests::count(|c| c.fit_searches += 1);
             with_largest_fit(why, "radius", || kernel::fillet_max_why(body, edges, r, turn, hint))
         }),
         Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Reduce => match kernel::fillet_max_each(body, edges, r, turn)? {
@@ -1095,6 +1109,53 @@ impl KeptSeparate {
 }
 
 impl ModelState {
+    /// This state with `bodies` in place of its own, the rest copied: a picture of some of a
+    /// model's bodies (the bodies of a design being opened that are meshed so far) without
+    /// copying every body of the model first and then dropping them.
+    pub fn with_bodies(&self, bodies: Vec<ModelBody>) -> ModelState {
+        // Every field named, so a new one is not left out.
+        let ModelState {
+            frame_bodies,
+            origin_frames,
+            threads,
+            bodies: _,
+            sketches,
+            body_counter,
+            reserved_body_names,
+            surface_sheets,
+            construct,
+            sketch_keys,
+            blend_edges,
+            named_faces,
+            fitted,
+            tapered,
+            kept_separate,
+            pattern_left_out,
+            legacy_picks,
+            cut_extents,
+        } = self;
+        ModelState {
+            frame_bodies: frame_bodies.clone(),
+            origin_frames: origin_frames.clone(),
+            threads: threads.clone(),
+            bodies,
+            sketches: sketches.clone(),
+            body_counter: *body_counter,
+            reserved_body_names: reserved_body_names.clone(),
+            surface_sheets: surface_sheets.clone(),
+            construct: construct.clone(),
+            sketch_keys: sketch_keys.clone(),
+            blend_edges: blend_edges.clone(),
+            named_faces: named_faces.clone(),
+            fitted: fitted.clone(),
+            tapered: tapered.clone(),
+            kept_separate: kept_separate.clone(),
+            pattern_left_out: pattern_left_out.clone(),
+            legacy_picks: legacy_picks.clone(),
+            cut_extents: cut_extents.clone(),
+        }
+    }
+
     /// How many joint origins have been resolved from the bodies of this model (and its copies),
     /// not taken from the frames kept ([`OriginFrames`]).
     pub fn origin_resolutions(&self) -> usize {
@@ -2549,7 +2610,16 @@ struct EvalKey {
 }
 
 impl EvalKey {
-    fn new(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, fp: u64, ctx: u64, st: &ModelState, steps: &ImportDigests) -> EvalKey {
+    fn new(
+        doc: &Document,
+        vals: &BTreeMap<String, Value>,
+        f: &Feature,
+        fp: u64,
+        ctx: u64,
+        st: &ModelState,
+        steps: &ImportDigests,
+        geo: u64,
+    ) -> EvalKey {
         let local = fingerprint(doc, 0, f, vals, false, steps) ^ placement_digest(doc, f, Some(st)) ^ construct_digest(doc, vals, f, Some(st));
         let whole = cache_key(f, fp, local, ctx, st);
         let reads = f.reads(doc, st).map(|read| {
@@ -2558,6 +2628,13 @@ impl EvalKey {
             local.hash(&mut h);
             ctx.hash(&mut h);
             f.id.hash(&mut h);
+            // An import reads the file it names and nothing of the model, so it keeps its result
+            // while the features before it are the same: a part that moves leaves the file
+            // unread (#17310). The features' own inputs, without where they are placed, are in
+            // the key: a change to them (a new length) reads the file again.
+            if matches!(f.kind, FeatureKind::Import { .. }) {
+                geo.hash(&mut h);
+            }
             // A pattern replays its features' definitions.
             if let FeatureKind::Pattern { features, .. } = &f.kind {
                 for id in features {
@@ -2717,7 +2794,8 @@ impl Feature {
     /// numbers or a construction plane (its projections reading the bodies and sketches they
     /// name), an extrude or revolve from a sketch of its component on the bodies it names or its
     /// component's bodies (no To / From Object, through all or taper), a fillet or chamfer of
-    /// the body its edges lie on (#6183). Construction geometry it names is in its key already
+    /// the body its edges lie on (#6183), an import (the file it names, and nothing of the
+    /// model). Construction geometry it names is in its key already
     /// ([`construct_digest`]). Never with a face picked by name, or an edge picked by name outside
     /// a fillet or chamfer; everything else may read anything (faces, To Object, `*` for every
     /// body).
@@ -2757,6 +2835,11 @@ impl Feature {
         match &self.kind {
             // A cylinder placed by reference edges reads the faces they lie on.
             k if numeric_tool(k) && hole_references(self).is_empty() => bodies(operated(feature_op(self))?),
+            // An import reads the file it names (in its own fingerprint) and nothing of the
+            // model: its bodies are its own, and their names follow the names the model
+            // already has (in the key of what it reads). A part that moves elsewhere in the
+            // timeline leaves it as it was, and the file is not read again (#17310).
+            FeatureKind::Import { .. } => Some(Reads::default()),
             FeatureKind::Pattern { bodies: copied, pattern, .. } if !copied.is_empty() && fixed_pattern(pattern) => {
                 bodies(named(&crate::plain::<String, _>(copied))?)
             }
@@ -3811,6 +3894,11 @@ impl Model {
         // read once: the context, the fingerprints and the model's record agree
         let heal = kernel::heals_tolerance_defects();
         self.heal_off = !heal;
+        // The features' own inputs, without where they are placed: a part that moves leaves them
+        // as they were. An import keeps its result while they are the same, so a move of a part
+        // does not read the file again (#17310). Only a design with an import needs the digest.
+        let with_import = doc.features.iter().any(|f| matches!(f.kind, FeatureKind::Import { .. }));
+        let mut geo = 0u64;
         let ctx = context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);
         let previous_context = self.context;
         let mut rolled_results = std::mem::take(&mut self.rolled_results);
@@ -3846,6 +3934,7 @@ impl Model {
                 out.truncate(s.out_len);
                 reuse = s.reuse;
                 prev_fp = s.prev_fp;
+                geo = s.geo;
                 recomputed = s.recomputed;
                 restored = s.restored;
                 poses = s.poses;
@@ -3860,6 +3949,8 @@ impl Model {
                     continue 'pass;
                 }
                 let (reuse_in, prev_fp_in) = (reuse, prev_fp);
+                // The digest of the features before this one, for an import's key (#17310).
+                let geo_in = geo;
                 if let Some(r) = out.last()
                     && let Some(e) = &r.error
                 {
@@ -3885,6 +3976,11 @@ impl Model {
                 let cancelled = watched.step(i);
                 let fp = chain_fingerprint(doc, &vals, f, prev_fp, rolled_back, &self.import_digests, Some(&state));
                 prev_fp = fp;
+                if with_import {
+                    // This feature's own inputs, without where it is placed: the digest of the
+                    // features before an import says whether the model around it changed (#17310).
+                    geo ^= fingerprint(doc, 0, f, &vals, rolled_back, &self.import_digests);
+                }
                 let pose = pose_only(f).then(|| placement_digest(doc, f, Some(&state)));
                 if let Some(pose) = pose {
                     poses.insert(f.id, pose);
@@ -3979,7 +4075,7 @@ impl Model {
                     continue;
                 }
                 // The same feature on the same inputs: its earlier result.
-                let key = EvalKey::new(doc, &vals, f, fp, ctx, &state, &self.import_digests);
+                let key = EvalKey::new(doc, &vals, f, fp, ctx, &state, &self.import_digests, geo_in);
                 let kept = self.kept.0.as_ref().filter(|_| !self.no_cache);
                 if !self.no_cache
                     && let Some(c) = self
@@ -4152,6 +4248,7 @@ impl Model {
                         out_len: out.len(),
                         reuse: reuse_in,
                         prev_fp: prev_fp_in,
+                        geo: geo_in,
                         recomputed: recomputed - 1,
                         restored,
                         poses: poses.clone(),
@@ -7672,6 +7769,54 @@ fn bridge_tools(plane: &Plane, r: f64, rc: f64, dc: f64, bottom: f64, layer: f64
     Ok(tools)
 }
 
+/// The turn a whole turn's tool is turned by about the revolve axis, so that its seam is not in
+/// the profile plane: a body revolved in that plane has its own seam there, and SMLib's boolean
+/// leaves an edge near the seam when it splits the two (#18039). The solid is the same (a whole
+/// turn is the same whatever angle it starts at).
+const SEAM_TURN: f64 = 0.5;
+
+/// Whether `body` holds a seam in the plane `plane`: an edge of its B-rep that is a seam of a
+/// curved surface and lies in the plane. Two solids of revolution about the same axis, revolved
+/// in the same plane, hold their seams in that plane, and SMLib's boolean splits both where the
+/// cut crosses them and leaves an edge near the seam, which its check refuses (#18039).
+///
+/// The seam is read from the exact record, never from a tessellation: the kernel's own seam
+/// flags (which the record's faces and edges decide) and the record's own vertices. The seam of
+/// a surface of revolution is the profile curve in the revolve's plane, so its ends in the plane
+/// mean the seam lies in it.
+fn has_seam_in_plane(body: &Body, plane: &Plane) -> bool {
+    // The kernel's seam flags are read from the record; the mesh it takes with them is unused.
+    let seams = kernel::seam_flags(body, &Mesh::default());
+    let record = body.record();
+    let tolerance = body.size().max(1e-9) * 1e-6;
+    seams.iter().enumerate().any(|(index, seam)| {
+        *seam
+            && record.edges.get(index).is_some_and(|edge| {
+                edge.vertices
+                    .iter()
+                    .all(|vertex| record.vertices.get(*vertex as usize).is_some_and(|v| plane.height(Vec3::from(v.point)).abs() <= tolerance))
+            })
+    })
+}
+
+/// The tool of a whole turn, with the seam of its surface of revolution turned away from the
+/// profile plane: the same solid, with the seam somewhere else, so the two seams are not in one
+/// plane (#18039).
+fn turned_seam(axis: Vec3, origin: Vec3, body: &Body) -> Result<Body> {
+    let m = crate::rigid(Vec3::ZERO, origin, axis, SEAM_TURN);
+    kernel::transform_matrix(body, m).map_err(DocError::Kernel)
+}
+
+/// Whether any of the bodies the feature cuts holds a seam in the plane `plane`.
+fn bodies_hold_a_seam_in_plane(st: &ModelState, f: &Feature, plane: &Plane) -> bool {
+    let FeatureKind::Revolve { targets, .. } = &f.kind else { return false };
+    st.bodies
+        .iter()
+        .filter(|b| b.component == f.component)
+        .filter(|b| targets.is_empty() || targets.iter().any(|t| t == &b.name))
+        .any(|b| has_seam_in_plane(&b.body, plane))
+}
+
 /// The angular interval used by both the solid and its interactive extent handles.
 #[derive(Clone, Copy, Debug)]
 pub struct RevolveExtent {
@@ -8393,24 +8538,51 @@ fn feature_tools_with_constructor(
                         continue;
                     }
                     let bodies = revolve(&ss.plane, std::slice::from_ref(region), o, d, region_extent.sweep)?;
-                    let m = crate::rigid(Vec3::ZERO, origin_w, rotation_axis, region_extent.start);
+                    let turn = region_extent.start;
+                    let m = crate::rigid(Vec3::ZERO, origin_w, rotation_axis, turn);
+                    // A whole turn's tool has the seam of its surface of revolution in the profile
+                    // plane. A body that holds a seam in that plane (a body revolved in it) makes
+                    // SMLib's boolean split both and leave an edge near the seam, which its check
+                    // refuses (#18039): the tool's seam is turned away from the plane then, the
+                    // solid being the same.
+                    let turn_it = operation != Operation::NewBody
+                        && (region_extent.sweep.abs() - std::f64::consts::TAU).abs() <= 1e-9
+                        && bodies_hold_a_seam_in_plane(st, f, &ss.plane);
                     for body in bodies {
-                        out.push(if region_extent.start.abs() < 1e-12 {
-                            tool(region, body, None)
+                        let (body, built) = if turn.abs() < 1e-12 {
+                            (body, None)
                         } else {
-                            tool(region, kernel::transform_matrix(&body, m)?, Some(&body))
-                        });
+                            let moved = kernel::transform_matrix(&body, m)?;
+                            (moved, Some(&body))
+                        };
+                        let body = if turn_it { turned_seam(rotation_axis, origin_w, &body)? } else { body };
+                        out.push(tool(region, body, built));
                     }
                 }
                 return Ok(out);
             }
             let bodies = revolve(&ss.plane, &regions, o, d, ang)?;
-            if start.abs() < 1e-12 {
-                return Ok(regions.iter().zip(bodies).map(|(r, body)| tool(r, body, None)).collect());
-            }
-            // Turned back to start before the profile.
-            let m = crate::rigid(Vec3::ZERO, origin_w, axis_w, -start);
-            regions.iter().zip(bodies).map(|(r, body)| Ok(tool(r, kernel::transform_matrix(&body, m)?, Some(&body)))).collect()
+            let turn = -start;
+            let turn_it =
+                operation != Operation::NewBody && (ang.abs() - std::f64::consts::TAU).abs() <= 1e-9 && bodies_hold_a_seam_in_plane(st, f, &ss.plane);
+            let tools: Vec<Traced> = if turn.abs() < 1e-12 {
+                regions.iter().zip(bodies).map(|(r, body)| tool(r, body, None)).collect()
+            } else {
+                // Turned back to start before the profile.
+                let m = crate::rigid(Vec3::ZERO, origin_w, axis_w, turn);
+                regions
+                    .iter()
+                    .zip(bodies)
+                    .map(|(r, body)| Ok(tool(r, kernel::transform_matrix(&body, m)?, Some(&body))))
+                    .collect::<Result<Vec<_>>>()?
+            };
+            tools
+                .into_iter()
+                .map(|t| {
+                    let body = if turn_it { turned_seam(axis_w, origin_w, &t.body)? } else { t.body.clone() };
+                    Ok(Traced { body, lineage: t.lineage, recipe: t.recipe })
+                })
+                .collect()
         }
         FeatureKind::Loft { sections, rails, .. } if sections.iter().any(|s| s.point.is_some()) => {
             // A profile lofted to a sketch point (an apex).
@@ -9889,6 +10061,21 @@ fn with_named_face_points(doc: &Document, vals: &BTreeMap<String, Value>, state:
                     },
                     _ => *p = hit.pick_point(input, *p),
                 }
+            }
+            // A deleted face is picked by its point as well: when its name is gone (a design saved by
+            // an older version names merged faces differently), the face is the one face of the same
+            // body that holds the point. With none, or with several (the point on an edge they share),
+            // nothing is deleted: the feature asks for the face to be picked again (#14206).
+            None if matches!(f.kind, FeatureKind::DeleteFace { .. }) => {
+                let mut holders = state
+                    .bodies
+                    .iter()
+                    .filter(|b| !b.body.is_mesh() && f.kind.face_body().is_none_or(|name| b.name == name))
+                    .flat_map(|b| crate::appearance::faces_within(b, *p, b.body.size() * 1e-3 + 1e-6));
+                if holders.next().is_none() || holders.next().is_some() {
+                    return Err(DocError::reselect(n.as_str()));
+                }
+                notes.push(format!("face `{n}` is no longer named so: the one face at [{}, {}, {}] is used", p.x, p.y, p.z));
             }
             None => return Err(DocError::reselect(n.as_str())),
         }
@@ -12279,6 +12466,8 @@ fn eval_feature_kind(
             Ok(())
         }
         FeatureKind::Import { step, skip, records, .. } => {
+            #[cfg(test)]
+            cost_tests::count(|c| c.imports_read += 1);
             let (imp, digest) = match records {
                 Some(r) => (kernel::records_import_shared(r)?, crate::config::payload_digest(&kernel::records_text(r)?)),
                 None => (kernel::step_import_shared(step)?, crate::config::payload_digest(step)),

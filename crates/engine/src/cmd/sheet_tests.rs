@@ -1224,6 +1224,58 @@ fn a_pattern_of_a_cut_in_the_flat_is_kept_like_the_cut() {
     assert!(rel(volume(&mut s), folded - 4.0 * each) < 1e-9, "{} vs {}", volume(&mut s), folded - 4.0 * each);
 }
 
+/// Hole copies on a folded flange keep their cut-outs when unfolded, rebuilt and reopened.
+#[test]
+fn a_pattern_of_holes_in_a_flange_is_kept_in_the_flat_material() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "N", "expression": "3", "unit": ""}));
+    base(&mut s, 100.0, 60.0);
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 60, 2.5]], "height": 20}));
+    let folded = volume(&mut s);
+    let each = PI * 2.0 * 2.0 * 2.5;
+    run(&mut s, "solid.hole", json!({"position": [10, 60, 12], "diameter": 4, "name": "WallHole"}));
+    assert!(rel(volume(&mut s), folded - each) < 1e-9);
+    run(&mut s, "solid.pattern.rectangular", json!({"features": ["WallHole"], "dir1": [1, 0, 0], "count1": "N", "spacing1": 20}));
+    assert_eq!(flat(&mut s)["cutouts"].as_array().map(Vec::len), Some(3));
+    assert!(rel(volume(&mut s), folded - 3.0 * each) < 1e-9);
+    run(&mut s, "parameters.change", json!({"name": "N", "expression": "5"}));
+    let pattern = flat(&mut s);
+    assert_eq!(pattern["cutouts"].as_array().map(Vec::len), Some(5));
+    assert!(rel(volume(&mut s), folded - 5.0 * each) < 1e-9);
+    run(&mut s, "sheet.unfold", json!({}));
+    assert_eq!(flat(&mut s)["cutouts"], pattern["cutouts"]);
+    run(&mut s, "sheet.refold", json!({}));
+    assert!(rel(volume(&mut s), folded - 5.0 * each) < 1e-9);
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(flat(&mut reopened)["cutouts"], pattern["cutouts"]);
+    assert!(rel(volume(&mut reopened), folded - 5.0 * each) < 1e-9);
+}
+
+#[test]
+fn patterned_sheet_holes_cut_only_the_source_targets() {
+    for (cut_sheet, cut_box) in [(true, false), (false, true), (true, true)] {
+        let mut s = Session::default();
+        base(&mut s, 100.0, 60.0);
+        let sheet_name = s.model.state().surface_sheets[0].body.clone();
+        run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 5, "corner": [0, 0, 10], "body_name": "Neighbor"}));
+        let mut targets = Vec::new();
+        if cut_sheet {
+            targets.push(sheet_name.clone());
+        }
+        if cut_box {
+            targets.push("Neighbor".to_owned());
+        }
+        run(&mut s, "solid.hole", json!({"position": [10, 10, 15], "diameter": 4, "targets": targets, "name": "Hole"}));
+        run(&mut s, "solid.pattern.rectangular", json!({"features": ["Hole"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 20}));
+        for (name, thickness, cut) in [(sheet_name, 2.5, cut_sheet), ("Neighbor".to_owned(), 5.0, cut_box)] {
+            let measured = run(&mut s, "inspect.measure", json!({"bodies": [name]}))["total"]["volume_mm3"].as_f64().unwrap();
+            let removed = if cut { 3.0 * PI * 2.0 * 2.0 * thickness } else { 0.0 };
+            assert!(rel(measured, 100.0 * 60.0 * thickness - removed) < 1e-9, "{name}: {measured}");
+        }
+        assert_eq!(flat(&mut s)["cutouts"].as_array().map(Vec::len), Some(if cut_sheet { 3 } else { 0 }));
+    }
+}
+
 /// Material joined in the flat, one sheet thick in the plane of a panel, becomes part of that
 /// panel as a cut made there does: kept in the flat pattern and refolded, its size following a
 /// parameter. A tab on the base's free edge and one beside the flange's panel. A join that
@@ -2056,10 +2108,15 @@ fn a_sketch_on_a_sheet_face_reports_a_lost_attachment_instead_of_moving_to_anoth
     assert!(matches!(status(&s), solidcraft_doc::FaceAttachmentStatus::Healthy { .. }));
 }
 
+/// The last design format without `sheet-face-names`, which 0.45.0-rc.4 folded into format 62
+/// (`crates/doc/src/format/v62/sheet-face-names.rs`). A fixed number, not `FORMAT - 1`, so the
+/// older design stays older when later changes are pending.
+const BEFORE_SHEET_FACE_NAMES: u32 = 61;
+
 /// A design saved before #6748 keeps a sketch on a base flange's sheet by the sheet's own name for
 /// its face, with no anchor: `sheet:Body1:base:top`, `sheet:Body1:base:bottom`. It opens with each
 /// sketch on that face by the model's name for it, `F<base flange>:top` and `:bottom` (format
-/// pending sheet-face-names), and their holes cut the sheet as they did: the 100 x 60 x 2.5 plate,
+/// 62's sheet-face-names), and their holes cut the sheet as they did: the 100 x 60 x 2.5 plate,
 /// 15000 mm³, less two 4 mm holes through it, 2 · π · 2² · 2.5 = 20π ≈ 62.83 mm³.
 #[test]
 fn sketches_saved_on_a_base_flanges_faces_by_the_sheets_names_open_on_those_faces() {
@@ -2073,7 +2130,7 @@ fn sketches_saved_on_a_base_flanges_faces_by_the_sheets_names_open_on_those_face
     assert!((volume(&mut s) - want).abs() < 0.1, "{}", volume(&mut s));
     let b = s.doc.features.iter().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::SheetBase { .. })).map_or(0, |f| f.id);
     // As a design from before saved them: by the sheet's names for the faces, with no anchor, at
-    // the last folded format with none of the pending changes.
+    // the last format without sheet-face-names.
     let mut older: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
     for (sketch, side) in [("Top", "top"), ("Bottom", "bottom")] {
         let f = older["features"].as_array_mut().unwrap().iter_mut().find(|f| f["name"] == sketch).unwrap();
@@ -2081,7 +2138,7 @@ fn sketches_saved_on_a_base_flanges_faces_by_the_sheets_names_open_on_those_face
         plane.remove("anchor");
         plane.insert("name".into(), json!(format!("sheet:Body1:base:{side}")));
     }
-    older["format"] = json!(solidcraft_doc::format::format_string(solidcraft_doc::format::FORMAT - 1));
+    older["format"] = json!(solidcraft_doc::format::format_string(BEFORE_SHEET_FACE_NAMES));
     older.as_object_mut().unwrap().remove("format_pending");
     let doc = solidcraft_doc::Document::from_json(&older.to_string()).unwrap();
     for (sketch, side) in [("Top", "top"), ("Bottom", "bottom")] {

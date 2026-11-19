@@ -47,9 +47,13 @@ inside it. The distance is a dimension like any other.
 
 <video src="../media/sketching/offset.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Offsetting the rectangle's outline 4 mm inward with one click on its bottom side"></video>
 
-**Trim** (T) removes the piece of a curve between the curves that cross it. With a circle drawn
-on the top side, click the piece of the side inside the circle, then the half of the circle
-outside the rectangle: what's left is a notch.
+**Trim** (T) removes the piece you click. **Break** splits off the same piece and keeps it.
+On a line, arc, circle or spline, each tool looks along the curve for the nearest crossing
+or constrained sketch point on either side. To mark a cut yourself, place a point on the
+curve with the point-on-curve snap.
+
+To trim a notch, draw a circle across the rectangle's top side. Click the piece of the side
+inside the circle, then click the half of the circle outside the rectangle.
 
 <video src="../media/sketching/trim.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Trimming a notch: removing the piece of the top side inside a circle, then the circle's upper half"></video>
 
