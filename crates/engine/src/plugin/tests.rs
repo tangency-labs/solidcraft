@@ -928,6 +928,19 @@ mod native {
         std::fs::write(f.0.join("sample/tests/big.bin"), vec![0u8; 17 << 20]).unwrap();
         std::fs::write(f.0.join("sample/.notes"), b"x").unwrap();
         assert_eq!(check(&mut s, &f.path())["problems"], json!([]));
+        // A name the .zip reader refuses is refused in a folder too (Windows cannot even make it).
+        #[cfg(unix)]
+        {
+            std::fs::write(f.0.join("sample/notes\\old.txt"), b"x").unwrap();
+            let reply = check(&mut s, &f.path());
+            assert_eq!((reply["ok"].as_bool(), reply["problems"][0]["field"].as_str()), (Some(false), Some("package")), "{reply}");
+            assert!(reply["problems"][0]["problem"].as_str().unwrap().contains("backslash"), "{reply}");
+            std::fs::remove_file(f.0.join("sample/notes\\old.txt")).unwrap();
+            std::fs::create_dir_all(f.0.join("sample/notes")).unwrap();
+            std::fs::write(f.0.join("sample/notes/old.txt"), b"x").unwrap();
+            assert_eq!(check(&mut s, &f.path())["problems"], json!([]), "a plain path in a folder is fine");
+            std::fs::remove_dir_all(f.0.join("sample/notes")).unwrap();
+        }
         let fields = |reply: &Value| -> Vec<(String, String)> {
             reply["problems"]
                 .as_array()

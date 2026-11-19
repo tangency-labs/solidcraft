@@ -217,17 +217,11 @@ fn a_token_fired_before_the_call_cancels_offset_shell_and_sweep() {
     }
 }
 
-/// Every opt-in fix but `geometric_g2_continuity` (as `fork_ea59e9c_section_orders`'s
+/// Every opt-in fix (as `fork_ea59e9c_section_orders`'s
 /// SolidCraft kernel): with them the shell takes #1476's slow path (two 38 000-sample
 /// curve offsets, over 4 min in a debug build).
-fn every_fix_but_g2() -> solidcore::kernel::UpstreamFixes {
-    let mut f = solidcore::kernel::UpstreamFixes::default();
-    for &name in solidcore::kernel::UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
-    }
-    f
+fn all_fixes() -> solidcore::kernel::UpstreamFixes {
+    solidcore::kernel::UpstreamFixes::all()
 }
 
 /// The swept bar's shell, cancelled from another thread `delay` into the call:
@@ -261,7 +255,7 @@ fn cancel_shell_after(
     });
     let mut k = Kernel::default();
     if every_fix {
-        k.fixes = every_fix_but_g2();
+        k.fixes = all_fixes();
     }
     let mut part = swept_bar(&mut k);
     let start = planar_faces_at(&k, &part, 2, 0.0);

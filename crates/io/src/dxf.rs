@@ -1466,6 +1466,7 @@ impl Affine {
     fn copy_work(&self, g: &Geom2) -> usize {
         match g {
             Geom2::Spline { pts, .. } => pts.len(),
+            Geom2::Nurbs { pts, knots, weights, .. } => pts.len() + knots.len() + weights.len(),
             Geom2::Text { text, .. } => text.len(),
             Geom2::Arc { .. } | Geom2::Ellipse { .. } if self.uniform().is_none() => 33,
             _ => 0,
@@ -1525,6 +1526,14 @@ impl Affine {
                     *point = self.p(*point);
                 }
                 Geom2::Spline { pts: copied, control: *control, degree: *degree }
+            }
+            // An affine map moves a spline exactly by its control points; knots and weights stay.
+            Geom2::Nurbs { pts, degree, knots, weights } => {
+                let mut copied = source_import::copy_points(pts, work)?;
+                for point in &mut copied {
+                    *point = self.p(*point);
+                }
+                Geom2::Nurbs { pts: copied, degree: *degree, knots: knots.clone(), weights: weights.clone() }
             }
             Geom2::Conic { a, apex, b, rho } => Geom2::Conic { a: self.p(*a), apex: self.p(*apex), b: self.p(*b), rho: *rho },
             Geom2::Text { text, at, height, angle } => {
@@ -1610,7 +1619,7 @@ pub fn write_dxf_entities(entities: &[(&str, Geom2)], insunits: i32) -> String {
                 w(1, &text.replace('\n', " "));
             }
             // Free-form curves are written by the caller as polylines (lines).
-            Geom2::Ellipse { .. } | Geom2::Spline { .. } | Geom2::Conic { .. } => {}
+            Geom2::Ellipse { .. } | Geom2::Spline { .. } | Geom2::Nurbs { .. } | Geom2::Conic { .. } => {}
         }
     }
     w(0, "ENDSEC");
