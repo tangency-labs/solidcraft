@@ -1486,7 +1486,8 @@ fn consumed_sketches(doc: &solidcraft_doc::Document) -> impl Iterator<Item = u64
         | FeatureKind::SheetBase { sketch, .. }
         | FeatureKind::SheetContour { sketch, .. }
         | FeatureKind::Hole { points: Some(SketchPoints { sketch, single: false, .. }), .. }
-        | FeatureKind::SheetPerforate { sketch: Some(sketch), .. } => Some(sketch.0),
+        | FeatureKind::SheetPerforate { sketch: Some(sketch), .. }
+        | FeatureKind::SheetFlange { profile: Some(sketch), .. } => Some(sketch.0),
         _ => None,
     })
 }
