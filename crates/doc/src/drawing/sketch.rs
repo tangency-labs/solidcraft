@@ -22,19 +22,67 @@ const MAX_STORED_TEXT_BYTES: usize = 4096;
 const MAX_LOCAL_ID_BYTES: usize = 512;
 const AUXILIARY: [&str; 7] = ["links", "patterns", "offsets", "freeform_offsets", "freeform_chain_offsets", "wires", "equations"];
 
-/// Authored sheet geometry. Points and lengths are paper XY millimetres, regardless
-/// of the drawing's display units. The origin is the sheet's lower-left corner,
-/// with x right and y up, not the border corner. No view scale or source path.
+/// What a drawing sketch belongs to. A sheet's sketch is in paper millimetres, from the sheet's
+/// lower-left corner. A view's sketch is in model millimetres in the view's plane, in the plane's
+/// own coordinates (from its basis's origin, as the view's section curves are), and is placed on
+/// paper at the view's scale, so it moves and scales with its view.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Owner {
+    Sheet(u64),
+    View(u64),
+}
+
+/// Authored drawing geometry, in its owner's frame ([`Owner`]), regardless of the drawing's
+/// display units. A sheet sketch's origin is the sheet's lower-left corner, with x right and
+/// y up, not the border corner. No source path.
 /// Expressions are retained verbatim; interpreting them is the later read-only store's job.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "Stored", into = "Stored")]
 pub struct SheetSketch {
-    #[serde(with = "crate::ids")]
     pub id: u64,
-    #[serde(with = "crate::ids")]
-    pub sheet: u64,
+    pub owner: Owner,
     pub name: String,
     pub sketch: Sketch,
+}
+
+/// A drawing sketch as it is saved. Its owner is saved flat, `"sheet": id` or `"view": id`, not
+/// nested as a note's anchor is: a sheet sketch then saves exactly what 0.45.0 saves, so that
+/// release still opens every drawing whose sketches are all on sheets (#5425).
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Stored {
+    #[serde(with = "crate::ids")]
+    id: u64,
+    #[serde(default, with = "crate::ids::option", skip_serializing_if = "Option::is_none")]
+    sheet: Option<u64>,
+    #[serde(default, with = "crate::ids::option", skip_serializing_if = "Option::is_none")]
+    view: Option<u64>,
+    name: String,
+    sketch: Sketch,
+}
+
+impl TryFrom<Stored> for SheetSketch {
+    type Error = DocError;
+
+    fn try_from(s: Stored) -> Result<SheetSketch> {
+        let owner = match (s.sheet, s.view) {
+            (Some(sheet), None) => Owner::Sheet(sheet),
+            (None, Some(view)) => Owner::View(view),
+            (Some(_), Some(_)) => return Err(invalid("it names both a sheet and a view as its owner")),
+            (None, None) => return Err(invalid("it names no sheet or view as its owner")),
+        };
+        Ok(SheetSketch { id: s.id, owner, name: s.name, sketch: s.sketch })
+    }
+}
+
+impl From<SheetSketch> for Stored {
+    fn from(record: SheetSketch) -> Stored {
+        let (sheet, view) = match record.owner {
+            Owner::Sheet(sheet) => (Some(sheet), None),
+            Owner::View(view) => (None, Some(view)),
+        };
+        Stored { id: record.id, sheet, view, name: record.name, sketch: record.sketch }
+    }
 }
 
 fn invalid(message: impl Into<String>) -> DocError {
@@ -365,7 +413,8 @@ fn solve_record(design: &crate::Document, owner: &Drawing, original: &SheetSketc
     require(report.keeps_orientation(), || report.failure(|conflicts| format!("sheet sketch edit would conflict with {conflicts}")))?;
     check_budget(std::iter::once(&candidate))?;
     check_payload(&candidate)?;
-    Ok(SolvedSheetSketch { drawing: owner.id, sheet: original.sheet, id: original.id, sketch: candidate.sketch, report })
+    let sheet = owner.sketch_sheet(original).ok_or_else(|| invalid("its owner is not in this drawing"))?;
+    Ok(SolvedSheetSketch { drawing: owner.id, sheet, id: original.id, sketch: candidate.sketch, report })
 }
 
 /// Names are collected after record admission, with cumulative expression work

@@ -1223,7 +1223,7 @@ fn inspect_lists_every_view_of_a_deep_or_large_drawing() {
 fn sheet_records_do_not_redirect_the_shared_model_sketch_store() {
     use crate::cmd::sketch_store;
     use solidcore_record::Vec2;
-    use solidcraft_doc::drawing::SheetSketch;
+    use solidcraft_doc::drawing::{Owner, SheetSketch};
     use solidcraft_sketch::Sketch;
 
     let mut s = Session::default();
@@ -1241,7 +1241,7 @@ fn sheet_records_do_not_redirect_the_shared_model_sketch_store() {
         for id in [model_id, separate] {
             drawing.sketches.push(Arc::new(SheetSketch {
                 id,
-                sheet: drawing.sheets[0].id,
+                owner: Owner::Sheet(drawing.sheets[0].id),
                 name: "Sheet sketch".into(),
                 sketch: sheet_sketch.clone(),
             }));
@@ -1851,9 +1851,39 @@ fn sheet_editor_new_commands_validate_hostile_inputs_and_declare_schemas() {
     run(&mut s, "sketch.cancel", json!({}));
 }
 
+/// A sketch can belong to a view (#5425). Until a view's sketches go on paper through their view,
+/// the sheet doesn't draw one as its own and editing one is refused. Deleting its view takes it,
+/// as it takes the view's notes.
+#[test]
+fn a_view_sketch_goes_with_its_view_but_is_not_drawn_or_edited_as_a_sheet_sketch() {
+    use solidcraft_doc::drawing::{Owner, SheetSketch};
+    let (mut s, d, on_sheet, made) = sheet_editor();
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let view = run(&mut s, "drawing.view.base", json!({"sheet": made["sheet"], "scale": "1:1"}))["view"].clone();
+    let view_id = ids::decode(view.as_str().unwrap()).unwrap();
+    let on_view = open_one(&s).allocate_id(&mut IdSource::seeded(5425)).unwrap();
+    s.edit_drawing("test", |drawing| {
+        let sketch = drawing.sheet_sketch(on_sheet).unwrap().sketch.clone();
+        drawing.sketches.push(Arc::new(SheetSketch { id: on_view, owner: Owner::View(view_id), name: "On the view".into(), sketch }));
+        Ok(())
+    })
+    .unwrap();
+    let owner = open_one(&s);
+    let built = crate::drawing_scene::build(&s, &owner, owner.sheets[0].id).unwrap();
+    assert!(built.scene.groups.iter().any(|group| group.object == on_sheet));
+    assert!(!built.scene.groups.iter().any(|group| group.object == on_view), "a view's sketch is not drawn as the sheet's");
+    let e = refused(&mut s, "drawing.sketch.edit", json!({"sketch": ids::encode(on_view)}));
+    assert!(e.contains("not supported yet: editing a view's sketch"), "{e}");
+    run(&mut s, "selection.delete", json!({"items": [{"type": "drawing", "drawing": ids::encode(d), "object": view}]}));
+    let after = open_one(&s);
+    assert!(after.sheet_sketch(on_view).is_none(), "the view's sketch goes with it");
+    assert!(after.sheet_sketch(on_sheet).is_some(), "the sheet's sketch stays");
+}
+
 #[test]
 fn sheet_editor_same_numeric_id_in_two_drawings_and_model_never_retargets_geometry() {
-    use solidcraft_doc::drawing::SheetSketch;
+    use solidcraft_doc::drawing::{Owner, SheetSketch};
     use solidcraft_sketch::Sketch;
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Model"}));
@@ -1863,7 +1893,7 @@ fn sheet_editor_same_numeric_id_in_two_drawings_and_model_never_retargets_geomet
     let model = s.doc.sketch(id).unwrap().clone();
     run(&mut s, "drawing.create", json!({"name": "First"}));
     s.edit_drawing("test", |drawing| {
-        drawing.sketches.push(Arc::new(SheetSketch { id, sheet: drawing.sheets[0].id, name: "Same id".into(), sketch: Sketch::new() }));
+        drawing.sketches.push(Arc::new(SheetSketch { id, owner: Owner::Sheet(drawing.sheets[0].id), name: "Same id".into(), sketch: Sketch::new() }));
         Ok(())
     })
     .unwrap();

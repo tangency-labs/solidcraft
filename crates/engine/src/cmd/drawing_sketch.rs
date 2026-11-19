@@ -6,7 +6,7 @@ use crate::schema::{drawing_sketch as contract, output_schema_for};
 use crate::{Result, Session, SheetSketchEdit};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use solidcraft_doc::drawing::SheetSketch;
+use solidcraft_doc::drawing::{Owner, SheetSketch};
 use solidcraft_doc::ids;
 use solidcraft_sketch::Sketch;
 use std::sync::Arc;
@@ -58,7 +58,7 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
         .collect();
     let sketch = s.ids.next(&taken).map_err(|e| bad(cmd, e.to_string()))?;
     s.edit_drawing(cmd, |drawing| {
-        drawing.sketches.push(Arc::new(SheetSketch { id: sketch, sheet, name, sketch: Sketch::new() }));
+        drawing.sketches.push(Arc::new(SheetSketch { id: sketch, owner: Owner::Sheet(sheet), name, sketch: Sketch::new() }));
         Ok(())
     })?;
     s.active_sheet_sketch = Some(Arc::new(SheetSketchEdit { drawing: owner.id, sheet, sketch, original: None }));
@@ -79,6 +79,9 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let solved = s.doc.solve_sheet_sketch(owner.id, sketch)?;
     let original = owner.sheet_sketch(sketch).cloned().ok_or_else(|| bad(cmd, "the open drawing has no such sketch"))?;
+    if matches!(original.owner, Owner::View(_)) {
+        return Err(bad(cmd, "not supported yet: editing a view's sketch"));
+    }
     s.active_sheet_sketch = Some(Arc::new(SheetSketchEdit { drawing: owner.id, sheet: solved.sheet, sketch, original: Some(original) }));
     s.selection.clear();
     s.revision += 1;

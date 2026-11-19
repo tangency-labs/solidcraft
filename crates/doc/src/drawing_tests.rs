@@ -1027,7 +1027,7 @@ fn sheet_sketch_records_are_ordered_by_id_without_reordering_sheets_or_geometry(
     reverse.sketches.reverse();
     assert_eq!(reverse.to_json().unwrap(), d.to_json().unwrap());
     assert_eq!(reverse.sketches[0].id, 41, "saving must not mutate the live record");
-    assert_eq!(d.sheet_sketch(41).unwrap().sheet, d.sheets[0].id);
+    assert_eq!(d.sheet_sketch(41).unwrap().owner, Owner::Sheet(d.sheets[0].id));
     assert!(bare().sheet_sketch(41).is_none(), "lookup must not fall back to another drawing");
 }
 
@@ -1041,7 +1041,7 @@ fn sheet_sketch_ids_share_the_drawing_namespace_and_owners_must_resolve() {
     }
     let mut v = good.clone();
     v["sketches"][0]["sheet"] = good["sources"][0]["id"].clone();
-    assert!(refusal(&v).contains("owner does not exist"));
+    assert!(refusal(&v).contains("owner"));
     v["sketches"][0]["sheet"] = json!(ids::encode(999));
     assert!(read(&v).is_err());
     let mut duplicate = good;
@@ -1054,6 +1054,135 @@ fn sheet_sketch_ids_share_the_drawing_namespace_and_owners_must_resolve() {
     let taken = generator.next(&BTreeSet::new()).unwrap();
     Arc::make_mut(&mut d.sketches[0]).id = taken;
     assert_ne!(d.allocate_id(&mut IdSource::seeded(777)).unwrap(), taken);
+}
+
+// W38b: a drawing sketch belongs to a sheet (paper millimetres) or to a view (model millimetres in
+// the view's plane). The iso view on the second sheet has no projected views, dimensions or balloons.
+fn iso_view(d: &Drawing) -> (u64, u64) {
+    let view = d.views.iter().find(|view| view.sheet == d.sheets[1].id).unwrap();
+    (view.id, view.sheet)
+}
+
+/// `paper_sketch_file` with a second sketch, id 40, owned by the iso view.
+fn view_sketch_file() -> Value {
+    let mut v = paper_sketch_file();
+    let (view, _) = iso_view(&read(&v).unwrap());
+    let mut on_view = v["sketches"][0].clone();
+    on_view["id"] = json!(ids::encode(40));
+    let record = on_view.as_object_mut().unwrap();
+    record.remove("sheet");
+    record.insert("view".into(), json!(ids::encode(view)));
+    on_view["name"] = json!("Weld symbol outline");
+    v["sketches"].as_array_mut().unwrap().insert(0, on_view);
+    v
+}
+
+#[test]
+fn drawing_sketches_belong_to_a_sheet_or_a_view_and_owners_must_resolve() {
+    let good = view_sketch_file();
+    let d = read(&good).unwrap();
+    let (view, view_sheet) = iso_view(&d);
+    assert_eq!(d.sketches.iter().map(|record| record.owner).collect::<Vec<_>>(), [Owner::View(view), Owner::Sheet(d.sheets[0].id)]);
+    assert_eq!(d.sketches.iter().map(|record| d.sketch_sheet(record)).collect::<Vec<_>>(), [Some(view_sheet), Some(d.sheets[0].id)]);
+    assert_eq!(file(&d)["sketches"], good["sketches"]);
+
+    // An owner names one of this drawing's sheets or views, of the kind its tag says.
+    let id = |n: u64| json!(ids::encode(n));
+    let dimension = d.dimensions[0].id;
+    let balloon = d.balloons.iter().next().unwrap().id;
+    let wrong = [
+        ("sheet", id(view)),
+        ("sheet", id(dimension)),
+        ("view", id(d.sheets[0].id)),
+        ("view", id(dimension)),
+        ("view", id(balloon)),
+        ("view", good["sources"][0]["id"].clone()),
+        ("view", good["id"].clone()),
+        ("view", id(999)),
+    ];
+    // `owners(v, i, [(key, value)])` gives sketch `i` exactly these owner fields.
+    let owners = |v: &mut Value, i: usize, fields: &[(&str, Value)]| {
+        let record = v["sketches"][i].as_object_mut().unwrap();
+        record.remove("sheet");
+        record.remove("view");
+        record.extend(fields.iter().map(|(key, value)| (key.to_string(), value.clone())));
+    };
+    for (tag, named) in wrong {
+        let mut v = good.clone();
+        owners(&mut v, 0, &[(tag, named.clone())]);
+        let why = refusal(&v);
+        assert!(why.contains("owner"), "{tag} {named}: {why}");
+    }
+    // A damaged owner is refused with what is wrong, never guessed: both a sheet and a view, or
+    // neither (missing, or null).
+    let sheet = good["sheets"][0]["id"].clone();
+    let mut both = good.clone();
+    owners(&mut both, 1, &[("sheet", sheet.clone()), ("view", id(view))]);
+    assert!(refusal(&both).contains("both a sheet and a view"), "{}", refusal(&both));
+    for none in [vec![], vec![("sheet", Value::Null)], vec![("view", Value::Null)], vec![("sheet", Value::Null), ("view", Value::Null)]] {
+        let mut v = good.clone();
+        owners(&mut v, 1, &none);
+        assert!(refusal(&v).contains("no sheet or view"), "{none:?}: {}", refusal(&v));
+    }
+    // An unknown owner field, and an owner that isn't an id, are refused too.
+    for (key, value) in [("note", sheet.clone()), ("owner", json!({"sheet": sheet})), ("sheet", json!({"sheet": sheet})), ("sheet", json!(41))] {
+        let mut v = good.clone();
+        owners(&mut v, 1, &[(key, value.clone())]);
+        assert!(read(&v).is_err(), "{key} {value}");
+    }
+}
+
+#[test]
+fn a_view_sketch_goes_with_its_view_and_with_its_views_sheet() {
+    let d = read(&view_sketch_file()).unwrap();
+    let (view, view_sheet) = iso_view(&d);
+    let with = d.with_contents(vec![view]);
+    assert_eq!(with.sketches, [40]);
+    assert_eq!(d.on_sheet(view_sheet).sketches, [40]);
+    assert_eq!(d.on_sheet(d.sheets[0].id).sketches, [41]);
+
+    let mut without_view = d.clone();
+    without_view.remove_objects(&with);
+    assert_eq!(without_view.sketches.iter().map(|record| record.id).collect::<Vec<_>>(), [41]);
+    without_view.validate().unwrap();
+
+    let mut without_sheet = d.clone();
+    let on = without_sheet.remove_sheet(view_sheet);
+    assert_eq!((on.views, on.sketches), (vec![view], vec![40]));
+    without_sheet.validate().unwrap();
+
+    // The view taken out without its sketch leaves an owner that doesn't resolve.
+    let mut dangling = d.clone();
+    let mut only_the_view = d.with_contents(vec![view]);
+    only_the_view.sketches.clear();
+    dangling.remove_objects(&only_the_view);
+    let why = dangling.validate().unwrap_err().to_string();
+    assert!(why.contains("owner"), "{why}");
+}
+
+/// A sheet sketch is saved exactly as a drawing saved before view sketches saves it (its
+/// `format_pending` lacks `view-sketches`), `"sheet": id` with no other owner field, so the 0.45.0
+/// release still reads it. Such an older drawing opens with that sheet as the owner and saves the
+/// same record again.
+#[test]
+fn a_sheet_sketch_saves_its_owner_as_an_older_drawing_does() {
+    let older_record = paper_sketch_file()["sketches"][0].clone();
+    let fields = |record: &Value| record.as_object().unwrap().keys().cloned().collect::<Vec<_>>();
+    assert_eq!(fields(&older_record), ["id", "name", "sheet", "sketch"]);
+    let current = file(&read(&view_sketch_file()).unwrap());
+    assert_eq!(current["sketches"][1], older_record);
+    assert_eq!(fields(&current["sketches"][0]), ["id", "name", "sketch", "view"]);
+
+    let mut older = current.clone();
+    older["format_pending"] = json!(DRAWING.pending_names().into_iter().filter(|name| name != "view-sketches").collect::<Vec<_>>());
+    older["sketches"] = json!([older_record]);
+    let d = read(&older).unwrap();
+    assert_eq!(d.sketches.iter().map(|record| (record.id, record.owner)).collect::<Vec<_>>(), [(41, Owner::Sheet(d.sheets[0].id))]);
+    let saved = file(&d);
+    assert_eq!(saved["sketches"], json!([older_record]));
+    assert_eq!(saved["format_pending"], current["format_pending"]);
+    let text = d.to_json().unwrap();
+    assert_eq!(Drawing::from_json(&text).unwrap().to_json().unwrap(), text);
 }
 
 #[test]
@@ -1082,7 +1211,7 @@ fn sheet_sketches_keep_current_views_dimensions_balloons_and_revisions() {
         assert!(Drawing::from_json(&serde_json::to_string(&duplicate).unwrap()).is_err());
     }
     let mut without = d.clone();
-    let sheet = d.sketches[0].sheet;
+    let sheet = d.sketch_sheet(&d.sketches[0]).unwrap();
     let on = without.remove_sheet(sheet);
     assert_eq!(on.sketches, vec![d.sketches[0].id]);
     assert!(!on.is_empty());
@@ -1516,7 +1645,7 @@ fn staged_sheet_sketch_edit_changes_only_the_given_drawing_not_the_source_design
     assert_eq!(doc.to_json(), source, "a staged Drawing operation never publishes to the source design");
     assert!(Arc::ptr_eq(doc.drawing(id).unwrap().sheet_sketch(41).unwrap(), &old_record));
     assert_eq!(staged.sheet_sketch(41).unwrap().sketch.points[0].pos, solidcore_record::Vec2::ZERO);
-    assert_eq!(staged.sheet_sketch(41).unwrap().sheet, staged.sheets[0].id);
+    assert_eq!(staged.sheet_sketch(41).unwrap().owner, Owner::Sheet(staged.sheets[0].id));
 }
 
 #[test]
@@ -1528,7 +1657,12 @@ fn staged_sheet_sketch_edit_checks_the_cumulative_entity_cap_before_solving() {
         payload.add_point(solidcore_record::Vec2::new(i as f64, 10.0), Some(&format!("p{i}"))).unwrap();
     }
     for i in 0..1000 {
-        d.sketches.push(Arc::new(SheetSketch { id: 1000 + i, sheet: d.sheets[0].id, name: format!("Sketch {i}"), sketch: payload.clone() }));
+        d.sketches.push(Arc::new(SheetSketch {
+            id: 1000 + i,
+            owner: Owner::Sheet(d.sheets[0].id),
+            name: format!("Sketch {i}"),
+            sketch: payload.clone(),
+        }));
     }
     assert_eq!(d.sketches.len(), MAX_SHEET_SKETCHES);
     assert_eq!(d.sketches.iter().map(|s| s.sketch.points.len()).sum::<usize>(), MAX_POINTS + MAX_CURVES + MAX_CONSTRAINTS);
@@ -1567,7 +1701,7 @@ fn sheet_sketch_validation_preserves_the_slot_work_allowance() {
     assert_eq!(sk.constraints.len(), 706);
     assert_eq!(4 * sk.constraints.len().pow(2) + sk.constraints.len() - 1, 1_994_449);
     let mut d = bare();
-    d.sketches.push(Arc::new(SheetSketch { id: 41, sheet: d.sheets[0].id, name: "Slot".into(), sketch: sk }));
+    d.sketches.push(Arc::new(SheetSketch { id: 41, owner: Owner::Sheet(d.sheets[0].id), name: "Slot".into(), sketch: sk }));
     // 705 ordinary charges plus 4*706^2 for the one slot: 1,994,449.
     d.validate().unwrap();
     let before = d.clone();
@@ -1645,7 +1779,7 @@ fn sheet_fill_records_keep_sorted_snapshots_global_ids_and_sheet_ownership() {
     let mut collision = reopened.clone();
     Arc::make_mut(&mut collision.patterns[0]).id = 70;
     assert!(collision.validate().unwrap_err().to_string().contains("two objects have the id"));
-    let sheet = reopened.sketches[0].sheet;
+    let sheet = reopened.sketch_sheet(&reopened.sketches[0]).unwrap();
     let mut removed = reopened.clone();
     let on = removed.remove_sheet(sheet);
     assert_eq!(on.fills, [70, 73]);
@@ -1653,6 +1787,20 @@ fn sheet_fill_records_keep_sorted_snapshots_global_ids_and_sheet_ownership() {
     assert_eq!(removed.patterns, reopened.patterns, "patterns belong to the drawing, not a removed sheet");
     removed.validate().unwrap();
     assert_eq!(file(&reopened), value);
+}
+
+/// A fill's region is in its sketch's units and goes on paper as it is. A view sketch's are model
+/// millimetres in its view, so a fill on one is refused until fills are placed through their view.
+#[test]
+fn a_fill_on_a_view_sketch_is_refused_until_fills_go_through_their_view() {
+    let (doc, id, _) = w38d_record_fixture(false);
+    let mut drawing = (**doc.drawing(id).unwrap()).clone();
+    let (view, _) = iso_view(&drawing);
+    Arc::make_mut(&mut drawing.sketches[0]).owner = Owner::View(view);
+    let why = drawing.validate().unwrap_err().to_string();
+    assert!(why.contains("not supported yet: a fill on a view sketch"), "{why}");
+    drawing.fills.clear();
+    drawing.validate().unwrap();
 }
 
 #[test]

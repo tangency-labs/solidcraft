@@ -14,7 +14,7 @@ use solidcraft_geom::paper::{Group, Item, ObjectKind, Scene};
 use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{CurveKind, Profile, find_profiles_checked};
 
-use super::{Drawing, require};
+use super::{Drawing, Owner, require};
 use crate::profile_refs::{WHOLE_MAX_BOUNDARY_CURVES, WHOLE_MAX_HOLES, WHOLE_MAX_ID_BYTES, WHOLE_MAX_TOTAL_CURVES};
 use crate::{DocError, Document, Result, WholeProfileBoundary, ids};
 
@@ -222,7 +222,10 @@ pub(super) fn check_drawing(drawing: &Drawing) -> Result<()> {
         pattern.pattern.validate().map_err(|e| invalid(format!("pattern {}: {e}", ids::encode(pattern.id))))?;
     }
     for fill in &drawing.fills {
-        require(drawing.sheet_sketch(fill.sketch).is_some(), || named(drawing, fill, "owning sheet sketch does not exist"))?;
+        let owner = drawing.sheet_sketch(fill.sketch).map(|sketch| sketch.owner);
+        require(owner.is_some(), || named(drawing, fill, "owning sheet sketch does not exist"))?;
+        // Its region would go on paper unscaled and unplaced: model millimetres, not paper.
+        require(!matches!(owner, Some(Owner::View(_))), || named(drawing, fill, "not supported yet: a fill on a view sketch"))?;
         crate::profile_refs::validate_whole(std::slice::from_ref(&fill.boundary))?;
         check_region(&fill.last_region).map_err(|e| invalid(named(drawing, fill, e)))?;
         if let FillPaint::Hatch { pattern, pen_width_mm } = &fill.paint {
@@ -349,7 +352,8 @@ impl Drawing {
     /// at a time. Failed exact associations keep each fill's own retained region.
     pub fn resolve_sheet_fill_regions(&self, design: &Document, sketch: u64) -> Result<Vec<ResolvedSketchFill>> {
         self.validate()?;
-        let sheet = self.sheet_sketch(sketch).ok_or_else(|| invalid("owning sketch disappeared"))?.sheet;
+        let record = self.sheet_sketch(sketch).ok_or_else(|| invalid("owning sketch disappeared"))?;
+        let sheet = self.sketch_sheet(record).ok_or_else(|| invalid("owning sketch's owner disappeared"))?;
         let profiles = self.fill_profiles(design, sketch)?;
         let mut out = Vec::new();
         for fill in self.fills.iter().filter(|fill| fill.sketch == sketch) {
