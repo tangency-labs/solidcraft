@@ -6679,6 +6679,7 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
 
 /// A sample of the band check whose foot on a band's run is the run's end
 /// ([`inside_band_past_run_end`]).
+#[derive(Clone, Copy)]
 struct PastRunEnd {
     /// The run's end: the sample's foot on the run.
     end: crate::math::Point3,
