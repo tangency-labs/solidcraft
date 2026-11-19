@@ -694,10 +694,11 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     }
     // A chamfer of two distances: Distance 2 gets its own arrow along the other face.
     let faces = chamfer_face_dirs(app, d, base);
+    let mut blend_handles: Option<egui::Rect> = None;
     if let (Kind::Fillet { distance2, .. }, Some((_, t2))) = (&mut d.kind, faces)
         && let Some(l2) = crate::length_input::eval(&app.session.doc, distance2, ValueKind::Length).ok().filter(|v| v.is_finite())
     {
-        drag_arrow(
+        blend_handles = drag_arrow(
             &app.session.doc,
             ui,
             painter,
@@ -712,7 +713,8 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             0.0,
             decimals,
             distance2,
-        );
+        )
+        .map(|ts| arrow_grab(bs, ts));
     }
     // A rectangular pattern's second direction gets its own arrow for Spacing 2 (#2462), as the
     // first direction's arrow sets Spacing.
@@ -878,6 +880,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     // With To Object picked the box holds To Offset, which is used, whatever All says: the
     // engine takes To Object first.
     let names_all = all_on && !d.inputs.iter().any(|input| input.label == "To Object");
+    let blend = matches!(d.kind, Kind::Fillet { .. });
     let Some((label, kind, value)) = d.primary() else { return };
     let len = all_span.or_else(|| {
         if to_span.is_some() && value.trim().is_empty() {
@@ -938,6 +941,10 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             if section {
                 past_tip = Some((bs, ts));
             }
+            if blend {
+                let primary = arrow_grab(bs, ts);
+                blend_handles = Some(blend_handles.map_or(primary, |secondary| secondary.union(primary)));
+            }
         }
     }
     let note = crate::drag_extrude::step_note(app);
@@ -945,6 +952,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     // Clear of the command window first, then off the placement handles: the handles have the
     // last word, as a box over a grip takes the press meant for it (#6608).
     let mut place = box_place(app, proj);
+    place.handles = blend_handles;
     let size = box_size(ui, egui::Id::unique("sc_canvas_area"), label, note.as_deref());
     let rect = match past_tip {
         Some((from, ts)) => {
@@ -963,7 +971,9 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     let mut typed = String::new();
     let shown = if shows_all { &mut typed } else { &mut *value };
     let hint = if shows_all { "All" } else { "" };
-    value_box_noted(ui, label, shown, box_at, select_all, hint, note.as_deref(), BoxPlace { dialog: None, ..place });
+    // Blend clearance is applied above; the field stays under its wheel-stepping pointer.
+    let place = BoxPlace { dialog: None, handles: if blend { None } else { place.handles }, ..place };
+    value_box_noted(ui, label, shown, box_at, select_all, hint, note.as_deref(), place);
     // Spaces alone are not an entry: the field has the keyboard as the dialog opens.
     let entered = !typed.trim().is_empty();
     if entered {
@@ -2465,6 +2475,32 @@ mod tests {
         }
         let inside = egui::Rect::from_min_size(egui::pos2(300.0, 300.0), size);
         assert_eq!(clear_of_dialog(inside, place), inside, "a box inside stays where it is");
+    }
+
+    /// Clearing a window next to an arrow must not clamp the field back onto that arrow,
+    /// whichever viewport wall the window touches.
+    #[test]
+    fn a_value_box_clears_a_window_and_arrow_near_either_viewport_wall() {
+        let view = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 700.0));
+        let dialog = egui::Rect::from_min_max(egui::pos2(720.0, 200.0), egui::pos2(1000.0, 500.0));
+        let arrow = arrow_grab(egui::pos2(650.0, 330.0), egui::pos2(690.0, 350.0));
+        let field = egui::Rect::from_min_size(egui::pos2(704.0, 338.0), egui::vec2(140.0, 24.0));
+        for mirror in [false, true] {
+            let reflected = |r: egui::Rect| {
+                if mirror {
+                    egui::Rect::from_min_max(egui::pos2(view.right() - r.right(), r.top()), egui::pos2(view.right() - r.left(), r.bottom()))
+                } else {
+                    r
+                }
+            };
+            let (dialog, arrow, field) = (reflected(dialog), reflected(arrow), reflected(field));
+            assert!(field.intersects(dialog));
+            let kept = clear_of_dialog(field, BoxPlace { dialog: Some(dialog), view: Some(view), handles: Some(arrow) });
+            assert!(view.contains_rect(kept), "viewport clamp: {kept:?}");
+            assert!(!kept.intersects(dialog), "window clearance: {kept:?}, {dialog:?}");
+            assert!(!kept.intersects(arrow), "tip/stem clearance: {kept:?}, {arrow:?}");
+            assert_eq!(kept.size(), field.size());
+        }
     }
 
     /// Canvas value boxes sit under Preferences and Report a bug (#9016).
