@@ -452,6 +452,11 @@ impl ThreadFace {
         let CylinderFace { axis_point, axis, radius, start, end, internal } = self.axis;
         AxialFace { origin: axis_point.into(), axis: (*axis).into(), extent: [start, end], radius, slope: self.slope, internal }
     }
+
+    /// Whether the radius changes enough across this face to thread it as a cone.
+    pub fn is_conical(self, b: &Body) -> bool {
+        self.slope.abs() * (self.axis.end - self.axis.start) > thread_point_tolerance(b)
+    }
 }
 
 /// Find the exact trimmed face under a point before deciding whether it can be threaded.
@@ -467,10 +472,24 @@ pub fn thread_face_at(b: &Body, p: Vec3) -> Option<(f64, ThreadFace)> {
 /// A conical face across a round shank rim, reported in the shank's axial coordinates.
 /// Return the rim's side (0 for the low end), the small or far end, and its signed slope.
 pub fn thread_point(b: &Body, shank: ThreadFace, from: Option<Vec3>) -> Result<(usize, f64, f64)> {
+    thread_point_at(b, shank, from.map(|p| shank.geometry().nearest_end(p.into())))
+}
+
+/// Whether this pick has a point the thread can follow at either rim. A shank with two
+/// points still qualifies: the user can pick the rim of the one to follow.
+pub fn has_thread_point(b: &Body, p: Vec3) -> bool {
+    thread_face_at(b, p)
+        .is_some_and(|(_, shank)| !shank.axis.internal && !shank.is_conical(b) && (0..2).any(|side| thread_point_at(b, shank, Some(side)).is_ok()))
+}
+
+fn thread_point_tolerance(b: &Body) -> f64 {
+    (b.size() * 1e-7).max(1e-7)
+}
+
+fn thread_point_at(b: &Body, shank: ThreadFace, requested: Option<usize>) -> Result<(usize, f64, f64)> {
     let invalid = |why: &str| crate::KernelError::Invalid(why.into());
     let geometry = shank.geometry();
-    let tol = (b.size() * 1e-7).max(1e-7);
-    let requested = from.map(|p| geometry.nearest_end(p.into()));
+    let tol = thread_point_tolerance(b);
     let faces = Faces::new(b.record(), tol);
     let mut candidates = BTreeMap::new();
     for e in crate::offset::face_edges(b.record(), shank.index) {

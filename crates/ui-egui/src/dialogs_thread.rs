@@ -302,6 +302,8 @@ pub struct Options {
     pub tip: ThreadTip,
     pub point: ThreadPoint,
     pub point_depth: ThreadPointDepth,
+    /// Cached with the face picks, like the suggested size.
+    pub has_point: bool,
     pub chamfer_angle: String,
     pub chamfer_depth: String,
     pub steep_flank: SteepFlank,
@@ -318,6 +320,7 @@ impl Default for Options {
             tip: ThreadTip::default(),
             point: ThreadPoint::default(),
             point_depth: ThreadPointDepth::default(),
+            has_point: false,
             chamfer_angle: String::new(),
             chamfer_depth: String::new(),
             steep_flank: SteepFlank::default(),
@@ -333,7 +336,11 @@ impl Options {
     }
 
     fn follows_point(&self, modeled: bool) -> bool {
-        modeled && self.point == ThreadPoint::Follow
+        self.offers_point(modeled) && self.point == ThreadPoint::Follow
+    }
+
+    fn offers_point(&self, modeled: bool) -> bool {
+        modeled && self.has_point && !self.form.is_taper()
     }
 }
 
@@ -500,7 +507,7 @@ pub(crate) fn rows(
     }
 
     crate::ui_kit::section(ui, "thread_ends", "Ends", true, |ui| {
-        if *modeled {
+        if o.offers_point(*modeled) {
             pick(ui, "thread.point", "thread_point", &mut o.point, POINTS);
         }
         if o.follows_point(*modeled) {
@@ -647,13 +654,15 @@ pub(crate) fn put_params(p: &mut Value, length: &str, o: &Options, inputs: &[Sel
         }
         _ => {}
     }
-    if let Some(from) = object_point(inputs, START_END) {
+    let modeled = p.get("modeled").and_then(Value::as_bool).unwrap_or(false);
+    if o.starts_at_an_end(modeled)
+        && let Some(from) = object_point(inputs, START_END)
+    {
         p["from"] = from;
     }
     if let Some(e) = o.ease_out.param() {
         p["ease_out"] = e;
     }
-    let modeled = p.get("modeled").and_then(Value::as_bool).unwrap_or(false);
     if o.follows_point(modeled) {
         p["point"] = json!(o.point);
         if o.point_depth != ThreadPointDepth::default() {
@@ -682,6 +691,18 @@ fn sizing_target(s: &Session, picks: &[Sel]) -> Option<(solidcraft_engine::doc::
     let mut state = solidcraft_engine::doc::ModelState::default();
     state.bodies = world.bodies.iter().filter(|candidate| candidate.name == *body).cloned().collect();
     Some((state, *point))
+}
+
+/// Point is a common option, so every selected face must have a point it can follow.
+pub(crate) fn selected_have_points(s: &Session, picks: &[Sel]) -> bool {
+    if picks.is_empty() {
+        return false;
+    }
+    let world = crate::open_meshing::session_world(s);
+    picks.iter().all(|pick| {
+        let Sel::Face { body, index, point } = pick else { return false };
+        *index != usize::MAX && world.body(body).is_some_and(|target| solidcraft_engine::doc::kernel::has_thread_point(&target.body, *point))
+    })
 }
 
 /// The face's size in the dialog's form, for an automatic size.
@@ -755,6 +776,7 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, feature: &Feature) {
         tip: *tip,
         point: *point,
         point_depth: *point_depth,
+        has_point: false,
         chamfer_angle: chamfer_angle.as_ref().map(expr).unwrap_or_default(),
         chamfer_depth: chamfer_depth.as_ref().map(expr).unwrap_or_default(),
         steep_flank: *steep_flank,
@@ -790,7 +812,18 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, feature: &Feature) {
             .filter_map(|(slot, pick)| refill(slot, pick.0))
             .collect();
     }
-    sync_inputs(&mut d.inputs, &mut d.active, &options, *modeled);
+    d.kind = Kind::Thread {
+        designation: designation.clone().unwrap_or_default(),
+        length: length.as_ref().map(expr).unwrap_or_default(),
+        suggested: None,
+        filled: None,
+        of: Vec::new(),
+        options,
+    };
+    d.sync_thread(s);
+    if let Kind::Thread { options, .. } = &d.kind {
+        sync_inputs(&mut d.inputs, &mut d.active, options, *modeled);
+    }
     // A place no pick finds again (the model changed) is still the place saved.
     let place = |sel: Option<Sel>, p| sel.unwrap_or(Sel::Vertex { body: String::new(), point: p });
     let set = |d: &mut Dialog, label: &str, sel: Sel| {
@@ -811,14 +844,6 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, feature: &Feature) {
         None => {}
     }
     d.active = 0;
-    d.kind = Kind::Thread {
-        designation: designation.clone().unwrap_or_default(),
-        length: length.as_ref().map(expr).unwrap_or_default(),
-        suggested: None,
-        filled: None,
-        of: Vec::new(),
-        options,
-    };
 }
 
 #[cfg(test)]

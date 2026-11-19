@@ -245,7 +245,7 @@ pub(super) fn thread_on_in(st: &ModelState, feature: u64, component: Option<u64>
         )
     })?;
     let mb = st.bodies.get(bi).ok_or_else(|| DocError::Invalid("threaded body".into()))?;
-    let direct = face.filter(|f| f.slope.abs() * (cyl.end - cyl.start) > (mb.body.size() * 1e-7).max(1e-7));
+    let direct = face.filter(|f| f.is_conical(&mb.body));
     let cone = if ask.point == ThreadPoint::Follow {
         let face = face
             .filter(|_| direct.is_none() && !cyl.internal)

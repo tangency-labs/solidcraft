@@ -259,7 +259,8 @@ pub use tolerance_heal::{
     set_heals_tolerance_defects,
 };
 pub use topo::{
-    CylinderFace, ThreadFace, cylinder_between_rims, cylinder_end_at, cylinder_face, cylinder_face_at, material_in_ring, thread_face_at, thread_point,
+    CylinderFace, ThreadFace, cylinder_between_rims, cylinder_end_at, cylinder_face, cylinder_face_at, has_thread_point, material_in_ring,
+    thread_face_at, thread_point,
 };
 pub use topo::{TopoCounts, merged_topology, seam_flags, whole_edge};
 pub use tspline::tspline_sheet;

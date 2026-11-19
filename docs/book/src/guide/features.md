@@ -242,6 +242,7 @@ a left-handed groove crossing, as on a reversing screw). Scripts use `hand: "lef
    remove a shallow rectangular slot across the head's top.
 3. Open **Thread** and select the shank's cylindrical side. Choose the size and pitch, such
    as `M8x1.25` for this example. Turn on **Modeled** and choose **Follow point** under **Point**.
+   The **Point** option appears when the selected shank has a joined cone the thread can follow.
    If both ends have a cone, use **Start end (optional)** to pick the rim of the one to follow.
 4. Leave **Point depth** at **Fade** and apply the thread. The groove keeps its full depth where
    the core is thick enough. It fades to zero at the tip while keeping the tooth crests narrow.
@@ -252,9 +253,9 @@ a left-handed groove crossing, as on a reversing screw). Scripts use `hand: "lef
 
 Choose **Full depth** for a point with enough material around its axis to keep the full groove
 depth. A sharp point needs **Fade**. To cut a constant-depth groove on a cone alone, select its
-conical face directly, turn on **Modeled**, and leave **Point** set to **None**. **Length** and
-**Up to** start at the wide rim. Limit the cut to the part of the cone where the cutting profile
-clears the axis. Leave **Start** set to **None** and **End** set to **Square**.
+conical face directly and turn on **Modeled**. **Length** and **Up to** start at the wide rim.
+Limit the cut to the part of the cone where the cutting profile clears the axis. Leave **Start**
+set to **None** and **End** set to **Square**.
 
 To script the thread on the blank above, name the body `Pointed screw` or use its name in
 `faces`. This command picks the shank's cylindrical side and cuts both hands.
