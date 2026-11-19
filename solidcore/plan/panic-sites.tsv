@@ -557,6 +557,7 @@ crates/solidcore/src/geom/local_solve1d.rs	IterQueue1d::is_oscillating	int-rem	1
 crates/solidcore/src/geom/matrix.rs	Matrix::make_identity	step_by	1	proven	step_by(step)	rows == cols checked and square storage bounds rows, so rows + 1 is nonzero
 crates/solidcore/src/geom/matrix.rs	sort_eigen_system	swap	1	proven	swap(i, j_min)	i and j_min index d; n equals both matrix dimensions and offset() validates matrix indices
 crates/solidcore/src/geom/matrix.rs	sort_eigen_system	swap	2	proven	swap(a, b)	i and j_min index d; n equals both matrix dimensions and offset() validates matrix indices
+crates/solidcore/src/geom/ordered_solve.rs	Band::factor_rows	copy_from_slice	1	proven	copy_from_slice(here)	row has exactly w=bw+1 entries from filled(w); here is the checked mutable slice r*w..r*w+w with exactly w entries, and neither length changes before this copy
 crates/solidcore/src/geom/point_set.rs	PointSet3d::set_up_centroid	int-div	1	proven	size / BLOCK_SIZE	divisor is the non-zero constant BLOCK_SIZE
 crates/solidcore/src/geom/point_set.rs	PointSet3d::set_up_centroid	int-rem	1	proven	size % BLOCK_SIZE	divisor is the non-zero constant BLOCK_SIZE
 crates/solidcore/src/geom/polar_box.rs	PolarBox::are_disjoint	f64::clamp	1	proven	clamp(-1.0, 1.0)	constant bounds, min <= max
