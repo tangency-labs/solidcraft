@@ -114,7 +114,8 @@ larger metadata misses the cache and uses the normal authoritative part-size bud
 ## Model cache
 
 Engine Save/Save As write the evaluated model with the design by default
-(`cache: true`; `cache: false` leaves it out): `cache/model.json` and
+(`cache: true`; `cache: false` leaves it out; `cache: "store"` keeps it in the model store
+only, below): `cache/model.json` and
 `cache/bodies.bin`. Plain JSON, recovery/autosave and browser downloads do not
 carry it. Saving never forces placement, evaluation or tessellation: the model is
 the session's own evaluation, and only when it is the evaluation of the document
@@ -268,6 +269,11 @@ file's own `container.json`, `cache/model.json` and `cache/bodies.bin`, copied a
 (nothing is encoded or compressed again), named `<key>.scm` after a SHA-256 of the cache
 format, the producer, the evaluation source, the kernel and the digest of the exact
 `document.json`.
+
+`cache: "store"` (a container only; json is refused) writes the file as `cache: false` does,
+byte for byte, and encodes the model into the store entry instead, as a save into the file
+would have encoded it. When there is no model to keep (a feature with an error, a sketch being
+edited) or it can't be stored, the save says so in `cache_not_saved`, as a save into the file does.
 
 When a design's file holds no model this build can use (saved with `cache: false`, its model
 left out because it did not fit, an earlier version of it brought back by version control, a

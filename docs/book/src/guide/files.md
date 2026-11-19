@@ -215,6 +215,12 @@ Warm saves with explicit `cache: true` can also include a small PNG thumbnail. I
 Home can show the recent design without reconstructing it when no local picture
 is available. Missing or incompatible pictures use the usual thumbnail generation.
 The default `cache: false` omits the portable thumbnail too.
+A design saved with its model on this computer also leaves the model in a local model store
+(`~/.cache/solidcraft/models` on Linux, `~/Library/Caches/SolidCraft/models` on macOS,
+`%LOCALAPPDATA%\SolidCraft\models` on Windows), so the same design opens without rebuilding here
+even from a copy of the file without its model. `cache: "store"` keeps the model only there: the
+file holds just the design, as small as with `cache: false`. The store keeps at most 2 GiB and
+2,000 entries, and drops the ones used longest ago first.
 The repository's `docs/design-container.md` describes limits and encoding details.
 
 Designs are saved in the newest format this version of SolidCraft knows (`"format": "solidcraft/N"`

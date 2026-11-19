@@ -2171,6 +2171,13 @@ mod tests {
         assert!(open(&store, &file).is_none());
         std::fs::write(&entry, &original).unwrap();
         assert!(open(&store, &file).is_some());
+        // `cache: "store"`: the model encoded straight into the entry, from a file without it.
+        std::fs::remove_file(&entry).unwrap();
+        store.keep_model(&without, &model).unwrap();
+        let read = open(&store, &file).expect("a model kept from a file without it opens it");
+        assert_eq!(read.records, model.records);
+        assert_eq!(parts(&std::fs::read(&entry).unwrap()), stored, "the entry a save into the file would have left");
+        std::fs::write(&entry, &original).unwrap();
 
         // Eviction: the entry used longest ago goes first, and opening from one is a use.
         let unrelated = dir.join("notes.txt");

@@ -1748,7 +1748,7 @@ fn write(
     format: &str,
     compression: &str,
     preview: bool,
-    cache: bool,
+    cache: KeepModel,
     overwrite: bool,
     sign: bool,
     signing_key: Option<&str>,
@@ -1756,6 +1756,14 @@ fn write(
     // A path outside the agent's folders says so first, whatever its name.
     solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(e.to_string()))?;
     check_design_name(cmd, path)?;
+    if cache == KeepModel::InStore {
+        if format != "container" {
+            return Err(bad(cmd, "`cache: \"store\"` keeps the model for a container (.sc) only: plain json is never opened from the model store"));
+        }
+        if model_store().is_none() {
+            return Err(bad(cmd, "`cache: \"store\"` needs the model store, which this build has none of: save with `cache: true` or `false`"));
+        }
+    }
     // A move not captured yet isn't in the document a file holds: refuse, rather than write the
     // file without it and say nothing (#9736). The app asks the Capture Position question first.
     // An exploded view shown saves as before: its placements aren't the design's.
@@ -1797,7 +1805,7 @@ fn write_file(
     format: &str,
     compression: &str,
     preview: bool,
-    cache: bool,
+    cache: KeepModel,
     sign: bool,
     signing_key: Option<&str>,
 ) -> Result<Value> {
@@ -1819,7 +1827,13 @@ fn missing_save_cache(s: &Session, format: &str, cache: bool, bytes: &[u8]) -> O
     if present {
         return None;
     }
-    let reason = if let Some(result) = s.model.results.iter().find(|r| r.error.is_some()) {
+    Some(format!("Model cache not saved: {}; opening this design will rebuild its model.", no_model_reason(s)))
+}
+
+/// Why a save kept no model: the first of the reasons [`saved_geometry`] has, else that it did not
+/// fit or could not be encoded.
+fn no_model_reason(s: &Session) -> String {
+    if let Some(result) = s.model.results.iter().find(|r| r.error.is_some()) {
         let feature = s.doc.feature(result.id).map_or("a timeline feature", |f| f.name.as_str());
         format!("feature {feature} has an error")
     } else if s.active_sketch.is_some() {
@@ -1830,8 +1844,7 @@ fn missing_save_cache(s: &Session, format: &str, cache: bool, bytes: &[u8]) -> O
         "there are no evaluated bodies to cache".into()
     } else {
         "the cache could not fit or be encoded within the design file budget".into()
-    };
-    Some(format!("Model cache not saved: {reason}; opening this design will rebuild its model."))
+    }
 }
 
 fn write_bytes(
@@ -1840,7 +1853,7 @@ fn write_bytes(
     format: &str,
     compression: solidcraft_io::DesignCompression,
     preview: bool,
-    cache: bool,
+    cache: KeepModel,
     sign: bool,
     signing_key: Option<&str>,
 ) -> Result<Value> {
@@ -1857,7 +1870,7 @@ fn write_bytes(
         } else if format != "container" {
             Some("only a container can carry a signature: save as .sc (format container), not json".to_owned())
         } else {
-            match write_signed_container(s, &chain, path, compression, preview, cache, signing_key) {
+            match write_signed_container(s, &chain, path, compression, preview, cache.in_file(), signing_key) {
                 Ok(Ok((bytes, signed))) => {
                     signature = signed;
                     signed_bytes = Some(bytes);
@@ -1884,16 +1897,17 @@ fn write_bytes(
         } else {
             let save =
                 solidcraft_io::ProvenanceSave { source: None, chain: &chain, author: None, tool: Some("SolidCraft"), note: None, created: None };
-            s.design_container_signed(Some(path), compression, preview, cache, &save).map_err(|e| EngineError::Other(format!("{path}: {e}")))?
+            s.design_container_signed(Some(path), compression, preview, cache.in_file(), &save)
+                .map_err(|e| EngineError::Other(format!("{path}: {e}")))?
         }
     } else {
         match format {
-            "container" => s.design_container_at(Some(path), compression, preview, cache)?,
+            "container" => s.design_container_at(Some(path), compression, preview, cache.in_file())?,
             "json" => solidcraft_io::write_design(&s.design_at(Some(path))),
             _ => return Err(bad("file.save", "format must be container or json")),
         }
     };
-    let cache_not_saved = missing_save_cache(s, format, cache, &bytes);
+    let mut cache_not_saved = missing_save_cache(s, format, cache.in_file(), &bytes);
     // Cancelled while the design was being prepared (a watched save): nothing is written.
     if solidcraft_kernel::watch::current().is_some_and(|w| w.cancelled()) {
         return Err(EngineError::Other(format!("{path}: save cancelled")));
@@ -1905,9 +1919,22 @@ fn write_bytes(
     // being evaluated again even from a copy of the file without it. Never a failed save.
     if format == "container"
         && let Some(store) = model_store()
-        && let Err(e) = store.keep(&bytes)
     {
-        log::info!("{path}: the model was not kept in the model store: {e}");
+        if cache == KeepModel::InStore {
+            // The file holds just the design: the model goes to the store alone, and the save says
+            // so when it could not.
+            let kept = match saved_geometry(s, &s.design_at(Some(path))) {
+                Some(model) => store.keep_model(&bytes, &model).map_err(|e| e.to_string()),
+                // An empty design has no model to keep, as a save into the file says nothing then.
+                None if s.doc.features.is_empty() => Ok(()),
+                None => Err(no_model_reason(s)),
+            };
+            if let Err(why) = kept {
+                cache_not_saved = Some(format!("Model not kept in the model store: {why}; opening this design will rebuild its model."));
+            }
+        } else if let Err(e) = store.keep(&bytes) {
+            log::info!("{path}: the model was not kept in the model store: {e}");
+        }
     }
     s.path = Some(path.to_string());
     s.disk = solidcraft_io::design_lock::stamp(path);
@@ -2341,6 +2368,32 @@ fn saved_preview(s: &Session) -> Option<solidcraft_io::DesignPreview> {
     Some(preview)
 }
 
+/// Where a save keeps the evaluated model (`cache`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum KeepModel {
+    /// In the file (`true`, the default).
+    InFile,
+    /// Only in the model store, the file holding just the design (`"store"`, #19123).
+    InStore,
+    /// Nowhere (`false`).
+    Nowhere,
+}
+
+impl KeepModel {
+    fn of(p: &Value, cmd: &str) -> Result<Self> {
+        match p.get("cache") {
+            None | Some(Value::Null) | Some(Value::Bool(true)) => Ok(KeepModel::InFile),
+            Some(Value::Bool(false)) => Ok(KeepModel::Nowhere),
+            Some(Value::String(s)) if s == "store" => Ok(KeepModel::InStore),
+            Some(_) => Err(bad(cmd, crate::schema::save::CACHE_MESSAGE)),
+        }
+    }
+
+    fn in_file(self) -> bool {
+        self == KeepModel::InFile
+    }
+}
+
 fn save(s: &mut Session, p: &Value) -> Result<Value> {
     let path = match str_(p, "path") {
         Some(x) if !x.trim().is_empty() => x.to_string(),
@@ -2353,7 +2406,7 @@ fn save(s: &mut Session, p: &Value) -> Result<Value> {
         str_(p, "format").unwrap_or(default_design_format(&path)),
         str_(p, "compression").unwrap_or("fast"),
         bool_(p, "preview").unwrap_or(false),
-        bool_(p, "cache").unwrap_or(true),
+        KeepModel::of(p, "file.save")?,
         bool_(p, "overwrite").unwrap_or(false),
         bool_(p, "sign").unwrap_or(false),
         str_(p, "signing_key"),
@@ -2373,7 +2426,7 @@ fn save_as(s: &mut Session, p: &Value) -> Result<Value> {
         str_(p, "format").unwrap_or(default_design_format(&path)),
         str_(p, "compression").unwrap_or("fast"),
         bool_(p, "preview").unwrap_or(false),
-        bool_(p, "cache").unwrap_or(true),
+        KeepModel::of(p, "file.save_as")?,
         bool_(p, "overwrite").unwrap_or(false),
         bool_(p, "sign").unwrap_or(false),
         str_(p, "signing_key"),
@@ -4132,6 +4185,37 @@ mod tests {
         s.execute("solid.box", &json!({"length":5,"width":5,"height":5,"corner":[0,0,8],"name":"Boss"})).unwrap();
         s.execute("file.save", &json!({"cache":false})).unwrap();
         assert!(read().1.is_none(), "a document never saved with its model here has none");
+
+        // `cache: "store"`: the file holds just the design, and the model is in the store.
+        let saved = s.execute("file.save", &json!({"cache":"store"})).unwrap();
+        assert!(saved.get("cache_not_saved").is_none() && saved.get("warnings").is_none(), "{saved}");
+        let small = std::fs::read(&path).unwrap();
+        assert!(!solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(&small)).unwrap().has_model_cache());
+        let (doc, saved) = read();
+        let adopted =
+            Session::saved_model(&std::sync::Arc::new(doc), saved.as_ref()).expect("the model saved to the store is the design's evaluation");
+        assert_eq!(adopted.state().bodies.len(), 2);
+        // The same file as `cache: false` writes, byte for byte: only the store differs. (The copy
+        // has the same name in another folder: a save names a design after its file.)
+        let plain = dir.join("plain").join("plate.sc");
+        std::fs::create_dir_all(plain.parent().unwrap()).unwrap();
+        s.execute("file.save_as", &json!({"path":plain, "cache":false})).unwrap();
+        s.execute("file.save_as", &json!({"path":path, "cache":"store"})).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), std::fs::read(&plain).unwrap());
+        // A design with no model to keep says so, as a save into the file does.
+        let mut failing = Session::default();
+        failing.execute("solid.box", &json!({"length":20,"width":20,"height":20,"name":"Block"})).unwrap();
+        failing.execute("solid.box", &json!({"length":5,"width":5,"height":5,"corner":[0,0,15],"operation":"cut","name":"Pocket"})).unwrap();
+        failing.execute("solid.fillet", &json!({"edges":[[2.5,5,15]],"radius":1,"name":"Round"})).unwrap();
+        failing.execute("timeline.suppress", &json!({"feature":"Pocket","suppressed":true})).unwrap();
+        let warned = failing.execute("file.save", &json!({"path":dir.join("failing.sc"), "cache":"store"})).unwrap();
+        let notice = warned["cache_not_saved"].as_str().unwrap();
+        assert!(notice.starts_with("Model not kept in the model store") && notice.contains("Round"), "{notice}");
+        // Plain json can't be opened from the store: refused, nothing written.
+        let json_path = dir.join("plate.json");
+        let refused = s.execute("file.save_as", &json!({"path":json_path, "cache":"store"})).unwrap_err().to_string();
+        assert!(refused.contains("container"), "{refused}");
+        assert!(!json_path.exists());
         use_store(false);
         let _ = std::fs::remove_dir_all(dir);
     }

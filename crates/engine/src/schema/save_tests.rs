@@ -88,6 +88,8 @@ fn the_schemas_take_what_the_handlers_read() {
             (json!({"format": "xml"}), false),
             (json!({"compression": "max"}), false),
             (json!({"cache": 1}), false),
+            (json!({"cache": "store"}), true),
+            (json!({"cache": "disk"}), false),
             (json!({"path": 1}), false),
         ],
     );
@@ -118,7 +120,8 @@ fn save_as_path_schema_is_pinned() {
 fn the_check_names_what_is_wrong() {
     let issues = |id: &str, p: Value| crate::schema::issues(id, &p).into_iter().map(|i| i.message).collect::<Vec<_>>();
     assert_eq!(issues("file.save", json!({"overwite": true})), ["unknown key `overwite`; did you mean `overwrite`?"]);
-    assert_eq!(issues("file.save_as", json!({"path": "a.sc", "cache": "no"})), ["`cache` must be true or false"]);
+    assert_eq!(issues("file.save_as", json!({"path": "a.sc", "cache": "no"})), ["`cache` must be true, false or \"store\""]);
+    assert_eq!(issues("file.save", json!({"path": "a.sc", "cache": "store"})), Vec::<String>::new());
     assert_eq!(issues("file.save_as", json!({"path": " "})), ["`path` is required"]);
     assert_eq!(issues("file.save", json!({"path": "a.sc", "format": "container"})), Vec::<String>::new());
 }

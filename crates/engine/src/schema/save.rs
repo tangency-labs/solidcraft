@@ -35,6 +35,26 @@ fn path_required(schema: &mut Schema) {
     require(schema, "path");
 }
 
+/// The handler's message for a `cache` it does not take.
+pub(crate) const CACHE_MESSAGE: &str = "`cache` must be true, false or \"store\"";
+
+/// `cache` as the handler reads it: true, false or `"store"`; `null` counts as left out.
+fn cache_choice<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        v @ Value::Bool(_) => Ok(Some(v)),
+        Value::String(s) if s == "store" => Ok(Some(Value::String(s))),
+        _ => Err(D::Error::custom(whole(CACHE_MESSAGE))),
+    }
+}
+
+fn cache_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "Keep the evaluated model, so the design opens without rebuilding: true, in the file; \"store\", only in this computer's model store, so the file holds just the design (a container only); false, nowhere. Default: true. Plain json has no room for it.",
+        "anyOf": [{"type": "boolean"}, {"type": "string", "enum": ["store"]}]
+    })
+}
+
 fn format_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({"type": "string", "enum": ["container", "json"]})
 }
@@ -63,10 +83,12 @@ pub struct SaveParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "compression_schema")]
     pub compression: Option<String>,
-    /// Keep the evaluated model in the file, so the design opens without rebuilding. Default:
-    /// true. Plain json has no room for it.
-    #[serde(default)]
-    pub cache: Option<bool>,
+    /// Keep the evaluated model, so the design opens without rebuilding: true, in the file;
+    /// `"store"`, only in this computer's model store, so the file holds just the design (a
+    /// container only); false, nowhere. Default: true. Plain json has no room for it.
+    #[serde(default, deserialize_with = "cache_choice", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "cache_schema")]
+    pub cache: Option<Value>,
     /// Keep the display meshes in the file. Default: false.
     #[serde(default)]
     pub preview: Option<bool>,
@@ -107,10 +129,12 @@ pub struct SaveAsParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "compression_schema")]
     pub compression: Option<String>,
-    /// Keep the evaluated model in the file, so the design opens without rebuilding. Default:
-    /// true. Plain json has no room for it.
-    #[serde(default)]
-    pub cache: Option<bool>,
+    /// Keep the evaluated model, so the design opens without rebuilding: true, in the file;
+    /// `"store"`, only in this computer's model store, so the file holds just the design (a
+    /// container only); false, nowhere. Default: true. Plain json has no room for it.
+    #[serde(default, deserialize_with = "cache_choice", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "cache_schema")]
+    pub cache: Option<Value>,
     /// Keep the display meshes in the file. Default: false.
     #[serde(default)]
     pub preview: Option<bool>,

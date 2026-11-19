@@ -16,6 +16,11 @@ const MAX_STORED: usize = 2000;
 const PARTS: [&str; 3] = ["container.json", native_cache::ENTRIES[0], native_cache::ENTRIES[1]];
 static WRITER: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// The `document.json` of a design container, as written.
+fn document_of(container: &[u8]) -> Result<std::sync::Arc<[u8]>> {
+    Ok(PackageReader::new(Cursor::new(container))?.document(16 << 20)?)
+}
+
 /// One bounded store of saved models, keyed by the document they were evaluated for and the
 /// evaluation source, platform and kernel that computed them ([`native_cache::store_key`]).
 #[derive(Clone)]
@@ -41,17 +46,33 @@ impl ModelStore {
         if PARTS.iter().any(|part| source.index_for_name(part).is_none()) {
             return Ok(());
         }
-        let document = {
-            let mut reader = PackageReader::new(Cursor::new(container))?;
-            reader.document(16 << 20)?
-        };
-        let path = self.path(&native_cache::store_key(&document)).ok_or_else(|| invalid("model store key"))?;
         let mut entry = zip::ZipWriter::new(Cursor::new(Vec::new()));
         for part in PARTS {
             let index = source.index_for_name(part).ok_or_else(|| invalid("model store part"))?;
             entry.raw_copy_file(source.by_index_raw(index).map_err(invalid)?).map_err(invalid)?;
         }
-        let bytes = entry.finish().map_err(invalid)?.into_inner();
+        self.put(&document_of(container)?, entry.finish().map_err(invalid)?.into_inner())
+    }
+
+    /// Keep `model`, the evaluation of the design in `container` (a design container just saved,
+    /// its bytes, that holds no model of its own: `cache: "store"`), as [`Self::keep`] would have
+    /// kept it from a container that held it. Encoded as a save encodes it, within the design
+    /// file's budget.
+    pub fn keep_model(&self, container: &[u8], model: &solidcraft_doc::SavedModel) -> Result<()> {
+        let document = document_of(container)?;
+        let header = PackageReader::new(Cursor::new(container))?.limited_part(PARTS[0], 4096)?;
+        let (manifest, payload) = native_cache::encode_model(model, &document, max_design())?;
+        let mut entry = PackageWriter::new();
+        // Each part stored as a design file stores it.
+        entry.part(PARTS[0], &header, false)?;
+        entry.part(PARTS[1], &manifest, true)?;
+        entry.part(PARTS[2], &payload, true)?;
+        self.put(&document, entry.finish()?)
+    }
+
+    /// Write `bytes` as the entry of `document`'s model, evicting what must go first.
+    fn put(&self, document: &[u8], bytes: Vec<u8>) -> Result<()> {
+        let path = self.path(&native_cache::store_key(document)).ok_or_else(|| invalid("model store key"))?;
         if bytes.len() as u64 > self.budget.min(max_design() as u64) {
             return Err(invalid("model store entry size"));
         }
