@@ -801,7 +801,12 @@ pub(crate) fn offset_faces(body: &Body, picked: &[usize], distance: f64, toleran
     if distance == 0.0 {
         return taken(body, r, &picked.iter().map(|f| (*f, false)).collect::<Vec<_>>());
     }
-    let moved = picked.iter().map(|f| imp::offset_face(r, *f, distance)).collect::<Result<Vec<_>>>()?;
+    // SMLib offsets along the surface's normal, so a face the body uses from its surface's back moves the other way.
+    let sides = face_sides(r);
+    let moved = picked
+        .iter()
+        .map(|f| imp::offset_face(r, *f, if sides.get(*f).copied().unwrap_or(true) { distance } else { -distance }))
+        .collect::<Result<Vec<_>>>()?;
     let (parts, offsets) = Parts::joined(&moved.iter().collect::<Vec<_>>())?;
     let c = parts.canonical()?;
     let (result, h) = imp::stitched(&c.brep, tolerance.max(c.brep.tolerance))?;
