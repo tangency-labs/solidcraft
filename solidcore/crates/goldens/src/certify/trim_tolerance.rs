@@ -1497,6 +1497,7 @@ fn expected_units(dir: &std::path::Path) -> std::collections::BTreeSet<String> {
 #[test]
 #[ignore = "writes the main digests of the ledger; run on main's expected files"]
 fn main_expected_digests() {
+    use std::fmt::Write as _;
     let dir = std::env::var("MAIN_EXPECTED_DIR").expect("MAIN_EXPECTED_DIR");
     let sha = std::env::var("MAIN_SHA").expect("MAIN_SHA");
     let mut out = format!("# main {sha}\n");
@@ -1505,7 +1506,7 @@ fn main_expected_digests() {
             std::fs::read_to_string(std::path::Path::new(&dir).join(format!("{unit}.jsonl")))
                 .unwrap_or_else(|e| panic!("{unit}: {e}"));
         let digest = expected_digest(&text, &[], &[]).expect("main's file");
-        out.push_str(&format!("{unit}\t{digest:016x}\n"));
+        writeln!(out, "{unit}\t{digest:016x}").expect("written");
     }
     std::fs::write(
         std::env::var("MAIN_EXPECTED_OUT").expect("MAIN_EXPECTED_OUT"),
