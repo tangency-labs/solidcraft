@@ -6,7 +6,8 @@
 //! wind around a periodic surface, frames turned so a round face's form covers it once, each
 //! edge's label and NURBS form, every use's pcurve (closed forms where the geometry has them, the
 //! kernel's [`Trims`] for the rest), outer loops and face sides checked against the pcurves,
-//! tolerances raised to the gaps the geometry has, regions, and the canonical order.
+//! loops of a face that touch at one vertex made one loop, tolerances raised to the gaps the
+//! geometry has, regions, and the canonical order.
 //!
 //! A face on a surface whose record form depends on the face (a linear sweep or a revolution of
 //! a record curve, a cone that may be the plane it nearly is) gets that surface from
@@ -41,6 +42,7 @@ use crate::topology::swept::Extent;
 
 mod frames;
 pub(crate) mod seams;
+mod touching;
 mod wound;
 
 /// Most control points in one direction of a schema spline.
@@ -196,6 +198,12 @@ pub struct Assembly<'t> {
     pub(crate) lines_between_vertices: usize,
     /// Inner loops written running the way the outer loop runs, run the other way.
     pub(crate) inner_loops_turned: usize,
+    /// Loops that touched another loop of their face at one vertex, made one loop with it
+    /// (`touching::join`).
+    pub(crate) loops_joined: usize,
+    /// The faces whose loops touch and are left as written: each one's origin and the first
+    /// vertex they touch at.
+    pub(crate) loops_left_touching: Vec<(u64, P3)>,
     /// Edges added with their vertices at the other ends of their intervals, turned round
     /// ([`Assembly::add_edge`]).
     pub(crate) edges_turned: usize,
@@ -219,6 +227,8 @@ impl<'t> Assembly<'t> {
             sense_mismatches: 0,
             lines_between_vertices: 0,
             inner_loops_turned: 0,
+            loops_joined: 0,
+            loops_left_touching: Vec::new(),
             edges_turned: 0,
             splines_closed: 0,
             raised_edges: HashSet::new(),
@@ -687,6 +697,21 @@ impl<'t> Assembly<'t> {
                 self.tol
             ));
         }
+        if self.loops_joined > 0 {
+            notes.push(format!(
+                "{} loops that touch another loop of their face at one vertex (a hole that touches its face's edge) made one loop with it",
+                self.loops_joined
+            ));
+        }
+        if let Some((origin, [x, y, z])) = self.loops_left_touching.first() {
+            let more = match self.loops_left_touching.len() {
+                0 | 1 => String::new(),
+                n => format!(", and {} more faces", n - 1),
+            };
+            notes.push(format!(
+                "face #{origin}: its loops touch at ({x}, {y}, {z}) mm and are left as written{more}: they make no single loop through that point (three or more of their edges' ends meet there, or the loops touch at another point as well). A face whose loops share a vertex fails the body's check, so features on the body are refused until the loops are moved apart in the source model"
+            ));
+        }
         let flipped = turned.iter().filter(|t| **t).count();
         if flipped > 0 {
             notes.push(format!("{flipped} faces turned over: their loops disagree with their same_sense"));
@@ -1063,6 +1088,7 @@ impl<'t> Assembly<'t> {
     /// marks none (or marks one that another loop encloses), and turns the face over when its
     /// outer loop runs clockwise about the natural normal on a surface where that cannot be a
     /// face's outer boundary.
+    /// Loops that touch at one vertex are then one loop through it ([`touching::join`]).
     fn face_pcurves(&mut self, fi: usize) -> R<(Vec<Vec<Curve2>>, [[f64; 2]; 2], bool, Option<BSurface>)> {
         let face = self.faces.get(fi).ok_or("face reference")?;
         let label = face.surface.clone();
@@ -1274,6 +1300,8 @@ impl<'t> Assembly<'t> {
             face.forward = !face.forward;
         }
         let mut pcs: Vec<Vec<Curve2>> = if rerun { pcs.into_iter().map(|l| l.into_iter().rev().collect()).collect() } else { pcs };
+        // Each loop's area as it now runs.
+        let mut areas: Vec<Option<f64>> = shapes.iter().map(|a| a.map(|a| if rerun { -a } else { a })).collect();
         // An inner bound written the way the outer one runs (its FACE_BOUND orientation wrong):
         // on a face whose loops all close in (u, v), each loop but the outer runs clockwise, so
         // such a loop is run the other way. Its uses and their pcurves are the same.
@@ -1290,8 +1318,97 @@ impl<'t> Assembly<'t> {
                 if let Some(l) = pcs.get_mut(i) {
                     l.reverse();
                 }
+                if let Some(slot) = areas.get_mut(i) {
+                    *slot = Some(-a);
+                }
                 self.inner_loops_turned += 1;
             }
+        }
+        // Loops that touch at one vertex are one loop through it, where they bound one region
+        // that way ([`touching::join`]); the others are noted, with where they touch.
+        let mut starts: Vec<Vec<u32>> = Vec::new();
+        let mut places: Vec<Vec<Option<[f64; 2]>>> = Vec::new();
+        for (&p, pc) in positions.iter().zip(&pcs) {
+            let Some(Bound::Edges(es)) = face.loops.get(p) else { return Err("loop reference".into()) };
+            let mut vs = Vec::new();
+            for &(e, forward) in es {
+                let [a, z] = self.edges.get(e as usize).ok_or("edge reference")?.vertices;
+                vs.push(if forward { a } else { z });
+            }
+            starts.push(vs);
+            places.push(
+                es.iter()
+                    .zip(pc)
+                    .map(|(&(_, forward), c)| {
+                        let [a, b] = c.interval()?;
+                        solidcore_ops::pcurve::eval(c, if forward { a } else { b })
+                    })
+                    .collect(),
+            );
+        }
+        // The outer loop runs counter-clockwise and every other loop clockwise.
+        let sound: Vec<bool> = areas.iter().enumerate().map(|(i, a)| a.is_some_and(|a| if i == outer { a > 0.0 } else { a < 0.0 })).collect();
+        // Two uses that start at one vertex start at one place of (u, v), not a period apart.
+        let place = |(l, k): (usize, usize)| places.get(l).and_then(|ps| ps.get(k)).copied().flatten();
+        let same_place = |a: (usize, usize), b: (usize, usize)| {
+            let (Some(p), Some(q)) = (place(a), place(b)) else { return false };
+            natural.iter().zip(p.iter().zip(&q)).all(|(n, (x, y))| {
+                let half = match n {
+                    Natural::Periodic => 0.5 * TAU,
+                    Natural::Range(lo, hi) => 0.5 * (hi - lo),
+                };
+                (x - y).abs() < half
+            })
+        };
+        let joins = touching::join(&starts, Some(outer), &sound, &same_place);
+        if let Some(&v) = joins.left.first() {
+            let at = self.vertices.get(v as usize).ok_or("vertex reference")?.point;
+            self.loops_left_touching.push((face.origin, at));
+        }
+        if !joins.walks.is_empty() {
+            let written: Vec<Vec<(u32, bool)>> = positions
+                .iter()
+                .map(|&p| match face.loops.get(p) {
+                    Some(Bound::Edges(es)) => es.clone(),
+                    _ => Vec::new(),
+                })
+                .collect();
+            for (stay, walk) in &joins.walks {
+                let (mut uses, mut curves) = (Vec::new(), Vec::new());
+                for &(l, k) in walk {
+                    uses.push(*written.get(l).and_then(|es| es.get(k)).ok_or("edge use")?);
+                    curves.push(pcs.get(l).and_then(|pc| pc.get(k)).cloned().ok_or("pcurve")?);
+                }
+                if let Some(Bound::Edges(es)) = positions.get(*stay).and_then(|&p| face.loops.get_mut(p)) {
+                    *es = uses;
+                }
+                if let Some(pc) = pcs.get_mut(*stay) {
+                    *pc = curves;
+                }
+            }
+            // The loops now part of another leave the face, and the outer loop's index follows.
+            let gone = |i: usize| joins.gone.get(i).copied().unwrap_or(false);
+            let mut leaves = vec![false; face.loops.len()];
+            for (i, &p) in positions.iter().enumerate() {
+                if gone(i)
+                    && let Some(slot) = leaves.get_mut(p)
+                {
+                    *slot = true;
+                }
+            }
+            let outer_at = positions.get(outer).copied();
+            face.outer = outer_at.map(|o| o - leaves.iter().take(o).filter(|g| **g).count());
+            let mut at = 0;
+            face.loops.retain(|_| {
+                at += 1;
+                !leaves.get(at - 1).copied().unwrap_or(false)
+            });
+            let mut at = 0;
+            pcs.retain(|_| {
+                at += 1;
+                !gone(at - 1)
+            });
+            self.loops_joined += joins.gone.iter().filter(|g| **g).count();
         }
         let domain = face_domain(&surface, &pcs)?;
         Ok((pcs, domain, flip, if wound { None } else { form }))

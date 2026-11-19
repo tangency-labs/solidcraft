@@ -1,16 +1,16 @@
 //! Other CAD formats read through [cadmpeg](https://github.com/cadmpeg/cadmpeg): FreeCAD
-//! `.FCStd` and Rhino `.3dm`. cadmpeg decodes the file into its neutral model (CADIR). By default
+//! `.FCStd` and Rhino `.3dm`, and OpenUSD both ways ([`usd`]). cadmpeg decodes the file into its neutral model (CADIR). By default
 //! cadmpeg's STEP writer restates that as STEP, which the Import feature then reads and keeps like
 //! any STEP file ([`native_cad_to_step`]); with [`crate::StepReader::Cadmpeg`] (the Preferences
 //! switch "Import with cadmpeg", off by default) the model is read straight into B-rep records
 //! ([`cadir_records`]) and the Import feature keeps those records, with no STEP text in between.
 //!
 //! Only codecs for open formats are compiled in (the workspace enables cadmpeg-registry's
-//! `fcstd`, `rhino` and `step` features alone). cadmpeg's codecs for commercial formats, and its
+//! `fcstd`, `rhino`, `step` and `usd` features alone). cadmpeg's codecs for commercial formats, and its
 //! `sat` codec (a ShapeManager stream decoder that reads ACIS as one dialect), are not built.
 //!
-//! This module is the importer seam: the one place cadmpeg is called, returning the STEP text or
-//! the records plus warnings. A cadmpeg-based STEP reader could be added here later and chosen by a setting, to
+//! This module is the cadmpeg seam: the one place cadmpeg is called, returning the STEP text, the
+//! records or the OpenUSD bytes plus warnings. A cadmpeg-based STEP reader could be added here later and chosen by a setting, to
 //! compare with our own STEP reader, without changing that reader.
 
 /// File extensions read through cadmpeg (lower case).
@@ -303,6 +303,31 @@ impl<'a> Looks<'a> {
 mod design;
 pub use design::NativeDesign;
 
+mod usd;
+pub use usd::{USD_EXTS, is_usd_path};
+
+/// `step` (STEP text SolidCraft wrote for the bodies to export) as an OpenUSD file called `file`:
+/// `.usda` text, `.usdc` or `.usd` binary, or a `.usdz` package. Returns the file's bytes and what
+/// it could not carry. Panics inside cadmpeg become errors.
+pub fn usd_from_step(step: &[u8], file: &str) -> Result<(Vec<u8>, Vec<String>), String> {
+    solidcraft_kernel::guard("cadmpeg USD export", || usd::from_step(step, file).map_err(solidcraft_kernel::KernelError::Invalid)).map_err(
+        |e| match e {
+            solidcraft_kernel::KernelError::Invalid(m) => m,
+            e => e.to_string(),
+        },
+    )
+}
+
+/// An OpenUSD file (`file` is its name) read for a mesh import: each mesh a mesh body, the prim
+/// tree a component plan and the materials the bodies' looks, as a glTF file is read
+/// ([`crate::read_gltf`]); and whether the file says Y is up. Panics inside cadmpeg become errors.
+pub fn read_usd(bytes: &[u8], file: &str) -> crate::Result<(crate::GltfImport, bool)> {
+    solidcraft_kernel::guard("cadmpeg USD import", || usd::read(bytes, file).map_err(solidcraft_kernel::KernelError::Invalid)).map_err(|e| match e {
+        solidcraft_kernel::KernelError::Invalid(m) => crate::IoError::Invalid(m),
+        e => crate::IoError::Invalid(e.to_string()),
+    })
+}
+
 pub(crate) use convert::step_route::hidden_items;
 pub use convert::step_route::native_cad_to_step;
 
@@ -376,7 +401,7 @@ mod convert {
             .ok_or_else(|| format!("{name}: unrecognised file contents"))?;
         let format = codec.id().as_str().to_string();
         if !accepted.contains(&format.as_str()) {
-            return Err(format!("{name}: {format} files are not supported (FreeCAD .FCStd and Rhino .3dm only)"));
+            return Err(format!("{name}: {format} files are not supported here"));
         }
 
         // Decode in memory under the caps, at the depth the caller chose: the records read the
