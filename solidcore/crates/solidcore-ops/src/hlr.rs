@@ -332,3 +332,81 @@ pub fn silhouettes(
             .collect(),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solidcore_record::brep::Curve;
+
+    #[test]
+    fn procedural_and_placed_records_are_not_supported_yet() {
+        let o = Options::default();
+        // A cylinder side stored as a placed revolution of its seam line, under a placement
+        // that is not rigid.
+        let (mut placed, _) = crate::body::make_cylinder([0.; 3], 4., 10.)
+            .unwrap()
+            .to_record()
+            .unwrap();
+        let side = placed
+            .faces
+            .iter_mut()
+            .find(|f| matches!(f.surface, Surface::Cylinder { .. }))
+            .unwrap();
+        let profile = Box::new(Curve::Line {
+            start: [2., 0., 0.],
+            end: [2., 0., 10.],
+        });
+        let matrix = [
+            [2., 0., 0., 0.],
+            [0., 2., 0., 0.],
+            [0., 0., 1., 0.],
+            [0., 0., 0., 1.],
+        ];
+        side.surface = Surface::PlacedRevolution {
+            profile,
+            origin: [0.; 3],
+            axis: [0., 0., 1.],
+            matrix,
+            forward: true,
+        };
+        assert!(matches!(
+            prepare(&placed, &o),
+            Err(HlrError::Unsupported("placed revolution surface"))
+        ));
+        // A box edge stored as the meeting of the planes y = 0 and z = 0, traced from a leader.
+        let (mut traced, _) = crate::body::make_box([0.; 3], [1.; 3])
+            .unwrap()
+            .to_record()
+            .unwrap();
+        let on_x = |p: &[f64; 3]| p[1] == 0. && p[2] == 0.;
+        let edge = traced
+            .edges
+            .iter_mut()
+            .find(|e| matches!(&e.curve, Curve::Line { start, end } if on_x(start) && on_x(end)))
+            .unwrap();
+        let y0 = Box::new(Surface::Plane {
+            origin: [0.; 3],
+            u_axis: [1., 0., 0.],
+            v_axis: [0., 0., 1.],
+        });
+        let z0 = Box::new(Surface::Plane {
+            origin: [0.; 3],
+            u_axis: [1., 0., 0.],
+            v_axis: [0., 1., 0.],
+        });
+        let leader = Box::new(Curve::Polyline {
+            points: vec![[0.; 3], [1., 0., 0.]],
+        });
+        edge.curve = Curve::SurfaceIntersection {
+            surfaces: [y0, z0],
+            leader,
+            tolerance: 1e-6,
+        };
+        // No NURBS form to follow: a traced edge is drawn from its leader.
+        edge.nurbs = None;
+        assert!(matches!(
+            prepare(&traced, &o),
+            Err(HlrError::Unsupported("surface intersection curve"))
+        ));
+    }
+}

@@ -2927,3 +2927,6 @@ fn slab(p: Vec3, d: Vec3, lo: Vec3, hi: Vec3) -> Option<[f64; 2]> {
     }
     (t1 >= t0.max(0.)).then_some([t0.max(0.), t1])
 }
+
+#[cfg(test)]
+mod tests;

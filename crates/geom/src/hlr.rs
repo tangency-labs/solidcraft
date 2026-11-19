@@ -3,7 +3,3 @@
 //! `docs/drawing-hlr.md` for the contract and its measured limits.
 
 pub use solidcore_ops::hlr::*;
-
-#[cfg(test)]
-#[path = "hlr_tests.rs"]
-mod tests;
