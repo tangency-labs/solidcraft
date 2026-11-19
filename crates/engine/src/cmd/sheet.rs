@@ -1230,7 +1230,7 @@ struct Stock {
     finish: String,
 }
 
-fn stock(s: &Session, sk: &solidcraft_doc::SurfaceSheet) -> Stock {
+fn stock_of(s: &Session, sk: &solidcraft_doc::SurfaceSheet) -> Stock {
     let rule = s.doc.sheet_rule(Some(&sk.rule));
     let (vals, _) = s.doc.param_values();
     let tolerance = s.doc.rule_values(&vals, &rule).map_or(0.0, |v| v.thickness_tolerance);
@@ -1382,7 +1382,7 @@ fn flat_pattern(s: &mut Session, p: &Value) -> Result<Value> {
 pub(crate) fn flat_reply(s: &Session, body: Option<&str>, cmd: &str) -> Result<Value> {
     let sk = surfaces_named(s, body, cmd)?;
     sk.flat_matches_body()?;
-    Ok(surface_flat_json(&sk, &stock(s, &sk)))
+    Ok(surface_flat_json(&sk, &stock_of(s, &sk)))
 }
 
 /// How the flat DXF writes the curves that are neither lines nor circular arcs.
@@ -1477,7 +1477,7 @@ fn bend_note(b: &solidcraft_doc::sheet::BendInfo, height: f64, display: sheet::A
 /// outline, so a program that follows the file's order cuts inside-out. Free-form curves as
 /// `o.curves` says.
 fn surface_dxf(s: &Session, sk: &solidcraft_doc::SurfaceSheet, o: &DxfOptions) -> Result<String> {
-    let stock = stock(s, sk);
+    let stock = stock_of(s, sk);
     // A perforation field's holes are laid out on the front's flat, and turned over with it.
     let front = sk.shown();
     let turn = |c: Vec2| if stock.face == sheet::FinishedFace::Back { Vec2::new(-c.x, c.y) } else { c };
@@ -1822,10 +1822,10 @@ fn export_bend_table(s: &mut Session, p: &Value) -> Result<Value> {
     let format = str_(p, "format").map_or(Some(BendTableFormat::Csv), bend_table_format).ok_or_else(|| bad(cmd, "`format` must be csv or json"))?;
     let sk = surfaces_of(s, p, cmd)?;
     sk.flat_matches_body()?;
-    let stock = stock(s, &sk);
+    let stock = stock_of(s, &sk);
     let bends = sk.shown_from(stock.face).bend_infos();
     let text = if format == BendTableFormat::Json {
-        serde_json::to_string_pretty(&surface_flat_json(&sk, &stock(s, &sk))).map_err(|e| EngineError::Other(e.to_string()))?
+        serde_json::to_string_pretty(&surface_flat_json(&sk, &stock)).map_err(|e| EngineError::Other(e.to_string()))?
     } else {
         // Always quote text fields: body/rule names may include commas, quotes or newlines, or start
         // as a spreadsheet formula does.
