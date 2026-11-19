@@ -2,7 +2,7 @@
 //! thread's groove cut along a helix.
 
 use super::*;
-use crate::thread_forms::{SteepFlank, ThreadForm, ThreadHand, ThreadTip};
+use crate::thread_forms::{SteepFlank, ThreadForm, ThreadHand, ThreadPoint, ThreadPointDepth, ThreadTip};
 
 /// A cosmetic thread: on which cylinder, its size, and the threaded part of the axis.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -54,6 +54,11 @@ pub fn suggested_thread_in(st: &ModelState, p: Vec3, form: ThreadForm) -> Result
     thread_on(st, 0, p, &ThreadAsk { form: Some(form), ..Default::default() }).map(|t| t.info.designation)
 }
 
+/// A designation for a modeled thread, including one cut into a cone.
+pub fn suggested_modeled_thread_in(st: &ModelState, p: Vec3, form: ThreadForm) -> Result<String> {
+    thread_on(st, 0, p, &ThreadAsk { form: Some(form), allow_cone: true, ..Default::default() }).map(|t| t.info.designation)
+}
+
 /// How far a thread runs along its face.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) enum Extent {
@@ -83,6 +88,9 @@ pub(super) struct ThreadAsk<'a> {
     pub from: Option<Vec3>,
     /// A modelled thread needs to know how each of its ends meets the face's ends.
     pub modeled: bool,
+    pub allow_cone: bool,
+    pub point: ThreadPoint,
+    pub point_depth: ThreadPointDepth,
     /// The runout at the end away from where the thread starts, as (mm, pitches): its length
     /// is mm + pitches x the pitch. The start never fades: it runs off its free end.
     pub ease_out: (f64, f64),
@@ -129,6 +137,17 @@ pub(super) struct ThreadOn {
     /// A shoulder keeps the square stop because the kernel couldn't check whether it stays beyond
     /// the face's end.
     shoulder_unchecked: bool,
+    cone: Option<ConeThread>,
+}
+
+/// The conical part in the thread's axial coordinates. For a followed point the join
+/// is one end of the cylinder. For a directly picked cone it is the wider end.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ConeThread {
+    wide: f64,
+    small: f64,
+    slope: f64,
+    point_depth: Option<ThreadPointDepth>,
 }
 
 /// The free-end test of a face's two ends (`side` 0 at its start, 1 at its end), each made
@@ -196,10 +215,8 @@ pub(super) fn thread_on(st: &ModelState, feature: u64, p: Vec3, ask: &ThreadAsk)
 /// coordinates, so two parts built alike (two screws of one size) each have a face at the same
 /// point, and without this the second part's thread went on the first part's body.
 pub(super) fn thread_on_in(st: &ModelState, feature: u64, component: Option<u64>, p: Vec3, ask: &ThreadAsk) -> Result<ThreadOn> {
-    // The component's own bodies are searched first; the others only when none of its own has
-    // a face there (each body searched is tessellated).
     let own = |b: &ModelBody| component.is_some_and(|c| b.component == c);
-    let search = |want_own: bool| -> Vec<(usize, kernel::CylinderFace)> {
+    let search = |want_own: bool| {
         st.bodies
             .iter()
             .enumerate()
@@ -207,22 +224,36 @@ pub(super) fn thread_on_in(st: &ModelState, feature: u64, component: Option<u64>
             .filter_map(|(i, b)| {
                 #[cfg(test)]
                 super::cost_tests::count(|c| c.cylinder_search += 1);
-                kernel::cylinder_face_at(&b.body, p).map(|c| (i, c))
+                if ask.allow_cone || ask.point == ThreadPoint::Follow {
+                    let (dist, face) = kernel::thread_face_at(&b.body, p)?;
+                    return Some((dist, i, face.axis, Some(face)));
+                }
+                let cyl = kernel::cylinder_face_at(&b.body, p)?;
+                let v = p - cyl.axis_point;
+                let dist = ((v - cyl.axis * v.dot(cyl.axis)).len() - cyl.radius).abs();
+                Some((dist, i, cyl, None))
             })
-            .collect()
+            .min_by(|a, b| a.0.total_cmp(&b.0))
     };
-    let mut found = search(true);
-    if found.is_empty() {
-        found = search(false);
-    }
-    let (bi, cyl) = found
-        .into_iter()
-        .min_by(|a, b| {
-            let dist = |c: &kernel::CylinderFace| ((p - c.axis_point - c.axis * (p - c.axis_point).dot(c.axis)).len() - c.radius).abs();
-            dist(&a.1).total_cmp(&dist(&b.1))
-        })
-        .ok_or_else(|| DocError::Invalid("no cylindrical face there to thread".into()))?;
+    let (_, bi, cyl, face) = search(true).or_else(|| search(false)).ok_or_else(|| {
+        DocError::Invalid(
+            if ask.allow_cone { "no cylindrical or conical face there to thread" } else { "no cylindrical face there to thread" }.into(),
+        )
+    })?;
     let mb = st.bodies.get(bi).ok_or_else(|| DocError::Invalid("threaded body".into()))?;
+    let direct = face.filter(|f| f.slope.abs() * (cyl.end - cyl.start) > (mb.body.size() * 1e-7).max(1e-7));
+    let cone = if ask.point == ThreadPoint::Follow {
+        let face = face
+            .filter(|_| direct.is_none() && !cyl.internal)
+            .ok_or_else(|| DocError::Invalid("following a screw point requires the outside cylindrical face of its shank".into()))?;
+        let (side, small, slope) = kernel::thread_point(&mb.body, face, ask.from)?;
+        Some(ConeThread { wide: if side == 0 { cyl.start } else { cyl.end }, small, slope, point_depth: Some(ask.point_depth) })
+    } else {
+        direct.map(|face| {
+            let (wide, small) = if face.slope < 0.0 { (cyl.start, cyl.end) } else { (cyl.end, cyl.start) };
+            ConeThread { wide, small, slope: face.slope, point_depth: None }
+        })
+    };
     let dia = cyl.radius * 2.0;
     let form = match (ask.form, ask.designation.and_then(ThreadForm::of_designation)) {
         (Some(f), _) | (None, Some(f)) => f,
@@ -230,6 +261,9 @@ pub(super) fn thread_on_in(st: &ModelState, feature: u64, component: Option<u64>
     };
     if let Some(why) = form.refused() {
         return Err(DocError::Invalid(why.into()));
+    }
+    if cone.is_some() && (cyl.internal || form.is_taper()) {
+        return Err(DocError::Invalid("a conical face needs an external thread with a non-tapered thread form".into()));
     }
     let starts = ask.starts.max(1);
     if starts > 8 {
@@ -329,7 +363,12 @@ pub(super) fn thread_on_in(st: &ModelState, feature: u64, component: Option<u64>
         }
         Ok((a, b))
     };
-    let from_side = |ends: &mut FaceEnds| start_side(ends, ask.from.map(along), along(p));
+    let cone_side = cone.map(|c| usize::from(c.wide == hi));
+    let from_side = |ends: &mut FaceEnds| match cone_side {
+        Some(side) => Ok(side),
+        None => start_side(ends, ask.from.map(along), along(p)),
+    };
+    let whole_side = || cone_side.unwrap_or_else(|| ask.from.map(|q| usize::from((along(q) - lo).abs() > (hi - along(q)).abs())).unwrap_or(0));
     // An external taper thread runs its standard length (ISO 7-1's useful thread, NPT's
     // effective thread L2) unless told otherwise; an internal one the face, as a tapped hole.
     let extent = match (ask.extent, form.is_taper() && !cyl.internal) {
@@ -337,14 +376,14 @@ pub(super) fn thread_on_in(st: &ModelState, feature: u64, component: Option<u64>
         (e, _) => e,
     };
     let (a, b, side) = match extent {
-        Extent::Full => (lo, hi, ask.from.map(|q| usize::from((along(q) - lo).abs() > (hi - along(q)).abs())).unwrap_or(0)),
+        Extent::Full => (lo, hi, whole_side()),
         Extent::Length(l) => {
             if !(l > 0.0) {
                 return Err(DocError::Invalid("thread length must be positive".into()));
             }
             if l >= hi - lo - pitch * 1e-3 {
                 // As long as the face (or longer): it runs the whole face from either end.
-                (lo, hi, ask.from.map(|q| usize::from((along(q) - lo).abs() > (hi - along(q)).abs())).unwrap_or(0))
+                (lo, hi, whole_side())
             } else {
                 let side = from_side(&mut ends)?;
                 let (a, b) = span(side, if side == 0 { lo + l } else { hi - l })?;
@@ -380,7 +419,9 @@ pub(super) fn thread_on_in(st: &ModelState, feature: u64, component: Option<u64>
     // A shoulder whose check the kernel couldn't make keeps the square stop, and the feature says so.
     let mut unchecked = false;
     let mut kind = |at: f64, side: usize| -> Result<End> {
-        Ok(if !ask.modeled || !near(at, side) {
+        Ok(if cone.is_some_and(|c| c.point_depth.is_none()) || cone_side == Some(side) {
+            End::Shoulder
+        } else if !ask.modeled || !near(at, side) {
             End::Inside
         } else if !ends.free(side)? {
             let at_end = (if side == 0 { at - lo } else { hi - at }) < pitch * 1e-3;
@@ -429,7 +470,7 @@ pub(super) fn thread_on_in(st: &ModelState, feature: u64, component: Option<u64>
         .then(|| form.groove(major, pitch, true))
         .filter(|g| !(g.root_r - cyl.radius >= g.basic_depth / 4.0))
         .map(|g| g.crest_r);
-    Ok(ThreadOn { info, cyl, ends, steep: ask.steep, ease, from: side, narrow, shoulder_unchecked: unchecked })
+    Ok(ThreadOn { info, cyl, ends, steep: ask.steep, ease, from: side, narrow, shoulder_unchecked: unchecked, cone })
 }
 
 /// The end of the face (0: its start, 1: its end) a thread of limited length starts at: the end
@@ -792,6 +833,8 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         starts,
         ease_out,
         tip,
+        point,
+        point_depth,
         chamfer_angle,
         chamfer_depth,
         steep_flank,
@@ -805,8 +848,9 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
     };
     let targets = super::thread_target_bodies(doc, st, &f.kind)?;
     if additional_faces.len() >= 1024 {
-        return Err(DocError::Invalid("a Thread feature takes at most 1024 cylindrical faces".into()));
+        return Err(DocError::Invalid("a Thread feature takes at most 1024 faces".into()));
     }
+    point.validate(*modeled, *tip).map_err(|why| DocError::Invalid(why.into()))?;
     if *tip != ThreadTip::None && !*modeled {
         return Err(DocError::Invalid("a chamfered tip is cut only on a modelled thread".into()));
     }
@@ -827,6 +871,9 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         extent,
         from: from.map(|q| q.0),
         modeled: *modeled,
+        allow_cone: *modeled,
+        point: *point,
+        point_depth: *point_depth,
         ease_out: (0.0, 0.0),
         tapped: false,
         old_auto_size: *old_auto_size,
@@ -847,8 +894,11 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             &*st
         };
         let on = thread_on_in(input, f.id, Some(f.component), face.0, &ask)?;
+        if on.cone.is_some() && *tip != ThreadTip::None {
+            return Err(DocError::Invalid("a conical thread cannot also chamfer the tip".into()));
+        }
         // Resolve against the starting model, before a modelled thread removes a picked surface.
-        if !selected.iter().any(|old| old.info.body == on.info.body && old.cyl == on.cyl) {
+        if !selected.iter().any(|old| old.info.body == on.info.body && old.cyl == on.cyl && old.cone == on.cone) {
             selected.push(on);
         }
     }
@@ -932,10 +982,326 @@ fn groove_tool(
     Ok(tool)
 }
 
+/// One axial interval with a straight root in the meridian plane.
+#[derive(Clone, Copy)]
+struct RootSpan {
+    low: f64,
+    high: f64,
+    root_low: f64,
+    root_high: f64,
+}
+
+impl RootSpan {
+    fn new(a: (f64, f64), b: (f64, f64)) -> Self {
+        let ((low, root_low), (high, root_high)) = if a.0 < b.0 { (a, b) } else { (b, a) };
+        Self { low, high, root_low, root_high }
+    }
+}
+
+/// Smooth a corner in a radial law as it reaches a constant value. The
+/// value at the corner is exact. The excess is under 9% of the blend width.
+fn point_rim_blend(at: f64, rim: f64, width: f64) -> f64 {
+    if at <= rim - width || at >= rim + width {
+        return at.min(rim);
+    }
+    let t = (at - rim + width) / (2.0 * width);
+    at - width * t * t + 4.0 * width * (t * (1.0 - t)).powi(2)
+}
+
+/// One cross-section of a groove. Keep the standard crest opening as the
+/// groove shallows and bring the root flat out to meet the flanks.
+fn point_groove_section(root: f64, outer: f64, low: [f64; 2], high: [f64; 2]) -> solidcore_record::Loop2 {
+    use solidcore_record::{Loop2, Seg2};
+    let flank = |radius: [f64; 2], angle: [f64; 2]| {
+        let [a, b] = angle.map(|a| Vec2::new(a.cos(), a.sin()));
+        let [r, s] = radius;
+        let tangent = |u: Vec2, r| u * (s - radius[0]) + Vec2::new(-u.y, u.x) * (r * (angle[1] - angle[0]));
+        Seg2::Cubic { p0: a * r, p1: a * r + tangent(a, r) / 3.0, p2: b * s - tangent(b, s) / 3.0, p3: b * s }
+    };
+    let arc = |radius, start, end: f64| Seg2::Arc { center: Vec2::ZERO, radius, start, sweep: end - start };
+    let spiral = |r: [f64; 2], a: [f64; 2]| {
+        (0..5).map(move |i| {
+            let lerp = |pair: [f64; 2], i| pair[0] + (pair[1] - pair[0]) * (f64::from(i) / 5.0);
+            flank([lerp(r, i), lerp(r, i + 1)], [lerp(a, i), lerp(a, i + 1)])
+        })
+    };
+    let [lo_root, lo_outer] = low.map(|a| -a);
+    let [hi_root, hi_outer] = high;
+    Loop2 {
+        segs: spiral([root, outer], [lo_root, lo_outer])
+            .chain([arc(outer, lo_outer, 0.0), arc(outer, 0.0, hi_outer)])
+            .chain(spiral([outer, root], [hi_outer, hi_root]))
+            .chain([arc(root, hi_root, 0.0), arc(root, 0.0, lo_root)])
+            .collect(),
+    }
+}
+
+/// At a sharp point a full-size meridian cutter would pass through the axis.
+/// Build the groove from sections normal to the axis instead. Each tooth
+/// keeps its angular opening as its radial height approaches zero.
+fn sharp_point_grooves(
+    t: &ThreadInfo,
+    cone: ConeThread,
+    radius: f64,
+    (depth, flat, flank_lo, flank_hi): (f64, f64, f64, f64),
+    shank: &[RootSpan],
+    end: End,
+) -> Result<Vec<Body>> {
+    let invalid = |reason: &str| DocError::Invalid(reason.into());
+    let [fixed, rest @ ..] = shank else {
+        return Err(invalid("the screw needs a shank to follow its point"));
+    };
+    let tip = cone.small;
+    let height = (cone.wide - tip).abs();
+    let dir = (cone.wide - tip).signum();
+    let along = |span: &RootSpan| (if dir > 0.0 { span.high } else { span.low } - tip) * dir;
+    let fixed_end = along(fixed);
+    let end_at = rest.first().map_or(fixed_end, along);
+    let (pitch, starts) = (t.pitch, t.starts.max(1));
+    let lead = pitch * f64::from(starts);
+    // Keep the end of the ruled apex cap large enough for its trimmed
+    // faces to tessellate on fine pitches as well.
+    let first = (0.012 * pitch).max(0.015);
+    let finish = end_at + if end == End::Free { 0.016 * pitch } else { 0.0 };
+    if height <= first || finish <= height || (finish - first) / lead > 190.0 || radius <= depth {
+        return Err(invalid("the screw point or its thread length does not fit a sharp-point groove"));
+    }
+    let steps = |a: f64, b: f64| (((b - a) / lead * 24.0).ceil() as u32).max(3);
+    let stations = |a, b, first_index| {
+        let count = steps(a, b);
+        (first_index..=count).map(move |i| a + (b - a) * f64::from(i) / f64::from(count))
+    };
+    let k = *t.axis;
+    let x = k.cross(if k.x.abs() < 0.9 { Vec3::X } else { Vec3::Y }).normalized().ok_or_else(|| invalid("thread axis"))?;
+    let y = k.cross(x);
+    let axis_at = |z| t.axis_point + t.axis * z;
+    let span = (0.12 * pitch).min(height * 0.25);
+    let hands: &[f64] = match t.hand {
+        ThreadHand::Right => &[1.0],
+        ThreadHand::Left => &[-1.0],
+        ThreadHand::Both => &[1.0, -1.0],
+    };
+    let scale = std::f64::consts::TAU / lead;
+    let mut tools = Vec::new();
+    for &hand in hands {
+        let (lo, hi) = if hand > 0.0 { (flank_hi.tan(), flank_lo.tan()) } else { (flank_lo.tan(), flank_hi.tan()) };
+        let clearance = ((0.98 * pitch - 2.0 * flat) / (lo + hi) - depth).min(0.045 * pitch);
+        for start in 0..starts {
+            let sections = stations(first, height, 0)
+                .chain(stations(height, if rest.is_empty() { finish } else { fixed_end }, 1))
+                .chain(rest.iter().flat_map(|_| stations(fixed_end, finish, 1)))
+                .map(|h| {
+                    let z = tip + dir * h;
+                    let phase = scale * (hand * (z - cone.wide) + f64::from(start) * pitch);
+                    let u = x * phase.cos() + y * phase.sin();
+                    let fraction = point_rim_blend(h, height, span) / height;
+                    let stock = radius * fraction;
+                    let d = depth * fraction;
+                    let runout = if rest.is_empty() {
+                        1.0
+                    } else {
+                        let length = end_at - fixed_end;
+                        let fade = h - point_rim_blend(h, fixed_end, (0.12 * pitch).min(length * 0.25));
+                        (1.0 - fade / length).clamp(0.0, 1.0)
+                    };
+                    // The overrun outside the crest does not cut the part. It tapers
+                    // with the radius so the whole section fits onto the apex.
+                    let overshoot = clearance * (1.0 - (-10.0 * d).exp());
+                    let extents = |tan| [(flat + (depth * runout - d * runout) * tan) * scale, (flat + (depth * runout + overshoot) * tan) * scale];
+                    let section = point_groove_section(stock - d * runout, stock + overshoot, extents(lo), extents(hi));
+                    (Plane { origin: axis_at(z), x: u, y: k.cross(u) }, section)
+                })
+                .collect::<Vec<_>>();
+            tools.push(kernel::loft_aligned_to_point(&sections, axis_at(tip))?);
+        }
+    }
+    Ok(tools)
+}
+
+fn conical_groove_tools(
+    t: &ThreadInfo,
+    cyl: kernel::CylinderFace,
+    cone: ConeThread,
+    ends: [End; 2],
+    steep: SteepFlank,
+    ease: [f64; 2],
+    continuous_flanks: bool,
+) -> Result<Vec<Body>> {
+    let invalid = |reason: &str| DocError::Invalid(reason.into());
+    let pitch = t.pitch;
+    let lead = pitch * f64::from(t.starts.max(1));
+    let profile = t.form.groove(t.major_diameter, pitch, false);
+    let depth = profile.crest_r - profile.root_r;
+    let (mut flank_lo, mut flank_hi) = (profile.flank_lo, profile.flank_hi);
+    if steep == SteepFlank::Start {
+        std::mem::swap(&mut flank_lo, &mut flank_hi);
+    }
+    let limiting_flank = if cone.slope < 0.0 { flank_lo } else { flank_hi };
+    let limit = std::f64::consts::FRAC_PI_2 - limiting_flank;
+    if cone.slope.abs().atan() >= limit {
+        return Err(DocError::Invalid(format!(
+            "the cone is too steep for this thread's flanks: its half-angle must be below {:.2}°",
+            limit.to_degrees()
+        )));
+    }
+    let (flat, margin) = (profile.width(pitch, profile.root_r) / 2.0, 0.025 * pitch);
+    let outer = depth + margin;
+    let (left, right) = (flat + outer * flank_lo.tan(), flat + outer * flank_hi.tan());
+    if !(pitch > 1e-3 && depth > 0.0 && flat > 0.0 && left + right < pitch * 0.98) {
+        return Err(invalid("the thread profile does not fit between its turns on this cone"));
+    }
+    let r = |z: f64| cyl.radius + (z - cone.wide) * cone.slope;
+    let mut spans = Vec::new();
+    let shank_root = cyl.radius - depth;
+    if cone.point_depth.is_some() {
+        // A limited shank thread starts at the cone's rim and runs into the shank.
+        let (other, end, runout, clear) = if cone.wide == t.start { (t.end, ends[1], ease[1], right) } else { (t.start, ends[0], ease[0], left) };
+        let dir = (other - cone.wide).signum();
+        let physical_end = if dir > 0.0 { cyl.end } else { cyl.start };
+        let end_at = if end == End::Closed { other - dir * clear } else { other };
+        if (end_at - cone.wide) * dir <= 0.0 {
+            return Err(invalid("the shank thread is too short between the point and shoulder"));
+        }
+        spans.push(RootSpan::new((cone.wide, shank_root), (end_at, shank_root)));
+        if runout > 0.0 {
+            let runout_end = if end == End::Closed || end == End::Free { runout.min((physical_end - end_at).abs()) } else { runout };
+            if runout_end > 0.0 {
+                spans.push(RootSpan::new((end_at, shank_root), (end_at + dir * runout_end, cyl.radius)));
+            }
+        }
+    }
+    let (base, tip) = if cone.point_depth.is_some() {
+        (cone.wide, cone.small)
+    } else if cone.slope < 0.0 {
+        (t.start, t.end)
+    } else {
+        (t.end, t.start)
+    };
+    let slope = cone.slope.abs();
+    let width = left + right;
+    // The cutter has to collapse to the pole with the stock. A truncated
+    // point can use the radial sweep and revolved root instead.
+    let sharp = cone.point_depth == Some(ThreadPointDepth::Fade) && r(tip).abs() <= 1e-6;
+    let exact_root = cone.point_depth.is_some();
+    if sharp {
+        let end = if cone.wide == t.start { ends[1] } else { ends[0] };
+        return sharp_point_grooves(t, cone, cyl.radius, (depth, flat, flank_lo, flank_hi), &spans, end);
+    } else if cone.point_depth == Some(ThreadPointDepth::Fade) {
+        let root = r(base) - depth;
+        if !(root > 0.0) {
+            return Err(invalid("there is not enough material around the shank's axis for the thread"));
+        }
+        spans.push(RootSpan::new((base, root), (tip, r(tip))));
+    } else {
+        let margin = if cone.point_depth.is_some() { 2e-6 } else { slope * width + 2e-6 };
+        if r(tip) - depth <= margin {
+            return Err(invalid(if cone.point_depth.is_some() {
+                "the full groove depth would reach the screw point's axis; choose a shallower thread or fade the point depth"
+            } else {
+                "the full groove depth would reach the cone's axis; shorten the thread or choose a shallower thread"
+            }));
+        }
+        spans.push(RootSpan::new((base, r(base) - depth), (tip, r(tip) - depth)));
+    }
+    spans.sort_by(|a, b| a.low.total_cmp(&b.low));
+    let (Some(first), Some(last)) = (spans.first(), spans.last()) else {
+        return Err(invalid("the thread is too short"));
+    };
+    if (last.high - first.low) / lead > 190.0 {
+        return Err(invalid("a modelled thread is limited to 190 turns"));
+    }
+
+    let (begin, finish) = (first.low - right - 0.001 * pitch, last.high + left + 0.001 * pitch);
+    let turns = (finish - begin) / lead;
+    let slope_of = |s: &RootSpan| (s.root_high - s.root_low) / (s.high - s.low);
+    let bite = 1.02 * spans.iter().map(|span| slope_of(span).abs()).fold(slope, f64::max) * flat + 0.001 * pitch;
+    // The outer profile sets the crest width. Follow the same envelope as a
+    // full-depth cutter when it clears the axis, then protect the shallow root
+    // with the core below. Lifting the cutter as the depth fades would close
+    // the groove at the surface and leave a broad, flat crest.
+    let keep_crest = cone.point_depth == Some(ThreadPointDepth::Fade) && r(tip) - depth > bite;
+    let tool_root = |z, root: f64| if keep_crest && z == tip { r(z) - depth } else { root.max(2e-6) };
+    let (root, shear, law) = if cone.point_depth.is_some() {
+        // One continuous sweep for the shank and point. Its root follows the
+        // piecewise-linear radius at the centre of the profile's root flat.
+        // Hold the law outside the part so the cutter stays clear of the axis.
+        let root = tool_root(first.low, first.root_low);
+        let law = std::iter::once((0.0, 0.0))
+            .chain(std::iter::once(((first.low - begin) / lead, 0.0)))
+            .chain(spans.iter().map(|span| ((span.high - begin) / lead, tool_root(span.high, span.root_high) - root)))
+            .chain(std::iter::once((turns, tool_root(last.high, last.root_high) - root)))
+            .collect::<Vec<_>>();
+        (root, 0.0, law)
+    } else {
+        let slope = slope_of(first);
+        let root = first.root_low + slope * (begin - first.low);
+        // For a cone alone the same shear everywhere keeps R(z) - depth
+        // across the whole root flat, in addition to its centre.
+        (root, slope, vec![(0.0, 0.0), (turns, slope * (finish - begin))])
+    };
+    // The radial law places the profile's centre. Across its flat, the
+    // local radius may vary with the axial offset. Allow the cutter to
+    // reach farther in there, then let the core set the exact root.
+    let mut meridian = Vec::new();
+    if exact_root {
+        meridian.push((-flat, -bite));
+    }
+    meridian.extend([(-flat, 0.0), (-left, outer)]);
+    if cone.point_depth.is_some() {
+        // The wider side of the stock can be farther out than the radius at the
+        // centre of the profile. Keep both outer corners above the surface,
+        // without making the cutter wider than a pitch.
+        let clear = outer + cone.slope.abs() * left.max(right);
+        meridian.extend([(-left, clear), (right, clear)]);
+    }
+    meridian.extend([(right, outer), (flat, 0.0)]);
+    if exact_root {
+        meridian.push((flat, -bite));
+    }
+    let section = meridian.into_iter().map(|(z, offset)| Vec2::new(root + shear * z + offset, z)).collect::<Vec<_>>();
+    let region = Region2 { outer: solidcore_record::Loop2::polygon(&section), holes: Vec::new() };
+    let k = *t.axis;
+    let u = k.cross(if k.x.abs() < 0.9 { Vec3::X } else { Vec3::Y }).normalized().ok_or_else(|| invalid("thread axis"))?;
+    let hands: &[f64] = match t.hand {
+        ThreadHand::Right => &[1.0],
+        ThreadHand::Left => &[-1.0],
+        ThreadHand::Both => &[1.0, -1.0],
+    };
+    let count = t.starts.max(1);
+    let axis_point = t.axis_point + k * begin;
+    let mut tools = Vec::new();
+    for &hand in hands {
+        for start in 0..count {
+            let phase = std::f64::consts::TAU * (hand * (begin - cone.wide) / lead + f64::from(start) / f64::from(count));
+            let x = u * phase.cos() + k.cross(u) * phase.sin();
+            let plane = Plane { origin: axis_point, x, y: k };
+            let tool = kernel::sweep_helix_radial(&plane, &region, axis_point, k * hand, lead * hand, turns, &law, continuous_flanks)?;
+            tools.push(trim_at_shoulders(tool, t.axis_point, [End::Shoulder; 2], (first.low, last.high), t.axis)?);
+        }
+    }
+    let tool = if let [tool] = tools.as_slice() { tool.clone() } else { kernel::union_all(&tools.iter().collect::<Vec<_>>())? };
+    if !exact_root {
+        return Ok(vec![tool]);
+    }
+    let lo = begin - pitch;
+    let hi = finish + pitch;
+    let profile = [Vec2::new(0.0, lo), Vec2::new(first.root_low, lo), Vec2::new(first.root_low, first.low)]
+        .into_iter()
+        .chain(spans.iter().map(|span| Vec2::new(span.root_high, span.high)))
+        .chain([Vec2::new(last.root_high, hi), Vec2::new(0.0, hi)])
+        .collect::<Vec<_>>();
+    let section = Region2 { outer: solidcore_record::Loop2::polygon(&profile), holes: Vec::new() };
+    let plane = Plane { origin: t.axis_point, x: u, y: k };
+    let core = kernel::revolve(&plane, &[section], Vec2::ZERO, Vec2::new(0.0, 1.0), std::f64::consts::TAU)?
+        .pop()
+        .ok_or_else(|| invalid("the thread's root has no volume"))?;
+    Ok(vec![kernel::boolean(&tool, &core, BoolOp::Cut)?.ok_or_else(|| invalid("the thread's groove is empty"))?])
+}
+
 /// Separate external grooves on one body can share its cut and its final validity check.
 /// Unsupported or overlapping tool sets retain the ordinary per-face cutter.
 fn cut_grouped(st: &ModelState, selected: &[ThreadOn], continuous_flanks: bool) -> Result<Option<ModelState>> {
-    if selected.iter().any(|on| on.info.internal || on.info.form.is_taper() || on.narrow.is_some() || on.shoulder_unchecked) {
+    if selected.iter().any(|on| on.info.internal || on.info.form.is_taper() || on.narrow.is_some() || on.shoulder_unchecked || on.cone.is_some()) {
         return Ok(None);
     }
     let mut groups: BTreeMap<&str, Vec<&ThreadOn>> = BTreeMap::new();
@@ -989,7 +1355,7 @@ fn cut_with_flanks(
     (tip, angle, depth): (ThreadTip, Option<f64>, Option<f64>),
     continuous_flanks: bool,
 ) -> Result<Option<String>> {
-    let ThreadOn { info: t, cyl, ends, steep, ease, from: from_side, narrow, shoulder_unchecked } = on;
+    let ThreadOn { info: t, cyl, ends, steep, ease, from: from_side, narrow, shoulder_unchecked, cone } = on;
     let i = st.bodies.iter().position(|b| b.name == t.body).ok_or_else(|| DocError::Invalid("threaded body".into()))?;
     let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
     let (mut input, radius) = (mb.traced(), cyl.radius);
@@ -1057,29 +1423,34 @@ fn cut_with_flanks(
     if continuous_flanks {
         input = chamfer(input)?;
     }
-    let cut_grooves = |ends: [End; 2]| -> Result<(Option<Body>, Body, Option<Body>)> {
-        let tool = groove_tool(&t, cyl, ends, steep, ease, groove_radius, taper, continuous_flanks)?;
-        #[cfg(test)]
-        super::cost_tests::count(|c| c.thread_cuts += 1);
-        let cut = kernel::boolean(&input.body, &tool, BoolOp::Cut)?;
+    let cut_grooves = |ends: [End; 2]| -> Result<(Traced, Option<Body>)> {
+        let tools = match cone {
+            Some(cone) => conical_groove_tools(&t, cyl, cone, ends, steep, ease, continuous_flanks)?,
+            None => vec![groove_tool(&t, cyl, ends, steep, ease, groove_radius, taper, continuous_flanks)?],
+        };
+        let mut cut = input.clone();
+        for tool in tools {
+            #[cfg(test)]
+            super::cost_tests::count(|c| c.thread_cuts += 1);
+            let body = kernel::boolean(&cut.body, &tool, BoolOp::Cut)?.ok_or_else(|| DocError::Invalid("the thread removed everything".into()))?;
+            let groove = crate::lineage::Lineage::unnamed(&tool);
+            let lineage = cut.lineage.and_then(|l| crate::lineage::Lineage::step(&body, &[&l, &groove]));
+            cut = Traced { body, lineage, recipe: None };
+        }
         // Now rather than at the feature's end, where it could only fail the feature.
         let checked = if ends.contains(&End::Shoulder) {
-            if let Some(body) = &cut {
-                super::check_feature_body(body)?;
-                Some(body.clone())
-            } else {
-                None
-            }
+            super::check_feature_body(&cut.body)?;
+            Some(cut.body.clone())
         } else {
             None
         };
-        Ok((cut, tool, checked))
+        Ok((cut, checked))
     };
     // A design that built with the square stop keeps building: where the kernel can't make the
     // trimmed cut, the groove stops clear of the shoulder as it did, and the feature says so.
     let mut made = cut_grooves(ends);
     let mut square_stop = shoulder_unchecked;
-    if matches!(made, Err(DocError::Kernel(_))) && ends.contains(&End::Shoulder) {
+    if cone.is_none() && matches!(made, Err(DocError::Kernel(_))) && ends.contains(&End::Shoulder) {
         made = cut_grooves(ends.map(|e| if e == End::Shoulder { End::Closed } else { e }));
         square_stop = true;
     }
@@ -1089,12 +1460,7 @@ fn cut_with_flanks(
             t.designation
         )
     });
-    let (nb, groove_tool, checked) = made?;
-    let nb = nb.ok_or_else(|| DocError::Invalid("the thread removed everything".into()))?;
-    // The groove's faces have no role to name them by.
-    let groove = crate::lineage::Lineage::unnamed(&groove_tool);
-    let lineage = input.lineage.and_then(|l| crate::lineage::Lineage::step(&nb, &[&l, &groove]));
-    let nb = Traced { body: nb, lineage, recipe: None };
+    let (nb, checked) = made?;
     let nb = if continuous_flanks { nb } else { chamfer(nb)? };
     if let Some(slot) = st.bodies.get_mut(i) {
         // A later tip boolean needs its own check; the unmodified shoulder cut already passed.
@@ -1215,6 +1581,9 @@ mod tests {
             extent: Extent::Full,
             from: None,
             modeled: true,
+            allow_cone: false,
+            point: ThreadPoint::None,
+            point_depth: ThreadPointDepth::Fade,
             ease_out: (0.0, 0.0),
             tapped: false,
             old_auto_size: false,

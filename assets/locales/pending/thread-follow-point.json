@@ -1,0 +1,74 @@
+{
+  "en": {
+    "thread.follow_point": "Follow point",
+    "thread.modeled_face": "Cylinder or cone",
+    "thread.pick_point_end": "Pick the rim where the shank meets the point to follow",
+    "thread.point": "Point",
+    "thread.point_depth": "Point depth",
+    "thread.point_full_depth": "Full depth",
+    "thread.select_modeled_face": "Select a cylindrical or conical face first"
+  },
+  "ar": {
+    "thread.follow_point": "متابعة الطرف المدبب",
+    "thread.modeled_face": "أسطوانة أو مخروط",
+    "thread.pick_point_end": "حدد الحافة التي يلتقي فيها الساق بالطرف المدبب المطلوب تتبعه",
+    "thread.point": "الطرف المدبب",
+    "thread.point_depth": "العمق عند الطرف",
+    "thread.point_full_depth": "العمق الكامل",
+    "thread.select_modeled_face": "حدد وجهاً أسطوانياً أو مخروطياً أولاً"
+  },
+  "de": {
+    "thread.follow_point": "Spitze folgen",
+    "thread.modeled_face": "Zylinder oder Kegel",
+    "thread.pick_point_end": "Wählen Sie die Kante zwischen dem Schaft und der gewünschten Spitze aus",
+    "thread.point": "Spitze",
+    "thread.point_depth": "Tiefe an der Spitze",
+    "thread.point_full_depth": "Volle Tiefe",
+    "thread.select_modeled_face": "Wählen Sie zuerst eine Zylinder- oder Kegelfläche aus"
+  },
+  "he": {
+    "thread.follow_point": "המשך לאורך החוד",
+    "thread.modeled_face": "גליל או חרוט",
+    "thread.pick_point_end": "יש לבחור את השפה שבה קנה הבורג פוגש את החוד הרצוי",
+    "thread.point": "חוד",
+    "thread.point_depth": "עומק בחוד",
+    "thread.point_full_depth": "עומק מלא",
+    "thread.select_modeled_face": "יש לבחור תחילה פאה גלילית או חרוטית"
+  },
+  "ja": {
+    "thread.follow_point": "先端に沿わせる",
+    "thread.modeled_face": "円筒または円すい",
+    "thread.pick_point_end": "軸部と、ねじを沿わせたい先端が接する縁を選択します",
+    "thread.point": "先端",
+    "thread.point_depth": "先端の深さ",
+    "thread.point_full_depth": "全深さ",
+    "thread.select_modeled_face": "先に円筒面または円すい面を選択してください"
+  },
+  "ko": {
+    "thread.follow_point": "뾰족한 끝 따라가기",
+    "thread.modeled_face": "원통 또는 원뿔",
+    "thread.pick_point_end": "몸통과 따라갈 끝부분이 만나는 모서리를 선택하세요",
+    "thread.point": "뾰족한 끝",
+    "thread.point_depth": "끝부분 깊이",
+    "thread.point_full_depth": "전체 깊이",
+    "thread.select_modeled_face": "먼저 원통면 또는 원뿔면을 선택하세요"
+  },
+  "vi": {
+    "thread.follow_point": "Theo đầu nhọn",
+    "thread.modeled_face": "Trụ hoặc côn",
+    "thread.pick_point_end": "Chọn mép nơi thân vít tiếp giáp với đầu nhọn cần theo",
+    "thread.point": "Đầu nhọn",
+    "thread.point_depth": "Độ sâu ở đầu nhọn",
+    "thread.point_full_depth": "Đủ độ sâu",
+    "thread.select_modeled_face": "Trước tiên hãy chọn một mặt trụ hoặc mặt côn"
+  },
+  "zh": {
+    "thread.follow_point": "沿尖端延伸",
+    "thread.modeled_face": "圆柱或圆锥",
+    "thread.pick_point_end": "选择螺杆与要延伸螺纹的尖端相接的边缘",
+    "thread.point": "尖端",
+    "thread.point_depth": "尖端深度",
+    "thread.point_full_depth": "完整深度",
+    "thread.select_modeled_face": "请先选择圆柱面或圆锥面"
+  }
+}

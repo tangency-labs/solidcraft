@@ -1429,7 +1429,8 @@ impl Dialog {
             return;
         }
         *of = picks.to_vec();
-        *suggested = crate::dialogs_thread::suggested(s, picks, options);
+        let modeled = self.extra.get("modeled").and_then(Value::as_bool).unwrap_or(false);
+        *suggested = crate::dialogs_thread::suggested(s, picks, options, modeled);
         *filled = if suggested.is_some() { None } else { crate::dialogs_thread::large_size(s, picks, options) };
         *designation = suggested.clone().or_else(|| filled.clone()).unwrap_or_default();
     }
@@ -6640,6 +6641,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             ("solid.offset_face", with_single_body(json!({"faces": face_points(0)}), sels(d, 0)))
         }
         Kind::Thread { designation, length, suggested, options, .. } => {
+            if sels(d, 0).is_empty() && d.extra.get("modeled").and_then(Value::as_bool) == Some(true) {
+                return Err(solidcraft_ui_text::tr("thread.select_modeled_face").to_string());
+            }
             need(0, "a cylindrical face")?;
             let mut common = Value::Object(d.extra.clone());
             if let Some(params) = common.as_object_mut() {

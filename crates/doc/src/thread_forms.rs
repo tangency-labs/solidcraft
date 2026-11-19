@@ -73,6 +73,37 @@ pub enum ThreadTip {
     Both,
 }
 
+/// How a modeled external thread meets the point next to its shank.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ThreadPoint {
+    #[default]
+    None,
+    Follow,
+}
+
+impl ThreadPoint {
+    /// Whether the options can be used together, independent of the picked face.
+    pub fn validate(self, modeled: bool, tip: ThreadTip) -> Result<(), &'static str> {
+        match (self, modeled, tip) {
+            (Self::Follow, false, _) => Err("`point: follow` requires a modeled thread"),
+            (Self::Follow, true, ThreadTip::Start | ThreadTip::Both) => Err("`point: follow` cannot be combined with a chamfered `tip`"),
+            _ => Ok(()),
+        }
+    }
+}
+
+/// How deep the thread cuts on a followed point.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ThreadPointDepth {
+    /// Keep the full depth where the core permits and fade out at the small end.
+    #[default]
+    Fade,
+    /// Keep the full depth along the point.
+    Full,
+}
+
 /// For `skip_serializing_if`: a field at its default is left out of the saved document.
 pub fn is_default<T: Default + PartialEq>(t: &T) -> bool {
     *t == T::default()

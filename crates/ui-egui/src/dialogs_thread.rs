@@ -1,11 +1,11 @@
-//! The thread dialog: form, size, hand, starts, extent, runouts, tip and the modelled option of
+//! The thread dialog: form, size, hand, starts, extent, runouts, tip and point options of
 //! `solid.thread`. Choices only build the command's parameters: the command checks the geometry
 //! and its error text is what the dialog shows. Browsing choices does not edit the model or
 //! freeze an automatic feature. Sizes, designations and the face's size come from the document's
 //! thread forms ([`ThreadForm`]).
 
 use serde_json::{Value, json};
-use solidcraft_engine::doc::thread_forms::{SteepFlank, ThreadForm, ThreadHand, ThreadTip};
+use solidcraft_engine::doc::thread_forms::{SteepFlank, ThreadForm, ThreadHand, ThreadPoint, ThreadPointDepth, ThreadTip};
 use solidcraft_engine::doc::{
     Document, Expr, Feature, FeatureKind, TappedThread, TappedThreadFamily, ThreadLimit, ThreadRunout, parse_metric_thread, parse_tapped_thread,
     tapped_thread_sizes,
@@ -234,6 +234,8 @@ const UP_TO_EXTENT: usize = 2;
 const EXTENTS: &[(&str, &str)] = &[("Full", "full"), ("Length", "length"), ("Up to", "up_to")];
 /// The thread's start, its free end: run off it plain, or chamfered (ISO 4753).
 const STARTS_AT: &[&str] = &["None", "Chamfer"];
+const POINTS: &[(&str, ThreadPoint)] = &[("None", ThreadPoint::None), ("thread.follow_point", ThreadPoint::Follow)];
+const POINT_DEPTHS: &[(&str, ThreadPointDepth)] = &[("ui.fade", ThreadPointDepth::Fade), ("thread.point_full_depth", ThreadPointDepth::Full)];
 /// The thread's inner end: a square stop (the groove ends in its own profile) or a fade
 /// (ISO 3508's runout).
 const ENDS_AT: &[&str] = &["thread.end_square", "ui.fade"];
@@ -247,7 +249,11 @@ const UP_TO_ACCEPT: Accept = FACES | PLANES;
 
 /// The selection inputs of a new thread dialog.
 pub(crate) fn inputs() -> Vec<SelInput> {
-    vec![SelInput::new("Cylindrical face", FACES, false)]
+    vec![SelInput::new(face_input(false), FACES, false)]
+}
+
+fn face_input(modeled: bool) -> &'static str {
+    if modeled { "thread.modeled_face" } else { "Cylindrical face" }
 }
 
 /// The inner end: square or a fade, the fade's typed length (empty: ISO 3508's runout, the
@@ -294,6 +300,8 @@ pub struct Options {
     pub extent: usize,
     pub ease_out: Ease,
     pub tip: ThreadTip,
+    pub point: ThreadPoint,
+    pub point_depth: ThreadPointDepth,
     pub chamfer_angle: String,
     pub chamfer_depth: String,
     pub steep_flank: SteepFlank,
@@ -308,6 +316,8 @@ impl Default for Options {
             extent: FULL,
             ease_out: Ease::default(),
             tip: ThreadTip::default(),
+            point: ThreadPoint::default(),
+            point_depth: ThreadPointDepth::default(),
             chamfer_angle: String::new(),
             chamfer_depth: String::new(),
             steep_flank: SteepFlank::default(),
@@ -317,9 +327,13 @@ impl Default for Options {
 
 impl Options {
     /// Does the thread start at one end of the face (a length or an Up To extent, a runout or a
-    /// tip)? Then the end to start from can be picked.
-    pub fn starts_at_an_end(&self) -> bool {
-        self.extent != FULL || self.ease_out.fade || self.tip != ThreadTip::None
+    /// tip)? Then the end to start from can be picked. It can also choose the cone to follow.
+    pub fn starts_at_an_end(&self, modeled: bool) -> bool {
+        self.extent != FULL || self.ease_out.fade || self.tip != ThreadTip::None || self.follows_point(modeled)
+    }
+
+    fn follows_point(&self, modeled: bool) -> bool {
+        modeled && self.point == ThreadPoint::Follow
     }
 }
 
@@ -486,20 +500,26 @@ pub(crate) fn rows(
     }
 
     crate::ui_kit::section(ui, "thread_ends", "Ends", true, |ui| {
-        // The start, a free end: plain or chamfered. A thread saved chamfered at both ends
-        // keeps that.
-        let mut chamfered = usize::from(o.tip != ThreadTip::None);
-        choice_row(ui, "Start", "thread_start", &mut chamfered, STARTS_AT);
-        o.tip = match (chamfered, o.tip) {
-            (0, _) => ThreadTip::None,
-            (_, ThreadTip::None) => ThreadTip::Start,
-            (_, kept) => kept,
-        };
-        if o.tip != ThreadTip::None {
-            enter |= hint_row(ui, "Chamfer Angle", &mut o.chamfer_angle, tr("ui.iso_4753"));
-            // ISO 4753's depth is for ISO metric threads; the other forms give theirs.
-            let depth = if f == ThreadForm::Metric { "ui.iso_4753" } else { "thread.chamfer_depth_needed" };
-            enter |= hint_row(ui, "Chamfer Depth", &mut o.chamfer_depth, tr(depth));
+        if *modeled {
+            pick(ui, "thread.point", "thread_point", &mut o.point, POINTS);
+        }
+        if o.follows_point(*modeled) {
+            pick(ui, "thread.point_depth", "thread_point_depth", &mut o.point_depth, POINT_DEPTHS);
+        } else {
+            // A thread saved chamfered at both ends keeps that.
+            let mut chamfered = usize::from(o.tip != ThreadTip::None);
+            choice_row(ui, "Start", "thread_start", &mut chamfered, STARTS_AT);
+            o.tip = match (chamfered, o.tip) {
+                (0, _) => ThreadTip::None,
+                (_, ThreadTip::None) => ThreadTip::Start,
+                (_, kept) => kept,
+            };
+            if o.tip != ThreadTip::None {
+                enter |= hint_row(ui, "Chamfer Angle", &mut o.chamfer_angle, tr("ui.iso_4753"));
+                // ISO 4753's depth is for ISO metric threads; the other forms give theirs.
+                let depth = if f == ThreadForm::Metric { "ui.iso_4753" } else { "thread.chamfer_depth_needed" };
+                enter |= hint_row(ui, "Chamfer Depth", &mut o.chamfer_depth, tr(depth));
+            }
         }
         enter |= end_rows(ui, &mut o.ease_out);
     });
@@ -589,9 +609,15 @@ fn size_rows(ui: &mut egui::Ui, f: ThreadForm, designation: &mut String, suggest
 
 /// Add the picks the options use, and take away the others: the end to start from (optional,
 /// so it does not take the next click), and the Up To place (which does).
-pub(crate) fn sync_inputs(inputs: &mut Vec<SelInput>, active: &mut usize, o: &Options) {
+pub(crate) fn sync_inputs(inputs: &mut Vec<SelInput>, active: &mut usize, o: &Options, modeled: bool) {
+    if let Some(input) = inputs.first_mut() {
+        input.label = face_input(modeled);
+    }
     let was = *active;
-    set_object_accepting(inputs, active, START_END, EDGES, o.starts_at_an_end());
+    set_object_accepting(inputs, active, START_END, EDGES, o.starts_at_an_end(modeled));
+    if let Some(input) = inputs.iter_mut().find(|input| input.label == START_END) {
+        input.tip = o.follows_point(modeled).then_some("thread.pick_point_end");
+    }
     *active = was.min(inputs.len().saturating_sub(1));
     set_object_accepting(inputs, active, UP_TO, UP_TO_ACCEPT, o.extent == UP_TO_EXTENT);
 }
@@ -627,7 +653,13 @@ pub(crate) fn put_params(p: &mut Value, length: &str, o: &Options, inputs: &[Sel
     if let Some(e) = o.ease_out.param() {
         p["ease_out"] = e;
     }
-    if o.tip != ThreadTip::None {
+    let modeled = p.get("modeled").and_then(Value::as_bool).unwrap_or(false);
+    if o.follows_point(modeled) {
+        p["point"] = json!(o.point);
+        if o.point_depth != ThreadPointDepth::default() {
+            p["point_depth"] = json!(o.point_depth);
+        }
+    } else if o.tip != ThreadTip::None {
         p["tip"] = json!(o.tip);
         put(p, &[("chamfer_angle", o.chamfer_angle.as_str()), ("chamfer_depth", o.chamfer_depth.as_str())]);
     }
@@ -645,13 +677,17 @@ fn up_to(inputs: &[SelInput]) -> Option<Value> {
 }
 
 /// The face's size in the dialog's form, for an automatic size.
-pub(crate) fn suggested(s: &Session, picks: &[Sel], o: &Options) -> Option<String> {
+pub(crate) fn suggested(s: &Session, picks: &[Sel], o: &Options, modeled: bool) -> Option<String> {
     picks.first().and_then(|sel| match sel {
         Sel::Face { body, point, .. } => {
             let world = crate::open_meshing::session_world(s);
             let mut state = solidcraft_engine::doc::ModelState::default();
             state.bodies = world.bodies.iter().filter(|candidate| candidate.name == *body).cloned().collect();
-            solidcraft_engine::doc::suggested_thread_in(&state, *point, o.form).ok()
+            if modeled {
+                solidcraft_engine::doc::suggested_modeled_thread_in(&state, *point, o.form).ok()
+            } else {
+                solidcraft_engine::doc::suggested_thread_in(&state, *point, o.form).ok()
+            }
         }
         _ => None,
     })
@@ -692,6 +728,8 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, feature: &Feature) {
         starts,
         ease_out,
         tip,
+        point,
+        point_depth,
         chamfer_angle,
         chamfer_depth,
         steep_flank,
@@ -721,6 +759,8 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, feature: &Feature) {
         },
         ease_out: Ease::of(ease_out),
         tip: *tip,
+        point: *point,
+        point_depth: *point_depth,
         chamfer_angle: chamfer_angle.as_ref().map(expr).unwrap_or_default(),
         chamfer_depth: chamfer_depth.as_ref().map(expr).unwrap_or_default(),
         steep_flank: *steep_flank,
@@ -756,7 +796,7 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, feature: &Feature) {
             .filter_map(|(slot, pick)| refill(slot, pick.0))
             .collect();
     }
-    sync_inputs(&mut d.inputs, &mut d.active, &options);
+    sync_inputs(&mut d.inputs, &mut d.active, &options, *modeled);
     // A place no pick finds again (the model changed) is still the place saved.
     let place = |sel: Option<Sel>, p| sel.unwrap_or(Sel::Vertex { body: String::new(), point: p });
     let set = |d: &mut Dialog, label: &str, sel: Sel| {

@@ -23,6 +23,153 @@ fn volume(s: &mut Session, b: &str) -> f64 {
     st.body(b).map(|mb| mb.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3)).unwrap().measure().volume).unwrap_or(0.0)
 }
 
+#[test]
+fn conical_thread_has_constant_root_depth_and_the_expected_volume() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cone", json!({"radius":4,"top_radius":2.5,"height":6,"body_name":"Cone"}));
+    let before = solidcraft_kernel::measure(&s.model.state().body("Cone").unwrap().body).unwrap().volume;
+    run(&mut s, "solid.thread", json!({"face":[3.25,0,3],"designation":"M8x1","modeled":true}));
+    let state = s.model.state();
+    let body = &state.body("Cone").unwrap().body;
+    let after = solidcraft_kernel::measure(body).unwrap().volume;
+    // ISO metric, P = 1: depth = 5H/8, root flat = P/4, flanks at 30°.
+    let depth = 5.0 * 3f64.sqrt() / 16.0;
+    let v = |z: f64, radial: f64| Vec3::new(0.0, radial, z);
+    for z in [1.0, 3.0, 5.0] {
+        let root = 4.0 - 0.25 * z - depth;
+        assert_eq!(body.classify_point(v(z, root - 0.02)).unwrap(), solidcraft_kernel::PointClass::Inside);
+        assert_eq!(body.classify_point(v(z, root + 0.02)).unwrap(), solidcraft_kernel::PointClass::Outside);
+    }
+    // At radius x out from the root, each turn removes an angular fraction
+    // w(x)/P, where w(x) = P/4 + 2x tan(30°). Integrate (root + x) w(x) over
+    // the depth; the root changes linearly, so its mean gives the total volume.
+    let mean_root = 3.25 - depth;
+    let m = 2.0 / 3f64.sqrt();
+    let expected = 6.0 * 2.0 * PI * (0.25 * (mean_root * depth + depth.powi(2) / 2.0) + m * (mean_root * depth.powi(2) / 2.0 + depth.powi(3) / 3.0));
+    assert!(((before - after) - expected).abs() < 0.05, "actual removal {}, expected {expected}", before - after);
+}
+
+#[test]
+fn conical_thread_follows_the_same_helix_across_the_shank_rim() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius":4,"height":4,"body_name":"Screw"}));
+    run(&mut s, "solid.cone", json!({"radius":4,"top_radius":1.25,"height":-8,"operation":"join","targets":["Screw"]}));
+    run(&mut s, "solid.thread", json!({"face":[4,0,2],"designation":"M8x1","modeled":true,"point":"follow","point_depth":"full","length":3}));
+    let state = s.model.state();
+    let body = &state.body("Screw").unwrap().body;
+    let depth = 5.0 * 3f64.sqrt() / 16.0;
+    for z in [-7.0_f64, -1.0, -0.03, 0.03, 1.0, 2.0] {
+        let r = 4.0 + z.min(0.0) * (2.75 / 8.0);
+        let a = std::f64::consts::TAU * z;
+        let at = |radius| Vec3::new(-a.sin() * radius, a.cos() * radius, z);
+        assert_eq!(body.classify_point(at(r - depth - 0.025)).unwrap(), solidcraft_kernel::PointClass::Inside, "z={z}");
+        assert_eq!(body.classify_point(at(r - depth + 0.025)).unwrap(), solidcraft_kernel::PointClass::Outside, "z={z}");
+    }
+    assert_eq!(body.classify_point(Vec3::new(0.0, 3.9, 3.5)).unwrap(), solidcraft_kernel::PointClass::Inside);
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    let reopened_state = reopened.model.state();
+    let reopened_body = &reopened_state.body("Screw").unwrap().body;
+    let at = Vec3::new(0.0, 4.0 - 2.75 / 8.0 - depth + 0.025, -1.0);
+    assert_eq!(reopened_body.classify_point(at).unwrap(), solidcraft_kernel::PointClass::Outside);
+}
+
+#[test]
+fn conical_thread_fades_from_the_rim_at_the_same_depth_across_the_root() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius":4,"height":3,"body_name":"Screw"}));
+    run(&mut s, "solid.cone", json!({"radius":4,"top_radius":1.25,"height":-8,"operation":"join","targets":["Screw"]}));
+    run(&mut s, "solid.thread", json!({"face":[4,0,1],"designation":"M8x1.25","modeled":true,"point":"follow"}));
+    let state = s.model.state();
+    let b = &state.body("Screw").unwrap().body;
+    let depth = 5.0 * 3f64.sqrt() / 16.0 * 1.25;
+    for z in [0.5_f64, -0.05, -2.0, -4.0, -6.0, -7.5, -7.98] {
+        let stock = 4.0 + z.min(0.0) * 2.75 / 8.0;
+        let root = stock - depth * ((z + 8.0) / 8.0).min(1.0);
+        for across in [-0.08, 0.0, 0.08] {
+            let phase = 2.0 * PI * (z / 1.25 + across);
+            let at = |r| Vec3::new(-phase.sin() * r, phase.cos() * r, z);
+            assert_eq!(b.classify_point(at(root - 0.0002)).unwrap(), solidcraft_kernel::PointClass::Inside, "z={z}, offset={across}");
+            assert_eq!(b.classify_point(at(root + 0.0002)).unwrap(), solidcraft_kernel::PointClass::Outside, "z={z}, offset={across}");
+        }
+    }
+    // At three quarters of the way down the point, the groove is shallow
+    // but still open on its flank. Moving the whole cutter outward would
+    // leave solid material here and make the crest wider.
+    let z = -6.0;
+    let radius = 4.0 + z * 2.75 / 8.0 - 0.005;
+    let at = |offset: f64| {
+        let phase = 2.0 * PI * (z / 1.25 + offset);
+        Vec3::new(-phase.sin() * radius, phase.cos() * radius, z)
+    };
+    assert_eq!(b.classify_point(at(0.28)).unwrap(), solidcraft_kernel::PointClass::Outside);
+    assert_eq!(b.classify_point(at(0.48)).unwrap(), solidcraft_kernel::PointClass::Inside);
+}
+
+#[test]
+fn conical_thread_fades_on_a_sharp_point_and_refuses_a_full_depth_there() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius":4,"height":3,"body_name":"Screw"}));
+    run(&mut s, "solid.cone", json!({"radius":4,"height":-8,"operation":"join","targets":["Screw"]}));
+    let mut params = json!({"face":[4,0,1],"designation":"M8x1.25","modeled":true,"point":"follow","point_depth":"full"});
+    let before = s.doc.to_json();
+    let err = s.execute("solid.thread", &params).unwrap_err().to_string();
+    assert!(err.contains("point's axis"), "{err}");
+    assert_eq!(s.doc.to_json(), before);
+    params["point_depth"] = json!("fade");
+    run(&mut s, "solid.thread", params);
+    let state = s.model.state();
+    let body = &state.body("Screw").unwrap().body;
+    let depth = 5.0 * 3f64.sqrt() / 16.0 * 1.25;
+    for h in [0.05_f64, 0.2, 2.0, 6.0] {
+        let z = h - 8.0;
+        let stock = h / 2.0;
+        let root = stock - depth * h / 8.0;
+        let at = |radius, offset: f64| {
+            let a = 2.0 * PI * (z / 1.25 + offset);
+            Vec3::new(-a.sin() * radius, a.cos() * radius, z)
+        };
+        assert_eq!(body.classify_point(at(root - 0.0005, 0.0)).unwrap(), solidcraft_kernel::PointClass::Inside, "h={h}");
+        assert_eq!(body.classify_point(at(root + 0.0005, 0.0)).unwrap(), solidcraft_kernel::PointClass::Outside, "h={h}");
+        assert_eq!(body.classify_point(at(stock - 0.0005, 0.40)).unwrap(), solidcraft_kernel::PointClass::Outside, "h={h}");
+        assert_eq!(body.classify_point(at(stock - 0.0005, 0.48)).unwrap(), solidcraft_kernel::PointClass::Inside, "h={h}");
+    }
+}
+
+#[test]
+fn conical_thread_sharp_point_mesh_includes_all_of_its_faces() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius":1.5,"height":3,"body_name":"Screw"}));
+    run(&mut s, "solid.cone", json!({"radius":1.5,"height":-2.4,"operation":"join","targets":["Screw"]}));
+    run(&mut s, "solid.thread", json!({"face":[1.5,0,1],"designation":"M3x0.5","modeled":true,"point":"follow"}));
+    let state = s.model.state();
+    let body = &state.body("Screw").unwrap().body;
+    assert_eq!(body.unmeshed_faces(), 0);
+}
+
+#[test]
+fn conical_thread_names_excess_taper_and_widening() {
+    let mut steep = Session::default();
+    run(&mut steep, "solid.cone", json!({"radius":4,"top_radius":2,"height":1}));
+    let error = steep.execute("solid.thread", &json!({"face":[3,0,0.5],"designation":"M8x1","modeled":true})).unwrap_err().to_string();
+    assert!(error.contains("too steep") && error.contains("60.00°"), "{error}");
+    let mut widening = Session::default();
+    run(&mut widening, "solid.cylinder", json!({"radius":4,"height":3,"body_name":"Screw"}));
+    run(&mut widening, "solid.cone", json!({"radius":4,"top_radius":5,"height":-4,"operation":"join","targets":["Screw"]}));
+    let error =
+        widening.execute("solid.thread", &json!({"face":[4,0,1],"designation":"M8x1","modeled":true,"point":"follow"})).unwrap_err().to_string();
+    assert!(error.contains("widens"), "{error}");
+}
+
+#[test]
+fn conical_thread_names_a_point_off_the_shank_axis() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius":4,"height":4,"body_name":"Screw"}));
+    // The sides intersect along a trimmed edge instead of a shared circular rim.
+    run(&mut s, "solid.cone", json!({"base":[1,0,1],"radius":4,"height":-8,"operation":"join","targets":["Screw"]}));
+    let err = s.execute("solid.thread", &json!({"face":[-4,0,3],"designation":"M8x1","modeled":true,"point":"follow"})).unwrap_err().to_string();
+    assert!(err.contains("not on the shank's axis"), "{err}");
+}
+
 const SIZES: [(f64, f64); 9] = [(3.0, 0.5), (4.0, 0.7), (5.0, 0.8), (6.0, 1.0), (8.0, 1.25), (10.0, 1.5), (12.0, 1.75), (16.0, 2.0), (20.0, 2.5)];
 
 fn assert_tapped_depth(state: &solidcraft_doc::ModelState, entry: Vec3, inward: Vec3, offset: f64, depth: f64) {
@@ -1277,6 +1424,9 @@ fn a_saved_segmented_thread_flank_pick_does_not_select_a_different_face() {
         check_picks(&reopened);
         let saved_again = solidcraft_doc::Document::from_json(&reopened.doc.to_json()).unwrap();
         assert!(matches!(saved_again.feature(2).unwrap().kind, solidcraft_doc::FeatureKind::Thread { continuous_flanks: false, .. }));
+        let saved_kind = serde_json::to_value(&saved_again.feature(2).unwrap().kind).unwrap();
+        assert!(saved_kind.get("point").is_none());
+        assert!(saved_kind.get("point_depth").is_none());
     }
 }
 
@@ -1773,6 +1923,24 @@ fn grouped_thread_faces_keep_automatic_sizes_in_one_feature_through_reopen_and_u
         assert_eq!(s.model.state().threads[0].designation, "M20");
         run(&mut s, "edit.undo", json!({}));
         check(&s);
+    }
+}
+
+#[test]
+fn point_options_are_validated_before_cutting() {
+    for level in [crate::schema::ParamCheck::Off, crate::schema::ParamCheck::Strict] {
+        let mut s = Session { param_check: level, ..Session::default() };
+        run(&mut s, "solid.cylinder", json!({"radius":4,"height":8,"body_name":"Shaft"}));
+        let before = s.doc.to_json();
+        for (modeled, tip, why) in [
+            (false, "none", "requires a modeled thread"),
+            (true, "start", "cannot be combined with a chamfered `tip`"),
+            (true, "both", "cannot be combined with a chamfered `tip`"),
+        ] {
+            let error = s.execute("solid.thread", &json!({"face":[4,0,2],"modeled":modeled,"point":"follow","tip":tip})).unwrap_err();
+            assert!(error.to_string().contains(why), "{error}");
+            assert_eq!(s.doc.to_json(), before);
+        }
     }
 }
 

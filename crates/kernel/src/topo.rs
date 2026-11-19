@@ -424,6 +424,117 @@ fn cylinder_of(faces: &Faces, face: usize) -> Option<(UnitVec3, Vec3, f64, bool)
     Some((a, *o, *r, !*convex))
 }
 
+/// A picked cylinder or cone, with the radius at the wider end and the signed change in
+/// radius per unit along its axis. A cylinder has zero slope.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ThreadFace {
+    pub index: usize,
+    pub axis: CylinderFace,
+    pub slope: f64,
+}
+
+impl ThreadFace {
+    fn of(faces: &Faces<'_>, index: usize) -> Option<Self> {
+        let (axis, axis_point, radius, internal, slope) = match faces.surf(index)? {
+            Surf::Cylinder { .. } => {
+                let (axis, origin, radius, internal) = cylinder_of(faces, index)?;
+                (axis, origin, Some(radius), internal, 0.0)
+            }
+            Surf::Cone { v, a, half, convex } => {
+                let a = a.unit()?;
+                let axis = if a.x + a.y * 1e-3 + a.z * 1e-6 < 0.0 { -a } else { a };
+                (axis, *v, None, !*convex, a.dot(*axis) * half.tan())
+            }
+            _ => return None,
+        };
+        // Round rims normal to the axis have constant axial coordinate. A generator is
+        // straight, so its end vertices give its entire axial range. Use the kernel's
+        // trimmed-face query for picking, including faces with more general trims.
+        let (start, end) = faces
+            .vertices(index)
+            .into_iter()
+            .map(|p| (p - axis_point).dot(axis))
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), z| (a.min(z), b.max(z)));
+        let wide = if slope < 0.0 { start } else { end };
+        let radius = radius.unwrap_or(wide * slope);
+        (start.is_finite() && end > start && radius.is_finite() && radius > 0.0).then_some(Self {
+            index,
+            axis: CylinderFace { axis_point, axis, radius, start, end, internal },
+            slope,
+        })
+    }
+
+    /// Evaluate the analytic radius at an axial coordinate.
+    pub fn radius_at(self, z: f64) -> f64 {
+        let wide = if self.slope < 0.0 { self.axis.start } else { self.axis.end };
+        self.axis.radius + self.slope * (z - wide)
+    }
+}
+
+/// Find the exact trimmed face under a point before deciding whether it can be threaded.
+pub fn thread_face_at(b: &Body, p: Vec3) -> Option<(f64, ThreadFace)> {
+    let (distance, index) = b.nearest_face(p)?;
+    if distance > (b.size() * 0.05).max(1e-3) {
+        return None;
+    }
+    let faces = Faces::new(b.record(), surface_tol(b));
+    Some((distance, ThreadFace::of(&faces, index)?))
+}
+
+/// A conical face across a round shank rim, reported in the shank's axial coordinates.
+/// Return the rim's side (0 for the low end), the small or far end, and its signed slope.
+pub fn thread_point(b: &Body, shank: ThreadFace, from: Option<Vec3>) -> Result<(usize, f64, f64)> {
+    let invalid = |why: &str| crate::KernelError::Invalid(why.into());
+    let c = shank.axis;
+    let tol = (b.size() * 1e-7).max(1e-7);
+    let along = |p: Vec3| (p - c.axis_point).dot(c.axis);
+    let side_of = |z: f64| usize::from((z - c.start).abs() > (z - c.end).abs());
+    let requested = from.map(|p| side_of(along(p)));
+    let faces = Faces::new(b.record(), tol);
+    let mut candidates = BTreeMap::new();
+    for e in crate::offset::face_edges(b.record(), shank.index) {
+        let Some(edge) = b.record().edges.get(e as usize) else { continue };
+        let at = edge.vertices.iter().filter_map(|&v| b.record().vertices.get(v as usize)).map(|v| along(Vec3::from(v.point)));
+        for (side, end) in [(0, c.start), (1, c.end)] {
+            if requested.is_some_and(|s| s != side) || !at.clone().any(|z| (z - end).abs() <= tol) {
+                continue;
+            }
+            for index in faces_of(edge).into_iter().filter(|&i| i != shank.index) {
+                let Some(cone) = ThreadFace::of(&faces, index).filter(|c| c.slope != 0.0) else { continue };
+                let v = cone.axis.axis_point - c.axis_point;
+                let direction = cone.axis.axis.dot(*c.axis);
+                if direction.abs() < 1.0 - 1e-9 || (v - c.axis * v.dot(c.axis)).len() > tol {
+                    return Err(invalid("the screw point is not on the shank's axis"));
+                }
+                let lo = along(cone.axis.axis_point + cone.axis.axis * cone.axis.start);
+                let hi = along(cone.axis.axis_point + cone.axis.axis * cone.axis.end);
+                let far = if side == 0 { lo.min(hi) } else { lo.max(hi) };
+                if (far - end).abs() <= tol {
+                    // A coaxial cone at the other end of this edge is not a point at this end.
+                    continue;
+                }
+                let slope = direction * cone.slope;
+                if (far - end) * slope >= 0.0 || cone.axis.internal {
+                    return Err(invalid("the screw point widens away from the shank"));
+                }
+                if (cone.radius_at((end - v.dot(c.axis)) / direction) - c.radius).abs() > tol {
+                    return Err(invalid("the screw point does not meet the shank at its radius"));
+                }
+                if let Some((other, _)) = candidates.insert(side, (far, slope))
+                    && (far - other).abs() > tol
+                {
+                    return Err(invalid("the shank end meets more than one screw point"));
+                }
+            }
+        }
+    }
+    match candidates.len() {
+        0 => Err(invalid("there is no conical screw point at the end of the shank")),
+        1 => candidates.into_iter().next().map(|(side, (far, slope))| (side, far, slope)).ok_or_else(|| invalid("no screw point")),
+        _ => Err(invalid("both ends meet a conical point: use `from` to choose an end")),
+    }
+}
+
 pub fn cylinder_face_at(b: &Body, p: Vec3) -> Option<CylinderFace> {
     let size = b.size();
     let tol = (size * 1e-3).max(1e-3);

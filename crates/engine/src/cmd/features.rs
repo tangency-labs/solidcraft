@@ -17,7 +17,7 @@ use crate::schema::features::SweepParams;
 use crate::schema::features::{
     AppliedRadius, BoundingSolidParams, BoxParams, ChamferParams, CombineParams, CombineResult, ConeParams, CylinderParams, ExtrudeParams,
     FeatureNotice, FeatureResult, FilletParams, FilletResult, MirrorParams, MoveParams, MoveResult, NoticeAction, OffsetPlaneParams, PipeParams,
-    PlaneAtAngleParams, PressPullParams, PressPullResult, RevolveParams, ScaleParams, SphereParams, TorusParams,
+    PlaneAtAngleParams, PressPullParams, PressPullResult, RevolveParams, ScaleParams, SphereParams, ThreadParams, ThreadResult, TorusParams,
 };
 use crate::schema::features::{PatternCircularParams, PatternPathParams, PatternRectangularParams, PatternResult};
 use crate::schema::split::{SplitBodyParams, SplitFaceParams};
@@ -48,6 +48,7 @@ const PATTERN_PATH_CONTRACT: TypedContract<PatternPathParams> = TypedContract::n
 const PRESS_PULL_CONTRACT: TypedContract<PressPullParams> = TypedContract::new();
 const MOVE_CONTRACT: TypedContract<MoveParams> = TypedContract::new();
 const MIRROR_CONTRACT: TypedContract<MirrorParams> = TypedContract::new();
+const THREAD_CONTRACT: TypedContract<ThreadParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.extrude", "Extrude", crate::checked!("solid.extrude", extrude))
@@ -174,10 +175,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "MODIFY")
         .icon("offset_face")
         .params("faces: [[x,y,z] points on faces (planar or curved), or face names from model.faces]; distance: expr (positive: outward); body?"),
-    CommandSpec::new("solid.thread", "Thread", thread)
+    CommandSpec::new("solid.thread", "Thread", crate::checked!("solid.thread", thread))
         .at("SOLID", "CREATE")
         .icon("thread")
-        .params("face: [x,y,z] on a cylindrical face OR faces: [{body, point:[x,y,z]}, ...] (1 to 1024 selected faces of the same component in one Thread feature; every plural face requires its body identity; exact world body names or unambiguous definition names; do not combine with face); single_face_selection?: bool (default false; true requires exactly one entry in faces and keeps single-face replacement when editing); shared options apply to every face, automatic size fits each independently; cosmetic replies include threads for faces and retain thread as the first; form?: metric|trapezoidal|acme|buttress|buttress_asme|bspp|rp|bspt|npt (default: the one `designation` names, else metric; square is refused: no current standard defines it); designation?: the size, as its standard writes it: metric \"M8\", \"M8x1\", \"M16xPh3P1.5\" (ISO 68-1, ISO 261, ISO 965-1); trapezoidal \"Tr20x4\", \"Tr40x14(P7)\" (ISO 2904, ISO 2903); buttress \"S20x4\", \"S40x14(P7)\" (DIN 513, 3°/30°); acme \"1/2-10 ACME\" (ASME B1.5); buttress_asme \"2.5-8 BUTT\" (ASME B1.9, 7°/45°, basic profile; no size table); bspp \"G 1/2\" (ISO 228-1, 55° parallel); rp \"Rp 1/2\" (ISO 7-1's parallel internal thread, 55°, an R screws into it; internal only); bspt \"R 1/2\" external, \"Rc 1/2\" internal (ISO 7-1, 55°, taper 1 in 16); npt \"1/2-14 NPT\" (ASME B1.20.1, 60°, taper 1 in 16) — a taper thread starts at a free end (the pipe end or the hole mouth) with its standard diameter there, and an external one runs its standard length unless `length` or `up_to` says otherwise (default: the standard size that fits the face, a shaft its major diameter, a hole its nominal diameter (a 12 mm hole is M12) or else the size whose tap drill it is); hand?: right|left|both (default right; both: a right- and a left-handed groove crossing); old_auto_size?: bool (an automatic size keeps the rule of designs saved before a hole was sized by its nominal diameter: a 12 mm hole is M14; set on those threads, keeps them as they were when edited); steep_flank?: start|end (buttress only, default end: the steep flank of the screw's teeth faces the thread's end, the way its axis points); starts?: 1..8 (lead = starts x pitch: that many grooves, each a turn's starts-th further round; a designation that gives the lead gives the starts); ease_out?: expr|standard|short (modelled threads: the inner end, away from where the thread starts, fades out over this length (shorter than a turn too), its section moving out of the material as it turns; standard 2.5 P, short 1.25 P per ISO 3508; it lies past the full-form length, up to a shoulder's clearance; at a free end, inside the face; without it the groove stops square there, ending in its own profile; the start never fades: it runs off its free end, plain or chamfered (`tip`)); tip?: none|start|both (modelled external threads: start chamfers the end the thread starts from, which must be free, both each free end the thread reaches, ISO 4753's chamfered end, the last teeth tapering into the cone; chamfer_angle?: angle expr to the axis, default 45 deg; chamfer_depth?: expr, radial from the major diameter, default for a metric thread down to the external minor diameter d3 = d - 1.226869 P (ISO 724), the largest ISO 4753 allows; other forms give it); extent?: full|length|up_to (default: length when `length` is given, up_to when `up_to` is, else full: the whole face); length?: expr (from the end the thread starts at); up_to?: [x,y,z] (a point, such as on a shoulder face: the thread runs to its place along the axis) | plane name or {origin, normal} (to where the plane crosses the axis); from?: [x,y,z] near the end of the face the thread starts at (default: the face's only free end, the one with no material past it; else the end the `face` point lies within a third of the face of; a pick in the middle of a face whose ends are alike is refused); modeled?: bool (default false); continuous_flanks?: bool (default true; false keeps the historical half-turn faces and groove-before-chamfer construction). Cosmetic: the model is unchanged, model.threads lists it. Modeled: cuts the thread profile into the body: past a free end the groove runs out a pitch into the air (or through a chamfer); at a shoulder, a head or a blind hole's bottom it stops with its section clear of it, never cutting into it; a hole as wide as the thread or wider is narrowed to the thread's minor diameter first, and the reply's warning says so, unless its wall is open along the thread (a cross hole, a cut through the side, a slanted end), which is refused with the drill to use; a shaft thicker than the thread is refused with the size to make it, never turned down"),
+        .contract(&THREAD_CONTRACT)
+        .output(output_schema_for::<ThreadResult>)
+        .params("face: [x,y,z] on a cylindrical face (or a conical face for a modeled thread) OR faces: [{body, point:[x,y,z]}, ...] (1 to 1024 selected faces of the same component in one Thread feature; every plural face requires its body identity; exact world body names or unambiguous definition names; do not combine with face); single_face_selection?: bool (default false; true requires exactly one entry in faces and keeps single-face replacement when editing); shared options apply to every face, automatic size fits each independently; cosmetic replies include threads for faces and retain thread as the first; form?: metric|trapezoidal|acme|buttress|buttress_asme|bspp|rp|bspt|npt (default: the one `designation` names, else metric; square is refused: no current standard defines it); designation?: the size, as its standard writes it: metric \"M8\", \"M8x1\", \"M16xPh3P1.5\" (ISO 68-1, ISO 261, ISO 965-1); trapezoidal \"Tr20x4\", \"Tr40x14(P7)\" (ISO 2904, ISO 2903); buttress \"S20x4\", \"S40x14(P7)\" (DIN 513, 3°/30°); acme \"1/2-10 ACME\" (ASME B1.5); buttress_asme \"2.5-8 BUTT\" (ASME B1.9, 7°/45°, basic profile; no size table); bspp \"G 1/2\" (ISO 228-1, 55° parallel); rp \"Rp 1/2\" (ISO 7-1's parallel internal thread, 55°, an R screws into it; internal only); bspt \"R 1/2\" external, \"Rc 1/2\" internal (ISO 7-1, 55°, taper 1 in 16); npt \"1/2-14 NPT\" (ASME B1.20.1, 60°, taper 1 in 16) — a taper thread starts at a free end (the pipe end or the hole mouth) with its standard diameter there, and an external one runs its standard length unless `length` or `up_to` says otherwise (default: the standard size that fits the face, a shaft its major diameter, a hole its nominal diameter (a 12 mm hole is M12) or else the size whose tap drill it is); hand?: right|left|both (default right; both: a right- and a left-handed groove crossing); old_auto_size?: bool (an automatic size keeps the rule of designs saved before a hole was sized by its nominal diameter: a 12 mm hole is M14; set on those threads, keeps them as they were when edited); steep_flank?: start|end (buttress only, default end: the steep flank of the screw's teeth faces the thread's end, the way its axis points); starts?: 1..8 (lead = starts x pitch: that many grooves, each a turn's starts-th further round; a designation that gives the lead gives the starts); ease_out?: expr|standard|short (modelled threads: the inner end, away from where the thread starts, fades out over this length (shorter than a turn too), its section moving out of the material as it turns; standard 2.5 P, short 1.25 P per ISO 3508; it lies past the full-form length, up to a shoulder's clearance; at a free end, inside the face; without it the groove stops square there, ending in its own profile; the start never fades: it runs off its free end, plain or chamfered (`tip`)); tip?: none|start|both (modelled external threads: start chamfers the end the thread starts from, which must be free, both each free end the thread reaches, ISO 4753's chamfered end, the last teeth tapering into the cone; chamfer_angle?: angle expr to the axis, default 45 deg; chamfer_depth?: expr, radial from the major diameter, default for a metric thread down to the external minor diameter d3 = d - 1.226869 P (ISO 724), the largest ISO 4753 allows; other forms give it); extent?: full|length|up_to (default: length when `length` is given, up_to when `up_to` is, else full: the whole face); length?: expr (from the end the thread starts at); up_to?: [x,y,z] (a point, such as on a shoulder face: the thread runs to its place along the axis) | plane name or {origin, normal} (to where the plane crosses the axis); from?: [x,y,z] near the end of the face the thread starts at (default: the face's only free end, the one with no material past it; else the end the `face` point lies within a third of the face of; a pick in the middle of a face whose ends are alike is refused); modeled?: bool (default false); point?: none|follow (default none; follow continues the modeled external groove down the narrowing coaxial cone at the end the thread starts from, and cannot be combined with a chamfered tip); point_depth?: fade|full (for a followed point: fade to zero at the small end, or keep full depth where the root stays clear of the axis; default fade); continuous_flanks?: bool (default true; false keeps the historical half-turn faces and groove-before-chamfer construction). Cosmetic: the model is unchanged, model.threads lists it. Modeled: cuts the thread profile into the body: past a free end the groove runs out a pitch into the air (or through a chamfer); at a shoulder, a head or a blind hole's bottom it stops with its section clear of it, never cutting into it; a hole as wide as the thread or wider is narrowed to the thread's minor diameter first, and the reply's warning says so, unless its wall is open along the thread (a cross hole, a cut through the side, a slanted end), which is refused with the drill to use; a shaft thicker than the thread is refused with the size to make it, never turned down"),
     CommandSpec::new("solid.shell", "Shell", shell)
         .at("SOLID", "MODIFY")
         .icon("shell")
@@ -3472,31 +3475,45 @@ const LARGEST_COARSE: f64 = 56.0;
 /// The size the Thread dialog fills in for a cylinder past the coarse table (`M150x4` for a Ø150
 /// shaft), where automatic sizing has none to give. `None` for any other face.
 pub fn large_thread_size(st: &solidcraft_doc::ModelState, face: Vec3) -> Option<String> {
-    beyond_coarse_sizes(st, face)?.2.into_iter().next()
+    beyond_coarse_sizes(st, face, false)?.2.into_iter().next()
 }
 
 /// The refusal for automatic sizing on a cylinder too big for the coarse table (a Ø75 shaft):
 /// `None` when sizing finds a thread, or the cylinder is not past the table's end (the feature's
 /// own error then explains). It suggests sizes with a pitch to type, scaled to the diameter.
-fn beyond_coarse_range(st: &solidcraft_doc::ModelState, face: Vec3) -> Option<String> {
-    let (dia, kind, sizes) = beyond_coarse_sizes(st, face)?;
+fn beyond_coarse_range(st: &solidcraft_doc::ModelState, face: Vec3, modeled: bool) -> Option<String> {
+    let (dia, kind, sizes) = beyond_coarse_sizes(st, face, modeled)?;
     Some(format!(
         "a {dia:.2} mm {kind} is beyond the coarse thread range (up to M{LARGEST_COARSE}): type a size with its pitch, e.g. {}",
         sizes.join(" or ")
     ))
 }
 
-/// The diameter, kind (`cylinder` or `hole`) and sizes with a pitch for a cylinder past the coarse
-/// table, `None` when sizing finds a thread or the cylinder is not past the table's end.
-fn beyond_coarse_sizes(st: &solidcraft_doc::ModelState, face: Vec3) -> Option<(f64, &'static str, Vec<String>)> {
-    if solidcraft_doc::suggested_thread(st, face).is_ok() {
+/// The diameter, kind and sizes with a pitch for a face past the coarse table. `None` when
+/// sizing finds a thread or the face is not past the table's end.
+fn beyond_coarse_sizes(st: &solidcraft_doc::ModelState, face: Vec3, modeled: bool) -> Option<(f64, &'static str, Vec<String>)> {
+    let suggested = if modeled {
+        solidcraft_doc::suggested_modeled_thread_in(st, face, solidcraft_doc::thread_forms::ThreadForm::Metric)
+    } else {
+        solidcraft_doc::suggested_thread(st, face)
+    };
+    if suggested.is_ok() {
         return None;
     }
-    let cyl = st.bodies.iter().filter_map(|b| solidcraft_doc::kernel::cylinder_face_at(&b.body, face)).min_by(|a, b| {
-        let dist =
-            |c: &solidcraft_doc::kernel::CylinderFace| ((face - c.axis_point - c.axis * (face - c.axis_point).dot(c.axis)).len() - c.radius).abs();
-        dist(a).total_cmp(&dist(b))
-    })?;
+    let (cyl, conical) = if modeled {
+        let (_, picked) =
+            st.bodies.iter().filter_map(|b| solidcraft_doc::kernel::thread_face_at(&b.body, face)).min_by(|a, b| a.0.total_cmp(&b.0))?;
+        (picked.axis, picked.slope != 0.0)
+    } else {
+        let cyl = st.bodies.iter().filter_map(|b| solidcraft_doc::kernel::cylinder_face_at(&b.body, face)).min_by(|a, b| {
+            let dist = |c: &solidcraft_doc::kernel::CylinderFace| {
+                let v = face - c.axis_point;
+                ((v - c.axis * v.dot(c.axis)).len() - c.radius).abs()
+            };
+            dist(a).total_cmp(&dist(b))
+        })?;
+        (cyl, false)
+    };
     let dia = cyl.radius * 2.0;
     if !dia.is_finite() || dia <= LARGEST_COARSE * 0.9 || dia > 1e4 {
         return None;
@@ -3507,7 +3524,17 @@ fn beyond_coarse_sizes(st: &solidcraft_doc::ModelState, face: Vec3) -> Option<(f
     let first = PITCHES.iter().position(|p| *p <= dia / 25.0 + 1e-6).unwrap_or(PITCHES.len() - 1);
     let sizes: Vec<String> =
         PITCHES.iter().skip(first).take(2).map(|p| format!("M{}x{p}", if cyl.internal { dia + p } else { dia }.round())).collect();
-    Some((dia, if cyl.internal { "hole" } else { "cylinder" }, sizes))
+    Some((
+        dia,
+        if cyl.internal {
+            "hole"
+        } else if conical {
+            "cone"
+        } else {
+            "cylinder"
+        },
+        sizes,
+    ))
 }
 
 fn hole(s: &mut Session, p: &Value) -> Result<Value> {
@@ -4275,6 +4302,8 @@ fn loft(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn thread(s: &mut Session, p: &Value) -> Result<Value> {
+    use solidcraft_doc::thread_forms::{SteepFlank, ThreadForm, ThreadHand, ThreadPoint, ThreadPointDepth, ThreadTip};
+
     let cmd = "solid.thread";
     let grouped = p.get("faces").is_some();
     let single_face_selection = match p.get("single_face_selection") {
@@ -4290,17 +4319,17 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
         let values = value
             .as_array()
             .filter(|values| !values.is_empty() && values.len() <= 1024)
-            .ok_or_else(|| bad(cmd, "`faces` must contain between 1 and 1024 points on cylindrical faces"))?;
+            .ok_or_else(|| bad(cmd, "`faces` must contain between 1 and 1024 face picks"))?;
         let mut faces = Vec::with_capacity(values.len());
         for value in values {
-            let face = point(value).ok_or_else(|| bad(cmd, "`faces` must be finite points [x, y, z] on cylindrical faces"))?;
+            let face = point(value).ok_or_else(|| bad(cmd, "`faces` must contain finite points [x, y, z]"))?;
             faces.push(face);
         }
         faces
     } else {
-        vec![p.get("face").and_then(point).ok_or_else(|| bad(cmd, "`face` must be a point [x, y, z] on a cylindrical face"))?]
+        vec![p.get("face").and_then(point).ok_or_else(|| bad(cmd, "`face` must be a point [x, y, z]"))?]
     };
-    let (face, additional_faces) = faces.split_first().ok_or_else(|| bad(cmd, "pick a cylindrical face to thread"))?;
+    let (face, additional_faces) = faces.split_first().ok_or_else(|| bad(cmd, "pick a face to thread"))?;
     if single_face_selection && (!grouped || !additional_faces.is_empty()) {
         return Err(bad(cmd, "`single_face_selection` requires exactly one body-qualified entry in `faces`"));
     }
@@ -4326,7 +4355,6 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
             target_bodies.push(body.name.clone().into());
         }
     }
-    use solidcraft_doc::thread_forms::{SteepFlank, ThreadForm, ThreadHand, ThreadTip};
     let designation = str_(p, "designation").map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
     let form = match str_(p, "form") {
         Some(f) => ThreadForm::from_name(f).ok_or_else(|| {
@@ -4365,6 +4393,16 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
         Some("chamfer") => return Err(bad(cmd, "tip `chamfer` is now `both` (every free end) or `start` (the end the thread starts from)")),
         Some(t) => return Err(bad(cmd, format!("unknown tip `{t}` (none, start or both)"))),
     };
+    let modeled = p.get("modeled").and_then(Value::as_bool).unwrap_or(false);
+    let point = match p.get("point") {
+        None => ThreadPoint::default(),
+        Some(value) => serde::Deserialize::deserialize(value).map_err(|_| bad(cmd, "`point` must be `none` or `follow`"))?,
+    };
+    let point_depth = match p.get("point_depth") {
+        None => ThreadPointDepth::default(),
+        Some(value) => serde::Deserialize::deserialize(value).map_err(|_| bad(cmd, "`point_depth` must be `fade` or `full`"))?,
+    };
+    point.validate(modeled, tip).map_err(|why| bad(cmd, why))?;
     let angled = |key: &str, kind: Kind| -> Result<Option<solidcraft_doc::Expr>> {
         let e = expr(p, key);
         if let Some(e) = &e {
@@ -4407,7 +4445,6 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
         None | Some(Value::Null) => None,
         Some(v) => Some(Position(vec3(v).ok_or_else(|| bad(cmd, "`from` must be a point [x, y, z] near the end the thread starts at"))?)),
     };
-    let modeled = p.get("modeled").and_then(Value::as_bool).unwrap_or(false);
     // The coarse metric range bounds only a metric thread with no designation given.
     if designation.is_none() && form == ThreadForm::Metric {
         let state = s.model.state();
@@ -4423,7 +4460,7 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
             } else {
                 &*state
             };
-            if let Some(msg) = beyond_coarse_range(input, *face) {
+            if let Some(msg) = beyond_coarse_range(input, *face, modeled) {
                 return Err(bad(cmd, msg));
             }
         }
@@ -4447,6 +4484,8 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
         starts,
         ease_out,
         tip,
+        point,
+        point_depth,
         chamfer_angle,
         chamfer_depth,
         steep_flank,

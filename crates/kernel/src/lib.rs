@@ -197,7 +197,7 @@ pub use fair::{
     fair_faces, fair_net, fair_nurbs_curve, fair_nurbs_surface, fair_surface,
 };
 pub use fill::{PATCH_ANGLE_TOL_DEG, PatchReport, PatchSpec, patch_edges_crowned, patch_edges_report, patch_edges_with};
-pub use helix::{loft_to_point, sweep_helix, sweep_helix_mesh, sweep_helix_radial};
+pub use helix::{loft_aligned_to_point, loft_to_point, sweep_helix, sweep_helix_mesh, sweep_helix_radial};
 pub use iges_in::{MAX_IGES_BYTES, iges_import, iges_to_step};
 pub use iges_out::iges_export_bodies;
 pub use intersection::{MeetingEdge, meeting_edges};
@@ -247,7 +247,7 @@ pub use surfaces::{
     stitch, sweep_sheet, sweep_sheet_point_path_with, sweep_sheet_points, sweep_sheet_points_with, sweep_sheet_with, thicken, unstitch,
 };
 pub use sweep_path::{RailFit, SweepControl, SweepOrientation, sweep_path, sweep_path_with};
-pub use topo::{CylinderFace, cylinder_end_at, cylinder_face, cylinder_face_at, material_in_ring};
+pub use topo::{CylinderFace, ThreadFace, cylinder_end_at, cylinder_face, cylinder_face_at, material_in_ring, thread_face_at, thread_point};
 pub use topo::{TopoCounts, merged_topology, seam_flags, whole_edge};
 pub use tspline::tspline_sheet;
 pub use validation::{CheckFailure, FailedTest, KeptCheck, Validation, check_kept, detach_kept, failing_check, validating};

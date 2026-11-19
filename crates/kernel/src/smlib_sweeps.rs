@@ -79,8 +79,8 @@ pub(crate) struct Draft {
 }
 
 pub(crate) use imp::{
-    body_from_record, curve, extrude, extrude_drafted_with_holes, face_section, loft, loft_curves, loft_to_point, path_curve, project_onto_face,
-    rail_curves, revolve, screw, screw_radial, sphere, sweep, sweep_controlled,
+    body_from_record, curve, extrude, extrude_drafted_with_holes, face_section, loft, loft_aligned_to_point, loft_curves, loft_to_point, path_curve,
+    project_onto_face, rail_curves, revolve, screw, screw_radial, sphere, sweep, sweep_controlled,
 };
 
 /// `parts` joined in order in a balanced tree: each part with its neighbour, then each pair with
@@ -2228,6 +2228,15 @@ mod imp {
             _ => 3,
         };
         loft_through(sections, first, &curves, degree)
+    }
+
+    pub(crate) fn loft_aligned_to_point(sections: &[(Plane, Loop2)], apex: Vec3) -> Result<Body> {
+        let curves =
+            sections.iter().map(|(plane, lp)| lp.segs.iter().map(|seg| curve(plane, seg)).collect::<Result<Vec<_>>>()).collect::<Result<Vec<_>>>()?;
+        let section = curves.first().ok_or_else(|| KernelError::Invalid("a pointed loft needs sections".into()))?;
+        let loft = body_of(Brep::loft(&curves, 3, true).map_err(|e| failed("pointed loft", e))?, "pointed loft")?;
+        let cap = body_of(Brep::loft_to_point(section, p(apex)).map_err(|e| failed("pointed loft cap", e))?, "pointed loft cap")?;
+        crate::boolean(&loft, &cap, crate::BoolOp::Union)?.ok_or_else(|| KernelError::Failed("a pointed loft has no volume".into()))
     }
 
     /// The loft skinned through `curves` (the sections', or with stations between them), `degree`

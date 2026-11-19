@@ -324,7 +324,7 @@ fn a_saved_thread_reopens_with_every_option() {
         (
             json!({"designation":"S20x4","steep_flank":"start","hand":"left","starts":2,"length":"12 mm","from":[10,0,20],"modeled":true,
                 "ease_out":"1 mm","tip":"start","chamfer_angle":"30 deg","chamfer_depth":"0.5 mm"}),
-            vec!["Cylindrical face", START_END],
+            vec!["thread.modeled_face", START_END],
         ),
         (json!({"designation":"M20","from":[10,0,20],"up_to":[10,0,5]}), vec!["Cylindrical face", START_END, UP_TO]),
         (json!({"designation":"M20","up_to":"XY","from":[10,0,20]}), vec!["Cylindrical face", START_END, UP_TO]),
@@ -483,7 +483,7 @@ fn thread_box_selection_keeps_one_face_until_explicit_add() {
         // Start/Up To inputs keep their existing single-selection contract.
         let Kind::Thread { options, .. } = &mut d.kind else { panic!("Thread") };
         options.extent = UP_TO_EXTENT;
-        sync_inputs(&mut d.inputs, &mut d.active, options);
+        sync_inputs(&mut d.inputs, &mut d.active, options, false);
         let up_to = d.inputs.iter().position(|i| i.label == UP_TO).unwrap();
         d.active = up_to;
         d.take_box(&h.app.session, picks[..2].to_vec(), false);

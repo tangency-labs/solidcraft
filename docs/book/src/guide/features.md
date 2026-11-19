@@ -231,6 +231,14 @@ The **Thread** feature's **Hand** is **Right** (the default), **Left**, or **Bot
 a left-handed groove crossing, as on a reversing screw). Scripts use `hand: "left"` (or `"right"`,
 `"both"`) on `solid.thread`; omitted, a thread is right-handed. Tapped holes are right-handed.
 
+For a modeled external thread, you can select a conical face to cut a groove that follows its
+taper. To thread a screw's shank and point together, select the shank, turn on **Modeled**, and
+choose **Follow point**. **Fade** makes the groove shallower toward the end of the point and
+keeps the tooth crests narrow. **Full depth** keeps the depth constant when there is enough
+material around the axis. Length and Up To limit the run along the shank, measured from the
+point's rim. Scripts use `point: "follow"` with
+`point_depth: "fade"` or `"full"` on `solid.thread`.
+
 Fillets and chamfers handle straight edges between planar faces, whole smooth loops, runs of
 neighbouring edges with mitred or spherical corners, and closed chains of curved edges (a rolling
 ball). See the roadmap's [known limitations](https://github.com/tangency-labs/solidcraft/blob/main/docs/roadmap-detail.md#known-limitations) for the rest.

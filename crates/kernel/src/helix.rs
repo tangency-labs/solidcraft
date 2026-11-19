@@ -142,6 +142,25 @@ pub fn loft_to_point(plane: &Plane, lp: &Loop2, apex: Vec3) -> Result<Body> {
     crate::smlib_sweeps::loft_to_point(plane, &crate::smlib_sweeps::pieces([&base]), apex)
 }
 
+/// Skin aligned sections and continue the first section to an apex. Each section has the
+/// same segment order. This preserves correspondence even when the section rotates.
+pub fn loft_aligned_to_point(sections: &[(Plane, Loop2)], apex: Vec3) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "loft_aligned_to_point");
+    let Some((_, first)) = sections.first() else {
+        return Err(KernelError::Invalid("a pointed loft needs sections".into()));
+    };
+    let count = first.segs.len();
+    if !apex.is_finite()
+        || sections.len() < 4
+        || count == 0
+        || sections.len().saturating_mul(count) > solidcraft_smlib::sweeps::MAX_CURVES
+        || sections.iter().any(|(_, lp)| lp.segs.len() != count)
+    {
+        return Err(KernelError::Invalid("a pointed loft needs aligned sections within the kernel's curve limit".into()));
+    }
+    crate::smlib_sweeps::loft_aligned_to_point(sections, apex)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

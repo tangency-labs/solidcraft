@@ -1615,6 +1615,8 @@ fn marking(p: Vec3) -> FeatureKind {
         starts: 1,
         ease_out: None,
         tip: Default::default(),
+        point: Default::default(),
+        point_depth: Default::default(),
         chamfer_angle: None,
         chamfer_depth: None,
         steep_flank: Default::default(),
