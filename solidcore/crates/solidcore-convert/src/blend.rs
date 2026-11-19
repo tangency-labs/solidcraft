@@ -217,6 +217,7 @@ fn chamfer(c: &r::ChamferRecord) -> kb::ChamferRecord {
             r::ChamferSizeRecord::Chord(l) => kb::ChamferSizeRecord::Chord(l),
         },
         wedge: c.wedge,
+        sagitta: c.sagitta,
     }
 }
 
@@ -230,6 +231,7 @@ fn record_chamfer(c: kb::ChamferRecord) -> r::ChamferRecord {
             kb::ChamferSizeRecord::Chord(l) => r::ChamferSizeRecord::Chord(l),
         },
         wedge: c.wedge,
+        sagitta: c.sagitta,
     }
 }
 
@@ -359,6 +361,7 @@ mod tests {
                     angle: 0.5,
                 },
                 wedge: 1.5,
+                sagitta: 0.0,
             }),
         };
         let procedural = r::BlendDefinition::Procedural(Box::new(r::BlendDefinitionRecord {

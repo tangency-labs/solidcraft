@@ -2633,10 +2633,11 @@ impl Surface {
                 // a blend corner's face (#2488): no offset is built from a corner's
                 // definition, so the face offsets as its net does, keeping none; a drafted
                 // face's net is its plane or cone, which offsets exactly as itself; a section
-                // blend (#3140) offsets as its net does
+                // blend (#3140) and a foot blend (a weld bead's, #15129) offset as their nets do
                 BlendRef::Corner { .. }
                 | BlendRef::Draft { .. }
-                | BlendRef::SectionBlend { .. } => None,
+                | BlendRef::SectionBlend { .. }
+                | BlendRef::FootBlend { .. } => None,
             };
             match made {
                 Some(BlendOffset::Round(s)) => return Ok(Some(*s)),

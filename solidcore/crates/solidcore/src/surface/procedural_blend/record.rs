@@ -127,6 +127,17 @@ pub struct ChamferRecord {
     pub size: ChamferSizeRecord,
     /// The angle between the supports the sizes were converted at.
     pub wedge: f64,
+    /// The order-0 section's sagitta (#15129): its arc's middle off the chord, away from the
+    /// edge for a positive one, towards it for a negative one (a weld bead). 0, the chord,
+    /// and absent from records written before it.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub sagitta: f64,
+}
+
+/// Whether a sagitta is 0 (the chord), so that a chamfer's record is written as before.
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde's `skip_serializing_if` passes a reference
+fn is_zero(x: &f64) -> bool {
+    *x == 0.0
 }
 
 /// The affine map from the net's (u, v) to the definition's (s, t):
@@ -343,6 +354,9 @@ impl ProceduralBlendRecord {
                 ChamferSizeRecord::DistanceAngle { distance, angle } => [distance, angle, c.wedge],
                 ChamferSizeRecord::Chord(l) => [l, l, c.wedge],
             };
+            if !c.sagitta.is_finite() {
+                return Err(refuse("chamfer", "an exact round's numbers are finite"));
+            }
             if !all_finite(&sizes) {
                 return Err(refuse(
                     "definition.chamfer",
@@ -1102,6 +1116,140 @@ impl SectionBlendRecord {
         }
         if !all_finite(&self.crown) {
             return Err(refuse("crown", "a crown is finite"));
+        }
+        let motions_finite = self.motions.iter().all(|m| {
+            points_finite(&[m.origin, m.x_axis, m.y_axis]) && m.scale.is_none_or(|s| all_finite(&s))
+        });
+        if !motions_finite {
+            return Err(refuse("motions", "a motion's numbers are finite"));
+        }
+        Ok(())
+    }
+}
+
+/// How a weld bead's span ends (`blend::weld_bead::BeadEnd`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BeadEndRecord {
+    /// Cut off square to the joint, in the station's plane.
+    Square,
+    /// A 45-degree ramp down to the end's point on the joint.
+    Taper,
+    /// Rounded within one bead reach.
+    Round,
+}
+
+/// A shaped end's leg law (`blend::foot_blend::FootRamp`): the face's piece is the end's zone,
+/// from `full` (the whole section) to `tip` (the root alone), the legs and the sagitta the
+/// weld's times the shape's share between.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct FootRampRecord {
+    /// Where the whole section stands, the leader's parameter.
+    pub full: f64,
+    /// Where the bead ends in a point on the root, the leader's parameter.
+    pub tip: f64,
+    /// The shape: `Taper` or `Round`.
+    pub end: BeadEndRecord,
+}
+
+/// A foot blend's section face (`blend::foot_blend`, a weld bead's, #15129): its definition
+/// (the supports and the face's side on each, the leader and the face's piece of it, the legs,
+/// the sagitta, the weld's spans and end shapes, the face's leg law at a shaped end, the fit
+/// tolerance and the motions its net took) and its net. A kind of its own, not fields added to an older record, so no reader
+/// that predates it can read a bead as another kind.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FootBlendRecord {
+    /// The supports S1, S2, by value (faces: NURBS forms with their kinds).
+    pub supports: [SupportRecord; 2],
+    /// Each face's side, `+1` or `-1`: the face leaves the root along `side (n x e')`, `n` the
+    /// support's own normal there and `e'` the leader's tangent.
+    pub sides: [f64; 2],
+    /// The leader: the joint edge's curve as its B-spline form.
+    pub leader: NurbsCurveRecord,
+    /// The face's piece of the leader's parameter, `a < b`.
+    pub interval: [f64; 2],
+    /// The legs on S1 and S2, straight from the root to the toe.
+    pub legs: [f64; 2],
+    /// The arc's height over the chord: `> 0` convex, `< 0` concave, 0 the chord.
+    pub sagitta: f64,
+    /// The weld's spans along the leader, as its parameters, ascending and not overlapping
+    /// (they may touch, as [`crate::surface::procedural_blend::bead::BeadSpan::along`] allows); the face's
+    /// piece lies in one of them.
+    pub spans: Vec<[f64; 2]>,
+    /// The end shape at each span's start and end.
+    pub ends: [BeadEndRecord; 2],
+    /// The face's leg law, where its piece is a shaped end's zone; absent elsewhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ramp: Option<FootRampRecord>,
+    /// The fit tolerance the net was made to (checked at samples, not proved).
+    pub tol: f64,
+    /// The motions, in order.
+    pub motions: Vec<MotionRecord>,
+    /// The net.
+    pub net: NurbsSurfaceRecord,
+}
+
+impl FootBlendRecord {
+    /// The structural check: the supports NURBS forms (a foot blend runs on faces), the leader
+    /// and the net as their own checks, the sides `+1` or `-1`, the legs and the tolerance
+    /// finite and positive, the sagitta finite, the piece and the spans finite, each `a < b`,
+    /// the spans ascending and not overlapping (they may touch) and the piece inside one of
+    /// them, a leg law's ends the piece's (its tip one of them) and its shape tapered or
+    /// rounded, and the motions' numbers finite. The rebuild checks what the numbers mean (the piece on the leader, the feet, the
+    /// net against its rebuild).
+    ///
+    /// # Errors
+    ///
+    /// The first [`RecordError`] met.
+    pub fn validate(&self) -> Result<(), RecordError> {
+        for support in &self.supports {
+            match support {
+                SupportRecord::Nurbs { form, .. } => form.validate("supports")?,
+                SupportRecord::Blend(_) => {
+                    return Err(refuse("supports", "a foot blend's supports are faces"))
+                }
+            }
+        }
+        self.leader.validate("leader")?;
+        self.net.validate("net")?;
+        if !self.sides.iter().all(|s| *s == 1.0 || *s == -1.0) {
+            return Err(refuse("sides", "a side is +1 or -1"));
+        }
+        if !self.legs.iter().all(|z| z.is_finite() && *z > 0.0) {
+            return Err(refuse("legs", "a leg is finite and positive"));
+        }
+        if !(self.tol.is_finite() && self.tol > 0.0) {
+            return Err(refuse("tol", "the tolerance is finite and positive"));
+        }
+        if !self.sagitta.is_finite() {
+            return Err(refuse("sagitta", "the sagitta is finite"));
+        }
+        let piece = |[a, b]: [f64; 2]| a.is_finite() && b.is_finite() && a < b;
+        if !piece(self.interval) {
+            return Err(refuse("interval", "a piece is finite with a < b"));
+        }
+        if !self.spans.iter().all(|s| piece(*s))
+            || !self
+                .spans
+                .windows(2)
+                .all(|w| matches!(w, [[_, end], [start, _]] if end <= start))
+        {
+            return Err(refuse(
+                "spans",
+                "spans are finite, a < b, ascending and not overlapping (they may touch)",
+            ));
+        }
+        let [a, b] = self.interval;
+        if !self.spans.iter().any(|[s, t]| *s <= a && b <= *t) {
+            return Err(refuse("interval", "the piece lies in one of the spans"));
+        }
+        if let Some(r) = self.ramp {
+            let ends = [r.full.min(r.tip), r.full.max(r.tip)];
+            if ends != [a, b] || r.end == BeadEndRecord::Square {
+                return Err(refuse(
+                    "ramp",
+                    "a leg law runs over its face's piece, tapered or rounded",
+                ));
+            }
         }
         let motions_finite = self.motions.iter().all(|m| {
             points_finite(&[m.origin, m.x_axis, m.y_axis]) && m.scale.is_none_or(|s| all_finite(&s))
