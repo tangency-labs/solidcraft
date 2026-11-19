@@ -2098,3 +2098,122 @@ mod drafts {
         assert_eq!(report.failures, 0, "{}", report.text);
     }
 }
+
+/// Kernel diagnostics cross the application seam here; the app receives only ops
+/// data and need not name the kernel's reason classes or construct kernel errors.
+#[test]
+fn offset_failures_keep_the_kernel_reason_and_class() {
+    use crate::OffsetRefusal;
+    use solidcore::error::offset::OffsetFailure;
+    use solidcore::error::Failure;
+    use solidcore::{EntityRef, FaceId};
+
+    for why in [
+        OffsetFailure::Failed("the offset edge has no intersection"),
+        OffsetFailure::Missing("the face's surface"),
+        OffsetFailure::InvalidValue("the offset distance is zero"),
+        OffsetFailure::Inconsistent("the edge's mate is absent"),
+    ] {
+        let error = Failure::new("offset::offset_executive::crossing_loops", why)
+            .at(EntityRef::Face(FaceId::from_index(2)))
+            .into_error();
+        let diagnostic = super::diagnostic(&error);
+        assert_eq!(diagnostic.detail, error.to_string());
+        assert_eq!(
+            diagnostic.refusal,
+            Some(Error::OffsetRefused {
+                face: None,
+                why: OffsetRefusal::Phrase {
+                    class: why.kind(),
+                    defect: why.is_defect(),
+                    phrase: error.to_string()
+                },
+            })
+        );
+    }
+}
+
+#[test]
+fn typed_offset_refusals_keep_their_nested_kernel_cause() {
+    use crate::OffsetRefusal;
+    use solidcore::error::intersect::IntersectFailure;
+    use solidcore::error::offset::OffsetFailure;
+    use solidcore::error::Failure;
+
+    let cause = Failure::new(
+        "intersect::clip",
+        IntersectFailure::Failed("the exact trim does not cross the face boundary"),
+    )
+    .into_error();
+    let error = Failure::new("offset::trim", OffsetFailure::ExactCurveUncut)
+        .caused_by(cause)
+        .into_error();
+    let diagnostic = super::diagnostic(&error);
+    assert_eq!(
+        diagnostic.refusal,
+        Some(Error::OffsetRefused {
+            face: None,
+            why: OffsetRefusal::ExactCurveUncut
+        })
+    );
+    assert_eq!(diagnostic.detail, error.to_string());
+    assert!(
+        diagnostic
+            .detail
+            .contains("intersect::clip: the exact trim does not cross the face boundary"),
+        "{}",
+        diagnostic.detail
+    );
+
+    let error = Failure::new(
+        "offset::face",
+        OffsetFailure::Folds {
+            face: solidcore::FaceId::from_index(2),
+            distance: 2.0,
+            largest: 1.0,
+        },
+    )
+    .caused_by(error)
+    .into_error();
+    let diagnostic = super::diagnostic(&error);
+    assert_eq!(
+        diagnostic.refusal,
+        Some(Error::WallFolds { largest: Some(1.0) })
+    );
+    assert_eq!(diagnostic.detail, error.to_string());
+}
+
+/// Intersections and Booleans inside shelling also keep their named cause,
+/// including the failure beneath an offset stage.
+#[test]
+fn offset_substages_keep_their_failure_reason() {
+    use solidcore::error::intersect::IntersectFailure;
+    use solidcore::error::offset::OffsetFailure;
+    use solidcore::error::{Failure, Reason};
+
+    let cause = Failure::new(
+        "intersect::surface_surface",
+        IntersectFailure::Failed("the two face trims do not cross"),
+    )
+    .into_error();
+    let offset = Failure::new("offset::offset_executive", OffsetFailure::StageFailed)
+        .caused_by(cause.clone())
+        .into_error();
+    let boolean = Failure::new(
+        "boolean::merge::p3",
+        Reason::Failed("a Boolean of the tree failed"),
+    )
+    .caused_by(cause.clone())
+    .into_error();
+    for error in [cause, offset, boolean] {
+        let diagnostic = super::diagnostic(&error);
+        assert_eq!(diagnostic.detail, error.to_string());
+        assert!(
+            diagnostic
+                .detail
+                .contains("the two face trims do not cross"),
+            "{}",
+            diagnostic.detail
+        );
+    }
+}
