@@ -324,6 +324,7 @@ pub mod sketch_modify_ui;
 mod sketch_modify_ui_tests;
 #[cfg(test)]
 mod sketch_moving_click_tests;
+mod sketch_notice;
 pub mod sketch_palette;
 mod sketch_pattern_tree;
 pub mod sketch_report;
@@ -450,7 +451,7 @@ pub struct UiState {
     pub dark: bool,
     /// Selection filter: kinds a click doesn't pick (`vertices`, `edges`, `faces`, `sketch`).
     pub pick_off: Vec<String>,
-    /// A click on a face picks its whole body (Modelling; Preferences › Sketch › Click selects).
+    /// A click on a face picks its whole body (Modelling; Preferences â€º Sketch â€º Click selects).
     pub pick_bodies: bool,
     /// A face picks its exact component occurrence (Modelling).
     pub pick_components: bool,
@@ -661,6 +662,12 @@ pub struct SolveApp {
     /// A view change in progress (axis view, Home, Fit); any mouse navigation cancels it.
     pub cam_anim: Option<CameraAnim>,
     pub(crate) sketch_camera_target: Option<Camera>,
+    pub(crate) sketch_notices: sketch_notice::State,
+    pub(crate) prepared_edit_starts: std::collections::BTreeMap<u64, String>,
+    pub(crate) sketch_finish_processing: bool,
+    pub(crate) sketch_refreshes: std::collections::BTreeMap<u64, sketch_view::ModelRefresh>,
+    pub(crate) stopped_sketch_refreshes: std::collections::BTreeSet<u64>,
+    pub(crate) sketch_edit_sequences: std::collections::BTreeMap<u64, u64>,
     /// The custom view navigator's body (kept with the preferences).
     pub view_gizmo: view_gizmo::State,
     /// Seconds since start, as of this frame.
@@ -686,7 +693,7 @@ pub struct SolveApp {
     pub(crate) slicer_wait: Option<dialogs_save_mesh::SlicerWait>,
     /// Open with EasyPrint: the upload in flight and the question before the first one.
     pub(crate) easyprint: easyprint_ui::State,
-    /// Install plugin…: the plugin waiting for the user's answer.
+    /// Install pluginâ€¦: the plugin waiting for the user's answer.
     pub(crate) plugin_install: plugin_install::State,
     /// What an importer plugin could not carry over from the file it just opened.
     pub(crate) import_report: Option<import_report::Shown>,
@@ -772,7 +779,7 @@ pub struct SolveApp {
     pub deferred_queue: Vec<(String, Value, u64)>,
     /// A feature started from a sketch while the marker rolls back, and that sketch: it starts
     /// once the marker is back.
-    pub start_after_roll: Option<(String, u64)>,
+    pub start_after_roll: Option<(String, Option<u64>)>,
     /// The ribbon tab before the current `start` moved it to the command's home tab. A command
     /// that starts nothing (refused with a parameter or status error) puts it back (#10540).
     pub(crate) command_tab_before_start: Option<String>,
@@ -857,7 +864,7 @@ pub struct SolveApp {
     /// The file brought more than one body or a component tree: the offer says "assembly".
     pub stand_up_assembly: bool,
     /// The offer is the small note over the view, not the dialog (a file from a program not known
-    /// to save Y up, Preferences › Design, #7717).
+    /// to save Y up, Preferences â€º Design, #7717).
     pub stand_up_note: bool,
     /// When the note was first drawn (the window's clock), or since the pointer was last on it; it
     /// goes after `stand_up::NOTE_SECONDS`.
@@ -900,7 +907,7 @@ pub struct SolveApp {
     pub safe_graphics_dismissed: bool,
     /// Try full graphics was clicked: the next start uses full graphics (the line offers a restart).
     pub safe_graphics_full_next: bool,
-    /// Preferences › Graphics › Start in safe graphics mode, for the next launch only.
+    /// Preferences â€º Graphics â€º Start in safe graphics mode, for the next launch only.
     pub safe_graphics_next: bool,
     pub frame_ms: f64,
     /// The viewport's frame-rate readout ([`frame_rate`]).
@@ -1055,6 +1062,12 @@ impl SolveApp {
             cam: Camera::default(),
             cam_anim: None,
             sketch_camera_target: None,
+            sketch_notices: Default::default(),
+            prepared_edit_starts: Default::default(),
+            sketch_edit_sequences: Default::default(),
+            sketch_finish_processing: false,
+            sketch_refreshes: Default::default(),
+            stopped_sketch_refreshes: Default::default(),
             view_gizmo: view_gizmo::State::default(),
             now: 0.0,
             pre_sketch_cam: None,
@@ -1353,7 +1366,7 @@ impl SolveApp {
         self.msaa_supported = rs.msaa_supported.clone();
         let info = rs.adapter.get_info();
         self.help.gpu = Some(format!("{} ({:?}, {:?})", info.name.trim(), info.backend, info.device_type));
-        self.viewport.adapter = format!("{:?} · {}", info.backend, info.name);
+        self.viewport.adapter = format!("{:?} Â· {}", info.backend, info.name);
     }
 
     /// Preferences as JSON for inspection and compatibility. Storage hosts use
@@ -1425,7 +1438,7 @@ impl SolveApp {
         }
         // While the Preferences dialog is open the file holds what Cancel would restore: a change
         // that was never applied must not reach disk through the periodic save, a quit or a
-        // window close (#9730). One change covers every writer — desktop save and on_exit, the
+        // window close (#9730). One change covers every writer â€” desktop save and on_exit, the
         // web app's save, and the control channel.
         if let Some(held) = prefs::held_overlay(self)
             && let Some(obj) = v.as_object_mut()
@@ -1570,6 +1583,7 @@ impl SolveApp {
         // command (the engine runs it), so it meets the same rules.
         let id = solidcraft_engine::find_command(id).map_or(id, |spec| spec.id);
         crate::sketch_view::sync(self)?;
+        let finished_sketch = crate::sketch_view::prepare_edit(self, id, &params)?;
         if matches!(id, "sketch.create" | "sketch.edit") {
             let explicit = match params.get("view") {
                 None | Some(Value::Null) => None,
@@ -1605,7 +1619,7 @@ impl SolveApp {
         {
             params.entry("reuse_import").or_insert(Value::Bool(self.preferences.reuse_imports));
         }
-        // Commands may start only detected slicers and the programs the user added under Custom….
+        // Commands may start only detected slicers and the programs the user added under Customâ€¦.
         if matches!(id, "file.save_mesh" | "file.send_to_slicer") {
             solidcraft_engine::slicers::set_chosen_programs(&self.preferences.custom_slicers);
         }
@@ -1646,6 +1660,14 @@ impl SolveApp {
             self.library.refresh();
         }
         self.big_operation |= now_ms() - t0 >= recovery_ui::BIG_OPERATION_MS;
+        let r = r.map(|mut reply| {
+            if let Some(event) = finished_sketch
+                && let Some(reply) = reply.as_object_mut()
+            {
+                reply.insert("finished_sketch".into(), json!(event.name));
+            }
+            reply
+        });
         self.after_command(id, &params, revision, selected_before, r)
     }
 
@@ -1714,6 +1736,10 @@ impl SolveApp {
 
     /// Host effects shared by directly executed and already evaluated commands.
     pub(crate) fn command_completed(&mut self, id: &str, r: Result<Value, String>) -> Result<Value, String> {
+        if self.dialog.as_ref().is_some_and(|dialog| dialog.command() == Some(id)) {
+            self.sketch_edit_sequences.insert(self.session.uid, self.session.edit_start_sequence());
+        }
+        crate::sketch_view::consume_finishes(self);
         // The engine has no edit in place to start or finish; the window does, and says when it can't.
         let r = match solidcraft_engine::find_command(id).map(|spec| spec.id) {
             // `queued`: it waits for the end of the agent's turn.
@@ -1950,6 +1976,10 @@ impl SolveApp {
             Ok(value)
         });
         crate::sketch_view::project(self);
+        if r.is_ok() && self.session.active_sketch.is_some() && !self.sketch_finish_processing {
+            let before = self.settled_cam();
+            self.look_at_opened_sketch(before);
+        }
         self.finish_command(id, &r);
         if render_workspace::active(self)
             && matches!(id, "appearance.assign" | "appearance.paste")
@@ -2268,7 +2298,7 @@ impl SolveApp {
             self.repeat_last();
             return;
         }
-        // Modify ▸ Delete deletes what is selected, as the Delete key does (#9079); with nothing
+        // Modify â–¸ Delete deletes what is selected, as the Delete key does (#9079); with nothing
         // selected it says what to pick instead of running with no features.
         if id == "timeline.delete" {
             if delete::nothing_to_delete(self) && self.tree.picked_timeline_groups.is_empty() {
@@ -2278,7 +2308,7 @@ impl SolveApp {
             }
             return;
         }
-        // The Dependents button of INSPECT ▸ HISTORY asks for the dependents of ONE
+        // The Dependents button of INSPECT â–¸ HISTORY asks for the dependents of ONE
         // feature, so it needs a target. With nothing selected it used to run the
         // command with no feature and the engine answered "Feature Dependents:
         // `feature` must be an id or name". It reports the dependents of what is
@@ -2321,11 +2351,11 @@ impl SolveApp {
             }
             return;
         }
-        // Front … Isometric (Ctrl+1…7 by default) turn the view as the navigator's faces do. The
+        // Front â€¦ Isometric (Ctrl+1â€¦7 by default) turn the view as the navigator's faces do. The
         // flat pattern is a 2D page: it has no other side to turn to.
         if solidcraft_engine::standard_view(id).is_some() {
             if !dialogs_sheet::flat_active(self) {
-                // `view.isometric` → "isometric", which `StandardView::parse` reads as Iso.
+                // `view.isometric` â†’ "isometric", which `StandardView::parse` reads as Iso.
                 self.animate_view(id.trim_start_matches("view."));
                 self.home.open = false;
             }
@@ -2385,7 +2415,7 @@ impl SolveApp {
             return;
         }
         // The ribbon's Ground acts on the selected placements, or the components picked in the
-        // Browser, as the Browser's Placement ▸ Ground does (#14911). It used to run with no
+        // Browser, as the Browser's Placement â–¸ Ground does (#14911). It used to run with no
         // occurrence and the engine answered "`occurrence` must be an id or name".
         if id == "occurrence.ground" {
             self.ground_selected_occurrences();
@@ -2594,7 +2624,7 @@ impl SolveApp {
             return;
         }
         if id == "component.insert_design" {
-            // The designs open in other tabs first, each a click away, then Browse… (#8570).
+            // The designs open in other tabs first, each a click away, then Browseâ€¦ (#8570).
             if self.preferences.insert_lists_open_designs && !documents::other_designs(self).is_empty() {
                 if let Some(rect) = opener {
                     context_menu::toggle_for(self, rect, rect.left_bottom(), context_menu::Target::InsertDesign);
@@ -2675,7 +2705,7 @@ impl SolveApp {
             }
             return;
         }
-        // Inspect → Measure → Properties: the window, not a reply nobody sees (#8095).
+        // Inspect â†’ Measure â†’ Properties: the window, not a reply nobody sees (#8095).
         if matches!(id, "component.properties" | "occurrence.properties") {
             design_properties::open_selected(self);
             return;
@@ -2738,29 +2768,33 @@ impl SolveApp {
         if interactive && (self.editing_state.is_some() || self.applying.is_some()) {
             dialogs::cancel(self);
         }
-        let finished_sketch = self.session.active_sketch.filter(|_| ends_sketch(id) && self.interactive(id));
-        // The sketch's end may turn the view (Preferences › Sketch); Extrude goes back to the view
-        // it was clicked in, so take that one before the turn starts (#10571).
-        self.pre_command_cam = finished_sketch.is_some().then(|| self.settled_cam());
-        if finished_sketch.is_some() {
-            // A point picked in the sketch being finished stays a pick of that sketch: its
-            // placement reads where the sketch puts it once the sketch is no longer the open one.
-            if let (Some(sketch), "solid.box" | "solid.sphere" | "solid.torus") = (finished_sketch, id) {
-                for sel in self.session.selection.iter_mut() {
-                    if let solidcraft_engine::Sel::SketchPoint { id } = sel {
-                        *sel = solidcraft_engine::Sel::ExternalSketchPoint { sketch, id: id.clone() };
-                    }
+        let starts_edit = solidcraft_engine::find_command(id).is_some_and(|spec| self.session.command_starts_edit(spec, &Value::Null));
+        let previous_sketch = self.session.active_sketch.filter(|_| starts_edit);
+        self.pre_command_cam = previous_sketch.is_some().then(|| self.settled_cam());
+        if let (Some(sketch), "solid.box" | "solid.sphere" | "solid.torus") = (previous_sketch, id) {
+            for sel in &mut self.session.selection {
+                if let solidcraft_engine::Sel::SketchPoint { id } = sel {
+                    *sel = solidcraft_engine::Sel::ExternalSketchPoint { sketch, id: id.clone() };
                 }
             }
-            self.finish_sketch();
-            // A feature committed before the marker is back would go in where the sketch was.
-            if self.deferred.is_some() {
-                self.start_after_roll = finished_sketch.map(|sketch| (id.to_string(), sketch));
-                // The sketch already took the ribbon back through `sketch_return_tab`; the
-                // deferred start must not undo that when it eventually runs (#10540).
-                self.command_tab_before_start = None;
+        }
+        self.prepared_edit_starts.remove(&self.session.uid);
+        let finished = match crate::sketch_view::prepare_edit(self, id, &Value::Null) {
+            Ok(event) => event,
+            Err(error) => {
+                self.set_status(error, true);
                 return;
             }
+        };
+        let finished_sketch = finished.filter(|event| matches!(event.domain, solidcraft_engine::SketchDomain::Model)).map(|event| event.sketch);
+        if starts_edit {
+            self.prepared_edit_starts.insert(self.session.uid, id.into());
+        }
+        crate::sketch_view::refresh_model(self);
+        if self.session.needs_sketch_finish_evaluation() {
+            self.start_after_roll = Some((id.to_string(), finished_sketch));
+            self.command_tab_before_start = None;
+            return;
         }
         self.start_interactive(id, finished_sketch);
     }
@@ -3004,8 +3038,17 @@ impl SolveApp {
         }
         let Some(idx) = self.session.doc.feature_index(id) else { return };
         let marker = self.finish_sketch_for_edit();
+        let prepared = self.session.prepare_feature_edit_start(id).map_err(|error| error.to_string());
+        if prepared.is_ok() {
+            self.sketch_notices.dismiss(self.session.uid);
+        }
+        crate::sketch_view::consume_finishes(self);
+        if let Err(error) = prepared {
+            self.set_status(error, true);
+            return;
+        }
         self.tool = None;
-        if self.session.doc.marker != marker {
+        if self.session.doc.marker != marker || self.session.needs_sketch_finish_evaluation() {
             self.prepare_feature_edit(id, idx, marker);
             return;
         }
@@ -3017,7 +3060,7 @@ impl SolveApp {
     }
 
     /// Undo, Redo and the History bar would change the design under an open feature editor (Edit
-    /// Hole, Edit Box, …), whose OK and Cancel then refuse it (#10688). They cancel the editor
+    /// Hole, Edit Box, â€¦), whose OK and Cancel then refuse it (#10688). They cancel the editor
     /// first, putting its marker back, as starting another tool does; while it is still opening
     /// they wait for it.
     pub(crate) fn close_editor_for_history(&mut self) -> Result<(), String> {
@@ -3079,6 +3122,10 @@ impl SolveApp {
     /// sketch row inside a component in the browser): that component is active while the sketch
     /// is open, and the one active before comes back when the sketch ends (#8127).
     pub fn edit_sketch_in(&mut self, id: u64, placement: Option<(u64, &[u64])>) {
+        self.edit_sketch_at_view(id, placement, None);
+    }
+
+    pub(crate) fn edit_sketch_at_view(&mut self, id: u64, placement: Option<(u64, &[u64])>, view: Option<u64>) {
         let activate = |app: &mut Self| {
             if let Some((component, path)) = placement {
                 let _ = app.run("component.activate", json!({"component": component, "occurrence": path.last(), "path": path}));
@@ -3099,12 +3146,17 @@ impl SolveApp {
             return;
         }
         let marker = self.finish_sketch_for_edit();
+        if let Err(error) = crate::sketch_view::prepare_edit(self, "sketch.edit", &json!({"sketch":id})) {
+            self.set_status(error, true);
+            return;
+        }
+        self.prepared_edit_starts.insert(self.session.uid, "sketch.edit".into());
         let before = self.settled_cam();
         let context = (self.session.active_component, self.session.active_occurrence_path.clone());
         self.tool = None;
         self.dialog = None;
         activate(self);
-        if self.run("sketch.edit", json!({ "sketch": id, "restore_marker": marker })).is_err() {
+        if self.run("sketch.edit", json!({ "sketch": id, "restore_marker": marker, "view": view })).is_err() {
             self.restore_component(context.0, context.1);
             return;
         }
@@ -3182,17 +3234,10 @@ impl SolveApp {
     /// Pass the original marker to the next editor. Restoring it between editors could finish
     /// in the background after the next rollback, moving the marker out from under that edit.
     fn finish_sketch_for_edit(&mut self) -> Option<usize> {
-        let marker = self
-            .pending_feature_edit
+        self.pending_feature_edit
             .take()
             .map(|pending| pending.marker)
-            .unwrap_or_else(|| self.session.sketch_restore_marker().unwrap_or(self.session.doc.marker));
-        if self.session.active_sketch.is_some() {
-            let command = self.take_sketch_exit().unwrap_or_else(|| "sketch.finish".into());
-            self.prepare_sketch_exit();
-            let _ = self.run(&command, json!({"restore_marker": false}));
-        }
-        marker
+            .unwrap_or_else(|| self.session.sketch_restore_marker().unwrap_or(self.session.doc.marker))
     }
 
     /// Finish the active sketch: stop editing and restore the history marker Edit Sketch moved.
@@ -3230,6 +3275,10 @@ impl SolveApp {
 
     /// Successful UI and programmatic exits share the same window cleanup.
     fn sketch_closed(&mut self, open: Option<u64>) {
+        self.sketch_closed_in(open, None);
+    }
+
+    fn sketch_closed_in(&mut self, open: Option<u64>, owner: Option<u64>) {
         self.take_sketch_exit();
         self.tool = None;
         dim_view::cancel();
@@ -3238,7 +3287,7 @@ impl SolveApp {
             self.restore_component(pre.component, pre.path);
         }
         // Only the views saved when this sketch opened: one opened another way saved none.
-        if let Some(view) = self.pre_sketch_cam.take().filter(|v| Some(v.sketch) == open) {
+        if let Some(view) = self.pre_sketch_cam.take().filter(|v| Some(v.sketch) == open && owner.is_none_or(|owner| owner == v.view)) {
             let _ = documents::with_sketch_camera(self, view.view, |app| {
                 if let Some(to) = app.preferences.sketch_exit_view.view_after(view.before, view.facing, app.settled_cam()) {
                     app.sketch_camera_target = Some(to);
@@ -3279,7 +3328,7 @@ impl SolveApp {
 
     /// Is the origin widget shown? Origin planes and axes are drawn and pickable. While a dialog
     /// picks a plane ([`SolveApp::picking_plane`]) the Origin is always shown, drawn through the
-    /// model (a plane inside a body stays visible), even when the browser hides it — except the
+    /// model (a plane inside a body stays visible), even when the browser hides it â€” except the
     /// origin planes for Project ([`SolveApp::picking_project_geometry`], #10778), which keep a
     /// hidden Origin hidden.
     pub fn origin_visible(&self) -> bool {
@@ -3783,7 +3832,7 @@ impl SolveApp {
         if !to.is_valid() {
             return;
         }
-        // Preferences › Navigation: animated (at a chosen speed) or immediate.
+        // Preferences â€º Navigation: animated (at a chosen speed) or immediate.
         if !self.preferences.look_at_anim {
             self.cam = to;
             self.cam_anim = None;
@@ -3830,7 +3879,7 @@ impl SolveApp {
     }
 
     /// A view chosen on a navigator (a face, corner or arrow, an axis tip): the view turns
-    /// in place, or frames the whole model from the new direction when Preferences › Navigation
+    /// in place, or frames the whole model from the new direction when Preferences â€º Navigation
     /// asks for it (`navigator_fit`, #10091).
     pub fn animate_turn(&mut self, to: Camera) {
         if self.preferences.navigator_fit {
@@ -4331,7 +4380,7 @@ impl SolveApp {
         network_prompt::show(self, ui.ctx());
         update::show(self, ui.ctx());
         install::show(self, ui.ctx());
-        // Settings › AI's Add agent dialog: Settings opens over Home too (#3483).
+        // Settings â€º AI's Add agent dialog: Settings opens over Home too (#3483).
         if agent_chat::shown(self) {
             agent_chat::settings::dialog(self, ui.ctx());
         }
@@ -4354,7 +4403,7 @@ impl SolveApp {
                     panel_runtime::hide_app_host(self);
                 }
                 browser::editors(self, ui);
-                // File › Install plugin… is offered on Home too: its question must show there.
+                // File â€º Install pluginâ€¦ is offered on Home too: its question must show there.
                 plugin_install::show(self, ui.ctx());
                 // Entry dialogs from every plugin slot are available on Home too.
                 plugin_menu::show(self, ui.ctx());
@@ -4417,6 +4466,7 @@ impl SolveApp {
                 viewport::show_host_controls(app, &mut controls, rect);
             });
         }
+        crate::sketch_view::show_notice(self, ui);
         view_tiles::placement_overlay(self, ui.ctx());
         self.resolve_fit(ui.ctx());
         panel_runtime::finish_app_host(self, ui);
@@ -4662,7 +4712,7 @@ pub fn command_label(id: &str) -> &str {
     solidcraft_engine::find_command(id).map_or(id, |c| c.label)
 }
 
-/// An engine error with the command's label instead of its id: "Shell: offset must be …".
+/// An engine error with the command's label instead of its id: "Shell: offset must be â€¦".
 /// The command label and catalogued engine messages follow the interface language.
 pub fn friendly_error(id: &str, e: &str) -> String {
     let label = solidcraft_ui_text::tr_label(command_label(id));
@@ -4681,12 +4731,3 @@ pub fn now_ms() -> f64 {
 mod picker_test_support;
 #[cfg(test)]
 mod test_support;
-
-/// Toolbar panels whose commands build features from the model; they finish an open sketch first.
-/// Construct, Inspect and Insert keep the sketch open.
-const SKETCH_ENDING_PANELS: [&str; 3] = ["CREATE", "MODIFY", "ASSEMBLE"];
-const SKETCH_TAB: &str = "SKETCH";
-
-fn ends_sketch(id: &str) -> bool {
-    solidcraft_engine::find_command(id).is_some_and(|c| c.tab != SKETCH_TAB && SKETCH_ENDING_PANELS.contains(&c.panel) && c.id != "sketch.create")
-}

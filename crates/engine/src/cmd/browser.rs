@@ -62,6 +62,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("body: its name, or bodies: several body names (each in turn gets the first of name, name (2), name (3)… that no other body has), name: the new name (features that use the bodies follow)"),
     // The import and failed operations offer it for a part the modelling kernel refuses.
     CommandSpec::new("body.repair", "Repair Part", crate::checked!("body.repair", repair_body))
+        .begins_edit()
         .icon("body")
         .contract(&REPAIR_CONTRACT)
         .output(output_schema_for::<RepairResult>)

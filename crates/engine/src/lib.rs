@@ -27,6 +27,7 @@ pub mod drawing_scene;
 mod drawing_table_paper;
 pub mod drawing_view;
 pub mod easyprint;
+mod edit_start;
 pub mod frames;
 pub mod fuzz;
 #[cfg(not(target_arch = "wasm32"))]
@@ -73,6 +74,7 @@ pub use cmd::{
     Addition, CommandInfo, CommandSpec, FromSelection, LinkProblem, LinkState, OpenSteps, addition, auto_operation, command_specs, dimension_roles,
     extrude_reach, find_command, normalize_command_id, resolve_design_links, shown_scope, standard_view, use_import_cache_dir,
 };
+pub use edit_start::{EditStart, RefreshedSketchModel, SketchDomain, SketchFinishEvent};
 pub use solidcraft_doc as doc;
 pub use solidcraft_doc::Visibility;
 pub use solidcraft_geom as geom;
@@ -636,6 +638,14 @@ pub struct Session {
     pub sketching_view: Option<u64>,
     /// Live host view identities; never restored from history or a worker snapshot.
     pub view_context: ViewContext,
+    sketch_finish_events: std::collections::VecDeque<SketchFinishEvent>,
+    sketch_finish_sequence: u64,
+    sketch_finish_pending: bool,
+    edit_source_sketch: Option<u64>,
+    prepared_edit_source: Option<(String, SketchFinishEvent)>,
+    edit_entry_depth: u32,
+    edit_start_sequence: u64,
+    prepared_edit_intent: Option<String>,
     /// Explicitly owned sheet edit, independent of the model sketch being edited.
     pub active_sheet_sketch: Option<Arc<SheetSketchEdit>>,
     /// The drawing open (by id): drawing commands change it. The model's commands work with it
@@ -1164,6 +1174,14 @@ impl Session {
             active_sketch: None,
             sketching_view: None,
             view_context: ViewContext::default(),
+            sketch_finish_events: Default::default(),
+            sketch_finish_sequence: 0,
+            sketch_finish_pending: false,
+            edit_source_sketch: None,
+            prepared_edit_source: None,
+            edit_entry_depth: 0,
+            edit_start_sequence: 0,
+            prepared_edit_intent: None,
             active_sheet_sketch: None,
             open_drawing: None,
             model_focus: false,
@@ -1889,6 +1907,7 @@ impl Session {
     }
 
     pub fn refresh(&mut self) {
+        self.sketch_finish_pending = false;
         let _ = self.refresh_with_joint_report();
     }
 
@@ -2417,6 +2436,30 @@ impl Session {
         if let Some(call) = plugin::resolve_call(self, id, params)? {
             return self.execute("plugin.run", &call);
         }
+        let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.into()))?;
+        self.check_command(spec, params)?;
+        self.note_edit_entry(spec, params);
+        let event = self.prepare_command_edit(spec, params)?;
+        let prepared = self.take_prepared_edit_source(spec, params);
+        let event = event.or(prepared);
+        let source = self.edit_source_sketch;
+        let depth = self.edit_entry_depth;
+        if let Some(event) = event.as_ref().filter(|event| event.domain == SketchDomain::Model) {
+            self.edit_source_sketch = Some(event.sketch);
+        }
+        if self.command_starts_edit(spec, params) {
+            self.edit_entry_depth = depth.saturating_add(1);
+        }
+        let result = self.execute_command(spec.id, params);
+        self.edit_source_sketch = source;
+        self.edit_entry_depth = depth;
+        result.map(|value| edit_start::finished_reply(value, event.as_ref()))
+    }
+
+    fn execute_command(&mut self, id: &str, params: &Value) -> Result<Value> {
+        if let Some(call) = plugin::resolve_call(self, id, params)? {
+            return self.execute("plugin.run", &call);
+        }
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
         if panels::commands::is_command(spec.id) {
             // Layout is application state. Even a missing capability must not
@@ -2441,13 +2484,12 @@ impl Session {
         self.model.settle_import_checks();
         if live.is_none() {
             self.live_links = None;
-            if reads_model && self.model.is_stale() {
+            if reads_model && (self.model.is_stale() || self.sketch_finish_pending) {
                 self.refresh();
             }
         }
         spec.allowed(self).map_err(|why| EngineError::Disabled(spec.id.to_string(), why))?;
         // Before anything changes: a refusal leaves the session exactly as it was.
-        self.check_command(spec, params)?;
         let open_drawing = self.open_drawing;
         let redo_watch_before = self.redo_watch.clone();
         let mut before = Snapshot {
@@ -2852,10 +2894,18 @@ impl Session {
             active_sketch: self.active_sketch,
             sketching_view: self.sketching_view,
             view_context: self.view_context.clone(),
+            sketch_finish_events: Default::default(),
+            sketch_finish_sequence: self.sketch_finish_sequence,
+            sketch_finish_pending: self.sketch_finish_pending,
+            edit_source_sketch: self.edit_source_sketch,
+            prepared_edit_source: self.prepared_edit_source.clone(),
+            edit_entry_depth: 0,
+            edit_start_sequence: 0,
+            prepared_edit_intent: self.prepared_edit_intent.clone(),
             active_sheet_sketch: self.active_sheet_sketch.clone(),
             open_drawing: self.open_drawing,
             model_focus: self.model_focus,
-            sketch_entry: None,
+            sketch_entry: self.sketch_entry.clone(),
             feature_edit_sketch: self.feature_edit_sketch,
             selection: self.selection.clone(),
             path: None,
@@ -3245,6 +3295,13 @@ impl Session {
             if !self.visibility.hidden_joints.contains(&j) {
                 self.visibility.hidden_joints.push(j);
             }
+        }
+        self.sketch_finish_pending = computed.sketch_finish_pending;
+        self.prepared_edit_source = computed.prepared_edit_source;
+        self.prepared_edit_intent = computed.prepared_edit_intent;
+        self.edit_start_sequence = self.edit_start_sequence.saturating_add(computed.edit_start_sequence);
+        for event in computed.sketch_finish_events {
+            self.publish_sketch_finish(event);
         }
         for message in computed.log {
             self.echo(message);

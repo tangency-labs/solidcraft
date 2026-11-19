@@ -5080,11 +5080,11 @@ mod tests {
         let window = app.run("tab.view.move_to_window", json!({"view": remote, "window": "new"})).unwrap()["window"].as_u64().unwrap();
 
         assert!(app.run("tab.view.close_right", json!({"id": second, "window": 0})).is_ok());
-        assert_eq!(app.docs.views.ids().collect::<Vec<_>>(), [root, second]);
+        assert_eq!(app.docs.views.views().iter().map(|view| view.id).collect::<Vec<_>>(), [root, second]);
         assert!(app.docs.views.get(third).is_none());
         assert!(app.run("tab.view.close_others", json!({"id": second, "window": window})).is_err());
         assert!(app.run("tab.view.close_others", json!({"id": second})).is_ok());
-        assert_eq!(app.docs.views.ids().collect::<Vec<_>>(), [second]);
+        assert_eq!(app.docs.views.views().iter().map(|view| view.id).collect::<Vec<_>>(), [second]);
         assert_eq!(app.docs.views.window_of(remote), u32::try_from(window).ok());
     }
 

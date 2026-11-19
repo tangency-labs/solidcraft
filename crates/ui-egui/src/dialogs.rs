@@ -5021,6 +5021,8 @@ fn pick_first(input: &SelInput) -> String {
 
 /// Close the dialog without applying it (Esc, Cancel). An edit puts the timeline marker back.
 pub fn cancel(app: &mut SolveApp) {
+    app.prepared_edit_starts.remove(&app.session.uid);
+    app.session.cancel_prepared_edit_start();
     app.session.feature_edit_sketch = None;
     if let Some(pending) = &mut app.pending_feature_edit {
         pending.cancel();
