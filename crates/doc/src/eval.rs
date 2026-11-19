@@ -9780,6 +9780,12 @@ fn copies_as_bodies<'a>(copies: &[&'a [Traced]]) -> (Vec<(Body, Vec<&'a [Traced]
     let mut tools = 0;
     for copy in copies {
         let n = copy.len();
+        if n > limit {
+            // More tools than a probe may hold: the copy is asked about one tool at a time, as
+            // before.
+            one_by_one.push(*copy);
+            continue;
+        }
         if !group.is_empty() && tools + n > limit {
             let taken = std::mem::take(&mut group);
             match one_body_of(&taken) {
