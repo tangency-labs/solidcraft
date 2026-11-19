@@ -72,9 +72,11 @@ fn read_folder(root: &Path) -> std::result::Result<Vec<safe_zip::File>, CheckPro
     let mut pending = vec![(root.to_path_buf(), String::new())];
     while let Some((dir, prefix)) = pending.pop() {
         solidcraft_io::vfs::check(&dir.to_string_lossy()).map_err(|e| unreadable(&dir, &e))?;
-        let mut entries: Vec<_> = std::fs::read_dir(&dir).map_err(|e| unreadable(&dir, &e))?.flatten().collect();
-        entries.sort_by_key(|e| e.file_name());
-        for entry in entries {
+        // Counted while listing, so one huge folder is not listed in full before the limit
+        // applies; an entry the listing cannot read is an error, not a file left out.
+        let mut entries = Vec::new();
+        for entry in std::fs::read_dir(&dir).map_err(|e| unreadable(&dir, &e))? {
+            let entry = entry.map_err(|e| unreadable(&dir, &e))?;
             let name = entry.file_name().to_string_lossy().into_owned();
             if name.starts_with('.') || (prefix.is_empty() && name == TESTS_FOLDER) {
                 continue;
@@ -83,7 +85,17 @@ fn read_folder(root: &Path) -> std::result::Result<Vec<safe_zip::File>, CheckPro
             if seen > super::MAX_FILES {
                 return Err(too_big(format!("the package holds more than {} files and folders", super::MAX_FILES)));
             }
-            let relative = format!("{prefix}{name}");
+            entries.push((name, entry));
+        }
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        for (name, entry) in entries {
+            let relative = safe_zip::checked_path(&format!("{prefix}{name}")).map_err(|reason| {
+                error_problem(
+                    "package",
+                    format!("{prefix}{name} has {reason}"),
+                    "Rename the file to a plain name: Install refuses a .zip entry with this name.",
+                )
+            })?;
             let kind = entry.file_type().map_err(|e| unreadable(&entry.path(), &e))?;
             if kind.is_symlink() {
                 return Err(error_problem(
@@ -164,7 +176,7 @@ fn fix_for(field: &str) -> String {
     };
     if field == "capabilities" {
         return format!(
-            "List the capabilities the plugin uses: \"commands@0.1\" for a command plugin, \"formats@0.1\" for an importer (with \"evaluate@0.1\" to check its result). This SolidCraft serves {}.",
+            "List the capabilities the plugin uses: \"commands@0.2\" for a command plugin, \"formats@0.2\" for an importer (with \"evaluate@0.2\" to check its result). This SolidCraft serves {}, and still runs plugins built for 0.1.",
             served()
         );
     }
@@ -321,7 +333,7 @@ pub fn check(session: &Session, path: &str) -> CheckResult {
             Severity::Warning,
             "runtime.limits.memory_mib",
             format!("asks for {} MiB of memory, over the app's ceiling of {} MiB", runtime.limits.memory_mib, ceilings.max_memory_mib),
-            "Install asks the user to approve the extra memory; a plugin copied in by hand runs only once the user raises the ceiling.",
+            "Install asks the user to allow the extra memory; a plugin copied in by hand runs only once the user raises Max plugin memory (MiB) in Preferences › Plugins (in solidcraft-cli, max_memory_mib in the --plugin-limits file).",
         ));
     }
     #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]

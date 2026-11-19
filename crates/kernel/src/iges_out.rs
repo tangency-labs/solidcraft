@@ -96,7 +96,9 @@ impl W {
         if let Some(d) = self.colors.get(&key) {
             return *d;
         }
-        let d = self.add(314, 0, vec![real(c[0] as f64 * 100.0), real(c[1] as f64 * 100.0), real(c[2] as f64 * 100.0), holl("")]);
+        // IGES 5.3 §4.76: CC1..CC3 as percentages, then an optional CNAME. There is no name, so
+        // the field is omitted (a Hollerith count is at least one, so `0H` is not an empty name).
+        let d = self.add(314, 0, vec![real(c[0] as f64 * 100.0), real(c[1] as f64 * 100.0), real(c[2] as f64 * 100.0)]);
         if let Some(e) = self.get_mut(d) {
             e.dependent = false;
         }
@@ -483,7 +485,13 @@ fn layout(w: &W, header: &StepHeader, max_coord: f64) -> String {
     }
     let f8 = |x: i64| format!("{x:>8}");
     for (k, e) in w.ents.iter().enumerate() {
-        let status = if e.dependent { "00010000" } else { "00000000" };
+        // Status (IGES 5.3 §2.2.4.4.9): blank, subordinate switch, entity use, hierarchy. A colour
+        // definition (314) is an independent entity with use flag 02, "definition" (§4.76).
+        let status = match (e.typ, e.dependent) {
+            (314, _) => "00000200",
+            (_, true) => "00010000",
+            (_, false) => "00000000",
+        };
         let a = format!("{}{}{}{}{}{}{}{}{status}", f8(e.typ), f8(pstart[k] as i64), f8(0), f8(0), f8(0), f8(0), f8(e.xform), f8(0));
         let b = format!("{}{}{}{}{}{}{}{:>8}{}", f8(e.typ), f8(0), f8(e.color), f8(pdata[k].len() as i64), f8(e.form), f8(0), f8(0), e.label, f8(0));
         line(&mut out, &a, 'D', 2 * k + 1);

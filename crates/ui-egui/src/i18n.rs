@@ -234,6 +234,15 @@ pub fn tr_engine_error(error: &str) -> String {
     use solidcraft_ui_text::{format, tr};
     // `EngineError::BadParams` carries `invalid parameters for `<command>`: ` in front.
     let text = error.strip_prefix("invalid parameters for `").and_then(|rest| rest.split_once("`: ")).map_or(error, |(_, text)| text);
+    for (english, id) in [
+        ("Boundary Fill cell points must be away from tool boundaries", "boundary_fill.error.boundary_point"),
+        ("Boundary Fill needs closed solid tools; open surface and mesh tools are not supported", "boundary_fill.error.closed_tools"),
+        ("Boundary Fill did not produce a closed solid cell", "boundary_fill.error.open_cell"),
+    ] {
+        if text == english {
+            return tr(id).to_string();
+        }
+    }
     if let Some((name, ids)) = text
         .strip_prefix("ambiguous component `")
         .and_then(|rest| rest.strip_suffix("; use a numeric component ID"))
@@ -322,6 +331,22 @@ mod tests {
     }
 
     #[test]
+    fn a_plugin_failure_is_worded_from_the_catalog_and_the_cli_english_matches_it() {
+        use solidcraft_engine::plugin::{PluginFailure, messages::MESSAGES};
+        install();
+        for (id, english) in MESSAGES {
+            assert_eq!(Locale::for_language("en").text(id), *english, "{id}: the engine's English is the catalog's");
+        }
+        let failure = PluginFailure {
+            plugin: "Dutchman".into(),
+            file: Some("cube.f3d".into()),
+            error: solidcraft_engine::plugin::HostError::OverCeiling { limit: "memory_mib".into(), requested: 2048, allowed: 128 },
+        };
+        let _scope = scope("de");
+        assert!(failure.text().starts_with("Dutchman konnte cube.f3d nicht öffnen: Es verlangt 2048 MiB Arbeitsspeicher, Plugins dürfen 128 MiB"));
+    }
+
+    #[test]
     fn component_ambiguity_is_translated_without_truncating_names() {
         install();
         let _scope = scope("de");
@@ -331,6 +356,23 @@ mod tests {
         assert_eq!(super::tr_engine_error(&message), expected);
         assert_eq!(super::tr_engine_error(&format!("invalid parameters for `component.delete`: {message}")), expected);
         assert_eq!(super::tr_engine_error("another error"), "another error");
+    }
+
+    #[test]
+    fn boundary_fill_refusals_are_translated() {
+        install();
+        let _scope = scope("de");
+        for (english, id) in [
+            ("Boundary Fill cell points must be away from tool boundaries", "boundary_fill.error.boundary_point"),
+            ("Boundary Fill needs closed solid tools; open surface and mesh tools are not supported", "boundary_fill.error.closed_tools"),
+            ("Boundary Fill did not produce a closed solid cell", "boundary_fill.error.open_cell"),
+        ] {
+            assert_eq!(Locale::for_language("en").text(id), english);
+            let expected = Locale::for_language("de").text(id);
+            assert_ne!(expected, english);
+            assert_eq!(super::tr_engine_error(english), expected);
+            assert_eq!(super::tr_engine_error(&format!("invalid parameters for `solid.boundary_fill`: {english}")), expected);
+        }
     }
 
     #[test]
@@ -838,6 +880,7 @@ mod tests {
             include_str!("documents.rs"),
             include_str!("dialogs.rs"),
             include_str!("browser.rs"),
+            include_str!("browser_search.rs"),
             include_str!("sketch_palette.rs"),
             include_str!("design_properties.rs"),
             include_str!("home.rs"),
@@ -1587,6 +1630,7 @@ mod tests {
         KitCall { name: "search_field", args: &[3], id: false, trim: &[] },
         KitCall { name: "menu_filter", args: &[3], id: false, trim: &[] },
         KitCall { name: "placement_field", args: &[3], id: false, trim: &[] },
+        KitCall { name: "canvas_value_field", args: &[4], id: false, trim: &[] },
         KitCall { name: "library_cell", args: &[3], id: false, trim: &[] },
         // actions.rs
         KitCall { name: "icon_button_at", args: &[3], id: false, trim: &[] },

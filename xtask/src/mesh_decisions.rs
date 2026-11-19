@@ -48,11 +48,13 @@ pub const SKIPPED_MODULES: &[(&str, &str)] = &[
     ("crates/engine/src/cmd/silhouette.rs", "a picture's view-aligned silhouette of the display meshes"),
     ("crates/engine/src/cmd/surface_analysis.rs", "view analyses: zebra, draft and curvature shading of the display mesh"),
     ("crates/engine/src/cosmetic_threads.rs", "cosmetic thread hatching drawn on the displayed triangles"),
+    ("crates/engine/src/drawing_view_lines.rs", "a drawing's view lines and their counts, from display meshes"),
     ("crates/engine/src/fuzz.rs", "the fuzz harness, which frames what it built"),
     ("crates/engine/src/mesh_lines/meshes.rs", "a drawing's view lines from display meshes"),
     ("crates/engine/src/mesh_lines/scene.rs", "a drawing's hidden-line occlusion over display meshes"),
     ("crates/engine/src/product_scene.rs", "the scene a rendered picture draws"),
     ("crates/engine/src/render_jobs.rs", "rendered pictures"),
+    ("crates/engine/src/schema/drawing_view.rs", "the counts of a drawing's view lines from display meshes"),
     ("crates/engine/src/slicer_files.rs", "the mesh export a 3D-printing slicer opens"),
     ("crates/engine/src/snap.rs", "the pointer's snap preview over the display mesh"),
     ("crates/engine/src/view.rs", "the viewport's meshes, edges and highlights"),
@@ -96,6 +98,7 @@ pub const SKIPPED_FUNCTIONS: &[(&str, &str)] = &[
     ("crates/kernel/src/body.rs:Body::mesh_untimed", "the mesher: a body's tessellation"),
     ("crates/kernel/src/body.rs:Body::retained_bytes", "the evaluation cache's memory estimate"),
     ("crates/kernel/src/body.rs:Body::unmeshed_faces", "the mesher's report of faces it left out"),
+    ("crates/kernel/src/step_in/records.rs:mesh_part", "mesh bodies: an imported part given as triangles, checked and made a mesh body"),
 ];
 
 /// What a function does with a mesh, the patterns the check matches:
