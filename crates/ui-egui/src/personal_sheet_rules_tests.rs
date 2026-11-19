@@ -56,11 +56,11 @@ fn settle_manager(h: &mut Harness) {
         h.frame();
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
-    let at = |h: &Harness| crate::scenario::handle_at("dialog:sheet.personal_rules:save");
+    let at = || crate::scenario::handle_at("dialog:sheet.personal_rules:save");
     let mut last = None;
     for _ in 0..240 {
         h.frame();
-        let now = at(h);
+        let now = at();
         if now.is_some() && now == last {
             return;
         }
