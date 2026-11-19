@@ -20,7 +20,8 @@
 //!   ([`crate::trims_on_edges`], rounded interval arithmetic). A trim on another edge that
 //!   does not is compared with main's run's record of that edge use (`OFF_TRIMS`): main's
 //!   where its record block (type, interval and five samples) is main's, bit for bit; else
-//!   added by this branch, which fails unless the entry names the issue tracking it.
+//!   added by this branch, which fails unless the entry names the issue tracking it and
+//!   the trim's record block is, bit for bit, the one listed for this branch.
 //! * **Moved values.** Each listed moved value is a coordinate of an edge curve's sample
 //!   point or of a vertex, or a vertex's tolerance. A point, main's and this branch's, has its
 //!   distance to each surface of the faces it lies on enclosed
@@ -528,14 +529,15 @@ include!("operand_trim_rows/level2_main.rs");
 /// row's case and body prefix, the edge use in `topology.brep_mirror`'s record order (the
 /// edge's index in `p1::edges`, the use's in its `edgeuses`), the record block main's
 /// (7d4445c0c) run wrote for that use ([`crate::units::topology_brep_mirror::curve_samples`];
-/// `[-1.0]`: no trim), and, where this branch's trim is not main's, the issue that tracks it.
+/// `[-1.0]`: no trim), and, where this branch's trim is not main's, the issue that tracks it
+/// and the record block this branch writes for that use, which the trim must keep.
 struct OffTrim {
     case: &'static str,
     prefix: &'static str,
     edge: usize,
     edge_use: usize,
     main: &'static [f64],
-    added: Option<&'static str>,
+    added: Option<(&'static str, &'static [f64])>,
 }
 
 include!("operand_trim_rows/off_trims.rs");
@@ -954,7 +956,7 @@ pub(crate) fn certify_body(
                 );
                 main_off += 1;
             } else {
-                let issue = entry.added.unwrap_or_else(|| {
+                let (issue, listed_now) = entry.added.unwrap_or_else(|| {
                     panic!(
                         "{name} {prefix}: edge {edge} use {edge_use}: a trim off its edge's \
                          tolerance on an untouched edge, not main's (main recorded {:?}): \
@@ -962,6 +964,12 @@ pub(crate) fn certify_body(
                         entry.main
                     )
                 });
+                assert_eq!(
+                    bits(&now),
+                    bits(listed_now),
+                    "{name} {prefix}: edge {edge} use {edge_use}: a tracked added trim ({issue}) \
+                     changed: {now:?}"
+                );
                 eprintln!(
                     "  trim of edge {edge} use {edge_use} (face {:?}): bound {:e} over its \
                      edge's tolerance {:e} on an untouched edge, added by this branch (main \
