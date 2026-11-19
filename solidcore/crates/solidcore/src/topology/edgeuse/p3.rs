@@ -1881,10 +1881,14 @@ fn other_trims_bound(
 /// leaves it (`heal.stitch_p2` cov_tjunc8: a face joined 2.43e-4 from the kept curve under a
 /// tolerance of 2.18e-4).
 ///
-/// The raise is to a proved bound, so it covers the face whatever the bound's slack; it is not
-/// capped by the join's own distance, which the stitch samples rather than proves (five or ten
-/// points, none for two lines): on cov_tjunc8 that distance is 0 and the deleted edge's
-/// tolerance 1e-5, where the kept curve is 2.43e-4 from the face.
+/// `reach` is the farthest the join can have put the kept curve from a face the deleted edge's
+/// tolerance covered: the stitch's tolerance (it joins only curves it finds within it) plus
+/// that edge's tolerance. A bound past it is the enclosure's slack, not the face's distance,
+/// and is not raised to: the face is then left as upstream leaves it (`primitive.api_primitives`
+/// gen0353: a face 1.2e-7 from the kept curve by samples, bounded at 4.76e4 where its nearest
+/// points are not followed). The join's own distance is no reach: the stitch samples it (five
+/// or ten points, none for two lines), and on cov_tjunc8 it is 0 under a deleted-edge
+/// tolerance of 1e-5, where the kept curve is 2.43e-4 from the face.
 ///
 /// # Errors
 ///
@@ -1894,6 +1898,7 @@ pub(crate) fn cover_joined_faces(
     b: &mut Brep,
     e: EdgeId,
     faces: &[FaceId],
+    reach: f64,
 ) -> Result<()> {
     let mut trimmed: Vec<FaceId> = Vec::new();
     for &x in &b.edge(e)?.edgeuses {
@@ -1917,8 +1922,8 @@ pub(crate) fn cover_joined_faces(
         }
         let tol = b.edge(e)?.tolerance;
         let fit = fit_tolerance(k, b, e)?;
-        match edge_face_gap_bound(k, b, e, f, fit, [tol, f64::INFINITY])? {
-            Some(gap) if gap.is_finite() && gap > tol => {
+        match edge_face_gap_bound(k, b, e, f, fit, [tol, reach])? {
+            Some(gap) if gap.is_finite() && gap > tol && gap <= reach => {
                 crate::topology::edge::set_tolerance(b, e, gap, true, true)?;
             }
             _ => {}

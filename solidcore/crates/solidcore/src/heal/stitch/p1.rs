@@ -1080,12 +1080,14 @@ impl<'c> Stitch<'c> {
         delete: EdgeId,
         inside: Option<&[FaceuseId]>,
     ) -> Result<()> {
-        // (the faces the join gives `keep`: not upstream, #18166)
+        // (the faces the join gives `keep`, and the farthest the stitch joins them from its
+        // curve: not upstream, #18166)
         let joined = if keep == delete {
             Vec::new()
         } else {
             edge::faces(b, delete, None)?
         };
+        let reach = (self.tol_3d + edge::tolerance(b, delete)?) * (1.0 + 4.0 * f64::EPSILON);
         // (an edit context's glue searches at each closed shell, as upstream)
         if let Some(edits) = self.edits.as_deref_mut() {
             edits.glue_edges(k, b, keep, orientation, dist, nest, delete, inside)?;
@@ -1094,11 +1096,11 @@ impl<'c> Stitch<'c> {
         }
         // Not upstream (#18166): the join keeps `keep`'s curve for the deleted edge's faces,
         // which the deleted edge's own tolerance covered; the tolerance is raised to cover the
-        // kept curve's proved distance to each of them that holds no trim
+        // kept curve's proved distance to each of them that holds no trim, up to `reach`
         // ([`crate::topology::edgeuse::p3::cover_joined_faces`]). The glue is done: a cover
         // that fails leaves the tolerance as upstream leaves it.
         ignored(crate::topology::edgeuse::p3::cover_joined_faces(
-            k, b, keep, &joined,
+            k, b, keep, &joined, reach,
         ))?;
         Ok(())
     }
