@@ -993,7 +993,7 @@ pub(super) fn lift(s: &mut Session, p: &Value, cmd: &str, curves: &[String], poi
     let inverse = inverse_owner_frame(s, p, cmd)?;
     let comp = move |q: Vec2| solidcraft_doc::apply_point(&inverse, plane.to_world(q));
     let shift = solidcraft_doc::apply_vector(&inverse, offset);
-    edit(s, p, cmd, false, |sk, _| {
+    edit(s, p, cmd, false, |sk, doc| {
         needs_3d(sk, cmd)?;
         let mut which = Vec::new();
         for c in curves {
@@ -1064,6 +1064,7 @@ pub(super) fn lift(s: &mut Session, p: &Value, cmd: &str, curves: &[String], poi
                 sk.move_drawn_point(w, *k, now + shift)?;
             }
         }
+        join_in(sk, doc, id, &made)?;
         Ok(made)
     })
 }
