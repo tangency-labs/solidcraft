@@ -77,7 +77,9 @@ pub fn sdf_model(doc: &Document, world: &ModelState, options: &SdfOptions) -> Re
     if sel.is_empty() && options.decals.is_empty() {
         return Err(IoError::Empty);
     }
-    let (meshed, mut warnings) = crate::per_placed_body(&sel, |b, body| crate::body_mesh(b, body, options.quality))?;
+    // A model of decals alone has no bodies to mesh, which `per_placed_body` refuses as empty.
+    let (meshed, mut warnings) =
+        if sel.is_empty() { (Vec::new(), Vec::new()) } else { crate::per_placed_body(&sel, |b, body| crate::body_mesh(b, body, options.quality))? };
     let uri = |file: &str| if options.model_uris { format!("model://{}/{file}", options.folder) } else { file.to_string() };
     let mut out = SdfPackage::default();
     let mut names = Names::default();
