@@ -490,7 +490,181 @@ pub fn check_and_fix_uv_trim_curves(k: &Kernel, b: &mut Brep) -> Result<()> {
             let _ = eu1::set_uv_trim_curve(b, eu, UvTrimCurveArg::Null, 0.0, true, None)?;
         }
     }
+    // not upstream: the check compares only a trim's ends with its edge's, so a kept trim
+    // could stray from its edge inside by more than the edge tolerance
+    cover_kept_uv_trim_curves(k, b)
+}
+
+/// Not upstream: after [`check_and_fix_uv_trim_curves`]'s end check, every UV trim curve an
+/// edge use keeps is held to its edge by a proved bound. `sm_CheckUVTrimCurve` compares only
+/// a trim's two ends with the edge's ends and vertices, so a trim whose image on the face
+/// runs away from the edge between its ends was kept with the edge tolerance below that
+/// gap (`Fillet/sphere_plane.smb` edge 3: the sphere's trim 4.4e-5 off and the plane's
+/// 1.3e-3 off, against 1.85e-5).
+///
+/// For each edge use's own trim `W`,
+/// [`trim_gap_bound`](crate::query::curve_surface_gap::polynomial_pieces::trim_gap_bound)
+/// encloses `sup |C(t) − S(W(t))|` over the edge interval, `C` the edge's curve and `S` the
+/// face's surface (its net, plus the net's own bound for a surface kept as a definition's
+/// net): the same-parameter gap the trim's users read it with. A gap within the edge
+/// tolerance is enclosed only as far as that.
+///
+/// 1. A trim whose bound is over the edge tolerance is replaced by the trim
+///    `GetOrCreateUVTrimCurve` makes from the edge when the edge then needs a smaller
+///    tolerance: the larger of the tolerance the rebuild leaves and the rebuilt trim's own
+///    bound, against the kept trim's bound. The rebuild is tried on a copy of the B-rep
+///    ([`Brep::with_rollback_untouched`]) and kept only when it needs less. Either way the
+///    edge ends with the least tolerance that a proved bound holds the trim within.
+/// 2. Every edge tolerance is then raised to cover the bound of each trim the edge's uses
+///    keep (and the vertex tolerances to the edge's, `SetTolerance`'s cascade); the geometry
+///    is untouched. A trim whose gap cannot be enclosed (a curve or surface with no NURB
+///    form, a trim that cannot be evaluated over the interval) is dropped, as the end check
+///    drops a trim it refuses, and is made again when it is next asked for.
+///
+/// Both passes run after every end check, so the raised tolerances do not change which trims
+/// the end check keeps. Each gap is enclosed once, in the first pass; only the uses of an edge
+/// whose trim was made again are enclosed again (a proved gap does not depend on the
+/// tolerance, which decides only how tightly it is enclosed).
+fn cover_kept_uv_trim_curves(k: &Kernel, b: &mut Brep) -> Result<()> {
+    let mut gaps = Vec::new();
+    // edges whose trim was made again: their uses' gaps are enclosed again below
+    let mut rebuilt = Vec::new();
+    for eu in edgeuses(b, None)? {
+        let gap = kept_trim_gap(k, b, eu)?;
+        if let KeptTrimGap::Bounded(e, g) = gap {
+            if g > edge::tolerance(b, e)? {
+                let tried = b.with_rollback_untouched(
+                    |copy| rebuilt_trim_tolerance(k, copy, eu, e),
+                    |r| matches!(r, Ok(Some(t)) if *t < g),
+                );
+                match tried {
+                    Err(err) if err.is_unported_or_cancelled() => return Err(err),
+                    Ok(Some(t)) if t < g => rebuilt.push(e),
+                    // a rebuild that needs no less, or a copy that cannot be made: the kept
+                    // trim is covered below
+                    Ok(_) | Err(_) => {}
+                }
+            }
+        }
+        gaps.push((eu, gap));
+    }
+    for (eu, gap) in gaps {
+        let gap = match (eu1::edge(b, eu)?, gap) {
+            (Some(e), _) if rebuilt.contains(&e) => kept_trim_gap(k, b, eu)?,
+            (_, gap) => gap,
+        };
+        match gap {
+            KeptTrimGap::NoTrim => {}
+            KeptTrimGap::Bounded(e, gap) => {
+                if gap > edge::tolerance(b, e)? {
+                    edge::set_tolerance(b, e, gap, true, true)?;
+                }
+            }
+            KeptTrimGap::Unbounded => {
+                let _ = eu1::set_uv_trim_curve(b, eu, UvTrimCurveArg::Null, 0.0, true, None)?;
+            }
+        }
+    }
     Ok(())
+}
+
+/// The tolerance edge `e` needs with edge use `eu`'s trim dropped and made again from the
+/// edge (`GetOrCreateUVTrimCurve`): the larger of the tolerance the rebuild leaves and the
+/// rebuilt trim's proved bound ([`cover_kept_uv_trim_curves`]). `None` when no trim is made
+/// or its gap is not enclosed.
+///
+/// # Errors
+///
+/// The kernel's unported and cancelled statuses; any other failure is `None`.
+fn rebuilt_trim_tolerance(
+    k: &Kernel,
+    b: &mut Brep,
+    eu: EdgeuseId,
+    e: EdgeId,
+) -> Result<Option<f64>> {
+    let rebuilt = (|| -> Result<Option<f64>> {
+        let _ = eu1::set_uv_trim_curve(b, eu, UvTrimCurveArg::Null, 0.0, true, None)?;
+        if eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?
+            .status
+            .is_err()
+        {
+            return Ok(None);
+        }
+        let Some(owner) = eu1::uv_trim_curve(b, eu)?.1 else {
+            return Ok(None);
+        };
+        Ok(match kept_trim_gap(k, b, owner)? {
+            KeptTrimGap::Bounded(_, gap) => Some(gap.max(edge::tolerance(b, e)?)),
+            KeptTrimGap::NoTrim | KeptTrimGap::Unbounded => None,
+        })
+    })();
+    match rebuilt {
+        Err(err) if err.is_unported_or_cancelled() => Err(err),
+        Ok(t) => Ok(t),
+        Err(_) => Ok(None),
+    }
+}
+
+/// What [`kept_trim_gap`] finds for an edge use.
+enum KeptTrimGap {
+    /// The edge use holds no trim of its own.
+    NoTrim,
+    /// The proved bound on the gap between the trim's image and its edge's curve.
+    Bounded(EdgeId, f64),
+    /// The gap is not enclosed.
+    Unbounded,
+}
+
+/// The proved same-parameter gap of edge use `eu`'s own UV trim curve to its edge's curve
+/// ([`cover_kept_uv_trim_curves`]).
+fn kept_trim_gap(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<KeptTrimGap> {
+    use crate::query::curve_surface_gap::polynomial_pieces::trim_gap_bound;
+    use edge as ed;
+
+    let Some(trim) = eu1::uv_trim_curve_pointer(b, eu)? else {
+        return Ok(KeptTrimGap::NoTrim);
+    };
+    let (Some(e), Some(f)) = (eu1::edge(b, eu)?, eu1::face(b, eu)?) else {
+        return Ok(KeptTrimGap::Unbounded);
+    };
+    let (Some(curve), Some(surface)) = (ed::curve(b, e)?, face2::surface(b, f)?) else {
+        return Ok(KeptTrimGap::Unbounded);
+    };
+    let (Some(c), Some(w)) = (nurb_form(curve)?, nurb_form(trim)?) else {
+        return Ok(KeptTrimGap::Unbounded);
+    };
+    // the net's own distance from a definition it is kept for (0 for a plain net)
+    let net_bound = surface.procedural_definition().map_or(0.0, |d| d.bound());
+    if !(net_bound >= 0.0 && net_bound.is_finite()) {
+        return Ok(KeptTrimGap::Unbounded);
+    }
+    let tol = ed::tolerance(b, e)?;
+    let ivl = ed::interval(b, e)?;
+    let floor = tol / 100.0;
+    // a gap this small is all the covers need to know: with the net's bound and the sum's
+    // rounding below, it is within the tolerance
+    let accept = tol / (1.0 + 8.0 * f64::EPSILON) - net_bound;
+    let range = [ivl.min(), ivl.max()];
+    let Some(gap) = trim_gap_bound(k, &c, &w, surface, range, floor, accept)? else {
+        return Ok(KeptTrimGap::Unbounded);
+    };
+    // the sum's rounding, covered
+    let bound = (gap + net_bound) * (1.0 + 4.0 * f64::EPSILON);
+    if !bound.is_finite() {
+        return Ok(KeptTrimGap::Unbounded);
+    }
+    Ok(KeptTrimGap::Bounded(e, bound))
+}
+
+/// The B-spline form of `c` that [`trim_gap_bound`] encloses: a line's B-spline part made
+/// with its NURB, the B-spline part of any other curve that is one (`None` for the rest).
+///
+/// [`trim_gap_bound`]: crate::query::curve_surface_gap::polynomial_pieces::trim_gap_bound
+fn nurb_form(c: &Curve) -> Result<Option<std::borrow::Cow<'_, BSplineCurve>>> {
+    Ok(match c.kind() {
+        CurveKind::Line(l) => Some(l.base_with_nurb()?),
+        _ => c.b_spline_base().map(std::borrow::Cow::Borrowed),
+    })
 }
 
 /// `SwapUV`: claims an unlocked mark and swaps the UV parameterisation of every face
@@ -3684,6 +3858,77 @@ mod tests {
                 [Some(NotifyArg::Entity(EntityRef::Edge(e))), None, None],
             )
             .unwrap();
+        }
+    }
+
+    /// Every UV trim curve a read keeps lies within its edge's tolerance of the edge, by a
+    /// proved bound (`trim_gap_bound` with nothing accepted early, closed to a thousandth of
+    /// the tolerance). The read's end check (`sm_CheckUVTrimCurve`) compares only a trim's
+    /// ends: without [`cover_kept_uv_trim_curves`], `Defeature/LShape_I.smb` keeps the trims
+    /// of edge uses 242 and 246 bounded at 1.1458e-5 from their edges under a tolerance of
+    /// 1e-5.
+    #[test]
+    fn every_kept_trim_is_within_its_edge_tolerance() {
+        use crate::query::curve_surface_gap::polynomial_pieces::trim_gap_bound;
+        use crate::topology::database_io::FileType;
+        use crate::topology::loopuse::notify_ref;
+        use crate::topology::topology::NotifyRecords;
+        for name in ["Defeature/LShape_I.smb"] {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../upstream/TestFiles/pt_TestFiles")
+                .join(name);
+            let bytes = std::fs::read(path).unwrap();
+            let mut k = Kernel::default();
+            let mut b = Brep::new_with_infinite_region().unwrap();
+            let mut records = NotifyRecords::new();
+            let mut attributes = AttributeStore::default();
+            let mut env = crate::topology::brep::p10::TopologyEnv {
+                all_attributes: &[],
+                attributes: &mut attributes,
+                key_of: &notify_ref,
+                records: &mut records,
+                next_key: 1 << 50,
+            };
+            crate::topology::brep::p7::read_from_file(
+                &mut k,
+                &mut b,
+                bytes,
+                FileType::Ascii,
+                false,
+                &mut env,
+            )
+            .unwrap();
+            let mut kept = 0;
+            let mut failures = Vec::new();
+            for eu in edgeuses(&b, None).unwrap() {
+                let Some(trim) = eu1::uv_trim_curve_pointer(&b, eu).unwrap() else {
+                    continue;
+                };
+                kept += 1;
+                let e = eu1::edge(&b, eu).unwrap().unwrap();
+                let f = eu1::face(&b, eu).unwrap().unwrap();
+                let s = face2::surface(&b, f).unwrap().unwrap();
+                let c = edge::curve(&b, e).unwrap().unwrap();
+                let tol = edge::tolerance(&b, e).unwrap();
+                let i = edge::interval(&b, e).unwrap();
+                let net = s.procedural_definition().map_or(0.0, |d| d.bound());
+                let gap = match (nurb_form(c).unwrap(), nurb_form(trim).unwrap()) {
+                    (Some(c), Some(w)) => {
+                        let range = [i.min(), i.max()];
+                        trim_gap_bound(&k, &c, &w, s, range, tol / 1000.0, 0.0).unwrap()
+                    }
+                    _ => None,
+                };
+                match gap {
+                    Some(g) if g + net <= tol => {}
+                    _ => failures.push(format!(
+                        "{name} eu {}: gap {gap:?} net {net:e} tolerance {tol:e}",
+                        eu.index()
+                    )),
+                }
+            }
+            assert!(kept > 0, "{name}: no trims kept");
+            assert!(failures.is_empty(), "{failures:#?}");
         }
     }
 }
