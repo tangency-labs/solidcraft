@@ -5405,3 +5405,52 @@ fn a_hex_rim_rounded_at_its_corner_rounds_radius_closes_on_six_spheres() {
         before - after
     );
 }
+
+/// #19502: a 1 thick wall (x 0…50, z 9…10) joined on a 1 thick plate (x −1…0, z 0…10), the
+/// wall's end flush with the plate's side (y = 0) and its top with the plate's top (z = 10).
+/// Both long edges of the wall's end, rounded half its thickness, are a full round: the two
+/// rounds' rails meet along z = 9.5 from x = 0 to 50, where the lower round ends on the
+/// plate, while the top round runs on over the plate's top to x = −1. Each round takes
+/// (1 − π/4) r² of the section along its edge (51 and 50 long), so the volume is
+/// 1200 − (1 − π/4) r² · 101 at every r up to 0.5, the full round included.
+///
+/// With a second plate at the wall's other end (x 50…51) the top round runs 52 long and its
+/// rail meets the lower one's in its middle third: 1400 − (1 − π/4) r² · 102. Both in either
+/// order of the edges.
+#[test]
+fn a_full_round_whose_rails_meet_along_part_of_one_of_them() {
+    solidcore_ops::session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
+    // (plates' corners in x, volume before rounding, top edge's length)
+    let parts: [(&[f64], f64, f64); 2] = [(&[-1.0], 1200.0, 51.0), (&[-1.0, 50.0], 1400.0, 52.0)];
+    for (plates, volume, top) in parts {
+        for reversed in [false, true] {
+            for r in [0.25, 0.4999, 0.5] {
+                let case = format!("plates {plates:?}, reversed {reversed}, r {r}");
+                let mut b = make_box([0.0, 0.0, 9.0], [50.0, 20.0, 1.0]).unwrap();
+                for &x in plates {
+                    let plate = make_box([x, 0.0, 0.0], [1.0, 20.0, 10.0]).unwrap();
+                    b = solidcore_ops::boolean::boolean(b, plate, solidcore_ops::BooleanOp::Union)
+                        .unwrap()
+                        .unwrap();
+                }
+                let mut edges = [
+                    edge_at(&b, [25.0, 0.0, 10.0]),
+                    edge_at(&b, [25.0, 0.0, 9.0]),
+                ];
+                if reversed {
+                    edges.reverse();
+                }
+                blend(&b, Blend::Round, &edges, &[r, r], &[], Corners::Filled)
+                    .unwrap_or_else(|e| panic!("{case}: {e:?}"));
+                let report = b.check(CheckLevel::All).unwrap();
+                assert!(report.is_valid(), "{case}: {report}");
+                let want = volume - (1.0 - PI / 4.0) * r * r * (top + 50.0);
+                let got = b.volume(1e-11).unwrap();
+                assert!(
+                    (got - want).abs() <= 1e-9 * want,
+                    "{case}: {got} vs closed form {want}"
+                );
+            }
+        }
+    }
+}

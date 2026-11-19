@@ -1117,7 +1117,7 @@
 {"case":"sphere_vertex0_bnd","deferred":null,"error":null,"ints":{},"topology":null,"values":{"classify":[0.0,104.0,3.0,0.0,0.0,1e-6,1e+20,0.0,0.0,0.0,1.0,0.0,-1.0]}}
 {"case":"sphere_vertex0_region","deferred":null,"error":null,"ints":{},"topology":null,"values":{"classify":[1001.0,100.0,0.0,-1.0,0.0,1e-6,1e+20,0.0,0.0,0.0,0.0,0.0,-1.0]}}
 {"case":"sphere_vertex3_off_bnd","deferred":null,"error":null,"ints":{},"topology":null,"values":{"classify":[0.0,104.0,3.0,1.0,1.7320508091879482e-7,1e-6,1e+20,0.0,0.0,0.0,1.0,0.0,-1.0]}}
-{"case":"sphere_vertex3_off_region","deferred":null,"error":null,"ints":{},"topology":null,"values":{"classify":[0.0,101.0,4.0,1.0,0.0,1e-6,1e+20,0.0,0.0,0.0,0.0,0.0,-1.0]}}
+{"case":"sphere_vertex3_off_region","deferred":null,"error":null,"ints":{},"topology":null,"values":{"classify":[0.0,101.0,4.0,0.0,0.0,1e-6,1e+20,0.0,0.0,0.0,0.0,0.0,-1.0]}}
 {"case":"surface_below_u_derivatives","deferred":null,"error":null,"ints":{},"topology":null,"values":{"p_du_dv":[101.5,-202.25,303.125,-404.0,505.5,-606.75,707.0,-808.5,909.25],"status":[1007.0]}}
 {"case":"surface_below_u_normal","deferred":null,"error":null,"ints":{},"topology":null,"values":{"p_du_dv":[101.5,-202.25,303.125,-404.0,505.5,-606.75,707.0,-808.5,909.25],"status":[1007.0]}}
 {"case":"surface_below_u_point","deferred":null,"error":null,"ints":{},"topology":null,"values":{"p_du_dv":[101.5,-202.25,303.125,-404.0,505.5,-606.75,707.0,-808.5,909.25],"status":[1007.0]}}
