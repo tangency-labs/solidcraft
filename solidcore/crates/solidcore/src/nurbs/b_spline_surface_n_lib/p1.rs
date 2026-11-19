@@ -17,6 +17,7 @@
 //! | [`create_coons_srf`], [`CoonsWarning`]                | `sm_CreateCoonsSrf` (static)                     |
 //! | [`BSplineSurface::create_coons_patch`], [`BSplineSurface::create_coons_patch_on_faces`] | `CreateCoonsPatch` |
 //! | `face_side_twist` (private)                           | the fork's `sm_FaceSideTwist` (static)           |
+//! | `set_end_derivatives` (private)                       | none (WR-613)                                    |
 //! | [`BSplineSurface::join_surface`]                      | `JoinSurface`                                    |
 //! | [`BSplineSurface::create_n_sided_patch`]              | `CreateNSidedPatch`                              |
 //! | [`BSplineSurface::create_ruled_surface`]              | `CreateRuledSurface`                             |
@@ -78,7 +79,10 @@
 //! - **Face sides** (not upstream; WR-613, the fork's tangency-labs/smlib@7fd9fb0):
 //!   [`create_coons_srf`] and [`BSplineSurface::create_coons_patch_on_faces`] take the
 //!   fork's `lFaceSides` bits ([`COONS_FACE_LEFT`] ..), which give a corner between a
-//!   face side and another side that side's twist; `0` (all
+//!   face side and another side that side's twist, and the collapsed-side bits
+//!   ([`COONS_APEX_LEFT`] ..), which give a degenerate side's cross-boundary derivative its
+//!   neighbours' cross-boundary derivative derivatives at its ends (`set_end_derivatives`),
+//!   so a triangular patch's apex is G1 to both neighbours; `0` (all
 //!   [`BSplineSurface::create_coons_patch`] callers) is upstream.
 //! - **`CreateNSidedPatch`** unitizes the caller's center normal in place, as upstream
 //!   (`Unitize`'s status is ignored, so a zero vector becomes `(0, 0, 1)`).
@@ -380,6 +384,55 @@ pub const COONS_FACE_BOTTOM: u32 = 4;
 /// [`create_coons_srf`]'s face-side bit for the top boundary curve (`bt[1]`).
 pub const COONS_FACE_TOP: u32 = 8;
 
+/// [`create_coons_srf`]'s collapsed-side bit for the left boundary curve (`lr[0]`): a
+/// degenerate side (a triangular patch's apex) whose cross-boundary derivative takes its
+/// neighbours' cross-boundary derivative derivatives at its ends. Not upstream (WR-613).
+pub const COONS_APEX_LEFT: u32 = 16;
+/// [`COONS_APEX_LEFT`] for the right boundary curve (`lr[1]`).
+pub const COONS_APEX_RIGHT: u32 = 32;
+/// [`COONS_APEX_LEFT`] for the bottom boundary curve (`bt[0]`).
+pub const COONS_APEX_BOTTOM: u32 = 64;
+/// [`COONS_APEX_LEFT`] for the top boundary curve (`bt[1]`).
+pub const COONS_APEX_TOP: u32 = 128;
+
+/// Sets the first derivatives of the non-rational curve `der` at its two ends to `d0` and
+/// `d1` by moving its second and last but one control points (`C'(u_0) = p (P_1 - P_0) /
+/// (U_{p+1} - U_1)`, likewise at the end); the end points stay. Not upstream (WR-613).
+fn set_end_derivatives(der: &mut Curve, d0: Vec3, d1: Vec3) -> Result<()> {
+    const OP: &str = OP_COONS_SRF;
+    let (n, p) = (der.n(), der.degree());
+    if p == 0 || n < 3 {
+        return Err(invalid(
+            OP,
+            "a collapsed side's derivative curve has too few control points",
+        ));
+    }
+    let knot = |i: usize| {
+        der.knots()
+            .get(i)
+            .copied()
+            .ok_or_else(|| invalid(OP, "knot index out of range"))
+    };
+    let pf = p as f64;
+    let h0 = (knot(p + 1)? - knot(1)?) / pf;
+    let h1 = (knot(n + p)? - knot(n)?) / pf;
+    let (p0, pn) = (cpt_of(der, 0)?, cpt_of(der, n)?);
+    let pts = der.cpts_mut();
+    let q1 = pts
+        .get_mut(1)
+        .ok_or_else(|| invalid(OP, "control point index out of range"))?;
+    q1.x = p0.x + h0 * d0.x;
+    q1.y = p0.y + h0 * d0.y;
+    q1.z = p0.z + h0 * d0.z;
+    let qn = pts
+        .get_mut(n - 1)
+        .ok_or_else(|| invalid(OP, "control point index out of range"))?;
+    qn.x = pn.x - h1 * d1.x;
+    qn.y = pn.y - h1 * d1.y;
+    qn.z = pn.z - h1 * d1.z;
+    Ok(())
+}
+
 /// The fork's `sm_FaceSideTwist` (WR-613): the twist at a Coons corner between a u side
 /// (`(u_bit, u_twist)`, its bit and twist) and a v side (`(v_bit, v_twist)`) when
 /// exactly one of them lies on a face of the body (`face_sides`): the other (the
@@ -445,7 +498,11 @@ fn bezier_knots() -> Vec<f64> {
 /// the boundary curves that lie on a face of the body ([`COONS_FACE_LEFT`],
 /// [`COONS_FACE_RIGHT`], [`COONS_FACE_BOTTOM`], [`COONS_FACE_TOP`]): a corner between
 /// one of them and an unmarked side takes the unmarked side's twist, so the patch meets
-/// the marked side's cross-boundary derivative there. `0` is upstream.
+/// the marked side's cross-boundary derivative there. The collapsed-side bits
+/// ([`COONS_APEX_LEFT`] ..; not upstream either) mark a degenerate boundary curve whose
+/// cross-boundary derivative's end derivatives are set to its neighbours' cross-boundary
+/// derivative derivatives (after the rescaling), so the twists at its corners are
+/// compatible. `0` is upstream.
 ///
 /// Returns the surface and the warning level.
 ///
@@ -523,6 +580,28 @@ pub fn create_coons_srf(
     let cd2 = deriv1(&lr[1], vs)?;
     if match_cross_derivative(&mut bt[3], u0, ur, cd1, cd2, mtol)? {
         warning = CoonsWarning::CornerMismatch;
+    }
+
+    // Not upstream (WR-613): a collapsed side's cross-boundary derivative (a triangular
+    // patch's apex fan) takes its neighbours' cross-boundary derivative derivatives at its
+    // ends, so both twists at each of its corners agree: the patch's cross derivative
+    // along each neighbour is that neighbour's own, and the apex normal is the fan's
+    // `D x D'`, in each neighbour's tangent plane at its end.
+    if face_sides & COONS_APEX_LEFT != 0 {
+        let (d0, d1) = (deriv1(&bt[2], u0)?, deriv1(&bt[3], u0)?);
+        set_end_derivatives(&mut lr[2], d0, d1)?;
+    }
+    if face_sides & COONS_APEX_RIGHT != 0 {
+        let (d0, d1) = (deriv1(&bt[2], ur)?, deriv1(&bt[3], ur)?);
+        set_end_derivatives(&mut lr[3], d0, d1)?;
+    }
+    if face_sides & COONS_APEX_BOTTOM != 0 {
+        let (d0, d1) = (deriv1(&lr[2], v0)?, deriv1(&lr[3], v0)?);
+        set_end_derivatives(&mut bt[2], d0, d1)?;
+    }
+    if face_sides & COONS_APEX_TOP != 0 {
+        let (d0, d1) = (deriv1(&lr[2], vs)?, deriv1(&lr[3], vs)?);
+        set_end_derivatives(&mut bt[3], d0, d1)?;
     }
 
     // Now compute the twist vectors to use: the mixed partials at the four corners,
@@ -1189,8 +1268,9 @@ impl BSplineSurface {
     /// tangency-labs/smlib@7fd9fb0): `face_sides` marks the boundary curves on a face of
     /// the body, [`COONS_FACE_LEFT`] for `bdry_crvs[0]`, [`COONS_FACE_RIGHT`] for
     /// `bdry_crvs[1]`, [`COONS_FACE_BOTTOM`] for `bdry_crvs[2]` and [`COONS_FACE_TOP`]
-    /// for `bdry_crvs[3]`, and goes to [`create_coons_srf`] (the bilinear patch ignores
-    /// it). `0` is upstream's `CreateCoonsPatch`.
+    /// for `bdry_crvs[3]`, with the collapsed-side bits ([`COONS_APEX_LEFT`] ..) in the same
+    /// order, and goes to [`create_coons_srf`] (the bilinear patch ignores it). `0` is
+    /// upstream's `CreateCoonsPatch`.
     ///
     /// # Errors
     ///
@@ -2026,6 +2106,123 @@ mod tests {
         // marking the blend's sides instead does not help the plane's
         let blend = miss(COONS_FACE_BOTTOM | COONS_FACE_TOP);
         assert!(blend > 0.04, "{blend}");
+    }
+
+    /// WR-613 (b): a triangular patch, its top side collapsed to the apex (0, 1, 0). The
+    /// left side runs up x = 0, the right side from (1, 0, 0) to the apex, and their
+    /// cross derivatives turn out of z = 0 (`(1 - v) (1, 0, +-3c v)`-like fields that
+    /// vanish at the apex as the collapsed side's derivative does; the bottom's field is
+    /// compatible with them at its corners). The fan
+    /// `[t1, t1, t2, t2]` across the apex has zero end derivatives, so the mean twists
+    /// at the apex corners pull the patch's u derivative along both sides off their
+    /// fields; with the collapsed side marked the fan's end derivatives are the fields'
+    /// own, both twists agree, and the patch's u derivative along each side is that
+    /// side's field: an identity (to rounding), whatever the fields. At the apex
+    /// `S_uv(0, 1)` and `S_uv(1, 1)` are the fields' derivatives, so the limit normal
+    /// `S_uv x S_v` there lies across each side's own tangent plane.
+    #[test]
+    fn wr_613_collapsed_side_meets_both_neighbours() {
+        let c = 0.4;
+        let third = 1.0 / 3.0;
+        let line = |a: (f64, f64, f64), b: (f64, f64, f64)| {
+            let at = |t: f64| {
+                (
+                    a.0 + t * (b.0 - a.0),
+                    a.1 + t * (b.1 - a.1),
+                    a.2 + t * (b.2 - a.2),
+                )
+            };
+            bezier([a, at(third), at(2.0 * third), b])
+        };
+        let field = |z: f64| {
+            bezier([
+                (1.0, 0.0, 0.0),
+                (2.0 * third, 0.0, z),
+                (third, 0.0, z),
+                (0.0, 0.0, 0.0),
+            ])
+        };
+        let apex = (0.0, 1.0, 0.0);
+        let build = |bits: u32| {
+            let mut lr = [
+                line((0.0, 0.0, 0.0), apex),
+                line((1.0, 0.0, 0.0), apex),
+                field(c),
+                field(-c),
+            ];
+            let mut bt = [
+                line((0.0, 0.0, 0.0), (1.0, 0.0, 0.0)),
+                bezier([apex; 4]),
+                // the bottom's field, compatible with the side fields at its corners
+                bezier([
+                    (0.0, 1.0, 0.0),
+                    (-third, 1.0, c),
+                    (-2.0 * third, 1.0, c),
+                    (-1.0, 1.0, 0.0),
+                ]),
+                bezier([
+                    (0.0, 1.0, 0.0),
+                    (0.0, 1.0, 0.0),
+                    (-1.0, 1.0, 0.0),
+                    (-1.0, 1.0, 0.0),
+                ]),
+            ];
+            let (sur, _) = create_coons_srf(1e-6, &mut lr, &mut bt, bits).unwrap();
+            (BSplineSurface::from_nurb(sur, false), lr)
+        };
+        let eval = |sur: &BSplineSurface, u: f64, v: f64| {
+            sur.evaluate_simple(Point2::new(u, v), 1, 1, u < 0.5, v < 0.5, false)
+                .unwrap()
+        };
+        // the worst miss of the patch's u derivative along its left and right sides
+        let miss = |bits: u32| -> f64 {
+            let (sur, lr) = build(bits);
+            let mut worst: f64 = 0.0;
+            for (u, der) in [(0.0, &lr[2]), (1.0, &lr[3])] {
+                for i in 0..=20 {
+                    let v = f64::from(i) / 20.0;
+                    let want = der.derivs(v, Side::Left, 1).unwrap()[0];
+                    worst = worst.max((eval(&sur, u, v)[1][0] - want).length());
+                }
+            }
+            worst
+        };
+        let mean = miss(0);
+        assert!(mean > 0.05, "the zero-derivative fan misses by {mean}");
+        let apex_bits = miss(COONS_APEX_TOP);
+        assert!(
+            apex_bits < 1e-14,
+            "the collapsed side's fan misses by {apex_bits}"
+        );
+        // a face side (the left) does not undo it: both twists at the apex agree
+        let faced = miss(COONS_APEX_TOP | COONS_FACE_LEFT);
+        assert!(faced < 1e-14, "{faced}");
+
+        // the apex: S_uv is the side's field derivative, S_v the side's tangent, and
+        // their cross product is the side's normal (both lie in x = 0 for the left
+        // side's field (1, 0, z) turning in z; across the right side's plane likewise)
+        let (sur, lr) = build(COONS_APEX_TOP);
+        for (u, der, side) in [
+            (0.0, &lr[2], (0.0, 1.0, 0.0)),
+            (1.0, &lr[3], (-1.0, 1.0, 0.0)),
+        ] {
+            let d = eval(&sur, u, 1.0);
+            let field_d = der.derivs(1.0, Side::Left, 1).unwrap()[1];
+            assert!(
+                (d[1][1] - field_d).length() < 1e-14,
+                "S_uv {:?} vs {field_d:?}",
+                d[1][1]
+            );
+            let side = Vec3::new(side.0, side.1, side.2);
+            assert!((d[0][1] - side).length() < 1e-14, "S_v {:?}", d[0][1]);
+            let n = d[1][1].cross(d[0][1]);
+            let want = field_d.cross(side);
+            let sin = n.cross(want).length() / (n.length() * want.length());
+            assert!(
+                want.length() > 0.5 && sin < 1e-14,
+                "apex normal off by {sin}"
+            );
+        }
     }
 
     #[test]

@@ -46,6 +46,9 @@ use crate::{Result, SolidError};
 
 /// A direction's knot samples (parameter, spacing, span index) and its slack.
 type KnotSamples = (Vec<(f64, f64, usize)>, f64);
+/// A side of a control net: whether it runs across u, whether at the max, and its points'
+/// indices.
+type Edge = (bool, bool, Vec<(usize, usize)>);
 
 const OP: &str = "query::curve_surface_gap";
 
@@ -133,6 +136,66 @@ impl NetSurface {
             out
         };
         (lines(&n.u, n.p, u.lo, u.hi), lines(&n.v, n.q, v.lo, v.hi))
+    }
+
+    /// The net's domain: `([u_lo, u_hi], [v_lo, v_hi])`.
+    pub(crate) fn domain(&self) -> (Ivl, Ivl) {
+        let n = &self.net;
+        (
+            Ivl::new(knot(&n.u, n.p as isize), knot(&n.u, n.nu as isize)),
+            Ivl::new(knot(&n.v, n.q as isize), knot(&n.v, n.nv as isize)),
+        )
+    }
+
+    /// The net's sides collapsed to a point: those whose row of control points (homogeneous
+    /// coordinates, weight included) is one point exactly, so the surface is that point all
+    /// along the side. Each is `(across_u, at_max, point)`: `across_u` for a side at
+    /// constant u (the first or last column), `at_max` for the last row or column, and the
+    /// point (`None` from a net with a zero weight there).
+    pub(crate) fn collapsed_sides(&self) -> Vec<(bool, bool, V3<f64>)> {
+        let n = &self.net;
+        let at = |i: usize, j: usize| -> Option<[f64; 4]> {
+            let k = (i.checked_mul(n.nv)?.checked_add(j)?).checked_mul(4)?;
+            let s = n.pw.get(k..k.checked_add(4)?)?;
+            Some([*s.first()?, *s.get(1)?, *s.get(2)?, *s.get(3)?])
+        };
+        let mut out = Vec::new();
+        let (Some(lu), Some(lv)) = (n.nu.checked_sub(1), n.nv.checked_sub(1)) else {
+            return out;
+        };
+        // (across u, at the max, the side's control points)
+        let sides: [Edge; 4] = [
+            (true, false, (0..n.nv).map(|j| (0, j)).collect()),
+            (true, true, (0..n.nv).map(|j| (lu, j)).collect()),
+            (false, false, (0..n.nu).map(|i| (i, 0)).collect()),
+            (false, true, (0..n.nu).map(|i| (i, lv)).collect()),
+        ];
+        for (across_u, at_max, row) in sides {
+            let pts: Option<Vec<[f64; 4]>> = row.iter().map(|&(i, j)| at(i, j)).collect();
+            let Some(pts) = pts else {
+                continue;
+            };
+            let Some(first) = pts.first().copied() else {
+                continue;
+            };
+            if pts.len() < 2 || pts.iter().any(|q| *q != first) {
+                continue;
+            }
+            let [x, y, z, w] = first;
+            if !(w.is_finite() && w > 0.0 && x.is_finite() && y.is_finite() && z.is_finite()) {
+                continue;
+            }
+            out.push((
+                across_u,
+                at_max,
+                V3 {
+                    x: x / w,
+                    y: y / w,
+                    z: z / w,
+                },
+            ));
+        }
+        out
     }
 
     /// The net's point at `uv` (double arithmetic, a sanity probe only).

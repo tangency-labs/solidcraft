@@ -17,7 +17,7 @@
 //! the nearest point of `S_s` to `C(t)` in that box, and the proof shows it is inside the
 //! box, not on its edge (a local nearest point). The enclosure is `lower <= Θ <= upper` for
 //! `Θ` the largest, over `t` in `[lo, hi]`, of the acute angle between the normals at the
-//! two sides' feet. Both bounds hold for every choice of feet.
+//! two sides' nearest points in their boxes (fact 1b narrows the feet to boxes of those).
 //!
 //! **The proof.** Two facts, each enclosed in outward-rounded interval arithmetic
 //! ([`crate::blend::fillet_section::interval`]). The curve's and the correspondences' values
@@ -39,6 +39,10 @@
 //!    Hence `|w − W| <= ρ := a / σ`: the feet lie in `F = W_s(T) ± ρ`. The box is first
 //!    `R = 2a / σ_0` (`σ_0` read over `W_s(T)`), regrown to `R = 2ρ` where `ρ >= R`, at most
 //!    [`FOOT_GROWTHS`] boxes; the bound is used only where `ρ < R`.
+//!    *1b. The nearest point.* Where it is proved, the box `F` is narrowed to one that
+//!    holds the nearest point (`nearest_box`): a zero of `J^T (S − C)` inside the domain, a
+//!    zero of the one partial on a domain edge, or a domain corner, each enclosed by a
+//!    Krawczyk step. Its width follows the curve piece, where `F`'s does not.
 //! 2. *The normal over the feet.* `F` is cut at the knot lines across which the net is not
 //!    C^1 (`NetSurface::low_lines`), at most [`MAX_PARTS`] parts. On a part `P`, with centre
 //!    `c` and half-diagonal `r_P`, the unit normal `n = N / |N|` (`N = S_u × S_v`) is
@@ -49,6 +53,13 @@
 //!    acute angle is a metric on lines, so for parts `P` of side 1 and `Q` of side 2 the angle
 //!    at the feet is within `δ_P + δ_Q` of the acute angle between `n_1(c_P)` and `n_2(c_Q)`,
 //!    `2 asin(|n_1 − s n_2| / 2)` with `s` the sign of `n_1 · n_2` (enclosed away from 0).
+//!
+//! 3. *Near a side collapsed to a point* (a triangular corner patch's apex, where `σ` and
+//!    `N` vanish and fact 1 cannot close): where the net's row along a side is one point
+//!    `A` exactly (`NetSurface::collapsed_sides`), the feet lie in a strip along that side
+//!    as deep as `|C − A| + G` over the speed at which the surface leaves `A`, and the
+//!    normal there is on the line of the fan's `S_st × S_t` (`apex_cones`, which proves
+//!    both). Where facts 1 and 2 also hold, the tighter cones are used.
 //!
 //! A piece's bound is the largest over its pairs of parts of the pair's upper angle plus
 //! their `δ`s (at most `π / 2`, the acute angle's largest); a station's lower bound is the
@@ -64,8 +75,8 @@
 //!
 //! Not enclosed (`None`): a side whose surface has no net, a sample with no nearest point, or
 //! a piece at the deepest bisection with no bound (a box too far past a net's end, a knot
-//! line of continuity below C^0, a zero normal or `σ`, a foot bound that does not close, more
-//! than [`MAX_PARTS`] parts).
+//! line of continuity below C^0, a zero normal or `σ` away from a collapsed side, a foot bound
+//! that does not close, more than [`MAX_PARTS`] parts).
 //!
 //! Deviations: none (no upstream counterpart). No recursion.
 
@@ -106,10 +117,12 @@ pub struct SeamAngleEnclosure {
     pub upper: f64,
 }
 
-/// One side prepared: its net and its correspondence.
+/// One side prepared: its net, its correspondence and its sides collapsed to a point
+/// (`NetSurface::collapsed_sides`).
 struct Side {
     net: NetSurface,
     w: NurbsCurve,
+    collapsed: Vec<(bool, bool, V3<f64>)>,
 }
 
 /// A part of a box of feet (fact 2): the unit normal at its centre and the angle `δ` within
@@ -322,9 +335,221 @@ fn feet_box(net: &NetSurface, u: Ivl, v: Ivl, gap: f64) -> Result<Option<(Ivl, I
     Ok(None)
 }
 
+/// The Krawczyk steps [`nearest_box`] takes at most.
+pub const NEAREST_STEPS: u32 = 4;
+
+/// The box of feet `(fu, fv)` (fact 1) narrowed to a box of the nearest point (fact 1b).
+/// The nearest point `w` of the surface (over its domain `D`) to a curve point `C` in `c`
+/// lies in `X = (fu, fv) ∩ D` (fact 1), away from the edges of the box `B` that are not
+/// edges of `D`, so it minimises `|S − C|^2 / 2` over `B ∩ D` with only `D`'s edges active:
+/// in each coordinate it is either inside `D`, where that partial of `F(w) = J(w)^T (S(w) −
+/// C)` (`J = [S_u S_v]`) vanishes, or on an edge of `D`. So it is
+/// - a zero of `F` in `X`, which lies in the Krawczyk box `K(X) = x − Y F(x) + (I − Y
+///   [F'](X)) (X − x)` (`x` the midpoint, `Y` the inverse of `[F']`'s midpoint, `F' =
+///   [[S_u·S_u + S_uu·g, S_u·S_v + S_uv·g], [., S_v·S_v + S_vv·g]]`, `g = S − C`; the mean
+///   value theorem, `F` Lipschitz where the net is C^1);
+/// - or, on an edge of `D` that `X` reaches, a zero of the edge's one partial in the
+///   one-dimensional Krawczyk interval of that edge's part in `X`;
+/// - or a corner of `D` in `X`.
+///
+/// The hull of those, intersected with `X`, is the next `X`, at most [`NEAREST_STEPS`]
+/// times while a side halves. `F(x)` over `c` is as wide as the curve piece, so the box
+/// shrinks with the piece where `W ± ρ` does not. The box is kept as it was where a step is
+/// not proved (a box past the net's end, a knot line across which the net is not C^1, a
+/// singular midpoint). The bounds then hold at the nearest point, the point the seam check
+/// reads (module docs), not at every foot.
+fn nearest_box(net: &NetSurface, (fu, fv): (Ivl, Ivl), c: V3<Ivl>) -> Result<(Ivl, Ivl)> {
+    let (du, dv) = net.domain();
+    let (Some(u), Some(v)) = (meet(fu, du), meet(fv, dv)) else {
+        return Ok((fu, fv));
+    };
+    let mut x = (u, v);
+    for _ in 0..NEAREST_STEPS {
+        let Some(next) = nearest_step(net, x, (du, dv), c)? else {
+            break;
+        };
+        let shrunk = next.0.hi - next.0.lo < 0.5 * (x.0.hi - x.0.lo)
+            || next.1.hi - next.1.lo < 0.5 * (x.1.hi - x.1.lo);
+        x = next;
+        if !shrunk {
+            break;
+        }
+    }
+    Ok(x)
+}
+
+/// `a ∩ b`, `None` where empty.
+fn meet(a: Ivl, b: Ivl) -> Option<Ivl> {
+    let (lo, hi) = (a.lo.max(b.lo), a.hi.min(b.hi));
+    (lo <= hi).then(|| Ivl::new(lo, hi))
+}
+
+/// One step of [`nearest_box`]: the hull of the nearest point's candidates in `x`, `None`
+/// where a candidate set is not proved (or none is left, which fact 1 rules out).
+fn nearest_step(
+    net: &NetSurface,
+    x: (Ivl, Ivl),
+    (du, dv): (Ivl, Ivl),
+    c: V3<Ivl>,
+) -> Result<Option<(Ivl, Ivl)>> {
+    let mut hull: Option<(Ivl, Ivl)> = None;
+    let mut add = |b: (Ivl, Ivl)| {
+        hull = Some(match hull {
+            Some(h) => (h.0.hull(b.0), h.1.hull(b.1)),
+            None => b,
+        });
+    };
+    // inside D
+    let Some(k) = krawczyk(net, x, c)? else {
+        return Ok(None);
+    };
+    if let (Some(u), Some(v)) = (meet(k.0, x.0), meet(k.1, x.1)) {
+        add((u, v));
+    }
+    // on an edge of D that the box reaches
+    for (pinned_u, at) in [(true, du.lo), (true, du.hi), (false, dv.lo), (false, dv.hi)] {
+        let (pin, free) = if pinned_u { (x.0, x.1) } else { (x.1, x.0) };
+        if !(pin.lo <= at && at <= pin.hi) {
+            continue;
+        }
+        let Some(k) = krawczyk_edge(net, pinned_u, at, free, c)? else {
+            return Ok(None);
+        };
+        if let Some(s) = meet(k, free) {
+            add(if pinned_u {
+                (Ivl::from(at), s)
+            } else {
+                (s, Ivl::from(at))
+            });
+        }
+    }
+    // at a corner of D
+    for u in [du.lo, du.hi] {
+        for v in [dv.lo, dv.hi] {
+            if x.0.lo <= u && u <= x.0.hi && x.1.lo <= v && v <= x.1.hi {
+                add((Ivl::from(u), Ivl::from(v)));
+            }
+        }
+    }
+    Ok(hull)
+}
+
+/// The one-dimensional Krawczyk interval of [`nearest_step`] on the edge of `D` at `at` in
+/// u (`pinned_u`) or v, over `free` in the other parameter: every zero there of `f(s) = S_s ·
+/// (S − C)` lies in `m − y f(m) + (1 − y [f'](free)) (free − m)`, `f' = S_s · S_s + S_ss ·
+/// (S − C)`, `y = 1 / mid [f']`. `None` where not proved.
+fn krawczyk_edge(
+    net: &NetSurface,
+    pinned_u: bool,
+    at: f64,
+    free: Ivl,
+    c: V3<Ivl>,
+) -> Result<Option<Ivl>> {
+    let box_of = |s: Ivl| {
+        if pinned_u {
+            (Ivl::from(at), s)
+        } else {
+            (s, Ivl::from(at))
+        }
+    };
+    let b = box_of(free);
+    let (lu, lv) = net.low_lines(b.0, b.1);
+    if !(lu.is_empty() && lv.is_empty()) {
+        return Ok(None);
+    }
+    let Some((p, slack)) = partials_over(net, b.0, b.1, 2)? else {
+        return Ok(None);
+    };
+    let m = free.mid();
+    let bm = box_of(Ivl::from(m));
+    let Some((q, qslack)) = partials_over(net, bm.0, bm.1, 1)? else {
+        return Ok(None);
+    };
+    if slack != 0.0 || qslack != 0.0 {
+        return Ok(None);
+    }
+    let ((i1, j1), (i2, j2)) = if pinned_u {
+        ((0, 1), (0, 2))
+    } else {
+        ((1, 0), (2, 0))
+    };
+    let f = v_dot(q.at(i1, j1), v_sub(q.at(0, 0), c));
+    let s1 = p.at(i1, j1);
+    let fp = v_dot(s1, s1) + v_dot(p.at(i2, j2), v_sub(p.at(0, 0), c));
+    let ym = fp.mid();
+    if !(ym.is_finite() && ym != 0.0) {
+        return Ok(None);
+    }
+    let y = 1.0 / ym;
+    if !y.is_finite() {
+        return Ok(None);
+    }
+    let y = Ivl::from(y);
+    let k = Ivl::from(m) - y * f + (Ivl::from(1.0) - y * fp) * (free - Ivl::from(m));
+    Ok((k.lo.is_finite() && k.hi.is_finite()).then_some(k))
+}
+
+/// One Krawczyk box of [`nearest_box`], `None` where it is not proved.
+fn krawczyk(net: &NetSurface, (xu, xv): (Ivl, Ivl), c: V3<Ivl>) -> Result<Option<(Ivl, Ivl)>> {
+    let (lu, lv) = net.low_lines(xu, xv);
+    if !(lu.is_empty() && lv.is_empty()) {
+        return Ok(None);
+    }
+    let Some((p, slack)) = partials_over(net, xu, xv, 2)? else {
+        return Ok(None);
+    };
+    if slack != 0.0 {
+        return Ok(None);
+    }
+    let (mu, mv) = (xu.mid(), xv.mid());
+    let Some((q, qslack)) = partials_over(net, Ivl::from(mu), Ivl::from(mv), 1)? else {
+        return Ok(None);
+    };
+    if qslack != 0.0 {
+        return Ok(None);
+    }
+    // F at the midpoint, over the curve points
+    let g = v_sub(q.at(0, 0), c);
+    let f = [v_dot(q.at(1, 0), g), v_dot(q.at(0, 1), g)];
+    // [F'] over the box
+    let gx = v_sub(p.at(0, 0), c);
+    let (su, sv) = (p.at(1, 0), p.at(0, 1));
+    let a = v_dot(su, su) + v_dot(p.at(2, 0), gx);
+    let b = v_dot(su, sv) + v_dot(p.at(1, 1), gx);
+    let d = v_dot(sv, sv) + v_dot(p.at(0, 2), gx);
+    let jac = [[a, b], [b, d]];
+    // Y: the midpoint's inverse (any matrix is valid; this one makes K tight)
+    let (am, bm, dm) = (a.mid(), b.mid(), d.mid());
+    let det = am * dm - bm * bm;
+    if !(det.is_finite() && det.abs() > 0.0) {
+        return Ok(None);
+    }
+    let y = [[dm / det, -bm / det], [-bm / det, am / det]];
+    if !y.iter().flatten().all(|x| x.is_finite()) {
+        return Ok(None);
+    }
+    // K = mid - Y F(mid) + (I - Y [F']) (X - mid), row by row
+    let [[y00, y01], [y10, y11]] = y.map(|r| r.map(Ivl::from));
+    let [[j00, j01], [j10, j11]] = jac;
+    let [f0, f1] = f;
+    let (dxu, dxv) = (xu - Ivl::from(mu), xv - Ivl::from(mv));
+    let one = Ivl::from(1.0);
+    let row = |at: f64, ya: Ivl, yb: Ivl, ea: Ivl, eb: Ivl| {
+        let m0 = ea - (ya * j00 + yb * j10);
+        let m1 = eb - (ya * j01 + yb * j11);
+        Ivl::from(at) - (ya * f0 + yb * f1) + m0 * dxu + m1 * dxv
+    };
+    let ku = row(mu, y00, y01, one, Ivl::from(0.0));
+    let kv = row(mv, y10, y11, Ivl::from(0.0), one);
+    if !([ku.lo, ku.hi, kv.lo, kv.hi].iter().all(|x| x.is_finite())) {
+        return Ok(None);
+    }
+    Ok(Some((ku, kv)))
+}
+
 /// `[lo, hi]` cut at `lines` (sorted, strictly inside).
 fn cut(a: Ivl, lines: &[f64]) -> Vec<Ivl> {
-    let mut out = Vec::with_capacity(lines.len() + 1);
+    let mut out = Vec::new();
     let mut from = a.lo;
     for &x in lines {
         out.push(Ivl::new(from, x));
@@ -335,18 +560,45 @@ fn cut(a: Ivl, lines: &[f64]) -> Vec<Ivl> {
 }
 
 /// The cones of side `side` over the feet of the correspondence sweeping `u x v` with gap
-/// at most `gap` (facts 1 and 2), `None` where they are not proved.
-fn cones(side: &Side, u: Ivl, v: Ivl, gap: f64) -> Result<Option<Vec<Cone>>> {
+/// at most `gap` (facts 1 and 2), `None` where they are not proved. Where fact 1 does not
+/// close and the net has a side collapsed to a point, the feet near that point (fact 3,
+/// [`apex_cones`]; `c` encloses the curve's points).
+fn cones(side: &Side, u: Ivl, v: Ivl, gap: f64, c: V3<Ivl>) -> Result<Option<Vec<Cone>>> {
     let net = &side.net;
+    let mut near_apex: Option<Vec<Cone>> = None;
+    for &(across_u, at_max, apex) in &side.collapsed {
+        if let Some(out) = apex_cones(net, (across_u, at_max, apex), (u, v), gap, c)? {
+            near_apex = Some(out);
+            break;
+        }
+    }
+    let regular = regular_cones(net, u, v, gap, c)?;
+    // both prove where the normals are: the tighter
+    let widest = |cs: &[Cone]| cs.iter().fold(0.0_f64, |m, c| m.max(c.delta));
+    Ok(match (regular, near_apex) {
+        (Some(r), Some(a)) => Some(if widest(&a) < widest(&r) { a } else { r }),
+        (r, a) => r.or(a),
+    })
+}
+
+/// [`cones`] by facts 1 and 2 alone.
+fn regular_cones(
+    net: &NetSurface,
+    u: Ivl,
+    v: Ivl,
+    gap: f64,
+    c: V3<Ivl>,
+) -> Result<Option<Vec<Cone>>> {
     let Some((fu, fv)) = feet_box(net, u, v, gap)? else {
         return Ok(None);
     };
+    let (fu, fv) = nearest_box(net, (fu, fv), c)?;
     let (lu, lv) = net.low_lines(fu, fv);
     let (us, vs) = (cut(fu, &lu), cut(fv, &lv));
     if us.len().saturating_mul(vs.len()) > MAX_PARTS {
         return Ok(None);
     }
-    let mut out = Vec::with_capacity(us.len() * vs.len());
+    let mut out = Vec::new();
     for &pu in &us {
         for &pv in &vs {
             let (cu, cv) = (pu.mid(), pv.mid());
@@ -383,6 +635,227 @@ fn cones(side: &Side, u: Ivl, v: Ivl, gap: f64) -> Result<Option<Vec<Cone>>> {
     Ok(Some(out))
 }
 
+/// The parts the along-side parameter of a collapsed side's strip is cut into (fact 3), at
+/// least: the fan's normal turns along it.
+pub const APEX_PARTS: usize = 32;
+
+/// `s x t` as the box `(u, v)`: `across_u` puts the across parameter `t` in u.
+fn uv_of(across_u: bool, s: Ivl, t: Ivl) -> (Ivl, Ivl) {
+    if across_u {
+        (t, s)
+    } else {
+        (s, t)
+    }
+}
+
+/// The hull of the partials up to second order over `s x t` (`uv_of`), `t` cut at the knot
+/// lines it crosses where the net is not C^1; `None` where the net refuses a part.
+fn partials_hull_over(
+    net: &NetSurface,
+    across_u: bool,
+    s: Ivl,
+    t: Ivl,
+) -> Result<Option<Partials<Ivl>>> {
+    let (bu, bv) = uv_of(across_u, s, t);
+    let (lu, lv) = net.low_lines(bu, bv);
+    let mut out: Option<Partials<Ivl>> = None;
+    for pu in cut(bu, &lu) {
+        for pv in cut(bv, &lv) {
+            let Some((p, slack)) = partials_over(net, pu, pv, 2)? else {
+                return Ok(None);
+            };
+            if slack != 0.0 {
+                return Ok(None);
+            }
+            out = Some(match out {
+                None => p,
+                Some(h) => crate::blend::fillet_section::certificate::partials_hull(h, &p, 2),
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// The cones over the feet near a side of the net collapsed to the point `apex` (fact 3;
+/// `side`: `(across_u, at_max, apex)` as `NetSurface::collapsed_sides`), for a
+/// correspondence sweeping `w` (a `(u, v)` box) with gap at most `gap` and curve points in
+/// `c`; `None` where they are not proved.
+///
+/// Write `s` for the parameter along the collapsed side and `t` across it, `t_e` its value
+/// there. `S(s, t_e) = A` for every `s`, so `S_s(s, t_e) = 0` and, along each line of
+/// constant `s`, `S_s(s, t) = (t - t_e) Ā` with `Ā` the mean of `S_st` between `t_e` and
+/// `t`, in the interval hull of `S_st` over any box holding that segment. The normal `N =
+/// S_u x S_v` is `±(t - t_e) Ā x S_t`: off the side, on the line of `M = Ā x S_t`. So over a
+/// part `P` of the feet, the normal's line is that of some `M` in `[S_st] x [S_t]` (the hulls
+/// over `P` grown to `t_e`), within `δ = atan(|E_⊥| / (|m| - |E_∥|))` of `m`, the box's
+/// midpoint, for `E = M - m` split along `m` (`E_∥`) and across it (`E_⊥`), where `|E_∥| <
+/// |m|`. On the collapsed side itself (`t =
+/// t_e`, where `N` is zero) the normal is taken as its limit, the line of `M` there.
+///
+/// The feet: a foot is within `gap` of a curve point `C` (fact 1), so within `r = |C - A| +
+/// gap` of `A`. The side is cut into parts `P` (as for the cones). With `e` the midpoint of
+/// `[S_t]` over `P x (t_e to t_e ± η)` (a strip of the net along the side), a foot at `s` in
+/// `P` has `|e · (S - A)| = |∫ e · S_t| >= |t - t_e| κ` with `κ > 0` the least of `e · S_t`
+/// over `P`'s strip (the integral runs between `t_e` and `t` at that `s`). So `|S - A| >=
+/// |t - t_e| κ / |e|` and the feet in the strip are within `η_f`, the largest over the parts
+/// of `r |e| / κ`, of the side (each part its own `e`: the side's fan turns along it). Where `η_f < η` and the correspondence
+/// is in the strip, the feet (including the nearest point in the strip) are within `η_f`,
+/// not on the strip's far edge; the strip is regrown to `2 η_f` where `η_f >= η`, at most
+/// [`FOOT_GROWTHS`] strips.
+fn apex_cones(
+    net: &NetSurface,
+    (across_u, at_max, apex): (bool, bool, V3<f64>),
+    (wu, wv): (Ivl, Ivl),
+    gap: f64,
+    c: V3<Ivl>,
+) -> Result<Option<Vec<Cone>>> {
+    if !(gap.is_finite() && gap >= 0.0) {
+        return Ok(None);
+    }
+    let (du, dv) = net.domain();
+    let (along, across, w_across) = if across_u { (dv, du, wu) } else { (du, dv, wv) };
+    let edge = if at_max { across.hi } else { across.lo };
+    // (a correspondence a rounding past the net's end: its clamped point, whose distance
+    // from the curve the gap bounds with the slack)
+    let w_across = Ivl::new(w_across.lo.max(across.lo), w_across.hi.min(across.hi));
+    if w_across.lo > w_across.hi {
+        return Ok(None);
+    }
+    // how far the correspondence is from the side, across
+    let w_off = if at_max {
+        round_up(edge - w_across.lo)
+    } else {
+        round_up(w_across.hi - edge)
+    };
+    if !(w_off.is_finite() && w_across.lo >= across.lo && w_across.hi <= across.hi) {
+        return Ok(None);
+    }
+    let a = V3 {
+        x: Ivl::from(apex.x),
+        y: Ivl::from(apex.y),
+        z: Ivl::from(apex.z),
+    };
+    let Some(ca) = norm_hi(v_sub(c, a)) else {
+        return Ok(None);
+    };
+    let r = round_up(ca + gap);
+    let width = round_up(across.hi - across.lo);
+    // the strip from the side, `eta` deep
+    let strip = |eta: f64| {
+        if at_max {
+            Ivl::new(round_down(edge - eta).max(across.lo), edge)
+        } else {
+            Ivl::new(edge, round_up(edge + eta).min(across.hi))
+        }
+    };
+    // the parts: the side's parameter cut into APEX_PARTS and at its low lines
+    let (ls, _) = {
+        let (bu, bv) = uv_of(across_u, along, across);
+        let (lu, lv) = net.low_lines(bu, bv);
+        if across_u {
+            (lv, lu)
+        } else {
+            (lu, lv)
+        }
+    };
+    let mut lines: Vec<f64> = (1..APEX_PARTS)
+        .map(|i| along.lo + (along.hi - along.lo) * (i as f64) / (APEX_PARTS as f64))
+        .filter(|x| *x > along.lo && *x < along.hi)
+        .collect();
+    lines.extend(ls);
+    lines.sort_by(f64::total_cmp);
+    lines.dedup();
+    let parts = cut(along, &lines);
+    let mut eta = round_up(2.0 * w_off).max(round_up(width * 1.0e-6));
+    let mut feet: Option<f64> = None;
+    'grow: for _ in 0..FOOT_GROWTHS {
+        if !(eta.is_finite() && eta > 0.0) || eta < w_off {
+            return Ok(None);
+        }
+        let eta_c = eta.min(width);
+        // the deepest a foot can be, over the parts of the side (each its own `e`)
+        let mut need = 0.0_f64;
+        for &ps in &parts {
+            let Some(p) = partials_hull_over(net, across_u, ps, strip(eta_c))? else {
+                return Ok(None);
+            };
+            let st = if across_u { p.at(1, 0) } else { p.at(0, 1) };
+            let e = V3 {
+                x: Ivl::from(st.x.mid()),
+                y: Ivl::from(st.y.mid()),
+                z: Ivl::from(st.z.mid()),
+            };
+            let kappa = v_dot(e, st).lo;
+            let Some(e_len) = norm_hi(e) else {
+                return Ok(None);
+            };
+            if !(kappa.is_finite() && kappa > 0.0) {
+                return Ok(None);
+            }
+            let part = (Ivl::from(r) * Ivl::from(e_len) / Ivl::from(kappa)).hi;
+            if !part.is_finite() {
+                return Ok(None);
+            }
+            need = need.max(part);
+        }
+        if need < eta_c || (eta_c == width && need <= width) {
+            feet = Some(need.min(width));
+            break 'grow;
+        }
+        eta = round_up(2.0 * need);
+    }
+    let Some(depth) = feet else {
+        return Ok(None);
+    };
+    let fstrip = strip(depth);
+    let mut out = Vec::new();
+    for &ps in &parts {
+        let Some(p) = partials_hull_over(net, across_u, ps, fstrip)? else {
+            return Ok(None);
+        };
+        let (st, s_t) = if across_u {
+            (p.at(1, 1), p.at(1, 0))
+        } else {
+            (p.at(1, 1), p.at(0, 1))
+        };
+        let m_box = v_cross(st, s_t);
+        if !finite(m_box) {
+            return Ok(None);
+        }
+        let mid = |x: Ivl| Ivl::from(x.mid());
+        let m = V3 {
+            x: mid(m_box.x),
+            y: mid(m_box.y),
+            z: mid(m_box.z),
+        };
+        let (Some(m_lo), Some(m_hi)) = (norm_lo(m), norm_hi(m)) else {
+            return Ok(None);
+        };
+        if !(m_lo.is_finite() && m_lo > 0.0) {
+            return Ok(None);
+        }
+        let n = v_scale(m, Ivl::from(1.0) / Ivl::new(m_lo, m_hi));
+        // M = m + E: the angle from m is atan(|E_perp| / |m + E_par|), E_par = E . n̂
+        let e = v_sub(m_box, m);
+        let along_m = v_dot(e, n);
+        let e_perp = v_sub(e, v_scale(n, along_m));
+        let Some(perp) = norm_hi(e_perp) else {
+            return Ok(None);
+        };
+        let base = round_down(m_lo - along_m.mag());
+        if !(base.is_finite() && base > 0.0) {
+            return Ok(None);
+        }
+        let tan = (Ivl::from(perp) / Ivl::from(base)).hi;
+        if !tan.is_finite() {
+            return Ok(None);
+        }
+        let delta = round_up(tan.atan() * (1.0 + ASIN_ROUNDING));
+        out.push(Cone { n, delta });
+    }
+    Ok(Some(out))
+}
+
 /// The acute angle between the lines of two unit normals enclosed in `a`, `b`: `(lower,
 /// upper)`, `None` where the dot product straddles 0 (the sign is not proved).
 fn line_angle(a: V3<Ivl>, b: V3<Ivl>) -> Option<(f64, f64)> {
@@ -408,10 +881,10 @@ fn both_cones(cn: &NurbsCurve, sides: &[Side; 2], t: Ivl) -> Result<Option<[Vec<
         let Some(w) = derivs(&side.w, t)? else {
             return Ok(None);
         };
+        let Some(c) = derivs(cn, t)? else {
+            return Ok(None);
+        };
         let gap = if t.lo == t.hi {
-            let Some(c) = derivs(cn, t)? else {
-                return Ok(None);
-            };
             let Some((p, _)) = partials_over(&side.net, w.x, w.y, 0)? else {
                 return Ok(None);
             };
@@ -426,10 +899,10 @@ fn both_cones(cn: &NurbsCurve, sides: &[Side; 2], t: Ivl) -> Result<Option<[Vec<
                 Ok(None) | Err(_) => return Ok(None),
             }
         };
-        let Some(c) = cones(side, w.x, w.y, gap)? else {
+        let Some(cs) = cones(side, w.x, w.y, gap, c)? else {
             return Ok(None);
         };
-        *slot = c;
+        *slot = cs;
     }
     Ok(Some(out))
 }
@@ -526,7 +999,8 @@ fn prepare(
         let Ok(w) = NurbsCurve::of(&w) else {
             return Ok(None);
         };
-        prepared.push(Side { net, w });
+        let collapsed = net.collapsed_sides();
+        prepared.push(Side { net, w, collapsed });
     }
     let Ok(sides): std::result::Result<[Side; 2], _> = prepared.try_into() else {
         return Ok(None);
@@ -617,6 +1091,74 @@ pub fn seam_angle_enclosure(
     }
     let upper = upper.max(lower);
     Ok((upper.is_finite() && lower.is_finite()).then_some(SeamAngleEnclosure { lower, upper }))
+}
+
+/// The starting pieces of [`seam_angle_within`]: even pieces of the interval.
+pub const WITHIN_PIECES: usize = 16;
+/// The deepest bisection of one of [`seam_angle_within`]'s starting pieces: its deepest
+/// pieces are as short as [`seam_angle_enclosure`]'s ([`MAX_DEPTH`] below a station gap,
+/// 1/256 of the interval or less).
+pub const WITHIN_DEPTH: u32 = MAX_DEPTH + 5;
+
+/// Whether the largest acute normal angle between `sides` along `curve` over `interval`
+/// (module docs) is proved at most `limit`: every piece of the interval has a proved upper
+/// bound at most `limit`, pieces bisected (from [`WITHIN_PIECES`], at most [`WITHIN_DEPTH`]
+/// deep) while theirs is above it or not proved. At most `budget` piece bounds are computed;
+/// `false` (not proved) once more would be needed, where a piece at the deepest bisection
+/// is above `limit` or not bounded, or where the sides are not prepared. Unlike
+/// [`seam_angle_enclosure`] no lower bound is computed: the caller only asks whether the
+/// angle is within `limit`, so `false` says nothing about the angle.
+///
+/// # Errors
+///
+/// Those of [`seam_angle_enclosure`].
+pub fn seam_angle_within(
+    k: &Kernel,
+    curve: &BSplineCurve,
+    interval: Extent1d,
+    sides: [&Surface; 2],
+    limit: f64,
+    budget: usize,
+) -> Result<bool> {
+    let Some((cn, sides)) = prepare(k, curve, interval, sides)? else {
+        return Ok(false);
+    };
+    let ends: Vec<f64> = (0..=WITHIN_PIECES)
+        .map(|i| {
+            if i == WITHIN_PIECES {
+                interval.max()
+            } else {
+                interval.evaluate(i as f64 / WITHIN_PIECES as f64)
+            }
+        })
+        .collect();
+    let mut stack: Vec<(f64, f64, u32)> = ends
+        .windows(2)
+        .rev()
+        .filter_map(|w| match w {
+            [a, b] if a < b => Some((*a, *b, 0)),
+            _ => None,
+        })
+        .collect();
+    let mut spent = 0_usize;
+    while let Some((a, b, depth)) = stack.pop() {
+        if spent >= budget {
+            return Ok(false);
+        }
+        spent += 1;
+        if let Some(bound) = piece_upper(&cn, &sides, a, b)? {
+            if bound <= limit {
+                continue;
+            }
+        }
+        let mid = 0.5 * (a + b);
+        if depth >= WITHIN_DEPTH || !(a < mid && mid < b) {
+            return Ok(false);
+        }
+        stack.push((mid, b, depth + 1));
+        stack.push((a, mid, depth + 1));
+    }
+    Ok(true)
 }
 
 /// The B-spline a curve is (a line's, a conic's base), `None` for any other kind.
@@ -767,6 +1309,82 @@ mod tests {
             e.lower <= half && half <= e.upper && e.upper < most,
             "{e:?}"
         );
+    }
+
+    /// A triangle in the plane `z = a y` as a bilinear net whose last row (v = 1) is the apex
+    /// `(1, 0, 0)`, against the plane `z = 0`, along the x-axis from `(0, 0, 0)` to the
+    /// apex. Near the apex the patch's `σ` vanishes, so fact 1 cannot close there: the
+    /// collapsed side's fan (fact 3) encloses the feet and their normal, and the angle,
+    /// `atan(a)` everywhere, is enclosed over the whole side (the fan's parts add `a / 64`:
+    /// interval cross products of vectors in the plane leave that much across it).
+    #[test]
+    fn a_triangle_is_enclosed_up_to_its_apex() {
+        let k = Kernel::default();
+        let a = 2.0e-3_f64;
+        let apex = CPoint::new(1.0, 0.0, 0.0, NOW);
+        let net = vec![
+            vec![CPoint::new(0.0, 0.0, 0.0, NOW), apex],
+            vec![CPoint::new(0.0, 1.0, a, NOW), apex],
+        ];
+        let s = NurbSurface::new(
+            net,
+            1,
+            1,
+            vec![0.0, 0.0, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let triangle = Surface::from(BSplineSurface::from_nurb(s, false));
+        let flat = leaning(0.0, 0.0);
+        let angle = a.atan();
+        let e = seam_angle_enclosure(
+            &k,
+            &x_axis(),
+            Extent1d::from_min_max(0.0, 1.0),
+            [&triangle, &flat],
+            angle + 1.0e-4,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(
+            e.lower <= angle && angle <= e.upper,
+            "{e:?} against {angle:e}"
+        );
+        assert!(e.upper <= angle + 1.0e-4, "{e:?}");
+    }
+
+    /// Fact 1b narrows a box of feet to the nearest point's, inside the domain and on its
+    /// edge: on the plane `z = 0` (`x = u`, `y = 2 v − 1`), the nearest point to `(0.3, 0.3,
+    /// 1e-3)` is `(0.3, 0.65)`, a zero of `J^T (S − C)`; to `(−1e-3, 0.3, 0)`, past the edge
+    /// `u = 0`, it is `(0, 0.65)`, where `F_u ≠ 0` (an unconstrained Krawczyk box would drop
+    /// it). Each narrowed box holds the point and is far narrower than the box it started
+    /// from.
+    #[test]
+    fn the_feet_narrow_to_the_nearest_point_inside_and_on_an_edge() {
+        let k = Kernel::default();
+        let probe = [crate::math::Point2::new(0.5, 0.5)];
+        let net = NetSurface::of(&k, &leaning(0.0, 0.0), &probe)
+            .unwrap()
+            .unwrap();
+        let point = |x: f64, y: f64, z: f64| V3 {
+            x: Ivl::from(x),
+            y: Ivl::from(y),
+            z: Ivl::from(z),
+        };
+        let start = (Ivl::new(0.25, 0.35), Ivl::new(0.6, 0.7));
+        let (u, v) = nearest_box(&net, start, point(0.3, 0.3, 1.0e-3)).unwrap();
+        assert!(
+            u.lo <= 0.3 && 0.3 <= u.hi && v.lo <= 0.65 && 0.65 <= v.hi,
+            "{u:?} {v:?}"
+        );
+        assert!(u.hi - u.lo < 1.0e-9 && v.hi - v.lo < 1.0e-9, "{u:?} {v:?}");
+        let start = (Ivl::new(-0.05, 0.05), Ivl::new(0.6, 0.7));
+        let (u, v) = nearest_box(&net, start, point(-1.0e-3, 0.3, 0.0)).unwrap();
+        assert!(
+            u.lo <= 0.0 && 0.0 <= u.hi && v.lo <= 0.65 && 0.65 <= v.hi,
+            "{u:?} {v:?}"
+        );
+        assert!(u.hi - u.lo < 1.0e-9 && v.hi - v.lo < 1.0e-9, "{u:?} {v:?}");
     }
 
     /// Faces at a right angle: the normals' dot product straddles 0, so no station's lower
