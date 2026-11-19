@@ -104,7 +104,9 @@ pub(super) static DATA: &[Row] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-bottle-e8-r0.1",
-        0x54ec49aee16198c0,
+        // (#16394: the trimmed-face box search ends the body's box 2.75e-5 nearer it on -x;
+        // the mass, integrated about the box's middle, moves in its last bits)
+        0xbd7e924def1e4e8e,
         1,
         &[
             (0, false, 25, 0x3ef71d7309f3641b, 0x3ee942308b035f45),
