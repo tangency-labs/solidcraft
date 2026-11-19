@@ -11,21 +11,23 @@ use serde::Deserialize;
 
 use super::config::NameList;
 use super::types::{
-    AngleExpr, ConventionParam, DirectionParam, FeatureCommon, IdOrName, LengthExpr, ProfilesParam, RevolveAxis, RevolveDirection, feature_common,
-    present,
+    AngleExpr, ConventionParam, DirectionParam, FeatureCommon, IdOrName, LengthExpr, ProfilesParam, RevolveAxis, RevolveDirection, ToPoint,
+    feature_common, present,
 };
 
 /// Extrude a sketch's curves or profiles into a surface body: walls only, no caps.
 ///
-/// The extent keys `solid.extrude` has beyond these (`through_all`, `extent`, `taper`, `corner`,
-/// `to`, `to_offset` and `from`) are left out: a surface extrude refuses the first ones as "not
-/// supported yet" and does nothing with the others.
+/// The extent keys `solid.extrude` has beyond these (`through_all`, `extent`, `taper`, `corner`
+/// and `from`) are left out: a surface extrude refuses the first ones as "not supported yet" and
+/// does nothing with the others.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct SurfaceExtrudeParams {
     /// How far: the length one way; with `direction: symmetric`, the total (per side with
-    /// `convention: legacy_per_side`); with `distance2`, the first side's length.
-    pub distance: LengthExpr,
+    /// `convention: legacy_per_side`); with `distance2`, the first side's length. Required
+    /// unless `to` is given.
+    #[serde(default)]
+    pub distance: Option<LengthExpr>,
     /// The sketch, by id or name. Default: the active sketch, else the last one.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "IdOrName")]
@@ -57,6 +59,14 @@ pub struct SurfaceExtrudeParams {
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "ConventionParam")]
     pub convention: Option<ConventionParam>,
+    /// End at this face, vertex or point (To Object). A curved or slanted face trims the walls
+    /// where they meet its surface.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "ToPoint")]
+    pub to: Option<ToPoint>,
+    /// How far past `to` to go: to a point or a flat face square to the extrusion only.
+    #[serde(default)]
+    pub to_offset: Option<LengthExpr>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }
