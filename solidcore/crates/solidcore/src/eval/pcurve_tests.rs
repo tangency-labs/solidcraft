@@ -1341,8 +1341,8 @@ fn a_loop_round_a_closed_spline_given_a_period_on_and_a_rounding_short_lands_in_
 /// A loop inside one period of a spline closed in u whose control polygon reaches past the
 /// period's end while its curve does not: a cubic from (3.5, 0.2) to (3.5, 0.8) with control u
 /// 3.5, 4.5625, 3.5, 3.5 (its u peaks at 3.5 + 3 · 1.0625 · 4/27 = 3.97 at t = 1/3) and the line
-/// back. Its vertices, at u = 3.5, lie in the base period [0, 4], so it stays where it is: moved
-/// a period down for its control polygon, the whole loop would lie outside the range.
+/// back. Its lowest point, u = 3.5, lies in the base period [0, 4], so it stays where it is: a
+/// period lower, the whole loop would lie outside the range.
 #[test]
 fn a_loop_whose_control_polygon_reaches_past_its_period_stays_in_it() {
     let full = [0., TAU];
@@ -1382,6 +1382,63 @@ fn a_loop_whose_control_polygon_reaches_past_its_period_stays_in_it() {
     let out = &pcurves(&cylinder, &[l.to_vec()], 1e-7).unwrap()[0];
     for (k, (got, given)) in out.iter().zip([&arc, &back]).enumerate() {
         assert_eq!(points(got), points(given), "use {k}: left where it is");
+    }
+}
+
+/// Loops on a spline closed in u (period and range [0, 4]) that lie outside the range both where
+/// their lowest point puts them and a period lower stay where their lowest point puts them: a
+/// rectangle across the seam, u 3 to 5, and one a period wide from a ten-thousandth of a period
+/// short of the range's end, u 3.9996 to 7.9996, whose uses meet exactly. Only a loop that lies
+/// in the range a period lower, to within how far its uses miss each other, is moved there.
+#[test]
+fn a_loop_outside_the_range_a_period_lower_too_stays_where_its_lowest_point_puts_it() {
+    let full = [0., TAU];
+    let (cylinder, _) = form::surface(
+        &Surface::Cylinder {
+            frame: about_z([0.; 3], false),
+            radius: 3.,
+        },
+        [full, [0., 4.]],
+    )
+    .unwrap();
+    let domain = SurfaceEval::new(&cylinder).unwrap().domain();
+    assert_eq!(
+        (domain.range[0], domain.period[0]),
+        (Some((0., 4.)), Some(4.))
+    );
+    let line = Curve::Line {
+        start: [3., 0., 0.],
+        end: [3., 0., 4.],
+    };
+    for [a, b] in [[3., 5.], [3.9996, 7.9996]] {
+        let corners = [[a, 0.2], [b, 0.2], [b, 0.8], [a, 0.8]];
+        let sides: Vec<Curve2> = (0..4)
+            .map(|k| Curve2::Spline {
+                knots: vec![0., 0., 1., 1.],
+                points: vec![corners[k], corners[(k + 1) % 4]],
+            })
+            .collect();
+        let l: Vec<EdgeUse<'_>> = sides
+            .iter()
+            .zip(0..)
+            .map(|(pc, edge)| EdgeUse {
+                edge,
+                curve: &line,
+                interval: [0., 1.],
+                forward: true,
+                tolerance: 0.0,
+                given: Some(pc),
+            })
+            .collect();
+        let out = &pcurves(&cylinder, &[l], 1e-7).unwrap()[0];
+        assert_eq!(out.len(), 4);
+        for (k, (got, given)) in out.iter().zip(&sides).enumerate() {
+            assert_eq!(
+                points(got),
+                points(given),
+                "u {a} to {b}, use {k}: left where it is"
+            );
+        }
     }
 }
 

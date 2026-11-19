@@ -793,10 +793,12 @@ impl On {
 
     /// The loop's uses moved by whole periods so each starts where the one before it ends (in
     /// loop order and direction), then all together into the surface's base period where the
-    /// loop's lowest vertex allows, each vertex where the higher of its two uses puts it. Where
-    /// uses meet at a pole (within `tol`) the periodic parameter is free: there the offsets that
-    /// turn the loop counter-clockwise in (u, v) (a face boundary seen from the natural normal)
-    /// by more than rounding are taken, else the nearest. A seam used twice from pole to pole thus encloses its face, never nothing.
+    /// loop's lowest point allows; a loop that lies outside the surface's range there but within
+    /// it a period lower, to within how far its uses miss each other at its vertices, goes there.
+    /// Where uses meet at a pole (within `tol`) the periodic parameter is free: there the offsets
+    /// that turn the loop counter-clockwise in (u, v) (a face boundary seen from the natural
+    /// normal) by more than rounding are taken, else the nearest. A seam used twice from pole to
+    /// pole thus encloses its face, never nothing.
     fn close(&self, uses: &mut [(Curve2, bool)], tol: f64) -> Result<()> {
         let n = uses.len();
         let mut ends = Vec::new();
@@ -914,23 +916,45 @@ impl On {
                 .copied()
                 .flatten()
                 .map_or(0.0, |(a, b)| a.min(b));
-            // The loop's lowest vertex: its vertices are points of the loop itself, where a
-            // control polygon may reach past its curve. Two uses meet at a vertex only to within
-            // their rounding, so each vertex is taken where the higher of the two puts it: one
-            // that a use puts a rounding below a period's start and the other on it lies there.
-            let low = (0..n)
-                .filter_map(|k| {
-                    let before = k.checked_sub(1).or_else(|| n.checked_sub(1))?;
-                    let (start, _) = ends.get(k)?;
-                    let (_, end) = ends.get(before)?;
-                    Some((at(*start, d) + shift.get(k)?).max(at(*end, d) + shift.get(before)?))
-                })
-                .fold(f64::INFINITY, f64::min);
-            let base = if low.is_finite() {
+            let (low, high) = uses
+                .iter()
+                .zip(&shift)
+                .flat_map(|((c, _), s)| points(c).into_iter().map(move |q| at(q, d) + s))
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), x| {
+                    (a.min(x), b.max(x))
+                });
+            let mut base = if low.is_finite() {
                 ((low - lo) / period + 1e-9).floor() * period
             } else {
                 0.0
             };
+            // Its uses meet at its vertices only to within their rounding: how far apart they
+            // are there, short of whole periods, but at a pole, where the parameter is free.
+            let slack = (0..n)
+                .filter(|&k| !at_pole.get(k).copied().unwrap_or(true))
+                .filter_map(|k| {
+                    let before = k.checked_sub(1).or_else(|| n.checked_sub(1))?;
+                    let (start, _) = ends.get(k)?;
+                    let (_, end) = ends.get(before)?;
+                    let gap = at(*start, d) + shift.get(k)? - at(*end, d) - shift.get(before)?;
+                    Some((gap - (gap / period).round() * period).abs())
+                })
+                .fold(0.0, f64::max);
+            // A loop that lies outside the range where its lowest point puts it, but within it a
+            // period lower to that rounding and the base's own (above), lies there: its lowest
+            // point is a rounding short of a period's start (#19315).
+            let hi = self
+                .dom
+                .range
+                .get(d)
+                .copied()
+                .flatten()
+                .map_or(lo + period, |(a, b)| a.max(b));
+            let room = slack + 1e-9 * period;
+            let inside = |by: f64| low - by >= lo - room && high - by <= hi + room;
+            if low.is_finite() && !inside(base) && inside(base + period) {
+                base += period;
+            }
             for (((c, _), s), (st, en)) in uses.iter_mut().zip(&shift).zip(ends.iter_mut()) {
                 let by = s - base;
                 if by != 0.0 {
