@@ -170,6 +170,12 @@ const URDF_OPTIONS: &[OptionSpec] = &[
     OptionSpec { param: "mesh_prefix", label: "Mesh file prefix", kind: OptionKind::Text { default: "", hint: "package://robot/meshes/" } },
     OptionSpec { param: "effort", label: "Joint effort", kind: OptionKind::Number { default: 1000.0, min: 0.0, max: 1e9, unit: "" } },
     OptionSpec { param: "velocity", label: "Joint velocity", kind: OptionKind::Number { default: 10.0, min: 0.0, max: 1e9, unit: "" } },
+    OptionSpec { param: "images", label: "Pictures as textured visuals", kind: OptionKind::Bool { default: false } },
+];
+
+const SDF_OPTIONS: &[OptionSpec] = &[
+    OptionSpec { param: "static", label: "Static model", kind: OptionKind::Bool { default: true } },
+    OptionSpec { param: "model_uris", label: "Name files as model://", kind: OptionKind::Bool { default: false } },
 ];
 
 const VIEW_DXF_OPTIONS: &[OptionSpec] = &[
@@ -360,6 +366,14 @@ pub static FORMATS: &[FormatSpec] = &[
         role: Role::Artifact,
         import: None,
         export: Some(ExportSpec { command: "file.export", format: None, options: URDF_OPTIONS, scope: ExportScope::Design, lossless: false }),
+    },
+    FormatSpec {
+        id: "sdf",
+        label: "Gazebo model (SDF)",
+        extensions: &["sdf"],
+        role: Role::Artifact,
+        import: None,
+        export: Some(ExportSpec { command: "file.export", format: None, options: SDF_OPTIONS, scope: ExportScope::Design, lossless: false }),
     },
     FormatSpec {
         id: "design-json",

@@ -2524,7 +2524,6 @@
   "prefs.blur_off": "Pois",
   "prefs.blur_reduce_transparency": "Poistettu käytöstä järjestelmän Vähennä läpinäkyvyyttä -asetuksella",
   "prefs.blur_software": "Ei käytettävissä ohjelmistografiikalla (gpu-software)",
-  "prefs.blur_source": "Ei käytettävissä tässä työtilan näkymässä",
   "prefs.blur_web": "Ei käytettävissä tällä verkkorenderöintipolulla",
   "prefs.bodies_folders": "Kappalekansiot",
   "prefs.bodies_folders_always": "Aina",
