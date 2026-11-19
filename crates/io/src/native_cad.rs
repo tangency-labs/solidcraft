@@ -119,7 +119,7 @@ fn traced_records(
         let (color, paint) = looks.as_ref().map_or((None, None), |l| l.paint_of(ir, &r.body, &r.solid.face_origin));
         warnings.extend(r.solid.notes.iter().map(|n| format!("{}: {n}", label(&r.body))));
         let record = RecordBody {
-            name: body.and_then(|b| b.name.clone()).unwrap_or_default(),
+            name: body.and_then(|b| b.name.as_deref()).map(str::trim).unwrap_or_default().to_string(),
             path: vec![product.to_string()],
             instance: None,
             // Only where asked: a Rhino object's colour is often its layer's default (black),
@@ -152,7 +152,12 @@ fn traced_records(
             },
             None => (t.id.as_str(), None),
         };
-        let name = body.and_then(|b| b.name.clone()).or_else(|| t.source_object.as_ref().and_then(|s| s.name.clone())).unwrap_or_default();
+        let name = body
+            .and_then(|b| b.name.clone())
+            .or_else(|| t.source_object.as_ref().and_then(|s| s.name.clone()))
+            .unwrap_or_default()
+            .trim()
+            .to_string();
         if body.is_none() && !ir.model.occurrences.is_empty() {
             let named = if name.trim().is_empty() { format!("triangles {id}") } else { name.clone() };
             warnings.push(format!("{named}: a part given as triangles comes in where the file defines it, not placed in the assembly: the file's reader does not say which part it is"));

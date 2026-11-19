@@ -961,3 +961,20 @@ fn a_part_on_a_hidden_layer_comes_in_hidden() {
     assert!(!with("#300=PRESENTATION_LAYER_ASSIGNMENT('Parts','',(#99));\n"), "on a shown layer");
     assert!(!with(""), "on no layer");
 }
+
+/// Names come in trimmed, as SolidCraft's STEP reader trims them: a product written with a
+/// trailing space ("Guma NR 60ShA černá ", as a real assembly writes one) is the same product to
+/// both readers.
+#[test]
+fn product_names_come_in_trimmed() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let text = std::fs::read_to_string(dir.join("cylinder_placed.step"))
+        .unwrap()
+        .replace("PRODUCT('cylinder_placed','cylinder_placed'", "PRODUCT(' cylinder_placed  ',' cylinder_placed  '");
+    let ours = solidcraft_kernel::step_import(&text).unwrap();
+    let (theirs, warnings) = by_records(&neutral(text.as_bytes(), "cylinder_placed.step"));
+    let theirs = theirs.unwrap_or_else(|e| panic!("{e} {warnings:?}"));
+    assert_eq!(tree_of(&theirs), tree_of(&ours));
+    let tree = tree_of(&theirs);
+    assert!(tree.get(1).is_some_and(|l| l.starts_with("1 cylinder_placed [") && l.contains("/cylinder_placed|")), "{tree:?}");
+}
