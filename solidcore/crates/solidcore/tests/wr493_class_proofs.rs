@@ -36,6 +36,7 @@
     clippy::indexing_slicing
 )] // test helpers
 
+use solidcore::curve::curve::p2::LINE_TYPE;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::object::ObjectRef;
 use solidcore::geom::tol::zone_tol3d;
@@ -188,15 +189,23 @@ fn bits(b: &BSplineSurface) -> Option<Bits> {
     Some((rows, knots(n.u_knots()), knots(n.v_knots())))
 }
 
-/// A UV curve as bits: its natural interval and five points on it.
+/// A UV curve as bits: its natural interval, for a B-spline or a line its kind and whole
+/// definition, and five points on it as evaluated.
 fn curve_bits(k: &Kernel, c: &solidcore::curve::curve::Curve) -> Vec<u64> {
     use solidcore::curve::curve::CurveKind;
     let iv = c.natural_interval();
     let mut out = vec![iv.min().to_bits(), iv.max().to_bits()];
     // a B-spline or line: its whole definition (degree, knots and control points in use)
+    // and its kind, so a line and the B-spline of its definition are told apart
     let base = match c.kind() {
-        CurveKind::BSpline(b) => Some(std::borrow::Cow::Borrowed(b)),
-        CurveKind::Line(l) => l.base_with_nurb().ok(),
+        CurveKind::BSpline(b) => {
+            out.push(1);
+            Some(std::borrow::Cow::Borrowed(b))
+        }
+        CurveKind::Line(l) => {
+            out.push(2);
+            l.base_with_nurb().ok()
+        }
         _ => None,
     };
     if let Some(nurb) = base.as_ref().and_then(|b| b.gw_nurb()) {
@@ -206,8 +215,8 @@ fn curve_bits(k: &Kernel, c: &solidcore::curve::curve::Curve) -> Vec<u64> {
         for q in &nurb.cpts()[..=n] {
             out.extend([q.x, q.y, q.z, q.w].map(f64::to_bits));
         }
-        return out;
     }
+    // and, whatever the kind, five points as evaluated bit for bit
     for f in [0.0, 0.17, 0.5, 0.83, 1.0] {
         let p = c
             .evaluate_point(k, iv.min() + (iv.max() - iv.min()) * f)
@@ -228,18 +237,30 @@ fn face_of(b: &Brep, eu: &solidcore::topology::Edgeuse) -> Option<FaceId> {
 
 /// Every found sphere/torus face holds a NURB that is bitwise its own record's surface in
 /// the file, so its UV parameters are the file's. Returns the number of found faces and of
-/// the UV trims on them that are their own edge-use record's (the same definition bit for
-/// bit: degree, knots and control points), so a file without any cannot pass vacuously;
-/// the others, which healing rebuilt, are listed. Record i makes the primary edge use at
+/// the UV trims on them that are their own edge-use record's as the read makes it (the
+/// same kind, definition bit for bit — degree, knots and control points — and five
+/// evaluated points), so a file without any cannot pass vacuously; the others are listed. Record i makes the primary edge use at
 /// arena index 2i (which carries the record's trim) and its mate at 2i + 1 (which
 /// carries none, asserted).
 fn assert_found_faces_keep_file_nurbs(name: &str) -> (usize, usize, Vec<u32>) {
     let mut k = Kernel::default();
     let data = BrepData::read_from_file(&k, bytes(name), FileType::Ascii).unwrap();
+    // each record's trim as the read makes it: the read's analytics (`MakeUVCurve` with
+    // `add_analytics`) turn a B-spline that is a line into that line, on every face
     let file_trims: Vec<Vec<u64>> = data
         .uv_curves
         .iter()
-        .map(|c| curve_bits(&k, &c.object))
+        .map(|c| {
+            let c = &c.object;
+            let line = if c.is_analytic() {
+                None
+            } else {
+                c.create_analytic_curve(&k, &c.natural_interval())
+                    .unwrap()
+                    .filter(|a| a.is_kind_of(LINE_TYPE))
+            };
+            curve_bits(&k, line.as_ref().unwrap_or(c))
+        })
         .collect();
 
     let b = read(&mut k, name);
@@ -302,24 +323,27 @@ fn assert_found_faces_keep_file_nurbs(name: &str) -> (usize, usize, Vec<u32>) {
 
 #[test]
 fn found_spheres_and_tori_keep_the_file_nurb_and_trims() {
-    // (file, the primary edge uses on found faces whose UV trim is not their own record's)
-    let files: [(&str, &[u32]); 9] = [
-        ("Fillet/box_w_slot.smb", &[]),
-        ("Fillet/sphere_diff_3cylinders.smb", &[10, 26]),
-        ("Fillet/sphere_plane.smb", &[4]),
-        ("Solids/nurb_fillet.smb", &[58, 68]),
-        ("Solids/revolution_360.smb", &[]),
-        ("Solids/revolution_mold.smb", &[]),
-        ("Solids/sphere.smb", &[]),
-        ("sphere.smb", &[]),
-        ("surf_sphere150.smb", &[]),
+    // every primary edge use on a found face keeps its own record's UV trim, as the read
+    // makes it (the earlier lists [10, 26], [4] and [58, 68] were lines the read's
+    // analytics made from those very records, whose NURBs the line rebuilds: compared with
+    // the read's line of the record, they are the record's)
+    let files = [
+        "Fillet/box_w_slot.smb",
+        "Fillet/sphere_diff_3cylinders.smb",
+        "Fillet/sphere_plane.smb",
+        "Solids/nurb_fillet.smb",
+        "Solids/revolution_360.smb",
+        "Solids/revolution_mold.smb",
+        "Solids/sphere.smb",
+        "sphere.smb",
+        "surf_sphere150.smb",
     ];
     let mut failures = Vec::new();
-    for (name, want) in files {
+    for name in files {
         let (found, trims, remade) = assert_found_faces_keep_file_nurbs(name);
-        if found == 0 || trims == 0 || remade != want {
+        if found == 0 || trims == 0 || !remade.is_empty() {
             failures.push(format!(
-                "{name}: {found} found, {trims} file trims, remade {remade:?} (want {want:?})"
+                "{name}: {found} found, {trims} file trims, remade {remade:?}"
             ));
         }
     }

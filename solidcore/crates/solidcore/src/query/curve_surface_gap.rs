@@ -617,7 +617,12 @@ pub fn curve_uv_gap_lower_bound(
     surface: &Surface,
     t: f64,
 ) -> Result<Option<f64>> {
-    let (Ok(cn), Ok(wn)) = (NurbsCurve::of(curve), NurbsCurve::of(uv)) else {
+    // (the homogeneous points as stored, so the curves enclosed are the ones evaluated: a
+    // rebuild from the Euclidean points rounds a rational point's `x w`)
+    let (Some(cn), Some(wn)) = (
+        polynomial_pieces::stored_nurbs(curve),
+        polynomial_pieces::stored_nurbs(uv),
+    ) else {
         return Ok(None);
     };
     let inside = |n: &NurbsCurve| matches!((n.u.get(n.p), n.u.get(n.n)), (Some(&d0), Some(&d1)) if d0 <= t && t <= d1);
@@ -1220,6 +1225,85 @@ mod tests {
             matches!(&stopped, Err(e) if e.is_cancelled()),
             "{stopped:?}"
         );
+    }
+
+    /// [`curve_uv_gap_lower_bound`] of a line `lift` above the bilinear plane patch z = 0 (x,
+    /// y in 0..1) at its UV line: at every parameter the gap is exactly `lift`, and the lower
+    /// bound is at most that (and at most [`curve_uv_gap_bound`]'s upper bound) and below it
+    /// by no more than rounding, a UV point on the net's end (`u = 1`) included. Read at the
+    /// reversed UV line, at `t = 0` the gap is the shadow's whole length. Nothing is enclosed
+    /// at a parameter outside the domain or not finite, nor where the UV line runs far past
+    /// the net's end.
+    #[test]
+    fn a_line_over_its_uv_line_has_its_height_as_lower_bound() {
+        use crate::nurbs::b_spline_curve::KnotType;
+        use crate::nurbs::b_spline_surface::{
+            BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData,
+        };
+        let k = Kernel::default();
+        let plane = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 1,
+            v_degree: 1,
+            control_points: &[
+                Point3::new(0.0, 0.0, 0.0),
+                Point3::new(0.0, 1.0, 0.0),
+                Point3::new(1.0, 0.0, 0.0),
+                Point3::new(1.0, 1.0, 0.0),
+            ],
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[2, 2],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&[1.0; 4]),
+            uv_domain: None,
+        })
+        .unwrap();
+        let surface = Surface::from(plane);
+        let line = |a: [f64; 3], b: [f64; 3]| {
+            let c = NurbCurve::new(
+                vec![
+                    CPoint::new(a[0], a[1], a[2], NOW),
+                    CPoint::new(b[0], b[1], b[2], NOW),
+                ],
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+            )
+            .unwrap();
+            BSplineCurve::from_nurb(c, 3, false)
+        };
+        let lift = 4.2e-7;
+        let lower = |c: &BSplineCurve, w: &BSplineCurve, t: f64| {
+            curve_uv_gap_lower_bound(&k, c, w, &surface, t).unwrap()
+        };
+        // (to the net's end u = 1 at t = 1)
+        let curve = line([0.2, 0.3, lift], [1.0, 0.6, lift]);
+        let uv = line([0.2, 0.3, 0.0], [1.0, 0.6, 0.0]);
+        let upper = curve_uv_gap_bound(&k, &curve, &uv, &surface, [0.0, 1.0], 1e-9)
+            .unwrap()
+            .unwrap();
+        // the bound gives up rounding only: coordinates near 1 cost a few ulps of 1 (at
+        // t = 1 the UV box rounds past the net's end, and the continuation's slack, about
+        // 6e-15, is taken off)
+        for t in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let lo = lower(&curve, &uv, t).unwrap_or_else(|| panic!("t {t}: not enclosed"));
+            assert!(
+                lo <= lift && lo <= upper && lo >= lift - 1e-13,
+                "t {t}: {lo:e} against {lift:e} (upper {upper:e})"
+            );
+        }
+        let reversed = line([1.0, 0.6, 0.0], [0.2, 0.3, 0.0]);
+        let full = (0.8_f64 * 0.8 + 0.3 * 0.3 + lift * lift).sqrt();
+        let lo = lower(&curve, &reversed, 0.0).unwrap();
+        assert!(lo <= full && lo >= full * (1.0 - 1e-12), "{lo:e} {full:e}");
+        for t in [-0.5, 1.5, f64::NAN, f64::INFINITY] {
+            assert_eq!(lower(&curve, &uv, t), None, "t {t}");
+        }
+        let far = line([0.2, 0.3, 0.0], [1.5, 0.3, 0.0]);
+        let over = line([0.2, 0.3, lift], [1.5, 0.3, lift]);
+        assert!(lower(&over, &far, 0.0).is_some());
+        assert_eq!(lower(&over, &far, 1.0), None);
     }
 
     /// The top face (`z = 3`) of a 1 x 2 x 3 box: its surface, a plane with a net.
