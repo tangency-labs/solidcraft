@@ -1160,6 +1160,7 @@ struct TabsRig {
     pop_out: bool,
     /// The + has a menu.
     plus: bool,
+    plus_rows: &'static [TabMenuRow<'static>],
     /// The name of this view is being typed: its place, and the text and focus the strip edits.
     rename: Option<usize>,
     text: std::cell::RefCell<String>,
@@ -1191,6 +1192,7 @@ impl TabsRig {
             layout: None,
             pop_out: false,
             plus,
+            plus_rows: &PLUS_MENU,
             rename: rename.map(|(k, _)| k),
             text: std::cell::RefCell::new(text),
             focused: std::cell::Cell::new(false),
@@ -1259,7 +1261,7 @@ impl TabsRig {
             view_right_row: "vright",
             view_rename_row: "vrename",
             view_rename: self.rename.map(|k| (k, TabRename { text: &mut text, focused: &mut focused, max: 8 })),
-            plus_menu: if self.plus { &PLUS_MENU } else { &[] },
+            plus_menu: if self.plus { self.plus_rows } else { &[] },
             layout_menu: if layout.is_some() { &LAYOUT_MENU } else { &[] },
             view_layout: layout.as_ref(),
             layout_current: "layout.single",
@@ -1674,6 +1676,66 @@ fn the_plus_menu_has_a_header_icon_rows_and_a_separator() {
     rig.frame(Vec::new());
     rig.frame(Vec::new());
     assert_eq!(rig.press(rig.at("t:menu:plus_reopen"), egui::PointerButton::Primary), vec![TabAction::PlusMenu { id: "plus_reopen".into() }]);
+}
+
+const SHEET_PLUS_MENU: [TabMenuRow<'static>; 1] = [TabMenuRow::new("sheet", "Sheet", "")
+    .with_children(&[TabMenuRow::new("sheet.new", "New sheet", ""), TabMenuRow::new("sheet.open:drawing/sheet", "Drawing / Sheet 1", "")])];
+
+#[test]
+fn plus_sheet_submenu_hover_survives_the_gap_and_returns_the_child_action() {
+    let mut rig = TabsRig::build(Some(true), true, None);
+    rig.plus_rows = &SHEET_PLUS_MENU;
+    rig.press(rig.at("t:vnew"), egui::PointerButton::Primary);
+    rig.frame(Vec::new());
+    rig.frame(Vec::new());
+    let parent = rig.at("t:menu:sheet");
+    assert!(rig.frame(vec![egui::Event::PointerMoved(parent)]).is_empty(), "hovering Sheet opens its children without choosing the parent");
+    rig.frame(Vec::new());
+    rig.frame(Vec::new());
+    let parent_rect = solidcraft_ui_registry::rect_of("t:menu:sheet").expect("Sheet parent stays drawn");
+    let child_rect = solidcraft_ui_registry::rect_of("t:menu:sheet.open:drawing/sheet").expect("the existing Sheet child is drawn");
+    let gap_x = if child_rect.left() > parent_rect.right() {
+        (parent_rect.right() + child_rect.left()) * 0.5
+    } else {
+        assert!(child_rect.right() < parent_rect.left(), "the flyout opens beside the parent");
+        (child_rect.right() + parent_rect.left()) * 0.5
+    };
+    let gap = pos2(gap_x, parent_rect.center().y);
+    assert!(rig.frame(vec![egui::Event::PointerMoved(gap)]).is_empty());
+    assert!(solidcraft_ui_registry::rect_of("t:menu:sheet.open:drawing/sheet").is_some(), "crossing the gap keeps the same flyout open");
+    let child = rig.at("t:menu:sheet.open:drawing/sheet");
+    assert_eq!(rig.press(child, egui::PointerButton::Primary), vec![TabAction::PlusMenu { id: "sheet.open:drawing/sheet".into() }]);
+    rig.frame(Vec::new());
+    assert!(solidcraft_ui_registry::rect_of("t:menu:sheet.open:drawing/sheet").is_none(), "choosing a child closes the menu");
+}
+
+#[test]
+fn plus_sheet_submenu_arrow_right_and_enter_choose_the_child_action() {
+    let mut rig = TabsRig::build(Some(true), true, None);
+    rig.plus_rows = &SHEET_PLUS_MENU;
+    rig.press(rig.at("t:vnew"), egui::PointerButton::Primary);
+    rig.frame(Vec::new());
+    rig.frame(Vec::new());
+    rig.frame(vec![egui::Event::PointerGone]);
+    let key = |key, pressed| egui::Event::Key { key, physical_key: None, pressed, repeat: false, modifiers: egui::Modifiers::NONE };
+    let parent_rect = solidcraft_ui_registry::rect_of("t:menu:sheet").expect("Sheet parent is drawn");
+    let focused_rect = || rig.ctx.memory(|m| m.focused()).and_then(|id| rig.ctx.read_response(id)).map(|response| response.rect);
+    for _ in 0..32 {
+        if focused_rect() == Some(parent_rect) {
+            break;
+        }
+        assert!(rig.frame(vec![key(egui::Key::Tab, true)]).is_empty());
+        rig.frame(vec![key(egui::Key::Tab, false)]);
+    }
+    assert_eq!(focused_rect(), Some(parent_rect), "Tab reaches the Sheet row before entering its submenu");
+    assert!(rig.frame(vec![key(egui::Key::ArrowRight, true)]).is_empty());
+    rig.frame(vec![key(egui::Key::ArrowRight, false)]);
+    // read_response reports the previous paint; let the flyout's invisible sizing pass
+    // settle before comparing its focused response with the published visible row.
+    rig.frame(Vec::new());
+    let child_rect = solidcraft_ui_registry::rect_of("t:menu:sheet.new").expect("the first Sheet child is drawn");
+    assert_eq!(focused_rect(), Some(child_rect), "ArrowRight transfers keyboard focus to the first child");
+    assert_eq!(rig.frame(vec![key(egui::Key::Enter, true)]), vec![TabAction::PlusMenu { id: "sheet.new".into() }]);
 }
 
 /// The row builders set only what they say, and the glyphs the menus use exist.

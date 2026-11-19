@@ -41,7 +41,7 @@ pub(crate) fn shown(app: &SolveApp) -> bool {
 fn with_card_kind<T>(app: &mut SolveApp, id: u64, draw: impl FnOnce(&mut SolveApp) -> T) -> T {
     match app.docs.views.get(id).map(|view| view.kind) {
         Some(ViewKind::Render) => crate::render_workspace::with_tile_camera(app, draw),
-        _ if crate::render_workspace::active(app) => {
+        Some(ViewKind::Model) if crate::render_workspace::active(app) || crate::drawing_workspace::active(app) => {
             let tab = std::mem::replace(&mut app.ui.tab, "MODEL".into());
             let result = draw(app);
             app.ui.tab = tab;
@@ -85,6 +85,11 @@ fn draw_canvas(app: &mut SolveApp, ui: &mut egui::Ui, kind: ViewKind) {
         ViewKind::Render => {
             crate::dim_view::set_model_drawn(Vec::new());
             crate::render_workspace::show(app, ui);
+        }
+        ViewKind::Sheet => {
+            crate::dim_view::set_model_drawn(Vec::new());
+            let id = app.viewport.compass_view.unwrap_or_else(|| app.docs.views.active().id);
+            crate::drawing_sheet_page::show_view(app, ui, id);
         }
         _ => crate::viewport::show(app, ui),
     }
@@ -738,6 +743,9 @@ fn visible_card_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.viewport.rect = Some(*rect);
         app.viewport.card = true;
         with_card_camera(app, *id, |app| {
+            if app.docs.views.get(*id).is_some_and(|view| view.kind == ViewKind::Sheet) {
+                return;
+            }
             if crate::render_workspace::active(app) {
                 crate::render_workspace::finish_result_navigation(app, &mut controls, *rect);
             }
@@ -827,6 +835,19 @@ fn card_chrome(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, cell: Rect, heade
             painter.rect_filled(top, CornerRadius { nw: CARD_RADIUS, ne: CARD_RADIUS, sw: 0, se: 0 }, t.sketch_soft);
             let title = Rect::from_min_max(pos2(label.left(), top.top()), pos2(button_rect(cell, 3.0).left(), top.bottom()));
             crate::app_bar::paint_sketch_header(&painter, title, &name, app.tr("sketch_mode.editing"));
+        } else if let Some((paper, state)) = crate::drawing_sheet_page::view_badge(app, id, ui.ctx()) {
+            paint_card_header(&painter, top, CARD_RADIUS, "", label.left());
+            let right = button_rect(cell, 3.0).left();
+            let metadata = Rect::from_min_max(pos2(label.left(), top.top()), pos2(right.max(label.left()), top.bottom()));
+            let used = crate::app_bar::paint_view_chips(&painter, metadata, &[&paper, &state]);
+            let title = Rect::from_min_max(top.min, pos2((right - used).max(label.left()), top.bottom()));
+            painter.with_clip_rect(title).text(
+                pos2(label.left(), top.center().y),
+                egui::Align2::LEFT_CENTER,
+                name,
+                crate::ui_kit::type_face::semibold(t.font_body),
+                t.text,
+            );
         } else {
             paint_card_header(&painter, top, CARD_RADIUS, name, label.left());
         }
@@ -922,9 +943,21 @@ fn ground_chip(app: &mut SolveApp, ui: &egui::Ui, id: u64, ground: Rect) {
     let painter = ui.painter();
     let galley = painter.layout_no_wrap(name.to_owned(), egui::FontId::proportional(t.font_body), t.text);
     let editing = painter.layout_no_wrap(app.tr("sketch_mode.editing").to_owned(), crate::ui_kit::type_face::semibold(t.font_small), t.text);
-    let size = vec2(galley.size().x + if sketch_name.is_some() { editing.size().x + 56.0 } else { 34.0 }, 26.0);
+    let badges = crate::drawing_sheet_page::view_badge(app, id, ui.ctx());
+    let badge_width = badges.as_ref().map_or(0.0, |(paper, state)| {
+        [paper, state]
+            .iter()
+            .map(|label| painter.layout_no_wrap((*label).clone(), crate::ui_kit::type_face::semibold(t.font_small), t.text).size().x + t.space_12 + t.space_6)
+            .sum::<f32>()
+    });
+    let size = vec2(
+        (galley.size().x + if sketch_name.is_some() { editing.size().x + 56.0 } else { 34.0 } + badge_width)
+            .min((ground.width() - 2.0 * MARGIN).max(0.0)),
+        26.0,
+    );
     let at = pos2(ground.left() + MARGIN, ground.top() - HEADER + (HEADER - size.y) / 2.0);
     let chip = clear_of_panels(app, Rect::from_min_size(at, size));
+    let painter = &painter.with_clip_rect(chip);
     let radius = CornerRadius::same(13);
     painter.add(egui::Shadow { offset: [0, 2], blur: 8, spread: 0, color: egui::Color32::from_black_alpha(60) }.as_shape(chip, radius));
     painter.rect_filled(chip, radius, if sketch_name.is_some() { t.sketch_soft } else { t.panel_header });
@@ -936,6 +969,13 @@ fn ground_chip(app: &mut SolveApp, ui: &egui::Ui, id: u64, ground: Rect) {
         painter.circle_filled(chip.left_center() + vec2(13.0, 0.0), 3.5, t.accent);
         painter.galley(chip.left_center() + vec2(24.0, -galley.size().y / 2.0), galley, t.text);
     }
+    if let Some((paper, state)) = badges {
+        crate::app_bar::paint_view_chips(
+            painter,
+            Rect::from_min_max(pos2(chip.right() - badge_width, chip.top()), chip.right_bottom()),
+            &[&paper, &state],
+        );
+    }
     view_title_drag(app, ui, id, chip);
 }
 
@@ -946,6 +986,13 @@ fn card_title_rect(cell: Rect) -> Rect {
 fn view_title_drag(app: &mut SolveApp, ui: &egui::Ui, id: u64, title: Rect) -> bool {
     crate::scenario::publish_rect(&format!("view:title:{id}"), title);
     let response = ui.interact(title, ui.scope_id().with(("view_title_drag", id)), Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::Grab);
+    if let Some((_, state)) = crate::drawing_sheet_page::view_badge(app, id, ui.ctx())
+        && state == app.tr("sheet_views.fit")
+    {
+        let name = app.docs.views.get(id).map_or("", |view| view.name.as_str());
+        let label = solidcraft_ui_text::format("sheet_views.fitted", &[("name", name)]);
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), label.as_str()));
+    }
     if response.drag_started_by(egui::PointerButton::Primary) {
         let origin = Rect::from_min_size(title.min, vec2(title.width().min(140.0), title.height()));
         crate::view_window_drag::start_header(app, ui.ctx(), id, origin);

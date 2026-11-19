@@ -101,6 +101,8 @@ pub(crate) fn apply_focused_view(app: &mut crate::SolveApp, view: &solidcraft_vi
     }
     if view.kind == ViewKind::Sheet {
         crate::sheet_views::focus(app, view)?;
+    } else if view.kind == ViewKind::Render {
+        crate::render_workspace::focus_view_framing(app, view.id);
     }
     let home = crate::documents::view_workspace(view.kind);
     let current_workspace = if drawing_tab(&app.ui.tab) {
@@ -2503,7 +2505,6 @@ mod tests {
         let added = solidcraft_engine::doc::ids::decode(reply["result"]["note"].as_str().unwrap()).unwrap();
         assert!(h.app.session.doc.drawing(drawing).unwrap().on_sheet(sheet).notes.contains(&added));
     }
-
     #[test]
     fn suspended_sketch_tool_hints_follow_owner_focus_without_hiding_other_statuses() {
         fn painted(h: &crate::scenario::Harness, expected: &str) -> bool {
