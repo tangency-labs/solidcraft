@@ -3426,6 +3426,133 @@ fn a_spline_surface_whose_ends_meet_within_the_tolerance_is_closed() {
     assert!(closed_within(&BSurface::RationalSpline { u_knots, v_knots, homogeneous }, tol).is_none(), "weights differ at the ends");
 }
 
+/// A fan narrowing to a point at v = 1, degree 2 along u and 1 along v, whose last control
+/// column is the apex `(0, 0, 10)` with the k-th of its three points moved by `off[k]` along x.
+fn fan(off: [f64; 3]) -> BSurface {
+    let base = [[-5.0, 0.0, 0.0], [0.0, -5.0, 0.0], [5.0, 0.0, 0.0]];
+    BSurface::Spline {
+        u_knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        v_knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: base.iter().zip(off).map(|(&p, o)| vec![p, [o, 0.0, 10.0]]).collect(),
+    }
+}
+
+/// A spline side whose control points all lie within the tolerance of their centroid, but are not
+/// one point, is made an exact pole: its points become their centroid, and the surface moves by
+/// at most the farthest any of them moved. A side already one point (or one to rounding), one
+/// spread wider than the tolerance, one on knots not clamped at that end, and a surface no wider than ten tolerances
+/// anywhere are left as they are. A rational side keeps its weights.
+#[test]
+fn a_spline_side_that_closes_to_a_point_within_the_tolerance_is_made_an_exact_pole() {
+    let tol = 1e-3;
+    let off = [2e-4, -1e-4, 5e-5];
+    let near = fan(off);
+    let (pole, sides) = poles_within(&near, tol, &[]).expect("a side within the tolerance of a point");
+    assert_eq!(sides, 1);
+    let (BSurface::Spline { points, .. }, BSurface::Spline { points: was, .. }) = (&pole, &near) else { panic!("splines") };
+    let apex = [(off[0] + off[1] + off[2]) / 3.0, 0.0, 10.0];
+    assert!(points.iter().all(|row| row[1] == apex), "{points:?}");
+    assert!(points.iter().zip(was).all(|(row, was)| row[0] == was[0]), "the other side stays");
+    // The farthest control point moved by |2e-4 - 5e-5| = 1.5e-4: the surface by no more.
+    let farthest = off.iter().map(|o| (o - apex[0]).abs()).fold(0.0, f64::max);
+    let (before, after) = (SurfaceEval::new(&near).unwrap(), SurfaceEval::new(&pole).unwrap());
+    let mut moved = 0.0_f64;
+    for i in 0..=20 {
+        for j in 0..=20 {
+            let uv = [f64::from(i) / 20.0, f64::from(j) / 20.0];
+            moved = moved.max(before.point(uv).unwrap().dist(after.point(uv).unwrap()));
+        }
+    }
+    assert!(moved <= farthest * (1.0 + 1e-12), "moved {moved}, farthest control point {farthest}");
+    // One point to the rounding of the surface's evaluation (its control points are one exactly).
+    let top: Vec<_> = (0..=20).map(|i| after.point([f64::from(i) / 20.0, 1.0]).unwrap()).collect();
+    assert!(top.iter().all(|p| p.dist(Vec3::new(apex[0], apex[1], apex[2])) < 1e-12), "the side is one point: {top:?}");
+    // With the face's vertex at the apex, the pole is the vertex, not the centroid: the side's
+    // farthest point (2e-4 off it) is within the tolerance. A vertex farther from the side than
+    // the tolerance does not move it there.
+    let vertex = Vec3::new(0.0, 0.0, 10.0);
+    let (at_vertex, _) = poles_within(&near, tol, &[Vec3::new(5.0, 0.0, 0.0), vertex]).expect("a pole at the vertex");
+    let BSurface::Spline { points, .. } = &at_vertex else { panic!("a spline") };
+    assert!(points.iter().all(|row| row[1] == [0.0, 0.0, 10.0]), "{points:?}");
+    let (off_vertex, _) = poles_within(&near, tol, &[Vec3::new(0.0, 0.0, 10.01)]).expect("a pole at the centroid");
+    let BSurface::Spline { points, .. } = &off_vertex else { panic!("a spline") };
+    assert!(points.iter().all(|row| row[1] == apex), "{points:?}");
+
+    assert!(poles_within(&fan([0.0; 3]), tol, &[]).is_none(), "already a pole");
+    // One ulp apart (as a rational sphere's pole row reads back from a file): a pole already.
+    let BSurface::Spline { u_knots, v_knots, mut points } = fan([0.0; 3]) else { panic!("a spline") };
+    points[1][1][2] = f64::from_bits(10.0_f64.to_bits() + 1);
+    assert!(poles_within(&BSurface::Spline { u_knots, v_knots, points }, tol, &[]).is_none(), "one to rounding");
+    assert!(poles_within(&fan([2e-3, 0.0, 0.0]), tol, &[]).is_none(), "farther from a point than the tolerance");
+    let BSurface::Spline { u_knots, points, .. } = fan(off) else { panic!("a spline") };
+    let unclamped = BSurface::Spline { u_knots, v_knots: vec![0.0, 0.0, 1.0, 2.0], points };
+    assert!(poles_within(&unclamped, tol, &[]).is_none(), "the last column is not the surface's side");
+    let sliver = BSurface::Spline {
+        u_knots: vec![0.0, 0.0, 1.0, 1.0],
+        v_knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: vec![vec![[0.0, 0.0, 0.0], [0.0, 0.0, 10.0]], vec![[5e-3, 0.0, 0.0], [5e-4, 0.0, 10.0]]],
+    };
+    assert!(poles_within(&sliver, tol, &[]).is_none(), "a sliver is thin, not collapsed");
+
+    let BSurface::Spline { u_knots, v_knots, points } = fan(off) else { panic!("a spline") };
+    let weights = [1.0, 0.5, 2.0];
+    let homogeneous = points.iter().zip(weights).map(|(row, w)| row.iter().map(|p| [p[0] * w, p[1] * w, p[2] * w, w]).collect()).collect();
+    let (rational, _) = poles_within(&BSurface::RationalSpline { u_knots, v_knots, homogeneous }, tol, &[]).expect("a rational side");
+    let BSurface::RationalSpline { homogeneous, .. } = rational else { panic!("rational") };
+    for (row, w) in homogeneous.iter().zip(weights) {
+        assert_eq!(row[1][3], w, "the weight stays");
+        assert!((row[1][0] / w - apex[0]).abs() < 1e-18 && row[1][2] / w == 10.0, "{row:?}");
+    }
+}
+
+/// A tetrahedron A B C D whose face A B D (on y = 0) is a degree 1 spline whose side at v = 1
+/// should be the vertex D, but whose control point over A lies 2e-4 mm off it, in a file of
+/// uncertainty 1e-3 mm. That side is made an exact pole when the face is read (noted), so the
+/// kernel's check takes the solid: no boundary is only close to singular (its surface test 5,
+/// "Bad Surf Pole Approximation", which every operation on the body ran into).
+#[test]
+fn a_spline_face_whose_side_closes_to_its_vertex_within_the_tolerance_reads_with_an_exact_pole() {
+    let (a, bp, c, d) = ([0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 10.0]);
+    let mut w = W::default();
+    let (va, vb, vc, vd) = (w.vertex(a), w.vertex(bp), w.vertex(c), w.vertex(d));
+    let edge = |w: &mut W, (vp, p): (u64, V), (vq, q): (u64, V)| w.line_edge((vp, p), (vq, q), true, len3(sub3(q, p)));
+    let ab = edge(&mut w, (va, a), (vb, bp));
+    let ac = edge(&mut w, (va, a), (vc, c));
+    let ad = edge(&mut w, (va, a), (vd, d));
+    let bc = edge(&mut w, (vb, bp), (vc, c));
+    let bd = edge(&mut w, (vb, bp), (vd, d));
+    let cd = edge(&mut w, (vc, c), (vd, d));
+    let face = |w: &mut W, uses: &[(u64, bool)], surface: u64| {
+        let oes: Vec<u64> = uses.iter().map(|&(e, o)| w.oe(e, o)).collect();
+        let bound = w.bound(&oes, true, true);
+        w.face(&[bound], surface, true)
+    };
+    let z0 = w.plane(a, [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]);
+    let x0 = w.plane(a, [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+    let r3 = 1.0 / 3.0_f64.sqrt();
+    let slope = w.plane(bp, [r3, r3, r3], [-std::f64::consts::FRAC_1_SQRT_2, std::f64::consts::FRAC_1_SQRT_2, 0.0]);
+    let (p00, p01, p10, p11) = (w.pt(a), w.pt([2e-4, 0.0, 10.0]), w.pt(bp), w.pt(d));
+    let spline = w.add(format!(
+        "B_SPLINE_SURFACE_WITH_KNOTS('',1,1,((#{p00},#{p01}),(#{p10},#{p11})),.UNSPECIFIED.,.F.,.F.,.F.,(2,2),(2,2),(0.,1.),(0.,1.),.UNSPECIFIED.)"
+    ));
+    let faces = [
+        face(&mut w, &[(ac, true), (bc, false), (ab, false)], z0),
+        face(&mut w, &[(ad, true), (cd, false), (ac, false)], x0),
+        face(&mut w, &[(bc, true), (cd, true), (bd, false)], slope),
+        face(&mut w, &[(ab, true), (bd, true), (ad, false)], spline),
+    ];
+    let shell = closed_shell(&mut w, &faces);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('',#{shell})"));
+    let s = one_solid(&w.file_with_uncertainty(&[solid], 1e-3));
+    assert!(s.notes.iter().any(|n| n.contains("1 sides of spline surfaces that close to a point")), "{:?}", s.notes);
+    let (body, _) = solidcore_ops::body::Body::from_record(&s.brep, false).unwrap();
+    let check = body.check(solidcore_ops::CheckLevel::All).unwrap();
+    assert!(!check.text.contains("Pole Approximation"), "{check}");
+    assert!(check.is_valid(), "{check}");
+    let volume = body.mass_properties(1e-6).unwrap().volume;
+    assert!((volume - 1000.0 / 6.0).abs() < 1e-3, "{volume}");
+}
+
 /// The range a closed profile is built over for a face whose loops are walked: a loop round the
 /// whole profile (a band round an extruded ellipse, its samples an eighth of a turn apart) takes
 /// the whole turn from its first point; one along part of it the part it sweeps, however coarse

@@ -173,6 +173,11 @@ const URDF_OPTIONS: &[OptionSpec] = &[
     OptionSpec { param: "images", label: "Pictures as textured visuals", kind: OptionKind::Bool { default: false } },
 ];
 
+const SDF_OPTIONS: &[OptionSpec] = &[
+    OptionSpec { param: "static", label: "Static model", kind: OptionKind::Bool { default: true } },
+    OptionSpec { param: "model_uris", label: "Name files as model://", kind: OptionKind::Bool { default: false } },
+];
+
 const VIEW_DXF_OPTIONS: &[OptionSpec] = &[
     OptionSpec {
         param: "hidden",
@@ -320,6 +325,15 @@ pub static FORMATS: &[FormatSpec] = &[
         import: Some(ImportSpec { target: ImportTarget::PointCloud, options: &[], native_only: false }),
         export: None,
     },
+    // The Point Cloud Library's file: text, binary or compressed.
+    FormatSpec {
+        id: "pcd",
+        label: "PCD point cloud",
+        extensions: &["pcd"],
+        role: Role::Artifact,
+        import: Some(ImportSpec { target: ImportTarget::PointCloud, options: &[], native_only: false }),
+        export: None,
+    },
     FormatSpec {
         id: "xyz",
         label: "XYZ point cloud",
@@ -336,6 +350,15 @@ pub static FORMATS: &[FormatSpec] = &[
         import: Some(ImportSpec { target: ImportTarget::PointCloud, options: &[], native_only: false }),
         export: None,
     },
+    // The same text as XYZ under another name.
+    FormatSpec {
+        id: "asc",
+        label: "ASC point cloud",
+        extensions: &["asc"],
+        role: Role::Artifact,
+        import: Some(ImportSpec { target: ImportTarget::PointCloud, options: &[], native_only: false }),
+        export: None,
+    },
     FormatSpec {
         id: "urdf",
         label: "URDF robot",
@@ -343,6 +366,14 @@ pub static FORMATS: &[FormatSpec] = &[
         role: Role::Artifact,
         import: None,
         export: Some(ExportSpec { command: "file.export", format: None, options: URDF_OPTIONS, scope: ExportScope::Design, lossless: false }),
+    },
+    FormatSpec {
+        id: "sdf",
+        label: "Gazebo model (SDF)",
+        extensions: &["sdf"],
+        role: Role::Artifact,
+        import: None,
+        export: Some(ExportSpec { command: "file.export", format: None, options: SDF_OPTIONS, scope: ExportScope::Design, lossless: false }),
     },
     FormatSpec {
         id: "design-json",
@@ -458,7 +489,7 @@ pub fn import_filters(native: bool) -> Vec<(&'static str, Vec<&'static str>)> {
             // An OpenUSD scene is read as meshes, but it is its own kind of file to most people.
             ImportTarget::Mesh if f.id == "usd" => add(f.label, f.extensions),
             ImportTarget::Mesh => add("Mesh (3MF, STL, OBJ, glTF)", f.extensions),
-            ImportTarget::PointCloud => add("Point cloud (PLY, XYZ, PTS)", f.extensions),
+            ImportTarget::PointCloud => add("Point cloud (PLY, PCD, XYZ, PTS, ASC)", f.extensions),
             ImportTarget::Sketch => add("Sketch drawings (DXF, SVG)", f.extensions),
         }
     }
@@ -523,7 +554,7 @@ mod tests {
         for e in ["3mf", "stl", "obj", "glb", "gltf"] {
             assert!(with_target(ImportTarget::Mesh).contains(&e), "registry misses mesh .{e}");
         }
-        for e in ["ply", "xyz", "pts"] {
+        for e in ["ply", "pcd", "xyz", "pts", "asc"] {
             assert!(with_target(ImportTarget::PointCloud).contains(&e), "registry misses point cloud .{e}");
             assert!(crate::is_point_cloud_path(&format!("scan.{e}")));
             assert!(open_extensions(true).contains(&e));
@@ -598,7 +629,7 @@ mod tests {
         assert_eq!(find("FreeCAD and Rhino"), vec!["fcstd", "3dm"]);
         assert_eq!(find("Mesh (3MF, STL, OBJ, glTF)"), vec!["stl", "3mf", "obj", "glb", "gltf"]);
         assert_eq!(find("OpenUSD"), vec!["usd", "usda", "usdc", "usdz"]);
-        assert_eq!(find("Point cloud (PLY, XYZ, PTS)"), vec!["ply", "xyz", "pts"]);
+        assert_eq!(find("Point cloud (PLY, PCD, XYZ, PTS, ASC)"), vec!["ply", "pcd", "xyz", "pts", "asc"]);
         assert_eq!(find("Sketch drawings (DXF, SVG)"), vec!["dxf", "svg"]);
         assert!(import_filters(false).iter().all(|(l, _)| *l != "FreeCAD and Rhino"));
     }

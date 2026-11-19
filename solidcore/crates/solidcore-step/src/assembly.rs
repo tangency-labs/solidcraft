@@ -210,6 +210,9 @@ pub struct Assembly<'t> {
     /// the tolerance, moved onto their neighbours ([`crate::topology::unfolded_curve`],
     /// [`crate::topology::unfolded_surface`]).
     pub(crate) points_unfolded: usize,
+    /// Sides of spline surfaces that collapsed to within the tolerance of a point, made exact
+    /// poles ([`crate::topology::poles_within`]).
+    pub(crate) poles_made_exact: usize,
     /// Edges whose tolerance was raised to the gap their curve has to a face's surface.
     pub(crate) raised_edges: HashSet<u32>,
 }
@@ -233,6 +236,7 @@ impl<'t> Assembly<'t> {
             edges_turned: 0,
             splines_closed: 0,
             points_unfolded: 0,
+            poles_made_exact: 0,
             raised_edges: HashSet::new(),
         }
     }
@@ -344,8 +348,9 @@ impl<'t> Assembly<'t> {
     /// surface's natural normal; `outer` is the outer bound's index in `bounds` when the reader
     /// knows it (the pcurves decide otherwise, [`Assembly::finish`]); `forward` says the face's
     /// side is the natural normal. A spline surface whose first and last control lines meet
-    /// within the tolerance is closed on itself (noted), and a control net that turns back on
-    /// itself within it is unfolded (noted). `origin` names the face.
+    /// within the tolerance is closed on itself (noted), a side that closes to a point within it is
+    /// made an exact pole (noted), and a control net that turns back on itself within it is
+    /// unfolded (noted). `origin` names the face.
     pub fn add_face(&mut self, origin: u64, surface: BSurface, bounds: Vec<Bound>, outer: Option<usize>, forward: bool) -> R<u32> {
         // A sphere bounded by its poles alone is the whole sphere, with a meridian for its seam.
         let bounds = match &surface {
@@ -363,7 +368,20 @@ impl<'t> Assembly<'t> {
             }
             None => surface,
         };
-        // A control net that turns back on itself within the tolerance, taken out likewise.
+        // A side only close to a point is an exact pole before anything is measured on it.
+        let corners: Vec<Vec3> = bounds
+            .iter()
+            .flat_map(|b| match b {
+                Bound::Edges(es) => es.iter().filter_map(|(e, _)| self.edges.get(*e as usize)).flat_map(|e| e.vertices).collect::<Vec<u32>>(),
+                Bound::Vertex(v) => vec![*v],
+            })
+            .filter_map(|v| self.vertices.get(v as usize).map(|p| v3(p.point)))
+            .collect();
+        if let Some((poled, sides)) = crate::topology::poles_within(&surface, self.tol, &corners) {
+            self.poles_made_exact += sides;
+            surface = poled;
+        }
+        // A control net that turns back on itself within the tolerance is unfolded.
         if let Some((unfolded, moved)) = crate::topology::unfolded_surface(&surface, self.tol) {
             self.points_unfolded += moved;
             surface = unfolded;
@@ -641,6 +659,12 @@ impl<'t> Assembly<'t> {
             notes.push(format!(
                 "{} control points of spline curves and surfaces whose polygon turned back on itself by less than {} mm moved onto their neighbours",
                 self.points_unfolded, self.tol
+            ));
+        }
+        if self.poles_made_exact > 0 {
+            notes.push(format!(
+                "{} sides of spline surfaces that close to a point within {} mm made exact poles (their control points made one)",
+                self.poles_made_exact, self.tol
             ));
         }
         if self.inner_loops_turned > 0 {

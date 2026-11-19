@@ -3841,10 +3841,11 @@ mod tests_c5 {
         f.add_geom(FilletGeomType::Blends);
         let e = f.run().unwrap_err();
         assert_eq!(
-            e,
-            SolidError::blend_missing(
+            (e.operation(), e.blend_failure(), e.upstream_status()),
+            (
                 "blend::fillet_geom::p4::FilletBrep::calc_blending_geom",
-                "the geometry's fillet solver"
+                Some(&crate::error::blend::BlendFailure::StageFailed),
+                Some(SM_ERR_NULL_POINTER)
             )
         );
 
