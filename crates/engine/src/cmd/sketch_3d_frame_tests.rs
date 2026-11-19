@@ -1346,6 +1346,27 @@ fn move_with_z_lifts_the_moved_curves() {
     near(w.fit[1], Vec3::new(14.0, 5.0, 4.0));
 }
 
+#[test]
+fn move_with_z_joins_the_lifted_curves_where_they_meet() {
+    let (mut s, sketch) = plane_3d_sketch();
+    run(&mut s, "sketch.line3d", json!({"points":[[50,50,0],[60,50,5]]}));
+    let lines: Vec<String> = run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0],[10,10]]}))["curves"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    let r = run(&mut s, "sketch.move", json!({"entities": lines, "translate":[0,0], "z": 4}));
+    let made: Vec<String> = r["curves"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect();
+    assert_eq!(made.len(), 2, "{r}");
+    let sk = s.doc.sketch(sketch).unwrap();
+    assert!(
+        sk.wire_constraints.iter().any(|c| made.iter().all(|w| c.kind.wires().contains(&w.as_str()))),
+        "{:?}",
+        sk.wire_constraints
+    );
+}
+
 /// Points placed on the plane first move off it with Move/Copy's `z`: each becomes a drawn 3D
 /// point that far up. A copy leaves the point and lifts its copy. A fit point of a spline picked
 /// on its own lifts just that point; the spline's other points stay.
