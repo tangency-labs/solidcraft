@@ -176,7 +176,7 @@ pub fn instance_descriptor_from_env() -> wgpu::InstanceDescriptor {
 pub fn open_headless(policy: select::Policy) -> Result<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
     #[cfg(test)]
     {
-        test_env::shared_headless(policy)
+        test_env::shared_headless(test_env::Sharers::Tests, policy)
     }
     #[cfg(not(test))]
     {
