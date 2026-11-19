@@ -1259,8 +1259,10 @@ fn offset_mm(app: &SolveApp, m: &Member) -> Result<Option<[f64; 2]>, String> {
         }
         crate::length_input::eval(&app.session.doc, t, ValueKind::Length)
             .ok()
-            .filter(|v| frame::within_profile_size(*v))
-            .ok_or_else(|| format!("Offset A and Offset B must be lengths within {} mm", frame::MAX_PROFILE_SIZE))
+            // The limit is on the `locate` they give (`locate_for`), not on each offset: a stored
+            // `locate` the engine takes can be farther than that from its anchor.
+            .filter(|v| v.is_finite())
+            .ok_or_else(|| "Offset A and Offset B must be lengths".to_string())
     };
     Ok(Some([mm(a)?, mm(b)?]))
 }
@@ -1275,8 +1277,11 @@ fn base_params(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<Stri
     Ok(p)
 }
 
+/// What the anchors are worked out from: the dialog's values and the design's parameters and units
+/// (a profile dimension may name a parameter that changes while the dialog is open).
 fn base_key(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<String, Value>) -> Option<String> {
-    base_params(app, m, inputs, extra).ok().map(|p| p.to_string())
+    let doc = &app.session.doc;
+    base_params(app, m, inputs, extra).ok().map(|p| format!("{p} {} {:?}", doc.units, doc.param_values().0))
 }
 
 /// The section the dialog's values make without a located point, from the section cache the

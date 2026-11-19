@@ -1750,8 +1750,8 @@ preference_settings! {
     /// While the Frame Member dialog is open, the member's section is drawn at the start of the
     /// first chosen line with a hot point at each anchor: a click puts that point on the line, and
     /// the line's marker drags to any other point of the section (`locate`;
-    /// `place_gizmo::frame_anchor`). Off: the section is placed by the dialog's Anchor alone, as
-    /// before.
+    /// `place_gizmo::frame_anchor`). Off: the section and its controls are not
+    /// drawn; the dialog's Anchor, Offset A and Offset B still place the member.
     frame_hot_points: bool = true, PAGE_TOOLS => check_id("prefs.frame_hot_points");
     /// The files a design names (linked designs, font files) may be on any network location, for
     /// organisations that keep their designs on file servers. Off (the default): only on the

@@ -186,6 +186,40 @@ fn an_edit_shows_the_offsets_of_a_located_member() {
     assert_eq!(c[0].1["params"]["locate"], json!([0.0, -70.0]), "{}", c[0].1);
 }
 
+/// A parameter a profile dimension names, changed while the dialog is open, moves the anchors: the
+/// offsets stay as they were and `locate` is worked out again from them, as OK would.
+#[test]
+fn a_parameter_change_while_open_works_locate_out_again() {
+    let mut app = frame_app();
+    app.run("parameters.add", json!({"name": "H", "expression": "40 mm"})).unwrap();
+    let tube = json!({"kind": "rect_tube", "width": 40, "height": "H", "wall": 3});
+    app.run("frame.member", json!({"sketch": "Frame", "profile": tube, "anchor": "bottom", "locate": [0, -70]})).unwrap();
+    let f = app.session.doc.features.last().unwrap().id;
+    let mut e = edit_dialog(&app, f, None).unwrap();
+    assert_eq!(member(&mut e).offset, ["0 mm".to_string(), "50 mm".to_string()]);
+    app.run("parameters.change", json!({"name": "H", "expression": "60 mm"})).unwrap();
+    let (inputs, mut extra, mut m) = (e.inputs.clone(), e.extra.clone(), member(&mut e).clone());
+    super::sync_offset(&app, &mut m, &inputs, &mut extra);
+    // The bottom is 30 mm below the centre now; 50 mm from the line is 80 mm.
+    assert_eq!(extra["locate"], json!([0.0, -80.0]));
+}
+
+/// A `locate` the engine takes can be farther from the anchor than any one coordinate may be: an
+/// unchanged edit keeps it, and only a `locate` past the largest profile is refused.
+#[test]
+fn an_edit_keeps_a_located_point_far_from_its_anchor() {
+    let mut app = frame_app();
+    let tube = json!({"kind": "rect_tube", "width": 40, "height": 40, "wall": 3});
+    app.run("frame.member", json!({"sketch": "Frame", "profile": tube, "anchor": "bottom", "locate": [0, 10000]})).unwrap();
+    let f = app.session.doc.features.last().unwrap().id;
+    let mut e = edit_dialog(&app, f, None).unwrap();
+    assert_eq!(member(&mut e).offset, ["0 mm".to_string(), "-10020 mm".to_string()]);
+    let c = apply_commands(&app, &e).unwrap();
+    assert_eq!(c[0].1["params"]["locate"], json!([0.0, 10000.0]), "{}", c[0].1);
+    member(&mut e).offset[1] = "-20000 mm".into();
+    assert!(apply_commands(&app, &e).is_err());
+}
+
 /// Without lines there is nothing to place; lines and the section in one sketch are refused.
 #[test]
 fn missing_or_mixed_picks_are_refused() {
