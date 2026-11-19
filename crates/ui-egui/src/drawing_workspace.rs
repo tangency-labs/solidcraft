@@ -221,7 +221,9 @@ pub(crate) fn edit(app: &mut SolveApp, object: u64, at: egui::Pos2) {
     };
     // A dimension's or a note's text is edited where it is drawn; the menu has no pointer on it,
     // so the box opens where the menu was opened.
-    if edit_in_place(app, object, at) {
+    // From a row of the browser there is no place on the sheet to put the box: its options open.
+    let on_sheet = app.viewport.rect.is_some_and(|sheet| sheet.contains(at)) && !crate::shell::covered(app, at);
+    if on_sheet && edit_in_place(app, object, at) {
         return;
     }
     edit_object(app, kind, object);
@@ -1463,6 +1465,55 @@ mod tests {
 
         assert_eq!(active_sheet(&h.app), first);
         assert_eq!(h.app.session.drawing("drawing.inspect").unwrap().sheets.len(), 1);
+    }
+
+    /// The browser's rows of what is on a sheet take the clicks the design's browser rows take: a
+    /// click selects the object (Shift adds), and a right-click opens the sheet's menu on it.
+    #[test]
+    fn browser_rows_select_their_objects_and_open_the_sheets_menu() {
+        use serde_json::json;
+        use solidcraft_engine::{Sel, doc::ids::encode};
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.ui.show_browser = true;
+        h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
+        enter(&mut h.app, true).unwrap();
+        h.app.run("drawing.create", json!({})).unwrap();
+        let view = h.app.run("drawing.view.base", json!({"sheet":"Sheet 1","scale":"1:1","position_mm":[150,150],"view":"top"})).unwrap();
+        h.app.run("drawing.dimension.add", json!({"view": view["view"], "kind": {"length": {"edge": [20, 0, 3]}}})).unwrap();
+        h.app.run("drawing.note.add", json!({"anchor": {"sheet": "Sheet 1"}, "at": [250, 220], "content": "DEBURR"})).unwrap();
+        h.frames(8);
+        let drawing = h.app.session.drawing("drawing.inspect").unwrap().clone();
+        let sheet = encode(drawing.sheets[0].id);
+        let (view, dimension, note) = (drawing.views[0].id, drawing.dimensions[0].id, drawing.notes[0].id);
+        let handle = |kind: &str, object: u64| format!("drawing:browser:sheet:{sheet}:{kind}:{}", encode(object));
+        let picked = |h: &Harness| -> Vec<u64> {
+            h.app.session.selection.iter().filter_map(|s| if let Sel::Drawing { object, .. } = s { Some(*object) } else { None }).collect()
+        };
+
+        h.step(&json!({"click": {"handle": handle("dimension", dimension)}})).unwrap();
+        h.frames(3);
+        assert_eq!(picked(&h), [dimension], "a click on the row selects the dimension");
+        h.step(&json!({"click": {"handle": handle("view", view)}, "shift": true})).unwrap();
+        h.frames(3);
+        assert_eq!(picked(&h), [dimension, view], "Shift-click adds, as in the model");
+
+        // A right-click on a row outside the selection selects it, and the menu is about it.
+        h.step(&json!({"click": {"handle": handle("note", note)}, "button": "right"})).unwrap();
+        h.frames(3);
+        assert_eq!(picked(&h), [note]);
+        let menu = crate::context_menu::describe(&h.app);
+        let rows: Vec<&str> = menu["items"].as_array().unwrap().iter().filter_map(|item| item["label"].as_str()).collect();
+        assert_eq!(&rows[..2], ["Edit Note", "Delete"], "{rows:?}");
+        crate::context_menu::pick(&mut h.app, "Edit Note").unwrap();
+        h.frames(3);
+        assert!(!crate::dim_view::editing() && inspector_visible(&h.app), "from the browser, Edit opens the note's options");
+        close_panel(&mut h.app);
+        h.step(&json!({"click": {"handle": handle("note", note)}, "button": "right"})).unwrap();
+        h.frames(3);
+        crate::context_menu::pick(&mut h.app, "Delete").unwrap();
+        h.frames(4);
+        assert!(h.app.session.drawing("drawing.inspect").unwrap().notes.by_id(note).is_none(), "the menu's Delete deletes it");
     }
 
     #[test]
