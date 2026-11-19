@@ -27,6 +27,10 @@
 //! | [`FilletBrep::update_geom_split_face`]            | `SmFilletGeom::UpdateSplitFace`                  |
 //!
 //! Deviations:
+//! - **Both ends of a bevel split (not upstream).** When both side-edge rail
+//!   crossings separate, the fillet/fillet edge has two unprocessed ends. Each end
+//!   is the crossing of its remaining rail with the opposite fillet surface; the
+//!   surfaces are then intersected between those ends, without an endpoint dependency.
 //! - **Tangent ends (WR-600, the fork's tangency-labs/smlib@856b54e).**
 //!   `CalcFilletIntSideFace` builds the end rib of a
 //!   fillet with a tangent end vertex from that end outward
@@ -791,6 +795,126 @@ impl FilletBrep {
         self.set_edgeuse_uv_curve(eu, curve, false, true)
     }
 
+    /// The remaining rail of a split bevel end, and its geometry. The side-gap cut
+    /// uses the plane through the corner, its side edge and this rail end, so the
+    /// support must be planar for that cut to remain exactly on the support.
+    fn planar_split_end_rail(
+        &self,
+        k: &Kernel,
+        v: VertexId,
+        target: &Brep,
+    ) -> Result<(EdgeId, FilletGeomId)> {
+        let Some(crate::error::EntityRef::Face(face)) = self.fillet_vertex(v)?.point_class_object()
+        else {
+            return Err(missing(OP_INT_FILLET));
+        };
+        let support = target
+            .face(face)?
+            .surface
+            .as_ref()
+            .ok_or_else(|| missing(OP_INT_FILLET))?;
+        if crate::blend::fillet_cliff_overflow::plane_of(k, support)?.is_none() {
+            return Err(stage_failed(OP_INT_FILLET));
+        }
+        let mut rail = None;
+        for incident in vertex::edges(self.brep(), v, None)? {
+            if self.fillet_edge(incident)?.fillet_edge_type() == FilletEdgeType::Rail
+                && rail.replace(incident).is_some()
+            {
+                return Err(stage_failed(OP_INT_FILLET));
+            }
+        }
+        let rail = rail.ok_or_else(|| missing(OP_INT_FILLET))?;
+        let (prim, mate) = self.p5_prim_mate(rail, OP_INT_FILLET)?;
+        let own = self
+            .eu_geom(prim)?
+            .or(self.eu_geom(mate)?)
+            .ok_or_else(|| missing(OP_INT_FILLET))?;
+        Ok((rail, own))
+    }
+
+    /// A bevel whose two side-edge rail crossings both split has no known end of its
+    /// fillet/fillet edge. Each new end still lies on its own rail: intersect that rail
+    /// with the opposite fillet, then intersect the fillets between those two ends.
+    /// This is the rail's end event, independent of the other end's processing order.
+    fn calc_rail_limited_fillet_pair(
+        &mut self,
+        k: &Kernel,
+        e: EdgeId,
+        context: &impl FilletEdgeContext,
+        target: &Brep,
+    ) -> Result<()> {
+        let (start, end) = self.edge_ends(e, OP_INT_FILLET)?;
+        let (prim, mate) = self.p5_prim_mate(e, OP_INT_FILLET)?;
+        let g1 = self.eu_geom(prim)?.ok_or_else(|| missing(OP_INT_FILLET))?;
+        let g2 = self.eu_geom(mate)?.ok_or_else(|| missing(OP_INT_FILLET))?;
+        let surface = |g| {
+            self.geom(g)?
+                .fillet_surface(None)?
+                .map(exact_surface)
+                .transpose()
+        };
+        let (Some(s1), Some(s2)) = (surface(g1)?, surface(g2)?) else {
+            return Ok(());
+        };
+        let fs1 = context.solver(
+            self.geom(g1)?
+                .fillet_solver()
+                .ok_or_else(|| missing(OP_INT_FILLET))?,
+        )?;
+        let fs2 = context.solver(
+            self.geom(g2)?
+                .fillet_solver()
+                .ok_or_else(|| missing(OP_INT_FILLET))?,
+        )?;
+        let tol = smin(fs1.approx_tol_3d, fs2.approx_tol_3d);
+        let angle_tol = smin(fs1.ang_tol_rad, fs2.ang_tol_rad);
+        let mut points = [self.vertex_point(start)?, self.vertex_point(end)?];
+        for (v, point) in [start, end].into_iter().zip(points.iter_mut()) {
+            let (rail, own) = self.planar_split_end_rail(k, v, target)?;
+            let opposite = if own == g1 {
+                &s2
+            } else if own == g2 {
+                &s1
+            } else {
+                return Err(missing(OP_INT_FILLET));
+            };
+            let curve = edge::curve(self.brep(), rail)?.ok_or_else(|| missing(OP_INT_FILLET))?;
+            let (_, crossing) = super::p4::rail_crossing_nearest(k, curve, opposite, *point, tol)?
+                .ok_or_else(|| stage_failed(OP_INT_FILLET))?;
+            *point = crossing;
+        }
+        let [p, q] = points;
+        set_vertex_point(self.brep_mut(), start, p)?;
+        set_vertex_point(self.brep_mut(), end, q)?;
+        let mut direction = q - p;
+        let curves = srf_srf_intersection(
+            k,
+            self,
+            Some(start),
+            Some(end),
+            Some(&mut direction),
+            None,
+            &s1,
+            &s2,
+            tol,
+            angle_tol,
+            true,
+            None,
+        )?;
+        let curve = curves.curve_3d.ok_or_else(|| missing(OP_INT_FILLET))?;
+        let interval = curve.natural_interval();
+        set_edge_curve(self.brep_mut(), e, Some(curve))?;
+        edge::set_interval(self.brep_mut(), e, &interval)?;
+        self.set_uv(prim, curves.uv_curve1)?;
+        self.set_uv(mate, curves.uv_curve2)?;
+        self.fillet_edge_mut(e)?.set_status(FilStatus::Processed);
+        for v in [start, end] {
+            self.fillet_vertex_mut(v)?.set_status(FilStatus::Processed);
+        }
+        Ok(())
+    }
+
     /// `SmFilletVertex::CalcFilletIntFillet`: the vertex at the end of the
     /// fillet/fillet intersection curve leaving `v`, whose other end is already
     /// processed. An Nx2 corner that is not a bevel corner goes to
@@ -798,7 +922,8 @@ impl FilletBrep {
     /// the fillet/fillet edge, the two fillet surfaces are intersected first (nothing
     /// happens while either surface is missing); the curve and its UV curves are
     /// reversed when needed so that the edge runs from its start vertex, and the vertex
-    /// gets the curve end away from the other vertex.
+    /// gets the curve end away from the other vertex. When both bevel ends split,
+    /// their rail/fillet crossings place both ends before the surfaces are intersected.
     ///
     /// # Errors
     ///
@@ -876,6 +1001,14 @@ impl FilletBrep {
         // get filletFVertex->Point at other end of intersection curve
         let other_fv = edge::other_vertex(self.brep(), curr_edge, Some(v))?
             .ok_or_else(|| missing(OP_INT_FILLET))?;
+        // Both sides of a four-face bevel may have different rail crossings. Its
+        // adjustment then leaves two new ends, each constrained by its own rail.
+        if the_corner.is_bevel_corner()
+            && self.fillet_vertex(other_fv)?.fillet_vertex_type() == FilletVertexType::FilletXFillet
+            && !self.fillet_vertex(other_fv)?.is_processed()
+        {
+            return self.calc_rail_limited_fillet_pair(k, curr_edge, context, target);
+        }
         if !self.fillet_vertex(other_fv)?.is_processed() {
             return Err(stage_failed(OP_INT_FILLET));
         }
