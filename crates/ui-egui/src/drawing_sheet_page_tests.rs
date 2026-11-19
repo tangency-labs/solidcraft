@@ -669,6 +669,30 @@ fn a_drawing_exports_the_same_on_a_4k_and_a_1080p_screen() {
 }
 
 /// Every choice, in either theme, stands off the stage behind it, and White is never pure white.
+/// The sheet is white paper unless another colour is chosen, in a dark theme too: Follows the
+/// theme is a choice, not the default. A setting saved while the default followed the theme
+/// (`auto`) was never chosen, and reads as White.
+#[test]
+fn the_sheet_is_white_unless_follows_the_theme_is_chosen() {
+    let t = Tokens::dark();
+    assert_eq!(crate::prefs::Prefs::default().drawing_sheet_colour, "white");
+    let default = SheetColour::parse(&crate::prefs::Prefs::default().drawing_sheet_colour).unwrap();
+    assert_eq!(default.paper(&t, true), (t.paper_white, t.paper_ink), "white paper in a dark theme");
+    assert_eq!(SheetColour::parse("auto"), Some(SheetColour::White), "the old default's name");
+    let follows = SheetColour::parse("theme").unwrap();
+    assert_eq!(follows.paper(&t, true), (t.paper_dark, t.paper_dark_ink), "chosen, it follows a dark theme");
+    assert_eq!(follows.paper(&t, false), (t.paper_white, t.paper_ink));
+    for colour in SheetColour::ALL {
+        assert_eq!(SheetColour::parse(colour.id()), Some(colour));
+    }
+
+    let (mut h, _) = plate_sheet();
+    assert_eq!(h.call("ui.prefs", json!({"drawing_sheet_colour": "theme"}))["ok"], true);
+    assert_eq!(h.call("ui.prefs", json!({"drawing_sheet_colour": "auto"}))["ok"], true, "a saved file's old name still loads");
+    h.frames(2);
+    assert_eq!(page(&mut h)["paper"], json!(hex(stage_and_paper(Tokens::get().paper_white, Tokens::get().viewport_top).1)));
+}
+
 #[test]
 fn every_sheet_colour_stands_off_the_backdrop() {
     crate::test_support::host_data();
