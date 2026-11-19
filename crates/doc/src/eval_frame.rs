@@ -186,7 +186,13 @@ pub(super) fn build(m: &Laid, lay: &Layout, ends: &[Option<Plane>; 2], feature: 
             let (part, tool) = kernel::half_space(&body.body, pl, false)?;
             let part = part.ok_or_else(|| DocError::Invalid(format!("trimming leaves nothing of the member on line `{}`", m.id)))?;
             let cap = cap.ok_or_else(|| DocError::Invalid("the member's end face has no construction identity".into()))?;
-            let roles = crate::lineage::ProfileRoles { sketch: None, region: None, caps: [None, Some(format!("face:{cap}"))], thin: None };
+            let roles = crate::lineage::ProfileRoles {
+                sketch: None,
+                region: None,
+                caps: [None, Some(format!("face:{cap}"))],
+                cap_synonyms: [None, None],
+                thin: None,
+            };
             let tool = roles.tool(tool, None).rebuilt(feature);
             body = Traced::step(part, &[&body, &tool]);
             if body.lineage.is_none() {
