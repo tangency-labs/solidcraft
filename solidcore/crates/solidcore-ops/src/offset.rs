@@ -43,7 +43,10 @@ const MAX_DISTANCE: f64 = 1e6;
 /// An offset's kernel error as the operation's: its offset refusal where it is one
 /// ([`typed`]), else as [`crate::error::status`].
 fn status(e: SolidError, index: &dyn Fn(EntityRef) -> Option<RecordEntity>) -> Error {
-    typed(&e, index).unwrap_or_else(|| kernel_status(e))
+    match typed(&e, index) {
+        Some(r) => crate::session::noted(&e, r),
+        None => kernel_status(e),
+    }
 }
 
 /// A kernel error as ops' offset refusal, for a caller that holds no [`Order`] of the body (any

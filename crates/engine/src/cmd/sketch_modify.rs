@@ -152,7 +152,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("sketch_move")
         .key("G")
         .enabled(in_sketch)
-        .params("entities: [curve/point ids], factor?: number (scale), angle?: degrees (turn), center?: [x,y] or point ref (what scales and turns stay put; default [0,0]), translate?: [dx,dy] (applied last); scales, turns and moves in one step"),
+        .params("entities: [curve/point ids], factor?: number (scale), angle?: degrees (turn), center?: [x,y] or point ref (what scales and turns stay put; default [0,0]), translate?: [dx,dy] (applied last); scales, turns and moves in one step; a free point held only to the picked geometry (a rounded rectangle's centre) goes with it; returns `released`: the constraints tying the picked geometry to what stays that the change let go, as {id, kind}"),
     CommandSpec::new("sketch.move", "Move/Copy Sketch Entities", crate::checked!("sketch.move", move_copy))
         .in_sketch_part()
         .contract(&MOVE_CONTRACT)
@@ -701,10 +701,26 @@ fn released_family(kind: &CurveKind) -> Option<Released> {
 /// its offset's association.
 fn release_trim_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, ci: usize, cmd: &str) -> Result<Vec<String>> {
     let Some(curve) = sk.curves.get(ci) else { return Ok(Vec::new()) };
+    let id = curve.id.clone();
+    // A trimmed chain offset's source: the offset's curves stay as ordinary geometry, and the
+    // dimension that drove them goes with the association (#12294).
+    if let Some(index) = sk.freeform_chain_offsets.iter().position(|record| record.sources.iter().any(|(source, _)| source == &id)) {
+        let record = sk.freeform_chain_offsets.remove(index);
+        sk.constraints.retain(|c| !matches!(&c.kind, ConstraintKind::OffsetDistance { output, .. } if record.outputs.contains(output)));
+        for output in &record.outputs {
+            if let Some(curve) = sk.curve_index(output).and_then(|i| sk.curves.get(i)) {
+                for i in curve.kind.point_ids() {
+                    if let Some(p) = sk.points.get_mut(i) {
+                        p.fixed = false;
+                    }
+                }
+            }
+        }
+        return Ok(record.outputs);
+    }
     if curve.infinite || sk.is_linked_curve(ci) || released_family(&curve.kind).is_none() {
         return Ok(Vec::new());
     }
-    let id = curve.id.clone();
     if let Some(curves) = sk.break_offset_topology(&id)? {
         return Ok(curves);
     }
@@ -3113,11 +3129,6 @@ struct Side {
     constraints: Vec<String>,
     association: Option<String>,
     param: Option<String>,
-    /// Set when the offset is not linked to its source: a free-form curve whose plain offset
-    /// folds over a tight bend or crosses itself (trimmed), or a chain of curves that
-    /// includes free-form ones. Its curves then have no association and no distance to
-    /// drive, and this names the source curves they were made from.
-    unlinked_sources: Option<Vec<String>>,
 }
 
 /// The signed distances an offset runs at. One side is the distance as given. `symmetric` is the
@@ -3154,14 +3165,7 @@ fn offset_side(sk: &mut Sketch, cmd: &str, order: &[(usize, bool)], sources: &[(
                 cons.push(add_c(sk, ConstraintKind::Parallel { a, b })?);
             }
         }
-        return Ok(Side {
-            distance: d,
-            curves: created.curves,
-            constraints: cons,
-            association: Some(created.association),
-            param: None,
-            unlinked_sources: None,
-        });
+        return Ok(Side { distance: d, curves: created.curves, constraints: cons, association: Some(created.association), param: None });
     }
     let pieces: Vec<Piece> =
         order.iter().map(|(c, f)| offset_piece(sk, *c, *f, d)).collect::<Option<_>>().ok_or_else(|| bad(cmd, "the offset collapses an arc"))?;
@@ -3261,7 +3265,7 @@ fn offset_side(sk: &mut Sketch, cmd: &str, order: &[(usize, bool)], sources: &[(
         sk.offsets.push(solidcraft_sketch::OffsetChain { sources: sources.to_vec(), outputs: outputs.clone(), distance: d, closed, topology: None });
         sk.refresh_offsets()?;
     }
-    Ok(Side { distance: d, curves: outputs, constraints: cons, association: None, param: None, unlinked_sources: None })
+    Ok(Side { distance: d, curves: outputs, constraints: cons, association: None, param: None })
 }
 
 /// Numbers remain millimetres for programmatic callers; expressions use design units.
@@ -3355,7 +3359,7 @@ fn offset_group(sk: &mut Sketch, ids: &[String], eligible: &std::collections::Ha
                 closed: true,
                 topology: None,
             });
-            sides.push(Side { distance: r - nr, curves: outputs, constraints: Vec::new(), association: None, param: None, unlinked_sources: None });
+            sides.push(Side { distance: r - nr, curves: outputs, constraints: Vec::new(), association: None, param: None });
         }
         return Ok(sides);
     }
@@ -3409,34 +3413,29 @@ fn offset_group(sk: &mut Sketch, ids: &[String], eligible: &std::collections::Ha
         // A smooth free-form entity is offset from exact pieces. One curve gets a linked
         // offset where its plain offset is smooth and simple; otherwise (a fold or a
         // crossing to trim, or a chain with corners) the offset is the trimmed parallel
-        // boundary, rounded at outer corners, and not linked to its source.
-        let source_ids = order
-            .iter()
-            .map(|(i, _)| sk.curves.get(*i).map(|c| c.id.clone()).ok_or_else(|| bad(cmd, "offset source vanished")))
-            .collect::<Result<Vec<_>>>()?;
+        // boundary, rounded at outer corners. A trimmed offset is kept with the sources it
+        // was made from, so the distance that drives it rebuilds it when it changes (#12294).
         let unlinked = |sk: &Sketch, dd: f64, curves: &[usize]| Side {
             distance: dd,
             curves: ids_of(sk, curves),
             constraints: Vec::new(),
             association: None,
             param: None,
-            unlinked_sources: Some(source_ids.clone()),
         };
         for dd in runs {
             let side = match order.as_slice() {
                 [(source, forward)] => match sk.offset_freeform(*source, *forward, dd)? {
-                    solidcraft_sketch::FreeformOffsetOutput::Linked(output) => Side {
-                        distance: dd,
-                        curves: ids_of(sk, &[output]),
-                        constraints: Vec::new(),
-                        association: None,
-                        param: None,
-                        unlinked_sources: None,
-                    },
-                    solidcraft_sketch::FreeformOffsetOutput::Unlinked(curves) => unlinked(sk, dd, &curves),
+                    solidcraft_sketch::FreeformOffsetOutput::Linked(output) => {
+                        Side { distance: dd, curves: ids_of(sk, &[output]), constraints: Vec::new(), association: None, param: None }
+                    }
+                    solidcraft_sketch::FreeformOffsetOutput::Unlinked(curves) => {
+                        sk.record_freeform_chain_offset(&[(*source, *forward)], &curves, dd)?;
+                        unlinked(sk, dd, &curves)
+                    }
                 },
                 _ => {
                     let curves = sk.offset_freeform_chain(&order, dd)?;
+                    sk.record_freeform_chain_offset(&order, &curves, dd)?;
                     unlinked(sk, dd, &curves)
                 }
             };
@@ -3477,7 +3476,12 @@ fn offset_rung(
         .find(|o| o.owns_output(output))
         .map(|o| o.sources.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>())
         .or_else(|| sk.freeform_offsets.iter().find(|o| o.output == *output).map(|o| vec![o.source.clone()]))
-        .or_else(|| group.iter().find_map(|side| side.unlinked_sources.clone()))
+        .or_else(|| {
+            sk.freeform_chain_offsets
+                .iter()
+                .find(|o| o.outputs.iter().any(|id| id == output))
+                .map(|o| o.sources.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>())
+        })
         .ok_or_else(|| bad(cmd, "offset association is missing"))?;
     // An offset of infinite lines is infinite lines too (#1359).
     let infinite = sources.iter().all(|id| sk.curve_index(id).and_then(|c| sk.curves.get(c)).is_some_and(|c| c.infinite));
@@ -3492,10 +3496,6 @@ fn offset_rung(
         }
     }
     for (index, side) in group.iter_mut().enumerate() {
-        // A trimmed offset is not linked to its source: it has no distance to drive.
-        if side.unlinked_sources.is_some() {
-            continue;
-        }
         let name = names.get(index).or_else(|| names.first()).ok_or_else(|| bad(cmd, "offset has no driving dimension"))?;
         let output = side.curves.first().ok_or_else(|| bad(cmd, "offset produced no curves"))?;
         side.constraints.push(sk.add_constraint(
@@ -3592,10 +3592,6 @@ fn offset_ladder(
     }
     Ok((sides, sources))
 }
-
-/// What the offset reply says when a distance names a parameter that drives nothing (#12294).
-const UNLINKED_OFFSET: &str =
-    "the offset is trimmed and not linked to its source, so its distance expression does not drive it: changing the parameter will not move it";
 
 fn offset(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.offset";
@@ -3700,10 +3696,6 @@ fn offset(s: &mut Session, p: &Value) -> Result<Value> {
         [(_, only)] => only.association.clone(),
         _ => None,
     };
-    // A trimmed offset (a spline with another curve) is not linked to its source, so a distance
-    // that names a parameter drives nothing: say so instead of leaving `param` null unexplained (#12294).
-    let ignored = |expression: &str, param: &Option<String>| param.is_none() && !solidcraft_doc::expr::references(expression).is_empty();
-    let warning = (ignored(&expression, &param) || expression2.as_deref().is_some_and(|e| ignored(e, &param2))).then(|| UNLINKED_OFFSET.to_string());
     reply(
         cmd,
         OffsetResult {
@@ -3715,7 +3707,6 @@ fn offset(s: &mut Session, p: &Value) -> Result<Value> {
             instances,
             param2,
             association,
-            warning,
             created: None,
             param_warnings: Vec::new(),
         },
@@ -3734,7 +3725,8 @@ fn break_offset(s: &mut Session, p: &Value) -> Result<Value> {
             .filter_map(|record| record.topology.as_ref())
             .any(|record| record.id == output || record.roles.iter().any(|role| role.output == output));
         let analytic = sk.offsets.iter().any(|o| o.outputs.iter().any(|id| id == output));
-        if record.is_none() && !topology && !analytic {
+        let chain = sk.freeform_chain_offsets.iter().position(|record| record.outputs.iter().any(|id| id == output));
+        if record.is_none() && !topology && !analytic && chain.is_none() {
             return Err(bad(cmd, "curve is not an offset output"));
         }
         // A parameter edit may have changed the evaluated source without
@@ -3790,6 +3782,23 @@ fn break_offset(s: &mut Session, p: &Value) -> Result<Value> {
                             && sk.curves.iter().all(|c| !c.kind.uses(i) || record.outputs.contains(&c.id))
                             && let Some(p) = sk.points.get_mut(i)
                         {
+                            p.fixed = false;
+                        }
+                    }
+                }
+            }
+            return Ok((output.to_string(), Some(record.outputs)));
+        }
+        if let Some(index) = chain {
+            // A trimmed chain offset: its curves stay as ordinary geometry, with their points
+            // free to edit, and the dimension that drove them goes.
+            let record = sk.freeform_chain_offsets.remove(index);
+            sk.constraints.retain(|c| !matches!(&c.kind, ConstraintKind::OffsetDistance { output, .. } if record.outputs.contains(output)));
+            for id in &record.outputs {
+                if let Some(curve) = sk.curve_index(id).and_then(|i| sk.curves.get(i)) {
+                    let points = curve.kind.point_ids();
+                    for i in points {
+                        if let Some(p) = sk.points.get_mut(i) {
                             p.fixed = false;
                         }
                     }
@@ -3934,6 +3943,22 @@ fn involved_points(sk: &Sketch, cs: &[usize], ps: &[usize]) -> Vec<usize> {
         }
     }
     out
+}
+
+/// The free points that ride on the moved points alone (#15697): on no curve, neither fixed nor
+/// linked, and held only by constraints whose other points all move, like a rounded rectangle's
+/// centre kept at the middle of its construction diagonal. They move too: left behind, the solve
+/// drags the moved shape back toward them and bends it.
+fn riders(sk: &Sketch, moved: &[usize]) -> Vec<usize> {
+    (0..sk.points.len())
+        .filter(|q| !moved.contains(q))
+        .filter(|&q| sk.points.get(q).is_some_and(|p| !p.fixed && p.link.is_none()))
+        .filter(|&q| !sk.curves.iter().any(|c| c.kind.point_ids().contains(&q)))
+        .filter(|&q| {
+            let mut tied = sk.constraints.iter().map(|c| sk.constraint_points(&c.kind)).filter(|pts| pts.contains(&q)).peekable();
+            tied.peek().is_some() && tied.all(|pts| pts.iter().all(|p| *p == q || moved.contains(p)))
+        })
+        .collect()
 }
 
 /// Copy curves and points through `f`. `flip` reverses arcs (mirroring). `keep(p)`: reuse the
@@ -4343,6 +4368,8 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
             return Ok(ids);
         }
         with_ellipse_axes(sk, &mut cs);
+        let riding = riders(sk, &involved_points(sk, &cs, &ps));
+        ps.extend(riding);
         let held = holding(sk, &involved_points(sk, &cs, &ps));
         transform_in_place(sk, &cs, &ps, &f, 1.0, cmd)?;
         // Broken external holds must not make the rectangle's replacement relations look redundant.
@@ -4371,6 +4398,7 @@ fn transform(s: &mut Session, p: &Value) -> Result<Value> {
         None => 0.0,
     };
     let t = if p.get("translate").is_some() { req_vec2(cmd, p, "translate")? } else { Vec2::ZERO };
+    let mut released = Vec::new();
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let (mut cs, mut ps) = entities(sk, p, cmd)?;
         let c = if p.get("center").is_some() { point_or_ref(sk, p, "center", cmd)? } else { Vec2::ZERO };
@@ -4393,15 +4421,21 @@ fn transform(s: &mut Session, p: &Value) -> Result<Value> {
             text_curves.extend(super::sketch_create::transform_text(sk, cmd, &link, &f, ang, k, false)?);
         }
         with_ellipse_axes(sk, &mut cs);
+        let riding = riders(sk, &involved_points(sk, &cs, &ps));
+        ps.extend(riding);
+        // As Move does (#2980): what ties the picked geometry to what stays and no longer holds
+        // after the turn is let go, else the solve drags the shape back and bends it (#15697).
+        let held = holding(sk, &involved_points(sk, &cs, &ps));
         transform_in_place(sk, &cs, &ps, &f, k, cmd)?;
         let moved = involved_points(sk, &cs, &ps);
         let _ = rotate_axis_constraints(sk, doc, &moved, ang)?;
         scale_dimensions(sk, doc, &cs, &moved, k)?;
+        released = release_broken(sk, &held);
         cs.extend(text_curves);
         Ok(ids_of(sk, &cs))
     })?;
     s.doc_mut().prune_model_params();
-    reply(cmd, TransformResult { curves: out, sketch: info, param_warnings: Vec::new() })
+    reply(cmd, TransformResult { curves: out, released, sketch: info, param_warnings: Vec::new() })
 }
 
 /// The driving lengths wholly inside a transformed selection scale with it. Keep formulas

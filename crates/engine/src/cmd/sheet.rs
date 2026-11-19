@@ -164,7 +164,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          angle_display?: bend|included (how the DXF bend notes read the bend angles: the bend angle, default, or the included angle \
          left between the bend's sides, 180° less it; the bend table gives both, and a flange's `angle` is always the bend angle); \
          active?: bool; delete?: bool; material?: text (the material the rule is for, a label saved with it); \
-         gauge?: with material, a gauge of the standard library (sheet.rule_library): the rule takes its thickness and keeps its own bend radius; \
+         gauge?: with material, a gauge (16 ga) or metric thickness (1.5 mm) of the standard library (sheet.rule_library): the rule takes its thickness and keeps its own bend radius; \
          its K-factor is the bend model's estimate at the rule's R/T for bend_method?: air|bottoming|coining (default air), said in notes, \
          unless k_factor is given; notes also say when the radius is under the material's published minimum",
     ),

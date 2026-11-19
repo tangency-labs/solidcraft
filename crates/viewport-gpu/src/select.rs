@@ -193,6 +193,13 @@ fn retain_vulkan_instance(instance: &wgpu::Instance, found: &[wgpu::Adapter]) {
     }
 }
 
+/// Whether NVIDIA's own driver runs a GPU of this Linux machine: its kernel module lists itself
+/// under `/proc/driver/nvidia`. `false` on other systems and with other drivers.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn nvidia_linux_driver() -> bool {
+    cfg!(target_os = "linux") && std::path::Path::new("/proc/driver/nvidia/version").exists()
+}
+
 /// Every adapter the native backends offer, best first.
 #[cfg(not(target_arch = "wasm32"))]
 fn adapters(instance: &wgpu::Instance) -> Vec<wgpu::Adapter> {
@@ -251,13 +258,6 @@ pub fn pick_path(policy: Policy, keep: impl Fn(&wgpu::AdapterInfo) -> bool) -> O
             (a, r)
         })
         .find(|(_, r)| policy.admits(r.tier))
-}
-
-/// Whether NVIDIA's own driver runs a GPU of this Linux machine: its kernel module lists itself
-/// under `/proc/driver/nvidia`. `false` on other systems and with other drivers.
-#[cfg(not(target_arch = "wasm32"))]
-fn nvidia_linux_driver() -> bool {
-    cfg!(target_os = "linux") && std::path::Path::new("/proc/driver/nvidia/version").exists()
 }
 
 /// The adapter `policy` picks, with its report; `None` when no adapter qualifies.

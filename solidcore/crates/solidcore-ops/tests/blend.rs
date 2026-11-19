@@ -302,7 +302,7 @@ const CREASE_PLATE_MITRE: [(f64, f64); 3] = [(3.0, 148.6327), (3.5, 201.0834), (
 /// to that end, so it had no length and the corner's loop did not close ("Corner Geometry
 /// Computation Failure"). The piece is now the crease line continued: the rounds build valid
 /// at the full check, within the corner ball's eighth of the mitred prisms. Run under the
-/// application's fix set (every fix less `kernel_cases/held_back.json`).
+/// application's fix set (every fix on).
 #[test]
 fn rounds_overflowing_a_shallow_concave_crease_build() {
     for (r, mitre) in CREASE_PLATE_MITRE {
@@ -2085,6 +2085,87 @@ fn a_chamfer_too_large_is_refused_with_the_distance_that_builds() {
     assert!(rel(removed, want) <= 1e-9, "{removed} vs {want}");
 }
 
+/// The two selected rims of a quadratic-ended extrusion approach across a 0.6 mm
+/// terminal strip (#19108). A fixed-angle refusal names the first distance and a
+/// point on the limiting top face; explicit two-distance input keeps its common scale.
+#[test]
+fn a_distance_angle_chamfer_on_a_curved_tip_names_its_distance_edge_and_limiting_face() {
+    use solidcore::nurbs::b_spline_curve::BSplineCurve;
+    use solidcore::nurbs::math::CPoint;
+    use solidcore_ops::RoomReason;
+
+    all_fixes();
+    let outline = || {
+        let quadratic = BSplineCurve::from_data(
+            3,
+            2,
+            5,
+            2,
+            &[
+                CPoint::new(10.0, 0.6, 0.0, 1.0),
+                CPoint::new(5.0, 0.6, 0.0, 1.0),
+                CPoint::new(0.0, 5.0, 0.0, 1.0),
+            ],
+            &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let native = swept(
+            &[
+                segment((0.0, 0.0), (10.0, 0.0)),
+                segment((10.0, 0.0), (10.0, 0.6)),
+                solidcore::curve::curve::Curve::from(quadratic),
+                segment((0.0, 5.0), (0.0, 0.0)),
+            ],
+            10.0,
+        );
+        // Application bodies pass through the record boundary: a native curved
+        // extrusion wall returns as a B-spline with the same translated net.
+        let (record, _) = native.to_record().unwrap();
+        Body::from_record(&record, true).unwrap().0
+    };
+    let angle = 80.0_f64.to_radians();
+    let mut distance_fit = None;
+    for second in [
+        ChamferSecond::Angle(angle),
+        ChamferSecond::Distance(angle.tan()),
+    ] {
+        let b = outline();
+        let before = b.to_record().unwrap().0;
+        let picks = [edge_at(&b, [5.0, 0.0, 10.0]), edge_at(&b, [5.0, 1.7, 10.0])];
+        let e = chamfer_sides_facing(&b, &picks, 1.0, second, [0.0, 0.0, 1.0]).unwrap_err();
+        let Error::TooLarge {
+            size,
+            kind,
+            at: Some(at),
+            face: Some(face),
+            why: Some(RoomReason::BandsOverlap),
+        } = e
+        else {
+            panic!("{e:?}");
+        };
+        let expected_kind = match second {
+            ChamferSecond::Angle(_) => FitKind::Distance,
+            ChamferSecond::Distance(_) => FitKind::Scale,
+        };
+        assert_eq!(kind, expected_kind);
+        // The terminal event is 0.6 / 2; the named open fit is below it.
+        assert!(size > 0.29 && size < 0.3, "{size}");
+        assert!((at[2] - 10.0).abs() < 1e-12, "edge {at:?}");
+        assert!((face[2] - 10.0).abs() < 1e-12, "limiting top face {face:?}");
+        assert!(face[0] > 0.0 && face[0] < 10.0 && face[1] > 0.0, "{face:?}");
+        assert_eq!(
+            b.to_record().unwrap().0,
+            before,
+            "a refusal leaves its input intact"
+        );
+        if kind == FitKind::Distance {
+            distance_fit = Some(size);
+        } else {
+            assert!((size - distance_fit.unwrap()).abs() < 1e-12);
+        }
+    }
+}
+
 /// #3145: a setback longer than an edge at a real set-back corner is the kernel's refusal before
 /// the trace, naming the largest that fits: the block's corner at (30, 0, 10) with its three
 /// edges rounded 1 and set back 50, its shortest edge 10 long. A setback of 10 would leave that
@@ -2342,6 +2423,96 @@ fn the_faces_a_round_is_carried_on_past_are_the_kernels() {
         solidcore_ops::carried_faces(&b, inner, 0.0),
         Err(Error::Argument)
     ));
+}
+
+/// The L of legs 40 and width 20, `height` high, less what lies above the plane through
+/// (`x0`, `z0`) and (`x1`, `z1`) in the side view (x across, z up), from `x0` to `x1`.
+fn l_cut_by_a_slope(height: f64, [x0, z0]: [f64; 2], [x1, z1]: [f64; 2]) -> Body {
+    let l = [
+        (0.0, 0.0),
+        (40.0, 0.0),
+        (40.0, 20.0),
+        (20.0, 20.0),
+        (20.0, 40.0),
+        (0.0, 40.0),
+    ];
+    let profile: Vec<_> = (0..l.len())
+        .map(|i| segment(l[i], l[(i + 1) % l.len()]))
+        .collect();
+    let line = |a: [f64; 2], b: [f64; 2]| Curve::Line {
+        start: [a[0], -1.0, a[1]],
+        end: [b[0], -1.0, b[1]],
+    };
+    let top = z0.max(z1) + height;
+    let above = extrude(
+        &[
+            line([x0, z0], [x1, z1]),
+            line([x1, z1], [x1, top]),
+            line([x1, top], [x0, top]),
+            line([x0, top], [x0, z0]),
+        ],
+        [0.0, 1.0, 0.0],
+        42.0,
+        0.0,
+        DraftCorner::default(),
+        true,
+    )
+    .unwrap();
+    solidcore_ops::boolean::boolean(
+        swept(&profile, height),
+        above,
+        solidcore_ops::BooleanOp::Subtract,
+    )
+    .unwrap()
+    .unwrap()
+}
+
+/// The L above, 30 high, its top cut off by the plane z = 15 + x / 4: the inner upright edge
+/// at (20, 20) now runs from the flat bottom to that plane, 20 up. The plane holds the normal
+/// of the edge's face y = 20 and not that of its face x = 20, so a round is carried on past
+/// the first only. Its slab's outline lies in y = 20 with two corners on the bottom and two
+/// on the sloped plane. The traces of the bottom and the plane cross at x = -60, 80 from the
+/// edge, on the side x falls: a round of 6 has its slab reach (6 + 80) / 2 = 43 that way, to
+/// x = -23 where the plane is 9.25 up, and the full reach the other way. A round of 81 has
+/// its contact line past the crossing and nothing to carry on.
+///
+/// Cut off instead by a plane that rises 2 for 1 (z = 2 x - 10, from x = 10 on), 63.4
+/// degrees from square to the edge, past the 60 the kernel takes, the edge carries nothing.
+#[test]
+fn a_round_is_carried_on_between_a_flat_end_and_a_sloped_one() {
+    all_fixes();
+    let b = l_cut_by_a_slope(30.0, [-1.0, 14.75], [41.0, 25.25]);
+    let inner = nearest_edge(&b, [20.0, 20.0, 10.0]);
+    let found = solidcore_ops::carried_faces(&b, inner, 6.0).unwrap();
+    assert_eq!(found.len(), 1);
+    let c = found[0];
+    let v = |a: [f64; 3]| Vec3::new(a[0], a[1], a[2]);
+    let (along, across) = (v(c.along), v(c.across));
+    assert!((along.cross(across) - Vec3::new(0.0, 1.0, 0.0)).length() < 1e-9);
+    let corners = c.outline.map(|[a, x]| v(c.origin) + along * a + across * x);
+    let has = |x: f64, z: f64| {
+        corners
+            .iter()
+            .any(|p| (*p - Vec3::new(x, 20.0, z)).length() < 1e-6)
+    };
+    let far = 20.0 + c.reach;
+    assert!(
+        has(-23.0, 0.0) && has(-23.0, 9.25) && has(far, 0.0) && has(far, 15.0 + far / 4.0),
+        "{corners:?}"
+    );
+    assert_eq!(c.depth, [-c.reach, 0.0]);
+    assert_eq!(
+        solidcore_ops::carried_faces(&b, inner, 79.0).unwrap().len(),
+        1
+    );
+    assert!(solidcore_ops::carried_faces(&b, inner, 81.0)
+        .unwrap()
+        .is_empty());
+    let steep = l_cut_by_a_slope(70.0, [10.0, 10.0], [41.0, 72.0]);
+    let inner = nearest_edge(&steep, [20.0, 20.0, 10.0]);
+    assert!(solidcore_ops::carried_faces(&steep, inner, 6.0)
+        .unwrap()
+        .is_empty());
 }
 
 /// The kernel rig's fix set (SolidCraft's preset, `solidcraft_fixes.rs`), as the rig runs its
@@ -4016,8 +4187,7 @@ fn issue_13911_rails(
 /// stand `reach` off the loop at the two heights).
 #[test]
 fn the_inner_top_outline_of_13911_chamfers_and_rounds_at_every_size() {
-    // SolidCraft's fix set when it traced the case: its preset, which has every flag on but the
-    // held-back ones
+    // SolidCraft's fix set: every flag on
     solidcore_ops::session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
     let (input, _) = issue_13911_body();
     let before = input.check(CheckLevel::All).unwrap();
@@ -5134,7 +5304,7 @@ fn a_hex_rim_rounded_at_its_corner_rounds_radius_closes_on_six_spheres() {
     let removed = 6.0 * ((1.0 - PI / 4.0) * HEX_RC + PI / 18.0);
     let after = b.volume(1e-11).unwrap();
     assert!(
-        (before - after - removed).abs() <= 1e-9 * before,
+        (before - after - removed).abs() <= 1e-9 * removed,
         "removed {}, the closed form {removed}",
         before - after
     );

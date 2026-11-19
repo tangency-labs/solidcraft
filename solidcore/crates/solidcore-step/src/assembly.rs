@@ -206,6 +206,9 @@ pub struct Assembly<'t> {
     pub(crate) edges_turned: usize,
     /// Spline surfaces whose first and last control lines met within the tolerance, closed.
     pub(crate) splines_closed: usize,
+    /// Sides of spline surfaces that collapsed to within the tolerance of a point, made exact
+    /// poles ([`crate::topology::poles_within`]).
+    pub(crate) poles_made_exact: usize,
     /// Edges whose tolerance was raised to the gap their curve has to a face's surface.
     pub(crate) raised_edges: HashSet<u32>,
 }
@@ -228,6 +231,7 @@ impl<'t> Assembly<'t> {
             loops_left_touching: Vec::new(),
             edges_turned: 0,
             splines_closed: 0,
+            poles_made_exact: 0,
             raised_edges: HashSet::new(),
         }
     }
@@ -330,7 +334,8 @@ impl<'t> Assembly<'t> {
     /// surface's natural normal; `outer` is the outer bound's index in `bounds` when the reader
     /// knows it (the pcurves decide otherwise, [`Assembly::finish`]); `forward` says the face's
     /// side is the natural normal. A spline surface whose first and last control lines meet
-    /// within the tolerance is closed on itself (noted). `origin` names the face.
+    /// within the tolerance is closed on itself (noted), and a side that closes to a point within
+    /// it is made an exact pole (noted). `origin` names the face.
     pub fn add_face(&mut self, origin: u64, surface: BSurface, bounds: Vec<Bound>, outer: Option<usize>, forward: bool) -> R<u32> {
         // A sphere bounded by its poles alone is the whole sphere, with a meridian for its seam.
         let bounds = match &surface {
@@ -348,6 +353,19 @@ impl<'t> Assembly<'t> {
             }
             None => surface,
         };
+        // A side only close to a point is an exact pole before anything is measured on it.
+        let corners: Vec<Vec3> = bounds
+            .iter()
+            .flat_map(|b| match b {
+                Bound::Edges(es) => es.iter().filter_map(|(e, _)| self.edges.get(*e as usize)).flat_map(|e| e.vertices).collect::<Vec<u32>>(),
+                Bound::Vertex(v) => vec![*v],
+            })
+            .filter_map(|v| self.vertices.get(v as usize).map(|p| v3(p.point)))
+            .collect();
+        if let Some((poled, sides)) = crate::topology::poles_within(&surface, self.tol, &corners) {
+            self.poles_made_exact += sides;
+            surface = poled;
+        }
         if bounds.len() == 2
             && let BSurface::Sphere { frame, .. } = &mut surface
         {
@@ -586,11 +604,11 @@ impl<'t> Assembly<'t> {
         // (a sphere's frame put on the slit), before anything is measured on the frame or split
         // at its poles.
         self.complete_slits()?;
-        // A face on a torus that is the rest of it round a patch its loop bounds gets the
-        // torus's seams, its loop a hole in it.
+        // A face on a sphere or torus that is the rest of it round a patch its loop bounds gets
+        // the surface's seams, its loop a hole in it.
         let outsides = self.complete_outsides()?;
         if outsides > 0 {
-            notes.push(format!("{outsides} faces on a torus that are the outside of their loops given the torus's seams"));
+            notes.push(format!("{outsides} faces on a sphere or torus that are the outside of their loops given the surface's seams"));
         }
         // A torus face's seams where its torus starts, so its (u, v) box is read whole.
         self.seat_torus_seams()?;
@@ -615,6 +633,12 @@ impl<'t> Assembly<'t> {
             notes.push(format!(
                 "{} spline surfaces whose ends meet within {} mm closed on themselves (their end control lines made one)",
                 self.splines_closed, self.tol
+            ));
+        }
+        if self.poles_made_exact > 0 {
+            notes.push(format!(
+                "{} sides of spline surfaces that close to a point within {} mm made exact poles (their control points made one)",
+                self.poles_made_exact, self.tol
             ));
         }
         if self.inner_loops_turned > 0 {
