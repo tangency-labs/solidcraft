@@ -2800,4 +2800,34 @@ mod tests {
         assert!((nested_box.min() - Vec3::new(1.0, 2.0, 3.0)).length() < 1e-12);
         assert!((nested_box.max() - Vec3::new(4.0, 5.0, 6.0)).length() < 1e-12);
     }
+
+    #[test]
+    fn a_point_is_closer_to_a_curve_only_where_its_rounding_proves_it() {
+        // #18514: a line 1000 from the origin and an offset of 0.0175 above its middle.
+        // The line's point error bound there is about 3e-11 (`crv_point_error`), so a point
+        // 3e-12 of the offset (5e-14) closer than the offset is not proved closer: upstream's
+        // `offset * (1 - 1e-12)` dropped it. Half the offset is proved closer. Without the
+        // solve's parameter the solved distance is tested as upstream tests it.
+        let k = Kernel::default();
+        let orig = line([1000.0, 0.0, 0.0], [1010.0, 0.0, 0.0]);
+        let t = orig.natural_interval().evaluate(0.5);
+        let foot = orig.evaluate_point(&k, t).unwrap();
+        let d = 0.0175;
+        let cutoff = d * (1.0 - EFF_ZERO);
+        let error = orig.point_error_bound(t).unwrap();
+        assert!(error > 1e-12 && error < 1e-10, "{error}");
+        for (above, closer) in [(d, false), (d * (1.0 - 3e-12), false), (0.5 * d, true)] {
+            let p = foot + Vec3::new(0.0, above, 0.0);
+            let solved = p.distance(foot);
+            assert_eq!(
+                proved_closer(&k, &orig, Some(t), p, solved, d, cutoff).unwrap(),
+                closer,
+                "{above}"
+            );
+        }
+        let p = foot + Vec3::new(0.0, d * (1.0 - 3e-12), 0.0);
+        let solved = p.distance(foot);
+        assert!(solved < cutoff);
+        assert!(proved_closer(&k, &orig, None, p, solved, d, cutoff).unwrap());
+    }
 }
