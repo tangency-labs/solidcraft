@@ -2630,12 +2630,15 @@ impl PlacementReads {
 
     /// The same target selection as `apply_traced`, expanded only over the timeline input.
     fn drawn_targets(&mut self, st: Option<&ModelState>, f: &Feature) {
-        let Some(st) = st else {
-            self.all = true;
-            return;
-        };
-        let (_, targets) = feature_op(f);
-        let names = if targets.is_empty() { &f.participants } else { &targets };
+        match st {
+            Some(st) => self.targets(st, f, &feature_op(f).1),
+            None => self.all = true,
+        }
+    }
+
+    /// The bodies `apply_traced` changes for `f` with `targets`.
+    fn targets(&mut self, st: &ModelState, f: &Feature, targets: &[String]) {
+        let names: &[String] = if targets.is_empty() { &f.participants } else { targets };
         let all = names.len() == 1 && names.first().is_some_and(|n| n == "*");
         if all || names.is_empty() {
             self.bodies.extend(st.bodies.iter().filter(|b| if all { !b.envelope } else { b.in_default_scope(f) }).map(|b| b.name.clone()));
@@ -3368,6 +3371,7 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
     // design is) must not change what its features read, or creating it evaluates them all.
     let mut reads = PlacementReads::default();
     let mut frame = None;
+    let mut copied = false;
     let mut h = std::collections::hash_map::DefaultHasher::new();
     let mut has_captured_profile = false;
     // A sketch, profile or path of another component is moved through both placements, unless the
@@ -3503,14 +3507,23 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
                 reads.placed_body(st, &b.0);
             }
         }
-        // Copies of drawn tools meet their sources' targets where those are placed, from where the
-        // sources are placed.
+        // Copies meet the bodies they change where those are placed relative to their source's
+        // tools' frame, whatever the pattern's own placement (#14271).
         FeatureKind::Pattern { features, bodies, .. } | FeatureKind::Mirror { features, bodies, .. } if bodies.is_empty() => {
-            for src in replayed_sources(doc, features).into_iter().filter(|g| drawn_tools_change_bodies(&g.kind)) {
-                reads.drawn_targets(st, src);
-                if src.component != f.component {
-                    reads.components.insert(src.component);
+            for src in replayed_sources(doc, features) {
+                let Some(frame) = tools_component(doc, src).map(|c| doc.component_transform(c)) else { continue };
+                let mut each = PlacementReads::default();
+                match (st, crate::mat_inverse(&frame)) {
+                    (Some(st), Some(inverse)) => {
+                        let (_, targets, scope) = copy_targets(st, f, src);
+                        each.targets(st, &scope, &targets);
+                        hash_placed_bodies(doc, Some(st), &each.bodies, &inverse, &mut h);
+                        copied |= !each.bodies.is_empty();
+                    }
+                    _ => each.all = true,
                 }
+                reads.all |= each.all;
+                reads.unlisted |= each.unlisted;
             }
         }
         // Joins, cuts and intersects meet their targets where those are placed (#3383).
@@ -3569,7 +3582,7 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
         _ => {}
     }
     reads.paths.extend(datums);
-    if reads.is_empty() {
+    if reads.is_empty() && !copied {
         return if has_captured_profile { h.finish() } else { 0 };
     }
     let frame = frame.unwrap_or_else(|| doc.component_transform(f.component));
@@ -10992,13 +11005,11 @@ fn replay(
             }
             continue;
         }
-        // Copies of drawn tools are made in their source's frame and meet each target where it is
-        // shown, as the source's own tools do (#3383).
-        let _frames = if drawn_tools_change_bodies(&src.kind) { ToolFrames::install(doc, src, st) } else { None };
-        let (op, targets) = feature_op(src);
-        // A primitive's or a hole's targets are its participants (#1108): the copies change
-        // those bodies only, like the feature itself (#2755).
-        let targets = if targets.is_empty() { src.participants.clone() } else { targets };
+        // Copies are made in their source's tools' frame and meet each target where it is shown,
+        // as the source's own tools do (#3383).
+        let _frames = ToolFrames::install(doc, src, st);
+        let (op, targets, scoped) = copy_targets(st, f, src);
+        let f: &Feature = &scoped;
         // A join that merged its targets left only the first of them (the others now live in
         // it): the copies change the bodies still there (#3378). When none is, the names stay
         // and say which body is missing.
@@ -11012,8 +11023,12 @@ fn replay(
         if let FeatureKind::Hole { diameter, depth, hole, to, .. } = &src.kind {
             // A hole is drilled again at each copy of its spot (found on the surface there), so
             // a blind hole's depth counts from the face at the copy, not from the bottom of the
-            // original hole under the original spot.
-            let (spots, dir) = hole_spots_raw(vals, named_from.as_ref().unwrap_or(st), src)?;
+            // original hole under the original spot. It meets its bodies where its sketch's frame
+            // shows them (#17623).
+            let from = targets_as_shown(named_from.as_ref().unwrap_or(st), src, &targets)?;
+            let (spots, dir) = hole_spots_raw(vals, &from, src)?;
+            let shown = if named_from.is_some() { targets_as_shown(st, src, &targets)? } else { from };
+            let st: &ModelState = &shown;
             // Copies start where the original does (#11538).
             let from_inside = hole_from_inside(doc, src);
             // A hole at sketch points drills into the material, judged at each copy's spots as
@@ -11079,9 +11094,11 @@ fn replay(
             }
         } else if let FeatureKind::Rib { .. } = &src.kind {
             // A rib is built again at each copy of its sketch, against the bodies there (#4593):
-            // its walls run until they meet the body, which may not lie the same way there.
+            // its walls run until they meet the body, which may not lie the same way there. It
+            // meets every body where its sketch's frame shows it (#17655).
+            let shown = targets_as_shown(st, src, &["*".to_string()])?;
             for (k, m) in mats.iter().enumerate() {
-                for body in more::rib_tools(vals, st, src, Some(m))? {
+                for body in more::rib_tools(vals, &shown, src, Some(m))? {
                     // Each copy's faces are named as the rib's, with the instance.
                     let t = Traced::unnamed(body);
                     copies.push(Traced { lineage: t.lineage.map(|l| l.copied(src.id, first + k + 1)), body: t.body, recipe: None });
@@ -11113,24 +11130,10 @@ fn replay(
                 instances.push(start..copies.len());
             }
         }
-        // A cut or intersect copy with no named targets, made where the pattern's own component
-        // has no body for it, works on the bodies of its source's component, as the source did
-        // (#12996). A pattern whose component has bodies cuts them, as before. The same scope
-        // counts misses, takes sheet cuts and applies the copies.
-        let scoped;
-        let f = if matches!(op, Operation::Cut | Operation::Intersect)
-            && targets.is_empty()
-            && f.participants.is_empty()
-            && src.component != f.component
-            && !st.bodies.iter().any(|b| b.in_default_scope(f))
-        {
-            scoped = Feature { component: src.component, ..f.clone() };
-            &scoped
-        } else {
-            f
-        };
         if op == Operation::Cut {
-            let shown = targets_as_shown(st, f, &targets)?;
+            // Checked against the bodies the copies cut, in the frames they cut them in.
+            let into: Vec<String> = miss_scope(st, f, &targets).map(|b| b.name.clone()).collect();
+            let shown = targets_as_shown(st, f, &into)?;
             let (m, t) = count_copy_misses(&shown, f, &targets, &copies, &instances, &axes);
             missed += m;
             total += t;
@@ -11149,6 +11152,22 @@ fn replay(
         append_warning(warning, format!("{missed} of {total} cut copies remove no material"));
     }
     Ok(())
+}
+
+/// What `f`'s copies of `src` do and change: `src`'s operation, its targets, else its participants
+/// (a primitive's or a hole's, #1108, #2755), and the feature whose scope takes them when it names
+/// none. That is `f`, or `f` in `src`'s component for an untargeted cut or intersect where `f`'s
+/// component has no body for it (#12996).
+fn copy_targets<'a>(st: &ModelState, f: &'a Feature, src: &Feature) -> (Operation, Vec<String>, std::borrow::Cow<'a, Feature>) {
+    let (op, targets) = feature_op(src);
+    let targets = if targets.is_empty() { src.participants.clone() } else { targets };
+    let own = matches!(op, Operation::Cut | Operation::Intersect)
+        && targets.is_empty()
+        && f.participants.is_empty()
+        && src.component != f.component
+        && !st.bodies.iter().any(|b| b.in_default_scope(f));
+    let scope = if own { std::borrow::Cow::Owned(Feature { component: src.component, ..f.clone() }) } else { std::borrow::Cow::Borrowed(f) };
+    (op, targets, scope)
 }
 
 #[path = "model_cache.rs"]
