@@ -126,7 +126,13 @@ fn open_entries(unit: &str) -> std::collections::BTreeSet<(String, usize, String
 ///   that moved with the face's refit trims (the surface's domain is bound to them): some
 ///   face's surface record holds it, and every UV trim on each face whose record holds it is
 ///   within its edge's tolerance (`fillet_group_torii_fillet_b_rb23`: the domain's `v` start moved 3.7e-7 and
-///   its samples there now lie on the plane `z = 2` they are tangent to, 6.2e-6 off before).
+///   its samples there now lie on the plane `z = 2` they are tangent to, 6.2e-6 off before);
+/// - `vertex-box`: a corner coordinate of a result's vertex box (`offset.offset_executive_p2`'s
+///   `result.geometry`: the body's tolerance, then the box of its vertex points), of a case
+///   that writes no bodies, that moved by less than that tolerance, which did not move: EQUAL
+///   within the body's own tolerance, MEASURED, not proved (the three shelled cylinders, whose
+///   marched rim vertex moved about 5e-8 straight outward under a 1e-6 tolerance, its radial
+///   error halved).
 const OTHER: &str = include_str!("trim_tolerance_other.tsv");
 
 /// The accuracy `blend.fillet_executive_p3`'s runner asks of the mass integrator
@@ -730,14 +736,15 @@ struct Tally {
     open_values: usize,
     /// Raised edges: every trim's `B` within the new tolerance, one above the old.
     raised: usize,
-    /// [`OTHER`] values: `rounding`, `quadrature`, `integration`, `padding`, `trim` and
-    /// `domain`.
+    /// [`OTHER`] values: `rounding`, `quadrature`, `integration`, `padding`, `trim`,
+    /// `domain` and `vertex-box`.
     rounding: usize,
     quadrature: usize,
     integration: usize,
     padding: usize,
     trim_values: usize,
     domain: usize,
+    vertex_box: usize,
     /// The largest `B / n`.
     worst: f64,
 }
@@ -787,6 +794,10 @@ fn certify(unit: &str) -> Tally {
                 new.to_bits(),
                 "{at}: output {now:e}, table {new:e}"
             );
+            // (a value is a moved entity's tolerance by its old and new bits, not by the
+            // output's layout, which 21 units lay out 21 ways: a coordinate that moved by
+            // exactly a moved tolerance's pair, both bit for bit, would pass as one. Every
+            // entity is certified below whichever values match it)
             if row
                 .entities
                 .iter()
@@ -942,6 +953,27 @@ fn certify(unit: &str) -> Tally {
                         Err(why) => failures.push(format!("{at}: {why}")),
                     }
                 }
+                "vertex-box"
+                    if key.ends_with("result.geometry")
+                        && *index > 0
+                        && bodies.is_empty()
+                        && !row.moved.iter().any(|m| m.0 == *key && m.1 == 0) =>
+                {
+                    let tol = out
+                        .values
+                        .get(key)
+                        .and_then(|v| v.first())
+                        .copied()
+                        .unwrap_or(f64::NAN);
+                    // (written so a NaN fails)
+                    if tol.is_finite() && tol > 0.0 && (new - old).abs() < tol {
+                        tally.vertex_box += 1;
+                    } else {
+                        failures.push(format!(
+                            "{at}: {old:e} -> {new:e} moved past the body's tolerance {tol:e}"
+                        ));
+                    }
+                }
                 _ => failures.push(format!("{at}: {old:e} -> {new:e} is not `{class}`")),
             }
         }
@@ -989,8 +1021,9 @@ fn certify(unit: &str) -> Tally {
                     tally.edges += 1;
                     assert!(!open.contains(&key), "{at}: certified, remove it from OPEN");
                 } else if open.contains(&key) {
-                    // open, and not farther than it was: the old tolerance did not certify
-                    // the edge either (some trim's `B` past it, or not enclosed)
+                    // open: the old tolerance does not certify the new geometry either (some
+                    // trim's `B` past it, or not enclosed). Not a claim about the old geometry,
+                    // which this test does not build: the entry is counted open, never proved
                     if bounds.iter().all(|x| x.is_some_and(|x| x <= old)) {
                         failures.push(format!(
                             "{at}: {old:e} -> {new:e}: certified at the old tolerance, not \
@@ -1016,7 +1049,8 @@ fn certify(unit: &str) -> Tally {
                     tally.vertices += 1;
                     assert!(!open.contains(&key), "{at}: certified, remove it from OPEN");
                 } else if open.contains(&key) && !vertex_covers_its_ends(&k, b, v, old) {
-                    // uncovered either way: not farther than it was
+                    // open: neither tolerance covers the new edge ends (the old geometry is
+                    // not built here: counted open, never proved)
                     open_seen.insert(key);
                     tally.open += 1;
                 } else {
@@ -1047,7 +1081,7 @@ macro_rules! certified_units {
             #[test]
             fn $name() {
                 let t = certify($unit);
-                assert!(t.values + t.rounding + t.quadrature + t.integration + t.padding + t.trim_values + t.domain > 0, "{t:?}");
+                assert!(t.values + t.rounding + t.quadrature + t.integration + t.padding + t.trim_values + t.domain + t.vertex_box > 0, "{t:?}");
             }
         )*
     };
@@ -1074,6 +1108,133 @@ certified_units! {
     brep_p4: "topology.brep_p4",
     edgeuse_p3: "topology.edgeuse_p3",
     face_p3: "topology.face_p3",
+}
+
+/// The digest of each [`ROWS`] unit's expected file on main, one `unit<TAB>digest` (hex) per
+/// line after the `#` lines that name main's commit: [`expected_digest`] of the file with
+/// nothing put back, written by [`main_expected_digests`] from main's files.
+const MAIN: &str = include_str!("trim_tolerance_main.tsv");
+
+/// FNV-1a 64 of the canonical lines of the expected file `text` ([`crate::json`]: each line
+/// parsed and written again, so the digest is of the values, not of their spelling), with
+/// each moved value of `rows` (`key[index]` of its case, bit for bit its `n`) put back to its
+/// `o`. An `Err` names a moved value the file does not hold as the row has it, or a row whose
+/// case the file does not have.
+fn expected_digest(text: &str, rows: &[Row]) -> Result<u64, String> {
+    use crate::json::{num, num_of, to_canonical_string};
+    let mut canonical = String::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for line in text.lines().filter(|l| !l.trim().is_empty()) {
+        let mut v: serde_json::Value =
+            serde_json::from_str(line).map_err(|e| format!("a line: {e}"))?;
+        let case = v["case"].as_str().map(str::to_string);
+        if let Some(row) = case.and_then(|c| rows.iter().find(|r| r.case == c)) {
+            seen.insert(row.case.clone());
+            for (key, index, old, new) in &row.moved {
+                let at = format!("{} {key}[{index}]", row.case);
+                let slot = v["values"]
+                    .get_mut(key)
+                    .and_then(|a| a.get_mut(*index))
+                    .ok_or_else(|| format!("{at}: not in the expected file"))?;
+                match num_of(slot) {
+                    Some(x) if x.to_bits() == new.to_bits() => *slot = num(*old),
+                    x => return Err(format!("{at}: expected {x:?}, row {new:e}")),
+                }
+            }
+        }
+        canonical.push_str(&to_canonical_string(&v));
+    }
+    if let Some(row) = rows.iter().find(|r| !seen.contains(&r.case)) {
+        return Err(format!("{}: not in the expected file", row.case));
+    }
+    Ok(crate::rng::fnv1a64(&canonical))
+}
+
+/// The units of [`ROWS`].
+fn row_units() -> std::collections::BTreeSet<String> {
+    ROWS.lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| {
+            let v: serde_json::Value = serde_json::from_str(l).expect("a row");
+            v[0].as_str().expect("unit").to_string()
+        })
+        .collect()
+}
+
+/// The ledger is the whole golden diff from main: every expected file, with each moved value
+/// of [`ROWS`] put back to its old value, is main's file ([`MAIN`] holds the digest of every
+/// unit's expected file on main). So no unit, case, moved value or other change is left out
+/// of the rows, and each row's new value is the expected one.
+#[test]
+fn the_rows_are_the_whole_golden_diff_from_main() {
+    let main: std::collections::BTreeMap<String, u64> = MAIN
+        .lines()
+        .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+        .map(|l| {
+            let (unit, hex) = l.split_once('\t').expect("unit and digest");
+            (
+                unit.to_string(),
+                u64::from_str_radix(hex, 16).expect("a hex digest"),
+            )
+        })
+        .collect();
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("expected");
+    let units = expected_units(&dir);
+    assert_eq!(
+        main.keys()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>(),
+        units,
+        "the expected units here and on main"
+    );
+    let missing: Vec<_> = row_units().difference(&units).cloned().collect();
+    assert!(
+        missing.is_empty(),
+        "ROWS units with no expected file: {missing:?}"
+    );
+    for (unit, want) in &main {
+        let text = std::fs::read_to_string(dir.join(format!("{unit}.jsonl")))
+            .unwrap_or_else(|e| panic!("{unit}: {e}"));
+        let got = expected_digest(&text, &rows(unit)).unwrap_or_else(|e| panic!("{unit}: {e}"));
+        assert_eq!(got, *want, "{unit}: {got:016x}, main {want:016x}");
+    }
+}
+
+/// The units of the `*.jsonl` expected files in `dir`.
+fn expected_units(dir: &std::path::Path) -> std::collections::BTreeSet<String> {
+    std::fs::read_dir(dir)
+        .expect("the expected directory")
+        .map(|e| e.expect("an entry").path())
+        .filter(|p| p.extension().is_some_and(|x| x == "jsonl"))
+        .map(|p| {
+            p.file_stem()
+                .and_then(|s| s.to_str())
+                .expect("a unit name")
+                .to_string()
+        })
+        .collect()
+}
+
+/// Writes [`MAIN`] from main's expected files in `MAIN_EXPECTED_DIR` (every unit) to
+/// `MAIN_EXPECTED_OUT`, after the line `# main <MAIN_SHA>`.
+#[test]
+#[ignore = "writes the main digests of the ledger; run on main's expected files"]
+fn main_expected_digests() {
+    let dir = std::env::var("MAIN_EXPECTED_DIR").expect("MAIN_EXPECTED_DIR");
+    let sha = std::env::var("MAIN_SHA").expect("MAIN_SHA");
+    let mut out = format!("# main {sha}\n");
+    for unit in expected_units(std::path::Path::new(&dir)) {
+        let text =
+            std::fs::read_to_string(std::path::Path::new(&dir).join(format!("{unit}.jsonl")))
+                .unwrap_or_else(|e| panic!("{unit}: {e}"));
+        let digest = expected_digest(&text, &[]).expect("main's file");
+        out.push_str(&format!("{unit}\t{digest:016x}\n"));
+    }
+    std::fs::write(
+        std::env::var("MAIN_EXPECTED_OUT").expect("MAIN_EXPECTED_OUT"),
+        out,
+    )
+    .expect("written");
 }
 
 /// An edge that holds a UV trim on one of its faces only is bounded on the other against

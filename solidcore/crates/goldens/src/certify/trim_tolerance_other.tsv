@@ -35,6 +35,13 @@ blend.fillet_executive_p3	stubs4-delete-edge-bottle-e8-r0.1	mass_properties	3	in
 blend.fillet_executive_p3	stubs4-delete-edge-bottle-e8-r0.1	mass_properties	4	integration	0
 blend.fillet_executive_p3	stubs4-delete-edge-bottle-e8-r0.1	mass_properties	8	integration	0
 blend.fillet_executive_p3	stubs4-delete-edge-bottle-e8-r0.1	mass_properties	9	integration	0
+offset.offset_executive_p2	api_shell_cylinder_r5_top_open_tol_1e6	result.geometry	1	vertex-box	0
+offset.offset_executive_p2	api_shell_cylinder_r5_top_open_tol_1e6	result.geometry	2	vertex-box	0
+offset.offset_executive_p2	api_shell_cylinder_r5_top_open_tol_1e6	result.geometry	3	vertex-box	0
+offset.offset_executive_p2	api_shell_cylinder_top_extend_merge_in	result.geometry	1	vertex-box	0
+offset.offset_executive_p2	api_shell_cylinder_top_extend_merge_in	result.geometry	2	vertex-box	0
+offset.offset_executive_p2	api_shell_cylinder_top_face	result.geometry	1	vertex-box	0
+offset.offset_executive_p2	api_shell_cylinder_top_face	result.geometry	2	vertex-box	0
 offset.offset_executive_p2	issue1795_plate_api_shell_2_top	result.geometry	6	rounding	0
 offset.offset_executive_p2	issue1795_plate_api_shell_2_top_offset_solid	result.geometry	6	rounding	0
 offset.offset_executive_p2	issue1795_plate_static_shell_2_top	result.geometry	6	rounding	0
