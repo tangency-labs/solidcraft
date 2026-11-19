@@ -97,6 +97,48 @@ fn rounds_and_chamfers_take_their_closed_forms() {
 }
 
 #[test]
+#[ignore = "#19089: missing support-change corner topology"]
+fn rounds_meet_a_chord_round_at_a_chamfered_notch() {
+    all_fixes();
+    let b = built(|k| {
+        let stock = create_box(k, Vec3::new(-10.0, -10.0, 0.0), 20.0, 20.0, 20.0)?;
+        let notch = create_box(k, Vec3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0)?;
+        boolean_difference(k, stock, notch)
+    });
+    blend(
+        &b,
+        Blend::Chamfer,
+        &[edge_at(&b, [-5.0, 10.0, 0.0])],
+        &[10.0],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap();
+    blend(
+        &b,
+        Blend::Chord,
+        &[edge_at(&b, [0.0, 0.0, 5.0])],
+        &[6.0],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap();
+    let r = 6.0 / std::f64::consts::SQRT_2;
+    // The cylinder meets the chamfer y=z. Its 45-degree point has
+    // x=y=z=R-3, since (x-R)^2 + (y-R)^2 = R^2 = 18.
+    let edges = [
+        edge_at(&b, [0.0, (10.0 + r) / 2.0, (10.0 + r) / 2.0]),
+        edge_at(&b, [r - 3.0, r - 3.0, r - 3.0]),
+        edge_at(&b, [(10.0 + r) / 2.0, 0.0, 0.0]),
+        edge_at(&b, [(-10.0 + r) / 2.0, 0.0, 0.0]),
+    ];
+    let made = blend(&b, Blend::Round, &edges, &[2.0], &[], Corners::Filled).unwrap();
+    assert_eq!(made.dropped, vec![false; edges.len()]);
+    assert!(made.holes.is_empty());
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+}
+
+#[test]
 fn three_rounds_meet_at_a_corner_filled_set_back_or_open() {
     all_fixes();
     let edges = |b: &Body| {
