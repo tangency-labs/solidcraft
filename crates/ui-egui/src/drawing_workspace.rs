@@ -166,7 +166,39 @@ pub(crate) fn counterpart(command: &'static str) -> Option<&'static str> {
 }
 
 pub fn can_open_options(id: &str) -> bool {
-    Tool::for_command(id).is_some() || matches!(id, "drawing.sheet.add" | "drawing.sheet.set")
+    Tool::for_command(id).is_some() || matches!(id, "drawing.sheet.add" | "drawing.sheet.set") || runs_for_the_sheet(id)
+}
+
+/// Planned ribbon ids whose click runs a working command on the open drawing (#18985). The ids
+/// stay planned, so a script calls the real commands; the click passes what the page knows.
+fn runs_for_the_sheet(id: &str) -> bool {
+    matches!(id, "drawing.update.planned" | "drawing.check.planned" | "drawing.revision_table")
+}
+
+/// Runs `id`'s command on the open drawing; a refusal or Check Drawing's answer goes on the
+/// status line.
+fn run_for_the_sheet(app: &mut SolveApp, id: &str) {
+    let Some(sheet) = active_sheet(app) else {
+        app.set_status(app.tr("ui.drawing_ribbon.open_drawing_first").to_string(), true);
+        return;
+    };
+    let reply = match id {
+        "drawing.update.planned" => app.run("drawing.update", serde_json::json!({})),
+        "drawing.check.planned" => app.run("drawing.check", serde_json::json!({})),
+        _ => app.run("drawing.table.add", serde_json::json!({"sheet": solidcraft_engine::doc::ids::encode(sheet), "kind": "revision"})),
+    };
+    match reply {
+        Err(why) => app.set_status(why, true),
+        Ok(answer) if id == "drawing.check.planned" => {
+            let found = answer["findings"].as_array().map_or(0, Vec::len);
+            let text = match found {
+                0 => app.tr("ui.drawing_ribbon.check_clean").to_string(),
+                n => app.tr("ui.drawing_ribbon.check_found").replace("{count}", &n.to_string()),
+            };
+            app.set_status(text, false);
+        }
+        Ok(_) => {}
+    }
 }
 
 /// Dismiss the current Drawing inspector without touching source or drawing data.
@@ -266,6 +298,7 @@ pub fn start(app: &mut SolveApp, id: &str) -> bool {
             app.drawing_workspace.placement = placement::Placement::new(app);
             app.drawing_workspace.options = Some(Tool::Base);
         }
+        _ if runs_for_the_sheet(id) => run_for_the_sheet(app, id),
         _ => app.drawing_workspace.options = Tool::for_command(id),
     }
     true
@@ -1339,7 +1372,7 @@ mod tests {
             let spec = solidcraft_engine::find_command(id).unwrap();
             assert!(!crate::toolbar::coming_soon(&h.app, spec), "{id} is drawn as a working tool, not faded");
         }
-        for id in ["drawing.update.planned", "drawing.view.section.planned", "drawing.export.planned"] {
+        for id in ["drawing.view.section.planned", "drawing.export.planned"] {
             let spec = solidcraft_engine::find_command(id).unwrap();
             assert!(crate::toolbar::coming_soon(&h.app, spec), "{id} opens nothing yet: faded, coming soon");
         }
@@ -1814,7 +1847,63 @@ mod tests {
             assert_eq!(h.app.cam, cam);
         }
         assert!(!can_open_options("drawing.export.planned"));
-        assert!(!can_open_options("drawing.update.planned"));
+        assert!(!can_open_options("drawing.print"));
+    }
+
+    /// Update Drawing, Check Drawing and Revision Table run their commands on the open drawing
+    /// (#18985). Revision Table adds a revision table to the open sheet in one undo step; Check
+    /// Drawing changes nothing and says what it found on the status line.
+    #[test]
+    fn the_review_and_table_buttons_run_their_commands() {
+        use serde_json::json;
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
+        let buttons = ["drawing.update.planned", "drawing.check.planned", "drawing.revision_table"];
+        for id in buttons {
+            assert!(can_open_options(id), "{id}");
+            assert!(start(&mut h.app, id), "{id}");
+            let status = h.app.status.clone().map(|(text, _, error)| (text, error));
+            assert_eq!(status, Some((h.app.tr("ui.drawing_ribbon.open_drawing_first").to_string(), true)), "{id} with no drawing");
+        }
+        h.app.run("drawing.create", json!({})).unwrap();
+        h.app.run("drawing.view.base", json!({"sheet":"Sheet 1","scale":"1:1","position_mm":[150,150]})).unwrap();
+        h.frames(3);
+        let drawing = |h: &Harness| h.app.session.drawing("test").unwrap().clone();
+        let tables = |h: &Harness| drawing(h).tables.iter().filter(|t| t.kind == solidcraft_engine::doc::drawing::table::Kind::Revision).count();
+
+        h.app.ui.tab = "DRAWING PARTS".into();
+        h.frames(2);
+        crate::test_support::click(&mut h, "button:drawing.revision_table");
+        assert_eq!(tables(&h), 1, "a revision table on the open sheet");
+        let sheet = drawing(&h).sheets[0].id;
+        assert!(drawing(&h).tables.iter().all(|t| t.sheet == sheet));
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(tables(&h), 0, "in one undo step");
+
+        h.app.ui.tab = "DRAWING REVIEW".into();
+        h.frames(2);
+        let before = drawing(&h);
+        crate::test_support::click(&mut h, "button:drawing.check.planned");
+        let found = h.app.run("drawing.check", json!({})).unwrap()["findings"].as_array().map_or(0, Vec::len);
+        let said = match found {
+            0 => h.app.tr("ui.drawing_ribbon.check_clean").to_string(),
+            n => h.app.tr("ui.drawing_ribbon.check_found").replace("{count}", &n.to_string()),
+        };
+        assert_eq!(h.app.status.as_ref().map(|(text, _, error)| (text.as_str(), *error)), Some((said.as_str(), false)));
+        assert_eq!(drawing(&h), before, "Check Drawing changes nothing");
+        h.app.status = None;
+        crate::test_support::click(&mut h, "button:drawing.update.planned");
+        assert!(h.app.status.as_ref().is_none_or(|(_, _, error)| !error), "Update Drawing runs: {:?}", h.app.status);
+        for id in buttons {
+            let spec = solidcraft_engine::find_command(id).unwrap();
+            assert!(!crate::toolbar::coming_soon(&h.app, spec), "{id} is drawn as a working tool, not faded");
+        }
+        // Scripts call the real commands: the ribbon ids stay planned and refuse.
+        for id in buttons {
+            assert!(h.app.run(id, json!({})).is_err(), "{id}");
+        }
     }
 
     fn app_width(h: &Harness) -> f32 {

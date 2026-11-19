@@ -119,7 +119,6 @@ drawing_gdt	false
 drawing_hatch	false
 drawing_hole_callout	false
 drawing_image	false
-drawing_issue_revision	false
 drawing_leader	false
 drawing_model_dimensions	false
 drawing_note	false
@@ -127,7 +126,6 @@ drawing_parts_list	false
 drawing_parts_renumber	false
 drawing_print	false
 drawing_replace_model	false
-drawing_revision	false
 drawing_revision_table	false
 drawing_revision_tag	false
 drawing_section_view	false

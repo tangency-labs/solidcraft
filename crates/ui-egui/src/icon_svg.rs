@@ -139,7 +139,7 @@ mod tests {
                 }
             }
         }
-        assert_eq!(candidates.len(), 45);
+        assert_eq!(candidates.len(), 43);
     }
 
     #[test]
