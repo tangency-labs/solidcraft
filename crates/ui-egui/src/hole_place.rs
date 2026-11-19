@@ -16,6 +16,8 @@
 //!
 //! Create Hole › Several holes on one face (`hole_several`): a pick elsewhere on a face that already
 //! has a hole adds another hole there (rather than moving it), and a pick on a hole takes it out.
+//! A Heat-Set Insert dialog always takes several: each pick on a face adds an insert there, and a
+//! pick on one takes it out.
 //! Create Hole › Group holes made together (`hole_group`): the holes one Hole dialog makes, two or
 //! more, go into a feature folder in History, closed at first.
 
@@ -291,9 +293,11 @@ pub(crate) fn pick_moves(d: &mut Dialog, s: &Session, sel: &Sel) -> PickMove {
 }
 
 /// Whether this dialog's faces take several Single holes (Preferences): a new Hole in Single
-/// placement. Editing a Hole keeps its one place.
+/// placement. Editing a Hole keeps its one place. A Heat-Set Insert always takes several.
 pub(crate) fn several(app: &SolveApp, d: &Dialog) -> bool {
-    app.preferences.hole_several && d.editing.is_none() && matches!(&d.kind, Kind::Hole { opts, .. } if !opts.multiple)
+    d.editing.is_none()
+        && (matches!(&d.kind, Kind::Plastic(crate::dialogs_plastic::Pl::HeatInsert { .. }))
+            || app.preferences.hole_several && matches!(&d.kind, Kind::Hole { opts, .. } if !opts.multiple))
 }
 
 /// The items of the face input that are holes when a face takes several: each pick, but not the
@@ -367,10 +371,15 @@ pub(crate) fn pick_several(app: &SolveApp, d: &mut Dialog, sel: &Sel) -> bool {
     if !several(app, d) || d.active != 0 {
         return false;
     }
-    let Kind::Hole { diameter, .. } = &d.kind else { return false };
     let Sel::Face { point, .. } = sel else { return false };
     let s = &app.session;
-    let radius = s.doc.eval(diameter, ValueKind::Length).ok().filter(|v| v.is_finite() && *v > 0.0).map_or(0.0, |v| v / 2.0);
+    let radius = match &d.kind {
+        Kind::Hole { diameter, .. } => s.doc.eval(diameter, ValueKind::Length).ok().filter(|v| v.is_finite() && *v > 0.0).map_or(0.0, |v| v / 2.0),
+        Kind::Plastic(crate::dialogs_plastic::Pl::HeatInsert { size, .. }) => {
+            solidcraft_engine::cmd::heat_insert_sizes().nth(*size).map_or(0.0, |z| z.outer / 2.0)
+        }
+        _ => return false,
+    };
     let group = crate::viewport::grouped_selection(s, sel);
     let mut places = several_list(s, d);
     let on =

@@ -1174,6 +1174,14 @@ pub enum FeatureKind {
         /// Hole keeps it.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         old_surface_start: bool,
+        /// More places drilled as `position` is, with the same direction (a Heat-Set Insert at
+        /// several points of one face).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        more: Vec<FacePick>,
+        /// A Heat-Set Insert (#12378): the holes are for this threaded insert, checked for the
+        /// wall and floor it needs whenever they are built, and shown as their own feature.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        insert: Option<HeatInsert>,
     },
     /// A thread on a cylindrical face. Cosmetic by default (no geometry change; drawn and
     /// exported as an annotation); `modeled` cuts the real helical ISO profile into the face.
@@ -2862,6 +2870,22 @@ impl MeshData {
     }
 }
 
+/// The threaded insert a Heat-Set Insert's holes are for (#12378), in mm.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+pub struct HeatInsert {
+    /// The size's id in the size table (`M3x5.7`); empty for an insert given by its values.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub size: String,
+    /// The insert's outer diameter, which the wall is measured from.
+    pub outer_diameter: f64,
+    /// The insert's length, over which the wall is measured.
+    pub length: f64,
+    /// The least wall around the insert.
+    pub min_wall: f64,
+    /// The least floor below the hole.
+    pub min_floor: f64,
+}
+
 /// Points of a sketch, by id.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 pub struct SketchPoints {
@@ -3486,6 +3510,7 @@ impl FeatureKind {
             FeatureKind::Pattern { .. } => "CircularPattern",
             FeatureKind::Mirror { .. } => "Mirror",
             FeatureKind::ConstructionPlane { .. } => "Plane",
+            FeatureKind::Hole { insert: Some(_), .. } => "HeatInsert",
             FeatureKind::Hole { .. } => "Hole",
             FeatureKind::Thread { .. } => "Thread",
             FeatureKind::Loft { .. } => "Loft",

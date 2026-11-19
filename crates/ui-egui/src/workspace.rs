@@ -847,6 +847,7 @@ pub fn feature_icon(k: &FeatureKind) -> Option<&'static str> {
         FeatureKind::SheetUnfold { .. } => "refold",
         FeatureKind::SheetConvert { .. } | FeatureKind::SheetSurfaceConvert { .. } | FeatureKind::SheetRecognize { .. } => "convert_sheet",
         FeatureKind::Boss { .. } => "boss",
+        FeatureKind::Hole { insert: Some(_), .. } => "heat_insert",
         FeatureKind::Lip { .. } => "lip",
         FeatureKind::SnapFit { .. } => "snap_fit",
         FeatureKind::Rest { .. } => "rest",
@@ -1064,7 +1065,9 @@ pub fn legacy_buttons(tab: &str, panel: &str) -> Vec<&'static str> {
         ("SHEET METAL", "CREATE") => (&["sketch.create", "sheet.flange", "sheet.flat_pattern"], 3, tab),
         ("SHEET METAL", "MODIFY") => (&["sheet.manage_rules", "sheet.unfold"], 2, tab),
         ("PLASTIC", "SETUP") => (&["plastic.manage_rules", "plastic.assign_rule"], 2, tab),
-        ("PLASTIC", "CREATE") => (&["sketch.create", "plastic.boss", "plastic.snap_fit", "plastic.lip", "plastic.rest"], 5, tab),
+        ("PLASTIC", "CREATE") => {
+            (&["sketch.create", "plastic.boss", "plastic.heat_insert", "plastic.snap_fit", "plastic.lip", "plastic.rest"], 6, tab)
+        }
         ("SOLID" | "PLASTIC", "MODIFY") => (&[], 4, "SOLID"),
         ("SOLID", "CREATE") => (&[], 4, tab),
         ("SHEET METAL" | "PLASTIC", "CONSTRUCT" | "INSPECT" | "INSERT") => (&[], 2, "SOLID"),

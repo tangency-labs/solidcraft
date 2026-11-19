@@ -3696,7 +3696,12 @@ fn beyond_coarse_sizes(st: &solidcraft_doc::ModelState, face: Vec3) -> Option<(f
     Some((dia, if cyl.internal { "hole" } else { "cylinder" }, sizes))
 }
 
-fn hole(s: &mut Session, p: &Value) -> Result<Value> {
+pub(super) fn hole(s: &mut Session, p: &Value) -> Result<Value> {
+    hole_with(s, p, Vec::new(), None)
+}
+
+/// [`hole`], drilling `more` places as it drills `position`, for a Heat-Set Insert (`insert`).
+pub(super) fn hole_with(s: &mut Session, p: &Value, more: Vec<Vec3>, insert: Option<solidcraft_doc::HeatInsert>) -> Result<Value> {
     let cmd = "solid.hole";
     // At sketch points: the holes go perpendicular to the sketch and follow its points.
     let points = match (p.get("sketch"), p.get("points"), p.get("position")) {
@@ -3999,6 +4004,8 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
             to: to.map(FacePick),
             references,
             old_surface_start,
+            more: more.into_iter().map(FacePick).collect(),
+            insert,
         },
     )
 }
@@ -4106,7 +4113,7 @@ fn body_with_face_at(
 }
 
 /// The points of a sketch a hole drills at when only the sketch is given.
-fn sketch_hole_points(s: &Session, sketch: u64) -> Vec<String> {
+pub(super) fn sketch_hole_points(s: &Session, sketch: u64) -> Vec<String> {
     let st = s.model.state();
     let Some(ss) = st.sketch(sketch) else { return Vec::new() };
     let mut ends: Vec<usize> = Vec::new();

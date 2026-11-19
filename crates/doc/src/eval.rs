@@ -7340,7 +7340,7 @@ fn backticked<S: AsRef<str>>(ids: &[S]) -> String {
 /// points perpendicular to the sketch (into the material), else at its position. A point gone
 /// from the sketch drops only its own hole ([`hole_points_gone`]); with none left it fails.
 fn hole_spots(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature) -> Result<(Vec<Vec3>, Vec3)> {
-    let FeatureKind::Hole { position, at, direction, points, .. } = &f.kind else { return Err(DocError::Invalid("not a hole".into())) };
+    let FeatureKind::Hole { position, at, direction, points, more, .. } = &f.kind else { return Err(DocError::Invalid("not a hole".into())) };
     let (spots, dir) = match points {
         Some(sp) if !sp.single => {
             let ss =
@@ -7359,7 +7359,12 @@ fn hole_spots(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, f
             let at = hole_start(st, f, single_hole_position(vals, st, position, at, points)?, dir);
             let at = with_references(vals, st, f, at, dir, true)?;
             let dir = hole_dir_into_face(st, at, dir, hole_drill_scope(f));
-            return Ok((vec![hole_start(st, f, at, dir)], dir));
+            // More places (a Heat-Set Insert at several points of a face) drill the same way.
+            let mut spots = vec![hole_start(st, f, at, dir)];
+            for p in more.iter().take(10_000) {
+                spots.push(hole_start(st, f, hole_start(st, f, p.0, dir), dir));
+            }
+            return Ok((spots, dir));
         }
     };
     if spots.is_empty() || spots.len() > 10_000 {
@@ -7420,7 +7425,7 @@ fn hole_depth_to(st: &ModelState, at: &Vec3, dir: Vec3, to: &Option<Vec3>, depth
 
 /// A hole's spots as given (not yet moved onto the surface) and its direction.
 fn hole_spots_raw(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature) -> Result<(Vec<Vec3>, Vec3)> {
-    let FeatureKind::Hole { position, at, direction, points, .. } = &f.kind else { return Err(DocError::Invalid("not a hole".into())) };
+    let FeatureKind::Hole { position, at, direction, points, more, .. } = &f.kind else { return Err(DocError::Invalid("not a hole".into())) };
     match points {
         Some(sp) if !sp.single => {
             let ss = st.sketch(sp.sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {}", sp.sketch)))?;
@@ -7434,7 +7439,8 @@ fn hole_spots_raw(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature) 
             let dir = direction.normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?;
             let p = single_hole_position(vals, st, position, at, points)?;
             let p = if hole_references(f).is_empty() { p } else { with_references(vals, st, f, hole_start(st, f, p, dir), dir, false)? };
-            Ok((vec![p], hole_dir_into_face(st, hole_start(st, f, p, dir), dir, hole_drill_scope(f))))
+            let into = hole_dir_into_face(st, hole_start(st, f, p, dir), dir, hole_drill_scope(f));
+            Ok((std::iter::once(p).chain(more.iter().take(10_000).map(|m| m.0)).collect(), into))
         }
     }
 }
@@ -10318,6 +10324,51 @@ fn has_a_new_surface(old: &Body, new: &Body) -> bool {
     })
 }
 
+/// What a Heat-Set Insert's holes at `spots` (drilled along `dir`) leave too thin for the insert,
+/// measured on the bodies before the cut ([`crate::heat_insert::wall_and_floor`]); nothing for
+/// another hole.
+fn heat_insert_notes(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature, spots: &[Vec3], dir: Vec3) -> Vec<String> {
+    let FeatureKind::Hole { insert: Some(ins), diameter, depth, hole, .. } = &f.kind else { return Vec::new() };
+    let Ok(d) = val(vals, diameter, Kind::Length) else { return Vec::new() };
+    let depth = match depth {
+        Some(e) => match val(vals, e, Kind::Length) {
+            Ok(v) => v,
+            Err(_) => return Vec::new(),
+        },
+        None => ins.length + 1.0,
+    };
+    let mouth = match hole {
+        crate::HoleKind::Countersink { cs_diameter, .. } => {
+            val(vals, cs_diameter, Kind::Length).ok().map(|cs| (cs / 2.0, (cs - d) / 2.0)).filter(|(r, _)| *r > ins.outer_diameter / 2.0)
+        }
+        _ => None,
+    };
+    let bodies: Vec<&ModelBody> = hole_targets(st, f).into_iter().filter(|b| !b.body.is_mesh()).collect();
+    let mut notes = Vec::new();
+    for at in spots {
+        let Some(b) = bodies.iter().find(|b| b.body.classify_point(*at).ok() == Some(kernel::PointClass::OnBoundary)) else { continue };
+        let place = crate::heat_insert::InsertPlace {
+            at: *at,
+            into: dir,
+            outer_radius: ins.outer_diameter / 2.0,
+            length: ins.length,
+            mouth,
+            depth,
+            min_wall: ins.min_wall,
+            min_floor: ins.min_floor,
+        };
+        let Ok((wall, floor)) = crate::heat_insert::wall_and_floor(&b.body, &place) else { continue };
+        let whose = if spots.len() > 1 { format!("at [{:.2}, {:.2}, {:.2}], ", at.x, at.y, at.z) } else { String::new() };
+        if let Some(w) = wall {
+            notes.push(format!("{whose}the wall around the insert is {w:.2} mm; it needs at least {} mm", ins.min_wall));
+        }
+        if let Some(fl) = floor {
+            notes.push(format!("{whose}the floor below the hole is {fl:.2} mm; it needs at least {} mm", ins.min_floor));
+        }
+    }
+    notes
+}
+
 /// Whether hole tool `tool` is clear of every body the hole cuts, by their exact boxes (#10701).
 /// Boxes only: a probe boolean for every hole of a large hole pattern would double its work. A
 /// body whose exact box is unknown, or one of another component (in another frame), leaves the
@@ -12390,6 +12441,11 @@ fn eval_feature_kind(
                 return Err(DocError::Invalid("thread depth must be finite and positive".into()));
             }
             let (spots, dir) = hole_spots(doc, vals, st, f)?;
+            // A Heat-Set Insert checks the wall and the floor its insert needs each time it is
+            // built: a change upstream (a sketch point moved, a wall made thinner) shows here.
+            for note in heat_insert_notes(vals, st, f, &spots, dir) {
+                append_warning(warning, note);
+            }
             let points_gone = hole_points_gone(st, f);
             if !points_gone.is_empty() {
                 append_warning(

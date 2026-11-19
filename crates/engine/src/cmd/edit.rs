@@ -2451,6 +2451,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "plastic.lip"
                 | "plastic.snap_fit"
                 | "plastic.rest"
+                | "plastic.heat_insert"
                 | "frame.end_cap"
                 | "frame.rotate_member"
                 | "frame.member"

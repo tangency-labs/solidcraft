@@ -144,6 +144,7 @@ pub const DOCUMENTED: &[&str] = &[
     "parts.resize",
     "plastic.assign_rule",
     "plastic.boss",
+    "plastic.heat_insert",
     "plastic.lip",
     "plastic.manage_rules",
     "plastic.rest",

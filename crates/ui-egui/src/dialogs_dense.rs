@@ -92,6 +92,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
             crate::dialogs_plastic::Pl::SnapFit { .. } => Some("plastic.snap_fit"),
             crate::dialogs_plastic::Pl::Assign { .. } => Some("plastic.assign_rule"),
             crate::dialogs_plastic::Pl::Rules { .. } => Some("plastic.manage_rules"),
+            crate::dialogs_plastic::Pl::HeatInsert { .. } => Some("plastic.heat_insert"),
             _ => k.simple_metadata().map(|(command, _)| command),
         },
         Kind::Assembly(k) => match k {

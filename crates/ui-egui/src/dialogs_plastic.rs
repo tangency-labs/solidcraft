@@ -1,5 +1,6 @@
-//! Plastic dialogs: Boss, Lip / Groove, Snap Fit and Rest (placed by a pick on a face), Manage
-//! Plastic Rules and Assign Plastic Rule. Values left empty take the body's plastic rule.
+//! Plastic dialogs: Boss, Lip / Groove, Snap Fit and Rest (placed by a pick on a face), Heat-Set
+//! Insert (placed by picks on faces), Manage Plastic Rules and Assign Plastic Rule. Values left
+//! empty take the body's plastic rule.
 
 use crate::dialogs::put;
 use crate::ui_kit::{choice_row, expr_row, hint_row};
@@ -13,7 +14,7 @@ use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::dialogs::{Kind, combo, face_sel, field, form_row, shown_expr};
-use crate::selection::{BODIES, FACES, PLANAR_FACES, SelInput, SelectionExt as _, point_value as pt};
+use crate::selection::{BODIES, EXTERNAL_POINTS, FACES, PLANAR_FACES, POINTS, SelInput, SelectionExt as _, point_value as pt};
 
 crate::dialog_descriptor::dialog_descriptors! {
     #[derive(Clone, Debug)]
@@ -70,6 +71,16 @@ crate::dialog_descriptor::dialog_descriptors! {
             Assign {
                 rule: usize,
             },
+            /// Heat-Set Insert: the size (index into the engine's size table), a lead-in chamfer
+            /// and its width (empty: out to the insert's outer diameter), the hole's depth (empty:
+            /// the insert's length plus 1 mm), and drilling anyway where a wall is too thin.
+            HeatInsert {
+                size: usize,
+                chamfer: bool,
+                chamfer_size: String,
+                depth: String,
+                warn: bool,
+            },
         }
     }
 }
@@ -81,6 +92,7 @@ impl Pl {
             Pl::SnapFit { .. } => "SNAP FIT",
             Pl::Rules { .. } => "MANAGE PLASTIC RULES",
             Pl::Assign { .. } => "ASSIGN PLASTIC RULE",
+            Pl::HeatInsert { .. } => "ui.heat_insert.title",
             _ => self.simple_metadata().map_or("", |(_, title)| title),
         }
     }
@@ -121,6 +133,12 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             (Pl::Rules { pick, name: String::new(), values: Vec::new(), active: false, loaded: None }, vec![])
         }
         "plastic.assign_rule" => (Pl::Assign { rule: 1 }, vec![SelInput::new("Bodies", BODIES, true)]),
+        "plastic.heat_insert" => {
+            let size = solidcraft_engine::cmd::heat_insert_sizes().position(|z| z.id == DEFAULT_INSERT).unwrap_or(0);
+            let kind = Pl::HeatInsert { size, chamfer: false, chamfer_size: String::new(), depth: String::new(), warn: false };
+            // Points on faces, and sketch points, which the holes then follow.
+            (kind, vec![SelInput::new("ui.heat_insert.positions", PLANAR_FACES | POINTS | EXTERNAL_POINTS, true)])
+        }
         _ => Pl::simple_start(id)?,
     };
     let mut inputs = inputs;
@@ -134,6 +152,9 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     }
     Some((crate::length_input::defaults(&app.session.doc, Kind::Plastic(pl)), inputs))
 }
+
+/// The size a new Heat-Set Insert dialog starts with.
+const DEFAULT_INSERT: &str = "M3x5.7";
 
 /// A value row whose empty value means "from the rule" (or another default).
 fn opt_field(ui: &mut egui::Ui, label: &str, v: &mut String, unit: &str, hint: &str) -> bool {
@@ -264,6 +285,33 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pl, inputs: &[SelInpu
                 }
             }
         }
+        Pl::HeatInsert { size, chamfer, chamfer_size, depth, warn } => {
+            let sizes: Vec<&solidcraft_engine::cmd::HeatInsertSize> = solidcraft_engine::cmd::heat_insert_sizes().collect();
+            let names: Vec<&str> = sizes.iter().map(|z| z.id).collect();
+            choice_row(ui, "ui.heat_insert.size", "pl_insert_size", size, &names);
+            if let Some(z) = sizes.get(*size) {
+                let mm = |v: f64| crate::length_input::shown(&app.session.doc, v);
+                let info = solidcraft_ui_text::format(
+                    "ui.heat_insert.size_info",
+                    &[("outer", &mm(z.outer)), ("length", &mm(z.length)), ("hole", &mm(z.hole)), ("wall", &mm(z.min_wall))],
+                );
+                crate::ui_kit::value_row(ui, "ui.heat_insert.dimensions", &info);
+            }
+            // Empty values show what the command does without them: the size's own numbers.
+            let default =
+                |v: f64| solidcraft_ui_text::format("ui.heat_insert.default", &[("value", &crate::length_input::shown(&app.session.doc, v))]);
+            let (deep, wide) = sizes.get(*size).map_or((0.0, 0.0), |z| (z.length + 1.0, (z.outer - z.hole) / 2.0));
+            enter |= hint_row(ui, "ui.heat_insert.depth", depth, &default(deep));
+            if crate::ui_kit::checkbox_row(ui, "pl_insert_chamfer", "ui.heat_insert.chamfer", *chamfer) {
+                *chamfer = !*chamfer;
+            }
+            if *chamfer {
+                enter |= hint_row(ui, "ui.heat_insert.chamfer_size", chamfer_size, &default(wide));
+            }
+            let mut thin = usize::from(*warn);
+            choice_row(ui, "ui.heat_insert.thin", "pl_insert_thin", &mut thin, &["ui.heat_insert.stop", "ui.heat_insert.warn"]);
+            *warn = thin == 1;
+        }
         Pl::Assign { rule } => {
             let mut names: Vec<String> = vec!["(no rule)".into()];
             names.extend(app.session.doc.plastic_rules().into_iter().map(|r| r.name));
@@ -349,6 +397,83 @@ pub fn commands(app: &SolveApp, k: &Pl, inputs: &[SelInput], extra: &Map<String,
             let p = crate::rule_editor::params(rules.get(*pick).map(|r| r.name.as_str()), name, *active, fields)?;
             ("plastic.manage_rules", p)
         }
+        Pl::HeatInsert { size, chamfer, chamfer_size, depth, warn } => {
+            let id = solidcraft_engine::cmd::heat_insert_sizes().nth(*size).map(|z| z.id).ok_or("choose a size")?;
+            let mut base = json!({"size": id});
+            // An optional length: empty is the command's default, anything else must be a length.
+            let length = |v: &str, what: &str| -> Result<Option<f64>, String> {
+                if v.trim().is_empty() {
+                    return Ok(None);
+                }
+                app.session.doc.eval(v, ValueKind::Length).map(Some).map_err(|e| format!("{what}: {e}"))
+            };
+            if let Some(d) = length(depth, "depth")? {
+                base["depth"] = json!(d);
+            }
+            if *chamfer {
+                base["chamfer"] = length(chamfer_size, "chamfer size")?.map_or(json!(true), |c| json!(c));
+            }
+            if *warn {
+                base["check"] = json!("warn");
+            }
+            let items = inputs.first().map(|i| i.items.as_slice()).unwrap_or_default();
+            let mut out = Vec::new();
+            // Points picked on faces: one insert per pick, not per piece of a round face split at
+            // its seam.
+            // A pick that snapped to a sketch point is that point, so its hole follows it.
+            let mut by_sketch: Vec<(u64, Vec<String>)> = Vec::new();
+            let mut bind = |sk: u64, point: String| match by_sketch.iter_mut().find(|(s, _)| *s == sk) {
+                Some((_, v)) if v.contains(&point) => {}
+                Some((_, v)) => v.push(point),
+                None => by_sketch.push((sk, vec![point])),
+            };
+            let mut picks: Vec<(String, Vec3)> = Vec::new();
+            for i in crate::hole_place::several_places(&app.session, items) {
+                if let Some(Sel::Face { body, point, .. }) = items.get(i) {
+                    match crate::dialogs::snapped_sketch_point(app, *point) {
+                        Some((sk, id)) => bind(sk, id),
+                        None => picks.push((body.clone(), *point)),
+                    }
+                }
+            }
+            if let Some((first, _)) = picks.first() {
+                let mut p = base.clone();
+                p["position"] = match picks.as_slice() {
+                    [(_, at)] => pt(*at),
+                    many => Value::Array(many.iter().map(|(_, at)| pt(*at)).collect()),
+                };
+                // One body for every pick: name it, as the other plastic tools do.
+                if picks.iter().all(|(b, _)| b == first) {
+                    p["body"] = json!(first);
+                }
+                out.push(("plastic.heat_insert".to_string(), p));
+            }
+            // Sketch points, clicked, box-selected or picked before the tool started: one command
+            // per sketch, whose feature follows its points.
+            for x in items {
+                match x {
+                    Sel::SketchPoint { id } => {
+                        if let Some((sk, point)) = id.split_once(':')
+                            && let Ok(sk) = sk.parse::<u64>()
+                        {
+                            bind(sk, point.to_string());
+                        }
+                    }
+                    Sel::ExternalSketchPoint { sketch, id } => bind(*sketch, id.clone()),
+                    _ => {}
+                }
+            }
+            for (sk, points) in by_sketch {
+                let mut p = base.clone();
+                p["sketch"] = json!(sk);
+                p["points"] = json!(points);
+                out.push(("plastic.heat_insert".to_string(), p));
+            }
+            if out.is_empty() {
+                return Err("select points on flat faces or sketch points first".into());
+            }
+            return Ok(out);
+        }
         Pl::Assign { rule } => {
             let bodies = crate::selection::items(inputs, 0).body_names();
             if bodies.is_empty() {
@@ -420,6 +545,46 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             }
             let r = Pl::simple_restore(kind)?;
             (r, "plastic.rest", position.0)
+        }
+        FeatureKind::Hole { insert: Some(ins), position, more, points, depth, hole, diameter, direction, .. } => {
+            let (_, mut inputs) = start(app, "plastic.heat_insert")?;
+            let sizes: Vec<&solidcraft_engine::cmd::HeatInsertSize> = solidcraft_engine::cmd::heat_insert_sizes().collect();
+            let size = sizes.iter().position(|z| z.id == ins.size).unwrap_or(0);
+            let mm = |v: f64| crate::length_input::shown(&ss.doc, v);
+            let d = ss.doc.eval(diameter, ValueKind::Length).unwrap_or(0.0);
+            let cs = match hole {
+                solidcraft_engine::doc::HoleKind::Countersink { cs_diameter, .. } => ss.doc.eval(cs_diameter, ValueKind::Length).ok(),
+                _ => None,
+            };
+            // A value the size gives by itself shows as empty, as the dialog makes it.
+            let chamfer_size = cs.map(|c| (c - d) / 2.0).filter(|c| (*c - (ins.outer_diameter - d) / 2.0).abs() > 1e-9).map(mm).unwrap_or_default();
+            let depth = depth
+                .as_ref()
+                .and_then(|e| ss.doc.eval(e, ValueKind::Length).ok())
+                .filter(|v| (*v - (ins.length + 1.0)).abs() > 1e-9)
+                .map(mm)
+                .unwrap_or_default();
+            let kind = Pl::HeatInsert { size, chamfer: cs.is_some(), chamfer_size, depth, warn: false };
+            if let Some(i) = inputs.first_mut() {
+                i.items = match points {
+                    Some(sp) if !sp.single => sp.ids.iter().map(|p| Sel::SketchPoint { id: format!("{}:{p}", sp.sketch.0) }).collect(),
+                    // The face is gone where the hole is: it is found just past the hole's rim, and
+                    // the pick keeps the hole's centre.
+                    _ => {
+                        let rim = cs.unwrap_or(d).max(d) / 2.0 + 0.25;
+                        let n = direction.0;
+                        let across = n.cross(if n.x.abs() < 0.9 { Vec3::X } else { Vec3::Y }).normalized().unwrap_or(Vec3::X);
+                        std::iter::once(position.0)
+                            .chain(more.iter().map(|m| m.0))
+                            .filter_map(|at| match face_sel(ss, at).or_else(|| face_sel(ss, at + across * rim)) {
+                                Some(Sel::Face { body, index, .. }) => Some(Sel::Face { body, index, point: at }),
+                                other => other,
+                            })
+                            .collect()
+                    }
+                };
+            }
+            return Some((Kind::Plastic(kind), inputs, extra));
         }
         _ => return None,
     };
