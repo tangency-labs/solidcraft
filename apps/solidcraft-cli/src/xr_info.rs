@@ -196,9 +196,17 @@ fn probe() -> Value {
                 "max_sample_count": view.max_swapchain_sample_count,
             }));
         }
+        // How the runtime can combine the rendered view with the room: opaque for a
+        // closed headset, additive or alpha blend for see-through and passthrough
+        // hardware. Asked per view configuration, because a runtime may answer
+        // differently for mono and stereo, and recorded even when the answer is just
+        // "opaque" - that is what tells a reporter apart from one with passthrough.
+        let blend_modes: Vec<Value> =
+            instance.enumerate_environment_blend_modes(system, *vc).unwrap_or_default().iter().map(|m| json!(blend_mode_name(*m))).collect();
         vc_list.push(json!({
             "type": config_name,
             "views": views,
+            "environment_blend_modes": blend_modes,
         }));
     }
     report["openxr"]["view_configurations"] = Value::Array(vc_list);
@@ -262,6 +270,9 @@ fn summary(report: &Value) -> String {
     if let Some((w, h)) = stereo_eye_size(report) {
         out.push_str(&format!("Eye resolution ..... {w} x {h} per eye\n"));
     }
+    if let Some(modes) = stereo_blend_modes(report) {
+        out.push_str(&format!("Blend modes ........ {modes}\n"));
+    }
     let vulkan = report["openxr"]["graphics"]["vulkan_supported"].as_bool();
     if let Some(v) = vulkan {
         let word = if v { "yes" } else { "no" };
@@ -296,6 +307,26 @@ fn stereo_eye_size(report: &Value) -> Option<(u64, u64)> {
         report["openxr"]["view_configurations"].as_array()?.iter().find(|c| c.get("type").and_then(Value::as_str) == Some("primary_stereo"))?;
     let view = stereo.get("views")?.as_array()?.first()?;
     Some((view.get("recommended_width")?.as_u64()?, view.get("recommended_height")?.as_u64()?))
+}
+
+/// The environment blend modes of the primary stereo view configuration, in the order the
+/// runtime listed them. Absent from reports captured before the probe asked for them, so a
+/// missing key is not an error.
+fn stereo_blend_modes(report: &Value) -> Option<String> {
+    let stereo =
+        report["openxr"]["view_configurations"].as_array()?.iter().find(|c| c.get("type").and_then(Value::as_str) == Some("primary_stereo"))?;
+    let modes: Vec<&str> = stereo.get("environment_blend_modes")?.as_array()?.iter().filter_map(Value::as_str).collect();
+    if modes.is_empty() { None } else { Some(modes.join(", ")) }
+}
+
+/// A stable name for an environment blend mode, so reports from different runtimes compare.
+fn blend_mode_name(mode: openxr::EnvironmentBlendMode) -> &'static str {
+    match mode {
+        openxr::EnvironmentBlendMode::OPAQUE => "opaque",
+        openxr::EnvironmentBlendMode::ADDITIVE => "additive",
+        openxr::EnvironmentBlendMode::ALPHA_BLEND => "alpha_blend",
+        _ => "unknown",
+    }
 }
 
 /// Walk a path of object keys, returning the string at the end of it.
@@ -389,6 +420,47 @@ mod tests {
             !extensions.iter().any(|e| e["name"] == "XR_KHR_vulkan_swapchain_format_list"),
             "the design note says the format list is absent on SteamVR as well as Oculus"
         );
+    }
+
+    /// The Linux side of the matrix: Monado 25.1.0 with its simulated "qwerty" headset,
+    /// reported by a tester on Arch Linux. No real display is involved, so the eye size is
+    /// Monado's default rather than a headset's - but everything else is real runtime
+    /// behaviour, and it is the only report where the format list extension is present.
+    #[test]
+    fn a_report_from_monado_on_linux_passes() {
+        let report: Value = serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/monado-25.1.0-qwerty.json")))
+            .expect("fixture is valid JSON");
+
+        let s = summary(&report);
+        assert!(s.contains("RESULT: PASS"), "{s}");
+        assert!(s.contains("Monado(XRT)"), "{s}");
+        assert!(s.contains("896 x 1007 per eye"), "{s}");
+        assert!(s.contains("Blend modes ........ opaque"), "{s}");
+        assert!(s.contains("Vulkan support ..... yes"), "{s}");
+
+        let extensions = report["openxr"]["instance_extensions"].as_array().expect("extensions are an array");
+        assert!(
+            extensions.iter().any(|e| e["name"] == "XR_KHR_vulkan_swapchain_format_list"),
+            "Monado offers the format list that Oculus and SteamVR both lack, so the probe must not assume it is absent"
+        );
+    }
+
+    #[test]
+    fn blend_modes_are_reported_when_the_runtime_offers_them() {
+        let mut report = working_setup();
+        report["openxr"]["view_configurations"][0]["environment_blend_modes"] = json!(["opaque", "alpha_blend"]);
+        let s = summary(&report);
+        assert!(s.contains("Blend modes ........ opaque, alpha_blend"), "{s}");
+        assert!(s.contains("RESULT: PASS"), "{s}");
+    }
+
+    /// Reports captured before the probe asked for blend modes have no such key. They must
+    /// keep their verdict and simply not print the line.
+    #[test]
+    fn an_older_report_without_blend_modes_still_passes() {
+        let s = summary(&working_setup());
+        assert!(!s.contains("Blend modes"), "{s}");
+        assert!(s.contains("RESULT: PASS"), "{s}");
     }
 
     #[test]
