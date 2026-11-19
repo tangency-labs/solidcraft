@@ -3017,3 +3017,106 @@ fn a_menu_taller_than_the_window_scrolls_its_last_rows_into_view() {
     let last_row = crate::scenario::rect_of(&format!("menu:{last}")).unwrap();
     assert!(menu.contains_rect(last_row), "and shows its last row: {last_row:?} in {menu:?}");
 }
+
+/// A sketch with an ellipse named Outline, finished; its feature id.
+fn outline_with_an_ellipse(h: &mut crate::scenario::Harness) -> u64 {
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Outline"})).unwrap();
+    h.app.run("sketch.ellipse", json!({"center": [0, 0], "major": [15, 0], "minor_radius": 8})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.session.doc.features.iter().find(|f| f.name == "Outline").unwrap().id
+}
+
+/// The file picker offers Outline.dxf and answers with `answer` (None: cancelled); it counts
+/// how often it was asked.
+fn answer_the_picker(h: &mut crate::scenario::Harness, answer: Option<std::path::PathBuf>) -> std::rc::Rc<std::cell::Cell<usize>> {
+    let asked = std::rc::Rc::new(std::cell::Cell::new(0));
+    let count = asked.clone();
+    h.app.services.pick_save = Some(Box::new(move |name, extensions| {
+        assert_eq!((name, extensions), ("Outline.dxf", &["dxf"][..]));
+        count.set(count.get() + 1);
+        Box::pin(std::future::ready(answer.as_ref().map(|p| p.to_string_lossy().into_owned())))
+    }));
+    asked
+}
+
+fn sketch_dxf_window(h: &crate::scenario::Harness) -> Option<(u64, bool)> {
+    match h.app.dialog.as_ref().map(|d| &d.kind) {
+        Some(crate::dialogs::Kind::SketchDxf { sketch, r12 }) => Some((*sketch, *r12)),
+        _ => None,
+    }
+}
+
+/// Export DXF… on a sketch opens a window that asks for the DXF version, AutoCAD 2000 first; the
+/// file has exact curves in AutoCAD 2000 and chords in release 12, and the window opens on the
+/// version used last, also after a restart.
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn export_dxf_asks_for_the_version_and_remembers_it() {
+    let mut h = crate::scenario::Harness::new();
+    let id = outline_with_an_ellipse(&mut h);
+    for (r12, choose) in [(false, None), (true, Some("dialog:dxf:r12"))] {
+        let path = h.dir.join(format!("outline-{r12}.dxf"));
+        let asked = answer_the_picker(&mut h, Some(path.clone()));
+        act(&mut h.app, &Target::Sketch { id }, "Export DXF…");
+        h.frames(3);
+        assert_eq!(asked.get(), 0, "the window comes before the file picker");
+        assert_eq!(sketch_dxf_window(&h), Some((id, false)), "AutoCAD 2000 is chosen first");
+        if let Some(handle) = choose {
+            h.step(&json!({"click": {"handle": handle}})).unwrap();
+        }
+        h.step(&json!({"click": {"handle": "dialog:Export DXF…"}})).unwrap();
+        h.settle();
+        assert_eq!(asked.get(), 1);
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("r12 {r12}: {error}"));
+        assert_eq!((text.contains("AC1015"), text.contains("ELLIPSE")), (!r12, !r12), "r12 {r12}");
+        if !r12 {
+            // Back to AutoCAD 2000 for the next round's first opening.
+            assert_eq!(h.app.preferences.sketch_dxf_version, "ac1015");
+        }
+    }
+    act(&mut h.app, &Target::Sketch { id }, "Export DXF…");
+    h.frames(3);
+    assert_eq!(sketch_dxf_window(&h), Some((id, true)), "the window opens on release 12, used last");
+    let saved = h.app.prefs();
+    let mut restored = SolveApp::new(Default::default(), Default::default());
+    restored.load_prefs(&saved);
+    assert_eq!(restored.preferences.sketch_dxf_version, "r12");
+}
+
+/// Cancel and Esc close the window, and a cancelled file picker writes no file.
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn export_dxf_cancelled_or_escaped_in_the_window_or_the_picker_writes_nothing() {
+    let mut h = crate::scenario::Harness::new();
+    let id = outline_with_an_ellipse(&mut h);
+    let asked = answer_the_picker(&mut h, None);
+    for close in [json!({"click": {"handle": "dialog:Cancel"}}), json!({"key": "Escape"})] {
+        act(&mut h.app, &Target::Sketch { id }, "Export DXF…");
+        h.frames(3);
+        assert!(sketch_dxf_window(&h).is_some());
+        h.step(&close).unwrap();
+        h.frames(2);
+        assert!(sketch_dxf_window(&h).is_none(), "{close} closes the window");
+    }
+    assert_eq!(asked.get(), 0, "Cancel and Esc never reach the file picker");
+    act(&mut h.app, &Target::Sketch { id }, "Export DXF…");
+    h.frames(3);
+    h.step(&json!({"click": {"handle": "dialog:Export DXF…"}})).unwrap();
+    h.settle();
+    assert_eq!(asked.get(), 1);
+    let written: Vec<_> = std::fs::read_dir(&h.dir).unwrap().flatten().filter(|e| e.path().extension().is_some_and(|x| x == "dxf")).collect();
+    assert!(written.is_empty(), "nothing is written: {written:?}");
+}
+
+/// The DXF version is chosen in the export window, so the Design page has no row for it.
+#[test]
+fn the_preferences_page_has_no_dxf_version_row() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    crate::prefs::control(&mut h.app, &json!({"language": "en", "open": "Design"})).unwrap();
+    h.frames(3);
+    // The row stood right below the export name.
+    crate::prefs::reveal_preference(&mut h, "prefs:export_name");
+    h.frames(2);
+    assert!(crate::scenario::rect_of("prefs:sketch_dxf_r12").is_none());
+}

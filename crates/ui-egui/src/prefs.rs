@@ -1764,6 +1764,9 @@ preference_settings! {
     /// design's and the exported body's names (`export_name`). Empty: each export offers the name
     /// it did before (the design's, or the first body's for a mesh).
     export_name: String = String::new(), PAGE_DESIGN;
+    /// Export DXF… on a sketch: the last version written, "ac1015" (AutoCAD 2000) or "r12"; anything
+    /// else reads as "ac1015".
+    sketch_dxf_version: String = "ac1015".into();
     /// Save as mesh: the last format (`stl` or `3mf`). Older versions also kept a "send to slicer"
     /// choice here (`save_mesh_send`, `save_mesh_slicer`); a settings file that still has them loads,
     /// and they are ignored.

@@ -600,8 +600,8 @@ pub struct SketchSolve {
 }
 
 /// Save a sketch's curves as an ASCII DXF: to the file `path`, or, without it, as text in the
-/// reply. Construction curves are left out; splines and other curves are written as line
-/// segments.
+/// reply. Construction curves are left out. AutoCAD 2000 by default, every curve exact; release
+/// 12 (`version: "r12"`) writes splines and other free-form curves as line segments.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ExportDxfParams {
@@ -625,9 +625,14 @@ pub struct ExportDxfParams {
     #[serde(default, deserialize_with = "dxf_layers")]
     #[schemars(schema_with = "dxf_layers_schema")]
     pub layers: Option<String>,
-    /// `true` writes closed loops as LWPOLYLINE with arc bulges. Default: false (LINE and ARC).
+    /// `true` writes closed loops as LWPOLYLINE with arc bulges (not with `version: "r12"`).
+    /// Default: false (each curve its own entity).
     #[serde(default, deserialize_with = "dxf_join")]
     pub join: Option<bool>,
+    /// The DXF release (any case): `ac1015` (AutoCAD 2000, the default) or `r12`.
+    #[serde(default, deserialize_with = "dxf_version")]
+    #[schemars(schema_with = "dxf_version_schema")]
+    pub version: Option<String>,
 }
 
 /// The units `sketch.export_dxf` takes, in lower case (the handler reads them in any case).
@@ -682,6 +687,18 @@ fn dxf_join<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
         Some(Value::Bool(join)) => Ok(Some(join)),
         Some(_) => Err(D::Error::custom(whole("`join` must be true or false"))),
     }
+}
+
+fn dxf_version<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    match Option::<Value>::deserialize(d)? {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(version)) if ["ac1015", "r12"].contains(&version.to_ascii_lowercase().as_str()) => Ok(Some(version.to_ascii_lowercase())),
+        Some(_) => Err(D::Error::custom(whole("`version` must be \"ac1015\" or \"r12\""))),
+    }
+}
+
+fn dxf_version_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"type": ["string", "null"], "description": "ac1015 or r12, in any case. Default: ac1015."})
 }
 
 /// What `sketch.export_dxf` returns.

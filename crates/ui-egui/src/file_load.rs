@@ -2432,14 +2432,14 @@ M30
     #[test]
     fn drawing_insert_and_drop_reuse_the_active_sketch_or_create_xy() {
         let mut h = crate::scenario::Harness::new();
-        let dxf = solidcraft_engine::io::write_dxf(&[
-            solidcraft_engine::io::Geom2::Line(solidcore_record::Vec2::ZERO, solidcore_record::Vec2::new(10.0, 0.0)),
-            solidcraft_engine::io::Geom2::Arc {
-                c: solidcore_record::Vec2::ZERO,
-                a: solidcore_record::Vec2::new(5.0, 0.0),
-                b: solidcore_record::Vec2::new(0.0, 5.0),
-            },
-        ]);
+        let dxf = {
+            use solidcraft_engine::io::{DxfFile, DxfShape, write_dxf_file};
+            let mut file = DxfFile::new().unwrap();
+            let zero = file.default_layer();
+            file.push(zero, DxfShape::Line(solidcore_record::Vec2::ZERO, solidcore_record::Vec2::new(10.0, 0.0)), None).unwrap();
+            file.push(zero, DxfShape::Arc { c: solidcore_record::Vec2::ZERO, r: 5.0, a0: 0.0, a1: 90.0 }, None).unwrap();
+            write_dxf_file(&file).unwrap()
+        };
         let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0 L10 0 L10 10"/></svg>"#;
         for (file, text) in [("outline.DXF", dxf.as_str()), ("outline.SVG", svg)] {
             h.app.run("file.new", json!({})).unwrap();

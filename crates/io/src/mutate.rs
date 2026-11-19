@@ -52,13 +52,13 @@ fn svg_survives_mutation() {
 
 #[test]
 fn dxf_survives_mutation() {
-    let geom = [
-        crate::Geom2::Line(Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0)),
-        crate::Geom2::Circle(Vec2::new(5.0, 5.0), 2.5),
-        crate::Geom2::Arc { c: Vec2::new(0.0, 0.0), a: Vec2::new(3.0, 0.0), b: Vec2::new(0.0, 3.0) },
-        crate::Geom2::Point(Vec2::new(1.0, 1.0)),
-    ];
-    let written = crate::write_dxf(&geom).into_bytes();
+    let written = crate::dxf::test_r12(&[
+        crate::DxfShape::Line(Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0)),
+        crate::DxfShape::Circle { c: Vec2::new(5.0, 5.0), r: 2.5 },
+        crate::DxfShape::Arc { c: Vec2::new(0.0, 0.0), r: 3.0, a0: 0.0, a1: 90.0 },
+        crate::DxfShape::Point(Vec2::new(1.0, 1.0)),
+    ])
+    .into_bytes();
     assert!(crate::read_dxf(std::str::from_utf8(&written).unwrap()).is_ok_and(|g| g.len() >= 3));
     survives("DXF (written)", &mutations(&written, true, 0xdf), usize::MAX, |b| crate::read_dxf(&String::from_utf8_lossy(b)).ok().map(|g| g.len()));
     // Blocks inside blocks, an array insert and a bulged polyline: what the block recursion,

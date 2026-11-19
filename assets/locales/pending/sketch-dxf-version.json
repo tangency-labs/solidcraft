@@ -1,0 +1,50 @@
+{
+  "ar": {
+    "dxf.sketch_ac1015": "AutoCAD 2000",
+    "dxf.sketch_r12": "الإصدار 12",
+    "dxf.sketch_version": "إصدار DXF",
+    "dxf.sketch_version_help": "يكتب AutoCAD 2000 كل منحنى بدقة. ويكتب الإصدار 12 الخطوط والأقواس والدوائر، والمنحنيات الأخرى خطوطًا قصيرة."
+  },
+  "de": {
+    "dxf.sketch_ac1015": "AutoCAD 2000",
+    "dxf.sketch_r12": "Release 12",
+    "dxf.sketch_version": "DXF-Version",
+    "dxf.sketch_version_help": "AutoCAD 2000 schreibt jede Kurve exakt. Release 12 schreibt Linien, Bögen und Kreise, andere Kurven als kurze Linien."
+  },
+  "en": {
+    "dxf.sketch_ac1015": "AutoCAD 2000",
+    "dxf.sketch_r12": "Release 12",
+    "dxf.sketch_version": "DXF version",
+    "dxf.sketch_version_help": "AutoCAD 2000 writes every curve exactly. Release 12 writes lines, arcs and circles, and other curves as short lines."
+  },
+  "he": {
+    "dxf.sketch_ac1015": "AutoCAD 2000",
+    "dxf.sketch_r12": "גרסה 12",
+    "dxf.sketch_version": "גרסת DXF",
+    "dxf.sketch_version_help": "AutoCAD 2000 כותב כל עקומה במדויק. גרסה 12 כותבת קווים, קשתות ועיגולים, ועקומות אחרות כקווים קצרים."
+  },
+  "ja": {
+    "dxf.sketch_ac1015": "AutoCAD 2000",
+    "dxf.sketch_r12": "リリース 12",
+    "dxf.sketch_version": "DXF のバージョン",
+    "dxf.sketch_version_help": "AutoCAD 2000 はすべての曲線を正確に書き出します。リリース 12 は線分、円弧、円を書き出し、ほかの曲線は短い線分になります。"
+  },
+  "ko": {
+    "dxf.sketch_ac1015": "AutoCAD 2000",
+    "dxf.sketch_r12": "릴리스 12",
+    "dxf.sketch_version": "DXF 버전",
+    "dxf.sketch_version_help": "AutoCAD 2000은 모든 곡선을 정확하게 씁니다. 릴리스 12는 선, 호, 원을 쓰고 다른 곡선은 짧은 선으로 씁니다."
+  },
+  "vi": {
+    "dxf.sketch_ac1015": "AutoCAD 2000",
+    "dxf.sketch_r12": "Bản 12",
+    "dxf.sketch_version": "Phiên bản DXF",
+    "dxf.sketch_version_help": "AutoCAD 2000 ghi mọi đường cong một cách chính xác. Bản 12 ghi đường thẳng, cung và đường tròn, các đường cong khác thành các đoạn thẳng ngắn."
+  },
+  "zh": {
+    "dxf.sketch_ac1015": "AutoCAD 2000",
+    "dxf.sketch_r12": "R12",
+    "dxf.sketch_version": "DXF 版本",
+    "dxf.sketch_version_help": "AutoCAD 2000 精确写出每条曲线。R12 写出直线、圆弧和圆，其他曲线写成短直线。"
+  }
+}

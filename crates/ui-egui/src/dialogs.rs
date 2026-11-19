@@ -435,6 +435,12 @@ crate::dialog_descriptor::dialog_descriptors! {
                 /// Put the drawing's 0,0 on the model's origin instead of the camera target.
                 zero_origin: bool,
             },
+            /// Export DXF… on a sketch: which DXF version to write (`dialogs_sketch_dxf`).
+            SketchDxf {
+                sketch: u64,
+                /// Release 12 instead of AutoCAD 2000.
+                r12: bool,
+            },
             /// Insert SVG / DXF: where the picked drawing goes (`dialogs_insert_drawing`).
             InsertDrawing(crate::dialogs_insert_drawing::Place),
             /// Insert Airfoil: how the picked section goes in (`dialogs_insert_airfoil`).
@@ -2972,6 +2978,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Surface(k) => k.title(),
         Kind::SaveMesh(_) => "SAVE AS MESH",
         Kind::ViewDxf { .. } => "Export Current View as DXF",
+        Kind::SketchDxf { .. } => "Export DXF",
         Kind::ViewNavigator(_) => "CUSTOM VIEW NAVIGATOR",
         Kind::InsertDrawing(p) => crate::dialogs_insert_drawing::title(p),
         Kind::InsertAirfoil(_) => crate::dialogs_insert_airfoil::title(),
@@ -4264,7 +4271,7 @@ pub(crate) fn action_labels(kind: &Kind) -> (&'static str, &'static str) {
         Kind::Measure { .. } => ("", "Close"),
         Kind::ConfirmDelete { .. } => ("Delete", "Cancel"),
         Kind::SaveMesh(k) => (crate::dialogs_save_mesh::button(k), "Cancel"),
-        Kind::ViewDxf { .. } => ("Export DXF…", "Cancel"),
+        Kind::ViewDxf { .. } | Kind::SketchDxf { .. } => ("Export DXF…", "Cancel"),
         _ => ("OK", "Cancel"),
     }
 }
@@ -4811,6 +4818,7 @@ fn rememberable(kind: &Kind) -> bool {
             | Kind::Pipe { .. }
             | Kind::Emboss { .. }
             | Kind::ViewDxf { .. }
+            | Kind::SketchDxf { .. }
             | Kind::SketchModify(_)
             | Kind::Sheet(
                 crate::dialogs_sheet::Sm::Perforate { .. }
@@ -5674,6 +5682,9 @@ fn run_primed(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
 pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
     if let Kind::ViewDxf { dashed, tolerance, zero_origin } = &d.kind {
         return crate::dialogs_view_dxf::run(app, *dashed, *tolerance, *zero_origin);
+    }
+    if let Kind::SketchDxf { sketch, r12 } = &d.kind {
+        return crate::dialogs_sketch_dxf::run(app, *sketch, *r12);
     }
     if let Kind::ViewNavigator(form) = &d.kind {
         return crate::view_gizmo::run_dialog(app, form, &d.inputs);
@@ -7027,7 +7038,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::Surface(k) => return crate::dialogs_surface::commands(app, k, &d.inputs, &d.extra),
         Kind::SketchModify(k) => return crate::sketch_modify_ui::commands(app, k, &d.inputs, &d.extra),
         Kind::SaveMesh(k) => return crate::dialogs_save_mesh::commands(k, &d.inputs),
-        Kind::ViewDxf { .. } | Kind::ViewNavigator(_) => return Ok(Vec::new()),
+        Kind::ViewDxf { .. } | Kind::SketchDxf { .. } | Kind::ViewNavigator(_) => return Ok(Vec::new()),
         Kind::InsertDrawing(p) => return crate::dialogs_insert_drawing::commands(p),
         Kind::InsertAirfoil(a) => return crate::dialogs_insert_airfoil::commands(a),
         Kind::Plastic(k) => return crate::dialogs_plastic::commands(app, k, &d.inputs, &d.extra),
