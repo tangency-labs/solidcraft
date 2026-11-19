@@ -1570,9 +1570,6 @@ preference_settings! {
     /// A Play History button in the History controls, between Previous and Next (#3688). Off
     /// gives the four controls History had before; right-clicking the controls toggles it too.
     history_play_button: bool = true, PAGE_LAYOUT;
-    /// Play History with the marker at the end moves it to the start and plays every feature
-    /// (#10798). Off: Play is greyed out there until the marker is moved back, as before.
-    history_play_rewinds: bool = true, PAGE_LAYOUT;
     /// A History folder whose features are all of one kind (Holes, say) shows their icon instead of
     /// the folder icon, in both Histories. Off by default: every folder shows the folder icon.
     history_folder_kind_icon: bool = false, PAGE_LAYOUT;
@@ -5617,7 +5614,6 @@ mod tests {
             ("browser_rows_start_closed", "prefs.browser_rows_start_closed"),
             ("browser_eye_left", "prefs.browser_eye_left"),
             ("browser_body_features", "prefs.browser_body_features"),
-            ("history_play_rewinds", "prefs.history_play_rewinds"),
         ];
         for width in [1600, 1100, 960, 800, 640] {
             let mut h = crate::scenario::Harness::new();

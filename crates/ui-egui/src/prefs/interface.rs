@@ -542,14 +542,6 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     &mut app.preferences.history_steps_component,
                     "history_steps_component",
                 );
-                // Play with the marker at the end starts over from the first feature (#10798).
-                layout_check(
-                    ui,
-                    app.tr("prefs.history_play_rewinds"),
-                    app.tr("prefs.history_play_rewinds_note"),
-                    &mut app.preferences.history_play_rewinds,
-                    "history_play_rewinds",
-                );
             });
         });
         ui_kit::settings_section(ui, "dialogs", app.tr("prefs.dialogs"), |ui| {

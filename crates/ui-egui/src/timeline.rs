@@ -961,11 +961,11 @@ fn playback_ready(app: &SolveApp) -> Result<(), String> {
     Ok(())
 }
 
-/// Whether Play History starts over: the marker is at the end of a History that has features,
-/// and Preferences > Layout > "Play at the end starts over" is on (#10798).
+/// Whether Play History starts over: the marker is at the end of a History that has features
+/// (#10798).
 fn play_starts_over(app: &SolveApp) -> bool {
     let n = app.session.doc.features.len();
-    app.preferences.history_play_rewinds && n > 0 && app.session.doc.marker.unwrap_or(n) >= n
+    n > 0 && app.session.doc.marker.unwrap_or(n) >= n
 }
 
 pub(crate) fn request_playback(app: &mut SolveApp, action: PlaybackAction) -> Result<(), String> {
@@ -1882,13 +1882,6 @@ mod tests {
             crate::context_menu::items(&h.app, &folder).into_iter().find(|i| i.id == "ui.historyTransport" && i.icon == "timeline_play")
         };
         assert_eq!(play(&h).map(|i| i.label).as_deref(), Some(solidcraft_ui_text::tr("ui.history_play_from_start")));
-        // With the preference off, Play has nothing left to play there, as before.
-        h.app.preferences.history_play_rewinds = false;
-        assert_eq!(enabled(&h), state([("first", true), ("back", true), ("play", false), ("forward", false), ("last", false)]));
-        let off = play(&h);
-        assert_eq!(off.as_ref().map(|i| i.label.as_str()), Some(solidcraft_ui_text::tr("cmd.timeline_play")));
-        assert_eq!(off.and_then(|i| i.tip).as_deref(), Some(solidcraft_ui_text::tr("ui.history_play_roll_back")), "Play says why it is off");
-        h.app.preferences.history_play_rewinds = true;
         // The bar's controls menu follows a separator.
         let items = crate::context_menu::items(&h.app, &folder);
         assert!(items.iter().any(|i| i.is_sep()) && items.iter().any(|i| i.id == "ui.historyPlayButton"));
@@ -2058,7 +2051,6 @@ mod tests {
     #[test]
     fn playback_at_the_end_starts_over_from_the_first_feature() {
         let mut h = two_boxes(false);
-        assert!(crate::prefs::Prefs::default().history_play_rewinds, "Play at the end starts over by default");
         assert_eq!(h.app.session.doc.marker, None);
         assert_eq!(super::play_labels(&h.app).play, solidcraft_ui_text::tr("ui.history_play_from_start"));
         h.app.start("timeline.play");
@@ -2088,17 +2080,15 @@ mod tests {
     }
 
     #[test]
-    fn playback_in_an_empty_design_or_at_the_end_with_the_preference_off_leaves_history_unchanged() {
-        for mut h in [Harness::new(), two_boxes(false)] {
-            h.app.preferences.history_play_rewinds = false;
-            h.frames(2);
-            let revision = h.app.session.revision;
-            h.app.start("timeline.play");
-            h.frames(2);
-            h.frames(60);
-            assert_eq!(h.app.session.revision, revision);
-            assert!(h.app.timeline_playback.is_none());
-        }
+    fn playback_in_an_empty_design_leaves_history_unchanged() {
+        let mut h = Harness::new();
+        h.frames(2);
+        let revision = h.app.session.revision;
+        h.app.start("timeline.play");
+        h.frames(2);
+        h.frames(60);
+        assert_eq!(h.app.session.revision, revision);
+        assert!(h.app.timeline_playback.is_none());
     }
 
     #[test]
