@@ -18,6 +18,7 @@ pub use solidcraft_ui_kit::blur;
 pub mod bom_panel;
 pub mod browser;
 pub mod browser_canvas;
+mod browser_defects;
 pub mod browser_prompts;
 pub mod browser_search;
 #[cfg(test)]
