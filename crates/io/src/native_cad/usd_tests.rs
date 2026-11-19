@@ -37,7 +37,7 @@ fn one_box() -> (Document, Model) {
 /// when empty), at `quality`.
 fn usd_at(doc: &Document, model: &Model, bodies: &[String], file: &str, quality: crate::MeshQuality) -> (Vec<u8>, Vec<String>) {
     let world = solidcraft_doc::world_state(doc, &model.state()).unwrap();
-    crate::usd_from_design(doc, &model.state(), &world, bodies, file, quality).unwrap()
+    crate::usd_from_design(doc, &model.state(), &world, bodies, &crate::CadmpegOptions::default(), file, quality).unwrap()
 }
 
 /// The whole design as an OpenUSD file called `file`, at standard quality.
@@ -53,7 +53,8 @@ fn usda(doc: &Document, model: &Model) -> String {
 /// The design's model as CADIR, as an OpenUSD export builds it.
 fn cadir(doc: &Document, model: &Model) -> super::super::cadir_out::Built {
     let world = solidcraft_doc::world_state(doc, &model.state()).unwrap();
-    super::super::cadir_out::design(doc, &model.state(), &world, &[], "design", crate::MeshQuality::Standard).unwrap()
+    super::super::cadir_out::design(doc, &model.state(), &world, &[], &crate::CadmpegOptions::default(), "design", crate::MeshQuality::Standard)
+        .unwrap()
 }
 
 /// The values of input `input` of every shader in `text`.
@@ -356,13 +357,16 @@ fn other_contents_and_empty_layers_are_refused() {
     }
     let (doc, model) = one_box();
     let st = model.state();
-    let e = crate::usd_from_design(&doc, &st, &st, &[], "x.step", crate::MeshQuality::Standard).unwrap_err();
+    let e = crate::usd_from_design(&doc, &st, &st, &[], &crate::CadmpegOptions::default(), "x.step", crate::MeshQuality::Standard).unwrap_err();
     assert!(e.contains("not an OpenUSD file name"), "{e}");
     // Nothing to write: an empty design, or a body it does not have.
     let empty = Document::new("Empty");
     let none = ModelState::default();
-    assert!(crate::usd_from_design(&empty, &none, &none, &[], "x.usda", crate::MeshQuality::Standard).is_err());
-    assert!(crate::usd_from_design(&doc, &st, &st, &["Nothing".into()], "x.usda", crate::MeshQuality::Standard).is_err());
+    assert!(crate::usd_from_design(&empty, &none, &none, &[], &crate::CadmpegOptions::default(), "x.usda", crate::MeshQuality::Standard).is_err());
+    assert!(
+        crate::usd_from_design(&doc, &st, &st, &["Nothing".into()], &crate::CadmpegOptions::default(), "x.usda", crate::MeshQuality::Standard)
+            .is_err()
+    );
 }
 
 /// Mutations of a valid text layer, binary layer and package each give a result or an error,
@@ -721,7 +725,8 @@ fn hostile_placements_never_panic() {
         let o = doc.occurrences.iter_mut().find(|o| o.name.starts_with("Needle")).unwrap();
         o.transform[0][0] = bad;
         let name = o.name.clone();
-        let (bytes, warnings) = crate::usd_from_design(&doc, &st, &st, &[], "bad.usda", crate::MeshQuality::Standard).unwrap();
+        let (bytes, warnings) =
+            crate::usd_from_design(&doc, &st, &st, &[], &crate::CadmpegOptions::default(), "bad.usda", crate::MeshQuality::Standard).unwrap();
         assert!(warnings.iter().any(|w| w.contains(&name)), "{bad}: {warnings:?}");
         assert!(crate::read_usd(&bytes, "bad.usda").is_ok(), "{bad}");
     }
@@ -753,4 +758,100 @@ fn placements_of_missing_components_keep_the_others_ordinals() {
         occurrences.iter().filter(|o| o.name.as_deref().is_some_and(|n| n.starts_with("Needle"))).map(|o| o.ordinal).collect();
     ordinals.sort_unstable();
     assert_eq!(ordinals, [1, 2]);
+}
+
+/// The design as an OpenUSD text file, `bodies` chosen (all when empty), with what `hidden`
+/// hides written hidden.
+fn usda_hidden(doc: &Document, model: &Model, bodies: &[String], hidden: &crate::Hidden) -> (String, Vec<String>) {
+    let world = solidcraft_doc::world_state(doc, &model.state()).unwrap();
+    let options = crate::CadmpegOptions { hidden: hidden.clone() };
+    let (bytes, warnings) =
+        crate::usd_from_design(doc, &model.state(), &world, bodies, &options, "design.usda", crate::MeshQuality::Standard).unwrap();
+    (String::from_utf8(bytes).unwrap(), warnings)
+}
+
+const INVISIBLE: &str = "token visibility = \"invisible\"";
+
+/// The galvanometer's two needle placements, by path, and the needle body's name.
+fn needles(doc: &Document, model: &Model) -> (Vec<Vec<u64>>, String) {
+    let frame = doc.components.iter().find(|c| c.name == "Frame").unwrap().id;
+    let needle = doc.components.iter().find(|c| c.name == "Needle").unwrap().id;
+    let frame_at = doc.occurrences.iter().find(|o| o.component == frame).unwrap().id;
+    let paths = doc.occurrences.iter().filter(|o| o.component == needle).map(|o| vec![frame_at, o.id]).collect();
+    let body = model.state().bodies.iter().find(|b| doc.model_body_component(b) == needle).unwrap().name.clone();
+    (paths, body)
+}
+
+/// A chosen body the view hides is written invisible; the other is not.
+#[test]
+fn a_hidden_body_is_written_invisible() {
+    let mut doc = Document::new("Pair");
+    add_box(&mut doc, Vec3::ZERO, 0);
+    add_box(&mut doc, Vec3::new(40.0, 0.0, 0.0), 0);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let names: Vec<String> = model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    let hidden = crate::Hidden { bodies: [names[0].clone()].into(), placements: Vec::new() };
+    let (text, warnings) = usda_hidden(&doc, &model, &names, &hidden);
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert_eq!(text.matches(INVISIBLE).count(), 1, "{text}");
+    let first = text.find(&format!("def Xform \"{}\"", names[0])).unwrap();
+    let second = text.find(&format!("def Xform \"{}\"", names[1])).unwrap();
+    let invisible = text.find(INVISIBLE).unwrap();
+    assert!(first < invisible && invisible < second, "the first body's prim holds it:\n{text}");
+}
+
+/// A placement the view hides is written as an invisible placement, once.
+#[test]
+fn a_hidden_placement_is_written_invisible() {
+    let (doc, model) = galvanometer();
+    let (paths, _) = needles(&doc, &model);
+    let hidden = crate::Hidden { bodies: Default::default(), placements: vec![paths[0].clone()] };
+    let (text, warnings) = usda_hidden(&doc, &model, &[], &hidden);
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert_eq!(text.matches(INVISIBLE).count(), 1, "{text}");
+}
+
+/// A component's body hidden in every placement is written hidden once, in the component; hidden
+/// in one placement of two, it is written shown, with a warning.
+#[test]
+fn a_body_hidden_in_its_placements_is_written_hidden_and_in_some_warns() {
+    let (doc, model) = galvanometer();
+    let (paths, body) = needles(&doc, &model);
+    let needle = doc.components.iter().find(|c| c.name == "Needle").unwrap().id;
+    let state = model.state();
+    let names = solidcraft_doc::WorldNames::new(&doc, &state);
+    let placed: Vec<String> = paths.iter().map(|p| names.name(&body, needle, p)).collect();
+    let all = crate::Hidden { bodies: placed.iter().cloned().collect(), placements: Vec::new() };
+    let (text, warnings) = usda_hidden(&doc, &model, &[], &all);
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert_eq!(text.matches(INVISIBLE).count(), 1, "{text}");
+    let one = crate::Hidden { bodies: [placed[0].clone()].into(), placements: Vec::new() };
+    let (text, warnings) = usda_hidden(&doc, &model, &[], &one);
+    assert_eq!(text.matches(INVISIBLE).count(), 0, "{text}");
+    assert!(warnings.iter().any(|w| w.contains(&body) && w.contains("hidden in 1 of the 2 shown placements")), "{warnings:?}");
+}
+
+/// A component's only body keeps its name when the component is placed once, and the design's
+/// only body when it is exported alone: a prim named after the body inside the placement's or
+/// the design's.
+#[test]
+fn an_only_body_keeps_its_name_when_placed_once() {
+    let mut doc = Document::new("Holder");
+    let bracket = doc.add_component(Some("Bracket"), 0).unwrap();
+    add_box(&mut doc, Vec3::ZERO, bracket);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let body = model.state().bodies[0].name.clone();
+    let placement = doc.occurrences.iter().find(|o| o.component == bracket).unwrap().name.replace(':', "_");
+    let text = usda(&doc, &model);
+    let at = text.find(&format!("\"{placement}\"")).unwrap_or_else(|| panic!("no prim {placement}:\n{text}"));
+    assert!(text[at..].contains(&format!("def Xform \"{body}\"")), "{text}");
+
+    let (doc, model) = one_box();
+    let body = model.state().bodies[0].name.clone();
+    let text = usda(&doc, &model);
+    assert!(text.contains("defaultPrim = \"Box\""), "{text}");
+    let at = text.find("def Xform \"Box\"").unwrap_or_else(|| panic!("no prim Box:\n{text}"));
+    assert!(text[at..].contains(&format!("def Xform \"{body}\"")), "{text}");
 }

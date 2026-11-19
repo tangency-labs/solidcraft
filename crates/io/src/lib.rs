@@ -82,9 +82,15 @@ pub mod limits;
 #[cfg(test)]
 mod mutate;
 mod native_cad;
+pub use native_cad::CadmpegOptions;
+pub use native_cad::DecalPlan;
+pub use native_cad::Hidden;
 pub use native_cad::NATIVE_CAD_EXTS;
 pub use native_cad::NativeDesign;
 pub use native_cad::RecordsRead;
+pub use native_cad::OpticsPlan;
+pub use native_cad::SurfaceMap;
+pub use native_cad::SurfacePlan;
 pub use native_cad::USD_EXTS;
 pub use native_cad::cadmpeg_export;
 pub use native_cad::cadmpeg_iges_records;
