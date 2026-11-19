@@ -55,10 +55,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::p1::{CornerCreation, ExecutiveObjects, SolverLoadingAccess};
 use super::p2::{EdgeMapAccess, FilletParameters, FilletParametersAccess, RunOn, SolverSpec};
 use super::p3::{
-    BrepCreationAccess, CornerAdjustmentAccess, CornerEdgeAccess, CornerVertexAccess, CornerView,
-    ErrorInfo, FaceConstructionAccess, FaceShrinkAccess, FaceStitchAccess, FilletExecutive,
-    OpenEnd, RailClassificationAccess, RailTrimAccess, SolverGeometryAccess, StitchAttempt,
-    VertexEntry,
+    BandFit, BrepCreationAccess, CornerAdjustmentAccess, CornerEdgeAccess, CornerVertexAccess,
+    CornerView, ErrorInfo, FaceConstructionAccess, FaceShrinkAccess, FaceStitchAccess,
+    FilletExecutive, OpenEnd, RailClassificationAccess, RailTrimAccess, SolverGeometryAccess,
+    StitchAttempt, VertexEntry,
 };
 use crate::blend::fillet_corner::p1::{EndRibDrop, LawIntervalSolvers};
 use crate::blend::fillet_corner::p3::{
@@ -113,6 +113,7 @@ mod original_trim;
 mod outline_rims;
 mod overflow_first;
 mod piecewise;
+mod planar_bands;
 mod surface;
 mod tangent_rollover;
 mod trace_reach;
@@ -4180,19 +4181,40 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
         Ok(out)
     }
 
-    fn creation_band_scale(
-        &mut self,
-        k: &mut Kernel,
-        solvers: &[FilletObject],
-    ) -> Result<Option<(f64, FilletObject)>> {
-        band_scale(self, k, solvers)
-    }
-
     fn creation_bands_meet(
         &mut self,
         k: &mut Kernel,
         solvers: &[FilletObject],
-    ) -> Result<Vec<(f64, FilletObject)>> {
+    ) -> Result<Vec<BandFit<FilletObject>>> {
+        use crate::blend::fillet_executive::FitKind;
+        use crate::topology::edgeuse::p1 as eu;
+        let mut blended = Vec::new();
+        let mut chamfers = true;
+        let mut common_ball = true;
+        let mut radius: Option<f64> = None;
+        for &object in solvers {
+            let FilletObject::Solver(id) = object else {
+                return Err(invalid("object is not a solver"));
+            };
+            let solver = self.solver(id)?;
+            chamfers &= solver.base().chamfer.is_some();
+            match solver.constant_offsets()? {
+                Some(offsets) => {
+                    for offset in offsets {
+                        let offset = offset.abs();
+                        let own = *radius.get_or_insert(offset);
+                        common_ball &= offset > 0.0
+                            && (offset - own).abs() <= crate::math::EFF_ZERO * (1.0 + own);
+                    }
+                }
+                None => common_ball = false,
+            }
+            if let Some(edgeuse) = solver.base().edgeuse(0)? {
+                if let Some(edge) = eu::edge(self.target, edgeuse)? {
+                    blended.push(edge);
+                }
+            }
+        }
         let mut out = Vec::new();
         for &a in solvers {
             for &b in solvers {
@@ -4202,26 +4224,61 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
                 if ia == ib {
                     continue;
                 }
-                let (Some(ea0), Some(_)) = (
+                let (Some(ea0), Some(eb0)) = (
                     self.solver(ia)?.base().edgeuse(0)?,
                     self.solver(ib)?.base().edgeuse(0)?,
                 ) else {
                     continue;
                 };
-                let edge = crate::topology::edgeuse::p1::edge(self.target, ea0)?
+                let edge = eu::edge(self.target, ea0)?
                     .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
+                let other_edge = eu::edge(self.target, eb0)?
+                    .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
+                let (a0, a1) = crate::topology::edge::start_end_vertices(self.target, edge)?;
+                let (b0, b1) = crate::topology::edge::start_end_vertices(self.target, other_edge)?;
+                if edge == other_edge
+                    || [a0, a1]
+                        .iter()
+                        .flatten()
+                        .any(|v| [b0, b1].contains(&Some(*v)))
+                {
+                    continue;
+                }
                 for ka in 0..2 {
                     for kb in 0..2 {
                         let fa = match self.solver(ia)?.base().edgeuse(ka)? {
-                            Some(e) => crate::topology::edgeuse::p1::face(self.target, e)?,
+                            Some(e) => eu::face(self.target, e)?,
                             None => continue,
                         };
                         let fb = match self.solver(ib)?.base().edgeuse(kb)? {
-                            Some(e) => crate::topology::edgeuse::p1::face(self.target, e)?,
+                            Some(e) => eu::face(self.target, e)?,
                             None => continue,
                         };
-                        if fa != fb {
+                        let Some(face) = fa.filter(|f| Some(*f) == fb) else {
                             continue;
+                        };
+                        let planar = planar_bands::supports(
+                            self.target,
+                            self.solver(ia)?,
+                            self.solver(ib)?,
+                            ka,
+                            kb,
+                        )?;
+                        let mut corners = Vec::new();
+                        if planar {
+                            for &object in solvers {
+                                let FilletObject::Solver(id) = object else {
+                                    return Err(invalid("object is not a solver"));
+                                };
+                                if id == ia || id == ib {
+                                    continue;
+                                }
+                                if let Some(corner) =
+                                    planar_bands::corner_band(self.target, self.solver(id)?, face)?
+                                {
+                                    corners.push(corner);
+                                }
+                            }
                         }
                         let (Some(mut this), Some(mut other)) = (
                             self.solvers.get_mut(ia.0 as usize).and_then(Option::take),
@@ -4229,19 +4286,81 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
                         ) else {
                             return Err(invalid("solver is not live in this session"));
                         };
-                        let meet =
-                            fit_size::bands_meet_at(k, self.target, &mut this, &mut other, ka, kb);
+                        // Select the construction from the support definitions. A planar
+                        // contact query that fails never falls back to a sampled search.
+                        let meet = (|| -> Result<Option<BandFit<FilletObject>>> {
+                            if planar {
+                                return Ok(planar_bands::contact(
+                                    k,
+                                    self.target,
+                                    &this,
+                                    &other,
+                                    [ka, kb],
+                                    &blended,
+                                    &corners,
+                                    chamfers && !common_ball,
+                                )?
+                                .map(|fit| BandFit {
+                                    size: fit.size,
+                                    kind: fit.kind,
+                                    edge: FilletObject::Topology(
+                                        FilletBody::Target,
+                                        EntityRef::Edge(fit.edge),
+                                    ),
+                                    face: Some(FilletObject::Topology(
+                                        FilletBody::Target,
+                                        EntityRef::Face(fit.face),
+                                    )),
+                                    at: Some(fit.at),
+                                }));
+                            }
+                            let meet = fit_size::bands_meet_at(
+                                k,
+                                self.target,
+                                &mut this,
+                                &mut other,
+                                ka,
+                                kb,
+                            )?;
+                            Ok(meet.map(|size| BandFit {
+                                size,
+                                kind: FitKind::Radius,
+                                edge: FilletObject::Topology(
+                                    FilletBody::Target,
+                                    EntityRef::Edge(edge),
+                                ),
+                                face: Some(FilletObject::Topology(
+                                    FilletBody::Target,
+                                    EntityRef::Face(face),
+                                )),
+                                at: None,
+                            }))
+                        })();
                         if let Some(slot) = self.solvers.get_mut(ia.0 as usize) {
                             *slot = Some(this);
                         }
                         if let Some(slot) = self.solvers.get_mut(ib.0 as usize) {
                             *slot = Some(other);
                         }
-                        if let Some(meet) = meet? {
-                            out.push((
-                                meet,
-                                FilletObject::Topology(FilletBody::Target, EntityRef::Edge(edge)),
-                            ));
+                        if let Some(mut meet) = meet? {
+                            // Every chamfer in one call scales together. Mixed wedges can
+                            // have equal offsets on one pair and unequal ones on another;
+                            // compare their common scales, never lengths against factors.
+                            if chamfers && !common_ball && meet.kind == FitKind::Radius {
+                                let offsets = self
+                                    .solver(ia)?
+                                    .constant_offsets()?
+                                    .ok_or_else(|| invalid("a chamfer's constant offsets"))?;
+                                let own = offsets
+                                    .first()
+                                    .copied()
+                                    .map(f64::abs)
+                                    .filter(|r| r.is_finite() && *r > 0.0)
+                                    .ok_or_else(|| invalid("a chamfer's positive offset"))?;
+                                meet.size /= own;
+                                meet.kind = FitKind::Scale;
+                            }
+                            out.push(meet);
                         }
                     }
                 }
@@ -4260,7 +4379,7 @@ type SolverRails = Vec<(
 )>;
 
 /// Each solver's rails, its filleted edge with its ends, and the largest solver tolerance:
-/// what the band check (`BandsClearOtherRails`) and its fit ([`band_scale`]) read.
+/// what the band check (`BandsClearOtherRails`) reads.
 #[allow(clippy::type_complexity)]
 fn band_rails(
     objects: &SessionObjects<'_>,
@@ -4389,149 +4508,6 @@ fn band_rails(
         edges.push((edge, ends));
     }
     Ok((rails, edges, tol))
-}
-
-/// The band refusal's fit as a scale of both blends (not the fork's; #3190's finding), from the
-/// band check's own quantities ([`band_rails`]): where the check refuses a pair of chamfers
-/// whose bands on a face they share overlap, the scale `lambda` of both at which the bands
-/// leave the face the fit margin, a thousand of the edges' tolerances (an open bound: at the
-/// face's width it keeps none, docs/generic-blend.md section 3.5). At a point `p` of the
-/// first's rail the check measures, as it does: the second's edge's foot `e`, its rail's foot
-/// `r` (the second's band width `|e - r|`); and, one drop more, the first's edge's foot `f`
-/// (its band width `|p - f|`). The face's width is `W = |f - e|`, and
-/// `lambda = (W - margin) / (|p - f| + |e - r|)`, the least over the check's points along the
-/// rail and its kept interval's two ends.
-///
-/// Named only where that is exact, decided from the geometry's kinds, not from the points:
-/// both blends chamfers, their shared face a plane, both edges lines, parallel (a band between
-/// planes along a line has one width, and scales with the chamfer, so the feet's distances
-/// scale and `W` stays); elsewhere `None`, as before. The check refuses only bands overlapping
-/// by more than its `apart` (ten of the solvers' tolerances), so between this size and the
-/// size the check refuses, `(W + apart) / (|p - f| + |e - r|)`, lie the margin and `apart`,
-/// about 1010 tolerances: this is the bound section 3.5 names, the check the fork's.
-///
-/// `lambda` is rounded down by `gamma_7`: its three operations (a difference, a sum and a
-/// quotient) and the three a check of the chamfers scaled by it adds (each setback scaled, their
-/// sum, and the width less the margin), so the scaled chamfers' sum stays within `W - margin`
-/// through the rounding; the feet's own accuracy (the drops') lies within the margin and
-/// `apart` between this size and the check's.
-fn band_scale(
-    objects: &SessionObjects<'_>,
-    k: &Kernel,
-    solvers: &[FilletObject],
-) -> Result<Option<(f64, FilletObject)>> {
-    use crate::curve::curve::CurveKind;
-    use crate::geom::global_solver::SolverOperation;
-    use crate::surface::surface::SurfaceKind;
-    let (rails, edges, _) = band_rails(objects, k, solvers)?;
-    let target: &Brep = &*objects.target;
-    // an edge's curve and interval where it is a line, with the line's unit direction
-    let line = |e: EdgeId| -> Result<
-        Option<(
-            crate::curve::curve::Curve,
-            crate::geom::extent1d::Extent1d,
-            crate::math::Vec3,
-        )>,
-    > {
-        let edge = target.edge(e)?;
-        let Some(curve) = edge.curve.clone() else {
-            return Ok(None);
-        };
-        if !matches!(curve.kind(), CurveKind::Line(_)) {
-            return Ok(None);
-        }
-        let ivl = edge.interval;
-        let d = curve.evaluate_point(k, ivl.max())? - curve.evaluate_point(k, ivl.min())?;
-        Ok(d.unitize().ok().map(|d| (curve, ivl, d)))
-    };
-    let drop = |curve: &crate::curve::curve::Curve,
-                ivl: &crate::geom::extent1d::Extent1d,
-                p: crate::math::Point3|
-     -> Result<Option<crate::math::Point3>> {
-        let d = curve.drop_point(
-            k,
-            ivl,
-            p,
-            None,
-            crate::math::BIG_DOUBLE,
-            None,
-            SolverOperation::Minimize,
-        )?;
-        if !d.success {
-            return Ok(None);
-        }
-        curve.evaluate_point(k, d.parameter).map(Some)
-    };
-    let mut least: Option<(f64, FilletObject)> = None;
-    for (a, &(edge_a, ends_a)) in edges.iter().enumerate() {
-        for (b, &(edge_b, ends_b)) in edges.iter().enumerate() {
-            if a == b || edge_a == edge_b || ends_a.iter().any(|v| ends_b.contains(v)) {
-                continue;
-            }
-            let (FilletObject::Solver(ia), FilletObject::Solver(ib)) = (
-                *solvers.get(a).ok_or_else(|| invalid("a solver"))?,
-                *solvers.get(b).ok_or_else(|| invalid("a solver"))?,
-            ) else {
-                return Err(invalid("object is not a solver"));
-            };
-            if objects.solver(ia)?.base().chamfer.is_none()
-                || objects.solver(ib)?.base().chamfer.is_none()
-            {
-                continue;
-            }
-            let (Some((curve_ea, ivl_ea, da)), Some((curve_eb, ivl_eb, db))) =
-                (line(edge_a)?, line(edge_b)?)
-            else {
-                continue;
-            };
-            if da.cross(db).length() > crate::math::EFF_ZERO {
-                continue;
-            }
-            let margin = 1000.0
-                * crate::topology::edge::tolerance(target, edge_a)?
-                    .max(crate::topology::edge::tolerance(target, edge_b)?);
-            let (Some(rails_a), Some(rails_b)) = (rails.get(a), rails.get(b)) else {
-                continue;
-            };
-            for (face_a, curve_a, kept_a) in rails_a {
-                for (face_b, curve_b, _) in rails_b {
-                    if face_a != face_b {
-                        continue;
-                    }
-                    let planar = crate::topology::face::p2::surface(target, *face_a)?
-                        .is_some_and(|s| matches!(s.kind(), SurfaceKind::Plane(_)));
-                    if !planar {
-                        continue;
-                    }
-                    let ivl_rb = curve_b.natural_interval();
-                    for s in 0..=16_u32 {
-                        let p = curve_a.evaluate_point(k, kept_a.evaluate(f64::from(s) / 16.0))?;
-                        let (Some(e), Some(r), Some(f)) = (
-                            drop(&curve_eb, &ivl_eb, p)?,
-                            drop(curve_b, &ivl_rb, p)?,
-                            drop(&curve_ea, &ivl_ea, p)?,
-                        ) else {
-                            // a foot not found: no size is named for this pair
-                            return Ok(None);
-                        };
-                        let w = f.distance(e);
-                        let bands = p.distance(f) + e.distance(r);
-                        let scale = (w - margin) / bands * (1.0 - crate::nurbs::math::gamma(7));
-                        if !scale.is_finite() {
-                            return Ok(None);
-                        }
-                        if least.is_none_or(|(l, _)| scale < l) {
-                            least = Some((
-                                scale.max(0.0),
-                                FilletObject::Topology(FilletBody::Target, EntityRef::Edge(edge_a)),
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-    }
-    Ok(least)
 }
 
 impl FaceShrinkAccess<FilletObject> for SessionObjects<'_> {
