@@ -86,6 +86,84 @@ fn large_face_permutation_is_bounded_and_preserves_geometry() {
 }
 
 #[test]
+fn a_small_ordered_move_of_a_large_face_updates_points_without_losing_identity() {
+    let mut sk = Sketch::new();
+    let geom: Vec<_> = (1..=129).flat_map(|i| square(f64::from(i))).collect();
+    let link = sk.add_link(LinkKind::Project, face(), &geom).unwrap();
+    let points = sk.link_points(&link);
+    let ids: Vec<_> = sk.link_curves(&link).iter().map(|i| sk.curves[*i].id.clone()).collect();
+    let old: Vec<_> = points.iter().map(|i| sk.points[*i].pos).collect();
+    let free = sk.add_point(Vec2::new(-129.0, -129.0), None).unwrap();
+    sk.add_constraint(ConstraintKind::Coincident { p: free, q: points[0] }, None).unwrap();
+    let constraint = sk.constraints[0].clone();
+    let shift = Vec2::new(1e-8, -1e-8);
+    let fresh: Vec<_> = geom
+        .iter()
+        .map(|g| match g {
+            LinkGeom::Line(a, b) => LinkGeom::Line(*a + shift, *b + shift),
+            _ => panic!("line fixture"),
+        })
+        .collect();
+    assert!(!sk.update_link(&link, &fresh).unwrap());
+    assert!(!sk.link(&link).unwrap().lost);
+    assert_eq!(points, sk.link_points(&link));
+    assert_eq!(ids, sk.link_curves(&link).iter().map(|i| sk.curves[*i].id.clone()).collect::<Vec<_>>());
+    assert_eq!(sk.constraints, vec![constraint]);
+    for (i, p) in points.iter().zip(&old) {
+        assert_eq!(sk.points[*i].pos, *p + shift, "the change must be applied, not ignored");
+    }
+    let moved = sk.clone();
+    let large_move: Vec<_> = fresh
+        .iter()
+        .map(|g| match g {
+            LinkGeom::Line(a, b) => LinkGeom::Line(*a + Vec2::X, *b + Vec2::X),
+            _ => panic!("line fixture"),
+        })
+        .collect();
+    assert!(sk.update_link(&link, &large_move).is_err());
+    assert_eq!(sk.points, moved.points);
+    assert_eq!(sk.curves, moved.curves);
+}
+
+#[test]
+fn small_moves_of_large_faces_use_relative_scale_and_apply_the_edit() {
+    for (offset, delta) in [(0.0, 1e-8), (1000.0, 1e-5), (100_000.0, 1e-3)] {
+        let origin = Vec2::new(offset, offset);
+        let geom: Vec<_> = (1..=129)
+            .flat_map(|i| square(f64::from(i)))
+            .map(|g| match g {
+                LinkGeom::Line(a, b) => LinkGeom::Line(a + origin, b + origin),
+                _ => panic!("line fixture"),
+            })
+            .collect();
+        let mut sk = Sketch::new();
+        let link = sk.add_link(LinkKind::Project, face(), &geom).unwrap();
+        let points = sk.link_points(&link);
+        let ids: Vec<_> = sk.link_curves(&link).iter().map(|i| sk.curves[*i].id.clone()).collect();
+        let old: Vec<_> = points.iter().map(|i| sk.points[*i].pos).collect();
+        let free = sk.add_point(origin, None).unwrap();
+        sk.add_constraint(ConstraintKind::Coincident { p: free, q: points[0] }, None).unwrap();
+        let constraint = sk.constraints[0].clone();
+        let shift = Vec2::new(delta, -delta);
+        let fresh: Vec<_> = geom
+            .into_iter()
+            .map(|g| match g {
+                LinkGeom::Line(a, b) => LinkGeom::Line(a + shift, b + shift),
+                _ => panic!("line fixture"),
+            })
+            .collect();
+        assert!(!sk.update_link(&link, &fresh).unwrap(), "offset={offset}");
+        assert!(!sk.link(&link).unwrap().lost);
+        assert_eq!(points, sk.link_points(&link));
+        assert_eq!(ids, sk.link_curves(&link).iter().map(|i| sk.curves[*i].id.clone()).collect::<Vec<_>>());
+        assert_eq!(sk.constraints, vec![constraint]);
+        for (id, old) in points.iter().zip(old) {
+            assert_eq!(sk.points[*id].pos, old + shift, "offset={offset}: apply the geometry change");
+        }
+    }
+}
+
+#[test]
 fn geometric_refresh_updates_conic_and_ellipse_scalar_values() {
     let mut sk = Sketch::new();
     let geom = |rho, minor| {

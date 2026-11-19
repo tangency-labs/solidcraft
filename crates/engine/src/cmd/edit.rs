@@ -1832,28 +1832,59 @@ fn select_sharp_edges(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// In an open sketch, every curve of it (construction ones too) and every point of it on no
 /// curve, leaving out its origin and projected geometry; outside a sketch, every shown body.
-fn select_all(s: &mut Session, _p: &Value) -> Result<Value> {
-    let all: Vec<Sel> = match s.active_sketch {
-        Some(id) => {
-            let sk = super::sketch_store::read(&s.doc, id)?;
-            let own = sk.curves.iter().filter(|c| c.link.is_none());
-            let on_curve = |q: usize| own.clone().any(|c| c.kind.uses(q));
-            own.clone()
-                .map(|c| Sel::SketchCurve { id: c.id.clone(), sketch: None })
-                .chain(
-                    sk.points
-                        .iter()
-                        .enumerate()
-                        .filter(|(q, p)| p.link.is_none() && p.id != "origin" && !on_curve(*q))
-                        .map(|(_, p)| Sel::SketchPoint { id: p.id.clone() }),
-                )
+fn select_all(s: &mut Session, p: &Value) -> Result<Value> {
+    let request: crate::schema::select::SelectAllParams = crate::schema::read("select.all", p)?;
+    // The drawing's sheet, unless the model has the focus (the Design workspace with a drawing open).
+    let drawing = s.open_drawing.filter(|_| s.active_sketch.is_none() && !s.model_focus);
+    if drawing.is_none() && request.sheet.is_some() {
+        return Err(bad("select.all", "sheet: only with a drawing open"));
+    }
+    let all: Vec<Sel> = match (s.active_sketch, drawing) {
+        (None, Some(open)) => {
+            let d = s.drawing("select.all")?;
+            let sheet = match &request.sheet {
+                Some(named) => crate::drawing_scene::sheet_id(d, named, "select.all")?,
+                None => d.sheets.first().map(|sheet| sheet.id).ok_or_else(|| bad("select.all", "the drawing open has no sheet"))?,
+            };
+            let on = d.on_sheet(sheet);
+            on.views
+                .iter()
+                .chain(&on.dimensions)
+                .chain(&on.balloons)
+                .chain(&on.notes)
+                .filter(|object| d.has_object(**object))
                 .take(10_001)
+                .map(|object| Sel::Drawing { drawing: open, object: *object })
                 .collect()
         }
-        None => {
-            let hidden = &s.visibility.hidden_bodies;
-            s.world_state()?.bodies.iter().filter(|b| !hidden.contains(&b.name)).take(10_001).map(|b| Sel::Body { name: b.name.clone() }).collect()
-        }
+        (active, _) => match active {
+            Some(id) => {
+                let sk = super::sketch_store::read(&s.doc, id)?;
+                let own = sk.curves.iter().filter(|c| c.link.is_none());
+                let on_curve = |q: usize| own.clone().any(|c| c.kind.uses(q));
+                own.clone()
+                    .map(|c| Sel::SketchCurve { id: c.id.clone(), sketch: None })
+                    .chain(
+                        sk.points
+                            .iter()
+                            .enumerate()
+                            .filter(|(q, p)| p.link.is_none() && p.id != "origin" && !on_curve(*q))
+                            .map(|(_, p)| Sel::SketchPoint { id: p.id.clone() }),
+                    )
+                    .take(10_001)
+                    .collect()
+            }
+            None => {
+                let hidden = &s.visibility.hidden_bodies;
+                s.world_state()?
+                    .bodies
+                    .iter()
+                    .filter(|b| !hidden.contains(&b.name))
+                    .take(10_001)
+                    .map(|b| Sel::Body { name: b.name.clone() })
+                    .collect()
+            }
+        },
     };
     if all.len() > 10_000 {
         return Err(bad("select.all", "too many items"));
