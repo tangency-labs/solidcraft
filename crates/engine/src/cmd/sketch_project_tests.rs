@@ -2763,10 +2763,13 @@ fn bossed_plate() -> Session {
     s
 }
 
-/// The farthest a point of the whole-body projection on `sketch` lies from the true outline: every
-/// edge of the body but a round wall's seam, sampled finely on its exact curve, and each round
-/// wall's two outline lines (where the view runs along the wall), in the sketch's coordinates.
-fn farthest_from_true_outline(s: &Session, sketch: u64) -> f64 {
+/// How the whole-body projection on `sketch` compares with the true outline: the farthest a point
+/// of it lies from the true projection, and the most it falls short of the body's extent in any of
+/// 16 directions (a missing stretch of outline falls short somewhere). The truth is every edge of
+/// the body but a round wall's seam, sampled finely on its exact curve, and each round wall's two
+/// outline lines (where the view runs along the wall) between the wall's own ends, in the sketch's
+/// coordinates.
+fn against_true_outline(s: &Session, sketch: u64) -> (f64, f64) {
     let state = s.model.state();
     let solved = state.sketch(sketch).unwrap();
     let plane = solved.plane;
@@ -2774,23 +2777,31 @@ fn farthest_from_true_outline(s: &Session, sketch: u64) -> f64 {
     let record = body.body.record();
     let q = solidcore_ops::query::Query::new(record);
     let mut truth: Vec<(solidcore_record::Vec2, solidcore_record::Vec2)> = Vec::new();
+    // Each face's edge points, for the axial reach of its round wall.
+    let mut on_face: Vec<Vec<solidcore_record::Vec3>> = vec![Vec::new(); record.faces.len()];
     for e in 0..record.edges.len() {
-        // A round wall's seam is an edge but no outline: one face lies on both its sides.
+        let [t0, t1] = q.edge_interval(e).unwrap();
+        let world: Vec<_> = (0..=4000).map(|k| q.edge_at(e, t0 + (t1 - t0) * f64::from(k) / 4000.0).unwrap().0).collect();
         let uses = q.edge_faces(e);
+        for f in &uses {
+            on_face[*f].extend(world.iter().copied());
+        }
+        // A round wall's seam is an edge but no outline: one face lies on both its sides.
         if uses.len() == 2 && uses[0] == uses[1] {
             continue;
         }
-        let [t0, t1] = q.edge_interval(e).unwrap();
-        let pts: Vec<_> = (0..=4000).map(|k| plane.to_local(q.edge_at(e, t0 + (t1 - t0) * f64::from(k) / 4000.0).unwrap().0)).collect();
+        let pts: Vec<_> = world.iter().map(|p| plane.to_local(*p)).collect();
         truth.extend(pts.windows(2).map(|w| (w[0], w[1])));
     }
     let n = plane.normal();
-    for f in 0..record.faces.len() {
+    for (f, edge_points) in on_face.iter().enumerate() {
         if let Some(solidcraft_kernel::FaceSurface::Cylinder { origin, axis, radius }) = solidcraft_kernel::face_surface(&body.body, f) {
-            let m = axis.vec().cross(n).normalized().unwrap();
+            let a = axis.vec();
+            let m = a.cross(n).normalized().unwrap();
+            let (lo, hi) = edge_points.iter().map(|p| (*p - origin).dot(a)).fold((f64::MAX, f64::MIN), |(lo, hi), t| (lo.min(t), hi.max(t)));
             for side in [1.0, -1.0] {
                 let p = origin + m * (radius * side);
-                truth.push((plane.to_local(p - axis.vec() * 100.0), plane.to_local(p + axis.vec() * 100.0)));
+                truth.push((plane.to_local(p + a * lo), plane.to_local(p + a * hi)));
             }
         }
     }
@@ -2801,11 +2812,16 @@ fn farthest_from_true_outline(s: &Session, sketch: u64) -> f64 {
     };
     let sk = &solved.sketch;
     let link = &sk.links[0].id;
-    sk.link_curves(link)
-        .into_iter()
-        .flat_map(|ci| sk.polyline(ci))
-        .map(|p| truth.iter().map(|seg| to_segment(p, *seg)).fold(f64::MAX, f64::min))
-        .fold(0.0, f64::max)
+    let got: Vec<_> = sk.link_curves(link).into_iter().flat_map(|ci| sk.polyline(ci)).collect();
+    let off = got.iter().map(|p| truth.iter().map(|seg| to_segment(*p, *seg)).fold(f64::MAX, f64::min)).fold(0.0, f64::max);
+    let short = (0..16)
+        .map(|k| {
+            let u = solidcore_record::Vec2::new((f64::from(k) * std::f64::consts::PI / 8.0).cos(), (f64::from(k) * std::f64::consts::PI / 8.0).sin());
+            let reach = |pts: &mut dyn Iterator<Item = solidcore_record::Vec2>| pts.map(|p| p.dot(u)).fold(f64::MIN, f64::max);
+            reach(&mut truth.iter().flat_map(|(a, b)| [*a, *b])) - reach(&mut got.iter().copied())
+        })
+        .fold(0.0, f64::max);
+    (off, short)
 }
 
 /// A whole body projected on a sketch tilted to it (the 45 degree plane of the design it came from,
@@ -2855,9 +2871,12 @@ fn a_tilted_whole_body_projection_is_the_exact_outline() {
         assert_eq!(conics + lines, curves.len(), "{name}: only conics and lines: {curves:?}");
         assert!(conics <= 5 * rounds, "{name}: {conics} conics for {rounds} round edges");
         assert!(lines <= straight + 2 * walls, "{name}: {lines} lines for {straight} straight edges and {walls} round walls");
-        let off = farthest_from_true_outline(&s, sketch);
-        // The truth's chords stand within 12 * (pi / 4000)^2 / 8 < 1e-5 mm of its curves.
+        let (off, short) = against_true_outline(&s, sketch);
+        // The truth's chords stand within 12 * (pi / 4000)^2 / 8 < 1e-5 mm of its curves. The
+        // sketch's points lie on its curves but its chords cut inside a round's extreme, so the
+        // reach is checked to 2e-3 mm: a missing stretch of outline falls short by millimetres.
         assert!(off < 2e-5, "{name}: {off} mm off the true outline");
+        assert!(short < 2e-3, "{name}: the outline falls {short} mm short of the body's extent");
     }
 }
 
