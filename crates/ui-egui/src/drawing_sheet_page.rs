@@ -15,7 +15,7 @@
 //! - **100 % is true size**: one paper millimetre is (96 / 25.4) × calibration / UI zoom points, so
 //!   the UI scale never changes it ([`true_size`]). The calibration is a preference, set against a
 //!   100 mm bar ([`calibration_bar`]).
-//! - **Sheet colour** (Follows the theme, White, Blueprint, Prussian Blue) is a screen preference
+//! - **Sheet colour** (White unless chosen: Follows the theme, Blueprint, Prussian Blue) is a screen preference
 //!   (D25 of `docs/design/drawing-ui/decisions.md`). The paper keeps its colour on a neutral stage
 //!   that moves away from it to stand off ([`stage_and_paper`]), and has a very slight rounded corner
 //!   (D29). Nothing here
@@ -60,7 +60,8 @@ const HOVER_BAND: f64 = 6.0;
 /// The paper's corner radius on screen, in points: very slight (D29).
 const PAPER_CORNER: u8 = 4;
 
-/// The sheet's colour on screen (Preferences › Design › Drawings › Sheet colour).
+/// The sheet's colour on screen (Preferences › Design › Drawings › Sheet colour). White unless
+/// another is chosen: paper is white, whatever the theme.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SheetColour {
     /// Follows the theme: White in a light theme, the theme's dark paper in a dark one (a theme
@@ -76,14 +77,19 @@ impl SheetColour {
     /// In the order Preferences lists them.
     pub const ALL: [SheetColour; 4] = [SheetColour::Auto, SheetColour::White, SheetColour::Blueprint, SheetColour::PrussianBlue];
 
+    /// The colour stored as `s`. `auto` was the default's name while the default followed the
+    /// theme: a setting saved then was never chosen, and reads as today's default, White.
     pub fn parse(s: &str) -> Option<SheetColour> {
+        if s == "auto" {
+            return Some(SheetColour::White);
+        }
         SheetColour::ALL.into_iter().find(|c| c.id() == s)
     }
 
     /// Its stored name.
     pub fn id(self) -> &'static str {
         match self {
-            SheetColour::Auto => "auto",
+            SheetColour::Auto => "theme",
             SheetColour::White => "white",
             SheetColour::Blueprint => "blueprint",
             SheetColour::PrussianBlue => "prussian_blue",
@@ -156,7 +162,7 @@ pub fn stage_and_paper(paper: Color32, backdrop: Color32) -> (Color32, Color32) 
 /// The stage, paper and ink the page draws in, now.
 pub fn sheet_colours(app: &SolveApp) -> (Color32, Color32, Color32) {
     let t = Tokens::get();
-    let colour = SheetColour::parse(&app.preferences.drawing_sheet_colour).unwrap_or(SheetColour::Auto);
+    let colour = SheetColour::parse(&app.preferences.drawing_sheet_colour).unwrap_or(SheetColour::White);
     let (paper, ink) = colour.paper(&t, solidcraft_theme::is_dark());
     let (stage, paper) = stage_and_paper(paper, t.viewport_top);
     (stage, paper, ink)
@@ -853,7 +859,7 @@ pub(crate) fn backdrop_choice(app: &mut SolveApp, ui: &mut egui::Ui) {
 /// Preferences' Sheet colour choice.
 pub(crate) fn colour_choice(app: &mut SolveApp, ui: &mut egui::Ui) {
     let labels: Vec<&str> = SheetColour::ALL.iter().map(|c| app.tr(c.label())).collect();
-    let current = SheetColour::parse(&app.preferences.drawing_sheet_colour).unwrap_or(SheetColour::Auto);
+    let current = SheetColour::parse(&app.preferences.drawing_sheet_colour).unwrap_or(SheetColour::White);
     let mut selected = SheetColour::ALL.iter().position(|c| *c == current).unwrap_or(3);
     let response = ui_kit::dropdown(ui, "pref_drawing_sheet_colour", &mut selected, &labels);
     crate::scenario::publish_target("prefs:drawing_sheet_colour", response.rect);
