@@ -1125,10 +1125,12 @@ fn changing_an_unfocused_window_layout_keeps_the_live_sketch_registry_and_focus(
     app.run("tab.view.activate", json!({"id":owner,"window":0})).unwrap();
     let sketch = app.run("sketch.create", json!({"plane":"XY","view":owner})).unwrap()["sketch"].as_u64().unwrap();
     let focused = app.session.view_context.focused();
+    assert_eq!(crate::view_windows::focused_view(&app), focused);
     let recent = app.session.view_context.recent().to_vec();
     app.run("tab.view.layout", json!({"window":window,"layout":"side_by_side"})).unwrap();
     assert_eq!((app.session.active_sketch, app.session.sketching_view), (Some(sketch), Some(owner)));
     assert_eq!(app.session.view_context.focused(), focused);
+    assert_eq!(crate::view_windows::focused_view(&app), focused, "layout's internal activation must not change committed native focus");
     assert_eq!(app.session.view_context.recent(), recent);
     assert!(app.session.view_context.descriptors().iter().any(|view| view.id == owner));
     assert!(app.docs.views.views_of(window).unwrap().is_tiled());
@@ -1316,8 +1318,12 @@ fn drawing_toolbar_entry_finishes_a_sheet_sketch_started_through_the_engine() {
     let mut app = SolveApp::new(Default::default(), Default::default());
     app.run("solid.box", json!({"length":40,"width":30,"height":5})).unwrap();
     let made = app.run("drawing.create", json!({})).unwrap();
-    app.ui.tab = "DRAWING LAYOUT".into();
-    app.session.model_focus = false;
+    crate::workspace::enter(&mut app, "drawing").unwrap();
+    let host = app.docs.views.active().clone();
+    assert_eq!(host.kind, solidcraft_views::ViewKind::Sheet);
+    assert_eq!(host.subject, Some(format!("{}/{}", made["id"].as_str().unwrap(), made["sheets"][0]["id"].as_str().unwrap())));
+    assert_eq!(app.session.view_context.focused(), host.id);
+    assert!(!app.session.model_focus, "the toolbar fixture commits a real Sheet receiver");
     let entry = app.session.execute("drawing.sketch.create", &json!({"owner":made["sheets"][0]["id"]})).unwrap();
     let sketch = solidcraft_engine::doc::ids::decode(entry["sketch"].as_str().unwrap()).unwrap();
     app.session.execute("sketch.line", &json!({"points":[[10,10],[20,10]],"infer":false})).unwrap();
@@ -1325,6 +1331,7 @@ fn drawing_toolbar_entry_finishes_a_sheet_sketch_started_through_the_engine() {
     app.start("drawing.note");
     assert!(app.session.active_sheet_sketch.is_none());
     assert!(crate::drawing_workspace::placing_note(&app));
+    assert_eq!(app.docs.views.active().id, host.id, "the Drawing toolbar keeps its committed Sheet host");
     assert_eq!(app.sketch_notices.latest_for(app.session.uid, 0).unwrap().sketch, sketch);
 }
 

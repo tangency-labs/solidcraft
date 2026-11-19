@@ -1603,6 +1603,9 @@ preference_settings! {
     show_design_view_switcher: bool = false, PAGE_LAYOUT;
     /// Use distinct tab treatments for the focused view, cards, hidden views, and pop-outs.
     clear_view_tabs: bool = true, PAGE_LAYOUT;
+    /// Focused views choose the workspace; the switcher focuses a recent matching view.
+    /// Off retains the workspace switcher's independent, legacy behaviour.
+    workspace_follows_view: bool = true, PAGE_LAYOUT => check_id("prefs.workspace_follows_view");
     /// A drawing sheet opens as a view (a sub-tab) of its design.
     design_sub_tab_sheets: bool = true, PAGE_LAYOUT;
     /// Render and Animate open as views of their design.
@@ -5786,6 +5789,7 @@ mod tests {
     #[test]
     fn layout_page_checkboxes_keep_their_labels_at_every_width() {
         let checks = [
+            ("workspace_follows_view", "prefs.workspace_follows_view"),
             ("history_play_button", "prefs.layout_page.play_history"),
             ("history_group_joints", "prefs.history_group_joints"),
             ("history_bar_groups", "prefs.history_bar_groups"),
@@ -14925,5 +14929,22 @@ mod kit_use_tests {
         assert_eq!(restored.ui.recent_colors.first(), Some(&[9, 8, 7]));
         assert_eq!(restored.ui.recent_colors.get(1), Some(&[1, 2, 3]));
         assert_eq!(restored.ui.recent_colors.len(), MAX_RECENT_COLORS);
+    }
+
+    #[test]
+    fn workspace_focus_preference_defaults_on_roundtrips_and_resets_on_layout_page() {
+        use super::{PAGE_LAYOUT, Prefs, defaults, set};
+        let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        assert!(app.preferences.workspace_follows_view);
+        app.load_prefs(r#"{"preferences":{"default_units":"mm"}}"#);
+        assert!(app.preferences.workspace_follows_view, "older preference files receive the new default");
+        set(&mut app, &serde_json::json!({"workspace_follows_view":false})).unwrap();
+        assert!(!app.preferences.workspace_follows_view);
+        let saved = serde_json::to_value(&app.preferences).unwrap();
+        let restored: Prefs = serde_json::from_value(saved).unwrap();
+        assert!(!restored.workspace_follows_view);
+        assert!(set(&mut app, &serde_json::json!({"workspace_follows_view":"yes"})).is_err());
+        defaults(&mut app, PAGE_LAYOUT);
+        assert!(app.preferences.workspace_follows_view);
     }
 }

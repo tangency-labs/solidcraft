@@ -483,11 +483,18 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
                 act("ui.workspace.drawing", "Drawing", "ws_drawing")
                     .with(json!({"workspace":"drawing"}))
                     .key(if drawing { "current" } else { "" })
-                    .on(app.session.active_sketch.is_none() && app.tool.is_none() && app.dialog.is_none() && !app.file_load.busy()),
-                act("ui.workspace.render", "Render", "ws_render")
-                    .with(json!({"workspace":"render"}))
-                    .key(if rendering { "current" } else { "" })
-                    .on(crate::render_workspace::entry_open(app)),
+                    .on(if app.preferences.workspace_follows_view {
+                        crate::workspace::switcher_available(app)
+                    } else {
+                        app.session.active_sketch.is_none() && app.tool.is_none() && app.dialog.is_none() && !app.file_load.busy()
+                    }),
+                act("ui.workspace.render", "Render", "ws_render").with(json!({"workspace":"render"})).key(if rendering { "current" } else { "" }).on(
+                    if app.preferences.workspace_follows_view {
+                        crate::workspace::switcher_available(app)
+                    } else {
+                        crate::render_workspace::entry_open(app)
+                    },
+                ),
             ]
         }
         Target::Units => crate::prefs::UNITS

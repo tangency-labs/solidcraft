@@ -690,6 +690,12 @@ pub fn cycle(app: &mut SolveApp, forward: bool) {
 /// render workspace. Sheet and Animation have no workspace yet and change nothing: enter theirs
 /// here when they exist.
 pub fn apply_view(app: &mut SolveApp, view: &DesignView) {
+    if app.preferences.workspace_follows_view {
+        if let Err(error) = crate::workspace::apply_focused_view(app, view) {
+            app.set_status(error, true);
+        }
+        return;
+    }
     match view.kind {
         ViewKind::Model => {
             if crate::render_workspace::active(app) {
@@ -711,6 +717,9 @@ fn enter_workspace(app: &mut SolveApp, render: bool) {
 /// Reflect the render workspace in the active view. Sketch editing stays in the current Model
 /// view and never creates a sub-tab. With the strip and switcher hidden, no view is opened here.
 pub(crate) fn sync_views(app: &mut SolveApp) {
+    if app.preferences.workspace_follows_view {
+        return;
+    }
     let shown = if crate::render_workspace::active(app) { Some((ViewKind::Render, None)) } else { None };
     let prefs = DesignTabPrefs::from(&app.preferences);
     // The Sketch ribbon shows because a sketch is open, not because the person left the Render
@@ -748,6 +757,7 @@ pub(crate) fn change_views<T>(app: &mut SolveApp, change: impl FnOnce(&mut ViewS
     let active = app.docs.views.active();
     if active.id != before {
         let active = active.clone();
+        crate::workspace::remember_view(app, before);
         switch_navigation(app, before, active.id);
         let perspective = app.ui.perspective;
         apply_view(app, &active);
@@ -952,6 +962,7 @@ pub(crate) fn view_window_ids(app: &SolveApp) -> Vec<(u64, solidcraft_views::Win
 pub(crate) fn view_workspace(kind: ViewKind) -> &'static str {
     match kind {
         ViewKind::Render => "RENDER",
+        ViewKind::Sheet => "DRAWING LAYOUT",
         _ => "MODEL",
     }
 }
@@ -1050,6 +1061,9 @@ pub(crate) fn reattach_window_views(app: &mut SolveApp, tab: u64, views: ViewSet
 /// as it was left: two Model views of one design are two angles, not one.
 pub(crate) fn keep_look(app: &mut SolveApp) {
     let active = app.docs.views.active();
+    if app.preferences.workspace_follows_view && active.kind == ViewKind::Render {
+        app.render_workspace.view.render_camera = Some(app.cam);
+    }
     if active.kind == ViewKind::Model {
         let id = active.id;
         app.docs.views.set_spec(id, solidcraft_viewport::ViewSpec::new(app.cam));
@@ -1060,6 +1074,14 @@ pub(crate) fn keep_look(app: &mut SolveApp) {
 /// Show `view` from the angle it was left at. A view that was never left (a new one) keeps the
 /// angle the design looks from now.
 fn show_look(app: &mut SolveApp, view: &DesignView) {
+    if app.preferences.workspace_follows_view
+        && view.kind == ViewKind::Render
+        && let Some(camera) = app.render_workspace.view.render_camera
+    {
+        app.cam = camera;
+        app.ui.perspective = camera.fov > 0.0;
+        app.ui.up_axis = camera.up;
+    }
     if view.kind == ViewKind::Model
         && let Some(spec) = view.spec
     {
@@ -1131,7 +1153,7 @@ pub(crate) fn with_sketch_camera<T>(app: &mut SolveApp, id: u64, change: impl Fn
 
 /// Make the view `id` the shown one, keeping the look of the one it replaces.
 pub(crate) fn focus_view(app: &mut SolveApp, id: u64) -> bool {
-    change_views(app, |views| views.activate(id))
+    activate_local_view(app, id)
 }
 
 /// Open a view of `kind` showing `subject` in the shown design and show it (`reuse`: one that
@@ -1140,7 +1162,7 @@ pub(crate) fn focus_view(app: &mut SolveApp, id: u64) -> bool {
 /// added: the design enters the state in the view already shown, which stays active.
 pub fn view_open(app: &mut SolveApp, kind: ViewKind, subject: Option<String>, reuse: bool) -> u64 {
     let prefs = DesignTabPrefs::from(&app.preferences);
-    if !prefs.opens_sub_tab(kind) {
+    if !app.preferences.workspace_follows_view && !prefs.opens_sub_tab(kind) {
         apply_view(app, &DesignView { editing: None, id: 0, kind, name: String::new(), subject, spec: None, compass: true });
         return app.docs.views.active().id;
     }
@@ -1303,7 +1325,18 @@ pub fn view_activate(app: &mut SolveApp, id: u64) -> bool {
 }
 
 pub(crate) fn activate_local_view(app: &mut SolveApp, id: u64) -> bool {
-    change_views(app, |views| views.activate(id))
+    if app.docs.views.get(id).is_none() {
+        return false;
+    }
+    crate::view_windows::record_local_focus(app, id);
+    let follows = app.preferences.workspace_follows_view;
+    change_views(app, |views| {
+        let previous = views.active().id;
+        if follows && views.is_tiled() && !views.tiles().is_some_and(|tiles| tiles.contains(id)) {
+            views.place_tile(id, solidcraft_views::Placement::Replace(previous));
+        }
+        views.activate(id)
+    })
 }
 
 /// Bring back the view the shown design closed last and show it.
@@ -1362,7 +1395,7 @@ pub fn view_layout(app: &mut SolveApp, preset: solidcraft_views::Preset) -> usiz
         if added.is_none() {
             break;
         }
-        view_activate(app, shown.id);
+        change_views(app, |views| views.activate(shown.id));
     }
     change_views(app, |views| views.set_layout(preset))
 }
@@ -1381,7 +1414,7 @@ fn view_copy_at(app: &mut SolveApp, angle: solidcraft_viewport::StandardView) ->
     let copy = view_duplicate(app, shown)?;
     // The copy is shown now, its look in the app: turn it, and going back to the first keeps that.
     app.cam.set_view(angle);
-    view_activate(app, shown);
+    change_views(app, |views| views.activate(shown));
     Some(copy)
 }
 
@@ -6182,28 +6215,28 @@ mod tests {
         assert_eq!(drawings(&mut a), [Value::Null, expected]);
     }
 
-    /// K10 (#3890): a tab with its drawing open takes model commands, as every tab does, with a
-    /// sheet sketch being edited there too; the sheet sketch stays in its own tab and is still
-    /// active after a round trip.
+    /// An open drawing never locks model commands; a tab's sheet sketch stays in its tab.
     #[test]
-    fn a_tabs_sheet_sketch_waits_in_that_tab_and_holds_nothing() {
+    fn a_tabs_model_commands_run_with_its_drawing_open() {
         let mut a = app();
+        a.preferences.workspace_follows_view = false;
         let [sheet, _] = two_sheet_drawing(&mut a);
-        // A sheet sketch is made, and finished, in Drawing.
+        a.run("solid.sphere", json!({"diameter":4})).unwrap();
+        assert!(a.session.open_drawing.is_some());
         crate::workspace::enter(&mut a, "drawing").unwrap();
         a.run("solid.sphere", json!({"diameter": 4})).unwrap();
         assert!(a.session.open_drawing.is_some(), "with the drawing still open");
         a.run("drawing.sketch.create", json!({"owner": solidcraft_engine::doc::ids::encode(sheet)})).unwrap();
         assert!(a.session.active_sheet_sketch.is_some(), "the sheet sketch is open");
         new_design(&mut a);
-        a.run("solid.sphere", json!({"diameter": 4})).unwrap();
-        assert!(a.session.active_sheet_sketch.is_none());
+        a.run("solid.sphere", json!({"diameter":4})).unwrap();
+        assert!(a.session.active_sheet_sketch.is_none(), "the other design has its own edit receiver");
         switch(&mut a, 0);
-        assert!(a.session.active_sheet_sketch.is_some(), "the sheet sketch waits in its tab");
+        assert!(a.session.active_sheet_sketch.is_some(), "the sheet sketch waits in its own design tab");
         crate::workspace::enter(&mut a, "drawing").unwrap();
         a.run("sketch.finish", json!({})).unwrap();
         assert!(a.session.active_sheet_sketch.is_none());
-        a.run("solid.sphere", json!({"diameter": 4})).unwrap();
+        a.run("solid.sphere", json!({"diameter":4})).unwrap();
     }
 
     /// K10 (#3890): without "Keep dialogs and tools open when switching designs", a tab switch

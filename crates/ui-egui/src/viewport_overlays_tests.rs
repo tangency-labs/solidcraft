@@ -2379,6 +2379,66 @@ fn swept(points: &[Pos2], centre: Pos2) -> f32 {
     points.windows(2).map(|w| ((w[1] - centre).angle() - (w[0] - centre).angle()).rem_euclid(turn)).sum::<f32>() / turn
 }
 
+#[test]
+fn window_tool_hint_clears_both_tiles_navigation_rows_regardless_of_the_last_tile() {
+    let mut app = SolveApp::new(Default::default(), Default::default());
+    app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    app.start("sketch.line");
+    assert_eq!(app.tool.as_ref().unwrap().cmd, "sketch.line");
+    app.preferences.navigation_bar.edge = crate::ui_kit::NavigationEdge::Bottom;
+    let t = Tokens::get();
+    let height = crate::ui_kit::NavigationMetrics::for_size(app.preferences.navigation_bar.size).height();
+    let ctx = crate::fonts::test_context();
+    let screen = Rect::from_min_size(Pos2::ZERO, vec2(1280.0, 720.0));
+    for place in [ToastPlace::Corner, ToastPlace::Centre] {
+        place.publish(&ctx);
+        let mut previous = None;
+        for last_right in [false, true] {
+            let mut host = Rect::NOTHING;
+            let mut rows = [Rect::NOTHING; 2];
+            let mut shown = Vec::new();
+            let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+                host = ui.max_rect();
+                let navigation_top = host.bottom() - t.space_8 - crate::ui_kit::NAV_BOTTOM - height;
+                rows = [
+                    Rect::from_min_size(pos2(host.left() + t.space_8, navigation_top), vec2(300.0, height)),
+                    Rect::from_min_size(pos2(host.right() - 300.0 - t.space_8, navigation_top), vec2(300.0, height)),
+                ];
+                let tile = Rect::from_min_max(
+                    pos2(if last_right { host.center().x } else { host.left() }, host.top()),
+                    pos2(if last_right { host.right() } else { host.center().x }, host.bottom()),
+                );
+                app.viewport.window = Some(host);
+                app.viewport.rect = Some(tile);
+                app.shell.content = Some(host);
+                app.viewport.layout = Some(crate::viewport_layout::Layout {
+                    viewport: tile,
+                    drawable: tile,
+                    middle: tile,
+                    content: tile,
+                    axis_view: Rect::NOTHING,
+                    navigation: rows[usize::from(last_right)],
+                    confirm: Rect::NOTHING,
+                    usable: None,
+                    panel_obstacles: None,
+                });
+                shown = transient_messages(&mut app, ui, host, None);
+            });
+            assert_eq!(shown.len(), 1, "one actual Line instruction toast belongs to the window");
+            let hint = shown[0];
+            assert!(host.contains_rect(hint));
+            for row in rows {
+                assert!(!hint.intersects(row), "the Line hint cannot cover either tile's navigation: {hint:?}, {row:?}");
+                assert!(hint.bottom() + t.space_8 <= row.top() + 0.5, "the hint leaves the shared navigation gap");
+            }
+            if let Some(previous) = previous {
+                assert_eq!(hint, previous, "the last painted tile cannot move a window hint");
+            }
+            previous = Some(hint);
+        }
+    }
+}
+
 /// The status toast has a close (×) at its top right and no Close button (#7971): the × closes it
 /// without opening the run's messages (a click elsewhere on it still does), its ring shows the
 /// share of its six seconds left, and behind an issue report the × does nothing.

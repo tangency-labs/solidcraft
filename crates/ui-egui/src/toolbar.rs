@@ -2824,6 +2824,18 @@ pub(crate) fn cancel_unfinished(app: &mut SolveApp) -> bool {
 
 /// Global keyboard shortcuts (when no text field has focus).
 pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
+    let sketch = app.session.active_sketch;
+    let held = if !crate::workspace::tool_receives_input(app) { app.tool.take() } else { None };
+    shortcuts_focused(app, ctx);
+    if let Some(tool) = held
+        && app.session.active_sketch == sketch
+        && app.tool.is_none()
+    {
+        app.tool = Some(tool);
+    }
+}
+
+fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
     if crate::view_window_drag::keyboard_active(app, ctx) {
         return;
     }
@@ -3112,7 +3124,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                     && !(crate::viewport_status::enabled(app) && crate::viewport_status::owns_escape(app))
                     && app.tool.is_none()
                     && app.dialog.is_none()
-                    && let Some(sketch) = app.session.active_sketch
+                    && let Some(sketch) = crate::workspace::focused_sketch(app)
                 {
                     app.last_escape = None;
                     // A sketch left blank is taken away instead, in one undo step, so no empty

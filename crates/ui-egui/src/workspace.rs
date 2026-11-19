@@ -51,6 +51,13 @@ pub fn tab_label(tab: &str) -> &str {
 
 /// Workspace switching has one lifecycle for menus and automation.
 pub fn enter(app: &mut crate::SolveApp, workspace: &str) -> Result<(), String> {
+    if app.preferences.workspace_follows_view {
+        return focus_workspace(app, workspace);
+    }
+    enter_legacy(app, workspace)
+}
+
+fn enter_legacy(app: &mut crate::SolveApp, workspace: &str) -> Result<(), String> {
     match workspace {
         "drawing" => {
             if crate::render_workspace::active(app) {
@@ -65,6 +72,192 @@ pub fn enter(app: &mut crate::SolveApp, workspace: &str) -> Result<(), String> {
         }
         _ => Err("workspace must be design, render or drawing".into()),
     }
+}
+
+/// Window-local ribbon state survives focus changes without becoming document data.
+pub(crate) type ViewRibbon = (String, Option<String>, Option<String>);
+
+pub(crate) fn focused_sketch(app: &crate::SolveApp) -> Option<u64> {
+    app.session.active_sketch.filter(|_| !app.preferences.workspace_follows_view || app.session.sketching_view == Some(app.docs.views.active().id))
+}
+
+/// Canonical tool state stays alive while its sketch owner is unfocused.
+pub(crate) fn tool_receives_input(app: &crate::SolveApp) -> bool {
+    !app.preferences.workspace_follows_view || app.session.active_sketch.is_none() || focused_sketch(app).is_some()
+}
+
+pub(crate) fn remember_view(app: &mut crate::SolveApp, view: u64) {
+    if app.preferences.workspace_follows_view {
+        app.view_ribbons.insert((app.session.uid, view), (app.ui.tab.clone(), app.ui.ribbon_context.clone(), app.ui.sketch_return_tab.clone()));
+    }
+}
+
+/// Project committed local focus. This is presentation and receiver state, never an edit.
+/// It deliberately leaves the current sketch/tool and every view camera untouched.
+pub(crate) fn apply_focused_view(app: &mut crate::SolveApp, view: &solidcraft_views::DesignView) -> Result<(), String> {
+    use solidcraft_views::ViewKind;
+    if !app.preferences.workspace_follows_view {
+        return Ok(());
+    }
+    if view.kind == ViewKind::Sheet {
+        crate::sheet_views::focus(app, view)?;
+    }
+    let home = crate::documents::view_workspace(view.kind);
+    let current_workspace = if drawing_tab(&app.ui.tab) {
+        "DRAWING LAYOUT"
+    } else if render_tab(&app.ui.tab) {
+        "RENDER"
+    } else {
+        "MODEL"
+    };
+    let remembered = app.view_ribbons.get(&(app.session.uid, view.id)).cloned();
+    if let Some((tab, context, back)) = remembered.filter(|(tab, _, _)| match view.kind {
+        ViewKind::Sheet => drawing_tab(tab),
+        ViewKind::Render => render_tab(tab),
+        _ => !drawing_tab(tab) && !render_tab(tab),
+    }) {
+        app.ui.tab = tab;
+        app.ui.ribbon_context = context;
+        app.ui.sketch_return_tab = back;
+    } else if current_workspace != home {
+        app.ui.tab = home.into();
+        app.ui.ribbon_context = None;
+        app.ui.sketch_return_tab = None;
+    }
+    crate::drawing_workspace::swap_selection(app);
+    crate::drawing_workspace::sync_history(app);
+    sync_context(app);
+    Ok(())
+}
+
+/// Commands use committed focus even while the main window paints a different ribbon.
+/// Camera/display commands keep the temporary canvas receiver borrowed by navigation.
+pub(crate) fn command_receiver(app: &mut crate::SolveApp, id: &str, params: &serde_json::Value) -> Result<(), String> {
+    use solidcraft_engine::cmd::Part;
+    use solidcraft_views::ViewKind;
+    let authoring = solidcraft_engine::find_command(id).is_some_and(|command| {
+        command.undoable || app.session.command_starts_edit(command, params) || matches!(command.part, Part::Drawing | Part::Sketch)
+    });
+    if !app.preferences.workspace_follows_view || !(authoring || id.starts_with("edit.") || id.starts_with("select.")) {
+        crate::drawing_workspace::sync_history(app);
+        return Ok(());
+    }
+    let explicit = matches!(id, "sketch.create" | "sketch.edit" | "drawing.sketch.create" | "drawing.sketch.edit")
+        .then(|| params.get("view").and_then(serde_json::Value::as_u64))
+        .flatten();
+    let target = explicit.unwrap_or_else(|| crate::view_windows::command_view(app));
+    let view = crate::view_windows::layout_views(app).into_iter().find(|(_, view)| view.id == target).map(|(_, view)| view.clone());
+    let Some(view) = view else { return Err("no_such_view".into()) };
+    let legacy_page = view.kind == ViewKind::Model
+        && crate::drawing_workspace::active(app)
+        && !crate::view_windows::layout_views(app).iter().any(|(_, view)| view.kind == ViewKind::Sheet);
+    if view.kind == ViewKind::Sheet {
+        if let Err(error) = crate::sheet_views::focus(app, &view) {
+            // Undo must still be able to bring back the sheet this view was showing.
+            let drawing = matches!(id, "edit.undo" | "edit.redo")
+                .then(|| {
+                    view.subject
+                        .as_deref()
+                        .and_then(|subject| subject.split_once('/'))
+                        .and_then(|(drawing, _)| solidcraft_engine::doc::ids::decode(drawing))
+                })
+                .flatten()
+                .filter(|drawing| app.session.doc.drawing(*drawing).is_some());
+            let Some(drawing) = drawing else { return Err(error) };
+            app.session.open_drawing = Some(drawing);
+        }
+        crate::drawing_workspace::select_receiver(app, true);
+        crate::drawing_workspace::sync_history_for(app, true);
+    } else if legacy_page {
+        crate::drawing_workspace::select_receiver(app, true);
+        crate::drawing_workspace::sync_history_for(app, true);
+    } else {
+        crate::drawing_workspace::select_receiver(app, false);
+        crate::drawing_workspace::sync_history_for(app, false);
+    }
+    Ok(())
+}
+
+pub(crate) fn switcher_available(app: &crate::SolveApp) -> bool {
+    app.applying.is_none()
+        && app.pending_feature_edit.is_none()
+        && app.editing_state.is_none()
+        && (app.dialog.is_none() || app.session.active_sketch.is_some())
+        && !app.file_load_holds()
+}
+
+fn focus_workspace(app: &mut crate::SolveApp, workspace: &str) -> Result<(), String> {
+    use solidcraft_views::ViewKind;
+    if !switcher_available(app) {
+        return Err(solidcraft_ui_text::tr("workspace_focus.finish_operation").into());
+    }
+    let kind = match workspace {
+        "design" => ViewKind::Model,
+        "render" => ViewKind::Render,
+        "drawing" => ViewKind::Sheet,
+        _ => return Err("workspace must be design, render or drawing".into()),
+    };
+    crate::sketch_view::sync(app)?;
+    let origin = app.view_windows.current_window();
+    let open = app.session.view_context.descriptors();
+    let recent = app.session.view_context.recent();
+    let eligible = |view: &&solidcraft_engine::ViewDescriptor| {
+        view.kind == kind && (kind != ViewKind::Sheet || crate::sheet_views::resolve(app, view.subject.as_deref()).is_ok())
+    };
+    let candidate = recent
+        .iter()
+        .filter_map(|id| open.iter().find(|view| view.id == *id))
+        .filter(eligible)
+        .find(|view| view.window == u64::from(origin))
+        .or_else(|| open.iter().filter(eligible).find(|view| view.window == u64::from(origin)))
+        .or_else(|| recent.iter().filter_map(|id| open.iter().find(|view| view.id == *id)).find(eligible))
+        .or_else(|| open.iter().find(eligible))
+        .map(|view| (view.id, view.window));
+    if let Some((id, window)) = candidate {
+        crate::view_windows::focus_view(app, id, u32::try_from(window).ok())?;
+        if window == u64::from(origin) && app.docs.views.active().id == id {
+            let view = app.docs.views.active().clone();
+            let matches = match kind {
+                ViewKind::Sheet => drawing_tab(&app.ui.tab),
+                ViewKind::Render => render_tab(&app.ui.tab),
+                _ => !drawing_tab(&app.ui.tab) && !render_tab(&app.ui.tab),
+            };
+            if !matches {
+                apply_focused_view(app, &view)?;
+            }
+        }
+        return Ok(());
+    }
+    let subject = if kind == ViewKind::Sheet {
+        let Some((drawing, sheet)) = app.session.doc.drawings.iter().find_map(|drawing| drawing.sheets.first().map(|sheet| (drawing.id, sheet.id)))
+        else {
+            // The existing empty Drawing page offers New Sheet; no fake Sheet receiver is made.
+            return crate::drawing_workspace::enter(app, true);
+        };
+        Some(crate::sheet_views::subject(drawing, sheet))
+    } else {
+        None
+    };
+    // Normal view commands retain admission, limits and automation visibility.
+    let previous = app.docs.views.active().id;
+    // Opening makes the new view active before it has a cell, so is_tiled() is
+    // temporarily false even while the original layout still exists.
+    let was_tiled = app.docs.views.is_tiled();
+    let reply = app.run("tab.view.open", serde_json::json!({"kind":kind.key(), "subject":subject, "reuse":false, "window":origin}))?;
+    let id = reply.get("id").and_then(serde_json::Value::as_u64).unwrap_or_else(|| app.docs.views.active().id);
+    if !app.docs.views.get(id).is_some_and(|view| view.kind == kind) {
+        return Err(solidcraft_ui_text::tr("workspace_focus.view_unavailable").into());
+    }
+    if was_tiled && !app.docs.views.tiles().is_some_and(|tiles| tiles.contains(id)) {
+        crate::documents::change_views(app, |views| {
+            views.activate(previous);
+            if !views.fill_empty(0, id) {
+                views.show_beside(id, solidcraft_views::Edge::Right);
+            }
+            views.activate(id);
+        });
+    }
+    crate::view_windows::focus_view(app, id, Some(origin))
 }
 
 /// Every tab's exact registry name with its accent: the contextual and specialty tabs, and the
@@ -945,7 +1138,7 @@ pub fn visible_tabs(app: &crate::SolveApp) -> Vec<&'static str> {
         // Right after MODEL, whether a sketch is open or not (#7904).
         let at = tabs.iter().position(|t| *t == "MODEL").map_or(0, |i| i + 1);
         tabs.insert(at, "SKETCH");
-    } else if app.session.active_sketch.is_some() {
+    } else if focused_sketch(app).is_some() {
         tabs.push("SKETCH");
     }
     tabs.extend(SPECIALTY_TABS.iter().map(|o| o.tab).filter(|tab| tab_turned_on(app, tab)));
@@ -964,7 +1157,7 @@ fn home_tab(app: &crate::SolveApp) -> &'static str {
 /// tool). Tools that work on a sketch's geometry (modify, pattern, constrain) wait for one.
 pub fn starts_a_sketch(app: &crate::SolveApp, id: &str) -> bool {
     app.preferences.sketch_tab_always
-        && app.session.active_sketch.is_none()
+        && focused_sketch(app).is_none()
         && solidcraft_engine::find_command(id)
             .and_then(destination)
             .is_some_and(|(tab, panel)| tab == "SKETCH" && matches!(panel, "CREATE" | "REFERENCE"))
@@ -977,15 +1170,13 @@ pub fn sync_context(app: &mut crate::SolveApp) {
     if crate::render_workspace::active(app) || crate::drawing_workspace::active(app) {
         return;
     }
-    let context = app
-        .session
-        .active_sketch
+    let context = focused_sketch(app)
         .map(|id| format!("sketch:{id}"))
         .or_else(|| sheet_body(app).map(|body| format!("sheet:{body}")))
         .or_else(|| frame_body(app).map(|body| format!("frame:{body}")));
     if app.ui.ribbon_context != context {
         let was_sketch = app.ui.ribbon_context.as_deref().is_some_and(|c| c.starts_with("sketch:"));
-        let back = if app.session.active_sketch.is_some() {
+        let back = if focused_sketch(app).is_some() {
             // Remember the tab the sketch was started from (#3250).
             if !was_sketch && app.ui.tab != "SKETCH" {
                 app.ui.sketch_return_tab = Some(app.ui.tab.clone());
@@ -996,7 +1187,7 @@ pub fn sync_context(app: &mut crate::SolveApp) {
         } else {
             None
         };
-        app.ui.tab = if app.session.active_sketch.is_some() {
+        app.ui.tab = if focused_sketch(app).is_some() {
             "SKETCH"
         } else if let Some(back) = back.as_deref().filter(|t| *t != "SKETCH" && visible_tabs(app).contains(t)) {
             // Finishing a sketch goes back to the tab it came from (#3250).
@@ -2034,5 +2225,321 @@ mod tests {
         for kind in ["Model", "Sheet", "Render", "Animation"] {
             assert!(TAB_ACCENTS.contains(view_accent_tab(kind)), "{kind}");
         }
+    }
+
+    #[test]
+    fn focused_model_views_suspend_and_resume_only_their_own_sketch_ribbon_and_tool() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let owner = h.app.docs.views.active().id;
+        let other = crate::documents::view_duplicate(&mut h.app, owner).unwrap();
+        crate::documents::focus_view(&mut h.app, owner);
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.tool = crate::tools::Tool::for_command("sketch.line");
+        let sketch = h.app.session.active_sketch;
+        assert_eq!(h.app.ui.tab, "SKETCH");
+        crate::documents::focus_view(&mut h.app, other);
+        assert!(!visible_tabs(&h.app).contains(&"SKETCH"));
+        assert_ne!(h.app.ui.tab, "SKETCH");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        assert_eq!(h.app.tool.as_ref().map(|tool| tool.cmd), Some("sketch.line"), "another view's Escape cannot discard the owner's suspended tool");
+        assert_eq!(h.app.session.active_sketch, sketch);
+        crate::documents::focus_view(&mut h.app, owner);
+        assert_eq!(h.app.ui.tab, "SKETCH");
+        assert!(visible_tabs(&h.app).contains(&"SKETCH"));
+        assert_eq!(h.app.tool.as_ref().map(|tool| tool.cmd), Some("sketch.line"));
+        assert!(h.app.session.take_sketch_finish_event().is_none());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn workspace_switcher_prefers_local_mru_then_foreign_mru_then_opens_a_view() {
+        use solidcraft_views::ViewKind;
+        let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        let model = app.docs.views.active().id;
+        let local = crate::documents::view_open(&mut app, ViewKind::Render, None, false);
+        let foreign = crate::documents::view_open(&mut app, ViewKind::Render, None, false);
+        app.run("tab.view.move_to_window", json!({"view":foreign})).unwrap();
+        let window = app.docs.views.window_of(foreign).unwrap();
+        crate::view_windows::focus_view(&mut app, foreign, Some(window)).unwrap();
+        crate::sketch_view::sync(&mut app).unwrap();
+        crate::documents::focus_view(&mut app, model);
+        let count = crate::view_windows::layout_views(&app).len();
+        enter(&mut app, "render").unwrap();
+        assert_eq!(app.docs.views.active().id, local, "same-window match wins over a newer foreign match");
+        assert_eq!(crate::view_windows::layout_views(&app).len(), count);
+        crate::documents::focus_view(&mut app, model);
+        assert!(crate::documents::view_close(&mut app, local));
+        enter(&mut app, "render").unwrap();
+        assert_eq!(crate::view_windows::focused_view(&app), foreign);
+        assert_eq!(app.docs.views.active().id, model, "focusing another window leaves this window's view intact");
+        // Closing a window returns its open views to Main. Close the actual
+        // view here so the next switch really has no Render candidate.
+        app.run("tab.view.close", json!({"id":foreign})).unwrap();
+        assert!(!crate::view_windows::layout_views(&app).iter().any(|(_, view)| view.id == foreign));
+        assert!(app.docs.views.window(window).is_none());
+        enter(&mut app, "render").unwrap();
+        assert_eq!(app.docs.views.active().kind, ViewKind::Render);
+        assert_ne!(app.docs.views.active().id, foreign, "a closed MRU ID is never reused as a target");
+    }
+
+    #[test]
+    fn workspace_switcher_opens_a_missing_kind_beside_the_existing_layout() {
+        use solidcraft_views::{Preset, ViewKind};
+        let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        crate::documents::view_layout(&mut app, Preset::SideBySide);
+        let before = app.docs.views.tiles().unwrap().views();
+        enter(&mut app, "render").unwrap();
+        let after = app.docs.views.tiles().unwrap().views();
+        assert_eq!(app.docs.views.active().kind, ViewKind::Render);
+        assert_eq!(after.len(), before.len() + 1);
+        assert!(before.iter().all(|id| after.contains(id)), "new fallback keeps every existing tile");
+    }
+
+    #[test]
+    fn sheet_focus_selects_its_exact_receiver_and_keeps_drawing_open_on_return_to_model() {
+        use solidcraft_views::ViewKind;
+        let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        let model = app.docs.views.active().id;
+        app.run("solid.box", json!({"length":40,"width":30,"height":5})).unwrap();
+        let drawing = app.run("drawing.create", json!({})).unwrap();
+        let drawing_id = app.session.open_drawing.unwrap();
+        let sheet = solidcraft_engine::doc::ids::decode(drawing["sheets"][0]["id"].as_str().unwrap()).unwrap();
+        let camera = app.cam;
+        enter(&mut app, "drawing").unwrap();
+        assert_eq!(app.docs.views.active().kind, ViewKind::Sheet);
+        assert_eq!(app.docs.views.active().subject.as_deref(), Some(crate::sheet_views::subject(drawing_id, sheet).as_str()));
+        assert_eq!(crate::drawing_sheet_page::active_sheet(&app), Some(sheet));
+        assert!(!app.session.model_focus);
+        assert_eq!(visible_tabs(&app), DRAWING_TABS);
+        crate::documents::focus_view(&mut app, model);
+        assert!(app.session.model_focus);
+        assert_eq!(app.session.open_drawing, Some(drawing_id));
+        assert_eq!(app.cam, camera);
+        assert!(!drawing_tab(&app.ui.tab));
+    }
+
+    #[test]
+    fn a_hover_and_passive_paint_never_change_workspace_focus_history() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        crate::documents::view_layout(&mut h.app, solidcraft_views::Preset::SideBySide);
+        h.frames(2);
+        let focused = h.app.session.view_context.focused();
+        let recent = h.app.session.view_context.recent().to_vec();
+        let tab = h.app.ui.tab.clone();
+        let card = h.app.viewport.cards.first().unwrap().1.center();
+        h.step(&json!({"move":[card.x, card.y]})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.view_context.focused(), focused);
+        assert_eq!(h.app.session.view_context.recent(), recent);
+        assert_eq!(h.app.ui.tab, tab);
+    }
+
+    #[test]
+    fn legacy_workspace_preference_keeps_independent_switching_without_opening_views() {
+        let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        app.preferences.workspace_follows_view = false;
+        let view = app.docs.views.active().id;
+        let before = app.docs.views.len();
+        enter(&mut app, "render").unwrap();
+        assert!(crate::render_workspace::active(&app));
+        assert_eq!(app.docs.views.active().id, view);
+        assert_eq!(app.docs.views.len(), before);
+        enter(&mut app, "design").unwrap();
+        assert!(!crate::render_workspace::active(&app));
+    }
+
+    #[test]
+    fn a_canvas_press_and_strip_activation_project_focus_without_finishing_the_sketch() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        crate::documents::view_layout(&mut h.app, solidcraft_views::Preset::SideBySide);
+        let owner = h.app.docs.views.active().id;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let sketch = h.app.session.active_sketch;
+        h.frames(2);
+        let (other, rect) = h.app.viewport.cards.first().copied().unwrap();
+        let at = rect.center();
+        h.step(&json!({"click":[at.x,at.y]})).unwrap();
+        assert_eq!(h.app.docs.views.active().id, other);
+        assert_ne!(h.app.ui.tab, "SKETCH");
+        assert_eq!(h.app.session.active_sketch, sketch);
+        h.app.run("tab.view.activate", json!({"id":owner,"window":0})).unwrap();
+        assert_eq!(h.app.ui.tab, "SKETCH");
+        assert_eq!(h.app.session.active_sketch, sketch);
+        assert!(h.app.session.take_sketch_finish_event().is_none());
+    }
+
+    #[test]
+    fn switching_to_a_hidden_existing_view_keeps_other_cells_in_place() {
+        use solidcraft_views::{Preset, Rect, ViewKind};
+        let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        crate::documents::view_layout(&mut app, Preset::SideBySide);
+        let model = app.docs.views.active().id;
+        let hidden = crate::documents::view_open(&mut app, ViewKind::Render, None, false);
+        crate::documents::focus_view(&mut app, model);
+        let area = Rect { x: 0.0, y: 0.0, w: 1000.0, h: 700.0 };
+        let before = app.docs.views.tiles().unwrap().rects(area, 12.0);
+        let count = app.docs.views.len();
+        enter(&mut app, "render").unwrap();
+        assert_eq!(app.docs.views.active().id, hidden);
+        let after = app.docs.views.tiles().unwrap().rects(area, 12.0);
+        assert_eq!(app.docs.views.len(), count);
+        assert!(after.iter().any(|(id, _)| *id == hidden));
+        for (id, rect) in before.iter().filter(|(id, _)| *id != model) {
+            assert!(after.iter().any(|(next, at)| next == id && at == rect));
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_scoped_sheet_window_restores_outer_ribbon_history_receiver_and_focus_order() {
+        use solidcraft_views::ViewKind;
+        let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        let model = app.docs.views.active().id;
+        app.run("solid.box", json!({"length":40,"width":30,"height":5})).unwrap();
+        let drawing = app.run("drawing.create", json!({})).unwrap();
+        let drawing_id = app.session.open_drawing.unwrap();
+        let sheet = solidcraft_engine::doc::ids::decode(drawing["sheets"][0]["id"].as_str().unwrap()).unwrap();
+        let page = crate::documents::view_open(&mut app, ViewKind::Sheet, Some(crate::sheet_views::subject(drawing_id, sheet)), false);
+        app.run("tab.view.move_to_window", json!({"view":page})).unwrap();
+        let window = app.docs.views.window_of(page).unwrap();
+        crate::documents::focus_view(&mut app, model);
+        app.ui.tab = "SURFACE".into();
+        crate::sketch_view::sync(&mut app).unwrap();
+        let recent = app.session.view_context.recent().to_vec();
+        crate::view_windows::with_strip(&mut app, Some(window), |app| {
+            assert!(drawing_tab(&app.ui.tab));
+            assert!(!app.session.model_focus);
+            crate::sketch_view::sync(app)?;
+            assert_eq!(app.session.view_context.focused(), model, "a passive foreign scope retains true native focus");
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(app.ui.tab, "SURFACE");
+        assert!(app.session.model_focus);
+        assert_eq!(app.session.view_context.recent(), recent);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn control_history_uses_focused_child_sheet_after_the_model_ribbon_is_restored() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let model = h.app.docs.views.active().id;
+        h.app.run("solid.box", json!({"length":40,"width":30,"height":5})).unwrap();
+        h.app.run("drawing.create", json!({"name":"Child drawing"})).unwrap();
+        let drawing = h.app.session.drawing("drawing.inspect").unwrap();
+        let (drawing, sheet) = (drawing.id, drawing.sheets[0].id);
+        let note = h.app.run("drawing.note.add", json!({"anchor":{"sheet":"Sheet 1"},"at":[50,50],"content":"Undo this note"})).unwrap();
+        let note = solidcraft_engine::doc::ids::decode(note["note"].as_str().unwrap()).unwrap();
+        let view =
+            crate::documents::view_open(&mut h.app, solidcraft_views::ViewKind::Sheet, Some(crate::sheet_views::subject(drawing, sheet)), false);
+        h.app.run("tab.view.move_to_window", json!({"view":view})).unwrap();
+        let window = h.app.docs.views.window_of(view).unwrap();
+        crate::documents::view_activate(&mut h.app, model);
+        crate::view_windows::focus_view(&mut h.app, view, Some(window)).unwrap();
+        crate::sketch_view::sync(&mut h.app).unwrap();
+        crate::view_windows::with_strip(&mut h.app, Some(window), |app| {
+            assert_eq!(app.session.history_part(), Some(drawing));
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(h.app.ui.tab, "MODEL");
+        let reply = h.call("engine.execute", json!({"command":"edit.undo","params":{}}));
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert!(!h.app.session.doc.drawing(drawing).unwrap().has_object(note));
+        assert_eq!(h.app.session.history_part(), Some(drawing));
+        let reply = h.call(
+            "engine.execute",
+            json!({"command":"drawing.note.add","params":{
+                "anchor":{"sheet":solidcraft_engine::doc::ids::encode(sheet)},"at":[80,80],"content":"Focused child"
+            }}),
+        );
+        assert_eq!(reply["ok"], true, "{reply}");
+        let added = solidcraft_engine::doc::ids::decode(reply["result"]["note"].as_str().unwrap()).unwrap();
+        assert!(h.app.session.doc.drawing(drawing).unwrap().on_sheet(sheet).notes.contains(&added));
+    }
+
+    #[test]
+    fn suspended_sketch_tool_hints_follow_owner_focus_without_hiding_other_statuses() {
+        fn painted(h: &crate::scenario::Harness, expected: &str) -> bool {
+            let mut found = false;
+            for clipped in &h.shapes {
+                crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+                    if let egui::Shape::Text(text) = shape {
+                        found |= text.galley.text() == expected;
+                    }
+                });
+            }
+            found
+        }
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":40,"width":30,"height":5})).unwrap();
+        let owner = h.app.docs.views.active().id;
+        h.app.run("drawing.create", json!({})).unwrap();
+        enter(&mut h.app, "drawing").unwrap();
+        let sheet = h.app.docs.views.active().id;
+        crate::documents::focus_view(&mut h.app, owner);
+        let other = crate::documents::view_duplicate(&mut h.app, owner).unwrap();
+        let render = crate::documents::view_open(&mut h.app, solidcraft_views::ViewKind::Render, None, false);
+        crate::documents::focus_view(&mut h.app, owner);
+        h.app.run("tab.view.beside", json!({"id":render,"edge":"right"})).unwrap();
+        h.app.run("sketch.create", json!({"plane":"XY","view":owner})).unwrap();
+        let sketch = h.app.session.active_sketch;
+        for command in ["sketch.line", "sketch.rectangle.two_point", "sketch.circle.center"] {
+            h.app.start(command);
+            assert_eq!(h.app.tool.as_ref().map(|tool| tool.cmd), Some(command));
+            assert!(h.app.status_is_tool_hint, "all tool starts mark guidance provenance");
+            let hint = h.app.status.as_ref().unwrap().0.clone();
+            h.frames(2);
+            assert!(painted(&h, &hint), "owner paints its actual tool guidance: {command}");
+            assert!(h.app.viewport.palette_rect.is_some(), "the owner exposes its actual Sketch palette");
+            assert!(painted(&h, "Finish Sketch"));
+            for away in [other, render, sheet] {
+                crate::documents::focus_view(&mut h.app, away);
+                if away == sheet {
+                    // Show the focused Drawing's existing property inspector, without
+                    // starting a different edit while the Model sketch is parked.
+                    h.app.drawing_workspace.settings_open = true;
+                }
+                h.frames(2);
+                assert!(!tool_receives_input(&h.app));
+                assert!(!painted(&h, &hint), "a suspended tool gives no click instructions in another Model/Render/Sheet view");
+                assert!(h.app.viewport.palette_rect.is_none(), "the Model Sketch palette cannot follow focus into another view");
+                assert!(!painted(&h, "Finish Sketch"));
+                if away == sheet {
+                    assert!(crate::drawing_workspace::inspector_visible(&h.app));
+                    assert!(painted(&h, h.app.tr("cmd.drawing_sheet_set")), "the focused Sheet's property inspector paints instead");
+                    h.app.preferences.workspace_follows_view = false;
+                    assert!(crate::sketch_palette::editing(&h.app), "legacy switching retains the old global palette condition");
+                    h.app.preferences.workspace_follows_view = true;
+                }
+                assert_eq!(h.app.status.as_ref().map(|status| &status.0), Some(&hint), "hiding guidance retains its canonical status");
+                assert_eq!(h.app.tool.as_ref().map(|tool| tool.cmd), Some(command));
+                assert_eq!(h.app.session.active_sketch, sketch);
+                crate::documents::focus_view(&mut h.app, owner);
+                h.frames(2);
+                assert!(tool_receives_input(&h.app));
+                assert!(painted(&h, &hint), "returning to the owner resumes guidance");
+                assert!(h.app.viewport.palette_rect.is_some());
+                assert!(painted(&h, "Finish Sketch"));
+            }
+        }
+        crate::documents::focus_view(&mut h.app, render);
+        h.app.set_status("Generic status while the tool is suspended", false);
+        assert!(!h.app.status_is_tool_hint);
+        h.frames(2);
+        assert!(painted(&h, "Generic status while the tool is suspended"));
+        h.app.set_status("Error while the tool is suspended", true);
+        assert!(!h.app.status_is_tool_hint);
+        h.frames(2);
+        assert!(painted(&h, "Error while the tool is suspended"));
+        assert_eq!(h.app.session.active_sketch, sketch);
+        assert_eq!(h.app.tool.as_ref().map(|tool| tool.cmd), Some("sketch.circle.center"));
+        assert!(h.app.session.take_sketch_finish_event().is_none());
     }
 }

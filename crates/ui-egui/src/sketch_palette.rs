@@ -93,7 +93,7 @@ pub fn set_mode(app: &mut SolveApp, m: u8) {
         3 => "Infinite mode: new lines are infinite construction lines",
         _ => "Normal mode",
     };
-    app.set_status(hint, false);
+    app.set_tool_hint(hint);
 }
 
 /// X / the toolbar's Construction: convert the selected curves, or with nothing selected
@@ -249,7 +249,8 @@ const LINE_TYPES: [(&str, &str, &str); 4] = [
 
 /// Is a sketch being edited? That is the palette's own condition.
 pub fn editing(app: &SolveApp) -> bool {
-    app.session.active_sketch.and_then(|s| crate::open_meshing::session_world(&app.session).sketch(s).map(|_| ())).is_some()
+    crate::workspace::tool_receives_input(app)
+        && app.session.active_sketch.and_then(|s| crate::open_meshing::session_world(&app.session).sketch(s).map(|_| ())).is_some()
 }
 
 /// Is the Canvas or Decal tool running? The palette then shows the tool's frame mode (#18405),
@@ -350,6 +351,9 @@ fn constraint_status(remaining: usize, solved: bool, geometry: bool) -> String {
 
 /// The active sketch supplies presentation while the host retains placement.
 pub(crate) fn shared_presentation(app: &SolveApp) -> Option<crate::panel_runtime::PanelPresentation> {
+    if !editing(app) {
+        return None;
+    }
     let _language = solidcraft_ui_text::scope(&app.preferences.language);
     if !editing(app) {
         return image_tool_presentation(app);
@@ -370,6 +374,9 @@ pub(crate) fn shared_presentation(app: &SolveApp) -> Option<crate::panel_runtime
 }
 
 pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
+    if !editing(app) {
+        return;
+    }
     let ctx = ui.ctx().clone();
     let _language = solidcraft_ui_text::scope(&app.preferences.language);
     if !editing(app) {
