@@ -4637,3 +4637,300 @@ fn a_round_overflowing_a_split_flange_s_tab_top_leaves_the_bends_on_their_surfac
         }
     }
 }
+
+/// The volume a round of radius `f` adds where a sphere of radius `r` stands with its centre
+/// on a plane (or takes off where a socket of radius `r` is cut so): the ring between the
+/// plane, the sphere and the ball of radius `f` touching both, by Pappus. In a half-plane
+/// through the axis the ball's centre is at height `f` and distance `rho` from the axis with
+/// `r + f` from the sphere's centre; at height z the ring spans from the sphere,
+/// `sqrt(r^2 - z^2)`, to the ball, `rho - sqrt(f^2 - (z - f)^2)`, up to the sphere's contact
+/// at `zt = f r / (r + f)`.
+fn sphere_on_plane_round(r: f64, f: f64) -> f64 {
+    let rho = ((r + f).powi(2) - f * f).sqrt();
+    let zt = f * r / (r + f);
+    // the integral of sqrt(f^2 - t^2)
+    let circle = |t: f64| t / 2.0 * (f * f - t * t).max(0.0).sqrt() + f * f / 2.0 * (t / f).asin();
+    PI * (2.0 * r * f * zt + f * zt * zt - 2.0 * rho * (circle(zt - f) - circle(-f)))
+}
+
+/// A turn of `degrees` about axis `axis` (0, 1, 2 for x, y, z), as `Body::transform` takes it.
+fn turn_about(axis: usize, degrees: f64) -> [[f64; 4]; 4] {
+    let (s, c) = degrees.to_radians().sin_cos();
+    let (i, j) = [(1, 2), (2, 0), (0, 1)][axis];
+    let mut m = [[0.0; 4]; 4];
+    for (d, row) in m.iter_mut().enumerate() {
+        row[d] = 1.0;
+    }
+    m[i][i] = c;
+    m[j][j] = c;
+    m[i][j] = s;
+    m[j][i] = -s;
+    m
+}
+
+/// The relative accuracy the rim-round tests ask of the volume integrator.
+const RIM_VOLUME_ACCURACY: f64 = 1e-12;
+
+/// A plate `r` thick with its face on the plane through the origin square to `axis`, lying on
+/// the side of it `side` gives, and a sphere of radius `r` centred on the origin, first moved
+/// by `moves` (applied in order), then joined (a nub) or cut (a socket) by `op`. The plate is
+/// 5 r across, wide enough for the round's ring, so the volume measured stays near the ring's.
+fn sphere_on_plate(
+    r: f64,
+    axis: usize,
+    side: f64,
+    moves: &[[[f64; 4]; 4]],
+    op: solidcore_ops::BooleanOp,
+) -> Body {
+    let mut lo = [-2.5 * r; 3];
+    let mut size = [5.0 * r; 3];
+    lo[axis] = if side > 0.0 { 0.0 } else { -r };
+    size[axis] = r;
+    let plate = make_box(lo, size).unwrap();
+    let sphere = solidcore_ops::make_sphere([0.0; 3], r).unwrap();
+    for m in moves {
+        sphere.transform(m).unwrap();
+    }
+    solidcore_ops::boolean::boolean(plate, sphere, op)
+        .unwrap()
+        .unwrap()
+}
+
+/// The edges of `b` on the circle of radius `r` about the origin in the plane square to
+/// `axis`, found at every degree of the circle, for which `keep` holds of the point there.
+fn circle_edges(b: &Body, r: f64, axis: usize, keep: impl Fn([f64; 3]) -> bool) -> Vec<usize> {
+    let (k, brep) = kernel_copy(b);
+    let all = brep.edge_list();
+    let (u, v) = [(1, 2), (0, 2), (0, 1)][axis];
+    let mut edges = Vec::new();
+    for i in 0..360 {
+        let a = (0.5 + f64::from(i)).to_radians();
+        let mut p = [0.0; 3];
+        p[u] = r * a.cos();
+        p[v] = r * a.sin();
+        if !keep(p) {
+            continue;
+        }
+        let q = Vec3::new(p[0], p[1], p[2]);
+        if let Some(e) = all.iter().position(|&e| {
+            edge_closest_point(&k, &brep, e, q)
+                .unwrap()
+                .closest
+                .distance
+                < 1e-9 * r
+        }) {
+            if !edges.contains(&e) {
+                edges.push(e);
+            }
+        }
+    }
+    edges
+}
+
+/// Rounds `edges` of `b` by `f` and checks the result: one valid manifold solid whose volume
+/// changed by `want`. Both volumes are integrated to `RIM_VOLUME_ACCURACY` of themselves, so
+/// the change is known to the sum of those two bounds; the ring's closed form is exact to
+/// rounding. Returns the change.
+fn round_rim(case: &str, b: &Body, edges: &[usize], f: f64, want: Option<f64>) -> f64 {
+    let before = b.volume(RIM_VOLUME_ACCURACY).unwrap();
+    blend(
+        b,
+        Blend::Round,
+        edges,
+        &vec![f; edges.len()],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap_or_else(|e| panic!("{case}: the round does not build: {e:?}"));
+    assert!(b.is_manifold_solid().unwrap(), "{case}");
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{case}: {report}");
+    let after = b.volume(RIM_VOLUME_ACCURACY).unwrap();
+    let change = after - before;
+    if let Some(want) = want {
+        let bound = RIM_VOLUME_ACCURACY * (before.abs() + after.abs()) + 1e-14 * want.abs();
+        assert!(
+            (change - want).abs() <= bound,
+            "{case}: the volume changed by {change}, not {want} ({:.2e} relative, the \
+             integration allows {:.2e})",
+            (change - want).abs() / want.abs(),
+            bound / want.abs()
+        );
+    }
+    change
+}
+
+/// Rounds the whole rim of a sphere of radius `r` cut or joined with its centre on a plate's
+/// face (see [`sphere_on_plate`]) by `f`, and checks the volume against the ring's closed form.
+fn round_sphere_rim(
+    case: &str,
+    r: f64,
+    f: f64,
+    axis: usize,
+    side: f64,
+    moves: &[[[f64; 4]; 4]],
+    op: solidcore_ops::BooleanOp,
+) {
+    let b = sphere_on_plate(r, axis, side, moves, op);
+    let edges = circle_edges(&b, r, axis, |_| true);
+    assert!(!edges.is_empty(), "{case}: no edge on the rim");
+    let ring = sphere_on_plane_round(r, f);
+    let want = if op == solidcore_ops::BooleanOp::Union {
+        ring
+    } else {
+        -ring
+    };
+    round_rim(case, &b, &edges, f, Some(want));
+}
+
+/// The nub and socket cases each rim-round test runs: (`op`, the plate's side).
+const NUB_AND_SOCKET: [(solidcore_ops::BooleanOp, f64); 3] = [
+    (solidcore_ops::BooleanOp::Union, 1.0),
+    (solidcore_ops::BooleanOp::Union, -1.0),
+    (solidcore_ops::BooleanOp::Subtract, 1.0),
+];
+
+/// tangency-labs/solidcraft#18829 and #18826: a round where a sphere meets a flat face it is
+/// centred on, as a nub (joined) or a socket (cut), with the face square to each axis. The
+/// sphere's poles lie on its z axis, so on a face square to x or y the rim runs through both
+/// poles and is split into its edges there: at each pole two pieces of the round meet as one
+/// blend, solved on one section from the ball's feet. The feet were the vertex's parameters
+/// stepped by the binormal's first-order image, which at a pole is unbounded, and the round
+/// failed ("Fillet Corner Error: Unable to Compute Geometry"). They are now the sphere's points
+/// nearest the vertex stepped along the binormal, found in 3D. Turning the sphere about z moves
+/// its seam and nothing else. Every round builds a valid solid and adds or takes off the
+/// ring's closed form, to the volume integration's accuracy.
+#[test]
+fn a_round_where_a_sphere_meets_a_face_through_its_poles_builds() {
+    use solidcore_ops::BooleanOp;
+    all_fixes();
+    let (r, f) = (0.975, 0.3);
+    for (axis, side, turn, op) in [
+        (2, -1.0, 0.0, BooleanOp::Union),
+        (1, 1.0, 0.0, BooleanOp::Union),
+        (1, -1.0, 0.0, BooleanOp::Union),
+        (1, 1.0, 30.0, BooleanOp::Union),
+        (1, 1.0, 180.0, BooleanOp::Union),
+        (0, 1.0, 0.0, BooleanOp::Union),
+        (0, -1.0, 0.0, BooleanOp::Union),
+        (1, 1.0, 0.0, BooleanOp::Subtract),
+        (1, -1.0, 0.0, BooleanOp::Subtract),
+        (0, 1.0, 0.0, BooleanOp::Subtract),
+    ] {
+        let case =
+            format!("face square to axis {axis}, plate on {side}, sphere turned {turn}, {op:?}");
+        round_sphere_rim(&case, r, f, axis, side, &[turn_about(2, turn)], op);
+    }
+}
+
+/// #18826's socket: a sphere of radius 1 cut with its centre on a block's face, its rim
+/// rounded by 0.1, 0.2 and 0.3, and the same as a nub; then the reported part, with a
+/// vertical channel (radius 0.9, its axis 0.35 outside the face) cut across the socket's top,
+/// which takes the rim's top from x = -0.829 to 0.829. The channelled round has no closed
+/// form; it must build a valid solid that takes less than the whole ring.
+#[test]
+fn a_round_on_a_rim_through_a_spheres_poles_joins_at_the_poles() {
+    use solidcore_ops::boolean::boolean;
+    use solidcore_ops::{make_sphere, BooleanOp};
+    all_fixes();
+    for (op, side) in NUB_AND_SOCKET {
+        for f in [0.1, 0.2, 0.3] {
+            round_sphere_rim(
+                &format!("{op:?} on {side}, f {f}"),
+                1.0,
+                f,
+                1,
+                side,
+                &[],
+                op,
+            );
+        }
+    }
+    let block = make_box([-5.0, 0.0, 0.0], [10.0, 5.0, 10.0]).unwrap();
+    let channel = make_cylinder([0.0, -0.35, 5.0], 0.9, 6.0).unwrap();
+    let b = boolean(block, channel, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let socket = make_sphere([0.0, 0.0, 5.0], 1.0).unwrap();
+    let b = boolean(b, socket, BooleanOp::Subtract).unwrap().unwrap();
+    let half_width = (0.81_f64 - 0.35 * 0.35).sqrt();
+    let (k, brep) = kernel_copy(&b);
+    let mut edges = Vec::new();
+    for degrees in [20.0_f64, -45.0, -135.0, 200.0] {
+        let t = degrees.to_radians();
+        let q = Vec3::new(t.cos(), 0.0, 5.0 + t.sin());
+        assert!(t.sin() < 0.0 || t.cos().abs() > half_width);
+        let e = brep
+            .edge_list()
+            .iter()
+            .position(|&e| {
+                edge_closest_point(&k, &brep, e, q)
+                    .unwrap()
+                    .closest
+                    .distance
+                    < 1e-9
+            })
+            .unwrap();
+        if !edges.contains(&e) {
+            edges.push(e);
+        }
+    }
+    assert_eq!(edges.len(), 3, "the channelled rim's edges");
+    let taken = -round_rim("the channelled socket", &b, &edges, 0.2, None);
+    assert!(
+        taken > 0.0 && taken < sphere_on_plane_round(1.0, 0.2),
+        "the channelled socket's round took {taken}"
+    );
+}
+
+/// The poles' rounding noise grows with the square of the radius (|du x dv| at an exact pole
+/// is 6e-11 at radius 0.975 and 1.3e-8 at 20), so a test of the parameterisation's singularity
+/// against a fixed limit lets the first-order step back in from radius 17 or so up. The foot
+/// is found in 3D at every size: the rim of a sphere of radius 0.01 to 100 builds, nub and
+/// socket, with the round a fixed share of the radius.
+#[test]
+fn a_round_on_a_sphere_s_rim_through_its_poles_builds_at_any_size() {
+    all_fixes();
+    for r in [0.01, 20.0, 40.0, 100.0] {
+        for (op, side) in NUB_AND_SOCKET {
+            let case = format!("radius {r}, {op:?} on {side}");
+            round_sphere_rim(&case, r, 0.3 * r / 0.975, 1, side, &[], op);
+        }
+    }
+}
+
+/// A sphere tilted about x by 1e-9 to 1e-6 radians: its poles leave the rim by that much, and
+/// the rim's vertices sit beside them, where the sphere's parameterisation is nearly singular.
+/// The first-order step there was up to 5e7 in longitude; the 3D foot is unaffected.
+#[test]
+fn a_round_on_a_sphere_s_rim_with_its_poles_beside_the_rim_builds() {
+    all_fixes();
+    for tilt in [1e-9_f64, 1e-8, 1e-7, 1e-6] {
+        for seam in [0.0, 90.0] {
+            for (op, side) in NUB_AND_SOCKET {
+                let case = format!("tilt {tilt:e} rad, seam turned {seam}, {op:?} on {side}");
+                let moves = [turn_about(2, seam), turn_about(0, tilt.to_degrees())];
+                round_sphere_rim(&case, 0.975, 0.3, 1, side, &moves, op);
+            }
+        }
+    }
+}
+
+/// A sphere turned about the face's normal: its poles stay on the rim, at other places. At 5
+/// degrees a rim vertex lies 5 degrees from a pole, where the parameterisation is regular
+/// (|du x dv| = 1.37) but the first-order step of -0.62 in u carried the foot across the pole
+/// onto the wrong meridian. With the seam turned 200 degrees a join lies on the sphere's seam,
+/// and the foot found in 3D must keep to the edge use's side of it (u = 1.0086, not 0.0086).
+#[test]
+fn a_round_on_a_sphere_s_rim_turned_about_the_face_normal_builds() {
+    all_fixes();
+    for turn in [5.0, 30.0, 137.0] {
+        for seam in [0.0, 200.0] {
+            for (op, side) in NUB_AND_SOCKET {
+                let case = format!("turned {turn} about y, seam turned {seam}, {op:?} on {side}");
+                let moves = [turn_about(2, seam), turn_about(1, turn)];
+                round_sphere_rim(&case, 0.975, 0.3, 1, side, &moves, op);
+            }
+        }
+    }
+}

@@ -1088,6 +1088,30 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
             "blend.fillet_executive_p3",
         ))
     }
+    /// The fork's `FacesOutlastTheirBlends` over `solvers`
+    /// ([`SolverGeometryAccess::geometry_faces_outlast`]).
+    ///
+    /// # Errors
+    /// [`SolidError::Unported`] without live context.
+    fn solvers_faces_outlast(&mut self, k: &mut Kernel, solvers: &[O]) -> Result<bool> {
+        let _ = (k, solvers);
+        Err(SolidError::unported(
+            "SmFilletExecutive::FacesOutlastTheirBlends (fork)",
+            "blend.fillet_executive_p3",
+        ))
+    }
+    /// The fork's `BandsClearOtherRails` over `solvers`
+    /// ([`SolverGeometryAccess::geometry_bands_clear_other_rails`]).
+    ///
+    /// # Errors
+    /// [`SolidError::Unported`] without live context.
+    fn solvers_bands_clear_other_rails(&mut self, k: &mut Kernel, solvers: &[O]) -> Result<bool> {
+        let _ = (k, solvers);
+        Err(SolidError::unported(
+            "SmFilletExecutive::BandsClearOtherRails (fork)",
+            "blend.fillet_executive_p3",
+        ))
+    }
     /// `SmFilletSolver::GetThisApproxTol3d`.
     fn solver_approx_tolerance(&self, solver: O) -> Result<f64>;
     /// `SmFilletGeom::m_pFilletSurface->GetOwner()`, cast to face.
@@ -1344,6 +1368,25 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
         faces: Option<&[O]>,
         allow_spine_edges: bool,
     ) -> Result<StitchAttempt>;
+    /// [`Self::stitch_faces`] of every face of `brep` keeping a fillet's own edge where a
+    /// patch of `corners` meets it
+    /// ([`FaceStitchAccess::stitch_body_keeping_fillet_edges`]).
+    ///
+    /// # Errors
+    /// [`SolidError::Unported`] without live context; as [`Self::stitch_faces`].
+    fn stitch_faces_keeping_fillet_edges(
+        &mut self,
+        k: &mut Kernel,
+        brep: O,
+        tolerance: f64,
+        corners: &[O],
+    ) -> Result<StitchAttempt> {
+        let _ = (k, brep, tolerance, corners);
+        Err(SolidError::unported(
+            "SmFilletPatchStitchCallback",
+            "blend.fillet_executive_p3",
+        ))
+    }
 
     /// `SmFilletExecutive::DoPiecewiseMerge` on the implementor's bodies (the live
     /// session's port is `FilletSession`'s piecewise merge).
@@ -2587,6 +2630,15 @@ where
     fn stitch_body(&mut self, k: &mut Kernel, body: O, tolerance: f64) -> Result<StitchAttempt> {
         ExecutiveAccess::stitch_faces(self, k, body, tolerance, None, false)
     }
+    fn stitch_body_keeping_fillet_edges(
+        &mut self,
+        k: &mut Kernel,
+        body: O,
+        tolerance: f64,
+        corners: &[O],
+    ) -> Result<StitchAttempt> {
+        ExecutiveAccess::stitch_faces_keeping_fillet_edges(self, k, body, tolerance, corners)
+    }
 }
 
 /// Actual construction operations for the intermediate fillet faces.
@@ -2876,6 +2928,12 @@ where
         _executive: &FilletExecutive<O>,
     ) -> Result<bool> {
         ExecutiveAccess::solver_end_sections_fit(self, k, solver)
+    }
+    fn geometry_faces_outlast(&mut self, k: &mut Kernel, solvers: &[O]) -> Result<bool> {
+        ExecutiveAccess::solvers_faces_outlast(self, k, solvers)
+    }
+    fn geometry_bands_clear_other_rails(&mut self, k: &mut Kernel, solvers: &[O]) -> Result<bool> {
+        ExecutiveAccess::solvers_bands_clear_other_rails(self, k, solvers)
     }
 }
 
