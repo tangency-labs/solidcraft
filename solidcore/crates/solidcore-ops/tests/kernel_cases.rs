@@ -47,7 +47,7 @@
 //!
 //! One entry from outside the corpus (a reported failure's case, `docs/failure-codes-and-reproduction.md`
 //! 3.4) replays with `KERNEL_CASES_ENTRY=<path to its .json>` (its records beside it) through
-//! the test `kernel_case_entry`: it prints the outcome as a JSON line, `same failure` when the
+//! the test `kernel_case_entry` (which does nothing without it): it prints the outcome as a JSON line, `same failure` when the
 //! call that fails fails with the entry's failure code (the failing call's `code`), `other
 //! failure`, `builds now`, or `unsupported`, and fails unless it is `same failure` (or
 //! `KERNEL_CASES_REPORT_ONLY` is set). `KERNEL_CASES_REPORT` writes the line to a file too.
@@ -4515,7 +4515,6 @@ fn replay_entry(entry: &Path, e: &Value) -> Value {
 /// `KERNEL_CASES_ENTRY`: one entry from outside the corpus, replayed against its failure code
 /// ([`replay_entry`]). Without it, nothing runs.
 #[test]
-#[ignore = "replays the entry KERNEL_CASES_ENTRY names; run it with --ignored"]
 fn kernel_case_entry() {
     let Some(path) = std::env::var_os("KERNEL_CASES_ENTRY") else {
         return;

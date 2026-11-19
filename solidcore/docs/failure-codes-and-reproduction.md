@@ -61,7 +61,7 @@ Each `Failed` error built where the routine knows its entity (an edge being blen
 
 The rig runner takes `KERNEL_CASES_ENTRY=<path>`: one entry file, its `<case>.bodies.json.gz` beside it, outside the corpus and outside the manifest. The run reports the outcome and the failing call's `FailureCode`, and checks that code against the entry's (`same failure`, `other failure`, `builds now`).
 
-Built: `KERNEL_CASES_ENTRY=<entry.json> cargo test -p solidcore-ops --test kernel_cases -- --ignored kernel_case_entry` prints one JSON line, `{"case", "outcome", "code", "expected", "note"}`. The expected code is the `code` of the entry's last failing call that is not `continued`. The outcome is `same failure`, `other failure`, `builds now` or `unsupported`. The test fails unless it is `same failure`, or `KERNEL_CASES_REPORT_ONLY` is set; `KERNEL_CASES_REPORT` writes the line to a file too.
+Built: `KERNEL_CASES_ENTRY=<entry.json> cargo test -p solidcore-ops --test kernel_cases -- kernel_case_entry` prints one JSON line, `{"case", "outcome", "code", "expected", "note"}`. The expected code is the `code` of the entry's last failing call that is not `continued`. The outcome is `same failure`, `other failure`, `builds now` or `unsupported`. The test fails unless it is `same failure`, or `KERNEL_CASES_REPORT_ONLY` is set; `KERNEL_CASES_REPORT` writes the line to a file too.
 
 ### 3.5 The reducer
 
