@@ -295,6 +295,7 @@ pub mod settings_profiles;
 #[cfg(test)]
 mod settings_profiles_tests;
 pub mod sheet_rule_library;
+pub(crate) mod sheet_views;
 pub mod shell;
 #[cfg(test)]
 mod shell_face_sketch_ui_tests;
@@ -302,7 +303,7 @@ pub mod shortcut_box;
 pub mod sketch3d;
 #[cfg(test)]
 mod sketch3d_frame_ui_tests;
-pub(crate) mod sketch_attachment_ui;
+mod sketch_attachment_ui;
 #[cfg(test)]
 mod sketch_attachment_ui_tests;
 mod sketch_construction;
@@ -668,6 +669,7 @@ pub struct SolveApp {
     pub(crate) sketch_refreshes: std::collections::BTreeMap<u64, sketch_view::ModelRefresh>,
     pub(crate) stopped_sketch_refreshes: std::collections::BTreeSet<u64>,
     pub(crate) sketch_edit_sequences: std::collections::BTreeMap<u64, u64>,
+    pub(crate) view_ribbons: std::collections::BTreeMap<(u64, u64), workspace::ViewRibbon>,
     /// The custom view navigator's body (kept with the preferences).
     pub view_gizmo: view_gizmo::State,
     /// Seconds since start, as of this frame.
@@ -827,6 +829,8 @@ pub struct SolveApp {
     /// When Esc was last pressed (input time): a second press soon after finishes the sketch.
     pub last_escape: Option<f64>,
     pub status: Option<(String, f64, bool)>,
+    /// Interactive tool guidance is presented only where the tool receives input.
+    pub(crate) status_is_tool_hint: bool,
     /// The status message offers Undo (a click on it undoes the last step), as after an automatic stand-up.
     pub status_undo: bool,
     pub quit_requested: bool,
@@ -1026,6 +1030,7 @@ impl SolveApp {
     }
 
     pub fn new(mut session: Session, services: Services) -> Self {
+        session.model_focus = true;
         // The app's catalogs, once per process; later calls find them installed.
         i18n::install();
         // The app's look (icons, glyphs and built-in theme files), likewise, before the first frame.
@@ -1065,6 +1070,7 @@ impl SolveApp {
             sketch_notices: Default::default(),
             prepared_edit_starts: Default::default(),
             sketch_edit_sequences: Default::default(),
+            view_ribbons: Default::default(),
             sketch_finish_processing: false,
             sketch_refreshes: Default::default(),
             stopped_sketch_refreshes: Default::default(),
@@ -1146,6 +1152,7 @@ impl SolveApp {
             escape_owner: None,
             last_escape: None,
             status: None,
+            status_is_tool_hint: false,
             status_undo: false,
             quit_requested: false,
             autosave: None,
@@ -1624,7 +1631,7 @@ impl SolveApp {
             solidcraft_engine::slicers::set_chosen_programs(&self.preferences.custom_slicers);
         }
         self.session.set_validation(self.preferences.validation);
-        drawing_workspace::sync_history(self);
+        workspace::command_receiver(self, id, &params)?;
         print_face_ui::sync(&mut self.session, &self.preferences);
         if id == "timeline.play" {
             let reply = self.session.execute(id, &params).map_err(|e| e.to_string())?;
@@ -2882,7 +2889,7 @@ impl SolveApp {
                 let _ = self.session.execute("select.clear", &json!({}));
             }
             self.tool = Some(t);
-            self.set_status(tools::hint(id), false);
+            self.set_tool_hint(tools::hint(id));
             return;
         }
         if let Some(mut d) = dialogs::Dialog::for_command(self, id) {
@@ -3382,7 +3389,14 @@ impl SolveApp {
         let (text, at) = (i18n::tr_diagnostic(&s.into()), now_ms());
         self.messages.push(&text, error, at);
         self.status = Some((text, at, error));
+        self.status_is_tool_hint = false;
         self.status_undo = false;
+    }
+
+    /// Retain tool guidance while its owner is suspended, without hiding ordinary statuses.
+    pub(crate) fn set_tool_hint(&mut self, text: impl Into<String>) {
+        self.set_status(text, false);
+        self.status_is_tool_hint = true;
     }
 
     /// Tell the user when the open design came from a newer SolidCraft: the notice on the status
@@ -4100,7 +4114,9 @@ impl SolveApp {
             }
             agent_chat::toggle_shortcut(self, ctx);
             // A digit for a construction line's Length box is not a shortcut (#10258).
-            sketch_construction::claim_typed_length(self, ctx);
+            if !self.preferences.workspace_follows_view || workspace::focused_sketch(self).is_some() {
+                sketch_construction::claim_typed_length(self, ctx);
+            }
             if !self.embedded {
                 toolbar::shortcuts(self, ctx);
             }
@@ -4136,7 +4152,9 @@ impl SolveApp {
             if !keymap::capturing(self) {
                 expression_complete::begin_frame(ctx);
             }
-            sketch_construction::claim_typed_length(self, ctx);
+            if !self.preferences.workspace_follows_view || workspace::focused_sketch(self).is_some() {
+                sketch_construction::claim_typed_length(self, ctx);
+            }
             toolbar::shortcuts(self, ctx);
         }
     }

@@ -327,7 +327,7 @@ pub fn place_point(app: &mut SolveApp, t: &mut Tool, at: (Vec2, Option<String>))
     if (matches!(mode, "free" | "angle" | "tangent_external") || picks_side) && t.pts.is_empty() {
         t.pts.push(at);
         if picks_side {
-            app.set_status(solidcraft_ui_text::tr("ui.construction.side_hint").to_owned(), false);
+            app.set_tool_hint(solidcraft_ui_text::tr("ui.construction.side_hint").to_owned());
         }
         return;
     }
@@ -345,7 +345,7 @@ pub fn place_point(app: &mut SolveApp, t: &mut Tool, at: (Vec2, Option<String>))
             app.session.undo.truncate(depth);
         }
         if !t.pts.is_empty() && length_box_at_start(mode) {
-            app.set_status(hint(t.cmd), false);
+            app.set_tool_hint(hint(t.cmd));
         }
         t.pts.clear();
         // Retain references for repeated parallel lines/tangents. Right-click resets the picks.
