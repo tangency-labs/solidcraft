@@ -66,7 +66,10 @@ pub use fonts::{
     font_file_path, font_override_dirs, installed_families, set_font_file_check,
 };
 pub use freeform_offset::{FreeformOffset, FreeformOffsetOutput, OFFSET_TOLERANCE};
-pub use link::{Link, LinkGeom, LinkKind, LinkSource, MAX_LINK_ENTITIES, SKETCH_AXIS_HALF, SketchPlacement, TextExprs, sketch_axis_geom};
+pub use link::{
+    Link, LinkGeom, LinkKind, LinkPlacement, LinkSource, LinkUpdate, MAX_LINK_ENTITIES, MAX_LINK_OMIT, MAX_PLACEMENT_PATH, SKETCH_AXIS_HALF,
+    SketchPlacement, TextExprs, sketch_axis_geom,
+};
 pub use model::{
     CEILING_CONSTRAINTS, CEILING_CURVES, CEILING_POINTS, Constraint, ConstraintKind, Curve, CurveKind, MAX_CONSTRAINTS, MAX_COORD, MAX_CURVES,
     MAX_POINTS, PointExprs, SPoint, Sketch, SketchBatch, SketchError, SketchView, TwoCircles,

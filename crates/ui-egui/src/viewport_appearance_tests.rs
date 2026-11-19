@@ -565,6 +565,47 @@ fn painted_in(shapes: &[egui::epaint::ClippedShape], colour: egui::Color32) -> u
 }
 
 #[test]
+fn projected_point_colours_require_the_projection_ui_option() {
+    fn points_in(shapes: &[egui::epaint::ClippedShape], colour: egui::Color32) -> usize {
+        fn walk(shape: &egui::Shape, colour: egui::Color32) -> usize {
+            match shape {
+                egui::Shape::Vec(shapes) => shapes.iter().map(|shape| walk(shape, colour)).sum(),
+                egui::Shape::Rect(rect) => usize::from(rect.fill == colour && rect.rect.size() == egui::vec2(5.0, 5.0)),
+                _ => 0,
+            }
+        }
+        shapes.iter().map(|shape| walk(&shape.shape, colour)).sum()
+    }
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.call(
+        "ui.prefs",
+        json!({"theme_import":{"format":"solidcraft-theme/1","name":"Projection markers","base":"light",
+            "colors":{"sketch_projected":"#12ab34","sketch_point":"#ab3412","sketch_point_free":"#3412ab"}}}),
+    );
+    h.app.run("solid.box", json!({"length":20,"width":20,"height":10})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.project", json!({"refs":[{"body":"Body1"}]})).unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.app.cam.distance = 80.0;
+    for enhanced in [false, true, false] {
+        h.call("ui.prefs", json!({"projection_workflow_ui":enhanced}));
+        h.settle();
+        let markers = points_in(&h.shapes, egui::Color32::from_rgb(0x12, 0xab, 0x34));
+        if enhanced {
+            assert!(markers >= 4, "projected corners take the projection colour");
+        } else {
+            assert_eq!(markers, 0, "the prior point colours remain the default");
+            assert!(
+                points_in(&h.shapes, egui::Color32::from_rgb(0xab, 0x34, 0x12)) + points_in(&h.shapes, egui::Color32::from_rgb(0x34, 0x12, 0xab))
+                    >= 4,
+                "projected corners keep the determined/free point palette"
+            );
+        }
+    }
+}
+
+#[test]
 fn conflicting_curves_points_glyphs_and_dimensions_take_the_conflict_colour_until_the_conflict_is_gone() {
     let mut h = crate::scenario::Harness::new();
     h.app.home.open = false;

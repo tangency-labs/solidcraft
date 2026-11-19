@@ -25,7 +25,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("selection.delete", "De
     .contract(&DELETE_CONTRACT)
     .output(output_schema_for::<SelectionDeleteResult>)
     .params(
-        "items?: [selection items]; components?, occurrences?, canvases?, point_clouds?, joints?: [ids or names]; dry_run?: bool → deleted, deleted_joints, would_fail, skipped (one undo step). With a drawing open, items are its views, dimensions and balloons ({type: drawing, drawing, object}); each view takes its dimensions and balloons with it; a view with views projected or cut from it is refused, naming them, unless they are in items or contents: delete takes them too → views, dimensions, balloons: [the ids that went], deleted: the names of the views that went with those asked for",
+        "items?: [selection items]; components?, occurrences?, canvases?, point_clouds?, joints?: [ids or names]; preserve_projection_link?: bool (default false, passed to sketch.delete including dry_run); dry_run?: bool → deleted, deleted_joints, would_fail, skipped (one undo step). With a drawing open, items are its views, dimensions and balloons ({type: drawing, drawing, object}); each view takes its dimensions and balloons with it; a view with views projected or cut from it is refused, naming them, unless they are in items or contents: delete takes them too → views, dimensions, balloons: [the ids that went], deleted: the names of the views that went with those asked for",
     )];
 
 /// Run another command's body inside this one (so the whole delete is one undo step).
@@ -145,6 +145,9 @@ pub(crate) fn in_drawing(s: &Session, p: &Value) -> bool {
 
 fn apply(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "selection.delete";
+    if p.get("preserve_projection_link").is_some_and(|value| !value.is_boolean()) {
+        return Err(bad(cmd, "`preserve_projection_link` must be a boolean"));
+    }
     let items: Vec<Sel> = match p.get("items") {
         None | Some(Value::Null) => Vec::new(),
         Some(Value::Array(a)) if a.len() <= 10_000 => {
@@ -260,7 +263,11 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
         if s.active_sketch.is_none() {
             skip("sketch entities are deleted while editing their sketch".into());
         } else {
-            sub(s, "sketch.delete", json!({ "entities": entities }))?;
+            sub(
+                s,
+                "sketch.delete",
+                json!({ "entities": entities, "preserve_projection_link": p.get("preserve_projection_link").cloned().unwrap_or(json!(false)) }),
+            )?;
             done = true;
         }
     }
