@@ -63,7 +63,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("import")
         .contract(&INSERT_STEP_CONTRACT)
         .output(output_schema_for::<StepInserted>)
-        .params("path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_members?: the occurrences its rigid group holds, group?: the folder); folder?: bool (default false; true: an assembly's import, which has subcomponents, goes into a new history folder named `Group #N`); flatten?: bool (default false; true: every solid comes in as a body of the import's own component, with no subcomponents, occurrences, joints or rigid group: a part placed several times is one body per placement where the file places it, and, as no component says which part a body belongs to, its name is prefixed with the outermost named part holding it (`R63: Terminal`), a placeholder name (empty, a bare number, or an exporter's `… STEP translator …`) giving way to its nearest named product's); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); history?: features|solids for a FreeCAD file (default features: its sketches and the Pad, Pocket, Revolution, Groove, Fillet, Chamfer and primitive features that use them are rebuilt as features in the new component, when every one can be and they build what the file holds → features_added, history: \"features\"; else, or with solids, the file's solids come in as an Import feature, and a warning says why the history was not rebuilt); reader?: solidcraft|cadmpeg for a .step/.stp, FreeCAD or Rhino file (default solidcraft: SolidCraft's own STEP reader, which keeps the STEP text, a FreeCAD or Rhino file's solids restated as STEP by cadmpeg's STEP writer first; cadmpeg: cadmpeg's model read straight into B-rep records, with no STEP text in between, a STEP file decoded by cadmpeg's STEP decoder, to compare the two; `flatten` works with either); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it, its translation column (entries 4, 8 and 12) numbers or length expressions: one that names a parameter is kept, and the import follows the parameter when it changes (a grounded one stays); a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move)"),
+        .params("path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_members?: the occurrences its rigid group holds, group?: the folder); folder?: bool (default false; true: an assembly's import, which has subcomponents, goes into a new history folder named `Group #N`); flatten?: bool (default false; true: every solid comes in as a body of the import's own component, with no subcomponents, occurrences, joints or rigid group: a part placed several times is one body per placement where the file places it, and, as no component says which part a body belongs to, its name is prefixed with the outermost named part holding it (`R63: Terminal`), a placeholder name (empty, a bare number, or an exporter's `… STEP translator …`) giving way to its nearest named product's); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); history?: features|solids for a FreeCAD file (default features: its sketches and the Pad, Pocket, Revolution, Groove, Fillet, Chamfer and primitive features that use them are rebuilt as features in the new component, when every one can be and they build what the file holds → features_added, history: \"features\"; else, or with solids, the file's solids come in as an Import feature, and a warning says why the history was not rebuilt); reader?: solidcraft|cadmpeg for a .step/.stp, FreeCAD or Rhino file (default solidcraft: SolidCraft's own STEP reader, which keeps the STEP text, a FreeCAD or Rhino file's solids restated as STEP by cadmpeg's STEP writer first; cadmpeg: cadmpeg's model read straight into B-rep records, with no STEP text in between, a STEP file decoded by cadmpeg's STEP decoder, to compare the two; `flatten` works with either); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it, its translation column (entries 4, 8 and 12) numbers or length expressions: one that names a parameter is kept, and the import follows the parameter when it changes (a grounded one stays); a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move; envelope?: \"box\" (also add the import's envelope, a hidden box around every body it placed, in its component, as solid.bounding_solid with `component` makes it → envelope: the body; inspect.clearance and inspect.interference check it instead of the parts with `envelopes: true`)"),
     CommandSpec::new("file.insert_mesh", "Insert Mesh", crate::checked!("file.insert_mesh", insert_mesh))
         .at("SOLID", "INSERT")
         .icon("import")
@@ -494,6 +494,7 @@ fn add_read_step(
         stand_up: turned,
         group: folder,
         transform: None,
+        envelope: None,
         profile: profiled.map(|mark| crate::schema::diagnostics::ProfileReport::new(&mark.report(), 20)),
         param_warnings: Vec::new(),
     };
@@ -640,6 +641,7 @@ fn add_rebuilt(
         stand_up: turned,
         group: None,
         transform: None,
+        envelope: None,
         profile: None,
         param_warnings: Vec::new(),
     };
@@ -853,7 +855,15 @@ fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
             Some(super::component::matrix::rigid(&numbers, super::component::matrix::tolerance(p, cmd)?, cmd)?)
         }
     };
+    let envelope = match p.get("envelope") {
+        None | Some(Value::Null) => false,
+        Some(Value::String(kind)) if kind == "box" => true,
+        Some(_) => return Err(bad(cmd, crate::schema::insert_step::ENVELOPE_MESSAGE)),
+    };
     let mut out = add_step(s, path, str_(p, "name"), &options)?;
+    if envelope {
+        out["envelope"] = json!(import_envelope(s, &out)?);
+    }
     if let Some(m) = placement {
         let occ = out["occurrence"].as_u64().ok_or_else(|| EngineError::Other("the import has no placement to move".into()))?;
         if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == occ) {
@@ -880,6 +890,21 @@ fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
         s.refresh();
     }
     Ok(out)
+}
+
+/// Add the envelope of an import that answered `out`: a box around every body it placed, in its
+/// component, named `<component> Envelope` and hidden, so the parts stay in view. Returns the
+/// body's name.
+fn import_envelope(s: &mut Session, out: &Value) -> Result<String> {
+    let component = out["component"].as_u64().ok_or_else(|| EngineError::Other("the import has no component to bound".into()))?;
+    let name = format!("{} Envelope", out["component_name"].as_str().unwrap_or("Import"));
+    let made = super::features::envelope_in(s, &json!({"name": name, "body_name": name}), component, "0".into(), None)?;
+    let body = made["created_bodies"].get(0).and_then(Value::as_str).map(str::to_string).unwrap_or(name);
+    if !s.visibility.hidden_bodies.contains(&body) {
+        s.visibility.hidden_bodies.push(body.clone());
+    }
+    s.refresh_display();
+    Ok(body)
 }
 
 /// The KiCad import options a command's parameters name.
@@ -1424,7 +1449,8 @@ fn reads_natively(path: &str) -> bool {
 /// Why a file read as a design could not be: with a design's own extension, what the reader said;
 /// with any other, that SolidCraft does not open that kind of file (#18465). A file of another
 /// CAD program reaches the design reader because nothing else claims it, and its words about a
-/// "design container" or an environment resource say nothing of that.
+/// "design container" or an environment resource say nothing of that. An importer plugin can add
+/// support for the format (Preferences › Plugins) (#19238).
 fn unreadable_design(path: &str, reason: &str) -> EngineError {
     let extension = std::path::Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or_default();
     if matches!(extension.to_ascii_lowercase().as_str(), "sc" | "solidcraft" | "json") {
@@ -1432,7 +1458,7 @@ fn unreadable_design(path: &str, reason: &str) -> EngineError {
     }
     let kind = if extension.is_empty() { "this file".to_string() } else { format!(".{extension} files") };
     EngineError::Other(format!(
-        "{path}: SolidCraft can't open {kind}; export STEP (or another format it opens) from the program that made it ({reason})"
+        "{path}: SolidCraft can't open {kind}; export STEP (or another format it opens) from the program that made it, or an importer plugin can add this format (Preferences › Plugins) ({reason})"
     ))
 }
 
@@ -2495,6 +2521,16 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.export";
     let path = path_arg(p, cmd)?;
     let format = Format::from_name(str_(p, "format").unwrap_or(path))?;
+    // The path's extension picks the OpenUSD encoding; a `format` naming another one is refused
+    // rather than ignored.
+    if format == Format::Usd
+        && let Some(f) = str_(p, "format")
+        && !f.eq_ignore_ascii_case("usd")
+        && solidcraft_io::is_usd_path(path)
+        && usd_encoding(f) != usd_encoding(path)
+    {
+        return Err(bad("file.export", format!("`format: {f}` disagrees with the path's extension, which picks the OpenUSD encoding")));
+    }
     if format == Format::Urdf {
         if !string_list(cmd, p, "bodies")?.is_empty() {
             return Err(bad(cmd, "urdf exports the whole assembly; omit bodies"));
@@ -2647,6 +2683,15 @@ fn urdf_decals(doc: &solidcraft_doc::Document, st: &solidcraft_doc::ModelState, 
         });
     }
     decals
+}
+
+/// The OpenUSD encoding a name or extension asks for: text, binary or package.
+fn usd_encoding(name: &str) -> &'static str {
+    match name.rsplit('.').next().unwrap_or(name).to_ascii_lowercase().as_str() {
+        "usda" => "text",
+        "usdz" => "package",
+        _ => "binary",
+    }
 }
 
 /// The OpenUSD export: the bodies written as STEP, as `file.export` writes STEP (a design with

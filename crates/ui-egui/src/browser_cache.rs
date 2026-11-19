@@ -100,12 +100,16 @@ pub(super) struct Cache {
     model: Weak<ModelState>,
     sketch: Option<u64>,
     colors: [Color32; 2],
+    /// The interface language the defect tips are worded in.
+    language: &'static str,
     components: BTreeMap<u64, Component>,
     ids: BTreeMap<u64, usize>,
     scheduled: usize,
     pub root: Node,
     pub root_bodies: Vec<String>,
     pub occurrences: HashMap<Vec<u64>, Node>,
+    /// What each component's row says about the parts of it its import could not bring in.
+    pub defects: BTreeMap<u64, crate::ui_kit::StatusTip>,
 }
 
 impl Cache {
@@ -113,10 +117,12 @@ impl Cache {
         let state = app.session.model.state();
         let t = Tokens::get();
         let colors = [t.error, t.sketch_accent];
+        let language = solidcraft_ui_text::locale().catalog().id;
         if std::ptr::eq(self.doc.as_ptr(), Arc::as_ptr(&app.session.doc))
             && std::ptr::eq(self.model.as_ptr(), Arc::as_ptr(&state))
             && self.sketch == app.session.active_sketch
             && self.colors == colors
+            && self.language == language
         {
             // A Save As can move the design to a new file without changing the document;
             // the top row follows the file's name (#7267).
@@ -143,12 +149,14 @@ impl Cache {
         };
         self.scheduled = self.root.children.len();
         self.root_bodies = crate::context_menu::component_bodies(app, 0);
+        self.defects = crate::browser_defects::component_tips(&app.session.doc, &app.session.model);
         // Weak snapshot identities catch replacement and reevaluation without retaining a
         // closed design's geometry while the browser is collapsed.
         self.doc = Arc::downgrade(&app.session.doc);
         self.model = Arc::downgrade(&state);
         self.sketch = app.session.active_sketch;
         self.colors = colors;
+        self.language = language;
     }
 
     fn children(&self, app: &SolveApp, component: u64, path: &[u64], remaining: usize) -> Vec<Vec<u64>> {

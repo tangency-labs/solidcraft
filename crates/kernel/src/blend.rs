@@ -1476,18 +1476,28 @@ pub(crate) fn rounds_too_small(body: &Body, picks: &[Vec3], edges: &[usize], rad
 /// Whether the point uncovered is material is the body's exact point classification.
 pub(crate) fn rounds_into_hollow(body: &Body, picks: &[Vec3], edges: &[usize], radii: &[f64]) -> Result<()> {
     let rec = Faces::of(body)?;
+    // The refused edge that opens at the smallest radius: that radius is the largest that keeps
+    // every refused edge's round out of its hollow, and the refusal names it, so a fillet feature
+    // searches for the largest radius that fits from there (`named_fit`).
+    let mut first: Option<(f64, usize, f64, Vec3)> = None;
     for (i, (&e, &r)) in edges.iter().zip(radii).enumerate() {
         let Some(section) = Section::of(&rec, e) else { continue };
         // Only an opening under the round's radius (less the tolerance) refuses it.
-        let Some((_, at)) = section.opening(body, &rec, edges, radii, r - section.tolerance)? else { continue };
-        let pick = picks.get(i).map(|p| format!(" at ({:.3}, {:.3}, {:.3})", p.x, p.y, p.z)).unwrap_or_default();
-        return Err(KernelError::TooLarge(format!(
-            "the round of radius {r} mm on the edge{pick} would cut through the material behind it into the hollow at ({:.3}, {:.3}, \
-             {:.3}) and open the part",
-            at.x, at.y, at.z
-        )));
+        let Some((opens, at)) = section.opening(body, &rec, edges, radii, r - section.tolerance)? else { continue };
+        if first.is_none_or(|(least, ..)| opens < least) {
+            first = Some((opens, i, r, at));
+        }
     }
-    Ok(())
+    let Some((opens, i, r, at)) = first else { return Ok(()) };
+    let pick = picks.get(i).map(|p| format!(" at ({:.3}, {:.3}, {:.3})", p.x, p.y, p.z)).unwrap_or_default();
+    Err(KernelError::TooLarge(format!(
+        "the round of radius {r} mm on the edge{pick} would cut through the material behind it into the hollow at ({:.3}, {:.3}, \
+         {:.3}) and open the part; {}",
+        at.x,
+        at.y,
+        at.z,
+        largest_fit_note("radius", opens)
+    )))
 }
 
 /// The section of a round of a straight, convex edge between two planar faces, as
@@ -1937,6 +1947,59 @@ mod tests {
             assert!(m.bbox.min.dist(before.bbox.min) < 1e-9 && m.bbox.max.dist(before.bbox.max) < 1e-9, "r {r}: {:?}", m.bbox);
             assert_eq!(faces_from_edge(&out, &body, BOSS_EDGE), 1, "r {r}");
             last = m.volume;
+        }
+    }
+
+    /// An L-shaped prism 40 tall, its notch's faces at x = 8 and y = 8, whose arm ends at x = -22
+    /// in a face rounded 18 along its bottom and top edges: the arm's face in the notch (y = 8,
+    /// 30 wide) turns into those rounds' arcs 12 from the notch's concave edge, at both caps.
+    /// Rounded 22, the edge's contact line on that face (at x = -14) runs past both arcs, SMLib
+    /// refuses it, and the round is built by carrying the face on. Its material is its section
+    /// r^2 (1 - pi/4) over the edge's 40, less what stands past each arc: u past the contact
+    /// line the round stands r - sqrt(r^2 - u^2) off the face and the arc lies
+    /// 18 - sqrt(18^2 - (10 - u)^2) off the cap, for u from 0 to 10, where the arc starts (their
+    /// product by Simpson's rule). The rounds' cylinders carry on over what is cut off there and
+    /// the caps over the round's ends: one face more (11); the concave edge and the face's two
+    /// cap edges gone, the round's two contact lines, two cap arcs and two edges on the
+    /// cylinders new (27 edges); the edge's two ends gone, the contact lines' four new (18
+    /// vertices). The face's sheet, whose two quarter circles each run on round their circle
+    /// when continued, has to thicken for it.
+    #[test]
+    fn a_concave_round_runs_on_past_both_rounded_corners_of_its_face() {
+        let plane = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Y };
+        let outline = [(-22.0, 8.0), (8.0, 8.0), (8.0, -32.0), (70.0, -32.0), (70.0, 32.0), (-22.0, 32.0)].map(|(x, y)| Vec2::new(x, y));
+        let prism = crate::build::extrude(&plane, &[Region2 { outer: Loop2::polygon(&outline), holes: vec![] }], 0.0, 40.0).unwrap();
+        let prism = prism.into_iter().next().unwrap();
+        let body = fillet(&prism, &[Vec3::new(-22.0, 20.0, 0.0), Vec3::new(-22.0, 20.0, 40.0)], 18.0).unwrap();
+        let before = crate::measure(&body).unwrap();
+        let quarter = 1.0 - std::f64::consts::FRAC_PI_4;
+        // the L's 4688 mm² over 40, less the two rounds along the arm's 24 mm end, to the
+        // measure's accuracy (1e-8 of the volume)
+        let rounded_prism = 187_520.0 - 2.0 * quarter * 324.0 * 24.0;
+        assert!((before.volume - rounded_prism).abs() < 1e-8 * rounded_prism, "{}", before.volume);
+        assert_eq!((before.faces, before.edges, before.vertices), (10, 24, 16));
+        let pick = Vec3::new(8.0, 8.0, 20.0);
+        let (r, corner, reach): (f64, f64, f64) = (22.0, 18.0, 10.0);
+        assert!(fillet(&body, &[pick], r).is_err(), "SMLib refuses the round");
+        let past = |u: f64| (r - (r * r - u * u).sqrt()) * (corner - (corner * corner - (reach - u).powi(2)).sqrt());
+        let n = 2000;
+        let h = reach / f64::from(n);
+        let past_arc =
+            h / 3.0 * (past(0.0) + past(reach) + (1..n).map(|i| f64::from(if i % 2 == 1 { 4 } else { 2 }) * past(h * f64::from(i))).sum::<f64>());
+        let (rounded, gone) = fillet_removing(&body, &[pick], r, FilletTurn::Mitre).unwrap();
+        assert!(gone.is_empty());
+        let m = crate::measure(&rounded).unwrap();
+        let added = m.volume - before.volume;
+        let full = quarter * r * r * 40.0;
+        // the difference of two measures, each to its accuracy
+        assert!(m.shells == 1 && (full - 2.0 * past_arc - added).abs() < 2e-8 * m.volume, "added {added} of {full} less {}", 2.0 * past_arc);
+        assert_eq!((m.faces, m.edges, m.vertices), (11, 27, 18));
+        assert!(m.bbox.min.dist(before.bbox.min) < 1e-9 && m.bbox.max.dist(before.bbox.max) < 1e-9, "{:?}", m.bbox);
+        assert_eq!(faces_from_edge(&rounded, &body, pick), 1);
+        // the contact lines: on the notch's other face from cap to cap, on the arm's face between the arcs
+        let on_arc = corner - (corner * corner - reach * reach).sqrt();
+        for v in [Vec3::new(8.0, -14.0, 0.0), Vec3::new(8.0, -14.0, 40.0), Vec3::new(-14.0, 8.0, on_arc), Vec3::new(-14.0, 8.0, 40.0 - on_arc)] {
+            assert!(has_vertex(&rounded, v, 1e-6), "no vertex at {v:?}");
         }
     }
 
@@ -2426,7 +2489,7 @@ mod tests {
 
         let angle = 45f64.to_radians();
         assert!(matches!(plain(6.45, angle), Err(KernelError::Failed(_))));
-        assert!(matches!(plain(8.0, angle), Err(KernelError::TooLarge(why)) if why.contains("times the distances given")));
+        assert!(matches!(plain(8.0, angle), Err(KernelError::TooLarge(why)) if why.contains("the largest distance that fits is")));
         let (largest, mut last) = carried(6.43, angle);
         assert_eq!(crate::encode_native_body(&largest).unwrap(), crate::encode_native_body(&plain(6.43, angle).unwrap()).unwrap());
         for d in [6.44, 6.45, 6.5, 7.0, 8.0] {
@@ -3263,6 +3326,10 @@ mod tests {
         assert!(matches!(e, KernelError::TooLarge(_)), "{e}");
         let e = e.to_string();
         assert!(e.contains("into the hollow at (0.000, 30.000, 40.000) and open the part"), "{e}");
+        // The refusal names the radius it opens at, 4 + 2 sqrt2 to the micrometre, so a fillet
+        // feature searches for the largest that fits from there.
+        let named = named_fit(&e).unwrap();
+        assert!((named - (4.0 + 2.0 * std::f64::consts::SQRT_2)).abs() <= 5e-7, "{e}");
         let (largest, _) = fillet_max(&case, &[top], 7.0, FilletTurn::Mitre).unwrap().unwrap();
         assert!((largest - 6.828).abs() < 1e-9, "{largest}");
 

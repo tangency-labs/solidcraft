@@ -2765,7 +2765,6 @@
   "prefs.blur_off": "გამორთული",
   "prefs.blur_reduce_transparency": "გამორთულია სისტემის პარამეტრით „გამჭვირვალობის შემცირება“",
   "prefs.blur_software": "მიუწვდომელია პროგრამული გრაფიკით (gpu-software)",
-  "prefs.blur_source": "მიუწვდომელია სამუშაო სივრცის ამ ხედში",
   "prefs.blur_web": "მიუწვდომელია ვებ-რენდერინგის ამ გზაზე",
   "prefs.bodies_folders": "სხეულების საქაღალდეები",
   "prefs.bodies_folders_always": "ყოველთვის",
