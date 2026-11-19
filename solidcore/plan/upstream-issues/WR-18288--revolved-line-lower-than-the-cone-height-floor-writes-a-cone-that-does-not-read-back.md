@@ -1,4 +1,4 @@
-#### WR-792. A revolved line that rises less than the cone recogniser's height floor is written as a cone that does not read back
+#### WR-18288. A revolved line that rises less than the cone recogniser's height floor is written as a cone that does not read back
 - **Severity:** Wrong result (a body Measure and Fillet cannot read)
 - **Area:** Sweeps (rotational sweep, analytic faces)
 - **Location:** the SolidCraft fork's `SmRotationalSweepGeometry::AnalyticSurface`, the line
