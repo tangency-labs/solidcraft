@@ -46,6 +46,11 @@ pub struct RecordBody {
     /// Surface colour, linear RGB in 0..1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<[f32; 3]>,
+    /// How the file shows it beyond its colour: its opacity, the colour's name, and the faces with
+    /// colours of their own, each `face` being the file's face (a value of `face_origin`), not the
+    /// body's face, as a STEP import's paint is before its body is made.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paint: Option<crate::Paint>,
     /// The file hides it: the design starts with it hidden.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub hidden: bool,
@@ -86,11 +91,24 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
     }
     check_tree(&records.tree, records.bodies.len(), 0, &mut 0)?;
     let mut bodies = Vec::with_capacity(records.bodies.len());
-    // A part placed again is one part: its copies are not counted again.
-    let mut report = ImportReport { parts: records.bodies.iter().filter(|r| r.copy_of.is_none()).count(), ..ImportReport::default() };
+    // A part placed again is one part: its copies are not counted again. One root product: the
+    // first name of every issue's path is the import's own component.
+    let mut report = ImportReport {
+        parts: records.bodies.iter().filter(|r| r.copy_of.is_none()).count(),
+        single_root: records.tree.len() == 1,
+        ..ImportReport::default()
+    };
     let mut warnings = records.warnings.clone();
     for w in &records.warnings {
-        report.issues.push(ImportIssue { kind: IssueKind::File, item: None, part: String::new(), faces: 0, times: 1, detail: w.clone() });
+        report.issues.push(ImportIssue {
+            kind: IssueKind::File,
+            item: None,
+            part: String::new(),
+            paths: Vec::new(),
+            faces: 0,
+            times: 1,
+            detail: w.clone(),
+        });
     }
     // A body SMLib refuses is left out, as a STEP import leaves out a solid it cannot make, and
     // the others still come in: `kept[k]` is where record body `k` is among the bodies made.
@@ -126,6 +144,7 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
                     kind: IssueKind::NotImported,
                     item: Some(k as u64),
                     part: r.name.clone(),
+                    paths: paths_of(r),
                     faces: 0,
                     times: 1,
                     detail: detail.clone(),
@@ -148,6 +167,7 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
                 kind: IssueKind::NotImported,
                 item: Some(k as u64),
                 part: r.name.clone(),
+                paths: paths_of(r),
                 faces: 0,
                 times: 1,
                 detail: detail.clone(),
@@ -155,7 +175,13 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
             warnings.push(detail);
             continue;
         };
-        let body = body.with_color(r.color).with_face_sources(Some(Arc::new(sources)));
+        // The body's colour too is from a file: kept in 0..1, as its faces' are.
+        let color = r.color.map(|c| c.map(unit));
+        let body = body.with_color(color).with_face_sources(Some(Arc::new(sources)));
+        let body = match &r.paint {
+            Some(paint) => body.with_paint(Some(body_paint(paint, &part.face_origin))),
+            None => body,
+        };
         // A part is counted once, by the first of its bodies that comes in.
         if part.closed && counted.insert(source) {
             report.solids += 1;
@@ -166,7 +192,7 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
             face_origin: part.face_origin,
             name: r.name.clone(),
             body,
-            color: r.color,
+            color,
             path: r.path.clone(),
             instance: r.instance.clone(),
             closed: part.closed,
@@ -226,11 +252,13 @@ fn renumbered(nodes: &[StepNode], kept: &[Option<usize>], made: &[ImportedBody])
 pub fn records_import_shared(records: &ImportRecords) -> Result<Arc<StepImport>> {
     let text = records_text(records)?;
     let key = super::text_key(&text);
-    if let Some(imp) = super::recent(key) {
+    // Records are made into bodies as they are, whatever the heal preference
+    // ([`crate::heals_tolerance_defects`]): never healed, so cached as a read that does not heal.
+    if let Some(imp) = super::recent(key, false) {
         return Ok(imp);
     }
     let imp = Arc::new(records_import(records)?);
-    super::remember(key, &imp, text.len() <= super::KEEP_SMALL_BYTES);
+    super::remember(key, false, &imp, text.len() <= super::KEEP_SMALL_BYTES);
     Ok(imp)
 }
 
@@ -238,6 +266,33 @@ pub fn records_import_shared(records: &ImportRecords) -> Result<Arc<StepImport>>
 /// import is (its cache key and its bodies' certificates are of this).
 pub fn records_text(records: &ImportRecords) -> Result<String> {
     serde_json::to_string(records).map_err(|e| KernelError::Invalid(format!("import records: {e}")))
+}
+
+/// Where a record body left out would have been, as [`ImportIssue::paths`] (none outside any
+/// product).
+fn paths_of(r: &RecordBody) -> Vec<Vec<String>> {
+    if r.path.is_empty() { Vec::new() } else { vec![r.path.clone()] }
+}
+
+/// `paint` with each face colour on the body's faces that come from its file face (`face_origin`,
+/// the file face of each body face), as a STEP import paints them; a colour on a face the body
+/// does not have is dropped. Colours and opacities from a file are hostile: each is kept in 0..1.
+fn body_paint(paint: &crate::Paint, face_origin: &[u64]) -> crate::Paint {
+    let by_file: std::collections::HashMap<u64, &crate::FacePaint> = paint.faces.iter().map(|f| (f.face as u64, f)).collect();
+    let faces = face_origin
+        .iter()
+        .enumerate()
+        .filter_map(|(i, f)| {
+            let p = by_file.get(f)?;
+            Some(crate::FacePaint { face: i, color: p.color.map(unit), opacity: unit(p.opacity), name: p.name.clone() })
+        })
+        .collect();
+    crate::Paint { opacity: unit(paint.opacity), faces, name: paint.name.clone() }
+}
+
+/// A colour channel or an opacity from a file, kept in 0..1 (1 when it is not a number).
+fn unit(x: f32) -> f32 {
+    if x.is_finite() { x.clamp(0.0, 1.0) } else { 1.0 }
 }
 
 /// The body SMLib makes of one record, checked first: a record from a file is hostile input.

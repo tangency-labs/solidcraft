@@ -231,6 +231,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                 }
             });
+            let heal = setting::heal_tolerance_defects(app, ui).on_hover_text(app.tr("prefs.heal_tolerance_defects_note"));
+            crate::scenario::publish_target("prefs:heal_tolerance_defects", heal.rect);
         });
         export_name(app, ui, label_width);
         origin_plane_names(app, ui, label_width);

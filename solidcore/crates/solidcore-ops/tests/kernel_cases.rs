@@ -1386,8 +1386,18 @@ fn run_case_with_records(
             // A handled refusal is an attempt, not the case's outcome. Keep checking the
             // later operations and final geometry; an unmarked refusal still ends the case.
             (Err(_), Some(_)) if continued => {}
-            (Err(_), Some(_)) => {
+            (Err(x), Some(_)) => {
                 write_smb(e, &ins);
+                // An entry may name the refusal it expects (`refused_as`, a part of the
+                // error's text): any other error, such as a blend that fails inside instead of
+                // being refused, does not stand for it.
+                if let Some(kind) = c.get("refused_as").and_then(Value::as_str) {
+                    if !x.contains(kind) {
+                        return Err(Stop::Fail(format!(
+                            "call {i} ({op}) failed where the rig's was refused as \"{kind}\": {x}"
+                        )));
+                    }
+                }
                 return Ok(None);
             }
             (Err(x), None) => {
@@ -1947,6 +1957,21 @@ fn handled_refusal_case() -> Value {
         "expected": {"body_count": 1, "volume_mm3": 4.0 * std::f64::consts::PI / 3.0,
                      "tolerance": {"rel": 1e-9}}
     })
+}
+
+#[test]
+fn a_named_refusal_kind_must_match_the_replayed_error() {
+    let mut e = handled_refusal_case();
+    let calls = e["calls"].as_array_mut().unwrap();
+    calls.truncate(1);
+    calls[0].as_object_mut().unwrap().remove("continued");
+    e["result"] = serde_json::json!([]);
+    // without a kind, any error stands for the traced refusal
+    assert!(matches!(run_case(Path::new("unused.json"), &e), Ok(None)));
+    e["calls"][0]["refused_as"] = serde_json::json!("no room");
+    assert!(
+        matches!(run_case(Path::new("unused.json"), &e), Err(Stop::Fail(why)) if why.contains("refused as \"no room\""))
+    );
 }
 
 #[test]

@@ -263,15 +263,13 @@ struct Built {
 }
 
 /// The crease round's error code and, when it builds, what it gives. SolidCraft's fixes
-/// (every `UpstreamFixes` field but `geometric_g2_continuity`), so both rounds are built
+/// (every `UpstreamFixes` field), so both rounds are built
 /// by the blend corner, the construction kept since WR-641's
 /// `fillet_through_extended_rail_end` was removed (#2500); the tangent tracer as `tracer`.
 fn crease_round(form: Form, tracer: bool) -> (i32, Option<Built>) {
     let mut k = Kernel::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *k.fixes.flag_mut(name).unwrap() = true;
-        }
+        *k.fixes.flag_mut(name).unwrap() = true;
     }
     k.fixes.ssi_tangent_curve_tracer = tracer;
     crease_round_with(k, form)

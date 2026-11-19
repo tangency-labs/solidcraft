@@ -229,7 +229,7 @@
    }
   },
   {
-   "command": "sheet.convert",
+   "command": "sheet.recognize",
    "params": {
     "body": "Channel",
     "face": [
@@ -257,4 +257,4 @@
    "params": {}
   }
  ]
-}
+}

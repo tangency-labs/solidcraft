@@ -57,9 +57,9 @@ fn sample_at(uv: vec2<f32>) -> vec4<f32> {
     let r = min(radius, min(half_size.x, half_size.y));
     let d = abs(relative) - half_size + vec2<f32>(r);
     let distance = min(max(d.x, d.y), 0.0) + length(max(d, vec2<f32>(0.0))) - r;
-    let alpha = clamp(0.5 - distance, 0.0, 1.0) * p.a.w;
+    let alpha = clamp(0.5 - distance, 0.0, 1.0);
     let c = textureSample(image, filtering, v.position.xy / vec2<f32>(textureDimensions(image)));
-    // Match egui: coverage/opacity multiply gamma-premultiplied RGB BEFORE the
+    // Match egui: coverage multiplies gamma-premultiplied RGB BEFORE the
     // framebuffer conversion. The sampled backdrop remains linear color.
     let premultiplied_gamma = gamma(c.rgb) * alpha;
     let rgb = select(premultiplied_gamma, linear(premultiplied_gamma), p.a.z > 0.5);
