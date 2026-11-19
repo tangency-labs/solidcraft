@@ -63,6 +63,10 @@
 //! | [`set_surface_closure`]                         | `sm_SetSurfaceClosure`                     |
 //!
 //! Deviations:
+//! - **A rail the fillet B-rep splits** (WR-19502, not upstream).
+//!   [`FilletBrep::fillet_brep_pieces_along`] finds the edges of the stitched fillet B-rep
+//!   that cover a rail end to end where none matches it whole, so that the edge map can
+//!   split the rail there.
 //! - **Object model.** Upstream's `SmFilletVertexuse`, `SmFilletVertex`,
 //!   `SmFilletEdgeuse` and `SmFilletEdge` derive from the topology classes and live in
 //!   the pseudo B-rep `SmFilletBrep` (an `SmBrep`). Here [`FilletBrep`] owns a
@@ -2477,6 +2481,124 @@ impl FilletBrep {
             OP_FIND_EDGE,
             "no fillet B-rep edge matches the fillet edge",
         ))
+    }
+
+    /// (Not upstream; #19502) Where the stitch split rail `e` in the fillet B-rep: the
+    /// intervals of `e`'s curve that edges of `fillet_brep` (of `edges`) cover end to end,
+    /// two or more, in the order of the curve's parameter. `None` when an edge matches `e`
+    /// as [`Self::find_fillet_brep_edge`] finds one (by its midpoint), or when the edges
+    /// lying on `e`'s curve do not cover it end to end.
+    ///
+    /// Two rounds whose rails meet along part of one of them (a full round whose rails run
+    /// unequal lengths) share one edge there in the stitched fillet B-rep, and the longer
+    /// rail runs on as another: no one edge has its midpoint, so each piece is mapped on
+    /// its own once the rail is split where the fillet B-rep splits it.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::NotFound`] for an edge that is not a fillet edge or a dangling id;
+    /// those of the evaluations and the drops.
+    pub fn fillet_brep_pieces_along(
+        &self,
+        k: &Kernel,
+        e: EdgeId,
+        fillet_brep: &Brep,
+        edges: &[EdgeId],
+    ) -> Result<Option<Vec<Extent1d>>> {
+        self.fillet_edge(e)?;
+        let Some(curve_3d) = self.brep.edge(e)?.curve.as_ref() else {
+            return Ok(None);
+        };
+        if curve_3d.is_degenerate(k, EFF_ZERO, None)? {
+            return Ok(None);
+        }
+        let ivl = curve_3d.natural_interval();
+        let pnt = curve_3d.evaluate_point(k, ivl.evaluate(0.5))?;
+
+        // the parameter of `p` on the rail's curve, where it lies on it within `tol`
+        let on_rail = |p: Point3, tol: f64| -> Result<Option<f64>> {
+            let dropped =
+                curve_3d.drop_point(k, &ivl, p, None, tol, None, SolverOperation::Minimize)?;
+            if !dropped.success {
+                return Ok(None);
+            }
+            let q = curve_3d.evaluate_point(k, dropped.parameter)?;
+            Ok((q.distance(p) <= tol).then_some(dropped.parameter))
+        };
+
+        let ends = [
+            curve_3d.evaluate_point(k, ivl.min())?,
+            curve_3d.evaluate_point(k, ivl.max())?,
+        ];
+        // First, by evaluations alone: an edge with the rail's midpoint and ends is the
+        // rail's whole (FindFilletBrepEdge's match), and there is nothing to split. This is
+        // every rail of a fillet that built before, so the drops below run only for a rail
+        // no edge matches whole. An edge with the rail's midpoint alone is a middle piece,
+        // the rail running on past both its ends (a plate at each end of a wall). A rail
+        // is split only where two or more edges cover it end to end, so one matched by its
+        // midpoint with ends a little off it maps as before.
+        for &pe in edges {
+            let edge = fillet_brep.edge(pe)?;
+            let Some(edge_curve) = edge.curve.as_ref() else {
+                continue;
+            };
+            let tol = edge.tolerance;
+            let mid = edge_curve.evaluate_point(k, edge.interval.evaluate(0.5))?;
+            if mid.distance(pnt) >= tol {
+                continue;
+            }
+            let a = edge_curve.evaluate_point(k, edge.interval.min())?;
+            let b = edge_curve.evaluate_point(k, edge.interval.max())?;
+            let whole = |p: Point3| ends.iter().any(|e| e.distance(p) <= tol);
+            if whole(a) && whole(b) {
+                return Ok(None);
+            }
+        }
+
+        let mut pieces: Vec<(f64, f64, f64)> = Vec::new();
+        for &pe in edges {
+            let edge = fillet_brep.edge(pe)?;
+            let Some(edge_curve) = edge.curve.as_ref() else {
+                continue;
+            };
+            let tol = edge.tolerance;
+            let a = edge_curve.evaluate_point(k, edge.interval.min())?;
+            let b = edge_curve.evaluate_point(k, edge.interval.max())?;
+            let (Some(ta), Some(tb)) = (on_rail(a, tol)?, on_rail(b, tol)?) else {
+                continue;
+            };
+            let mid = edge_curve.evaluate_point(k, edge.interval.evaluate(0.5))?;
+            if on_rail(mid, tol)?.is_none() {
+                continue;
+            }
+            pieces.push((ta.min(tb), ta.max(tb), tol));
+        }
+        if pieces.len() < 2 {
+            return Ok(None);
+        }
+        pieces.sort_by(|x, y| x.0.total_cmp(&y.0));
+
+        // end to end: from the curve's start, each piece starting where the one before
+        // ends, to its end
+        let at = |t: f64| curve_3d.evaluate_point(k, t);
+        let mut out = Vec::with_capacity(pieces.len());
+        let mut from = ivl.min();
+        for (i, &(t0, t1, tol)) in pieces.iter().enumerate() {
+            if at(from)?.distance(at(t0)?) > tol || t1 <= from {
+                return Ok(None);
+            }
+            let to = if i + 1 == pieces.len() {
+                if at(t1)?.distance(at(ivl.max())?) > tol {
+                    return Ok(None);
+                }
+                ivl.max()
+            } else {
+                t1
+            };
+            out.push(Extent1d::from_min_max(from, to));
+            from = to;
+        }
+        Ok(Some(out))
     }
 
     // ---- SmFilletGeom ---------------------------------------------------------------
