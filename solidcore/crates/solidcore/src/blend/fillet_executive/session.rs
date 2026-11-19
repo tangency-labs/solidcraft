@@ -6942,7 +6942,7 @@ impl FilletParametersAccess<FilletObject> for SessionObjects<'_> {
 ///
 /// # Errors
 /// Those of the topology walks and the seam and tangency tests.
-fn runs_on_across_seams(
+pub(crate) fn runs_on_across_seams(
     k: &Kernel,
     target: &mut Brep,
     edges: &[EdgeId],

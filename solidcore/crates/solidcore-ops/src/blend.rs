@@ -40,7 +40,7 @@ use std::collections::{HashMap, HashSet};
 
 use solidcore::blend::band_room::law_fits_band;
 use solidcore::blend::blend_corner::rollover::{
-    concave_chain, concave_chain_ends, is_concave_chain, RollOver,
+    concave_chain, concave_chain_ends, has_end_arc, is_concave_chain, RollOver,
 };
 use solidcore::blend::blend_corner::BlendCornerEvent;
 use solidcore::blend::blend_refusal::{BlendRefusal, NotBlendable, SetbackTooShortWhy};
@@ -1704,8 +1704,15 @@ fn blend_on_body(
         && back.is_empty()
         && corners == Corners::Filled
         && picked.len() > 1;
-    // the untouched input, for the overflowing rounds to go first on
-    let fresh = if may_go_first {
+    // a round that may be the Roll-over's concave chain asked on its own (#10876), of one edge
+    // too (#19476: the foot of a cylinder that stands through a face)
+    let asked_alone = kind == Blend::Round
+        && turn == Turn::Mitre
+        && back.is_empty()
+        && corners == Corners::Filled;
+    let may_be_chain = asked_alone && has_end_arc(k, b, &picked)?;
+    // the untouched input, for the overflowing rounds to go first on, or the chain to be built on
+    let fresh = if may_go_first || may_be_chain {
         Some(brep_copy(k, b)?)
     } else {
         None
@@ -1786,11 +1793,7 @@ fn blend_on_body(
     // overflow left to go first): built as the event's second pass on a copy of the
     // untouched input (the asked edges at their places in the copy's order); where it is
     // not the chain, does not build or does not finish, the first call's refusal stands
-    if step == RollOverStep::Classify
-        && stopped.roll_overs.is_empty()
-        && stopped.overflow.is_none()
-        && made.is_err()
-    {
+    if asked_alone && stopped.roll_overs.is_empty() && stopped.overflow.is_none() && made.is_err() {
         if let Some(input) = fresh.as_ref() {
             // the faces the sessions log, put back where the copy is given up (its faces
             // are not the result's)
