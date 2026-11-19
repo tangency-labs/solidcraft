@@ -7892,7 +7892,10 @@ fn render_lighting_methods_show_reasons_and_budgets_without_changing_method_or_d
             assert!(crate::scenario::rect_of("dialog:note:render.lighting_shadow_cpu").is_some());
             assert!(crate::scenario::rect_of("dialog:note:render.lighting_samples_cpu").is_some());
         }
-        assert!(h.widget(h.app.tr("render.lighting_budget_help")).is_some());
+        // What a control does shows on hover, not as a line of its own (#19269).
+        for help in ["render.lighting_budget_help", "render.lighting_custom_help"] {
+            assert!(crate::scenario::rect_of(&format!("dialog:note:{help}")).is_none(), "{help} is a tooltip");
+        }
         assert_eq!(h.app.render_workspace.view.method, method);
         assert_eq!(h.app.session.revision, revision);
         assert!(Arc::ptr_eq(&before, &h.app.session.doc));
