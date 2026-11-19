@@ -519,6 +519,47 @@ fn a_note_drags_like_a_sketch_dimensions_text() {
     }
 }
 
+/// A drag from one of several selected things moves them all together by the pointer's way, as
+/// a sketch drags its selected geometry, in one undo step: here a view, a note on the sheet and a
+/// dimension on another view. The view's own dimension goes with it once, not twice.
+#[test]
+fn a_selection_drags_together_in_one_undo_step() {
+    use solidcraft_engine::Sel;
+    let (mut h, front) = plate_sheet();
+    let decode = |v: &Value, key: &str| solidcraft_engine::doc::ids::decode(v[key].as_str().unwrap()).unwrap();
+    let drawing = h.app.session.drawing("drawing.inspect").unwrap().clone();
+    let front_id = solidcraft_engine::doc::ids::decode(&front).unwrap();
+    let right = drawing.views.iter().find(|view| view.id != front_id).unwrap().id;
+    let on_front = drawing.dimensions[0].id;
+    let note = h.app.run("drawing.note.add", json!({"anchor": {"sheet": "Sheet 1"}, "at": [300, 230], "content": "DEBURR"})).unwrap();
+    let note = decode(&note, "note");
+    let side =
+        h.app.run("drawing.dimension.add", json!({"view": solidcraft_engine::doc::ids::encode(right), "kind": {"length": {"edge": [100, 40, 20]}}}));
+    let side = decode(&side.unwrap(), "dimension");
+    settle(&mut h);
+    h.app.session.selection = [front_id, note, side].map(|object| Sel::Drawing { drawing: drawing.id, object }).to_vec();
+    let centre = |h: &Harness| h.app.session.drawing("drawing.inspect").unwrap().view_centre(front_id).unwrap();
+    let note_at = |h: &Harness| Vec2::from(h.app.session.drawing("drawing.inspect").unwrap().notes.by_id(note).unwrap().at);
+    let (front_from, note_from, side_from, own_from) = (centre(&h), note_at(&h), text_of(&mut h, side).0, text_of(&mut h, on_front).0);
+    let undo = h.app.session.undo.len();
+    let sheet = crate::drawing_sheet_page::active_sheet(&h.app).unwrap();
+    let bounds = drawing_scene::extract(&mut h.app.session, sheet).unwrap().objects.iter().find(|object| object.object == note).unwrap().bounds_mm;
+    let grab = (bounds.min + bounds.max) * 0.5;
+    let by = Vec2::new(20.0, -15.0);
+    h.step(&json!({"drag": [on_screen(grab.x, grab.y), on_screen(grab.x + by.x, grab.y + by.y)], "steps": 6})).unwrap();
+    h.frames(2);
+    assert!(crate::dim_view::dragged().is_none(), "the drag ended");
+    let moved = |what: &str, from: Vec2, to: Vec2| assert!((to - (from + by)).len() < 1.0, "{what} moved by {:?}, not {by:?}", to - from);
+    moved("the view", front_from, centre(&h));
+    moved("the note", note_from, note_at(&h));
+    moved("the other view's dimension", side_from, text_of(&mut h, side).0);
+    moved("the view's own dimension", own_from, text_of(&mut h, on_front).0);
+    assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step for the whole drag");
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert!((centre(&h) - front_from).len() < 1e-9 && (note_at(&h) - note_from).len() < 1e-9, "one undo puts them all back");
+    assert!((text_of(&mut h, side).0 - side_from).len() < 1e-6, "and the dimension");
+}
+
 /// What the pointer is over, and what is selected, is lit in the accent colour as in a sketch,
 /// with no box round it.
 #[test]
