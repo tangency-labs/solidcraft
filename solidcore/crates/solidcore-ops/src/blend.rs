@@ -40,7 +40,7 @@ use std::collections::{HashMap, HashSet};
 
 use solidcore::blend::band_room::law_fits_band;
 use solidcore::blend::blend_corner::rollover::{
-    concave_chain, concave_chain_ends, is_concave_chain, RollOver,
+    concave_chain, concave_chain_ends, has_end_arc, is_concave_chain, RollOver,
 };
 use solidcore::blend::blend_corner::BlendCornerEvent;
 use solidcore::blend::blend_refusal::{BlendRefusal, NotBlendable, SetbackTooShortWhy};
@@ -546,14 +546,16 @@ fn blend_failure(
 ) -> (Error, Option<EdgeId>) {
     if let SolidError::BlendRefused { refusal, .. } = &e {
         if let Some(error) = refused(s, refusal) {
-            return (error, None);
+            return (crate::session::noted(&e, error), None);
         }
     }
-    match session_refusal(s, e, call) {
+    let (kind, operation) = (e.kind().code(), e.operation());
+    let (error, edge) = match session_refusal(s, e, call) {
         Ok(r) => (r.refusal.into(), r.edge),
         // a failure the kernel states in words says what the session noted of the step too
         Err(e) => (session_failure(s, &e).unwrap_or_else(|| status(e)), None),
-    }
+    };
+    (crate::session::noted_as(kind, operation, error), edge)
 }
 
 /// The refusal of a swept turn the corners step noted at its vertex (the blend corner's
@@ -959,7 +961,7 @@ fn pass(
             Ok(Err(refusal)) => Ok(Err(refusal)),
             Err(e) => {
                 if let Some(why) = refused_turn {
-                    Ok(Err(Refused::Error(why)))
+                    Ok(Err(Refused::Error(crate::session::noted(&e, why))))
                 } else {
                     let (error, edge) = blend_failure(&s, e, call);
                     fit_edge = edge;
@@ -1702,8 +1704,15 @@ fn blend_on_body(
         && back.is_empty()
         && corners == Corners::Filled
         && picked.len() > 1;
-    // the untouched input, for the overflowing rounds to go first on
-    let fresh = if may_go_first {
+    // a round that may be the Roll-over's concave chain asked on its own (#10876), of one edge
+    // too (#19476: the foot of a cylinder that stands through a face)
+    let asked_alone = kind == Blend::Round
+        && turn == Turn::Mitre
+        && back.is_empty()
+        && corners == Corners::Filled;
+    let may_be_chain = asked_alone && has_end_arc(k, b, &picked)?;
+    // the untouched input, for the overflowing rounds to go first on, or the chain to be built on
+    let fresh = if may_go_first || may_be_chain {
         Some(brep_copy(k, b)?)
     } else {
         None
@@ -1742,8 +1751,10 @@ fn blend_on_body(
     // left them)
     if !stopped.roll_overs.is_empty() && made.is_err() {
         if let Some(input) = fresh.as_ref() {
-            // the faces the sessions log, put back where the passes are given up
+            // the faces the sessions log, and the kernel error the first call's refusal noted,
+            // put back where the passes are given up
             let log = k.blend_face_log.clone();
+            let note = crate::session::note();
             let rolled_input = brep_copy(k, input)?;
             let mut rolled_dropped = dropped.clone();
             let rolled = roll_over(
@@ -1776,7 +1787,10 @@ fn blend_on_body(
                     }));
                 }
                 Err(e) if e.is_cancelled() => return Err(e),
-                Ok(Err(_)) | Err(_) => k.blend_face_log = log,
+                Ok(Err(_)) | Err(_) => {
+                    k.blend_face_log = log;
+                    crate::session::note_back(note);
+                }
             }
         }
     }
@@ -1784,15 +1798,12 @@ fn blend_on_body(
     // overflow left to go first): built as the event's second pass on a copy of the
     // untouched input (the asked edges at their places in the copy's order); where it is
     // not the chain, does not build or does not finish, the first call's refusal stands
-    if step == RollOverStep::Classify
-        && stopped.roll_overs.is_empty()
-        && stopped.overflow.is_none()
-        && made.is_err()
-    {
+    if asked_alone && stopped.roll_overs.is_empty() && stopped.overflow.is_none() && made.is_err() {
         if let Some(input) = fresh.as_ref() {
             // the faces the sessions log, put back where the copy is given up (its faces
-            // are not the result's)
+            // are not the result's), and the kernel error the first call's refusal noted
             let log = k.blend_face_log.clone();
+            let note = crate::session::note();
             let mut copy = brep_copy(k, input)?;
             let copy_list = copy.edge_list().to_vec();
             let mapped: Option<Vec<EdgeId>> = picked
@@ -1836,6 +1847,7 @@ fn blend_on_body(
                 }
             }
             k.blend_face_log = log;
+            crate::session::note_back(note);
         }
     }
     if stopped.overflow.is_some() {

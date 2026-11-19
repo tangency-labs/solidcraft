@@ -1329,7 +1329,7 @@ fn a_computing_batch_is_a_row_of_the_operations_panel_that_stops_it() {
     assert_eq!(reply_to(&mut h, &single)["ok"], true);
     h.frames(1);
     let finished = crate::operations::control(&mut h.app, &json!({})).unwrap()["finished"].clone();
-    if h.app.operations.rows(crate::now_ms()).any(|(r, _)| r.key == "agent") || finished[0]["key"] == "agent" {
+    if h.app.operations.rows(crate::operations::frame_ms(&h.ctx)).any(|(r, _)| r.key == "agent") || finished[0]["key"] == "agent" {
         assert_eq!(finished[0]["outcome"], "done", "{finished}");
     }
 }
@@ -1758,7 +1758,7 @@ fn many_waiting_agent_commands_keep_the_panel_and_fold_into_one_row() {
     h.frames(1);
     assert!(h.app.agent_computing().is_some());
     assert!(h.app.operations.panel_drew, "the panel is drawn with 40 commands waiting");
-    let shown = h.app.operations.rows(crate::now_ms()).count();
+    let shown = h.app.operations.rows(crate::operations::frame_ms(&h.ctx)).count();
     assert_eq!(shown, 1 + MAX_WAITING_SHOWN + 1, "the computing one, the first waiting ones and the summary row");
     let rows = agent_rows(&mut h);
     assert_eq!(rows.iter().filter(|r| r["queued"] == true).count(), 40, "all of them stay listed");
@@ -1794,9 +1794,119 @@ fn the_summary_row_stays_above_the_waiting_rows_when_one_unfolds() {
     let first = rows.iter().rfind(|r| r["queued"] == true).unwrap()["key"].as_str().unwrap().to_string();
     crate::operations::cancel(&mut h.app, &first).unwrap();
     h.frames(1);
-    let shown: Vec<_> = h.app.operations.rows(crate::now_ms()).map(|(r, alpha)| (r.key.clone(), r.label.clone(), alpha)).collect();
+    let shown: Vec<_> = h.app.operations.rows(crate::operations::frame_ms(&h.ctx)).map(|(r, _)| (r.key.clone(), r.label.clone(), r.queued)).collect();
     assert_eq!(shown.last().map(|r| r.0.as_str()), Some("agent:held:more"), "the summary row is the top one: {shown:?}");
-    let live: Vec<_> = shown.iter().filter(|r| r.0.starts_with("agent:held:") && r.0 != "agent:held:more" && r.2 == 1.0).collect();
+    // Those still waiting: the cancelled one is fading out, no longer queued (fully opaque on the
+    // frame it went, since its fade starts on that frame's clock).
+    let live: Vec<_> = shown.iter().filter(|r| r.0.starts_with("agent:held:") && r.0 != "agent:held:more" && r.2).collect();
     let places: Vec<_> = live.iter().map(|r| r.1.split('.').next().unwrap().to_string()).collect();
     assert_eq!(places, (1..=MAX_WAITING_SHOWN).map(|n| n.to_string()).collect::<Vec<_>>(), "in queue order: {shown:?}");
+}
+
+/// A block whose length is the parameter `len` (60 mm), with a boss and a hole placed by `len`: a
+/// change of `len` recomputes every feature. Every command computes off the window thread.
+fn block_of_len() -> Harness {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("parameters.add", json!({"name": "len", "expression": "60 mm"})).unwrap();
+    for (id, p) in [
+        ("solid.box", json!({"length": "len", "width": 20, "height": 10})),
+        ("solid.box", json!({"corner": ["len / 2", 5, 10], "length": 10, "width": 10, "height": 5, "operation": "join"})),
+        ("solid.cylinder", json!({"base": ["len / 2 + 5", 10, -1], "axis": [0, 0, 1], "radius": 2, "height": 20, "operation": "cut"})),
+    ] {
+        h.app.run(id, p).unwrap();
+    }
+    h.app.apply_off_thread = Some(Duration::ZERO);
+    h
+}
+
+fn len(h: &Harness) -> Option<String> {
+    h.app.session.doc.param("len").map(|p| p.expr.clone())
+}
+
+fn volume_at_len(h: &mut Harness, mm: f64) -> f64 {
+    let v = h.app.run("inspect.measure", json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
+    v - (mm * 200.0 + 500.0 - std::f64::consts::PI * 4.0 * 15.0)
+}
+
+/// A parameter changed in the Parameters dialog computes off the window thread (#6777): the
+/// design stays as it was while the window goes on, saying it computes, the row shows the
+/// expression being applied, and the change is in once computed.
+#[test]
+fn a_parameter_changed_in_the_dialog_computes_off_the_window_thread() {
+    let mut h = block_of_len();
+    // The toast says it (with the operations panel on, its row does).
+    h.app.preferences.operations_panel = false;
+    h.step(&json!({"start": "parameters.change"})).unwrap();
+    h.frames(4);
+    h.run(&json!([{"click": {"handle": "param:len"}}, {"key": "A", "cmd": true}, {"text": "70 mm"}, {"key": "Enter"}])).unwrap();
+    assert!(h.app.computing_since().is_some(), "computing");
+    assert_eq!(len(&h).as_deref(), Some("60 mm"), "the design is as it was while it computes");
+    let applying = h.app.params.as_ref().and_then(|d| d.applying.get("len").cloned());
+    assert_eq!(applying.as_deref(), Some("70 mm"), "the row shows the expression it applies");
+    h.frames(1);
+    assert!(crate::scenario::rect_of("toast:computing").is_some(), "the window says it computes");
+    until_settled(&mut h);
+    assert_eq!(len(&h).as_deref(), Some("70 mm"));
+    assert!(volume_at_len(&mut h, 70.0).abs() < 1.0);
+    h.frames(1);
+    assert!(h.app.params.as_ref().is_some_and(|d| d.applying.is_empty() && d.editing.is_empty()), "nothing left pending");
+}
+
+/// Edits held for Apply (#9279) go in one change, off the window thread too.
+#[test]
+fn held_parameter_edits_applied_compute_off_the_window_thread() {
+    let mut h = block_of_len();
+    h.app.preferences.parameters_apply_live = false;
+    h.step(&json!({"start": "parameters.change"})).unwrap();
+    h.frames(4);
+    h.run(&json!([{"click": {"handle": "param:len"}}, {"key": "A", "cmd": true}, {"text": "80 mm"}, {"key": "Enter"}])).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.params.as_ref().and_then(|d| d.editing.get("len").cloned()).as_deref(), Some("80 mm"), "held for Apply");
+    h.step(&json!({"click": {"handle": "dialog:apply"}})).unwrap();
+    assert!(h.app.computing_since().is_some(), "computing");
+    assert_eq!(len(&h).as_deref(), Some("60 mm"));
+    until_settled(&mut h);
+    assert_eq!(len(&h).as_deref(), Some("80 mm"));
+    assert!(volume_at_len(&mut h, 80.0).abs() < 1.0);
+}
+
+/// A configuration activated in the configurations table computes off the window thread too.
+#[test]
+fn a_configuration_activated_computes_off_the_window_thread() {
+    let mut h = block_of_len();
+    h.app.run("config.configure", json!({"params": ["len"]})).unwrap();
+    h.app.run("config.row", json!({"name": "Long", "values": {"len": "80 mm"}})).unwrap();
+    h.app.start("config.table");
+    h.frames(4);
+    h.step(&json!({"click": {"handle": "config:activate:Long"}})).unwrap();
+    assert!(h.app.computing_since().is_some(), "computing");
+    assert_ne!(h.app.session.doc.configs.active.as_deref(), Some("Long"), "not active while it computes");
+    until_settled(&mut h);
+    assert_eq!(h.app.session.doc.configs.active.as_deref(), Some("Long"));
+    assert_eq!(len(&h).as_deref(), Some("80 mm"));
+    assert!(volume_at_len(&mut h, 80.0).abs() < 1.0);
+}
+
+/// Cancel puts back a live edit that computed off the window thread (#15377, #6777), whether it
+/// is in already or still computing when Cancel is clicked.
+#[test]
+fn cancel_puts_back_a_parameter_change_computed_off_the_window_thread() {
+    for in_before_cancel in [true, false] {
+        let mut h = block_of_len();
+        h.app.preferences.parameters_apply_live = true;
+        h.step(&json!({"start": "parameters.change"})).unwrap();
+        h.frames(4);
+        h.run(&json!([{"click": {"handle": "param:len"}}, {"key": "A", "cmd": true}, {"text": "70 mm"}, {"key": "Enter"}])).unwrap();
+        assert!(h.app.computing_since().is_some(), "computing");
+        if in_before_cancel {
+            until_settled(&mut h);
+            assert_eq!(len(&h).as_deref(), Some("70 mm"), "the edit is in");
+        }
+        h.step(&json!({"click": {"handle": "dialog:Cancel"}})).unwrap();
+        assert!(h.app.params.is_none(), "Cancel closes the dialog");
+        until_settled(&mut h);
+        assert_eq!(len(&h).as_deref(), Some("60 mm"), "Cancel puts the edit back (in before Cancel: {in_before_cancel})");
+        assert!(volume_at_len(&mut h, 60.0).abs() < 1.0);
+    }
 }

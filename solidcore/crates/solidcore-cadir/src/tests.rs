@@ -1615,3 +1615,56 @@ fn a_body_placed_by_a_scale_or_mirror_is_refused_and_a_rigid_one_moves_it() {
         Some([100.0, 0.0, 0.0, 1.0])
     );
 }
+
+/// A solid refused for one face (its plane moved 5 mm off its edges) comes in as an open surface
+/// of its other faces, as the STEP reader brings in a solid it cannot close: the record says why
+/// it is open and which face was left out, and the face is only left out because the refusal
+/// names it.
+#[test]
+fn a_solid_refused_for_one_face_comes_in_as_an_open_surface_of_the_others() {
+    let mut ir = cube();
+    let face = ir.model.faces.first().unwrap().clone();
+    let surface = ir
+        .model
+        .surfaces
+        .iter_mut()
+        .find(|s| s.id == face.surface)
+        .unwrap();
+    let SurfaceGeometry::Solved(SolvedSurfaceGeometry::Plane(plane)) = &surface.geometry else {
+        panic!("{:?}", surface.geometry)
+    };
+    let o = plane.origin().get();
+    let (n, u) = (
+        plane.frame().axis().as_raw(),
+        plane.frame().reference().as_raw(),
+    );
+    let moved = cadmpeg_ir::geometry::analytic::PlaneSurface::try_new(
+        Point3::new(o.x + 5.0 * n.x, o.y + 5.0 * n.y, o.z + 5.0 * n.z),
+        Vector3::new(n.x, n.y, n.z),
+        Vector3::new(u.x, u.y, u.z),
+    )
+    .unwrap();
+    surface.geometry = SurfaceGeometry::Solved(SolvedSurfaceGeometry::Plane(moved));
+    let bodies = read_bodies(&ir, None);
+    assert!(bodies.failures.is_empty(), "{:?}", bodies.failures);
+    let s = &bodies.read[0].solid;
+    assert!(s.sheet, "an open surface");
+    assert_eq!(s.brep.faces.len(), 5);
+    assert!(
+        !s.face_origin.contains(&0),
+        "face 0 left out: {:?}",
+        s.face_origin
+    );
+    assert!(
+        s.notes.iter().any(|n| n.starts_with("not closed")),
+        "{:?}",
+        s.notes
+    );
+    assert!(
+        s.notes
+            .iter()
+            .any(|n| n.starts_with("left out: ") && n.contains("face #0")),
+        "{:?}",
+        s.notes
+    );
+}
