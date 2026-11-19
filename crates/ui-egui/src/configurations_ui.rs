@@ -146,6 +146,27 @@ pub(super) fn configurations_rows(
                 for (column_index, (column, value)) in tb.columns.iter().zip(values).enumerate() {
                     row.cell(|ui| {
                         let (kind, _) = column_parts(column);
+                        if kind == "suppress" {
+                            let (response, toggled) = suppress_box(ui, column, value);
+                            crate::scenario::publish_handle(&format!("config:cell:{name}:{column}"), response.rect.center());
+                            if let Some(on) = toggled {
+                                run(app, error, "config.row", json!({"name":name,"values":{column:on}}));
+                            }
+                            // Enter, Tab and their Shift forms move on as from a value cell.
+                            let landed = ui_kit::landing(ui, cells, name, column, &response, "");
+                            let focused = response.has_focus() && !landed;
+                            if [ui_kit::CellKey::Next, ui_kit::CellKey::Previous]
+                                .into_iter()
+                                .any(|key| target(row_index, column_index, key).is_some())
+                            {
+                                ui_kit::keep_tab_in_cell(ui, &response);
+                            }
+                            if let Some((row, column)) = ui_kit::cell_key(ui, focused).and_then(|key| target(row_index, column_index, key)) {
+                                ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+                                ui_kit::land_in_cell(ui.ctx(), cells, &row, &column);
+                            }
+                            return;
+                        }
                         let shown = display_cell(kind, value);
                         let key = (name.clone(), column.clone());
                         let mut text = rule_editor.drafts.get(&key).cloned().unwrap_or_else(|| shown.clone());
@@ -222,6 +243,14 @@ pub(super) fn configurations_rows(
                                         .unwrap_or_default()
                                 });
                                 let (kind, _) = column_parts(column);
+                                if kind == "suppress" {
+                                    let (response, toggled) = suppress_box(ui, column, &value);
+                                    crate::scenario::publish_handle(&format!("config:new:cell:{column}"), response.rect.center());
+                                    if let Some(on) = toggled {
+                                        rule_editor.new_values.insert(column.clone(), on.to_string());
+                                    }
+                                    return;
+                                }
                                 let (response, choice) = value_control(ui, ui.scope_id().with(column), &mut value, kind, &material_names);
                                 let picked = choice.is_some();
                                 if let Some(choice) = choice {
@@ -506,6 +535,17 @@ fn display_cell(kind: &str, value: &str) -> String {
     } else {
         value.to_owned()
     }
+}
+
+/// A suppression cell is a check box, ticked while the feature is suppressed, so the table reads
+/// at a glance and one click or Space changes it. The `toggled` value is the new suppression;
+/// Enter is left to move between cells, as it does from a value cell, rather than toggling.
+fn suppress_box(ui: &mut egui::Ui, column: &str, value: &str) -> (egui::Response, Option<bool>) {
+    let mut on = cell_value(column, value) == json!(true);
+    let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+    let response = ui_kit::checkbox(ui, "", &mut on);
+    let toggled = response.changed() && !enter;
+    (response, toggled.then_some(on))
 }
 
 fn value_control(ui: &mut egui::Ui, id: egui::Id, text: &mut String, kind: &str, material_names: &[String]) -> (egui::Response, Option<String>) {
