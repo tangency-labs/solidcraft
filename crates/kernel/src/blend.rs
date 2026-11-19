@@ -1350,6 +1350,15 @@ fn smooth_join(rec: &Faces, e: usize) -> Result<bool> {
 /// passes over.
 fn chain_of(rec: &Faces, seeds: &[usize], hidden: &[bool]) -> Result<Vec<usize>> {
     let mut chain = seeds.to_vec();
+    // Which edges `chain` holds, beside it, so the walk asks in one step rather than scanning the
+    // chain for every edge it looks at, which made it slow down with the square of the chain's
+    // length (#19245).
+    let mut in_chain = vec![false; rec.rec.edges.len()];
+    for &s in seeds {
+        if let Some(slot) = in_chain.get_mut(s) {
+            *slot = true;
+        }
+    }
     // Each edge's smoothness, decided once.
     let mut smooth: Vec<Option<bool>> = vec![None; rec.rec.edges.len()];
     let mut smooth_at = |f: usize| -> Result<bool> {
@@ -1364,24 +1373,7 @@ fn chain_of(rec: &Faces, seeds: &[usize], hidden: &[bool]) -> Result<Vec<usize>>
     };
     let leaving = |e: usize, v: u32| leaving(&rec.rec, e, v);
     let cos = solidcraft_geom::TANGENT_CHAIN.cos();
-    let accept = normal_reach(rec);
-    // Whether edge `e` is convex at its end `v` (its faces meet at less than 180° inside the
-    // body): the direction into its second face, square to it, points against its first face's
-    // outward normal. A face lies to the left of its loop seen from its surface's natural normal.
-    // None for an edge without exactly two uses, or where a normal cannot be found.
-    let convex = |e: usize, v: u32| -> Option<bool> {
-        let edge = rec.rec.edges.get(e)?;
-        let [ua, ub] = edge.uses.as_slice() else { return None };
-        let forward_b = match rec.rec.faces.get(ub.face as usize)?.loops.get(ub.r#loop as usize)? {
-            Loop::Edges { edges } => edges.get(ub.position as usize)?.forward,
-            Loop::Vertex { .. } => return None,
-        };
-        let p = rec.point(v)?;
-        let along = rec.tangent(e, edge.vertices[0] != v)?;
-        let natural_b = rec.normal_at(ub.face as usize, p, accept)? * rec.side(ub.face as usize)?;
-        let into_b = natural_b.cross(if forward_b { along } else { along * -1.0 });
-        Some(into_b.dot(rec.normal_at(ua.face as usize, p, accept)?) < 0.0)
-    };
+    let convex = |e: usize, v: u32| convex_at(rec, e, v);
     let mut k = 0;
     while k < chain.len() {
         let Some(&e) = chain.get(k) else { break };
@@ -1391,17 +1383,40 @@ fn chain_of(rec: &Faces, seeds: &[usize], hidden: &[bool]) -> Result<Vec<usize>>
             let Some(d) = leaving(e, v) else { continue };
             for (f, other) in rec.rec.edges.iter().enumerate() {
                 let passed_over = hidden.get(f).copied().unwrap_or(false);
-                if passed_over || chain.contains(&f) || other.uses.len() < 2 || !other.vertices.contains(&v) || smooth_at(f)? {
+                let held = in_chain.get(f).copied().unwrap_or(true);
+                if passed_over || held || other.uses.len() < 2 || !other.vertices.contains(&v) || smooth_at(f)? {
                     continue;
                 }
                 let turns_over = matches!((convex(e, v), convex(f, v)), (Some(a), Some(b)) if a != b);
                 if !turns_over && leaving(f, v).is_some_and(|g| d.dot(g) < -cos) {
+                    if let Some(slot) = in_chain.get_mut(f) {
+                        *slot = true;
+                    }
                     chain.push(f);
                 }
             }
         }
     }
     Ok(chain)
+}
+
+/// Whether edge `e` is convex at its end `v` (its faces meet at less than 180° inside the body):
+/// the direction into its second face, square to it, points against its first face's outward
+/// normal. A face lies to the left of its loop seen from its surface's natural normal. None for an
+/// edge without exactly two uses, or where a normal cannot be found.
+fn convex_at(rec: &Faces, e: usize, v: u32) -> Option<bool> {
+    let accept = normal_reach(rec);
+    let edge = rec.rec.edges.get(e)?;
+    let [ua, ub] = edge.uses.as_slice() else { return None };
+    let forward_b = match rec.rec.faces.get(ub.face as usize)?.loops.get(ub.r#loop as usize)? {
+        Loop::Edges { edges } => edges.get(ub.position as usize)?.forward,
+        Loop::Vertex { .. } => return None,
+    };
+    let p = rec.point(v)?;
+    let along = rec.tangent(e, edge.vertices[0] != v)?;
+    let natural_b = rec.normal_at(ub.face as usize, p, accept)? * rec.side(ub.face as usize)?;
+    let into_b = natural_b.cross(if forward_b { along } else { along * -1.0 });
+    Some(into_b.dot(rec.normal_at(ua.face as usize, p, accept)?) < 0.0)
 }
 
 /// Before blending exactly `edges` (the record's edges `picks` took, in order): refuses an edge
@@ -2903,6 +2918,117 @@ mod tests {
         assert_eq!(tangent_chain(&near, &[pick]).unwrap().len(), 240);
         let (corner, pick) = polygon_prism(120);
         assert_eq!(tangent_chain_edges(&corner, &[pick]).unwrap().len(), 1, "3° is a corner");
+    }
+
+    /// The tangent chain walked by scanning the chain for every edge it looks at, as [`chain_of`]
+    /// did before it kept a membership array beside the chain (#19245): the order the chain must
+    /// keep.
+    fn chain_by_scan(rec: &Faces, seeds: &[usize], hidden: &[bool]) -> Vec<usize> {
+        let mut chain = seeds.to_vec();
+        let cos = solidcraft_geom::TANGENT_CHAIN.cos();
+        let mut k = 0;
+        while k < chain.len() {
+            let e = chain[k];
+            k += 1;
+            for v in rec.rec.edges[e].vertices {
+                let Some(d) = leaving(&rec.rec, e, v) else { continue };
+                for (f, other) in rec.rec.edges.iter().enumerate() {
+                    if hidden.get(f).copied().unwrap_or(false)
+                        || chain.contains(&f)
+                        || other.uses.len() < 2
+                        || !other.vertices.contains(&v)
+                        || smooth_join(rec, f).unwrap()
+                    {
+                        continue;
+                    }
+                    let turns_over = matches!((convex_at(rec, e, v), convex_at(rec, f, v)), (Some(a), Some(b)) if a != b);
+                    if !turns_over && leaving(&rec.rec, f, v).is_some_and(|g| d.dot(g) < -cos) {
+                        chain.push(f);
+                    }
+                }
+            }
+        }
+        chain
+    }
+
+    /// Keeping chain membership in an array changes neither which edges a tangent chain holds nor
+    /// their order (#19245). On a 240-gon prism's top outline (one pick, and two picks on
+    /// opposite sides), a box with its vertical edges rounded (a top edge, and a top and a bottom
+    /// edge together), a box with one vertical edge rounded and the rounded plate with its boss,
+    /// the chain is the one the scanning walk gives, edge for edge. Where the number of edges is
+    /// known it is checked too (0: not checked). On a flat pyramid, where two edges run on from
+    /// one vertex, it is checked from every lateral edge and every pair of them.
+    #[test]
+    fn a_tangent_chain_keeps_its_edges_and_their_order() {
+        let (prism, pick) = polygon_prism(240);
+        let far = Vec3::new(-pick.x, -pick.y, pick.z);
+        let block = crate::build::box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
+        let corners = [Vec3::new(0.0, 0.0, 10.0), Vec3::new(40.0, 0.0, 10.0), Vec3::new(40.0, 30.0, 10.0), Vec3::new(0.0, 30.0, 10.0)];
+        let all_round = fillet(&block, &corners, 5.0).unwrap();
+        let one_round = fillet(&block, &[Vec3::new(40.0, 30.0, 10.0)], 5.0).unwrap();
+        let plate = boss_on_rounded_plate();
+        let cases: [(&str, &Body, Vec<Vec3>, usize); 6] = [
+            ("240-gon, one pick", &prism, vec![pick], 240),
+            ("240-gon, two picks", &prism, vec![pick, far], 240),
+            ("rounded box, top edge", &all_round, vec![Vec3::new(20.0, 30.0, 20.0)], 8),
+            ("rounded box, top and bottom", &all_round, vec![Vec3::new(20.0, 30.0, 20.0), Vec3::new(20.0, 0.0, 0.0)], 16),
+            ("one rounded corner", &one_round, vec![Vec3::new(20.0, 30.0, 20.0)], 3),
+            ("plate and boss", &plate, vec![Vec3::new(26.796894836538296, -10.5, -12.0)], 0),
+        ];
+        for (name, body, picks, expected) in cases {
+            let (rec, chain, _) = picked_chain(body, &picks).unwrap();
+            let (seeds, hidden) = crate::blend_smlib::picked_edges(body, &picks).unwrap();
+            let mut unique: Vec<usize> = Vec::new();
+            for e in seeds {
+                if !unique.contains(&e) {
+                    unique.push(e);
+                }
+            }
+            assert_eq!(chain, chain_by_scan(&rec, &unique, &hidden), "{name}: the chain changed");
+            if expected > 0 {
+                assert_eq!(chain.len(), expected, "{name}: {chain:?}");
+            }
+        }
+        // A very flat pyramid over 8 base corners in near-opposite pairs: at the apex every
+        // lateral edge runs on into two others (each within 2°), so the chain's order there
+        // depends on the order the walk takes them in. From every lateral edge and every ordered
+        // pair of them.
+        let pyramid = flat_star_pyramid();
+        let rec = Faces::of(&pyramid).unwrap();
+        let apex = (0..rec.rec.vertices.len() as u32).find(|&v| rec.point(v).is_some_and(|p| p.z > 0.1)).unwrap();
+        let lateral: Vec<usize> = (0..rec.rec.edges.len()).filter(|&e| rec.rec.edges[e].vertices.contains(&apex)).collect();
+        assert_eq!(lateral.len(), 8);
+        let none = vec![false; rec.rec.edges.len()];
+        let mut most_at_apex = 0;
+        let mut seed_sets: Vec<Vec<usize>> = lateral.iter().map(|&e| vec![e]).collect();
+        for &a in &lateral {
+            seed_sets.extend(lateral.iter().filter(|&&b| b != a).map(|&b| vec![a, b]));
+        }
+        for seeds in seed_sets {
+            let chain = chain_of(&rec, &seeds, &none).unwrap();
+            assert_eq!(chain, chain_by_scan(&rec, &seeds, &none), "pyramid from {seeds:?}: the chain changed");
+            let at_apex = chain.iter().skip(seeds.len()).take_while(|&&e| rec.rec.edges[e].vertices.contains(&apex)).count();
+            most_at_apex = most_at_apex.max(at_apex);
+        }
+        assert!(most_at_apex >= 2, "no seed ran on into two edges at the apex");
+    }
+
+    /// A very flat pyramid (0.42 high over a base of radius 30) whose 8 base corners come in
+    /// near-opposite pairs, so from the apex every lateral edge runs on into two others, each
+    /// within 2°.
+    fn flat_star_pyramid() -> Body {
+        let (r, h) = (30.0, 0.42);
+        let angles = [0.0f64, 0.6, 89.7, 90.4, 179.6, 180.4, 269.6, 270.3];
+        let apex = Vec3::new(0.0, 0.0, h);
+        let p: Vec<Vec3> = angles.iter().map(|a| Vec3::new(r * a.to_radians().cos(), r * a.to_radians().sin(), 0.0)).collect();
+        let mut planes = vec![crate::HalfSpace { n: Vec3::new(0.0, 0.0, -1.0), d: 0.0 }];
+        for i in 0..p.len() {
+            let (a, b) = (p[i], p[(i + 1) % p.len()]);
+            let n = (a - apex).cross(b - apex).normalized().unwrap();
+            let n = if n.z < 0.0 { n * -1.0 } else { n };
+            planes.push(crate::HalfSpace { n, d: n.dot(apex) });
+        }
+        crate::convex_polyhedron(&planes).unwrap()
     }
 
     /// Smoothness is decided all along an edge. A bar 40 × 16 × 10 whose front face runs tangent
