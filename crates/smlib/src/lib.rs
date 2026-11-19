@@ -68,6 +68,12 @@ pub enum Error {
     WallFolds { largest: Option<f64> },
     /// SMLib cannot build this exactly yet (a variable radius whose law has a corner).
     Unsupported,
+    /// A face move whose tangent blends cannot follow the moved faces, with solidcore's reason
+    /// (`SmOffsetFacesExecutive`'s refusal comment): `exact` false where the blend cannot be taken
+    /// off and put back ([`Error::Unsupported`] without a reason), true where following it needs a
+    /// surface or edge continued that cannot be continued exactly ([`Error::NotExact`] without
+    /// one).
+    BlendsNotFollowed { exact: bool, why: String },
     /// A blend's edges meet at a vertex of a kind no SMLib blend corner handles yet.
     CornerUnsupported,
     /// A swept turn ([`Turn::Swept`]) solidcore does not build at the corner `at`: `room` where
@@ -183,6 +189,8 @@ impl std::fmt::Display for Error {
                     }
                 }
             }
+            Error::BlendsNotFollowed { exact: true, why } => write!(f, "SMLib cannot build this exactly in the input's geometry: {why}"),
+            Error::BlendsNotFollowed { exact: false, why } => write!(f, "SMLib cannot do this yet: {why}"),
             Error::Exception => write!(f, "SMLib raised an internal exception"),
             Error::Record(u) => write!(f, "{u}"),
             Error::Solidcore(e) => write!(f, "solidcore: {e}"),

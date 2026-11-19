@@ -42,6 +42,15 @@ pub(super) struct Draft {
     preview: Option<Preview>,
 }
 
+/// What a click would pick where the pointer is, looked up once for each place the pointer rests:
+/// it is shaded before the click, as a sketch shades the curve under the pointer.
+pub(super) struct Hover {
+    sheet: u64,
+    revision: u64,
+    at: Vec2,
+    hit: Option<(u64, Picked)>,
+}
+
 /// An edge picked on a view: how `drawing.dimension.add` names it, and its shape on paper.
 #[derive(Clone, Debug)]
 pub(crate) struct Picked {
@@ -277,6 +286,25 @@ fn paint_pick(painter: &egui::Painter, at: OnScreen, shape: Shape, path: &[Seg2]
     }
 }
 
+/// The edge a click at `point` would pick, kept while the pointer rests there. None once the picks
+/// are complete, where a click places the dimension instead.
+fn hovered(app: &mut SolveApp, at: OnScreen, sheet: u64, point: Vec2, band: f64, more: bool) -> Option<(u64, Picked)> {
+    if !more {
+        app.drawing_workspace.dimension_hover = None;
+        return None;
+    }
+    let revision = app.session.revision;
+    let kept = app
+        .drawing_workspace
+        .dimension_hover
+        .take()
+        .filter(|h| h.sheet == sheet && h.revision == revision && h.at.dist(point) * at_scale(at) <= RELAYOUT_PX);
+    let hover = kept.unwrap_or_else(|| Hover { sheet, revision, at: point, hit: pick(app, sheet, point, band).ok().flatten() });
+    let hit = hover.hit.clone();
+    app.drawing_workspace.dimension_hover = Some(hover);
+    hit
+}
+
 pub(crate) fn on_sheet(app: &mut SolveApp, painter: &egui::Painter, at: OnScreen, sheet: u64, point: Vec2, band: f64, clicked: bool) {
     let revision = app.session.revision;
     let mut draft = app.drawing_workspace.dimension.take().filter(|draft| draft.sheet == sheet && draft.revision == revision);
@@ -314,6 +342,16 @@ pub(crate) fn on_sheet(app: &mut SolveApp, painter: &egui::Painter, at: OnScreen
             (None, None) => {}
         }
     }
+    // The edge a click would take is shaded before the click, as the sketch's Dimension tool shades
+    // the curve under the pointer: an edge of the picked view that is not picked yet.
+    let more = draft.as_ref().is_none_or(|draft| draft.picks.len() < 2);
+    if let Some((view, edge)) = hovered(app, at, sheet, point, band, more)
+        && draft
+            .as_ref()
+            .is_none_or(|d| view == d.view && !d.picks.iter().any(|p| p.body == edge.body && p.index == edge.index && p.path == edge.path))
+    {
+        paint_pick(painter, at, edge.shape, &edge.stroke);
+    }
     if let Some(d) = &mut draft {
         let stale = d.preview.as_ref().is_none_or(|p| p.at.dist(point) * at_scale(at) > RELAYOUT_PX);
         if stale {
@@ -333,6 +371,12 @@ pub(crate) fn on_sheet(app: &mut SolveApp, painter: &egui::Painter, at: OnScreen
 /// Paper points per millimetre on screen.
 fn at_scale(at: OnScreen) -> f64 {
     at.screen(Vec2::new(1.0, 0.0)).x as f64 - at.screen(Vec2::ZERO).x as f64
+}
+
+/// What is shaded under the pointer, for tests: its shape on paper.
+#[cfg(test)]
+pub(crate) fn hovered_shape(app: &SolveApp) -> Option<Shape> {
+    app.drawing_workspace.dimension_hover.as_ref().and_then(|h| h.hit.as_ref().map(|(_, picked)| picked.shape))
 }
 
 /// The picks so far, for tests: their shapes on paper.

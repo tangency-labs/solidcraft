@@ -957,8 +957,15 @@ pub(crate) fn same_path(a: &str, b: &str) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     {
         // canonicalize resolves symlinks and Windows long names/case using the filesystem.
-        // Never lowercase: Windows can also host case-sensitive directories.
-        if let (Ok(a), Ok(b)) = (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        // Never lowercase: Windows can also host case-sensitive directories. A path on a network
+        // location not allowed (other than the host the other path is on) or a device is never
+        // resolved: on Windows that connects to the host before any "network location" question.
+        use solidcraft_engine::io::vfs;
+        let reachable = |p: &str, other: &str| vfs::design_path_refusal(p, Some(other)).is_none();
+        if reachable(a, b)
+            && reachable(b, a)
+            && let (Ok(a), Ok(b)) = (vfs::canonicalize(a), vfs::canonicalize(b))
+        {
             return a == b;
         }
         // A deleted file can still select its live editing session. Path equality also
@@ -2636,6 +2643,24 @@ mod tests {
         assert!(reuse_path(&mut a, "picker.solidcraft").is_err());
         assert_eq!(a.docs.active, 1);
         assert_eq!(a.docs.count(), 2);
+    }
+
+    /// A design's link to a network location not allowed is never resolved to see whether it is
+    /// an open design (Edit in Place asks that before the "network location" question).
+    #[test]
+    fn saved_path_identity_never_resolves_a_refused_network_path() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-tab-paths-net-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let open = dir.join("assembly.solidcraft").to_string_lossy().into_owned();
+        let calls = solidcraft_engine::io::vfs::file_calls();
+        for link in [r"\\server\share\part.solidcraft", "//server/share/part.solidcraft", r"\\.\pipe\part.solidcraft"] {
+            assert!(!same_path(&open, link), "{link}");
+            assert!(!same_path(link, &open), "{link}");
+        }
+        assert_eq!(solidcraft_engine::io::vfs::file_calls(), calls, "a refused path was resolved");
+        // Two paths on the same server (a design opened from it) are still compared.
+        assert!(same_path(r"\\files\share\a.solidcraft", r"\\files\share\a.solidcraft"));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
