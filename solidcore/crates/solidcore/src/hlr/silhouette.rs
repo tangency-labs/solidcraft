@@ -3,12 +3,32 @@
 //! circle; other surfaces are contoured on a chart grid, each point refined onto the curve,
 //! and the deviation of the chords from the curve is measured.
 
+// Moved from SolidCraft's `crates/geom/src/hlr` as it was, so the move reads line for line against
+// it: the pedantic restyling these would ask for waits for a change of its own. A comparison that
+// is not true takes the refusing branch, so a NaN is refused too.
+#![allow(
+    clippy::neg_cmp_op_on_partial_ord,
+    clippy::cast_lossless,
+    clippy::single_match_else,
+    clippy::manual_let_else,
+    clippy::semicolon_if_nothing_returned,
+    clippy::type_complexity,
+    clippy::match_same_arms,
+    clippy::items_after_statements,
+    clippy::redundant_closure_for_method_calls,
+    clippy::nonminimal_bool,
+    clippy::option_if_let_else,
+    clippy::map_unwrap_or,
+    clippy::unnecessary_wraps,
+    clippy::doc_markdown
+)]
+
 use super::curve::C3;
 use super::surface::{Analytic, S3};
 use super::trim::Trim;
-use crate::prelude::*;
-use crate::section::CurveAccuracy;
-use solidcore_record::Vec3;
+use super::vec::V3;
+use super::CurveAccuracy;
+use crate::math::Vec3;
 
 const TAU: f64 = std::f64::consts::TAU;
 
@@ -25,22 +45,36 @@ fn perp(a: Vec3) -> Vec3 {
 
 /// Axial extent of the faces' boundaries relative to `p` along `a`.
 fn extent(parts: &[(&S3, &Trim)], p: Vec3, a: Vec3) -> (f64, f64) {
-    parts.iter().flat_map(|(_, trim)| trim.chords.iter()).flat_map(|(x, y)| [*x, *y]).fold((f64::MAX, f64::MIN), |(lo, hi), q| {
-        let t = (q - p).dot(a);
-        (lo.min(t), hi.max(t))
-    })
+    parts
+        .iter()
+        .flat_map(|(_, trim)| trim.chords.iter())
+        .flat_map(|(x, y)| [*x, *y])
+        .fold((f64::MAX, f64::MIN), |(lo, hi), q| {
+            let t = (q - p).dot(a);
+            (lo.min(t), hi.max(t))
+        })
 }
 
 /// Silhouettes of a set of faces on one surface (`parts`: each face's chart and trim, all
 /// recognised as `an`): traced once and kept where they lie on any of the faces, so a
 /// silhouette along a seam between them is one curve. `stop` is asked before each face a
 /// curve is trimmed to; once it answers true the work ends and `out` is incomplete.
-pub(crate) fn silhouettes(parts: &[(&S3, &Trim)], an: Analytic, d: Vec3, out: &mut Vec<Sil>, stop: &dyn Fn() -> bool) {
-    let Some(&(s, trim)) = parts.first() else { return };
+pub(crate) fn silhouettes(
+    parts: &[(&S3, &Trim)],
+    an: Analytic,
+    d: Vec3,
+    out: &mut Vec<Sil>,
+    stop: &dyn Fn() -> bool,
+) {
+    let Some(&(s, trim)) = parts.first() else {
+        return;
+    };
     let mut push = |curve: C3, acc: CurveAccuracy| {
         // A traced curve's chords stand up to their deviation off the surface.
         let slack = match acc {
-            CurveAccuracy::Sampled { max_sample_deviation_mm: dev } => dev,
+            CurveAccuracy::Sampled {
+                max_sample_deviation_mm: dev,
+            } => dev,
             _ => 0.,
         };
         let mut ranges: Vec<[f64; 2]> = Vec::new();
@@ -52,7 +86,7 @@ pub(crate) fn silhouettes(parts: &[(&S3, &Trim)], an: Analytic, d: Vec3, out: &m
         }
         ranges.sort_by(|a, b| a[0].total_cmp(&b[0]));
         let [t0, t1] = curve.domain();
-        let mut merged: Vec<[f64; 2]> = Vec::with_capacity(ranges.len());
+        let mut merged: Vec<[f64; 2]> = Vec::new();
         for r in ranges {
             match merged.last_mut() {
                 Some(last) if r[0] <= last[1] + 1e-12 * (t1 - t0) => last[1] = last[1].max(r[1]),
@@ -60,20 +94,32 @@ pub(crate) fn silhouettes(parts: &[(&S3, &Trim)], an: Analytic, d: Vec3, out: &m
             }
         }
         if !merged.is_empty() {
-            out.push(Sil { curve, acc, ranges: merged });
+            out.push(Sil {
+                curve,
+                acc,
+                ranges: merged,
+            });
         }
     };
     match an {
         Analytic::Plane => {}
         Analytic::Cylinder { p, a, r } => {
-            let Some(m) = a.cross(d).normalized() else { return };
+            let Some(m) = a.cross(d).normalized() else {
+                return;
+            };
             let (t0, t1) = extent(parts, p, a);
             if !(t1 > t0) {
                 return;
             }
             for side in [1., -1.] {
                 let base = p + m * (r * side);
-                push(C3::Line { a: base + a * t0, b: base + a * t1 }, CurveAccuracy::Analytic);
+                push(
+                    C3::Line {
+                        a: base + a * t0,
+                        b: base + a * t1,
+                    },
+                    CurveAccuracy::Analytic,
+                );
             }
         }
         Analytic::Cone { apex, a, half } => {
@@ -97,25 +143,50 @@ pub(crate) fn silhouettes(parts: &[(&S3, &Trim)], an: Analytic, d: Vec3, out: &m
             for sign in [1., -1.] {
                 let phi = phid + sign * c.acos();
                 let g = a * half.cos() + (e1 * phi.cos() + e2 * phi.sin()) * half.sin();
-                push(C3::Line { a: apex + g * t0, b: apex + g * t1 }, CurveAccuracy::Analytic);
+                push(
+                    C3::Line {
+                        a: apex + g * t0,
+                        b: apex + g * t1,
+                    },
+                    CurveAccuracy::Analytic,
+                );
             }
         }
         Analytic::Sphere { c, r } => {
             let x = perp(d);
             let y = d.cross(x);
-            push(C3::Arc { o: c, x, y, r: [r, r], range: [0., TAU] }, CurveAccuracy::Analytic);
+            push(
+                C3::Arc {
+                    o: c,
+                    x,
+                    y,
+                    r: [r, r],
+                    range: [0., TAU],
+                },
+                CurveAccuracy::Analytic,
+            );
         }
         Analytic::Torus { .. } | Analytic::Other => {
             // Several faces of one torus may each hold part of its silhouette: trace it on the
             // whole torus then. One face keeps its own chart (finer along a narrow strip).
-            let whole = if parts.len() > 1 { S3::from_analytic(&an, [0., 0.], Vec3::ZERO) } else { None };
+            let whole = if parts.len() > 1 {
+                S3::from_analytic(&an, [0., 0.], Vec3::ZERO)
+            } else {
+                None
+            };
             let s = whole.as_ref().unwrap_or(s);
-            let traced = if matches!(s, S3::Rev(_)) { s.rev_silhouette(d) } else { contour(s, trim, d) };
+            let traced = if matches!(s, S3::Rev(_)) {
+                s.rev_silhouette(d)
+            } else {
+                contour(s, trim, d)
+            };
             for (curve, dev) in traced {
                 let acc = if dev == 0. && matches!(curve, C3::Arc { .. }) {
                     CurveAccuracy::Analytic
                 } else {
-                    CurveAccuracy::Sampled { max_sample_deviation_mm: dev }
+                    CurveAccuracy::Sampled {
+                        max_sample_deviation_mm: dev,
+                    }
                 };
                 push(curve, acc);
             }
@@ -158,13 +229,20 @@ pub(crate) fn inside_ranges(c: &C3, s: &S3, trim: &Trim, slack: f64) -> Vec<[f64
     // Uniform samples, plus the parameters nearest to the face's boundary points: an in-face
     // interval is bounded by boundary crossings, so a narrow one between two uniform samples
     // still gets samples on both of its sides.
-    let mut ts: Vec<f64> = (0..=n).map(|i| t0 + (t1 - t0) * i as f64 / n as f64).collect();
+    let mut ts: Vec<f64> = (0..=n)
+        .map(|i| t0 + (t1 - t0) * i as f64 / n as f64)
+        .collect();
     let near = 0.02 * (trim.hi - trim.lo).len();
-    ts.extend(trim.chords.iter().step_by(4).filter_map(|(q, _)| closest_param(c, *q).filter(|t| c.at(*t).dist(*q) <= near)));
+    ts.extend(
+        trim.chords
+            .iter()
+            .step_by(4)
+            .filter_map(|(q, _)| closest_param(c, *q).filter(|t| c.at(*t).dist(*q) <= near)),
+    );
     ts.retain(|t| *t >= t0 && *t <= t1);
     ts.sort_by(f64::total_cmp);
     ts.dedup_by(|a, b| (*a - *b).abs() <= 1e-12 * (t1 - t0));
-    let mut hints = Vec::with_capacity(ts.len());
+    let mut hints = Vec::new();
     let states: Vec<bool> = ts
         .iter()
         .map(|t| {
@@ -176,7 +254,9 @@ pub(crate) fn inside_ranges(c: &C3, s: &S3, trim: &Trim, slack: f64) -> Vec<[f64
     let mut out = Vec::new();
     let mut start: Option<f64> = None;
     for i in 0..ts.len() {
-        let (Some(&t), Some(&inside)) = (ts.get(i), states.get(i)) else { continue };
+        let (Some(&t), Some(&inside)) = (ts.get(i), states.get(i)) else {
+            continue;
+        };
         let prev = i.checked_sub(1).and_then(|j| states.get(j).copied());
         if prev.is_some_and(|p| p != inside) {
             let (mut lo, mut hi) = (ts.get(i - 1).copied().unwrap_or(t), t);
@@ -232,7 +312,11 @@ fn closest_param(c: &C3, p: Vec3) -> Option<f64> {
             .filter_map(|(i, w)| {
                 let (a, b) = (*w.first()?, *w.get(1)?);
                 let e = b - a;
-                let f = if e.len2() > 0. { ((p - a).dot(e) / e.len2()).clamp(0., 1.) } else { 0. };
+                let f = if e.len2() > 0. {
+                    ((p - a).dot(e) / e.len2()).clamp(0., 1.)
+                } else {
+                    0.
+                };
                 Some((i as f64 + f, (a + e * f).dist(p)))
             })
             .min_by(|x, y| x.1.total_cmp(&y.1))
@@ -243,7 +327,9 @@ fn closest_param(c: &C3, p: Vec3) -> Option<f64> {
 
 /// Zero set of `normal . d` on a chart grid over the face's chart box.
 fn contour(s: &S3, trim: &Trim, d: Vec3) -> Vec<(C3, f64)> {
-    let Some((lo, hi)) = trim.uv_bounds() else { return Vec::new() };
+    let Some((lo, hi)) = trim.uv_bounds() else {
+        return Vec::new();
+    };
     let dom = s.domain();
     let lo = [lo[0].max(dom[0][0]), lo[1].max(dom[1][0])];
     let hi = [hi[0].min(dom[0][1]), hi[1].min(dom[1][1])];
@@ -251,9 +337,17 @@ fn contour(s: &S3, trim: &Trim, d: Vec3) -> Vec<(C3, f64)> {
         return Vec::new();
     }
     let g = 128usize;
-    let uv = |i: usize, j: usize| [lo[0] + (hi[0] - lo[0]) * i as f64 / g as f64, lo[1] + (hi[1] - lo[1]) * j as f64 / g as f64];
+    let uv = |i: usize, j: usize| {
+        [
+            lo[0] + (hi[0] - lo[0]) * i as f64 / g as f64,
+            lo[1] + (hi[1] - lo[1]) * j as f64 / g as f64,
+        ]
+    };
     let f = |p: [f64; 2]| s.normal(p).map_or(f64::NAN, |n| n.dot(d));
-    let vals: Vec<f64> = (0..=g).flat_map(|j| (0..=g).map(move |i| (i, j))).map(|(i, j)| f(uv(i, j))).collect();
+    let vals: Vec<f64> = (0..=g)
+        .flat_map(|j| (0..=g).map(move |i| (i, j)))
+        .map(|(i, j)| f(uv(i, j)))
+        .collect();
     let val = |i: usize, j: usize| vals.get(j * (g + 1) + i).copied().unwrap_or(f64::NAN);
     let zero = |a: [f64; 2], b: [f64; 2], fa: f64| -> [f64; 2] {
         let (mut lo, mut hi, mut flo) = (a, b, fa);
@@ -279,10 +373,13 @@ fn contour(s: &S3, trim: &Trim, d: Vec3) -> Vec<(C3, f64)> {
         if fa.is_nan() || fb.is_nan() || (fa > 0.) == (fb > 0.) {
             return None;
         }
-        points.entry(id).or_insert_with(|| zero(uv(a.0, a.1), uv(b.0, b.1), fa));
+        points
+            .entry(id)
+            .or_insert_with(|| zero(uv(a.0, a.1), uv(b.0, b.1), fa));
         Some(id)
     };
-    let mut links: std::collections::BTreeMap<usize, Vec<usize>> = std::collections::BTreeMap::new();
+    let mut links: std::collections::BTreeMap<usize, Vec<usize>> =
+        std::collections::BTreeMap::new();
     for j in 0..g {
         for i in 0..g {
             let k = |i: usize, j: usize| j * (g + 1) + i;
@@ -296,8 +393,15 @@ fn contour(s: &S3, trim: &Trim, d: Vec3) -> Vec<(C3, f64)> {
             let pairs: Vec<(usize, usize)> = match found.as_slice() {
                 [a, b] => vec![(*a, *b)],
                 [a, b, c, dd] => {
-                    let centre = f([0.5 * (uv(i, j)[0] + uv(i + 1, j)[0]), 0.5 * (uv(i, j)[1] + uv(i, j + 1)[1])]);
-                    if (centre > 0.) == (val(i, j) > 0.) { vec![(*a, *b), (*c, *dd)] } else { vec![(*a, *dd), (*b, *c)] }
+                    let centre = f([
+                        0.5 * (uv(i, j)[0] + uv(i + 1, j)[0]),
+                        0.5 * (uv(i, j)[1] + uv(i, j + 1)[1]),
+                    ]);
+                    if (centre > 0.) == (val(i, j) > 0.) {
+                        vec![(*a, *b), (*c, *dd)]
+                    } else {
+                        vec![(*a, *dd), (*b, *c)]
+                    }
                 }
                 _ => Vec::new(),
             };
@@ -310,7 +414,12 @@ fn contour(s: &S3, trim: &Trim, d: Vec3) -> Vec<(C3, f64)> {
     // Chain the links into polylines.
     let mut used = std::collections::BTreeSet::new();
     let mut chains = Vec::new();
-    let starts: Vec<usize> = links.iter().filter(|(_, v)| v.len() == 1).map(|(k, _)| *k).chain(links.keys().copied()).collect();
+    let starts: Vec<usize> = links
+        .iter()
+        .filter(|(_, v)| v.len() == 1)
+        .map(|(k, _)| *k)
+        .chain(links.keys().copied())
+        .collect();
     for s0 in starts {
         if used.contains(&s0) {
             continue;
@@ -318,7 +427,10 @@ fn contour(s: &S3, trim: &Trim, d: Vec3) -> Vec<(C3, f64)> {
         let mut chain = vec![s0];
         used.insert(s0);
         let mut cur = s0;
-        while let Some(next) = links.get(&cur).and_then(|v| v.iter().find(|n| !used.contains(*n)).copied()) {
+        while let Some(next) = links
+            .get(&cur)
+            .and_then(|v| v.iter().find(|n| !used.contains(*n)).copied())
+        {
             used.insert(next);
             chain.push(next);
             cur = next;
@@ -333,12 +445,18 @@ fn contour(s: &S3, trim: &Trim, d: Vec3) -> Vec<(C3, f64)> {
     }
     let mut out = Vec::new();
     for chain in chains {
-        let uvs: Vec<[f64; 2]> = chain.iter().filter_map(|id| points.get(id).copied()).collect();
+        let uvs: Vec<[f64; 2]> = chain
+            .iter()
+            .filter_map(|id| points.get(id).copied())
+            .collect();
         let pts: Vec<Vec3> = uvs.iter().map(|p| s.point(*p)).collect();
         // Deviation: refine each chord's midpoint onto the curve across the chord.
         let mut dev = 0f64;
         for (w, q) in uvs.windows(2).zip(pts.windows(2)) {
-            let (Some(a), Some(b), Some(pa), Some(pb)) = (w.first(), w.get(1), q.first(), q.get(1)) else { continue };
+            let (Some(a), Some(b), Some(pa), Some(pb)) = (w.first(), w.get(1), q.first(), q.get(1))
+            else {
+                continue;
+            };
             let m = [0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1])];
             let n = [-(b[1] - a[1]), b[0] - a[0]];
             let (x, y) = ([m[0] - n[0], m[1] - n[1]], [m[0] + n[0], m[1] + n[1]]);
