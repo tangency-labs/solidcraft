@@ -294,9 +294,15 @@ ball's sphere. Setback: the rounds stop short and a 2n-sided hole is filled.*
   edge; the section is revolved about the side edge through the corner's turn. Between planes at a
   straight side edge this is an exact torus segment (a horn torus touching the axis at the side
   vertex), G1 to both rounds. It is the ball kept touching the side edge: the offset of an edge is a
-  cylinder about it, so the spine there is a circle and the envelope a torus [37, 6, 18, 8]. A ball
-  cannot pass a sharp concave side edge, so Swept there is refused, naming the corner radius that
-  would let it pass (R ≥ r).
+  cylinder about it, so the spine there is a circle and the envelope a torus [37, 6, 18, 8]. The
+  ball can circle the side edge only where its own side of the faces there is the wide one: a
+  concave round's ball lies in the air, a convex round's in the material, and a sharp concave
+  side edge leaves the air a narrow wedge, a convex one the material. So Swept builds where the
+  side edge and the rounds differ in convexity (a boss base's concave rounds about its convex
+  upright edge; an L's convex top rounds about its concave inner edge), and is refused where they
+  agree (a pocket rim's concave rounds at its concave corner edge; a box's convex rounds at its
+  convex corner edge), naming the corner radius that would let it pass (R ≥ r). Rounds of
+  different convexity are not swept yet.
 - **Ball.** Three equal rounds at three faces end on the corner ball's sphere [37, 6]. The corner
   face is always one rational patch exactly on the sphere, of degree (4, 2) by stereographic
   construction [8], with no analytic sphere special case: one code path.

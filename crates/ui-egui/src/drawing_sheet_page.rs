@@ -547,7 +547,18 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
         && !view_tools::dragging_dimension()
         && let Some(point) = on_paper
     {
-        crate::drawing_workspace::dimension::on_sheet(app, &placement_painter, at, sheet, point, HOVER_BAND / at.scale, response.clicked());
+        // The second click of a double-click is not a click of the tool's: it would place the
+        // dimension where the first click picked its edge, on top of the edge.
+        let clicked = response.clicked() && !response.double_clicked();
+        crate::drawing_workspace::dimension::on_sheet(app, &placement_painter, at, sheet, point, HOVER_BAND / at.scale, clicked);
+    }
+    // With the tool in hand a double-click on a placed dimension's text edits it where it is, as
+    // the sketch's Dimension tool does, and the tool stays in hand; anywhere else it changes nothing.
+    if response.double_clicked()
+        && let Some(hit) = annotation.filter(|hit| hit.kind == ObjectKind::Dimension)
+        && let Some(pointer) = response.interact_pointer_pos()
+    {
+        crate::drawing_workspace::edit_in_place(app, hit.object, pointer);
     }
     let placing = placing || placing_note || placing_dimension;
     view_tools::Canvas { at, painter: &painter, response: &response, drawing: &drawing, sheet, objects: &view.objects, free: free_area(app, canvas) }
