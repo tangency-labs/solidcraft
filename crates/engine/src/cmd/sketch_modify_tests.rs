@@ -4727,11 +4727,13 @@ fn freeform_offsets_trim_folds_and_round_chain_corners_into_an_extrudable_wall()
     let out = run(&mut s, "sketch.offset", json!({"curves": ["s1"], "distance": 1.26}));
     let curves = ids(&out["curves"]);
     assert!(!curves.is_empty(), "{out}");
-    assert_eq!(out["param"], Value::Null, "a trimmed offset has no distance to drive: {out}");
+    assert!(out["param"].is_string(), "the trimmed offset is driven by its distance: {out}");
     assert_eq!(out["sketch"]["dof"], source_dof, "the offset adds no freedom: {out}");
-    assert_eq!(s.doc.params.len(), params, "no orphan distance parameter");
+    assert_eq!(s.doc.params.len(), params + 1, "the distance parameter drives the offset");
     let sk = sketch(&s);
-    assert!(sk.freeform_offsets.is_empty() && !sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::OffsetDistance { .. })));
+    assert!(sk.freeform_offsets.is_empty(), "a trimmed offset is not a linked one");
+    assert_eq!(sk.freeform_chain_offsets.len(), 1, "the trimmed offset keeps its sources");
+    assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::OffsetDistance { .. })), "the trimmed offset has a driving dimension");
     // The source and its offset bound the inner region and the wall around it.
     let areas = profiles(&s);
     assert_eq!(areas.len(), 2, "{areas:?}");
