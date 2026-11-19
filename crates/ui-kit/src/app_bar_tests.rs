@@ -2,6 +2,124 @@
 use super::*;
 
 #[test]
+fn app_bar_rounded_dash_geometry_is_closed_clamped_and_safe_for_tiny_rectangles() {
+    let rect = Rect::from_min_size(pos2(10.0, 20.0), vec2(100.0, 30.0));
+    let path = rounded_rect_path(rect, 7.0);
+    assert_eq!(path.first(), path.last());
+    assert!(path.len() > 25);
+    assert!(path.iter().all(|p| p.is_finite() && rect.contains(*p)));
+    assert!(!path.contains(&rect.left_top()) && !path.contains(&rect.right_top()));
+    for (width, height, radius) in [(0.0, 0.0, 9.0), (0.001, 0.002, 100.0), (1.0, 1.0, 0.0), (10.0, 20.0, f32::NAN)] {
+        let tiny = Rect::from_min_size(Pos2::ZERO, vec2(width, height));
+        let path = rounded_rect_path(tiny, radius);
+        assert!(path.iter().all(|p| p.is_finite() && tiny.contains(*p)));
+        assert!(split_dashes(&path, 4.0, 3.0).iter().flatten().all(|p| p.is_finite()));
+    }
+    assert!(rounded_rect_path(Rect::from_min_max(pos2(f32::NAN, 0.0), pos2(30.0, 30.0)), 7.0).is_empty());
+    assert!(rounded_rect_path(Rect::from_min_max(pos2(-f32::MAX, 0.0), pos2(f32::MAX, 30.0)), 7.0).is_empty());
+    for id in ["save", "file", "donate", "discord", "report", "version"] {
+        let (outline, radius) = item_outline(id, rect);
+        assert_eq!(radius, if matches!(id, "save" | "file") { 7.0 } else { outline.height() / 2.0 });
+    }
+}
+
+#[test]
+fn app_bar_dash_phase_crosses_vertices_and_hostile_input_is_bounded() {
+    let dashes = split_dashes(&[pos2(0.0, 0.0), pos2(3.0, 0.0), pos2(3.0, 6.0)], 4.0, 3.0);
+    assert_eq!(dashes, vec![vec![pos2(0.0, 0.0), pos2(3.0, 0.0), pos2(3.0, 1.0)], vec![pos2(3.0, 4.0), pos2(3.0, 6.0)]]);
+    for (dash, gap) in [(0.0, 3.0), (f32::NAN, 3.0), (4.0, -1.0), (4.0, f32::INFINITY)] {
+        assert!(split_dashes(&[Pos2::ZERO, pos2(10.0, 10.0)], dash, gap).is_empty());
+    }
+    assert!(split_dashes(&[Pos2::ZERO, Pos2::ZERO], 4.0, 3.0).is_empty());
+    let huge = split_dashes(&[pos2(-f32::MAX, 0.0), pos2(f32::MAX, 0.0)], 4.0, 3.0);
+    assert!(huge.len() <= 8192);
+    assert!(huge.iter().flatten().all(|p| p.is_finite()));
+}
+
+#[test]
+fn app_bar_animated_step_converges_without_overshoot_and_handles_invalid_timing() {
+    for (from, to) in [(0.0, 100.0), (100.0, -100.0)] {
+        let mut previous = from;
+        for tick in 0..=15 {
+            let value = animated_step(from, to, tick as f32 / 100.0, 0.15);
+            assert!(value >= from.min(to) && value <= from.max(to));
+            assert!((value - to).abs() <= (previous - to).abs());
+            previous = value;
+        }
+        assert_eq!(previous, to);
+    }
+    assert_eq!(animated_step(99.6, 100.0, 0.0, 0.15), 100.0);
+    assert_eq!(animated_step(0.0, 100.0, -1.0, 0.15), 0.0);
+    for (dt, duration) in [(f32::NAN, 0.15), (0.01, 0.0), (0.01, f32::NAN), (f32::INFINITY, 0.15)] {
+        assert_eq!(animated_step(0.0, 100.0, dt, duration), 100.0);
+    }
+    assert_eq!(animated_step(f32::NAN, 10.0, 0.01, 0.15), 10.0);
+    assert!(animated_step(10.0, f32::NAN, 0.01, 0.15).is_finite());
+    assert!(animated_step(f32::MAX, -f32::MAX, 0.05, 0.15).is_finite());
+}
+
+#[test]
+fn app_bar_displacement_changes_paint_only_and_skips_resizing_and_appearing_items() {
+    let ctx = crate::test_support::context();
+    let mut style = ctx.global_style().as_ref().clone();
+    style.animation_time = 0.15;
+    ctx.set_global_style(style);
+    let render = |time, x, width, present| {
+        let final_rect = Rect::from_min_size(pos2(x, 5.0), vec2(32.0, 24.0));
+        let mut drawn = final_rect;
+        let output = crate::test_support::raw_frame(
+            &ctx,
+            egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(width, 400.0))), time: Some(time), ..Default::default() },
+            |ui| {
+                begin_motion(&ctx, width);
+                if present {
+                    let hit = paint_motion(ui, "save", final_rect, |ui| {
+                        let response = ui.interact(final_rect, egui::Id::unique("motion_hit"), Sense::click());
+                        ui.painter().rect_filled(final_rect, 7, Tokens::get().accent);
+                        response.rect
+                    });
+                    assert_eq!(hit, final_rect, "hit testing retains the layout rectangle");
+                    drawn = drawn_rect(&ctx, "save", final_rect);
+                }
+            },
+        );
+        (drawn, output)
+    };
+    assert_eq!(render(0.0, 10.0, 800.0, true).0.left(), 10.0);
+    assert_eq!(render(0.02, 110.0, 800.0, true).0.left(), 10.0);
+    let (middle, output) = render(0.07, 110.0, 800.0, true);
+    assert!(middle.left() > 10.0 && middle.left() < 110.0);
+    assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.rect.left() == 110.0 && ((shape.transform_after_tessellation * rect.rect.min).x - middle.left()).abs() < 0.01)), "the offset is paint-only and applied after pixel snapping");
+    assert_eq!(render(0.25, 110.0, 800.0, true).0.left(), 110.0);
+    assert_eq!(render(0.26, 210.0, 900.0, true).0.left(), 210.0, "resize snaps");
+    let _ = render(0.27, 210.0, 900.0, false);
+    assert_eq!(render(0.28, 310.0, 900.0, true).0.left(), 310.0, "appearing items snap");
+    let previous = render(0.30, 410.0, 900.0, true).0;
+    assert_eq!(render(0.35, 510.0, 900.0, true).0.min, previous.min, "retargeting starts where the last frame was painted");
+    assert_eq!(render(0.55, 510.0, 900.0, true).0.left(), 510.0);
+    let key = motion_key(&ctx);
+    assert!(!ctx.data(|data| data.get_temp::<BarMotion>(key).unwrap().items.get("save").unwrap().active));
+}
+
+#[test]
+fn app_bar_tray_badges_use_the_shared_tick_and_a_neutral_lock_backing() {
+    let ctx = crate::test_support::context();
+    let t = solidcraft_theme::Tokens::get();
+    let cell = Rect::from_min_size(pos2(100.0, 100.0), vec2(74.0, 46.0));
+    let output = crate::test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| {
+        let badge = tray_badge(ui, cell, false);
+        assert_eq!(badge.right(), cell.right() + 6.0);
+        assert_eq!(badge.top(), cell.top() - 6.0);
+        tray_badge(ui, cell.translate(vec2(100.0, 0.0)), true);
+    });
+    assert!(output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Path(p) if p.points.len() == 3 && matches!(p.stroke.color, egui::epaint::ColorMode::Solid(ink) if ink == t.on_accent))), "the badge paints a tick, not an unresolved icon placeholder");
+    assert!(
+        output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Circle(c) if c.fill == t.control_fill.to_opaque())),
+        "File's lock uses a neutral backing"
+    );
+}
+
+#[test]
 fn app_bar_file_migrates_moves_but_never_disappears() {
     use crate::app_bar_items::{Layout, Preset, Zone, can_remove};
     let defaults = Layout::default();

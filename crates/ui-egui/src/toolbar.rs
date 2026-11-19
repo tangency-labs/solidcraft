@@ -313,7 +313,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 out.actions.push(action);
             }
             if let Some(rect) = out.leading {
-                crate::library::app_bar_toggle(app, ui, rect);
+                app_bar::paint_motion(ui, "leading", rect, |ui| crate::library::app_bar_toggle(app, ui, rect));
             }
             ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_file_menu_x"), out.file.left()));
             let editing = customizing;
@@ -384,11 +384,13 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let mut tabs_ui = ui.new_child(egui::UiBuilder::new().max_rect(tabs_rect));
             tabs_ui.set_clip_rect(tabs_rect.intersect(ui.clip_rect()));
             let bar_context_click = ui.input(|i| i.pointer.secondary_clicked()) && ui.rect_contains_pointer(content);
-            tabs_ui.add_enabled_ui(!bar_context_click && !customizing, |ui| {
-                if customizing {
-                    ui.set_opacity(1.0);
-                }
-                crate::documents::tabs(app, ui, r, out.tabs_start, tabs_end);
+            app_bar::paint_motion(&mut tabs_ui, "tabs", tabs_rect, |ui| {
+                ui.add_enabled_ui(!bar_context_click && !customizing, |ui| {
+                    if customizing {
+                        ui.set_opacity(1.0);
+                    }
+                    crate::documents::tabs(app, ui, r, out.tabs_start, tabs_end);
+                });
             });
             if let Some(at) = out.assistant {
                 assistant_button(app, ui, at);
@@ -419,18 +421,20 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
 /// Reserved slots keep the tab minimum in the layout, so their labels need no second tab allowance.
 fn draw_bar_offers(app: &mut SolveApp, ui: &mut egui::Ui, out: &app_bar::BarOut) -> (Option<Rect>, Option<Rect>) {
     if !out.reserved_offers {
-        let update = crate::update::button(app, ui, out.offer, out.offer_labeled);
+        let update = app_bar::paint_motion(ui, "offered", out.offer, |ui| crate::update::button(app, ui, out.offer, out.offer_labeled));
         let badge = out.managed.and_then(|mut span| {
             let right = update.map_or(out.controls_left, |u| u.left().min(out.controls_left)) - 6.0;
             span.max.x = right.max(span.min.x);
-            crate::policy::badge(app, ui, span, out.managed_labeled)
+            app_bar::paint_motion(ui, "managed", span, |ui| crate::policy::badge(app, ui, span, out.managed_labeled))
         });
         return (update, badge);
     }
     let update = crate::update::offered(app).map(|r| r.version().to_string()).and_then(|version| {
         let full = solidcraft_ui_text::format("update.button_version", &[("version", &version)]);
         let labels = [full.as_str(), solidcraft_ui_text::tr("update.button")];
-        let (rect, response) = offer_pill(ui, out.offer, out.offer_labeled, &labels, 0.0, "update", "titlebar:update", false)?;
+        let (rect, response) = app_bar::paint_motion(ui, "offered", out.offer, |ui| {
+            offer_pill(ui, out.offer, out.offer_labeled, &labels, 0.0, "update", "titlebar:update", false)
+        })?;
         if response.backing_on_hover_text(solidcraft_ui_text::format("update.available", &[("version", &version)])).clicked() {
             run_overflow_control(app, "offered");
         }
@@ -438,13 +442,30 @@ fn draw_bar_offers(app: &mut SolveApp, ui: &mut egui::Ui, out: &app_bar::BarOut)
     });
     let badge = app.policy.managed_by().zip(out.managed).and_then(|(full, span)| {
         let labels = [full.as_str(), solidcraft_ui_text::tr("policy.managed_short")];
-        let (rect, response) = offer_pill(ui, span, out.managed_labeled, &labels, 0.0, "briefcase", "titlebar:managed", true)?;
+        let (rect, response) = app_bar::paint_motion(ui, "managed", span, |ui| {
+            offer_pill(ui, span, out.managed_labeled, &labels, 0.0, "briefcase", "titlebar:managed", true)
+        })?;
         if response.backing_on_hover_text(format!("{full}\n{}", solidcraft_ui_text::tr("policy.managed_tip"))).clicked() {
             run_overflow_control(app, "managed");
         }
         Some(rect)
     });
     (update, badge)
+}
+
+/// Closed bar search shares item displacement; an open/closing command sheet stays anchored.
+pub(crate) fn command_search(app: &mut SolveApp, ctx: &egui::Context) {
+    let anchor = ctx
+        .data(|data| data.get_temp::<Rect>(egui::Id::unique("sc_ribbon_search")))
+        .filter(|rect| rect.top() >= 0.0 && rect.bottom() <= app_bar::HEIGHT);
+    let closed = !app.ui.palette_open
+        && egui::containers::AreaState::load(ctx, egui::Id::unique("sc_sbox")).is_none_or(|area| area.rect().height() <= app_bar::HEIGHT);
+    if let Some(rect) = anchor.filter(|_| closed) {
+        let layers = [egui::Order::Background, egui::Order::Foreground].map(|order| egui::LayerId::new(order, egui::Id::unique("sc_sbox")));
+        app_bar::paint_layers_motion(ctx, "search", rect, &layers, || crate::shortcut_box::show(app, ctx));
+    } else {
+        crate::shortcut_box::show(app, ctx);
+    }
 }
 
 /// Complete host-owned menu rows without changing the kit's bar order.
@@ -2137,12 +2158,13 @@ fn quick_access_bar(app: &mut SolveApp, ui: &mut egui::Ui, bar: Rect, slots: &[(
         let label = app.tr_label(info.label).to_string();
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, &label));
         crate::scenario::publish_target(&format!("appbar:quick:{}", c.id), br);
-        app_bar::paint_control(
+        app_bar::paint_item(
             ui,
             br,
             app_bar::Control::Command { icon: info.icon, enabled },
             &resp,
             app_bar::item_opacity(ui.ctx(), &format!("quick:{}", c.id)),
+            &format!("quick:{}", c.id),
         );
         let tip = match crate::keymap::display_for(app, c.id) {
             Some(key) if !key.is_empty() => format!("{label} ({key})"),
@@ -2173,12 +2195,13 @@ fn assistant_button(app: &mut SolveApp, ui: &mut egui::Ui, at: Rect) {
     let tip = crate::agent_chat::assistant_tip(app, mark);
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), &tip));
     let state = assistant_state(app);
-    app_bar::paint_control(
+    app_bar::paint_item(
         ui,
         at,
         app_bar::Control::Assistant { state, open: app.agent_chat.open },
         &resp,
         app_bar::item_opacity(ui.ctx(), "assistant"),
+        "assistant",
     );
     if resp.backing_on_hover_text(tip).clicked() && !customizing {
         crate::agent_chat::toggle(app);
@@ -4932,6 +4955,112 @@ mod dropdown_toggle_tests {
 #[cfg(test)]
 mod app_bar_tests {
     use super::*;
+
+    fn tray_paint_leaves<'a>(shape: &'a egui::Shape, out: &mut Vec<&'a egui::Shape>) {
+        if let egui::Shape::Vec(shapes) = shape {
+            for shape in shapes {
+                tray_paint_leaves(shape, out);
+            }
+        } else {
+            out.push(shape);
+        }
+    }
+
+    #[test]
+    fn app_bar_tray_card_columns_header_footer_and_short_labels_stay_bounded() {
+        use crate::scenario::rect_of;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.start("ui.appBarCustomize");
+        for pixel_width in [1280, 800] {
+            let resized = h.call("ui.resize", json!({"width":pixel_width,"height":720}));
+            assert_eq!(resized["ok"], true, "{resized}");
+            let width = pixel_width as f32;
+            h.frames(6);
+            let card = rect_of("appbar:tray").unwrap();
+            assert!((card.width() - 1040.0_f32.min(width - 24.0)).abs() <= 2.0, "{card:?}");
+            assert!((card.center().x - width / 2.0).abs() <= 1.0, "the card is centred: {card:?}");
+            assert!((card.top() - 46.0).abs() <= 1.0);
+            let mut tiles = Vec::new();
+            for (column, ids) in [
+                (0, &["file", "home", "save", "undo", "redo", "assistant", "report", "settings", "help"][..]),
+                (1, &["version"][..]),
+                (2, &["donate", "discord"][..]),
+            ] {
+                let bounds = rect_of(&format!("appbar:column:{column}")).unwrap();
+                assert!(card.contains_rect(bounds));
+                for id in ids {
+                    let tile = rect_of(&format!("appbar:tile:{id}")).unwrap();
+                    assert!(bounds.contains_rect(tile), "{id} stays inside column {column}: {tile:?}/{bounds:?}");
+                    assert!(tiles.iter().all(|r: &Rect| !r.intersects(tile)), "{id} overlaps a tile");
+                    assert!(rect_of(&format!("appbar:cell:{id}")).unwrap().width() >= 74.0);
+                    if let Some(badge) = rect_of(&format!("appbar:badge:{id}")) {
+                        assert!(bounds.contains_rect(badge), "{id}'s badge stays inside its column");
+                    }
+                    tiles.push(tile);
+                }
+            }
+            let first = rect_of("appbar:column:0").unwrap();
+            let next = rect_of("appbar:column:1").unwrap();
+            assert!((first.width() - next.width()).abs() < 0.01);
+            assert!((next.left() - first.right() - 26.0).abs() < 0.01);
+            let done = rect_of("appbar:done").unwrap();
+            let presets = rect_of("appbar:header:presets").unwrap();
+            assert!((done.height() - 32.0).abs() < 0.1);
+            assert!((done.center().y - presets.center().y).abs() < 0.1);
+            assert!(presets.right() < done.left());
+            let reset = rect_of("appbar:reset").unwrap();
+            let keys = rect_of("appbar:footer:keys").unwrap();
+            let check = rect_of("appbar:footer:check").unwrap();
+            assert_eq!(reset.center().y, keys.center().y);
+            assert_eq!(check.center().y, keys.center().y);
+            assert!(reset.right() <= keys.left() && keys.right() <= check.left());
+            let mut shapes = Vec::new();
+            for clipped in &h.shapes {
+                tray_paint_leaves(&clipped.shape, &mut shapes);
+            }
+            let t = solidcraft_theme::Tokens::get();
+            let panel = shapes.iter().position(|shape| matches!(shape, egui::Shape::Rect(r) if (r.rect.width() - card.width()).abs() <= 2.0 && r.rect.contains(card.center()) && r.fill == t.panel.to_opaque() && r.stroke.width == 1.0)).expect("an opaque, bordered panel backs the entire tray");
+            let scrim = shapes.iter().position(|shape| matches!(shape, egui::Shape::Rect(r) if r.rect.top() == 34.0 && r.rect.bottom() == 720.0 && r.rect.width() == width && r.fill.a() > 0)).expect("the scrim is painted");
+            assert!(scrim < panel, "the card paints above the scrim");
+            for (id, label) in [("assistant", "Assistant"), ("settings", "Settings"), ("home", "Start page")] {
+                let bounds = rect_of(&format!("appbar:label:{id}")).unwrap();
+                assert!(
+                    shapes.iter().any(|shape| matches!(shape, egui::Shape::Text(text) if text.galley.job.text == label && bounds.contains(text.pos))),
+                    "short name {label} is painted below its own cell"
+                );
+            }
+            let save_cell = rect_of("appbar:cell:save").unwrap();
+            assert!(shapes.iter().any(|shape| matches!(shape, egui::Shape::Mesh(mesh) if !mesh.vertices.is_empty() && mesh.vertices.iter().all(|v| save_cell.contains(v.pos) && v.color.a() <= 160) && mesh.vertices.iter().any(|v| v.color.a() >= 100))), "the checked Save icon remains visible at half opacity");
+            let saved = h.app.toolbar_custom.app_bar.clone();
+            h.step(&json!({"click":[2,710]})).unwrap();
+            h.frames(3);
+            assert_eq!(h.app.toolbar_custom.app_bar, saved);
+            assert_eq!(
+                h.ctx.layer_id_at(card.center()).unwrap().id,
+                egui::Id::unique("sc_appbar_tray"),
+                "clicking the scrim cannot lift it above the card"
+            );
+        }
+    }
+
+    #[test]
+    fn app_bar_editing_hides_only_the_inner_view_plus() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.design_views_as_tabs = true;
+        h.call("ui.resize", json!({"width":1280,"height":720}));
+        h.frames(4);
+        assert!(crate::scenario::rect_of("tab:view_new").is_some(), "normal mode keeps Open another view");
+        h.app.start("ui.appBarCustomize");
+        h.frames(4);
+        assert!(crate::scenario::rect_of("tab:view_new").is_none());
+        assert!(crate::scenario::handle_at("tab:new").is_some());
+        assert!(crate::scenario::rect_of("tab:close:0").is_some());
+        h.app.start("ui.appBarCustomize");
+        h.frames(4);
+        assert!(crate::scenario::rect_of("tab:view_new").is_some(), "the view control returns on leaving edit mode");
+    }
 
     #[test]
     fn app_bar_right_click_opens_the_shared_menu_and_hides_the_target() {

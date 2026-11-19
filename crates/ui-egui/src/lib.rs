@@ -4303,7 +4303,7 @@ impl SolveApp {
         import_report::show(self, ui.ctx());
         linked_source::show_copies(self, ui.ctx());
         joint_handles::show_warning(self, ui.ctx());
-        shortcut_box::show(self, ui.ctx());
+        toolbar::command_search(self, ui.ctx());
         prefs::show(self, ui.ctx());
         toolbar_custom::window(self, ui.ctx());
         app_bar_custom::show(self, ui.ctx());

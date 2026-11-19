@@ -152,15 +152,6 @@ pub(crate) fn home_escape(app: &mut SolveApp, ctx: &egui::Context) {
         cancel_or_exit(app, ctx);
     }
 }
-fn dashed(p: &egui::Painter, r: Rect, ink: egui::Color32) {
-    p.extend(egui::Shape::dashed_line(
-        &[r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()],
-        Stroke::new(1.0, ink),
-        4.0,
-        3.0,
-    ));
-}
-
 pub(crate) fn bar(app: &mut SolveApp, ui: &mut egui::Ui, content: Rect, out: &app_bar::BarOut) {
     if !app.toolbar_custom.app_bar_customizing {
         return;
@@ -173,15 +164,22 @@ pub(crate) fn bar(app: &mut SolveApp, ui: &mut egui::Ui, content: Rect, out: &ap
     for item in &out.edit_items {
         let rect = Rect::from_min_max(pos2(item.left, content.top() + 1.0), pos2(item.right, content.bottom() - 1.0));
         if item.locked {
-            ui.painter().rect_filled(rect, 0, t.app_bar.gamma_multiply(0.45));
+            app_bar::paint_decoration(ui, &item.id, |painter| {
+                painter.rect_filled(rect, 0, t.app_bar.gamma_multiply(0.45));
+            });
             continue;
         }
         let response = ui.interact(rect, Id::unique(("appbar_edit", &item.id)), Sense::click_and_drag());
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label_icon(app, &item.id).0));
         crate::scenario::publish_target(&format!("appbar:edit:{}", item.id), rect);
-        dashed(ui.painter(), rect.shrink(1.0), t.app_bar_text.gamma_multiply(0.5));
+        let (outline, radius) = app_bar::item_outline(&item.id, rect);
+        app_bar::paint_decoration(ui, &item.id, |painter| {
+            app_bar::dashed_rounded_rect(painter, outline, radius, t.app_bar_text.gamma_multiply(0.5));
+            if response.has_focus() {
+                painter.rect_stroke(outline, radius, Stroke::new(1.5, t.accent), egui::StrokeKind::Inside);
+            }
+        });
         if response.has_focus() {
-            ui.painter().rect_stroke(rect, t.radius_sm, Stroke::new(1.5, t.accent), egui::StrokeKind::Inside);
             if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Delete)) {
                 run(app, &json!({"item":item.id,"action":"hide"}));
             }
@@ -237,7 +235,7 @@ pub(crate) fn bar(app: &mut SolveApp, ui: &mut egui::Ui, content: Rect, out: &ap
                 .map_or(Rect::from_min_size(pos2(slot.x, content.top() + 2.0), vec2(32.0, content.height() - 4.0)), |p| {
                     Rect::from_min_max(pos2(p.left, content.top() + 2.0), pos2(p.right, content.bottom() - 2.0))
                 });
-            dashed(ui.painter(), gap, t.accent);
+            app_bar::dashed_rounded_rect(ui.painter(), gap, 9.0, t.accent);
             ui_kit::insertion_marker(ui.painter(), gap.left(), gap.top(), gap.bottom());
         }
         let pass = ui.ctx().cumulative_pass_nr();
@@ -308,11 +306,11 @@ fn label_icon(app: &SolveApp, id: &str) -> (String, String) {
         "save" => ("ui.save", "save"),
         "undo" => ("ui.undo", "undo"),
         "redo" => ("ui.redo", "redo"),
-        "assistant" => ("cmd.ui.assistant", "assistant"),
+        "assistant" => ("ui.assistant", "assistant"),
         "donate" => ("links.kofi_button", "kofi"),
         "discord" => ("links.discord_button", "discord"),
         "report" => ("ui.report_a_bug", "bug_report"),
-        "settings" => ("ui.preferences", "settings"),
+        "settings" => ("ui.details_settings", "settings"),
         "help" => ("ui.help", "help"),
         "version" => ("app_bar.version", "help"),
         _ => return (id.into(), "help".into()),
@@ -362,12 +360,16 @@ fn control<'a>(app: &'a SolveApp, id: &'a str, version: &'a str) -> Control<'a> 
         }
     }
 }
+const TILE_WIDTH: f32 = 86.0;
+const TILE_HEIGHT: f32 = 72.0;
+
 fn tile(app: &mut SolveApp, ui: &mut egui::Ui, id: &str, version: &str) {
     let t = solidcraft_theme::Tokens::get();
-    let (rect, _) = ui.allocate_exact_size(vec2(82.0, 76.0), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(vec2(TILE_WIDTH, TILE_HEIGHT), Sense::hover());
     let response = ui.interact(rect, Id::unique(("appbar_tile", id)), Sense::click_and_drag());
-    let cell = Rect::from_min_size(rect.min, vec2(74.0, 46.0));
+    let cell = Rect::from_min_size(rect.min + vec2(0.0, t.space_6), vec2(TILE_WIDTH, 46.0));
     crate::scenario::publish_target(&format!("appbar:tile:{id}"), rect);
+    crate::scenario::publish_rect(&format!("appbar:cell:{id}"), cell);
     let label = label_icon(app, id).0;
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
     let drag = ui.ctx().data(|d| d.get_temp::<Drag>(drag_key()));
@@ -375,37 +377,31 @@ fn tile(app: &mut SolveApp, ui: &mut egui::Ui, id: &str, version: &str) {
     let returning = drag.as_ref().is_some_and(|d| d.active && d.from_bar && d.below && d.id == id);
     let empty = drag.as_ref().is_some_and(|d| d.active && !d.from_bar && d.id == id) || spring.as_ref().is_some_and(|s| !s.from_bar && s.id == id);
     let on_bar = app.toolbar_custom.app_bar.items.iter().any(|p| p.id == id && p.shown) && !returning;
-    ui.painter().rect_filled(cell, t.radius_sm, t.app_bar);
+    ui.painter().rect_filled(cell, 9, t.app_bar);
     if empty {
-        dashed(ui.painter(), cell.shrink(1.0), t.border);
+        app_bar::dashed_rounded_rect(ui.painter(), cell.shrink(0.5), 9.0, t.border);
     } else {
         if returning {
-            ui.painter().rect_stroke(cell.expand(2.0), t.radius_sm, Stroke::new(4.0, t.accent.gamma_multiply(0.15)), egui::StrokeKind::Outside);
+            ui.painter().rect_stroke(cell.expand(2.0), 11, Stroke::new(4.0, t.accent.gamma_multiply(0.15)), egui::StrokeKind::Outside);
         }
         ui.painter().rect_stroke(
             cell,
-            t.radius_sm,
+            9,
             Stroke::new(1.0, if returning || response.has_focus() { t.accent } else { t.border }),
             egui::StrokeKind::Inside,
         );
         app_bar::preview_control(ui, cell.shrink(4.0), control(app, id, version), if on_bar { 0.5 } else { 1.0 }, false, false);
         if on_bar || id == "file" {
-            let badge = Rect::from_center_size(cell.right_top() + vec2(-7.0, 7.0), vec2(14.0, 14.0));
-            ui.painter().circle_filled(badge.center(), 7.0, t.accent);
-            ui_kit::icons::paint_ink(ui.painter(), badge.shrink(2.0), if id == "file" { "lock" } else { "check" }, t.on_accent);
+            let badge = app_bar::tray_badge(ui, cell, id == "file");
+            crate::scenario::publish_rect(&format!("appbar:badge:{id}"), badge);
             ui.interact(badge, ui.scope_id().with(("badge", id)), Sense::hover()).widget_info(|| {
                 egui::WidgetInfo::labeled(egui::Role::Image, true, app.tr(if id == "file" { "app_bar.locked" } else { "app_bar.on_bar" }))
             });
         }
     }
-    ui_kit::paint_text(
-        ui,
-        Rect::from_min_max(pos2(rect.left(), cell.bottom() + t.space_4), rect.right_bottom()),
-        &label,
-        FontId::proportional(t.font_small),
-        t.text,
-        false,
-    );
+    let label_rect = Rect::from_min_max(pos2(cell.left(), cell.bottom() + t.space_4), pos2(cell.right(), rect.bottom()));
+    crate::scenario::publish_rect(&format!("appbar:label:{id}"), label_rect);
+    ui_kit::paint_text(ui, label_rect, &label, FontId::proportional(t.font_small), t.text, false);
     if ui.input(|i| i.pointer.primary_pressed())
         && response.contains_pointer()
         && !on_bar
@@ -428,6 +424,170 @@ fn tile(app: &mut SolveApp, ui: &mut egui::Ui, id: &str, version: &str) {
         add(app, id);
         ui.ctx().request_repaint();
     }
+}
+
+fn header(app: &mut SolveApp, ui: &mut egui::Ui, width: f32) -> bool {
+    let t = solidcraft_theme::Tokens::get();
+    let options = [app.tr("app_bar.default"), app.tr("app_bar.minimal"), app.tr("app_bar.full"), app.tr("app_bar.compact")];
+    let done_label = app.tr("app_bar.done");
+    let done_width =
+        ui.painter().layout_no_wrap(done_label.into(), FontId::proportional(t.font_label), t.on_accent).size().x + (t.space_12 + t.space_6) * 2.0;
+    let natural_presets: f32 = options
+        .iter()
+        .map(|label| ui.painter().layout_no_wrap((*label).into(), ui_kit::type_face::semibold(t.font_label), t.text).size().x.ceil() + t.space_16)
+        .sum();
+    let presets_width = natural_presets.min((width - done_width - t.space_8 - 166.0).max(80.0));
+    let controls_width = presets_width + t.space_8 + done_width;
+    let title_width = (width - controls_width - t.space_24 - t.space_2).max(0.0);
+    let title_height = t.font_heading + t.space_4;
+    let subtitle = app.tr("app_bar.subtitle");
+    let subtitle_height = ui.painter().layout(subtitle.into(), FontId::proportional(t.font_small), t.form_dim, title_width).size().y;
+    let height = (title_height + t.space_4 + subtitle_height + t.space_8).max(32.0);
+    let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    let title = Rect::from_min_size(rect.min, vec2(title_width, title_height));
+    ui_kit::paint_text(ui, title, app.tr("app_bar.title"), FontId::proportional(t.font_heading), t.text, false);
+    crate::scenario::publish_rect("appbar:header:title", title);
+    let sub = Rect::from_min_max(pos2(rect.left(), title.bottom() + t.space_4), pos2(title.right(), rect.bottom()));
+    let mut sub_ui = ui.new_child(egui::UiBuilder::new().max_rect(sub).layout(egui::Layout::top_down(egui::Align::Min)));
+    sub_ui.set_clip_rect(sub.intersect(ui.clip_rect()));
+    ui_kit::text(&mut sub_ui, subtitle, ui_kit::Text::Note("appbar_subtitle"));
+    let done_rect = Rect::from_center_size(pos2(rect.right() - done_width / 2.0, rect.center().y), vec2(done_width, 32.0));
+    let mut done_ui =
+        ui.new_child(egui::UiBuilder::new().id_salt("appbar_done").max_rect(done_rect).layout(egui::Layout::top_down(egui::Align::Min)));
+    let done = ui_kit::button_at(&mut done_ui, "appbar_done", done_rect, egui::RichText::new(done_label).size(t.font_label), ui_kit::Button::Primary);
+    crate::scenario::publish_target("appbar:done", done.rect);
+    let presets_rect =
+        Rect::from_center_size(pos2(done_rect.left() - t.space_8 - presets_width / 2.0, rect.center().y), vec2(presets_width, ui_kit::row_height()));
+    crate::scenario::publish_rect("appbar:header:presets", presets_rect);
+    let mut presets_ui =
+        ui.new_child(egui::UiBuilder::new().id_salt("appbar_presets").max_rect(presets_rect).layout(egui::Layout::top_down(egui::Align::Min)));
+    let mut selected = ui.ctx().data(|d| d.get_temp::<usize>(Id::unique("appbar_preset"))).unwrap_or(0);
+    if ui_kit::segmented(
+        &mut presets_ui,
+        &mut selected,
+        &options,
+        ui_kit::Segments {
+            intrinsic: true,
+            targets: &["appbar:preset:Default", "appbar:preset:Minimal", "appbar:preset:Full", "appbar:preset:Compact"],
+            ..Default::default()
+        },
+    ) {
+        if let Some(value) = [Preset::Default, Preset::Minimal, Preset::Full, Preset::Compact].get(selected) {
+            preset(app, *value);
+        }
+        ui.ctx().data_mut(|d| d.insert_temp(Id::unique("appbar_preset"), selected));
+    }
+    done.clicked()
+}
+
+fn tiles_per_row(width: f32) -> usize {
+    // Leave room for the six-pixel badge overlap and inward rounding at the column edge.
+    ((width - 7.0 + solidcraft_theme::Tokens::get().space_8) / (TILE_WIDTH + solidcraft_theme::Tokens::get().space_8)).floor().max(1.0) as usize
+}
+
+fn section_height(width: f32, count: usize) -> f32 {
+    let t = solidcraft_theme::Tokens::get();
+    let rows = count.div_ceil(tiles_per_row(width));
+    (t.control_height + t.space_14 + rows as f32 * TILE_HEIGHT + rows.saturating_sub(1) as f32 * t.space_14).ceil() + 1.0
+}
+
+fn section(app: &mut SolveApp, ui: &mut egui::Ui, width: f32, key: &str, ids: &[&str], version: &str) {
+    if ids.is_empty() {
+        return;
+    }
+    let t = solidcraft_theme::Tokens::get();
+    let (rect, _) = ui.allocate_exact_size(vec2(width, section_height(width, ids.len())), Sense::hover());
+    crate::scenario::publish_rect(&format!("appbar:section:{key}"), rect);
+    let heading = Rect::from_min_size(rect.min, vec2(width, t.control_height));
+    ui_kit::paint_text(ui, heading, app.tr(key), FontId::proportional(t.font_button), t.text, false);
+    let per_row = tiles_per_row(width);
+    for (i, id) in ids.iter().enumerate() {
+        let at = rect.min
+            + vec2(
+                (i % per_row) as f32 * (TILE_WIDTH + t.space_8),
+                t.control_height + t.space_14 + (i / per_row) as f32 * (TILE_HEIGHT + t.space_14),
+            );
+        // egui quantises allocated widget origins; round inward so a fractional column
+        // boundary cannot put its first tile just outside the column's clip rectangle.
+        let at = pos2(at.x.ceil(), at.y.ceil());
+        let tile_rect = Rect::from_min_size(at, vec2(TILE_WIDTH, TILE_HEIGHT));
+        let mut tile_ui = ui.new_child(egui::UiBuilder::new().id_salt(id).max_rect(tile_rect).layout(egui::Layout::top_down(egui::Align::Min)));
+        tile_ui.set_clip_rect(rect.intersect(ui.clip_rect()));
+        tile(app, &mut tile_ui, id, version);
+    }
+}
+
+fn body(app: &mut SolveApp, ui: &mut egui::Ui, width: f32, version: &str) {
+    let t = solidcraft_theme::Tokens::get();
+    let gap = t.space_24 + t.space_2;
+    let sections = [
+        ("app_bar.commands", &["file", "home", "save", "undo", "redo", "assistant", "report", "settings", "help"][..]),
+        ("app_bar.status", &["version"][..]),
+        ("app_bar.community", &["donate", "discord"][..]),
+    ];
+    let quick: Vec<_> =
+        app.toolbar_custom.quick_access.iter().filter(|id| solidcraft_engine::find_command(id).is_some()).map(|id| format!("quick:{id}")).collect();
+    let quick_ids: Vec<_> = quick.iter().map(String::as_str).collect();
+    // At narrow window sizes sections stack; a tile never shrinks below its cell width.
+    if width < (TILE_WIDTH + 7.0) * 3.0 + gap * 2.0 {
+        for (key, ids) in sections {
+            section(app, ui, width, key, ids, version);
+            ui.add_space(t.space_14);
+        }
+        section(app, ui, width, "app_bar.quick", &quick_ids, version);
+        return;
+    }
+    let column_width = (width - gap * 2.0) / 3.0;
+    let height = sections
+        .iter()
+        .map(|(key, ids)| {
+            section_height(column_width, ids.len())
+                + if *key == "app_bar.status" && !quick_ids.is_empty() { t.space_14 + section_height(column_width, quick_ids.len()) } else { 0.0 }
+        })
+        .fold(0.0_f32, f32::max);
+    let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    for (i, (key, ids)) in sections.iter().enumerate() {
+        let column = Rect::from_min_size(rect.min + vec2(i as f32 * (column_width + gap), 0.0), vec2(column_width, height));
+        crate::scenario::publish_rect(&format!("appbar:column:{i}"), column);
+        let mut column_ui = ui.new_child(egui::UiBuilder::new().id_salt(key).max_rect(column).layout(egui::Layout::top_down(egui::Align::Min)));
+        column_ui.set_clip_rect(column.intersect(ui.clip_rect()));
+        section(app, &mut column_ui, column_width, key, ids, version);
+        if *key == "app_bar.status" && !quick_ids.is_empty() {
+            column_ui.add_space(t.space_14);
+            section(app, &mut column_ui, column_width, "app_bar.quick", &quick_ids, version);
+        }
+    }
+}
+
+fn divider(ui: &mut egui::Ui, width: f32) {
+    let t = solidcraft_theme::Tokens::get();
+    ui.add_space(t.space_8);
+    let (line, _) = ui.allocate_exact_size(vec2(width, 1.0), Sense::hover());
+    ui.painter().hline(line.x_range(), line.center().y, Stroke::new(1.0, t.border));
+    ui.add_space(t.space_8);
+}
+
+fn footer(app: &mut SolveApp, ui: &mut egui::Ui, width: f32) {
+    let t = solidcraft_theme::Tokens::get();
+    let font = FontId::proportional(t.font_small);
+    let measure = |s: &str| ui.painter().layout_no_wrap(s.into(), font.clone(), t.text).size().x;
+    let reset_width = measure(app.tr("app_bar.reset"));
+    let check_width = measure(app.tr("app_bar.check_hint"));
+    let keys_width = measure(app.tr("app_bar.keyboard_hint"));
+    let (row, _) = ui.allocate_exact_size(vec2(width, 32.0), Sense::hover());
+    let flank = reset_width.max(check_width).min(width / 3.0);
+    let reset_rect = Rect::from_min_max(row.min, pos2(row.left() + reset_width.min(flank), row.bottom()));
+    let reset = app_bar::tray_link(ui, reset_rect, app.tr("app_bar.reset"));
+    crate::scenario::publish_target("appbar:reset", reset.rect);
+    if reset.clicked() {
+        app.start("ui.appBarReset");
+    }
+    let keys_rect = Rect::from_center_size(row.center(), vec2(keys_width.min((width - flank * 2.0 - t.space_16).max(0.0)), row.height()));
+    let check_rect = Rect::from_min_max(pos2(row.right() - check_width.min(flank), row.top()), row.max);
+    ui_kit::paint_text(ui, keys_rect, app.tr("app_bar.keyboard_hint"), font.clone(), t.form_dim, false);
+    ui_kit::paint_text(ui, check_rect, app.tr("app_bar.check_hint"), font, t.form_dim, false);
+    crate::scenario::publish_rect("appbar:footer:keys", keys_rect);
+    crate::scenario::publish_rect("appbar:footer:check", check_rect);
 }
 
 /// The early foreground host shields the app before its children process pointer input.
@@ -474,93 +634,51 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let screen = ctx.content_rect();
     let width = 1040.0_f32.min((screen.width() - t.space_12 * 2.0).max(120.0));
     let at = pos2(screen.center().x - width / 2.0, screen.top() + app_bar::HEIGHT + t.space_12);
-    let host = Container::new(ctx, Surface::Window);
+    let host = Container::floating_card(Surface::Panel);
     let removing =
         ctx.data(|d| d.get_temp::<Drag>(drag_key())).is_some_and(|d| d.active && d.from_bar && d.below && app_bar_items::can_remove(&d.id));
     let mut done = false;
-    host.area(Id::unique("sc_appbar_tray")).order(egui::Order::Foreground).fixed_pos(at).movable(false).show(ctx, |ui| {
-        let frame = host.frame(ctx, t.dialog_bg, ui_kit::frame::Side::Left).inner_margin(t.space_12);
-        let card = Container::show_backing(ui, frame, |ui| {
-            ui.set_width((width - t.space_12 * 2.0).max(0.0));
-            ui.horizontal_wrapped(|ui| {
-                ui.vertical(|ui| {
-                    ui.set_width((width - 490.0).max(120.0));
-                    ui_kit::text(ui, app.tr("app_bar.title"), ui_kit::Text::Heading("appbar_tray"));
-                    ui_kit::text(ui, app.tr("app_bar.subtitle"), ui_kit::Text::Note("appbar_subtitle"));
+    let shown = host
+        .area(Id::unique("sc_appbar_tray"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(at)
+        .default_size(vec2(width, 0.0))
+        .movable(false)
+        .fade_in(false)
+        .show(ctx, |ui| {
+            ui.set_width(width);
+            ui.set_opacity(1.0);
+            // This editor is an opaque card, even when workspace panels use glass backing.
+            let frame = host
+                .frame(ctx, t.panel, ui_kit::frame::Side::Left)
+                .fill(t.panel.to_opaque())
+                .stroke(Stroke::new(1.0, t.border))
+                .inner_margin(t.space_12);
+            let content_width = (width - (t.space_12 + frame.stroke.width) * 2.0).max(TILE_WIDTH);
+            let card = Container::show_backing(ui, frame, |ui| {
+                ui.set_width(content_width);
+                done |= header(app, ui, content_width);
+                divider(ui, content_width);
+                let version = format!("v{}", crate::update::current_version());
+                egui::ScrollArea::vertical().max_height((screen.height() - 250.0).max(80.0)).show(ui, |ui| {
+                    // Reserve scrollbar space within the panel rather than letting it widen it.
+                    let body_width = ui.available_width().min(content_width);
+                    body(app, ui, body_width, &version);
                 });
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                    let response = ui_kit::button(ui, app.tr("app_bar.done"), ui_kit::Button::Primary);
-                    crate::scenario::publish_target("appbar:done", response.rect);
-                    done |= response.clicked();
-                    let mut selected = ctx.data(|d| d.get_temp::<usize>(Id::unique("appbar_preset"))).unwrap_or(0);
-                    let options = [app.tr("app_bar.default"), app.tr("app_bar.minimal"), app.tr("app_bar.full"), app.tr("app_bar.compact")];
-                    if ui_kit::segmented(
-                        ui,
-                        &mut selected,
-                        &options,
-                        ui_kit::Segments {
-                            intrinsic: true,
-                            targets: &["appbar:preset:Default", "appbar:preset:Minimal", "appbar:preset:Full", "appbar:preset:Compact"],
-                            ..Default::default()
-                        },
-                    ) {
-                        if let Some(value) = [Preset::Default, Preset::Minimal, Preset::Full, Preset::Compact].get(selected) {
-                            preset(app, *value);
-                        }
-                        ctx.data_mut(|d| d.insert_temp(Id::unique("appbar_preset"), selected));
-                    }
-                });
-            });
-            ui.separator();
-            let version = format!("v{}", crate::update::current_version());
-            egui::ScrollArea::vertical().max_height((screen.height() - 260.0).max(80.0)).show(ui, |ui| {
-                ui.columns(3, |columns| {
-                    for (column, (key, ids)) in columns.iter_mut().zip([
-                        ("app_bar.commands", &["file", "home", "save", "undo", "redo"][..]),
-                        ("app_bar.status", &["assistant", "report", "settings", "help"][..]),
-                        ("app_bar.community", &["donate", "discord", "version"][..]),
-                    ]) {
-                        ui_kit::text(column, app.tr(key), ui_kit::Text::Heading(key));
-                        column.horizontal_wrapped(|ui| {
-                            for id in ids {
-                                ui.push_id(id, |ui| tile(app, ui, id, &version));
-                            }
-                        });
-                    }
-                });
-                let quick: Vec<_> = app
-                    .toolbar_custom
-                    .quick_access
-                    .iter()
-                    .filter(|id| solidcraft_engine::find_command(id).is_some())
-                    .map(|id| format!("quick:{id}"))
-                    .collect();
-                if !quick.is_empty() {
-                    ui_kit::text(ui, app.tr("app_bar.quick"), ui_kit::Text::Heading("appbar_quick"));
-                    ui.horizontal_wrapped(|ui| {
-                        for id in &quick {
-                            ui.push_id(id, |ui| tile(app, ui, id, &version));
-                        }
-                    });
+                divider(ui, content_width);
+                footer(app, ui, content_width);
+                if removing {
+                    ui_kit::assistant_badge(ui, app.tr("app_bar.release"), ui_kit::AssistantTone::Working);
                 }
             });
-            ui.separator();
-            let reset = ui_kit::button(ui, app.tr("app_bar.reset"), ui_kit::Button::Ghost);
-            crate::scenario::publish_target("appbar:reset", reset.rect);
-            if reset.clicked() {
-                app.start("ui.appBarReset");
-            }
-            ui_kit::text(ui, app.tr("app_bar.keyboard_hint"), ui_kit::Text::Note("appbar_keys"));
-            ui_kit::text(ui, app.tr("app_bar.check_hint"), ui_kit::Text::Note("appbar_check_hint"));
+            crate::scenario::publish_rect("appbar:tray", card.response.rect);
             if removing {
-                ui_kit::assistant_badge(ui, app.tr("app_bar.release"), ui_kit::AssistantTone::Working);
+                app_bar::dashed_rounded_rect(ui.painter(), card.response.rect.expand(2.0), f32::from(t.radius_lg) + 2.0, t.accent);
             }
         });
-        crate::scenario::publish_rect("appbar:tray", card.response.rect);
-        if removing {
-            dashed(ui.painter(), card.response.rect.expand(2.0), t.accent);
-        }
-    });
+    // A scrim click may raise its area. Keep the card directly above it on every pass,
+    // independently of area creation and click order.
+    ctx.set_sublayer(egui::LayerId::new(egui::Order::Foreground, Id::unique("sc_appbar_edit_scrim")), shown.response.layer_id);
     if done {
         app.toolbar_custom.app_bar_customizing = false;
         ctx.request_repaint();

@@ -10,6 +10,295 @@ use crate::BackingTooltipExt as _;
 use egui::{Align2, FontId, Painter, Pos2, Rect, Sense, Stroke, pos2, vec2};
 use solidcraft_theme::Tokens;
 
+/// A closed, clockwise rounded rectangle. Work is bounded even for hostile dimensions.
+pub fn rounded_rect_path(rect: Rect, radius: f32) -> Vec<Pos2> {
+    let (w, h) = (rect.width(), rect.height());
+    if !rect.is_finite() || !w.is_finite() || !h.is_finite() || w <= 0.0 || h <= 0.0 {
+        return Vec::new();
+    }
+    let radius = if radius.is_finite() { radius.max(0.0).min(w / 2.0).min(h / 2.0) } else { 0.0 };
+    if radius == 0.0 {
+        return vec![rect.left_top(), rect.right_top(), rect.right_bottom(), rect.left_bottom(), rect.left_top()];
+    }
+    let steps = (radius.ceil() as usize).clamp(4, 24);
+    let mut path = Vec::with_capacity((steps + 1) * 4 + 1);
+    for (centre, start) in [
+        (pos2(rect.right() - radius, rect.top() + radius), -std::f64::consts::FRAC_PI_2),
+        (pos2(rect.right() - radius, rect.bottom() - radius), 0.0),
+        (pos2(rect.left() + radius, rect.bottom() - radius), std::f64::consts::FRAC_PI_2),
+        (pos2(rect.left() + radius, rect.top() + radius), std::f64::consts::PI),
+    ] {
+        for i in 0..=steps {
+            let angle = start + std::f64::consts::FRAC_PI_2 * i as f64 / steps as f64;
+            path.push(pos2(
+                (f64::from(centre.x) + f64::from(radius) * angle.cos()).clamp(f64::from(rect.left()), f64::from(rect.right())) as f32,
+                (f64::from(centre.y) + f64::from(radius) * angle.sin()).clamp(f64::from(rect.top()), f64::from(rect.bottom())) as f32,
+            ));
+        }
+    }
+    if let Some(first) = path.first().copied() {
+        path.push(first);
+    }
+    path
+}
+
+/// Split a polyline without resetting the dash phase at vertices, including arc samples.
+pub fn split_dashes(path: &[Pos2], dash: f32, gap: f32) -> Vec<Vec<Pos2>> {
+    if !dash.is_finite() || dash <= 0.0 || !gap.is_finite() || gap < 0.0 {
+        return Vec::new();
+    }
+    let mut result = Vec::new();
+    let mut current = Vec::new();
+    let (mut drawing, mut remaining, mut budget) = (true, f64::from(dash), 8192usize);
+    for pair in path.windows(2).take(512) {
+        let (Some(&from), Some(&to)) = (pair.first(), pair.get(1)) else { continue };
+        if !from.is_finite() || !to.is_finite() {
+            continue;
+        }
+        let (dx, dy) = (f64::from(to.x) - f64::from(from.x), f64::from(to.y) - f64::from(from.y));
+        let length = dx.hypot(dy);
+        if length <= 1e-12 {
+            continue;
+        }
+        let mut at = 0.0;
+        while at < length && budget > 0 {
+            budget -= 1;
+            let next = (at + remaining).min(length);
+            let point =
+                |distance: f64| pos2((f64::from(from.x) + dx * (distance / length)) as f32, (f64::from(from.y) + dy * (distance / length)) as f32);
+            if drawing {
+                if current.is_empty() {
+                    current.push(point(at));
+                }
+                current.push(point(next));
+            }
+            remaining -= next - at;
+            at = next;
+            if remaining <= 1e-9 {
+                if drawing && current.len() > 1 {
+                    result.push(std::mem::take(&mut current));
+                }
+                if gap == 0.0 {
+                    drawing = true;
+                    remaining = f64::from(dash);
+                } else {
+                    drawing = !drawing;
+                    remaining = f64::from(if drawing { dash } else { gap });
+                }
+            }
+        }
+        if budget == 0 {
+            break;
+        }
+    }
+    if current.len() > 1 {
+        result.push(current);
+    }
+    result
+}
+
+/// The shared edit outline: one-pixel dashes with continuous four/three-pixel phase.
+pub fn dashed_rounded_rect(painter: &Painter, rect: Rect, radius: f32, ink: egui::Color32) {
+    painter
+        .extend(split_dashes(&rounded_rect_path(rect, radius), 4.0, 3.0).into_iter().map(|points| egui::Shape::line(points, Stroke::new(1.0, ink))));
+}
+
+/// The editing outline follows the actual button or capsule, independently of its hit target.
+pub fn item_outline(id: &str, hit: Rect) -> (Rect, f32) {
+    let height = match id {
+        "file" | "version" => 26.0,
+        "donate" | "discord" | "report" => PILL_HEIGHT,
+        _ => hit.height(),
+    };
+    let rect = Rect::from_center_size(hit.center(), vec2(hit.width(), height)).shrink(0.5);
+    let radius = if matches!(id, "donate" | "discord" | "report" | "version") { rect.height() / 2.0 } else { 7.0 };
+    (rect, radius)
+}
+
+/// Cubic ease-out from an origin to its target, with elapsed time `dt`. Invalid timing snaps;
+/// invalid positions produce a finite fallback. Double precision keeps hostile deltas finite.
+pub fn animated_step(from: f32, to: f32, dt: f32, duration: f32) -> f32 {
+    if !to.is_finite() {
+        return if from.is_finite() { from } else { 0.0 };
+    }
+    if !from.is_finite() || !dt.is_finite() || !duration.is_finite() || duration <= 0.0 {
+        return to;
+    }
+    let progress = (f64::from(dt) / f64::from(duration)).clamp(0.0, 1.0);
+    let value = (f64::from(from) + (f64::from(to) - f64::from(from)) * (1.0 - (1.0 - progress).powi(3))) as f32;
+    if (f64::from(to) - f64::from(value)).abs() <= 0.5 { to } else { value }
+}
+
+#[derive(Clone)]
+struct ItemMotion {
+    from: Pos2,
+    target: Pos2,
+    drawn: Pos2,
+    seen: u64,
+    appeared: u64,
+    active: bool,
+}
+
+#[derive(Clone, Default)]
+struct BarMotion {
+    initialized: bool,
+    frame: u64,
+    width: f32,
+    resized: bool,
+    items: std::collections::BTreeMap<String, ItemMotion>,
+}
+
+fn motion_key(ctx: &egui::Context) -> egui::Id {
+    egui::Id::unique(("sc_appbar_motion", ctx.viewport_id()))
+}
+
+/// Start a paint pass. Resizing cancels displacement, and absent items lose their history.
+pub fn begin_motion(ctx: &egui::Context, width: f32) {
+    let (key, frame) = (motion_key(ctx), ctx.cumulative_frame_nr());
+    ctx.data_mut(|data| {
+        let state = data.get_temp_mut_or_default::<BarMotion>(key);
+        if !state.initialized || state.frame != frame {
+            state.resized = !width.is_finite() || !state.initialized || (state.width - width).abs() > 0.01;
+            state.frame = frame;
+            state.initialized = true;
+            state.items.retain(|_, item| item.seen.saturating_add(1) >= frame);
+        } else if (state.width - width).abs() > 0.01 {
+            state.resized = true;
+        }
+        state.width = width;
+        if state.resized {
+            state.items.clear();
+        }
+    });
+}
+
+fn motion_offset(ctx: &egui::Context, id: &str, rect: Rect) -> egui::Vec2 {
+    if id.len() > 256 || !rect.is_finite() || !rect.is_positive() || rect.min.x.abs() > 1e6 || rect.min.y.abs() > 1e6 {
+        return egui::Vec2::ZERO;
+    }
+    let (key, frame) = (motion_key(ctx), ctx.cumulative_frame_nr());
+    let instant = ctx.global_style().animation_time <= 0.0;
+    let selection = ctx.data_mut(|data| {
+        let state = data.get_temp_mut_or_default::<BarMotion>(key);
+        if !state.initialized || state.frame != frame || (state.items.len() >= 128 && !state.items.contains_key(id)) {
+            return None;
+        }
+        let previous = state.items.get(id).cloned();
+        let appeared = previous.as_ref().is_none_or(|item| item.seen.saturating_add(1) < frame);
+        let mut item =
+            previous.unwrap_or(ItemMotion { from: rect.min, target: rect.min, drawn: rect.min, seen: frame, appeared: frame, active: false });
+        let snap = instant || state.resized || appeared || item.appeared == frame;
+        let retarget = item.target != rect.min;
+        let reused = item.seen == frame && !snap && !retarget;
+        if snap {
+            item.from = rect.min;
+            item.target = rect.min;
+            item.drawn = rect.min;
+            item.active = false;
+            if appeared {
+                item.appeared = frame;
+            }
+        } else if retarget {
+            item.from = item.drawn;
+            item.target = rect.min;
+            item.active = item.from.distance(item.target) > 0.5;
+        }
+        item.seen = frame;
+        Some((item, snap, retarget, reused))
+    });
+    let Some((mut item, snap, retarget, reused)) = selection else { return egui::Vec2::ZERO };
+    if reused {
+        return item.drawn - item.target;
+    }
+    let animation = egui::Id::unique(("sc_appbar_motion_progress", ctx.viewport_id(), id));
+    if snap || !item.active {
+        item.drawn = item.target;
+        ctx.animate_value_with_time(animation, 1.0, 0.0);
+    } else {
+        if retarget {
+            ctx.animate_value_with_time(animation, 0.0, 0.0);
+        }
+        let progress = ctx.animate_value_with_time(animation, 1.0, 0.15);
+        item.drawn = pos2(animated_step(item.from.x, item.target.x, progress, 1.0), animated_step(item.from.y, item.target.y, progress, 1.0));
+        if item.drawn.distance(item.target) <= 0.5 {
+            item.drawn = item.target;
+            item.active = false;
+            ctx.animate_value_with_time(animation, 1.0, 0.0);
+        }
+    }
+    let offset = item.drawn - item.target;
+    ctx.data_mut(|data| {
+        data.get_temp_mut_or_default::<BarMotion>(key).items.insert(id.to_owned(), item);
+    });
+    offset
+}
+
+/// Read the painted position for decoration only. Interaction always uses the original rect.
+pub fn drawn_rect(ctx: &egui::Context, id: &str, rect: Rect) -> Rect {
+    let (key, frame) = (motion_key(ctx), ctx.cumulative_frame_nr());
+    let offset = ctx
+        .data(|data| {
+            data.get_temp::<BarMotion>(key)
+                .and_then(|state| state.items.get(id).filter(|item| item.seen == frame).map(|item| item.drawn - item.target))
+        })
+        .unwrap_or_default();
+    rect.translate(offset)
+}
+
+fn translate_paint(ctx: &egui::Context, layer: egui::LayerId, start: egui::layers::ShapeIdx, offset: egui::Vec2) {
+    if offset == egui::Vec2::ZERO {
+        return;
+    }
+    let screen = ctx.content_rect();
+    ctx.graphics_mut(|graphics| {
+        let list = graphics.entry(layer);
+        let end = list.next_idx();
+        if start.0 < end.0 {
+            list.transform_after_rounding_range(start, end, egui::emath::TSTransform::from_translation(offset));
+            for index in start.0..end.0 {
+                list.mutate_shape(egui::layers::ShapeIdx(index), |shape| shape.clip_rect = shape.clip_rect.intersect(screen));
+            }
+        }
+    });
+}
+
+/// Offset only the newly emitted paint, after pixel snapping. Widget rectangles stay final.
+pub fn paint_motion<R>(ui: &mut egui::Ui, id: &str, rect: Rect, paint: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    let (ctx, layer) = (ui.ctx().clone(), ui.layer_id());
+    let start = ctx.graphics_mut(|graphics| graphics.entry(layer).next_idx());
+    let result = paint(ui);
+    translate_paint(&ctx, layer, start, motion_offset(&ctx, id, rect));
+    result
+}
+
+/// The same paint-only displacement for an app-owned control with its own area layer.
+pub fn paint_layers_motion<R>(ctx: &egui::Context, id: &str, rect: Rect, layers: &[egui::LayerId], paint: impl FnOnce() -> R) -> R {
+    let starts: Vec<_> = layers.iter().take(16).map(|&layer| (layer, ctx.graphics_mut(|graphics| graphics.entry(layer).next_idx()))).collect();
+    let result = paint();
+    let offset = motion_offset(ctx, id, rect);
+    for (layer, start) in starts {
+        translate_paint(ctx, layer, start, offset);
+    }
+    result
+}
+
+pub fn paint_decoration(ui: &egui::Ui, id: &str, paint: impl FnOnce(&Painter)) {
+    let (ctx, layer) = (ui.ctx(), ui.layer_id());
+    let start = ctx.graphics_mut(|graphics| graphics.entry(layer).next_idx());
+    paint(ui.painter());
+    let offset = drawn_rect(ctx, id, Rect::from_min_size(Pos2::ZERO, vec2(1.0, 1.0))).min.to_vec2();
+    translate_paint(ctx, layer, start, offset);
+}
+
+/// Shared real control painter, with displacement applied only to its paint commands.
+pub fn paint_item(ui: &mut egui::Ui, rect: Rect, control: Control<'_>, response: &egui::Response, opacity: f32, id: &str) {
+    if opacity <= 0.0 {
+        paint_control(ui, rect, control, response, opacity);
+    } else {
+        paint_motion(ui, id, rect, |ui| paint_control(ui, rect, control, response, opacity));
+    }
+}
+
 /// The bar's height: the window's title bar on desktop builds.
 pub const HEIGHT: f32 = 34.0;
 /// Room for the version between Report a bug and the caption buttons, at the least.
@@ -148,6 +437,44 @@ pub fn editing(ctx: &egui::Context, active: bool, lifted: Option<String>) {
     ctx.data_mut(|d| d.insert_temp(egui::Id::unique("appbar_edit_paint"), (active, lifted)));
 }
 
+fn editing_active(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<(bool, Option<String>)>(egui::Id::unique("appbar_edit_paint"))).is_some_and(|s| s.0)
+}
+
+/// Tray state badges use the same check path as checkboxes and menus, and the host's lock
+/// glyph. Neither is an SVG alias: resolving them as icons would paint the placeholder.
+pub fn tray_badge(ui: &egui::Ui, cell: Rect, locked: bool) -> Rect {
+    let t = Tokens::get();
+    let radius = t.space_8;
+    let badge = Rect::from_center_size(cell.right_top() + vec2(-t.space_2, t.space_2), vec2(radius * 2.0, radius * 2.0));
+    ui.painter().circle_filled(badge.center(), radius, if locked { t.control_fill.to_opaque() } else { t.accent });
+    if locked {
+        ui.painter().circle_stroke(badge.center(), radius, Stroke::new(1.0, t.border));
+        crate::icons::glyphs::badge(ui.painter(), badge.shrink(t.space_3), "lock", t.text);
+    } else {
+        crate::checks::paint_check_glyph(ui.painter(), badge.shrink(t.space_2), false, t.on_accent);
+    }
+    badge
+}
+
+/// A link-style tray action with the shared typography, focus outline and accent token.
+pub fn tray_link(ui: &mut egui::Ui, rect: Rect, label: &str) -> egui::Response {
+    let t = Tokens::get();
+    let response = ui.interact(rect, ui.scope_id().with("tray_link"), Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
+    let text = ui.painter().layout_no_wrap(label.to_owned(), FontId::proportional(t.font_small), t.accent);
+    let at = pos2(rect.left(), rect.center().y - text.size().y / 2.0);
+    ui.painter().with_clip_rect(rect.intersect(ui.clip_rect())).galley(at, text.clone(), t.accent);
+    if response.hovered() || response.has_focus() {
+        ui.painter().hline(rect.left()..=rect.left() + text.size().x.min(rect.width()), at.y + text.size().y, Stroke::new(1.0, t.accent));
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    if response.has_focus() {
+        ui.painter().rect_stroke(rect, t.radius_sm, Stroke::new(1.0, t.accent), egui::StrokeKind::Inside);
+    }
+    response
+}
+
 pub fn item_opacity(ctx: &egui::Context, id: &str) -> f32 {
     let state = ctx.data(|d| d.get_temp::<(bool, Option<String>)>(egui::Id::unique("appbar_edit_paint")));
     match state {
@@ -159,7 +486,7 @@ pub fn item_opacity(ctx: &egui::Context, id: &str) -> f32 {
 /// No feature-owned lookalikes: all bar/tray painting goes through this function.
 pub fn paint_control(ui: &mut egui::Ui, rect: Rect, control: Control<'_>, response: &egui::Response, opacity: f32) {
     ui.scope(|ui| {
-        let editing = ui.ctx().data(|d| d.get_temp::<(bool, Option<String>)>(egui::Id::unique("appbar_edit_paint"))).is_some_and(|s| s.0);
+        let editing = editing_active(ui.ctx());
         if editing {
             ui.set_opacity(opacity);
         } else {
@@ -258,9 +585,12 @@ pub fn control_size(ctx: &egui::Context, control: Control<'_>) -> egui::Vec2 {
 /// Render the very same widget into a fitted cell. Lifted controls are tessellated and rotated
 /// together with their tokenised card/shadow; no alternate drawing or bitmap asset is involved.
 pub fn preview_control(ui: &mut egui::Ui, cell: Rect, control: Control<'_>, opacity: f32, lifted: bool, warning: bool) {
-    let native = Rect::from_min_size(Pos2::ZERO, control_size(ui.ctx(), control));
+    // This scratch layer is tessellated into the owning cell below. Even disabled hover
+    // widgets on a tooltip layer occlude clicks, so keep its widgets outside the viewport.
+    let native = Rect::from_min_size(ui.ctx().content_rect().right_bottom() + vec2(100.0, 100.0), control_size(ui.ctx(), control));
     let layer = egui::LayerId::new(egui::Order::Tooltip, ui.scope_id().with("control_preview_paint"));
-    let mut child = ui.new_child(egui::UiBuilder::new().layer_id(layer).max_rect(native));
+    let mut child = ui.new_child(egui::UiBuilder::new().layer_id(layer).max_rect(native).layout(egui::Layout::top_down(egui::Align::Min)).disabled());
+    child.set_opacity(1.0);
     child.set_clip_rect(Rect::EVERYTHING);
     if lifted {
         let t = Tokens::get();
@@ -353,7 +683,7 @@ pub struct AppBar<'a> {
 fn text_button(ui: &mut egui::Ui, rect: Rect, (label, name): (&str, &str), open: bool, idle: bool, salt: &str) -> (Rect, bool) {
     let resp = ui.interact(rect, ui.scope_id().with(("ab", salt)), if idle { Sense::click() } else { Sense::hover() });
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, idle, name));
-    paint_control(ui, rect, Control::File { label, enabled: idle, open }, &resp, item_opacity(ui.ctx(), "file"));
+    paint_item(ui, rect, Control::File { label, enabled: idle, open }, &resp, item_opacity(ui.ctx(), "file"), "file");
     (rect, idle && resp.clicked())
 }
 
@@ -510,7 +840,7 @@ fn pill(ui: &mut egui::Ui, bar: Rect, rect: Rect, p: &Pill, h: &Handles, actions
     let lift = ui.ctx().animate_bool_with_time(ui.scope_id().with(("sc_pill_lift", p.id)), hot, 0.1);
     let veil = ui.ctx().animate_bool_with_time(ui.scope_id().with(("sc_pill_veil", p.id)), hot_x, 0.1);
     let id = if p.id == "kofi" { "donate" } else { p.id };
-    paint_control(ui, rect, Control::Pill { data: *p, lift, veil, focused: x_resp.has_focus() }, &main_resp, item_opacity(ui.ctx(), id));
+    paint_item(ui, rect, Control::Pill { data: *p, lift, veil, focused: x_resp.has_focus() }, &main_resp, item_opacity(ui.ctx(), id), id);
     solidcraft_ui_registry::publish_target(&handle(h.pill, p.id), main);
     solidcraft_ui_registry::publish_target(&format!("{}{}:hide", h.pill, p.id), x_rect);
     if main_resp.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(p.tip).clicked() {
@@ -525,7 +855,9 @@ fn pill(ui: &mut egui::Ui, bar: Rect, rect: Rect, p: &Pill, h: &Handles, actions
 pub fn separator(ui: &egui::Ui, bar: Rect, x: f32, group: &str, handles: &Handles) {
     let t = Tokens::get();
     let rect = Rect::from_center_size(pos2(x, bar.center().y), vec2(1.0, 20.0));
-    ui.painter().line_segment([rect.center_top(), rect.center_bottom()], Stroke::new(1.0, t.app_bar.lerp_to_gamma(t.app_bar_separator, 0.4)));
+    paint_layers_motion(ui.ctx(), &format!("separator:{group}"), rect, &[ui.layer_id()], || {
+        ui.painter().line_segment([rect.center_top(), rect.center_bottom()], Stroke::new(1.0, t.app_bar.lerp_to_gamma(t.app_bar_separator, 0.4)));
+    });
     solidcraft_ui_registry::publish_rect(&handle(handles.separator, group), rect);
 }
 
@@ -539,7 +871,14 @@ fn icon_button(ui: &mut egui::Ui, bar: Rect, at: f32, b: &BarButton, compact: bo
     for prefix in handles.button {
         solidcraft_ui_registry::publish_target(&handle(prefix, b.id), br);
     }
-    paint_control(ui, br, Control::Icon { icon: b.icon, size: 18.0, enabled: b.enabled }, &resp, item_opacity(ui.ctx(), b.id));
+    paint_item(
+        ui,
+        br,
+        Control::Icon { icon: b.icon, size: 18.0, enabled: b.enabled },
+        &resp,
+        item_opacity(ui.ctx(), b.id),
+        if b.id == "overflow" { "more" } else { b.id },
+    );
     let clicked = resp.backing_on_hover_text(b.tip).clicked();
     b.enabled && clicked
 }
@@ -600,6 +939,7 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
     };
     let placed = layout(&spec);
     let geometry = placed.application.clone().unwrap_or_default();
+    begin_motion(ui.ctx(), content.width());
     let visible = |id: &str| geometry.visible.iter().any(|s| s == id);
     let compact = geometry.compact;
     let rect = |span: application::Span, height| {
@@ -631,7 +971,14 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
         for name in h.home_rect {
             solidcraft_ui_registry::publish_rect(name, home);
         }
-        paint_control(ui, home, Control::Icon { icon: data.home.icon, size: 18.0, enabled: idle }, &home_response, item_opacity(ui.ctx(), "home"));
+        paint_item(
+            ui,
+            home,
+            Control::Icon { icon: data.home.icon, size: 18.0, enabled: idle },
+            &home_response,
+            item_opacity(ui.ctx(), "home"),
+            "home",
+        );
         if home_response.backing_on_hover_text(data.home.tip).clicked() && idle {
             actions.push(BarAction::Home);
         }
@@ -688,7 +1035,14 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
         let response = ui.interact(report, ui.scope_id().with("sc_report_button"), Sense::click_and_drag());
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), data.report.label));
         solidcraft_ui_registry::publish_target(h.report, report);
-        paint_control(ui, report, Control::Report { label: data.report.label, labelled: report_label }, &response, item_opacity(ui.ctx(), "report"));
+        paint_item(
+            ui,
+            report,
+            Control::Report { label: data.report.label, labelled: report_label },
+            &response,
+            item_opacity(ui.ctx(), "report"),
+            "report",
+        );
         let tip = if report_label {
             data.report.tip
         } else if data.report.icon_only {
@@ -711,7 +1065,14 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
     let gear = rect(geometry.settings, 32.0);
     if visible("settings") {
         let gresp = ui.interact(gear, ui.scope_id().with("sc_prefs_button"), Sense::click_and_drag());
-        paint_control(ui, gear, Control::Icon { icon: data.settings.icon, size: 18.0, enabled: true }, &gresp, item_opacity(ui.ctx(), "settings"));
+        paint_item(
+            ui,
+            gear,
+            Control::Icon { icon: data.settings.icon, size: 18.0, enabled: true },
+            &gresp,
+            item_opacity(ui.ctx(), "settings"),
+            "settings",
+        );
         solidcraft_ui_registry::publish_rect(h.settings, gear);
         solidcraft_ui_registry::publish_handle(h.settings, gear.center());
         if gresp.backing_on_hover_text(data.settings.tip).clicked() {
@@ -725,7 +1086,7 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
         let vrect = rect(span, galley.size().y);
         let vresp = ui.interact(vrect.expand2(vec2(2.0, 4.0)), ui.scope_id().with("sc_version_link"), Sense::click_and_drag());
         let vresp = vresp.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(v.url);
-        paint_control(ui, vrect, Control::Version(v.text), &vresp, item_opacity(ui.ctx(), "version"));
+        paint_item(ui, vrect, Control::Version(v.text), &vresp, item_opacity(ui.ctx(), "version"), "version");
         solidcraft_ui_registry::publish_handle(h.version, vrect.center());
         if vresp.clicked() {
             actions.push(BarAction::Version);
@@ -1331,10 +1692,6 @@ fn line_colour(t: &Tokens) -> egui::Color32 {
     t.app_bar.lerp_to_gamma(t.app_bar_separator, 0.4)
 }
 
-fn outline(r: Rect) -> [Pos2; 5] {
-    [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()]
-}
-
 /// Lays out the selected design's tab for its views, `room` points of the bar being free for it.
 fn measure(ui: &egui::Ui, strip: &TabStrip, tab: &DocTab, name: &str, view_typed: Option<(usize, &str)>, room: f32) -> Geom {
     let t = Tokens::get();
@@ -1476,8 +1833,7 @@ fn view_list(ui: &mut egui::Ui, views: &[ViewTab], prefix: &str) -> Option<usize
                 ui.painter().circle_stroke(pos2(resp.rect.right() - 32.0, resp.rect.center().y), 3.25, Stroke::new(1.5, t.warning));
             }
             ViewState::Deleted => {
-                let dash = Stroke::new(1.0, t.app_bar_separator.gamma_multiply(0.7));
-                ui.painter().extend(crate::dashed_line(&outline(resp.rect.shrink(1.0)), resp.rect, dash, 3.0, 2.0));
+                dashed_rounded_rect(ui.painter(), resp.rect.shrink(1.0), 7.0, t.app_bar_separator.gamma_multiply(0.7));
             }
             ViewState::Normal => {}
         }
@@ -1491,6 +1847,9 @@ fn view_list(ui: &mut egui::Ui, views: &[ViewTab], prefix: &str) -> Option<usize
 /// The + that opens another view, in `rect` with a glyph `icon` points wide: a click opens the +
 /// menu (or asks for a new view where the app gave no menu), a right click opens the menu.
 fn plus_button(ui: &mut egui::Ui, strip: &TabStrip, rect: Rect, icon: f32, pen: &mut Pen) {
+    if editing_active(ui.ctx()) {
+        return;
+    }
     let t = Tokens::get();
     let resp = ui.interact(rect, ui.scope_id().with("view_plus"), Sense::click());
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, strip.view_text.new_view));
@@ -1565,8 +1924,7 @@ fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: 
         painter.rect_filled(vr, VIEW_RADIUS, t.app_bar_hover);
     }
     if deleted {
-        let dash = Stroke::new(1.0, t.app_bar_separator.gamma_multiply(0.7));
-        painter.extend(crate::dashed_line(&outline(vr.shrink(0.5)), vr.expand(2.0), dash, 3.0, 2.0));
+        dashed_rounded_rect(&painter, vr.shrink(0.5), f32::from(VIEW_RADIUS), t.app_bar_separator.gamma_multiply(0.7));
     }
     if resp.has_focus() {
         painter.rect_stroke(vr.expand(1.0), VIEW_RADIUS + 1, Stroke::new(2.0, t.accent), egui::StrokeKind::Outside);
