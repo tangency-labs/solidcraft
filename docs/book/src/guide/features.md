@@ -250,9 +250,9 @@ a left-handed groove crossing, as on a reversing screw). Scripts use `hand: "lef
 
 Choose **Full depth** for a point with enough material around its axis to keep the full groove
 depth. A sharp point needs **Fade**. To cut a constant-depth groove on a cone alone, select its
-conical face directly, turn on **Modeled**, and leave **Point** set to **None**. Use **Length**
-to limit the cut to the part of the cone where the groove clears the axis. Leave **End** set
-to **Square** for a directly selected cone.
+conical face directly, turn on **Modeled**, and leave **Point** set to **None**. **Length** and
+**Up to** start at the wide rim. Limit the cut to the part of the cone where the cutting profile
+clears the axis. Leave **Start** set to **None** and **End** set to **Square**.
 
 The [pointed screw example](https://github.com/tangency-labs/solidcraft/blob/main/examples/pointed-screw.json)
 builds the shank, cone, slotted head, and thread with the built-in tools. Run it from the

@@ -57,14 +57,12 @@ use solidcore::topology::{edge, EdgeId, FaceId, VertexId};
 use solidcore::{Brep, Kernel};
 use std::f64::consts::PI;
 
-/// Every fix but `geometric_g2_continuity`.
+/// Every fix.
 fn all_fixes() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     k.fixes = f;
     k
@@ -540,12 +538,12 @@ fn a_set_back_vertex_is_no_ball() {
 // Facet. The plane through X_u, X_v, X_w cuts off, beyond the mitre, the tetrahedron
 // M X_u X_v X_w: |det(X_u - M, X_v - M, X_w - M)| / 6 more.
 
-// Every fix but `geometric_g2_continuity`, with or without `fillet_chamfer_corner`.
+// Every fix, with or without `fillet_chamfer_corner`.
 fn chamfer_fixes(on: bool) -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" && (on || name != "fillet_chamfer_corner") {
+        if on || name != "fillet_chamfer_corner" {
             *f.flag_mut(name).unwrap() = true;
         }
     }

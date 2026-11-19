@@ -1021,6 +1021,10 @@ fn point_fade_length(height: f64, slope: f64, depth: f64) -> f64 {
     height.min(2.0 * depth / slope)
 }
 
+fn point_blend_width(length: f64, pitch: f64) -> f64 {
+    (0.12 * pitch).min(length * 0.25)
+}
+
 /// Fair the depth law just before it reaches the full-depth plateau so
 /// the loft does not overshoot into the core across the change in slope.
 fn point_depth_fraction(at: f64, fade_length: f64, width: f64) -> f64 {
@@ -1086,7 +1090,7 @@ impl PointGroove {
     fn runout_at(&self, h: f64) -> f64 {
         self.runout.map_or(1.0, |(start, end)| {
             let length = end - start;
-            point_depth_fraction((end - h).max(0.0), length, (0.12 * self.pitch).min(length * 0.25))
+            point_depth_fraction((end - h).max(0.0), length, point_blend_width(length, self.pitch))
         })
     }
 }
@@ -1162,7 +1166,7 @@ fn crossed_point_groove(t: &ThreadInfo, groove: &PointGroove, meridian: Plane, f
             .ok_or_else(|| DocError::Invalid("the crossed thread has no volume".into()))
     };
     let blend = groove.fade.map(|(end, width)| (end - width, end));
-    let ease = groove.runout.map(|(start, end)| (start, start + (0.12 * pitch).min((end - start) * 0.25)));
+    let ease = groove.runout.map(|(start, end)| (start, start + point_blend_width(end - start, pitch)));
     let mut knots = vec![0.0, groove.height, finish];
     knots.extend(blend.into_iter().flat_map(|(a, b)| [a, b]));
     knots.extend(ease.into_iter().flat_map(|(a, b)| [a, b]));
@@ -1319,7 +1323,7 @@ fn narrow_point_grooves(
     // faces to tessellate on fine pitches as well.
     let sharp = tip_radius <= 1e-6;
     let fade_length = point_fade_length(height, cone.slope.abs(), depth);
-    let fade_width = (0.12 * pitch).min(fade_length * 0.25);
+    let fade_width = point_blend_width(fade_length, pitch);
     let groove = PointGroove {
         tip_radius,
         height,
@@ -1343,7 +1347,7 @@ fn narrow_point_grooves(
     let x = k.cross(if k.x.abs() < 0.9 { Vec3::X } else { Vec3::Y }).normalized().ok_or_else(|| invalid("thread axis"))?;
     let y = k.cross(x);
     let axis_at = |z| t.axis_point + t.axis * z;
-    let span = (0.12 * pitch).min(height * 0.25);
+    let span = point_blend_width(height, pitch);
     if t.hand == ThreadHand::Both {
         let plane = Plane { origin: axis_at(tip), x, y: k * dir };
         return Ok(vec![crossed_point_groove(t, &groove, plane, finish, dir, flat, [flank_hi.tan(), flank_lo.tan()])?]);
