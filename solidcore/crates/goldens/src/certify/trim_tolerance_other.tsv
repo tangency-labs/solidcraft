@@ -29,15 +29,10 @@ blend.fillet_executive_p3	real-box-fillet4v-r3-shell-closed	shell_geometry	93	ro
 blend.fillet_executive_p3	real-box-fillet4v-r3-shell-closed	shell_geometry	96	rounding	0
 blend.fillet_executive_p3	real-box-fillet4v-r3-shell-closed	shell_geometry	97	rounding	0
 blend.fillet_executive_p3	stubs4-delete-edge-bottle-e8-r0.1	mass_properties	0	integration	0
-blend.fillet_executive_p3	stubs4-delete-edge-bottle-e8-r0.1	mass_properties	1	integration	0
 blend.fillet_executive_p3	stubs4-delete-edge-bottle-e8-r0.1	mass_properties	10	integration	0
 blend.fillet_executive_p3	stubs4-delete-edge-bottle-e8-r0.1	mass_properties	11	integration	0
-blend.fillet_executive_p3	stubs4-delete-edge-bottle-e8-r0.1	mass_properties	2	integration	0
 blend.fillet_executive_p3	stubs4-delete-edge-bottle-e8-r0.1	mass_properties	3	integration	0
 blend.fillet_executive_p3	stubs4-delete-edge-bottle-e8-r0.1	mass_properties	4	integration	0
-blend.fillet_executive_p3	stubs4-delete-edge-bottle-e8-r0.1	mass_properties	5	integration	0
-blend.fillet_executive_p3	stubs4-delete-edge-bottle-e8-r0.1	mass_properties	6	integration	0
-blend.fillet_executive_p3	stubs4-delete-edge-bottle-e8-r0.1	mass_properties	7	integration	0
 blend.fillet_executive_p3	stubs4-delete-edge-bottle-e8-r0.1	mass_properties	8	integration	0
 blend.fillet_executive_p3	stubs4-delete-edge-bottle-e8-r0.1	mass_properties	9	integration	0
 offset.offset_executive_p2	issue1795_plate_api_shell_2_top	result.geometry	6	rounding	0
