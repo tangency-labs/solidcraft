@@ -6262,7 +6262,10 @@ mod glass_tests {
         // validation pipeline, naga cannot emit compute GLSL below 4.30, and request_device fails
         // as Device(Lost) (#15410). The test draws nothing indirect.
         descriptor.flags.remove(wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL);
-        let instance = wgpu::Instance::new(descriptor);
+        let instance = crate::select::start_instance(descriptor);
+        // Never dropped: NVIDIA's driver deadlocks when one thread drops an EGL context while
+        // another test's thread destroys a Vulkan device (#10232).
+        std::mem::forget(instance.clone());
         let policy = crate::test_env::policy();
         let Some((adapter, _)) = crate::select::pick_among(pollster::block_on(instance.enumerate_adapters(wgpu::Backends::GL)), policy) else {
             eprintln!("skipped: no OpenGL adapter qualifies under {}", policy.name());

@@ -42,9 +42,65 @@ pub(crate) fn skip_unless_required(required: bool, why: &dyn std::fmt::Display) 
     true
 }
 
+/// An adapter, device and queue, as [`crate::open_headless`] hands them out.
+type Opened = (wgpu::Adapter, wgpu::Device, wgpu::Queue);
+
+/// The device this crate's tests share under `policy`; [`crate::open_headless`] is this in a test
+/// build. The first test that asks opens it, every test that asks while it is open gets the same
+/// one, and it closes when the last test thread that asked for it ends.
+///
+/// With a device of its own, every test closed one as it ended. NVIDIA's Linux driver deadlocks
+/// when one thread ends while another is closing a Vulkan device (#10232), and libtest ends a
+/// thread with every test, so the test process froze. Shared, a run closes one device or a few.
+/// The device is not kept until the process exits: the same driver crashed at exit while a device
+/// was still open.
+///
+/// A test that must have a device to itself (one that loses it, say) opens it with
+/// [`crate::open_own_headless`].
+pub(crate) fn shared_headless(policy: Policy) -> crate::Result<Opened> {
+    use std::sync::{Arc, Mutex, PoisonError, Weak};
+    static SHARED: Mutex<Vec<(Policy, Weak<Opened>)>> = Mutex::new(Vec::new());
+    thread_local! {
+        /// The shared devices this thread asked for, held until the thread ends.
+        static HELD: std::cell::RefCell<Vec<Arc<Opened>>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+    // Held while a device opens, so tests that start together open one device, not one each.
+    let mut shared = SHARED.lock().unwrap_or_else(PoisonError::into_inner);
+    let open = shared.iter().find(|(p, _)| *p == policy).and_then(|(_, opened)| opened.upgrade());
+    let opened = match open {
+        Some(opened) => opened,
+        None => {
+            let opened = Arc::new(crate::open_own_headless(policy)?);
+            shared.retain(|(p, _)| *p != policy);
+            shared.push((policy, Arc::downgrade(&opened)));
+            opened
+        }
+    };
+    drop(shared);
+    HELD.with(|held| {
+        let mut held = held.borrow_mut();
+        if !held.iter().any(|mine| Arc::ptr_eq(mine, &opened)) {
+            held.push(opened.clone());
+        }
+    });
+    Ok((*opened).clone())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A test that asks twice gets one device, not a second one (#10232).
+    #[test]
+    fn a_test_thread_gets_the_same_shared_device_each_time_it_asks() {
+        let (_, first, _) = match shared_headless(policy()) {
+            Ok(opened) => opened,
+            Err(e) if skip_unless_required(required(), &e) => return,
+            Err(e) => panic!("{e}"),
+        };
+        let (_, second, _) = shared_headless(policy()).unwrap_or_else(|e| panic!("{e}"));
+        assert!(first == second, "the second ask opened another device");
+    }
 
     #[test]
     fn the_tests_policy_comes_from_the_crates_own_variable() {
