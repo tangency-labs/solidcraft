@@ -323,10 +323,9 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
                     if s.start().dist(s.end()) < tol && s.length() < tol {
                         return Err(fail("a profile edge of no length"));
                     }
-                    // The whole curve, not only its ends, stays clear of the seam and endcaps:
-                    // its control points' box bounds it.
-                    let (bl, bh) = seg_box(&s);
-                    if bl.x / r <= alo + tol / r || bh.x / r >= ahi - tol / r || bl.y <= lo + tol || bh.y >= hi - tol {
+                    // The whole curve, not only its ends, stays clear of the seam and endcaps.
+                    let (xlo, xhi) = (alo * r + tol, ahi * r - tol);
+                    if !clear_within(s, Vec2::new(xlo, lo + tol), Vec2::new(xhi, hi - tol), tol, &mut 256) {
                         return Err(fail("profile crosses a cylinder seam or endcap boundary"));
                     }
                     segs.push(s);
@@ -741,7 +740,15 @@ impl Wrap {
         let pad = self.tol * 100.0;
         let on = self.cap_form;
         let (v0, v1) = (on.v0 + on.vk * lo.y, on.v0 + on.vk * hi.y);
-        let domain = [[lo.x / self.r - pad / self.r, hi.x / self.r + pad / self.r], [v0.min(v1) - pad, v0.max(v1) + pad]];
+        // The angle padding keeps the domain short of a whole turn: a padded domain of a turn
+        // would take the form of a whole turn from the quarter its padded start lies in, which
+        // can end before the boundary's own angles (a footprint near a whole turn).
+        let (a0, a1) = (lo.x / self.r, hi.x / self.r);
+        let pad_u = (pad / self.r).min(0.5 * (std::f64::consts::TAU * (1.0 - 1e-8) - (a1 - a0)));
+        if pad_u.is_nan() || pad_u <= 0.0 {
+            return Err(fail("profile wraps a whole turn"));
+        }
+        let domain = [[a0 - pad_u, a1 + pad_u], [v0.min(v1) - pad, v0.max(v1) + pad]];
         form::surface(&self.cylinder(rr), domain).ok_or_else(|| fail("cap form"))
     }
 
@@ -755,7 +762,8 @@ impl Wrap {
     /// Bruno's formula, as in [`fit_spans`].
     fn pcurve(&self, seg: &Seg2, q: Vec2, on: OnForm, radius: f64) -> Result<Curve2> {
         let b = derivative_bounds(seg).ok_or_else(|| fail("a profile curve whose shape cannot be bounded"))?;
-        let th: Vec<f64> = b.iter().map(|x| x / self.r).collect();
+        let across = across_bounds(seg).ok_or_else(|| fail("a profile curve whose shape cannot be bounded"))?;
+        let th: Vec<f64> = across.iter().map(|x| x / self.r).collect();
         let (Some(&t1), Some(&t2), Some(&t3), Some(&t4)) = (th.first(), th.get(1), th.get(2), th.get(3)) else { return Err(fail("bounds")) };
         let [g1, g2, g3, g4] = PARAM_BOUNDS;
         let u4 = g1 * t4 + g2 * (4.0 * t1 * t3 + 3.0 * t2 * t2) + 6.0 * g3 * t1 * t1 * t2 + g4 * t1.powi(4);
@@ -836,7 +844,8 @@ impl Wrap {
         // corner: the gap counts against the fit.
         let room = self.fit / scale - seg.end().dist(q);
         let bounds = derivative_bounds(seg).ok_or_else(|| fail("a profile curve whose shape cannot be bounded"))?;
-        let n = fit_spans(bounds, self.r, room).ok_or_else(|| fail("a profile curve is too detailed to wrap"))?;
+        let across = across_bounds(seg).ok_or_else(|| fail("a profile curve whose shape cannot be bounded"))?;
+        let n = fit_spans(bounds, across, self.r, room).ok_or_else(|| fail("a profile curve is too detailed to wrap"))?;
         self.take_spans(n)?;
         let h = 1.0 / n as f64;
         // The B-spline's control points: each span's Bézier points, the point shared by two
@@ -944,6 +953,17 @@ fn derivative_bounds(seg: &Seg2) -> Option<[f64; 4]> {
     b.iter().all(|x| x.is_finite()).then_some(b)
 }
 
+/// [`derivative_bounds`] of a segment's first coordinate alone (in wall coordinates, the way
+/// round the wall; the height runs straight and does not turn the wrap): those of its shadow on
+/// that axis, its control points' first coordinates (a Bézier or conic's shadow is the Bézier
+/// or conic of its controls' shadows); an arc's are its own.
+fn across_bounds(seg: &Seg2) -> Option<[f64; 4]> {
+    match seg {
+        Seg2::Arc { .. } => derivative_bounds(seg),
+        _ => derivative_bounds(&seg.map_controls(|p| Vec2::new(p.x, 0.0))),
+    }
+}
+
 /// [`derivative_bounds`] of the polynomial Bézier with control points `p`.
 fn polynomial_bounds(p: &[Vec2]) -> [f64; 4] {
     let mut out = [0.0; 4];
@@ -962,17 +982,18 @@ fn polynomial_bounds(p: &[Vec2]) -> [f64; 4] {
 }
 
 /// How many even spans a cubic Hermite fit of the wrap of a segment needs to stay within `room`
-/// of it, from the segment's [`derivative_bounds`] `b` and the wall radius `r`. The wrap is
+/// of it, from the segment's [`derivative_bounds`] `b`, those of its first coordinate alone
+/// `across` ([`across_bounds`]: only the way round the wall bends the wrap) and the wall radius `r`. The wrap is
 /// `axis z + r (radial cos(s/r) + tangent sin(s/r))`; Faà di Bruno's formula bounds its fourth
 /// derivative by `M = |z''''| + |s''''| + (4|s'||s'''| + 3|s''|²)/r + 6|s'|²|s''|/r² + |s'|⁴/r³`,
 /// and a Hermite cubic on a span of length h misses a function by at most `h⁴/384` of its
 /// fourth derivative, in each of the three coordinates. `None` past [`MAX_SPANS`] or without room.
-fn fit_spans(b: [f64; 4], r: f64, room: f64) -> Option<usize> {
-    let [b1, b2, b3, b4] = b;
+fn fit_spans(b: [f64; 4], across: [f64; 4], r: f64, room: f64) -> Option<usize> {
+    let [s1, s2, s3, _] = across;
     if room.is_nan() || room <= 0.0 || r.is_nan() || r <= 0.0 {
         return None;
     }
-    let m = 2.0 * b4 + (4.0 * b1 * b3 + 3.0 * b2 * b2) / r + 6.0 * b1 * b1 * b2 / (r * r) + b1.powi(4) / r.powi(3);
+    let m = 2.0 * b[3] + (4.0 * s1 * s3 + 3.0 * s2 * s2) / r + 6.0 * s1 * s1 * s2 / (r * r) + s1.powi(4) / r.powi(3);
     let n = (3f64.sqrt() * m / (384.0 * room)).powf(0.25).ceil().max(1.0);
     (n.is_finite() && n <= MAX_SPANS as f64).then_some(n as usize)
 }
@@ -1046,6 +1067,23 @@ fn segs_meet(s: Seg2, t: Seg2, tol: f64, budget: &mut usize) -> bool {
         let (a, b) = t.split_half();
         segs_meet(s, a, tol, budget) || segs_meet(s, b, tol, budget)
     }
+}
+
+/// Whether segment `s` lies strictly inside the box from `lo` to `hi`: its [`seg_box`] does, or
+/// each half does (halved exactly, as in [`segs_meet`]), so control points past a limit that the
+/// curve itself stays short of do not refuse it. A piece under `tol` across that still reaches a
+/// limit, or running out of `budget` halvings, answers no, which refuses the profile.
+fn clear_within(s: Seg2, lo: Vec2, hi: Vec2, tol: f64, budget: &mut usize) -> bool {
+    let (sl, sh) = seg_box(&s);
+    if sl.x > lo.x && sh.x < hi.x && sl.y > lo.y && sh.y < hi.y {
+        return true;
+    }
+    if sh.x <= lo.x || sl.x >= hi.x || sh.y <= lo.y || sl.y >= hi.y || (sh - sl).len() <= tol || *budget == 0 {
+        return false;
+    }
+    *budget -= 1;
+    let (a, b) = s.split_half();
+    clear_within(a, lo, hi, tol, budget) && clear_within(b, lo, hi, tol, budget)
 }
 
 /// A loop of one closed segment split into its two halves (both over the segment); any other
@@ -1467,6 +1505,46 @@ mod tests {
     /// Curved and slanted profiles wrapped on a full outside wall and in a bore: the body stays
     /// one valid shell and changes by the wrapped region's exact volume, the profile's area times
     /// `|rr² - r²| / 2r`; every fitted edge lies on its cylinder within the fit.
+    /// Profiles a looser bound refused wrap (#19229 review): a long slant that barely turns round
+    /// a thin wall needs few spans (only the way round bends the wrap), and a curve whose control
+    /// points pass the top endcap while the curve stays short of it is clear of the endcap.
+    #[test]
+    fn long_slants_and_curves_near_an_endcap_wrap() {
+        let thin = crate::cylinder(Vec3::ZERO, Vec3::Z, 1., 200.).unwrap();
+        let on_thin = Plane::new(Vec3::Y, -Vec3::X, Vec3::Z).unwrap();
+        let slant = Loop2::polygon(&[Vec2::new(-0.25, 1.), Vec2::new(0.25, 1.), Vec2::new(0.45, 199.), Vec2::new(-0.05, 199.)]);
+        // Endpoints at height 18, controls at 20: the curve peaks at 19.5 on a wall 20 high.
+        let dome = Loop2 {
+            segs: vec![
+                Seg2::Line { a: Vec2::new(2., 18.), b: Vec2::new(-2., 18.) },
+                Seg2::Cubic { p0: Vec2::new(-2., 18.), p1: Vec2::new(-1., 20.), p2: Vec2::new(1., 20.), p3: Vec2::new(2., 18.) },
+            ],
+        };
+        let outside = crate::cylinder(Vec3::ZERO, Vec3::Z, 10., 20.).unwrap();
+        for (body, sketch, outer, r) in [(&thin, on_thin, slant, 1.), (&outside, plane(), dome, 10.)] {
+            let region = Region2 { outer, holes: vec![] };
+            let before = volume(body);
+            for depth in [0.2, -0.2] {
+                let rr: f64 = r + depth;
+                let result = emboss_cylinder(body, &sketch, std::slice::from_ref(&region), depth).unwrap();
+                assert_eq!(result.shell_count(), 1);
+                assert!(result.validity().is_empty());
+                let want = depth.signum() * region.area() * (rr * rr - r * r).abs() / (2. * r);
+                let change = volume(&result) - before;
+                assert!((change - want).abs() < 1e-6 * region.area(), "r {r} depth {depth}: {change} vs {want}");
+            }
+        }
+        // A curve that does cross the endcap is still refused.
+        let past = Loop2 {
+            segs: vec![
+                Seg2::Line { a: Vec2::new(2., 18.), b: Vec2::new(-2., 18.) },
+                Seg2::Cubic { p0: Vec2::new(-2., 18.), p1: Vec2::new(-1., 21.), p2: Vec2::new(1., 21.), p3: Vec2::new(2., 18.) },
+            ],
+        };
+        let e = emboss_cylinder(&outside, &plane(), &[Region2 { outer: past, holes: vec![] }], 0.2).unwrap_err();
+        assert!(e.to_string().contains("seam or endcap"), "{e}");
+    }
+
     #[test]
     fn curved_and_slanted_profiles_wrap_to_the_analytic_volume() {
         let circle = |c: Vec2, r: f64| Loop2::circle(c, r);
