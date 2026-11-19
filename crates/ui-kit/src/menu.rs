@@ -559,6 +559,7 @@ impl<'a> MenuItem<'a> {
             painter.rect(icon, t.radius_sm, color, t.control_border_stroke(t.control_border), egui::StrokeKind::Inside);
         } else if !self.icon.is_blank() {
             match self.icon {
+                Icon::Kit(name @ ("window_here" | "window_other")) => icons::paint_ink(&painter, icon, name, t.text_dim),
                 Icon::Kit(name) if self.danger => icons::paint_danger(&painter, icon, name, 1.0),
                 Icon::Kit(name) if hot => icons::paint_ink(&painter, icon, name, dim),
                 plain => plain.paint_plain(&painter, icon, 1.0),
