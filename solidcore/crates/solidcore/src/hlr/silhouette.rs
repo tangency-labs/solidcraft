@@ -233,11 +233,12 @@ pub(crate) fn inside_ranges(c: &C3, s: &S3, trim: &Trim, slack: f64) -> Vec<[f64
         .map(|i| t0 + (t1 - t0) * i as f64 / n as f64)
         .collect();
     let near = 0.02 * (trim.hi - trim.lo).len();
+    let closest = Closest::new(c);
     ts.extend(
         trim.chords
             .iter()
             .step_by(4)
-            .filter_map(|(q, _)| closest_param(c, *q).filter(|t| c.at(*t).dist(*q) <= near)),
+            .filter_map(|(q, _)| closest.param(*q).filter(|t| c.at(*t).dist(*q) <= near)),
     );
     ts.retain(|t| *t >= t0 && *t <= t1);
     ts.sort_by(f64::total_cmp);
@@ -289,7 +290,169 @@ pub(crate) fn inside_ranges(c: &C3, s: &S3, trim: &Trim, slack: f64) -> Vec<[f64
 
 /// The parameter of the point of `c` nearest to `p` (lines and arcs exactly, polylines at a
 /// vertex), when `p` projects inside the curve's domain.
-fn closest_param(c: &C3, p: Vec3) -> Option<f64> {
+/// Chords of a polyline per block of [`Closest`].
+const BLOCK: usize = 16;
+/// Blocks per group of [`Closest`].
+const GROUP: usize = 16;
+
+/// [`closest_param`] for many points on one curve, with the same answers: a polyline's chords
+/// are boxed in blocks of [`BLOCK`] and the blocks in groups of [`GROUP`]. The block nearest the
+/// point is looked at first, and then every block or group whose box lies further from the point
+/// than the nearest chord found so far is passed over (none of its chords can be nearer). Of
+/// chords equally near, the first is kept, as [`closest_param`] keeps it.
+pub(crate) struct Closest<'c> {
+    c: &'c C3,
+    /// Each block's first chord and its box, padded for rounding; empty for any other curve
+    /// and for a polyline with a point that is not finite.
+    blocks: Vec<(usize, Vec3, Vec3)>,
+    /// Each group's box.
+    groups: Vec<(Vec3, Vec3)>,
+}
+
+/// The box `a` grown to hold `b`.
+fn grown(a: Option<&mut (Vec3, Vec3)>, b: (Vec3, Vec3)) -> Option<(Vec3, Vec3)> {
+    match a {
+        Some(a) => {
+            *a = (a.0.min(b.0), a.1.max(b.1));
+            None
+        }
+        None => Some(b),
+    }
+}
+
+impl<'c> Closest<'c> {
+    pub(crate) fn new(c: &'c C3) -> Closest<'c> {
+        let mut blocks: Vec<(usize, Vec3, Vec3)> = Vec::new();
+        let mut groups: Vec<(Vec3, Vec3)> = Vec::new();
+        if let C3::Polyline(pts) = c {
+            if pts.iter().all(|p| p.is_finite()) {
+                for (i, w) in pts.windows(2).enumerate() {
+                    let (Some(a), Some(b)) = (w.first(), w.get(1)) else {
+                        continue;
+                    };
+                    let (lo, hi) = (a.min(*b), a.max(*b));
+                    match blocks.last_mut() {
+                        Some(last) if i % BLOCK != 0 => {
+                            last.1 = last.1.min(lo);
+                            last.2 = last.2.max(hi);
+                        }
+                        _ => blocks.push((i, lo, hi)),
+                    }
+                }
+                // A chord's nearest point is computed with rounding: it may sit a hair outside
+                // the box of its ends.
+                for (_, lo, hi) in &mut blocks {
+                    let big = |v: Vec3| v.x.abs().max(v.y.abs()).max(v.z.abs());
+                    let pad = 1e-9 * (1. + big(*lo).max(big(*hi)));
+                    *lo -= Vec3::new(pad, pad, pad);
+                    *hi += Vec3::new(pad, pad, pad);
+                }
+                for (k, (_, lo, hi)) in blocks.iter().enumerate() {
+                    let last = if k % GROUP == 0 {
+                        None
+                    } else {
+                        groups.last_mut()
+                    };
+                    if let Some(new) = grown(last, (*lo, *hi)) {
+                        groups.push(new);
+                    }
+                }
+            }
+        }
+        Closest { c, blocks, groups }
+    }
+
+    /// [`closest_param`] of `p`.
+    pub(crate) fn param(&self, p: Vec3) -> Option<f64> {
+        let C3::Polyline(pts) = self.c else {
+            return closest_param(self.c, p);
+        };
+        if self.blocks.is_empty() || !p.is_finite() {
+            return closest_param(self.c, p);
+        }
+        // The nearest chord so far: its index, parameter and distance.
+        let mut best: Option<(usize, f64, f64)> = None;
+        let scan = |k: usize, best: &mut Option<(usize, f64, f64)>| {
+            let Some((start, _, _)) = self.blocks.get(k) else {
+                return;
+            };
+            let end = start.saturating_add(BLOCK + 1).min(pts.len());
+            let Some(run) = pts.get(*start..end) else {
+                return;
+            };
+            for (j, w) in run.windows(2).enumerate() {
+                let i = *start + j;
+                let Some((t, d)) = chord_param(i, w, p) else {
+                    continue;
+                };
+                if best.is_none_or(|(bi, _, bd)| d.total_cmp(&bd).then(i.cmp(&bi)).is_lt()) {
+                    *best = Some((i, t, d));
+                }
+            }
+        };
+        let far = |lo: Vec3, hi: Vec3, best: &Option<(usize, f64, f64)>| {
+            best.is_some_and(|(_, _, d)| box_dist(p, lo, hi) > d)
+        };
+        let blocks_of = |g: usize| {
+            let first = g.saturating_mul(GROUP);
+            first..first.saturating_add(GROUP).min(self.blocks.len())
+        };
+        // A near chord first, so that most boxes are passed over.
+        let nearest = |range: std::ops::Range<usize>,
+                       boxes: &dyn Fn(usize) -> Option<(Vec3, Vec3)>| {
+            range
+                .filter_map(|k| boxes(k).map(|(lo, hi)| (box_dist(p, lo, hi), k)))
+                .min_by(|a, b| a.0.total_cmp(&b.0))
+                .map(|(_, k)| k)
+        };
+        let group_box = |g: usize| self.groups.get(g).copied();
+        let block_box = |k: usize| self.blocks.get(k).map(|(_, lo, hi)| (*lo, *hi));
+        if let Some(g) = nearest(0..self.groups.len(), &group_box) {
+            if let Some(k) = nearest(blocks_of(g), &block_box) {
+                scan(k, &mut best);
+            }
+        }
+        for (g, (glo, ghi)) in self.groups.iter().enumerate() {
+            if far(*glo, *ghi, &best) {
+                continue;
+            }
+            for k in blocks_of(g) {
+                let Some((lo, hi)) = block_box(k) else {
+                    continue;
+                };
+                if !far(lo, hi, &best) {
+                    scan(k, &mut best);
+                }
+            }
+        }
+        best.map(|(_, t, _)| t)
+    }
+}
+
+/// How far `p` is from the box `lo`..`hi`.
+fn box_dist(p: Vec3, lo: Vec3, hi: Vec3) -> f64 {
+    let gap = |v: f64, a: f64, b: f64| (a - v).max(v - b).max(0.);
+    Vec3::new(
+        gap(p.x, lo.x, hi.x),
+        gap(p.y, lo.y, hi.y),
+        gap(p.z, lo.z, hi.z),
+    )
+    .len()
+}
+
+/// The parameter of the point of chord `i` (its ends `w`) nearest `p`, and how far it is.
+fn chord_param(i: usize, w: &[Vec3], p: Vec3) -> Option<(f64, f64)> {
+    let (a, b) = (*w.first()?, *w.get(1)?);
+    let e = b - a;
+    let f = if e.len2() > 0. {
+        ((p - a).dot(e) / e.len2()).clamp(0., 1.)
+    } else {
+        0.
+    };
+    Some((i as f64 + f, (a + e * f).dist(p)))
+}
+
+pub(crate) fn closest_param(c: &C3, p: Vec3) -> Option<f64> {
     match c {
         C3::Line { a, b } => {
             let e = *b - *a;
@@ -309,16 +472,7 @@ fn closest_param(c: &C3, p: Vec3) -> Option<f64> {
         C3::Polyline(pts) => pts
             .windows(2)
             .enumerate()
-            .filter_map(|(i, w)| {
-                let (a, b) = (*w.first()?, *w.get(1)?);
-                let e = b - a;
-                let f = if e.len2() > 0. {
-                    ((p - a).dot(e) / e.len2()).clamp(0., 1.)
-                } else {
-                    0.
-                };
-                Some((i as f64 + f, (a + e * f).dist(p)))
-            })
+            .filter_map(|(i, w)| chord_param(i, w, p))
             .min_by(|x, y| x.1.total_cmp(&y.1))
             .map(|(t, _)| t),
         C3::Spline { .. } => None,

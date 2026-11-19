@@ -191,6 +191,9 @@ pub struct Body {
     /// ([`Body::flat_spline_face`]): made on first use, shared by clones as `smlib` is. None
     /// when the record was refused, kept like `smlib`'s refusal so it is not tried again.
     pub(crate) ops: std::sync::Arc<std::sync::OnceLock<Option<(solidcore_ops::Body, solidcore_ops::Order)>>>,
+    /// The record prepared for its outline ([`Body::outline_prepared`]): made on first use,
+    /// shared by clones as `smlib` is.
+    pub(crate) outline: std::sync::Arc<OutlinePrep>,
     /// Bounding-box diagonal of the vertices, measured when the body was made; 0 means "not
     /// measured, walk the geometry". Every kernel tolerance is a fraction of it.
     pub(crate) size: f64,
@@ -647,7 +650,39 @@ impl SurfaceKind {
     }
 }
 
+/// A record prepared for hidden lines with [`OUTLINE_TRIM_SAMPLES`], or why it could not be.
+#[derive(Default)]
+pub(crate) struct OutlinePrep(std::sync::OnceLock<Option<solidcraft_geom::hlr::Prepared>>);
+
+impl std::fmt::Debug for OutlinePrep {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(if self.0.get().is_some() { "OutlinePrep(made)" } else { "OutlinePrep" })
+    }
+}
+
+/// Boundary samples per curve piece of the faces' trims when a body is prepared for its outline
+/// ([`Body::outline_prepared`]).
+pub const OUTLINE_TRIM_SAMPLES: usize = 1024;
+
 impl Body {
+    /// The record prepared for hidden lines ([`solidcraft_geom::hlr::prepare`] with
+    /// [`OUTLINE_TRIM_SAMPLES`] on one thread), as a whole-body projection traces its outline:
+    /// made the first time it is asked for and shared by clones, which share the record. None
+    /// for a mesh body and when the record cannot be prepared.
+    pub fn outline_prepared(&self) -> Option<&solidcraft_geom::hlr::Prepared> {
+        self.outline
+            .0
+            .get_or_init(|| {
+                if self.is_mesh() {
+                    return None;
+                }
+                let opts =
+                    solidcraft_geom::hlr::Options { trim_samples: OUTLINE_TRIM_SAMPLES, threads: 1, ..solidcraft_geom::hlr::Options::default() };
+                solidcraft_geom::hlr::prepare(self.record(), &opts).ok()
+            })
+            .as_ref()
+    }
+
     /// A body with `record` and nothing else set.
     fn bare(record: Brep, mesh: Option<std::sync::Arc<crate::meshbody::TriMesh>>) -> Body {
         let size = span_of(&record);
@@ -656,6 +691,7 @@ impl Body {
             placing: std::sync::Arc::default(),
             smlib: std::sync::Arc::new(std::sync::OnceLock::new()),
             ops: std::sync::Arc::new(std::sync::OnceLock::new()),
+            outline: std::sync::Arc::default(),
             size,
             volume: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
             bounds: std::sync::Arc::new(std::sync::Mutex::new(None)),
@@ -1235,6 +1271,7 @@ impl Body {
             placing: self.placing.clone(),
             smlib: std::sync::Arc::new(std::sync::OnceLock::new()),
             ops: std::sync::Arc::new(std::sync::OnceLock::new()),
+            outline: std::sync::Arc::default(),
             // A rigid motion keeps the size and the volume.
             size: self.size,
             volume: self.volume.clone(),

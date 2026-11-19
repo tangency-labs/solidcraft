@@ -1209,6 +1209,59 @@ fn edge_line(d: &Drawing, placement: usize, edge: usize) -> &Line {
 }
 
 #[test]
+fn nearest_points_on_a_traced_silhouette_are_found_as_by_every_chord() {
+    use super::curve::C3;
+    use super::silhouette::{closest_param, Closest};
+    // A traced curve that winds back past itself, with repeated points (ties between chords)
+    // and a zero-length chord.
+    let mut pts: Vec<Vec3> = (0..700)
+        .map(|i| {
+            let t = f64::from(i) * 0.03;
+            Vec3::new(10. * t.cos(), 7. * (1.3 * t).sin(), 0.4 * t)
+        })
+        .collect();
+    pts.insert(300, *pts.get(300).unwrap());
+    let back: Vec<Vec3> = pts
+        .iter()
+        .rev()
+        .take(50)
+        .map(|p| *p + Vec3::new(0., 0., 1e-9))
+        .collect();
+    pts.extend(back);
+    let c = C3::Polyline(pts);
+    let closest = Closest::new(&c);
+    let mut asked = 0;
+    for i in 0..60 {
+        for j in 0..60 {
+            let p = Vec3::new(
+                -14. + 0.47 * f64::from(i),
+                -9. + 0.31 * f64::from(j),
+                f64::from((i * 7 + j) % 23) * 0.4 - 1.,
+            );
+            assert_eq!(
+                closest.param(p).map(f64::to_bits),
+                closest_param(&c, p).map(f64::to_bits),
+                "{p:?}"
+            );
+            asked += 1;
+        }
+    }
+    assert_eq!(asked, 3600);
+    // A point that is not finite, and a curve with one, are looked at chord by chord.
+    let nan = Vec3::new(f64::NAN, 0., 0.);
+    assert_eq!(
+        closest.param(nan).map(f64::to_bits),
+        closest_param(&c, nan).map(f64::to_bits)
+    );
+    let broken = C3::Polyline(vec![Vec3::ZERO, nan, Vec3::new(1., 0., 0.)]);
+    let p = Vec3::new(0.5, 1., 0.);
+    assert_eq!(
+        Closest::new(&broken).param(p).map(f64::to_bits),
+        closest_param(&broken, p).map(f64::to_bits)
+    );
+}
+
+#[test]
 fn a_cylinder_seen_from_the_side_has_exact_silhouette_lines() {
     let def = prepare(&cylinder(10., 30.), &Options::default()).unwrap();
     // Slightly from above, along +X (rulings at +-90 degrees) and along +Y (rulings at 0 and
