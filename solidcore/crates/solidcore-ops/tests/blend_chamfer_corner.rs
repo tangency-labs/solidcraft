@@ -12,12 +12,16 @@
 
 mod common;
 
-use common::all_fixes;
+use common::{all_fixes, built, edge_at};
+use solidcore::boolean::api_brep::{boolean_difference, boolean_intersection};
 use solidcore::kernel::UpstreamFixes;
+use solidcore::math::Point3;
+use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore_ops::session;
 use solidcore_ops::sweep::{loft_to_point, Curve};
 use solidcore_ops::{
-    blend_ordered, make_box, Blend, BlendOptions, Body, ChamferCorner, Corners, Error, Order,
+    blend, blend_ordered, blend_with, chamfer_sides_facing, make_box, Blend, BlendOptions, Body,
+    ChamferCorner, ChamferSecond, CheckLevel, Corners, Error, FitKind, Order,
 };
 
 /// The record's edge indices (the order `blend_ordered` reads) of the edges from `a` to `b`, each
@@ -193,4 +197,296 @@ fn the_facet_without_its_fix_or_on_a_round_is_refused() {
         },
     );
     assert_eq!(r.err(), Some(Error::Argument));
+}
+
+/// The closed form of 3.1 for unequal distances: sizes 2, 3 and 4 on the box's edges along x,
+/// y and z at the corner (40, 30, 20), so the sorted sizes are `a = 2` (edge 40), `b = 3` (edge
+/// 30), `c = 4` (edge 20). The prisms give `(a^2 L_a + b^2 L_b + c^2 L_c) / 2 = 375`; the pair
+/// overlaps are `P(a, c) = 20/3` and `P(b, c) = 27/2`, and `(a + b - c)^3 / 12 = 1/12`. The
+/// mitre removes `375 - 20/3 - 27/2 - 1/12 = 354.75` and adds three faces (nine in all). The
+/// facet adds `(b + c - a)(a + c - b)(a + b - c) / 12 = 5 * 3 * 1 / 12 = 5/4`, for `356`, and a
+/// fourth face (ten in all).
+#[test]
+fn a_box_corner_s_unequal_chamfers_mitre_or_take_the_facet() {
+    all_fixes();
+    for (corner, removed, faces) in [
+        (ChamferCorner::Mitre, 354.75, 9),
+        (ChamferCorner::Facet, 356.0, 10),
+    ] {
+        let (b, order, e) = box_corner();
+        blend_ordered(
+            &b,
+            &order,
+            Blend::Chamfer,
+            &e,
+            &[2.0, 3.0, 4.0],
+            &[],
+            Corners::Filled,
+            BlendOptions {
+                chamfer_corner: corner,
+                ..BlendOptions::default()
+            },
+        )
+        .unwrap();
+        let v = b.volume(1e-10).unwrap();
+        let want = 24000.0 - removed;
+        assert!((v - want).abs() <= 1e-9 * want, "{corner:?}: {v} vs {want}");
+        assert_eq!(b.counts().unwrap()[0], faces, "{corner:?}");
+    }
+}
+
+/// The closed form of 3.1 for two-distance chamfers: distance 2 along the face facing +z and 3
+/// along the other face, on each of the box's three edges at the corner (40, 30, 20). The
+/// planes are `v/2 + w/3 = 1`, `u/2 + w/3 = 1` and `u/2 + v/3 = 1` (the corner's frame of the
+/// test above). A slice at depth `w` is strips of width `a = 2 (1 - w/3)` with area `70 a - a^2`,
+/// plus the triangle of the third chamfer (area 3) less its part under the strips, which shows
+/// outside the strips only for `a < 6/5`, by `(3 - 5 a / 2)^2 / 3`. Removed: `206 + 51 + 9/5 =
+/// 258.8`. The result has nine faces, twenty-one edges and fourteen vertices.
+#[test]
+fn a_box_corner_s_two_distance_chamfers_mitre() {
+    all_fixes();
+    let b = make_box([0.0; 3], [40.0, 30.0, 20.0]).unwrap();
+    let e = [[20.0, 30.0, 20.0], [40.0, 15.0, 20.0], [40.0, 30.0, 10.0]].map(|p| edge_at(&b, p));
+    chamfer_sides_facing(&b, &e, 2.0, ChamferSecond::Distance(3.0), [0.0, 0.0, 1.0]).unwrap();
+    let v = b.volume(1e-10).unwrap();
+    let want = 24000.0 - 258.8;
+    assert!((v - want).abs() <= 1e-9 * want, "{v} vs {want}");
+    assert_eq!(b.counts().unwrap(), [9, 21, 14]);
+}
+
+/// Sizes 1, 2 and 3 on the box's corner: the mitre point of the three planes would lie outside
+/// the corner, since 3 = 1 + 2 (the chamfer along z is as wide as the other two together). The
+/// refusal names the largest size that builds, 3 less the fit margin (1000 edge tolerances, so
+/// just under 3), and the edge's middle `(40, 30, 10)`. The body is unchanged by the refusal.
+#[test]
+fn a_chamfer_as_wide_as_the_other_two_together_is_refused_with_its_fit() {
+    all_fixes();
+    for corner in [ChamferCorner::Mitre, ChamferCorner::Facet] {
+        let (b, order, e) = box_corner();
+        let err = blend_ordered(
+            &b,
+            &order,
+            Blend::Chamfer,
+            &e,
+            &[1.0, 2.0, 3.0],
+            &[],
+            Corners::Filled,
+            BlendOptions {
+                chamfer_corner: corner,
+                ..BlendOptions::default()
+            },
+        )
+        .err();
+        match err {
+            Some(Error::TooLarge {
+                size,
+                kind: FitKind::Distance,
+                at: Some(at),
+                ..
+            }) => {
+                assert!(size < 3.0 && size > 2.98, "{corner:?}: fit {size}");
+                assert_eq!(at, [40.0, 30.0, 10.0], "{corner:?}");
+            }
+            other => panic!("{corner:?}: refused as {other:?}"),
+        }
+        let v = b.volume(1e-10).unwrap();
+        assert!((v - 24000.0).abs() <= 1e-9 * 24000.0, "{corner:?}: {v}");
+        assert_eq!(b.counts().unwrap(), [6, 12, 8], "{corner:?}");
+    }
+}
+
+/// The round of radius 2 on the box's edge along x, then the chamfers of distance 2 on the
+/// edges along y and z together. Expected: the union of the three removed regions,
+/// `130.10753002` (`docs/generic-blend.md` section 3.4), nine faces.
+#[test]
+#[ignore = "#17893, a later PR: two blends that end on an earlier blend's end cross and are not mitred; fails with 'the trim leaks'"]
+fn two_chamfers_made_after_a_round_at_their_corner_mitre_on_it() {
+    all_fixes();
+    let b = make_box([0.0; 3], [40.0, 30.0, 20.0]).unwrap();
+    blend(
+        &b,
+        Blend::Round,
+        &[edge_at(&b, [20.0, 30.0, 20.0])],
+        &[2.0],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap();
+    let e = [[40.0, 15.0, 20.0], [40.0, 30.0, 10.0]].map(|p| edge_at(&b, p));
+    blend(&b, Blend::Chamfer, &e, &[2.0], &[], Corners::Filled).unwrap();
+    let v = b.volume(1e-10).unwrap();
+    let want = 24000.0 - 130.107_530_022_738;
+    assert!((v - want).abs() <= 1e-8 * want, "{v} vs {want}");
+    assert_eq!(b.counts().unwrap()[0], 9);
+}
+
+/// The chamfer of distance 2 on the box's edge along x, then the chamfers of distance 2 on the
+/// edges along y and z together. Expected: the mitre of three equal chamfers, `174`, nine faces.
+#[test]
+#[ignore = "#17893, a later PR: as the round's case, fails with status 1001 (boolean::topology_intersector::p3::merge_curve_classes)"]
+fn two_chamfers_made_after_a_chamfer_at_their_corner_are_the_corner_s_mitre() {
+    all_fixes();
+    let b = make_box([0.0; 3], [40.0, 30.0, 20.0]).unwrap();
+    blend(
+        &b,
+        Blend::Chamfer,
+        &[edge_at(&b, [20.0, 30.0, 20.0])],
+        &[2.0],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap();
+    let e = [[40.0, 15.0, 20.0], [40.0, 30.0, 10.0]].map(|p| edge_at(&b, p));
+    blend(&b, Blend::Chamfer, &e, &[2.0], &[], Corners::Filled).unwrap();
+    let v = b.volume(1e-10).unwrap();
+    let want = 24000.0 - 174.0;
+    assert!((v - want).abs() <= 1e-9 * want, "{v} vs {want}");
+    assert_eq!(b.counts().unwrap()[0], 9);
+}
+
+/// The round of radius 2 on the box's edge along x, then the chamfer of distance 2 on the edge
+/// along y, then on the edge along z: expected the same solid as the round and the two chamfers
+/// together, nine faces.
+#[test]
+#[ignore = "#17893, a later PR: the third blend fails with 'Fillet Corner Error: Unable to Make Topology'"]
+fn chamfers_made_one_at_a_time_after_a_round_are_the_same_solid() {
+    all_fixes();
+    let b = make_box([0.0; 3], [40.0, 30.0, 20.0]).unwrap();
+    blend(
+        &b,
+        Blend::Round,
+        &[edge_at(&b, [20.0, 30.0, 20.0])],
+        &[2.0],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap();
+    blend(
+        &b,
+        Blend::Chamfer,
+        &[edge_at(&b, [40.0, 15.0, 20.0])],
+        &[2.0],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap();
+    blend(
+        &b,
+        Blend::Chamfer,
+        &[edge_at(&b, [40.0, 30.0, 10.0])],
+        &[2.0],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap();
+    let v = b.volume(1e-10).unwrap();
+    let want = 24000.0 - 130.107_530_022_738;
+    assert!((v - want).abs() <= 1e-8 * want, "{v} vs {want}");
+    assert_eq!(b.counts().unwrap()[0], 9);
+}
+
+/// Unequal chamfers at a vertex where a cylinder cuts the box: the two planes and the cylinder
+/// meet at the corner (40, y, 20), y = sqrt(45^2 - 40^2). Sizes 1, 2 and 1 on its three edges.
+/// Expected: ten faces (seven before) and a valid body.
+#[test]
+#[ignore = "#17893, the curved-face PR: the pinned bevel does not find the chamfers' common point; fails with 'Vertex Computation Failure'"]
+fn unequal_chamfers_at_a_vertex_beside_a_cylinder_build() {
+    all_fixes();
+    let b = built(|k| {
+        let block = create_box(k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0)?;
+        let cyl = create_cylinder(k, Point3::new(0.0, 0.0, -5.0), 45.0, 30.0)?;
+        boolean_intersection(k, block, cyl)
+    });
+    let y = (45.0_f64.powi(2) - 1600.0).sqrt();
+    let e = [
+        [40.0, y, 10.0],
+        [40.0, y / 2.0, 20.0],
+        [45.0 * 0.55_f64.cos(), 45.0 * 0.55_f64.sin(), 20.0],
+    ]
+    .map(|p| edge_at(&b, p));
+    blend(
+        &b,
+        Blend::Chamfer,
+        &e,
+        &[1.0, 2.0, 1.0],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap();
+    assert_eq!(b.counts().unwrap()[0], 10);
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+}
+
+/// The pyramid of base 20 about (0, 0, 10): three of its four apex edges chamfered 1.5. The
+/// expected result is a solid; the brief gives no volume to pin, so only that it is one.
+#[test]
+#[ignore = "#17893 names this as a separate issue (apex of three of four edges): fails with NotSolid, a body of volume 0"]
+fn three_chamfers_of_a_pyramid_s_apex_build_a_solid() {
+    all_fixes();
+    let square = [[10.0, 10.0], [-10.0, 10.0], [-10.0, -10.0], [10.0, -10.0]];
+    let section: Vec<Curve> = (0..4)
+        .map(|i| {
+            let (a, b) = (square[i], square[(i + 1) % 4]);
+            Curve::Line {
+                start: [a[0], a[1], 0.0],
+                end: [b[0], b[1], 0.0],
+            }
+        })
+        .collect();
+    let apex = [0.0, 0.0, 10.0];
+    let b = loft_to_point(&section, apex).unwrap();
+    let (order, e) = edges(&b, &square.map(|c| ([c[0], c[1], 0.0], apex)));
+    blend_ordered(
+        &b,
+        &order,
+        Blend::Chamfer,
+        &e[..3],
+        &[1.5],
+        &[],
+        Corners::Filled,
+        BlendOptions::default(),
+    )
+    .unwrap();
+    b.check_solid().unwrap();
+}
+
+/// The L block (the box less a notch at its top), its inner top vertex (20, 15, 20) where the
+/// upright is concave and the two top edges convex: three chamfers of both convexities, which
+/// the kernel refuses as bevels at that vertex. ops refuses them with the kernel's reason and
+/// the vertex's point, and the body is unchanged.
+#[test]
+fn an_l_block_s_inner_corner_of_three_chamfers_is_refused_naming_the_vertex() {
+    all_fixes();
+    for corner in [ChamferCorner::Mitre, ChamferCorner::Facet] {
+        let b = built(|k| {
+            let block = create_box(k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0)?;
+            let cut = create_box(k, Point3::new(20.0, 15.0, -1.0), 21.0, 16.0, 22.0)?;
+            boolean_difference(k, block, cut)
+        });
+        let e =
+            [[20.0, 15.0, 10.0], [30.0, 15.0, 20.0], [20.0, 22.0, 20.0]].map(|p| edge_at(&b, p));
+        let r = blend_with(
+            &b,
+            Blend::Chamfer,
+            &e,
+            &[2.0],
+            &[],
+            Corners::Filled,
+            BlendOptions {
+                chamfer_corner: corner,
+                ..BlendOptions::default()
+            },
+        );
+        match r {
+            Err(Error::CornerUnsupported {
+                why: Some(why),
+                at: Some(at),
+            }) if why.contains("chamfers of convex and of concave edges meet at the vertex")
+                && at == [20.0, 15.0, 20.0] => {}
+            other => panic!("{corner:?}: refused as {other:?}"),
+        }
+        let v = b.volume(1e-10).unwrap();
+        assert!((v - 18000.0).abs() <= 1e-9 * 18000.0, "{corner:?}: {v}");
+        assert_eq!(b.counts().unwrap()[0], 8, "{corner:?}");
+    }
 }

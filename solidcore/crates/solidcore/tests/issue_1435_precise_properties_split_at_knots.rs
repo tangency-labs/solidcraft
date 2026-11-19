@@ -128,9 +128,8 @@ mod box_w_slot {
     const NAME: &str = "Fillet/box_w_slot.smb";
 
     /// `Fillet/box_w_slot.smb` read with healing on, as `SmBrep::ReadFromFile`, its eight
-    /// sphere corners (radius 0.06) keeping the file's NURB and UV trims
-    /// (`found_torus_sphere_keep_tested_nurb`): their trims cross the NURB's interior v
-    /// knot lines.
+    /// sphere corners (radius 0.06) keeping the file's NURB and UV trims (the sphere test
+    /// keeps the NURB it tested): their trims cross the NURB's interior v knot lines.
     fn read(k: &mut Kernel) -> Brep {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../upstream/TestFiles/pt_TestFiles")
@@ -479,7 +478,6 @@ mod box_w_slot {
     #[test]
     fn box_w_slot_corner_moments_end_their_trim_pieces_on_knot_lines() {
         let mut k = Kernel::default();
-        k.fixes.found_torus_sphere_keep_tested_nurb = true;
         let b = read(&mut k);
         let spheres: Vec<FaceId> = bl::faces(&b, None)
             .unwrap()

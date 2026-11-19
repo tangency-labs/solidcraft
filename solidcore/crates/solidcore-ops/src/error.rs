@@ -76,8 +76,14 @@ pub enum Error {
     /// The kernel cannot build this exactly yet (a variable radius that is zero inside its
     /// edge): what it cannot.
     Unsupported(&'static str),
-    /// A blend's edges meet at a vertex of a kind no blend corner handles yet.
-    CornerUnsupported,
+    /// A blend's edges meet at a vertex of a kind no blend corner builds yet: the kernel's
+    /// reason and the vertex's point, where its session notes them.
+    CornerUnsupported {
+        /// The kernel's reason, without the "Fillet Error:" that says only whose it is.
+        why: Option<String>,
+        /// The vertex's point.
+        at: Option<[f64; 3]>,
+    },
     /// A swept turn ([`crate::Turn::Swept`]) the kernel does not build at the corner `at`:
     /// `room` where no radius of the rounds builds it (a sharp concave side edge between them),
     /// else where the blend corner does not build one yet (unequal or variable rounds, a corner
@@ -470,7 +476,7 @@ impl Error {
             Error::BlendNotCertified { .. } => "BlendNotCertified",
             Error::WallFolds { .. } => "WallFolds",
             Error::Unsupported(..) => "Unsupported",
-            Error::CornerUnsupported => "CornerUnsupported",
+            Error::CornerUnsupported { .. } => "CornerUnsupported",
             Error::TurnRefused { .. } => "TurnRefused",
             Error::CornerRefused { .. } => "CornerRefused",
             Error::RoundsCross { .. } => "RoundsCross",
@@ -927,8 +933,15 @@ impl std::fmt::Display for Error {
                 "the blend could not be certified within its tolerance in the work allowed ({halvings} spans halved, {stations} stations)"
             ),
             Error::WallFolds { largest } => write!(f, "the wall folds (largest {largest:?})"),
-            Error::CornerUnsupported => {
-                write!(f, "a blend corner of this kind is not supported yet")
+            Error::CornerUnsupported { why, at } => {
+                write!(f, "a blend corner of this kind is not supported yet")?;
+                if let Some([x, y, z]) = at {
+                    write!(f, " at ({x:.3}, {y:.3}, {z:.3})")?;
+                }
+                if let Some(why) = why {
+                    write!(f, ": {why}")?;
+                }
+                Ok(())
             }
             Error::TurnRefused { why, at, .. } => {
                 write!(f, "the swept corner is not built")?;
