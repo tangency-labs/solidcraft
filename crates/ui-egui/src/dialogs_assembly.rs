@@ -2158,6 +2158,8 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
     let plugin_view = cmds.iter().zip(&preview.replies).rev().find(|((c, _), _)| c == "plugin.run").and_then(|(_, reply)| reply.get("view")).cloned();
     let before = preview.before.clone();
     let shown_after: Vec<_> = preview.after.sketches.iter().filter(|sketch| preview.shown_sketches.contains(&sketch.feature)).cloned().collect();
+    // A Frame Member's tubes, for its dialog to pick (#15705).
+    let centrelines = crate::dialogs_frame::centrelines(&preview);
     // A moved component looks like itself (no new surface), with its old place as the ghost.
     // A plugin can both move and make bodies: the builder distinguishes them per body.
     let colors = if was_placed && !plugin { Colors { added: colors.body, new_body: colors.body, ..colors } } else { colors };
@@ -2174,6 +2176,7 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
         if plugin && built.bounds.is_empty() && !built.replaced.is_empty() {
             built.bounds = before.bodies.iter().fold(Aabb3::EMPTY, |b, body| b.union(&body.mesh().bounds()));
         }
+        built.centrelines = centrelines;
         built
     }))
 }

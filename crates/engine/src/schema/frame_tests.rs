@@ -4,7 +4,7 @@ use solidcraft_doc::frame::{self, MAX_MEMBERS};
 
 use super::{
     FrameMemberParams, ProfileInsertParams, ProfileInsertResult, ProfileListParams, ProfileListResult, ProfilePropertiesParams,
-    ProfilePropertiesResult,
+    ProfilePropertiesResult, RemoveMemberParams,
 };
 use crate::Session;
 use crate::schema::features::FeatureResult;
@@ -51,6 +51,8 @@ fn schemas_and_the_key_check_agree() {
             "mirror",
             "name",
             "names",
+            "next_pair",
+            "pairs",
             "participants",
             "profile",
             "profile_sketch",
@@ -61,6 +63,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<ProfileListParams>(), &["family"]);
     assert_keys(input_schema_for::<ProfilePropertiesParams>(), &["density", "profile"]);
     assert_keys(input_schema_for::<ProfileInsertParams>(), &["anchor", "angle", "at", "fixed", "profile", "sketch"]);
+    assert_keys(input_schema_for::<RemoveMemberParams>(), &["members"]);
 }
 
 #[test]
@@ -176,6 +179,16 @@ fn strict_keeps_todays_errors() {
         insert(json!({"sketch": "Nowhere"})),
         // No sketch is being edited, and none is named.
         insert(json!({})),
+        // frame.remove_member
+        ("frame.remove_member", json!({})),
+        ("frame.remove_member", json!({"members": null})),
+        ("frame.remove_member", json!({"members": []})),
+        ("frame.remove_member", json!({"members": "pair1"})),
+        ("frame.remove_member", json!({"members": [{"feature": 1}]})),
+        ("frame.remove_member", json!({"members": [{"feature": true, "line": "pair1"}]})),
+        ("frame.remove_member", json!({"members": [{"feature": 1, "line": "pair1", "extra": 1}]})),
+        ("frame.remove_member", json!({"members": (0..=MAX_MEMBERS).map(|_| json!({"feature": 1, "line": "l"})).collect::<Vec<_>>()})),
+        ("frame.remove_member", json!({"members": [{"feature": "Nowhere", "line": "pair1"}]})),
     ]);
 }
 
@@ -316,7 +329,7 @@ fn a_section_sketchs_keys_count_only_with_a_section_sketch() {
     assert_eq!(messages(json!({"sketch": 1, "profile_sketch": 2, "exact_regions": "yes"})), ["`exact_regions` must be true or false"]);
 }
 
-/// The schemas say what the handlers need: `sketch` and a profile are required, `profile` and
+/// The schemas say what the handlers need: `sketch` or `pairs` and a profile are required, `profile` and
 /// `profile_sketch` are alternatives, and values have the shape the handlers read.
 #[test]
 fn the_schemas_take_what_the_handlers_read() {
@@ -341,6 +354,14 @@ fn the_schemas_take_what_the_handlers_read() {
                 }),
                 true,
             ),
+            (json!({"profile": tube(), "pairs": [{"a": {"vertex": [0, 0, 0]}, "b": {"sketch": 3, "point": "p2"}}]}), true),
+            (
+                json!({"sketch": 3, "profile": tube(), "pairs": [{"id": "pair2", "a": {"type": "origin"}, "b": {"construct_point": "P"}}], "next_pair": 3}),
+                true,
+            ),
+            (json!({"profile": tube(), "pairs": []}), false),
+            (json!({"profile": tube(), "pairs": [{"a": {"vertex": [0, 0, 0]}, "b": {"vertex": [1, 0, 0]}, "c": 1}]}), false),
+            (json!({"profile": tube(), "pairs": [{"a": {"vertex": [0, 0, 0]}, "b": {"vertex": [1, 0, 0]}}], "next_pair": -1}), false),
             (json!({"profile": tube()}), false),
             (json!({"sketch": "Frame"}), false),
             (json!({"sketch": "Frame", "profile": tube(), "profile_sketch": "Section"}), false),

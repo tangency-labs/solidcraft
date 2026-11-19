@@ -2156,3 +2156,22 @@ fn a_pattern_of_whole_components_bodies_offers_and_places_the_components() {
     assert_eq!(h.app.session.doc.occurrences.len(), occurrences + 4);
     assert_eq!(h.app.session.model.state().bodies.len(), 2);
 }
+
+/// Frame Member remembers its values, but opens with Ghost Frame Members unticked and no tubes
+/// picked for Remove Tube (#15705).
+#[test]
+fn frame_member_dialog_recalls_values_but_not_ghosting_or_picked_tubes() {
+    let mut h = Harness::new();
+    h.app.preferences.remember_dialog_values = true;
+    let mut d = Dialog::for_command(&h.app, "frame.member").unwrap();
+    let Kind::Frame(m) = &mut d.kind else { panic!("not the Frame Member dialog") };
+    m.mirror = true;
+    m.ghost = true;
+    m.picked_tubes = vec!["pair1".into()];
+    remember(&mut h.app, &d);
+    let recalled = Dialog::for_command(&h.app, "frame.member").unwrap();
+    let Kind::Frame(m) = &recalled.kind else { panic!("not the Frame Member dialog") };
+    assert!(m.mirror, "values are remembered");
+    assert!(!m.ghost, "unticked whenever the dialog opens");
+    assert!(m.picked_tubes.is_empty());
+}
