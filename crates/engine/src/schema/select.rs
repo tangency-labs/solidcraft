@@ -1,5 +1,6 @@
-//! Contracts and result types for the selection commands in `cmd/edit.rs`: `select.set` and
-//! `select.clear`.
+//! Contracts and result types for the selection commands in `cmd/edit.rs`: `select.set`,
+//! `select.filter`, `select.clear`, `select.same_look` and
+//! `select.sharp_edges`.
 //!
 //! `select.set` reads `items` and `add` from the raw JSON. Each item reads as the handler reads
 //! it ([`read_item`] is the handler's own first step, so a call the handler takes is a call the
@@ -131,6 +132,64 @@ pub struct SelectSetResult {
     pub param_warnings: Vec<String>,
 }
 
+/// Select the objects that use the same appearance as a body, or as one face of it. `body` names a
+/// body in the design and defaults to the body of the current selection; `face` says which face to
+/// take the appearance from and defaults to the selected face when the call doesn't name another
+/// body. A call with neither and no selection is refused, as is a body or face that isn't there and
+/// more than 10,000 matches. What it selects is `select.set`'s own reply. Not an undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct SameLookParams {
+    // Unknown keys are refused by serde here, not only by the check: the handler read this type
+    // through a `deny_unknown_fields` struct before, and a key it doesn't take stays refused with
+    // the same message at every parameter-check level. The keys are `Option` without
+    // `serde(default)`, as that struct's were: a call whose parameters aren't an object at all,
+    // such as `[]`, keeps the same "missing field" refusal.
+    /// The name of a body in the design. Default: the body of the current selection.
+    pub body: Option<String>,
+    /// Which face of that body to take the appearance from. Default: the face of the current
+    /// selection, when the call doesn't name another body.
+    pub face: Option<usize>,
+}
+
+/// Select the sharp edges of solid bodies: every edge between two faces whose outward normals
+/// turn by more than `angle_deg` across it somewhere along it (0 for faces that continue each
+/// other, 90 at a box's corner). The angle is measured on the faces' exact surfaces, never on the
+/// display mesh, and tangent edges (within a degree) are never selected. `body` names one body;
+/// without it every shown solid body is searched. Mesh bodies are left out. What it selects is
+/// `select.set`'s own reply. Not an undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct SharpEdgesParams {
+    /// The name of a solid body in the design. Default: every shown solid body.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// The threshold in degrees, 1 to 179: an edge is selected where its faces' normals turn by
+    /// more than this. Default: 30.
+    #[serde(default)]
+    #[schemars(range(min = 1.0, max = 179.0))]
+    pub angle_deg: Option<f64>,
+    /// Add to the current selection instead of replacing it. Default: false.
+    #[serde(default)]
+    pub add: Option<bool>,
+}
+
+/// `select.all`: in an open sketch it selects every curve of that sketch, construction curves
+/// too, and every point of it that is on no curve; projected geometry and the sketch's origin are
+/// left out. With a drawing open and the model not focused it selects the views, dimensions,
+/// balloons and notes on one of its sheets. Otherwise it selects every shown body. It replaces the selection; refused when that
+/// would be more than 10,000 items. Not an undo step. Ctrl+A (Cmd+A).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SelectAllParams {
+    /// With a drawing open and the model not focused: the sheet, by its id or its one name.
+    /// Default: the drawing's first sheet. Refused otherwise.
+    #[serde(default)]
+    pub sheet: Option<String>,
+}
+
 /// `select.clear` takes no parameters: it deselects everything. Not an undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -141,6 +200,62 @@ pub struct SelectClearParams {}
 pub struct SelectClearResult {
     /// How many items are selected now: always 0.
     pub selected: usize,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// How fine the window lets a click pick: the three words `select.filter` takes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SelectMode {
+    /// A whole body.
+    Body,
+    /// One face of a body.
+    Face,
+    /// One placed component.
+    Component,
+}
+
+impl SelectMode {
+    /// The mode a call names, or none for a word that isn't one. The handler and the contract both
+    /// read through this, so they refuse the same words with the same message.
+    pub fn parse(word: &str) -> Option<Self> {
+        match word {
+            "body" => Some(Self::Body),
+            "face" => Some(Self::Face),
+            "component" => Some(Self::Component),
+            _ => None,
+        }
+    }
+}
+
+fn mode_required(schema: &mut Schema) {
+    super::motion::require(schema, "mode");
+}
+
+/// Reads `mode` as the handler reads it: one of the three words, refused with its message.
+fn select_mode<'de, D: Deserializer<'de>>(d: D) -> Result<Option<SelectMode>, D::Error> {
+    super::view_navigation::read_with(d, "mode must be body, face or component", |v| v.as_str().and_then(SelectMode::parse))
+}
+
+/// `select.filter`: the pick granularity the window uses. `mode` is optional in the type, so the
+/// check leaves its refusal to the handler, and required in the schema, because the handler refuses a
+/// call without it. The headless engine only echoes the mode; the window keeps it as its own state.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = mode_required)]
+pub struct SelectFilterParams {
+    /// How fine a click picks: a whole body, one of its faces, or one placed component.
+    #[serde(default, deserialize_with = "select_mode", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SelectMode")]
+    pub mode: Option<SelectMode>,
+}
+
+/// What `select.filter` returns: the mode it was given.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SelectFilterResult {
+    /// The mode the window picks at now.
+    pub mode: SelectMode,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

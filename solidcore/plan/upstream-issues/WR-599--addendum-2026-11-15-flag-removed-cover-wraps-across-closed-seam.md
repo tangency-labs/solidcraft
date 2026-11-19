@@ -1,0 +1,8 @@
+Updates: WR-599
+
+#### WR-599 (update, 2026-11-15). `cover_wraps_across_closed_seam` is removed
+
+The fix is the default and its flag is gone (tangency-labs/solidcraft#14246, batch surface1). `Surface::cover_coincident_surface` (`surface/surface/p3.rs`) always treats a boundary step across this surface's seam, in a direction the surface is closed in over its natural domain, as no failure, and the domain keeps its period in that direction. A crossing in an open direction, or at a pole, still refuses. The fork's `bAcrossWrappedSeams` argument (`false` keeps the cover within one period) is still honoured. `boolean_post_process` (`boolean/merge/p1.rs`) always completes the merged face's seam (`complete_merged_face_seam`). Upstream refuses every crossing, so the two coincident walls stay apart. Removed: the field `UpstreamFixes::cover_wraps_across_closed_seam`, SolidCraft's preset line, the goldens SolidCraft-case name mapping, its entries in `fixes.json` and `issue_2260`'s list, and the test settings in `issue_1945_fork_1207_step4.rs`.
+
+- **Tests:** `tests/fork_16bf1cb_full_turn_cover_across_seam.rs` (`wr599_full_turn_wall_takes_in_the_half_round`: the test peg's union is one wall, with the seam vertex on the bar and the closed-form volume), `tests/fork_b518bbe_cover_wraps_seam_on_trims_only.rs` and `tests/fork_3ae7bfa_drafted_cone_wall.rs` run on the default kernel. Removed are the tests that pinned the upstream path: `wr599_default_keeps_the_walls_apart` and `wr599_default_has_no_seam_vertex_on_the_bar`, the b518bbe without-option test, and `without_the_cover_the_cone_walls_stay_two_faces`.
+- **Results:** no goldens row moves (leave-one-out run of the batch: every unit passes against the batch's blessed set with this flag off).

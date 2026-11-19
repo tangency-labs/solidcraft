@@ -6,14 +6,14 @@
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError, channel};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
 use crate::Effect;
-use crate::auth::tokens_match;
+use crate::auth::{TOO_MANY_CONNECTIONS, tokens_match};
 use crate::cancel::{Cancel, Ticket};
 use crate::request::{ControlRequest, DOCUMENT_WATCH, DocumentWatch, Subscriber};
 
@@ -36,6 +36,10 @@ pub struct Summary {
 /// What an app's requests mean to its control server.
 pub trait Protocol: Send + Sync {
     fn summary(&self, method: &str, params: &Value) -> Summary;
+    /// Whether a request belongs to this live connection and should stop on disconnect.
+    fn stop_on_disconnect(&self, _method: &str) -> bool {
+        false
+    }
     /// What the app calls its document in messages ("design").
     fn document(&self) -> &'static str;
     /// The event a subscribed connection is sent when the document moves ("design.changed").
@@ -61,7 +65,7 @@ pub struct Hub {
     waits: Waits,
     watch: &'static DocumentWatch,
     running: Arc<Running>,
-    open: AtomicUsize,
+    open: Arc<AtomicUsize>,
 }
 
 impl Hub {
@@ -74,7 +78,7 @@ impl Hub {
             waits: Waits::default(),
             watch: &DOCUMENT_WATCH,
             running: Arc::new(Running::new()),
-            open: AtomicUsize::new(0),
+            open: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -111,42 +115,18 @@ impl Hub {
         if !addr.ip().is_loopback() {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("the control channel listens on loopback only, not {addr}")));
         }
-        let hub = Arc::clone(self);
+        let (hub, open, max_line) = (Arc::clone(self), Arc::clone(&self.open), self.max_line);
         let token = Arc::new(token);
         let shared = Arc::new(Accepted::default());
         let (closed_tx, closed) = channel::<()>();
         let stop = Stop { addr, shared: Arc::clone(&shared), closed };
         std::thread::spawn(move || {
-            // Dropped when this thread ends, with the listener: `Stop::stop` waits for that.
+            // Dropped when this thread ends, after `accept` has dropped the listener: `Stop::stop`
+            // waits for that.
             let _closed = closed_tx;
-            for stream in listener.incoming().flatten() {
-                if shared.stopped.load(Ordering::SeqCst) {
-                    break;
-                }
-                if hub.open.fetch_add(1, Ordering::Relaxed) >= MAX_CONNECTIONS {
-                    hub.open.fetch_sub(1, Ordering::Relaxed);
-                    let mut refused = stream;
-                    let _ = send(&mut refused, &json!({"ok": false, "error": "too many connections"}));
-                    continue;
-                }
-                let id = shared.next.fetch_add(1, Ordering::Relaxed);
-                if let Ok(copy) = stream.try_clone() {
-                    shared.lock().push((id, copy));
-                }
-                // Stopped while this one was being accepted: it is closed with the rest.
-                if shared.stopped.load(Ordering::SeqCst) {
-                    shared.close_all();
-                }
-                let (hub, tx, token, shared) = (Arc::clone(&hub), requests.clone(), Arc::clone(&token), Arc::clone(&shared));
-                std::thread::spawn(move || {
-                    hub.serve(stream, &token, tx, patient);
-                    hub.open.fetch_sub(1, Ordering::Relaxed);
-                    shared.lock().retain(|(i, _)| *i != id);
-                });
-            }
-            // A captured value drops after the body's locals, so without this `_closed` would tell
-            // `Stop::stop` the port is free while the listener still holds it (#14752).
-            drop(listener);
+            accept(listener, open, MAX_CONNECTIONS, max_line, REFUSAL_DRAIN, &shared, move |stream| {
+                hub.serve(stream, &token, requests.clone(), patient)
+            });
         });
         Ok(stop)
     }
@@ -196,8 +176,58 @@ impl Stop {
     }
 }
 
+/// Serve each connection of `listener` on a thread of its own, at most `max` at once (`open`
+/// counts them). One past that is refused here, on the accepting thread, as [`refuse`] does, so the
+/// client reads why instead of a reset (#10967): it has usually sent its request already. A thread
+/// for each refusal is what the limit is there to prevent; a refusal holds up the next connection
+/// for at most `drain` ([`REFUSAL_DRAIN`] when serving). A [`Stop`] ends it through `shared`: the
+/// connections it accepted are listed there so stopping closes them too, and the listener is
+/// dropped before it returns.
+fn accept(
+    listener: TcpListener,
+    open: Arc<AtomicUsize>,
+    max: usize,
+    max_line: usize,
+    drain: Duration,
+    shared: &Arc<Accepted>,
+    handle: impl Fn(TcpStream) + Clone + Send + 'static,
+) {
+    for stream in listener.incoming().flatten() {
+        if shared.stopped.load(Ordering::SeqCst) {
+            break;
+        }
+        if open.fetch_add(1, Ordering::Relaxed) >= max {
+            open.fetch_sub(1, Ordering::Relaxed);
+            if let Ok(socket) = stream.try_clone() {
+                let mut out = stream;
+                let mut reader = BufReader::new(ClientInput { socket, deadline: None });
+                refuse(&mut out, &mut reader, &json!({"ok": false, "error": TOO_MANY_CONNECTIONS}), max_line, drain);
+            }
+            continue;
+        }
+        let id = shared.next.fetch_add(1, Ordering::Relaxed);
+        if let Ok(copy) = stream.try_clone() {
+            shared.lock().push((id, copy));
+        }
+        // Stopped while this one was being accepted: it is closed with the rest.
+        if shared.stopped.load(Ordering::SeqCst) {
+            shared.close_all();
+        }
+        let (handle, open, shared) = (handle.clone(), Arc::clone(&open), Arc::clone(shared));
+        std::thread::spawn(move || {
+            handle(stream);
+            open.fetch_sub(1, Ordering::Relaxed);
+            shared.lock().retain(|(i, _)| *i != id);
+        });
+    }
+    // Before the caller's `Stop` hears the thread end, so the port is free by then (#14752).
+    drop(listener);
+}
+
 /// Connections served at once, so a flood must not be able to spawn threads without end.
 pub const MAX_CONNECTIONS: usize = 16;
+/// How long a refused connection's request is read before it is closed (see [`refuse`]).
+const REFUSAL_DRAIN: Duration = Duration::from_millis(500);
 /// Lines that are not JSON before the connection is closed, so garbage cannot loop forever.
 const MAX_BAD_LINES: usize = 8;
 /// How long a subscribed connection waits after a `design.changed` line before the next: what
@@ -292,14 +322,16 @@ fn unauthorized(docs: &str) -> Value {
 }
 
 /// Refuse the connection: the reply, then the end of what we send, then what the client had
-/// already sent read and dropped (a little, briefly). Closing a socket with unread input resets
-/// the connection, and a reset can reach the client before it has read the refusal.
-fn refuse(out: &mut TcpStream, reader: &mut BufReader<ClientInput>, docs: &str) {
+/// already sent read and dropped (for `drain` at most, and at most a request's length, `max_line`,
+/// which a connection refused before reading anything may have on its way). Closing a socket with
+/// unread input resets the connection, and a reset can reach the client before it has read the
+/// refusal.
+fn refuse(out: &mut TcpStream, reader: &mut BufReader<ClientInput>, reply: &Value, max_line: usize, drain: Duration) {
     use std::io::Read;
-    let _ = send(out, &unauthorized(docs));
+    let _ = send(out, reply);
     let _ = out.shutdown(std::net::Shutdown::Write);
-    reader.get_mut().deadline = Some(Instant::now() + Duration::from_millis(500));
-    let _ = std::io::copy(&mut reader.by_ref().take(64 * 1024), &mut std::io::sink());
+    reader.get_mut().deadline = Some(Instant::now() + drain);
+    let _ = std::io::copy(&mut reader.by_ref().take((max_line as u64).saturating_add(1)), &mut std::io::sink());
 }
 
 /// What a client sends. Until it shows the token, all of its reads share one deadline, so neither
@@ -315,6 +347,35 @@ impl ClientInput {
     fn admit(&mut self) -> std::io::Result<()> {
         self.deadline = None;
         self.socket.set_read_timeout(None)
+    }
+
+    /// Wait for a connection-owned request's reply. While it is still working, look for EOF
+    /// without consuming the next line. A client's unread pipelined input can mask EOF.
+    fn wait_for_reply(&self, reply: &Receiver<Value>, wait: Duration) -> std::io::Result<Option<Value>> {
+        const CHECK_INTERVAL: Duration = Duration::from_millis(100);
+        const PEEK_WAIT: Duration = Duration::from_millis(1);
+        let start = Instant::now();
+        loop {
+            let left = wait.saturating_sub(start.elapsed());
+            match reply.recv_timeout(left.min(CHECK_INTERVAL)) {
+                Ok(reply) => return Ok(Some(reply)),
+                Err(RecvTimeoutError::Disconnected) => return Ok(None),
+                Err(RecvTimeoutError::Timeout) => {}
+            }
+
+            self.socket.set_read_timeout(Some(PEEK_WAIT))?;
+            let probe = self.socket.peek(&mut [0u8; 1]);
+            self.socket.set_read_timeout(None)?;
+            match probe {
+                Ok(0) => return Err(std::io::ErrorKind::UnexpectedEof.into()),
+                Ok(_) => {}
+                Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut | std::io::ErrorKind::Interrupted) => {}
+                Err(e) => return Err(e),
+            }
+            if start.elapsed() >= wait {
+                return Ok(None);
+            }
+        }
     }
 }
 
@@ -674,6 +735,7 @@ impl Hub {
         let (waits, running, documents, tx) = (self.waits, &self.running, self.watch, requests);
         let connection = running.connections.fetch_add(1, Ordering::Relaxed) + 1;
         let Ok(read) = stream.try_clone() else { return };
+        let connection_owner = Arc::new(());
         let mut out = stream;
         let mut reader = BufReader::new(ClientInput { socket: read, deadline: Some(Instant::now() + waits.token) });
         let mut bad = 0usize;
@@ -708,7 +770,7 @@ impl Hub {
                         authenticated = true;
                     }
                     _ => {
-                        refuse(&mut out, &mut reader, self.protocol.docs());
+                        refuse(&mut out, &mut reader, &unauthorized(self.protocol.docs()), self.max_line, REFUSAL_DRAIN);
                         break;
                     }
                 }
@@ -773,19 +835,29 @@ impl Hub {
                         // Counted before the window answers, so it publishes every change from its
                         // answer on.
                         joining = (method == "control.subscribe").then(|| documents.join());
-                        let (req, rrx) = ControlRequest::new(method.clone(), params);
+                        let (mut req, rrx) = ControlRequest::new(method.clone(), params);
+                        req.connection = Some(Arc::downgrade(&connection_owner));
                         let job = Arc::clone(&req.ticket);
                         let ticket = running.add(connection, &id, &req, command, steps);
                         if tx.send(req).is_err() {
                             break;
                         }
                         (self.wake)();
-                        match rrx.recv_timeout(wait) {
-                            Ok(r) => r,
-                            Err(_) => {
+                        let reply = if self.protocol.stop_on_disconnect(&method) {
+                            reader.get_ref().wait_for_reply(&rrx, wait)
+                        } else {
+                            Ok(rrx.recv_timeout(wait).ok())
+                        };
+                        match reply {
+                            Ok(Some(r)) => r,
+                            Ok(None) => {
                                 let r = json!({"ok": false, "running": true, "error": timeout_message(&what, effect, self.protocol.document())});
                                 pending = Some(Pending { id: id.clone(), method, what, reply: watch(rrx, ticket), job });
                                 r
+                            }
+                            Err(_) => {
+                                job.stop();
+                                break;
                             }
                         }
                     };
@@ -820,6 +892,14 @@ impl Hub {
                 break;
             }
         }
+        // The window can discard work owned by this connection even with no requests left.
+        drop(connection_owner);
+        if let Some(pending) = pending.filter(|p| self.protocol.stop_on_disconnect(&p.method)) {
+            pending.job.stop();
+        }
+        if authenticated {
+            (self.wake)();
+        }
     }
 }
 
@@ -836,6 +916,9 @@ mod tests {
     impl Protocol for Plain {
         fn summary(&self, method: &str, _: &Value) -> Summary {
             Summary { what: format!("`{method}`"), effect: Effect::Changes, command: None, steps: None, long: false }
+        }
+        fn stop_on_disconnect(&self, method: &str) -> bool {
+            method == "test.connection_owned"
         }
         fn document(&self) -> &'static str {
             "design"
@@ -870,6 +953,47 @@ mod tests {
         assert!(e.to_string().contains("loopback only"), "{e}");
         let local = TcpListener::bind("127.0.0.1:0").unwrap();
         assert!(hub(Waits::default(), &DOCUMENT_WATCH).listen(local, "0123456789abcdef0123456789abcdef".into(), tx, false).is_ok());
+    }
+
+    /// #10967: a connection past the limit reads why it was refused, and then the end of the
+    /// connection, although its request was on its way. Closed with that request unread, it was
+    /// reset, and on Windows the reset reached the client before the refusal (os error 10054).
+    #[test]
+    fn a_connection_past_the_limit_reads_why() {
+        use std::io::Read;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            // A drain far longer than a busy runner stalls, so the client's delays cannot decide the
+            // outcome: the app reads until the client is done.
+            accept(
+                listener,
+                Arc::new(AtomicUsize::new(0)),
+                1,
+                MAX_LINE,
+                Duration::from_secs(30),
+                &Arc::new(Accepted::default()),
+                |mut s: TcpStream| {
+                    let _ = std::io::copy(&mut s, &mut std::io::sink());
+                },
+            )
+        });
+        // Accepted first, so it holds the one seat while the next one connects.
+        let _first = TcpStream::connect(addr).unwrap();
+        let mut late = TcpStream::connect(addr).unwrap();
+        late.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        // A long one, as a batch is: the app reads all of it before it closes. Sent in one write, as
+        // the MCP server sends: written a token at a time it takes longer than the app waits.
+        let steps = vec![json!({"command": "solid.box", "params": {"length": 1, "width": 1, "height": 1}}); 4000];
+        let request = json!({"id": 1, "method": "engine.batch", "params": {"commands": steps}, "token": "0123456789abcdef0123456789abcdef"});
+        late.write_all(format!("{request}\n").as_bytes()).unwrap();
+        // Read late, as a busy client reads: a reset (closing with the request unread, as before)
+        // would arrive first and, on Windows, drop the reply.
+        std::thread::sleep(Duration::from_millis(200));
+        let mut line = String::new();
+        BufReader::new(late.try_clone().unwrap()).read_line(&mut line).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&line).unwrap(), json!({"ok": false, "error": "too many connections"}));
+        assert_eq!(late.read(&mut [0u8; 1]).unwrap(), 0, "closed, not reset");
     }
 
     /// A connection that doesn't show the token in time is closed without a word, however it fills
@@ -1204,6 +1328,105 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
         }
         assert!(!WATCH.subscribed());
+    }
+
+    #[test]
+    fn requests_keep_their_connection_identity_until_it_closes() {
+        let token = "0123456789abcdef0123456789abcdef";
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = channel::<ControlRequest>();
+        let (wake, wakes) = channel();
+        let hub = Arc::new(Hub::new(
+            Plain,
+            move || {
+                let _ = wake.send(());
+            },
+            MAX_LINE,
+        ));
+        let stop = hub.listen_stoppable(listener, token.into(), tx, false).unwrap();
+        let timeout = Duration::from_secs(10);
+        let connect = || {
+            let stream = TcpStream::connect(addr).unwrap();
+            stream.set_read_timeout(Some(timeout)).unwrap();
+            BufReader::new(stream)
+        };
+        let ask = |client: &mut BufReader<TcpStream>, request: Value| {
+            writeln!(client.get_mut(), "{request}").unwrap();
+            wakes.recv_timeout(timeout).unwrap();
+            let req = rx.recv_timeout(timeout).unwrap();
+            let owner = req.connection.unwrap();
+            assert_eq!(owner.strong_count(), 1);
+            req.reply.send(json!({"ok": true})).unwrap();
+            let mut line = String::new();
+            client.read_line(&mut line).unwrap();
+            assert_eq!(serde_json::from_str::<Value>(&line).unwrap(), json!({"id": 1, "ok": true}));
+            owner
+        };
+        let first_request = || json!({"id": 1, "method": "ui.view", "token": token});
+        assert!(ControlRequest::new("ui.view", json!({})).0.connection.is_none());
+
+        let mut first = connect();
+        let first_owner = ask(&mut first, first_request());
+        let same_owner = ask(&mut first, json!({"id": 1, "method": "ui.view"}));
+        assert!(first_owner.ptr_eq(&same_owner));
+
+        let mut other = connect();
+        let other_owner = ask(&mut other, first_request());
+        assert!(!first_owner.ptr_eq(&other_owner));
+        drop(first);
+        wakes.recv_timeout(timeout).unwrap();
+        assert_eq!(first_owner.strong_count(), 0, "the idle client is gone before the window wakes");
+        assert_eq!(other_owner.strong_count(), 1);
+
+        let mut reconnected = connect();
+        let reconnected_owner = ask(&mut reconnected, first_request());
+        assert!(!first_owner.ptr_eq(&reconnected_owner));
+        assert!(!other_owner.ptr_eq(&reconnected_owner));
+
+        stop.stop();
+        wakes.recv_timeout(timeout).unwrap();
+        wakes.recv_timeout(timeout).unwrap();
+        assert_eq!(other_owner.strong_count(), 0);
+        assert_eq!(reconnected_owner.strong_count(), 0);
+    }
+
+    #[test]
+    fn disconnect_stops_a_connection_owned_request_before_its_reply() {
+        let token = "0123456789abcdef0123456789abcdef";
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = channel::<ControlRequest>();
+        let (wake, wakes) = channel();
+        let hub = Arc::new(Hub::new(
+            Plain,
+            move || {
+                let _ = wake.send(());
+            },
+            MAX_LINE,
+        ));
+        let stop = hub.listen_stoppable(listener, token.into(), tx, false).unwrap();
+        let mut client = TcpStream::connect(addr).unwrap();
+        send(&mut client, &json!({"id": 1, "method": "test.connection_owned", "token": token})).unwrap();
+
+        let timeout = Duration::from_secs(10);
+        wakes.recv_timeout(timeout).unwrap();
+        let request = rx.recv_timeout(timeout).unwrap();
+        let owner = request.connection.as_ref().unwrap();
+        assert_eq!(owner.strong_count(), 1);
+        let (stopped, stop_seen) = channel();
+        request.ticket.on_stop(move || {
+            let _ = stopped.send(());
+        });
+        request.ticket.computing(false);
+        // Keep the request held so the server cannot reach EOF by first receiving its reply.
+        drop(client);
+        wakes.recv_timeout(timeout).unwrap();
+        assert_eq!(owner.strong_count(), 0);
+        assert!(request.ticket.is_cancelled());
+        stop_seen.try_recv().unwrap();
+        assert!(request.reply.send(Value::Null).is_err());
+        stop.stop();
     }
 
     /// #8315: a closed connection leaves the watch at once. The seat of a subscribed connection

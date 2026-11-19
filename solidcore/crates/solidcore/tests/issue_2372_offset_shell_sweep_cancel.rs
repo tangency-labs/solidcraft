@@ -24,8 +24,7 @@ mod offset_fixture;
 use offset_fixture::{api_shell, offset_full, planar_faces_at, volume};
 use solidcore::curve::curve::p2::Curve;
 use solidcore::error::SolidError;
-use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-use solidcore::geom::object::ObjectRef;
+use solidcore::geom::attribute::AttributeStore;
 use solidcore::geom::vector2d::Point2;
 use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
@@ -38,7 +37,7 @@ use solidcore::topology::database_io::FileType;
 use solidcore::topology::face::p2 as face;
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::{vertex, FaceId};
-use solidcore::{Brep, CancelToken, EntityRef, Kernel, Result};
+use solidcore::{Brep, CancelToken, Kernel, Result};
 
 /// `SmBrep::ReadFromFile` of #1476's operand (the rig's working copy of shell/566).
 fn swept_bar(k: &mut Kernel) -> Brep {
@@ -46,10 +45,7 @@ fn swept_bar(k: &mut Kernel) -> Brep {
     let mut b = Brep::new_with_infinite_region().unwrap();
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
-    let key = |_: EntityRef| ObjectRef {
-        key: ObjectKey(0),
-        type_code: 0,
-    };
+    let key = solidcore::topology::loopuse::notify_ref;
     let mut env = TopologyEnv {
         all_attributes: &[],
         attributes: &mut attributes,
@@ -221,17 +217,11 @@ fn a_token_fired_before_the_call_cancels_offset_shell_and_sweep() {
     }
 }
 
-/// Every opt-in fix but `geometric_g2_continuity` (as `fork_ea59e9c_section_orders`'s
+/// Every opt-in fix (as `fork_ea59e9c_section_orders`'s
 /// SolidCraft kernel): with them the shell takes #1476's slow path (two 38 000-sample
 /// curve offsets, over 4 min in a debug build).
-fn every_fix_but_g2() -> solidcore::kernel::UpstreamFixes {
-    let mut f = solidcore::kernel::UpstreamFixes::default();
-    for &name in solidcore::kernel::UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
-    }
-    f
+fn all_fixes() -> solidcore::kernel::UpstreamFixes {
+    solidcore::kernel::UpstreamFixes::all()
 }
 
 /// The swept bar's shell, cancelled from another thread `delay` into the call:
@@ -265,7 +255,7 @@ fn cancel_shell_after(
     });
     let mut k = Kernel::default();
     if every_fix {
-        k.fixes = every_fix_but_g2();
+        k.fixes = all_fixes();
     }
     let mut part = swept_bar(&mut k);
     let start = planar_faces_at(&k, &part, 2, 0.0);

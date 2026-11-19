@@ -234,6 +234,8 @@ impl<O: ClassObject> CurveClassification<O> {
         self.doing_cross_hatch = other.doing_cross_hatch;
         self.doing_fillets = other.doing_fillets;
         self.ok_to_set_tolerance = other.ok_to_set_tolerance;
+        self.source_reach = other.source_reach;
+        self.seam_hint = other.seam_hint;
         self.tgt_loops_only = other.tgt_loops_only;
         self.tgt_loops.clear();
         self.tgt_loops.extend_from_slice(&other.tgt_loops);

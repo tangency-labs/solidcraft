@@ -15,14 +15,14 @@
 //! **The profile can be swept where it lies** (`SweepOptions::profile_at_path_start`,
 //! the SolidCraft fork's `bProfileAtPathStart`, tangency-labs/smlib 2dd71a0, WR-522,
 //! #1450; off by default): the path's start is the profile's reference point.
-//! **Statuses pass on** (opt-in `Kernel::fixes.sweep_statuses_pass_on`, WR-662;
-//! SolidCraft change, tangency-labs/smlib c8f6a31): the statuses upstream drops here
-//! are returned instead (`SER`). The path's unused normal is not computed.
+//! **Statuses pass on** (WR-662; SolidCraft change, tangency-labs/smlib c8f6a31): the
+//! statuses upstream drops here are returned (`SER`). The path's unused normal is not
+//! computed.
 
 use crate::curve::curve::p1::GlobalPointSolveOptions;
-use crate::curve::curve::p3::compute_crvs_normal;
+use crate::curve::curve::p3::compute_crvs_normal_written;
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{ignore_status, ignored, passed_on, Result, SolidError};
+use crate::error::{ignore_status, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -47,6 +47,56 @@ pub(super) fn bspline(curve: &Curve) -> Option<BSplineCurve> {
         CurveKind::Hyperbola(c) => Some(c.base().clone()),
         _ => None,
     }
+}
+
+/// The curve as `(SmBSplineCurve*)curve` reaches it: its B-spline with the NURB that
+/// `GetOrCreateGwNurbPointer` makes when missing. A line or conic builds its NURB lazily
+/// here, where upstream's `SmLine` and `SmEllipse` are `SmBSplineCurve`s that hold one, so
+/// [`bspline`]'s copy of the bare base would have none. The caller's owner and context are
+/// kept for the analytic generation; `MakeNurb`'s ordinary status is ignored, as
+/// `GetOrCreateGwNurbPointer` ignores it, and `Unported` propagates. `None` for a kind that
+/// is not a B-spline.
+///
+/// # Errors
+///
+/// [`SolidError::Unported`] from `MakeNurb`.
+pub(in crate::primitive::primitive_creation) fn bspline_with_nurb(
+    kernel: &Kernel,
+    curve: &Curve,
+) -> Result<Option<BSplineCurve>> {
+    let Some(base) = bspline(curve) else {
+        return Ok(None);
+    };
+    if base.gw_nurb().is_some() {
+        return Ok(Some(base));
+    }
+    Ok(Some(match curve.kind() {
+        CurveKind::Line(line) => {
+            let mut line = line.clone();
+            ignore_status(line.make_nurb_owned(curve.owner()))?;
+            line.base().clone()
+        }
+        CurveKind::Ellipse(ellipse) => {
+            let mut ellipse = ellipse.clone();
+            ignore_status(ellipse.make_nurb_owned_with_edge_tol(
+                kernel,
+                curve.owner(),
+                curve.owner_zone_tol_3d(),
+            ))?;
+            ellipse.base().clone()
+        }
+        CurveKind::Parabola(parabola) => {
+            let mut parabola = parabola.clone();
+            ignore_status(parabola.make_nurb(curve.owner()))?;
+            parabola.base().clone()
+        }
+        CurveKind::Hyperbola(hyperbola) => {
+            let mut hyperbola = hyperbola.clone();
+            ignore_status(hyperbola.make_nurb(curve.owner()))?;
+            hyperbola.base().clone()
+        }
+        _ => base,
+    }))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -89,11 +139,7 @@ pub(super) fn split_profiles(k: &Kernel, curves: &mut Vec<BSplineCurve>) -> Resu
     while let Some(curve) = curves.get(index) {
         // SubdivideAtDiscontinuity resets its output before any fallible call.
         // fork c8f6a31 (WR-662): SER(SubdivideAtDiscontinuity(..)).
-        let pieces = ignored(passed_on(
-            curve.subdivide_at_discontinuity(k, ContinuityType::C1, 0.5),
-            k.fixes.sweep_statuses_pass_on,
-        )?)?
-        .unwrap_or_default();
+        let pieces = curve.subdivide_at_discontinuity(k, ContinuityType::C1, 0.5)?;
         if pieces.len() > 1 {
             let count = pieces.len();
             curves.splice(index..=index, pieces.iter().cloned());
@@ -184,18 +230,26 @@ fn scaling(
 /// matching the upstream copy constructors.
 pub fn prepare_curve_sweep(
     k: &Kernel,
-    profiles: &[Option<Curve>],
+    profiles_in: &[Option<Curve>],
     path: &BSplineCurve,
     scale_reference: Option<&Curve>,
     scale_curve: Option<&BSplineCurve>,
     options: SweepOptions,
     test_continuity: bool,
 ) -> Result<PreparedCurveSweep> {
-    if profiles.is_empty() {
+    if profiles_in.is_empty() {
         return Err(SolidError::primitive_failed(OP, "no profiles to sweep"));
     }
     let mut path = path.clone();
-    let mut profiles: Vec<_> = profiles.iter().flatten().filter_map(bspline).collect();
+    // `(SmBSplineCurve *)` of each profile: the curve with its NURB, as upstream's `SmLine`
+    // and `SmEllipse` hold one. A copy of a line's bare base has none, so its split, move
+    // and evaluation refuse (`make_nurb`, 1001), and those statuses are passed on (WR-662).
+    let mut profiles = Vec::new();
+    for profile in profiles_in.iter().flatten() {
+        if let Some(curve) = bspline_with_nurb(k, profile)? {
+            profiles.push(curve);
+        }
+    }
     if test_continuity {
         split_profiles(k, &mut profiles)?;
     }
@@ -211,13 +265,11 @@ pub fn prepare_curve_sweep(
     let mut path_to_origin = Axis2Placement::IDENTITY;
     path_to_origin.translate(-start);
     // fork c8f6a31 (WR-662): the statuses below are passed on (`SER`).
-    let p = k.fixes.sweep_statuses_pass_on;
-    ignore_status(passed_on(path.transform(&path_to_origin, None), p)?)?;
-    let mut reference = Vec3::ZERO;
-    if options.profile_at_path_start {
+    path.transform(&path_to_origin, None)?;
+    let reference = if options.profile_at_path_start {
         // SolidCraft fork (tangency-labs/smlib 2dd71a0, WR-522, #1450): the profile moves
         // with the path's start, so it keeps its place relative to the path.
-        reference = start;
+        start
     } else if options.move_profile_center_to_path {
         let mut total = Extent3d::new();
         let mut bounds = Extent3d::new();
@@ -232,42 +284,30 @@ pub fn prepare_curve_sweep(
                 },
                 true,
             );
-            if let Some(next) = ignored(passed_on(bbox, p)?)? {
-                if let Some(next) = next.normal {
-                    bounds = next;
-                }
+            if let Some(next) = bbox?.normal {
+                bounds = next;
             }
             total.add_point(bounds.min());
             total.add_point(bounds.max());
         }
-        reference = total.mid();
+        total.mid()
     } else {
         let first = profiles
             .first()
             .ok_or_else(|| SolidError::invalid_input(OP, "no B-spline profiles"))?;
-        if let Some(point) = ignored(passed_on(
-            first.evaluate_point(first.natural_interval().min()),
-            p,
-        )?)? {
-            reference = point;
-        }
-    }
+        first.evaluate_point(first.natural_interval().min())?
+    };
     let mut profile_to_origin = Axis2Placement::IDENTITY;
     profile_to_origin.translate(-reference);
     for profile in &mut profiles {
-        ignore_status(passed_on(profile.transform(&profile_to_origin, None), p)?)?;
+        profile.transform(&profile_to_origin, None)?;
     }
     let values = path.evaluate(path.natural_interval().min(), 1, true, false)?;
     let tangent = values
         .get(1)
         .copied()
         .ok_or_else(|| SolidError::primitive_failed(OP, "the path has no start tangent"))?;
-    let mut from_x = tangent.unitize_or_z();
-    let mut from_y = Vec3::UNDEF;
-    if let Some([x, y, _]) = ignored(passed_on(tangent.make_unit_ortho_vectors(None), p)?)? {
-        from_x = x;
-        from_y = y;
-    }
+    let [mut from_x, mut from_y, _] = tangent.make_unit_ortho_vectors(None)?;
     // SolidCraft change, tangency-labs/smlib 1b6f5fa (tangency-labs/solidcore#434): the path
     // is turned so that this frame becomes the global one, and the sweep (`N_CreateSweepScale`,
     // `Z0` = global z) carries the profile on a frame that starts there and is computed from
@@ -287,9 +327,8 @@ pub fn prepare_curve_sweep(
                 let from_z = normal - normal.dot(from_x) * from_x;
                 if from_z.unitize().is_ok() {
                     from_y = from_z.cross(from_x);
-                } else if let Some([x, y, _]) =
-                    ignored(passed_on(tangent.make_unit_ortho_vectors(None), p)?)?
-                {
+                } else {
+                    let [x, y, _] = tangent.make_unit_ortho_vectors(None)?;
                     from_x = x;
                     from_y = y;
                 }
@@ -300,47 +339,36 @@ pub fn prepare_curve_sweep(
         &Axis2Placement::new(Vec3::ZERO, from_x, from_y),
         &Axis2Placement::IDENTITY,
     );
-    ignore_status(passed_on(path.transform(&rotation, None), p)?)?;
+    path.transform(&rotation, None)?;
     for profile in &mut profiles {
-        ignore_status(passed_on(profile.transform(&rotation, None), p)?)?;
+        profile.transform(&rotation, None)?;
     }
     let mut orientation = None;
     if options.orient_profile_perpendicular_to_path {
         let as_curves: Vec<_> = profiles.iter().cloned().map(Curve::from).collect();
-        let mut normal = match compute_crvs_normal(k, &as_curves) {
-            Ok(normal) => normal,
-            Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(e) if e.upstream_status() == Some(1001) => {
+        // Only `SM_ERR` takes the fallback; any other status keeps the normal
+        // `ComputeCrvsNormal` wrote ((0, 0, 1) for a zero normal), as upstream and the
+        // fork test `== SM_ERR` here
+        let (written, status) = compute_crvs_normal_written(k, &as_curves)?;
+        let mut normal = match status {
+            Some(e) if e.upstream_status() == Some(1001) => {
                 let first = profiles
                     .first()
                     .ok_or_else(|| SolidError::primitive_failed(OP, "no profiles to sweep"))?;
-                let values = ignored(passed_on(
-                    first.evaluate(first.natural_interval().evaluate(0.0), 1, true, false),
-                    p,
-                )?)?;
-                Vec3::X.cross(
-                    values
-                        .as_ref()
-                        .and_then(|v| v.get(1))
-                        .copied()
-                        .unwrap_or(Vec3::UNDEF),
-                )
+                let values =
+                    first.evaluate(first.natural_interval().evaluate(0.0), 1, true, false)?;
+                Vec3::X.cross(values.get(1).copied().unwrap_or(Vec3::UNDEF))
             }
-            Err(error) => return Err(error),
+            _ => written,
         };
-        // The fork no longer computes the path's normal (unused, and a straight path has
-        // none; c8f6a31).
-        if !p {
-            ignore_status(compute_crvs_normal(k, &[Curve::from(path.clone())]))?;
-        }
         if normal.dot(Vec3::X) < 0.0 {
             normal = -normal;
         }
-        let angle = ignored(passed_on(Vec3::X.angle_between(normal), p)?)?.unwrap_or(0.0);
+        let angle = Vec3::X.angle_between(normal)?;
         let mut placement = Axis2Placement::IDENTITY;
         placement.rotate_about_axis(-angle, Vec3::X.cross(normal));
         for profile in &mut profiles {
-            ignore_status(passed_on(profile.transform(&placement, None), p)?)?;
+            profile.transform(&placement, None)?;
         }
         orientation = Some(placement);
     }

@@ -16,7 +16,7 @@ use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
-use solidcraft_engine::doc::joints::{JointKind, JointOrigin, Snap};
+use solidcraft_engine::doc::joints::{Coupling, JointKind, JointOrigin, Size, Snap};
 use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::geom::{Aabb3, Mesh};
 
@@ -24,7 +24,7 @@ use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind, combo, field, form_row};
 use crate::preview::{Built, Colors};
 use crate::selection::{
-    AXES, BODIES, CONSTRUCTION_POINTS, EDGES, FACES, ORIGIN, PLANES, POINTS, SelInput, SelectionExt as _, VERTICES, items as sel_items,
+    AXES, BODIES, CONSTRUCTION_POINTS, EDGES, FACES, ORIGIN, PLANES, POINTS, PROFILES, SelInput, SelectionExt as _, VERTICES, items as sel_items,
     point_value as pt, polyline_mid,
 };
 use solidcraft_theme::Tokens;
@@ -127,6 +127,8 @@ pub enum Asm {
         ib: usize,
         ratio: String,
         offset: String,
+        /// Editing motion link this instead of adding a new one (#6825).
+        editing: Option<usize>,
     },
     Coupling(Box<crate::dialogs_coupling::CouplingForm>),
     Cam(Box<crate::dialogs_coupling::cam::CamForm>),
@@ -247,6 +249,13 @@ impl JointForm {
         TYPES.get(self.kind).and_then(|t| JointKind::parse(t)).unwrap_or(JointKind::Rigid)
     }
 
+    /// Assembly constraints keep their reference geometry until converted to a plain joint.
+    fn lateral_offsets(&self, doc: &solidcraft_engine::doc::Document) -> bool {
+        self.editing
+            .and_then(|id| doc.assembly.joints.iter().find(|j| j.id == id))
+            .is_none_or(|j| j.constraint.is_none() || j.kind != self.joint_kind())
+    }
+
     /// Limits rows sized to the joint's values.
     fn fit_limits(&mut self, doc: &solidcraft_engine::doc::Document) {
         let k = self.joint_kind();
@@ -312,7 +321,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "motion.trace" => (Asm::Trace(Box::new(trace::form(s, picked_joint(app, false)))), vec![SelInput::new("Point", SNAPS, false)]),
         "joint.motion_link" => {
             let b = usize::from(movable(s).len() > 1);
-            (Asm::MotionLink { a: 0, b, ia: 0, ib: 0, ratio: "1".into(), offset: "0".into() }, vec![])
+            (Asm::MotionLink { a: 0, b, ia: 0, ib: 0, ratio: "1".into(), offset: "0".into(), editing: None }, vec![])
         }
         "joint.gear" | "joint.rack_pinion" | "joint.screw" => crate::dialogs_coupling::start(app, id)?,
         "joint.cam" => crate::dialogs_coupling::cam::start(app),
@@ -418,7 +427,7 @@ pub(crate) fn side_pick(app: &SolveApp, o: &JointOrigin) -> Option<Sel> {
             let name = match plane.as_ref() {
                 solidcraft_engine::doc::PlaneRef::Origin { name } => Some(name.clone()),
                 solidcraft_engine::doc::PlaneRef::Datum { datum } => Some(datum.key()),
-                solidcraft_engine::doc::PlaneRef::Construction { feature } => {
+                solidcraft_engine::doc::PlaneRef::Construction { feature, .. } => {
                     let id = feature.0;
                     s.doc
                         .feature(id)
@@ -570,6 +579,9 @@ pub fn edit_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
     // the joint keeps following its parameters.
     f.angle = j.exprs.angle.clone().unwrap_or_else(|| num(j.angle.to_degrees(), "deg"));
     f.angle_shown = f.angle.clone();
+    for (text, value) in f.offset.iter_mut().zip(j.offset_xy) {
+        *text = crate::length_input::model(&app.session.doc, value);
+    }
     f.offset[2] = j.exprs.offset.clone().unwrap_or_else(|| crate::length_input::model(&app.session.doc, j.offset));
     f.fit_limits(&app.session.doc);
     for (i, l) in f.limits.iter_mut().enumerate() {
@@ -588,6 +600,109 @@ pub fn edit_joint_limits(app: &SolveApp, id: u64) -> Option<Dialog> {
         f.show_limits = true;
     }
     Some(d)
+}
+
+/// The Edit dialog for a motion link (by its index, as `joint.list` numbers them): the gear,
+/// rack, screw or cam dialog for a coupled link, the Motion Link one otherwise (#6825).
+pub fn edit_link(app: &SolveApp, index: usize) -> Option<Dialog> {
+    let s = &app.session;
+    let l = s.doc.assembly.links.get(index)?;
+    // A round-face pick is not kept in the form; leaving the size out of the box while editing
+    // makes the engine keep the old one, the picked face included.
+    let size_text = |sz: &Size| match sz {
+        Size::Length(v) => crate::length_input::model(&s.doc, *v),
+        Size::Expr(e) => e.clone(),
+        Size::Circle(_) => String::new(),
+    };
+    let is_angle = |id: u64, i: usize| s.doc.assembly.joints.iter().find(|j| j.id == id).is_some_and(|j| j.kind.is_angle(i));
+    if l.coupling.is_none() {
+        // A plain link as `joint.list` shows it: ratio per degree where a turns, offset in b's units.
+        let unit = |angle: bool| if angle { 1f64.to_radians() } else { 1.0 };
+        let scale = unit(is_angle(l.b, l.ib)) / unit(is_angle(l.a, l.ia));
+        let pos = |id: u64| s.doc.assembly.joints.iter().position(|j| j.id == id);
+        let (Some(a), Some(b)) = (pos(l.a), pos(l.b)) else { return None };
+        let offset = if is_angle(l.b, l.ib) { num(l.offset.to_degrees(), "deg") } else { crate::length_input::model(&s.doc, l.offset) };
+        let ratio = crate::dialogs_coupling::trim(l.ratio / scale);
+        return Some(Dialog::new(Kind::Assembly(Asm::MotionLink { a, b, ia: l.ia, ib: l.ib, ratio, offset, editing: Some(index) }), vec![]));
+    }
+    let (kind, inputs) = match l.coupling.as_ref()? {
+        Coupling::Gear { ra, rb, internal, reverse } => (
+            Asm::Coupling(Box::new(crate::dialogs_coupling::CouplingForm {
+                command: "joint.gear",
+                a: l.a,
+                b: l.b,
+                sizes: [size_text(ra), size_text(rb)],
+                internal: *internal,
+                reverse: *reverse,
+                picked: [None, None],
+                animate: false,
+                phase: 0.0,
+                editing: Some(index),
+            })),
+            vec![SelInput::new("Gear 1 (optional)", FACES | EDGES, false), SelInput::new("Gear 2 (optional)", FACES | EDGES, false)],
+        ),
+        Coupling::RackPinion { radius, reverse } => (
+            Asm::Coupling(Box::new(crate::dialogs_coupling::CouplingForm {
+                command: "joint.rack_pinion",
+                a: l.a,
+                b: l.b,
+                sizes: [size_text(radius), String::new()],
+                internal: false,
+                reverse: *reverse,
+                picked: [None, None],
+                animate: false,
+                phase: 0.0,
+                editing: Some(index),
+            })),
+            vec![SelInput::new("Pinion (optional)", FACES | EDGES, false)],
+        ),
+        Coupling::Screw { pitch, reverse } => (
+            Asm::Coupling(Box::new(crate::dialogs_coupling::CouplingForm {
+                command: "joint.screw",
+                a: l.a,
+                b: l.b,
+                sizes: [size_text(pitch), String::new()],
+                internal: false,
+                reverse: *reverse,
+                picked: [None, None],
+                animate: false,
+                phase: 0.0,
+                editing: Some(index),
+            })),
+            vec![],
+        ),
+        Coupling::Cam(c) => {
+            use solidcraft_engine::doc::joints::cam::Follower;
+            let follower = match &c.follower {
+                Follower::Roller { .. } => 1,
+                Follower::Flat => 2,
+                Follower::Knife => 0,
+            };
+            let radius = match &c.follower {
+                Follower::Roller { radius } => size_text(radius),
+                _ => crate::dialogs::length_default(s, "5"),
+            };
+            (
+                Asm::Cam(Box::new(crate::dialogs_coupling::cam::CamForm {
+                    a: l.a,
+                    b: l.b,
+                    editing: Some(index),
+                    follower,
+                    radius,
+                    flip: c.reverse,
+                    picked: None,
+                    animate: false,
+                    phase: 0.0,
+                })),
+                vec![
+                    SelInput::new("Profile", PROFILES | EDGES, true),
+                    SelInput::new("Roller (optional)", FACES | EDGES, false),
+                    SelInput::new("Tip (optional)", FACES | EDGES | VERTICES, false),
+                ],
+            )
+        }
+    };
+    Some(Dialog::new(Kind::Assembly(kind), inputs))
 }
 
 /// Edit Joint with its motion playing (the browser's Animate Joint).
@@ -1095,11 +1210,10 @@ fn snap_hovered(app: &SolveApp, sel: &Sel) -> Option<SnapPt> {
     face_point_source(app, true, sel).and_then(|(kind, from)| face_tied(&app.session, sel, kind, &from)).or_else(|| picked_snap(app, sel))
 }
 
-/// A snap moved across its own plane by (x, y) (the joint's offset), as an explicit frame.
-fn shifted(s: &SnapPt, x: f64, y: f64) -> Value {
+/// The frame used for lateral offsets, with the same axes as the original shifted snap.
+fn offset_frame(s: &SnapPt) -> Value {
     let ax = s.z.any_perp();
-    let ay = s.z.cross(ax);
-    let mut p = json!({"frame": {"origin": pt(s.at + ax * x + ay * y), "z": pt(s.z), "x": pt(ax)}});
+    let mut p = json!({"frame": {"origin": pt(s.at), "z": pt(s.z), "x": pt(ax)}});
     if let Some(path) = s.param.get("path") {
         p["path"] = path.clone();
     }
@@ -1165,9 +1279,10 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             f.fit_limits(&app.session.doc);
             if !f.as_built {
                 enter |= expr_row(ui, "Angle", &mut f.angle);
+                let lateral = f.lateral_offsets(&app.session.doc);
                 crate::ui_kit::section(ui, "joint_position", "Position", false, |ui| {
                     for (l, v) in ["Offset X", "Offset Y", "Offset Z"].iter().zip(f.offset.iter_mut()) {
-                        if f.editing.is_some() && *l != "Offset Z" {
+                        if !lateral && *l != "Offset Z" {
                             continue;
                         }
                         enter |= expr_row(ui, l, v);
@@ -1341,7 +1456,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 crate::ui_kit::checkbox(ui, "", &mut app.preferences.drive_joints_ghost);
             });
         }
-        Asm::MotionLink { a, b, ia, ib, ratio, offset } => {
+        Asm::MotionLink { a, b, ia, ib, ratio, offset, editing: _ } => {
             let s = &app.session;
             let joints = &s.doc.assembly.joints;
             if joints.len() < 2 {
@@ -1853,6 +1968,10 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                 f.limits.iter().take(jk.dofs().len()).map(|(on, lo, hi)| if *on { json!([lo, hi]) } else { Value::Null }).collect();
             if let Some(id) = f.editing {
                 let mut p = json!({"joint": id, "type": kind, "flip": f.flip, "offset": f.offset[2]});
+                if f.lateral_offsets(&app.session.doc) {
+                    p["offset_x"] = json!(eval(&f.offset[0], ValueKind::Length)?);
+                    p["offset_y"] = json!(eval(&f.offset[1], ValueKind::Length)?);
+                }
                 if !custom_name.is_empty() {
                     p["name"] = json!(custom_name);
                 }
@@ -1898,11 +2017,12 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                 return Err("the two origins are on the same component".into());
             }
             let (x, y) = (eval(&f.offset[0], ValueKind::Length)?, eval(&f.offset[1], ValueKind::Length)?);
-            let a_param = if x.abs() > 1e-12 || y.abs() > 1e-12 { shifted(&a, x, y) } else { a.param };
+            let a_param = if x.abs() > 1e-12 || y.abs() > 1e-12 { offset_frame(&a) } else { a.param };
             // Picked origins mate by default (the engine's default: B's z opposite A's, faces
             // meet face to face, a pin goes into its hole); the dialog's Flip is the command's
             // `flip`, which turns B the other way.
-            let mut p = json!({"type": kind, "a": a_param, "b": b.param, "flip": f.flip, "offset": f.offset[2], "angle": f.angle, "limits": limits});
+            let mut p = json!({"type": kind, "a": a_param, "b": b.param, "flip": f.flip,
+                "offset_x": x, "offset_y": y, "offset": f.offset[2], "angle": f.angle, "limits": limits});
             if !custom_name.is_empty() {
                 p["name"] = json!(custom_name);
             }
@@ -1937,13 +2057,17 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             }
             cmd("joint.drive", json!({"joint": j.id, "values": values}))
         }
-        Asm::MotionLink { a, b, ia, ib, ratio, offset } => {
+        Asm::MotionLink { a, b, ia, ib, ratio, offset, editing } => {
             let js = &s.doc.assembly.joints;
             let (Some(ja), Some(jb)) = (js.get(*a), js.get(*b)) else { return Err("needs two joints".into()) };
             // The offset as typed: the engine reads it in Joint 2's units (deg or mm), and the
             // ratio in Joint 2's units per Joint 1's.
             let ratio = eval(ratio, ValueKind::Unitless)?;
-            cmd("joint.motion_link", json!({"a": ja.id, "b": jb.id, "ia": ia, "ib": ib, "ratio": ratio, "offset": offset.trim()}))
+            let mut p = json!({"a": ja.id, "b": jb.id, "ia": ia, "ib": ib, "ratio": ratio, "offset": offset.trim()});
+            if let Some(index) = editing {
+                p["link"] = json!(index);
+            }
+            cmd("joint.motion_link", p)
         }
         Asm::Coupling(f) => return crate::dialogs_coupling::commands(app, f, inputs),
         Asm::Cam(f) => return crate::dialogs_coupling::cam::commands(app, f, inputs),
@@ -2011,7 +2135,11 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
     // Any feature, when components are placed away from their frames: the preview must show
     // the world the viewport shows.
     let moves = cmds.iter().all(|(c, _)| MOVES.contains(&c.as_str()));
-    if cmds.is_empty() || !(moves || solidcraft_engine::frames::placed(s)) {
+    let was_placed = moves || solidcraft_engine::frames::placed(s);
+    // A plugin's run can make a component and move it, in a design that has none placed yet:
+    // only its result says so, and that is where the component has to show.
+    let plugin = cmds.iter().any(|(c, _)| c == "plugin.run");
+    if cmds.is_empty() || !(was_placed || plugin) {
         return None;
     }
     let preview = match s.preview_visible_world(cmds) {
@@ -2027,22 +2155,30 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
         .map(|(_, r)| r.clone());
     // A constraint's reply: how free its part is with the constraint the preview shows.
     let placed = cmds.iter().zip(&preview.replies).find(|((c, _), _)| c.starts_with("assembly.constraint.")).map(|(_, r)| r.clone());
-    let (before, after) = (preview.before, preview.after);
     // A moved component looks like itself (no new surface), with its old place as the ghost.
-    let colors = Colors { added: colors.body, new_body: colors.body, ..colors };
+    // A plugin's run in a design with nothing placed keeps the colours of a new body.
+    let colors = if was_placed { Colors { added: colors.body, new_body: colors.body, ..colors } } else { colors };
+    Some(build_world_preview(preview, colors).map(|mut built| {
+        built.stopped = stopped;
+        built.placed = placed;
+        built
+    }))
+}
+
+/// Draw a placed model before and after an assembly edit using the common preview scene.
+pub(crate) fn build_world_preview(preview: solidcraft_engine::Preview, colors: Colors) -> Result<Built, String> {
+    let (before, after) = (preview.before, preview.after);
     let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crate::preview::build(&before, &after, colors)));
-    Some(match built {
+    match built {
         Ok(mut b) => {
             if !colors.ghost {
                 b.scene.ghost.clear();
             }
             b.bounds = after.bodies.iter().fold(Aabb3::EMPTY, |acc, x| acc.union(&x.mesh().bounds()));
-            b.stopped = stopped;
-            b.placed = placed;
             Ok(b)
         }
         Err(_) => Err("the preview failed".into()),
-    })
+    }
 }
 
 /// What a drive that stopped short of the asked values says: where the joint got to and why
@@ -2278,7 +2414,8 @@ fn grouped(app: &SolveApp, count: usize) -> bool {
 fn joints_open(app: &SolveApp, count: usize, run: JointRun) -> bool {
     !grouped(app, count)
         || match run {
-            JointRun::Loose => crate::browser::is_open(app, &run.key(), false),
+            // The History's own fold: a Browser search filters the Browser's rows, not these.
+            JointRun::Loose => crate::browser::fold_open(app, &run.key(), false),
             // Folder ids are numbered in each design: its choice stays with the design, as the
             // folder's own fold does.
             JointRun::Folder { .. } => crate::history_folds::is_open(app, &run.key(), false),
@@ -2287,7 +2424,7 @@ fn joints_open(app: &SolveApp, count: usize, run: JointRun) -> bool {
 
 fn toggle_joints(app: &mut SolveApp, run: JointRun) {
     match run {
-        JointRun::Loose => crate::browser::toggle(app, &run.key(), false),
+        JointRun::Loose => crate::browser::toggle_fold(app, &run.key(), false),
         JointRun::Folder { .. } => {
             let open = crate::history_folds::is_open(app, &run.key(), false);
             crate::history_folds::set_open(app, &run.key(), !open);
@@ -2509,11 +2646,16 @@ pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Op
 
 /// The Joints folder at the end of the Browser: a row per joint (double-click edits, the menu
 /// edits, drives, suppresses or deletes). Returns the joint whose row is under the pointer.
-pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) -> Option<u64> {
-    use crate::browser::{Row, draw_row, is_open, toggle};
-    let joints: Vec<(u64, String, JointKind, bool)> =
+pub fn browser_joints(app: &mut SolveApp, rows: &mut crate::ui_kit::browser::Rows<'_>, depth: usize) -> Option<u64> {
+    use crate::browser::{Row, Spec, is_open, node_row, toggle};
+    let mut joints: Vec<(u64, String, JointKind, bool)> =
         app.session.doc.assembly.joints.iter().map(|j| (j.id, j.name.clone(), j.kind, j.suppressed)).collect();
     app.tree.picked_joints.retain(|p| joints.iter().any(|j| j.0 == *p));
+    // A search keeps the joints that match (the folder's eye stays the folder's own).
+    let searching = app.tree.search.on();
+    if let Some(hits) = app.tree.search.hits() {
+        joints.retain(|j| hits.joint(j.0));
+    }
     if joints.is_empty() {
         return None;
     }
@@ -2524,10 +2666,18 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) -> Op
     let start_open = crate::browser::rows_start_open(app);
     let open = is_open(app, key, start_open);
     let folder_shown = !app.session.folder_hidden(key);
-    let r = draw_row(
-        ui,
-        ui.scope_id().with(key),
-        &Row { depth, fold: Some(open), eye: Some(folder_shown), icon: "folder", label: "Joints", dim: !folder_shown, ..Default::default() },
+    let r = node_row(
+        rows,
+        Spec { key, ..Default::default() },
+        Row {
+            depth,
+            fold: Some(open),
+            eye: Some(folder_shown),
+            icon: "folder",
+            label: "Joints",
+            dim: !folder_shown || searching,
+            ..Default::default()
+        },
     );
     if r.eye {
         crate::browser::toggle_folder(app, key);
@@ -2542,10 +2692,12 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) -> Op
     for (id, name, kind, suppressed) in joints {
         let visible = app.session.joint_visible(id);
         let selected = app.tree.picked_joints.contains(&id);
-        let r = draw_row(
-            ui,
-            ui.scope_id().with(("joint", id)),
-            &Row {
+        let joint_key = format!("joint:{id}");
+        let emphasis = app.tree.search.hits().and_then(|h| h.span(&name));
+        let r = node_row(
+            rows,
+            Spec { key: &joint_key, ..Default::default() },
+            Row {
                 depth: depth + 1,
                 eye: Some(visible),
                 icon: "joint",
@@ -2554,6 +2706,7 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) -> Op
                 rename: true,
                 selected,
                 dim: suppressed || !visible || !folder_shown,
+                emphasis,
                 ..Default::default()
             },
         );
@@ -2567,14 +2720,14 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) -> Op
             let _ = app.run("browser.visibility", json!({ "joints": [id], "visible": !visible }));
         // The slower second click on the only selected joint renames it and keeps it selected.
         } else if r.clicked && !(r.slow_rename && app.tree.picked_joints == [id]) {
-            pick_joint(app, id, ui.input(|i| i.modifiers.command || i.modifiers.ctrl));
+            pick_joint(app, id, rows.ui().input(|i| i.modifiers.command || i.modifiers.ctrl));
         }
         if r.slow_rename {
-            crate::browser::start_inline_rename(app, crate::context_menu::RenameWhat::Joint(id), &r);
+            crate::browser::start_inline_rename(app, crate::context_menu::RenameWhat::Joint(id), r.name_at());
         } else if r.double {
             dialog = edit_joint(app, id);
         }
-        crate::browser::inline_rename(app, ui, &r, &name);
+        crate::browser::inline_rename(app, rows.ui(), r.name_at(), &name);
         // The same menus as the rest of the browser.
         if let Some(at) = r.secondary {
             if !app.tree.picked_joints.contains(&id) {
@@ -2583,11 +2736,133 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) -> Op
             crate::context_menu::open_for(app, at, crate::context_menu::Target::Joint { id });
         }
     }
+    // Then a row per motion link (Motion Link, Gear, Rack and Pinion, Screw and Cam): the links
+    // were only ever in `joint.list`, so they could not be seen, changed or deleted here (#6825).
+    let links = link_rows(&app.session);
+    let n = app.session.doc.assembly.links.len();
+    app.tree.picked_links.retain(|i| *i < n);
+    for (index, label, icon, tip) in links {
+        let selected = app.tree.picked_links.contains(&index);
+        let link_key = format!("link:{index}");
+        let r = node_row(
+            rows,
+            Spec { key: &link_key, ..Default::default() },
+            Row { depth: depth + 1, icon, label: &label, name: true, selected, dim: !folder_shown, ..Default::default() },
+        );
+        if let (Some(resp), Some(tip)) = (&r.resp, &tip) {
+            resp.clone().backing_on_hover_text(tip.as_str());
+        }
+        if r.clicked {
+            pick_link(app, index, rows.ui().input(|i| i.modifiers.command || i.modifiers.ctrl));
+        }
+        if r.double {
+            dialog = edit_link(app, index);
+        }
+        if let Some(at) = r.secondary {
+            if !app.tree.picked_links.contains(&index) {
+                pick_link(app, index, false);
+            }
+            crate::context_menu::open_for(app, at, crate::context_menu::Target::Link { index });
+        }
+    }
     if let Some(d) = dialog {
         app.tool = None;
         app.dialog = Some(d);
     }
     hovered
+}
+
+/// A motion link's kind: the word its Browser row starts with and the icon it shows.
+fn coupling_kind(c: Option<&solidcraft_engine::doc::joints::Coupling>) -> (&'static str, &'static str) {
+    use solidcraft_engine::doc::joints::Coupling as C;
+    match c {
+        Some(C::Gear { .. }) => ("Gear", "gear"),
+        Some(C::RackPinion { .. }) => ("Rack and Pinion", "rack_pinion"),
+        Some(C::Screw { .. }) => ("Screw", "screw"),
+        Some(C::Cam(_)) => ("Cam", "cam"),
+        None => ("Motion Link", "motion_link"),
+    }
+}
+
+/// The Browser's motion-link rows: the link's index, its label, its icon and what hovering its
+/// row says.
+fn link_rows(s: &Session) -> Vec<(usize, String, &'static str, Option<String>)> {
+    let name = |id: u64| s.doc.assembly.joints.iter().find(|j| j.id == id).map(|j| j.name.clone()).unwrap_or_default();
+    s.doc
+        .assembly
+        .links
+        .iter()
+        .enumerate()
+        .map(|(i, l)| {
+            let (word, icon) = coupling_kind(l.coupling.as_ref());
+            let label = format!("{}: {} → {}", solidcraft_ui_text::tr_label(word), name(l.a), name(l.b));
+            (i, label, icon, link_tip(s, l))
+        })
+        .collect()
+}
+
+/// A link row's tooltip: a cam's travel over a turn of the cam, which its row else has no room
+/// for (`joint.list` says the same). The other links say all they have to in their label.
+fn link_tip(s: &Session, l: &solidcraft_engine::doc::joints::MotionLink) -> Option<String> {
+    let joint = |id: u64| s.doc.assembly.joints.iter().find(|j| j.id == id);
+    if !matches!(l.coupling, Some(solidcraft_engine::doc::joints::Coupling::Cam(_))) {
+        return None;
+    }
+    let angle = joint(l.b).is_some_and(|j| j.kind.is_angle(l.ib));
+    let unit = if angle { "deg" } else { "mm" };
+    let show = |v: f64| if angle { v.to_degrees() } else { v };
+    let (mut min, mut max) = (f64::NAN, f64::NAN);
+    for v in &l.lift {
+        if v.is_finite() {
+            if !min.is_finite() || *v < min {
+                min = *v;
+            }
+            if !max.is_finite() || *v > max {
+                max = *v;
+            }
+        }
+    }
+    if !min.is_finite() || !max.is_finite() {
+        return Some(solidcraft_ui_text::tr("browser.link.no_profile").to_string());
+    }
+    let (min, max) = (show(min), show(max));
+    Some(format!(
+        "{} {}…{} {unit} ({} {})",
+        solidcraft_ui_text::tr("browser.link.lift"),
+        crate::dialogs_coupling::trim(min),
+        crate::dialogs_coupling::trim(max),
+        solidcraft_ui_text::tr("browser.link.rise"),
+        crate::dialogs_coupling::trim(max - min)
+    ))
+}
+
+/// A click on a motion link's row: it becomes the pick (or, with Ctrl, toggles in or out of it),
+/// and the two joints it ties draw highlighted with it (#6825).
+pub fn pick_link(app: &mut SolveApp, index: usize, add: bool) {
+    app.tree.picked_timeline_groups.clear();
+    app.tree.timeline_anchor = None;
+    if !add {
+        app.tree.picked_joints.clear();
+        app.tree.picked_canvases.clear();
+        app.tree.picked_components.clear();
+        app.tree.picked_links.clear();
+        let _ = app.run("select.clear", json!({}));
+    }
+    if app.tree.picked_links.contains(&index) {
+        app.tree.picked_links.retain(|l| *l != index);
+        app.tree.picked_joints.clear();
+    } else {
+        app.tree.picked_links.push(index);
+        app.tree.picked_links.sort_unstable();
+        if let Some(l) = app.session.doc.assembly.links.get(index) {
+            let (a, b) = (l.a, l.b);
+            for id in [a, b] {
+                if !app.tree.picked_joints.contains(&id) {
+                    app.tree.picked_joints.push(id);
+                }
+            }
+        }
+    }
 }
 
 /// A click on a joint's browser row: it becomes the pick (or, with Ctrl, toggles in or out of
@@ -2618,15 +2893,23 @@ pub fn pick_joint(app: &mut SolveApp, id: u64, add: bool) {
 /// The folder starts closed and has no eye of its own (the root folder's eye hides every joint
 /// glyph); it isn't drawn for a placement no joint attaches. `key` is the placement's row key.
 /// Returns the joint whose row is under the pointer.
-pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key: &str, depth: usize) -> Option<u64> {
-    use crate::browser::{Row, draw_row, is_open, toggle};
+pub fn component_joints(app: &mut SolveApp, rows: &mut crate::ui_kit::browser::Rows<'_>, path: &[u64], key: &str, depth: usize) -> Option<u64> {
+    use crate::browser::{Row, Spec, is_open, node_row, toggle};
+    // A search lists the joints it finds in the root folder.
+    if app.tree.search.on() {
+        return None;
+    }
     let joints = placement_joints(&app.session.doc, path);
     if joints.is_empty() {
         return None;
     }
     let key = format!("{key}/joints");
     let open = is_open(app, &key, false);
-    let r = draw_row(ui, ui.scope_id().with(&key), &Row { depth, fold: Some(open), icon: "folder", label: "Joints", ..Default::default() });
+    let r = node_row(
+        rows,
+        Spec { key: &key, ..Default::default() },
+        Row { depth, fold: Some(open), icon: "folder", label: "Joints", ..Default::default() },
+    );
     if r.fold || r.clicked {
         toggle(app, &key, false);
     }
@@ -2641,10 +2924,11 @@ pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key
         let id = j.id;
         let visible = app.session.joint_visible(id);
         let selected = app.tree.picked_joints.contains(&id);
-        let r = draw_row(
-            ui,
-            ui.scope_id().with((&key, "joint", id)),
-            &Row {
+        let joint_key = format!("{key}/joint:{id}");
+        let r = node_row(
+            rows,
+            Spec { key: &joint_key, ..Default::default() },
+            Row {
                 depth: depth + 1,
                 eye: Some(visible),
                 icon: "joint",
@@ -2665,7 +2949,7 @@ pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key
         if r.eye {
             let _ = app.run("browser.visibility", json!({ "joints": [id], "visible": !visible }));
         } else if r.clicked {
-            pick_joint(app, id, ui.input(|i| i.modifiers.command || i.modifiers.ctrl));
+            pick_joint(app, id, rows.ui().input(|i| i.modifiers.command || i.modifiers.ctrl));
         }
         if r.double {
             dialog = edit_joint(app, id);
@@ -2832,7 +3116,7 @@ pub fn joint_frames_world(s: &Session) -> Vec<(u64, solidcraft_engine::doc::Mat)
         std::borrow::Cow::Owned(d)
     };
     let st = s.model.state();
-    let v: Vec<_> = doc.assembly.joints.iter().filter_map(|j| doc.origin_world(&st, &j.a).ok().map(|m| (j.id, m))).collect();
+    let v: Vec<_> = doc.assembly.joints.iter().filter_map(|j| doc.origin_world(&st, &j.a).ok().map(|m| (j.id, j.offset_frame_a(m)))).collect();
     JOINT_FRAMES.with(|o| *o.borrow_mut() = Some((key, v.clone())));
     v
 }

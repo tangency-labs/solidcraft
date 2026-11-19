@@ -6,10 +6,8 @@ use solidcraft_sketch::{Shape, intersections};
 
 use crate::{Result, params::bad};
 
-/// Degrees the exact extend intersection handles: a round support squares the piece's degree in
-/// homogeneous form, and both the root finder and its `evaluate` buffer hold at most 15
-/// coefficients, so 2·7 + 1 fits.
-const MAX_EXACT_EXTEND_DEGREE: u8 = 7;
+/// A round support squares the piece in homogeneous form.
+const MAX_COEFFICIENTS: usize = 2 * solidcore_record::MAX_BEZIER_DEGREE + 1;
 
 fn choose(n: usize, k: usize) -> f64 {
     (0..k.min(n - k)).fold(1.0, |value, i| value * (n - i) as f64 / (i + 1) as f64)
@@ -21,7 +19,7 @@ fn product(a: &[f64], b: &[f64]) -> Vec<f64> {
         .collect()
 }
 fn evaluate(c: &[f64], t: f64) -> f64 {
-    let mut values = [0.0; 15];
+    let mut values = [0.0; MAX_COEFFICIENTS];
     for (slot, value) in values.iter_mut().zip(c) {
         *slot = *value;
     }
@@ -35,9 +33,9 @@ fn evaluate(c: &[f64], t: f64) -> f64 {
 
 /// Derivative roots partition a polynomial into monotone intervals. Testing its critical
 /// points retains repeated/tangent roots that a sign-change-only search would miss.
-fn roots(c: &[f64], budget: &mut usize) -> Result<Vec<f64>> {
-    if c.is_empty() || c.len() > 15 || c.iter().any(|v| !v.is_finite()) {
-        return Err(bad("sketch.extend", "invalid intersection polynomial"));
+fn roots(c: &[f64], budget: &mut usize, cmd: &str) -> Result<Vec<f64>> {
+    if c.is_empty() || c.len() > MAX_COEFFICIENTS || c.iter().any(|v| !v.is_finite()) {
+        return Err(bad(cmd, "invalid intersection polynomial"));
     }
     let scale = c.iter().map(|v| v.abs()).fold(0.0_f64, f64::max);
     if scale < 1e-28 {
@@ -48,7 +46,7 @@ fn roots(c: &[f64], budget: &mut usize) -> Result<Vec<f64>> {
         return Ok(Vec::new());
     }
     let d: Vec<f64> = c.windows(2).map(|w| (w[1] - w[0]) * (c.len() - 1) as f64).collect();
-    let mut knots = roots(&d, budget)?;
+    let mut knots = roots(&d, budget, cmd)?;
     knots.extend([0.0, 1.0]);
     knots.sort_by(f64::total_cmp);
     knots.dedup_by(|a, b| (*a - *b).abs() < 1e-13);
@@ -61,7 +59,7 @@ fn roots(c: &[f64], budget: &mut usize) -> Result<Vec<f64>> {
         }
         for _ in 0..64 {
             if *budget == 0 {
-                return Err(bad("sketch.extend", "intersection work limit exceeded"));
+                return Err(bad(cmd, "intersection work limit exceeded"));
             }
             *budget -= 1;
             let mid = (lo + hi) * 0.5;
@@ -84,6 +82,10 @@ fn roots(c: &[f64], budget: &mut usize) -> Result<Vec<f64>> {
 }
 
 pub(super) fn hits(support: &Shape, seg: &Seg2, budget: &mut usize) -> Result<Vec<Vec2>> {
+    hits_for("sketch.extend", support, seg, budget)
+}
+
+pub(in crate::cmd) fn hits_for(cmd: &str, support: &Shape, seg: &Seg2, budget: &mut usize) -> Result<Vec<Vec2>> {
     if let Seg2::Line { a, b } = *seg {
         let other = Shape::Line { a, b };
         if let Shape::Line { a: pa, b: pb } = *support
@@ -122,11 +124,13 @@ pub(super) fn hits(support: &Shape, seg: &Seg2, budget: &mut usize) -> Result<Ve
     let (points, weights): (Vec<Vec2>, Vec<f64>) = match *seg {
         Seg2::Cubic { p0, p1, p2, p3 } => (vec![p0, p1, p2, p3], vec![1.0; 4]),
         Seg2::Conic { a, apex, b, w } if w.is_finite() && w > 0.0 => (vec![a, apex, b], vec![1.0, w, 1.0]),
-        Seg2::Bezier { n, p } if (1..=MAX_EXACT_EXTEND_DEGREE).contains(&n) => (p[..=usize::from(n)].to_vec(), vec![1.0; usize::from(n) + 1]),
-        _ => return Err(bad("sketch.extend", "invalid exact curve piece")),
+        Seg2::Bezier { n, p } if (1..=solidcore_record::MAX_BEZIER_DEGREE).contains(&usize::from(n)) => {
+            (p[..=usize::from(n)].to_vec(), vec![1.0; usize::from(n) + 1])
+        }
+        _ => return Err(bad(cmd, "invalid exact curve piece")),
     };
     if points.iter().any(|p| !p.is_finite()) {
-        return Err(bad("sketch.extend", "nonfinite intersection geometry"));
+        return Err(bad(cmd, "nonfinite intersection geometry"));
     }
     let weight_scale = weights.iter().copied().fold(1.0_f64, f64::max);
     let weights: Vec<f64> = weights.iter().map(|w| w / weight_scale).collect();
@@ -139,7 +143,7 @@ pub(super) fn hits(support: &Shape, seg: &Seg2, budget: &mut usize) -> Result<Ve
     let y: Vec<f64> = points.iter().zip(&weights).map(|(p, w)| (p.y - origin.y) * w / scale).collect();
     let c = match *support {
         Shape::Line { a, b } => {
-            let d = (b - a).normalized().ok_or_else(|| bad("sketch.extend", "zero-length support"))?;
+            let d = (b - a).normalized().ok_or_else(|| bad(cmd, "zero-length support"))?;
             x.iter().zip(&y).map(|(x, y)| d.x * y - d.y * x).collect::<Vec<_>>()
         }
         Shape::Round { r, .. } => {
@@ -153,10 +157,10 @@ pub(super) fn hits(support: &Shape, seg: &Seg2, budget: &mut usize) -> Result<Ve
         return Ok(Vec::new());
     }
     let mut out = Vec::new();
-    for t in roots(&c, budget)? {
+    for t in roots(&c, budget, cmd)? {
         let p = seg.point_at(t);
         if !p.is_finite() || support.project(p).dist(p) > 1e-7 {
-            return Err(bad("sketch.extend", "the intersection could not be resolved accurately"));
+            return Err(bad(cmd, "the intersection could not be resolved accurately"));
         }
         if !out.iter().any(|q: &Vec2| q.dist(p) < 1e-7) {
             out.push(p);
