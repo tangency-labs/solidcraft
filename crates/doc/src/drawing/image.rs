@@ -10,8 +10,12 @@
 //!   decoded as it opens, and a plain JSON file can't hold them.
 //! - **The caps** are checked from the file's bytes and header, before anything decodes its pixels:
 //!   a small file can claim to hold more pixels than memory has. The header can lie in the record
-//!   too, so reading a drawing compares the two ([`Drawing::check_image_files`]); an edit, which only
+//!   too, so reading a drawing compares the two ([`Drawing::read_image_files`]); an edit, which only
 //!   ever adds a checked file, doesn't decode them again.
+//! - **The size** saved is the file's, as it stores its pixels. A photo can store them turned and say
+//!   so in its EXIF orientation, which every viewer, and the drawing's decoder, applies: the size it
+//!   shows at is [`ImageFile::shown_pixels`] (#19106). The orientation is read with the file, never
+//!   saved, so older drawings read as they were saved.
 //!
 //! The rules, beside the record's: a file is used; a placement names a file the drawing has, and is
 //! on one of its sheets, in a rectangle on paper with a size; at most [`MAX_IMAGES`] files of at most
@@ -25,11 +29,12 @@ use serde::{Deserialize, Serialize};
 use solidcraft_geom::drawing_view::is_paper_coordinate;
 use solidcraft_geom::paper::{MAX_IMAGE_PIXELS, MAX_SIDE_MM};
 use solidcraft_geom::title_block::{Cell, CellKind};
+use solidcraft_render::image_orientation::{Header, header, shown};
 
 use super::by_id::Record;
 use super::{Drawing, require};
 use crate::blob::Blob;
-use crate::canvas::{base64_decode, image_info};
+use crate::canvas::base64_decode;
 use crate::{DocError, Result, ids};
 
 /// The most image files a drawing may have.
@@ -49,10 +54,13 @@ pub struct ImageFile {
     pub id: u64,
     /// `png` or `jpeg`, as the file's header says.
     pub format: String,
-    /// Its width and height in pixels, as the file's header says.
+    /// Its width and height in pixels, as the file's header says: as stored, before its orientation.
     pub pixels: [u32; 2],
     /// The file's bytes.
     pub data: Blob,
+    /// The file's EXIF orientation, 1 to 8, as its header says: read with the file, never saved.
+    /// 0 until then, which shows the pixels as stored.
+    pub(crate) orientation: u8,
 }
 
 /// An image file's record: its file is the container's part it names (`part`), or, in an older
@@ -81,7 +89,7 @@ impl TryFrom<ImageRecord> for ImageFile {
                 .map(Blob::from)
                 .ok_or_else(|| DocError::Invalid(format!("image {}: its file isn't base64", ids::encode(record.id))))?,
         };
-        Ok(ImageFile { id: record.id, format: record.format, pixels: record.pixels, data })
+        Ok(ImageFile { id: record.id, format: record.format, pixels: record.pixels, data, orientation: 0 })
     }
 }
 
@@ -110,19 +118,24 @@ pub struct SheetImage {
 }
 
 /// What a file's bytes and header say it is, when its caps allow it. Nothing is decoded.
-fn file_info(bytes: &[u8]) -> Result<(&'static str, [u32; 2])> {
+fn file_info(bytes: &[u8]) -> Result<Header> {
     require(bytes.len() <= MAX_IMAGE_BYTES, || format!("the file is over {} MiB", MAX_IMAGE_BYTES >> 20))?;
-    let (format, pixels) = image_info(bytes).ok_or_else(|| DocError::Invalid("the file isn't a PNG or JPEG".into()))?;
-    let [w, h] = pixels;
+    let file = header(bytes).ok_or_else(|| DocError::Invalid("the file isn't a PNG or JPEG".into()))?;
+    let [w, h] = file.stored;
     require(u64::from(w) * u64::from(h) <= MAX_IMAGE_PIXELS, || format!("the file has {w} by {h} pixels, over {MAX_IMAGE_PIXELS}"))?;
-    Ok((format, pixels))
+    Ok(file)
 }
 
 impl ImageFile {
     /// The image file of a file's `bytes`, when its caps allow it: nothing is decoded.
     pub fn from_file(id: u64, bytes: &[u8]) -> Result<ImageFile> {
-        let (format, pixels) = file_info(bytes)?;
-        Ok(ImageFile { id, format: format.into(), pixels, data: bytes.into() })
+        let file = file_info(bytes)?;
+        Ok(ImageFile { id, format: file.format.into(), pixels: file.stored, data: bytes.into(), orientation: file.orientation })
+    }
+
+    /// Its width and height in pixels as it shows, its EXIF orientation applied: what it is sized by.
+    pub fn shown_pixels(&self) -> [u32; 2] {
+        shown(self.pixels, self.orientation)
     }
 }
 
@@ -232,13 +245,15 @@ impl Drawing {
         require(on_paper && x0 < x1 && y0 < y1, || format!("its rectangle has a size and is at most {MAX_SIDE_MM} mm on paper"))
     }
 
-    /// Each image's bytes are the file its record says: what reading a drawing checks once, so that
-    /// nothing later trusts a size the file doesn't have.
-    pub(super) fn check_image_files(&self) -> Result<()> {
-        self.images.iter().try_for_each(|i| {
-            let (format, pixels) = file_info(&i.data).map_err(|e| DocError::Invalid(format!("image {}: {e}", ids::encode(i.id))))?;
-            require(format == i.format && pixels == i.pixels, || format!("image {}: its record and its file disagree", ids::encode(i.id)))
-        })
+    /// Each image's bytes are the file its record says, and each record learns its file's orientation:
+    /// what reading a drawing checks once, so that nothing later trusts a size the file doesn't have.
+    pub(super) fn read_image_files(&mut self) -> Result<()> {
+        for i in self.images.iter_mut() {
+            let file = file_info(&i.data).map_err(|e| DocError::Invalid(format!("image {}: {e}", ids::encode(i.id))))?;
+            require(file.format == i.format && file.stored == i.pixels, || format!("image {}: its record and its file disagree", ids::encode(i.id)))?;
+            Arc::make_mut(i).orientation = file.orientation;
+        }
+        Ok(())
     }
 }
 

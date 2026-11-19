@@ -63,7 +63,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     let id = id.map_err(|e| bad(ADD, e.to_string()))?;
     let new_file = new_file.map_err(|e| bad(ADD, e.to_string()))?;
     let image = read_file(ADD, &request.file, new_file)?;
-    let reply = AddResult { image: ids::encode(id), format: image.format.clone(), pixels: image.pixels, param_warnings: Vec::new() };
+    let reply = AddResult { image: ids::encode(id), format: image.format.clone(), pixels: image.shown_pixels(), param_warnings: Vec::new() };
     let rect_mm = request.rect_mm;
     s.edit_drawing(ADD, |d| {
         let shown = d.keep_file(image);
