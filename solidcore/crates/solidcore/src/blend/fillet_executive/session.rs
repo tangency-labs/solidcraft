@@ -6540,7 +6540,7 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                                     return Err(error);
                                 }
                             };
-                            if at_run_end || !on_rail.success {
+                            if !on_rail.success {
                                 continue; // beside the band, not across it
                             }
                             let r = match curve_b.evaluate_point(k, on_rail.parameter) {
@@ -6558,6 +6558,39 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                                     || band_ends_b.iter().any(|&q| (r - q).length() <= tol))
                             {
                                 continue; // past the section that ends the band
+                            }
+                            if at_run_end {
+                                // Not the fork's (#18563): `p` lies past the end of the run,
+                                // beside rail `b`'s kept part. Where that part runs on past
+                                // the end of a run of one edge (a round running out onto a
+                                // face beyond its edge's end, as onto the sphere that trims a
+                                // block's corner), the band runs on with it: a sample in it
+                                // refuses as one beside the edge does. A run of several edges
+                                // ends at another blend's edge, whose section says nothing of
+                                // band `b`'s width.
+                                if run.len() == 1
+                                    && band_has_ends
+                                    && inside_band_past_run_end(
+                                        k,
+                                        curve_b,
+                                        &ivl_b,
+                                        PastRunEnd {
+                                            end: e,
+                                            sample: p,
+                                            on_rail: (on_rail.parameter, r),
+                                            kept_ends: [
+                                                (kept_b.min(), band_ends_b[0]),
+                                                (kept_b.max(), band_ends_b[1]),
+                                            ],
+                                        },
+                                        tol,
+                                        apart,
+                                    )?
+                                    && !sample_off_face(k, self.target, *face_a, p)?
+                                {
+                                    return Ok(false);
+                                }
+                                continue;
                             }
                             // Not the fork's (#18823): the band's section through `r` reaches
                             // the run at `r`'s own foot there, which is `p`'s where `p` lies in
@@ -6642,6 +6675,85 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
         }
         Ok(true)
     }
+}
+
+/// A sample of the band check whose foot on a band's run is the run's end
+/// ([`inside_band_past_run_end`]).
+struct PastRunEnd {
+    /// The run's end: the sample's foot on the run.
+    end: crate::math::Point3,
+    /// The sample.
+    sample: crate::math::Point3,
+    /// The point of the band's rail nearest the sample, by its parameter, inside the rail's
+    /// kept part.
+    on_rail: (f64, crate::math::Point3),
+    /// The ends of the rail's kept part, by their parameters.
+    kept_ends: [(f64, crate::math::Point3); 2],
+}
+
+/// The band check past a band's run of one edge (#18563): whether the sample lies in the band's
+/// run-on, the part of the band beside the rail's kept part past the run's end. The band's
+/// section at the run's end goes from the rail's point across from the end to the end; the
+/// run-on is the rail's part from there to the kept end nearer the run's end, and beside it the
+/// band is taken as that section carried along the rail. So the sample is in it where its
+/// nearest point of the rail lies strictly within that part, and it lies on the end's side of
+/// the rail, further than `tol` from it and short of the section's width by more than `apart`,
+/// as the check beside the edge judges a sample. A rail without a point across from the end, or
+/// a section no wider than `2 apart`, takes no band there.
+///
+/// # Errors
+/// Those of the drop onto the rail and its evaluation.
+fn inside_band_past_run_end(
+    k: &Kernel,
+    rail: &crate::curve::curve::Curve,
+    ivl: &crate::geom::extent1d::Extent1d,
+    at: PastRunEnd,
+    tol: f64,
+    apart: f64,
+) -> Result<bool> {
+    use crate::geom::global_solver::SolverOperation;
+    let PastRunEnd {
+        end,
+        sample,
+        on_rail: (t, r),
+        kept_ends: [(t0, q0), (t1, q1)],
+    } = at;
+    let across = rail.drop_point(
+        k,
+        ivl,
+        end,
+        None,
+        crate::math::BIG_DOUBLE,
+        None,
+        SolverOperation::Minimize,
+    )?;
+    if !across.success {
+        return Ok(false);
+    }
+    // the kept end past the run's end: the one nearer the run's end
+    let t_far = if (q0 - end).length() <= (q1 - end).length() {
+        t0
+    } else {
+        t1
+    };
+    let (lo, hi) = if across.parameter <= t_far {
+        (across.parameter, t_far)
+    } else {
+        (t_far, across.parameter)
+    };
+    if !(t > lo && t < hi) {
+        return Ok(false);
+    }
+    let section = end - rail.evaluate_point(k, across.parameter)?;
+    let width = section.length();
+    if !matches!(
+        width.partial_cmp(&(2.0 * apart)),
+        Some(core::cmp::Ordering::Greater)
+    ) {
+        return Ok(false);
+    }
+    let from_rail = (sample - r).dot(section * (1.0 / width));
+    Ok(from_rail > tol && from_rail < width - apart && (sample - r).length() < width)
 }
 
 /// A step of the band check that found nothing where a point always exists (a drop onto a
