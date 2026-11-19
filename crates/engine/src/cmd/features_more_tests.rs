@@ -773,7 +773,7 @@ fn cylinder_small_chord_pick_is_saved_on_the_exact_surface() {
 /// Text wraps round a whole tube, outside and in its bore (#5358): each way it adds or removes
 /// the flat text's volume times `|rr² - r²| / 2r` per unit depth, the wrap keeping arc length.
 #[test]
-fn text_wraps_round_a_whole_tube_outside_and_in_its_bore() {
+fn emboss_text_wraps_round_a_whole_tube_outside_and_in_its_bore() {
     let mut flat = Session::default();
     run(&mut flat, "solid.box", json!({"length": 60, "width": 60, "height": 20, "body_name": "Flat"}));
     let flat_before = volume(&mut flat);
