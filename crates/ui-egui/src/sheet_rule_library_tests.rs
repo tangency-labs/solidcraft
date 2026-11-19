@@ -128,6 +128,41 @@ fn a_rule_pack_imports_into_the_personal_rules_and_they_export_as_one() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A library pick gives a thickness and a K-factor, and a 90° bend deduction is a chart's value
+/// for one thickness: a manager showing Bend Deduction goes back to K Factor on a pick, and OK
+/// makes a rule that unfolds from the pick's K-factor (#6794).
+#[test]
+fn a_library_pick_takes_a_rule_that_unfolds_by_bend_deduction_back_to_its_k_factor() {
+    let mut h = manager();
+    // Picked in the dialog, so the 90° row is filled from the K-factor as a user's switch fills it.
+    h.step(&json!({"click": {"handle": "dialog:Unfold"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Unfold:Bend Deduction"}})).unwrap();
+    h.frames(2);
+    assert_eq!(ok_commands(&h)[0].1["unfold_method"], "deduction");
+    // The pick itself, as the section's gauge menu makes it. (The click on Unfold scrolled the
+    // library section out of the card's view, so its menus are not clicked here.)
+    let entry = solidcraft_engine::doc::sheet_library::standard_rule("Mild steel (cold-rolled)", "1.5 mm").expect("the library's 1.5 mm mild steel");
+    let doc = h.app.session.doc.clone();
+    let Some(Kind::Sheet(sm)) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("no manager") };
+    super::fill(sm, entry, &doc, solidcraft_engine::doc::sheet_library::BendMethod::Air);
+    h.frames(2);
+    let commands = ok_commands(&h);
+    let p = &commands[0].1;
+    // Air bending mild steel at the default R = T: the medium column's 0.43.
+    assert_eq!(
+        (p["unfold_method"].as_str(), p["thickness"].as_str(), p["k_factor"].as_str()),
+        (Some("k_factor"), Some("1.5 mm"), Some("0.43")),
+        "{p}"
+    );
+    for (command, p) in commands {
+        h.app.run(&command, p).unwrap();
+    }
+    let rule = h.app.session.doc.sheet_rule(None);
+    let (vals, _) = h.app.session.doc.param_values();
+    assert_eq!(rule.unfold_method, "k_factor");
+    assert_eq!(h.app.session.doc.rule_values(&vals, &rule).unwrap().k_factor, 0.43);
+}
+
 #[test]
 fn the_manager_keeps_the_rules_material_and_ok_saves_an_edit_of_it() {
     let mut h = manager();

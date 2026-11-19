@@ -1009,8 +1009,22 @@ fn rules(s: &mut Session, p: &Value) -> Result<Value> {
             *slot = e.into();
         }
     }
+    let unfold_given = p.get("unfold_method").filter(|v| !v.is_null());
+    if let Some(method) = unfold_given {
+        let method = method.as_str().and_then(sheet::UnfoldMethod::parse);
+        rule.unfold_method = method.ok_or_else(|| bad(cmd, "`unfold_method` must be k_factor, deduction or allowance"))?.name().into();
+    }
     let mut notes = Vec::new();
     if let Some(entry) = picked {
+        // A library pick gives the rule a new thickness, and a 90° bend deduction or allowance is a
+        // chart's value for one thickness: the rule goes back to its K-factor (the pick's), unless
+        // the call says how it unfolds (#6794).
+        let by_chart = sheet::UnfoldMethod::parse(&rule.unfold_method).is_some_and(|m| m != sheet::UnfoldMethod::KFactor);
+        if by_chart && unfold_given.is_none() && expr(p, "unfold_value").is_none() {
+            rule.unfold_method = sheet::UnfoldMethod::KFactor.name().into();
+            rule.unfold_value.clear();
+            notes.push("the rule now unfolds from its K-factor: its 90° bend deduction or allowance was for the thickness it had".to_string());
+        }
         let (vals, _) = s.doc.param_values();
         library_k_and_radius(s, cmd, p, entry, &vals, &mut rule, &mut notes)?;
     }
@@ -1021,10 +1035,6 @@ fn rules(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(display) = p.get("angle_display").filter(|v| !v.is_null()) {
         let display = display.as_str().and_then(sheet::AngleDisplay::parse);
         rule.angle_display = display.ok_or_else(|| bad(cmd, "`angle_display` must be bend or included"))?.name().into();
-    }
-    if let Some(method) = p.get("unfold_method").filter(|v| !v.is_null()) {
-        let method = method.as_str().and_then(sheet::UnfoldMethod::parse);
-        rule.unfold_method = method.ok_or_else(|| bad(cmd, "`unfold_method` must be k_factor, deduction or allowance"))?.name().into();
     }
     let (vals, _) = s.doc.param_values();
     let values = s.doc.rule_values(&vals, &rule).map_err(|e| bad(cmd, e.to_string()))?;
@@ -1072,8 +1082,11 @@ fn library_k_and_radius(
         Some(m) => library::BendMethod::parse(m).ok_or_else(|| bad(cmd, "`bend_method` must be air, bottoming or coining"))?,
     };
     let v = s.doc.rule_values(vals, rule).map_err(|e| bad(cmd, e.to_string()))?;
+    // No estimate for a rule that unfolds from a 90° bend deduction or allowance: its K-factor is
+    // that value's, not the rule's `k_factor`.
     if expr(p, "k_factor").is_none()
         && !entry.given.k_factor
+        && sheet::UnfoldMethod::parse(&rule.unfold_method) == Some(sheet::UnfoldMethod::KFactor)
         && let Some(hardness) = entry.hardness
     {
         let r_over_t = v.bend_radius / v.thickness;

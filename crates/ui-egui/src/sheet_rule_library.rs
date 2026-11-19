@@ -85,7 +85,10 @@ fn radius_mm(values: &[String], doc: &Document, thickness: f64) -> Option<f64> {
 /// display stay as the manager shows them; a pack's own radius and K-factor are taken. Returns
 /// the notes the section shows.
 fn fill(sm: &mut Sm, entry: &PackRule, doc: &Document, method: BendMethod) -> Vec<(String, bool)> {
-    let Sm::Rules { pick, name, values, material, active, loaded, .. } = sm else { return Vec::new() };
+    let Sm::Rules { pick, name, values, unfold, material, active, loaded, .. } = sm else { return Vec::new() };
+    // The pick gives a new thickness and its K-factor. A 90° bend deduction or allowance was the
+    // chart's value for the old thickness, so the rule unfolds from its K-factor again (#6794).
+    *unfold = crate::dialogs_sheet::unfold_index("k_factor");
     if let Some(thickness) = slot(values, "thickness") {
         *thickness = crate::length_input::stored(doc, &entry.rule.thickness);
     }

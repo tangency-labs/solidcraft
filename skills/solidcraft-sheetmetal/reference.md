@@ -205,7 +205,9 @@ Every bend unfolds from the rule's K-factor. A rule can give that K-factor direc
 thickness and radius. The rule derives K = (2·BA90/π − R)/T, with BA90 = 2·(R + T) − BD90 for a
 deduction, and refuses a value whose K is outside 0…1, naming the range. The arithmetic above
 stays the same: read the derived K from `sheet.rules` (`values.k_factor`). One chart value fits
-one thickness and radius, so make one rule per chart line.
+one thickness and radius, so make one rule per chart line. A library pick (`material` with
+`gauge`) changes the thickness, so it takes such a rule back to `k_factor`, said in `notes`,
+unless the same call gives `unfold_method` or `unfold_value`.
 
 ## Corners and relief
 

@@ -61,6 +61,12 @@ rule works out to. A value that would make K less than 0 or more than 1 is refus
 message gives the range the value must be in for that thickness and radius. The chart's value
 is for one thickness and radius, so make one rule for each line of the chart you use.
 
+Picking a material and gauge from the standard library gives the rule a new thickness, so the
+rule goes back to **K Factor**, with the pick's K-factor. Set **Unfold** again and type the
+chart's value for the new thickness. A rule pack holds K-factors only: a rule that unfolds from
+a 90° value is exported with the K-factor it works out to, so the pack gives the same flat
+pattern.
+
 ## Step by step
 
 A tray: a plate with a flange up each long side, and its flat pattern.
