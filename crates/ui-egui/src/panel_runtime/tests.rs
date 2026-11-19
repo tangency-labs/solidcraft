@@ -8631,7 +8631,7 @@ fn turning_wide_grab_off_and_on_again_rebuilds_the_docked_sash_grab() {
     open_editor(&mut content);
     content.dispatch(vec![fixture_open("fixture.log", "neighbour", "neighbour-section", Zone::Left, 1).unwrap()]).unwrap();
     let mut raw = RawPanelHost::new(content, 1.0);
-    let mut frame = |raw: &mut RawPanelHost, wide: bool| {
+    let frame = |raw: &mut RawPanelHost, wide: bool| {
         raw.host.set_wide_grab(wide);
         raw.frame(Vec::new(), false);
         let layout = raw.host.frame().unwrap().layout.clone();
