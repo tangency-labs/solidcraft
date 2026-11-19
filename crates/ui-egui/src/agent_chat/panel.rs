@@ -227,9 +227,6 @@ pub struct PanelView {
     pub shared: bool,
     /// The composer's height the shared host measured last time, if it has.
     pub composer_height: Option<f32>,
-    /// A new chat shows the full introduction at the top, as before #11256, rather than a short
-    /// one just above the message box.
-    pub intro_at_top: bool,
 }
 
 impl PanelView {
@@ -260,7 +257,6 @@ impl PanelView {
             rtl: crate::i18n::panel_direction(&app.preferences.language) == solidcraft_engine::panels::Direction::Rtl,
             shared: crate::panel_runtime::shared_content_measurement(ctx),
             composer_height: crate::panel_runtime::shared_content_composer_height(ctx),
-            intro_at_top: app.preferences.assistant_intro_at_top,
         }
     }
 }
@@ -2365,16 +2361,6 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, room:
                     chat.actions.push(PanelAction::OpenSettings);
                 }
             });
-        } else if view.intro_at_top {
-            let intro = ui_kit::assistant_prose(ui, |ui| {
-                ui.vertical(|ui| {
-                    ui.label(RichText::new(tr("ui.agent_chat_intro")).color(t.text_dim));
-                    ui.label(RichText::new(tr("ui.agent_chat_privacy")).color(t.text_dim).size(t.font_small));
-                })
-                .response
-                .rect
-            });
-            solidcraft_ui_registry::publish_rect("agent_chat:intro", intro);
         } else {
             new_chat_intro(ui, room);
         }
@@ -3131,7 +3117,6 @@ mod tests {
             rtl: false,
             shared,
             composer_height: None,
-            intro_at_top: false,
         }
     }
 
@@ -3347,11 +3332,10 @@ mod tests {
 
     /// Draws a new chat with one agent in a panel of `size`, a few frames as the app does, and
     /// returns the texts drawn in the last one.
-    fn new_chat_texts(intro_at_top: bool, size: egui::Vec2) -> Vec<String> {
+    fn new_chat_texts(size: egui::Vec2) -> Vec<String> {
         let ctx = crate::fonts::test_context();
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
         app.preferences.agents.push(agents::AgentConfig { id: "plate".into(), name: "Plate agent".into(), ..Default::default() });
-        app.preferences.assistant_intro_at_top = intro_at_top;
         app.agent_chat.detection = Some(discover::Detection::default());
         app.agent_chat.picking = Some(false);
         app.agent_chat.state = Some(State::Ready);
@@ -3375,7 +3359,7 @@ mod tests {
     /// at the top of an empty panel (#11256).
     #[test]
     fn a_new_chat_introduces_itself_just_above_the_message_box() {
-        let texts = new_chat_texts(false, vec2(440.0, 720.0));
+        let texts = new_chat_texts(vec2(440.0, 720.0));
         for id in ["ui.agent_chat_intro_short", "ui.agent_chat_privacy", "ui.agent_chat_hint"] {
             assert!(texts.iter().any(|text| text == tr(id)), "{id} is drawn: {texts:?}");
         }
@@ -3394,27 +3378,11 @@ mod tests {
     /// the message box and the start of the introduction scrolls up.
     #[test]
     fn a_new_chat_introduction_taller_than_the_panel_keeps_the_hint_in_view() {
-        new_chat_texts(false, vec2(300.0, 260.0));
+        new_chat_texts(vec2(300.0, 260.0));
         let intro = solidcraft_ui_registry::rect_of("agent_chat:intro").expect("the introduction is drawn");
         let conversation = solidcraft_ui_registry::rect_of("agent_chat:conversation").expect("the conversation is drawn");
         assert!(intro.height() > conversation.height(), "the introduction is taller than the conversation: {intro:?} in {conversation:?}");
         assert!(intro.bottom() <= conversation.bottom(), "the hint is not cut off: {intro:?} in {conversation:?}");
         assert!(intro.bottom() > conversation.top(), "the hint is not scrolled out of view: {intro:?} in {conversation:?}");
-    }
-
-    /// Full introduction at the top keeps a new chat as it was before #11256: the long
-    /// introduction at the top of the panel and no hint.
-    #[test]
-    fn full_introduction_at_the_top_keeps_the_old_new_chat() {
-        let texts = new_chat_texts(true, vec2(440.0, 720.0));
-        for id in ["ui.agent_chat_intro", "ui.agent_chat_privacy"] {
-            assert!(texts.iter().any(|text| text == tr(id)), "{id} is drawn: {texts:?}");
-        }
-        for id in ["ui.agent_chat_intro_short", "ui.agent_chat_hint"] {
-            assert!(!texts.iter().any(|text| text == tr(id)), "{id} is not drawn");
-        }
-        let intro = solidcraft_ui_registry::rect_of("agent_chat:intro").expect("the introduction is drawn");
-        let conversation = solidcraft_ui_registry::rect_of("agent_chat:conversation").expect("the conversation is drawn");
-        assert!(intro.top() <= conversation.top() + Tokens::get().space_12 + 1.0, "at the top: {intro:?} in {conversation:?}");
     }
 }
