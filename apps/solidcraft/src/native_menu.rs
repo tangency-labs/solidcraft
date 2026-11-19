@@ -5,7 +5,7 @@
 //! Entries that are control actions use their ids and do the same there: `app.quit`,
 //! `ui.prefs {open}` (Settings and Keyboard Shortcuts), `ui.agent_chat {toggle}`, `ui.help {item}`. Undo and Redo are the commands
 //! `edit.undo` and `edit.redo`. The other entries' ids are defined here: `ui.file.new`,
-//! `ui.file.open`, `ui.file.open_recent {path}`, `ui.file.clear_recent`, `ui.file.save`,
+//! `ui.file.new_drawing`, `ui.file.open`, `ui.file.open_recent {path}`, `ui.file.clear_recent`, `ui.file.save`,
 //! `ui.file.save_as`, `ui.file.save_json`, `ui.file.export {format}`,
 //! `ui.file.export_mesh {format}`. Menus are `menu.file`, `menu.file.recent`, `menu.edit`,
 //! `menu.window` and `menu.help`.
@@ -36,13 +36,14 @@ const INSERTS: [(&str, FileAction); 3] = [
 ];
 
 /// File > Export entries.
-const EXPORTS: [(&str, FileAction); 7] = [
+const EXPORTS: [(&str, FileAction); 8] = [
     ("Export STL\u{2026}", FileAction::ExportMesh("stl")),
     ("Export 3MF\u{2026}", FileAction::ExportMesh("3mf")),
     ("Export STEP\u{2026}", FileAction::Export("step")),
     ("Export Current View as DXF\u{2026}", FileAction::Command("file.export_view_dxf")),
     ("Export OBJ\u{2026}", FileAction::Export("obj")),
     ("Export URDF\u{2026}", FileAction::Export("urdf")),
+    ("Export SDF Model\u{2026}", FileAction::Export("sdf")),
     ("Export Design as JSON\u{2026}", FileAction::Export("json")),
 ];
 
@@ -54,11 +55,13 @@ const FIXED: &[FileAction] = &[
     FileAction::Shortcuts,
     FileAction::Quit,
     FileAction::New,
+    FileAction::NewDrawing,
     FileAction::Open,
     FileAction::ClearRecent,
     FileAction::Save,
     FileAction::SaveAs,
     FileAction::SaveJson,
+    FileAction::VerifySignature,
     DESIGN_PROPERTIES,
     FileAction::Undo,
     FileAction::Redo,
@@ -97,12 +100,14 @@ fn id_of(action: &FileAction) -> (String, Option<Value>) {
         FileAction::Shortcuts => ("ui.prefs".into(), Some(json!({ "open": "Shortcuts" }))),
         FileAction::Quit => fixed("app.quit"),
         FileAction::New => fixed("ui.file.new"),
+        FileAction::NewDrawing => fixed("ui.file.new_drawing"),
         FileAction::Open => fixed("ui.file.open"),
         FileAction::OpenRecent(path) => (OPEN_RECENT.into(), Some(json!({ "path": path }))),
         FileAction::ClearRecent => fixed("ui.file.clear_recent"),
         FileAction::Save => fixed("ui.file.save"),
         FileAction::SaveAs => fixed("ui.file.save_as"),
         FileAction::SaveJson => fixed("ui.file.save_json"),
+        FileAction::VerifySignature => fixed("file.verify"),
         FileAction::Export(format) => ("ui.file.export".into(), Some(json!({ "format": format }))),
         FileAction::ExportMesh(format) => ("ui.file.export_mesh".into(), Some(json!({ "format": format }))),
         FileAction::Command(command) => fixed(command),
@@ -160,18 +165,16 @@ fn recent_items(app: &SolveApp, paths: &[String]) -> Vec<Item> {
 
 fn menu_bar(app: &SolveApp, recent: &[String]) -> MenuBar {
     let more = |key: &str| format!("{}\u{2026}", app.tr(key));
-    let mut file = vec![
-        item(app.tr("ui.new_design"), &FileAction::New),
-        item(&more("ui.open"), &FileAction::Open),
-        submenu(RECENT, app.tr("ui.open_recent"), recent_items(app, recent)),
-        Item::sep(),
-    ];
+    let mut file = vec![item(app.tr("ui.new_design"), &FileAction::New)];
+    file.push(item(app.tr("ui.new_drawing"), &FileAction::NewDrawing));
+    file.extend([item(&more("ui.open"), &FileAction::Open), submenu(RECENT, app.tr("ui.open_recent"), recent_items(app, recent)), Item::sep()]);
     file.extend(INSERTS.iter().map(|(label, action)| item(app.tr_label(label), action)));
     file.extend([
         Item::sep(),
         item(app.tr("ui.save"), &FileAction::Save),
         item(&more("ui.save_as"), &FileAction::SaveAs),
         item(app.tr_label("Save As JSON\u{2026}"), &FileAction::SaveJson),
+        item(app.tr("cmd.file.verify"), &FileAction::VerifySignature),
         Item::sep(),
     ]);
     file.extend(EXPORTS.iter().map(|(label, action)| item(app.tr_label(label), action)));
@@ -341,9 +344,9 @@ mod tests {
         leaves(std::slice::from_ref(&bar.quit), &mut entries);
         leaves(&bar.menus, &mut entries);
         entries.retain(|i| i.id != "-");
-        // App menu 2 + Quit; File: New, Open, 1 recent, Clear, 3 inserts, Save, Save As, JSON,
-        // 7 exports, Properties; Edit 2; Window 1; Help 7.
-        assert_eq!(entries.len(), 3 + 4 + 3 + 3 + 7 + 1 + 2 + 1 + 7, "{:?}", entries.iter().map(|i| &i.id).collect::<Vec<_>>());
+        // App menu 2 + Quit; File: New, New Drawing, Open, 1 recent, Clear, 3 inserts, Save, Save As,
+        // JSON, Verify Signature, 8 exports, Properties; Edit 2; Window 1; Help 7.
+        assert_eq!(entries.len(), 3 + 5 + 3 + 4 + 8 + 1 + 2 + 1 + 7, "{:?}", entries.iter().map(|i| &i.id).collect::<Vec<_>>());
         for item in &entries {
             assert!(entry_of(&item.id, item.params.as_ref()).is_some(), "`{}` {:?} runs nothing", item.id, item.params);
         }

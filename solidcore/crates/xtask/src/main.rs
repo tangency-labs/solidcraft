@@ -7,9 +7,10 @@
 //! unattended runs.
 //!
 //! Deletion is confined to the worktree root (`$SOLIDCORE_WT`, default
-//! `~/github/solidcore-wt`), this checkout's `bin/` and `reports/`, and the
-//! system temp dir. A root itself, the main checkout, and anything inside a
-//! `.git` directory are refused.
+//! `~/github/solidcore-wt`), this checkout's `bin/` and `reports/`, this
+//! workspace's build output (`bin/` beside its `.cargo/config.toml`, which inside
+//! SolidCraft is `solidcore/bin`), and the system temp dir. A root itself, the main
+//! checkout, and anything inside a `.git` directory are refused.
 
 use std::env;
 use std::ffi::OsString;
@@ -135,6 +136,19 @@ fn main_checkout() -> io::Result<PathBuf> {
         .ok_or_else(|| io::Error::other("git common dir has no parent"))
 }
 
+/// The directory this workspace builds into: `target-dir = "bin"` in its
+/// `.cargo/config.toml`, at the workspace root two levels above this crate. Inside SolidCraft
+/// the workspace is `solidcore/`, so this is `solidcore/bin`, not the checkout root's `bin/`.
+const WORKSPACE_TARGET_DIR: &str = "bin";
+
+/// This workspace's build output ([`WORKSPACE_TARGET_DIR`] at the workspace root).
+fn workspace_bin() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join(WORKSPACE_TARGET_DIR)
+}
+
 /// The directories deletion is confined to.
 struct Roots {
     allowed: Vec<PathBuf>,
@@ -149,9 +163,13 @@ impl Roots {
             None => home()?.join("github").join("solidcore-wt"),
         };
         let mut allowed = vec![main.join("bin"), main.join("reports")];
-        for root in [worktrees, env::temp_dir()] {
+        // the workspace's own build output: the checkout's `bin/` only when the workspace
+        // is the checkout itself, so it is added on its own (once)
+        for root in [worktrees, env::temp_dir(), workspace_bin()] {
             if let Ok(c) = canonical(&root) {
-                allowed.push(c);
+                if !allowed.contains(&c) {
+                    allowed.push(c);
+                }
             }
         }
         Ok(Roots {
@@ -309,6 +327,20 @@ mod tests {
             let name = OsString::from_vec(b".git\xff".to_vec());
             assert!(r.check(&tmp.join("wt/a").join(name)).is_ok());
         }
+    }
+
+    #[test]
+    fn the_workspace_bin_is_the_configured_target_dir() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
+        let config = fs::read_to_string(root.join(".cargo").join("config.toml")).unwrap();
+        let configured = config
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("target-dir"))
+            .filter_map(|rest| rest.trim().strip_prefix('='))
+            .map(|value| value.trim().trim_matches('"'))
+            .next();
+        assert_eq!(configured, Some(WORKSPACE_TARGET_DIR));
+        assert_eq!(workspace_bin(), root.join(WORKSPACE_TARGET_DIR));
     }
 
     #[test]

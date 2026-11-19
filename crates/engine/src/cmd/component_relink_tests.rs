@@ -20,6 +20,196 @@ fn part(path: &Path, height: u32) {
     run(&mut s, "file.save", json!({"path": path}));
 }
 
+fn threaded_part(path: &Path, length: Option<u32>) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 10, "body_name": "Stud"}));
+    if let Some(length) = length {
+        run(&mut s, "solid.thread", json!({"face": [3,0,5], "designation": "M6", "length": length, "from": [3,0,0]}));
+    }
+    run(&mut s, "file.save", json!({"path": path}));
+    s
+}
+
+#[test]
+fn linked_cosmetic_threads_keep_their_bodies_placements_and_saved_records() {
+    let dir = folder("cosmetic-threads-insert");
+    let file = dir.join("part.sc");
+    let mut source = threaded_part(&file, Some(5));
+    run(&mut source, "solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [20,0,0], "body_name": "Plate"}));
+    run(&mut source, "solid.hole", json!({"position": [30,10,10], "direction": [0,0,-1], "thread": "M6", "depth": 8, "thread_depth": 4}));
+    run(&mut source, "file.save", json!({"path": file}));
+    let expected = source.world_state().unwrap().threads.clone();
+    assert_eq!(expected.len(), 2);
+    let mut s = Session::default();
+    // A name collision must not attach the imported thread to this unrelated body.
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1, "body_name": "Stud"}));
+    let inserted = run(&mut s, "component.insert_design", json!({"path": file, "translate": [40,0,0]}));
+    let feature = inserted["feature"].as_u64().unwrap();
+    let component = inserted["component"].as_u64().unwrap();
+    assert_eq!(s.model.state().threads.len(), 2, "Insert Design must keep cosmetic threads and threaded holes");
+    run(&mut s, "component.insert_design", json!({"path": file, "reuse": true, "translate": [80,0,0]}));
+    let check = |s: &Session| {
+        let world = s.world_state().unwrap();
+        assert_eq!(world.threads.len(), 4);
+        for x in [40.0, 80.0] {
+            for original in &expected {
+                let placed = world
+                    .threads
+                    .iter()
+                    .find(|t| t.internal == original.internal && (t.axis_point.x - original.axis_point.x - x).abs() < 1e-6)
+                    .unwrap();
+                let body = world.bodies.iter().find(|b| b.name == placed.body).unwrap();
+                assert_eq!(s.doc.model_body_component(body), component);
+                assert_ne!(placed.body, "Stud");
+                let mut wanted = original.clone();
+                wanted.feature = feature;
+                wanted.body.clone_from(&placed.body);
+                wanted.axis_point.x += x;
+                assert_eq!(placed, &wanted);
+                assert!(!crate::cosmetic_threads::segments(body, &body.mesh(), &world.threads).is_empty());
+            }
+        }
+    };
+    check(&s);
+    let assembly = dir.join("assembly.sc");
+    run(&mut s, "file.save", json!({"path": assembly}));
+    std::fs::remove_file(&file).unwrap();
+    let mut reopened = Session::default();
+    run(&mut reopened, "doc.open", json!({"path": assembly}));
+    check(&reopened);
+    // A fresh evaluation must work without either the source or the saved model cache.
+    check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()));
+    // Older STEP readers may have stored these same two bodies in the opposite order.
+    let mut renumbered = (*s.doc).clone();
+    let f = renumbered.feature_mut(feature).unwrap();
+    assert_eq!(f.body_names.len(), 2);
+    f.body_names.reverse();
+    f.link_faces.reverse();
+    f.link_threads.reverse();
+    fn reverse_indices(nodes: &mut [solidcraft_doc::kernel::StepNode]) {
+        for node in nodes {
+            for index in &mut node.bodies {
+                assert!(*index < 2);
+                *index = 1 - *index;
+            }
+            reverse_indices(&mut node.children);
+        }
+    }
+    if let solidcraft_doc::FeatureKind::Import { components, .. } = &mut f.kind {
+        assert!(!components.is_empty());
+        reverse_indices(components);
+    }
+    check(&Session::new(renumbered));
+    run(&mut reopened, "component.break_link", json!({"component": component}));
+    check(&reopened);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn linked_cosmetic_threads_follow_thread_only_updates_cached_reads_and_relink() {
+    let dir = folder("cosmetic-threads-update");
+    let file = dir.join("part.sc");
+    threaded_part(&file, Some(5));
+    let mut s = Session::default();
+    let first = run(&mut s, "component.insert_design", json!({"path": file}));
+    run(&mut s, "component.insert_design", json!({"path": file, "translate": [20,0,0]}));
+    assert_eq!(s.model.state().threads.len(), 2);
+    for length in [Some(8), None] {
+        threaded_part(&file, length);
+        let updated = run(&mut s, "component.update_links", json!({}));
+        assert_eq!(updated["updated"].as_array().unwrap().len(), 2, "{updated}");
+        let threads = s.model.state().threads.clone();
+        assert_eq!(threads.len(), if length.is_some() { 2 } else { 0 });
+        for t in threads {
+            assert!((t.end - t.start - 8.0).abs() < 1e-6);
+        }
+        assert_eq!(run(&mut s, "component.update_links", json!({}))["unchanged"].as_array().unwrap().len(), 2);
+    }
+    let other = dir.join("other.sc");
+    threaded_part(&other, Some(3));
+    run(&mut s, "component.relink", json!({"component": first["component"], "path": other}));
+    assert_eq!(s.model.state().threads.len(), 1);
+    let t = &s.model.state().threads[0];
+    assert!((t.end - t.start - 3.0).abs() < 1e-6);
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.model.state().threads.is_empty());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn linked_cosmetic_threads_on_split_bodies_warn_instead_of_duplicating_records() {
+    let dir = folder("cosmetic-threads-split");
+    let file = dir.join("part.sc");
+    let mut source = Session::default();
+    run(&mut source, "solid.cylinder", json!({"radius": 3, "height": 10, "body_name": "A"}));
+    run(&mut source, "solid.cylinder", json!({"radius": 3, "height": 10, "base": [20,0,0], "body_name": "B"}));
+    run(&mut source, "solid.combine", json!({"target": "A", "tools": ["B"], "operation": "join", "touching": "one_body"}));
+    run(&mut source, "solid.thread", json!({"face": [3,0,5], "designation": "M6", "length": 5, "from": [3,0,0]}));
+    run(&mut source, "file.save", json!({"path": file}));
+    assert_eq!(source.model.state().bodies.len(), 1);
+    assert_eq!(source.model.state().threads.len(), 1);
+    let mut s = Session::default();
+    let inserted = run(&mut s, "component.insert_design", json!({"path": file}));
+    assert_eq!(s.model.state().bodies.len(), 2);
+    assert!(s.model.state().threads.is_empty());
+    let warnings = inserted["warnings"].as_array().unwrap();
+    assert!(warnings.iter().any(|w| w.as_str().is_some_and(|w| w.contains("cosmetic threads") && w.contains("split"))), "{inserted}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn linked_cosmetic_threads_preserve_the_source_occurrence_frame() {
+    let dir = folder("cosmetic-threads-source-frame");
+    let file = dir.join("part.sc");
+    let mut source = Session::default();
+    let component = run(&mut source, "component.create", json!({"name": "Stud", "grounded": false}));
+    run(&mut source, "solid.cylinder", json!({"radius": 3, "height": 10}));
+    run(&mut source, "solid.thread", json!({"face": [3,0,5], "designation": "M6", "length": 5, "from": [3,0,0]}));
+    run(&mut source, "occurrence.move", json!({"occurrence": component["occurrence"], "axis": [1,0,0], "angle": "90 deg", "translate": [10,20,30]}));
+    run(&mut source, "file.save", json!({"path": file}));
+    let original = source.world_state().unwrap().threads[0].clone();
+    assert!((original.axis.y + 1.0).abs() < 1e-6);
+    let mut s = Session::default();
+    run(&mut s, "component.insert_design", json!({"path": file, "translate": [40,0,0]}));
+    let world = s.world_state().unwrap();
+    assert_eq!(world.threads.len(), 1);
+    let thread = &world.threads[0];
+    assert!((thread.axis_point.x - original.axis_point.x - 40.0).abs() < 1e-6);
+    assert!((thread.axis_point.y - original.axis_point.y).abs() < 1e-6);
+    assert!((thread.axis_point.z - original.axis_point.z).abs() < 1e-6);
+    for (got, wanted) in [(thread.axis.x, original.axis.x), (thread.axis.y, original.axis.y), (thread.axis.z, original.axis.z)] {
+        assert!((got - wanted).abs() < 1e-6);
+    }
+    let body = world.body(&thread.body).unwrap();
+    assert!(!crate::cosmetic_threads::segments(body, &body.mesh(), &world.threads).is_empty());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn linked_cosmetic_threads_refuse_invalid_saved_records_without_partial_state() {
+    let dir = folder("cosmetic-threads-invalid");
+    let file = dir.join("part.sc");
+    threaded_part(&file, Some(5));
+    let mut s = Session::default();
+    let inserted = run(&mut s, "component.insert_design", json!({"path": file}));
+    let feature = inserted["feature"].as_u64().unwrap();
+    for case in 0..3 {
+        let mut doc = (*s.doc).clone();
+        let record = &mut doc.feature_mut(feature).unwrap().link_threads[0][0];
+        match case {
+            0 => record.radius = -1.0,
+            1 => record.end = record.start - 1.0,
+            _ => record.starts = 9,
+        }
+        let opened = Session::new(solidcraft_doc::Document::from_json(&doc.to_json()).unwrap());
+        let error = opened.model.result(feature).unwrap().error.as_deref().unwrap();
+        assert!(error.contains("invalid cosmetic thread record"), "{error}");
+        assert!(opened.model.state().threads.is_empty());
+        assert!(opened.model.state().bodies.is_empty());
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 fn volume(s: &mut Session) -> f64 {
     run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap()
 }
@@ -511,6 +701,99 @@ fn linked_design_properties_repair_old_links_without_overwriting_assignments() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+fn numbered_part(path: &Path, values: Value) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Cube"}));
+    run(&mut s, "document.metadata.set", json!({"values": values}));
+    run(&mut s, "file.save", json!({"path": path}));
+    s
+}
+
+fn part_property(s: &Session, component: u64, key: &str) -> Option<String> {
+    s.doc.components.iter().find(|c| c.id == component).and_then(|c| c.metadata.text(key)).map(str::to_string)
+}
+
+#[test]
+fn linked_part_properties_follow_the_design_and_keep_values_set_in_the_assembly() {
+    let dir = folder("part-properties");
+    let file = dir.join("plate.sc");
+    let mut part = numbered_part(&file, json!({"part_number": "P-1", "revision": "A", "description": "Plate"}));
+    let mut s = Session::default();
+    let c = run(&mut s, "component.insert_design", json!({"path": file}))["component"].as_u64().unwrap();
+    // A second placement as its own component reads the changed file from the first one's read.
+    let other = run(&mut s, "component.insert_design", json!({"path": file, "translate": [30, 0, 0]}))["component"].as_u64().unwrap();
+    assert_eq!(part_property(&s, c, "revision").as_deref(), Some("A"));
+    assert_eq!(s.doc.links[&c].inherited_metadata.text("part_number"), Some("P-1"));
+    // A bill of materials type is the assembly's own: no update touches it.
+    run(&mut s, "component.metadata.set", json!({"component": c, "bom_type": "purchased"}));
+
+    // The design's new revision comes in, through one undo step.
+    run(&mut part, "document.metadata.set", json!({"values": {"revision": "B"}}));
+    run(&mut part, "file.save", json!({}));
+    let r = run(&mut s, "component.update_links", json!({}));
+    assert_eq!(r["updated"].as_array().unwrap().len(), 2, "{r}");
+    for id in [c, other] {
+        assert_eq!(part_property(&s, id, "revision").as_deref(), Some("B"));
+        assert_eq!(part_property(&s, id, "part_number").as_deref(), Some("P-1"));
+    }
+    assert_eq!(part_property(&s, c, "bom_type").as_deref(), Some("purchased"));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(part_property(&s, c, "revision").as_deref(), Some("A"));
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(part_property(&s, c, "revision").as_deref(), Some("B"));
+
+    // A property changed in the assembly stays, and the update says so when the design moved on.
+    run(&mut s, "component.metadata.set", json!({"component": c, "description": "Plate, anodised"}));
+    run(&mut part, "document.metadata.set", json!({"values": {"description": "Plate v2", "revision": "C"}}));
+    run(&mut part, "file.save", json!({}));
+    let r = run(&mut s, "component.update_links", json!({}));
+    assert_eq!(part_property(&s, c, "description").as_deref(), Some("Plate, anodised"));
+    assert_eq!(part_property(&s, c, "revision").as_deref(), Some("C"));
+    assert_eq!(part_property(&s, other, "description").as_deref(), Some("Plate v2"));
+    let warnings = r["warnings"].to_string();
+    assert!(warnings.contains("keeps its part property `description`") && warnings.contains("Plate v2"), "{r}");
+
+    // A property the design drops goes from the component too, and the record survives a save.
+    run(&mut part, "document.metadata.remove", json!({"keys": ["revision"]}));
+    run(&mut part, "file.save", json!({}));
+    run(&mut s, "component.update_links", json!({}));
+    assert_eq!(part_property(&s, c, "revision"), None);
+    let assembly = dir.join("assembly.sc");
+    run(&mut s, "file.save", json!({"path": assembly}));
+    let mut cold = Session::default();
+    run(&mut cold, "doc.open", json!({"path": assembly}));
+    assert_eq!(cold.doc.links[&c].inherited_metadata, s.doc.links[&c].inherited_metadata);
+    let r = run(&mut cold, "component.update_links", json!({}));
+    assert_eq!(r["updated"], json!([]), "{r}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn linked_part_properties_of_old_links_fill_gaps_without_overwriting_and_follow_a_relink() {
+    let dir = folder("part-properties-legacy");
+    let (first, second) = (dir.join("first.sc"), dir.join("second.sc"));
+    numbered_part(&first, json!({"part_number": "P-1", "revision": "A"}));
+    numbered_part(&second, json!({"part_number": "P-2", "revision": "A", "description": "Second plate"}));
+    let mut s = Session::default();
+    let c = run(&mut s, "component.insert_design", json!({"path": first}))["component"].as_u64().unwrap();
+    // A link made before it kept the properties it took: what the component has is its own.
+    s.doc_mut().links.get_mut(&c).unwrap().inherited_metadata = solidcraft_doc::Metadata::default();
+    run(&mut s, "component.metadata.set", json!({"component": c, "part_number": "LOCAL", "revision": null}));
+    let r = run(&mut s, "component.update_links", json!({}));
+    assert_eq!(part_property(&s, c, "part_number").as_deref(), Some("LOCAL"));
+    assert_eq!(part_property(&s, c, "revision").as_deref(), Some("A"));
+    assert!(r["warnings"].to_string().contains("keeps its part property `part_number`"), "{r}");
+    // Relink Source: the new design's properties replace the ones the old design gave.
+    run(&mut s, "component.metadata.set", json!({"component": c, "part_number": "P-1"}));
+    run(&mut s, "component.update_links", json!({}));
+    run(&mut s, "component.relink", json!({"component": c, "path": second}));
+    assert_eq!(part_property(&s, c, "part_number").as_deref(), Some("P-2"));
+    assert_eq!(part_property(&s, c, "description").as_deref(), Some("Second plate"));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(part_property(&s, c, "part_number").as_deref(), Some("P-1"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[test]
 fn relink_repairs_a_moved_source_for_every_instance_in_one_undo_step() {
     let dir = folder("moved");
@@ -749,5 +1032,360 @@ fn relink_of_one_placement_moves_its_joints_to_the_same_faces() {
     assert_ne!(moved, face);
     // The copy is the same design, so the same face comes at the same place in the new body.
     assert_eq!(moved, names[index], "{moved} is not the face that was {face}: {names:?}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+fn configured_part(path: &Path) -> (Session, u64, u64) {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "L", "expression": "25 mm"}));
+    run(&mut s, "solid.box", json!({"length": "L", "width": 10, "height": 10, "corner": [0,0,0], "body_name": "Bolt"}));
+    run(&mut s, "config.configure", json!({"params": ["L"]}));
+    run(&mut s, "config.row", json!({"name": "Default", "rename": "Short"}));
+    run(&mut s, "config.row", json!({"name": "Long", "values": {"L": "30 mm"}}));
+    let id = |name: &str| s.doc.configs.rows.iter().find(|r| r.name == name).unwrap().id;
+    let (short, long) = (id("Short"), id("Long"));
+    run(&mut s, "config.activate", json!({"row": short}));
+    run(&mut s, "file.save", json!({"path": path}));
+    (s, short, long)
+}
+
+fn assert_variant_length(s: &mut Session, occurrence: u64, length: f64) {
+    let p = run(s, "occurrence.properties", json!({"occurrence": occurrence}));
+    assert_eq!(p["body_count"], 1, "{p}");
+    assert!((p["total"]["volume_mm3"].as_f64().unwrap() - length * 100.0).abs() < 1e-5, "{p}");
+    let bbox = &p["total"]["bbox"];
+    assert!((bbox["max"][0].as_f64().unwrap() - bbox["min"][0].as_f64().unwrap() - length).abs() < 1e-6, "{p}");
+}
+
+#[test]
+fn linked_configurations_keep_distinct_sizes_through_reuse_updates_and_offline_reopen() {
+    let dir = folder("configuration-lifecycle");
+    let file = dir.join("family.sc");
+    let assembly = dir.join("assembly.sc");
+    let (mut source, short, long) = configured_part(&file);
+    let bytes = std::fs::read(&file).unwrap();
+    let mut s = Session::default();
+    let small = run(&mut s, "component.insert_design", json!({"path": file, "configuration": "Short", "reuse": true}));
+    let large = run(&mut s, "component.insert_design", json!({"path": file, "configuration": long, "reuse": true, "translate": [50,0,0]}));
+    let saved = run(&mut s, "component.insert_design", json!({"path": file, "reuse": true, "translate": [100,0,0]}));
+    let small_id = small["component"].as_u64().unwrap();
+    let large_id = large["component"].as_u64().unwrap();
+    let saved_id = saved["component"].as_u64().unwrap();
+    assert_ne!(small_id, large_id);
+    assert_ne!(small_id, saved_id, "an explicit row differs from following the saved state");
+    assert_eq!(s.doc.links[&small_id].configuration, Some(short));
+    assert_eq!(s.doc.links[&large_id].configuration, Some(long));
+    assert_eq!(s.doc.links[&saved_id].configuration, None);
+    let reused = run(&mut s, "component.insert_design", json!({"path": file, "configuration": short, "reuse": true}));
+    assert_eq!(reused["component"], small_id, "name and fixed id identify the same row");
+    let reused_saved = run(&mut s, "component.insert_design", json!({"path": file, "configuration": null, "reuse": true}));
+    assert_eq!(reused_saved["component"], saved_id);
+    assert_eq!(std::fs::read(&file).unwrap(), bytes, "selecting a row never saves the source");
+    let occurrences = [small["occurrence"].as_u64().unwrap(), large["occurrence"].as_u64().unwrap(), saved["occurrence"].as_u64().unwrap()];
+    for (occurrence, length) in occurrences.into_iter().zip([25.0, 30.0, 25.0]) {
+        assert_variant_length(&mut s, occurrence, length);
+    }
+    run(&mut source, "config.row", json!({"name": short, "rename": "Short renamed", "values": {"L": "27 mm"}}));
+    run(&mut source, "config.activate", json!({"row": long}));
+    run(&mut source, "file.save", json!({"path": file}));
+    for _ in 0..2 {
+        run(&mut s, "component.update_links", json!({}));
+        for (occurrence, length) in occurrences.into_iter().zip([27.0, 30.0, 30.0]) {
+            assert_variant_length(&mut s, occurrence, length);
+        }
+    }
+    let links = run(&mut s, "component.links", json!({}));
+    assert_eq!(links["links"].as_array().unwrap().iter().find(|l| l["component"] == small_id).unwrap()["configuration"], short);
+    run(&mut s, "file.save", json!({"path": assembly}));
+    std::fs::remove_file(&file).unwrap();
+    let mut reopened = Session::default();
+    run(&mut reopened, "doc.open", json!({"path": assembly}));
+    assert_eq!(reopened.doc.links[&small_id].configuration, Some(short));
+    for (occurrence, length) in occurrences.into_iter().zip([27.0, 30.0, 30.0]) {
+        assert_variant_length(&mut reopened, occurrence, length);
+    }
+    let mut uncached = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    for (occurrence, length) in occurrences.into_iter().zip([27.0, 30.0, 30.0]) {
+        assert_variant_length(&mut uncached, occurrence, length);
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn linked_configurations_reject_invalid_or_deleted_rows_without_retargeting() {
+    let dir = folder("configuration-errors");
+    let file = dir.join("family.sc");
+    let (mut source, short, long) = configured_part(&file);
+    run(&mut source, "config.row", json!({"name": "Degenerate", "values": {"L": "0 mm"}}));
+    run(&mut source, "file.save", json!({"path": file}));
+    let mut s = Session::default();
+    let inserted = run(&mut s, "component.insert_design", json!({"path": file, "configuration": short}));
+    let component = inserted["component"].as_u64().unwrap();
+    let occurrence = inserted["occurrence"].as_u64().unwrap();
+    let valid = run(&mut s, "component.insert_design", json!({"path": file, "configuration": long}));
+    let valid_component = valid["component"].as_u64().unwrap();
+    let valid_occurrence = valid["occurrence"].as_u64().unwrap();
+    let before = s.doc.clone();
+    let undo = s.undo.len();
+    for configuration in [json!("Missing"), json!(u64::MAX), json!(true), json!({}), json!("Degenerate")] {
+        for command in ["component.insert_design", "component.relink"] {
+            let mut params = json!({"path": file, "configuration": configuration});
+            if command == "component.relink" {
+                params["component"] = json!(component);
+            }
+            assert!(s.execute(command, &params).is_err(), "{command}: {params}");
+            assert_eq!(s.doc, before);
+            assert_eq!(s.undo.len(), undo);
+            assert_variant_length(&mut s, occurrence, 25.0);
+        }
+    }
+    run(&mut source, "config.row", json!({"name": long, "values": {"L": "32 mm"}}));
+    run(&mut source, "config.activate", json!({"row": long}));
+    run(&mut source, "config.row", json!({"name": short, "delete": true}));
+    run(&mut source, "config.row", json!({"name": "Short", "values": {"L": "40 mm"}}));
+    run(&mut source, "file.save", json!({"path": file}));
+    assert!(s.execute("component.update_links", &json!({"component": component})).is_err());
+    assert_eq!(s.doc, before, "a new row with the old name must not take the deleted row's link");
+    assert_eq!(s.undo.len(), undo);
+    assert!(s.execute("component.update_links", &json!({"components": [component]})).is_err());
+    assert_eq!(s.doc, before, "a list in which every link fails also rolls back");
+    let result = run(&mut s, "component.update_links", json!({"components": [component, valid_component]}));
+    assert_eq!(result["failed"].as_array().unwrap().len(), 1);
+    assert_eq!(result["updated"].as_array().unwrap().len(), 1);
+    assert_eq!(s.doc.links[&component], before.links[&component], "failed list updates retain the old digest and row");
+    assert_variant_length(&mut s, occurrence, 25.0);
+    assert_variant_length(&mut s, valid_occurrence, 32.0);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn linked_configurations_reject_row_ids_recycled_after_source_undo() {
+    for legacy in [false, true] {
+        let dir = folder(if legacy { "configuration-undo-legacy" } else { "configuration-undo" });
+        let file = dir.join("family.sc");
+        let assembly = dir.join("assembly.sc");
+        let (mut source, _, _) = configured_part(&file);
+        run(&mut source, "config.row", json!({"name": "Victim", "values": {"L": "35 mm"}}));
+        let row = source.doc.configs.rows.iter().find(|r| r.name == "Victim").unwrap().id;
+        if legacy {
+            source.doc_mut().configs.row_identities.remove(&row);
+        }
+        run(&mut source, "file.save", json!({"path": file}));
+        let mut s = Session::default();
+        let inserted = run(&mut s, "component.insert_design", json!({"path": file, "configuration": row, "reuse": true}));
+        let component = inserted["component"].as_u64().unwrap();
+        let occurrence = inserted["occurrence"].as_u64().unwrap();
+        let identity = s.doc.links[&component].configuration_identity;
+        assert_eq!(identity.is_none(), legacy);
+        run(&mut s, "file.save", json!({"path": assembly}));
+        let mut reopened = Session::default();
+        run(&mut reopened, "doc.open", json!({"path": assembly}));
+        assert_eq!(reopened.doc.links[&component].configuration_identity, identity);
+        s = reopened;
+
+        run(&mut source, "edit.undo", json!({}));
+        // The replacement deliberately has identical geometry: another link can warm the
+        // shared read cache, but neither that cache nor reuse may bypass the identity check.
+        run(&mut source, "config.row", json!({"name": "Replacement", "values": {"L": "35 mm"}}));
+        let replacement = source.doc.configs.rows.iter().find(|r| r.name == "Replacement").unwrap().id;
+        assert_eq!(replacement, row, "the source counter rewound with undo");
+        assert_ne!(source.doc.configs.row_identity(row), identity);
+        run(&mut source, "file.save", json!({"path": file}));
+        let fresh = run(&mut s, "component.insert_design", json!({"path": file, "configuration": row, "reuse": true}));
+        let fresh_component = fresh["component"].as_u64().unwrap();
+        assert_ne!(fresh_component, component, "a replacement row must not reuse the stale definition");
+        let before = s.doc.clone();
+        let undo = s.undo.len();
+        for (command, params) in
+            [("component.update_links", json!({"component": component})), ("component.relink", json!({"component": component, "path": file}))]
+        {
+            let error = s.execute(command, &params).unwrap_err().to_string();
+            assert!(error.contains("replaced"), "{error}");
+            assert_eq!(s.doc, before);
+            assert_eq!(s.undo.len(), undo);
+            assert_variant_length(&mut s, occurrence, 35.0);
+        }
+        let result = run(&mut s, "component.update_links", json!({"components": [component, fresh_component]}));
+        assert_eq!(result["failed"][0]["component"], component);
+        assert_eq!(s.doc.links[&component], before.links[&component]);
+        // An explicit selection intentionally accepts the replacement and records its identity.
+        run(&mut s, "component.relink", json!({"component": component, "path": file, "configuration": row}));
+        assert_eq!(s.doc.links[&component].configuration_identity, source.doc.configs.row_identity(row));
+        run(&mut source, "config.row", json!({"name": row, "rename": "Renamed", "values": {"L": "80 mm"}}));
+        run(&mut source, "file.save", json!({"path": file}));
+        run(&mut s, "component.update_links", json!({"component": component}));
+        assert_variant_length(&mut s, occurrence, 80.0);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[test]
+fn relinking_one_occurrence_selects_a_configuration_and_keeps_other_placements() {
+    let dir = folder("configuration-placement");
+    let file = dir.join("family.sc");
+    let (_, short, long) = configured_part(&file);
+    let mut s = Session::default();
+    let small = run(&mut s, "component.insert_design", json!({"path": file, "configuration": short, "reuse": true}));
+    let component = small["component"].as_u64().unwrap();
+    let first = small["occurrence"].as_u64().unwrap();
+    let second = run(&mut s, "occurrence.copy", json!({"occurrence": first, "translate": [50,0,0]}))["occurrence"].as_u64().unwrap();
+    let was = s.doc.occurrences.iter().find(|o| o.id == second).unwrap().clone();
+    let before = s.doc.clone();
+    let result = run(&mut s, "component.relink", json!({"component": component, "occurrence": second, "path": file, "configuration": "Long"}));
+    let linked = result["component"].as_u64().unwrap();
+    assert_ne!(linked, component);
+    let now = s.doc.occurrences.iter().find(|o| o.id == second).unwrap();
+    assert_eq!((now.parent, now.transform, now.grounded), (was.parent, was.transform, was.grounded));
+    assert_eq!(s.doc.links[&linked].configuration, Some(long));
+    assert_eq!(s.doc.links[&component].configuration, Some(short));
+    assert_variant_length(&mut s, first, 25.0);
+    assert_variant_length(&mut s, second, 30.0);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc, before);
+    assert_variant_length(&mut s, second, 25.0);
+    run(&mut s, "edit.redo", json!({}));
+    assert_variant_length(&mut s, second, 30.0);
+    // A single placement can change row in place; omitting the selector preserves that row.
+    run(&mut s, "component.relink", json!({"component": linked, "path": file}));
+    assert_eq!(s.doc.links[&linked].configuration, Some(long));
+    assert_variant_length(&mut s, second, 30.0);
+    run(&mut s, "component.relink", json!({"component": linked, "path": file, "configuration": null}));
+    assert_eq!(s.doc.links[&linked].configuration, None);
+    assert_variant_length(&mut s, second, 25.0);
+    run(&mut s, "component.relink", json!({"component": linked, "path": file, "configuration": long}));
+    let other = dir.join("other.sc");
+    part(&other, 45);
+    run(&mut s, "component.relink", json!({"component": linked, "path": other}));
+    assert_eq!(s.doc.links[&linked].configuration, None, "a different file does not inherit source-local row ids");
+    assert!((volume(&mut s) - (2500.0 + 9000.0)).abs() < 1e-5);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn relinking_through_a_source_alias_preserves_the_selected_configuration() {
+    let dir = folder("configuration-alias");
+    let file = dir.join("family.sc");
+    let alias = dir.join("alias.sc");
+    let (mut source, short, long) = configured_part(&file);
+    run(&mut source, "config.activate", json!({"row": long}));
+    run(&mut source, "file.save", json!({"path": file}));
+    std::os::unix::fs::symlink(&file, &alias).unwrap();
+    let mut s = Session::default();
+    let inserted = run(&mut s, "component.insert_design", json!({"path": file, "configuration": short}));
+    let component = inserted["component"].as_u64().unwrap();
+    let occurrence = inserted["occurrence"].as_u64().unwrap();
+    for path in [&alias, &file] {
+        let result = run(&mut s, "component.relink", json!({"component": component, "path": path}));
+        assert_eq!(result["geometry_changed"], false);
+        assert_eq!(s.doc.links[&component].configuration, Some(short));
+        assert_variant_length(&mut s, occurrence, 25.0);
+    }
+    // Repairing a refused old source must still work, without treating it as an alias.
+    s.doc_mut().links.get_mut(&component).unwrap().path = r"\\blocked-link-server\parts\family.sc".into();
+    run(&mut s, "component.relink", json!({"component": component, "path": file}));
+    assert_eq!(s.doc.links[&component].configuration, None);
+    run(&mut s, "component.relink", json!({"component": component, "path": file, "configuration": short}));
+    run(&mut s, "component.relink", json!({"component": component, "path": alias, "configuration": null}));
+    assert_eq!(s.doc.links[&component].configuration, None);
+    assert_variant_length(&mut s, occurrence, 30.0);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn linked_configuration_cache_keeps_materials_distinct_for_identical_geometry() {
+    let dir = folder("configuration-material-cache");
+    let file = dir.join("family.sc");
+    let mut source = properties_part(&file, "Steel", None, [12, 34, 56]);
+    run(&mut source, "config.configure", json!({"materials": ["Cube"]}));
+    run(&mut source, "config.row", json!({"name": "Default", "rename": "Steel row"}));
+    run(&mut source, "config.row", json!({"name": "Aluminum row", "values": {"material:Cube": "Aluminum"}}));
+    run(&mut source, "file.save", json!({"path": file}));
+    let mut s = Session::default();
+    let steel = run(&mut s, "component.insert_design", json!({"path": file, "configuration": "Steel row"}))["component"].as_u64().unwrap();
+    let aluminum = run(&mut s, "component.insert_design", json!({"path": file, "configuration": "Aluminum row"}))["component"].as_u64().unwrap();
+    for _ in 0..2 {
+        run(&mut s, "component.update_links", json!({"components": [steel, aluminum]}));
+        assert_link_properties(&mut s, steel, "Steel", 7.85, [12, 34, 56]);
+        assert_link_properties(&mut s, aluminum, "Aluminum", 2.7, [12, 34, 56]);
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn replace_with_link_by_path_does_not_reuse_a_pinned_configuration() {
+    let dir = folder("configuration-replacement");
+    let file = dir.join("family.sc");
+    let (mut source, short, long) = configured_part(&file);
+    let mut s = Session::default();
+    let pinned = run(&mut s, "component.insert_design", json!({"path": file, "configuration": short}));
+    let pinned_component = pinned["component"].as_u64().unwrap();
+    let pinned_occurrence = pinned["occurrence"].as_u64().unwrap();
+    let local = run(&mut s, "component.create", json!({"name": "Local bolt"}));
+    let local_occurrence = local["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length": 25, "width": 10, "height": 10, "corner": [0,0,0]}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let replaced = run(&mut s, "component.replace_with_link", json!({"component": local["component"], "path": file}));
+    let replacement = replaced["component"].as_u64().unwrap();
+    assert_ne!(replacement, pinned_component, "a path alone must follow saved source state even when a pinned row currently matches it");
+    assert_eq!(s.doc.links[&replacement].configuration, None);
+    assert_variant_length(&mut s, pinned_occurrence, 25.0);
+    assert_variant_length(&mut s, local_occurrence, 25.0);
+    run(&mut source, "config.activate", json!({"row": long}));
+    run(&mut source, "file.save", json!({"path": file}));
+    run(&mut s, "component.update_links", json!({}));
+    assert_variant_length(&mut s, pinned_occurrence, 25.0);
+    assert_variant_length(&mut s, local_occurrence, 30.0);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn insert_design_accepts_matrix_and_rotation_placement() {
+    let dir = folder("placement-test");
+    let file = dir.join("part.sc");
+    part(&file, 20);
+
+    let mut s = Session::default();
+
+    // 1. Insert with to_matrix (row-major 3x4).
+    let to_m = [0.0, 1.0, 0.0, 100.0, -1.0, 0.0, 0.0, 50.0, 0.0, 0.0, 1.0, 25.0];
+    let res1 = run(&mut s, "component.insert_design", json!({"path": file, "name": "PlacedMatrix", "to_matrix": to_m}));
+    let occ1_id = res1["occurrence"].as_u64().unwrap();
+    let occ1 = s.doc.occurrences.iter().find(|o| o.id == occ1_id).unwrap();
+    assert!((occ1.transform[1][0] - 1.0).abs() < 1e-6);
+    assert!((occ1.transform[0][1] - (-1.0)).abs() < 1e-6);
+    assert_eq!(occ1.transform[3], [100.0, 50.0, 25.0, 1.0]);
+
+    // 2. Reuse with to_matrix.
+    let to_m2 = [1.0, 0.0, 0.0, 10.0, 0.0, 1.0, 0.0, 20.0, 0.0, 0.0, 1.0, 30.0];
+    let res2 = run(&mut s, "component.insert_design", json!({"path": file, "reuse": true, "to_matrix": to_m2}));
+    let occ2_id = res2["occurrence"].as_u64().unwrap();
+    let occ2 = s.doc.occurrences.iter().find(|o| o.id == occ2_id).unwrap();
+    assert_eq!(occ2.transform[3], [10.0, 20.0, 30.0, 1.0]);
+
+    // 3. Insert with axis, angle and translate.
+    let res3 = run(
+        &mut s,
+        "component.insert_design",
+        json!({"path": file, "name": "PlacedTurn", "axis": [0, 0, 1], "angle": "90 deg", "translate": [5, 10, 15]}),
+    );
+    let occ3_id = res3["occurrence"].as_u64().unwrap();
+    let occ3 = s.doc.occurrences.iter().find(|o| o.id == occ3_id).unwrap();
+    assert!((occ3.transform[0][1] - 1.0).abs() < 1e-6);
+    assert!((occ3.transform[1][0] - (-1.0)).abs() < 1e-6);
+    assert_eq!(occ3.transform[3], [5.0, 10.0, 15.0, 1.0]);
+
+    // 4. Matrix with length expression in translation column.
+    let expr_m = json!([1, 0, 0, "40 mm", 0, 1, 0, "60 mm", 0, 0, 1, 0]);
+    let res4 = run(&mut s, "component.insert_design", json!({"path": file, "reuse": true, "matrix": expr_m}));
+    let occ4_id = res4["occurrence"].as_u64().unwrap();
+    let occ4 = s.doc.occurrences.iter().find(|o| o.id == occ4_id).unwrap();
+    assert_eq!(occ4.transform[3], [40.0, 60.0, 0.0, 1.0]);
+
+    // 5. Conflicting parameters refused.
+    assert!(s.execute("component.insert_design", &json!({"path": file, "to_matrix": to_m, "matrix": to_m})).is_err());
+    assert!(s.execute("component.insert_design", &json!({"path": file, "to_matrix": to_m, "translate": [1, 0, 0]})).is_err());
+    assert!(s.execute("component.insert_design", &json!({"path": file, "matrix": to_m, "axis": [0, 0, 1]})).is_err());
+
     let _ = std::fs::remove_dir_all(dir);
 }

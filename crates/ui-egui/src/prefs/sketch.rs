@@ -73,6 +73,7 @@ fn snapping(app: &mut SolveApp, ui: &mut egui::Ui) {
                     Some("prefs.sketch_snap_to_visible_grid_note"),
                     &mut app.preferences.sketch_snap_to_visible_grid,
                 );
+                setting::sketch_square_rectangles(app, ui);
             });
         });
         let label_width = ui_kit::ContentWidth::label(ui, app.tr("prefs.hold_stop_snapping"));
@@ -103,6 +104,7 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
             "prefs.line_hover_tangent_arc",
             "prefs.sketch.center_arc",
             "prefs.sketch_construction_lines",
+            "prefs.construction_line_classic",
             "prefs.sketch_mirror_auto_line",
             "prefs.sketch.ellipse_axes",
             "prefs.sketch.auto_dimensions",
@@ -111,6 +113,7 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
             "ui.first_dimension_scales_about_origin",
         ];
         let right_labels = [
+            "prefs.sketch.shortcut_again_ends_tool",
             "prefs.sketch.shortcut_cycles_modes",
             "prefs.ribbon_click_ends_tool",
             "ui.project_face_edges_sketch",
@@ -160,6 +163,13 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                     &mut app.preferences.center_arc_follows_cursor,
                 );
                 check(ui, "sketch_construction_lines", "prefs.sketch_construction_lines", None, &mut app.preferences.sketch_construction_lines);
+                check(
+                    ui,
+                    "construction_line_classic",
+                    "prefs.construction_line_classic",
+                    Some("prefs.construction_line_classic_note"),
+                    &mut app.preferences.construction_line_classic,
+                );
                 check(ui, "sketch_mirror_auto_line", "prefs.sketch_mirror_auto_line", None, &mut app.preferences.sketch_mirror_auto_line);
                 check(ui, "ellipse_axes", "prefs.sketch.ellipse_axes", Some("prefs.sketch.ellipse_axes_note"), &mut app.preferences.ellipse_axes);
                 check(
@@ -196,6 +206,13 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
             });
             ui.allocate_ui_with_layout(egui::vec2(right, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+                check(
+                    ui,
+                    "shortcut_again_ends_tool",
+                    "prefs.sketch.shortcut_again_ends_tool",
+                    Some("prefs.sketch.shortcut_again_ends_tool_tip"),
+                    &mut app.preferences.shortcut_again_ends_tool,
+                );
                 check(
                     ui,
                     "shortcut_cycles_modes",
@@ -241,6 +258,7 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::ui_kit::settings_search::commit_search_child(ui, &child, before);
         }
         dimension_values(app, ui, t.space_24 * 8.0 + t.space_8);
+        dimension_appearance(app, ui, t.space_24 * 8.0 + t.space_8);
         sketch_size(app, ui, t.space_24 * 8.0 + t.space_8);
     });
 }
@@ -491,6 +509,8 @@ fn selecting(app: &mut SolveApp, ui: &mut egui::Ui) {
                 (&[ctrl, click], toggle),
             ],
         );
+        #[cfg(target_arch = "wasm32")]
+        check(ui, "pencil_mode", "prefs.pencil_mode", Some("prefs.pencil_mode_tip"), &mut app.preferences.pencil_mode);
         check(ui, "prefer_free_sketch_points", "prefs.sketch.prefer_free_points", None, &mut app.preferences.prefer_free_sketch_points);
         check(
             ui,
@@ -588,6 +608,7 @@ fn targets(key: &str, response: &egui::Response) {
         "sketch_auto_locate" => "Also place them from the origin (fully constrained)",
         "first_dimension_scales" => "The first dimension scales the drawing",
         "center_arc_follows_cursor" => "Center point arc follows the cursor's direction",
+        "shortcut_again_ends_tool" => "Pressing an active tool's shortcut again closes it",
         "shortcut_cycles_modes" => "Pressing a tool's shortcut again switches its mode",
         "project_options_dialog" => "Project options dialog",
         "sketch_state_icons" => "Sketch icons in the color of their state",
@@ -628,6 +649,73 @@ fn dimension_values(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
                         .backing_on_hover_text(solidcraft_ui_text::tr("prefs.dimension_step_angle"));
                 });
             });
+        });
+    });
+}
+
+/// The size and colour of a sketch dimension's lines, arrows and value (#14121). The size is a
+/// factor of the theme's dimension text size; the colour is the theme's or one the user picks.
+/// Selection, hover and conflicts keep their own colours.
+fn dimension_appearance(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
+    let t = Tokens::get();
+    // The custom colour starts at the theme's dimension colour, so switching to Custom changes
+    // nothing until the user picks a colour, and stays visible in either theme.
+    let theme_colour = {
+        let colour = t.dimension.to_array();
+        [colour[0], colour[1], colour[2]]
+    };
+    let size_label = app.tr("prefs.dimension_text_size").to_string();
+    ui_kit::settings_block_hint(ui, &size_label, app.tr("prefs.dimension_text_size_note"), label_width, |ui| {
+        let response = ui_kit::slider(
+            ui,
+            &mut app.preferences.dimension_text_scale,
+            DIMENSION_TEXT_SCALE,
+            ui_kit::Slider { step: Some(0.05), format: |v| format!("{:.0} %", v * 100.0), ..Default::default() },
+        );
+        crate::scenario::publish_target("prefs:dimension_text_scale", response.rect);
+    });
+    let colour_label = app.tr("prefs.dimension_colour").to_string();
+    ui_kit::settings_block_hint(ui, &colour_label, app.tr("prefs.dimension_colour_note"), label_width, |ui| {
+        let labels = [app.tr("prefs.dimension_colour_theme"), app.tr("prefs.dimension_colour_custom")];
+        let mut selected = usize::from(app.preferences.dimension_colour.is_some());
+        if ui_kit::settings_segments(ui, &colour_label, &mut selected, &labels) {
+            app.preferences.dimension_colour = (selected == 1).then_some(theme_colour);
+        }
+        for (key, caption) in [("theme", labels[0]), ("custom", labels[1])] {
+            if let Some(at) = crate::scenario::handle_at(&format!("dialog:{colour_label}:{caption}")) {
+                crate::scenario::publish_handle(&format!("prefs:dimension_colour:{key}"), at);
+            }
+        }
+        let enabled = app.preferences.dimension_colour.is_some();
+        let mut rgb = app.preferences.dimension_colour.unwrap_or(theme_colour);
+        ui.horizontal_wrapped(|ui| {
+            ui.add_enabled_ui(enabled, |ui| {
+                let response = ui_kit::color_field(ui, &mut rgb);
+                crate::scenario::publish_target("prefs:dimension_colour_picker", response.rect);
+                if response.changed() {
+                    app.preferences.dimension_colour = Some(rgb);
+                }
+            });
+            let saved = app.preferences.dimension_colour;
+            let key = ui.make_persistent_id("sketch_dimension_colour_hex");
+            let (last, mut hex) = ui
+                .data(|data| data.get_temp::<(Option<[u8; 3]>, String)>(key))
+                .unwrap_or_else(|| (saved, crate::dialogs_appearance::hex(saved.unwrap_or(theme_colour))));
+            if last != saved {
+                hex = crate::dialogs_appearance::hex(saved.unwrap_or(theme_colour));
+            }
+            ui.add_enabled_ui(saved.is_some(), |ui| {
+                ui_kit::settings_control_width(ui, t.space_24 * 4.0, |ui| {
+                    let response = ui_kit::cell_editor(ui, key.with("edit"), &mut hex, app.tr("color.hex_hint"), false);
+                    crate::scenario::publish_target("prefs:dimension_colour_hex", response.rect);
+                    if response.changed()
+                        && let Some(colour) = crate::dialogs_appearance::parse_color(&json!(hex))
+                    {
+                        app.preferences.dimension_colour = Some(colour);
+                    }
+                });
+            });
+            ui.data_mut(|data| data.insert_temp(key, (app.preferences.dimension_colour, hex)));
         });
     });
 }

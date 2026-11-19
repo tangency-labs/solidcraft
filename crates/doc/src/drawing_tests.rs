@@ -4,6 +4,7 @@ use solidcraft_geom::drawing_sheet::{Margins, Orientation, PaperSize, SheetSize}
 use solidcraft_geom::drawing_view::{NamedView, ProjectedSide};
 use solidcraft_geom::paper::line::LineGroup;
 use solidcraft_geom::title_block::{Cell, CellKind, TextCell};
+use solidcraft_geom::{Region2Geom, Vec2Geom};
 
 use solidcraft_render::VisualStyle;
 
@@ -34,7 +35,7 @@ pub(crate) fn plate() -> Drawing {
     let a3 = drawing_sheet::Sheet::standard(PaperSize::A3, Orientation::Landscape);
     let mut d = Drawing::new("Plate assembly", "en-GB", "Assembly", a3, Some(DrawingBorderProfile::iso()), &BTreeSet::new(), &mut id_source).unwrap();
     let id = d.allocate_id(&mut id_source).unwrap();
-    d.sources.push(Source { id });
+    d.sources.push(Source { id, path: None });
     let plate_id = d.sources[0].id;
     let id = d.allocate_id(&mut id_source).unwrap();
     d.sheets.push(Arc::new(Sheet {
@@ -55,7 +56,7 @@ pub(crate) fn plate() -> Drawing {
     let (assembly, bolt_sheet) = (d.sheets[0].id, d.sheets[1].id);
     let mut add = |d: &mut Drawing, sheet, kind, place, settings, reference_shown_percent| {
         let id = d.allocate_id(&mut id_source).unwrap();
-        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent })]);
+        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent, label: None })]);
         id
     };
     let half = ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() };
@@ -221,15 +222,31 @@ fn every_cap_holds_on_both_sides() {
     for n in [0, 1001] {
         assert_eq!(refusal(&with("sheets", sheets(n))), "damaged drawing: a drawing has 1 to 1000 sheets", "{n} sheets");
     }
-    // Sources from id 1: the drawing's and the sheet's ids are the seed's, far from them. A drawing
-    // draws the design it is in, by an id alone: a path is a field this build doesn't know.
-    let sources = |n: u64| Value::Array((1..=n).map(|id| json!({"id": ids::encode(id)})).collect());
-    for n in [0, 1] {
-        assert_eq!(read(&with("sources", sources(n))).unwrap().sources.len(), n as usize);
+    // Sources from id 1: the drawing's and the sheet's ids are the seed's, far from them. Each names
+    // another design's file by its path, but at most one: the design the drawing is in, by an id alone.
+    let linked = |n: u64| Value::Array((1..=n).map(|id| json!({"id": ids::encode(id), "path": format!("parts/{id}.sc")})).collect());
+    for n in [0, 1, 64] {
+        assert_eq!(read(&with("sources", linked(n))).unwrap().sources.len(), n as usize);
     }
-    assert_eq!(refusal(&with("sources", sources(2))), "damaged drawing: a drawing draws only the design it is in");
-    let with_path = refusal(&with("sources", json!([{"id": ids::encode(1), "path": "plate.solidcraft"}])));
-    assert!(with_path.starts_with("damaged drawing: unknown field `path`"), "{with_path}");
+    assert_eq!(refusal(&with("sources", linked(65))), "damaged drawing: a drawing draws at most 64 designs");
+    let own = |id: u64| json!({"id": ids::encode(id)});
+    let both = json!([own(1), {"id": ids::encode(2), "path": "plate.sc"}]);
+    assert_eq!(read(&with("sources", both)).unwrap().own_source(), Some(1));
+    assert_eq!(refusal(&with("sources", json!([own(1), own(2)]))), "damaged drawing: a drawing draws the design it is in at most once");
+    for broken in ["", "  ", "a\0b.sc", "a\nb.sc"] {
+        let one = json!([{"id": ids::encode(1), "path": broken}]);
+        let rule = "damaged drawing: a source's path is not empty, not only spaces, without control characters";
+        assert_eq!(refusal(&with("sources", one)), rule, "{broken:?}");
+    }
+    // One file named twice still reads: only the file system can say two paths are one file, so
+    // the engine refuses it when a source is added, never the record.
+    let twice = json!([{"id": ids::encode(1), "path": "plate.sc"}, {"id": ids::encode(2), "path": "plate.sc"}]);
+    assert_eq!(read(&with("sources", twice)).unwrap().sources.len(), 2);
+    // No cap on a path's bytes but the drawing's own: a design deep in folders keeps its sources'
+    // whole paths in memory, as a component link keeps its file's.
+    let long = "é".repeat(3000) + ".sc";
+    let deep = read(&with("sources", json!([{"id": ids::encode(1), "path": long}]))).unwrap();
+    assert_eq!(deep.sources[0].path.as_deref(), Some(long.as_str()));
     let names = |name: &str| {
         let mut sheet_named = base.clone();
         sheet_named["sheets"][0]["name"] = json!(name);
@@ -244,6 +261,25 @@ fn every_cap_holds_on_both_sides() {
         let expected = (format!("damaged drawing: the drawing's {rule}"), format!("damaged drawing: sheet {sheet_id}: its {rule}"));
         assert_eq!(names(broken.as_str()), expected, "{broken:?}");
     }
+}
+
+/// Sources read in id order whatever order a file lists them in, and a drawing that draws another
+/// design's file saves the same bytes again: on its own (a design container's entry for it) and
+/// inline in a design's JSON. A `null` path reads as none and is never written.
+#[test]
+fn sources_read_in_id_order_and_save_the_same_bytes() {
+    let mut v = file(&bare());
+    v["sources"] = json!([{"id": ids::encode(9), "path": "../parts/plate.sc"}, {"id": ids::encode(3), "path": null}]);
+    let d = read(&v).unwrap();
+    assert_eq!(d.sources, [Source { id: 3, path: None }, Source { id: 9, path: Some("../parts/plate.sc".into()) }]);
+    let saved = d.to_json().unwrap();
+    assert_eq!(Drawing::from_json(&saved).unwrap().to_json().unwrap(), saved, "save, open, save: the same bytes");
+    let written: Value = serde_json::from_str(&saved).unwrap();
+    assert_eq!(written["sources"], json!([{"id": ids::encode(3)}, {"id": ids::encode(9), "path": "../parts/plate.sc"}]));
+    let mut doc = crate::Document::new("Case");
+    doc.drawings = vec![Arc::new(d)];
+    let inline = doc.to_json();
+    assert_eq!(crate::Document::from_json(&inline).unwrap().to_json(), inline);
 }
 
 /// The content language is a well-formed BCP 47 tag of 2 to 35 characters.
@@ -611,7 +647,7 @@ fn a_sheet_goes_with_everything_on_it() {
     assert_eq!((without.sheets.len(), without.views.len(), without.dimensions.len(), without.balloons.len()), (1, 1, 0, 0));
     // The top view, placed apart, moved to the bolt's sheet: its parent is on the assembly's.
     let mut moved = d.clone();
-    let top = moved.views.iter().position(|v| v.sheet == assembly && matches!((v.kind, v.place), (ViewKind::Projected { .. }, ViewPlace::At(_))));
+    let top = moved.views.iter().position(|v| v.sheet == assembly && matches!((&v.kind, v.place), (ViewKind::Projected { .. }, ViewPlace::At(_))));
     Arc::make_mut(&mut moved.views[top.unwrap()]).sheet = bolt;
     moved.validate().unwrap();
     moved.remove_sheet(assembly);
@@ -787,7 +823,11 @@ fn a_design_keeps_its_drawings_inline_in_plain_json() {
     assert_eq!(crate::Document::from_json(&saved).unwrap().to_json(), saved, "save, open, save: the same bytes");
     let v: Value = serde_json::from_str(&saved).unwrap();
     assert_eq!(v["drawings"][3], file(&plate()));
-    assert!(v["format_pending"].as_array().is_some_and(|names| names.contains(&json!("drawings"))), "{}", v["format_pending"]);
+    // Drawings in a design are a change of design format 59 (folded for 0.45.0-rc.1): a design
+    // that holds drawings is written at 59 or later, and no longer names the change as pending.
+    let format = v["format"].as_str().and_then(crate::format::version_of);
+    assert!(format.is_some_and(|n| n >= 59), "{}", v["format"]);
+    assert!(!v["format_pending"].as_array().is_some_and(|names| names.contains(&json!("drawings"))), "{}", v["format_pending"]);
     let empty: Value = serde_json::from_str(&crate::Document::new("Plate").to_json()).unwrap();
     assert_eq!(empty.get("drawings"), None);
 }
@@ -928,4 +968,943 @@ fn a_newer_builds_drawing_opens_and_keeps_what_it_cant_read() {
     assert_eq!(again["future_views"], file["future_views"]);
     assert_eq!(again["sheets"].as_array().unwrap().len(), d.sheets.len() + 1);
     assert_eq!(again["format"], json!(newer));
+    // A source of another design's file reads; one it can't read (a field a later build adds) stays
+    // out, named by its path, and goes back.
+    let nut = json!({"id": ids::encode(2), "path": "parts/nut.sc"});
+    let bolt = json!({"id": ids::encode(1), "path": "parts/bolt.sc", "future_digest": "ab"});
+    file["sources"].as_array_mut().unwrap().extend([nut, bolt.clone()]);
+    let opened = Drawing::from_json(&file.to_string()).unwrap();
+    let nut = Source { id: 2, path: Some("parts/nut.sc".into()) };
+    assert_eq!(opened.sources, [&[nut][..], &d.sources[..]].concat());
+    assert_eq!(opened.own_source(), Some(d.sources[0].id));
+    let said = &opened.newer_file.as_ref().unwrap().not_understood;
+    assert!(said.iter().any(|what| what.contains("parts/bolt.sc")), "{said:?}");
+    let again: Value = serde_json::from_str(&opened.to_json().unwrap()).unwrap();
+    assert_eq!(again["sources"].as_array().unwrap().last(), Some(&bolt));
+}
+
+// W38a: original paper-mm payload, independent of any Drawing UI or model solver.
+fn paper_sketch_file() -> Value {
+    let mut d = file(&plate());
+    let mut sketch = solidcraft_sketch::Sketch::new();
+    let pts = [(15.0, 10.0), (55.0, 10.0), (55.0, 30.0), (15.0, 30.0)];
+    for (i, (x, y)) in pts.into_iter().enumerate() {
+        sketch.add_point(solidcore_record::Vec2::new(x, y), Some(&format!("p{i}"))).unwrap();
+    }
+    for i in 0..4 {
+        sketch.add_line_pts(i + 1, (i + 1) % 4 + 1, Some(&format!("l{i}"))).unwrap();
+    }
+    sketch.add_constraint(solidcraft_sketch::ConstraintKind::Length { l: 0, value: 40.0 }, Some("Width".into())).unwrap();
+    sketch.points[1].exprs = Some(Box::new(solidcraft_sketch::PointExprs { x: Some("Inset + 5 mm".into()), y: None }));
+    d["sketches"] = json!([{"id": ids::encode(41), "sheet": d["sheets"][0]["id"], "name":"Detail outline", "sketch": sketch}]);
+    d
+}
+
+#[test]
+fn sheet_sketch_records_round_trip_in_paper_millimetres() {
+    let input = paper_sketch_file();
+    let loaded = read(&input).unwrap();
+    let saved = file(&loaded);
+    assert_eq!(saved["sketches"], input["sketches"]);
+    assert_eq!(saved["units"], json!({"fixed":{"unit":"in"}}));
+    assert_eq!(saved["sketches"][0]["sketch"]["points"][2]["pos"], json!([55.0, 10.0]));
+    assert_eq!(saved["sketches"][0]["sketch"]["constraints"][0]["value"], json!(40.0));
+    assert_eq!(saved["sketches"][0]["sketch"]["constraints"][0]["param"], json!("Width"));
+    assert_eq!(read(&saved).unwrap().to_json().unwrap(), loaded.to_json().unwrap());
+}
+
+#[test]
+fn sheet_sketch_records_are_ordered_by_id_without_reordering_sheets_or_geometry() {
+    let mut input = paper_sketch_file();
+    let mut second = input["sketches"][0].clone();
+    second["id"] = json!(ids::encode(40));
+    second["sheet"] = input["sheets"][1]["id"].clone();
+    input["sketches"].as_array_mut().unwrap().push(second);
+    let d = read(&input).unwrap();
+    assert_eq!(d.sketches.iter().map(|s| s.id).collect::<Vec<_>>(), [40, 41]);
+    assert_eq!(file(&d)["sheets"], input["sheets"]);
+    let mut reverse = d.clone();
+    reverse.sketches.reverse();
+    assert_eq!(reverse.to_json().unwrap(), d.to_json().unwrap());
+    assert_eq!(reverse.sketches[0].id, 41, "saving must not mutate the live record");
+    assert_eq!(d.sheet_sketch(41).unwrap().sheet, d.sheets[0].id);
+    assert!(bare().sheet_sketch(41).is_none(), "lookup must not fall back to another drawing");
+}
+
+#[test]
+fn sheet_sketch_ids_share_the_drawing_namespace_and_owners_must_resolve() {
+    let good = paper_sketch_file();
+    for duplicate in [good["id"].clone(), good["sources"][0]["id"].clone(), good["sheets"][0]["id"].clone(), json!(ids::encode(0))] {
+        let mut v = good.clone();
+        v["sketches"][0]["id"] = duplicate;
+        assert!(read(&v).is_err());
+    }
+    let mut v = good.clone();
+    v["sketches"][0]["sheet"] = good["sources"][0]["id"].clone();
+    assert!(refusal(&v).contains("owner does not exist"));
+    v["sketches"][0]["sheet"] = json!(ids::encode(999));
+    assert!(read(&v).is_err());
+    let mut duplicate = good;
+    let record = duplicate["sketches"][0].clone();
+    duplicate["sketches"].as_array_mut().unwrap().push(record);
+    assert!(read(&duplicate).is_err());
+
+    let mut d = read(&paper_sketch_file()).unwrap();
+    let mut generator = IdSource::seeded(777);
+    let taken = generator.next(&BTreeSet::new()).unwrap();
+    Arc::make_mut(&mut d.sketches[0]).id = taken;
+    assert_ne!(d.allocate_id(&mut IdSource::seeded(777)).unwrap(), taken);
+}
+
+#[test]
+fn sheet_sketches_keep_current_views_dimensions_balloons_and_revisions() {
+    let mut d = read(&paper_sketch_file()).unwrap();
+    let mut id_source = IdSource::seeded(7082);
+    let revision = d.allocate_id(&mut id_source).unwrap();
+    Arc::make_mut(&mut d.revisions).add(None, revision).unwrap();
+    d.validate().unwrap();
+    let saved = d.to_json().unwrap();
+    let reopened = Drawing::from_json(&saved).unwrap();
+    assert_eq!(reopened, d);
+    assert_eq!(reopened.to_json().unwrap(), saved);
+    assert_eq!((d.views.len(), d.dimensions.len(), d.balloons.len(), d.revisions.rows().len(), d.sketches.len()), (4, 3, 1, 1, 1));
+    for existing in d
+        .views
+        .iter()
+        .map(|record| record.id)
+        .chain(d.dimensions.iter().map(|record| record.id))
+        .chain(d.balloons.iter().map(|record| record.id))
+        .chain(d.revisions.ids())
+    {
+        let mut duplicate = d.clone();
+        Arc::make_mut(&mut duplicate.sketches[0]).id = existing;
+        assert!(duplicate.validate().unwrap_err().to_string().contains("two objects have the id"));
+        assert!(Drawing::from_json(&serde_json::to_string(&duplicate).unwrap()).is_err());
+    }
+    let mut without = d.clone();
+    let sheet = d.sketches[0].sheet;
+    let on = without.remove_sheet(sheet);
+    assert_eq!(on.sketches, vec![d.sketches[0].id]);
+    assert!(!on.is_empty());
+    assert!(without.sketches.is_empty());
+    without.validate().unwrap();
+    assert_eq!(without.revisions, d.revisions);
+    assert_eq!(d.to_json().unwrap(), saved, "removing a sheet changed the original record");
+}
+
+#[test]
+fn drawings_without_sketches_keep_their_old_shape_and_gain_only_the_pending_format() {
+    let old = plate();
+    let v = file(&old);
+    assert!(v.get("sketches").is_none());
+    assert!(read(&v).unwrap().sketches.is_empty());
+    // Sheet sketches are a change of drawing format 2 (folded for 0.45.0-rc.1), no longer pending.
+    assert!(DRAWING.current() >= 2 && !DRAWING.pending_names().iter().any(|n| n == "sheet-sketches"));
+    let mut explicit_empty = v;
+    explicit_empty["sketches"] = json!([]);
+    assert!(file(&read(&explicit_empty).unwrap()).get("sketches").is_none());
+}
+
+#[test]
+fn sheet_sketch_record_caps_run_before_typed_payload_decoding() {
+    let base = paper_sketch_file();
+    for (field, cap) in
+        [("points", solidcraft_sketch::MAX_POINTS), ("curves", solidcraft_sketch::MAX_CURVES), ("constraints", solidcraft_sketch::MAX_CONSTRAINTS)]
+    {
+        let mut v = base.clone();
+        // Null would fail typed SPoint/Curve/Constraint decoding; the size guard must run first.
+        v["sketches"][0]["sketch"][field] = Value::Array(vec![Value::Null; cap + 1]);
+        let why = refusal(&v);
+        assert!(why.contains(&format!("{field} limit exceeded")), "{why}");
+    }
+    let mut too_many = base.clone();
+    too_many["sketches"] = Value::Array(vec![Value::Null; MAX_SHEET_SKETCHES + 1]);
+    assert!(refusal(&too_many).contains("too many sheet sketches"));
+    for malformed in [Value::Null, json!({}), json!(true)] {
+        let mut v = base.clone();
+        v["sketches"] = malformed;
+        assert!(read(&v).is_err());
+    }
+    let mut spline = base;
+    spline["sketches"][0]["sketch"]["curves"][0] = json!({"type":"spline", "id":"s1", "pts":vec![0; solidcraft_sketch::MAX_SPLINE_POINTS + 1]});
+    assert!(refusal(&spline).contains("spline point limit exceeded"));
+}
+
+#[test]
+fn sheet_sketch_count_limit_is_inclusive_and_entity_budget_is_shared() {
+    let mut v = paper_sketch_file();
+    let template = v["sketches"][0].clone();
+    let records: Vec<_> = (0..MAX_SHEET_SKETCHES)
+        .map(|i| {
+            let mut record = template.clone();
+            record["id"] = json!(ids::encode(100 + i as u64));
+            record["sketch"] = serde_json::to_value(solidcraft_sketch::Sketch::new()).unwrap();
+            record
+        })
+        .collect();
+    v["sketches"] = json!(records);
+    assert_eq!(read(&v).unwrap().sketches.len(), MAX_SHEET_SKETCHES);
+    // Individually allowed arrays must not multiply the drawing-wide budget.
+    let payload = json!({"points":vec![Value::Null; solidcraft_sketch::MAX_POINTS]});
+    let many: Vec<_> = (0..5).map(|i| json!({"id":ids::encode(100+i),"sketch":payload})).collect();
+    v["sketches"] = json!(many);
+    assert!(refusal(&v).contains("drawing sketch entity limit exceeded"));
+}
+
+#[test]
+fn sheet_sketch_payload_refuses_bad_geometry_identity_and_constraints_without_repair() {
+    let original = paper_sketch_file();
+    let edits: Vec<(&str, Value)> = vec![
+        ("/sketches/0/sketch/points/1/id", json!("origin")),
+        ("/sketches/0/sketch/curves/0/id", json!("p0")),
+        ("/sketches/0/sketch/points/0/fixed", json!(false)),
+        ("/sketches/0/sketch/points/0/pos", json!([1.0, 0.0])),
+        ("/sketches/0/sketch/curves/0/a", json!(9999)),
+        ("/sketches/0/sketch/constraints/0/l", json!(9999)),
+        ("/sketches/0/sketch/constraints/0/value", json!(-1.0)),
+        ("/sketches/0/name", json!(" ")),
+        ("/sketches/0/sketch/points/1/exprs/x", json!("x".repeat(4097))),
+        ("/sketches/0/sketch/constraints/0/param", json!("\n")),
+    ];
+    for (pointer, bad) in edits {
+        let mut v = original.clone();
+        *v.pointer_mut(pointer).unwrap() = bad;
+        assert!(read(&v).is_err(), "accepted {pointer}");
+    }
+    let mut d = read(&original).unwrap();
+    Arc::make_mut(&mut d.sketches[0]).sketch.points[1].pos.x = f64::NAN;
+    assert!(d.validate().is_err());
+    assert!(d.to_json().is_err(), "NaN must not silently serialize as null");
+    assert_eq!(original, paper_sketch_file(), "the oracle was not modified");
+}
+
+#[test]
+fn sheet_sketch_records_refuse_unconnected_auxiliary_and_model_only_state_explicitly() {
+    let original = paper_sketch_file();
+    for field in ["links", "patterns", "offsets", "freeform_offsets", "wires", "equations"] {
+        let mut v = original.clone();
+        v["sketches"][0]["sketch"][field] = json!([null]);
+        assert!(refusal(&v).contains("not supported yet"), "{field}");
+    }
+    for flag in ["slice", "three_d"] {
+        let mut v = original.clone();
+        v["sketches"][0]["sketch"]["view"] = json!({flag:true});
+        assert!(refusal(&v).contains("model-only"));
+    }
+    let mut unknown = original;
+    unknown["sketches"][0]["source_path"] = json!("another-design.solidcraft");
+    assert!(refusal(&unknown).contains("unknown field"));
+}
+
+#[test]
+fn inline_design_roundtrip_preserves_sketch_payload_without_model_parameter_creation() {
+    let d = read(&paper_sketch_file()).unwrap();
+    let mut doc = crate::Document::new("Source");
+    let before = doc.to_json();
+    doc.drawings.push(Arc::new(d));
+    let reopened = crate::Document::from_json(&doc.to_json()).unwrap();
+    assert_eq!(file(&reopened.drawings[0])["sketches"], paper_sketch_file()["sketches"]);
+    let mut only_model = reopened;
+    only_model.drawings.clear();
+    assert_eq!(only_model.to_json(), before, "record IO must not create source parameters or features");
+}
+
+#[test]
+fn sheet_sketch_json_mutations_are_errors_or_complete_reopenable_records() {
+    let base = paper_sketch_file();
+    let count = count(&base);
+    for index in 0..count {
+        for lie in [Value::Null, json!(true), json!("hostile"), json!(-1), json!(1e100)] {
+            let mut v = base.clone();
+            let mut pick = index;
+            mutate(&mut v, &mut pick, &lie, 0);
+            if let Ok(d) = read(&v) {
+                d.validate().unwrap();
+                let saved = d.to_json().unwrap();
+                assert_eq!(Drawing::from_json(&saved).unwrap(), d);
+            }
+        }
+    }
+}
+
+// W38a R2: the edit boundary uses the existing evaluator/solver, not a second sketcher.
+fn sheet_edit_design() -> (crate::Document, u64) {
+    use solidcraft_sketch::ConstraintKind;
+    let mut drawing = read(&paper_sketch_file()).unwrap();
+    let sketch = &mut Arc::make_mut(&mut drawing.sketches[0]).sketch;
+    for l in [0, 2] {
+        sketch.add_constraint(ConstraintKind::Horizontal { l }, None).unwrap();
+    }
+    for l in [1, 3] {
+        sketch.add_constraint(ConstraintKind::Vertical { l }, None).unwrap();
+    }
+    sketch.add_constraint(ConstraintKind::Length { l: 1, value: 20.0 }, None).unwrap();
+    let id = drawing.id;
+    let mut doc = crate::Document::new("Read-only parameter source");
+    doc.units = "in".into();
+    doc.set_param("Width", "40", Some("mm"), None).unwrap();
+    doc.set_param("Inset", "10", Some("mm"), None).unwrap();
+    doc.put_drawing(Arc::new(drawing));
+    (doc, id)
+}
+
+// Test-only container adoption of a staged Drawing edit. The production engine
+// always publishes through Session::edit_drawing; no Document writer API remains.
+fn edit_sheet_fixture<T>(
+    doc: &mut crate::Document,
+    drawing: u64,
+    sketch: u64,
+    change: impl FnOnce(&mut solidcraft_sketch::Sketch) -> Result<T>,
+) -> Result<(T, SolvedSheetSketch)> {
+    let mut owners = doc.drawings.iter().filter(|owner| owner.id == drawing);
+    let owner = owners.next().ok_or_else(|| DocError::Invalid("missing drawing".into()))?;
+    if owners.next().is_some() {
+        return Err(DocError::Invalid("ambiguous drawing".into()));
+    }
+    let mut next = (**owner).clone();
+    let out = next.edit_sheet_sketch(doc, sketch, change)?;
+    next.validate()?;
+    if next != **owner {
+        doc.put_drawing(Arc::new(next));
+    }
+    Ok(out)
+}
+
+fn sheet_rectangle_size(sketch: &solidcraft_sketch::Sketch) -> (f64, f64) {
+    (sketch.points[2].pos.dist(sketch.points[1].pos), sketch.points[3].pos.dist(sketch.points[2].pos))
+}
+
+#[test]
+fn sheet_sketch_resolution_reads_source_values_without_changing_the_record_or_model() {
+    let (doc, id) = sheet_edit_design();
+    let before = doc.to_json();
+    let owner = doc.drawing(id).unwrap().clone();
+    let solved = doc.solve_sheet_sketch(id, 41).unwrap();
+    assert_eq!((solved.drawing, solved.sheet, solved.id), (id, owner.sheets[0].id, 41));
+    assert!(solved.report.keeps_orientation());
+    assert_eq!(solved.report.dof, 0);
+    let (width, height) = sheet_rectangle_size(&solved.sketch);
+    assert!((width - 40.0).abs() < 1e-6 && (height - 20.0).abs() < 1e-6);
+    assert_eq!(solved.sketch.points[1].pos, solidcore_record::Vec2::new(15.0, 10.0));
+    assert_eq!(solved.sketch.points[1].exprs, owner.sketches[0].sketch.points[1].exprs);
+    assert_eq!(solved.sketch.constraints[0].param.as_deref(), Some("Width"));
+    assert_eq!(doc.to_json(), before);
+    assert!(Arc::ptr_eq(doc.drawing(id).unwrap(), &owner));
+}
+
+#[test]
+fn sheet_sketch_resolution_uses_fresh_parameters_and_paper_defaults_not_display_units() {
+    let (mut doc, id) = sheet_edit_design();
+    doc.set_param("Width", "2", Some("in"), None).unwrap();
+    doc.set_param("Inset", "1", Some("in"), None).unwrap();
+    let d = Arc::make_mut(doc.drawings.iter_mut().find(|d| d.id == id).unwrap());
+    Arc::make_mut(&mut d.sketches[0]).sketch.points[1].exprs.as_mut().unwrap().x = Some("Inset + 5".into());
+    let before = doc.to_json();
+    let solved = doc.solve_sheet_sketch(id, 41).unwrap();
+    let (width, height) = sheet_rectangle_size(&solved.sketch);
+    assert!((width - 50.8).abs() < 1e-6 && (height - 20.0).abs() < 1e-6);
+    // Inset is 25.4 mm, but the literal +5 is five paper mm, not five inches.
+    assert!((solved.sketch.points[1].pos.x - 30.4).abs() < 1e-9);
+    assert_eq!(doc.to_json(), before);
+    doc.set_param("Width", "60", Some("mm"), None).unwrap();
+    let solved_again = doc.solve_sheet_sketch(id, 41).unwrap();
+    assert!((sheet_rectangle_size(&solved_again.sketch).0 - 60.0).abs() < 1e-6);
+    assert_eq!(doc.drawing(id).unwrap().sketches[0].sketch.points[2].pos.x, 55.0, "read-only resolution never adopts a result");
+}
+
+#[test]
+fn sheet_sketch_edit_solves_and_commits_only_its_own_drawing() {
+    let (mut doc, id) = sheet_edit_design();
+    let before = doc.clone();
+    let mut other = (**doc.drawing(id).unwrap()).clone();
+    other.id += 1;
+    other.name = "Other drawing, same local sketch id".into();
+    let other_id = other.id;
+    doc.put_drawing(Arc::new(other));
+    let other = doc.drawing(other_id).unwrap().clone();
+    let (answer, solved) = edit_sheet_fixture(&mut doc, id, 41, |sketch| {
+        sketch.constraints[0].param = None;
+        sketch.constraints[0].kind.set_value(60.0);
+        Ok("accepted")
+    })
+    .unwrap();
+    assert_eq!(answer, "accepted");
+    assert!((sheet_rectangle_size(&solved.sketch).0 - 60.0).abs() < 1e-6);
+    assert_eq!(doc.drawing(id).unwrap().sketches[0].sketch, solved.sketch);
+    assert_eq!(doc.params, before.params, "editing cannot create a source parameter");
+    assert_eq!(doc.features, before.features);
+    assert!(Arc::ptr_eq(doc.drawing(other_id).unwrap(), &other));
+    assert_eq!(other.sketches[0].sketch.constraints[0].param.as_deref(), Some("Width"));
+    let mut only_model = doc.clone();
+    only_model.drawings = before.drawings.clone();
+    assert_eq!(only_model.to_json(), before.to_json(), "no other document field changed");
+    let reopened = crate::Document::from_json(&doc.to_json()).unwrap();
+    assert_eq!(reopened.drawing(id).unwrap().sketches[0].sketch, solved.sketch);
+}
+
+#[test]
+fn sheet_sketch_edit_refuses_bad_inputs_and_conflicts_atomically() {
+    let (mut doc, id) = sheet_edit_design();
+    let original = doc.to_json();
+    let owner = doc.drawing(id).unwrap().clone();
+    for kind in 0..5 {
+        let result = edit_sheet_fixture(&mut doc, id, 41, |sketch| {
+            match kind {
+                0 => {
+                    sketch.points[1].pos.x += 1.0;
+                    return Err(DocError::Invalid("deliberately refused edit".into()));
+                }
+                1 => sketch.points[2].pos.x = f64::NAN,
+                2 => sketch.curves[0].kind = solidcraft_sketch::CurveKind::Line { a: 99_999, b: 1 },
+                3 => sketch.constraints[0].param = Some("Absent".into()),
+                _ => {
+                    sketch.add_constraint(solidcraft_sketch::ConstraintKind::Length { l: 0, value: 99.0 }, None)?;
+                }
+            }
+            Ok(())
+        });
+        assert!(result.is_err(), "accepted failed edit {kind}");
+        assert_eq!(doc.to_json(), original, "edit {kind} changed the stored document");
+        assert!(Arc::ptr_eq(doc.drawing(id).unwrap(), &owner));
+    }
+}
+
+#[test]
+fn sheet_sketch_edit_does_not_publish_partial_expression_evaluation() {
+    let (mut doc, id) = sheet_edit_design();
+    let before = doc.to_json();
+    let owner = doc.drawing(id).unwrap().clone();
+    for expression in ["Absent + 1 mm", "90 deg", "1 / 0", "100000000000 mm", "("] {
+        let result = edit_sheet_fixture(&mut doc, id, 41, |sketch| {
+            sketch.points[1].exprs.as_mut().unwrap().x = Some("Inset + 15 mm".into());
+            sketch.points[2].exprs = Some(Box::new(solidcraft_sketch::PointExprs { x: Some(expression.into()), y: None }));
+            Ok(())
+        });
+        assert!(result.is_err(), "accepted {expression}");
+        assert_eq!(doc.to_json(), before);
+        assert!(Arc::ptr_eq(doc.drawing(id).unwrap(), &owner));
+    }
+}
+
+#[test]
+fn sheet_sketch_resolution_requires_a_declared_source_only_for_named_references() {
+    let (mut doc, id) = sheet_edit_design();
+    let d = Arc::make_mut(doc.drawings.iter_mut().find(|d| d.id == id).unwrap());
+    // The shared plate fixture now has source-dependent view records. This
+    // case isolates sheet expressions without leaving damaged view references.
+    d.sources.clear();
+    d.views.clear();
+    d.dimensions.clear();
+    d.balloons.clear();
+    for sheet in &mut d.sheets {
+        Arc::make_mut(sheet).documents = None;
+    }
+    d.validate().unwrap();
+    let before = doc.to_json();
+    let e = doc.solve_sheet_sketch(id, 41).unwrap_err().to_string();
+    assert!(e.contains("declared design source"), "{e}");
+    assert_eq!(doc.to_json(), before);
+    let (_, solved) = edit_sheet_fixture(&mut doc, id, 41, |sketch| {
+        sketch.constraints[0].param = None;
+        sketch.points[1].exprs.as_mut().unwrap().x = Some("5".into());
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(solved.sketch.points[1].pos.x, 5.0, "bare values stay paper mm without a source");
+    assert!((sheet_rectangle_size(&solved.sketch).0 - 40.0).abs() < 1e-6);
+}
+
+#[test]
+fn sheet_sketch_source_errors_are_explicit_and_unrelated_errors_do_not_retarget_it() {
+    let (mut doc, id) = sheet_edit_design();
+    doc.set_param("Width", "90", Some("deg"), None).unwrap();
+    assert!(doc.solve_sheet_sketch(id, 41).is_err());
+    doc.set_param("Width", "40", Some("mm"), None).unwrap();
+    let at = doc.params.iter().position(|p| p.name == "Width").unwrap();
+    doc.params[at].expr = "Width + 1 mm".into();
+    let before = doc.to_json();
+    let error = doc.solve_sheet_sketch(id, 41).unwrap_err().to_string();
+    assert!(error.contains("circular reference") && error.contains("Width"), "{error}");
+    assert_eq!(doc.to_json(), before);
+    let (_, solved) = edit_sheet_fixture(&mut doc, id, 41, |sketch| {
+        sketch.constraints[0].param = None;
+        Ok(())
+    })
+    .unwrap();
+    assert!((sheet_rectangle_size(&solved.sketch).0 - 40.0).abs() < 1e-6, "unreferenced source error is not a fallback or a global blocker");
+}
+
+#[test]
+fn sheet_sketch_target_is_exact_and_a_noop_preserves_the_record_arc() {
+    let (mut doc, id) = sheet_edit_design();
+    let before = doc.to_json();
+    assert!(doc.solve_sheet_sketch(id + 1, 41).is_err());
+    assert!(edit_sheet_fixture(&mut doc, id, 42, |_| Ok(())).is_err());
+    assert_eq!(doc.to_json(), before);
+    edit_sheet_fixture(&mut doc, id, 41, |_| Ok(())).unwrap();
+    let owner = doc.drawing(id).unwrap().clone();
+    let record = owner.sketches[0].clone();
+    edit_sheet_fixture(&mut doc, id, 41, |_| Ok(())).unwrap();
+    assert!(Arc::ptr_eq(doc.drawing(id).unwrap(), &owner));
+    assert!(Arc::ptr_eq(&doc.drawing(id).unwrap().sketches[0], &record));
+}
+
+#[test]
+fn sheet_sketch_resolution_refuses_ambiguous_drawing_identity() {
+    let (mut doc, id) = sheet_edit_design();
+    let owner = doc.drawing(id).unwrap().clone();
+    doc.drawings.push(owner.clone());
+    let before = doc.to_json();
+    assert!(doc.solve_sheet_sketch(id, 41).unwrap_err().to_string().contains("ambiguous"));
+    assert!(edit_sheet_fixture(&mut doc, id, 41, |_| Ok(())).is_err());
+    assert_eq!(doc.to_json(), before);
+    assert!(doc.drawings.iter().all(|drawing| Arc::ptr_eq(drawing, &owner)));
+}
+
+#[test]
+fn sheet_sketch_resolution_refuses_parameter_binding_on_a_nondimension() {
+    let (mut doc, id) = sheet_edit_design();
+    let before = doc.to_json();
+    let error = edit_sheet_fixture(&mut doc, id, 41, |sketch| {
+        sketch.constraints[1].param = Some("Width".into());
+        Ok(())
+    })
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("only a sheet sketch dimension"), "{error}");
+    assert_eq!(doc.to_json(), before);
+}
+
+// Cam's W38a review: save has the same validation rule with or without sketches.
+#[test]
+fn saving_a_drawing_validates_its_record_even_without_sketches() {
+    for with_sketch in [false, true] {
+        let good = if with_sketch { read(&paper_sketch_file()).unwrap() } else { bare() };
+        let before = good.to_json().unwrap();
+        for problem in 0..5 {
+            let mut damaged = good.clone();
+            match problem {
+                0 => damaged.name.clear(),
+                1 => Arc::make_mut(&mut damaged.sheets[0]).dpi = f64::NAN,
+                2 => damaged.sheets.clear(),
+                3 => damaged.language = "???".into(),
+                _ => damaged.units = Units::Fixed { unit: "deg".into() },
+            }
+            assert!(damaged.to_json().is_err(), "saved invalid record {problem}, sketches={with_sketch}");
+        }
+        assert_eq!(good.to_json().unwrap(), before);
+        assert_eq!(Drawing::from_json(&before).unwrap(), good);
+    }
+}
+
+#[test]
+fn staged_sheet_sketch_edit_changes_only_the_given_drawing_not_the_source_design() {
+    let (doc, id) = sheet_edit_design();
+    let source = doc.to_json();
+    let mut staged = (**doc.drawing(id).unwrap()).clone();
+    let old_record = staged.sheet_sketch(41).unwrap().clone();
+    let (_, solved) = staged
+        .edit_sheet_sketch(&doc, 41, |sketch| {
+            sketch.constraints[0].param = None;
+            sketch.constraints[0].kind.set_value(60.0);
+            Ok(())
+        })
+        .unwrap();
+    staged.validate().unwrap();
+    assert!((sheet_rectangle_size(&solved.sketch).0 - 60.0).abs() < 1e-6);
+    assert!((sheet_rectangle_size(&staged.sheet_sketch(41).unwrap().sketch).0 - 60.0).abs() < 1e-6);
+    assert_eq!(doc.to_json(), source, "a staged Drawing operation never publishes to the source design");
+    assert!(Arc::ptr_eq(doc.drawing(id).unwrap().sheet_sketch(41).unwrap(), &old_record));
+    assert_eq!(staged.sheet_sketch(41).unwrap().sketch.points[0].pos, solidcore_record::Vec2::ZERO);
+    assert_eq!(staged.sheet_sketch(41).unwrap().sheet, staged.sheets[0].id);
+}
+
+#[test]
+fn staged_sheet_sketch_edit_checks_the_cumulative_entity_cap_before_solving() {
+    use solidcraft_sketch::{MAX_CONSTRAINTS, MAX_CURVES, MAX_POINTS, Sketch};
+    let mut d = bare();
+    let mut payload = Sketch::new();
+    for i in 1..80 {
+        payload.add_point(solidcore_record::Vec2::new(i as f64, 10.0), Some(&format!("p{i}"))).unwrap();
+    }
+    for i in 0..1000 {
+        d.sketches.push(Arc::new(SheetSketch { id: 1000 + i, sheet: d.sheets[0].id, name: format!("Sketch {i}"), sketch: payload.clone() }));
+    }
+    assert_eq!(d.sketches.len(), MAX_SHEET_SKETCHES);
+    assert_eq!(d.sketches.iter().map(|s| s.sketch.points.len()).sum::<usize>(), MAX_POINTS + MAX_CURVES + MAX_CONSTRAINTS);
+    d.validate().unwrap();
+    let original = d.clone();
+    let record = d.sheet_sketch(1000).unwrap().clone();
+    let e = d
+        .edit_sheet_sketch(&crate::Document::default(), 1000, |sketch| {
+            sketch.add_point(solidcore_record::Vec2::new(3.0, 4.0), Some("over_cap"))?;
+            Ok(())
+        })
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("entity") && e.contains("limit"), "{e}");
+    assert_eq!(d, original);
+    assert!(Arc::ptr_eq(d.sheet_sketch(1000).unwrap(), &record));
+}
+
+#[test]
+fn sheet_sketch_validation_preserves_the_slot_work_allowance() {
+    use solidcore_record::Vec2;
+    use solidcraft_sketch::{Constraint, ConstraintKind as K, Sketch};
+    let mut sk = Sketch::new();
+    let line = sk.add_line(Vec2::new(20.0, 15.0), Vec2::new(60.0, 15.0), None, None, None).unwrap();
+    let a = sk.add_arc(Vec2::new(20.0, 20.0), Vec2::new(20.0, 25.0), Vec2::new(20.0, 15.0), [None; 3], None).unwrap();
+    let b = sk.add_arc(Vec2::new(60.0, 20.0), Vec2::new(60.0, 15.0), Vec2::new(60.0, 25.0), [None; 3], None).unwrap();
+    // Stored redundant constraints are valid input. Bypass add_constraint's
+    // current deduplication only in this hostile-size fixture, preserving the
+    // original validation work at both sides of the production limit.
+    for i in 0..703 {
+        sk.constraints.push(Constraint { id: format!("budget_h{i}"), kind: K::Horizontal { l: line }, param: None, driven: false, text: None });
+    }
+    sk.add_constraint(K::Radius { c: a, value: 5.0 }, None).unwrap();
+    sk.add_constraint(K::Radius { c: b, value: 5.0 }, None).unwrap();
+    sk.add_constraint(K::SlotOverallLength { a, b, value: 50.0 }, None).unwrap();
+    assert_eq!(sk.constraints.len(), 706);
+    assert_eq!(4 * sk.constraints.len().pow(2) + sk.constraints.len() - 1, 1_994_449);
+    let mut d = bare();
+    d.sketches.push(Arc::new(SheetSketch { id: 41, sheet: d.sheets[0].id, name: "Slot".into(), sketch: sk }));
+    // 705 ordinary charges plus 4*706^2 for the one slot: 1,994,449.
+    d.validate().unwrap();
+    let before = d.clone();
+    let e = d
+        .edit_sheet_sketch(&crate::Document::default(), 41, |sketch| {
+            sketch.constraints.push(Constraint { id: "budget_h703".into(), kind: K::Horizontal { l: line }, param: None, driven: false, text: None });
+            assert_eq!(sketch.constraints.len(), 707);
+            assert_eq!(4 * sketch.constraints.len().pow(2) + sketch.constraints.len() - 1, 2_000_102);
+            Ok(())
+        })
+        .unwrap_err()
+        .to_string();
+    // Adding one ordinary constraint makes the same conservative charge 2,000,102.
+    assert!(e.contains("validation work"), "{e}");
+    assert_eq!(d, before);
+}
+
+#[test]
+fn staged_sheet_sketch_edit_refuses_an_invalid_original_before_running_the_callback() {
+    let (doc, id) = sheet_edit_design();
+    let mut d = (**doc.drawing(id).unwrap()).clone();
+    Arc::make_mut(&mut d.sketches[0]).sketch.curves[0].kind = solidcraft_sketch::CurveKind::Line { a: 99_999, b: 1 };
+    let before = d.clone();
+    let mut called = false;
+    assert!(
+        d.edit_sheet_sketch(&doc, 41, |_| {
+            called = true;
+            Ok(())
+        })
+        .is_err()
+    );
+    assert!(!called, "unsafe original data must be refused before a callback sees it");
+    assert_eq!(d, before);
+}
+
+fn w38d_record_fixture(hole: bool) -> (crate::Document, u64, crate::WholeProfileBoundary) {
+    let (mut doc, id) = sheet_edit_design();
+    let mut drawing = (**doc.drawing(id).unwrap()).clone();
+    if hole {
+        Arc::make_mut(&mut drawing.sketches[0]).sketch.add_circle(Vec2::new(35.0, 20.0), 3.0, None, Some("hole")).unwrap();
+    }
+    let boundary = drawing
+        .sheet_fill_profiles(&doc, 41)
+        .unwrap()
+        .profiles
+        .into_iter()
+        .find(|profile| profile.boundary.holes.len() == usize::from(hole))
+        .unwrap()
+        .boundary;
+    let region = drawing.sheet_fill_region(&doc, 41, &boundary).unwrap();
+    drawing.patterns.push(Arc::new(PatternSnapshot { id: 71, pattern: solidcore_record::hatch::Pattern::lines_45() }));
+    drawing.fills.push(Arc::new(SketchFill { id: 70, sketch: 41, boundary: boundary.clone(), paint: FillPaint::Solid, last_region: region }));
+    drawing.validate().unwrap();
+    doc.put_drawing(Arc::new(drawing));
+    (doc, id, boundary)
+}
+
+#[test]
+fn sheet_fill_records_keep_sorted_snapshots_global_ids_and_sheet_ownership() {
+    let (doc, id, _) = w38d_record_fixture(true);
+    let mut drawing = (**doc.drawing(id).unwrap()).clone();
+    let mut second = (*drawing.fills[0]).clone();
+    second.id = 73;
+    second.paint = FillPaint::Hatch { pattern: 71, pen_width_mm: 0.25 };
+    drawing.fills.insert(0, Arc::new(second));
+    drawing.patterns.insert(0, Arc::new(PatternSnapshot { id: 72, pattern: drawing.patterns[0].pattern.clone() }));
+    let value = file(&drawing);
+    assert_eq!(value["fills"][0]["id"], ids::encode(70));
+    assert_eq!(value["patterns"][0]["id"], ids::encode(71));
+    assert_eq!(value["fills"][1]["paint"]["pattern"], ids::encode(71));
+    let reopened = read(&value).unwrap();
+    assert_eq!(reopened.fills.iter().map(|fill| fill.id).collect::<Vec<_>>(), [70, 73]);
+    assert_eq!(reopened.patterns[0].pattern.name, reopened.patterns[1].pattern.name, "duplicate imported names have independent ids");
+    assert!(reopened.object_ids().any(|id| id == 70) && reopened.object_ids().any(|id| id == 72));
+    let mut collision = reopened.clone();
+    Arc::make_mut(&mut collision.patterns[0]).id = 70;
+    assert!(collision.validate().unwrap_err().to_string().contains("two objects have the id"));
+    let sheet = reopened.sketches[0].sheet;
+    let mut removed = reopened.clone();
+    let on = removed.remove_sheet(sheet);
+    assert_eq!(on.fills, [70, 73]);
+    assert!(removed.fills.is_empty() && removed.sketches.is_empty());
+    assert_eq!(removed.patterns, reopened.patterns, "patterns belong to the drawing, not a removed sheet");
+    removed.validate().unwrap();
+    assert_eq!(file(&reopened), value);
+}
+
+#[test]
+fn sheet_fill_deleted_hole_keeps_the_complete_old_region_instead_of_outer_only() {
+    let (doc, id, boundary) = w38d_record_fixture(true);
+    let mut drawing = (**doc.drawing(id).unwrap()).clone();
+    let region = drawing.fills[0].last_region.clone();
+    assert!((region.area() - (800.0 - std::f64::consts::PI * 9.0)).abs() < 1e-7);
+    Arc::make_mut(&mut drawing.sketches[0]).sketch.remove_curves(&[4]);
+    drawing.refresh_fill_regions(&doc, &std::collections::BTreeSet::from([41])).unwrap();
+    let resolved = drawing.resolve_sheet_fill(&doc, 70).unwrap();
+    assert!(matches!(resolved.status, FillRegionStatus::LostBoundary(_)));
+    assert_eq!(resolved.region, region);
+    assert_eq!(drawing.fills[0].last_region, region);
+    let outer_only = crate::WholeProfileBoundary { outer: boundary.outer, holes: vec![] };
+    assert!((drawing.sheet_fill_region(&doc, 41, &outer_only).unwrap().area() - 800.0).abs() < 1e-7);
+    let reopened = Drawing::from_json(&drawing.to_json().unwrap()).unwrap();
+    assert_eq!(reopened.resolve_sheet_fill(&doc, 70).unwrap().region, region);
+    assert!(matches!(reopened.resolve_sheet_fill(&doc, 70).unwrap().status, FillRegionStatus::LostBoundary(_)));
+}
+
+#[test]
+fn sheet_fill_source_refresh_uses_prospective_source_and_preserves_latest_region_on_loss() {
+    let (before, id, _) = w38d_record_fixture(false);
+    let original = before.drawing(id).unwrap();
+    let mut after = before.clone();
+    after.set_param("Width", "60", Some("mm"), None).unwrap();
+    let mut prospective = (**original).clone();
+    prospective.refresh_fill_regions_after_source_change(original, &before, &after).unwrap();
+    assert!((prospective.fills[0].last_region.area() - 1200.0).abs() < 1e-7);
+    assert!(
+        (after.drawing(id).unwrap().fills[0].last_region.area() - 800.0).abs() < 1e-7,
+        "the prospective Drawing must not be looked up through the old published record"
+    );
+    let newest = prospective.fills[0].last_region.clone();
+    Arc::make_mut(&mut prospective.sketches[0]).sketch.remove_curves(&[0]);
+    prospective.refresh_fill_regions(&after, &std::collections::BTreeSet::from([41])).unwrap();
+    let reopened = Drawing::from_json(&prospective.to_json().unwrap()).unwrap();
+    let retained = reopened.resolve_sheet_fill(&after, 70).unwrap();
+    assert!(matches!(retained.status, FillRegionStatus::LostBoundary(_)));
+    assert_eq!(retained.region, newest);
+    assert_eq!(retained.region, reopened.fills[0].last_region);
+}
+
+#[test]
+fn sheet_fill_source_failure_is_an_error_while_storage_keeps_the_retention_snapshot() {
+    let (mut doc, id, _) = w38d_record_fixture(false);
+    // A valid source exists before it disappears. set_param correctly refuses
+    // unknown expressions; removing a parameter used only by a read-only
+    // Drawing is the actual source-loss transition this consumer must handle.
+    doc.set_param("missing_source_value", "Width", Some("mm"), None).unwrap();
+    let mut record = (**doc.drawing(id).unwrap()).clone();
+    let constraint = Arc::make_mut(&mut record.sketches[0]).sketch.constraints.iter_mut().find(|c| c.param.as_deref() == Some("Width")).unwrap();
+    constraint.param = Some("missing_source_value".into());
+    record.validate().unwrap();
+    doc.put_drawing(Arc::new(record));
+    let drawing = doc.drawing(id).unwrap().clone();
+    let retained = drawing.fills[0].last_region.clone();
+    let current = drawing.resolve_sheet_fill(&doc, 70).unwrap();
+    assert!(matches!(current.status, FillRegionStatus::Current));
+    assert_eq!(current.region, retained);
+    doc.remove_param("missing_source_value").unwrap();
+    assert!(doc.param("missing_source_value").is_none());
+    assert!(drawing.resolve_sheet_fill(&doc, 70).unwrap_err().to_string().contains("missing_source_value"));
+    let mut candidate = (*drawing).clone();
+    candidate.refresh_fill_regions(&doc, &std::collections::BTreeSet::from([41])).unwrap();
+    assert_eq!(candidate.fills[0].last_region, retained);
+    assert!(Drawing::from_json(&candidate.to_json().unwrap()).unwrap().resolve_sheet_fill(&doc, 70).is_err());
+}
+
+#[test]
+fn sheet_fill_raw_nested_caps_refuse_before_typed_pattern_and_identity_admission() {
+    let (doc, id, _) = w38d_record_fixture(false);
+    let base = file(doc.drawing(id).unwrap());
+    let cases = [
+        ("`fills`", {
+            let mut value = base.clone();
+            value["fills"] = json!(vec![base["fills"][0].clone(); 1001]);
+            value
+        }),
+        ("`patterns`", {
+            let mut value = base.clone();
+            value["patterns"] = json!(vec![base["patterns"][0].clone(); 1001]);
+            value
+        }),
+        ("families", {
+            let mut value = base.clone();
+            value["patterns"][0]["pattern"]["families"] = json!(vec![base["patterns"][0]["pattern"]["families"][0].clone(); 65]);
+            value
+        }),
+        ("dashes", {
+            let mut value = base.clone();
+            value["patterns"][0]["pattern"]["families"][0]["dashes"] = json!([1, 1, 1, 1, 1, 1, 1]);
+            value
+        }),
+        ("name", {
+            let mut value = base.clone();
+            value["patterns"][0]["pattern"]["name"] = json!("A".repeat(32));
+            value
+        }),
+        ("description", {
+            let mut value = base.clone();
+            value["patterns"][0]["pattern"]["description"] = json!("🦀".repeat(81));
+            value
+        }),
+        ("512 curve ids", {
+            let mut value = base.clone();
+            value["fills"][0]["boundary"]["outer"] = json!(vec!["l0"; 513]);
+            value
+        }),
+        ("128 holes", {
+            let mut value = base.clone();
+            value["fills"][0]["boundary"]["holes"] = json!(vec![vec!["hole"]; 129]);
+            value
+        }),
+        ("invalid curve id", {
+            let mut value = base.clone();
+            value["fills"][0]["boundary"]["outer"][0] = json!("x".repeat(513));
+            value
+        }),
+        ("retained region", {
+            let mut value = base.clone();
+            value["fills"][0]["last_region"]["holes"] = json!(vec![json!({"segs":[]}); 129]);
+            value
+        }),
+        ("8192", {
+            let mut value = base.clone();
+            value["fills"][0]["last_region"]["outer"]["segs"] = json!(vec![base["fills"][0]["last_region"]["outer"]["segs"][0].clone(); 8193]);
+            value
+        }),
+    ];
+    for (key, value) in cases {
+        let error = read(&value).unwrap_err().to_string();
+        assert!(error.contains("raw") && error.contains(key), "{key}: {error}");
+    }
+    let mut value = base.clone();
+    let ids: Vec<_> = (0..512).map(|index| format!("curve{index:04}")).collect();
+    value["fills"][0]["boundary"]["outer"] = json!(ids);
+    value["fills"] = json!(vec![value["fills"][0].clone(); 40]);
+    assert!(read(&value).unwrap_err().to_string().contains("raw boundaries exceed 20000"));
+}
+
+#[test]
+fn sheet_fill_typed_caps_cover_zero_piece_holes_and_cumulative_identity_storage() {
+    let (doc, id, _) = w38d_record_fixture(false);
+    let original = doc.drawing(id).unwrap();
+    let mut holes = (**original).clone();
+    Arc::make_mut(&mut holes.fills[0]).last_region.holes = vec![solidcore_record::Loop2 { segs: vec![] }; 129];
+    assert!(holes.validate().unwrap_err().to_string().contains("128 holes"));
+    let mut families = (**original).clone();
+    let family = families.patterns[0].pattern.families[0].clone();
+    Arc::make_mut(&mut families.patterns[0]).pattern.families = vec![family; 65];
+    assert!(families.validate().unwrap_err().to_string().contains("64 families"));
+    let mut fills = (**original).clone();
+    let template = (*fills.fills[0]).clone();
+    fills.fills.clear();
+    let mut fill_ids = IdSource::seeded(7062);
+    for _ in 0..1000 {
+        let id = fills.allocate_id(&mut fill_ids).unwrap();
+        fills.fills.push(Arc::new(SketchFill { id, ..template.clone() }));
+    }
+    fills.validate().unwrap();
+    let fill_id = fills.allocate_id(&mut fill_ids).unwrap();
+    fills.fills.push(Arc::new(SketchFill { id: fill_id, ..template }));
+    assert_eq!(fills.fills.len(), 1001);
+    assert!(fills.validate().unwrap_err().to_string().contains("1000 fills"));
+    let mut too_many = (**original).clone();
+    let mut fill = (*too_many.fills[0]).clone();
+    fill.boundary.outer = (0..512).map(|index| format!("curve{index:04}")).collect();
+    too_many.fills = (1000..1040).map(|id| Arc::new(SketchFill { id, ..fill.clone() })).collect();
+    assert!(too_many.validate().unwrap_err().to_string().contains("20000 total curve ids"));
+    let mut pieces = (**original).clone();
+    let first = pieces.fills[0].last_region.outer.segs[0];
+    Arc::make_mut(&mut pieces.fills[0]).last_region.outer.segs = vec![first; 8193];
+    assert!(pieces.validate().unwrap_err().to_string().contains("8192"));
+    assert_eq!(doc.drawing(id).unwrap(), original);
+}
+
+#[test]
+fn sheet_fill_profile_search_refuses_shared_conic_clamping_and_tiny_arc_widening() {
+    use solidcraft_sketch::{CurveKind, Sketch};
+    let (doc, id, _) = w38d_record_fixture(false);
+    let original = doc.drawing(id).unwrap();
+    for conic in [false, true] {
+        let mut drawing = (**original).clone();
+        let mut sketch = Sketch::new();
+        let a = sketch.add_point(Vec2::new(1000.0, 0.0), Some("start")).unwrap();
+        let b = sketch.add_point(Vec2::new(1000.0, 5e-10), Some("end")).unwrap();
+        let apex = sketch.add_point(Vec2::new(1010.0, 10.0), Some("apex")).unwrap();
+        let kind = if conic { CurveKind::Conic { a, b, apex, rho: 0.5 } } else { CurveKind::Arc { c: 0, a, b } };
+        sketch.add_curve(kind, Some("unsafe_exact_curve")).unwrap();
+        for point in &mut sketch.points {
+            point.fixed = true;
+        }
+        sketch.curves[0].fixed = true;
+        Arc::make_mut(&mut drawing.sketches[0]).sketch = sketch;
+        drawing.validate().unwrap();
+        let mut raw = file(&drawing);
+        if conic {
+            // The editing constructor deliberately admits a narrower rho
+            // range. Persisted SheetSketch records admit 0<rho<1; exercise that
+            // real file boundary before exact profile conversion refuses it.
+            raw["sketches"][0]["sketch"]["curves"][0]["rho"] = json!(1.0 - 1e-10);
+        }
+        let reopened = read(&raw).unwrap();
+        let source = &reopened.sketches[0].sketch;
+        if conic {
+            let CurveKind::Conic { rho, .. } = source.curves[0].kind else { panic!("missing authored conic") };
+            assert!(rho > 0.0 && rho < 1.0 && 1.0 - rho < 1e-9);
+            let pieces = source.exact_segs(0).unwrap();
+            let solidcore_record::Seg2::Conic { w, .. } = pieces[0] else { panic!("missing shared conic") };
+            assert!(w < rho / (1.0 - rho), "precondition: shared conversion clamps the actual authored weight");
+        } else {
+            let CurveKind::Arc { c, a, b } = source.curves[0].kind else { panic!("missing authored arc") };
+            let (center, start, end) = (source.point(c).unwrap(), source.point(a).unwrap(), source.point(b).unwrap());
+            assert_ne!(start, end);
+            let authored = ((end - center).angle() - (start - center).angle()).rem_euclid(std::f64::consts::TAU);
+            assert!(authored > 0.0 && authored <= 1e-12);
+            let pieces = source.segs(0);
+            let solidcore_record::Seg2::Arc { sweep, .. } = pieces[0] else { panic!("missing shared arc") };
+            assert!(sweep >= std::f64::consts::TAU, "precondition: shared conversion widens the actual noncoincident tiny arc");
+        }
+        let why = reopened.sheet_fill_profiles(&doc, 41).unwrap_err().to_string();
+        assert!(why.contains("unsafe_exact_curve") && why.contains(if conic { "conic rho" } else { "arc sweep" }), "{why}");
+        assert!(reopened.resolve_sheet_fill(&doc, 70).is_err(), "normalization refusal must be Failed, never LostBoundary");
+    }
+}
+
+#[test]
+fn sheet_sketch_unsupported_equations_and_centerlines_are_refused_before_solving_or_saving() {
+    for centerline in [false, true] {
+        let mut drawing = read(&paper_sketch_file()).unwrap();
+        let record = Arc::make_mut(&mut drawing.sketches[0]);
+        let expected = if centerline {
+            record.sketch.curves[0].centerline = true;
+            "centerline"
+        } else {
+            record.sketch.equations.push(solidcraft_sketch::EquationCurve {
+                curve: record.sketch.curves[0].id.clone(),
+                x: None,
+                y: "x".into(),
+                start: "0".into(),
+                end: "1".into(),
+                tolerance: 0.01,
+                variable_unit: solidcraft_sketch::VariableUnit::Number,
+            });
+            "equations"
+        };
+        assert!(drawing.validate().unwrap_err().to_string().contains(expected));
+        assert!(drawing.to_json().unwrap_err().to_string().contains(expected));
+        assert!(drawing.solve_sheet_sketch(&crate::Document::default(), 41).unwrap_err().to_string().contains(expected));
+        let raw = serde_json::to_value(&drawing).unwrap();
+        assert!(refusal(&raw).contains(expected));
+    }
 }

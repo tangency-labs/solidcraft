@@ -12,6 +12,18 @@ pub(crate) use solidcore::eval::uv::Starts;
 /// Why a record cannot be evaluated: it does not convert (too deep), or the kernel refuses it.
 pub(crate) type Error = String;
 
+/// The kernel's geometric radial order of the faces leaving an edge. Record uses
+/// are returned as a permutation, with their side flags unchanged.
+pub(crate) fn radial_order(curve: &Curve, interval: [f64; 2], faces: &[(&Surface, &Curve2, bool)]) -> Result<Vec<usize>, Error> {
+    let curve = c::curve(curve).map_err(|e| e.to_string())?;
+    let converted = faces
+        .iter()
+        .map(|&(surface, pcurve, forward)| Ok((c::surface(surface).map_err(|e| e.to_string())?, c::curve2(pcurve), forward)))
+        .collect::<Result<Vec<_>, Error>>()?;
+    let faces: Vec<_> = converted.iter().map(|(surface, pcurve, forward)| k::pcurve::RadialFace { surface, pcurve, forward: *forward }).collect();
+    k::pcurve::radial_order(&curve, interval, &faces).map_err(|e| e.to_string())
+}
+
 /// A curve record ready to evaluate.
 pub(crate) struct CurveEval(k::CurveEval);
 
@@ -23,6 +35,34 @@ impl CurveEval {
     pub(crate) fn point(&self, t: f64) -> Option<Vec3> {
         self.0.point(t).map(c::record_vec3)
     }
+    /// The point and first derivative at `t`; `None` for a traced intersection.
+    pub(crate) fn derivs(&self, t: f64) -> Option<(Vec3, Vec3)> {
+        self.0.derivs(t).map(|(p, d)| (c::record_vec3(p), c::record_vec3(d)))
+    }
+}
+
+/// Where a piece `on` of `curve`, its angle about the axis through `origin` (from unit `x`
+/// towards unit `y`) monotone and under half a turn, reaches angle `theta`
+/// ([`k::ruling::angle_crossing`]): `(true, point, parameter)` where it does, else `(false, the
+/// end nearer in angle, its parameter)`. `None` where the curve can't be evaluated.
+pub(crate) fn angle_crossing(curve: &CurveEval, origin: Vec3, x: Vec3, y: Vec3, on: [f64; 2], theta: f64) -> Option<(bool, Vec3, f64)> {
+    use k::ruling::AngleCrossing as A;
+    Some(match k::ruling::angle_crossing(&curve.0, c::vec3(origin), c::vec3(x), c::vec3(y), on, theta)? {
+        A::At { point, t } => (true, c::record_vec3(point), t),
+        A::Nearer { point, t } => (false, c::record_vec3(point), t),
+    })
+}
+
+/// A closed spline or polyline with its seam moved to `start`, exactly.
+pub(crate) fn restart_curve(curve: &Curve, start: f64) -> Result<Curve, Error> {
+    let curve = c::curve(curve).map_err(|e| e.to_string())?;
+    let restarted = k::pcurve::restart_curve(&curve, start).map_err(|e| match e {
+        solidcore::SolidError::InvalidInput { reason, .. }
+        | solidcore::SolidError::Unsupported { reason, .. }
+        | solidcore::SolidError::PortInvariant { reason, .. } => reason.to_string(),
+        other => other.to_string(),
+    })?;
+    c::record_curve(restarted).map_err(|e| e.to_string())
 }
 
 /// A surface record ready to evaluate.
@@ -53,6 +93,13 @@ impl SurfaceEval {
     pub(crate) fn pole_within(&self, uv: [f64; 2], reach: f64) -> Result<[bool; 2], String> {
         self.0.pole_within(uv, reach).map_err(|e| e.to_string())
     }
+    /// `pc` with its control points put on the knot range and a certified bound on how far that
+    /// moves the surface under it; `None` when it is on the range, refused where the move is past
+    /// `tolerance` or not bounded ([`k::SurfaceEval::pcurve_onto_knots`]).
+    pub(crate) fn pcurve_onto_knots(&self, pc: &Curve2, tolerance: f64) -> Result<Option<(Curve2, f64)>, String> {
+        let moved = self.0.pcurve_onto_knots(&c::curve2(pc), tolerance).map_err(|e| e.to_string())?;
+        Ok(moved.map(|m| (c::record_curve2(m.pcurve), m.displacement)))
+    }
 }
 
 /// The flux of `field` through a face of `s` bounded by `loops` ([`k::face_flux`]).
@@ -60,6 +107,25 @@ pub(crate) fn face_flux(s: &SurfaceEval, v0: f64, loops: &[Vec<(&Curve2, bool)>]
     let converted: Vec<Vec<(k::Curve2, bool)>> = loops.iter().map(|l| l.iter().map(|(pc, fwd)| (c::curve2(pc), *fwd)).collect()).collect();
     let borrowed: Vec<Vec<(&k::Curve2, bool)>> = converted.iter().map(|l| l.iter().map(|(pc, fwd)| (pc, *fwd)).collect()).collect();
     k::face_flux(&s.0, v0, &borrowed, &|p| c::vec3(field(c::record_vec3(p))))
+}
+
+/// The sign of one closed shell, certified by the kernel's volume enclosure.
+/// No numerical estimate decides a repaired shell's absolute direction.
+pub(crate) fn shell_volume_positive(record: &solidcore_record::brep::Brep, shell: usize) -> Result<bool, Error> {
+    use solidcore::mass::enclosure::{VolumeSign, volume_sign};
+    use solidcore_record::brep::Region;
+
+    let shell = u32::try_from(shell).map_err(|_| "too many shells".to_string())?;
+    let mut single = record.clone();
+    single.regions = vec![Region { shells: vec![shell], void: false }, Region { shells: vec![shell], void: false }];
+    let single = single.canonical().map_err(|e| e.to_string())?.brep;
+    let mut kernel = solidcore::kernel::Kernel::default();
+    let mut body = c::brep::to_kernel_body(&mut kernel, &single, true).map_err(|e| e.to_string())?;
+    match volume_sign(&kernel, &mut body).map_err(|e| e.to_string())? {
+        VolumeSign::Positive(_) => Ok(true),
+        VolumeSign::Negative(_) => Ok(false),
+        VolumeSign::Undecided(_) => Err("the repaired shell's volume sign is not certified".into()),
+    }
 }
 
 /// The exact NURBS forms of the analytic kinds ([`k::form`]), over records.
@@ -79,6 +145,13 @@ pub(crate) mod form {
         c::record_curve(cv).ok()
     }
 
+    pub(crate) fn winds(domain: [[f64; 2]; 2]) -> bool {
+        k::form::winds(domain)
+    }
+    pub(crate) fn wound_surface(s: &Surface, domain: [[f64; 2]; 2], tolerance: f64) -> Option<(Surface, [[f64; 2]; 2])> {
+        let (form, d) = k::form::wound_surface(&surface_in(s)?, domain, tolerance)?;
+        Some((surface_out(form)?, d))
+    }
     pub(crate) use solidcore::eval::form::param;
 
     pub(crate) fn frame_of(s: &Surface) -> Option<Frame> {

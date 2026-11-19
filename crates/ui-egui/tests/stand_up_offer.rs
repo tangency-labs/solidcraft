@@ -263,10 +263,14 @@ fn an_unknown_exporter_lying_on_its_back_gets_the_note_not_the_dialog() {
         assert!(h.at(&json!({"handle": name})).is_ok(), "{name} is published");
     }
     // No Close button (#7971): the only control named Close is the note's ×, which the old handle finds.
-    let close = h.at(&json!({"handle": "toast:stand_up:close"})).unwrap();
+    // All three from the frame last drawn: `h.at` runs frames after it reads, and the note can still
+    // move then. It is placed clear of the operations panel, whose rows fade out once the file's
+    // background work ends, on a frame that differs from run to run.
+    let handle = |name: &str| solidcraft_ui_egui::scenario::handle_at(name).map(|p| [f64::from(p.x), f64::from(p.y)]);
+    let close = handle("toast:stand_up:close").unwrap();
     let near = |p: [f64; 2]| (p[0] - close[0]).abs() < 1.0 && (p[1] - close[1]).abs() < 1.0;
     assert!(h.widget("Close").is_some_and(near), "the × is the Close: {:?} at {close:?}", h.widget("Close"));
-    assert!(near(h.at(&json!({"handle": "stand_up:dismiss"})).unwrap()));
+    assert!(handle("stand_up:dismiss").is_some_and(near));
     assert!(h.at(&json!({"handle": "stand_up:leave"})).is_err(), "the dialog's buttons are not");
     // It doesn't hold anything up: the view and commands work while it shows.
     h.run(&json!([{"camera": {"yaw": 0.6, "pitch": 0.4}}, {"call": "engine.execute", "params": {"command": "solid.box", "params": {"length": 1, "width": 1, "height": 1, "corner": [100, 0, 0]}}}]))
@@ -311,10 +315,18 @@ fn which_way_is_up_weighs_flat_area_then_the_box() {
     assert_eq!(upright(f64::INFINITY, 1.0, [1.0, 1.0, 1.0]), Upright::Unclear);
 }
 
+fn click_note(h: &mut Harness, name: &str) {
+    let [x, y] = h.at(&json!({"handle": name})).unwrap();
+    h.call("ui.move", json!({"x": x, "y": y}));
+    // Refresh the notice position after hover lays out the viewport again.
+    let p = solidcraft_ui_egui::scenario::handle_at(name).unwrap();
+    h.call("ui.click", json!({"x": p.x, "y": p.y}));
+}
+
 #[test]
 fn the_notes_stand_it_up_turns_once_and_undo_restores() {
     let mut h = opened_box(ON_ITS_BACK, UNKNOWN, |_| {});
-    h.run(&json!([{"click": {"handle": "stand_up:stand"}}])).unwrap();
+    click_note(&mut h, "stand_up:stand");
     h.frames(3);
     assert!(h.app.stand_up.is_none() && !h.app.stand_up_note, "the note is gone");
     assert!(!painted(&h, "Did this part open the wrong way up?"));
@@ -326,7 +338,7 @@ fn the_notes_stand_it_up_turns_once_and_undo_restores() {
 #[test]
 fn the_notes_dont_ask_again_turns_the_offer_off() {
     let mut h = opened_box(ON_ITS_BACK, UNKNOWN, |_| {});
-    h.run(&json!([{"click": {"handle": "stand_up:never"}}])).unwrap();
+    click_note(&mut h, "stand_up:never");
     h.frames(3);
     assert!(h.app.stand_up.is_none(), "closed");
     assert!(!h.app.preferences.offer_stand_up, "the offer is off, as the dialog's Don't ask again");
@@ -336,7 +348,7 @@ fn the_notes_dont_ask_again_turns_the_offer_off() {
 #[test]
 fn the_note_closes_on_dismiss_and_by_itself() {
     let mut h = opened_box(ON_ITS_BACK, UNKNOWN, |_| {});
-    h.run(&json!([{"click": {"handle": "toast:stand_up:close"}}])).unwrap();
+    click_note(&mut h, "toast:stand_up:close");
     h.frames(3);
     assert!(h.app.stand_up.is_none(), "dismissed");
     assert!(h.app.preferences.offer_stand_up, "the preference stays");

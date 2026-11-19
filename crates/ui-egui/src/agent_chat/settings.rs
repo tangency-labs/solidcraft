@@ -555,7 +555,10 @@ fn connecting_section(app: &mut SolveApp, ui: &mut egui::Ui) {
 /// Custom instructions (#8220): text every new chat's system note carries.
 fn instructions_section(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::settings_section(ui, "instructions", tr("ai.prefs.instructions"), |ui| {
-        let id = egui::Id::unique("prefs_agent_instructions");
+        // The shown field keeps one fixed id, so its focus and cursor survive a search. Preferences
+        // search also lays the section out unseen first; that copy takes an id of its own place,
+        // or egui sees one id twice in the frame (#15902).
+        let id = if ui.is_visible() { egui::Id::unique("prefs_agent_instructions") } else { ui.scope_id().with("prefs_agent_instructions") };
         let text = &mut app.preferences.agent_instructions;
         let response = ui_kit::text_area(ui, tr("ai.prefs.instructions"), id, text, 6, acp::INSTRUCTIONS_LIMIT);
         if response.has_focus() {
@@ -636,21 +639,18 @@ fn permissions_section(app: &mut SolveApp, ui: &mut egui::Ui) {
 fn panel_section(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = solidcraft_theme::Tokens::get();
     ui_kit::settings_section(ui, "panel", tr("ui.ai_panel"), |ui| {
-        let label_width = [tr("ui.agent_chat_side"), tr("ui.agent_chat_turn_limit")]
+        let label_width = [tr("ui.assistant"), tr("ui.agent_chat_thinking"), tr("ui.agent_chat_turn_limit")]
             .iter()
             .map(|label| ui_kit::ContentWidth::label(ui, label) + t.space_4)
             .fold(0.0, f32::max);
         ui_kit::settings_form(ui, label_width, |ui| {
-            ui_kit::row(ui, tr("ui.agent_chat_side"), |ui| {
-                let p = &mut app.preferences;
-                let mut selected = if p.agent_chat_popped { 2 } else { usize::from(p.agent_chat_side != "left") };
-                let options = [tr("ui.agent_chat_left"), tr("ui.agent_chat_right"), tr("ui.agent_chat_own_window")];
-                if ui_kit::segmented(ui, &mut selected, &options, ui_kit::Segments { intrinsic: true, ..Default::default() }) {
-                    p.agent_chat_popped = selected == 2;
-                    if selected < 2 {
-                        p.agent_chat_side = if selected == 0 { "left" } else { "right" }.into();
-                    }
-                }
+            ui_kit::row(ui, tr("ui.assistant"), |ui| {
+                ui_kit::checkbox(ui, tr("ui.agent_chat_own_window"), &mut app.preferences.agent_chat_popped);
+            });
+            ui_kit::row(ui, tr("ui.agent_chat_thinking"), |ui| {
+                let response = ui_kit::checkbox(ui, tr("ui.agent_thinking_folded"), &mut app.preferences.agent_thinking_folded)
+                    .backing_on_hover_text(tr("ui.agent_thinking_folded_note"));
+                solidcraft_ui_registry::publish_handle("prefs:agent_thinking_folded", response.rect.center());
             });
             ui_kit::row(ui, tr("ui.agent_chat_turn_limit"), |ui| {
                 let p = &mut app.preferences;
@@ -2415,15 +2415,54 @@ mod card_tests {
 
     fn list_settled(h: &mut Harness) {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        h.frames(2);
-        while (h.app.agent_chat.settings.listing.is_some() || h.app.agent_chat.settings.card_listing.is_some())
-            && std::time::Instant::now() < deadline
-        {
-            std::thread::sleep(std::time::Duration::from_millis(1));
+        let mut settled_frames = 0;
+        while settled_frames < 2 {
             h.frames(1);
+            let state = &h.app.agent_chat.settings;
+            // A dialog can have a replacement request ready while no worker is active.
+            let dialog_pending = state.add.as_ref().is_some_and(|add| {
+                add.kind == AddKind::Api
+                    && add.confirm_insecure_http.is_none()
+                    && (add.list_again || add.listing.as_ref().is_some_and(|key| !state.endpoint_models.contains_key(key)))
+            });
+            if state.listing.is_some() || state.card_listing.is_some() || dialog_pending {
+                assert!(std::time::Instant::now() < deadline, "model listing did not settle");
+                settled_frames = 0;
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            } else {
+                settled_frames += 1;
+            }
         }
-        assert!(h.app.agent_chat.settings.listing.is_none());
-        h.frames(2);
+    }
+
+    /// UnoRouter is a normal OpenAI-compatible preset: one click sets its name and HTTPS
+    /// base URL, then the existing model picker fetches GET /v1/models (#17068).
+    #[test]
+    fn unorouter_preset_populates_the_endpoint_and_lists_models() {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width": 1500.0, "height": 900.0}));
+        h.app.home.open = false;
+        h.app.preferences.ai_features = true;
+        h.app.agent_chat.detection = Some(Default::default());
+        let seen = listing_http(&mut h);
+        open_add(&mut h.app);
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"ai_add:ui.ai_add_endpoint"}})).unwrap();
+        list_settled(&mut h);
+        h.step(&json!({"click":{"handle":"ai_add:preset"}})).unwrap();
+        h.frames(3);
+        let top = solidcraft_ui_registry::handle_at("ai_add:preset:Ollama").expect("preset menu");
+        h.call("ui.scroll", json!({"x":top.x,"y":top.y,"delta":-1000}));
+        h.frames(10);
+        h.step(&json!({"click":{"handle":"ai_add:preset:UnoRouter"}})).unwrap();
+        list_settled(&mut h);
+        let add = h.app.agent_chat.settings.add.as_ref().unwrap();
+        assert_eq!(add.kind, AddKind::Api);
+        assert_eq!(add.protocol, Protocol::OpenAi);
+        assert_eq!(add.name, "UnoRouter");
+        assert_eq!(add.base_url, "https://api.unorouter.com/v1");
+        assert_eq!(seen.lock().unwrap().last().cloned(), Some(("https://api.unorouter.com/v1/models".into(), false)));
+        assert!(solidcraft_ui_registry::handle_at("ai_add:model").is_some(), "existing model picker remains available");
     }
 
     /// The dialog lists an endpoint's models off the window's thread, once per endpoint and key, of

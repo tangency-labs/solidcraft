@@ -8,8 +8,10 @@
 //!   exact up to rounding) mapped into the frame, each control point at the curve's level within
 //!   the tolerance. A line is proposed by the ends and proved by every span: control points
 //!   within the tolerance of the chord, and `W T' - T W'` positive (an oriented traversal, not a
-//!   retracing). A circle is proposed by the curve's label (a circle kind's centre and radius)
-//!   or by three of its points, and proved by every span: the Bernstein coefficients of
+//!   retracing); a rational piece whose control points leave the chord by more than the zone
+//!   tolerance is the arc it is proved on, and the line only when it is no arc. A circle is
+//!   proposed by the curve's label (a circle kind's centre and radius) or by three of its
+//!   points, and proved by every span: the Bernstein coefficients of
 //!   `x^2 + y^2 - r^2 w^2` within the rounding of computing them and the tolerance, the angular
 //!   determinant of one sign, the span in one open half plane about the centre (split in halves
 //!   up to twelve times where needed). Else the one span is the free-form segment it is (a
@@ -144,46 +146,30 @@ fn segment(run: &Run, work: &mut usize) -> Option<(usize, Vec<f64>, Vec<[f64; 4]
     if !(1..=MAX_DEGREE).contains(&degree) || n > MAX_CONTROLS || nurb.knots().len() > 8192 {
         return None;
     }
-    charge(
-        work,
-        n.checked_mul(nurb.knots().len())?.checked_mul(degree + 1)?,
-    )?;
+    charge(work, n.checked_mul(degree + 1)?.checked_mul(2)?)?;
     let (u0, u1) = nurb.param_bounds();
     let (t0, t1) = (run.interval.min(), run.interval.max());
     if !(t0 < t1 && t0 >= u0 && t1 <= u1) {
         return None;
     }
-    let seg = if t0 == u0 && t1 == u1 {
-        nurb.clone()
-    } else {
-        nurb.extract_seg(t0, t1).ok()?
-    };
-    let pts: Vec<[f64; 4]> = seg.cpts().iter().map(|c| hp(*c)).collect();
-    pts.iter()
-        .all(|p| p.iter().all(|x| x.is_finite()))
-        .then(|| (seg.degree(), seg.knots().to_vec(), pts))
+    let controls: Vec<_> = nurb.cpts().iter().map(|c| hp(*c)).collect();
+    let (knots, pts) =
+        crate::curve::spline_projection::segment(degree, nurb.knots(), &controls, t0, t1).ok()?;
+    Some((degree, knots, pts))
 }
 
 /// The run's Bézier spans, homogeneous, in the direction it runs.
 fn spans_of(run: &Run, work: &mut usize) -> Option<Vec<Vec<[f64; 4]>>> {
     let nurb = net(run.curve)?.nurb.as_ref()?;
-    let (t0, t1) = (run.interval.min(), run.interval.max());
-    let (u0, u1) = nurb.param_bounds();
-    if !(t0 < t1 && t0 >= u0 && t1 <= u1) {
-        return None;
-    }
-    charge(work, nurb.cpts().len().checked_mul(nurb.knots().len())?)?;
-    let seg = if t0 == u0 && t1 == u1 {
-        nurb.clone()
-    } else {
-        nurb.extract_seg(t0, t1).ok()?
-    };
-    let spans: Vec<Vec<[f64; 4]>> = seg
-        .decompose_bez()
-        .ok()?
-        .iter()
-        .map(|b| b.cpts().iter().map(|c| hp(*c)).collect())
-        .collect();
+    charge(
+        work,
+        nurb.cpts()
+            .len()
+            .checked_mul(nurb.knots().len())?
+            .checked_mul(nurb.degree() + 1)?,
+    )?;
+    let (degree, knots, ctrl) = segment(run, work)?;
+    let spans = crate::curve::spline_projection::bezier_spans(degree, &knots, &ctrl).ok()?;
     Some(if run.forward {
         spans
     } else {
@@ -257,7 +243,7 @@ fn line_span(c: &[H2], a: Point2, b: Point2, tol: f64, error: f64) -> Option<()>
     if length <= tol {
         return None;
     }
-    let d = d / length;
+    let d = Vec2::new(d.x / length, d.y / length);
     let mut projected = Vec::new();
     let weights: Vec<f64> = c.iter().map(|p| p[2]).collect();
     for p in c {
@@ -367,6 +353,18 @@ pub fn planar_pieces(
     work: &mut usize,
     each_span: bool,
 ) -> Option<Vec<Seg2>> {
+    read_pieces(k, run, frame, tol, work, each_span, false)
+}
+
+fn read_pieces(
+    k: &Kernel,
+    run: &Run,
+    frame: &Frame,
+    tol: f64,
+    work: &mut usize,
+    each_span: bool,
+    whole: bool,
+) -> Option<Vec<Seg2>> {
     if !(tol.is_finite() && tol > 0.0) {
         return None;
     }
@@ -408,22 +406,32 @@ pub fn planar_pieces(
     if !joins || first.distance(a) + error > tol || last.distance(b) + error > tol {
         return None;
     }
-    if a.distance(b) > tol
-        && spans
-            .iter()
-            .all(|s| line_span(s, a, b, tol, error).is_some())
-    {
-        return Some(vec![Seg2::Line { a, b }]);
-    }
     let label = circle_label(run.curve).and_then(|(c, n, r)| {
         let nl = n.dot(Vec3::new(0.0, 0.0, 0.0) + super::profile::axes(frame).3);
         // the label's plane parallel to the frame's, within the tolerance over the radius
         let tilt = r * n.cross(super::profile::axes(frame).3).length();
         (nl.is_finite() && tilt <= tol).then(|| (to_local(frame, c), r))
     });
-    let candidate = label.or_else(|| through_three(k, run, (ts, te), frame, a, tol));
-    candidate
-        .and_then(|(center, radius)| arc(&spans, center, radius, a, b, tol, error, work))
+    let proved = |work: &mut usize| {
+        label
+            .or_else(|| through_three(k, run, (ts, te), frame, a, tol))
+            .and_then(|(center, radius)| arc(&spans, center, radius, a, b, tol, error, work, whole))
+    };
+    if a.distance(b) > tol
+        && spans
+            .iter()
+            .all(|s| line_span(s, a, b, tol, error).is_some())
+    {
+        // Within `tol` of its chord the piece is that line, unless `arc_before_line` says it
+        // is the arc it is proved on within `tol`; one that is no arc stays the line.
+        let found = if arc_before_line(&spans, k.tolerances.zone_tol_3d) {
+            proved(work)
+        } else {
+            None
+        };
+        return Some(found.unwrap_or_else(|| vec![Seg2::Line { a, b }]));
+    }
+    proved(work)
         .or_else(|| free_form(&spans, a, b, tol))
         .or_else(|| {
             if each_span {
@@ -475,6 +483,7 @@ fn arc(
     tol: f64,
     error: f64,
     work: &mut usize,
+    whole: bool,
 ) -> Option<Vec<Seg2>> {
     let mut sweep: f64 = 0.0;
     for span in spans {
@@ -499,18 +508,26 @@ fn arc(
         if (sweep.abs() - TAU).abs() > angular_tol {
             return None;
         }
+        if whole {
+            return Some(vec![Seg2::Arc {
+                center,
+                radius,
+                start: principal(start),
+                sweep: sweep.signum() * TAU,
+            }]);
+        }
         let h = sweep.signum() * PI;
         return Some(vec![
             Seg2::Arc {
                 center,
                 radius,
-                start,
+                start: principal(start),
                 sweep: h,
             },
             Seg2::Arc {
                 center,
                 radius,
-                start: start + h,
+                start: principal(start + h),
                 sweep: h,
             },
         ]);
@@ -518,9 +535,24 @@ fn arc(
     Some(vec![Seg2::Arc {
         center,
         radius,
-        start,
+        start: principal(start),
         sweep,
     }])
+}
+
+/// The angle `a` in (-π, π]: unchanged when it is already (so an angle in range keeps its bits),
+/// else turned by whole turns (`atan2` answers -π for a point on the negative x axis at y = -0,
+/// and a whole turn's second half starts past π).
+pub(super) fn principal(a: f64) -> f64 {
+    if a > -PI && a <= PI {
+        return a;
+    }
+    let r = a.rem_euclid(TAU);
+    if r > PI {
+        r - TAU
+    } else {
+        r
+    }
 }
 
 /// Several spans end to end from `a` to `b`, each the segment it is: a polynomial span along its
@@ -561,6 +593,27 @@ fn span_by_span(spans: &[Vec<H2>], a: Point2, b: Point2, tol: f64) -> Option<Vec
     Some(out)
 }
 
+/// Whether a piece within the reading tolerance of the chord between its ends is read as the
+/// arc it is proved on before that line: its Bézier `spans` (homogeneous, in the frame) are
+/// rational (a circle's or a conic's: the weights of a span differ by more than their rounding)
+/// and their control points leave the chord by more than `zone`, the zone tolerance an edge keeps
+/// to its face. The piece lies in the hull of its control points, so only then can the line lie
+/// farther than `zone` off it. Read as the line, a few hundredths of a millimetre of a circle made
+/// a flat prism side 1e-5 off its cylinder.
+#[must_use]
+pub fn arc_before_line(spans: &[Vec<H2>], zone: f64) -> bool {
+    let rational = spans.iter().any(|s| {
+        let (lo, hi) = s
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| {
+                (lo.min(p[2]), hi.max(p[2]))
+            });
+        hi - lo > lo.abs().max(hi.abs()) * f64::EPSILON * 64.0
+    });
+    let pts: Vec<Point2> = spans.iter().flatten().map(|p| point_of(*p)).collect();
+    rational && off_chord(&pts) > zone
+}
+
 /// How far the points lie off the chord between the first and the last.
 fn off_chord(pts: &[Point2]) -> f64 {
     let (Some(first), Some(last)) = (pts.first().copied(), pts.last().copied()) else {
@@ -578,8 +631,9 @@ fn off_chord(pts: &[Point2]) -> f64 {
 }
 
 /// One Bézier span that is neither a line nor an arc, as the exact free-form segment it is (a
-/// polynomial Bézier, a conic), its ends `a` and `b`. `None` for several spans, degrees past
-/// [`MAX_BEZIER_DEGREE`], rational spans other than conics, and control polygons with no area.
+/// polynomial Bézier, a polynomial quadratic as the conic of weight 1, a conic), its ends `a` and
+/// `b`. `None` for several spans, degrees past [`MAX_BEZIER_DEGREE`], rational spans other than
+/// conics, and control polygons with no area.
 fn free_form(spans: &[Vec<H2>], a: Point2, b: Point2, tol: f64) -> Option<Vec<Seg2>> {
     let [span] = spans else { return None };
     let pts: Vec<Point2> = span.iter().map(|p| point_of(*p)).collect();
@@ -598,6 +652,14 @@ fn free_form(spans: &[Vec<H2>], a: Point2, b: Point2, tol: f64) -> Option<Vec<Se
             p1: *pts.get(1)?,
             p2: *pts.get(2)?,
             p3: b,
+        },
+        // a polynomial quadratic is the conic of weight 1, as a profile writes one (a font's
+        // quadratic curves)
+        (3, false) => Seg2::Conic {
+            a,
+            apex: *pts.get(1)?,
+            b,
+            w: 1.0,
         },
         (n, false) if (2..=MAX_BEZIER_DEGREE + 1).contains(&n) => {
             let mut p = [Vec2::ZERO; super::profile::MAX_BEZIER_CTRL];
@@ -632,8 +694,8 @@ fn free_form(spans: &[Vec<H2>], a: Point2, b: Point2, tol: f64) -> Option<Vec<Se
 
 /// The run in `frame` exactly, for a sketch to project it: as [`planar_pieces`], and else a
 /// curve of several Bézier spans as the one B-spline it is (its clamped segment over the run's
-/// interval, its knots and weights its own). `None` when it does not lie in a plane parallel to
-/// the frame or is not read exactly.
+/// interval, its knots and weights its own). Spline and ellipse control points project between
+/// nonparallel planes too. `None` when the curve is not read exactly.
 #[must_use]
 pub fn planar_curves(
     k: &Kernel,
@@ -642,24 +704,78 @@ pub fn planar_curves(
     tol: f64,
     work: &mut usize,
 ) -> Option<Vec<PlanarPiece>> {
-    if let Some(segs) = planar_pieces(k, run, frame, tol, work, false) {
-        return Some(segs.into_iter().map(PlanarPiece::Seg).collect());
+    read_curves(k, run, frame, tol, work, false)
+}
+
+/// Read only curves in a plane parallel to `frame`, including their trimmed spline nets.
+/// This keeps the parallel reader's eligibility separate from general projection.
+#[must_use]
+pub fn parallel_curves(
+    k: &Kernel,
+    run: &Run,
+    frame: &Frame,
+    tol: f64,
+    work: &mut usize,
+) -> Option<Vec<PlanarPiece>> {
+    read_curves(k, run, frame, tol, work, true)
+}
+
+fn read_curves(
+    k: &Kernel,
+    run: &Run,
+    frame: &Frame,
+    tol: f64,
+    work: &mut usize,
+    parallel_only: bool,
+) -> Option<Vec<PlanarPiece>> {
+    // A failed analytic certificate must leave work for the exact spline form.
+    let allowance = *work / 2;
+    let mut analytic_work = allowance;
+    let analytic = read_pieces(k, run, frame, tol, &mut analytic_work, false, true);
+    *work -= allowance - analytic_work;
+    if let Some(segs) = analytic {
+        let native_spline = matches!(run.curve.kind(), CurveKind::BSpline(_));
+        if !native_spline
+            || segs
+                .iter()
+                .all(|s| matches!(s, Seg2::Line { .. } | Seg2::Arc { .. }))
+        {
+            return Some(segs.into_iter().map(PlanarPiece::Seg).collect());
+        }
     }
-    one_spline(run, frame, tol, work).map(|s| vec![PlanarPiece::Spline(s)])
+    one_spline(k, run, frame, tol, work, parallel_only).map(|s| vec![PlanarPiece::Spline(s)])
 }
 
 /// The run's net over its interval, the way it runs, as one clamped B-spline in `frame`.
-fn one_spline(run: &Run, frame: &Frame, tol: f64, work: &mut usize) -> Option<PlanarSpline> {
+fn one_spline(
+    k: &Kernel,
+    run: &Run,
+    frame: &Frame,
+    tol: f64,
+    work: &mut usize,
+    parallel_only: bool,
+) -> Option<PlanarSpline> {
     if !(tol.is_finite() && tol > 0.0) {
         return None;
     }
-    let (degree, knots, ctrl) = segment(run, work)?;
+    let (degree, knots, ctrl) = if matches!(run.curve.kind(), CurveKind::Line(_)) {
+        charge(work, 1)?;
+        let (lo, hi) = (run.interval.min(), run.interval.max());
+        let a = run.curve.evaluate_point(k, lo).ok()?;
+        let b = run.curve.evaluate_point(k, hi).ok()?;
+        (
+            1,
+            vec![lo, lo, hi, hi],
+            vec![[a.x, a.y, a.z, 1.0], [b.x, b.y, b.z, 1.0]],
+        )
+    } else {
+        segment(run, work)?
+    };
     let (knots, ctrl) = if run.forward {
         (knots, ctrl)
     } else {
-        let sum = knots.first()? + knots.last()?;
         (
-            knots.iter().rev().map(|t| sum - t).collect(),
+            knots.iter().rev().map(|t| -t).collect(),
             ctrl.into_iter().rev().collect(),
         )
     };
@@ -667,12 +783,13 @@ fn one_spline(run: &Run, frame: &Frame, tol: f64, work: &mut usize) -> Option<Pl
     if !(max_w.is_finite() && max_w > 0.0) {
         return None;
     }
+    let ctrl: Vec<_> = ctrl.into_iter().map(|p| p.map(|v| v / max_w)).collect();
+    let max_w = 1.0;
     let project = |p: &[f64; 4]| Point3::new(p[0] / p[3], p[1] / p[3], p[2] / p[3]);
     let (first, last) = (project(ctrl.first()?), project(ctrl.last()?));
     if first.distance(run.ends[0]) > tol || last.distance(run.ends[1]) > tol {
         return None;
     }
-    let level = height(frame, first);
     let o = Vec3::new(frame.origin[0], frame.origin[1], frame.origin[2]);
     let mut points = Vec::new();
     let mut weights = Vec::new();
@@ -682,7 +799,10 @@ fn one_spline(run: &Run, frame: &Frame, tol: f64, work: &mut usize) -> Option<Pl
         }
         let v = project(p);
         let error = (v.x.abs() + v.y.abs() + v.z.abs() + o.length()) * f64::EPSILON * 256.0;
-        if (height(frame, v) - level).abs() + error > tol || error > tol * 0.1 {
+        if error > tol * 0.1 {
+            return None;
+        }
+        if parallel_only && (height(frame, v) - height(frame, first)).abs() + error > tol {
             return None;
         }
         let local = to_local(frame, v);
@@ -692,7 +812,7 @@ fn one_spline(run: &Run, frame: &Frame, tol: f64, work: &mut usize) -> Option<Pl
         points.push(local);
         weights.push(p[3] / max_w);
     }
-    if weights.iter().all(|w| (w - 1.0).abs() <= 1e-12) {
+    if weights.iter().all(|w| *w == 1.0) {
         weights.clear();
     }
     Some(PlanarSpline {
@@ -728,8 +848,8 @@ pub fn planar_edges_tolerance(b: &Brep) -> Option<f64> {
 }
 
 /// Edges `edges` of `b`, each run forward, in `frame`'s coordinates exactly
-/// ([`planar_curves`], to [`planar_edges_tolerance`]): `None` for an edge that does not lie in a
-/// plane parallel to the frame, is not read exactly, or is not there.
+/// ([`planar_curves`], to [`planar_edges_tolerance`]). Splines and ellipses can also project
+/// between nonparallel planes. `None` for an edge that cannot be read exactly or is not there.
 #[must_use]
 pub fn planar_edges(
     k: &Kernel,

@@ -639,3 +639,36 @@ fn replace_face_moves_the_named_body_of_a_flush_face_and_warns_for_an_unnamed_on
     assert!((body_volume(&mut s, "Small") - 350.0).abs() < 1e-6, "{}", body_volume(&mut s, "Small"));
     assert!((body_volume(&mut s, "Big") - 24000.0).abs() < 1e-6);
 }
+
+/// Replace Face on a named body takes the named body's face, though another body has a face a
+/// hair from the pick (#16871): B's top moves to z = 10.02 (30 × 20 × 10.02) whatever A is.
+#[test]
+fn replace_face_ignores_a_face_of_another_body_near_the_target_plane() {
+    // A's height and corner: on the target plane, just past it, and half overlapping B.
+    for (height, corner) in [(10.02, [0.0, 0.0, 0.0]), (10.03, [0.0, 0.0, 0.0]), (10.02, [15.0, 0.0, 0.0])] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 30, "width": 20, "height": height, "corner": corner, "operation": "new", "body_name": "A"}));
+        run(&mut s, "solid.box", json!({"length": 30, "width": 20, "height": 10, "corner": [0, 0, 0], "operation": "new", "body_name": "B"}));
+        let out = run(
+            &mut s,
+            "solid.replace_face",
+            json!({"faces": [[15, 10, 10]], "target": {"origin": [0, 0, 10.02], "normal": [0, 0, 1]}, "body": "B"}),
+        );
+        assert!(out.get("warning").is_none_or(Value::is_null), "A {height} at {corner:?}: {out}");
+        let b = body_volume(&mut s, "B");
+        assert!((b - 6012.0).abs() < 1e-6, "A {height} at {corner:?}: B is {b}");
+        let a = body_volume(&mut s, "A");
+        assert!((a - 600.0 * height).abs() < 1e-6, "A {height} at {corner:?}: A is {a}");
+    }
+}
+
+/// #18061: a face with more edges than a profile can take is refused with its edge count and the
+/// limit, not "the face has no usable boundary"; a face with none keeps that message.
+#[test]
+fn a_face_with_too_many_edges_is_refused_with_its_count_and_the_limit() {
+    let many = super::profile_edge_count("solid.extrude", 6000).unwrap_err().to_string();
+    assert!(many.contains("the face has 6000 edges; a face used as a profile can have at most 5000"), "{many}");
+    assert!(super::profile_edge_count("solid.extrude", 5000).is_ok());
+    let none = super::profile_edge_count("solid.revolve", 0).unwrap_err().to_string();
+    assert!(none.contains("the face has no usable boundary"), "{none}");
+}

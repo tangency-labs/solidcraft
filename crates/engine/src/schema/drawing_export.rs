@@ -3,7 +3,9 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::drawing_scene::{SheetSceneDimension, SheetSceneNote, SheetSceneView};
+use super::drawing_scene::{
+    SheetSceneBalloon, SheetSceneDimension, SheetSceneFill, SheetSceneNote, SheetSceneSketch, SheetSceneTable, SheetSceneView,
+};
 use super::drawing_sheet::sheet_ref;
 
 /// Write one sheet of the open drawing to a file, or return it.
@@ -143,9 +145,19 @@ pub struct ExportResult {
     /// Each note on the sheet or its views, as `drawing.scene` reports it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<SheetSceneNote>,
+    /// Each balloon of a view on the sheet, as `drawing.scene` reports it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub balloons: Vec<SheetSceneBalloon>,
+    /// Each table on the sheet, as `drawing.scene` reports it: one that isn't drawn leaves the file
+    /// written, and says why here.
+    pub tables: Vec<SheetSceneTable>,
     /// What a deferred drawing wrote as it last was, as `drawing.scene` reports it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub out_of_date: Vec<String>,
+    /// Each sheet sketch on the sheet, in id order, as `drawing.scene` reports it.
+    pub sketches: Vec<SheetSceneSketch>,
+    /// Each fill and its boundary/expansion status, as drawing.scene reports it.
+    pub fills: Vec<SheetSceneFill>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

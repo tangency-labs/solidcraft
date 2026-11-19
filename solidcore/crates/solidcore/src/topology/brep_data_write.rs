@@ -23,12 +23,11 @@
 //! Deviations:
 //! - **Files.** [`BrepData::write_to_file`] returns the file's bytes (no filesystem on
 //!   wasm32); only a new file (`bNewFile = TRUE`) is supported.
-//! - **ASCII doubles (opt-in).** With
-//!   [`crate::kernel::UpstreamFixes::ascii_doubles_round_trip`],
-//!   [`write_brep_to_file`] (through [`BrepData::write_to_file_with_nurbs`]) writes
-//!   an ASCII file's doubles so that they read back unchanged
-//!   ([`BrepData::write_to_file_with`]; WR-655), where upstream's `%.16f` loses digits
-//!   below 1.
+//! - **ASCII doubles.** [`write_brep_to_file`] (through
+//!   [`BrepData::write_to_file_with_nurbs`]) writes an ASCII file's finite doubles so
+//!   that they read back unchanged ([`BrepData::write_to_file_with`]; WR-655), where
+//!   upstream's `%.16f` loses digits below 1. [`BrepData::write_to_file`] keeps
+//!   upstream's `%.16f` text.
 //! - **Native formats only.** `bWriteAsBSplines = TRUE` approximates every non-B-spline
 //!   curve and surface (`ApproximateCurve`, `ApproximateSurface`); it is not ported,
 //!   and the writers always write native formats (the upstream default). The kinds
@@ -597,9 +596,17 @@ pub fn write_curve_to_db(
     } else {
         // database versions 32 and before - limited to BSplineCurves
         db.write_type(crate::curve::curve::p2::BSPLINE_CURVE_TYPE, None);
-        let b = bspline_curve_part(curve)
-            .ok_or_else(|| SolidError::topology_missing(OP_CURVE, "the curve's B-spline part"))?;
-        b.write_to_db(db, version)?;
+        // `pBSP->SmBSplineCurve::WriteToDB(..)` on the curve itself: its
+        // GetOrCreateGwNurbPointer runs a line's own MakeNurb (a two-point line has no NURB
+        // yet), so a line's part is written with its NURB
+        if let CurveKind::Line(l) = curve.kind() {
+            l.base_with_nurb()?.write_to_db(db, version)?;
+        } else {
+            let b = bspline_curve_part(curve).ok_or_else(|| {
+                SolidError::topology_missing(OP_CURVE, "the curve's B-spline part")
+            })?;
+            b.write_to_db(db, version)?;
+        }
     }
 
     // gather and output curve attributes
@@ -784,8 +791,8 @@ impl BrepData {
     /// [`Self::write_to_file`] after [`make_missing_nurb`] on every surface: upstream's
     /// `SmBSplineSurface::WriteToDB` reaches the NURB through
     /// `GetOrCreateGwNurbPointer`, so a lazy surface is written with the NURB it makes.
-    /// With `k.fixes.ascii_doubles_round_trip` an ASCII file's doubles read back
-    /// unchanged ([`Self::write_to_file_with`]).
+    /// An ASCII file's finite doubles are written so that they read back unchanged
+    /// ([`Self::write_to_file_with`]; WR-655).
     ///
     /// # Errors
     ///
@@ -794,7 +801,7 @@ impl BrepData {
         for s in &mut self.surfaces {
             make_missing_nurb(k, &mut s.object)?;
         }
-        self.write_to_file_with(file_type, k.fixes.ascii_doubles_round_trip)
+        self.write_to_file_with(file_type, true)
     }
 
     /// `SmBrepData::WriteToFile(name, eType, TRUE)`: the `Version` and
@@ -810,8 +817,7 @@ impl BrepData {
     }
 
     /// [`Self::write_to_file`], an ASCII file's doubles written so that they read back
-    /// unchanged when `round_trip_doubles` (not upstream: WR-655's opt-in,
-    /// [`crate::kernel::UpstreamFixes::ascii_doubles_round_trip`];
+    /// unchanged when `round_trip_doubles` (not upstream: WR-655's fix,
     /// [`DatabaseWriter::with_round_trip_doubles`]).
     ///
     /// # Errors
@@ -1581,6 +1587,45 @@ mod tests {
     /// NURB their `MakeNurb` gives: the bytes equal those of the same surface with its
     /// NURB made first (upstream's `GetOrCreateGwNurbPointer`). A surface that has its
     /// NURB is written byte for byte as before.
+    /// A lazy line (`Line::from_points`, no NURB yet, as upstream's two-point `SmLine`) is
+    /// written to a version 32 database (the B-spline part only) with the NURB its
+    /// `MakeNurb` gives: the bytes equal those of the same line with its NURB made first
+    /// (upstream's `pBSP->SmBSplineCurve::WriteToDB` on the line itself).
+    #[test]
+    fn a_lazy_line_writes_the_nurb_it_makes_at_version_32() {
+        use crate::curve::line::Line;
+        let bytes = |c: Curve| -> Result<Vec<u8>> {
+            let store = AttributeStore::default();
+            let mut all = Vec::new();
+            let mut map = BTreeSet::new();
+            let mut attrs = AttributeTable {
+                store: &store,
+                all: &mut all,
+                map: &mut map,
+            };
+            let mut db = DatabaseWriter::open_for_write(FileType::Ascii);
+            db.begin_writing();
+            write_curve_to_db(
+                &Keyed {
+                    key: ObjectKey(0),
+                    object: c,
+                },
+                32,
+                &mut attrs,
+                &mut db,
+                false,
+            )?;
+            db.end_writing();
+            Ok(db.into_bytes())
+        };
+        let lazy = Line::from_points(Vec3::new(1.0, 2.0, 3.0), Vec3::new(4.0, 6.0, 3.0), 3);
+        assert!(lazy.base().gw_nurb().is_none());
+        let mut made = lazy.clone();
+        made.make_nurb().unwrap();
+        let want = bytes(Curve::from(made)).unwrap();
+        assert_eq!(bytes(Curve::from(lazy)).unwrap(), want);
+    }
+
     #[test]
     fn lazy_surfaces_write_the_nurb_they_make() {
         use crate::geom::extent2d::Extent2d;

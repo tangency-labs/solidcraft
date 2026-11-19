@@ -639,8 +639,10 @@ fn failed_end_connection_retains_completed_mutations_and_stops_the_walk() {
     assert_eq!(fb.fillet_edge(r).unwrap().curve_class().unwrap().size(), 2);
 }
 
+/// The bare `Copy`'s status is returned (fork 66b02de `SER`, WR-661; upstream ignores it
+/// and uses the copy): nothing after the copy runs.
 #[test]
-fn ignored_copy_status_does_not_discard_its_completed_output() {
+fn a_failed_copy_status_is_returned() {
     let mut f = Fixture::new([&[0.4, 1.0], &[1.0]], true);
     let id = f.geom;
     let mut script = Script {
@@ -649,14 +651,11 @@ fn ignored_copy_status_does_not_discard_its_completed_output() {
         fail: Some("copy_offset"),
         ..Script::default()
     };
-    f.context().process(id, &mut vec![], &mut script).unwrap();
     assert_eq!(
-        f.fb.geom(FilletGeomId(1)).unwrap().off_surfs[0]
-            .as_ref()
-            .unwrap()
-            .offset_distance(),
-        0.25
+        f.context().process(id, &mut vec![], &mut script),
+        Err(SolidError::sm_err("regression"))
     );
+    assert_eq!(script.calls.last().map(String::as_str), Some("copy_offset"));
 }
 
 #[test]
@@ -1098,14 +1097,12 @@ fn rollover_topology_split_preserves_actual_solver_id_and_partial_edits() {
     let end_use = f.fb.brep().edge(rail).unwrap().edgeuses[1];
     let count = f.fb.geoms().len();
     let err = Missing.topology_split(&mut f.context(), id).unwrap_err();
-    // a typed blend failure that keeps the bare `Upstream`'s status (#13790)
+    // a stage failure (#15034) that keeps the bare `Upstream`'s status (#13790)
     assert_eq!(
         (err.operation(), err.blend_failure(), err.upstream_status()),
         (
             "blend::fillet_geom::p5::FilletBrep::make_rail_edgeuse",
-            Some(&crate::error::blend::BlendFailure::Missing(
-                "the other base edge use"
-            )),
+            Some(&crate::error::blend::BlendFailure::StageFailed),
             Some(crate::error::SM_ERR_NULL_POINTER)
         ),
         "{err:?}"
