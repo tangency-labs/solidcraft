@@ -13,7 +13,7 @@
     "prefs.glass_see_through": "الشفافية",
     "prefs.glass_refraction": "انحناء الحافة",
     "prefs.glass_reach": "امتداد الحافة",
-    "prefs.glass_tint": "صبغة الزجاج",
+    "prefs.glass_tint": "تلوين الزجاج",
     "prefs.glass_tint_clear": "شفاف",
     "prefs.glass_tint_accent": "لون التمييز"
   },
@@ -40,8 +40,8 @@
     "prefs.glass_see_through": "Độ trong suốt",
     "prefs.glass_refraction": "Độ cong mép",
     "prefs.glass_reach": "Độ rộng mép",
-    "prefs.glass_tint": "Sắc kính",
-    "prefs.glass_tint_clear": "Trong",
+    "prefs.glass_tint": "Màu kính",
+    "prefs.glass_tint_clear": "Trong suốt",
     "prefs.glass_tint_accent": "Màu nhấn"
   },
   "zh": {
