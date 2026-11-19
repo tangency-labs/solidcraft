@@ -318,7 +318,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             push_sheet(st, f, crate::lineage::ChainRoles { sketch: &ss, chains: &chains }.tool(body));
             Ok(())
         }
-        FeatureKind::SurfaceRevolve { sketch, profiles, curves, axis, angle, angle2, symmetric } => {
+        FeatureKind::SurfaceRevolve { sketch, profiles, curves, axis, angle, angle2, symmetric, faced } => {
             let ss = sketch_in_feature_frame(
                 doc,
                 st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?,
@@ -348,7 +348,11 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 (None, false) => (0.0, a),
             };
             let chains = sheet_chains(&ss, profiles.as_ref(), curves)?;
-            let body = kernel::revolve_sheet(&ss.plane, &chains, o, d, start, sweep)?;
+            let body = if *faced {
+                kernel::revolve_sheet(&ss.plane, &chains, o, d, start, sweep)?
+            } else {
+                kernel::revolve_sheet_legacy_sides(&ss.plane, &chains, o, d, start, sweep)?
+            };
             push_sheet(st, f, crate::lineage::ChainRoles { sketch: &ss, chains: &chains }.tool(body));
             Ok(())
         }

@@ -20,7 +20,7 @@ use std::collections::BTreeSet;
 
 use solidcore_record::brep::{self as b, Brep, Curve2};
 use solidcore_record::{Plane, Region2, Seg2, Vec2, Vec3};
-use solidcraft_geom::brep::eval::CurveEval;
+use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
 use solidcraft_geom::bspline::{HPoint, NurbsSurface};
 
 use crate::body::Body;
@@ -972,6 +972,45 @@ fn swept_from(r: &Brep, start: &Plane, pieces: &[Numbered]) -> Vec<FaceProv> {
     from.iter().map(|set| if set.is_empty() { record::generated(Vec::new()) } else { record::profile(set.iter()) }).collect()
 }
 
+/// The sheet `r` swept from `pieces` that start on `start`, each face turned where it faces away
+/// from the side the curves give it: the curve's direction crossed with `start`'s normal, as
+/// [`extrude_sheet`]'s faces face. A face is judged at the middles of its edges lying on the
+/// curves; one with no such edge keeps its side, and a closed shell (a solid) is left as it is.
+fn faced_by_curves(r: Brep, start: &Plane, pieces: &[Numbered]) -> Result<Brep> {
+    if r.edges.iter().all(|e| e.uses.len() >= 2) {
+        return Ok(r);
+    }
+    let n = start.normal();
+    let sides = face_sides(&r);
+    let mut votes = vec![0.0f64; r.faces.len()];
+    for e in &r.edges {
+        let Some(mid) = CurveEval::new(e.parameters()).ok().and_then(|c| c.point(0.5 * (e.interval[0] + e.interval[1]))) else { continue };
+        let near = 4.0 * e.tolerance.max(r.tolerance);
+        if start.height(mid).abs() > near {
+            continue;
+        }
+        let o = mid - start.origin;
+        let q = Vec2::new(o.dot(start.x), o.dot(start.y));
+        let on = pieces.iter().map(|(s, _)| (s, s.closest_param(q))).find(|(s, t)| s.point_at(*t).dist(q) <= near);
+        let Some(want) = on.and_then(|(s, t)| start.dir_to_world(s.derivative(t)).normalized()).map(|d| d.cross(n)) else { continue };
+        for u in &e.uses {
+            let f = u.face as usize;
+            let Some(surface) = r.faces.get(f).and_then(|face| SurfaceEval::new(face.parameters()).ok()) else { continue };
+            let Some(uv) = surface.project(mid, None, near.max(1e-6)) else { continue };
+            let Some(normal) = surface.derivs(uv[0], uv[1]).and_then(|(_, su, sv)| su.cross(sv).normalized()) else { continue };
+            let side = if sides.get(f).copied().unwrap_or(true) { 1.0 } else { -1.0 };
+            if let Some(v) = votes.get_mut(f) {
+                *v += side * normal.dot(want);
+            }
+        }
+    }
+    if votes.iter().all(|v| *v >= 0.0) {
+        return Ok(r);
+    }
+    let picked: Vec<(usize, bool)> = votes.iter().enumerate().map(|(f, v)| (f, *v < 0.0)).collect();
+    Ok(Parts::of(&r, &picked)?.canonical()?.brep)
+}
+
 /// A sheet of SMLib's pieces (each a record with its faces' history), joined into one record and,
 /// with `stitch`, sewn where pieces share edges (at ten times the pieces' tolerance).
 pub(crate) fn sheet_of(pieces: Vec<(Brep, Vec<FaceProv>)>, stitch: bool, operands: &[&Body]) -> Result<Body> {
@@ -1042,7 +1081,22 @@ pub(crate) fn revolved_record(plane: &Plane, segs: &[Seg2], origin: Vec3, axis: 
 /// stays put there (a cone's apex, a sphere's pole). The walls form one surface body with no caps,
 /// or a solid where they close (a full turn of a closed curve, or of a curve from the axis back to
 /// it); its history has no operands: every face is new.
+///
+/// A sheet's faces face the side [`extrude_sheet`]'s do: the curve's direction crossed with the
+/// sketch normal, so out of a profile (its outer loop runs counter-clockwise about the normal, its
+/// holes clockwise), and the faces of one chain agree across the edges they share.
 pub fn revolve_sheet(plane: &Plane, chains: &[Vec<Seg2>], axis_origin: Vec2, axis_dir: Vec2, start: f64, sweep: f64) -> Result<Body> {
+    revolved_sheet(plane, chains, (axis_origin, axis_dir), start, sweep, true)
+}
+
+/// [`revolve_sheet`] as designs saved before it faced its faces built it: each face along its
+/// surface's own normal (a plane's, a cylinder's outward one), whichever way the curve runs, so
+/// the faces of a profile can disagree.
+pub fn revolve_sheet_legacy_sides(plane: &Plane, chains: &[Vec<Seg2>], axis_origin: Vec2, axis_dir: Vec2, start: f64, sweep: f64) -> Result<Body> {
+    revolved_sheet(plane, chains, (axis_origin, axis_dir), start, sweep, false)
+}
+
+fn revolved_sheet(plane: &Plane, chains: &[Vec<Seg2>], (axis_origin, axis_dir): (Vec2, Vec2), start: f64, sweep: f64, faced: bool) -> Result<Body> {
     use std::f64::consts::TAU;
     if !crate::build::frame_ok(plane) || !axis_origin.is_finite() || !axis_dir.is_finite() {
         return Err(invalid("revolve frame is not finite and orthonormal"));
@@ -1078,6 +1132,7 @@ pub fn revolve_sheet(plane: &Plane, chains: &[Vec<Seg2>], axis_origin: Vec2, axi
         let turned = Plane { origin: crate::build::rotate_about(plane.origin, origin, a, start), x: turn(plane.x), y: turn(plane.y) };
         let (k, angle) = if sweep < 0.0 { (a * -1.0, -sweep) } else { (a, sweep) };
         let r = imp::revolved(&turned, &chain, origin, k, angle.min(TAU))?;
+        let r = if faced { faced_by_curves(r, &turned, &chain)? } else { r };
         let h = swept_from(&r, &turned, &chain);
         pieces.push((r, h));
     }
@@ -1711,6 +1766,49 @@ mod tests {
         let ring = measure(&sheet(sq.segs.clone(), 0.0, 2.0 * PI)).unwrap();
         close(ring.area, 2.0 * PI * (2.0 + 3.0 + 2.5 + 2.5));
         close(ring.volume, 2.0 * PI * 2.5);
+    }
+
+    /// A revolved sheet's faces face the side Surface Extrude's do, the curve's direction crossed
+    /// with the sketch normal: out of a square profile on every wall, and along a single line the
+    /// way it runs. The legacy build keeps each face along its surface's own normal, so two of the
+    /// square's walls face into it there.
+    #[test]
+    fn revolve_sheet_faces_follow_the_curves() {
+        use std::f64::consts::FRAC_PI_2;
+        let line = |a: (f64, f64), b: (f64, f64)| Seg2::Line { a: Vec2::new(a.0, a.1), b: Vec2::new(b.0, b.1) };
+        // The unit normal of the face of `body` whose surface passes through `p`.
+        let normal = |body: &Body, p: Vec3| {
+            let faces = crate::blend::Faces::of(body).unwrap();
+            let on = |f: usize| {
+                let surface = SurfaceEval::new(faces.rec.faces.get(f)?.parameters()).ok()?;
+                surface.point(surface.project(p, None, 1e-6)?).filter(|q| q.dist(p) < 1e-6)
+            };
+            let found: Vec<Vec3> = (0..faces.rec.faces.len()).filter(|f| on(*f).is_some()).filter_map(|f| faces.normal_at(f, p, 1e-6)).collect();
+            assert_eq!(found.len(), 1, "one face through {p:?}: {found:?}");
+            found[0]
+        };
+        let near = |a: Vec3, b: Vec3| assert!(a.dist(b) < 1e-6, "{a:?} vs {b:?}");
+        let sq = Loop2::polygon(&[Vec2::new(2.0, 0.0), Vec2::new(3.0, 0.0), Vec2::new(3.0, 1.0), Vec2::new(2.0, 1.0)]);
+        let walls = [
+            (Vec3::new(2.0, 0.5, 0.0), Vec3::new(-1.0, 0.0, 0.0)),
+            (Vec3::new(3.0, 0.5, 0.0), Vec3::new(1.0, 0.0, 0.0)),
+            (Vec3::new(2.5, 0.0, 0.0), Vec3::new(0.0, -1.0, 0.0)),
+            (Vec3::new(2.5, 1.0, 0.0), Vec3::new(0.0, 1.0, 0.0)),
+        ];
+        for (start, sweep) in [(0.0, FRAC_PI_2), (-FRAC_PI_2 / 2.0, FRAC_PI_2), (0.0, -FRAC_PI_2)] {
+            let ring = revolve_sheet(&Plane::XY, std::slice::from_ref(&sq.segs), Vec2::ZERO, Vec2::new(0.0, 1.0), start, sweep).unwrap();
+            assert!(ring.is_surface());
+            for (p, out) in walls {
+                near(normal(&ring, p), out);
+            }
+        }
+        let legacy = revolve_sheet_legacy_sides(&Plane::XY, std::slice::from_ref(&sq.segs), Vec2::ZERO, Vec2::new(0.0, 1.0), 0.0, FRAC_PI_2).unwrap();
+        let inward = walls.iter().filter(|(p, out)| normal(&legacy, *p).dot(*out) < 0.0).count();
+        assert_eq!(inward, 2, "the legacy build faces two walls into the square");
+        for (a, b, side) in [((3.0, 0.0), (3.0, 1.0), 1.0), ((3.0, 1.0), (3.0, 0.0), -1.0)] {
+            let wall = revolve_sheet(&Plane::XY, &[vec![line(a, b)]], Vec2::ZERO, Vec2::new(0.0, 1.0), 0.0, FRAC_PI_2).unwrap();
+            near(normal(&wall, Vec3::new(3.0, 0.5, 0.0)), Vec3::new(side, 0.0, 0.0));
+        }
     }
 
     #[test]
