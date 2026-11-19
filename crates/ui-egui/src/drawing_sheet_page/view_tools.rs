@@ -54,7 +54,17 @@ pub(super) fn owns_drag(app: &SolveApp, response: &egui::Response, at: OnScreen,
             || dragging_dimension()
             || (response.dragged_by(PointerButton::Primary)
                 && ((!tool && (origin(app, response, at, objects).is_some() || selected_origin(app, response, at, objects).is_some()))
-                    || dimension_origin(app, response, at, objects).is_some())))
+                    || dimension_origin(app, response, at, objects)
+                        .is_some_and(|(id, pointer)| !tool || in_tool(app, id, pointer, HOVER_BAND / at.scale)))))
+}
+
+/// With the Dimension tool in hand, whether a press at `point` on dimension or note `id` is on
+/// what drags there: a note, or the dimension's text as the pointer's hover last found it
+/// ([`over_text`] keeps it). Elsewhere on a dimension the press is the tool's, or navigation's.
+fn in_tool(app: &SolveApp, id: u64, point: Vec2, band: f64) -> bool {
+    let texts = app.drawing_workspace.page.view_tools.text_box.as_ref().filter(|(of, at, _)| *of == id && *at == app.session.revision);
+    app.session.drawing(drawing_scene::CMD).is_ok_and(|drawing| drawing.notes.by_id(id).is_some())
+        || texts.is_some_and(|(.., texts)| texts.iter().any(|text| text.inflated(band).contains(point)))
 }
 
 /// Whether something on the sheet is being dragged by the drag sketch dimensions use: a
