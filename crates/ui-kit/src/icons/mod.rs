@@ -13,6 +13,7 @@ use egui::{Color32, Painter, Rect, TextureHandle, TextureOptions, pos2};
 
 pub mod glyphs;
 mod svg;
+pub mod wave;
 
 pub use svg::{
     Doc, IconData, IconExtension, IconSet, Look, MAX_ACCENTS, MAX_ADDED, MAX_ADDED_BYTES, MAX_ROLES, PLACEHOLDER, Palette, Resolved, audit, render,
@@ -75,6 +76,11 @@ enum Finish {
     Artwork,
     Ink(Color32),
     Danger,
+    /// The artwork's coloured parts as their brightness, so a tint multiplied in takes the place of
+    /// the accent and keeps the shading (RGB wave).
+    WaveAccent,
+    /// The artwork without its coloured parts: its whites and greys, drawn as they are (RGB wave).
+    WaveNeutral,
 }
 
 /// Textures already rasterised: one per (master, look, pixel size, finish).
@@ -164,6 +170,12 @@ pub fn paint_danger(p: &Painter, r: Rect, name: &str, opacity: f32) {
 }
 
 fn paint_resolved(p: &Painter, r: Rect, resolved: Resolved, look: Look, opacity: f32, finish: Finish, mirror: Mirror) {
+    paint_tinted(p, r, resolved, look, opacity, finish, mirror, None);
+}
+
+/// [`paint_resolved`] with a hue tint in place of the white one (the RGB wave's accent).
+#[allow(clippy::too_many_arguments)]
+fn paint_tinted(p: &Painter, r: Rect, resolved: Resolved, look: Look, opacity: f32, finish: Finish, mirror: Mirror, tint: Option<Color32>) {
     let ctx = p.ctx();
     let ppp = ctx.pixels_per_point().max(0.5);
     let side = r.width().min(r.height());
@@ -182,6 +194,11 @@ fn paint_resolved(p: &Painter, r: Rect, resolved: Resolved, look: Look, opacity:
         let pm = if finish == Finish::Danger { render_tinted(doc, look, px) } else { render(doc, look, px) };
         let Some(pm) = pm else { return };
         let mut image = egui::ColorImage::from_rgba_premultiplied([px as usize, px as usize], pm.data());
+        if matches!(finish, Finish::WaveAccent | Finish::WaveNeutral) {
+            for pixel in &mut image.pixels {
+                *pixel = wave::wave_part(*pixel, finish == Finish::WaveAccent);
+            }
+        }
         if let Finish::Ink(ink) = finish {
             for pixel in &mut image.pixels {
                 *pixel = ink.gamma_multiply(f32::from(pixel.a()) / 255.0);
@@ -193,7 +210,7 @@ fn paint_resolved(p: &Painter, r: Rect, resolved: Resolved, look: Look, opacity:
     // Snap the image to whole physical pixels so it stays crisp.
     let size = px as f32 / ppp;
     let min = pos2(((r.center().x - size / 2.0) * ppp).round() / ppp, ((r.center().y - size / 2.0) * ppp).round() / ppp);
-    let tint = Color32::from_white_alpha((opacity.clamp(0.0, 1.0) * 255.0).round() as u8);
+    let tint = tint.unwrap_or_else(|| Color32::from_white_alpha((opacity.clamp(0.0, 1.0) * 255.0).round() as u8));
     let uv = match mirror {
         Mirror::None => Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
         Mirror::Vertical => Rect::from_min_max(pos2(0.0, 1.0), pos2(1.0, 0.0)),

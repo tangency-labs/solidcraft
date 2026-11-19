@@ -1,0 +1,74 @@
+{
+  "en": {
+    "prefs.ui_effect": "Effect",
+    "prefs.ui_effect_icons": "RGB wave on toolbar icons",
+    "prefs.ui_effect_buttons": "RGB wave on toolbar button backgrounds",
+    "prefs.ui_effect_panels": "RGB wave on UI panels",
+    "prefs.ui_effect_length": "RGB wave length",
+    "prefs.ui_effect_speed": "RGB wave speed",
+    "plugin_install.effects": "Visual effects: {names}"
+  },
+  "ar": {
+    "prefs.ui_effect": "تأثير",
+    "prefs.ui_effect_icons": "موجة RGB على أيقونات شريط الأدوات",
+    "prefs.ui_effect_buttons": "موجة RGB على خلفيات أزرار شريط الأدوات",
+    "prefs.ui_effect_panels": "موجة RGB على لوحات الواجهة",
+    "prefs.ui_effect_length": "طول موجة RGB",
+    "prefs.ui_effect_speed": "سرعة موجة RGB",
+    "plugin_install.effects": "مؤثرات مرئية: {names}"
+  },
+  "de": {
+    "prefs.ui_effect": "Effekt",
+    "prefs.ui_effect_icons": "RGB-Welle auf Werkzeugleisten-Symbolen",
+    "prefs.ui_effect_buttons": "RGB-Welle auf Werkzeugleisten-Schaltflächen",
+    "prefs.ui_effect_panels": "RGB-Welle auf Oberflächenfeldern",
+    "prefs.ui_effect_length": "RGB-Wellenlänge",
+    "prefs.ui_effect_speed": "RGB-Wellengeschwindigkeit",
+    "plugin_install.effects": "Visuelle Effekte: {names}"
+  },
+  "he": {
+    "prefs.ui_effect": "אפקט",
+    "prefs.ui_effect_icons": "גל RGB בסמלי סרגל הכלים",
+    "prefs.ui_effect_buttons": "גל RGB ברקע כפתורי סרגל הכלים",
+    "prefs.ui_effect_panels": "גל RGB בלוחות הממשק",
+    "prefs.ui_effect_length": "אורך גל RGB",
+    "prefs.ui_effect_speed": "מהירות גל RGB",
+    "plugin_install.effects": "אפקטים חזותיים: {names}"
+  },
+  "ja": {
+    "prefs.ui_effect": "エフェクト",
+    "prefs.ui_effect_icons": "ツールバーのアイコンにRGBウェーブ",
+    "prefs.ui_effect_buttons": "ツールバーのボタン背景にRGBウェーブ",
+    "prefs.ui_effect_panels": "UIパネルにRGBウェーブ",
+    "prefs.ui_effect_length": "RGBウェーブの長さ",
+    "prefs.ui_effect_speed": "RGBウェーブの速度",
+    "plugin_install.effects": "視覚効果: {names}"
+  },
+  "ko": {
+    "prefs.ui_effect": "효과",
+    "prefs.ui_effect_icons": "도구 모음 아이콘의 RGB 웨이브",
+    "prefs.ui_effect_buttons": "도구 모음 버튼 배경의 RGB 웨이브",
+    "prefs.ui_effect_panels": "UI 패널의 RGB 웨이브",
+    "prefs.ui_effect_length": "RGB 웨이브 길이",
+    "prefs.ui_effect_speed": "RGB 웨이브 속도",
+    "plugin_install.effects": "시각 효과: {names}"
+  },
+  "vi": {
+    "prefs.ui_effect": "Hiệu ứng",
+    "prefs.ui_effect_icons": "Sóng RGB trên biểu tượng thanh công cụ",
+    "prefs.ui_effect_buttons": "Sóng RGB trên nền nút thanh công cụ",
+    "prefs.ui_effect_panels": "Sóng RGB trên các bảng giao diện",
+    "prefs.ui_effect_length": "Độ dài sóng RGB",
+    "prefs.ui_effect_speed": "Tốc độ sóng RGB",
+    "plugin_install.effects": "Hiệu ứng hình ảnh: {names}"
+  },
+  "zh": {
+    "prefs.ui_effect": "效果",
+    "prefs.ui_effect_icons": "工具栏图标的RGB波浪",
+    "prefs.ui_effect_buttons": "工具栏按钮背景的RGB波浪",
+    "prefs.ui_effect_panels": "界面面板的RGB波浪",
+    "prefs.ui_effect_length": "RGB波浪长度",
+    "prefs.ui_effect_speed": "RGB波浪速度",
+    "plugin_install.effects": "视觉效果：{names}"
+  }
+}

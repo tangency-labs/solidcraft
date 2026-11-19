@@ -1541,11 +1541,16 @@ impl Tokens {
         t.with_vision(dark, mode)
     }
 
+    /// The logo's three faces in shades of `accent`: lighter, the accent itself, darker.
+    pub fn logo_shades(accent: Color32) -> [Color32; 3] {
+        [accent.lerp_to_gamma(Color32::WHITE, 0.22), accent, accent.lerp_to_gamma(Color32::BLACK, 0.2)]
+    }
+
     /// These tokens with the logo's three faces in shades of the accent: lighter, the accent
     /// itself, darker (as the built-in logo's blues are).
     pub fn with_accent_logo(mut self) -> Tokens {
         let accent = self.accent.to_opaque();
-        self.logo = [accent.lerp_to_gamma(Color32::WHITE, 0.22), accent, accent.lerp_to_gamma(Color32::BLACK, 0.2)];
+        self.logo = Self::logo_shades(accent);
         self
     }
 
