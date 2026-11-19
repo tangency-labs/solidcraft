@@ -137,12 +137,37 @@ in it; change them and click **OK**.
   `2 * pi` (6.28) along x, not every 360.
 - **The circle has a gap.** End must be a whole turn: `2 * pi`, or `360 deg`.
 - **A rule is rejected.** Use `*` for multiply (`2 * t`, not `2t`), and close every bracket.
+- **"Even 500 points don't keep the spline within the tolerance".** A point of the rule is proven
+  further than the tolerance from every point of the curve, by at least the distance quoted: the
+  rule bends faster than 500 points can follow, such as a very fine wave. Raise the tolerance or
+  narrow the range.
+- **"Even 500 points stray … from the formulas".** Checked a quarter, a half and three quarters
+  of the way between the points, the rule is still further off than the tolerance. Raise the
+  tolerance or narrow the range.
+- **A sketch warns "with these values its points leave the formulas' point … past the
+  tolerance".** A parameter the rule uses changed (a wave made finer, a curve made much larger),
+  or the design was saved by an older SolidCraft: a point of the rule is now proven further than
+  the tolerance from every point of the curve, which is drawn as it is. Edit the curve (applying
+  it unchanged is enough) to fit it with enough points; if even 500 can't, the edit says so, and
+  a larger tolerance or a narrower range fits it.
+- **A sketch warns "its formulas have no value at … between its points".** The rule can't be
+  worked out somewhere between two of the curve's points (a square root of a negative number,
+  say), and the spline is drawn across that gap. Change the rule or its range so it has a value
+  all along.
 
 ## For scripts and agents
 
 The commands are `sketch.equation_curve` and `sketch.equation_curve.edit` (see the
 [command reference](../reference/commands.md)). The curve is a fit point spline through points
 worked out from the rules, as many as keep it within the **Tolerance** (0.01 mm unless you set
-another), up to 500. Its points are fixed, so other curves can start at its ends. When a parameter
-a rule uses changes, the points follow. The pictures on this page come from the scripts in
+another), up to 500. How many is found by checking the rules a quarter, a half and three
+quarters of the way between the points; then, for a few milliseconds, a proof looks at the whole
+curve. If it proves the curve within the Tolerance, the reply's `deviation` is that bound and
+`proven` is true. If it proves a point of the rules further off (a wave the checks all miss),
+more points are used, and the curve is refused if even 500 are not enough. If it settles neither
+in time, or the rule jumps (`floor`, `sign`, `mod`), the curve is made from the checks, with
+`proven` false. Its points are fixed, so other curves can start at its ends. When a parameter a
+rule uses changes, the points follow, as many as before; the sketch warns only when a point of
+the rules is then proven further than the Tolerance from every point of the curve (a wave made
+finer, say), and editing the curve fits it again. The pictures on this page come from the scripts in
 `docs/book/scripts/equation-*.json`.

@@ -36,7 +36,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              The variable is a plain number: sin(t) reads it in radians; a result without a unit is in the design's length unit. \
              With variable_unit \"range\" it is a length, so a ^ 2 / (4 * t) is a length when a is one: start and end must both be lengths, or one a length and the other a plain number, which is then in the design's unit. \
              Makes a fit point spline through fixed points, as many as the tolerance needs (up to 500), closed smoothly when it ends where it starts; \
-             the points are placed again from the formulas whenever the parameters change. Returns curve, points (how many), closed, deviation (mm)",
+             the points are placed again from the formulas whenever the parameters change. Returns curve, points (how many), closed, deviation (mm), proven (whether deviation is a proven bound or an estimate)",
             created_doc!()
         )),
     CommandSpec::new("sketch.equation_curve.edit", "Edit Equation Curve", crate::checked!("sketch.equation_curve.edit", edit_curve))
@@ -46,7 +46,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<EquationEditResult>)
         .params(
             "curve: an equation curve's id; x?, y?, explicit?, start?, end?, tolerance?, variable_unit?: as in sketch.equation_curve, each kept when left out (explicit: true drops x; false needs x). \
-             The points are chosen again for the new formulas; the curve's start point (and the end point of an open curve) keeps its id, so geometry joined there stays joined. Returns curve, points, closed, deviation",
+             The points are chosen again for the new formulas; the curve's start point (and the end point of an open curve) keeps its id, so geometry joined there stays joined. Returns curve, points, closed, deviation, proven",
         ),
 ];
 
@@ -134,7 +134,7 @@ fn fit(doc: &solidcraft_doc::Document, eq: &EquationCurve, cmd: &str) -> Result<
 fn reply(curve: String, fit: &EquationFit, info: Value) -> Value {
     // A closed curve's last point is its first one.
     let points = fit.points.len().saturating_sub(usize::from(fit.closed));
-    json!({"curves": [curve.clone()], "curve": curve, "points": points, "closed": fit.closed, "deviation": fit.deviation, "sketch": info})
+    json!({"curves": [curve.clone()], "curve": curve, "points": points, "closed": fit.closed, "deviation": fit.deviation, "proven": fit.proven, "sketch": info})
 }
 
 fn create(s: &mut Session, p: &Value) -> Result<Value> {
