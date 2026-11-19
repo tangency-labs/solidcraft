@@ -8,8 +8,7 @@ description: "Use for writing, placing or running SolidCraft tests, or CI test f
 The long form is `docs/book/src/dev/testing.md`.
 
 ## Placement
-- New tests and list entries go next to related items, not at the end of a shared file; in a sorted list they go at their sorted place, which is the end only when they sort last.
-- A regression test goes into its area's existing test file (booleans, blends, shell, STEP, naming, ...), never a new file named after the bug (#3226).
+- A regression test goes into its area's existing test file (booleans, blends, shell, STEP, naming, ...) next to related tests, never at the end or in a new file named after the bug (#3226). Sorted lists: at the sorted place.
 - Engine tests sit next to the code or in `*_tests.rs` files, measured against a value you can derive.
 - UI scenarios are JSON in `crates/ui-egui/tests/scenarios/*.json`. Put `{"pending": "why"}` in a scenario that records a bug before it is fixed, and remove it in the fixing PR.
 - Reference tests are `tests/oracle/<case>/recipe.json` with an `expected.json` beside it, run by `cargo xtask oracle`, expected values in closed form (`tools/oracle-analytic/`) or from FreeCAD as a separate program (`tools/freecad-oracle/`). A known failure names its issue (`"known_failure": "#123"`). Never change an expected value to match SolidCraft's output, and never take one from a commercial CAD product.
