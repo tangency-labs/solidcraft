@@ -454,6 +454,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     // (`take_work`).
     crate::timeline::stop_playback(app);
     crate::sketch_text_move::cancel_drag(app);
+    crate::control_joint_drive::discard(app);
     let work = take_work(app);
     crate::dim_view::cancel();
     app.params = None;

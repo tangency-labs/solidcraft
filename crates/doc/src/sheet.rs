@@ -81,6 +81,11 @@ pub struct SheetRule {
     /// brake is set). A choice, not an expression; saved only when it isn't `bend`.
     #[serde(default = "rule_angle_display", skip_serializing_if = "is_bend_display")]
     pub angle_display: String,
+    /// The material the rule is for (`Aluminium 5052-H32`), as the standard library or a rule
+    /// pack names it, or as typed. A label for the people reading the design: nothing is
+    /// computed from it. Saved only when it is set (#18304).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub material: String,
 }
 
 impl SheetRule {
@@ -174,7 +179,14 @@ impl SheetRule {
             hem_gap: rule_hem_gap(),
             gap: rule_gap(),
             angle_display: rule_angle_display(),
+            material: String::new(),
         }
+    }
+
+    /// A rule named `name` with the default rule's reliefs, gaps and angle display, for a pack
+    /// row or library entry that gives only some values.
+    pub fn named(name: &str) -> SheetRule {
+        SheetRule { name: name.into(), ..SheetRule::steel() }
     }
 }
 

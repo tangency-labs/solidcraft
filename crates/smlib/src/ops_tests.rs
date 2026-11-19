@@ -200,6 +200,20 @@ fn offset_face_beside_a_round_all_round_a_spline_outline_moves_the_round() {
     }
 }
 
+/// Moving the top of a closed hollow out keeps the hollow (#18570): the faces moved are rebuilt
+/// with the cavity's walls, which were taken for walls between two pieces of material and
+/// deleted, filling the cavity in (a solid 20 × 20 × 25 block).
+#[test]
+fn offset_face_of_a_closed_hollow_keeps_the_hollow() {
+    let c = cube(20.0);
+    let hollow = c.shell(&[], 0.1, -2.0).unwrap();
+    let raised = hollow.offset_faces(&[[10.0, 10.0, 20.0]], 0.1, 5.0).unwrap();
+    shot(&raised, "offset_face_closed_hollow");
+    assert_close(volume(&raised), 20.0 * 20.0 * 25.0 - 16.0f64.powi(3), 1e-9, "raised hollow volume");
+    // The outside's 6 faces and the cavity's 6.
+    assert_eq!(raised.counts().unwrap()[0], 12);
+}
+
 #[test]
 fn fillet_takes_exactly_the_picked_edges() {
     // Round the vertical edge x = y = 20 first (r = 5): the top rim is then line, arc, line,
