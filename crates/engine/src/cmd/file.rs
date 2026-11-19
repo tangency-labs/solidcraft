@@ -1479,10 +1479,12 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
         } else {
             let mut fresh = Session::new(Document::new(&stem));
             fresh.set_validation(s.validation());
+            // `units` is checked on either route: an OpenUSD file states its own.
+            let units = mesh_units(p, path, "doc.open")?;
             let r = if geometry == solidcraft_io::UsdGeometry::Exact {
                 add_usd_exact(&mut fresh, path, None, mesh_up(p, path, "doc.open")?, mesh_origin(p, "doc.open")?)?
             } else {
-                add_mesh(&mut fresh, path, None, mesh_up(p, path, "doc.open")?, mesh_units(p, path, "doc.open")?, mesh_origin(p, "doc.open")?, None)?
+                add_mesh(&mut fresh, path, None, mesh_up(p, path, "doc.open")?, units, mesh_origin(p, "doc.open")?, None)?
             };
             (fresh, r)
         };

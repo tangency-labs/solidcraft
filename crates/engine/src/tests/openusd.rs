@@ -195,7 +195,8 @@ fn exact_geometry_reads_an_assembly_back_as_brep() {
 /// A stage that says Y is up stands up by default with `geometry: "exact"` too, and `up: z` keeps
 /// its axes: the 10 × 20 × 30 mm box, turned a quarter about X, has its file Y (0..20) up and its
 /// file Z (0..30) toward -Y. `geometry` is refused for another kind of file, an unknown choice is
-/// refused, and so is a crease angle with exact geometry.
+/// refused, and so is a crease angle with exact geometry. `units` is refused for an OpenUSD file on
+/// either route, `doc.open`'s exact one too, as the stage states its own.
 #[test]
 fn exact_geometry_stands_a_y_up_stage_up() {
     let dir = temp_dir("exact-up");
@@ -230,6 +231,9 @@ fn exact_geometry_stands_a_y_up_stage_up() {
         ("doc.open", json!({"path": stl, "geometry": "exact"}), "OpenUSD files only"),
         ("file.insert_mesh", json!({"path": path, "geometry": "nurbs"}), "`geometry` must be"),
         ("file.insert_mesh", json!({"path": path, "geometry": "exact", "crease_angle_degrees": 30}), "crease_angle_degrees"),
+        ("file.insert_mesh", json!({"path": path, "geometry": "exact", "units": "cm"}), "states its own"),
+        ("doc.open", json!({"path": path, "geometry": "exact", "units": "cm"}), "states its own"),
+        ("doc.open", json!({"path": path, "units": "cm"}), "states its own"),
     ] {
         let e = Session::default().execute(cmd, &p).unwrap_err().to_string();
         assert!(e.contains(why), "{cmd} {p}: {e}");
