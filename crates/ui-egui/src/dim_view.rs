@@ -865,6 +865,9 @@ pub(crate) enum Dragged {
     Sketch(String),
     /// A drawing dimension, by its id: `drawing.dimension.edit` with `text_to_mm`, on paper.
     Drawing(u64),
+    /// A drawing's note, by its id: `drawing.note.edit` with `at`, on paper from its sheet's corner
+    /// or its view's centre, as the note keeps it.
+    Note(u64),
 }
 
 /// Start dragging the text of the dimension under `press` (true: a dimension took the drag).
@@ -906,6 +909,9 @@ pub fn drag_to(app: &mut SolveApp, to: Vec2) {
         Dragged::Drawing(id) => app
             .session
             .execute("drawing.dimension.edit", &json!({"dimension": solidcraft_engine::doc::ids::encode(*id), "set": {"text_to_mm": [at.x, at.y]}})),
+        Dragged::Note(id) => {
+            app.session.execute("drawing.note.edit", &json!({"note": solidcraft_engine::doc::ids::encode(*id), "set": {"at": [at.x, at.y]}}))
+        }
     };
     if moved.is_ok() {
         app.session.undo.truncate(depth + 1);

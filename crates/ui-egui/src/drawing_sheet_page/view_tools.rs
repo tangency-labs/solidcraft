@@ -51,19 +51,21 @@ pub(super) fn owns_drag(app: &SolveApp, response: &egui::Response, at: OnScreen,
                 && (origin(app, response, at, objects).is_some() || dimension_origin(app, response, at, objects).is_some())))
 }
 
-/// Whether a drawing dimension's text is being dragged, by the drag sketch dimensions use.
+/// Whether a drawing dimension's text or a note is being dragged, by the drag sketch dimensions use.
 fn dragging_dimension() -> bool {
-    matches!(crate::dim_view::dragged(), Some(crate::dim_view::Dragged::Drawing(_)))
+    matches!(crate::dim_view::dragged(), Some(crate::dim_view::Dragged::Drawing(_) | crate::dim_view::Dragged::Note(_)))
 }
 
-/// The dimension a drag starts on, and where on paper: a press on a dimension's text or lines.
+/// The dimension or note a drag starts on, and where on paper: a press on a dimension's text or
+/// lines, or on a note.
 fn dimension_origin(app: &SolveApp, response: &egui::Response, at: OnScreen, objects: &[SheetObject]) -> Option<(u64, Vec2)> {
     let screen = response.ctx.input(|input| input.pointer.press_origin())?;
     if crate::shell::covered(app, screen) {
         return None;
     }
     let pointer = at.paper(screen);
-    let hit = drawing_scene::hit(objects, pointer, HOVER_BAND / at.scale).filter(|hit| hit.kind == ObjectKind::Dimension)?;
+    let hit =
+        drawing_scene::hit(objects, pointer, HOVER_BAND / at.scale).filter(|hit| matches!(hit.kind, ObjectKind::Dimension | ObjectKind::Note))?;
     Some((hit.object, pointer))
 }
 
@@ -182,11 +184,15 @@ impl Canvas<'_> {
         } else if self.response.drag_started_by(PointerButton::Primary)
             && let Some((dimension, pointer)) = dimension_origin(app, self.response, self.at, self.objects)
         {
-            // A drag from a dimension moves its text, by the drag that moves a sketch dimension's.
+            // A drag from a dimension moves its text, and one from a note the note, by the drag that
+            // moves a sketch dimension's text.
             if !selected(app, self.drawing.id).contains(&dimension) {
                 crate::viewport::select(app, Some(pick(self.drawing.id, dimension)), false, false);
             }
-            if let Some(text) = text_centre(app, dimension) {
+            if let Some(note) = self.drawing.notes.by_id(dimension) {
+                // A note keeps where it sits: the drag moves that, by the same drag.
+                crate::dim_view::begin_drag(app, crate::dim_view::Dragged::Note(dimension), Vec2::new(note.at[0], note.at[1]), pointer);
+            } else if let Some(text) = text_centre(app, dimension) {
                 crate::dim_view::begin_drag(app, crate::dim_view::Dragged::Drawing(dimension), text, pointer);
             }
         } else if self.response.drag_started_by(PointerButton::Primary)
