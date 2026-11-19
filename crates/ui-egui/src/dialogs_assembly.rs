@@ -2135,7 +2135,11 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
     // Any feature, when components are placed away from their frames: the preview must show
     // the world the viewport shows.
     let moves = cmds.iter().all(|(c, _)| MOVES.contains(&c.as_str()));
-    if cmds.is_empty() || !(moves || solidcraft_engine::frames::placed(s)) {
+    let was_placed = moves || solidcraft_engine::frames::placed(s);
+    // A plugin's run can make a component and move it, in a design that has none placed yet:
+    // only its result says so, and that is where the component has to show.
+    let plugin = cmds.iter().any(|(c, _)| c == "plugin.run");
+    if cmds.is_empty() || !(was_placed || plugin) {
         return None;
     }
     let preview = match s.preview_visible_world(cmds) {
@@ -2151,22 +2155,32 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
         .map(|(_, r)| r.clone());
     // A constraint's reply: how free its part is with the constraint the preview shows.
     let placed = cmds.iter().zip(&preview.replies).find(|((c, _), _)| c.starts_with("assembly.constraint.")).map(|(_, r)| r.clone());
-    let (before, after) = (preview.before, preview.after);
     // A moved component looks like itself (no new surface), with its old place as the ghost.
-    let colors = Colors { added: colors.body, new_body: colors.body, ..colors };
+    // A plugin's run in a design with nothing placed keeps the colours of a new body.
+    let colors = if was_placed { Colors { added: colors.body, new_body: colors.body, ..colors } } else { colors };
+    Some(build_world_preview(preview, colors).map(|mut built| {
+        built.stopped = stopped;
+        built.placed = placed;
+        built
+    }))
+}
+
+/// Draw a placed model before and after an assembly edit using the common preview scene.
+pub(crate) fn build_world_preview(preview: solidcraft_engine::Preview, colors: Colors) -> Result<Built, String> {
+    let (before, after) = (preview.before, preview.after);
     let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crate::preview::build(&before, &after, colors)));
-    Some(match built {
+    match built {
         Ok(mut b) => {
             if !colors.ghost {
                 b.scene.ghost.clear();
             }
             b.bounds = after.bodies.iter().fold(Aabb3::EMPTY, |acc, x| acc.union(&x.mesh().bounds()));
-            b.stopped = stopped;
-            b.placed = placed;
+            // The joints the preview posed: what a reader of the pose sees the preview show.
+            b.joints = preview.joints;
             Ok(b)
         }
         Err(_) => Err("the preview failed".into()),
-    })
+    }
 }
 
 /// What a drive that stopped short of the asked values says: where the joint got to and why

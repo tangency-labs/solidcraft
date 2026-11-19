@@ -173,8 +173,7 @@ pub enum NoRoomReason {
     CutsThePart,
     /// A convex blend's section would leave the part between its rails and come back into
     /// it through an inner face: the blend would break through a wall into the hollow
-    /// behind (a round on a wall thinner than it reaches; not the fork's,
-    /// `fixes.fillet_refuse_rounds_breaking_through`, WR-707, #2299).
+    /// behind (a round on a wall thinner than it reaches; not the fork's, WR-707, #2299).
     BreaksThrough,
     /// A cliff overflow runs past a fillet end whose end face is not planar (WR-631).
     CliffEndFaceNotPlanar,
@@ -834,6 +833,12 @@ pub struct FilletExecutive<O> {
     /// smooth vertex that waited for the rails' rollover is built in. An End that would wait
     /// again then has no later pass to build its edges, so it fails instead.
     pub rollover_adjusting: bool,
+    /// Not upstream (#19242; `false` from the constructor, cleared before each rollover
+    /// decision): a round taken as apart rolled over a smooth edge onto a face another round
+    /// of the blend stands on. Only the bands' check compares that round's band with the
+    /// rolled rail, so [`Self::refuse_overlapping_bands`] runs it whatever
+    /// `fixes.fillet_refuse_overlapping_bands` says.
+    pub rolled_beside_band: bool,
 }
 
 /// What a refusal's fit sizes (the fork's `SM_FIT_RADIUS`, `SM_FIT_SCALE`, `SM_FIT_CHORD`).
@@ -1085,6 +1090,30 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
         let _ = (k, solver);
         Err(SolidError::unported(
             "SmFilletSolver::EndSectionsFitTheirFaces (fork)",
+            "blend.fillet_executive_p3",
+        ))
+    }
+    /// The fork's `FacesOutlastTheirBlends` over `solvers`
+    /// ([`SolverGeometryAccess::geometry_faces_outlast`]).
+    ///
+    /// # Errors
+    /// [`SolidError::Unported`] without live context.
+    fn solvers_faces_outlast(&mut self, k: &mut Kernel, solvers: &[O]) -> Result<bool> {
+        let _ = (k, solvers);
+        Err(SolidError::unported(
+            "SmFilletExecutive::FacesOutlastTheirBlends (fork)",
+            "blend.fillet_executive_p3",
+        ))
+    }
+    /// The fork's `BandsClearOtherRails` over `solvers`
+    /// ([`SolverGeometryAccess::geometry_bands_clear_other_rails`]).
+    ///
+    /// # Errors
+    /// [`SolidError::Unported`] without live context.
+    fn solvers_bands_clear_other_rails(&mut self, k: &mut Kernel, solvers: &[O]) -> Result<bool> {
+        let _ = (k, solvers);
+        Err(SolidError::unported(
+            "SmFilletExecutive::BandsClearOtherRails (fork)",
             "blend.fillet_executive_p3",
         ))
     }
@@ -1344,6 +1373,25 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
         faces: Option<&[O]>,
         allow_spine_edges: bool,
     ) -> Result<StitchAttempt>;
+    /// [`Self::stitch_faces`] of every face of `brep` keeping a fillet's own edge where a
+    /// patch of `corners` meets it
+    /// ([`FaceStitchAccess::stitch_body_keeping_fillet_edges`]).
+    ///
+    /// # Errors
+    /// [`SolidError::Unported`] without live context; as [`Self::stitch_faces`].
+    fn stitch_faces_keeping_fillet_edges(
+        &mut self,
+        k: &mut Kernel,
+        brep: O,
+        tolerance: f64,
+        corners: &[O],
+    ) -> Result<StitchAttempt> {
+        let _ = (k, brep, tolerance, corners);
+        Err(SolidError::unported(
+            "SmFilletPatchStitchCallback",
+            "blend.fillet_executive_p3",
+        ))
+    }
 
     /// `SmFilletExecutive::DoPiecewiseMerge` on the implementor's bodies (the live
     /// session's port is `FilletSession`'s piecewise merge).
@@ -2350,23 +2398,29 @@ pub trait BrepCreationAccess<O: ClassObject + SolutionObject + Ord>:
         solver: O,
     ) -> Result<Option<crate::blend::fillet_exact::RailBelowResolution>>;
 
-    /// `SmFilletSolver::BandsMeetAt` (the fork's, a3d6d81) over the executive's pairs of
-    /// `solvers` sharing a face, in its loop order (`a`, `b`, then each's face index): the
-    /// radius where their bands meet, with the first solver's edge, for each pair that
-    /// has one. None from the adapter over [`ExecutiveAccess`], which holds no solvers.
+    /// The contact size of each pair of blends sharing a face, with the size's kind,
+    /// limiting edge and face. Planar constant-width chamfer bands use their exact
+    /// bounded-curve separation, including endpoint contacts; the other constant-ball
+    /// classes use `SmFilletSolver::BandsMeetAt`.
     ///
     /// # Errors
-    /// The sizing's own errors.
-    fn creation_bands_meet(&mut self, k: &mut Kernel, solvers: &[O]) -> Result<Vec<(f64, O)>>;
+    /// Those of the sizing and the face's interior-point query.
+    fn creation_bands_meet(&mut self, k: &mut Kernel, solvers: &[O]) -> Result<Vec<BandFit<O>>>;
+}
 
-    /// Not the fork's (#3190's finding): the band refusal's fit as a scale of both blends,
-    /// from the band check's own quantities, where that is exact (two chamfers on a plane
-    /// face between parallel lines), with the first blend's edge; `None` elsewhere. The
-    /// session's `band_scale` says how.
-    ///
-    /// # Errors
-    /// Those of the topology and geometry lookups.
-    fn creation_band_scale(&mut self, k: &mut Kernel, solvers: &[O]) -> Result<Option<(f64, O)>>;
+/// A band contact's limiting size and the target entities that locate it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BandFit<O> {
+    /// The radius or common scale at which the bands meet.
+    pub size: f64,
+    /// What `size` measures.
+    pub kind: FitKind,
+    /// The first blend's target edge.
+    pub edge: O,
+    /// The shared target face, when the contact locates it.
+    pub face: Option<O>,
+    /// An interior point of the shared face, when it is named.
+    pub at: Option<Point3>,
 }
 
 /// Where a solver's convex blend would cut the part
@@ -2499,13 +2553,8 @@ where
         Ok(Vec::new())
     }
 
-    fn creation_bands_meet(&mut self, _k: &mut Kernel, _solvers: &[O]) -> Result<Vec<(f64, O)>> {
+    fn creation_bands_meet(&mut self, _k: &mut Kernel, _solvers: &[O]) -> Result<Vec<BandFit<O>>> {
         Ok(Vec::new())
-    }
-
-    fn creation_band_scale(&mut self, _k: &mut Kernel, _solvers: &[O]) -> Result<Option<(f64, O)>> {
-        // the adapter over ExecutiveAccess holds no solver geometry: no chamfer to judge
-        Ok(None)
     }
 }
 
@@ -2586,6 +2635,15 @@ where
     fn stitch_body(&mut self, k: &mut Kernel, body: O, tolerance: f64) -> Result<StitchAttempt> {
         ExecutiveAccess::stitch_faces(self, k, body, tolerance, None, false)
     }
+    fn stitch_body_keeping_fillet_edges(
+        &mut self,
+        k: &mut Kernel,
+        body: O,
+        tolerance: f64,
+        corners: &[O],
+    ) -> Result<StitchAttempt> {
+        ExecutiveAccess::stitch_faces_keeping_fillet_edges(self, k, body, tolerance, corners)
+    }
 }
 
 /// Actual construction operations for the intermediate fillet faces.
@@ -2643,6 +2701,18 @@ pub trait FaceConstructionAccess<O: ClassObject + SolutionObject + Ord>:
         body: O,
         executive: &mut FilletExecutive<O>,
     ) -> Result<()>;
+    /// Bound open-ended native sheets before their first stitch. Abstract adapters
+    /// have no live open-end geometry; the session supplies that construction.
+    ///
+    /// # Errors
+    /// The boundary construction's errors, preserving its refusal and fit metadata.
+    fn faces_bound_open_ends(
+        &mut self,
+        _k: &mut Kernel,
+        _executive: &mut FilletExecutive<O>,
+    ) -> Result<()> {
+        Ok(())
+    }
 }
 impl<O, A> FaceConstructionAccess<O> for A
 where
@@ -2875,6 +2945,12 @@ where
         _executive: &FilletExecutive<O>,
     ) -> Result<bool> {
         ExecutiveAccess::solver_end_sections_fit(self, k, solver)
+    }
+    fn geometry_faces_outlast(&mut self, k: &mut Kernel, solvers: &[O]) -> Result<bool> {
+        ExecutiveAccess::solvers_faces_outlast(self, k, solvers)
+    }
+    fn geometry_bands_clear_other_rails(&mut self, k: &mut Kernel, solvers: &[O]) -> Result<bool> {
+        ExecutiveAccess::solvers_bands_clear_other_rails(self, k, solvers)
     }
 }
 
@@ -3360,6 +3436,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     /// trims them (not upstream; opt-in `fixes.fillet_refuse_overlapping_bands`, WR-542:
     /// the fork's tangency-labs/smlib@c0d74ee, `SmFilletExecutive::BandsClearOtherRails`,
     /// called right after `FacesOutlastTheirBlends`). Fails with `FilletErrorType::NoRoom`.
+    /// Runs with the fix off too where [`Self::rolled_beside_band`] is set.
     ///
     /// # Errors
     /// The refusal as `SM_ERR`, noted in the error info; those of the check.
@@ -3368,29 +3445,30 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         k: &mut Kernel,
         access: &mut impl BrepCreationAccess<O>,
     ) -> Result<()> {
-        if k.fixes.fillet_refuse_overlapping_bands
+        if (k.fixes.fillet_refuse_overlapping_bands || self.rolled_beside_band)
             && !access.geometry_bands_clear_other_rails(k, &self.solvers)?
         {
-            // the fork's a3d6d81 (WR-696): the largest common radius at which the bands stay
-            // apart, where they meet (closed), the least over the pairs
             let solvers = self.solvers.clone();
-            for (meet, edge) in access.creation_bands_meet(k, &solvers)? {
-                if self.fit_radius < 0.0 || meet < self.fit_radius {
-                    self.note_fit_radius(meet, Some(edge), FitKind::Radius);
+            let mut site = None;
+            for fit in access.creation_bands_meet(k, &solvers)? {
+                if self.fit_radius < 0.0 || fit.size < self.fit_radius {
+                    self.note_fit_radius(fit.size, Some(fit.edge), fit.kind);
+                    site = Some(fit);
                 }
             }
-            // (not the fork's, #3190's finding) where no radius is common to both, the scale
-            // of both that leaves the face the fit margin, where that is exact
-            if self.fit_radius < 0.0 {
-                let solvers = self.solvers.clone();
-                if let Some((scale, edge)) = access.creation_band_scale(k, &solvers)? {
-                    self.note_fit_radius(scale, Some(edge), FitKind::Scale);
-                }
-            }
-            return self.record_no_room(
+            let refused = self.record_no_room(
                 NoRoomReason::BandsOverlap,
                 "Fillet Error: a blend's rail runs inside the band another blend takes off a face they share (the blends are larger than the face allows)",
             );
+            if let Some(fit) = site {
+                self.error.edge = Some(fit.edge);
+                self.error.vertex = None;
+                self.error.end_face = None;
+                self.error.side_face = fit.face;
+                self.error.location = fit.at;
+                self.error.no_room_without_site = false;
+            }
+            return refused;
         }
         Ok(())
     }
@@ -3683,6 +3761,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             }
             index += 1;
         }
+        access.faces_bound_open_ends(k, self)?;
         Ok(fillet)
     }
 
@@ -3761,7 +3840,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         Ok(())
     }
 
-    /// Not the fork's (WR-707, #2299; `fixes.fillet_refuse_rounds_breaking_through`): after
+    /// Not the fork's (WR-707, #2299): after
     /// `BandCutsThePart`, a convex blend whose section between its rails leaves the part and
     /// comes back into it through an inner face would break through a wall into the hollow
     /// behind; the one whose largest size that does not is least is refused with
@@ -4294,10 +4373,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         // into pieces, refused naming the largest size that keeps it whole
         self.refuse_blends_cutting_the_part(k, access)?;
         // not the fork's (WR-707, #2299): a convex blend whose section would break through a
-        // wall into the hollow behind, refused naming the largest size that does not
-        if k.fixes.fillet_refuse_rounds_breaking_through {
-            self.refuse_blends_breaking_through(k, access)?;
-        }
+        // wall into the hollow behind, refused naming the largest size that does not (a
+        // hollow that a concave round of the same blend fills is no break-through)
+        self.refuse_blends_breaking_through(k, access)?;
         // not the fork's (#2401): a polygon face its blends take whole, refused before the
         // trace that its rails of no length would fail
         if k.fixes.fillet_refuse_face_consuming_blends {

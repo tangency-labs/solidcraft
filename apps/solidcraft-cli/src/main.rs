@@ -23,7 +23,7 @@
 //!                                                             MCP server on stdio (docs/mcp.md)
 //! solidcraft-cli mcp setup [--dry-run] [--client NAME] [--live] (alias: mcp install) add it to OpenCode, Claude Desktop, Claude Code, Cursor
 //! solidcraft-cli plugin check <folder|plugin.zip> [--json]    what Install and a call would refuse, with fixes
-//! solidcraft-cli plugin test <folder|plugin.zip> [--json] [--out DIR] run the plugin's tests/*.json on the real host
+//! solidcraft-cli plugin test <folder|plugin.zip> [--json] [--out DIR] [--require-cases]  run the plugin's tests/*.json on the real host
 //! solidcraft-cli licences                                     SolidCraft's licence and the third-party licences
 //! solidcraft-cli icon --out F.png|F.ico [--size N]             the app icon (packaging; drawn, not a file)
 //!
@@ -102,9 +102,25 @@ const USAGE_FUZZ: &str =
     "  solidcraft-cli fuzz [--from N] [--count N] [--jobs J] [--timeout S] [--steps N] [--minimise] [--out DIR] [--report FILE]\n";
 /// `mcp`'s lines in the usage.
 const USAGE_MCP: &str = "  solidcraft-cli mcp [--headless] [--in design.sc|script.json] [--connect 127.0.0.1:PORT [--token T]] [--allow-path DIR]... [--allow-any-path] [--require-allow-path]\n                     [--param-check off|warn|strict] [--render-gpu] [--compact]\n      (--compact, SOLIDCRAFT_MCP_COMPACT=1 or the app's Preferences › AI (with --connect): compact tool output for\n       agents: inspect_design summarises sketches and takes `sketches` by name and a `bodies` filter, and tool JSON\n       is not pretty-printed; off by default)\n  solidcraft-cli mcp setup [--dry-run] [--client opencode|claude-desktop|claude-code|cursor] [--live]\n      (adds a `solidcraft` server, with this program's path, to each installed AI client; --live adds `solidcraft-live` for the running app; alias: mcp install)\n";
-/// `crashes`'s lines in the usage.
-const USAGE_PLUGIN: &str = "  solidcraft-cli plugin check <folder|plugin.zip> [--json]\n  solidcraft-cli plugin test <folder|plugin.zip> [--json] [--out DIR]\n      (check: what Install and a call would refuse, without running the plugin: the manifest and its size, permissions\n       (net is refused), limits, the component's WIT world and version; each problem with how to fix it; exits non-zero on an error;\n       a folder is checked without its tests folder and hidden files)\n      (test: installs the package in a scratch folder and runs its test cases, tests/*.json, on the real host and limits;\n       an entry with no case runs once with its defaults when it can; --json prints pass or fail per case; --out DIR keeps\n       each case's resulting design and log; exits non-zero when a case fails; see the plugin guide in the docs)\n";
+/// The plugin operations' lines in the usage. The macro holds one text for each operation, so
+/// `plugin --help` prints both and an operation's own `--help` prints its own lines alone
+/// (#19237): what the operation does, its arguments and its exit codes.
+macro_rules! define_plugin_usage {
+    ($check:literal, $test:literal) => {
+        /// `check`'s lines: what `plugin check --help` prints.
+        const USAGE_PLUGIN_CHECK: &str = $check;
+        /// `test`'s lines: what `plugin test --help` prints.
+        const USAGE_PLUGIN_TEST: &str = $test;
+        /// Both operations' lines: what `plugin --help` and the top-level usage print.
+        const USAGE_PLUGIN: &str = concat!($check, $test);
+    };
+}
+define_plugin_usage!(
+    "  solidcraft-cli plugin check <folder|plugin.zip> [--json]    what Install and a call would refuse, with fixes\n      (check: what Install and a call would refuse, without running the plugin: the manifest and its size, permissions\n       (net is refused), limits, the component's WIT world and version; each problem with how to fix it; exits non-zero on an error;\n       a folder is checked without its tests folder and hidden files; plugin.inspect and plugin.run need the folder named after\n       the plugin's id, as Install names it)\n",
+    "  solidcraft-cli plugin test <folder|plugin.zip> [--json] [--out DIR] [--require-cases]  run the plugin's tests/*.json on the real host\n      (test: installs the package in a scratch folder and runs its test cases, tests/*.json, on the real host and limits;\n       an entry with no case runs once with its defaults when it can; --json prints pass or fail per case; --out DIR keeps\n       each case's resulting design and log; exits non-zero when a case fails; --require-cases also fails an entry no case\n       covers, instead of skipping it; see the plugin guide in the docs)\n"
+);
 
+/// `crashes`'s lines in the usage.
 const USAGE_CRASHES: &str = "  solidcraft-cli crashes [list [--json] | show <id> | replay <id> | dir | clear [<id>]]\n";
 /// `licences`'s lines in the usage.
 const USAGE_LICENCES: &str = "  solidcraft-cli licences\n";
@@ -190,7 +206,7 @@ fn main() -> ExitCode {
         // before the command runs, so `--help` never starts a run (a fuzz run, a server).
         Some(cmd) if wants_help(&args[1..]) && is_command(cmd) => {
             use std::io::Write as _;
-            let _ = std::io::stdout().lock().write_all(command_usage(cmd).as_bytes());
+            let _ = std::io::stdout().lock().write_all(command_usage(cmd, &args[1..]).as_bytes());
             Ok(())
         }
         Some("run") => cmd_run(&args[1..]),
@@ -262,6 +278,9 @@ fn main() -> ExitCode {
         (Ok(()), Some(Err(e))) => Err(e),
         (r, _) => r,
     };
+    // The device that drew this run's pictures closes before the process exits: with it open,
+    // NVIDIA's Linux driver can crash in its exit handler after the work is done (#19431).
+    solidcraft_viewport_gpu::capture::close_shared_before_exit();
     match r {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
@@ -402,11 +421,26 @@ fn usage() -> String {
     s
 }
 
-/// A command's own usage: its lines under a `usage:` line.
-fn command_usage(cmd: &str) -> String {
+/// A command's own usage: its lines under a `usage:` line. A command with operations of its own
+/// prints the operation's lines when the user names one: `plugin check --help` says what `check`
+/// does, and `plugin --help` what both do (#19237).
+fn command_usage(cmd: &str, args: &[String]) -> String {
+    if cmd == "plugin" {
+        return plugin_usage(args.first().map(String::as_str));
+    }
     match COMMANDS.iter().find(|c| c.name == cmd) {
         Some(c) => format!("usage:\n{}", c.usage),
         None => usage(),
+    }
+}
+
+/// The plugin command's usage: both operations, or the one the user named (`plugin check --help`
+/// prints what `check` does alone) (#19237).
+fn plugin_usage(operation: Option<&str>) -> String {
+    match operation {
+        Some("check") => format!("usage:\n{USAGE_PLUGIN_CHECK}"),
+        Some("test") => format!("usage:\n{USAGE_PLUGIN_TEST}"),
+        _ => format!("usage:\n{USAGE_PLUGIN}"),
     }
 }
 

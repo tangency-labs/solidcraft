@@ -10,6 +10,47 @@ fn rel(a: f64, b: f64) -> f64 {
 }
 
 #[test]
+fn boundary_fill_classifies_cells_on_exact_surfaces() {
+    let mut doc = Document::new("Boundary Fill");
+    let cylinder = serde_json::from_value(serde_json::json!({
+        "type": "cylinder", "base": ["0", "0", "0"], "axis": [0.0, 0.0, 1.0], "radius": "5", "height": "10", "operation": "new_body"
+    }))
+    .unwrap();
+    doc.add_feature(cylinder, None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    let tool = model.state().bodies.first().unwrap().name.clone();
+    // The cylinder axis at half height is strictly inside every bounding surface.
+    let fill = doc
+        .add_feature(
+            FeatureKind::BoundaryFill {
+                tools: vec![BodyName(tool)],
+                cells: vec![Position(Vec3::new(0.0, 0.0, 5.0))],
+                operation: Operation::NewBody,
+                remove_tools: true,
+            },
+            None,
+        )
+        .unwrap();
+    model.evaluate(&doc);
+    assert!(model.result(fill).unwrap().error.is_none(), "{:?}", model.results);
+    assert_eq!(model.state().bodies.len(), 1);
+    // A single solid tool is the entire cell: V = πr²h = 250π mm³.
+    let state = model.state();
+    let body = &state.bodies.first().unwrap().body;
+    assert!(!body.is_surface());
+    assert!(rel(measure(body).unwrap().volume, 250.0 * std::f64::consts::PI) < 1e-9);
+    let FeatureKind::BoundaryFill { cells, .. } = &mut doc.feature_mut(fill).unwrap().kind else { panic!("Boundary Fill") };
+    // 3² + 4² = 5²: a point on the tool cannot identify either adjacent cell.
+    *cells = vec![Position(Vec3::new(3.0, 4.0, 5.0))];
+    model.evaluate(&doc);
+    let error = model.result(fill).unwrap().error.as_ref().unwrap();
+    assert!(error.contains("Boundary Fill cell points must be away from tool boundaries"), "{error}");
+    assert_eq!(model.state().bodies.len(), 1, "the original tool is kept on failure");
+}
+
+#[test]
 fn component_lookup_refuses_duplicate_names_and_keeps_explicit_ids() {
     let mut doc = Document::new("A");
     let first = doc.add_component(Some("A"), 0).unwrap();
@@ -1853,9 +1894,10 @@ fn fillet_edge_radii_default_to_none_round_trip_and_are_checked() {
     let mut m = Model::new();
     m.evaluate(&opened);
     assert!(m.results.iter().all(|r| r.error.is_none()), "{:?}", m.results.iter().map(|r| &r.error).collect::<Vec<_>>());
-    let spandrel = |r: f64| (1.0 - std::f64::consts::PI / 4.0) * r * r;
     let v = measure(&m.state().bodies[0].body).unwrap().volume;
-    let want = 12000.0 - 40.0 * (spandrel(1.0) + spandrel(2.0));
+    // A 40 x 30 x 10 block, two 40-long edges rounded at 1 and 2: each round of radius r on a
+    // 90 deg edge of length L removes (1 - pi/4) r^2 L, so 12000 - 40 (1 - pi/4) (1 + 4).
+    let want = 11957.07963267949;
     assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
     for (bad, says) in [
         (fillet(&["1"], false, Default::default()), "gives 1 radii for 2 picked edges"),
@@ -2071,6 +2113,17 @@ fn feature_kind_key_and_type_name_mappings() {
     assert_eq!(FeatureKind::type_name_to_kind_key("BaseFeature"), Some("import"));
     assert_eq!(FeatureKind::type_name_to_kind_key("MeshFeature"), Some("mesh_import"));
     assert_eq!(FeatureKind::type_name_to_kind_key("NonExistent"), None);
+    // Convert of picked faces, Convert of a whole body and Recognize: each its own type name,
+    // which leads back to its kind.
+    for kind in [
+        serde_json::json!({"type": "sheet_convert", "body": "B", "face": [0, 0, 0]}),
+        serde_json::json!({"type": "sheet_surface_convert", "body": "B"}),
+        serde_json::json!({"type": "sheet_recognize", "body": "B"}),
+    ] {
+        let key = kind["type"].as_str().unwrap_or_default().to_string();
+        let kind = serde_json::from_value::<FeatureKind>(kind).unwrap();
+        assert_eq!(FeatureKind::type_name_to_kind_key(kind.type_name()), Some(key.as_str()), "{key}");
+    }
 }
 
 /// An extruded ellipse has one side face, and a spline in a profile one wall, each named by its
@@ -2258,4 +2311,25 @@ fn restoring_a_thread_pick_keeps_the_resolved_point_when_a_distance_is_refused()
     assert_eq!(restored_thread_pick(Vec3::ZERO, resolved), resolved);
     let resolved = Vec3::new(f64::MAX, 0.0, 0.0);
     assert_eq!(restored_thread_pick(Vec3::new(-f64::MAX, 0.0, 0.0), resolved), resolved);
+}
+
+/// A closed control-point spline (#19337) is a design the loader accepts: it saves, reopens
+/// unchanged and evaluates with no error.
+#[test]
+fn a_closed_control_spline_design_saves_and_reopens_unchanged() {
+    let mut sk = Sketch::new();
+    let pts: Vec<usize> = [(0., 0.), (12., -2.), (20., 8.), (10., 16.), (-3., 12.), (-6., 3.)]
+        .iter()
+        .map(|&(x, y)| sk.add_point(Vec2::new(x, y), None).unwrap())
+        .collect();
+    sk.add_curve(solidcraft_sketch::CurveKind::Spline { pts, control: true, degree: 3, periodic: true, nurbs: None, handles: Vec::new() }, None)
+        .unwrap();
+    let mut doc = Document::new("closed control");
+    doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, None).unwrap();
+    let saved = doc.to_json();
+    let reopened = Document::from_json(&saved).expect("a closed control spline design opens");
+    assert_eq!(reopened.to_json(), saved);
+    let mut model = Model::new();
+    model.evaluate(&reopened);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
 }

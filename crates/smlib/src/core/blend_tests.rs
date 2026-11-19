@@ -430,7 +430,7 @@ fn each_room_reason_reaches_the_refusal_as_ops_gives_it() {
     for (name, body, kind, points, size, reason, fit, [lo, hi]) in cases {
         let e = timed(name, move || blend(&body, kind, &points, &[size], TOL, &[], &[], Corners::Filled).map(|_| ()).err());
         let Some(e) = e else { panic!("{name}: built") };
-        let Error::TooLarge { size, kind, at: Some(_), why: Some(why) } = e else { panic!("{name}: {e:?}") };
+        let Error::TooLarge { size, kind, at: Some(_), why: Some(why), .. } = e else { panic!("{name}: {e:?}") };
         assert_eq!((why, kind), (reason, fit), "{name}");
         assert!(size > lo && size < hi, "{name}: {size} outside ({lo}, {hi})");
     }
@@ -448,7 +448,7 @@ fn a_distance_angle_chamfer_with_equal_setbacks_too_large_names_its_distance() {
     const TOP: [[f64; 3]; 2] = [[20.0, 0.0, 20.0], [20.0, 4.0, 20.0]];
     let sides = |d: f64| chamfer_sides(&RIB.core(), &TOP, TOL, d, ChamferSecond::Angle(PI / 4.0), [0.0, 0.0, 1.0]);
     let e = timed("angle_fit", move || sides(3.0).map(|_| ()).unwrap_err());
-    let Error::TooLarge { size, kind: crate::FitKind::Distance, at: Some(_), why: Some(crate::RoomReason::BandsOverlap) } = e else {
+    let Error::TooLarge { size, kind: crate::FitKind::Distance, at: Some(_), why: Some(crate::RoomReason::BandsOverlap), .. } = e else {
         panic!("{e:?}")
     };
     assert!((size - 2.0).abs() < 1e-9, "{size}");
@@ -553,7 +553,7 @@ fn a_knife_edge_chamfer_wider_than_the_part_keeps_nothing() {
     let tip = [TIP, 0.0, H / 2.0];
     let e =
         timed("knife_keeps_nothing", move || blend(&part, Blend::Chamfer, &[tip], &[200.0], TOL, &[], &[], Corners::Filled).map(|_| ()).unwrap_err());
-    let Error::TooLarge { size: d, kind: crate::FitKind::Distance, at: Some(_), why } = e else { panic!("{e:?}") };
+    let Error::TooLarge { size: d, kind: crate::FitKind::Distance, at: Some(_), why, .. } = e else { panic!("{e:?}") };
     assert_eq!(why, Some(crate::RoomReason::OverflowKeepsNothing));
     assert_ne!(why, Some(crate::RoomReason::CornersTakeWholeEdge));
     let closed = TIP * TIP / R - 0.01;
@@ -789,7 +789,7 @@ fn an_edge_tag_crosses_a_cliff_overflow() {
 }
 
 /// Solidcore alone: the pocket rim chamfered 5.5, as WR-642's own test
-/// does it, with `keep_operand_uv_trims` on too, on the body the boolean gives:
+/// does it, on the body the boolean gives (with the operand's exact UV trims, WR-361):
 /// 21000 - (50 d² + 4/3 d³) = 19265.666666667 (the fork, and the same body through the flat
 /// arrays). Before WR-654's B-spline run-on it was refused: error 3, Corner Edge Computation
 /// Failure (solidcore#1981).
@@ -803,7 +803,6 @@ fn pocket_chamfer_on_a_boolean_body() {
     let p = Point3::new;
     let mut k = Kernel::default();
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.keep_operand_uv_trims = true;
     let plate = create_box(&mut k, Point3::ZERO, 60.0, 40.0, 10.0).unwrap();
     let cut = create_box(&mut k, p(15.0, 10.0, 5.0), 30.0, 20.0, 6.0).unwrap();
     let mut b = boolean_difference(&mut k, plate, cut).unwrap();

@@ -337,6 +337,13 @@ fn is_closed(c: &Curve) -> bool {
 /// SURFACE_OF_REVOLUTION: the profile turned about the axis, u the angle and v the profile's
 /// parameter (`forward: false`), so the natural normal is ∂S/∂angle × ∂S/∂profile, STEP's.
 fn revolution(profile: &Curve, axis: &Axis1, ext: &Extent) -> R<BSurface> {
+    revolution_of(profile, axis, ext, None)
+}
+
+/// [`revolution`] of a profile whose distance from the axis is known: `tube` is a torus's
+/// major and minor radius where the profile is its tube's circle ([`torus_revolved`]), the
+/// circle's centre from the axis and its radius as the file gives them.
+fn revolution_of(profile: &Curve, axis: &Axis1, ext: &Extent, tube: Option<(f64, f64)>) -> R<BSurface> {
     let c = basis(profile)?;
     let (o, k) = (v3(axis.origin), v3(axis.direction));
     let k = k.normalized().ok_or("a revolution about no direction")?;
@@ -402,7 +409,7 @@ fn revolution(profile: &Curve, axis: &Axis1, ext: &Extent) -> R<BSurface> {
                 Span::Open { inner, .. } => 0.5 * (inner.0 + inner.1),
                 Span::Turn { start } => start + (mid - start).rem_euclid(TAU),
             };
-            let arc = conic_side_arc(c, o, e, face_mid);
+            let arc = conic_side_arc(c, o, e, face_mid, tube);
             let side = |t: f64| probe(t).map(|q| (q - o).dot(e));
             let s = match (s, arc) {
                 (_, Some(arc)) => Span::Open { inner: arc, outer: arc },
@@ -447,7 +454,7 @@ fn torus_revolved(position: &Placement, major: f64, minor: f64, ext: &Extent) ->
         },
         radius: minor,
     };
-    revolution(&circle, &Axis1 { origin: position.origin, direction: position.axis }, ext)
+    revolution_of(&circle, &Axis1 { origin: position.origin, direction: position.axis }, ext, Some((major, minor)))
 }
 
 /// The arc of a circle or ellipse profile on the positive side of the plane through the axis
@@ -456,15 +463,24 @@ fn torus_revolved(position: &Placement, major: f64, minor: f64, ext: &Extent) ->
 /// meet it. On the conic `O + a cos t X + b sin t Y` the side is `s₀ + A cos t + B sin t =
 /// s₀ + M cos(t − φ)`, zero at `φ ± acos(−s₀/M)`; a profile that only touches the axis (a horn
 /// torus's tube) has its arc a whole turn, both ends at the touching point.
-fn conic_side_arc(c: &Curve, o: Vec3, e: Vec3, near: f64) -> Option<(f64, f64)> {
+///
+/// `tube` is a torus's major and minor radius where the profile is its tube's circle: `s₀` and
+/// `M` are then those radii, as the file gives them. Worked out from the circle's centre they
+/// are the difference of two points' coordinates, which for a horn torus off the origin comes
+/// out a few units in the last place either side of touching: a miss (no arc, a form that runs
+/// past the pole) or a crossing just short of it.
+fn conic_side_arc(c: &Curve, o: Vec3, e: Vec3, near: f64, tube: Option<(f64, f64)>) -> Option<(f64, f64)> {
     let (position, a, b) = match c {
         Curve::Circle { position, radius } => (position, *radius, *radius),
         Curve::Ellipse { position, semi_axis_1, semi_axis_2 } => (position, *semi_axis_1, *semi_axis_2),
         _ => return None,
     };
-    let s0 = (v3(position.origin) - o).dot(e);
     let (ca, cb) = (a * v3(position.ref_direction).dot(e), b * v3(position.y()).dot(e));
-    let m = ca.hypot(cb);
+    let (s0, m) = match tube {
+        // The tube's centre lies along the circle's reference direction, on the side `e` is.
+        Some((major, minor)) => (major * ca.signum(), minor.abs()),
+        None => ((v3(position.origin) - o).dot(e), ca.hypot(cb)),
+    };
     let ratio = -s0 / m;
     if !(m > 0.0 && (-1.0..=1.0).contains(&ratio)) {
         return None;

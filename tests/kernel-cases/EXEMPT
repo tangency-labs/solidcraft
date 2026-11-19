@@ -39,6 +39,7 @@ canvas.calibrate                  reference images, and sketches traced from the
 canvas.decal                      reference images, and sketches traced from them (sketch only)
 canvas.delete                     reference images, and sketches traced from them (sketch only)
 canvas.edit                       reference images, and sketches traced from them (sketch only)
+canvas.frame_sketch               reference images, and sketches traced from them (sketch only); crates/engine/src/cmd/sketch_canvas.rs tests
 canvas.insert                     reference images, and sketches traced from them (sketch only)
 canvas.straighten                 reference images, and sketches traced from them (sketch only); crates/engine/src/cmd/sketch_canvas.rs tests
 canvas.to_sketch                  reference images, and sketches traced from them (sketch only)
@@ -84,6 +85,7 @@ drawing.balloon.add               a drawing: its tests in crates/engine/src/cmd/
 drawing.balloon.edit              a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.balloon.inspect           a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.balloon.repair            a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.break.preview             read-only drawing preview: crates/engine/src/cmd/drawing_break_tests.rs and crates/ui-egui/src/broken_view_preview_tests.rs
 drawing.check                     a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.close                     a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.create                    a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
@@ -167,6 +169,7 @@ explode.delete                    exploded views: display offsets
 explode.list                      exploded views: display offsets
 expr.evaluate                     expression evaluation
 file.copy                        file operations: tested in crates/engine/src/cmd/file_library.rs tests
+file.export_sdf                  writes a robot model folder from the meshes: tested in crates/io/src/sdf.rs and crates/engine/src/tests.rs
 file.gerber_files                 a listing of a board's files: crates/engine/src/cmd/board_import_tests.rs
 file.gpg_keys                     GnuPG key listing: tested in crates/engine/src/gpg.rs tests
 file.import                       opens a file through an importer plugin: tested in crates/engine/src/plugin/tests.rs
@@ -354,6 +357,9 @@ settings.profile.import           settings profiles: preferences saved, applied 
 settings.profile.list             settings profiles: preferences saved, applied and shared
 settings.profile.rename           settings profiles: preferences saved, applied and shared
 settings.profile.save             settings profiles: preferences saved, applied and shared
+sheet.convert                     every face a panel: crates/engine/src/cmd/sheet_surface_convert_tests.rs and sheet_convert_tests.rs (thin solids are sheet.recognize, which the convert-named cases here run)
+sheet.measure_body                measures a body's thickness and modelled bend radii, makes nothing: crates/engine/src/cmd/sheet_recognize_tests.rs
+sheet.rule_library                the standard library's listing, makes nothing: crates/engine/src/cmd/sheet_tests.rs and crates/doc/src/sheet_library_tests.rs
 sheet.rules                       a listing of sheet metal rules
 sketch.arc.tangent                2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.auto_constrain             2D sketch only (the sketch solver and engine tests); no kernel operation
@@ -438,6 +444,7 @@ sketch.slot.arc_three_point       2D sketch only (the sketch solver and engine t
 sketch.slot.center_point          2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.snap                       2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.solve                      2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.spline.control_knots       2D sketch only (crates/engine/src/cmd/sketch_knots_tests.rs: the 33-point non-uniform example draws as exact Bezier spans and extrudes to a closed body); no new kernel operation
 sketch.spline.handles             2D sketch only (crates/engine/src/cmd/sketch_create.rs: fit_spline_handles_are_visible_lines_and_accept_existing_constraints); no kernel operation
 sketch.spline.insert_point        2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.spline.remove_point        2D sketch only (the sketch solver and engine tests); no kernel operation

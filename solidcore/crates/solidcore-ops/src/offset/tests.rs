@@ -85,6 +85,132 @@ fn a_cylinder_shells_open_at_its_top() {
     assert!(rel(volume(&c), PI * 25.0 * 10.0 - PI * 16.0 * 9.0) < 1e-9);
 }
 
+fn drilled_half_torus(center: f64) -> Body {
+    let torus = crate::make_torus([0.0; 3], 30.0, 8.0).unwrap();
+    let upper = make_box([-40.0, -40.0, 0.0], [80.0, 80.0, 16.0]).unwrap();
+    let half = crate::boolean::boolean(torus, upper, crate::BooleanOp::Intersect)
+        .unwrap()
+        .unwrap();
+    let drill = make_cylinder([center, 0.0, 0.0], 0.95, 4.0).unwrap();
+    crate::boolean::boolean(half, drill, crate::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap()
+}
+
+/// Stress corpus S1983: the blind hole leaves 0.00002 mm at the outer rim of a
+/// half torus. Opening the annular bottom must produce a closed hollow body.
+#[test]
+fn a_half_torus_with_a_blind_hole_shells_open_at_its_bottom() {
+    crate::test_corpus::rig_fixes();
+    let body = drilled_half_torus(37.049_98);
+    let input_report = body.copy().unwrap().check(crate::CheckLevel::All).unwrap();
+    assert!(input_report.is_valid(), "{}", input_report.text);
+    let o = order(&body);
+    let bottom = face(&body, &o, |bx| {
+        bx.min().z.abs() < 1e-9 && bx.max().z.abs() < 1e-9
+    });
+    shell(&body, &o, &[bottom], -0.8).unwrap();
+    let report = body.check(crate::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    // Half-torus wall volume minus the original drill/torus overlap, plus the
+    // expanded drill/cavity overlap; the polar integral is derived in the finding.
+    let actual = volume(&body);
+    assert!(
+        rel(actual, 3_607.142_961_425_14) < 1e-9,
+        "shell volume {actual:.17}"
+    );
+}
+
+/// The same incidence graph before the seam disappears: the outer rim is
+/// 37.99 and the grown drill reaches 37.96, so their meridian still survives.
+#[test]
+fn a_half_torus_keeps_a_periodic_seam_when_its_offsets_still_meet() {
+    crate::test_corpus::rig_fixes();
+    let body = drilled_half_torus(37.0);
+    let o = order(&body);
+    let bottom = face(&body, &o, |bx| {
+        bx.min().z.abs() < 1e-9 && bx.max().z.abs() < 1e-9
+    });
+    shell(&body, &o, &[bottom], -0.01).unwrap();
+    let report = body.check(crate::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    // The same polar integral as S1983, with a=37 and wall=0.01;
+    // its hand derivation and converged values are in the construction finding.
+    let actual = volume(&body);
+    assert!(
+        rel(actual, 47.498_020_998_403_7) < 1e-9,
+        "shell volume {actual:.17}"
+    );
+    let (record, _) = body.to_record().unwrap();
+    let cavity_faces: Vec<_> = record
+        .faces
+        .iter()
+        .enumerate()
+        .filter_map(|(i, f)| {
+            matches!(
+                f.surface,
+                solidcore_record::brep::Surface::Torus { minor_radius, .. } if minor_radius < 8.0
+            )
+            .then_some(i)
+        })
+        .collect();
+    assert_eq!(cavity_faces.len(), 1, "one inset torus face");
+    let cavity = cavity_faces[0];
+    let query = crate::query::Query::new(&record);
+    // The short seam has two distinct ends beyond the drill centre, x = 37.
+    // The other meridian ends on the cap at x < 37; the outer rim is closed.
+    let seam_edges: Vec<_> = record
+        .edges
+        .iter()
+        .enumerate()
+        .filter(|(i, e)| {
+            query.edge_faces(*i).contains(&cavity)
+                && e.vertices[0] != e.vertices[1]
+                && e.vertices
+                    .iter()
+                    .all(|&v| record.vertices[v as usize].point[0] > 37.0)
+        })
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(seam_edges.len(), 1, "one retained outer-rim seam");
+    assert_eq!(query.edge_faces(seam_edges[0]), [cavity, cavity]);
+}
+
+/// The Dutchman stress corpus's Shell family (S0003, S0012, S0061): a feature no wider than
+/// twice the wall holds no cavity. A cylinder r 1.5, h 4 with a
+/// pin r 0.15, 1.2 high on its top, and a 30 x 20 x 10 block with a 2 x 2 x 3 boss on its
+/// top, each shelled closed with a wall wider than half the feature (0.18; 1.2). The pin's
+/// side's offset collapses and the boss's walls meet across it, which refused the shell; the
+/// hollow is the body's without the feature, the feature left solid on it.
+///
+/// Closed forms: pi 1.5^2 4 + pi 0.15^2 1.2 - pi (1.5 - 0.18)^2 (4 - 0.36), and
+/// 6000 + 12 - (30 - 2.4)(20 - 2.4)(10 - 2.4).
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn a_feature_narrower_than_twice_the_wall_stays_solid() {
+    all_fixes();
+    let base = make_cylinder([0.0; 3], 1.5, 4.0).unwrap();
+    let pin = make_cylinder([0.0, 0.0, 4.0], 0.15, 1.2).unwrap();
+    let b = crate::boolean::boolean(base, pin, crate::BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    shell(&b, &order(&b), &[], -0.18).unwrap();
+    let want = PI * 2.25 * 4.0 + PI * 0.0225 * 1.2 - PI * 1.32_f64.powi(2) * 3.64;
+    assert!(rel(volume(&b), want) < 1e-9, "{} {want}", volume(&b));
+    assert!(b.is_manifold_solid().unwrap());
+    assert_eq!(b.check(crate::CheckLevel::All).unwrap().failures, 0);
+
+    let boss = make_box([14.0, 9.0, 10.0], [2.0, 2.0, 3.0]).unwrap();
+    let b = crate::boolean::boolean(block(), boss, crate::BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    shell(&b, &order(&b), &[], -1.2).unwrap();
+    let want = ABC + 12.0 - 27.6 * 17.6 * 7.6;
+    assert!(rel(volume(&b), want) < 1e-9, "{} {want}", volume(&b));
+    assert!(b.is_manifold_solid().unwrap());
+    assert_eq!(b.check(crate::CheckLevel::All).unwrap().failures, 0);
+}
+
 /// A basin: a 100 x 60 x 30 slab less a ruled pocket (60 x 46 at the top, 4 from the front, 40 x
 /// 20 at its floor 20 down), shelled open at its bottom, each wall moved in by t with sharp
 /// edges. The cavity is the slab shrunk by t (open at z = 0) less the pocket grown by t, each
@@ -95,18 +221,7 @@ fn a_cylinder_shells_open_at_its_top() {
 #[test]
 #[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
 fn a_basin_shells_past_its_rim_to_its_closed_form() {
-    session::set_thread_fixes(
-        solidcore::kernel::UpstreamFixes::NAMES
-            .iter()
-            .copied()
-            .filter(|n| {
-                !matches!(
-                    *n,
-                    "fillet_refuse_rounds_breaking_through" | "fillet_round_ends_on_outline"
-                )
-            }),
-    )
-    .unwrap();
+    session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
     let rect = |x0: f64, y0: f64, x1: f64, y1: f64, z: f64| {
         let p = [[x0, y0, z], [x1, y0, z], [x1, y1, z], [x0, y1, z]];
         (0..4)
@@ -797,6 +912,78 @@ fn a_plate_thickens_and_offsets() {
     thicken(&p, 2.0, true).unwrap();
     assert!(rel(volume(&p), 1200.0) < 1e-9);
     assert_eq!(p.counts().unwrap()[0], 6);
+}
+
+/// The `l` x `h` plate in y = 0 (x across, z up) with its two corners on x = 0 rounded at
+/// `r`: four lines and two quarter circles, each tangent to the lines beside it.
+fn plate_with_round_corners(l: f64, h: f64, r: f64) -> Body {
+    use crate::sweep::Curve;
+    let line = |a: [f64; 2], b: [f64; 2]| Curve::Line {
+        start: [a[0], 0.0, a[1]],
+        end: [b[0], 0.0, b[1]],
+    };
+    // a quarter turn about +y from the direction `from` off the centre `c`
+    let corner = |c: [f64; 2], from: [f64; 3]| Curve::Arc {
+        center: [c[0], 0.0, c[1]],
+        axis: [0.0, 1.0, 0.0],
+        reference: from,
+        radius: r,
+        start: 0.0,
+        end: PI / 2.0,
+    };
+    crate::sweep::planar_faces(&[
+        line([l, 0.0], [r, 0.0]),
+        corner([r, r], [0.0, 0.0, -1.0]),
+        line([0.0, r], [0.0, h - r]),
+        corner([r, h - r], [-1.0, 0.0, 0.0]),
+        line([r, h], [l, h]),
+        line([l, h], [l, 0.0]),
+    ])
+    .unwrap()
+}
+
+/// A flat sheet with two rounded corners thickens to the prism of its outline: its area,
+/// `l h - 2 (1 - pi/4) r^2`, times the thickness, in eight faces (the sheet's two copies
+/// and a wall for each of its six edges), eighteen edges and twelve vertices, from the
+/// sheet's plane to the thickness off it, or half the thickness to either side.
+///
+/// Each quarter circle's offset is trimmed on its own curve continued ten lengths each
+/// way, which runs round the circle five times, so each of its ends has a parameter on
+/// every turn. An end taken on another turn gave the corner the other three quarters of
+/// its circle, and the thicken failed (status 1001): which turn was taken changed with
+/// the radius, the thickness and the side.
+#[test]
+fn a_plate_with_round_corners_thickens_to_its_prism() {
+    all_fixes();
+    let (l, h) = (30.0, 40.0);
+    for r in [16.0, 17.0, 18.0] {
+        let area = l * h - 2.0 * (1.0 - PI / 4.0) * r * r;
+        for t in [2.0, 104.0] {
+            for symmetric in [false, true] {
+                let p = plate_with_round_corners(l, h, r);
+                thicken(&p, t, symmetric)
+                    .unwrap_or_else(|e| panic!("r {r}, by {t}, symmetric {symmetric}: {e:?}"));
+                let got = volume(&p);
+                assert!(
+                    rel(got, area * t) < 1e-9,
+                    "r {r}, by {t}, symmetric {symmetric}: {got} against {}",
+                    area * t
+                );
+                assert_eq!(
+                    p.counts().unwrap(),
+                    [8, 18, 12],
+                    "r {r}, by {t}, symmetric {symmetric}"
+                );
+                let (low, high) = p.bounds().unwrap();
+                let reach = if symmetric { 0.5 * t } else { t };
+                assert!(
+                    (high[1] - low[1] - t).abs() < 1e-9
+                        && (low[1].abs().max(high[1].abs()) - reach).abs() < 1e-9,
+                    "r {r}, by {t}, symmetric {symmetric}: {low:?} {high:?}"
+                );
+            }
+        }
+    }
 }
 
 #[test]
@@ -1763,6 +1950,39 @@ mod drafts {
         assert!(rel(volume(&c), v) < 1e-9, "{} {v}", volume(&c));
     }
 
+    /// Acid-6's needle: R = 0.5, h = 1000, neutral at z = -1600, theta = 0.02 degrees.
+    /// r(z) = R - (z + 1600) tan(theta), so the frustum volume is
+    /// `pi h (R^2 + R r_top + r_top^2) / 3` = 364.684642297274456 mm^3;
+    /// `r_top` = 0.150934135423594902 mm.
+    #[test]
+    fn a_long_thin_cylinder_drafts_to_a_frustum() {
+        all_fixes();
+        let base = [0.0, 0.0, -1600.0];
+        let c = make_cylinder(base, 0.5, 1000.0).unwrap();
+        let o = order(&c);
+        // 0.02 pi / 180 and tan(0.02 pi / 180), rounded to doubles.
+        let angle = 0.000_349_065_850_398_865_93;
+        let slope = 0.000_349_065_864_576_405_1;
+        draft(&c, &o, &[curved(&c, &o)], base, Z, Z, angle).unwrap();
+        let small = 0.5 - 1000.0 * slope;
+        let want = PI * 1000.0 * (0.25 + 0.5 * small + small * small) / 3.0;
+        let got = volume(&c);
+        assert!(rel(got, want) < 1e-9, "{got} {want}");
+        assert!(c.is_manifold_solid().unwrap());
+        assert_eq!(c.check(crate::CheckLevel::All).unwrap().failures, 0);
+        assert_eq!(c.counts().unwrap(), [3, 3, 2]);
+        // At z = -601 the radius is about 0.1513; at -1599 it is about 0.4997.
+        for (point, class) in [
+            ([0.0, 0.0, -601.0], crate::PointClass::Inside),
+            ([0.2, 0.0, -601.0], crate::PointClass::Outside),
+            ([0.2, 0.0, -1599.0], crate::PointClass::Inside),
+            ([0.0, 0.0, -1601.0], crate::PointClass::Outside),
+            ([0.0, 0.0, -599.0], crate::PointClass::Outside),
+        ] {
+            assert_eq!(c.classify_point(point).unwrap(), class, "{point:?}");
+        }
+    }
+
     /// A cone r 10 at its base to 8 at its top, 20 tall, drafted 5 degrees about its base turns
     /// its generators 5 degrees more: r 10 + 20 tan(atan(-0.1) - 5 degrees) at the top.
     #[test]
@@ -2061,5 +2281,124 @@ mod drafts {
         b.check_solid().unwrap();
         let report = b.check(crate::CheckLevel::All).unwrap();
         assert_eq!(report.failures, 0, "{}", report.text);
+    }
+}
+
+/// Kernel diagnostics cross the application seam here; the app receives only ops
+/// data and need not name the kernel's reason classes or construct kernel errors.
+#[test]
+fn offset_failures_keep_the_kernel_reason_and_class() {
+    use crate::OffsetRefusal;
+    use solidcore::error::offset::OffsetFailure;
+    use solidcore::error::Failure;
+    use solidcore::{EntityRef, FaceId};
+
+    for why in [
+        OffsetFailure::Failed("the offset edge has no intersection"),
+        OffsetFailure::Missing("the face's surface"),
+        OffsetFailure::InvalidValue("the offset distance is zero"),
+        OffsetFailure::Inconsistent("the edge's mate is absent"),
+    ] {
+        let error = Failure::new("offset::offset_executive::crossing_loops", why)
+            .at(EntityRef::Face(FaceId::from_index(2)))
+            .into_error();
+        let diagnostic = super::diagnostic(&error);
+        assert_eq!(diagnostic.detail, error.to_string());
+        assert_eq!(
+            diagnostic.refusal,
+            Some(Error::OffsetRefused {
+                face: None,
+                why: OffsetRefusal::Phrase {
+                    class: why.kind(),
+                    defect: why.is_defect(),
+                    phrase: error.to_string()
+                },
+            })
+        );
+    }
+}
+
+#[test]
+fn typed_offset_refusals_keep_their_nested_kernel_cause() {
+    use crate::OffsetRefusal;
+    use solidcore::error::intersect::IntersectFailure;
+    use solidcore::error::offset::OffsetFailure;
+    use solidcore::error::Failure;
+
+    let cause = Failure::new(
+        "intersect::clip",
+        IntersectFailure::Failed("the exact trim does not cross the face boundary"),
+    )
+    .into_error();
+    let error = Failure::new("offset::trim", OffsetFailure::ExactCurveUncut)
+        .caused_by(cause)
+        .into_error();
+    let diagnostic = super::diagnostic(&error);
+    assert_eq!(
+        diagnostic.refusal,
+        Some(Error::OffsetRefused {
+            face: None,
+            why: OffsetRefusal::ExactCurveUncut
+        })
+    );
+    assert_eq!(diagnostic.detail, error.to_string());
+    assert!(
+        diagnostic
+            .detail
+            .contains("intersect::clip: the exact trim does not cross the face boundary"),
+        "{}",
+        diagnostic.detail
+    );
+
+    let error = Failure::new(
+        "offset::face",
+        OffsetFailure::Folds {
+            face: solidcore::FaceId::from_index(2),
+            distance: 2.0,
+            largest: 1.0,
+        },
+    )
+    .caused_by(error)
+    .into_error();
+    let diagnostic = super::diagnostic(&error);
+    assert_eq!(
+        diagnostic.refusal,
+        Some(Error::WallFolds { largest: Some(1.0) })
+    );
+    assert_eq!(diagnostic.detail, error.to_string());
+}
+
+/// Intersections and Booleans inside shelling also keep their named cause,
+/// including the failure beneath an offset stage.
+#[test]
+fn offset_substages_keep_their_failure_reason() {
+    use solidcore::error::intersect::IntersectFailure;
+    use solidcore::error::offset::OffsetFailure;
+    use solidcore::error::{Failure, Reason};
+
+    let cause = Failure::new(
+        "intersect::surface_surface",
+        IntersectFailure::Failed("the two face trims do not cross"),
+    )
+    .into_error();
+    let offset = Failure::new("offset::offset_executive", OffsetFailure::StageFailed)
+        .caused_by(cause.clone())
+        .into_error();
+    let boolean = Failure::new(
+        "boolean::merge::p3",
+        Reason::Failed("a Boolean of the tree failed"),
+    )
+    .caused_by(cause.clone())
+    .into_error();
+    for error in [cause, offset, boolean] {
+        let diagnostic = super::diagnostic(&error);
+        assert_eq!(diagnostic.detail, error.to_string());
+        assert!(
+            diagnostic
+                .detail
+                .contains("the two face trims do not cross"),
+            "{}",
+            diagnostic.detail
+        );
     }
 }

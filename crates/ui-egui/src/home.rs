@@ -1106,6 +1106,7 @@ fn recent_kind(app: &SolveApp, path: &str) -> String {
         "glb" | "gltf" => "glTF",
         "fcstd" => "FreeCAD",
         "3dm" => "Rhino",
+        "usd" | "usda" | "usdc" | "usdz" => "OpenUSD",
         other if !other.is_empty() => return other.to_ascii_uppercase(),
         _ => return app.tr("home.design_workspace").to_string(),
     };
@@ -1171,7 +1172,9 @@ fn export_tiles(app: &SolveApp) -> start_page::Tiles<'_, FileAction> {
         ("view_dxf", "DXF", None, FileAction::ViewDxf),
         ("obj", "OBJ", None, FileAction::Export("obj")),
         ("glb", "GLB", None, FileAction::Export("glb")),
+        ("usd", "OpenUSD", None, FileAction::Export("usd")),
         ("urdf", "URDF", None, FileAction::Export("urdf")),
+        ("sdf", "SDF", None, FileAction::Export("sdf")),
         ("json", "JSON", Some("home.export_json_hint"), FileAction::Export("json")),
     ];
     let tiles = formats
@@ -1215,13 +1218,14 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
                 app.open_chosen_file(&path);
             }
         }),
-        FileAction::Import => {
-            app.pick_open_for(&["step", "stp", "iges", "igs", "stl", "obj", "3mf", "gltf", "glb", "ply", "xyz", "pts"], |app, path| {
+        FileAction::Import => app.pick_open_for(
+            &["step", "stp", "iges", "igs", "stl", "obj", "3mf", "gltf", "glb", "usd", "usda", "usdc", "usdz", "ply", "pcd", "xyz", "pts", "asc"],
+            |app, path| {
                 if let Some(path) = path {
                     app.open_path_async(&path);
                 }
-            })
-        }
+            },
+        ),
         FileAction::Save => {
             app.home.open = false;
             crate::toolbar::save(app);

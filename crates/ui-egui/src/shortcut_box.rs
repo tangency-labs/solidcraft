@@ -172,11 +172,12 @@ pub fn score(q: &str, s: &str) -> u32 {
 fn keywords(id: &str) -> &'static str {
     match id {
         "file.save_mesh" => "export stl 3mf mesh 3d print printing slicer",
-        "file.export" => "export stl 3mf obj step urdf mesh 3d print",
+        "file.export" => "export stl 3mf obj step urdf sdf gazebo mesh 3d print",
         "file.export_step" => "stp cad",
         "file.export_stl" | "file.export_3mf" => "mesh 3d print printing",
         "file.export_obj" => "mesh",
         "file.export_urdf" => "robot ros simulation",
+        "file.export_sdf" => "gazebo model simulation world texture",
         "sketch.constraint.tangent" => "g1 tangency continuity smooth",
         "sketch.constraint.curvature" => "g2 curvature continuity smooth",
         "sketch.blend_curve" => "g1 g2 g3 g4 continuity tangent curvature bridge",
@@ -914,7 +915,6 @@ mod tests {
     fn drawing_search_exposes_only_drawing_and_explicit_source_actions() {
         let mut app = SolveApp::new(Default::default(), Default::default());
         assert!(!search(&app, "").iter().any(|row| row.0.starts_with("drawing.")));
-        app.preferences.drawings_preview = true;
         crate::workspace::enter(&mut app, "drawing").unwrap();
         let rows = search(&app, "");
         assert!(rows.iter().any(|row| row.0 == "drawing.view.base.planned"));
