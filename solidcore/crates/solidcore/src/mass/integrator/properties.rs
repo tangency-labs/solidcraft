@@ -1997,6 +1997,65 @@ pub fn brep_properties_in_box(
     attributes: &PropertyAttributes<'_>,
     bbox: &Extent3d,
 ) -> Result<PreciseProperties> {
+    properties_in_box(k, b, accuracy, origin, behavior, attributes, bbox, None)
+}
+
+/// [`brep_properties_in_box`] and its summands: each face use's, closure's and wire
+/// edge's contribution as it is added to the total, in order (the rounding of the total is at most `gamma_(n-1)` times the sum of the
+/// summands' magnitudes, per component). The total is the same, bit for bit.
+///
+/// # Errors
+///
+/// Those of [`brep_properties_in_box`]; [`SolidError::Unsupported`] for a body with a
+/// shell vertex, whose ball is not recorded as a summand.
+#[doc(hidden)] // (for the goldens' rounding bounds; the kernel itself does not call it)
+pub fn brep_properties_in_box_terms(
+    k: &Kernel,
+    b: &mut Brep,
+    accuracy: f64,
+    origin: Point3,
+    behavior: MassPropertyBehavior,
+    attributes: &PropertyAttributes<'_>,
+    bbox: &Extent3d,
+) -> Result<(PreciseProperties, Vec<PreciseProperties>)> {
+    let mut terms = Vec::new();
+    let total = properties_in_box(
+        k,
+        b,
+        accuracy,
+        origin,
+        behavior,
+        attributes,
+        bbox,
+        Some(&mut terms),
+    )?;
+    Ok((total, terms))
+}
+
+/// Pushes on `terms`, when recording, the summand `add` adds to a zero total.
+fn record(
+    terms: &mut Option<&mut Vec<PreciseProperties>>,
+    add: impl FnOnce(&mut PreciseProperties),
+) {
+    if let Some(terms) = terms.as_deref_mut() {
+        let mut term = PreciseProperties::default();
+        add(&mut term);
+        terms.push(term);
+    }
+}
+
+/// [`brep_properties_in_box`], recording its summands on `terms` when given.
+#[allow(clippy::too_many_arguments)] // brep_properties_in_box's inputs and the record
+fn properties_in_box(
+    k: &Kernel,
+    b: &mut Brep,
+    accuracy: f64,
+    origin: Point3,
+    behavior: MassPropertyBehavior,
+    attributes: &PropertyAttributes<'_>,
+    bbox: &Extent3d,
+    mut terms: Option<&mut Vec<PreciseProperties>>,
+) -> Result<PreciseProperties> {
     let size = bbox.size();
     let estimated = size.z.max(size.x.max(size.y));
     let estimated = estimated * estimated / 100.0;
@@ -2079,6 +2138,9 @@ pub fn brep_properties_in_box(
                     // face between two solid regions bounds both volumes but is no part of
                     // the area
                     add_selected(&mut total, &delta, mass.x, do_volume, do_area);
+                    record(&mut terms, |t| {
+                        add_selected(t, &delta, mass.x, do_volume, do_area);
+                    });
                     // Not upstream (#16735): the strips and corners closing the face onto
                     // its edges, the use's way round as its volume
                     if do_volume {
@@ -2097,10 +2159,12 @@ pub fn brep_properties_in_box(
                                 *m *= sign;
                             }
                             add_selected(&mut total, &c, mass.x, true, false);
+                            record(&mut terms, |t| add_selected(t, &c, mass.x, true, false));
                         }
                     }
                 } else {
                     add(&mut total, &delta, mass.x);
+                    record(&mut terms, |t| add(t, &delta, mass.x));
                 }
                 if !separating {
                     break;
@@ -2121,10 +2185,17 @@ pub fn brep_properties_in_box(
             mass.x = 1.0;
         }
         add(&mut total, &delta.properties, mass.x);
+        record(&mut terms, |t| add(t, &delta.properties, mass.x));
     }
     for v in vertices(b)? {
         if !vertex::is_shell_vertex(b, v)? {
             continue;
+        }
+        if terms.is_some() {
+            return Err(SolidError::Unsupported {
+                operation: OP,
+                reason: "a shell vertex's ball is not recorded as a summand",
+            });
         }
         let mut mass = attributes.mass_vector(
             EntityRef::Vertex(v),
@@ -3031,6 +3102,54 @@ mod tests {
         .unwrap();
         assert_eq!(p.volume, 20_000.0, "{p:?}");
         assert_eq!(p.area, 20_800.0, "{p:?}");
+    }
+
+    /// [`brep_properties_in_box_terms`] returns [`brep_properties_in_box`]'s total bit for
+    /// bit with two summands per face use of a box, and refuses a body with a shell vertex,
+    /// whose ball it does not record.
+    #[test]
+    fn properties_terms_match_the_total_and_refuse_a_shell_vertex() {
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_box(
+            &mut k,
+            Point3::new(-3.0, 5.0, 1.0),
+            7.0,
+            2.0,
+            3.0,
+        )
+        .unwrap();
+        let bbox = crate::query::api_queries::brep_bounding_box(&k, &b, true).unwrap();
+        let store = no_attributes();
+        let attrs = PropertyAttributes {
+            store: &store,
+            key_of: &|_| ObjectKey(0),
+        };
+        let behavior = MassPropertyBehavior::default();
+        let p =
+            brep_properties_in_box(&k, &mut b, 1e-8, bbox.mid(), behavior, &attrs, &bbox).unwrap();
+        let (total, terms) =
+            brep_properties_in_box_terms(&k, &mut b, 1e-8, bbox.mid(), behavior, &attrs, &bbox)
+                .unwrap();
+        assert_eq!(total.volume.to_bits(), p.volume.to_bits());
+        assert_eq!(total.area.to_bits(), p.area.to_bits());
+        // (each of the 6 face uses, then its closure strips and corners)
+        assert_eq!(terms.len(), 12, "{terms:?}");
+        let mut sum = PreciseProperties::default();
+        for t in &terms {
+            add(&mut sum, t, 1.0);
+        }
+        assert_eq!(sum.volume.to_bits(), p.volume.to_bits());
+        assert_eq!(sum.area.to_bits(), p.area.to_bits());
+
+        crate::topology::brep::p2::make_shell_vertex_topology(&mut b, None).unwrap();
+        let refused =
+            brep_properties_in_box_terms(&k, &mut b, 1e-8, bbox.mid(), behavior, &attrs, &bbox);
+        assert!(
+            matches!(refused, Err(SolidError::Unsupported { .. })),
+            "{refused:?}"
+        );
+        // (the total alone still measures it)
+        brep_properties_in_box(&k, &mut b, 1e-8, bbox.mid(), behavior, &attrs, &bbox).unwrap();
     }
     fn no_attributes() -> AttributeStore {
         AttributeStore::default()

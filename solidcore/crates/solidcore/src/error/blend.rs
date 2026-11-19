@@ -340,7 +340,8 @@ pub const fn no_room_class(reason: NoRoomReason) -> ErrorKind {
         R::JoinOffsetsDiffer => ErrorKind::JoinOffsetsDiffer,
         R::StripBelowResolution => ErrorKind::StripBelowResolution,
         R::EndPastSideEdge => ErrorKind::EndPastSideEdge,
-        R::EndOverflowsSideEdge => ErrorKind::EndOverflowsSideEdge,
+        // an End the round overflows: past its side edge, or over its end face whole
+        R::EndOverflowsSideEdge | R::EndPassesOverEndFace => ErrorKind::EndOverflowsSideEdge,
         R::EndRollsIntoSmoothEnd => ErrorKind::EndRollsIntoSmoothEnd,
         R::EndAtSeamVertex => ErrorKind::EndAtSeamVertex,
         R::TangentContinuationEndUnsupported => ErrorKind::TangentContinuationEnd,
@@ -981,6 +982,10 @@ mod tests {
             ),
             (
                 BlendFailure::NoRoom(R::EndOverflowsSideEdge),
+                ErrorKind::EndOverflowsSideEdge,
+            ),
+            (
+                BlendFailure::NoRoom(R::EndPassesOverEndFace),
                 ErrorKind::EndOverflowsSideEdge,
             ),
             (
