@@ -1419,6 +1419,10 @@ preference_settings! {
     /// cadmpeg's STEP writer and read by SolidCraft's STEP reader. Off (the default) keeps
     /// SolidCraft's STEP reader for all three, as before.
     cadmpeg_import: bool = false, PAGE_GENERAL => check_id("settings.cadmpeg_import");
+    /// Opening, inserting or dropping a file whose format has import options (STEP, IGES,
+    /// FreeCAD, Rhino, glTF) asks them first (`import_options`); off imports at once with the defaults,
+    /// as before.
+    ask_import_options: bool = true, PAGE_GENERAL => check_id("settings.ask_import_options");
     /// Explicit assembly Move uses joint handles; off keeps the previous Move panel.
     assembly_move_handles: bool = true, PAGE_TOOLS => check_id("joint_move.use_handles");
     /// Degrees per step near the assembly Move ring.

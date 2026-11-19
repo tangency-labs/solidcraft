@@ -77,6 +77,9 @@
  {
   "widget": "Insert STEP\u2026"
  },
+ {
+  "click": {"handle": "import_options:ok"}
+ },
  {"until": {"file_busy": false}},
  {
   "debug": 1
