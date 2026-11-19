@@ -566,10 +566,7 @@ fn equal_area_roots_and_sums_are_solved_once_each() {
             build: boss_root,
             pick: [30.0 + d, 20.0 + d, 10.0],
             r: 2.0,
-            // 12 since a round's new edges take their measured gaps as tolerances: the gaps
-            // are measured on the round's own definition, which solves its roots at the
-            // edges' samples too (10 before)
-            most_roots: 12,
+            most_roots: 10,
             most_sums: 680,
         },
     ];
