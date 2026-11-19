@@ -56,13 +56,11 @@ pub fn numeric_preview_ready(ctx: &egui::Context) -> bool {
     let Some(edit) = ctx.data(|data| data.get_temp::<NumericEdit>(numeric_edit_id())) else { return true };
     // The viewport schedules its preview before the dialog draws this pass, so it consumes
     // the previous pass's fields. Also allow a host that schedules after drawing its fields.
-    if ctx.cumulative_pass_nr().saturating_sub(edit.pass) > 1
-        || !ctx.memory(|m| m.has_focus(edit.id))
-        || ctx.input(|i| i.key_pressed(egui::Key::Enter))
-    {
+    if ctx.cumulative_pass_nr().saturating_sub(edit.pass) > 1 || !ctx.memory(|m| m.has_focus(edit.id)) {
         return true;
     }
-    // A queued edit must reach the field before an expired timer can publish its old text.
+    // A queued edit must reach the field before an expired timer, or an Enter in the same
+    // frame, can publish its old text (`m` then Enter must not release the earlier `2m`).
     // This matters when the host schedules previews before processing the current inputs.
     if ctx.input(|i| {
         i.events.iter().any(|event| {
@@ -77,6 +75,9 @@ pub fn numeric_preview_ready(ctx: &egui::Context) -> bool {
     }) {
         ctx.request_repaint();
         return false;
+    }
+    if ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
+        return true;
     }
     let remaining = edit.edited_at + UNIT_PREFIX_PAUSE.as_secs_f64() - ctx.input(|i| i.time);
     if remaining > 0.0

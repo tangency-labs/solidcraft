@@ -243,6 +243,38 @@ fn numeric_preview_pause_restarts_after_each_edit() {
 }
 
 #[test]
+fn numeric_preview_enter_waits_for_a_queued_edit_in_the_same_frame() {
+    let ctx = context();
+    install_expressions(&ctx, std::sync::Arc::new(UnitExpressions));
+    let mut value = "2m".to_owned();
+    let mut draw = |time, events: Vec<egui::Event>| {
+        let mut result = None;
+        raw_frame(&ctx, egui::RawInput { time: Some(time), events, ..Default::default() }, |ui| {
+            let ready_before = numeric_preview_ready(ui.ctx());
+            let response = checked_field(ui, &mut value, "", false).1;
+            result = Some((response.id, ready_before));
+        });
+        result.unwrap()
+    };
+    let enter = || egui::Event::Key {
+        key: egui::Key::Enter,
+        physical_key: Some(egui::Key::Enter),
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let (id, _) = draw(0.0, vec![]);
+    ctx.memory_mut(|m| m.request_focus(id));
+    draw(0.005, vec![]);
+    select(&ctx, id, 0, 2);
+    draw(0.01, vec![egui::Event::Text("2".into())]);
+    draw(0.1, vec![egui::Event::Text("m".into())]);
+    let (_, before) = draw(0.12, vec![egui::Event::Text("m".into()), enter()]);
+    assert!(!before, "Enter in the frame of the completing keystroke must not release the earlier `2m`");
+    assert!(draw(0.13, vec![]).1, "after the Enter the finished value previews immediately");
+}
+
+#[test]
 fn multiline_text_retains_focus_id_and_three_line_geometry() {
     let ctx = crate::test_support::context();
     let id = egui::Id::unique("multiline_test");
