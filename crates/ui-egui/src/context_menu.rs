@@ -50,6 +50,10 @@ pub enum Target {
     OriginAxis {
         name: String,
     },
+    /// An origin point (O).
+    OriginPoint {
+        name: String,
+    },
     Component {
         id: u64,
     },
@@ -300,7 +304,7 @@ fn touched_bodies(app: &SolveApp) -> Vec<String> {
     for s in &app.session.selection {
         let b = match s {
             Sel::Body { name } => name,
-            Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => body,
+            Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } if !body.is_empty() => body,
             _ => continue,
         };
         if !v.contains(b) {
@@ -383,6 +387,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Plane { id } => plane_items(app, *id),
         Target::OriginPlane { name } => origin_plane_items(app, name),
         Target::OriginAxis { name } => origin_axis_items(app, name),
+        Target::OriginPoint { name } => origin_point_items(app, name),
         Target::Component { id } => component_items(app, *id),
         Target::Occurrence { path } => occurrence_items(app, path),
         Target::Group { id, scope } => crate::browser::group_items(app, *id, scope),
@@ -1046,6 +1051,12 @@ fn origin_plane_items(app: &SolveApp, name: &str) -> Vec<Item> {
 
 /// An origin axis: Show/Hide, as on a plane (an axis takes no sketch) (#8382).
 fn origin_axis_items(app: &SolveApp, name: &str) -> Vec<Item> {
+    let visible = !app.session.visibility.hidden_origin.iter().any(|h| h == name);
+    vec![act("ui.originPart", "Show/Hide", "eye").key("V").with(json!({ "keys": [name], "show": !visible }))]
+}
+
+/// An origin point: Show/Hide, as on an axis (#14554).
+fn origin_point_items(app: &SolveApp, name: &str) -> Vec<Item> {
     let visible = !app.session.visibility.hidden_origin.iter().any(|h| h == name);
     vec![act("ui.originPart", "Show/Hide", "eye").key("V").with(json!({ "keys": [name], "show": !visible }))]
 }
@@ -2374,6 +2385,7 @@ pub fn toggle_visibility(app: &mut SolveApp) {
         .iter()
         .filter_map(|s| match s {
             Sel::Plane { name } | Sel::Axis { name } | Sel::ConstructionPoint { name } => Some(name.clone()),
+            Sel::Vertex { body, .. } if body.is_empty() => Some("O".to_string()),
             _ => None,
         })
         .collect();
@@ -2703,6 +2715,7 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
         Target::Timeline { feature: id } => feature(*id),
         Target::OriginPlane { name } => crate::prefs::OriginPlaneNames::PLANES.contains(&name.as_str()),
         Target::OriginAxis { name } => ["X", "Y", "Z"].contains(&name.as_str()),
+        Target::OriginPoint { name } => name == "O" || solidcraft_engine::origins::item(name).is_some_and(|(_, item)| item == "O"),
         Target::Component { id } => component(*id),
         Target::Occurrence { path } => app.session.occurrence_placement(path).is_ok(),
         // The scope is the row it is under: the component's own, or one of its placements.
