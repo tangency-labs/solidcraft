@@ -720,6 +720,66 @@ pub struct ManageRulesParams {
     /// Delete the named saved rule instead of editing it. Default: false. Deleting the active
     /// rule clears that choice; listing then uses the first remaining rule, else built-in steel.
     pub delete: Option<bool>,
+    /// The material the rule is for: a label of at most 128 characters on one line, saved with
+    /// the rule; empty clears it. With `gauge`, a material of the standard library
+    /// (`sheet.rule_library`). Ignored when deleting.
+    pub material: Option<String>,
+    /// A gauge of `material` in the standard library (`16`, `16 ga`): the rule takes its
+    /// thickness and keeps its own bend radius; its K-factor is the bend model's estimate, unless
+    /// `k_factor` is given. Needs `material`. Ignored when deleting.
+    pub gauge: Option<String>,
+    /// With `gauge`, the bend method the K-factor estimate is for: air (default), bottoming or
+    /// coining. Ignored otherwise.
+    pub bend_method: Option<String>,
+}
+
+/// The standard library of sheet metal materials and gauges, each value with its sources.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct RuleLibraryParams {
+    /// Only this material's gauges (ignoring case). Default: every material.
+    pub material: Option<String>,
+}
+
+/// A source of the library's values.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct LibrarySource {
+    pub id: String,
+    pub title: String,
+    pub url: String,
+}
+
+/// One material in one gauge: the rule `sheet.manage_rules` makes from `material` and `gauge`.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct LibraryRule {
+    pub name: String,
+    pub material: String,
+    pub gauge: String,
+    /// Whose gauge chart `gauge` is from.
+    pub chart: String,
+    /// The thickness as the rule takes it, and in millimetres.
+    pub thickness: String,
+    pub thickness_mm: f64,
+    /// The column of the generic K-factor chart the material reads: soft, medium or hard.
+    pub hardness: Option<String>,
+    /// The material's published minimum inside radius at this thickness (an expression, and in
+    /// millimetres), when there is one. The working radius is the tooling's.
+    pub min_bend_radius: Option<String>,
+    pub min_bend_radius_mm: Option<f64>,
+    /// Ids of the sources of these values.
+    pub sources: Vec<String>,
+}
+
+/// The library and where its values come from.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct RuleLibraryResult {
+    pub name: String,
+    pub note: String,
+    pub materials: Vec<String>,
+    pub sources: Vec<LibrarySource>,
+    pub rules: Vec<LibraryRule>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 /// A rule name, checked by the handler's reader.
@@ -781,6 +841,9 @@ pub struct RuleReply {
     pub hem_gap: String,
     pub gap: String,
     pub angle_display: String,
+    /// The material the rule is for; left out when none is set.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub material: String,
 }
 
 impl From<&solidcraft_doc::sheet::SheetRule> for RuleReply {
@@ -797,6 +860,7 @@ impl From<&solidcraft_doc::sheet::SheetRule> for RuleReply {
             hem_gap: r.hem_gap.clone(),
             gap: r.gap.clone(),
             angle_display: r.angle_display.clone(),
+            material: r.material.clone(),
         }
     }
 }
@@ -864,6 +928,10 @@ pub enum ManageRulesResult {
         rule: Box<RuleReply>,
         values: RuleValuesReply,
         errors: Vec<RuleFeatureError>,
+        /// What a standard library pick estimated or found (#18304): a K-factor from the bend
+        /// model, a radius under the material's published minimum.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        notes: Vec<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         param_warnings: Vec<String>,
     },
