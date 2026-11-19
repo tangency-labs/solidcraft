@@ -697,10 +697,24 @@ fn fillet_fitted(
     fit: crate::FilletFit,
     turn: kernel::FilletTurn,
 ) -> std::result::Result<(kernel::Body, Option<Vec<f64>>, Vec<Vec3>), kernel::KernelError> {
+    #[cfg(test)]
+    cost_tests::count(|c| c.blends += 1);
     match kernel::fillet_removing(body, edges, r, turn) {
         Ok((b, gone)) => Ok((b, None, gone)),
+        // A refusal the kernel could not size names no radius to try, and the search for the
+        // largest radius that fits cannot be guided by it: it then halves the radius from the
+        // middle down and blends every edge again for each of the sizes it tries. On the design
+        // of #4282 (a cube with a hole through each axis, a 2 mm round of every edge) those ten
+        // blends of the forty-one edges took 77 s, fifteen times the blend that failed, and they
+        // found nothing: the round fails at any radius there. The refusal is reported as the
+        // kernel stated it.
+        Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Exact && kernel::named_fit(&why).is_none() => {
+            Err(kernel::KernelError::TooLarge(why))
+        }
         Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Exact => Err({
             let hint = kernel::named_fit(&why);
+            #[cfg(test)]
+            cost_tests::count(|c| c.fit_searches += 1);
             with_largest_fit(why, "radius", || kernel::fillet_max_why(body, edges, r, turn, hint))
         }),
         Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Reduce => match kernel::fillet_max_each(body, edges, r, turn)? {

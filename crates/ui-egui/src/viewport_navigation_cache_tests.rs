@@ -8,7 +8,8 @@ fn app() -> SolveApp {
     app.set_origin_shown(false);
     app.ui.show_grid = false;
     app.ui.ground_shadow = true;
-    app.viewport.gpu = Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+    app.viewport.gpu =
+        Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false, edges: false });
     app.cam.pitch = 0.7;
     app
 }
