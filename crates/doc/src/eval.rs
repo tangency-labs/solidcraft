@@ -12160,7 +12160,7 @@ fn eval_feature_kind(
             }
             Ok(())
         }
-        FeatureKind::Split { body, plane, tool, tool_plane, sketch, line } => {
+        FeatureKind::Split { body, plane, tool, tool_plane, tool_sheet, tool_faces, sketch, line } => {
             let i = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Unknown(format!("body `{body}`"))) };
             let input = mb.traced();
@@ -12191,8 +12191,30 @@ fn eval_feature_kind(
                         };
                         split_by_plane_traced(&input, &plane)?
                     } else {
+                        let parts = match tool_sheet {
+                            crate::SplitSheet::Extended => kernel::split_body(&mb.body, &kernel::SplitTool::Face { body: &tb.body, face })?,
+                            // The picked faces as they are, never extended (#9305).
+                            crate::SplitSheet::Faces => {
+                                let faces = tool_faces
+                                    .iter()
+                                    .map(|p| {
+                                        crate::appearance::face_index_at(tb, p.0)
+                                            .ok_or_else(|| DocError::Invalid(format!("no face of `{}` at a tool point", t.body)))
+                                    })
+                                    .collect::<Result<Vec<_>>>()?;
+                                kernel::split_body_by_faces(&mb.body, &tb.body, face, &faces)?
+                            }
+                            // Every face of a surface body as it is (#9305).
+                            crate::SplitSheet::Body => {
+                                if !tb.body.is_surface() {
+                                    return Err(DocError::Invalid(format!("`{}` is not a surface body, so it cannot split as a whole", t.body)));
+                                }
+                                let faces: Vec<usize> = (0..tb.body.face_count()).collect();
+                                kernel::split_body_by_faces(&mb.body, &tb.body, face, &faces)?
+                            }
+                        };
                         // The pieces keep the planar roles of the faces they share with the body (#565).
-                        kernel::split_body(&mb.body, &kernel::SplitTool::Face { body: &tb.body, face })?
+                        parts
                             .into_iter()
                             .map(|part| Ok(Traced::step(part.with_preserved_planar_sources(&mb.body)?, &[&input])))
                             .collect::<Result<Vec<_>>>()?

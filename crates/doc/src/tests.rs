@@ -1744,6 +1744,8 @@ fn a_split_of_a_body_of_two_pieces_gives_the_halves_of_both() {
                 plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: "5".into() },
                 tool: None,
                 tool_plane: false,
+                tool_sheet: Default::default(),
+                tool_faces: Vec::new(),
                 sketch: None,
                 line: None,
             },
