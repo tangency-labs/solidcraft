@@ -42,7 +42,9 @@ Every step is judged against a machine. The machine decides:
 - what the program looks like (the post dialect).
 
 So the analysis, the plan and the checks all take the machine: the setup's own, or one named in
-the call.
+the call. A rotary or turning operation turns about the machine's own rotary axis, through the
+setup's origin. On a machine whose 4th axis lies along Y, the assistant puts the origin on the A
+centreline and gives the operation no frame of its own.
 
 **Known machines are documented as data files, one per machine**, so a person or an assistant
 can read them, check them and add new ones without changing code. A machine file holds:
@@ -59,6 +61,10 @@ Z1, from their public specifications) and reads them at start. `cam.machine.list
 `docs/cam-machines.md` describes the format. If the CAM core that reaches `main` brings its own
 machine models (the open "workholding and machine models in a job" draft, #16053), the Makera
 machines become entries in that format instead of a second one.
+
+A machine file can also describe someone's own machine. The first one contributed is a
+STARMACNC 6060 with a manual tool change, a Mach3 control and a rotary option along Y. Its
+sources say the numbers are the owner's own machine and settings, not a maker's specification.
 
 ## How cutting loads are estimated
 
@@ -299,7 +305,10 @@ Before posting, the assistant gives the person a summary:
 - any warnings.
 
 `cam.post` checks the safety gates again and refuses with the issue codes if any fail. After
-approval, it writes the program for the machine's dialect.
+approval, it writes the program for the machine's dialect: generic RS-274, GRBL, Makera, five-axis
+or Mach3. With no post named, it uses the machine's own, else five-axis for more than three axes,
+else generic. A manual tool change (`T M6` on Mach3) comes after the spindle and coolant are off
+and Z is parked.
 
 ## 8. Learn
 
@@ -358,4 +367,6 @@ branch `jb69/solidcraft:cam`, and each piece is moved onto the stack's interface
 7. **`cam.job.feedback`.**
 
 Each one is a pull request of its own under #11348, with screenshots of what it shows in the
-Manufacture workspace.
+Manufacture workspace. There, the person can make the same changes by hand through forms
+(tool, setup, machine, tool kit, operation and post) that run the same `cam.*` commands. Each
+Manufacture button's tooltip says what it does and when to use it.
