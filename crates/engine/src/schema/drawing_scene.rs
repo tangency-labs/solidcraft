@@ -2,15 +2,17 @@
 
 use std::borrow::Cow;
 
-use schemars::{JsonSchema, Schema, SchemaGenerator};
+use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
+use solidcore_record::{MAX_BEZIER_CTRL, MAX_BEZIER_DEGREE, Seg2};
 use solidcraft_doc::ids;
 use solidcraft_geom::paper::ObjectKind;
 
 use super::Point2;
 use super::drawing_sheet::sheet_ref;
-use super::drawing_view::{BoxResult, LineSourceResult, LinesStatsResult, paper_scene_schema};
-use crate::drawing_scene::{SheetObject, ViewState};
+use super::drawing_view::{BoxResult, LineSourceResult, LinesStatsResult, PathSegResult, paper_scene_schema};
+use crate::drawing_scene::{FillState, FillStatus, SheetObject, SketchState, SketchStatus, ViewState};
 
 /// Draw one sheet of the open drawing. Read-only.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -24,8 +26,11 @@ pub struct SheetSceneParams {
 /// A sheet's paper scene: its size and its groups in paint order, in paper millimetres from the
 /// sheet's lower-left corner: the drawing border's (object: the sheet), then each image's picture
 /// (object and source: the placement), then each view's strokes (object: the view), then each
-/// dimension's lines and arrowheads (object: the dimension) and each note of a view (object: the
-/// note), then each note on the sheet, then the title block's (object: the sheet).
+/// dimension's lines and arrowheads (object: the dimension), each note of a view (object: the
+/// note), each view's label (object: the view) and each balloon's circle, number and leader (object:
+/// the balloon), then each parts list's and revision table's (object: the table), then each note on
+/// the sheet, each revision tag's triangle and text (object: the tag), each fill and each sheet
+/// sketch, then the title block's (object: the sheet).
 #[derive(Debug, Serialize)]
 #[serde(transparent)]
 pub struct SheetPaperScene(pub solidcraft_geom::paper::Scene);
@@ -35,11 +40,49 @@ impl JsonSchema for SheetPaperScene {
         "SheetPaperScene".into()
     }
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        paper_scene_schema(
+        paper_scene_schema::<SheetPathSegResult>(
             generator,
-            &[ObjectKind::DrawingBorder, ObjectKind::SheetImage, ObjectKind::View, ObjectKind::Dimension, ObjectKind::Note, ObjectKind::TitleBlock],
+            &[
+                ObjectKind::DrawingBorder,
+                ObjectKind::SheetImage,
+                ObjectKind::View,
+                ObjectKind::Dimension,
+                ObjectKind::Note,
+                ObjectKind::ViewLabel,
+                ObjectKind::Balloon,
+                ObjectKind::PartsList,
+                ObjectKind::RevisionTable,
+                ObjectKind::Fill,
+                ObjectKind::Sketch,
+                ObjectKind::RevisionTag,
+                ObjectKind::TitleBlock,
+            ],
             true,
         )
+    }
+}
+
+/// A sheet's exact paper geometry, including freeforms independently of writer support.
+/// Projected-view paths retain their separate line/arc-only `PathSegResult` contract.
+#[derive(Debug, Serialize)]
+#[serde(transparent)]
+pub struct SheetPathSegResult(pub Seg2);
+
+impl JsonSchema for SheetPathSegResult {
+    fn schema_name() -> Cow<'static, str> {
+        "SheetPaperSegment".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let projected = generator.subschema_for::<PathSegResult>();
+        let point = json!({"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2});
+        json_schema!({
+            "anyOf": [
+                projected,
+                {"type": "object", "properties": {"type": {"const": "cubic"}, "p0": point, "p1": point, "p2": point, "p3": point}, "required": ["type", "p0", "p1", "p2", "p3"], "additionalProperties": false},
+                {"type": "object", "properties": {"type": {"const": "conic"}, "a": point, "apex": point, "b": point, "w": {"type": "number", "exclusiveMinimum": 0}}, "required": ["type", "a", "apex", "b", "w"], "additionalProperties": false},
+                {"type": "object", "properties": {"type": {"const": "bezier"}, "n": {"type": "integer", "minimum": 4, "maximum": MAX_BEZIER_DEGREE}, "p": {"type": "array", "items": point, "minItems": MAX_BEZIER_CTRL, "maxItems": MAX_BEZIER_CTRL}}, "required": ["type", "n", "p"], "additionalProperties": false}
+            ]
+        })
     }
 }
 
@@ -54,12 +97,56 @@ pub struct SheetSceneView {
     /// What working out its lines cost, when they were.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stats: Option<LinesStatsResult>,
+    /// Its label, when it draws one (a view placed apart from its projection place).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<SheetSceneLabel>,
+    /// A section view's hatching, one entry per body it cut, in the order the view shows them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hatches: Vec<SheetSceneHatch>,
+}
+
+/// One body's hatching in a section view: its lines' angle on paper (45 or 135 degrees) and
+/// spacing, or painted solid when its cut faces are too thin to hatch.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SheetSceneHatch {
+    pub body: String,
+    pub angle_deg: f64,
+    pub spacing_mm: f64,
+    pub filled: bool,
+    /// How many hatch lines it drew: none when it is filled.
+    pub strokes: usize,
 }
 
 impl From<ViewState> for SheetSceneView {
     fn from(v: ViewState) -> Self {
-        SheetSceneView { view: ids::encode(v.view), status: v.status.name(), reason: v.status.reason().or(v.why), stats: v.stats.map(Into::into) }
+        let label = v.label.map(|label| SheetSceneLabel { drawn: label.drawn, why: label.why });
+        SheetSceneView {
+            view: ids::encode(v.view),
+            status: v.status.name(),
+            reason: v.status.reason().or(v.why),
+            stats: v.stats.map(Into::into),
+            label,
+            hatches: v
+                .hatches
+                .into_iter()
+                .map(|h| SheetSceneHatch {
+                    body: h.body,
+                    angle_deg: h.angle.to_degrees(),
+                    spacing_mm: h.spacing_mm,
+                    filled: h.filled,
+                    strokes: h.strokes,
+                })
+                .collect(),
+        }
     }
+}
+
+/// A view's label on the sheet: whether it is in the scene, with why not, or why its text is left out.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SheetSceneLabel {
+    pub drawn: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
 }
 
 /// One dimension of a view on the sheet: where it stands with the model, in
@@ -84,6 +171,44 @@ pub struct SheetSceneNote {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub view: Option<String>,
     pub status: &'static str,
+    pub drawn: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
+}
+
+/// One table on the sheet: `ok`, or `failed` when it can't be read or laid out, and whether its lines
+/// are in the scene, with why not. The rest of the sheet still draws.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SheetSceneTable {
+    pub table: String,
+    pub status: &'static str,
+    pub drawn: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
+}
+
+/// One balloon of a view on the sheet: where the edge its arrow ends on stands with the model, in
+/// `drawing.dimension.inspect`'s words; what it reads of its parts list, in
+/// `drawing.balloon.inspect`'s words, and its number when it has one; and whether it is in the scene,
+/// with why not, or what of it is left out.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SheetSceneBalloon {
+    pub balloon: String,
+    pub view: String,
+    pub status: &'static str,
+    /// `ok`, `no_list`, `not_found`, `reference`, `no_row` or `unread` (its list's design can't be read).
+    pub row_status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub item: Option<String>,
+    pub drawn: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
+}
+
+/// One revision tag on the sheet: whether it is in the scene, with why not, or why its text is left out.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SheetSceneTag {
+    pub tag: String,
     pub drawn: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub why: Option<String>,
@@ -199,7 +324,9 @@ pub struct DrawingUpdateParams {}
 /// What `drawing.update` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct DrawingUpdateResult {
-    /// How many views wait to be drawn: the sheet page draws them, as a command that reads their sheet does.
+    /// How many views wait to be drawn on the sheet page. For a deferred drawing a command that reads
+    /// their sheet draws them too; an automatic drawing's scenes and exports draw from the model at
+    /// once and leave this as it is.
     pub waiting: usize,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -222,8 +349,8 @@ pub struct DimensionStatusResult {
     pub status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub why: Option<String>,
-    /// Its sheet shows it as it last was, or not at all: its view is out of date, it was read from
-    /// another model or record than it has now, or its view draws an exploded view and holds it back.
+    /// Its sheet shows it as it last was, or not at all: its view is out of date, or it was read from
+    /// another model or record than it has now.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub out_of_date: bool,
 }
@@ -235,13 +362,69 @@ pub struct DrawingStatusResult {
     pub views: Vec<ViewStatusResult>,
     /// Each dimension, in id order.
     pub dimensions: Vec<DimensionStatusResult>,
-    /// How many views are out of date.
+    /// How many views are out of date on the sheet page. An automatic drawing's scenes and exports
+    /// draw from the model at once and don't change it.
     pub waiting: usize,
     /// A deferred drawing: its views and dimensions out of date wait for `drawing.update`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub held: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// One sheet sketch, in id order. `drawn` admits exact scene geometry; a selected writer can
+/// still refuse that geometry. A failed sketch draws nothing and reports why.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SheetSceneSketch {
+    pub sketch: String,
+    #[schemars(schema_with = "sketch_status_schema")]
+    pub status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+fn sketch_status_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"type": "string", "enum": ["drawn", "failed"]})
+}
+
+impl From<SketchState> for SheetSceneSketch {
+    fn from(sketch: SketchState) -> Self {
+        let status = sketch.status.name();
+        let reason = match sketch.status {
+            SketchStatus::Drawn => None,
+            SketchStatus::Failed(why) => Some(why),
+        };
+        Self { sketch: ids::encode(sketch.sketch), status, reason }
+    }
+}
+
+/// A fill retains its saved last region when its exact boundary is lost.
+/// Failed expansion draws nothing. Both conditions prevent export.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SheetSceneFill {
+    pub fill: String,
+    pub sketch: String,
+    #[schemars(schema_with = "fill_status_schema")]
+    pub status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+fn fill_status_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"type": "string", "enum": ["drawn", "lost_boundary", "failed"]})
+}
+
+impl From<FillState> for SheetSceneFill {
+    fn from(fill: FillState) -> Self {
+        let status = fill.status.name();
+        let reason = match fill.status {
+            FillStatus::Drawn => None,
+            FillStatus::LostBoundary(reason) | FillStatus::Failed(reason) => Some(reason),
+        };
+        Self { fill: ids::encode(fill.fill), sketch: ids::encode(fill.sketch), status, reason }
+    }
 }
 
 /// What `drawing.scene` returns.
@@ -251,7 +434,7 @@ pub struct SheetSceneResult {
     pub scene: SheetPaperScene,
     /// Each view on the sheet, in id order.
     pub views: Vec<SheetSceneView>,
-    /// The sheet's border, then each view on it, then each dimension and note drawn, in paint order:
+    /// The sheet's border, then each view on it, then each dimension, note, balloon, table and sketch drawn, in paint order:
     /// each that is on paper. What draws nothing and has no boundary isn't one.
     pub objects: Vec<SheetObjectResult>,
     /// Each dimension of a view on the sheet, by view and id.
@@ -259,10 +442,21 @@ pub struct SheetSceneResult {
     /// Each note of a view on the sheet, by view and id, then each note on the sheet, by id.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<SheetSceneNote>,
-    /// The views, dimensions and notes a deferred drawing shows as they last were, and the dimensions
-    /// and notes on its model a view drawing an exploded view holds back.
+    /// Each balloon of a view on the sheet, by view and id.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub balloons: Vec<SheetSceneBalloon>,
+    /// Each table on the sheet, by id.
+    pub tables: Vec<SheetSceneTable>,
+    /// Each revision tag on the sheet, in the drawing's order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<SheetSceneTag>,
+    /// The views, dimensions, notes, balloons and sketches a deferred drawing shows as they last were.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub out_of_date: Vec<String>,
+    /// Each sheet sketch on the sheet, in id order.
+    pub sketches: Vec<SheetSceneSketch>,
+    /// Each authored fill, separately from the owning sketches and views.
+    pub fills: Vec<SheetSceneFill>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

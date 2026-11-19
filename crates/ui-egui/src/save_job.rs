@@ -41,6 +41,8 @@ pub fn start(app: &mut SolveApp, command: &'static str, params: Value) -> bool {
         let mut copy = app.session.scratch();
         // The copy has no file: the command saves to this session's (and names the design after it).
         copy.path.clone_from(&app.session.path);
+        // This is the user's own Save: only this path may sign with the keyring.
+        copy.signing_allowed = true;
         let (tx, rx) = std::sync::mpsc::channel();
         let given = params.clone();
         let progress = std::sync::Arc::new(solidcraft_engine::doc::progress::Progress::default());
@@ -225,6 +227,18 @@ mod tests {
         assert!(h.app.session.is_dirty() && h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
     }
 
+    #[test]
+    fn an_unsigned_save_of_a_signed_design_says_the_earlier_signature_does_not_cover_it() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.session.path = Some("/work/Signed.sc".into());
+        h.app.session.provenance_chain = Some(solidcraft_engine::io::ProvenanceChain { records: vec![vec![1, 2, 3]], truncated: false });
+        h.app.finish_command("file.save", &Ok(json!({"path": "/work/Signed.sc"})));
+        let (text, _, error) = h.app.status.as_ref().expect("the save says where it went");
+        assert!(text.contains("earlier signature") && text.contains("does not cover"), "{text}");
+        assert!(!error);
+    }
+
     /// A save can be cancelled until its file is replaced: a cancelled save writes nothing, and
     /// the design keeps its changes to save. From the operations panel (here `ui.operations`) its
     /// row's X stops it, and it ends cancelled, not as an error.
@@ -252,7 +266,7 @@ mod tests {
         assert_eq!(listed["operations"][0]["cancelling"], true, "{listed}");
         h.frame();
         let shown = |h: &crate::scenario::Harness| {
-            h.app.operations.rows(crate::now_ms()).find(|(r, _)| r.key == "save:file.save_as").and_then(|(r, _)| r.status())
+            h.app.operations.rows(crate::operations::frame_ms(&h.ctx)).find(|(r, _)| r.key == "save:file.save_as").and_then(|(r, _)| r.status())
         };
         assert_eq!(shown(&h), Some(solidcraft_ui_text::tr("operations.cancelling").to_string()), "drawn while it stops");
         // The worker stops before replacing the file: cancelled, not an error, still unsaved.

@@ -768,7 +768,10 @@ fn rust_write(s: &WriteSrc, ascii: bool) -> Result<Output, HarnessError> {
                 read_from_file(&mut k, &mut b, bytes, FileType::Ascii, *rebuild, &mut env)
             };
             return Ok(match read {
-                Ok(()) => write_rec(&k, &b, &write_file_key, &records, &attributes, ascii),
+                Ok(()) => {
+                    crate::tolsub::after_read(&mut b);
+                    write_rec(&k, &b, &write_file_key, &records, &attributes, ascii)
+                }
                 Err(e) => Output::unported(&e)
                     .unwrap_or_else(|| Output::new().ints("rec", vec![write_status(&e)])),
             });
@@ -996,5 +999,125 @@ impl UnitDiff for Runner {
             },
         };
         serde_json::to_value(op).ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solidcore::topology::database_io::{fixed16, round_trip};
+
+    /// The file a `write_bytes` output records (`rec`: `0, 0, n, bytes...`).
+    fn file_of(out: &Output) -> Option<Vec<u8>> {
+        let rec = out.ints.get("rec")?;
+        if rec.first() != Some(&0) || rec.get(1) != Some(&0) {
+            return None;
+        }
+        Some(rec.get(3..)?.iter().map(|&c| c as u8).collect())
+    }
+
+    /// `bytes` read with the Rust reader under the write cases' file identities, then
+    /// written as a binary file under the same identities (binary doubles are exact).
+    fn binary_after_reading(bytes: Vec<u8>, file_type: FileType) -> Vec<u8> {
+        let mut k = Kernel::default();
+        let mut records = NotifyRecords::new();
+        let mut attributes = AttributeStore::default();
+        let mut b = Brep::new_with_infinite_region().unwrap();
+        {
+            let mut env = TopologyEnv {
+                all_attributes: &[],
+                attributes: &mut attributes,
+                key_of: &write_file_key,
+                records: &mut records,
+                next_key: WRITE_GEOMETRY_KEYS,
+            };
+            read_from_file(&mut k, &mut b, bytes, file_type, false, &mut env).unwrap();
+        }
+        let out = write_rec(&k, &b, &write_file_key, &records, &attributes, false);
+        file_of(&out).unwrap()
+    }
+
+    /// The ASCII `write_bytes` cases that write a file: all 114 moved with the WR-655 fix
+    /// (the expectations commit of the flag's retirement), and every one is certified
+    /// below.
+    const ASCII_FILES: usize = 114;
+
+    /// Certificate for the ASCII `write_bytes` rows (WR-655): every finite double in each
+    /// ASCII file is written as the shortest text that reads back as itself (`round_trip`,
+    /// no `%.16f` text left), and the file carries every double exactly: read back and
+    /// written as a binary file, it gives the same bytes as the case's own binary file read
+    /// back and written the same way. The certified cases must be exactly the
+    /// [`ASCII_FILES`] ASCII write cases that write a file, each with a committed golden
+    /// row.
+    #[test]
+    fn ascii_files_carry_every_double_exactly() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 16,
+        };
+        let cases = Runner.cases(&ctx).unwrap();
+        let golden = std::fs::read_to_string(
+            crate::case::repo_root().join("crates/goldens/expected/topology.api_files.jsonl"),
+        )
+        .unwrap();
+        let golden: std::collections::BTreeSet<String> = golden
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .filter_map(|v| v.get("case")?.as_str().map(str::to_string))
+            .collect();
+        let mut covered = Vec::new();
+        let mut lossy = Vec::new();
+        for case in &cases {
+            let op: Op = case
+                .parse()
+                .unwrap_or_else(|e| panic!("{}: {e:?}", case.name));
+            // the ASCII writes only: the other ops and the binary writes do not move
+            let Op::WriteBytes { brep, ascii: true } = op else {
+                continue;
+            };
+            let ascii = rust(&Op::WriteBytes {
+                brep: brep.clone(),
+                ascii: true,
+            })
+            .unwrap();
+            let binary = rust(&Op::WriteBytes {
+                brep: brep.clone(),
+                ascii: false,
+            })
+            .unwrap();
+            let name = &case.name;
+            let Some(text) = file_of(&ascii) else {
+                // a refused source or write: the binary case is refused the same way
+                assert_eq!(file_of(&binary), None, "{name}");
+                continue;
+            };
+            let bin = file_of(&binary).unwrap_or_else(|| panic!("{name}: no binary file"));
+            let s = String::from_utf8(text.clone()).unwrap();
+            let mut loses = false;
+            for token in s.split_whitespace() {
+                let Ok(v) = token.parse::<f64>() else {
+                    continue;
+                };
+                if token.contains(['.', 'e', 'n', 'i']) {
+                    assert_eq!(round_trip(v), token, "{name}: double {token}");
+                    // upstream's `%.16f` text of the same double
+                    loses |= !v.is_nan()
+                        && fixed16(v).parse::<f64>().map_or(true, |w| w.to_bits() != v.to_bits());
+                }
+            }
+            assert_eq!(
+                binary_after_reading(text, FileType::Ascii),
+                binary_after_reading(bin, FileType::Binary),
+                "{name}: the ASCII file does not carry the binary file's doubles"
+            );
+            if loses {
+                lossy.push(name.clone());
+            }
+            assert!(golden.contains(name), "{name}: no committed golden row");
+            covered.push(name.clone());
+        }
+        println!("ASCII_EXACT covered {}: {covered:?}", covered.len());
+        println!("ASCII_EXACT %.16f loses a double in {}: {lossy:?}", lossy.len());
+        assert_eq!(covered.len(), ASCII_FILES);
     }
 }

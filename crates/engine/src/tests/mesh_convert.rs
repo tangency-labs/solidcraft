@@ -193,9 +193,9 @@ fn stl_export_is_closed_where_faces_meet() {
 #[test]
 fn save_mesh_rejects_unknown_format_and_slicer_without_writing() {
     let mut s = imported_box();
-    // Its own file name: `save_mesh_writes_stl_and_3mf` writes `solvecraft-save-mesh-<pid>.stl`, and
+    // Its own file name: `save_mesh_writes_stl_and_3mf` writes `solidcraft-save-mesh-<pid>.stl`, and
     // sharing it made this one fail when the two ran together.
-    let path = std::env::temp_dir().join(format!("solvecraft-save-mesh-rejected-{}.stl", std::process::id()));
+    let path = std::env::temp_dir().join(format!("solidcraft-save-mesh-rejected-{}.stl", std::process::id()));
     let _ = std::fs::remove_file(&path);
     for params in
         [json!({"path":path,"format":"nope"}), json!({"path":path,"slicer":"no such slicer anywhere"}), json!({"path":path,"slicer":"/bin/sh"})]
@@ -210,7 +210,7 @@ fn save_mesh_writes_stl_and_3mf() {
     let mut s = imported_box();
     let dir = std::env::temp_dir();
     for (ext, format) in [("stl", None), ("3mf", None), ("dat", Some("3mf"))] {
-        let path = dir.join(format!("solvecraft-save-mesh-{}.{ext}", std::process::id()));
+        let path = dir.join(format!("solidcraft-save-mesh-{}.{ext}", std::process::id()));
         let mut params = json!({"path": path});
         if let Some(f) = format {
             params["format"] = json!(f);
@@ -239,8 +239,8 @@ fn send_to_slicer_needs_a_slicer_and_bodies() {
     assert!(s.execute("file.send_to_slicer", &json!({"slicer":"no such slicer anywhere"})).is_err());
 }
 
-/// The chosen-programs list is process-wide: tests that set it take turns.
-#[cfg(unix)]
+/// The chosen-programs list and the made-up slicers are process-wide: tests that set them take
+/// turns.
 pub(crate) static CHOSEN_PROGRAMS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// `file.save_mesh` with a `slicer` writes where the caller said and hands that file over, by the
@@ -275,11 +275,9 @@ fn save_mesh_with_a_chosen_program_writes_the_file_where_asked_and_sends_it_ther
     std::fs::remove_dir_all(dir).unwrap();
 }
 
-/// Puts back what the tests of the send commands make up, even when one fails.
-#[cfg(unix)]
+/// Puts back what the tests of the slicer commands make up, even when one fails.
 pub(crate) struct MadeUp;
 
-#[cfg(unix)]
 impl Drop for MadeUp {
     fn drop(&mut self) {
         *crate::slicers::TEST_DETECTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
@@ -676,4 +674,35 @@ fn a_second_placements_mesh_body_converts_by_the_name_the_world_shows() {
         }
     }
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #18465: a file of another CAD program (a zip as a `.f3d`, text as a `.x_t`) is not a design;
+/// Open says it does not open that kind of file, not what the design reader made of it. A design
+/// under its own extension keeps the reader's words, and a design under an odd name still opens.
+#[test]
+fn open_names_an_unsupported_file_instead_of_the_design_readers_complaint() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-open-unsupported-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let write = |name: &str, bytes: &[u8]| {
+        let path = dir.join(name);
+        std::fs::write(&path, bytes).unwrap();
+        path.to_string_lossy().into_owned()
+    };
+    let mut s = Session::default();
+    for (name, bytes) in [("part.f3d", &b"PK\x03\x04not a design"[..]), ("part.x_t", b"**ABCDEFGHIJKLMNOPQRSTUVWXYZ\n"), ("part.xyz123", b"{")] {
+        let error = s.execute("doc.open", &json!({"path": write(name, bytes)})).unwrap_err().to_string();
+        let ext = name.rsplit('.').next().unwrap();
+        assert!(error.contains(&format!("can't open .{ext} files")), "{error}");
+        assert!(error.contains("export STEP") && error.contains("importer plugin") && error.contains("Preferences › Plugins"), "{error}");
+    }
+    let broken = s.execute("doc.open", &json!({"path": write("broken.sc", b"PK\x03\x04not a design")})).unwrap_err().to_string();
+    assert!(!broken.contains("can't open"), "{broken}");
+    // A design that was copied under another name opens as it did.
+    let mut saved = Session::default();
+    let design = dir.join("design.sc");
+    saved.execute("file.save_as", &json!({"path": design.to_string_lossy()})).unwrap();
+    let copy = dir.join("design.sc.bak");
+    std::fs::copy(&design, &copy).unwrap();
+    assert!(s.execute("doc.open", &json!({"path": copy.to_string_lossy()})).is_ok());
+    std::fs::remove_dir_all(dir).unwrap();
 }

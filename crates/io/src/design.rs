@@ -10,10 +10,17 @@ use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::sync::Arc;
 
 mod drawing;
+mod import_cache;
 mod native_cache;
+mod provenance;
 mod thumbnail;
 pub use drawing::{FileKind, file_kind, read_drawing, read_drawing_file, write_drawing_container};
+pub use import_cache::ImportCache;
 pub use native_cache::read_design_geometry;
+pub use provenance::{
+    OpenPgpSignature, OpenPgpSigner, ProvenanceChain, ProvenanceRecord, ProvenanceReport, ProvenanceSave, ProvenanceSigner, ProvenanceStatus,
+    ProvenanceSummary, SignatureSource, Signer,
+};
 pub use thumbnail::{THUMBNAIL_SIZE, read_design_thumbnail, read_design_thumbnail_file};
 
 use serde_json::{Map, Value, json};
@@ -105,11 +112,15 @@ const LIMITS: Limits = Limits {
     cancelled: Some(crate::safe_write::cancelled),
 };
 
+/// The budgets of a save. The file limit guards opening untrusted files; a design that grew past it
+/// is still written in full, never refused (data loss), and the caller says it is over the limit.
+const SAVE_LIMITS: Limits = Limits { max_expanded: || usize::MAX, part_limit: |_| usize::MAX, ..LIMITS };
+
 /// The Deflate level of a part: STEP sources take [`STEP_LEVEL`], and so does a mesh past the file
 /// limit: level 1 of a large payload leaves more on disk, and that part exists only because
 /// compression is what makes it fit. Everything else is level 1.
 fn part_level(name: &str, length: usize) -> i64 {
-    if name.ends_with(".step") || (name.ends_with(".mesh") && length > max_part()) { STEP_LEVEL } else { 1 }
+    if name.ends_with(".step") || name.ends_with(".records") || (name.ends_with(".mesh") && length > max_part()) { STEP_LEVEL } else { 1 }
 }
 
 /// A design container being written, within [`LIMITS`].
@@ -128,10 +139,10 @@ impl std::ops::DerefMut for PackageWriter {
     }
 }
 
-/// The uncompressed size a part may have. STEP and mesh blobs may be larger than the
-/// design file because they are stored compressed when they would not fit otherwise.
+/// The uncompressed size a part may have. STEP, import record and mesh blobs may be larger than
+/// the design file because they are stored compressed when they would not fit otherwise.
 fn part_limit(name: &str) -> usize {
-    if name.ends_with(".step") {
+    if name.ends_with(".step") || name.ends_with(".records") {
         max_step_part()
     } else if name.ends_with(".mesh") {
         max_mesh_part()
@@ -142,7 +153,7 @@ fn part_limit(name: &str) -> usize {
 
 impl PackageWriter {
     fn new() -> PackageWriter {
-        PackageWriter(Writer::new(LIMITS))
+        PackageWriter(Writer::new(SAVE_LIMITS))
     }
     fn finish(self) -> Result<Vec<u8>> {
         Ok(self.0.finish()?)
@@ -197,11 +208,26 @@ pub fn write_design_container_with_thumbnail(
     thumbnail: Option<&[u8]>,
 ) -> Result<Vec<u8>> {
     let _span = solidcraft_profile::span("io", "write_design_container_with_thumbnail");
-    write_container(doc, compression, preview, geometry, thumbnail, max_design())
+    write_container(doc, compression, preview, geometry, thumbnail, max_design(), None)
 }
 
-/// [`write_design_container_with_thumbnail`] within `budget` bytes for the optional caches (the
-/// container's budget; tests pass less).
+/// Write a container with one signed provenance record appended to `save.chain` (see
+/// [`ProvenanceSave`]). The signature covers the document, the container header and every
+/// authoritative part beside them; the optional caches are not signed.
+pub fn write_design_container_with_provenance(
+    doc: &Document,
+    compression: DesignCompression,
+    preview: Option<&DesignPreview>,
+    geometry: Option<&solidcraft_doc::SavedModel>,
+    thumbnail: Option<&[u8]>,
+    save: &ProvenanceSave<'_>,
+) -> Result<Vec<u8>> {
+    let _span = solidcraft_profile::span("io", "write_design_container_with_provenance");
+    write_container(doc, compression, preview, geometry, thumbnail, max_design(), Some(save))
+}
+
+/// The common container writer. `provenance` records a signed record when present; the budget
+/// bounds the optional caches (tests pass less).
 fn write_container(
     doc: &Document,
     compression: DesignCompression,
@@ -209,17 +235,28 @@ fn write_container(
     geometry: Option<&solidcraft_doc::SavedModel>,
     thumbnail: Option<&[u8]>,
     budget: usize,
+    provenance: Option<&ProvenanceSave<'_>>,
 ) -> Result<Vec<u8>> {
     doc.render.validate().map_err(invalid)?;
     let mut writer = PackageWriter::new();
+    if provenance.is_some() {
+        writer.track_parts(provenance::is_authoritative);
+    }
     let mut features = Vec::with_capacity(doc.features.len());
     for feature in &doc.features {
         let replacements = match &feature.kind {
-            FeatureKind::Import { step, .. } => {
+            FeatureKind::Import { step, records, .. } => {
                 // STEP is text and shrinks several times: always compressed, so an import as large
                 // as MAX_STEP_BYTES still fits in a design file.
                 let blob = writer.blob(step.as_bytes(), "step", true)?;
-                fields([("step", Value::String(String::new())), ("step_blob", blob)])
+                let mut replaced = fields([("step", Value::String(String::new())), ("step_blob", blob)]);
+                // An import kept as records: they go in a part of their own, compressed as STEP.
+                if let Some(r) = records {
+                    let text = solidcraft_kernel::records_text(r)?;
+                    replaced.insert("records".into(), Value::Null);
+                    replaced.insert("records_blob".into(), writer.blob(text.as_bytes(), "records", true)?);
+                }
+                replaced
             }
             FeatureKind::MeshImport { meshes, .. } => {
                 let mut metadata = Vec::with_capacity(meshes.len());
@@ -240,9 +277,12 @@ fn write_container(
         };
         // Extra reference fields are added after serializing existing fields.
         let step_blob = replacements.get("step_blob").cloned();
+        let records_blob = replacements.get("records_blob").cloned();
         let mut value = replace(feature, replacements).map_err(invalid)?;
-        if let Some(blob) = step_blob {
-            value.as_object_mut().ok_or_else(|| invalid("feature metadata"))?.insert("step_blob".into(), blob);
+        for (key, blob) in [("step_blob", step_blob), ("records_blob", records_blob)] {
+            if let Some(blob) = blob {
+                value.as_object_mut().ok_or_else(|| invalid("feature metadata"))?.insert(key.into(), blob);
+            }
         }
         features.push(value);
     }
@@ -294,20 +334,37 @@ fn write_container(
         replacements.insert("render".into(), render);
     }
     let mut metadata = replace(doc, replacements).map_err(invalid)?;
-    // The drawings have entries of their own: `document.json` is the same with them or without.
-    if let Some(o) = metadata.as_object_mut() {
-        o.remove("drawings");
+    // The drawings have entries of their own, and plugin data goes beside the design, a part each,
+    // as it came: `document.json` is the same with them or without.
+    if let Some(object) = metadata.as_object_mut() {
+        object.remove("drawings");
+        object.remove("plugin_data");
     }
     solidcraft_doc::newer_file::restore(doc, &mut metadata);
     let metadata = serde_json::to_vec(&metadata).map_err(invalid)?;
     writer.part("document.json", &metadata, true)?;
     // What a newer build's file holds beside the design goes back as it came.
     let container = doc.newer_file.as_ref().and_then(|file| file.container.clone()).unwrap_or_else(|| json!({"format": VERSION}));
-    writer.part("container.json", &serde_json::to_vec(&container).map_err(invalid)?, false)?;
+    let container_bytes = serde_json::to_vec(&container).map_err(invalid)?;
+    writer.part("container.json", &container_bytes, false)?;
     for (name, bytes) in doc.newer_file.iter().flat_map(|file| &file.parts) {
+        // A signed save writes the chain the caller carries; older raw records cannot be checked
+        // here, so they are replaced rather than kept beside the new entry.
+        if provenance.is_some() && name.starts_with("provenance/") {
+            continue;
+        }
         writer.part(name, bytes, true)?;
     }
     drawing::write(&mut writer, doc)?;
+    for (key, data) in &doc.plugin_data {
+        let bytes = solidcraft_doc::canvas::base64_decode(data).ok_or_else(|| invalid(format!("plugin data `{key}` is not base64")))?;
+        writer.part(&format!("{}{key}", solidcraft_doc::plugin_data::PREFIX), &bytes, true)?;
+    }
+    // The signature binds every authoritative part written above (never the optional caches), and
+    // is written before them so their budget sees its bytes.
+    if let Some(save) = provenance {
+        provenance::write(save, &mut writer, &metadata, &container_bytes, &doc.format, &doc.format_pending)?;
+    }
     // The model cache is optional: one that does not fit the container keeps fewer states, or is
     // left out, never a failed save. Encoding it is a save's longest step: not begun once cancelled.
     if crate::safe_write::cancelled() {
@@ -331,14 +388,6 @@ fn write_container(
         thumbnail::write(&mut writer, png, &metadata)?;
     }
     let bytes = writer.finish()?;
-    if bytes.len() > max_design() {
-        return Err(invalid(format!(
-            "the design would be {} MB, over the {} MB a design file may hold. {}",
-            bytes.len() >> 20,
-            max_design() >> 20,
-            crate::limits::how_to_raise()
-        )));
-    }
     Ok(bytes)
 }
 
@@ -563,6 +612,70 @@ pub fn read_design_preview(bytes: &[u8]) -> Option<DesignPreview> {
     DesignContainerReader::new(Cursor::new(bytes)).ok()?.preview()
 }
 
+/// Verify a container's provenance entry in memory. `None` when the file has no entry or is not a
+/// container; a bad entry is reported, never an error.
+pub fn read_design_provenance(bytes: &[u8]) -> Option<ProvenanceReport> {
+    if bytes.len() > max_design() || !is_design_container(bytes) {
+        return None;
+    }
+    DesignContainerReader::new(Cursor::new(bytes)).ok()?.provenance()
+}
+
+/// The provenance records a container carries, without verifying them. That is what a save
+/// appends to; verification is [`read_design_provenance`].
+pub fn read_design_provenance_chain(bytes: &[u8]) -> Option<ProvenanceChain> {
+    if bytes.len() > max_design() || !is_design_container(bytes) {
+        return None;
+    }
+    DesignContainerReader::new(Cursor::new(bytes)).ok()?.provenance_chain()
+}
+
+/// [`read_design_provenance`] for a file on disk (or the browser's storage).
+pub fn read_design_provenance_file(path: &str) -> Option<ProvenanceReport> {
+    read_design_provenance_file_checked(path).ok().flatten()
+}
+
+/// [`read_design_provenance_file`], but a file that cannot be read is an error: a caller that
+/// asks for a check must not report a missing or unreadable file as an unsigned one.
+pub fn read_design_provenance_file_checked(path: &str) -> Result<Option<ProvenanceReport>> {
+    let mut source = open_regular_file(path)?;
+    if !is_container_source(&mut source)? {
+        return Ok(None);
+    }
+    let mut reader = DesignContainerReader::new(source)?;
+    Ok(reader.provenance())
+}
+
+/// What a design file's provenance says without verifying it, for a list that shows a design
+/// before it is opened. Reads the entry only.
+pub fn read_design_provenance_summary_file(path: &str) -> Option<ProvenanceSummary> {
+    let mut source = open_regular_file(path).ok()?;
+    if !is_container_source(&mut source).ok()? {
+        return None;
+    }
+    let chain = DesignContainerReader::new(source).ok()?.provenance_chain()?;
+    provenance::summarize_chain(&chain)
+}
+
+/// Whether a design file carries a provenance entry, without verifying it. Cheap: it reads the
+/// container directory, not the payloads.
+pub fn has_design_provenance(path: &str) -> bool {
+    let Ok(mut source) = open_regular_file(path) else { return false };
+    if !is_container_source(&mut source).unwrap_or(false) {
+        return false;
+    }
+    DesignContainerReader::new(source).is_ok_and(|reader| reader.has_provenance())
+}
+
+/// [`read_design_provenance_chain`] for a file on disk (or the browser's storage).
+pub fn read_design_provenance_chain_file(path: &str) -> Option<ProvenanceChain> {
+    let mut source = open_regular_file(path).ok()?;
+    if !is_container_source(&mut source).ok()? {
+        return None;
+    }
+    DesignContainerReader::new(source).ok()?.provenance_chain()
+}
+
 fn read_preview<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<DesignPreview> {
     let container: Value = serde_json::from_slice(&reader.limited_part("container.json", 4096)?).map_err(invalid)?;
     if !matches!(container.get("format").and_then(Value::as_str), Some(VERSION | LEGACY_VERSION)) {
@@ -651,6 +764,30 @@ impl<R: Read + Seek> DesignContainerReader<R> {
     /// Portable PNG picture only; no source blobs or geometry are evaluated.
     pub fn thumbnail(&mut self) -> Option<Vec<u8>> {
         thumbnail::read(&mut self.reader).ok()
+    }
+
+    /// Verify the provenance entry against this file's authoritative content. `None` when the
+    /// file has no entry; a malformed or unverifiable entry is a report, never an error, so the
+    /// design still opens. The verification reads and hashes every authoritative part.
+    pub fn provenance(&mut self) -> Option<ProvenanceReport> {
+        provenance::verify(&mut self.reader)
+    }
+
+    /// Whether the container carries a provenance entry, read or not: a file with one must not
+    /// adopt its excluded model cache, even when the entry is malformed.
+    pub fn has_provenance(&self) -> bool {
+        self.reader.has_part(provenance::ENTRY)
+    }
+
+    /// The provenance records, unverified: what a save appends to.
+    pub fn provenance_chain(&mut self) -> Option<ProvenanceChain> {
+        provenance::read_chain(&mut self.reader)
+    }
+
+    /// Whether both model-cache entries were included. Only the container directory is
+    /// inspected, so this never decodes or evaluates geometry (#18815).
+    pub fn has_model_cache(&self) -> bool {
+        native_cache::ENTRIES.iter().all(|entry| self.reader.has_part(entry))
     }
 
     /// The saved model, when this build wrote it for exactly this document.
@@ -743,6 +880,19 @@ fn is_container_source(source: &mut FileSource) -> Result<bool> {
     Ok(is_design_container(&prefix))
 }
 
+/// Whether a newer build's import records read as this build's with nothing left over: saved
+/// again, they are what the file has (serde passes over a field this build does not have, which
+/// a save would then drop).
+fn records_read_whole(text: &[u8]) -> Result<()> {
+    let records: solidcraft_kernel::ImportRecords = serde_json::from_slice(text).map_err(invalid)?;
+    let original: Value = serde_json::from_slice(text).map_err(invalid)?;
+    let again: Value = serde_json::from_str(&solidcraft_kernel::records_text(&records)?).map_err(invalid)?;
+    if again != original {
+        return Err(invalid("records with fields this build does not read"));
+    }
+    Ok(())
+}
+
 /// A newer build's container: a feature, picture or point cloud whose payload doesn't read here
 /// is kept as the file has it, and so is every part this build has no use for.
 fn hydrate_newer<R: Read + Seek>(doc: &mut Document, metadata: &Value, container: Value, reader: &mut PackageReader<R>) -> Result<()> {
@@ -750,7 +900,20 @@ fn hydrate_newer<R: Read + Seek>(doc: &mut Document, metadata: &Value, container
     for (index, feature) in doc.features.iter_mut().enumerate() {
         let Some(value) = metadata.get("features").and_then(|v| v.get(index)) else { continue };
         let readable = match &mut feature.kind {
-            FeatureKind::Import { .. } => reader.blob(value, "step_blob", "step").map(|_| ()).map_err(IoError::from),
+            // The records must read as this build's records, all of them, or the import is kept as
+            // the file has it rather than failing the whole design when it is hydrated, or losing
+            // on save what this build does not read of them.
+            FeatureKind::Import { .. } => reader.blob(value, "step_blob", "step").map(|_| ()).map_err(IoError::from).and_then(|()| {
+                if value.get("records_blob").is_some() {
+                    return records_read_whole(reader.blob(value, "records_blob", "records")?);
+                }
+                // Records a newer build wrote inline are held to the same reading: saving would
+                // move them to a part of their own, without what this build does not read.
+                match value.get("records").filter(|r| !r.is_null()) {
+                    Some(inline) => records_read_whole(&serde_json::to_vec(inline).map_err(invalid)?),
+                    None => Ok(()),
+                }
+            }),
             FeatureKind::MeshImport { meshes, .. } => {
                 let mut check = meshes.clone();
                 check.iter_mut().enumerate().try_for_each(|(i, mesh)| {
@@ -791,7 +954,10 @@ fn hydrate_newer<R: Read + Seek>(doc: &mut Document, metadata: &Value, container
     }
     // A blob a typed record uses comes back from that record; others only for what is kept.
     for name in reader.part_names() {
-        let ours = matches!(name.as_str(), "document.json" | "container.json") || name.starts_with("cache/") || name.starts_with("drawings/");
+        let ours = matches!(name.as_str(), "document.json" | "container.json")
+            || name.starts_with("cache/")
+            || name.starts_with("drawings/")
+            || plugin_part(&name).is_some();
         let unused_blob = name.starts_with("blobs/") && !file.mentions(&name) && !foreign_mentions(&doc.features, &name);
         if !ours && !unused_blob {
             file.parts.push((name.clone(), reader.limited_part(&name, part_limit(&name))?.into()));
@@ -800,6 +966,25 @@ fn hydrate_newer<R: Read + Seek>(doc: &mut Document, metadata: &Value, container
     // Looking counts against what a design may expand to only once: the reads below are the real ones.
     reader.hydrated = 0;
     Ok(())
+}
+
+/// The plugin data key of a container part under `plugins/`, when it is one this build keeps.
+fn plugin_part(name: &str) -> Option<&str> {
+    name.strip_prefix(solidcraft_doc::plugin_data::PREFIX).filter(|key| solidcraft_doc::plugin_data::valid_key(key))
+}
+
+/// Plugin data: each `plugins/<plugin-id>/` part, kept as it is whether or not the plugin is
+/// installed. One that does not read is left out; the design opens all the same.
+fn hydrate_plugin_data<R: Read + Seek>(doc: &mut Document, reader: &mut PackageReader<R>) {
+    for name in reader.part_names() {
+        let Some(key) = plugin_part(&name) else { continue };
+        if doc.plugin_data.len() >= solidcraft_doc::plugin_data::MAX_FILES && !doc.plugin_data.contains_key(key) {
+            break;
+        }
+        if let Ok(bytes) = reader.limited_part(&name, part_limit(&name)) {
+            doc.plugin_data.insert(key.to_string(), solidcraft_doc::canvas::base64_encode(&bytes).into());
+        }
+    }
 }
 
 /// A `container.json` that says only a format this build writes or wrote.
@@ -895,14 +1080,22 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
     if doc.newer_file.is_some() {
         hydrate_newer(&mut doc, &metadata, container, reader)?;
     }
+    hydrate_plugin_data(&mut doc, reader);
     for (index, feature) in doc.features.iter_mut().enumerate() {
         let value = metadata.get("features").and_then(|v| v.get(index)).ok_or_else(|| invalid("missing feature metadata"))?;
         match &mut feature.kind {
-            FeatureKind::Import { step, .. } => {
+            FeatureKind::Import { step, records, .. } => {
                 if !step.is_empty() {
                     return Err(invalid("ambiguous embedded STEP and blob"));
                 }
                 *step = std::str::from_utf8(reader.blob(value, "step_blob", "step")?).map_err(invalid)?.into();
+                if value.get("records_blob").is_some() {
+                    if records.is_some() {
+                        return Err(invalid("ambiguous embedded import records and blob"));
+                    }
+                    let text = reader.blob(value, "records_blob", "records")?;
+                    *records = Some(Arc::new(serde_json::from_slice(text).map_err(invalid)?));
+                }
             }
             FeatureKind::MeshImport { meshes, .. } => {
                 for (index, mesh) in meshes.iter_mut().enumerate() {
@@ -1187,6 +1380,22 @@ mod tests {
     use super::*;
     use solidcore_record::Vec2;
 
+    #[test]
+    fn a_missing_design_file_is_a_check_error_not_an_unsigned_design() {
+        let path = std::env::temp_dir().join(format!("solidcraft-check-missing-{}.sc", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        assert!(read_design_provenance_file_checked(&path.to_string_lossy()).is_err());
+    }
+
+    #[test]
+    fn a_readable_unsigned_design_has_no_report_and_no_error() {
+        let doc = Document::new("Unsigned");
+        let path = std::env::temp_dir().join(format!("solidcraft-check-unsigned-{}.sc", std::process::id()));
+        std::fs::write(&path, write_design_container(&doc).unwrap()).unwrap();
+        assert!(read_design_provenance_file_checked(&path.to_string_lossy()).unwrap().is_none());
+        let _ = std::fs::remove_file(&path);
+    }
+
     /// Building a design file under a watch that asks to stop (a cancelled save) stops with
     /// "save cancelled", before the next part; unwatched, it is built as ever.
     #[test]
@@ -1242,12 +1451,35 @@ mod tests {
         assert!(DesignContainerReader::new(Oversized).is_err());
     }
 
+    /// #18686 (was #3221's refusal): the file limit guards opening, not keeping. A design past it is
+    /// still written in full, where it used to be refused and left Save, Save As and autosave failing.
+    /// A 1 MB limit for this thread stands in for the real one.
+    #[test]
+    fn a_design_over_the_open_limit_is_still_written_not_refused() {
+        let mut doc = Document::new("Past the limit");
+        // A 1 MB limit for this thread; the design is a couple of MB of noise, which barely deflates.
+        crate::limits::test_cap::set(Some(1 << 20));
+        let step = noise(2_600_000);
+        doc.add_feature(
+            FeatureKind::Import { file: "huge.step".into(), step: step.into(), components: Vec::new(), skip: Vec::new(), records: None },
+            None,
+        )
+        .unwrap();
+        let bytes = write_design_container(&doc).unwrap();
+        assert!(bytes.len() > max_design(), "{} bytes is not past the limit", bytes.len());
+        assert!(is_design_container(&bytes));
+        crate::limits::test_cap::set(None);
+    }
+
     #[test]
     fn seekable_preview_defers_large_source_blob_until_document_read() {
         let mut doc = Document::new("Deferred source");
         let step = noise(2_600_000);
-        doc.add_feature(FeatureKind::Import { file: "large.step".into(), step: step.clone().into(), components: Vec::new(), skip: Vec::new() }, None)
-            .unwrap();
+        doc.add_feature(
+            FeatureKind::Import { file: "large.step".into(), step: step.clone().into(), components: Vec::new(), skip: Vec::new(), records: None },
+            None,
+        )
+        .unwrap();
         let preview = DesignPreview { meshes: vec![mesh()] };
         let bytes = write_design_container_with_preview(&doc, DesignCompression::Fast, Some(&preview)).unwrap();
         let count = std::rc::Rc::new(std::cell::Cell::new(0));
@@ -1305,13 +1537,13 @@ mod tests {
             .collect();
         let state = json!({
             "bodies": [[0, bodies.len()]], "sketches": [], "body_counter": 7, "sheets": [], "construct": [], "threads": [],
-            "sketch_key_set": 0, "blend_edges": {}, "fitted": {}, "tapered": {},
+            "sketch_key_set": 0, "blend_edges": {}, "fitted": {}, "tapered": {}, "named_faces": [],
         });
         solidcraft_doc::SavedModel {
             records: json!({
                 "features": [{"id": 1, "fingerprint": "0000000000000000", "ms": 0.0, "skipped": false, "state": 0}],
                 "states": [state], "model_bodies": records, "names": [{"faces": [], "info": []}], "sketches": [], "sheets": [],
-                "threads": [], "rounds": [], "sketch_key_sets": [{"set": [], "drop": []}],
+                "threads": [], "rounds": [], "sketch_key_sets": [{"set": [], "drop": []}], "named_faces": [],
             }),
             bodies,
         }
@@ -1364,8 +1596,11 @@ mod tests {
     fn native_cache_round_trip_and_preview_defer_original_sources() {
         let mut doc = Document::new("Native cache");
         let step = noise(2_600_000);
-        doc.add_feature(FeatureKind::Import { file: "large.step".into(), step: step.clone().into(), components: Vec::new(), skip: Vec::new() }, None)
-            .unwrap();
+        doc.add_feature(
+            FeatureKind::Import { file: "large.step".into(), step: step.clone().into(), components: Vec::new(), skip: Vec::new(), records: None },
+            None,
+        )
+        .unwrap();
         let bodies = native_geometry();
         let bytes = write_design_container_with_cache(&doc, DesignCompression::Fast, None, Some(&bodies)).unwrap();
         let entries = parts(&bytes);
@@ -1428,6 +1663,64 @@ mod tests {
         assert_eq!(tree.as_object().unwrap().len(), 12, "{:?}", tree.as_object().unwrap().keys().collect::<Vec<_>>());
     }
 
+    /// An import kept as B-rep records (a FreeCAD or Rhino file read through cadmpeg) is saved in
+    /// a part of its own and opens with the same records, which build the same body.
+    #[test]
+    fn an_import_kept_as_records_survives_saving_and_opening() {
+        use solidcore_record::Vec3;
+        let part = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
+        let brep = solidcraft_kernel::brep_record(&part).unwrap();
+        let body = solidcraft_kernel::RecordBody {
+            name: "Block".into(),
+            path: vec!["block".into()],
+            instance: None,
+            color: Some([0.2, 0.4, 0.6]),
+            paint: None,
+            hidden: false,
+            placement: None,
+            face_origin: (0..brep.faces.len() as u64).collect(),
+            brep: Some(brep),
+            sheet: false,
+            copy_of: None,
+            mesh: None,
+        };
+        let tree = vec![solidcraft_kernel::StepNode {
+            name: "block".into(),
+            transform: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [0., 0., 0., 1.]],
+            bodies: vec![0],
+            items: Vec::new(),
+            left_out: Vec::new(),
+            children: Vec::new(),
+        }];
+        let records = Arc::new(solidcraft_kernel::ImportRecords { bodies: vec![body], tree, warnings: Vec::new(), system: "FreeCAD".into() });
+        let mut doc = Document::new("Records");
+        let kind = FeatureKind::Import {
+            file: "block.FCStd".into(),
+            step: "".into(),
+            components: Vec::new(),
+            skip: Vec::new(),
+            records: Some(records.clone()),
+        };
+        doc.add_feature(kind, None).unwrap();
+        let volume = |doc: &Document| {
+            let mut model = solidcraft_doc::Model::new();
+            model.evaluate(doc);
+            assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().map(|r| &r.error).collect::<Vec<_>>());
+            let body = &model.state().bodies[0].body;
+            // The evaluated body has the record's colour.
+            assert_eq!(body.color(), Some([0.2, 0.4, 0.6]));
+            solidcraft_kernel::measure(body).unwrap().volume
+        };
+        assert!((volume(&doc) - 6000.0).abs() < 1e-6);
+        let bytes = write_design_container(&doc).unwrap();
+        assert!(parts(&bytes).keys().any(|k| k.ends_with(".records")), "{:?}", parts(&bytes).keys().collect::<Vec<_>>());
+        let opened = crate::read_design(&bytes).unwrap();
+        let Some(FeatureKind::Import { step, records: Some(read), .. }) = opened.features.first().map(|f| &f.kind) else { panic!("no records") };
+        assert!(step.is_empty());
+        assert_eq!(**read, *records);
+        assert!((volume(&opened) - 6000.0).abs() < 1e-6);
+    }
+
     /// #9170: a mesh body (an imported STL) is kept in the model cache with the rest of the
     /// model, as its own triangles, colour and paint. One mesh body left the whole cache out, so
     /// opening the design evaluated every feature again.
@@ -1442,8 +1735,11 @@ mod tests {
             part.with_color(Some([0.5, 0.5, 0.5])).with_paint(Some(solidcraft_kernel::Paint { opacity: 1., faces, name: Some("Body grey".into()) }));
         let step = solidcraft_kernel::step_export(&[&named], "named").unwrap();
         let mut doc = Document::new("Named colours");
-        doc.add_feature(FeatureKind::Import { file: "named.step".into(), step: step.into(), components: Vec::new(), skip: Vec::new() }, None)
-            .unwrap();
+        doc.add_feature(
+            FeatureKind::Import { file: "named.step".into(), step: step.into(), components: Vec::new(), skip: Vec::new(), records: None },
+            None,
+        )
+        .unwrap();
         let mut model = solidcraft_doc::Model::new();
         model.evaluate(&doc);
         let names = |model: &solidcraft_doc::Model| {
@@ -1520,13 +1816,15 @@ mod tests {
     #[test]
     fn a_model_cache_too_big_for_the_file_is_left_out_not_a_failed_save() {
         let doc = document();
-        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, 70_000).unwrap();
+        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, 70_000, None).unwrap();
         assert!(!parts(&bytes).contains_key("cache/model.json") && !parts(&bytes).contains_key("cache/bodies.bin"));
+        assert!(!DesignContainerReader::new(Cursor::new(&bytes)).unwrap().has_model_cache(), "the omitted cache is observable without decoding");
         assert!(read_design_geometry(&bytes).is_none());
         assert_eq!(crate::read_design(&bytes).unwrap().to_json(), doc.to_json());
         // With room for it, the same model is kept.
-        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, crate::MAX_DESIGN_BYTES).unwrap();
+        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, crate::MAX_DESIGN_BYTES, None).unwrap();
         assert!(read_design_geometry(&bytes).is_some());
+        assert!(DesignContainerReader::new(Cursor::new(&bytes)).unwrap().has_model_cache());
     }
 
     /// Opening a design with its model validates its document once, where the document is read
@@ -1583,8 +1881,8 @@ mod tests {
             .map(|i| {
                 let bodies = if i == 0 { json!([[0, 16]]) } else { json!([[0, 8], [8 * (i + 1), 8]]) };
                 json!({
-                    "bodies": bodies, "sketches": [], "body_counter": 7, "sheets": [], "construct": [], "threads": [],
-                    "sketch_key_set": 0, "blend_edges": {}, "fitted": {}, "tapered": {},
+                    "bodies": bodies, "sketches": [], "body_counter": 7, "construct": [], "threads": [],
+                    "sketch_key_set": 0, "blend_edges": {}, "fitted": {}, "tapered": {}, "named_faces": [],
                 })
             })
             .collect();
@@ -1596,7 +1894,8 @@ mod tests {
         solidcraft_doc::SavedModel {
             records: json!({
                 "features": features, "states": states, "model_bodies": records, "names": [{"faces": [], "info": []}], "sketches": [],
-                "sheets": [], "threads": [], "validation": "each_feature", "rounds": [], "sketch_key_sets": [{"set": [], "drop": []}],
+                "threads": [], "validation": "each_feature", "rounds": [], "sketch_key_sets": [{"set": [], "drop": []}],
+                "named_faces": [],
             }),
             bodies,
         }
@@ -1647,8 +1946,8 @@ mod tests {
             assert_eq!(
                 one.records["states"],
                 json!([{
-                    "bodies": [[0, 16]], "sketches": [], "body_counter": 7, "sheets": [], "construct": [], "threads": [],
-                    "sketch_key_set": 0, "blend_edges": {}, "fitted": {}, "tapered": {},
+                    "bodies": [[0, 16]], "sketches": [], "body_counter": 7, "construct": [], "threads": [],
+                    "sketch_key_set": 0, "blend_edges": {}, "fitted": {}, "tapered": {}, "named_faces": [],
                 }])
             );
         }
@@ -1710,6 +2009,137 @@ mod tests {
     }
 
     #[test]
+    fn import_cache_uses_native_trust_checks_and_evicts_oldest_first() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-import-store-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut cache = ImportCache::new(dir.clone());
+        let body = native_geometry().bodies.remove(0);
+        let text = solidcraft_kernel::step_export_bodies(
+            &[solidcraft_kernel::ExportBody { body: &body, name: "Box".into(), color: None }],
+            &solidcraft_kernel::StepHeader::default(),
+        )
+        .unwrap();
+        let mut doc = Document::new("Box");
+        doc.add_feature(crate::step_import_feature(text.as_bytes(), "box.step").unwrap().kind, None).unwrap();
+        let mut model = solidcraft_doc::Model::new();
+        model.evaluate(&doc);
+        let saved = model.saved(&doc).unwrap();
+        let key = ImportCache::key(text.as_bytes(), "box.step", &json!({}));
+        let reply = json!({"content_sha256": digest(text.as_bytes())});
+        cache.write(&key, &doc, &saved, &reply).unwrap();
+        let path = dir.join(format!("{key}.sc"));
+        let original_bytes = std::fs::read(&path).unwrap();
+        let (back, saved, out) = cache.read(&key).unwrap();
+        assert_eq!(out, reply);
+        assert_eq!(back.to_json(), doc.to_json());
+        assert_eq!(solidcraft_doc::Model::adopt(&back, &saved).unwrap().last_recomputed, 0);
+        let original = parts(&original_bytes);
+        for field in ["format", "producer", "evaluation", "document", "payload"] {
+            let mut entries = original.clone();
+            let mut manifest: Value = serde_json::from_slice(&entries["cache/model.json"]).unwrap();
+            manifest[field] = json!("different");
+            entries.insert("cache/model.json".into(), serde_json::to_vec(&manifest).unwrap());
+            std::fs::write(&path, package(&entries)).unwrap();
+            assert!(cache.read(&key).is_none(), "{field} mismatch must miss");
+        }
+        for field in ["key", "reply"] {
+            let mut entries = original.clone();
+            let mut binding: Value = serde_json::from_slice(&entries["cache/import.json"]).unwrap();
+            binding[field] = Value::Null;
+            entries.insert("cache/import.json".into(), serde_json::to_vec(&binding).unwrap());
+            std::fs::write(&path, package(&entries)).unwrap();
+            assert!(cache.read(&key).is_none(), "damaged {field} must miss");
+        }
+        let mut entries = original;
+        entries.get_mut("cache/bodies.bin").unwrap()[0] ^= 1;
+        std::fs::write(&path, package(&entries)).unwrap();
+        assert!(cache.read(&key).is_none());
+        std::fs::write(&path, &original_bytes).unwrap();
+        assert!(cache.read(&key).is_some());
+        let unrelated = dir.join("my-design.sc");
+        std::fs::write(&unrelated, b"leave me").unwrap();
+
+        cache.budget = original_bytes.len() as u64 * 2 + 64;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(std::time::UNIX_EPOCH))
+            .unwrap();
+        let second = "b".repeat(64);
+        cache.write(&second, &doc, &saved, &reply).unwrap();
+        assert!(cache.read(&key).is_some());
+        let third = "c".repeat(64);
+        cache.write(&third, &doc, &saved, &reply).unwrap();
+        assert!(cache.read(&key).is_none(), "oldest entry evicted without touching recent ones");
+        assert!(cache.read(&second).is_some() && cache.read(&third).is_some());
+        let size: u64 = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().metadata().unwrap().len()).sum();
+        assert!(size <= cache.budget);
+        assert_eq!(cache.clear().unwrap(), 2);
+        assert_eq!(cache.clear().unwrap(), 0);
+        assert_eq!(std::fs::read(unrelated).unwrap(), b"leave me", "clear only removes managed cache entries");
+        #[cfg(unix)]
+        {
+            let outside = dir.join("outside");
+            std::fs::create_dir(&outside).unwrap();
+            let target = outside.join("valuable.sc");
+            std::fs::write(&target, b"keep this design").unwrap();
+            std::os::unix::fs::symlink(&target, &path).unwrap();
+            assert!(cache.read(&key).is_none());
+            assert!(cache.write(&key, &doc, &saved, &reply).is_err());
+            assert_eq!(std::fs::read(&target).unwrap(), b"keep this design");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// #17697 review: a pending import-cache write stays visible to every reader until it is
+    /// done, so a second reader that comes while the first waits waits too and reads the entry.
+    #[test]
+    fn every_reader_waits_for_a_pending_import_cache_write() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-import-pending-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let cache = ImportCache::new(dir.clone());
+        let body = native_geometry().bodies.remove(0);
+        let text = solidcraft_kernel::step_export_bodies(
+            &[solidcraft_kernel::ExportBody { body: &body, name: "Box".into(), color: None }],
+            &solidcraft_kernel::StepHeader::default(),
+        )
+        .unwrap();
+        let mut doc = Document::new("Box");
+        doc.add_feature(crate::step_import_feature(text.as_bytes(), "box.step").unwrap().kind, None).unwrap();
+        let mut model = solidcraft_doc::Model::new();
+        model.evaluate(&doc);
+        let saved = model.saved(&doc).unwrap();
+        let key = ImportCache::key(text.as_bytes(), "box.step", &json!({}));
+        let reply = json!({"content_sha256": digest(text.as_bytes())});
+        let path = dir.join(format!("{key}.sc"));
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        cache.write_after(key.clone(), doc, saved, reply.clone(), move |_| {
+            let _ = held.recv();
+            true
+        });
+        let waiting = |n: usize| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+            while ImportCache::waiting_for(&path) < n {
+                assert!(std::time::Instant::now() < deadline, "{n} readers never waited for the pending write");
+                std::thread::yield_now();
+            }
+        };
+        let read = || {
+            let (cache, key) = (cache.clone(), key.clone());
+            std::thread::spawn(move || cache.read(&key).map(|(_, _, reply)| reply))
+        };
+        let first = read();
+        waiting(1);
+        let second = read();
+        waiting(2);
+        release.send(()).unwrap();
+        assert_eq!(first.join().unwrap(), Some(reply.clone()));
+        assert_eq!(second.join().unwrap(), Some(reply));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn native_cache_mismatch_is_only_a_cache_miss() {
         let doc = document();
         let bytes = write_design_container_with_cache(&doc, DesignCompression::Fast, None, Some(&native_geometry())).unwrap();
@@ -1724,14 +2154,17 @@ mod tests {
             assert!(read_design_preview(&bytes).is_none());
             assert_eq!(crate::read_design(&bytes).unwrap().to_json(), doc.to_json());
         }
-        // A cache of the format before sketch-key sets (/4) or before the tap markings were
-        // written once (/8) is a miss, and so are records of those shapes (each state's keys or
-        // markings inline) under the current format: never misread.
+        // A cache of the format before sketch-key sets (/4), before the tap markings were written
+        // once (/8) or before the sheets made from surfaces were (/9) is a miss, and so are records
+        // of those shapes (each state's keys or markings inline) under the current format: never
+        // misread.
         let manifest: Value = serde_json::from_slice(&original["cache/model.json"]).unwrap();
         let mut older = manifest.clone();
         older["format"] = json!("solidcraft-model-cache/4");
         let mut before_markings = manifest.clone();
         before_markings["format"] = json!("solidcraft-model-cache/8");
+        let mut before_surface_sheets = manifest.clone();
+        before_surface_sheets["format"] = json!("solidcraft-model-cache/9");
         let mut markings_inline = manifest.clone();
         markings_inline["model"].as_object_mut().unwrap().remove("threads");
         let mut inline = manifest.clone();
@@ -1740,7 +2173,7 @@ mod tests {
         let state = model["states"][0].as_object_mut().unwrap();
         state.remove("sketch_key_set");
         state.insert("sketch_keys".into(), json!([]));
-        for manifest in [older, before_markings, markings_inline, inline] {
+        for manifest in [older, before_markings, before_surface_sheets, markings_inline, inline] {
             let mut entries = original.clone();
             entries.insert("cache/model.json".into(), serde_json::to_vec(&manifest).unwrap());
             let bytes = package(&entries);
@@ -1914,6 +2347,7 @@ mod tests {
                     step: "ISO-10303-21;\nEND-ISO-10303-21;".into(),
                     components: Vec::new(),
                     skip: Vec::new(),
+                    records: None,
                 },
                 None,
             )
@@ -1939,6 +2373,7 @@ mod tests {
             visible: true,
             locked: false,
             component: 0,
+            anchor: None,
         });
         doc
     }
@@ -1995,6 +2430,124 @@ mod tests {
         let said = &opened.newer_file.as_ref().unwrap().not_understood;
         assert!(said.iter().any(|what| what.contains("unsupported mesh blob version")), "{said:?}");
         assert_eq!(parts(&write_design_container(&opened).unwrap())[&renamed], encoded);
+    }
+
+    /// A newer build's import whose records this build cannot read costs that feature, which is
+    /// kept as the file has it, not the whole design; so do records this build reads but with a
+    /// field it does not have (at the top or within a body), which saving its reading would drop.
+    /// Records this build wrote read whole.
+    #[test]
+    fn a_newer_builds_records_this_build_cannot_read_cost_only_their_import() {
+        use solidcore_record::Vec3;
+        let part = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
+        let brep = solidcraft_kernel::brep_record(&part).unwrap();
+        let face_origin = (0..brep.faces.len() as u64).collect();
+        let body = solidcraft_kernel::RecordBody {
+            name: "Block".into(),
+            path: Vec::new(),
+            instance: None,
+            color: None,
+            paint: None,
+            hidden: false,
+            placement: None,
+            brep: Some(brep),
+            face_origin,
+            sheet: false,
+            copy_of: None,
+            mesh: None,
+        };
+        let records =
+            Arc::new(solidcraft_kernel::ImportRecords { bodies: vec![body], tree: Vec::new(), warnings: Vec::new(), system: String::new() });
+        let mut doc = document();
+        let kind =
+            FeatureKind::Import { file: "block.FCStd".into(), step: "".into(), components: Vec::new(), skip: Vec::new(), records: Some(records) };
+        doc.add_feature(kind, Some("Imported block")).unwrap();
+        let entries = parts(&write_design_container(&doc).unwrap());
+        let mut metadata: Value = serde_json::from_slice(&entries["document.json"]).unwrap();
+        metadata["format"] = json!(solidcraft_doc::format::format_string(solidcraft_doc::format::FORMAT + 1));
+        let import = metadata["features"].as_array().unwrap().iter().find(|f| f.get("records_blob").is_some()).unwrap();
+        let old = import["records_blob"].as_str().unwrap().to_string();
+        let ours: Value = serde_json::from_slice(&entries[&old]).unwrap();
+        assert!(records_read_whole(&entries[&old]).is_ok(), "this build's own records");
+        let mut top = ours.clone();
+        top["future_metadata"] = json!({"keep": true});
+        let mut within = ours.clone();
+        within["bodies"][0]["future_field"] = json!(1);
+        // The newer records: a shape this build's records do not have, and this build's with a
+        // field more.
+        for newer in [br#"{"bodies":{"a later shape":true}}"#.to_vec(), serde_json::to_vec(&top).unwrap(), serde_json::to_vec(&within).unwrap()] {
+            let mut entries = entries.clone();
+            let mut metadata = metadata.clone();
+            let blob = format!("blobs/{}.records", digest(&newer));
+            let import = metadata["features"].as_array_mut().unwrap().iter_mut().find(|f| f.get("records_blob").is_some()).unwrap();
+            import["records_blob"] = json!(blob);
+            entries.remove(&old);
+            entries.insert(blob.clone(), newer.clone());
+            entries.insert("document.json".into(), serde_json::to_vec(&metadata).unwrap());
+            let opened = crate::read_design(&package(&entries)).unwrap();
+            let said = &opened.newer_file.as_ref().unwrap().not_understood;
+            assert!(said.iter().any(|what| what.contains("Imported block")), "{said:?}");
+            assert_eq!(opened.features.len(), doc.features.len());
+            assert_eq!(parts(&write_design_container(&opened).unwrap())[&blob], newer, "the records are kept as the file has them");
+        }
+        // The same records written inline, with no part of their own, are kept as the file has
+        // them too.
+        for newer in [top, within] {
+            let mut entries = entries.clone();
+            let mut metadata = metadata.clone();
+            let import = metadata["features"].as_array_mut().unwrap().iter_mut().find(|f| f.get("records_blob").is_some()).unwrap();
+            import.as_object_mut().unwrap().remove("records_blob");
+            import["records"] = newer.clone();
+            entries.remove(&old);
+            entries.insert("document.json".into(), serde_json::to_vec(&metadata).unwrap());
+            let opened = crate::read_design(&package(&entries)).unwrap();
+            let said = &opened.newer_file.as_ref().unwrap().not_understood;
+            assert!(said.iter().any(|what| what.contains("Imported block")), "{said:?}");
+            let saved: Value = serde_json::from_slice(&parts(&write_design_container(&opened).unwrap())["document.json"]).unwrap();
+            let import = saved["features"].as_array().unwrap().iter().find(|f| f.get("records").is_some_and(|r| !r.is_null())).unwrap();
+            assert_eq!(import["records"], newer, "the inline records are kept as the file has them");
+        }
+    }
+
+    /// Plugin data under `plugins/<plugin-id>/` opens and saves back byte for byte with no plugin
+    /// installed, in a container and in a plain JSON design; a design without any has no
+    /// `plugins/` part, and a part that is not a plugin data name is not kept.
+    #[test]
+    fn plugin_data_round_trips_untouched_without_the_plugin() {
+        let doc = document();
+        let without = parts(&write_design_container(&doc).unwrap());
+        assert!(without.keys().all(|name| !name.starts_with("plugins/")));
+        assert!(crate::read_design(&package(&without)).unwrap().plugin_data.is_empty());
+
+        let mut entries = without.clone();
+        let binary: Vec<u8> = (0..=255).collect();
+        entries.insert("plugins/gear-maker/state.json".into(), br#"{"teeth":24}"#.to_vec());
+        entries.insert("plugins/gear-maker/cache/table.bin".into(), binary.clone());
+        entries.insert("plugins/other-tool/notes.txt".into(), b"kept".to_vec());
+        entries.insert("plugins/Bad_ID/x".into(), b"no".to_vec());
+        entries.insert("plugins/gear-maker/.hidden".into(), b"no".to_vec());
+        // A name that climbs out (`plugins/../x`) is refused by the container reader itself.
+        let mut climbing = entries.clone();
+        climbing.insert("plugins/../escape".into(), b"no".to_vec());
+        assert!(crate::read_design(&package(&climbing)).is_err());
+        let opened = crate::read_design(&package(&entries)).unwrap();
+        assert_eq!(opened.features, doc.features);
+        assert_eq!(opened.plugin_data.len(), 3, "{:?}", opened.plugin_data.keys().collect::<Vec<_>>());
+
+        let resaved = parts(&write_design_container(&opened).unwrap());
+        assert_eq!(resaved["plugins/gear-maker/state.json"], br#"{"teeth":24}"#);
+        assert_eq!(resaved["plugins/gear-maker/cache/table.bin"], binary);
+        assert_eq!(resaved["plugins/other-tool/notes.txt"], b"kept");
+        assert_eq!(resaved.keys().filter(|name| name.starts_with("plugins/")).count(), 3);
+        let metadata: Value = serde_json::from_slice(&resaved["document.json"]).unwrap();
+        assert!(metadata.get("plugin_data").is_none(), "the parts stand beside the design, not inside it");
+        assert_eq!(crate::read_design(&package(&resaved)).unwrap(), opened);
+
+        // A plain JSON design carries the same data, and a container made from it has the parts.
+        let json = opened.to_json();
+        let from_json = Document::from_json(&json).unwrap();
+        assert_eq!(from_json.plugin_data, opened.plugin_data);
+        assert_eq!(parts(&write_design_container(&from_json).unwrap())["plugins/gear-maker/cache/table.bin"], binary);
     }
 
     /// A newer build's point cloud with numbers, an edge and a face (#14572): a field this build
@@ -2468,19 +3021,6 @@ mod tests {
         check_step_importable(&step).unwrap_or_else(|e| panic!("a STEP within the import limit is refused: {e}"));
     }
 
-    /// #3221: a STEP that no design file may hold is refused with a clear message, when the
-    /// design is saved: the import limit governs the import and the design file limit governs
-    /// the design (#2721).
-    #[test]
-    fn step_that_cannot_be_saved_even_compressed_is_refused_when_the_design_is_saved() {
-        let step = padded_step(crate::MAX_DESIGN_BYTES + (80 << 20), true);
-        let mut doc = Document::new("Noisy import");
-        doc.add_feature(FeatureKind::Import { file: "noisy.step".into(), step: step.into(), components: Vec::new(), skip: Vec::new() }, None)
-            .unwrap();
-        let message = write_design_container(&doc).err().unwrap().to_string();
-        assert!(message.contains("the design would be") && message.contains("a design file may hold"), "{message}");
-    }
-
     #[test]
     fn designs_with_uncompressed_step_sources_still_open() {
         // Saves before #3221 stored the STEP source without compression.
@@ -2502,7 +3042,11 @@ mod tests {
         // 64 MiB that deflate to a few hundred kilobytes, declared as a 1 KiB STEP source.
         let mut doc = Document::new("Bomb");
         let step = format!("ISO-10303-21;{}", " ".repeat(64 << 20));
-        doc.add_feature(FeatureKind::Import { file: "bomb.step".into(), step: step.into(), components: Vec::new(), skip: Vec::new() }, None).unwrap();
+        doc.add_feature(
+            FeatureKind::Import { file: "bomb.step".into(), step: step.into(), components: Vec::new(), skip: Vec::new(), records: None },
+            None,
+        )
+        .unwrap();
         let honest = write_design_container(&doc).unwrap();
         assert!(honest.len() < 1 << 20);
         let central = honest.windows(4).position(|v| v == b"PK\x01\x02").unwrap();
@@ -2818,8 +3362,11 @@ mod tests {
             .collect();
         let step = solidcraft_kernel::step_export(&bodies.iter().collect::<Vec<_>>(), "SolidCraft storage benchmark").unwrap();
         let mut doc = Document::new("Generated STEP benchmark");
-        doc.add_feature(FeatureKind::Import { file: "generated.step".into(), step: step.into(), components: Vec::new(), skip: Vec::new() }, None)
-            .unwrap();
+        doc.add_feature(
+            FeatureKind::Import { file: "generated.step".into(), step: step.into(), components: Vec::new(), skip: Vec::new(), records: None },
+            None,
+        )
+        .unwrap();
         measure_storage(&doc, "step");
     }
 

@@ -110,7 +110,7 @@ mod tests {
         for command in &specs {
             if let Some(candidate) = solidcraft_engine::cmd::drawing_pending_icon(command.id) {
                 assert!(command.planned.is_some(), "{} must remain explicitly planned", command.id);
-                assert_eq!(command.icon, PLACEHOLDER, "{} artwork awaits owner approval", command.id);
+                assert_eq!(command.icon, candidate, "{} uses its Drawing artwork", command.id);
                 assert!(!resolve(candidate).placeholder, "{}: missing review draft {candidate}", command.id);
             } else {
                 assert!(!resolve(command.icon).placeholder, "{}: {}", command.id, command.icon);
@@ -139,7 +139,7 @@ mod tests {
                 }
             }
         }
-        assert_eq!(candidates.len(), 21);
+        assert_eq!(candidates.len(), 45);
     }
 
     #[test]

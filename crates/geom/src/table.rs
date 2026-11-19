@@ -112,14 +112,27 @@ pub enum Heading {
     Bottom,
 }
 
-/// Which rows are shown: those of the kind `only` names, whose cells contain every text filter.
+/// Which rows are shown: those of the kind `only` names, ballooned where `ballooned` says, whose cells
+/// contain every text filter.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Filter {
     #[serde(default)]
     pub only: Option<Only>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ballooned: Option<Ballooned>,
     #[serde(default)]
     pub text: Vec<TextFilter>,
+}
+
+/// Where a row's balloons are counted ([`BALLOONED`]): a list of one sheet of a set shows what that sheet numbers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Ballooned {
+    /// On the table's sheet.
+    Sheet,
+    /// Anywhere in the drawing.
+    Drawing,
 }
 
 /// One kind of row.
@@ -422,7 +435,9 @@ impl Table {
             Some(Only::Purchased) => row.purchased,
         };
         let mut shown = Vec::new();
-        for row in rows.iter().filter(|row| kind(row)) {
+        // A row's ballooned count is worked out in the filter's scope, so over 0 is ballooned there.
+        let ballooned = |row: &Row| row.fields.get(BALLOONED).and_then(|n| n.parse::<usize>().ok()).is_some_and(|n| n > 0);
+        for row in rows.iter().filter(|row| kind(row) && (self.filter.ballooned.is_none() || ballooned(row))) {
             let mut cells = Vec::with_capacity(self.columns.len());
             for column in &self.columns {
                 let parts = || {

@@ -26,16 +26,13 @@ fn sphere(n: u32) -> Arc<Mesh> {
     Arc::new(m)
 }
 
-/// A large mesh's levels are made once, on a worker: asked for, `None` comes back at once and
-/// the work starts; when done, the generation moves on and the levels come back, coarser and
-/// coarser, each with its error. A small mesh gets none.
+/// Every mesh's levels are made once, on a worker, whatever its size: asked for, `None` comes
+/// back at once and the work starts; when done, the generation moves on and the levels come back,
+/// coarser and coarser, each with its error.
 #[test]
-fn a_large_meshs_levels_are_made_once_on_a_worker() {
+fn a_meshs_levels_are_made_once_on_a_worker() {
     let lods = MeshLods::default();
-    assert!(lods.levels(&sphere(20)).is_none(), "small: none");
-    assert!(!lods.busy());
     let mesh = sphere(110);
-    assert!(mesh.triangles.len() >= MIN_TRIANGLES);
     let before = lods.generation();
     assert!(lods.levels(&mesh).is_none(), "not made in the asking frame");
     let began = std::time::Instant::now();
@@ -46,15 +43,19 @@ fn a_large_meshs_levels_are_made_once_on_a_worker() {
         assert!(began.elapsed() < std::time::Duration::from_secs(60), "made on a worker");
         std::thread::sleep(std::time::Duration::from_millis(5));
     };
+    // The worker stores the levels before it retires: wait for that too.
+    while lods.busy() {
+        assert!(began.elapsed() < std::time::Duration::from_secs(60), "the worker retires");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
     assert_ne!(lods.generation(), before);
-    assert!(!lods.busy());
-    // A quarter and a sixteenth (a sixty-fourth would be under `MIN_LEVEL`).
-    assert_eq!(levels.len(), 2, "{} triangles", mesh.triangles.len());
+    // A quarter, a sixteenth and a sixty-fourth.
+    assert_eq!(levels.len(), 3, "{} triangles", mesh.triangles.len());
     let mut last = (mesh.triangles.len(), 0.0f32);
     for (tris, error) in levels.iter() {
         let n = tris.indices.len() / 3;
         assert!(n * 3 <= last.0, "{n} after {}", last.0);
-        assert!(*error >= last.1 && *error < 2.0, "error {error}");
+        assert!(*error >= last.1 && *error < 6.0, "error {error}");
         assert!(tris.flat);
         last = (n, *error);
     }
@@ -62,4 +63,43 @@ fn a_large_meshs_levels_are_made_once_on_a_worker() {
     // Let go when no longer drawn.
     lods.retain(&HashSet::new());
     assert!(lods.levels(&mesh).is_none(), "made again when asked again");
+}
+
+/// Small meshes get levels too, coarser than a level of a large mesh went before, each with its
+/// measured error (which decides where it is drawn); a mesh that cannot simplify gets none.
+/// Requests made while the workers are busy wait their turn, and the viewport is told once per
+/// worker when the queue is empty, not once per mesh.
+#[test]
+fn every_mesh_gets_levels_whatever_its_size() {
+    let lods = MeshLods::default();
+    let small: Vec<Arc<Mesh>> = (0..5).map(|k| sphere(8 + k)).collect();
+    // One triangle: nothing to simplify.
+    let single = Arc::new(Mesh {
+        positions: vec![solidcore_record::Vec3::ZERO, solidcore_record::Vec3::X, solidcore_record::Vec3::Y],
+        normals: vec![solidcore_record::Vec3::Z; 3],
+        triangles: vec![[0, 1, 2]],
+        ..Default::default()
+    });
+    let before = lods.generation();
+    // Queued under one lock, so no worker starts on the queue before it is full and none retires
+    // early: each worker retires once, when the queue is empty.
+    {
+        let mut state = lods.0.lock().unwrap();
+        for m in small.iter().chain([&single]) {
+            queue(&mut state, &lods.0, Arc::as_ptr(m) as usize, m);
+        }
+    }
+    let began = std::time::Instant::now();
+    while lods.busy() {
+        assert!(began.elapsed() < std::time::Duration::from_secs(60), "made on the workers");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let after = lods.generation();
+    assert!(after > before && after - before <= 2, "told once per worker, not per mesh");
+    for m in &small {
+        let levels = lods.levels(m).expect("made, all of them, though more were asked than workers");
+        assert!(!levels.is_empty(), "{} triangles", m.triangles.len());
+        assert!(levels.windows(2).all(|w| w[1].1 >= w[0].1), "errors grow with each level");
+    }
+    assert!(lods.levels(&single).expect("made").is_empty(), "a single triangle has no coarser copy");
 }

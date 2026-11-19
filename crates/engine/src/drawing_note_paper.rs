@@ -4,7 +4,8 @@
 //! from where each thing it points at is now to its text, ending in a dimension's arrowhead, with a
 //! landing on the side of the text it comes from: drawn once on each side, where the other leaders
 //! from that side meet it. A lost reference has no leader; the text stays where it is. A note on a view is centred on the view, as the view's lines are, and the scene moves it to
-//! the view's centre; one on a sheet sits from the sheet's corner.
+//! the view's centre; one on a sheet sits from the sheet's corner. A view's label is set the same way,
+//! without a leader ([`label_group`]).
 
 use solidcore_record::Vec2;
 use solidcraft_doc::drawing::note::Note;
@@ -12,10 +13,7 @@ use solidcraft_geom::paper::annotate::{LANDING_PER_LINE_WIDTH, Leader};
 use solidcraft_geom::paper::{Group, Item, ObjectKind};
 use solidcraft_sketch::PaperFonts;
 
-use crate::drawing_dimension_paper::{ARROW, OnPaper, TEXT_MM, Text, placed};
-
-/// The gap between a note's text and its leader's end.
-const GAP_MM: f64 = 1.0;
+use crate::drawing_dimension_paper::{ARROW, GAP_MM, Layout, OnPaper, TEXT_MM, Text, placed};
 
 /// `note`, reading `text` (its content with its fields read), at its place (from its sheet's corner,
 /// or from its view's centre as its view's lines are), in lines `line_mm` wide, a leader ending at
@@ -35,7 +33,25 @@ pub fn note_group(note: &Note, text: &str, tips: &[Vec2], line_mm: f64, letterin
         }
     }
     items.extend(placed(text.runs, text.half, cap_mm, centre, Vec2::X));
-    OnPaper { group: Group { object: note.id, kind: ObjectKind::Note, items }, fonts: text.fonts, why, pending: text.pending }
+    OnPaper {
+        group: Group { object: note.id, kind: ObjectKind::Note, items },
+        fonts: text.fonts,
+        why,
+        pending: text.pending,
+        layout: Layout::default(),
+    }
+}
+
+/// The height of a view label's capitals: the ISO 3098 height after a dimension's.
+const LABEL_MM: f64 = 5.0;
+
+/// View `view`'s label reading `text` (#13044), set as a note's text is, its capitals [`LABEL_MM`]
+/// high, centred on the origin for the scene to place by its view: its group, and half its size.
+pub fn label_group(view: u64, text: &str, lettering: &PaperFonts) -> (OnPaper, Vec2) {
+    let text = Text::set(Some(text), LABEL_MM, lettering);
+    let items = placed(text.runs, text.half, LABEL_MM, Vec2::ZERO, Vec2::X).collect();
+    let group = Group { object: view, kind: ObjectKind::ViewLabel, items };
+    (OnPaper { group, fonts: text.fonts, why: text.why, pending: text.pending, layout: Layout::default() }, text.half)
 }
 
 /// A leader from `tip` to the text `half` in size round `centre`. From beside the text it ends with a

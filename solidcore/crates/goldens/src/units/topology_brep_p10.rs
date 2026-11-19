@@ -449,7 +449,10 @@ fn rust(i: &Inputs) -> Result<Dump, HarnessError> {
         healer_enabled,
     };
     match make_topology_from_data(&mut k, &mut b, &mut data, &mut env, options) {
-        Ok(()) => out.push(Item::Int(0)),
+        Ok(()) => {
+            crate::tolsub::after_read(&mut b);
+            out.push(Item::Int(0));
+        }
         Err(e @ SolidError::Unported { .. }) => return Ok(Err(e)),
         Err(e) => {
             out.push(Item::Int(status(&e)));
@@ -635,6 +638,7 @@ fn rust(i: &Inputs) -> Result<Dump, HarnessError> {
                     Vec::new()
                 }
             };
+            crate::trim_hook::observe(&mut b);
             let g2 = Graph::walk(&b).map_err(|e| harness(e.to_string()))?;
             out.push(Item::Int(faces.len() as i64));
             for f in faces {

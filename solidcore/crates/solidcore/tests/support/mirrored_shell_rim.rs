@@ -15,6 +15,9 @@ use solidcore::topology::loopuse;
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::{Brep, Kernel, Vec3};
 
+#[path = "solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 /// Load the original captured operand with the rig's fix set.
 pub fn input() -> (Kernel, Brep) {
     input_from_bytes(include_bytes!("../data/issue_2903_shelled_box_rim.smb"))
@@ -29,12 +32,10 @@ pub fn edited_input() -> (Kernel, Brep) {
 
 /// Read a fresh operand and enable definition logging without preparing its geometry.
 fn input_from_bytes(bytes: &[u8]) -> (Kernel, Brep) {
-    let mut k = Kernel::default();
-    let fixes: Vec<String> =
-        serde_json::from_str(include_str!("../kernel_cases/fixes.json")).unwrap();
-    for name in fixes {
-        *k.fixes.flag_mut(&name).unwrap() = true;
-    }
+    let mut k = Kernel {
+        fixes: solidcraft_fixes::solidcraft_fixes(),
+        ..Kernel::default()
+    };
     k.blend_face_log = Some(BlendFaceLog::default());
     let mut attributes = AttributeStore::default();
     let mut records = NotifyRecords::new();

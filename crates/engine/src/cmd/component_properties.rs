@@ -140,21 +140,19 @@ struct Placed {
 /// and the box: the body's own measurement (worked out once and shared by every placement of it,
 /// [`solidcraft_doc::ModelBody::measure`]) is reused, where measuring each placed copy again took
 /// three fine tessellations per copy and made Properties of a large assembly take minutes
-/// (#8706). A placement that turns the body off the axes takes its box from the body's mesh
-/// placed there (shared with the display). Any other placement (scaled or mirrored) is measured
-/// as placed, as before.
+/// (#8706). A placement that turns the body off the axes takes its box from the body's exact
+/// bounds placed there. Any other placement (scaled or mirrored) is measured as placed, as before.
 fn measure_placed(body: &solidcraft_doc::ModelBody, transform: Mat) -> Result<Placed> {
     if proper_rotation(&transform) {
         let m = body.measure()?;
         let bbox = if square_to_axes(&transform) {
             placed_box(&transform, &m.bbox)
+        } else if let Ok(placed) = solidcraft_kernel::transform_matrix(&body.body, transform)
+            && let Ok(b) = placed.exact_bounds()
+        {
+            b
         } else {
-            let mesh = body.mesh();
-            let mut b = Aabb3::EMPTY;
-            for p in &mesh.positions {
-                b.add(solidcraft_doc::apply_point(&transform, *p));
-            }
-            if b.is_empty() { placed_box(&transform, &m.bbox) } else { b }
+            placed_box(&transform, &m.bbox)
         };
         return Ok(Placed {
             volume: m.volume,
@@ -223,7 +221,7 @@ fn measure(s: &Session, doc: &Document, selected: &[u64], descendants: bool, abo
     let spreads = solidcraft_kernel::map_on_threads(&spread_bodies, 16, |&i| {
         let body = state.bodies.get(i)?;
         let mut measured = solidcraft_io::mass_properties(&body.body).ok().flatten()?;
-        if let Some(sheet) = state.sheets.iter().find(|sheet| sheet.body == body.definition_name()) {
+        if let Some(sheet) = state.surface_sheets.iter().find(|sheet| sheet.body == body.definition_name()) {
             sheet.correct_perforation_mass_properties(&mut measured, &solidcraft_doc::IDENTITY).ok()?;
         }
         measured.gyration()
@@ -253,7 +251,9 @@ fn measure(s: &Session, doc: &Document, selected: &[u64], descendants: bool, abo
             // The volume the bill of materials weighs too, measured once for the model; the area,
             // the centre, the box and the counts are the placed body's.
             let mut body_volume = body.volume().map_or(measured.volume, |v| v * solidcraft_doc::mat_volume_scale(&transform));
-            if let Some(sheet) = state.sheets.iter().find(|sheet| sheet.body == body.definition_name() && !sheet.perforations.is_empty()) {
+            // A sheet's perforation fields (#732): their holes, which the body does not have,
+            // come off what it measures.
+            if let Some(sheet) = state.surface_sheets.iter().find(|sheet| sheet.body == body.definition_name() && !sheet.perforations.is_empty()) {
                 let mut corrected = body.measure()?;
                 corrected.volume = measured.volume;
                 corrected.area = measured.area;
