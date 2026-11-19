@@ -764,6 +764,7 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
             command.as_str(),
             "sketch.redefine"
                 | "sketch.mirror"
+                | "sketch.move"
                 | "sketch.pattern.rectangular"
                 | "sketch.pattern.circular"
                 | "sketch.offset"

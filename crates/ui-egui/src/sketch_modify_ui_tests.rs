@@ -620,7 +620,10 @@ fn the_move_window_previews_where_the_entities_will_land() {
     // The preview draws the rectangle where the move will leave it: 30 mm further along x.
     let preview = h.app.preview.sketches.first().expect("the move is previewed");
     let xs: Vec<f64> = preview.sketch.sketch.points.iter().map(|p| p.pos.x).collect();
-    assert!(xs.iter().any(|x| (x - 40.0).abs() < 1e-6) && xs.iter().any(|x| (x - 60.0).abs() < 1e-6), "the preview shows the rectangle 30 mm along x: {xs:?}");
+    assert!(
+        xs.iter().any(|x| (x - 40.0).abs() < 1e-6) && xs.iter().any(|x| (x - 60.0).abs() < 1e-6),
+        "the preview shows the rectangle 30 mm along x: {xs:?}"
+    );
     // The design itself is untouched until OK: the rectangle is still where it was drawn.
     let now = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
     assert_eq!(now.curves.len(), 4, "the preview adds no curve");
