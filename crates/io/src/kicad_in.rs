@@ -347,6 +347,14 @@ pub fn kicad_board_thickness(bytes: &[u8]) -> Option<f64> {
     None
 }
 
+/// The thickness of the board a KiCad project or PCB path names, read from its file without
+/// building it (the import options start at it; `doc.open` uses it when given no `thickness`).
+pub fn kicad_file_thickness(path: &str) -> Option<f64> {
+    let board = kicad_board_path(Path::new(path)).ok()?;
+    let bytes = crate::vfs::read(&board.to_string_lossy(), MAX_KICAD_BYTES).ok()?;
+    kicad_board_thickness(&bytes)
+}
+
 /// Resolve a selected KiCad project to its same-stem board, or keep a directly selected board.
 pub fn kicad_board_path(path: &Path) -> Result<PathBuf> {
     match path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {

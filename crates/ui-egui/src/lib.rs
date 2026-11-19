@@ -130,7 +130,6 @@ pub mod joint_drag;
 pub(crate) mod joint_handles;
 pub(crate) mod joint_symbols;
 pub mod keymap;
-pub mod kicad_import_dialog;
 #[cfg(test)]
 mod kit_gallery_tests;
 #[cfg(test)]
@@ -750,8 +749,6 @@ pub struct SolveApp {
     pub design_properties: Option<design_properties::DesignProperties>,
     /// The Sketch report window (`sketch.inspect` from the ribbon), when open.
     pub sketch_report: Option<sketch_report::SketchReport>,
-    /// The KiCad import options window, when a board is chosen to open.
-    pub kicad_import: Option<kicad_import_dialog::Dialog>,
     /// The Bill of Materials window, when open.
     pub bom: Option<bom_panel::BomPanel>,
     material_card_review: Option<material_card_review::ReviewWindow>,
@@ -1142,7 +1139,6 @@ impl SolveApp {
             params: None,
             design_properties: None,
             sketch_report: None,
-            kicad_import: None,
             bom: None,
             material_card_review: None,
             menu: context_menu::MenuState::default(),
@@ -2293,14 +2289,12 @@ impl SolveApp {
 
     /// Insert Design's file picker: another design becomes a linked component; a STEP or mesh
     /// file picked here is inserted the way Insert STEP or Insert Mesh would (#1240), and a KiCad
-    /// board asks for its import settings.
+    /// board asks for its import options and opens as a design of its own (`import_options`).
     pub(crate) fn pick_design_to_insert(&mut self) {
         self.pick_open(|app, path| {
             let Some(path) = path else { return };
             if solidcraft_engine::io::is_design_path(&path) {
                 app.insert_design_async(&path, None);
-            } else if solidcraft_engine::io::is_kicad_path(&path) {
-                kicad_import_dialog::open(app, &path);
             } else {
                 app.insert_path_async(&path);
             }
@@ -3805,13 +3799,10 @@ impl SolveApp {
         });
     }
 
-    /// Open a chosen file: a KiCad board asks for its import options first, anything else opens.
+    /// Open a chosen file; one whose format has import options (a STEP file, a KiCad board) asks
+    /// them first (`import_options`).
     pub fn open_chosen_file(&mut self, path: &str) {
-        if solidcraft_engine::io::is_kicad_path(path) {
-            kicad_import_dialog::open(self, path);
-        } else {
-            self.open_path_async(path);
-        }
+        self.open_path_async(path);
     }
     pub fn insert_path_async(&mut self, path: &str) {
         file_load::begin(self, path, true);
@@ -3882,8 +3873,6 @@ impl SolveApp {
             || solidcraft_engine::cmd::drawing_import_command(path).is_some();
         if import && (!self.session.doc.features.is_empty() || !self.session.doc.point_clouds.is_empty()) {
             self.insert_path_async(path);
-        } else if solidcraft_engine::io::is_kicad_path(path) {
-            self.open_chosen_file(path);
         } else {
             self.open_path_async(path);
         }
@@ -4664,7 +4653,6 @@ impl SolveApp {
         }
         issue_report::CadInput::block(self, ui, report_input);
         file_load::show(self, ui.ctx());
-        kicad_import_dialog::show(self, ui.ctx());
         // A file's import options are asked on Home too, where Open and Import start.
         import_options::show(self, ui.ctx());
         open_meshing::show(self, ui.ctx());

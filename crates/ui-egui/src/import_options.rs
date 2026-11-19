@@ -14,9 +14,13 @@
 //! stand-up offer ([`crate::stand_up::offered_for`]) sees how its bodies lie, gives the exporter's
 //! reason, remembers an answer per file and turns the whole component in one undoable step, while
 //! an `up` sent with the import would skip that offer: asking it before the file is read, without
-//! seeing it, would ask the same question twice in two ways. A KiCad board keeps its own window
-//! (`crate::kicad_import_dialog`), which shows the board's thickness and colour too and draws the
-//! table's other KiCad options with [`option_rows`].
+//! seeing it, would ask the same question twice in two ways.
+//!
+//! A KiCad board is asked here too: the components, the copper, the silkscreen, the board's colour
+//! and thickness (starting at the board's own, read from its file) and whether the board is a solid
+//! or a mesh. A board always asks, whatever the preference says: it had its own window before the
+//! preference existed, and turning the preference off must not take its choices away. A board
+//! chosen to insert opens as a design of its own, as it always has (`doc.open` reads boards).
 //!
 //! Only interactive entry points ask ([`crate::file_load::begin`]): a script, the control channel
 //! or MCP calls the commands with their own options and never meets this dialog.
@@ -40,6 +44,8 @@ pub enum Choice {
     Choice(usize),
     Text(String),
     Number(f64),
+    /// sRGB.
+    Color([u8; 3]),
 }
 
 /// One option of the format, its value now and the value the import would use without the dialog.
@@ -61,7 +67,8 @@ pub struct Values {
 impl Values {
     /// The options of the format of `path` shown here, leaving out `skip` and the options asked
     /// elsewhere, each at the value the import would use: what `preferred` names for it, else the
-    /// table's default. `None` when the format has no import row.
+    /// file's own value (a KiCad board's thickness), else the table's default. `None` when the
+    /// format has no import row.
     pub fn for_path(path: &str, skip: &[&str], preferred: &Map<String, Value>) -> Option<Values> {
         let spec = formats::import_for_path(path)?;
         let import = spec.import.as_ref()?;
@@ -70,7 +77,7 @@ impl Values {
             .iter()
             .filter(|o| !asked_elsewhere(path, o.param) && !skip.contains(&o.param))
             .map(|o| {
-                let initial = start(o, preferred);
+                let initial = start(o, path, preferred);
                 Field { param: o.param, value: initial.clone(), initial }
             })
             .collect();
@@ -92,14 +99,16 @@ impl Values {
         out
     }
 
-    /// [`Self::params`], plus each shown value the import would no longer use by itself now that
-    /// `preferred` (the preferences when the answer comes) names another: a preference changed
-    /// while the question waited (a FreeCAD file's history) does not override what was shown.
-    pub fn params_now(&self, preferred: &Map<String, Value>) -> Map<String, Value> {
+    /// [`Self::params`], plus each shown value the import of `path` would no longer use by itself
+    /// now that `preferred` (the preferences when the answer comes) names another: a preference
+    /// changed while the question waited (a FreeCAD file's history) does not override what was
+    /// shown. A value read from the file (a board's thickness) is the import's own, so an
+    /// untouched board still sends nothing.
+    pub fn params_now(&self, path: &str, preferred: &Map<String, Value>) -> Map<String, Value> {
         let mut out = self.params();
         for f in &self.fields {
             if let Some(spec) = self.spec(f.param)
-                && start(spec, preferred) != f.value
+                && start(spec, path, preferred) != f.value
                 && let Some(v) = to_json(spec, &f.value)
             {
                 out.insert(f.param.into(), v);
@@ -113,9 +122,10 @@ impl Values {
     }
 }
 
-/// The value the import uses for an option by itself: what `preferred` names, else the table's default.
-fn start(o: &OptionSpec, preferred: &Map<String, Value>) -> Choice {
-    preferred.get(o.param).and_then(|v| parse(o, v)).unwrap_or_else(|| default(o))
+/// The value the import of `path` uses for an option by itself: what `preferred` names, else the
+/// file's own value (a KiCad board's thickness), else the table's default.
+fn start(o: &OptionSpec, path: &str, preferred: &Map<String, Value>) -> Choice {
+    preferred.get(o.param).and_then(|v| parse(o, v)).or_else(|| from_file(o, path)).unwrap_or_else(|| default(o))
 }
 
 /// The table's default for an option.
@@ -125,7 +135,29 @@ fn default(o: &OptionSpec) -> Choice {
         OptionKind::Choice { choices, default } => Choice::Choice((*default).min(choices.len().saturating_sub(1))),
         OptionKind::Text { default, .. } => Choice::Text((*default).to_string()),
         OptionKind::Number { default, .. } => Choice::Number(*default),
+        OptionKind::Color { default } => Choice::Color(*default),
     }
+}
+
+/// The option's value in the file at `path`, for an option the command reads from the file when
+/// it is not given one; `None` when the file names none (or cannot be read).
+fn from_file(o: &OptionSpec, path: &str) -> Option<Choice> {
+    match &o.kind {
+        OptionKind::Number { min, max, from_file: Some(read), .. } => {
+            read(path).filter(|n| n.is_finite() && (*min..=*max).contains(n)).map(Choice::Number)
+        }
+        _ => None,
+    }
+}
+
+/// `#rrggbb` (or `rrggbb`) as sRGB bytes.
+fn parse_hex(s: &str) -> Option<[u8; 3]> {
+    let hex = s.trim().trim_start_matches('#');
+    if hex.len() != 6 || !hex.is_ascii() {
+        return None;
+    }
+    let byte = |i: usize| hex.get(i..i + 2).and_then(|h| u8::from_str_radix(h, 16).ok());
+    Some([byte(0)?, byte(2)?, byte(4)?])
 }
 
 /// A command parameter's value as the option's row holds it; `None` when it is not one of its values.
@@ -138,6 +170,7 @@ fn parse(o: &OptionSpec, v: &Value) -> Option<Choice> {
         }
         OptionKind::Text { .. } => v.as_str().map(|s| Choice::Text(s.to_string())),
         OptionKind::Number { min, max, .. } => v.as_f64().filter(|n| n.is_finite() && (*min..=*max).contains(n)).map(Choice::Number),
+        OptionKind::Color { .. } => v.as_str().and_then(parse_hex).map(Choice::Color),
     }
 }
 
@@ -148,6 +181,7 @@ fn to_json(o: &OptionSpec, v: &Choice) -> Option<Value> {
         (OptionKind::Choice { choices, .. }, Choice::Choice(i)) => choices.get(*i).map(|(value, _)| json!(value)),
         (OptionKind::Text { .. }, Choice::Text(s)) => Some(json!(s)),
         (OptionKind::Number { min, max, .. }, Choice::Number(n)) if n.is_finite() => Some(json!(n.clamp(*min, *max))),
+        (OptionKind::Color { .. }, Choice::Color([r, g, b])) => Some(json!(format!("#{r:02x}{g:02x}{b:02x}"))),
         _ => None,
     }
 }
@@ -175,6 +209,8 @@ pub fn option_rows(ui: &mut egui::Ui, values: &mut Values) {
                 let suffix = if unit.is_empty() { String::new() } else { format!(" {unit}") };
                 ui_kit::row(ui, spec.label, |ui| ui_kit::number_field(ui, n, *min..=*max, 0.1, &suffix))
             }
+            // The kit's colour button and its picker, as the Appearance dialog's.
+            (OptionKind::Color { .. }, Choice::Color(rgb)) => ui_kit::row(ui, spec.label, |ui| ui_kit::color_field(ui, rgb)),
             _ => continue,
         };
         crate::scenario::publish_handle(&handle, response.rect.center());
@@ -195,15 +231,13 @@ pub struct Ask {
 
 /// Ask for the import options of `path` before it is opened or inserted. Returns whether the file
 /// was held for the answer (the caller then stops: the dialog starts the import itself). A file
-/// whose format shows no options here, a KiCad board (its own window) and every file while the
-/// preference is off go on at once. A file asked while another waits (several dropped at once)
-/// waits its turn, and is asked once that one is answered.
+/// whose format shows no options here goes on at once, and so does every file but a KiCad board
+/// while the preference is off (see the module docs). A file asked while another waits (several
+/// dropped at once) waits its turn, and is asked once that one is answered.
 pub fn ask(app: &mut SolveApp, path: &str, insert: bool) -> bool {
-    if !app.preferences.ask_import_options {
-        return false;
-    }
-    let Some(spec) = formats::import_for_path(path) else { return false };
-    if spec.import.as_ref().is_none_or(|i| i.target == ImportTarget::Kicad) {
+    let Some(target) = formats::import_for_path(path).and_then(|f| f.import.as_ref()).map(|i| i.target) else { return false };
+    let board = target == ImportTarget::Kicad;
+    if !app.preferences.ask_import_options && !board {
         return false;
     }
     let preferred = file_load::preferred_options(app, path);
@@ -211,6 +245,8 @@ pub fn ask(app: &mut SolveApp, path: &str, insert: bool) -> bool {
     if values.fields.is_empty() {
         return false;
     }
+    // A board chosen to insert opens as a design of its own (see the module docs).
+    let insert = insert && !board;
     let tab = insert.then(|| app.docs.active_tab());
     let ask = Ask { path: path.into(), insert, values, tab };
     if app.import_options.is_some() {
@@ -227,7 +263,7 @@ pub fn ask(app: &mut SolveApp, path: &str, insert: bool) -> bool {
 fn request(app: &SolveApp, ask: &Ask) -> file_load::Request {
     let kind = if ask.insert { file_load::Kind::Insert } else { file_load::Kind::Open };
     let mut request = file_load::Request::new(&ask.path, kind);
-    request.options = ask.values.params_now(&file_load::preferred_options(app, &ask.path));
+    request.options = ask.values.params_now(&ask.path, &file_load::preferred_options(app, &ask.path));
     request.tab = ask.tab;
     request
 }
@@ -241,12 +277,22 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let title = solidcraft_ui_text::format(title_id, &[("format", format)]);
     let ok = solidcraft_ui_text::tr(ok);
     let cancel = solidcraft_ui_text::tr("ui.cancel");
+    // The window widens so its longest label (a KiCad board's copper) is not cut short: the rows'
+    // form publishes the width its label column needs beyond the design's (#10620), within the
+    // screen.
+    let t = solidcraft_theme::Tokens::get();
+    let grow = egui::Id::unique("sc_import_options_label_grow");
+    let extra = ctx.data(|d| d.get_temp::<f32>(grow)).unwrap_or(0.0);
+    let width = (t.form_card_width * 1.5 + extra).min((ctx.content_rect().width() - t.space_24 * 2.0).max(t.form_card_width));
     let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_import_options"), "import", &title)
         .actions(ok, cancel, None)
+        .cards(width / t.form_card_width)
         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
         .show(ctx, true, |ui| {
-            ui_kit::text(ui, &file, ui_kit::Text::Report("file", false));
-            option_rows(ui, &mut ask.values);
+            ui_kit::scope_grow(ui, grow, |ui| {
+                ui_kit::text(ui, &file, ui_kit::Text::Report("file", false));
+                option_rows(ui, &mut ask.values);
+            });
         });
     for (handle, key) in [("import_options:ok", "dialog:ok"), ("import_options:cancel", "dialog:cancel")] {
         if let Some(at) = crate::scenario::handle_at(key) {
@@ -303,8 +349,8 @@ mod tests {
             let v = Values::for_path(path, &[], &none).expect("imports");
             assert!(v.fields.iter().all(|f| f.param != "up"), "{path}: its up axis is the stand-up offer's");
         }
-        let board = Values::for_path("b.kicad_pcb", &["components", "copper", "silkscreen"], &none).unwrap();
-        assert_eq!(board.fields.iter().map(|f| f.param).collect::<Vec<_>>(), ["representation"]);
+        let board = Values::for_path("b.kicad_pcb", &["components", "copper", "silkscreen", "color"], &none).unwrap();
+        assert_eq!(board.fields.iter().map(|f| f.param).collect::<Vec<_>>(), ["thickness", "representation"], "`skip` leaves options out");
     }
 
     /// Every label and choice the dialog shows is in the catalogs, so it is translated.
@@ -574,12 +620,16 @@ mod tests {
     #[test]
     fn a_control_open_never_asks() {
         let path = step_file("control");
+        let board = board_file("control");
         let mut h = crate::scenario::Harness::new();
         let (tx, rx) = std::sync::mpsc::channel();
         h.app.control_rx = Some(rx);
-        for (command, params) in
-            [("doc.open", json!({"path": path.to_string_lossy()})), ("file.insert_step", json!({"path": path.to_string_lossy()}))]
-        {
+        for (command, params) in [
+            ("doc.open", json!({"path": path.to_string_lossy()})),
+            ("file.insert_step", json!({"path": path.to_string_lossy()})),
+            // A board, which always asks from the window, never asks a caller either.
+            ("doc.open", json!({"path": board.to_string_lossy(), "copper": "mesh"})),
+        ] {
             let (req, reply) = crate::control::ControlRequest::new("engine.execute", json!({"command": command, "params": params}));
             tx.send(req).unwrap();
             let mut answer = None;
@@ -595,5 +645,187 @@ mod tests {
             assert_eq!(answer["ok"], true, "{command}: {answer}");
         }
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
+        let _ = std::fs::remove_dir_all(board.parent().unwrap());
+    }
+
+    /// A KiCad board 2.2 mm thick, its own thickness, with a trace on the front copper.
+    fn board_file(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("solidcraft-import-options-{}-board-{name}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join(format!("{name}.kicad_pcb"));
+        std::fs::write(
+            &path,
+            r#"(kicad_pcb (version 20240108) (generator pcbnew)
+  (general (thickness 2.2))
+  (gr_rect (start -20 -20) (end 20 20) (stroke (width 0.1) (type default)) (fill none) (layer "Edge.Cuts"))
+  (segment (start -10 0) (end 10 0) (width 2) (layer "F.Cu") (net 0)))"#,
+        )
+        .unwrap();
+        path
+    }
+
+    /// A board's options are the table's KiCad row, each starting where `doc.open` does without
+    /// it (the thickness at the board's own), and each change is sent as that parameter.
+    #[test]
+    fn a_boards_options_start_at_the_import_defaults_and_send_each_change() {
+        let board = board_file("values");
+        let p = board.to_string_lossy();
+        let mut v = Values::for_path(&p, &[], &Map::new()).expect("a board imports");
+        let shown: Vec<(&str, Choice)> = v.fields.iter().map(|f| (f.param, f.initial.clone())).collect();
+        assert_eq!(
+            shown,
+            [
+                ("components", Choice::Bool(true)),
+                ("copper", Choice::Choice(1)),
+                ("silkscreen", Choice::Bool(true)),
+                ("color", Choice::Color([13, 84, 46])),
+                ("thickness", Choice::Number(2.2)),
+                ("representation", Choice::Choice(0)),
+            ],
+            "every option the old window had, and the board as a solid or a mesh"
+        );
+        assert!(v.params().is_empty(), "untouched, the board opens as `doc.open` opens it");
+        // At the answer, the thickness read from the board and the table's colour are still the
+        // import's own: an untouched board sends nothing.
+        assert!(v.params_now(&p, &Map::new()).is_empty(), "untouched, nothing is sent at the answer either");
+        // A project file finds its board; a board that cannot be read starts at the table's 1.6 mm.
+        let project = Values::for_path(&board.with_extension("kicad_pro").to_string_lossy(), &[], &Map::new()).unwrap();
+        assert_eq!(project.fields[4].initial, Choice::Number(2.2));
+        let missing = Values::for_path("missing.kicad_pcb", &[], &Map::new()).unwrap();
+        assert_eq!(missing.fields[4].initial, Choice::Number(1.6));
+
+        let changes = [Choice::Bool(false), Choice::Choice(2), Choice::Bool(false), Choice::Color([1, 2, 3]), Choice::Number(2.4), Choice::Choice(1)];
+        for (field, value) in v.fields.iter_mut().zip(changes) {
+            field.value = value;
+        }
+        assert_eq!(
+            Value::Object(v.params()),
+            json!({"components": false, "copper": "mesh", "silkscreen": false, "color": "#010203", "thickness": 2.4, "representation": "mesh"})
+        );
+        // The copper back at the overlay it started at is not sent again.
+        v.fields[1].value = Choice::Choice(1);
+        assert!(!v.params().contains_key("copper"));
+        let _ = std::fs::remove_dir_all(board.parent().unwrap());
+    }
+
+    /// Every way of opening a board from the window asks its options before anything is read, and
+    /// a board chosen to insert opens as a design of its own, as before. The preference that turns
+    /// the other formats' questions off leaves a board's alone.
+    #[test]
+    fn every_way_of_opening_a_board_asks_its_options() {
+        let check = |h: &mut crate::scenario::Harness, how: &str| {
+            h.frames(2);
+            let ask = h.app.import_options.clone().unwrap_or_else(|| panic!("{how} skipped the board's options"));
+            assert_eq!((ask.values.format, ask.insert, ask.tab), ("kicad", false, None), "{how}: a board opens as a design of its own");
+            assert!(!h.app.file_load.busy(), "{how} read the board before its options were chosen");
+        };
+        let mut h = crate::scenario::Harness::new();
+        h.app.open_chosen_file("board.kicad_pcb");
+        check(&mut h, "the Open picker");
+        let mut h = crate::scenario::Harness::new();
+        h.app.drop_path("board.kicad_pcb");
+        check(&mut h, "a drop");
+        // The Open command itself (the palette, a pinned button, `ui.start`).
+        let mut h = crate::scenario::Harness::new();
+        h.step(&json!({ "choose_file": "board.kicad_pcb" })).unwrap();
+        h.app.start("doc.open");
+        check(&mut h, "the Open command");
+        // The app bar's File > Open and Ctrl+O.
+        for by_menu in [true, false] {
+            let mut h = crate::scenario::Harness::new();
+            h.frames(2);
+            h.step(&json!({ "choose_file": "board.kicad_pcb" })).unwrap();
+            if by_menu {
+                h.step(&json!({ "click": { "handle": "appbar:file" } })).unwrap();
+                h.step(&json!({ "widget": "Open…" })).unwrap();
+            } else {
+                h.step(&json!({ "key": "O", "cmd": true })).unwrap();
+            }
+            check(&mut h, if by_menu { "the File menu" } else { "Ctrl+O" });
+        }
+        // Insert Design's picker, and an insert while the preference is off.
+        let mut h = crate::scenario::Harness::new();
+        h.step(&json!({ "choose_file": "board.kicad_pcb" })).unwrap();
+        h.app.pick_design_to_insert();
+        check(&mut h, "Insert Design");
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.ask_import_options = false;
+        h.app.insert_path_async("board.kicad_pcb");
+        check(&mut h, "an insert with the preference off");
+    }
+
+    /// The window shows every option at the board's values; Cancel reads nothing; the options
+    /// changed in it are `doc.open`'s, and the board comes in as `doc.open` with them makes it.
+    #[test]
+    fn a_board_opened_from_the_window_imports_as_doc_open_with_its_choices() {
+        let board = board_file("window");
+        let p = board.to_string_lossy().to_string();
+        let mut h = crate::scenario::Harness::new();
+        h.app.open_chosen_file(&p);
+        h.frames(4);
+        for label in [
+            "Include components",
+            "Copper (traces, vias, zones, pads)",
+            "Overlay on the board",
+            "Include silkscreen",
+            "Board colour",
+            "Board thickness",
+            "Board",
+            "Solid",
+        ] {
+            assert!(h.widget(label).is_some(), "`{label}` is missing");
+        }
+        // The window widens for its longest label: the copper's is drawn whole, not cut short.
+        let drawn = h
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.job.text.starts_with("Copper (") => Some(text.galley.job.text.to_string()),
+                _ => None,
+            })
+            .expect("the copper row drew its label");
+        assert!(drawn.contains("pads)") && !drawn.contains('…'), "the copper label is cut short: {drawn:?}");
+        for handle in ["components", "copper", "silkscreen", "color", "thickness", "representation"] {
+            assert!(crate::scenario::handle_at(&format!("import_options:{handle}")).is_some(), "no `{handle}` row");
+        }
+        assert_eq!(h.app.import_options.as_ref().unwrap().values.fields[4].value, Choice::Number(2.2), "the board's thickness");
+        h.step(&json!({"click": {"handle": "import_options:cancel"}})).unwrap();
+        h.frames(2);
+        assert!(h.app.import_options.is_none() && h.app.file_load.idle() && h.app.session.doc.features.is_empty(), "Cancel read the board");
+
+        h.app.open_chosen_file(&p);
+        h.frames(3);
+        h.step(&json!({"click": {"handle": "import_options:copper"}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click": {"handle": "dialog:Copper (traces, vias, zones, pads):Modelled"}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click": {"handle": "import_options:silkscreen"}})).unwrap();
+        h.frames(2);
+        // The colour picker and the number field are the kit's, tested there: set their values.
+        if let Some(ask) = h.app.import_options.as_mut() {
+            ask.values.fields[3].value = Choice::Color([200, 30, 30]);
+            ask.values.fields[4].value = Choice::Number(1.2);
+        }
+        h.frames(1);
+        let held = h.app.import_options.clone().expect("still open");
+        let params = request(&h.app, &held).options;
+        assert_eq!(Value::Object(params.clone()), json!({"copper": "mesh", "silkscreen": false, "color": "#c81e1e", "thickness": 1.2}));
+        h.step(&json!({"click": {"handle": "import_options:ok"}})).unwrap();
+        h.settle();
+        assert!(h.app.import_options.is_none() && !h.app.file_load.busy());
+
+        let mut direct = solidcraft_engine::Session::default();
+        let mut with_path = params.clone();
+        with_path.insert("path".into(), json!(p));
+        direct.execute("doc.open", &Value::Object(with_path)).unwrap();
+        let names = |s: &solidcraft_engine::Session| {
+            let mut n: Vec<String> = s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
+            n.sort();
+            n
+        };
+        assert_eq!(names(&h.app.session), names(&direct), "the window's import is `doc.open`'s");
+        assert!(names(&direct).iter().any(|n| n == "Copper F.Cu"), "{:?}", names(&direct));
+        assert_eq!(size(&h.app.session), size(&direct), "the board's thickness reached the import");
+        let _ = std::fs::remove_dir_all(board.parent().unwrap());
     }
 }

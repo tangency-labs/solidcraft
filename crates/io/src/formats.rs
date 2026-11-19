@@ -96,6 +96,14 @@ pub enum OptionKind {
         min: f64,
         max: f64,
         unit: &'static str,
+        /// The file's own value, read without importing it, when the command uses that value
+        /// unless it is given another (a KiCad board's thickness): the option starts there, and
+        /// at `default` when the file names none.
+        from_file: Option<fn(&str) -> Option<f64>>,
+    },
+    /// An sRGB colour, sent as `"#rrggbb"`.
+    Color {
+        default: [u8; 3],
     },
 }
 
@@ -157,16 +165,23 @@ const USD_GEOMETRY: OptionSpec = OptionSpec {
     kind: OptionKind::Choice { choices: &[("meshes", "Meshes"), ("exact", "Exact B-rep where the file has it")], default: 0 },
 };
 
-/// A KiCad PCB's import options (see `doc.open`). The board's own thickness and colour are used
-/// unless the command is given others, so neither is offered here.
+/// A KiCad PCB's import options (see `doc.open`); each default is what the command does without
+/// the parameter: the copper as an overlay, the substrate in [`crate::DEFAULT_BOARD_COLOR`]
+/// (rounded to 8-bit sRGB) and the board's own thickness, read from its file.
 const KICAD_IMPORT: &[OptionSpec] = &[
     OptionSpec { param: "components", label: "Include components", kind: OptionKind::Bool { default: true } },
     OptionSpec {
         param: "copper",
         label: "Copper (traces, vias, zones, pads)",
-        kind: OptionKind::Choice { choices: &[("none", "None"), ("overlay", "Overlay on the board"), ("mesh", "Modeled")], default: 0 },
+        kind: OptionKind::Choice { choices: &[("none", "None"), ("overlay", "Overlay on the board"), ("mesh", "Modeled")], default: 1 },
     },
     OptionSpec { param: "silkscreen", label: "Include silkscreen", kind: OptionKind::Bool { default: true } },
+    OptionSpec { param: "color", label: "Board color", kind: OptionKind::Color { default: [13, 84, 46] } },
+    OptionSpec {
+        param: "thickness",
+        label: "Board thickness",
+        kind: OptionKind::Number { default: 1.6, min: 0.01, max: 1000.0, unit: "mm", from_file: Some(crate::kicad_file_thickness) },
+    },
     OptionSpec { param: "representation", label: "Board", kind: OptionKind::Choice { choices: &[("brep", "Solid"), ("mesh", "Mesh")], default: 0 } },
 ];
 
@@ -176,8 +191,16 @@ const STL_ENCODING: OptionSpec =
 
 const URDF_OPTIONS: &[OptionSpec] = &[
     OptionSpec { param: "mesh_prefix", label: "Mesh file prefix", kind: OptionKind::Text { default: "", hint: "package://robot/meshes/" } },
-    OptionSpec { param: "effort", label: "Joint effort", kind: OptionKind::Number { default: 1000.0, min: 0.0, max: 1e9, unit: "" } },
-    OptionSpec { param: "velocity", label: "Joint velocity", kind: OptionKind::Number { default: 10.0, min: 0.0, max: 1e9, unit: "" } },
+    OptionSpec {
+        param: "effort",
+        label: "Joint effort",
+        kind: OptionKind::Number { default: 1000.0, min: 0.0, max: 1e9, unit: "", from_file: None },
+    },
+    OptionSpec {
+        param: "velocity",
+        label: "Joint velocity",
+        kind: OptionKind::Number { default: 10.0, min: 0.0, max: 1e9, unit: "", from_file: None },
+    },
     OptionSpec { param: "images", label: "Pictures as textured visuals", kind: OptionKind::Bool { default: false } },
 ];
 
@@ -192,7 +215,11 @@ const VIEW_DXF_OPTIONS: &[OptionSpec] = &[
         label: "Hidden edges",
         kind: OptionKind::Choice { choices: &[("omit", "Omitted"), ("dashed", "Dashed")], default: 0 },
     },
-    OptionSpec { param: "tolerance", label: "Tolerance", kind: OptionKind::Number { default: 0.01, min: 0.0001, max: 1.0, unit: "mm" } },
+    OptionSpec {
+        param: "tolerance",
+        label: "Tolerance",
+        kind: OptionKind::Number { default: 0.01, min: 0.0001, max: 1.0, unit: "mm", from_file: None },
+    },
 ];
 
 /// The options of `file.save` and `file.save_as` beyond the path (the design row itself; Save
@@ -634,6 +661,29 @@ mod tests {
         assert!(writes("fcstd").is_empty(), "cadmpeg cannot write a new FreeCAD file yet");
         assert!(for_path("a.png").is_none());
         assert!(for_path("nodot").is_none());
+    }
+
+    /// The KiCad row starts where the import does without the parameter: the copper as an overlay,
+    /// the default substrate colour and the board's own thickness from its file.
+    #[test]
+    fn kicad_defaults_are_the_import_defaults() {
+        let options = find("kicad").and_then(|f| f.import.as_ref()).map(|i| i.options).expect("KiCad imports");
+        let kind = |param: &str| &options.iter().find(|o| o.param == param).unwrap_or_else(|| panic!("{param} offered")).kind;
+        let defaults = crate::KicadOptions::default();
+        let OptionKind::Choice { choices, default } = kind("copper") else { panic!("copper is a choice") };
+        assert_eq!(crate::KicadCopper::parse(choices[*default].0), Some(defaults.copper));
+        let OptionKind::Color { default } = kind("color") else { panic!("color is a colour") };
+        let expected = crate::DEFAULT_BOARD_COLOR.map(|c| (c * 255.0).round() as u8);
+        assert_eq!(*default, expected);
+        let OptionKind::Number { from_file: Some(read), .. } = kind("thickness") else { panic!("thickness comes from the file") };
+        let dir = std::env::temp_dir().join(format!("solidcraft-formats-kicad-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let board = dir.join("b.kicad_pcb");
+        std::fs::write(&board, "(kicad_pcb (version 20240108) (general (thickness 2.2)))").unwrap();
+        assert_eq!(read(&board.to_string_lossy()), Some(2.2));
+        assert_eq!(read(&dir.join("b.kicad_pro").to_string_lossy()), Some(2.2), "a project reads its board");
+        assert_eq!(read(&dir.join("missing.kicad_pcb").to_string_lossy()), None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// cadmpeg is pure Rust now, so the browser build offers its rows too; `native = false`
