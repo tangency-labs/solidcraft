@@ -133,7 +133,7 @@ const NO_KERNEL: [&str; 15] = [
     "start",
 ];
 
-const ANSWERING: [&str; 68] = [
+const ANSWERING: [&str; 69] = [
     "set_dump_dir",
     "current_call",
     "crash_test",
@@ -165,6 +165,7 @@ const ANSWERING: [&str; 68] = [
     "split_faces",
     "split_body",
     "split_body_by_sheet",
+    "trim_sheet",
     "untrim_face",
     "extend_sheet",
     "face_points",
@@ -304,6 +305,7 @@ fn every_entry_point_answers() {
     let lines: Vec<Curve> = (0..4).map(|i| Curve::Line { start: square[i], end: square[(i + 1) % 4] }).collect();
     let sheet = says("planar_faces", Brep::planar_faces(&lines)).unwrap();
     says("split_body_by_sheet", a.split_body_by_sheet(&sheet, 0));
+    says("trim_sheet", a.trim_sheet(&sheet, &[p(5.0, 5.0, 5.0)]));
     says("untrim_face", sheet.untrim_face(p(5.0, 5.0, 5.0), 0.1, Holes::All, true, false));
     says("extend_sheet", sheet.extend_sheet(p(5.0, 5.0, 5.0), 0.1, 1.0, Continuation::Natural));
     says("face_points", a.face_points());

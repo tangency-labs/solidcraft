@@ -244,7 +244,7 @@ pub use surface_extend::{ExtendLimit, ExtendMode, ExtendOptions, extend_surface}
 pub use surface_kind::{AxialPiece, EdgeCircle, FaceSurface, axial_face_section, edge_circle, face_edge_indices, face_surface};
 pub use surface_offset::offset_surface;
 pub use surface_ruled::{Ruled, RuledCorners, RuledMode, ruled_far_handles, ruled_surface, ruled_surface_with};
-pub use surface_trim::{TrimKeep, mutual_trim, trim, trim_keep};
+pub use surface_trim::{TrimKeep, mutual_trim, trim, trim_keep, trim_sheet_keep};
 pub use surface_untrim::{UntrimHoles, untrim};
 pub use surfaces::{
     copy_faces, extend, extrude_sheet, loft_sheet, loft_sheet_with_rails, patch_edges, patch_region, remove_faces, reverse_faces, revolve_sheet,
