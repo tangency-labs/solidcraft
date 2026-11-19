@@ -2017,6 +2017,37 @@ mod drafts {
         assert_eq!(report.failures, 0, "{}", report.text);
     }
 
+    /// A finite radial removal leaves an overhang above the fixed top plane and
+    /// removes a shallow blind hole wholly outside the new conical wall.
+    #[test]
+    fn a_drafted_cylinder_keeps_its_boss_and_loses_a_hole_beyond_the_new_wall() {
+        all_fixes();
+        let cylinder = make_cylinder([0.0; 3], 1.5, 4.0).unwrap();
+        let boss = make_box([1.02, -0.36, 4.0], [0.36, 0.72, 0.36]).unwrap();
+        let b = crate::boolean::boolean(cylinder, boss, crate::BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        let hole = make_cylinder([-1.4, 0.0, 3.8], 0.05, 0.2).unwrap();
+        let b = crate::boolean::boolean(b, hole, crate::BooleanOp::Subtract)
+            .unwrap()
+            .unwrap();
+        let o = order(&b);
+        let outer = face(&b, &o, |bx| {
+            bx.min().x < 0.0 && bx.max().x > 0.0 && bx.max().z > bx.min().z
+        });
+        draft(&b, &o, &[outer], [0.0; 3], Z, Z, THREE).unwrap();
+        // The hole's nearest radius is 1.35, beyond r(3.8) < 1.301. None
+        // survives. Above z = 4 the entire boss stays, including its overhang.
+        let small = 1.5 - 4.0 * TAN_THREE;
+        let expected =
+            PI * 4.0 * (1.5 * 1.5 + 1.5 * small + small * small) / 3.0 + 0.36 * 0.72 * 0.36;
+        assert!(rel(volume(&b), expected) < 1e-9);
+        assert_eq!(b.counts().unwrap()[0], 9);
+        b.check_solid().unwrap();
+        let report = b.check(crate::CheckLevel::All).unwrap();
+        assert_eq!(report.failures, 0, "{}", report.text);
+    }
+
     /// S1767 of the public stress corpus: two touching pads, the second 0.00002
     /// taller, stay above the cylinder's top while its side drafts under their feet.
     #[test]
@@ -2048,7 +2079,6 @@ mod drafts {
     /// S8075 of the public stress corpus: drafting the outer wall opens the three
     /// blind holes through the side. Their walls must be trimmed against the cone.
     #[test]
-    #[ignore = "S8075: local operations cannot trim crossing wall interiors (#18805)"]
     fn a_cylinder_with_three_blind_holes_drafts_through_the_hole_walls() {
         all_fixes();
         let mut b = make_cylinder([0.0; 3], 600.0, 2400.0).unwrap();
@@ -2063,6 +2093,20 @@ mod drafts {
             bx.min().x < 0.0 && bx.max().x > 0.0 && bx.max().z > bx.min().z
         });
         draft(&b, &o, &[outer], [0.0; 3], Z, Z, THREE).unwrap();
+        // r(z) = 600 - z tan(3 degrees). Below the blind floors (-480, 0)
+        // is material; above them each hole remains void on its inward side.
+        // At z = 2000 the cone radius is between 495 and 496, so (500, 0)
+        // is outside although it was inside the original cylinder.
+        for (point, wanted) in [
+            ([-480.0, 0.0, 1900.0], crate::PointClass::Inside),
+            ([500.0, 0.0, 2000.0], crate::PointClass::Outside),
+            ([-410.0, 0.0, 2300.0], crate::PointClass::Inside),
+            ([-430.0, -180.0, 2300.0], crate::PointClass::Outside),
+            ([-430.0, 0.0, 2300.0], crate::PointClass::Outside),
+            ([-430.0, 180.0, 2300.0], crate::PointClass::Outside),
+        ] {
+            assert_eq!(b.classify_point(point).unwrap(), wanted, "{point:?}");
+        }
         assert!(b.is_manifold_solid().unwrap());
         b.check_solid().unwrap();
         let report = b.check(crate::CheckLevel::All).unwrap();

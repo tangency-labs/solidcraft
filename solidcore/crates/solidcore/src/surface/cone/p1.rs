@@ -43,6 +43,9 @@
 //! | [`total_coincidence_checker`], [`Coincidence`]    | `sm_TotalCoincidenceChecker` (static)            |
 //!
 //! Deviations:
+//! - **Exact iso heights.** A circular iso's centre uses the cone's analytic
+//!   axial parameter map, retaining stored endpoint heights exactly. Averaging
+//!   projected NURB samples must not replace that plane (#18805).
 //! - **Derived classes.** `SmCone` derives from `SmSurfOfRevolution`; the base object
 //!   is the [`Cone::rev`] field. `SmCylinder` adds no data: it is a [`Cone`] with
 //!   [`Cone::is_cylinder_class`] set (its type, `IsCylinder` and
@@ -266,6 +269,49 @@ fn unbounded_maps_linearly(inside_out: bool, step_ivl: &Extent1d, nurb_ivl: &Ext
             || nurb_ivl.max().to_bits() != (-step_ivl.min()).to_bits())
 }
 
+/// The cone's axial parameter map, independently of the polar converter. Exact
+/// endpoint selection retains the defining heights even when interpolation rounds.
+fn cone_height_from_nurbs(
+    rev: &SurfOfRevolution,
+    inside_out: bool,
+    nurb_ivl: &Extent1d,
+    parameter: f64,
+) -> Result<f64> {
+    let step_ivl = rev.anal_uv_domain.v_interval();
+    let height = if rev.is_bounded()? || unbounded_maps_linearly(inside_out, &step_ivl, nurb_ivl) {
+        let (start, end) = if inside_out {
+            (nurb_ivl.max(), nurb_ivl.min())
+        } else {
+            (nurb_ivl.min(), nurb_ivl.max())
+        };
+        if parameter == start {
+            step_ivl.min()
+        } else if parameter == end {
+            step_ivl.max()
+        } else {
+            let span = end - start;
+            if span == 0.0 || !span.is_finite() {
+                return Err(SolidError::surface_failed(
+                    OP_TO_STEP,
+                    "the axial parameter span is invalid",
+                ));
+            }
+            step_ivl.evaluate((parameter - start) / span)
+        }
+    } else if inside_out {
+        -parameter
+    } else {
+        parameter
+    };
+    if !height.is_finite() {
+        return Err(SolidError::surface_failed(
+            OP_TO_STEP,
+            "the axial height is not finite",
+        ));
+    }
+    Ok(height)
+}
+
 /// The cone's `ConvertUVFromNURBSToSTEP` on its base parts (the virtual the
 /// inherited `UpdateAnalyticalDomain` calls); see [`Cone::convert_uv_from_nurbs_to_step`].
 pub(crate) fn cone_convert_uv_from_nurbs_to_step(
@@ -286,7 +332,6 @@ pub(crate) fn cone_convert_uv_from_nurbs_to_step_exact(
     nurbs_uv: Point2,
 ) -> Result<(Point2, bool)> {
     // swap NurbPoint when needed
-    let step_ivl = rev.anal_uv_domain.v_interval();
     let nurb_domain = rev.base.natural_uv_domain();
     let (nurb_uv, nurb_ivl) = if rev.swap_uv {
         (
@@ -305,17 +350,7 @@ pub(crate) fn cone_convert_uv_from_nurbs_to_step_exact(
 
     // convert linear coordinate
     // (WR-713: see `unbounded_maps_linearly`)
-    let y = if rev.is_bounded()? || unbounded_maps_linearly(inside_out, &step_ivl, &nurb_ivl) {
-        if inside_out {
-            step_ivl.min() + ((nurb_uv.y - nurb_ivl.max()) / -nurb_ivl.length() * step_ivl.length())
-        } else {
-            step_ivl.min() + ((nurb_uv.y - nurb_ivl.min()) / nurb_ivl.length() * step_ivl.length())
-        }
-    } else if inside_out {
-        -nurb_uv.y
-    } else {
-        nurb_uv.y
-    };
+    let y = cone_height_from_nurbs(rev, inside_out, &nurb_ivl, nurb_uv.y)?;
     Ok((Point2::new(x, y), exact))
 }
 
@@ -406,11 +441,24 @@ pub(crate) fn cone_iso_curve(
     let curve = if step_param == SurfParamType::V {
         // constant V, varying U is a circle
 
-        // Offset vector = projection of MidPoint onto cone ZAxis (averaged)
-        let offset_mid = (mid_point - cone_origin).dot(cone_z_axis);
-        let offset_min = (min_point - cone_origin).dot(cone_z_axis);
-        let offset_max = (max_point - cone_origin).dot(cone_z_axis);
-        let offset = (offset_mid + offset_min + offset_max) / 3.0;
+        // The circle's plane comes from the cone definition, independently of
+        // rounding in the extracted curve's projected sample points.
+        let height_ivl = if surf_param == SurfParamType::U {
+            nurb_domain.u_interval()
+        } else {
+            nurb_domain.v_interval()
+        };
+        // Successful extraction has already accepted and clamped a parameter
+        // within its boundary allowance. Label that same effective iso, using
+        // the optional fixed-coordinate interval when one was requested.
+        let extraction_domain = domain.copied().unwrap_or(nurb_domain);
+        let extraction_ivl = if surf_param == SurfParamType::U {
+            extraction_domain.u_interval()
+        } else {
+            extraction_domain.v_interval()
+        };
+        let effective_parameter = extraction_ivl.clamp_value(iso_parameter);
+        let offset = cone_height_from_nurbs(rev, inside_out, &height_ivl, effective_parameter)?;
 
         // Center = O + offset * Z
         let center = cone_origin + offset * cone_z_axis;
@@ -1398,7 +1446,8 @@ impl Cone {
     /// surface ([`crate::nurbs::b_spline_surface::BSplineSurface::create_iso_parametric_curve`], trimmed to `domain`,
     /// with its UV line when `uv_iso_curve`), kept when degenerate, else replaced by
     /// the circle (sweep direction) or line (linear direction) with that NURB. The
-    /// circle's centre and radius average the curve's start, middle and end points; its
+    /// circle's centre uses the analytic height map and its radius averages the
+    /// curve's start, middle and end points; its
     /// angular domain is the STEP sweep, or with `domain` the angles of its end points.
     /// The line's height domain is the STEP one, or with `domain` the heights of its
     /// end points; its NURB keeps the curve's interval.
@@ -2320,6 +2369,76 @@ mod tests {
         assert!(line.curve.is_kind_of(LINE_TYPE));
         assert!(line.uv_iso_curve.is_some());
         assert!(!line.curve.is_kind_of(ELLIPSE_TYPE));
+    }
+
+    #[test]
+    fn iso_circles_retain_the_cones_exact_axial_heights() {
+        let k = k();
+        for (swap, inside) in [(false, false), (true, false), (false, true), (true, true)] {
+            let c =
+                Cone::create_canonical(&k, &std_placement(), 600.0, 600.0, 2400.0, swap, inside)
+                    .unwrap();
+            let domain = c.rev.base.natural_uv_domain();
+            let (direction, interval) = if swap {
+                (SurfParamType::U, domain.u_interval())
+            } else {
+                (SurfParamType::V, domain.v_interval())
+            };
+            for (parameter, height) in [
+                (interval.min(), if inside { 2400.0 } else { 0.0 }),
+                (interval.mid(), 1200.0),
+                (interval.max(), if inside { 0.0 } else { 2400.0 }),
+            ] {
+                let iso = c
+                    .create_iso_parametric_curve(&k, direction, parameter, None, false)
+                    .unwrap();
+                let CurveKind::Ellipse(circle) = iso.curve.kind() else {
+                    panic!("the cylinder iso is a circle");
+                };
+                assert_eq!(
+                    circle.position().origin(),
+                    Vec3::new(0.0, 0.0, height),
+                    "swap={swap}, inside={inside}"
+                );
+            }
+            let quarter = interval.evaluate(0.25);
+            let three_quarters = interval.evaluate(0.75);
+            let trimmed = if swap {
+                Extent2d::from_bounds(quarter, domain.min().y, three_quarters, domain.max().y)
+            } else {
+                Extent2d::from_bounds(domain.min().x, quarter, domain.max().x, three_quarters)
+            };
+            // The base extractor accepts the next representable parameter just
+            // above a boundary and extracts that boundary. The analytic circle
+            // must name that same plane, including an optional trimmed domain.
+            for (requested, upper, height) in [
+                (None, interval.max(), if inside { 0.0 } else { 2400.0 }),
+                (
+                    Some(trimmed),
+                    three_quarters,
+                    if inside { 600.0 } else { 1800.0 },
+                ),
+            ] {
+                let parameter = f64::from_bits(upper.to_bits() + 1);
+                let iso = c
+                    .create_iso_parametric_curve(
+                        &k,
+                        direction,
+                        parameter,
+                        requested.as_ref(),
+                        false,
+                    )
+                    .unwrap();
+                let CurveKind::Ellipse(circle) = iso.curve.kind() else {
+                    panic!("the clamped cylinder iso is a circle");
+                };
+                assert_eq!(
+                    circle.position().origin().z,
+                    height,
+                    "swap={swap}, inside={inside}"
+                );
+            }
+        }
     }
 
     /// A reference point beyond a cone's end but within the tolerance (#1067, UB-87): the

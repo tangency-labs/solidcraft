@@ -403,7 +403,7 @@ struct ConeDraft {
 /// # Errors
 ///
 /// Those of reading the net's knots and control points.
-fn net_sense(
+pub(crate) fn net_sense(
     net: &BSplineSurface,
     on_axis: Point3,
     x_axis: Vec3,
