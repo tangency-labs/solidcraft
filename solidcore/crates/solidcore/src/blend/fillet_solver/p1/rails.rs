@@ -310,9 +310,9 @@ pub fn split_rail_along(
         }
     }
 
-    let mut rails = vec![rail];
+    let mut new_rails = Vec::new();
     let mut current = rail;
-    for piece in ordered.iter().take(ordered.len() - 1) {
+    for piece in ordered.iter().take(ordered.len().saturating_sub(1)) {
         let (vertex, next) = split_rail(k, fillets, ownership, geom, current)?;
         let at = if forward { piece.max() } else { piece.min() };
         let point = curve.evaluate_point(k, at)?;
@@ -322,11 +322,11 @@ pub fn split_rail_along(
         fillets
             .fillet_vertex_mut(vertex)?
             .set_status(FilStatus::Processed);
-        rails.push(next);
+        new_rails.push(next);
         current = next;
     }
 
-    for (&e, piece) in rails.iter().zip(&ordered) {
+    for (&e, piece) in std::iter::once(&rail).chain(&new_rails).zip(&ordered) {
         let mut piece = *piece;
         if let Some(c) = fillets.brep_mut().edge_mut(e)?.curve.as_mut() {
             c.trim(k, &mut piece, TrimMode::Notify)?;
@@ -349,8 +349,7 @@ pub fn split_rail_along(
             fillets.set_edgeuse_uv_curve(e_use, uv, true, true)?;
         }
     }
-    rails.remove(0);
-    Ok(rails)
+    Ok(new_rails)
 }
 /// Compute, trim and install a support curve between its adjacent fillet surfaces.
 ///

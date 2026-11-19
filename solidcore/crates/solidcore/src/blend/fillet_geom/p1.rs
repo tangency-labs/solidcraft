@@ -2581,7 +2581,7 @@ impl FilletBrep {
         // end to end: from the curve's start, each piece starting where the one before
         // ends, to its end
         let at = |t: f64| curve_3d.evaluate_point(k, t);
-        let mut out = Vec::with_capacity(pieces.len());
+        let mut out = Vec::new();
         let mut from = ivl.min();
         for (i, &(t0, t1, tol)) in pieces.iter().enumerate() {
             if at(from)?.distance(at(t0)?) > tol || t1 <= from {
