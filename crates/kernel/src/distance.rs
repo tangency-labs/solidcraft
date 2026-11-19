@@ -289,6 +289,9 @@ pub fn edges_closest(a: &Body, edges: &[usize], b: &Body, to: Members) -> Result
 /// # Errors
 /// [`KernelError::Failed`] when the kernel cannot take either body or answer the solve.
 pub fn faces_closest(a: &Body, faces: &[usize], b: &Body, to: &[usize]) -> Result<Option<BodyDistance>> {
+    if a.is_mesh() || b.is_mesh() {
+        return Ok(None);
+    }
     let (Some((ops_a, order_a)), Some((ops_b, order_b))) = (exact_body(a)?, exact_body(b)?) else { return Ok(None) };
     let c = ops_a.closest_faces(order_a, faces, ops_b, order_b, to).map_err(|e| failed(&e))?;
     Ok(Some(BodyDistance { distance: c.distance, from: Vec3::from(c.from), to: Vec3::from(c.to), exact: true }))

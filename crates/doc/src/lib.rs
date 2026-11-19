@@ -94,6 +94,7 @@ pub mod render_surface;
 pub mod render_texture_resources;
 pub mod shaft_spline;
 pub mod sheet;
+pub mod sheet_library;
 mod sheet_surface;
 mod sheet_surface_convert;
 mod sheet_surface_cuts;
