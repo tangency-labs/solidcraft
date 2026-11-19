@@ -31,10 +31,14 @@
 //! | [`OffsetFailure::InvalidValue`]        | `SM_ERR_INVALID_INPUT`                    |
 //! | [`OffsetFailure::Inconsistent`]        | `SM_ERR_ASSERT_FAILURE`                   |
 //! | [`OffsetFailure::StageFailed`]         | the site's (`SM_ERR`, or `SM_ERR_NULL_POINTER` for an `NER`) |
+//! | [`OffsetFailure::Defect`]              | the site's (`SM_ERR`, or another through `with_status`) |
 //!
 //! A stage of an offset routine that fails with no reason the kernel names is an
 //! [`OffsetFailure::StageFailed`], a defect ([`ErrorKind::StageFailed`], #15034), keeping the
-//! error of the call it made as its cause where it has one.
+//! error of the call it made as its cause where it has one. That is the form not yet
+//! reviewed: a stage reviewed as the kernel's fault is an [`OffsetFailure::Defect`] with its
+//! reason, of the same class and status (the conversion guide:
+//! `docs/failure-codes-and-reproduction.md` §6).
 //!
 //! Deviations: not upstream. Entity ids are those of the operation's input B-rep. The
 //! last four describe, in a phrase, the failures of offset routines that returned a bare
@@ -262,8 +266,17 @@ pub enum OffsetFailure {
     /// A stage of an offset routine failed with no reason the kernel names: a defect
     /// ([`ErrorKind::StageFailed`]). The failure holds the operation, the status the C++
     /// reports (for the goldens only), where it was built, and the error of the call it made
-    /// where it has one.
+    /// where it has one. The form not yet reviewed: new code builds
+    /// [`OffsetFailure::Defect`], a named cause or a refusal instead.
     StageFailed,
+    /// A failure that is the kernel's fault, reviewed at its site, with the written reason:
+    /// `why` names the step that failed and why that is the kernel's fault, not the
+    /// geometry's. A defect ([`ErrorKind::StageFailed`]); status `SM_ERR` unless its site
+    /// says otherwise.
+    Defect {
+        /// The step that failed, and why that is the kernel's fault.
+        why: &'static str,
+    },
 }
 
 /// What a local operation's or a solid offset's built body fails ([`OffsetFailure::Unsound`]).
@@ -410,14 +423,15 @@ impl OffsetFailure {
             | Self::Missing(_)
             | Self::InvalidValue(_)
             | Self::Inconsistent(_)
-            | Self::StageFailed => None,
+            | Self::StageFailed
+            | Self::Defect { .. } => None,
         }
     }
 
     /// True for a failure that replaced a bare status an offset routine returned
     /// ([`OffsetFailure::Failed`], [`OffsetFailure::Missing`],
     /// [`OffsetFailure::InvalidValue`], [`OffsetFailure::Inconsistent`],
-    /// [`OffsetFailure::StageFailed`]): it answers with
+    /// [`OffsetFailure::StageFailed`], [`OffsetFailure::Defect`]): it answers with
     /// that status as the `Upstream` it replaced did. The refusals replaced none.
     #[must_use]
     pub const fn replaces_upstream_status(&self) -> bool {
@@ -428,6 +442,7 @@ impl OffsetFailure {
                 | Self::InvalidValue(_)
                 | Self::Inconsistent(_)
                 | Self::StageFailed
+                | Self::Defect { .. }
         )
     }
 
@@ -459,7 +474,8 @@ impl OffsetFailure {
             | Self::ReachUncertified { .. }
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. }
-            | Self::StageFailed => false,
+            | Self::StageFailed
+            | Self::Defect { .. } => false,
             Self::Failed(_) | Self::Missing(_) | Self::InvalidValue(_) | Self::Inconsistent(_) => {
                 true
             }
@@ -469,12 +485,13 @@ impl OffsetFailure {
     /// True for a failure that is the kernel's fault, not a fact of the input: a consistency
     /// check of a routine's own data that did not hold ([`OffsetFailure::Inconsistent`]), or a
     /// stage that failed with no reason the kernel names ([`OffsetFailure::StageFailed`],
-    /// whose class [`ErrorKind::StageFailed`] says it too). Report it. Said per cause, as its class ([`ErrorKind::Failed`]) does not say it, until
+    /// whose class [`ErrorKind::StageFailed`] says it too), reviewed or not
+    /// ([`OffsetFailure::Defect`]). Report it. Said per cause, as its class ([`ErrorKind::Failed`]) does not say it, until
     /// offset failures move onto a class of their own.
     #[must_use]
     pub const fn is_defect(&self) -> bool {
         match self {
-            Self::Inconsistent(_) | Self::StageFailed => true,
+            Self::Inconsistent(_) | Self::StageFailed | Self::Defect { .. } => true,
             Self::Folds { .. }
             | Self::NotCertified { .. }
             | Self::Collapses { .. }
@@ -520,7 +537,8 @@ impl OffsetFailure {
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. }
             | Self::Failed(_)
-            | Self::StageFailed => SM_ERR,
+            | Self::StageFailed
+            | Self::Defect { .. } => SM_ERR,
             Self::Missing(_) => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
@@ -556,7 +574,7 @@ impl OffsetFailure {
             Self::DistanceUnresolved { .. } | Self::ToleranceUnresolved { .. } => {
                 ErrorKind::InvalidInput
             }
-            Self::StageFailed => ErrorKind::StageFailed,
+            Self::StageFailed | Self::Defect { .. } => ErrorKind::StageFailed,
             Self::Failed(_) | Self::Missing(_) | Self::InvalidValue(_) | Self::Inconsistent(_) => {
                 ErrorKind::of_status(self.comparison_status())
             }
@@ -839,6 +857,7 @@ impl core::fmt::Display for OffsetFailure {
             Self::InvalidValue(what) => write!(f, "invalid input: {what}"),
             Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
             Self::StageFailed => write!(f, "{}", ErrorKind::StageFailed),
+            Self::Defect { why } => write!(f, "{}: {why}", ErrorKind::StageFailed),
         }
     }
 }
@@ -1131,6 +1150,8 @@ mod tests {
                 false,
                 false,
             ),
+            // a failure reviewed as the kernel's fault, with its reason
+            (O::Defect { why: "x" }, ErrorKind::StageFailed, false, true),
         ];
         let row = |o: &O| -> usize {
             match o {
@@ -1159,6 +1180,7 @@ mod tests {
                 O::WallsMeetAcross { .. } => 22,
                 O::PastSide { .. } => 23,
                 O::PeriodicBranchAmbiguous => 24,
+                O::Defect { .. } => 25,
             }
         };
         for (i, (o, class, phrase, defect)) in pinned.iter().enumerate() {
@@ -1169,7 +1191,7 @@ mod tests {
             // what replaced a bare status is a phrase, or a stage failure built on purpose
             assert_eq!(
                 o.replaces_upstream_status(),
-                *phrase || matches!(o, O::StageFailed),
+                *phrase || matches!(o, O::StageFailed | O::Defect { .. }),
                 "{o:?}"
             );
         }
@@ -1182,6 +1204,32 @@ mod tests {
             super::super::tests::assert_stage_failure(&e, "offset::op", status);
             assert_eq!(e.offset_failure(), Some(&OffsetFailure::StageFailed));
         }
+    }
+
+    /// A reviewed defect is of class 127 with the stage failure's status, and says why.
+    #[test]
+    fn a_reviewed_defect_is_class_127_with_its_reason() {
+        let why =
+            "the offset edge use just built has no mate, which the offset's own pairing gives it";
+        let defect = OffsetFailure::Defect { why };
+        for status in [SM_ERR, SM_ERR_NULL_POINTER] {
+            let e = Failure::new("offset::op", defect)
+                .with_status(status)
+                .into_error();
+            super::super::tests::assert_defect(
+                &e,
+                &SolidError::offset_stage_failed("offset::op", status),
+                "offset::op",
+                status,
+                &format!("offset::op: stage_failed: {why}"),
+            );
+            assert_eq!(e.offset_failure(), Some(&defect));
+            assert_eq!(e.entity(), None);
+        }
+        assert_eq!(
+            SolidError::offset("offset::op", defect).sm_status(),
+            Some(SM_ERR)
+        );
     }
 
     /// A body whose edge or vertex tolerance grew past its certificate's bound is refused
@@ -1242,11 +1290,39 @@ mod tests {
             "offset",
             20,
             &[
-                ("offset/offset_executive/p1.rs", 9),
-                ("offset/offset_executive/p2.rs", 8),
-                ("offset/offset_faces.rs", 4),
-                ("offset/offset_geometry_creation.rs", 1),
+                ("offset/offset_executive/p1.rs", 79),
+                ("offset/offset_executive/p2.rs", 57),
+                ("offset/offset_faces.rs", 29),
+                ("offset/offset_geometry_creation.rs", 32),
             ],
         );
+    }
+
+    /// The sites that build a offset phrase cause only fall:
+    /// per file, in the library code of `solidcore` and `solidcore-ops`, as
+    /// [`super::super::site_scan`] counts them. A PR that converts sites lowers its
+    /// files' counts here, and a file at 0 loses its line (the conversion guide:
+    /// `docs/failure-codes-and-reproduction.md` §6).
+    #[test]
+    fn the_offset_phrase_cause_sites_only_shrink() {
+        use super::super::site_scan::{assert_pinned, crate_sites, Builder, Scan, Wrappers};
+        const PHRASES: Scan = Scan {
+            builders: &[
+                Builder::Variant("OffsetFailure", "Failed"),
+                Builder::Variant("OffsetFailure", "Missing"),
+                Builder::Variant("OffsetFailure", "InvalidValue"),
+                Builder::Variant("OffsetFailure", "Inconsistent"),
+                Builder::Method("offset_missing", Some(1)),
+            ],
+            wrappers: Wrappers::Phrase,
+        };
+        #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
+        const PINNED: &[(&str, usize)] = &[
+            ("solidcore/src/offset/draft.rs", 1),
+            ("solidcore/src/offset/offset_executive/cavity.rs", 1),
+            ("solidcore/src/offset/offset_executive/crossing_loops.rs", 5),
+            ("solidcore/src/offset/offset_executive/step_gaps.rs", 5),
+        ];
+        assert_pinned("offset phrase-cause sites", &crate_sites(&PHRASES), PINNED);
     }
 }

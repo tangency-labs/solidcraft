@@ -89,6 +89,74 @@ The minimal case is input for a person or an agent, not a corpus entry: a rig ca
 
 A case carries the user's geometry. The application asks before attaching it (RFC 0016). The reducer only removes geometry; its output is smaller than the report, still the user's, and stays with the ticket unless the reporter agreed to share it.
 
+## 6. Converting a failure site
+
+This is the guide for the typed-errors work (#13790). Follow it when you convert the sites that build a failure in a file of `crates/solidcore` or `crates/solidcore-ops`.
+
+### The goal and the counts
+
+Every failure ends up as one of three things:
+- **a named cause**: a variant of the area's failure enum that says what happened, with its numbers;
+- **a refusal**: a fact of the input, so the way out is a different input. Where a check measures a size, the refusal carries the size that would pass;
+- **a defect**: the area's `Defect { why }`, a failure that is the kernel's fault.
+
+Three kinds of site are not there yet. Tests count them per file, and each count only goes down:
+- **phrase causes**: variants that carry only a sentence, such as `SurfaceFailure::Failed("...")`, and the helpers that build them (`SolidError::surface_failed(`). The blend's list is `PINNED` in `src/error/phrase_sites.rs`. Each other area's list is in its own error file's tests (`src/error/<area>.rs`). The generic `Reason::Failed` list is in `src/error.rs`'s tests.
+- **bare statuses**: `SolidError::sm_err(`, `null_pointer(`, `Upstream {` and `nl_ser(`. The lists are in each area's error file (`assert_waiting`).
+- **unreviewed stage failures**: an area's `StageFailed`, and the helpers that build one (`SolidError::curve_stage_failed(`). The list is `PINNED` in `src/error/stage_sites.rs`.
+
+A call of a local wrapper counts once for each call. `src/error/site_scan.rs` says exactly what counts. A PR that converts sites lowers its files' counts in the same PR. A file whose count reaches 0 loses its line. The test failure prints the list as found.
+
+### 1. Keep the status
+
+This rule comes first. A conversion keeps the numeric status the site reports today. The goldens compare the status exactly, so a changed status fails them.
+
+- Stay on the typed record: `Failure::new(OP, cause)`, or the area's constructor (`SolidError::curve(OP, cause)`).
+- Each cause has a default status. When the site's status is not the default, keep it with `.with_status(status)`.
+- Do not convert a site to `SolidError::InvalidInput` or `SolidError::PortInvariant`. They report no status.
+- A change of status is a separate PR. That PR re-blesses the goldens and says why.
+
+### 2. A missing thing
+
+A `Missing` site is a defect unless the missing thing came from the caller.
+- The kernel built the thing, and it is not there: `Defect { why }`, keeping the status (`SM_ERR_NULL_POINTER` through `with_status`).
+- The caller supplied the thing, and it is not there: a named cause in the area's enum whose class is `InvalidInput`. `CurveFailure::PointSolveOptionMissing` is the model.
+
+### 3. A solve that does not converge
+
+- A solve that stops with its numbers: a named cause that carries them (the residual, the tolerance, the iterations). It is a defect. `BlendFailure::StationDidNotConverge` is the model.
+- A refusal only where a separate check measures the fit. Then the refusal carries the fit.
+- A drop or an intersection that stops with no numbers: `Defect { why }`.
+
+### 4. What a `why` is
+
+A `why` names the step that failed. It also says why that is the kernel's fault and not the geometry's. Copying the old phrase is not a `why`.
+
+- Bad: `"the drop failed"`. It names no step and gives no reason.
+- Good: `"the drop of the rail's end onto its own support found no foot, though the end was built on that support"`.
+
+If you cannot write the second half, the site may be a refusal. Find the check that would show it.
+
+### 5. Wrappers and shared helpers
+
+A local wrapper or a shared helper is split per site when its file is converted. Each call gets its own outcome. A helper with a misleading name, such as a local `sm_err` that builds something else, is renamed in the same PR.
+
+### 6. What the PR shows
+
+- For each site, or each group of identical sites: the outcome chosen and the evidence. "No site in this file decides a refusal" alone is not evidence.
+- The tests that assert an old phrase are updated in the same PR.
+
+The reviewer checks four things:
+- the status is preserved at every site;
+- each count is lowered by exactly the sites converted;
+- each `why` meets rule 4;
+- no new phrase cause, bare status or `StageFailed` site.
+
+### 7. What does not change
+
+- `PortInvariant` is not a conversion target.
+- Class 127 (`ErrorKind::StageFailed`) and its name `stage_failed` do not change in this work. A `Defect { why }` has that class, so a converted defect reads exactly as the stage failure it replaces, except for its message.
+
 ## If you're stuck
 
 The code's fields come from `SolidError::kind`, `SolidError::operation` and `SolidError::site`: read their docs in `crates/solidcore/src/error.rs`. The entry format is the rig's README (`crates/solidcore/tests/kernel_cases/README.md`). If a failure replays differently in a fresh process, it is state-dependent (3.5, step 1): say so on the ticket and do not reduce it.
