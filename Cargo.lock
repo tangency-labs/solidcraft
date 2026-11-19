@@ -6553,6 +6553,7 @@ dependencies = [
  "image",
  "serde",
  "serde_json",
+ "solidcore-ops",
  "solidcore-record",
  "solidcore-tess",
  "solidcraft-color",
