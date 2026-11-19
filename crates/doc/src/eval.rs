@@ -659,16 +659,18 @@ impl ModelBody {
     }
 
     /// The mesh a cam's profile is read from: the body's edges at the cam's own tolerance (finer
-    /// than the display mesh, as the profile follows the body's outline). The mesh is made once
-    /// and kept, so a solve that works the cam's table out again does not mesh the body again
-    /// (#3389).
-    pub(crate) fn cam_mesh(&self) -> Result<Arc<Mesh>> {
+    /// than the display mesh, as the profile follows the body's outline). The cam reads its
+    /// profile from it, and it is kept with the body, so that a solve which works the cam's
+    /// table out again does not mesh the body again (#3389). `make` meshes the body: the
+    /// profile is a decision made on a mesh (`xtask/mesh-decisions.txt`), so the meshing stays
+    /// with the cam.
+    pub(crate) fn cam_mesh(&self, make: impl FnOnce() -> kernel::Result<Mesh>) -> Result<Arc<Mesh>> {
         if let Some(mesh) = self.cam_mesh.get() {
             return Ok(mesh.clone());
         }
         #[cfg(test)]
         cost_tests::count(|c| c.cam_meshes += 1);
-        let mesh = Arc::new(self.body.mesh(&solidcraft_kernel::MeshTolerance::chord(crate::joints::cam::profile_tolerance(self.body.size())))?);
+        let mesh = Arc::new(make()?);
         // Another thread may have made it first: the mesh is the same either way.
         Ok(self.cam_mesh.get_or_init(|| mesh).clone())
     }

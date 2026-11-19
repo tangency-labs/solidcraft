@@ -455,8 +455,12 @@ pub(crate) fn profile_points(
                 return Err(bad("the cam has no body"));
             }
             // Each body sampled to its own size (a large part beside the cam leaves the cam fine).
-            // Each body's edges with the faces beside them.
-            let meshes: Vec<std::sync::Arc<solidcraft_geom::Mesh>> = bodies.iter().map(|b| b.cam_mesh()).collect::<crate::Result<_>>()?;
+            // Each body's edges with the faces beside them. The mesh of a body is made once and
+            // kept with it, so a solve that reads the profile again does not mesh it again.
+            let meshes: Vec<std::sync::Arc<solidcraft_geom::Mesh>> = bodies
+                .iter()
+                .map(|b| b.cam_mesh(|| b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(profile_tolerance(b.body.size())))))
+                .collect::<crate::Result<_>>()?;
             let edges: Vec<(usize, &Vec<Vec3>, &[u32])> = meshes
                 .iter()
                 .enumerate()
