@@ -18,6 +18,7 @@ pub use solidcraft_ui_kit::blur;
 pub mod bom_panel;
 pub mod browser;
 pub mod browser_canvas;
+mod browser_defects;
 pub mod browser_prompts;
 pub mod browser_search;
 #[cfg(test)]
@@ -291,6 +292,7 @@ pub mod semantic_content;
 pub mod settings_profiles;
 #[cfg(test)]
 mod settings_profiles_tests;
+pub mod sheet_rule_library;
 pub mod shell;
 #[cfg(test)]
 mod shell_face_sketch_ui_tests;
@@ -1217,6 +1219,7 @@ impl SolveApp {
             samples: samples.max(1),
             tess: false,
             oit: false,
+            edges: false,
         };
         let built = Self::build_wgpu(rs, target, target, !self.cpu_meshing);
         self.adopt_wgpu(rs, built);
@@ -1243,8 +1246,9 @@ impl SolveApp {
             samples: samples.max(1),
             tess: false,
             oit: false,
+            edges: false,
         };
-        let window = crate::gpu::GpuTarget { format: rs.target_format, depth: None, samples: 1, tess: false, oit: false };
+        let window = crate::gpu::GpuTarget { format: rs.target_format, depth: None, samples: 1, tess: false, oit: false, edges: false };
         Self::build_wgpu(rs, scene, window, gpu_meshing)
     }
 
@@ -1575,6 +1579,7 @@ impl SolveApp {
             solidcraft_engine::slicers::set_chosen_programs(&self.preferences.custom_slicers);
         }
         self.session.set_validation(self.preferences.validation);
+        drawing_workspace::sync_history(self);
         print_face_ui::sync(&mut self.session, &self.preferences);
         if id == "timeline.play" {
             let reply = self.session.execute(id, &params).map_err(|e| e.to_string())?;
@@ -2204,6 +2209,8 @@ impl SolveApp {
             && !id.starts_with("drawing.")
             && !matches!(id, "assembly.bom" | "sheet.flat_pattern" | "document.metadata" | "document.metadata.set" | "view.layout")
             && !matches!(id, "view.fit" | "view.home" | "view.tool" | "view.tool.zoom")
+            // Undo and Redo take the open drawing's steps here, from a menu as from their keys.
+            && !matches!(id, "edit.undo" | "edit.redo")
         {
             self.set_status(self.tr_label("Return to Design to use this command.").to_string(), true);
             return;
@@ -2559,7 +2566,7 @@ impl SolveApp {
             // Like Insert SVG it asks the host for its own kind of file (on the web a file dialog,
             // not the window that also opens and downloads designs), so the file comes straight
             // back here and nothing has to remember which command asked.
-            self.pick_open_for(&["3mf", "stl", "obj", "ply", "glb", "gltf"], |app, path| {
+            self.pick_open_for(&["3mf", "stl", "obj", "ply", "glb", "gltf", "usd", "usda", "usdc", "usdz"], |app, path| {
                 if let Some(path) = path
                     && !mesh_units::ask_ply_as_mesh(app, &path)
                 {

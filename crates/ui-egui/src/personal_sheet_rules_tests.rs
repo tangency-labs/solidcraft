@@ -47,6 +47,9 @@ fn type_values(h: &mut Harness, typed: [&str; 8]) {
 }
 
 fn save_personal(h: &mut Harness, name: &str) {
+    // A manager taller than the window scrolls to an error report the frame after it appears:
+    // let it settle before clicking.
+    h.frames(2);
     h.step(&json!({"widget":"Save new"})).unwrap();
     h.step(&json!({"click":{"handle":"dialog:sheet.personal_rules.name"}})).unwrap();
     h.step(&json!({"key":"A","cmd":true})).unwrap();

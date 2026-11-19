@@ -74,7 +74,7 @@ use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::Surface;
 use crate::surface::torus::{Torus, TorusOptions};
 use crate::topology::edge::NotifyEnv;
-use crate::topology::{Brep, FaceId, RegionId};
+use crate::topology::{Brep, FaceId, FaceuseId, RegionId};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct SweepCurve(u8, crate::geom::extent1d::Extent1d);
@@ -163,18 +163,173 @@ fn stitch_with_keys(
     b: &mut Brep,
     key_of: &dyn Fn(crate::error::EntityRef) -> crate::geom::object::ObjectRef,
 ) -> Result<()> {
+    stitch_faces_of(k, b, key_of, None)
+}
+
+/// Stitches the faces of a box's or a cylinder's solid. `outside` is a face use on the
+/// solid's outside ([`side_away_from`]) when the B-rep was empty before the solid's faces
+/// were made ([`is_empty`]), the solid is one the closing glue's ray leaves nothing in
+/// ([`one_solid_as_built`]) and the faces say which side that is.
+///
+/// With it the glue that closes the solid's shell fires no ray to tell which half of the
+/// region it splits is the infinite one
+/// ([`stitch_and_orient_one_solid`](crate::topology::brep::p5::stitch_and_orient_one_solid)):
+/// - the solid is alone, so the region split is the infinite one and the half outside the
+///   solid is the infinite half; in a B-rep that holds anything else the solid may lie
+///   inside another shell, and the closing glue's search also places the wire and vertex
+///   shells already there;
+/// - the solid is convex, so every point of it off a face's plane is on that face's inner
+///   side, and the side of the face away from such a point is outside.
+///
+/// The stitch's end searches as ever. Without `outside` the solid is stitched as every
+/// stitch is, and so is every cone.
+fn stitch_solid(k: &mut Kernel, b: &mut Brep, outside: Option<FaceuseId>) -> Result<()> {
+    stitch_faces_of(k, b, &crate::topology::loopuse::notify_ref, outside)
+}
+
+/// Whether `b` holds nothing but the one empty region a new B-rep has: no face, edge or
+/// vertex, and no shell. A B-rep whose region list cannot be read is not that one: the
+/// question raises no error of its own.
+fn is_empty(b: &Brep) -> bool {
+    let Ok(regions) = crate::topology::brep::p1::regions(b, None) else {
+        return false;
+    };
+    let [region] = regions.as_slice() else {
+        return false;
+    };
+    b.region(*region).is_ok_and(|r| r.shells.is_empty())
+        && b.face_list().is_empty()
+        && b.edge_list().is_empty()
+        && b.vertex_list().is_empty()
+}
+
+/// Whether the closing glue's ray, besides naming the infinite half, leaves nothing in
+/// the body that the stitch's end would not: the solid made on `frame` with `lengths` (a
+/// box's three sides, or a cylinder's radius, twice, and its height) is met as built and
+/// is of a size the B-rep's tolerance serves. The ray solves faces against the edited
+/// B-rep and makes the UV trims of the faces it reaches
+/// (`get_or_create_uv_trim_curve`), whose gaps may raise tolerances, and a ray that
+/// fails leaves the region list as it found it. Outside these conditions old against new
+/// over the review's probes changes such trims, tolerances and region lists; inside them
+/// no body and no error changes:
+/// - the frame's axes are unit and square to each other, so the stated lengths are the
+///   distances between the solid's edges (a stored frame keeps the axes it is given);
+/// - each length is beyond [`stitch_reach`]: the closing glue is the stitch's last edit
+///   (a cylinder 1e-7 high glues and squeezes again after its shell closes);
+/// - the solid is of a size the B-rep's tolerance serves ([`served_size`]): past it the
+///   searches' ray solves fail, each on its own rays.
+fn one_solid_as_built(b: &Brep, frame: &Axis2Placement, lengths: &[f64]) -> bool {
+    let reach = stitch_reach(b);
+    unit_frame(frame) && lengths.iter().all(|l| l.abs() > reach) && served_size(b, frame, lengths)
+}
+
+/// The model sizes upstream's table of zone tolerances lists
+/// ([`size_estimate_to_zone_tol_3d`](crate::geom::tol::size_estimate_to_zone_tol_3d),
+/// `SmTol::SizeEstimateToZoneTol3d`: its rows run from `0.00005` to `5e6`). Outside
+/// them the table is a formula with no row behind it.
+const LISTED_SIZES: core::ops::RangeInclusive<f64> = 0.00005..=5e6;
+
+/// Whether the solid, which is the whole model (the B-rep was empty), is of a size
+/// upstream's table lists ([`LISTED_SIZES`]) and the B-rep's tolerance is the one the
+/// table gives a model of that size, or looser: `size_estimate_to_zone_tol_3d` of the
+/// largest coordinate the solid can reach (the origin's largest plus its lengths) is no
+/// more than the tolerance. At the default tolerance of 1e-5 that is a solid within 500
+/// of the origin. It is the kernel's policy for which tolerance a model of a size is
+/// built with, not a bound on what the searches compute.
+fn served_size(b: &Brep, frame: &Axis2Placement, lengths: &[f64]) -> bool {
+    let o = frame.origin();
+    let far = o.x.abs().max(o.y.abs()).max(o.z.abs());
+    let size = lengths.iter().fold(far, |sum, l| sum + l.abs());
+    LISTED_SIZES.contains(&size)
+        && crate::geom::tol::size_estimate_to_zone_tol_3d(size) <= b.tolerance()
+}
+
+/// Whether `frame`'s X and Y axes are unit vectors square to each other, to
+/// [`EFF_ZERO`]: the frame a primitive's stated lengths are true lengths on.
+fn unit_frame(frame: &Axis2Placement) -> bool {
+    let (x, y) = (frame.x_axis(), frame.y_axis());
+    (x.dot(x) - 1.0).abs() <= EFF_ZERO
+        && (y.dot(y) - 1.0).abs() <= EFF_ZERO
+        && x.dot(y).abs() <= EFF_ZERO
+}
+
+/// Twice the largest distance over which the primitives' stitch can glue two edges or two
+/// vertices of a B-rep of this tolerance: its first pass runs at twice the B-rep's
+/// tolerance and its second at twenty times that (`StitchAndOrient`), and each of the two
+/// features may be moved by that much. The stitch caps its own tolerance for a loose
+/// B-rep, but not the tolerances its edges and vertices carry, so the reach follows the
+/// B-rep's tolerance uncapped: a box side of 0.04 in a B-rep of tolerance 0.1 is inside it.
+fn stitch_reach(b: &Brep) -> f64 {
+    2.0 * 20.0 * 2.0 * b.tolerance()
+}
+
+/// The face use of `face` on the side away from a point of the convex solid the face
+/// bounds: the outside of the solid. The face's point is the one at the fractions `at` of
+/// its UV box and the solid's the one at the fractions `inside` of the UV box of
+/// `inside_face`; the surface's normal at the first says which of the face's two face
+/// uses it is ([`OrientType::Same`] has the surface's normal).
+///
+/// `None` when the faces do not say: the normal has no part along the line between the
+/// two points (a solid of no thickness), a surface is missing or cannot be evaluated
+/// there, or the face lacks a face use. The solid is then stitched as every stitch is.
+fn side_away_from(
+    k: &Kernel,
+    b: &Brep,
+    (face, at): (FaceId, [f64; 2]),
+    (inside_face, inside): (FaceId, [f64; 2]),
+) -> Option<FaceuseId> {
+    use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+    use crate::nurbs::knots::Side;
+    let record = b.face(face).ok()?;
+    let surface = record.surface.as_ref()?;
+    let uv = record.uv_domain.evaluate(at[0], at[1]);
+    let point = surface.evaluate_point(k, uv).ok()?;
+    let normal = surface
+        .evaluate_normal(k, uv, Side::Right, Side::Right)
+        .ok()?;
+    let other = b.face(inside_face).ok()?;
+    let within = other
+        .surface
+        .as_ref()?
+        .evaluate_point(k, other.uv_domain.evaluate(inside[0], inside[1]))
+        .ok()?;
+    let first = record.faceuse?;
+    let mate = b.faceuse(first).ok()?.mate?;
+    let (same, opposite) = if b.faceuse(first).ok()?.orientation == OrientType::Same {
+        (first, mate)
+    } else {
+        (mate, first)
+    };
+    let away = normal.dot(point - within);
+    if away > 0.0 {
+        Some(same)
+    } else if away < 0.0 {
+        Some(opposite)
+    } else {
+        None
+    }
+}
+
+fn stitch_faces_of(
+    k: &mut Kernel,
+    b: &mut Brep,
+    key_of: &dyn Fn(crate::error::EntityRef) -> crate::geom::object::ObjectRef,
+    outside: Option<FaceuseId>,
+) -> Result<()> {
     use crate::query::brep::BrepIdentity;
-    use crate::topology::brep::p5::{stitch_and_orient_with_identity, StitchAndOrientOptions};
+    use crate::topology::brep::p5::{
+        stitch_and_orient_one_solid, stitch_and_orient_with_identity, StitchAndOrientOptions,
+    };
     let keys = |object| crate::topology::brep::p2::caller_cache_key(key_of, object);
-    stitch_and_orient_with_identity(
-        k,
-        b,
-        &StitchAndOrientOptions::default(),
-        Some(BrepIdentity {
-            keys: &keys,
-            ..BrepIdentity::default()
-        }),
-    )
+    let identity = Some(BrepIdentity {
+        keys: &keys,
+        ..BrepIdentity::default()
+    });
+    let options = StitchAndOrientOptions::default();
+    match outside {
+        Some(outside) => stitch_and_orient_one_solid(k, b, &options, identity, outside),
+        None => stitch_and_orient_with_identity(k, b, &options, identity),
+    }
 }
 
 /// `CreatePlanarFaceWith3DCurves`; `None` when the curves bound no face.
@@ -476,6 +631,7 @@ fn box_faces(
     [length, width, height]: [f64; 3],
     frame: &Axis2Placement,
 ) -> Result<()> {
+    let alone = is_empty(brep) && one_solid_as_built(brep, frame, &[length, width, height]);
     let mut placement = Axis2Placement::new(frame.origin(), frame.x_axis(), frame.y_axis());
     let planes = [
         (frame.x_axis(), frame.y_axis(), length, width, height),
@@ -503,7 +659,15 @@ fn box_faces(
             create_face(k, brep, Surface::from(plane), uv)?;
         }
     }
-    stitch(k, brep)
+    // a box is convex: the outside of its first face is the side away from the middle of
+    // its second, the face across the box from it
+    let outside = match (alone, brep.face_list()) {
+        (true, [first, across, ..]) => {
+            side_away_from(k, brep, (*first, [0.5, 0.5]), (*across, [0.5, 0.5]))
+        }
+        _ => None,
+    };
+    stitch_solid(k, brep, outside)
 }
 
 impl PrimitiveCreation {
@@ -641,7 +805,7 @@ impl PrimitiveCreation {
     ) -> Result<()> {
         brep.set_editing_enabled(true);
         let cone = Cone::create_canonical(k, frame, base, top, height, false, false)?;
-        self.conic_solid(k, brep, &cone, base, top)
+        self.conic_solid(k, brep, &cone, base, top, None)
     }
 
     /// Solid cylinder of `radius` and `height` on the frame (`CreateCylinder`): the
@@ -687,7 +851,7 @@ impl PrimitiveCreation {
             }
         }
 
-        self.conic_solid(k, brep, &cylinder, radius, radius)?;
+        self.conic_solid(k, brep, &cylinder, radius, radius, Some((height, frame)))?;
 
         brep.set_editing_enabled(false);
         Ok(())
@@ -703,9 +867,15 @@ impl PrimitiveCreation {
         cone: &Cone,
         base: f64,
         top: f64,
+        cylinder: Option<(f64, &Axis2Placement)>,
     ) -> Result<()> {
+        // (asked only for a cylinder, on its frame with its height: a cone's making is as
+        // it was)
+        let alone = cylinder.is_some_and(|(height, frame)| {
+            is_empty(brep) && one_solid_as_built(brep, frame, &[base, top, height])
+        });
         let domain = cone.rev.base().natural_uv_domain();
-        cone_face(k, brep, cone, domain)?;
+        let side = cone_face(k, brep, cone, domain)?;
         let tolerance = brep.tolerance();
 
         // make base face
@@ -727,7 +897,19 @@ impl PrimitiveCreation {
             None
         };
         if base_face.is_some() || top_face.is_some() {
-            stitch(k, brep)?;
+            // a cylinder is convex: the outside of its side is away from the point of the
+            // side half a turn on (a quarter and three quarters of the way round, clear of
+            // the seam); a cone's solid is stitched as ever
+            let outside = if alone {
+                side_away_from(k, brep, (side, [0.25, 0.5]), (side, [0.75, 0.5]))
+            } else {
+                None
+            };
+            if cylinder.is_some() {
+                stitch_solid(k, brep, outside)?;
+            } else {
+                stitch(k, brep)?;
+            }
         }
         Ok(())
     }

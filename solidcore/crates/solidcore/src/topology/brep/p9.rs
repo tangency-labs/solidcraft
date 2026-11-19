@@ -183,6 +183,7 @@ pub fn find_infinite_region(
         if let [region] = regions.as_slice() {
             return Ok(Some(*region));
         }
+        k.work_counters.add_infinite_region_search();
         let tolerance = b.tolerance();
         let mut state = ShellRayState {
             region: None,
@@ -1737,6 +1738,11 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
         });
         seam = required(b.edgeuse(top)?.uv_trim_curve.as_ref(), "trim disappeared")?
             .is_domain_boundary(k, &domain, crate::math::EFF_ZERO)?;
+        // Not upstream (WR-361): a domain boundary is a seam only where the surface
+        // closes across it. Upstream takes every trim on the boundary for a seam, so
+        // an edge along an open boundary (a sliver along a plane face's side) got its
+        // other edge use's trim moved to the opposite side of the domain, off its edge
+        seam = seam_if_closed(k, b, face, &domain, seam)?;
         if seam != SurfParamType::Neither {
             let translation = match seam {
                 SurfParamType::UMin => Vec3::new(domain.x_length(), 0.0, 0.0),
@@ -1813,6 +1819,7 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
             .unwrap_or(end);
         }
         edge::insert_manifold_edge_end(b, edge_id, Some(end), false)?;
+        let mut reparameterised = false;
         let (new_face, new_fu1, new_fu2) = if new_loop_without_new_face {
             let fu1 = required(fp2::upward_faceuse(b, face)?, "face without upward use")?;
             let fu2 = required(b.faceuse(fu1)?.mate, "faceuse without mate")?;
@@ -1827,9 +1834,15 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
                 None => cached_shell,
             };
             let new_face = b.add_face_record(crate::topology::Face::new(shell))?;
-            let mut surface =
-                required(b.face(face)?.surface.as_ref(), "split face without surface")?
-                    .copy_and_add_analytics(k)?;
+            let old_surface =
+                required(b.face(face)?.surface.as_ref(), "split face without surface")?;
+            let mut surface = old_surface.copy_and_add_analytics(k)?;
+            // Not upstream (WR-361): without WR-450's fix, a B-spline recognised as an
+            // analytic is copied in the analytic's own parameterisation, so the trims of
+            // the edge uses that move onto the new face no longer lie on their edges
+            reparameterised = !k.fixes.analytic_copy_keeps_parameterization
+                && std::mem::discriminant(old_surface.kind())
+                    != std::mem::discriminant(surface.kind());
             let new_face_owner = (env.key_of)(EntityRef::Face(new_face));
             surface.set_owner(Some(new_face_owner));
             b.face_mut(new_face)?.surface = Some(surface);
@@ -1937,7 +1950,17 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
                     }
                 }
             }
+            // The loops new_face has now (after the separating cut's swap) carry trims in
+            // the old parameterisation: drop them before redistribute_inner_loops
+            // classifies the old face's inner loops against new_face, and again after,
+            // for the inner loops it moves over from the old face
+            if reparameterised {
+                drop_face_trims(b, new_face)?;
+            }
             redistribute_inner_loops(k, b, face, new_face, start_loop, new_loop, env)?;
+            if reparameterised {
+                drop_face_trims(b, new_face)?;
+            }
         } else {
             // Both boundary cycles belong to this face. Put one seam side first;
             // the orthogonal seam will join the two cycles into its outer loop.
@@ -2094,6 +2117,50 @@ fn find_vertex_sector(
 
 fn remove_old_loop_vertices(b: &mut Brep, vu: VertexuseId) -> Result<()> {
     crate::topology::brep::p1::rm_and_del_old_loop_vertices(b, vu)
+}
+
+/// Not upstream (WR-361): drops the UV trim curves of every edge use of `face`'s loops
+/// (the lazy caches of their edges' curves on the face, rebuilt when next asked for),
+/// for a face whose surface is no longer in the parameterisation they were made in.
+fn drop_face_trims(b: &mut Brep, face: FaceId) -> Result<()> {
+    let Some(fu) = crate::topology::face::p2::upward_faceuse(b, face)? else {
+        return Ok(());
+    };
+    let mate = b.faceuse(fu)?.mate;
+    for fu in std::iter::once(fu).chain(mate) {
+        for eu in crate::topology::edgeuse::p1::faceuse_edgeuses(b, fu, false, None)? {
+            crate::topology::edgeuse::p1::set_uv_trim_curve(
+                b,
+                eu,
+                crate::topology::edgeuse::p1::UvTrimCurveArg::Null,
+                0.0,
+                true,
+                None,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// `seam` (from `IsDomainBoundary` on `domain`, the face surface's natural domain) where
+/// the face's surface is closed across that boundary (`IsClosed` in its direction), else
+/// [`SurfParamType::Neither`]: only a closed direction has another side to carry the
+/// second edge use's trim to (WR-361; upstream takes any boundary for a seam).
+fn seam_if_closed(
+    k: &Kernel,
+    b: &Brep,
+    face: FaceId,
+    domain: &crate::geom::extent2d::Extent2d,
+    seam: SurfParamType,
+) -> Result<SurfParamType> {
+    let direction = match seam {
+        SurfParamType::UMin | SurfParamType::UMax => SurfParamType::U,
+        SurfParamType::VMin | SurfParamType::VMax => SurfParamType::V,
+        _ => return Ok(seam),
+    };
+    let surface = required(b.face(face)?.surface.as_ref(), "face without surface")?;
+    let (closed, _) = surface.is_closed(k, domain, direction, None, false)?;
+    Ok(if closed { seam } else { SurfParamType::Neither })
 }
 
 /// `sm_RedistributeSeamUVTrimCurves(pNewE, pUVTrimCurve, ..)`: the supplied trim

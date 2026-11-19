@@ -357,10 +357,20 @@ impl State<'_> {
                 let y = delta.cross(u) / (a * r);
                 return (x.hypot(y) - 1.0) * a.min(r);
             }
-            Some(CurveKind::Spline { pts, periodic, .. }) => {
+            Some(CurveKind::Spline { pts, periodic, degree, nurbs, .. }) => {
                 let p = self.spline_points(pts, *periodic);
                 if p.len() < 2 {
                     return q.dist(p.first().copied().unwrap_or_default());
+                }
+                // A general weighted spline has no Seg2 form. Its display chords pull an
+                // on-curve point off the spline, including points used as Break/Trim boundaries.
+                if let Some(record) = nurbs.as_ref().and_then(|n| n.rational_record(&p, *degree)) {
+                    let Some(hit) = solidcore_ops::curve::closest_point(&record, [q.x, q.y, 0.0], 1e-9).ok().flatten() else { return f64::INFINITY };
+                    let Some((_, tangent)) = solidcraft_geom::brep::eval::CurveEval::new(&record).ok().and_then(|c| c.derivs(hit.parameter)) else {
+                        return f64::INFINITY;
+                    };
+                    let delta = q - Vec2::new(hit.point[0], hit.point[1]);
+                    return delta.len().copysign(Vec2::new(tangent.x, tangent.y).cross(delta));
                 }
                 self.segs(c)
             }
