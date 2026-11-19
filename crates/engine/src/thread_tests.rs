@@ -236,6 +236,31 @@ fn crossed_conical_buttress_thread_follows_both_flank_angles() {
 }
 
 #[test]
+fn crossed_conical_buttress_thread_keeps_the_short_crest_on_a_reversed_point() {
+    use solidcraft_kernel::PointClass::{Inside, Outside};
+
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"base":[0,0,-3],"radius":4,"height":3,"body_name":"Screw"}));
+    run(&mut s, "solid.cone", json!({"radius":4,"top_radius":0,"height":8,"operation":"join","targets":["Screw"]}));
+    run(
+        &mut s,
+        "solid.thread",
+        json!({"face":[4,0,-1],"designation":"S8x1.25","modeled":true,"point":"follow","point_depth":"fade","hand":"both","length":2.4}),
+    );
+    let state = s.model.state();
+    let body = &state.body("Screw").unwrap().body;
+
+    // At 0.065 mm from the apex the crest lies between the two 3° flanks
+    // on the -Y side. The other side is cut back to half the stock radius.
+    let z = 7.935;
+    let root = (8.0 - z) / 4.0;
+    assert_eq!(body.classify_point(Vec3::new(0.0, root - 0.001, z)).unwrap(), Inside);
+    assert_eq!(body.classify_point(Vec3::new(0.0, root + 0.001, z)).unwrap(), Outside);
+    assert_eq!(body.classify_point(Vec3::new(0.0, -0.03, z)).unwrap(), Inside);
+    assert_eq!(body.unmeshed_faces(), 0);
+}
+
+#[test]
 fn conical_thread_keeps_its_profile_on_a_narrow_flat_tip() {
     let depth = 5.0 * 3f64.sqrt() / 16.0 * 1.25;
     for (tip_radius, mode) in [(0.2, "fade"), (0.7, "full")] {

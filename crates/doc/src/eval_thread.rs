@@ -1232,15 +1232,38 @@ fn crossed_point_groove(t: &ThreadInfo, groove: &PointGroove, meridian: Plane, f
             let mut pieces = Vec::new();
             for pair in splits.windows(2) {
                 let (a, b) = (pair[0], pair[1]);
+                // A short lobe's buried cap can have edges near the loft's
+                // absolute stitching tolerance. Build it at pitch scale and
+                // return it to part coordinates before joining it to the core.
+                let span = b - a;
+                let magnification = if span < 0.025 * pitch { (pitch / span).min(100.0) } else { 1.0 };
+                let origin = if magnification > 1.0 { point(a) } else { Vec3::ZERO };
+                let local = |p| (p - origin) * magnification;
                 let sections = (0..=8)
                     .map(|i| {
-                        let h = a + (b - a) * f64::from(i) / 8.0;
+                        let h = a + span * f64::from(i) / 8.0;
                         let skirt = root(h) - skirt_depth(h);
-                        let section = crossed_lobe_section(skirt, baseline(h), gap(h), tangents, scale);
-                        (Plane { origin: point(h), x, y: axis.cross(x) }, section)
+                        let section = crossed_lobe_section(
+                            skirt * magnification,
+                            baseline(h) * magnification,
+                            gap(h).map(|g| g * magnification),
+                            tangents,
+                            scale / magnification,
+                        );
+                        (Plane { origin: local(point(h)), x, y: axis.cross(x) }, section)
                     })
                     .collect::<Vec<_>>();
-                pieces.push(kernel::loft_aligned(&sections, degree, apex.filter(|_| a == first))?);
+                let loft = kernel::loft_aligned(&sections, degree, apex.filter(|_| a == first).map(local))?;
+                let loft = if magnification > 1.0 {
+                    let s = magnification.recip();
+                    kernel::transform_matrix(
+                        &loft,
+                        [[s, 0.0, 0.0, 0.0], [0.0, s, 0.0, 0.0], [0.0, 0.0, s, 0.0], [origin.x, origin.y, origin.z, 1.0]],
+                    )?
+                } else {
+                    loft
+                };
+                pieces.push(loft);
             }
             if let [one] = pieces.as_slice() {
                 lobes.push(one.clone());
