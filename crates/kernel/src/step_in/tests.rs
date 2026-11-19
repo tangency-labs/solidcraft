@@ -3173,6 +3173,109 @@ fn a_cylinder_whose_rim_lies_a_little_off_its_wall_keeps_its_wall() {
     assert!(m.volume > low * (1.0 - 1e-6) && m.volume < high * (1.0 + 1e-6), "volume {} outside {low}..{high}", m.volume);
 }
 
+/// A cylinder of radius 5 and height 4 as a general placement writes one (#18779): its wall an
+/// exact rational spline closed round u whose knots start at angle `start`, bounded by the
+/// file's own seam (a line at angle 0) and by rims that are rational spline circles starting at
+/// their vertex there.
+fn spline_band_step(start: f64) -> String {
+    use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, FRAC_PI_4, SQRT_2, TAU};
+    let (r, h) = (5.0, 4.0);
+    let mut out: Vec<String> = Vec::new();
+    let mut add = |s: String| {
+        out.push(format!("#{}={s};", out.len() + 1));
+        out.len()
+    };
+    let point = |p: [f64; 3]| format!("CARTESIAN_POINT('',({:.16},{:.16},{:.16}))", p[0], p[1], p[2]);
+    // Four quarter arcs from angle `a0` at height `z`: on the circle at the quarters, at the
+    // corners of their square between, weighted 1/√2 there.
+    let quarters = |a0: f64, z: f64| -> Vec<([f64; 3], f64)> {
+        (0..9)
+            .map(|k| {
+                let a = a0 + f64::from(k) * FRAC_PI_4;
+                let (d, w) = if k % 2 == 0 { (r, 1.0) } else { (r * SQRT_2, FRAC_1_SQRT_2) };
+                ([d * a.cos(), d * a.sin(), z], w)
+            })
+            .collect()
+    };
+    let quarter_knots = format!("(0.,{FRAC_PI_2:.16},{:.16},{:.16},{TAU:.16})", 2.0 * FRAC_PI_2, 3.0 * FRAC_PI_2);
+    let knots = format!("(3,2,2,2,3),{quarter_knots}");
+    let ids = |v: &[usize]| v.iter().map(|i| format!("#{i}")).collect::<Vec<_>>().join(",");
+    let mut rim = |z: f64| {
+        let pts = quarters(0.0, z);
+        let p: Vec<usize> = pts.iter().map(|(p, _)| add(point(*p))).collect();
+        let w: Vec<String> = pts.iter().map(|(_, w)| format!("{w:.16}")).collect();
+        let curve = add(format!(
+            "( BOUNDED_CURVE() B_SPLINE_CURVE(2,({}),.UNSPECIFIED.,.T.,.F.) B_SPLINE_CURVE_WITH_KNOTS({knots},.UNSPECIFIED.) CURVE() GEOMETRIC_REPRESENTATION_ITEM() RATIONAL_B_SPLINE_CURVE(({})) REPRESENTATION_ITEM('') )",
+            ids(&p),
+            w.join(",")
+        ));
+        let v = add(point([r, 0.0, z]));
+        let v = add(format!("VERTEX_POINT('',#{v})"));
+        (add(format!("EDGE_CURVE('',#{v},#{v},#{curve},.T.)")), v)
+    };
+    let ((bottom, v0), (top, v1)) = (rim(0.0), rim(h));
+    let o = add(point([r, 0.0, 0.0]));
+    let d = add("DIRECTION('',(0.,0.,1.))".into());
+    let d = add(format!("VECTOR('',#{d},{h:.16})"));
+    let line = add(format!("LINE('',#{o},#{d})"));
+    let seam = add(format!("EDGE_CURVE('',#{v0},#{v1},#{line},.T.)"));
+    let (lo, hi) = (quarters(start, 0.0), quarters(start, h));
+    let rows: Vec<String> = lo.iter().zip(&hi).map(|((a, _), (b, _))| format!("(#{},#{})", add(point(*a)), add(point(*b)))).collect();
+    let weights: Vec<String> = lo.iter().map(|(_, w)| format!("({w:.16},{w:.16})")).collect();
+    let wall = add(format!(
+        "( BOUNDED_SURFACE() B_SPLINE_SURFACE(2,1,({}),.UNSPECIFIED.,.T.,.F.,.F.) B_SPLINE_SURFACE_WITH_KNOTS((3,2,2,2,3),(2,2),{quarter_knots},(0.,{h:.16}),.UNSPECIFIED.) GEOMETRIC_REPRESENTATION_ITEM() RATIONAL_B_SPLINE_SURFACE(({})) REPRESENTATION_ITEM('') SURFACE() )",
+        rows.join(","),
+        weights.join(",")
+    ));
+    let mut plane = |z: f64| {
+        let (o, n, x) = (add(point([0.0, 0.0, z])), add("DIRECTION('',(0.,0.,1.))".into()), add("DIRECTION('',(1.,0.,0.))".into()));
+        let a = add(format!("AXIS2_PLACEMENT_3D('',#{o},#{n},#{x})"));
+        add(format!("PLANE('',#{a})"))
+    };
+    let (pb, pt) = (plane(0.0), plane(h));
+    let mut face = |uses: &[(usize, bool)], surface: usize, sense: bool| {
+        let oes: Vec<usize> = uses.iter().map(|(e, o)| add(format!("ORIENTED_EDGE('',*,*,#{e},{})", if *o { ".T." } else { ".F." }))).collect();
+        let l = add(format!("EDGE_LOOP('',({}))", ids(&oes)));
+        let b = add(format!("FACE_OUTER_BOUND('',#{l},.T.)"));
+        add(format!("ADVANCED_FACE('',(#{b}),#{surface},{})", if sense { ".T." } else { ".F." }))
+    };
+    // Round the bottom counter-clockwise about +z, up the seam, back round the top and down the
+    // seam: the wall's normal points out.
+    let side = face(&[(bottom, true), (seam, true), (top, false), (seam, false)], wall, true);
+    let cap_b = face(&[(bottom, false)], pb, false);
+    let cap_t = face(&[(top, true)], pt, true);
+    let shell = add(format!("CLOSED_SHELL('',(#{side},#{cap_b},#{cap_t}))"));
+    let solid = add(format!("MANIFOLD_SOLID_BREP('Band',#{shell})"));
+    add(format!("SHAPE_REPRESENTATION('',(#{solid}),$)"));
+    format!("{HEAD}{}\n{TAIL}", out.join("\n"))
+}
+
+/// A cylinder whose wall is a spline closed round u with the file's own seam a little off the
+/// knots' start, as a general (non-rigid) placement writes every round face. Both of the seam's
+/// uses were given its one u inside the knots, a turn short: the wall enclosed no (u, v) area, was
+/// left out, and the part read as surfaces. A vendor's motor plate came in as 229 loose faces for
+/// one such band (#18779). The wall is started at its seam, and the part reads whole.
+#[test]
+fn a_band_round_a_closed_spline_with_its_seam_off_the_knots_start_reads_whole() {
+    use std::f64::consts::{PI, TAU};
+    // On the knots' start, the issue's 0.0376 rad off it, well inside, half a turn, just short of
+    // the end.
+    for start in [0.0, 0.037_592_7, 0.3, 1.0, 3.0, TAU - 0.05] {
+        let imp = step_import(&spline_band_step(start)).unwrap_or_else(|e| panic!("start {start}: {e}"));
+        assert!(
+            !imp.warnings.iter().any(|w| w.contains("left out") || w.contains("not imported") || w.contains("as surfaces")),
+            "start {start}: {:?}",
+            imp.warnings
+        );
+        assert_eq!(imp.bodies.len(), 1, "start {start}");
+        assert!(imp.bodies[0].closed, "start {start}");
+        let m = measure(&imp.bodies[0].body).unwrap();
+        assert_eq!(m.faces, 3, "start {start}");
+        assert!(rel(m.volume, 100.0 * PI) < 1e-6, "start {start}: volume {}", m.volume);
+        assert!(rel(m.area, 90.0 * PI) < 1e-6, "start {start}: area {}", m.area);
+    }
+}
+
 /// The volume of the one solid `solidcore_step::topology` reads from `text` into schema 4,
 /// measured as the body of that record.
 pub(super) fn schema_4_volume(text: &str) -> f64 {

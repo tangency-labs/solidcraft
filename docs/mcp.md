@@ -570,9 +570,13 @@ count. A line in a wording the compact reply doesn't know stays as it is.
 A `warning` that is null is left out. A null `error` stays, so a client that reads `error` still
 finds it. A `display_value` the same as `value` (a new parameter in its own unit) is left out.
 
-`timeline.export_script` with a `path` writes the script and replies with `path` (the file
-written, as an absolute path), `bytes` (its size) and `steps`. The compact reply leaves the script
-itself out, as it is in the file. An older app that gives no `bytes` keeps the script in the reply.
+`timeline.export_script` with a `path` writes the script and replies with `path` (as given),
+`absolute_path` (the file written, in full: a relative `path` resolves against the folder the app
+runs in), `bytes` (its size) and `steps`. `absolute_path` is left out when it can't be worked out:
+in browser storage, or when the app's folder has a name that isn't valid UTF-8. On Linux and macOS
+a `..` stays in it, because removing it from the text alone would name another file when the folder
+before it is a symbolic link; Windows removes it, as Windows resolves the path that way itself. The compact reply leaves the script itself out, as it is in the file. An older app
+that gives no `bytes` keeps the script in the reply.
 
 All other fields and errors are unchanged;
 inspection commands still return their complete results. Compaction uses the

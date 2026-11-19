@@ -39,7 +39,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("decal")
         .contract(&DECAL_CONTRACT)
         .output(output_schema_for::<CanvasPlaced>)
-        .params("path | data (PNG, JPEG or SVG); resolution?: pixels (an SVG's longest side, default 1024); face: [x,y,z] on a planar face (the image is centred there), or the picked face as sketch.create's plane takes it ({face, body, index, path?}); width?: mm; angle?: deg; opacity?: (default 1); frame?: true ties the image to a construction rectangle around it, as canvas.frame_sketch does; \"auto\" only in the sketch being edited, when the face is on its plane"),
+        .params("path | data (PNG, JPEG or SVG); resolution?: pixels (an SVG's longest side, default 1024); face: [x,y,z] on a planar face (the image is centred there), or the picked face as sketch.create's plane takes it ({face, body, index, path?}); width?: mm; angle?: deg; opacity?: (default 1); frame?: true ties the image to a construction rectangle around it, as canvas.frame_sketch does; \"auto\" only in the sketch being edited, when the face is on its plane. A decal is part of the model's look: URDF export writes it as a textured visual of its component's link"),
     CommandSpec::new("canvas.edit", "Edit Canvas", crate::checked!("canvas.edit", edit_canvas))
         .at("SKETCH", "INSERT")
         .icon("canvas")
