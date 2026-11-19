@@ -3014,6 +3014,19 @@ fn extend_dialog_goes_up_to_a_picked_face_or_plane() {
     assert!(to_object(&h), "editing shows To Object");
     let picked = h.app.dialog.as_ref().unwrap().inputs.iter().find(|i| i.label == "To Object").map(|i| i.items.len());
     assert_eq!(picked, Some(1), "with the face picked");
+    // A target the window can't show as a pick is kept unseen; Distance drops it, so going back
+    // to To Object needs a new pick rather than bringing the old target back.
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.extra.insert("up_to".into(), json!({"body": "Block", "point": [30.0, 5.0, 0.0]}));
+        for i in d.inputs.iter_mut().filter(|i| i.label == "To Object") {
+            i.items.clear();
+        }
+    }
+    assert!(crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).is_ok(), "the kept target stands in for the pick");
+    choose(&mut h, "Distance");
+    choose(&mut h, "To Object");
+    assert!(crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).is_err(), "Distance dropped the kept target");
     choose(&mut h, "Distance");
     {
         let d = h.app.dialog.as_mut().unwrap();

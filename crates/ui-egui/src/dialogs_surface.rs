@@ -851,8 +851,8 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
             let mut p = json!({"body": body, "edges": edges});
             let picked = inputs.iter().find(|i| i.label == EXTEND_TO).and_then(|i| i.items.first());
             // A plane or face kept from the feature (one the dialog can't pick); a stored "bounds"
-            // goes with Distance.
-            let kept = extra.get("up_to").is_some_and(|v| v != "bounds");
+            // goes with Distance, and a null is one Distance dropped.
+            let kept = extra.get("up_to").is_some_and(|v| !v.is_null() && v != "bounds");
             match (*to_object, picked) {
                 (true, Some(Sel::Plane { name })) => p["up_to"] = json!(name),
                 (true, Some(Sel::Face { body, point, .. })) => p["up_to"] = json!({"body": body, "point": pt(*point)}),
