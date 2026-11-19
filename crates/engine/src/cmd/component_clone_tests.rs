@@ -1081,6 +1081,55 @@ fn pasted_coil_and_datum_keep_the_selected_ancestor_occurrences() {
     }
 }
 
+#[test]
+fn pasted_move_keeps_its_placed_edge_in_another_component() {
+    use solidcraft_doc::FeatureKind;
+    use solidcraft_doc::construct::GeoRef;
+
+    let mut s = Session::default();
+    let external = component(&mut s, "External");
+    let external_path = vec![s.doc.occurrence_of(external).unwrap().id];
+    let anchor = run(&mut s, "solid.box", json!({"length":2,"width":2,"height":2,"body_name":"Anchor"}))["feature"].as_u64().unwrap();
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    let part = component(&mut s, "Part");
+    let part_occurrence = s.doc.occurrence_of(part).unwrap().id;
+    run(&mut s, "solid.box", json!({"base":[12,0,0],"length":2,"width":2,"height":2,"body_name":"Work"}));
+    let moved = run(&mut s, "solid.move", json!({"bodies":["Work"],"axis":[0,0,1],"angle":"20 deg"}))["feature"].as_u64().unwrap();
+    let name = format!("F{anchor}:-x|F{anchor}:-y");
+    let mut doc = (*s.doc).clone();
+    let FeatureKind::Move { rotate_about, .. } = &mut doc.feature_mut(moved).unwrap().kind else { panic!("expected a Move") };
+    *rotate_about = Some(GeoRef::PlacedEdge {
+        body: "Anchor".into(),
+        path: external_path.clone(),
+        author_path: vec![part_occurrence],
+        at: [0., 0., 1.].into(),
+        name: name.clone(),
+    });
+    // Exercise the persisted placed edge, including evaluation before and after the copy.
+    let mut s = Session::new(doc);
+    let result = s.model.result(moved).unwrap();
+    assert!(result.error.is_none() && result.warning.is_none(), "{result:?}");
+    let cloned = run(&mut s, "component.paste_new", json!({"component":part}));
+    let owner = cloned["component"].as_u64().unwrap();
+    let root = cloned["occurrence"].as_u64().unwrap();
+    let (feature, edge) = s
+        .doc
+        .features
+        .iter()
+        .find_map(|feature| match &feature.kind {
+            FeatureKind::Move { rotate_about: Some(edge), .. } if feature.component == owner => Some((feature, edge)),
+            _ => None,
+        })
+        .unwrap();
+    let GeoRef::PlacedEdge { body, path, author_path, name: copied_name, .. } = edge else { panic!("expected a placed edge") };
+    assert_eq!(body.as_ref(), "Anchor");
+    assert_eq!(path, &external_path);
+    assert_eq!(author_path, &[root]);
+    assert_eq!(copied_name, &name);
+    let result = s.model.result(feature.id).unwrap();
+    assert!(result.error.is_none() && result.warning.is_none(), "{result:?}");
+}
+
 /// Paste New of an imported assembly: the copy's parts are held by a rigid group of its own,
 /// so the copy moves as one too, and unlocking one leaves the other held.
 #[test]

@@ -48,6 +48,88 @@ fn top_front(b: &Body) -> usize {
     edge_at(b, [15.0, 0.0, 10.0])
 }
 
+/// Closed forms recorded in
+/// `plan/findings/blend.fillet_solver_p5--neighbouring-chamfers-closed-forms.md`.
+/// The overlap of the two removed triangular prisms is integrated over depth w.
+fn neighbouring_chamfer_measures(l: f64, a: f64, b: f64, c: f64, d: f64) -> (f64, f64) {
+    let m = b.min(d);
+    let overlap = a * c * (m - m * m * (1.0 / b + 1.0 / d) / 2.0 + m * m * m / (3.0 * b * d));
+    let volume = l * l * l - l * a * b / 2.0 - l * c * d / 2.0 + overlap;
+    let area = l * l + (l - c) * (l - a) + l * (l - b) - c * (d - b).max(0.0).powi(2) / (2.0 * d)
+        + l * l
+        - c * d / 2.0
+        + l * l
+        - a * b / 2.0
+        + l * (l - d)
+        - a * (b - d).max(0.0).powi(2) / (2.0 * b)
+        + a.hypot(b) * (l - c / b * (m - m * m / (2.0 * d)))
+        + c.hypot(d) * (l - a / d * (m - m * m / (2.0 * b)));
+    (volume, area)
+}
+
+#[test]
+fn neighbouring_unequal_chamfers_build_in_either_history_order() {
+    all_fixes();
+    let mut failures = Vec::new();
+    for scale in [1.0, 0.5, 2.0] {
+        for flip_angle in [true, false] {
+            for flip_distances in [false, true] {
+                for reverse in [false, true] {
+                    let case = (scale, flip_angle, flip_distances, reverse);
+                    let b = make_box([0.0; 3], [10.0 * scale; 3]).unwrap();
+                    let angle = || {
+                        chamfer_sides_facing(
+                            &b,
+                            &[edge_at(&b, [5.0 * scale, 0.0, 10.0 * scale])],
+                            scale,
+                            ChamferSecond::Angle(PI / 6.0),
+                            [0.0, 0.0, if flip_angle { -1.0 } else { 1.0 }],
+                        )
+                    };
+                    let distances = || {
+                        chamfer_sides_facing(
+                            &b,
+                            &[edge_at(&b, [10.0 * scale, 5.0 * scale, 10.0 * scale])],
+                            scale,
+                            ChamferSecond::Distance(3.0 * scale),
+                            [0.0, 0.0, if flip_distances { -1.0 } else { 1.0 }],
+                        )
+                    };
+                    let result = if reverse {
+                        distances().unwrap();
+                        angle()
+                    } else {
+                        angle().unwrap();
+                        distances()
+                    };
+                    if let Err(error) = result {
+                        failures.push((case, error));
+                        continue;
+                    }
+                    let depth = scale * (PI / 6.0).tan();
+                    let (a, front) = if flip_angle {
+                        (depth, scale)
+                    } else {
+                        (scale, depth)
+                    };
+                    let (c, right) = if flip_distances {
+                        (3.0 * scale, scale)
+                    } else {
+                        (scale, 3.0 * scale)
+                    };
+                    let (want_volume, want_area) =
+                        neighbouring_chamfer_measures(10.0 * scale, a, front, c, right);
+                    assert!(b.check(CheckLevel::All).unwrap().is_valid(), "{case:?}");
+                    assert_eq!(b.counts().unwrap()[0], 8, "{case:?}");
+                    assert!(rel(volume(&b), want_volume) < 1e-9, "{case:?}");
+                    assert!(rel(b.area(1e-8).unwrap(), want_area) < 1e-9, "{case:?}");
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:?}");
+}
+
 #[test]
 fn rounds_and_chamfers_take_their_closed_forms() {
     all_fixes();
@@ -302,7 +384,7 @@ const CREASE_PLATE_MITRE: [(f64, f64); 3] = [(3.0, 148.6327), (3.5, 201.0834), (
 /// to that end, so it had no length and the corner's loop did not close ("Corner Geometry
 /// Computation Failure"). The piece is now the crease line continued: the rounds build valid
 /// at the full check, within the corner ball's eighth of the mitred prisms. Run under the
-/// application's fix set (every fix less `kernel_cases/held_back.json`).
+/// application's fix set (every fix on).
 #[test]
 fn rounds_overflowing_a_shallow_concave_crease_build() {
     for (r, mitre) in CREASE_PLATE_MITRE {
@@ -2085,6 +2167,87 @@ fn a_chamfer_too_large_is_refused_with_the_distance_that_builds() {
     assert!(rel(removed, want) <= 1e-9, "{removed} vs {want}");
 }
 
+/// The two selected rims of a quadratic-ended extrusion approach across a 0.6 mm
+/// terminal strip (#19108). A fixed-angle refusal names the first distance and a
+/// point on the limiting top face; explicit two-distance input keeps its common scale.
+#[test]
+fn a_distance_angle_chamfer_on_a_curved_tip_names_its_distance_edge_and_limiting_face() {
+    use solidcore::nurbs::b_spline_curve::BSplineCurve;
+    use solidcore::nurbs::math::CPoint;
+    use solidcore_ops::RoomReason;
+
+    all_fixes();
+    let outline = || {
+        let quadratic = BSplineCurve::from_data(
+            3,
+            2,
+            5,
+            2,
+            &[
+                CPoint::new(10.0, 0.6, 0.0, 1.0),
+                CPoint::new(5.0, 0.6, 0.0, 1.0),
+                CPoint::new(0.0, 5.0, 0.0, 1.0),
+            ],
+            &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let native = swept(
+            &[
+                segment((0.0, 0.0), (10.0, 0.0)),
+                segment((10.0, 0.0), (10.0, 0.6)),
+                solidcore::curve::curve::Curve::from(quadratic),
+                segment((0.0, 5.0), (0.0, 0.0)),
+            ],
+            10.0,
+        );
+        // Application bodies pass through the record boundary: a native curved
+        // extrusion wall returns as a B-spline with the same translated net.
+        let (record, _) = native.to_record().unwrap();
+        Body::from_record(&record, true).unwrap().0
+    };
+    let angle = 80.0_f64.to_radians();
+    let mut distance_fit = None;
+    for second in [
+        ChamferSecond::Angle(angle),
+        ChamferSecond::Distance(angle.tan()),
+    ] {
+        let b = outline();
+        let before = b.to_record().unwrap().0;
+        let picks = [edge_at(&b, [5.0, 0.0, 10.0]), edge_at(&b, [5.0, 1.7, 10.0])];
+        let e = chamfer_sides_facing(&b, &picks, 1.0, second, [0.0, 0.0, 1.0]).unwrap_err();
+        let Error::TooLarge {
+            size,
+            kind,
+            at: Some(at),
+            face: Some(face),
+            why: Some(RoomReason::BandsOverlap),
+        } = e
+        else {
+            panic!("{e:?}");
+        };
+        let expected_kind = match second {
+            ChamferSecond::Angle(_) => FitKind::Distance,
+            ChamferSecond::Distance(_) => FitKind::Scale,
+        };
+        assert_eq!(kind, expected_kind);
+        // The terminal event is 0.6 / 2; the named open fit is below it.
+        assert!(size > 0.29 && size < 0.3, "{size}");
+        assert!((at[2] - 10.0).abs() < 1e-12, "edge {at:?}");
+        assert!((face[2] - 10.0).abs() < 1e-12, "limiting top face {face:?}");
+        assert!(face[0] > 0.0 && face[0] < 10.0 && face[1] > 0.0, "{face:?}");
+        assert_eq!(
+            b.to_record().unwrap().0,
+            before,
+            "a refusal leaves its input intact"
+        );
+        if kind == FitKind::Distance {
+            distance_fit = Some(size);
+        } else {
+            assert!((size - distance_fit.unwrap()).abs() < 1e-12);
+        }
+    }
+}
+
 /// #3145: a setback longer than an edge at a real set-back corner is the kernel's refusal before
 /// the trace, naming the largest that fits: the block's corner at (30, 0, 10) with its three
 /// edges rounded 1 and set back 50, its shortest edge 10 long. A setback of 10 would leave that
@@ -2342,6 +2505,96 @@ fn the_faces_a_round_is_carried_on_past_are_the_kernels() {
         solidcore_ops::carried_faces(&b, inner, 0.0),
         Err(Error::Argument)
     ));
+}
+
+/// The L of legs 40 and width 20, `height` high, less what lies above the plane through
+/// (`x0`, `z0`) and (`x1`, `z1`) in the side view (x across, z up), from `x0` to `x1`.
+fn l_cut_by_a_slope(height: f64, [x0, z0]: [f64; 2], [x1, z1]: [f64; 2]) -> Body {
+    let l = [
+        (0.0, 0.0),
+        (40.0, 0.0),
+        (40.0, 20.0),
+        (20.0, 20.0),
+        (20.0, 40.0),
+        (0.0, 40.0),
+    ];
+    let profile: Vec<_> = (0..l.len())
+        .map(|i| segment(l[i], l[(i + 1) % l.len()]))
+        .collect();
+    let line = |a: [f64; 2], b: [f64; 2]| Curve::Line {
+        start: [a[0], -1.0, a[1]],
+        end: [b[0], -1.0, b[1]],
+    };
+    let top = z0.max(z1) + height;
+    let above = extrude(
+        &[
+            line([x0, z0], [x1, z1]),
+            line([x1, z1], [x1, top]),
+            line([x1, top], [x0, top]),
+            line([x0, top], [x0, z0]),
+        ],
+        [0.0, 1.0, 0.0],
+        42.0,
+        0.0,
+        DraftCorner::default(),
+        true,
+    )
+    .unwrap();
+    solidcore_ops::boolean::boolean(
+        swept(&profile, height),
+        above,
+        solidcore_ops::BooleanOp::Subtract,
+    )
+    .unwrap()
+    .unwrap()
+}
+
+/// The L above, 30 high, its top cut off by the plane z = 15 + x / 4: the inner upright edge
+/// at (20, 20) now runs from the flat bottom to that plane, 20 up. The plane holds the normal
+/// of the edge's face y = 20 and not that of its face x = 20, so a round is carried on past
+/// the first only. Its slab's outline lies in y = 20 with two corners on the bottom and two
+/// on the sloped plane. The traces of the bottom and the plane cross at x = -60, 80 from the
+/// edge, on the side x falls: a round of 6 has its slab reach (6 + 80) / 2 = 43 that way, to
+/// x = -23 where the plane is 9.25 up, and the full reach the other way. A round of 81 has
+/// its contact line past the crossing and nothing to carry on.
+///
+/// Cut off instead by a plane that rises 2 for 1 (z = 2 x - 10, from x = 10 on), 63.4
+/// degrees from square to the edge, past the 60 the kernel takes, the edge carries nothing.
+#[test]
+fn a_round_is_carried_on_between_a_flat_end_and_a_sloped_one() {
+    all_fixes();
+    let b = l_cut_by_a_slope(30.0, [-1.0, 14.75], [41.0, 25.25]);
+    let inner = nearest_edge(&b, [20.0, 20.0, 10.0]);
+    let found = solidcore_ops::carried_faces(&b, inner, 6.0).unwrap();
+    assert_eq!(found.len(), 1);
+    let c = found[0];
+    let v = |a: [f64; 3]| Vec3::new(a[0], a[1], a[2]);
+    let (along, across) = (v(c.along), v(c.across));
+    assert!((along.cross(across) - Vec3::new(0.0, 1.0, 0.0)).length() < 1e-9);
+    let corners = c.outline.map(|[a, x]| v(c.origin) + along * a + across * x);
+    let has = |x: f64, z: f64| {
+        corners
+            .iter()
+            .any(|p| (*p - Vec3::new(x, 20.0, z)).length() < 1e-6)
+    };
+    let far = 20.0 + c.reach;
+    assert!(
+        has(-23.0, 0.0) && has(-23.0, 9.25) && has(far, 0.0) && has(far, 15.0 + far / 4.0),
+        "{corners:?}"
+    );
+    assert_eq!(c.depth, [-c.reach, 0.0]);
+    assert_eq!(
+        solidcore_ops::carried_faces(&b, inner, 79.0).unwrap().len(),
+        1
+    );
+    assert!(solidcore_ops::carried_faces(&b, inner, 81.0)
+        .unwrap()
+        .is_empty());
+    let steep = l_cut_by_a_slope(70.0, [10.0, 10.0], [41.0, 72.0]);
+    let inner = nearest_edge(&steep, [20.0, 20.0, 10.0]);
+    assert!(solidcore_ops::carried_faces(&steep, inner, 6.0)
+        .unwrap()
+        .is_empty());
 }
 
 /// The kernel rig's fix set (SolidCraft's preset, `solidcraft_fixes.rs`), as the rig runs its
@@ -3514,6 +3767,131 @@ fn a_round_along_a_whole_circle_builds_alike_on_both_ends_of_a_mirrored_ring() {
     }
 }
 
+/// Acid-1 stage 4: both rims of the upper half torus, including the outer rim's
+/// detour around an r0.7 notch, are rounded r0.8 after joining the seam's boss.
+#[test]
+fn both_flat_face_loops_of_a_notched_half_torus_round() {
+    use solidcore_ops::boolean::boolean;
+    use solidcore_ops::sweep::revolve;
+    use solidcore_ops::BooleanOp;
+
+    all_fixes();
+    let reopen = |body: Body| {
+        let (record, _) = body.to_record().unwrap();
+        Body::from_record(&record, true).unwrap().0
+    };
+    let cylinder = |base, radius, height| {
+        let (s, c) = 0.6131_f64.sin_cos();
+        extrude(
+            &[Curve::Arc {
+                center: base,
+                axis: [0.0, 0.0, 1.0],
+                reference: [c, s, 0.0],
+                radius,
+                start: 0.0,
+                end: 2.0 * PI,
+            }],
+            [0.0, 0.0, 1.0],
+            height,
+            0.0,
+            DraftCorner::Curvature,
+            true,
+        )
+        .unwrap()
+    };
+    let ring = revolve(
+        &[Curve::Arc {
+            center: [30.0, 0.0, 0.0],
+            axis: [0.0, -1.0, 0.0],
+            reference: [1.0, 0.0, 0.0],
+            radius: 8.0,
+            start: 0.0,
+            end: 2.0 * PI,
+        }],
+        [0.0; 3],
+        [0.0, 0.0, 1.0],
+        2.0 * PI,
+        true,
+    )
+    .unwrap();
+    let below = make_box([-100.0; 3], [200.0, 200.0, 100.0]).unwrap();
+    let half = reopen(
+        boolean(reopen(ring), below, BooleanOp::Subtract)
+            .unwrap()
+            .unwrap(),
+    );
+    let boss = cylinder([29.984954243751982, 0.95001, -1.9], 0.95, 1.9);
+    let joined = reopen(boolean(half, boss, BooleanOp::Union).unwrap().unwrap());
+    let notch = cylinder([0.0, 38.0, -1.0], 0.7, 4.0);
+    let body = reopen(
+        boolean(joined, notch, BooleanOp::Subtract)
+            .unwrap()
+            .unwrap(),
+    );
+    let edges: Vec<_> = [[-38.0, 0.0, 0.0], [0.0, 37.3, 0.0], [-22.0, 0.0, 0.0]]
+        .into_iter()
+        .map(|point| nearest_edge(&body, point))
+        .collect();
+    // solid.fillet propagates the picks across tangent joins by default (2 degrees).
+    let edges = tangent_chain(&body, None, &edges, &[], 2.0 * PI / 180.0)
+        .unwrap()
+        .members;
+    let run = || blend(&body, Blend::Round, &edges, &[0.8], &[], Corners::Filled);
+    #[cfg(feature = "profile")]
+    let (result, profiles) = solidcore_ops::session::profiled(run);
+    #[cfg(not(feature = "profile"))]
+    let result = run();
+    let result = result.unwrap();
+    #[cfg(feature = "profile")]
+    for call in profiles {
+        let certificates: u64 = call
+            .profile
+            .summary
+            .iter()
+            .filter(|s| s.name == "blend::certificate::gn_certify_span")
+            .map(|s| s.count)
+            .sum();
+        assert_eq!(
+            certificates, 0,
+            "circular spines need no generic span certificates"
+        );
+    }
+    assert!(result.dropped.iter().all(|dropped| !dropped));
+    assert!(body.is_manifold_solid().unwrap());
+    let report = body.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(body.solid_count().unwrap(), 1);
+    // At z=0.1 the rounded rims are at radii 22.4573 and 37.5427;
+    // the notch's radius is 1.1127. The boss and notch roof stay intact.
+    for (inside, outside) in [
+        ([-37.4, 0.0, 0.1], [-37.8, 0.0, 0.1]),
+        ([-22.6, 0.0, 0.1], [-22.3, 0.0, 0.1]),
+        ([0.0, 36.8, 0.1], [0.0, 37.2, 0.1]),
+        ([0.0, 37.35, 3.1], [0.0, 37.35, 2.9]),
+    ] {
+        assert_eq!(
+            body.classify_point(inside).unwrap(),
+            solidcore_ops::measure::PointClass::Inside,
+            "{inside:?}"
+        );
+        assert_eq!(
+            body.classify_point(outside).unwrap(),
+            solidcore_ops::measure::PointClass::Outside,
+            "{outside:?}"
+        );
+    }
+    assert_eq!(
+        body.classify_point([29.984954243751982, 0.95001, -0.95])
+            .unwrap(),
+        solidcore_ops::measure::PointClass::Inside
+    );
+    // Meridian-area and circle-intersection integration, independently derived in
+    // plan/findings/acid1-half-torus-flat-rim-round.md.
+    let expected = 18892.19338975647;
+    let actual = body.volume(1e-10).unwrap();
+    assert!(rel(actual, expected) < 1e-8, "{actual} vs {expected}");
+}
+
 /// A revolved r8 corner, clipped on x = +/-10. Its torus support must survive the
 /// round's definition record and reload, including the partial generator's parameters.
 #[test]
@@ -3891,8 +4269,7 @@ fn issue_13911_rails(
 /// stand `reach` off the loop at the two heights).
 #[test]
 fn the_inner_top_outline_of_13911_chamfers_and_rounds_at_every_size() {
-    // SolidCraft's fix set when it traced the case: its preset, which has every flag on but the
-    // held-back ones
+    // SolidCraft's fix set: every flag on
     solidcore_ops::session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
     let (input, _) = issue_13911_body();
     let before = input.check(CheckLevel::All).unwrap();
@@ -4852,4 +5229,165 @@ fn a_round_on_a_sphere_s_rim_turned_about_the_face_normal_builds() {
             }
         }
     }
+}
+
+/// #17594's slab: the top 1.206 of a hexagonal boss whose six upright corners are rounds of
+/// radius 1 (axes on the circle of radius `HEX_RC` about (0, -69.5), top z = 30.706, bottom
+/// z = 29.5), cut from the imported part as SolidCraft traced it (`b1`).
+fn hex_slab() -> Body {
+    let case = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/data/issue_17594_hex_slab.bodies.json.gz"
+    );
+    let mut text = String::new();
+    flate2::read::GzDecoder::new(std::fs::File::open(case).unwrap())
+        .read_to_string(&mut text)
+        .unwrap();
+    let records: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let record: Record = serde_json::from_value(records["b1"].clone()).unwrap();
+    Body::from_record(&record, true).unwrap().0
+}
+
+/// The radius of the circle the slab's corner axes stand on: 2 x 5.928203230275 / sqrt(3).
+const HEX_RC: f64 = 6.845_299_461_620_161;
+
+/// #17594: the slab's top rim (six straight edges and the six corner rounds' arcs, one
+/// tangent chain) rounded at the corners' own radius, r 1. Along each arc the ball touches the
+/// corner's cylinder all round its equator, so its centre stays on the corner's axis: the
+/// piece is a sphere of radius 1 about the axis 1 below the top (the round's arc turned about
+/// the axis, a torus with no hole). Each
+/// straight round removes `(1 - pi/4) HEX_RC` (its section over the side between the axes),
+/// each corner `pi/6 - pi/9 = pi/18` (the 60 degree sector of the unit cylinder 1 high less
+/// that of the upper half ball). On main, at the one corner whose round has the top as its
+/// first face, the turn was taken from the top's rail point, the ball's pole on the axis, and
+/// the section to the next straight round came out a curve up to 0.61 off its meridian and
+/// 0.21 off that round's cylinder: the check finds that gap, and the volume is off where the
+/// faces miss each other (the slab lost 9.674 for 9.861; the whole part gained 5.85).
+#[test]
+fn a_hex_rim_rounded_at_its_corner_rounds_radius_closes_on_six_spheres() {
+    rig_fixes();
+    let b = hex_slab();
+    let before = b.volume(1e-11).unwrap();
+    let top = 30.706;
+    let corners: Vec<[f64; 2]> = (0..6)
+        .map(|i| {
+            let a = (90.0 - 60.0 * f64::from(i)).to_radians();
+            [HEX_RC * a.cos(), -69.5 + HEX_RC * a.sin()]
+        })
+        .collect();
+    // the arc about corner `i`: its middle, one out from the axis, away from the centre
+    let arc = |i: usize| {
+        let c = corners[i];
+        let (dx, dy) = (c[0], c[1] + 69.5);
+        nearest_edge(&b, [c[0] + dx / HEX_RC, c[1] + dy / HEX_RC, top])
+    };
+    // the side from corner `i` to the next: its middle, one out from the axes' midpoint
+    let side = |i: usize| {
+        let (c, n) = (corners[i], corners[(i + 1) % 6]);
+        let m = [0.5 * (c[0] + n[0]), 0.5 * (c[1] + n[1])];
+        let (mx, my) = (m[0], m[1] + 69.5);
+        let len = mx.hypot(my);
+        nearest_edge(&b, [m[0] + mx / len, m[1] + my / len, top])
+    };
+    // in SolidCraft's order: the picked side x = 6.928, then its tangent chain outward both
+    // ways (the order the chain's start and its corners are taken in)
+    let rim = [
+        side(1),
+        arc(1),
+        arc(2),
+        side(0),
+        side(2),
+        arc(0),
+        arc(3),
+        side(5),
+        side(3),
+        arc(5),
+        arc(4),
+        side(4),
+    ];
+    let mut distinct = rim.to_vec();
+    distinct.sort_unstable();
+    distinct.dedup();
+    assert_eq!(distinct.len(), 12, "the rim's twelve edges");
+    blend(&b, Blend::Round, &rim, &[1.0], &[], Corners::Filled).unwrap();
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    // the slab's 14 faces and the twelve rounds; the sides' 12 upright edges, the bottom's
+    // 12, the rounds' 12 contacts with the walls, 6 on the top and their 12 sections; the
+    // bottom's 12 vertices, the contacts' 12 ends and the six poles on the top
+    assert_eq!(b.counts().unwrap(), [26, 54, 30]);
+    // the top, the bottom and the six sides; the six corner walls and the six straight
+    // rounds, cylinders; the six corner pieces, each the arc turned about its corner's axis
+    // (26 in all: no face of another kind)
+    let (_, brep) = kernel_copy(&b);
+    for &f in brep.face_list() {
+        if let SurfaceKind::Cone(c) = brep.face(f).unwrap().surface.as_ref().unwrap().kind() {
+            assert!(c.is_cylinder(), "face {f:?} on a cone");
+        }
+    }
+    let count = |name: &str| {
+        brep.face_list()
+            .iter()
+            .filter(|&&f| {
+                surface_kind_name(brep.face(f).unwrap().surface.as_ref().unwrap()) == name
+            })
+            .count()
+    };
+    assert_eq!(
+        [
+            count("plane"),
+            count("cone"),
+            count("surface-of-revolution")
+        ],
+        [8, 12, 6]
+    );
+    // each surface of revolution is the ball about its own corner's axis point 1 below the
+    // top: a 7 x 7 grid over its face's domain lies on that unit sphere
+    let (k, _) = kernel_copy(&b);
+    let mut at_corner = Vec::new();
+    for &f in brep.face_list() {
+        let s = brep.face(f).unwrap().surface.as_ref().unwrap();
+        if surface_kind_name(s) != "surface-of-revolution" {
+            continue;
+        }
+        let d = solidcore::topology::face::uv_domain(&brep, f).unwrap();
+        let mid = s
+            .evaluate_point(
+                &k,
+                Point2::new(0.5 * (d.u_min() + d.u_max()), 0.5 * (d.v_min() + d.v_max())),
+            )
+            .unwrap();
+        let (i, c) = corners
+            .iter()
+            .enumerate()
+            .min_by(|a, b| {
+                let da = (a.1[0] - mid.x).hypot(a.1[1] - mid.y);
+                let db = (b.1[0] - mid.x).hypot(b.1[1] - mid.y);
+                da.total_cmp(&db)
+            })
+            .unwrap();
+        at_corner.push(i);
+        let centre = Vec3::new(c[0], c[1], top - 1.0);
+        for a in 0..7 {
+            for e in 0..7 {
+                let u = d.u_min() + (d.u_max() - d.u_min()) * f64::from(a) / 6.0;
+                let v = d.v_min() + (d.v_max() - d.v_min()) * f64::from(e) / 6.0;
+                let p = s.evaluate_point(&k, Point2::new(u, v)).unwrap();
+                let off = (p.distance(centre) - 1.0).abs();
+                assert!(
+                    off <= 1e-9,
+                    "face {f:?} at corner {i}: {off:e} off its ball"
+                );
+            }
+        }
+    }
+    at_corner.sort_unstable();
+    assert_eq!(at_corner, [0, 1, 2, 3, 4, 5], "one sphere at each corner");
+    let removed = 6.0 * ((1.0 - PI / 4.0) * HEX_RC + PI / 18.0);
+    let after = b.volume(1e-11).unwrap();
+    assert!(
+        (before - after - removed).abs() <= 1e-9 * removed,
+        "removed {}, the closed form {removed}",
+        before - after
+    );
 }

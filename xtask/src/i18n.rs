@@ -148,12 +148,17 @@ fn locales(root: &Path) -> Result<Vec<String>, String> {
 fn read(root: &Path, locale: &str) -> Result<Map<String, Value>, String> {
     let path = root.join(DIR).join(format!("{locale}.json"));
     let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    // Messages still in assets/locales/pending/ count: they are folded on main.
+    // Messages still in assets/locales/pending/ count: they are folded on main. So do the shared
+    // crates' messages, which the app's build merges into the same catalog.
     let pending = crate::pending::locale_messages(root, locale)?;
+    let shared = crate::pending::shared_messages(root, locale)?;
     match serde_json::from_str(&text) {
         Ok(Value::Object(mut map)) => {
             for (id, text) in pending {
                 map.entry(id).or_insert(Value::String(text));
+            }
+            for (id, text) in shared {
+                map.entry(id).or_insert(text);
             }
             Ok(map)
         }

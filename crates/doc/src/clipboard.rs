@@ -214,6 +214,7 @@ pub struct ClonePlacements<'a> {
     pub source_roots: &'a BTreeSet<u64>,
     pub root: u64,
     pub doc: &'a crate::Document,
+    pub same_document: bool,
 }
 
 fn remap_geo(
@@ -236,8 +237,11 @@ fn remap_geo(
         GeoRef::Face { name: Some(n), .. } | GeoRef::Edge { name: Some(n), .. } => *n = remap_topology(n, ids, bodies),
         GeoRef::PlacedEdge { path, author_path, name, .. } => {
             *name = remap_topology(name, ids, bodies);
-            for path in [path, author_path].into_iter().filter(|path| !path.is_empty()) {
-                remap_occurrence_path(path, placements)?;
+            if !path.is_empty() {
+                remap_occurrence_path(path, placements, true)?;
+            }
+            if !author_path.is_empty() {
+                remap_occurrence_path(author_path, placements, false)?;
             }
         }
         GeoRef::Vertex { edges: Some(names), .. } => {
@@ -246,7 +250,7 @@ fn remap_geo(
             }
         }
         GeoRef::Plane { plane } => remap_plane(plane, ids, bodies, depth + 1, placements)?,
-        GeoRef::Datum { datum } => remap_occurrence_path(&mut datum.path, placements)?,
+        GeoRef::Datum { datum } => remap_occurrence_path(&mut datum.path, placements, false)?,
         GeoRef::Snap { of, .. } => remap_geo(of, ids, bodies, depth + 1, placements)?,
         _ => {}
     }
@@ -264,7 +268,7 @@ fn remap_plane(
         return Err(crate::DocError::Invalid("clone plane reference depth exceeded".into()));
     }
     match p {
-        PlaneRef::Datum { datum } => remap_occurrence_path(&mut datum.path, placements)?,
+        PlaneRef::Datum { datum } => remap_occurrence_path(&mut datum.path, placements, false)?,
         PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } => remap_plane(base, ids, bodies, depth + 1, placements)?,
         PlaneRef::ThroughPoint { base, point } => {
             remap_plane(base, ids, bodies, depth + 1, placements)?;
@@ -298,19 +302,21 @@ fn remap_plane(
 
 /// Keep every selected occurrence within the copied subtree. The new root supplies the
 /// destination's ancestors, which are outside the copy.
-fn remap_occurrence_path(path: &mut Vec<u64>, placements: Option<&ClonePlacements<'_>>) -> crate::Result<()> {
+fn remap_occurrence_path(path: &mut Vec<u64>, placements: Option<&ClonePlacements<'_>>, keep_external: bool) -> crate::Result<()> {
     if path.is_empty() {
         return Err(crate::DocError::Invalid("a copied reference names no placement".into()));
     }
     let outside = || crate::DocError::Invalid("the copied reference names a placement outside the copied tree".into());
     let placements = placements.ok_or_else(outside)?;
-    let mapped = path
+    let mut mapped = path
         .iter()
         .map(|id| if placements.source_roots.contains(id) { Some(placements.root) } else { placements.occurrences.get(id).copied() })
         .skip_while(Option::is_none)
-        .collect::<Option<Vec<_>>>()
-        .filter(|path| !path.is_empty())
-        .ok_or_else(outside)?;
+        .peekable();
+    if mapped.peek().is_none() {
+        return if keep_external && placements.same_document { placements.doc.placement_frame(path).map(|_| ()) } else { Err(outside()) };
+    }
+    let mapped = mapped.collect::<Option<Vec<_>>>().ok_or_else(outside)?;
     let broken = || crate::DocError::Invalid("the copied placement's path is broken".into());
     let mut remapped = placements.doc.occurrence_path(placements.root).ok_or_else(broken)?;
     if mapped.first() == Some(&placements.root) {
@@ -455,7 +461,7 @@ impl crate::Feature {
                             pin.sketch = *id;
                         }
                     }
-                    for n in link.face_name.iter_mut().chain(&mut link.edge_name).chain(&mut link.vertex_name) {
+                    for n in link.face_name.iter_mut().chain(&mut link.edge_name).chain(&mut link.vertex_name).chain(&mut link.curve_edges) {
                         *n = remap_topology(n, ids, bodies);
                     }
                 }

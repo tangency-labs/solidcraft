@@ -43,7 +43,8 @@ pub enum Error {
     WallsTouch,
     /// A blend larger than its faces allow, refused with the largest size that builds it
     /// (the kernel's fit, `SolidError::FilletRefused`): the size, what it sizes, a point at the
-    /// middle of the edge it was found for, and why there is no room, when the refusal names them.
+    /// middle of the edge it was found for, a point on the limiting face, and why there is no room,
+    /// when the refusal names them.
     TooLarge {
         /// The largest size that builds it.
         size: f64,
@@ -51,6 +52,8 @@ pub enum Error {
         kind: FitKind,
         /// A point at the middle of the edge it was found for.
         at: Option<[f64; 3]>,
+        /// An exact point on the face that limits the size, when the kernel names it.
+        face: Option<[f64; 3]>,
         /// Why there is no room.
         why: Option<RoomReason>,
     },
@@ -391,6 +394,128 @@ pub enum Error {
     },
 }
 
+/// What failed, as stable data: the same failure always gives the same code, compared as plain
+/// values, so failures can be grouped and matched without reading their messages.
+///
+/// Every part is a static string or an integer: nothing from the model (no geometry, names or
+/// numbers). [`FailureCode::kind`] is the stable part and the bucket; [`FailureCode::operation`]
+/// splits a coarse kind and follows the kernel's module paths, so a refactor can move it: it is
+/// the second level of a grouping, never its key.
+///
+/// The session gives it for every failed call it runs but a cancelled one
+/// ([`crate::session::take_failure_code`], [`crate::session::Failure::code`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct FailureCode {
+    /// The ops call that failed: the session's call name (`"fillet"`, `"boolean"`, ...), as
+    /// [`crate::session::current_call`] gives it while it runs.
+    pub call: &'static str,
+    /// The kernel's [`solidcore::error::ErrorKind::code`] of the error the call failed with,
+    /// never changing meaning once released; [`FailureCode::OPS`] (0) for a failure ops itself
+    /// decided, with no kernel error behind it (an argument refused before the kernel saw it, a
+    /// result the call's own checks refuse, a caught panic).
+    pub kind: u16,
+    /// The kernel routine that failed ([`solidcore::SolidError::operation`], a module path such
+    /// as `"blend::fillet_executive::…"`); for a failure ops decided ([`FailureCode::OPS`]),
+    /// the name of its [`Error`] variant ([`Error::name`]).
+    pub operation: &'static str,
+}
+
+impl FailureCode {
+    /// The kind of a failure ops itself decided, with no kernel error behind it.
+    pub const OPS: u16 = 0;
+
+    /// The code of `call` failing with the kernel's error `e`.
+    #[must_use]
+    pub fn of_kernel(call: &'static str, e: &SolidError) -> Self {
+        Self {
+            call,
+            kind: e.kind().code(),
+            operation: e.operation(),
+        }
+    }
+
+    /// The code of `call` failing with `e`, an error ops decided itself ([`FailureCode::OPS`]).
+    #[must_use]
+    pub fn of_ops(call: &'static str, e: &Error) -> Self {
+        Self {
+            call,
+            kind: Self::OPS,
+            operation: e.name(),
+        }
+    }
+}
+
+/// `call · kind · operation`, as a failure signature writes it (`fillet · 108 · blend::…`).
+impl std::fmt::Display for FailureCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} · {} · {}", self.call, self.kind, self.operation)
+    }
+}
+
+impl Error {
+    /// The variant's name (`"TooLarge"`, `"Status"`, ...): a stable static string with nothing
+    /// of the failure's values in it. A variant keeps its name once released.
+    #[must_use]
+    pub const fn name(&self) -> &'static str {
+        match self {
+            Error::Status(..) => "Status",
+            Error::Refused { .. } => "Refused",
+            Error::Argument => "Argument",
+            Error::Empty => "Empty",
+            Error::NotSolid => "NotSolid",
+            Error::NotSolidBecause(..) => "NotSolidBecause",
+            Error::NoRoom => "NoRoom",
+            Error::WallsTouch => "WallsTouch",
+            Error::TooLarge { .. } => "TooLarge",
+            Error::BlendNotCertified { .. } => "BlendNotCertified",
+            Error::WallFolds { .. } => "WallFolds",
+            Error::Unsupported(..) => "Unsupported",
+            Error::CornerUnsupported => "CornerUnsupported",
+            Error::TurnRefused { .. } => "TurnRefused",
+            Error::CornerRefused { .. } => "CornerRefused",
+            Error::RoundsCross { .. } => "RoundsCross",
+            Error::TaperEndUnsupported { .. } => "TaperEndUnsupported",
+            Error::FacesCloseAtBothEnds => "FacesCloseAtBothEnds",
+            Error::RoomRunsOut { .. } => "RoomRunsOut",
+            Error::NoEffect => "NoEffect",
+            Error::CurveDoesNotCut => "CurveDoesNotCut",
+            Error::NotExact => "NotExact",
+            Error::Profile(..) => "Profile",
+            Error::Degenerate => "Degenerate",
+            Error::UnsureRegion { .. } => "UnsureRegion",
+            Error::DraftCornerRefused { .. } => "DraftCornerRefused",
+            Error::PathUndecided { .. } => "PathUndecided",
+            Error::PathGap { .. } => "PathGap",
+            Error::BoundaryGap { .. } => "BoundaryGap",
+            Error::NoCrossing { .. } => "NoCrossing",
+            Error::NetworkGap { .. } => "NetworkGap",
+            Error::PastTolerance { .. } => "PastTolerance",
+            Error::TooFar { .. } => "TooFar",
+            Error::OffsetPastTolerance { .. } => "OffsetPastTolerance",
+            Error::RailPastTolerance { .. } => "RailPastTolerance",
+            Error::Exception => "Exception",
+            Error::Invariant { .. } => "Invariant",
+            Error::ContactUndecided { .. } => "ContactUndecided",
+            Error::Cancelled => "Cancelled",
+            Error::DefinitionNotCertified { .. } => "DefinitionNotCertified",
+            Error::Reentered => "Reentered",
+            Error::Record(..) => "Record",
+            Error::Internal(..) => "Internal",
+            Error::Unported(..) => "Unported",
+            Error::EdgeNotBlendable { .. } => "EdgeNotBlendable",
+            Error::ContinuesInto { .. } => "ContinuesInto",
+            Error::RoundTooSmall { .. } => "RoundTooSmall",
+            Error::SeamMismatch { .. } => "SeamMismatch",
+            Error::EdgeLeftBehind { .. } => "EdgeLeftBehind",
+            Error::SetbackTooShort { .. } => "SetbackTooShort",
+            Error::SetbackTooLong { .. } => "SetbackTooLong",
+            Error::ChamferAngleTooLarge { .. } => "ChamferAngleTooLarge",
+            Error::OffsetRefused { .. } => "OffsetRefused",
+            Error::BlendFailed { .. } => "BlendFailed",
+        }
+    }
+}
+
 /// Why the kernel refuses an offset or a draft ([`Error::OffsetRefused`]), as its
 /// `OffsetFailure` names it. More reasons get names of their own, so match it with a wildcard.
 #[derive(Clone, Debug, PartialEq)]
@@ -693,7 +818,7 @@ pub enum RoomReason {
 pub enum FitKind {
     /// A round's radius.
     Radius,
-    /// An equal chamfer's distance.
+    /// A chamfer's first distance, for equal distances or a fixed angle.
     Distance,
     /// A factor on a chamfer's two distances.
     Scale,
@@ -973,8 +1098,17 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// other failures), a refusal of what the kernel does
 /// not support or has not ported, a cancellation, a broken invariant of the kernel's
 /// ([`Error::Invariant`]), or a call made before the preparation it needs.
+///
+/// Noted for the call running on this thread ([`crate::session::noted`]), so a refusal of it
+/// keeps the kernel's [`FailureCode`].
 #[must_use]
 pub(crate) fn status(e: SolidError) -> Error {
+    let (kind, operation) = (e.kind(), e.operation());
+    crate::session::noted_as(kind.code(), operation, typed(e))
+}
+
+/// [`status`]'s typing of the kernel error `e`.
+fn typed(e: SolidError) -> Error {
     use solidcore::error::{SM_ERR, SM_ERR_NOT_CONVERGING};
     match e {
         SolidError::InvalidInput { operation, reason } => Error::Refused { operation, reason },

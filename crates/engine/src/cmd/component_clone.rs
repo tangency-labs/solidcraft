@@ -528,8 +528,13 @@ pub(super) fn build(
         } else if f.body_names.is_empty() {
             f.body_names = outputs.get(&old.id).cloned().unwrap_or_default();
         }
-        let placements =
-            solidcraft_doc::ClonePlacements { occurrences: &occurrences, source_roots: &source_roots, root: root_occurrence, doc: &scratch.doc };
+        let placements = solidcraft_doc::ClonePlacements {
+            occurrences: &occurrences,
+            source_roots: &source_roots,
+            root: root_occurrence,
+            doc: &scratch.doc,
+            same_document: !origin.other_design,
+        };
         f.remap_clone(&features, &names, &bodies, &parameters, Some(&placements))?;
         for (name, original) in f.face_names.iter_mut().chain(&mut f.edge_names).zip(old.face_names.iter().chain(&old.edge_names)) {
             *name = solidcraft_doc::remap_topology_faces(original, &features, &bodies, &frozen_faces)?;
