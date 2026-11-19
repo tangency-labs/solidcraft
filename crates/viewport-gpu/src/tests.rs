@@ -42,6 +42,20 @@ fn out_of_memory_is_reported_before_secondary_validation_errors() {
     assert_eq!(buffer.map(|b| b.size()).map_err(|e| e.to_string()), Ok(wgpu::COPY_BUFFER_ALIGNMENT));
 }
 
+/// A pick and a survey list GL in an instance of its own. Listed in the same instance as Vulkan,
+/// GL left an OpenGL context alive for as long as the picked Vulkan adapter, and with Mesa's
+/// radeonsi (25.2) threads that created and dropped those contexts together hung: the GPU tests
+/// stopped at random. The adapters and their order are those one instance gives.
+#[test]
+fn a_pick_and_a_survey_list_gl_in_an_instance_of_its_own() {
+    let before = select::MIXED_INSTANCES.with(std::cell::Cell::get);
+    let picked = select::pick(test_env::policy()).map(|(_, r)| (r.name, r.backend));
+    let survey = select::survey(test_env::policy());
+    assert_eq!(select::MIXED_INSTANCES.with(std::cell::Cell::get), before, "GL was listed in an instance with another backend");
+    let chosen = survey.chosen.and_then(|i| survey.adapters.get(i)).map(|r| (r.name.clone(), r.backend.clone()));
+    assert_eq!(picked, chosen, "the survey names the adapter a pick takes");
+}
+
 #[test]
 fn the_hlsl_for_fxc_has_no_arrays_fxc_must_unroll_loops_for() {
     use naga::back::hlsl;
