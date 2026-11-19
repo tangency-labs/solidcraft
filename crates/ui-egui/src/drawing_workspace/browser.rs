@@ -127,7 +127,13 @@ fn show_sheet(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, sheet:
                 open = next;
                 rows.ui().data_mut(|data| data.insert_temp(id, open));
             }
-            Event::Click(_) | Event::Open(_) => select_sheet(app, sheet.id),
+            Event::Click(_) | Event::Open(_) => {
+                if !app.preferences.design_sub_tab_sheets {
+                    select_sheet(app, sheet.id);
+                } else if let Err(error) = crate::sheet_views::open_in(app, drawing.id, sheet.id, false) {
+                    app.set_status(error, true);
+                }
+            }
             Event::Menu { at, .. } => open_sheet_menu(app, drawing.id, sheet.id, Rect::from_min_max(at, at)),
             _ => {}
         }
