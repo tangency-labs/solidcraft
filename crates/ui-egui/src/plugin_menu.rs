@@ -960,6 +960,11 @@ impl EntryDialog {
     }
 }
 
+/// Whether a plugin command that edits this design has an open dialog.
+pub(crate) fn editing_dialog_open(app: &SolveApp) -> bool {
+    app.plugin_menu.dialogs.iter().any(|dialog| dialog.session == app.session.uid && !dialog.read && dialog.opens.is_none())
+}
+
 /// The dialog the viewport previews, and the `plugin.run` it previews: the dialog picking in the
 /// viewport, else the most recently opened one, when it is a command that edits the design on
 /// this design, has Preview on, is not running and its fields make parameters. `None` while a
@@ -1120,6 +1125,14 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
 /// selection fields, and whether its list of picks was opened.
 type Claim = Option<(usize, bool)>;
 
+/// An entry keeps its window across reopenings on the same design. A transient dialog serial
+/// changes every time, which used to discard the moved position (#18684). The design identity
+/// also prevents two documents' dialogs for the same plugin entry from sharing one window.
+fn dialog_window_id(dialog: &EntryDialog, remember_position: bool) -> egui::Id {
+    let id = egui::Id::unique("sc_plugin_entry");
+    if remember_position { id.with((dialog.plugin.id.as_str(), dialog.entry.as_str(), dialog.session)) } else { id.with(dialog.id) }
+}
+
 /// Draw one dialog. Returns whether it stays open, whether Run was pressed, and a selection field
 /// that asks for the viewport's picks.
 fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog) -> (bool, bool, Claim) {
@@ -1136,7 +1149,7 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
     let mut picker = if picking(app) == Some(dialog.id) { app.dialog.take() } else { None };
     let mut claim = None;
     let icon = dialog.icon.clone();
-    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_plugin_entry").with(dialog.id), &icon, &title)
+    let (closed, action) = ui_kit::Window::new(dialog_window_id(dialog, app.preferences.plugin_remember_dialog_position), &icon, &title)
         .fields()
         .actions(&run_label, &close_label, None)
         .show(ctx, ready.is_ok() && !running, |ui| body(app, ui, dialog, ready.as_ref().err(), &mut picker, &mut claim));

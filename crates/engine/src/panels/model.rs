@@ -224,7 +224,7 @@ impl PanelSpec {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct PanelRegistry {
     specs: BTreeMap<PanelKind, PanelSpec>,
     side_widths: BTreeMap<PanelKind, Vec<(f32, f32)>>,

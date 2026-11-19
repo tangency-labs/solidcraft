@@ -579,6 +579,7 @@ pub(crate) fn check_raw(v: &Value, version: u32) -> Result<Vec<(usize, usize)>> 
     validate_versioned_geometry(v)?;
     validate_emboss_targets(v)?;
     validate_freeform_offsets(v)?;
+    validate_freeform_chain_offsets(v)?;
     validate_sketch_sizes(v)?;
     crate::format_offsets::validate_raw(v)?;
     validate_wires(v, version)
@@ -587,6 +588,8 @@ pub(crate) fn check_raw(v: &Value, version: u32) -> Result<Vec<(usize, usize)>> 
 /// [`check_raw`], the upgrade and the typed record alone: what a piece of a design must pass by
 /// itself ([`crate::newer_file`]), with nothing else in the file for it to refer to.
 pub(crate) fn check_piece(mut v: Value, version: u32, applied: Option<&[String]>) -> Result<()> {
+    // Each drawing is a record of its own family, read by its own rules, numbers and all.
+    take_drawings(&mut v)?;
     check_raw(&v, version)?;
     DESIGN.upgrade(&mut v, version, applied)?;
     let d: Document = serde_json::from_value(v).map_err(|e| DocError::Invalid(format!("design file: {e}")))?;
@@ -595,6 +598,8 @@ pub(crate) fn check_piece(mut v: Value, version: u32, applied: Option<&[String]>
 
 /// A design's JSON, its format taken out, as the document it holds.
 pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> Result<Document> {
+    // Each drawing is a record of its own family, read by its own rules, numbers and all.
+    let drawings = take_drawings(&mut v)?;
     let legacy_wires = check_raw(&v, version)?;
     validate_body_transfers(&v)?;
     DESIGN.upgrade(&mut v, version, applied)?;
@@ -699,6 +704,7 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
     for feature in &d.features {
         if let crate::FeatureKind::Sketch { sketch, .. } = &feature.kind {
             sketch.validate_freeform_offsets().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
+            sketch.validate_freeform_chain_offsets().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_wires().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_wire_constraints().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_patterns().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
@@ -729,9 +735,20 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
     // These lists used to allocate independently. Keep their existing identities, but never
     // let a later deletion make them available again after loading an older design.
     d.next_id = d.next_item_id()?;
+    d.drawings = crate::drawing::in_design(drawings).map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
     d.format = format_string(FORMAT);
     d.format_pending = pending_names();
     Ok(d)
+}
+
+/// Take a plain JSON design's drawings out of its JSON and read each, before the design's own
+/// rules see anything: a drawing this build can't read refuses the design, never dropped.
+fn take_drawings(v: &mut Value) -> Result<Vec<crate::drawing::Drawing>> {
+    let Some(list) = v.as_object_mut().and_then(|o| o.remove("drawings")) else { return Ok(Vec::new()) };
+    let Value::Array(list) = list else { return Err(DocError::Invalid("damaged design: `drawings` is not a list".into())) };
+    crate::drawing::check_count(list.len()).map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
+    let read = |(i, d): (usize, Value)| crate::drawing::Drawing::from_value(d).map_err(|e| DocError::Invalid(format!("drawing {}: {e}", i + 1)));
+    list.into_iter().enumerate().map(read).collect()
 }
 
 fn all_unique(ids: impl Iterator<Item = u64>) -> bool {
@@ -1136,9 +1153,59 @@ fn validate_freeform_offsets(value: &Value) -> Result<()> {
     Ok(())
 }
 
+/// The trimmed chain offsets of a design's sketches: the sources each was made from, the
+/// curves it made and the distance it runs at.
+fn validate_freeform_chain_offsets(value: &Value) -> Result<()> {
+    let Some(features) = value.get("features").and_then(Value::as_array) else { return Ok(()) };
+    for feature in features {
+        if feature.get("type").and_then(Value::as_str) != Some("sketch") {
+            continue;
+        }
+        let Some(records) = feature.get("sketch").and_then(|sketch| sketch.get("freeform_chain_offsets")) else { continue };
+        let invalid = || DocError::Invalid("damaged design: invalid trimmed chain offset metadata".into());
+        let records = records.as_array().ok_or_else(invalid)?;
+        if records.len() > 128 {
+            return Err(invalid());
+        }
+        let mut outputs = std::collections::BTreeSet::new();
+        for record in records {
+            let object = record.as_object().ok_or_else(invalid)?;
+            if object.len() != 3 || object.keys().any(|key| !matches!(key.as_str(), "sources" | "outputs" | "distance")) {
+                return Err(invalid());
+            }
+            let sources = record.get("sources").and_then(Value::as_array).ok_or_else(invalid)?;
+            let made = record.get("outputs").and_then(Value::as_array).ok_or_else(invalid)?;
+            if sources.is_empty() || sources.len() > 512 || made.is_empty() || made.len() > 512 {
+                return Err(invalid());
+            }
+            for source in sources {
+                let pair = source.as_array().ok_or_else(invalid)?;
+                if pair.len() != 2 {
+                    return Err(invalid());
+                }
+                let id = pair[0].as_str().ok_or_else(invalid)?;
+                if id.is_empty() || id.len() > 512 || id.chars().any(char::is_control) || pair[1].as_bool().is_none() {
+                    return Err(invalid());
+                }
+            }
+            for output in made {
+                let id = output.as_str().ok_or_else(invalid)?;
+                if id.is_empty() || id.len() > 512 || id.chars().any(char::is_control) || !outputs.insert(id) {
+                    return Err(invalid());
+                }
+            }
+            let distance = record.get("distance").and_then(Value::as_f64).ok_or_else(invalid)?;
+            if !distance.is_finite() || !(1e-9..=MAX_REAL).contains(&distance.abs()) {
+                return Err(invalid());
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Largest coordinate or size a design may hold (mm): a kilometre-scale part is already far
 /// outside what the kernel's tolerances serve.
-const MAX_REAL: f64 = 1e9;
+pub(crate) const MAX_REAL: f64 = 1e9;
 
 /// Every number the design itself holds is in range ([`check_numbers`]). `metadata` is left
 /// alone: it is other tools' data, kept as it is and never read as a number (#1015); parsing

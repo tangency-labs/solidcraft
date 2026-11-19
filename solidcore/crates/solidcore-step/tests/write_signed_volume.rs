@@ -37,6 +37,70 @@ use solidcore_step::write::{GeomWriter, Writer, topology};
 
 type P = [f64; 3];
 
+/// A 2 x 3 x 5 box has volume 30 and area 2(6 + 10 + 15) = 62.
+/// Reverse each bound in turn, including the traversal's anchor and a z-facing
+/// face (whose wrong side cancels the volume about the box's midpoint).
+#[test]
+fn a_reversed_bound_in_a_closed_shell_keeps_the_box_volume() {
+    let mut k = Kernel::default();
+    let mut b = api::create_box(&mut k, Point3::new(1.0, -2.0, 4.0), 2.0, 3.0, 5.0).unwrap();
+    assert_reversed_bounds(&mut k, &mut b, 30.0, 62.0);
+}
+
+/// The centred unit cavity subtracts 1 from volume and adds 6 to area. Both
+/// shells must keep their absolute sides when either shell needs parity repair.
+#[test]
+fn a_reversed_bound_keeps_the_cavity_inside_the_material() {
+    let mut k = Kernel::default();
+    let outer = api::create_box(&mut k, Point3::new(1.0, -2.0, 4.0), 2.0, 3.0, 5.0).unwrap();
+    let cavity = api::create_box(&mut k, Point3::new(1.5, -1.0, 6.0), 1.0, 1.0, 1.0).unwrap();
+    let mut b = boolean_difference(&mut k, outer, cavity).unwrap();
+    assert_reversed_bounds(&mut k, &mut b, 29.0, 68.0);
+}
+
+fn assert_reversed_bounds(k: &mut Kernel, b: &mut Brep, volume: f64, area: f64) {
+    use solidcore::mass::integrator::properties::{brep_area, brep_mass_properties_default};
+    use solidcore_record::brep::{Loop, Shell};
+    let ex = p21::parse(&write_step("box", k, b)).unwrap();
+    let bounds: Vec<_> = ex.entities.iter().filter(|(_, e)| e.name() == "FACE_OUTER_BOUND").map(|(&id, _)| id).collect();
+    assert_eq!(bounds.len(), if volume == 30.0 { 6 } else { 12 });
+    for bound in bounds {
+        let mut reversed = ex.clone();
+        let params = &mut reversed.entities.get_mut(&bound).unwrap().records[0].params;
+        params[2] = Param::Enum(if flag(&params[2]) { "F" } else { "T" }.to_owned());
+        let read = solidcore_step::topology::read_solids(&reversed);
+        assert!(read.failures.is_empty(), "bound #{bound}: {:?}", read.failures);
+        assert_eq!(read.solids.len(), 1);
+        let record = &read.solids[0].brep;
+        for shell in &record.shells {
+            let Shell::Faces { faces, .. } = shell else { panic!("face shell") };
+            let mut traversal: BTreeMap<u32, Vec<bool>> = BTreeMap::new();
+            for side in faces {
+                for bound in &record.faces[side.face as usize].loops {
+                    if let Loop::Edges { edges } = bound {
+                        for edge in edges {
+                            traversal.entry(edge.edge).or_default().push(edge.forward == side.forward);
+                        }
+                    }
+                }
+            }
+            for (edge, directions) in traversal {
+                assert_eq!(directions.len(), 2, "edge {edge}");
+                assert_ne!(directions[0], directions[1], "bound #{bound}: edge {edge} traverses the same way on both faces");
+            }
+        }
+        let mut back = solidcore_convert::brep::to_kernel_body(k, record, true).unwrap();
+        let a = brep_area(k, &mut back, 1e-9).unwrap();
+        assert!((a - area).abs() <= 1e-9, "bound #{bound}: area {a}, expected {area}");
+        for origin in [Point3::ZERO, Point3::new(0.0, 0.0, 100.0)] {
+            let mass = brep_mass_properties_default(k, &mut back, 1e-9, 1.0, origin).unwrap();
+            let v = mass.properties.volume;
+            assert!((v - volume).abs() <= 1e-9, "bound #{bound}: volume {v}, expected {volume}");
+            assert!(mass.centroid.distance(Point3::new(2.0, -0.5, 6.5)) <= 1e-9, "bound #{bound}: centroid {:?}", mass.centroid);
+        }
+    }
+}
+
 fn add(a: P, b: P) -> P {
     [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
 }

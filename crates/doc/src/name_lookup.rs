@@ -20,6 +20,8 @@
 //! again that 0.30.1 saved as a numbered piece (`F2:side#2`) or under a later index
 //! (`F4:bore:side:1`): see [`locate_thread_face_on_body`] (#16602).
 
+use std::sync::Arc;
+
 use solidcore_record::Vec3;
 use solidcraft_geom::Mesh;
 use solidcraft_geom::prelude::*;
@@ -53,6 +55,63 @@ pub struct EdgeHit {
     pub verified: bool,
     /// Whether the reference's point still lies on the edge.
     pub on_point: bool,
+}
+
+/// A body's edge names and face names, worked out once for every edge name looked up on it.
+pub(crate) struct BodyEdges {
+    pub(crate) mesh: Arc<Mesh>,
+    names: Vec<String>,
+    faces: Arc<Names>,
+}
+
+/// The edges of a body a stored edge name matches, before a picked point decides between them.
+pub(crate) enum EdgeMatch {
+    /// The edge with that name, or the one edge between the faces it names.
+    Edge(usize),
+    /// Pieces of it: the faces it names meet along several edges now, or only a piece of one of
+    /// them is left.
+    Pieces(Vec<usize>),
+}
+
+impl BodyEdges {
+    pub(crate) fn new(b: &ModelBody) -> BodyEdges {
+        BodyEdges { mesh: b.mesh(), names: edge_names(b), faces: naming::names(b) }
+    }
+
+    /// Whether edge `i`'s name follows exact history: the faces it separates do, and it isn't one
+    /// of several edges between them, numbered by where they lie.
+    /// Edge `i`'s persistent name.
+    pub(crate) fn name(&self, i: usize) -> Option<&str> {
+        self.names.get(i).map(String::as_str)
+    }
+
+    pub(crate) fn verified(&self, i: usize) -> bool {
+        self.mesh.edge_faces.get(i).is_some_and(|fs| fs.iter().all(|f| self.faces.verified(*f as usize)))
+            && self.names.get(i).is_some_and(|n| strip_edge_number(n).len() == n.len())
+    }
+
+    /// What the stored edge name `name` matches: the edge with that name; else the one edge
+    /// between the faces it names (followed through splits and merges of those faces); else the
+    /// pieces of it. `None` when nothing does.
+    pub(crate) fn matching(&self, name: &str) -> Option<EdgeMatch> {
+        if let Some(i) = self.names.iter().position(|n| n == name) {
+            return Some(EdgeMatch::Edge(i));
+        }
+        // By the faces it separates: the best way any edge matches.
+        let wanted = strip_edge_number(name);
+        let mut best: Option<(Match, Vec<usize>)> = None;
+        for (i, fs) in self.mesh.edge_faces.iter().enumerate() {
+            let [fa, fb] = fs.as_slice() else { continue };
+            let Some(level) = edge_match(&self.faces, *fa as usize, *fb as usize, wanted) else { continue };
+            keep_best(&mut best, level, i);
+        }
+        let (level, cands) = best?;
+        let one = match cands.as_slice() {
+            [i] if level >= Match::Piece => Some(*i),
+            _ => None,
+        };
+        Some(one.map_or(EdgeMatch::Pieces(cands), EdgeMatch::Edge))
+    }
 }
 
 /// The edge of a body a stored edge name finds: the edge with that name; else the one edge
@@ -904,9 +963,54 @@ fn locate_face_with(st: &ModelState, name: &str, p: Vec3, round: bool) -> Option
     naming::warm_names(st.bodies.iter().filter(|b| !b.body.is_mesh()));
     match locate_in(st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()), name, p) {
         Ok(hit) => Some(hit),
-        Err(Miss::Gone) => recover_numbered_face_in(st, name, p, round).or_else(|| replaced_side_line(st, name, p)),
+        Err(Miss::Gone) => {
+            recover_numbered_face_in(st, name, p, round).or_else(|| replaced_side_line(st, name, p)).or_else(|| numbered_sheet_face(st, name, p))
+        }
         Err(Miss::Several) => None,
     }
+}
+
+/// The `F2` of a face named by its number among the faces feature `F2` made (`F2:face:1`): `None`
+/// for any other name.
+fn numbered_face_name(name: &str) -> Option<&str> {
+    let (stem, k) = name.split_once(":face:")?;
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|c| c.is_ascii_digit());
+    (stem.strip_prefix('F').is_some_and(digits) && digits(k)).then_some(stem)
+}
+
+/// A face of a sheet saved by its number among the faces its feature made (`F2:face:1`), as builds
+/// before the sheet was made from surfaces (#6748) named every face of a sheet feature. A sheet
+/// feature names its faces after what made each now (`F2:top`, `F2:side:l1`,
+/// `F3:far:F2:side:l1`), and numbers none, so the stored name names nothing. The stored point
+/// still lies on the face it was: that face, when it is the one face of a sheet body that the same
+/// feature made and the point lies on. A point on no face of that feature, or on two, finds
+/// nothing, as before; so does a name of a feature that still numbers a face of the body.
+fn numbered_sheet_face(st: &ModelState, name: &str, p: Vec3) -> Option<FaceHit> {
+    let stem = numbered_face_name(name)?;
+    if !p.is_finite() {
+        return None;
+    }
+    let made = |own: &str| own.split_once(':').is_some_and(|(s, _)| s == stem);
+    let sheet = |b: &ModelBody| st.surface_sheets.iter().any(|s| s.body == b.name);
+    let mut found: Option<FaceHit> = None;
+    for (bi, b) in st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh() && sheet(b) && b.body.face_count() <= MAX_PROJECTION_RECOVERY_FACES)
+    {
+        let names = naming::names(b);
+        if names.faces.iter().any(|own| numbered_face_name(own) == Some(stem)) {
+            continue;
+        }
+        for (face, own) in names.faces.iter().enumerate() {
+            if !made(own.as_str()) {
+                continue;
+            }
+            let Some((_, point)) = on_face(b, face, p) else { continue };
+            if found.is_some() {
+                return None;
+            }
+            found = Some(FaceHit { body: bi, face, point, verified: names.verified(face), on_point: true });
+        }
+    }
+    found
 }
 
 /// The `F2` and the number of a side face named after a sketch line (`F2:side:l1`): `None` for any

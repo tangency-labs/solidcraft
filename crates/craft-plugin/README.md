@@ -22,10 +22,13 @@ The app implements `PluginHost` and defines command policy, approval and transac
 grants. Its default denies hidden child names unless a more specific approved folder grant
 covers them; an app may override it to enforce its explicit scope policy.
 
-The [WIT](wit/plugin.wit) declares `craft:plugin@0.1.0`, world `command-plugin`: the
-capability `commands@0.1` (`CAPABILITIES`). A manifest lists the capabilities it needs
-(`"capabilities": ["commands@0.1"]`); `check_capabilities` refuses an unknown or newer one with
-`HostError::UnsupportedCapability`. While a version is 0.x, minors may break each other.
+The [WIT](wit/plugin.wit) declares `craft:plugin@0.2.0`, world `command-plugin`: the
+capability `commands@0.2` (`CAPABILITIES`). A manifest lists the capabilities it needs
+(`"capabilities": ["commands@0.2"]`); `check_capabilities` refuses an unknown or newer one with
+`HostError::UnsupportedCapability`. While a version is 0.x, minors may break each other. 0.2 added
+`plugin-error.unsupported`; the frozen [0.1 WIT](wit-0.1/plugin.wit) (`WIT_0_1`,
+`OLDER_CAPABILITIES`) is still served, so plugins built against it keep running.
+`HostError::OverCeiling` and `HostError::Exhausted` carry a limit's numbers.
 The [Wasm runtime](../craft-plugin-wasm/README.md) begins an app transaction and requests
 commit or rollback after guest execution. It stages granted file writes until the guest
 succeeds and the app commits. File publication after app commit is not atomic across

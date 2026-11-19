@@ -59,6 +59,12 @@
 //!   multiplicity above the degree). Its `Trim` and `CreateUVIsoLine` statuses are
 //!   ignored (the UV curve is then `None`), except [`SolidError::Unported`], which is
 //!   propagated, as everywhere.
+//! - **Iso curve ends.** `CreateIsoParametricCurve` with a domain gives the trimmed
+//!   curve's right end the point [`crv_point_by_insertion`] computes, the arithmetic of
+//!   its left end and of the neighbouring iso curve's extraction, so the sides of a
+//!   face made from a surface meet exactly where their net coordinates agree (#17896;
+//!   `nurbs::srf_tool::p1::extract_iso_crv` keeps the coordinate a row or column of the
+//!   net shares, which the neighbouring side's end is computed from).
 //! - **`CreateSphereFromArcs`** returns the indices of the input arcs in CCW order
 //!   (upstream returns the same curve pointers). The recomputing `IsArc` calls whose
 //!   result upstream ignores keep the previous frame and angles when they fail. Its
@@ -110,6 +116,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::crv_basic::Curve as NlCurve;
 use crate::nurbs::geom::Rectangle;
 use crate::nurbs::math::{CPoint, NOW, NOZ};
+use crate::nurbs::nurbs_crv::crv_point_by_insertion;
 use crate::nurbs::nurbs_srf::{is_nsrf_degenerate, split_srf};
 use crate::nurbs::srf_basic::Direction;
 use crate::nurbs::srf_tool::p1::{extract_iso_crv, extract_patch, ISO_MULT_ABOVE_DEGREE};
@@ -374,6 +381,24 @@ fn surface_is_closed(
     Ok(crate::surface::surface::p7::base_is_closed(k, srf, domain, dir, None, false)?.0)
 }
 
+/// Makes the last control point of `trimmed`, a piece of `whole` ending at `u` inside its
+/// domain, [`crv_point_by_insertion`]`(whole, u)` (not upstream, #17896): the point the
+/// iso curve's neighbouring side starts or ends at, by the same arithmetic. A piece that
+/// does not end at `u` (an interval the trim left whole) is not touched.
+fn end_at_insertion_point(trimmed: &mut BSplineCurve, whole: &NlCurve, u: f64) -> Result<()> {
+    let whole_end = whole.knots().last().copied();
+    let piece = trimmed.nurb_ref()?;
+    if piece.knots().last().copied() != Some(u) || whole_end.is_none_or(|e| u >= e) {
+        return Ok(());
+    }
+    let end = crv_point_by_insertion(whole, u)?;
+    let mut piece = piece.clone();
+    if let Some(last) = piece.cpts_mut().last_mut() {
+        *last = end;
+    }
+    trimmed.set_from_gw_nurb(Some(&piece))
+}
+
 /// Expands `ivl` relatively by 100 (degree 1), 1 (degree 2) or 0.5.
 pub(crate) fn expand_by_degree(ivl: &mut Extent1d, deg: usize) {
     if deg == 1 {
@@ -550,8 +575,16 @@ impl BSplineSurface {
                 let point = new_iso_curve.evaluate_point(trim_ivl.min())?;
                 new_iso_curve = BSplineCurve::create_degenerate_curve(3, point)?;
             } else {
+                let whole = new_iso_curve.nurb_ref()?.clone();
                 // may snap the interval by tol to existing knots (status ignored)
                 ignored(new_iso_curve.trim(k, &mut trim_ivl, TrimMode::Notify))?;
+                // not upstream (#17896): the end at the right of the interval is the
+                // iso curve's point there by de Boor's triangle on its own control
+                // points, as the left end and the neighbouring side (extracted at that
+                // parameter) are, so the face's sides meet exactly in the net's
+                // coordinate that does not vary along that neighbour; the trim's own
+                // right end can come from points its left insertion already rounded
+                end_at_insertion_point(&mut new_iso_curve, &whole, trim_ivl.max())?;
             }
         }
 
@@ -1820,6 +1853,79 @@ mod tests {
             a.distance(at) < 1e-12 && b.distance(at) < 1e-12,
             "{a:?} {b:?} {at:?}"
         );
+    }
+
+    /// #17896 (heal `gen0242`): the four iso curves of a sub-domain of a surface whose net
+    /// has `x = s i`, `y = s j` (the sides of a face made from it) meet exactly in `x` and
+    /// `y` at every corner: both sides take the coordinate from the same net values
+    /// through the same de Boor triangle. Before, a side's end at the right of its
+    /// interval came from control points the trim's left insertion had already rounded
+    /// (an ulp or two off; 9.1e-13 near 3000 in `gen0242`), and an extraction could round
+    /// a coordinate shared along it. Fails without either `end_at_insertion_point` or the
+    /// `CPoint::affine2` combination in `extract_iso_crv`.
+    #[test]
+    fn iso_sides_of_a_sub_domain_meet_exactly_in_the_net_coordinates() {
+        let k = Kernel::default();
+        let mut seed = 0x2545_f491_4f6c_dd1d_u64;
+        let mut rnd = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let knots = |deg: usize, last: usize, rnd: &mut dyn FnMut() -> f64| {
+            let mut inner: Vec<f64> = (0..last - deg).map(|_| rnd()).collect();
+            inner.sort_by(f64::total_cmp);
+            let mut u = vec![0.0; deg + 1];
+            u.extend(inner);
+            u.extend(vec![1.0; deg + 1]);
+            u
+        };
+        for case in 0..243_usize {
+            let (p, q) = (1 + case % 3, 1 + (case / 3) % 3);
+            let (n, m) = (p + (case / 9) % 3, q + (case / 27) % 3);
+            let s = [1e-3, 1.0, 1e3][(case / 81) % 3];
+            let uk = knots(p, n, &mut rnd);
+            let vk = knots(q, m, &mut rnd);
+            let net = (0..=n)
+                .map(|i| {
+                    (0..=m)
+                        .map(|j| CPoint::new(i as f64 * s, j as f64 * s, (rnd() - 0.5) * s, NOW))
+                        .collect()
+                })
+                .collect();
+            let surface =
+                BSplineSurface::from_nurb(Surface::new(net, p, q, uk, vk).unwrap(), false);
+            let (u0, u1) = (0.3 * rnd(), 1.0 - 0.3 * rnd());
+            let (v0, v1) = (0.3 * rnd(), 1.0 - 0.3 * rnd());
+            let domain = Extent2d::from_bounds(u0, v0, u1, v1);
+            let side = |dir: SurfParamType, t: f64| {
+                let options = IsoCurveOptions {
+                    domain: Some(domain),
+                    uv_iso_curve: false,
+                };
+                let iso = surface
+                    .create_iso_parametric_curve(&k, dir, t, options)
+                    .unwrap();
+                let pw = iso.curve.nurb_ref().unwrap().cpts().to_vec();
+                (pw[0], pw[pw.len() - 1])
+            };
+            // constant u: a curve in v from v0 to v1; constant v: in u from u0 to u1
+            let (a, b) = (side(SurfParamType::U, u0), side(SurfParamType::U, u1));
+            let (c, d) = (side(SurfParamType::V, v0), side(SurfParamType::V, v1));
+            for (name, e, f) in [
+                ("(u0, v0)", a.0, c.0),
+                ("(u0, v1)", a.1, d.0),
+                ("(u1, v0)", b.0, c.1),
+                ("(u1, v1)", b.1, d.1),
+            ] {
+                assert_eq!(
+                    (e.x.to_bits(), e.y.to_bits()),
+                    (f.x.to_bits(), f.y.to_bits()),
+                    "case {case} corner {name}: {e:?} {f:?}"
+                );
+            }
+        }
     }
 
     /// Three radius-5 rational quadratic arcs of 120 degrees about the origin, closing a
