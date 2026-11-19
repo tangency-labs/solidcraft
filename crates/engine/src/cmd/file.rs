@@ -216,6 +216,46 @@ fn import_cache() -> Option<solidcraft_io::ImportCache> {
     crate::recovery::data_dir().map(|dir| solidcraft_io::ImportCache::new(dir.join("imports")))
 }
 
+static MODEL_STORE_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+/// Keep this process's model store in `dir` instead of the per-user cache folder. For test
+/// harnesses of other crates, where `cfg!(test)` is false in the engine; the first call wins.
+pub fn use_model_store_dir(dir: std::path::PathBuf) {
+    let _ = MODEL_STORE_DIR.set(dir);
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The model store of this test's thread: none unless the test sets one, so a test that opens a
+    /// design saved without its model evaluates it whatever another test saved.
+    pub(crate) static TEST_MODEL_STORE: std::cell::RefCell<Option<std::path::PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The per-user store of the models of designs saved here ([`solidcraft_io::ModelStore`]): a
+/// design whose file holds no model this build can use opens from it. `SOLIDCRAFT_MODEL_STORE_DIR`
+/// moves it.
+pub(super) fn model_store() -> Option<solidcraft_io::ModelStore> {
+    if cfg!(target_arch = "wasm32") {
+        return None;
+    }
+    #[cfg(test)]
+    return TEST_MODEL_STORE.with(|dir| dir.borrow().clone().map(solidcraft_io::ModelStore::new));
+    #[cfg(not(test))]
+    model_store_outside_tests()
+}
+
+#[cfg(not(test))]
+fn model_store_outside_tests() -> Option<solidcraft_io::ModelStore> {
+    if let Some(dir) = MODEL_STORE_DIR.get() {
+        return Some(solidcraft_io::ModelStore::new(dir.clone()));
+    }
+    if let Some(dir) = solidcraft_geom::env::var_os("MODEL_STORE_DIR").filter(|dir| !dir.is_empty()) {
+        return Some(solidcraft_io::ModelStore::new(dir.into()));
+    }
+    // Disposable: the cache folder, which the system may empty, not the data folder.
+    crate::recovery::cache_dir().map(|dir| solidcraft_io::ModelStore::new(dir.join("models")))
+}
+
 fn clear_import_cache(_: &mut Session, _: &Value) -> Result<Value> {
     let removed = import_cache().map(|cache| cache.clear()).transpose().map_err(|e| EngineError::Other(e.to_string()))?.unwrap_or(0);
     Ok(json!({"removed": removed}))
@@ -1471,7 +1511,8 @@ fn unreadable_design(path: &str, reason: &str) -> EngineError {
 
 /// Read the design file at `path` for `doc.open`, under its file's name if it has none of its own.
 fn read_design(s: &mut Session, path: &str) -> Result<(Document, Option<solidcraft_doc::SavedModel>)> {
-    let (mut doc, saved) = solidcraft_io::read_design_file(path, s.open_preview.take()).map_err(|e| unreadable_design(path, &e.to_string()))?;
+    let (mut doc, saved) = solidcraft_io::read_design_file_with_store(path, s.open_preview.take(), model_store().as_ref())
+        .map_err(|e| unreadable_design(path, &e.to_string()))?;
     if let Some(stem) = default_name_for(&doc.name, path) {
         doc.name = stem;
     }
@@ -1860,6 +1901,14 @@ fn write_bytes(
     // Atomic, keeping the version being replaced as `<file>.bak`; a watched save reports how far
     // the write is and stops on Cancel until the file is replaced.
     solidcraft_io::write_atomic(std::path::Path::new(path), &bytes, true).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    // The model the file keeps is kept in the model store too, so this document opens without
+    // being evaluated again even from a copy of the file without it. Never a failed save.
+    if format == "container"
+        && let Some(store) = model_store()
+        && let Err(e) = store.keep(&bytes)
+    {
+        log::info!("{path}: the model was not kept in the model store: {e}");
+    }
     s.path = Some(path.to_string());
     s.disk = solidcraft_io::design_lock::stamp(path);
     s.read_only = false;
@@ -4045,6 +4094,48 @@ mod tests {
     /// A save with a failing feature succeeds but explains that its missing model cache will
     /// make the next open rebuild the timeline. Plain JSON and explicit cache:false are
     /// unchanged; an ordinary cache is still silent (#18815).
+    /// #19123: a save keeps its model in the model store as well, so the same document opens
+    /// without being evaluated even from a file saved without its model; a changed document is
+    /// evaluated as before.
+    #[test]
+    fn a_design_saved_here_opens_from_the_model_store_when_its_file_kept_no_model() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-model-store-open-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("plate.sc");
+        let path_str = path.to_str().unwrap();
+        let use_store = |on: bool| TEST_MODEL_STORE.with(|store| *store.borrow_mut() = on.then(|| dir.join("models")));
+        use_store(true);
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length":40,"width":30,"height":8,"name":"Plate"})).unwrap();
+        s.execute("solid.fillet", &json!({"edges":[[40,30,4]],"radius":3,"name":"Corner"})).unwrap();
+        s.execute("file.save", &json!({"path":path})).unwrap();
+        s.execute("file.save", &json!({"cache":false})).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        assert!(!solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(&bytes)).unwrap().has_model_cache(), "the file keeps no model");
+        // What `doc.open` reads, and whether it takes the model as the design's evaluation.
+        let read = || read_design(&mut Session::default(), path_str).unwrap();
+        let (doc, saved) = read();
+        let doc = std::sync::Arc::new(doc);
+        let adopted = Session::saved_model(&doc, saved.as_ref()).expect("the stored model is the design's evaluation");
+        assert_eq!(adopted.state().bodies.len(), 1);
+        let mut reopened = Session::default();
+        reopened.execute("doc.open", &json!({"path": path})).unwrap();
+        assert_eq!(reopened.model.state().bodies.len(), 1);
+        use_store(false);
+        assert!(read().1.is_none(), "without the store the file gives no model");
+        use_store(true);
+        // A linked design's read takes it too.
+        let mut reader = solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(&bytes)).unwrap();
+        assert!(reader.geometry_or_stored(model_store().as_ref()).is_some());
+
+        // Changed and saved without a model: no entry is its model.
+        s.execute("solid.box", &json!({"length":5,"width":5,"height":5,"corner":[0,0,8],"name":"Boss"})).unwrap();
+        s.execute("file.save", &json!({"cache":false})).unwrap();
+        assert!(read().1.is_none(), "a document never saved with its model here has none");
+        use_store(false);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn saving_a_failed_feature_reports_missing_cache_without_losing_the_design() {
         let path = std::env::temp_dir().join(format!("solidcraft-cache-error-{}.sc", std::process::id()));

@@ -258,6 +258,29 @@ Before the session is ready the cache still supplies the picture (a bounded mesh
 of the placed bodies) shown while opening. Earlier `cache/key.json` and
 `cache/brep.bin` entries are ignored.
 
+### The model store
+
+A desktop save that writes the model into the file also copies it into the model store, a
+per-user folder in the platform's cache folder (`models` beside the slicer files and
+thumbnails: `$XDG_CACHE_HOME/solidcraft`, `~/Library/Caches/SolidCraft` or
+`%LOCALAPPDATA%\SolidCraft`; `SOLIDCRAFT_MODEL_STORE_DIR` moves it), #19123. An entry is the
+file's own `container.json`, `cache/model.json` and `cache/bodies.bin`, copied as written
+(nothing is encoded or compressed again), named `<key>.scm` after a SHA-256 of the cache
+format, the producer, the evaluation source, the kernel and the digest of the exact
+`document.json`.
+
+When a design's file holds no model this build can use (saved with `cache: false`, its model
+left out because it did not fit, an earlier version of it brought back by version control, a
+copy whose cache another build wrote), Open and a linked design's read look for the entry of
+its `document.json` and take it under the same rules as a cache in the file: the manifest's
+key and digests, then `Model::adopt`. A file with provenance never takes one, as it never
+takes its own. Nothing about the file changes: the store only spares an evaluation on a
+machine that saved that exact document before.
+
+The store keeps at most 2 GiB and 2,000 entries; a save that would pass either evicts the
+entries used longest ago first (opening from an entry counts as a use). It is disposable: an
+emptied store only means designs evaluate as they did without it.
+
 ## Review increments and kernel independence
 
 The implementation is split into the following review increments after the

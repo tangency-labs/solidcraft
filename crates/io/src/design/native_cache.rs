@@ -35,6 +35,12 @@ fn evaluation() -> String {
 /// what they refuse, so a design opened from it evaluates again.
 pub(super) const KERNEL: &str = "solidcore";
 
+/// The name of the model store's entry for a model of `document` ([`super::ModelStore`]): what
+/// [`current`] checks, so an entry another build could not read is never even looked at.
+pub(super) fn store_key(document: &[u8]) -> String {
+    digest(json!([FORMAT, PRODUCER, evaluation(), KERNEL, digest(document)]).to_string().as_bytes())
+}
+
 pub(super) fn identity() -> Value {
     json!([FORMAT, PRODUCER, env!("CARGO_PKG_VERSION"), build()])
 }

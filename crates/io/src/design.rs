@@ -11,11 +11,13 @@ use std::sync::Arc;
 
 mod drawing;
 mod import_cache;
+mod model_store;
 mod native_cache;
 mod provenance;
 mod thumbnail;
 pub use drawing::{FileKind, file_kind, read_drawing, read_drawing_file, write_drawing_container};
 pub use import_cache::ImportCache;
+pub use model_store::ModelStore;
 pub use native_cache::read_design_geometry;
 pub use provenance::{
     OpenPgpSignature, OpenPgpSigner, ProvenanceChain, ProvenanceRecord, ProvenanceReport, ProvenanceSave, ProvenanceSigner, ProvenanceStatus,
@@ -796,6 +798,11 @@ impl<R: Read + Seek> DesignContainerReader<R> {
         native_cache::read_geometry_with(&mut self.reader, &document).ok()
     }
 
+    /// [`Self::geometry`], or else the model `store` keeps for this document ([`ModelStore`]).
+    pub fn geometry_or_stored(&mut self, store: Option<&ModelStore>) -> Option<solidcraft_doc::SavedModel> {
+        self.geometry().or_else(|| store?.read(&self.reader.document(16 << 20).ok()?, true))
+    }
+
     /// Consume the reader, resolving every required blob before returning a document.
     pub fn read_document(mut self) -> Result<Document> {
         read_document(&mut self.reader)
@@ -818,12 +825,22 @@ pub(super) fn read(bytes: &[u8]) -> Result<Document> {
 /// keeps one seekable file handle instead of buffering the complete archive. JSON continues
 /// through the normal migrations.
 pub fn read_design_file(path: &str, notify: Option<impl FnOnce(DesignPreview)>) -> Result<(Document, Option<solidcraft_doc::SavedModel>)> {
+    read_design_file_with_store(path, notify, None)
+}
+
+/// [`read_design_file`], with the model `store` keeps for this document when the file holds none
+/// this build can use ([`ModelStore`]).
+pub fn read_design_file_with_store(
+    path: &str,
+    notify: Option<impl FnOnce(DesignPreview)>,
+    store: Option<&ModelStore>,
+) -> Result<(Document, Option<solidcraft_doc::SavedModel>)> {
     let _span = solidcraft_profile::span("io", "read_design_file");
     let mut source = open_regular_file(path)?;
     if is_container_source(&mut source)? {
         let mut reader = DesignContainerReader::new(source)?;
         // A design with its model opens without a picture first: the model is the session.
-        let model = reader.geometry_before_document();
+        let model = reader.geometry_before_document().or_else(|| store?.read(&reader.reader.document(16 << 20).ok()?, false));
         if let Some(notify) = notify
             && model.is_none()
             && let Ok(preview) = read_preview(&mut reader.reader)
@@ -2090,6 +2107,111 @@ mod tests {
             assert_eq!(std::fs::read(&target).unwrap(), b"keep this design");
         }
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// #19123: a save's model is kept in the model store, copied as the file holds it, and a file
+    /// of the same document without a model opens with it; anything else misses. The entries used
+    /// longest ago are evicted first, and nothing else in the folder is touched.
+    #[test]
+    fn the_model_store_gives_a_file_without_a_model_the_model_saved_for_its_document() {
+        let root = std::env::temp_dir().join(format!("solidcraft-model-store-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = root.join("models");
+        let designs = root.join("designs");
+        std::fs::create_dir_all(&designs).unwrap();
+        let mut store = ModelStore::new(dir.clone());
+        let doc = Document::new("Plate");
+        let model = native_geometry();
+        let with = write_design_container_with_cache(&doc, DesignCompression::Fast, None, Some(&model)).unwrap();
+        let without = write_design_container_with_cache(&doc, DesignCompression::Fast, None, None).unwrap();
+        let file = designs.join("plate.sc");
+        std::fs::write(&file, &without).unwrap();
+        let open = |store: &ModelStore, file: &std::path::Path| {
+            read_design_file_with_store(file.to_str().unwrap(), None::<fn(DesignPreview)>, Some(store)).unwrap().1
+        };
+        assert!(open(&store, &file).is_none(), "nothing stored yet");
+
+        // A file without a model stores nothing; one with a model stores its parts as written.
+        store.keep(&without).unwrap();
+        assert!(!dir.exists());
+        store.keep(&with).unwrap();
+        let entries: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().path()).collect();
+        assert_eq!(entries.len(), 1);
+        let entry = entries[0].clone();
+        assert_eq!(entry.extension().unwrap(), "scm");
+        let stored = parts(&std::fs::read(&entry).unwrap());
+        let saved = parts(&with);
+        assert_eq!(stored.keys().collect::<Vec<_>>(), ["cache/bodies.bin", "cache/model.json", "container.json"]);
+        for (name, bytes) in &stored {
+            assert_eq!(bytes, &saved[name], "{name} is copied as the file holds it");
+        }
+        let read = open(&store, &file).expect("the file without a model opens with the stored one");
+        assert_eq!(read.records, model.records);
+        assert_eq!(solidcraft_kernel::encode_native_body(&read.bodies[0]).unwrap(), solidcraft_kernel::encode_native_body(&model.bodies[0]).unwrap());
+        assert!(read_design_file(file.to_str().unwrap(), None::<fn(DesignPreview)>).unwrap().1.is_none(), "without the store, as before");
+        let mut reader = DesignContainerReader::new(Cursor::new(&without)).unwrap();
+        assert!(reader.geometry_or_stored(Some(&store)).is_some(), "a linked design's read uses the store too");
+
+        // Another document, a changed key field or damaged bodies: a miss.
+        let other = designs.join("other.sc");
+        std::fs::write(&other, write_design_container_with_cache(&Document::new("Other"), DesignCompression::Fast, None, None).unwrap()).unwrap();
+        assert!(open(&store, &other).is_none());
+        let original = std::fs::read(&entry).unwrap();
+        for field in ["format", "producer", "evaluation", "kernel", "document", "payload"] {
+            let mut damaged = stored.clone();
+            let mut manifest: Value = serde_json::from_slice(&damaged["cache/model.json"]).unwrap();
+            manifest[field] = json!("different");
+            damaged.insert("cache/model.json".into(), serde_json::to_vec(&manifest).unwrap());
+            std::fs::write(&entry, package(&damaged)).unwrap();
+            assert!(open(&store, &file).is_none(), "{field} mismatch must miss");
+        }
+        let mut damaged = stored.clone();
+        damaged.get_mut("cache/bodies.bin").unwrap()[0] ^= 1;
+        std::fs::write(&entry, package(&damaged)).unwrap();
+        assert!(open(&store, &file).is_none());
+        std::fs::write(&entry, &original).unwrap();
+        assert!(open(&store, &file).is_some());
+
+        // Eviction: the entry used longest ago goes first, and opening from one is a use.
+        let unrelated = dir.join("notes.txt");
+        std::fs::write(&unrelated, b"leave me").unwrap();
+        let entry_of = |doc: &Document| {
+            let bytes = write_design_container_with_cache(doc, DesignCompression::Fast, None, Some(&model)).unwrap();
+            let document = DesignContainerReader::new(Cursor::new(&bytes)).unwrap().reader.document(1 << 20).unwrap();
+            (bytes, dir.join(format!("{}.scm", native_cache::store_key(&document))))
+        };
+        let old = |path: &std::path::Path| {
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(path)
+                .unwrap()
+                .set_times(std::fs::FileTimes::new().set_modified(std::time::UNIX_EPOCH))
+                .unwrap();
+        };
+        let (second, second_entry) = entry_of(&Document::new("Second"));
+        let (third, third_entry) = entry_of(&Document::new("Third"));
+        store.budget = original.len() as u64 * 2 + 64;
+        store.keep(&second).unwrap();
+        old(&entry);
+        old(&second_entry);
+        assert!(open(&store, &file).is_some(), "used now");
+        store.keep(&third).unwrap();
+        assert!(entry.exists() && third_entry.exists());
+        assert!(!second_entry.exists(), "the entry used longest ago is evicted");
+        assert!(store.size().unwrap() <= store.budget);
+        assert_eq!(store.clear().unwrap(), 2);
+        assert_eq!(store.clear().unwrap(), 0);
+        assert_eq!(std::fs::read(&unrelated).unwrap(), b"leave me", "only the store's entries are removed");
+        #[cfg(unix)]
+        {
+            let target = root.join("valuable.sc");
+            std::fs::write(&target, b"keep this design").unwrap();
+            std::os::unix::fs::symlink(&target, &entry).unwrap();
+            assert!(open(&store, &file).is_none());
+            assert!(store.keep(&with).is_err(), "an entry that is a link is never written through");
+            assert_eq!(std::fs::read(&target).unwrap(), b"keep this design");
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// #17697 review: a pending import-cache write stays visible to every reader until it is

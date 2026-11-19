@@ -312,7 +312,8 @@ pub(super) fn file_sha256(file: &Path, own: Option<&str>) -> Option<String> {
 }
 
 /// The solid bodies of `bytes`, the design at `file`, as an Import feature. The model the file
-/// keeps is its evaluation when this build saved it for exactly that design, as when it is opened.
+/// keeps, or else the model store's, is its evaluation when this build saved it for exactly that
+/// design, as when it is opened.
 fn design_bodies(
     file: &Path,
     bytes: &[u8],
@@ -325,7 +326,7 @@ fn design_bodies(
     let fail = |e: solidcraft_io::IoError| EngineError::Other(format!("{shown}: {e}"));
     let (doc, saved) = if solidcraft_io::is_design_container(bytes) {
         let mut reader = solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(bytes)).map_err(fail)?;
-        let saved = reader.geometry();
+        let saved = reader.geometry_or_stored(super::file::model_store().as_ref());
         (reader.read_document().map_err(fail)?, saved)
     } else {
         (solidcraft_io::read_design(bytes).map_err(fail)?, None)
