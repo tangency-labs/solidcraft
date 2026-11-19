@@ -74,6 +74,16 @@ An `edges` entry is `[x,y,z]` on a top or bottom edge, `{x,y,z}`, or
   angle, direction, radius, allowance, length and its flat centre line, so an agent can check
   where a bend landed.
 
+### On a drawing
+A note (`drawing.note.add`) or a title block cell on a sheet that documents a sheet metal part
+reads its sheet metal fields live, so a drawing never carries a typed-in thickness:
+`{"field":{"source":"component","key":"thickness"}}`, and likewise `sheet_rule` (the rule's
+name), `k_factor`, `bend_radius` (the radius all its bends share), `flat_length` and `flat_width`
+(the flat's longer and shorter side). Lengths are in the drawing's units with two decimals
+(`2.00 mm`). A field reads empty, and `drawing.check` lists it, when the part has no sheet metal
+body, its sheet bodies disagree, its bends have different radii, or its flat no longer describes
+the body.
+
 ### Inspection
 - `inspect.measure`: `bodies?`, `names_only?`, or `items` (faces and edges) for lengths, areas,
   volumes, diameters, distances, centre distances and angles between two faces or edges.
