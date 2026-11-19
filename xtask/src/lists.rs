@@ -3,8 +3,8 @@
 //! (CONTRIBUTING.md, "Lists many changes add to"). Checked by `cargo xtask ci` and the Lists
 //! workflow; `--fix` rewrites them.
 //!
-//! - The message catalogs (`assets/locales/*.json`): one message per line, sorted by id, no
-//!   duplicate ids, as `serde_json` pretty-prints them.
+//! - The message catalogs (`assets/locales/*.json` and the shared `crates/ui-text/locales/*.json`):
+//!   one message per line, sorted by id, no duplicate ids, as `serde_json` pretty-prints them.
 //! - `tests/KNOWN_FAILING_TESTS`: one test a line with its cause, sorted, each test once
 //!   (checked only; `cargo xtask known-failing` reads it).
 //! - `tests/QUARANTINED_TESTS`: flaky tests, `<test> <issue> <date added> [why]`, sorted, an issue
@@ -20,9 +20,11 @@ use serde_json::{Map, Value};
 const LOCALES: &str = "assets/locales";
 
 pub fn run(root: &Path, fix: bool) -> Result<(), String> {
-    let dir = root.join(LOCALES);
-    let entries = std::fs::read_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    let mut files: Vec<_> = entries.filter_map(Result::ok).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "json")).collect();
+    let mut files = Vec::new();
+    for dir in [root.join(LOCALES), root.join(crate::pending::SHARED_LOCALES)] {
+        let entries = std::fs::read_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        files.extend(entries.filter_map(Result::ok).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "json")));
+    }
     files.sort();
     // Each catalog is parsed and written out again on a core of its own.
     let read = crate::parallel::map(&files, |path| {
