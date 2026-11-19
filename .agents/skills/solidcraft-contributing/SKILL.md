@@ -254,9 +254,7 @@ sccache is an opt-in tool on your machine. The repository doesn't require it, an
 - **blaze** (https://github.com/indexable-inc/blaze) doesn't build this workspace yet, so don't
   plan around it. As of blaze 0.20261027 it stops on thread-local statics in tests
   (`unsupported: writable static`) and on `unsupported: vector in the C ABI` in the app, and it
-  builds with its own toolchain instead of the pinned rustc. Keep sccache as the speed-up, and
-  note that the dev profile already keeps line tables only (not full debug info), which makes
-  links faster and binaries much smaller.
+  builds with its own toolchain instead of the pinned rustc. Keep sccache as the speed-up.
 
 ## 6. Show the result
 
