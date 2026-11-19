@@ -383,4 +383,17 @@ fn union_with_a_surface_crossing_a_certified_face_keeps_the_circle_it_meets_it_a
         })
         .count();
     assert_eq!(top_faces, 2, "the block's top, split along the circle the cone crosses it in");
+    // The cone's piece above the block is kept (it reaches z 100), and the split is where the
+    // cone crosses z 10: radius 6 + (10 - 6) * 10 / 100 = 6.4. That circle has two vertices (the
+    // split's and the cone's cut edge's), the rim at z 100 one (radius 10); each within its own
+    // tolerance.
+    assert!((r.exact_bounds().unwrap().max.z - 100.).abs() <= r.record().tolerance, "{:?}", r.exact_bounds());
+    let on = |z: f64, radius: f64| {
+        r.record()
+            .vertices
+            .iter()
+            .filter(|v| (v.point[2] - z).abs() <= v.tolerance && (v.point[0].hypot(v.point[1]) - radius).abs() <= v.tolerance)
+            .count()
+    };
+    assert_eq!((on(10., 6.4), on(100., 10.)), (2, 1), "{:?}", r.record().vertices);
 }
