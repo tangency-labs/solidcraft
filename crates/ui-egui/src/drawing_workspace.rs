@@ -68,6 +68,7 @@ pub struct State {
 
 pub fn active(app: &SolveApp) -> bool {
     matches!(app.ui.tab.as_str(), "DRAWING LAYOUT" | "DRAWING ANNOTATE" | "DRAWING PARTS" | "DRAWING REVIEW")
+        || (app.ui.tab == "SKETCH" && crate::workspace::sheet_scope(app))
 }
 
 pub fn enter(app: &mut SolveApp, drawing: bool) -> Result<(), String> {

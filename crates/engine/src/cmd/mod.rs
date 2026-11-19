@@ -404,7 +404,10 @@ impl CommandSpec {
     /// Whether the command can run in `s` now: on the part open, and enabled. The one check
     /// running a command, running it inside another and listing it make.
     pub fn allowed(&self, s: &Session) -> std::result::Result<(), String> {
-        if s.active_sheet_sketch.is_some() && matches!(self.id, "drawing.create" | "drawing.open" | "drawing.close" | "drawing.delete") {
+        if let Some(entry) = &s.active_sheet_sketch
+            && matches!(self.id, "drawing.create" | "drawing.open" | "drawing.close" | "drawing.delete")
+            && !(entry.view.is_some() && matches!(self.id, "drawing.open" | "drawing.close"))
+        {
             return Err("finish or cancel the sheet sketch before switching drawings".into());
         }
         // Nothing a drawing does holds the model's commands: an open drawing, or a sheet sketch
@@ -489,7 +492,7 @@ pub fn in_sketch(s: &Session) -> std::result::Result<(), String> {
     }
 }
 
-/// Lifecycle actions address the one active edit independently of the focused receiver.
+/// Lifecycle actions address the one active edit even when its owning tile is not focused.
 pub fn has_sketch_edit(s: &Session) -> std::result::Result<(), String> {
     if s.active_sketch.is_some() || s.active_sheet_sketch.is_some() { Ok(()) } else { in_sketch(s) }
 }

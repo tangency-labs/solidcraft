@@ -761,7 +761,7 @@ pub(crate) fn with_strip<T>(
     std::mem::swap(&mut app.ui.ribbon_context, &mut host.ribbon_context);
     std::mem::swap(&mut app.ui.sketch_return_tab, &mut host.sketch_return_tab);
     crate::drawing_workspace::swap_selection(app);
-    crate::drawing_workspace::sync_history(app);
+    crate::workspace::sync_history(app);
     documents::show_active_look(app);
     app.view_windows.painting = Some(target);
     app.view_windows.painting_options = Some(window.options);
@@ -780,7 +780,7 @@ pub(crate) fn with_strip<T>(
     std::mem::swap(&mut app.ui.ribbon_context, &mut host.ribbon_context);
     std::mem::swap(&mut app.ui.sketch_return_tab, &mut host.sketch_return_tab);
     crate::drawing_workspace::swap_selection(app);
-    crate::drawing_workspace::sync_history(app);
+    crate::workspace::sync_history(app);
     app.view_windows.painting = None;
     app.view_windows.parked = None;
     for (_, view) in &app.view_windows.foreign_views {
@@ -1957,7 +1957,7 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
             std::mem::swap(&mut app.ui.ribbon_context, &mut host.ribbon_context);
             std::mem::swap(&mut app.ui.sketch_return_tab, &mut host.sketch_return_tab);
             crate::drawing_workspace::swap_selection(app);
-            crate::drawing_workspace::sync_history(app);
+            crate::workspace::sync_history(app);
             if app.preferences.workspace_follows_view && app.docs.views.active().kind == ViewKind::Sheet {
                 let view = app.docs.views.active().clone();
                 let result = if receiver_scope.is_some() { crate::sheet_views::bind(app, &view) } else { crate::sheet_views::focus(app, &view) };
@@ -2007,7 +2007,7 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
             std::mem::swap(&mut app.ui.ribbon_context, &mut host.ribbon_context);
             std::mem::swap(&mut app.ui.sketch_return_tab, &mut host.sketch_return_tab);
             crate::drawing_workspace::swap_selection(app);
-            crate::drawing_workspace::sync_history(app);
+            crate::workspace::sync_history(app);
             app.home.open = home;
             (app.custom_titlebar, app.integrated_titlebar) = decorations;
             app.view_windows.painting = None;

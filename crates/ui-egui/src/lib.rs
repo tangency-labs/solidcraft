@@ -1668,6 +1668,9 @@ impl SolveApp {
                 params.insert("view".into(), json!(target));
             }
         }
+        if matches!(id, "drawing.sketch.create" | "drawing.sketch.edit") {
+            crate::sketch_view::prepare_sheet_start(self, id, &mut params)?;
+        }
         crate::plugins::sync_policy(self);
         if plugins::busy(self) && matches!(id.to_ascii_lowercase().as_str(), "plugin.install" | "plugin.remove") {
             return Err(self.tr("prefs.plugin_busy").into());
@@ -2057,6 +2060,9 @@ impl SolveApp {
             Ok(value)
         });
         crate::sketch_view::project(self);
+        if workspace::sheet_scope(self) {
+            workspace::sync_context(self);
+        }
         crate::drawing_sheet_page::retire_closed(self);
         if r.is_ok() && self.session.active_sketch.is_some() && !self.sketch_finish_processing {
             // A sketch some command left open: remember the view to go back to, as a command run from
@@ -2396,10 +2402,19 @@ impl SolveApp {
         if self.file_load_holds() || self.file_picker.is_some() {
             return;
         }
+        if matches!(id, "drawing.sheet_sketch" | "drawing.sketch.create")
+            || (id == "sketch.create" && self.docs.views.active().kind == solidcraft_views::ViewKind::Sheet)
+        {
+            if let Err(error) = crate::sketch_view::start_sheet(self) {
+                self.set_status(error, true);
+            }
+            return;
+        }
         if drawing_workspace::start(self, id) {
             return;
         }
         if drawing_workspace::active(self)
+            && !(self.session.active_sheet_sketch.is_some() && id.starts_with("sketch."))
             && !id.starts_with("drawing.")
             && !matches!(id, "assembly.bom" | "sheet.flat_pattern" | "document.metadata" | "document.metadata.set" | "view.layout")
             && !matches!(id, "view.fit" | "view.home" | "view.tool" | "view.tool.zoom")
@@ -4679,12 +4694,14 @@ impl SolveApp {
             dim_view::set_model_drawn(Vec::new());
             let id = self.docs.views.active().id;
             drawing_sheet_page::show_view(self, ui, id);
+            view_tiles::single_sketch_chrome(self, ui);
         } else if drawing_workspace::active(self) {
             if dialogs_sheet::flat_active(self) {
                 viewport::show(self, ui);
             } else {
                 dim_view::set_model_drawn(Vec::new());
                 drawing_workspace::show(self, ui);
+                view_tiles::single_sketch_chrome(self, ui);
             }
         } else if view_window_drag::unanchored(self, ui.ctx(), self.docs.views.active().id) {
             self.viewport.rect = Some(ui.max_rect());

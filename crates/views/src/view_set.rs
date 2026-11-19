@@ -63,7 +63,7 @@ impl ViewKind {
     }
 }
 
-/// A model sketch being edited in one view. Runtime state, never saved with a layout.
+/// A Model or Sheet sketch being edited in one view. Runtime state, never saved with a layout.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SketchSession {
     pub sketch: u64,
@@ -723,7 +723,7 @@ impl ViewSet {
                 .window_of(id)
                 .and_then(|window| self.views_of(window))
                 .and_then(|views| views.get(id))
-                .is_some_and(|view| view.kind == ViewKind::Model)
+                .is_some_and(|view| matches!(view.kind, ViewKind::Model | ViewKind::Sheet))
         {
             return false;
         }
@@ -1350,7 +1350,8 @@ impl ViewSet {
 
     /// Take the view at `i` out of the set onto the closed stack.
     fn remove_closed(&mut self, i: usize) {
-        let view = self.views.remove(i);
+        let mut view = self.views.remove(i);
+        view.editing = None;
         self.closed.push((i, view));
         let skip = self.closed.len().saturating_sub(CLOSED_CAP);
         self.closed.drain(..skip);
@@ -1708,26 +1709,48 @@ mod tests {
 
     #[test]
     fn sketch_editing_is_runtime_only_and_follows_the_original_view() {
-        let mut set = ViewSet::new();
-        let original = set.active().id;
-        let editing = SketchSession { sketch: 42 };
-        assert!(set.set_editing(Some((original, editing))));
-        let copy = set.duplicate(original).unwrap();
-        assert_eq!(set.get(original).unwrap().editing, Some(editing));
-        assert_eq!(set.get(copy).unwrap().editing, None);
-        assert_eq!(ViewSet::from_json(&set.to_json()).unwrap().get(original).unwrap().editing, None);
-        assert!(set.to_json()["views"].as_array().unwrap().iter().all(|view| view.get("editing").is_none()));
-        let moved = set.move_to_window(original, WindowTarget::New { placement: None }).unwrap();
-        assert_eq!(set.views_of(moved.window).unwrap().get(original).unwrap().editing, Some(editing));
-        assert!(set.set_editing(Some((copy, SketchSession { sketch: 43 }))));
-        assert_eq!(set.views_of(moved.window).unwrap().get(original).unwrap().editing, None);
-        assert_eq!(set.get(copy).unwrap().editing, Some(SketchSession { sketch: 43 }));
-        let render = set.open(ViewKind::Render, None, false);
-        assert!(!set.set_editing(Some((render, editing))));
-        assert!(!set.set_editing(Some((999, editing))));
-        assert_eq!(set.get(copy).unwrap().editing, Some(SketchSession { sketch: 43 }));
-        assert!(set.set_editing(None));
-        assert_eq!(set.get(copy).unwrap().editing, None);
+        for kind in [ViewKind::Model, ViewKind::Sheet] {
+            let mut set = ViewSet::new();
+            let original = if kind == ViewKind::Model { set.active().id } else { set.open(kind, Some("sheet-a".into()), false) };
+            let editing = SketchSession { sketch: 42 };
+            assert!(set.set_editing(Some((original, editing))), "{kind:?}");
+            let copy = set.duplicate(original).unwrap();
+            assert_eq!(set.get(original).unwrap().editing, Some(editing));
+            assert_eq!(set.get(copy).unwrap().editing, None);
+            assert_eq!(ViewSet::from_json(&set.to_json()).unwrap().get(original).unwrap().editing, None);
+            assert!(set.to_json()["views"].as_array().unwrap().iter().all(|view| view.get("editing").is_none()));
+            let moved = set.move_to_window(original, WindowTarget::New { placement: None }).unwrap();
+            assert_eq!(set.views_of(moved.window).unwrap().get(original).unwrap().editing, Some(editing));
+            let saved = set.to_json();
+            assert!(saved["views"].as_array().unwrap().iter().all(|view| view.get("editing").is_none()));
+            assert_eq!(ViewSet::from_json(&saved).unwrap().views_of(moved.window).unwrap().get(original).unwrap().editing, None);
+            assert!(set.set_editing(Some((copy, SketchSession { sketch: 43 }))));
+            assert_eq!(set.views_of(moved.window).unwrap().get(original).unwrap().editing, None);
+            assert_eq!(set.get(copy).unwrap().editing, Some(SketchSession { sketch: 43 }));
+            for unsupported in [ViewKind::Render, ViewKind::Animation] {
+                let target = set.open(unsupported, None, false);
+                assert!(!set.set_editing(Some((target, editing))));
+                assert_eq!(set.get(target).unwrap().editing, None);
+            }
+            assert!(!set.set_editing(Some((999, editing))));
+            assert_eq!(set.get(copy).unwrap().editing, Some(SketchSession { sketch: 43 }));
+            let other_kind = if kind == ViewKind::Model { ViewKind::Sheet } else { ViewKind::Model };
+            let other = set.open(other_kind, (other_kind == ViewKind::Sheet).then(|| "sheet-b".into()), false);
+            assert!(set.set_editing(Some((other, editing))));
+            assert_eq!(set.get(copy).unwrap().editing, None, "switching Model/Sheet preserves one global owner");
+            assert_eq!(set.views_of(moved.window).unwrap().get(original).unwrap().editing, None);
+            assert!(set.set_editing(Some((original, editing))));
+            set.move_to_window(original, WindowTarget::Existing { window: 0, index: None }).unwrap();
+            assert_eq!(set.get(original).unwrap().editing, Some(editing), "moving back keeps the original owner");
+            assert_eq!(set.get(other).unwrap().editing, None);
+            assert!(set.close(original));
+            assert!(set.closed.iter().all(|(_, view)| view.editing.is_none()));
+            assert_eq!(set.reopen(), Some(original));
+            assert_eq!(set.get(original).unwrap().editing, None, "reopening a closed view never reopens an editor");
+            assert!(set.set_editing(Some((copy, editing))));
+            assert!(set.set_editing(None));
+            assert_eq!(set.get(copy).unwrap().editing, None);
+        }
     }
 
     fn sheets(n: usize) -> ViewSet {

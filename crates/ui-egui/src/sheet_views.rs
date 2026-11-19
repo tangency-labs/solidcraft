@@ -61,16 +61,6 @@ pub(crate) fn resolve(app: &SolveApp, subject: Option<&str>) -> Result<(u64, u64
         .ok_or_else(|| app.tr("sheet_views.missing").to_owned())
 }
 
-/// Bind a real focus transition to its drawing receiver, without fitting or authoring anything.
-pub(crate) fn focus(app: &mut SolveApp, view: &DesignView) -> Result<(), String> {
-    if view.kind != ViewKind::Sheet {
-        return Ok(());
-    }
-    bind(app, view)?;
-    crate::drawing_workspace::focus_sheet_selection(app);
-    Ok(())
-}
-
 /// Borrow a Sheet receiver without committing a selection or focus transition.
 pub(crate) fn bind(app: &mut SolveApp, view: &DesignView) -> Result<(), String> {
     if view.kind != ViewKind::Sheet {
@@ -80,6 +70,16 @@ pub(crate) fn bind(app: &mut SolveApp, view: &DesignView) -> Result<(), String> 
     crate::drawing_sheet_page::activate_view(app, view.id);
     app.session.open_drawing = Some(drawing);
     crate::drawing_sheet_page::select_sheet(app, sheet);
+    Ok(())
+}
+
+/// Bind a real focus transition to its drawing receiver, without fitting or authoring anything.
+pub(crate) fn focus(app: &mut SolveApp, view: &DesignView) -> Result<(), String> {
+    if view.kind != ViewKind::Sheet {
+        return Ok(());
+    }
+    bind(app, view)?;
+    crate::drawing_workspace::focus_sheet_selection(app);
     Ok(())
 }
 

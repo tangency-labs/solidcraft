@@ -141,7 +141,7 @@ fn put_work(app: &mut SolveApp, mut work: DocWork, before: u64) {
     }
     crate::workspace::sync_context(app);
     crate::drawing_workspace::swap_selection(app);
-    crate::drawing_workspace::sync_history(app);
+    crate::workspace::sync_history(app);
 }
 
 /// The per-design part of the UI state the session doesn't keep (what is hidden, shown or locked
@@ -2834,10 +2834,10 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                         (
                             {
                                 let mut view = view.clone();
-                                if let Some(editing) = view.editing
-                                    && let Some(sketch) = app.session.doc.feature(editing.sketch)
+                                if view.editing.is_some()
+                                    && let Some(name) = crate::sketch_view::name(app, view.id)
                                 {
-                                    view.name = sketch.name.clone();
+                                    view.name = name;
                                 }
                                 view
                             },

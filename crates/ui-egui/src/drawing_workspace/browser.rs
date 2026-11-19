@@ -252,7 +252,7 @@ pub(crate) fn name_of(app: &SolveApp, id: u64) -> Option<String> {
     Some(view_name(app, drawing, view, number))
 }
 
-fn view_name(app: &SolveApp, drawing: &Drawing, view: &View, number: usize) -> String {
+pub(crate) fn view_name(app: &SolveApp, drawing: &Drawing, view: &View, number: usize) -> String {
     // A view with a label is called what its label says: its name, else its words and letter
     // (`DETAIL A`), never nothing.
     if let Some(label) = &view.label {
