@@ -4244,6 +4244,29 @@ fn bend_lines_are_long_dashes_with_one_and_two_dots_in_every_group() {
     }
 }
 
+/// Each bend line's chain-line pattern starts so its long dash is centred on the line: at half the
+/// line's length the pattern is halfway along its first, long dash.
+#[test]
+fn a_bend_line_has_its_long_dash_at_its_middle() {
+    let mut s = sheet_plate();
+    with_drawing_closed(&mut s, |s| {
+        run(s, "sheet.flange", json!({"edges": [[50, 60, 2]], "height": 20, "flip": true}));
+    });
+    let (id, _) = flat_view(&mut s, json!({"sheet": "Sheet 1", "scale": "1:1"}));
+    let d = s.drawing("test").unwrap();
+    let built = crate::drawing_scene::build(&s, d, d.view(id).unwrap().sheet).unwrap();
+    let mut bends = 0;
+    for item in built.scene.groups.iter().filter(|g| g.object == id).flat_map(|g| &g.items) {
+        let solidcraft_geom::paper::Item::Stroke { path, pattern: Some(dashes), .. } = item else { continue };
+        let period: f64 = dashes.lengths_mm.iter().sum();
+        let length: f64 = path.iter().map(solidcore_record::Seg2::length).sum();
+        let off = ((dashes.phase_mm + length / 2.0).rem_euclid(period) - dashes.lengths_mm[0] / 2.0).abs();
+        assert!(off.min(period - off) < 1e-9, "a {length} mm bend line: {dashes:?}");
+        bends += 1;
+    }
+    assert_eq!(bends, 2, "one bend line up, one down");
+}
+
 /// A bend up and a bend down are drawn in two line types, ISO 128's long dash and dot and its long
 /// dash and two dots, narrow, one stroke per bend line, each where its own bend is; each bend line
 /// ends on the outline, unturned and turned a quarter.
