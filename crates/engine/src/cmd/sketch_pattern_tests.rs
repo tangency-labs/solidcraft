@@ -918,6 +918,45 @@ fn the_limit_survives_new_and_opened_designs() {
     assert_eq!(s.set_pattern_limit(usize::MAX), solidcraft_sketch::MAX_PATTERN_COPIES);
 }
 
+/// A pattern computed beside the window is adopted under the limit the session has then: one
+/// lowered meanwhile below the pattern's size refuses it and leaves the design as it was, as a
+/// typed count would be refused. A pattern that already had that size keeps it.
+#[test]
+fn a_computed_pattern_follows_a_limit_lowered_while_it_computed() {
+    let grid_of = |count: usize, count2: usize| vec![("sketch.pattern.rectangular".to_string(), grid(count, count2))];
+    let mut s = seeded();
+    s.set_pattern_limit(800);
+    let prepared = s.scratch().compute_commands(&grid_of(20, 30), None).unwrap();
+    s.set_pattern_limit(500);
+    let before = s.doc.to_json();
+    let error = s.accept_commands(prepared).unwrap_err().to_string();
+    assert!(error.contains("pattern limit") && error.contains("600"), "{error}");
+    assert_eq!(s.doc.to_json(), before);
+    assert!(sketch(&s).patterns.is_empty());
+
+    let mut s = seeded();
+    s.set_pattern_limit(800);
+    let prepared = s.scratch().compute_commands(&grid_of(20, 30), None).unwrap();
+    s.set_pattern_limit(700);
+    s.accept_commands(prepared).unwrap();
+    assert_eq!(sketch(&s).patterns[0].total(), 600);
+
+    let mut s = seeded();
+    let prepared = s.scratch().compute_commands(&grid_of(20, 20), None).unwrap();
+    s.set_pattern_limit(800);
+    s.accept_commands(prepared).unwrap();
+    assert_eq!(sketch(&s).patterns[0].total(), 400);
+
+    let mut s = seeded();
+    s.set_pattern_limit(800);
+    let out = run(&mut s, "sketch.pattern.rectangular", grid(20, 30));
+    let edit = vec![("sketch.pattern.rectangular".to_string(), json!({"pattern":out["pattern"],"spacing":4}))];
+    let prepared = s.scratch().compute_commands(&edit, None).unwrap();
+    s.set_pattern_limit(500);
+    s.accept_commands(prepared).unwrap();
+    assert_eq!(sketch(&s).patterns[0].total(), 600);
+}
+
 /// A design saved where the limit was raised opens, evaluates and stays editable under the
 /// default limit: stored designs are checked against the fixed ceiling, not a preference.
 #[test]

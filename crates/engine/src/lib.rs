@@ -556,6 +556,36 @@ impl ComputedCommands {
                 && session.plugin_state == source.plugin_state))
     }
 
+    /// A sketch pattern in the result larger than `session`'s pattern limit allows, when the limit
+    /// was lowered while the commands computed (#7824). A pattern keeps a size it already had.
+    fn pattern_over_limit(&self, session: &Session) -> Option<String> {
+        if session.pattern_limit >= self.source.pattern_limit {
+            return None;
+        }
+        fn patterns(doc: &Document) -> Vec<(u64, &solidcraft_sketch::SketchPattern)> {
+            doc.features
+                .iter()
+                .filter_map(|feature| match &feature.kind {
+                    solidcraft_doc::FeatureKind::Sketch { sketch, .. } => Some((feature.id, sketch)),
+                    _ => None,
+                })
+                .flat_map(|(feature, sketch)| sketch.patterns.iter().map(move |pattern| (feature, pattern)))
+                .collect()
+        }
+        let before = patterns(&self.source.doc);
+        patterns(&self.computed.doc).into_iter().find_map(|(feature, pattern)| {
+            let had = before.iter().find(|(f, p)| *f == feature && p.id == pattern.id).map(|(_, p)| p.total());
+            let allowed = cmd::pattern_limit_for(session.pattern_limit, had);
+            (pattern.total() > allowed).then(|| {
+                format!(
+                    "sketch pattern `{}` makes {} instances, more than the pattern limit (sketch.pattern_limit) now allows ({allowed}); the limit was lowered while it was computing, so nothing was changed",
+                    pattern.id,
+                    pattern.total()
+                )
+            })
+        })
+    }
+
     /// Prepare display tessellation before returning the transaction to the window; a model that
     /// cannot be placed is the error.
     pub fn warm_meshes(&self, keep_going: impl Fn() -> bool + Sync) -> Result<()> {
@@ -2947,6 +2977,9 @@ impl Session {
     pub fn accept_commands(&mut self, mut prepared: ComputedCommands) -> Result<Vec<(String, Value)>> {
         if !prepared.is_current(self) {
             return Err(EngineError::Other("the design changed while the feature was computing".into()));
+        }
+        if let Some(problem) = prepared.pattern_over_limit(self) {
+            return Err(EngineError::Other(problem));
         }
         if let Some(original) = &prepared.editor_original {
             self.restore_editor_history(&prepared.source.doc, original);
