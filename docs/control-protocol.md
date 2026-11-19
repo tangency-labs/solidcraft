@@ -676,6 +676,36 @@ The selection alone is the engine command `selection.get` (run it with `engine.e
 
 Commands never open dialogs when run this way. `solidcraft-cli commands` prints the same registry.
 
+### View windows
+
+Run these commands through `engine.execute` with the following parameter objects. Window ids
+belong to the active design. The main window has id `0`.
+
+| Command | Parameters | Result |
+| --- | --- | --- |
+| `tab.view.move_to_window` | `view` (required, from `tab.view.list`), `window?` (a window id or `"new"`, default `"new"`). An existing window accepts `index?` (zero-based insertion position, counted after removing the view for a reorder) or `placement?` (the tile placement used by `tab.view.beside`, for transfers between windows). A new window accepts `display?` (name or zero-based index), `x?`, `y?`, `w?`, `h?` (logical points), and `level?` (`"views_only"`) | `{view, window, created, from, closed_source, placement}` |
+| `tab.window.list` | `{}` | `{windows: [{id, level, views, active, layout, display, placement, tool_window}]}` |
+| `tab.window.focus` | `{window}` | `{window}` |
+| `tab.window.close` | `{window}` (a pop-out id) | `{returned}`, the ids returned to the main strip in order |
+| `tab.view.activate` | `id` or zero-based `index`, and optional `window` | The active view id and the supplied window id |
+| `tab.view.open` | `kind?`, `subject?`, `reuse?`, `window?` | The view id and the checked request |
+| `tab.view.layout` | `layout` (`single\|side_by_side\|stacked\|large_and_two\|grid`), `window?` | The layout and the number of visible views |
+| `tab.view.beside` | `id?`, `edge?` or `placement?`, `window?` | The view id, position, and number of visible views |
+
+View commands with an omitted window target use the last focused window of the active design.
+They use the main window when no window has focus. An explicit window id targets that window.
+
+A placement is `{x, y, w, h, maximised, fullscreen}` or `null`. Positions are relative to the
+requested display. A pop-out opens as Views only. A move to the window that already holds the view
+returns its current placement without moving it. Moving the last view out of a pop-out closes that
+window and sets `closed_source`. Closing a pop-out directly returns its live views to the main
+window. Window changes leave the design and its undo history untouched. A design can have eight
+pop-outs. Opening a ninth returns `too_many_windows`. Trying to move the last main-window view
+returns `last_view_of_main_window`. Closing window `0` returns `cannot_close_main_window`. Invalid ids
+return `no_such_view` or `no_such_window`, and invalid geometry returns `bad_geometry`.
+A browser host returns `windows_unavailable` when asked to open a native window.
+A headless tab host reports its virtual windows with `display: null`.
+
 `document.export`, `document.import` and `document.saved` are control methods, not commands: they
 act on the app's open design rather than on an engine session, and they are not among the methods
 the agent chat may use.
@@ -1081,10 +1111,9 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `constraint_glyph_scale` (1…3, default 1: how large the open sketch's constraint glyphs are drawn, a multiple of their 15-pixel badge, letter and icon included; Preferences › Sketch › Constraint glyph size, #10794)
 - `default_units`
 - `design_reopen_views` (default false: a design opens with only its Model view; true opens it with the views it had when it was last closed)
-- `design_reuse_views` (default true: opening a sheet, sketch or workspace that a view already shows activates that view; false makes a new view each time)
+- `design_reuse_views` (default true: opening a sheet or workspace that a view already shows activates that view; false makes a new view each time)
 - `design_sub_tab_render` (default true: Render and Animate open as views of their design; false: they replace the current view)
 - `design_sub_tab_sheets` (default true: a drawing sheet opens as a view of its design; false: it replaces the current view)
-- `design_sub_tab_sketches` (default true: editing a sketch opens it as a view of its design and Finish Sketch returns to the previous view; false: the sketch is edited in the current view)
 - `design_views_as_tabs` (default false: each design keeps one tab, with a view switcher menu while it has more than one view; true: a design's views are tabs inside its tab)
 - `dialog_buttons` (`bottom` (default), `top`: a feature dialog's OK, Cancel and Apply sit in its title row instead of under its inputs, #6708; the buttons keep their handles, and `dialog:close` is then Cancel's; the Sketch panel's Finish Sketch row moves above its options, #9860)
 - `dimension_colour` (`null` (default) or `[r, g, b]` numbers 0…255: the colour a sketch dimension draws its lines, arrows and value in; null uses the theme's dimension colours. Selection, hover and conflicts keep their own colours, #14121)
@@ -1167,7 +1196,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `save_prompt_one_at_a_time` (default false: closing several tabs or quitting with more than one unsaved design asks once, in one "Save changes to N designs?" list; true restores one "Save changes?" prompt per design, #11680)
 - `select_hidden_edges` (default false: v0.30.1 visible-only edge picking; true allows ordinary edge picks through faces in Shaded with hidden edges, including Fillet inputs; hidden bodies and section-clipped edges stay excluded)
 - `select_other_hidden` (default true: Select Other includes hidden geometry near the pointer; false restores the original visible-only list under the pointer)
-- `show_design_view_switcher` (default false: a design tab shows no view switcher until the design has a second view the user opened, and editing a sketch or opening Render stays in the view shown; true: every design tab shows its view switcher (handle `tab:switcher`), even with one view, and a sketch or Render opens a view of its own as in 0.43.0; `design_views_as_tabs` true overrides it)
+- `show_design_view_switcher` (default false: a design tab shows no view switcher until the design has a second view the user opened, and editing a sketch or opening Render stays in the view shown; true: every design tab shows its view switcher (handle `tab:switcher`), even with one view, and Render opens a view of its own as in 0.43.0; `design_views_as_tabs` true overrides it)
 - `show_frame_rate` (default false: frames per second in the view's bottom-right corner, counting the frames the view draws anyway; it reads 0 FPS once the view is idle)
 - `sign_saved_designs` (default false: every save from the app adds a GnuPG OpenPGP signature to the design's provenance; `file.save`'s `sign` is accepted only from the app's own Save, because a script or agent must not make GnuPG sign with the user's keyring; the key may be on a smartcard, where GnuPG uses it and asks for its PIN; [signing](formats/cose-provenance.md))
 - `signing_key` (string, default empty: the GnuPG key a signed save uses, a fingerprint or user id; empty asks GnuPG for its default signing key)

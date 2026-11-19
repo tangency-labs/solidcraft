@@ -409,7 +409,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Timeline { feature } => crate::timeline::feature_items(app, *feature),
         Target::Workspace => {
             let rendering = crate::render_workspace::active(app);
-            let drawing = crate::drawing_workspace::active(app);
+            let drawing = crate::drawing_workspace::active(app) || crate::workspace::sheet_scope(app);
             // Design, then Drawing (the owner's order), then Render: the workspaces there are. Ones still
             // to come aren't listed.
             vec![
@@ -421,11 +421,18 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
                 act("ui.workspace.drawing", "Drawing", "ws_drawing")
                     .with(json!({"workspace":"drawing"}))
                     .key(if drawing { "current" } else { "" })
-                    .on(app.session.active_sketch.is_none() && app.tool.is_none() && app.dialog.is_none() && !app.file_load.busy()),
-                act("ui.workspace.render", "Render", "ws_render")
-                    .with(json!({"workspace":"render"}))
-                    .key(if rendering { "current" } else { "" })
-                    .on(crate::render_workspace::entry_open(app)),
+                    .on(if app.preferences.workspace_follows_view {
+                        crate::workspace::switcher_available(app)
+                    } else {
+                        app.session.active_sketch.is_none() && app.tool.is_none() && app.dialog.is_none() && !app.file_load.busy()
+                    }),
+                act("ui.workspace.render", "Render", "ws_render").with(json!({"workspace":"render"})).key(if rendering { "current" } else { "" }).on(
+                    if app.preferences.workspace_follows_view {
+                        crate::workspace::switcher_available(app)
+                    } else {
+                        crate::render_workspace::entry_open(app)
+                    },
+                ),
             ]
         }
         Target::Units => crate::prefs::UNITS

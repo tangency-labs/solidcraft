@@ -148,7 +148,7 @@ fn started(app: &SolveApp) -> Value {
         "tool": app.tool.as_ref().map(|t| t.cmd),
         "dialog": dialog_state(app),
         "windows": open_windows(app),
-        "pending": app.pending_feature_edit.is_some() || app.start_after_roll.is_some(),
+        "pending": app.pending_feature_edit.is_some() || app.start_after_roll.is_some() || app.sketch_refreshes.contains_key(&app.session.uid),
         "status": app.status.as_ref().map(|(text, _, error)| json!({"text": text, "error": error})),
     })
 }
@@ -1509,7 +1509,7 @@ fn app_quit(app: &mut SolveApp, ctx: &egui::Context, q: params::Quit) -> Outcome
     } else {
         crate::documents::request_quit(app);
     }
-    if app.quit_requested {
+    if app.ready_to_quit() {
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
     ok(json!({"quitting": app.quit_requested, "asking": app.docs.closing.is_some()}))

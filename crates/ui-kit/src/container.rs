@@ -765,6 +765,16 @@ impl Container {
         }
     }
 
+    /// Compact completion notifications keep Toast's independent layout, with popup elevation
+    /// and the large (8-point) corner token. Ordinary status/progress toasts keep their shell frame.
+    pub fn completion_notice_frame(ctx: &Context) -> Frame {
+        let t = Tokens::get();
+        Self::new(ctx, Surface::Toast)
+            .frame(ctx, t.panel, Side::Left)
+            .corner_radius(t.radius_lg)
+            .shadow(Self::popup_frame(&ctx.global_style()).shadow)
+    }
+
     /// Movable tool sheets round all exposed corners, joining only their right dock edge (or the
     /// edges they were declared `joined` at).
     pub fn tool_frame(self, mut frame: Frame, right_docked: bool) -> Frame {

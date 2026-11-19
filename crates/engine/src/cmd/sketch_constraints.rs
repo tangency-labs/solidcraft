@@ -337,6 +337,7 @@ fn auto_constrain_datum(s: &mut Session, p: &Value) -> Result<Value> {
 fn auto_constrain_finish(s: &mut Session, p: &Value) -> Result<Value> {
     let r = auto(s, p, "sketch.finish_auto_constrain")?;
     s.active_sketch = None;
+    s.sketching_view = None;
     s.revision += 1;
     Ok(r)
 }

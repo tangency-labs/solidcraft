@@ -217,6 +217,7 @@ pub(super) fn box_select(
 }
 
 pub(super) struct Canvas<'a> {
+    pub interactive: bool,
     pub at: OnScreen,
     pub painter: &'a egui::Painter,
     pub response: &'a egui::Response,
@@ -228,6 +229,10 @@ pub(super) struct Canvas<'a> {
 
 impl Canvas<'_> {
     pub(super) fn show(self, app: &mut SolveApp, ui: &mut egui::Ui, placing: bool) {
+        if !self.interactive {
+            app.drawing_workspace.page.view_tools.drag = None;
+            return;
+        }
         let mut state = std::mem::take(&mut app.drawing_workspace.page.view_tools);
         let mods = ui.input(|input| input.modifiers);
         let (add, toggle) =
