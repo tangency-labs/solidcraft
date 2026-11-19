@@ -6,7 +6,7 @@ members = ["crates/*", "apps/*", "xtask"]
 exclude = ["solidcore", "vendor"]
 
 [workspace.package]
-version = "0.45.0-rc.2"
+version = "0.45.0-rc.4"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.95"
@@ -20,6 +20,7 @@ craft-plugin = { path = "crates/craft-plugin" }
 craft-plugin-wasm = { path = "crates/craft-plugin-wasm" }
 solidcraft-geom = { path = "crates/geom" }
 solidcraft-profile = { path = "crates/profile" }
+solidcraft-develop = { path = "crates/develop" }
 solidcraft-sketch = { path = "crates/sketch" }
 solidcraft-kernel = { path = "crates/kernel" }
 solidcraft-smlib = { path = "crates/smlib" }
@@ -123,7 +124,7 @@ gethostname = "1"
 # and its ShapeManager/ACIS `sat` codec are not compiled in. `step` is the writer we restate through.
 cadmpeg-core = "=0.6.12"
 cadmpeg-ir = "=0.6.12"
-cadmpeg-registry = { version = "=0.6.12", default-features = false, features = ["fcstd", "rhino", "step"] }
+cadmpeg-registry = { version = "=0.6.12", default-features = false, features = ["fcstd", "rhino", "step", "usd"] }
 
 # fonts (sketch text outlines; MIT OR Apache-2.0, pure Rust)
 ttf-parser = { version = "0.25", default-features = false, features = ["std", "variable-fonts"] }
@@ -142,6 +143,9 @@ pdf-writer = "0.15"
 flate2 = "1.1"
 # rasterises the UI icon SVGs (BSD-3-Clause, pure Rust, builds for wasm)
 tiny-skia = { version = "0.12", default-features = false, features = ["std", "simd"] }
+# rasterises an SVG given as a canvas or decal image (MIT OR Apache-2.0, pure Rust, builds for
+# wasm); no default features: no text, system fonts, raster images or SVGZ, so it reads no file but the SVG
+resvg = { version = "0.50", default-features = false }
 # build scripts: reads the icon palette (MIT OR Apache-2.0)
 toml = "1"
 

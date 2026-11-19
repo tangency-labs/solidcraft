@@ -23,9 +23,10 @@ use solidcore::error::{ErrorKind, Reason};
 use solidcore::geom::attribute::{ids, Attribute, Behavior};
 use solidcore::offset::draft::{draft_surface, Draft, DraftRefusal};
 use solidcore::offset::offset_executive::p2::{
-    local_operation_simple, offset_brep_simple, shell_brep_simple, OffsetOptions, ShellOptions,
+    local_operation_simple, offset_brep_simple, OffsetOptions, ShellOptions,
 };
 use solidcore::offset::offset_faces::{OffsetFacesExecutive, OffsetFacesRefusal};
+use solidcore::offset::thin_features::shell_brep;
 use solidcore::offset::wall_room::{shell_wall_room, WallRoom};
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::{Brep, EntityRef, FaceId, Kernel, SolidError, Vec3};
@@ -51,6 +52,33 @@ fn status(e: SolidError, index: &dyn Fn(EntityRef) -> Option<RecordEntity>) -> E
 #[must_use]
 pub fn refusal(e: &SolidError) -> Option<Error> {
     typed(e, &|_| None)
+}
+
+/// An offset call's failure as application data: its typed refusal where there is
+/// one, alongside the complete kernel diagnostic. A caller still holding a kernel
+/// error can retain its operation, entities and cause chain without interpreting it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Diagnostic {
+    /// The typed offset refusal, with any face unnamed as in [`refusal`]. Phrase
+    /// refusals carry the complete diagnostic in their phrase as well.
+    pub refusal: Option<Error>,
+    /// The kernel's complete statement, including nested causes.
+    pub detail: String,
+}
+
+/// Extracts an offset call's diagnostic, retaining its refusal as typed data.
+#[must_use]
+pub fn diagnostic(e: &SolidError) -> Diagnostic {
+    let detail = e.to_string();
+    let mut refusal = refusal(e);
+    if let Some(Error::OffsetRefused {
+        why: OffsetRefusal::Phrase { phrase, .. },
+        ..
+    }) = &mut refusal
+    {
+        phrase.clone_from(&detail);
+    }
+    Diagnostic { refusal, detail }
 }
 
 /// The offset refusal a kernel error is, the one routing [`status`] and [`refusal`] share: a
@@ -252,7 +280,8 @@ fn shell_brep_full(
         create_offset_solid: true,
         merge_sheet_side_walls: true,
     };
-    shell_brep_simple(k, b, options, open)
+    // (a feature narrower than twice an inward wall stays solid: `thin_features`)
+    shell_brep(k, b, options, open)
 }
 
 /// The kernel's room test for a wall of `wall` (> 0) inward from every face of `b` but `open`:
