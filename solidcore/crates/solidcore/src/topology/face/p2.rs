@@ -3375,10 +3375,11 @@ pub fn fix_uv_trim_curves_notified(
     let _prev_edge_gap = surf_vertex.distance(prev_edge_point);
     let _ = tol_3d;
 
-    // Not upstream (#18162): which of the two trims its edge's tolerance provably covers
-    // before they are edited, so that it still does after.
-    let curr_covered = covered_trim(k, b, eu_current, curr_holder)?;
-    let prev_covered = covered_trim(k, b, eu_previous, prev_holder)?;
+    // Not upstream (#18162): the two trims and their edges' tolerances before they are
+    // edited, to ask after the edits whether the tolerance provably covered the trim
+    // ([`keep_trim_covered`]).
+    let curr_before = trim_before(b, eu_current, curr_holder)?;
+    let prev_before = trim_before(b, eu_previous, prev_holder)?;
 
     // drop sUVVertex to each UVTrimCurve, trim there and stretch back (upstream). The
     // opt-in WR-255 fix (#959/#570) skips this and only moves the end points below.
@@ -3495,56 +3496,57 @@ pub fn fix_uv_trim_curves_notified(
     // Not upstream (#18162): the edits moved the trims' ends in UV, where a step is
     // scaled by the surface's speed in 3D, and upstream leaves the edge tolerances as
     // they were.
-    keep_trim_covered(k, b, eu_current, curr_holder, curr_covered)?;
-    keep_trim_covered(k, b, eu_previous, prev_holder, prev_covered)?;
+    keep_trim_covered(k, b, eu_current, curr_holder, curr_before)?;
+    keep_trim_covered(k, b, eu_previous, prev_holder, prev_before)?;
 
     // all done
     Ok(true)
 }
 
-/// Not upstream (#18162): whether the edge tolerance of `eu` provably covers the UV trim
-/// held at `holder` (`trim_deviation_bound`, an enclosed bound on the distance between
-/// the trim's image and the edge curve, at most the tolerance). A bound that does not
-/// certify the tolerance before an edit is not one to raise the tolerance to after it.
-fn covered_trim(k: &Kernel, b: &Brep, eu: EdgeuseId, holder: EdgeuseId) -> Result<bool> {
+/// Not upstream (#18162): the UV trim held at `holder` for `eu`, copied for evaluation, and
+/// the tolerance of `eu`'s edge, before [`fix_uv_trim_curves_notified`] edits it; `None`
+/// without an edge.
+fn trim_before(b: &Brep, eu: EdgeuseId, holder: EdgeuseId) -> Result<Option<(Curve, f64)>> {
     let Some(e) = eu1::edge(b, eu)? else {
-        return Ok(false);
+        return Ok(None);
     };
     let tolerance = b.edge(e)?.tolerance;
-    let trim = held_curve(b, holder)?;
-    Ok(matches!(
-        crate::topology::edgeuse::p3::trim_deviation_bound(k, b, eu, trim, [tolerance; 2])?,
-        Some(bound) if bound <= tolerance
-    ))
+    Ok(Some((held_curve(b, holder)?.clone_for_evaluation()?, tolerance)))
 }
 
 /// Not upstream (#18162): after [`fix_uv_trim_curves_notified`] edited the UV trim held at
 /// `holder` for `eu`, raises the edge's tolerance to the trim's enclosed distance from the
-/// edge curve (`trim_deviation_bound`) where the tolerance covered the trim before the edit
-/// (`covered`, [`covered_trim`]) and no longer does. Never lowers it.
+/// edge curve (`trim_deviation_bound`) where it no longer covers the trim but covered it
+/// before the edit (`before`, [`trim_before`]: the bound of the trim before the edit at most
+/// the tolerance then; a bound that does not certify the tolerance before an edit is not
+/// one to raise the tolerance to after it). Never lowers it.
 ///
 /// Only a bound up to twice the tolerance is taken. The enclosure can be loose by orders of
 /// magnitude (0.03 and 0.27 over a tolerance of 1e-5 on read corpus bodies), and a
 /// tolerance raised to such a bound fails the B-rep's own tolerance checks; there the
 /// tolerance stays upstream's. Twice is `SetUVTrimCurve`'s own allowance: it raises an edge
 /// to twice the distance its trim reports.
+///
+/// The trim before the edit is bounded only where the edited one would raise: on a dense
+/// net a trim just within its tolerance costs a deep bisection each time (the
+/// `crashes/2992` rig case bounds over a thousand such trims, all still covered).
 fn keep_trim_covered(
     k: &Kernel,
     b: &mut Brep,
     eu: EdgeuseId,
     holder: EdgeuseId,
-    covered: bool,
+    before: Option<(Curve, f64)>,
 ) -> Result<()> {
-    if !covered {
+    let Some((trim_before, tolerance_before)) = before else {
         return Ok(());
-    }
+    };
     let Some(e) = eu1::edge(b, eu)? else {
         return Ok(());
     };
+    let tolerance = b.edge(e)?.tolerance;
     let bound = {
         let trim = held_curve(b, holder)?;
         // (a bound past twice the tolerance is not taken; one within it raises nothing)
-        let tolerance = b.edge(e)?.tolerance;
         crate::topology::edgeuse::p3::trim_deviation_bound(
             k,
             b,
@@ -3553,11 +3555,25 @@ fn keep_trim_covered(
             [tolerance, 2.0 * tolerance],
         )?
     };
-    let tolerance = b.edge(e)?.tolerance;
-    if let Some(bound) = bound {
-        if bound.is_finite() && bound > tolerance && bound <= 2.0 * tolerance {
-            crate::topology::edge::set_tolerance(b, e, bound, true, true)?;
-        }
+    let Some(bound) = bound else {
+        return Ok(());
+    };
+    if !(bound.is_finite() && bound > tolerance && bound <= 2.0 * tolerance) {
+        return Ok(());
+    }
+    // (whether the tolerance before the edit provably covered the trim before it)
+    let covered = matches!(
+        crate::topology::edgeuse::p3::trim_deviation_bound(
+            k,
+            b,
+            eu,
+            &trim_before,
+            [tolerance_before; 2],
+        )?,
+        Some(was) if was <= tolerance_before
+    );
+    if covered {
+        crate::topology::edge::set_tolerance(b, e, bound, true, true)?;
     }
     Ok(())
 }
