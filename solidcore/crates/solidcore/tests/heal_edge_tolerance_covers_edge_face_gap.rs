@@ -1763,7 +1763,11 @@ const FILLET_MAIN: [u64; 29] = [
 /// `stubs4-delete-edge-bottle-e8-r0.1` ([`FILLETS`] 1, 2, 3 and 14). Entry 14's are main's
 /// (see [`FILLET_MAIN`]) with the mass integrator's knot-line split, which moved that row
 /// since; its entries are classified against a certified enclosure in goldens'
-/// `mass_knot_line_moved_rows_are_classified`.
+/// `mass_knot_line_moved_rows_are_classified`. They are this run's since #16394's trimmed-face
+/// box search: the body's box ends 2.75e-5 nearer the body on -x (-1.0899125885102552, was
+/// -1.089940123551663), and the integrator works about the box's middle, so the moments
+/// shifted back to the origin move in their last bits (centroid x, inertia y and z,
+/// products zx and xy; at most 1.4e-14).
 const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
     (
         1,
@@ -1822,15 +1826,15 @@ const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
             0x40408bcce093b407,
             0x402621896ddff25f,
             0x402621896ddff25f,
-            0x3f10d1d4e45e4676,
+            0x3f10d1d4e45e4874,
             0x3f13efa0c2fbe9dc,
             0x4000a10fe9b1ffd5,
             0x4050316570dd030e,
-            0x4050a9c381d79ffa,
-            0x40151aaab4b869fc,
+            0x4050a9c381d79ffb,
+            0x40151aaab4b869fb,
             0x3f6aed519268bff5,
-            0x3f66b6ad970f60ae,
-            0xbf3c98793964b142,
+            0x3f66b6ad970f64e1,
+            0xbf3c987939649c64,
         ],
     ),
 ];
