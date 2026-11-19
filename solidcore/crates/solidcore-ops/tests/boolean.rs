@@ -1249,6 +1249,86 @@ fn a_ball_with_its_poles_on_a_plane_or_a_cone_is_cut() {
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
+/// SolidCraft's cone (#18546): a frustum revolved about +z, radius 3 at z = 0 to 0.5 at
+/// z = 1000, its seam in the half plane y = 0, x > 0. A round notch, r 0.06, centred on the top
+/// rim and extruded from z = 999.5 to the top, crosses the rim 9.2e-5 rad past the seam. Two of
+/// the boolean's proto edges there overlap along a piece, running opposite ways; the boolean
+/// split and combined them, then removed the second one at end proto vertices that no longer
+/// listed it, refused as "the proto edge is not listed". It is one
+/// valid solid of 5 faces, 10 edges and 7 vertices (the notch rotated off the seam has 9 and 6:
+/// the seam ends on the notch wall's curve on the cone, which splits it), and of V = the frustum
+/// less the notch, the notch the integral over z of the area the r 0.06 disc shares with the
+/// cone's circle there (two circles' lens, in closed form), by Simpson's rule.
+#[test]
+fn a_round_notch_overlapping_a_cones_seam_backwards_is_cut() {
+    all_fixes();
+    let (r_base, r_top, height, r, depth) = (3.0, 0.5, 1000.0_f64, 0.06, 0.5);
+    let section = [
+        [0.0, 0.0, 0.0],
+        [r_base, 0.0, 0.0],
+        [r_top, 0.0, height],
+        [0.0, 0.0, height],
+    ];
+    let profile: Vec<Curve> = (0..4)
+        .map(|i| Curve::Line {
+            start: section[i],
+            end: section[(i + 1) % 4],
+        })
+        .collect();
+    let cone = || revolve(&profile, [0.0; 3], [0.0, 0.0, 1.0], TAU, true).unwrap();
+    let notch = |c: [f64; 2]| {
+        let circle = [Curve::Arc {
+            center: [c[0], c[1], height - depth],
+            axis: [0.0, 0.0, 1.0],
+            reference: [1.0, 0.0, 0.0],
+            radius: r,
+            start: 0.0,
+            end: TAU,
+        }];
+        extrude(
+            &circle,
+            [0.0, 0.0, 1.0],
+            depth,
+            0.0,
+            DraftCorner::Curvature,
+            true,
+        )
+        .unwrap()
+    };
+    let c: [f64; 2] = [0.496_405_514_95, 0.059_846_175_546_1];
+    let d = c[0].hypot(c[1]);
+    // the area the disc of radius `r` about `c` shares with the disc of radius `big` about the
+    // axis, `big` - r < d < `big` + r
+    let lens = |big: f64| {
+        let a = big * big * ((d * d + big * big - r * r) / (2.0 * d * big)).acos();
+        let b = r * r * ((d * d + r * r - big * big) / (2.0 * d * r)).acos();
+        let k = (-d + big + r) * (d + big - r) * (d - big + r) * (d + big + r);
+        a + b - 0.5 * k.sqrt()
+    };
+    let radius_at = |z: f64| r_top + (r_base - r_top) * (height - z) / height;
+    let n = 2000;
+    let h = depth / f64::from(n);
+    let removed = (0..=n)
+        .map(|i| {
+            let w = if i == 0 || i == n {
+                1.0
+            } else if i % 2 == 1 {
+                4.0
+            } else {
+                2.0
+            };
+            w * lens(radius_at(height - depth + f64::from(i) * h))
+        })
+        .sum::<f64>()
+        * h
+        / 3.0;
+    let frustum = PI * height / 3.0 * (r_base * r_base + r_base * r_top + r_top * r_top);
+    let cut = boolean(cone(), notch(c), BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    one_valid_solid_of_volume(&cut, [5, 10, 7], frustum - removed, 1e-9);
+}
+
 /// The half roll less the r 6 ball about (0, 50 + δ, 20), its poles δ off the roll's outside:
 /// 1e-6 inside it and 1e-6 outside, within the tolerance the trace refines with, in the four
 /// frames of the walls' cylinders that failed above. The line where the ball crosses the wall
