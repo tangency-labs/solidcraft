@@ -5,6 +5,7 @@ use solidcraft_theme::Tokens;
 
 const SHEET_ROWS: &[&str] = &[
     "Rule",
+    "Material",
     "Thickness",
     "K Factor",
     "Bend Radius",
@@ -37,7 +38,7 @@ fn frame(app: &mut SolveApp, ctx: &egui::Context, kind: &mut Kind, labels: &[&st
     scenario::clear_handles();
     let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
         crate::ui_kit::scope(ui, |ui| match kind {
-            Kind::Sheet(k) => assert!(!crate::dialogs_sheet::rows(app, ui, k, &mut [])),
+            Kind::Sheet(k) => assert!(!crate::dialogs_sheet::rows(app, ui, k, &mut Vec::new())),
             Kind::Plastic(k) => assert!(!crate::dialogs_plastic::rows(app, ui, k, &[])),
             _ => panic!("rule dialog"),
         });

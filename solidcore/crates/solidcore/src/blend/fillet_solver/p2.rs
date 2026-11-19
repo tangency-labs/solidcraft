@@ -1582,8 +1582,15 @@ impl FilletSolver {
         };
 
         // Determine if we need to reverse the axis of revolution
+        // Not upstream (#17594, WR-422): as for the end section below, a rail point on the
+        // axis carries no direction about it, not only one at the origin: where a face's
+        // offset collapses onto the axis (a cylinder of the ball's radius beside a plane
+        // square to it) the plane's rail point is the ball's pole, on the axis a radius above
+        // the origin, and the turn and the axis's sense were taken from that point. On the
+        // axis is within the solver's tolerance (`center_tol`), as WR-592 snaps a rail point
+        // above, not within an absolute 1e-8, which rounding far from the origin exceeds
         let mut vec = p0 - origin;
-        if vec.length() < ANALYTIC_TOL {
+        if axis_of_revolution.cross(vec).length() < center_tol {
             vec = p1 - origin;
         }
         let dir = axis_of_revolution.cross(vec); // Start direction of rail curves
@@ -1640,8 +1647,9 @@ impl FilletSolver {
         let mut end_vec = end_p0 - origin;
 
         // If sEndVec is zero or parallel to sAxisOfRev, use sEndP1.
+        // (#17594: on the axis within the solver's tolerance, as the start section's)
         let temp_cross = axis_of_revolution.cross(end_vec);
-        if temp_cross.length() < ANALYTIC_TOL {
+        if temp_cross.length() < center_tol {
             end_vec = end_p1 - origin;
         }
 

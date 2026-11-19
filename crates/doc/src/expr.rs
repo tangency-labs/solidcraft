@@ -965,6 +965,16 @@ fn pow(base: Value, e: Value) -> Result<Value, DocError> {
     Ok(Value { v: base.v.powf(n), len: dims(0, base.len.saturating_mul(k), false)?, ang: dims(0, base.ang.saturating_mul(k), false)? })
 }
 
+/// The whole number of quarter turns an angle in radians is, if it is one up to rounding: `90 deg`
+/// is stored as a rounded pi/2, so its cosine came out 6.1e-17 instead of 0. Within 4 ulps of the
+/// quarter-turn count and below 1e12 quarter turns, where an ulp is still far smaller than a
+/// quarter turn; zero is not matched, as a tiny angle's sine is the angle.
+fn quarter_turns(a: f64) -> Option<i64> {
+    let q = a / std::f64::consts::FRAC_PI_2;
+    let n = q.round();
+    (n != 0.0 && n.abs() < 1e12 && (q - n).abs() <= 4.0 * f64::EPSILON * n.abs()).then_some(n as i64)
+}
+
 fn call(f: &str, args: &[Value], d: Defaults) -> Result<Value, DocError> {
     let one = || match args {
         [a] => Ok(*a),
@@ -992,9 +1002,28 @@ fn call(f: &str, args: &[Value], d: Defaults) -> Result<Value, DocError> {
     };
     let unit_fn = |x: f64, a: Value| Value { v: x, ..a };
     Ok(match f {
-        "sin" => Value::num(rad(one()?)?.sin()),
-        "cos" => Value::num(rad(one()?)?.cos()),
-        "tan" => Value::num(rad(one()?)?.tan()),
+        "sin" => {
+            let a = rad(one()?)?;
+            Value::num(match quarter_turns(a) {
+                Some(n) => [0.0, 1.0, 0.0, -1.0][n.rem_euclid(4) as usize],
+                None => a.sin(),
+            })
+        }
+        "cos" => {
+            let a = rad(one()?)?;
+            Value::num(match quarter_turns(a) {
+                Some(n) => [1.0, 0.0, -1.0, 0.0][n.rem_euclid(4) as usize],
+                None => a.cos(),
+            })
+        }
+        "tan" => {
+            let a = rad(one()?)?;
+            // Only a half turn is exact: the tangent of an odd quarter turn is not a number.
+            Value::num(match quarter_turns(a) {
+                Some(n) if n % 2 == 0 => 0.0,
+                _ => a.tan(),
+            })
+        }
         "asin" | "acos" => {
             let x = num(one()?)?;
             if !(-1.0..=1.0).contains(&x) {
@@ -1828,6 +1857,61 @@ mod tests {
         assert_eq!(reported_value(Value::length(50.8)), 50.8);
         assert_eq!(round_reported(reported_value(Value::angle(30f64.to_radians()))), 30.0);
         assert_eq!(reported_value(Value::num(4.0)), 4.0);
+    }
+
+    /// `sin`, `cos` and `tan` at a whole number of quarter turns are exact: a quarter turn as radians
+    /// is a rounded pi/2, so `cos(90 deg)` was 6.1e-17 and `sin(180 deg)` 1.2e-16, and `ceil` of
+    /// either was 1.
+    #[test]
+    fn trig_at_a_quarter_turn_is_exact() {
+        let look = |_: &str| Err(DocError::Expr("no parameters".into()));
+        let val = |e: &str| eval_with(e, &look).unwrap().v;
+        for (e, want) in [
+            ("sin(0 deg)", 0.0),
+            ("sin(90 deg)", 1.0),
+            ("sin(180 deg)", 0.0),
+            ("sin(180°)", 0.0),
+            ("sin(270 deg)", -1.0),
+            ("sin(360 deg)", 0.0),
+            ("sin(-90 deg)", -1.0),
+            ("sin(-180 deg)", 0.0),
+            ("sin(180)", 0.0),
+            ("sin(1 rad * pi)", 0.0),
+            ("cos(0 deg)", 1.0),
+            ("cos(90 deg)", 0.0),
+            ("cos(180 deg)", -1.0),
+            ("cos(270 deg)", 0.0),
+            ("cos(360 deg)", 1.0),
+            ("cos(-90 deg)", 0.0),
+            ("cos(pi / 2 * 1 rad)", 0.0),
+            ("cos(1 rad * pi)", -1.0),
+            ("sin(720 deg)", 0.0),
+            ("sin(450 deg)", 1.0),
+            ("sin(36000 deg)", 0.0),
+            ("tan(0 deg)", 0.0),
+            ("tan(180 deg)", 0.0),
+            ("tan(-360 deg)", 0.0),
+            ("ceil(sin(180 deg))", 0.0),
+            ("ceil(cos(90 deg))", 0.0),
+            ("floor(sin(-180 deg))", 0.0),
+        ] {
+            assert_eq!(val(e), want, "{e}");
+        }
+        // Any other angle keeps the library result, including one a hair off a quarter turn and
+        // an angle too large for a quarter turn to be told from its neighbours.
+        for (e, x) in [
+            ("sin(30 deg)", 30f64.to_radians().sin()),
+            ("cos(60 deg)", 60f64.to_radians().cos()),
+            ("tan(45 deg)", 45f64.to_radians().tan()),
+            ("sin(180.0000001 deg)", 180.0000001f64.to_radians().sin()),
+            ("cos(89.9999 deg)", 89.9999f64.to_radians().cos()),
+            ("sin(1e-20 deg)", 1e-20f64.to_radians().sin()),
+            ("tan(90 deg)", 90f64.to_radians().tan()),
+            ("tan(270 deg)", 270f64.to_radians().tan()),
+            ("sin(1e15 deg)", 1e15f64.to_radians().sin()),
+        ] {
+            assert_eq!(val(e), x, "{e}");
+        }
     }
 
     /// `mod` of a value by a whole-number fraction of itself is 0 even when unit conversion leaves

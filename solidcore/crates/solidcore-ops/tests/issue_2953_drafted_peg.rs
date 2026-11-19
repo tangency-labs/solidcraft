@@ -18,6 +18,9 @@
     clippy::indexing_slicing
 )] // test
 
+#[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 mod common;
 
 use common::{edge_at, kernel_copy};
@@ -45,11 +48,7 @@ const CORPUS: &str = concat!(
 
 /// The peg with the case's two edges rounded 2.
 fn rounded() -> Body {
-    let fixes: Vec<String> = serde_json::from_str(include_str!(
-        "../../solidcore/tests/kernel_cases/fixes.json"
-    ))
-    .unwrap();
-    session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
     let gz = std::fs::File::open(format!("{CORPUS}/{CASE}.bodies.json.gz")).unwrap();
     let mut text = String::new();
     flate2::read::GzDecoder::new(gz)

@@ -259,6 +259,14 @@ key is the argument the plugin receives. The design follows the
   through the same `plugin.run` request. Programs calling `plugin.run` pass the same references
   themselves; nothing fills them from the selection.
 
+### Seating a custom fastener
+
+To fit a custom fastener into an existing bore, accept `face` and `edge` picks in a selection
+field. Call `parts.seats` with those references in `picks` before creating hardware. Each seat
+supplies a world-space point and outward normal, and an `origin` that can be passed directly
+as side A of `joint.create`. Place the screw with its head facing outward, then use a rigid
+joint to attach its seating point to the bore. Declare both commands in the plugin manifest.
+
 ### Icons and pictures
 
 A plugin can ship vector images in its package and name them with `x-solidcraft-icon`, a
@@ -315,8 +323,9 @@ The WIT package is `craft:plugin@0.2.0`. Its capability `commands@0.2` runs app 
 reports progress and cancellation, reads named files and a clock, and exports the entry. A plugin's
 `plugin.json` lists what it needs, for example `"capabilities": ["commands@0.2"]`; the host refuses
 an unknown or newer capability when it reads the manifest, with a plain message such as "needs
-commands 0.3; update SolidCraft or the plugin". `formats@0.2` adds importers and `evaluate@0.2`
-lets an importer check its result (below). `ui`, `viewport` and `storage` arrive later as their own
+commands 0.3; update SolidCraft or the plugin". `formats@0.2` adds importers, `evaluate@0.2`
+lets an importer check its result, and `storage@0.1` keeps data in a design (below). `ui` and
+`viewport` arrive later as their own
 versioned interfaces. While a version is 0.x, a minor version may break the one before it.
 
 0.2 added one error, `plugin-error.unsupported(string)`: the input is valid, but this plugin does
@@ -399,14 +408,19 @@ plugin and importer.
   with no WASI or network import. Each problem has a severity, the field, what is wrong and how to
   fix it. In a folder, `tests/` and hidden files are left out. It runs no plugin code, installs
   nothing and never opens a dialog.
-- `solidcraft-cli plugin test <folder|plugin.zip> [--json] [--out DIR]` checks the package, installs
-  it into a scratch plugins folder with the app's installer, and runs its test cases, `tests/*.json`,
-  through `plugin.run` and `file.import` with the app's limits. A case names the entry, its
-  parameters or file, the grants (default: everything the manifest asks for, stored in the scratch
-  folder's grant store as an install stores them, see [Headless use](#headless-use)), and what to expect:
-  an error kind, values in the reply, values `inspect.measure` gives, files written. An entry
-  with no case runs once with its defaults when it needs nothing else. It exits with an error when
-  a case fails.
+- `solidcraft-cli plugin test <folder|plugin.zip> [--json] [--out DIR] [--require-cases]` checks
+  the package, installs it into a scratch plugins folder with the app's installer, and runs its
+  test cases, `tests/*.json`, through `plugin.run` and `file.import` with the app's limits. A
+  folder's cases are in its `tests/` folder; a `.zip`'s are the `tests/` folder it holds, so a
+  `.zip` made without one has none. A case names the entry, its parameters or file, the grants
+  (default: everything the manifest asks for, stored in the scratch folder's grant store as an
+  install stores them, see [Headless use](#headless-use)), and what to expect: an error kind,
+  values in the reply, values `inspect.measure` gives, files written. An entry with no case runs
+  once with its defaults when it needs nothing else, and is reported as skipped otherwise. It exits with an
+  error when a case fails, and with `--require-cases` also when an entry is skipped, in a folder
+  or a `.zip` alike: use it in CI so an untested entry fails the run. A `tests/` folder that
+  cannot be read, a grant the manifest does not ask for, and a fixture folder (`from`) that is a
+  link fail the case or the run; nothing is skipped silently.
 
 ## Importers
 
@@ -504,4 +518,46 @@ and MCP give the English.
 
 A design container reserves `plugins/<plugin-id>/` for a plugin's own files. They are kept and
 saved back untouched when the plugin is missing, and opening a design never fails because a plugin
-is missing. The `storage` capability will let plugins read and write them.
+is missing.
+
+A command plugin keeps its own data there with the `storage@0.1` capability and a data format
+number. Its manifest lists the `storage.*` commands it calls, like any other command:
+
+```json
+{"id": "gears", "name": "Gears", "version": "1.4.0", "capabilities": ["commands@0.1", "storage@0.1"],
+ "runtime": {"module": "gears.wasm", "entries": ["make"], "data_format": 3,
+   "commands": ["solid.box", "storage.get", "storage.patch", "storage.put_blob"]}}
+```
+
+- **What it keeps.** One main JSON document (`data.json`, at most 16 MiB) and files of its own
+  (`blobs/<name>`; with `cache: true`, `cache/<name>`, files it can make again). Files are at most
+  256 MiB per plugin per design, and all plugin data in a design at most 256 MiB.
+  SolidCraft writes `meta.json` beside them: the plugin's id, name and version and the data's format.
+- **Reading.** `storage.get` returns the main document, the data's `format`, the running plugin's
+  `plugin_format`, `read_only` and the list of files. To read a large main document within the
+  plugin host's 1 MiB result limit, supply `offset` or `len`: `storage.get {offset: 0}` returns
+  `{plugin, data, offset, bytes}`, with `data` holding base64 of up to 512 KiB of the saved JSON
+  bytes and `bytes` the whole document size. Advance `offset` by the number of decoded bytes,
+  concatenate the decoded parts, then parse the JSON. `len` defaults to 524288 and accepts
+  1 through 524288; `offset` defaults to 0. Parts omit metadata and the file list. Past the end,
+  or without a saved document, `data` is empty (`bytes` is 0 without a document). Documents
+  still accept up to 16 MiB; plugins should use parts when the full reply could exceed 1 MiB.
+  `storage.get_blob {name, offset?, len?}`
+  returns up to 512 KiB of a file, base64, so a reply stays inside a plugin's 1 MiB. Inside a
+  plugin's run these reach only that plugin's own data. Agents and scripts read any plugin's
+  data by naming it: `storage.get {"plugin": "gears"}`.
+- **Writing.** `storage.set {document}`, `storage.patch {patch}` (an RFC 7396 merge patch),
+  `storage.put_blob {name, data, cache?, append?}` (base64; `append` writes a large file in
+  parts) and `storage.delete_blob {name}` change only the running plugin's own data, and only
+  from its run: the whole run is one undo step, and a failed run changes nothing. Called from
+  anywhere else they are refused. A `read` entry can't call them.
+- **Formats.** Every write saves the data in the plugin's `data_format`. When `storage.get` says
+  `format` is lower than `plugin_format`, the data is from an older version of the plugin: the
+  plugin reads it, converts it and writes it back, which saves it in the new format as one undo
+  step. When `format` is higher, the data is from a newer version: this version reads it, and
+  every write is refused with "saved by a newer version of the plugin".
+- **Without the plugin.** The design opens as usual and the status line says so: "Contains Gears
+  data (plugin 1.4.0). Install it to edit." (or turn it on, or update it, when it's off or older
+  than the data). The data is saved back byte for byte. Nothing is downloaded, installed or run.
+  `storage.list` lists every plugin that keeps data in the open design, with its `status`
+  (`ready`, `migrate`, `missing`, `disabled` or `older`) and size.

@@ -119,8 +119,8 @@ fn unit_names() -> String {
 pub struct InsertMeshKeys {
     // Optional in the type and required in the schema (`path_required`): left out, the handler
     // refuses it with its own message.
-    /// The file to insert: `.3mf`, `.stl`, `.obj`, `.ply` (with faces), `.glb` or `.gltf` (any
-    /// case), not blank and fewer than 4096 UTF-8 bytes. Any other kind of file is refused. Its
+    /// The file to insert: `.3mf`, `.stl`, `.obj`, `.ply` (with faces), `.glb`, `.gltf`, or
+    /// OpenUSD's `.usd`, `.usda`, `.usdc` or `.usdz` (any case), not blank and fewer than 4096 UTF-8 bytes. Any other kind of file is refused. Its
     /// meshes join the design as mesh bodies in a new component, placed in the active component.
     #[serde(default, deserialize_with = "path_key", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String")]
@@ -129,24 +129,25 @@ pub struct InsertMeshKeys {
     /// without its extension.
     #[serde(default)]
     pub name: Option<String>,
-    /// For a glTF file only (any other file is refused it): `y` (the default: glTF has Y up)
-    /// turns the import's component a quarter turn about X, so Y becomes Z, and the reply gives
-    /// its occurrence as `stand_up`; `z` keeps the file's axes. Any case.
+    /// For a glTF or OpenUSD file only (any other file is refused it): `y` turns the import's
+    /// component a quarter turn about X, so Y becomes Z, and the reply gives its occurrence as
+    /// `stand_up`; `z` keeps the file's axes. Any case. Default: `y` for glTF (glTF has Y up), and
+    /// for OpenUSD the axis the file says is up (Y when it says nothing).
     #[serde(default, deserialize_with = "up_key", skip_serializing_if = "Option::is_none")]
     pub up: Option<UpAxis>,
-    /// Read only when `up` is given for a glTF file, where it is checked and changes nothing:
-    /// `auto`, `solid`, `product` or `instance`, in any case. It is how a STEP file's bodies are
+    /// Read only when `up` is given for a glTF or OpenUSD file, where it is checked and changes
+    /// nothing: `auto`, `solid`, `product` or `instance`, in any case. It is how a STEP file's bodies are
     /// named (`file.insert_step`).
     #[serde(default, deserialize_with = "names_key", skip_serializing_if = "Option::is_none")]
     pub names: Option<StepNamesParam>,
-    /// Read only when `up` is given for a glTF file, where it is checked and changes nothing:
-    /// true or false. It is whether a STEP import goes into a history folder (`file.insert_step`).
+    /// Read only when `up` is given for a glTF or OpenUSD file, where it is checked and changes
+    /// nothing: true or false. It is whether a STEP import goes into a history folder (`file.insert_step`).
     #[serde(default, deserialize_with = "folder_key", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<bool>")]
     pub folder: Option<bool>,
     /// For an STL, OBJ or PLY file: the unit its coordinates are in, scaled to millimetres as the
-    /// file is read: `mm`, `cm`, `m`, `in` or `ft`, in any case. Default: mm. A 3MF or glTF file
-    /// states its own, and is refused `units`. The design keeps the millimetre mesh and not the
+    /// file is read: `mm`, `cm`, `m`, `in` or `ft`, in any case. Default: mm. A 3MF, glTF or
+    /// OpenUSD file states its own, and is refused `units`. The design keeps the millimetre mesh and not the
     /// unit, so insert the file again to try another.
     #[serde(default, deserialize_with = "units_key", skip_serializing_if = "Option::is_none")]
     pub units: Option<MeshUnits>,
@@ -180,11 +181,12 @@ fn leave_unread(value: &mut Value) {
         return;
     }
     let up_given = keys.get("up").is_some_and(|u| !u.is_null());
-    if !(up_given && solidcraft_io::is_gltf_path(&path)) {
+    let gltf_or_usd = solidcraft_io::is_gltf_path(&path) || solidcraft_io::is_usd_path(&path);
+    if !(up_given && gltf_or_usd) {
         keys.remove("names");
         keys.remove("folder");
     }
-    if !solidcraft_io::is_gltf_path(&path) {
+    if !gltf_or_usd {
         keys.remove("up");
     }
 }
@@ -351,9 +353,9 @@ pub struct MeshInserted {
     /// How many components were made below it (a glTF file's nodes). Only when there are some.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subcomponents: Option<usize>,
-    /// How many rigid joints hold its contents together. Only when `subcomponents` is given.
+    /// How many occurrences its rigid group holds together. Only when `subcomponents` is given.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rigid_joints: Option<usize>,
+    pub rigid_members: Option<usize>,
     /// With `origin`: the shift, [x, y, z] in mm, that moved the import to the origin; absent
     /// when it was not moved.
     #[serde(default, skip_serializing_if = "Option::is_none")]

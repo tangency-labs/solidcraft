@@ -59,15 +59,14 @@ fn nearest_edge(k: &Kernel, b: &Brep, p: Point3) -> EdgeId {
         .unwrap()
 }
 
-/// The volume the arc round adds, and the face count after it, with every fix but
-/// `geometric_g2_continuity`: the blend corner's ends and corners on the peg are built with
+/// The volume the arc round adds, and the face count after it, with every fix: the
+/// blend corner's ends and corners on the peg are built with
 /// their companion fixes (on the default kernel the arc's chain fails at a corner, #2400).
 fn peg() -> (f64, usize) {
     let mut k = Kernel {
         fixes: UpstreamFixes::all(),
         ..Kernel::default()
     };
-    k.fixes.geometric_g2_continuity = false;
     let bar = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 16.0, 10.0).unwrap();
     let boss = create_cylinder(&mut k, Point3::new(40.0, 8.0, 0.0), 8.0, 20.0).unwrap();
     let mut b = boolean_union(&mut k, bar, boss).unwrap();
