@@ -1876,19 +1876,20 @@ fn other_trims_bound(
 /// edge it deleted), where none of `e`'s uses on that face holds a UV trim. The join keeps
 /// `e`'s curve for the deleted edge's faces and raises the tolerance to the two curves'
 /// distance only (`UpdateObjectTolerance`), which does not cover that curve's distance to
-/// those faces: the deleted edge's own tolerance covered its own curve there. A face whose
-/// distance is not enclosed, or whose bound is within the tolerance, is left as upstream
-/// leaves it (`heal.stitch_p2` cov_tjunc8: a face joined 2.43e-4 from the kept curve under a
-/// tolerance of 2.18e-4).
+/// those faces: the deleted edge's own tolerance covered its own curve there (`heal.stitch_p2`
+/// cov_tjunc8: a face joined 2.43e-4 from the kept curve under a tolerance of 2.18e-4). A face
+/// with no finite bound, or whose bound is within the tolerance, is left as upstream leaves it.
 ///
-/// `reach` is the farthest the join can have put the kept curve from a face the deleted edge's
-/// tolerance covered: the stitch's tolerance (it joins only curves it finds within it) plus
-/// that edge's tolerance. A bound past it is the enclosure's slack, not the face's distance,
-/// and is not raised to: the face is then left as upstream leaves it (`primitive.api_primitives`
-/// gen0353: a face 1.2e-7 from the kept curve by samples, bounded at 4.76e4 where its nearest
-/// points are not followed). The join's own distance is no reach: the stitch samples it (five
-/// or ten points, none for two lines), and on cov_tjunc8 it is 0 under a deleted-edge
-/// tolerance of 1e-5, where the kept curve is 2.43e-4 from the face.
+/// `reach` bounds the same distance another way: the deleted edge's tolerance covered its
+/// faces, so the kept curve is within its proved distance to the deleted curve plus that
+/// tolerance of each of them (`edit_glue_edges`, infinite where the two curves have no
+/// bound). The tolerance is raised to the smaller of the two bounds: the face's alone can be
+/// the enclosure's slack (`primitive.api_primitives` gen0353: a face 1.2e-7 from the kept
+/// curve by samples, bounded at 4.76e4 where its nearest points are not followed), and
+/// `reach` alone holds where the face's is not enclosed. The join's own distance is no
+/// bound: the stitch samples it (five or ten points, none for two lines), and on cov_tjunc8
+/// it is 0 under a deleted-edge tolerance of 1e-5, where the kept curve is 2.43e-4 from the
+/// face.
 ///
 /// # Errors
 ///
@@ -1922,11 +1923,13 @@ pub(crate) fn cover_joined_faces(
         }
         let tol = b.edge(e)?.tolerance;
         let fit = fit_tolerance(k, b, e)?;
-        match edge_face_gap_bound(k, b, e, f, fit, [tol, reach])? {
-            Some(gap) if gap.is_finite() && gap > tol && gap <= reach => {
-                crate::topology::edge::set_tolerance(b, e, gap, true, true)?;
-            }
-            _ => {}
+        // (the smaller of the two bounds; `reach` where the face's is not enclosed or passes it)
+        let gap = match edge_face_gap_bound(k, b, e, f, fit, [tol, reach])? {
+            Some(gap) if gap.is_finite() => gap.min(reach),
+            _ => reach,
+        };
+        if gap.is_finite() && gap > tol {
+            crate::topology::edge::set_tolerance(b, e, gap, true, true)?;
         }
     }
     Ok(())

@@ -1080,14 +1080,27 @@ impl<'c> Stitch<'c> {
         delete: EdgeId,
         inside: Option<&[FaceuseId]>,
     ) -> Result<()> {
-        // (the faces the join gives `keep`, and the farthest the stitch joins them from its
-        // curve: not upstream, #18166)
-        let joined = if keep == delete {
-            Vec::new()
+        // (the faces the join gives `keep`, and a bound on their distance from its curve: the
+        // two curves' proved distance plus the deleted edge's tolerance, which covered them;
+        // not upstream, #18166)
+        let (joined, reach) = if keep == delete {
+            (Vec::new(), f64::INFINITY)
         } else {
-            edge::faces(b, delete, None)?
+            let (kr, dr) = (b.edge(keep)?, b.edge(delete)?);
+            let apart = match (kr.curve.as_ref(), dr.curve.as_ref()) {
+                (Some(kc), Some(dc)) => crate::boolean::api_brep::coincidence_bound(
+                    kc,
+                    &kr.interval,
+                    dc,
+                    &dr.interval,
+                ),
+                _ => None,
+            };
+            let reach = apart.map_or(f64::INFINITY, |h| {
+                (h + dr.tolerance) * (1.0 + 4.0 * f64::EPSILON)
+            });
+            (edge::faces(b, delete, None)?, reach)
         };
-        let reach = (self.tol_3d + edge::tolerance(b, delete)?) * (1.0 + 4.0 * f64::EPSILON);
         // (an edit context's glue searches at each closed shell, as upstream)
         if let Some(edits) = self.edits.as_deref_mut() {
             edits.glue_edges(k, b, keep, orientation, dist, nest, delete, inside)?;
@@ -1096,8 +1109,8 @@ impl<'c> Stitch<'c> {
         }
         // Not upstream (#18166): the join keeps `keep`'s curve for the deleted edge's faces,
         // which the deleted edge's own tolerance covered; the tolerance is raised to cover the
-        // kept curve's proved distance to each of them that holds no trim, up to `reach`
-        // ([`crate::topology::edgeuse::p3::cover_joined_faces`]). The glue is done: a cover
+        // kept curve's distance to each of them that holds no trim, the smaller of its proved
+        // bound and `reach` ([`crate::topology::edgeuse::p3::cover_joined_faces`]). The glue is done: a cover
         // that fails leaves the tolerance as upstream leaves it.
         ignored(crate::topology::edgeuse::p3::cover_joined_faces(
             k, b, keep, &joined, reach,
