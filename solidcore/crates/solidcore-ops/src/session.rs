@@ -7,15 +7,16 @@
 //!   run at once and a long call holds up only the calls on its own bodies: a call waits for a
 //!   body another call holds on that body's own lock. A call that holds two bodies at once
 //!   locks them in one order ([`Body::lock_pair`]), so calls on the same bodies in other orders
-//!   never wait on each other for good. Calls one after another all get the same kernel, so
-//!   they see the state it keeps as one process kernel would (its random draws, caches and
-//!   context); calls side by side see the states of different kernels. At most
+//!   never wait on each other for good. Every call starts from the state a fresh kernel has
+//!   ([`start_clean`]: its random draws from the default seed, no blend station remembered),
+//!   so its result does not depend on the calls before it or on the kernel it is handed. At most
 //!   [`most_idle`] kernels wait between calls, however many once ran side by side. A kernel
 //!   holds no global state and a body's identities are valid only in the kernel that issued
 //!   them, so any kernel takes any body.
 //! - **Process-lifetime state:** the state upstream keeps for the whole process (SMLib's context
-//!   is process-global) is the fillet solver's latched step: the first step a call latches is
-//!   the process's ([`publish_step`]), and every kernel a call takes runs with it.
+//!   is process-global) is the fillet solver's latched step. Every kernel the session makes
+//!   shares the process's ([`STEP`]): the first latch on any of them settles it, and every
+//!   latch after it, on any kernel and in any call, takes it, calls side by side included.
 //! - **Configuration:** the kernel runs with the opt-in fixes the application names
 //!   ([`set_fixes`], by `UpstreamFixes` flag name); which ones is the application's choice, never
 //!   ops'. Everything else about the kernel (its tolerances, context, caches) is the kernel's
@@ -48,27 +49,36 @@ use std::num::NonZeroUsize;
 use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
-use solidcore::kernel::{CancelToken, Kernel, KernelOptions, UpstreamFixes};
+use solidcore::blend::fillet_section::definition::StationMemo;
+use solidcore::kernel::{CancelToken, Kernel, KernelOptions, Rng, UpstreamFixes};
 use solidcore::topology::brep::p3::brep_copy;
 use solidcore::{Brep, SolidError};
 
 use crate::body::Body;
 use crate::error::status;
-use crate::{Error, Result};
+use crate::{Error, FailureCode, Result};
 
 /// The kernels waiting between calls, the one given back last at the end.
 static IDLE: Mutex<Vec<Kernel>> = Mutex::new(Vec::new());
-/// The fillet solver's step, once a call has latched it: the process's.
+/// The fillet solver's step for the process, settled by the first latch on any of the session's
+/// kernels ([`Kernel::process_fillet_point_step`], which each kernel [`fresh`] makes is handed).
+/// A cell the kernels share, rather than one the session copies into each kernel it takes, so
+/// that a kernel taken before the step was settled still latches the settled step (#18164).
 static STEP: OnceLock<f64> = OnceLock::new();
 static FIXES: Mutex<Option<UpstreamFixes>> = Mutex::new(None);
 
-/// A failed call, as the failure callback sees it.
+/// A failed call, as the failure callback sees it. More fields come (the call's arguments,
+/// `docs/failure-codes-and-reproduction.md` 3.2): read it by its fields, never build it.
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct Failure<'a> {
     /// The call's name.
     pub call: &'a str,
     /// Why it failed: its error, or the refusal its answer carries.
     pub why: &'a str,
+    /// What failed, as stable data ([`FailureCode`]): the same code
+    /// [`take_failure_code`] gives after the call.
+    pub code: FailureCode,
     /// Its input bodies by the names the call gives them, each as a binary `.smb` (or why it
     /// could not be written), as they are after the call: a refused or failed edit has put its
     /// body back as it came in ([`with_body`]).
@@ -193,11 +203,13 @@ pub(crate) fn counted<T>(counter: Counter, f: impl FnOnce() -> T) -> (T, u64) {
     (value, grew)
 }
 
-/// A kernel of the session's configuration: the kernel's default options and the fixes the
-/// application named. Every kernel the pool makes is made here, so they are configured alike.
+/// A kernel of the session's configuration: the kernel's default options, the fixes the
+/// application named and the process's fillet step ([`STEP`]). Every kernel the pool makes is
+/// made here, so they are configured alike.
 fn fresh() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     k.fixes = current_fixes();
+    k.process_fillet_point_step = Some(&STEP);
     k
 }
 
@@ -209,15 +221,21 @@ fn most_idle() -> usize {
     *MOST.get_or_init(|| std::thread::available_parallelism().map_or(1, NonZeroUsize::get))
 }
 
-/// A kernel for a call: the idle one given back last, or a fresh one when none is idle. It runs
-/// with the process's latched step, once a call has latched one ([`publish_step`]).
+/// A kernel for a call: the idle one given back last, or a fresh one when none is idle.
 fn take() -> Kernel {
     let idle = IDLE.lock().unwrap_or_else(PoisonError::into_inner).pop();
-    let k = idle.unwrap_or_else(fresh);
-    if let Some(&step) = STEP.get() {
-        k.fillet_point_step.set(Some(step));
-    }
-    k
+    idle.unwrap_or_else(fresh)
+}
+
+/// A call starts from the state a fresh kernel has, whatever kernel it was handed and whatever
+/// ran on it before: its random draws start from the default seed, and the stations the blend
+/// definitions solved last are forgotten. A call's result is then the same after any history
+/// and on any kernel of the pool, so calls side by side on several threads give what they give
+/// one after another. (The kernel's other caches never change a result, only its speed, and
+/// stay.)
+fn start_clean(k: &mut Kernel) {
+    k.rng = Rng::new(KernelOptions::default().seed);
+    *k.blend_station_memo.borrow_mut() = StationMemo::default();
 }
 
 /// A call's kernel, fit to use again, back among the idle ones (dropped when [`most_idle`] wait
@@ -236,16 +254,6 @@ fn give_back(k: Kernel) {
     drop(surplus);
 }
 
-/// The step the fillet solver latched on `k`, if it did, is the process's from now on: upstream
-/// latches it in a function static, once for the whole process. The first call to latch one
-/// publishes it; a call latching another at the same moment on another kernel keeps its own
-/// for that call only.
-fn publish_step(k: &Kernel) {
-    if let Some(step) = k.fillet_point_step.get() {
-        let _ = STEP.set(step);
-    }
-}
-
 thread_local! {
     /// This thread's own fixes, when it named some ([`set_thread_fixes`]).
     static THREAD_FIXES: Cell<Option<UpstreamFixes>> = const { Cell::new(None) };
@@ -257,8 +265,50 @@ thread_local! {
     /// kept or put back its body: [`run_with`] then answers the same, so a cancel landing between
     /// the two never leaves an edit in place under a `Cancelled` answer.
     static STOPPED: Cell<Option<bool>> = const { Cell::new(None) };
+    /// The kernel's own statement of the last error a call on this thread failed with
+    /// ([`take_failure_detail`]).
+    static DETAIL: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
     /// The call running on this thread ([`current_call`]).
     static CURRENT: Cell<Option<&'static str>> = const { Cell::new(None) };
+    /// The code of the last failed call on this thread ([`take_failure_code`]).
+    static CODE: Cell<Option<FailureCode>> = const { Cell::new(None) };
+    /// The last kernel error the call running on this thread typed into an [`Error`] ([`noted`]):
+    /// its kind's code, its operation, and the name of the variant it became.
+    static NOTED: Cell<Option<(u16, &'static str, &'static str)>> = const { Cell::new(None) };
+}
+
+/// `r`, the kernel's error `e` as ops types it, noted for the call running on this thread: when
+/// the call's answer refuses with an error of `r`'s variant (`r` itself, or `r` with what the
+/// call adds to it, a point, an index), its [`FailureCode`] is `e`'s kind and operation, not a
+/// failure ops decided itself. Every place ops types a kernel error into an [`Error`] passes it
+/// here; outside a call it is `r`, untouched. The last note wins: a call that types two kernel
+/// errors into one variant, drops one and refuses with the other, reports the later one's code,
+/// so a call that tries and gives up something puts its earlier note back ([`note_back`]).
+pub(crate) fn noted(e: &SolidError, r: Error) -> Error {
+    noted_as(e.kind().code(), e.operation(), r)
+}
+
+/// What the call running on this thread noted last ([`noted`]), for work that tries something
+/// and gives it up to put back ([`note_back`]): a refusal it returns is the one noted before.
+pub(crate) type Note = Option<(u16, &'static str, &'static str)>;
+
+/// The note of the call running on this thread, to put back with [`note_back`].
+pub(crate) fn note() -> Note {
+    NOTED.try_with(Cell::get).ok().flatten()
+}
+
+/// Puts back a note taken with [`note`], forgetting what was noted since.
+pub(crate) fn note_back(n: Note) {
+    let _ = NOTED.try_with(|c| c.set(n));
+}
+
+/// [`noted`] for a kernel error already taken apart: its kind's code and its operation.
+pub(crate) fn noted_as(kind: u16, operation: &'static str, r: Error) -> Error {
+    if in_call() {
+        // (a thread being torn down notes nothing)
+        let _ = NOTED.try_with(|n| n.set(Some((kind, operation, r.name()))));
+    }
+    r
 }
 
 #[cfg(test)]
@@ -338,17 +388,50 @@ pub fn current_call() -> Option<String> {
         .map(str::to_owned)
 }
 
+/// The kernel's own statement of why the last call on this thread failed with a kernel error:
+/// the error and the chain of what caused it, in the kernel's words, as it was before the call
+/// typed it into an [`Error`] (which keeps the kernel's status or its kind, not its words).
+/// For an application's logs and failure reports, beside the typed error it words for its
+/// users. Taken: the next call returns `None` until a call on this thread fails again, so an
+/// application takes it before a call (to drop an older one) and after the call fails. `None`
+/// too for a failure that is no kernel error (a refusal the call itself types, a panic, a
+/// cancellation).
+#[must_use]
+pub fn take_failure_detail() -> Option<String> {
+    DETAIL.with(std::cell::RefCell::take)
+}
+
+/// What the last call on this thread that failed failed with, as stable data
+/// ([`FailureCode`]): for an application's failure reports, to group them by and to match a
+/// replay against, beside the typed error it words for its users. Every failure of a call the
+/// session runs gives one, a refusal its answer carries included; a cancellation is no failure
+/// and gives none. An argument an operation refuses before it starts a call is no call's
+/// failure and leaves none: an application that wants a code for it makes one
+/// ([`FailureCode::of_ops`]). Taken, as
+/// [`take_failure_detail`] is: the next call returns `None` until a call on this thread fails
+/// again, so an application takes it before a call (to drop an older one) and after the call
+/// fails.
+///
+/// The code is the kernel's for a call the kernel failed: its error's kind and operation, the
+/// error ops' answer refuses with being that kernel error as ops types it. It is
+/// [`FailureCode::OPS`] with the [`Error`]'s variant name for a failure ops decided itself (an
+/// argument refused, a result its own checks refuse, a panic caught).
+#[must_use]
+pub fn take_failure_code() -> Option<FailureCode> {
+    CODE.with(Cell::take)
+}
+
 /// How a call's value reads: whether it is a refusal, for the calls whose answer can carry one.
 pub(crate) trait Answer {
     /// The refusal this value carries, if it is one.
-    fn refusal(&self) -> Option<String> {
+    fn refusal(&self) -> Option<Error> {
         None
     }
 }
 
 impl<T> Answer for Result<T> {
-    fn refusal(&self) -> Option<String> {
-        self.as_ref().err().map(Error::to_string)
+    fn refusal(&self) -> Option<Error> {
+        self.as_ref().err().cloned()
     }
 }
 
@@ -431,6 +514,7 @@ fn run_with<T: Answer>(
         return Err(Error::Cancelled);
     }
     let mut k = take();
+    start_clean(&mut k);
     k.fixes = current_fixes();
     k.cancel.clone_from(&token);
     CURRENT.with(|c| c.set(Some(call)));
@@ -441,6 +525,8 @@ fn run_with<T: Answer>(
     // the operands as they come in, for a call that consumes them, when someone will read them
     let snapshot = (before && hook.is_some()).then(|| written(&k, inputs));
     STOPPED.with(|d| d.set(None));
+    // a kernel error an earlier call typed is not this call's
+    NOTED.with(|n| n.set(None));
     // this thread collects profiles: the call's alone (earlier calls on this kernel left
     // records in it, dropped here)
     #[cfg(feature = "profile")]
@@ -473,16 +559,21 @@ fn run_with<T: Answer>(
         let grew = counter(&k.work_counters).saturating_sub(start);
         COUNTED.with(|c| c.set(Some((counter, n.saturating_add(grew)))));
     }
-    publish_step(&k);
     let stopped = STOPPED
         .with(Cell::take)
         .unwrap_or_else(|| token.as_ref().is_some_and(CancelToken::is_cancelled));
+    let noted = NOTED.with(Cell::take);
+    let mut kernel_code = None;
     let (r, fit) = match caught {
         // Cancelled during the call: no result, even one the kernel finished first, and a
         // kernel whose caches it may have left half-built is not used again.
         Ok(_) if stopped => (Err(Error::Cancelled), false),
         Ok(Ok(v)) => (Ok(v), true),
-        Ok(Err(e)) => (Err(status(e)), true),
+        Ok(Err(e)) => {
+            DETAIL.with(|d| d.replace(Some(e.to_string())));
+            kernel_code = Some(FailureCode::of_kernel(call, &e));
+            (Err(status(e)), true)
+        }
         Err(p) => (
             Err(Error::Internal(format!("{call}: {}", message(p.as_ref())))),
             false,
@@ -495,12 +586,25 @@ fn run_with<T: Answer>(
     }
     k.cancel = None;
     // A cancellation is the application's own: no failure to report.
-    let why = match &r {
+    let failed = match &r {
         Err(Error::Cancelled) => None,
         Ok(v) => v.refusal(),
-        Err(e) => Some(e.to_string()),
+        Err(e) => Some(e.clone()),
     };
-    let report = why.and_then(|why| {
+    let why = failed.map(|e| {
+        // the kernel's error the call failed with, or the one its refusal is as ops typed it
+        let code = kernel_code.unwrap_or_else(|| match noted {
+            Some((kind, operation, typed)) if typed == e.name() => FailureCode {
+                call,
+                kind,
+                operation,
+            },
+            _ => FailureCode::of_ops(call, &e),
+        });
+        CODE.with(|c| c.set(Some(code)));
+        (e.to_string(), code)
+    });
+    let report = why.and_then(|(why, code)| {
         let hook = hook?;
         // The kernel the call ran on, or the one that replaced it after a panic; still inside
         // the call, so nothing reenters, and the writer's own panic is caught.
@@ -508,17 +612,18 @@ fn run_with<T: Answer>(
             Some(taken) => taken,
             None => written(&k, inputs),
         };
-        Some((hook, why, inputs))
+        Some((hook, why, code, inputs))
     });
     drop(depth);
     give_back(k);
-    if let Some((hook, why, inputs)) = report {
+    if let Some((hook, why, code, inputs)) = report {
         IN_HOOK.with(|h| h.set(true));
         // A panicking callback loses nothing of the call's result.
         let _ = catch_unwind(AssertUnwindSafe(|| {
             hook(&Failure {
                 call,
                 why: &why,
+                code,
                 inputs,
             });
         }));
@@ -628,6 +733,19 @@ pub(crate) fn read_body<T: Answer>(
     call: &'static str,
     body: &Body,
     f: impl FnOnce(&mut Kernel, &Brep) -> solidcore::Result<T>,
+) -> Result<T> {
+    read_held(call, body, |k, held| f(k, held))
+}
+
+/// [`read_body`] for a call that also reads what the body holds beside its B-rep (its proof,
+/// its template), under the one lock: `f` is given the body's guard.
+///
+/// # Errors
+/// As [`read_body`].
+pub(crate) fn read_held<T: Answer>(
+    call: &'static str,
+    body: &Body,
+    f: impl FnOnce(&mut Kernel, &crate::body::BodyGuard<'_>) -> solidcore::Result<T>,
 ) -> Result<T> {
     if body.is_poisoned() {
         return Err(unfinished(call));

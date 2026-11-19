@@ -16,8 +16,8 @@ use super::motion::require;
 use super::types::{
     AngleExpr, AxisDir, AxisLine, CombineOperation, ConventionParam, DirectionParam, EdgeRefs, ExtentKeyword, ExtrudeOperation, FacesParam,
     FeatureCommon, FilletCornerParam, FilletFitParam, FilletTurnParam, FilletTypeParam, FromPoint, GeoRefParam, IdOrName, LengthExpr, NumberExpr,
-    OperationParam, PatternAxis, PlaneCommon, PlaneOrFace, PlaneParam, Point3, PointExpr3, ProfilesParam, ScaleFactors, SketchRef, StringList,
-    ThinSideParam, ToPoint, TouchingParam, feature_common, present,
+    OperationParam, PathList, PatternAxis, PlaneCommon, PlaneOrFace, PlaneParam, Point3, PointExpr3, ProfilesParam, ScaleFactors, SketchRef,
+    StringList, ThinSideParam, ToPoint, TouchingParam, feature_common, present,
 };
 use super::types::{RevolveAxis, RevolveConventionParam, RevolveDirection, RevolveToPoint};
 use crate::params::MAX_STRING_LIST;
@@ -144,7 +144,8 @@ pub struct ExtrudeParams {
     /// How far past `to` to go.
     #[serde(default)]
     pub to_offset: Option<LengthExpr>,
-    /// Start at this face or point (From Object).
+    /// Start at this face or point (From Object). On a flat face at a slant the start follows the
+    /// face, and a distance moves it along the extrusion.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "FromPoint")]
     pub from: Option<FromPoint>,
@@ -466,10 +467,12 @@ pub struct SweepParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "SketchRef")]
     pub path_sketch: Option<SketchRef>,
-    /// The path's curve ids, in order along the path. Not needed when the path is a body's edges.
+    /// The path's curve ids, in order along the path; an entry may be `{"sketch": <sketch>,
+    /// "curve": <id>}` for a curve of another sketch (#16168). Not needed when the path is a
+    /// body's edges.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "StringList")]
-    pub path: Option<StringList>,
+    #[schemars(with = "PathList")]
+    pub path: Option<PathList>,
     /// The name of the body whose edges are the path, instead of a sketch's curves.
     #[serde(default, deserialize_with = "path_body_opt", skip_serializing_if = "Option::is_none")]
     pub path_body: Option<String>,
@@ -585,6 +588,10 @@ pub struct BoundingSolidParams {
     /// negative one sets that side into the bodies, but not past their opposite side.
     #[serde(default)]
     pub margins: Option<[LengthExpr; 6]>,
+    /// Instead of `bodies`: an envelope of this component, a box around every body placed inside
+    /// it (its subcomponents' at any depth, every placement), added to the component in its axes.
+    #[serde(default)]
+    pub component: Option<super::component_link::ComponentRef>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }
@@ -827,6 +834,11 @@ pub struct FilletParams {
     /// picked edges.
     #[serde(default)]
     pub tangent_chain: Option<bool>,
+    /// Each picked edge's own radius, one per edge in the order of `edges`, all rounded in one
+    /// fillet (`radius` is then the nominal one, usually the first). Takes a constant, exact, rolling-corner,
+    /// mitred round with `tangent_chain: false`.
+    #[serde(default)]
+    pub edge_radii: Option<Vec<LengthExpr>>,
     #[serde(default, rename = "type")]
     pub kind: Option<FilletTypeParam>,
     /// `type: variable`: the radius at the end away from `start`; it or `radius` may be 0, where

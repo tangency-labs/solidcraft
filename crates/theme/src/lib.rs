@@ -867,6 +867,8 @@ pub struct IconColors {
 /// other one's colours (#4146): a new colour drawn in the view goes in both.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tokens {
+    /// User-assigned document labels: red, orange, green, blue, purple.
+    pub library_highlights: [Color32; 5],
     /// Navigation chrome from the approved Navbar boards.
     pub nav_hover: Color32,
     pub nav_press: Color32,
@@ -1242,6 +1244,15 @@ pub struct Tokens {
     /// Sheet metal flat pattern: bend up, bend down.
     pub bend_up: Color32,
     pub bend_down: Color32,
+    /// Screen paper and ink for the four drawing sheet appearances.
+    pub paper_white: Color32,
+    pub paper_ink: Color32,
+    pub paper_blueprint: Color32,
+    pub paper_blueprint_ink: Color32,
+    pub paper_prussian_blue: Color32,
+    pub paper_prussian_blue_ink: Color32,
+    pub paper_dark: Color32,
+    pub paper_dark_ink: Color32,
     /// Interference: the clash fill, before its shading.
     pub interference: Color32,
     /// Curvature Comb: the envelope through the teeth tips (purple) and the teeth, the scaled

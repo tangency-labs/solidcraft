@@ -2,9 +2,11 @@
 
 use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use serde_json::{Value, json};
-use solidcraft_doc::{Feature, FeatureKind};
+use solidcraft_doc::drawing::{self, Drawing};
+use solidcraft_doc::{Document, Feature, FeatureKind};
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, name_or_id_values, num, str_};
@@ -18,14 +20,15 @@ use crate::schema::edit::{
     TimelineUngroupParams, TimelineUngrouped,
 };
 use crate::schema::select::{
-    PartialPick, SameLookParams, SelectClearParams, SelectClearResult, SelectFilterParams, SelectFilterResult, SelectItem, SelectMode,
-    SelectSetParams, SelectSetResult, read_item,
+    PartialPick, SameLookParams, SelectAllParams, SelectClearParams, SelectClearResult, SelectFilterParams, SelectFilterResult, SelectItem,
+    SelectMode, SelectSetParams, SelectSetResult, SharpEdgesParams, read_item,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Sel, Session, Snapshot};
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("ui.assistant", "Toggle Assistant", crate::checked!("ui.assistant", assistant))
+        .any_part()
         .icon("assistant")
         .key("Ctrl+Shift+A")
         .noundo()
@@ -57,6 +60,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(crate::schema::output_schema_for::<crate::schema::edit::DialogOkResult>)
         .params("Runs OK in the feature dialog open in the app, as Enter does; bind it to a key in Preferences. Only the app has a dialog: called here it is refused, and changes nothing"),
     CommandSpec::new("edit.undo", "Undo", crate::checked!("edit.undo", undo))
+        .any_part()
         .icon("undo")
         .key("Ctrl+Z")
         .noundo()
@@ -64,6 +68,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&UNDO_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::edit::UndoResult>),
     CommandSpec::new("edit.redo", "Redo", crate::checked!("edit.redo", redo))
+        .any_part()
         .icon("redo")
         .key("Ctrl+Y")
         .noundo()
@@ -78,13 +83,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&REPEAT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::edit::RepeatResult>)
         .params("Starts the last tool or dialog started in the app again, with its defaults (a toolbar click, not a replay of its values). Only the app has a tool to start: called here it is refused, and changes nothing"),
-    CommandSpec::new("edit.checkpoint", "Checkpoint", crate::checked!("edit.checkpoint", checkpoint)).icon("checkpoint")
+    CommandSpec::new("edit.checkpoint", "Checkpoint", crate::checked!("edit.checkpoint", checkpoint)).any_part().icon("checkpoint")
         .noundo()
         .doc_only()
         .contract(&CHECKPOINT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::edit::CheckpointResult>)
         .params("→ {checkpoint: id}: remember the design, active sketch and undo history (restore with edit.restore_checkpoint; the last 16 are kept, the oldest dropped first)"),
-    CommandSpec::new("edit.restore_checkpoint", "Restore Checkpoint", crate::checked!("edit.restore_checkpoint", restore_checkpoint)).icon("restore")
+    CommandSpec::new("edit.restore_checkpoint", "Restore Checkpoint", crate::checked!("edit.restore_checkpoint", restore_checkpoint)).any_part().icon("restore")
         .noundo()
         .doc_only()
         .contract(&RESTORE_CHECKPOINT_CONTRACT)
@@ -209,15 +214,16 @@ pub static COMMANDS: &[CommandSpec] = &[
         "group: folder id → group, name, parent, features, joints; or feature: id|name → type, definition (the fields timeline.edit's set changes, with their current values), \
          inputs: [{label, param, expression, unit}] (named inputs parameters.change can also set), error, warning",
     ),
-    CommandSpec::new("select.set", "Select", crate::checked!("select.set", select_set)).icon("select")
+    CommandSpec::new("select.set", "Select", crate::checked!("select.set", select_set)).any_part().icon("select")
         .noundo()
         .contract(&SELECT_SET_CONTRACT)
         .output(output_schema_for::<SelectSetResult>)
-        .params("items: [{type: body|edge|face|feature|sketch_curve|sketch_point|profile, …}], add?: bool; face/edge: body plus point [x,y,z] in world mm or index (both also accepted); a point uses Measure's pick tolerance, an index supplies a point on the item; invalid partial picks leave the selection unchanged"),
+        .params("items: [{type: body|edge|face|feature|sketch_curve|sketch_point|profile, …} or {type: drawing, drawing, object: ids of the drawing open and of a view, dimension or balloon of it}], add?: bool; face/edge: body plus point [x,y,z] in world mm or index (both also accepted); a point uses Measure's pick tolerance, an index supplies a point on the item; invalid partial picks leave the selection unchanged"),
     CommandSpec::new("select.filter", "Selection filter", crate::checked!("select.filter", select_filter)).icon("select").noundo().doc_only()
         .contract(&SELECT_FILTER_CONTRACT).output(output_schema_for::<SelectFilterResult>)
         .params("mode: body|face|component → validated UI pick granularity; headless echo only, no document edits or undo"),
     CommandSpec::new("select.clear", "Clear Selection", crate::checked!("select.clear", select_clear))
+        .any_part()
         .icon("select")
         .noundo()
         .contract(&SELECT_CLEAR_CONTRACT)
@@ -229,12 +235,27 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SAME_LOOK_CONTRACT)
         .output(output_schema_for::<SelectSetResult>)
         .params("body?: world body name, face?: face index; defaults to the current body/face selection → selects objects using the resolved appearance"),
+    CommandSpec::new("select.sharp_edges", "Select Sharp Edges", crate::checked!("select.sharp_edges", select_sharp_edges))
+        .icon("select")
+        .noundo()
+        .doc_only()
+        .contract(&SHARP_EDGES_CONTRACT)
+        .output(output_schema_for::<SelectSetResult>)
+        .params("angle_deg?: 1…179 (default 30), body?: solid body name (default: every shown solid body), add?: bool → selects the edges whose faces' normals turn by more than angle_deg, measured on the exact surfaces; tangent edges never"),
+    CommandSpec::new("select.all", "Select All", crate::checked!("select.all", select_all))
+        .icon("select")
+        .key("Ctrl+A")
+        .noundo()
+        .contract(&SELECT_ALL_CONTRACT)
+        .output(output_schema_for::<SelectSetResult>),
 ];
 
 const SELECT_SET_CONTRACT: TypedContract<SelectSetParams> = TypedContract::new();
 const SELECT_FILTER_CONTRACT: TypedContract<SelectFilterParams> = TypedContract::new();
 const SELECT_CLEAR_CONTRACT: TypedContract<SelectClearParams> = TypedContract::new();
+const SELECT_ALL_CONTRACT: TypedContract<SelectAllParams> = TypedContract::new();
 const SAME_LOOK_CONTRACT: TypedContract<SameLookParams> = TypedContract::new();
+const SHARP_EDGES_CONTRACT: TypedContract<SharpEdgesParams> = TypedContract::new();
 const COMPUTE_ALL_CONTRACT: TypedContract<TimelineComputeAllParams> = TypedContract::new();
 const DELETE_CONTRACT: TypedContract<TimelineDeleteParams> = TypedContract::new();
 const RENAME_CONTRACT: TypedContract<TimelineRenameParams> = TypedContract::new();
@@ -270,16 +291,20 @@ fn reply(cmd: &str, r: impl serde::Serialize) -> Result<Value> {
 }
 
 fn undo(s: &mut Session, _p: &Value) -> Result<Value> {
-    let Some(prev) = s.undo.pop() else { return Err(EngineError::Other("nothing to undo".into())) };
-    let now = go_to(s, prev);
+    let at = latest(&s.undo, s.history_part()).ok_or_else(|| nothing(s, "undo"))?;
+    let prev = s.undo.get(at).cloned().ok_or_else(|| nothing(s, "undo"))?;
+    let now = go_to(s, prev, "edit.undo")?;
+    s.undo.remove(at);
     let label = now.label.clone();
     s.redo.push(now);
     reply("edit.undo", crate::schema::edit::UndoResult { undone: label, param_warnings: Vec::new() })
 }
 
 fn redo(s: &mut Session, _p: &Value) -> Result<Value> {
-    let Some(next) = s.redo.pop() else { return Err(EngineError::Other("nothing to redo".into())) };
-    let now = go_to(s, next);
+    let at = latest(&s.redo, s.history_part()).ok_or_else(|| nothing(s, "redo"))?;
+    let next = s.redo.get(at).cloned().ok_or_else(|| nothing(s, "redo"))?;
+    let now = go_to(s, next, "edit.redo")?;
+    s.redo.remove(at);
     let label = now.label.clone();
     s.undo.push(now);
     reply("edit.redo", crate::schema::edit::RedoResult { redone: label, param_warnings: Vec::new() })
@@ -327,32 +352,86 @@ fn repeat(_s: &mut Session, _p: &Value) -> Result<Value> {
     ))
 }
 
-/// Put the session at `snap`; returns where it was, under the same label.
-fn go_to(s: &mut Session, snap: Snapshot) -> Snapshot {
-    let was = Snapshot {
-        label: snap.label,
-        doc: s.doc.clone(),
-        active_sketch: s.active_sketch,
-        pending_moves: s.pending_moves.clone(),
-        visibility: s.visibility.clone(),
+/// Takes the latest of `steps` on `part` ([`Session::history_part`]: the open drawing, else the
+/// model): undo and redo go through one part's steps, and leave the others' where they are.
+fn latest(steps: &[Snapshot], part: Option<u64>) -> Option<usize> {
+    steps.iter().rposition(|step| step.part == part)
+}
+
+fn nothing(s: &Session, what: &str) -> EngineError {
+    match s.history_part() {
+        Some(_) => EngineError::Other(format!("nothing to {what} in this drawing (close it to {what} in the model)")),
+        None => EngineError::Other(format!("nothing to {what}")),
+    }
+}
+
+/// Put the session at `snap`; returns where it was, under the same label. A drawing's step puts
+/// back only that drawing. The model's step puts back the design as it was, but keeps each
+/// drawing the design had as it is now: each part's steps are undone in that part only. Neither
+/// opens or closes a drawing: a drawing's steps are taken while it is open, and the model's with a
+/// drawing open or not.
+fn go_to(s: &mut Session, snap: Snapshot, cmd: &str) -> Result<Snapshot> {
+    let was = Snapshot { part: snap.part, section: snap.section.as_ref().map(|_| s.section_state()), ..Snapshot::of(s, &snap.label) };
+    let mut snap = match snap.part {
+        Some(id) => Snapshot {
+            doc: drawing_from(&s.doc, &snap.doc, id),
+            active_sheet_sketch: snap.active_sheet_sketch.clone(),
+            section: snap.section.clone(),
+            ..was.clone()
+        },
+        // A sheet sketch being edited stays as it is: the model's steps never end or start one.
+        None => Snapshot { doc: drawings_from(snap.doc, &s.doc), active_sheet_sketch: s.active_sheet_sketch.clone(), ..snap },
     };
-    let same = std::sync::Arc::ptr_eq(&s.doc, &snap.doc);
-    // Undoing a hide (or a show) leaves the document alone: the model needs no evaluating.
-    let display_only = same && s.visibility != snap.visibility;
+    snap.doc = Session::refreshed_sheet_fill_history_document(&s.doc, &snap.doc, snap.part, cmd)?;
+    let same = Arc::ptr_eq(&s.doc, &snap.doc);
+    let moved = s.active_sketch != snap.active_sketch || s.pending_moves != snap.pending_moves;
+    // Undoing a hide (or a show) leaves the document alone: the model needs no evaluating, and
+    // a section step needs nothing evaluated or drawn again.
+    let display_only = same && !moved && s.visibility != snap.visibility;
+    if let Some(section) = snap.section.take() {
+        s.set_section_state(section);
+    }
     s.doc = snap.doc;
     s.active_sketch = snap.active_sketch;
+    s.active_sheet_sketch = snap.active_sheet_sketch;
+    s.prune_sheet_sketch_edit();
     s.pending_moves = snap.pending_moves;
     s.visibility = snap.visibility;
     s.selection.clear();
-    // A new document is evaluated by `execute`.
-    if same {
-        if display_only {
-            s.refresh_display();
-        } else {
-            s.refresh();
-        }
+    // A new document is evaluated by `execute`, and a drawing's change evaluates nothing.
+    if display_only {
+        s.refresh_display();
+    } else if same && moved {
+        s.refresh();
     }
-    was
+    Ok(was)
+}
+
+/// `doc` with its drawing `id` as `step` has it.
+fn drawing_from(doc: &Arc<Document>, step: &Document, id: u64) -> Arc<Document> {
+    let mut doc = doc.clone();
+    if let Some(then) = step.drawing(id)
+        && !doc.drawing(id).is_some_and(|now| Arc::ptr_eq(then, now))
+    {
+        Arc::make_mut(&mut doc).put_drawing(then.clone());
+    }
+    doc
+}
+
+/// The model's step `step` with each of its drawings as `now` has it.
+fn drawings_from(mut step: Arc<Document>, now: &Document) -> Arc<Document> {
+    let current = |d: &Arc<Drawing>| now.drawing(d.id).filter(|n| !Arc::ptr_eq(d, n));
+    if step.drawings.iter().any(|d| current(d).is_some()) {
+        let mut drawings = step.drawings.clone();
+        for d in &mut drawings {
+            if let Some(n) = current(d) {
+                *d = n.clone();
+            }
+        }
+        drawing::sort(&mut drawings);
+        Arc::make_mut(&mut step).drawings = drawings;
+    }
+    step
 }
 
 fn checkpoint(s: &mut Session, _p: &Value) -> Result<Value> {
@@ -694,7 +773,7 @@ fn group(s: &mut Session, p: &Value) -> Result<Value> {
     let joints = group_joints(s, p, cmd)?;
     let groups = group_ids(s, p, false, cmd)?;
     let name = match str_(p, "name").map(str::trim).filter(|name| !name.is_empty()) {
-        Some(name) if name.len() <= 128 => name.to_string(),
+        Some(name) if name.chars().count() <= 128 => name.to_string(),
         Some(_) => return Err(bad(cmd, "`name` must be 1…128 characters")),
         None => format!("Folder{}", s.doc.timeline_groups.len() + 1),
     };
@@ -947,14 +1026,15 @@ fn feature_ids(s: &Session, p: &Value, cmd: &str) -> Result<Vec<u64>> {
 /// renamed (#1109). The suppressed feature keeps its own too: the counter passes the names of
 /// suppressed features by, so a body made meanwhile does not take `Body1` and lose it again when
 /// the feature is back.
-fn counted_names_from(s: &Session, ids: &[u64]) -> Vec<(u64, Vec<String>)> {
+fn counted_names_from(s: &Session, ids: &[u64]) -> Vec<(u64, Vec<String>, Vec<usize>)> {
     let made = |f: &Feature| -> Vec<String> {
         s.model.result(f.id).map(|r| r.state.bodies.iter().filter(|b| b.feature == f.id).map(|b| b.name.clone()).collect()).unwrap_or_default()
     };
     let makes_counted = |f: &Feature| (0..made(f).len()).any(|i| super::browser::counted(f, i));
     let first = s.doc.features.iter().position(|f| ids.contains(&f.id) && !f.suppressed && makes_counted(f));
     let Some(at) = first else { return Vec::new() };
-    s.doc.features.iter().skip(at).filter(|f| makes_counted(f)).map(|f| (f.id, made(f))).collect()
+    let left_out = |f: &Feature| s.model.result(f.id).map(|r| r.state.pattern_left_out(f.id).to_vec()).unwrap_or_default();
+    s.doc.features.iter().skip(at).filter(|f| makes_counted(f)).map(|f| (f.id, made(f), left_out(f))).collect()
 }
 
 fn suppress(s: &mut Session, p: &Value) -> Result<Value> {
@@ -981,9 +1061,9 @@ fn suppress(s: &mut Session, p: &Value) -> Result<Value> {
     let keep = if want { counted_names_from(s, &ids) } else { Vec::new() };
     // One command, so one undo step however many features it changes.
     let doc = s.doc_mut();
-    for (id, made) in &keep {
+    for (id, made, left_out) in &keep {
         if let Some(f) = doc.feature_mut(*id) {
-            f.pin_body_names(made);
+            f.pin_body_names(made, left_out);
         }
     }
     for id in &ids {
@@ -1487,7 +1567,9 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     // New bend edges for a conversion: the names of the body's edges there now.
-    if let (FeatureKind::SheetConvert { bends: a, body, .. }, FeatureKind::SheetConvert { bends: b, body: was, .. }) = (&nf.kind, &f.kind)
+    if let (FeatureKind::SheetConvert { bends: a, body, .. }, FeatureKind::SheetConvert { bends: b, body: was, .. })
+    | (FeatureKind::SheetSurfaceConvert { bends: a, body, .. }, FeatureKind::SheetSurfaceConvert { bends: b, body: was, .. })
+    | (FeatureKind::SheetRecognize { bends: a, body, .. }, FeatureKind::SheetRecognize { bends: b, body: was, .. }) = (&nf.kind, &f.kind)
         && (a != b || body != was)
     {
         nf.edge_names = solidcraft_doc::sheet::bend_edge_names(&s.model.state_before(id), body, &solidcraft_doc::plain(a));
@@ -1533,6 +1615,12 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
         let before = s.model.state_before(id);
         super::component::pin_picked_placements_in(s, &mut nf.kind, nf.component, &before);
     }
+    if !sets_path(set, "extent.from_level") {
+        keep_from_level_on_the_same_face(s, &f, &mut nf);
+    }
+    // A one-sided extrude made symmetric remembers the way it went, so what was picked on its
+    // start cap is still found on the cap facing the same way.
+    solidcraft_doc::keep_one_sided_direction(&s.model, &f, &mut nf);
     if let Some(slot) = s.doc_mut().feature_mut(id) {
         *slot = nf;
     }
@@ -1619,6 +1707,12 @@ fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
                 }
             }
         }
+        if let Sel::Drawing { drawing, object } = &one
+            && !s.selectable_in_drawing(*drawing, *object)
+        {
+            let object = solidcraft_doc::ids::encode(*object);
+            return Err(bad("select.set", format!("the drawing open has no view, dimension or balloon {object}")));
+        }
         sel.push(one);
     }
     if !bool_(p, "add").unwrap_or(false) {
@@ -1674,6 +1768,130 @@ fn select_same_look(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad("select.same_look", "too many objects"));
     }
     select_set(s, &json!({"items":items}))
+}
+
+/// Faces whose normals turn by no more than this many degrees across an edge meet tangentially:
+/// such an edge is never sharp, whatever the threshold.
+const TANGENT_DEG: f64 = 1.0;
+
+/// The angle Select Sharp Edges takes when the call gives none (command search, a key, the menu).
+const SHARP_DEG: f64 = 30.0;
+
+fn select_sharp_edges(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "select.sharp_edges";
+    if !p.is_object() {
+        return Err(bad(CMD, "the parameters must be an object"));
+    }
+    let request: SharpEdgesParams = serde_json::from_value(p.clone()).map_err(|e| bad(CMD, e.to_string()))?;
+    let angle = request.angle_deg.unwrap_or(SHARP_DEG);
+    if !(TANGENT_DEG..=179.0).contains(&angle) {
+        return Err(bad(CMD, "`angle_deg` must be 1…179 degrees"));
+    }
+    let state = s.world_state()?;
+    let bodies: Vec<&solidcraft_doc::ModelBody> = match request.body.as_deref() {
+        Some(name) => {
+            let body = state.body(name).ok_or_else(|| bad(CMD, format!("no body `{name}`")))?;
+            if body.body.is_mesh() {
+                return Err(bad(CMD, format!("`{name}` is a mesh body: sharp edges are found on solid bodies")));
+            }
+            if body.is_surface() {
+                return Err(bad(CMD, format!("`{name}` is a surface body: sharp edges are found on solid bodies")));
+            }
+            vec![body]
+        }
+        None => state.bodies.iter().filter(|b| !b.body.is_mesh() && !b.is_surface() && s.body_visible(&b.name)).collect(),
+    };
+    // The normal angle is judged on the faces' exact surfaces at stations along each edge's own
+    // curve (the continuity analysis's measure), never on the mesh.
+    let tolerances = crate::kernel::ContinuityTolerances { angle_deg: TANGENT_DEG, ..Default::default() };
+    let mut items = Vec::new();
+    for body in bodies {
+        let report = crate::kernel::seam_diagnostics(&body.body, &[], crate::kernel::DEFAULT_SAMPLES, tolerances)?;
+        for seam in &report.seams {
+            let worst = seam.normal_angle_deg.value;
+            if seam.order.is_none() || !(worst > angle.max(TANGENT_DEG)) {
+                continue;
+            }
+            let Some(point) = seam.points.get(seam.points.len() / 2) else { continue };
+            items.push(Sel::Edge { body: body.name.clone(), index: seam.edge, point: *point });
+            if items.len() > 10_000 {
+                return Err(bad(CMD, "more than 10,000 sharp edges: name a `body` or raise `angle_deg`"));
+            }
+        }
+    }
+    let add = request.add.unwrap_or(false);
+    if add {
+        // An edge already selected is the same edge whatever point it was picked at: the items'
+        // points are the analysis's stations, not the user's.
+        let picked =
+            |body: &str, index: usize| s.selection.iter().any(|x| matches!(x, Sel::Edge { body: b, index: i, .. } if b == body && *i == index));
+        items.retain(|x| !matches!(x, Sel::Edge { body, index, .. } if picked(body, *index)));
+    }
+    select_set(s, &json!({"items": items, "add": add}))
+}
+
+/// In an open sketch, every curve of it (construction ones too) and every point of it on no
+/// curve, leaving out its origin and projected geometry; outside a sketch, every shown body.
+fn select_all(s: &mut Session, p: &Value) -> Result<Value> {
+    let request: crate::schema::select::SelectAllParams = crate::schema::read("select.all", p)?;
+    // The drawing's sheet, unless the model has the focus (the Design workspace with a drawing open).
+    let drawing = s.open_drawing.filter(|_| s.active_sketch.is_none() && !s.model_focus);
+    if drawing.is_none() && request.sheet.is_some() {
+        return Err(bad("select.all", "sheet: only with a drawing open"));
+    }
+    let all: Vec<Sel> = match (s.active_sketch, drawing) {
+        (None, Some(open)) => {
+            let d = s.drawing("select.all")?;
+            let sheet = match &request.sheet {
+                Some(named) => crate::drawing_scene::sheet_id(d, named, "select.all")?,
+                None => d.sheets.first().map(|sheet| sheet.id).ok_or_else(|| bad("select.all", "the drawing open has no sheet"))?,
+            };
+            let on = d.on_sheet(sheet);
+            on.views
+                .iter()
+                .chain(&on.dimensions)
+                .chain(&on.balloons)
+                .chain(&on.notes)
+                .filter(|object| d.has_object(**object))
+                .take(10_001)
+                .map(|object| Sel::Drawing { drawing: open, object: *object })
+                .collect()
+        }
+        (active, _) => match active {
+            Some(id) => {
+                let sk = super::sketch_store::read(&s.doc, id)?;
+                let own = sk.curves.iter().filter(|c| c.link.is_none());
+                let on_curve = |q: usize| own.clone().any(|c| c.kind.uses(q));
+                own.clone()
+                    .map(|c| Sel::SketchCurve { id: c.id.clone(), sketch: None })
+                    .chain(
+                        sk.points
+                            .iter()
+                            .enumerate()
+                            .filter(|(q, p)| p.link.is_none() && p.id != "origin" && !on_curve(*q))
+                            .map(|(_, p)| Sel::SketchPoint { id: p.id.clone() }),
+                    )
+                    .take(10_001)
+                    .collect()
+            }
+            None => {
+                let hidden = &s.visibility.hidden_bodies;
+                s.world_state()?
+                    .bodies
+                    .iter()
+                    .filter(|b| !hidden.contains(&b.name))
+                    .take(10_001)
+                    .map(|b| Sel::Body { name: b.name.clone() })
+                    .collect()
+            }
+        },
+    };
+    if all.len() > 10_000 {
+        return Err(bad("select.all", "too many items"));
+    }
+    s.selection = all;
+    s.refresh_display();
+    reply("select.all", SelectSetResult { selected: s.selection.len(), param_warnings: Vec::new() })
 }
 
 fn select_clear(s: &mut Session, _p: &Value) -> Result<Value> {
@@ -1960,89 +2178,52 @@ fn reorder_features(
     Ok((next, ordered, broken, Some(after)))
 }
 
-/// The edge and stretch (`from`, `to`) a `sheet.flange` segment input's key names:
-/// `sheet.flange.edge<x bits>,<y bits>,<z bits>.stretch<from bits>.<to bits>.<field>`. The edge is
-/// the point the flange was made on, the physical edge itself, so reordering the `edges` list moves
-/// no name onto another edge's stretch.
-fn segment_span(key: &str) -> Option<([u64; 3], f64, f64)> {
+/// The edge a `sheet.flange` input's key names: the persistent name of the edge its pick stored
+/// (`Feature::edge_names`, `<face A>|<face B>`, #7990), length-prefixed so the key reads back
+/// without parsing the name; or, for an edge with no name, its pick point exactly, the only key
+/// such a reference has (docs/design/persistent-naming-proposal.md, change 1). Two picks are the
+/// same edge when they name the same edge, never by how near their points are.
+fn edge_token(names: &[String], k: usize, point: solidcore_record::Vec3) -> String {
+    match names.get(k).filter(|n| !n.is_empty()) {
+        Some(name) => format!("name{}:{name}", name.len()),
+        None => format!("point:{},{},{}", point.x.to_bits(), point.y.to_bits(), point.z.to_bits()),
+    }
+}
+
+/// A `sheet.flange` key's edge token (see [`edge_token`]) and what the key names after it.
+fn split_edge_key(key: &str) -> Option<(&str, &str)> {
     let rest = key.strip_prefix("sheet.flange.edge")?;
-    let mut parts = rest.split('.');
-    let point: Vec<u64> = parts.next()?.split(',').map(|bits| bits.parse().ok()).collect::<Option<_>>()?;
-    let point: [u64; 3] = point.try_into().ok()?;
+    let end = if let Some(named) = rest.strip_prefix("name") {
+        let (len, _) = named.split_once(':')?;
+        "name".len() + len.len() + 1 + len.parse::<usize>().ok()?
+    } else {
+        rest.strip_prefix("point:")?;
+        rest.find('.')?
+    };
+    Some((rest.get(..end)?, rest.get(end..)?.strip_prefix('.')?))
+}
+
+/// The edge and stretch (`from`, `to`) a `sheet.flange` segment input's key names:
+/// `sheet.flange.edge<edge>.stretch<from bits>.<to bits>.<field>`. The stretch is the one the
+/// feature's definition gives, so reordering the `edges` list or the segments moves no name onto
+/// another stretch.
+fn segment_span(key: &str) -> Option<(&str, f64, f64)> {
+    let (edge, named) = split_edge_key(key)?;
+    let mut parts = named.split('.');
     let from = f64::from_bits(parts.next()?.strip_prefix("stretch")?.parse::<u64>().ok()?);
     let to = f64::from_bits(parts.next()?.parse::<u64>().ok()?);
-    Some((point, from, to))
+    Some((edge, from, to))
 }
 
-/// The edge a `sheet.flange` edge-level input belongs to: the pick point its key carries, for the
-/// edge's own `angle` and `height`. A segment input carries its stretch as well, so `segment_span`
-/// reads those; this reads only the keys that name the edge itself.
-fn edge_point(key: &str) -> Option<[u64; 3]> {
-    let rest = key.strip_prefix("sheet.flange.edge")?;
-    let mut parts = rest.split('.');
-    let point: Vec<u64> = parts.next()?.split(',').map(|bits| bits.parse().ok()).collect::<Option<_>>()?;
-    let point: [u64; 3] = point.try_into().ok()?;
-    if !matches!(parts.next()?, "angle" | "height") || parts.next().is_some() {
-        return None;
-    }
-    Some(point)
+/// The edge a `sheet.flange` edge-level input belongs to, for the edge's own `angle` and `height`.
+/// A segment input carries its stretch as well, so `segment_span` reads those; this reads only the
+/// keys that name the edge itself.
+fn edge_of_key(key: &str) -> Option<&str> {
+    let (edge, named) = split_edge_key(key)?;
+    matches!(named, "angle" | "height").then_some(edge)
 }
 
-/// The pick point a `sheet.flange` key carries, decoded from the bits it stores, and what the key
-/// names after that point: its field, and for a segment its stretch.
-fn key_point(key: &str) -> Option<([f64; 3], &str)> {
-    let rest = key.strip_prefix("sheet.flange.edge")?;
-    let (point, named) = rest.split_once('.')?;
-    let point: Vec<f64> = point.split(',').map(|bits| bits.parse::<u64>().ok().map(f64::from_bits)).collect::<Option<_>>()?;
-    let point: [f64; 3] = point.try_into().ok()?;
-    Some((point, named))
-}
-
-/// How far apart two pick points are.
-fn point_distance(a: [f64; 3], b: [f64; 3]) -> f64 {
-    let d = [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-    (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
-}
-
-/// Whether two pick points, as the bits a key stores, are within `tol` of each other.
-fn points_within(a: [u64; 3], b: [u64; 3], tol: f64) -> bool {
-    point_distance(a.map(f64::from_bits), b.map(f64::from_bits)) <= tol
-}
-
-/// The tolerance within which two pick points name the same edge: the distance the document lets a
-/// pick miss an edge by and still select it (`appearance::pick_tolerance` of the sheet body the
-/// feature is on), or 1e-6 mm when the model does not hold that body yet. A pick point that moves
-/// by a hair is the same edge, so the names on it stay (#5927, #5928).
-fn edge_pick_tolerance(s: &Session, kind: &FeatureKind) -> f64 {
-    const NONE: f64 = 1e-6;
-    let FeatureKind::SheetFlange { body, edges, .. } = kind else { return NONE };
-    let state = s.model.state();
-    // The body named, else the sheet the first pick point lands on: the one evaluation takes the
-    // feature's body from (`sheet_for`).
-    let sheet = match body {
-        Some(name) => state.sheets.iter().find(|sh| sh.body == name.0),
-        None => edges.first().and_then(|e| {
-            state.sheets.iter().filter_map(|sh| sh.edge_at(e.point.0).map(|at| (sh, at.4))).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(sh, _)| sh)
-        }),
-    };
-    sheet.and_then(|sh| state.body(&sh.body)).map_or(NONE, solidcraft_doc::appearance::pick_tolerance)
-}
-
-/// Whether an old key and a new key name the same input: the same key, or the same field (and, for
-/// a segment, the same stretch) on pick points within `tol` of each other. The keys keep the bits
-/// of their point, so a point that moved by a hair no longer matches as a string; it is the same
-/// edge all the same (#5927, #5928).
-fn keys_match(old_key: &str, key: &str, tol: f64) -> bool {
-    if old_key == key {
-        return true;
-    }
-    match (key_point(old_key), key_point(key)) {
-        (Some((a, named)), Some((b, named_too))) => named == named_too && point_distance(a, b) <= tol,
-        _ => false,
-    }
-}
-
-fn input_keys(kind: &FeatureKind) -> Vec<(String, solidcraft_doc::expr::Kind)> {
+fn input_keys(kind: &FeatureKind, edge_names: &[String]) -> Vec<(String, solidcraft_doc::expr::Kind)> {
     let mut keys: Vec<_> = kind.inputs().into_iter().map(|(label, _, unit)| (label.to_string(), unit)).collect();
     if let FeatureKind::Fillet { style, .. } = kind {
         if let Some((key, _)) = keys.first_mut() {
@@ -2065,17 +2246,17 @@ fn input_keys(kind: &FeatureKind) -> Vec<(String, solidcraft_doc::expr::Kind)> {
     // Every segment's angle and height has the same label ("Segment angle", "Segment height"), so
     // a name could only be matched by position: inserting, deleting or reordering stretches or
     // edges moved a named height onto another stretch (#5927, #5928). Each segment input is keyed
-    // by the edge it is on (the point the flange was made on, the physical edge) and by the stretch
-    // it describes (its `from` and `to`, exactly), so a name stays on its own stretch however the
-    // list is reordered. An edge's own angle and height are keyed by the edge's point for the same
+    // by the edge it is on (the persistent name its pick stored, see `edge_token`) and by the
+    // stretch it describes (its `from` and `to`, exactly), so a name stays on its own stretch however
+    // the list is reordered. An edge's own angle and height are keyed by the edge for the same
     // reason: reordering the edges moves no name onto another edge. The order is the walk's: an
     // edge's angle before its height before its segments, edges in order, and only the expressions
     // that carry a value.
     if let FeatureKind::SheetFlange { edges, .. } = kind {
         let mut edge_keys = Vec::new();
         let mut segment_keys = Vec::new();
-        for e in edges {
-            let point = format!("{},{},{}", e.point.0.x.to_bits(), e.point.0.y.to_bits(), e.point.0.z.to_bits());
+        for (k, e) in edges.iter().enumerate() {
+            let point = edge_token(edge_names, k, e.point.0);
             if e.angle.is_some() {
                 edge_keys.push(format!("sheet.flange.edge{point}.angle"));
             }
@@ -2112,6 +2293,21 @@ fn input_keys(kind: &FeatureKind) -> Vec<(String, solidcraft_doc::expr::Kind)> {
     keys
 }
 
+/// An old design's From Object keeps starting at the face's level (`from_level`) through an edit
+/// that keeps its From face: the same pick, or a pick of a face on the same plane, found as the
+/// build finds it in the model before the feature. A From picked on another plane is a new
+/// choice, so it starts on that face, as a new extrude does. `after`'s face names and picked
+/// placements must already be its own.
+fn keep_from_level_on_the_same_face(s: &Session, before: &Feature, after: &mut Feature) {
+    let FeatureKind::Extrude { extent: was, .. } = &before.kind else {
+        return;
+    };
+    let keep = was.from_level && solidcraft_doc::same_extrude_from_face(&s.doc, &s.model.state_before(before.id), before, after);
+    if let FeatureKind::Extrude { extent, .. } = &mut after.kind {
+        extent.from_level = keep;
+    }
+}
+
 fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.redefine";
     let id = feature_id(s, p.get("feature"), cmd)?;
@@ -2137,6 +2333,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "sheet.unfold"
                 | "sheet.refold"
                 | "sheet.convert"
+                | "sheet.recognize"
                 | "plastic.boss"
                 | "plastic.lip"
                 | "plastic.snap_fit"
@@ -2208,6 +2405,16 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         && parameters.get("body_name").and_then(Value::as_str) == body_name.as_deref()
     {
         parameters.entry("names").or_insert_with(|| json!(names));
+    }
+    // A fold keeps the side that stays, decided when it was made, through an edit that names
+    // neither a side nor a fixed point: the side is never decided again.
+    if let FeatureKind::SheetFold { stays: Some(side), .. } = &old.kind
+        && cid == "sheet.fold"
+        && let Some(parameters) = params.as_object_mut()
+        && parameters.get("stays").is_none_or(Value::is_null)
+        && parameters.get("fixed").is_none_or(Value::is_null)
+    {
+        parameters.insert("stays".into(), json!(side));
     }
     // A hole's and a primitive's `targets` are the bodies it takes part in: an edit that names
     // them changes them (#17623), rather than the old participants overriding them.
@@ -2290,6 +2497,8 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         after.to_body_apart = before.to_body_apart;
     }
+    keep_from_level_on_the_same_face(s, &old, &mut new);
+    solidcraft_doc::keep_one_sided_direction(&s.model, &old, &mut new);
     // A boundary surface's loop of sketch curves and its curve network are one command's two
     // forms: an edit may turn one into the other.
     let boundary = |k: &FeatureKind| matches!(k, FeatureKind::SurfaceBoundary { .. } | FeatureKind::SurfaceNetwork { .. });
@@ -2310,36 +2519,31 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     // material it still is, below: the value it still has first, then the span it still covers.
     let new_inputs = new.kind.inputs();
     let new_labels: Vec<String> = new_inputs.iter().map(|(label, _, _)| label.to_string()).collect();
-    let mut old_inputs: Vec<(String, String, solidcraft_doc::expr::Kind, String, String)> = input_keys(&old.kind)
+    // Each flange edge by the persistent name its pick stored; a feature saved before its edges
+    // were named reads its picks' names now, as the edit that makes a flange does, so old and new
+    // keys name edges alike.
+    let edge_names = |f: &solidcraft_doc::Feature| -> Vec<String> {
+        match &f.kind {
+            FeatureKind::SheetFlange { edges, .. } if f.edge_names.is_empty() => {
+                let points: Vec<solidcore_record::Vec3> = edges.iter().map(|e| e.point.0).collect();
+                solidcraft_doc::sheet::sheet_edge_names(&s.model.state_before(old.id), &points)
+            }
+            _ => f.edge_names.clone(),
+        }
+    };
+    let mut old_inputs: Vec<(String, String, solidcraft_doc::expr::Kind, String, String)> = input_keys(&old.kind, &edge_names(&old))
         .into_iter()
         .zip(old.kind.inputs())
         .zip(&old.param_names)
         .map(|(((key, kind), (label, expression, _)), name)| (key, label.to_string(), kind, name.clone(), expression))
         .collect();
-    let keys = input_keys(&new.kind);
-    // Two pick points within the document's own pick tolerance name the same edge: a pick that
-    // moved by a hair keeps the names on its edge and on its stretches, and the expressions that
-    // read them (#5927, #5928). A feature whose body the model does not hold yet falls back to
-    // 1e-6 mm.
-    let tol = edge_pick_tolerance(s, &old.kind);
+    let keys = input_keys(&new.kind, &edge_names(&new));
+    // A pick that moved along its edge names the same edge, so the names on the edge and on its
+    // stretches, and the expressions that read them, stay (#5927, #5928): the keys name the edge,
+    // not where it was picked.
     let mut param_names: Vec<String> = vec![String::new(); keys.len()];
     for (i, (key, kind)) in keys.iter().enumerate() {
-        // The old input naming the same input with the nearest point: the exact key, or the same
-        // field (and stretch) on a point within the tolerance.
-        let mut best: Option<(usize, f64)> = None;
-        for (k, (old_key, _, old_kind, _, _)) in old_inputs.iter().enumerate() {
-            if old_kind != kind || !keys_match(old_key, key, tol) {
-                continue;
-            }
-            let distance = match (key_point(old_key), key_point(key)) {
-                (Some((a, _)), Some((b, _))) => point_distance(a, b),
-                _ => 0.0,
-            };
-            if best.is_none_or(|(_, nearest)| distance < nearest) {
-                best = Some((k, distance));
-            }
-        }
-        if let Some((k, _)) = best {
+        if let Some(k) = old_inputs.iter().position(|(old_key, _, old_kind, _, _)| old_kind == kind && old_key == key) {
             param_names[i] = old_inputs.remove(k).3.clone();
         }
     }
@@ -2348,23 +2552,21 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     // the old input of the same label and kind that carries the same expression first: the survivor
     // still has the value it had. Only then does the greatest span overlap on the same edge carry a
     // name. A deleted stretch's name never lands on a stretch whose value came from elsewhere
-    // (#5927, #5928). An edge's own angle or height is keyed by its pick point and matched by that
-    // point within the tolerance, so an edge deleted and another inserted in one redefine move no
-    // name across.
+    // (#5927, #5928). An edge's own angle or height is keyed by its edge, so an edge deleted and
+    // another inserted in one redefine move no name across.
     for (i, (key, kind)) in keys.iter().enumerate() {
         if !param_names[i].is_empty() {
             continue;
         }
-        if let Some((point, from, to)) = segment_span(key) {
+        if let Some((edge, from, to)) = segment_span(key) {
             let mut best: Option<(usize, bool, f64)> = None;
             for (k, (old_key, old_label, old_kind, _, old_expression)) in old_inputs.iter().enumerate() {
                 if *old_label != new_labels[i] || old_kind != kind {
                     continue;
                 }
-                let Some((old_point, old_from, old_to)) = segment_span(old_key) else { continue };
-                // The stretch's edge is its pick point, within the same tolerance: a pick that moved
-                // by a hair keeps the stretch's name (#5927, #5928).
-                if !points_within(old_point, point, tol) {
+                let Some((old_edge, old_from, old_to)) = segment_span(old_key) else { continue };
+                // On the same edge only.
+                if old_edge != edge {
                     continue;
                 }
                 let same_value = *old_expression == new_inputs[i].1;
@@ -2387,36 +2589,16 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
             // constructor's own name stays, rather than another stretch's.
             continue;
         }
-        if let Some(point) = edge_point(key) {
-            // An edge's own angle or height is keyed by the edge's pick point, and the key match
-            // above took a point within the pick tolerance. When no old point was that close, the
-            // nearest edge point on this feature still names the edge the pick moved to, within a
-            // sane bound: twice the tolerance, and a hundredth of a millimetre at least, for a
-            // feature whose body the model does not hold yet. Beyond that bound the nearest point is
-            // not the edge that was picked, and a newly inserted edge keeps the constructor's name:
-            // a deleted edge's name never lands on it (#5927, #5928).
-            let bound = (tol * 2.0).max(1e-2);
-            let mut best: Option<(usize, f64)> = None;
-            for (k, (old_key, old_label, old_kind, _, _)) in old_inputs.iter().enumerate() {
-                if *old_label != new_labels[i] || old_kind != kind || segment_span(old_key).is_some() {
-                    continue;
-                }
-                let Some(old_point) = edge_point(old_key) else { continue };
-                let distance = point_distance(old_point.map(f64::from_bits), point.map(f64::from_bits));
-                if distance > bound || best.is_some_and(|(_, nearest)| distance >= nearest) {
-                    continue;
-                }
-                best = Some((k, distance));
-            }
-            if let Some((k, _)) = best {
-                param_names[i] = old_inputs.remove(k).3.clone();
-            }
+        // An edge's own angle or height whose key missed is on an edge the old feature did not
+        // have: it keeps the constructor's name, and a deleted edge's name never lands on it
+        // (#5927, #5928).
+        if edge_of_key(key).is_some() {
             continue;
         }
-        // Only inputs whose key names no point are left: a label and a kind are all they carry, so
+        // Only inputs whose key names no edge are left: a label and a kind are all they carry, so
         // one of them is matched by those alone.
         if let Some(k) = old_inputs.iter().position(|(old_key, old_label, old_kind, _, _)| {
-            *old_label == new_labels[i] && old_kind == kind && segment_span(old_key).is_none() && edge_point(old_key).is_none()
+            *old_label == new_labels[i] && old_kind == kind && segment_span(old_key).is_none() && edge_of_key(old_key).is_none()
         }) {
             param_names[i] = old_inputs.remove(k).3.clone();
         }

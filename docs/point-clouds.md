@@ -10,7 +10,8 @@ depends on it.
 | Extension | What is read |
 |-----------|--------------|
 | `.ply` | ASCII, binary little-endian and binary big-endian PLY: the `vertex` element's `x`, `y`, `z` (any numeric type) and its `red`, `green`, `blue` when present (bytes, 16-bit or 0…1 floats). Every other scalar vertex property (intensity, a class, a time…) is kept, by its name in the file, to colour and filter the cloud by; it is whole-numbered when its type is an integer. The `edge` element (`vertex1`, `vertex2`) and the `face` element (`vertex_indices`, a face as a fan of triangles) become segments and triangles between the points, with their own properties. Other elements are passed over. |
-| `.xyz`, `.pts` | Text, a point per line: `x y z`, optionally followed by `r g b` (six numbers) or by an intensity and `r g b` (seven or more, as PTS files write it). Spaces, tabs, commas or semicolons separate the numbers; `#` and `//` start comments; a PTS file's first line (its count) is skipped. |
+| `.pcd` | The Point Cloud Library's PCD, with its points stored as text (`DATA ascii`), as binary rows (`binary`) or as an LZF-compressed block (`binary_compressed`): the fields `x`, `y`, `z` (any numeric type) and the packed `rgb` or `rgba` field when present (its alpha is passed over). Every other field with one value a point (intensity, a label, a normal's parts…) is kept, by its name in the file, to colour and filter the cloud by; it is whole-numbered when its `TYPE` is `I` or `U`. A field with several values a point (a descriptor) and the padding fields named `_` are passed over. A grid of points (`WIDTH` by `HEIGHT`) is read as its points in order, and the points it marks as missing (`nan`) are left out with a warning. `VIEWPOINT`, where the scanner stood, is not applied: the points keep the file's coordinates. |
+| `.xyz`, `.pts`, `.asc` | Text, a point per line: `x y z`, optionally followed by `r g b` (six numbers) or by an intensity and `r g b` (seven or more, as PTS files write it). Spaces, tabs, commas or semicolons separate the numbers; `#` and `//` start comments; a PTS file's first line (its count) is skipped. An `.asc` file that is an ESRI grid of heights (it starts with `ncols`) is refused: it holds rows of heights, not points. |
 
 A PLY file with faces can also be inserted as a mesh body with **Insert Mesh**
 (`file.insert_mesh`), which makes it solid geometry rather than a reference.
@@ -110,9 +111,52 @@ A cloud keeps at most `max_points` points (5,000,000 unless asked, at most 20,00
 file is thinned evenly, one point in *n*, and the result says how many were kept. Thinning would
 cut a file's edges and faces, so a thinned file leaves them out, with a warning; raise `max_points`
 to keep them. A cloud holds at most 20,000,000 segments and as many triangles. Files up to
-1 GiB are read. The points are stored single precision relative to the cloud's first point (kept
-double precision), so a scan far from the origin keeps its detail; they travel inside the design
-file as a binary part (12 bytes a point, 3 more with colours).
+1 GiB are read; a larger one is read when the limit for STEP and import files is raised
+(Preferences › General › Largest file to open, or `--max-file-size`), and a file over the limit is
+refused before it is read, saying how to raise it. The points are stored single precision relative
+to the cloud's first point (kept double precision), so a scan far from the origin keeps its
+detail; they travel inside the design file as a binary part (12 bytes a point, 3 more with
+colours).
+
+## Deviation from a body
+
+`pointcloud.deviation` measures how far each point of a cloud lies from a body. It reads the
+cloud and the body where they are placed now and changes nothing: no placement, no colour, no undo
+step. It does not align the cloud, scale it or leave points out as outliers.
+
+- **Exact geometry.** Each distance is the kernel's closest-point solve on the body's faces as they
+  are trimmed, with their edges and vertices. A point past a face's edge is measured to that edge,
+  not to the face's unbounded surface. The display mesh plays no part, so a finer or coarser view
+  gives the same result. A mesh body is refused.
+- **Sign.** For a body that encloses a volume, measured on all its faces, each distance has a sign:
+  positive outside the material, negative inside it, zero on the boundary within the body's own
+  tolerance. The kernel's exact point classification decides the side. A face set (`faces`) or an
+  open body has no inside, so its distances are unsigned and `signed: true` is refused.
+- **Sampling.** At most `max_samples` points are measured (100,000 unless asked). A larger cloud is
+  sampled at every *n*-th point, from the first point, with *n* the smallest whole number that keeps
+  the count within the limit. The result gives `cloud_points`, `sample_step`, `sampled`, `measured`
+  and `failed`, and `sampled` = `measured` + `failed`. A point the kernel cannot measure is listed in
+  `failures` and left out of the statistics; it never counts as 0.
+- **Statistics.** `mean_abs_mm`, `rms_mm`, `max_abs_mm`, `mean_signed_mm` (signed only) and
+  `within_tolerance` count each measured point once; they are not weighted by area.
+  `within_tolerance_fraction` is `within_tolerance` / `measured`. With no measured point, each is
+  `null`, not 0. `worst` lists the farthest points with their closest point on the body, and
+  `per_point: true` adds every distance in sampling order.
+- **Filters and visibility** change only what the view shows. Every point of the cloud is a
+  candidate to measure.
+
+What the numbers do and do not say:
+
+- **Numerical accuracy.** The kernel solves each distance on the exact geometry;
+  `body_tolerance_mm` is the body's own tolerance. The cloud stores its coordinates as 32-bit floats,
+  and `point_precision_mm` says how far a stored point may lie from the value in its file.
+- **Sampling error.** `max_abs_mm` is the largest distance among the measured points, not a
+  certified maximum. A point the cloud does not have, or that sampling skipped, may lie farther.
+- **Coverage.** The distances go from the points to the body only. A part of the body with no
+  points near it does not show up, so a missing feature or a gap in the scan can go unseen.
+- **Scanner uncertainty.** The scanner's own noise and errors are in the points, and the command
+  cannot tell them apart from a real difference in shape. The result is a sampled geometric
+  comparison, not a check of conformity to a specification.
 
 ## Commands
 
@@ -127,6 +171,8 @@ file as a binary part (12 bytes a point, 3 more with colours).
   `occurrence.move` takes it).
 - `pointcloud.reload` — `cloud`; reads its file again (see [Reloading](#reloading)).
 - `pointcloud.delete`.
+- `pointcloud.deviation` — `cloud`, `body`; `faces?`, `tolerance?` (mm, default 0.1),
+  `max_samples?`, `signed?`, `worst?`, `per_point?` (see [Deviation from a body](#deviation-from-a-body)).
 - `pointcloud.list` — each cloud with its `source`, its segment and triangle counts, its properties (name, whole-numbered or not, span, named
   values), its filters and its ramp's range as drawn (`color_range`).
 - `doc.open` opens a point cloud file as a new design holding it; dropping one on the window

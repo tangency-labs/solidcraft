@@ -219,6 +219,137 @@ fn sag_refinement_across_an_inflection_ends_without_slivers() {
     }
 }
 
+/// The two triangles are flat on the support in (u, v), but their held vertices are
+/// above it. Subdividing their shared side cannot repair the boundary displacement.
+#[test]
+fn sag_refinement_keeps_a_displaced_flat_boundary_without_splitting() {
+    let offset = 0.05;
+    let tol = 0.01;
+    let corners = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+    let fixed = corners.map(|[u, v]| Vec3::new(u, v, offset));
+    let mut uv = corners.to_vec();
+    let mut triangles = vec![[0, 1, 2], [0, 2, 3]];
+    let face = poles::Face::new(EvalSurface::Plane { origin: Vec3::ZERO, du: Vec3::X, dv: Vec3::Y }, offset);
+    let poles = sag::Poles::new(&face, 1e-9);
+    let refinement = sag::refine(&face, tol, &poles, &fixed, &mut uv, &mut triangles, 64);
+    assert!(!refinement.capped && refinement.boundary_has_residual(&face, tol, &poles, &fixed, &uv, &triangles));
+    assert_eq!(uv.len(), corners.len(), "added {} points to a flat support", uv.len() - corners.len());
+    assert_eq!(triangles, [[0, 1, 2], [0, 2, 3]]);
+    let (measured, unmeasured) = sag::worst(&face, &poles, &fixed, &uv, &triangles);
+    assert_eq!(unmeasured, 0);
+    assert!((measured - offset).abs() < 1e-12, "measured {measured} mm, wanted {offset} mm");
+}
+
+/// A radius-4 cylinder over two radians and six millimetres. Its boundary lies at
+/// radius `4 + offset`, within its own tolerance. Four rational quadratic arcs in
+/// the same parameter make the face's two rims and its surface's two control rows.
+fn cylinder_with_displaced_boundary(offset: f64) -> brep::Brep {
+    let radius = 4.0;
+    let height = 6.0;
+    let rim = radius + offset;
+    let tol = offset.max(1e-6);
+    let angle = |i: u32| 0.5 + 0.25 * f64::from(i);
+    let point = |a: f64, z| [rim * a.cos(), rim * a.sin(), z];
+    let points = [point(angle(0), 0.0), point(angle(8), 0.0), point(angle(8), height), point(angle(0), height)];
+    let arc_knots = vec![0.0, 0.0, 0.0, 0.25, 0.25, 0.5, 0.5, 0.75, 0.75, 1.0, 1.0, 1.0];
+    let control = |r, z, i| {
+        let a = angle(i);
+        let w = if i % 2 == 0 { 1.0 } else { 0.25_f64.cos() };
+        [r * a.cos(), r * a.sin(), z * w, w]
+    };
+    let arc = |z| Curve::RationalSpline { knots: arc_knots.clone(), homogeneous: (0..=8).map(|i| control(rim, z, i)).collect() };
+    let line = |a: usize, b: usize| Curve::Line { start: points[a], end: points[b] };
+    let corners = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+    let mut edges = Vec::new();
+    let mut uses = Vec::new();
+    for (i, (curve, vertices, forward)) in [
+        (arc(0.0), [0, 1], true),
+        (line(1, 2), [1, 2], true),
+        (arc(height), [3, 2], false),
+        (line(0, 3), [0, 3], false),
+    ].into_iter().enumerate() {
+        let position = u32::try_from(i).unwrap();
+        let pcurve = brep::Curve2::Spline {
+            knots: vec![0.0, 0.0, 1.0, 1.0],
+            points: vertices.map(|j| corners[j as usize]).to_vec(),
+        };
+        edges.push(brep::Edge {
+            curve,
+            nurbs: None,
+            interval: [0.0, 1.0],
+            vertices,
+            tolerance: tol,
+            uses: vec![brep::EdgeUseRef { face: 0, r#loop: 0, position, upper: !forward }],
+        });
+        uses.push(brep::OrientedEdge { edge: position, forward, pcurve });
+    }
+    brep::Brep {
+        version: brep::VERSION,
+        tolerance: tol,
+        regions: vec![brep::Region { shells: vec![0], void: false }],
+        shells: vec![Shell::Faces { faces: vec![brep::OrientedFace { face: 0, forward: true }], wires: Vec::new() }],
+        faces: vec![brep::Face {
+            surface: brep::Surface::Cylinder {
+                frame: brep::Frame { origin: [0.0; 3], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] },
+                radius,
+            },
+            nurbs: Some(brep::Surface::RationalSpline {
+                u_knots: arc_knots,
+                v_knots: vec![0.0, 0.0, 1.0, 1.0],
+                homogeneous: (0..=8).map(|i| vec![control(radius, 0.0, i), control(radius, height, i)]).collect(),
+            }),
+            domain: [[0.0, 1.0], [0.0, 1.0]],
+            loops: vec![Loop::Edges { edges: uses }],
+        }],
+        edges,
+        vertices: points.into_iter().map(|point| brep::Vertex { point, tolerance: tol }).collect(),
+    }
+}
+
+#[test]
+fn sag_refinement_keeps_displaced_cylinder_rims_and_reports_their_gap() {
+    let chord = 0.01;
+    let area = 4.0 * 2.0 * 6.0;
+    for offset in [0.0, 0.05, 0.1] {
+        let record = cylinder_with_displaced_boundary(offset);
+        record.validate().unwrap();
+        let (plan, stats) = plan(&record, &crate::MeshTolerance::chord(chord), 8.0).unwrap();
+        let (mesh, refused) = plan.evaluate();
+        assert!(refused.is_empty() && stats.unmeshed.is_empty() && stats.lenient.is_empty(), "offset {offset}: {refused:?} {stats:?}");
+        assert!(!mesh.triangles.is_empty() && mesh.triangles.len() < 5_000, "offset {offset}: {} triangles", mesh.triangles.len());
+
+        let [face] = plan.faces.as_slice() else { panic!("expected one face") };
+        assert_eq!(plan.edges.len(), 4);
+        assert!(plan.edges.iter().all(|edge| edge.len() >= 2));
+        for point in plan.edges.iter().flatten() {
+            assert!(face.fixed.contains(point), "edge sample {point:?} moved or went missing");
+            assert!((point.x.hypot(point.y) - (4.0 + offset)).abs() < 1e-9, "edge sample {point:?} left its radius");
+        }
+        assert!(face.fixed.iter().all(|point| plan.edges.iter().flatten().any(|p| p == point)));
+        assert_eq!(&mesh.positions[..face.fixed.len()], face.fixed.as_slice(), "the evaluated mesh retains the shared edge samples");
+
+        let total: f64 = mesh.triangles.iter().map(|triangle| {
+            let [a, b, c] = triangle.map(|i| kernel::vec3(mesh.positions[i as usize]));
+            let cross = (b - a).cross(c - a);
+            let radial = a + b + c;
+            assert!(cross.dot(Vec3::new(radial.x, radial.y, 0.0)) > 0.0, "offset {offset}: reversed or degenerate triangle {triangle:?}");
+            0.5 * cross.length()
+        }).sum();
+        assert!((total - area).abs() <= 0.02 * area, "offset {offset}: area {total} mm², wanted {area} mm²");
+
+        if offset == 0.0 {
+            assert!(stats.over_tolerance.is_empty(), "{stats:?}");
+        } else {
+            let [residual] = stats.over_tolerance.as_slice() else { panic!("offset {offset}: {stats:?}") };
+            assert_eq!(residual.face, 0);
+            assert_eq!(residual.tol, chord);
+            assert_eq!(residual.unmeasured, 0);
+            assert!(residual.caps.is_empty(), "boundary displacement is not a budget cap: {residual:?}");
+            assert!(!residual.within && residual.sag >= offset - 1e-9, "vertical boundary midpoint retains {offset} mm of sag: {residual:?}");
+        }
+    }
+}
+
 /// A sheet curved across (a parabola 20 wide, 3.2 high at a tenth in from either side) and two
 /// triangles standing on a chord across the curve: their corners on the surface, their planes
 /// across it, so they count far more than the area under them. The flip lays them along the
@@ -270,16 +401,18 @@ fn a_box_is_two_triangles_a_face() {
     }
 }
 
-/// SolidCraft's coil from SMLib, its lower half: the counts the bake-off recorded for
-/// `793-coil-split-by-a-plane-across-its-axis` at the display and export tolerances, plus what
-/// shaping adds (18 triangles on its flat cut face, and at display 10 on its curved faces).
+/// SolidCraft's coil from SMLib, its lower half (`793-coil-split-by-a-plane-across-its-axis`), at
+/// the display and export tolerances: the triangle counts pin the planner, and no face is named
+/// over its tolerance. Its longest side is a fifth of its extent over its vertices and its edges' points
+/// (57.3 mm); its two vertices alone, the coil's ends, lie 20.4 mm apart.
 #[test]
 fn the_spline_coil_keeps_its_triangles() {
     let name = "smlib_coil_lower_half";
     let (b, size) = (crate::fixtures::fixture(name), crate::fixtures::size_of(name));
-    for (t, want) in [(crate::MeshTolerance::display_of(size), 30_658), (crate::MeshTolerance::export_of(size), 30_680)] {
-        let Ok((p, _)) = plan(&b, &t, size) else { panic!("plans") };
+    for (t, want) in [(crate::MeshTolerance::display_of(size), 15_392), (crate::MeshTolerance::export_of(size), 30_678)] {
+        let Ok((p, stats)) = plan(&b, &t, size) else { panic!("plans") };
         assert_eq!(p.evaluate().0.triangles.len(), want);
+        assert!(stats.over_tolerance.is_empty(), "{:?}", stats.over_tolerance);
     }
 }
 
@@ -520,3 +653,47 @@ fn a_sliver_whose_vertices_come_twice_is_still_drawn() {
     }
 }
 
+
+/// A ring 1000 mm across with a 1 mm tube, cut in half at z = 0, with a 0.12 mm cube joined to its
+/// flat face (the stress corpus's S0437): every vertex lies within about a millimetre of the cube.
+/// The longest side was a fifth of an extent taken from the vertices alone, a fifth of a
+/// millimetre for the flat face's two circles 3142 mm long: at 1/10000 of the body they took
+/// 19352 and 19840 segments, a few hundred short of [`edges::MAX_EDGE_NODES`], which SolidCraft's
+/// join of this body passed. The extent counts the edges' points: at that tolerance and at the
+/// display's the body is planned whole, and the tolerance alone splits each circle, into at most
+/// twice the segments a chord sagging the tolerance needs (bisection halves a chord at most once
+/// past it).
+#[test]
+fn a_thin_half_torus_is_sized_by_its_edges_not_its_vertices() {
+    use solidcore_ops::boolean::boolean;
+    use solidcore_ops::{BooleanOp, make_box, make_torus};
+    use crate::vec::VecExt as _;
+    let torus = make_torus([0.0; 3], 500.0, 0.5).expect("torus");
+    let below = make_box([-501.5, -501.5, -1.5], [1003.0, 1003.0, 1.5]).expect("box");
+    let half = boolean(torus, below, BooleanOp::Subtract).expect("cut").expect("a half torus");
+    let cube = make_box([499.94, -0.06, -0.12], [0.12, 0.12, 0.12]).expect("cube");
+    let joined = boolean(half, cube, BooleanOp::Union).expect("join").expect("a body");
+    let b = joined.to_record().expect("the record").0;
+    // The torus face, the flat face and the cube's five other faces; the flat face's two circles
+    // and the torus's seam, the cube's twelve edges; two seam vertices and the cube's eight.
+    assert_eq!((b.faces.len(), b.edges.len(), b.vertices.len()), (7, 15, 10));
+    // SolidCraft's size of the body: the box diagonal of its vertices and its edges' points.
+    let size = 2f64.sqrt() * 1001.0;
+    for t in [crate::MeshTolerance::chord(size * 1e-4), crate::MeshTolerance::display_of(size)] {
+        let (p, stats) = plan(&b, &t, size).expect("planned");
+        assert!(stats.unmeshed.is_empty(), "{t:?}: {:?}", stats.unmeshed);
+        let (tol, _) = t.rules(size);
+        // The chord that sags the tolerance on the smaller circle (radius 499.5).
+        let chord = (8.0 * 499.5 * tol).sqrt();
+        let circles: Vec<(f64, usize)> = p
+            .edges
+            .iter()
+            .map(|n| (n.windows(2).map(|w| w[0].dist(w[1])).sum::<f64>(), n.len() - 1))
+            .filter(|(len, _)| *len > 3000.0)
+            .collect();
+        assert_eq!(circles.len(), 2, "{t:?}: {circles:?}");
+        for (len, segments) in circles {
+            assert!(segments as f64 <= 2.0 * (len / chord).ceil(), "{t:?}: {segments} segments over {len} mm at a chord of {chord} mm");
+        }
+    }
+}

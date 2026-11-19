@@ -102,6 +102,12 @@ fn uri_path(rest: &str) -> Option<PathBuf> {
     // A Windows drive: `/C:/Users` is `C:/Users`.
     let drive = s.as_bytes();
     let s = if drive.get(2) == Some(&b':') && drive.get(1).is_some_and(u8::is_ascii_alphabetic) { s.get(1..)?.to_string() } else { s };
+    // A link to another machine or a device is text, judged from the link alone, with the rule
+    // design paths follow. A server the user allowed in Preferences is reached as a design link
+    // to it would be.
+    if solidcraft_engine::io::vfs::design_path_refusal(&s, None).is_some() {
+        return None;
+    }
     Some(Path::new(&s).to_path_buf())
 }
 
@@ -210,6 +216,29 @@ mod tests {
         assert!(files_in_text("file://host/share/a.png").is_empty(), "another machine's file");
         assert!(files_in_text("file:///a/%zz").is_empty(), "a bad escape");
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Links that lead to another machine or to a device are not files: the link's text decides,
+    /// so nothing on the disk or the network is asked whether they exist.
+    #[test]
+    fn links_to_other_machines_and_devices_are_text() {
+        for link in [
+            "file:////server/share/a.png",
+            "file:///%5C%5Cserver%5Cshare%5Ca.png",
+            "file:///\\\\server\\share\\a.png",
+            "file:////./pipe/a",
+            "file:////?/UNC/server/share/a.png",
+            "file://localhost//server/share/a.png",
+            "file:///%2F%2Fserver/share/a.png",
+            "file:////%3F/UNC/server/share/a.png",
+        ] {
+            let rest = link.strip_prefix("file://").unwrap_or(link);
+            assert_eq!(uri_path(rest), None, "{link}");
+            assert!(files_in_text(link).is_empty(), "{link}");
+        }
+        // A local drive still reads as a file's path.
+        assert_eq!(uri_path("/C:/Users/a/part.step"), Some(PathBuf::from("C:/Users/a/part.step")));
+        assert_eq!(uri_path("/home/a/part.step"), Some(PathBuf::from("/home/a/part.step")));
     }
 
     #[test]

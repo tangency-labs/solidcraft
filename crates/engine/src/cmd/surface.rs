@@ -432,6 +432,16 @@ fn surface_sweep(s: &mut Session, p: &Value) -> Result<Value> {
     let sketch = feature_sketch(s, p, cmd)?;
     let (profiles, curves) = sheet_inputs(p, cmd)?;
     let (path_sketch, path, path_body, path_edges) = super::features::sweep_path(s, p, cmd)?;
+    // A surface sweep's path is the curves of one sketch (its own format keeps plain ids);
+    // a curve of another sketch is refused.
+    let path = path
+        .into_iter()
+        .map(|e| match e {
+            solidcraft_doc::PathEntry::OfPathSketch(id) => Ok(id),
+            solidcraft_doc::PathEntry::OfSketch { sketch, curve } if sketch.0 == path_sketch => Ok(curve),
+            _ => Err(bad(cmd, "the surface sweep's path curves must be in one sketch")),
+        })
+        .collect::<Result<Vec<_>>>()?;
     if path_body.is_none() && (path.is_empty() || path.len() > 1000) {
         return Err(bad(cmd, "`path` must list 1…1000 curve ids"));
     }
@@ -1988,6 +1998,39 @@ mod tests {
         }
     }
 
+    /// With a body hidden, the shown scope an automatic cut names leaves out a shown surface, so
+    /// the cut runs instead of being refused for a named surface (#18083).
+    #[test]
+    fn shown_scope_skips_surface_bodies() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+        sheet(&mut s, "XY", "Sheet", [0.0, 0.0], [10.0, 10.0]);
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [30, 0, 0], "operation": "new", "body_name": "Small"}));
+        run(&mut s, "browser.visibility", json!({"items": ["Small"], "visible": false}));
+        assert_eq!(crate::shown_scope(&s), Some(vec!["Block".to_string()]));
+        let shown = crate::shown_scope(&s).unwrap();
+        run(&mut s, "solid.cylinder", json!({"radius": 2, "height": 12, "base": [5, 5, -1], "operation": "cut", "targets": shown}));
+        assert!((volume(&s, "Block") - (1000.0 - 40.0 * std::f64::consts::PI)).abs() < 1e-6);
+    }
+
+    /// A hidden solid with only a surface shown: an automatic cut is refused, never reaching the
+    /// hidden body (an empty participant list would mean every body).
+    #[test]
+    fn automatic_cut_with_only_a_surface_shown_leaves_hidden_solid_alone() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+        sheet(&mut s, "XY", "Sheet", [20.0, 0.0], [30.0, 10.0]);
+        run(&mut s, "browser.visibility", json!({"items": ["Block"], "visible": false}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Hole"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [2, 2], "p1": [5, 5]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let before = s.doc.clone();
+        let error = s.execute("solid.extrude", &json!({"sketch": "Hole", "distance": 3, "operation": "cut"})).unwrap_err().to_string();
+        assert!(error.contains("no shown solid body"), "{error}");
+        assert_eq!(s.doc, before);
+        assert!((volume(&s, "Block") - 1000.0).abs() < 1e-6);
+    }
+
     /// Sheet-metal machining preserves separate surfaces before cutting any ordinary solids.
     #[test]
     fn automatic_solid_cuts_preserve_surfaces_beside_sheet_metal() {
@@ -2045,7 +2088,7 @@ mod tests {
             run(&mut s, "solid.pattern.rectangular", json!({"features": ["Half"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 10}));
             let state = s.world_state().unwrap();
             assert!(state.body("Plate").is_none());
-            assert!(state.sheets.is_empty());
+            assert!(state.surface_sheets.is_empty());
             assert_eq!(state.bodies.len(), usize::from(with_surface));
             assert_eq!(state.body("Sheet").map(|b| b.body.record()), surface.as_ref());
         }
@@ -2150,6 +2193,39 @@ mod tests {
         }
     }
 
+    /// #12326: a Thicken join that names no target joins the solid it meets. The surface it
+    /// thickens and every other surface body are no solids to join, and stay as they were.
+    #[test]
+    fn automatic_thicken_joins_skip_surface_bodies() {
+        for targets in [json!([]), json!(["*"])] {
+            let mut s = Session::default();
+            run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+            // The slab is 16 x 6 x 2 = 192, half of it (8 x 6 x 2 = 96) inside the block.
+            sheet(&mut s, "XY", "Sheet", [2.0, 2.0], [18.0, 8.0]);
+            sheet(&mut s, "XY", "Other", [12.0, 3.0], [16.0, 7.0]);
+            let surface = s.world_state().unwrap().body("Sheet").unwrap().body.clone();
+            let other = s.world_state().unwrap().body("Other").unwrap().body.clone();
+            run(&mut s, "surface.thicken", json!({"bodies": ["Sheet"], "thickness": 2, "operation": "join", "targets": targets}));
+            assert!((volume(&s, "Block") - 1096.0).abs() < 1e-6, "{targets}: {}", volume(&s, "Block"));
+            let state = s.world_state().unwrap();
+            assert_eq!(state.bodies.len(), 3, "{targets}");
+            assert_eq!(state.body("Sheet").unwrap().body.record(), surface.record());
+            assert_eq!(state.body("Other").unwrap().body.record(), other.record());
+        }
+        // With surfaces only there is nothing to join: the slab is a new body, as it is in an
+        // empty design.
+        let mut s = Session::default();
+        sheet(&mut s, "XY", "Sheet", [2.0, 2.0], [18.0, 8.0]);
+        let surface = s.world_state().unwrap().body("Sheet").unwrap().body.clone();
+        run(&mut s, "surface.thicken", json!({"bodies": ["Sheet"], "thickness": 2, "operation": "join"}));
+        let state = s.world_state().unwrap();
+        assert_eq!(state.body("Sheet").unwrap().body.record(), surface.record());
+        let solids: Vec<_> = state.bodies.iter().filter(|b| b.is_closed()).collect();
+        assert_eq!((state.bodies.len(), solids.len()), (2, 1));
+        let made = solidcraft_kernel::measure(&solids[0].body).unwrap().volume;
+        assert!((made - 192.0).abs() < 1e-6, "{made}");
+    }
+
     /// A 10 mm box and, through it, a surface tube (an open cylinder wall).
     fn box_and_tube(s: &mut Session) {
         run(s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
@@ -2173,6 +2249,47 @@ mod tests {
             assert!(st.body("Tube").unwrap().body.is_surface());
             assert!((volume(&s, "Block") - 1000.0).abs() < 1e-6);
         }
+    }
+
+    /// #18708: a Combine cut or intersect with an open (non-closed) tool body is refused up front
+    /// with an informative message instead of failing in kernel export; bodies are left unchanged.
+    #[test]
+    fn a_cut_with_an_open_tool_body_is_refused_and_names_it() {
+        let mut s = Session::default();
+        box_and_tube(&mut s);
+        let err = match s.execute("solid.combine", &json!({"target": "Block", "tools": ["Tube"], "operation": "cut"})) {
+            Err(e) => e.to_string(),
+            Ok(_) => String::new(),
+        };
+        assert!(
+            err.contains(
+                "\"Tube\" isn't a closed solid (it has open edges), so it can't cut. Close it with Stitch, or use a closed body as the tool"
+            ),
+            "{err}"
+        );
+        let Some(st) = s.world_state().ok() else { panic!("world state") };
+        assert!(st.body("Tube").is_some_and(|b| b.body.is_surface()));
+        assert!((volume(&s, "Block") - 1000.0).abs() < 1e-6);
+    }
+
+    /// #18708: a Combine intersect with an open tool body is refused up front and names the tool.
+    #[test]
+    fn an_intersect_with_an_open_tool_body_is_refused_and_names_it() {
+        let mut s = Session::default();
+        box_and_tube(&mut s);
+        let err = match s.execute("solid.combine", &json!({"target": "Block", "tools": ["Tube"], "operation": "intersect"})) {
+            Err(e) => e.to_string(),
+            Ok(_) => String::new(),
+        };
+        assert!(
+            err.contains(
+                "\"Tube\" isn't a closed solid (it has open edges), so it can't intersect. Close it with Stitch, or use a closed body as the tool"
+            ),
+            "{err}"
+        );
+        let Some(st) = s.world_state().ok() else { panic!("world state") };
+        assert!(st.body("Tube").is_some_and(|b| b.body.is_surface()));
+        assert!((volume(&s, "Block") - 1000.0).abs() < 1e-6);
     }
 
     /// #15913 negative control: a join of overlapping solids still makes one body of the union.

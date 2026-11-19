@@ -23,7 +23,7 @@
 //! | [`is_connected_to`]                         | `SmVertex::IsConnectedTo`                        |
 //! | [`are_edges_tangent`]                       | `SmVertex::AreEdgesTangent`                      |
 //! | [`is_topological_vertex`], [`is_on_pole`]   | `SmVertex::IsTopologicalVertex`, `IsOnPole`      |
-//! | [`is_on_face_seam`]                         | none (not upstream, below)                       |
+//! | [`is_on_face_seam`], [`ends_seam_edge`], [`seam_edge`], [`is_seam_edge`] | none (not upstream, below) |
 //! | [`is_wire_vertex`], [`is_lamina_vertex`]    | `SmVertex::IsWireVertex`, `IsLaminaVertex`       |
 //! | [`is_shell_vertex`], [`is_loop_vertex`]     | `SmVertex::IsShellVertex`, `IsLoopVertex`        |
 //! | [`max_up_dim_gap_3d`], [`max_gap_3d`], [`VertexGap`], [`HeldGap`] | `SmVertex::GetMaxUpDimGap3d`, `GetMaxGap3d` (the `SmGap*` results) |
@@ -622,6 +622,27 @@ pub fn edges(b: &Brep, v: VertexId, face: Option<FaceId>) -> Result<Vec<EdgeId>>
     Ok(out)
 }
 
+/// Not upstream: whether `face` surrounds the vertex on every side: the vertex has edges and
+/// each is a seam of `face` ([`crate::topology::edge::face_on_both_sides`]), as a sphere's
+/// pole. Such a vertex bounds no material; it is a point where the surface's
+/// parametrisation degenerates (docs/booleans.md, "Seams and poles").
+///
+/// # Errors
+///
+/// Those of [`edges`] and of the edge use queries.
+pub fn inside_face(b: &Brep, v: VertexId, face: FaceId) -> Result<bool> {
+    let all = edges(b, v, None)?;
+    if all.is_empty() {
+        return Ok(false);
+    }
+    for e in all {
+        if !crate::topology::edge::face_on_both_sides(b, e, face)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 /// `GetCommonEdges`: the edges of [`edges`] (on `face` when given) that join this
 /// vertex and `other` (closed edges included).
 ///
@@ -865,6 +886,53 @@ pub fn is_on_face_seam(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bool> {
         if vertexuse::is_on_seam_of_face(k, b, vu)? {
             return Ok(true);
         }
+    }
+    Ok(false)
+}
+
+/// Not upstream: whether the vertex ends a seam edge ([`seam_edge`]).
+///
+/// # Errors
+///
+/// Those of [`seam_edge`].
+pub fn ends_seam_edge(b: &Brep, v: VertexId) -> Result<bool> {
+    Ok(seam_edge(b, v)?.is_some())
+}
+
+/// Not upstream: the first seam edge the vertex ends ([`is_seam_edge`]).
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; those of [`edges`] and [`is_seam_edge`].
+pub fn seam_edge(b: &Brep, v: VertexId) -> Result<Option<EdgeId>> {
+    for e in edges(b, v, None)? {
+        if is_seam_edge(b, e)? {
+            return Ok(Some(e));
+        }
+    }
+    Ok(None)
+}
+
+/// Not upstream: whether one face use runs along the edge twice (the two sides of the seam
+/// of the face's closed surface). Read from the topology alone, so it holds for the B-rep as
+/// it stands, before any geometry is measured.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; those of the edge use queries.
+pub fn is_seam_edge(b: &Brep, e: EdgeId) -> Result<bool> {
+    let mut uses: Vec<FaceuseId> = Vec::new();
+    for eu in crate::topology::edge::edgeuses(b, e, None, None)? {
+        if !eu1::is_loop_edgeuse(b, eu)? {
+            continue;
+        }
+        let Some(fu) = eu1::faceuse(b, eu)? else {
+            continue;
+        };
+        if uses.contains(&fu) {
+            return Ok(true);
+        }
+        uses.push(fu);
     }
     Ok(false)
 }

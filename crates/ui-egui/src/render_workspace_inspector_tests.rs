@@ -939,7 +939,13 @@ fn native_cpu_legacy_dimensions_remain_checkable_renderable_and_saveable_with_bo
     for (width, height, progressive, identity_output) in [(16384, 1, false, false), (1, 16384, true, true), (8192, 8192, true, false)] {
         let mut h = fixture();
         h.app.render_workspace.view.live_paused = true;
-        h.app.session.set_render_job_host(Some(CpuHost::for_platform().unwrap())).unwrap();
+        let host = CpuHost::for_platform().unwrap();
+        h.app.session.set_render_job_host(Some(host.clone())).unwrap();
+        h.app.render_workspace.image_host = Some(host);
+        if super::super::image_host(&h.app, ImageMethod::CpuRaytrace).is_err() {
+            eprintln!("legacy native dimension test requires raytrace-cpu");
+            return;
+        }
         let mut options = json!({"budget":"workstation","threads":1});
         if progressive {
             options["progressive"] = json!({"samples_per_pixel":32,"seed":81});

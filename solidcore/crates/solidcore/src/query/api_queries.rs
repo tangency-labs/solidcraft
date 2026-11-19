@@ -20,6 +20,7 @@
 //! | [`edge_plane_crossings`] | not upstream: where an edge, over its own interval, meets a plane |
 //! | [`edge_crossing_on_face`] | not upstream: where a curve meets an edge, solved on one of the edge's faces |
 //! | [`closest_to_members`], [`edge_curve_copy`] | not upstream: `ShapeCurveSolve`/`ShapePointSolve` minimum of a curve or point against faces and edges |
+//! | [`closest_between_faces`] | not upstream: selected-shape minimum on trimmed faces and their boundaries |
 //! | [`point_distance`], [`vertex_distance`], [`edge_face_gap_samples`], [`edgeuse_face_frame`] | not upstream: certified distances (the last on `SmCrvSrfGapFunction`'s samples) |
 //! | [`box_max_distance_to_point`] | not upstream: [`Extent3d::max_distance_to_point`] of a box given by two corners |
 //! | `count_contained_samples`, `edge_piece_points`, `point_in_solid`, `target_curve_crossings` (private) | `sm_CountContainedSamples`, `sm_PointInSolid`, its `BrepCurveSolve` |
@@ -63,7 +64,7 @@ use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::intersect::topology_solver::p1::{CurveRef, TopologyObjects, TopologySolver};
 use crate::intersect::topology_solver::p2::TopologySolveOptions;
 use crate::kernel::Kernel;
-use crate::math::{Point2, Point3, Vec3, EFF_ZERO};
+use crate::math::{Point2, Point3, Vec2, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_curve::BoundingBoxRequest;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::math::MODEL_TOL;
@@ -1021,13 +1022,13 @@ pub enum Probe<'c> {
     Point(Point3),
 }
 
-/// The closest points of a [`Probe`] and some faces and edges of a B-rep
-/// ([`closest_to_members`]).
+/// The closest points of selected exact geometry ([`closest_to_members`],
+/// [`closest_between_faces`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MembersClosest {
     /// The distance the solver reached between the two points.
     pub distance: f64,
-    /// The point of the probe: on its curve, within its interval, or the point itself.
+    /// The point of the probe, or the first set of trimmed faces.
     pub on_probe: Point3,
     /// The point of the faces (as they are trimmed) and edges (over their intervals).
     pub on_members: Point3,
@@ -1113,6 +1114,56 @@ pub fn closest_to_members(
     }
     Ok(MembersClosest {
         distance: solution.start.solution_value,
+        on_probe,
+        on_members,
+    })
+}
+
+/// The minimum distance between two sets of trimmed faces of one B-rep, including their
+/// boundary edges and vertices. Both witnesses are evaluated on the exact geometry named by
+/// the topology solver's solution; no tessellation supplies a point or limits the search.
+///
+/// # Errors
+/// Those of shape construction and the topology solver; [`SolidError::query_failed`] when
+/// there is no solution or either witness does not evaluate to a finite point.
+pub fn closest_between_faces(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    id: BrepId,
+    first: &[FaceId],
+    second: &[FaceId],
+) -> Result<MembersClosest> {
+    let first: Vec<FaceKey> = first.iter().map(|f| (id, *f)).collect();
+    let second: Vec<FaceKey> = second.iter().map(|f| (id, *f)).collect();
+    let first = Shape::new(k, &(id, &*brep), &[], &first, &[], &[])?;
+    let second = Shape::new(k, &(id, &*brep), &[], &second, &[], &[])?;
+    let query = qbrep::BrepQuery::of_brep(brep);
+    let identity = query.effective_identity();
+    let objects = qbrep::LiveBrepObjects::new(brep, &identity, None)?;
+    let solutions = TopologySolver::shape_shape_solve(
+        k,
+        &objects,
+        &first,
+        &second,
+        solve_options(k, SolutionRequested::Single),
+    )?;
+    let solution = solutions
+        .as_slice()
+        .first()
+        .ok_or_else(|| SolidError::query_failed(OP, "no closest points were found"))?;
+    let on_probe = solution_point(k, &objects, solution, 0)?;
+    let on_members = solution_point(k, &objects, solution, 1)?;
+    let distance = solution.start.solution_value;
+    let evaluated =
+        |p: Point3| !p.is_undef() && p.x.is_finite() && p.y.is_finite() && p.z.is_finite();
+    if !(distance.is_finite() && distance >= 0.0 && evaluated(on_probe) && evaluated(on_members)) {
+        return Err(SolidError::query_failed(
+            OP,
+            "a closest point does not evaluate",
+        ));
+    }
+    Ok(MembersClosest {
+        distance,
         on_probe,
         on_members,
     })
@@ -1646,6 +1697,90 @@ pub fn point_distance(a: Point3, b: Point3) -> Result<Distance> {
     })
 }
 
+/// A point set's arithmetic centroid and mean Euclidean distance from that centroid.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PointSetSummary {
+    /// The arithmetic mean of the input points.
+    pub centroid: Point2,
+    /// The arithmetic mean of each point's distance from `centroid`.
+    pub mean_distance: f64,
+}
+
+/// The arithmetic centroid and mean radial distance of a non-empty point set.
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for an empty set, a non-finite point, or a non-finite
+/// intermediate or result.
+pub fn point_set_summary(points: &[Point2]) -> Result<PointSetSummary> {
+    if points.is_empty() {
+        return Err(SolidError::invalid_input(OP, "empty point set"));
+    }
+    if points.iter().any(|p| !p.x.is_finite() || !p.y.is_finite()) {
+        return Err(SolidError::invalid_input(OP, "non-finite point"));
+    }
+
+    let (mut x, mut y) = (0.0, 0.0);
+    for point in points {
+        x += point.x;
+        y += point.y;
+        if !x.is_finite() || !y.is_finite() {
+            return Err(SolidError::invalid_input(OP, "point centroid overflows"));
+        }
+    }
+    let count = points.len() as f64;
+    let centroid = Point2::new(x / count, y / count);
+    if !centroid.x.is_finite() || !centroid.y.is_finite() {
+        return Err(SolidError::invalid_input(
+            OP,
+            "point centroid is not finite",
+        ));
+    }
+
+    let mut total_distance = 0.0;
+    for point in points {
+        let distance = point.distance(centroid);
+        if !distance.is_finite() {
+            return Err(SolidError::invalid_input(OP, "point distance overflows"));
+        }
+        total_distance += distance;
+        if !total_distance.is_finite() {
+            return Err(SolidError::invalid_input(
+                OP,
+                "mean point distance overflows",
+            ));
+        }
+    }
+    let mean_distance = total_distance / count;
+    if !mean_distance.is_finite() {
+        return Err(SolidError::invalid_input(
+            OP,
+            "mean point distance is not finite",
+        ));
+    }
+    Ok(PointSetSummary {
+        centroid,
+        mean_distance,
+    })
+}
+
+/// The vector from point `from` to point `to`.
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for a non-finite input or a displacement that overflows.
+pub fn point_displacement(from: Point2, to: Point2) -> Result<Vec2> {
+    if !from.x.is_finite() || !from.y.is_finite() || !to.x.is_finite() || !to.y.is_finite() {
+        return Err(SolidError::invalid_input(OP, "non-finite point"));
+    }
+    let displacement = to - from;
+    if !displacement.x.is_finite() || !displacement.y.is_finite() {
+        return Err(SolidError::invalid_input(
+            OP,
+            "point displacement overflows",
+        ));
+    }
+    Ok(displacement)
+}
+
 /// The largest distance from `point` to a point of the box with opposite corners `a`
 /// and `b`: to its farthest corner ([`Extent3d::max_distance_to_point`]; not upstream).
 ///
@@ -1717,7 +1852,7 @@ pub fn edgeuse_face_frame(
             return Err(SolidError::Unsupported {
                 operation: OP,
                 reason: "a faceuse whose orientation is unknown has no proved sense",
-            })
+            });
         }
     };
     let at = evaluate_binormal(k, brep, eu, parameter, false, &BinormalOptions::default())?;
@@ -1932,6 +2067,43 @@ mod tests {
     use crate::nurbs::math::CPoint;
     use crate::nurbs::srf_basic::Surface as NlSurface;
 
+    /// Opposite faces of a 1 × 2 × 3 block are 3 apart. Adjacent faces meet on their
+    /// shared boundary; reversing the selected sets preserves the distance and ownership.
+    #[test]
+    fn closest_between_faces_respects_selected_faces_and_their_boundaries() {
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
+                .unwrap();
+        let faces = get_faces(&b).unwrap();
+        let at_z = |z: f64| {
+            *faces
+                .iter()
+                .find(|&&f| {
+                    let box_ = face_bounding_box(&k, &b, f, true).unwrap();
+                    (box_.min().z - z).abs() <= 1e-9 && (box_.max().z - z).abs() <= 1e-9
+                })
+                .unwrap()
+        };
+        let (bottom, top) = (at_z(0.0), at_z(3.0));
+        let side = *faces.iter().find(|&&f| f != bottom && f != top).unwrap();
+        let id = BrepId::from_index(0);
+        for (first, second, distance) in [(bottom, top, 3.0), (top, bottom, 3.0), (top, side, 0.0)]
+        {
+            let c = closest_between_faces(&mut k, &mut b, id, &[first], &[second]).unwrap();
+            assert!((c.distance - distance).abs() <= 1e-9, "{c:?}");
+            assert!(
+                (c.on_probe.distance(c.on_members) - distance).abs() <= 1e-9,
+                "{c:?}"
+            );
+            for (f, p) in [(first, c.on_probe), (second, c.on_members)] {
+                let near =
+                    closest_to_members(&mut k, &mut b, id, &[f], &[], Probe::Point(p)).unwrap();
+                assert!(near.distance <= 1e-9, "{c:?}: {near:?}");
+            }
+        }
+    }
+
     /// Both call sites of [`faces_closest_distances_within`] read a kernel status as no answer
     /// about that one pair, and keep every other pair's answer. The status paths are not
     /// reachable from geometry these tests can build, so the step is made to fail
@@ -2115,6 +2287,81 @@ mod tests {
         assert!(point_distance(Point3::ZERO, nan).is_err());
         let inf = Point3::new(0.0, f64::INFINITY, 0.0);
         assert!(point_distance(inf, Point3::ZERO).is_err());
+    }
+
+    #[test]
+    fn point_set_summary_uses_the_arithmetic_mean_radius() {
+        let points = [
+            Point2::new(0.0, 0.0),
+            Point2::new(6.0, 0.0),
+            Point2::new(0.0, 6.0),
+        ];
+        let summary = point_set_summary(&points).unwrap();
+        assert_eq!(summary.centroid, Point2::new(2.0, 2.0));
+        let expected = (2.0 * 2.0_f64.sqrt() + 4.0 * 5.0_f64.sqrt()) / 3.0;
+        assert!((summary.mean_distance - expected).abs() <= 2.0 * f64::EPSILON * expected);
+        assert_ne!(
+            summary.mean_distance, 4.0,
+            "the RMS radius is not the mean radius"
+        );
+
+        let moved = [
+            Point2::new(0.0, 0.0),
+            Point2::new(6.0, 0.0),
+            Point2::new(0.0, 12.0),
+        ];
+        let moved_summary = point_set_summary(&moved).unwrap();
+        assert_eq!(moved_summary.centroid, Point2::new(2.0, 4.0));
+        let moved_expected =
+            (2.0 * 5.0_f64.sqrt() + 4.0 * 2.0_f64.sqrt() + 2.0 * 17.0_f64.sqrt()) / 3.0;
+        assert!(
+            (moved_summary.mean_distance - moved_expected).abs()
+                <= 2.0 * f64::EPSILON * moved_expected
+        );
+    }
+
+    #[test]
+    fn point_set_summary_accepts_single_and_duplicate_points() {
+        let one = Point2::new(3.0, -4.0);
+        assert_eq!(
+            point_set_summary(&[one]).unwrap(),
+            PointSetSummary {
+                centroid: one,
+                mean_distance: 0.0,
+            }
+        );
+        assert_eq!(
+            point_set_summary(&[one, one, one]).unwrap(),
+            PointSetSummary {
+                centroid: one,
+                mean_distance: 0.0,
+            }
+        );
+    }
+
+    #[test]
+    fn point_set_summary_refuses_empty_non_finite_and_overflowing_sets() {
+        assert!(point_set_summary(&[]).is_err());
+        assert!(point_set_summary(&[Point2::new(f64::NAN, 0.0)]).is_err());
+        assert!(point_set_summary(&[Point2::new(0.0, f64::INFINITY)]).is_err());
+        assert!(
+            point_set_summary(&[Point2::new(f64::MAX, 0.0), Point2::new(f64::MAX, 0.0),]).is_err()
+        );
+        assert!(
+            point_set_summary(&[Point2::new(-f64::MAX, 0.0), Point2::new(f64::MAX, 0.0),]).is_err()
+        );
+    }
+
+    #[test]
+    fn point_displacement_is_from_first_point_to_second_and_refuses_bad_values() {
+        assert_eq!(
+            point_displacement(Point2::new(2.0, 2.0), Point2::new(5.0, 6.0)).unwrap(),
+            Vec2::new(3.0, 4.0)
+        );
+        assert!(point_displacement(Point2::new(f64::NAN, 0.0), Point2::ZERO).is_err());
+        assert!(
+            point_displacement(Point2::new(-f64::MAX, 0.0), Point2::new(f64::MAX, 0.0),).is_err()
+        );
     }
 
     #[test]
