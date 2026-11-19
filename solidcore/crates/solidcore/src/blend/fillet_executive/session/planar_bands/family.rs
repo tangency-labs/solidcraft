@@ -357,9 +357,8 @@ pub(super) fn feet(
             (band.interval.max(), edge::end_vertex(target, band.edge)?),
         ] {
             let endpoint = band.curve.evaluate_point(k, parameter)?;
-            let vertex = vertex.ok_or_else(|| {
-                SolidError::blend_band_input_missing(OP, BandInput::LineEndpoint)
-            })?;
+            let vertex = vertex
+                .ok_or_else(|| SolidError::blend_band_input_missing(OP, BandInput::LineEndpoint))?;
             if !endpoint_cap(k, target, band, vertex, inward(k, band, endpoint)?, blended)? {
                 forbidden.push(family.cap(foot, endpoint, edge::tolerance(target, band.edge)?)?);
             }

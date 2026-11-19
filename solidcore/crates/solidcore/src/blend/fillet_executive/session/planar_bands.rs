@@ -163,7 +163,9 @@ fn band(target: &Brep, solver: &SolverObject, rail: usize) -> Result<Option<Band
         1 => 0,
         _ => return Err(SolidError::invalid_input(OP, "rail index out of range")),
     };
-    let use_ = base.edgeuse(rail)?.ok_or_else(|| missing(BandInput::EdgeUse))?;
+    let use_ = base
+        .edgeuse(rail)?
+        .ok_or_else(|| missing(BandInput::EdgeUse))?;
     let face = eu::face(target, use_)?.ok_or_else(|| missing(BandInput::SharedFace))?;
     let own = base
         .surface(rail)?
@@ -208,8 +210,8 @@ fn band(target: &Brep, solver: &SolverObject, rail: usize) -> Result<Option<Band
         return Err(SolidError::invalid_input(OP, "invalid constant band width"));
     }
     let edge = eu::edge(target, use_)?.ok_or_else(|| missing(BandInput::BlendedEdge))?;
-    let curve =
-        edge::evaluation_curve(target, edge)?.ok_or_else(|| missing(BandInput::BlendedEdgeCurve))?;
+    let curve = edge::evaluation_curve(target, edge)?
+        .ok_or_else(|| missing(BandInput::BlendedEdgeCurve))?;
     Ok(Some(Band {
         edge,
         face,
