@@ -5,18 +5,17 @@
 //! about the centroid); a circle's elliptical dome is the half-ellipsoid, a circle's spherical
 //! dome the spherical cap.
 
-use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI, SQRT_2};
+use std::f64::consts::{FRAC_PI_2, PI};
 
 use solidcore::geom::extent3d::Extent3d;
 use solidcore::kernel::Kernel;
 use solidcore::query::api_queries::face_bounding_box;
 use solidcore::topology::brep::dome::{DomeRefusal, DomeShape};
-use solidcore_record::brep::Curve;
 
 use crate::boolean::boolean;
 use crate::dome::dome;
 use crate::session;
-use crate::sweep::{extrude, DraftCorner};
+use crate::sweep::{extrude, Curve, DraftCorner};
 use crate::{make_box, make_cylinder, Body, BooleanOp, Error, Order};
 
 fn all_fixes() {
@@ -70,24 +69,16 @@ fn polygon(points: &[[f64; 2]], z: f64) -> Vec<Curve> {
         .collect()
 }
 
-/// The circular arc about `centre` of radius `r` from angle `from` counter-clockwise by a right
-/// angle, as the rational quadratic it is (weights 1, 1/√2, 1), at height `z`.
+/// The circular arc of radius `r` about `centre` from angle `from` counter-clockwise by a right
+/// angle, at height `z`.
 fn quarter_arc(centre: [f64; 2], r: f64, from: f64, z: f64) -> Curve {
-    let at = |a: f64, s: f64| [centre[0] + s * a.cos(), centre[1] + s * a.sin()];
-    let (p0, p1, p2) = (
-        at(from, r),
-        at(from + FRAC_PI_4, r * SQRT_2),
-        at(from + FRAC_PI_2, r),
-    );
-    let w = FRAC_PI_4.cos();
-    let homogeneous = [
-        [p0[0], p0[1], z, 1.0],
-        [p1[0] * w, p1[1] * w, z * w, w],
-        [p2[0], p2[1], z, 1.0],
-    ];
-    Curve::RationalSpline {
-        knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
-        homogeneous: homogeneous.to_vec(),
+    Curve::Arc {
+        center: [centre[0], centre[1], z],
+        axis: [0.0, 0.0, 1.0],
+        reference: [1.0, 0.0, 0.0],
+        radius: r,
+        start: from,
+        end: from + FRAC_PI_2,
     }
 }
 
