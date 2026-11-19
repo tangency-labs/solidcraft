@@ -44,7 +44,6 @@ pub mod delete;
 pub mod design_properties;
 pub mod design_tab_prefs;
 pub mod design_view_ui;
-pub mod design_views;
 mod dialog_descriptor;
 pub mod dialogs;
 pub mod dialogs_appearance;
@@ -384,6 +383,11 @@ mod view_confirm;
 pub mod view_gizmo;
 mod view_memory;
 pub mod view_pick;
+mod view_setups;
+mod view_setups_ui;
+mod view_tiles;
+mod view_window_drag;
+pub mod view_windows;
 pub mod viewport;
 mod viewport_details;
 mod viewport_layout;
@@ -960,6 +964,8 @@ pub struct SolveApp {
     pub(crate) frame_watch: frame_watch::Watch,
     /// The other open designs (tabs).
     pub docs: documents::Documents,
+    view_window_drag: view_window_drag::State,
+    view_windows: view_windows::Windows,
     /// Last OS title inputs; unchanged frames allocate nothing and send no title command.
     pub(crate) window_title: documents::WindowTitle,
     /// The language the installed font fallback chain is ordered for (`ui_kit::type_face::fallback_order`);
@@ -1197,6 +1203,8 @@ impl SolveApp {
             open_meshing_next: false,
             frame_watch: Default::default(),
             docs: documents::Documents::default(),
+            view_window_drag: view_window_drag::State::default(),
+            view_windows: view_windows::Windows::default(),
             window_title: Default::default(),
             applied_fonts_language: "en".into(),
             applied_ui_font: String::new(),
@@ -1695,7 +1703,12 @@ impl SolveApp {
             // `queued`: it waits for the end of the agent's turn.
             Some("component.edit_in_place") => r.and_then(|v| edit_in_place::command_ran(self, &v).map(|queued| with_queued(v, queued))),
             Some("component.finish_edit") => r.and_then(|v| edit_in_place::finish_command(self).map(|queued| with_queued(v, queued))),
+            Some(layout) if layout.starts_with("tab.layout.") => r.and_then(|v| view_setups::command(self, layout, v)),
+            Some("view.set_compass") => r.and_then(|v| documents::set_compass(self, v)),
             Some(view) if view.starts_with("tab.view.") => r.and_then(|v| documents::view_command(self, view, v)),
+            Some(window) if window.starts_with("tab.window.") || window == "window.options.use_as_default" => {
+                r.and_then(|v| view_windows::command(self, window, v))
+            }
             _ => r,
         };
         // A grant taken back here that the shared store still holds is not taken back: say so.
@@ -2355,6 +2368,18 @@ impl SolveApp {
         }
         if render_workspace::start_interactive(self, id) {
             return;
+        }
+        match id {
+            "tab.view.pop_out" => {
+                let view = self.docs.views.active().id;
+                crate::design_view_ui::move_to_window(self, view, json!("new"));
+                return;
+            }
+            "tab.view.move_to_window" => {
+                crate::view_windows::cycle_view(self);
+                return;
+            }
+            _ => {}
         }
         // A display toggle leaves the current modelling tool and camera in place, and the ribbon
         // where it is: F6, the navigation bar and the navigator never went through `start`, so
@@ -4009,6 +4034,24 @@ impl SolveApp {
         control::publish_design(self, &control::DOCUMENT_WATCH);
     }
 
+    /// Input for another viewport of the same app. Shared jobs are serviced by the root window.
+    pub(crate) fn view_window_logic(&mut self, ctx: &egui::Context) {
+        let _language = solidcraft_ui_text::scope(&self.preferences.language);
+        self.now = ctx.input(|i| i.time);
+        self.escape_owner = None;
+        self.esc_handled = false;
+        self.step_view_animation(ctx);
+        ui_kit::install_keyboard_focus(ctx);
+        if self.issue_report.draft.is_none() && self.file_picker.is_none() {
+            panel_runtime::reserve_host_input(self, ctx);
+            if !keymap::capturing(self) {
+                expression_complete::begin_frame(ctx);
+            }
+            sketch_construction::claim_typed_length(self, ctx);
+            toolbar::shortcuts(self, ctx);
+        }
+    }
+
     /// The frame's input before the app reads it: synthetic events, then what is typed while a
     /// capture hides the report waits for it (the control channel's typing too).
     pub fn raw_input_hook(&mut self, raw: &mut egui::RawInput) {
@@ -4146,6 +4189,22 @@ impl SolveApp {
         self.apply_look(ctx);
     }
 
+    /// Release pictures whose views no longer belong to any window. Native hosts call this
+    /// after all child scopes restore the root; Web calls it after its single root UI pass.
+    /// Keeping hidden/live slots avoids consuming their pending CPU scenes a second time.
+    pub fn retain_view_pictures(&mut self, state: Option<&egui_wgpu::RenderState>) {
+        if self.view_windows.is_child() {
+            return;
+        }
+        let mut slots = documents::live_view_picture_slots(self);
+        slots.extend(view_windows::retain_picture_slots(self));
+        if let Some(state) = state
+            && let Some(renderer) = state.renderer.write().callback_resources.get_mut::<solidcraft_viewport_gpu::view::Renderer>()
+        {
+            renderer.retain_views(&slots);
+        }
+    }
+
     /// Lay out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         plugins::tick(self, ui.ctx(), false);
@@ -4169,7 +4228,9 @@ impl SolveApp {
         self.cad_ui(ui, &mut report_input);
         semantic_content::finalize(self, ui.ctx());
         #[cfg(not(target_arch = "wasm32"))]
-        panel_runtime::show_desktop_windows(self, ui.ctx());
+        if !self.view_windows.is_child() {
+            panel_runtime::show_desktop_windows(self, ui.ctx());
+        }
         drop(report_input);
         // After everything else, on every page (the start page too, which returns early from
         // `cad_ui`): the window's edges resize it (#1381).
@@ -4189,6 +4250,7 @@ impl SolveApp {
         self.frame_ms = now_ms() - t0;
         frame_watch::end(self);
         render_workspace::displayed::finish(self, ui.ctx());
+        documents::sync_linked_active(self);
         documents::sync_views(self);
         documents::sync_window_title(self, ui.ctx());
     }
@@ -4213,6 +4275,10 @@ impl SolveApp {
         self.poll_deferred(ui.ctx());
         self.poll_delete_check(ui.ctx());
         timeline::tick_playback(self, ui.ctx());
+        if !self.home.open && view_windows::is_clean(self) {
+            view_windows::show_clean(self, ui);
+            return;
+        }
         if !self.embedded && !self.embed_editor {
             toolbar::app_bar(self, ui);
         }
@@ -4297,25 +4363,36 @@ impl SolveApp {
         // against those footprints; the render domain stays unchanged.
         self.viewport.host_windows = ui_kit::Container::host_window_regions(ui.ctx());
         if let Some(rect) = self.viewport.rect.filter(|rect| rect.is_positive() && rect.is_finite()) {
-            let mut controls = ui.new_child(egui::UiBuilder::new().id_salt("universal_panel_controls").max_rect(rect));
-            controls.set_clip_rect(controls.clip_rect().intersect(rect));
+            if view_tiles::shown(self) {
+                view_tiles::card_controls(self, ui);
+            }
+            let mut controls = view_tiles::controls_ui(ui, self.session.uid, self.docs.views.active().id, rect);
             render_workspace::host_result_overlays(self, &mut controls);
             viewport::show_host_controls(self, &mut controls, rect);
         }
+        view_tiles::placement_overlay(self, ui.ctx());
         self.resolve_fit(ui.ctx());
         panel_runtime::finish_app_host(self, ui);
+        if view_tiles::focus_pressed(self) {
+            ui.ctx().request_repaint();
+        }
+    }
+
+    /// Whether the host can close after queued view preferences have reached disk.
+    pub fn ready_to_quit(&self) -> bool {
+        self.quit_requested && !crate::view_memory::pending()
     }
 
     fn show_workspace(&mut self, ui: &mut egui::Ui) {
         if drawing_workspace::active(self) {
             if dialogs_sheet::flat_active(self) {
-                // This is the existing source manufacturing inspector, not a drawing scene.
                 viewport::show(self, ui);
             } else {
-                // The model view is not drawn, so no shown dimension can be double-clicked.
                 dim_view::set_model_drawn(Vec::new());
                 drawing_workspace::show(self, ui);
             }
+        } else if view_tiles::shown(self) {
+            view_tiles::show(self, ui);
         } else if render_workspace::active(self) {
             // The model view is not drawn, so no shown dimension can be double-clicked.
             dim_view::set_model_drawn(Vec::new());
