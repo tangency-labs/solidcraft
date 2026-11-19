@@ -4152,8 +4152,7 @@ impl SolveApp {
         ui_kit::set_viewport_half_height(ui.ctx(), self.cam.half_height());
         prefs::prepare_blur(self, ui.ctx());
         render_workspace::displayed::begin(self);
-        let blur_source = !self.home.open && !render_workspace::result_active(self);
-        let _blur_scope = self.blur.begin(ui.ctx(), blur_source);
+        let _blur_scope = self.blur.begin(ui.ctx());
         value_step::set_enabled(ui.ctx(), self.preferences.step_values);
         canvas::set_boxes_shown(ui.ctx(), self.preferences.value_boxes_in_view);
         // #9841: dialog buttons answer their first letter only when the preference says so;

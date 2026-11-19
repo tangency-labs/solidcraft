@@ -1273,7 +1273,18 @@ mod tests {
         assert_eq!(hover["outlined"], true);
         h.step(&json!({"click":[x,y]})).unwrap();
         h.frames(3);
-        assert!(crate::scenario::handle_at("drawing:view_selection:project").is_some());
+        // Selected, with its options on the right and nothing floating over the sheet: what the
+        // card offered is in the right-click menu.
+        assert_eq!(h.app.session.selection, [solidcraft_engine::Sel::Drawing { drawing: h.app.session.open_drawing.unwrap(), object: id }]);
+        assert!(crate::scenario::handle_at("drawing:view_selection:project").is_none(), "no card over the view");
+        assert_eq!(inspector_title(&h.app), "Edit View");
+        h.step(&json!({"click":[x,y], "button":"right"})).unwrap();
+        h.frames(3);
+        let menu = crate::context_menu::describe(&h.app);
+        let rows: Vec<&str> = menu["items"].as_array().unwrap().iter().filter_map(|item| item["label"].as_str()).collect();
+        assert_eq!(&rows[..3], ["Edit View", "Projected View", "Delete"], "{rows:?}");
+        crate::context_menu::close(&mut h.app);
+        h.frames(2);
 
         let before = h.app.session.undo.len();
         h.step(&json!({"drag":[[x,y],[x+60.0,y+24.0]]})).unwrap();
@@ -1284,6 +1295,17 @@ mod tests {
         assert_eq!(h.app.session.undo.len(), before + 1);
         h.app.run("edit.undo", json!({})).unwrap();
         assert_eq!(centre(&h), Vec2::new(175.0, 140.0));
+
+        // Delete is the Delete key's, with no question of the drawing's own, and Ctrl+Z undoes it.
+        h.frames(3);
+        h.step(&json!({"click":[x,y]})).unwrap();
+        h.frames(3);
+        h.step(&json!({"key":"Delete"})).unwrap();
+        h.frames(4);
+        assert!(h.app.session.drawing("drawing.inspect").unwrap().view(id).is_none(), "the view is deleted at once");
+        h.step(&json!({"key":"Z", "cmd": true})).unwrap();
+        h.settle();
+        assert!(h.app.session.drawing("drawing.inspect").unwrap().view(id).is_some(), "and Ctrl+Z brings it back");
     }
 
     /// A blank sheet's ribbon offers every tool that has a working panel: a click opens it.
