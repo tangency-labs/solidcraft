@@ -1479,12 +1479,15 @@ pub(crate) fn rounds_into_hollow(body: &Body, picks: &[Vec3], edges: &[usize], r
     for (i, (&e, &r)) in edges.iter().zip(radii).enumerate() {
         let Some(section) = Section::of(&rec, e) else { continue };
         // Only an opening under the round's radius (less the tolerance) refuses it.
-        let Some((_, at)) = section.opening(body, &rec, edges, radii, r - section.tolerance)? else { continue };
+        let Some((limit, at)) = section.opening(body, &rec, edges, radii, r - section.tolerance)? else { continue };
         let pick = picks.get(i).map(|p| format!(" at ({:.3}, {:.3}, {:.3})", p.x, p.y, p.z)).unwrap_or_default();
         return Err(KernelError::TooLarge(format!(
             "the round of radius {r} mm on the edge{pick} would cut through the material behind it into the hollow at ({:.3}, {:.3}, \
-             {:.3}) and open the part",
-            at.x, at.y, at.z
+             {:.3}) and open the part; {}",
+            at.x,
+            at.y,
+            at.z,
+            largest_fit_note("radius", limit)
         )));
     }
     Ok(())
@@ -3263,6 +3266,7 @@ mod tests {
         assert!(matches!(e, KernelError::TooLarge(_)), "{e}");
         let e = e.to_string();
         assert!(e.contains("into the hollow at (0.000, 30.000, 40.000) and open the part"), "{e}");
+        assert_eq!(named_fit(&e), Some(6.828427));
         let (largest, _) = fillet_max(&case, &[top], 7.0, FilletTurn::Mitre).unwrap().unwrap();
         assert!((largest - 6.828).abs() < 1e-9, "{largest}");
 
@@ -3280,6 +3284,23 @@ mod tests {
         assert!(fillet_each(&case, &[top, inside], &[13.8, 7.0], FilletTurn::Mitre).is_ok());
         let e = fillet_each(&case, &[top, inside], &[13.9, 7.0], FilletTurn::Mitre).unwrap_err().to_string();
         assert!(e.contains("into the hollow at"), "{e}");
+    }
+
+    #[test]
+    fn a_round_cutting_into_a_rounded_hollow_names_the_largest_that_fits() {
+        let outer = crate::build::box_solid(Vec3::ZERO, Vec3::new(60.0, 20.0, 50.0)).unwrap();
+        let hollow = crate::build::box_solid(Vec3::new(3.0, -1.0, -1.0), Vec3::new(57.0, 21.0, 47.0)).unwrap();
+        let wall = crate::ops::boolean(&outer, &hollow, crate::BoolOp::Cut).unwrap().unwrap();
+        let inside = [Vec3::new(3.0, 10.0, 47.0), Vec3::new(57.0, 10.0, 47.0)];
+        let wall = fillet(&wall, &inside, 15.0).unwrap();
+        let outside = [Vec3::new(0.0, 10.0, 50.0), Vec3::new(60.0, 10.0, 50.0)];
+        // The outer arc's middle is R(sqrt2 - 1) from the corner; the inner R15's
+        // is 18 sqrt2 - 15. They meet at R = (18 sqrt2 - 15)/(sqrt2 - 1).
+        let why = fillet(&wall, &outside, 30.0).unwrap_err();
+        assert!(matches!(why, KernelError::TooLarge(_)), "{why}");
+        let why = why.to_string();
+        assert!(why.contains("into the hollow at"), "{why}");
+        assert_eq!(named_fit(&why), Some(25.242641));
     }
 
     #[test]
