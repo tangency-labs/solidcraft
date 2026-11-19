@@ -894,8 +894,10 @@ fn check_key_state(key: &SignedPublicKey) -> std::result::Result<(), String> {
         return Err("the signing key was revoked".into());
     }
     // The primary key's expiry: the self-signature says when the key stops being good.
-    let self_signatures: Vec<&pgp::packet::Signature> = key.details.users.iter().flat_map(|user| user.signatures.iter()).collect();
-    if let Some(expiry) = expiry_at(&self_signatures)
+    // A renewed key keeps the old self-signature next to the new one, so the newest
+    // self-signature of each user ID is the one that counts (#15722).
+    let expiry = key.details.users.iter().filter_map(|user| expiry_at(user.signatures.iter())).min();
+    if let Some(expiry) = expiry
         && expiry <= now
     {
         return Err(format!("the signing key expired on {}", day(expiry)));
@@ -906,9 +908,8 @@ fn check_key_state(key: &SignedPublicKey) -> std::result::Result<(), String> {
         if subkey.signatures.iter().any(|signature| signature.typ() == Some(pgp::packet::SignatureType::SubkeyRevocation)) {
             return Err("the signing key's subkey was revoked".into());
         }
-        let bindings: Vec<&pgp::packet::Signature> =
-            subkey.signatures.iter().filter(|signature| signature.typ() == Some(pgp::packet::SignatureType::SubkeyBinding)).collect();
-        if let Some(expiry) = expiry_at(&bindings)
+        let bindings = subkey.signatures.iter().filter(|signature| signature.typ() == Some(pgp::packet::SignatureType::SubkeyBinding));
+        if let Some(expiry) = expiry_at(bindings)
             && expiry <= now
         {
             return Err(format!("the signing key's subkey expired on {}", day(expiry)));
@@ -919,10 +920,16 @@ fn check_key_state(key: &SignedPublicKey) -> std::result::Result<(), String> {
 
 /// The day the key stops being good for, in seconds since the epoch.
 ///
-/// The expiry is the day the self-signature was made plus the time it carries. The
-/// earliest of them is the one that counts.
-fn expiry_at(signatures: &[&pgp::packet::Signature]) -> Option<u64> {
-    signatures.iter().filter_map(|signature| expiry_of(signature.created().map(|created| created.as_secs()), signature.key_expiration_time())).min()
+/// The expiry is the day the self-signature was made plus the time it carries. A key
+/// that was renewed keeps the older self-signature next to the newer one, and it is
+/// the newer one that says how long the key is good for, so the self-signature with
+/// the latest creation time is the one that counts (#15722).
+fn expiry_at<'a>(signatures: impl Iterator<Item = &'a pgp::packet::Signature>) -> Option<u64> {
+    let newest = signatures
+        .filter_map(|signature| signature.created().map(|created| (created.as_secs(), signature)))
+        .max_by_key(|(created, _)| *created)
+        .map(|(_, signature)| signature);
+    newest.and_then(|signature| expiry_of(signature.created().map(|created| created.as_secs()), signature.key_expiration_time()))
 }
 
 /// The day a key stops being good for: the day its self-signature was made plus the
@@ -1022,6 +1029,57 @@ mod tests {
                 subkey.signatures.clear();
             }
             PgpSerialize::to_bytes(&public_key).unwrap()
+        }
+
+        /// The same key with its expiry extended: an older self-signature with a short
+        /// expiry and a newer one with a longer expiry, the way GnuPG leaves a renewed
+        /// key (#15722).
+        fn renewed_public(&self) -> Vec<u8> {
+            let mut public_key = self.key.to_public_key();
+            let id = public_key.details.users[0].id.clone();
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|since| since.as_secs() as u32).unwrap_or_default();
+            let older = self.self_certification(&id, now - 30 * 86_400, 86_400);
+            let newer = self.self_certification(&id, now, 3_650 * 86_400);
+            public_key.details.users[0].signatures = vec![older, newer];
+            PgpSerialize::to_bytes(&public_key).unwrap()
+        }
+
+        /// The same key with a self-signature that has already run out: the key stops
+        /// being good for on the day the self-signature was made plus the time it
+        /// carries, and that day is in the past.
+        fn expired_public(&self) -> Vec<u8> {
+            let mut public_key = self.key.to_public_key();
+            let id = public_key.details.users[0].id.clone();
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|since| since.as_secs() as u32).unwrap_or_default();
+            public_key.details.users[0].signatures = vec![self.self_certification(&id, now - 30 * 86_400, 86_400)];
+            PgpSerialize::to_bytes(&public_key).unwrap()
+        }
+
+        /// A self-signature over the key's user ID, made on a given day and carrying a
+        /// given expiry.
+        fn self_certification(&self, id: &pgp::packet::UserId, created: u32, expiry: u32) -> pgp::packet::Signature {
+            let mut config = pgp::packet::SignatureConfig::v4(
+                pgp::packet::SignatureType::CertPositive,
+                pgp::crypto::public_key::PublicKeyAlgorithm::EdDSALegacy,
+                HashAlgorithm::Sha256,
+            );
+            config.hashed_subpackets = vec![
+                pgp::packet::Subpacket::regular(pgp::packet::SubpacketData::SignatureCreationTime(pgp::types::Timestamp::from_secs(created)))
+                    .unwrap(),
+                pgp::packet::Subpacket::regular(pgp::packet::SubpacketData::KeyExpirationTime(pgp::types::Duration::from_secs(expiry))).unwrap(),
+                pgp::packet::Subpacket::regular(pgp::packet::SubpacketData::IssuerFingerprint(self.key.primary_key.fingerprint())).unwrap(),
+            ];
+            config.unhashed_subpackets =
+                vec![pgp::packet::Subpacket::regular(pgp::packet::SubpacketData::IssuerKeyId(self.key.primary_key.legacy_key_id())).unwrap()];
+            config
+                .sign_certification(
+                    &self.key.primary_key,
+                    self.key.primary_key.public_key(),
+                    &pgp::types::Password::empty(),
+                    pgp::types::Tag::UserId,
+                    id,
+                )
+                .unwrap()
         }
 
         /// The same key with a revocation on it: the parser puts the revocation
@@ -1349,6 +1407,46 @@ mod tests {
         let report = self::report(&revoked).unwrap();
         assert!(matches!(&report.status, ProvenanceStatus::Invalid(reason) if reason.contains("revoked")), "{:?}", report.status);
         assert_eq!(read_design(&revoked).unwrap().name, "Plate");
+    }
+
+    /// #15722: extending the expiry of a key adds a newer self-signature and leaves the
+    /// older, shorter one in the key. The most recent self-signature is the one that says
+    /// how long the key is good for, so a renewed key is not reported as expired.
+    #[test]
+    fn a_renewed_key_is_not_expired() {
+        let signer = TestPgpSigner::new(32);
+        let bytes = signed_pgp(&Document::new("Plate"), &signer, &ProvenanceChain::default());
+        let entries = read_entries(&bytes);
+        let mut envelope = envelope(entries.get(ENTRY).unwrap());
+        let mut wire: OpenPgpWire = decode(&envelope.records[0]).unwrap();
+        wire.key = signer.renewed_public().into();
+        let mut encoded = Vec::new();
+        ciborium::ser::into_writer(&wire, &mut encoded).unwrap();
+        *envelope.records.last_mut().unwrap() = serde_bytes::ByteBuf::from(encoded);
+        let renewed = replace_entry(&bytes, ENTRY, &encode(&envelope));
+        let report = self::report(&renewed).unwrap();
+        assert!(matches!(report.status, ProvenanceStatus::Valid), "{:?}", report.status);
+        assert_eq!(read_design(&renewed).unwrap().name, "Plate");
+    }
+
+    /// #15722: a key whose only self-signature has already run out is still reported
+    /// as expired: the newest self-signature counts, and here it says the key is past
+    /// its expiry.
+    #[test]
+    fn an_expired_key_is_still_expired() {
+        let signer = TestPgpSigner::new(33);
+        let bytes = signed_pgp(&Document::new("Plate"), &signer, &ProvenanceChain::default());
+        let entries = read_entries(&bytes);
+        let mut envelope = envelope(entries.get(ENTRY).unwrap());
+        let mut wire: OpenPgpWire = decode(&envelope.records[0]).unwrap();
+        wire.key = signer.expired_public().into();
+        let mut encoded = Vec::new();
+        ciborium::ser::into_writer(&wire, &mut encoded).unwrap();
+        *envelope.records.last_mut().unwrap() = serde_bytes::ByteBuf::from(encoded);
+        let expired = replace_entry(&bytes, ENTRY, &encode(&envelope));
+        let report = self::report(&expired).unwrap();
+        assert!(matches!(&report.status, ProvenanceStatus::Invalid(reason) if reason.contains("expired")), "{:?}", report.status);
+        assert_eq!(read_design(&expired).unwrap().name, "Plate");
     }
 
     /// #15722: a key stops being good for on the day its self-signature was made plus the
