@@ -1905,8 +1905,8 @@ const BOTTLE_E8_MOVED_ENDS: [[f64; 3]; 3] = [
 ];
 
 /// [`FILLETS`] entry 14 (`bottle` e8 r0.1) under #18162's lazy UV trim raise: the result's
-/// edges 42 and 47 keep 4e-5 where main raises them to 8.05e-5 (the drop's reported fit
-/// error), their end vertices 26, 27 and 38 follow (4.07e-5, 4e-5, 4e-5 against main's
+/// edges 42 and 47 keep 4e-5 where main raises them to 8.05e-5 (twice the drop's reported
+/// fit error), their end vertices 26, 27 and 38 follow (4.07e-5, 4e-5, 4e-5 against main's
 /// 8.05e-5), and edge use 190's trim (face 16, a B-spline) is refit at that tolerance;
 /// nothing else of the result moves (same counts, status, vertex points and edge curves;
 /// Level 2 reports the same two lines as main). Proved here, on the result:
@@ -1915,7 +1915,11 @@ const BOTTLE_E8_MOVED_ENDS: [[f64; 3]; 3] = [
 ///   a proved bound on the distance between the trim's image and the edge curve, is at most
 ///   the tolerance (edge use 190's, the refit one, is 1.45e-5; edge use 170's 3.75e-6); their
 ///   other trim, on the procedural blend, has no exact net to enclose (goldens'
-///   `certify::trim_tolerance` keeps those edges OPEN, `blend-surface`);
+///   `certify::trim_tolerance` keeps those edges OPEN, `blend-surface`): that trim at 4e-5
+///   is the move's one unproved remainder;
+/// - the three end vertices (26, 38 and 27, at 4e-5, 4e-5 and 4.07e-5) each cover the end
+///   of every edge curve that ends there, the distance's rounding (`gamma(8)` of the
+///   coordinates' size, times sqrt 3) counted against the tolerance;
 /// - Level 2 reports exactly the two vertex/face gaps both kernels report (4.71e-5 against
 ///   3.65e-5, unchanged by the raise) and nothing else;
 /// - the mass properties, now and before ([`BOTTLE_E8_BEFORE`]), are each within the case's
@@ -1930,6 +1934,7 @@ fn bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds() {
     use solidcore::blend::fillet_executive::api::fillet_edges;
     use solidcore::mass::integrator::properties::brep_mass_properties_default;
     use solidcore::math::Vec3;
+    use solidcore::nurbs::math::gamma;
     use solidcore::query::brep::{calculate_bounding_box, BoundingBoxOptions};
     use solidcore::query::curve_surface_gap::trim_image_gap_bound_up_to;
     use solidcore::surface::surface::p2::SurfaceKind;
@@ -1989,6 +1994,41 @@ fn bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds() {
         [moved, bounded, blend],
         [2, 2, 2],
         "moved edges, bounded and blend trims"
+    );
+
+    // the end vertices the raise lowers (26, 38 and 27): each still covers the end of every
+    // edge curve that ends there, each distance's rounding counted against it
+    let mut lowered = Vec::new();
+    for v in bl::vertices(&b, None).unwrap() {
+        let rec = b.vertex(v).unwrap();
+        let (at, tol) = (rec.point, rec.tolerance);
+        if !BOTTLE_E8_MOVED_ENDS
+            .iter()
+            .any(|&[x, y, z]| at.distance(Vec3::new(x, y, z)) <= 1e-4)
+        {
+            continue;
+        }
+        lowered.push(tol);
+        for e in solidcore::topology::vertex::edges(&b, v, None).unwrap() {
+            let rec = b.edge(e).unwrap();
+            let curve = rec.curve.as_ref().unwrap();
+            let (v0, v1) = solidcore::topology::edge::start_end_vertices(&b, e).unwrap();
+            for (end, t) in [(v0, rec.interval.min()), (v1, rec.interval.max())] {
+                if end != Some(v) {
+                    continue;
+                }
+                let p = curve.evaluate_point(&k, t).unwrap();
+                let size = at.max_dimension().max(p.max_dimension());
+                let far = at.distance(p) + gamma(8) * size * 3.0_f64.sqrt();
+                assert!(far <= tol, "{v:?} {e:?}: {far:e} against {tol:e}");
+            }
+        }
+    }
+    lowered.sort_by(f64::total_cmp);
+    assert_eq!(
+        lowered,
+        [4e-5, 4e-5, 4.0730163673638e-5],
+        "the lowered vertices"
     );
 
     let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
