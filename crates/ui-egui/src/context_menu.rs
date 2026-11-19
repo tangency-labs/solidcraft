@@ -304,7 +304,7 @@ fn touched_bodies(app: &SolveApp) -> Vec<String> {
     for s in &app.session.selection {
         let b = match s {
             Sel::Body { name } => name,
-            Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => body,
+            Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } if !body.is_empty() => body,
             _ => continue,
         };
         if !v.contains(b) {

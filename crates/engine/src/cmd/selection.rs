@@ -276,9 +276,7 @@ fn anchor_of(s: &Session, sel: &Sel) -> Option<Vec3> {
         }
         // A construction or origin point: where it sits.
         Sel::ConstructionPoint { name } => {
-            if name == "O" {
-                Some(Vec3::ZERO)
-            } else if let Some(p) = s.origin_point(name) {
+            if let Some(p) = s.origin_point(name) {
                 Some(p)
             } else {
                 crate::view::construction_points(s).into_iter().find(|(_, n, _)| n == name).map(|(_, _, p)| p)

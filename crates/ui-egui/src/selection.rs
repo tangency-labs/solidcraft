@@ -153,8 +153,10 @@ impl SelInput {
             Hit::Plane { name, .. } if a & PLANES != 0 => Some(Sel::Plane { name: name.clone() }),
             Hit::Axis { name } if a & AXES != 0 => Some(Sel::Axis { name: name.clone() }),
             Hit::ConstructionPoint { name } if a & CONSTRUCTION_POINTS != 0 => Some(Sel::ConstructionPoint { name: name.clone() }),
-            Hit::ConstructionPoint { name } if name == "O" && a & ORIGIN != 0 => {
-                Some(Sel::Vertex { body: String::new(), point: solidcore_record::Vec3::ZERO })
+            Hit::ConstructionPoint { name }
+                if solidcraft_engine::origins::item(name).is_some_and(|(_, item)| item == "O") && a & (ORIGIN | SNAP_POINTS) != 0 =>
+            {
+                Some(Sel::ConstructionPoint { name: name.clone() })
             }
             Hit::SketchPoint3d { sketch, id, .. } if a & POINTS != 0 => Some(Sel::SketchPoint { id: format!("{sketch}:{id}") }),
             // A straight sketch line stands for an axis only in an input that takes axes for

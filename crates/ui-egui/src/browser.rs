@@ -1074,6 +1074,22 @@ fn sel_of_key(k: &str) -> Option<Sel> {
     if let Some((_, id)) = k.rsplit_once("/s:") {
         return id.parse().ok().map(|id| Sel::Feature { id });
     }
+    if let Some(name) = k.strip_prefix("origin:") {
+        return match name {
+            "O" => Some(Sel::Vertex { body: String::new(), point: solidcore_record::Vec3::ZERO }),
+            "X" | "Y" | "Z" => Some(Sel::Axis { name: name.to_string() }),
+            "XY" | "XZ" | "YZ" => Some(Sel::Plane { name: name.to_string() }),
+            _ => None,
+        };
+    }
+    if let Some((_, item)) = solidcraft_engine::origins::item(k) {
+        return match item {
+            "O" => Some(Sel::ConstructionPoint { name: k.to_string() }),
+            "X" | "Y" | "Z" => Some(Sel::Axis { name: k.to_string() }),
+            "XY" | "XZ" | "YZ" => Some(Sel::Plane { name: k.to_string() }),
+            _ => None,
+        };
+    }
     if let Some(p) = k.strip_prefix("o:") {
         let path: Option<Vec<u64>> = p.split('/').map(|id| id.parse().ok()).collect();
         return path.filter(|p| !p.is_empty()).map(|path| Sel::Occurrence { path });
@@ -2272,10 +2288,10 @@ fn origin_rows_at(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: &
             _ => Some(Sel::Vertex { body: String::new(), point: solidcore_record::Vec3::ZERO }),
         };
         let (selected, mark) = lit_row(lit(&thing));
-        let item_key = format!("{key}:{name}");
+        let item_key = if component { name.clone() } else { format!("origin:{name}") };
         let r = node_row(
             rows,
-            Spec { key: &item_key, ..Default::default() },
+            Spec { key: &item_key, item: true, ..Default::default() },
             // Faded when hidden itself or with the whole Origin. A renamed plane's label is already
             // in the interface's language (`name`).
             Row {
@@ -2283,7 +2299,7 @@ fn origin_rows_at(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: &
                 eye: Some(visible),
                 icon,
                 label,
-                handle: component.then_some(name.as_str()),
+                handle: Some(name.as_str()),
                 name: label != k,
                 selected,
                 dim: !visible || faded,
@@ -2315,23 +2331,13 @@ fn origin_rows_at(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: &
         if r.hovered && app.preferences.browser_hover_shows_origin {
             acts.hover_origin = Some(name);
         }
-        if r.clicked
-            && let Some(x) = sel
-        {
+        if r.clicked {
             if app.dialog.is_some() {
-                pick_from_browser(app, x);
-            } else {
-                let ctrl = rows.ui().input(|i| i.modifiers.command || i.modifiers.ctrl);
-                if ctrl {
-                    if app.session.selection.contains(&x) {
-                        let rest: Vec<Sel> = app.session.selection.iter().filter(|s| **s != x).cloned().collect();
-                        let _ = app.run("select.set", json!({ "items": rest }));
-                    } else {
-                        let _ = app.run("select.set", json!({ "items": [x], "add": true }));
-                    }
-                } else {
+                if let Some(x) = sel {
                     pick_from_browser(app, x);
                 }
+            } else {
+                click_select(app, r.how.as_ref(), sel);
             }
         }
     }
