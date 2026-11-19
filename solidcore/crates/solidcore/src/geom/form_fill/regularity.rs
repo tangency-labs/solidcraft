@@ -691,8 +691,8 @@ fn prove_normal(
                 let [z0, z1] = z.halve(axis, work)?;
                 let [w0, w1] = w.halve(axis, work)?;
                 (
-                    Some([x0, y0, z0, w0]).filter(|_| left_original.contains(&true)),
-                    Some([x1, y1, z1, w1]).filter(|_| right_original.contains(&true)),
+                    left_original.contains(&true).then_some([x0, y0, z0, w0]),
+                    right_original.contains(&true).then_some([x1, y1, z1, w1]),
                 )
             }
             None => (None, None),
