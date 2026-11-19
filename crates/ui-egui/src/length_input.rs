@@ -178,6 +178,11 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
         D::PathPattern { spacing, .. } => vec![spacing],
         D::Pipe { diameter, wall, .. } => vec![diameter, wall],
         D::Stock { margin } => vec![margin],
+        // An empty Tab and Slot row stands for the command's default and stays so.
+        D::TabSlot(t) => [&mut t.spacing, &mut t.tab_width, &mut t.end_distance, &mut t.clearance, &mut t.protrusion]
+            .into_iter()
+            .filter(|v| !v.trim().is_empty())
+            .collect(),
         D::Move { x, y, z, .. } => vec![x, y, z],
         D::Hole { diameter, depth, cb_diameter, cb_depth, cs_diameter, opts, .. } => {
             vec![diameter, depth, cb_diameter, cb_depth, cs_diameter, &mut opts.bridge]

@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Tab and Slot</title>
+  <path d="M16.23 22.52L44.31 38.73L44.31 54.95L16.23 38.73Z" fill="#328bd3"/>
+  <path d="M47.77 36.74L44.31 38.73L44.31 54.95L47.77 52.95Z" fill="#236ead"/>
+  <path d="M19.69 20.53L47.77 36.74L44.31 38.73L16.23 22.52Z" fill="#b9ddf8"/>
+  <path d="M19.69 20.53L47.77 36.74L47.77 52.95L44.31 54.95L16.23 38.73L16.23 22.52Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M16.23 22.52L44.31 38.73L47.77 36.74" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M44.31 38.73L44.31 54.95" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M5 21.52L37.4 40.23L37.4 45.22L5 26.51Z" fill="#b8c3cf"/>
+  <path d="M59 27.76L37.4 40.23L37.4 45.22L59 32.75Z" fill="#8e9faf"/>
+  <path d="M26.6 9.05L59 27.76L37.4 40.23L5 21.52Z" fill="#e2e8ef"/>
+  <path d="M26.6 9.05L59 27.76L59 32.75L37.4 45.22L5 26.51L5 21.52Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M5 21.52L37.4 40.23L59 27.76" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M37.4 40.23L37.4 45.22" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M22.93 15.91L32.54 21.46L26.49 24.95L16.88 19.4Z" fill="#34465b"/>
+  <path d="M19.47 13.79L26.49 17.85L26.49 23.46L19.47 19.4Z" fill="#328bd3"/>
+  <path d="M29.95 15.85L26.49 17.85L26.49 23.46L29.95 21.46Z" fill="#236ead"/>
+  <path d="M22.93 11.8L29.95 15.85L26.49 17.85L19.47 13.79Z" fill="#b9ddf8"/>
+  <path d="M22.93 11.8L29.95 15.85L29.95 21.46L26.49 23.46L19.47 19.4L19.47 13.79Z" fill="none" stroke="#34465b" stroke-width="2.04" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M19.47 13.79L26.49 17.85L29.95 15.85" fill="none" stroke="#34465b" stroke-width="2.04" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M26.49 17.85L26.49 23.46" fill="none" stroke="#34465b" stroke-width="2.04" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M37.51 24.33L47.12 29.88L41.07 33.37L31.46 27.82Z" fill="#34465b"/>
+  <path d="M34.05 22.21L41.07 26.26L41.07 31.88L34.05 27.82Z" fill="#328bd3"/>
+  <path d="M44.53 24.27L41.07 26.26L41.07 31.88L44.53 29.88Z" fill="#236ead"/>
+  <path d="M37.51 20.22L44.53 24.27L41.07 26.26L34.05 22.21Z" fill="#b9ddf8"/>
+  <path d="M37.51 20.22L44.53 24.27L44.53 29.88L41.07 31.88L34.05 27.82L34.05 22.21Z" fill="none" stroke="#34465b" stroke-width="2.04" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M34.05 22.21L41.07 26.26L44.53 24.27" fill="none" stroke="#34465b" stroke-width="2.04" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M41.07 26.26L41.07 31.88" fill="none" stroke="#34465b" stroke-width="2.04" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

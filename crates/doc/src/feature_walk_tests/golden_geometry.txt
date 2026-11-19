@@ -135,6 +135,8 @@ cell_grid
   moves: anchor[0], anchor[1], anchor[2]
   profiles: 1 indices
   placement: cell_grid.x, cell_grid.y, cell_grid.z
+tab_slot
+  moves: tab_plates[0].near[0], tab_plates[0].near[1], tab_plates[0].near[2]
 sheet_base
   profiles: 1 all
 sheet_contour

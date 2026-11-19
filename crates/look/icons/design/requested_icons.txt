@@ -368,6 +368,7 @@ surface_unstitch	false
 surface_untrim	false
 svg	false
 sweep	false
+tab_slot	false
 text	false
 thread	false
 timeline_play	false

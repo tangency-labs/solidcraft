@@ -229,7 +229,7 @@ pub fn groups(tab: &str, panel: &str) -> &'static [CommandGroup] {
                 ids: &["solid.press_pull", "solid.draft", "solid.offset_face", "solid.replace_face", "solid.split_face", "face.delete"],
             },
             CommandGroup { label: "Bodies", ids: &["solid.shell", "solid.combine", "solid.split_body", "solid.scale", "solid.remove"] },
-            CommandGroup { label: "Specialise", ids: &["sheet.convert"] },
+            CommandGroup { label: "Specialise", ids: &["sheet.convert", "solid.tab_slot"] },
         ],
         _ => &[],
     }
@@ -354,7 +354,7 @@ pub const SECTIONS: &[Section] = &[
         tab: "MODEL",
         panel: "MODIFY",
         promoted: 4,
-        ids: &["solid.fillet", "solid.chamfer", "solid.shell", "solid.press_pull", "sheet.convert"],
+        ids: &["solid.fillet", "solid.chamfer", "solid.shell", "solid.press_pull", "sheet.convert", "solid.tab_slot"],
     },
     Section {
         tab: "MODEL",

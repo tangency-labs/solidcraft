@@ -1349,6 +1349,117 @@ fn a_tapered_flange_changes_by_half_its_length_times_the_slope_tangent() {
 }
 
 #[test]
+fn a_region_reaches_along_a_direction_as_far_as_its_outer_loop() {
+    let x = p(1.0, 0.0);
+    let y = p(0.0, 1.0);
+    let diag = p(FRAC_1_SQRT_2, FRAC_1_SQRT_2);
+    // A rectangle: its sides; a hole changes nothing.
+    let mut r = rectangle(p(-2.0, 1.0), p(4.0, 7.0));
+    assert_eq!(r.extent_along(x, 1e-9), Some((-2.0, 4.0)));
+    assert_eq!(r.extent_along(y, 1e-9), Some((1.0, 7.0)));
+    r.holes
+        .push(polygon(&[p(0.0, 2.0), p(0.0, 3.0), p(1.0, 3.0)]));
+    assert_eq!(r.extent_along(x, 1e-9), Some((-2.0, 4.0)));
+    let (lo, hi) = r.extent_along(diag, 1e-9).unwrap();
+    assert!((lo + FRAC_1_SQRT_2).abs() < 1e-12 && (hi - 11.0 * FRAC_1_SQRT_2).abs() < 1e-12);
+    // A half disc of radius 2 about the origin, the arc on top: up to 2, across to +-2; the arc
+    // runs past +-x only at its ends, so along x it is exact too.
+    let half = Region2 {
+        outer: Loop2 {
+            segs: vec![
+                Seg2::Line {
+                    a: p(-2.0, 0.0),
+                    b: p(2.0, 0.0),
+                },
+                Seg2::Arc {
+                    center: p(0.0, 0.0),
+                    radius: 2.0,
+                    start: 0.0,
+                    sweep: PI,
+                },
+            ],
+        },
+        holes: vec![],
+    };
+    assert_eq!(half.extent_along(y, 1e-9), Some((0.0, 2.0)));
+    let (lo, hi) = half.extent_along(x, 1e-9).unwrap();
+    assert!(
+        (lo + 2.0).abs() < 1e-12 && (hi - 2.0).abs() < 1e-12,
+        "{lo} {hi}"
+    );
+    // The same arc run clockwise from pi back to 0 holds the same top.
+    let cw = Seg2::Arc {
+        center: p(0.0, 0.0),
+        radius: 2.0,
+        start: PI,
+        sweep: -PI,
+    };
+    let back = Region2 {
+        outer: Loop2 {
+            segs: vec![
+                cw,
+                Seg2::Line {
+                    a: p(2.0, 0.0),
+                    b: p(-2.0, 0.0),
+                },
+            ],
+        },
+        holes: vec![],
+    };
+    assert_eq!(back.extent_along(y, 1e-9), Some((0.0, 2.0)));
+    // A cubic bulge from (0,0) to (3,0) with inner points at height 4: its top is 3 (at t = 1/2),
+    // under its hull's 4, found within eps.
+    let bulge = Region2 {
+        outer: Loop2 {
+            segs: vec![
+                Seg2::Cubic {
+                    p0: p(0.0, 0.0),
+                    p1: p(1.0, 4.0),
+                    p2: p(2.0, 4.0),
+                    p3: p(3.0, 0.0),
+                },
+                Seg2::Line {
+                    a: p(3.0, 0.0),
+                    b: p(0.0, 0.0),
+                },
+            ],
+        },
+        holes: vec![],
+    };
+    let (lo, hi) = bulge.extent_along(y, 1e-9).unwrap();
+    assert!(lo == 0.0 && (hi - 3.0).abs() <= 1e-9, "{lo} {hi}");
+    // A conic quarter circle (apex weight cos 45) reaches its radius along the diagonal.
+    let quarter = Region2 {
+        outer: Loop2 {
+            segs: vec![
+                Seg2::Conic {
+                    a: p(1.0, 0.0),
+                    apex: p(1.0, 1.0),
+                    b: p(0.0, 1.0),
+                    w: FRAC_1_SQRT_2,
+                },
+                Seg2::Line {
+                    a: p(0.0, 1.0),
+                    b: p(0.0, 0.0),
+                },
+                Seg2::Line {
+                    a: p(0.0, 0.0),
+                    b: p(1.0, 0.0),
+                },
+            ],
+        },
+        holes: vec![],
+    };
+    let (_, hi) = quarter.extent_along(diag, 1e-9).unwrap();
+    assert!((hi - 1.0).abs() <= 1e-9, "{hi}");
+    // Refusals: a direction that is not a unit vector, a bad eps, no outer loop.
+    assert_eq!(r.extent_along(p(2.0, 0.0), 1e-9), None);
+    assert_eq!(r.extent_along(p(f64::NAN, 0.0), 1e-9), None);
+    assert_eq!(r.extent_along(x, 0.0), None);
+    assert_eq!(Region2::default().extent_along(x, 1e-9), None);
+}
+
+#[test]
 fn directed_planar_sweep_keeps_quadrants_and_tiny_seam_angles() {
     let sweep = super::profile::counterclockwise_sweep;
     let center = Point2::new(0.0, 0.0);
@@ -2945,4 +3056,73 @@ mod path_export_regressions {
         assert!(!pts.contains(&Vec2::new(0.0, -1.0)));
         assert_eq!(pts.len(), 5);
     }
+}
+
+/// Two regions share area when a piece of one boundary lies clear inside the other, or when
+/// their boundaries run together the same way; touching along an edge or at a corner is none.
+#[test]
+fn regions_overlap_only_where_they_share_area() {
+    use super::profile::regions_overlap;
+    let eps = 1e-6;
+    let sq = rectangle(p(0.0, 0.0), p(2.0, 2.0));
+    // a plus sign: no corner of one inside the other
+    let wide = rectangle(p(-1.0, 0.5), p(3.0, 1.5));
+    let tall = rectangle(p(0.5, -1.0), p(1.5, 3.0));
+    assert_eq!(regions_overlap(&wide, &tall, eps), Some(true));
+    // one inside the other, either way round
+    let inner = rectangle(p(0.5, 0.5), p(1.0, 1.0));
+    assert_eq!(regions_overlap(&sq, &inner, eps), Some(true));
+    assert_eq!(regions_overlap(&inner, &sq, eps), Some(true));
+    // the same region
+    assert_eq!(regions_overlap(&sq, &sq.clone(), eps), Some(true));
+    // touching along an edge, at a corner, apart
+    let right = rectangle(p(2.0, 0.0), p(4.0, 2.0));
+    let corner = rectangle(p(2.0, 2.0), p(3.0, 3.0));
+    let apart = rectangle(p(5.0, 5.0), p(6.0, 6.0));
+    assert_eq!(regions_overlap(&sq, &right, eps), Some(false));
+    assert_eq!(regions_overlap(&sq, &corner, eps), Some(false));
+    assert_eq!(regions_overlap(&sq, &apart, eps), Some(false));
+    // an inner square sitting in a hole: no shared area
+    let framed = Region2 {
+        outer: rectangle(p(-2.0, -2.0), p(4.0, 4.0)).outer,
+        holes: vec![sq.outer.reversed()],
+    };
+    assert_eq!(regions_overlap(&framed, &inner, eps), Some(false));
+    // a circle crossing the square's edge
+    let disc = Region2 {
+        outer: circle(p(2.0, 1.0), 0.5),
+        holes: vec![],
+    };
+    assert_eq!(regions_overlap(&sq, &disc, eps), Some(true));
+    assert_eq!(regions_overlap(&sq, &inner, 0.0), None);
+}
+
+/// A boundary running along the other one is kept whole, not halved down to `eps`: two equal
+/// squares give one near chord per edge, two squares sharing an edge a few (the shared edge and
+/// a short piece at each corner where the boundaries part), so the pair check stays small.
+#[test]
+fn regions_overlap_keeps_shared_edges_whole() {
+    use super::profile::pieces_against;
+    let eps = 1e-6;
+    let sq = rectangle(p(0.0, 0.0), p(2.0, 2.0));
+    let right = rectangle(p(2.0, 0.0), p(4.0, 2.0));
+    let (inside, near) = pieces_against(&sq, &sq.clone(), eps).unwrap();
+    assert!(!inside);
+    assert_eq!(near.len(), 4);
+    let (inside, near) = pieces_against(&sq, &right, eps).unwrap();
+    assert!(!inside);
+    assert!((1..=8).contains(&near.len()), "{} near chords", near.len());
+    // a circle crossing the square's edge: the stretch of the edge inside the circle is clear of
+    // the circle's flattened boundary (not of its arcs' hull boxes), so it is found inside
+    let disc = Region2 {
+        outer: circle(p(2.0, 1.0), 0.5),
+        holes: vec![],
+    };
+    let (inside, near) = pieces_against(&sq, &disc, eps).unwrap();
+    assert!(inside);
+    assert!(near.len() <= 16, "{} near chords", near.len());
+    // a curved boundary running along an equal one is kept whole once flat
+    let (inside, near) = pieces_against(&disc, &disc.clone(), 1e-3).unwrap();
+    assert!(!inside);
+    assert!(near.len() <= 256, "{} near chords", near.len());
 }

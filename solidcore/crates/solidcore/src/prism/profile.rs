@@ -243,6 +243,105 @@ impl Region2 {
             bound: bound + gamma(self.holes.len() + 2) * size,
         })
     }
+
+    /// Its extent along the unit direction `d`: the least and the greatest `d · p` over the
+    /// points `p` of its outer loop (its holes lie inside it). Lines and arcs exactly; conics
+    /// and Béziers to within `eps`, by halving their spans until the control points'
+    /// projections bound the extreme that tightly.
+    ///
+    /// `None` for a non-finite or non-unit `d`, an `eps` that is not finite and positive, an
+    /// empty or malformed loop, or a span that will not tighten within [`MAX_EXTENT_PIECES`].
+    #[must_use]
+    pub fn extent_along(&self, d: Vec2, eps: f64) -> Option<(f64, f64)> {
+        if !(finite2(d) && (d.length() - 1.0).abs() <= 8.0 * f64::EPSILON) {
+            return None;
+        }
+        if !(eps.is_finite() && eps > 0.0) || self.outer.segs.is_empty() {
+            return None;
+        }
+        let mut lo = f64::INFINITY;
+        let mut hi = f64::NEG_INFINITY;
+        for seg in &self.outer.segs {
+            hi = hi.max(seg_max_along(seg, d, eps)?);
+            lo = lo.min(-seg_max_along(seg, -d, eps)?);
+        }
+        (lo.is_finite() && hi.is_finite()).then_some((lo, hi))
+    }
+}
+
+/// The most pieces [`Region2::extent_along`] halves one span into before it gives up.
+pub const MAX_EXTENT_PIECES: usize = 4096;
+
+/// The greatest `d · p` over the points `p` of `seg` (`d` a unit vector).
+fn seg_max_along(seg: &Seg2, d: Vec2, eps: f64) -> Option<f64> {
+    match *seg {
+        Seg2::Line { a, b } => (finite2(a) && finite2(b)).then(|| d.dot(a).max(d.dot(b))),
+        Seg2::Arc {
+            center,
+            radius,
+            start,
+            sweep,
+        } => {
+            if !(finite2(center)
+                && radius.is_finite()
+                && radius > 0.0
+                && start.is_finite()
+                && sweep.is_finite())
+            {
+                return None;
+            }
+            let ends = d.dot(seg.start()).max(d.dot(seg.end()));
+            // The circle's point furthest along `d` is at angle `atan2(d)`; the arc holds it
+            // when that angle lies within its sweep.
+            let toward = d.y.atan2(d.x);
+            let into = ((toward - start) * sweep.signum()).rem_euclid(TAU);
+            Some(if into <= sweep.abs() {
+                d.dot(center) + radius
+            } else {
+                ends
+            })
+        }
+        _ => {
+            let mut best = f64::NEG_INFINITY;
+            for span in seg.spans()? {
+                best = best.max(span_max_along(span, d, eps)?);
+            }
+            Some(best)
+        }
+    }
+}
+
+/// The greatest `d · p` over a homogeneous Bézier span with positive weights, within `eps`: the
+/// span lies in its control points' hull, so their greatest projection bounds it above and its
+/// ends' bound it below; halve until the two meet.
+fn span_max_along(span: Vec<H2>, d: Vec2, eps: f64) -> Option<f64> {
+    let along = |q: &H2| d.dot(point_of(*q));
+    let ends = |s: &[H2]| Some(along(s.first()?).max(along(s.last()?)));
+    let hull = |s: &[H2]| s.iter().map(along).fold(f64::NEG_INFINITY, f64::max);
+    if span.len() < 2
+        || !span
+            .iter()
+            .all(|q| q[2] > 0.0 && q.iter().all(|c| c.is_finite()))
+    {
+        return None;
+    }
+    let mut best = ends(&span)?;
+    let mut stack = vec![span];
+    let mut pieces = 0usize;
+    while let Some(s) = stack.pop() {
+        pieces += 1;
+        if pieces > MAX_EXTENT_PIECES {
+            return None;
+        }
+        best = best.max(ends(&s)?);
+        if hull(&s) <= best + eps {
+            continue;
+        }
+        let (left, right) = halves(&s);
+        stack.push(left);
+        stack.push(right);
+    }
+    best.is_finite().then_some(best)
 }
 
 /// A homogeneous control point `[x w, y w, w]`.
@@ -750,6 +849,329 @@ fn crossings_odd(span: Vec<H2>, p: Point2) -> Option<bool> {
         todo.push((r, depth + 1));
     }
     Some(odd)
+}
+
+/// Most halvings of one boundary span in [`regions_overlap`].
+const MAX_OVERLAP_DEPTH: u32 = 40;
+
+/// The Bézier spans of a region's loops, with a straight join wherever a span ends away from
+/// where the next starts (as [`Loop2::holds`] closes them).
+fn boundary_spans(r: &Region2) -> Option<Vec<Vec<H2>>> {
+    let mut out = Vec::new();
+    for lp in r.loops() {
+        let mut spans: Vec<Vec<H2>> = Vec::new();
+        for s in &lp.segs {
+            spans.extend(s.spans()?);
+        }
+        for (here, next) in spans.iter().zip(spans.iter().cycle().skip(1)) {
+            let end = point_of(*here.last()?);
+            let start = point_of(*next.first()?);
+            out.push(here.clone());
+            if end != start {
+                out.push(vec![[end.x, end.y, 1.0], [start.x, start.y, 1.0]]);
+            }
+        }
+    }
+    Some(out)
+}
+
+/// The box of a span's control points, `(lo, hi)`.
+fn hull_box(c: &[H2]) -> (Point2, Point2) {
+    let inf = f64::INFINITY;
+    c.iter().map(|q| point_of(*q)).fold(
+        (Point2::new(inf, inf), Point2::new(-inf, -inf)),
+        |(lo, hi), p| {
+            (
+                Point2::new(lo.x.min(p.x), lo.y.min(p.y)),
+                Point2::new(hi.x.max(p.x), hi.y.max(p.y)),
+            )
+        },
+    )
+}
+
+fn boxes_meet(a: (Point2, Point2), b: (Point2, Point2), m: f64) -> bool {
+    a.0.x <= b.1.x + m && b.0.x <= a.1.x + m && a.0.y <= b.1.y + m && b.0.y <= a.1.y + m
+}
+
+/// Whether `r` holds `p` by the even–odd rule over all its loops; `None` on its boundary.
+fn region_holds(r: &Region2, p: Point2) -> Option<bool> {
+    let mut odd = false;
+    for lp in r.loops() {
+        odd ^= lp.holds(p)?;
+    }
+    Some(odd)
+}
+
+/// The distance from `p` to the segment `s`–`e`.
+fn distance_to_segment(p: Point2, s: Point2, e: Point2) -> f64 {
+    let d = Point2::new(e.x - s.x, e.y - s.y);
+    let len2 = d.x * d.x + d.y * d.y;
+    let t = if len2 > 0.0 {
+        (((p.x - s.x) * d.x + (p.y - s.y) * d.y) / len2).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    (p.x - s.x - t * d.x).hypot(p.y - s.y - t * d.y)
+}
+
+/// The chord of a span when the span lies within `tol` of it (its control points do, and by
+/// the convex hull of a span with positive weights so does the span); `None` otherwise.
+fn flat_chord(c: &[H2], tol: f64) -> Option<(Point2, Point2)> {
+    let (s, e) = (point_of(*c.first()?), point_of(*c.last()?));
+    c.iter()
+        .all(|q| q[2] > 0.0 && distance_to_segment(point_of(*q), s, e) <= tol)
+        .then_some((s, e))
+}
+
+/// Two points: a box `(lo, hi)` or a chord `(start, end)`.
+type Segment2 = (Point2, Point2);
+
+/// A region's boundary halved until each piece lies within `tol` of its chord, or after
+/// [`MAX_OVERLAP_DEPTH`] halvings: the pieces' boxes (all of them, so together they cover the
+/// boundary) and the chords of the flat ones, each within `tol` of the boundary.
+///
+/// Cost: halving a span shrinks how far its control points stray from its chord about four
+/// times a level, so a span whose control points stray `d` from its chord gives about
+/// `sqrt(d / tol)` pieces (a quarter circle of radius 0.5 at 2.5e-7: about 2^10).
+fn flat_pieces(r: &Region2, tol: f64) -> Option<(Vec<Segment2>, Vec<Segment2>)> {
+    let (mut boxes, mut chords) = (Vec::new(), Vec::new());
+    let mut todo: Vec<(Vec<H2>, u32)> = boundary_spans(r)?.into_iter().map(|c| (c, 0)).collect();
+    while let Some((c, depth)) = todo.pop() {
+        if let Some(chord) = flat_chord(&c, tol) {
+            boxes.push(hull_box(&c));
+            chords.push(chord);
+        } else if depth < MAX_OVERLAP_DEPTH {
+            let (l, r) = halves(&c);
+            todo.push((l, depth + 1));
+            todo.push((r, depth + 1));
+        } else {
+            boxes.push(hull_box(&c));
+        }
+    }
+    Some((boxes, chords))
+}
+
+/// The parameters `t` (any real) where `lo <= alpha + beta * t <= hi`, as `(from, to)`; empty
+/// when `from > to`.
+fn band_params(alpha: f64, beta: f64, lo: f64, hi: f64) -> (f64, f64) {
+    if beta == 0.0 {
+        return if (lo..=hi).contains(&alpha) {
+            (f64::NEG_INFINITY, f64::INFINITY)
+        } else {
+            (1.0, 0.0)
+        };
+    }
+    let (t0, t1) = ((lo - alpha) / beta, (hi - alpha) / beta);
+    (t0.min(t1), t0.max(t1))
+}
+
+/// The parameters along `s`–`e` (`s + t · (e − s)`) of the points within `r` of the segment
+/// `p`–`q`, as `(from, to)` (an interval: the band round a segment is convex); `None` when there
+/// are none.
+fn capsule_params(s: Point2, e: Point2, p: Point2, q: Point2, r: f64) -> Option<(f64, f64)> {
+    let d = Point2::new(e.x - s.x, e.y - s.y);
+    let dd = d.x * d.x + d.y * d.y;
+    // within r of an end of p–q: |s + t d − c|² <= r²
+    let disc = |c: Point2| -> (f64, f64) {
+        let f = Point2::new(s.x - c.x, s.y - c.y);
+        let (b, cc) = (f.x * d.x + f.y * d.y, f.x * f.x + f.y * f.y - r * r);
+        if dd == 0.0 {
+            return if cc <= 0.0 {
+                (f64::NEG_INFINITY, f64::INFINITY)
+            } else {
+                (1.0, 0.0)
+            };
+        }
+        let root = b * b - dd * cc;
+        if root < 0.0 {
+            return (1.0, 0.0);
+        }
+        let w = root.sqrt();
+        ((-b - w) / dd, (-b + w) / dd)
+    };
+    let mut parts = vec![disc(p), disc(q)];
+    // beside p–q: the projection on it within its ends, the offset from its line within r
+    let u = Point2::new(q.x - p.x, q.y - p.y);
+    let uu = u.x * u.x + u.y * u.y;
+    if uu > 0.0 {
+        let (fx, fy) = (s.x - p.x, s.y - p.y);
+        let (a0, a1) = band_params(fx * u.x + fy * u.y, d.x * u.x + d.y * u.y, 0.0, uu);
+        let side = r * uu.sqrt();
+        let (b0, b1) = band_params(u.x * fy - u.y * fx, u.x * d.y - u.y * d.x, -side, side);
+        parts.push((a0.max(b0), a1.min(b1)));
+    }
+    let (from, to) = parts
+        .into_iter()
+        .filter(|(lo, hi)| lo <= hi)
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), (a, b)| {
+            (lo.min(a), hi.max(b))
+        });
+    (from <= to).then_some((from, to))
+}
+
+/// Whether every point of the segment `s`–`e` lies within `r` of one of `chords`: the
+/// parameter intervals of the bands round the chords near it cover `[0, 1]`.
+fn segment_within(s: Point2, e: Point2, chords: &[(Point2, Point2)], r: f64) -> bool {
+    let bx = (
+        Point2::new(s.x.min(e.x), s.y.min(e.y)),
+        Point2::new(s.x.max(e.x), s.y.max(e.y)),
+    );
+    let mut spans: Vec<(f64, f64)> = chords
+        .iter()
+        .filter(|(p, q)| {
+            let cb = (
+                Point2::new(p.x.min(q.x), p.y.min(q.y)),
+                Point2::new(p.x.max(q.x), p.y.max(q.y)),
+            );
+            boxes_meet(bx, cb, r)
+        })
+        .filter_map(|&(p, q)| capsule_params(s, e, p, q, r))
+        .filter(|&(lo, hi)| hi >= 0.0 && lo <= 1.0)
+        .collect();
+    spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut reach = 0.0;
+    for (lo, hi) in spans {
+        if lo > reach {
+            return false;
+        }
+        reach = f64::max(reach, hi);
+        if reach >= 1.0 {
+            return true;
+        }
+    }
+    false
+}
+
+/// Consecutive chords (one ending where the next starts) joined while every point of the run
+/// stays within `eps` of the joined chord.
+fn merge_collinear(chords: Vec<(Point2, Point2)>, eps: f64) -> Vec<(Point2, Point2)> {
+    let mut out: Vec<(Point2, Point2)> = Vec::new();
+    let mut run: Vec<Point2> = Vec::new();
+    for (s, e) in chords {
+        let joins = out.last().is_some_and(|last| {
+            last.1 == s
+                && run
+                    .iter()
+                    .chain(std::iter::once(&s))
+                    .all(|q| distance_to_segment(*q, last.0, e) <= eps)
+        });
+        match out.last_mut() {
+            Some(last) if joins => {
+                run.push(s);
+                last.1 = e;
+            }
+            _ => {
+                run.clear();
+                out.push((s, e));
+            }
+        }
+    }
+    out
+}
+
+/// What halving `a`'s boundary against `b`'s found: a piece clear of `b`'s boundary lying
+/// inside `b`, and the pieces left within `eps` of `b`'s boundary (as chords, in boundary order,
+/// collinear neighbours merged).
+///
+/// Cost: `b`'s boundary is flattened once ([`flat_pieces`] at `eps / 4`: `n` pieces, about
+/// `sqrt(d / tol)` per span, one per straight span). A piece of `a` is halved only while it
+/// meets the box of one of them and is not flat within `eps / 4` with its chord wholly within
+/// `eps / 2` of `b`'s chords ([`segment_within`], which may run over several of them). A stretch
+/// running along `b`'s boundary, straight or curved, is therefore kept whole once it is flat,
+/// and only the pieces at a place where the boundaries meet, cross or part go on halving, one
+/// or two per level, at most [`MAX_OVERLAP_DEPTH`] levels. So with `m` such places on a span
+/// and `f` halvings to flatten it, the span gives at most `2^f + 4 · MAX_OVERLAP_DEPTH · (m + 1)`
+/// pieces, each tested against the `n` boxes and chords: `O(n)` work per piece, not the
+/// `length / eps` pieces (about 2^21 per millimetre at 1e-6) that halving down to `eps` gave
+/// (`prism::tests::regions_overlap_keeps_shared_edges_whole` checks the count).
+pub(super) fn pieces_against(
+    a: &Region2,
+    b: &Region2,
+    eps: f64,
+) -> Option<(bool, Vec<(Point2, Point2)>)> {
+    let (other, other_chords) = flat_pieces(b, 0.25 * eps)?;
+    let mut near = Vec::new();
+    let mut todo: Vec<(Vec<H2>, u32)> = boundary_spans(a)?
+        .into_iter()
+        .rev()
+        .map(|c| (c, 0))
+        .collect();
+    while let Some((c, depth)) = todo.pop() {
+        let bx = hull_box(&c);
+        if !other.iter().any(|o| boxes_meet(bx, *o, eps)) {
+            if region_holds(b, point_of(casteljau(&c, 0.5)))? {
+                return Some((true, near));
+            }
+            continue;
+        }
+        // flat within eps / 4 and its chord within eps / 2 of b's chords (which are within
+        // eps / 4 of b): the whole piece is within eps of b's boundary
+        if let Some((s, e)) = flat_chord(&c, 0.25 * eps) {
+            if segment_within(s, e, &other_chords, 0.5 * eps) {
+                near.push((s, e));
+                continue;
+            }
+        }
+        let (lo, hi) = bx;
+        if (hi.x - lo.x).max(hi.y - lo.y) <= eps || depth >= MAX_OVERLAP_DEPTH {
+            near.push((point_of(*c.first()?), point_of(*c.last()?)));
+            continue;
+        }
+        // right first so the left half is taken next: the near chords come in boundary order
+        let (l, r) = halves(&c);
+        todo.push((r, depth + 1));
+        todo.push((l, depth + 1));
+    }
+    Some((false, merge_collinear(near, eps)))
+}
+
+/// Whether two regions (outer loops counter-clockwise, holes clockwise) share area beyond a
+/// band of `eps` (mm) round their boundaries. Each boundary is halved until each piece is clear
+/// of the other boundary by `eps` or within `eps` of it; a clear piece inside the other region
+/// has its region's inside next to it, so the two share area there. When no clear piece is
+/// inside, they still share area where their boundaries run together the same way (the insides
+/// on the same side), as for two equal regions. `None` when a point cannot be decided or a
+/// region is malformed.
+pub fn regions_overlap(a: &Region2, b: &Region2, eps: f64) -> Option<bool> {
+    if !(eps.is_finite() && eps > 0.0) {
+        return None;
+    }
+    let (a_in_b, a_near) = pieces_against(a, b, eps)?;
+    if a_in_b {
+        return Some(true);
+    }
+    let (b_in_a, b_near) = pieces_against(b, a, eps)?;
+    if b_in_a {
+        return Some(true);
+    }
+    let along = |(s, e): &(Point2, Point2)| Point2::new(e.x - s.x, e.y - s.y);
+    Some(a_near.iter().any(|pa| {
+        let da = along(pa);
+        b_near.iter().any(|pb| {
+            let db = along(pb);
+            let meet = boxes_meet(
+                (
+                    Point2::new(pa.0.x.min(pa.1.x), pa.0.y.min(pa.1.y)),
+                    Point2::new(pa.0.x.max(pa.1.x), pa.0.y.max(pa.1.y)),
+                ),
+                (
+                    Point2::new(pb.0.x.min(pb.1.x), pb.0.y.min(pb.1.y)),
+                    Point2::new(pb.0.x.max(pb.1.x), pb.0.y.max(pb.1.y)),
+                ),
+                eps,
+            );
+            let (la, lb) = (da.length(), db.length());
+            if !(meet && la > 0.0 && lb > 0.0 && da.dot(db) > 0.5 * la * lb) {
+                return false;
+            }
+            // they must lie side by side, not end to end (as at a shared corner)
+            let u = Point2::new(da.x / la, da.y / la);
+            let at = |q: Point2| (q.x - pa.0.x) * u.x + (q.y - pa.0.y) * u.y;
+            let (s, e) = (at(pb.0), at(pb.1));
+            let shared = e.max(s).min(la) - e.min(s).max(0.0);
+            shared > 0.25 * la.min(lb)
+        })
+    }))
 }
 
 /// Why a profile is refused ([`check_regions`]).

@@ -62,6 +62,7 @@ mod face;
 mod features;
 mod features_more;
 mod join_pieces;
+mod tab_slot;
 pub(crate) use bom::{SAME_AS_COMPONENT, occurrence_bom_type, record_item_numbers};
 pub(crate) use browser::{find_kinds, find_text};
 pub(crate) use component::follow_expressed_moves;
@@ -492,6 +493,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(features::COMMANDS.iter());
     v.extend(features_more::COMMANDS.iter());
     v.extend(cell_grid::COMMANDS.iter());
+    v.extend(tab_slot::COMMANDS.iter());
     v.extend(mesh::COMMANDS.iter());
     v.extend(construct_auto::COMMANDS.iter());
     v.extend(plugin::COMMANDS.iter());

@@ -139,6 +139,8 @@ cell_grid
   sketches: [1]
   remap_refs: sketch
   remap_bodies: targets[0]
+tab_slot
+  remap_bodies: slot_plates[0].body, tab_plates[0].body
 sheet_base
   sketches: [1]
   remap_refs: sketch

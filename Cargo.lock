@@ -6303,6 +6303,7 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
+ "solidcore",
  "solidcore-ops",
  "solidcore-record",
  "solidcore-step",

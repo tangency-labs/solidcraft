@@ -333,6 +333,7 @@ impl MovePreview {
             mirror_meets: None,
             points: Vec::new(),
             placed: None,
+            report: None,
             tapered: Vec::new(),
             replaced,
             outlines: Vec::new(),

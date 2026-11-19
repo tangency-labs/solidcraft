@@ -148,6 +148,10 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             "cell_grid",
             json!({"type": "cell_grid", "sketch": 1, "profiles": {"type": "indices", "indices": [0]}, "sides": "cell_grid.sides", "size": "cell_grid.size", "web": "cell_grid.web", "angle": "cell_grid.angle", "margin": "cell_grid.margin", "anchor": ["cell_grid.x", "cell_grid.y", "cell_grid.z"], "depth": "cell_grid.depth"}),
         ),
+        (
+            "tab_slot",
+            json!({"type": "tab_slot", "tab_plates": [], "slot_plates": [], "next_plate_key": 3, "count": "tab_slot.count", "spacing": "tab_slot.spacing", "tab_width": "tab_slot.tab_width", "end_distance": "tab_slot.end_distance", "clearance": "tab_slot.clearance", "protrusion": "tab_slot.protrusion", "seed": "tab_slot.seed", "width_jitter": "tab_slot.width_jitter", "tip_chamfer": "tab_slot.tip_chamfer"}),
+        ),
         ("sheet_base", json!({"type": "sheet_base", "sketch": 1, "profiles": {"type": "all"}})),
         ("sheet_contour", json!({"type": "sheet_contour", "sketch": 1, "curves": ["l1"], "distance": "contour.distance"})),
         (
@@ -266,6 +270,9 @@ pub(super) fn with_refs(name: &str, mut v: Value) -> Value {
         | "offset_face" | "delete_face" | "replace_face" | "sheet_flange" | "sheet_hem" | "sheet_perforate" | "sheet_path" | "sheet_unfold"
         | "boss" | "lip" | "snap_fit" | "rest" | "surface_offset" => {
             json!({"body": "B"})
+        }
+        "tab_slot" => {
+            json!({"tab_plates": [{"key": 1, "body": "B", "near": o}], "slot_plates": [{"key": 2, "body": "B"}], "sheet_picks": [{"kind": "joint", "key": 3, "name": "J"}]})
         }
         "combine" => json!({"target": "B", "tools": ["B"]}),
         "pattern_rectangular" | "pattern_circular" | "pattern_path" | "mirror" => json!({"bodies": ["B"]}),

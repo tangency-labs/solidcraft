@@ -983,6 +983,11 @@ impl ModelState {
         self.kept_separate.get(&feature).copied()
     }
 
+    /// What Tab and Slot `feature` did: its joints (cut or why skipped) and each plate's tool faces.
+    pub fn tab_slot_report(&self, feature: u64) -> Option<&tab_slot::TabSlotReport> {
+        self.tab_slots.get(&feature)
+    }
+
     /// The sources (indices into its `bodies`) body Pattern `feature` could not copy and left out.
     pub fn pattern_left_out(&self, feature: u64) -> &[usize] {
         self.pattern_left_out.get(&feature).map_or(&[], Vec::as_slice)
@@ -1094,6 +1099,8 @@ pub struct ModelState {
     /// How the pieces a join split off into bodies of their own touched the others (by feature
     /// id), for its notice.
     kept_separate: BTreeMap<u64, KeptSeparate>,
+    /// What each Tab and Slot did (by feature id), for its result.
+    tab_slots: BTreeMap<u64, tab_slot::TabSlotReport>,
     /// The sources (indices into its `bodies`) each body Pattern could not copy and left out (by
     /// feature id), so the session keeps the names stored for their copies in their places
     /// ([`crate::Feature::pattern_pins`]).
@@ -2939,6 +2946,8 @@ struct Change {
     tapered: Option<Vec<(Vec3, kernel::Taper)>>,
     /// A join's touching pieces it kept as bodies of their own.
     kept_separate: Option<KeptSeparate>,
+    /// A Tab and Slot's joints and tool faces.
+    tab_slot: Option<tab_slot::TabSlotReport>,
     /// A body Pattern's sources it left out.
     pattern_left_out: Option<Vec<usize>>,
     /// Where the feature found its named faces.
@@ -2988,6 +2997,7 @@ impl ModelState {
             && others_same(&self.fitted, &before.fitted, feature)
             && self.tapered.keys().filter(|k| **k != feature).eq(before.tapered.keys().filter(|k| **k != feature))
             && others_same(&self.kept_separate, &before.kept_separate, feature)
+            && others_same(&self.tab_slots, &before.tab_slots, feature)
             && others_same(&self.pattern_left_out, &before.pattern_left_out, feature)
             && others_same(&self.named_faces, &before.named_faces, feature)
             && serde_json::to_string(&self.threads).ok() == serde_json::to_string(&before.threads).ok();
@@ -3020,6 +3030,7 @@ impl ModelState {
             fitted: self.fitted.get(&feature).cloned(),
             tapered: self.tapered.get(&feature).cloned(),
             kept_separate: self.kept_separate.get(&feature).copied(),
+            tab_slot: self.tab_slots.get(&feature).cloned(),
             pattern_left_out: self.pattern_left_out.get(&feature).cloned(),
             named_faces: self.named_faces.get(&feature).cloned(),
         })
@@ -3057,6 +3068,10 @@ impl ModelState {
         next.kept_separate.remove(&feature);
         if let Some(k) = change.kept_separate {
             next.kept_separate.insert(feature, k);
+        }
+        next.tab_slots.remove(&feature);
+        if let Some(r) = &change.tab_slot {
+            next.tab_slots.insert(feature, r.clone());
         }
         next.pattern_left_out.remove(&feature);
         if let Some(l) = &change.pattern_left_out {
@@ -10822,6 +10837,8 @@ pub mod cell_grid;
 pub(crate) mod frame_member;
 #[path = "eval_surface.rs"]
 mod surface;
+#[path = "eval_tab_slot.rs"]
+pub(crate) mod tab_slot;
 #[path = "eval_thread.rs"]
 mod thread;
 use thread::thread_on;
@@ -11789,6 +11806,11 @@ fn eval_feature_kind(
             if !before.is_empty() && st.bodies.len() == before.len() && st.bodies.iter().zip(&before).all(|(b, old)| old.same(&b.body)) {
                 append_warning(warning, "the cut removes no material; check where its profile lies, the direction and the depth".into());
             }
+            Ok(())
+        }
+        FeatureKind::TabSlot { .. } => {
+            let report = tab_slot::apply(vals, &f.kind, st, warning)?;
+            st.tab_slots.insert(f.id, report);
             Ok(())
         }
         FeatureKind::Hole { thread, thread_depth, thread_class, diameter, hand, modeled, ease_out, depth, to, .. } => {

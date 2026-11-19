@@ -59,12 +59,14 @@ pub mod intersect;
 pub mod mass;
 pub mod nurbs;
 pub mod offset;
+pub mod plate_contact;
 pub mod primitive;
 pub mod prism;
 pub mod profile;
 pub mod query;
 pub mod surface;
 pub mod sweep;
+pub mod tab_slot;
 
 pub use error::{EntityRef, Result, SolidError};
 pub use heal::face_props::Tri;

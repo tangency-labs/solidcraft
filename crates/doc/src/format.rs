@@ -735,10 +735,35 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
     // These lists used to allocate independently. Keep their existing identities, but never
     // let a later deletion make them available again after loading an older design.
     d.next_id = d.next_item_id()?;
+    mint_plate_keys(&mut d)?;
     d.drawings = crate::drawing::in_design(drawings).map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
     d.format = format_string(FORMAT);
     d.format_pending = pending_names();
     Ok(d)
+}
+
+/// Gives every Tab and Slot plate pick without a key one, as `next_id` is made safe above: a
+/// hand-edited or generated file may leave keys out or `next_plate_key` stale. Runs on every load,
+/// not as a format step. A keyless pick takes the next key in list order, tab plates first, and
+/// `next_plate_key` ends one past the largest key, so no key is handed out twice. Duplicate keys
+/// are left for the rebuild to report.
+fn mint_plate_keys(d: &mut Document) -> Result<()> {
+    let exhausted = || DocError::Invalid("damaged design: the plate key space of a tab and slot is exhausted".into());
+    for feature in &mut d.features {
+        let crate::FeatureKind::TabSlot { tab_plates, slot_plates, next_plate_key, .. } = &mut feature.kind else { continue };
+        let largest = tab_plates.iter().chain(slot_plates.iter()).filter_map(|p| p.key).max();
+        let mut next = match largest {
+            Some(k) => k.checked_add(1).ok_or_else(exhausted)?,
+            None => 1,
+        }
+        .max(*next_plate_key);
+        for pick in tab_plates.iter_mut().chain(slot_plates.iter_mut()).filter(|p| p.key.is_none()) {
+            pick.key = Some(next);
+            next = next.checked_add(1).ok_or_else(exhausted)?;
+        }
+        *next_plate_key = next;
+    }
+    Ok(())
 }
 
 /// Take a plain JSON design's drawings out of its JSON and read each, before the design's own

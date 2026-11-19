@@ -286,6 +286,18 @@ cell_grid
     Margin = cell_grid.margin (Length)
     Depth = cell_grid.depth (Length)
   expressions: cell_grid.sides, cell_grid.size, cell_grid.web, cell_grid.angle, cell_grid.margin, cell_grid.depth, cell_grid.x, cell_grid.y, cell_grid.z
+tab_slot
+  inputs:
+    Tabs Per Stretch = tab_slot.count (Unitless)
+    Spacing = tab_slot.spacing (Length)
+    Tab Width = tab_slot.tab_width (Length)
+    End Distance = tab_slot.end_distance (Length)
+    Clearance = tab_slot.clearance (Length)
+    Protrusion = tab_slot.protrusion (Length)
+    Seed = tab_slot.seed (Unitless)
+    Width Jitter = tab_slot.width_jitter (Length)
+    Tip Chamfer = tab_slot.tip_chamfer (Length)
+  expressions: tab_slot.count, tab_slot.spacing, tab_slot.tab_width, tab_slot.end_distance, tab_slot.clearance, tab_slot.protrusion, tab_slot.seed, tab_slot.width_jitter, tab_slot.tip_chamfer
 sheet_base
 sheet_contour
   inputs:
