@@ -1329,3 +1329,89 @@ fn a_hardware_hole_is_redefined_by_sheet_hardware() {
     let circles = flat_circles(&mut s);
     assert!(circles.len() == 1 && (circles[0].0 - 3.96).abs() < 1e-9, "{circles:?}");
 }
+
+fn warning(reply: &Value) -> String {
+    reply["warning"].as_str().unwrap_or("").to_string()
+}
+
+/// A hole centre nearer a free edge than the hardware's minimum (M3 nut: 4.8 mm) is a warning, the
+/// hole is cut all the same; one far enough has none.
+#[test]
+fn a_hardware_hole_near_an_edge_warns() {
+    let mut s = plate();
+    let far = run(&mut s, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": [50, 30, T]}));
+    assert_eq!(warning(&far), "", "a centre 30 mm from every edge");
+    let near = run(&mut s, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": [3, 30, T]}));
+    let w = warning(&near);
+    assert!(w.starts_with("The hole at (3, 30) is 3 mm from the nearest edge, cut-out or other hole") && w.contains("an M3 nut needs 4.8 mm"), "{w}");
+    assert!(!w.contains("from a bend"), "{w}");
+    assert_eq!(flat_circles(&mut s).len(), 2, "the hole is cut");
+    // Another hole's rim counts as an edge: 4.8 mm minimum from a cut-out too. The two holes are 6 mm
+    // apart centre to centre, 6 - 2.125 = 3.875 mm from the first's rim to this centre, and clear of each other.
+    let beside = run(&mut s, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": [50, 36, T]}));
+    assert!(warning(&beside).contains("3.88 mm from the nearest edge, cut-out or other hole"), "{}", warning(&beside));
+}
+
+/// A centre too near a bend is a warning measured to where the bend starts, the boundary of the
+/// bend's zone (read here from the flat pattern's `bend_zones`); the same hole far from the bend has
+/// none. The hole is clear of the zone, so the sheet cuts it, but its centre is nearer than 4.8 mm.
+#[test]
+fn a_hardware_hole_near_a_bend_warns() {
+    let mut s = plate();
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, T]], "height": 20}));
+    let near = run(&mut s, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": [50, 8, T]}));
+    let w = warning(&near);
+    assert!(w.contains("mm from a bend (to where the bend starts)") && w.contains("an M3 nut needs 4.8 mm"), "{w}");
+    assert!(!w.contains("nearest edge"), "{w}");
+    // The distance is the centre's from the nearest side of the bend's zone in the flat.
+    let flat = run(&mut s, "sheet.flat_pattern", json!({}));
+    let at = flat["cutout_shapes"][0]["circle"]["center"][1].as_f64().unwrap_or(f64::NAN);
+    let zone = &flat["bend_zones"][0];
+    let side = |i: usize| (at - zone[i].as_f64().unwrap_or(f64::NAN)).abs();
+    let shown: f64 = w.split(" mm from a bend").next().and_then(|t| t.rsplit(' ').next()).and_then(|n| n.parse().ok()).unwrap_or(f64::NAN);
+    assert!((shown - side(2).min(side(3))).abs() < 0.006, "{shown} vs the zone {zone} and the centre at {at}: {w}");
+    let far = run(&mut s, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": [50, 30, T]}));
+    assert_eq!(warning(&far), "");
+}
+
+/// A centre inside a bend's zone is in the bend, however wide the zone is: a wide bend's middle is
+/// farther than the minimum from both sides of its zone, and must warn all the same. Cut while the
+/// sheet is unfolded (folded, the sheet refuses a hole through a bend).
+#[test]
+fn a_hardware_hole_inside_a_wide_bend_zone_warns() {
+    let mut s = plate();
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, T]], "height": 20, "radius": "10 mm"}));
+    run(&mut s, "sheet.unfold", json!({}));
+    let zone = run(&mut s, "sheet.flat_pattern", json!({}))["bend_zones"][0].clone();
+    let (y0, y1) = (zone[2].as_f64().unwrap_or(f64::NAN), zone[3].as_f64().unwrap_or(f64::NAN));
+    let middle = (y0 + y1) / 2.0;
+    assert!((y1 - y0) / 2.0 > 4.8 + 1.0, "the zone's middle is farther than the minimum from both sides: {zone}");
+    let reply = run(&mut s, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": [50, middle, T]}));
+    let w = warning(&reply);
+    assert!(w.contains("is in a bend") && w.contains("an M3 nut needs its centre 4.8 mm from where a bend starts"), "{w}");
+    assert!(!w.contains("mm from a bend"), "{w}");
+    // Clear of the zone by more than the minimum: none.
+    let far = run(&mut s, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": [50, y1 + 12.0, T]}));
+    assert_eq!(warning(&far), "");
+}
+
+/// A sheet that is rebuilt thinner than the hardware (the gauge changed) only warns: the timeline
+/// still evaluates. (`sheet.hardware` run on a sheet that thin refuses.)
+#[test]
+fn a_sheet_made_thinner_than_its_hardware_warns_and_still_builds() {
+    let mut s = session();
+    rule(&mut s, "Test", T, 0.44, 2.0, 0.5);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
+    let reply = run(&mut s, "sheet.hardware", json!({"kind": "flush_nut", "thread": "M3", "position": [50, 30, T]}));
+    let id = reply["feature"].as_u64().unwrap();
+    assert_eq!(warning(&reply), "");
+    rule(&mut s, "Test", 1.0, 0.44, 1.0, 0.5);
+    let result = s.model.result(id).cloned().expect("the hardware feature was evaluated");
+    assert!(result.error.is_none(), "a thinner gauge must not break the timeline: {:?}", result.error);
+    let w = result.warning.unwrap_or_default();
+    assert!(w.contains("is 1 mm thick") && w.contains("an M3 flush nut is made for a sheet of at least 1.5 mm"), "{w}");
+    assert!(w.starts_with("Body1 is 1 mm thick: ") && !w.contains('`'), "a message starts with a capital and has no markdown marks: {w}");
+}
