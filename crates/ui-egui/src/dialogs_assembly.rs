@@ -2175,6 +2175,8 @@ pub(crate) fn build_world_preview(preview: solidcraft_engine::Preview, colors: C
                 b.scene.ghost.clear();
             }
             b.bounds = after.bodies.iter().fold(Aabb3::EMPTY, |acc, x| acc.union(&x.mesh().bounds()));
+            // The joints the preview posed: what a reader of the pose sees the preview show.
+            b.joints = preview.joints;
             Ok(b)
         }
         Err(_) => Err("the preview failed".into()),
