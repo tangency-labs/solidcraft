@@ -155,7 +155,7 @@ pub fn conic_spans(g: Piece) -> Vec<Piece> {
     if !double || !ends {
         return vec![g];
     }
-    let mut out = Vec::with_capacity(spans);
+    let mut out = Vec::new();
     for i in 0..spans {
         let (Some(a), Some(apex), Some(b), Some(w0), Some(w1), Some(w2)) = (
             pts.get(2 * i),
