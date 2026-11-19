@@ -12,10 +12,12 @@
 //! and all the scans are read into one cloud. `colorRed`, `colorGreen` and `colorBlue` are the
 //! colours, over the range the scan's `colorLimits` (or else the field) gives, and `intensity`
 //! becomes a column. A point the file marks as having no position (`cartesianInvalidState` or
-//! `sphericalInvalidState` not 0) is left out. The pictures (`/images2D`) are not read. The file is
-//! untrusted: every checksum is checked and every offset and count is checked against its size.
+//! `sphericalInvalidState` not 0) is left out. Other fields, of any type, and the pictures
+//! (`/images2D`) are passed over. The file is untrusted: every checksum is checked, every offset
+//! and count is checked against its size, and the packets of all the scans together may not add
+//! up to more than the file (scans that share their points would be read again and again).
 
-use solidcraft_doc::point_cloud::{Column, Complex, Floats, On};
+use solidcraft_doc::point_cloud::{Column, Complex, Floats, MAX_POINTS, On};
 
 use crate::ply_complex::PlyCloud;
 use crate::{IoError, Result};
@@ -250,6 +252,8 @@ enum Kind {
     Float { double: bool },
     /// Whole numbers from `min`, each in `bits` bits, then scaled: `value * scale + offset`.
     Integer { min: i64, bits: u32, scale: f64, offset: f64 },
+    /// Another type (a string): passed over, and refused only where a number is needed.
+    Other,
 }
 
 #[derive(Clone, Debug)]
@@ -285,7 +289,7 @@ impl Field {
                 let ends = [min as f64 * scale + offset, max as f64 * scale + offset];
                 (Kind::Integer { min, bits, scale, offset }, (ends[0].min(ends[1]), ends[0].max(ends[1])))
             }
-            other => return Err(invalid(format!("the field `{}` is of the type `{}`, which a point cannot hold", short(&n.name), short(other)))),
+            _ => (Kind::Other, (0.0, 0.0)),
         };
         Ok(Field { name: n.name.clone(), kind, range })
     }
@@ -343,6 +347,7 @@ impl<'a> Stream<'a> {
             Kind::Float { double: true } => f64::from_bits(self.bits(64)?),
             Kind::Float { double: false } => f64::from(f32::from_bits(self.bits(32)? as u32)),
             Kind::Integer { min, bits, scale, offset } => (i128::from(min) + i128::from(self.bits(bits)?)) as f64 * scale + offset,
+            Kind::Other => return Err(invalid("a field the points need is not a number")),
         })
     }
 }
@@ -372,8 +377,16 @@ fn rotation(q: [f64; 4]) -> Result<[[f64; 3]; 3]> {
     ])
 }
 
+/// What all the scans together may take: the bytes of their packets, which scans that share their
+/// points would count again and again, and the points of scans whose every field holds one value,
+/// which take no bytes at all.
+struct Budget {
+    bytes: usize,
+    constant_points: u64,
+}
+
 /// The runs of bytes each of a scan's `fields` fields has in the section at `start`.
-fn packets(l: &[u8], start: usize, page: usize, fields: usize) -> Result<Vec<Vec<&[u8]>>> {
+fn packets<'a>(l: &'a [u8], start: usize, page: usize, fields: usize, budget: &mut Budget) -> Result<Vec<Vec<&'a [u8]>>> {
     // The section header: its kind (1, points), its length and where its first packet is.
     if l.get(start) != Some(&1) {
         return Err(invalid("a scan's points are not in a section of points"));
@@ -386,6 +399,8 @@ fn packets(l: &[u8], start: usize, page: usize, fields: usize) -> Result<Vec<Vec
         let kind = *l.get(at).ok_or_else(early)?;
         let length = usize::from(u16_at(l, at + 2)?) + 1;
         let packet = l.get(at..at + length).filter(|_| at + length <= end).ok_or_else(early)?;
+        budget.bytes =
+            budget.bytes.checked_sub(length).ok_or_else(|| invalid("the scans' packets add up to more than the file: scans share their points"))?;
         match kind {
             // Points: the number of runs, their lengths, then the runs.
             1 => {
@@ -409,23 +424,31 @@ fn packets(l: &[u8], start: usize, page: usize, fields: usize) -> Result<Vec<Vec
     Ok(out)
 }
 
-fn scan<'a>(n: &Node, l: &'a [u8], page: usize) -> Result<Scan<'a>> {
+fn scan<'a>(n: &Node, l: &'a [u8], page: usize, budget: &mut Budget) -> Result<Scan<'a>> {
     let points = n.child("points").filter(|p| p.attr("type") == Some("CompressedVector")).ok_or_else(|| invalid("a scan has no points"))?;
     let prototype = points.child("prototype").ok_or_else(|| invalid("a scan's points have no prototype"))?;
     if prototype.children.len() > MAX_FIELDS {
         return Err(invalid(format!("a point has more than {MAX_FIELDS} fields")));
     }
     let fields = prototype.children.iter().map(Field::of).collect::<Result<Vec<_>>>()?;
-    if let Some(codec) = points.child("codecs").and_then(|c| c.children.first()) {
-        return Err(invalid(format!("the points are packed with `{}`, which is not read", short(&codec.name))));
+    // No codecs means the bit packing for every field; a codec may also name it.
+    for codec in points.child("codecs").map(|c| c.children.as_slice()).unwrap_or_default() {
+        if codec.child("bitPackCodec").is_none() {
+            let name = codec.children.iter().map(|c| c.name.as_str()).find(|n| *n != "inputs").unwrap_or(codec.name.as_str());
+            return Err(invalid(format!("the points are packed with `{}`, which is not read", short(name))));
+        }
     }
     let records = points.integer_attr("recordCount", 0)?;
     let records = u64::try_from(records).map_err(|_| invalid("a scan has fewer than no points"))?;
     let offset = u64::try_from(points.integer_attr("fileOffset", -1)?).map_err(|_| invalid("a scan does not say where its points are"))?;
-    let streams = packets(l, to_logical(offset, page)?, page, fields.len())?;
-    // A point takes at least one bit, unless every field holds one value: then it is one point.
+    let streams = packets(l, to_logical(offset, page)?, page, fields.len(), budget)?;
+    // A point takes at least one bit, unless every field holds one value: then its points take
+    // none, and only as many are made as a cloud can hold.
     let bits: u64 = streams.iter().flatten().map(|r| r.len() as u64 * 8).sum();
-    if records > bits.max(1) {
+    if bits == 0 {
+        budget.constant_points =
+            budget.constant_points.checked_sub(records).ok_or_else(|| invalid(format!("a scan says it has {records} points of one value each")))?;
+    } else if records > bits {
         return Err(invalid(format!("a scan says it has {records} points, more than its data holds")));
     }
     let pose = n.child("pose");
@@ -478,7 +501,7 @@ impl Roles {
             [Some(r), Some(g), Some(b)] => Some([r, g, b]),
             _ => None,
         };
-        Ok(Roles {
+        let roles = Roles {
             position,
             spherical,
             invalid,
@@ -486,7 +509,17 @@ impl Roles {
             color_invalid: at("isColorInvalid"),
             intensity: at("intensity"),
             intensity_invalid: at("isIntensityInvalid"),
-        })
+        };
+        // A field the points need must be a number; the others may be anything.
+        let used = roles
+            .position
+            .iter()
+            .chain(roles.color.iter().flatten())
+            .chain([roles.invalid, roles.color_invalid, roles.intensity, roles.intensity_invalid].iter().flatten());
+        if let Some(f) = used.filter_map(|i| fields.get(*i)).find(|f| f.kind == Kind::Other) {
+            return Err(invalid(format!("the field `{}` is not a number", short(&f.name))));
+        }
+        Ok(roles)
     }
 }
 
@@ -578,7 +611,9 @@ pub(crate) fn read_e57_cloud(bytes: &[u8], max_points: usize) -> Result<PlyCloud
     if data.len() > MAX_SCANS {
         return Err(invalid(format!("more than {MAX_SCANS} scans")));
     }
-    let scans = data.iter().map(|n| scan(n, &l, h.page)).collect::<Result<Vec<_>>>()?;
+    // The packets lie outside the XML part.
+    let mut budget = Budget { bytes: l.len().saturating_sub(xml_length), constant_points: MAX_POINTS as u64 };
+    let scans = data.iter().map(|n| scan(n, &l, h.page, &mut budget)).collect::<Result<Vec<_>>>()?;
     if scans.is_empty() {
         return Err(invalid("the file has no scans"));
     }
@@ -894,6 +929,21 @@ mod tests {
     }
 
     #[test]
+    fn a_scan_whose_fields_each_hold_one_value_has_all_its_points() {
+        // Every field's minimum is its maximum: the values take no bits, and the points are made.
+        let s = TestScan {
+            fields: vec![
+                F::Scaled("cartesianX", 5, 5, 0.5, 0.0, vec![5, 5]),
+                F::Scaled("cartesianY", 0, 0, 1.0, 1.0, vec![0, 0]),
+                F::Int("cartesianZ", -3, -3, vec![-3, -3]),
+            ],
+            ..TestScan::default()
+        };
+        let r = read_e57_cloud(&e57(&[s], 1024), 10).unwrap();
+        assert!(near(&r.positions, &[[2.5, 1.0, -3.0], [2.5, 1.0, -3.0]]), "{:?}", r.positions);
+    }
+
+    #[test]
     fn points_without_a_position_are_left_out_before_thinning() {
         let s = TestScan {
             fields: vec![
@@ -956,6 +1006,28 @@ mod tests {
         };
         let one = |prototype: &str| file(&points("fileOffset=\"@DATA\" recordCount=\"1\"", prototype), &section(&p));
         assert!(read_e57_cloud(&one(xyz_fields), 10).is_ok(), "{:?}", read_e57_cloud(&one(xyz_fields), 10).err());
+        // A string field the points do not need is passed over; its run still counts.
+        let with_label = section(&packet(&[&[0; 8], &[0; 8], &[0; 8], &[]]));
+        let label = format!("{xyz_fields}<label type=\"String\"/>");
+        assert!(read_e57_cloud(&file(&points("fileOffset=\"@DATA\" recordCount=\"1\"", &label), &with_label), 10).is_ok());
+        // The bit packing named as a codec is read; another codec is not.
+        let codec = |name: &str| {
+            format!(
+                "<e57Root type=\"Structure\"><data3D type=\"Vector\"><vectorChild type=\"Structure\"><points type=\"CompressedVector\" \
+                 fileOffset=\"@DATA\" recordCount=\"1\"><prototype type=\"Structure\">{xyz_fields}</prototype><codecs type=\"Vector\">\
+                 <vectorChild type=\"Structure\"><inputs type=\"Vector\"/><{name} type=\"Structure\"/></vectorChild></codecs></points>\
+                 </vectorChild></data3D></e57Root>"
+            )
+        };
+        assert!(read_e57_cloud(&file(&codec("bitPackCodec"), &section(&p)), 10).is_ok());
+        let e = read_e57_cloud(&file(&codec("zipCodec"), &section(&p)), 10).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.contains("zipCodec"), "{e}");
+        // Two scans that share their points count the packets twice: more than the file holds.
+        let scan = "<vectorChild type=\"Structure\"><points type=\"CompressedVector\" fileOffset=\"@DATA\" recordCount=\"1\">\
+                    <prototype type=\"Structure\"><cartesianX type=\"Float\"/><cartesianY type=\"Float\"/><cartesianZ type=\"Float\"/>\
+                    </prototype></points></vectorChild>";
+        let shared = |n: usize| format!("<e57Root type=\"Structure\"><data3D type=\"Vector\">{}</data3D></e57Root>", scan.repeat(n));
+        assert!(read_e57_cloud(&file(&shared(4000), &section(&p)), 10).is_err());
         let mut unknown = p.clone();
         unknown[0] = 9;
         let mut long_run = p.clone();
