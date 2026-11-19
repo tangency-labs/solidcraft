@@ -737,6 +737,25 @@ fn a_part_with_one_body_imported_and_one_not_is_said_not_checked() {
     assert!(!notes.is_empty() && notes.iter().all(|n| n.contains("was not checked")), "{notes:?}");
 }
 
+/// A part whose solid could not be closed, come in as an open surface of the faces that read, is
+/// said not checked against the volume and centre its file states, not left out of them unsaid.
+#[test]
+fn a_part_whose_solid_came_in_open_is_said_not_checked() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let ours = solidcraft_kernel::step_import(&std::fs::read_to_string(dir.join("washer.step")).unwrap()).unwrap();
+    let m = solidcraft_kernel::measure(&ours.bodies[0].body).unwrap();
+    // One face's plane moved 5 mm off its edges: the reader names that face, and the solid comes
+    // in open.
+    let text = washer_stating(m.volume, [m.centroid.x, m.centroid.y, m.centroid.z])
+        .replace("#50=CARTESIAN_POINT('',(0.0,0.0,0.0));", "#50=CARTESIAN_POINT('',(0.0,0.0,-5.0));");
+    let ir = neutral(text.as_bytes(), "washer.step");
+    let (records, origins) = traced_records(&ir, "washer", "", true);
+    assert!(records.bodies.iter().any(|b| b.sheet), "{:?}", records.warnings);
+    let imp = solidcraft_kernel::records_import(&records).unwrap();
+    let notes = validation::check(&ir, &records, &origins, &imp);
+    assert!(!notes.is_empty() && notes.iter().all(|n| n.contains("came in as open surfaces")), "{notes:?}");
+}
+
 /// The washer with the CAx-IF validation properties a CAD system writes for it: its volume and its
 /// centre, as `volume` and `centre` give them.
 fn washer_stating(volume: f64, centre: [f64; 3]) -> String {
