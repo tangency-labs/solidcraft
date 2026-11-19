@@ -2391,6 +2391,11 @@ pub struct CarriedFace {
     /// to its second, each end along the trace of the face that ends the round there. A
     /// rectangle between ends square to the edge.
     pub outline: [[f64; 2]; 4],
+    /// The edge's length.
+    pub length: f64,
+    /// How far along the edge the slab's start and its end run for each unit across it: 0
+    /// for an end square to the edge.
+    pub ends: [f64; 2],
     /// The slab's extent along the outward normal, up to the face's plane.
     pub depth: [f64; 2],
     /// How far to either side of its plane the face's outline is to be carried.
@@ -2398,6 +2403,27 @@ pub struct CarriedFace {
     /// Which way along `across` from the edge's line the other face's material stands, in the
     /// face's plane: `1.0` or `-1.0`.
     pub other_side: f64,
+}
+
+impl CarriedFace {
+    /// The outline of the region past the edge's line on the other face's side of it, in
+    /// (`along`, `across`) from `origin` (the kernel's
+    /// [`solidcore::blend::carried_face::past_edge_outline`]): between the slab's two ends,
+    /// from the edge's line out to `room`, or to where the slab stops if that is nearer. What
+    /// a blend adds over the other face lies here, not over the carried face's outline.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for a `room` that is not finite and positive.
+    pub fn past_edge(&self, room: f64) -> Result<[[f64; 2]; 4]> {
+        solidcore::blend::carried_face::past_edge_outline(
+            self.length,
+            self.ends,
+            &self.outline,
+            self.other_side,
+            room,
+        )
+        .map_err(|_| Error::Argument)
+    }
 }
 
 /// The flat faces of `body`'s edge at index `edge` that a round of radius `radius` can be
@@ -2478,6 +2504,8 @@ fn carried_face_indices(
             along: [c.along.x, c.along.y, c.along.z],
             across: [c.across.x, c.across.y, c.across.z],
             outline: c.outline,
+            length: c.length,
+            ends: c.ends,
             depth: c.depth,
             reach: c.reach,
             other_side: c.other_side,

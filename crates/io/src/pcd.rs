@@ -281,7 +281,17 @@ enum Source<'a> {
     Columns { b: Vec<u8>, points: usize },
 }
 
-impl Source<'_> {
+impl<'a> Source<'a> {
+    /// Take the next point's `count` values from `tokens` (text; a binary source holds them all).
+    fn load(&mut self, tokens: &mut impl Iterator<Item = &'a [u8]>, count: usize) -> Result<()> {
+        if let Source::Text(values) = self {
+            values.clear();
+            for _ in 0..count {
+                values.push(tokens.next().ok_or_else(early)?);
+            }
+        }
+        Ok(())
+    }
     /// The bytes that start with point `r`'s value of `f`.
     fn at(&self, f: &Field, r: usize) -> Result<&[u8]> {
         match self {
@@ -380,8 +390,25 @@ pub(crate) fn read_pcd_cloud(bytes: &[u8], max_points: usize) -> Result<PlyCloud
             Source::Columns { b: lzf(data, expanded)?, points: h.points as usize }
         }
     };
-    let stride = h.points.div_ceil(max_points.max(1) as u64).max(1);
-    let mut tokens = body.split(u8::is_ascii_whitespace).filter(|t| !t.is_empty());
+    let max = max_points.max(1) as u64;
+    let tokens = || body.split(u8::is_ascii_whitespace).filter(|t| !t.is_empty());
+    let position = |s: &Source, r: usize| -> Result<Option<[f64; 3]>> {
+        let p = [s.value(x, r)?, s.value(y, r)?, s.value(z, r)?];
+        Ok(p.iter().all(|v| v.is_finite()).then_some(p))
+    };
+    // Points without a position (`nan`, as a depth camera writes where it saw nothing) are left
+    // out before thinning, so they never take the place of points that have one.
+    let mut eligible = h.points;
+    if h.points > max {
+        let mut t = tokens();
+        eligible = 0;
+        // The checks above leave no more points than a slice can hold.
+        for r in 0..h.points as usize {
+            source.load(&mut t, h.values)?;
+            eligible += u64::from(position(&source, r)?.is_some());
+        }
+    }
+    let stride = eligible.div_ceil(max).max(1);
     let mut out = PlyCloud {
         positions: Vec::new(),
         colors: rgb.map(|_| Vec::new()),
@@ -389,25 +416,21 @@ pub(crate) fn read_pcd_cloud(bytes: &[u8], max_points: usize) -> Result<PlyCloud
         vertices: h.points,
         bad_faces: 0,
         cells_left_out: 0,
+        skipped: 0,
     };
     let mut columns: Vec<Vec<f32>> = vec![Vec::new(); others.len()];
-    for r in 0..h.points {
-        let kept = r.is_multiple_of(stride);
-        if let Source::Text(values) = &mut source {
-            values.clear();
-            for _ in 0..h.values {
-                let token = tokens.next().ok_or_else(early)?;
-                if kept {
-                    values.push(token);
-                }
-            }
-        }
-        if !kept {
+    let (mut t, mut seen) = (tokens(), 0u64);
+    for r in 0..h.points as usize {
+        source.load(&mut t, h.values)?;
+        let Some(p) = position(&source, r)? else {
+            out.skipped += 1;
+            continue;
+        };
+        seen += 1;
+        if !(seen - 1).is_multiple_of(stride) {
             continue;
         }
-        // The checks above leave no more points than a slice can hold.
-        let r = r as usize;
-        out.positions.push([source.value(x, r)?, source.value(y, r)?, source.value(z, r)?]);
+        out.positions.push(p);
         if let (Some(colors), Some(f)) = (out.colors.as_mut(), rgb) {
             colors.push(source.color(f, r)?);
         }
@@ -541,19 +564,24 @@ mod tests {
     }
 
     #[test]
-    fn a_grid_of_points_is_thinned_and_keeps_the_points_without_a_number() {
+    fn a_grid_of_points_leaves_out_the_points_without_a_number_before_thinning() {
         // A depth camera's picture: `WIDTH` by `HEIGHT` with no `POINTS` line, and `nan` where it
         // saw nothing.
         let file = "VERSION .7\nFIELDS x y z t\nSIZE 4 4 4 8\nTYPE F F F F\nWIDTH 3\nHEIGHT 2\nDATA ascii\n\
             0 0 1 0.5\nnan nan nan 1.5\n2 0 1 2.5\n0 1 1 3.5\n1 1 1 4.5\n2 1 1 5.5\n";
         let all = read_pcd_cloud(file.as_bytes(), 6).unwrap();
-        assert_eq!((all.vertices, all.positions.len()), (6, 6));
-        assert!(all.positions[1].iter().all(|v| v.is_nan()) && all.colors.is_none());
+        assert_eq!((all.vertices, all.positions.len(), all.skipped), (6, 5, 1));
+        assert!(all.positions.iter().flatten().all(|v| v.is_finite()) && all.colors.is_none());
+        assert_eq!(&*all.complex.column("t", On::Point).unwrap().values.0, &[0.5, 2.5, 3.5, 4.5, 5.5], "the point left out takes its number");
+        // Thinned, every second of the five points with a position.
         let thin = read_pcd_cloud(file.as_bytes(), 3).unwrap();
-        assert_eq!(thin.vertices, 6);
-        assert_eq!(thin.positions, [[0.0, 0.0, 1.0], [2.0, 0.0, 1.0], [1.0, 1.0, 1.0]], "every second point");
-        assert_eq!(&*thin.complex.column("t", On::Point).unwrap().values.0, &[0.5, 2.5, 4.5]);
+        assert_eq!((thin.vertices, thin.skipped), (6, 1));
+        assert_eq!(thin.positions, [[0.0, 0.0, 1.0], [0.0, 1.0, 1.0], [2.0, 1.0, 1.0]]);
+        assert_eq!(&*thin.complex.column("t", On::Point).unwrap().values.0, &[0.5, 3.5, 5.5]);
         thin.complex.check(3).unwrap();
+        // A point without a position never takes the place of one that has it.
+        let one = "FIELDS x y z\nSIZE 4 4 4\nTYPE F F F\nPOINTS 2\nDATA ascii\nnan nan nan\n1 2 3\n";
+        assert_eq!(read_pcd_cloud(one.as_bytes(), 1).unwrap().positions, [[1.0, 2.0, 3.0]]);
     }
 
     #[test]
@@ -596,9 +624,10 @@ mod tests {
         assert_eq!(colour("U", "255"), [0, 0, 255]);
         assert_eq!(colour("I", "-16711936"), [0, 255, 0]);
         // A missing position as a C library on Windows prints it, and type letters in lower case.
-        let file = "FIELDS x y z\nSIZE 4 4 4\nTYPE f f f\nPOINTS 2\nDATA ascii\n1 2 -nan(ind)\n4 5 1.#QNAN\n";
+        // Both are read as numbers, so the file is read, and both points are left out.
+        let file = "FIELDS x y z\nSIZE 4 4 4\nTYPE f f f\nPOINTS 3\nDATA ascii\n1 2 -nan(ind)\n4 5 1.#QNAN\n7 8 9\n";
         let r = read_pcd_cloud(file.as_bytes(), 10).unwrap();
-        assert!(r.positions.iter().all(|p| p[0].is_finite() && p[2].is_nan()), "{:?}", r.positions);
+        assert_eq!((r.positions, r.skipped), (vec![[7.0, 8.0, 9.0]], 2));
     }
 
     #[test]
