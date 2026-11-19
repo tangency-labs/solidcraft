@@ -214,6 +214,18 @@ fn create(app: &mut SolveApp, params: Value) -> bool {
     match app.run("drawing.create", params) {
         Ok(_) => {
             crate::drawing_sheet_page::fit(app);
+            if app.preferences.design_sub_tab_sheets {
+                let owner = app
+                    .session
+                    .open_drawing
+                    .and_then(|id| app.session.doc.drawing(id))
+                    .and_then(|drawing| drawing.sheets.first().map(|sheet| (drawing.id, sheet.id)));
+                if let Some((drawing, sheet)) = owner
+                    && let Err(error) = crate::sheet_views::open_in(app, drawing, sheet, false)
+                {
+                    app.set_status(error, true);
+                }
+            }
             true
         }
         Err(error) => {

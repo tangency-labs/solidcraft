@@ -1770,6 +1770,7 @@ impl SolveApp {
             r => r,
         };
         if let Ok(v) = &r {
+            sheet_views::command_opened(self, id, v);
             if id.eq_ignore_ascii_case("plugin.inspect")
                 && let Some(id) = v.pointer("/manifest/id").and_then(Value::as_str)
             {
@@ -1983,6 +1984,7 @@ impl SolveApp {
             Ok(value)
         });
         crate::sketch_view::project(self);
+        crate::drawing_sheet_page::retire_closed(self);
         if r.is_ok() && self.session.active_sketch.is_some() && !self.sketch_finish_processing {
             let before = self.settled_cam();
             self.look_at_opened_sketch(before);
@@ -4314,6 +4316,8 @@ impl SolveApp {
 
     /// Lay out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        let host = self.view_windows.current_window();
+        let opening_host = self.view_windows.opening_host(Some(host));
         plugins::tick(self, ui.ctx(), false);
         documents::give_up_renames_of_other_designs(self);
         params_dialog::install_expressions(ui.ctx());
@@ -4360,6 +4364,7 @@ impl SolveApp {
         documents::sync_linked_active(self);
         documents::sync_views(self);
         documents::sync_window_title(self, ui.ctx());
+        self.view_windows.opening_host(opening_host);
     }
 
     fn cad_ui(&mut self, ui: &mut egui::Ui, report_input: &mut Option<issue_report::CadInput>) {
@@ -4499,15 +4504,19 @@ impl SolveApp {
     }
 
     fn show_workspace(&mut self, ui: &mut egui::Ui) {
-        if drawing_workspace::active(self) {
+        if view_tiles::shown(self) && (self.preferences.workspace_follows_view || !drawing_workspace::active(self)) {
+            view_tiles::show(self, ui);
+        } else if self.docs.views.active().kind == solidcraft_views::ViewKind::Sheet && !dialogs_sheet::flat_active(self) {
+            dim_view::set_model_drawn(Vec::new());
+            let id = self.docs.views.active().id;
+            drawing_sheet_page::show_view(self, ui, id);
+        } else if drawing_workspace::active(self) {
             if dialogs_sheet::flat_active(self) {
                 viewport::show(self, ui);
             } else {
                 dim_view::set_model_drawn(Vec::new());
                 drawing_workspace::show(self, ui);
             }
-        } else if view_tiles::shown(self) {
-            view_tiles::show(self, ui);
         } else if view_window_drag::unanchored(self, ui.ctx(), self.docs.views.active().id) {
             self.viewport.rect = Some(ui.max_rect());
             let t = solidcraft_theme::Tokens::get();
