@@ -280,8 +280,18 @@ pub(crate) fn refresh(app: &mut SolveApp, now: f64) {
         return;
     }
     let began = *m.began.get_or_insert(now);
-    let mut st = (*m.world).clone();
-    st.bodies = order.iter().filter_map(|&i| m.world.bodies.get(i).cloned()).collect();
+    // Bodies are only ever added to `order`: the picture before holds its first bodies. Where
+    // nothing else holds that picture any more, the new bodies are added to it; otherwise the
+    // bodies so far are copied, never the world's every body (copying the world and dropping its
+    // bodies again took most of a second over the open of a design of 56 000 bodies).
+    let before = m.shown.take().and_then(|(n, st)| Arc::try_unwrap(st).ok().map(|st| (n, st)));
+    let st = match before {
+        Some((n, mut st)) if n <= done && st.bodies.len() == n => {
+            st.bodies.extend(order.get(n..).unwrap_or_default().iter().filter_map(|&i| m.world.bodies.get(i).cloned()));
+            st
+        }
+        _ => m.world.with_bodies(order.iter().filter_map(|&i| m.world.bodies.get(i).cloned()).collect()),
+    };
     if !m.first_shown && !st.bodies.is_empty() {
         m.first_shown = true;
         if profiling() {
@@ -366,9 +376,18 @@ thread_local! {
 #[cfg(test)]
 pub(crate) fn show_only(app: &mut SolveApp, shown: &[usize]) {
     let Some(m) = app.open_meshing.as_mut() else { return };
-    let mut st = (*m.world).clone();
-    st.bodies = shown.iter().filter_map(|&i| m.world.bodies.get(i).cloned()).collect();
+    let st = m.world.with_bodies(shown.iter().filter_map(|&i| m.world.bodies.get(i).cloned()).collect());
     m.shown = Some((shown.len(), Arc::new(st)));
+}
+
+/// Mark the bodies `ready` of the world being opened (by their index in it, in that order) as
+/// the ones meshed so far, as the meshing thread does.
+#[cfg(test)]
+pub(crate) fn set_ready(app: &mut SolveApp, ready: &[usize]) {
+    let Some(m) = app.open_meshing.as_mut() else { return };
+    if let Ok(mut r) = m.ready.lock() {
+        *r = ready.to_vec();
+    }
 }
 
 /// Run `f` as the web build runs: meshing cannot start a thread.

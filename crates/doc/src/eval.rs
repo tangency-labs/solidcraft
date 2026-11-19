@@ -1109,6 +1109,53 @@ impl KeptSeparate {
 }
 
 impl ModelState {
+    /// This state with `bodies` in place of its own, the rest copied: a picture of some of a
+    /// model's bodies (the bodies of a design being opened that are meshed so far) without
+    /// copying every body of the model first and then dropping them.
+    pub fn with_bodies(&self, bodies: Vec<ModelBody>) -> ModelState {
+        // Every field named, so a new one is not left out.
+        let ModelState {
+            frame_bodies,
+            origin_frames,
+            threads,
+            bodies: _,
+            sketches,
+            body_counter,
+            reserved_body_names,
+            surface_sheets,
+            construct,
+            sketch_keys,
+            blend_edges,
+            named_faces,
+            fitted,
+            tapered,
+            kept_separate,
+            pattern_left_out,
+            legacy_picks,
+            cut_extents,
+        } = self;
+        ModelState {
+            frame_bodies: frame_bodies.clone(),
+            origin_frames: origin_frames.clone(),
+            threads: threads.clone(),
+            bodies,
+            sketches: sketches.clone(),
+            body_counter: *body_counter,
+            reserved_body_names: reserved_body_names.clone(),
+            surface_sheets: surface_sheets.clone(),
+            construct: construct.clone(),
+            sketch_keys: sketch_keys.clone(),
+            blend_edges: blend_edges.clone(),
+            named_faces: named_faces.clone(),
+            fitted: fitted.clone(),
+            tapered: tapered.clone(),
+            kept_separate: kept_separate.clone(),
+            pattern_left_out: pattern_left_out.clone(),
+            legacy_picks: legacy_picks.clone(),
+            cut_extents: cut_extents.clone(),
+        }
+    }
+
     /// How many joint origins have been resolved from the bodies of this model (and its copies),
     /// not taken from the frames kept ([`OriginFrames`]).
     pub fn origin_resolutions(&self) -> usize {
