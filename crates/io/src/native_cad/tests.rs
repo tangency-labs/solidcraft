@@ -737,6 +737,25 @@ fn a_part_with_one_body_imported_and_one_not_is_said_not_checked() {
     assert!(!notes.is_empty() && notes.iter().all(|n| n.contains("was not checked")), "{notes:?}");
 }
 
+/// A part whose solid could not be closed, come in as an open surface of the faces that read, is
+/// said not checked against the volume and centre its file states, not left out of them unsaid.
+#[test]
+fn a_part_whose_solid_came_in_open_is_said_not_checked() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let ours = solidcraft_kernel::step_import(&std::fs::read_to_string(dir.join("washer.step")).unwrap()).unwrap();
+    let m = solidcraft_kernel::measure(&ours.bodies[0].body).unwrap();
+    // One face's plane moved 5 mm off its edges: the reader names that face, and the solid comes
+    // in open.
+    let text = washer_stating(m.volume, [m.centroid.x, m.centroid.y, m.centroid.z])
+        .replace("#50=CARTESIAN_POINT('',(0.0,0.0,0.0));", "#50=CARTESIAN_POINT('',(0.0,0.0,-5.0));");
+    let ir = neutral(text.as_bytes(), "washer.step");
+    let (records, origins) = traced_records(&ir, "washer", "", true);
+    assert!(records.bodies.iter().any(|b| b.sheet), "{:?}", records.warnings);
+    let imp = solidcraft_kernel::records_import(&records).unwrap();
+    let notes = validation::check(&ir, &records, &origins, &imp);
+    assert!(!notes.is_empty() && notes.iter().all(|n| n.contains("came in as open surfaces")), "{notes:?}");
+}
+
 /// The washer with the CAx-IF validation properties a CAD system writes for it: its volume and its
 /// centre, as `volume` and `centre` give them.
 fn washer_stating(volume: f64, centre: [f64; 3]) -> String {
@@ -906,4 +925,39 @@ fn a_broken_mesh_record_is_left_out_with_why() {
         let imp = solidcraft_kernel::records_import(&r).unwrap();
         assert!(imp.bodies.is_empty() && imp.warnings.iter().any(|w| w.contains(why)), "{why}: {:?}", imp.warnings);
     }
+}
+
+/// A part given as triangles of a body comes in hidden when a hidden layer names the triangles
+/// (the tessellation), as when it names the body; on no layer it comes in shown.
+#[test]
+fn triangles_on_a_hidden_layer_come_in_hidden() {
+    for on_layer in [false, true] {
+        let mut ir = mesh_placed_twice();
+        if on_layer {
+            let t = ir.model.tessellations.last().unwrap().id.to_string();
+            let layer = serde_json::json!({"id": "test:hidden:layer#0", "name": "Hidden parts", "visible": false, "items": [{"kind": "tessellation", "tessellation": t}]});
+            ir.model.presentation_layers.push(serde_json::from_value(layer).unwrap());
+        }
+        let (records, _) = traced_records(&ir, "twice", "", true);
+        assert_eq!(records.bodies.len(), 2, "{:?}", records.warnings);
+        assert!(records.bodies.iter().all(|b| b.hidden == on_layer), "on a hidden layer: {on_layer}");
+    }
+}
+
+/// A part on a layer the file hides (INVISIBILITY naming a PRESENTATION_LAYER_ASSIGNMENT) comes in
+/// hidden, as with SolidCraft's reader; on a layer that is not hidden it comes in shown.
+#[test]
+fn a_part_on_a_hidden_layer_comes_in_hidden() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let text = std::fs::read_to_string(dir.join("washer.step")).unwrap();
+    let with = |extra: &str| {
+        let at = text.rfind("ENDSEC;").unwrap();
+        let t = format!("{}{extra}{}", &text[..at], &text[at..]);
+        let (records, warnings, _) = cadmpeg_step_records(t.as_bytes(), "washer.step").unwrap();
+        assert_eq!(records.bodies.len(), 1, "{warnings:?}");
+        records.bodies[0].hidden
+    };
+    assert!(with("#300=PRESENTATION_LAYER_ASSIGNMENT('Hidden parts','',(#99));\n#301=INVISIBILITY((#300));\n"), "on a hidden layer");
+    assert!(!with("#300=PRESENTATION_LAYER_ASSIGNMENT('Parts','',(#99));\n"), "on a shown layer");
+    assert!(!with(""), "on no layer");
 }
