@@ -1881,6 +1881,11 @@ fn other_trims_bound(
 /// leaves it (`heal.stitch_p2` cov_tjunc8: a face joined 2.43e-4 from the kept curve under a
 /// tolerance of 2.18e-4).
 ///
+/// The raise is to a proved bound, so it covers the face whatever the bound's slack; it is not
+/// capped by the join's own distance, which the stitch samples rather than proves (five or ten
+/// points, none for two lines): on cov_tjunc8 that distance is 0 and the deleted edge's
+/// tolerance 1e-5, where the kept curve is 2.43e-4 from the face.
+///
 /// # Errors
 ///
 /// [`SolidError::NotFound`] for a dangling id; those of `curve_face_gap_bound_within`.
@@ -1924,10 +1929,10 @@ pub(crate) fn cover_joined_faces(
 
 /// Not upstream (#18166): a proved bound on the distance from `e`'s curve over its interval to
 /// the surface of its face `f` (`curve_face_gap_bound_within`, cut to a thousandth of `fit` as
-/// [`trim_deviation_bound`], and until shown within `within` where it is; above `over` it is
-/// infinite), plus the rounding of a line's analytic evaluation against its NURBS data
-/// (`line_evaluation_slack`); `None` where it is not enclosed or the curve is not a B-spline,
-/// an ellipse or a line.
+/// [`trim_deviation_bound`], and until shown within `within` where it is; a bound whose end
+/// values pass `over` may be infinite), plus the rounding of a line's analytic evaluation
+/// against its NURBS data (`line_evaluation_slack`); `None` where it is not enclosed or the
+/// curve is not a B-spline, an ellipse or a line.
 ///
 /// # Errors
 ///

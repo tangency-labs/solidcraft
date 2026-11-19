@@ -707,7 +707,10 @@ fn certified_gap(
 /// - once `seen` is above `over`, so is the bound: it is infinite at once;
 /// - once `seen` is above `enough`, the bound is not at most `enough` whatever the cuts, and
 ///   the pieces still open bound a gap the caller acts on: they get the whole [`MAX_PIECES`],
-///   not the budget, which only stops the search for a bound at most `enough`.
+///   not the budget, which only stops the search for a bound at most `enough`. The pieces the
+///   budget stopped before (whatever the order the pieces were reached in) are set aside, and
+///   cut on once the other pieces are done if `seen` is then above `enough`; if it is not,
+///   the gap is not enclosed.
 fn bisect(
     [lo, hi]: [f64; 2],
     first_pieces: usize,
@@ -744,52 +747,74 @@ fn bisect(
     let mut made = stack.len();
     // (the largest end value evaluated, with a budget: the bound is at least it)
     let mut seen = f64::NEG_INFINITY;
-    while let Some((a, b, depth, parent)) = stack.pop() {
-        let mid = 0.5 * (a + b);
-        // (the budget holds while the bound may still be at most `enough`)
-        let capped = budget.filter(|_| seen <= enough);
-        let max_pieces = capped.unwrap_or(MAX_PIECES);
-        // (a piece that cannot be cut further is bounded as it is: the bound holds whether or
-        // not the second term has shrunk, closing only makes it tight)
-        let out_of_pieces = made + 2 > max_pieces;
-        let last = depth >= MAX_DEPTH || !(a < mid && mid < b) || out_of_pieces;
-        let mut slack = f64::INFINITY;
-        match piece(a, b) {
-            Ok(Some(p)) => {
-                let bound = (Ivl::from(p.ends) + Ivl::from(p.with_slack)).hi;
-                if budget.is_some() {
-                    seen = seen.max(p.ends);
-                    if seen > over {
-                        return Ok(Some(f64::INFINITY));
+    // (the open pieces the budget stopped, in the order they were reached)
+    let mut parked: Vec<(f64, f64, u32, f64)> = Vec::new();
+    loop {
+        while let Some((a, b, depth, parent)) = stack.pop() {
+            let mid = 0.5 * (a + b);
+            let bottom = depth >= MAX_DEPTH || !(a < mid && mid < b);
+            // (the budget holds while the bound may still be at most `enough`; a piece that
+            // cannot be cut further is bounded as it is: the bound holds whether or not the
+            // second term has shrunk, closing only makes it tight)
+            let out_of = |seen: f64| {
+                let capped = budget.filter(|_| seen <= enough);
+                (capped.is_some(), made + 2 > capped.unwrap_or(MAX_PIECES))
+            };
+            let mut slack = f64::INFINITY;
+            match piece(a, b) {
+                Ok(Some(p)) => {
+                    let bound = (Ivl::from(p.ends) + Ivl::from(p.with_slack)).hi;
+                    if budget.is_some() {
+                        seen = seen.max(p.ends);
+                        if seen > over {
+                            return Ok(Some(f64::INFINITY));
+                        }
                     }
-                }
-                let proved = budget.is_some() && bound <= seen;
-                let closed = bound <= enough || proved || p.closes(parent, relative, floor);
-                if last || closed {
+                    let (capped, out_of_pieces) = out_of(seen);
+                    let proved = budget.is_some() && bound <= seen;
+                    let closed = bound <= enough || proved || p.closes(parent, relative, floor);
                     // (an open piece the budget stopped is not bounded as it stands)
-                    if !closed && capped.is_some() && out_of_pieces {
+                    if !closed && capped && out_of_pieces {
+                        parked.push((a, b, depth, parent));
+                        continue;
+                    }
+                    if bottom || out_of_pieces || closed {
+                        if bound > over {
+                            return Ok(Some(f64::INFINITY));
+                        }
+                        worst = worst.max(bound);
+                        continue;
+                    }
+                    slack = p.slack;
+                }
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                // a box past the net, on a knot line of too low a continuity: a smaller piece
+                // may clear it; at the bottom the gap is not enclosed
+                Ok(None) | Err(_) => {
+                    let (capped, out_of_pieces) = out_of(seen);
+                    if capped && out_of_pieces {
+                        parked.push((a, b, depth, parent));
+                        continue;
+                    }
+                    if bottom || out_of_pieces {
                         return Ok(None);
                     }
-                    if bound > over {
-                        return Ok(Some(f64::INFINITY));
-                    }
-                    worst = worst.max(bound);
-                    continue;
-                }
-                slack = p.slack;
-            }
-            Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            // a box past the net, on a knot line of too low a continuity: a smaller piece may
-            // clear it; at the bottom the gap is not enclosed
-            Ok(None) | Err(_) => {
-                if last {
-                    return Ok(None);
                 }
             }
+            made += 2;
+            stack.push((mid, b, depth + 1, slack));
+            stack.push((a, mid, depth + 1, slack));
         }
-        made += 2;
-        stack.push((mid, b, depth + 1, slack));
-        stack.push((a, mid, depth + 1, slack));
+        // (a gap the budget stopped while it may still be at most `enough` is not enclosed;
+        // past `enough`, the stopped pieces are cut on without it)
+        if parked.is_empty() {
+            break;
+        }
+        if seen <= enough {
+            return Ok(None);
+        }
+        parked.reverse();
+        stack.append(&mut parked);
     }
     Ok(worst.is_finite().then_some(worst))
 }
@@ -901,13 +926,14 @@ pub fn curve_face_gap_bound(
 /// the cut afresh, and the second-order term shrinks with the piece.
 ///
 /// A piece whose bound is at most `enough` closes as it stands, and so does one within the
-/// largest end value `seen` so far (the bound is at least that, and no cut lowers it: the
-/// halves keep their ends' nearest points). While `seen` is at most `enough` a piece above
-/// it is cut until it closes below `enough`, at [`CLOSE_ABSOLUTE`] or at the bottom, so a gap
-/// just within `enough` is shown within it; once `seen` is above `enough` the pieces close at
-/// a thousandth of their end values or `floor`, as [`curve_face_gap_bound`]'s. Once `seen` is
-/// above `over`, so is the bound: it is infinite at once. An `enough` of `f64::NEG_INFINITY`
-/// and an `over` of `f64::INFINITY` give the bound to the tightness `floor` asks.
+/// largest end value `seen` so far (the bound is at least that, and no cut lowers it but by
+/// rounding: the halves keep their ends' nearest points). While `seen` is at most `enough` a
+/// piece above it is cut until it closes below `enough`, at [`CLOSE_ABSOLUTE`] or at the
+/// bottom, so a gap just within `enough` is shown within it; once `seen` is above `enough`
+/// the pieces close at a thousandth of their end values or `floor`, as
+/// [`curve_face_gap_bound`]'s. Once `seen` is above `over`, so is the bound: it is infinite at
+/// once. An `enough` of `f64::NEG_INFINITY` and an `over` of `f64::INFINITY` give the bound to
+/// the tightness `floor` asks.
 ///
 /// Each nearest point is a witness only (`dist(C(t), S) <= |C(t) - S(w)|` for any `w` in the
 /// parameter box): where the surface's point is not dropped at a cut, the straight map's
@@ -2577,10 +2603,11 @@ mod tests {
         );
     }
 
-    /// With a budget, a gap whose end values already pass `enough` is bounded with every
-    /// piece, not the budget (the budget only stops the search for a bound at most `enough`),
-    /// a piece whose bound is within the largest end value closes as it stands, and an end
-    /// value past `over` gives an infinite bound at once (#18166).
+    /// With a budget, a gap whose end values pass `enough` is bounded with every piece, not the
+    /// budget, whether the end value past it comes before or after the budget runs out (the
+    /// budget only stops the search for a bound at most `enough`), a piece whose bound is
+    /// within the largest end value closes as it stands, and an end value past `over` gives an
+    /// infinite bound at once (#18166).
     #[test]
     fn a_budget_stops_only_the_search_below_enough() {
         // (end values 1 at the middle, 0.5 elsewhere; a term 0.1 h² closes at h of 1e-6)
@@ -2604,6 +2631,13 @@ mod tests {
         };
         // (past `enough` = 0.9 at the middle: the budget of 64 does not stop it)
         let g = run([0.9, f64::INFINITY], Some(64));
+        assert!(
+            g.is_some_and(|g| (1.0..=1.0 + 1.0e-12).contains(&g)),
+            "{g:?}"
+        );
+        // (the first pieces, within 1e-4 of `enough` = 0.5 + 1e-13, spend the budget before the
+        // middle shows an end value past it: they are cut on after it, and close within it)
+        let g = run([0.5 + 1.0e-13, f64::INFINITY], Some(64));
         assert!(
             g.is_some_and(|g| (1.0..=1.0 + 1.0e-12).contains(&g)),
             "{g:?}"
