@@ -3173,9 +3173,9 @@ mod wr493_certificates {
     /// `x = -4` and, inside, the sphere of radius 5 about the origin), here and replayed
     /// in the fitted-NURB (seam) build ([`round`]: the file's sphere given upstream's fitted
     /// NURB). That build is main's: its `result_geometry` is main's run's bit for bit (its
-    /// block, pinned, measured on main at 0b321cbaa4; main's committed line differs from
-    /// main's own run by 3.6e-14 in the block's sum, within the goldens' comparator, and
-    /// that is asserted too).
+    /// record, pinned, captured on #19588's head a3c61d838d, main 21b4ba5387 with the
+    /// kept-trim prover fix; main's committed block agrees with that run within 1e-13 of
+    /// its scale, which is asserted too).
     ///
     /// - The contact edges' curves and the round face's net (rational Bezier pieces): each
     ///   piece's distance from the torus is enclosed ([`torus_bound`]), and the largest
@@ -3192,7 +3192,7 @@ mod wr493_certificates {
     ///   sum moves.
     /// - Geometry (`util::primitive::append`, entity by entity, matched by role): the
     ///   file's edges, the plane face and the two pole vertices are bit for bit
-    ///   main's. What moves: the round's tolerance and its edges' (`1.4249e-4` to
+    ///   main's. What moves: the round's tolerance and its edges' (`6.743e-5` to
     ///   `4e-5`, the tolerance the net and curves are made to), the contact edges'
     ///   parameter spans and samples (on the closer curves), the round face's domain and
     ///   samples, the sphere face's samples (the same fractions of the same domain of
@@ -3283,8 +3283,9 @@ mod wr493_certificates {
             (vertices, by_role, faces)
         };
         // the refit build is main's: its record is, value by value and bit for bit, the
-        // record main's run of this case produced (captured on main 46dafacb6f), and agrees
-        // with main's committed block within 1e-13 of its scale
+        // record main's run of this case produced (captured on #19588's head a3c61d838d:
+        // main 21b4ba5387 with the kept-trim prover fix), and agrees with main's committed
+        // block within 1e-13 of its scale
         {
             let mut g = Vec::new();
             crate::util::primitive::append(&Kernel::default(), &old, &mut g).expect("geometry");
@@ -3301,7 +3302,7 @@ mod wr493_certificates {
                 abs += x.abs();
                 weighted += (j as f64 + 1.0) * x;
             }
-            let committed = [41.492_010_499_717_83, 331.960_110_824_691_4, 4_079.178_130_064_161];
+            let committed = [41.617_968_596_419_11, 332.078_693_403_764_93, 4_093.749_889_732_379];
             for (a, b) in [sum, abs, weighted].iter().zip(committed) {
                 assert!((a - b).abs() <= 1e-13 * weighted, "{NAME}: main's committed block");
             }
@@ -3311,7 +3312,7 @@ mod wr493_certificates {
         let moved = |a: &[f64], b: &[f64]| -> Vec<usize> {
             (0..a.len()).filter(|&i| a[i].to_bits() != b[i].to_bits()).collect()
         };
-        let (old_tol, new_tol) = (1.424_937_159_614_344_5e-4, 4e-5);
+        let (old_tol, new_tol) = (6.743_092_552_193_158e-5, 4e-5);
         // the poles; the file's three edges; the plane face (faces: sphere, plane, round)
         for i in 0..2 {
             assert_eq!(moved(&vo[i], &vn[i]), [0_usize; 0], "{NAME}: vertex {i}");
@@ -3330,9 +3331,9 @@ mod wr493_certificates {
         assert_eq!(
             got,
             [
-                vec![0, 2, 5, 6, 7, 10, 11, 13, 14, 15],
+                vec![0, 2, 6, 7, 9, 10, 11, 13, 14, 15],
                 vec![0, 2, 5, 6, 7, 9, 10, 11, 13, 14, 15],
-                vec![0, 6, 7, 9, 10, 11, 13, 14, 15],
+                vec![0, 5, 6, 7, 9, 10, 11, 13, 14, 15],
             ],
             "{NAME}: the round's edges"
         );
