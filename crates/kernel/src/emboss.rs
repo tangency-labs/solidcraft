@@ -1561,4 +1561,30 @@ mod tests {
         ];
         assert!(emboss_cylinder(&body, &plane(), &overlapping, 1.).is_err());
     }
+
+    /// A fitted wrap survives the boolean after it, on small and large walls, shallow and deep: a
+    /// box cut through half of a wrapped circle leaves half the body and half the wrap, and a pin
+    /// joined across the circle leaves one valid shell.
+    #[test]
+    fn a_fitted_wrap_takes_a_boolean_after_it() {
+        let circle = Region2 { outer: Loop2::circle(Vec2::new(0., 10.), 2.5), holes: vec![] };
+        for r in [4., 10., 100.] {
+            let body = crate::cylinder(Vec3::ZERO, Vec3::Z, r, 20.).unwrap();
+            let sketch = Plane::new(Vec3::Y * r, -Vec3::X, Vec3::Z).unwrap();
+            for depth in [0.2, 2., -0.2, -2.] {
+                let wrapped = emboss_cylinder(&body, &sketch, std::slice::from_ref(&circle), depth).unwrap();
+                let v = volume(&wrapped);
+                let top = crate::box_solid(Vec3::new(-2. * r, -2. * r, 10.), Vec3::new(2. * r, 2. * r, 30.)).unwrap();
+                let cut = crate::boolean(&wrapped, &top, crate::BoolOp::Cut).unwrap().unwrap();
+                assert_eq!(cut.shell_count(), 1);
+                assert!(cut.validity().is_empty());
+                let want = 0.5 * v;
+                assert!((volume(&cut) - want).abs() < 1e-6 * v, "{r} {depth}: {} vs {want}", volume(&cut));
+                let pin = crate::cylinder(Vec3::new(0., 0., 10.), Vec3::Y, 1., r + 4.).unwrap();
+                let joined = crate::boolean(&wrapped, &pin, crate::BoolOp::Union).unwrap().unwrap();
+                assert_eq!(joined.shell_count(), 1, "{r} {depth}");
+                assert!(joined.validity().is_empty(), "{r} {depth}");
+            }
+        }
+    }
 }
