@@ -2857,3 +2857,31 @@ fn mirror_axis_does_not_drift_when_dimensioning_mirrored_geometry() {
     assert!((before_axis.0 - after_axis.0).len() < 1e-6, "axis moved");
     assert!((before_axis.1 - after_axis.1).len() < 1e-6, "axis moved");
 }
+
+/// #19337: A closed (periodic) control-point spline of degree 3 and above builds smooth exact
+/// closed segments and profiles that can be extruded.
+#[test]
+fn closed_periodic_control_point_spline_builds_and_closes() -> crate::model::Result<()> {
+    let mut sk = Sketch::new();
+    let p0 = sk.add_point(v(0.0, 0.0), None)?;
+    let p1 = sk.add_point(v(20.0, 0.0), None)?;
+    let p2 = sk.add_point(v(20.0, 20.0), None)?;
+    let p3 = sk.add_point(v(0.0, 20.0), None)?;
+    let c = sk.add_curve(
+        CurveKind::Spline { pts: vec![p0, p1, p2, p3], control: true, degree: 3, periodic: true, nurbs: None, handles: Vec::new() },
+        None,
+    )?;
+
+    let segs = sk.exact_segs(c).ok_or_else(|| crate::SketchError::Invalid("exact pieces".into()))?;
+    assert_eq!(segs.len(), 4, "4 spans for 4 control points");
+
+    // Polyline forms a closed outline
+    let poly = sk.polyline(c);
+    assert!(poly.len() > 10);
+    assert_eq!(poly.first(), poly.last(), "polyline must be closed");
+
+    // Profile search detects the closed profile
+    let profiles = crate::profiles::find_profiles(&sk);
+    assert_eq!(profiles.len(), 1, "closed periodic control spline must form 1 profile");
+    Ok(())
+}

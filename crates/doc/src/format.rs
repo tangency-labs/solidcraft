@@ -1041,11 +1041,23 @@ fn validate_versioned_geometry(value: &Value) -> Result<()> {
             }
             let indices = curve.get("pts").and_then(Value::as_array).ok_or_else(invalid)?;
             work = work.saturating_add(indices.len());
-            if !(4..=solidcraft_sketch::MAX_SPLINE_POINTS).contains(&indices.len())
-                || work > 1_000_000
-                || curve.get("control").is_some_and(|control| control.as_bool() != Some(false))
-                || curve.get("degree").is_some_and(|degree| degree.as_u64() != Some(3))
-            {
+            let control = match curve.get("control") {
+                Some(v) => v.as_bool().ok_or_else(invalid)?,
+                None => false,
+            };
+            let degree = match curve.get("degree") {
+                Some(v) => v.as_u64().ok_or_else(invalid)?,
+                None => 3,
+            };
+            if control {
+                if !(3..=9).contains(&degree)
+                    || indices.len() <= degree as usize
+                    || indices.len() > solidcraft_sketch::MAX_SPLINE_POINTS
+                    || work > 1_000_000
+                {
+                    return Err(invalid());
+                }
+            } else if !(4..=solidcraft_sketch::MAX_SPLINE_POINTS).contains(&indices.len()) || work > 1_000_000 || degree != 3 {
                 return Err(invalid());
             }
             let count = points.ok_or_else(invalid)?.len();
@@ -2165,9 +2177,12 @@ mod tests {
             }}]})
         };
         assert!(validate_versioned_geometry(&make(curve.clone())).is_ok());
+        let mut valid_control = curve.clone();
+        valid_control["control"] = serde_json::json!(true);
+        assert!(validate_versioned_geometry(&make(valid_control)).is_ok());
         for (key, malformed) in [
             ("periodic", serde_json::json!("true")),
-            ("control", serde_json::json!(true)),
+            ("control", serde_json::json!("true")),
             ("degree", serde_json::json!(2)),
             ("pts", serde_json::json!([0, 1, 2])),
             ("pts", serde_json::json!([0, 1, 2, u64::MAX])),

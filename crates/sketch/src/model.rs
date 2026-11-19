@@ -2052,10 +2052,13 @@ impl Sketch {
                 let p: Vec<Vec2> = pts.iter().map(pt).collect::<Option<_>>()?;
                 nurbs.segs(&p, *degree)
             }
-            CurveKind::Spline { pts, control: true, degree, nurbs: None, .. } if (*degree as usize) <= solidcore_record::MAX_BEZIER_DEGREE => {
+            CurveKind::Spline { pts, control: true, degree, periodic, nurbs: None, .. }
+                if (*degree as usize) <= solidcore_record::MAX_BEZIER_DEGREE =>
+            {
                 let p: Vec<Vec2> = pts.iter().map(pt).collect::<Option<_>>()?;
                 let k = (*degree as usize).min(p.len().saturating_sub(1)).max(1);
-                Some(crate::curves::bspline_beziers(&p, k).iter().filter_map(|c| solidcraft_geom::bezier(c)).collect())
+                let beziers = if *periodic { crate::curves::periodic_bspline_beziers(&p, k) } else { crate::curves::bspline_beziers(&p, k) };
+                Some(beziers.iter().filter_map(|c| solidcraft_geom::bezier(c)).collect())
             }
             _ => None,
         }
@@ -2145,14 +2148,23 @@ impl Sketch {
                     )));
                 }
                 if *periodic {
-                    if *control || *degree != 3 {
-                        return Err(SketchError::Invalid("periodic mode requires a cubic fit spline".into()));
+                    if *control {
+                        if *degree < 3 || pts.len() <= *degree as usize {
+                            return Err(SketchError::Invalid(format!(
+                                "periodic control spline requires degree 3 or above and more than {} points",
+                                degree
+                            )));
+                        }
+                    } else {
+                        if *degree != 3 {
+                            return Err(SketchError::Invalid("periodic mode requires a cubic fit spline".into()));
+                        }
+                        let p = pts
+                            .iter()
+                            .map(|i| self.point(*i).ok_or_else(|| SketchError::Invalid("missing periodic point".into())))
+                            .collect::<Result<Vec<_>>>()?;
+                        crate::periodic_beziers(&p)?;
                     }
-                    let p = pts
-                        .iter()
-                        .map(|i| self.point(*i).ok_or_else(|| SketchError::Invalid("missing periodic point".into())))
-                        .collect::<Result<Vec<_>>>()?;
-                    crate::periodic_beziers(&p)?;
                 }
                 if !handles.is_empty() {
                     let expected = if *periodic { pts.len().saturating_sub(1) } else { pts.len() };

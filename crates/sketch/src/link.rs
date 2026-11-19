@@ -328,7 +328,9 @@ impl LinkGeom {
             LinkGeom::Conic { a, apex, b, rho } => ok(a) && ok(apex) && ok(b) && a.dist(*b) > MERGE_TOL && *rho > 1e-6 && *rho < 1.0 - 1e-6,
             LinkGeom::Ellipse { c, major, minor } => ok(c) && ok(major) && c.dist(*major) > 1e-9 && radius_in_range(*minor),
             LinkGeom::Spline { pts, control, degree, periodic, nurbs } => {
-                (!*periodic || (!*control && *degree == 3 && crate::periodic_beziers(pts).is_ok()))
+                (!*periodic
+                    || (!*control && *degree == 3 && crate::periodic_beziers(pts).is_ok())
+                    || (*control && *degree >= 3 && pts.len() > *degree as usize))
                     && nurbs.as_ref().is_none_or(|k| *control && !*periodic && k.check(pts.len(), *degree).is_ok())
                     && (2..=crate::curves::MAX_SPLINE_POINTS).contains(&pts.len())
                     && pts.iter().all(ok)

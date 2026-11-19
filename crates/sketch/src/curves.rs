@@ -392,6 +392,9 @@ pub fn spline_point_mode(p: &[Vec2], control: bool, degree: u8, periodic: bool, 
     if !periodic {
         return spline_point(p, control, degree, t);
     }
+    if control {
+        return periodic_bspline_point(p, degree as usize, t);
+    }
     let Ok(pieces) = crate::periodic_beziers(p) else {
         return p.first().copied().unwrap_or_default();
     };
@@ -417,6 +420,9 @@ pub fn spline_polyline_mode(p: &[Vec2], control: bool, degree: u8, periodic: boo
     if !periodic {
         return spline_polyline(p, control, degree);
     }
+    if control {
+        return periodic_bspline_polyline(p, degree as usize);
+    }
     let Ok(pieces) = crate::periodic_beziers(p) else {
         return Vec::new();
     };
@@ -435,6 +441,13 @@ pub fn spline_polyline_mode(p: &[Vec2], control: bool, degree: u8, periodic: boo
 pub fn spline_end_tangent_mode(p: &[Vec2], control: bool, periodic: bool, at_end: bool) -> Option<Vec2> {
     if !periodic {
         return spline_end_tangent(p, control, at_end);
+    }
+    if control {
+        let n = p.len();
+        if n < 2 {
+            return None;
+        }
+        return (p[1] - p[(n - 1) % n]).normalized();
     }
     let pieces = crate::periodic_beziers(p).ok()?;
     if at_end {
@@ -486,6 +499,115 @@ pub fn bspline_beziers(ctrl: &[Vec2], degree: usize) -> Vec<Vec<Vec2>> {
         }
     }
     pts.windows(k + 1).step_by(k).map(|w| w.to_vec()).collect()
+}
+
+/// The Bézier pieces (each `degree + 1` points) of the closed periodic uniform B-spline over `ctrl`.
+pub fn periodic_bspline_beziers(ctrl: &[Vec2], degree: usize) -> Vec<Vec<Vec2>> {
+    let n = ctrl.len();
+    let k = degree.clamp(1, solidcore_record::MAX_BEZIER_DEGREE);
+    if n <= k {
+        return Vec::new();
+    }
+    if k == 3 {
+        let mut out = Vec::with_capacity(n);
+        for i in 0..n {
+            let p_prev = ctrl[(i + n - 1) % n];
+            let p_curr = ctrl[i];
+            let p_next = ctrl[(i + 1) % n];
+            let p_next2 = ctrl[(i + 2) % n];
+            let b0 = (p_prev + p_curr * 4.0 + p_next) / 6.0;
+            let b1 = (p_curr * 2.0 + p_next) / 3.0;
+            let b2 = (p_curr + p_next * 2.0) / 3.0;
+            let b3 = (p_curr + p_next * 4.0 + p_next2) / 6.0;
+            out.push(vec![b0, b1, b2, b3]);
+        }
+        return out;
+    }
+    let mut extended = Vec::with_capacity(n + k * 2);
+    for i in 0..(n + k) {
+        extended.push(ctrl[i % n]);
+    }
+    let mut knots: Vec<f64> = (0..=(n + 2 * k)).map(|i| i as f64).collect();
+    let mut pts = extended;
+    for s in 0..=n {
+        let u = (k + s) as f64;
+        for _ in 1..k {
+            let Some(span) = knots.iter().rposition(|x| *x <= u + 1e-15) else { break };
+            let mut q = Vec::with_capacity(pts.len() + 1);
+            for i in 0..=pts.len() {
+                let p = if i + k <= span {
+                    pts.get(i).copied()
+                } else if i > span {
+                    pts.get(i - 1).copied()
+                } else {
+                    let (lo, hi) = (knots.get(i).copied().unwrap_or(0.0), knots.get(i + k).copied().unwrap_or(1.0));
+                    let a = if hi - lo > 1e-15 { (u - lo) / (hi - lo) } else { 0.0 };
+                    match (pts.get(i.wrapping_sub(1)), pts.get(i)) {
+                        (Some(x), Some(y)) => Some(*x * (1.0 - a) + *y * a),
+                        _ => None,
+                    }
+                };
+                if let Some(p) = p {
+                    q.push(p);
+                }
+            }
+            knots.insert(span + 1, u);
+            pts = q;
+        }
+    }
+    pts.windows(k + 1).step_by(k).take(n).map(|w| w.to_vec()).collect()
+}
+
+pub fn periodic_bspline_point(p: &[Vec2], degree: usize, t: f64) -> Vec2 {
+    let pieces = periodic_bspline_beziers(p, degree);
+    if pieces.is_empty() {
+        return p.first().copied().unwrap_or_default();
+    }
+    let t = t.clamp(0.0, 1.0);
+    let x = t * pieces.len() as f64;
+    let i = (x.floor() as usize).min(pieces.len() - 1);
+    let local_t = (x - i as f64).clamp(0.0, 1.0);
+    let piece = &pieces[i];
+    if piece.len() == 4 {
+        bezier_at([piece[0], piece[1], piece[2], piece[3]], local_t)
+    } else {
+        let mut v = piece.clone();
+        for step in 1..v.len() {
+            for j in 0..(v.len() - step) {
+                v[j] = v[j] * (1.0 - local_t) + v[j + 1] * local_t;
+            }
+        }
+        v[0]
+    }
+}
+
+pub fn periodic_bspline_polyline(p: &[Vec2], degree: usize) -> Vec<Vec2> {
+    let pieces = periodic_bspline_beziers(p, degree);
+    if pieces.is_empty() {
+        return p.to_vec();
+    }
+    let mut out = Vec::with_capacity(pieces.len() * SPAN_SAMPLES + 1);
+    for piece in &pieces {
+        for i in 0..SPAN_SAMPLES {
+            let t = i as f64 / SPAN_SAMPLES as f64;
+            let pt = if piece.len() == 4 {
+                bezier_at([piece[0], piece[1], piece[2], piece[3]], t)
+            } else {
+                let mut v = piece.clone();
+                for step in 1..v.len() {
+                    for j in 0..(v.len() - step) {
+                        v[j] = v[j] * (1.0 - t) + v[j + 1] * t;
+                    }
+                }
+                v[0]
+            };
+            out.push(pt);
+        }
+    }
+    if let Some(first) = out.first().copied() {
+        out.push(first);
+    }
+    out
 }
 
 /// Polyline of a spline through (`control == false`) or over (`control`) the points.

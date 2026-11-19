@@ -429,7 +429,8 @@ impl State<'_> {
                     nurbs.segs(&p, *degree).unwrap_or_default()
                 } else if *control {
                     let k = (*degree as usize).min(solidcore_record::MAX_BEZIER_DEGREE).min(p.len().saturating_sub(1)).max(1);
-                    crate::curves::bspline_beziers(&p, k).iter().filter_map(|span| solidcraft_geom::bezier(span)).collect()
+                    let beziers = if *periodic { crate::curves::periodic_bspline_beziers(&p, k) } else { crate::curves::bspline_beziers(&p, k) };
+                    beziers.iter().filter_map(|span| solidcraft_geom::bezier(span)).collect()
                 } else if !handles.is_empty() {
                     let handles: Vec<Vec2> = handles.iter().map(|point| self.p(*point)).collect();
                     crate::curves::fit_beziers_with_handles(&p, &handles, *periodic)
@@ -2381,7 +2382,7 @@ fn initial_x(sk: &Sketch, lay: &Layout) -> Vec<f64> {
 fn build_blocks<'a>(sk: &'a Sketch, lay: &Layout, on_curve: &[(usize, usize)]) -> (Vec<(Block<'a>, Vec<usize>)>, Vec<bool>) {
     let mut raw = Vec::new();
     for (k, c) in sk.curves.iter().enumerate() {
-        if let CurveKind::Spline { pts, periodic: true, .. } = &c.kind
+        if let CurveKind::Spline { pts, control: false, periodic: true, .. } = &c.kind
             && let (Some(a), Some(b)) = (pts.first(), pts.last())
             && a != b
         {
@@ -3596,7 +3597,7 @@ fn solve_inner(
         let mut positions = (0..sk.points.len()).map(|i| state.p(i)).collect::<Vec<_>>();
         let mut parent = (0..positions.len()).collect::<Vec<_>>();
         for curve in &sk.curves {
-            if let CurveKind::Spline { pts, periodic: true, .. } = &curve.kind
+            if let CurveKind::Spline { pts, control: false, periodic: true, .. } = &curve.kind
                 && let (Some(a), Some(b)) = (pts.first(), pts.last())
                 && *a < parent.len()
                 && *b < parent.len()
@@ -3628,7 +3629,11 @@ fn solve_inner(
         for curve in &sk.curves {
             if let CurveKind::Spline { pts, control, degree, periodic: true, .. } = &curve.kind {
                 let points = pts.iter().map(|i| positions.get(*i).copied()).collect::<Option<Vec<_>>>();
-                if *control || *degree != 3 || points.as_ref().is_none_or(|p| crate::periodic::validate_periodic_points(p).is_err()) {
+                if *control {
+                    if *degree < 3 || pts.len() <= *degree as usize || points.as_ref().is_none_or(|p| p.iter().any(|p| !crate::model::in_range(*p))) {
+                        valid = false;
+                    }
+                } else if *degree != 3 || points.as_ref().is_none_or(|p| crate::periodic::validate_periodic_points(p).is_err()) {
                     valid = false;
                 }
             }
