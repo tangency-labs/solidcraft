@@ -694,7 +694,7 @@ fn a_part_whose_body_was_not_imported_is_said_not_checked() {
     assert!(!ir.model.declared_measures.is_empty());
     // Every region refused: a coedge missing from each.
     ir.model.coedges.clear();
-    let (records, origins) = traced_records(&ir, "washer", "", true);
+    let (records, origins) = traced_records(&ir, "washer", "", true, false);
     assert!(records.bodies.is_empty(), "{:?}", records.warnings);
     let imp = solidcraft_kernel::records_import(&records).unwrap();
     let notes = validation::check(&ir, &records, &origins, &imp);
@@ -730,7 +730,7 @@ fn a_part_with_one_body_imported_and_one_not_is_said_not_checked() {
         }
     }
     model.bodies.push(refused);
-    let (records, origins) = traced_records(&ir, "washer", "", true);
+    let (records, origins) = traced_records(&ir, "washer", "", true, false);
     assert!(!records.bodies.is_empty(), "the washer itself comes in: {:?}", records.warnings);
     let imp = solidcraft_kernel::records_import(&records).unwrap();
     let notes = validation::check(&ir, &records, &origins, &imp);
@@ -749,7 +749,7 @@ fn a_part_whose_solid_came_in_open_is_said_not_checked() {
     let text = washer_stating(m.volume, [m.centroid.x, m.centroid.y, m.centroid.z])
         .replace("#50=CARTESIAN_POINT('',(0.0,0.0,0.0));", "#50=CARTESIAN_POINT('',(0.0,0.0,-5.0));");
     let ir = neutral(text.as_bytes(), "washer.step");
-    let (records, origins) = traced_records(&ir, "washer", "", true);
+    let (records, origins) = traced_records(&ir, "washer", "", true, false);
     assert!(records.bodies.iter().any(|b| b.sheet), "{:?}", records.warnings);
     let imp = solidcraft_kernel::records_import(&records).unwrap();
     let notes = validation::check(&ir, &records, &origins, &imp);
@@ -896,7 +896,7 @@ fn mesh_placed_twice() -> cadmpeg_ir::document::CadIr {
 /// holds no triangles of its own, and both placements come in as mesh bodies.
 #[test]
 fn a_mesh_part_placed_twice_keeps_its_triangles_once() {
-    let (records, _) = traced_records(&mesh_placed_twice(), "twice", "", true);
+    let (records, _) = traced_records(&mesh_placed_twice(), "twice", "", true, false);
     let shape: Vec<(bool, Option<usize>)> = records.bodies.iter().map(|b| (b.mesh.is_some(), b.copy_of)).collect();
     assert_eq!(shape, [(true, None), (false, Some(0))], "{:?}", records.warnings);
     let imp = solidcraft_kernel::records_import(&records).unwrap();
@@ -938,7 +938,7 @@ fn triangles_on_a_hidden_layer_come_in_hidden() {
             let layer = serde_json::json!({"id": "test:hidden:layer#0", "name": "Hidden parts", "visible": false, "items": [{"kind": "tessellation", "tessellation": t}]});
             ir.model.presentation_layers.push(serde_json::from_value(layer).unwrap());
         }
-        let (records, _) = traced_records(&ir, "twice", "", true);
+        let (records, _) = traced_records(&ir, "twice", "", true, false);
         assert_eq!(records.bodies.len(), 2, "{:?}", records.warnings);
         assert!(records.bodies.iter().all(|b| b.hidden == on_layer), "on a hidden layer: {on_layer}");
     }

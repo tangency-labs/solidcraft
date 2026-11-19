@@ -9,7 +9,10 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<InsertMeshParams>(), &["crease_angle_degrees", "folder", "name", "names", "origin", "path", "units", "up"]);
+    assert_keys(
+        input_schema_for::<InsertMeshParams>(),
+        &["crease_angle_degrees", "folder", "geometry", "name", "names", "origin", "path", "units", "up"],
+    );
 }
 
 #[test]
@@ -55,6 +58,12 @@ fn strict_keeps_todays_errors() {
         ("file.insert_mesh", json!({"path": "X.3MF", "units": "mm"})),
         ("file.insert_mesh", json!({"path": "x.ply", "units": "yd"})),
         ("file.insert_mesh", json!({"path": "x.ply", "up": "y"})),
+        // `geometry` is for an OpenUSD file only, whatever it says.
+        ("file.insert_mesh", json!({"path": "x.stl", "geometry": "exact"})),
+        ("file.insert_mesh", json!({"path": "x.glb", "geometry": 5})),
+        ("file.insert_mesh", json!({"path": "x.usda", "geometry": "nurbs"})),
+        ("file.insert_mesh", json!({"path": "x.usdz", "geometry": 5})),
+        ("file.insert_mesh", json!({"path": "does-not-exist.usda", "geometry": " Exact "})),
         // A file that isn't there.
         ("file.insert_mesh", json!({"path": "does-not-exist.stl"})),
         ("file.insert_mesh", json!({"path": "does-not-exist.glb", "up": "Z", "names": " Auto ", "folder": false})),
