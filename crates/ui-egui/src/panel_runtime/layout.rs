@@ -1490,7 +1490,9 @@ fn append_section(
     }
     // Handles over the header sit above the draggable title and below every other header control.
     if floating_open {
-        for (edge, grab) in floating_resize_handles(outer, header, metrics.floating_grab_reach).into_iter().filter(|(_, grab)| touches_header(*grab, header)) {
+        for (edge, grab) in
+            floating_resize_handles(outer, header, metrics.floating_grab_reach).into_iter().filter(|(_, grab)| touches_header(*grab, header))
+        {
             add_floating_handle(out, section, edge, grab, outer, metrics.sash_width);
         }
     }
@@ -1515,7 +1517,9 @@ fn append_section(
     // reverse hit-testing must choose the same owner at their edges.
     let (min, max) = tab_bounds(proposed, service.registry(), section)?;
     if floating_open {
-        for (edge, grab) in floating_resize_handles(outer, header, metrics.floating_grab_reach).into_iter().filter(|(_, grab)| !touches_header(*grab, header)) {
+        for (edge, grab) in
+            floating_resize_handles(outer, header, metrics.floating_grab_reach).into_iter().filter(|(_, grab)| !touches_header(*grab, header))
+        {
             add_floating_handle(out, section, edge, grab, outer, metrics.sash_width);
         }
     } else if !section.collapsed && !(section.location.zone() == Zone::Bottom && min.height == max.height) {
