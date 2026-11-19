@@ -1075,8 +1075,27 @@ fn minor_3x3(a: &[[f64; 4]; 4], row: usize, col: usize) -> [[f64; 3]; 3] {
 /// quotient on the scaled values has the same bits as on the originals wherever neither
 /// overflows nor underflows.
 fn pow2_unit_scale(m: f64) -> f64 {
-    let biased_exponent = (m.abs().to_bits() >> 52) & 0x7ff;
-    f64::from_bits(2046_u64.saturating_sub(biased_exponent).max(1) << 52)
+    pow2(unit_scale_exponent(m))
+}
+
+/// The exponent of [`pow2_unit_scale`], in `[-1022, 1023]`.
+fn unit_scale_exponent(m: f64) -> i32 {
+    let biased_exponent = ((m.abs().to_bits() >> 52) & 0x7ff) as i32;
+    (1023 - biased_exponent).clamp(-1022, 1023)
+}
+
+/// `2^k` for `k` in `[-1022, 1023]` (clamped to it), a normal `f64`.
+fn pow2(k: i32) -> f64 {
+    f64::from_bits(((k.clamp(-1022, 1023) + 1023) as u64) << 52)
+}
+
+/// `v * 2^e` for any `|e| <= 4092`, in four factors of one sign, each a normal power of
+/// two: the product moves monotonically, so it overflows or underflows only where the
+/// result does, and is exact otherwise.
+fn times_pow2(v: Vec3, e: i32) -> Vec3 {
+    let quarter = e / 4;
+    let factor = pow2(quarter);
+    v * factor * factor * factor * pow2(e - 3 * quarter)
 }
 
 /// `v.length()` taken on `v` scaled by a power of two: finite for every finite `v`
@@ -1091,9 +1110,11 @@ fn scaled_length(v: Vec3) -> f64 {
 /// (`smgu_FrenetFromDerivatives`): returns `n + 1` vectors `[position, first
 /// derivative, curvature vector, torsion vector]` (`n <= 3`); the curvature vector
 /// has magnitude `k` along the normal, the torsion vector magnitude `tau` along the
-/// binormal. The curvature `P' x P'' x P' / |P'|^4` is taken with `P'` scaled by a power
-/// of two, so `|P'|^4` does not overflow for a long tangent (upstream's then reads 0);
-/// wherever upstream's products neither overflow nor underflow the value is the same.
+/// binormal. The curvature `P' x P'' x P' / |P'|^4` is taken with `P'` and `P''` each
+/// scaled by a power of two into `[1, 2)` and the exponents put back at the end, so
+/// `|P'|^4` does not overflow for a long tangent (upstream's then reads 0) and products
+/// that cancel do not overflow for a short one; wherever upstream's products neither
+/// overflow nor underflow the value is the same.
 ///
 /// # Errors
 ///
@@ -1123,12 +1144,18 @@ pub fn frenet_from_derivatives(vals: &[Vec3], n: usize) -> Result<Vec<Vec3>> {
     if tan_len_sq < EFF_ZERO_SQ {
         return Err(SolidError::geom_failed(OP, "the tangent has zero length"));
     }
-    let scale = pow2_unit_scale(d1.max_dimension());
-    let d1_scaled = d1 * scale;
-    let scaled_len_sq = d1_scaled.length_squared();
+    // with P' scaled by 2^e1 and P'' by 2^e2 the formula gives 2^(e2 - 2 e1) times the
+    // curvature, so 2^(2 e1 - e2) restores it
     let d2 = get(2);
-    let curvature =
-        d1_scaled.cross(d2).cross(d1_scaled) / (scaled_len_sq * scaled_len_sq) * scale * scale;
+    let e1 = unit_scale_exponent(d1.max_dimension());
+    let e2 = unit_scale_exponent(d2.max_dimension());
+    let d1_scaled = d1 * pow2(e1);
+    let d2_scaled = d2 * pow2(e2);
+    let scaled_len_sq = d1_scaled.length_squared();
+    let curvature = times_pow2(
+        d1_scaled.cross(d2_scaled).cross(d1_scaled) / (scaled_len_sq * scaled_len_sq),
+        2 * e1 - e2,
+    );
     out.push(curvature);
     if n == 2 {
         return Ok(out);
@@ -1641,6 +1668,13 @@ mod tests {
             let p = 2f64.powi(e);
             assert_eq!(scaled_length(v(3.0 * p, 4.0 * p, 0.0)), 5.0 * p);
         }
+        // 2^e in four factors: exact across the whole range, overflow only past it
+        let one = v(1.0, 0.0, 0.0);
+        assert_eq!(times_pow2(one, 3068).x, f64::INFINITY);
+        assert_eq!(times_pow2(v(2f64.powi(-1022), 0.0, 0.0), 2045).x, 2f64.powi(1023));
+        assert_eq!(times_pow2(v(2f64.powi(1023), 0.0, 0.0), -2045).x, 2f64.powi(-1022));
+        assert_eq!(times_pow2(one, -5).x, 1.0 / 32.0);
+        assert_eq!(times_pow2(one, 0).x, 1.0);
         assert_eq!(scaled_length(Vec3::ZERO), 0.0);
         assert_eq!(scaled_length(v(f64::MAX, f64::MAX, 0.0)), f64::INFINITY);
         assert!(scaled_length(v(f64::NAN, 1.0, 0.0)).is_nan());
