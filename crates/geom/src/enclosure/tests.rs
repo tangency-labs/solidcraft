@@ -18,6 +18,12 @@ fn every_operation_holds_its_exact_result() {
     assert!(holds(rest, 1.5, 2f64.powi(-52)), "{rest:?}");
     assert_eq!(Interval::point(1.0) / Interval::ZERO, Interval::ENTIRE);
     assert!(!(Interval::point(f64::MAX) + Interval::point(f64::MAX)).is_finite());
+    // −3·2⁹⁷⁰ + MAX rounds up to its nearest float, and TwoSum's `s − x` overflows on the way to
+    // that error: the exact sum lies below `s`, either way round.
+    let (x, y) = (-3.0 * 2f64.powi(970), f64::MAX);
+    for r in [Interval::point(x) + Interval::point(y), Interval::point(y) + Interval::point(x)] {
+        assert!(r.lo < x + y && r.hi >= x + y, "{r:?}");
+    }
     // `lo/2 + hi/2` rounds the smallest subnormal to 0, outside [η, η].
     for x in [f64::from_bits(1), f64::from_bits(3)] {
         assert_eq!(Interval::point(x).mid(), x);

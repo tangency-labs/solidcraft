@@ -56,7 +56,9 @@ fn not_finite(r: f64, finite_operands: bool) -> (f64, f64) {
 }
 
 /// Bounds of the exact `x + y`. TwoSum's error term is exact for any finite operands whose rounded
-/// sum is finite (an underflowing sum is exact, so there is no lower limit).
+/// sum is finite (an underflowing sum is exact, so there is no lower limit), unless a step of it
+/// overflows (`s − x` past the largest number when `x` and `y` are near it with opposite signs):
+/// then the side is unknown.
 pub(super) fn sum(x: f64, y: f64) -> (f64, f64) {
     let s = x + y;
     if !s.is_finite() || !x.is_finite() || !y.is_finite() {
@@ -64,6 +66,9 @@ pub(super) fn sum(x: f64, y: f64) -> (f64, f64) {
     }
     let b = s - x;
     let e = (x - (s - b)) + (y - b);
+    if !e.is_finite() {
+        return both(s);
+    }
     around(s, e.partial_cmp(&0.0).unwrap_or(Ordering::Equal))
 }
 
