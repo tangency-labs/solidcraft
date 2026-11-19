@@ -301,6 +301,29 @@ fn tilted_non_circular_loop_with_many_curves_is_a_profile() {
 }
 
 #[test]
+fn planar_loop_of_over_two_thousand_segments_is_a_profile() {
+    // #19464: 11 curves of 9 fit points round a circle of R 50 in y = 0, 24 segments a span.
+    let mut sk = Sketch::new();
+    sk.view.three_d = true;
+    let (curves, fit, per_span) = (11usize, 9usize, 24usize);
+    let steps = curves * (fit - 1) * per_span;
+    let at = |k: usize| {
+        let t = 2.0 * std::f64::consts::PI * (k % steps) as f64 / steps as f64;
+        Vec3 { x: 50.0 * t.cos(), y: 0.0, z: 50.0 * t.sin() }
+    };
+    let per_curve = (fit - 1) * per_span;
+    for c in 0..curves {
+        let pts: Vec<Vec3> = (0..=per_curve).map(|s| at(c * per_curve + s)).collect();
+        sk.wires.push(wire(&format!("w{c}"), &pts));
+    }
+    assert!(sk.wires.iter().map(|w| w.pts.len() - 1).sum::<usize>() > 2000);
+    let ps = find_planar_3d_profiles(&sk, Plane::XY);
+    assert_eq!(ps.len(), 1);
+    let expected = std::f64::consts::PI * 2500.0;
+    assert!((ps[0].area - expected).abs() < 0.01 * expected, "area {}", ps[0].area);
+}
+
+#[test]
 fn nothing_without_3d_wires() {
     let mut sk = Sketch::new();
     let a = sk.add_point(Vec2 { x: 0.0, y: 0.0 }, None).unwrap();

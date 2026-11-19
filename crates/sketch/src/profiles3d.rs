@@ -46,8 +46,9 @@ const MERGE_TOL: f64 = 1e-5;
 const MAX_NODES: usize = 64;
 /// A wire with more points than this spans planes by its ends and a few points along it.
 const KEY_SAMPLES: usize = 5;
-/// Total lifted segments allowed.
-const MAX_EDGES: usize = 2_000;
+/// Total lifted segments allowed: the most the 2D tracing run on each plane's edges takes, so a
+/// long loop is never cut short here and left with a gap (#19464).
+const MAX_EDGES: usize = crate::profiles::MAX_PROFILE_EDGES;
 /// Distinct planes considered.
 const MAX_PLANES: usize = 256;
 /// A face smaller than this (mm²) is round-off, not a profile.
