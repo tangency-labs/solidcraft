@@ -48,6 +48,10 @@ use crate::kernel::Kernel;
 use crate::math::{Point2, Vec3, BIG_DOUBLE, PI};
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
+use crate::nurbs::math::gamma;
+use crate::surface::plane::Plane;
+use crate::surface::surface::p2::SurfaceKind;
+use crate::surface::surface::p8::point_rounding;
 use crate::surface::surface::Surface;
 
 const OP: &str = "intersect::surface_intersector::tangent_tracer";
@@ -334,6 +338,48 @@ impl<'a> TangentTracer<'a> {
         let (su, sv) = (g(1, 0)?, g(0, 1)?);
         let d_len = len(su.cross(sv));
         Ok(d_len > 1e-12 * (su.dot(su) + sv.dot(sv)) && d_len > 1e-300)
+    }
+
+    /// Not the fork's (#18930): whether the two surfaces meet at `x`: their points, as
+    /// [`Surface::evaluate_point`] gives them, within the counted rounding of those two
+    /// evaluations ([`point_rounding`], a plane's here) plus one ulp step of each
+    /// parameter (no closer parameters exist), and at least the gap at which
+    /// [`Self::solve`] stops (cost `1e-34`). `None` where a surface has no counted bound
+    /// (a cone, offset, procedural, STEP or curve bounded surface, a surface in a
+    /// volume, a power-basis net) or cannot be evaluated.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] from the evaluations.
+    fn meets(&self, k: &Kernel, x: &[f64; 4]) -> Result<Option<bool>> {
+        let mut pts = [Vec3::ZERO; 2];
+        let mut bound = 0.0;
+        for (s, pt) in pts.iter_mut().enumerate() {
+            let srf = *self.surfaces.get(s).ok_or_else(oob)?;
+            let (u, v) = (at(x, 2 * s)?, at(x, 2 * s + 1)?);
+            let uv = Point2::new(u, v);
+            let p = match srf.evaluate_point(k, uv) {
+                Ok(p) => p,
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                Err(_) => return Ok(None),
+            };
+            let rounding = match srf.kind() {
+                SurfaceKind::Plane(plane) => Some(plane_point_rounding(plane, p)),
+                _ => point_rounding(k, srf, uv)?,
+            };
+            let Some(rounding) = rounding else {
+                return Ok(None);
+            };
+            let Some(e) = self.eval(k, s, u, v)? else {
+                return Ok(None);
+            };
+            let ulp = |t: f64| t.next_up() - t;
+            bound += rounding + len(e.su) * ulp(u) + len(e.sv) * ulp(v);
+            *pt = p;
+        }
+        // the difference and its length round by at most `gamma(4)` of the gap
+        let gap = len(pts[0] - pts[1]);
+        Ok(Some(gap <= smax(bound * (1.0 + gamma(4)), 1e-17)))
     }
 
     /// `Clamp`: both parameter pairs clamped to their domains.
@@ -979,6 +1025,14 @@ impl<'a> TangentTracer<'a> {
     /// from 24 sampled directions, not from a certificate; the crossing mode
     /// (`tangent` false) uses the same test.
     ///
+    /// Not the fork's either (#18930): a direction's solution counts only where the
+    /// surfaces meet ([`Self::meets`]), not where they are only within tolerance of each
+    /// other, as the fork's acceptance (a gap of a tenth of the tolerance) lets them. Two
+    /// touching points closer than the probe's radius, with the surfaces within
+    /// tolerance between them, gave the crossing mode three or four such directions; the
+    /// contact became a node, and a crossing branch was traced through both points. A
+    /// surface with no counted rounding bound is judged as the fork judges.
+    ///
     /// # Errors
     ///
     /// [`SolidError::Unported`] from the evaluations.
@@ -1027,6 +1081,11 @@ impl<'a> TangentTracer<'a> {
             if off > 0.35 * r {
                 continue;
             }
+            // a point where the surfaces are only within tolerance of each other is no
+            // contact to continue in (#18930)
+            if self.meets(k, &q.x)? == Some(false) {
+                continue;
+            }
             let h = q.p - p.p;
             let h_t = h - n * n.dot(h);
             *along_jj = h_t.dot(d) > cos_half_step * len(h_t);
@@ -1049,6 +1108,19 @@ impl<'a> TangentTracer<'a> {
         }
         i32::try_from(dirs.len()).map_err(|_| oob())
     }
+}
+
+/// Not the fork's (#18930): a bound on `|computed - exact|` of [`Plane::evaluate_point`]'s
+/// point `p` (the evaluated point). Each coordinate is `o + (u su) x + (v sv) y` (`o`
+/// the origin, `x`, `y` the unit axes, `su`, `sv` the uv scales): two products per
+/// term and two sums, so within `gamma(4) (|o| + |u su x| + |v sv y|)`. The axes are
+/// orthonormal, so `|u su|` and `|v sv|` are at most `|p - o|`, with room for `p`'s own
+/// rounding; the coordinate bound times 2 (above `sqrt 3`) bounds the point.
+fn plane_point_rounding(plane: &Plane, p: Vec3) -> f64 {
+    let o = plane.position().origin();
+    let o_max = o.x.abs().max(o.y.abs()).max(o.z.abs());
+    let reach = len(p - o) * (1.0 + gamma(8)) + gamma(4) * o_max;
+    2.0 * gamma(4) * (o_max + 2.0 * reach) * (1.0 + gamma(8))
 }
 
 /// `sm_TcUVDer`: the uv derivatives (per unit 3D arc length) at point `i` of a traced
