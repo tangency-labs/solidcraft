@@ -3805,8 +3805,10 @@ mod tests {
         assert_eq!((o.kind, o.tube, o.side), (QuadricKind::Torus, 1.0, 1.0));
         // no implicit form, no class of the fork's
         assert_eq!(t.implicit(), ([[0.0; 3]; 3], [0.0; 3], 0.0));
+        // a plane square to the torus's axis: by symmetry about the axis the rolling ball's
+        // centre runs on a circle about it, so the spine is that circle (exact), not traced
         let e = classify(t, plane(Point3::ZERO, z), 1.0, p);
-        assert_eq!(e.spine, BlendSpine::Traced);
+        assert_eq!(e.spine, BlendSpine::Circle);
     }
 
     #[test]
