@@ -59,7 +59,9 @@
 //!    `A` exactly (`NetSurface::collapsed_sides`), the feet lie in a strip along that side
 //!    as deep as `|C − A| + G` over the speed at which the surface leaves `A`, and the
 //!    normal there is on the line of the fan's `S_st × S_t` (`apex_cones`, which proves
-//!    both). Where facts 1 and 2 also hold, the tighter cones are used.
+//!    both). It is tried only where facts 1 and 2 do not prove the cones: far from the
+//!    point it does not close (the fan turns across the strip), so trying it everywhere
+//!    costs every piece and station a strip of failing hulls.
 //!
 //! A piece's bound is the largest over its pairs of parts of the pair's upper angle plus
 //! their `δ`s (at most `π / 2`, the acute angle's largest); a station's lower bound is the
@@ -298,6 +300,21 @@ fn normal_lipschitz(p: &Partials<Ivl>) -> Option<f64> {
 /// The box of feet `F = W ± ρ` for a correspondence sweeping `u x v` with gap at most `gap`
 /// (fact 1), `None` where the foot bound does not close.
 fn feet_box(net: &NetSurface, u: Ivl, v: Ivl, gap: f64) -> Result<Option<(Ivl, Ivl)>> {
+    Ok(feet_reach(net, u, v, gap)?.map(|rho| (grow(u, rho), grow(v, rho))))
+}
+
+/// `a` widened by `by` each way, rounded outward.
+fn grow(a: Ivl, by: f64) -> Ivl {
+    if by == 0.0 {
+        return a;
+    }
+    Ivl::new(round_down(a.lo - by), round_up(a.hi + by))
+}
+
+/// The foot bound `ρ` of fact 1: every foot at `t` is within `ρ` (Euclidean, in the
+/// parameters) of `W(t)`, for a correspondence sweeping `u x v` with gap at most `gap`;
+/// `None` where it does not close. 0 where the gap and slack are 0.
+fn feet_reach(net: &NetSurface, u: Ivl, v: Ivl, gap: f64) -> Result<Option<f64>> {
     if !(gap.is_finite() && gap >= 0.0) {
         return Ok(None);
     }
@@ -309,12 +326,11 @@ fn feet_box(net: &NetSurface, u: Ivl, v: Ivl, gap: f64) -> Result<Option<(Ivl, I
         return Ok(None);
     }
     if apart == 0.0 {
-        return Ok(Some((u, v)));
+        return Ok(Some(0.0));
     }
     let Some(s0) = sigma_lo(&p0) else {
         return Ok(None);
     };
-    let grow = |a: Ivl, by: f64| Ivl::new(round_down(a.lo - by), round_up(a.hi + by));
     let mut reach = round_up(round_up(2.0 * apart) / s0);
     for _ in 0..FOOT_GROWTHS {
         if !reach.is_finite() {
@@ -328,7 +344,7 @@ fn feet_box(net: &NetSurface, u: Ivl, v: Ivl, gap: f64) -> Result<Option<(Ivl, I
         };
         let rho = round_up(apart / s);
         if rho < reach {
-            return Ok(Some((grow(u, rho), grow(v, rho))));
+            return Ok(Some(rho));
         }
         reach = round_up(2.0 * rho);
     }
@@ -560,25 +576,20 @@ fn cut(a: Ivl, lines: &[f64]) -> Vec<Ivl> {
 }
 
 /// The cones of side `side` over the feet of the correspondence sweeping `u x v` with gap
-/// at most `gap` (facts 1 and 2), `None` where they are not proved. Where fact 1 does not
-/// close and the net has a side collapsed to a point, the feet near that point (fact 3,
+/// at most `gap` (facts 1 and 2), `None` where they are not proved. Where those are not
+/// proved and the net has a side collapsed to a point, the feet near that point (fact 3,
 /// [`apex_cones`]; `c` encloses the curve's points).
 fn cones(side: &Side, u: Ivl, v: Ivl, gap: f64, c: V3<Ivl>) -> Result<Option<Vec<Cone>>> {
     let net = &side.net;
-    let mut near_apex: Option<Vec<Cone>> = None;
+    if let Some(regular) = regular_cones(net, u, v, gap, c)? {
+        return Ok(Some(regular));
+    }
     for &(across_u, at_max, apex) in &side.collapsed {
         if let Some(out) = apex_cones(net, (across_u, at_max, apex), (u, v), gap, c)? {
-            near_apex = Some(out);
-            break;
+            return Ok(Some(out));
         }
     }
-    let regular = regular_cones(net, u, v, gap, c)?;
-    // both prove where the normals are: the tighter
-    let widest = |cs: &[Cone]| cs.iter().fold(0.0_f64, |m, c| m.max(c.delta));
-    Ok(match (regular, near_apex) {
-        (Some(r), Some(a)) => Some(if widest(&a) < widest(&r) { a } else { r }),
-        (r, a) => r.or(a),
-    })
+    Ok(None)
 }
 
 /// [`cones`] by facts 1 and 2 alone.
@@ -934,8 +945,29 @@ fn station_lower(cn: &NurbsCurve, sides: &[Side; 2], t: f64) -> Result<Option<f6
 }
 
 /// The proved upper bound of the angle at the feet over the piece `[a, b]`, `None` where
-/// none is.
-fn piece_upper(cn: &NurbsCurve, sides: &[Side; 2], a: f64, b: f64) -> Result<Option<f64>> {
+/// none is: fact 4's ([`seam_piece_upper`]) where it is at most `enough`, else the least of
+/// it and facts 1 to 3's ([`cone_piece_upper`]).
+fn piece_upper(
+    cn: &NurbsCurve,
+    sides: &[Side; 2],
+    a: f64,
+    b: f64,
+    enough: f64,
+) -> Result<Option<f64>> {
+    let along = seam_piece_upper(cn, sides, a, b)?;
+    if let Some(x) = along {
+        if x <= enough {
+            return Ok(Some(x));
+        }
+    }
+    Ok(match (along, cone_piece_upper(cn, sides, a, b)?) {
+        (Some(x), Some(y)) => Some(x.min(y)),
+        (x, y) => x.or(y),
+    })
+}
+
+/// [`piece_upper`] by facts 1 to 3 (each side's cones), `None` where not proved.
+fn cone_piece_upper(cn: &NurbsCurve, sides: &[Side; 2], a: f64, b: f64) -> Result<Option<f64>> {
     let Some([c1, c2]) = both_cones(cn, sides, Ivl::new(a, b))? else {
         return Ok(None);
     };
@@ -950,6 +982,139 @@ fn piece_upper(cn: &NurbsCurve, sides: &[Side; 2], a: f64, b: f64) -> Result<Opt
         }
     }
     Ok(upper.is_finite().then_some(upper))
+}
+
+/// One side's terms of fact 4 over a piece: the unit normal at `W(m)`, the enclosure of
+/// `d/dt n(W(t))` over the piece, and the angle `A` within which every foot's normal lies
+/// of `n(W(t))` at the same `t`.
+struct SeamSide {
+    n_mid: V3<Ivl>,
+    n_dot: V3<Ivl>,
+    feet: f64,
+}
+
+/// The unit normal over the enclosure `p` and its derivative along `w'` (`(u', v')`):
+/// `n = N / |N|`, `d/dt n = n_u u' + n_v v'`, `n_u = (N_u − n (n · N_u)) / |N|` (likewise
+/// `n_v`); `None` where `|N|` is not proved positive.
+fn unit_normal(p: &Partials<Ivl>) -> Option<(V3<Ivl>, Ivl)> {
+    let nn = v_cross(p.at(1, 0), p.at(0, 1));
+    let (lo, hi) = (norm_lo(nn)?, norm_hi(nn)?);
+    if !(lo.is_finite() && lo > 0.0) {
+        return None;
+    }
+    let len = Ivl::new(lo, hi);
+    Some((v_scale(nn, Ivl::from(1.0) / len), len))
+}
+
+/// Fact 4's terms of `side` over the piece `t` with midpoint `m` (gap at most `gap` over
+/// the piece), `None` where one is not proved.
+fn seam_side(side: &Side, t: Ivl, m: f64, gap: f64) -> Result<Option<SeamSide>> {
+    let net = &side.net;
+    let wd = match curve_derivs_over(&side.w, t, 1, None) {
+        Ok(d) => d,
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Err(_) => return Ok(None),
+    };
+    let (Some(w0), Some(w1)) = (wd.first().copied(), wd.get(1).copied()) else {
+        return Ok(None);
+    };
+    // the feet: within rho of W(t) (fact 1), their normals within D rho of n(W(t))
+    let Some(rho) = feet_reach(net, w0.x, w0.y, gap)? else {
+        return Ok(None);
+    };
+    let feet = if rho == 0.0 {
+        0.0
+    } else {
+        let Some((p, _)) = partials_over(net, grow(w0.x, rho), grow(w0.y, rho), 2)? else {
+            return Ok(None);
+        };
+        let Some(d) = normal_lipschitz(&p) else {
+            return Ok(None);
+        };
+        chord_angle_hi(round_up(d * rho))
+    };
+    // d/dt n(W(t)) over the piece
+    let Some((p, _)) = partials_over(net, w0.x, w0.y, 2)? else {
+        return Ok(None);
+    };
+    let Some((n, len)) = unit_normal(&p) else {
+        return Ok(None);
+    };
+    let (su, sv) = (p.at(1, 0), p.at(0, 1));
+    let nu = v_add(v_cross(p.at(2, 0), sv), v_cross(su, p.at(1, 1)));
+    let nv = v_add(v_cross(p.at(1, 1), sv), v_cross(su, p.at(0, 2)));
+    let off = |d: V3<Ivl>| v_scale(v_sub(d, v_scale(n, v_dot(n, d))), Ivl::from(1.0) / len);
+    let n_dot = v_add(v_scale(off(nu), w1.x), v_scale(off(nv), w1.y));
+    // n(W(m))
+    let Some(wm) = derivs(&side.w, Ivl::from(m))? else {
+        return Ok(None);
+    };
+    let Some((q, _)) = partials_over(net, wm.x, wm.y, 1)? else {
+        return Ok(None);
+    };
+    let Some((n_mid, _)) = unit_normal(&q) else {
+        return Ok(None);
+    };
+    if !(finite(n_dot) && finite(n_mid) && feet.is_finite()) {
+        return Ok(None);
+    }
+    Ok(Some(SeamSide { n_mid, n_dot, feet }))
+}
+
+/// The proved upper bound of the angle at the feet over the piece `[a, b]` by fact 4, `None`
+/// where it is not proved (a side collapsed near the piece, a knot line the net is not C^1
+/// across, a foot bound that does not close).
+///
+/// *4. Along the seam.* Write `n_s(t)` for the unit normal of side `s` at `W_s(t)` and
+/// `f(t) = n_1(t) − σ n_2(t)` for a fixed sign `σ` (that of `n_1 · n_2` at the midpoint
+/// `m`; any sign bounds the acute angle). The acute angle at the feet at `t` is at most
+/// `A_1 + 2 asin(|f(t)| / 2) + A_2` (a metric on lines): `A_s` the angle within which a
+/// foot's normal lies of `n_s(t)`, `D ρ` over `W_s(T) ± ρ` (fact 1's `ρ` is a Euclidean
+/// bound on `|w − W_s(t)|`, fact 2's `D` the normal's Lipschitz bound; the segment between
+/// them is in the box). `f` is Lipschitz on the piece (the net C^1 across every knot line
+/// `W_s(T)` crosses), so each coordinate of `f(t) − f(m)` is `(t − m)` times a value of
+/// that coordinate of `f'` on the piece: `f(t)` lies in `f(m) + [−h, h] [f']`, `h` the
+/// piece's half-length, `[f']` enclosing `n_1' − σ n_2'` with `n_s' = n_u u' + n_v v'`.
+/// Unlike fact 2's cones, whose `δ` is the normal's turn over the whole piece on each side,
+/// the two sides' turns along the seam cancel in `f'`, so a piece closes once its
+/// second-order term is small: long pieces close where the sides turn together.
+fn seam_piece_upper(cn: &NurbsCurve, sides: &[Side; 2], a: f64, b: f64) -> Result<Option<f64>> {
+    let t = Ivl::new(a, b);
+    let m = 0.5 * (a + b);
+    if !(a < m && m < b) {
+        return Ok(None);
+    }
+    let mut out: Vec<SeamSide> = Vec::with_capacity(2);
+    for side in sides {
+        let gap = match gap_piece(cn, &side.w, &side.net, a, b) {
+            Ok(Some((ends, term))) => round_up(ends + term),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Ok(None) | Err(_) => return Ok(None),
+        };
+        let Some(s) = seam_side(side, t, m, gap)? else {
+            return Ok(None);
+        };
+        out.push(s);
+    }
+    let [s1, s2] = out.as_slice() else {
+        return Ok(None);
+    };
+    let sign = if v_dot(s1.n_mid, s2.n_mid).mid() < 0.0 {
+        Ivl::from(-1.0)
+    } else {
+        Ivl::from(1.0)
+    };
+    let f_mid = v_sub(s1.n_mid, v_scale(s2.n_mid, sign));
+    let f_dot = v_sub(s1.n_dot, v_scale(s2.n_dot, sign));
+    let h = round_up((b - m).max(m - a));
+    let f = v_add(f_mid, v_scale(f_dot, Ivl::new(-h, h)));
+    let Some(chord) = norm_hi(f) else {
+        return Ok(None);
+    };
+    let upper = round_up(round_up(chord_angle_hi(chord) + s1.feet) + s2.feet);
+    Ok(upper
+        .is_finite()
+        .then_some(upper.min(std::f64::consts::FRAC_PI_2)))
 }
 
 /// The seam check's stations over `interval` ([`SEAM_PARTS`]), sorted, each once.
@@ -1077,7 +1242,7 @@ pub fn seam_angle_enclosure(
         // that stopped above it), no cut can bring `upper` to `below`: stop cutting
         let above = lower > below || upper > below;
         let last = above || depth >= MAX_DEPTH || !(a < mid && mid < b) || made + 2 > MAX_PIECES;
-        match piece_upper(&cn, &sides, a, b)? {
+        match piece_upper(&cn, &sides, a, b, below)? {
             Some(bound) if last || bound <= below => {
                 upper = upper.max(bound);
                 continue;
@@ -1146,7 +1311,7 @@ pub fn seam_angle_within(
             return Ok(false);
         }
         spent += 1;
-        if let Some(bound) = piece_upper(&cn, &sides, a, b)? {
+        if let Some(bound) = piece_upper(&cn, &sides, a, b, limit)? {
             if bound <= limit {
                 continue;
             }
@@ -1309,6 +1474,50 @@ mod tests {
             e.lower <= half && half <= e.upper && e.upper < most,
             "{e:?}"
         );
+    }
+
+    /// Two surfaces whose normals turn together along the x-axis, `atan(b x^2)` and
+    /// `atan(e + b x^2)` from `+z` (`b = 0.5`, `e = 1e-3`): the angle between them is at
+    /// most `atan(e)`. Fact 2's cones turn by about `b` times a piece's length on each side,
+    /// so a piece of 1/64 of the seam has no cone bound within the limit (pieces of 1/256
+    /// are still at 5e-3, five times it); fact 4's turns cancel, so the whole seam is proved
+    /// within it with at most 256 piece bounds (pieces of 1/64 or longer).
+    #[test]
+    fn surfaces_turning_together_are_proved_in_long_pieces() {
+        let k = Kernel::default();
+        let (b, e) = (0.5_f64, 1.0e-3_f64);
+        let (one, two) = (leaning(0.0, b), leaning(e, b));
+        let limit = e.atan() * 1.2;
+        let interval = Extent1d::from_min_max(0.0, 1.0);
+        assert!(seam_angle_within(
+            &k,
+            &x_axis(),
+            interval,
+            [&one, &two],
+            limit,
+            16 * WITHIN_PIECES
+        )
+        .unwrap());
+        let (cn, sides) = prepare(&k, &x_axis(), interval, [&one, &two])
+            .unwrap()
+            .unwrap();
+        let (a, z) = (0.5, 0.5 + 1.0 / 64.0);
+        let cone = cone_piece_upper(&cn, &sides, a, z).unwrap().unwrap();
+        let along = seam_piece_upper(&cn, &sides, a, z).unwrap().unwrap();
+        assert!(
+            cone > limit && along <= limit,
+            "{cone:e} {along:e} {limit:e}"
+        );
+        // and nothing below the angle is proved: the seam reaches atan(e) at x = 0
+        assert!(!seam_angle_within(
+            &k,
+            &x_axis(),
+            interval,
+            [&one, &two],
+            e.atan() * (1.0 - 1.0e-6),
+            1 << 12
+        )
+        .unwrap());
     }
 
     /// A triangle in the plane `z = a y` as a bilinear net whose last row (v = 1) is the apex

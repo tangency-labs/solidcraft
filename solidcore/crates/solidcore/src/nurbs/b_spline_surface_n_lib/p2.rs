@@ -3472,10 +3472,12 @@ struct CoonsSides<'c, 's> {
 const MAX_CORNER_GRADE: u32 = 3;
 
 /// Not the fork's (WR-613): the most piece bounds one side's certification
-/// ([`coons_side_within`]) computes: 128 per starting piece ([`WITHIN_PIECES`]). A side in
-/// its neighbour's plane needs about 1000 (its pieces are bounded once they are about 1/512
-/// of the side). Past it the side is not certified, so the candidate is refused and the
-/// shipped patch kept: the budget bounds the work, never what is accepted.
+/// ([`coons_side_within`]) computes: 128 per starting piece ([`WITHIN_PIECES`]). A side
+/// whose normals turn with its neighbour's is bounded in long pieces by the along-seam
+/// bound (fact 4 of [`crate::query::seam_bound`]); the budget is for sides that only close
+/// in short pieces, such as near a collapsed corner. Past it the side is not certified, so
+/// the candidate is refused and the shipped patch kept: the budget bounds the work, never
+/// what is accepted.
 ///
 /// [`WITHIN_PIECES`]: crate::query::seam_bound::WITHIN_PIECES
 const CERTIFY_PIECES: usize = 2048;
@@ -3526,7 +3528,7 @@ fn face_sided_patch(
         return Ok(None);
     };
     let taken = |cand: &BSplineSurface| -> Result<bool> {
-        let cand_seams = coons_side_seams(k, cand, sides)?;
+        let cand_seams = coons_side_seams(k, cand, sides, limit)?;
         if !read_within(&cand_seams, limit) {
             return Ok(false);
         }
@@ -3591,10 +3593,15 @@ enum SideSeam {
 /// and the candidate's 3.2e-7 above it). A
 /// reading that fails with an error other than an unported call or a cancellation reads
 /// nothing.
+///
+/// The sides after the first whose reading [`read_within`] refuses at `limit` are not
+/// read (left [`SideSeam::Free`]): the screen's answer is already no, and each reading is
+/// a nearest-point solve at every station.
 fn coons_side_seams(
     k: &crate::kernel::Kernel,
     patch: &BSplineSurface,
     sides: &CoonsSides<'_, '_>,
+    limit: f64,
 ) -> Result<[SideSeam; 4]> {
     let patch = SmSurface::from(patch.clone());
     let mut out = [SideSeam::Free; 4];
@@ -3609,11 +3616,18 @@ fn coons_side_seams(
             curve.natural_interval(),
             [(&patch, 1.0), (surface, 1.0)],
         );
-        *slot = SideSeam::Read(match read {
+        let seam = SideSeam::Read(match read {
             Ok(angle) => angle,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => None,
         });
+        *slot = seam;
+        if !read_within(
+            &[seam, SideSeam::Free, SideSeam::Free, SideSeam::Free],
+            limit,
+        ) {
+            break;
+        }
     }
     Ok(out)
 }
