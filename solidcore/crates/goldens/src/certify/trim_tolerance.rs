@@ -12,8 +12,8 @@
 //! check), and each moved entity's tolerance must be `n` and certify:
 //! - an edge: `B` is [`trim_image_gap_bound`] of each of its UV trims, a proved upper bound on
 //!   the Hausdorff distance between the edge curve and the trim's image on its face (so on the
-//!   true gap `g`); an edge whose B-rep keeps no UV trim has `B` the proved bound
-//!   ([`curve_face_gap_bound`]) on the distance from its curve to each of its faces' surfaces
+//!   true gap `g`); on a face of the edge where it holds no UV trim, `B` is the proved bound
+//!   ([`curve_face_gap_bound`]) on the distance from its curve to the face's surface
 //!   (a UV trim that is a line is enclosed as its NURB, the segment between its two control
 //!   points, which is the line's geometry up to the slack [`line_evaluation_slack`] bounds,
 //!   added to `B`; see `use_bound`);
@@ -624,40 +624,62 @@ fn face_trims_covered(k: &Kernel, b: &Brep, f: FaceId) -> Result<f64, String> {
     }
 }
 
-/// For an edge whose B-rep keeps no UV trim: a proved bound on the distance from its curve
-/// over its interval to the surface of each face of the edge
-/// ([`curve_face_gap_bound`], floor a thousandth of `n`), plus the rounding of the curve's
-/// evaluation against its NURBS data (none for a B-spline or an ellipse, evaluated on it; for a
-/// line, evaluated analytically, [`line_evaluation_slack`]); `None` per face where it is not enclosed or the curve is
-/// of another kind.
-fn face_bounds(k: &Kernel, b: &Brep, e: EdgeId, n: f64) -> Vec<Option<f64>> {
+/// A proved bound on the distance from `e`'s curve over its interval to the surface of its
+/// face `f` ([`curve_face_gap_bound`], floor a thousandth of `n`), plus the rounding of the
+/// curve's evaluation against its NURBS data (none for a B-spline or an ellipse, evaluated on
+/// it; for a line, evaluated analytically, [`line_evaluation_slack`]); `None` where it is not
+/// enclosed or the curve is of another kind.
+fn face_bound(k: &Kernel, b: &Brep, e: EdgeId, f: FaceId, n: f64) -> Option<f64> {
     let rec = b.edge(e).expect("edge");
-    let faces = edge::faces(b, e, None).expect("faces");
-    let Some(curve) = rec.curve.as_ref() else {
-        return vec![None; faces.len().max(1)];
-    };
+    let curve = rec.curve.as_ref()?;
     let line;
     let (bs, slack) = match curve.kind() {
         CurveKind::BSpline(bs) => (bs, 0.0),
         CurveKind::Ellipse(el) => (el.base(), 0.0),
         CurveKind::Line(l) => {
             line = l.base_with_nurb().expect("a line's NURB");
-            let Some(slack) = line_evaluation_slack(l, false) else {
-                return vec![None; faces.len().max(1)];
-            };
-            (&*line, slack)
+            (&*line, line_evaluation_slack(l, false)?)
         }
-        _ => return vec![None; faces.len().max(1)],
+        _ => return None,
     };
     let ivl = rec.interval;
-    faces
-        .iter()
-        .map(|&f| {
-            curve_face_gap_bound(k, b, f, bs, [ivl.min(), ivl.max()], FLOOR * n)
-                .expect("the bound")
-                .map(|g| (g + slack) * (1.0 + 4.0 * f64::EPSILON))
-        })
-        .collect()
+    curve_face_gap_bound(k, b, f, bs, [ivl.min(), ivl.max()], FLOOR * n)
+        .expect("the bound")
+        .map(|g| (g + slack) * (1.0 + 4.0 * f64::EPSILON))
+}
+
+/// The bounds that certify `e`'s tolerance `n`, one per checked gap, for every face of the
+/// edge: the `B` of each UV trim the edge's uses on that face hold ([`use_bound`]), or, on a
+/// face where none holds one, its curve's distance to the face's surface ([`face_bound`]);
+/// `None` where a gap is not enclosed, and a single `None` for an edge on no face. With the
+/// number of faces bounded without a trim.
+fn edge_bounds(k: &Kernel, b: &Brep, e: EdgeId, n: f64) -> (Vec<Option<f64>>, usize) {
+    let rec = b.edge(e).expect("edge");
+    let faces = edge::faces(b, e, None).expect("faces");
+    if faces.is_empty() {
+        return (vec![None], 0);
+    }
+    let mut out = Vec::new();
+    let mut trimless = 0;
+    for f in faces {
+        let mut on_face = Vec::new();
+        for &eu in &rec.edgeuses {
+            if eu1::face(b, eu).expect("face") != Some(f) {
+                continue;
+            }
+            match use_bound(k, b, e, eu) {
+                UseBound::NoTrim => {}
+                UseBound::Open => on_face.push(None),
+                UseBound::Bound(x) => on_face.push(Some(x)),
+            }
+        }
+        if on_face.is_empty() {
+            on_face.push(face_bound(k, b, e, f, n));
+            trimless += 1;
+        }
+        out.extend(on_face);
+    }
+    (out, trimless)
 }
 
 /// Whether the point of `v` is within `n` of the end of every edge curve of `v` that ends
@@ -699,7 +721,8 @@ struct Tally {
     vertices: usize,
     /// Trims bounded (or faces, for an edge without trims).
     trims: usize,
-    /// Moved edges without a UV trim, bounded against their faces' surfaces instead.
+    /// Faces of moved edges on which the edge holds no UV trim, bounded against the face's
+    /// surface instead.
     trimless: usize,
     /// Moved edges listed in [`OPEN`].
     open: usize,
@@ -937,11 +960,10 @@ fn certify(unit: &str) -> Tally {
                     .find(|(e, _)| usize::try_from(e.index()) == Ok(index))
                     .unwrap_or_else(|| panic!("{at}: no edge"));
                 assert_eq!(rec.tolerance.to_bits(), new.to_bits(), "{at}: tolerance");
-                let mut bounds = trim_bounds(&k, b, e);
-                if bounds.is_empty() {
-                    bounds = face_bounds(&k, b, e, new);
-                    tally.trimless += 1;
-                }
+                // (each face of the edge: its trims' bounds, or the curve's distance to its
+                // surface where the edge holds no trim on it)
+                let (bounds, trimless) = edge_bounds(&k, b, e, new);
+                tally.trimless += trimless;
                 let mut bad = Vec::new();
                 for x in &bounds {
                     tally.trims += 1;
@@ -1052,6 +1074,74 @@ certified_units! {
     brep_p4: "topology.brep_p4",
     edgeuse_p3: "topology.edgeuse_p3",
     face_p3: "topology.face_p3",
+}
+
+/// An edge that holds a UV trim on one of its faces only is bounded on the other against
+/// that face's surface ([`edge_bounds`]): a box edge with its trims made on its first face, its
+/// second face's surface then swapped for that of a face the edge does not touch (so the edge
+/// lies up to the box's size off it). The first face's trims still certify; the second face's
+/// bound does not, where bounding the trims alone saw nothing wrong (#18166 review).
+#[test]
+fn an_edge_face_without_a_trim_is_bounded_against_its_surface() {
+    let mut k = Kernel::default();
+    let mut b = solidcore::primitive::api_primitives::create_box(
+        &mut k,
+        solidcore::Point3::new(0.0, 0.0, 0.0),
+        10.0,
+        20.0,
+        30.0,
+    )
+    .expect("a box");
+    let e = b.edges().iter().map(|(e, _)| e).next().expect("an edge");
+    let faces = edge::faces(&b, e, None).expect("faces");
+    assert_eq!(faces.len(), 2);
+    let uses = b.edge(e).expect("edge").edgeuses.clone();
+    for &eu in &uses {
+        if eu1::face(&b, eu).expect("face") == Some(faces[0]) {
+            solidcore::topology::edgeuse::p3::get_or_create_uv_trim_curve(
+                &k, &mut b, eu, false, false, true,
+            )
+            .expect("a trim")
+            .status
+            .expect("a trim");
+        }
+    }
+    let on_second = |b: &Brep| {
+        uses.iter()
+            .filter(|&&eu| eu1::face(b, eu).expect("face") == Some(faces[1]))
+            .any(|&eu| b.edgeuse(eu).expect("use").uv_trim_curve.is_some())
+    };
+    assert!(!on_second(&b), "the second face holds no trim");
+    let tol = b.edge(e).expect("edge").tolerance;
+    let certified = |bounds: &[Option<f64>]| bounds.iter().all(|x| x.is_some_and(|x| x <= tol));
+    let (bounds, trimless) = edge_bounds(&k, &b, e, tol);
+    assert_eq!(trimless, 1, "{bounds:?}");
+    assert!(bounds.len() >= 2 && certified(&bounds), "{bounds:?}");
+    let others: Vec<FaceId> = b
+        .faces()
+        .iter()
+        .map(|(f, _)| f)
+        .filter(|f| !faces.contains(f))
+        .collect();
+    assert_eq!(others.len(), 4);
+    for o in others {
+        let mut moved = b.clone_standing_for_self().expect("a copy");
+        let surface = moved.face(o).expect("face").surface.clone();
+        moved.face_mut(faces[1]).expect("face").surface = surface;
+        let (bounds, trimless) = edge_bounds(&k, &moved, e, tol);
+        assert_eq!(trimless, 1);
+        assert!(!certified(&bounds), "face {}: {bounds:?}", o.index());
+        // (the trims alone still certify)
+        let trims: Vec<Option<f64>> = uses
+            .iter()
+            .filter_map(|&eu| match use_bound(&k, &moved, e, eu) {
+                UseBound::NoTrim => None,
+                UseBound::Open => Some(None),
+                UseBound::Bound(x) => Some(Some(x)),
+            })
+            .collect();
+        assert!(!trims.is_empty() && certified(&trims), "{trims:?}");
+    }
 }
 
 /// #18162 regression: `heal.stitch_p2` `cov_tjunc11_do_nonmanifold_gaps` closes a corner's
