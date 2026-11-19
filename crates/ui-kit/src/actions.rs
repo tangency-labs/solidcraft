@@ -33,7 +33,6 @@ enum ButtonTone {
     Danger,
     DangerOutlined,
     Selected,
-    Ghost,
 }
 
 struct ButtonAppearance {
@@ -62,7 +61,7 @@ fn button_appearance(ui: &Ui, response: Option<&Response>, tone: ButtonTone) -> 
         ButtonTone::Danger => (t.form_error, t.on_accent),
         ButtonTone::DangerOutlined => (t.control_fill, t.form_error),
         ButtonTone::Selected => selected_button_palette(&t),
-        ButtonTone::Normal | ButtonTone::Ghost => (t.control_fill, t.form_ink),
+        ButtonTone::Normal => (t.control_fill, t.form_ink),
     };
     if enabled {
         if accented {
@@ -83,9 +82,7 @@ fn button_appearance(ui: &Ui, response: Option<&Response>, tone: ButtonTone) -> 
         } else if hovered {
             fill = if t.hover == t.control_fill { t.hover.lerp_to_gamma(t.form_ink, 0.12) } else { t.hover };
         }
-        if matches!(tone, ButtonTone::Ghost) && (hovered || pressed || focused) {
-            ink = if pressed { t.form_primary.lerp_to_gamma(t.form_ink, 0.24) } else { t.form_primary };
-        } else if solidcraft_theme::contrast_ratio(ink, fill) < 4.5 {
+        if solidcraft_theme::contrast_ratio(ink, fill) < 4.5 {
             // Custom themes can use a light accent with light on-accent text. Select a readable
             // foreground from that same theme for each interaction shade.
             ink = [t.form_ink, t.on_accent, t.tab_on_fill_dark].into_iter().fold(ink, |best, candidate| {
@@ -127,6 +124,16 @@ fn styled_button(ui: &Ui, label: egui::WidgetText, tone: ButtonTone) -> egui::Bu
         appearance.stroke.width = ui.style().visuals.widgets.state(state).bg_stroke.width;
     }
     egui::Button::new(label.color(appearance.ink)).fill(appearance.fill).stroke(appearance.stroke)
+}
+
+/// Ghost actions use the surface underneath and underline the label on hover or keyboard focus.
+fn ghost_button(ui: &Ui, label: egui::WidgetText) -> egui::Button<'static> {
+    let t = Tokens::get();
+    let enabled = ui.is_enabled();
+    let label = label.color(if enabled { t.form_ink } else { t.form_dim });
+    let interaction = ui.ctx().read_response(ui.next_auto_id());
+    let label = if enabled && interaction.is_some_and(|response| response.hovered() || response.has_focus()) { label.underline() } else { label };
+    egui::Button::new(label).frame(false)
 }
 
 /// Icon action inside an existing rectangle. Tokens: `form_icon_inset, text, text_dim; icon palette`.
@@ -355,24 +362,18 @@ pub(super) fn footer_with_left(
     ui.scope_builder(egui::UiBuilder::new().max_rect(left_rect).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
         if let Some(label) = apply_label.filter(|_| confirm) {
             let marked = selected == Some(Action::Apply);
-            let tone = if !secondary_left {
-                ButtonTone::Ghost
-            } else if marked {
-                ButtonTone::Selected
-            } else {
-                ButtonTone::Normal
-            };
             // A confirmation's third choice (Don't Save, Keep) never waited for OK's inputs.
             let response = ui.add_enabled(!nothing_to_apply, |ui: &mut Ui| {
-                let mut button = styled_button(ui, solidcraft_ui_text::tr_label(label).into(), tone)
-                    .frame(secondary_left)
-                    .selected(marked)
-                    .min_size(vec2(0.0, t.form_button_height));
-                if secondary_left {
+                let label = solidcraft_ui_text::tr_label(label).into();
+                let button = if secondary_left {
+                    let tone = if marked { ButtonTone::Selected } else { ButtonTone::Normal };
+                    let button = styled_button(ui, label, tone).frame(true).corner_radius(t.control_radius);
                     ui.spacing_mut().button_padding = vec2(t.space_12, 0.0);
-                    button = button.corner_radius(t.control_radius);
-                }
-                ui.add(button)
+                    button
+                } else {
+                    ghost_button(ui, label)
+                };
+                ui.add(button.selected(marked).min_size(vec2(0.0, t.form_button_height)))
             });
             pointer_on_hover(ui, &response);
             solidcraft_ui_registry::publish_target("dialog:apply", response.rect);
@@ -675,7 +676,7 @@ fn button_widget(label: egui::WidgetText, options: Button) -> impl egui::Widget 
             Button::DangerOutlined => styled_button(ui, label, ButtonTone::DangerOutlined)
                 .corner_radius(Tokens::get().control_radius)
                 .min_size(vec2(0.0, Tokens::get().control_height)),
-            Button::Ghost => styled_button(ui, label, ButtonTone::Ghost).frame(false),
+            Button::Ghost => ghost_button(ui, label),
             Button::SmallSelected => styled_button(ui, label, ButtonTone::Selected).small(),
             _ => styled_button(ui, label, ButtonTone::Normal),
         };
