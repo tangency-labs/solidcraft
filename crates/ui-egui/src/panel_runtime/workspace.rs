@@ -368,6 +368,14 @@ impl WorkspacePanelHost {
         Ok(())
     }
 
+    pub(crate) fn set_wide_grab(&mut self, wide: bool) {
+        let docked_grab_width = if wide { super::layout::DOCKED_GRAB_WIDTH } else { 0.0 };
+        if docked_grab_width != self.options.metrics.docked_grab_width {
+            self.invalidate_geometry();
+            self.options.metrics.docked_grab_width = docked_grab_width;
+        }
+    }
+
     pub fn new(options: HostOptions) -> PanelResult<Self> {
         options.metrics.validate()?;
         if !options.content_header_height.is_finite() || options.content_header_height < 0.0 || options.content_header_height > 256.0 {

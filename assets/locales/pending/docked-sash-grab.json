@@ -1,0 +1,6 @@
+{
+  "en": {
+    "prefs.wide_panel_grab": "Wide grab on panel dividers",
+    "prefs.wide_panel_grab_help": "A divider between docked panels takes presses a few pixels to either side of the line it draws. When off, only the drawn line resizes."
+  }
+}

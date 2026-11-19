@@ -270,6 +270,8 @@ pub struct HostMetrics {
     /// joins compact cards; resize handles retain their own positive width.
     pub gap: f32,
     pub sash_width: f32,
+    /// Docked sashes draw `sash_width` but grab this wide; zero grabs only what is drawn.
+    pub docked_grab_width: f32,
     pub control_extent: f32,
     pub tab_min_width: f32,
     /// Single-row Wide composition threshold, bounded by the shared contract.
@@ -278,8 +280,7 @@ pub struct HostMetrics {
     pub min_viewport: Size,
 }
 
-/// Docked sashes draw `sash_width` but grab this wide.
-const DOCKED_GRAB_WIDTH: f32 = 8.0;
+pub const DOCKED_GRAB_WIDTH: f32 = 8.0;
 
 impl Default for HostMetrics {
     fn default() -> Self {
@@ -290,6 +291,7 @@ impl Default for HostMetrics {
             footer_height: t.form_footer_height,
             gap: t.space_4,
             sash_width: t.space_4,
+            docked_grab_width: DOCKED_GRAB_WIDTH,
             control_extent: t.control_height,
             tab_min_width: t.control_height * 2.0,
             inline_max_height: (t.control_height * 2.0 + t.space_4).min(88.0),
@@ -317,6 +319,9 @@ impl HostMetrics {
         }
         if !self.gap.is_finite() || !(0.0..=256.0).contains(&self.gap) {
             return Err(error(Rule::Bounds, "invalid host gap"));
+        }
+        if !self.docked_grab_width.is_finite() || !(0.0..=DOCKED_GRAB_WIDTH).contains(&self.docked_grab_width) {
+            return Err(error(Rule::Bounds, "invalid docked grab width"));
         }
         if !self.inline_max_height.is_finite() || !(0.0..=88.0).contains(&self.inline_max_height) {
             return Err(error(Rule::Bounds, "invalid inline row threshold"));
@@ -1606,7 +1611,7 @@ fn append_sashes(out: &mut HostLayout, proposed: &Layout) -> PanelResult<()> {
                     add_grab_control(
                         out,
                         HostPointerTarget::Sash { first: first.clone(), second: second.clone() },
-                        centre_widen(bounds, DOCKED_GRAB_WIDTH),
+                        centre_widen(bounds, out.metrics.docked_grab_width),
                         bounds,
                         InputRole::Sash,
                         "ui.panel_host.sash",
