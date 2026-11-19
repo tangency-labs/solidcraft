@@ -82,7 +82,8 @@
 //!   tolerance), it is raised to the edited trim's proved distance from the edge curve
 //!   when that is larger and at most twice the tolerance (`keep_trim_covered`: a larger
 //!   bound is the enclosure's slack as often as the trim's move, and stays upstream's);
-//!   it is never lowered.
+//!   it is never lowered. Both bounds bisect into at most `KEEP_COVERED_PIECES` (2048)
+//!   pieces; a trim not enclosed within them raises nothing.
 //! - **Not upstream (#14257): the end move is spread.** Upstream moves each trim's end
 //!   control point alone onto the vertex's UV point, which turns the end control leg by
 //!   any angle when the gap is not small against it (WR-794). Here the control points
@@ -3535,6 +3536,10 @@ struct TrimBefore {
     fit: f64,
 }
 
+/// The most pieces [`keep_trim_covered`]'s bounds bisect a trim into (a sixteenth of the
+/// bisection's own budget): about 5 ms a trim.
+const KEEP_COVERED_PIECES: usize = 1 << 11;
+
 /// Not upstream (#18162): after [`fix_uv_trim_curves_notified`] edited the UV trim held at
 /// `holder` for `eu`, raises the edge's tolerance to the trim's enclosed distance from the
 /// edge curve (`trim_deviation_bound`) where it no longer covers the trim but covered it
@@ -3554,6 +3559,12 @@ struct TrimBefore {
 /// The trim before the edit is bounded only where the edited one would raise: on a dense
 /// net a trim just within its tolerance costs a deep bisection each time (the
 /// `crashes/2992` rig case bounds over a thousand such trims, all still covered).
+///
+/// Both bounds stop at [`KEEP_COVERED_PIECES`] pieces, and a trim not enclosed within them
+/// raises nothing (the tolerance stays upstream's). A trim lying just within its tolerance
+/// along its whole length cannot be closed below it, and bounding it to the full budget took
+/// 80 ms a trim, over 200 trims of the same rig case; the bound reached when the pieces run
+/// out is not one to raise a tolerance to.
 fn keep_trim_covered(
     k: &Kernel,
     b: &mut Brep,
@@ -3587,6 +3598,7 @@ fn keep_trim_covered(
             trim,
             fit,
             [tolerance, 2.0 * tolerance],
+            Some(KEEP_COVERED_PIECES),
         )?
     };
     let Some(bound) = bound else {
@@ -3604,6 +3616,7 @@ fn keep_trim_covered(
             &before.trim,
             before.fit,
             [before.tolerance; 2],
+            Some(KEEP_COVERED_PIECES),
         )?,
         Some(was) if was <= before.tolerance
     );

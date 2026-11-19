@@ -667,6 +667,7 @@ fn certified_gap(
         CLOSE_RELATIVE,
         floor,
         [f64::NEG_INFINITY, f64::INFINITY],
+        None,
         |a, b| {
             k.check_cancelled(OP)?;
             piece(&cn, &wn, surface, a, b)
@@ -690,6 +691,11 @@ fn certified_gap(
 /// The first pieces are also cut at every point of `corners` (sorted, distinct) inside
 /// `(lo, hi)`, so no first piece has one inside it ([`certified_gap`] passes the curves'
 /// [`kinks`]).
+///
+/// `budget` is the most pieces the bisection may make, [`MAX_PIECES`] when `None`. Without one
+/// a piece left open when the pieces run out is bounded as it stands, as one cut to the
+/// deepest; with one, the gap is then not enclosed (`None`): a caller that only acts on a bound
+/// at most a few times its tolerance can afford neither the whole budget nor the looser bound.
 fn bisect(
     [lo, hi]: [f64; 2],
     first_pieces: usize,
@@ -697,6 +703,7 @@ fn bisect(
     relative: f64,
     floor: f64,
     [enough, over]: [f64; 2],
+    budget: Option<usize>,
     piece: impl Fn(f64, f64) -> Result<Option<PieceBound>>,
 ) -> Result<Option<f64>> {
     if !(lo.is_finite() && hi.is_finite() && lo < hi) || first_pieces == 0 {
@@ -723,16 +730,23 @@ fn bisect(
     stack.reverse();
     let mut worst = 0.0_f64;
     let mut made = stack.len();
+    let max_pieces = budget.unwrap_or(MAX_PIECES);
     while let Some((a, b, depth, parent)) = stack.pop() {
         let mid = 0.5 * (a + b);
         // (a piece that cannot be cut further is bounded as it is: the bound holds whether or
         // not the second term has shrunk, closing only makes it tight)
-        let last = depth >= MAX_DEPTH || !(a < mid && mid < b) || made + 2 > MAX_PIECES;
+        let out_of_pieces = made + 2 > max_pieces;
+        let last = depth >= MAX_DEPTH || !(a < mid && mid < b) || out_of_pieces;
         let mut slack = f64::INFINITY;
         match piece(a, b) {
             Ok(Some(p)) => {
                 let bound = (Ivl::from(p.ends) + Ivl::from(p.with_slack)).hi;
-                if last || bound <= enough || p.closes(parent, relative, floor) {
+                let closed = bound <= enough || p.closes(parent, relative, floor);
+                if last || closed {
+                    // (an open piece the budget stopped is not bounded as it stands)
+                    if !closed && budget.is_some() && out_of_pieces {
+                        return Ok(None);
+                    }
                     if bound > over {
                         return Ok(Some(f64::INFINITY));
                     }
@@ -1739,6 +1753,7 @@ pub fn trim_image_gap_bound_up_to(
         range,
         floor,
         [f64::NEG_INFINITY, over],
+        None,
     )
 }
 
@@ -1749,6 +1764,9 @@ pub fn trim_image_gap_bound_up_to(
 /// `enough` is answered as by [`trim_image_gap_bound_up_to`] wherever that one stays within its
 /// piece budget (pruned pieces leave the budget to the others, which can only tighten it).
 /// An `enough` of `f64::NEG_INFINITY` is [`trim_image_gap_bound_up_to`].
+///
+/// `budget` caps the bisection's pieces as for [`bisect`]: `None` is the whole budget, with a
+/// piece still open at its end bounded as it stands; with a cap, such a gap is not enclosed.
 ///
 /// # Errors
 ///
@@ -1761,6 +1779,7 @@ pub fn trim_image_gap_bound_within(
     range: [f64; 2],
     floor: f64,
     [enough, over]: [f64; 2],
+    budget: Option<usize>,
 ) -> Result<Option<f64>> {
     use crate::error::ignored;
     use crate::surface::surface::exact_pieces::exact_nurbs_surface;
@@ -1834,6 +1853,7 @@ pub fn trim_image_gap_bound_within(
         CLOSE_RELATIVE,
         floor,
         [enough_gap, over],
+        budget,
         |a, b| {
             k.check_cancelled(OP)?;
             piece_reparametrised(&sides, &net, a, b)
@@ -2155,6 +2175,7 @@ mod tests {
             CLOSE_RELATIVE,
             floor,
             [f64::NEG_INFINITY, f64::INFINITY],
+            None,
             |a, b| {
                 let h = b - a;
                 Ok(PieceBound::with(ends, Ivl::from(0.1 * h * h), slack(a, h)))
@@ -2162,6 +2183,37 @@ mod tests {
         )
         .unwrap()
         .unwrap()
+    }
+
+    /// A budget the open pieces outlast leaves the gap not enclosed, where the whole budget
+    /// bounds the pieces it stops as they stand (#18166); a budget the pieces close within
+    /// gives the bound without one, bit for bit.
+    #[test]
+    fn a_budget_run_out_is_not_enclosed() {
+        let run = |relative: f64, budget: Option<usize>| {
+            bisect(
+                [0.0, 1.0],
+                32,
+                &[],
+                relative,
+                0.0,
+                [f64::NEG_INFINITY, f64::INFINITY],
+                budget,
+                |a, b| {
+                    let h = b - a;
+                    Ok(PieceBound::with(1.0, Ivl::from(0.1 * h * h), 0.0))
+                },
+            )
+            .unwrap()
+        };
+        // (closing at 0.1 h² <= 1e-13 needs pieces of 1e-6: more than 1 << 11)
+        assert_eq!(run(0.0, Some(1 << 11)), None);
+        assert!(run(0.0, None).is_some_and(|g| g >= 1.0));
+        // (closing at 0.1 h² <= 1e-3 needs no cut of the 32 first pieces)
+        assert_eq!(
+            run(CLOSE_RELATIVE, Some(1 << 11)).map(f64::to_bits),
+            run(CLOSE_RELATIVE, None).map(f64::to_bits)
+        );
     }
 
     /// A slack no cut shrinks (a trim past its surface's net, #18166) does not hold a piece

@@ -1787,7 +1787,7 @@ pub(crate) fn trim_raise_distance(
     // (a bound not below `upstream` is not taken)
     // (a bound at most half the tolerance raises nothing, whatever its value: the bisection
     // stops tightening it there)
-    let raise_by = match trim_deviation_bound(k, b, eu, trim, fit, [0.5 * tol, upstream])? {
+    let raise_by = match trim_deviation_bound(k, b, eu, trim, fit, [0.5 * tol, upstream], None)? {
         Some(bound) if bound < upstream => bound,
         _ => return Ok(upstream),
     };
@@ -1830,7 +1830,7 @@ fn other_trims_bound(
         let Some(other) = b.edgeuse(x)?.uv_trim_curve.as_ref() else {
             continue;
         };
-        match trim_deviation_bound(k, b, x, other, fit, [lowered, lowered])? {
+        match trim_deviation_bound(k, b, x, other, fit, [lowered, lowered], None)? {
             Some(bound) if bound.is_finite() => worst = worst.max(bound),
             _ => return Ok(None),
         }
@@ -1872,6 +1872,7 @@ pub(crate) fn trim_deviation_bound(
     trim: &Curve,
     fit: f64,
     [enough, over]: [f64; 2],
+    budget: Option<usize>,
 ) -> Result<Option<f64>> {
     let (Some(e), Some(fu)) = (edge(b, eu)?, faceuse(b, eu)?) else {
         return Ok(None);
@@ -1898,6 +1899,7 @@ pub(crate) fn trim_deviation_bound(
         [ivl.min(), ivl.max()],
         floor,
         [enough, over],
+        budget,
     )
 }
 
