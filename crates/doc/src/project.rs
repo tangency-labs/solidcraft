@@ -353,7 +353,10 @@ fn resolve_uncached(
             let mesh = b.mesh();
             match kind {
                 LinkKind::Intersect => section(plane, &mesh, None),
-                _ => silhouette(plane, &mesh, Some(&b.body)),
+                _ => match exact_silhouette(b, plane) {
+                    Some(g) if !g.is_empty() => g,
+                    _ => silhouette(plane, &mesh, Some(&b.body)),
+                },
             }
         }
         LinkSource::Vertex { body, at } => {
@@ -2217,6 +2220,375 @@ fn surface_facing(m: &Mesh, t: &[u32; 3], flat: Vec3) -> Vec3 {
         }
     }
     sum.normalized().unwrap_or(flat)
+}
+
+/// Points along an edge at which [`exact_silhouette`] asks which way its faces face.
+const OUTLINE_SAMPLES: u32 = 32;
+
+/// The outline of a solid seen along the sketch normal, from its exact faces and edges: the
+/// stretches of its edges between a face that faces the sketch and one that does not (and of an
+/// open sheet's border where its face faces the sketch), each projected exactly as an edge link
+/// projects it ([`exact_edges`], or the kernel's projection of the stretch), and the silhouettes of
+/// its curved faces as the drawing's hidden lines trace them ([`hlr::silhouettes`]). A face faces
+/// the sketch where its normal out of the material leans toward it; edge-on is away, as in
+/// [`silhouette`]. A circle seen at a slant is an ellipse: its stretches come out as exact
+/// elliptical arcs, not lines and circular arcs fitted to the mesh (which bulged the wrong way and
+/// ran to hundreds of curves on a sketch at 45 degrees).
+///
+/// `None` for a mesh body, a body hidden lines leave out (a freeform face, a trim they cannot
+/// read), or an edge or face the kernel cannot read exactly here: the mesh's outline is traced
+/// then ([`silhouette`]).
+///
+/// [`hlr::silhouettes`]: solidcraft_geom::hlr::silhouettes
+fn exact_silhouette(body: &crate::ModelBody, plane: &Plane) -> Option<Vec<LinkGeom>> {
+    use solidcraft_geom::hlr;
+    if body.body.is_mesh() {
+        return None;
+    }
+    let rec = body.body.record();
+    let n = plane.normal();
+    let size = body.body.size().max(1e-9);
+    let q = solidcore_ops::query::Query::new(rec);
+    // Which way face `f` faces at `p`, a point of one of its edges running along `along`. A face
+    // seen edge-on there (two faces meeting tangentially where the view grazes them both: a round
+    // edge's end seen along the round) faces as it does just inside, a hair from the edge.
+    let step = size * 1e-5;
+    let front = |f: usize, p: Vec3, along: Vec3, accept: f64| -> Option<bool> {
+        let normal = q.face_normal(f, q.face_uv(f, p, accept)?)?;
+        let s = normal.dot(n);
+        if s.abs() > 1e-6 {
+            return Some(s > 1e-9);
+        }
+        let Some(across) = normal.cross(along).normalized() else { return Some(false) };
+        // A step to the side off the face finds its edge again (its parameters held to the
+        // face's), where it is edge-on; the step onto it finds how it leans. The side that leans
+        // more is the face's.
+        let near = accept + 0.1 * step;
+        let lean = |side: f64| q.face_uv(f, p + across * (step * side), near).and_then(|uv| q.face_normal(f, uv)).map(|v| v.dot(n));
+        let s = [lean(1.0), lean(-1.0)].into_iter().flatten().fold(s, |a, b| if b.abs() > a.abs() { b } else { a });
+        Some(s > 1e-9)
+    };
+    let mut edges = Vec::new();
+    for (e, edge) in rec.edges.iter().enumerate() {
+        let uses = q.edge_faces(e);
+        let mut faces = uses.clone();
+        faces.sort_unstable();
+        faces.dedup();
+        // A wire bounds no face; a seam (one face on both sides, a round wall's) is no outline.
+        if faces.is_empty() || (faces.len() == 1 && uses.len() > 1) {
+            continue;
+        }
+        let accept = 4.0 * edge.tolerance.max(1e-7) + size * 1e-7;
+        // On the outline at `p`: one face facing the sketch and the other not, or an open
+        // sheet's border facing it. Faces on one surface (a seam) face alike.
+        let outline = |(p, along): (Vec3, Vec3)| -> Option<bool> {
+            match faces.as_slice() {
+                [f] => front(*f, p, along, accept),
+                [f, g] => Some(front(*f, p, along, accept)? != front(*g, p, along, accept)?),
+                _ => None,
+            }
+        };
+        let [t0, t1] = q.edge_interval(e)?;
+        let at = |t: f64| q.edge_at(e, t).map(|(p, _)| p);
+        let state = |t: f64| q.edge_at(e, t).and_then(outline);
+        let ts: Vec<f64> = (0..=OUTLINE_SAMPLES).map(|k| t0 + (t1 - t0) * f64::from(k) / f64::from(OUTLINE_SAMPLES)).collect();
+        let states: Vec<bool> = ts.iter().map(|t| state(*t)).collect::<Option<_>>()?;
+        if !states.iter().any(|s| *s) {
+            continue;
+        }
+        // Where the outline starts or stops between two samples: bisected on the edge.
+        let cross = |lo: f64, hi: f64, lo_state: bool| -> Option<f64> {
+            let (mut lo, mut hi) = (lo, hi);
+            for _ in 0..60 {
+                let mid = 0.5 * (lo + hi);
+                if state(mid)? == lo_state {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+            Some(0.5 * (lo + hi))
+        };
+        let mut ranges: Vec<[f64; 2]> = Vec::new();
+        let mut start = states.first().copied().unwrap_or(false).then_some(t0);
+        for (k, w) in states.windows(2).enumerate() {
+            let (Some(&a), Some(&b), Some(&ta), Some(&tb)) = (w.first(), w.get(1), ts.get(k), ts.get(k + 1)) else { continue };
+            if a == b {
+                continue;
+            }
+            let t = cross(ta, tb, a)?;
+            match start.take() {
+                Some(s) => ranges.push([s, t]),
+                None => start = Some(t),
+            }
+        }
+        if let Some(s) = start {
+            ranges.push([s, t1]);
+        }
+        // An outline that starts or stops within a hair of a vertex does so at it: there the
+        // faces meet a third, and which way they face is settled only to rounding.
+        let hair = (t1 - t0) * 1e-5;
+        for r in &mut ranges {
+            if r[0] - t0 <= hair {
+                r[0] = t0;
+            }
+            if t1 - r[1] <= hair {
+                r[1] = t1;
+            }
+        }
+        for [a, b] in ranges {
+            let geom = if a == t0 && b == t1 {
+                let mut g = exact_edges(body, plane, &[e]).ok()?.pop().flatten()?;
+                at_vertices(body, plane, e, &mut g);
+                g
+            } else {
+                let (pa, pb) = (at(a)?, at(b)?);
+                if pa.dist(pb) <= size * 1e-9 && (b - a) < (t1 - t0) * 1e-6 {
+                    continue;
+                }
+                let pieces = solidcore_ops::spline_projection::project_curve(
+                    edge.parameters(),
+                    [a, b],
+                    true,
+                    [pa, pb],
+                    plane,
+                    body.body.planar_edges_tolerance(),
+                    &mut 262_144,
+                )?;
+                let classified = solidcore_ops::conic_projection::classify_pieces(
+                    plane,
+                    &pieces,
+                    solidcraft_sketch::MAX_SPLINE_POINTS,
+                    solidcraft_sketch::MAX_COORD,
+                )
+                .ok()?;
+                projection_links(classified).ok()?
+            };
+            // An edge seen end on is a point of the outline, not a curve of it.
+            edges.extend(round_conics(geom.into_iter().filter(|g| !matches!(g, LinkGeom::Point(_))).flat_map(conic_spans).map(flat_conic).collect()));
+        }
+    }
+    // The silhouettes of the curved faces, traced where they lie inside them.
+    let opts = hlr::Options { trim_samples: 1024, threads: 1, ..hlr::Options::default() };
+    let def = hlr::prepare(rec, &opts).ok()?;
+    if !def.report.freeform_faces.is_empty() || !def.report.unsupported_trims.is_empty() {
+        return None;
+    }
+    let view = hlr::View { x: plane.x, y: plane.y, d: n };
+    let placed = hlr::Placement { body: 0, rotation: [Vec3::X, Vec3::Y, Vec3::Z], translation: Vec3::ZERO - plane.origin };
+    let mut sils = Vec::new();
+    for s in hlr::silhouettes(&def, &placed, &view, &opts).ok()? {
+        match s.accuracy {
+            solidcraft_geom::section::CurveAccuracy::Analytic => {
+                let pieces: Vec<LinkGeom> = s.geometry.iter().map(LinkGeom::from_seg).collect::<Option<_>>()?;
+                sils.extend(round_conics(pieces.into_iter().map(flat_conic).collect()));
+            }
+            _ => {
+                let pts: Vec<Vec2> = s.points.iter().map(|p| Vec2::new(p[0], p[1])).collect();
+                // A traced silhouette along an edge already in the outline (a round's end, where
+                // the view grazes the round) is that edge.
+                if pts.iter().all(|p| edges.iter().any(|g| near_link_geom(g, *p, size * 1e-6))) {
+                    continue;
+                }
+                let tol = size * 1e-5;
+                match as_spline(&pts, tol) {
+                    Some(sp) => sils.push(sp),
+                    None => fit_chain(&pts, Some(tol), &mut sils),
+                }
+            }
+        }
+    }
+    // A silhouette ends where it meets an edge, on the face's trim: within its chords of the
+    // edge's own end there. Edges come first, so their exact ends are the ones kept.
+    let mut out = edges;
+    out.extend(sils);
+    meet_at_shared_ends(&mut out, 8.0 * def.report.max_trim_chord + size * 1e-7);
+    Some(drop_coincident(out, (size * 1e-9).max(1e-7)))
+}
+
+/// A rational quadratic spline whose inner knots are all double, as the kernel projects a stretch
+/// of a circle at a slant: a chain of conic arcs, one per span, the same curve. Any other curve as
+/// it is.
+fn conic_spans(g: LinkGeom) -> Vec<LinkGeom> {
+    let LinkGeom::Spline { pts, control: true, degree: 2, periodic: false, nurbs: Some(n) } = &g else { return vec![g] };
+    let (k, w) = (&n.knots, &n.weights);
+    let spans = pts.len().saturating_sub(1) / 2;
+    if spans == 0 || pts.len() != 2 * spans + 1 || w.len() != pts.len() || k.len() != pts.len() + 3 {
+        return vec![g];
+    }
+    // Knots t t t, then each inner knot twice, then u u u.
+    let double = (0..spans.saturating_sub(1)).all(|i| k.get(3 + 2 * i) == k.get(4 + 2 * i));
+    let ends = k.first() == k.get(1) && k.get(1) == k.get(2) && k.last() == k.get(k.len() - 2) && k.get(k.len() - 2) == k.get(k.len() - 3);
+    if !double || !ends {
+        return vec![g];
+    }
+    let mut out = Vec::with_capacity(spans);
+    for i in 0..spans {
+        let (Some(a), Some(apex), Some(b), Some(w0), Some(w1), Some(w2)) =
+            (pts.get(2 * i), pts.get(2 * i + 1), pts.get(2 * i + 2), w.get(2 * i), w.get(2 * i + 1), w.get(2 * i + 2))
+        else {
+            return vec![g];
+        };
+        // End weights brought to one: the middle weight over the ends' geometric mean.
+        let wm = w1 / (w0 * w2).sqrt();
+        if !(wm.is_finite() && wm > 0.0 && w0 > &0.0 && w2 > &0.0) {
+            return vec![g];
+        }
+        out.push(LinkGeom::Conic { a: *a, apex: *apex, b: *b, rho: wm / (1.0 + wm) });
+    }
+    out
+}
+
+/// `geom` with curves that coincide drawn once: an outline seen square to a face meets several
+/// edges on one line or circle (a hole's rim seen edge on lies along the plate's top edge, a
+/// boss's rim on its foot). Lines on one line become the stretches they cover together; any other
+/// curve given twice is kept once. (A profile is found where curves cross, so a line need not end
+/// where another meets it.)
+fn drop_coincident(geom: Vec<LinkGeom>, tol: f64) -> Vec<LinkGeom> {
+    let same = |p: Vec2, q: Vec2| p.dist(q) <= tol;
+    let duplicate = |a: &LinkGeom, b: &LinkGeom| match (a, b) {
+        (LinkGeom::Circle(c, r), LinkGeom::Circle(c2, r2)) => same(*c, *c2) && (r - r2).abs() <= tol,
+        (LinkGeom::Arc { c, a, b }, LinkGeom::Arc { c: c2, a: a2, b: b2 }) => same(*c, *c2) && same(*a, *a2) && same(*b, *b2),
+        (LinkGeom::Conic { a, apex, b, rho }, LinkGeom::Conic { a: a2, apex: x2, b: b2, rho: r2 }) => {
+            same(*apex, *x2) && (rho - r2).abs() <= 1e-9 && ((same(*a, *a2) && same(*b, *b2)) || (same(*a, *b2) && same(*b, *a2)))
+        }
+        (LinkGeom::Ellipse { c, major, minor }, LinkGeom::Ellipse { c: c2, major: m2, minor: n2 }) => {
+            same(*c, *c2) && (minor - n2).abs() <= tol && (same(*major, *m2) || same(*major, *c2 * 2.0 - *m2))
+        }
+        (LinkGeom::Spline { pts, .. }, LinkGeom::Spline { pts: p2, .. }) => {
+            pts.len() == p2.len() && (pts.iter().zip(p2).all(|(p, q)| same(*p, *q)) || pts.iter().zip(p2.iter().rev()).all(|(p, q)| same(*p, *q)))
+        }
+        _ => false,
+    };
+    let mut lines: Vec<(Vec2, Vec2)> = Vec::new();
+    let mut others: Vec<LinkGeom> = Vec::new();
+    for g in geom {
+        match g {
+            LinkGeom::Line(a, b) => lines.push((a, b)),
+            g if others.iter().any(|o| duplicate(o, &g)) => {}
+            g => others.push(g),
+        }
+    }
+    let mut used = vec![false; lines.len()];
+    let mut out = Vec::new();
+    for i in 0..lines.len() {
+        if used.get(i).copied().unwrap_or(true) {
+            continue;
+        }
+        let Some(&(a, b)) = lines.get(i) else { continue };
+        let Some(u) = (b - a).normalized() else { continue };
+        let on = |p: Vec2| (p - a).cross(u).abs() <= tol;
+        // The lines on this one's line, as intervals along it.
+        let mut spans: Vec<(f64, f64)> = Vec::new();
+        for (j, (p, q)) in lines.iter().enumerate().skip(i) {
+            if !used.get(j).copied().unwrap_or(true) && on(*p) && on(*q) {
+                if let Some(slot) = used.get_mut(j) {
+                    *slot = true;
+                }
+                let (s, t) = ((*p - a).dot(u), (*q - a).dot(u));
+                spans.push((s.min(t), s.max(t)));
+            }
+        }
+        spans.sort_by(|x, y| x.0.total_cmp(&y.0));
+        let mut merged: Vec<(f64, f64)> = Vec::new();
+        for (s, t) in spans {
+            match merged.last_mut() {
+                Some(last) if s <= last.1 + tol => last.1 = last.1.max(t),
+                _ => merged.push((s, t)),
+            }
+        }
+        out.extend(merged.into_iter().map(|(s, t)| LinkGeom::Line(a + u * s, a + u * t)));
+    }
+    out.extend(others);
+    out
+}
+
+/// Whether `p` lies within `tol` of the curve `g` (sampled finely: lines, arcs, circles, conics
+/// and ellipses; any other curve never holds it).
+fn near_link_geom(g: &LinkGeom, p: Vec2, tol: f64) -> bool {
+    let to_segment = |a: Vec2, b: Vec2| {
+        let d = b - a;
+        let t = if d.len2() > 0.0 { ((p - a).dot(d) / d.len2()).clamp(0.0, 1.0) } else { 0.0 };
+        p.dist(a + d * t)
+    };
+    let on_chords = |pts: &[Vec2], slack: f64| pts.windows(2).any(|w| to_segment(w[0], w[1]) <= tol + slack);
+    match *g {
+        LinkGeom::Line(a, b) => to_segment(a, b) <= tol,
+        LinkGeom::Circle(c, r) => (p.dist(c) - r).abs() <= tol,
+        LinkGeom::Arc { c, a, b } => {
+            let r = c.dist(a);
+            let (t0, t) = ((a - c).angle(), (p - c).angle());
+            let sweep = ((b - c).angle() - t0).rem_euclid(std::f64::consts::TAU);
+            ((p.dist(c) - r).abs() <= tol && (t - t0).rem_euclid(std::f64::consts::TAU) <= sweep) || p.dist(a) <= tol || p.dist(b) <= tol
+        }
+        LinkGeom::Conic { a, apex, b, rho } => {
+            // 256 chords of a conic arc of at most a quarter turn sag less than 1e-5 of its size.
+            let pts: Vec<Vec2> = (0..=256).map(|k| solidcraft_sketch::conic_point(a, apex, b, rho, f64::from(k) / 256.0)).collect();
+            on_chords(&pts, 1e-5 * a.dist(b).max(a.dist(apex)))
+        }
+        LinkGeom::Ellipse { c, major, minor } => {
+            let pts: Vec<Vec2> =
+                (0..=1024).map(|k| solidcraft_sketch::ellipse_point(c, major, minor, std::f64::consts::TAU * f64::from(k) / 1024.0)).collect();
+            on_chords(&pts, 1e-5 * c.dist(major))
+        }
+        _ => false,
+    }
+}
+
+/// A conic whose control lies on its chord's line is a stretch of that line (an arc of a circle
+/// seen edge-on): the line it covers, from end to end of the points it passes.
+fn flat_conic(g: LinkGeom) -> LinkGeom {
+    let LinkGeom::Conic { a, apex, b, rho } = g else { return g };
+    let Some(u) = (b - a).normalized() else { return g };
+    if (apex - a).cross(u).abs() > 1e-7 * (1.0 + a.dist(b).max(a.dist(apex))) {
+        return g;
+    }
+    let along: Vec<f64> = (0..=64).map(|k| (solidcraft_sketch::conic_point(a, apex, b, rho, f64::from(k) / 64.0) - a).dot(u)).collect();
+    let (lo, hi) = along.iter().fold((0.0_f64, 0.0_f64), |(lo, hi), x| (lo.min(*x), hi.max(*x)));
+    LinkGeom::Line(a + u * lo, a + u * hi)
+}
+
+/// `geom` with every conic that is an arc of a circle (as the silhouette of a sphere comes out
+/// of hidden lines: quarter conics of weight `cos 45°`) as that arc, and arcs of one circle that
+/// follow each other joined, a whole turn as the circle.
+fn round_conics(geom: Vec<LinkGeom>) -> Vec<LinkGeom> {
+    let as_arc = |g: LinkGeom| -> LinkGeom {
+        let LinkGeom::Conic { a, apex, b, rho } = g else { return g };
+        let w = rho / (1.0 - rho);
+        let (ta, tb) = (apex - a, apex - b);
+        let chord = b - a;
+        let (la, lb, lc) = (ta.len(), tb.len(), chord.len());
+        let scale = la.max(lb).max(lc);
+        if !(w > 0.0 && w < 1.0 && lc > 0.0 && la > 0.0) || (la - lb).abs() > 1e-9 * scale || (ta.dot(chord) / (la * lc) - w).abs() > 1e-9 {
+            return g;
+        }
+        let m = (a + b) * 0.5;
+        let c = m + (m - apex) * (w * w / (1.0 - w * w));
+        if ta.cross(chord) > 0.0 { LinkGeom::Arc { c, a, b } } else { LinkGeom::Arc { c, a: b, b: a } }
+    };
+    let mut out: Vec<LinkGeom> = Vec::new();
+    for g in geom.into_iter().map(as_arc) {
+        if let (Some(LinkGeom::Arc { c, a, b }), LinkGeom::Arc { c: c2, a: a2, b: b2 }) = (out.last_mut(), &g) {
+            let tol = 1e-9 * (1.0 + c.dist(*a));
+            if c.dist(*c2) <= tol {
+                if b.dist(*a2) <= tol {
+                    *b = *b2;
+                    continue;
+                }
+                if a.dist(*b2) <= tol {
+                    *a = *a2;
+                    continue;
+                }
+            }
+        }
+        out.push(g);
+    }
+    out.into_iter()
+        .map(|g| match g {
+            LinkGeom::Arc { c, a, b } if a.dist(b) <= 1e-9 * (1.0 + c.dist(a)) => LinkGeom::Circle(c, c.dist(a)),
+            g => g,
+        })
+        .collect()
 }
 
 /// The outline of a body seen along the sketch normal: mesh edges between triangles facing the
