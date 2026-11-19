@@ -354,7 +354,7 @@ fn settle(jobs: &[Job], mut outcomes: Vec<Outcome>, heals: &Heals, workers: usiz
     let mut issues = Vec::new();
     for (job, outcome) in jobs.iter().zip(&outcomes) {
         if let Some((kind, detail)) = notes.remove(&job.item) {
-            issues.push(ImportIssue { kind, item: Some(job.item), part: job.part.clone(), faces: 0, times: 1, detail });
+            issues.push(ImportIssue { kind, item: Some(job.item), part: job.part.clone(), paths: Vec::new(), faces: 0, times: 1, detail });
         }
         match outcome {
             Outcome::Passes => {}
@@ -366,6 +366,7 @@ fn settle(jobs: &[Job], mut outcomes: Vec<Outcome>, heals: &Heals, workers: usiz
                     kind: IssueKind::NeedsRepair,
                     item: Some(job.item),
                     part: job.part.clone(),
+                    paths: Vec::new(),
                     faces: 0,
                     times: job.times,
                     detail,

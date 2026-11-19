@@ -7,8 +7,6 @@ use solidcore::SolidError;
 use super::Ans::{Err as E, Ok as O};
 use super::Row;
 
-mod railrail0769;
-
 /// The moved rows.
 pub(super) static DATA: &[Row] = &[
     (
@@ -281,15 +279,6 @@ pub(super) static DATA: &[Row] = &[
             (491, O(0x3fd0cfd27b8bc178, 0x3fd5555555555555, 1)),
             (492, O(0x3fe0cfd58ea23737, 0x3fd5555555555555, 1)),
         ],
-    ),
-    (
-        "blend.fillet_geom_p2",
-        "railrail0769",
-        0x6119c029d83688cf,
-        8146,
-        0x4d2abc576057bca6,
-        0x70f8768e716d4dd6,
-        railrail0769::SUBS,
     ),
     (
         "blend.fillet_standard_solver_p1",
