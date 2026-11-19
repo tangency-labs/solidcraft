@@ -25,7 +25,22 @@ fn schemas_and_the_key_check_agree() {
     );
     assert_keys(
         input_schema_for::<OpenParams>(),
-        &["folder", "format", "history", "max_points", "names", "options", "origin", "path", "read_only", "reuse_import", "units", "up", "verify"],
+        &[
+            "folder",
+            "format",
+            "history",
+            "max_points",
+            "names",
+            "options",
+            "origin",
+            "path",
+            "read_only",
+            "reader",
+            "reuse_import",
+            "units",
+            "up",
+            "verify",
+        ],
     );
     assert_keys(input_schema_for::<RecoveryListParams>(), &["dir"]);
     assert_keys(input_schema_for::<RecoverParams>(), &["dir", "discard", "id"]);

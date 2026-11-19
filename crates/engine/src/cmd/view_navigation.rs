@@ -736,8 +736,8 @@ mod tests {
     }
 
     /// Fit, Home and the pan and zoom tools also frame and move a drawing's sheet, so they run with
-    /// a drawing open; the other view commands act on the model and stay refused there. None makes
-    /// an undo step or changes the design.
+    /// a drawing open; the other view commands act on the model and run there too, as every model
+    /// command does. None makes an undo step or changes the design.
     #[test]
     fn sheet_navigation_runs_with_a_drawing_open() {
         let mut s = Session::default();
@@ -749,9 +749,9 @@ mod tests {
         {
             assert!(s.execute(id, &params).is_ok(), "{id}");
         }
-        for id in ["view.normal_to", "view.visual_style"] {
-            assert!(s.execute(id, &json!({"style": "shaded"})).unwrap_err().to_string().contains("a drawing is open"), "{id}");
-        }
+        s.execute("view.visual_style", &json!({"style": "shaded"})).unwrap();
+        let normal = s.execute("view.normal_to", &json!({})).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(!normal.contains("a drawing is open"), "{normal}");
         assert_eq!((s.doc.to_json(), s.undo.len()), (before, undo));
     }
 

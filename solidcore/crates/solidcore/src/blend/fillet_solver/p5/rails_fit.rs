@@ -491,6 +491,21 @@ fn beyond_end_section(
         ));
     }
     let foot = edge_curve.evaluate_point(k, dropped.parameter)?;
+    // Not the fork's (#16654): the drop may stop at the far end of the edge, a local minimum
+    // (a point past the end of an arc of more than a half turn is nearest that end, yet moving
+    // in from the other end first takes it further away): an end nearer the point than the
+    // foot found is the nearest point of the edge.
+    let reach = foot.distance(leave_point);
+    let mut nearest: Option<(usize, f64)> = None;
+    for (index, end) in [ivl.min(), ivl.max()].into_iter().enumerate() {
+        let away = edge_curve.evaluate_point(k, end)?.distance(leave_point);
+        if away < reach - solver.approx_tol_3d && nearest.is_none_or(|(_, d)| away < d) {
+            nearest = Some((index, away));
+        }
+    }
+    if let Some((index, _)) = nearest {
+        return Ok(Some(index));
+    }
     for (index, end) in [ivl.min(), ivl.max()].into_iter().enumerate() {
         if foot.distance(edge_curve.evaluate_point(k, end)?) <= solver.approx_tol_3d {
             return Ok(Some(index));

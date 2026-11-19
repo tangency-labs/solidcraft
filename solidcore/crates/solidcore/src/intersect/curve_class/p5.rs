@@ -929,7 +929,14 @@ impl<O: ClassObject> CurveClassification<O> {
             // whether a contact is held to the curve's region: at a pole, for every curve
             // but the face's own seam curve (checked as upstream does)
             let mut regional = false;
-            let tolerance = if pole_of_face(geometry, vertex, self.face())? {
+            // (#18705) on a face known to have no seam no vertex is a pole
+            let pole = if self.face_known_seam_free() {
+                false
+            } else {
+                k.work_counters.add_seam_test();
+                pole_of_face(geometry, vertex, self.face())?
+            };
+            let tolerance = if pole {
                 let working = match &wrapped {
                     Some(lifted) => lifted,
                     None => self.curve_geometry(geometry)?,

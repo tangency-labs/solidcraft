@@ -655,7 +655,14 @@ impl<'b, 'a> Builder<'b, 'a> {
         }
         let p = e.params();
         let (vs_id, ve_id) = (rid(p.get(1), "edge start")?, rid(p.get(2), "edge end")?);
-        let (vs, ve) = (self.vertex(vs_id)?, self.vertex(ve_id)?);
+        let (mut vs, mut ve) = (self.vertex(vs_id)?, self.vertex(ve_id)?);
+        // Two VERTEX_POINTs written at one point are the one vertex of a closed edge, as when the
+        // file writes that vertex once: joined here, the edge is read as that edge on any curve.
+        // The join is `meet`'s, which still keeps apart the two ends of any other EDGE_CURVE.
+        if vs != ve && self.at_one_point(vs_id, ve_id) && self.meet(vs, ve)? {
+            vs = self.find(vs);
+            ve = vs;
+        }
         let same_sense = flag(p.get(4), "edge same_sense")?;
         let curve = self.edge_geometry(rid(p.get(3), "edge geometry")?, 0)?;
         let (ps, pe) = (self.asm.point(vs)?, self.asm.point(ve)?);
@@ -774,18 +781,29 @@ impl<'b, 'a> Builder<'b, 'a> {
         self.vertex_members.get(&root).map_or(1, Vec::len)
     }
 
+    /// Whether VERTEX_POINTs `a` and `z` of the file are written at one point (their
+    /// CARTESIAN_POINTs' coordinates equal). An EDGE_CURVE between two such vertices is a closed
+    /// edge written with two vertices: [`Builder::edge`] reads it as the edge with one.
+    fn at_one_point(&self, a: u64, z: u64) -> bool {
+        let at = |v: u64| entity(self.ex, v).ok().and_then(|e| rid(e.params().get(1), "vertex point").ok()).and_then(|p| self.reader.point(p).ok());
+        matches!((at(a), at(z)), (Some(pa), Some(pz)) if pa == pz)
+    }
+
     /// Whether an EDGE_CURVE of the file, read yet or not, runs from a VERTEX_POINT of `small`'s
-    /// set to one of `other`'s (both roots).
+    /// set to one of `other`'s (both roots). An EDGE_CURVE whose two ends are at one point
+    /// ([`Builder::at_one_point`]) does not count: its ends are one vertex, not apart.
     fn edge_between(&mut self, small: u32, other: u32) -> bool {
         if self.edge_partners.is_none() {
+            let ex = self.ex;
             let mut partners: HashMap<u64, Vec<u64>> = HashMap::new();
-            for e in self.ex.entities.values() {
+            for e in ex.entities.values() {
                 if e.name() != "EDGE_CURVE" {
                     continue;
                 }
                 let p = e.params();
                 if let (Some(a), Some(z)) = (p.get(1).and_then(Param::as_ref_id), p.get(2).and_then(Param::as_ref_id))
                     && a != z
+                    && !self.at_one_point(a, z)
                 {
                     partners.entry(a).or_default().push(z);
                     partners.entry(z).or_default().push(a);
@@ -809,7 +827,8 @@ impl<'b, 'a> Builder<'b, 'a> {
     /// file may write one corner as two VERTEX_POINTs at one point). Coincident ones are joined
     /// into one set, its root's tolerance covering both, so the faces and the edges they share
     /// meet at one vertex. Two vertices that are the two ends of one EDGE_CURVE of the file are
-    /// never joined, whether that edge is read yet or not: its own ends are apart.
+    /// never joined, whether that edge is read yet or not: its own ends are apart. The exception is
+    /// an edge whose two VERTEX_POINTs are at one point ([`Builder::edge_between`]).
     fn meet(&mut self, a: u32, b: u32) -> R<bool> {
         let (a, b) = (self.find(a), self.find(b));
         if a == b {
@@ -1417,6 +1436,55 @@ pub(crate) fn parabola_curve(position: &Placement, focal: f64, [t0, t1]: [f64; 2
 /// follows cosh and sinh), so an interior `t` is not mapped through it.
 pub(crate) fn hyperbola_curve(position: &Placement, a: f64, b: f64, [t0, t1]: [f64; 2]) -> BCurve {
     swept::hyperbola_spline(position, a, b, t0, t1)
+}
+
+/// An edge from `ps` to `pe` on a record curve whose producer gives no interval (cadmpeg's
+/// neutral model read from a STEP file bounds an edge by its vertices alone): the curve as the
+/// record takes it, the interval (min → max) between the vertices, and whether the edge runs
+/// from `ps` to `pe` along it, found as [`map_edge`] finds a STEP edge's, its sense along the
+/// curve. `closed`: the same vertex at both ends; `full`: the ends are one point.
+pub(crate) fn record_edge(curve: BCurve, ps: P3, pe: P3, closed: bool, full: bool, tol: f64) -> R<(BCurve, [f64; 2], bool)> {
+    let mapped = match curve {
+        BCurve::Line { start, end } => {
+            if closed {
+                return Err("a closed edge on a line".into());
+            }
+            let d = sub(end, start);
+            let m2 = dot(d, d);
+            if !(m2 > 0.0) {
+                return Err("a line of no length".into());
+            }
+            let param = |p: P3| dot(sub(p, start), d) / m2;
+            let (ts, te) = (param(ps), param(pe));
+            // Its length, whatever the line's own parameter scale, as `map_edge` measures it.
+            let m = m2.sqrt();
+            if !((te - ts).abs() * m > 1e-12 * (1.0 + ts.abs().max(te.abs()) * m)) {
+                return Err("a degenerate edge on a line".into());
+            }
+            let with = ts < te;
+            let interval = if with { [ts, te] } else { [te, ts] };
+            Mapped { curve: BCurve::Line { start, end }, interval, with_step: with, sense_mismatch: false }
+        }
+        BCurve::Circle { ref frame, radius } => {
+            let position = placement(frame);
+            conic(curve.clone(), &position, [radius; 2], ps, pe, true, full)?
+        }
+        BCurve::Ellipse { ref frame, radii } => {
+            let position = placement(frame);
+            conic(curve.clone(), &position, radii, ps, pe, true, full)?
+        }
+        // Ends at one point, one vertex or two: the whole closed curve, as for a conic.
+        BCurve::Spline { .. } | BCurve::RationalSpline { .. } | BCurve::Polyline { .. } => open_or_closed(curve, ps, pe, true, full, tol)?,
+        BCurve::SurfaceIntersection { .. } => return Err(unsupported("an intersection curve without an interval")),
+    };
+    Ok((mapped.curve, mapped.interval, mapped.with_step))
+}
+
+/// The STEP placement of a record frame: its axis x × y.
+fn placement(f: &Frame) -> Placement {
+    let (x, y) = (f.x_axis, f.y_axis);
+    let axis = [x[1] * y[2] - x[2] * y[1], x[2] * y[0] - x[0] * y[2], x[0] * y[1] - x[1] * y[0]];
+    Placement { origin: f.origin, axis, ref_direction: x }
 }
 
 /// A hyperbola or parabola: the vertices' parameters in closed form, the edge running the way

@@ -1,0 +1,12 @@
+{
+  "id": "box-importer",
+  "name": "Box Importer",
+  "version": "0.1.0",
+  "capabilities": ["formats@0.2"],
+  "runtime": {
+    "module": "box-importer.wasm",
+    "commands": [],
+    "entries": [{"name": "convert", "kind": "importer", "extensions": ["box"]}],
+    "limits": {"fuel": 1000000000, "memory_mib": 32, "deadline_ms": 10000}
+  }
+}
