@@ -4249,6 +4249,10 @@ pub(crate) fn sync_feature_edit(app: &mut SolveApp) {
     app.session.feature_edit_sketch = edited.or(started_from);
 }
 
+/// Where the Configurations card's dragged width and body height are kept.
+const CONFIGURATIONS_SIZE: crate::card_resize::CardSize =
+    crate::card_resize::CardSize { width: "sc_configurations_width", height: "sc_configurations_height", handle: "config" };
+
 /// The width a dialog's card asks for: the managers' wider form, a study's table, or a card.
 pub(crate) fn card_width(d: &Dialog) -> f32 {
     let t = Tokens::get();
@@ -4409,8 +4413,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let panel = crate::ui_kit::Panel::new(&heading, egui::Id::unique(("sc_dialog", title_of(&d))), anchor, drag_bounds, side, frame)
         .actions(ok_label, close_label);
     let max_width = (docked.x - drag_bounds.left()).max(crate::frame::DIALOG_MIN_W);
+    // The configuration table's card is resized by its edges, like the Parameters card (T-693).
+    let sized = matches!(d.kind, Kind::Motion(crate::dialogs_motion::Mo::Configurations { .. })).then_some(CONFIGURATIONS_SIZE);
+    let panel = panel.body_height(sized.as_ref().and_then(|size| size.height(ctx)));
     let panel = if manager {
-        panel.width(card_width(&d).min(max_width))
+        panel.width(sized.as_ref().and_then(|size| size.width(ctx)).unwrap_or_else(|| card_width(&d)).min(max_width))
     } else {
         panel.width((card_width(&d) + label_grow).min(max_width)).grow_label(grow_key)
     };
@@ -4421,6 +4428,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let repeatable =
         matches!(&d.kind, Kind::SketchModify(k) if crate::sketch_modify_ui::repeatable(k)) && d.editing.is_none() && !d.extra.contains_key("pattern");
     let mut painted = false;
+    let mut resize = crate::card_resize::Resize::None;
     if let Kind::ConfirmDelete { with, fail, .. } = &d.kind {
         let detail = with.join(" · ");
         let (closed, action) = crate::ui_kit::Confirm::new(egui::Id::unique(("sc_dialog", title_of(&d))), "delete", &heading)
@@ -4483,6 +4491,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             } else {
                 panel.feature(ui, heading, applying, valid, body)
             };
+            if let Some(size) = &sized
+                && !collapsed
+            {
+                resize = size.edges(ui, side, panel.last_body_scrollbar(ui.ctx()));
+            }
             d.reset_scroll = false;
             d.collapsed = collapsed;
             cancel |= closed;
@@ -4505,6 +4518,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 }
             }
         });
+        if let Some(size) = &sized {
+            size.apply(ctx, resize, response.as_ref().map(|r| r.response.rect), panel.last_body_height(ctx), vp);
+        }
         app.viewport.dialog_rect = response.filter(|_| painted).map(|r| r.response.rect);
         // OK and Cancel in the view's corner do what the dialog's own do (#6709).
         if app.issue_report.draft.is_none() {
