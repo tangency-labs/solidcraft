@@ -4,7 +4,7 @@
 //! broken one fails its import with the reason, never a panic.
 
 use super::super::{IDENTITY, StepNode, step_import};
-use super::{ImportRecords, RecordBody, records_import};
+use super::{ImportRecords, RecordBody, records_import, records_noted};
 use crate::measure;
 
 /// The records the STEP reader assembles from `text`, kept as an import.
@@ -20,12 +20,14 @@ fn kept(text: &str) -> ImportRecords {
             path: Vec::new(),
             instance: None,
             color: None,
+            paint: None,
             hidden: false,
             placement: None,
             brep: Some(s.brep),
             face_origin: s.face_origin,
             sheet: s.sheet,
             copy_of: None,
+            mesh: None,
         })
         .collect();
     let tree = vec![StepNode {
@@ -237,4 +239,56 @@ fn a_copy_of_nothing_it_can_use_is_left_out_with_why() {
     assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
     assert!(imp.warnings.iter().any(|w| w.contains("not finite")), "{:?}", imp.warnings);
     assert_eq!((imp.report.parts, imp.report.solids), (1, 1));
+}
+
+/// A record body's paint names faces by their face in the file; the body's paint has them on its
+/// own faces. Colours and opacities from a file are hostile: each comes in within 0..1, the body's
+/// own colour too, and a colour on a face the body does not have is dropped.
+#[test]
+fn a_record_bodys_paint_is_on_its_own_faces_within_range() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let mut records = kept(&std::fs::read_to_string(dir.join("washer.step")).unwrap());
+    let file_face = records.bodies[0].face_origin[2];
+    records.bodies[0].paint = Some(crate::Paint {
+        opacity: f32::NAN,
+        faces: vec![
+            crate::FacePaint { face: file_face as usize, color: [2.0, -1.0, 0.5], opacity: 0.25, name: Some("Accent".into()) },
+            crate::FacePaint { face: usize::MAX, color: [0.0; 3], opacity: 1.0, name: None },
+        ],
+        name: Some("Body".into()),
+    });
+    records.bodies[0].color = Some([-1.0, 0.5, 2.0]);
+    let imp = records_import(&records).unwrap();
+    let body = &imp.bodies[0];
+    assert_eq!((body.color, body.body.color()), (Some([0.0, 0.5, 1.0]), Some([0.0, 0.5, 1.0])));
+    let paint = body.body.paint().expect("paint");
+    assert_eq!((paint.opacity, paint.name.as_deref()), (1.0, Some("Body")));
+    assert_eq!(paint.faces.len(), 1, "{paint:?}");
+    let f = &paint.faces[0];
+    assert_eq!((body.face_origin[f.face], f.color, f.opacity, f.name.as_deref()), (file_face, [1.0, 0.0, 0.5], 0.25, Some("Accent")));
+}
+
+/// Notes about a file found after its import was made (its stated volume, say) are file issues
+/// of the import, after the records' own warnings, as an import of the noted records has them:
+/// the design's evaluation of those records shows them without making the bodies again.
+#[test]
+fn notes_about_the_file_are_its_imports_file_issues() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let mut records = kept(&std::fs::read_to_string(dir.join("washer.step")).unwrap());
+    records.warnings = vec!["read: a loss".into()];
+    let mut broken = records.bodies[0].clone();
+    broken.face_origin.pop();
+    records.bodies.push(broken);
+    let imp = records_import(&records).unwrap();
+    let note = "part 'washer': the file states its volume as 1 mm³".to_string();
+    let (noted, noted_imp) = records_noted(records, &imp, vec![note.clone()]).unwrap();
+    assert_eq!(noted.warnings, vec!["read: a loss".to_string(), note.clone()]);
+    let rebuilt = records_import(&noted).unwrap();
+    assert_eq!(noted_imp.report, rebuilt.report);
+    assert_eq!(noted_imp.warnings, rebuilt.warnings);
+    assert_eq!(noted_imp.report.issues[1].detail, note);
+    assert_eq!(noted_imp.report.issues[1].kind, super::super::IssueKind::File);
+    // The evaluation of the noted records finds this import.
+    let shared = super::records_import_shared(&noted).unwrap();
+    assert!(std::sync::Arc::ptr_eq(&shared, &noted_imp));
 }

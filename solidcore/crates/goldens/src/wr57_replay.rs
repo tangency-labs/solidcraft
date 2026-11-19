@@ -54,9 +54,15 @@
 //! surfaces the 28 sphere rows of `blend.fillet_standard_solver_p1`, `topology.edgeuse_p1`,
 //! `edgeuse_p2`, `edgeuse_p3`, `topology.vertex` and `topology.vertexuse` make their calls
 //! on, so their calls are no longer main's; 24 of them are then main's rows without the
-//! tape. Their entries are deleted; the ten left still replay. The vertex row's convex hull
+//! tape. Their entries are deleted. The vertex row's convex hull
 //! certificate moved to `refit::replay::vertex_gap`, which runs it on this branch and as
 //! main built it.
+//!
+//! #17896 (exact shared coordinates, `CPoint::affine2`, in the curve split, trim and
+//! insertion routines) changes the calls `blend.fillet_geom_p2`'s `railrail0769` makes:
+//! this branch's answers at all 6086 substituted calls are no longer the taped ones (its
+//! golden line is not re-blessed). The tape cannot be recorded again on a main that already
+//! has #17856, so the entry is deleted, as above. Nine entries are left.
 //!
 //! [`Surface::find_degen_param_for_direction`]: solidcore::surface::surface::Surface::find_degen_param_for_direction
 //! [`Surface::invert_point_near_singularity`]: solidcore::surface::surface::Surface::invert_point_near_singularity
@@ -386,7 +392,6 @@ macro_rules! replay_tests {
 
 replay_tests! {
     fillet_executive_p3_rows_move_only_through_the_wr57_answers: "blend.fillet_executive_p3", 2, cert::EXECUTIVE_P3;
-    fillet_geom_p2_rows_move_only_through_the_wr57_answers: "blend.fillet_geom_p2", 1, cert::GEOM_P2;
     heal_data_p3_rows_move_only_through_the_wr57_answers: "heal.heal_data_p3", 5, cert::HEAL_DATA_P3;
     surface_drop_lib_p3_rows_move_only_through_the_wr57_answers: "intersect.surface_drop_lib_p3", 1, cert::DROP_LIB_P3;
     api_queries_rows_move_only_through_the_wr57_answers: "query.api_queries", 1, cert::API_QUERIES;
@@ -429,7 +434,7 @@ fn without_the_tape_no_row_is_mains() {
         "(tape of main {MAIN_COMMIT})\n{}",
         failures.join("\n")
     );
-    assert_eq!(DATA.len(), 10);
+    assert_eq!(DATA.len(), 9);
 }
 
 /// Main's error from its `Debug` text: a surface routine's `Failed` phrase (the only kind

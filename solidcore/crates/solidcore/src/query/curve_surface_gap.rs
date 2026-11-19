@@ -44,8 +44,13 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::surface::surface::Surface;
 use crate::{Result, SolidError};
 
+pub(crate) mod polynomial_pieces;
+
 /// A direction's knot samples (parameter, spacing, span index) and its slack.
 type KnotSamples = (Vec<(f64, f64, usize)>, f64);
+/// A side of a control net: whether it runs across u, whether at the max, and its points'
+/// indices.
+type Edge = (bool, bool, Vec<(usize, usize)>);
 
 const OP: &str = "query::curve_surface_gap";
 
@@ -66,7 +71,7 @@ const CORRESPONDENCE_POINTS: usize = 257;
 const FIRST_PIECES: usize = 32;
 
 /// A surface prepared for enclosure: its net and the directions it continues past the net.
-struct NetSurface {
+pub(crate) struct NetSurface {
     net: Nurbs,
     ends: EndContinuation,
 }
@@ -75,7 +80,15 @@ impl NetSurface {
     /// The net of `surface`, or `None` when it has none (an offset, a step surface, a surface
     /// in a volume, a curve-bounded one) or its net's parameters are not the surface's: the
     /// net and the surface must give one point at the parameters `probe`.
-    fn of(k: &Kernel, surface: &Surface, probe: &[Point2]) -> Result<Option<Self>> {
+    ///
+    /// The bounds built on it take the net as the surface. That holds by construction for
+    /// the kinds [`as_b_spline`] returns whose evaluation is their own net (a B-spline
+    /// surface, and the analytic kinds through their exact base B-spline); the probe checks
+    /// the agreement only at `probe` (to `1e-9` relative), so it catches a parameterisation
+    /// mismatch but is no proof of agreement between the probes. A procedural blend's net
+    /// only approximates its definition, by which it evaluates: not exact by construction
+    /// (`query::seam_bound` refuses it).
+    pub(crate) fn of(k: &Kernel, surface: &Surface, probe: &[Point2]) -> Result<Option<Self>> {
         let Some(bs) = as_b_spline(k, surface)? else {
             return Ok(None);
         };
@@ -112,6 +125,109 @@ impl NetSurface {
         Ok(Some(me))
     }
 
+    /// The knot lines strictly inside `u x v` across which the net is not C^1 (a knot of
+    /// multiplicity at least the degree): the `u` values, then the `v` values, each sorted
+    /// and once. A box cut at them has each part's second partials enclosed by
+    /// [`Self::partials`].
+    pub(crate) fn low_lines(&self, u: Ivl, v: Ivl) -> (Vec<f64>, Vec<f64>) {
+        let n = &self.net;
+        let lines = |knots: &[f64], p: usize, lo: f64, hi: f64| {
+            let mut out: Vec<f64> = Vec::new();
+            for &x in knots {
+                if x > lo && x < hi && out.last() != Some(&x) {
+                    let m = knots.iter().filter(|&&y| y == x).count();
+                    if m >= p {
+                        out.push(x);
+                    }
+                }
+            }
+            out.sort_by(f64::total_cmp);
+            out.dedup();
+            out
+        };
+        (lines(&n.u, n.p, u.lo, u.hi), lines(&n.v, n.q, v.lo, v.hi))
+    }
+
+    /// The net's domain: `([u_lo, u_hi], [v_lo, v_hi])`.
+    pub(crate) fn domain(&self) -> (Ivl, Ivl) {
+        let n = &self.net;
+        (
+            Ivl::new(knot(&n.u, n.p as isize), knot(&n.u, n.nu as isize)),
+            Ivl::new(knot(&n.v, n.q as isize), knot(&n.v, n.nv as isize)),
+        )
+    }
+
+    /// The net's sides collapsed to a point: those whose row of control points (homogeneous
+    /// coordinates, weight included) is one point exactly, so the surface is that point all
+    /// along the side. Each is `(across_u, at_max, point)`: `across_u` for a side at
+    /// constant u (the first or last column), `at_max` for the last row or column, and the
+    /// point (`None` from a net with a zero weight there). Only an end whose knots are
+    /// clamped (the first or last `degree + 1` equal) is a side: the surface's edge there
+    /// is that row; an unclamped end's row is not on the surface, and gives no side.
+    pub(crate) fn collapsed_sides(&self) -> Vec<(bool, bool, V3<f64>)> {
+        let n = &self.net;
+        // the end of a knot vector (degree `p`, `count` control points) is clamped
+        let clamped = |kn: &[f64], p: usize, count: usize, at_max: bool| -> bool {
+            if at_max {
+                let end = knot(kn, count as isize);
+                (1..=p).all(|i| knot(kn, (count + i) as isize) == end)
+            } else {
+                let end = knot(kn, p as isize);
+                (0..p).all(|i| knot(kn, i as isize) == end)
+            }
+        };
+        let at = |i: usize, j: usize| -> Option<[f64; 4]> {
+            let k = (i.checked_mul(n.nv)?.checked_add(j)?).checked_mul(4)?;
+            let s = n.pw.get(k..k.checked_add(4)?)?;
+            Some([*s.first()?, *s.get(1)?, *s.get(2)?, *s.get(3)?])
+        };
+        let mut out = Vec::new();
+        let (Some(lu), Some(lv)) = (n.nu.checked_sub(1), n.nv.checked_sub(1)) else {
+            return out;
+        };
+        // (across u, at the max, the side's control points)
+        let sides: [Edge; 4] = [
+            (true, false, (0..n.nv).map(|j| (0, j)).collect()),
+            (true, true, (0..n.nv).map(|j| (lu, j)).collect()),
+            (false, false, (0..n.nu).map(|i| (i, 0)).collect()),
+            (false, true, (0..n.nu).map(|i| (i, lv)).collect()),
+        ];
+        for (across_u, at_max, row) in sides {
+            let ends_clamped = if across_u {
+                clamped(&n.u, n.p, n.nu, at_max)
+            } else {
+                clamped(&n.v, n.q, n.nv, at_max)
+            };
+            if !ends_clamped {
+                continue;
+            }
+            let pts: Option<Vec<[f64; 4]>> = row.iter().map(|&(i, j)| at(i, j)).collect();
+            let Some(pts) = pts else {
+                continue;
+            };
+            let Some(first) = pts.first().copied() else {
+                continue;
+            };
+            if pts.len() < 2 || pts.iter().any(|q| *q != first) {
+                continue;
+            }
+            let [x, y, z, w] = first;
+            if !(w.is_finite() && w > 0.0 && x.is_finite() && y.is_finite() && z.is_finite()) {
+                continue;
+            }
+            out.push((
+                across_u,
+                at_max,
+                V3 {
+                    x: x / w,
+                    y: y / w,
+                    z: z / w,
+                },
+            ));
+        }
+        out
+    }
+
     /// The net's point at `uv` (double arithmetic, a sanity probe only).
     fn point(&self, uv: Point2) -> Option<crate::math::Vec3> {
         let n = &self.net;
@@ -133,7 +249,7 @@ impl NetSurface {
     /// out): the continued polynomial `S~` differs from the surface at the clamped point by at
     /// most the first partials' size times the overshoot, which is the slack, added to the
     /// bound: `dist(C, S) <= |C - S~(W)| + |S~(W) - S(clamp W)|`.
-    fn partials(
+    pub(crate) fn partials(
         &self,
         w: &[V3<Ivl>],
         lk: usize,
@@ -249,8 +365,9 @@ fn minus(a: V3<Ivl>, b: V3<Ivl>) -> V3<Ivl> {
     }
 }
 
-/// The bound of one piece: `(end values, second-order term)`.
-fn piece(
+/// The bound of one piece: `(end values, second-order term)`; the gap over `[a, b]` is at
+/// most their sum.
+pub(crate) fn piece(
     cn: &NurbsCurve,
     wn: &NurbsCurve,
     s: &NetSurface,
@@ -481,12 +598,6 @@ pub fn curve_face_gap_bound(
     range: [f64; 2],
     floor: f64,
 ) -> Result<Option<f64>> {
-    use crate::curve::curve::Curve;
-    use crate::error::ignored;
-    use crate::nurbs::crv_fit::p1::ParamMethod;
-    use crate::surface::surface::p4::NoObject;
-    use crate::surface::surface::p5::DropPointOptions;
-
     let [lo, hi] = range;
     if !(lo.is_finite() && hi.is_finite() && lo < hi && floor.is_finite() && floor >= 0.0) {
         return Ok(None);
@@ -496,7 +607,35 @@ pub fn curve_face_gap_bound(
         return Ok(None);
     };
     let surface = surface.clone_for_evaluation()?;
-    let domain = rec.uv_domain;
+    let Some((net, correspondence)) = correspondence(k, &surface, &rec.uv_domain, curve, [lo, hi])?
+    else {
+        return Ok(None);
+    };
+    certified_gap(k, curve, &correspondence, &net, range, FIRST_PIECES, floor)
+}
+
+/// The correspondence `W` of `curve` over `[lo, hi]` on `surface` (module docs): a cubic
+/// B-spline of parameters `(u, v, 0)` on the curve's own parameter, through the nearest points
+/// in `domain` of [`CORRESPONDENCE_POINTS`] equally spaced points of the curve, with the
+/// surface's net. `None` where a nearest point is not found or the surface has no net whose
+/// parameters are the surface's ([`NetSurface::of`]).
+///
+/// # Errors
+///
+/// The kernel's unported and cancelled statuses; those of the curve's evaluation.
+pub(crate) fn correspondence(
+    k: &Kernel,
+    surface: &Surface,
+    domain: &crate::geom::extent2d::Extent2d,
+    curve: &BSplineCurve,
+    [lo, hi]: [f64; 2],
+) -> Result<Option<(NetSurface, BSplineCurve)>> {
+    use crate::curve::curve::Curve;
+    use crate::error::ignored;
+    use crate::nurbs::crv_fit::p1::ParamMethod;
+    use crate::surface::surface::p4::NoObject;
+    use crate::surface::surface::p5::DropPointOptions;
+
     let evaluated = Curve::from(curve.clone_exact());
     let params: Vec<f64> = (0..CORRESPONDENCE_POINTS)
         .map(|i| {
@@ -534,7 +673,7 @@ pub fn curve_face_gap_bound(
             guess_uv: guess,
             ..DropPointOptions::default()
         };
-        let Some(drop) = ignored(surface.drop_point::<NoObject>(k, point, &domain, &opts))? else {
+        let Some(drop) = ignored(surface.drop_point::<NoObject>(k, point, domain, &opts))? else {
             return Ok(None);
         };
         if !drop.success {
@@ -545,7 +684,7 @@ pub fn curve_face_gap_bound(
         }
     }
     let uvs: Vec<Point2> = found.into_iter().flatten().collect();
-    let Some(net) = NetSurface::of(k, &surface, &uvs)? else {
+    let Some(net) = NetSurface::of(k, surface, &uvs)? else {
         return Ok(None);
     };
     let flat: Vec<crate::math::Vec3> = uvs
@@ -563,7 +702,7 @@ pub fn curve_face_gap_bound(
     ) else {
         return Ok(None);
     };
-    certified_gap(k, curve, &correspondence, &net, range, FIRST_PIECES, floor)
+    Ok(Some((net, correspondence)))
 }
 
 // ---- a curve piece against a point, a surface or a curve ------------------------------------

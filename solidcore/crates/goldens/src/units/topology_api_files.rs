@@ -774,7 +774,10 @@ fn rust_write(s: &WriteSrc, ascii: bool) -> Result<Output, HarnessError> {
                 )
             };
             return Ok(match read {
-                Ok(()) => write_rec(&k, &b, &write_file_key, &records, &attributes, ascii),
+                Ok(()) => {
+                    crate::tolsub::after_read(&mut b);
+                    write_rec(&k, &b, &write_file_key, &records, &attributes, ascii)
+                }
                 Err(e) => Output::unported(&e)
                     .unwrap_or_else(|| Output::new().ints("rec", vec![write_status(&e)])),
             });

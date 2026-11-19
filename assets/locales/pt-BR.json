@@ -2532,7 +2532,6 @@
   "prefs.blur_off": "Desativado",
   "prefs.blur_reduce_transparency": "Desativado pela configuração Reduzir transparência do sistema",
   "prefs.blur_software": "Indisponível com gráficos por software (gpu-software)",
-  "prefs.blur_source": "Indisponível nesta vista do espaço de trabalho",
   "prefs.blur_web": "Indisponível neste caminho de renderização web",
   "prefs.bodies_folders": "Pastas de corpos",
   "prefs.bodies_folders_always": "Sempre",

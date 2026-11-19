@@ -15,6 +15,8 @@ pub use trim::FreeformOffsetOutput;
 pub const OFFSET_TOLERANCE: f64 = 0.002;
 const MAX_PIECES: usize = 256;
 const MAX_ASSOCIATIONS: usize = 128;
+/// The most curves one trimmed chain offset is made of, and the most sources it has.
+const MAX_CHAIN_SOURCES: usize = 512;
 const MAX_OFFSET_WORK: usize = 1_048_576;
 struct Fit {
     tolerance: f64,
@@ -42,6 +44,19 @@ pub struct FreeformOffset {
     pub closed: bool,
     pub tolerance: f64,
     pub certificate: u8,
+}
+
+/// A trimmed offset of a chain that includes a free-form curve: ordinary curves, kept with
+/// the sources they were made from, so the distance that drives them rebuilds them when it
+/// changes (#12294). The curves keep their ids across the rebuild.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FreeformChainOffset {
+    /// The chain's sources, in the order they are walked, each with the way it runs.
+    pub sources: Vec<(String, bool)>,
+    /// The curves the offset made, in the order they were made.
+    pub outputs: Vec<String>,
+    /// The signed distance the offset runs at.
+    pub distance: f64,
 }
 
 #[derive(Clone, Copy)]
@@ -454,6 +469,72 @@ impl Sketch {
         }
         Ok(())
     }
+
+    /// Validate the persisted roles of the trimmed chain offsets without solving or
+    /// certifying geometry.
+    pub fn validate_freeform_chain_offsets(&self) -> Result<()> {
+        if self.freeform_chain_offsets.is_empty() {
+            return Ok(());
+        }
+        if self.freeform_chain_offsets.len() > MAX_ASSOCIATIONS {
+            return Err(bad("too many associative trimmed chain offsets"));
+        }
+        if self.points.len() > 100_000 || self.curves.len() > 100_000 {
+            return Err(bad("offset sketch exceeds ownership validation limit"));
+        }
+        let mut outputs = std::collections::BTreeSet::new();
+        for record in &self.freeform_chain_offsets {
+            if record.sources.is_empty()
+                || record.sources.len() > MAX_CHAIN_SOURCES
+                || record.outputs.is_empty()
+                || record.outputs.len() > MAX_CHAIN_SOURCES
+                || !record.distance.is_finite()
+                || record.distance.abs() < 1e-9
+            {
+                return Err(bad("invalid trimmed chain offset association"));
+            }
+            for (id, _) in &record.sources {
+                if id.is_empty() || id.len() > 512 {
+                    return Err(bad("invalid trimmed chain offset source"));
+                }
+                if self.curve_index(id).is_none() {
+                    return Err(bad("trimmed chain offset source vanished"));
+                }
+            }
+            for id in &record.outputs {
+                if id.is_empty() || id.len() > 512 || !outputs.insert(id.as_str()) {
+                    return Err(bad("invalid trimmed chain offset output"));
+                }
+                if self.curve_index(id).is_none() {
+                    return Err(bad("trimmed chain offset output vanished"));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Keep the association of a trimmed offset: the sources it was made from, the curves
+    /// it made and the distance it runs at. The distance drives it: the offset is rebuilt
+    /// from the sources when the distance changes (#12294).
+    pub fn record_freeform_chain_offset(&mut self, sources: &[(usize, bool)], outputs: &[usize], distance: f64) -> Result<()> {
+        if self.freeform_chain_offsets.len() >= MAX_ASSOCIATIONS {
+            return Err(bad("too many associative trimmed chain offsets"));
+        }
+        let sources = sources
+            .iter()
+            .map(|(index, forward)| {
+                let id = self.curves.get(*index).ok_or_else(|| bad("offset source vanished"))?.id.clone();
+                Ok((id, *forward))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let outputs = outputs
+            .iter()
+            .map(|index| self.curves.get(*index).ok_or_else(|| bad("offset output vanished")).map(|curve| curve.id.clone()))
+            .collect::<Result<Vec<_>>>()?;
+        self.freeform_chain_offsets.push(FreeformChainOffset { sources, outputs, distance });
+        Ok(())
+    }
+
     pub fn add_freeform_offset(&mut self, source: usize, forward: bool, distance: f64) -> Result<usize> {
         if self.freeform_offsets.len() >= MAX_ASSOCIATIONS {
             return Err(bad("too many associative free-form offsets"));
@@ -589,6 +670,21 @@ impl Sketch {
                 CurveKind::Spline { pts: indices, control: false, degree: 3, periodic: record.certificate == 2, nurbs: None, handles: Vec::new() };
             candidate.freeform_offsets[record_index].divisions = divisions;
             candidate.freeform_offsets[record_index].pieces = pieces;
+        }
+        *self = candidate;
+        Ok(())
+    }
+
+    /// Rebuild every trimmed chain offset at the distance that drives it: the curves it made
+    /// keep their ids, so a profile that uses them still finds them (#12294).
+    pub(crate) fn refresh_freeform_chain_offsets(&mut self) -> Result<()> {
+        if self.freeform_chain_offsets.is_empty() {
+            return Ok(());
+        }
+        self.validate_freeform_chain_offsets()?;
+        let mut candidate = self.clone();
+        for record in candidate.freeform_chain_offsets.clone() {
+            candidate.rebuild_freeform_chain_offset(&record)?;
         }
         *self = candidate;
         Ok(())

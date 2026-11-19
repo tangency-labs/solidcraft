@@ -807,11 +807,14 @@ fn same_oriented_plane(a: &solidcore_record::Plane, b: &solidcore_record::Plane,
 
 impl Document {
     /// The exact plane an anchor on face `index` of `body` is measured in: the construction
-    /// certificate's plane, or for a [`FaceCertificate::Lineage`] face its current exact plane in
-    /// the [`lineage_frame`].
+    /// certificate's plane, or for a [`FaceCertificate::Lineage`] face the frame what built the
+    /// body gives it (a sheet's panel's: the flat pattern's, see [`ModelBody::sketch_frame`]),
+    /// else its current exact plane in the [`lineage_frame`].
     pub fn anchor_face_plane(&self, body: &ModelBody, index: usize, certificate: Option<&FaceCertificate>) -> Option<solidcore_record::Plane> {
         match certificate {
-            Some(FaceCertificate::Lineage) => body.body.planar_face(index).and_then(|plane| lineage_frame(body, &plane)),
+            Some(FaceCertificate::Lineage) => {
+                body.sketch_frame(index).or_else(|| body.body.planar_face(index).and_then(|plane| lineage_frame(body, &plane)))
+            }
             _ => body.body.face_plane(index),
         }
     }

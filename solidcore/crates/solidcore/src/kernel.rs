@@ -167,6 +167,7 @@ pub struct WorkCounters {
     shell_traversal_faces: Cell<u64>,
     proto_vertex_point_solves: Cell<u64>,
     merge_record_visits: Cell<u64>,
+    infinite_region_searches: Cell<u64>,
     face_extreme_control_points: Cell<u64>,
     feet_tm_coefficients: Cell<u64>,
     mass_iso_evaluations: Cell<u64>,
@@ -179,6 +180,7 @@ pub struct WorkCounters {
     ball_certified_roots: Cell<u64>,
     blends_recertified: Cell<u64>,
     vertex_drops: Cell<u64>,
+    seam_tests: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -242,6 +244,13 @@ impl WorkCounters {
     #[must_use]
     pub fn merge_record_visits(&self) -> u64 {
         self.merge_record_visits.get()
+    }
+
+    /// Searches for a B-rep's infinite region (`FindInfiniteRegion`): each time a B-rep
+    /// of more than one region goes on to choose a ray and classify it. Not the fork's.
+    #[must_use]
+    pub fn infinite_region_searches(&self) -> u64 {
+        self.infinite_region_searches.get()
     }
 
     /// Control points of the B-spline nets the trimmed-face tight box's directed solves
@@ -349,6 +358,18 @@ impl WorkCounters {
         self.vertex_drops.get()
     }
 
+    /// Edges and vertices of a face asked whether they are a seam or a pole of it while a
+    /// face intersection classifies its curves on the face (docs/booleans.md, "Seams and
+    /// poles"): each edge [`crate::topology::edge::face_on_both_sides`] is asked about and
+    /// each vertex [`crate::topology::vertex::inside_face`] is asked about, for a curve's
+    /// boundary edges and vertices, its reach and the face's own seam. A face without a
+    /// seam has no pole either, so once its edges are found to hold none, its curves skip
+    /// both questions until the B-rep changes. Not the fork's (#18705).
+    #[must_use]
+    pub fn seam_tests(&self) -> u64 {
+        self.seam_tests.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
@@ -358,6 +379,7 @@ impl WorkCounters {
         self.shell_traversal_faces.set(0);
         self.proto_vertex_point_solves.set(0);
         self.merge_record_visits.set(0);
+        self.infinite_region_searches.set(0);
         self.face_extreme_control_points.set(0);
         self.feet_tm_coefficients.set(0);
         self.mass_iso_evaluations.set(0);
@@ -370,6 +392,12 @@ impl WorkCounters {
         self.ball_certified_roots.set(0);
         self.blends_recertified.set(0);
         self.vertex_drops.set(0);
+        self.seam_tests.set(0);
+    }
+
+    /// Counts one edge or vertex asked whether it is a seam or a pole of a face.
+    pub(crate) fn add_seam_test(&self) {
+        self.seam_tests.set(self.seam_tests.get().saturating_add(1));
     }
 
     /// Counts one vertex a classified curve is solved against.
@@ -417,6 +445,12 @@ impl WorkCounters {
     pub(crate) fn add_merge_record_visits(&self, visits: u64) {
         self.merge_record_visits
             .set(self.merge_record_visits.get().saturating_add(visits));
+    }
+
+    /// Counts one search for a B-rep's infinite region.
+    pub(crate) fn add_infinite_region_search(&self) {
+        self.infinite_region_searches
+            .set(self.infinite_region_searches.get().saturating_add(1));
     }
 
     /// Counts the control points of the net one trimmed-face extreme solve ran on.
@@ -1219,9 +1253,10 @@ mod tests {
                 w.shell_traversal_faces(),
                 w.proto_vertex_point_solves(),
                 w.merge_record_visits(),
+                w.infinite_region_searches(),
             )
         };
-        assert_eq!(counts(w), (0, 0, 0, 0, 0, 0, 0, 0, 0));
+        assert_eq!(counts(w), (0, 0, 0, 0, 0, 0, 0, 0, 0, 0));
         w.add_face_pair();
         w.add_face_pair();
         w.add_loop_classified();
@@ -1234,11 +1269,13 @@ mod tests {
         w.add_shell_traversal_face();
         w.add_proto_vertex_point_solve();
         w.add_merge_record_visits(3);
-        assert_eq!(counts(w), (2, 1, 1, 1, 3, 1, 1, 1, 3));
+        w.add_infinite_region_search();
+        w.add_infinite_region_search();
+        assert_eq!(counts(w), (2, 1, 1, 1, 3, 1, 1, 1, 3, 2));
         // each kernel counts its own work
         assert_eq!(Kernel::default().work_counters.face_pairs(), 0);
         w.reset();
-        assert_eq!(counts(w), (0, 0, 0, 0, 0, 0, 0, 0, 0));
+        assert_eq!(counts(w), (0, 0, 0, 0, 0, 0, 0, 0, 0, 0));
     }
 
     #[test]

@@ -278,14 +278,6 @@ pub(super) const EXECUTIVE_P3: &[(&str, usize)] = &[
     ),
     ("invert: proven nearer", 240),
 ];
-/// Of `blend.fillet_geom_p2`'s.
-pub(super) const GEOM_P2: &[(&str, usize)] = &[
-    ("invert: proven nearer", 6083),
-    (
-        "invert: this branch refuses main's answer, proven farther than the guess",
-        3,
-    ),
-];
 /// Of `heal.heal_data_p3`'s.
 pub(super) const HEAL_DATA_P3: &[(&str, usize)] = &[
     ("invert: proven nearer", 21),
