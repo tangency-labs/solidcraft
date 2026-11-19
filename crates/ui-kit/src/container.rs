@@ -859,7 +859,11 @@ impl Container {
 
     fn background(self, ctx: &Context, frame: Frame) -> Option<Background> {
         // Keep the off path to boundary checks only: no painter, shape slot or allocation.
-        if crate::blur::enabled() && !self.see_through && ctx.viewport_id() == egui::ViewportId::ROOT && frame.fill.a() > 0 { Some(crate::blur::decorate) } else { None }
+        if crate::blur::enabled() && !self.see_through && ctx.viewport_id() == egui::ViewportId::ROOT && frame.fill.a() > 0 {
+            Some(crate::blur::decorate)
+        } else {
+            None
+        }
     }
 
     pub(super) fn show_frame_background<R>(
