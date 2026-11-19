@@ -4,10 +4,12 @@
 use std::f64::consts::PI;
 
 use solidcore::geom::extent3d::Extent3d;
+use solidcore::geom::vector3d::Point3;
 use solidcore::kernel::Kernel;
-use solidcore::query::api_queries::face_bounding_box;
+use solidcore::query::api_queries::{edge_closest_point, face_bounding_box};
 
 use super::{offset_faces, offset_sheet, shell, thicken};
+use crate::blend::{blend, Blend, Corners};
 use crate::session::{self, run};
 use crate::{make_box, make_cylinder, make_sphere, Body, Error, Order};
 
@@ -2400,5 +2402,50 @@ fn offset_substages_keep_their_failure_reason() {
             "{}",
             diagnostic.detail
         );
+    }
+}
+
+/// The index of the edge of `body` through `p`, in its edge list.
+fn edge_at(body: &Body, p: [f64; 3]) -> usize {
+    let k = Kernel::default();
+    let b = body.lock();
+    let p = Point3::new(p[0], p[1], p[2]);
+    b.edge_list()
+        .iter()
+        .position(|&e| edge_closest_point(&k, &b, e, p).is_ok_and(|c| c.closest.distance < 1e-9))
+        .unwrap()
+}
+
+/// A shell over a 4 mm G2 corner names its largest wall, 0.9674 mm, rather than "not proved
+/// regular" (#17246).
+#[test]
+fn shell_of_g2_corner_names_largest_wall() {
+    all_fixes();
+    let b = make_box([-7.5, -7.5, 0.0], [36.5, 38.5, 10.0]).unwrap();
+    // the three edges meeting at the corner (29, 31, 10)
+    let edges = [
+        edge_at(&b, [10.75, 31.0, 10.0]),
+        edge_at(&b, [29.0, 11.75, 10.0]),
+        edge_at(&b, [29.0, 31.0, 5.0]),
+    ];
+    blend(&b, Blend::Curvature, &edges, &[4.0], &[], Corners::Filled).unwrap();
+    let (_, order) = b.to_record().unwrap();
+    let counts = b.counts().unwrap();
+    let mut top: Option<(usize, f64)> = None;
+    for i in 0..counts[0] {
+        let c = b.face_centroid(&order, i, 1e-8).unwrap();
+        if c.centroid[2] >= 9.999 && top.is_none_or(|(_, a)| c.area > a) {
+            top = Some((i, c.area));
+        }
+    }
+    let (top, _) = top.expect("a top face at z = 10");
+    match shell(&b, &order, &[top], -1.0) {
+        Err(Error::WallFolds { largest: Some(l) }) => {
+            assert!(
+                (l - 0.9674).abs() < 1e-3,
+                "largest wall {l}, expected 0.9674"
+            );
+        }
+        other => panic!("expected WallFolds naming the largest wall, got {other:?}"),
     }
 }
