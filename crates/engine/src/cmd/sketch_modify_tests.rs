@@ -1523,6 +1523,36 @@ fn offset_chain_mirror_patterns_move_scale() {
     assert!(sk.center(sk.curve_index(&cp).unwrap()).unwrap().dist(Vec2::new(-110.0, 0.0)) < 1e-7);
 }
 
+/// #15697: the Transform tool turns a rounded square about its middle. Picked by its sides and
+/// corner arcs, with a corner drawn on the origin, it turns whole: every point of its curves and
+/// its centre point land where the rotation puts them, so the square does not come out as a
+/// trapezoid (the corner's hold on the origin is let go, as Move does).
+#[test]
+fn rotation_turns_a_rounded_square_whole() {
+    for command in ["sketch.transform", "sketch.move"] {
+        for angle in [45.0, 30.0] {
+            let at = format!("{command} {angle}");
+            let mut s = new_sketch();
+            let r = run(&mut s, "sketch.rectangle.rounded", json!({"p0": [0, 0], "p1": [20, 20], "radius": 3}));
+            let source = ids(&r["curves"]);
+            assert_eq!(source.len(), 8, "four sides and four corner arcs: {r}");
+            let before = sketch(&s);
+            let mut shape: Vec<usize> = source.iter().flat_map(|id| before.curves[before.curve_index(id).unwrap()].kind.point_ids()).collect();
+            shape.push(before.points.iter().position(|p| Some(p.id.as_str()) == r["centre"].as_str()).unwrap());
+            let out = run(&mut s, command, json!({"entities": source, "angle": angle, "center": [10, 10]}));
+            assert_eq!(out["sketch"]["solved"], true, "{at}: {out}");
+            let after = sketch(&s);
+            let (sin, cos) = f64::to_radians(angle).sin_cos();
+            let c = Vec2::new(10.0, 10.0);
+            for i in shape {
+                let (p, q) = (before.points[i].pos - c, after.points[i].pos);
+                let expected = c + Vec2::new(p.x * cos - p.y * sin, p.x * sin + p.y * cos);
+                assert!(q.dist(expected) < 1e-6, "{at}: point {} at {q:?}, expected {expected:?}", before.points[i].id);
+            }
+        }
+    }
+}
+
 /// #4645: rotating a constrained 40 × 10 rectangle turns it at its size. Horizontal and vertical
 /// relations and dimensions swap at odd quarter turns, stay at half turns and go at other angles;
 /// lengths stay. A rotated copy is unconstrained and leaves the original as it was.
