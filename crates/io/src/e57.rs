@@ -373,7 +373,7 @@ fn rotation(q: [f64; 4]) -> Result<[[f64; 3]; 3]> {
 }
 
 /// The runs of bytes each of a scan's `fields` fields has in the section at `start`.
-fn packets<'a>(l: &'a [u8], start: usize, page: usize, fields: usize) -> Result<Vec<Vec<&'a [u8]>>> {
+fn packets(l: &[u8], start: usize, page: usize, fields: usize) -> Result<Vec<Vec<&[u8]>>> {
     // The section header: its kind (1, points), its length and where its first packet is.
     if l.get(start) != Some(&1) {
         return Err(invalid("a scan's points are not in a section of points"));
@@ -443,10 +443,10 @@ fn scan<'a>(n: &Node, l: &'a [u8], page: usize) -> Result<Scan<'a>> {
     let limits = n.child("colorLimits");
     let mut color_limits = [None; 3];
     for (slot, c) in color_limits.iter_mut().zip(["Red", "Green", "Blue"]) {
-        if let Some(l) = limits {
-            if let (Some(lo), Some(hi)) = (l.number_in(&format!("color{c}Minimum"))?, l.number_in(&format!("color{c}Maximum"))?) {
-                *slot = (hi > lo).then_some((lo, hi));
-            }
+        if let Some(l) = limits
+            && let (Some(lo), Some(hi)) = (l.number_in(&format!("color{c}Minimum"))?, l.number_in(&format!("color{c}Maximum"))?)
+        {
+            *slot = (hi > lo).then_some((lo, hi));
         }
     }
     Ok(Scan { fields, streams: streams.into_iter().map(std::sync::Arc::new).collect(), records, rotation: rotation(q)?, translation, color_limits })
@@ -545,10 +545,10 @@ impl<'s, 'a> Points<'s, 'a> {
                 .unwrap_or((0.0, 255.0));
             *out = ((v - lo) / (hi - lo) * 255.0).round().clamp(0.0, 255.0) as u8;
         }
-        if let Some(i) = self.roles.color_invalid {
-            if self.value(i)? != 0.0 {
-                return Ok(Some([255; 3]));
-            }
+        if let Some(i) = self.roles.color_invalid
+            && self.value(i)? != 0.0
+        {
+            return Ok(Some([255; 3]));
         }
         Ok(Some(rgb))
     }
@@ -556,10 +556,10 @@ impl<'s, 'a> Points<'s, 'a> {
     fn intensity(&mut self) -> Result<Option<f32>> {
         let Some(f) = self.roles.intensity else { return Ok(None) };
         let v = self.value(f)? as f32;
-        if let Some(i) = self.roles.intensity_invalid {
-            if self.value(i)? != 0.0 {
-                return Ok(Some(f32::NAN));
-            }
+        if let Some(i) = self.roles.intensity_invalid
+            && self.value(i)? != 0.0
+        {
+            return Ok(Some(f32::NAN));
         }
         Ok(Some(v))
     }
