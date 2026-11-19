@@ -5429,22 +5429,43 @@ impl Document {
     }
 
     /// Move the points placed by parameters to where their expressions come to (in place). Such
-    /// a point is fixed, so the solve keeps it there.
+    /// a point is fixed, so the solve keeps it there. A point's expression may read another
+    /// point's coordinate (`p1.x`), so the points are worked out in the order those names
+    /// allow (#19232).
     pub fn apply_point_values(&self, vals: &std::collections::BTreeMap<String, expr::Value>, sk: &mut Sketch) -> Result<()> {
-        use crate::eval::val;
-        for p in &mut sk.points {
-            let Some(exprs) = p.exprs.as_deref() else { continue };
-            let mut at = p.pos;
-            for (e, slot, what) in [(&exprs.x, &mut at.x, "X"), (&exprs.y, &mut at.y, "Y")] {
-                if let Some(e) = e {
-                    *slot = val(vals, e, Kind::Length).map_err(|error| DocError::Expr(format!("point {} {what}: {error}", p.id)))?;
-                }
+        use crate::eval::val_with;
+        use crate::point_expr;
+        let placed: Vec<usize> = sk.points.iter().enumerate().filter_map(|(i, p)| p.exprs.as_ref().map(|_| i)).collect();
+        if placed.is_empty() {
+            return Ok(());
+        }
+        // The points each point's expressions read: a point waits for them.
+        let names: Vec<Vec<String>> = placed.iter().map(|&i| point_expr::reads(sk, i)).collect();
+        let order = point_expr::order(&placed, &names, sk)?;
+        for i in order {
+            let (id, exprs, start) = match sk.points.get(i) {
+                Some(p) => (p.id.clone(), p.exprs.as_deref().map(|e| (e.x.clone(), e.y.clone())), p.pos),
+                None => continue,
+            };
+            let Some((ex, ey)) = exprs else { continue };
+            let (x, y) = {
+                let members = |point: &str, member: &str| point_expr::coordinate(sk, point, member);
+                let x = match &ex {
+                    Some(e) => val_with(vals, e, Kind::Length, Some(&members)).map_err(|error| DocError::Expr(format!("point {} X: {error}", id)))?,
+                    None => start.x,
+                };
+                let y = match &ey {
+                    Some(e) => val_with(vals, e, Kind::Length, Some(&members)).map_err(|error| DocError::Expr(format!("point {} Y: {error}", id)))?,
+                    None => start.y,
+                };
+                (x, y)
+            };
+            let pos = Vec2::new(x, y);
+            if !(pos.is_finite() && pos.x.abs() < solidcraft_sketch::MAX_COORD && pos.y.abs() < solidcraft_sketch::MAX_COORD) {
+                return Err(DocError::Invalid(format!("point {} is placed out of range", id)));
             }
-            if !(at.is_finite() && at.x.abs() < solidcraft_sketch::MAX_COORD && at.y.abs() < solidcraft_sketch::MAX_COORD) {
-                return Err(DocError::Invalid(format!("point {} is placed out of range", p.id)));
-            }
-            p.pos = at;
-            p.fixed = true;
+            sk.points[i].pos = pos;
+            sk.points[i].fixed = true;
         }
         Ok(())
     }

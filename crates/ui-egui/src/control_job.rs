@@ -121,6 +121,7 @@ const ANSWERED_ON_A_COPY: &[&str] = &[
     "file.export",
     "file.export_3mf",
     "file.export_obj",
+    "file.export_sdf",
     "file.export_step",
     "file.export_stl",
     "file.export_urdf",

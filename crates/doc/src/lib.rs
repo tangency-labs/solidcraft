@@ -71,6 +71,7 @@ pub mod plugin_data;
 pub mod point_cloud;
 mod point_cloud_complex;
 pub mod point_cloud_distribution;
+mod point_expr;
 mod points;
 mod profile_refs;
 pub mod progress;

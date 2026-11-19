@@ -4681,15 +4681,21 @@ fn point(vals: &BTreeMap<String, Value>, p: &crate::PointExpr) -> Result<Vec3> {
 }
 
 pub(crate) fn val(vals: &BTreeMap<String, Value>, e: &str, k: Kind) -> Result<f64> {
+    val_with(vals, e, k, None)
+}
+
+/// [`val`], with the coordinates of points the expression may read (`p1.x`): `members`
+/// resolves the point's name and the coordinate (`x` or `y`) to its value.
+pub(crate) fn val_with(vals: &BTreeMap<String, Value>, e: &str, k: Kind, members: Option<&dyn Fn(&str, &str) -> Result<Value>>) -> Result<f64> {
     let scale = vals.get(DESIGN_LEN).map(|x| x.v).unwrap_or(1.0);
+    let look = |n: &str| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`")));
     // Non-literal lengths (a parameter ± a bare number) must read that bare number in the design's
     // units during the expression, not only when the whole result is unit-less (#9015).
     if k == Kind::Length && scale != 1.0 && !expr::is_literal(e) {
         let defaults = expr::Defaults { len: scale, ..expr::Defaults::default() };
-        let look = |n: &str| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`")));
-        return expr::eval_with_defaults(e, &look, defaults)?.to_kind_in(k, defaults);
+        return expr::eval_with_defaults_members(e, &look, members, defaults)?.to_kind_in(k, defaults);
     }
-    Document::eval_in(vals, e, k)
+    expr::eval_with_defaults_members(e, &look, members, expr::Defaults::default())?.to_kind(k)
 }
 
 #[cfg(test)]

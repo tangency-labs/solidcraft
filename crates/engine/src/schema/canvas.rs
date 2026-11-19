@@ -96,9 +96,10 @@ pub enum FrameAuto {
     Auto,
 }
 
-/// Put an image on a planar face of the model, like a sticker, kept in the design. Give the image
-/// as `path` or as base64 `data`; PNG, JPEG and SVG are taken, up to 16 MiB, an SVG drawn into a
-/// PNG. The image goes into the active component. One undo step.
+/// Put an image on a planar face of the model, like a sticker, kept in the design and written to
+/// a URDF export as a textured visual of its component's link. Give the image as `path` or as
+/// base64 `data`; PNG, JPEG and SVG are taken, up to 16 MiB, an SVG drawn into a PNG. The image
+/// goes into the active component. One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = decal_required)]
 pub struct CanvasDecalParams {
