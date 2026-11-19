@@ -3110,7 +3110,6 @@
   "prefs.blur_off": "כבוי",
   "prefs.blur_reduce_transparency": "מושבת עקב הגדרת הפחתת השקיפות של המערכת",
   "prefs.blur_software": "לא זמין עם עיבוד גרפי בתוכנה (gpu-software)",
-  "prefs.blur_source": "לא זמין בתצוגת סביבת העבודה הזו",
   "prefs.blur_web": "לא זמין בנתיב העיבוד הזה בדפדפן",
   "prefs.bodies_folders": "תיקיות גופים",
   "prefs.bodies_folders_always": "תמיד",

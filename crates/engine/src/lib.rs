@@ -55,6 +55,7 @@ pub mod status_details;
 pub mod status_items;
 pub mod timing;
 pub mod title_block_text;
+pub mod upright_image;
 pub mod view;
 
 use solidcraft_geom::prelude::*;
