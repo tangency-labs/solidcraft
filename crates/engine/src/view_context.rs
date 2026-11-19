@@ -18,17 +18,85 @@ pub struct ViewDescriptor {
     pub subject: Option<String>,
 }
 
+impl crate::Session {
+    /// The stable UI owner of the one edit, or none for a headless sheet edit.
+    pub fn editing_view(&self) -> Option<u64> {
+        self.active_sketch.and(self.sketching_view).or_else(|| self.active_sheet_sketch.as_ref().and_then(|entry| entry.view))
+    }
+
+    pub(crate) fn sheet_view_matches(context: &ViewContext, document: &solidcraft_doc::Document, view: u64, drawing: u64, sheet: u64) -> bool {
+        let drawing_id = solidcraft_doc::ids::encode(drawing);
+        let sheet_id = solidcraft_doc::ids::encode(sheet);
+        let canonical = format!("{drawing_id}/{sheet_id}");
+        context.descriptors().iter().any(|descriptor| {
+            descriptor.id == view
+                && descriptor.kind == ViewKind::Sheet
+                && descriptor.subject.as_deref().is_some_and(|subject| {
+                    subject == canonical
+                        || (subject == sheet_id
+                            && document.drawings.iter().filter(|drawing| drawing.sheets.iter().any(|record| record.id == sheet)).count() == 1)
+                })
+        })
+    }
+
+    /// Resolve a Sheet tile without manufacturing host identities. Default headless sessions
+    /// permit an omitted view and keep no tile owner. Hosted sessions require an open match.
+    pub(crate) fn requested_sheet_view(&self, drawing: u64, sheet: u64, requested: Option<u64>, command: &str) -> crate::Result<Option<u64>> {
+        let bad = |message: String| crate::EngineError::BadParams { cmd: command.into(), msg: message };
+        if let Some(view) = requested {
+            if !(1..=MAX_ID).contains(&view) || !Self::sheet_view_matches(&self.view_context, &self.doc, view, drawing, sheet) {
+                return Err(bad(format!("view {view} must be an open Sheet view of this drawing and sheet")));
+            }
+            return Ok(Some(view));
+        }
+        if !self.view_context.is_hosted() {
+            return Ok(None);
+        }
+        std::iter::once(self.view_context.focused())
+            .chain(self.view_context.recent().iter().copied())
+            .chain(self.view_context.descriptors().iter().map(|descriptor| descriptor.id))
+            .find(|view| Self::sheet_view_matches(&self.view_context, &self.doc, *view, drawing, sheet))
+            .map(Some)
+            .ok_or_else(|| bad("no Sheet view of this drawing and sheet is open".into()))
+    }
+
+    pub(crate) fn checked_sheet_sketch_owner(
+        &self,
+        context: &ViewContext,
+        entry: Option<&crate::SheetSketchEdit>,
+        document: &solidcraft_doc::Document,
+    ) -> crate::Result<()> {
+        let Some(entry) = entry else { return Ok(()) };
+        let valid_record = document.drawing(entry.drawing).is_some_and(|drawing| {
+            drawing.sketches.iter().filter(|record| record.id == entry.sketch).count() == 1
+                && drawing.sheet_sketch(entry.sketch).is_some_and(|record| record.owner == entry.owner)
+        });
+        if !valid_record {
+            return Err(crate::EngineError::Other("the edited sheet sketch changed owner or no longer exists".into()));
+        }
+        let sheet = entry.sheet(document).ok_or_else(|| crate::EngineError::Other("the edited sheet sketch's owner no longer exists".into()))?;
+        if entry.view.is_some_and(|view| Self::sheet_view_matches(context, document, view, entry.drawing, sheet))
+            || (entry.view.is_none() && !context.is_hosted())
+        {
+            Ok(())
+        } else {
+            Err(crate::EngineError::Other("the sheet sketch's editing view is closed or displays another sheet".into()))
+        }
+    }
+}
+
 /// A bounded snapshot of the host's real open views. Recent IDs are most-recent-first.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ViewContext {
     open: Vec<ViewDescriptor>,
     focused: u64,
     recent: Vec<u64>,
+    hosted: bool,
 }
 
 impl Default for ViewContext {
     fn default() -> Self {
-        Self { open: vec![ViewDescriptor { id: 1, kind: ViewKind::Model, window: 0, subject: None }], focused: 1, recent: vec![1] }
+        Self { open: vec![ViewDescriptor { id: 1, kind: ViewKind::Model, window: 0, subject: None }], focused: 1, recent: vec![1], hosted: false }
     }
 }
 
@@ -62,7 +130,12 @@ impl ViewContext {
             }
             seen.push(*id);
         }
-        Ok(Self { open, focused, recent })
+        Ok(Self { open, focused, recent, hosted: true })
+    }
+
+    /// Whether a host supplied real view identities. Headless sessions own no Sheet tile.
+    pub fn is_hosted(&self) -> bool {
+        self.hosted
     }
 
     /// All open view identities supplied by the host.

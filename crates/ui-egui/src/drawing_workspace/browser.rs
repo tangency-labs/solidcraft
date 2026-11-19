@@ -252,7 +252,7 @@ pub(crate) fn name_of(app: &SolveApp, id: u64) -> Option<String> {
     Some(view_name(app, drawing, view, number))
 }
 
-fn view_name(app: &SolveApp, drawing: &Drawing, view: &View, number: usize) -> String {
+pub(crate) fn view_name(app: &SolveApp, drawing: &Drawing, view: &View, number: usize) -> String {
     if let Some(label) = &view.label {
         return label.name.clone();
     }
