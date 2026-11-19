@@ -381,6 +381,14 @@ pub struct NavigatorParams {
     /// The Home button beside the custom navigator. Default: unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home: Option<bool>,
+    /// The world axes beside the custom navigator, as the view cube's triad was. Default:
+    /// unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub axes: Option<bool>,
+    /// The names of the six main faces on the custom navigator, each at its direction whatever
+    /// the body's shape. Default: unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub faces: Option<bool>,
 }
 
 /// A view navigator type.

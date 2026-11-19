@@ -321,6 +321,12 @@ fn view(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         {
             crate::scenario::publish_target("prefs:navigator", all);
         }
+        // The custom navigator's own two additions, as its panel also carries them: the world
+        // axes beside the body and the names of its six main faces on it.
+        let axes = setting::navigator_axes(app, ui);
+        crate::scenario::publish_target("prefs:navigator_axes", axes.rect);
+        let names = setting::navigator_faces(app, ui);
+        crate::scenario::publish_target("prefs:navigator_faces", names.rect);
         setting::look_at_anim(app, ui);
         let width =
             ["ui.animation_speed", "prefs.home_fit_size"].into_iter().map(|id| ui_kit::ContentWidth::label(ui, app.tr(id))).fold(0.0, f32::max);

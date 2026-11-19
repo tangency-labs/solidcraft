@@ -417,19 +417,27 @@ pub(crate) fn command(app: &mut SolveApp, v: &Value) -> Result<Value, String> {
     if let Some(on) = field("home").and_then(|x| x.as_bool()) {
         p.navigator_home = on;
     }
+    if let Some(on) = field("axes").and_then(|x| x.as_bool()) {
+        p.navigator_axes = on;
+    }
+    if let Some(on) = field("faces").and_then(|x| x.as_bool()) {
+        p.navigator_faces = on;
+    }
     Ok(json!({
         "style": p.navigator_style,
         "body": app.view_gizmo.shape.as_ref().map(|s| s.name.clone()),
         "texture": p.navigator_texture,
         "arrows": p.navigator_arrows,
         "home": p.navigator_home,
+        "axes": p.navigator_axes,
+        "faces": p.navigator_faces,
     }))
 }
 
 /// The custom navigator's texture, arrows and Home, as a settings profile keeps them.
 pub(crate) fn profile_settings(app: &SolveApp) -> Value {
     let p = &app.preferences;
-    json!({"texture": p.navigator_texture, "arrows": p.navigator_arrows, "home": p.navigator_home})
+    json!({"texture": p.navigator_texture, "arrows": p.navigator_arrows, "home": p.navigator_home, "axes": p.navigator_axes, "faces": p.navigator_faces})
 }
 
 /// A profile's navigator settings cut down to the ones this version reads.
@@ -438,7 +446,7 @@ pub(crate) fn checked_profile_settings(v: &Value) -> Value {
     if let Some(t) = v.get("texture").filter(|t| serde_json::from_value::<NavigatorTexture>((*t).clone()).is_ok()) {
         out.insert("texture".into(), t.clone());
     }
-    for key in ["arrows", "home"] {
+    for key in ["arrows", "home", "axes", "faces"] {
         if let Some(on) = v.get(key).and_then(Value::as_bool) {
             out.insert(key.into(), json!(on));
         }
@@ -458,6 +466,12 @@ pub(crate) fn apply_profile_settings(app: &mut SolveApp, v: &Value) {
     if let Some(on) = v.get("home").and_then(Value::as_bool) {
         p.navigator_home = on;
     }
+    if let Some(on) = v.get("axes").and_then(Value::as_bool) {
+        p.navigator_axes = on;
+    }
+    if let Some(on) = v.get("faces").and_then(Value::as_bool) {
+        p.navigator_faces = on;
+    }
 }
 
 /// The Custom View Navigator panel's settings; its body is the panel's selection input.
@@ -466,6 +480,8 @@ pub struct Form {
     pub texture: NavigatorTexture,
     pub arrows: bool,
     pub home: bool,
+    pub axes: bool,
+    pub faces: bool,
     /// The picked body and its snapshot (or why it can't be the navigator), which the navigator
     /// previews while the panel is open.
     preview: Option<(String, Result<Shape, &'static str>)>,
@@ -483,7 +499,17 @@ pub(crate) fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             body.items.push(Sel::Body { name: shape.name.clone() });
         }
         let p = &app.preferences;
-        (Kind::ViewNavigator(Form { texture: p.navigator_texture, arrows: p.navigator_arrows, home: p.navigator_home, preview: None }), vec![body])
+        (
+            Kind::ViewNavigator(Form {
+                texture: p.navigator_texture,
+                arrows: p.navigator_arrows,
+                home: p.navigator_home,
+                axes: p.navigator_axes,
+                faces: p.navigator_faces,
+                preview: None,
+            }),
+            vec![body],
+        )
     })
 }
 
@@ -521,6 +547,10 @@ pub(crate) fn rows(app: &SolveApp, ui: &mut egui::Ui, form: &mut Form, inputs: &
     crate::scenario::publish_target("view_gizmo:arrows", arrows.rect);
     let home = ui_kit::checkbox(ui, solidcraft_ui_text::tr("view_gizmo.home"), &mut form.home);
     crate::scenario::publish_target("view_gizmo:home", home.rect);
+    let axes = ui_kit::checkbox(ui, solidcraft_ui_text::tr("view_gizmo.axes"), &mut form.axes);
+    crate::scenario::publish_target("view_gizmo:axes", axes.rect);
+    let names = ui_kit::checkbox(ui, solidcraft_ui_text::tr("view_gizmo.faces"), &mut form.faces);
+    crate::scenario::publish_target("view_gizmo:faces", names.rect);
     ui_kit::text(ui, solidcraft_ui_text::tr("view_gizmo.note"), ui_kit::Text::Note("view_gizmo_note"));
 }
 
@@ -529,7 +559,7 @@ pub(crate) fn run_dialog(app: &mut SolveApp, form: &Form, inputs: &[SelInput]) -
     if let Some((_, Err(reason))) = &form.preview {
         return Err(solidcraft_ui_text::tr(reason).to_string());
     }
-    let mut params = json!({"style": NavigatorStyle::Custom, "texture": form.texture, "arrows": form.arrows, "home": form.home});
+    let mut params = json!({"style": NavigatorStyle::Custom, "texture": form.texture, "arrows": form.arrows, "home": form.home, "axes": form.axes, "faces": form.faces});
     if let (Some(body), Some(o)) = (picked(inputs), params.as_object_mut()) {
         o.insert("body".into(), json!(body));
     }
@@ -544,6 +574,8 @@ pub(crate) struct Shown {
     pub texture: NavigatorTexture,
     pub arrows: bool,
     pub home: bool,
+    pub axes: bool,
+    pub faces: bool,
 }
 
 /// The navigator the view lays out for: Custom stands as the signed axes until a body is chosen.
@@ -566,6 +598,8 @@ pub(crate) fn shown(app: &SolveApp) -> Shown {
             texture: form.texture,
             arrows: form.arrows,
             home: form.home,
+            axes: form.axes,
+            faces: form.faces,
         },
         _ => Shown {
             style: p.navigator_style,
@@ -573,6 +607,8 @@ pub(crate) fn shown(app: &SolveApp) -> Shown {
             texture: p.navigator_texture,
             arrows: p.navigator_arrows,
             home: p.navigator_home,
+            axes: p.navigator_axes,
+            faces: p.navigator_faces,
         },
     }
 }

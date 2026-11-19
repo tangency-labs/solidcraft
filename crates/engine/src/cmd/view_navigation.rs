@@ -104,7 +104,7 @@ CommandSpec::new("view.navigation_bar", "Navigation Bar", crate::checked!("view.
 CommandSpec::new("view.navigator", "Custom View Navigator", crate::checked!("view.navigator", navigator))
     .icon("nav_settings").noundo().doc_only()
     .contract(&NAVIGATOR_CONTRACT).output(output_schema_for::<NavigatorParams>)
-    .params("style?: axes|custom; body?: body name|null; texture?: themed|modeled; arrows?, home?: bool → the navigator as set; the app's view navigator, never saved in the design; never opens a dialog (a toolbar start opens the Custom View Navigator panel)"),
+    .params("style?: axes|custom; body?: body name|null; texture?: themed|modeled; arrows?, home?, axes?, faces?: bool → the navigator as set; the app's view navigator, never saved in the design; never opens a dialog (a toolbar start opens the Custom View Navigator panel)"),
 CommandSpec::new("view.ribbon_tabs_only", "Ribbon Tabs Only", crate::checked!("view.ribbon_tabs_only", ribbon_tabs_only))
     .icon("chevron").noundo().doc_only().contract(&RIBBON_TABS_ONLY_CONTRACT).output(output_schema_for::<RibbonTabsOnly>)
     .params("on?: bool (omitted: switch) → on?; fold the ribbon to its tab row, a tab click shows its panels over the view (window setting)"),

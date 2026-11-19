@@ -339,7 +339,7 @@ fn next_and_previous_tab_echo_their_step_without_editing_the_design() {
 
 #[test]
 fn navigator_checks_and_echoes_its_settings_and_refuses_a_missing_body() {
-    assert_keys(input_schema_for::<super::NavigatorParams>(), &["arrows", "body", "home", "style", "texture"]);
+    assert_keys(input_schema_for::<super::NavigatorParams>(), &["arrows", "axes", "body", "faces", "home", "style", "texture"]);
     let schema = output_schema_for::<super::NavigatorParams>();
     let root = schema.as_value();
     let mut s = Session::default();
@@ -350,8 +350,8 @@ fn navigator_checks_and_echoes_its_settings_and_refuses_a_missing_body() {
         (json!({}), json!({})),
         (Value::Null, json!({})),
         (
-            json!({"style": "custom", "body": body, "texture": "modeled", "arrows": true, "home": false}),
-            json!({"style": "custom", "body": body, "texture": "modeled", "arrows": true, "home": false}),
+            json!({"style": "custom", "body": body, "texture": "modeled", "arrows": true, "home": false, "axes": false, "faces": true}),
+            json!({"style": "custom", "body": body, "texture": "modeled", "arrows": true, "home": false, "axes": false, "faces": true}),
         ),
         (json!({"body": null}), json!({"body": null})),
     ] {
@@ -360,9 +360,14 @@ fn navigator_checks_and_echoes_its_settings_and_refuses_a_missing_body() {
         assert!(conforms(root, root, &reply), "{reply} does not match {root}");
     }
     assert_eq!((s.revision, s.doc.to_json(), s.undo.len()), before, "the navigator is never part of the design");
-    for bad in
-        [json!({"style": "sphere"}), json!({"body": "No such body"}), json!({"body": 3}), json!({"texture": "glossy"}), json!({"arrows": "yes"})]
-    {
+    for bad in [
+        json!({"style": "sphere"}),
+        json!({"body": "No such body"}),
+        json!({"body": 3}),
+        json!({"texture": "glossy"}),
+        json!({"arrows": "yes"}),
+        json!({"faces": "no"}),
+    ] {
         assert!(s.execute("view.navigator", &bad).is_err(), "{bad}");
     }
     let spec = crate::find_command("view.navigator").unwrap();

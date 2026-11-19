@@ -1181,6 +1181,12 @@ preference_settings! {
     navigator_texture: NavigatorTexture = NavigatorTexture::default(), PAGE_NAVIGATION;
     /// The custom view gizmo has the orbit and roll arrows around it.
     navigator_arrows: bool = true, PAGE_NAVIGATION;
+    /// The custom view gizmo has the world axes beside it, as the view cube had; the Custom View
+    /// Navigator panel and Preferences › Navigation both carry it.
+    navigator_axes: bool = true, PAGE_NAVIGATION => check_tr("view_gizmo.axes");
+    /// The custom view gizmo names its six main faces on it, whatever shape it is; the Custom
+    /// View Navigator panel and Preferences › Navigation both carry it.
+    navigator_faces: bool = true, PAGE_NAVIGATION => check_tr("view_gizmo.faces");
     /// The custom view gizmo has the Home button beside it.
     navigator_home: bool = true, PAGE_NAVIGATION;
     /// Show the radial ring and enable hold/flick gestures for viewport context menus.
@@ -11031,6 +11037,26 @@ mod tests {
         h.call("ui.click", json!({"x":axis.x,"y":axis.y}));
         assert!(h.app.cam.back().dist(Vec3::Y) < 1e-6, "original axes retain click-again reversal");
         assert_eq!(h.app.session.doc.to_json(), design);
+    }
+
+    #[test]
+    fn the_navigators_axes_and_face_names_follow_their_preferences_rows() {
+        let mut h = crate::scenario::Harness::new();
+        assert!(h.app.preferences.navigator_axes && h.app.preferences.navigator_faces, "both are on by default");
+        h.call("ui.prefs", json!({"open": "Navigation"}));
+        // A reveal stops at the row it is given, and the faces row sits below the axes row, still
+        // clipped off the page body: reveal each row before its click.
+        super::reveal_preference(&mut h, "prefs:navigator_axes");
+        let axes = crate::scenario::rect_of("prefs:navigator_axes").expect("the axes check box").center();
+        h.call("ui.click", json!({"x": axes.x, "y": axes.y}));
+        assert!(!h.app.preferences.navigator_axes, "the axes row turns its setting off");
+        super::reveal_preference(&mut h, "prefs:navigator_faces");
+        let names = crate::scenario::rect_of("prefs:navigator_faces").expect("the face-names check box").center();
+        h.call("ui.click", json!({"x": names.x, "y": names.y}));
+        assert!(!h.app.preferences.navigator_faces, "the face-names row turns its setting off");
+        h.call("ui.prefs", json!({"button": "cancel"}));
+        assert!(h.app.preferences.navigator_axes, "a change that was not applied is not saved (#9730)");
+        assert!(h.app.preferences.navigator_faces, "cancel restores this one too");
     }
 
     /// The texts one frame paints.

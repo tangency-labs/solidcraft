@@ -1,0 +1,112 @@
+{
+  "en": {
+    "ui.left": "Left",
+    "view_gizmo.axes": "Coordinate axes",
+    "view_gizmo.faces": "Face names"
+  },
+  "ar": {
+    "ui.left": "يسار",
+    "view_gizmo.axes": "محاور الإحداثيات",
+    "view_gizmo.faces": "أسماء الأوجه"
+  },
+  "cs": {
+    "ui.left": "Vlevo",
+    "view_gizmo.axes": "Souřadnicové osy",
+    "view_gizmo.faces": "Názvy stěn"
+  },
+  "da": {
+    "ui.left": "Venstre",
+    "view_gizmo.axes": "Koordinatakser",
+    "view_gizmo.faces": "Fladenavne"
+  },
+  "de": {
+    "ui.left": "Links",
+    "view_gizmo.axes": "Koordinatenachsen",
+    "view_gizmo.faces": "Flächennamen"
+  },
+  "es": {
+    "ui.left": "Izquierda",
+    "view_gizmo.axes": "Ejes de coordenadas",
+    "view_gizmo.faces": "Nombres de las caras"
+  },
+  "fi": {
+    "ui.left": "Vasen",
+    "view_gizmo.axes": "Koordinaattiakselit",
+    "view_gizmo.faces": "Pintojen nimet"
+  },
+  "fr": {
+    "ui.left": "Gauche",
+    "view_gizmo.axes": "Axes de coordonnées",
+    "view_gizmo.faces": "Noms des faces"
+  },
+  "he": {
+    "ui.left": "שמאל",
+    "view_gizmo.axes": "צירי קואורדינטות",
+    "view_gizmo.faces": "שמות הפאות"
+  },
+  "it": {
+    "ui.left": "Sinistra",
+    "view_gizmo.axes": "Assi di coordinate",
+    "view_gizmo.faces": "Nomi delle facce"
+  },
+  "ja": {
+    "ui.left": "左",
+    "view_gizmo.axes": "座標軸",
+    "view_gizmo.faces": "面の名前"
+  },
+  "ko": {
+    "ui.left": "왼쪽",
+    "view_gizmo.axes": "좌표축",
+    "view_gizmo.faces": "면 이름"
+  },
+  "nl": {
+    "ui.left": "Links",
+    "view_gizmo.axes": "Coördinatenassen",
+    "view_gizmo.faces": "Namen van de vlakken"
+  },
+  "pl": {
+    "ui.left": "Lewa",
+    "view_gizmo.axes": "Osie współrzędnych",
+    "view_gizmo.faces": "Nazwy ścian"
+  },
+  "pt-BR": {
+    "ui.left": "Esquerda",
+    "view_gizmo.axes": "Eixos de coordenadas",
+    "view_gizmo.faces": "Nomes das faces"
+  },
+  "ru": {
+    "ui.left": "Слева",
+    "view_gizmo.axes": "Оси координат",
+    "view_gizmo.faces": "Названия граней"
+  },
+  "sv": {
+    "ui.left": "Vänster",
+    "view_gizmo.axes": "Koordinataxlar",
+    "view_gizmo.faces": "Ytnamn"
+  },
+  "tr": {
+    "ui.left": "Sol",
+    "view_gizmo.axes": "Koordinat eksenleri",
+    "view_gizmo.faces": "Yüz adları"
+  },
+  "uk": {
+    "ui.left": "Ліворуч",
+    "view_gizmo.axes": "Осі координат",
+    "view_gizmo.faces": "Назви граней"
+  },
+  "vi": {
+    "ui.left": "Trái",
+    "view_gizmo.axes": "Trục tọa độ",
+    "view_gizmo.faces": "Tên các mặt"
+  },
+  "zh": {
+    "ui.left": "左",
+    "view_gizmo.axes": "坐标轴",
+    "view_gizmo.faces": "面的名称"
+  },
+  "zh-TW": {
+    "ui.left": "左",
+    "view_gizmo.axes": "座標軸",
+    "view_gizmo.faces": "面的名稱"
+  }
+}
