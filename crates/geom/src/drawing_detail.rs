@@ -172,6 +172,12 @@ impl Detail {
             window_size.x >= MIN_WINDOW_MM && window_size.y >= MIN_WINDOW_MM && window.on_paper(),
             "a detail is at least 0.01 mm across and lies within 5000 mm of the sheet's origin",
         )?;
+        // Far from the plane's origin the map's offset can round the centre away from the paper
+        // position asked for. Half the smallest window keeps that position inside any window.
+        require(
+            (window.centre() - position_mm).len() <= MIN_WINDOW_MM / 2.0,
+            "a detail's centre lands at its paper position; the boundary is too far from the view's origin for this scale",
+        )?;
         Ok(Detail { boundary, outline, window, frame })
     }
 

@@ -244,6 +244,22 @@ fn minimum_window_size_is_independent_of_paper_position() {
     }
 }
 
+/// A boundary 1e12 from the plane's origin at 1000:1: the map's offset is about 1e15, where
+/// doubles are 0.125 apart, so the centre cannot land on the paper position asked for.
+#[test]
+fn a_detail_whose_centre_rounds_off_its_paper_position_is_refused() {
+    let far = Vec2::new(1e12, 0.0);
+    let parent = ViewFrame::new(NamedView::Front.basis(), scale(1.0, 100000.0), far, Vec2::new(500.0, 100.0)).unwrap();
+    let boundary = Boundary::circle(far, 1e-5).unwrap();
+    let refused = Detail::new(&parent, boundary, scale(1000.0, 1.0), Vec2::new(0.03125, 0.0)).unwrap_err();
+    assert!(refused.0.contains("lands at its paper position"), "{refused:?}");
+    // The same boundary at the plane's origin lands where it is put.
+    let parent = ViewFrame::new(NamedView::Front.basis(), scale(1.0, 100000.0), Vec2::ZERO, Vec2::new(500.0, 100.0)).unwrap();
+    let boundary = Boundary::circle(Vec2::ZERO, 1e-5).unwrap();
+    let detail = Detail::new(&parent, boundary, scale(1000.0, 1.0), Vec2::new(0.03125, 0.0)).unwrap();
+    assert!(near(detail.window().centre(), Vec2::new(0.03125, 0.0)));
+}
+
 #[test]
 fn a_rectangle_whose_parent_outline_collapses_is_refused() {
     let x = 1e12_f64.next_down();
