@@ -2222,12 +2222,10 @@ fn surface_facing(m: &Mesh, t: &[u32; 3], flat: Vec3) -> Vec3 {
     sum.normalized().unwrap_or(flat)
 }
 
-/// Points along an edge at which [`exact_silhouette`] asks which way its faces face.
-const OUTLINE_SAMPLES: u32 = 32;
-
 /// The outline of a solid seen along the sketch normal, from its exact faces and edges: the
 /// stretches of its edges between a face that faces the sketch and one that does not (and of an
-/// open sheet's border where its face faces the sketch), each projected exactly as an edge link
+/// open sheet's border where its face faces the sketch; the kernel's
+/// [`Query::outline_stretches`](solidcore_ops::query::Query::outline_stretches)), each projected exactly as an edge link
 /// projects it ([`exact_edges`], or the kernel's projection of the stretch), and the silhouettes of
 /// its curved faces as the drawing's hidden lines trace them ([`hlr::silhouettes`]). A face faces
 /// the sketch where its normal out of the material leans toward it; edge-on is away, as in
@@ -2249,124 +2247,32 @@ fn exact_silhouette(body: &crate::ModelBody, plane: &Plane) -> Option<Vec<LinkGe
     let n = plane.normal();
     let size = body.body.size().max(1e-9);
     let q = solidcore_ops::query::Query::new(rec);
-    // Which way face `f` faces at `p`, a point of one of its edges running along `along`. A face
-    // seen edge-on there (two faces meeting tangentially where the view grazes them both: a round
-    // edge's end seen along the round) faces as it does just inside, a hair from the edge.
-    let step = size * 1e-5;
-    let front = |f: usize, p: Vec3, along: Vec3, accept: f64| -> Option<bool> {
-        let normal = q.face_normal(f, q.face_uv(f, p, accept)?)?;
-        let s = normal.dot(n);
-        if s.abs() > 1e-6 {
-            return Some(s > 1e-9);
-        }
-        let Some(across) = normal.cross(along).normalized() else { return Some(false) };
-        // A step to the side off the face finds its edge again (its parameters held to the
-        // face's), where it is edge-on; the step onto it finds how it leans. The side that leans
-        // more is the face's.
-        let near = accept + 0.1 * step;
-        let lean = |side: f64| q.face_uv(f, p + across * (step * side), near).and_then(|uv| q.face_normal(f, uv)).map(|v| v.dot(n));
-        let s = [lean(1.0), lean(-1.0)].into_iter().flatten().fold(s, |a, b| if b.abs() > a.abs() { b } else { a });
-        Some(s > 1e-9)
-    };
     let mut edges = Vec::new();
-    for (e, edge) in rec.edges.iter().enumerate() {
-        let uses = q.edge_faces(e);
-        let mut faces = uses.clone();
-        faces.sort_unstable();
-        faces.dedup();
-        // A wire bounds no face; a seam (one face on both sides, a round wall's) is no outline.
-        if faces.is_empty() || (faces.len() == 1 && uses.len() > 1) {
-            continue;
-        }
-        let accept = 4.0 * edge.tolerance.max(1e-7) + size * 1e-7;
-        // On the outline at `p`: one face facing the sketch and the other not, or an open
-        // sheet's border facing it. Faces on one surface (a seam) face alike.
-        let outline = |(p, along): (Vec3, Vec3)| -> Option<bool> {
-            match faces.as_slice() {
-                [f] => front(*f, p, along, accept),
-                [f, g] => Some(front(*f, p, along, accept)? != front(*g, p, along, accept)?),
-                _ => None,
-            }
+    // The stretches of the edges on the outline, each projected as an edge link projects it.
+    for stretch in q.outline_stretches(n, size)? {
+        let e = stretch.edge;
+        let edge = rec.edges.get(e)?;
+        let geom = if stretch.whole {
+            let mut g = exact_edges(body, plane, &[e]).ok()?.pop().flatten()?;
+            at_vertices(body, plane, e, &mut g);
+            g
+        } else {
+            let pieces = solidcore_ops::spline_projection::project_curve(
+                edge.parameters(),
+                stretch.range,
+                true,
+                stretch.ends,
+                plane,
+                body.body.planar_edges_tolerance(),
+                &mut 262_144,
+            )?;
+            let classified =
+                solidcore_ops::conic_projection::classify_pieces(plane, &pieces, solidcraft_sketch::MAX_SPLINE_POINTS, solidcraft_sketch::MAX_COORD)
+                    .ok()?;
+            projection_links(classified).ok()?
         };
-        let [t0, t1] = q.edge_interval(e)?;
-        let at = |t: f64| q.edge_at(e, t).map(|(p, _)| p);
-        let state = |t: f64| q.edge_at(e, t).and_then(outline);
-        let ts: Vec<f64> = (0..=OUTLINE_SAMPLES).map(|k| t0 + (t1 - t0) * f64::from(k) / f64::from(OUTLINE_SAMPLES)).collect();
-        let states: Vec<bool> = ts.iter().map(|t| state(*t)).collect::<Option<_>>()?;
-        if !states.iter().any(|s| *s) {
-            continue;
-        }
-        // Where the outline starts or stops between two samples: bisected on the edge.
-        let cross = |lo: f64, hi: f64, lo_state: bool| -> Option<f64> {
-            let (mut lo, mut hi) = (lo, hi);
-            for _ in 0..60 {
-                let mid = 0.5 * (lo + hi);
-                if state(mid)? == lo_state {
-                    lo = mid;
-                } else {
-                    hi = mid;
-                }
-            }
-            Some(0.5 * (lo + hi))
-        };
-        let mut ranges: Vec<[f64; 2]> = Vec::new();
-        let mut start = states.first().copied().unwrap_or(false).then_some(t0);
-        for (k, w) in states.windows(2).enumerate() {
-            let (Some(&a), Some(&b), Some(&ta), Some(&tb)) = (w.first(), w.get(1), ts.get(k), ts.get(k + 1)) else { continue };
-            if a == b {
-                continue;
-            }
-            let t = cross(ta, tb, a)?;
-            match start.take() {
-                Some(s) => ranges.push([s, t]),
-                None => start = Some(t),
-            }
-        }
-        if let Some(s) = start {
-            ranges.push([s, t1]);
-        }
-        // An outline that starts or stops within a hair of a vertex does so at it: there the
-        // faces meet a third, and which way they face is settled only to rounding.
-        let hair = (t1 - t0) * 1e-5;
-        for r in &mut ranges {
-            if r[0] - t0 <= hair {
-                r[0] = t0;
-            }
-            if t1 - r[1] <= hair {
-                r[1] = t1;
-            }
-        }
-        for [a, b] in ranges {
-            let geom = if a == t0 && b == t1 {
-                let mut g = exact_edges(body, plane, &[e]).ok()?.pop().flatten()?;
-                at_vertices(body, plane, e, &mut g);
-                g
-            } else {
-                let (pa, pb) = (at(a)?, at(b)?);
-                if pa.dist(pb) <= size * 1e-9 && (b - a) < (t1 - t0) * 1e-6 {
-                    continue;
-                }
-                let pieces = solidcore_ops::spline_projection::project_curve(
-                    edge.parameters(),
-                    [a, b],
-                    true,
-                    [pa, pb],
-                    plane,
-                    body.body.planar_edges_tolerance(),
-                    &mut 262_144,
-                )?;
-                let classified = solidcore_ops::conic_projection::classify_pieces(
-                    plane,
-                    &pieces,
-                    solidcraft_sketch::MAX_SPLINE_POINTS,
-                    solidcraft_sketch::MAX_COORD,
-                )
-                .ok()?;
-                projection_links(classified).ok()?
-            };
-            // An edge seen end on is a point of the outline, not a curve of it.
-            edges.extend(round_conics(geom.into_iter().filter(|g| !matches!(g, LinkGeom::Point(_))).flat_map(conic_spans).map(flat_conic).collect()));
-        }
+        // An edge seen end on is a point of the outline, not a curve of it.
+        edges.extend(round_conics(geom.into_iter().filter(|g| !matches!(g, LinkGeom::Point(_))).flat_map(conic_spans).map(flat_conic).collect()));
     }
     // The silhouettes of the curved faces, traced where they lie inside them.
     let opts = hlr::Options { trim_samples: 1024, threads: 1, ..hlr::Options::default() };

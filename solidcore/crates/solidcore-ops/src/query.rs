@@ -9,6 +9,19 @@ use solidcore_convert::{record_vec3, vec3};
 use solidcore_record::brep::{Brep, Loop, Shell};
 use solidcore_record::Vec3;
 
+/// One stretch of an edge on a body's outline ([`Query::outline_stretches`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OutlineStretch {
+    /// Into the record's edges.
+    pub edge: usize,
+    /// Its interval on the edge's parameter.
+    pub range: [f64; 2],
+    /// Its points at the ends of `range`.
+    pub ends: [Vec3; 2],
+    /// It is the whole edge.
+    pub whole: bool,
+}
+
 /// A record ready for exact queries (see the module docs).
 #[derive(Debug)]
 pub struct Query<'a> {
@@ -110,6 +123,26 @@ impl<'a> Query<'a> {
         self.inner
             .edge_points(e, sag)
             .map(|v| v.into_iter().map(|(t, p)| (t, record_vec3(p))).collect())
+    }
+
+    /// The stretches of the body's edges on its outline seen along `view`, for a body of size
+    /// `size` (mm): edge by edge, each with its interval on the edge's parameter, its points at
+    /// the ends and whether it is the whole edge ([`solidcore::eval::outline::stretches`], where
+    /// what is outline is set out). Each edge's own tolerance is taken from the record. `None`
+    /// when an edge or face cannot be read, or an edge bounds more than two faces.
+    #[must_use]
+    pub fn outline_stretches(&self, view: Vec3, size: f64) -> Option<Vec<OutlineStretch>> {
+        let tolerance: Vec<f64> = self.record.edges.iter().map(|e| e.tolerance).collect();
+        solidcore::eval::outline::stretches(&self.inner, vec3(view), size, &tolerance).map(|v| {
+            v.into_iter()
+                .map(|s| OutlineStretch {
+                    edge: s.edge,
+                    range: s.range,
+                    ends: s.ends.map(record_vec3),
+                    whole: s.whole,
+                })
+                .collect()
+        })
     }
 
     /// How far `p` is from edge `e`.

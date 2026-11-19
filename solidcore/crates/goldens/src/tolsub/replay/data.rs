@@ -7,6 +7,10 @@
 //! (each row's exact line from that build), and each moved entry is classified against its
 //! certified enclosure in `tests/mass_knot_line_moved_rows_are_classified.rs`. The
 //! substitutions are unchanged.
+//!
+//! `stubs4-delete-edge-bottle-e8-r0.1`'s main hash is of #18918's run: its near-knot rail
+//! trim (WR-664) moves a rail's cut onto the rail's nearby knot, which moves the row apart
+//! from the tolerances; its substitutions are unchanged.
 
 use super::Row;
 
@@ -104,7 +108,7 @@ pub(super) static DATA: &[Row] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-bottle-e8-r0.1",
-        0x54ec49aee16198c0,
+        0x260c25b115a91473,
         1,
         &[
             (0, false, 25, 0x3ef71d7309f3641b, 0x3ee942308b035f45),
