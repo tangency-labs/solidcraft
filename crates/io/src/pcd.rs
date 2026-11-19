@@ -53,7 +53,7 @@ enum Num {
 
 impl Num {
     fn of(kind: &str, size: usize) -> Option<Num> {
-        Some(match (kind, size) {
+        Some(match (kind.to_ascii_uppercase().as_str(), size) {
             ("I", 1) => Num::I8,
             ("U", 1) => Num::U8,
             ("I", 2) => Num::I16,
@@ -215,14 +215,19 @@ fn lzf(data: &[u8], size: usize) -> Result<Vec<u8>> {
     if size > data.len().saturating_mul(LZF_GROWTH) {
         return Err(damaged());
     }
-    let mut out: Vec<u8> = Vec::with_capacity(size);
+    // Reserved once and never outgrown: a copy that would pass `size` is refused before it is made.
+    let mut out: Vec<u8> = Vec::new();
+    out.try_reserve_exact(size).map_err(|_| invalid("not enough memory to expand the compressed points"))?;
     let mut pos = 0;
     while let Some(control) = data.get(pos).map(|c| usize::from(*c)) {
         pos += 1;
         if control < 32 {
-            let run = control + 1;
-            out.extend_from_slice(data.get(pos..pos + run).ok_or_else(damaged)?);
-            pos += run;
+            let run = data.get(pos..pos + control + 1).ok_or_else(damaged)?;
+            if run.len() > size - out.len() {
+                return Err(damaged());
+            }
+            out.extend_from_slice(run);
+            pos += run.len();
         } else {
             let mut len = (control >> 5) + 2;
             if len == 9 {
@@ -232,6 +237,9 @@ fn lzf(data: &[u8], size: usize) -> Result<Vec<u8>> {
             let back = ((control & 0x1f) << 8) + usize::from(*data.get(pos).ok_or_else(damaged)?) + 1;
             pos += 1;
             let from = out.len().checked_sub(back).ok_or_else(damaged)?;
+            if len > size - out.len() {
+                return Err(damaged());
+            }
             if back >= len {
                 out.extend_from_within(from..from + len);
             } else {
@@ -242,9 +250,6 @@ fn lzf(data: &[u8], size: usize) -> Result<Vec<u8>> {
                 }
             }
         }
-        if out.len() > size {
-            return Err(damaged());
-        }
     }
     if out.len() != size {
         return Err(damaged());
@@ -252,12 +257,18 @@ fn lzf(data: &[u8], size: usize) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-/// A value written as text.
-fn parsed<T: std::str::FromStr>(token: &[u8]) -> Result<T> {
-    std::str::from_utf8(token)
-        .ok()
-        .and_then(|s| s.parse::<T>().ok())
-        .ok_or_else(|| invalid(format!("`{}` is not a number", short(&String::from_utf8_lossy(token)))))
+/// A value written as text. "Not a number" is read however a C library prints it (`nan`,
+/// `-nan(ind)`, `1.#QNAN`).
+fn number(token: &[u8]) -> Result<f64> {
+    let text = std::str::from_utf8(token).unwrap_or_default();
+    if let Ok(v) = text.parse::<f64>() {
+        return Ok(v);
+    }
+    let bare = text.trim_start_matches(['+', '-']).to_ascii_lowercase();
+    if bare.starts_with("nan") || bare.starts_with("1.#") {
+        return Ok(f64::NAN);
+    }
+    Err(invalid(format!("`{}` is not a number", short(&String::from_utf8_lossy(token)))))
 }
 
 /// Where the points' values are.
@@ -285,18 +296,31 @@ impl Source<'_> {
     fn value(&self, f: &Field, r: usize) -> Result<f64> {
         let b = self.at(f, r)?;
         match self {
-            Source::Text(_) => parsed::<f64>(b),
+            Source::Text(_) => number(b),
             _ => f.num.read(b).ok_or_else(early),
         }
     }
     /// The 32 bits of a packed colour: alpha, red, green and blue, blue lowest. A binary file
-    /// holds the bits themselves whatever the field's type; text holds the number the bits are
-    /// as that type, so a float is turned back into its bits.
+    /// holds the bits themselves whatever the field's type. Text holds the bits as a whole number.
+    /// In a float field it holds either that whole number (as the Point Cloud Library writes it)
+    /// or a float whose own bits are the colour; a whole number from 1 up is taken as the bits,
+    /// since no usual colour is such a float. A colour that is not a number has lost its bits and
+    /// is white.
     fn color(&self, f: &Field, r: usize) -> Result<[u8; 3]> {
         let b = self.at(f, r)?;
         let bits = match self {
-            Source::Text(_) if f.num == Num::F32 => parsed::<f32>(b)?.to_bits(),
-            Source::Text(_) => parsed::<f64>(b)? as i64 as u32,
+            Source::Text(_) => {
+                let v = number(b)?;
+                let whole = v >= 1.0 && v <= f64::from(u32::MAX) && v.fract() == 0.0;
+                if v.is_nan() {
+                    return Ok([255; 3]);
+                } else if f.num == Num::F32 && !whole {
+                    // Read as a float at once, not through a double: its bits are the colour.
+                    std::str::from_utf8(b).ok().and_then(|s| s.parse::<f32>().ok()).map_or(0, f32::to_bits)
+                } else {
+                    v as i64 as u32
+                }
+            }
             _ => b.get(..4).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes).ok_or_else(early)?,
         };
         Ok([(bits >> 16) as u8, (bits >> 8) as u8, bits as u8])
@@ -344,7 +368,15 @@ pub(crate) fn read_pcd_cloud(bytes: &[u8], max_points: usize) -> Result<PlyCloud
                 return Err(invalid(format!("the compressed points do not expand to the file's {} points", h.points)));
             }
             // The expanded block is held in memory as a file's bytes are: under the same limit.
-            crate::limits::check(crate::limits::Kind::PointCloud, expanded as u64).map_err(IoError::Invalid)?;
+            let limit = crate::limits::Kind::PointCloud.limit();
+            if expanded as u64 > limit {
+                return Err(invalid(format!(
+                    "the compressed points expand to {}, over the {} limit for point cloud files. {}",
+                    crate::limits::describe(expanded as u64),
+                    crate::limits::describe(limit),
+                    crate::limits::how_to_raise()
+                )));
+            }
             Source::Columns { b: lzf(data, expanded)?, points: h.points as usize }
         }
     };
@@ -373,7 +405,7 @@ pub(crate) fn read_pcd_cloud(bytes: &[u8], max_points: usize) -> Result<PlyCloud
         if !kept {
             continue;
         }
-        // Every check above leaves fewer points than the file has bytes.
+        // The checks above leave no more points than a slice can hold.
         let r = r as usize;
         out.positions.push([source.value(x, r)?, source.value(y, r)?, source.value(z, r)?]);
         if let (Some(colors), Some(f)) = (out.colors.as_mut(), rgb) {
@@ -544,13 +576,29 @@ mod tests {
         // A second `z` is a column of its own, as any other field is.
         assert_eq!(r.complex.columns.len(), 1);
         assert_eq!(&*r.complex.column("Z", On::Point).unwrap().values.0, &[0.0, -5.0]);
-        // As text the float is written as a number: the colour is that number's bits.
+    }
+
+    #[test]
+    fn colours_and_missing_numbers_written_as_text_are_read() {
+        let colour = |kind: &str, text: &str| {
+            let file = format!("FIELDS x y z rgb\nSIZE 4 4 4 4\nTYPE F F F {kind}\nPOINTS 1\nDATA ascii\n1 2 3 {text}\n");
+            read_pcd_cloud(file.as_bytes(), 10).unwrap().colors.unwrap()[0]
+        };
+        // A float field holds a float whose bits are the colour, or the bits as a whole number.
         let red = f32::from_bits(0x00FF_0000);
-        let text = format!("FIELDS x y z rgb\nSIZE 4 4 4 4\nTYPE F F F F\nPOINTS 1\nDATA ascii\n1 2 3 {red:e}\n");
-        assert_eq!(read_pcd_cloud(text.as_bytes(), 10).unwrap().colors, Some(vec![[255, 0, 0]]));
-        // A signed whole number holds the same bits.
-        let text = "FIELDS x y z rgba\nSIZE 4 4 4 4\nTYPE F F F I\nPOINTS 1\nDATA ascii\n1 2 3 -16711936\n";
-        assert_eq!(read_pcd_cloud(text.as_bytes(), 10).unwrap().colors, Some(vec![[0, 255, 0]]));
+        assert_eq!(colour("F", &format!("{red:e}")), [255, 0, 0]);
+        assert_eq!(colour("F", "4294901760"), [255, 0, 0]);
+        assert_eq!(colour("F", "65280"), [0, 255, 0]);
+        assert_eq!(colour("F", "0"), [0, 0, 0]);
+        // An opaque colour can be "not a number" as a float: its bits are lost.
+        assert_eq!(colour("F", "nan"), [255, 255, 255]);
+        // A whole-numbered field holds the bits, signed or not.
+        assert_eq!(colour("U", "255"), [0, 0, 255]);
+        assert_eq!(colour("I", "-16711936"), [0, 255, 0]);
+        // A missing position as a C library on Windows prints it, and type letters in lower case.
+        let file = "FIELDS x y z\nSIZE 4 4 4\nTYPE f f f\nPOINTS 2\nDATA ascii\n1 2 -nan(ind)\n4 5 1.#QNAN\n";
+        let r = read_pcd_cloud(file.as_bytes(), 10).unwrap();
+        assert!(r.positions.iter().all(|p| p[0].is_finite() && p[2].is_nan()), "{:?}", r.positions);
     }
 
     #[test]
@@ -562,8 +610,8 @@ mod tests {
             b.extend(data);
             b
         };
-        let compressed = |stored: u32, expanded: u32, block: &[u8]| {
-            let mut b = b"FIELDS x y z\nSIZE 4 4 4\nTYPE F F F\nPOINTS 1\nDATA binary_compressed\n".to_vec();
+        let compressed = |points: u32, stored: u32, expanded: u32, block: &[u8]| {
+            let mut b = format!("FIELDS x y z\nSIZE 4 4 4\nTYPE F F F\nPOINTS {points}\nDATA binary_compressed\n").into_bytes();
             b.extend(stored.to_le_bytes());
             b.extend(expanded.to_le_bytes());
             b.extend(block);
@@ -603,12 +651,14 @@ mod tests {
             binary("1", &[0; 11]),
             binary("2", &[0; 12]),
             binary("18446744073709551615", &[0; 12]),
-            compressed(0, 12, &[]),
-            compressed(4, 12, &[0, 0]),
-            compressed(2, 13, &[0, 0]),
-            compressed(2, 12, &[0, 0]),
-            compressed(3, 12, &[0x20, 0, 0]),
-            compressed(4, 12, &[0xE0, 0xFF, 0, 0]),
+            compressed(1, 0, 12, &[]),
+            compressed(1, 4, 12, &[0, 0]),
+            compressed(1, 2, 13, &[0, 0]),
+            compressed(1, 2, 12, &[0, 0]),
+            compressed(1, 3, 12, &[0x20, 0, 0]),
+            compressed(1, 4, 12, &[0xE0, 0xFF, 0, 0]),
+            // Two bytes said to expand to two gigabytes: over the limit, and more than LZF can make.
+            compressed(178_956_970, 2, 2_147_483_640, &[0, 0]),
             b"FIELDS x y z\nSIZE 4 4 4\nTYPE F F F\nPOINTS 1\nDATA binary_compressed\n\x01\x00\x00".to_vec(),
         ];
         for b in &cases {
