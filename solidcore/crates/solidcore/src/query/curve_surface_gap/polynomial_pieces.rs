@@ -1,5 +1,11 @@
-//! A proved bound on `sup |C(t) − S(W(t))|`, a curve's same-parameter gap to the surface's
-//! image of a UV curve on it, from the exact polynomials of each piece (not upstream).
+//! A proved bound on how far the surface's image of a UV curve runs from a curve
+//! (`sup_s dist(S(W(s)), C)`), from the exact polynomials of each piece (not upstream).
+//!
+//! For any map `φ` of the UV curve's parameter to the curve's, `dist(S(W(s)), C) ≤
+//! |C(φ(s)) − S(W(s))|`; [`trim_distance_bound`] bounds the right side with `φ` affine on
+//! each piece (`C(φ(t))` is then a polynomial in `t` on a piece inside one knot span of
+//! `C`, its Taylor coefficients those of `C` scaled by powers of `φ'`), and below `C` stands
+//! for `C ∘ φ`.
 //!
 //! On a piece `[a, b]` inside one knot span of the curve `C` and one of the UV curve `W`, and
 //! with `W`'s values over the piece inside one knot cell of the surface's net `S`, all three
@@ -30,16 +36,16 @@
 //! boundary) the end cell's polynomial is continued, plus the slack `NetSurface::partials`
 //! adds there, as [`super::piece`] does. A piece whose values reach into more than
 //! [`MAX_CELLS`] cells, run too far past the net, or whose `D` is not proved positive is
-//! bounded by [`super::piece`] instead.
+//! bisected.
 //!
 //! | Rust                      | Upstream |
 //! |---------------------------|----------|
-//! | [`trim_gap_bound`]        | none     |
+//! | [`trim_distance_bound`]   | none     |
 //!
 //! Deviations: none (new code). The bisection is bounded by `MAX_PIECES` and `MAX_DEPTH`
 //! of [`super`], and polls cancellation at every piece.
 
-use super::{piece, NetSurface, CLOSE_ABSOLUTE, CLOSE_RELATIVE, MAX_DEPTH, MAX_PIECES, OP};
+use super::{NetSurface, CLOSE_ABSOLUTE, CLOSE_RELATIVE, MAX_DEPTH, MAX_PIECES, OP};
 use crate::blend::fillet_section::certificate::NurbsCurve;
 use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_section::series::V3;
@@ -51,7 +57,7 @@ use crate::surface::surface::Surface;
 use crate::Result;
 
 /// The most knot cells of the surface one piece's UV values may reach into before the piece
-/// is bisected instead (or bounded by [`super::piece`]).
+/// is bisected instead.
 const MAX_CELLS: usize = 4;
 
 /// A polynomial in `δ`, its coefficients enclosed (`c[j]` of `δ^j`).
@@ -387,16 +393,53 @@ fn polynomial_piece(
     s: &NetSurface,
     a: f64,
     b: f64,
+    map: Option<Reparam>,
 ) -> Option<(f64, f64)> {
     let m = 0.5 * (a + b);
     let (da, db) = (Ivl::from(a) - Ivl::from(m), Ivl::from(b) - Ivl::from(m));
     let rho = da.mag().max(db.mag());
-    let within = |n: &NurbsCurve| {
-        let k = span(&n.u, n.p, n.n, m);
+    let within_at = |n: &NurbsCurve, x: f64| {
+        let k = span(&n.u, n.p, n.n, x);
         (knot(&n.u, k as isize) <= a && b <= knot(&n.u, k as isize + 1)).then_some(k)
     };
-    let (kc, kw) = (within(cn)?, within(wn)?);
-    let c = curve_taylor(cn, kc, m);
+    let within = |n: &NurbsCurve| within_at(n, m);
+    // (a piece a ulp wide, its middle rounded onto its end `b`, is its span's from `a`)
+    let kw = match map {
+        None => within(wn)?,
+        Some(_) => within(wn).or_else(|| within_at(wn, a))?,
+    };
+    let c = match map {
+        None => curve_taylor(cn, within(cn)?, m),
+        Some(r) => {
+            // `C(φ(t))`, `φ(t) = at + slope δ`: the span's Taylor coefficients about `at`
+            // times `slope^j`, for `φ`'s values over the piece (enclosed) inside one knot
+            // span of `C` and inside `[lo, hi]`
+            let slope = Ivl::from(r.slope);
+            // (a constant map's one value exactly: the sum would round it out a ulp)
+            let image = if r.slope == 0.0 {
+                Ivl::from(r.at)
+            } else {
+                (Ivl::from(r.at) + slope * da).hull(Ivl::from(r.at) + slope * db)
+            };
+            let k = span(&cn.u, cn.p, cn.n, r.at);
+            let inside = knot(&cn.u, k as isize) <= image.lo
+                && image.hi <= knot(&cn.u, k as isize + 1)
+                && r.lo <= image.lo
+                && image.hi <= r.hi;
+            if !(inside && image.is_finite()) {
+                return None;
+            }
+            let mut c = curve_taylor(cn, k, r.at);
+            for comp in &mut c {
+                let mut power = Ivl::from(1.0);
+                for coefficient in comp.iter_mut() {
+                    *coefficient = *coefficient * power;
+                    power = power * slope;
+                }
+            }
+            c
+        }
+    };
     let w = curve_taylor(wn, kw, m);
     let [wu, wv, _, ww] = &w;
     let uv_over = |x: Ivl| (at(wu, x) / at(ww, x), at(wv, x) / at(ww, x));
@@ -483,33 +526,231 @@ fn polynomial_piece(
     (bound.is_finite() && bound >= 0.0).then_some((ends, bound))
 }
 
-/// A proved upper bound on `sup |C(t) − S(W(t))|` over `t` in `range`, as
-/// [`super::curve_uv_gap_bound`], for a caller that holds the gap to a tolerance `accept`:
-/// a piece whose bound is at most `accept` is closed at once, so a result at most `accept`
-/// says only that (the gap is no larger), and above it the result is bounded as tightly as
-/// [`super::curve_uv_gap_bound`] bounds it. The first pieces end at every knot of `C` and
-/// of `W` inside `range`; each piece is bounded from its exact polynomials
-/// ([`polynomial_piece`], the module's bound) where it can be, else by [`super::piece`]
-/// (whose second-order bound needs no corner inside a piece: every knot is a first cut).
+/// The NURBS data of `c` exactly as stored: its homogeneous control points `(x w, y w, z w, w)`
+/// taken as they are (a non-rational point's weight `1`, a 2D point's `z` `0`), so the curve
+/// enclosed is the curve evaluated. (`NurbsCurve::of` rebuilds them from the Euclidean
+/// points, which rounds: a stored `x w = 3` with `w = 10` comes back as `3.0000000000000004`.)
+/// `None` when the degree, knots and points do not agree or a weight is not positive.
+fn stored_nurbs(c: &BSplineCurve) -> Option<NurbsCurve> {
+    use crate::nurbs::math::{NOW, NOZ};
+    let (knots, mult) = c.knots(None).ok()?;
+    let p = c.degree().ok()?;
+    let cps = c.control_points().ok()?;
+    let n = cps.len();
+    let mut u = Vec::new();
+    for (&x, &m) in knots.iter().zip(&mult) {
+        for _ in 0..m {
+            u.push(x);
+        }
+    }
+    if p < 1 || u.len() != n + p + 1 {
+        return None;
+    }
+    let mut pw = Vec::new();
+    for cp in cps {
+        let w = if cp.w == NOW { 1.0 } else { cp.w };
+        let z = if cp.z == NOZ { 0.0 } else { cp.z };
+        if !(w > 0.0 && w.is_finite()) {
+            return None;
+        }
+        pw.extend_from_slice(&[cp.x, cp.y, z, w]);
+    }
+    Some(NurbsCurve { p, n, u, pw })
+}
+
+/// An affine map `φ(t) = at + slope (t − m)` of a piece's parameter `t` (`m` its middle) to
+/// the curve's, whose values over the piece lie in `[lo, hi]` ([`polynomial_piece`]).
+#[derive(Clone, Copy, Debug)]
+struct Reparam {
+    /// `φ(m)`.
+    at: f64,
+    /// `φ'`.
+    slope: f64,
+    /// The least value `φ` may take.
+    lo: f64,
+    /// The greatest value `φ` may take.
+    hi: f64,
+}
+
+/// `C(t)` and `C'(t)` of `cn` (plain floating point, not enclosed: a guess only), or `None`
+/// where a weight vanishes.
+fn point_and_tangent(cn: &NurbsCurve, t: f64) -> Option<([f64; 3], [f64; 3])> {
+    let k = span(&cn.u, cn.p, cn.n, t);
+    let ders = ders_basis(&cn.u, k, cn.p, t, 1);
+    let mut a = [[0.0_f64; 4]; 2];
+    for (d, row) in a.iter_mut().enumerate() {
+        for i in 0..=cn.p {
+            let n = ders.get(d).and_then(|r| r.get(i)).copied()?;
+            let base = 4 * (k + i).checked_sub(cn.p)?;
+            for (comp, x) in row.iter_mut().enumerate() {
+                *x += n * cn.pw.get(base + comp).copied()?;
+            }
+        }
+    }
+    let [a0, a1] = a;
+    if !(a0[3] != 0.0 && a0[3].is_finite()) {
+        return None;
+    }
+    let point = [a0[0] / a0[3], a0[1] / a0[3], a0[2] / a0[3]];
+    let tangent = [
+        (a1[0] - point[0] * a1[3]) / a0[3],
+        (a1[1] - point[1] * a1[3]) / a0[3],
+        (a1[2] - point[2] * a1[3]) / a0[3],
+    ];
+    Some((point, tangent))
+}
+
+/// The parameter in `[lo, hi]` of a point of `cn` near `p`: Gauss–Newton steps from
+/// `guess`, clamped, each halved until it brings the point nearer (so a step across a
+/// corner, where `C'` is short, cannot carry it to another part of the curve). A guess
+/// only, which [`trim_distance_bound`] needs no property of.
+fn nearest_parameter(cn: &NurbsCurve, p: [f64; 3], guess: f64, [lo, hi]: [f64; 2]) -> f64 {
+    let squared = |c: [f64; 3]| {
+        let r = [c[0] - p[0], c[1] - p[1], c[2] - p[2]];
+        r[0] * r[0] + r[1] * r[1] + r[2] * r[2]
+    };
+    let mut t = guess.max(lo).min(hi);
+    let Some((mut c, mut d)) = point_and_tangent(cn, t) else {
+        return t;
+    };
+    let mut now = squared(c);
+    for _ in 0..NEWTON_STEPS {
+        let dd = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+        if !(dd > 0.0 && dd.is_finite()) {
+            break;
+        }
+        let r = [c[0] - p[0], c[1] - p[1], c[2] - p[2]];
+        let mut step = (d[0] * r[0] + d[1] * r[1] + d[2] * r[2]) / dd;
+        let mut moved = None;
+        for _ in 0..HALVINGS {
+            let next = (t - step).max(lo).min(hi);
+            if !next.is_finite() || next == t {
+                break;
+            }
+            if let Some((cn_, dn)) = point_and_tangent(cn, next) {
+                let there = squared(cn_);
+                if there < now {
+                    moved = Some((next, cn_, dn, there));
+                    break;
+                }
+            }
+            step *= 0.5;
+        }
+        let Some((next, cn_, dn, there)) = moved else {
+            break;
+        };
+        (t, c, d, now) = (next, cn_, dn, there);
+    }
+    t
+}
+
+/// The Gauss–Newton steps [`nearest_parameter`] takes at most.
+const NEWTON_STEPS: usize = 16;
+
+/// The halvings [`nearest_parameter`] tries a step with before it stops.
+const HALVINGS: usize = 30;
+
+/// The parameter `s` in `(a, b)` whose nearest point on `C` is at the knot `x`, as near as
+/// a few false-position steps find it (`nearest(s, guess)` gives that point's parameter;
+/// `ta < x < tb` are those of `a` and `b`, either way round): a guess only, so a piece cut
+/// there has its two lines meet at a point of `C` near `S(W(s))` rather than at the
+/// straight line's `s`, where the two parameterisations may be far apart. `None` where
+/// `nearest` cannot evaluate the trim.
+fn knot_preimage(
+    nearest: &dyn Fn(f64, f64) -> Result<Option<f64>>,
+    (a, ta): (f64, f64),
+    (b, tb): (f64, f64),
+    x: f64,
+) -> Result<Option<f64>> {
+    let (mut lo, mut flo) = (a, ta - x);
+    let (mut hi, mut fhi) = (b, tb - x);
+    let mut s = a + (x - ta) / (tb - ta) * (b - a);
+    let mut side = 0_i8;
+    for _ in 0..PREIMAGE_STEPS {
+        if !(lo < s && s < hi) {
+            s = 0.5 * (lo + hi);
+        }
+        let guess = ta + (s - a) / (b - a) * (tb - ta);
+        let Some(t) = nearest(s, guess)? else {
+            return Ok(None);
+        };
+        let f = t - x;
+        if f == 0.0 {
+            break;
+        }
+        // (Illinois: the end kept twice running has its value halved)
+        if (f < 0.0) == (flo < 0.0) {
+            (lo, flo) = (s, f);
+            if side == -1 {
+                fhi *= 0.5;
+            }
+            side = -1;
+        } else {
+            (hi, fhi) = (s, f);
+            if side == 1 {
+                flo *= 0.5;
+            }
+            side = 1;
+        }
+        let next = lo - flo * (hi - lo) / (fhi - flo);
+        if !next.is_finite() || next == s {
+            break;
+        }
+        s = next;
+    }
+    Ok(Some(s))
+}
+
+/// The false-position steps [`knot_preimage`] takes at most.
+const PREIMAGE_STEPS: usize = 24;
+
+/// A proved upper bound on `sup_s dist(S(W(s)), C([edge]))` over `s` in `trim`: how far the
+/// surface's image of the UV curve `W` (over its own interval) runs from the curve `C` over
+/// `edge`, whatever the two parameterisations.
 ///
-/// `None` when the gap is not enclosed (as [`super::curve_uv_gap_bound`]: a surface that is
-/// not a NURBS net, or whose net is not parameterised as the surface, an empty, unordered
-/// or not finite `range` or one past either curve's domain, a `W` that cannot be evaluated,
-/// or a piece neither bound holds).
+/// For any map `φ` of `trim` into `edge`, `dist(S(W(s)), C([edge])) ≤ |C(φ(s)) − S(W(s))|`,
+/// so each piece is bounded as [`polynomial_piece`] bounds it with `C` read through an
+/// affine `φ` ([`Reparam`]): the line between the parameters of the points of `C` nearest
+/// the piece's two ends (found by [`nearest_parameter`] from the normalised map
+/// `edge.lo + (s − trim.lo) / |trim| |edge|`, or from the parent piece's line), pulled in by
+/// a few ulps about its middle so its enclosed values stay inside one knot span of `C` and
+/// inside `edge`. The first pieces end at every knot of `W` inside `trim`; a piece whose line
+/// runs across a knot of `C` is cut where the nearest point is at that knot
+/// ([`knot_preimage`]). The bound holds for whatever `φ` the guesses give; they decide only
+/// how tight it is.
+///
+/// A piece whose bound is at most `accept` is closed at once, so a result at most `accept`
+/// says only that (the distance is no larger). Any other piece is closed once its bound is
+/// within `CLOSE_RELATIVE` of its end values (or within `floor` or `CLOSE_ABSOLUTE` of
+/// them), and is bisected until then: above `accept` the result stands that close above
+/// the largest `|C(φ(s)) − S(W(s))|` at the pieces' ends, each the distance to a point of
+/// `C` the guesses found near.
+///
+/// `None` when the distance is not enclosed: a surface that is not a NURBS net or whose net
+/// is not parameterised as the surface, an empty, unordered or not finite range or one past
+/// either curve's domain, a `W` that cannot be evaluated, or a piece that does not close
+/// before `MAX_DEPTH` or `MAX_PIECES` (its bound may stand far above the distance: a loose
+/// bound is not returned). On the last piece the budget allows, the constant maps at its
+/// two ends are tried beside the line.
 ///
 /// # Errors
 ///
 /// The kernel's unported and cancelled statuses.
-pub(crate) fn trim_gap_bound(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn trim_distance_bound(
     k: &Kernel,
     curve: &BSplineCurve,
+    edge: [f64; 2],
     uv: &BSplineCurve,
+    trim: [f64; 2],
     surface: &Surface,
-    [lo, hi]: [f64; 2],
     floor: f64,
     accept: f64,
 ) -> Result<Option<f64>> {
-    if !(lo.is_finite() && hi.is_finite() && lo < hi && floor.is_finite() && floor >= 0.0) {
+    k.check_cancelled(OP)?;
+    let ([elo, ehi], [lo, hi]) = (edge, trim);
+    let ordered = |a: f64, b: f64| a.is_finite() && b.is_finite() && a < b;
+    if !(ordered(elo, ehi) && ordered(lo, hi) && floor.is_finite() && floor >= 0.0) {
         return Ok(None);
     }
     let accept = if accept >= 0.0 { accept } else { 0.0 };
@@ -520,26 +761,48 @@ pub(crate) fn trim_gap_bound(
         };
         probe.push(Point2::new(w.x, w.y));
     }
-    let surface = surface.clone_for_evaluation()?;
+    // (a copy with a cache slot and NURB cells of its own: a NURB or cache the bound makes
+    // stays on the copy, so measuring leaves the B-rep's surface as it was)
+    let mut surface = surface.clone_for_evaluation()?;
+    surface.detach_for_edit();
     let Some(net) = NetSurface::of(k, &surface, &probe)? else {
         return Ok(None);
     };
-    let (Ok(cn), Ok(wn)) = (NurbsCurve::of(curve), NurbsCurve::of(uv)) else {
+    let (Some(cn), Some(wn)) = (stored_nurbs(curve), stored_nurbs(uv)) else {
         return Ok(None);
     };
-    let within = |n: &NurbsCurve| match (n.u.get(n.p), n.u.get(n.n)) {
-        (Some(&d0), Some(&d1)) => d0 <= lo && hi <= d1,
+    let within = |n: &NurbsCurve, a: f64, b: f64| match (n.u.get(n.p), n.u.get(n.n)) {
+        (Some(&d0), Some(&d1)) => d0 <= a && b <= d1,
         _ => false,
     };
-    if !(within(&cn) && within(&wn)) {
+    if !(within(&cn, elo, ehi) && within(&wn, lo, hi)) {
         return Ok(None);
     }
-    let mut cuts: Vec<f64> =
-        cn.u.iter()
-            .chain(&wn.u)
-            .copied()
-            .filter(|&x| lo < x && x < hi)
-            .collect();
+    // the parameter on `C` of the point nearest `S(W(s))`, from `guess`
+    let nearest = |s: f64, guess: f64| -> Result<Option<f64>> {
+        let Ok(w) = uv.evaluate_point(s) else {
+            return Ok(None);
+        };
+        let Ok(p) = surface.evaluate_point(k, Point2::new(w.x, w.y)) else {
+            return Ok(None);
+        };
+        Ok(Some(nearest_parameter(&cn, [p.x, p.y, p.z], guess, edge)))
+    };
+    // `|C(t) − S(W(s))|` in plain floating point (`None` where either is not evaluated)
+    let gap_at = |s: f64, t: f64| -> Result<Option<f64>> {
+        let Ok(w) = uv.evaluate_point(s) else {
+            return Ok(None);
+        };
+        let Ok(p) = surface.evaluate_point(k, Point2::new(w.x, w.y)) else {
+            return Ok(None);
+        };
+        Ok(point_and_tangent(&cn, t).map(|(c, _)| {
+            let d = [c[0] - p.x, c[1] - p.y, c[2] - p.z];
+            crate::geom::vector3d::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2])
+        }))
+    };
+    let normalised = |s: f64| elo + (s - lo) / (hi - lo) * (ehi - elo);
+    let mut cuts: Vec<f64> = wn.u.iter().copied().filter(|&x| lo < x && x < hi).collect();
     cuts.sort_by(f64::total_cmp);
     cuts.dedup();
     if cuts.len() + 1 > MAX_PIECES {
@@ -548,40 +811,102 @@ pub(crate) fn trim_gap_bound(
     let mut ends = vec![lo];
     ends.extend(cuts);
     ends.push(hi);
-    let mut stack: Vec<(f64, f64, u32)> = ends
+    let mut images = Vec::with_capacity(ends.len());
+    for &s in &ends {
+        let Some(t) = nearest(s, normalised(s))? else {
+            return Ok(None);
+        };
+        images.push(t);
+    }
+    let mut stack: Vec<(f64, f64, f64, f64, u32)> = ends
         .windows(2)
-        .filter_map(|w| match w {
-            [a, b] => Some((*a, *b, 0)),
+        .zip(images.windows(2))
+        .filter_map(|pair| match pair {
+            ([a, b], [ta, tb]) => Some((*a, *b, *ta, *tb, 0)),
             _ => None,
         })
         .rev()
         .collect();
     let mut worst = 0.0_f64;
     let mut made = stack.len();
-    while let Some((a, b, depth)) = stack.pop() {
+    while let Some((a, b, ta, tb, depth)) = stack.pop() {
         k.check_cancelled(OP)?;
         let mid = 0.5 * (a + b);
         let last = depth >= MAX_DEPTH || !(a < mid && mid < b) || made + 2 > MAX_PIECES;
-        let bounded = match polynomial_piece(&cn, &wn, &net, a, b) {
-            Some((ends, bound)) => Some((ends, bound, (Ivl::from(bound) - Ivl::from(ends)).hi)),
-            None => match piece(&cn, &wn, &net, a, b) {
-                Ok(Some((ends, term))) => {
-                    Some((ends, (Ivl::from(ends) + Ivl::from(term)).hi, term))
-                }
-                Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                Ok(None) | Err(_) => None,
-            },
+        // a knot of `C` strictly inside the line's values: cut the piece there
+        let (t0, t1) = (ta.min(tb), ta.max(tb));
+        let knot_inside = cn.u.iter().copied().find(|&x| t0 < x && x < t1);
+        if let (Some(x), false) = (knot_inside, last) {
+            let Some(s) = knot_preimage(&nearest, (a, ta), (b, tb), x)? else {
+                return Ok(None);
+            };
+            if a < s && s < b {
+                // (a cut at a knot is a first cut, as `W`'s knots are: it does not deepen
+                // the piece, and each side has fewer of `C`'s knots inside)
+                made += 1;
+                stack.push((s, b, x, tb, depth));
+                stack.push((a, s, ta, x, depth));
+                continue;
+            }
+        }
+        // the line through `(a, ta)` and `(b, tb)`, flattened about its middle by a few ulps
+        // so its enclosed values stay inside `[ta, tb]` (a knot span of `C`, inside `edge`)
+        let at = 0.5 * (ta + tb);
+        let half = 0.5 * (tb - ta).abs() - MARGIN_ULPS * f64::EPSILON * at.abs();
+        let slope = if half > 0.0 {
+            (half / (0.5 * (b - a))).copysign(tb - ta)
+        } else {
+            0.0
         };
+        let map = Reparam {
+            at,
+            slope,
+            lo: elo,
+            hi: ehi,
+        };
+        // (a piece a ulp wide the line is refused for, its values a few ulps across a knot
+        // of `C`, is read through the constant map at the line's middle: any map holds)
+        // the line, and on a piece the budget would end (or a piece a ulp wide, whose line
+        // may be refused for values a few ulps across a knot of `C`) the constant maps at
+        // its ends too, the smallest bound kept: any map holds, and where the nearest points
+        // jump along `C` over a short piece a constant one is the tighter
+        let mut maps = vec![map];
+        if last {
+            for t in [ta, tb] {
+                maps.push(Reparam {
+                    at: t,
+                    slope: 0.0,
+                    ..map
+                });
+            }
+        }
+        let bounded = maps
+            .into_iter()
+            .filter_map(|r| polynomial_piece(&cn, &wn, &net, a, b, Some(r)))
+            .min_by(|x, y| x.1.total_cmp(&y.1));
         match bounded {
-            // (a NaN from either bound would vanish in `f64::max`: refuse it instead)
-            Some((_, bound, _)) if !bound.is_finite() => return Ok(None),
-            Some((ends, bound, term)) => {
+            Some((_, bound)) if !bound.is_finite() => return Ok(None),
+            Some((ends, bound)) => {
+                // (the piece's end values, enclosed by a cell alone or taken at 0 on a knot
+                // line, with the gaps at its ends in plain floating point: the scale only
+                // decides when a piece is closed, never the bound)
+                let mut scale = ends;
+                for (s, t) in [(a, ta), (b, tb)] {
+                    if let Some(g) = gap_at(s, t)? {
+                        scale = scale.max(g);
+                    }
+                }
+                let term = (Ivl::from(bound) - Ivl::from(scale)).hi;
                 if bound <= accept
-                    || last
-                    || term <= (CLOSE_RELATIVE * ends).max(floor).max(CLOSE_ABSOLUTE)
+                    || term <= (CLOSE_RELATIVE * scale).max(floor).max(CLOSE_ABSOLUTE)
                 {
                     worst = worst.max(bound);
                     continue;
+                }
+                // (a piece the budget ends before its bound closes on its end values says
+                // nothing of the distance but that it is below a loose bound: not enclosed)
+                if last {
+                    return Ok(None);
                 }
             }
             None => {
@@ -590,12 +915,20 @@ pub(crate) fn trim_gap_bound(
                 }
             }
         }
+        let Some(tm) = nearest(mid, 0.5 * (ta + tb))? else {
+            return Ok(None);
+        };
         made += 2;
-        stack.push((mid, b, depth + 1));
-        stack.push((a, mid, depth + 1));
+        stack.push((mid, b, tm, tb, depth + 1));
+        stack.push((a, mid, ta, tm, depth + 1));
     }
     Ok(worst.is_finite().then_some(worst))
 }
+
+/// The ulps (of its middle) [`trim_distance_bound`] pulls each end of a piece's line in by,
+/// so the line's values, enclosed with outward rounding, stay inside the knot span (and the
+/// edge interval) its two ends bound.
+const MARGIN_ULPS: f64 = 16.0;
 
 #[cfg(test)]
 mod tests {
@@ -607,6 +940,19 @@ mod tests {
     };
     use crate::nurbs::crv_basic::Curve as NurbCurve;
     use crate::nurbs::math::{CPoint, NOW};
+
+    /// [`trim_distance_bound`] of `uv`'s image over `trim` from `curve` over `[0, 1]`.
+    fn distance(
+        k: &Kernel,
+        curve: &BSplineCurve,
+        uv: &BSplineCurve,
+        s: &Surface,
+        trim: [f64; 2],
+        floor: f64,
+        accept: f64,
+    ) -> Result<Option<f64>> {
+        trim_distance_bound(k, curve, [0.0, 1.0], uv, trim, s, floor, accept)
+    }
 
     /// The plane z = 0 over x, y in 0..1 as a bilinear net cut at 0.5 both ways (four cells).
     fn plane() -> Surface {
@@ -666,36 +1012,43 @@ mod tests {
         let lift = 3.0e-7;
         let curve = half_circle(0.45, 0.45, lift);
         let uv = half_circle(0.45, 0.45, 0.0);
-        let g = trim_gap_bound(&k, &curve, &uv, &s, [0.0, 1.0], 1e-12, 0.0)
+        let g = distance(&k, &curve, &uv, &s, [0.0, 1.0], 1e-12, 0.0)
             .unwrap()
             .unwrap();
         assert!(g >= lift && g <= lift * (1.0 + 1.1e-3), "{g:e}");
-        let g = trim_gap_bound(&k, &curve, &uv, &s, [0.0, 1.0], 1e-12, 1e-5)
+        let g = distance(&k, &curve, &uv, &s, [0.0, 1.0], 1e-12, 1e-5)
             .unwrap()
             .unwrap();
         assert!(g >= lift && g <= 1e-5, "{g:e}");
     }
 
-    /// A UV arc moved 1e-4 along u from its curve's shadow: the gap is 1e-4 everywhere, and
-    /// held to a tolerance of 1e-5 the bound still says it is over (at least 1e-4).
+    /// A UV arc moved 1e-4 along u from its curve's shadow (the half circle of radius `r`):
+    /// the image's distance from the arc at angle `θ` is `|sqrt(r² + 2 r d cos θ + d²) − r|`,
+    /// at most `d` = 1e-4 (at both ends), and held to a tolerance of 1e-5 the bound still
+    /// says it is over (at least 1e-4).
     #[test]
     fn a_trim_off_its_edge_is_bounded_above_the_tolerance() {
         let k = Kernel::default();
         let s = plane();
         let curve = half_circle(0.45, 0.45, 0.0);
         let uv = half_circle(0.45 + 1e-4, 0.45, 0.0);
-        let g = trim_gap_bound(&k, &curve, &uv, &s, [0.0, 1.0], 1e-9, 1e-5)
+        let g = distance(&k, &curve, &uv, &s, [0.0, 1.0], 1e-9, 1e-5)
             .unwrap()
             .unwrap();
         assert!(
             (1e-4 * (1.0 - 1e-12)..=1e-4 * (1.0 + 1e-3)).contains(&g),
             "{g:e}"
         );
-        // (over a part of the interval as well)
-        let g = trim_gap_bound(&k, &curve, &uv, &s, [0.3, 0.7], 1e-9, 1e-5)
+        // (over a part of the trim as well: there the image of each end is off the arc
+        // radially, by `| |P − c| − r |` in closed form, and the bound is at least that)
+        let g = distance(&k, &curve, &uv, &s, [0.3, 0.7], 1e-9, 1e-5)
             .unwrap()
             .unwrap();
-        assert!(g >= 1e-4 * (1.0 - 1e-12), "{g:e}");
+        for t in [0.3, 0.7] {
+            let p = uv.evaluate_point(t).unwrap();
+            let off = ((p.x - 0.45).hypot(p.y - 0.45) - 0.4).abs();
+            assert!(g >= off * (1.0 - 1e-9) && off > 1e-6, "{t}: {g:e} {off:e}");
+        }
     }
 
     /// A line `lift` above its UV line across the four cells' knot lines (each cell bounded
@@ -724,7 +1077,7 @@ mod tests {
             let curve = line([0.2, 0.3, lift, 1.0], [0.9, 0.8, lift, w1]);
             let uv = line([0.2, 0.3, 0.0, 1.0], [0.9, 0.8, 0.0, w1]);
             for accept in [0.0, 1e-5] {
-                let g = trim_gap_bound(&k, &curve, &uv, &s, [0.0, 1.0], 1e-12, accept)
+                let g = distance(&k, &curve, &uv, &s, [0.0, 1.0], 1e-12, accept)
                     .unwrap()
                     .unwrap();
                 let most = (lift * (1.0 + 1.1e-3)).max(accept);
@@ -760,13 +1113,14 @@ mod tests {
         Surface::from(net)
     }
 
-    /// A UV line running `over` past the ramp's end u = 1 (a seam's parameters a little out,
-    /// within what `NetSurface::of`'s probe takes for the surface's own point), its curve on
-    /// the ramp's plane continued (`(u, 0.5, u)`): the continued polynomial puts the gap at
-    /// 0, but the surface is read at the clamped point `(1, 0.5, 1)`, so the true gap at the
-    /// far end is `over * sqrt(2)` (the distance from `(1 + over, 0.5, 1 + over)` to
-    /// `(1, 0.5, 1)`, in closed form). The bound holds it only with
-    /// `NetSurface::partials`' slack. A line far past the end is refused.
+    /// A UV line running a little past the ramp's end u = 1 (a seam's parameters a ulp-scale
+    /// out, within what `NetSurface::of`'s probe takes for the surface's own point), its
+    /// curve 1e-6 above the ramp's line `(u, 0.5, u)`: the continued end cell and
+    /// `NetSurface::partials`' slack enclose it, and the bound is at least the distance in
+    /// closed form: the trim's start `(0.5, 0.5, 0.5)` is nearest the edge's start
+    /// `(0.5, 0.5, 0.5 + 1e-6)` (its foot on the edge's line falls before the edge), `1e-6`
+    /// away, and every later point is within that (`1e-6 / sqrt(2)` from the line where
+    /// its foot is on the edge). A line far past the end is refused.
     #[test]
     fn a_trim_past_the_net_end_takes_the_slack() {
         let k = Kernel::default();
@@ -784,20 +1138,62 @@ mod tests {
             BSplineCurve::from_nurb(c, 3, false)
         };
         let end = 1.0 + 1e-10;
-        let truth = (end - 1.0) * std::f64::consts::SQRT_2;
-        let curve = line([0.5, 0.5, 0.5], [end, 0.5, end]);
+        let h = 1e-6;
+        let truth = h;
+        let curve = line([0.5, 0.5, 0.5 + h], [end, 0.5, end + h]);
         let uv = line([0.5, 0.5, 0.0], [end, 0.5, 0.0]);
         for accept in [0.0, 1e-5] {
-            let g = trim_gap_bound(&k, &curve, &uv, &s, [0.0, 1.0], 1e-14, accept)
+            let g = distance(&k, &curve, &uv, &s, [0.0, 1.0], 1e-14, accept)
                 .unwrap()
                 .unwrap();
-            assert!(g >= truth, "{accept:e}: {g:e} < {truth:e}");
+            assert!(g >= truth * (1.0 - 1e-9), "{accept:e}: {g:e} < {truth:e}");
+            assert!(g <= truth * 1.01 || g <= accept, "{accept:e}: {g:e}");
         }
         let far = 1.1;
         let curve = line([0.5, 0.5, 0.5], [far, 0.5, far]);
         let uv = line([0.5, 0.5, 0.0], [far, 0.5, 0.0]);
-        let g = trim_gap_bound(&k, &curve, &uv, &s, [0.0, 1.0], 1e-9, 1e-5).unwrap();
+        let g = distance(&k, &curve, &uv, &s, [0.0, 1.0], 1e-9, 1e-5).unwrap();
         assert_eq!(g, None);
+    }
+
+    /// A trim with another parameterisation than its edge (the same arc, its parameter run
+    /// as `t²`, here a quadratic B-spline UV curve along the arc's line): far apart at equal
+    /// parameters, on the edge geometrically. The same-parameter gap is large, the distance
+    /// is bounded at the height it sits above the plane.
+    #[test]
+    fn a_trim_with_its_own_parameterisation_is_bounded_by_its_distance() {
+        let k = Kernel::default();
+        let s = plane();
+        let lift = 1e-7;
+        let at = |x: f64, y: f64, z: f64| CPoint::new(x, y, z, NOW);
+        let c = NurbCurve::new(
+            vec![at(0.2, 0.3, lift), at(0.9, 0.8, lift)],
+            1,
+            vec![0.0, 0.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let curve = BSplineCurve::from_nurb(c, 3, false);
+        // W(s) = A + (B − A) s² (a quadratic Bezier with the middle point at A)
+        let w = NurbCurve::new(
+            vec![at(0.2, 0.3, 0.0), at(0.2, 0.3, 0.0), at(0.9, 0.8, 0.0)],
+            2,
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let uv = BSplineCurve::from_nurb(w, 3, false);
+        let same = {
+            let p = uv.evaluate_point(0.5).unwrap();
+            let c = curve.evaluate_point(0.5).unwrap();
+            (p.x - c.x).hypot(p.y - c.y)
+        };
+        assert!(same > 0.1, "{same:e}");
+        for accept in [0.0, 1e-5] {
+            let g = distance(&k, &curve, &uv, &s, [0.0, 1.0], 1e-12, accept)
+                .unwrap()
+                .unwrap();
+            let most = (lift * (1.0 + 1.1e-3)).max(accept);
+            assert!(g >= lift && g <= most, "{accept:e}: {g:e}");
+        }
     }
 
     /// `shifted` re-centres a polynomial: `(x + 2)^2 = x^2 + 4 x + 4`.
@@ -809,7 +1205,8 @@ mod tests {
     }
 
     /// A curve with a corner inside the interval (a spike to 1e-3 between two points on the
-    /// plane) is cut there and seen, whatever the tolerance it is held to.
+    /// plane, the trim the straight line under it) is seen, whatever the tolerance it is
+    /// held to.
     #[test]
     fn a_spike_between_knots_is_seen() {
         let k = Kernel::default();
@@ -826,10 +1223,14 @@ mod tests {
         let spiked = BSplineCurve::from_nurb(c, 3, false);
         let w = NurbCurve::new(vec![at(0.0), at(1.0)], 1, vec![0.0, 0.0, 1.0, 1.0]).unwrap();
         let uv = BSplineCurve::from_nurb(w, 3, false);
-        let g = trim_gap_bound(&k, &spiked, &uv, &s, [0.0, 1.0], 1e-9, 1e-5)
+        let g = distance(&k, &spiked, &uv, &s, [0.0, 1.0], 1e-9, 1e-5)
             .unwrap()
             .unwrap();
-        assert!(g >= 1e-3, "{g:e}");
+        // the trim's point under the spike is off both of the spike's legs by `L h /
+        // sqrt(L² + h²)` (`L` the leg's run on the plane, `h` its rise), in closed form
+        let run = (0.5_f64 / 64.0).hypot(0.3 / 64.0);
+        let off = run * 1e-3 / run.hypot(1e-3);
+        assert!(g >= off * (1.0 - 1e-9), "{g:e} {off:e}");
     }
 
     /// An empty, reversed, not finite or out-of-domain range encloses nothing; a cancelled
@@ -841,8 +1242,10 @@ mod tests {
         let curve = half_circle(0.45, 0.45, 0.0);
         let uv = half_circle(0.45, 0.45, 0.0);
         for range in [[0.5, 0.5], [0.7, 0.3], [f64::NAN, 1.0], [0.0, 1.5]] {
-            let g = trim_gap_bound(&k, &curve, &uv, &s, range, 1e-9, 1e-5).unwrap();
+            let g = distance(&k, &curve, &uv, &s, range, 1e-9, 1e-5).unwrap();
             assert_eq!(g, None, "{range:?}");
+            let g = trim_distance_bound(&k, &curve, range, &uv, [0.0, 1.0], &s, 1e-9, 1e-5);
+            assert_eq!(g.unwrap(), None, "edge {range:?}");
         }
         let token = crate::kernel::CancelToken::default();
         token.cancel();
@@ -850,7 +1253,7 @@ mod tests {
             cancel: Some(token),
             ..Kernel::default()
         };
-        let stopped = trim_gap_bound(&cancelled, &curve, &uv, &s, [0.0, 1.0], 1e-9, 1e-5);
+        let stopped = distance(&cancelled, &curve, &uv, &s, [0.0, 1.0], 1e-9, 1e-5);
         assert!(
             matches!(&stopped, Err(e) if e.is_cancelled()),
             "{stopped:?}"

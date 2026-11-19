@@ -102,8 +102,8 @@
 {"case":"box_unit_tol_negtiny_region","deferred":null,"error":null,"ints":{},"topology":null,"values":{"classify":[1001.0,100.0,0.0,-1.0,0.0,1e-12,1e+20,0.0,0.0,0.0,0.0,0.0,-1.0]}}
 {"case":"box_unit_vertex0_bnd","deferred":null,"error":null,"ints":{},"topology":null,"values":{"classify":[0.0,104.0,3.0,0.0,0.0,1e-6,1e+20,0.0,0.0,0.0,1.0,0.0,-1.0]}}
 {"case":"box_unit_vertex0_region","deferred":null,"error":null,"ints":{},"topology":null,"values":{"classify":[1001.0,100.0,0.0,-1.0,0.0,1e-6,1e+20,0.0,0.0,0.0,0.0,0.0,-1.0]}}
-{"case":"box_with_large_fillet_approx","deferred":null,"error":null,"ints":{},"topology":null,"values":{"steps":[0.0,-0.00001,-0.004360565399748202,-0.00001,10.004360565399748,10.004360565399612,10.004360565399748,0.0,0.0,0.0,0.0,10.0,10.0,10.0]}}
-{"case":"box_with_large_fillet_defaults","deferred":null,"error":null,"ints":{},"topology":null,"values":{"steps":[0.0,-0.00002,-0.004370565399748201,-0.00002,10.004370565399748,10.004370565399611,10.004370565399748]}}
+{"case":"box_with_large_fillet_approx","deferred":null,"error":null,"ints":{},"topology":null,"values":{"steps":[0.0,-0.00001,-0.002374395088828545,-0.00001,10.002374395088829,10.00237439508875,10.002374395088829,0.0,0.0,0.0,0.0,10.0,10.0,10.0]}}
+{"case":"box_with_large_fillet_defaults","deferred":null,"error":null,"ints":{},"topology":null,"values":{"steps":[0.0,-0.00002,-0.002384395088828545,-0.00002,10.002384395088828,10.00238439508875,10.002384395088828]}}
 {"case":"box_with_large_fillet_face_corner_bnd","deferred":null,"error":null,"ints":{},"topology":null,"values":{"classify":[0.0,104.0,3.0,6.0,0.0,1e-6,1e+20,0.0,0.0,0.0,1.0,0.0,-1.0]}}
 {"case":"box_with_large_fillet_face_corner_region","deferred":null,"error":null,"ints":{},"topology":null,"values":{"classify":[1001.0,100.0,0.0,-1.0,0.0,1e-6,1e+20,0.0,0.0,0.0,0.0,0.0,-1.0]}}
 {"case":"box_with_large_fillet_face_mid_bnd","deferred":null,"error":null,"ints":{},"topology":null,"values":{"classify":[0.0,102.0,1.0,0.0,0.0,1e-6,1e+20,0.0,5.0,5.0,1.0,0.0,-1.0]}}
@@ -112,11 +112,11 @@
 {"case":"box_with_large_fillet_face_mid_region","deferred":null,"error":null,"ints":{},"topology":null,"values":{"classify":[1001.0,100.0,0.0,-1.0,0.0,1e-6,1e+20,0.0,0.0,0.0,0.0,0.0,-1.0]}}
 {"case":"box_with_large_fillet_far_bnd","deferred":null,"error":null,"ints":{},"topology":null,"values":{"classify":[0.0,101.0,4.0,0.0,0.0,1e-6,1e+20,0.0,0.0,0.0,0.0,0.0,-1.0]}}
 {"case":"box_with_large_fillet_far_region","deferred":null,"error":null,"ints":{},"topology":null,"values":{"classify":[0.0,101.0,4.0,0.0,0.0,1e-6,1e+20,0.0,0.0,0.0,0.0,0.0,-1.0]}}
-{"case":"box_with_large_fillet_lock_then_query","deferred":null,"error":null,"ints":{},"topology":null,"values":{"steps":{"blocks":[[120.02610339239807,120.05250678479658,2130.4746616285656]],"n":30}}}
-{"case":"box_with_large_fillet_lock_tight_relock","deferred":null,"error":null,"ints":{},"topology":null,"values":{"steps":{"blocks":[[90.01740226159873,90.03504452319771,1380.3658074935736]],"n":25}}}
+{"case":"box_with_large_fillet_lock_then_query","deferred":null,"error":null,"ints":{},"topology":null,"values":{"steps":{"blocks":[[120.01418637053274,120.02867274106572,2130.2581690646784]],"n":30}}}
+{"case":"box_with_large_fillet_lock_tight_relock","deferred":null,"error":null,"ints":{},"topology":null,"values":{"steps":{"blocks":[[90.00945758035516,90.01915516071047,1380.1989691874585]],"n":25}}}
 {"case":"box_with_large_fillet_origin_bnd","deferred":null,"error":null,"ints":{},"topology":null,"values":{"classify":[0.0,104.0,3.0,0.0,0.0,1e-6,1e+20,0.0,0.0,0.0,1.0,0.0,-1.0]}}
 {"case":"box_with_large_fillet_origin_region","deferred":null,"error":null,"ints":{},"topology":null,"values":{"classify":[1001.0,100.0,0.0,-1.0,0.0,1e-6,1e+20,0.0,0.0,0.0,0.0,0.0,-1.0]}}
-{"case":"box_with_large_fillet_plain","deferred":null,"error":null,"ints":{},"topology":null,"values":{"steps":[0.0,-0.00001,-0.004360565399748202,-0.00001,10.004360565399748,10.004360565399612,10.004360565399748]}}
+{"case":"box_with_large_fillet_plain","deferred":null,"error":null,"ints":{},"topology":null,"values":{"steps":[0.0,-0.00001,-0.002374395088828545,-0.00001,10.002374395088829,10.00237439508875,10.002374395088829]}}
 {"case":"box_with_large_fillet_rebuilt_approx","deferred":null,"error":null,"ints":{},"topology":null,"values":{"steps":[0.0,-0.00001,-0.004360565399748202,-0.00001,10.004360565399748,10.004360565399612,10.004360565399748,0.0,0.0,0.0,0.0,10.0,10.0,10.0]}}
 {"case":"box_with_large_fillet_rebuilt_defaults","deferred":null,"error":null,"ints":{},"topology":null,"values":{"steps":[0.0,-0.00002,-0.004370565399748201,-0.00002,10.004370565399748,10.004370565399611,10.004370565399748]}}
 {"case":"box_with_large_fillet_rebuilt_lock_then_query","deferred":null,"error":null,"ints":{},"topology":null,"values":{"steps":{"blocks":[[120.02610339239807,120.05250678479658,2130.4746616285656]],"n":30}}}
@@ -125,7 +125,7 @@
 {"case":"box_with_large_fillet_rebuilt_tight_box","deferred":null,"error":null,"ints":{},"topology":null,"values":{"steps":[0.0,0.0,0.0,0.0,10.0,10.0,10.0]}}
 {"case":"box_with_large_fillet_rebuilt_tight_edges_faces","deferred":null,"error":null,"ints":{},"topology":null,"values":{"steps":[0.0,-0.00001,-0.004360565399748202,-0.00001,10.004360565399748,10.004360565399612,10.004360565399748,0.0,0.0,0.0,0.0,10.0,10.0,10.0]}}
 {"case":"box_with_large_fillet_tight_box","deferred":null,"error":null,"ints":{},"topology":null,"values":{"steps":[0.0,0.0,0.0,0.0,10.0,10.0,10.0]}}
-{"case":"box_with_large_fillet_tight_edges_faces","deferred":null,"error":null,"ints":{},"topology":null,"values":{"steps":[0.0,-0.00001,-0.004360565399748202,-0.00001,10.004360565399748,10.004360565399612,10.004360565399748,0.0,0.0,0.0,0.0,10.0,10.0,10.0]}}
+{"case":"box_with_large_fillet_tight_edges_faces","deferred":null,"error":null,"ints":{},"topology":null,"values":{"steps":[0.0,-0.00001,-0.002374395088828545,-0.00001,10.002374395088829,10.00237439508875,10.002374395088829,0.0,0.0,0.0,0.0,10.0,10.0,10.0]}}
 {"case":"box_with_large_fillet_vertex0_bnd","deferred":null,"error":null,"ints":{},"topology":null,"values":{"classify":[0.0,104.0,3.0,0.0,0.0,1e-6,1e+20,0.0,0.0,0.0,1.0,0.0,-1.0]}}
 {"case":"box_with_large_fillet_vertex0_region","deferred":null,"error":null,"ints":{},"topology":null,"values":{"classify":[1001.0,100.0,0.0,-1.0,0.0,1e-6,1e+20,0.0,0.0,0.0,0.0,0.0,-1.0]}}
 {"case":"box_with_large_fillet_vertex3_off_bnd","deferred":null,"error":null,"ints":{},"topology":null,"values":{"classify":[0.0,104.0,3.0,3.0,1.7320508040600478e-7,1e-6,1e+20,0.0,0.0,0.0,1.0,0.0,-1.0]}}
@@ -869,7 +869,7 @@
 {"case":"gen0580","deferred":null,"error":null,"ints":{},"topology":null,"values":{"p_du_dv":[7984.980132677203,29683.653286780936,0.0,-790.0702536715692,278.677957605694,907.4984110419389,-386.09260186014365,650.5102113316118,-77.1331706185465],"status":[0.0]}}
 {"case":"gen0581","deferred":null,"error":null,"ints":{},"topology":null,"values":{"p_du_dv":[780.2099673911093,-756.8255844728378,-847.4222406014853,525.3130568150716,554.2446007595458,-886.6971668218775,927.4375182902054,-198.8280199574191,-373.75112438352073],"status":[1007.0]}}
 {"case":"gen0582","deferred":null,"error":null,"ints":{},"topology":null,"values":{"p_du_dv":[459.55344634760127,-750.052437273034,935.0834831030859,-792.3904317239953,-285.5513178120175,281.4167462014391,-259.69685054802994,875.5294345604418,-989.2634636076069],"status":[1007.0]}}
-{"case":"gen0583","deferred":null,"error":null,"ints":{},"topology":null,"values":{"steps":{"blocks":[[210.03480452319738,210.07002904639543,5791.262293965909]],"n":50}}}
+{"case":"gen0583","deferred":null,"error":null,"ints":{},"topology":null,"values":{"steps":{"blocks":[[210.01891516071024,210.03825032142092,5790.68630457575]],"n":50}}}
 {"case":"gen0584","deferred":null,"error":null,"ints":{},"topology":null,"values":{"p_du_dv":[0.27485510114755024,0.9220771782386347,0.27244880389652476,-390.64125511220254,147.15801624182677,625.7637971342951,-734.1753933916484,35.27229767120798,-274.9889385359729],"status":[0.0]}}
 {"case":"gen0585","deferred":null,"error":null,"ints":{},"topology":null,"values":{"attributes":{"blocks":[[-1.9999999998489025e+20,2.0000000001510975e+20,-2.799999999886999e+21]],"n":24}}}
 {"case":"gen0586","deferred":null,"error":null,"ints":{},"topology":null,"values":{"p_du_dv":[1.5072542624388539,0.7911532570880058,0.13547105590820674,-849.6895811401942,-682.7476539461591,519.3132017764995,160.8216728263801,-787.2692227211613,-200.83069078481628],"status":[0.0]}}

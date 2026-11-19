@@ -5,6 +5,8 @@
 //! The tolerance-substitution replay (`tolsub::replay`, #18230) uses it to show
 //! that a golden row moved only through the tolerances a read set: with main's tolerance
 //! bits put back on the entities the read changed, the row is main's row bit for bit.
+//! The kept-trim cover's raises (tangency-labs/solidcraft#19295) are put back from each
+//! read's own record of them (`Brep::trim_cover_raises`) the same way.
 //!
 //! The seams are the readers the runners share ([`crate::own_reader`]), `corpus.parity`'s
 //! `read_breps` and `topology.brep_p10`'s `make_topology_from_data` cases. Each call is one
@@ -74,6 +76,9 @@ pub(crate) mod state {
             applied: usize,
             /// Of `applied`, those that held `main` already.
             already: usize,
+            /// The edge and vertex tolerances put back from the reads' kept-trim cover
+            /// records (`Brep::trim_cover_raises`), before `subs` apply.
+            undone: usize,
             failures: Vec<String>,
         },
     }
@@ -106,10 +111,32 @@ pub(crate) mod state {
                 reads,
                 applied,
                 already,
+                undone,
                 failures,
             }) => {
                 let read = *reads;
                 *reads += 1;
+                // (the kept-trim cover's raises, made after the healer, put back first:
+                // each entity must still hold the raised value)
+                let raises = b.trim_cover_raises().clone();
+                for (e, (before, after)) in raises.edges {
+                    match b.edge_mut(e) {
+                        Ok(r) if r.tolerance.to_bits() == after.to_bits() => {
+                            r.tolerance = before;
+                            *undone += 1;
+                        }
+                        _ => failures.push(format!("read {read}: {e:?} lost its cover raise")),
+                    }
+                }
+                for (v, (before, after)) in raises.vertices {
+                    match b.vertex_mut(v) {
+                        Ok(r) if r.tolerance.to_bits() == after.to_bits() => {
+                            r.tolerance = before;
+                            *undone += 1;
+                        }
+                        _ => failures.push(format!("read {read}: {v:?} lost its cover raise")),
+                    }
+                }
                 for s in subs.iter().filter(|s| s.read == read) {
                     let slot = if s.vertex {
                         let id = b

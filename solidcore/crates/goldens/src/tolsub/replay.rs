@@ -29,6 +29,14 @@
 //! the 19 `blend.fillet_executive_p3` bottle rows whose fillet that read reaches. The read's
 //! moved values and those fillets' results are classified in `solidcore`'s
 //! `tests/heal_edge_tolerance_covers_edge_face_gap.rs`.
+//!
+//! The kept-trim cover (tangency-labs/solidcraft#19295) raises, after the healer, the
+//! tolerance of an edge whose kept UV trim runs farther from it than its tolerance, to a
+//! proved bound on that distance, and records each raise it makes with the value before
+//! (`Brep::trim_cover_raises`). Every read of a replayed row first has those raises put
+//! back. [`TRIM_COVER`] lists the rows only the cover moved, each with main's row hash
+//! ([`record_main_hashes`] on main's goldens): with the raises put back (at least one) the
+//! row is main's row, and as is it is the committed golden line.
 
 use std::collections::BTreeMap;
 
@@ -43,6 +51,8 @@ use crate::UnitDiff;
 
 mod data;
 use data::DATA;
+mod trim_cover;
+use trim_cover::TRIM_COVER;
 
 /// Generated cases per unit, as `goldens` runs them (`main.rs` `DEFAULT_SEEDS`).
 const SEEDS: usize = 16;
@@ -128,6 +138,7 @@ fn replay(unit_id: &str) -> usize {
             reads: 0,
             applied: 0,
             already: 0,
+            undone: 0,
             failures: Vec::new(),
         }));
         let line = run(u.as_ref(), case);
@@ -159,6 +170,56 @@ fn replay(unit_id: &str) -> usize {
     n
 }
 
+/// Runs every row of `unit_id` in [`TRIM_COVER`] with the reads' kept-trim cover raises put
+/// back (at least one per row) and as is; returns the row count.
+fn replay_trim_cover(unit_id: &str) -> usize {
+    let u = unit(unit_id);
+    let all = cases(u.as_ref());
+    let golden = read(&default_dir(), unit_id).unwrap();
+    let mut failures = Vec::new();
+    let mut n = 0;
+    for &(_, name, main_hash) in TRIM_COVER.iter().filter(|r| r.0 == unit_id) {
+        n += 1;
+        assert!(
+            !DATA.iter().any(|r| r.0 == unit_id && r.1 == name),
+            "{unit_id} {name}: replayed with #18230's rows"
+        );
+        let case = all
+            .get(name)
+            .unwrap_or_else(|| panic!("{unit_id}: no case {name}"));
+        state::set(Some(Mode::Substitute {
+            subs: Vec::new(),
+            reads: 0,
+            applied: 0,
+            already: 0,
+            undone: 0,
+            failures: Vec::new(),
+        }));
+        let line = run(u.as_ref(), case);
+        let Some(Mode::Substitute {
+            reads,
+            undone,
+            failures: f,
+            ..
+        }) = state::take()
+        else {
+            panic!("mode lost");
+        };
+        if reads == 0 || undone == 0 || !f.is_empty() {
+            failures.push(format!("{name}: {reads} reads, {undone} put back, {f:?}"));
+        }
+        if hash(&line) != main_hash {
+            failures.push(format!("{name}: the row put back is not main's row"));
+        }
+        let line = run(u.as_ref(), case);
+        if golden.get(name) != Some(&line) {
+            failures.push(format!("{name}: the row is not the committed golden line"));
+        }
+    }
+    assert!(failures.is_empty(), "{unit_id}:\n{}", failures.join("\n"));
+    n
+}
+
 macro_rules! replay_tests {
     ($($test:ident: $unit:literal, $rows:literal;)*) => {$(
         #[test]
@@ -179,6 +240,17 @@ replay_tests! {
     edgeuse_p3_rows_move_only_through_the_read_tolerances: "topology.edgeuse_p3", 14;
     face_p3_rows_move_only_through_the_read_tolerances: "topology.face_p3", 48;
 }
+
+macro_rules! replay_trim_cover_tests {
+    ($($test:ident: $unit:literal, $rows:literal;)*) => {$(
+        #[test]
+        fn $test() {
+            assert_eq!(replay_trim_cover($unit), $rows);
+        }
+    )*};
+}
+
+replay_trim_cover_tests! {}
 
 /// Writes, per `unit<TAB>case` line of `$TOLSUB_CASES`, one JSON line to `$TOLSUB_OUT`:
 /// the row hash, the encoded row and every read's tolerances.
@@ -208,6 +280,29 @@ fn record() {
             "line": line, "reads": snaps,
         });
         let _ = writeln!(out, "{rec}");
+    }
+    std::fs::write(std::env::var("TOLSUB_OUT").unwrap(), out).unwrap();
+}
+
+/// Writes, per `unit<TAB>case` line of `$TOLSUB_CASES`, the line `unit<TAB>case<TAB>hash`
+/// to `$TOLSUB_OUT`: the hash of the case's committed golden line. Run before the moved
+/// rows are blessed, it gives main's row hashes (main's goldens are main's rows).
+#[test]
+#[ignore = "makes TRIM_COVER's hashes; run before blessing"]
+fn record_main_hashes() {
+    use std::fmt::Write as _;
+    let list = std::fs::read_to_string(std::env::var("TOLSUB_CASES").unwrap()).unwrap();
+    let mut goldens = BTreeMap::new();
+    let mut out = String::new();
+    for l in list.lines() {
+        let (id, name) = l.split_once('\t').unwrap();
+        let golden = goldens
+            .entry(id.to_string())
+            .or_insert_with(|| read(&default_dir(), id).unwrap());
+        let line = golden
+            .get(name)
+            .unwrap_or_else(|| panic!("{id}: no golden {name}"));
+        let _ = writeln!(out, "{id}\t{name}\t{:#018x}", hash(line));
     }
     std::fs::write(std::env::var("TOLSUB_OUT").unwrap(), out).unwrap();
 }
