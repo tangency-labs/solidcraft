@@ -1902,6 +1902,70 @@ fn body_volume(st: &solidcraft_doc::ModelState) -> f64 {
     st.bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).sum()
 }
 
+/// What an import found wrong is told where it is (`document.inspect`'s `defects`, the Browser's
+/// marks): a part whose shell lacks a face on its body, a part that could not be read on
+/// the component that would have held it. The bodies that read are all there.
+#[test]
+fn step_insert_tells_which_body_and_component_its_problems_are_in() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-step-defects-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("parts.step");
+    let mut source = Session::default();
+    run(&mut source, "component.create", json!({"name": "Left"}));
+    run(&mut source, "solid.box", json!({"length": 10, "width": 10, "height": 10, "operation": "new", "body_name": "Torn"}));
+    run(&mut source, "component.activate", json!({"component": "root"}));
+    run(&mut source, "component.create", json!({"name": "Right"}));
+    for (name, x) in [("Kept", 20), ("Lost", 40)] {
+        run(&mut source, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0], "operation": "new", "body_name": name}));
+    }
+    // Pin, whose only part is lost, is placed in Left and again in Right.
+    run(&mut source, "component.create", json!({"name": "Pin", "parent": "Left"}));
+    run(&mut source, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [60, 0, 0], "operation": "new", "body_name": "Gone"}));
+    run(&mut source, "component.activate", json!({"component": "root"}));
+    run(&mut source, "occurrence.copy", json!({"component": "Pin", "parent": "Right", "translate": [0, 20, 0]}));
+    run(&mut source, "file.export", json!({"path": path.to_string_lossy()}));
+    let text = std::fs::read_to_string(&path).unwrap();
+    // The solid `name` and its shell's entity line.
+    let solid = |name: &str| {
+        let line = text.lines().find(|l| l.contains("MANIFOLD_SOLID_BREP") && l.contains(&format!("'{name}'"))).unwrap_or_else(|| panic!("{text}"));
+        let shell = line.rsplit_once('#').unwrap().1.trim_end_matches([')', ';']).to_string();
+        (line.to_string(), shell)
+    };
+    // Torn: its shell loses a face. Lost: its shell is not in the file.
+    let (_, torn) = solid("Torn");
+    let shell = text.lines().find(|l| l.starts_with(&format!("#{torn}="))).unwrap();
+    let (head, faces) = shell.rsplit_once(",#").unwrap();
+    let torn_shell = format!("{head}{}", &faces[faces.find(')').unwrap()..]);
+    let (lost, _) = solid("Lost");
+    let lost_line = format!("{},#999999);", lost.rsplit_once(",#").unwrap().0);
+    let (gone, _) = solid("Gone");
+    let gone_line = format!("{},#999998);", gone.rsplit_once(",#").unwrap().0);
+    let text = text.replacen(shell, &torn_shell, 1).replacen(&lost, &lost_line, 1).replacen(&gone, &gone_line, 1);
+    std::fs::write(&path, &text).unwrap();
+
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path": path.to_string_lossy(), "name": "Imported"}));
+    let names: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(names.len(), 2, "{names:?}");
+    let inspect = run(&mut s, "document.inspect", json!({"timeline": false, "bodies": "names"}));
+    let defects = inspect["defects"].as_array().cloned().unwrap_or_default();
+    // A shell short of a face is no solid: the part came in as surfaces.
+    let torn = defects.iter().find(|d| d["body"] == "Torn" && d["kind"] == "imported_as_surfaces");
+    assert!(torn.is_some(), "{defects:#?}");
+    let right = s.doc.components.iter().find(|c| c.name == "Right").unwrap().id;
+    let lost = defects.iter().find(|d| d["component"] == right && d["body"].is_null());
+    assert!(lost.is_some_and(|d| d["kind"] == "not_imported" || d["kind"] == "refused"), "{defects:#?}");
+    // Pin was not made: each component it is placed in is told, not only the first.
+    let left = s.doc.components.iter().find(|c| c.name == "Left").unwrap().id;
+    assert!(!s.doc.components.iter().any(|c| c.name == "Pin"), "{:?}", s.doc.components);
+    for at in [left, right] {
+        assert!(defects.iter().any(|d| d["component"] == at && d["detail"].as_str().is_some_and(|t| t.contains("Gone"))), "{at}: {defects:#?}");
+    }
+    // Kept read cleanly: nothing is said of it.
+    assert!(!defects.iter().any(|d| d["body"] == "Kept"), "{defects:#?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Deleting an inserted assembly keeps the names of the bodies that remain, and leaves no assembly
 /// ownership behind.
 #[test]
