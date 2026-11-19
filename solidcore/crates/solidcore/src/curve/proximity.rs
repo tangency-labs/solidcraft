@@ -22,6 +22,9 @@
 //! of a control point from the chord, plus the points' rounding. A piece over several knot
 //! spans takes the points of each span's part against the one chord between its ends.
 //!
+//! At a full-multiplicity interior knot, the one-sided endpoints must coincide for a
+//! piece touching the knot to receive a tube.
+//!
 //! The converse holds too: the piece is a continuous path between the chord's ends (to
 //! their rounding `e`) within `rho` of the chord, so its projection onto the chord's line
 //! covers the chord but for `e` at each end, and the point of the piece above a point of
@@ -206,6 +209,37 @@ fn spline_breaks(c: &BSplineCurve, a: f64, b: f64) -> Result<Vec<f64>> {
     Ok(out)
 }
 
+/// The chord-to-curve part of the tube proof requires a connected spline piece.
+/// At a knot of multiplicity degree + 1, the two one-sided limits are separate control
+/// points. Equal homogeneous points prove the limits agree; otherwise decline the tube.
+/// Check the closed interval so that a trim endpoint cannot silently use the other limit.
+fn spline_piece_connected(c: &BSplineCurve, a: f64, b: f64) -> Result<bool> {
+    let nurb = c.nurb_ref()?;
+    let knots = nurb.knots();
+    let Some((&first, &last)) = knots.first().zip(knots.last()) else {
+        return Ok(false);
+    };
+    // Use the actual knots. Grouping nearby values by a tolerance can hide a break.
+    let mut start = knots.partition_point(|&t| t < a || t == first);
+    let end = knots.partition_point(|&t| t <= b && t < last);
+    let Some(inside) = knots.get(start..end) else {
+        return Ok(false);
+    };
+    for run in inside.chunk_by(|x, y| x == y) {
+        if run.len() > nurb.degree() {
+            let endpoints = start
+                .checked_sub(1)
+                .and_then(|i| nurb.cpts().get(i))
+                .zip(nurb.cpts().get(start));
+            if run.len() - 1 != nurb.degree() || !endpoints.is_some_and(|(p, q)| p == q) {
+                return Ok(false);
+            }
+        }
+        start += run.len();
+    }
+    Ok(true)
+}
+
 impl Form<'_> {
     /// The parameters to cut `[a, b]` at so that each piece lies in one knot span.
     fn breaks(&self, a: f64, b: f64) -> Result<Vec<f64>> {
@@ -231,6 +265,9 @@ impl Form<'_> {
                 }))
             }
             Form::Spline(c) => {
+                if !spline_piece_connected(c, a, b)? {
+                    return Ok(None);
+                }
                 let cuts = spline_breaks(c, a, b)?;
                 let mut points: Vec<Vec3> = Vec::new();
                 let mut rounding = 0.0_f64;
@@ -949,6 +986,57 @@ mod tests {
         assert!(!circle
             .proved_together(&k, &ic, &other, &io, 2e-6, &[])
             .unwrap());
+    }
+
+    #[test]
+    fn a_spline_with_a_gap_does_not_prove_an_unbroken_seam() {
+        use crate::nurbs::crv_basic::Curve as Nurb;
+        use crate::nurbs::math::{CPoint, NOW};
+
+        let k = Kernel::default();
+        let line = Curve::from(Line::from_points(Point3::ZERO, Vec3::X, 3));
+        let spline = |xs: &[f64], knots: &[f64]| {
+            let points = xs.iter().map(|&x| CPoint::new(x, 0.0, 0.0, NOW)).collect();
+            let nurb = Nurb::new(points, 1, knots.to_vec()).unwrap();
+            Curve::from(BSplineCurve::from_nurb(nurb, 3, true))
+        };
+        let broken = spline(&[0.0, 0.1, 0.9, 1.0], &[0.0, 0.0, 0.5, 0.5, 1.0, 1.0]);
+        let whole = Extent1d::from_min_max(0.0, 1.0);
+        // The line midpoint is 0.4 from either component.
+        assert!(matches!(
+            line.proved_overlap(&k, &whole, &broken, &whole, 0.01)
+                .unwrap(),
+            Overlap::Unproved(_)
+        ));
+        assert!(!line
+            .proved_near(&k, &whole, &broken, &whole, 0.01, &[])
+            .unwrap());
+        assert!(!broken
+            .proved_together(&k, &whole, &line, &whole, 0.01, &[])
+            .unwrap());
+
+        // A subinterval away from the break and a continuous spline still certify.
+        let first = Extent1d::from_min_max(0.0, 0.25);
+        let first_line = Extent1d::from_min_max(0.0, 0.05);
+        assert!(line
+            .proved_together(&k, &first_line, &broken, &first, 1e-8, &[])
+            .unwrap());
+        let joined = spline(&[0.0, 0.5, 1.0], &[0.0, 0.0, 0.5, 1.0, 1.0]);
+        assert!(line
+            .proved_together(&k, &whole, &joined, &whole, 1e-8, &[])
+            .unwrap());
+        // A repeated knot is also continuous when its two endpoint controls agree.
+        let touching = spline(&[0.0, 0.5, 0.5, 1.0], &[0.0, 0.0, 0.5, 0.5, 1.0, 1.0]);
+        assert!(line
+            .proved_together(&k, &whole, &touching, &whole, 1e-8, &[])
+            .unwrap());
+        let broken_form = form(&broken).unwrap();
+        assert!(broken_form.tube(0.0, 0.5).unwrap().is_none());
+        assert!(broken_form.tube(0.5, 1.0).unwrap().is_none());
+        // The last two interior knots coincide, one representable step after the first.
+        let t = 0.5_f64.next_up();
+        let clustered = spline(&[0.0, 0.1, 0.1, 0.9, 1.0], &[0.0, 0.0, 0.5, t, t, 1.0, 1.0]);
+        assert!(form(&clustered).unwrap().tube(0.0, 1.0).unwrap().is_none());
     }
 
     /// A chord of a circle strays from its arc by the sagitta, and the arc from the chord
