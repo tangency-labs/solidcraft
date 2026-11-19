@@ -1379,11 +1379,14 @@ fn swept_tube(leg: [f64; 2]) -> (p21::Exchange, f64, f64) {
 }
 
 /// A swept tube's bend reads with every edge on its torus whatever the direction of its second
-/// leg: along −y its torus's seam round the axis lies on a quarter line of the tube, along
-/// (−3.75, −10.6, 0) it does not, and the bend's form starts at the seam (#18778).
+/// leg: along −y its torus's seam round the axis lies on a quarter line of the tube; along the
+/// legs off the axes (the seam in each quarter of the tube) and 1e-6 off −y it does not; 1e-8 off
+/// −y it does, to within the file's uncertainty. The bend stays a torus, and the quarter grid of
+/// its tube runs through the seam (#18778).
 #[test]
 fn a_tube_swept_round_a_corner_reads_closed_whatever_its_second_legs_direction() {
-    for leg in [[0.0, -11.24], [-3.75, -10.6]] {
+    let legs = [[0.0, -11.24], [-3.75, -10.6], [3.75, -10.6], [-3.75, 10.6], [3.75, 10.6], [1e-8, -11.24], [1e-6, -11.24]];
+    for leg in legs {
         let (file, volume, area) = swept_tube(leg);
         let r = read_solids(&file);
         assert!(r.failures.is_empty(), "{leg:?}: {:?}", r.failures);
@@ -1393,6 +1396,27 @@ fn a_tube_swept_round_a_corner_reads_closed_whatever_its_second_legs_direction()
         solidcore_ops::record_check::agreement(&s.brep).unwrap();
         // The file's 5 faces, 7 edges (3 seams, 4 rings) and 4 vertices, inside and outside.
         assert_eq!(counts(&s.brep), [2, 1, 5, 7, 4], "{leg:?}: {:?}", s.notes);
+        // One torus, the tube angle of the seam vertex (−1.8, 0, 2.5) on it a whole number of
+        // quarters from its tube start, to within the angle the file's uncertainty (1e-7 mm)
+        // makes round the tube (the start a face within it of a quarter line keeps).
+        let tori: Vec<_> = s
+            .brep
+            .faces
+            .iter()
+            .filter_map(|f| match &f.surface {
+                BSurface::Torus { frame, major_radius, tube_start, .. } => Some((frame.clone(), *major_radius, *tube_start)),
+                _ => None,
+            })
+            .collect();
+        let [(frame, major, tube_start)] = tori.as_slice() else { panic!("{leg:?}: {} tori", tori.len()) };
+        let (x, y) = (Vec3::from(frame.x_axis), Vec3::from(frame.y_axis));
+        let z = x.cross(y);
+        let d = Vec3::from([-1.8, 0.0, 2.5]) - Vec3::from(frame.origin);
+        let h = d.dot(z);
+        let angle = h.atan2((d - z * h).len() - major);
+        let off = angle - tube_start;
+        let off = off - (off / std::f64::consts::FRAC_PI_2).round() * std::f64::consts::FRAC_PI_2;
+        assert!(off.abs() <= 1e-7 / 1.8, "{leg:?}: seam at {angle}, tube start {tube_start}");
         let (body, _) = solidcore_ops::body::Body::from_record(&s.brep, false).unwrap();
         assert!(body.is_manifold_solid().unwrap());
         let mass = body.mass_properties(1e-9).unwrap();
