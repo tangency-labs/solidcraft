@@ -1112,3 +1112,111 @@ impl SectionBlendRecord {
         Ok(())
     }
 }
+
+/// How a weld bead's span ends (`blend::weld_bead::BeadEnd`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BeadEndRecord {
+    /// Cut off square to the joint, in the station's plane.
+    Square,
+    /// A 45-degree ramp down to the end's point on the joint.
+    Taper,
+    /// Rounded within one bead reach.
+    Round,
+}
+
+/// A foot blend's section face (`blend::foot_blend`, a weld bead's, #15129): its definition
+/// (the supports and the face's side on each, the leader and the face's piece of it, the legs,
+/// the sagitta, the weld's spans and end shapes, the fit tolerance and the motions its net
+/// took) and its net. A kind of its own, not fields added to an older record, so no reader
+/// that predates it can read a bead as another kind.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FootBlendRecord {
+    /// The supports S1, S2, by value (faces: NURBS forms with their kinds).
+    pub supports: [SupportRecord; 2],
+    /// Each face's side, `+1` or `-1`: the face leaves the root along `side (n x e')`, `n` the
+    /// support's own normal there and `e'` the leader's tangent.
+    pub sides: [f64; 2],
+    /// The leader: the joint edge's curve as its B-spline form.
+    pub leader: NurbsCurveRecord,
+    /// The face's piece of the leader's parameter, `a < b`.
+    pub interval: [f64; 2],
+    /// The legs on S1 and S2, straight from the root to the toe.
+    pub legs: [f64; 2],
+    /// The arc's height over the chord: `> 0` convex, `< 0` concave, 0 the chord.
+    pub sagitta: f64,
+    /// The weld's spans along the leader, as its parameters, ascending and not overlapping
+    /// (they may touch, as [`crate::surface::procedural_blend::bead::BeadSpan::along`] allows); the face's
+    /// piece lies in one of them.
+    pub spans: Vec<[f64; 2]>,
+    /// The end shape at each span's start and end.
+    pub ends: [BeadEndRecord; 2],
+    /// The fit tolerance the net was made to (checked at samples, not proved).
+    pub tol: f64,
+    /// The motions, in order.
+    pub motions: Vec<MotionRecord>,
+    /// The net.
+    pub net: NurbsSurfaceRecord,
+}
+
+impl FootBlendRecord {
+    /// The structural check: the supports NURBS forms (a foot blend runs on faces), the leader
+    /// and the net as their own checks, the sides `+1` or `-1`, the legs and the tolerance
+    /// finite and positive, the sagitta finite, the piece and the spans finite, each `a < b`,
+    /// the spans ascending and not overlapping (they may touch) and the piece inside one of them, and the motions' numbers
+    /// finite. The rebuild checks what the numbers mean (the piece on the leader, the feet, the
+    /// net against its rebuild).
+    ///
+    /// # Errors
+    ///
+    /// The first [`RecordError`] met.
+    pub fn validate(&self) -> Result<(), RecordError> {
+        for support in &self.supports {
+            match support {
+                SupportRecord::Nurbs { form, .. } => form.validate("supports")?,
+                SupportRecord::Blend(_) => {
+                    return Err(refuse("supports", "a foot blend's supports are faces"))
+                }
+            }
+        }
+        self.leader.validate("leader")?;
+        self.net.validate("net")?;
+        if !self.sides.iter().all(|s| *s == 1.0 || *s == -1.0) {
+            return Err(refuse("sides", "a side is +1 or -1"));
+        }
+        if !self.legs.iter().all(|z| z.is_finite() && *z > 0.0) {
+            return Err(refuse("legs", "a leg is finite and positive"));
+        }
+        if !(self.tol.is_finite() && self.tol > 0.0) {
+            return Err(refuse("tol", "the tolerance is finite and positive"));
+        }
+        if !self.sagitta.is_finite() {
+            return Err(refuse("sagitta", "the sagitta is finite"));
+        }
+        let piece = |[a, b]: [f64; 2]| a.is_finite() && b.is_finite() && a < b;
+        if !piece(self.interval) {
+            return Err(refuse("interval", "a piece is finite with a < b"));
+        }
+        if !self.spans.iter().all(|s| piece(*s))
+            || !self
+                .spans
+                .windows(2)
+                .all(|w| matches!(w, [[_, end], [start, _]] if end <= start))
+        {
+            return Err(refuse(
+                "spans",
+                "spans are finite, a < b, ascending and not overlapping (they may touch)",
+            ));
+        }
+        let [a, b] = self.interval;
+        if !self.spans.iter().any(|[s, t]| *s <= a && b <= *t) {
+            return Err(refuse("interval", "the piece lies in one of the spans"));
+        }
+        let motions_finite = self.motions.iter().all(|m| {
+            points_finite(&[m.origin, m.x_axis, m.y_axis]) && m.scale.is_none_or(|s| all_finite(&s))
+        });
+        if !motions_finite {
+            return Err(refuse("motions", "a motion's numbers are finite"));
+        }
+        Ok(())
+    }
+}

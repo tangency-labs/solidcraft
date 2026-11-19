@@ -15,6 +15,10 @@ use super::chamfer::{ChamferDefinition, ChamferSize};
 use super::corner::{CornerDefinition, SetbackFill};
 use super::exact::{ExactClass, ExactRound};
 use super::record::{
+    BeadEndRecord, EndOrderRecord, FootBlendRecord, MotionRecord, SectionBlendRecord,
+    SectionFrameRecord,
+};
+use super::record::{
     BezierCurveRecord, BlendDefinitionRecord, ChamferRecord, ChamferSizeRecord, ClassInputsRecord,
     CornerRecord, DraftRecord, EndCornerRecord, ExactClassRecord, ExactNetKindRecord,
     ExactNetRecord, ExactRoundDefinition, ExactRoundRecord, FaceDefinition, LeaderMapRecord,
@@ -22,7 +26,6 @@ use super::record::{
     PlaneRecord, ProceduralBlendRecord, QuadricKindRecord, QuadricRecord, RadiusRecord,
     SetbackCornerRecord, SetbackRoundRecord, SupportKindRecord, SupportRecord, SweptCornerRecord,
 };
-use super::record::{EndOrderRecord, MotionRecord, SectionBlendRecord, SectionFrameRecord};
 use super::{BlendDefinitionInput, BlendRef, ProceduralBlend, BLEND_MAX_DEPTH};
 use crate::blend::blend_corner::mixed::algebra::{Crv, Side};
 use crate::blend::blend_setback::{Face, FaceKind, Round};
@@ -436,7 +439,8 @@ const OP_EXACT_FROM: &str = "surface::procedural_blend::convert::exact_from_reco
 /// # Errors
 ///
 /// `InvalidInput` for a surface that is not an exact round; `Unsupported` for a net of a
-/// kind with no label; those of [`to_record`]'s supports and forms.
+/// kind with no label and for a chord with a sagitta (a weld bead's, #15129, which no record
+/// holds yet); those of [`to_record`]'s supports and forms.
 pub fn exact_to_record(k: &Kernel, surface: &Surface) -> Result<ExactRoundRecord> {
     let Some(BlendRef::Exact { round, net }) = surface.procedural_blend() else {
         return Err(SolidError::invalid_input(
@@ -444,6 +448,14 @@ pub fn exact_to_record(k: &Kernel, surface: &Surface) -> Result<ExactRoundRecord
             "the surface is not an exact round",
         ));
     };
+    // a weld bead's chord with a sagitta (#15129): no record holds a sagitta yet, and one read
+    // without it would be the flat chord, so it is refused rather than dropped
+    if round.sagitta != 0.0 {
+        return Err(SolidError::Unsupported {
+            operation: OP_EXACT_TO,
+            reason: "a chord with a sagitta (a weld bead's) has no record yet",
+        });
+    }
     let [s0, s1] = &round.supports;
     let supports = [support_record(k, s0, 1)?, support_record(k, s1, 1)?];
     let kind = match net.kind() {
@@ -1421,6 +1433,145 @@ pub fn section_blend_rebuild(rec: &SectionBlendRecord) -> Result<Surface> {
     let net = section_blend_from_record(rec)?;
     if let Some(BlendRef::SectionBlend { blend, net: n }) = net.procedural_blend() {
         blend.recertify(n)?;
+    }
+    Ok(net)
+}
+
+const OP_FOOT_TO: &str = "surface::procedural_blend::convert::foot_blend_to_record";
+const OP_FOOT_FROM: &str = "surface::procedural_blend::convert::foot_blend_from_record";
+
+/// The record of a foot blend's section face (`blend::foot_blend`, a weld bead's, #15129): its
+/// definition and its net, every number as the kernel stores it.
+///
+/// # Errors
+///
+/// `InvalidInput` for a surface that is not a foot blend's, or a net that is not a B-spline
+/// surface; `Unsupported` for a support with no NURBS form; those of the forms.
+pub fn foot_blend_to_record(k: &Kernel, surface: &Surface) -> Result<FootBlendRecord> {
+    use crate::blend::weld_bead::BeadEnd;
+    let Some(BlendRef::FootBlend { blend, net }) = surface.procedural_blend() else {
+        return Err(SolidError::invalid_input(
+            OP_FOOT_TO,
+            "the surface is not a foot blend's",
+        ));
+    };
+    let SurfaceKind::BSpline(form) = net.kind() else {
+        return Err(SolidError::invalid_input(
+            OP_FOOT_TO,
+            "a foot blend's net is a B-spline surface",
+        ));
+    };
+    let parts = blend.parts();
+    let [s1, s2] = &parts.supports;
+    let end = |e: BeadEnd| match e {
+        BeadEnd::Square => BeadEndRecord::Square,
+        BeadEnd::Taper => BeadEndRecord::Taper,
+        BeadEnd::Round => BeadEndRecord::Round,
+    };
+    let [e0, e1] = parts.ends;
+    let xyz = |p: Point3| [p.x, p.y, p.z];
+    Ok(FootBlendRecord {
+        supports: [support_record(k, s1, 1)?, support_record(k, s2, 1)?],
+        sides: parts.sides,
+        leader: curve_record(&parts.leader)?,
+        interval: parts.interval,
+        legs: parts.legs,
+        sagitta: parts.sagitta,
+        spans: parts.spans,
+        ends: [end(e0), end(e1)],
+        tol: parts.tol,
+        motions: parts
+            .motions
+            .iter()
+            .map(|m| MotionRecord {
+                origin: xyz(m.rotate_n_move.origin()),
+                x_axis: xyz(m.rotate_n_move.x_axis()),
+                y_axis: xyz(m.rotate_n_move.y_axis()),
+                scale: m.scale.map(xyz),
+            })
+            .collect(),
+        net: surface_record(form)?,
+    })
+}
+
+/// A face's surface a record holds as a support: its analytic surface derived from its NURBS
+/// form by its label (exact to rounding), or the form.
+fn face_surface_of(k: &Kernel, s: &SupportRecord) -> Result<Surface> {
+    match s {
+        SupportRecord::Nurbs { kind, form } => {
+            let form = surface_of(form)?;
+            match kind_of(*kind) {
+                None => Ok(Surface::from(form)),
+                Some(kind) => {
+                    AnalyticSupport::derive(k, kind, &form).and_then(|a| a.build(k, form))
+                }
+            }
+        }
+        SupportRecord::Blend(_) => Err(SolidError::invalid_input(
+            OP_FOOT_FROM,
+            "a foot blend's supports are faces",
+        )),
+    }
+}
+
+/// The foot blend's section face a record holds, its definition kept on it, not yet checked
+/// against it: [`foot_blend_rebuild`] does that.
+///
+/// # Errors
+///
+/// `InvalidInput` for a record its structural check refuses ([`FootBlendRecord::validate`]) or
+/// a support form not of its label's kind; those of making the supports, the leader and the
+/// net.
+pub fn foot_blend_from_record(k: &Kernel, rec: &FootBlendRecord) -> Result<Surface> {
+    use crate::blend::foot_blend::{FootBlendDefinition, FootBlendParts};
+    use crate::blend::weld_bead::BeadEnd;
+    use crate::geom::axis2_placement::Axis2Placement;
+    use crate::sweep::section_blend::Motion;
+    rec.validate()
+        .map_err(|e| SolidError::invalid_input(OP_FOOT_FROM, e.reason))?;
+    let p = |a: [f64; 3]| Point3::new(a[0], a[1], a[2]);
+    let end = |e: BeadEndRecord| match e {
+        BeadEndRecord::Square => BeadEnd::Square,
+        BeadEndRecord::Taper => BeadEnd::Taper,
+        BeadEndRecord::Round => BeadEnd::Round,
+    };
+    let [s1, s2] = &rec.supports;
+    let [e0, e1] = rec.ends;
+    let definition = FootBlendDefinition::from_parts(FootBlendParts {
+        supports: [face_surface_of(k, s1)?, face_surface_of(k, s2)?],
+        sides: rec.sides,
+        leader: curve_of(&rec.leader)?,
+        interval: rec.interval,
+        legs: rec.legs,
+        sagitta: rec.sagitta,
+        spans: rec.spans.clone(),
+        ends: [end(e0), end(e1)],
+        tol: rec.tol,
+        motions: rec
+            .motions
+            .iter()
+            .map(|m| Motion {
+                rotate_n_move: Axis2Placement::from_stored(p(m.origin), p(m.x_axis), p(m.y_axis)),
+                scale: m.scale.map(p),
+            })
+            .collect(),
+    });
+    let mut net = Surface::from(surface_of(&rec.net)?);
+    net.set_foot_blend_definition(definition);
+    Ok(net)
+}
+
+/// [`foot_blend_from_record`] and the net checked against the definition
+/// ([`crate::blend::foot_blend::FootBlendDefinition::recertify`]): refused unless the
+/// definition rebuilds it, to rounding.
+///
+/// # Errors
+///
+/// Those of [`foot_blend_from_record`] and of the check.
+pub fn foot_blend_rebuild(k: &Kernel, rec: &FootBlendRecord) -> Result<Surface> {
+    let net = foot_blend_from_record(k, rec)?;
+    if let Some(blend) = net.procedural_blend() {
+        blend.recertify(k)?;
     }
     Ok(net)
 }
