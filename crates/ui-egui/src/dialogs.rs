@@ -1203,7 +1203,7 @@ impl Dialog {
                     at: None,
                     refs: Default::default(),
                 },
-                vec![SelInput::new("Profile", PROFILES, false)],
+                vec![SelInput::new("Profile", PROFILES | PLANES, false)],
             ),
             "solid.combine" => Dialog::new(
                 Kind::Combine { operation: 1, keep_tools: false },
@@ -6973,6 +6973,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 }
             } else {
                 crate::primitive_placement::params(s, cmd, &d.extra, &mut p);
+            }
+            if *cmd == "solid.coil" {
+                crate::primitive_placement::plane_params(s, sels(d, 0).first(), &mut p)?;
             }
             p.insert("operation".into(), json!(OPS.get(*operation).copied().unwrap_or("new")));
             (cmd, Value::Object(p))

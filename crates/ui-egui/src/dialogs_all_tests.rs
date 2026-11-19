@@ -1499,6 +1499,173 @@ fn rectangular_pattern_groups_each_direction_in_the_same_order() {
     }
 }
 
+fn coil_plane_coordinates(h: &Harness, point: &Value) -> [f64; 3] {
+    std::array::from_fn(|k| {
+        let value = point.get(k).or_else(|| point.get(["x", "y", "z"][k])).expect("a point or direction coordinate");
+        value.as_f64().unwrap_or_else(|| {
+            h.app.session.doc.eval(value.as_str().expect("a coordinate expression"), solidcraft_engine::doc::expr::Kind::Length).unwrap()
+        })
+    })
+}
+
+/// Plane picks place a primitive Coil; they are not sketch profiles. Both Browser rows and
+/// viewport picks must reach the same preview and the command run by the dialog's OK button.
+fn assert_coil_plane_pick(plane: &str, z: f64) {
+    for browser in [true, false] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.set_origin_shown(true);
+        if plane == "Plane1" {
+            h.app.run("construct.plane.offset", json!({"base":"XY", "offset":z, "name":plane})).unwrap();
+        }
+        h.call("ui.camera", json!({"target":[0,0,z], "distance":150}));
+        h.step(&json!({"start":"solid.coil"})).unwrap();
+        h.frames(4);
+        if browser {
+            let row = format!("row:{plane}");
+            if scenario::handle_at(&row).is_none() {
+                let folder = if plane == "Plane1" { "Construction" } else { "Origin" };
+                h.step(&json!({"click":{"handle":format!("fold:{folder}")}})).unwrap();
+                h.frames(2);
+            }
+            h.step(&json!({"click":{"handle":row}})).unwrap();
+        } else {
+            let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.expect("a visible viewport"));
+            let target = if plane == "XY" {
+                crate::viewport::origin_plane_target(&h.app, &proj, plane).expect("the visible XY origin plane")
+            } else {
+                let (_, _, quad) =
+                    crate::viewport::construction_quads(&h.app).into_iter().find(|(name, _, _)| name == plane).expect("the construction plane quad");
+                let middle = (quad[0] + quad[1] + quad[2] + quad[3]) / 4.0;
+                // Quarter centres stay well inside the rendered quad and clear of its axes.
+                quad.into_iter()
+                    .map(|corner| (middle + corner) / 2.0)
+                    .find(|point| {
+                        proj.to_screen(*point).is_some_and(|pixel| {
+                            matches!(crate::viewport::pick(&h.app, &proj, pixel).first(), Some(crate::viewport::Hit::Plane { name, .. }) if name == plane)
+                        })
+                    })
+                    .expect("an unobscured interior of the construction plane")
+            };
+            let pixel = proj.to_screen(target).expect("the plane target projects into the view");
+            assert!(
+                matches!(crate::viewport::pick(&h.app, &proj, pixel).first(), Some(crate::viewport::Hit::Plane { name, .. }) if name == plane),
+                "the viewport click must hit {plane} before testing Coil placement"
+            );
+            h.step(&json!({"click":{"world":[target.x,target.y,target.z]}})).unwrap();
+        }
+        h.settle();
+        let dialog = h.app.dialog.as_ref().expect("Coil remains open after the plane pick");
+        let commands = crate::dialogs::preview_commands(&h.app, dialog).unwrap();
+        let (command, params) = commands.iter().find(|(id, _)| id == "solid.coil").expect("Coil preview command");
+        assert_eq!(command, "solid.coil");
+        let base = coil_plane_coordinates(&h, params.get("base").expect("the picked plane places the Coil base"));
+        for (value, expected) in base.into_iter().zip([0.0, 0.0, z]) {
+            assert!((value - expected).abs() < 1e-9, "{plane}, Browser={browser}: {params}");
+        }
+        let axis = coil_plane_coordinates(&h, params.get("axis").expect("the picked plane supplies the Coil axis"));
+        assert_eq!(axis, [0.0, 0.0, 1.0], "{plane}, Browser={browser}: {params}");
+        assert!(params.get("sketch").is_none(), "a placement plane must not become a profile: {params}");
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        h.settle();
+        assert!(h.app.dialog.is_none(), "{plane}, Browser={browser}: OK applies the Coil");
+        let measured = h.app.run("inspect.measure", json!({})).unwrap();
+        assert_eq!(measured["body_count"], json!(1));
+        let body = &measured["bodies"][0];
+        assert_eq!(body["closed"], json!(true));
+        // Default four turns at pitch 8, centred circular section of diameter 3: the
+        // coil extends 1.5 below the base and 32 + 1.5 above it, translated by the pick.
+        for (side, expected) in [("min", z - 1.5), ("max", z + 33.5)] {
+            let actual = body["bbox"][side][2].as_f64().unwrap();
+            assert!((actual - expected).abs() < 1e-6, "{plane}, Browser={browser}: {measured}");
+        }
+    }
+}
+
+#[test]
+fn coil_plane_pick_uses_the_xy_origin_plane() {
+    assert_coil_plane_pick("XY", 0.0);
+}
+
+#[test]
+fn coil_plane_pick_uses_an_offset_construction_plane() {
+    assert_coil_plane_pick("Plane1", 50.0);
+}
+
+/// A newly picked world plane is distinct from an unchanged saved component-local placement,
+/// even when both serialise to the same numbers. Preview and OK must use the picked plane.
+#[test]
+fn editing_a_coil_in_a_moved_component_uses_the_picked_world_plane() {
+    use solidcraft_engine::doc::{FeatureKind, apply_point, apply_vector};
+
+    for turned in [false, true] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        let owner = h.app.run("component.create", json!({"name":"Owner", "grounded":false})).unwrap();
+        let component = owner["component"].as_u64().unwrap();
+        h.app
+            .run(
+                "solid.coil",
+                json!({"name":"Coil", "body_name":"Spring", "base":[0,0,0], "axis":[0,0,1],
+                   "diameter":40, "revolutions":4, "pitch":8, "section_size":3}),
+            )
+            .unwrap();
+        let id = h.app.session.doc.find_feature("Coil").unwrap().id;
+        assert_eq!(h.app.session.doc.feature(id).unwrap().component, component, "the Coil belongs to the component being moved");
+        h.app.run("component.activate", json!({"component":"root"})).unwrap();
+        h.app
+            .run(
+                "occurrence.move",
+                json!({"occurrence":owner["occurrence"], "translate":[10,0,0], "axis":[0,1,0],
+                   "angle":if turned { "90 deg" } else { "0 deg" }}),
+            )
+            .unwrap();
+        let frame = h.app.session.placed_document().component_transform(component);
+        assert!((apply_point(&frame, Vec3::ZERO) - Vec3::new(10.0, 0.0, 0.0)).len() < 1e-9);
+        if turned {
+            assert!((apply_vector(&frame, Vec3::Z) - Vec3::X).len() < 1e-9);
+        }
+        h.app.edit_feature(id);
+        h.frames(3);
+        let plane = crate::dialogs::plane_by_name(&h.app.session, "XY").expect("the picked world XY plane");
+        assert_eq!(plane.origin, Vec3::ZERO, "Edit Feature resolves XY at the world origin");
+        assert_eq!(plane.normal(), Vec3::Z, "the picked plane has the world Z normal");
+        let saved = h.app.dialog.as_ref().expect("the Coil editor");
+        assert_eq!(coil_plane_coordinates(&h, &saved.extra["base"]), [0.0, 0.0, 0.0]);
+        assert_eq!(coil_plane_coordinates(&h, &saved.extra["axis"]), [0.0, 0.0, 1.0]);
+        {
+            let dialog = h.app.dialog.as_mut().expect("the Coil editor");
+            assert!(dialog.editing.is_some_and(|(edited, _)| edited == id));
+            assert_eq!(dialog.extra["base"].as_array().map(Vec::len), Some(3), "saved placement uses its existing coordinate-list form");
+            assert_eq!(dialog.extra["axis"].as_array().map(Vec::len), Some(3));
+            dialog.pick(&h.app.session, Sel::Plane { name: "XY".into() });
+            assert_eq!(dialog.inputs[0].items, vec![Sel::Plane { name: "XY".into() }]);
+        }
+        let commands = preview_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].0, "timeline.redefine");
+        let params = &commands[0].1["params"];
+        assert_eq!(coil_plane_coordinates(&h, &params["base"]), [0.0, 0.0, 0.0]);
+        assert_eq!(coil_plane_coordinates(&h, &params["axis"]), [0.0, 0.0, 1.0]);
+        let before = h.app.session.doc.to_json();
+        let preview = h.app.session.preview_world(&commands).unwrap();
+        assert_eq!(h.app.session.doc.to_json(), before, "preview preserves the design");
+        assert_eq!(preview.after.bodies.len(), 1);
+        let bounds = preview.after.bodies[0].mesh().bounds();
+        assert!(bounds.center().x.abs() < 1e-5 && bounds.center().y.abs() < 1e-5, "world-plane preview, turned={turned}: {bounds:?}");
+        assert!((bounds.min.z + 1.5).abs() < 1e-5 && (bounds.max.z - 33.5).abs() < 1e-5, "world Z preview, turned={turned}: {bounds:?}");
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        h.settle();
+        assert!(h.app.dialog.is_none(), "OK applies the Coil edit");
+        let FeatureKind::Coil { base, axis, .. } = &h.app.session.doc.feature(id).unwrap().kind else { panic!("the edited Coil") };
+        let local = h.app.session.doc.eval_point(base).unwrap();
+        let frame = h.app.session.placed_document().component_transform(component);
+        assert!(apply_point(&frame, local).len() < 1e-9, "the applied base lies at world XY, turned={turned}");
+        assert!((apply_vector(&frame, axis.0) - Vec3::Z).len() < 1e-9, "the applied axis follows world XY, turned={turned}");
+        assert_eq!(h.app.session.world_state().unwrap().bodies[0].mesh().bounds(), bounds, "OK matches the actual world preview");
+    }
+}
+
 #[test]
 fn coil_from_a_profile_hides_the_primitive_section() {
     let h = fixture();

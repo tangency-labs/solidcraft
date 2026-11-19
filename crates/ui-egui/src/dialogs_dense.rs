@@ -1167,7 +1167,8 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             }
         }
         Kind::Primitive { cmd, fields, operation, at, .. } => {
-            let from_sketch = *cmd == "solid.coil" && d.inputs.first().is_some_and(|i| i.accept & selection::PROFILES != 0 && !i.items.is_empty());
+            let from_sketch =
+                *cmd == "solid.coil" && d.inputs.first().is_some_and(|i| i.items.iter().any(|item| matches!(item, Sel::Profile { .. })));
             if matches!(*cmd, "solid.cylinder" | "solid.sphere") {
                 round_size_row(ui, fields);
             }
