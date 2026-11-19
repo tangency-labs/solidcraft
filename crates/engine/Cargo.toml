@@ -77,6 +77,8 @@ solidcraft-io = { workspace = true, features = ["dxf-legacy-baseline-tests", "tr
 solidcraft-sketch = { workspace = true, features = ["solver-profiling"] }
 # Sheet metal tests read the joints of a sheet made from surfaces.
 solidcraft-develop = { workspace = true }
+# A temporary folder per test, removed when the test ends, a failure included.
+tempfile = "3.27"
 
 [[example]]
 name = "render_resource_workflow"

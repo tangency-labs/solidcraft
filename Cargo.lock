@@ -6192,6 +6192,7 @@ dependencies = [
  "solidcraft-sketch",
  "solidcraft-ui-text",
  "solidcraft-viewport",
+ "tempfile",
  "thiserror 2.0.21",
  "tiny-skia",
  "toml_edit",
@@ -6339,6 +6340,7 @@ dependencies = [
  "solidcraft-mcp-server",
  "solidcraft-viewport",
  "solidcraft-viewport-gpu",
+ "tempfile",
 ]
 
 [[package]]
