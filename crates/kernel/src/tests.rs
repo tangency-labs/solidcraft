@@ -2907,13 +2907,16 @@ fn loft_joins_a_corner_to_the_middle_of_a_rounded_corner() {
 /// paired vertices, pinned here: each wall is ruled (degree 1 across the two sections), and each
 /// span runs on its own parameter (a line's linear one, an arc's rational Bezier one), so a point
 /// at share t of a rectangle side is paired with the arc point at share t of the arc's Bezier
-/// parameter, not its share of the arc length. The two x-sides are each two walls, meeting at
-/// their middle with the circle's 0 and 180 degree points; the y-sides are one wall each. The
-/// volume is that surface's integral (Gauss-Legendre, 40 points a span): 1 312 579.22 mm3.
-/// SolidWorks gives 1 310 514.00 mm3 for the same sections, with four corner-to-corner walls; the
-/// same rule on those four walls gives 1 310 501.28 mm3, so the 1 310 514.00 is not the span
-/// parameter (arc-length spans give 1 313 109.39 mm3 and chord-length spans 1 313 370.97 mm3 on
-/// the kernel's walls).
+/// parameter, not its share of the arc length. The two 105.8 degree arcs are two conic spans each
+/// (`conic_data`, solidcore/crates/solidcore/src/nurbs/crv_basic.rs, the quarter-turn bound), so
+/// the x-sides are each two walls, meeting at their middle with the circle's 0 and 180 degree
+/// points; the 74.2 degree arcs are one span, so the y-sides are one wall each. The volume is that
+/// surface's integral (Gauss-Legendre, 40 points a span): 1 312 579.22 mm3.
+/// SolidWorks gives 1 310 514.00 mm3 for the same sections, with four corner-to-corner walls. The
+/// same rule with each 105.8 degree arc as one span gives 1 310 501.28 mm3, so the two-span arcs
+/// account for the 2065 mm3. The remaining 12.72 mm3 is not the pairing points, which are exact
+/// (radius 55.76, and the corner directions to the last digit); the arc-length spans give
+/// 1 313 109.39 mm3 and the chord-length spans 1 313 370.97 mm3 on the kernel's walls.
 #[test]
 fn loft_rectangle_to_circle_pairs_each_span_on_its_own_parameter() {
     let rect = Loop2::polygon(&[Vec2::new(56.12, -74.17), Vec2::new(56.12, 74.17), Vec2::new(-56.12, 74.17), Vec2::new(-56.12, -74.17)]);

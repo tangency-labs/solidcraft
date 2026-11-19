@@ -991,9 +991,12 @@ pub fn planar_face_record(plane: &Plane, r: &Region2) -> Result<solidcore_record
 /// across them, so a point at height `z` lies on the segment between the paired points), and each
 /// pair of matched spans runs on its own parameter. A line's parameter is linear in its length,
 /// an arc's is its rational Bezier parameter (not its angle or its arc length), and a span's
-/// point at parameter `t` is paired with the other span's point at `t`. For a rectangle lofted to
-/// a circle the walls are split where the circle's 0 and 180 degree points meet the rectangle's
-/// two x-sides (pinned by `loft_rectangle_to_circle_pairs_each_span_on_its_own_parameter`, #19478).
+/// point at parameter `t` is paired with the other span's point at `t`. An arc longer than 90
+/// degrees is two rational quadratic spans, as NLib's conic count makes it
+/// (`conic_data` in `solidcore/crates/solidcore/src/nurbs/crv_basic.rs`, `theta < 91`, the
+/// Piegl & Tiller quarter-turn bound): the knot between them is a point of the wall, so a
+/// rectangle lofted to a circle has its x-sides' middles at the circle's 0 and 180 degree points
+/// (pinned by `loft_rectangle_to_circle_pairs_each_span_on_its_own_parameter`, #19478).
 pub fn loft(sections: &[(Plane, Loop2)]) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "loft");
     loft_with_rails(sections, &[], RailFit::Scale)
