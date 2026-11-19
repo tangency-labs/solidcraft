@@ -859,3 +859,92 @@ pub(crate) fn add_tangent_nodes(
 }
 
 const OP: &str = "intersect::surface_intersector::tangent_curves::find_tangent_curves";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::kernel::CancelToken;
+    use crate::nurbs::b_spline_surface::BSplineSurface;
+    use crate::nurbs::math::CPoint;
+    use crate::nurbs::srf_basic::Surface as NurbSurface;
+    use crate::surface::surface::Surface;
+
+    /// A bilinear patch over `[-1, 1]^2` through the heights `z` at its corners
+    /// `(-1, -1)`, `(1, -1)`, `(-1, 1)`, `(1, 1)`.
+    fn bilinear(z: [f64; 4]) -> Surface {
+        Surface::from(
+            BSplineSurface::create_bilinear_surface(
+                Vec3::new(-1.0, -1.0, z[0]),
+                Vec3::new(1.0, -1.0, z[1]),
+                Vec3::new(-1.0, 1.0, z[2]),
+                Vec3::new(1.0, 1.0, z[3]),
+            )
+            .unwrap(),
+        )
+    }
+
+    /// `z = x^2` over `[-1, 1]^2`: it touches the plane `z = 0` along the line `x = 0`.
+    fn parabolic_cylinder() -> Surface {
+        let net = [[-1.0, 1.0], [0.0, -1.0], [1.0, 1.0]]
+            .iter()
+            .map(|&[x, z]| vec![CPoint::new(x, -1.0, z, 1.0), CPoint::new(x, 1.0, z, 1.0)])
+            .collect();
+        let knots = |p: usize| [vec![0.0; p + 1], vec![1.0; p + 1]].concat();
+        let nurb = NurbSurface::new(net, 2, 1, knots(2), knots(1)).unwrap();
+        Surface::from(BSplineSurface::from_nurb(nurb, false))
+    }
+
+    /// The pass on `a` and `b` (natural domains, tolerance `1e-6`, model size 2) from one
+    /// seed at the middle of both; its nodes and the curves it flushed.
+    fn trace(k: &Kernel, a: &Surface, b: &Surface) -> Result<(usize, TsectCurves)> {
+        let doms = [
+            a.natural_uv_domain_with_nurb(k).unwrap(),
+            b.natural_uv_domain_with_nurb(k).unwrap(),
+        ];
+        let mut si = SurfaceIntersector::new(k, a, &doms[0], b, &doms[1], false).unwrap();
+        si.this_approx_tol_3d = 1e-6;
+        let mid = Point2::new(0.5, 0.5);
+        let mut out = TsectCurves::default();
+        let nodes = find_tangent_curves(k, &mut si, 2.0, &[[mid, mid]], &mut out)?;
+        Ok((nodes.len(), out))
+    }
+
+    /// #18930: the pass, now on every intersection, stops at a cancellation wherever it
+    /// polls: before each seed, node and refinement pass and at each march step. A
+    /// cancellation at any of its first polls ends it with `Cancelled`; with polls
+    /// enough, the tangent line of a parabolic cylinder on a plane is traced.
+    #[test]
+    fn the_tangent_curve_pass_stops_when_cancelled() {
+        let (a, b) = (parabolic_cylinder(), bilinear([0.0; 4]));
+        let mut polls = 0;
+        loop {
+            polls += 1;
+            assert!(polls < 10_000, "never finished");
+            let mut k = Kernel::default();
+            k.set_cancel_token(CancelToken::after_polls(polls));
+            match trace(&k, &a, &b) {
+                Ok((_, out)) => {
+                    assert_eq!(out.curve_types, [TsectCurveType::Tangent]);
+                    break;
+                }
+                Err(e) => assert!(e.is_cancelled(), "{e:?}"),
+            }
+        }
+        // a seed, the march steps both ways and the refinement passes
+        assert!(polls > 10, "{polls}");
+    }
+
+    /// #18930: `z = xy + 1e-9` comes within `1e-9` of the plane `z = 0` at the origin,
+    /// inside the tolerance `1e-6`, with parallel normals, and crosses it along the
+    /// hyperbola `xy = -1e-9`, whose two branches pass the origin along the axes. The
+    /// surfaces do not meet at the origin, so it is no node where branches meet.
+    #[test]
+    fn a_contact_where_the_surfaces_do_not_meet_is_no_node() {
+        let k = Kernel::default();
+        let eps = 1e-9;
+        let saddle = bilinear([1.0 + eps, -1.0 + eps, -1.0 + eps, 1.0 + eps]);
+        let (nodes, out) = trace(&k, &saddle, &bilinear([0.0; 4])).unwrap();
+        assert_eq!(nodes, 0, "{:?}", out.curve_types);
+        assert!(out.curves_3d.is_empty(), "{:?}", out.curve_types);
+    }
+}
