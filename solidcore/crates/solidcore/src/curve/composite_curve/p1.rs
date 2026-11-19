@@ -44,6 +44,12 @@
 //! | [`trim_first_break`], [`trim_last_break`], [`insert_sorted_breaks`] | `sm_TrimFirstBreak`, `sm_TrimLastBreak`, `sm_InsertSortedBreaks` (static) |
 //!
 //! Deviations:
+//! - **Classifying an offset (#18514).** [`curve_classify`] discards a trimmed offset
+//!   whose mid point is proved closer than the offset distance to an original curve
+//!   (the distance to the solve's nearest point with its rounding and that point's
+//!   error bound), not one whose solved distance is below `distance * (1 -
+//!   SM_EFF_ZERO)`: an offset's mid point lies exactly the offset distance from its own
+//!   curve, and that test flipped on the distance's rounding.
 //! - **Nesting.** `with_curves` and `set_segment` return `InvalidInput` when any segment curve would nest
 //!   deeper than [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING)
 //!   (32; upstream fixtures nest at most 3), which bounds the recursive dispatch,
@@ -121,6 +127,7 @@ use crate::geom::a_object;
 use crate::geom::assert_array::ObjectKey;
 use crate::geom::attribute;
 use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::certified::{self, Bounded};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -1941,9 +1948,11 @@ impl SolutionObject for OrigHandle {
 /// `sm_CurveClassify`: whether to keep the trimmed offset curve `trimmed_offset`.
 /// With its `originator` (the offset map attribute's original curve), a curve whose
 /// mid-parameter tangent opposes the originator's there is a bow tie (discard).
-/// Otherwise the curve is discarded when its mid point lies closer than
-/// `offset_distance * (1 - SM_EFF_ZERO)` to any of `orig_curves` (minimum distance
-/// solves within `offset_distance + 2 xsect_tol_3d`).
+/// Otherwise the curve is discarded when its mid point is proved closer than
+/// `offset_distance` to any of `orig_curves` (minimum distance solves within
+/// `offset_distance + 2 xsect_tol_3d`; the proof as `proved_closer` makes it, a
+/// SolidCraft change for #18514; upstream discards below `offset_distance * (1 -
+/// SM_EFF_ZERO)`).
 ///
 /// # Errors
 ///
@@ -2036,7 +2045,16 @@ pub(crate) fn curve_classify_cached(
                 cache,
             )?;
             if let Some(s) = sols.get(0) {
-                if s.start.solution_value < cutoff {
+                let t = s.start.parameters.first().copied();
+                if proved_closer(
+                    k,
+                    orig,
+                    t,
+                    p,
+                    s.start.solution_value,
+                    offset_distance,
+                    cutoff,
+                )? {
                     // Within offset distance of this curve.
                     return Ok(false);
                 }
@@ -2044,6 +2062,44 @@ pub(crate) fn curve_classify_cached(
         }
     }
     Ok(true)
+}
+
+/// Whether the point `p` is proved closer than `distance` to `orig`, given the point solve's
+/// nearest point on it, at parameter `t` with the solve's distance `solved` (SolidCraft
+/// change, #18514). The point of `orig` at `t` is evaluated again, and `p` is closer when
+/// the distance between them, widened by its own rounding ([`certified::distance`]) and
+/// twice the point's coordinate error ([`Curve::point_error_bound`]; a norm is within
+/// `sqrt 3 < 2` times a coordinate's), stays below `distance`: that point lies on `orig`,
+/// so `p` is then closer to `orig` than `distance`. Where it is not proved, `p` is not
+/// taken as closer. The mid point of a trimmed offset lies exactly the offset distance from
+/// its own curve, at its foot, and the rounding of that distance grows with the
+/// coordinates, not with the distance: about 1e-12 of an offset of 0.017 at 111 from the
+/// origin, which upstream's `distance * (1 - SM_EFF_ZERO)` (`cutoff`) did not cover, so
+/// it dropped such an offset at single offset distances. A curve kind with no point error
+/// bound, or a solution with no parameter, keeps that test of `solved`.
+///
+/// # Errors
+///
+/// Those of the point's evaluation.
+fn proved_closer(
+    k: &Kernel,
+    orig: &Curve,
+    t: Option<f64>,
+    p: Point3,
+    solved: f64,
+    distance: f64,
+    cutoff: f64,
+) -> Result<bool> {
+    let Some((t, error)) = t.and_then(|t| Some((t, orig.point_error_bound(t)?))) else {
+        return Ok(solved < cutoff);
+    };
+    let q = orig.evaluate_point(k, t)?;
+    let d = certified::distance(p, q);
+    let near = Bounded {
+        value: d.value,
+        bound: d.bound + 2.0 * error,
+    };
+    Ok(near.at_most(distance).is_yes())
 }
 
 // ---- sorted break lists ---------------------------------------------------------------
