@@ -421,6 +421,22 @@ impl PieceBound {
     }
 }
 
+/// The bound of one piece as `(end values, second-order term with the slack)`: the gap over
+/// `[a, b]` is at most their sum ([`piece`]).
+///
+/// # Errors
+///
+/// Those of [`piece`].
+pub(crate) fn piece_bound(
+    cn: &NurbsCurve,
+    wn: &NurbsCurve,
+    s: &NetSurface,
+    a: f64,
+    b: f64,
+) -> Result<Option<(f64, f64)>> {
+    Ok(piece(cn, wn, s, a, b)?.map(|p| (p.ends, p.with_slack)))
+}
+
 /// The bound of one piece ([`second_term`]).
 fn piece(
     cn: &NurbsCurve,
@@ -1680,7 +1696,15 @@ pub fn trim_image_gap_bound_up_to(
     floor: f64,
     over: f64,
 ) -> Result<Option<f64>> {
-    trim_image_gap_bound_within(k, surface, curve, uv, range, floor, [f64::NEG_INFINITY, over])
+    trim_image_gap_bound_within(
+        k,
+        surface,
+        curve,
+        uv,
+        range,
+        floor,
+        [f64::NEG_INFINITY, over],
+    )
 }
 
 /// [`trim_image_gap_bound_up_to`] for a caller that also takes any bound at most `enough` as
@@ -2221,7 +2245,10 @@ mod tests {
         };
         let g = up_to(f64::INFINITY);
         assert_eq!(g, t.bound(&curve, &trim).unwrap());
-        assert!(g >= lift && slack > g - g.next_down(), "{g:e}, slack {slack:e}");
+        assert!(
+            g >= lift && slack > g - g.next_down(),
+            "{g:e}, slack {slack:e}"
+        );
         assert_eq!(up_to(g).to_bits(), g.to_bits());
         // (at most the gap plus a part of the slack: the bisection's gap is below it)
         assert_eq!(up_to(g - 0.5 * slack), f64::INFINITY);

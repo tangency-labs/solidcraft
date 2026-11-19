@@ -3511,7 +3511,10 @@ fn trim_before(b: &Brep, eu: EdgeuseId, holder: EdgeuseId) -> Result<Option<(Cur
         return Ok(None);
     };
     let tolerance = b.edge(e)?.tolerance;
-    Ok(Some((held_curve(b, holder)?.clone_for_evaluation()?, tolerance)))
+    Ok(Some((
+        held_curve(b, holder)?.clone_for_evaluation()?,
+        tolerance,
+    )))
 }
 
 /// Not upstream (#18162): after [`fix_uv_trim_curves_notified`] edited the UV trim held at
