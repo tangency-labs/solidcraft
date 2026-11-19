@@ -410,12 +410,17 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Workspace => {
             let rendering = crate::render_workspace::active(app);
             let drawing = crate::drawing_workspace::active(app);
+            // Design, then Drawing (the owner's order), then Render and what comes later.
             let mut v = vec![
                 act("ui.workspace.design", "Design", "ws_design").with(json!({"workspace":"design"})).key(if rendering || drawing {
                     ""
                 } else {
                     "current"
                 }),
+                act("ui.workspace.drawing", "Drawing", "ws_drawing")
+                    .with(json!({"workspace":"drawing"}))
+                    .key(if drawing { "current" } else { "" })
+                    .on(app.session.active_sketch.is_none() && app.tool.is_none() && app.dialog.is_none() && !app.file_load.busy()),
                 act("ui.workspace.render", "Render", "ws_render")
                     .with(json!({"workspace":"render"}))
                     .key(if rendering { "current" } else { "" })
@@ -424,12 +429,6 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
             for (w, icon) in [("Animation", "ws_animate"), ("Simulation", ""), ("Manufacture", "")] {
                 v.push(act("ui.workspace", w, icon).key("coming later").on(false));
             }
-            v.push(
-                act("ui.workspace.drawing", "Drawing", "ws_drawing")
-                    .with(json!({"workspace":"drawing"}))
-                    .key(if drawing { "current" } else { "" })
-                    .on(app.session.active_sketch.is_none() && app.tool.is_none() && app.dialog.is_none() && !app.file_load.busy()),
-            );
             v
         }
         Target::Units => crate::prefs::UNITS

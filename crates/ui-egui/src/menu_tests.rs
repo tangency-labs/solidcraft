@@ -1848,6 +1848,9 @@ fn the_workspace_menu_lists_design_and_render_and_greys_future_workspaces() {
     assert!(find(&items, "Render").enabled);
     assert!(!find(&items, "Animation").enabled);
     assert!(!items.iter().any(|i| i.label.contains("Generative")));
+    // Drawing comes second, right after Design (the owner's order), then Render and the rest.
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).filter(|l| !l.is_empty()).collect();
+    assert_eq!(labels[..3], ["Design", "Drawing", "Render"], "{labels:?}");
 }
 
 /// A right-click on a construction plane's browser row opens its menu, like a body's or a
