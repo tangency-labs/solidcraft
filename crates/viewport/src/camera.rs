@@ -190,15 +190,14 @@ impl CameraAnim {
         }
         let (_, up, back) = self.from.basis();
         let (_, to_up, to_back) = self.to.basis();
-        if up.dist(to_up) > 1e-9 {
+        if !matches!(solidcore_ops::points_meet(up.into(), to_up.into(), 1e-9), Ok(true)) {
             self.screen_up_turn = None;
             return self;
         }
-        let sin = up.dot(back.cross(to_back));
-        let cos = back.dot(to_back).clamp(-1.0, 1.0);
-        // Both directions are equally short at half a turn. Always choose the positive one
-        // rather than letting roundoff in a pole's frame choose the direction.
-        let angle = if cos < 0.0 && sin.abs() < 1e-12 { std::f64::consts::PI } else { sin.atan2(cos) };
+        let Ok(angle) = solidcore_ops::affine::signed_unit_angle(up.into(), back.into(), to_back.into()) else {
+            self.screen_up_turn = None;
+            return self;
+        };
         let duration = |angle: f64| CameraAnim::DURATION * (angle.abs() / std::f64::consts::FRAC_PI_2).clamp(1.0, 2.0);
         let previous = self.screen_up_turn.map_or_else(|| Self::new(self.from, self.to, self.start).duration, duration);
         self.duration *= duration(angle) / previous;
