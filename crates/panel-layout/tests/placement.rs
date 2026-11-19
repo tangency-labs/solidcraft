@@ -67,7 +67,10 @@ fn floating_card_drags_docks_right_and_restores() -> TestResult {
 
     // Drag by the grip: the host reports the card's new floating origin.
     let dragged = Point { x: 100.0, y: 120.0 };
-    apply(&mut service, vec![Mutation::SetFloatingRect { section: SectionId::new("card.floating")?, origin: dragged, size: Size { width: 280.0, height: 240.0 } }])?;
+    apply(
+        &mut service,
+        vec![Mutation::SetFloatingRect { section: SectionId::new("card.floating")?, origin: dragged, size: Size { width: 280.0, height: 240.0 } }],
+    )?;
     let (zone, outer) = card_placement(&service)?;
     assert_eq!((zone, outer.origin), (Zone::Floating, dragged));
 
