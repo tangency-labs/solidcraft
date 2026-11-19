@@ -772,6 +772,7 @@ fn state() -> FilletExecutive<Handle> {
         fit_kind: FitKind::Radius,
         fit_setback: -1.0,
         rollover_adjusting: false,
+        rolled_beside_band: false,
     }
 }
 

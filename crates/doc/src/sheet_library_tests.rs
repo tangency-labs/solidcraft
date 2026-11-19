@@ -19,6 +19,14 @@ fn gauge_number(r: &PackRule) -> i32 {
     r.gauge.strip_suffix(" ga").and_then(|g| g.parse().ok()).unwrap_or_else(|| panic!("{}: gauge `{}`", r.rule.name, r.gauge))
 }
 
+/// A material's rows in a gauge (`16 ga`), leaving out its metric thicknesses.
+fn gauge_rows(material: &str) -> Vec<&'static PackRule> {
+    standard_gauges(material).into_iter().filter(|r| r.gauge.ends_with(" ga")).collect()
+}
+
+/// The R″10 rounded preferred numbers of ISO 3 / ISO 497, per decade, from 0.5 to 6 mm.
+const R10_ROUNDED_MM: [&str; 12] = ["0.5", "0.6", "0.8", "1", "1.2", "1.5", "2", "2.5", "3", "4", "5", "6"];
+
 fn rounded4(x: f64) -> f64 {
     (x * 1e4).round() / 1e4
 }
@@ -30,7 +38,9 @@ fn the_standard_library_has_the_issues_materials_each_value_with_its_sources() {
         standard_materials(),
         ["Mild steel (cold-rolled)", "Stainless steel 304", "Aluminium 5052-H32", "Aluminium 6061-T6", "Copper C110", "Brass C260"]
     );
-    assert_eq!(lib.rules.len(), 55);
+    // 55 gauge rows (10 steel, 9 stainless, 10 of each aluminium, 8 copper, 8 brass) and the 12
+    // metric thicknesses of each of the 6 materials.
+    assert_eq!(lib.rules.len(), 55 + 6 * 12);
     for source in &lib.sources {
         assert!(source.url.starts_with("https://") && !source.title.is_empty(), "{source:?}");
     }
@@ -42,10 +52,15 @@ fn the_standard_library_has_the_issues_materials_each_value_with_its_sources() {
             want.push("al-radii".into());
         }
         assert_eq!(r.sources, want, "{}", r.rule.name);
-        assert!(["msg", "uss", "awg"].contains(&r.sources[0].as_str()), "{}", r.rule.name);
         assert_eq!(r.rule.name, format!("{}, {}", r.rule.material, r.gauge));
-        // A gauge is a label that says whose chart it is.
-        assert!(r.gauge_label().ends_with(&format!("({})", r.chart)) && !r.chart.is_empty(), "{}", r.rule.name);
+        if r.gauge.ends_with(" mm") {
+            // A metric thickness is its own label, from the preferred-number series.
+            assert_eq!((r.sources[0].as_str(), r.chart.as_str(), r.gauge_label()), ("iso497", "", r.rule.thickness.clone()), "{}", r.rule.name);
+        } else {
+            assert!(["msg", "uss", "awg"].contains(&r.sources[0].as_str()), "{}", r.rule.name);
+            // A gauge is a label that says whose chart it is.
+            assert!(r.gauge_label().ends_with(&format!("({})", r.chart)) && !r.chart.is_empty(), "{}", r.rule.name);
+        }
         // The library gives stock, not tooling: no working radius and no K-factor of its own.
         assert_eq!(r.given, Given::default(), "{}", r.rule.name);
         assert!(r.hardness.is_some(), "{}", r.rule.name);
@@ -58,7 +73,7 @@ fn the_standard_library_has_the_issues_materials_each_value_with_its_sources() {
 #[test]
 fn steel_gauges_are_the_manufacturers_standard_gauge() {
     let weights = [(10, 5.625), (11, 5.0), (12, 4.375), (13, 3.75), (14, 3.125), (16, 2.5), (18, 2.0), (20, 1.5), (22, 1.25), (24, 1.0)];
-    let rows = standard_gauges("Mild steel (cold-rolled)");
+    let rows = gauge_rows("Mild steel (cold-rolled)");
     assert_eq!(rows.len(), weights.len());
     for (gauge, lb) in weights {
         let r = rows.iter().find(|r| gauge_number(r) == gauge).unwrap_or_else(|| panic!("no {gauge} ga"));
@@ -83,7 +98,7 @@ fn stainless_gauges_are_the_us_standard_gauge_of_15_usc_206() {
         (22, 1.0 / 32.0),
         (24, 1.0 / 40.0),
     ];
-    let rows = standard_gauges("Stainless steel 304");
+    let rows = gauge_rows("Stainless steel 304");
     assert_eq!(rows.len(), fractions.len());
     for (gauge, inch) in fractions {
         let r = rows.iter().find(|r| gauge_number(r) == gauge).unwrap_or_else(|| panic!("no {gauge} ga"));
@@ -95,7 +110,7 @@ fn stainless_gauges_are_the_us_standard_gauge_of_15_usc_206() {
 #[test]
 fn aluminium_copper_and_brass_gauges_are_brown_and_sharpe() {
     for material in ["Aluminium 5052-H32", "Aluminium 6061-T6", "Copper C110", "Brass C260"] {
-        let rows = standard_gauges(material);
+        let rows = gauge_rows(material);
         assert!(rows.len() >= 8, "{material}");
         for r in rows {
             let n = gauge_number(r);
@@ -135,6 +150,19 @@ fn k_factor_estimates_are_the_generic_charts_cells() {
         };
         assert_eq!(r.hardness, Some(want), "{}", r.rule.name);
     }
+}
+
+/// Each material comes in the metric thicknesses of the R″10 series too, with the same hardness
+/// and minimum radius rules as its gauges.
+#[test]
+fn every_material_has_the_r10_metric_thicknesses() {
+    for material in standard_materials() {
+        let metric: Vec<&str> = standard_gauges(material).iter().filter(|r| r.gauge.ends_with(" mm")).map(|r| r.rule.thickness.as_str()).collect();
+        let want: Vec<String> = R10_ROUNDED_MM.iter().map(|t| format!("{t} mm")).collect();
+        assert_eq!(metric, want, "{material}");
+    }
+    // A metric size is looked up as a gauge is.
+    assert_eq!(standard_rule("Aluminium 5052-H32", "1.5mm").map(|r| r.rule.name.as_str()), Some("Aluminium 5052-H32, 1.5 mm"));
 }
 
 /// The published approximate minimum radius for a 90° cold bend, the top of each range, by the
