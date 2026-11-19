@@ -575,10 +575,14 @@ mod mapped_tests {
         let line = |b: f64| b::Curve2::Spline { knots: vec![0.0, 0.0, b, b], points: vec![[0.0, 0.0], [b, 0.0]] };
         for t in [6.5490500023792094e-15, 1e-12] {
             let e = mapped(&line(t), true, [1.0, 0.0], [0.0, t], &|_, _| true).unwrap_err();
-            assert!(e.to_string().contains(&format!("its edge on [0, {t}]")), "{e}");
+            let e = e.to_string();
+            assert!(e.contains(&format!("its edge on [0, {t}]")) && e.contains("no longer than SMLib's knot resolution"), "{e}");
         }
         let out = mapped(&line(2e-12), true, [1.0, 0.0], [0.0, 2e-12], &|_, _| false).unwrap();
         check_curve2(&out, &mut Budget::input()).unwrap();
+        // Each other refusal says which end is off, not the knot resolution.
+        let e = mapped(&line(1.0), true, [1.0, 0.0], [0.0, 0.5], &|_, _| false).unwrap_err().to_string();
+        assert!(e.contains("its end 0.5 from the edge's") && !e.contains("its start") && !e.contains("knot resolution"), "{e}");
     }
 
     /// An edge on a spline whose knots run from 5e-12 to 2.5e-4 (a file may write knots in

@@ -625,8 +625,8 @@ fn trims(flat: View, n_edgeuses: usize) -> Res<Vec<Option<b::Curve2>>> {
 /// lies on [0, 6e-12]), or by more but at one point of the edge within its tolerance (`on_edge`:
 /// a circle on its NURBS form ending a rounding past its trim's quarter line), every knot within
 /// that of an end is that end, and the end spans left without length go with their control
-/// points. Farther is an error, as is an interval of at most `SM_EFF_ZERO` (10⁻¹², SMLib's
-/// absolute knot resolution: no trim fits on it).
+/// points. Farther is an error naming the end, as is (worded apart) an interval of at most
+/// `SM_EFF_ZERO` (10⁻¹², SMLib's absolute knot resolution: no trim fits on it).
 fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f64; 2], on_edge: &dyn Fn(f64, f64) -> bool) -> Res<b::Curve2> {
     fn along<T: Clone>(knots: &[f64], points: &[T], same: bool) -> (Vec<f64>, Vec<T>) {
         if same {
@@ -684,8 +684,22 @@ fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f6
                 None
             }
         };
-        let (Some(s0), Some(s1), false) = (end(a, t0), end(z, t1), t1 - t0 <= 1e-12) else {
-            return Err(invalid(format!("a UV trim on [{a}, {z}], its edge on [{t0}, {t1}] (SMLib's knot resolution is 1e-12)")));
+        let trim_on = || format!("a UV trim on [{a}, {z}], its edge on [{t0}, {t1}]");
+        if t1 - t0 <= 1e-12 {
+            return Err(invalid(format!("{}: the edge's interval is no longer than SMLib's knot resolution (1e-12)", trim_on())));
+        }
+        let (Some(s0), Some(s1)) = (end(a, t0), end(z, t1)) else {
+            // Which ends: more than a rounding apart and not one point of the edge.
+            let off: Vec<String> = [("start", a, t0), ("end", z, t1)]
+                .into_iter()
+                .filter(|(_, x, t)| end(*x, *t).is_none())
+                .map(|(which, x, t)| format!("its {which} {} from the edge's", (x - t).abs()))
+                .collect();
+            return Err(invalid(format!(
+                "{}: {}, more than a rounding and not at one point of the edge within its tolerance",
+                trim_on(),
+                off.join(" and ")
+            )));
         };
         // A knot within the rounding of an end is that end, and so is one past the end on the
         // side the trim runs over it, up to the trim's end; a knot inside the edge's interval
