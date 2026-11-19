@@ -2850,9 +2850,9 @@ pub struct Renderer {
     /// another view's, which waits in `parked` meanwhile.
     pic: Picture,
     /// The view `pic` belongs to (0 for the one viewport an app without tiles has).
-    pic_slot: u32,
+    pic_slot: u64,
     /// The other views' pictures, by view slot.
-    parked: std::collections::HashMap<u32, Picture>,
+    parked: std::collections::HashMap<u64, Picture>,
     /// The AO depth prepass resources (a 1 × 1 stand-in while ambient occlusion is off).
     ao: ao::Resources,
     ground_ao: wgpu::RenderPipeline,
@@ -4553,7 +4553,7 @@ impl Renderer {
     /// order are written to buffers all the views share, and a write reaches the GPU in front of
     /// the commands submitted after it: one submission per view keeps each view's writes with
     /// its own draws. [`Renderer::paint_view`] then shows the picture.
-    pub fn prepare_view(&mut self, slot: u32, device: &wgpu::Device, queue: &wgpu::Queue, frame: &Frame) {
+    pub fn prepare_view(&mut self, slot: u64, device: &wgpu::Device, queue: &wgpu::Queue, frame: &Frame) {
         self.activate(slot);
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("sc_view") });
         self.prepare_timed(device, queue, &mut encoder, frame, true);
@@ -4562,7 +4562,7 @@ impl Renderer {
 
     /// Make `slot` the view the renderer draws: its picture comes in, and the one that was in
     /// goes to wait for its next frame.
-    fn activate(&mut self, slot: u32) {
+    fn activate(&mut self, slot: u64) {
         if slot == self.pic_slot {
             return;
         }
@@ -4573,14 +4573,21 @@ impl Renderer {
     }
 
     /// The picture last drawn for `slot`.
-    fn picture(&self, slot: u32) -> Option<&Picture> {
+    fn picture(&self, slot: u64) -> Option<&Picture> {
         if slot == self.pic_slot { Some(&self.pic) } else { self.parked.get(&slot) }
     }
 
-    /// Forget the pictures of views that are gone: only `slots` (and the one being drawn) keep
-    /// their textures.
-    pub fn retain_views(&mut self, slots: &[u32]) {
-        self.parked.retain(|slot, _| slots.contains(slot));
+    /// Forget every picture whose slot is no longer live, including the active picture.
+    /// Shared product uploads and pipelines remain available to the surviving views.
+    pub fn retain_views(&mut self, slots: &[u64]) {
+        let live: std::collections::HashSet<u64> = slots.iter().copied().collect();
+        if !live.contains(&self.pic_slot) {
+            self.activate(0);
+            if !live.contains(&0) {
+                self.pic = Picture::default();
+            }
+        }
+        self.parked.retain(|slot, _| live.contains(slot));
     }
 
     fn prepare_timed(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, frame: &Frame, isolated: bool) {
@@ -4808,7 +4815,7 @@ impl Renderer {
     }
 
     /// [`Renderer::paint`] for the view `slot` ([`Renderer::prepare_view`]).
-    pub fn paint_view(&self, slot: u32, frame: &Frame, pass: &mut wgpu::RenderPass<'static>, viewport: [f32; 4]) {
+    pub fn paint_view(&self, slot: u64, frame: &Frame, pass: &mut wgpu::RenderPass<'static>, viewport: [f32; 4]) {
         let [x, y, w, h] = viewport;
         if !(w > 0.0 && h > 0.0) {
             return;
@@ -5753,6 +5760,37 @@ pub fn analysis_colors(c: &solidcraft_color::AnalysisColors) -> [f32; 36] {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn retaining_live_picture_slots_releases_closed_active_and_parked_uploads() {
+        use super::*;
+        let (_, device, _) = match crate::open_headless(crate::test_env::policy()) {
+            Ok(opened) => opened,
+            Err(error) if crate::test_env::skip_unless_required(crate::test_env::required(), &error) => return,
+            Err(error) => panic!("required GPU unavailable: {error}"),
+        };
+        let target = GpuTarget { format: wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false, edges: false };
+        let mut renderer = Renderer::new(&device, target, None);
+        renderer.product.key = Some(90);
+        for slot in [11, 22, 33] {
+            renderer.activate(slot);
+            renderer.pic.model.key = Some(slot);
+            renderer.pic.ss_key = Some(slot + 100);
+        }
+        renderer.retain_views(&[0, 22]);
+        assert_eq!(renderer.pic_slot, 0);
+        assert!(renderer.picture(11).is_none() && renderer.picture(33).is_none());
+        assert_eq!(renderer.picture(22).unwrap().model.key, Some(22));
+        assert_eq!(renderer.picture(22).unwrap().ss_key, Some(122));
+        assert_eq!(renderer.product.key, Some(90), "shared product uploads are not per-view pictures");
+        renderer.activate(22);
+        renderer.retain_views(&[0, 22]);
+        assert_eq!(renderer.pic.model.key, Some(22), "a live active picture retains its consumed upload");
+        renderer.retain_views(&[]);
+        assert_eq!(renderer.pic_slot, 0);
+        assert!(renderer.pic.model.key.is_none() && renderer.pic.ss_key.is_none() && renderer.parked.is_empty());
+        assert_eq!(renderer.product.key, Some(90));
+    }
+
     /// The device refuses a block's index buffer (past its buffer size limit, standing in for a
     /// GPU out of memory): the scene is not swapped in, the previous picture stays, and the scene
     /// is kept for a retry (#4791).
@@ -7337,8 +7375,11 @@ mod glass_tests {
         };
         let depth = crate::depth_format(&device, true);
         let format = wgpu::TextureFormat::Rgba8Unorm;
-        let target = GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false };
+        let target = GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false, edges: false };
         let mut r = Renderer::new(&device, target, None);
+        // Saved view ids remain distinct above the old 32-bit picture-slot boundary.
+        const FIRST: u64 = (1 << 40) + 1;
+        const SECOND: u64 = (1 << 40) + 2;
         let mut a = test_frame(test_scene(), 1.0);
         let mut b = test_frame(test_scene_with_color([0, 0, 255, 255]), 1.0);
         b.key = 2;
@@ -7361,15 +7402,15 @@ mod glass_tests {
         let color_view = color.create_view(&Default::default());
         let depth_view = texture(depth, wgpu::TextureUsages::RENDER_ATTACHMENT).create_view(&Default::default());
         // Both tiles are prepared before either is painted, as egui does for one frame.
-        r.prepare_view(1, &device, &queue, &a);
-        r.prepare_view(2, &device, &queue, &b);
+        r.prepare_view(FIRST, &device, &queue, &a);
+        r.prepare_view(SECOND, &device, &queue, &b);
         assert!(a.slot.lock().unwrap().is_none() && b.slot.lock().unwrap().is_none());
         // Focus swaps the draw order and changes which view bleeds into the window.
         // Both frames must redraw using the uploads that were already consumed.
         a.view_proj[3][1] += 0.02;
         b.view_proj[3][1] -= 0.02;
-        r.prepare_view(2, &device, &queue, &b);
-        r.prepare_view(1, &device, &queue, &a);
+        r.prepare_view(SECOND, &device, &queue, &b);
+        r.prepare_view(FIRST, &device, &queue, &a);
         let mut encoder = device.create_command_encoder(&Default::default());
         {
             let mut pass = encoder
@@ -7396,8 +7437,8 @@ mod glass_tests {
                     multiview_mask: None,
                 })
                 .forget_lifetime();
-            r.paint_view(1, &a, &mut pass, [0.0, 0.0, SIZE as f32, SIZE as f32]);
-            r.paint_view(2, &b, &mut pass, [SIZE as f32, 0.0, SIZE as f32, SIZE as f32]);
+            r.paint_view(FIRST, &a, &mut pass, [0.0, 0.0, SIZE as f32, SIZE as f32]);
+            r.paint_view(SECOND, &b, &mut pass, [SIZE as f32, 0.0, SIZE as f32, SIZE as f32]);
         }
         let read = device.create_buffer(&wgpu::BufferDescriptor {
             label: None,

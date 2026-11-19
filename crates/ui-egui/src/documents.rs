@@ -65,6 +65,8 @@ pub struct DocSlot {
     navigation: ViewNavigation,
     /// Opened behind the shown design: framed when it is first shown.
     fit: bool,
+    /// Restored behind the shown design: apply the remembered workspace and camera once.
+    restore_views: bool,
 }
 
 /// What a design was doing when its tab was left, with the "Keep dialogs and tools open when
@@ -181,6 +183,7 @@ impl DocSlot {
             inspect: ViewInspect::new(),
             navigation: ViewNavigation::new(),
             fit: false,
+            restore_views: false,
         }
     }
 }
@@ -481,6 +484,7 @@ fn put_view(app: &mut SolveApp, v: DocView) {
 
 /// Put `slot` into the app and return what was there.
 fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
+    keep_look(app);
     crate::select_other::close(app);
     let reveals = crate::browser::take_reveals(app);
     crate::semantic_content::leave_document(app);
@@ -542,6 +546,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
         inspect: std::mem::replace(&mut app.docs.inspect, slot.inspect),
         navigation: std::mem::replace(&mut app.docs.navigation, slot.navigation),
         fit: false,
+        restore_views: false,
     };
     crate::browser::restore_reveals(app, slot.reveals);
     // Only the displayed design owns the process-wide crash replay journal.
@@ -610,10 +615,11 @@ pub fn switch(app: &mut SolveApp, i: usize) {
     };
     crate::linked_source::note_unread(app);
     let fit = incoming.fit;
+    let restore_views = incoming.restore_views;
     let out = swap_in(app, incoming);
     // Give up the old design's renames now, before an editor drawn later in this frame commits one.
     give_up_renames_of_other_designs(app);
-    if fit {
+    if fit && !restore_views {
         app.fit_view();
     }
     let a = app.docs.active;
@@ -632,6 +638,10 @@ pub fn switch(app: &mut SolveApp, i: usize) {
         crate::linked_source::update_changed(app);
     }
     crate::edit_in_place::attach(app);
+    if restore_views {
+        let view = app.docs.views.active().clone();
+        apply_recalled_view(app, &view);
+    }
     // The design comes back as the app shows it: a Render view it was left in shows only if the
     // workspace came back too (`put_work`).
     sync_views(app);
@@ -752,6 +762,7 @@ struct ViewOptions {
     show_navigation_bar: bool,
     tool_cursor: bool,
     perspective: bool,
+    up_axis: solidcraft_viewport::UpAxis,
     auto_ortho_faces: bool,
     visual_style: u8,
     view_angles_lock_yaw: bool,
@@ -773,6 +784,7 @@ impl ViewOptions {
             show_navigation_bar: ui.show_navigation_bar,
             tool_cursor: ui.tool_cursor,
             perspective: ui.perspective,
+            up_axis: ui.up_axis,
             auto_ortho_faces: ui.auto_ortho_faces,
             visual_style: ui.visual_style,
             view_angles_lock_yaw: ui.view_angles_lock_yaw,
@@ -787,6 +799,7 @@ impl ViewOptions {
         std::mem::swap(&mut self.show_navigation_bar, &mut ui.show_navigation_bar);
         std::mem::swap(&mut self.tool_cursor, &mut ui.tool_cursor);
         std::mem::swap(&mut self.perspective, &mut ui.perspective);
+        std::mem::swap(&mut self.up_axis, &mut ui.up_axis);
         std::mem::swap(&mut self.auto_ortho_faces, &mut ui.auto_ortho_faces);
         std::mem::swap(&mut self.visual_style, &mut ui.visual_style);
         std::mem::swap(&mut self.view_angles_lock_yaw, &mut ui.view_angles_lock_yaw);
@@ -909,6 +922,9 @@ fn show_look(app: &mut SolveApp, view: &DesignView) {
     if view.kind == ViewKind::Model
         && let Some(spec) = view.spec
     {
+        // Live options can already contain a new projection while this saved
+        // camera still has the previous frame's fov. Restoring the camera must
+        // not overwrite those pending options.
         app.cam = spec.camera;
     }
     if view.kind == ViewKind::Model
@@ -916,6 +932,14 @@ fn show_look(app: &mut SolveApp, view: &DesignView) {
     {
         app.session.set_inspect(state.clone());
     }
+}
+
+/// Apply a recalled workspace after its initialized runtime options were restored.
+fn apply_recalled_view(app: &mut SolveApp, view: &DesignView) {
+    let projection = (app.ui.perspective, app.ui.up_axis);
+    apply_view(app, view);
+    (app.ui.perspective, app.ui.up_axis) = projection;
+    show_look(app, view);
 }
 
 /// Run `draw` with the Model view `id` standing in for the shown one: its camera and analyses are
@@ -978,13 +1002,18 @@ fn remember_views_in(app: &SolveApp, i: usize, dir: &std::path::Path) {
     }
     let session = if i == app.docs.active { Some(&app.session) } else { app.docs.slots.get(i).and_then(Option::as_ref).map(|slot| &slot.session) };
     let (Some(path), Some(views)) = (session.and_then(|session| session.path.as_deref()), views_of(app, i)) else { return };
-    // The shown Model view is saved from the angle the design looks from now.
+    // Every design keeps its live camera, including one parked in a background slot.
     let mut views = views.clone();
-    if i == app.docs.active && views.active().kind == ViewKind::Model {
+    let camera = if i == app.docs.active { Some(app.cam) } else { app.docs.slots.get(i).and_then(Option::as_ref).map(|slot| slot.cam) };
+    if views.active().kind == ViewKind::Model
+        && let Some(camera) = camera
+    {
         let id = views.active().id;
-        views.set_spec(id, solidcraft_viewport::ViewSpec::new(app.cam));
+        views.set_spec(id, solidcraft_viewport::ViewSpec::new(camera));
     }
-    if let Err(e) = crate::view_memory::remember(dir, path, views.to_json()) {
+    let remembered = crate::view_memory::remember_async(dir.to_owned(), path.to_owned(), views.to_json());
+
+    if let Err(e) = remembered {
         log::warn!("could not remember the views of {path}: {e}");
     }
 }
@@ -1008,14 +1037,36 @@ fn restore_views_in(app: &mut SolveApp, path: &str, dir: &std::path::Path) {
     else {
         return;
     };
+    // Saved cameras initialize runtime options once. Subsequent UI changes are
+    // authoritative even until the next frame writes their projection into cam.
+    let navigation: ViewNavigation = set
+        .views()
+        .iter()
+        .map(|view| {
+            let mut look = ViewLook::from_ui(&app.ui);
+            if view.kind == ViewKind::Model
+                && let Some(spec) = view.spec
+            {
+                look.options.perspective = spec.camera.fov > 0.0;
+                look.options.up_axis = spec.camera.up;
+            }
+            (view.id, look)
+        })
+        .collect();
     if app.session.path.as_deref().is_some_and(|p| same_path(p, path)) {
         app.docs.views = set;
-        app.docs.navigation.clear();
+        app.docs.inspect.clear();
+        app.docs.navigation = navigation;
         let active = app.docs.views.active().clone();
-        apply_view(app, &active);
-        show_look(app, &active);
+        if let Some(mut look) = app.docs.navigation.remove(&active.id) {
+            look.swap(app);
+        }
+        apply_recalled_view(app, &active);
     } else if let Some(slot) = app.docs.slots.iter_mut().flatten().find(|slot| slot.session.path.as_deref().is_some_and(|p| same_path(p, path))) {
         slot.views = set;
+        slot.inspect.clear();
+        slot.navigation = navigation;
+        slot.restore_views = true;
     }
 }
 
@@ -1078,10 +1129,15 @@ pub fn view_rename_start(app: &mut SolveApp, id: u64) -> bool {
 
 /// Copy the view `id` of the shown design next to it and show the copy.
 pub fn view_duplicate(app: &mut SolveApp, id: u64) -> Option<u64> {
+    let state = if id == app.docs.views.active().id { Some(app.session.inspect()) } else { app.docs.inspect.get(&id).cloned() };
     let options = app.docs.navigation.get(&id).map(|look| look.options);
     let copy = change_views(app, |views| views.duplicate(id))?;
     if let Some(mut options) = options {
         options.swap(&mut app.ui);
+    }
+    if let Some(state) = state {
+        app.session.set_inspect(state);
+        app.docs.inspect.insert(copy, app.session.inspect());
     }
     Some(copy)
 }
@@ -1182,6 +1238,27 @@ pub fn view_counts(app: &SolveApp) -> Vec<usize> {
 
 fn views_of(app: &SolveApp, design: usize) -> Option<&ViewSet> {
     if design == app.docs.active { Some(&app.docs.views) } else { app.docs.slots.get(design)?.as_ref().map(|slot| &slot.views) }
+}
+
+/// Live root-window slots across all designs. Closed views retain their camera/navigation,
+/// but their consumed upload slots must be fresh before Reopen can draw them again.
+pub(crate) fn live_view_picture_slots(app: &mut SolveApp) -> Vec<u64> {
+    fn collect(views: &ViewSet, navigation: &mut ViewNavigation, slots: &mut Vec<u64>) {
+        slots.extend(views.views().iter().map(|view| view.id));
+        for (id, look) in navigation {
+            if views.get(*id).is_none() {
+                look.scenes.retire_uploads();
+            }
+        }
+    }
+    let mut slots = vec![0];
+    collect(&app.docs.views, &mut app.docs.navigation, &mut slots);
+    for slot in app.docs.slots.iter_mut().flatten() {
+        collect(&slot.views, &mut slot.navigation, &mut slots);
+    }
+    slots.sort_unstable();
+    slots.dedup();
+    slots
 }
 
 /// Carry out a checked `tab.view.*` command (`v`: the engine's echo of its parameters) on the
@@ -2209,7 +2286,7 @@ fn view_tip(view: &DesignView, place: usize) -> String {
         ViewKind::Render => "tab_strip.workspace_render",
         ViewKind::Animation => "tab_strip.workspace_animation",
     });
-    if place < 9 { format!("{} · {workspace} · Ctrl+{}", view.name, place + 1) } else { format!("{} · {workspace}", view.name) }
+    if place < 9 { format!("{} · {workspace} · Alt+{}", view.name, place + 1) } else { format!("{} · {workspace}", view.name) }
 }
 
 /// A view as the strip draws it: its icon in the view's colour (the bar is dark in every theme)
@@ -2237,6 +2314,15 @@ const TAB_MENU: [crate::app_bar::TabMenuRow<'static>; 3] = [
 /// The document tabs in the application bar, from `x0` to `x1` ([`crate::app_bar::tabs`]): click
 /// to switch, × to close, drag to reorder, + for the start page.
 pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
+    let owner_key = tab_strip_id().with("view_popup_owner");
+    let changed = ui.ctx().data_mut(|data| {
+        let previous = data.get_temp::<u64>(owner_key);
+        data.insert_temp(owner_key, app.session.uid);
+        previous.is_some_and(|owner| owner != app.session.uid)
+    });
+    if changed {
+        crate::app_bar::clear_view_popup(ui.ctx(), tab_strip_id());
+    }
     let info = tabs_info(app);
     let paths = tab_paths(app);
     let n = info.len();
@@ -2253,9 +2339,8 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     let selected = if app.docs.slots.is_empty() { 0 } else { app.docs.active };
     let mut rename = app.menu.rename.take();
     let renaming = renaming_tab_state(rename.as_ref());
-    // A view being renamed shows its field only while its design is shown with its views as tabs.
-    let as_tabs = DesignTabPrefs::from(&app.preferences).views_as_tabs && app.docs.views.len() > 1;
-    let mut view_edit = app.docs.view_rename.take().filter(|r| as_tabs && !app.home.open && app.docs.views.get(r.view).is_some());
+    // The switcher and sub-tab presentations both expose the view rename field.
+    let mut view_edit = app.docs.view_rename.take().filter(|r| !app.home.open && app.docs.views.get(r.view).is_some());
     let view_place = view_edit.as_ref().and_then(|r| app.docs.views.views().iter().position(|v| v.id == r.view));
     let new_tip = app.tr("ui.start_page").to_string();
     let views_as_tabs = DesignTabPrefs::from(&app.preferences).views_as_tabs;
@@ -3327,6 +3412,62 @@ mod tests {
         }
     }
 
+    #[test]
+    fn closed_picture_uploads_are_fresh_on_reopen_while_live_and_background_uploads_survive() {
+        use std::sync::Arc;
+        let mut app = app();
+        app.home.open = false;
+        let closed = app.docs.views.open(ViewKind::Model, None, false);
+        let live = app.docs.views.open(ViewKind::Model, None, false);
+        let mut closed_look = ViewLook::from_ui(&app.ui);
+        closed_look.options.show_grid = false;
+        closed_look.motion.spin = true;
+        let old = closed_look.scenes.mark_uploaded_for_test(71);
+        app.docs.navigation.insert(closed, closed_look);
+        let mut live_look = ViewLook::from_ui(&app.ui);
+        let kept = live_look.scenes.mark_uploaded_for_test(72);
+        app.docs.navigation.insert(live, live_look);
+        assert!(app.docs.views.close(closed));
+        let mut background = DocSlot::new(Session::default());
+        let background_id = (1u64 << 40) + 7;
+        background.views =
+            ViewSet::from_json(&json!({"views":[{"id":background_id,"kind":"model","name":"Background"}],"active":background_id})).unwrap();
+        let mut background_look = ViewLook::from_ui(&app.ui);
+        let hidden = background_look.scenes.mark_uploaded_for_test(73);
+        background.navigation.insert(background_id, background_look);
+        app.docs.slots = vec![None, Some(background)];
+        app.docs.active = 0;
+        let root_slots = app.viewport.upload_slots_for_test();
+        let slots = live_view_picture_slots(&mut app);
+        assert!(slots.contains(&0) && slots.contains(&live) && slots.contains(&background_id));
+        assert!(!slots.contains(&closed));
+        let cleared = &app.docs.navigation[&closed];
+        let fresh = cleared.scenes.upload_slots_for_test();
+        assert!(!cleared.options.show_grid && cleared.motion.spin, "closing keeps preferences and navigation state");
+        for (old, fresh) in old.iter().zip(&fresh) {
+            assert!(!Arc::ptr_eq(old, fresh), "Reopen must republish after the renderer released its consumed scene");
+        }
+        for (before, after) in kept.iter().zip(app.docs.navigation[&live].scenes.upload_slots_for_test()) {
+            assert!(Arc::ptr_eq(before, &after), "a live view's consumed upload is still valid");
+        }
+        let background = app.docs.slots[1].as_ref().unwrap();
+        for (before, after) in hidden.iter().zip(background.navigation[&background_id].scenes.upload_slots_for_test()) {
+            assert!(Arc::ptr_eq(before, &after), "a background design's picture stays live");
+        }
+        for (before, after) in root_slots.iter().zip(app.viewport.upload_slots_for_test()) {
+            assert!(Arc::ptr_eq(before, &after), "root's active CPU state is untouched");
+        }
+        let _ = live_view_picture_slots(&mut app);
+        for (before, after) in fresh.iter().zip(app.docs.navigation[&closed].scenes.upload_slots_for_test()) {
+            assert!(Arc::ptr_eq(before, &after), "a closed cache is retired once rather than reallocated each frame");
+        }
+        assert_eq!(view_reopen(&mut app), Some(closed));
+        for (expected, actual) in fresh.iter().zip(app.viewport.upload_slots_for_test()) {
+            assert!(Arc::ptr_eq(expected, &actual));
+        }
+        assert_eq!(app.viewport.upload_keys_for_test(), [0; 4], "reopening regenerates every consumed upload");
+    }
+
     fn app() -> SolveApp {
         SolveApp::new(Session::default(), Services::default())
     }
@@ -4184,13 +4325,155 @@ mod tests {
         let first = h.app.docs.views.active().id;
         let second = view_open(&mut h.app, ViewKind::Model, None, false);
         h.app.session.analysis = Some(SurfaceAnalysis::Zebra { stripes: 8.0 });
+        h.app.session.colored_components = Some(());
         assert!(view_activate(&mut h.app, first));
+        assert!(h.app.session.colored_components.is_none());
         assert_eq!(h.app.session.analysis, None, "the first view never had the analysis");
         h.app.session.analysis = Some(SurfaceAnalysis::Environment);
         assert!(view_activate(&mut h.app, second));
         assert_eq!(h.app.session.analysis, Some(SurfaceAnalysis::Zebra { stripes: 8.0 }));
+        assert!(h.app.session.colored_components.is_some());
         assert!(view_activate(&mut h.app, first));
         assert_eq!(h.app.session.analysis, Some(SurfaceAnalysis::Environment));
+    }
+
+    #[test]
+    fn duplicating_an_inactive_view_copies_its_own_inspection_state() {
+        use solidcraft_engine::SurfaceAnalysis;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let source = h.app.docs.views.active().id;
+        h.app.session.analysis = Some(SurfaceAnalysis::Zebra { stripes: 7.0 });
+        h.app.session.colored_components = Some(());
+        let other = view_open(&mut h.app, ViewKind::Model, None, false);
+        h.app.session.analysis = Some(SurfaceAnalysis::Environment);
+        h.app.session.colored_components = None;
+        let copy = view_duplicate(&mut h.app, source).unwrap();
+        assert_ne!(copy, source);
+        assert_eq!(h.app.session.analysis, Some(SurfaceAnalysis::Zebra { stripes: 7.0 }));
+        assert!(h.app.session.colored_components.is_some());
+        assert!(view_activate(&mut h.app, other));
+        assert_eq!(h.app.session.analysis, Some(SurfaceAnalysis::Environment));
+        assert!(h.app.session.colored_components.is_none());
+        assert!(view_activate(&mut h.app, copy));
+        assert_eq!(h.app.session.analysis, Some(SurfaceAnalysis::Zebra { stripes: 7.0 }));
+    }
+
+    #[test]
+    fn inspection_snapshots_drop_stale_sampled_geometry_but_keep_requested_settings() {
+        use solidcore_record::Vec3;
+        use solidcraft_engine::{CombPick, CombView, IsoPick, SurfaceAnalysis};
+        let mut session = Session::default();
+        session.analysis = Some(SurfaceAnalysis::Zebra { stripes: 7.0 });
+        session.colored_components = Some(());
+        session.isocurves = vec![IsoPick { body: "Body1".into(), at: Vec3::ZERO, count: 4 }];
+        session.comb = Some(CombView {
+            picks: vec![CombPick::Edge { at: Vec3::ZERO }],
+            density: 4,
+            length: 1.0,
+            fixed_scale: None,
+            scale: 1.0,
+            teeth: vec![vec![[Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0)]]],
+        });
+        let saved = session.inspect();
+        session.revision += 1;
+        session.set_inspect(saved.clone());
+        assert!(session.comb.is_some(), "a view-only revision preserves sampled geometry");
+        session.doc_mut().name.push_str(" changed");
+        session.set_inspect(saved);
+        let comb = session.comb.as_ref().unwrap();
+        assert!(comb.teeth.is_empty(), "a changed document cannot restore old comb teeth");
+        assert_eq!(comb.density, 4, "the requested comb settings remain available");
+        assert_eq!(comb.picks, vec![CombPick::Edge { at: Vec3::ZERO }]);
+        assert!(session.continuity.is_empty());
+        assert_eq!(session.analysis, Some(SurfaceAnalysis::Zebra { stripes: 7.0 }));
+        assert!(session.colored_components.is_some());
+        assert_eq!(session.isocurves.len(), 1, "face picks are resolved against the current model");
+    }
+
+    #[test]
+    fn a_background_design_remembers_its_live_model_camera() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.design_reopen_views = true;
+        let path = h.dir.join("background.solidcraft").to_string_lossy().into_owned();
+        h.app.session.path = Some(path.clone());
+        h.app.cam.yaw = 1.7;
+        open_tab(&mut h.app, Session::default()).unwrap();
+        let slot = h.app.docs.slots[0].as_mut().unwrap();
+        let active = slot.views.active().id;
+        slot.views.set_spec(active, solidcraft_viewport::ViewSpec::new(Camera::default()));
+        let dir = h.dir.join("view-memory");
+        remember_views_in(&h.app, 0, &dir);
+        crate::view_memory::wait_for_pending().unwrap();
+        let saved = crate::view_memory::recall(&dir, &path).unwrap();
+        let views = ViewSet::from_json(&saved).unwrap();
+        assert_eq!(views.active().spec.unwrap().camera.yaw, 1.7);
+    }
+
+    #[test]
+    fn remembered_background_views_apply_their_camera_when_first_shown() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.design_reopen_views = true;
+        let path = h.dir.join("restored.solidcraft").to_string_lossy().into_owned();
+        let mut incoming = Session::default();
+        incoming.path = Some(path.clone());
+        open_tab_behind(&mut h.app, incoming).unwrap();
+        let mut saved = ViewSet::new();
+        let id = saved.open(ViewKind::Model, None, false);
+        let camera = Camera { yaw: 2.3, pitch: 0.4, ..Camera::default() };
+        saved.set_spec(id, solidcraft_viewport::ViewSpec::new(camera));
+        let dir = h.dir.join("view-memory");
+        crate::view_memory::remember(&dir, &path, saved.to_json()).unwrap();
+        let before = h.app.cam;
+        restore_views_in(&mut h.app, &path, &dir);
+        assert_eq!(h.app.cam, before, "a background restore leaves the shown design alone");
+        switch(&mut h.app, 1);
+        assert_eq!(h.app.docs.views.active().id, id);
+        assert_eq!(h.app.cam, camera, "the first selection uses the remembered camera, not Fit");
+    }
+
+    #[test]
+    fn view_rename_is_available_with_one_view_and_with_the_default_switcher() {
+        for many in [false, true] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.app.preferences.design_views_as_tabs = false;
+            if many {
+                view_open(&mut h.app, ViewKind::Model, None, false);
+            }
+            h.frames(2);
+            h.app.run("tab.view.rename", json!({})).unwrap();
+            h.frames(3);
+            assert!(crate::scenario::handle_at("tab:rename").is_some(), "the switcher exposes the rename field");
+            h.step(&json!({"text": "Inspection"})).unwrap();
+            h.step(&json!({"key": "Enter"})).unwrap();
+            h.frames(2);
+            assert_eq!(h.app.docs.views.active().name, "Inspection");
+        }
+    }
+
+    #[test]
+    fn view_popups_never_follow_an_index_into_another_design() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.design_views_as_tabs = true;
+        view_open(&mut h.app, ViewKind::Model, None, false);
+        h.frames(3);
+        let [x, y] = h.at(&json!({"handle": "tab:view:0"})).unwrap();
+        let pos = egui::pos2(x as f32, y as f32);
+        h.app.synthetic.extend([
+            egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton { pos, button: egui::PointerButton::Secondary, pressed: true, modifiers: egui::Modifiers::NONE },
+            egui::Event::PointerButton { pos, button: egui::PointerButton::Secondary, pressed: false, modifiers: egui::Modifiers::NONE },
+        ]);
+        h.frames(3);
+        assert!(crate::scenario::handle_at("menu:view.close").is_some());
+        open_tab(&mut h.app, Session::default()).unwrap();
+        h.frames(3);
+        assert!(crate::scenario::handle_at("menu:view.close").is_none(), "the old design's popup is discarded");
+        assert_eq!(h.app.docs.views.len(), 1);
     }
 
     /// The Layout page's "Design tabs" choices govern the views: a kind kept out of sub-tabs is
@@ -4340,9 +4623,11 @@ mod tests {
         view_activate(&mut h.app, model);
         assert_eq!(h.app.docs.views.len(), 3);
         remember_views_in(&h.app, 0, &dir);
+        crate::view_memory::wait_for_pending().unwrap();
         assert!(!dir.exists(), "off: nothing is kept");
         h.app.preferences.design_reopen_views = true;
         remember_views_in(&h.app, 0, &dir);
+        crate::view_memory::wait_for_pending().unwrap();
         h.app.docs.views = ViewSet::new();
         h.app.preferences.design_reopen_views = false;
         restore_views_in(&mut h.app, &path, &dir);
