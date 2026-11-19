@@ -1,6 +1,10 @@
 //! [`super::TRIM_COVER`]: the rows only the kept-trim cover moved
 //! (tangency-labs/solidcraft#19295), each with the hash of main's row from
 //! [`super::record`] run on main.
+//!
+//! The four `stubs4-delete-edge-sphere_diff_3cylinders` rows' main hashes are of main's
+//! run after #18971 (a fillet's rail cut near a knot snaps onto the knot), which moves
+//! those rows apart from the cover.
 
 /// The moved rows: unit, case, main's row hash.
 pub(super) static TRIM_COVER: &[(&str, &str, u64)] = &[
@@ -117,12 +121,12 @@ pub(super) static TRIM_COVER: &[(&str, &str, u64)] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
-        0x43427d5f7b978fab,
+        0xeae85527cac221aa,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
-        0xd6d5c869dfbb2b4c,
+        0xc572443cb53cad33,
     ),
     (
         "blend.fillet_executive_p3",
@@ -132,12 +136,12 @@ pub(super) static TRIM_COVER: &[(&str, &str, u64)] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
-        0xa4cd0b5ab55b94be,
+        0x8081d5b676e37592,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
-        0x39b17d0e71b2c7f4,
+        0xcbe384f9c2724dfd,
     ),
     (
         "blend.fillet_executive_p3",
