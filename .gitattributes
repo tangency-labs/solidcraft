@@ -7,10 +7,6 @@
 # The plugin test fixture is read with include_str! and patched with multi-line excerpts written
 # as Rust strings (always LF), so a CRLF checkout must not change it (#17299).
 *.wat text eol=lf
-# Independent test/cause records; cargo xtask lists rejects unsorted or duplicate test IDs.
-/tests/KNOWN_FAILING_TESTS merge=union
-# Independent quarantine records; cargo xtask lists rejects unsorted or duplicate test IDs.
-/tests/QUARANTINED_TESTS merge=union
 # solidcore's build.rs turns each UpstreamFixes flag file into that field's doc, so a CRLF
 # checkout must not change it.
 solidcore/crates/solidcore/src/kernel/fixes/*.md text eol=lf

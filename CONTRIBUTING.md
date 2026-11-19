@@ -197,7 +197,7 @@ the most complete description of the house style.
 
 ## Tests
 
-New tests and list entries go next to related items, not at the end of a shared file.
+New tests and list entries go next to related items, not at the end of a shared file; in a sorted list they go at their sorted place, which is the end only when they sort last.
 
 | What | Where | Run |
 |---|---|---|
