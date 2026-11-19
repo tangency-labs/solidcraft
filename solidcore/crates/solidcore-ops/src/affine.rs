@@ -74,11 +74,12 @@ pub fn orthonormal_axes(x: [f64; 3], y: [f64; 3]) -> Result<[[f64; 3]; 2]> {
 /// Calls [`Vec3::signed_unit_angle`], including its positive choice for a half turn.
 ///
 /// # Errors
-/// [`Error::Argument`] for non-finite, non-unit or non-perpendicular directions.
+/// [`Error::Refused`] for non-finite, non-unit or non-perpendicular directions,
+/// retaining the kernel routine and reason.
 pub fn signed_unit_angle(normal: [f64; 3], start: [f64; 3], end: [f64; 3]) -> Result<f64> {
     vec3(normal)
         .signed_unit_angle(vec3(start), vec3(end))
-        .map_err(|_| Error::Argument)
+        .map_err(crate::error::status)
 }
 
 /// Carry planar axes by a rigid `matrix`, keeping UV scales and keeping square source
@@ -311,10 +312,13 @@ mod tests {
             signed_unit_angle(normal, start, [-1.0, -5e-13, 0.0]).unwrap(),
             std::f64::consts::PI
         );
-        assert!(matches!(
+        assert_eq!(
             signed_unit_angle(start, normal, start),
-            Err(Error::Argument)
-        ));
+            Err(Error::Refused {
+                operation: "geom::vector3d::Vec3::signed_unit_angle",
+                reason: "expected unit directions perpendicular to a unit normal",
+            })
+        );
     }
 
     /// The mirror in the plane y = 0.
