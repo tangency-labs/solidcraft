@@ -1,0 +1,98 @@
+{
+  "en": {
+    "prefs.clear_view_tabs": "Show view states in tabs",
+    "prefs.clear_view_tabs.help": "Distinguish focused, on-screen, hidden, and detached views in the tab strip.",
+    "view_tab.bring_back": "Bring {view} back to this window",
+    "view_tab.elsewhere": "{view}, in {window}",
+    "view_tab.hidden": "Hidden",
+    "view_tab.main_window": "Main window",
+    "view_tab.on_screen": "On screen",
+    "view_tab.showing": "Showing",
+    "view_tab.views_in": "Views in {design}",
+    "view_tab.window_number": "Window {n}"
+  },
+  "ar": {
+    "prefs.clear_view_tabs": "إظهار حالات العروض في علامات التبويب",
+    "prefs.clear_view_tabs.help": "ميّز بين العروض النشطة والمعروضة والمخفية والموجودة في نافذة أخرى في شريط علامات التبويب.",
+    "view_tab.bring_back": "إعادة {view} إلى هذه النافذة",
+    "view_tab.elsewhere": "{view}، في {window}",
+    "view_tab.hidden": "مخفي",
+    "view_tab.main_window": "النافذة الرئيسية",
+    "view_tab.on_screen": "على الشاشة",
+    "view_tab.showing": "معروض",
+    "view_tab.views_in": "العروض في {design}",
+    "view_tab.window_number": "النافذة {n}"
+  },
+  "de": {
+    "prefs.clear_view_tabs": "Ansichtsstatus in Tabs anzeigen",
+    "prefs.clear_view_tabs.help": "Aktive, sichtbare, ausgeblendete und ausgelagerte Ansichten in der Tableiste unterscheiden.",
+    "view_tab.bring_back": "{view} in dieses Fenster zurückholen",
+    "view_tab.elsewhere": "{view}, in {window}",
+    "view_tab.hidden": "Ausgeblendet",
+    "view_tab.main_window": "Hauptfenster",
+    "view_tab.on_screen": "Auf dem Bildschirm",
+    "view_tab.showing": "Angezeigt",
+    "view_tab.views_in": "Ansichten in {design}",
+    "view_tab.window_number": "Fenster {n}"
+  },
+  "he": {
+    "prefs.clear_view_tabs": "הצגת מצבי תצוגות בלשוניות",
+    "prefs.clear_view_tabs.help": "הבחנה בין תצוגות ממוקדות, גלויות, מוסתרות ובחלון אחר בשורת הלשוניות.",
+    "view_tab.bring_back": "החזרת {view} לחלון הזה",
+    "view_tab.elsewhere": "{view}, ב־{window}",
+    "view_tab.hidden": "מוסתרת",
+    "view_tab.main_window": "חלון ראשי",
+    "view_tab.on_screen": "על המסך",
+    "view_tab.showing": "מוצגת",
+    "view_tab.views_in": "תצוגות ב־{design}",
+    "view_tab.window_number": "חלון {n}"
+  },
+  "ja": {
+    "prefs.clear_view_tabs": "タブにビューの状態を表示",
+    "prefs.clear_view_tabs.help": "フォーカス中、画面上、非表示、別ウィンドウのビューをタブバーで区別します。",
+    "view_tab.bring_back": "{view} をこのウィンドウに戻す",
+    "view_tab.elsewhere": "{view}、{window} 内",
+    "view_tab.hidden": "非表示",
+    "view_tab.main_window": "メインウィンドウ",
+    "view_tab.on_screen": "画面上",
+    "view_tab.showing": "表示中",
+    "view_tab.views_in": "{design} のビュー",
+    "view_tab.window_number": "ウィンドウ {n}"
+  },
+  "ko": {
+    "prefs.clear_view_tabs": "탭에 뷰 상태 표시",
+    "prefs.clear_view_tabs.help": "탭 표시줄에서 활성 뷰, 화면에 보이는 뷰, 숨긴 뷰, 다른 창의 뷰를 구분합니다.",
+    "view_tab.bring_back": "{view}을(를) 이 창으로 가져오기",
+    "view_tab.elsewhere": "{view}, {window}에 있음",
+    "view_tab.hidden": "숨김",
+    "view_tab.main_window": "기본 창",
+    "view_tab.on_screen": "화면에 표시됨",
+    "view_tab.showing": "표시 중",
+    "view_tab.views_in": "{design}의 뷰",
+    "view_tab.window_number": "창 {n}"
+  },
+  "vi": {
+    "prefs.clear_view_tabs": "Hiện trạng thái khung nhìn trên thẻ",
+    "prefs.clear_view_tabs.help": "Phân biệt khung nhìn đang chọn, đang hiển thị, bị ẩn và ở cửa sổ khác trong thanh thẻ.",
+    "view_tab.bring_back": "Đưa {view} về cửa sổ này",
+    "view_tab.elsewhere": "{view}, trong {window}",
+    "view_tab.hidden": "Đã ẩn",
+    "view_tab.main_window": "Cửa sổ chính",
+    "view_tab.on_screen": "Trên màn hình",
+    "view_tab.showing": "Đang hiển thị",
+    "view_tab.views_in": "Khung nhìn trong {design}",
+    "view_tab.window_number": "Cửa sổ {n}"
+  },
+  "zh": {
+    "prefs.clear_view_tabs": "在标签页中显示视图状态",
+    "prefs.clear_view_tabs.help": "在标签栏中区分当前、在屏幕上、隐藏以及位于其他窗口的视图。",
+    "view_tab.bring_back": "将 {view} 移回此窗口",
+    "view_tab.elsewhere": "{view}，位于{window}",
+    "view_tab.hidden": "已隐藏",
+    "view_tab.main_window": "主窗口",
+    "view_tab.on_screen": "在屏幕上",
+    "view_tab.showing": "正在显示",
+    "view_tab.views_in": "{design}中的视图",
+    "view_tab.window_number": "窗口 {n}"
+  }
+}

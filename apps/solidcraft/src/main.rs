@@ -262,7 +262,7 @@ impl eframe::App for App {
             {
                 startup::closed_while_starting(&dir, self.gpu.as_ref().is_none_or(|g| g.lost_at.is_none()));
             }
-            if self.solve.quit_requested {
+            if self.solve.ready_to_quit() {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
             return;
@@ -317,9 +317,11 @@ impl eframe::App for App {
         self.solve.session.crash_journal = solidcraft_engine::crash::enabled();
         // The OS closing the window (Alt+F4, Cmd+Q, the window manager): ask about unsaved
         // designs first; the window closes once they are answered (`quit_requested`).
-        if ctx.input(|i| i.viewport().close_requested()) && !self.solve.quit_requested {
+        if ctx.input(|i| i.viewport().close_requested()) && !self.solve.ready_to_quit() {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            solidcraft_ui_egui::documents::request_quit(&mut self.solve);
+            if !self.solve.quit_requested {
+                solidcraft_ui_egui::documents::request_quit(&mut self.solve);
+            }
             // Closed from the taskbar or a window switcher while another app had the focus: the
             // "save changes?" prompt is only seen once the window comes forward.
             if !self.solve.quit_requested {
@@ -360,8 +362,10 @@ impl eframe::App for App {
         }
         // Every frame, so switching the bridge off reaches the reader while a picker is open too.
         self.nav_bridge.tick(&mut self.solve, ctx);
-        if self.solve.quit_requested {
+        if self.solve.ready_to_quit() {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        } else if self.solve.quit_requested {
+            ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
     }
     /// Pointer motion over a still 3D view that lights up nothing new paints no frame: the view
@@ -415,7 +419,7 @@ impl eframe::App for App {
             return;
         }
         if let Some(window) = frame.winit_window() {
-            self.solve.refresh_panel_monitors(|| {
+            let monitors = || {
                 let primary = window.primary_monitor();
                 window
                     .available_monitors()
@@ -433,9 +437,14 @@ impl eframe::App for App {
                         }
                     })
                     .collect()
-            });
+            };
+            self.solve.refresh_panel_monitors(monitors);
+            solidcraft_ui_egui::view_windows::refresh_displays(&mut self.solve, monitors);
         }
+        solidcraft_ui_egui::view_windows::prepare(&mut self.solve, ui.ctx());
         content_ui(&mut self.solve, ui);
+        solidcraft_ui_egui::view_windows::show(&mut self.solve, ui.ctx(), frame.wgpu_render_state());
+        self.solve.retain_view_pictures(frame.wgpu_render_state());
         // After the frame's UI, so a setting changed in it (Preferences' OK) is written now.
         let now = std::time::Instant::now();
         if self.prefs_writer.due(ui.input(|i| i.events.iter().any(changes_settings)), now)
