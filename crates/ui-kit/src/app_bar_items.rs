@@ -75,6 +75,53 @@ pub enum Zone {
     End,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Preset {
+    Default,
+    Minimal,
+    Full,
+    Compact,
+}
+
+/// A measured hit region. Locked regions reject drops rather than shifting fixed controls.
+#[derive(Clone, Debug)]
+pub struct DropItem {
+    pub id: String,
+    pub zone: Zone,
+    pub left: f32,
+    pub right: f32,
+    pub locked: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DropSlot {
+    pub zone: Zone,
+    pub before: Option<String>,
+    pub x: f32,
+}
+
+/// Ignore pointer jitter before beginning a direct bar edit.
+pub fn is_drag(dx: f32, dy: f32) -> bool {
+    dx.is_finite() && dy.is_finite() && dx.hypot(dy) >= 5.0
+}
+
+/// Find the insertion point in physical bar order, excluding the item being dragged.
+/// The centre's midpoint divides Start from End; tabs and other locked regions reject drops.
+pub fn drop_slot(x: f32, centre: f32, items: &[DropItem], from: &str) -> Option<DropSlot> {
+    if !x.is_finite() || !centre.is_finite() {
+        return None;
+    }
+    let valid = |p: &&DropItem| p.left.is_finite() && p.right.is_finite() && p.right >= p.left;
+    if items.iter().take(256).filter(valid).any(|p| p.locked && x >= p.left && x <= p.right) {
+        return None;
+    }
+    let zone = if x < centre { Zone::Start } else { Zone::End };
+    let mut targets: Vec<_> = items.iter().take(256).filter(valid).filter(|p| !p.locked && p.zone == zone && p.id != from).collect();
+    targets.sort_by(|a, b| a.left.total_cmp(&b.left));
+    let before = targets.iter().find(|p| x < p.left + (p.right - p.left) / 2.0);
+    Some(DropSlot { zone, before: before.map(|p| p.id.clone()), x: before.map_or_else(|| targets.last().map_or(x, |p| p.right), |p| p.left) })
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct Placement {
     pub id: String,
@@ -94,6 +141,93 @@ impl Default for Layout {
 }
 
 impl Layout {
+    /// Unknown entries are preserved for newer versions, but cannot be edited by this one.
+    pub fn editable(&self, id: &str) -> bool {
+        matches!(ItemId::parse(id), Some(item) if item != ItemId::Update) && self.items.iter().any(|p| p.id == id)
+    }
+
+    /// Move before an item in the destination zone, or to that zone's end. Validation happens
+    /// before removal, so stale menu targets and locked/unknown ids are harmless.
+    pub fn move_before(&mut self, id: &str, zone: Zone, before: Option<&str>, defaults: &Self) -> bool {
+        self.sanitize(defaults);
+        if !self.editable(id)
+            || before == Some(id)
+            || before.is_some_and(|b| !self.editable(b) || !self.items.iter().any(|p| p.id == b && p.zone == zone))
+        {
+            return false;
+        }
+        let old = self.clone();
+        if let Some(at) = self.items.iter().position(|p| p.id == id) {
+            let mut item = self.items.remove(at);
+            item.zone = zone;
+            let at = before
+                .and_then(|b| self.items.iter().position(|p| p.id == b))
+                .or_else(|| self.items.iter().rposition(|p| p.zone == zone).map(|i| i + 1))
+                .unwrap_or(self.items.len());
+            self.items.insert(at, item);
+        }
+        *self != old
+    }
+
+    pub fn move_after(&mut self, id: &str, after: &str, defaults: &Self) -> bool {
+        self.sanitize(defaults);
+        if id == after || !self.editable(after) {
+            return false;
+        }
+        let Some(target) = self.items.iter().find(|p| p.id == after) else { return false };
+        let zone = target.zone;
+        let before = self
+            .items
+            .iter()
+            .skip_while(|p| p.id != after)
+            .skip(1)
+            .find(|p| p.zone == zone && p.id != id && self.editable(&p.id))
+            .map(|p| p.id.clone());
+        self.move_before(id, zone, before.as_deref(), defaults)
+    }
+
+    /// Move one visible neighbour in the same zone (left/up or right/down).
+    pub fn move_step(&mut self, id: &str, forward: bool, defaults: &Self) -> bool {
+        self.sanitize(defaults);
+        let Some(item) = self.items.iter().find(|p| p.id == id && self.editable(id)) else { return false };
+        let rows: Vec<_> =
+            self.items.iter().filter(|p| p.zone == item.zone && p.shown == item.shown && self.editable(&p.id)).map(|p| p.id.clone()).collect();
+        let Some(at) = rows.iter().position(|p| p == id) else { return false };
+        let neighbour = if forward { rows.get(at + 1) } else { at.checked_sub(1).and_then(|i| rows.get(i)) };
+        let Some(neighbour) = neighbour else { return false };
+        if forward { self.move_after(id, neighbour, defaults) } else { self.move_before(id, item.zone, Some(neighbour), defaults) }
+    }
+
+    pub fn set_shown(&mut self, id: &str, shown: bool, defaults: &Self) -> bool {
+        self.sanitize(defaults);
+        if !self.editable(id) {
+            return false;
+        }
+        if let Some(item) = self.items.iter_mut().find(|p| p.id == id) {
+            let changed = item.shown != shown;
+            item.shown = shown;
+            return changed;
+        }
+        false
+    }
+
+    /// Presets only edit the saved list. Unknown future entries keep their state.
+    pub fn set_preset(&mut self, preset: Preset, defaults: &Self) {
+        self.sanitize(defaults);
+        let future: Vec<_> = self.items.iter().filter(|p| !defaults.items.iter().any(|d| d.id == p.id)).cloned().collect();
+        *self = defaults.clone();
+        for item in &mut self.items {
+            item.shown = match preset {
+                Preset::Default => item.shown,
+                Preset::Full => true,
+                Preset::Minimal => matches!(item.id.as_str(), "save" | "undo" | "redo" | "search" | "settings" | "help"),
+                Preset::Compact => item.shown && !matches!(item.id.as_str(), "donate" | "discord" | "report" | "version"),
+            };
+        }
+        self.items.extend(future);
+        self.sanitize(defaults);
+    }
+
     /// Today's actual drawing order. Update and Managed are transient, locked slots, never
     /// placements. Legacy visibility preferences remain an additional draw-time condition.
     pub fn default_for<'a>(quick: impl IntoIterator<Item = &'a str>) -> Self {

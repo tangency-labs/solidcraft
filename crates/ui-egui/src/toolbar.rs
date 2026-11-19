@@ -281,7 +281,10 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     },
                     icon_only: app.header.report == ReportButton::Icon,
                 },
-                pills: crate::links::pills(app, r.width() >= app_bar::PILL_LABEL_MIN),
+                pills: crate::links::pills(app, r.width() >= app_bar::PILL_LABEL_MIN)
+                    .into_iter()
+                    .map(|p| app_bar::Pill { hide_tip: app.tr("app_bar.hide_tip"), ..p })
+                    .collect(),
                 search: search_in_header(app) && design_shown(app),
                 search_shortcut: palette_shortcut.as_deref(),
                 assistant: crate::agent_chat::app_bar_button_shown(app),
@@ -304,6 +307,10 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 crate::library::app_bar_toggle(app, ui, rect);
             }
             ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_file_menu_x"), out.file.left()));
+            let editing = crate::app_bar_custom::bar(app, ui, content, &out);
+            if editing {
+                out.actions.clear();
+            }
             for action in &out.actions {
                 match action {
                     app_bar::BarAction::Home => app.home.show(app.session.revision),
@@ -339,15 +346,13 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         crate::links::run(ui.ctx(), id);
                     }
                     app_bar::BarAction::HidePill { id } => {
-                        if let Some(link) = crate::links::by_id(id) {
-                            (link.hide)(&mut app.preferences);
-                        }
+                        crate::app_bar_custom::run(app, &json!({"item":if id == "kofi" { "donate" } else { id },"action":"hide"}));
                     }
                     app_bar::BarAction::Version => ui.ctx().open_url(egui::OpenUrl::new_tab(&url)),
                     app_bar::BarAction::App { id } => run_overflow_control(app, id),
                 }
             }
-            quick_access_bar(app, ui, r, &out.quick_slots, shown);
+            quick_access_bar(app, ui, r, &out.quick_slots, shown && !editing);
             if search_in_header(app) {
                 // Overflow must clear the previous frame's anchor, or the search editor would
                 // still paint over the controls that have taken its old slot.
@@ -369,11 +374,20 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let tabs_rect = Rect::from_min_max(pos2(out.tabs_start.min(tabs_end), r.top()), pos2(tabs_end, r.bottom()));
             let mut tabs_ui = ui.new_child(egui::UiBuilder::new().max_rect(tabs_rect));
             tabs_ui.set_clip_rect(tabs_rect.intersect(ui.clip_rect()));
-            crate::documents::tabs(app, &mut tabs_ui, r, out.tabs_start, tabs_end);
+            let bar_context_click = ui.input(|i| i.pointer.secondary_clicked()) && ui.rect_contains_pointer(content);
+            tabs_ui.add_enabled_ui(!bar_context_click, |ui| crate::documents::tabs(app, ui, r, out.tabs_start, tabs_end));
             if let Some(at) = out.assistant {
-                assistant_button(app, ui, at);
+                ui.add_enabled_ui(!editing, |ui| assistant_button(app, ui, at));
             }
+            crate::app_bar_custom::menu(app, ui, content, &out);
         });
+        if ui.input(|i| i.pointer.secondary_clicked())
+            && let Some(at) = ui.input(|i| i.pointer.interact_pos())
+            && ui.rect_contains_pointer(r)
+            && !chrome.layout(r).content.contains(at)
+        {
+            crate::context_menu::open_for(app, at, crate::context_menu::Target::AppBar { id: Some("captions".into()) });
+        }
         if let Some(action) = action {
             crate::titlebar::run(app, ui.ctx(), action);
         }
@@ -699,6 +713,7 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     if crate::install::offered(app).is_some() {
         rows.push(button("install", solidcraft_ui_text::tr("install.menu"), "new", Some(solidcraft_ui_text::tr("install.button_tip"))));
     }
+    rows.push(row("ui.appBarCustomize", app.tr("cmd.ui.appBarCustomize"), "", "settings", true));
     rows.push(row("settings", &format!("{}…", app.tr("ui.preferences")), "", "settings", true));
     rows.push(row("shortcuts", &format!("{}…", app.tr("ui.keyboard_shortcuts")), "", "list", true));
     rows.push(row("quit", app.tr("ui.quit"), "", "close", true));
@@ -729,6 +744,7 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
         return;
     }
     match id {
+        "ui.appBarCustomize" => app.start(id),
         "new" => FileAction::New.run(app),
         "new_drawing" => FileAction::NewDrawing.run(app),
         "open" => FileAction::Open.run(app),
@@ -2081,14 +2097,10 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
     }
 }
 
-/// A quick-access button being dragged along the bar (#10223).
-#[derive(Clone)]
-struct QuickAccessDrag(String);
-
 /// The quick-access bar (#10223): the commands added from a command's menu, after Save, Undo and
 /// Redo, each with its own icon. A click starts the command as its ribbon button does, a
-/// right-click opens the command's menu (Remove from Quick Access), and a drag along the bar
-/// reorders the buttons. Each button uses its own [`app_bar::BarOut::quick_slots`] position.
+/// right-click and drag use the shared application-bar editor. Each button uses its own
+/// [`app_bar::BarOut::quick_slots`] position.
 fn quick_access_bar(app: &mut SolveApp, ui: &mut egui::Ui, bar: Rect, slots: &[(usize, f32)], shown: bool) {
     let t = Tokens::get();
     let commands: Vec<_> = app.toolbar_custom.quick_access.iter().filter_map(|id| solidcraft_engine::find_command(id)).collect();
@@ -2099,7 +2111,6 @@ fn quick_access_bar(app: &mut SolveApp, ui: &mut egui::Ui, bar: Rect, slots: &[(
     }
     let mut buttons = Vec::with_capacity(ids.len());
     let mut start = None;
-    let mut menu = None;
     for (c, x) in &ids {
         let br = Rect::from_center_size(pos2(*x, bar.center().y), vec2(32.0, 32.0));
         let info = c.info(&app.session);
@@ -2112,12 +2123,6 @@ fn quick_access_bar(app: &mut SolveApp, ui: &mut egui::Ui, bar: Rect, slots: &[(
             ui.painter().rect_filled(br.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
         }
         icons::paint_on(ui.painter(), Rect::from_center_size(br.center(), vec2(20.0, 20.0)), info.icon, Some(true), if enabled { 1.0 } else { 0.35 });
-        if resp.drag_started() {
-            egui::DragAndDrop::set_payload(ui.ctx(), QuickAccessDrag(c.id.to_string()));
-        }
-        if resp.secondary_clicked() {
-            menu = Some((resp.interact_pointer_pos().unwrap_or(br.left_bottom()), c.id));
-        }
         let tip = match crate::keymap::display_for(app, c.id) {
             Some(key) if !key.is_empty() => format!("{label} ({key})"),
             _ => label.clone(),
@@ -2130,37 +2135,18 @@ fn quick_access_bar(app: &mut SolveApp, ui: &mut egui::Ui, bar: Rect, slots: &[(
     }
     let span = buttons.iter().map(|(_, rect)| *rect).reduce(Rect::union).unwrap_or(Rect::NOTHING).expand(1.0);
     crate::scenario::publish_rect("appbar:quick_access", span);
-    // Dragged along the bar: the line shows where it goes; let go and it moves there.
-    if let Some(drag) = egui::DragAndDrop::payload::<QuickAccessDrag>(ui.ctx())
-        && let Some(p) = ui.input(|i| i.pointer.latest_pos())
-    {
-        let before = buttons.iter().find(|(_, br)| p.x < br.center().x).map(|(id, _)| *id);
-        let line = before.and_then(|b| buttons.iter().find(|(id, _)| *id == b)).map_or(span.right(), |(_, br)| br.left());
-        if buttons.iter().any(|(_, rect)| rect.expand2(vec2(35.0, 1.0)).contains(p)) {
-            ui_kit::insertion_marker(ui.painter(), line, bar.top() + 6.0, bar.bottom() - 6.0);
-        }
-        if ui.input(|i| i.pointer.any_released()) {
-            egui::DragAndDrop::clear_payload(ui.ctx());
-            if buttons.iter().any(|(_, rect)| rect.expand2(vec2(35.0, 1.0)).contains(p)) {
-                crate::toolbar_custom::quick_move(app, &drag.0, before);
-            }
-        }
-    }
     if let Some((id, br)) = start {
         // The exact pinned command, without replacing its family's remembered ribbon choice.
         if !end_running_tool(app, id) {
             app.start_pinned(id, Some(br));
         }
     }
-    if let Some((at, id)) = menu {
-        crate::context_menu::open_for(app, at, crate::context_menu::Target::ToolbarCommand { id: id.to_string() });
-    }
 }
 
 /// The chat panel's compact entry point. State stays in agent_chat; the bar only paints it.
 fn assistant_button(app: &mut SolveApp, ui: &mut egui::Ui, at: Rect) {
     use crate::agent_chat::AssistantMark;
-    let resp = ui.interact(at, ui.scope_id().with("assistant_button"), Sense::click());
+    let resp = ui.interact(at, ui.scope_id().with("assistant_button"), Sense::click_and_drag());
     crate::scenario::publish_target("titlebar:assistant", at);
     let mark = crate::agent_chat::assistant_mark(app);
     let tip = crate::agent_chat::assistant_tip(app, mark);
@@ -4916,6 +4902,151 @@ mod app_bar_tests {
     use super::*;
 
     #[test]
+    fn app_bar_right_click_opens_the_shared_menu_and_hides_the_target() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.show(h.app.session.revision);
+        h.call("ui.resize", json!({"width":1920,"height":720}));
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"appbar:save"},"button":"right"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.menu.target, crate::context_menu::Target::AppBar { id: Some("save".into()) });
+        h.step(&json!({"widget":"Hide"})).unwrap();
+        h.frames(2);
+        assert!(!h.app.toolbar_custom.app_bar.items.iter().find(|p| p.id == "save").unwrap().shown);
+        h.step(&json!({"click":{"handle":"appbar:file"},"button":"right"})).unwrap();
+        h.frames(2);
+        let rows = crate::context_menu::items(&h.app, &h.app.menu.target);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "ui.appBarCustomize");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.step(&json!({"click":[1000,17],"button":"right"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.menu.target, crate::context_menu::Target::AppBar { id: None });
+        assert_eq!(crate::context_menu::items(&h.app, &h.app.menu.target).len(), 2);
+        assert!(h.app.home.open);
+    }
+
+    #[test]
+    fn app_bar_customize_dispatch_opens_only_on_interactive_start() {
+        let mut h = crate::scenario::Harness::new();
+        let before = (h.app.session.doc.to_json(), h.app.session.revision);
+        let reply = h.call("engine.execute", json!({"command":"UI.APPBARCUSTOMIZE","params":{}}));
+        assert_eq!(reply["result"], json!({"available":true}));
+        assert!(!h.app.toolbar_custom.app_bar_customizing);
+        assert!(h.app.dialog.is_none());
+        h.app.session.param_check = solidcraft_engine::schema::ParamCheck::Strict;
+        let invalid = h.call("engine.execute", json!({"command":"ui.appBarCustomize","params":{"open":true}}));
+        assert_eq!(invalid["ok"], false);
+        assert!(!h.app.toolbar_custom.app_bar_customizing);
+        let reply = h.call("ui.start", json!({"command":"ui.appBarCustomize"}));
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert!(h.app.toolbar_custom.app_bar_customizing);
+        h.app.toolbar_custom.app_bar_customizing = false;
+        assert!(file_rows(&h.app).iter().any(|row| matches!(row, app_bar::FileRow::Item(item) if item.id == "ui.appBarCustomize")));
+        run_file_row(&mut h.app, "ui.appBarCustomize");
+        assert!(h.app.toolbar_custom.app_bar_customizing);
+        h.app.toolbar_custom.app_bar_customizing = false;
+        h.app.home.open = false;
+        assert!(crate::shortcut_box::search(&h.app, "Customize App Bar").iter().any(|row| row.0 == "ui.appBarCustomize"));
+        h.call("ui.palette", json!({"text":"Customize App Bar"}));
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"menu:ui.appBarCustomize"}})).unwrap();
+        h.frames(2);
+        assert!(h.app.toolbar_custom.app_bar_customizing);
+        assert_eq!((h.app.session.doc.to_json(), h.app.session.revision), before);
+        assert!(h.app.dialog.is_none());
+    }
+
+    #[test]
+    fn app_bar_customization_window_preset_and_checkbox_persist_live() {
+        use ui_kit::app_bar_items::{Layout, Preset};
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1280,"height":1000}));
+        h.app.start("ui.appBarCustomize");
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"appbar:preset:Minimal"}})).unwrap();
+        h.frames(2);
+        let mut expected = Layout::default();
+        expected.set_preset(Preset::Minimal, &Layout::default());
+        assert_eq!(h.app.toolbar_custom.app_bar, expected);
+        h.step(&json!({"click":{"handle":"appbar:shown:save"}})).unwrap();
+        h.frames(2);
+        assert!(!h.app.toolbar_custom.app_bar.items.iter().find(|p| p.id == "save").unwrap().shown);
+        let mut loaded = crate::toolbar_custom::ToolbarCustom::default();
+        loaded.load(&h.app.toolbar_custom.prefs());
+        assert_eq!(loaded.app_bar, h.app.toolbar_custom.app_bar);
+    }
+
+    #[test]
+    fn app_bar_direct_drag_reorders_crosses_zones_and_rejects_locked_targets() {
+        use crate::scenario::{Harness, handle_at};
+        use ui_kit::app_bar_items::Zone;
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1920,"height":720}));
+        h.frames(3);
+        let save = handle_at("appbar:save").unwrap();
+        let settings = handle_at("titlebar:preferences").unwrap();
+        h.step(&json!({"drag":[[save.x,save.y],[settings.x - 10.0, settings.y]]})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.toolbar_custom.app_bar.items.iter().find(|p| p.id == "save").unwrap().zone, Zone::End);
+        let save = handle_at("appbar:save").unwrap();
+        let file = handle_at("appbar:file").unwrap();
+        let layout = h.app.toolbar_custom.app_bar.clone();
+        h.step(&json!({"drag":[[save.x,save.y],[file.x,file.y]]})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.toolbar_custom.app_bar, layout, "File rejects a drop");
+        // Escape cancels an active drag through release, so the source click cannot run too.
+        let press =
+            |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        h.frame_with(vec![egui::Event::PointerMoved(save), press(save, true)]);
+        let undo = handle_at("appbar:undo").unwrap();
+        h.frame_with(vec![egui::Event::PointerMoved(undo)]);
+        h.frame_with(vec![egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        h.frame_with(vec![press(undo, false)]);
+        h.frames(2);
+        assert_eq!(h.app.toolbar_custom.app_bar, layout, "Escape discards the move");
+    }
+
+    #[test]
+    fn app_bar_tiny_drag_stays_a_home_click() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.frames(3);
+        let home = crate::scenario::handle_at("appbar:home").unwrap();
+        let layout = h.app.toolbar_custom.app_bar.clone();
+        h.step(&json!({"drag":[[home.x,home.y],[home.x+2.0,home.y+1.0]]})).unwrap();
+        h.frames(2);
+        assert!(h.app.home.open);
+        assert_eq!(h.app.toolbar_custom.app_bar, layout);
+    }
+
+    #[test]
+    fn app_bar_window_row_handle_moves_between_zone_lists() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.show(h.app.session.revision);
+        h.call("ui.resize", json!({"width":1600,"height":1200}));
+        h.app.start("ui.appBarCustomize");
+        h.frames(3);
+        let save = crate::scenario::handle_at("appbar:drag:save").unwrap();
+        let end = crate::scenario::handle_at("appbar:zone:ui.end").unwrap();
+        h.step(&json!({"drag":[[save.x,save.y],[end.x,end.y]]})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.toolbar_custom.app_bar.items.iter().find(|p| p.id == "save").unwrap().zone, ui_kit::app_bar_items::Zone::End);
+        assert!(h.app.home.open, "the editor also operates over Home");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(!h.app.toolbar_custom.app_bar_customizing && h.app.home.open, "Escape closes the editor and keeps Home");
+    }
+
+    #[test]
     fn app_bar_reset_command_runs_from_control_and_the_palette_without_a_design() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.show(h.app.session.revision);
@@ -5002,7 +5133,9 @@ mod app_bar_tests {
             let handle = format!("titlebar:{id}:hide");
             h.step(&json!({"click":{"handle":handle}})).unwrap();
             h.frames(2);
-            assert!(!(crate::links::by_id(id).unwrap().shown)(&h.app.preferences));
+            let item = if id == "kofi" { "donate" } else { id };
+            assert!(!h.app.toolbar_custom.app_bar.items.iter().find(|p| p.id == item).unwrap().shown);
+            assert!((crate::links::by_id(id).unwrap().shown)(&h.app.preferences), "bar hiding edits the placement only");
         }
         let mut custom = h.app.toolbar_custom.app_bar.clone();
         for p in &mut custom.items {
@@ -6695,13 +6828,14 @@ mod quick_access_tests {
         // Dragged before Extrude, Fillet comes first.
         h.step(&json!({"drag": [[fillet.x, fillet.y], [extrude.x - 10.0, extrude.y]]})).unwrap();
         h.frames(3);
-        assert_eq!(h.app.toolbar_custom.quick_access, ["solid.fillet", "solid.extrude"]);
+        let ordered: Vec<_> = h.app.toolbar_custom.app_bar.items.iter().filter_map(|p| p.id.strip_prefix("quick:")).collect();
+        assert_eq!(ordered, ["solid.fillet", "solid.extrude"]);
 
         // Saved with the toolbar and read back.
         let saved = h.app.toolbar_custom.prefs();
         let mut reloaded = crate::toolbar_custom::ToolbarCustom::default();
         reloaded.load(&saved);
-        assert_eq!(reloaded.quick_access, ["solid.fillet", "solid.extrude"]);
+        assert_eq!(reloaded.app_bar, h.app.toolbar_custom.app_bar);
         reloaded.load(&json!({"version": 3, "quick_access": ["solid.extrude", "solid.extrude", 7, "", "no.such.command"]}));
         assert_eq!(reloaded.quick_access, ["solid.extrude", "no.such.command"], "each once; unknown ids kept but not drawn");
 
@@ -6715,11 +6849,11 @@ mod quick_access_tests {
         h.step(&json!({"key":"Escape"})).unwrap();
         h.frames(2);
 
-        // The button's own menu takes it off; the last one gone, the bar goes too.
-        pick(&mut h, "appbar:quick:solid.extrude", "Remove from Quick Access");
-        assert_eq!(h.app.toolbar_custom.quick_access, ["solid.fillet"]);
+        // The bar menu hides a placement; the ribbon menu can still remove a pinned command.
+        pick(&mut h, "appbar:quick:solid.extrude", "Hide");
+        assert!(!h.app.toolbar_custom.app_bar.items.iter().find(|p| p.id == "quick:solid.extrude").unwrap().shown);
         pick(&mut h, "button:solid.fillet", "Remove from Quick Access");
-        assert!(h.app.toolbar_custom.quick_access.is_empty());
+        assert_eq!(h.app.toolbar_custom.quick_access, ["solid.extrude"]);
         h.frames(2);
         assert!(rect_of("appbar:quick_access").is_none());
         assert!(h.app.session.doc.features.is_empty(), "nothing in the design changed");

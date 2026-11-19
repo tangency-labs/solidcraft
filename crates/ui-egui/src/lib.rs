@@ -187,6 +187,7 @@ mod status_tests {
         assert!(app.session.log.last().is_some_and(|l| l.starts_with("Redo: ") && !l.contains("edit.redo")), "{:?}", app.session.log.last());
     }
 }
+mod app_bar_custom;
 #[cfg(test)]
 mod apply_off_thread_tests;
 mod export_name;
@@ -2183,6 +2184,13 @@ impl SolveApp {
         if id == "timeline.play" {
             if let Err(why) = self.run(id, json!({})) {
                 self.set_status(why, true);
+            }
+            return;
+        }
+        if id == "ui.appBarCustomize" {
+            match self.run(id, json!({})) {
+                Ok(_) => self.toolbar_custom.app_bar_customizing = true,
+                Err(why) => self.set_status(why, true),
             }
             return;
         }
@@ -4230,6 +4238,7 @@ impl SolveApp {
         if self.home.open {
             let workspace = ui.available_rect_before_wrap();
             panel_runtime::hide_app_host(self);
+            app_bar_custom::home_escape(self, ui.ctx());
             home::show(self, ui);
             if self.home.open {
                 // Agent detection runs in the background and is only received by `agent_chat::poll`
@@ -4241,6 +4250,10 @@ impl SolveApp {
                     self.prepare_workspace_panels(ui, workspace, false);
                 }
                 prefs::show(self, ui.ctx());
+                if matches!(self.menu.target, context_menu::Target::AppBar { .. }) {
+                    context_menu::show(self, ui.ctx());
+                }
+                app_bar_custom::window(self, ui.ctx());
                 if settings_open {
                     panel_runtime::hide_app_host(self);
                 }
@@ -4289,6 +4302,7 @@ impl SolveApp {
         shortcut_box::show(self, ui.ctx());
         prefs::show(self, ui.ctx());
         toolbar_custom::window(self, ui.ctx());
+        app_bar_custom::window(self, ui.ctx());
         // All persistent producers have now registered this pass's actual
         // visible paint. Place independent controls and finish result navigation
         // against those footprints; the render domain stays unchanged.

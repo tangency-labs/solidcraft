@@ -98,6 +98,10 @@ pub enum Target {
     },
     /// The toolbar's empty space.
     Toolbar,
+    /// An application-bar item, or empty space (None).
+    AppBar {
+        id: Option<String>,
+    },
     /// The History controls (first, previous, next, last, and Play when shown).
     HistoryControls,
     /// The History folder, with History in the browser: the History controls as menu entries.
@@ -398,6 +402,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Link { index } => link_items(app, *index),
         Target::ToolbarCommand { id } => crate::toolbar_custom::command_items(app, id),
         Target::Toolbar => crate::toolbar_custom::toolbar_items(app),
+        Target::AppBar { id } => crate::app_bar_custom::items(app, id.as_deref()),
         Target::Quick => crate::quick_menu::items(app),
         Target::HistoryControls => crate::timeline::transport_items(app),
         Target::HistoryFolder => crate::timeline::history_folder_items(app),
@@ -1663,6 +1668,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 app.start("parts.resize");
             }
         }
+        "ui.appBarEdit" => crate::app_bar_custom::run(app, &p),
+        "ui.appBarCustomize" | "ui.appBarReset" => app.start(&item.id),
         "ui.repeat" => {
             app.repeat_last();
         }
@@ -1988,8 +1995,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         | "ui.toolbarTab"
         | "ui.shortcutPin"
         | "ui.quickAccessAdd"
-        | "ui.quickAccessRemove"
-        | "ui.appBarReset" => crate::toolbar_custom::run(app, &item.id, &p),
+        | "ui.quickAccessRemove" => crate::toolbar_custom::run(app, &item.id, &p),
         "ui.navigatorStyle" => {
             if let Some(style) = p.get("style").and_then(|s| serde_json::from_value(s.clone()).ok()) {
                 crate::view_gizmo::pick_style(app, style);
@@ -2592,6 +2598,7 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
         | Target::SelectionFilter
         | Target::Navigation
         | Target::Toolbar
+        | Target::AppBar { .. }
         | Target::HistoryControls
         | Target::Workspace
         | Target::NamedViews

@@ -218,6 +218,8 @@ pub enum BarAction {
 /// The bar drawn: what was chosen, and the places it leaves to the app.
 #[derive(Debug)]
 pub struct BarOut {
+    /// Actual control hit regions, in screen coordinates, for editing the saved item list.
+    pub edit_items: Vec<crate::app_bar_items::DropItem>,
     /// Each quick button's source-list index and centre x, including reordered/cross-zone ones.
     pub quick_slots: Vec<(usize, f32)>,
     /// Space reserved for the app-owned control before Home.
@@ -327,7 +329,7 @@ fn pill(ui: &mut egui::Ui, bar: Rect, rect: Rect, p: &Pill, h: &Handles, actions
     let rect = Rect::from_min_size(pos2(rect.left(), snap(bar.center().y - PILL_HEIGHT / 2.0)), vec2(rect.width(), PILL_HEIGHT));
     let x_rect = Rect::from_center_size(pos2(snap(rect.right() - 4.0 - PILL_X / 2.0), rect.center().y), vec2(PILL_X, PILL_X));
     let main = Rect::from_min_max(rect.min, pos2(x_rect.left(), rect.bottom()));
-    let main_resp = ui.interact(main, ui.scope_id().with(("sc_pill", p.id)), Sense::click());
+    let main_resp = ui.interact(main, ui.scope_id().with(("sc_pill", p.id)), Sense::click_and_drag());
     let x_resp = ui.interact(x_rect, ui.scope_id().with(("sc_pill_hide", p.id)), Sense::click());
     main_resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, p.name));
     x_resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, p.hide_name));
@@ -380,7 +382,7 @@ fn icon_button(ui: &mut egui::Ui, bar: Rect, at: f32, b: &BarButton, compact: bo
     let t = Tokens::get();
     let width = if compact && b.narrow { 22.0 } else { 32.0 };
     let br = Rect::from_center_size(pos2(at, bar.center().y), vec2(width, 32.0));
-    let resp = ui.interact(br, ui.scope_id().with(("ab", b.id)), if b.enabled { Sense::click() } else { Sense::hover() });
+    let resp = ui.interact(br, ui.scope_id().with(("ab", b.id)), if b.id == "overflow" { Sense::click() } else { Sense::click_and_drag() });
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, b.enabled, b.tip));
     for prefix in handles.button {
         solidcraft_ui_registry::publish_target(&handle(prefix, b.id), br);
@@ -472,7 +474,7 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
     let home = rect(geometry.home, 32.0);
     let idle = data.home.enabled;
     if visible("home") {
-        let home_response = ui.interact(home, ui.scope_id().with("appbar_home"), if idle { Sense::click() } else { Sense::hover() });
+        let home_response = ui.interact(home, ui.scope_id().with("appbar_home"), Sense::click_and_drag());
         home_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, idle, data.home.tip));
         for name in h.home {
             solidcraft_ui_registry::publish_handle(name, home.center());
@@ -537,7 +539,7 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
     let offer_labeled = geometry.offer_labeled;
     // Report a bug.
     if visible("report") {
-        let response = ui.interact(report, ui.scope_id().with("sc_report_button"), Sense::click());
+        let response = ui.interact(report, ui.scope_id().with("sc_report_button"), Sense::click_and_drag());
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), data.report.label));
         solidcraft_ui_registry::publish_target(h.report, report);
         let hot = response.hovered() || response.has_focus();
@@ -575,7 +577,7 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
     // Settings sits immediately left of Help.
     let gear = rect(geometry.settings, 32.0);
     if visible("settings") {
-        let gresp = ui.interact(gear, ui.scope_id().with("sc_prefs_button"), Sense::click());
+        let gresp = ui.interact(gear, ui.scope_id().with("sc_prefs_button"), Sense::click_and_drag());
         if gresp.hovered() || gresp.has_focus() {
             ui.painter().rect_filled(gear.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
         }
@@ -591,11 +593,7 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
         && let Some(span) = geometry.version
     {
         let vrect = rect(span, galley.size().y);
-        let vresp = ui.interact(
-            vrect.expand2(vec2(2.0, 4.0)).intersect(Rect::everything_right_of(report.right())),
-            ui.scope_id().with("sc_version_link"),
-            Sense::click(),
-        );
+        let vresp = ui.interact(vrect.expand2(vec2(2.0, 4.0)), ui.scope_id().with("sc_version_link"), Sense::click_and_drag());
         let vresp = vresp.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(v.url);
         if vresp.hovered() || vresp.has_focus() {
             ui.painter().hline(vrect.x_range(), vrect.bottom(), Stroke::new(1.0, t.app_bar_text));
@@ -625,7 +623,56 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
         }
     }
     let overflow_items = overflow_items(data, &placed.overflow, overflow_button.map_or(r.left(), |b| b.left()));
+    let mut edit_items = Vec::new();
+    let mut edit_item = |id: String, br: Rect, locked: bool| {
+        if br.is_positive() {
+            let zone = data.items.and_then(|l| l.items.iter().find(|p| p.id == id)).map_or(crate::app_bar_items::Zone::Start, |p| p.zone);
+            edit_items.push(crate::app_bar_items::DropItem { id, zone, left: br.left(), right: br.right(), locked });
+        }
+    };
+    for (id, br) in
+        [("home", home), ("settings", gear), ("report", report), ("help", Rect::from_center_size(pos2(help, r.center().y), vec2(32.0, 32.0)))]
+    {
+        if visible(id) {
+            edit_item(id.into(), br, false);
+        }
+    }
+    for (b, at) in data.actions.iter().zip(&geometry.actions) {
+        if let Some(at) = at {
+            let width = if compact && b.narrow { 22.0 } else { 32.0 };
+            edit_item(b.id.into(), Rect::from_center_size(pos2(r.left() + at, r.center().y), vec2(width, 32.0)), false);
+        }
+    }
+    for &(i, at) in &geometry.quick_slots {
+        if let Some(id) = data.quick_ids.get(i) {
+            edit_item(format!("quick:{id}"), Rect::from_center_size(pos2(r.left() + at, r.center().y), vec2(32.0, 32.0)), false);
+        }
+    }
+    for (p, span) in data.pills.iter().zip(&geometry.pills) {
+        edit_item(if p.id == "kofi" { "donate" } else { p.id }.into(), rect(*span, PILL_HEIGHT), false);
+    }
+    for (id, br) in [("search", search), ("assistant", assistant), ("version", geometry.version.map(|s| rect(s, 26.0)))] {
+        if let Some(br) = br {
+            edit_item(id.into(), br, false);
+        }
+    }
+    edit_item("file".into(), file, true);
+    edit_item("tabs".into(), Rect::from_min_max(pos2(tabs_start, r.top()), pos2(r.left() + geometry.tabs_end, r.bottom())), true);
+    if let Some(br) = leading {
+        edit_item("leading".into(), br, true);
+    }
+    if let Some(br) = overflow_button {
+        edit_item("more".into(), br, true);
+    }
+    for (item, p) in spec.items.iter().zip(&placed.placements) {
+        if matches!(item.id.as_str(), "logo" | "managed" | "offered")
+            && let Some(p) = p
+        {
+            edit_item(item.id.clone(), Rect::from_min_max(pos2(r.left() + p.x, r.top()), pos2(r.left() + p.right(), r.bottom())), true);
+        }
+    }
     BarOut {
+        edit_items,
         quick_slots: geometry.quick_slots.iter().map(|&(i, x)| (i, r.left() + x)).collect(),
         leading,
         actions,

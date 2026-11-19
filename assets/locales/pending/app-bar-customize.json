@@ -1,0 +1,19 @@
+{
+  "en": {
+    "app_bar.compact": "Compact",
+    "app_bar.default": "Default",
+    "app_bar.drag": "Drag to reorder or move between zones",
+    "app_bar.full": "Full",
+    "app_bar.hidden": "Hidden",
+    "app_bar.hide_tip": "Hide from the app bar (show again in Customize App Bar)",
+    "app_bar.minimal": "Minimal",
+    "app_bar.move_down": "Move down",
+    "app_bar.move_end": "Move to End",
+    "app_bar.move_left": "Move left",
+    "app_bar.move_right": "Move right",
+    "app_bar.move_start": "Move to Start",
+    "app_bar.move_up": "Move up",
+    "app_bar.version": "Version",
+    "cmd.ui.appBarCustomize": "Customize App Bar..."
+  }
+}

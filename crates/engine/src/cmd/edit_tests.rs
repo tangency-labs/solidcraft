@@ -1863,6 +1863,17 @@ fn app_bar_reset_is_registered_and_only_requests_a_ui_reset() {
 }
 
 #[test]
+fn app_bar_customize_validates_without_opening_or_changing_a_design() {
+    let mut s = Session::default();
+    let before = (s.doc.to_json(), s.revision, s.undo.len(), s.redo.len());
+    let spec = crate::find_command("ui.appBarCustomize").unwrap();
+    assert!(spec.info(&s).enabled);
+    assert!(!spec.undoable);
+    assert_eq!(s.execute(spec.id, &json!({})).unwrap(), json!({"available":true}));
+    assert_eq!((s.doc.to_json(), s.revision, s.undo.len(), s.redo.len()), before);
+}
+
+#[test]
 fn assistant_toggle_is_refused_headlessly_without_changing_the_document() {
     let mut s = Session::default();
     let before = (s.doc.to_json(), s.undo.len());

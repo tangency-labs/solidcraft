@@ -1,6 +1,94 @@
 //! The application bar from plain data, no app: what each click returns.
 use super::*;
 
+#[test]
+fn app_bar_edit_moves_before_after_and_between_zones() {
+    use crate::app_bar_items::{Layout, Zone};
+    let defaults = Layout::default_for(["solid.box"]);
+    let mut layout = defaults.clone();
+    assert!(layout.move_before("redo", Zone::Start, Some("save"), &defaults));
+    assert_eq!(
+        layout.items.iter().filter(|p| p.zone == Zone::Start).map(|p| p.id.as_str()).collect::<Vec<_>>(),
+        ["home", "redo", "save", "undo", "quick:solid.box"]
+    );
+    assert!(layout.move_after("redo", "undo", &defaults));
+    assert!(layout.move_before("save", Zone::End, Some("settings"), &defaults));
+    assert_eq!(layout.items.iter().find(|p| p.id == "save").unwrap().zone, Zone::End);
+    assert!(layout.move_before("quick:solid.box", Zone::End, None, &defaults));
+    assert_eq!(layout.items.iter().rfind(|p| p.zone == Zone::End).unwrap().id, "quick:solid.box");
+    assert!(layout.move_step("settings", true, &defaults));
+    assert!(layout.move_step("settings", false, &defaults));
+    assert!(layout.set_shown("undo", false, &defaults));
+    assert!(!layout.set_shown("undo", false, &defaults));
+    assert!(layout.set_shown("undo", true, &defaults));
+    let saved = layout.to_value();
+    assert_eq!(Layout::from_value(&saved, &defaults), layout);
+}
+
+#[test]
+fn app_bar_edit_presets_and_hostile_operations_keep_sanitize_guarantees() {
+    use crate::app_bar_items::{Layout, MAX_ITEMS, Placement, Preset, Zone};
+    let defaults = Layout::default_for(["solid.box"]);
+    let mut layout = defaults.clone();
+    layout.items.extend((0..5000).map(|i| Placement { id: format!("future:{i}"), zone: Zone::End, shown: false }));
+    layout.items.insert(0, Placement { id: "file".into(), zone: Zone::End, shown: false });
+    layout.items.push(Placement { id: "save".into(), zone: Zone::End, shown: false });
+    for id in ["logo", "file", "tabs", "more", "update", "managed", "leading", "captions", "unknown", "", "\n", &"x".repeat(10000)] {
+        assert!(!layout.move_before(id, Zone::End, None, &defaults));
+        assert!(!layout.set_shown(id, false, &defaults));
+        assert!(!layout.move_after("save", id, &defaults));
+    }
+    assert!(layout.items.len() <= MAX_ITEMS);
+    assert_eq!(layout.items.iter().filter(|p| p.id == "save").count(), 1);
+    let clean = layout.clone();
+    assert!(!layout.move_before("save", Zone::Start, Some("settings"), &defaults), "wrong-zone target is stale");
+    assert!(!layout.move_before("save", Zone::Start, Some("file"), &defaults));
+    assert_eq!(layout, clean);
+    for preset in [Preset::Minimal, Preset::Full, Preset::Compact, Preset::Default] {
+        layout.set_preset(preset, &defaults);
+        let shown: Vec<_> = layout.items.iter().filter(|p| p.shown).map(|p| p.id.as_str()).collect();
+        match preset {
+            Preset::Minimal => assert_eq!(shown, ["save", "undo", "redo", "search", "settings", "help"]),
+            Preset::Full | Preset::Default => assert!(defaults.items.iter().all(|p| shown.contains(&p.id.as_str()))),
+            Preset::Compact => assert!(["donate", "discord", "report", "version"].iter().all(|id| !shown.contains(id))),
+        }
+        assert!(layout.items.iter().any(|p| p.id == "future:0" && !p.shown));
+        let mut sanitized = layout.clone();
+        sanitized.sanitize(&defaults);
+        assert_eq!(layout, sanitized);
+    }
+}
+
+#[test]
+fn app_bar_drop_slots_cross_zones_reject_locked_parts_and_ignore_tiny_drags() {
+    use crate::app_bar_items::{DropItem, Zone, drop_slot, is_drag};
+    let row = |id: &str, zone, left, right, locked| DropItem { id: id.into(), zone, left, right, locked };
+    let items = vec![
+        row("file", Zone::Start, 0.0, 30.0, true),
+        row("save", Zone::Start, 35.0, 65.0, false),
+        row("undo", Zone::Start, 70.0, 100.0, false),
+        row("tabs", Zone::Start, 110.0, 200.0, true),
+        row("settings", Zone::End, 210.0, 240.0, false),
+        row("help", Zone::End, 245.0, 275.0, false),
+        row("more", Zone::End, 280.0, 310.0, true),
+    ];
+    assert!(!is_drag(2.0, 2.0));
+    assert!(is_drag(3.0, 4.0));
+    assert!(!is_drag(f32::NAN, f32::INFINITY));
+    let before = drop_slot(72.0, 155.0, &items, "save").unwrap();
+    assert_eq!((before.zone, before.before.as_deref(), before.x), (Zone::Start, Some("undo"), 70.0));
+    let across = drop_slot(211.0, 155.0, &items, "save").unwrap();
+    assert_eq!((across.zone, across.before.as_deref(), across.x), (Zone::End, Some("settings"), 210.0));
+    let end = drop_slot(276.0, 155.0, &items, "save").unwrap();
+    assert_eq!((end.zone, end.before, end.x), (Zone::End, None, 275.0));
+    for x in [10.0, 155.0, 295.0, f32::NAN, f32::INFINITY] {
+        assert!(drop_slot(x, 155.0, &items, "save").is_none());
+    }
+    assert!(drop_slot(15.0, f32::NAN, &items, "save").is_none());
+    let empty = drop_slot(250.0, 155.0, &[], "save").unwrap();
+    assert_eq!((empty.zone, empty.before, empty.x), (Zone::End, None, 250.0));
+}
+
 const HANDLES: Handles<'static> = Handles {
     home: &["t:home"],
     home_rect: &["t:home"],
