@@ -640,6 +640,97 @@ fn a_refused_rule_names_the_value_at_fault() {
     assert!(e.contains("the bend radius must be more than 0") && !e.contains("negative"), "{e}");
 }
 
+/// A rule made from the standard library (#18304) takes the gauge's thickness and keeps its own
+/// working radius; its K-factor is the bend model's estimate at that R/T, said so in the reply.
+/// An edge flange's flat is then the closed form: the base and the leg, each short of the outer
+/// sharp by R + T, and the bend's allowance (π/2)(R + K·T).
+#[test]
+fn a_library_material_flattens_by_its_closed_form_bend_allowance() {
+    // 5052-H32 14 ga: 0.0641 in at the default rule's R = T, air bent: the soft column's 0.40 for
+    // R/T from T to 3T. 6061-T6 14 ga at R = 3T: the same band, so 0.40 again.
+    for (material, radius_over_t, radius) in [("Aluminium 5052-H32", 1.0, None), ("Aluminium 6061-T6", 3.0, Some("3 * Thickness"))] {
+        let mut s = Session::default();
+        let mut p = json!({"name": "Stock", "material": material, "gauge": "14 ga", "active": true});
+        if let Some(r) = radius {
+            p["bend_radius"] = json!(r);
+        }
+        let made = run(&mut s, "sheet.manage_rules", p);
+        assert_eq!(made["rule"]["material"], material, "{made}");
+        assert_eq!(made["rule"]["k_factor"], "0.40", "{made}");
+        let notes = made["notes"].to_string();
+        assert!(notes.contains("estimate from the generic air chart") && !notes.contains("minimum"), "{made}");
+        let t = 0.0641 * 25.4;
+        let r = radius_over_t * t;
+        assert!((made["values"]["thickness"].as_f64().unwrap_or(0.0) - t).abs() < 1e-12, "{made}");
+        assert!((made["values"]["bend_radius"].as_f64().unwrap_or(0.0) - r).abs() < 1e-12, "{made}");
+        base(&mut s, 100.0, 60.0);
+        run(&mut s, "sheet.flange", json!({"edges": [[50, 0, t]], "height": 20}));
+        let want = (60.0 - (r + t)) + FRAC_PI_2 * (r + 0.40 * t) + (20.0 - (r + t));
+        let f = flat(&mut s);
+        assert!((f["flat_size_mm"][1].as_f64().unwrap_or(0.0) - want).abs() < 1e-6, "{material}: {f}");
+        assert!((f["bends"][0]["allowance"].as_f64().unwrap_or(0.0) - FRAC_PI_2 * (r + 0.40 * t)).abs() < 1e-6, "{material}: {f}");
+        // The material is saved with the rule, and reads back.
+        let saved = s.doc.to_json();
+        assert!(saved.contains(&format!("\"material\": \"{material}\"")) || saved.contains(&format!("\"material\":\"{material}\"")), "{saved}");
+        let listed = run(&mut s, "sheet.rules", json!({}));
+        assert_eq!(listed["rules"][0]["rule"]["material"], material, "{listed}");
+    }
+}
+
+#[test]
+fn library_rules_keep_the_values_given_beside_them_and_refuse_what_the_library_lacks() {
+    let mut s = Session::default();
+    let made = run(&mut s, "sheet.manage_rules", json!({"name": "SS", "material": "stainless steel 304", "gauge": "16", "k_factor": 0.42}));
+    assert_eq!(made["rule"]["k_factor"], "0.42", "{made}");
+    assert!(made.get("notes").is_none(), "a K-factor given is no estimate: {made}");
+    // A metric thickness is picked as a gauge is.
+    let metric = run(&mut s, "sheet.manage_rules", json!({"name": "SS2", "material": "Stainless steel 304", "gauge": "2 mm"}));
+    assert_eq!(metric["rule"]["thickness"], "2 mm", "{metric}");
+    // Bottoming at R = T reads the hard column's 0.48.
+    let bottomed =
+        run(&mut s, "sheet.manage_rules", json!({"name": "SSB", "material": "Stainless steel 304", "gauge": "16", "bend_method": "bottoming"}));
+    assert_eq!(bottomed["rule"]["k_factor"], "0.48", "{bottomed}");
+    // 6061-T6 at 1T is under its published minimum (2T at 16 ga): kept, and said.
+    let tight = run(&mut s, "sheet.manage_rules", json!({"name": "AL", "material": "Aluminium 6061-T6", "gauge": "16", "bend_radius": "Thickness"}));
+    assert_eq!(tight["rule"]["bend_radius"], "Thickness", "{tight}");
+    assert!(tight["notes"].to_string().contains("under Aluminium 6061-T6's published minimum of 2.581 mm"), "{tight}");
+    assert_eq!(made["rule"]["thickness"], "0.0625 in", "{made}");
+    assert_eq!(made["rule"]["material"], "Stainless steel 304", "{made}");
+    // A material of one's own is a label.
+    let own = run(&mut s, "sheet.manage_rules", json!({"name": "Galv", "material": "Galvanneal", "thickness": "1.6 mm"}));
+    assert_eq!(own["rule"]["material"], "Galvanneal", "{own}");
+    let refused =
+        |s: &mut Session, p: Value| s.execute("sheet.manage_rules", &p).err().map(|e| e.to_string()).unwrap_or_else(|| panic!("{p} was accepted"));
+    // 128 characters, counted as characters, not bytes.
+    let accented = run(&mut s, "sheet.manage_rules", json!({"name": "Accented", "material": "é".repeat(128), "thickness": "2 mm"}));
+    assert_eq!(accented["rule"]["material"], "é".repeat(128));
+    let before = s.doc.to_json();
+    let e = refused(&mut s, json!({"name": "X", "material": "Copper C110", "gauge": "16", "bend_method": "folding"}));
+    assert!(e.contains("air, bottoming or coining"), "{e}");
+    let e = refused(&mut s, json!({"name": "X", "gauge": "16"}));
+    assert!(e.contains("`gauge` needs `material`"), "{e}");
+    let e = refused(&mut s, json!({"name": "X", "material": "Titanium", "gauge": "16"}));
+    assert!(e.contains("not in the standard library") && e.contains("Aluminium 5052-H32"), "{e}");
+    let e = refused(&mut s, json!({"name": "X", "material": "Stainless steel 304", "gauge": "13"}));
+    assert!(e.contains("no gauge `13`") && e.contains("14 ga"), "{e}");
+    let e = refused(&mut s, json!({"name": "X", "material": "é".repeat(129)}));
+    assert!(e.contains("128 characters"), "{e}");
+    let e = refused(&mut s, json!({"name": "X", "material": "a\nb"}));
+    assert!(e.contains("one line"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+    // A rule without a material saves without the field, as designs did before.
+    let mut plain = Session::default();
+    run(&mut plain, "sheet.manage_rules", json!({"name": "Plain", "thickness": "2 mm"}));
+    assert!(!plain.doc.to_json().contains("\"material\""));
+    let lib = run(&mut s, "sheet.rule_library", json!({"material": "copper c110"}));
+    let rules = lib["rules"].as_array().cloned().unwrap_or_default();
+    // 8 Brown & Sharpe gauges and the 12 metric thicknesses.
+    assert_eq!(rules.len(), 8 + 12, "{lib}");
+    assert!(rules.iter().all(|r| r["material"] == "Copper C110" && r["sources"].as_array().is_some_and(|s| !s.is_empty())), "{lib}");
+    assert!(lib["sources"].as_array().is_some_and(|s| s.len() >= 5), "{lib}");
+    assert!(s.execute("sheet.rule_library", &json!({"material": "unobtainium"})).is_err());
+}
+
 /// Every bend keeps an inside radius. At 0 the inside fiber would close to nothing (all of its
 /// length compressed away), which no press brake or forming tool makes, and the bend could not be
 /// built either: its end wall would join a line on one face of the sheet to an arc on the other.

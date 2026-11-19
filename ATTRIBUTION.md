@@ -960,6 +960,14 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | tests/step-regressions/hole_round_revolved.step | SolidCraft contributors | exported by SolidCraft 0.30.1 from public commands (a 30 x 30 x 10 block, a 14 mm hole, a 1 mm round on its top edge), inserted and exported again; import regression fixture | MIT OR Apache-2.0 |
 | tests/step-regressions/torus_patch_and_rest.step | SolidCraft contributors | exported by SolidCraft 0.30.1 from public commands (solid.torus R 12, r 2); import regression fixture | MIT OR Apache-2.0 |
 | tests/step-regressions/torus_patch_and_rest_revolved.step | SolidCraft contributors | exported by SolidCraft 0.30.1 from public commands (torus_patch_and_rest.step inserted and exported again); import regression fixture | MIT OR Apache-2.0 |
+| solidcore/crates/solidcore/tests/data/issue_17598_pole_corner_patch.smb | HuggingAI4Engineering | a 5 x 4 x 3 mm block cut by the kernel from the part of CADGenBench task 215 (https://huggingface.co/datasets/HuggingAI4Engineering/cadgenbench-data, revision f76f9655), around a three-sided corner patch with a pole, written as a native body file; offset regression fixture | ODC-By-1.0 |
+| assets/sheet-metal/standard-library.json | SolidCraft contributors | Original; gauge thicknesses worked out from the Manufacturers' Standard Gauge weights, 15 U.S.C. 206 and the Brown & Sharpe formula, K-factors and radii from the generic tables its `sources` list cite (facts, not copied text); the standard sheet metal library (#18304) | MIT OR Apache-2.0 |
+| .agents/skills/solidcraft-babysit-pr/SKILL.md | Theo Browne (tstack babysit-pr), adapted for SolidCraft | https://github.com/t3dotgg/tstack | MIT (.agents/skills/LICENSE-tstack) |
+| .agents/skills/solidcraft-babysit-pr/scripts/pr-wait | Theo Browne (tstack pr-wait), rewritten for SolidCraft | https://github.com/t3dotgg/tstack | MIT (.agents/skills/LICENSE-tstack) |
+| .agents/skills/solidcraft-file-pr/SKILL.md | Theo Browne (tstack file-pr), adapted for SolidCraft | https://github.com/t3dotgg/tstack | MIT (.agents/skills/LICENSE-tstack) |
+| .agents/skills/solidcraft-full-stop/SKILL.md | Theo Browne (tstack full-stop), adapted for SolidCraft | https://github.com/t3dotgg/tstack | MIT (.agents/skills/LICENSE-tstack) |
+| .agents/skills/solidcraft-modernize/SKILL.md | Theo Browne (tstack modernize), adapted for SolidCraft | https://github.com/t3dotgg/tstack | MIT (.agents/skills/LICENSE-tstack) |
+| .agents/skills/solidcraft-takeover/SKILL.md | Theo Browne (tstack takeover), adapted for SolidCraft | https://github.com/t3dotgg/tstack | MIT (.agents/skills/LICENSE-tstack) |
 
 ## Code adapted from sibling projects
 

@@ -268,6 +268,23 @@ fn listed(id: &str, entries: Vec<solidcraft_engine::plugin::Entry>) -> Listed {
 }
 
 #[test]
+fn a_numeric_plugin_editor_interrupts_external_joint_drive() {
+    use crate::control::tests::{assert_local_editor_interrupts_joint_drive, joint_drive_design};
+
+    let (mut h, arm, _) = joint_drive_design();
+    let mut make = entry("make", "edit", json!([]));
+    make.input_schema = json!({"type":"object","properties":{"length":{"type":"number","default":20}}});
+    h.app.plugin_menu.listed = vec![listed("boxes", vec![make])];
+    h.app.plugin_menu.loaded = true;
+    assert_local_editor_interrupts_joint_drive(&mut h, arm, |app| {
+        open_entry(app, 0, 0);
+        assert!(app.dialog.is_none(), "the editor has no viewport pick field");
+        assert_eq!(app.plugin_menu.dialog().unwrap().ready(app), Ok(json!({"length":20.0})));
+        assert!(preview_commands(app).is_some());
+    });
+}
+
+#[test]
 fn the_menu_lists_install_then_entries_with_a_submenu_for_several() {
     use crate::app_bar::FileRow;
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());

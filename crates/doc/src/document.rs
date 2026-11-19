@@ -3705,6 +3705,12 @@ pub struct DesignLink {
     /// local overrides and survive a source update. Older links start with no baseline.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub inherited: Vec<LinkedBodyProperties>,
+    /// The linked design's properties (its `metadata`) as the component last took them. A
+    /// component property that still has its value here follows the design through Update Links
+    /// and Relink Source; one changed in this design differs from it and stays. Older links
+    /// keep none, so a property the component already has stays and one it lacks is added.
+    #[serde(default, skip_serializing_if = "crate::Metadata::is_empty")]
+    pub inherited_metadata: crate::Metadata,
     /// SHA-256 of the design file's bytes as this design last read them ([`Self::file_digest`]):
     /// opened again, this design tells which linked files changed meanwhile (#9739). Links made
     /// before it was kept have none and are taken as up to date.
@@ -5525,7 +5531,7 @@ impl Document {
         let paired = moved_from.and_then(|from| sk.stored_with_rebuilt_texts(from));
         let moved_from = paired.as_ref().or(moved_from);
         let was = |sk: &Sketch| moved_from.and_then(|from| sk.positions_in(from));
-        let offsets = !sk.offsets.is_empty() || !sk.freeform_offsets.is_empty();
+        let offsets = !sk.offsets.is_empty() || !sk.freeform_offsets.is_empty() || !sk.freeform_chain_offsets.is_empty();
         // Offsets always require another solve after refresh. Only that last report is
         // published; the first report only decides which state the second solve starts from.
         let first_analysis = if offsets { solidcraft_sketch::Analysis::StatusOnly } else { analysis };

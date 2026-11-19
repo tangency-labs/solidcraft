@@ -518,7 +518,6 @@
       "ungraded": {}
     }
   },
-  "held_back": "held_back.json",
   "not_expressible": [
     {
       "case": "assemblies/cov-browser-reparent-placement-and-body-into-a-turned-part",

@@ -488,3 +488,25 @@ fn a_light_jpeg_keeps_its_part() {
     let out = run(&mut s, "inspect.compare_picture", json!({"reference": path, "view": "front", "overlay": false}));
     assert!(out["overlap"].as_f64().unwrap() > 0.9, "overlap {}", out["overlap"]);
 }
+
+/// #19138: a phone photo stored turned (EXIF orientation 6) is measured as it is shown: a 280 x 200
+/// file tagged "turn it" answers as the 200 x 280 picture, not as one lying on its side.
+#[test]
+fn an_exif_orientation_is_applied_to_the_reference() {
+    let mut s = Session::default();
+    box_body(&mut s, "Box", 20.0, 10.0, 30.0);
+    let part = |x0: usize, y0: usize, x1: usize, y1: usize| {
+        move |x: usize, y: usize| if (x0..x1).contains(&x) && (y0..y1).contains(&y) { [255, 255, 255] } else { [200, 200, 200] }
+    };
+    let plain = reference("upright.jpg", &jpeg(200, 280, part(20, 20, 180, 260)));
+    // The same part as it is stored turned a quarter: 280 wide, 200 tall.
+    let stored = crate::upright_image::tagged(&jpeg(280, 200, part(20, 20, 260, 180)), 6);
+    let turned = reference("exif6.jpg", &stored);
+    let mut size = |path: &str| {
+        let out = run(&mut s, "inspect.compare_picture", json!({"reference": path, "view": "front", "overlay": false}));
+        (out["picture"]["width"].as_u64().unwrap(), out["picture"]["height"].as_u64().unwrap())
+    };
+    let upright = size(&plain);
+    assert_eq!(size(&turned), upright, "the tagged file is the same picture as the upright one");
+    assert!(upright.1 > upright.0, "{upright:?}");
+}
