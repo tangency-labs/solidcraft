@@ -730,7 +730,7 @@ impl JsonSchema for CornerOrSnap {
         let coordinate = generator.subschema_for::<LengthExpr>();
         let model = generator.subschema_for::<Point3>();
         json_schema!({
-            "description": "A corner: [x, y] or {x, y} in mm, or [x, y] where a coordinate is an expression over the design's parameters, such as [\"w / 2\", 5]: the corner is then fixed and follows the parameters; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the corner. Or a snap that holds the corner there: \"mid:<line>\" (the line's midpoint), \"on:<curve>:x,y\" (on the curve, near x,y), \"x:<a>+<b>:x,y\" (at the crossing of two curves, near x,y), \"vertex:x,y,z\" or {vertex: [x,y,z]} (a model vertex, projected) or {on_edge: [x,y,z]} (a point on a model edge, projected). Not a point's id.",
+            "description": "A corner: [x, y] or {x, y} in mm, or [x, y] where a coordinate is an expression over the design's parameters and the sketch's other points (\"p1.x\"), such as [\"w / 2\", 5]: the corner is then fixed and follows the parameters; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the corner. Or a snap that holds the corner there: \"mid:<line>\" (the line's midpoint), \"on:<curve>:x,y\" (on the curve, near x,y), \"x:<a>+<b>:x,y\" (at the crossing of two curves, near x,y), \"vertex:x,y,z\" or {vertex: [x,y,z]} (a model vertex, projected) or {on_edge: [x,y,z]} (a point on a model edge, projected). Not a point's id.",
             "anyOf": [
                 point,
                 {"type": "array", "items": coordinate, "minItems": 2, "maxItems": 2},
