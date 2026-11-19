@@ -338,10 +338,11 @@ pub fn fillet_removing(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTur
 /// flat face it rolls on (the face's outline turns away there, into a rounded corner or an
 /// opening), which SMLib refuses (solidcore#3252), or just past the largest blend that fits fails
 /// as an operation: `blend` of the edge on the body with that face
-/// carried on as a slab behind its plane, over the edge's length, and of the material that blend
+/// carried on as a slab behind its plane, between the planes of the faces the edge ends on, and
+/// of the material that blend
 /// adds, what stands over the face's outline (its sheet thickened along its normal) and what
 /// stands past the edge's line, on the other face's side of it (a box on that side of the line,
-/// over the edge's length), joined to the body. So the blend ends where the face's outline ends,
+/// between the same two planes), joined to the body. So the blend ends where the face's outline ends,
 /// on the surface of whatever the face turns into there, carried on square to the face, and is
 /// whole where it stands over the other face (leaning back, or curving away behind the edge's
 /// line). The sheet's prism and the box reach as far either way from the plane, and the box as
@@ -351,8 +352,10 @@ pub fn fillet_removing(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTur
 ///
 /// The kernel says where that gives the blend it would build on an unbounded face, and
 /// measures the slab ([`solidcore_ops::carried_faces_ordered`]: a straight concave edge, a flat
-/// face of it, and a flat face square to the edge at each end, so the slab's square ends add no
-/// material the blend could run into). This only sequences the operations, each recording its
+/// face of it, and at each end a flat face whose plane holds that face's normal, so each end of
+/// the slab lies in the plane of the face the blend ends on there and adds no material the blend
+/// could run into; such a face is square to the edge, or leans, as a sloped cut the edge ends on
+/// does, and the slab's end leans with it). This only sequences the operations, each recording its
 /// history. `Ok(None)` where it does not apply, or where the blend itself fails on the body
 /// with the face carried on too (carrying the face on does not make room for it): the caller
 /// keeps SMLib's refusal. Where the blend builds there but a later step fails for every face,
@@ -413,7 +416,11 @@ fn carried_on_round(body: &Body, pick: Vec3, reach: f64, blend: impl Fn(&Body) -
     // the blend itself fails with the face carried on, so carrying it on does not apply.
     let carry = |c: &solidcore_ops::CarriedFace| -> std::result::Result<Body, Option<FailedStep>> {
         let plane = Plane { origin: v(c.origin), x: v(c.along), y: v(c.across) };
-        let length = c.outline[1][0];
+        // The slab's ends in the face's plane: from the edge's start it runs `s0` along the edge
+        // for each unit across it, and from the edge's end `s1` (both 0 between square ends).
+        let [p0, p1, p2, p3] = c.outline;
+        let (s0, s1) = ((p3[0] - p0[0]) / (p3[1] - p0[1]), (p2[0] - p1[0]) / (p2[1] - p1[1]));
+        let length = p1[0] - s1 * p1[1];
         let rect = Loop2::polygon(&c.outline.map(|p| Vec2::new(p[0], p[1])));
         let what = "building the slab that carries the face on";
         let slab = crate::build::extrude(&plane, &[Region2 { outer: rect, holes: vec![] }], c.depth[0], c.depth[1]).map_err(failed(what))?;
@@ -431,9 +438,11 @@ fn carried_on_round(body: &Body, pick: Vec3, reach: f64, blend: impl Fn(&Body) -
         let room = bounds.min.dist(bounds.max) + size * 1e-3 + 1.0;
         let prism = crate::thicken(&sheet, 2.0 * room, true).map_err(failed("thickening the flat face's sheet"))?;
         // Past the edge's line the fill stands over the other face, not over the flat face's
-        // outline, and is kept whole.
-        let (from, to) = if c.other_side > 0.0 { (0.0, room) } else { (-room, 0.0) };
-        let beyond = Loop2::polygon(&[Vec2::new(0.0, from), Vec2::new(length, from), Vec2::new(length, to), Vec2::new(0.0, to)]);
+        // outline, and is kept whole: between the slab's two ends, as far as the slab reaches.
+        let (from, to) = if c.other_side > 0.0 { (0.0, room.min(p2[1])) } else { (-room.min(-p0[1]), 0.0) };
+        // (exactly 0 and `length` between square ends)
+        let (start, end) = (|across: f64| 0.0 + s0 * across, |across: f64| length + s1 * across);
+        let beyond = Loop2::polygon(&[Vec2::new(start(from), from), Vec2::new(end(from), from), Vec2::new(end(to), to), Vec2::new(start(to), to)]);
         let what = "building the box past the edge's line";
         let beyond = crate::build::extrude(&plane, &[Region2 { outer: beyond, holes: vec![] }], -room, room).map_err(failed(what))?;
         let beyond = beyond.into_iter().next().ok_or_else(|| nothing(what))?;
@@ -2014,6 +2023,79 @@ mod tests {
         // the contact lines: on the notch's other face from cap to cap, on the arm's face between the arcs
         let on_arc = corner - (corner * corner - reach * reach).sqrt();
         for v in [Vec3::new(8.0, -14.0, 0.0), Vec3::new(8.0, -14.0, 40.0), Vec3::new(-14.0, 8.0, on_arc), Vec3::new(-14.0, 8.0, 40.0 - on_arc)] {
+            assert!(has_vertex(&rounded, v, 1e-6), "no vertex at {v:?}");
+        }
+    }
+
+    /// The L-shaped prism above with the top of its arm cut off by a plane that rises 1 in 2 from
+    /// z = 24 at the arm's end (x = -22) to the top at x = 10, and the arm's end rounded 11 along
+    /// its bottom edge and along its edge with that plane. The notch's concave edge now ends on
+    /// the sloped plane, at z = 39, which is not square to it. Rounded 22, its contact line on the
+    /// arm's face (at x = -14) runs past where that face turns into the bottom round's arc
+    /// (x = -11), so SMLib refuses the round, and it is built by carrying the face on between the
+    /// bottom and the sloped plane, whose plane holds the face's normal.
+    ///
+    /// Its material: s from the contact line toward the edge the round stands
+    /// r - sqrt(r^2 - s^2) off the face and the plane is 28 + s / 2 up, which over the round's 22
+    /// is 28 r^2 (1 - pi/4) + r^3 / 12; less what stands past the arc, u past the contact line
+    /// r - sqrt(r^2 - u^2) off the face and 11 - sqrt(11^2 - (3 - u)^2) off the bottom, for u
+    /// from 0 to 3 (Simpson's rule). One face more (12). The concave edge and the face's bottom
+    /// edge are gone; the round's two contact lines, its arcs on the bottom and on the sloped
+    /// plane and its edge on the bottom round's cylinder are new (30 edges). The edge's two ends
+    /// and the bottom edge's other end are gone; the contact lines' four ends and the point where
+    /// the round leaves the bottom for that cylinder are new (20 vertices).
+    #[test]
+    fn a_concave_round_runs_on_past_a_rounded_corner_where_its_edge_ends_on_a_sloped_cut() {
+        let plane = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Y };
+        let outline = [(-22.0, 8.0), (8.0, 8.0), (8.0, -32.0), (70.0, -32.0), (70.0, 32.0), (-22.0, 32.0)].map(|(x, y)| Vec2::new(x, y));
+        let prism = crate::build::extrude(&plane, &[Region2 { outer: Loop2::polygon(&outline), holes: vec![] }], 0.0, 40.0).unwrap();
+        let prism = prism.into_iter().next().unwrap();
+        // what lies above z = 35 + x / 2, drawn in y = -40 (x across, z up) and run to y = 40
+        let side = Plane { origin: Vec3::new(0.0, -40.0, 0.0), x: Vec3::X, y: Vec3::Z };
+        let above = [(-30.0, 20.0), (30.0, 50.0), (-30.0, 50.0)].map(|(x, z)| Vec2::new(x, z));
+        let above = crate::build::extrude(&side, &[Region2 { outer: Loop2::polygon(&above), holes: vec![] }], -80.0, 0.0).unwrap();
+        let cut = crate::boolean(&prism, &above.into_iter().next().unwrap(), crate::BoolOp::Cut).unwrap().unwrap();
+        let body = fillet(&cut, &[Vec3::new(-22.0, 20.0, 0.0), Vec3::new(-22.0, 20.0, 24.0)], 11.0).unwrap();
+        let before = crate::measure(&body).unwrap();
+        // The L's 4688 mm² over 40; less the cut, 255 mm² of the side view over the arm's 24 and
+        // 1 mm² over the block's 64; less the rounds along the arm's 24 mm end, the bottom one
+        // in a square corner and the top one in a corner of 90° + atan(1/2), whose half angle's
+        // cotangent is (sqrt(5) - 1) / 2 and which the round turns atan(2) through.
+        let quarter = 1.0 - std::f64::consts::FRAC_PI_4;
+        let top_round = (5.0_f64.sqrt() - 1.0) / 2.0 - 2.0_f64.atan() / 2.0;
+        let rounded_end = 187_520.0 - 255.0 * 24.0 - 64.0 - 121.0 * 24.0 * (quarter + top_round);
+        assert!((before.volume - rounded_end).abs() < 1e-8 * rounded_end, "{} against {rounded_end}", before.volume);
+        assert_eq!((before.faces, before.edges, before.vertices), (11, 27, 18));
+        let pick = Vec3::new(8.0, 8.0, 19.5);
+        let (r, corner, reach): (f64, f64, f64) = (22.0, 11.0, 3.0);
+        assert!(fillet(&body, &[pick], r).is_err(), "SMLib refuses the round");
+        let past = |u: f64| (r - (r * r - u * u).sqrt()) * (corner - (corner * corner - (reach - u).powi(2)).sqrt());
+        let n = 2000;
+        let h = reach / f64::from(n);
+        let past_arc =
+            h / 3.0 * (past(0.0) + past(reach) + (1..n).map(|i| f64::from(if i % 2 == 1 { 4 } else { 2 }) * past(h * f64::from(i))).sum::<f64>());
+        let (rounded, gone) = fillet_removing(&body, &[pick], r, FilletTurn::Mitre).unwrap();
+        assert!(gone.is_empty());
+        let m = crate::measure(&rounded).unwrap();
+        let added = m.volume - before.volume;
+        let full = 28.0 * r * r * quarter + r.powi(3) / 12.0;
+        // the difference of two measures, each to its accuracy
+        assert!(m.shells == 1 && (full - past_arc - added).abs() < 2e-8 * m.volume, "added {added} of {full} less {past_arc}");
+        assert_eq!((m.faces, m.edges, m.vertices), (12, 30, 20));
+        assert!(m.bbox.min.dist(before.bbox.min) < 1e-9 && m.bbox.max.dist(before.bbox.max) < 1e-9, "{:?}", m.bbox);
+        assert_eq!(faces_from_edge(&rounded, &body, pick), 1);
+        // The contact lines: on the notch's other face from the bottom to the sloped plane (39 up
+        // at x = 8); on the arm's face from the bottom round's arc to the plane (28 up at
+        // x = -14). And where the round leaves the bottom for that round's cylinder, at x = -11.
+        let on_arc = corner - (corner * corner - reach * reach).sqrt();
+        let leaves = -14.0 + (r * r - reach * reach).sqrt();
+        for v in [
+            Vec3::new(8.0, -14.0, 0.0),
+            Vec3::new(8.0, -14.0, 39.0),
+            Vec3::new(-14.0, 8.0, on_arc),
+            Vec3::new(-14.0, 8.0, 28.0),
+            Vec3::new(-11.0, leaves, 0.0),
+        ] {
             assert!(has_vertex(&rounded, v, 1e-6), "no vertex at {v:?}");
         }
     }
