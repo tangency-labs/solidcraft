@@ -1298,6 +1298,17 @@ impl Torus {
         torus.base.base.nurb_is_borrowed = false;
         ignore_status(torus.rebuild_step_from_nurb_parameters(k))?;
 
+        // not upstream (#18195): the rebuild's horn-torus snap (the fork's af7a4d9) merges
+        // radii within its own tolerance, a thousand times the one the circles were found
+        // at here (2e-2 a hundred thousand units from the origin). A torus whose radii the
+        // rebuild moved by more than this test's tolerance no longer lies on the NURB it
+        // keeps: it is not found (the surface stays the NURB).
+        if (torus.major_radius() - maj_rad).abs() > scaled_zero
+            || (torus.minor_radius() - min_rad).abs() > scaled_zero
+        {
+            return Ok(None);
+        }
+
         // (Notify(SM_NO_COPY) copies the test surface's attributes: not modelled)
         Ok(Some(torus))
     }
@@ -2549,6 +2560,44 @@ mod tests {
         assert!(z.is_parallel_to(Vec3::new(0.0, 0.0, 1.0), 1e-9), "{z:?}");
         let o = found.base().position().origin();
         assert!(o.length() < 1e-9, "{o:?}");
+    }
+
+    /// #18195: a torus found in its NURB keeps that NURB, so its analytic radii must lie
+    /// on it. The rebuild's horn snap (radii within a thousand times the recognition's
+    /// tolerance merge) would make a ring torus a hundred thousand units out, 1e-3 short
+    /// of a horn, a horn torus 1e-3 off the NURB: it is not found. Nearer the origin the
+    /// same torus is found with its own radii, and a horn torus stays a horn torus.
+    #[test]
+    fn torus_found_in_its_nurb_keeps_radii_on_the_nurb() {
+        let k = Kernel::default();
+        let found = |cx: f64, maj: f64, min: f64| {
+            let frame = Axis2Placement::new(
+                Vec3::new(cx, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 0.0, 1.0),
+            );
+            let t = Torus::create_canonical(&k, &frame, maj, min, TorusOptions::default(), None)
+                .unwrap();
+            Torus::is_nurb_surface_torus(&k, &plain(&t), 1.0)
+                .unwrap()
+                .map(|f| (f.major_radius(), f.minor_radius()))
+        };
+        // the snap's tolerance: 2e-2 at 1e5, 2e-3 at 1e4
+        for (cx, min) in [(1.0e5, 9.999), (1.0e5, 9.99), (1.0e4, 9.999)] {
+            assert_eq!(found(cx, 10.0, min), None, "cx {cx} minor {min}");
+        }
+        for (cx, min) in [(1.0e4, 9.99), (0.0, 9.999)] {
+            let (maj, got) = found(cx, 10.0, min).expect("a torus");
+            assert!(
+                (maj - 10.0).abs() < 1e-9 && (got - min).abs() < 1e-9,
+                "{maj} {got}"
+            );
+        }
+        for cx in [0.0, 1.0e5] {
+            let (maj, min) = found(cx, 10.0, 10.0).expect("a horn torus");
+            assert_eq!(maj, min, "cx {cx}");
+            assert!((maj - 10.0).abs() < 1e-9, "cx {cx}: {maj}");
+        }
     }
 
     /// Partial tori (swapped, inside out, below the equator, scaled, tiny) are found

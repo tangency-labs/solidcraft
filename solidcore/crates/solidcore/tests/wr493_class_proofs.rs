@@ -190,8 +190,24 @@ fn bits(b: &BSplineSurface) -> Option<Bits> {
 
 /// A UV curve as bits: its natural interval and five points on it.
 fn curve_bits(k: &Kernel, c: &solidcore::curve::curve::Curve) -> Vec<u64> {
+    use solidcore::curve::curve::CurveKind;
     let iv = c.natural_interval();
     let mut out = vec![iv.min().to_bits(), iv.max().to_bits()];
+    // a B-spline or line: its whole definition (degree, knots and control points in use)
+    let base = match c.kind() {
+        CurveKind::BSpline(b) => Some(std::borrow::Cow::Borrowed(b)),
+        CurveKind::Line(l) => l.base_with_nurb().ok(),
+        _ => None,
+    };
+    if let Some(nurb) = base.as_ref().and_then(|b| b.gw_nurb()) {
+        let (n, p) = (nurb.n(), nurb.degree());
+        out.push(p as u64);
+        out.extend(nurb.knots()[..n + p + 2].iter().map(|x| x.to_bits()));
+        for q in &nurb.cpts()[..=n] {
+            out.extend([q.x, q.y, q.z, q.w].map(f64::to_bits));
+        }
+        return out;
+    }
     for f in [0.0, 0.17, 0.5, 0.83, 1.0] {
         let p = c
             .evaluate_point(k, iv.min() + (iv.max() - iv.min()) * f)
@@ -210,18 +226,16 @@ fn face_of(b: &Brep, eu: &solidcore::topology::Edgeuse) -> Option<FaceId> {
     Some(b.loop_(l).ok()?.face)
 }
 
-/// Every found sphere/torus face holds a NURB that is bitwise one of the file's surfaces,
-/// so its UV parameters are the file's. Returns the number of found faces and of the UV
-/// trims on them that are the file's own (same interval, same points bit for bit), so a
-/// file without any cannot pass vacuously.
+/// Every found sphere/torus face holds a NURB that is bitwise its own record's surface in
+/// the file, so its UV parameters are the file's. Returns the number of found faces and of
+/// the UV trims on them that are their own edge-use record's (the same definition bit for
+/// bit: degree, knots and control points), so a file without any cannot pass vacuously;
+/// the others, which healing rebuilt, are listed. Record i makes the primary edge use at
+/// arena index 2i (which carries the record's trim) and its mate at 2i + 1 (which
+/// carries none, asserted).
 fn assert_found_faces_keep_file_nurbs(name: &str) -> (usize, usize, Vec<u32>) {
     let mut k = Kernel::default();
     let data = BrepData::read_from_file(&k, bytes(name), FileType::Ascii).unwrap();
-    let file: Vec<Bits> = data
-        .surfaces
-        .iter()
-        .filter_map(|s| b_spline_part(&s.object).and_then(bits))
-        .collect();
     let file_trims: Vec<Vec<u64>> = data
         .uv_curves
         .iter()
@@ -229,6 +243,15 @@ fn assert_found_faces_keep_file_nurbs(name: &str) -> (usize, usize, Vec<u32>) {
         .collect();
 
     let b = read(&mut k, name);
+    // the read keeps the file's record order: face i is record i
+    assert_eq!(b.faces().iter().count(), data.faces.len(), "{name}: faces");
+    // each edge use record makes its use (arena 2i, which carries the record's trim) and
+    // the mate (arena 2i + 1, which carries none)
+    assert_eq!(
+        b.edgeuses().iter().count(),
+        2 * data.edgeuses.len(),
+        "{name}: edge uses"
+    );
     let mut found = Vec::new();
     for (fid, f) in b.faces().iter() {
         let Some(s) = f.surface.as_ref() else {
@@ -241,9 +264,15 @@ fn assert_found_faces_keep_file_nurbs(name: &str) -> (usize, usize, Vec<u32>) {
         let nurb = b_spline_part(s)
             .and_then(bits)
             .expect("found surface keeps a NURB");
-        assert!(
-            file.contains(&nurb),
-            "{name}: {fid:?}: found surface's NURB is not the file's"
+        let record = &data.faces[fid.index() as usize];
+        let source = data
+            .surfaces
+            .get(record.surface as usize)
+            .and_then(|s| b_spline_part(&s.object).and_then(bits));
+        assert_eq!(
+            Some(nurb),
+            source,
+            "{name}: {fid:?}: found surface's NURB is not its own record's"
         );
     }
     let mut trims = 0;
@@ -252,14 +281,20 @@ fn assert_found_faces_keep_file_nurbs(name: &str) -> (usize, usize, Vec<u32>) {
         if !face_of(&b, eu).is_some_and(|f| found.contains(&f)) {
             continue;
         }
-        if eu
-            .uv_trim_curve
-            .as_ref()
-            .is_some_and(|t| file_trims.contains(&curve_bits(&k, t)))
-        {
-            trims += 1;
-        } else {
-            remade.push(id.index());
+        let i = id.index() as usize;
+        if i % 2 == 1 {
+            // a mate: the read puts no trim on it
+            assert!(eu.uv_trim_curve.is_none(), "{name}: mate {i} has a trim");
+            continue;
+        }
+        let record = data.edgeuses.get(i / 2).expect("record");
+        let own = usize::try_from(record.uv_curve)
+            .ok()
+            .and_then(|u| file_trims.get(u));
+        match (own, eu.uv_trim_curve.as_ref()) {
+            (Some(own), Some(t)) if *own == curve_bits(&k, t) => trims += 1,
+            (Some(_), _) => remade.push(id.index()),
+            (None, _) => panic!("{name}: edge use record {} has no trim", i / 2),
         }
     }
     (found.len(), trims, remade)
@@ -267,45 +302,17 @@ fn assert_found_faces_keep_file_nurbs(name: &str) -> (usize, usize, Vec<u32>) {
 
 #[test]
 fn found_spheres_and_tori_keep_the_file_nurb_and_trims() {
-    // (file, the edge uses on found faces whose UV trim is not one of the file's)
+    // (file, the primary edge uses on found faces whose UV trim is not their own record's)
     let files: [(&str, &[u32]); 9] = [
-        (
-            "Fillet/box_w_slot.smb",
-            &[
-                149, 151, 153, 155, 157, 159, 161, 163, 165, 167, 169, 171, 173, 175, 177, 179,
-                181, 183, 185, 187, 189, 191, 193, 195,
-            ],
-        ),
-        (
-            "Fillet/sphere_diff_3cylinders.smb",
-            &[
-                1, 3, 4, 5, 7, 9, 10, 11, 13, 15, 17, 19, 21, 23, 25, 26, 27, 29, 31, 33, 34, 35,
-                37, 39,
-            ],
-        ),
-        ("Fillet/sphere_plane.smb", &[0, 1, 3, 4, 5, 7, 9]),
-        (
-            "Solids/nurb_fillet.smb",
-            &[
-                55, 57, 58, 59, 61, 63, 65, 67, 68, 69, 71, 73, 75, 77, 79, 81,
-            ],
-        ),
-        (
-            "Solids/revolution_360.smb",
-            &[
-                23, 25, 26, 27, 28, 29, 30, 31, 33, 34, 35, 37, 38, 39, 40, 41, 42, 43, 45, 47, 48,
-                49, 51,
-            ],
-        ),
-        (
-            "Solids/revolution_mold.smb",
-            &[
-                150, 151, 153, 155, 157, 159, 161, 163, 165, 166, 167, 169, 171, 173,
-            ],
-        ),
-        ("Solids/sphere.smb", &[1, 2, 3]),
-        ("sphere.smb", &[1, 2, 3]),
-        ("surf_sphere150.smb", &[1, 2, 3]),
+        ("Fillet/box_w_slot.smb", &[]),
+        ("Fillet/sphere_diff_3cylinders.smb", &[10, 26]),
+        ("Fillet/sphere_plane.smb", &[4]),
+        ("Solids/nurb_fillet.smb", &[58, 68]),
+        ("Solids/revolution_360.smb", &[]),
+        ("Solids/revolution_mold.smb", &[]),
+        ("Solids/sphere.smb", &[]),
+        ("sphere.smb", &[]),
+        ("surf_sphere150.smb", &[]),
     ];
     let mut failures = Vec::new();
     for (name, want) in files {
@@ -378,6 +385,17 @@ fn loop_area(k: &Kernel, b: &Brep, centre: Vec3, radius: f64, inside: Vec3, n: u
         let e = edges.remove(i);
         let fwd = at(&e, e.interval.min()) < 1e-6;
         chain.push((e, fwd));
+    }
+    // the chain closes: the last edge ends where the first starts
+    {
+        let end_of = |(e, fwd): (&solidcore::topology::Edge, bool), at_end: bool| {
+            let iv = e.interval;
+            let t = if fwd == at_end { iv.max() } else { iv.min() };
+            e.curve.as_ref().unwrap().evaluate_point(k, t).unwrap()
+        };
+        let (first, last) = (chain[0], *chain.last().unwrap());
+        let gap = (end_of(last, true) - end_of(first, false)).length();
+        assert!(gap < 1e-6, "the loop does not close: {gap:e}");
     }
     let g = gauss(n);
     let mut total = 0.0;
@@ -599,7 +617,10 @@ fn point_just_outside_the_sphere_pole_is_in_the_infinite_region() {
 /// The cuts of `[a, b]` where the UV curve `t` crosses one of the knot lines `uk` (in u)
 /// or `vk` (in v): the surface is a different polynomial patch on each side, so a Gauss
 /// rule only converges on pieces between them. Sign changes are found on 512 steps and
-/// bisected to the last bit.
+/// bisected to the last bit. Two crossings of one line inside one step are not seen: the
+/// rule then converges more slowly on that piece, which the n = 24 against n = 32
+/// comparison of the callers shows; these integrals are a cross-check, the areas are
+/// proven by `enclose_face_area_relative`.
 fn knot_cuts(
     k: &Kernel,
     t: &solidcore::curve::curve::Curve,
@@ -623,6 +644,10 @@ fn knot_cuts(
             for i in 0..m {
                 let x0 = a + (b - a) * f64::from(i) / f64::from(m);
                 let x1 = a + (b - a) * f64::from(i + 1) / f64::from(m);
+                // a crossing on a step's point is a cut there (the ends are cuts already)
+                if i > 0 && f(x0) == 0.0 {
+                    cuts.push(x0);
+                }
                 if f(x0) * f(x1) < 0.0 {
                     let (mut lo, mut hi) = (x0, x1);
                     for _ in 0..80 {
@@ -760,6 +785,18 @@ fn sphere_face_trim_area(k: &Kernel, b: &Brep, f: FaceId, n: usize, origin: Vec3
         };
         chain.push((p, sense));
     }
+    // the chain closes: the last trim's image ends where the first's starts (a missing
+    // side, which neither area integral need see, leaves it open)
+    {
+        let ((ft, fiv), fs) = chain[0];
+        let ((lt, liv), ls) = *chain.last().unwrap();
+        let start = img(ft, if fs > 0.0 { fiv.min() } else { fiv.max() });
+        let end = img(lt, if ls > 0.0 { liv.max() } else { liv.min() });
+        assert!(
+            (end - start).length() < 1e-4,
+            "{f:?}: the trims do not close"
+        );
+    }
     let g = gauss(n);
     let u0 = face.uv_domain.min().x;
     let (mut gb, mut green) = (0.0, 0.0);
@@ -854,10 +891,14 @@ fn sphere_face_trim_area(k: &Kernel, b: &Brep, f: FaceId, n: usize, origin: Vec3
 /// old per-face areas, taken on a refit sphere with rebuilt trims, were 5.5e-9 to 2.9e-8
 /// off. On the sum the new area is 2e-11 off the trims' area, the old one 9.5e-8.
 ///
-/// PROVEN CLOSER (both rows): the body's area is certified ([`enclose_face_area_relative`]
-/// over every face, 1e-10 of itself wide, about 5.9e-10); both new rows are in the
-/// enclosure and both old rows more than 100 widths outside it. The quadrature references
-/// above (n = 24 against 32, no remainder bound) are cross-checks, not the proof.
+/// PROVEN against the stored geometry (both rows): the area of the body as read, the file's
+/// NURB and the file's trims, is certified ([`enclose_face_area_relative`] over every face,
+/// 1e-10 of itself wide, about 5.9e-10); both new rows are in the enclosure and both old
+/// rows more than 100 widths outside it. The enclosure is of this body's domain: main
+/// measured another one (the refit sphere with rebuilt trims), so this proves the new rows
+/// are the file's area and the old ones are not, which ranks them only with the file's
+/// trims taken as the face's boundary. The quadrature references above (n = 24 against 32,
+/// no remainder bound) are cross-checks, not the proof.
 #[test]
 fn box_w_slot_sphere_corners_are_the_area_their_trims_bound() {
     // the old per-face areas (refit sphere, rebuilt trims), faces 18..=25
@@ -1030,8 +1071,8 @@ fn sphere_face_shares(
 /// bound is out of reach for the ranking: the rows differ by 1.4e-10 of the volume, and
 /// the volume enclosure ([`enclose_volume`]) spends its cell budget at 2.2e-4 of it wide.
 /// What is PROVEN is EQUAL (WIDE): both volume rows lie in that certified enclosure, which
-/// is 2.2e-4 of the volume wide (asserted here); the mass rows are held EQUAL to the body's
-/// certified enclosure by `goldens/tests/wr493_moved_rows_are_classified`.
+/// is at most 2.3e-4 of the volume wide (asserted here); the mass rows are held EQUAL to the
+/// body's certified enclosure by `goldens/tests/wr493_moved_rows_are_classified`.
 #[test]
 fn box_w_slot_volume_and_mass_are_those_their_trims_bound() {
     use solidcore::mass::integrator::properties::{
@@ -1082,12 +1123,11 @@ fn box_w_slot_volume_and_mass_are_those_their_trims_bound() {
         e.hi,
         (e.hi - e.lo) / row
     );
-    // WIDE: the budget stops the enclosure at 2.2146644063900247e-4 of the volume
+    // WIDE: the budget stops the enclosure at 2.2146644063900247e-4 of the volume (a
+    // tighter one holding both rows passes too)
     let width = (e.hi - e.lo) / row;
-    assert!(
-        (2.2e-4..2.3e-4).contains(&width),
-        "volume enclosure {width:e} wide"
-    );
+    eprintln!("{name}: volume enclosure {width:e} of the volume wide");
+    assert!(width < 2.3e-4, "volume enclosure {width:e} wide");
     for r in [row, old_row] {
         assert!(
             e.lo <= r && r <= e.hi,
@@ -1097,7 +1137,8 @@ fn box_w_slot_volume_and_mass_are_those_their_trims_bound() {
         );
     }
     // ARGUED CLOSER: the new row is the reference to the bit, the old row 9.8e-11 off (the
-    // reference is good to 8 * 2e-13, the Stokes/Green agreement above).
+    // Stokes/Green agreement above, 8 * 2e-13, is a cross-check of the reference, not a
+    // bound on its error).
     assert!((row - reference).abs() * 10.0 < (old_row - reference).abs());
     assert!((row - reference).abs() <= 1e-11 * reference.abs());
 

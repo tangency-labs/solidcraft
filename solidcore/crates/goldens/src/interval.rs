@@ -144,9 +144,16 @@ pub(crate) fn gamma_up(n: usize) -> f64 {
     gamma(n).next_up().next_up()
 }
 
-/// `C(n, k)`, exact: each partial product is an integer below 2^53 here.
+/// `C(n, k)`, exact: computed in integers (each partial product `i C(n, i)` is checked) and
+/// asserted below 2^53, so the `f64` is the integer itself.
 pub(crate) fn binom(n: usize, k: usize) -> f64 {
-    (1..=k).fold(1.0, |a, i| a * (n + 1 - i) as f64 / i as f64)
+    let c = (1..=k as u64).fold(1_u64, |a, i| {
+        a.checked_mul(n as u64 + 1 - i)
+            .expect("a binomial past u64")
+            / i
+    });
+    assert!(c < 1 << 53, "C({n}, {k}) is not exact in f64");
+    c as f64
 }
 
 /// A tensor polynomial in Bernstein form of degrees `(p, q)` on `[0, 1]^2`,
@@ -182,9 +189,14 @@ impl Bern {
             for j in 0..=self.q {
                 for a in 0..=o.p {
                     for b in 0..=o.q {
-                        let f = binom(self.p, i) * binom(o.p, a) * binom(self.q, j) * binom(o.q, b);
-                        let d = binom(p, i + a) * binom(q, j + b);
-                        let w = Iv::exact(f).div(Iv::exact(d));
+                        // (each factor exact; their products and quotient enclosed, as
+                        // they round once past 2^53)
+                        let f = Iv::exact(binom(self.p, i))
+                            .mul(Iv::exact(binom(o.p, a)))
+                            .mul(Iv::exact(binom(self.q, j)))
+                            .mul(Iv::exact(binom(o.q, b)));
+                        let d = Iv::exact(binom(p, i + a)).mul(Iv::exact(binom(q, j + b)));
+                        let w = f.div(d);
                         let t = self.c[i * (self.q + 1) + j]
                             .mul(o.c[a * (o.q + 1) + b])
                             .mul(w);

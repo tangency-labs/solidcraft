@@ -1253,7 +1253,17 @@ mod tests {
                 );
                 let (wt, st) = (face_trims(&w, i), face_trims(&src, i));
                 assert!(!wt.is_empty(), "{name}: face {i}: no trims");
-                let same = wt.iter().filter(|t| st.contains(t)).count();
+                // one-to-one: each written trim uses up one matching source trim
+                let mut left = st.clone();
+                let same = wt
+                    .iter()
+                    .filter(|t| {
+                        left.iter()
+                            .position(|s| s == *t)
+                            .map(|at| left.swap_remove(at))
+                            .is_some()
+                    })
+                    .count();
                 kept += same;
                 remade += wt.len() - same;
             }

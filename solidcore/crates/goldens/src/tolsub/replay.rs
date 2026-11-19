@@ -320,6 +320,19 @@ fn replay_trim_cover(unit_id: &str) -> usize {
             if hash(&line) == main_hash {
                 failures.push(format!("{name}: the row put back is main's row to the bit"));
             }
+            // the positive oracle: main's put-back row (captured on main 46dafacb6f, the
+            // row `main_hash` pins), which the row put back agrees with under the comparator
+            let main_row = main_put_back_row(name);
+            if hash(&main_row) != main_hash {
+                failures.push(format!(
+                    "{name}: the captured row is not main's put-back row"
+                ));
+            }
+            if diff(&main_row, &line, u.abs_floors()).is_some() {
+                failures.push(format!(
+                    "{name}: the row put back does not agree with main's put-back row"
+                ));
+            }
             if committed.is_some_and(|g| diff(g, &line, u.abs_floors()).is_none()) {
                 failures.push(format!(
                     "{name}: the row put back agrees with the committed line: the cover \
@@ -436,13 +449,24 @@ const TRIM_COVER_REFIT: &[(&str, &str)] = &[
     ("topology.face_p3", "own_reader_sphere_plane_uv_trim_f8"),
 ];
 
+/// Main's put-back row of a [`TRIM_COVER_PUT_BACK_OFF_MAIN_RUN`] row (captured on main at
+/// 46dafacb6f; its hash is the row's [`TRIM_COVER`] hash).
+fn main_put_back_row(name: &str) -> Value {
+    include_str!("replay/main_put_back_rows.jsonl")
+        .lines()
+        .map(|l| serde_json::from_str::<Value>(l).expect("row"))
+        .find(|v| v["case"] == name)
+        .unwrap_or_else(|| panic!("{name}: no captured put-back row"))
+}
+
 /// The [`TRIM_COVER`] rows (mirrors of `Solids/nurb_fillet.smb`) that, with the cover's
 /// raises put back, with or without the fitted NURB, are one to three units in the last
 /// place off main's put-back run in their geometry blocks' sums (measured once on main at
 /// 0b321cbaa4, not replayed here). Held here: put back, the row is not main's put-back row
 /// to the bit, and it does not agree with the committed line under the goldens' comparator
-/// (the cover's raises move it beyond that); as is, it agrees with its committed line
-/// (main's) under the comparator (`gen0061` to the bit).
+/// (the cover's raises move it beyond that), but it agrees with main's put-back row (held in
+/// `replay/main_put_back_rows.jsonl`) under the comparator; as is, it agrees with its
+/// committed line (main's) under the comparator (`gen0061` to the bit).
 const TRIM_COVER_PUT_BACK_OFF_MAIN_RUN: &[(&str, &str)] = &[
     ("topology.brep_mirror", "gen0050"),
     ("topology.brep_mirror", "gen0061"),

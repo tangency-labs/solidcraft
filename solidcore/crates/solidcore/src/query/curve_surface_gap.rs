@@ -341,6 +341,25 @@ fn norm_upper(v: V3<Ivl>) -> Option<f64> {
     (v.x.is_finite() && v.y.is_finite() && v.z.is_finite() && hi.is_finite()).then_some(hi)
 }
 
+/// `sqrt(x^2 + y^2 + z^2)` of an enclosure, a lower bound (each component's least
+/// magnitude); `None` unless finite.
+fn norm_lower(v: V3<Ivl>) -> Option<f64> {
+    let sq = |a: Ivl| {
+        let m = if a.lo > 0.0 {
+            a.lo
+        } else if a.hi < 0.0 {
+            -a.hi
+        } else {
+            0.0
+        };
+        let m = Ivl::from(m);
+        m * m
+    };
+    let s = sq(v.x) + sq(v.y) + sq(v.z);
+    let lo = s.sqrt().lo.max(0.0);
+    (v.x.is_finite() && v.y.is_finite() && v.z.is_finite() && lo.is_finite()).then_some(lo)
+}
+
 fn scaled(v: V3<Ivl>, a: Ivl) -> V3<Ivl> {
     V3 {
         x: v.x * a,
@@ -575,6 +594,58 @@ pub fn curve_uv_gap_bound(
         return Ok(None);
     };
     certified_gap(k, curve, uv, &net, range, FIRST_PIECES, floor)
+}
+
+/// A proved lower bound on `|C(t) − S(W(t))|` at the one parameter `t`, for the curves and
+/// surface of [`curve_uv_gap_bound`]: the same enclosures of `C(t)`, `W(t)` and the net's
+/// point over the box `W(t)` encloses, every rounding included, and the norm's lower end.
+/// It bounds the supremum [`curve_uv_gap_bound`] encloses from below (not upstream,
+/// tangency-labs/solidcraft#18195, a witness for ranking two gaps).
+///
+/// `None` when the gap at `t` is not enclosed: `t` outside either curve's domain or not
+/// finite, a surface that is not a NURBS net or whose net's parameters are not the
+/// surface's (probed at `W(t)`), or a box `W(t)` too far past the net's end. A box past the
+/// end by rounding has the continued polynomial's slack taken off.
+///
+/// # Errors
+///
+/// The kernel's unported and cancelled statuses.
+pub fn curve_uv_gap_lower_bound(
+    k: &Kernel,
+    curve: &BSplineCurve,
+    uv: &BSplineCurve,
+    surface: &Surface,
+    t: f64,
+) -> Result<Option<f64>> {
+    let (Ok(cn), Ok(wn)) = (NurbsCurve::of(curve), NurbsCurve::of(uv)) else {
+        return Ok(None);
+    };
+    let inside = |n: &NurbsCurve| matches!((n.u.get(n.p), n.u.get(n.n)), (Some(&d0), Some(&d1)) if d0 <= t && t <= d1);
+    if !(t.is_finite() && inside(&cn) && inside(&wn)) {
+        return Ok(None);
+    }
+    let Ok(w) = uv.evaluate_point(t) else {
+        return Ok(None);
+    };
+    let surface = surface.clone_for_evaluation()?;
+    let Some(net) = NetSurface::of(k, &surface, &[Point2::new(w.x, w.y)])? else {
+        return Ok(None);
+    };
+    let at = Ivl::from(t);
+    let c = curve_derivs_over(&cn, at, 0, None)?;
+    let w = curve_derivs_over(&wn, at, 0, None)?;
+    let Some(c0) = c.first().copied() else {
+        return Ok(None);
+    };
+    // a box past the net's end (rounding of a parameter on the boundary) is the continued
+    // polynomial `S~` there: `|C - S(clamp W)| >= |C - S~(W)| - slack`, the slack of
+    // [`NetSurface::partials`] bounding `|S~(W) - S(clamp W)|`
+    let (surf, slack) = match net.partials(&w, 1, 0) {
+        Ok((p, slack)) => (p.at(0, 0), slack),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Err(_) => return Ok(None),
+    };
+    Ok(norm_lower(minus(c0, surf)).map(|d| (Ivl::from(d) - Ivl::from(slack)).lo.max(0.0)))
 }
 
 /// A proved upper bound on the distance from every point of `curve` over its parameters

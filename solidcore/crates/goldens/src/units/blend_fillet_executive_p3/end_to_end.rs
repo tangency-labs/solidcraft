@@ -3206,8 +3206,10 @@ mod wr493_certificates {
     #[test]
     fn the_round_is_closer_to_its_torus() {
         let (_, old) = round(true);
-        let (mut k, mut new) = round(false);
-        let lines = check_brep(&mut k, &mut new, CheckLevel::Level2)
+        let (mut k, new) = round(false);
+        // (on a copy: the check writes the edges' curves, which the record below measures)
+        let mut checked = new.clone_standing_for_self().expect("copy");
+        let lines = check_brep(&mut k, &mut checked, CheckLevel::Level2)
             .expect("check")
             .lines();
         assert!(lines.is_empty(), "{NAME}: Level 2: {lines:?}");
@@ -3281,22 +3283,28 @@ mod wr493_certificates {
             let faces: Vec<Vec<f64>> = g[124..].chunks(18).map(<[f64]>::to_vec).collect();
             (vertices, by_role, faces)
         };
-        // the refit build is main's: its record is main's run's (the block pinned, measured
-        // on main), and agrees with main's committed block within 1e-13 of its scale
+        // the refit build is main's: its record is, value by value and bit for bit, the
+        // record main's run of this case produced (captured on main 46dafacb6f), and agrees
+        // with main's committed block within 1e-13 of its scale
         {
             let mut g = Vec::new();
             crate::util::primitive::append(&Kernel::default(), &old, &mut g).expect("geometry");
+            let main_run: Vec<u64> =
+                include_str!("../fixtures/blend_fillet_executive_p3_wr493_main_geometry.txt")
+                    .lines()
+                    .map(|l| u64::from_str_radix(l, 16).expect("bits"))
+                    .collect();
+            let bits: Vec<u64> = g.iter().map(|x| x.to_bits()).collect();
+            assert_eq!(bits, main_run, "{NAME}: the refit build is not main's run");
             let (mut sum, mut abs, mut weighted) = (0.0f64, 0.0f64, 0.0f64);
             for (j, &x) in g.iter().enumerate() {
                 sum += x;
                 abs += x.abs();
                 weighted += (j as f64 + 1.0) * x;
             }
-            let run = [41.492_010_499_717_864, 331.960_110_824_691_47, 4_079.178_130_064_164_6];
-            assert_eq!([sum, abs, weighted], run, "{NAME}: the refit build is not main's run");
             let committed = [41.492_010_499_717_83, 331.960_110_824_691_4, 4_079.178_130_064_161];
-            for (a, b) in run.iter().zip(committed) {
-                assert!((a - b).abs() <= 1e-13 * run[2], "{NAME}: main's committed block");
+            for (a, b) in [sum, abs, weighted].iter().zip(committed) {
+                assert!((a - b).abs() <= 1e-13 * weighted, "{NAME}: main's committed block");
             }
         }
         let (vo, eo, fo) = entities(&old, &ro);

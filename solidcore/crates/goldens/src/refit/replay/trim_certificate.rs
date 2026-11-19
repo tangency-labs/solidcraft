@@ -121,7 +121,15 @@ fn trim_bound(k: &Kernel, b: &Brep, eu: EdgeuseId) -> (f64, f64) {
     let (s0, s1) = (vs.first().unwrap().0, vs.last().unwrap().0);
     let mut best = f64::INFINITY;
     for reversed in [false, true] {
+        // the trim's ends go to the interval's ends exactly (the formula's width can round)
         let t_at = |s: f64| {
+            if s == s0 || s == s1 {
+                return if (s == s0) != reversed {
+                    i.min()
+                } else {
+                    i.max()
+                };
+            }
             let f = (s - s0) / (s1 - s0);
             let f = if reversed { 1.0 - f } else { f };
             i.min() + f * (i.max() - i.min())
@@ -169,13 +177,14 @@ fn assert_moved_input(case: &Case, before: (&Brep, EdgeuseId), after: (&Brep, Ed
     let f = eu1::face(before.0, before.1).unwrap().unwrap();
     let d = before.0.face(f).unwrap().uv_domain;
     let (sx, sy) = (du * (d.max().x - d.min().x), dv * (d.max().y - d.min().y));
-    let moved: Vec<(f64, f64)> = polyline(trim(before.0, before.1))
+    // (parameter, point) pairs: the knots are the same, only the points move
+    let moved: Vec<(f64, f64, f64)> = polyline(trim(before.0, before.1))
         .iter()
-        .map(|(_, q)| (q.x + sx, q.y + sy))
+        .map(|&(s, q)| (s, q.x + sx, q.y + sy))
         .collect();
-    let reported: Vec<(f64, f64)> = polyline(trim(after.0, after.1))
+    let reported: Vec<(f64, f64, f64)> = polyline(trim(after.0, after.1))
         .iter()
-        .map(|(_, q)| (q.x, q.y))
+        .map(|&(s, q)| (s, q.x, q.y))
         .collect();
     assert_eq!(
         moved, reported,
@@ -287,7 +296,7 @@ fn encoding(k: &Kernel, c: &Curve) -> Vec<u64> {
 /// the refit seam, as main built it; with every trim on a found face (a sphere or torus)
 /// fetched or made (`get_or_create_uv_trim_curve`), and each such edge use's [`Gap`].
 fn gaps(name: &str, refit: bool) -> std::collections::BTreeMap<u32, Gap> {
-    use solidcore::query::curve_surface_gap::curve_uv_gap_bound;
+    use solidcore::query::curve_surface_gap::{curve_uv_gap_bound, curve_uv_gap_lower_bound};
     use solidcore::surface::surface::SurfaceKind;
     use solidcore::topology::brep_data::BrepData;
     use solidcore::topology::database_io::FileType;
@@ -355,18 +364,18 @@ fn gaps(name: &str, refit: bool) -> std::collections::BTreeMap<u32, Gap> {
             .unwrap_or_else(|| panic!("{name} {id:?}: the gap is not enclosed"));
         let bits = encoding(&k, t);
         let lo_k = crate::runner_kernel();
-        // A lower bound: the largest gap at uniform parameters, each less a margin for its
-        // evaluation's rounding: the supremum is at least every gap at a parameter. The
-        // margin (1e-9 of the points' size, against rounding near 1e-15 of it) is ARGUED,
-        // not derived: the points are evaluated in plain floating point.
+        // A lower bound: the largest of the certified lower bounds of the gap at uniform
+        // parameters ([`curve_uv_gap_lower_bound`]: interval evaluation, every rounding
+        // included): the supremum is at least the gap at any one parameter. A parameter whose
+        // gap is not enclosed (its UV box not inside the net) is skipped.
         let lo = Box::new(move || {
+            let CurveKind::BSpline(c) = rail.kind() else {
+                unreachable!("checked above");
+            };
             (0..=SAMPLES)
-                .map(|j| {
+                .filter_map(|j| {
                     let t = range[0] + (range[1] - range[0]) * j as f64 / SAMPLES as f64;
-                    let q = w.evaluate_point(t).unwrap();
-                    let sp = s.evaluate_point(&lo_k, Point2::new(q.x, q.y)).unwrap();
-                    let cp = rail.evaluate_point(&lo_k, t).unwrap();
-                    (sp - cp).length() - 1e-9 * (sp.length() + cp.length())
+                    curve_uv_gap_lower_bound(&lo_k, c, &w, &s, t).unwrap()
                 })
                 .fold(0.0_f64, f64::max)
         });
@@ -390,12 +399,12 @@ fn gaps(name: &str, refit: bool) -> std::collections::BTreeMap<u32, Gap> {
 /// ([`curve_uv_gap_bound`]: interval Taylor models with bisection, every rounding
 /// included). A trim within its edge's tolerance on both sides is PROVEN. The others are
 /// pinned below, each ranked between the sides by the certified upper bound of one against
-/// a lower bound of the other (the largest gap at [`SAMPLES`] parameters less a rounding
-/// margin, which is ARGUED; a lower bound of a supremum needs no enclosure). So the
-/// CLOSER and FARTHER rankings below rest on that argued margin (it is about six orders of
-/// magnitude above the rounding); the upper bounds are certified:
-/// - the same file trim on both sides, out of tolerance by the same amount (the two
-///   enclosures `[lo, hi]` overlap): the file's own data, kept by main too;
+/// a certified lower bound of the other (the largest of the lower bounds of the gap at
+/// [`SAMPLES`] parameters, [`curve_uv_gap_lower_bound`]: a supremum is at least its value at
+/// any parameter). Both ends of every ranking are enclosed:
+/// - the same file trim on both sides, proved out of tolerance on both (each side's lower
+///   bound above its edge's tolerance; the two enclosures `[lo, hi]` overlap, so neither
+///   side is ranked closer): the file's own data, kept by main too;
 /// - CLOSER: within tolerance here, out on main (`hi` here below `lo` on main);
 /// - FARTHER: out here, `lo` here above `hi` on main.
 ///
@@ -475,8 +484,8 @@ fn wr493_trims_on_found_faces_are_bounded_on_both_nurbs() {
                     "FARTHER"
                 } else {
                     assert!(
-                        n.bits == m.bits && m.file && n.hi >= mlo && m.hi >= nlo,
-                        "{name} {eu}: neither the same file trim nor ranked"
+                        n.bits == m.bits && m.file && mlo > m.tol && n.hi >= mlo && m.hi >= nlo,
+                        "{name} {eu}: neither the same file trim out on both sides nor ranked"
                     );
                     "same file trim"
                 }
