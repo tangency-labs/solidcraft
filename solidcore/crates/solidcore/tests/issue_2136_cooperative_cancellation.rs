@@ -13,14 +13,11 @@
 //! 3. **Mid-solve & worker-thread cancellation:** [`GlobalSolver::solve_branch`] stops
 //!    deterministically mid-traversal when its shared [`CancelToken`] is signalled; a
 //!    host thread cancels an in-flight worker-thread kernel job (and a multi-worker group
-//!    sharing clones of one token); and [`CancelToken::reset`] / [`Kernel::clear_cancel_token`]
+//!    sharing one token) once the job has polled its token; and [`CancelToken::reset`] / [`Kernel::clear_cancel_token`]
 //!    restore normal execution.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Barrier};
 use std::thread;
-use std::time::Duration;
 
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::blend::fillet_section::section::GN_DEFAULT_THUMBWEIGHT;
@@ -513,6 +510,36 @@ fn mass_properties_ode_integration_parity_and_cancellation() {
     });
 }
 
+/// Runs `brep_mass_properties` (`accuracy = 1e-8`, a heavy NURBS ODE integration) on a fresh
+/// copy of `template` again and again until it returns an error: a job that can't finish
+/// before it is cancelled, however fast the machine.
+fn mass_properties_until_err(k: &Kernel, template: &Brep, centre: Point3) -> solidcore::Result<()> {
+    let store = AttributeStore::default();
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &|_| ObjectKey(0),
+    };
+    loop {
+        let mut b = copy_brep(&mut Kernel::default(), template, 1);
+        brep_mass_properties(k, &mut b, 1e-8, 1.0, centre, &attrs)?;
+    }
+}
+
+/// Waits until `counter` (a [`CancelToken::after_polls`] token) has been polled, so the
+/// worker holding it is inside its kernel job. Panics if the worker ends without polling.
+fn wait_until_polled(counter: &CancelToken, worker_finished: impl Fn() -> bool) {
+    let polls = || counter.polls().expect("a counting token");
+    while polls() == 0 {
+        // read `finished` before the count: a worker that polled and then ended is not a failure
+        let finished = worker_finished();
+        assert!(
+            !finished || polls() > 0,
+            "worker ended before it polled its cancel token"
+        );
+        thread::yield_now();
+    }
+}
+
 #[test]
 fn worker_thread_and_group_cancel_in_flight_via_cancel_token() {
     let mut setup = Kernel::default();
@@ -522,34 +549,24 @@ fn worker_thread_and_group_cancel_in_flight_via_cancel_token() {
         create_box(&mut setup, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
     let cyl_template = create_cylinder(&mut setup, Point3::new(5.0, 5.0, -1.0), 2.0, 12.0).unwrap();
 
-    // 1. Single worker running a heavy NURBS ODE integration (`accuracy = 1e-8`),
-    //    cancelled mid-flight from the host thread via its cloned `CancelToken`, then
-    //    reused cleanly after `token.reset()`.
-    let mut worker_brep = copy_brep(&mut setup, &torus_template, 1);
+    // 1. Single worker running heavy NURBS ODE integrations until it is cancelled, cancelled
+    //    mid-flight from the host thread via its cloned `CancelToken`, then reused cleanly
+    //    after `token.reset()`. The token counts its polls and never cancels by count: the
+    //    host cancels once the worker has polled, so the job is running, not after a sleep.
+    let torus_worker = copy_brep(&mut setup, &torus_template, 1);
     let mut retry_brep = copy_brep(&mut setup, &torus_template, 2);
 
-    let token = CancelToken::new();
-    let started = Arc::new(AtomicBool::new(false));
+    let token = CancelToken::after_polls(u64::MAX);
     let token_worker = token.clone();
-    let started_worker = Arc::clone(&started);
 
     let handle = thread::spawn(move || {
         let mut k = Kernel::default();
         k.set_cancel_token(token_worker);
-        let store = AttributeStore::default();
-        let attrs = PropertyAttributes {
-            store: &store,
-            key_of: &|_| ObjectKey(0),
-        };
-        started_worker.store(true, Ordering::Release);
-        let cancelled = brep_mass_properties(&k, &mut worker_brep, 1e-8, 1.0, centre, &attrs);
+        let cancelled = mass_properties_until_err(&k, &torus_worker, centre);
         (k, cancelled)
     });
 
-    while !started.load(Ordering::Acquire) {
-        thread::yield_now();
-    }
-    thread::sleep(Duration::from_millis(20));
+    wait_until_polled(&token, || handle.is_finished());
     token.cancel();
 
     let (worker_kernel, result) = handle.join().expect("worker thread must not panic");
@@ -566,18 +583,19 @@ fn worker_thread_and_group_cancel_in_flight_via_cancel_token() {
     assert!(ok.properties.volume > 0.0);
 
     // 2. Group cancellation: one shared `CancelToken` cancels multiple worker kernels
-    //    concurrently (boolean, fillet, and mass-property jobs).
+    //    concurrently (boolean, fillet, and mass-property jobs), each running until it is
+    //    cancelled. Each worker's token is its own poll counter joined with the shared one
+    //    (`CancelToken::either`), so the host cancels the shared token once every worker
+    //    has polled.
     let group_token = CancelToken::new();
-    let barrier = Arc::new(Barrier::new(4));
+    let counters: [CancelToken; 3] = std::array::from_fn(|_| CancelToken::after_polls(u64::MAX));
 
-    let b1 = Arc::clone(&barrier);
-    let t1 = group_token.clone();
+    let t1 = counters[0].either(&group_token);
     let box_w1 = copy_brep(&mut setup, &box_template, 10);
     let cyl_w1 = copy_brep(&mut setup, &cyl_template, 11);
     let w1 = thread::spawn(move || -> solidcore::Result<()> {
         let mut k = Kernel::default();
         k.set_cancel_token(t1);
-        b1.wait();
         loop {
             let mut sc = Kernel::default();
             let a = copy_brep(&mut sc, &box_w1, 1);
@@ -586,13 +604,11 @@ fn worker_thread_and_group_cancel_in_flight_via_cancel_token() {
         }
     });
 
-    let b2 = Arc::clone(&barrier);
-    let t2 = group_token.clone();
+    let t2 = counters[1].either(&group_token);
     let box_w2 = copy_brep(&mut setup, &box_template, 20);
     let w2 = thread::spawn(move || -> solidcore::Result<()> {
         let mut k = Kernel::default();
         k.set_cancel_token(t2);
-        b2.wait();
         loop {
             let mut sc = Kernel::default();
             let mut body = copy_brep(&mut sc, &box_w2, 1);
@@ -609,23 +625,17 @@ fn worker_thread_and_group_cancel_in_flight_via_cancel_token() {
         }
     });
 
-    let b3 = Arc::clone(&barrier);
-    let t3 = group_token.clone();
-    let mut torus_w3 = copy_brep(&mut setup, &torus_template, 30);
+    let t3 = counters[2].either(&group_token);
+    let torus_w3 = copy_brep(&mut setup, &torus_template, 30);
     let w3 = thread::spawn(move || {
         let mut k = Kernel::default();
         k.set_cancel_token(t3);
-        let store = AttributeStore::default();
-        let attrs = PropertyAttributes {
-            store: &store,
-            key_of: &|_| ObjectKey(0),
-        };
-        b3.wait();
-        brep_mass_properties(&k, &mut torus_w3, 1e-8, 1.0, centre, &attrs).map(|_| ())
+        mass_properties_until_err(&k, &torus_w3, centre)
     });
 
-    barrier.wait();
-    thread::sleep(Duration::from_millis(15));
+    wait_until_polled(&counters[0], || w1.is_finished());
+    wait_until_polled(&counters[1], || w2.is_finished());
+    wait_until_polled(&counters[2], || w3.is_finished());
     group_token.cancel();
 
     assert_cancelled_err("group worker 1 (boolean)", w1.join().unwrap());
