@@ -113,6 +113,8 @@ pub(super) struct Patch {
     pub curves: Vec<(Curve, TsectCurveType)>,
     /// The generator ranges covered.
     pub ranges: Vec<(f64, f64)>,
+    /// The certified normal residual of the covered generator ranges.
+    pub profile_deviation: f64,
 }
 
 /// `|x| + |y| + |z|`.
@@ -259,20 +261,208 @@ impl Affine {
 /// plane, and every patch point `C(s) + v E` within that plus `|v| SM_EFF_ZERO |E|`:
 /// the scale of the point itself. `err` counts the rounding of the split, of `P - O`,
 /// of the dot products and of the plane normal (`|n|_1`).
-fn certify_in_plane(net: &Net, e: Vec3, plane: &Plane) -> bool {
+fn certify_in_plane(net: &Net, e: Vec3, plane: &Plane) -> Option<f64> {
     let n = plane.position().z_axis();
-    let o = plane.position().origin();
     let n1 = norm1(n);
     let err_e = n1 * gamma(4) * norm1(e);
     let sweep_in_plane = n.dot(e).abs() + err_e <= EFF_ZERO * e.max_dimension();
     if !sweep_in_plane {
+        return None;
+    }
+    let deviation = net_plane_deviation(net, plane)?;
+    (deviation <= EFF_ZERO * net.scale()).then_some(deviation * (1.0 + gamma(1)))
+}
+
+/// A positive-weight curve lies in its Euclidean control hull. Carry the split,
+/// division, subtraction and dot-product errors when bounding its normal residual.
+fn net_plane_deviation(net: &Net, plane: &Plane) -> Option<f64> {
+    let n = plane.position().z_axis();
+    let o = plane.position().origin();
+    let mut deviation = 0.0_f64;
+    for &(p, err) in &net.pts {
+        let bound = n.dot(p - o).abs() + functional_err(n, p, o, err);
+        if !bound.is_finite() {
+            return None;
+        }
+        deviation = deviation.max(bound);
+    }
+    Some(deviation)
+}
+
+/// Only a certified coincident profile bypasses transverse planar classification:
+/// distinct roots of a transverse profile may sweep overlapping pieces of one line.
+pub(super) fn generator_in_plane(gen: &Curve, e: Vec3, plane: &Plane) -> bool {
+    net_points(gen)
+        .and_then(|net| certify_in_plane(&net, e, plane))
+        .is_some()
+}
+
+/// Proves a crossing of the complete generator at sweep parameter zero. Opposite
+/// endpoint signs give a root by continuity; positive weights keep its plane UV
+/// coordinates in the control hull, which must fit the requested plane domain.
+pub(super) fn generator_crosses_plane(
+    gen: &Curve,
+    e: Vec3,
+    plane: &Plane,
+    domain: &Extent2d,
+) -> bool {
+    let Ok(base) = gen_base(gen) else {
+        return false;
+    };
+    let Ok(canon) = base.canonical() else {
+        return false;
+    };
+    let ivl = gen.natural_interval();
+    let clamped = canon.knots.first() == Some(&ivl.min())
+        && canon.knots.last() == Some(&ivl.max())
+        && canon
+            .knot_multiplicities
+            .first()
+            .is_some_and(|&m| m > canon.degree)
+        && canon
+            .knot_multiplicities
+            .last()
+            .is_some_and(|&m| m > canon.degree);
+    // Full interior multiplicity can jump between opposite signs without a root.
+    let continuous = ivl.min() < ivl.max()
+        && canon
+            .knot_multiplicities
+            .get(1..canon.knot_multiplicities.len().saturating_sub(1))
+            .is_some_and(|interior| interior.iter().all(|&m| m <= canon.degree));
+    if !clamped || !continuous {
         return false;
     }
-    let bound = EFF_ZERO * net.scale();
+    let Some(net) = net_points(gen) else {
+        return false;
+    };
+    let Some(frame) = Frame::new(plane, e) else {
+        return false;
+    };
+    let normal = Affine {
+        d: plane.position().z_axis(),
+        o: frame.o,
+        c: 0.0,
+    };
+    let (Some(&(a, ea)), Some(&(b, eb))) = (net.pts.first(), net.pts.last()) else {
+        return false;
+    };
+    let (fa, ra) = normal.at(a, ea);
+    let (fb, rb) = normal.at(b, eb);
+    if !((fa > ra && fb < -rb) || (fb > rb && fa < -ra)) {
+        return false;
+    }
     net.pts.iter().all(|&(p, err)| {
-        // (a NaN anywhere fails the check)
-        n.dot(p - o).abs() + functional_err(n, p, o, err) <= bound
+        [
+            (frame.du, domain.min().x, domain.max().x),
+            (frame.dw, domain.min().y, domain.max().y),
+        ]
+        .into_iter()
+        .all(|(d, lo, hi)| {
+            let (value, error) = Affine {
+                d,
+                o: frame.o,
+                c: 0.0,
+            }
+            .at(p, err);
+            value - error >= lo && value + error <= hi
+        })
     })
+}
+
+/// Bounds the normal residual of every point of an output curve, with rounding.
+pub(super) fn curve_plane_deviation(curve: &Curve, plane: &Plane) -> Option<f64> {
+    let canon = gen_base(curve).ok()?.canonical().ok()?;
+    let rational = !canon.weights.is_empty();
+    if canon.control_points.is_empty()
+        || (rational && canon.weights.len() != canon.control_points.len())
+        || canon.weights.iter().any(|&w| !w.is_finite() || w <= 0.0)
+    {
+        return None;
+    }
+    let n = plane.position().z_axis();
+    let o = plane.position().origin();
+    let mut deviation = 0.0_f64;
+    for p in canon.control_points {
+        let d = p - o;
+        let terms = (n.x * d.x).abs() + (n.y * d.y).abs() + (n.z * d.z).abs();
+        // Six operations cover subtraction and the three-term dot product.
+        // Canonical rational points also round their homogeneous division.
+        let division = if rational {
+            gamma(1) * ((n.x * p.x).abs() + (n.y * p.y).abs() + (n.z * p.z).abs())
+        } else {
+            0.0
+        };
+        let bound = (n.dot(d).abs() + gamma(6) * terms + division) * (1.0 + gamma(4));
+        if !bound.is_finite() {
+            return None;
+        }
+        deviation = deviation.max(bound);
+    }
+    Some(deviation)
+}
+
+/// Bounds the whole output curve's distance to the bounded source extrusion.
+/// Each generator witness defines one segment wholly on the source. Distance to
+/// that fixed convex segment is convex, so bounds at the certified output hull's
+/// vertices also bound every point in its hull, hence every curve point. Each
+/// segment supplies a whole-curve bound; the smallest of those bounds is valid.
+pub(super) fn curve_source_deviation(
+    curve: &Curve,
+    witnesses: &[(Point3, f64)],
+    e: Vec3,
+    sweep: Extent1d,
+) -> Option<f64> {
+    let finite_point = |p: Point3| [p.x, p.y, p.z].iter().all(|x| x.is_finite());
+    let e2 = e.dot(e);
+    if witnesses.is_empty()
+        || !finite_point(e)
+        || !e2.is_finite()
+        || e2 <= 0.0
+        || !sweep.min().is_finite()
+        || !sweep.max().is_finite()
+        || sweep.min() > sweep.max()
+    {
+        return None;
+    }
+    let hull = curve.piece_hull_points(&curve.natural_interval())?;
+    if hull.is_empty() {
+        return None;
+    }
+    let mut best = f64::INFINITY;
+    for &(c, gen_err) in witnesses {
+        if !finite_point(c) || !gen_err.is_finite() || gen_err < 0.0 {
+            return None;
+        }
+        let mut worst = 0.0_f64;
+        for &(p, hull_err) in &hull {
+            if !finite_point(p) || !hull_err.is_finite() || hull_err < 0.0 {
+                return None;
+            }
+            let projection = (p - c).dot(e) / e2;
+            if !projection.is_finite() {
+                return None;
+            }
+            // Any computed parameter inside the segment gives a valid witness;
+            // its projection error cannot invalidate the distance upper bound.
+            let v = projection.max(sweep.min()).min(sweep.max());
+            let q = c + v * e;
+            if !finite_point(q) {
+                return None;
+            }
+            // L1 bounds Euclidean distance. Three coordinate errors cover each
+            // certified point; gamma(16) covers the affine witness, subtraction
+            // and absolute-coordinate sums. Widen the assembled bound as well.
+            let scale = norm1(p) + norm1(c) + v.abs() * norm1(e);
+            let bound =
+                (norm1(p - q) + 3.0 * (gen_err + hull_err) + gamma(16) * scale) * (1.0 + gamma(8));
+            if !bound.is_finite() {
+                return None;
+            }
+            worst = worst.max(bound);
+        }
+        best = best.min(worst);
+    }
+    best.is_finite().then_some(best)
 }
 
 /// Bisects for the single root of `g(C(s))` in `[a, b]`, `g` negative at `a` when
@@ -734,6 +924,7 @@ struct RangePiece {
     monotone: bool,
     nu_lo: f64,
     nu_hi: f64,
+    profile_deviation: f64,
 }
 
 /// A generator range measured by [`range_piece`].
@@ -793,9 +984,9 @@ fn range_piece(
     let Some(net) = net_points(&piece) else {
         return Ok(Measured::Declined);
     };
-    if !certify_in_plane(&net, inputs.extrusion_vec, inputs.plane) {
+    let Some(profile_deviation) = certify_in_plane(&net, inputs.extrusion_vec, inputs.plane) else {
         return Ok(Measured::Declined);
-    }
+    };
 
     // mu monotone on the control polygon (each step not against the direction beyond
     // the values' errors) makes it monotone on the curve: for positive weights the
@@ -877,6 +1068,7 @@ fn range_piece(
         monotone,
         nu_lo,
         nu_hi,
+        profile_deviation,
     }))
 }
 
@@ -960,7 +1152,7 @@ fn past_end(k: &Kernel, inputs: &PatchInputs<'_>, end: f64, dir: f64) -> Result<
     let Some(net) = net_points(&piece) else {
         return Ok(Past::Declined);
     };
-    if certify_in_plane(&net, inputs.extrusion_vec, inputs.plane) {
+    if certify_in_plane(&net, inputs.extrusion_vec, inputs.plane).is_some() {
         return Ok(Past::Extends(next));
     }
     let p = net.degree;
@@ -1560,5 +1752,8 @@ pub(super) fn coincident_patch(
             .map(|c| (c, TsectCurveType::RegionBoundary))
             .collect(),
         ranges: covered,
+        profile_deviation: pieces
+            .iter()
+            .fold(0.0_f64, |m, p| m.max(p.profile_deviation)),
     }))
 }
