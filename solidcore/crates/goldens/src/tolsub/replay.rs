@@ -21,6 +21,14 @@
 //!
 //! [`DATA`] was made by [`record`] on main and on this branch (`TOLSUB_CASES`, a
 //! `unit<TAB>case` list, and `TOLSUB_OUT`), diffed read by read.
+//!
+//! **When a later change moves one of these rows** other than through the read
+//! tolerances, the substitution can no longer give main's row; such a row's entry is
+//! deleted and the unit's row count lowered. #17896 (exact shared coordinates,
+//! `CPoint::affine2`) moves the geometry of the `Fillet/bottle.smb` read itself; it deletes
+//! the 19 `blend.fillet_executive_p3` bottle rows whose fillet that read reaches. The read's
+//! moved values and those fillets' results are classified in `solidcore`'s
+//! `tests/heal_edge_tolerance_covers_edge_face_gap.rs`.
 
 use std::collections::BTreeMap;
 
@@ -162,7 +170,7 @@ macro_rules! replay_tests {
 
 replay_tests! {
     feature_executive_rows_move_only_through_the_read_tolerances: "blend.feature_executive", 1;
-    fillet_executive_p3_rows_move_only_through_the_read_tolerances: "blend.fillet_executive_p3", 30;
+    fillet_executive_p3_rows_move_only_through_the_read_tolerances: "blend.fillet_executive_p3", 11;
     fillet_removal_rows_move_only_through_the_read_tolerances: "blend.fillet_removal", 4;
     corpus_parity_rows_move_only_through_the_read_tolerances: "corpus.parity", 26;
     stitch_p1_rows_move_only_through_the_read_tolerances: "heal.stitch_p1", 2;

@@ -27,14 +27,12 @@ use solidcore::surface::procedural_blend::chamfer::ChamferSize;
 use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::{edge, Brep, EdgeId};
 
-/// Every fix on but `geometric_g2_continuity`, as ops runs.
+/// Every fix on, as ops runs.
 fn kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     k.fixes = f;
     k
