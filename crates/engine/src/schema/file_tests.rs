@@ -43,6 +43,7 @@ fn schemas_and_the_key_check_agree() {
             "solids",
             "static",
             "velocity",
+            "writer",
         ],
     );
     assert_keys(
@@ -445,6 +446,8 @@ fn the_export_schema_takes_what_the_handler_reads() {
         (json!({"path": "robot.urdf", "mesh_prefix": "package://robot/meshes/", "effort": 50, "velocity": 2.5}), true),
         (json!({"path": "a.step", "bodies": "Body1"}), true),
         (json!({"path": "a.stl", "lay_on_print_faces": true}), true),
+        (json!({"path": "a.step", "writer": "cadmpeg"}), true),
+        (json!({"path": "a.igs", "writer": "solidcraft"}), true),
         (json!({}), false),
         (json!({"path": "a.stl", "lay_on_print_faces": "yes"}), false),
         (json!({"path": "a.stl", "bodies": [1]}), false),
@@ -475,6 +478,9 @@ fn export_replies_match_the_output_schema() {
         // body is a part of a component's object, so it stays as it lies).
         json!({"path": at("i.stl"), "lay_on_print_faces": true}),
         json!({"path": at("j.3mf"), "objects": "component", "lay_on_print_faces": true}),
+        json!({"path": at("k.step"), "writer": "cadmpeg"}),
+        json!({"path": at("l.igs"), "writer": "cadmpeg"}),
+        json!({"path": at("m.3dm")}),
     ];
     for level in [ParamCheck::Warn, ParamCheck::Strict] {
         let mut s = two_cubes();

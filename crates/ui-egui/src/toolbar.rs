@@ -1007,6 +1007,17 @@ pub(crate) fn start_export(app: &mut SolveApp, id: &str) -> bool {
     true
 }
 
+/// `file.export`'s `writer` for a file `name` (a path or a format): cadmpeg's for a STEP or IGES
+/// file while Preferences › General › Export STEP and IGES with cadmpeg is on; else left out, so
+/// SolidCraft's own writer writes it. The command never reads the preference itself.
+pub(crate) fn with_export_writer(app: &SolveApp, name: &str, params: &mut Value) {
+    let step_or_iges =
+        matches!(solidcraft_engine::io::Format::from_name(name), Ok(solidcraft_engine::io::Format::Step | solidcraft_engine::io::Format::Iges));
+    if app.preferences.cadmpeg_export && step_or_iges {
+        params["writer"] = json!("cadmpeg");
+    }
+}
+
 /// Export to a file with extension `ext`, in `format` when the extension alone doesn't name it.
 fn export_as(app: &mut SolveApp, ext: &str, format: Option<&str>) {
     let body = crate::export_name::first_body(app);
@@ -1018,9 +1029,10 @@ fn export_as(app: &mut SolveApp, ext: &str, format: Option<&str>) {
     app.pick_save(&name, exts, move |app, path| {
         let Some(path) = path else { return };
         let mut params = json!({"path": path});
-        if let Some(format) = format {
+        if let Some(format) = &format {
             params["format"] = json!(format);
         }
+        with_export_writer(app, format.as_deref().unwrap_or(&path), &mut params);
         // GLB only, and not read for the other formats.
         params["hierarchy"] = json!(app.preferences.glb_export_hierarchy);
         if let Ok(result) = app.run("file.export", params) {

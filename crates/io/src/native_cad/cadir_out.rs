@@ -27,7 +27,9 @@
 //! triangle group of the tessellation (the triangles meshed from it). It is not bound to the
 //! B-rep face as well: cadmpeg 0.6.12 writes such a binding as a `GeomSubset` under the
 //! `BrepArray` prim, which OpenUSD's validation refuses (no family name, and a parent that is not
-//! imageable). A body with no look but a colour (an imported one) carries that colour.
+//! imageable). A writer that takes no mesh beside the exact shape (STEP) has the face's look
+//! bound to its B-rep face instead. A body with no look but a colour (an imported one) carries
+//! that colour.
 //!
 //! What the view hides is written hidden: a placement hidden itself as a hidden occurrence, and
 //! a body as a hidden body when it is hidden in every shown placement of its component. A body
@@ -99,6 +101,11 @@ pub(crate) struct Writes {
     /// A component's only body named other than the prim the writer names after its one
     /// placement is put in a definition of its own, so its name reaches the file.
     pub named_bodies: bool,
+    /// Each pcurve states its own parameter range (its coedge's), and each use whether it is
+    /// declared isoparametric (never, as that is only a hint), for a writer that must have both.
+    pub stated_pcurves: bool,
+    /// The writer names each solid after its body; else a warning says the names are not written.
+    pub solid_names: bool,
     /// Whether the writer takes a body's exact shape (the body alone in a model, planned by the
     /// writer); a body it refuses is written as its mesh, with a warning naming it and why.
     pub admit: Option<fn(&CadIr) -> Result<(), String>>,
@@ -116,6 +123,8 @@ impl Writes {
         linear: true,
         planar_pcurves: true,
         named_bodies: true,
+        stated_pcurves: false,
+        solid_names: true,
         admit: None,
     };
 }
@@ -315,6 +324,15 @@ impl<'a> Builder<'a> {
         }
         if self.writes.named_bodies {
             self.keep_body_names()?;
+        }
+        if self.writes.stated_pcurves {
+            with_stated_pcurves(&mut self.ir);
+        }
+        if !self.writes.solid_names && self.ir.model.bodies.iter().any(|b| b.name.is_some()) {
+            self.warnings.push(format!(
+                "the bodies' names are not written: cadmpeg's {} writer writes each solid without a name (the components keep theirs)",
+                self.writes.label
+            ));
         }
         self.ir.finalize();
         Ok(Built { ir: self.ir, warnings: self.warnings })
@@ -876,11 +894,16 @@ impl<'a> Builder<'a> {
         let prefix = format!("solidcraft:body-{n:09}");
         let name = clean(name).unwrap_or_else(|| shown.clone());
         let label = self.writes.label;
+        // Each record face's CADIR face, when the exact shape is written.
+        let mut brep_faces = Vec::new();
         let mut brep = if geometry.is_mesh() || self.meshes_only {
             None
         } else {
             match self.brep(geometry, &prefix, &name) {
-                Ok(written) => Some(written),
+                Ok(written) => {
+                    brep_faces = written.faces;
+                    Some(written.body)
+                }
                 Err(e) => {
                     self.warnings.push(format!("{shown}: written as its mesh only: its exact shape could not be: {e}"));
                     None
@@ -897,7 +920,8 @@ impl<'a> Builder<'a> {
                 (Some(written), Err(Unmeshed::Failed(e))) => {
                     self.warnings
                         .push(format!("{shown}: its mesh could not be made ({e}): written as its exact shape, although the file is meshes only"));
-                    brep = Some(written);
+                    brep_faces = written.faces;
+                    brep = Some(written.body);
                     None
                 }
                 (_, made) => kept_without_mesh(made, brep.is_some(), &shown, &mut self.warnings)?,
@@ -991,7 +1015,17 @@ impl<'a> Builder<'a> {
                 }
             }
         }
-        let Some(mesh) = mesh else { return Ok(id) };
+        let Some(mesh) = mesh else {
+            // No mesh beside the exact shape (STEP): each face's own look is bound to its B-rep
+            // face, as there are no triangles to bind it to.
+            for (face, a) in face_looks {
+                match brep_faces.get(face as usize).cloned().flatten() {
+                    Some(f) => self.bind(AppearanceTarget::Face(f), a)?,
+                    None => self.warnings.push(format!("{shown}: the colour of its face {face} is not written: the face is not in its exact shape")),
+                }
+            }
+            return Ok(id);
+        };
         // A render setup's textures: the mesh's coordinates in its images, and the body's and its
         // faces' appearances with the images, bound to the mesh (the exact shape keeps the plain
         // look).
@@ -1065,7 +1099,7 @@ impl<'a> Builder<'a> {
 
     /// `geometry`'s exact shape written as body `name` under `prefix`, once the writer takes it
     /// ([`Writes::admit`]).
-    fn brep(&mut self, geometry: &solidcraft_kernel::Body, prefix: &str, name: &str) -> Result<BodyId, String> {
+    fn brep(&mut self, geometry: &solidcraft_kernel::Body, prefix: &str, name: &str) -> Result<solidcore_cadir::Written, String> {
         let record = solidcraft_kernel::brep_record(geometry).map_err(|e| e.to_string())?;
         let tolerance = record.tolerance;
         if let Some(admit) = self.writes.admit {
@@ -1084,7 +1118,7 @@ impl<'a> Builder<'a> {
         if tolerance.is_finite() && tolerance > 0.0 {
             self.tolerance = Some(self.tolerance.map_or(tolerance, |t| t.max(tolerance)));
         }
-        Ok(w.body)
+        Ok(w)
     }
 
     /// `geometry`'s mesh at the export's quality, within the file's size cap.
@@ -1262,5 +1296,34 @@ mod tests {
         assert!(b.tessellation("solidcraft:body-000000000", None, &mesh, &BTreeMap::new(), None).is_err());
         b.refund(mesh.positions.len(), mesh.triangles.len());
         assert_eq!(b.bytes, 0);
+    }
+}
+
+/// Each pcurve of `ir` states the parameter range its one use runs over, and each use that says
+/// nothing states it is not declared isoparametric (the flag is only a hint to a reader)
+/// ([`Writes::stated_pcurves`]). A pcurve used by more than one coedge, or with no range on its
+/// use, is left as it is.
+fn with_stated_pcurves(ir: &mut CadIr) {
+    use cadmpeg_ir::geometry::pcurve::PcurveMetadata;
+    use cadmpeg_ir::units::FiniteVector;
+    let mut ranges: HashMap<String, Option<[f64; 2]>> = HashMap::new();
+    for u in ir.model.coedges.iter_mut().flat_map(|c| c.pcurves.iter_mut()) {
+        if u.isoparametric.is_none() {
+            u.isoparametric = Some(false);
+        }
+        let range = u.parameter_range.map(|r| {
+            let [a, b] = r.endpoints();
+            [a.min(b), a.max(b)]
+        });
+        // A second use makes the pcurve's own range ambiguous.
+        ranges.entry(u.pcurve.as_str().to_string()).and_modify(|r| *r = None).or_insert(range);
+    }
+    for p in &mut ir.model.pcurves {
+        if p.metadata != PcurveMetadata::default() {
+            continue;
+        }
+        if let Some(range) = ranges.get(p.id.as_str()).copied().flatten().and_then(FiniteVector::new) {
+            p.metadata = PcurveMetadata::general(None, Some(range), None);
+        }
     }
 }

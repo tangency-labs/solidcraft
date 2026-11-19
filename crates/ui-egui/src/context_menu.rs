@@ -2028,13 +2028,13 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 .into_iter()
                 .filter(|f| *f != "3dm" || !cfg!(target_arch = "wasm32"))
                 .collect();
-            app.pick_save_command(
-                &format!("{name}.step"),
-                &formats,
-                "file.export",
-                // `hierarchy` is read for GLB only.
-                json!({"bodies": bodies, "hierarchy": app.preferences.glb_export_hierarchy}),
-            );
+            let bodies = bodies.clone();
+            app.pick_save(&format!("{name}.step"), &formats, move |app, path| {
+                let Some(path) = path else { return };
+                let mut params = json!({"bodies": bodies, "path": path, "hierarchy": app.preferences.glb_export_hierarchy});
+                crate::toolbar::with_export_writer(app, &path, &mut params);
+                let _ = app.run("file.export", params);
+            });
         }
         "ui.findBrowser" => {
             if let Some(b) = p.get("body").and_then(Value::as_str) {

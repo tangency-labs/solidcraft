@@ -2368,6 +2368,34 @@ M30
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// File › Export of a STEP or IGES file asks for cadmpeg's writer only while "Export STEP and
+    /// IGES with cadmpeg" is on (off by default); other formats never carry a writer. The file
+    /// written then names cadmpeg in its header, and SolidCraft's own writer's does not.
+    #[test]
+    fn cadmpeg_export_preference_chooses_the_step_and_iges_writer() {
+        assert!(!crate::prefs::Prefs::default().cadmpeg_export, "off by default");
+        let dir = std::env::temp_dir().join(format!("solidcraft-cadmpeg-export-pref-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for on in [false, true] {
+            let mut app = SolveApp::new(Session::default(), Default::default());
+            app.preferences.cadmpeg_export = on;
+            app.run("solid.box", json!({"length": 10, "width": 20, "height": 30})).unwrap();
+            for name in ["part.step", "part.STP", "part.igs", "part.iges", "part.stl", "part.3mf", "part.usda", "part.3dm"] {
+                let path = dir.join(name).to_string_lossy().to_string();
+                let mut params = json!({"path": path});
+                crate::toolbar::with_export_writer(&app, &path, &mut params);
+                let step_or_iges = !matches!(name.rsplit_once('.').map(|(_, e)| e), Some("stl" | "3mf" | "usda" | "3dm"));
+                assert_eq!(params.get("writer").and_then(Value::as_str), (on && step_or_iges).then_some("cadmpeg"), "{name} {on}");
+                app.run("file.export", params).unwrap_or_else(|e| panic!("{name} {on}: {e}"));
+                if step_or_iges {
+                    let text = std::fs::read_to_string(&path).unwrap();
+                    assert_eq!(text.contains("cadmpeg"), on, "{name} {on}");
+                }
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn the_reuse_import_default_is_added_to_import_opens_only() {
         let mut app = SolveApp::new(Session::default(), Default::default());

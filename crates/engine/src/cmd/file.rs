@@ -2905,6 +2905,13 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         }
     };
     let exact_brep = usd_flag("exact_brep")?;
+    // STEP and IGES: SolidCraft's own writer unless `writer: cadmpeg` asks for cadmpeg's.
+    let writer = crate::schema::file::export_writer(p.get("writer"), format).map_err(|e| bad(cmd, e))?;
+    if writer == Some(crate::schema::file::ExportWriter::Cadmpeg) {
+        lay_on_print_faces(p, cmd, format)?;
+        mesh_parts(s, p, cmd, format)?;
+        return export_cadmpeg(s, cmd, path, &string_list(cmd, p, "bodies")?, mesh_quality(p, cmd)?, format, CadmpegChoices::default());
+    }
     if format == Format::Urdf {
         if !string_list(cmd, p, "bodies")?.is_empty() {
             return Err(bad(cmd, "urdf exports the whole assembly; omit bodies"));

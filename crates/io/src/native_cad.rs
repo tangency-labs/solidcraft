@@ -612,7 +612,9 @@ pub(crate) use export::FREECAD_REFUSED;
 
 /// The bodies of `world` (the design's model placed in the world; all of them when `bodies` is
 /// empty) as a `format` file called `file`, written by cadmpeg: OpenUSD ([`crate::Format::Usd`],
-/// the extension picking the encoding) or Rhino ([`crate::Format::Rhino`]); FreeCAD is refused,
+/// the extension picking the encoding), Rhino ([`crate::Format::Rhino`]), or STEP and IGES
+/// ([`crate::Format::Step`], [`crate::Format::Iges`]: SolidCraft's own writers are the default; this is
+/// the choice of writing them with cadmpeg); FreeCAD is refused,
 /// as cadmpeg cannot write a new FreeCAD file yet. With no bodies chosen, a design with components
 /// keeps them where the format holds them: `model`, the model before placing, holds each
 /// component's bodies. `options` says what else is written. Meshes are made at `quality`. Returns
