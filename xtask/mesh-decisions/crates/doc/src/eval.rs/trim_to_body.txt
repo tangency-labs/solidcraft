@@ -1,0 +1,1 @@
+keeps the tool pieces touching the start by a mesh

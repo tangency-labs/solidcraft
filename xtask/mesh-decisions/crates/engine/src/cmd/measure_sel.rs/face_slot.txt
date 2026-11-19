@@ -1,0 +1,1 @@
+finds a slot from mesh triangles

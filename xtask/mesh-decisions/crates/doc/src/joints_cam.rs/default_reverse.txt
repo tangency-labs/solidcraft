@@ -1,0 +1,1 @@
+picks a cam follower's side by the display mesh

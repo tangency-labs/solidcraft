@@ -133,7 +133,7 @@ commands:
                   AGENTS.md and new skills stay short
   mesh-decisions  check that model decisions in crates/doc, crates/engine and crates/kernel use exact
                   geometry: fails on a function outside display, export, previews and mesh bodies
-                  that uses a mesh and xtask/mesh-decisions.txt does not list, and on a listed one
+                  that uses a mesh and xtask/mesh-decisions/ does not list, and on a listed one
                   that no longer does (the list only shrinks)
   test [CARGO ARGS] [-- TEST ARGS]
                   build the tests with the ci profile, then run every test binary at once

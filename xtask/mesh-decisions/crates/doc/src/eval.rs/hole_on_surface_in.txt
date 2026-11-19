@@ -1,0 +1,1 @@
+moves a hole back onto its face by the display mesh

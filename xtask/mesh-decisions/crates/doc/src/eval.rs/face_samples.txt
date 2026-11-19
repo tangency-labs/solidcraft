@@ -1,0 +1,1 @@
+takes a point on each face from its mesh triangles

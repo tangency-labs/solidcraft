@@ -1,0 +1,1 @@
+picks the projected curves met first by the display mesh

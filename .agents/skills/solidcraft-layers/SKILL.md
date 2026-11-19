@@ -17,7 +17,7 @@ The authority is `solidcore/docs/layers.md`; this is its short form. Every job l
 - Before writing STEP, meshing, surface intersection, tangent chains or frames, look for solidcore's: a second implementation is flagged.
 
 ## Lists that only shrink
-- `xtask/mesh-decisions.txt`: model decisions made from a mesh (`cargo xtask mesh-decisions`).
+- `xtask/mesh-decisions/`: model decisions made from a mesh, one file each (`cargo xtask mesh-decisions`).
 - `solidcore/plan/panic-sites.tsv`: panic-prone calls in solidcore (SolidCore checks in CI).
 
 ## Working in solidcore/

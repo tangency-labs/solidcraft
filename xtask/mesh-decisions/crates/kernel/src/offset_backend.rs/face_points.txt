@@ -1,0 +1,1 @@
+takes a point per face from mesh triangles

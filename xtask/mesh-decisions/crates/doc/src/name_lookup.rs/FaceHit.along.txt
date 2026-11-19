@@ -1,0 +1,1 @@
+meets a line with a found face on the display mesh

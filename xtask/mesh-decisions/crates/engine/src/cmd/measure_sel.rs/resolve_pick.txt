@@ -1,0 +1,1 @@
+resolves a face or edge pick by the display mesh

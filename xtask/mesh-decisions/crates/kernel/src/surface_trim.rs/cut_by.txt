@@ -1,0 +1,1 @@
+trims a surface by a tool through a mesh

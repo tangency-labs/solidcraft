@@ -1,0 +1,1 @@
+takes a planar face's normal from mesh triangles

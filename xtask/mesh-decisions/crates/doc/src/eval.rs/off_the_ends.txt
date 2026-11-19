@@ -1,0 +1,1 @@
+moves an edge point off the edge's ends by the display mesh

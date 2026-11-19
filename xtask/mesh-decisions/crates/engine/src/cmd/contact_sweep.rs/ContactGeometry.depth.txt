@@ -1,0 +1,1 @@
+finds bodies passing through each other by mesh triangles

@@ -1,0 +1,1 @@
+runs a rib to the body by the display mesh

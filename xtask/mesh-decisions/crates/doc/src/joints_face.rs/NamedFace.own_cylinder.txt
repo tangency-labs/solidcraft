@@ -1,0 +1,1 @@
+reads a named face's cylinder from the display mesh

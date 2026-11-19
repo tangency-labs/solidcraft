@@ -1,0 +1,1 @@
+works out a hole's To Object depth on the display mesh

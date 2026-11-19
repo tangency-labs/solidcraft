@@ -1,0 +1,1 @@
+picks the face under each point by the nearest mesh triangle

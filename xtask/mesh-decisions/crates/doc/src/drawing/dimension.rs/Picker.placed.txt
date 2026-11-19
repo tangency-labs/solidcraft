@@ -1,0 +1,1 @@
+reads a body's edges for a dimension from the display mesh (drawings branch only: clear before landing on main)
