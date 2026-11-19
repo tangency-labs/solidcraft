@@ -337,7 +337,7 @@ fn remove_tube_item(app: &SolveApp, bodies: &[String]) -> Option<Item> {
     let members = bodies
         .iter()
         .map(|b| {
-            let line = solidcraft_engine::doc::frame::member_of_body(&st, f, b).ok()??;
+            let line = solidcraft_engine::doc::frame::member_of_body(&app.session.doc, &st, f, b).ok()??;
             (body_feature(app, b)? == id).then(|| json!({ "feature": id, "line": line }))
         })
         .collect::<Option<Vec<_>>>()?;

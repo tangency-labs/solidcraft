@@ -9198,19 +9198,45 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
     // Project takes the visible curves of the other sketches too (#14927): the marquee of its
     // Geometry input reaches them as a click does, as `ExternalSketchCurve`. Only a marquee that
     // took nothing else: one over model edges, faces or points takes what it always took.
-    if out.is_empty()
-        && app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::SketchProject { .. }))
-        && accepts.is_some_and(|a| a & crate::selection::SKETCH_LINES != 0)
-        && !app.ui.pick_off.iter().any(|x| x == "sketch" || x == "sketch_curves")
-    {
+    // The Frame Member dialog's Lines input takes them the same way, and its Corner Overrides
+    // input takes the visible points of those sketches as `ExternalSketchPoint` (it keeps corners).
+    let external = app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::SketchProject { .. } | crate::dialogs::Kind::Frame(_)));
+    let pick_curves =
+        accepts.is_some_and(|a| a & crate::selection::SKETCH_LINES != 0) && !app.ui.pick_off.iter().any(|x| x == "sketch" || x == "sketch_curves");
+    let frame = app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Frame(_)));
+    let pick_points = frame
+        && accepts.is_some_and(|a| a & crate::selection::EXTERNAL_POINTS != 0)
+        && !app.ui.pick_off.iter().any(|x| x == "sketch" || x == "sketch_points");
+    if out.is_empty() && external && (pick_curves || pick_points) {
         for sid in visible_sketches(app) {
             if app.session.active_sketch == Some(sid) {
                 continue;
             }
             let Some(ss) = st.sketch(sid) else { continue };
-            for (i, c) in ss.sketch.curves.iter().enumerate() {
-                if solidcraft_engine::view::sketch_curve_visible(&ss.sketch, i) && box_takes_curve(app, ss, i, proj, &bx, false) {
-                    out.push(Sel::ExternalSketchCurve { sketch: sid, id: c.id.clone() });
+            if pick_curves {
+                for (i, c) in ss.sketch.curves.iter().enumerate() {
+                    // Frame Member's Lines take only the lines a member is laid on.
+                    let takes = !frame || solidcraft_engine::doc::frame::is_member_line(&ss.sketch, i);
+                    if takes && solidcraft_engine::view::sketch_curve_visible(&ss.sketch, i) && box_takes_curve(app, ss, i, proj, &bx, false) {
+                        out.push(Sel::ExternalSketchCurve { sketch: sid, id: c.id.clone() });
+                    }
+                }
+                // And its 3D lines, as a click takes them (window: wholly on screen and inside).
+                for (_, w) in
+                    ss.sketch.wires.iter().enumerate().filter(|(i, _)| frame && solidcraft_engine::doc::frame::is_member_wire(&ss.sketch, *i))
+                {
+                    let pts = to2(&w.pts);
+                    if (bx.crossing || pts.len() == w.pts.len()) && bx.takes(&pts) {
+                        out.push(Sel::ExternalSketchCurve { sketch: sid, id: w.id.clone() });
+                    }
+                }
+            }
+            if pick_points {
+                let visible = solidcraft_engine::view::SketchPointVisibility::new(&ss.sketch);
+                for (i, p) in ss.sketch.points.iter().enumerate() {
+                    if i != 0 && visible.takes(p) && bx.takes(&to2(&[ss.plane.to_world(p.pos)])) {
+                        out.push(Sel::ExternalSketchPoint { sketch: sid, id: p.id.clone() });
+                    }
                 }
             }
         }

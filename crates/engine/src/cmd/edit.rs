@@ -1545,12 +1545,32 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     let before = serde_json::to_value(&f).map_err(|e| EngineError::Other(e.to_string()))?;
     let set = expand_dotted(set, Some(&before), cmd, 0)?;
     let set = hole_position_expressions(set, &f.kind);
-    let set = &numbers_as_expressions(command_profiles(&set, cmd)?, &before);
+    let mut set = numbers_as_expressions(command_profiles(&set, cmd)?, &before);
+    // A Frame Member's corner entry may give a Flip, input only: saved as an order below, as `frame.member` saves it.
+    let mut flips = Vec::new();
+    if matches!(f.kind, FeatureKind::FrameMember { .. }) {
+        for c in set.get_mut("corners").and_then(Value::as_array_mut).into_iter().flatten() {
+            flips.push(match c.as_object_mut().and_then(|c| c.remove("flip")) {
+                None | Some(Value::Null) => None,
+                Some(flip) => Some(flip.as_bool().ok_or_else(|| bad(cmd, "`corners`: `flip` must be true or false"))?),
+            });
+        }
+    }
+    let set = &set;
     let mut v = before.clone();
     merge(&mut v, set, 0);
     resolve_feature_names(&mut v, &s.doc, cmd)?;
     let mut nf: Feature = serde_json::from_value(v.clone()).map_err(|e| bad(cmd, format!("invalid feature: {e}")))?;
     nf.id = f.id;
+    // An older script's `coped_butt` is Butt with the frame's Coped ticked, as `frame.member` reads it. A corner's
+    // member of this frame itself is saved without the name; another frame's is refused.
+    if let FeatureKind::FrameMember { corner, corners, coped, .. } = &mut nf.kind {
+        solidcraft_doc::frame::read_coped(corner, corners, coped);
+        own_corner_members(corners, &f.name).map_err(|e| bad(cmd, e))?;
+        if flips.iter().any(Option::is_some) {
+            super::frame::flips_as_order(&s.doc, &s.model.state_before(id), &mut nf, &flips);
+        }
+    }
     // A one-sided extrude made symmetric takes the convention a new one would: its old marker
     // never read a symmetric distance.
     if let (FeatureKind::Extrude { extent: old, .. }, FeatureKind::Extrude { extent: new, .. })
@@ -2387,6 +2407,18 @@ fn removed_pair_message(id: &str) -> String {
     format!("pair id `{id}` was removed: a removed pair's id is never given again (leave `id` out for a new pair)")
 }
 
+/// `corners`' members named by the frame's own name (`own`) saved without it; one of another frame refused.
+fn own_corner_members(corners: &mut [solidcraft_doc::frame::CornerOverride], own: &str) -> std::result::Result<(), &'static str> {
+    for m in corners.iter_mut().flat_map(|c| &mut c.members) {
+        match &m.feature {
+            Some(n) if *n == own => m.feature = None,
+            Some(_) => return Err("`corners`: not supported yet: a corner with a member of another frame"),
+            None => {}
+        }
+    }
+    Ok(())
+}
+
 fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.redefine";
     let id = feature_id(s, p.get("feature"), cmd)?;
@@ -2487,6 +2519,16 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         && cid == "frame.member"
         && let Some(parameters) = params.as_object_mut()
     {
+        // A corner's member named by this frame's own name is its own: `frame.member` takes it without the name.
+        for m in
+            parameters.get_mut("corners").and_then(Value::as_array_mut).into_iter().flatten().filter_map(|c| c.get_mut("members")?.as_array_mut())
+        {
+            for m in m.iter_mut().filter_map(Value::as_object_mut) {
+                if m.get("feature").and_then(Value::as_str) == Some(old.name.as_str()) {
+                    m.remove("feature");
+                }
+            }
+        }
         let mut named = parameters.get("pairs").and_then(Value::as_array).into_iter().flatten().filter_map(|p| p.get("id")?.as_str());
         if let Some(id) = named.find(|id| removed_pair_id(&old.kind, id)) {
             return Err(bad(cmd, removed_pair_message(id)));

@@ -690,9 +690,11 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
         _ if app.params.as_ref().and_then(|p| p.preview_commands()).is_some() => {
             app.params.as_ref().and_then(|p| p.preview_commands()).unwrap_or_default()
         }
-        // No dialog, or inputs still missing: nothing to preview.
+        // No dialog, or inputs still missing: nothing to preview, and a pick waiting for one is
+        // not checked (`settle_pick` drops it).
         _ => {
             app.preview.clear();
+            crate::dialogs_frame::settle_pick(app);
             return;
         }
     };
@@ -756,6 +758,7 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     if app.preview.busy {
         ctx.request_repaint_after(std::time::Duration::from_millis(16));
     }
+    crate::dialogs_frame::settle_pick(app);
 }
 
 /// What tells one preview computation from another: its commands, the document revision they

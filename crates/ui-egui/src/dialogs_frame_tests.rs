@@ -2,7 +2,6 @@ use crate::test_support::run_all;
 use serde_json::json;
 use solidcore_record::Vec3;
 use solidcraft_engine::Session;
-use solidcraft_engine::geom::prelude::*;
 
 use super::*;
 use crate::Services;
@@ -19,7 +18,11 @@ fn app_with(cmds: &[(&str, Value)]) -> SolveApp {
 /// A 600 × 400 rectangle on XY as the frame sketch `Frame`, and, drawn after it on YZ, a ring of
 /// two circles as the section sketch `Ring` (its circles' ids are not the frame's line ids).
 fn frame_app() -> SolveApp {
-    app_with(&[
+    app_with(&frame_commands())
+}
+
+fn frame_commands() -> Vec<(&'static str, Value)> {
+    vec![
         ("sketch.create", json!({"plane": "XY", "name": "Frame"})),
         ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [600, 400]})),
         ("sketch.finish", json!({})),
@@ -27,7 +30,7 @@ fn frame_app() -> SolveApp {
         ("sketch.circle.center", json!({"center": [0, 0], "radius": 20})),
         ("sketch.circle.center", json!({"center": [0, 0], "radius": 17})),
         ("sketch.finish", json!({})),
-    ])
+    ]
 }
 
 fn sketch_id(app: &SolveApp, name: &str) -> u64 {
@@ -337,13 +340,13 @@ fn a_shared_point_picked_twice_joins_two_members() {
 }
 
 #[test]
-fn a_lone_last_point_waits_with_pick_another_point() {
+fn a_lone_last_point_waits_with_pick_the_second_point() {
     let mut app = box_app();
     let mut d = dialog_on(&mut app, &[]);
     pick(&app, &mut d, corner(0., 0., 0.));
-    assert_eq!(d.error.as_deref(), Some("Pick another point"));
+    assert_eq!(d.error.as_deref(), Some("Pick the second point"));
     pick_all(&app, &mut d, &[corner(0., 0., 400.), corner(600., 0., 0.)]);
-    assert_eq!(d.error.as_deref(), Some("Pick another point"));
+    assert_eq!(d.error.as_deref(), Some("Pick the second point"));
     // OK makes the members already paired; the lone point waits.
     let c = apply_commands(&app, &d).unwrap();
     assert_eq!(c[0].1["pairs"], json!([{"a": vertex(0., 0., 0.), "b": vertex(0., 0., 400.)}]));
@@ -381,13 +384,13 @@ fn clicking_the_waiting_point_again_unpicks_it() {
     let mut app = box_app();
     let mut d = dialog_on(&mut app, &[]);
     pick(&app, &mut d, corner(0., 0., 0.));
-    assert_eq!(d.error.as_deref(), Some("Pick another point"));
+    assert_eq!(d.error.as_deref(), Some("Pick the second point"));
     pick(&app, &mut d, corner(0., 0., 0.));
     assert_eq!((path(&d), d.error.as_deref()), (&[][..], None), "the point is unpicked and nothing waits");
     // After a whole pair, its last point clicked again starts the next member from it.
     pick_all(&app, &mut d, &[corner(0., 0., 0.), corner(0., 0., 400.), corner(0., 0., 400.)]);
     assert_eq!(path(&d).len(), 3);
-    assert_eq!(d.error.as_deref(), Some("Pick another point"));
+    assert_eq!(d.error.as_deref(), Some("Pick the second point"));
     // And that waiting point, clicked again, goes; its pair stays.
     pick(&app, &mut d, corner(0., 0., 400.));
     assert_eq!(path(&d), [corner(0., 0., 0.), corner(0., 0., 400.)]);
@@ -403,7 +406,7 @@ fn a_point_can_be_picked_again_and_ctrl_click_takes_out_its_last_occurrence() {
     assert!(take_out(&mut app, &p1));
     let d = app.dialog.clone().unwrap();
     assert_eq!(path(&d), [p0.clone(), p1.clone(), p2.clone()], "the later p1 goes");
-    assert_eq!(d.error.as_deref(), Some("Pick another point"), "p2 now waits");
+    assert_eq!(d.error.as_deref(), Some("Pick the second point"), "p2 now waits");
     assert_eq!(apply_commands(&app, &d).unwrap()[0].1["pairs"], json!([{"a": vertex(0., 0., 0.), "b": vertex(0., 0., 400.)}]));
     // A point not in the path, or a line, is no Ctrl+click take-out: it goes to the input as usual.
     assert!(!take_out(&mut app, &corner(600., 400., 0.)));
@@ -871,6 +874,10 @@ fn rotate_member_dial_sets_the_angle() {
     assert_eq!(turns(&h.app), ["-90 deg"]);
 }
 
+fn corner_type(name: &str) -> usize {
+    CORNER_TYPES.iter().position(|c| c.0 == name).unwrap()
+}
+
 // ---------------------------------------------------------------------------------------------
 // Ghost Frame Members (#15705)
 
@@ -1007,6 +1014,35 @@ fn a_ghosted_members_vertex_and_centreline_end_can_be_picked() {
 }
 
 #[test]
+fn a_copys_hidden_crossing_tube_offers_no_end() {
+    // An Auto plus, v (200, −100)…(200, 100) drawn before h (0, 0)…(400, 0): its members are v's two pieces, then h.
+    // Named by position as a copy is, h's body is the third, not the second (a piece of v).
+    let mut app = box_app();
+    for (id, p) in [
+        ("sketch.create", json!({"plane": "XY", "name": "Plus"})),
+        ("sketch.line", json!({"points": [[200, -100], [200, 100]], "ids": ["v"]})),
+        ("sketch.line", json!({"points": [[0, 0], [400, 0]], "ids": ["h"]})),
+        ("sketch.finish", json!({})),
+        ("frame.member", json!({"sketch": "Plus", "profile": tube(), "corner": "auto", "names": {"h": "H", "v": "V"}})),
+    ] {
+        app.run(id, p).unwrap();
+    }
+    let f = app.session.doc.features.last().unwrap().id;
+    app.session.doc_mut().feature_mut(f).unwrap().body_names = ["V", "V · H", "H"].map(String::from).to_vec();
+    app.session.refresh();
+    ghosted_frame_dialog(&mut app);
+    app.session.visibility.hidden_bodies.push("H".into());
+    let lines: Vec<String> = super::member_ends(&app)
+        .into_iter()
+        .filter_map(|h| match h {
+            crate::viewport::Hit::MemberEnd { feature, line, .. } if feature == f => Some(line),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(lines, ["v", "v"], "h's body is hidden, v's shown");
+}
+
+#[test]
 fn picking_a_centreline_end_stores_the_point_it_is_built_on() {
     let mut app = box_app();
     let base = sketch_id(&app, "Base");
@@ -1049,6 +1085,32 @@ fn this_frame_members_tubes_are_tinted_apart_from_other_frame_members() {
     let body = solidcraft_theme::Tokens::get().body.to_srgba_unmultiplied();
     assert_eq!(other[..3], body[..3], "other frame members are grey");
     assert_ne!(own[..3], other[..3], "this one's are tinted");
+}
+
+/// With a component placed away from its frame the preview is of the placed model; this feature's
+/// new tubes are still drawn see-through in the ghost colour there.
+#[test]
+fn a_placed_models_preview_keeps_the_ghost_colour() {
+    let mut app = box_app();
+    let c = app.run("component.create", json!({"name": "Away", "grounded": false})).unwrap()["component"].as_u64().unwrap();
+    let o = app.session.doc.occurrence_of(c).unwrap().id;
+    app.run("occurrence.move", json!({"occurrence": o, "translate": [0, 0, 1000]})).unwrap();
+    app.run("component.activate", json!({"component": 0})).unwrap();
+    assert!(solidcraft_engine::frames::placed(&app.session));
+    let mut d = ghosted_frame_dialog(&mut app);
+    pick_all(&app, &mut d, &[corner(0., 0., 400.), corner(600., 0., 400.)]);
+    app.dialog = Some(d.clone());
+    let colors = crate::preview::colors(&app);
+    let built = crate::preview::compute(&app.session, &apply_commands(&app, &d).unwrap(), colors).unwrap();
+    assert!(built.scene.tris.is_empty() && !built.scene.glass.is_empty(), "the new tube is drawn see-through");
+    let drawn: std::collections::BTreeSet<[u8; 4]> = built
+        .scene
+        .glass
+        .chunks(crate::gpu::TRI_SIZE)
+        .filter_map(|v| v.get(24..28).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes))
+        .filter_map(|i| built.scene.palette.get(crate::gpu::PaletteIndex(i)))
+        .collect();
+    assert_eq!(drawn.into_iter().collect::<Vec<_>>(), [colors.new_body], "in the ghost colour, its alpha {}", colors.new_body[3]);
 }
 
 #[test]
@@ -1328,10 +1390,9 @@ fn ok_after_removing_every_tube_deletes_the_frame_member() {
     assert_eq!(members(&app), bodies);
 }
 
-/// A line refused in place of the waiting point gives the point back as it was picked, with its
-/// reference.
-#[test]
-fn a_refused_line_gives_the_waiting_point_back_with_its_reference() {
+/// The box with a circle drawn in sketch `Hoop`, and the circle as a pick: a line no member can
+/// be laid on.
+fn hoop_app() -> (SolveApp, Sel) {
     let mut app = box_app();
     for (id, p) in [
         ("sketch.create", json!({"plane": "XY", "name": "Hoop"})),
@@ -1342,17 +1403,84 @@ fn a_refused_line_gives_the_waiting_point_back_with_its_reference() {
     }
     let hoop = sketch_id(&app, "Hoop");
     let circle = Sel::ExternalSketchCurve { sketch: hoop, id: app.session.doc.sketch(hoop).unwrap().curves[0].id.clone() };
-    let mut d = dialog_on(&mut app, &[]);
-    pick_all(&app, &mut d, &[corner(0., 0., 0.), corner(0., 0., 400.)]);
+    (app, circle)
+}
+
+/// `picks` made in the open dialog, as clicks make them.
+fn pick_in(app: &mut SolveApp, picks: &[Sel]) {
+    let mut d = app.dialog.take().unwrap();
+    pick_all(app, &mut d, picks);
+    app.dialog = Some(d);
+}
+
+/// A line refused in place of the waiting point gives the point back as it was picked, with its
+/// reference: once the live preview of the path it made is in and fails, so a pick never waits for
+/// a build on the UI thread. A valid pick after it is kept.
+#[test]
+fn a_refused_line_gives_the_waiting_point_back_with_its_reference() {
+    let (mut app, circle) = hoop_app();
+    let d = dialog_on(&mut app, &[]);
+    app.dialog = Some(d);
+    pick_in(&mut app, &[corner(0., 0., 0.), corner(0., 0., 400.)]);
+    settle_preview(&mut app);
     // A reference other than the one the corner would be found as again.
     let given = json!({"vertex": [600.0, 0.0, 0.001]});
+    let mut d = app.dialog.take().unwrap();
     super::pick_as(&app, &mut d, corner(600., 0., 0.), Some(given.clone()));
-    pick(&app, &mut d, circle);
+    pick(&app, &mut d, circle.clone());
+    assert!(!d.error.as_deref().is_some_and(super::refused_pick), "{:?}", d.error);
+    assert_eq!(path(&d).last(), Some(&circle), "taken until its preview is in");
+    app.dialog = Some(d);
+    settle_preview(&mut app);
+    let d = app.dialog.as_ref().unwrap();
     assert!(d.error.as_deref().is_some_and(super::refused_pick), "{:?}", d.error);
-    assert_eq!(path(&d), [corner(0., 0., 0.), corner(0., 0., 400.), corner(600., 0., 0.)]);
-    pick(&app, &mut d, corner(600., 0., 400.));
+    assert_eq!(path(d), [corner(0., 0., 0.), corner(0., 0., 400.), corner(600., 0., 0.)]);
+    settle_preview(&mut app);
+    pick_in(&mut app, &[corner(600., 0., 400.)]);
+    settle_preview(&mut app);
+    let d = app.dialog.clone().unwrap();
+    assert!(d.error.is_none() && app.preview.error.is_none(), "{:?} {:?}", d.error, app.preview.error);
+    assert_eq!(path(&d).len(), 4, "the valid pick is kept");
     let c = apply_commands(&app, &d).unwrap();
     assert_eq!(c[0].1["pairs"][1]["a"], given, "{}", c[0].1);
+}
+
+/// A valid pick is kept when the frame fails for a change made after it (a wall thicker than the
+/// tube), before its preview is in: that preview's error is not the pick's.
+#[test]
+fn a_change_after_a_valid_pick_does_not_take_it_back() {
+    let mut app = box_app();
+    let d = dialog_on(&mut app, &[]);
+    app.dialog = Some(d);
+    pick_in(&mut app, &[corner(0., 0., 0.), corner(0., 0., 400.)]);
+    let m = member(open(&mut app));
+    let kinds = frame::profile_kinds();
+    let k = &kinds[m.kind];
+    let wall = k.required.iter().chain(k.optional).position(|n| *n == "wall").unwrap();
+    m.dims[m.kind][wall] = "30".into();
+    settle_preview(&mut app);
+    let d = app.dialog.as_ref().unwrap();
+    assert!(app.preview.error.is_some(), "the frame fails");
+    assert!(!d.error.as_deref().is_some_and(super::refused_pick), "{:?}", d.error);
+    assert_eq!(path(d), [corner(0., 0., 0.), corner(0., 0., 400.)]);
+}
+
+/// A failing pick's preview takes back only that pick: a pick made after it, before that preview
+/// is in, stays, though the path it made fails too.
+#[test]
+fn a_preview_of_an_older_path_takes_no_newer_pick_back() {
+    let (mut app, circle) = hoop_app();
+    let d = dialog_on(&mut app, &[]);
+    app.dialog = Some(d);
+    pick_in(&mut app, std::slice::from_ref(&circle));
+    crate::preview::update(&mut app, &egui::Context::default());
+    assert!(app.preview.busy, "the circle's path is previewed");
+    pick_in(&mut app, &[corner(0., 0., 0.), corner(0., 0., 400.)]);
+    settle_preview(&mut app);
+    let d = app.dialog.as_ref().unwrap();
+    assert!(app.preview.error.is_some());
+    assert!(!d.error.as_deref().is_some_and(super::refused_pick), "{:?}", d.error);
+    assert_eq!(path(d), [circle, corner(0., 0., 0.), corner(0., 0., 400.)]);
 }
 
 /// In a design with a component placed away from its frame the preview is of the placed model,
@@ -1433,11 +1561,94 @@ fn the_pick_cache_follows_the_previews_centrelines_and_ghosting() {
 // ---------------------------------------------------------------------------------------------
 // The path's picked list (#15705)
 
-/// p0, p1, p1, p2: the path's picked list shows the shared corner once for each pair it is in,
-/// and a row's remove button takes out that occurrence only, so the other pair keeps its point,
-/// its reference and its id.
+/// The box, and the Frame Member dialog open on it in a harness with the given path picks made
+/// as clicks in the view make them.
+fn path_harness(picks: impl FnOnce(&SolveApp) -> Vec<Sel>) -> crate::scenario::Harness {
+    let mut h = tall_harness();
+    for (id, p) in [
+        ("sketch.create", json!({"plane": "XY", "name": "Base"})),
+        ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [600, 400]})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"distance": 400, "name": "Box", "body_name": "Box"})),
+    ] {
+        h.app.run(id, p).unwrap();
+    }
+    h.app.start("frame.member");
+    let mut d = h.app.dialog.take().unwrap();
+    pick_all(&h.app, &mut d, &picks(&h.app));
+    h.app.dialog = Some(d);
+    h.frames(2);
+    h
+}
+
+/// The Base sketch's first line as the view picks it.
+fn base_line(app: &SolveApp) -> Sel {
+    let base = sketch_id(app, "Base");
+    Sel::ExternalSketchCurve { sketch: base, id: app.session.doc.sketch(base).unwrap().curves[0].id.clone() }
+}
+
+/// The number of rows in the Path list, opened.
+fn path_rows(h: &mut crate::scenario::Harness) -> usize {
+    if h.app.dialog.as_ref().unwrap().listed != Some(0) {
+        h.step(&json!({"click": {"handle": "dialog:list_toggle:Path"}})).unwrap();
+        h.frames(2);
+    }
+    (0..8).take_while(|i| crate::scenario::handle_at(&format!("dialog:list:Path:{i}:remove")).is_some()).count()
+}
+
+fn drawn_texts(h: &crate::scenario::Harness) -> Vec<String> {
+    h.shapes.iter().filter_map(|s| if let egui::Shape::Text(t) = &s.shape { Some(t.galley.text().to_owned()) } else { None }).collect()
+}
+
+/// A line and a pair of points: two rows, the line's and the pair's, which reads as its tube; the
+/// chip counts the two.
 #[test]
-fn the_picked_list_shows_each_occurrence_and_a_rows_remove_takes_out_only_that_one() {
+fn a_point_pair_is_one_path_row() {
+    let mut h = path_harness(|app| vec![base_line(app), corner(0., 0., 0.), corner(0., 0., 400.)]);
+    assert_eq!(path(h.app.dialog.as_ref().unwrap()).len(), 3);
+    assert!(drawn_texts(&h).iter().any(|t| t == "2 selected"), "the line and the tube");
+    assert_eq!(path_rows(&mut h), 2, "the line's row and the pair's");
+    let texts = drawn_texts(&h);
+    let tube = texts.iter().find(|t| t.starts_with("Tube 1: ")).unwrap_or_else(|| panic!("a Tube 1 row: {texts:?}"));
+    assert_eq!(tube.matches(" → ").count(), 1, "{tube}");
+}
+
+/// A lone first point makes no row: the dialog asks for the second, and the view still draws the
+/// point (it stays in the path). The second point makes the pair's row.
+#[test]
+fn a_lone_first_point_is_not_a_row_and_the_prompt_asks_for_the_second() {
+    let mut h = path_harness(|app| vec![base_line(app), corner(0., 0., 0.)]);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(d.error.as_deref(), Some("Pick the second point"));
+    assert!(path(d).contains(&corner(0., 0., 0.)), "the waiting point is still picked, so drawn");
+    assert!(drawn_texts(&h).iter().any(|t| t == "1 selected"), "the line alone");
+    assert_eq!(path_rows(&mut h), 1, "the line's row only");
+    assert!(!drawn_texts(&h).iter().any(|t| t.starts_with("Tube")));
+    let mut d = h.app.dialog.take().unwrap();
+    pick(&h.app, &mut d, corner(0., 0., 400.));
+    h.app.dialog = Some(d);
+    h.frames(2);
+    assert_eq!(h.app.dialog.as_ref().unwrap().error, None);
+    assert_eq!(path_rows(&mut h), 2);
+}
+
+/// A lone first point is no row yet: the Path chip stays the plain "Select" it is with nothing
+/// picked, never a filled "0 selected" (the prompt asks for the second point).
+#[test]
+fn a_lone_first_point_leaves_the_path_chip_unfilled() {
+    let empty = drawn_texts(&path_harness(|_| Vec::new()));
+    let h = path_harness(|_| vec![corner(0., 0., 0.)]);
+    assert_eq!(h.app.dialog.as_ref().unwrap().error.as_deref(), Some("Pick the second point"));
+    let texts = drawn_texts(&h);
+    assert!(!texts.iter().any(|t| t.ends_with("selected")), "{texts:?}");
+    let selects = |t: &[String]| t.iter().filter(|t| *t == "Select").count();
+    assert_eq!(selects(&texts), selects(&empty), "{texts:?} vs {empty:?}");
+}
+
+/// p0, p1, p1, p2 (two pairs sharing p1): two rows. Removing the second pair's row takes out both
+/// its points, and the first pair keeps its points, references and id.
+#[test]
+fn removing_a_pair_row_removes_both_points() {
     let mut h = crate::scenario::Harness::new();
     let rail = json!({"a": vertex(0., 0., 0.), "b": vertex(0., 0., 400.)});
     let top = json!({"a": vertex(0., 0., 400.), "b": vertex(600., 0., 400.)});
@@ -1458,24 +1669,1113 @@ fn the_picked_list_shows_each_occurrence_and_a_rows_remove_takes_out_only_that_o
     h.app.dialog = Some(edit_dialog(&h.app, f, None).unwrap());
     h.frames(2);
     let (p0, p1, p2) = (corner(0., 0., 0.), corner(0., 0., 400.), corner(600., 0., 400.));
-    assert_eq!(path(h.app.dialog.as_ref().unwrap()), [p0.clone(), p1.clone(), p1.clone(), p2.clone()]);
+    assert_eq!(path(h.app.dialog.as_ref().unwrap()), [p0.clone(), p1.clone(), p1.clone(), p2]);
     let m = member(h.app.dialog.as_mut().unwrap());
     let (refs, ids) = (m.refs.clone(), m.pair_ids.clone());
     assert_eq!(ids[1].as_deref(), Some("pair1"));
-
-    h.step(&json!({"click": {"handle": "dialog:list_toggle:Path"}})).unwrap();
-    h.frames(2);
-    let rows = (0..8).take_while(|i| crate::scenario::handle_at(&format!("dialog:list:Path:{i}:remove")).is_some()).count();
-    assert_eq!(rows, 4, "a row for each occurrence");
-    // The second p1 is the second pair's.
-    h.step(&json!({"click": {"handle": "dialog:list:Path:2:remove"}})).unwrap();
+    assert_eq!(path_rows(&mut h), 2, "a row for each pair");
+    h.step(&json!({"click": {"handle": "dialog:list:Path:1:remove"}})).unwrap();
     h.frames(2);
     let d = h.app.dialog.as_mut().unwrap();
-    assert_eq!(path(d), [p0, p1, p2], "only that occurrence goes");
+    assert_eq!(path(d), [p0, p1], "both of the second pair's points go");
+    assert_eq!(d.error, None, "nothing waits");
     let m = member(d);
-    assert_eq!(m.refs, [refs[0].clone(), refs[1].clone(), refs[3].clone()]);
-    assert_eq!(m.pair_ids, [ids[0].clone(), ids[1].clone(), ids[3].clone()]);
-    assert_eq!(d.error.as_deref(), Some("Pick another point"), "p2 now waits");
+    assert_eq!(m.refs, refs[..2]);
+    assert_eq!(m.pair_ids, ids[..2]);
     let c = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
     assert_eq!(c[0].1["params"]["pairs"], json!([stored[0]]), "the first pair is intact, id and references");
+}
+
+/// The Frame sketch's point at (x, y) (not the sketch origin).
+fn point_at(app: &SolveApp, x: f64, y: f64) -> String {
+    let sk = app.session.doc.sketch(sketch_id(app, "Frame")).unwrap();
+    sk.points.iter().find(|p| p.id != "origin" && (p.pos.x - x).abs() < 1e-6 && (p.pos.y - y).abs() < 1e-6).unwrap().id.clone()
+}
+
+/// The Frame sketch's lines with an end at (x, y), in the order they were drawn.
+fn lines_at(app: &SolveApp, x: f64, y: f64) -> Vec<String> {
+    let sk = app.session.doc.sketch(sketch_id(app, "Frame")).unwrap();
+    let at = |i: usize| sk.points.get(i).is_some_and(|p| (p.pos.x - x).abs() < 1e-6 && (p.pos.y - y).abs() < 1e-6);
+    sk.curves.iter().filter(|c| c.kind.ends().is_some_and(|(a, b)| at(a) || at(b))).map(|c| c.id.clone()).collect()
+}
+
+/// Corner Type and Flip reach the command; None writes neither, and a Mitre, which has no Flip,
+/// no flip.
+#[test]
+fn corner_type_and_flip_go_into_the_command() {
+    let mut app = frame_app();
+    let lines = frame_lines(&app);
+    let mut d = dialog_on(&mut app, &lines);
+    member(&mut d).corner = corner_type("none");
+    let p = &apply_commands(&app, &d).unwrap()[0].1;
+    assert!(p.get("corner").is_none() && p.get("flip").is_none() && p.get("corners").is_none(), "{p}");
+    let m = member(&mut d);
+    m.corner = corner_type("butt");
+    m.flip = true;
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!((&c[0].1["corner"], &c[0].1["flip"]), (&json!("butt"), &json!(true)), "{}", c[0].1);
+    member(&mut d).corner = corner_type("mitre");
+    let p = &apply_commands(&app, &d).unwrap()[0].1;
+    assert!(p["corner"] == "mitre" && p.get("flip").is_none(), "{p}");
+    run_all(&mut app, c);
+    assert_eq!(body_names(&app).len(), 4);
+}
+
+/// A corner point picked into Corner Overrides is saved by the two lines that end there, with its
+/// own type: a new pick takes the feature's type, unflipped.
+#[test]
+fn a_picked_corner_point_becomes_an_override() {
+    let mut app = frame_app();
+    let lines = frame_lines(&app);
+    let frame = sketch_id(&app, "Frame");
+    let mut d = dialog_on(&mut app, &lines);
+    member(&mut d).corner = corner_type("butt");
+    let corner = Sel::ExternalSketchPoint { sketch: frame, id: point_at(&app, 0.0, 0.0) };
+    d.active = 2;
+    d.pick(&app.session, corner.clone());
+    assert_eq!(d.inputs[2].items, std::slice::from_ref(&corner), "{:?}", d.error);
+    let members = lines_at(&app, 0.0, 0.0);
+    assert_eq!(members.len(), 2);
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(c[0].1["corners"], json!([{"members": members, "kind": "butt", "flip": false}]));
+    member(&mut d).overrides = vec![Override::new(corner, corner_type("mitre"))];
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(c[0].1["corners"], json!([{"members": members, "kind": "mitre", "flip": false}]), "a Mitre pair: today's order");
+    run_all(&mut app, c);
+    assert_eq!(body_names(&app).len(), 4);
+}
+
+/// A point where no two members end alone (the foot of a T, a point on a line's middle) is not
+/// taken, and the dialog says why.
+#[test]
+fn a_point_that_is_no_corner_is_refused_at_the_pick() {
+    let mut app = app_with(&[
+        ("sketch.create", json!({"plane": "XY", "name": "Frame"})),
+        ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [600, 400]})),
+        ("sketch.line", json!({"points": [[300, 0], [300, 400]], "ids": ["post"]})),
+        ("sketch.point", json!({"point": [0, 200], "id": "middle"})),
+        ("sketch.finish", json!({})),
+    ]);
+    let frame = sketch_id(&app, "Frame");
+    let lines = frame_lines(&app);
+    let mut d = dialog_on(&mut app, &lines);
+    d.active = 2;
+    for id in [point_at(&app, 300.0, 0.0), "middle".to_string()] {
+        d.pick(&app.session, Sel::ExternalSketchPoint { sketch: frame, id: id.clone() });
+        assert!(d.inputs[2].items.is_empty(), "{id}");
+        let e = d.error.clone().unwrap_or_default();
+        assert!(e.contains("members end"), "{id}: {e}");
+    }
+    let corner = Sel::ExternalSketchPoint { sketch: frame, id: point_at(&app, 600.0, 400.0) };
+    d.pick(&app.session, corner.clone());
+    assert_eq!((d.inputs[2].items.as_slice(), d.error.as_deref()), ([corner].as_slice(), None));
+}
+
+/// Edit Feature brings back Corner Type, Flip and each override, the override as the point of its
+/// corner.
+#[test]
+fn an_edit_shows_the_corner_settings_and_overrides() {
+    let mut app = frame_app();
+    let members = lines_at(&app, 0.0, 0.0);
+    let corners = json!([{"members": members, "corner": "mitre", "flip": false}]);
+    app.run("frame.member", json!({"sketch": "Frame", "profile": tube(), "corner": "butt", "flip": true, "corners": corners})).unwrap();
+    let f = app.session.doc.features.last().unwrap().id;
+    let mut e = edit_dialog(&app, f, None).unwrap();
+    let frame = sketch_id(&app, "Frame");
+    let [Sel::ExternalSketchPoint { sketch, id }] = e.inputs[2].items.as_slice() else { panic!("{:?}", e.inputs[2].items) };
+    let sk = app.session.doc.sketch(frame).unwrap();
+    assert_eq!((*sketch, sk.points[sk.point_index(id).unwrap()].pos), (frame, solidcore_record::Vec2::new(0.0, 0.0)));
+    assert!(e.extra.get("corners").is_none());
+    let m = member(&mut e);
+    assert_eq!((CORNER_TYPES[m.corner].0, m.flip), ("butt", true));
+    assert_eq!(m.overrides.iter().map(|o| (CORNER_TYPES[o.corner].0, o.flip)).collect::<Vec<_>>(), [("mitre", false)]);
+    let c = apply_commands(&app, &e).unwrap();
+    assert_eq!(c[0].1["params"]["corners"], json!([{"members": saved_orders(&app, f)[0], "kind": "mitre"}]), "as saved: {}", c[0].1);
+}
+
+/// A harness window tall enough for the whole Frame Member card with its corner rows: in the
+/// default one the card scrolls, and its OK and Cancel lie over the last rows.
+fn tall_harness() -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.resize", json!({"width": 1600, "height": 1400}));
+    h.app.home.open = false;
+    h
+}
+
+/// An override whose two lines no longer meet still opens for editing: it is kept, listed as a
+/// Missing corner, and its row's bin removes it.
+#[test]
+fn an_edit_opens_with_an_override_whose_corner_has_gone() {
+    let mut h = tall_harness();
+    for (id, p) in frame_commands() {
+        h.app.run(id, p).unwrap();
+    }
+    h.app.run("frame.member", json!({"sketch": "Frame", "profile": tube()})).unwrap();
+    let lines = frame_lines(&h.app);
+    let f = h.app.session.doc.features.last().unwrap().id;
+    // The opposite sides of the rectangle never meet, as two lines a dimension edit moved apart.
+    let gone = json!([{"members": [lines[0], lines[2]], "corner": "butt", "flip": true}]);
+    let doc = std::sync::Arc::make_mut(&mut h.app.session.doc);
+    let FeatureKind::FrameMember { corners, .. } = &mut doc.feature_mut(f).unwrap().kind else { panic!() };
+    *corners = serde_json::from_value(gone.clone()).unwrap();
+    let e = edit_dialog(&h.app, f, None).unwrap();
+    assert!(e.inputs[2].items.is_empty());
+    let gone = saved(&gone);
+    assert_eq!(e.extra.get("corners"), Some(&gone));
+    // OK keeps it (the feature then says the override is not at a corner).
+    assert_eq!(apply_commands(&h.app, &e).unwrap()[0].1["params"]["corners"], gone);
+    h.app.dialog = Some(e);
+    h.frames(2);
+    let bin = "dialog:button:Corner 1:×";
+    assert!(crate::scenario::rect_of(bin).is_some(), "the missing corner has a row with a bin");
+    h.step(&json!({"click": {"handle": bin}})).unwrap();
+    h.frames(1);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert!(d.extra.get("corners").is_none());
+    assert!(apply_commands(&h.app, d).unwrap()[0].1["params"].get("corners").is_none());
+}
+
+/// An X brace's diagonals cross where no sketch point is, so the edit can't show their override as
+/// a picked point: it is kept, and its row reads Crossing (it still applies), not Missing corner.
+#[test]
+fn an_edit_shows_a_kept_crossing_override_as_a_crossing() {
+    let mut h = tall_harness();
+    for (id, p) in [
+        ("sketch.create", json!({"plane": "XY", "name": "Frame"})),
+        ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [600, 400]})),
+        ("sketch.line", json!({"points": [[0, 0], [600, 400]], "ids": ["d1"]})),
+        ("sketch.line", json!({"points": [[0, 400], [600, 0]], "ids": ["d2"]})),
+        ("sketch.finish", json!({})),
+    ] {
+        h.app.run(id, p).unwrap();
+    }
+    let over = json!([{"members": ["d1", "d2"], "kind": "auto", "flip": true}]);
+    h.app.run("frame.member", json!({"sketch": "Frame", "profile": tube(), "corner": "auto", "corners": over})).unwrap();
+    let f = h.app.session.doc.features.last().unwrap().id;
+    let e = edit_dialog(&h.app, f, None).unwrap();
+    assert!(e.inputs[2].items.is_empty());
+    // Saved as the order Flip gave: d2 stays whole.
+    assert_eq!(e.extra.get("corners").and_then(|c| c[0].get("members")), Some(&json!([{"line": "d2"}, {"line": "d1"}])));
+    h.app.dialog = Some(e);
+    h.frames(2);
+    let texts = drawn_texts(&h);
+    assert!(texts.iter().any(|t| t == "Crossing") && !texts.iter().any(|t| t == "Missing corner"), "{texts:?}");
+}
+
+/// An override of a corner where a point-to-point member ends (#15705) can't show as a picked
+/// sketch point: an edit keeps it as it is, its row says its type, and OK sends it back.
+#[test]
+fn an_edit_keeps_an_override_of_a_pair_members_corner() {
+    let mut app = frame_app();
+    // The bottom line, and a tube up the right side between its two corner points: they meet at (600, 0).
+    let bottom = lines_at(&app, 0.0, 0.0).into_iter().find(|l| lines_at(&app, 600.0, 0.0).contains(l)).unwrap();
+    let (a, b) = (point_at(&app, 600.0, 0.0), point_at(&app, 600.0, 400.0));
+    let over = json!([{"members": [bottom, "pair1"], "corner": "mitre", "flip": false}]);
+    app.run(
+        "frame.member",
+        json!({"sketch": "Frame", "lines": [bottom], "profile": tube(), "corners": over,
+               "pairs": [{"a": {"sketch": "Frame", "point": a}, "b": {"sketch": "Frame", "point": b}}]}),
+    )
+    .unwrap();
+    let f = app.session.doc.features.last().unwrap().id;
+    let e = edit_dialog(&app, f, None).unwrap();
+    assert!(e.inputs[2].items.is_empty());
+    let over = saved(&over);
+    assert_eq!(e.extra.get("corners"), Some(&over));
+    assert_eq!(kept_corner_text(&over[0], false), "Mitre");
+    assert_eq!(kept_corner_text(&json!({"members": [bottom, "l9"], "corner": "mitre"}), false), "Missing corner");
+    assert_eq!(apply_commands(&app, &e).unwrap()[0].1["params"]["corners"], over);
+}
+
+/// Remove Tube drops the corner overrides naming the tube taken out, as `frame.remove_member` does: one kept
+/// from the edited feature (the bottom line and pair1), and a picked row (the brace's corner when the brace goes).
+#[test]
+fn remove_tube_drops_the_overrides_naming_it() {
+    let mut app = frame_app();
+    let bottom = lines_at(&app, 0.0, 0.0).into_iter().find(|l| lines_at(&app, 600.0, 0.0).contains(l)).unwrap();
+    let (a, b) = (point_at(&app, 600.0, 0.0), point_at(&app, 600.0, 400.0));
+    let over = json!([{"members": [bottom, "pair1"], "corner": "mitre", "flip": false}]);
+    app.run(
+        "frame.member",
+        json!({"sketch": "Frame", "lines": [bottom], "profile": tube(), "corners": over,
+               "pairs": [{"a": {"sketch": "Frame", "point": a}, "b": {"sketch": "Frame", "point": b}}]}),
+    )
+    .unwrap();
+    let f = app.session.doc.features.last().unwrap().id;
+    app.edit_feature(f);
+    settle_preview(&mut app);
+    super::remove_tubes(&mut app, &["pair1".to_string()]);
+    let d = app.dialog.clone().unwrap();
+    let c = apply_commands(&app, &d).unwrap();
+    assert!(c[0].1["params"].get("corners").is_none(), "{}", c[0].1);
+    crate::dialogs::run_dialog(&mut app, &d).unwrap();
+    // A picked row: the three-tube corner at (0, 0) goes with the brace.
+    let mut app = braced_app();
+    let corners = json!([{"members": lines_at(&app, 0.0, 0.0), "corner": "auto", "flip": true}]);
+    app.run("frame.member", json!({"sketch": "Frame", "profile": tube(), "corner": "auto", "corners": corners})).unwrap();
+    let f = app.session.doc.features.last().unwrap().id;
+    app.edit_feature(f);
+    settle_preview(&mut app);
+    assert_eq!(open(&mut app).inputs[2].items.len(), 1);
+    super::remove_tubes(&mut app, &["brace".to_string()]);
+    let d = app.dialog.clone().unwrap();
+    assert!(d.inputs[2].items.is_empty(), "{:?}", d.inputs[2].items);
+    let c = apply_commands(&app, &d).unwrap();
+    assert!(c[0].1["params"].get("corners").is_none(), "{}", c[0].1);
+    crate::dialogs::run_dialog(&mut app, &d).unwrap();
+}
+
+/// A new Frame Member starts on Auto with Fit Ends to Earlier Frames ticked, unflipped, with no
+/// overrides, even after one made with Butt; its command says so.
+#[test]
+fn a_new_frame_member_starts_on_auto_with_fit_ends() {
+    let mut app = frame_app();
+    let lines = frame_lines(&app);
+    let mut d = dialog_on(&mut app, &lines);
+    assert_eq!(d.inputs[2].label, "Corner Overrides");
+    let m = member(&mut d);
+    assert_eq!((CORNER_TYPES[m.corner].0, m.flip, m.fit_ends, m.overrides.len()), ("auto", false, true, 0));
+    let p = &apply_commands(&app, &d).unwrap()[0].1;
+    assert_eq!((&p["corner"], &p["fit_ends"]), (&json!("auto"), &json!(true)), "{p}");
+    assert!(p.get("flip").is_none() && p.get("corners").is_none(), "{p}");
+    member(&mut d).corner = corner_type("butt");
+    let c = apply_commands(&app, &d).unwrap();
+    run_all(&mut app, c);
+    app.dialog = None;
+    let mut d = dialog_on(&mut app, &lines);
+    assert_eq!(CORNER_TYPES[member(&mut d).corner].0, "auto");
+}
+
+/// With the preference "New Frame Members start on Corner Type None" a new Frame Member starts on
+/// None, as before Auto, and its command sends no corner.
+#[test]
+fn the_frame_starts_on_none_preference_keeps_the_old_start() {
+    let mut app = frame_app();
+    app.preferences.frame_starts_on_none = true;
+    let lines = frame_lines(&app);
+    let mut d = dialog_on(&mut app, &lines);
+    assert_eq!(CORNER_TYPES[member(&mut d).corner].0, "none");
+    let p = &apply_commands(&app, &d).unwrap()[0].1;
+    assert!(p.get("corner").is_none() && p.get("fit_ends").is_none(), "{p}");
+}
+
+/// Fit Ends to Earlier Frames unticked writes nothing, and under None, ticked or not, neither.
+#[test]
+fn fit_ends_unticked_writes_nothing() {
+    let mut app = frame_app();
+    let lines = frame_lines(&app);
+    let mut d = dialog_on(&mut app, &lines);
+    member(&mut d).fit_ends = false;
+    let p = &apply_commands(&app, &d).unwrap()[0].1;
+    assert!(p["corner"] == "auto" && p.get("fit_ends").is_none(), "{p}");
+    let m = member(&mut d);
+    (m.fit_ends, m.corner) = (true, corner_type("none"));
+    let p = &apply_commands(&app, &d).unwrap()[0].1;
+    assert!(p.get("corner").is_none() && p.get("fit_ends").is_none(), "{p}");
+    member(&mut d).corner = corner_type("mitre");
+    assert_eq!(apply_commands(&app, &d).unwrap()[0].1["fit_ends"], json!(true));
+}
+
+/// Flip is hidden under Auto (it has no one corner to act on) and shows under Butt; Fit Ends to
+/// Earlier Frames shows under every type but None.
+#[test]
+fn flip_is_hidden_under_auto() {
+    let mut h = tall_harness();
+    for (id, p) in frame_commands() {
+        h.app.run(id, p).unwrap();
+    }
+    let lines = frame_lines(&h.app);
+    h.app.session.selection = lines.iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
+    h.app.start("frame.member");
+    h.frames(2);
+    assert!(h.widgets("Flip").is_empty(), "no Flip under Auto");
+    assert!(h.widget("Fit Ends to Earlier Frames").is_some());
+    member(h.app.dialog.as_mut().unwrap()).corner = corner_type("butt");
+    h.frames(2);
+    assert!(!h.widgets("Flip").is_empty(), "Flip under Butt");
+    member(h.app.dialog.as_mut().unwrap()).corner = corner_type("none");
+    h.frames(2);
+    assert!(h.widget("Fit Ends to Earlier Frames").is_none(), "nothing to fit under None");
+}
+
+/// Under an Auto frame an override row's Type lists Auto (a new pick starts on it), and its Flip
+/// is enabled and saved. On a frame of another type, Auto isn't offered, and an Auto override
+/// reads and saves as the frame's type (it builds as that type, spec A6).
+#[test]
+fn override_rows_offer_auto_and_flip_it() {
+    let names = |c: &[(&str, &str)]| c.iter().map(|c| c.0.to_string()).collect::<Vec<_>>();
+    assert_eq!(names(override_choices(corner_type("auto"))), names(&CORNER_TYPES));
+    assert_eq!(names(override_choices(corner_type("mitre"))), ["none", "mitre", "butt"]);
+    let (mut h, _) = overrides_dialog("auto");
+    assert!(h.widget_near("Auto", "Corner 1").is_some());
+    let [_, y] = h.widget("Corner 1").unwrap();
+    let tree = h.output.accesskit_update.as_ref().unwrap();
+    let on_row = |n: &egui::accesskit::Node| n.bounds().is_some_and(|b| (f64::midpoint(b.y0, b.y1) - y).abs() < 2.0);
+    let flip = tree.nodes.iter().find(|(_, n)| n.label() == Some("Flip") && on_row(n));
+    assert!(flip.is_some_and(|(_, n)| !n.is_disabled()), "Corner 1's Flip is enabled under Auto");
+    member(h.app.dialog.as_mut().unwrap()).overrides[0].flip = true;
+    let c = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!((&c[0].1["corners"][0]["kind"], &c[0].1["corners"][0]["flip"]), (&json!("auto"), &json!(true)), "{}", c[0].1);
+    member(h.app.dialog.as_mut().unwrap()).corner = corner_type("mitre");
+    h.frames(2);
+    assert!(h.widget_near("Mitre", "Corner 1").is_some());
+    let c = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!((&c[0].1["corners"][0]["kind"], c[0].1["corners"][0].get("flip")), (&json!("mitre"), Some(&json!(false))), "{}", c[0].1);
+    // Back on Auto, the row is Auto again.
+    member(h.app.dialog.as_mut().unwrap()).corner = corner_type("auto");
+    let c = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(c[0].1["corners"][0]["kind"], json!("auto"));
+}
+
+/// The 600 × 400 rectangle with a brace `brace` from corner to corner: three lines end at (0, 0)
+/// and at (600, 400).
+fn braced_app() -> SolveApp {
+    app_with(&[
+        ("sketch.create", json!({"plane": "XY", "name": "Frame"})),
+        ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [600, 400]})),
+        ("sketch.line", json!({"points": [[0, 0], [600, 400]], "ids": ["brace"]})),
+        ("sketch.finish", json!({})),
+    ])
+}
+
+/// Under Auto, a point where three lines end is a corner to override, saved by all three; under
+/// Mitre the same pick is refused, as stage 1 refuses it.
+#[test]
+fn under_auto_a_three_tube_point_is_an_override() {
+    let mut app = braced_app();
+    let frame = sketch_id(&app, "Frame");
+    let lines = frame_lines(&app);
+    let corner = Sel::ExternalSketchPoint { sketch: frame, id: point_at(&app, 0.0, 0.0) };
+    let members = lines_at(&app, 0.0, 0.0);
+    assert_eq!(members.len(), 3, "{members:?}");
+    let mut d = dialog_on(&mut app, &lines);
+    d.active = 2;
+    d.pick(&app.session, corner.clone());
+    assert_eq!(d.inputs[2].items, std::slice::from_ref(&corner), "{:?}", d.error);
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(c[0].1["corners"], json!([{"members": members, "kind": "auto", "flip": false}]), "{}", c[0].1);
+    let mut d = dialog_on(&mut app, &lines);
+    member(&mut d).corner = corner_type("mitre");
+    d.active = 2;
+    d.pick(&app.session, corner);
+    assert!(d.inputs[2].items.is_empty());
+    let e = d.error.clone().unwrap_or_default();
+    assert!(e.contains("exactly two members end"), "{e}");
+}
+
+/// Under Auto, a corner picked where a point-to-point member ends too is saved with that pair's id, as
+/// the build counts every member ending there (ruling A16), and the feature builds. An edit that adds a
+/// pair names it by the id the command gives it.
+#[test]
+fn an_auto_override_names_the_pairs_ending_at_its_corner() {
+    let mut app = app_with(&[
+        ("sketch.create", json!({"plane": "XY", "name": "Frame"})),
+        ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [600, 400]})),
+        ("sketch.point", json!({"point": [300, 200], "id": "mid"})),
+        ("sketch.finish", json!({})),
+    ]);
+    let frame = sketch_id(&app, "Frame");
+    let lines = frame_lines(&app);
+    let at = |app: &SolveApp, x: f64, y: f64| Sel::SketchPoint { id: format!("{frame}:{}", point_at(app, x, y)) };
+    let mid = Sel::SketchPoint { id: format!("{frame}:mid") };
+    let mut d = dialog_on(&mut app, &lines);
+    d.active = 0;
+    pick_all(&app, &mut d, &[at(&app, 0.0, 0.0), mid.clone()]);
+    assert_eq!((path(&d).len(), d.error.as_deref()), (6, None));
+    d.active = 2;
+    d.pick(&app.session, Sel::ExternalSketchPoint { sketch: frame, id: point_at(&app, 0.0, 0.0) });
+    let c = apply_commands(&app, &d).unwrap();
+    let mut members = lines_at(&app, 0.0, 0.0);
+    members.push("pair1".into());
+    assert_eq!(c[0].1["corners"], json!([{"members": members, "kind": "auto", "flip": false}]), "{}", c[0].1);
+    run_all(&mut app, c);
+    let f = app.session.doc.features.last().unwrap().id;
+    // The edit adds a second pair from (600, 400): its id is pair2.
+    let mut e = edit_dialog(&app, f, None).unwrap();
+    e.active = 0;
+    pick_all(&app, &mut e, &[at(&app, 600.0, 400.0), mid]);
+    e.active = 2;
+    e.pick(&app.session, Sel::ExternalSketchPoint { sketch: frame, id: point_at(&app, 600.0, 400.0) });
+    let c = apply_commands(&app, &e).unwrap();
+    let mut far = lines_at(&app, 600.0, 400.0);
+    far.push("pair2".into());
+    let corners = c[0].1["params"]["corners"].as_array().cloned().unwrap_or_default();
+    assert!(corners.iter().any(|o| o["members"] == json!(far)), "{}", c[0].1);
+    run_all(&mut app, c);
+    assert_eq!(body_names(&app).len(), 6);
+}
+
+/// Edit Feature brings back Auto, Fit Ends to Earlier Frames and a three-tube override as the point
+/// of its corner, and OK sends them back as they were. An override that names only two of the
+/// three is no longer that corner: it is kept as a Missing corner.
+#[test]
+fn an_edit_shows_a_three_tube_override() {
+    let mut app = braced_app();
+    let members = lines_at(&app, 0.0, 0.0);
+    let corners = json!([{"members": members, "corner": "auto", "flip": true}]);
+    app.run("frame.member", json!({"sketch": "Frame", "profile": tube(), "corner": "auto", "fit_ends": true, "corners": corners})).unwrap();
+    let f = app.session.doc.features.last().unwrap().id;
+    let mut e = edit_dialog(&app, f, None).unwrap();
+    let frame = sketch_id(&app, "Frame");
+    let [Sel::ExternalSketchPoint { sketch, id }] = e.inputs[2].items.as_slice() else { panic!("{:?} {:?}", e.inputs[2].items, e.extra) };
+    let sk = app.session.doc.sketch(frame).unwrap();
+    assert_eq!((*sketch, sk.points[sk.point_index(id).unwrap()].pos), (frame, solidcore_record::Vec2::new(0.0, 0.0)));
+    assert!(e.extra.get("corners").is_none());
+    let m = member(&mut e);
+    assert_eq!((CORNER_TYPES[m.corner].0, m.fit_ends), ("auto", true));
+    assert_eq!(m.overrides.iter().map(|o| (CORNER_TYPES[o.corner].0, o.flip)).collect::<Vec<_>>(), [("auto", true)]);
+    let p = &apply_commands(&app, &e).unwrap()[0].1["params"];
+    let kept = json!([{"members": saved_orders(&app, f)[0], "kind": "auto"}]);
+    assert_eq!((&p["corner"], &p["fit_ends"], &p["corners"]), (&json!("auto"), &json!(true), &kept), "as saved: {p}");
+    // Two of the three: the set of tubes there changed, so it no longer matches.
+    let two = json!([{"members": members[..2], "corner": "auto", "flip": false}]);
+    let doc = std::sync::Arc::make_mut(&mut app.session.doc);
+    let FeatureKind::FrameMember { corners, .. } = &mut doc.feature_mut(f).unwrap().kind else { panic!() };
+    *corners = serde_json::from_value(two.clone()).unwrap();
+    let e = edit_dialog(&app, f, None).unwrap();
+    assert!(e.inputs[2].items.is_empty(), "{:?}", e.inputs[2].items);
+    assert_eq!(e.extra.get("corners"), Some(&saved(&two)));
+}
+
+/// Corner overrides as a design saves them (#17854: `{members: [{line}], kind}`, an old `flip` dropped).
+fn saved(corners: &Value) -> Value {
+    serde_json::to_value(serde_json::from_value::<Vec<solidcraft_engine::doc::frame::CornerOverride>>(corners.clone()).unwrap()).unwrap()
+}
+
+/// The Gap fields on the row under the one at height `y`: whether each is greyed.
+fn gaps_under(h: &crate::scenario::Harness, y: f64) -> Vec<bool> {
+    let tree = h.output.accesskit_update.as_ref().unwrap();
+    let row = f64::from(solidcraft_theme::Tokens::get().control_height);
+    tree.nodes
+        .iter()
+        .filter(|(_, n)| n.role() == egui::accesskit::Role::TextInput && n.label() == Some("Gap"))
+        .filter(|(_, n)| n.bounds().is_some_and(|b| (2.0..1.5 * row).contains(&(f64::midpoint(b.y0, b.y1) - y))))
+        .map(|(_, n)| n.is_disabled())
+        .collect()
+}
+
+/// Gap (#17854) is a row of its own under Fit Ends and Coped: typed, it goes into the command as `gap`; 0 or empty
+/// sends nothing; under None it is greyed and sends nothing. An edit brings it back.
+#[test]
+fn the_gap_field_is_sent() {
+    let (mut h, _) = overrides_dialog("butt");
+    let [_, cy] = h.widget("Coped").unwrap();
+    assert_eq!(gaps_under(&h, cy), [false], "one enabled Gap under Coped");
+    let sent = |h: &crate::scenario::Harness| apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap()[0].1.get("gap").cloned();
+    assert_eq!(sent(&h), None, "Gap starts empty: nothing sent");
+    for (typed, expected) in [("3 mm", Some(json!("3 mm"))), ("0", None), ("0 mm", None), ("", None)] {
+        member(h.app.dialog.as_mut().unwrap()).gap = typed.into();
+        assert_eq!(sent(&h), expected, "Gap {typed:?}");
+    }
+    member(h.app.dialog.as_mut().unwrap()).gap = "3 mm".into();
+    member(h.app.dialog.as_mut().unwrap()).corner = corner_type("none");
+    h.frames(2);
+    let [_, cy] = h.widget("Coped").unwrap();
+    assert_eq!(gaps_under(&h, cy), [true], "Gap is greyed under None");
+    assert_eq!(sent(&h), None, "under None no gap is sent");
+    member(h.app.dialog.as_mut().unwrap()).corner = corner_type("butt");
+    let c = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    h.app.dialog = None;
+    run_all(&mut h.app, c);
+    let f = h.app.session.doc.features.last().unwrap().id;
+    let mut e = edit_dialog(&h.app, f, None).unwrap();
+    assert_eq!(member(&mut e).gap, "3 mm");
+}
+
+/// Each Corner Overrides row has a Gap row of its own under it (empty: the frame's): a row sends its `kind` and its
+/// gap, a Mitre row (Flip greyed) `flip` false, a Butt row its own. A kept override of tubes that overlap has no Gap.
+#[test]
+fn an_override_row_sends_its_gap_and_kind() {
+    let (mut h, _) = overrides_dialog("butt");
+    for n in [1, 2] {
+        let [_, y] = h.widget(&format!("Corner {n}")).unwrap();
+        assert_eq!(gaps_under(&h, y), [false], "Corner {n} has a Gap");
+    }
+    let m = member(h.app.dialog.as_mut().unwrap());
+    m.overrides[0].corner = corner_type("mitre");
+    m.overrides[0].gap = "2 mm".into();
+    let c = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    let members = lines_at(&h.app, 0.0, 0.0);
+    assert_eq!(c[0].1["corners"][0], json!({"members": members, "kind": "mitre", "flip": false, "gap": "2 mm"}), "{}", c[0].1);
+    assert_eq!(c[0].1["corners"][1], json!({"members": lines_at(&h.app, 600.0, 400.0), "kind": "butt", "flip": false}), "{}", c[0].1);
+    h.app.dialog = None;
+    run_all(&mut h.app, c);
+    let f = h.app.session.doc.features.last().unwrap().id;
+    let mut e = edit_dialog(&h.app, f, None).unwrap();
+    assert_eq!(member(&mut e).overrides.iter().map(|o| o.gap.as_str()).collect::<Vec<_>>(), ["2 mm", ""]);
+
+    // A post whose foot stops 15 mm short of the bottom rail: its tube overlaps the rail's.
+    let mut h = tall_harness();
+    for (id, p) in [
+        ("sketch.create", json!({"plane": "XY", "name": "Frame"})),
+        ("sketch.line", json!({"points": [[0, 0], [600, 0]], "ids": ["rail"]})),
+        ("sketch.line", json!({"points": [[300, 15], [300, 300]], "ids": ["post"]})),
+        ("sketch.finish", json!({})),
+    ] {
+        h.app.run(id, p).unwrap();
+    }
+    let over = json!([{"members": ["rail", "post"], "kind": "auto"}]);
+    h.app.run("frame.member", json!({"sketch": "Frame", "profile": tube(), "corner": "auto", "corners": over})).unwrap();
+    let f = h.app.session.doc.features.last().unwrap().id;
+    let e = edit_dialog(&h.app, f, None).unwrap();
+    assert!(e.inputs[2].items.is_empty() && e.extra.get("corners").is_some(), "kept: {:?}", e.extra);
+    h.app.dialog = Some(e);
+    h.frames(2);
+    let [_, y] = h.widget("Corner 1").unwrap();
+    assert!(gaps_under(&h, y).is_empty(), "the overlap row has no Gap");
+}
+
+/// The Butt frame on the rectangle with an override at (0, 0) saved in today's order and one at (600, 400) saved
+/// the other way round (`flip` makes those orders), and the lines of each.
+fn flipped_frame(app: &mut SolveApp) -> [Vec<String>; 2] {
+    let (near, far) = (lines_at(app, 0.0, 0.0), lines_at(app, 600.0, 400.0));
+    let corners = json!([{"members": near, "kind": "butt", "flip": false}, {"members": far, "kind": "butt", "flip": true}]);
+    app.run("frame.member", json!({"sketch": "Frame", "profile": tube(), "corner": "butt", "corners": corners})).unwrap();
+    [near, far]
+}
+
+/// The saved order of each override of Frame Member `f`.
+fn saved_orders(app: &SolveApp, f: u64) -> Vec<Vec<String>> {
+    let FeatureKind::FrameMember { corners, .. } = &app.session.doc.feature(f).unwrap().kind else { panic!() };
+    corners.iter().map(|c| c.lines().map(String::from).collect()).collect()
+}
+
+/// Reopened, a row shows Flip ticked when its saved order is not the one today's rules give (`default_order`), and
+/// unticked when it is.
+#[test]
+fn reopening_shows_flip_from_the_saved_order() {
+    let mut app = frame_app();
+    let [near, far] = flipped_frame(&mut app);
+    let f = app.session.doc.features.last().unwrap().clone();
+    let st = app.session.model.state_before(f.id);
+    let default = |lines: &[String]| frame::default_order(&app.session.doc, &st, &f, lines).unwrap();
+    let (near, mut far) = (default(&near), default(&far));
+    far.swap(0, 1);
+    assert_eq!(saved_orders(&app, f.id), [near, far], "one in today's order, one the other way round");
+    let mut e = edit_dialog(&app, f.id, None).unwrap();
+    assert_eq!(member(&mut e).overrides.iter().map(|o| o.flip).collect::<Vec<_>>(), [false, true]);
+}
+
+/// Two Frame Members alike in every setting: editing the second reads its Flips against the model before it, not
+/// the first one's (which, moved before its sketch, has no lines to order).
+#[test]
+fn an_edit_reads_flip_for_its_own_frame_of_two_alike() {
+    let mut app = frame_app();
+    flipped_frame(&mut app);
+    flipped_frame(&mut app);
+    let doc = std::sync::Arc::make_mut(&mut app.session.doc);
+    let n = doc.features.len();
+    // Alike down to the names their tubes keep.
+    doc.features[n - 1].kind = doc.features[n - 2].kind.clone();
+    let (first, second) = (doc.features[n - 2].clone(), doc.features[n - 1].clone());
+    // The first Frame Member before every sketch.
+    doc.features.remove(n - 2);
+    doc.features.insert(0, first);
+    app.session.refresh();
+    let mut e = edit_dialog(&app, second.id, None).unwrap();
+    assert_eq!(member(&mut e).overrides.iter().map(|o| o.flip).collect::<Vec<_>>(), [false, true]);
+}
+
+/// OK on an edit leaves an override whose Flip was not touched exactly as it was saved: a three-tube corner whose
+/// first two are not the pair today's rules give keeps its order (a Flip would only swap today's first two).
+/// Unticking Flip sends `flip` against today's order.
+#[test]
+fn an_untouched_override_keeps_its_saved_order() {
+    let mut app = braced_app();
+    let members = lines_at(&app, 0.0, 0.0);
+    app.run("frame.member", json!({"sketch": "Frame", "profile": tube(), "corner": "auto"})).unwrap();
+    let f = app.session.doc.features.last().unwrap().clone();
+    let st = app.session.model.state_before(f.id);
+    let today = frame::default_order(&app.session.doc, &st, &f, &members).unwrap();
+    let order = vec![today[0].clone(), today[2].clone(), today[1].clone()];
+    let corners = json!([{"members": order, "kind": "auto"}]);
+    let params = json!({"sketch": "Frame", "profile": tube(), "corner": "auto", "corners": corners});
+    app.run("timeline.redefine", json!({"feature": f.id, "command": "frame.member", "params": params})).unwrap();
+    assert_eq!(saved_orders(&app, f.id), std::slice::from_ref(&order));
+    let mut e = edit_dialog(&app, f.id, None).unwrap();
+    assert_eq!(member(&mut e).overrides.iter().map(|o| o.flip).collect::<Vec<_>>(), [true], "not today's first two");
+    let c = apply_commands(&app, &e).unwrap();
+    assert_eq!(c[0].1["params"]["corners"], json!([{"members": order, "kind": "auto"}]), "{}", c[0].1);
+    run_all(&mut app, c);
+    assert_eq!(saved_orders(&app, f.id), std::slice::from_ref(&order), "OK changed nothing");
+    // Unticked: today's order.
+    let mut e = edit_dialog(&app, f.id, None).unwrap();
+    member(&mut e).overrides[0].flip = false;
+    let c = apply_commands(&app, &e).unwrap();
+    assert_eq!(c[0].1["params"]["corners"][0]["flip"], json!(false), "{}", c[0].1);
+    run_all(&mut app, c);
+    assert_eq!(saved_orders(&app, f.id), [today]);
+}
+
+/// A new Mitre row (Flip greyed) is sent with `flip` false, so it is saved in today's order, not as the corner lists
+/// its lines: reopened, its Flip is unticked, and a later switch to Butt runs today's member through.
+#[test]
+fn a_new_mitre_row_is_saved_in_todays_order() {
+    let (mut h, _) = overrides_dialog("butt");
+    for o in &mut member(h.app.dialog.as_mut().unwrap()).overrides {
+        o.corner = corner_type("mitre");
+    }
+    let c = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert!(c[0].1["corners"].as_array().unwrap().iter().all(|e| e["flip"] == json!(false)), "{}", c[0].1);
+    h.app.dialog = None;
+    run_all(&mut h.app, c);
+    let f = h.app.session.doc.features.last().unwrap().clone();
+    let st = h.app.session.model.state_before(f.id);
+    let today: Vec<Vec<String>> = saved_orders(&h.app, f.id).iter().map(|o| frame::default_order(&h.app.session.doc, &st, &f, o).unwrap()).collect();
+    assert_eq!(saved_orders(&h.app, f.id), today);
+    let mut e = edit_dialog(&h.app, f.id, None).unwrap();
+    assert_eq!(member(&mut e).overrides.iter().map(|o| o.flip).collect::<Vec<_>>(), [false, false]);
+}
+
+/// With Corner Overrides active, a corner of the frame sketch (not being edited) is picked in the
+/// view as that sketch's point.
+#[test]
+fn a_corner_is_picked_in_the_view() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    for (id, p) in frame_commands() {
+        h.app.run(id, p).unwrap();
+    }
+    h.app.set_origin_shown(false);
+    h.call("ui.view", json!({"view": "top"}));
+    h.call("ui.view", json!({"view": "fit"}));
+    h.app.start("frame.member");
+    h.app.dialog.as_mut().unwrap().active = 2;
+    h.frames(2);
+    let [x, y] = h.at(&json!({"world": [600, 400, 0]})).unwrap();
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    let hits = crate::viewport::pick(&h.app, &proj, egui::pos2(x as f32, y as f32));
+    let d = h.app.dialog.as_ref().unwrap();
+    let picked: Vec<Sel> = hits.iter().filter_map(|hit| d.candidate(&h.app.session, hit)).collect();
+    let frame = sketch_id(&h.app, "Frame");
+    assert!(picked.contains(&Sel::ExternalSketchPoint { sketch: frame, id: point_at(&h.app, 600.0, 400.0) }), "{picked:?} from {hits:?}");
+}
+
+/// A marquee over the frame sketch picks its straight lines into Lines (not a construction line or
+/// an arc drawn inside it), and its corners into Corner Overrides.
+#[test]
+fn a_box_over_the_frame_sketch_picks_its_lines() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    for (id, p) in frame_commands() {
+        h.app.run(id, p).unwrap();
+    }
+    let mut want = frame_lines(&h.app);
+    want.sort();
+    for (id, p) in [
+        ("sketch.edit", json!({"sketch": "Frame"})),
+        ("sketch.line", json!({"points": [[100, 100], [500, 100]], "construction": true})),
+        ("sketch.arc.three_point", json!({"start": [100, 300], "through": [300, 350], "end": [500, 300]})),
+        ("sketch.finish", json!({})),
+    ] {
+        h.app.run(id, p).unwrap();
+    }
+    h.app.set_origin_shown(false);
+    h.app.ui.show_browser = false;
+    h.app.ui.show_timeline = false;
+    h.call("ui.view", json!({"view": "top"}));
+    h.call("ui.camera", json!({"target": [300, 200, 0], "distance": 1600}));
+    h.app.start("frame.member");
+    h.frames(2);
+    let frame = sketch_id(&h.app, "Frame");
+    let drag = json!({"drag": [{"world": [-50, -50, 0]}, {"world": [650, 450, 0]}]});
+    h.step(&drag).unwrap();
+    let mut lines: Vec<String> = h.app.dialog.as_ref().unwrap().inputs[0]
+        .items
+        .iter()
+        .filter_map(|s| match s {
+            Sel::ExternalSketchCurve { sketch, id } if *sketch == frame => Some(id.clone()),
+            _ => None,
+        })
+        .collect();
+    lines.sort();
+    assert_eq!(lines, want, "{:?}", h.app.dialog.as_ref().unwrap().inputs[0].items);
+    // With Corner Overrides active the same marquee takes the 4 corners.
+    h.app.dialog.as_mut().unwrap().active = 2;
+    h.frames(2);
+    h.step(&drag).unwrap();
+    let corners = &h.app.dialog.as_ref().unwrap().inputs[2].items;
+    assert_eq!(corners.len(), 4, "{corners:?}");
+    assert!(corners.contains(&Sel::ExternalSketchPoint { sketch: frame, id: point_at(&h.app, 600.0, 400.0) }), "{corners:?}");
+}
+
+/// A marquee over a 3D sketch picks its straight lines into Lines, as a click on each does.
+#[test]
+fn a_box_over_a_3d_sketch_picks_its_lines() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    for (id, p) in [
+        ("sketch.create", json!({"plane": "XY", "name": "Space"})),
+        ("sketch.options", json!({"sketch_3d": true})),
+        ("sketch.line3d", json!({"points": [[0, 0, 0], [600, 0, 0]]})),
+        ("sketch.line3d", json!({"points": [[600, 0, 0], [600, 400, 0]]})),
+        ("sketch.finish", json!({})),
+    ] {
+        h.app.run(id, p).unwrap();
+    }
+    let space = sketch_id(&h.app, "Space");
+    let mut want: Vec<String> = h.app.session.doc.sketch(space).unwrap().wires.iter().map(|w| w.id.clone()).collect();
+    want.sort();
+    assert_eq!(want.len(), 2, "{want:?}");
+    h.app.set_origin_shown(false);
+    h.app.ui.show_browser = false;
+    h.app.ui.show_timeline = false;
+    h.call("ui.view", json!({"view": "top"}));
+    h.call("ui.camera", json!({"target": [300, 200, 0], "distance": 1600}));
+    h.app.start("frame.member");
+    h.frames(2);
+    h.step(&json!({"drag": [{"world": [-50, -50, 0]}, {"world": [650, 450, 0]}]})).unwrap();
+    let mut lines: Vec<String> = h.app.dialog.as_ref().unwrap().inputs[0]
+        .items
+        .iter()
+        .filter_map(|s| match s {
+            Sel::ExternalSketchCurve { sketch, id } if *sketch == space => Some(id.clone()),
+            _ => None,
+        })
+        .collect();
+    lines.sort();
+    assert_eq!(lines, want, "{:?}", h.app.dialog.as_ref().unwrap().inputs[0].items);
+}
+
+/// The frame dialog in a harness, the frame's lines picked, the feature's type `corner`, and the
+/// rectangle's corners at (0, 0) and (600, 400) picked into Corner Overrides.
+fn overrides_dialog(corner: &str) -> (crate::scenario::Harness, [Sel; 2]) {
+    let mut h = tall_harness();
+    for (id, p) in frame_commands() {
+        h.app.run(id, p).unwrap();
+    }
+    let lines = frame_lines(&h.app);
+    h.app.session.selection = lines.iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
+    h.app.start("frame.member");
+    let frame = sketch_id(&h.app, "Frame");
+    let picks = [(0.0, 0.0), (600.0, 400.0)].map(|(x, y)| Sel::ExternalSketchPoint { sketch: frame, id: point_at(&h.app, x, y) });
+    let d = h.app.dialog.as_mut().unwrap();
+    member(d).corner = corner_type(corner);
+    d.active = 2;
+    for p in &picks {
+        h.app.dialog.as_mut().unwrap().pick(&h.app.session, p.clone());
+    }
+    h.frames(2);
+    (h, picks)
+}
+
+/// A corner taken out of Corner Overrides forgets its own type and flip: picked again, it starts
+/// as the feature's type, unflipped.
+#[test]
+fn a_corner_picked_again_starts_as_the_features_type() {
+    let (mut h, [corner, _]) = overrides_dialog("mitre");
+    let d = h.app.dialog.as_mut().unwrap();
+    let o = member(d).overrides.iter_mut().find(|o| o.pick == corner).unwrap();
+    (o.corner, o.flip) = (corner_type("butt"), true);
+    d.inputs[2].items.retain(|x| *x != corner);
+    h.frames(1);
+    h.app.dialog.as_mut().unwrap().pick(&h.app.session, corner.clone());
+    h.frames(1);
+    let m = member(h.app.dialog.as_mut().unwrap());
+    let o = m.overrides.iter().find(|o| o.pick == corner).unwrap();
+    assert_eq!((CORNER_TYPES[o.corner].0, o.flip), ("mitre", false), "{:?}", m.overrides);
+}
+
+/// Each override is one row: "Corner n" (in pick order), its type, its Flip (greyed for None and
+/// Mitre so the rows line up) and its bin, which removes that corner alone.
+#[test]
+fn each_corner_override_is_one_row() {
+    let (mut h, picks) = overrides_dialog("butt");
+    let d = h.app.dialog.as_mut().unwrap();
+    member(d).overrides[0].corner = corner_type("mitre");
+    h.frames(2);
+    let flips = h.widgets("Flip");
+    for n in [1, 2] {
+        let bin = crate::scenario::rect_of(&format!("dialog:button:Corner {n}:×")).unwrap_or_else(|| panic!("Corner {n} has a bin"));
+        let [_, y] = h.widget(&format!("Corner {n}")).unwrap_or_else(|| panic!("a row labelled Corner {n}"));
+        assert!((y - f64::from(bin.center().y)).abs() < 2.0, "Corner {n}: label at {y}, bin at {bin:?}");
+        assert!(flips.iter().any(|f| (f[1] - y).abs() < 2.0), "Corner {n}: a Flip on its row: {flips:?} vs {y}");
+    }
+    assert!(h.widgets("Type").is_empty(), "no separate Type row");
+    // Corner 2's type reads as its own: the feature's Butt.
+    assert!(h.widget_near("Butt", "Corner 2").is_some());
+    let bin = "dialog:button:Corner 2:×";
+    h.step(&json!({"click": {"handle": bin}})).unwrap();
+    h.frames(1);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[2].items, std::slice::from_ref(&picks[0]));
+}
+
+/// Flip shows in full on every override row (never "Fl…"), and the bin sits at the row's right edge.
+#[test]
+fn a_corner_override_row_shows_flip_in_full_with_the_bin_at_the_right() {
+    let (mut h, _) = overrides_dialog("butt");
+    h.frames(2);
+    let drawn: Vec<String> =
+        h.shapes.iter().filter_map(|s| if let egui::Shape::Text(t) = &s.shape { Some(t.galley.text().to_owned()) } else { None }).collect();
+    assert!(!drawn.iter().any(|t| t.starts_with("Fl") && t != "Flip"), "an elided Flip: {drawn:?}");
+    assert_eq!(drawn.iter().filter(|t| *t == "Flip").count(), 3, "{drawn:?}");
+    let t = solidcraft_theme::Tokens::get();
+    let need = t.space_14
+        + t.space_6
+        + h.ctx.fonts_mut(|f| f.layout_no_wrap("Flip".to_owned(), egui::FontId::proportional(t.font_label), egui::Color32::WHITE).size().x);
+    let tree = h.output.accesskit_update.as_ref().unwrap();
+    let flips: Vec<_> = tree.nodes.iter().filter(|(_, n)| n.label() == Some("Flip")).filter_map(|(_, n)| n.bounds()).collect();
+    for n in [1, 2] {
+        let [_, y] = h.widget(&format!("Corner {n}")).unwrap();
+        let f = flips.iter().find(|b| (f64::midpoint(b.y0, b.y1) - y).abs() < 2.0).unwrap_or_else(|| panic!("Corner {n}: a Flip on its row"));
+        assert!(f.x1 - f.x0 + 0.5 >= f64::from(need), "Corner {n}: Flip is {} wide, its text needs {need}", f.x1 - f.x0);
+    }
+    for n in [1, 2] {
+        let row = crate::scenario::rect_of(&format!("dialog:row:Corner {n}")).unwrap();
+        let bin = crate::scenario::rect_of(&format!("dialog:button:Corner {n}:×")).unwrap();
+        assert!((0.0..2.0).contains(&(row.right() - bin.right())), "Corner {n}: bin {bin:?} at the right of {row:?}");
+    }
+}
+
+/// Corner Type offers Auto, None, Mitre and Butt, and an override row None, Mitre and Butt: Coped (#17854) is a tick
+/// box of its own on the Fit Ends to Earlier Frames row, to the right of that box, unticked at the start and greyed
+/// under None.
+#[test]
+fn coped_is_a_tick_box_beside_fit_ends() {
+    assert_eq!(CORNER_TYPES.map(|c| c.0)[..], ["auto", "none", "mitre", "butt"]);
+    let (mut h, _) = overrides_dialog("butt");
+    assert!(!member(h.app.dialog.as_mut().unwrap()).coped);
+    h.frames(2);
+    // The Coped box: its centre, and whether it is greyed.
+    let coped = |h: &crate::scenario::Harness| {
+        let tree = h.output.accesskit_update.as_ref().unwrap();
+        let boxes: Vec<_> =
+            tree.nodes.iter().filter(|(_, n)| n.label() == Some("Coped")).filter_map(|(_, n)| Some((n.bounds()?, n.is_disabled()))).collect();
+        assert_eq!(boxes.len(), 1, "one Coped: {boxes:?}");
+        let (b, disabled) = boxes[0];
+        ([f64::midpoint(b.x0, b.x1), f64::midpoint(b.y0, b.y1)], disabled)
+    };
+    let fit = h.widgets("Fit Ends to Earlier Frames");
+    let ([x, y], disabled) = coped(&h);
+    assert!(!disabled, "Coped is enabled under Butt");
+    assert!(fit.len() >= 2 && fit.iter().all(|f| (f[1] - y).abs() < 2.0 && f[0] < x), "Coped at {x}, {y}: Fit Ends at {fit:?}");
+    // No override row offers Coped.
+    assert!(h.widget_near("Coped", "Corner 1").is_none_or(|[cx, cy]| (cx, cy) == (x, y)));
+    member(h.app.dialog.as_mut().unwrap()).corner = corner_type("none");
+    h.frames(2);
+    assert!(coped(&h).1, "Coped is greyed under None");
+    assert!(h.widget("Fit Ends to Earlier Frames").is_none());
+}
+
+/// Coped ticked puts `"coped": true` in the command under every type but None (unticked or under None, nothing), and
+/// Edit Feature brings it back ticked.
+#[test]
+fn coped_goes_into_the_command_and_an_edit_brings_it_back() {
+    let mut app = frame_app();
+    let lines = frame_lines(&app);
+    let mut d = dialog_on(&mut app, &lines);
+    member(&mut d).corner = corner_type("butt");
+    assert!(apply_commands(&app, &d).unwrap()[0].1.get("coped").is_none());
+    member(&mut d).coped = true;
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!((&c[0].1["corner"], &c[0].1["coped"]), (&json!("butt"), &json!(true)), "{}", c[0].1);
+    member(&mut d).corner = corner_type("none");
+    let p = &apply_commands(&app, &d).unwrap()[0].1;
+    assert!(p.get("corner").is_none() && p.get("coped").is_none(), "{p}");
+    run_all(&mut app, c);
+    let f = app.session.doc.features.last().unwrap().id;
+    let mut e = edit_dialog(&app, f, None).unwrap();
+    let m = member(&mut e);
+    assert_eq!((CORNER_TYPES[m.corner].0, m.coped), ("butt", true));
+    let p = &apply_commands(&app, &e).unwrap()[0].1["params"];
+    assert_eq!((&p["corner"], &p["coped"]), (&json!("butt"), &json!(true)), "{p}");
+}
+
+/// The Corner Overrides line's arrow folds the corner rows away and back; a new pick opens them.
+#[test]
+fn the_corner_override_rows_fold() {
+    let (mut h, _) = overrides_dialog("butt");
+    let rows = || [1, 2].map(|n| crate::scenario::rect_of(&format!("dialog:button:Corner {n}:×")).is_some());
+    assert_eq!(rows(), [true, true], "open at the start");
+    let toggle = "dialog:list_toggle:Corner Overrides";
+    h.step(&json!({"click": {"handle": toggle}})).unwrap();
+    h.frames(1);
+    assert_eq!(rows(), [false, false], "folded");
+    assert!(crate::scenario::handle_at(toggle).is_some(), "the arrow stays to open them again");
+    h.step(&json!({"click": {"handle": toggle}})).unwrap();
+    h.frames(1);
+    assert_eq!(rows(), [true, true], "open again");
+    h.step(&json!({"click": {"handle": toggle}})).unwrap();
+    h.frames(1);
+    let corner = Sel::ExternalSketchPoint { sketch: sketch_id(&h.app, "Frame"), id: point_at(&h.app, 600.0, 0.0) };
+    h.app.dialog.as_mut().unwrap().pick(&h.app.session, corner);
+    h.frames(2);
+    assert!(crate::scenario::rect_of("dialog:button:Corner 3:×").is_some(), "a new pick opens the rows");
+}
+
+/// The pointer over an overridden corner in the view lights that corner's row (the Corner
+/// Overrides line while the rows are folded); over a corner with no override, nothing.
+#[test]
+fn hovering_an_overridden_corner_lights_its_row() {
+    let (mut h, _) = overrides_dialog("butt");
+    h.app.set_origin_shown(false);
+    h.call("ui.view", json!({"view": "top"}));
+    h.call("ui.view", json!({"view": "fit"}));
+    h.frames(2);
+    let lit = || crate::scenario::rects("dialog:lit:").into_iter().map(|r| r.0).collect::<Vec<_>>();
+    h.step(&json!({"move": {"world": [600, 400, 0]}})).unwrap();
+    h.frames(2);
+    assert_eq!(lit(), ["dialog:lit:Corner 2"]);
+    h.step(&json!({"move": {"world": [600, 0, 0]}})).unwrap();
+    h.frames(2);
+    assert!(lit().is_empty(), "{:?}", lit());
+    h.step(&json!({"click": {"handle": "dialog:list_toggle:Corner Overrides"}})).unwrap();
+    h.step(&json!({"move": {"world": [600, 400, 0]}})).unwrap();
+    h.frames(2);
+    assert_eq!(lit(), ["dialog:lit:Corner Overrides"]);
+}
+
+/// Under Auto a sketch point where two of the frame's lines cross (none ending there) is an
+/// override, saved by the lines crossing there. Its row reads Crossing, with Flip and no Type
+/// list, and an edit brings it back. Under None, which cuts no crossing, the same pick is refused.
+#[test]
+fn a_crossing_point_override_is_a_crossing_row_with_flip() {
+    let mut h = tall_harness();
+    for (id, p) in [
+        ("sketch.create", json!({"plane": "XY", "name": "Frame"})),
+        ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [600, 400]})),
+        ("sketch.line", json!({"points": [[0, 0], [600, 400]], "ids": ["d1"]})),
+        ("sketch.line", json!({"points": [[0, 400], [600, 0]], "ids": ["d2"]})),
+        ("sketch.point", json!({"point": [300, 200], "id": "x"})),
+        ("sketch.finish", json!({})),
+    ] {
+        h.app.run(id, p).unwrap();
+    }
+    let frame = sketch_id(&h.app, "Frame");
+    let lines = frame_lines(&h.app);
+    let x = Sel::ExternalSketchPoint { sketch: frame, id: "x".into() };
+    let mut d = dialog_on(&mut h.app, &lines);
+    d.active = 2;
+    d.pick(&h.app.session, x.clone());
+    assert_eq!(d.inputs[2].items, std::slice::from_ref(&x), "{:?}", d.error);
+    let c = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(c[0].1["corners"], json!([{"members": ["d1", "d2"], "kind": "auto", "flip": false}]), "{}", c[0].1);
+    h.app.dialog = Some(d);
+    h.frames(2);
+    assert!(h.widget_near("Crossing", "Corner 1").is_some(), "the row reads Crossing");
+    let [_, y] = h.widget("Corner 1").unwrap();
+    let tree = h.output.accesskit_update.as_ref().unwrap();
+    let on_row: Vec<_> = tree
+        .nodes
+        .iter()
+        .filter(|(_, n)| n.bounds().is_some_and(|b| b.x1 > b.x0 && (f64::midpoint(b.y0, b.y1) - y).abs() < 2.0))
+        .map(|(_, n)| n.clone())
+        .collect();
+    assert!(on_row.iter().any(|n| n.label() == Some("Flip") && !n.is_disabled()), "an enabled Flip on the row");
+    assert!(!on_row.iter().any(|n| n.label() == Some("Auto") || n.value() == Some("Auto")), "no Type list on the row");
+    member(h.app.dialog.as_mut().unwrap()).overrides[0].flip = true;
+    let c = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(c[0].1["corners"], json!([{"members": ["d1", "d2"], "kind": "auto", "flip": true}]), "{}", c[0].1);
+    run_all(&mut h.app, c);
+    let f = h.app.session.doc.features.last().unwrap().id;
+    let mut e = edit_dialog(&h.app, f, None).unwrap();
+    assert_eq!(e.inputs[2].items, std::slice::from_ref(&x), "{:?}", e.extra);
+    assert!(e.extra.get("corners").is_none());
+    assert_eq!(member(&mut e).overrides.iter().map(|o| o.flip).collect::<Vec<_>>(), [true]);
+    h.app.dialog = None;
+    let mut d = dialog_on(&mut h.app, &lines);
+    member(&mut d).corner = corner_type("none");
+    d.active = 2;
+    d.pick(&h.app.session, x);
+    assert!(d.inputs[2].items.is_empty());
+    let e = d.error.clone().unwrap_or_default();
+    assert!(e.contains("exactly two members end"), "{e}");
+}
+
+/// Mitre, Butt and Coped frames split crossings as Auto does: on a Mitre frame a sketch point where
+/// the diagonals cross is taken as an override, saved by the lines crossing there with its Flip, its
+/// row reads Crossing with an enabled Flip, and Flip keeps the other diagonal whole.
+#[test]
+fn a_crossing_point_on_a_mitre_frame_is_a_crossing_override() {
+    let mut h = tall_harness();
+    for (id, p) in [
+        ("sketch.create", json!({"plane": "XY", "name": "Frame"})),
+        ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [600, 400]})),
+        ("sketch.line", json!({"points": [[0, 0], [600, 400]], "ids": ["d1"]})),
+        ("sketch.line", json!({"points": [[0, 400], [600, 0]], "ids": ["d2"]})),
+        ("sketch.point", json!({"point": [300, 200], "id": "x"})),
+        ("sketch.finish", json!({})),
+    ] {
+        h.app.run(id, p).unwrap();
+    }
+    let frame = sketch_id(&h.app, "Frame");
+    let lines = frame_lines(&h.app);
+    let x = Sel::ExternalSketchPoint { sketch: frame, id: "x".into() };
+    let mut d = dialog_on(&mut h.app, &lines);
+    member(&mut d).corner = corner_type("mitre");
+    d.active = 2;
+    d.pick(&h.app.session, x.clone());
+    assert_eq!(d.inputs[2].items, std::slice::from_ref(&x), "{:?}", d.error);
+    h.app.dialog = Some(d);
+    h.frames(2);
+    assert!(h.widget_near("Crossing", "Corner 1").is_some(), "the row reads Crossing");
+    let [_, y] = h.widget("Corner 1").unwrap();
+    let tree = h.output.accesskit_update.as_ref().unwrap();
+    let on_row: Vec<_> = tree
+        .nodes
+        .iter()
+        .filter(|(_, n)| n.bounds().is_some_and(|b| b.x1 > b.x0 && (f64::midpoint(b.y0, b.y1) - y).abs() < 2.0))
+        .map(|(_, n)| n.clone())
+        .collect();
+    assert!(on_row.iter().any(|n| n.label() == Some("Flip") && !n.is_disabled()), "an enabled Flip on the row");
+    member(h.app.dialog.as_mut().unwrap()).overrides[0].flip = true;
+    let c = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(c[0].1["corners"], json!([{"members": ["d1", "d2"], "kind": "mitre", "flip": true}]), "{}", c[0].1);
+    run_all(&mut h.app, c);
+    let f = h.app.session.doc.features.last().unwrap();
+    let ids = frame::member_line_ids(&h.app.session.model.state(), &f.kind).unwrap();
+    assert!(ids.iter().any(|i| i == "d1>d2") && !ids.iter().any(|i| i == "d2>d1"), "{ids:?}");
+    // An edit brings the override back as the picked point, flipped.
+    let f = f.id;
+    let mut e = edit_dialog(&h.app, f, None).unwrap();
+    assert_eq!(e.inputs[2].items, std::slice::from_ref(&x), "{:?}", e.extra);
+    assert_eq!(member(&mut e).overrides.iter().map(|o| o.flip).collect::<Vec<_>>(), [true]);
+}
+
+/// A crossing where another tube also ends (the two diagonals, and a post from the bottom ending
+/// where they cross) is a crossing too: the pick is taken and saved by the two diagonals alone, its
+/// row reads Crossing with Flip, and Flip changes which diagonal stays whole.
+#[test]
+fn a_crossing_where_a_tube_also_ends_is_a_crossing_override() {
+    let mut h = tall_harness();
+    for (id, p) in [
+        ("sketch.create", json!({"plane": "XY", "name": "Frame"})),
+        ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [600, 400]})),
+        ("sketch.line", json!({"points": [[0, 0], [600, 400]], "ids": ["d1"]})),
+        ("sketch.line", json!({"points": [[0, 400], [600, 0]], "ids": ["d2"]})),
+        ("sketch.line", json!({"points": [[300, 0], [300, 200]], "ids": ["post"]})),
+        ("sketch.finish", json!({})),
+    ] {
+        h.app.run(id, p).unwrap();
+    }
+    let frame = sketch_id(&h.app, "Frame");
+    let lines = frame_lines(&h.app);
+    let x = Sel::ExternalSketchPoint { sketch: frame, id: point_at(&h.app, 300.0, 200.0) };
+    let mut d = dialog_on(&mut h.app, &lines);
+    d.active = 2;
+    d.pick(&h.app.session, x.clone());
+    assert_eq!(d.inputs[2].items, std::slice::from_ref(&x), "{:?}", d.error);
+    let c = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(c[0].1["corners"], json!([{"members": ["d1", "d2"], "kind": "auto", "flip": false}]), "{}", c[0].1);
+    h.app.dialog = Some(d);
+    h.frames(2);
+    assert!(h.widget_near("Crossing", "Corner 1").is_some(), "the row reads Crossing");
+    // Which diagonal is cut: its later piece is `<it>>‹the whole one›`.
+    let cut = |app: &SolveApp| {
+        let f = app.session.doc.features.last().unwrap();
+        let ids = frame::member_line_ids(&app.session.model.state(), &f.kind).unwrap();
+        ["d1>d2", "d2>d1"].into_iter().filter(|p| ids.iter().any(|i| i == p)).collect::<Vec<_>>()
+    };
+    let mut flipped = h.app.dialog.clone().unwrap();
+    run_all(&mut h.app, c);
+    let plain = cut(&h.app);
+    assert_eq!(plain.len(), 1, "one diagonal is cut: {plain:?}");
+    member(&mut flipped).overrides[0].flip = true;
+    let c = apply_commands(&h.app, &flipped).unwrap();
+    assert_eq!(c[0].1["corners"][0]["flip"], json!(true), "{}", c[0].1);
+    h.app.run("edit.undo", json!({})).unwrap();
+    run_all(&mut h.app, c);
+    let other = cut(&h.app);
+    assert_eq!(other.len(), 1, "{other:?}");
+    assert_ne!(plain, other, "Flip keeps the other diagonal whole");
 }

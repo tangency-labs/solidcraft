@@ -1469,6 +1469,28 @@ pub enum FeatureKind {
         /// when the profile's size changes.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         locate: Option<[f64; 2]>,
+        /// How two members ending at one point are cut (default none: ends square to their lines).
+        #[serde(default, skip_serializing_if = "crate::frame::CornerType::is_none")]
+        corner: crate::frame::CornerType,
+        /// With a butt: the other member runs through.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip: bool,
+        /// Free ends are fitted to the tubes of earlier Frame Members.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        fit_ends: bool,
+        /// Coped (#17854): under every type but None, each butt joint's butting tube is cut to the other tube's real
+        /// shape (its outline, radii kept, hole filled); mitres stay mitres.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        coped: bool,
+        /// Corners, crossings and overlaps finished their own way, each named by its members in order (the first runs
+        /// through, or stays whole).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        corners: Vec<crate::frame::CornerOverride>,
+        /// The weld gap (#17854) left at every welded end: each mitre, butting end and fitted end stands this far off
+        /// the member it meets; through members are never shortened. None: 0.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Gap")]
+        gap: Option<Expr>,
         /// How far the profile turns about the line (see `frame::member_axes`).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(angle = "Rotation")]
@@ -4727,6 +4749,12 @@ impl Document {
         let mut d = crate::format::read(s)?;
         if d.features.len() > MAX_FEATURES || d.params.len() > MAX_PARAMS {
             return Err(DocError::Invalid("document too large".into()));
+        }
+        // A test build's Coped corner type is Butt with Coped (#17854).
+        for f in &mut d.features {
+            if let FeatureKind::FrameMember { corner, corners, coped, .. } = &mut f.kind {
+                crate::frame_corners::read_coped(corner, corners, coped);
+            }
         }
         // A design from elsewhere may nest groups too deep, loop, or name things that are gone.
         if let Some((groups, order)) = d.browser_pruned() {

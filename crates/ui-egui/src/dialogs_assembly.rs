@@ -2160,9 +2160,15 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
     let shown_after: Vec<_> = preview.after.sketches.iter().filter(|sketch| preview.shown_sketches.contains(&sketch.feature)).cloned().collect();
     // A Frame Member's tubes, for its dialog to pick (#15705).
     let centrelines = crate::dialogs_frame::centrelines(&preview);
-    // A moved component looks like itself (no new surface), with its old place as the ghost.
-    // A plugin can both move and make bodies: the builder distinguishes them per body.
-    let colors = if was_placed && !plugin { Colors { added: colors.body, new_body: colors.body, ..colors } } else { colors };
+    // A moved component looks like itself (no new surface), with its old place as the ghost; Ghost
+    // Frame Members' new tubes keep their see-through tint (`preview::colors`). A plugin can both
+    // move and make bodies: the builder distinguishes them per body.
+    let colors = if was_placed && !plugin {
+        let new_body = if colors.glass_new { colors.new_body } else { colors.body };
+        Colors { added: colors.body, new_body, ..colors }
+    } else {
+        colors
+    };
     Some(build_world_preview(preview, colors).map(|mut built| {
         built.stopped = stopped;
         built.placed = placed;

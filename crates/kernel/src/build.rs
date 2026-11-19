@@ -323,7 +323,7 @@ pub fn torus(center: Vec3, major: f64, minor: f64) -> Result<Body> {
 /// neighbours now meet at one point). Loops of arcs on one circle, and loops of lines, arcs and
 /// free curves (spline and conic pieces, such as the outlines of text) where the arcs meet their
 /// neighbours tangentially are supported.
-pub(crate) fn offset_loop(lp: &Loop2, d: f64) -> Result<Vec<Option<Seg2>>> {
+pub fn offset_loop(lp: &Loop2, d: f64) -> Result<Vec<Option<Seg2>>> {
     if d == 0.0 {
         return Ok(lp.segs.iter().copied().map(Some).collect());
     }
