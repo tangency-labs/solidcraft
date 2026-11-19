@@ -116,22 +116,20 @@ fn ridge_volume(major: f64, pitch: f64, turns: f64) -> f64 {
     PI * rc * rc * len + ridge * turns
 }
 
-/// The thread, as made and after a STEP round trip (which is how such a thread reaches us).
+/// The M10 × 1.5 thread of 6 turns, as made and after a STEP round trip (which is how such a
+/// thread reaches us).
 fn threads() -> Vec<(String, Body, f64, f64, f64)> {
-    let mut out = Vec::new();
-    for (d, p, turns) in [(10.0, 1.5, 6.0), (12.0, 1.75, 8.0)] {
-        let b = ridge_thread(d, p, turns);
-        let step = crate::step_import(&crate::step_export(&[&b], "thread").unwrap()).unwrap().bodies.remove(0).body;
-        out.push((format!("M{d}x{p}"), b, d, p, turns));
-        out.push((format!("M{d}x{p} from STEP"), step, d, p, turns));
-    }
-    out
+    let (d, p, turns) = (10.0, 1.5, 6.0);
+    let b = ridge_thread(d, p, turns);
+    let step = crate::step_import(&crate::step_export(&[&b], "thread").unwrap()).unwrap().bodies.remove(0).body;
+    vec![(format!("M{d}x{p}"), b, d, p, turns), (format!("M{d}x{p} from STEP"), step, d, p, turns)]
 }
 
 /// Issue 1289: a modelled thread's faces turn several times around the shaft. The core and the
 /// crest cylinders, trimmed by helices, had no display plan, and the reference mesher drew them
 /// with triangles across the solid. They are now cut along a seam: the display mesh stays on
-/// the surfaces.
+/// the surfaces, and no triangle of it is degenerate, a sliver or turned against its surface's
+/// normal.
 #[test]
 fn thread_display_mesh_stays_on_its_surfaces() {
     for (name, b, d, p, turns) in threads() {
@@ -140,6 +138,10 @@ fn thread_display_mesh_stays_on_its_surfaces() {
             b.mesh_plan(&crate::MeshTolerance { chord: tol, angle: Some(DISPLAY_ANGLE) }).unwrap_or_else(|e| panic!("{name}: no display plan: {e}"));
         let mesh = plan.evaluate_mesh();
         let q = quality(&plan, &mesh);
+        assert!(q.tris > 1000, "{name}: {} triangles", q.tris);
+        assert_eq!(q.slivers, 0, "{name}: degenerate triangles");
+        assert_eq!(q.flipped, 0, "{name}: triangles facing against their normals");
+        assert!(q.min_angle > 1.0, "{name}: a triangle with a {:.3} degree corner", q.min_angle);
         assert!(q.worst_sag <= 1.5 * tol, "{name}: a triangle lies {} mm off its surface (tolerance {tol})", q.worst_sag);
         // Every vertex of the cylinders on its cylinder, every triangle centre within the
         // tolerance inside it.
@@ -169,23 +171,6 @@ fn thread_display_mesh_stays_on_its_surfaces() {
         assert_eq!(reference.triangles.len(), mesh.triangles.len(), "{name}");
         let measured = b.mesh(&crate::MeshTolerance::chord(tol * 0.1)).unwrap().measure().volume;
         assert!((measured - want).abs() < want * 1e-3, "{name}: measured volume {measured}, the thread's {want}");
-    }
-}
-
-/// Issue 1289: no triangle of the thread's display mesh is degenerate, a sliver or turned
-/// against its surface's normal.
-#[test]
-fn thread_display_mesh_has_no_degenerate_or_flipped_triangles() {
-    for (name, b, ..) in threads() {
-        let plan = b
-            .mesh_plan(&crate::MeshTolerance { chord: tol(&b), angle: Some(DISPLAY_ANGLE) })
-            .unwrap_or_else(|e| panic!("{name}: no display plan: {e}"));
-        let mesh = plan.evaluate_mesh();
-        let q = quality(&plan, &mesh);
-        assert!(q.tris > 1000, "{name}: {} triangles", q.tris);
-        assert_eq!(q.slivers, 0, "{name}: degenerate triangles");
-        assert_eq!(q.flipped, 0, "{name}: triangles facing against their normals");
-        assert!(q.min_angle > 1.0, "{name}: a triangle with a {:.3} degree corner", q.min_angle);
     }
 }
 

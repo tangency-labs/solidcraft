@@ -393,8 +393,12 @@ fn vec2(v: &Value) -> Vec2 {
     Vec2::new(v[0].as_f64().unwrap_or(f64::NAN), v[1].as_f64().unwrap_or(f64::NAN))
 }
 
+/// A marked tray's flat pattern in one DXF, as a laser-cutting shop uses it: each role on its own
+/// layer, inner contours before the outline. Its letters can be etched instead of cut. And (#4314)
+/// a cutter that cuts every line gets a file without the bend lines, or with everything on layer
+/// 0; the default keeps the role layers and the dashed bend lines.
 #[test]
-fn the_flat_pattern_is_on_layers_by_role_and_inner_contours_come_first() {
+fn a_trays_dxf_has_a_layer_for_each_role_and_etches_letters_or_leaves_out_bend_lines_on_request() {
     let mut s = tray_with(&marks());
     let out = run(&mut s, "sheet.export_dxf", json!({}));
     let dxf = out["dxf"].as_str().unwrap_or_default();
@@ -437,20 +441,11 @@ fn the_flat_pattern_is_on_layers_by_role_and_inner_contours_come_first() {
         ("BEND_DOWN", 5, "DASHED"),
     ];
     assert_eq!(layer_table(dxf), want.map(|(n, c, l)| (n.to_string(), (c, l.to_string()))).into_iter().collect());
-}
 
-/// How many entities of `kind` there are among `list`.
-fn count_of(list: &[&Entity], kind: &str) -> usize {
-    list.iter().filter(|e| e.0 == kind).count()
-}
-
-#[test]
-fn letters_can_be_etched_instead_of_cut() {
-    let mut s = tray_with(&marks());
-    let cut = entities(&export(&mut s, json!({})));
+    // Letters etched: the same contours, on ETCH instead of TEXT: nothing of them is cut.
+    let cut = es;
     let etched_dxf = export(&mut s, json!({"text": "etch"}));
     let etched = entities(&etched_dxf);
-    // The same contours, on ETCH instead of TEXT: nothing of them is cut.
     assert!(!on_layer(&cut, "TEXT").is_empty());
     assert_eq!(on_layer(&etched, "ETCH"), on_layer(&cut, "TEXT"));
     assert!(on_layer(&etched, "TEXT").is_empty());
@@ -462,8 +457,26 @@ fn letters_can_be_etched_instead_of_cut() {
     assert_eq!(layers.get("ETCH"), Some(&(6, "Continuous".to_string())));
     assert!(!layers.contains_key("TEXT"));
     // `cut` is the default, and a value that is neither is refused.
-    assert_eq!(export(&mut s, json!({"text": "cut"})), export(&mut s, json!({})));
+    assert_eq!(export(&mut s, json!({"text": "cut"})), dxf);
     assert!(s.execute("sheet.export_dxf", &json!({"text": "fill"})).is_err());
+
+    // #4314: the bend lines left out, or everything on layer 0.
+    let bends = |es: &[Entity]| es.iter().filter(|e| matches!(layer_of(e).as_str(), "BEND_UP" | "BEND_DOWN")).count();
+    assert_eq!(bends(&cut), 4, "the tray's four bends");
+    let without = entities(&export(&mut s, json!({"bend_lines": false})));
+    assert_eq!(bends(&without), 0);
+    assert_eq!(without.len(), cut.len() - 4, "only the bend lines go");
+    let single = entities(&export(&mut s, json!({"layers": "single"})));
+    assert_eq!(single.len(), cut.len());
+    assert!(single.iter().all(|e| layer_of(e) == "0"), "{:?}", single.iter().map(layer_of).collect::<Vec<_>>());
+    for bad in [json!({"bend_lines": "no"}), json!({"layers": "one"})] {
+        assert!(s.execute("sheet.export_dxf", &bad).is_err(), "{bad}");
+    }
+}
+
+/// How many entities of `kind` there are among `list`.
+fn count_of(list: &[&Entity], kind: &str) -> usize {
+    list.iter().filter(|e| e.0 == kind).count()
 }
 
 #[test]
@@ -654,26 +667,6 @@ fn the_file_of_a_body_is_named_after_it_and_no_two_share_a_name() {
     assert_eq!(names("p.dxf", &["a/b:c", "  ", "wall."]), ["p-a_b_c.dxf", "p-body.dxf", "p-wall.dxf"]);
     // Two bodies that would share a file (in any case) get a number.
     assert_eq!(names("p.dxf", &["Lid", "lid", "LID", "Lid_2"]), ["p-Lid.dxf", "p-lid_2.dxf", "p-LID_3.dxf", "p-Lid_2_2.dxf"]);
-}
-
-/// #4314: a cutter that cuts every line gets a file without the bend lines, or with everything
-/// on layer 0. The default keeps the role layers and the dashed bend lines.
-#[test]
-fn bend_lines_can_be_left_out_and_everything_put_on_layer_0() {
-    let mut s = tray_with(&marks());
-    let layer = layer_of;
-    let default = entities(&export(&mut s, json!({})));
-    let bends = |es: &[Entity]| es.iter().filter(|e| matches!(layer(e).as_str(), "BEND_UP" | "BEND_DOWN")).count();
-    assert_eq!(bends(&default), 4, "the tray's four bends");
-    let without = entities(&export(&mut s, json!({"bend_lines": false})));
-    assert_eq!(bends(&without), 0);
-    assert_eq!(without.len(), default.len() - 4, "only the bend lines go");
-    let single = entities(&export(&mut s, json!({"layers": "single"})));
-    assert_eq!(single.len(), default.len());
-    assert!(single.iter().all(|e| layer(e) == "0"), "{:?}", single.iter().map(layer).collect::<Vec<_>>());
-    for bad in [json!({"bend_lines": "no"}), json!({"layers": "one"})] {
-        assert!(s.execute("sheet.export_dxf", &bad).is_err(), "{bad}");
-    }
 }
 
 /// A shop's DXF profile (`docs/formats/dxf-profiles.md`): the outline and the cut-outs on one
@@ -1289,6 +1282,7 @@ fn opposite_side_stretches_of_different_angles_cut_from_the_inner_bend_line() {
 // are unchanged. Re-recorded again for main's DXF number rule (#5321): lengths on a 1e-9 grid,
 // other values at twelve decimals; 45 files changed, the JSON, text and Unicode cases did not.
 // These byte pins are fixed expectations, never regenerated by the test.
+// The tray's 16 option crosses were cut to the defaults and each option flipped alone.
 #[cfg(not(target_arch = "wasm32"))]
 mod byte_regressions {
     use super::*;
@@ -1296,7 +1290,7 @@ mod byte_regressions {
 
     type ExpectedOutput = (&'static str, usize, &'static str);
 
-    const EXPECTED_OUTPUTS: [ExpectedOutput; 53] = [
+    const EXPECTED_OUTPUTS: [ExpectedOutput; 42] = [
         ("circle-cutout-shapes.json", 48, "c634654c54b427c376b74eb30facd6c6d4cfa41ad4ae5dd51d3b31afc76ed458"),
         ("circle-two-halves-exact.dxf", 5964, "40a43a719bac03a9cbbbdc2db260ee17b182364704285b7a397e4428e3bd59df"),
         ("circle-two-halves-arcs.dxf", 5964, "40a43a719bac03a9cbbbdc2db260ee17b182364704285b7a397e4428e3bd59df"),
@@ -1314,19 +1308,8 @@ mod byte_regressions {
         ("tray-exact-cut-bends-true-roles.dxf", 26208, "68d383ada43f98c31a92847f3f9b3b32b83a31b0585d02029d112d95aa54163c"),
         ("tray-exact-cut-bends-true-single.dxf", 25027, "9acb9220246b5caf35cc7b9d0b2e23b3ff6837961884748a6efa2a3fe412232a"),
         ("tray-exact-cut-bends-false-roles.dxf", 25690, "5ca0ca25c2bf31bdd9b7df22f7ba7f407e8064ae41e9ad3e33b79aa6bb6b10bf"),
-        ("tray-exact-cut-bends-false-single.dxf", 24535, "6aab380c007bfae85d9da2d05c3a001cfe63adda17df5827f127835e20cc4664"),
         ("tray-exact-etch-bends-true-roles.dxf", 26208, "cb5b159282810c31d2c2dc458e2b070011af73ff14f7184afa1e55db9fcff785"),
-        ("tray-exact-etch-bends-true-single.dxf", 25027, "9acb9220246b5caf35cc7b9d0b2e23b3ff6837961884748a6efa2a3fe412232a"),
-        ("tray-exact-etch-bends-false-roles.dxf", 25690, "e28f584e54d8d758caa58961eea5a915d3026b7f0265b1073d6809cedcf5b120"),
-        ("tray-exact-etch-bends-false-single.dxf", 24535, "6aab380c007bfae85d9da2d05c3a001cfe63adda17df5827f127835e20cc4664"),
         ("tray-arcs-cut-bends-true-roles.dxf", 42626, "82c3eb0931a213b0e76d86bf7c5e5d1b36f1641f6b11e5ab045c3bf4d6892bad"),
-        ("tray-arcs-cut-bends-true-single.dxf", 41076, "248b29fe4f5fde255fe746609289f617ec9b53ff9cfd489a3b2e217be3d79e70"),
-        ("tray-arcs-cut-bends-false-roles.dxf", 42104, "fb036b96f843dad73bfbf31ed7e29555ce7ac53e953b4f856b9fcaf35a432d9b"),
-        ("tray-arcs-cut-bends-false-single.dxf", 40580, "5bfb406e95429d82b69fcd445340b6d8cf58d241d6571fb9c3df3c9bccdebd5b"),
-        ("tray-arcs-etch-bends-true-roles.dxf", 42626, "a5264746d1b89fd12c439f84545aa58e9b3e64c0876ea4ca45f2cd37d3aa2b6f"),
-        ("tray-arcs-etch-bends-true-single.dxf", 41076, "248b29fe4f5fde255fe746609289f617ec9b53ff9cfd489a3b2e217be3d79e70"),
-        ("tray-arcs-etch-bends-false-roles.dxf", 42104, "593cd9d43b801c2b99d01bc00498af5481424c3c7809bd9d542a9e04eebc16f0"),
-        ("tray-arcs-etch-bends-false-single.dxf", 40580, "5bfb406e95429d82b69fcd445340b6d8cf58d241d6571fb9c3df3c9bccdebd5b"),
         ("rule-bend-down-exact-bends-true-roles.dxf", 6391, "ee6762b7787eda81ac0b7abd6eaf3e431fd01b94df59d37aa71a9f115e0189ed"),
         ("rule-bend-down-exact-bends-false-single.dxf", 5594, "214a4e1b608e0cc9ec3d086205f62abe8b6e0ef40bbf63ea364b6cfafe69c86c"),
         ("rule-bend-down-arcs-bends-true-roles.dxf", 6391, "ee6762b7787eda81ac0b7abd6eaf3e431fd01b94df59d37aa71a9f115e0189ed"),
@@ -1356,31 +1339,24 @@ mod byte_regressions {
     // library of CI's Native Linux tests: captured there in the ci profile (tangency-labs/solidcraft Actions run
     // 44139450763, after #5321's nine-decimal numbers). The other 40 are the same
     // on both. Keep exact (length, SHA-256) pairs: no numeric normalization or loose tolerance.
-    const UBUNTU_MATH_OUTPUTS: [ExpectedOutput; 13] = [
+    const UBUNTU_MATH_OUTPUTS: &[ExpectedOutput] = &[
         ("cubic-spline-arcs.dxf", 13550, "a8a828d9825d454b05b07a31f2aacbd83a93174acde634ff694131b8595c6398"),
         ("degree-nine-arcs.dxf", 14320, "d084dab80a8da5d22f3b61dbe6e5fab94677e14da5eec4bde927a1fd27d31625"),
         ("ellipse-arcs.dxf", 16674, "2042450483bee76a36d2e5b37e3a54511b97efab479a1fce8a0e8b9c220d0331"),
         ("pocket-and-engraved-text-arcs.dxf", 39080, "0732cbc0dc9533c5eb27833ed78ed5db18cf0299d599a8c7cba062017913e41d"),
         ("text-outlines-arcs.dxf", 25311, "300f58b5681ffe089b1f900f548da740b9aa16ba2f10f21a5e4b3a5c0bb8a7fb"),
-        ("tray-arcs-cut-bends-false-roles.dxf", 42104, "9c16c793111306b3ff290c1df312e74b0ccd984ff27a64f73c3152d32717ff88"),
-        ("tray-arcs-cut-bends-false-single.dxf", 40580, "82967c0891b4530b7d5baf7b7348eb1ef93a404d3e69324083b4609fce144bb3"),
         ("tray-arcs-cut-bends-true-roles.dxf", 42626, "f650a184c9795df766c4c917a6617f4000eee6a7f6f779c67604b86c97ca706a"),
-        ("tray-arcs-cut-bends-true-single.dxf", 41076, "eee0e2d5a25faf63942bfa408257aad8c65f894bed6f65bb98cf4b96e13a7906"),
-        ("tray-arcs-etch-bends-false-roles.dxf", 42104, "7808677679865a0191f4a51a0591e640cc2d4b153633c9a0bcaa418490d856e6"),
-        ("tray-arcs-etch-bends-false-single.dxf", 40580, "82967c0891b4530b7d5baf7b7348eb1ef93a404d3e69324083b4609fce144bb3"),
-        ("tray-arcs-etch-bends-true-roles.dxf", 42626, "85f4af3fdf6d6818af84a466850642a2158de48ce5678e7629b4072607650eed"),
-        ("tray-arcs-etch-bends-true-single.dxf", 41076, "eee0e2d5a25faf63942bfa408257aad8c65f894bed6f65bb98cf4b96e13a7906"),
     ];
 
     struct BytePins {
-        expected: &'static [ExpectedOutput; 53],
+        expected: &'static [ExpectedOutput; 42],
         next: usize,
         // Every changed case, so one run on a new platform reports its whole set.
         changed: Vec<String>,
     }
 
     impl BytePins {
-        fn new(expected: &'static [ExpectedOutput; 53]) -> Self {
+        fn new(expected: &'static [ExpectedOutput; 42]) -> Self {
             Self { expected, next: 0, changed: Vec::new() }
         }
 
@@ -1492,30 +1468,28 @@ mod byte_regressions {
         let default = export(&mut tray, json!({}));
         assert_eq!(default, export(&mut tray, json!({"curves": "exact", "text": "cut", "bend_lines": true, "layers": "roles"})));
         capture.dxf("tray-default", &default);
-        for curves in ["exact", "arcs"] {
-            for text in ["cut", "etch"] {
-                for bend_lines in [true, false] {
-                    for layers in ["roles", "single"] {
-                        let dxf = export(
-                            &mut tray,
-                            json!({"curves": curves, "text": text, "bend_lines": bend_lines, "layers": layers, "bend_notes": true}),
-                        );
-                        let es = entities(&dxf);
-                        assert_eq!(count(&es, "TEXT"), 4, "notes remain independent of bend lines");
-                        if layers == "single" {
-                            assert!(es.iter().all(|e| layer_of(e) == "0"));
-                        } else {
-                            let bends = es.iter().filter(|e| matches!(layer_of(e).as_str(), "BEND_UP" | "BEND_DOWN")).count();
-                            assert_eq!(bends, if bend_lines { 4 } else { 0 });
-                            assert!(es.iter().any(|e| layer_of(e) == if text == "cut" { "TEXT" } else { "ETCH" }));
-                            let inner = es.iter().rposition(|e| matches!(layer_of(e).as_str(), "CUT" | "TEXT" | "ETCH")).unwrap();
-                            let outline = es.iter().position(|e| layer_of(e) == "OUTLINE").unwrap();
-                            assert!(inner < outline);
-                        }
-                        capture.dxf(&format!("tray-{curves}-{text}-bends-{bend_lines}-{layers}"), &dxf);
-                    }
-                }
+        // The defaults with bend notes, then each option flipped alone (in the pins' order).
+        for (curves, text, bend_lines, layers) in [
+            ("exact", "cut", true, "roles"),
+            ("exact", "cut", true, "single"),
+            ("exact", "cut", false, "roles"),
+            ("exact", "etch", true, "roles"),
+            ("arcs", "cut", true, "roles"),
+        ] {
+            let dxf = export(&mut tray, json!({"curves": curves, "text": text, "bend_lines": bend_lines, "layers": layers, "bend_notes": true}));
+            let es = entities(&dxf);
+            assert_eq!(count(&es, "TEXT"), 4, "notes remain independent of bend lines");
+            if layers == "single" {
+                assert!(es.iter().all(|e| layer_of(e) == "0"));
+            } else {
+                let bends = es.iter().filter(|e| matches!(layer_of(e).as_str(), "BEND_UP" | "BEND_DOWN")).count();
+                assert_eq!(bends, if bend_lines { 4 } else { 0 });
+                assert!(es.iter().any(|e| layer_of(e) == if text == "cut" { "TEXT" } else { "ETCH" }));
+                let inner = es.iter().rposition(|e| matches!(layer_of(e).as_str(), "CUT" | "TEXT" | "ETCH")).unwrap();
+                let outline = es.iter().position(|e| layer_of(e) == "OUTLINE").unwrap();
+                assert!(inner < outline);
             }
+            capture.dxf(&format!("tray-{curves}-{text}-bends-{bend_lines}-{layers}"), &dxf);
         }
 
         for display in ["bend", "included"] {

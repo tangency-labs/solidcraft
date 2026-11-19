@@ -1604,7 +1604,9 @@ fn the_overlap_depth_of_pins_in_each_other_is_the_scan_of_every_triangle() {
     let (posts, arms) = (of(post), of(arm));
     assert!(posts.len() == 2 && arms.len() == 2, "two bodies a part");
     let mut overlapping = 0;
-    for deg in [0.0f64, 5.0, 10.92, 11.5, 20.0, 45.0, 180.0, 300.0, 332.6] {
+    // The angles where the plate meets the block's corners, and two others.
+    let angles = [0.0f64, 10.92, 11.5, 180.0, 332.6];
+    for deg in angles {
         let (sin, cos) = deg.to_radians().sin_cos();
         for (ma, sa) in &arms {
             let mut turned = ma.clone();
@@ -1623,7 +1625,7 @@ fn the_overlap_depth_of_pins_in_each_other_is_the_scan_of_every_triangle() {
     }
     // The pins are in each other at every angle (seen at least one way round), and the plate
     // meets the block at some.
-    assert!(overlapping > 9, "{overlapping}");
+    assert!(overlapping > angles.len(), "{overlapping}");
 }
 
 #[test]

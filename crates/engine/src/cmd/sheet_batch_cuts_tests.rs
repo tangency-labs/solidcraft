@@ -158,19 +158,19 @@ fn a_cut_after_a_text_cut_still_cuts() {
     assert_eq!(cutout_count(&mut s), 4, "A, B, the slot and the hole");
 }
 
+/// Labels in one sketch, cut at once, give the volume and flat pattern of a cut for each label.
+/// (Holes in one feature against one by one are `a_hole_feature_drills_a_sheet_in_one_pass_like_holes_one_by_one`,
+/// a hole after a text cut `a_cut_after_a_text_cut_still_cuts`.)
 #[test]
-fn labels_in_one_sketch_and_holes_in_one_feature_match_cutting_them_one_by_one() {
-    let labels: Vec<(String, [f64; 2])> = (0..3).map(|i| (format!("A{i}"), [15.0 + 30.0 * i as f64, 55.0])).collect();
-    let points = hole_grid(6, 6, [15.0, 20.0], 15.0);
+fn labels_in_one_sketch_match_cutting_them_one_by_one() {
+    let labels: Vec<(String, [f64; 2])> = (0..2).map(|i| (format!("A{i}"), [15.0 + 30.0 * i as f64, 55.0])).collect();
     let (mut once, mut each) = (Session::default(), Session::default());
     tray(&mut once, 120.0, 80.0);
     tray(&mut each, 120.0, 80.0);
     labels_cut(&mut once, &labels);
-    holes_at_once(&mut once, &points);
     for (i, (text, at)) in labels.iter().enumerate() {
         label_cut(&mut each, &format!("Label{i}"), text, *at);
     }
-    holes_one_by_one(&mut each, &points);
     assert_same(&mut once, &mut each);
 }
 

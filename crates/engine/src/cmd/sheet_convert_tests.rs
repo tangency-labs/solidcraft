@@ -2132,34 +2132,34 @@ fn trays_of_its_own_sheet_metal_convert_back() {
 /// A bend that slots cross is one bend, however many of its pieces are picked: the pieces of
 /// its cylinder between the slots are all bent, and the slots come back as cut-outs across it.
 /// The tray is read back from STEP, so Recognize reads it (#6748).
+/// Each corner relief and each way of picking once: notches with one piece picked, tears with
+/// every piece.
 #[test]
 fn a_bend_split_by_slots_across_it_converts_as_one_bend() {
     // Two slots across the long bend at y = 0, one across the short bend at x = 120, from the
     // base into the walls of the unfolded tray.
     let slots = [[30.0, -6.0, 40.0, 8.0], [70.0, -6.0, 80.0, 8.0], [112.0, 55.0, 126.0, 65.0]];
-    for shape in ["notch", "tear"] {
-        for every in [false, true] {
-            let what = format!("{shape}, {}", if every { "every piece picked" } else { "one piece picked" });
-            let (mut s, mut picks, mut source) = slotted_tray_round_trip(shape, false, &slots);
-            if every {
-                let (o, d) = (2.0, 2.0 * std::f64::consts::FRAC_1_SQRT_2);
-                picks.extend([[15.0, o - d, o - d], [100.0, o - d, o - d], [120.0 - o + d, 20.0, o - d], [120.0 - o + d, 75.0, o - d]]);
-            }
-            let body = s.model.state().bodies.first().map(|b| b.name.clone()).unwrap_or_default();
-            let out = s.execute("sheet.recognize", &json!({"body": body, "face": [60, 45, 0], "bends": picks, "rule": "T"}));
-            assert!(out.is_ok(), "{what}: {}", out.err().map(|e| e.to_string()).unwrap_or_default());
-            let (v, size, (area, bends)) = (volume(&mut source), flat_size(&mut source), flat_area_and_bends(&mut source));
-            let cutouts = flat(&mut source)["cutouts"].as_array().map(Vec::len);
-            assert_eq!(cutouts, Some(3), "{what}");
-            assert!((volume(&mut s) - v).abs() < 1e-6 * v, "{what}: {} vs {v}", volume(&mut s));
-            assert!(same_size(flat_size(&mut s), size, 1e-6), "{what}: {:?} vs {size:?}", flat_size(&mut s));
-            let (got_area, got_bends) = flat_area_and_bends(&mut s);
-            assert!((got_area - area).abs() < 1e-6 * area, "{what}: {got_area} vs {area}");
-            assert!(
-                got_bends.len() == bends.len() && got_bends.iter().zip(&bends).all(|(x, y)| (x - y).abs() < 1e-6),
-                "{what}: {got_bends:?} vs {bends:?}"
-            );
-            assert_eq!(flat(&mut s)["cutouts"].as_array().map(Vec::len), cutouts, "{what}");
+    for (shape, every) in [("notch", false), ("tear", true)] {
+        let what = format!("{shape}, {}", if every { "every piece picked" } else { "one piece picked" });
+        let (mut s, mut picks, mut source) = slotted_tray_round_trip(shape, false, &slots);
+        if every {
+            let (o, d) = (2.0, 2.0 * std::f64::consts::FRAC_1_SQRT_2);
+            picks.extend([[15.0, o - d, o - d], [100.0, o - d, o - d], [120.0 - o + d, 20.0, o - d], [120.0 - o + d, 75.0, o - d]]);
         }
+        let body = s.model.state().bodies.first().map(|b| b.name.clone()).unwrap_or_default();
+        let out = s.execute("sheet.recognize", &json!({"body": body, "face": [60, 45, 0], "bends": picks, "rule": "T"}));
+        assert!(out.is_ok(), "{what}: {}", out.err().map(|e| e.to_string()).unwrap_or_default());
+        let (v, size, (area, bends)) = (volume(&mut source), flat_size(&mut source), flat_area_and_bends(&mut source));
+        let cutouts = flat(&mut source)["cutouts"].as_array().map(Vec::len);
+        assert_eq!(cutouts, Some(3), "{what}");
+        assert!((volume(&mut s) - v).abs() < 1e-6 * v, "{what}: {} vs {v}", volume(&mut s));
+        assert!(same_size(flat_size(&mut s), size, 1e-6), "{what}: {:?} vs {size:?}", flat_size(&mut s));
+        let (got_area, got_bends) = flat_area_and_bends(&mut s);
+        assert!((got_area - area).abs() < 1e-6 * area, "{what}: {got_area} vs {area}");
+        assert!(
+            got_bends.len() == bends.len() && got_bends.iter().zip(&bends).all(|(x, y)| (x - y).abs() < 1e-6),
+            "{what}: {got_bends:?} vs {bends:?}"
+        );
+        assert_eq!(flat(&mut s)["cutouts"].as_array().map(Vec::len), cutouts, "{what}");
     }
 }

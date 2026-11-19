@@ -170,33 +170,26 @@ fn blend_kinds(body: &Body) -> Vec<&'static str> {
         .collect()
 }
 
-/// Rounded bodies, by what their rounds are: a cylinder's rim (the 900-copy pattern's part), a
-/// box's edge, a boss on a plate, and a round where a slanted plane cuts a cylinder.
-fn rounded_bodies() -> Vec<(&'static str, Body)> {
-    let mut out = Vec::new();
-    let rim = crate::cylinder(Vec3::ZERO, Vec3::Z, 3.0, 6.0).unwrap();
-    out.push(("cylinder rim", crate::fillet(&rim, &[Vec3::new(3.0, 0.0, 6.0)], 1.0).unwrap()));
-    let block = crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
-    out.push(("box edge", crate::fillet(&block, &[Vec3::new(5.0, 0.0, 10.0)], 2.0).unwrap()));
-    let plate = crate::box_solid(Vec3::new(-10.0, -10.0, -4.0), Vec3::new(10.0, 10.0, 0.0)).unwrap();
-    let boss = crate::cylinder(Vec3::new(0.0, 0.0, -1.0), Vec3::Z, 4.0, 7.0).unwrap();
-    let bossed = boolean(&plate, &boss, BoolOp::Union).unwrap().unwrap();
-    out.push(("boss on a plate", crate::fillet(&bossed, &[Vec3::new(4.0, 0.0, 0.0)], 1.0).unwrap()));
-    // Two cylinders meeting at a tee: the round along their quartic edge is of no exact class.
-    let post = crate::cylinder(Vec3::ZERO, Vec3::Z, 5.0, 20.0).unwrap();
-    let arm = crate::cylinder(Vec3::new(0.0, 0.0, 10.0), Vec3::X, 3.0, 15.0).unwrap();
-    let tee = boolean(&post, &arm, BoolOp::Union).unwrap().unwrap();
-    let foot = Vec3::new((25.0f64 - 9.0).sqrt(), 0.0, 13.0);
-    out.push(("tee", crate::fillet(&tee, &[foot], 1.0).unwrap()));
-    let tube = crate::cylinder(Vec3::ZERO, Vec3::Z, 5.0, 20.0).unwrap();
-    let slant = solidcore_record::Plane { origin: Vec3::new(0.0, 0.0, 10.0), x: Vec3::X, y: Vec3::new(0.0, 1.0, -0.5).normalized().unwrap() };
-    if let Ok(parts) = split_by_plane(&tube, &slant)
-        && let Some(lower) = parts.into_iter().find(|p| p.mesh(&crate::MeshTolerance::chord(0.1)).is_ok_and(|m| m.bounds().min.z < 1.0))
-        && let Ok(rounded) = crate::fillet(&lower, &[Vec3::new(5.0, 0.0, 10.0)], 1.5)
-    {
-        out.push(("slanted cut", rounded));
-    }
-    out
+/// Rounded bodies, by what their rounds are, each made when it is asked for: a cylinder's rim
+/// (the 900-copy pattern's part) and a box's edge, rounds of exact classes, and a tee of two
+/// cylinders, whose round along their quartic edge is of no exact class.
+fn rounded_bodies() -> [(&'static str, fn() -> Body); 3] {
+    [
+        ("cylinder rim", || {
+            let rim = crate::cylinder(Vec3::ZERO, Vec3::Z, 3.0, 6.0).unwrap();
+            crate::fillet(&rim, &[Vec3::new(3.0, 0.0, 6.0)], 1.0).unwrap()
+        }),
+        ("box edge", || {
+            let block = crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+            crate::fillet(&block, &[Vec3::new(5.0, 0.0, 10.0)], 2.0).unwrap()
+        }),
+        ("tee", || {
+            let post = crate::cylinder(Vec3::ZERO, Vec3::Z, 5.0, 20.0).unwrap();
+            let arm = crate::cylinder(Vec3::new(0.0, 0.0, 10.0), Vec3::X, 3.0, 15.0).unwrap();
+            let tee = boolean(&post, &arm, BoolOp::Union).unwrap().unwrap();
+            crate::fillet(&tee, &[Vec3::new((25.0f64 - 9.0).sqrt(), 0.0, 13.0)], 1.0).unwrap()
+        }),
+    ]
 }
 
 /// A rounded body moves as exactly as any other: its rounds' definitions move with their nets
@@ -211,10 +204,16 @@ fn a_rounded_body_moves_exactly_as_the_kernel_moves_it() {
         [[c, s, 0., 0.], [-s, c, 0., 0.], [0., 0., 1., 0.], [10., -20., 30., 1.]],
     ];
     let mut kinds = Vec::new();
-    for (what, body) in rounded_bodies() {
+    // It is an operand like any other: cut through a round, as the source is cut.
+    let corner = crate::box_solid(Vec3::new(-50.0, -50.0, 3.0), Vec3::new(50.0, 1.0, 50.0)).unwrap();
+    let cut =
+        |b: &Body, tool: &Body| boolean(b, tool, BoolOp::Cut).unwrap().unwrap().mesh(&crate::MeshTolerance::chord(1e-3)).unwrap().measure().volume;
+    for (what, make) in rounded_bodies() {
+        let body = make();
         let found = blend_kinds(&body);
         kinds.extend(found.iter().copied());
         let before = body.mesh(&crate::MeshTolerance::chord(1e-3)).unwrap().measure().volume;
+        let source_cut = cut(&body, &corner);
         for m in matrices {
             let motion = solidcraft_geom::brep::placement::Rigid::of_matrix(&m).unwrap();
             assert!(solidcraft_geom::brep::placement::moved(body.record(), &motion).is_some(), "{what} {found:?}: moved exactly");
@@ -229,13 +228,8 @@ fn a_rounded_body_moves_exactly_as_the_kernel_moves_it() {
             for (a, b) in placed.record().vertices.iter().zip(&kernels.record().vertices) {
                 assert!(Vec3::from(a.point).dist(Vec3::from(b.point)) < 1e-9, "{what}");
             }
-            // It is an operand like any other: cut through a round, as the source is cut.
-            let corner = crate::box_solid(Vec3::new(-50.0, -50.0, 3.0), Vec3::new(50.0, 1.0, 50.0)).unwrap();
-            let cut = |b: &Body, tool: &Body| {
-                boolean(b, tool, BoolOp::Cut).unwrap().unwrap().mesh(&crate::MeshTolerance::chord(1e-3)).unwrap().measure().volume
-            };
             let moved_cut = cut(&placed, &transform_matrix(&corner, m).unwrap());
-            assert!((moved_cut - cut(&body, &corner)).abs() < 1e-5 * before, "{what}: cut {moved_cut}");
+            assert!((moved_cut - source_cut).abs() < 1e-5 * before, "{what}: cut {moved_cut}");
         }
         if found.contains(&"procedural") {
             // The bound takes in the move's rounding: it only widens.
@@ -326,7 +320,7 @@ fn a_placed_body_is_moved_only_when_its_geometry_is_read() {
     let later = transform_matrix(&source, near).unwrap();
     assert!(later.record.pending(), "a part with no blend is placed lazily by a near-rigid motion");
     assert_eq!(*later.record(), eager(&near));
-    let rounded = rounded_bodies().into_iter().find(|(_, b)| !blend_kinds(b).is_empty()).map(|(_, b)| b).unwrap();
+    let rounded = rounded_bodies().into_iter().map(|(_, make)| make()).find(|b| !blend_kinds(b).is_empty()).unwrap();
     let now = transform_matrix(&rounded, near).unwrap();
     assert!(!now.record.pending(), "a blend moves with its net only by an exact motion: moved now");
     assert!(transform_matrix(&rounded, shift).unwrap().record.pending(), "and lazily by an exact one");

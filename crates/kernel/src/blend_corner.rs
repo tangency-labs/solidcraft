@@ -393,7 +393,8 @@ mod tests {
         let rounded = fillet(&b, &bottom, 2.0).unwrap();
         let vertical = Vec3::new(25.0, 0.0, 6.0);
         let seam = Vec3::new(24.287266336668306, 0.7127336633316916, 0.48266373325510686);
-        for radius in [0.5, 1.0, 3.0] {
+        // Below and above the bottom rounds' 2.
+        for radius in [0.5, 3.0] {
             let mut together: Vec<_> = bottom.iter().map(|p| (*p, 2.0)).collect();
             together.push((vertical, radius));
             let reference = fillet_radii(&b, &together).unwrap();

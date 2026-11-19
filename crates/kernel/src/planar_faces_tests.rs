@@ -39,12 +39,6 @@ fn spiral_wall(radius: f64, start: f64, turn: f64, stations: usize) -> Body {
     crate::sweep_path(&plane, &profile, &path).unwrap()
 }
 
-/// Two such walls whose centrelines are 11 mm apart, so that they overlap by 1 mm; the second
-/// starts a little further round, so that no end face lies in the other's.
-fn two_walls(turn: f64, stations: usize) -> (Body, Body) {
-    (spiral_wall(60.0, 0.0, turn, stations), spiral_wall(71.0, 0.26, turn, stations))
-}
-
 /// The plan area of the union of the walls (each given as `(radius, start)`), by sampling every
 /// 0.4 mm: a point is in a wall if it is within half its thickness of the wall's centreline and
 /// not beyond either end (flat ends).
@@ -93,15 +87,9 @@ fn join_checked(a: &Body, b: &Body, walls: &[(f64, f64)], turn: f64) {
     assert!((got - want).abs() < 5e-3 * want, "{got} vs {want}");
 }
 
-/// Two walls whose tops and bottoms coincide: the join is one solid with the walls as arcs.
-#[test]
-fn a_join_of_swept_walls_is_decided_in_2d() {
-    let turn = 0.6;
-    let (a, b) = two_walls(turn, 16);
-    join_checked(&a, &b, &[(60.0, 0.0), (71.0, 0.26)], turn);
-}
-
-/// Two interleaved spirals, 0.75 turn, as in the snail: the second is the first turned half a turn.
+/// Two interleaved spirals, 0.75 turn, as in the snail: the second is the first turned half a
+/// turn, its centreline 11 mm out from the first's (half the pitch), so that they overlap by 1 mm.
+/// The tops and bottoms coincide: the join is one solid with the walls as arcs.
 #[test]
 fn interleaved_spiral_walls_join() {
     let turn = 0.75 * TAU;

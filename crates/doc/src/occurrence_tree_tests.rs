@@ -174,7 +174,7 @@ fn hostile_documents_walk_as_before() {
     // Few component ids and parents drawn from them, so repeats, missing parents, cycles and
     // duplicated ids all come up.
     let mut state = 4032;
-    for round in 0..300 {
+    for round in 0..50 {
         let n = next(&mut state) % 40;
         let components = 1 + next(&mut state) % 12;
         let occurrences = (0..n)

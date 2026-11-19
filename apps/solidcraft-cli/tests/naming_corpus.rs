@@ -39,7 +39,12 @@ enum Source {
     Sample(fn() -> Value),
 }
 
-/// Every design of the corpus: (`<group>/<design>`, where it comes from).
+/// Designs of the corpus left out: a kind of feature another design names as well, at many
+/// times the cost. One build of oracle 77's variable linear round took 35.6 s (see
+/// [`HEAVIEST`]); oracle 78's variable round to zero names a variable-radius blend in under 3.6 s.
+const LEFT_OUT: [&str; 1] = ["oracle/77-fillet-variable-linear"];
+
+/// Every design of the corpus but [`LEFT_OUT`]: (`<group>/<design>`, where it comes from).
 fn designs() -> Vec<(String, Source)> {
     let root = root();
     let mut out = Vec::new();
@@ -73,6 +78,7 @@ fn designs() -> Vec<(String, Source)> {
         let stem: String = sample.name.to_lowercase().split_whitespace().collect::<Vec<_>>().join("-");
         out.push((format!("samples/{stem}"), Source::Sample(sample.script)));
     }
+    out.retain(|(name, _)| !LEFT_OUT.contains(&name.as_str()));
     out
 }
 
@@ -401,8 +407,7 @@ const UNSTABLE: [(&str, &str); 1] = [(
 /// one worker while the rest wait. Every other design took under 3.6 s. Only the order of the
 /// work depends on this list: a stale entry makes the test slower, never wrong. Re-measure when a
 /// design here gets much faster, or one not listed takes over 5 s.
-const HEAVIEST: [&str; 6] = [
-    "oracle/77-fillet-variable-linear",   // 35.6 s
+const HEAVIEST: [&str; 5] = [
     "oracle/83-boundary-loop-thicken",    // 12.4 s
     "regressions/closed_sweep_torus_cut", // 6.8 s
     "oracle/41-tube-radial-holes",        // 4.6 s

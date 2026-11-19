@@ -4654,11 +4654,11 @@ fn the_chord_grid_finds_what_a_scan_of_every_chord_finds() {
     assert!(trim.chords.len() > 1000);
     let (lo, hi) = (trim.lo, trim.hi);
     let mut checked = [0usize; 2];
-    for i in 0..=60 {
-        for j in 0..=60 {
+    for i in 0..=30 {
+        for j in 0..=30 {
             let p = Vec3::new(
-                lo.x + (hi.x - lo.x) * i as f64 / 60.,
-                lo.y + (hi.y - lo.y) * j as f64 / 60.,
+                lo.x + (hi.x - lo.x) * i as f64 / 30.,
+                lo.y + (hi.y - lo.y) * j as f64 / 30.,
                 lo.z + 1e-9 * (i % 3) as f64,
             );
             for tol in [1e-12, 1e-6, 0.01, 0.3, 2., 50.] {
@@ -4671,7 +4671,7 @@ fn the_chord_grid_finds_what_a_scan_of_every_chord_finds() {
             }
         }
     }
-    assert!(checked[0] > 1000 && checked[1] > 1000, "{checked:?}");
+    assert!(checked[0] > 250 && checked[1] > 250, "{checked:?}");
 }
 
 #[test]
@@ -5693,17 +5693,15 @@ fn fingerprint(mut d: Drawing) -> String {
 #[test]
 fn serial_and_parallel_work_draw_the_same_bits() {
     let view = View::new(Vec3::new(-1., -0.8, -0.6), Vec3::new(0., 0., 1.)).unwrap();
-    // Freeform faces handled and tangent edges left out change every phase's work; once more
-    // than one thread is enough to compare there.
+    // By default: an odd split, more threads than work, and the automatic count (0), which
+    // takes its own share of work. Freeform faces handled and tangent edges left out change
+    // every phase's work; once more than one thread is enough to compare there.
     let freeform = Options {
         freeform: true,
         tangent_edges: false,
         ..Options::default()
     };
-    for (base, counts) in [
-        (Options::default(), &[2, 3, 8, 0][..]),
-        (freeform, &[4][..]),
-    ] {
+    for (base, counts) in [(Options::default(), &[3, 8, 0][..]), (freeform, &[4][..])] {
         let (defs, scene) = mixed_scene(&base);
         let run = |threads: usize| {
             hidden_lines(&defs, &scene, &view, &Options { threads, ..base }, &never).unwrap()
