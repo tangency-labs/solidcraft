@@ -31,6 +31,11 @@ pub struct State {
     note: Option<note::Draft>,
     view_edit: Option<panels::ViewEdit>,
     dimension: Option<dimension::Draft>,
+    dimension_edit: Option<panels::DimensionEdit>,
+    /// The object whose options the panel shows because it was selected (it alone), and the one
+    /// thing selected when that was last looked at: see [`follow_selection`].
+    shown_for: Option<u64>,
+    selection_seen: Option<u64>,
     add_sheet: Option<panels::AddSheet>,
     rename_sheet: Option<u64>,
     sheet_menu: Option<SheetMenu>,
@@ -75,6 +80,9 @@ pub fn enter(app: &mut SolveApp, drawing: bool) -> Result<(), String> {
         app.drawing_workspace.note = None;
         app.drawing_workspace.view_edit = None;
         app.drawing_workspace.dimension = None;
+        app.drawing_workspace.dimension_edit = None;
+        app.drawing_workspace.shown_for = None;
+        app.drawing_workspace.selection_seen = None;
         app.drawing_workspace.add_sheet = None;
         app.drawing_workspace.rename_sheet = None;
         app.drawing_workspace.sheet_menu = None;
@@ -173,10 +181,65 @@ pub fn close_panel(app: &mut SolveApp) -> bool {
     app.drawing_workspace.note = None;
     app.drawing_workspace.view_edit = None;
     app.drawing_workspace.dimension = None;
+    app.drawing_workspace.dimension_edit = None;
+    app.drawing_workspace.shown_for = None;
     app.drawing_workspace.add_sheet = None;
     app.drawing_workspace.first_sheet = None;
     app.drawing_workspace.settings = None;
     open
+}
+
+/// Esc with the panel open: a tool's or a double-click's panel closes (true), and the selection
+/// stays for the next Esc. The panel that shows the selected object's options is not a step of its
+/// own: Esc clears the selection, as in a sketch, and the panel goes with it.
+pub(crate) fn escape_panel(app: &mut SolveApp) -> bool {
+    let state = &app.drawing_workspace;
+    if state.shown_for.is_some() && state.options.and_then(Tool::object) == state.shown_for {
+        return false;
+    }
+    close_panel(app)
+}
+
+/// The one view, dimension or note selected shows its options in the right panel, where a tool
+/// shows its own, and they go when it is no longer the selection. A tool in hand, the sheet's
+/// settings or a panel opened another way stays as it is; the panel closed by hand stays closed
+/// until the selection changes.
+fn follow_selection(app: &mut SolveApp) {
+    let one = match &app.session.selection[..] {
+        [solidcraft_engine::Sel::Drawing { drawing, object }] if app.session.open_drawing == Some(*drawing) => Some(*object),
+        _ => None,
+    };
+    if one == app.drawing_workspace.selection_seen {
+        return;
+    }
+    app.drawing_workspace.selection_seen = one;
+    let state = &app.drawing_workspace;
+    let ours = state.shown_for.is_some() && state.options.and_then(Tool::object) == state.shown_for;
+    let free =
+        !state.settings_open && state.add_sheet.is_none() && state.first_sheet.is_none() && state.placement.is_none() && state.options.is_none();
+    if !ours && !free {
+        app.drawing_workspace.shown_for = None;
+        return;
+    }
+    if ours {
+        close_panel(app);
+    }
+    let kind = one.and_then(|object| {
+        let drawing = app.session.drawing("drawing.inspect").ok()?;
+        if drawing.view(object).is_some() {
+            Some("view")
+        } else if drawing.dimension(object).is_some() {
+            Some("dimension")
+        } else if drawing.notes.by_id(object).is_some() {
+            Some("note")
+        } else {
+            None
+        }
+    });
+    if let (Some(object), Some(kind)) = (one, kind) {
+        edit_object(app, kind, object);
+        app.drawing_workspace.shown_for = Some(object);
+    }
 }
 
 /// Toolbar clicks inspect options. Engine execution still uses command parameters directly.
@@ -294,6 +357,7 @@ fn panel_width(app: &SolveApp) -> f32 {
 /// The sheet page draws the open drawing's sheet; with no drawing open there is no paper, sample
 /// geometry or camera, only a note.
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
+    follow_selection(app);
     if crate::drawing_sheet_page::show(app, ui) {
         return;
     }
@@ -943,6 +1007,10 @@ fn panel_fields(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     } else if placing_dimension(app) {
         dimension::panel(app, ui);
+    } else if let Some(Tool::Dimension(Some(placed))) = app.drawing_workspace.options {
+        if panels::dimension_editor(app, ui, placed) {
+            close_panel(app);
+        }
     } else if let Some(tool) = app.drawing_workspace.options {
         panels::tool_body(app, ui, tool);
         if panels::footer(ui, tool) {
