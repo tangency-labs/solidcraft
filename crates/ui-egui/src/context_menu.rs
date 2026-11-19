@@ -2174,9 +2174,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         }
         "ui.exportDxf" => {
             if let Some(id) = id_of(&p, "sketch") {
-                let name = app.session.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
-                let version = if app.preferences.sketch_dxf_r12 { "r12" } else { "ac1015" };
-                app.pick_save_command(&format!("{name}.dxf"), &["dxf"], "sketch.export_dxf", json!({"sketch": id, "version": version}));
+                crate::dialogs_sketch_dxf::open(app, id);
             }
         }
         "ui.extrudeSketch" => {

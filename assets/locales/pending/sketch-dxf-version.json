@@ -1,0 +1,42 @@
+{
+  "ar": {
+    "dxf.sketch_ac1015": "AutoCAD 2000: كل منحنى دقيق",
+    "dxf.sketch_r12": "الإصدار 12: خطوط وأقواس ودوائر، والمنحنيات الأخرى خطوط قصيرة",
+    "dxf.sketch_version": "إصدار DXF"
+  },
+  "de": {
+    "dxf.sketch_ac1015": "AutoCAD 2000: jede Kurve exakt",
+    "dxf.sketch_r12": "Release 12: Linien, Bögen und Kreise, andere Kurven als kurze Linien",
+    "dxf.sketch_version": "DXF-Version"
+  },
+  "en": {
+    "dxf.sketch_ac1015": "AutoCAD 2000: every curve exact",
+    "dxf.sketch_r12": "Release 12: lines, arcs and circles; other curves as short lines",
+    "dxf.sketch_version": "DXF version"
+  },
+  "he": {
+    "dxf.sketch_ac1015": "AutoCAD 2000: כל עקומה מדויקת",
+    "dxf.sketch_r12": "גרסה 12: קווים, קשתות ועיגולים, ועקומות אחרות כקווים קצרים",
+    "dxf.sketch_version": "גרסת DXF"
+  },
+  "ja": {
+    "dxf.sketch_ac1015": "AutoCAD 2000: すべての曲線を正確に書き出します",
+    "dxf.sketch_r12": "リリース 12: 線分、円弧、円のみで、ほかの曲線は短い線分になります",
+    "dxf.sketch_version": "DXF のバージョン"
+  },
+  "ko": {
+    "dxf.sketch_ac1015": "AutoCAD 2000: 모든 곡선을 정확하게 씁니다",
+    "dxf.sketch_r12": "릴리스 12: 선, 호, 원만 쓰고 다른 곡선은 짧은 선으로 씁니다",
+    "dxf.sketch_version": "DXF 버전"
+  },
+  "vi": {
+    "dxf.sketch_ac1015": "AutoCAD 2000: mọi đường cong đều chính xác",
+    "dxf.sketch_r12": "Bản 12: đường thẳng, cung và đường tròn, các đường cong khác thành các đoạn thẳng ngắn",
+    "dxf.sketch_version": "Phiên bản DXF"
+  },
+  "zh": {
+    "dxf.sketch_ac1015": "AutoCAD 2000：每条曲线都精确",
+    "dxf.sketch_r12": "R12：直线、圆弧和圆，其他曲线写成短直线",
+    "dxf.sketch_version": "DXF 版本"
+  }
+}

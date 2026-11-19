@@ -287,8 +287,6 @@ fn export_name(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
                 ui_kit::Text::Hint("export_name"),
             );
         }
-        let response = setting::sketch_dxf_r12(app, ui);
-        crate::scenario::publish_target("prefs:sketch_dxf_r12", response.rect);
     });
 }
 
