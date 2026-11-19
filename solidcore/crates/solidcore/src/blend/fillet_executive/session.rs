@@ -4408,8 +4408,12 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
                 };
                 let edge = eu::edge(self.target, ea0)?
                     .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
-                let other_edge = eu::edge(self.target, eb0)?
-                    .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
+                let other_edge = eu::edge(self.target, eb0)?.ok_or_else(|| {
+                    SolidError::blend_band_input_missing(
+                        OP,
+                        crate::error::blend::BandInput::EdgeUseEdge,
+                    )
+                })?;
                 let (a0, a1) = crate::topology::edge::start_end_vertices(self.target, edge)?;
                 let (b0, b1) = crate::topology::edge::start_end_vertices(self.target, other_edge)?;
                 if edge == other_edge

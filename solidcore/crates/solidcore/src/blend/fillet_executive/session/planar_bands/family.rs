@@ -10,6 +10,7 @@
 use super::interval::{self, add, mul, scale, sub, Ratio};
 use super::{endpoint_cap, inward, kept_witness, Band, ContactWitness, CornerBand, OP};
 use crate::curve::line::Line;
+use crate::error::blend::BandInput;
 use crate::error::{Result, SolidError};
 use crate::geom::expansion as exact;
 use crate::geom::tol::is_zero;
@@ -356,8 +357,9 @@ pub(super) fn feet(
             (band.interval.max(), edge::end_vertex(target, band.edge)?),
         ] {
             let endpoint = band.curve.evaluate_point(k, parameter)?;
-            let vertex =
-                vertex.ok_or_else(|| SolidError::blend_missing(OP, "the line endpoint"))?;
+            let vertex = vertex.ok_or_else(|| {
+                SolidError::blend_band_input_missing(OP, BandInput::LineEndpoint)
+            })?;
             if !endpoint_cap(k, target, band, vertex, inward(k, band, endpoint)?, blended)? {
                 forbidden.push(family.cap(foot, endpoint, edge::tolerance(target, band.edge)?)?);
             }

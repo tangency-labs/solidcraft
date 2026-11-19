@@ -22,6 +22,7 @@ use super::SolverObject;
 use crate::blend::fillet_executive::FitKind;
 use crate::curve::curve::p9::CurveSolveOptions;
 use crate::curve::curve::{Curve, CurveKind};
+use crate::error::blend::BandInput;
 use crate::error::{Result, SolidError};
 use crate::geom::expansion as exact;
 use crate::geom::extent1d::Extent1d;
@@ -73,8 +74,8 @@ struct Band {
     offsets: [f64; 2],
 }
 
-fn missing(what: &'static str) -> SolidError {
-    SolidError::blend_missing(OP, what)
+fn missing(input: BandInput) -> SolidError {
+    SolidError::blend_band_input_missing(OP, input)
 }
 
 fn parallel_error_is_zero(error: f64) -> bool {
@@ -106,7 +107,7 @@ fn net_extrusion_axis(surface: &BSplineSurface) -> Result<Option<Vec3>> {
             index
                 .and_then(|index| points.get(index))
                 .copied()
-                .ok_or_else(|| missing("the extrusion control point"))
+                .ok_or_else(|| missing(BandInput::ExtrusionControlPoint))
         };
         let (a, b) = (point(start)?, point(end)?);
         let weight = if a.w == NOW { 1.0 } else { a.w };
@@ -127,9 +128,9 @@ fn net_extrusion_axis(surface: &BSplineSurface) -> Result<Option<Vec3>> {
         if let Some((first, first_weight)) = &reference {
             for (d, r) in delta.iter().zip(first) {
                 let left = exact::scale(d, *first_weight)
-                    .ok_or_else(|| missing("the exact extrusion translation product"))?;
+                    .ok_or_else(|| missing(BandInput::ExtrusionTranslationProduct))?;
                 let right = exact::scale(r, weight)
-                    .ok_or_else(|| missing("the exact extrusion translation product"))?;
+                    .ok_or_else(|| missing(BandInput::ExtrusionTranslationProduct))?;
                 if !exact::is_zero(&exact::sub(&left, &right)) {
                     return Ok(None);
                 }
@@ -162,18 +163,18 @@ fn band(target: &Brep, solver: &SolverObject, rail: usize) -> Result<Option<Band
         1 => 0,
         _ => return Err(SolidError::invalid_input(OP, "rail index out of range")),
     };
-    let use_ = base.edgeuse(rail)?.ok_or_else(|| missing("the edge use"))?;
-    let face = eu::face(target, use_)?.ok_or_else(|| missing("the shared face"))?;
+    let use_ = base.edgeuse(rail)?.ok_or_else(|| missing(BandInput::EdgeUse))?;
+    let face = eu::face(target, use_)?.ok_or_else(|| missing(BandInput::SharedFace))?;
     let own = base
         .surface(rail)?
-        .ok_or_else(|| missing("the planar support"))?;
+        .ok_or_else(|| missing(BandInput::PlanarSupport))?;
     let SurfaceKind::Plane(plane) = own.surface.base_surface().kind() else {
         return Ok(None);
     };
     let plane_normal = plane.evaluate_normal();
     let other = base
         .surface(other_rail)?
-        .ok_or_else(|| missing("the other support"))?
+        .ok_or_else(|| missing(BandInput::OtherSupport))?
         .surface
         .base_surface();
     match other.kind() {
@@ -198,17 +199,17 @@ fn band(target: &Brep, solver: &SolverObject, rail: usize) -> Result<Option<Band
         .setbacks()
         .get(rail)
         .copied()
-        .ok_or_else(|| missing("the chamfer setback"))?;
+        .ok_or_else(|| missing(BandInput::ChamferSetback))?;
     let inward_offset = offsets
         .get(other_rail)
         .copied()
-        .ok_or_else(|| missing("the other offset"))?;
+        .ok_or_else(|| missing(BandInput::OtherOffset))?;
     if !(width.is_finite() && width > 0.0 && inward_offset.is_finite() && inward_offset != 0.0) {
         return Err(SolidError::invalid_input(OP, "invalid constant band width"));
     }
-    let edge = eu::edge(target, use_)?.ok_or_else(|| missing("the blended edge"))?;
+    let edge = eu::edge(target, use_)?.ok_or_else(|| missing(BandInput::BlendedEdge))?;
     let curve =
-        edge::evaluation_curve(target, edge)?.ok_or_else(|| missing("the blended edge's curve"))?;
+        edge::evaluation_curve(target, edge)?.ok_or_else(|| missing(BandInput::BlendedEdgeCurve))?;
     Ok(Some(Band {
         edge,
         face,
@@ -302,7 +303,7 @@ pub(super) fn corner_band(
     let Some(use_) = solver.base().edgeuse(0)? else {
         return Ok(None);
     };
-    let edge = eu::edge(target, use_)?.ok_or_else(|| missing("the selected edge"))?;
+    let edge = eu::edge(target, use_)?.ok_or_else(|| missing(BandInput::SelectedEdge))?;
     let (start, end) = edge::start_end_vertices(target, edge)?;
     let mut line = None;
     for rail in 0..2 {
@@ -339,7 +340,7 @@ fn inward(k: &Kernel, band: &Band, foot: Point3) -> Result<Vec3> {
         &DropPointOptions::default(),
     )?;
     if !dropped.success {
-        return Err(missing("the foot on the other support"));
+        return Err(missing(BandInput::FootOnOtherSupport));
     }
     let normal = band
         .other
@@ -422,7 +423,7 @@ fn kept_witness(
         (band.interval.max(), edge::end_vertex(target, band.edge)?),
     ] {
         if foot.distance(band.curve.evaluate_point(k, parameter)?) <= tolerance {
-            let vertex = vertex.ok_or_else(|| missing("the blended edge's endpoint"))?;
+            let vertex = vertex.ok_or_else(|| missing(BandInput::BlendedEdgeEndpoint))?;
             return endpoint_cap(k, target, band, vertex, normal, blended);
         }
     }
@@ -514,7 +515,7 @@ fn closest_feet(
     )?;
     let solution = solutions
         .get(0)
-        .ok_or_else(|| missing("the closest band feet"))?;
+        .ok_or_else(|| missing(BandInput::ClosestBandFeet))?;
     Ok(Some(ClosestFeet {
         points: [
             a.curve.evaluate_point(k, solution.start.param(0)?)?,
@@ -597,7 +598,7 @@ pub(super) fn retained_contact(
         .offsets
         .first()
         .copied()
-        .ok_or_else(|| missing("the first offset"))?
+        .ok_or_else(|| missing(BandInput::FirstOffset))?
         .abs();
     let equal = !as_scale
         && a.offsets
