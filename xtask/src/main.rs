@@ -128,7 +128,7 @@ commands:
   lists [--fix]   check that files many changes add to are sorted one item per line (the
                   message catalogs in assets/locales, tests/KNOWN_FAILING_TESTS); --fix sorts
                   the catalogs
-  skills          check that AGENTS.md and skills/*/SKILL.md cite files, `cargo xtask` commands and skills
+  skills          check that AGENTS.md, skills/ and .agents/skills/ cite files, `cargo xtask` commands and skills
                   that exist, that the router table lists exactly the skills there are, and that
                   AGENTS.md and new skills stay short
   mesh-decisions  check that model decisions in crates/doc, crates/engine and crates/kernel use exact

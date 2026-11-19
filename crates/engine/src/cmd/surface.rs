@@ -2078,7 +2078,7 @@ mod tests {
             run(&mut s, "solid.pattern.rectangular", json!({"features": ["Half"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 10}));
             let state = s.world_state().unwrap();
             assert!(state.body("Plate").is_none());
-            assert!(state.sheets.is_empty());
+            assert!(state.surface_sheets.is_empty());
             assert_eq!(state.bodies.len(), usize::from(with_surface));
             assert_eq!(state.body("Sheet").map(|b| b.body.record()), surface.as_ref());
         }

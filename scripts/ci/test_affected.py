@@ -132,7 +132,8 @@ class RealWorkspace(unittest.TestCase):
     def test_embedded_root_files_select_their_crate(self):
         for path, pkg in [("ATTRIBUTION.md", "solidcraft-ui-egui"), ("LICENSE-MIT", "solidcraft-engine"),
                           ("NOTICE", "solidcraft-engine"), ("THIRD-PARTY-LICENSES.txt", "solidcraft-engine"),
-                          ("skills/solidcraft-modeling/SKILL.md", "solidcraft-mcp")]:
+                          ("skills/solidcraft-modeling/SKILL.md", "solidcraft-mcp"),
+                          (".agents/skills/solidcraft-tests/SKILL.md", "xtask"), (".claude/skills", "xtask")]:
             full, pk = affected.select(self.meta, [path])
             self.assertFalse(full, path)
             self.assertIn(pkg, pk, path)
