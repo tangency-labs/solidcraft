@@ -3647,6 +3647,71 @@ impl EdgeMapAccess<FilletObject> for SessionObjects<'_> {
         self.pseudo
             .find_fillet_brep_edge(k, edge, body, &candidates, multiple)
     }
+    fn mapping_split_rail(
+        &mut self,
+        k: &mut Kernel,
+        geom: FilletObject,
+        rail: FilletObject,
+        candidates: &[FilletObject],
+    ) -> Result<()> {
+        let FilletObject::Geometry(g) = geom else {
+            return Err(invalid("mapping geometry is not retained"));
+        };
+        let FilletObject::Topology(FilletBody::Pseudo, EntityRef::Edge(rail)) = rail else {
+            return Err(invalid("mapping edge is not actual pseudo topology"));
+        };
+        let candidates = candidates
+            .iter()
+            .map(|object| {
+                let FilletObject::IntermediateTopology(EntityRef::Edge(edge)) = *object else {
+                    return Err(invalid(
+                        "mapping candidate is not actual intermediate topology",
+                    ));
+                };
+                Ok(edge)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let record = self.pseudo.geom(g)?;
+        let Some(side) = record.rails.iter().position(|r| *r == Some(rail)) else {
+            return Err(invalid("mapping rail is not the geometry's"));
+        };
+        // a rail already split (a cliff's) keeps its pieces
+        let others = if side == 0 {
+            &record.other_rails1
+        } else {
+            &record.other_rails2
+        };
+        if !others.is_empty() {
+            return Ok(());
+        }
+        let body = self
+            .intermediate
+            .as_ref()
+            .ok_or_else(|| invalid("intermediate body is not allocated"))?;
+        let Some(pieces) = self
+            .pseudo
+            .fillet_brep_pieces_along(k, rail, body, &candidates)?
+        else {
+            return Ok(());
+        };
+        let pieces = crate::blend::fillet_solver::p1::RetainedRailOwnership::with_context(
+            k,
+            &mut self.pseudo,
+            &mut self.attributes,
+            |k, pseudo, ownership| {
+                crate::blend::fillet_solver::p1::split_rail_along(
+                    k, pseudo, ownership, g, rail, &pieces,
+                )
+            },
+        )?;
+        let record = self.pseudo.geom_mut(g)?;
+        if side == 0 {
+            record.other_rails1.extend(pieces);
+        } else {
+            record.other_rails2.extend(pieces);
+        }
+        Ok(())
+    }
 }
 
 impl crate::blend::fillet_executive::p1::SmoothSequenceAccess<FilletObject> for SessionObjects<'_> {
