@@ -685,9 +685,11 @@ fn a_tubes_outline_across_its_axis_is_its_rims_near_halves() {
             assert!(!s.whole);
             for (t, p) in s.range.iter().zip(s.ends) {
                 if *t != t0 && *t != t1 {
-                    // Edge-on: on the plane x = 1 through the axis, 2 from it.
+                    // Edge-on: on the plane x = 1 through the axis, 2 from it. A face faces the
+                    // viewer from a lean of 1e-9 (`outline::FACING`), which a radius of 2 puts
+                    // 2e-9 off that plane.
                     assert!(
-                        (p.x - 1.).abs() < 1e-9 && ((p.y - 2.).abs() - 2.).abs() < 1e-9,
+                        (p.x - 1.).abs() < 1e-8 && ((p.y - 2.).abs() - 2.).abs() < 1e-8,
                         "{p:?}"
                     );
                 } else {
