@@ -14,7 +14,7 @@
 //! Wire points are taken in the sketch's component frame (the frame of the `plane` passed in);
 //! linked World-space wires take no part.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use solidcore_record::{Plane, Region2, Vec2, Vec3};
 use solidcraft_geom::prelude::*;
@@ -164,19 +164,7 @@ pub fn find_planar_3d_profiles(sk: &Sketch, plane: Plane) -> Vec<Profile3D> {
     }
     key.sort_unstable();
     key.dedup();
-    // A sketch with few enough points spans planes by all of them: a plane can hold just part of
-    // a wire (one tooth of a zigzag) and none of its key points but the ends of that part.
-    if nodes.pts.len() <= MAX_NODES {
-        key = (0..nodes.pts.len()).collect();
-    } else if key.len() > MAX_NODES {
-        // Subsample evenly across the candidate key points to protect the O(n³) plane triple
-        // search from combinatorial blowup while preserving loop plane spanning (#19093).
-        let step = key.len() as f64 / MAX_NODES as f64;
-        let mut downsampled: Vec<usize> = (0..MAX_NODES).map(|i| key[(i as f64 * step) as usize]).collect();
-        downsampled.dedup();
-        key = downsampled;
-    }
-    if edges.is_empty() || key.len() < 3 {
+    if edges.is_empty() {
         return Vec::new();
     }
     // The planes the nodes span, deduplicated. A plane needs at least three edges on it, one of
@@ -184,33 +172,46 @@ pub fn find_planar_3d_profiles(sk: &Sketch, plane: Plane) -> Vec<Profile3D> {
     // candidate too (flat 3D loops take part there); profiles bounded only by in-plane curves are
     // dropped below, so nothing is listed twice.
     let mut candidates: Vec<Candidate> = Vec::new();
-    for i in 0..key.len() {
-        for j in i + 1..key.len() {
-            for k in j + 1..key.len() {
-                let (a, b, c) = (nodes.pts[key[i]], nodes.pts[key[j]], nodes.pts[key[k]]);
-                let (ab, ac) = (b - a, c - a);
-                let n = ab.cross(ac);
-                let len = n.len();
-                if len < 1e-12 || len < 1e-9 * ab.len().max(1e-300) * ac.len().max(1e-300) {
-                    continue;
-                }
-                let (n, off) = canonical(n / len, n.dot(a) / len);
-                let known = candidates.iter().any(|p| (p.n.dot(n) - 1.0).abs() < 1e-9 && (p.off - off).abs() < 1e-6);
-                if known {
-                    continue;
-                }
-                candidates.push(Candidate { n, off, anchor: a });
-                if candidates.len() >= MAX_PLANES {
-                    break;
-                }
-            }
-            if candidates.len() >= MAX_PLANES {
-                break;
+    if nodes.pts.len() <= MAX_NODES {
+        // A sketch with few enough points spans planes by all of them: a plane can hold just part
+        // of a wire (one tooth of a zigzag) and none of its key points but the ends of that part.
+        let all: Vec<usize> = (0..nodes.pts.len()).collect();
+        add_planes(&all, &nodes.pts, &mut candidates);
+    } else {
+        // Planes come from each connected chain's own points, never from a thinned global list,
+        // so admitting more edges elsewhere cannot lose a loop (#19464).
+        let mut parent: Vec<usize> = (0..nodes.pts.len()).collect();
+        for e in &edges {
+            let (ra, rb) = (find_root(&mut parent, e.a), find_root(&mut parent, e.b));
+            if let Some(slot) = parent.get_mut(ra) {
+                *slot = rb;
             }
         }
-        if candidates.len() >= MAX_PLANES {
-            break;
+        let mut chains: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+        for &n in &key {
+            chains.entry(find_root(&mut parent, n)).or_default().push(n);
         }
+        let mut members: HashMap<usize, Vec<usize>> = HashMap::new();
+        for e in &edges {
+            for n in [e.a, e.b] {
+                members.entry(find_root(&mut parent, n)).or_default().push(n);
+            }
+        }
+        for (root, ks) in &chains {
+            // The plane of the chain's first points and the point farthest from their line: a
+            // planar chain lies wholly in it, whatever its length.
+            if let Some(all) = members.get_mut(root) {
+                all.sort_unstable();
+                all.dedup();
+                add_spanning_plane(all, &nodes.pts, &mut candidates);
+            }
+            // A chain of a few key points also spans planes it only partly lies in.
+            let ks = if ks.len() > MAX_NODES { evenly(ks) } else { ks.clone() };
+            add_planes(&ks, &nodes.pts, &mut candidates);
+        }
+    }
+    if candidates.is_empty() {
+        return Vec::new();
     }
     candidates.sort_by(|x, y| x.n.x.total_cmp(&y.n.x).then(x.n.y.total_cmp(&y.n.y)).then(x.n.z.total_cmp(&y.n.z)).then(x.off.total_cmp(&y.off)));
 
@@ -305,6 +306,79 @@ pub fn find_planar_3d_profiles(sk: &Sketch, plane: Plane) -> Vec<Profile3D> {
         }
     }
     out
+}
+
+/// `n` points' worth of indices thinned evenly to at most `MAX_NODES`.
+fn evenly(ids: &[usize]) -> Vec<usize> {
+    let step = ids.len() as f64 / MAX_NODES as f64;
+    let mut out: Vec<usize> = (0..MAX_NODES).filter_map(|i| ids.get((i as f64 * step) as usize)).copied().collect();
+    out.dedup();
+    out
+}
+
+/// Union-find root with path halving; an index outside `parent` is its own root.
+fn find_root(parent: &mut [usize], mut i: usize) -> usize {
+    while let Some(&p) = parent.get(i) {
+        if p == i {
+            break;
+        }
+        let gp = parent.get(p).copied().unwrap_or(p);
+        if let Some(slot) = parent.get_mut(i) {
+            *slot = gp;
+        }
+        i = gp;
+    }
+    i
+}
+
+/// Adds the plane through three points if it is new and there is room.
+fn push_plane(a: Vec3, b: Vec3, c: Vec3, candidates: &mut Vec<Candidate>) {
+    if candidates.len() >= MAX_PLANES {
+        return;
+    }
+    let (ab, ac) = (b - a, c - a);
+    let n = ab.cross(ac);
+    let len = n.len();
+    if len < 1e-12 || len < 1e-9 * ab.len().max(1e-300) * ac.len().max(1e-300) {
+        return;
+    }
+    let (n, off) = canonical(n / len, n.dot(a) / len);
+    if candidates.iter().any(|p| (p.n.dot(n) - 1.0).abs() < 1e-9 && (p.off - off).abs() < 1e-6) {
+        return;
+    }
+    candidates.push(Candidate { n, off, anchor: a });
+}
+
+/// Every plane three of the points span.
+fn add_planes(ids: &[usize], pts: &[Vec3], candidates: &mut Vec<Candidate>) {
+    for (i, &x) in ids.iter().enumerate() {
+        for (j, &y) in ids.iter().enumerate().skip(i + 1) {
+            for &z in ids.iter().skip(j + 1) {
+                if candidates.len() >= MAX_PLANES {
+                    return;
+                }
+                if let (Some(&a), Some(&b), Some(&c)) = (pts.get(x), pts.get(y), pts.get(z)) {
+                    push_plane(a, b, c, candidates);
+                }
+            }
+        }
+    }
+}
+
+/// The plane through the first point, the one farthest from it, and the one farthest from their
+/// line: the plane a planar point set lies in, found from the points themselves.
+fn add_spanning_plane(ids: &[usize], pts: &[Vec3], candidates: &mut Vec<Candidate>) {
+    let p = |i: usize| pts.get(i).copied();
+    let Some(a) = ids.first().and_then(|&i| p(i)) else { return };
+    let dist = |i: usize, f: &dyn Fn(Vec3) -> f64| p(i).map_or(0.0, f);
+    let Some(b) = ids.iter().copied().max_by(|&i, &j| dist(i, &|q| q.dist(a)).total_cmp(&dist(j, &|q| q.dist(a)))).and_then(p) else { return };
+    let chord = b - a;
+    let Some(c) =
+        ids.iter().copied().max_by(|&i, &j| dist(i, &|q| chord.cross(q - a).len()).total_cmp(&dist(j, &|q| chord.cross(q - a).len()))).and_then(p)
+    else {
+        return;
+    };
+    push_plane(a, b, c, candidates);
 }
 
 /// The nodes of one wire (`ends`, in order along it) that span planes: all of them for a short

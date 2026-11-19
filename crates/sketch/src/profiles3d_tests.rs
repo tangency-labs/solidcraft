@@ -324,6 +324,23 @@ fn planar_loop_of_over_two_thousand_segments_is_a_profile() {
 }
 
 #[test]
+fn closed_triangle_survives_many_short_wires_elsewhere() {
+    // #19464 review: 100 short wires at z = 100 push the node count past `MAX_NODES`; the
+    // triangle in z = 0 is still a profile.
+    let mut sk = Sketch::new();
+    sk.view.three_d = true;
+    let v = |x: f64, y: f64, z: f64| Vec3 { x, y, z };
+    sk.wires.push(wire("tri", &[v(0.0, 0.0, 0.0), v(1.0, 0.0, 0.0), v(0.0, 1.0, 0.0), v(0.0, 0.0, 0.0)]));
+    for i in 0..100 {
+        let x = 10.0 + 3.0 * i as f64;
+        sk.wires.push(wire(&format!("s{i}"), &[v(x, 0.0, 100.0), v(x + 1.0, 0.0, 100.0)]));
+    }
+    let ps = find_planar_3d_profiles(&sk, Plane::XY);
+    assert_eq!(ps.len(), 1);
+    assert!((ps[0].area - 0.5).abs() < 1e-9, "area {}", ps[0].area);
+}
+
+#[test]
 fn nothing_without_3d_wires() {
     let mut sk = Sketch::new();
     let a = sk.add_point(Vec2 { x: 0.0, y: 0.0 }, None).unwrap();
