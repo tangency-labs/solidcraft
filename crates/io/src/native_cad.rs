@@ -113,6 +113,7 @@ fn traced_records(
     let mut warnings = Vec::new();
     let mut unplaced = Vec::with_capacity(read.read.len());
     let looks = colours.then(|| Looks::of(ir));
+    let layers = HiddenLayers::of(ir);
     for r in read.read {
         let body = by_id.get(r.body.as_str());
         let (color, paint) = looks.as_ref().map_or((None, None), |l| l.paint_of(ir, &r.body, &r.solid.face_origin));
@@ -125,7 +126,7 @@ fn traced_records(
             // which is not how Rhino shades it.
             color,
             paint,
-            hidden: body.is_some_and(|b| b.visible == Some(false)),
+            hidden: body.is_some_and(|b| b.visible == Some(false)) || layers.bodies.contains(r.body.as_str()),
             placement: r.placement,
             brep: Some(r.solid.brep),
             face_origin: r.solid.face_origin,
@@ -171,7 +172,8 @@ fn traced_records(
             instance: None,
             color,
             paint,
-            hidden: body.is_some_and(|b| b.visible == Some(false)),
+            // On a hidden layer: its body, or the tessellation itself (a layer names it by its id).
+            hidden: body.is_some_and(|b| b.visible == Some(false)) || layers.bodies.contains(id) || layers.bodies.contains(t.id.as_str()),
             placement,
             brep: None,
             face_origin: Vec::new(),
@@ -198,13 +200,53 @@ fn traced_records(
         }];
         (bodies, tree, origins)
     } else {
-        assembly::placed(ir, product, unplaced, &mut warnings)
+        assembly::placed(ir, product, unplaced, &layers, &mut warnings)
     };
     (ImportRecords { bodies, tree, warnings, system: system.to_string() }, origins)
 }
 
 mod assembly;
 mod validation;
+
+/// What the file's hidden presentation layers hide (CADIR ids): bodies (with the bodies of the
+/// products on them, and the parts given as triangles on them), and the occurrences and products
+/// whose placements, with all they hold, start hidden.
+#[derive(Default)]
+pub(crate) struct HiddenLayers {
+    pub bodies: std::collections::HashSet<String>,
+    pub occurrences: std::collections::HashSet<String>,
+    pub definitions: std::collections::HashSet<String>,
+}
+
+impl HiddenLayers {
+    fn of(ir: &cadmpeg_ir::document::CadIr) -> Self {
+        use cadmpeg_ir::presentation::PresentationItem;
+        let mut out = HiddenLayers::default();
+        for layer in ir.model.presentation_layers.iter().filter(|l| l.visible == Some(false)) {
+            for item in &layer.items {
+                match item {
+                    PresentationItem::Body { body } => {
+                        out.bodies.insert(body.as_str().to_string());
+                    }
+                    PresentationItem::Tessellation { tessellation } => {
+                        out.bodies.insert(tessellation.clone());
+                    }
+                    PresentationItem::Occurrence { occurrence } => {
+                        out.occurrences.insert(occurrence.as_str().to_string());
+                    }
+                    PresentationItem::Product { product } => {
+                        out.definitions.insert(product.as_str().to_string());
+                        if let Some(d) = ir.model.product_definitions.iter().find(|d| d.id == *product) {
+                            out.bodies.extend(d.bodies.iter().map(|b| b.as_str().to_string()));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        out
+    }
+}
 
 /// A file's appearances by what they colour: whole bodies and single faces (CADIR ids).
 struct Looks<'a> {

@@ -529,7 +529,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     let placing = crate::drawing_workspace::placement::on_sheet(app, &placement_painter, at, &drawing, sheet, on_paper, response.clicked());
     let placing_note = crate::drawing_workspace::placing_note(app);
     if placing_note && let Some(point) = on_paper {
-        crate::drawing_workspace::note::on_sheet(app, &placement_painter, at.screen(point), point, sheet, response.clicked());
+        crate::drawing_workspace::note::on_sheet(app, &placement_painter, at, point, sheet, response.clicked());
     }
     let placing_dimension = crate::drawing_workspace::placing_dimension(app);
     if placing_dimension && let Some(point) = on_paper {

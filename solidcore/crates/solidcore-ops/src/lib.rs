@@ -106,8 +106,8 @@ pub use boolean::BooleanOp;
 pub use check::{CheckLevel, CheckReport};
 pub use contact::Gap;
 pub use error::{
-    Error, FitKind, OffsetRefusal, RecordEntity, Result, RoomReason, SolidTest, Unblendable,
-    Unsoundness,
+    Error, FailureCode, FitKind, OffsetRefusal, RecordEntity, Result, RoomReason, SolidTest,
+    Unblendable, Unsoundness,
 };
 pub use measure::{
     point_displacement, point_distance, point_set_summary, points_meet, Distance, EdgeCurve,
