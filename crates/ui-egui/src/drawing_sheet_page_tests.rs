@@ -464,6 +464,24 @@ fn fit_sheet_keeps_the_paper_clear_of_the_ribbon_browser_and_history() {
     }
 }
 
+/// A short Browser (folded, or on a small window) is wider than tall, yet lies against the left
+/// edge: the paper is framed to its right, not below it.
+#[test]
+fn fit_sheet_frames_beside_a_short_browser_not_under_it() {
+    let (mut h, _) = plate_sheet();
+    h.call("ui.resize", json!({"width": 1280, "height": 720}));
+    h.frames(6);
+    let canvas = h.app.viewport.rect.unwrap();
+    let short = Rect::from_min_size(canvas.min + vec2(8.0, 180.0), vec2(260.0, 60.0));
+    h.app.shell.browser = Some(short);
+    h.app.ui.show_browser = true;
+    h.app.run("view.home", json!({})).unwrap();
+    h.frames(4);
+    let paper = crate::scenario::rect_of("sheet:paper").unwrap();
+    assert!(!paper.intersects(short), "the paper {paper:?} is under the short Browser {short:?}");
+    assert!(paper.min.x >= short.right() - 1.0, "the paper {paper:?} is framed beside the Browser {short:?}");
+}
+
 /// Fit Sheet shows the whole sheet, and comes back after any zoom; typed and wheeled zooms stay
 /// within 5 % to 3200 %, and a zoom that isn't a number changes nothing.
 #[test]
