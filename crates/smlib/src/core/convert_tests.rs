@@ -385,13 +385,20 @@ fn a_drafted_circle_far_from_the_origin_comes_back_as_written() {
 /// -3.8e-5°, so the equator's piece up to the seam is an arc 1.27e-3 long, under 1e-6 of its
 /// radius. The body comes back from its arrays with the same faces, edges, vertices and volume,
 /// and so does the join of an 80 × 80 × 160 block wholly inside the tube, which leaves it as it is.
+/// The equator's other piece, 96 long, is still written as a circle of radius 1900.
 #[test]
 fn a_hole_cut_a_hair_across_a_torus_seam_comes_back() {
+    use crate::flat::{CURVE_CIRCLE, EDGE_CIRCLE_RADIUS, EDGE_CURVE_TYPE};
     let torus = make_torus([0.0; 3], 1500.0, 400.0).unwrap();
     let hole = make_cylinder([1899.3937162045017, 47.9949043425656, -200.0], 48.0, 200.0).unwrap();
     let cut = boolean(&torus, &hole, BooleanOp::Subtract).unwrap().unwrap();
     let want = volume(&cut, 1e-9).unwrap();
-    let back = from_arrays(&to_arrays(&cut).unwrap()).unwrap();
+    let arrays = to_arrays(&cut).unwrap();
+    let circles = arrays.ints[&EDGE_CURVE_TYPE].iter().filter(|&&t| t == i64::from(CURVE_CIRCLE)).count();
+    let radii = &arrays.reals[&EDGE_CIRCLE_RADIUS];
+    assert_eq!(radii.len(), circles);
+    assert!(radii.iter().any(|r| (r - 1900.0).abs() <= 1e-9 * 1900.0), "no circle of radius 1900 among {radii:?}");
+    let back = from_arrays(&arrays).unwrap();
     assert_eq!(counts(&back).unwrap(), counts(&cut).unwrap());
     let v = volume(&back, 1e-9).unwrap();
     assert!(rel(v, want) < 1e-9, "round trip: {v} vs {want}");

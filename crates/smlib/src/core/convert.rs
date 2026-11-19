@@ -500,8 +500,9 @@ const NURBS_EXPORT: EdgeExport = EdgeExport {
 /// NURBS one goes with its axis reversed and its range negated. A call that returns a status
 /// other than success makes the edge NURBS, as there ([`answer`]); any other solidcore error
 /// fails the export. A circle also needs its NURBS to pass the import's circle test
-/// ([`circle_test_finds`]), so an edge written as a circle is read back as one; an arc too short
-/// for that test (under 1e-6 of its radius) goes as its NURBS.
+/// ([`circle_test_finds`]), so the import's circle test does not refuse an edge written as a
+/// circle; a circle the test cannot find, such as an arc under about 1e-6 of its radius, goes as
+/// its NURBS.
 fn classify_edge_curve(k: &Kernel, c: Option<&Curve>, ivl: &Extent1d) -> Result<EdgeExport> {
     let Some(c) = c else { return Ok(NURBS_EXPORT) };
     let e = classify(k, c, ivl).map_err(sc("ClassifyEdgeCurve"))?.unwrap_or(NURBS_EXPORT);
