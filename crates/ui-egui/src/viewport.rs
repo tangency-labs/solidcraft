@@ -4360,6 +4360,8 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     let visible = |p: Vec3, slack: f64| kept(p) && (through || wireframe || hidden_from.is_none_or(|t| (p - o).dot(d) <= t + slack));
     // Vertices (edge end points) and edges, within 7 and 6 points of the cursor.
     let reach = crate::pick_index::reach(proj, pos, 8.0);
+    // A joint origin takes an edge only right under the pointer: inside a face the face is meant (#18255).
+    let edge_reach = if app.dialog.as_ref().is_some_and(crate::dialogs_assembly::takes_snaps) { JOINT_EDGE_REACH } else { 6.0 };
     let mut bestv = Near::new(all);
     let mut beste = Near::new(all);
     for (i, b) in st.bodies.iter().enumerate() {
@@ -4411,7 +4413,7 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
             let key = (dd, !seen);
             // A section cap still hides kept material; only ordinary faces permit hidden edges.
             let hidden = hidden_edges && kept(point) && cap.is_none_or(|t| (point - o).dot(d) <= t + body_slack);
-            if dd < 6.0 && beste.wants(key) && (seen || hidden) {
+            if dd < edge_reach && beste.wants(key) && (seen || hidden) {
                 beste.offer(key, Hit::Edge { body: b.name.clone(), index: ei, mid: at(polyline_mid(e)), point });
             }
         }
@@ -5044,6 +5046,9 @@ fn list_hover(app: &mut SolveApp) {
         app.viewport.hover = sel_hit(app, item);
     }
 }
+
+/// How far from the pointer (screen points) an edge is still taken by a joint origin input.
+pub(crate) const JOINT_EDGE_REACH: f32 = 3.0;
 
 /// What lights up under the pointer while a tool runs: the nearest hit its click takes.
 fn tool_hover(app: &SolveApp, hits: &[Hit]) -> Option<Hit> {
@@ -17570,6 +17575,53 @@ mod tests {
             h.call("ui.drag", json!({"x0":800,"y0":500,"x1":1020,"y1":500,"button":"right","shift":true,"steps":40}));
             assert!((h.app.cam.yaw - std::f64::consts::FRAC_PI_2).abs() < 1e-6, "{preset}: {:?}", h.app.cam);
         }
+    }
+
+    /// #19477: pointer moves over a still view ask for no frame, so the frame a middle press comes
+    /// in carries all the motion since the last one. The first step of the orbit is the drag's own
+    /// motion from where the button went down, not the way the pointer came there.
+    #[test]
+    fn a_middle_press_after_unseen_pointer_motion_does_not_jump_the_orbit() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.nav = "blender".into();
+        h.call("ui.view", json!({"view":"front"}));
+        let from = h.app.viewport.rect.unwrap().center();
+        h.frame_with(vec![egui::Event::PointerMoved(from)]);
+        let start = h.app.cam;
+        // The pointer travelled a long way with no frame, then the button went down in the same one.
+        let at = from + vec2(300.0, 120.0);
+        let press = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Middle, pressed, modifiers: egui::Modifiers::NONE };
+        h.frame_with(vec![egui::Event::PointerMoved(at), press(true)]);
+        assert!(
+            (h.app.cam.yaw - start.yaw).abs() < 1e-9 && (h.app.cam.pitch - start.pitch).abs() < 1e-9,
+            "the press turned the view: {:?}",
+            h.app.cam
+        );
+        h.frame_with(vec![egui::Event::PointerMoved(at + vec2(4.0, 0.0))]);
+        let mut expected = start;
+        expected.orbit(4.0, 0.0);
+        assert!((h.app.cam.yaw - expected.yaw).abs() < 1e-6, "the drag turns by its own 4 points: {:?}", h.app.cam);
+        h.frame_with(vec![press(false)]);
+    }
+
+    /// #19477 review: a second button pressed while a middle orbit is running does not reset the
+    /// orbit's motion: that frame still turns the view by its own movement.
+    #[test]
+    fn a_second_button_pressed_during_an_orbit_keeps_that_frames_motion() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.nav = "blender".into();
+        h.call("ui.view", json!({"view":"front"}));
+        let at = h.app.viewport.rect.unwrap().center();
+        let button = |button, pressed, pos| egui::Event::PointerButton { pos, button, pressed, modifiers: egui::Modifiers::NONE };
+        h.frame_with(vec![egui::Event::PointerMoved(at), button(egui::PointerButton::Middle, true, at)]);
+        h.frame_with(vec![egui::Event::PointerMoved(at + vec2(4.0, 0.0))]);
+        let before = h.app.cam;
+        let next = at + vec2(10.0, 0.0);
+        h.frame_with(vec![egui::Event::PointerMoved(next), button(egui::PointerButton::Primary, true, next)]);
+        let mut expected = before;
+        expected.orbit(6.0, 0.0);
+        assert!((h.app.cam.yaw - expected.yaw).abs() < 1e-6, "the frame's 6 points still turn the view: {:?}", h.app.cam);
+        h.frame_with(vec![button(egui::PointerButton::Primary, false, next), button(egui::PointerButton::Middle, false, next)]);
     }
 
     /// Shift let go partway through a Shift+middle orbit (Fusion): the rest of the drag still

@@ -789,7 +789,6 @@ pub(super) fn sheet_settings(app: &mut SolveApp, ui: &mut egui::Ui) {
 
             next_sheet_section(ui, "ui.drawing_panel.screen");
             ui_kit::row(ui, tr("ui.sheet_page.colour"), |ui| crate::drawing_sheet_page::colour_choice(app, ui));
-            ui_kit::row(ui, tr("ui.drawing_backdrop.label"), |ui| crate::drawing_sheet_page::backdrop_choice(app, ui));
         });
         ui.add_space(t.space_8);
         ui.separator();
