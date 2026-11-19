@@ -1872,24 +1872,31 @@ fn other_trims_bound(
 }
 
 /// Not upstream (#18166): raises `e`'s tolerance to cover the proved distance of its curve to
-/// the surface of each face of `faces` that a join just gave it (`GlueEdges`: the faces of the
-/// edge it deleted), where none of `e`'s uses on that face holds a UV trim. The join keeps
-/// `e`'s curve for the deleted edge's faces and raises the tolerance to the two curves'
-/// distance only (`UpdateObjectTolerance`), which does not cover that curve's distance to
-/// those faces: the deleted edge's own tolerance covered its own curve there (`heal.stitch_p2`
-/// cov_tjunc8: a face joined 2.43e-4 from the kept curve under a tolerance of 2.18e-4). A face
-/// with no finite bound, or whose bound is within the tolerance, is left as upstream leaves it.
+/// the surface of each face of `faces` that a stitch's joins gave it (`GlueEdges`: the faces
+/// of the edges they deleted), where none of `e`'s uses on that face holds a UV trim (a trim
+/// raised the tolerance for its own face when it was set). The stitch runs this when its
+/// operation ends, on the final trims, faces and curve
+/// ([`crate::heal::stitch::p1::Stitch::finish_joins`]). A join keeps `e`'s curve for the
+/// deleted edge's faces and raises the tolerance to the two curves' distance only
+/// (`UpdateObjectTolerance`), which does not cover that curve's distance to those faces: the
+/// deleted edge's own tolerance covered its own curve there (`heal.stitch_p2` cov_tjunc8: a
+/// face joined 2.43e-4 from the kept curve under a tolerance of 2.18e-4). A face with no
+/// finite bound, or whose bound is within the tolerance, is left as upstream leaves it.
 ///
-/// `reach` bounds the same distance another way: the deleted edge's tolerance covered its
-/// faces, so the kept curve is within its proved distance to the deleted curve plus that
-/// tolerance of each of them (`edit_glue_edges`, infinite where the two curves have no
-/// bound). The tolerance is raised to the smaller of the two bounds: the face's alone can be
-/// the enclosure's slack (`primitive.api_primitives` gen0353: a face 1.2e-7 from the kept
-/// curve by samples, bounded at 4.76e4 where its nearest points are not followed), and
-/// `reach` alone holds where the face's is not enclosed. The join's own distance is no
-/// bound: the stitch samples it (five or ten points, none for two lines), and on cov_tjunc8
-/// it is 0 under a deleted-edge tolerance of 1e-5, where the kept curve is 2.43e-4 from the
-/// face.
+/// Each face comes with a second bound on the same distance, from the join: the two curves'
+/// proved distance plus the deleted curve's bound on the face (its edge's tolerance), infinite
+/// where it does not hold. The tolerance is raised to the smaller of the two bounds: the
+/// face's alone can be the enclosure's slack (`primitive.api_primitives` gen0353: a face
+/// 1.2e-7 from the kept curve by samples, bounded at 4.76e4 where its nearest points are not
+/// followed), and the join's alone holds where the face's is not enclosed. The join's own
+/// distance is no bound: the stitch samples it (five or ten points, none for two lines), and
+/// on cov_tjunc8 it is 0 under a deleted-edge tolerance of 1e-5, where the kept curve is
+/// 2.43e-4 from the face.
+///
+/// After a raise, the faces' own bounds are settled at the raised tolerance
+/// ([`settle_face_bounds`]): each bound is cut to a thousandth of the fit, and the fit after
+/// the raise is the raised tolerance, at which a bound can come out a rounding above the one
+/// it raised to, leaving the edge short of the face by its own measure.
 ///
 /// # Errors
 ///
@@ -1898,8 +1905,7 @@ pub(crate) fn cover_joined_faces(
     k: &Kernel,
     b: &mut Brep,
     e: EdgeId,
-    faces: &[FaceId],
-    reach: f64,
+    faces: &[(FaceId, f64)],
 ) -> Result<()> {
     let mut trimmed: Vec<FaceId> = Vec::new();
     for &x in &b.edge(e)?.edgeuses {
@@ -1913,7 +1919,10 @@ pub(crate) fn cover_joined_faces(
         }
     }
     let mut done: Vec<FaceId> = Vec::new();
-    for &f in faces {
+    // (the faces whose own bound is below their join bound, and whether any face raised)
+    let mut settle: Vec<(FaceId, f64)> = Vec::new();
+    let mut raised = false;
+    for &(f, reach) in faces {
         if done.contains(&f) || trimmed.contains(&f) {
             continue;
         }
@@ -1925,11 +1934,146 @@ pub(crate) fn cover_joined_faces(
         let fit = fit_tolerance(k, b, e)?;
         // (the smaller of the two bounds; `reach` where the face's is not enclosed or passes it)
         let gap = match edge_face_gap_bound(k, b, e, f, fit, [tol, reach])? {
-            Some(gap) if gap.is_finite() => gap.min(reach),
+            Some(gap) if gap.is_finite() && gap < reach => {
+                settle.push((f, reach));
+                gap
+            }
             _ => reach,
         };
         if gap.is_finite() && gap > tol {
             crate::topology::edge::set_tolerance(b, e, gap, true, true)?;
+            raised = true;
+        }
+    }
+    if raised {
+        settle_face_bounds(k, b, e, &settle)?;
+    }
+    Ok(())
+}
+
+/// The faces of `e` none of whose uses of `e` holds a UV trim, in the order of the edge's uses.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id.
+fn trimless_faces(b: &Brep, e: EdgeId) -> Result<Vec<FaceId>> {
+    let mut faces: Vec<(FaceId, bool)> = Vec::new();
+    for &x in &b.edge(e)?.edgeuses {
+        let Some(fu) = faceuse(b, x)? else {
+            continue;
+        };
+        let Some(f) = faceuse_face(b, fu)? else {
+            continue;
+        };
+        let trimmed = b.edgeuse(x)?.uv_trim_curve.is_some();
+        match faces.iter_mut().find(|(g, _)| *g == f) {
+            Some(slot) => slot.1 |= trimmed,
+            None => faces.push((f, trimmed)),
+        }
+    }
+    Ok(faces
+        .into_iter()
+        .filter(|(_, trimmed)| !trimmed)
+        .map(|(f, _)| f)
+        .collect())
+}
+
+/// Not upstream (#18166): of each edge of `edges`, the faces it holds no UV trim on whose
+/// proved distance from its curve, bounded at its tolerance ([`edge_face_gap_bound`] with the
+/// tolerance as fit and target), is within that tolerance. [`keep_trimless_faces_covered`]
+/// keeps them covered across an edit of the faces' surfaces.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; those of [`edge_face_gap_bound`].
+pub(crate) fn covered_trimless_faces(
+    k: &Kernel,
+    b: &Brep,
+    edges: &[EdgeId],
+) -> Result<Vec<(EdgeId, FaceId)>> {
+    let mut out = Vec::new();
+    for &e in edges {
+        let tol = b.edge(e)?.tolerance;
+        for f in trimless_faces(b, e)? {
+            if matches!(edge_face_gap_bound(k, b, e, f, tol, [tol, tol])?, Some(g) if g <= tol) {
+                out.push((e, f));
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Not upstream (#18166): keeps each edge of `covered` ([`covered_trimless_faces`]) covering
+/// its face after an edit that rewrote the face's surface without moving it
+/// (`OrientTrimmedSurfaces` reverses a surface: its knots are reflected, with rounding), where
+/// the edge is still on the face and still holds no trim there: the face's bound, which
+/// comes out a rounding apart on the rewritten surface (`heal.stitch_p1` cov_tjunc11_stitch
+/// edge 12: 1.0687382852519145e-5 before the stitch's orientation, 1.0687382852519804e-5
+/// after it), is settled at the edge's tolerance ([`settle_face_bounds`]), up to twice the
+/// tolerance the edge had (a bound past that is no rounding, and is left as upstream leaves
+/// it).
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; those of [`edge_face_gap_bound`].
+pub(crate) fn keep_trimless_faces_covered(
+    k: &Kernel,
+    b: &mut Brep,
+    covered: &[(EdgeId, FaceId)],
+) -> Result<()> {
+    let mut edges: Vec<EdgeId> = Vec::new();
+    for &(e, _) in covered {
+        if !edges.contains(&e) {
+            edges.push(e);
+        }
+    }
+    for e in edges {
+        if b.edge(e).is_err() {
+            continue;
+        }
+        let now = trimless_faces(b, e)?;
+        let cap = 2.0 * b.edge(e)?.tolerance;
+        let faces: Vec<(FaceId, f64)> = covered
+            .iter()
+            .filter(|&&(x, f)| x == e && now.contains(&f))
+            .map(|&(_, f)| (f, cap))
+            .collect();
+        settle_face_bounds(k, b, e, &faces)?;
+    }
+    Ok(())
+}
+
+/// The most rounds [`settle_face_bounds`] takes.
+const SETTLE_ROUNDS: usize = 8;
+
+/// Not upstream (#18166): after a raise of `e`, makes its tolerance cover each face of
+/// `faces` (each with a bound past which it is not raised) by the face's own bound, as that
+/// bound
+/// comes out at the raised tolerance: the bound is cut to a thousandth of the fit, and the
+/// fit after the raise is the raised tolerance ([`edge_face_gap_bound`] with the tolerance as
+/// both fit and target), at which a bound can come out a rounding above the one found before
+/// (the bisection stops at a coarser floor). Raised again to such a bound (below the face's
+/// join bound, or the cap [`keep_trimless_faces_covered`] gives) for at most
+/// [`SETTLE_ROUNDS`] rounds; each bound is proved, so each raise covers a proved distance.
+///
+/// # Errors
+///
+/// Those of [`edge_face_gap_bound`].
+fn settle_face_bounds(k: &Kernel, b: &mut Brep, e: EdgeId, faces: &[(FaceId, f64)]) -> Result<()> {
+    for _ in 0..SETTLE_ROUNDS {
+        let mut raised = false;
+        for &(f, reach) in faces {
+            let tol = b.edge(e)?.tolerance;
+            match edge_face_gap_bound(k, b, e, f, tol, [tol, f64::INFINITY])? {
+                Some(again) if again.is_finite() && again > tol && again < reach => {
+                    crate::topology::edge::set_tolerance(b, e, again, true, true)?;
+                    raised = true;
+                }
+                _ => {}
+            }
+        }
+        if !raised {
+            break;
         }
     }
     Ok(())

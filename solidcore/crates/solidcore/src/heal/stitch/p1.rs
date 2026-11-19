@@ -28,6 +28,11 @@
 //! | [`api_stitch_advanced`], [`AdvancedStitch`], [`AdvancedStitchOptions`] | `SmApiStitchAdvanced` |
 //!
 //! Deviations:
+//! - Not upstream (#18166): each edge join leaves a cover pending, and when
+//!   `DoStitching`, `StitchEdgesOfVertices` or `DoSimpleFaceStitch` ends, every kept edge's
+//!   tolerance is raised to cover its curve's proved distance to each face its joins gave it
+//!   that holds none of its trims, on the final faces, trims and curve
+//!   (`Stitch::finish_joins`). Upstream's join covers only the two curves' distance.
 //! - Out-params become return values. The coincident objects of
 //!   `SelectTopologyToKeep` are [`EntityRef`]s (upstream `SmTopology*`, never null
 //!   here); a null `SmBrep*`/`SmFace*` of the API entry points is `None`.
@@ -931,6 +936,41 @@ pub struct Stitch<'c> {
     /// enclosed, and the tolerance growth its editing applied (not upstream,
     /// solidcore#2975). Nothing else changes.
     pub report_gaps: Option<Vec<ClosedGap>>,
+    /// The covers the running operation's joins left pending (not upstream, #18166;
+    /// [`Stitch::finish_joins`]).
+    pending_covers: Vec<JoinCover>,
+}
+
+/// Not upstream (#18166): the cover one join leaves pending until its operation ends
+/// ([`Stitch::finish_joins`]): the faces the join gave the kept edge, each with a proved
+/// bound on its distance from the kept curve as it was at the join.
+#[derive(Debug, Clone)]
+struct JoinCover {
+    /// The kept edge, or a piece split from it.
+    edge: EdgeId,
+    /// The kept edge's curve at the join (its kind's `Debug` text; `None` without one).
+    curve: Option<String>,
+    /// The kept edge's interval at the join.
+    interval: crate::geom::extent1d::Extent1d,
+    /// Each face the join gave the edge, with the bound (infinite where none holds).
+    faces: Vec<(FaceId, f64)>,
+}
+
+impl JoinCover {
+    /// Whether the bounds still hold for the edge: its curve is the one they were taken on
+    /// and its interval lies inside theirs, so its points are among those they bound.
+    fn holds_on(&self, b: &Brep) -> Result<bool> {
+        let rec = b.edge(self.edge)?;
+        Ok(self.curve.is_some()
+            && curve_shape(rec.curve.as_ref()) == self.curve
+            && rec.interval.min() >= self.interval.min()
+            && rec.interval.max() <= self.interval.max())
+    }
+}
+
+/// A curve's kind as `Debug` text, which compares its every defining value exactly.
+fn curve_shape(curve: Option<&Curve>) -> Option<String> {
+    curve.map(|c| format!("{:?}", c.kind()))
 }
 
 impl Stitch<'_> {
@@ -1080,26 +1120,12 @@ impl<'c> Stitch<'c> {
         delete: EdgeId,
         inside: Option<&[FaceuseId]>,
     ) -> Result<()> {
-        // (the faces the join gives `keep`, and a bound on their distance from its curve: the
-        // two curves' proved distance plus the deleted edge's tolerance, which covered them;
-        // not upstream, #18166)
-        let (joined, reach) = if keep == delete {
-            (Vec::new(), f64::INFINITY)
+        // (not upstream, #18166: the join's pending cover, taken before the glue deletes
+        // `delete`; see `JoinCover`)
+        let pending = if keep == delete {
+            None
         } else {
-            let (kr, dr) = (b.edge(keep)?, b.edge(delete)?);
-            let apart = match (kr.curve.as_ref(), dr.curve.as_ref()) {
-                (Some(kc), Some(dc)) => crate::boolean::api_brep::coincidence_bound(
-                    kc,
-                    &kr.interval,
-                    dc,
-                    &dr.interval,
-                ),
-                _ => None,
-            };
-            let reach = apart.map_or(f64::INFINITY, |h| {
-                (h + dr.tolerance) * (1.0 + 4.0 * f64::EPSILON)
-            });
-            (edge::faces(b, delete, None)?, reach)
+            Some(self.join_cover(b, keep, delete)?)
         };
         // (an edit context's glue searches at each closed shell, as upstream)
         if let Some(edits) = self.edits.as_deref_mut() {
@@ -1107,15 +1133,136 @@ impl<'c> Stitch<'c> {
         } else {
             glue_edges_searching(k, b, keep, orientation, dist, nest, half, delete, inside)?;
         }
-        // Not upstream (#18166): the join keeps `keep`'s curve for the deleted edge's faces,
-        // which the deleted edge's own tolerance covered; the tolerance is raised to cover the
-        // kept curve's distance to each of them that holds no trim, the smaller of its proved
-        // bound and `reach` ([`crate::topology::edgeuse::p3::cover_joined_faces`]). The glue is done: a cover
-        // that fails leaves the tolerance as upstream leaves it.
-        ignored(crate::topology::edgeuse::p3::cover_joined_faces(
-            k, b, keep, &joined, reach,
-        ))?;
+        self.pending_covers.extend(pending);
         Ok(())
+    }
+
+    /// Not upstream (#18166): the cover a join of `delete` into `keep` leaves pending. The
+    /// join keeps `keep`'s curve for the deleted edge's faces and raises the tolerance to the
+    /// two curves' distance only (`UpdateObjectTolerance`), which need not cover that curve's
+    /// distance to those faces. Each face gets a proved bound on that distance: the two
+    /// curves' Hausdorff distance (`coincidence_bound`) plus the deleted curve's own bound on
+    /// the face, which is the deleted edge's tolerance (the tolerance covers its faces), or,
+    /// for a face an earlier join gave the deleted edge and whose cover is still pending,
+    /// that join's bound, while the deleted edge's curve is still the one it was taken on
+    /// (infinite otherwise: the tolerance need not cover such a face).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::NotFound`] for a dangling id.
+    fn join_cover(&self, b: &Brep, keep: EdgeId, delete: EdgeId) -> Result<JoinCover> {
+        let (kr, dr) = (b.edge(keep)?, b.edge(delete)?);
+        let apart = match (kr.curve.as_ref(), dr.curve.as_ref()) {
+            (Some(kc), Some(dc)) => {
+                crate::boolean::api_brep::coincidence_bound(kc, &kr.interval, dc, &dr.interval)
+            }
+            _ => None,
+        };
+        let mut faces = Vec::new();
+        for f in edge::faces(b, delete, None)? {
+            let base = self.pending_bound(b, delete, f)?.unwrap_or(dr.tolerance);
+            let reach = apart.map_or(f64::INFINITY, |h| (h + base) * (1.0 + 4.0 * f64::EPSILON));
+            faces.push((f, reach));
+        }
+        Ok(JoinCover {
+            edge: keep,
+            curve: curve_shape(kr.curve.as_ref()),
+            interval: kr.interval,
+            faces,
+        })
+    }
+
+    /// Not upstream (#18166): the smallest bound a pending cover holds for the distance of
+    /// `e`'s curve from face `f`, where one holds `f` for `e` (infinite where none of those
+    /// is still taken on `e`'s curve); `None` where no pending cover holds `f` for `e`.
+    fn pending_bound(&self, b: &Brep, e: EdgeId, f: FaceId) -> Result<Option<f64>> {
+        let mut bound = None;
+        for cover in self.pending_covers.iter().filter(|c| c.edge == e) {
+            let Some(&(_, reach)) = cover.faces.iter().find(|(g, _)| *g == f) else {
+                continue;
+            };
+            let reach = if cover.holds_on(b)? {
+                reach
+            } else {
+                f64::INFINITY
+            };
+            bound = Some(bound.map_or(reach, |r: f64| r.min(reach)));
+        }
+        Ok(bound)
+    }
+
+    /// Not upstream (#18166): a split of `e` into `pieces` gives each piece `e`'s pending
+    /// covers. A piece's curve is checked against the one each cover was taken on when the
+    /// cover runs ([`JoinCover::holds_on`]).
+    fn split_pending_covers(&mut self, e: EdgeId, pieces: [Option<EdgeId>; 2]) {
+        let of_e: Vec<JoinCover> = self
+            .pending_covers
+            .iter()
+            .filter(|c| c.edge == e)
+            .cloned()
+            .collect();
+        for piece in pieces.into_iter().flatten().filter(|&p| p != e) {
+            self.pending_covers
+                .extend(of_e.iter().cloned().map(|c| JoinCover { edge: piece, ..c }));
+        }
+    }
+
+    /// Not upstream (#18166): runs the covers the operation's joins left pending, on the
+    /// final trims and faces: each live edge's tolerance is raised to cover the proved
+    /// distance of its curve from each face a join gave it that holds none of its trims
+    /// ([`crate::topology::edgeuse::p3::cover_joined_faces`]). A trim set or fitted after the
+    /// join raised the tolerance for its own face when it was set, so only trimless faces
+    /// are covered here, against the faces and curve the operation ends with. `outcome` is
+    /// the operation's; after a failure the covers still run (the joins made stand), unless
+    /// it was cancelled or unported, and the failure is returned.
+    ///
+    /// # Errors
+    ///
+    /// `outcome`'s; [`SolidError::NotFound`] for a dangling id; the covers' unported and
+    /// cancelled statuses.
+    pub(crate) fn finish_joins<T>(
+        &mut self,
+        k: &Kernel,
+        b: &mut Brep,
+        outcome: Result<T>,
+    ) -> Result<T> {
+        let pending = core::mem::take(&mut self.pending_covers);
+        if matches!(&outcome, Err(err) if err.is_unported_or_cancelled()) {
+            return outcome;
+        }
+        // (the faces of each live edge, each with its smallest bound still taken on the
+        // edge's curve, in the order the joins ran)
+        let mut edges: Vec<(EdgeId, Vec<(FaceId, f64)>)> = Vec::new();
+        for cover in &pending {
+            if b.edge(cover.edge).is_err() {
+                continue;
+            }
+            let holds = cover.holds_on(b)?;
+            let at = match edges.iter().position(|(e, _)| *e == cover.edge) {
+                Some(at) => at,
+                None => {
+                    edges.push((cover.edge, Vec::new()));
+                    edges.len() - 1
+                }
+            };
+            let Some((_, faces)) = edges.get_mut(at) else {
+                continue;
+            };
+            for &(f, reach) in &cover.faces {
+                let reach = if holds { reach } else { f64::INFINITY };
+                match faces.iter_mut().find(|(g, _)| *g == f) {
+                    Some(slot) => slot.1 = slot.1.min(reach),
+                    None => faces.push((f, reach)),
+                }
+            }
+        }
+        // (a cover that fails leaves the tolerance as upstream leaves it)
+        for (e, faces) in &edges {
+            ignored(crate::topology::edgeuse::p3::cover_joined_faces(
+                k, b, *e, faces,
+            ))?;
+        }
+        outcome
     }
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn edit_squeeze_edge(
@@ -1139,11 +1286,13 @@ impl<'c> Stitch<'c> {
         e: EdgeId,
         t: f64,
     ) -> Result<(Option<EdgeId>, Option<EdgeId>, Option<VertexId>)> {
-        if let Some(edits) = self.edits.as_deref_mut() {
-            edits.split_edge(k, b, e, t)
+        let split = if let Some(edits) = self.edits.as_deref_mut() {
+            edits.split_edge(k, b, e, t)?
         } else {
-            make_vertex_split_edge(k, b, e, t)
-        }
+            make_vertex_split_edge(k, b, e, t)?
+        };
+        self.split_pending_covers(e, [split.0, split.1]);
+        Ok(split)
     }
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn edit_brep_pre_edit(&mut self, k: &mut Kernel, b: &mut Brep) -> Result<()> {
@@ -1222,6 +1371,7 @@ impl<'c> Stitch<'c> {
             making_manifold_solid: true,
             remove_laminar_slivers: false,
             report_gaps: None,
+            pending_covers: Vec::new(),
         }
     }
 
@@ -1254,8 +1404,20 @@ impl<'c> Stitch<'c> {
     /// `SM_ERR` for empty or differently sized face lists, faces of another B-rep,
     /// faces whose vertices or edges do not pair up, and a selection or gap above
     /// tolerance; those of the curve evaluations, the callback and the gluing (`SER`).
-    #[allow(clippy::too_many_lines)] // one upstream routine
     pub fn do_simple_face_stitch(
+        &mut self,
+        k: &mut Kernel,
+        b: &mut Brep,
+        faces_to_keep: &[FaceId],
+        faces_to_delete: &[FaceId],
+    ) -> Result<SimpleFaceStitch> {
+        let outcome = self.do_simple_face_stitch_body(k, b, faces_to_keep, faces_to_delete);
+        self.finish_joins(k, b, outcome)
+    }
+
+    /// [`Stitch::do_simple_face_stitch`] before its joins' covers run.
+    #[allow(clippy::too_many_lines)] // one upstream routine
+    fn do_simple_face_stitch_body(
         &mut self,
         k: &mut Kernel,
         b: &mut Brep,
@@ -2166,8 +2328,19 @@ impl<'c> Stitch<'c> {
     ///
     /// Those of the curve evaluations and distances (`SER`); a failing glue, or an edge
     /// without B-rep, unless [`Stitch::ignore_problems`].
-    #[allow(clippy::too_many_lines)] // one upstream routine
     pub fn stitch_edges_of_vertices(
+        &mut self,
+        k: &mut Kernel,
+        b: &mut Brep,
+        verts: &[Option<VertexId>],
+    ) -> Result<EdgesOfVertices> {
+        let outcome = self.stitch_edges_of_vertices_body(k, b, verts);
+        self.finish_joins(k, b, outcome)
+    }
+
+    /// [`Stitch::stitch_edges_of_vertices`] before its joins' covers run.
+    #[allow(clippy::too_many_lines)] // one upstream routine
+    fn stitch_edges_of_vertices_body(
         &mut self,
         k: &mut Kernel,
         b: &mut Brep,
