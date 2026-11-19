@@ -206,6 +206,10 @@ pub struct Assembly<'t> {
     pub(crate) edges_turned: usize,
     /// Spline surfaces whose first and last control lines met within the tolerance, closed.
     pub(crate) splines_closed: usize,
+    /// Control points of spline curves and surfaces whose polygon turned back on itself within
+    /// the tolerance, moved onto their neighbours ([`crate::topology::unfolded_curve`],
+    /// [`crate::topology::unfolded_surface`]).
+    pub(crate) points_unfolded: usize,
     /// Edges whose tolerance was raised to the gap their curve has to a face's surface.
     pub(crate) raised_edges: HashSet<u32>,
 }
@@ -228,6 +232,7 @@ impl<'t> Assembly<'t> {
             loops_left_touching: Vec::new(),
             edges_turned: 0,
             splines_closed: 0,
+            points_unfolded: 0,
             raised_edges: HashSet::new(),
         }
     }
@@ -256,6 +261,15 @@ impl<'t> Assembly<'t> {
     /// gap (with margin) as its tolerance, and one too far off refuses the edge, named
     /// `edge #origin`.
     pub fn add_edge(&mut self, origin: u64, curve: BCurve, interval: [f64; 2], ends: [u32; 2]) -> R<(u32, bool)> {
+        // A control polygon that turns back on itself within the tolerance is a wiggle of the
+        // file's, taken out before anything is measured on the curve.
+        let curve = match crate::topology::unfolded_curve(&curve, self.tol) {
+            Some((unfolded, moved)) => {
+                self.points_unfolded += moved;
+                unfolded
+            }
+            None => curve,
+        };
         let eval = CurveEval::new(&curve).map_err(|m| format!("edge #{origin}: {m}"))?;
         let mut at = [Vec3::new(0.0, 0.0, 0.0); 2];
         for (slot, t) in at.iter_mut().zip(interval) {
@@ -330,7 +344,8 @@ impl<'t> Assembly<'t> {
     /// surface's natural normal; `outer` is the outer bound's index in `bounds` when the reader
     /// knows it (the pcurves decide otherwise, [`Assembly::finish`]); `forward` says the face's
     /// side is the natural normal. A spline surface whose first and last control lines meet
-    /// within the tolerance is closed on itself (noted). `origin` names the face.
+    /// within the tolerance is closed on itself (noted), and a control net that turns back on
+    /// itself within it is unfolded (noted). `origin` names the face.
     pub fn add_face(&mut self, origin: u64, surface: BSurface, bounds: Vec<Bound>, outer: Option<usize>, forward: bool) -> R<u32> {
         // A sphere bounded by its poles alone is the whole sphere, with a meridian for its seam.
         let bounds = match &surface {
@@ -348,6 +363,11 @@ impl<'t> Assembly<'t> {
             }
             None => surface,
         };
+        // A control net that turns back on itself within the tolerance, taken out likewise.
+        if let Some((unfolded, moved)) = crate::topology::unfolded_surface(&surface, self.tol) {
+            self.points_unfolded += moved;
+            surface = unfolded;
+        }
         if bounds.len() == 2
             && let BSurface::Sphere { frame, .. } = &mut surface
         {
@@ -615,6 +635,12 @@ impl<'t> Assembly<'t> {
             notes.push(format!(
                 "{} spline surfaces whose ends meet within {} mm closed on themselves (their end control lines made one)",
                 self.splines_closed, self.tol
+            ));
+        }
+        if self.points_unfolded > 0 {
+            notes.push(format!(
+                "{} control points of spline curves and surfaces whose polygon turned back on itself by less than {} mm moved onto their neighbours",
+                self.points_unfolded, self.tol
             ));
         }
         if self.inner_loops_turned > 0 {

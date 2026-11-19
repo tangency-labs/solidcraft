@@ -1028,6 +1028,29 @@ pub(super) fn lifted_bezier_block(lift: f64) -> String {
         .collect()
 }
 
+/// A tetrahedron whose spline face's control net steps back 0.5 µm along each of its sides
+/// (tests/step-regressions/net_steps_back_within_tolerance.step): the steps are taken out when it
+/// is read, so SMLib's check takes the part. As written the check failed it on "Bad NonMonotonic
+/// CPts", and every cut, join or fillet on it was refused (a Fusion 360 export's surface and edge
+/// curve did the same, by 0.4 to 0.9 µm).
+#[test]
+fn a_spline_face_whose_control_net_steps_back_within_the_tolerance_imports_checked() {
+    let text = include_str!("../../../../tests/step-regressions/net_steps_back_within_tolerance.step");
+    let imp = step_import(text).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert!(
+        imp.warnings.iter().any(|w| w.contains("2 control points of spline curves and surfaces whose polygon turned back")),
+        "{:?}",
+        imp.warnings
+    );
+    assert!(!imp.warnings.iter().any(|w| w.contains("needs repair")), "{:?}", imp.warnings);
+    let body = &imp.bodies[0].body;
+    assert!(imp.bodies[0].closed);
+    assert_eq!(crate::validation::failing_check(body).unwrap().map(|c| c.to_string()), None);
+    let m = measure(body).unwrap();
+    assert!(rel(m.volume, 1000.0 / 6.0) < 1e-6, "volume {}", m.volume);
+}
+
 #[test]
 fn a_part_smlibs_check_fails_is_reported_at_import_by_name() {
     // #17689: a part SMLib takes but its check fails came in silently, and every boolean on it
