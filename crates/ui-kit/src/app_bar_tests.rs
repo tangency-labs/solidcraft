@@ -1639,6 +1639,28 @@ fn the_view_switcher_lists_every_view() {
     assert_eq!(rig.press(rig.at("t:menu:as_tabs"), egui::PointerButton::Primary), vec![TabAction::SwitcherMenu { id: "as_tabs".into() }]);
 }
 
+/// The first extra view is reachable from a one-view design, including the default switcher preference.
+#[test]
+fn a_single_view_tab_opens_the_add_view_menu_with_either_tab_preference() {
+    for as_tabs in [false, true] {
+        for clear in [false, true] {
+            let mut rig = TabsRig::build(Some(as_tabs), true, None);
+            rig.single_view = true;
+            rig.clear = clear;
+            rig.frame(Vec::new());
+            let plus = solidcraft_ui_registry::rect_of("t:vnew").expect("a single-view design has an add-view button");
+            if !as_tabs || !clear {
+                let close = solidcraft_ui_registry::rect_of("t:close:0").expect("the plain tab retains its close button");
+                assert!(!plus.intersects(close), "add-view and close keep separate hit targets");
+            }
+            assert!(rig.press(plus.center(), egui::PointerButton::Primary).is_empty());
+            rig.frame(Vec::new());
+            rig.frame(Vec::new());
+            assert_eq!(rig.press(rig.at("t:menu:plus_render"), egui::PointerButton::Primary), vec![TabAction::PlusMenu { id: "plus_render".into() }]);
+        }
+    }
+}
+
 /// A click on the + opens its menu and leaves it open: two frames later its rows are drawn under the
 /// +'s left edge, and a row returns its id. A press in the frame that opened the menu is not a press
 /// outside it.
