@@ -163,6 +163,9 @@ pub static COMMANDS: &[CommandSpec] = &[
          `corner_relief` across; tear none, each bend's end is cut straight from the corner to its flange's end; default notch); \
          angle_display?: bend|included (how the DXF bend notes read the bend angles: the bend angle, default, or the included angle \
          left between the bend's sides, 180° less it; the bend table gives both, and a flange's `angle` is always the bend angle); \
+         thickness_tolerance? (± how far the stock's thickness may vary; the bend table then gives each allowance's range); \
+         finish?: text (the stock's finish, a label); finished_face?: front|back (the face that is up in the flat pattern and DXF: \
+         front, the default, is the side the up bends rise to; back turns the flat over); \
          active?: bool; delete?: bool; material?: text (the material the rule is for, a label saved with it); \
          gauge?: with material, a gauge of the standard library (sheet.rule_library): the rule takes its thickness and keeps its own bend radius; \
          its K-factor is the bend model's estimate at the rule's R/T for bend_method?: air|bottoming|coining (default air), said in notes, \
@@ -1011,6 +1014,14 @@ fn rules(s: &mut Session, p: &Value) -> Result<Value> {
         let display = display.as_str().and_then(sheet::AngleDisplay::parse);
         rule.angle_display = display.ok_or_else(|| bad(cmd, "`angle_display` must be bend or included"))?.name().into();
     }
+    if let Some(face) = p.get("finished_face").filter(|v| !v.is_null()) {
+        let face = face.as_str().and_then(sheet::FinishedFace::parse);
+        rule.finished_face = face.ok_or_else(|| bad(cmd, "`finished_face` must be front or back"))?.name().into();
+    }
+    if let Some(finish) = p.get("finish").filter(|v| !v.is_null()) {
+        let finish = finish.as_str().map(str::trim).filter(|f| f.chars().count() <= 64 && !f.chars().any(char::is_control));
+        rule.finish = finish.ok_or_else(|| bad(cmd, "`finish` must be text of at most 64 characters on one line"))?.into();
+    }
     let (vals, _) = s.doc.param_values();
     let values = s.doc.rule_values(&vals, &rule).map_err(|e| bad(cmd, e.to_string()))?;
     let doc = s.doc_mut();
@@ -1211,10 +1222,34 @@ fn pocket_json(p: &solidcraft_doc::sheet::SheetPocket, t: f64) -> Value {
     "side": side, "depth_mm": p.z1-p.z0, "z0_mm": p.z0, "z1_mm": p.z1})
 }
 
+/// What a sheet's rule says of its stock for its flat (#18304): which face is up, and ± how far
+/// its thickness may vary (mm; 0 when not given, or when the rule no longer works out).
+struct Stock {
+    face: sheet::FinishedFace,
+    tolerance: f64,
+    finish: String,
+}
+
+fn stock(s: &Session, sk: &solidcraft_doc::SurfaceSheet) -> Stock {
+    let rule = s.doc.sheet_rule(Some(&sk.rule));
+    let (vals, _) = s.doc.param_values();
+    let tolerance = s.doc.rule_values(&vals, &rule).map_or(0.0, |v| v.thickness_tolerance);
+    Stock { face: sheet::FinishedFace::parse(&rule.finished_face).unwrap_or_default(), tolerance, finish: rule.finish.clone() }
+}
+
+/// A bend's allowance at the thinnest and the thickest the stock may be: θ(R + K·T) moves by
+/// θ·K for each mm of thickness.
+fn allowance_range(b: &solidcraft_doc::sheet::BendInfo, k: f64, tolerance: f64) -> [f64; 2] {
+    let d = b.angle_deg.to_radians().abs() * k * tolerance;
+    [b.allowance - d, b.allowance + d]
+}
+
 /// A converted body's flat as `sheet.flat_pattern` reports a sheet's, with how many of its panels are rolls
-/// and the largest stretch any panel's flat leaves.
-fn surface_flat_json(sk: &solidcraft_doc::SurfaceSheet) -> Value {
-    let sk = &sk.shown();
+/// and the largest stretch any panel's flat leaves. Laid out with the rule's finished face up; with a
+/// thickness tolerance, each bend gives its allowance at the thinnest and thickest stock too.
+fn surface_flat_json(sk: &solidcraft_doc::SurfaceSheet, stock: &Stock) -> Value {
+    let k = sk.k_factor;
+    let sk = &sk.shown_from(stock.face);
     let loops: Vec<Ring<Vec2>> = sk.regions.iter().map(|r| r.outer.polyline(1e-3)).collect();
     let size = loops.iter().fold(Aabb2::EMPTY, |b, l| b.union(&l.bounds())).size();
     let pt = |v: &Vec2| json!([v.x, v.y]);
@@ -1225,8 +1260,12 @@ fn surface_flat_json(sk: &solidcraft_doc::SurfaceSheet) -> Value {
         .bend_infos()
         .iter()
         .map(|b| {
-            json!({"bend": b.index, "angle_deg": b.angle_deg, "included_angle_deg": b.included_angle_deg(), "radius": b.radius, "direction": if b.up { "up" } else { "down" },
-                "allowance": b.allowance, "length": b.length, "start": pt(&b.start), "end": pt(&b.end)})
+            let mut row = json!({"bend": b.index, "angle_deg": b.angle_deg, "included_angle_deg": b.included_angle_deg(), "radius": b.radius, "direction": if b.up { "up" } else { "down" },
+                "allowance": b.allowance, "length": b.length, "start": pt(&b.start), "end": pt(&b.end)});
+            if stock.tolerance > 0.0 {
+                row["allowance_range"] = json!(allowance_range(b, k, stock.tolerance));
+            }
+            row
         })
         .collect();
     let bend_zones: Vec<Value> = sk
@@ -1266,6 +1305,16 @@ fn surface_flat_json(sk: &solidcraft_doc::SurfaceSheet) -> Value {
         "perforations": perforations, "bend_zones": bend_zones, "surfaces": true, "rolls": sk.rolls});
     if !bores.is_empty() {
         out["bores"] = Value::Array(bores);
+    }
+    // The stock, where the rule says more than its thickness (#18304).
+    if stock.tolerance > 0.0 {
+        out["thickness_tolerance"] = json!(stock.tolerance);
+    }
+    if !stock.finish.is_empty() {
+        out["finish"] = json!(stock.finish);
+    }
+    if stock.face == sheet::FinishedFace::Back {
+        out["finished_face"] = json!("back");
     }
     // Where stretches of a split edge bend to opposite sides, the blank is cut along their
     // junction: a cut with no width, from the bend line out, beside the outline.
@@ -1333,7 +1382,7 @@ fn flat_pattern(s: &mut Session, p: &Value) -> Result<Value> {
 pub(crate) fn flat_reply(s: &Session, body: Option<&str>, cmd: &str) -> Result<Value> {
     let sk = surfaces_named(s, body, cmd)?;
     sk.flat_matches_body()?;
-    Ok(surface_flat_json(&sk))
+    Ok(surface_flat_json(&sk, &stock(s, &sk)))
 }
 
 /// How the flat DXF writes the curves that are neither lines nor circular arcs.
@@ -1428,7 +1477,12 @@ fn bend_note(b: &solidcraft_doc::sheet::BendInfo, height: f64, display: sheet::A
 /// outline, so a program that follows the file's order cuts inside-out. Free-form curves as
 /// `o.curves` says.
 fn surface_dxf(s: &Session, sk: &solidcraft_doc::SurfaceSheet, o: &DxfOptions) -> Result<String> {
-    let sk = &sk.shown();
+    let stock = stock(s, sk);
+    // A perforation field's holes are laid out on the front's flat, and turned over with it.
+    let front = sk.shown();
+    let turn = |c: Vec2| if stock.face == sheet::FinishedFace::Back { Vec2::new(-c.x, c.y) } else { c };
+    let perforation = front.perforations.iter().flat_map(|p| front.perforation_holes(p).into_iter().map(move |c| (turn(c), p.diameter / 2.0))).collect();
+    let sk = &sk.shown_from(stock.face);
     let rule = s.doc.sheet_rule(Some(&sk.rule));
     let display = sheet::AngleDisplay::parse(&rule.angle_display).unwrap_or_default();
     let drawing = FlatDrawing {
@@ -1436,12 +1490,13 @@ fn surface_dxf(s: &Session, sk: &solidcraft_doc::SurfaceSheet, o: &DxfOptions) -
         regions: sk.regions.clone(),
         pockets: sk.pockets.clone(),
         letters: sheet::Letters::of(&sk.labels),
-        perforation: sk.perforations.iter().flat_map(|p| sk.perforation_holes(p).into_iter().map(|c| (c, p.diameter / 2.0))).collect(),
+        perforation,
         bends: sk.bend_infos(),
         rolls: sk.roll_lines.iter().map(|l| (l.start, l.end)).collect(),
         slits: sk.slits.iter().map(|[a, b]| (*a, *b)).collect(),
         display,
         thickness: sk.thickness,
+        stock: stock_note(sk.thickness, &stock),
     };
     drawing.dxf(o)
 }
@@ -1461,6 +1516,28 @@ struct FlatDrawing {
     slits: Vec<(Vec2, Vec2)>,
     display: sheet::AngleDisplay,
     thickness: f64,
+    /// What the bend notes say of the stock, when its rule says more than its thickness.
+    stock: Option<String>,
+}
+
+/// The stock's note for a DXF's bend notes (#18304): `T 1.52 ±0.08 BRUSHED, BACK FACE UP`, or
+/// none when the rule gives no tolerance, finish or back face.
+fn stock_note(thickness: f64, stock: &Stock) -> Option<String> {
+    if stock.tolerance <= 0.0 && stock.finish.is_empty() && stock.face == sheet::FinishedFace::Front {
+        return None;
+    }
+    let mut note = format!("T {}", compact(thickness));
+    if stock.tolerance > 0.0 {
+        note.push_str(&format!(" ±{}", compact(stock.tolerance)));
+    }
+    if !stock.finish.is_empty() {
+        note.push(' ');
+        note.push_str(&stock.finish.to_uppercase());
+    }
+    if stock.face == sheet::FinishedFace::Back {
+        note.push_str(", BACK FACE UP");
+    }
+    Some(note)
 }
 
 impl FlatDrawing {
@@ -1563,6 +1640,15 @@ impl FlatDrawing {
             if let Some(height) = o.bend_notes {
                 let layer = dxf_layer(&mut file, "BEND_NOTES", o.one_layer)?;
                 file.push(layer, bend_note(b, height, self.display), None)?;
+            }
+        }
+        // The stock's note under the flat, beside its bend notes.
+        if let (Some(height), Some(note)) = (o.bend_notes, &self.stock) {
+            let bounds = self.regions.iter().fold(Aabb2::EMPTY, |b, r| b.union(&r.outer.polyline(1e-3).bounds()));
+            if bounds.min.x.is_finite() && bounds.min.y.is_finite() {
+                let layer = dxf_layer(&mut file, "BEND_NOTES", o.one_layer)?;
+                let at = Vec2::new(bounds.min.x, bounds.min.y - height * 2.0);
+                file.push(layer, solidcraft_io::DxfShape::Text { at, height, angle_deg: 0.0, text: note.clone() }, None)?;
             }
         }
         if !self.perforation.is_empty() {
@@ -1736,16 +1822,20 @@ fn export_bend_table(s: &mut Session, p: &Value) -> Result<Value> {
     let format = str_(p, "format").map_or(Some(BendTableFormat::Csv), bend_table_format).ok_or_else(|| bad(cmd, "`format` must be csv or json"))?;
     let sk = surfaces_of(s, p, cmd)?;
     sk.flat_matches_body()?;
-    let bends = sk.shown().bend_infos();
+    let stock = stock(s, &sk);
+    let bends = sk.shown_from(stock.face).bend_infos();
     let text = if format == BendTableFormat::Json {
-        serde_json::to_string_pretty(&surface_flat_json(&sk)).map_err(|e| EngineError::Other(e.to_string()))?
+        serde_json::to_string_pretty(&surface_flat_json(&sk, &stock(s, &sk))).map_err(|e| EngineError::Other(e.to_string()))?
     } else {
         // Always quote text fields: body/rule names may include commas, quotes or newlines, or start
         // as a spreadsheet formula does.
         let quote = solidcraft_doc::csv::quoted;
+        // With a thickness tolerance, each bend's allowance at the thinnest and thickest stock too.
+        let ranged = stock.tolerance > 0.0;
         let mut csv =
-            "body,rule,thickness_mm,k_factor,bend,angle_deg,direction,radius_mm,allowance_mm,length_mm,start_x_mm,start_y_mm,end_x_mm,end_y_mm,included_angle_deg\r\n"
+            "body,rule,thickness_mm,k_factor,bend,angle_deg,direction,radius_mm,allowance_mm,length_mm,start_x_mm,start_y_mm,end_x_mm,end_y_mm,included_angle_deg"
                 .to_string();
+        csv.push_str(if ranged { ",allowance_min_mm,allowance_max_mm\r\n" } else { "\r\n" });
         for b in &bends {
             csv.push_str(&format!(
                 "{},{},{:.9},{:.9},{},{:.9},{},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9}\r\n",
@@ -1765,6 +1855,11 @@ fn export_bend_table(s: &mut Session, p: &Value) -> Result<Value> {
                 b.end.y,
                 b.included_angle_deg()
             ));
+            if ranged {
+                let [lo, hi] = allowance_range(b, sk.k_factor, stock.tolerance);
+                csv.truncate(csv.len() - 2);
+                csv.push_str(&format!(",{lo:.9},{hi:.9}\r\n"));
+            }
         }
         csv
     };

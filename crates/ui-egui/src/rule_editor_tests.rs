@@ -15,7 +15,10 @@ const SHEET_ROWS: &[&str] = &[
     "Corner Relief",
     "Hem Gap",
     "Flange Gap",
+    "Thickness Tolerance",
     "Angle Display",
+    "Surface Finish",
+    "Finished Face",
     "Active rule",
 ];
 const PLASTIC_ROWS: &[&str] = &[

@@ -40,10 +40,31 @@ struct Rule {
     /// The material the rule is for (#18304); empty when none.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     material: String,
+    /// ± how far the stock's thickness may vary, the stock's finish and its finished face
+    /// (#18304); each kept only when it says more than the default.
+    #[serde(default = "no_tolerance", skip_serializing_if = "is_no_tolerance")]
+    thickness_tolerance: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    finish: String,
+    #[serde(default = "front_face", skip_serializing_if = "is_front_face")]
+    finished_face: String,
     /// Values a newer version saved. They survive renaming and are never dropped silently: a rule
     /// that has them can't be recalled or overwritten here.
     #[serde(flatten)]
     unknown: BTreeMap<String, serde_json::Value>,
+}
+
+fn no_tolerance() -> String {
+    "0 mm".into()
+}
+fn is_no_tolerance(s: &str) -> bool {
+    matches!(s.trim(), "0 mm" | "0")
+}
+fn front_face() -> String {
+    "front".into()
+}
+fn is_front_face(s: &str) -> bool {
+    s.trim().eq_ignore_ascii_case("front")
 }
 
 fn valid_text(text: &str, max: usize) -> bool {
@@ -79,6 +100,7 @@ impl Rule {
     fn value(&self, key: &str) -> Option<&String> {
         Some(match key {
             "thickness" => &self.thickness,
+            "thickness_tolerance" => &self.thickness_tolerance,
             "k_factor" => &self.k_factor,
             "bend_radius" => &self.bend_radius,
             "relief_width" => &self.relief_width,
@@ -90,8 +112,8 @@ impl Rule {
         })
     }
 
-    fn expressions(&self) -> [&String; 8] {
-        [&self.thickness, &self.k_factor, &self.bend_radius, &self.relief_width, &self.relief_depth, &self.corner_relief, &self.hem_gap, &self.gap]
+    fn expressions(&self) -> [&String; 9] {
+        [&self.thickness, &self.k_factor, &self.bend_radius, &self.relief_width, &self.relief_depth, &self.corner_relief, &self.hem_gap, &self.gap, &self.thickness_tolerance]
     }
 
     fn sheet_rule(&self) -> SheetRule {
@@ -108,6 +130,9 @@ impl Rule {
             gap: self.gap.clone(),
             angle_display: self.angle_display.clone(),
             material: self.material.clone(),
+            thickness_tolerance: self.thickness_tolerance.clone(),
+            finish: self.finish.clone(),
+            finished_face: self.finished_face.clone(),
         }
     }
 
@@ -126,6 +151,9 @@ impl Rule {
             gap: rule.gap.clone(),
             angle_display: rule.angle_display.clone(),
             material: rule.material.clone(),
+            thickness_tolerance: rule.thickness_tolerance.clone(),
+            finish: rule.finish.clone(),
+            finished_face: rule.finished_face.clone(),
             unknown: BTreeMap::new(),
         };
         row.validate()?;
@@ -137,6 +165,12 @@ impl Rule {
     fn validate(&self) -> Result<(), &'static str> {
         if !valid_name(&self.name) {
             return Err(INVALID_NAME);
+        }
+        if self.finish.chars().count() > 64
+            || self.finish.chars().any(char::is_control)
+            || !matches!(self.finished_face.trim().to_ascii_lowercase().as_str(), "front" | "back")
+        {
+            return Err(INVALID_VALUES);
         }
         if self.material.chars().count() > MAX_NAME || self.material.chars().any(char::is_control) {
             return Err(INVALID_VALUES);
@@ -163,7 +197,7 @@ impl Rule {
     /// The rule the manager shows, under `name`. The design must accept it as the manager's OK
     /// would: a positive thickness and a K factor from 0 to 1.
     fn capture(sm: &Sm, name: &str, doc: &Document) -> Result<Self, &'static str> {
-        let Sm::Rules { values, relief, angles, material, .. } = sm else {
+        let Sm::Rules { values, relief, angles, material, finish, face, .. } = sm else {
             return Err(INVALID_VALUES);
         };
         let (vals, _) = doc.param_values();
@@ -191,6 +225,10 @@ impl Rule {
             gap: length("gap")?,
             angle_display: ANGLE_DISPLAYS.get(*angles).copied().unwrap_or("bend").into(),
             material: material.trim().into(),
+            // Left empty, the stock has no tolerance given.
+            thickness_tolerance: if field(values, "thickness_tolerance").is_empty() { no_tolerance() } else { length("thickness_tolerance")? },
+            finish: finish.trim().into(),
+            finished_face: crate::dialogs_sheet::FINISHED_FACES.get(*face).copied().unwrap_or("front").into(),
             unknown: BTreeMap::new(),
         };
         rule.validate()?;
@@ -215,7 +253,7 @@ impl Rule {
         if !self.unknown.is_empty() {
             return Err("sheet.personal_rules.unsupported");
         }
-        let Sm::Rules { pick, name, values, relief, angles, active, loaded, material } = sm else {
+        let Sm::Rules { pick, name, values, relief, angles, active, loaded, material, finish, face } = sm else {
             return Err(INVALID_VALUES);
         };
         let rules = design_rules(doc);
@@ -225,6 +263,8 @@ impl Rule {
         *relief = RELIEF_SHAPES.iter().position(|s| s.eq_ignore_ascii_case(self.corner_relief_shape.trim())).unwrap_or(0);
         *angles = ANGLE_DISPLAYS.iter().position(|d| d.eq_ignore_ascii_case(self.angle_display.trim())).unwrap_or(0);
         material.clone_from(&self.material);
+        finish.clone_from(&self.finish);
+        *face = crate::dialogs_sheet::FINISHED_FACES.iter().position(|f| f.eq_ignore_ascii_case(self.finished_face.trim())).unwrap_or(0);
         *active = doc.sheet_rule(None).name == self.name || *pick >= rules.len();
         // The manager loads a rule's values only when its Rule box changes: these are now its own.
         *loaded = Some(*pick);

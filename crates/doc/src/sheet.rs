@@ -86,12 +86,65 @@ pub struct SheetRule {
     /// computed from it. Saved only when it is set (#18304).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub material: String,
+    /// How far the stock's thickness may be either side of `thickness` (±), as the mill or the
+    /// shop gives it. `0 mm` (the default) is none given; saved only when it is more.
+    #[serde(default = "rule_no_tolerance", skip_serializing_if = "is_no_tolerance")]
+    pub thickness_tolerance: String,
+    /// The stock's finish (`brushed`, `film`, `coated`), a label. Saved only when it is set.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub finish: String,
+    /// Which face of the sheet is the finished one, and so faces up in its flat pattern and DXF:
+    /// `front` (the face the flat is read from, the side its up bends rise to; the default, saved
+    /// as before) or `back` (the flat is turned over: mirrored, its up and down bends swapped).
+    #[serde(default = "rule_front_face", skip_serializing_if = "is_front_face")]
+    pub finished_face: String,
+}
+
+/// Which face of a sheet is the finished one (a rule's `finished_face`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FinishedFace {
+    /// The face the flat pattern is read from: the side its up bends rise to.
+    #[default]
+    Front,
+    /// The other face: the flat pattern is turned over to put it up.
+    Back,
+}
+
+impl FinishedFace {
+    pub fn parse(s: &str) -> Option<FinishedFace> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "front" => Some(FinishedFace::Front),
+            "back" => Some(FinishedFace::Back),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            FinishedFace::Front => "front",
+            FinishedFace::Back => "back",
+        }
+    }
+}
+
+fn rule_no_tolerance() -> String {
+    "0 mm".into()
+}
+fn is_no_tolerance(s: &str) -> bool {
+    s.trim() == "0 mm" || s.trim() == "0"
+}
+fn rule_front_face() -> String {
+    FinishedFace::Front.name().into()
+}
+fn is_front_face(s: &str) -> bool {
+    FinishedFace::parse(s) == Some(FinishedFace::Front)
 }
 
 impl SheetRule {
     /// The expressions, by field name (as commands name them), with the kind each evaluates to.
     /// (`corner_relief_shape` is a choice, not an expression.)
-    pub fn fields(&self) -> [(&'static str, &String, Kind); 8] {
+    pub fn fields(&self) -> [(&'static str, &String, Kind); 9] {
         [
             ("thickness", &self.thickness, Kind::Length),
             ("k_factor", &self.k_factor, Kind::Unitless),
@@ -101,11 +154,12 @@ impl SheetRule {
             ("corner_relief", &self.corner_relief, Kind::Length),
             ("hem_gap", &self.hem_gap, Kind::Length),
             ("gap", &self.gap, Kind::Length),
+            ("thickness_tolerance", &self.thickness_tolerance, Kind::Length),
         ]
     }
 
     /// The expressions to change, by field name, in the order of [`SheetRule::fields`].
-    pub fn fields_mut(&mut self) -> [(&'static str, &mut String); 8] {
+    pub fn fields_mut(&mut self) -> [(&'static str, &mut String); 9] {
         [
             ("thickness", &mut self.thickness),
             ("k_factor", &mut self.k_factor),
@@ -115,6 +169,7 @@ impl SheetRule {
             ("corner_relief", &mut self.corner_relief),
             ("hem_gap", &mut self.hem_gap),
             ("gap", &mut self.gap),
+            ("thickness_tolerance", &mut self.thickness_tolerance),
         ]
     }
 }
@@ -180,6 +235,9 @@ impl SheetRule {
             gap: rule_gap(),
             angle_display: rule_angle_display(),
             material: String::new(),
+            thickness_tolerance: rule_no_tolerance(),
+            finish: String::new(),
+            finished_face: rule_front_face(),
         }
     }
 
@@ -299,6 +357,9 @@ pub struct RuleValues {
     pub hem_gap: f64,
     pub gap: f64,
     pub angle_display: AngleDisplay,
+    /// ± the thickness may vary (mm); 0 when none is given.
+    pub thickness_tolerance: f64,
+    pub finished_face: FinishedFace,
 }
 
 /// A sheet rule's thickness is less than this (mm).
@@ -352,7 +413,13 @@ impl Document {
             gap: with_t(&r.gap, Kind::Length)?,
             angle_display: AngleDisplay::parse(&r.angle_display)
                 .ok_or_else(|| DocError::Invalid(format!("unknown bend angle display `{}` (bend or included)", r.angle_display)))?,
+            thickness_tolerance: with_t(&r.thickness_tolerance, Kind::Length)?,
+            finished_face: FinishedFace::parse(&r.finished_face)
+                .ok_or_else(|| DocError::Invalid(format!("unknown finished face `{}` (front or back)", r.finished_face)))?,
         };
+        if !(v.thickness_tolerance >= 0.0 && v.thickness_tolerance < v.thickness) {
+            return Err(DocError::Invalid("the thickness tolerance must be 0 or more and less than the thickness".into()));
+        }
         // Each value named on its own (#9625). A radius of 0 is refused (see [`KNIFE_EDGE`]).
         if !(0.0..=1.0).contains(&v.k_factor) {
             return Err(DocError::Invalid("the K-factor must be between 0 and 1".into()));

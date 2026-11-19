@@ -727,6 +727,72 @@ fn library_rules_keep_the_values_given_beside_them_and_refuse_what_the_library_l
     assert!(s.execute("sheet.rule_library", &json!({"material": "unobtainium"})).is_err());
 }
 
+/// A rule's finished face (#18304): the back turns the flat pattern over, so the finished face is
+/// up in the flat and the DXF. Every point's x is negated and every up bend reads down; the flat's
+/// size and each bend's allowance are the same.
+#[test]
+fn the_back_as_finished_face_turns_the_flat_over() {
+    let mut front = Session::default();
+    base(&mut front, 100.0, 60.0);
+    run(&mut front, "sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20}));
+    let a = flat(&mut front);
+    let mut back = Session::default();
+    run(&mut back, "sheet.manage_rules", json!({"name": "Brushed", "thickness": "2.5 mm", "finish": "brushed", "finished_face": "back", "active": true}));
+    base(&mut back, 100.0, 60.0);
+    run(&mut back, "sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20}));
+    let b = flat(&mut back);
+    assert_eq!(a["flat_size_mm"], b["flat_size_mm"]);
+    assert_eq!((a["bends"][0]["direction"].as_str(), b["bends"][0]["direction"].as_str()), (Some("up"), Some("down")));
+    assert_eq!(a["bends"][0]["allowance"], b["bends"][0]["allowance"]);
+    assert_eq!((b["finish"].as_str(), b["finished_face"].as_str()), (Some("brushed"), Some("back")), "{b}");
+    assert!(a.get("finished_face").is_none(), "{a}");
+    let xs = |v: &Value| -> Vec<i64> {
+        let mut out: Vec<i64> = v["outline"][0].as_array().into_iter().flatten().map(|p| (p[0].as_f64().unwrap_or(f64::NAN) * 1e6).round() as i64).collect();
+        out.sort_unstable();
+        out
+    };
+    let mut turned: Vec<i64> = xs(&a).into_iter().map(|x| -x).collect();
+    turned.sort_unstable();
+    assert_eq!(turned, xs(&b));
+    // The DXF draws the bend on BEND_DOWN, and its bend notes name the stock.
+    let d = run(&mut back, "sheet.export_dxf", json!({"bend_notes": true}));
+    let text = d["dxf"].as_str().unwrap_or_default();
+    assert!(dxf_has_layer(text, "BEND_DOWN") && !dxf_has_layer(text, "BEND_UP"), "{text}");
+    assert!(text.contains("T 2.5 BRUSHED, BACK FACE UP"), "{text}");
+    // Saved only when set: a front-face rule's design has none of it.
+    assert!(!front.doc.to_json().contains("finished_face") && back.doc.to_json().contains("\"finished_face\": \"back\""));
+}
+
+/// A rule's thickness tolerance (#18304): each bend's allowance θ(R + K·T) at the thinnest and
+/// the thickest stock, θ·K·tol either side, in the flat pattern and the bend table.
+#[test]
+fn a_thickness_tolerance_gives_each_allowance_its_range() {
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "T", "thickness": "2 mm", "k_factor": 0.4, "bend_radius": "2 mm", "thickness_tolerance": "0.1 mm", "active": true}));
+    base(&mut s, 100.0, 60.0);
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20}));
+    let f = flat(&mut s);
+    let ba = FRAC_PI_2 * (2.0 + 0.4 * 2.0);
+    let d = FRAC_PI_2 * 0.4 * 0.1;
+    let range = &f["bends"][0]["allowance_range"];
+    assert!((range[0].as_f64().unwrap_or(0.0) - (ba - d)).abs() < 1e-9 && (range[1].as_f64().unwrap_or(0.0) - (ba + d)).abs() < 1e-9, "{f}");
+    assert_eq!(f["thickness_tolerance"], 0.1);
+    let csv = run(&mut s, "sheet.export_bend_table", json!({}));
+    let text = csv["text"].as_str().unwrap_or_default();
+    assert!(text.lines().next().is_some_and(|h| h.ends_with("allowance_min_mm,allowance_max_mm")), "{text}");
+    // Refused: a tolerance as thick as the stock, a negative one, an unknown face, a long finish.
+    let refused = |s: &mut Session, p: Value| s.execute("sheet.manage_rules", &p).err().map(|e| e.to_string()).unwrap_or_else(|| panic!("{p} was accepted"));
+    assert!(refused(&mut s, json!({"name": "T", "thickness_tolerance": "2 mm"})).contains("thickness tolerance"));
+    assert!(refused(&mut s, json!({"name": "T", "thickness_tolerance": "-0.1 mm"})).contains("thickness tolerance"));
+    assert!(refused(&mut s, json!({"name": "T", "finished_face": "inside"})).contains("front or back"));
+    assert!(refused(&mut s, json!({"name": "T", "finish": "x".repeat(65)})).contains("64 characters"));
+    // Without a tolerance, the bend table reads as it did.
+    let mut plain = Session::default();
+    base(&mut plain, 100.0, 60.0);
+    run(&mut plain, "sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20}));
+    assert!(flat(&mut plain)["bends"][0].get("allowance_range").is_none());
+}
+
 /// Every bend keeps an inside radius. At 0 the inside fiber would close to nothing (all of its
 /// length compressed away), which no press brake or forming tool makes, and the bend could not be
 /// built either: its end wall would join a line on one face of the sheet to an arc on the other.

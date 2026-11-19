@@ -190,6 +190,9 @@ fn a_pack_round_trips_through_json_and_csv() {
     let mut odd = lib.rules[0].clone();
     odd.rule.name = "=1+1, \"quoted\"".into();
     odd.rule.material = "-steel".into();
+    odd.rule.thickness_tolerance = "0.08 mm".into();
+    odd.rule.finish = "brushed".into();
+    odd.rule.finished_face = "back".into();
     let pack = RulePack { rules: vec![odd.clone(), lib.rules[20].clone()], ..RulePack::default() };
     let csv = write_csv(&pack);
     let back = read(csv.as_bytes()).unwrap_or_else(|e| panic!("{e}\n{csv}"));
@@ -252,6 +255,8 @@ fn hostile_packs_are_refused_with_what_to_change() {
         (r#"{"format":"solidcraft-sheet-rules","rules":[7]}"#.into(), "an object"),
         (row(r#""k_factor":"0.4""#), "`thickness` is required"),
         (row(r#""thickness":"2 mm","hardness":"squishy""#), "soft, medium or hard"),
+        (row(r#""thickness":"2 mm","finished_face":"sideways""#), "front or back"),
+        (row(r#""thickness":"2 mm","thickness_tolerance":"3 mm""#), "thickness tolerance"),
         (row(r#""thickness":"2 mm","min_bend_radius":"0 mm""#), "more than 0"),
         (row(r#""thickness":"2 mm","min_bend_radius":"-1 mm""#), "more than 0"),
         (row(r#""thickness":"2 mm","min_bend_radius":"2""#), "no unit"),

@@ -485,6 +485,8 @@ fn rule_contract_keys_and_readers_match() {
             "corner_relief",
             "corner_relief_shape",
             "delete",
+            "finish",
+            "finished_face",
             "gap",
             "gauge",
             "hem_gap",
@@ -494,6 +496,7 @@ fn rule_contract_keys_and_readers_match() {
             "relief_depth",
             "relief_width",
             "thickness",
+            "thickness_tolerance",
         ],
     );
     for (text, valid) in [("bend", true), (" INCLUDED ", true), ("\u{2003}BeNd\u{2003}", true), ("outside", false)] {

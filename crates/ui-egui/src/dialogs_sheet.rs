@@ -33,7 +33,7 @@ const POSITION_LABELS: [&str; 5] = ["Inside", "Outside", "Middle", "Material Out
 const HEIGHT_FROM: [&str; 3] = ["outer", "inner", "tangent"];
 const HEIGHT_FROM_LABELS: [&str; 3] = ["Outer Sharp", "Inner Sharp", "Tangent"];
 /// Rule fields the manager edits (parameter name, label).
-pub(crate) const RULE_FIELDS: [(&str, &str); 8] = [
+pub(crate) const RULE_FIELDS: [(&str, &str); 9] = [
     ("thickness", "Thickness"),
     ("k_factor", "K Factor"),
     ("bend_radius", "Bend Radius"),
@@ -42,6 +42,7 @@ pub(crate) const RULE_FIELDS: [(&str, &str); 8] = [
     ("corner_relief", "Corner Relief"),
     ("hem_gap", "Hem Gap"),
     ("gap", "Flange Gap"),
+    ("thickness_tolerance", "Thickness Tolerance"),
 ];
 /// The corner relief shapes the manager offers (the rule's `corner_relief_shape`) and their labels.
 pub(crate) const RELIEF_SHAPES: [&str; 4] = ["notch", "round", "rectangular", "tear"];
@@ -50,6 +51,9 @@ const RELIEF_SHAPE_LABELS: [&str; 4] = ["Notch", "Round", "Rectangular", "Tear"]
 /// and their labels.
 pub(crate) const ANGLE_DISPLAYS: [&str; 2] = ["bend", "included"];
 const ANGLE_DISPLAY_LABELS: [&str; 2] = ["Bend", "Included"];
+/// Which face of the sheet is finished, up in its flat (the rule's `finished_face`), and labels.
+pub(crate) const FINISHED_FACES: [&str; 2] = ["front", "back"];
+const FINISHED_FACE_LABELS: [&str; 2] = ["Front", "Back"];
 /// The corner relief shapes an edge flange offers: the rule's (index 0, nothing of its own), then
 /// the shapes of `RELIEF_SHAPES` in order.
 /// Which way a further bend turns, against the bend before it.
@@ -175,6 +179,9 @@ crate::dialog_descriptor::dialog_descriptors! {
                 loaded: Option<usize>,
                 /// The material the rule is for (a label; #18304).
                 material: String,
+                /// The stock's finish (a label) and the finished face (index into `FINISHED_FACES`).
+                finish: String,
+                face: usize,
             },
             /// The flat pattern of the picked (or last) sheet body.
             FlatPattern {
@@ -261,6 +268,8 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
                     active: true,
                     loaded: None,
                     material: String::new(),
+                    finish: String::new(),
+                    face: 0,
                 },
                 vec![],
             )
@@ -600,7 +609,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
             rule_combo(app, ui, "sm_rec_rule", rule);
             enter |= hint_row(ui, "New Rule", new_rule, solidcraft_ui_text::tr_label("none: the rule above"));
         }
-        Sm::Rules { pick, name, values, relief, angles, active, loaded, material } => {
+        Sm::Rules { pick, name, values, relief, angles, active, loaded, material, finish, face } => {
             let rules = rule_list(app);
             crate::rule_editor::rule_editor! {
                 ui, "sm_rules", rules, pick, name, active, loaded;
@@ -617,11 +626,14 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                         crate::length_input::stored(&app.session.doc, &base.corner_relief),
                         crate::length_input::stored(&app.session.doc, &base.hem_gap),
                         crate::length_input::stored(&app.session.doc, &base.gap),
+                        crate::length_input::stored(&app.session.doc, &base.thickness_tolerance),
                     ];
                     *relief = RELIEF_SHAPES.iter().position(|s| s.eq_ignore_ascii_case(base.corner_relief_shape.trim())).unwrap_or(0);
                     *angles = ANGLE_DISPLAYS.iter().position(|d| d.eq_ignore_ascii_case(base.angle_display.trim())).unwrap_or(0);
                     *active = app.session.doc.sheet_rule(None).name == base.name || *pick >= rules.len();
                     material.clone_from(&base.material);
+                    finish.clone_from(&base.finish);
+                    *face = FINISHED_FACES.iter().position(|f| f.eq_ignore_ascii_case(base.finished_face.trim())).unwrap_or(0);
                 },
                 fields: {
                     crate::ui_kit::text_row(ui, "Material", material, "Material");
@@ -633,6 +645,8 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                         enter |= expr_row(ui, label, v);
                     }
                     choice_row(ui, "Angle Display", "sm_angle_display", angles, &ANGLE_DISPLAY_LABELS);
+                    crate::ui_kit::text_row(ui, "Surface Finish", finish, "Surface Finish");
+                    choice_row(ui, "Finished Face", "sm_finished_face", face, &FINISHED_FACE_LABELS);
                 }
             }
             if *pick < rules.len()
@@ -1211,7 +1225,7 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             }
             ("sheet.convert", p)
         }
-        Sm::Rules { pick, name, values, relief, angles, active, material, .. } => {
+        Sm::Rules { pick, name, values, relief, angles, active, material, finish, face, .. } => {
             let rules = rule_list(app);
             let fields = RULE_FIELDS.iter().map(|(key, _)| *key).zip(values);
             let mut p = crate::rule_editor::params(rules.get(*pick).map(|r| r.name.as_str()), name, *active, fields)?;
@@ -1220,6 +1234,22 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             let inherited = rules.get(*pick).map_or_else(|| app.session.doc.sheet_rule(None).material, |r| r.material.clone());
             if !material.trim().is_empty() || !inherited.is_empty() {
                 p["material"] = json!(material.trim());
+            }
+            // The stock's finish and finished face (#18304), sent as material is.
+            let base = rules.get(*pick).cloned().unwrap_or_else(|| app.session.doc.sheet_rule(None));
+            if !finish.trim().is_empty() || !base.finish.is_empty() {
+                p["finish"] = json!(finish.trim());
+            }
+            // No tolerance stays unsaid, as rules said it before there was one.
+            if p.get("thickness_tolerance").and_then(Value::as_str).is_some_and(|t| matches!(t.trim(), "0 mm" | "0"))
+                && matches!(base.thickness_tolerance.trim(), "0 mm" | "0")
+                && let Value::Object(m) = &mut p
+            {
+                m.remove("thickness_tolerance");
+            }
+            let chosen = FINISHED_FACES.get(*face).copied().unwrap_or("front");
+            if chosen != "front" || !base.finished_face.eq_ignore_ascii_case("front") {
+                p["finished_face"] = json!(chosen);
             }
             p["corner_relief_shape"] = json!(RELIEF_SHAPES.get(*relief).copied().unwrap_or("notch"));
             p["angle_display"] = json!(ANGLE_DISPLAYS.get(*angles).copied().unwrap_or("bend"));
@@ -1739,10 +1769,19 @@ impl FlatView {
         self.perforations.clear();
         // Bound overlay storage and drawing work, including designs with many fields.
         const MAX_HOLES: usize = 1_000_000;
-        let Some(sk) = state.surface_sheets.iter().find(|sk| sk.body == body).map(|sk| sk.shown()) else { return };
+        let Some(sk) = state.surface_sheets.iter().find(|sk| sk.body == body) else { return };
+        // Laid out on the front's flat, and turned over with it when the back is the finished face.
+        let back = solidcraft_engine::doc::sheet::FinishedFace::parse(&session.doc.sheet_rule(Some(&sk.rule)).finished_face)
+            == Some(solidcraft_engine::doc::sheet::FinishedFace::Back);
+        let sk = sk.shown();
         for field in sk.perforations.iter().filter(|f| f.diameter.is_finite() && f.diameter > 0.0) {
             let remaining = MAX_HOLES.saturating_sub(self.perforations.len());
-            self.perforations.extend(sk.perforation_holes(field).into_iter().take(remaining).map(|centre| (centre, field.diameter / 2.0)));
+            self.perforations.extend(
+                sk.perforation_holes(field)
+                    .into_iter()
+                    .take(remaining)
+                    .map(|c| (if back { Vec2::new(-c.x, c.y) } else { c }, field.diameter / 2.0)),
+            );
         }
     }
 

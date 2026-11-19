@@ -3958,6 +3958,46 @@ impl SurfaceSheet {
         out
     }
 
+    /// The flat pattern with `face` up (#18304): [`SurfaceSheet::shown`] for the front face, and
+    /// for the back that flat turned over about its y axis. Turned over, every point's x is
+    /// negated, each up bend is a down bend and the other way round, each bend's centre line is
+    /// turned round again (the mirror flips handedness: the material of the panel it was made on
+    /// stays on its left), and a pocket measured from the front is measured from the back.
+    /// Perforation outlines turn with it; the holes of a perforation field are laid out on the
+    /// front's flat and turned over by whoever reads them (see [`SurfaceSheet::perforation_holes`]).
+    pub fn shown_from(&self, face: crate::sheet::FinishedFace) -> SurfaceSheet {
+        let front = self.shown();
+        if face == crate::sheet::FinishedFace::Front {
+            return front;
+        }
+        let f = |p: Vec2| Vec2::new(-p.x, p.y);
+        let r = |g: &Region2| rigid_region(g, f);
+        let mut out = front.clone();
+        out.regions = front.regions.iter().map(r).collect();
+        out.slits = front.slits.iter().map(|[a, b]| [f(*a), f(*b)]).collect();
+        for b in &mut out.bends {
+            b.zone = r(&b.zone);
+            (b.start, b.end) = (f(b.end), f(b.start));
+            b.tabs = b.tabs.iter().map(r).collect();
+            b.up = !b.up;
+        }
+        for l in &mut out.roll_lines {
+            (l.start, l.end) = (f(l.end), f(l.start));
+        }
+        let t = front.thickness;
+        for p in &mut out.pockets {
+            p.region = r(&p.region);
+            (p.z0, p.z1) = (t - p.z1, t - p.z0);
+        }
+        for p in &mut out.perforations {
+            if let Some(o) = &mut p.outline {
+                *o = o.iter().map(r).collect();
+            }
+        }
+        out.labels = front.labels.iter().map(r).collect();
+        out
+    }
+
     /// The sheet laid out flat, from its flat (see [`flat_anchors`]): what every feature reads its
     /// flat pattern and its pieces from.
     pub fn develop(&self) -> std::result::Result<Development, solidcraft_develop::DevelopError> {

@@ -53,6 +53,9 @@ const COLUMNS: &[&str] = &[
     "hardness",
     "min_bend_radius",
     "thickness",
+    "thickness_tolerance",
+    "finish",
+    "finished_face",
     "k_factor",
     "bend_radius",
     "relief_width",
@@ -481,6 +484,15 @@ fn pack_rule(row: usize, fields: &[(&str, String)], skipped: &mut Skipped) -> Re
     if let Some(display) = get("angle_display") {
         rule.angle_display = AngleDisplay::parse(display).ok_or_else(|| fail("`angle_display` must be bend or included".into()))?.name().into();
     }
+    if let Some(finish) = get("finish") {
+        if !plain_label(finish, 64) {
+            return Err(fail("the finish must be at most 64 characters on one line".into()));
+        }
+        rule.finish = finish.into();
+    }
+    if let Some(face) = get("finished_face") {
+        rule.finished_face = crate::sheet::FinishedFace::parse(face).ok_or_else(|| fail("`finished_face` must be front or back".into()))?.name().into();
+    }
     let no_parameters = std::collections::BTreeMap::new();
     let values = crate::Document::default().rule_values(&no_parameters, &rule).map_err(|e| fail(e.to_string()))?;
     let pack_rule = PackRule { rule, gauge, chart, hardness, min_bend_radius, given, sources: Vec::new() };
@@ -583,6 +595,10 @@ fn rule_json(r: &PackRule) -> Value {
     }
     row.insert("corner_relief_shape".into(), json!(rule.corner_relief_shape));
     row.insert("angle_display".into(), json!(rule.angle_display));
+    if !rule.finish.is_empty() {
+        row.insert("finish".into(), json!(rule.finish));
+    }
+    row.insert("finished_face".into(), json!(rule.finished_face));
     if !r.sources.is_empty() {
         row.insert("source".into(), json!(r.sources));
     }
@@ -626,6 +642,8 @@ pub fn write_csv(pack: &RulePack) -> String {
                 "k_factor" if !r.given.k_factor => "",
                 "bend_radius" if !r.given.bend_radius => "",
                 "corner_relief_shape" => &rule.corner_relief_shape,
+                "finish" => &rule.finish,
+                "finished_face" => &rule.finished_face,
                 "angle_display" => &rule.angle_display,
                 key => rule.fields().into_iter().find(|(k, _, _)| *k == key).map_or("", |(_, text, _)| text.as_str()),
             }

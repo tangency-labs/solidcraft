@@ -714,6 +714,15 @@ pub struct ManageRulesParams {
     /// How DXF bend notes show angles: bend or included, ignoring case and surrounding blanks.
     /// Ignored when deleting.
     pub angle_display: Option<AngleDisplayParam>,
+    /// ± how far the stock's thickness may vary, 0 or more and less than the thickness (`0 mm`:
+    /// none given). Ignored when deleting.
+    pub thickness_tolerance: Option<LengthExpr>,
+    /// The stock's finish (brushed, film, coated), a label of at most 64 characters on one line;
+    /// empty clears it. Ignored when deleting.
+    pub finish: Option<String>,
+    /// The finished face, up in the flat pattern and DXF: front (the default, the side the up
+    /// bends rise to) or back (the flat turned over). Ignored when deleting.
+    pub finished_face: Option<String>,
     /// Make this the active rule. Default: true if there is no saved active rule, otherwise false.
     /// False leaves the active choice unchanged; ignored when deleting.
     pub active: Option<bool>,
@@ -844,6 +853,23 @@ pub struct RuleReply {
     /// The material the rule is for; left out when none is set.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub material: String,
+    /// ± how far the thickness may vary; left out when none is given (`0 mm`).
+    #[serde(skip_serializing_if = "no_tolerance")]
+    pub thickness_tolerance: String,
+    /// The stock's finish; left out when none is set.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub finish: String,
+    /// The finished face, up in the flat; left out when it is the front.
+    #[serde(skip_serializing_if = "front_face")]
+    pub finished_face: String,
+}
+
+fn no_tolerance(s: &str) -> bool {
+    matches!(s.trim(), "0 mm" | "0")
+}
+
+fn front_face(s: &str) -> bool {
+    solidcraft_doc::sheet::FinishedFace::parse(s) == Some(solidcraft_doc::sheet::FinishedFace::Front)
 }
 
 impl From<&solidcraft_doc::sheet::SheetRule> for RuleReply {
@@ -861,6 +887,9 @@ impl From<&solidcraft_doc::sheet::SheetRule> for RuleReply {
             gap: r.gap.clone(),
             angle_display: r.angle_display.clone(),
             material: r.material.clone(),
+            thickness_tolerance: r.thickness_tolerance.clone(),
+            finish: r.finish.clone(),
+            finished_face: r.finished_face.clone(),
         }
     }
 }
@@ -878,6 +907,16 @@ pub struct RuleValuesReply {
     pub hem_gap: f64,
     pub gap: f64,
     pub angle_display: String,
+    /// ± the thickness may vary (mm); left out when none is given.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub thickness_tolerance: f64,
+    /// The finished face; left out when it is the front.
+    #[serde(skip_serializing_if = "front_face")]
+    pub finished_face: String,
+}
+
+fn is_zero(v: &f64) -> bool {
+    *v == 0.0
 }
 
 impl From<solidcraft_doc::sheet::RuleValues> for RuleValuesReply {
@@ -893,6 +932,8 @@ impl From<solidcraft_doc::sheet::RuleValues> for RuleValuesReply {
             hem_gap: r.hem_gap,
             gap: r.gap,
             angle_display: r.angle_display.name().into(),
+            thickness_tolerance: r.thickness_tolerance,
+            finished_face: r.finished_face.name().into(),
         }
     }
 }

@@ -1,0 +1,58 @@
+{
+  "en": {
+    "Back": "Back",
+    "Finished Face": "Finished Face",
+    "Front": "Front",
+    "Surface Finish": "Surface Finish",
+    "Thickness Tolerance": "Thickness Tolerance"
+  },
+  "ar": {
+    "Back": "الخلفي",
+    "Finished Face": "الوجه المشطَّب",
+    "Front": "الأمامي",
+    "Surface Finish": "تشطيب السطح",
+    "Thickness Tolerance": "تفاوت السماكة"
+  },
+  "de": {
+    "Back": "Rückseite",
+    "Finished Face": "Sichtseite",
+    "Front": "Vorderseite",
+    "Surface Finish": "Oberflächenausführung",
+    "Thickness Tolerance": "Dickentoleranz"
+  },
+  "he": {
+    "Back": "אחורי",
+    "Finished Face": "הפנים הגמורות",
+    "Front": "קדמי",
+    "Surface Finish": "גימור משטח",
+    "Thickness Tolerance": "סבולת עובי"
+  },
+  "ja": {
+    "Back": "裏",
+    "Finished Face": "仕上げ面",
+    "Front": "表",
+    "Surface Finish": "表面仕上げ",
+    "Thickness Tolerance": "板厚公差"
+  },
+  "ko": {
+    "Back": "뒷면",
+    "Finished Face": "마감 면",
+    "Front": "앞면",
+    "Surface Finish": "표면 마감",
+    "Thickness Tolerance": "두께 공차"
+  },
+  "vi": {
+    "Back": "Mặt sau",
+    "Finished Face": "Mặt hoàn thiện",
+    "Front": "Mặt trước",
+    "Surface Finish": "Hoàn thiện bề mặt",
+    "Thickness Tolerance": "Dung sai độ dày"
+  },
+  "zh": {
+    "Back": "背面",
+    "Finished Face": "成品面",
+    "Front": "正面",
+    "Surface Finish": "表面处理",
+    "Thickness Tolerance": "厚度公差"
+  }
+}
