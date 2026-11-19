@@ -1922,6 +1922,24 @@ fn classify_edge_crossing(
     {
         return Ok(clear);
     }
+    // the whole-interval claim check (issue #18503's fix): a removal or a trim the
+    // ends' affine model decides stands only where the certified decomposition of the
+    // span shows the same event — no kept island the model cannot see (the
+    // retained-island rule). `Complex` (certified multiple crossings, the coplanar
+    // band, or a root that will not refine) refuses typed: research issue #18967 owns
+    // the island and coincidence machinery. The model's own decision and clip
+    // placement stand unchanged — the decomposition certifies their claim, it does not
+    // move their point.
+    let chord = end_side_chord(k, curve, t0, t1)?;
+    let shape =
+        match clearance::decompose_cut(k, curve, interval, plane.origin, plane.normal, tolerance) {
+            Ok(shape) => shape,
+            Err(err) if err.is_cancelled() => return Err(err),
+            // an undecided decomposition refuses typed: nothing uncertified decides
+            Err(_) => {
+                return Err(refusal(ReconstructionRefusal::ClipUncertified { edge }));
+            }
+        };
     // lambda: the fraction of the interval where the side is zero
     let lambda = if g0 == g1 {
         if g0 <= 0.0 {
@@ -1932,7 +1950,6 @@ fn classify_edge_crossing(
     } else {
         g0 / (g0 - g1)
     };
-    let chord = end_side_chord(k, curve, t0, t1)?;
     // a cut exactly at an end rounds a hair outside [0, 1]: the length model decides,
     // not the sign of one rounding. The clip point's displacement from the end,
     // |lambda| * chord, is within the tolerance the length model resolves (the
@@ -1965,18 +1982,28 @@ fn classify_edge_crossing(
     if !bounds_face && (1.0 - width) * chord <= tolerance {
         // the cut trims off no part of the edge the model resolves (the clip is at its
         // very end, or the whole edge is clear of it): the edge is untouched
-        // the cut trims off no part of the edge the model resolves (the clip is at its
-        // very end, or the whole edge is clear of it): the edge is untouched
         return Ok(clear);
     }
-    // a clip is needed: its point is the curve's meeting with the plane, proposed by
-    // the ends' affine model (exact for a line, and a bent curve's proposal fails the
-    // certificate below: nothing uncertain is built)
     if width * chord <= tolerance {
         // the retained part is within the tolerance of the cut: nothing of the edge
         // stays. The clip is where the curve meets the plane; it certifies at the
         // interval's end
         if !(0.0..=1.0).contains(&lambda) {
+            return Err(refusal(ReconstructionRefusal::ClipUncertified { edge }));
+        }
+        // the removal claim's whole-interval proof: the decomposition shows no kept
+        // piece on the span (a rootless removal or the clamped end cut), never an
+        // island the model could not see
+        let removing_span = match shape {
+            clearance::CutShape::Complex => false,
+            clearance::CutShape::Whole { removed_side } => removed_side,
+            clearance::CutShape::Single {
+                low_kept,
+                high_kept,
+                ..
+            } => !low_kept && !high_kept,
+        };
+        if !removing_span {
             return Err(refusal(ReconstructionRefusal::ClipUncertified { edge }));
         }
         let clip_t = t0 + lambda * (t1 - t0);
@@ -1998,13 +2025,39 @@ fn classify_edge_crossing(
             proof: Some(proof),
         });
     }
-    // the trimmed case: the retained interval keeps one side of the clip
+    // the trimmed case: the retained interval keeps one side of the clip. The
+    // decomposition must show that side as the one kept piece of a single crossing —
+    // no island on the kept side, no second crossing the model cannot see
     let removes_low = unit_clamp(lo) > 0.0;
     let clip_fraction = if removes_low {
         unit_clamp(lo)
     } else {
         unit_clamp(hi)
     };
+    // a clip clamped to its very end (the beyond-end cut's degenerate trim) has an
+    // empty removed interval: the claim is then that the whole span stays, certified
+    // piece by piece, and a zero-length piece side proves nothing
+    let clip_at_end = clip_fraction == 0.0 || clip_fraction == 1.0;
+    let trim_claim = match shape {
+        clearance::CutShape::Complex => false,
+        clearance::CutShape::Single {
+            crossing,
+            low_kept,
+            high_kept,
+        } => {
+            if clip_at_end {
+                (crossing <= t0 || low_kept) && (crossing >= t1 || high_kept)
+            } else if removes_low {
+                high_kept && !low_kept
+            } else {
+                low_kept && !high_kept
+            }
+        }
+        clearance::CutShape::Whole { removed_side } => clip_at_end && !removed_side,
+    };
+    if !trim_claim {
+        return Err(refusal(ReconstructionRefusal::ClipUncertified { edge }));
+    }
     let clip_t = t0 + clip_fraction * (t1 - t0);
     let clip = clip_point(k, curve, t0, t1, clip_t)?;
     let retained = if removes_low {
