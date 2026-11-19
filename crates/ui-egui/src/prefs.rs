@@ -2018,7 +2018,9 @@ preference_settings! {
     /// Approved install permissions survive page resets and Cancel, like installed files.
     plugin_grants: std::collections::BTreeMap<String, solidcraft_engine::plugin::Grants> = std::collections::BTreeMap::new();
     /// User ceilings, not automatic increases to a package's approved execution budget.
+    plugin_max_deadline_ms: u64 = solidcraft_engine::plugin::HostLimits::default().max_deadline_ms, PAGE_PLUGINS;
     plugin_max_fuel: u64 = solidcraft_engine::plugin::HostLimits::default().max_fuel, PAGE_PLUGINS;
+    plugin_max_host_calls: u64 = solidcraft_engine::plugin::HostLimits::default().max_host_calls, PAGE_PLUGINS;
     plugin_max_memory_mib: usize = solidcraft_engine::plugin::HostLimits::default().max_memory_mib, PAGE_PLUGINS;
 }
 
@@ -4541,6 +4543,12 @@ pub(crate) fn migrate_gruvbox(p: &mut Prefs) {
 /// those instead of dropping them.
 fn limit_disabled_plugins(mut p: Prefs) -> Prefs {
     let defaults = solidcraft_engine::plugin::HostLimits::default();
+    if p.plugin_max_deadline_ms == 0 {
+        p.plugin_max_deadline_ms = defaults.max_deadline_ms;
+    }
+    if p.plugin_max_host_calls == 0 {
+        p.plugin_max_host_calls = defaults.max_host_calls;
+    }
     if p.plugin_max_fuel == 0 {
         p.plugin_max_fuel = defaults.max_fuel;
     }
@@ -4732,7 +4740,9 @@ fn prepare_preferences(
         return Err("`dimension_text_scale` must be 0.5…2.5".into());
     }
     let new = migrate(new);
-    crate::plugins::host_limits(&new).validate().map_err(|e| format!("plugin_max_fuel / plugin_max_memory_mib: {e}"))?;
+    crate::plugins::host_limits(&new)
+        .validate()
+        .map_err(|e| format!("plugin_max_fuel / plugin_max_memory_mib / plugin_max_host_calls / plugin_max_deadline_ms: {e}"))?;
     if !UNITS.contains(&new.default_units.as_str()) {
         return Err(format!("units must be one of {}", UNITS.join(", ")));
     }

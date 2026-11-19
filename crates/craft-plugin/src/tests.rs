@@ -82,7 +82,7 @@ fn hostile_manifest_fields_return_errors() {
         |value: &mut Value| value["runtime"]["entries"] = json!(["make", "make"]),
         |value: &mut Value| value["runtime"]["limits"] = json!({"fuel":0,"memory_mib":64,"deadline_ms":1}),
         |value: &mut Value| value["runtime"]["limits"] = json!({"fuel":1,"memory_mib":4097,"deadline_ms":1}),
-        |value: &mut Value| value["runtime"]["limits"] = json!({"fuel":1,"memory_mib":1,"deadline_ms":30001}),
+        |value: &mut Value| value["runtime"]["limits"] = json!({"fuel":1,"memory_mib":1,"deadline_ms":0}),
         |value: &mut Value| value["runtime"]["entries"] = json!([{"name":"make","input_schema":true}]),
     ] {
         let mut value = manifest();
@@ -114,6 +114,38 @@ fn larger_manifests_fit_without_removing_input_descriptions() {
 }
 
 #[test]
+fn call_and_deadline_requests_are_host_policy() {
+    let mut value = manifest();
+    value["runtime"]["limits"] = json!({"fuel":1000000,"memory_mib":64,"host_calls":300,"deadline_ms":80000});
+    let requested = parse(&value).unwrap().runtime.unwrap().limits;
+    assert_eq!((requested.host_calls, requested.deadline_ms), (300, 80000));
+    let defaults = HostLimits::default();
+    assert_eq!((defaults.max_host_calls, defaults.max_deadline_ms), (256, 30000));
+    assert_eq!(parse(&manifest()).unwrap().runtime.unwrap().limits.host_calls, 256);
+    assert_eq!(defaults.check(&requested), Err(HostError::OverCeiling { limit: "host_calls".into(), requested: 300, allowed: 256 }));
+    let raised_calls = HostLimits { max_host_calls: 300, ..defaults };
+    assert_eq!(raised_calls.check(&requested), Err(HostError::OverCeiling { limit: "deadline_ms".into(), requested: 80000, allowed: 30000 }));
+    assert!(HostLimits { max_deadline_ms: 80000, ..raised_calls }.check(&requested).is_ok());
+    // Importers keep their existing native-import count and ten-minute ceiling.
+    assert!(defaults.check_importer(&Limits { deadline_ms: 600000, host_calls: 1 << 20, ..Limits::default() }).is_ok());
+    assert_eq!(
+        defaults.check_importer(&Limits { deadline_ms: 600001, ..Limits::default() }),
+        Err(HostError::OverCeiling { limit: "deadline_ms".into(), requested: 600001, allowed: 600000 })
+    );
+    let maximum = Limits { fuel: u64::MAX, deadline_ms: u64::MAX, host_calls: u64::MAX, ..Limits::default() };
+    assert!(HostLimits { max_fuel: u64::MAX, max_host_calls: u64::MAX, max_deadline_ms: u64::MAX, ..defaults }.check(&maximum).is_ok());
+    for field in ["host_calls", "deadline_ms"] {
+        for invalid in [json!(0), json!(-1), json!(1.5)] {
+            value["runtime"]["limits"][field] = invalid;
+            assert!(parse(&value).is_err(), "{field}");
+            value["runtime"]["limits"][field] = json!(80000);
+        }
+    }
+    assert!(HostLimits { max_host_calls: 0, ..defaults }.validate().is_err());
+    assert!(HostLimits { max_deadline_ms: 0, ..defaults }.validate().is_err());
+}
+
+#[test]
 fn host_limits_have_typed_failures() {
     let limits = HostLimits::default();
     assert!(limits.check(&Limits::default()).is_ok());
@@ -132,7 +164,10 @@ fn host_limits_have_typed_failures() {
     let stopped = |limit: &str, allowed| HostError::Exhausted { limit: limit.into(), allowed }.to_string();
     assert_eq!(stopped("fuel", 1000), "used all 1000 fuel it asks for and was stopped");
     assert_eq!(stopped("memory_mib", 64), "needed more than the 64 MiB of memory it asks for and was stopped");
-    assert_eq!(stopped("deadline_ms", 5000), "ran longer than its time limit of 5000 ms and was stopped");
+    assert_eq!(
+        stopped("deadline_ms", 5000),
+        "ran longer than its time limit of 5000 ms and was stopped; raise runtime.limits.deadline_ms and, if needed, Max plugin guest time (ms) in Preferences > Plugins (max_deadline_ms in --plugin-limits)"
+    );
     assert_eq!(stopped("design_mib", 256), "made a design larger than 256 MiB, the most an importer may hand over");
     assert_eq!(HostError::Unsupported { reason: "no solids".into() }.to_string(), "not supported: no solids");
 }
@@ -276,7 +311,7 @@ fn an_importer_claims_extensions_needs_formats_and_never_mixes_with_commands() {
     let mut evaluating = importer();
     evaluating["capabilities"] = json!(["evaluate@0.1", "formats@0.1"]);
     assert!(parse(&evaluating).is_ok());
-    // A command claims no extension, reads no input folder and still finishes within 30 s.
+    // A command claims no extension and reads no input folder.
     let command = |change: &dyn Fn(&mut Value), field: &str| {
         let mut value = manifest();
         change(&mut value);
@@ -286,7 +321,6 @@ fn an_importer_claims_extensions_needs_formats_and_never_mixes_with_commands() {
     command(&|v| v["runtime"]["entries"] = json!([{"name":"make","effect":"open"}]), "effect");
     command(&|v| v["runtime"]["permissions"] = json!({"input_folder":true}), "input_folder");
     command(&|v| v["capabilities"] = json!(["commands@0.1", "evaluate@0.1"]), "capabilities");
-    command(&|v| v["runtime"]["limits"] = json!({"fuel":1,"memory_mib":1,"deadline_ms":60000}), "deadline_ms");
 }
 
 #[test]

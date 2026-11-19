@@ -102,6 +102,82 @@ fn edit_commands_commit_as_one_transaction_and_instances_are_fresh() {
     assert_eq!((app.value, app.begins, app.commits, app.rollbacks), (3, 3, 2, 1));
 }
 #[test]
+fn raised_host_call_budget_commits_three_hundred_calls_and_exhaustion_rolls_back() {
+    let bytes = component(&"call $box ".repeat(300));
+    for version in ["0.1.0", "0.2.0"] {
+        let bytes = if version == "0.1.0" { component_for(version, &"call $box ".repeat(300)) } else { bytes.clone() };
+        let mut request = manifest();
+        let mut app = App { value: 7, ..Default::default() };
+        assert_eq!(
+            run(&mut app, &request, &bytes, "make", &json!({})).unwrap_err(),
+            HostError::Exhausted { limit: "host_calls".into(), allowed: 256 }
+        );
+        assert_eq!((app.value, app.commits, app.rollbacks), (7, 0, 1));
+        request.runtime.as_mut().unwrap().limits.host_calls = 300;
+        run(&mut app, &request, &bytes, "make", &json!({})).unwrap();
+        assert_eq!((app.value, app.commits, app.rollbacks), (307, 1, 1));
+    }
+}
+
+#[test]
+fn native_host_time_does_not_consume_guest_deadline() {
+    let start = Instant::now();
+    let at = |ms| start + Duration::from_millis(ms);
+    let mut deadline = GuestDeadline::new(5000);
+    deadline.transition(CallHook::CallingWasm, at(0));
+    deadline.transition(CallHook::CallingHost, at(1000));
+    assert!(!deadline.expired(at(81000)), "80 seconds of native work must not consume guest time");
+    // A native host can invoke a guest callback; count that guest interval too.
+    deadline.transition(CallHook::CallingWasm, at(81000));
+    deadline.transition(CallHook::ReturningFromWasm, at(82000));
+    assert!(!deadline.expired(at(162000)));
+    deadline.transition(CallHook::ReturningFromHost, at(162000));
+    assert!(!deadline.expired(at(164999)));
+    assert!(deadline.expired(at(165000)));
+    deadline.transition(CallHook::ReturningFromWasm, at(165000));
+    assert!(deadline.expired(at(165000)), "completion and post-return are charged");
+    let mut maximum = GuestDeadline::new(u64::MAX);
+    maximum.transition(CallHook::CallingWasm, start);
+    assert!(!maximum.expired(at(165000)));
+}
+
+#[test]
+fn guest_deadline_stops_a_loop_without_host_calls() {
+    let mut request = manifest();
+    let limits = &mut request.runtime.as_mut().unwrap().limits;
+    limits.fuel = u64::MAX;
+    limits.deadline_ms = 1;
+    let mut app = App::default();
+    assert_eq!(
+        run(&mut app, &request, &component("(loop br 0)"), "make", &json!({})).unwrap_err(),
+        HostError::Exhausted { limit: "deadline_ms".into(), allowed: 1 }
+    );
+    assert_eq!((app.commits, app.rollbacks), (0, 1));
+}
+
+#[test]
+fn host_call_counter_exhausts_at_u64_max_without_wrapping() {
+    let mut state = state(App::default());
+    state.calls = u64::MAX - 1;
+    state.max_calls = u64::MAX;
+    state.check().unwrap();
+    assert_eq!(state.calls, u64::MAX);
+    assert!(state.check().is_err());
+    assert_eq!(state.failed, Some(HostError::Exhausted { limit: "host_calls".into(), allowed: u64::MAX }));
+}
+
+#[test]
+fn importer_host_call_count_keeps_its_separate_fixed_budget() {
+    let mut state = state(App::default());
+    state.effect = Effect::Open;
+    state.max_calls = MAX_IMPORT_CALLS;
+    state.calls = MAX_IMPORT_CALLS - 1;
+    state.check().unwrap();
+    assert!(state.check().is_err());
+    assert_eq!(state.failed, Some(HostError::LimitExceeded { limit: "host call count".into() }));
+}
+
+#[test]
 fn traps_runaway_loops_memory_and_swallowed_failures_rollback() {
     for (code, diagnostic) in [
         ("call $box unreachable", "trap=UnreachableCodeReached"),
@@ -281,9 +357,9 @@ fn state<H: PluginHost>(app: H) -> State<H> {
         limits: StoreLimitsBuilder::new().build(),
         failed: None,
         calls: 0,
-        max_calls: MAX_CALLS,
+        max_calls: Limits::default().host_calls,
         log_bytes: 0,
-        deadline: Instant::now() + Duration::from_secs(5),
+        deadline: GuestDeadline::new(5000),
         import: None,
     }
 }
@@ -356,7 +432,7 @@ fn epoch_interrupt_is_distinct_from_fuel_exhaustion_in_diagnostics() {
     let engine = wasmtime::Engine::new(&config).unwrap();
     let module = wasmtime::Module::from_binary(&engine, &wat::parse_str(r#"(module (func (export "run") (loop br 0)))"#).unwrap()).unwrap();
     let mut store = wasmtime::Store::new(&engine, ());
-    let limits = Limits { fuel: 100_000, memory_mib: 1, deadline_ms: 5000, stack_kib: None };
+    let limits = Limits { fuel: 100_000, memory_mib: 1, deadline_ms: 5000, ..Limits::default() };
     store.set_fuel(limits.fuel).unwrap();
     store.set_epoch_deadline(1);
     let instance = wasmtime::Instance::new(&mut store, &module, &[]).unwrap();

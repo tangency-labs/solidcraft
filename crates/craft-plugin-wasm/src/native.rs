@@ -17,7 +17,7 @@ use std::sync::{
 };
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use wasmtime::component::{Component, Linker};
-use wasmtime::{Config, Engine, Store, StoreLimits, StoreLimitsBuilder, UpdateDeadline};
+use wasmtime::{CallHook, Config, Engine, Store, StoreLimits, StoreLimitsBuilder, UpdateDeadline};
 
 mod bindings {
     wasmtime::component::bindgen!({ path: "../craft-plugin/wit", world: "command-plugin" });
@@ -25,9 +25,8 @@ mod bindings {
 include!(concat!(env!("OUT_DIR"), "/aliases.rs"));
 include!(concat!(env!("OUT_DIR"), "/importer.rs"));
 
-const MAX_CALLS: usize = 256;
 /// An importer streams its file in chunks and reports progress as it goes.
-const MAX_IMPORT_CALLS: usize = 1 << 20;
+const MAX_IMPORT_CALLS: u64 = 1 << 20;
 /// Files an importer may look at beside the one it imports, and names a folder listing reads.
 const MAX_IMPORT_FILES: usize = 4096;
 /// `O_NONBLOCK` for the platforms the runtime targets (the flag is not in `std`).
@@ -82,6 +81,30 @@ fn host_error(error: PluginError) -> HostError {
         PluginError::Unsupported(reason) => HostError::Unsupported { reason },
     }
 }
+/// Accumulates only time spent executing Wasm, including instantiation and post-return.
+/// A duration budget avoids overflowing an Instant for large user-approved deadlines.
+struct GuestDeadline {
+    remaining: Duration,
+    running_since: Option<Instant>,
+}
+impl GuestDeadline {
+    fn new(milliseconds: u64) -> Self {
+        Self { remaining: Duration::from_millis(milliseconds), running_since: None }
+    }
+    fn transition(&mut self, hook: CallHook, now: Instant) {
+        if hook.entering_host() {
+            if let Some(started) = self.running_since.take() {
+                self.remaining = self.remaining.saturating_sub(now.saturating_duration_since(started));
+            }
+        } else {
+            self.running_since.get_or_insert(now);
+        }
+    }
+    fn expired(&self, now: Instant) -> bool {
+        self.running_since.map_or(Duration::ZERO, |started| now.saturating_duration_since(started)) >= self.remaining
+    }
+}
+
 struct Folder {
     dir: Dir,
     path: PathBuf,
@@ -90,7 +113,7 @@ struct Folder {
 }
 struct PendingWrite {
     temporary: PathBuf,
-    order: usize,
+    order: u64,
 }
 struct State<H> {
     host: H,
@@ -103,10 +126,10 @@ struct State<H> {
     clock: bool,
     limits: StoreLimits,
     failed: Option<HostError>,
-    calls: usize,
-    max_calls: usize,
+    calls: u64,
+    max_calls: u64,
     log_bytes: usize,
-    deadline: Instant,
+    deadline: GuestDeadline,
     /// The file an importer reads and the design it writes; `None` for a command.
     import: Option<ImportState>,
 }
@@ -136,13 +159,17 @@ impl<H: PluginHost> State<H> {
         if self.host.is_cancelled() {
             return Err(self.fail(HostError::Cancelled));
         }
-        if Instant::now() >= self.deadline {
+        if self.deadline.expired(Instant::now()) {
             return Err(self.fail(deadline()));
         }
-        self.calls = self.calls.saturating_add(1);
-        if self.calls > self.max_calls {
-            return Err(self.fail(limit("host call count")));
+        if self.calls >= self.max_calls {
+            let error = match self.effect {
+                Effect::Open => limit("host call count"),
+                _ => HostError::Exhausted { limit: "host_calls".into(), allowed: self.max_calls },
+            };
+            return Err(self.fail(error));
         }
+        self.calls = self.calls.saturating_add(1);
         Ok(())
     }
     fn file_path(&mut self, grant: &str, path: &str, write: bool) -> std::result::Result<(), PluginError> {
@@ -742,9 +769,9 @@ fn execute<H: PluginHost + 'static>(
         clock: runtime.permissions.clock,
         failed: None,
         calls: 0,
-        max_calls: MAX_CALLS,
+        max_calls: limits.host_calls,
         log_bytes: 0,
-        deadline: Instant::now() + Duration::from_millis(limits.deadline_ms),
+        deadline: GuestDeadline::new(limits.deadline_ms),
         limits: store_limits(limits, 10_000),
         import: None,
     };
@@ -772,7 +799,7 @@ fn execute<H: PluginHost + 'static>(
         if store.data().host.is_cancelled() {
             return Err(HostError::Cancelled);
         }
-        if Instant::now() >= store.data().deadline {
+        if store.data().deadline.expired(Instant::now()) {
             return Err(deadline());
         }
         let value = serde_json::from_str(&text)
@@ -807,13 +834,17 @@ fn prepare_store<H: PluginHost + 'static>(store: &mut Store<State<H>>, limits: &
     store.limiter(|s| &mut s.limits);
     store.set_fuel(limits.fuel).map_err(|e| trap(e.to_string()))?;
     store.set_epoch_deadline(1);
+    store.call_hook(|mut context, hook| {
+        context.data_mut().deadline.transition(hook, Instant::now());
+        Ok(())
+    });
     store.epoch_deadline_callback(|mut context| {
         let state = context.data_mut();
         if state.host.is_cancelled() {
             state.failed.get_or_insert(HostError::Cancelled);
             return Err(wasmtime::Error::msg("plugin cancelled"));
         }
-        if Instant::now() >= state.deadline {
+        if state.deadline.expired(Instant::now()) {
             state.failed.get_or_insert_with(deadline);
             return Err(wasmtime::Error::msg("plugin deadline exceeded"));
         }
@@ -1087,7 +1118,7 @@ pub(super) fn run_import<H: PluginHost + 'static>(
         calls: 0,
         max_calls: MAX_IMPORT_CALLS,
         log_bytes: 0,
-        deadline: Instant::now() + Duration::from_millis(limits.deadline_ms),
+        deadline: GuestDeadline::new(limits.deadline_ms),
         // A large converter has a large indirect-call table.
         limits: store_limits(limits, 1_000_000),
         import: Some(import),
@@ -1123,8 +1154,8 @@ pub(super) fn run_import<H: PluginHost + 'static>(
         if design.is_empty() {
             return Err(HostError::InvalidInput { field: "design".into(), reason: "the importer wrote no design".into() });
         }
-        // A last host call can finish after the deadline, before the next epoch tick sees it.
-        if Instant::now() >= store.data().deadline {
+        // Check guest compute since the last epoch, including guest post-return work.
+        if store.data().deadline.expired(Instant::now()) {
             return Err(deadline());
         }
         Ok(Imported { design, report })

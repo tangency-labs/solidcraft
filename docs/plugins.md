@@ -480,14 +480,16 @@ Only an importer may say `open`.
   it, returning the command's JSON reply (or `{"error": "..."}` when the command fails). Staging
   again starts a new design; `evaluate.reset` discards it, and nothing outlives the import. The
   session reads no files, not even fonts or linked designs, and runs no command that writes; its
-  time counts against the import's deadline, and Cancel stops the import between commands. A
+  native evaluation time does not count against the guest compute deadline. Cancel stops the
+  import between commands. A
   design the app can't open, a command outside the list or a reply over 1 MiB is an error for that
   call only, so the importer can report its history as unchecked instead of failing.
 - **Failures.** A failure fails that one import, named with the plugin and the file ("Sample
   could not open bracket.smp: ...", or "Sample does not support bracket.smp: ..." for
   `unsupported`), and the next one gets a fresh instance. The compiled component stays in memory, so the next file opens
   without compiling again; nothing compiled is written to disk.
-- **Limits.** An importer's component may be up to 64 MiB, its deadline up to 10 minutes, and its
+- **Limits.** An importer's component may be up to 64 MiB, its guest compute deadline up to
+  10 minutes under default host policy (or more with a raised `max_deadline_ms`), and its
   `stack_kib` up to 64 MiB (a command may ask for at most 1 MiB). Its fuel has to fit the user's ceiling in Preferences › Plugins, and
   its memory too unless the user approved more at install. Build it for `wasm32-unknown-unknown` and wrap it with
   `wasm-tools component new`: the host links no WASI, so a component that imports any is refused.
@@ -505,13 +507,15 @@ and MCP give the English.
 | `invalid-input` from the plugin | Sample could not open broken.smp: (its reason) |
 | More memory than plugins may use | Sample could not open big.smp: it asks for 2048 MiB of memory, and plugins may use 128 MiB. Install the plugin again and allow its memory request, or raise Max plugin memory (MiB) in Preferences › Plugins (in solidcraft-cli, max_memory_mib in the --plugin-limits file). |
 | More fuel than plugins may use | ... it asks for N fuel, and plugins may use M. Raise Max plugin fuel in Preferences › Plugins (in solidcraft-cli, max_fuel in the --plugin-limits file). |
-| It ran out of fuel, memory, stack or time | ... it used all N fuel it asks for and was stopped. Ask its author to raise its fuel limit. (memory in MiB, stack in KiB, time in seconds) |
+| More command host calls than plugins may use | ... it asks for N host calls, and plugins may use M. Raise Max plugin host calls in Preferences › Plugins (in solidcraft-cli, max_host_calls in the --plugin-limits file). |
+| More guest compute time than plugins may use | ... it asks for N ms of guest time, and plugins may use M ms. Raise Max plugin guest time (ms) in Preferences › Plugins (in solidcraft-cli, max_deadline_ms in the --plugin-limits file). |
+| It ran out of fuel, memory, host calls, stack or guest compute time | ... it used all N fuel it asks for and was stopped. Ask its author to raise its fuel limit. (memory in MiB, host calls as a count, stack in KiB, time in seconds) |
 | Its design is over 256 MiB | ... the design it made is larger than 256 MiB, the most a plugin can hand over. |
 | A trap | ... it stopped on an error inside the plugin (details). Report this to its author. |
 
 `plugin.inspect` words `limits_error` the same way. The structured kinds are `unsupported`
-(`reason`), `over_ceiling` (`limit` is `fuel` or `memory_mib`, with `requested` and `allowed`) and
-`exhausted` (`limit` is `fuel`, `memory_mib`, `stack_kib`, `deadline_ms` or `design_mib`, with
+(`reason`), `over_ceiling` (`limit` is `fuel`, `memory_mib`, `host_calls` or `deadline_ms`, with `requested` and `allowed`) and
+`exhausted` (`limit` is `fuel`, `memory_mib`, `host_calls`, `stack_kib`, `deadline_ms` or `design_mib`, with
 `allowed`). The engine's own numbers for a stopped run (fuel used and left) go to the debug log.
 
 ## Plugin data in a design

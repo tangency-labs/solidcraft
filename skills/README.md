@@ -1,12 +1,13 @@
 # Skills for agents that use SolidCraft
 
-Skills for agents that model, edit and check designs through SolidCraft's [MCP server](../docs/mcp.md), and report what went wrong. Each folder is
+Skills for agents that model, edit and check designs through SolidCraft's [MCP server](../docs/mcp.md), report what went wrong, or author plugins. Each folder is
 one skill in the [Agent Skills](https://agentskills.io) format: a `SKILL.md` with a name and a
 description that tell the agent when to load it, and an optional supporting reference file.
 
 The modelling documents are built into SolidCraft: its MCP server's `skill_reference` tool returns them, so an
 agent without file access (such as the one in SolidCraft's own chat) can still read a skill's reference.
-`solidcraft-reporting` is checked against the same tools but not embedded.
+`solidcraft-reporting` is checked against the same tools but not embedded. The plugin authoring
+skill is also read from this repository rather than embedded in the MCP server.
 
 The skills for working on SolidCraft's code (contributing, PRs, tests, layers, UI rules) are a different set, in [`.agents/skills/`](../.agents/skills/README.md). `AGENTS.md` routes to both; `cargo xtask skills` fails when its table, these folders or their READMEs disagree, or a file, `cargo xtask` command or skill they name is gone.
 
@@ -17,6 +18,7 @@ The skills for working on SolidCraft's code (contributing, PRs, tests, layers, U
 | [`solidcraft-editing`](solidcraft-editing/SKILL.md) | changes, fixes or extends an existing design |
 | [`solidcraft-checking`](solidcraft-checking/SKILL.md) | builds, changes or ports a design, next to the two above: parameter ranges, every allowed value, exact STEP comparison, regression tests, designs kept in git |
 | [`solidcraft-mechanisms`](solidcraft-mechanisms/SKILL.md) | builds, drives or animates an assembly: components, joints, motion links, closed loops such as actuators, contact sets, motion studies |
+| [`solidcraft-plugins`](solidcraft-plugins/SKILL.md) | authors, packages or tests a command plugin or importer, including its manifest, permissions and budgets |
 | [`solidcraft-reporting`](solidcraft-reporting/SKILL.md) | hears that something went wrong (a crash, a failed command, a wrong shape or number, a hang): reproduces it in a fresh design, shrinks it to a minimal script and writes the bug report |
 
 The modelling skills teach the agent to:

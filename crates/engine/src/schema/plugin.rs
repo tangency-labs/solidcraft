@@ -256,8 +256,9 @@ pub struct InstallResult {
     pub capabilities: Vec<String>,
     /// What it asks for: command groups, named folders, the clock.
     pub permissions: craft_plugin::Permissions,
-    /// The fuel, memory and time it asks for. Memory above `host_limits` is approved at install
-    /// (`approve.memory_mib`); fuel is not, and must fit `host_limits`.
+    /// The fuel, memory, host-call count and guest time it asks for. Memory above `host_limits`
+    /// is approved at install (`approve.memory_mib`); fuel, calls and guest time must fit the
+    /// user's ceilings in `host_limits` (importers keep their existing 600000 ms time ceiling).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limits: Option<craft_plugin::Limits>,
     /// The app's ceilings for plugins, before any approval.

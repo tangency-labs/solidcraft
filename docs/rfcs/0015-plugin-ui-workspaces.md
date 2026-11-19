@@ -496,7 +496,7 @@ interface storage-provider {
 - An entry can declare `"job": true`. It then runs on a worker and gets a row in the existing operations panel (bottom right, red X to cancel) with the plugin's name and the entry's label. `ui.operations` lists it like any other operation.
 - It uses the `progress(fraction, message)` and `cancelled()` calls #15112 already has. Cancel, or a changed design, means the result isn't adopted. That's the same rule the runtime uses today.
 - A job can push overlay and panel updates while it runs (a toolpath growing on screen), merged to at most 10 per second.
-- Jobs get a separate budget: a 10 minute deadline by default, and a Preferences ceiling like the current fuel and memory fields. Ordinary entries keep the 5 to 30 s limits.
+- Jobs get a separate budget: a 10 minute deadline by default, and a Preferences ceiling like the current fuel and memory fields. Ordinary command entries retain the 5 s guest compute default and 30 s default host ceiling; users can raise that ceiling for an approved request.
 
 ## 7. Worked example: a Manufacturing plugin
 

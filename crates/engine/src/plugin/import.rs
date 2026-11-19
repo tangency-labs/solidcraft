@@ -134,7 +134,7 @@ fn convert(session: &mut Session, importer: &Importer, path: &str, options: &Val
         .into());
     }
     let runtime = package.manifest.runtime.as_ref().ok_or_else(|| error("no executable runtime"))?;
-    host_limits_for(session, &package.manifest.id, &package.approval).check(&runtime.limits)?;
+    host_limits_for(session, &package.manifest.id, &package.approval).check_importer(&runtime.limits)?;
     if !options.is_object() {
         return Err(HostError::InvalidInput { field: "options".into(), reason: "the importer's options are an object".into() }.into());
     }

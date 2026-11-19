@@ -63,7 +63,7 @@ fn manifest_is_inert_bounded_and_refuses_unknown_capabilities() {
         |m: &mut Value| m["runtime"]["entries"] = json!(["make", "make"]),
         |m: &mut Value| m["runtime"]["limits"]["memory_mib"] = json!(4097),
         |m: &mut Value| m["runtime"]["limits"]["fuel"] = json!(0),
-        |m: &mut Value| m["runtime"]["limits"]["deadline_ms"] = json!(30_001),
+        |m: &mut Value| m["runtime"]["limits"]["deadline_ms"] = json!(0),
         |m: &mut Value| m["runtime"]["api"] = json!("solidcraft:plugin@1.0.0"),
         |m: &mut Value| m["capabilities"] = json!(["commands@0.3"]),
         |m: &mut Value| m["capabilities"] = json!([]),
@@ -340,6 +340,16 @@ fn disabled_ids_survive_scratch_and_new_design() {
 }
 
 #[test]
+fn guest_deadline_messages_preserve_the_exact_millisecond_budget() {
+    for (allowed, seconds) in [(1, "0.001"), (50, "0.05"), (5000, "5"), (u64::MAX, "18446744073709551.615")] {
+        let failure = PluginFailure { plugin: "Sample".into(), file: None, error: HostError::Exhausted { limit: "deadline_ms".into(), allowed } };
+        let text = failure.text();
+        assert!(text.contains(&format!("all {seconds} s of guest time")), "{text}");
+        assert!(text.contains("runtime.limits.deadline_ms") && text.contains("max_deadline_ms"), "{text}");
+    }
+}
+
+#[test]
 fn a_failure_message_shows_braces_in_a_file_name_or_reason_as_they_are() {
     let failure = |file: &str, reason: &str| PluginFailure {
         plugin: "Sample".into(),
@@ -397,7 +407,10 @@ mod native {
         include_str!("fixture.wat").replace("\r\n", "\n").replace("__PACKAGE__", package).replace("__VERSION__", version)
     }
     fn component(code: &str) -> Vec<u8> {
-        let template = component_template();
+        component_with_memory_pages(code, 1)
+    }
+    fn component_with_memory_pages(code: &str, pages: u32) -> Vec<u8> {
+        let template = component_template().replacen("(memory (;0;) 1)", &format!("(memory (;0;) {pages})"), 1);
         let original = "      call $box\n      call $box\n";
         assert!(template.contains(original));
         wat::parse_str(template.replacen(original, &format!("      {code}\n"), 1)).unwrap()
@@ -464,6 +477,68 @@ mod native {
         wat::parse_str(source).unwrap()
     }
     #[test]
+    fn three_hundred_host_commands_need_raised_ceilings_and_current_approval() {
+        let code = "call $box ".repeat(300);
+        let f = Fixture::new(&code);
+        let memory_mib = 64;
+        // The fixture's bump allocator retains every host reply: give it the declared budget.
+        // A MiB contains 16 Wasm pages of 65536 bytes.
+        std::fs::write(f.0.join("sample/plugin.wasm"), component_with_memory_pages(&code, memory_mib * 16)).unwrap();
+        let path = f.0.join("sample/plugin.json");
+        let mut m = manifest();
+        m["runtime"]["limits"] = json!({"fuel":10_000_000,"memory_mib":memory_mib,"host_calls":300,"deadline_ms":5000});
+        std::fs::write(&path, m.to_string()).unwrap();
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length":1,"width":1,"height":1})).unwrap();
+        let before = s.doc.to_json();
+        let undo = s.undo.len();
+        let inspection = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap();
+        assert_eq!(inspection["within_host_limits"], false);
+        assert_eq!(inspection["host_limits"]["max_host_calls"], 256);
+        let refusal = f.run(&mut s).unwrap_err();
+        assert_eq!(refusal.host_error(), Some(&HostError::OverCeiling { limit: "host_calls".into(), requested: 300, allowed: 256 }));
+        assert!(refusal.to_string().contains("max_host_calls in the --plugin-limits file"));
+        assert_eq!(s.doc.to_json(), before);
+        assert_eq!(s.undo.len(), undo);
+
+        s.plugin_limits = serde_json::from_value(json!({"max_host_calls":300})).unwrap();
+        m["runtime"]["limits"]["deadline_ms"] = json!(80000);
+        std::fs::write(&path, m.to_string()).unwrap();
+        let requested = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap();
+        let refusal = f.run(&mut s).unwrap_err();
+        assert_eq!(refusal.host_error(), Some(&HostError::OverCeiling { limit: "deadline_ms".into(), requested: 80000, allowed: 30000 }));
+        assert!(refusal.to_string().contains("max_deadline_ms in the --plugin-limits file"));
+        s.plugin_limits = serde_json::from_value(json!({"max_host_calls":300,"max_deadline_ms":80000})).unwrap();
+        let approved = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap();
+        assert_eq!(approved["within_host_limits"], true);
+        assert_eq!(approved["approval"], requested["approval"], "the user's ceilings never change the approved package");
+        s.execute("plugin.run", &json!({"path":f.path(),"approval":approved["approval"],"entry":"make"})).unwrap();
+        assert_eq!(s.doc.features.len(), 301, "all 300 commands ran");
+        assert_eq!(s.undo.len(), undo + 1);
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(s.doc.to_json(), before, "one undo removes the entire plugin edit");
+
+        for (field, requested) in [("host_calls", 301), ("deadline_ms", 80001)] {
+            let mut changed = m.clone();
+            changed["runtime"]["limits"][field] = json!(requested);
+            std::fs::write(&path, changed.to_string()).unwrap();
+            let inspection = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap();
+            assert_ne!(inspection["approval"], approved["approval"], "{field} is covered by approval");
+            assert!(s.execute("plugin.run", &json!({"path":f.path(),"approval":approved["approval"],"entry":"make"})).is_err());
+            assert_eq!(s.doc.to_json(), before);
+        }
+
+        // A plugin that keeps its default call request is stopped on call 257 and discards
+        // its earlier successful native commands, even when it ignores the host's refusal.
+        m["runtime"]["limits"].as_object_mut().unwrap().remove("host_calls");
+        std::fs::write(&path, m.to_string()).unwrap();
+        let refusal = f.run(&mut s).unwrap_err();
+        assert_eq!(refusal.host_error(), Some(&HostError::Exhausted { limit: "host_calls".into(), allowed: 256 }));
+        assert!(refusal.to_string().contains("runtime.limits.host_calls"));
+        assert_eq!(s.doc.to_json(), before);
+        assert_eq!(s.undo.len(), undo);
+    }
+    #[test]
     fn larger_declared_budgets_need_user_ceilings_and_exact_content_approval() {
         let f = Fixture::new("call $box i32.const 2048 memory.grow i32.const -1 i32.eq if unreachable end");
         let path = f.0.join("sample/plugin.json");
@@ -482,7 +557,7 @@ mod native {
         assert_eq!(error.host_error(), Some(&HostError::OverCeiling { limit: "fuel".into(), requested: 200_000_000_000, allowed: 100_000_000_000 }));
         assert_eq!(s.doc.to_json(), before);
         assert!(s.undo.is_empty());
-        s.plugin_limits = HostLimits { max_fuel: 200_000_000_000, max_memory_mib: 256 };
+        s.plugin_limits = HostLimits { max_fuel: 200_000_000_000, max_memory_mib: 256, ..Default::default() };
         let approved = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap();
         assert_eq!(approved["within_host_limits"], true);
         assert_eq!(approved["approval"], inspection["approval"], "approval pins the exact request; a ceiling change never changes its budget");
@@ -956,6 +1031,7 @@ mod native {
             (|m: &mut Value| m["runtime"]["commands"] = json!(["file.export"]), "runtime.commands"),
             (|m: &mut Value| m["runtime"]["limits"]["deadline_ms"] = json!(60_000), "runtime.limits.deadline_ms"),
             (|m: &mut Value| m["runtime"]["limits"]["fuel"] = json!(200_000_000_000_u64), "runtime.limits.fuel"),
+            (|m: &mut Value| m["runtime"]["limits"]["host_calls"] = json!(300), "runtime.limits.host_calls"),
             (|m: &mut Value| m["runtime"]["module"] = json!("missing.wasm"), "runtime.module"),
             (|m: &mut Value| m["surprise"] = json!(true), "manifest"),
         ] {
@@ -1347,8 +1423,11 @@ fn evaluated_mesh_transfer_refuses_an_oversized_input_without_truncation() {
 fn host_resource_policy_is_exact_user_state_and_never_design_data() {
     let defaults = HostLimits::default();
     assert_eq!((defaults.max_fuel, defaults.max_memory_mib), (100_000_000_000, 128));
+    assert_eq!(serde_json::to_value(defaults).unwrap()["max_host_calls"], 256);
+    assert_eq!(serde_json::to_value(defaults).unwrap()["max_deadline_ms"], 30000);
     let request = Limits::default();
     assert_eq!((request.fuel, request.memory_mib, request.deadline_ms), (10_000_000, 64, 5000));
+    assert_eq!(serde_json::to_value(&request).unwrap()["host_calls"], 256);
     assert!(defaults.check(&request).is_ok());
     for limits in
         [HostLimits { max_fuel: 0, ..defaults }, HostLimits { max_memory_mib: 0, ..defaults }, HostLimits { max_memory_mib: 4097, ..defaults }]
@@ -1358,7 +1437,7 @@ fn host_resource_policy_is_exact_user_state_and_never_design_data() {
     let mut m = manifest();
     m["runtime"]["limits"] = json!({"fuel":u64::MAX,"memory_mib":4096,"deadline_ms":30000});
     assert!(parse_manifest(&serde_json::to_vec(&m).unwrap(), "sample").is_ok());
-    let policy = HostLimits { max_fuel: u64::MAX, max_memory_mib: 4096 };
+    let policy = HostLimits { max_fuel: u64::MAX, max_memory_mib: 4096, ..Default::default() };
     assert_eq!(serde_json::from_str::<HostLimits>(&serde_json::to_string(&policy).unwrap()).unwrap(), policy);
     let mut s = Session { plugin_limits: policy, ..Default::default() };
     assert_eq!(s.scratch().plugin_limits, policy);
@@ -1543,6 +1622,27 @@ mod importers {
     }
 
     #[test]
+    fn importer_deadline_keeps_its_existing_ceiling_and_can_be_raised() {
+        let (mut s, root) = installed("deadline-ceiling", &[("smp", &["smp"], false)]);
+        let path = root.join("plugins/smp");
+        let mut m = importer_manifest("smp", &["smp"], false);
+        m["runtime"]["limits"]["deadline_ms"] = json!(600000);
+        std::fs::write(path.join("plugin.json"), m.to_string()).unwrap();
+        assert_eq!(s.execute("plugin.inspect", &json!({"path":path})).unwrap()["within_host_limits"], true);
+        assert_eq!(s.execute("plugin.check", &json!({"path":path})).unwrap()["ok"], true);
+        assert!(s.execute("file.import", &json!({"path":put(&root,"legacy.smp",&design())})).is_ok());
+
+        m["runtime"]["limits"]["deadline_ms"] = json!(800000);
+        std::fs::write(path.join("plugin.json"), m.to_string()).unwrap();
+        let error = s.execute("file.import", &json!({"path":put(&root,"larger.smp",&design())})).unwrap_err();
+        assert_eq!(error.host_error(), Some(&HostError::OverCeiling { limit: "deadline_ms".into(), requested: 800000, allowed: 600000 }));
+        s.plugin_limits = serde_json::from_value(json!({"max_deadline_ms":800000})).unwrap();
+        assert_eq!(s.execute("plugin.inspect", &json!({"path":path})).unwrap()["within_host_limits"], true);
+        assert!(s.execute("file.import", &json!({"path":put(&root,"approved.smp",&design())})).is_ok());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn an_import_failure_names_the_plugin_and_the_file_and_says_not_supported_plainly() {
         let (mut s, root) = installed("errors", &[("smp", &["smp"], false)]);
         // A valid file the importer does not convert: "does not support", not "invalid".
@@ -1568,7 +1668,7 @@ mod importers {
         let error = s.execute("doc.open", &json!({"path": put(&root, "slow.smp", b"L")})).unwrap_err();
         assert_eq!(
             error.to_string(),
-            "Sample Importer could not open slow.smp: it ran longer than its time limit of 0.05 s and was stopped. Ask its author to raise its time limit."
+            "Sample Importer could not open slow.smp: it used all 0.05 s of guest time it asks for and was stopped. Ask its author to raise runtime.limits.deadline_ms; if needed, raise Max plugin guest time (ms) in Preferences › Plugins (in solidcraft-cli, max_deadline_ms in the --plugin-limits file)."
         );
         std::fs::remove_dir_all(root).unwrap();
     }

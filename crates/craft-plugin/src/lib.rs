@@ -23,7 +23,7 @@ pub const MAX_IMPORT_CHUNK_BYTES: usize = 1024 * 1024;
 pub const MAX_IMPORT_INPUT_BYTES: u64 = 1024 * 1024 * 1024;
 /// The largest design an importer may write.
 pub const MAX_IMPORT_DESIGN_BYTES: usize = 256 * 1024 * 1024;
-/// A command entry finishes within 30 s; an importer converting a large assembly may take minutes.
+/// Default host deadline ceilings; users may approve larger guest compute budgets.
 pub const MAX_COMMAND_DEADLINE_MS: u64 = 30_000;
 pub const MAX_IMPORTER_DEADLINE_MS: u64 = 600_000;
 /// The most extensions one importer entry claims.
@@ -73,12 +73,12 @@ pub enum HostError {
     #[error("not supported: {reason}")]
     Unsupported { reason: String },
     /// The plugin asks for more of a budget than the app lets plugins have, so it was not run.
-    /// `limit` is the manifest field (`fuel`, `memory_mib`); `requested` and `allowed` are in its
+    /// `limit` is the manifest field (`fuel`, `memory_mib`, `host_calls`, `deadline_ms`); `requested` and `allowed` are in its
     /// unit.
     #[error("{}", over_ceiling(limit, *requested, *allowed))]
     OverCeiling { limit: String, requested: u64, allowed: u64 },
     /// The plugin ran into one of its budgets and was stopped. `limit` is `fuel`, `memory_mib`,
-    /// `deadline_ms` or `stack_kib` (the manifest's own budgets) or `design_mib` (the most an
+    /// `host_calls`, `deadline_ms` or `stack_kib` (the manifest's own budgets) or `design_mib` (the most an
     /// importer may hand over); `allowed` is that budget, in its unit.
     #[error("{}", exhausted(limit, *allowed))]
     Exhausted { limit: String, allowed: u64 },
@@ -90,6 +90,12 @@ fn over_ceiling(limit: &str, requested: u64, allowed: u64) -> String {
             "asks for {requested} MiB of memory, more than the {allowed} MiB plugins may use; allow its memory request when you install it, or raise the memory ceiling for plugins"
         ),
         "fuel" => format!("asks for {requested} fuel, more than the {allowed} plugins may use; raise the fuel ceiling for plugins"),
+        "host_calls" => format!(
+            "asks for {requested} host calls, more than the {allowed} plugins may use; raise Max plugin host calls in Preferences > Plugins (max_host_calls in --plugin-limits)"
+        ),
+        "deadline_ms" => format!(
+            "asks for {requested} ms of guest time, more than the {allowed} ms plugins may use; raise Max plugin guest time (ms) in Preferences > Plugins (max_deadline_ms in --plugin-limits)"
+        ),
         _ => format!("asks for {requested} {limit}, more than the {allowed} plugins may use"),
     }
 }
@@ -99,7 +105,12 @@ fn exhausted(limit: &str, allowed: u64) -> String {
         "fuel" => format!("used all {allowed} fuel it asks for and was stopped"),
         "memory_mib" => format!("needed more than the {allowed} MiB of memory it asks for and was stopped"),
         "deadline_ms" if allowed == 0 => "ran longer than its time limit and was stopped".into(),
-        "deadline_ms" => format!("ran longer than its time limit of {allowed} ms and was stopped"),
+        "deadline_ms" => format!(
+            "ran longer than its time limit of {allowed} ms and was stopped; raise runtime.limits.deadline_ms and, if needed, Max plugin guest time (ms) in Preferences > Plugins (max_deadline_ms in --plugin-limits)"
+        ),
+        "host_calls" => format!(
+            "used all {allowed} host calls it asks for and was stopped; raise runtime.limits.host_calls and, if needed, Max plugin host calls in Preferences > Plugins (max_host_calls in --plugin-limits)"
+        ),
         "stack_kib" => format!("ran out of its {allowed} KiB stack and was stopped"),
         "design_mib" => format!("made a design larger than {allowed} MiB, the most an importer may hand over"),
         _ => format!("went over its {limit} limit of {allowed} and was stopped"),
@@ -267,20 +278,29 @@ pub trait PluginHost {
 pub struct HostLimits {
     pub max_fuel: u64,
     pub max_memory_mib: usize,
+    pub max_host_calls: u64,
+    pub max_deadline_ms: u64,
 }
 impl Default for HostLimits {
     fn default() -> Self {
-        Self { max_fuel: 100_000_000_000, max_memory_mib: 128 }
+        Self { max_fuel: 100_000_000_000, max_memory_mib: 128, max_host_calls: 256, max_deadline_ms: MAX_COMMAND_DEADLINE_MS }
     }
 }
 impl HostLimits {
     pub fn validate(&self) -> Result<()> {
-        if self.max_fuel == 0 || !(1..=MAX_MEMORY_MIB).contains(&self.max_memory_mib) {
-            return Err(invalid("host_limits", "requires positive max_fuel and max_memory_mib 1..4096 (Wasm32)"));
+        if self.max_fuel == 0 || self.max_host_calls == 0 || self.max_deadline_ms == 0 || !(1..=MAX_MEMORY_MIB).contains(&self.max_memory_mib) {
+            return Err(invalid("host_limits", "requires positive max_fuel, max_host_calls, max_deadline_ms and max_memory_mib 1..4096 (Wasm32)"));
         }
         Ok(())
     }
     pub fn check(&self, requested: &Limits) -> Result<()> {
+        self.check_kind(requested, false)
+    }
+    /// Importers retain their existing ten-minute ceiling and separate host-import budget.
+    pub fn check_importer(&self, requested: &Limits) -> Result<()> {
+        self.check_kind(requested, true)
+    }
+    fn check_kind(&self, requested: &Limits, importer: bool) -> Result<()> {
         self.validate()?;
         requested.validate()?;
         if requested.fuel > self.max_fuel {
@@ -293,6 +313,13 @@ impl HostLimits {
                 allowed: self.max_memory_mib as u64,
             });
         }
+        if !importer && requested.host_calls > self.max_host_calls {
+            return Err(HostError::OverCeiling { limit: "host_calls".into(), requested: requested.host_calls, allowed: self.max_host_calls });
+        }
+        let max_deadline_ms = if importer { self.max_deadline_ms.max(MAX_IMPORTER_DEADLINE_MS) } else { self.max_deadline_ms };
+        if requested.deadline_ms > max_deadline_ms {
+            return Err(HostError::OverCeiling { limit: "deadline_ms".into(), requested: requested.deadline_ms, allowed: max_deadline_ms });
+        }
         Ok(())
     }
 }
@@ -303,13 +330,18 @@ pub struct Limits {
     pub fuel: u64,
     pub memory_mib: usize,
     pub deadline_ms: u64,
+    #[serde(default = "default_host_calls")]
+    pub host_calls: u64,
     /// The guest stack in KiB, when the default is too small (a real decoder needed about 16 MiB).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stack_kib: Option<u32>,
 }
+fn default_host_calls() -> u64 {
+    256
+}
 impl Default for Limits {
     fn default() -> Self {
-        Self { fuel: 10_000_000, memory_mib: 64, deadline_ms: 5000, stack_kib: None }
+        Self { fuel: 10_000_000, memory_mib: 64, deadline_ms: 5000, host_calls: default_host_calls(), stack_kib: None }
     }
 }
 impl Limits {
@@ -320,8 +352,11 @@ impl Limits {
         if !(1..=MAX_MEMORY_MIB).contains(&self.memory_mib) {
             return Err(invalid("runtime.limits.memory_mib", "must be 1..4096 (Wasm32)"));
         }
-        if !(1..=MAX_IMPORTER_DEADLINE_MS).contains(&self.deadline_ms) {
-            return Err(invalid("runtime.limits.deadline_ms", "must be 1..600000"));
+        if self.deadline_ms == 0 {
+            return Err(invalid("runtime.limits.deadline_ms", "must be positive"));
+        }
+        if self.host_calls == 0 {
+            return Err(invalid("runtime.limits.host_calls", "must be positive"));
         }
         if self.stack_kib.is_some_and(|kib| !(64..=65_536).contains(&kib)) {
             return Err(invalid("runtime.limits.stack_kib", "must be 64..65536 (64 KiB to 64 MiB)"));
@@ -558,9 +593,6 @@ impl RuntimeManifest {
         } else {
             if self.permissions.input_folder {
                 return Err(invalid("runtime.permissions.input_folder", "only an importer reads the folder of the file it imports"));
-            }
-            if self.limits.deadline_ms > MAX_COMMAND_DEADLINE_MS {
-                return Err(invalid("runtime.limits.deadline_ms", "must be 1..30000"));
             }
         }
         Ok(())
