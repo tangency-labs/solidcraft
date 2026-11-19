@@ -149,10 +149,10 @@ pub fn with_values<'c, R>(
 /// what the model says of it; none when the design has no such component.
 fn documented<'a>(doc: &'a Document, id: u64, material: Option<&'a str>, mass: Option<&'a str>) -> Option<Component<'a>> {
     if id == 0 {
-        return Some(Component { name: &doc.name, metadata: &doc.metadata, properties: None, material, mass });
+        return Some(Component { name: &doc.name, metadata: &doc.metadata, properties: None, material, mass, sheet_metal: None });
     }
     let c = doc.components.iter().find(|c| c.id == id)?;
-    Some(Component { name: &c.name, metadata: &c.metadata, properties: Some(&c.properties), material, mass })
+    Some(Component { name: &c.name, metadata: &c.metadata, properties: Some(&c.properties), material, mass, sheet_metal: None })
 }
 
 /// A mass as a sheet shows it: kilograms to two places, until #4867 gives drawings their units.
