@@ -1864,9 +1864,8 @@ fn joint_dialog_applies_custom_name_or_falls_back_to_type_default() {
 /// An imported assembly makes a joint per placed part: with "Group joints in the History" on, from
 /// the second joint the timeline shows them as one grouped button with their count, and clicking
 /// it shows (and hides) each one.
-#[test]
-fn many_joints_start_grouped_in_the_timeline() {
-    let mut h = crate::scenario::Harness::new();
+/// Two parts, A and B, held by one rigid joint, "Held", with "Group joints in the History" on.
+fn one_held_joint(h: &mut crate::scenario::Harness) {
     assert_eq!(h.call("ui.prefs", json!({"history_group_joints": true}))["ok"], true);
     for (name, x) in [("A", 0), ("B", 30)] {
         h.app.run("component.activate", json!({"component": "root"})).unwrap();
@@ -1877,7 +1876,10 @@ fn many_joints_start_grouped_in_the_timeline() {
     let at = |o: &str| json!({"occurrence": o, "point": [30, 10, 5], "z": [1, 0, 0]});
     h.app.run("joint.create", json!({"type": "rigid", "a": at("A"), "b": at("B"), "name": "Held"})).unwrap();
     h.frames(2);
-    assert!(crate::scenario::handle_at("timeline:joints").is_none(), "one joint shows on its own");
+}
+
+/// Copies of the first joint, enough for the History to group them.
+fn joints_enough_to_group(h: &mut crate::scenario::Harness) {
     let first = h.app.session.doc.assembly.joints[0].clone();
     for i in 1..=JOINT_GROUP_MIN as u64 {
         let mut copy = first.clone();
@@ -1886,6 +1888,14 @@ fn many_joints_start_grouped_in_the_timeline() {
         h.app.session.doc_mut().assembly.joints.push(copy);
     }
     h.frames(2);
+}
+
+#[test]
+fn many_joints_start_grouped_in_the_timeline() {
+    let mut h = crate::scenario::Harness::new();
+    one_held_joint(&mut h);
+    assert!(crate::scenario::handle_at("timeline:joints").is_none(), "one joint shows on its own");
+    joints_enough_to_group(&mut h);
     assert_eq!(h.app.session.doc.assembly.joints.len(), 2);
     assert!(!joints_open(&h.app, JOINT_GROUP_MIN + 1, JointRun::Loose), "a second joint starts them grouped");
     let group = crate::scenario::handle_at("timeline:joints").expect("the grouped joints button");
@@ -1894,6 +1904,27 @@ fn many_joints_start_grouped_in_the_timeline() {
     let group = crate::scenario::handle_at("timeline:joints").expect("the grouped joints button");
     assert_eq!(h.call("ui.click", json!({"x": group.x, "y": group.y}))["ok"], true);
     assert!(!joints_open(&h.app, JOINT_GROUP_MIN + 1, JointRun::Loose), "clicking it again groups them");
+}
+
+/// A Browser search filters the Browser's rows, not the History's: grouped joints stay grouped
+/// while it runs, and a click on the group opens them in the History's own fold, which is still
+/// open once the search ends.
+#[test]
+fn grouped_joints_keep_their_fold_while_the_browser_searches() {
+    let mut h = crate::scenario::Harness::new();
+    one_held_joint(&mut h);
+    joints_enough_to_group(&mut h);
+    h.app.tree.search.show();
+    h.app.tree.search.text = "Held".to_string();
+    h.frames(2);
+    assert!(h.app.tree.search.on());
+    assert!(!joints_open(&h.app, JOINT_GROUP_MIN + 1, JointRun::Loose), "a search leaves the group as it was");
+    let group = crate::scenario::handle_at("timeline:joints").expect("the grouped joints button");
+    assert_eq!(h.call("ui.click", json!({"x": group.x, "y": group.y}))["ok"], true);
+    assert!(joints_open(&h.app, JOINT_GROUP_MIN + 1, JointRun::Loose), "the click opens the History's own fold");
+    h.app.tree.search.clear();
+    h.frames(2);
+    assert!(joints_open(&h.app, JOINT_GROUP_MIN + 1, JointRun::Loose), "and it is still open after the search");
 }
 
 /// With "Group joints in the History" off, as it is by default, the History shows each joint as it
@@ -2341,4 +2372,22 @@ fn lateral_offset_controls_do_not_change_assembly_constraint_rules() {
     harness.settle();
     assert_eq!(harness.app.session.doc.assembly.joints[0].constraint, None);
     assert_eq!(harness.app.session.doc.assembly.joints[0].offset_xy, [12.0, 0.0]);
+}
+
+/// A joint origin clicked inside a face, a few points from its edge, is the face: an edge is taken
+/// only within `JOINT_EDGE_REACH` of the pointer, not the 6 points other picks use (#18255).
+#[test]
+fn a_joint_origin_a_few_points_inside_a_face_is_the_face() {
+    let pick_at = |dy: f64| {
+        let mut h = joint_picking_component_1();
+        let at = h.call("ui.at", json!({ "world": [15, 0, 10] }))["result"].clone();
+        let p = json!([at[0].as_f64().unwrap(), at[1].as_f64().unwrap() + dy]);
+        h.step(&json!({ "move": p })).unwrap();
+        h.step(&json!({ "click": p })).unwrap();
+        h.app.dialog.as_ref().unwrap().inputs[0].items.clone()
+    };
+    let near = pick_at(1.5);
+    assert!(matches!(near.as_slice(), [Sel::Edge { .. } | Sel::Vertex { .. }]), "right on the edge: {near:?}");
+    let inside = pick_at(4.5);
+    assert!(matches!(inside.as_slice(), [Sel::Face { body, .. }] if body == "Body1"), "inside the face: {inside:?}");
 }

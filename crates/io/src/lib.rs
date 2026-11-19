@@ -2,8 +2,8 @@
 //! document rebuilds on load and optional display caches remain provisional. Bodies export
 //! as STL (binary or ASCII), OBJ, STEP and 3MF, and assemblies as URDF ([`urdf()`]); STEP, IGES,
 //! FreeCAD and Rhino files import as a base feature (see [`step_import_feature`]), 3MF and
-//! STL files as mesh bodies (see [`mesh_import_feature`]), PLY and XYZ files as point clouds
-//! (see [`read_point_cloud`]), and KiCad boards as a mesh substrate with referenced STEP
+//! STL files as mesh bodies (see [`mesh_import_feature`]), PLY, PCD and XYZ files as point
+//! clouds (see [`read_point_cloud`]), and KiCad boards as a mesh substrate with referenced STEP
 //! component models.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
@@ -37,9 +37,13 @@ pub mod limits;
 #[cfg(test)]
 mod mutate;
 mod native_cad;
-pub use native_cad::{NATIVE_CAD_EXTS, NativeDesign, detects_freecad, is_freecad_path, is_native_cad_path, native_cad_design, native_cad_to_step};
+pub use native_cad::{
+    NATIVE_CAD_EXTS, NativeDesign, USD_EXTS, cadmpeg_step_records, detects_freecad, is_freecad_path, is_native_cad_path, is_usd_path,
+    native_cad_design, native_cad_records, native_cad_to_step, read_usd, usd_from_step, usd_records,
+};
 pub mod paper;
 mod pat;
+mod pcd;
 mod ply;
 mod ply_complex;
 pub use ply::{ply_counts, read_ply_mesh};
@@ -47,6 +51,7 @@ mod point_cloud;
 pub use point_cloud::{CloudFile, DEFAULT_MAX_POINTS, MAX_POINT_CLOUD_BYTES, is_ply_path, is_point_cloud_path, read_point_cloud};
 pub mod safe_write;
 pub mod safe_zip;
+pub mod sdf;
 mod sketch2d;
 mod svg;
 /// Explicit development-test seams; absent from ordinary production builds.
@@ -85,6 +90,7 @@ pub use kicad_in::{
 };
 mod obj;
 pub use obj::read_obj;
+pub use sdf::{SdfDecal, SdfOptions, SdfPackage, sdf_model};
 pub use threemf::{
     MAX_3MF_BYTES, MeshObject, model_xml, model_xml_parts, model_xml_with, read_3mf, weld, write_3mf, write_3mf_parts, write_3mf_with,
 };
@@ -316,24 +322,53 @@ fn step_text(bytes: &[u8]) -> String {
     encoding.decode_without_bom_handling(bytes).0.into_owned()
 }
 
-/// The STEP items of a native CAD file that its solids import leaves out: a FreeCAD body's
-/// hidden intermediate shapes. A Rhino file's hidden objects are its own visibility, which the
-/// file's user asked to keep, so none are left out; the format is the one cadmpeg detects in
-/// the bytes, not the file's name (a Rhino file can be called `.FCStd`).
-fn hidden_items(file: &str, bytes: &[u8], step: &str) -> std::collections::HashSet<u64> {
-    if is_native_cad_path(file) && native_cad::detects_freecad(bytes) { native_cad::invisible_items(step) } else { Default::default() }
-}
-
 /// Read STEP bytes (`file` is the source file name) into an Import base feature. The file is
 /// read once here to fail early and collect names; the feature holds the STEP text.
 pub fn step_import_feature(bytes: &[u8], file: &str) -> Result<StepFeature> {
     step_import_feature_named(bytes, file, StepNames::default())
 }
 
+/// Which reader turns a file's solids into SolidCraft's bodies.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum StepReader {
+    /// SolidCraft's own STEP reader (solidcore's), which keeps the STEP text. A FreeCAD or Rhino
+    /// file is decoded by cadmpeg and restated as STEP by cadmpeg's STEP writer first, as before
+    /// the records route.
+    #[default]
+    SolidCraft,
+    /// cadmpeg's neutral model read straight into B-rep records, with no STEP text in between: a
+    /// FreeCAD or Rhino file's solids, or a STEP file decoded by cadmpeg's STEP decoder (to
+    /// compare with SolidCraft's reader). IGES is always SolidCraft's. The Preferences switch
+    /// "Import with cadmpeg" (off by default) chooses it in the window.
+    Cadmpeg,
+}
+
+impl StepReader {
+    /// `solidcraft` or `cadmpeg` (any case); `None` for anything else.
+    pub fn parse(s: &str) -> Option<StepReader> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "solidcraft" => Some(StepReader::SolidCraft),
+            "cadmpeg" => Some(StepReader::Cadmpeg),
+            _ => None,
+        }
+    }
+}
+
 /// [`step_import_feature`], with the bodies named after `names`.
 pub fn step_import_feature_named(bytes: &[u8], file: &str, names: StepNames) -> Result<StepFeature> {
+    step_import_feature_read(bytes, file, names, StepReader::SolidCraft)
+}
+
+/// [`step_import_feature_named`], a STEP, FreeCAD or Rhino file read by `reader`.
+pub fn step_import_feature_read(bytes: &[u8], file: &str, names: StepNames, reader: StepReader) -> Result<StepFeature> {
     let _span = solidcraft_profile::span("import", "step_import_feature_named");
     limits::check(limits::Kind::Step, bytes.len() as u64).map_err(IoError::Invalid)?;
+    if reader == StepReader::Cadmpeg && is_step_path(file) && !is_iges_path(file) && !is_native_cad_path(file) {
+        return records_import_feature(cadmpeg_step_records(bytes, file).map_err(IoError::Invalid)?, file, names);
+    }
+    if reader == StepReader::Cadmpeg && is_native_cad_path(file) {
+        return records_import_feature(native_cad_records(bytes, file).map_err(IoError::Invalid)?, file, names);
+    }
     // STEP is 7-bit text with escapes; tolerate stray 8-bit bytes. IGES and the cadmpeg formats
     // are restated as STEP (the feature keeps that STEP text).
     let (text, iges_warnings) = if is_native_cad_path(file) {
@@ -354,7 +389,7 @@ pub fn step_import_feature_named(bytes: &[u8], file: &str, names: StepNames) -> 
         .unwrap_or_else(|| "Import".into());
     let body_names: Vec<String> = imp.bodies.iter().map(|b| body_name(b, names)).collect();
     // A FreeCAD body's hidden intermediate shapes are not built (unless nothing else is).
-    let hidden = hidden_items(file, bytes, &text);
+    let hidden = native_cad::hidden_items(file, bytes, &text);
     let skip: Vec<u64> = imp.bodies.iter().zip(0u64..).filter(|(b, _)| hidden.contains(&b.source_item)).map(|(_, i)| i).collect();
     let skip = if skip.len() == imp.bodies.len() { Vec::new() } else { skip };
     // A body the STEP file itself marks invisible is still built, and starts hidden.
@@ -370,21 +405,105 @@ pub fn step_import_feature_named(bytes: &[u8], file: &str, names: StepNames) -> 
         name,
         body_names,
         invisible,
-        kind: solidcraft_doc::FeatureKind::Import { file: file_name, step: text.into(), components: imp.tree.clone(), skip },
+        kind: solidcraft_doc::FeatureKind::Import { file: file_name, step: text.into(), components: imp.tree.clone(), skip, records: None },
         warnings: iges_warnings.into_iter().chain(imp.warnings.iter().cloned()).collect(),
         import: imp,
     })
 }
 
-/// Is this a mesh file we import (`.3mf`, `.stl`, `.obj`, `.glb`, `.gltf`, any case)?
+/// What an OpenUSD file's import brings in.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum UsdGeometry {
+    /// Its meshes, as mesh bodies ([`read_usd`]): how OpenUSD files have always been read, and
+    /// what most of them hold. A B-rep with no mesh is left out.
+    #[default]
+    Meshes,
+    /// Its exact geometry where it has it ([`usd_records`]): each B-rep (a `BrepArray`'s solids
+    /// and shells) a B-rep body of an Import feature, and each mesh with
+    /// no B-rep beside it a mesh body of that feature.
+    Exact,
+}
+
+impl UsdGeometry {
+    /// `meshes` or `exact` (any case); `None` for anything else.
+    pub fn parse(s: &str) -> Option<UsdGeometry> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "meshes" => Some(UsdGeometry::Meshes),
+            "exact" => Some(UsdGeometry::Exact),
+            _ => None,
+        }
+    }
+}
+
+/// An OpenUSD file (`file` is its name) read for its exact geometry ([`UsdGeometry::Exact`]) into
+/// an Import feature keeping records, as a FreeCAD or Rhino file read by cadmpeg is, with the
+/// bodies named after `names`; and whether the file says Y is up.
+pub fn usd_import_feature(bytes: &[u8], file: &str, names: StepNames) -> Result<(StepFeature, bool)> {
+    let _span = solidcraft_profile::span("import", "usd_import_feature");
+    limits::check(limits::Kind::Step, bytes.len() as u64).map_err(IoError::Invalid)?;
+    let (records, warnings, y_up) = usd_records(bytes, file).map_err(IoError::Invalid)?;
+    Ok((records_import_feature((records, warnings, false), file, names)?, y_up))
+}
+
+/// A file read with [`StepReader::Cadmpeg`] (FreeCAD, Rhino or STEP) into an Import feature that
+/// keeps the B-rep records cadmpeg's neutral model was read into (no STEP text). A FreeCAD body's
+/// hidden intermediate shapes (each pad and pocket, the tool shapes, sketch faces, which FreeCAD
+/// shows only through its body's own shape) are not built, unless nothing else is; a Rhino file's
+/// hidden objects are its user's own choice, so they are built and start hidden. The format is
+/// the one cadmpeg detects in the contents, not the file's name.
+fn records_import_feature(read: (solidcraft_kernel::ImportRecords, Vec<String>, bool), file: &str, names: StepNames) -> Result<StepFeature> {
+    let (records, decode_warnings, freecad) = read;
+    let text = solidcraft_kernel::records_text(&records)?;
+    design::check_step_importable(&text)?;
+    let imp = solidcraft_kernel::records_import_shared(&records)?;
+    // Not one body made of the records: no feature, as a STEP file with no solids is refused.
+    if imp.bodies.is_empty() {
+        let why = imp.warnings.last().map(|w| format!(" ({w})")).unwrap_or_default();
+        return Err(IoError::Invalid(format!("{file}: no bodies could be made of this file{why}")));
+    }
+    let stem = std::path::Path::new(file)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "Import".into());
+    let body_names: Vec<String> = imp.bodies.iter().map(|b| body_name(b, names)).collect();
+    let skip: Vec<u64> = if freecad { imp.bodies.iter().zip(0u64..).filter(|(b, _)| b.hidden).map(|(_, i)| i).collect() } else { Vec::new() };
+    let skip = if skip.len() == imp.bodies.len() { Vec::new() } else { skip };
+    let invisible: Vec<bool> = imp.bodies.iter().map(|b| b.hidden).collect();
+    // As a STEP import's: the root product's name; else the only body's name; else the file name.
+    let name = match (imp.tree.as_slice(), body_names.as_slice()) {
+        ([root], _) if !generic_name(&root.name) => root.name.clone(),
+        (_, [only]) if !generic_name(only) => only.clone(),
+        _ => stem,
+    };
+    let file_name = std::path::Path::new(file).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
+    Ok(StepFeature {
+        name,
+        body_names,
+        invisible,
+        kind: solidcraft_doc::FeatureKind::Import {
+            file: file_name,
+            step: "".into(),
+            components: imp.tree.clone(),
+            skip,
+            records: Some(std::sync::Arc::new(records)),
+        },
+        warnings: decode_warnings.into_iter().chain(imp.warnings.iter().cloned()).collect(),
+        import: imp,
+    })
+}
+
+/// Is this a mesh file we import (`.3mf`, `.stl`, `.obj`, `.glb`, `.gltf`, or OpenUSD's `.usd`,
+/// `.usda`, `.usdc` and `.usdz`, any case)?
 pub fn is_mesh_path(path: &str) -> bool {
     std::path::Path::new(path)
         .extension()
         .and_then(|e| e.to_str())
         .is_some_and(|e| ["3mf", "stl", "obj", "glb", "gltf"].iter().any(|x| e.eq_ignore_ascii_case(x)))
+        || is_usd_path(path)
 }
 
-/// A 3MF, STL, OBJ or glTF file read as a mesh import feature.
+/// A 3MF, STL, OBJ, glTF or OpenUSD file read as a mesh import feature.
 pub struct MeshFeature {
     /// Timeline name: the only mesh's name, else the file name.
     pub name: String,
@@ -423,9 +542,15 @@ pub fn mesh_import_feature_in(bytes: &[u8], file: &str, mm_per_unit: f64) -> Res
         g.flatten();
         return Ok(g.feature);
     }
-    if bytes.len() > MAX_3MF_BYTES {
-        return Err(IoError::Invalid(format!("mesh file too large ({} MB)", bytes.len() >> 20)));
+    if is_usd_path(file) {
+        own_units("OpenUSD")?;
+        let (mut g, _) = read_usd(bytes, file)?;
+        g.flatten();
+        return Ok(g.feature);
     }
+    // A mesh file is read up to the limit for STEP and import files, which Preferences raise
+    // (#17446, #14548).
+    limits::check(limits::Kind::Step, bytes.len() as u64).map_err(IoError::Invalid)?;
     let path = std::path::Path::new(file);
     let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "Mesh".into());
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
@@ -503,6 +628,12 @@ pub enum Format {
     /// Binary glTF with the bodies' looks ([`export_glb`]); written from the document, which
     /// holds the looks.
     Glb,
+    /// A Gazebo model folder of the design ([`sdf_model`]): `model.config`, `model.sdf`, meshes
+    /// and decal images; written by the engine, since it is several files.
+    Sdf,
+    /// OpenUSD: `.usda` text, `.usdc` (or `.usd`) binary, or a `.usdz` package, chosen by the
+    /// file's extension ([`usd_from_step`]); written by the engine from the STEP it writes.
+    Usd,
 }
 
 impl Format {
@@ -519,6 +650,8 @@ impl Format {
             "3mf-tagged" => Format::ThreeMfTagged,
             "urdf" => Format::Urdf,
             "glb" => Format::Glb,
+            "sdf" => Format::Sdf,
+            "usd" | "usda" | "usdc" | "usdz" => Format::Usd,
             e if e == "json" || is_design_ext(e) => Format::Design,
             _ => return Err(IoError::Format(ext)),
         })
@@ -925,8 +1058,8 @@ pub fn export_obj(state: &ModelState, bodies: &[String], mtl_name: &str, quality
 
 /// The OBJ export of the given bodies: the mesh file and the material library beside it.
 fn obj_export(sel: &[&solidcraft_doc::ModelBody], mtl_name: &str, quality: MeshQuality) -> Result<ObjFiles> {
-    let (meshes, warnings) = noted(per_placed_body(sel, |b, body| body_mesh(b, body, quality))?);
-    let bodies: Vec<ObjBody<'_>> = sel.iter().zip(&meshes).map(|(b, mesh)| ObjBody { name: b.name.as_str(), mesh, color: b.body.color() }).collect();
+    let (items, warnings) = per_placed_body(sel, |b, body| body_mesh(b, body, quality))?;
+    let bodies: Vec<ObjBody<'_>> = items.iter().map(|(b, mesh)| ObjBody { name: b.name.as_str(), mesh, color: b.body.color() }).collect();
     Ok(ObjFiles { warnings, ..obj_files(&bodies, mtl_name) })
 }
 
@@ -1064,22 +1197,52 @@ fn placed_vertices_match(original: &solidcraft_kernel::Body, copy: &solidcraft_k
 
 /// `f` for each body of an export and the body it is meshed as ([`shared_placements`]), on
 /// threads (a body at a time each), the results in the order of the bodies. The bodies are
-/// meshed and welded on their own, so the file is the same, byte for byte, as made one body
-/// after the other; of several failing bodies the first one's error is the export's, as it was
-/// then. An assembly of many bodies meshed on one core took most of the export's time.
-fn per_placed_body<R: Send>(
-    sel: &[&solidcraft_doc::ModelBody],
-    f: impl Fn(&solidcraft_doc::ModelBody, &Placed) -> Result<R> + Sync,
-) -> Result<Vec<R>> {
+/// Mesh each placed body on threads. If a body fails to mesh (e.g. an untessellatable sliver face),
+/// but other bodies in the export succeed, the failing body is skipped with a warning note so the
+/// rest of the assembly can still be exported (#18780). If all bodies fail (or only one body was
+/// selected and failed), the first error is returned.
+fn per_placed_body<'a, R: Send>(
+    sel: &[&'a solidcraft_doc::ModelBody],
+    f: impl Fn(&solidcraft_doc::ModelBody, &Placed) -> Result<(R, Vec<String>)> + Sync,
+) -> Result<(Vec<(&'a solidcraft_doc::ModelBody, R)>, Vec<String>)> {
     let meshed = shared_placements(sel);
     let pairs: Vec<(&solidcraft_doc::ModelBody, &Placed)> = sel.iter().copied().zip(&meshed).collect();
-    solidcraft_kernel::map_on_threads(&pairs, EXPORT_THREADS, |(b, body)| f(b, body))
-        .into_iter()
-        .zip(sel)
-        .map(|(r, b)| r.unwrap_or_else(|| Err(IoError::Invalid(format!("body {}: meshing it failed", b.name)))))
-        .collect()
+    let thread_results = solidcraft_kernel::map_on_threads(&pairs, EXPORT_THREADS, |(b, body)| f(b, body));
+
+    let mut successful = Vec::new();
+    let mut notes = Vec::new();
+    let mut first_err = None;
+
+    for (r, b) in thread_results.into_iter().zip(sel) {
+        match r {
+            Some(Ok((val, item_notes))) => {
+                successful.push((*b, val));
+                notes.extend(item_notes);
+            }
+            Some(Err(e)) => {
+                notes.push(format!("{}: skipped: meshing failed ({e})", b.name));
+                if first_err.is_none() {
+                    first_err = Some(e);
+                }
+            }
+            None => {
+                let e = IoError::Invalid(format!("body {}: meshing it failed", b.name));
+                notes.push(format!("{}: skipped: meshing failed ({e})", b.name));
+                if first_err.is_none() {
+                    first_err = Some(e);
+                }
+            }
+        }
+    }
+
+    if successful.is_empty() {
+        return Err(first_err.unwrap_or(IoError::Empty));
+    }
+
+    Ok((successful, notes))
 }
 
+#[allow(dead_code)]
 /// Results with their notes, as the results and every note in the results' order.
 fn noted<R>(results: Vec<(R, Vec<String>)>) -> (Vec<R>, Vec<String>) {
     let mut notes = Vec::new();
@@ -1188,46 +1351,49 @@ pub fn export_with_parts_noted(
     thumbnail: Option<&[u8]>,
 ) -> Result<(Vec<u8>, Vec<String>)> {
     let sel = selected(state, bodies)?;
-    let mut notes = Vec::new();
-    let bytes = match format {
+    let (bytes, notes) = match format {
         Format::StlBinary | Format::StlAscii => {
             // Each body welded on its own (as for 3MF), so shared vertices are written identically
             // and the file is closed where faces meet.
-            let meshes: Vec<Mesh>;
-            (meshes, notes) = noted(per_placed_body(&sel, |b, body| {
+            let (items, notes) = per_placed_body(&sel, |b, body| {
                 let (m, n) = body_mesh(b, body, quality)?;
                 let (positions, triangles) = weld(&m.positions, &m.triangles, weld_eps(&b.body));
                 Ok((Mesh { positions, triangles, ..Mesh::default() }, n))
-            })?);
-            if format == Format::StlBinary { stl_binary(&meshes, name) } else { stl_ascii(&meshes, name).into_bytes() }
+            })?;
+            let meshes: Vec<Mesh> = items.into_iter().map(|(_, m)| m).collect();
+            let bytes = if format == Format::StlBinary { stl_binary(&meshes, name) } else { stl_ascii(&meshes, name).into_bytes() };
+            (bytes, notes)
         }
         Format::Obj => {
             // One file, so no material library: a mesh file that names a library nobody wrote
             // would come out in the reader's default grey.
-            let meshes: Vec<(String, Mesh)>;
-            (meshes, notes) = noted(per_placed_body(&sel, |b, body| body_mesh(b, body, quality).map(|(m, n)| ((b.name.clone(), m), n)))?);
-            obj(&meshes).into_bytes()
+            let (items, notes) = per_placed_body(&sel, |b, body| body_mesh(b, body, quality))?;
+            let meshes: Vec<(String, Mesh)> = items.into_iter().map(|(b, m)| (b.name.clone(), m)).collect();
+            (obj(&meshes).into_bytes(), notes)
         }
         Format::Step => {
             let bs: Vec<solidcraft_kernel::ExportBody> =
                 sel.iter().map(|b| solidcraft_kernel::ExportBody { name: b.name.clone(), body: &b.body, color: b.body.color() }).collect();
-            solidcraft_kernel::step_export_bodies(&bs, &step_header(format!("{name}.step"), meta))?.into_bytes()
+            (solidcraft_kernel::step_export_bodies(&bs, &step_header(format!("{name}.step"), meta))?.into_bytes(), Vec::new())
         }
         Format::Iges => {
             let bs: Vec<solidcraft_kernel::ExportBody> =
                 sel.iter().map(|b| solidcraft_kernel::ExportBody { name: b.name.clone(), body: &b.body, color: b.body.color() }).collect();
-            solidcraft_kernel::iges_export_bodies(&bs, &step_header(format!("{name}.igs"), meta))?.into_bytes()
+            (solidcraft_kernel::iges_export_bodies(&bs, &step_header(format!("{name}.igs"), meta))?.into_bytes(), Vec::new())
         }
         Format::ThreeMf | Format::ThreeMfTagged => {
-            let objs: Vec<MeshObject>;
-            (objs, notes) = noted(per_placed_body(&sel, |b, body| mesh_object(b, body, format == Format::ThreeMfTagged, quality))?);
-            let index = |n: &String| sel.iter().position(|b| &b.name == n);
+            let (items, notes) = per_placed_body(&sel, |b, body| mesh_object(b, body, format == Format::ThreeMfTagged, quality))?;
+            let (kept_bodies, objs): (Vec<_>, Vec<_>) = items.into_iter().unzip();
+            let index = |n: &String| kept_bodies.iter().position(|b| &b.name == n);
             let parts: Vec<(String, Vec<usize>)> = parts.iter().map(|(p, names)| (p.clone(), names.iter().filter_map(index).collect())).collect();
-            write_3mf_parts(&objs, &parts, &threemf_metadata(meta), thumbnail)?
+            let bytes = write_3mf_parts(&objs, &parts, &threemf_metadata(meta), thumbnail)?;
+            (bytes, notes)
         }
         Format::Design => return Err(IoError::Format("sc (save the document instead)".into())),
         Format::Urdf => return Err(IoError::Format("urdf (an assembly package; use file.export)".into())),
         Format::Glb => return Err(IoError::Format("glb (its looks come from the design; use file.export)".into())),
+        Format::Sdf => return Err(IoError::Format("sdf (a model folder; use file.export)".into())),
+        Format::Usd => return Err(IoError::Format("usd (the file's extension picks its encoding; use file.export)".into())),
     };
     Ok((bytes, notes))
 }
@@ -1730,6 +1896,41 @@ mod tests {
         assert!(!model_xml(export(&m.state(), &[], Format::ThreeMf, "t").unwrap()).contains("Title"));
     }
 
+    /// #18780: in an export of multiple bodies, if one body fails to mesh, it is skipped with a
+    /// warning note and the remaining valid bodies are exported.
+    #[test]
+    fn untessellated_body_is_skipped_with_warning_on_multi_body_export() -> Result<()> {
+        let (_, m) = model();
+        let valid_body = &m.state().bodies[0];
+        let mut broken_model_body = valid_body.clone();
+        broken_model_body.name = "BrokenSliver".into();
+
+        let sel = [valid_body, &broken_model_body];
+        let res = per_placed_body(&sel, |b, body| {
+            if b.name == "BrokenSliver" {
+                Err(IoError::Invalid("not supported yet: tessellation: face 0 (cylinder)".into()))
+            } else {
+                body_mesh(b, body, MeshQuality::default())
+            }
+        });
+
+        let (items, notes) = res?;
+        assert_eq!(items.len(), 1, "only the valid body is kept");
+        assert_eq!(items[0].0.name, "Body1");
+        assert!(
+            notes.iter().any(|n| n.contains("BrokenSliver: skipped: meshing failed")),
+            "warning note must be reported for skipped body: {notes:?}"
+        );
+
+        // However, if all bodies fail (or only the broken body is exported), it must return Err
+        let only_broken = [&broken_model_body];
+        let err_res = per_placed_body(&only_broken, |_b, _body| -> Result<(Mesh, Vec<String>)> {
+            Err(IoError::Invalid("not supported yet: tessellation".into()))
+        });
+        assert!(err_res.is_err(), "single failing body must fail the export");
+        Ok(())
+    }
+
     #[test]
     fn step_names_in_a_legacy_encoding() {
         // Exporters that write names in the system encoding instead of Part 21 escapes (#2344).
@@ -1894,6 +2095,7 @@ mod tests {
                 setbacks: Vec::new(),
                 turn: Default::default(),
                 tangent_chain: true,
+                edge_radii: Vec::new(),
             },
             None,
         )
@@ -2140,6 +2342,7 @@ mod tests {
                 setbacks: Vec::new(),
                 turn: Default::default(),
                 tangent_chain: true,
+                edge_radii: Vec::new(),
             },
             None,
         )

@@ -191,6 +191,9 @@ pub struct Body {
     /// ([`Body::flat_spline_face`]): made on first use, shared by clones as `smlib` is. None
     /// when the record was refused, kept like `smlib`'s refusal so it is not tried again.
     pub(crate) ops: std::sync::Arc<std::sync::OnceLock<Option<(solidcore_ops::Body, solidcore_ops::Order)>>>,
+    /// The record prepared for its outline ([`Body::outline_prepared`]): made on first use,
+    /// shared by clones as `smlib` is.
+    pub(crate) outline: std::sync::Arc<OutlinePrep>,
     /// Bounding-box diagonal of the vertices, measured when the body was made; 0 means "not
     /// measured, walk the geometry". Every kernel tolerance is a fraction of it.
     pub(crate) size: f64,
@@ -647,7 +650,39 @@ impl SurfaceKind {
     }
 }
 
+/// A record prepared for hidden lines with [`OUTLINE_TRIM_SAMPLES`], or why it could not be.
+#[derive(Default)]
+pub(crate) struct OutlinePrep(std::sync::OnceLock<Option<solidcraft_geom::hlr::Prepared>>);
+
+impl std::fmt::Debug for OutlinePrep {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(if self.0.get().is_some() { "OutlinePrep(made)" } else { "OutlinePrep" })
+    }
+}
+
+/// Boundary samples per curve piece of the faces' trims when a body is prepared for its outline
+/// ([`Body::outline_prepared`]).
+pub const OUTLINE_TRIM_SAMPLES: usize = 1024;
+
 impl Body {
+    /// The record prepared for hidden lines ([`solidcraft_geom::hlr::prepare`] with
+    /// [`OUTLINE_TRIM_SAMPLES`] on one thread), as a whole-body projection traces its outline:
+    /// made the first time it is asked for and shared by clones, which share the record. None
+    /// for a mesh body and when the record cannot be prepared.
+    pub fn outline_prepared(&self) -> Option<&solidcraft_geom::hlr::Prepared> {
+        self.outline
+            .0
+            .get_or_init(|| {
+                if self.is_mesh() {
+                    return None;
+                }
+                let opts =
+                    solidcraft_geom::hlr::Options { trim_samples: OUTLINE_TRIM_SAMPLES, threads: 1, ..solidcraft_geom::hlr::Options::default() };
+                solidcraft_geom::hlr::prepare(self.record(), &opts).ok()
+            })
+            .as_ref()
+    }
+
     /// A body with `record` and nothing else set.
     fn bare(record: Brep, mesh: Option<std::sync::Arc<crate::meshbody::TriMesh>>) -> Body {
         let size = span_of(&record);
@@ -656,6 +691,7 @@ impl Body {
             placing: std::sync::Arc::default(),
             smlib: std::sync::Arc::new(std::sync::OnceLock::new()),
             ops: std::sync::Arc::new(std::sync::OnceLock::new()),
+            outline: std::sync::Arc::default(),
             size,
             volume: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
             bounds: std::sync::Arc::new(std::sync::Mutex::new(None)),
@@ -1235,6 +1271,7 @@ impl Body {
             placing: self.placing.clone(),
             smlib: std::sync::Arc::new(std::sync::OnceLock::new()),
             ops: std::sync::Arc::new(std::sync::OnceLock::new()),
+            outline: std::sync::Arc::default(),
             // A rigid motion keeps the size and the volume.
             size: self.size,
             volume: self.volume.clone(),
@@ -1621,31 +1658,40 @@ impl Body {
         (self.size() * 1e-7).max(1e-9) * 10.0
     }
 
-    /// Edges `indices` (record edge indices) in `plane`'s coordinates, exactly: lines, circular
-    /// arcs, single free-form segments, and a free-form curve of several spans as the one
-    /// B-spline it is, for a sketch to project them. An edge out of the plane that lies on a
-    /// cylinder whose axis is `plane`'s normal (a hole's rim on a curved wall) projects onto that
-    /// cylinder's circle: the arc of it ([`Body::projected_on_cylinder`]). `None` for any other
-    /// edge that doesn't lie in a plane parallel to `plane`, one that isn't read exactly or isn't
-    /// there, and for every edge of a mesh body.
+    /// Edges `indices` (record edge indices) as planar curves in `plane`'s coordinates:
+    /// lines, circular arcs and splines with their own knots and weights. An edge must lie
+    /// in a plane parallel to `plane`, except a cylinder's rim read along its axis
+    /// ([`Body::projected_on_cylinder`]). Nonparallel curves, unreadable edges and mesh
+    /// bodies return `None`; drawing measurements must not measure a flattened image.
     pub fn planar_edges(&self, plane: &solidcore_record::Plane, indices: &[usize]) -> Vec<Option<Vec<crate::PlanarPiece>>> {
         if self.is_mesh() {
             return vec![None; indices.len()];
         }
         let tol = self.planar_edges_tolerance();
-        let mut faces = None;
         indices
             .iter()
             .map(|i| {
-                let mut work = 262_144usize;
-                let run = crate::prism_curve::Run::of(&self.record, *i, true)?;
-                crate::prism_curve::projected_curves(&run, plane, tol, &mut work).or_else(|| {
-                    let faces = faces.get_or_insert_with(|| crate::history::edge_faces(&self.record));
-                    let segs = self.projected_on_cylinder(plane, *i, faces.get(*i)?, tol)?;
-                    Some(segs.into_iter().map(crate::PlanarPiece::Seg).collect())
-                })
+                if solidcore_ops::spline_projection::has_parallel_projection(&self.record, plane, *i, tol) {
+                    solidcore_ops::spline_projection::project_edges(&self.record, plane, &[*i], tol).pop().flatten()
+                } else {
+                    self.cylinder_edge_projection(plane, *i)
+                }
             })
             .collect()
+    }
+
+    /// The circle or arc of a cylinder bounded by this edge, viewed along its axis.
+    /// Uses the body's existing tolerance and the kernel's monotone-turn certificate.
+    pub fn cylinder_edge_projection(&self, plane: &solidcore_record::Plane, edge: usize) -> Option<Vec<crate::PlanarPiece>> {
+        if self.is_mesh() {
+            return None;
+        }
+        let tol = self.planar_edges_tolerance();
+        if solidcore_ops::spline_projection::has_parallel_projection(&self.record, plane, edge, tol) {
+            return None;
+        }
+        let faces = crate::history::faces_of(self.record.edges.get(edge)?);
+        self.projected_on_cylinder(plane, edge, &faces, tol).map(|segs| segs.into_iter().map(crate::PlanarPiece::Seg).collect())
     }
 
     /// Edge `edge` projected on `plane` as the arc it covers of the circle of a cylinder it

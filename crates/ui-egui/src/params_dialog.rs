@@ -7,7 +7,8 @@
 //! (`expr.evaluate`) with a live model preview; Enter or leaving the field applies them.
 //! With "Apply each change as you leave its field" off (a remembered preference, #9279), they
 //! wait instead, without a preview, until Apply or OK sets them in one `parameters.change`.
-//! Escape closes the window and discards pending edits and their preview.
+//! Escape closes the window and discards pending edits and their preview; Cancel and Escape also
+//! put back the expressions applied live since the dialog opened, in one undo step (#15377).
 //! Import and export go through `parameters.import` / `parameters.export`.
 //!
 //! [`complete`] adds suggestions (parameters, functions, units) under any expression box: the
@@ -37,6 +38,13 @@ pub struct ParamsDialog {
     reset_scroll: bool,
     /// Expressions being edited, by parameter name.
     pub editing: std::collections::BTreeMap<String, String>,
+    /// Expressions applied live since the dialog opened (#15377), by parameter name: the one the
+    /// parameter had before the first, and the one the design listed right after the last, read
+    /// before anything else can change it. Cancel and Escape put the first back.
+    applied: std::collections::BTreeMap<String, (String, String)>,
+    /// Expressions applied and still computing off the window thread, by parameter name: their
+    /// rows show them until the change is in.
+    pub(crate) applying: std::collections::BTreeMap<String, String>,
     /// Comments being edited, by parameter name.
     pub comments: std::collections::BTreeMap<String, String>,
     /// A parameter being renamed: (old name, new name).
@@ -223,8 +231,13 @@ pub(crate) fn cancel_on_escape(app: &mut SolveApp, ctx: &egui::Context) -> bool 
         i.raw.events.retain(|event| !matches!(event, egui::Event::Key { key: egui::Key::Escape, modifiers, .. } if modifiers.matches_logically(egui::Modifiers::NONE)));
     });
     // Dropping the dialog discards every draft. The regular preview update clears its scene.
-    if let Some(d) = app.params.take() {
-        d.forget_grids(ctx);
+    // What was applied live goes back first; a refused put-back keeps the dialog open to say so.
+    if let Some(mut d) = app.params.take() {
+        if revert_applied(app, &mut d) {
+            d.forget_grids(ctx);
+        } else {
+            app.params = Some(d);
+        }
     }
     app.esc_handled = true;
     true
@@ -240,6 +253,18 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let Some(mut d) = app.params.take() else { return };
     forget_refused_add(app, &mut d);
+    if !d.applying.is_empty() && app.computing_since().is_none() && app.deferred_queue.is_empty() {
+        // A live edit computed off the window thread (#6777) is in now; what the design lists for
+        // it is what Cancel later checks is still there (#15377), as `apply_grid` read it too early.
+        let listed = rows(app);
+        for name in std::mem::take(&mut d.applying).into_keys() {
+            if let Some(entry) = d.applied.get_mut(&name)
+                && let Some(now) = listed.iter().find(|l| l.name == name)
+            {
+                entry.1 = now.expression.clone();
+            }
+        }
+    }
     d.sort = ctx.data_mut(|m| m.get_persisted(sort_id())).unwrap_or_default();
     let sort = d.sort;
     ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
@@ -404,9 +429,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         }
     }
     // Held edits (#9279) are set by Apply and OK; Cancel, the close button and Escape drop them.
+    // Cancel and Escape also put back what was applied live (#15377); the close button keeps it,
+    // as closing the window the usual way never loses an edit.
     let (closed, action) = outcome;
     let applied = live || !matches!(action, ui_kit::Action::Ok | ui_kit::Action::Apply) || apply_held(app, &mut d, &all);
-    let close = closed || action == ui_kit::Action::Cancel || (action == ui_kit::Action::Ok && applied);
+    let cancelled = action == ui_kit::Action::Cancel && revert_applied(app, &mut d);
+    let close = closed || cancelled || (action == ui_kit::Action::Ok && applied);
     // Each cell owns fresh Enter from raw events. The panel itself must not submit on
     // Enter in the filter or with unrelated focus (the legacy editor left those alone), but
     // the filter, rename and comment fields still see Enter first to give up focus.
@@ -648,9 +676,10 @@ impl ParamGrid<'_> {
         self.rows.get(row).copied()
     }
 
-    /// The expression a row shows: an edit held for Apply or being typed, else the design's.
+    /// The expression a row shows: an edit held for Apply or being typed, else one still being
+    /// applied, else the design's.
     fn expression<'r>(&'r self, r: &'r Row) -> &'r str {
-        self.d.editing.get(&r.name).map_or(r.expression.as_str(), String::as_str)
+        self.d.editing.get(&r.name).or_else(|| self.d.applying.get(&r.name)).map_or(r.expression.as_str(), String::as_str)
     }
 
     /// What the cell being typed in holds until its edit commits: the draft it had before (an edit
@@ -1044,11 +1073,25 @@ fn apply_grid(app: &mut SolveApp, ctx: &egui::Context, d: &mut ParamsDialog, row
         d.error = held_error;
         return;
     }
-    match run_as_one(app, &all) {
+    let ran = match all.as_slice() {
+        [("parameters.change", params)] => change(app, d, params.clone()),
+        _ => run_as_one(app, &all),
+    };
+    match ran {
         Ok(()) => {
             d.error = held_error;
+            // Listed once, right after the edit, before anything else can change it (#15377).
+            let listed = if applied.is_empty() { Vec::new() } else { self::rows(app) };
             for name in applied {
                 d.editing.remove(&name);
+                // The first live edit keeps the expression to put back (#15377); the design may
+                // write the edit differently (`30` becomes `30 mm`), so what it lists now is what
+                // Cancel later checks is still there.
+                if let Some(r) = find(&name)
+                    && let Some(now) = listed.iter().find(|l| l.name == name)
+                {
+                    d.applied.entry(name).or_insert_with(|| (r.expression.clone(), String::new())).1 = now.expression.clone();
+                }
             }
             for name in comments {
                 d.comments.remove(&name);
@@ -1059,6 +1102,25 @@ fn apply_grid(app: &mut SolveApp, ctx: &egui::Context, d: &mut ParamsDialog, row
             ui_kit::Grid::refuse(ctx, grid_state(d, salt), &error);
         }
     }
+}
+
+/// Run a `parameters.change` as the timeline's commands run (#6777): a rebuild that takes a while
+/// computes off the window thread, which goes on drawing meanwhile, and its rows show the
+/// expressions being applied until the change is in.
+fn change(app: &mut SolveApp, d: &mut ParamsDialog, params: Value) -> Result<(), String> {
+    let applying: Vec<(String, String)> = match (params.get("name").and_then(Value::as_str), params.get("expression").and_then(Value::as_str)) {
+        (Some(name), Some(expression)) => vec![(name.to_owned(), expression.to_owned())],
+        _ => params
+            .get("changes")
+            .and_then(Value::as_object)
+            .map(|changes| changes.iter().filter_map(|(name, e)| Some((name.clone(), e.as_str()?.to_owned()))).collect())
+            .unwrap_or_default(),
+    };
+    app.run_heavy("parameters.change", params)?;
+    if app.computing_since().is_some() || !app.deferred_queue.is_empty() {
+        d.applying.extend(applying);
+    }
+    Ok(())
 }
 
 /// Run `steps` as one gesture: all of them or none, and one undo step for all. A refused step
@@ -1136,13 +1198,43 @@ fn apply_held(app: &mut SolveApp, d: &mut ParamsDialog, rows: &[Row]) -> bool {
         Some((name, expression)) if changes.len() == 1 => json!({"name": name, "expression": expression}),
         Some(_) => json!({"changes": changes}),
     };
-    d.error = app.run("parameters.change", params).err();
+    d.error = change(app, d, params).err();
     if d.error.is_some() {
         return false;
     }
     for name in changes.keys() {
         d.editing.remove(name);
     }
+    true
+}
+
+/// Put back the expressions applied live since the dialog opened (#15377): one
+/// `parameters.change`, so the design rebuilds once and one undo (or redo) covers them. A
+/// parameter changed since by something else (an agent, an undo) or gone (renamed, deleted) is
+/// left as it is. False, with the error shown, when the put-back is refused; what to put back is kept for the next try.
+/// An edit still computing off the window thread (#6777) is not in the design yet: its put-back
+/// waits its turn behind it.
+fn revert_applied(app: &mut SolveApp, d: &mut ParamsDialog) -> bool {
+    if d.applied.is_empty() {
+        return true;
+    }
+    let now = rows(app);
+    let changes: serde_json::Map<String, Value> = d
+        .applied
+        .iter()
+        .filter_map(|(name, (before, listed))| {
+            let current = &now.iter().find(|r| r.name == *name)?.expression;
+            (d.applying.contains_key(name) || (listed == current && current != before)).then(|| (name.clone(), json!(before)))
+        })
+        .collect();
+    if !changes.is_empty() {
+        let params = json!({"changes": changes});
+        d.error = if d.applying.is_empty() { app.run("parameters.change", params) } else { app.run_heavy("parameters.change", params) }.err();
+        if d.error.is_some() {
+            return false;
+        }
+    }
+    d.applied.clear();
     true
 }
 
@@ -1442,7 +1534,9 @@ pub(crate) fn unit_token(ctx: &egui::Context, word: &str) -> bool {
 /// number in it with Up/Down or the wheel (`value_step`, #2320).
 /// Returns true when either changed the text; callers must not submit that frame.
 pub fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut String) -> bool {
-    crate::expression_complete::complete(ui, resp, text) || crate::value_step::step(ui, resp, text)
+    let changed = crate::expression_complete::complete(ui, resp, text) || crate::value_step::step(ui, resp, text);
+    ui_kit::note_numeric_edit(ui, resp, Some(text), resp.changed(), changed);
+    changed
 }
 
 /// SolidCraft's expression language for the kit's value fields: literals and units as
@@ -1456,6 +1550,11 @@ impl ui_kit::Expressions for DocExpressions {
 
     fn is_unit(&self, unit: &str) -> bool {
         solidcraft_engine::doc::expr::unit_info(unit).is_some()
+    }
+
+    fn unit_is_prefix(&self, unit: &str) -> bool {
+        let unit = if unit == "μ" { "µ" } else { unit };
+        !unit.is_empty() && solidcraft_engine::doc::expr::UNITS.iter().any(|(name, _, _)| *name != unit && name.starts_with(unit))
     }
 
     fn complete(&self, ui: &mut egui::Ui, response: &egui::Response, text: &mut String) -> bool {
@@ -1504,6 +1603,44 @@ pub(crate) fn install_expressions(ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn numeric_field_waits_for_unit_completion() {
+        let ctx = crate::fonts::test_context();
+        install_expressions(&ctx);
+        let mut value = String::new();
+        let mut id = egui::Id::NULL;
+        let mut draw = |time, text: &str| {
+            let events = if text.is_empty() { vec![] } else { vec![egui::Event::Text(text.into())] };
+            let mut ready = true;
+            let output = ui_kit::test_support::raw_frame(&ctx, egui::RawInput { time: Some(time), events, ..Default::default() }, |ui| {
+                id = ui_kit::checked_field(ui, &mut value, "", false).1.id;
+                ready = ui_kit::numeric_preview_ready(ui.ctx());
+            });
+            ctx.memory_mut(|m| m.request_focus(id));
+            (value.clone(), ready, output)
+        };
+        draw(0.0, "");
+        assert_eq!(draw(0.01, "2").0, "2", "a complete number updates immediately");
+        let (text, ready, output) = draw(0.02, "m");
+        assert_eq!(text, "2m", "completion and caret handling retain the draft");
+        assert!(!ready, "m may still become mm or mil; do not preview two metres");
+        assert!(ui_kit::test_support::text_shapes(&output).any(|s| s.galley.text() == "2m"), "the draft remains visible");
+        let (text, ready, _) = draw(0.03, "m");
+        assert_eq!(text, "2mm");
+        assert!(ready, "a completed unit updates immediately");
+    }
+
+    #[test]
+    fn numeric_unit_prefixes_follow_the_expression_languages_units() {
+        let host: &dyn ui_kit::Expressions = &DocExpressions;
+        for unit in ["m", "mi", "i", "in", "r", "µ", "μ"] {
+            assert!(host.unit_is_prefix(unit), "{unit}");
+        }
+        for unit in ["", "mm", "cm", "rad", "inch", "R"] {
+            assert!(!host.unit_is_prefix(unit), "{unit}");
+        }
+    }
 
     #[test]
     fn parameter_names_show_one_tooltip_and_only_repeat_clipped_names() {
@@ -1705,15 +1842,21 @@ mod tests {
         escape_closed(&mut h, &before, "10 mm");
     }
 
+    /// #3399, #15377: Escape drops what is being typed and puts back an edit already applied, in
+    /// one undo step.
     #[test]
-    fn escape_keeps_previously_committed_parameter_edit() {
+    fn escape_drops_the_typed_value_and_puts_back_a_previously_committed_parameter_edit() {
         let mut h = escape_dialog();
         escape_type(&mut h, "param:width", "20 mm");
         h.step(&json!({"key":"Enter"})).unwrap();
         assert_eq!(h.app.session.doc.param("width").unwrap().expr, "20 mm");
-        let before = escape_state(&h);
+        let undo = h.app.session.undo.len();
         escape_type(&mut h, "param:width", "30 mm");
-        escape_closed(&mut h, &before, "20 mm");
+        escape_key(&mut h, true);
+        assert!(h.app.params.is_none(), "the first Escape press closes Parameters");
+        assert_eq!(h.app.session.doc.param("width").unwrap().expr, "10 mm", "30 mm is never applied and 20 mm goes back");
+        assert_eq!(h.app.session.undo.len(), undo + 1, "one step puts the edit back");
+        escape_key(&mut h, false);
     }
 
     #[test]
@@ -1787,6 +1930,126 @@ mod tests {
         assert!(d.editing.is_empty() && d.error.is_none());
         h.app.run("edit.undo", json!({})).unwrap();
         assert_eq!((expression(&h, "w").as_str(), expression(&h, "h").as_str()), ("10 mm", "20 mm"), "one undo takes both back");
+    }
+
+    /// #15377: the box of `held_dialog`, the dialog open with live updates on (the default).
+    fn live_dialog() -> crate::scenario::Harness {
+        let mut h = held_dialog();
+        h.app.preferences.parameters_apply_live = true;
+        h.frames(2);
+        h
+    }
+
+    fn reopen(h: &mut crate::scenario::Harness) {
+        h.step(&json!({"start":"parameters.change"})).unwrap();
+        h.frames(2);
+    }
+
+    #[test]
+    fn live_edits_are_put_back_by_cancel_or_escape_in_one_undo_step_and_kept_by_ok_or_the_close_button() {
+        let mut h = live_dialog();
+        let undo = h.app.session.undo.len();
+        hold(&mut h, "w", "30 mm");
+        hold(&mut h, "h", "w * 2");
+        hold(&mut h, "w", "35 mm");
+        assert_eq!((expression(&h, "w").as_str(), expression(&h, "h").as_str()), ("35 mm", "w * 2"), "live edits apply as each field is left");
+        h.step(&json!({"click":{"handle":"dialog:Cancel"}})).unwrap();
+        assert!(h.app.params.is_none(), "Cancel closes the dialog");
+        assert_eq!((expression(&h, "w").as_str(), expression(&h, "h").as_str()), ("10 mm", "20 mm"), "Cancel puts back what the dialog opened with");
+        assert_eq!(h.app.session.undo.len(), undo + 4, "three live edits, then one step that puts both parameters back");
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!((expression(&h, "w").as_str(), expression(&h, "h").as_str()), ("35 mm", "w * 2"), "one undo brings the edits back");
+        h.app.run("edit.redo", json!({})).unwrap();
+
+        reopen(&mut h);
+        hold(&mut h, "w", "30 mm");
+        escape_key(&mut h, true);
+        escape_key(&mut h, false);
+        assert!(h.app.params.is_none());
+        assert_eq!(expression(&h, "w"), "10 mm", "Escape puts live edits back");
+
+        reopen(&mut h);
+        escape_type(&mut h, "param:w", "30 mm");
+        h.step(&json!({"click":{"handle":"dialog:Cancel"}})).unwrap();
+        assert!(h.app.params.is_none());
+        assert_eq!(expression(&h, "w"), "10 mm", "an edit applied by the Cancel click that leaves its field goes back too");
+
+        reopen(&mut h);
+        hold(&mut h, "w", "30 mm");
+        h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
+        assert!(h.app.params.is_none());
+        assert_eq!(expression(&h, "w"), "30 mm", "OK keeps live edits");
+
+        reopen(&mut h);
+        hold(&mut h, "w", "40 mm");
+        h.step(&json!({"click":{"handle":"params:close"}})).unwrap();
+        assert!(h.app.params.is_none());
+        assert_eq!(expression(&h, "w"), "40 mm", "the close button only closes, keeping live edits");
+    }
+
+    #[test]
+    fn cancel_leaves_a_parameter_changed_elsewhere() {
+        let mut h = live_dialog();
+        hold(&mut h, "w", "30 mm");
+        hold(&mut h, "h", "25 mm");
+        h.frames(1);
+        // An agent changes `w` while the dialog is open: Cancel must not undo that.
+        h.app.run("parameters.change", json!({"name":"w","expression":"40 mm"})).unwrap();
+        h.frames(1);
+        h.step(&json!({"click":{"handle":"dialog:Cancel"}})).unwrap();
+        assert_eq!((expression(&h, "w").as_str(), expression(&h, "h").as_str()), ("40 mm", "20 mm"), "only the dialog's own edit goes back");
+    }
+
+    /// An agent can change a parameter between the frame that applies a live edit and the next
+    /// one that lists the rows: Escape and Cancel leave the agent's expression (#15377 review).
+    #[test]
+    fn cancel_and_escape_leave_a_change_made_before_the_rows_are_listed_again() {
+        for escape in [true, false] {
+            let mut h = live_dialog();
+            escape_type(&mut h, "param:w", "30 mm");
+            // Enter applies the edit in this one frame; nothing lists the rows after it.
+            h.app.synthetic.push(egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            });
+            h.frame();
+            assert_eq!(expression(&h, "w"), "30 mm", "Enter applied the edit live");
+            h.app.run("parameters.change", json!({"name":"w","expression":"40 mm"})).unwrap();
+            if escape {
+                escape_key(&mut h, true);
+                escape_key(&mut h, false);
+            } else {
+                h.step(&json!({"click":{"handle":"dialog:Cancel"}})).unwrap();
+            }
+            assert!(h.app.params.is_none(), "escape {escape}: the dialog closes");
+            assert_eq!(expression(&h, "w"), "40 mm", "escape {escape}: the agent's change stays");
+        }
+    }
+
+    /// A refused put-back keeps the dialog open with its error, and the next Cancel tries again
+    /// (#15377 review).
+    #[test]
+    fn a_refused_put_back_is_tried_again_by_the_next_cancel() {
+        let mut h = live_dialog();
+        h.app.run("parameters.add", json!({"name":"k","expression":"5 mm"})).unwrap();
+        h.app.run("parameters.change", json!({"name":"w","expression":"k * 2"})).unwrap();
+        h.frames(2);
+        hold(&mut h, "w", "30 mm");
+        assert_eq!(expression(&h, "w"), "30 mm");
+        // Without `k`, `k * 2` can't go back.
+        h.app.run("parameters.delete", json!({"name":"k"})).unwrap();
+        h.frames(1);
+        h.step(&json!({"click":{"handle":"dialog:Cancel"}})).unwrap();
+        assert!(h.app.params.as_ref().is_some_and(|d| d.error.is_some()), "the refused put-back keeps the dialog open with its error");
+        assert_eq!(expression(&h, "w"), "30 mm");
+        h.app.run("parameters.add", json!({"name":"k","expression":"5 mm"})).unwrap();
+        h.frames(1);
+        h.step(&json!({"click":{"handle":"dialog:Cancel"}})).unwrap();
+        assert!(h.app.params.is_none(), "the second Cancel puts it back and closes");
+        assert_eq!(expression(&h, "w"), "k * 2");
     }
 
     #[test]

@@ -27,9 +27,11 @@ pub mod csv;
 pub mod display_quality;
 pub mod display_units;
 mod document;
+pub mod drafting_profile;
 pub mod drawing;
 pub mod drawing_view;
 pub mod end_cap;
+mod envelope;
 mod eval;
 pub mod expr;
 pub mod face_anchor;
@@ -43,6 +45,7 @@ pub mod gpu_plan;
 mod history_names;
 pub mod hole_reference;
 pub mod ids;
+pub mod import_defects;
 mod inline_params;
 pub use format_offsets::whole_profile_selection_from_value;
 pub use inline_params::Defined;
@@ -67,6 +70,7 @@ pub mod plugin_data;
 pub mod point_cloud;
 mod point_cloud_complex;
 pub mod point_cloud_distribution;
+mod point_expr;
 mod points;
 mod profile_refs;
 pub mod progress;
@@ -90,7 +94,20 @@ pub mod render_settings;
 pub mod render_surface;
 pub mod render_texture_resources;
 pub mod sheet;
+pub mod sheet_library;
+mod sheet_surface;
+mod sheet_surface_convert;
+mod sheet_surface_cuts;
+mod sheet_surface_features;
+mod sheet_surface_fold;
+mod sheet_surface_perforation;
+mod sheet_surface_shadow;
 pub mod sketch_equation;
+pub use sheet_surface_convert::{
+    ConvertRule, RollEdge, RollInfo, RollLine, SheetFaces, SheetMeasure, SurfaceBendLine, SurfaceConversion, SurfaceSheet, convert_surfaces,
+    measure_sheet_body,
+};
+pub use sheet_surface_cuts::{Loose, Recess};
 pub mod text_params;
 pub mod thread_forms;
 pub mod tolerance;
@@ -117,6 +134,7 @@ pub use feature_geometry::restored_thread_pick;
 pub use names::{BodyName, FeatureId, FeatureName, SketchId, copy_name};
 pub use params::{ParamRow, ParamUser, cycles, name_words_match};
 pub use points::{Dir, FacePick, Position, plain};
+pub use solidcraft_develop as develop;
 pub use solidcraft_kernel as kernel;
 pub use solidcraft_sketch as sketch;
 
@@ -137,6 +155,11 @@ pub enum DocError {
     /// empty until the evaluation of the feature fills it in ([`DocError::in_feature`]).
     #[error("{}", reselect_message(feature, reference))]
     Reselect { feature: String, reference: String },
+    /// An id or index read from a body's record or a sheet's own lists names no entry there:
+    /// `what` (say "face") number `index`, where the list holds `count`. The data naming it is
+    /// stale or corrupt; the operation fails instead of reading past the list.
+    #[error("{what} {index} doesn't exist (there are {count}): the data naming it is stale or corrupt")]
+    Missing { what: &'static str, index: usize, count: usize },
     /// A sketch's projections whose face or edge, kept by its persistent name, finds nothing any
     /// more: the sketch fails, naming them as the user sees them. `feature` as for `Reselect`.
     #[error("{}", lost_projections_message(feature, links))]
@@ -267,11 +290,15 @@ pub type Result<T> = std::result::Result<T, DocError>;
 #[cfg(test)]
 mod coil_tests;
 #[cfg(test)]
+mod drafting_profile_tests;
+#[cfg(test)]
 mod feature_walk_tests;
 #[cfg(test)]
 mod named_projection_tests;
 #[cfg(test)]
 mod old_cap_anchor_tests;
+#[cfg(test)]
+mod saved_text_font_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

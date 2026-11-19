@@ -84,6 +84,23 @@ struct Edit {
     /// A driven dimension that nothing else fixes any more, which the value makes driving (its
     /// constraint id; `param` names the parameter it gets).
     driven: Option<String>,
+    /// A drawing's dimension or note, edited on its sheet with the same box: `expr` is its text
+    /// and `param` what the box is headed. None: a sketch dimension's value.
+    sheet: Option<SheetText>,
+}
+
+/// What on a drawing's sheet the inline editor's text belongs to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum SheetText {
+    /// A text cell of a sheet's title block, by the sheet and the cell's name:
+    /// `drawing.sheet.set`'s `title_block_overrides` (nothing, or the cell's own value typed back,
+    /// shows that value again).
+    TitleCell { sheet: u64, cell: String },
+    /// A dimension's text: `drawing.dimension.edit`'s `override_text` (nothing, or its measured
+    /// number typed back, shows the number again).
+    Dimension(u64),
+    /// A note's text: `drawing.note.edit`'s `content`.
+    Note(u64),
 }
 
 /// A reference click not yet acted on (see [`Edit::pending`]).
@@ -278,6 +295,7 @@ pub fn begin_dimension(app: &mut SolveApp, entities: Vec<String>, at: Vec2) -> R
             caret: None,
             sketch: None,
             driven: None,
+            sheet: None,
         })
     });
     PLACEMENT.with(|preview| *preview.borrow_mut() = None);
@@ -319,6 +337,7 @@ pub fn begin_live(app: &mut SolveApp, entities: Vec<String>, pointer: Option<Pos
             caret: None,
             sketch: None,
             driven: None,
+            sheet: None,
         })
     });
     PLACEMENT.with(|preview| *preview.borrow_mut() = None);
@@ -497,8 +516,9 @@ fn placement_preview(app: &SolveApp) -> Option<(String, DimensionDraft)> {
 
 thread_local! {
     static DRAWN: RefCell<Vec<Drawn>> = const { RefCell::new(Vec::new()) };
-    /// A text being dragged: dimension id, undo depth at the start, grab offset (sketch).
-    static DRAG: RefCell<Option<(String, usize, Vec2)>> = const { RefCell::new(None) };
+    /// What a drag moves: each item and where it was, the undo depth at the start and where the
+    /// pointer pressed (sketch, or paper for a drawing's).
+    static DRAG: RefCell<Option<Drag>> = const { RefCell::new(None) };
     static EDIT: RefCell<Option<Edit>> = const { RefCell::new(None) };
     /// Solves made for drafts so far: each preview's number, which the sketch scene is keyed on.
     static SOLVES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
@@ -578,6 +598,7 @@ fn open_model(app: &mut SolveApp, d: ModelDim) -> bool {
             caret: None,
             sketch: Some(d.sketch),
             driven: None,
+            sheet: None,
         })
     });
     true
@@ -681,9 +702,108 @@ fn open_editor(app: &mut SolveApp, id: Option<String>) -> bool {
             caret: None,
             sketch: None,
             driven,
+            sheet: None,
         })
     });
     true
+}
+
+/// Open the inline editor on a drawing's dimension or note, as a double-click opens it on a
+/// sketch dimension: the same box, at `at` on screen, headed `title`, holding `text`. Enter
+/// changes the text in one undo step, Esc and a click elsewhere leave it as it was.
+pub(crate) fn edit_sheet_text(target: SheetText, title: &str, text: String, at: Pos2) {
+    EDIT.with(|e| {
+        *e.borrow_mut() = Some(Edit {
+            param: title.to_owned(),
+            expr: text,
+            at: Some(at),
+            fresh: FRESH,
+            wait: 0,
+            draft: None,
+            live: None,
+            selection: None,
+            owned: false,
+            typed: false,
+            shown: None,
+            pending: None,
+            caret: None,
+            sketch: None,
+            driven: None,
+            sheet: Some(target),
+        })
+    });
+}
+
+/// What on a drawing's sheet the inline editor is open on, if anything.
+pub(crate) fn sheet_editing() -> Option<SheetText> {
+    EDIT.with(|e| e.borrow().as_ref().and_then(|e| e.sheet.clone()))
+}
+
+/// The inline editor's box on a drawing's sheet (a sketch's is drawn by [`show`]).
+pub(crate) fn show_sheet_editor(app: &mut SolveApp, ctx: &egui::Context) {
+    if sheet_editing().is_some() {
+        edit_box(app, ctx);
+    }
+}
+
+/// Enter in the box on a sheet: the typed text becomes the dimension's or the note's.
+fn change_sheet_text(app: &mut SolveApp, target: SheetText, typed: &str) -> Result<serde_json::Value, String> {
+    let encode = solidcraft_engine::doc::ids::encode;
+    let typed = typed.trim();
+    match target {
+        SheetText::Dimension(id) => {
+            let inspect = |app: &mut SolveApp| app.run("drawing.dimension.inspect", json!({"dimension": encode(id)}));
+            let edit = |app: &mut SolveApp, text: serde_json::Value| {
+                app.run("drawing.dimension.edit", json!({"dimension": encode(id), "set": {"override_text": text}}))
+                    .map_err(|err| shown_error("drawing.dimension.edit", &err))
+            };
+            let read = inspect(app)?;
+            if read["text"].as_str() == Some(typed) {
+                // As it reads now: nothing to change, and a measured number stays measured.
+                return Ok(read);
+            }
+            if read["record"]["override_text"].is_null() {
+                return if typed.is_empty() { Ok(read) } else { edit(app, json!(typed)) };
+            }
+            // It shows a text instead of its number. The number shows again first: typed back, or
+            // with nothing typed, that is the whole change, and the dimension follows the model
+            // again. Any other text then takes its place, the two as one undo step.
+            let depth = app.session.undo.len();
+            let measured = edit(app, serde_json::Value::Null)?;
+            if typed.is_empty() || inspect(app)?["text"].as_str() == Some(typed) {
+                return Ok(measured);
+            }
+            let changed = edit(app, json!(typed));
+            if changed.is_ok() {
+                app.session.undo.truncate(depth + 1);
+            } else {
+                // A text that can't be set leaves the one it had.
+                let _ = app.run("edit.undo", json!({}));
+            }
+            changed
+        }
+        SheetText::TitleCell { sheet, cell } => {
+            // As the sheet shows the cell now, and the value a typed text hides.
+            let read = app.run("drawing.inspect", json!({}))?;
+            let shown = read["sheets"]
+                .as_array()
+                .and_then(|sheets| sheets.iter().find(|s| s["id"].as_str() == Some(encode(sheet).as_str())))
+                .and_then(|s| s["title_block_cells"].as_array()?.iter().find(|c| c["name"].as_str() == Some(cell.as_str())))
+                .cloned()
+                .unwrap_or_default();
+            if shown["text"].as_str() == Some(typed) || (typed.is_empty() && shown["value"].is_null()) {
+                return Ok(read);
+            }
+            let own = typed.is_empty() || shown["value"].as_str() == Some(typed);
+            let mut texts = serde_json::Map::new();
+            texts.insert(cell, if own { serde_json::Value::Null } else { json!(typed) });
+            app.run("drawing.sheet.set", json!({"sheet": encode(sheet), "title_block_overrides": texts}))
+                .map_err(|err| shown_error("drawing.sheet.set", &err))
+        }
+        SheetText::Note(id) => {
+            app.run("drawing.note.edit", json!({"note": encode(id), "set": {"content": typed}})).map_err(|err| shown_error("drawing.note.edit", &err))
+        }
+    }
 }
 
 /// A driven dimension that nothing else fixes any more, such as one placed while a Tangent
@@ -737,6 +857,34 @@ fn change_value(app: &mut SolveApp, param: &str, typed: &str) -> Result<serde_js
     app.run("parameters.change", json!({"name": param, "expression": expression})).map_err(|err| shown_error("parameters.change", &err))
 }
 
+/// The dimension whose text a drag moves: one drag for sketch and drawing dimensions alike, each
+/// moved by its own command, one undo step for the whole drag.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Dragged {
+    /// A sketch dimension, by its constraint id: `sketch.dimension_text`.
+    Sketch(String),
+    /// A drawing dimension, by its id: `drawing.dimension.edit` with `text_to_mm`, on paper.
+    Drawing(u64),
+    /// A drawing's note, by its id: `drawing.note.edit` with `at`, on paper from its sheet's corner
+    /// or its view's centre, as the note keeps it.
+    Note(u64),
+    /// A drawing view, by its id: `drawing.view.move` with `to_mm`, its centre on the sheet.
+    View(u64),
+    /// A drawing's balloon, by its id: `drawing.balloon.edit` with `at`, as the balloon keeps it.
+    Balloon(u64),
+    /// A drawing's table, by its id: `drawing.table.edit` with `place: {at}`, its top left.
+    Table(u64),
+}
+
+/// A drag in progress: everything it moves, each from where it was, by how far the pointer has
+/// gone since `press`. One item, or a whole selection, as a sketch drags its selected geometry.
+#[derive(Clone, Debug)]
+struct Drag {
+    items: Vec<(Dragged, Vec2)>,
+    depth: usize,
+    press: Vec2,
+}
+
 /// Start dragging the text of the dimension under `press` (true: a dimension took the drag).
 /// Its lines take it only off sketch geometry (`on_geometry`: a point or curve is under `press`).
 pub fn drag_start(app: &SolveApp, press: Pos2, press_sketch: Vec2, on_geometry: bool) -> bool {
@@ -746,8 +894,23 @@ pub fn drag_start(app: &SolveApp, press: Pos2, press_sketch: Vec2, on_geometry: 
     }) else {
         return false;
     };
-    DRAG.with(|g| *g.borrow_mut() = Some((d.id, app.session.undo.len(), d.at - press_sketch)));
+    begin_drag(app, Dragged::Sketch(d.id), d.at, press_sketch);
     true
+}
+
+/// Start dragging `dragged`'s text, which is at `text` now, from the pointer at `press` (both in
+/// the sketch's coordinates, or on paper for a drawing's).
+pub(crate) fn begin_drag(app: &SolveApp, dragged: Dragged, text: Vec2, press: Vec2) {
+    begin_group_drag(app, vec![(dragged, text)], press);
+}
+
+/// Start dragging several things at once, each from where it is now (`items`), by the pointer's
+/// way from `press`: a drawing's selection moves together, one undo step for the whole drag.
+pub(crate) fn begin_group_drag(app: &SolveApp, items: Vec<(Dragged, Vec2)>, press: Vec2) {
+    if items.is_empty() {
+        return;
+    }
+    DRAG.with(|g| *g.borrow_mut() = Some(Drag { items, depth: app.session.undo.len(), press }));
 }
 
 /// Is a dimension text being dragged?
@@ -755,14 +918,32 @@ pub fn dragging() -> bool {
     DRAG.with(|g| g.borrow().is_some())
 }
 
+/// The dimension being dragged, if any.
+pub(crate) fn dragged() -> Option<Dragged> {
+    DRAG.with(|g| g.borrow().as_ref().and_then(|d| d.items.first().map(|(item, _)| item.clone())))
+}
+
 /// Move the dragged text so it follows the pointer (at `to`, sketch coordinates); one undo
 /// step for the whole drag.
 pub fn drag_to(app: &mut SolveApp, to: Vec2) {
-    let Some((id, depth, off)) = DRAG.with(|g| g.borrow().clone()) else { return };
-    let at = to + off;
-    if app.session.execute("sketch.dimension_text", &json!({"dimension": id, "at": [at.x, at.y]})).is_ok() {
-        app.session.undo.truncate(depth + 1);
+    let Some(drag) = DRAG.with(|g| g.borrow().clone()) else { return };
+    let by = to - drag.press;
+    let encode = solidcraft_engine::doc::ids::encode;
+    for (item, from) in &drag.items {
+        let at = *from + by;
+        let (command, params) = match item {
+            Dragged::Sketch(id) => ("sketch.dimension_text", json!({"dimension": id, "at": [at.x, at.y]})),
+            Dragged::Drawing(id) => ("drawing.dimension.edit", json!({"dimension": encode(*id), "set": {"text_to_mm": [at.x, at.y]}})),
+            Dragged::Note(id) => ("drawing.note.edit", json!({"note": encode(*id), "set": {"at": [at.x, at.y]}})),
+            Dragged::View(id) => ("drawing.view.move", json!({"view": encode(*id), "to_mm": [at.x, at.y]})),
+            Dragged::Balloon(id) => ("drawing.balloon.edit", json!({"balloon": encode(*id), "set": {"at": [at.x, at.y]}})),
+            Dragged::Table(id) => ("drawing.table.edit", json!({"table": encode(*id), "set": {"place": {"at": [at.x, at.y]}}})),
+        };
+        // One that can't go there stays where it is; the rest still move.
+        let _ = app.session.execute(command, &params);
     }
+    // Each step keeps the design as it was before it: the first, from before the drag, undoes it all.
+    app.session.undo.truncate(drag.depth + 1);
 }
 
 pub fn drag_end() {
@@ -1058,6 +1239,7 @@ pub fn edit_param(app: &SolveApp, param: &str) {
             caret: None,
             sketch: None,
             driven: None,
+            sheet: None,
         })
     });
 }
@@ -1250,7 +1432,13 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
     if !ctx.input(|i| i.pointer.any_down()) {
         e.caret = egui::TextEdit::load_state(ctx, egui::Id::unique("sc_dim_edit")).and_then(|s| s.cursor.char_range()).or(e.selection);
     }
-    flush_pending(app, ctx, &mut e);
+    if e.sheet.is_some() && !crate::drawing_workspace::active(app) {
+        // The Drawing workspace was left with its box open: the text stays as it was.
+        return;
+    }
+    if e.sheet.is_none() {
+        flush_pending(app, ctx, &mut e);
+    }
     if e.at.is_none() {
         e.at = DRAWN.with(|d| d.borrow().iter().find(|x| x.param.as_deref() == Some(e.param.as_str())).map(|x| x.text.center()));
     }
@@ -1262,7 +1450,7 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
         }
         return;
     };
-    if window::on(app) {
+    if e.sheet.is_none() && window::on(app) {
         let (done, escaped) = window::show(app, ctx, &mut e, at);
         return settle(app, e, done, escaped);
     }
@@ -1286,8 +1474,16 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
             Container::show_backing(ui, frame, |ui| {
                 crate::ui_kit::scope(ui, |ui| {
                     ui.set_max_width(popup_width);
-                    crate::ui_kit::text(ui, &solidcraft_ui_text::format("dialog.dimension_name", &[("name", &e.param)]), crate::ui_kit::Text::Inline)
+                    if e.sheet.is_some() {
+                        crate::ui_kit::text(ui, &e.param, crate::ui_kit::Text::Inline);
+                    } else {
+                        crate::ui_kit::text(
+                            ui,
+                            &solidcraft_ui_text::format("dialog.dimension_name", &[("name", &e.param)]),
+                            crate::ui_kit::Text::Inline,
+                        )
                         .backing_on_hover_text(solidcraft_ui_text::tr("dialog.dimension_insert_hint"));
+                    }
                     if !e.owned {
                         // The whole value is selected before the field reads its state, every frame
                         // until the person takes it over, so typing replaces it (#11204). Only on the
@@ -1313,7 +1509,8 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                     if r.has_focus() {
                         e.selection = egui::TextEdit::load_state(ctx, id).and_then(|s| s.cursor.char_range());
                     }
-                    let completed = crate::params_dialog::complete(ui, &r, &mut e.expr);
+                    // A sheet's text is words, not an expression: no parameter names are offered.
+                    let completed = e.sheet.is_none() && crate::params_dialog::complete(ui, &r, &mut e.expr);
                     if completed {
                         e.selection = egui::TextEdit::load_state(ctx, id).and_then(|s| s.cursor.char_range());
                     }
@@ -1361,7 +1558,9 @@ fn settle(app: &mut SolveApp, mut e: Edit, done: Option<bool>, escaped: bool) {
     e.fresh = e.fresh.saturating_sub(1);
     match done {
         Some(true) => {
-            let result = if let Some(draft) = &e.draft {
+            let result = if let Some(target) = e.sheet.clone() {
+                change_sheet_text(app, target, &e.expr)
+            } else if let Some(draft) = &e.draft {
                 if draft.valid(app) {
                     draft
                         .evaluate(app, &e.expr)
@@ -1380,6 +1579,7 @@ fn settle(app: &mut SolveApp, mut e: Edit, done: Option<bool>, escaped: bool) {
                     // The value is selected again, so typing replaces it.
                     EDIT.with(|x| *x.borrow_mut() = Some(Edit { fresh: FRESH, owned: false, ..e }));
                 }
+                Ok(_) if e.sheet.is_some() => {}
                 Ok(reply) => {
                     clear_picks(app);
                     // A new dimension defines its parameter; an edited one renames its own (#4071).

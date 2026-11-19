@@ -73,6 +73,40 @@ fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
+/// #19237: `plugin --help` says what each operation does, and an operation's own help says what
+/// that operation does: `plugin check --help` does not print `plugin test`.
+#[test]
+fn plugin_help_lists_each_operation_and_each_operation_has_its_own_help() {
+    let both = cli(&["plugin", "--help"]);
+    assert!(both.status.success(), "{}", text(&both.stderr));
+    let check = cli(&["plugin", "check", "--help"]);
+    assert!(check.status.success(), "{}", text(&check.stderr));
+    let test = cli(&["plugin", "test", "--help"]);
+    assert!(test.status.success(), "{}", text(&test.stderr));
+    let (both, check, test) = (text(&both.stdout), text(&check.stdout), text(&test.stdout));
+    assert!(both.contains("solidcraft-cli plugin check") && both.contains("solidcraft-cli plugin test"), "{both}");
+    assert!(check.contains("solidcraft-cli plugin check") && !check.contains("solidcraft-cli plugin test"), "{check}");
+    assert!(test.contains("solidcraft-cli plugin test") && !test.contains("solidcraft-cli plugin check"), "{test}");
+    // `plugin --help` is both operations' help, one after the other.
+    let body = |usage: &str| usage.strip_prefix("usage:\n").unwrap_or_default().to_string();
+    assert_eq!(both, format!("usage:\n{}{}", body(&check), body(&test)));
+}
+
+/// #19237: an argument that is not a plugin says what was expected (the plugin's package folder,
+/// or its .zip), not the CLI's generic usage.
+#[test]
+fn an_argument_that_is_not_a_plugin_says_what_it_expected() {
+    let scratch = Scratch::new();
+    let nowhere = scratch.path("nowhere");
+    for action in ["check", "test"] {
+        let output = cli(&["plugin", action, &nowhere]);
+        assert!(!output.status.success(), "`plugin {action}` succeeded");
+        let (stdout, stderr) = (text(&output.stdout), text(&output.stderr));
+        assert!(stdout.contains("fix: Give the plugin's package folder"), "plugin {action}: {stdout}");
+        assert!(!stderr.contains("usage:"), "plugin {action}: {stderr}");
+    }
+}
+
 #[test]
 fn check_passes_good_packages_and_names_each_broken_one_with_its_fix() {
     let scratch = Scratch::new();
@@ -200,4 +234,94 @@ fn an_importers_cases_open_their_files_and_check_the_loss_report() {
     std::fs::write(Path::new(&path).join("tests/missing.json"), json!({"entry":"convert","file":"missing.smp"}).to_string()).unwrap();
     let output = cli(&["plugin", "test", &path]);
     assert!(!output.status.success() && text(&output.stdout).contains("FAIL  missing (convert)"), "{}", text(&output.stdout));
+}
+
+#[test]
+fn require_cases_fails_an_untested_entry_in_a_folder_and_a_zip() {
+    let scratch = Scratch::new();
+    let path = package(&scratch.0, &importer_manifest(), &wat::parse_str(fixture("importer")).unwrap(), &[]);
+    let output = cli(&["plugin", "test", &path]);
+    let stdout = text(&output.stdout);
+    assert!(output.status.success() && stdout.contains("copier 1.0.0: 0 passed, 0 failed, 1 skipped"), "{stdout}");
+    let manifest = importer_manifest().to_string();
+    let component = wat::parse_str(fixture("importer")).unwrap();
+    let zip = solidcraft_engine::io::safe_zip::write(&[("copier/plugin.json", manifest.as_bytes()), ("copier/copier.wasm", &component)]).unwrap();
+    std::fs::write(scratch.0.join("copier.zip"), zip).unwrap();
+    for package in [path, scratch.path("copier.zip")] {
+        let output = cli(&["plugin", "test", &package, "--require-cases"]);
+        let stdout = text(&output.stdout);
+        assert!(!output.status.success(), "{package}: {stdout}");
+        assert!(stdout.contains("FAIL  convert") && stdout.contains("0 passed, 1 failed, 0 skipped"), "{package}: {stdout}");
+    }
+}
+
+#[test]
+fn a_cases_grants_and_fixtures_stay_inside_its_tests_and_scratch_folders() {
+    let scratch = Scratch::new();
+    let mut manifest = command_manifest();
+    manifest["runtime"]["permissions"] = json!({"files":[{"name":"seed","read":true}]});
+    let path = package(&scratch.0, &manifest, &command_component("call $box"), &[]);
+    let tests = Path::new(&path).join("tests");
+    std::fs::create_dir_all(tests.join("seed")).unwrap();
+    std::fs::write(tests.join("seed/part.txt"), b"x").unwrap();
+    // A grant the manifest does not ask for is refused before any folder is made or seeded.
+    let outside = scratch.0.join("outside");
+    let escape = json!({"entry":"make","grants":{"folders":[{"name":outside.to_string_lossy(),"read":true,"from":"seed"}]}});
+    std::fs::write(tests.join("escape.json"), escape.to_string()).unwrap();
+    let output = cli(&["plugin", "test", &path]);
+    let stdout = text(&output.stdout);
+    assert!(!output.status.success() && stdout.contains("FAIL  escape (make)") && stdout.contains("asks for no folder"), "{stdout}");
+    assert!(!outside.exists(), "nothing was made outside the case's folder");
+    std::fs::remove_file(tests.join("escape.json")).unwrap();
+    let seeded = json!({"entry":"make","grants":{"folders":[{"name":"seed","read":true,"from":"seed"}]}});
+    std::fs::write(tests.join("seeded.json"), seeded.to_string()).unwrap();
+    let output = cli(&["plugin", "test", &path]);
+    assert!(output.status.success() && text(&output.stdout).contains("pass  seeded (make)"), "{}", text(&output.stdout));
+    #[cfg(unix)]
+    {
+        // A fixture folder that is a link could reach anywhere: refused, as links inside it are.
+        std::os::unix::fs::symlink(tests.join("seed"), tests.join("linked")).unwrap();
+        let linked = json!({"entry":"make","grants":{"folders":[{"name":"seed","read":true,"from":"linked"}]}});
+        std::fs::write(tests.join("seeded.json"), linked.to_string()).unwrap();
+        let output = cli(&["plugin", "test", &path]);
+        let stdout = text(&output.stdout);
+        assert!(!output.status.success() && stdout.contains("FAIL  seeded (make)") && stdout.contains("is a link"), "{stdout}");
+        std::fs::remove_file(tests.join("seeded.json")).unwrap();
+        std::fs::remove_file(tests.join("linked")).unwrap();
+        // The tests root itself must not redirect the fixture copy outside the package.
+        std::fs::write(tests.join("seeded.json"), seeded.to_string()).unwrap();
+        let external = scratch.0.join("external-tests");
+        std::fs::rename(&tests, &external).unwrap();
+        std::os::unix::fs::symlink(&external, &tests).unwrap();
+        let output = cli(&["plugin", "test", &path]);
+        std::fs::remove_file(&tests).unwrap();
+        std::fs::rename(&external, &tests).unwrap();
+        let stdout = text(&output.stdout);
+        assert!(!output.status.success() && stdout.contains("FAIL  seeded (make)") && stdout.contains("is a link"), "{stdout}");
+        // Listing a folder without search permission must not silently drop its cases.
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tests, std::fs::Permissions::from_mode(0o400)).unwrap();
+        let metadata_denied = std::fs::metadata(tests.join("seeded.json")).is_err();
+        let output = cli(&["plugin", "test", &path, "--require-cases"]);
+        std::fs::set_permissions(&tests, std::fs::Permissions::from_mode(0o755)).unwrap();
+        if metadata_denied {
+            assert!(!output.status.success() && text(&output.stderr).contains("could not check the test case"), "{}", text(&output.stderr));
+        }
+        std::fs::remove_file(tests.join("seeded.json")).unwrap();
+        // A dangling case link also reports its metadata error, even with elevated rights.
+        std::os::unix::fs::symlink(tests.join("missing.json"), tests.join("broken.json")).unwrap();
+        let output = cli(&["plugin", "test", &path, "--require-cases"]);
+        std::fs::remove_file(tests.join("broken.json")).unwrap();
+        let stderr = text(&output.stderr);
+        assert!(!output.status.success() && stderr.contains("could not check the test case") && stderr.contains("broken.json"), "{stderr}");
+        // A tests folder that can't be read is an error, not an empty suite (unless this runs
+        // with the rights to read it anyway).
+        std::fs::set_permissions(&tests, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let unreadable = std::fs::read_dir(&tests).is_err();
+        let output = cli(&["plugin", "test", &path]);
+        std::fs::set_permissions(&tests, std::fs::Permissions::from_mode(0o755)).unwrap();
+        if unreadable {
+            assert!(!output.status.success() && text(&output.stderr).contains("could not read the tests folder"), "{}", text(&output.stderr));
+        }
+    }
 }

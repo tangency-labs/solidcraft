@@ -7,7 +7,7 @@ use std::time::Duration;
 use tracing::warn;
 
 use sctk::reexports::client::delegate_dispatch;
-use sctk::reexports::client::protocol::wl_pointer::WlPointer;
+use sctk::reexports::client::protocol::wl_pointer::{self, WlPointer};
 use sctk::reexports::client::protocol::wl_seat::WlSeat;
 use sctk::reexports::client::protocol::wl_surface::WlSurface;
 use sctk::reexports::client::{Connection, Proxy, QueueHandle, Dispatch};
@@ -171,26 +171,21 @@ impl PointerHandler for WinitState {
                         window_id,
                     );
                 },
-                PointerEventKind::Axis { horizontal, vertical, .. } => {
+                PointerEventKind::Axis { horizontal, vertical, source, .. } => {
                     // Get the current phase.
                     let mut pointer_data = pointer.winit_data().inner.lock().unwrap();
 
                     let has_discrete_scroll = horizontal.discrete != 0 || vertical.discrete != 0;
-
-                    // Figure out what to do about start/ended phases here.
-                    //
-                    // Figure out how to deal with `Started`. Also the `Ended` is not guaranteed
-                    // to be sent for mouse wheels.
-                    let phase = if horizontal.stop || vertical.stop {
-                        TouchPhase::Ended
-                    } else {
-                        match pointer_data.phase {
-                            // Discrete scroll only results in moved events.
-                            _ if has_discrete_scroll => TouchPhase::Moved,
-                            TouchPhase::Started | TouchPhase::Moved => TouchPhase::Moved,
-                            _ => TouchPhase::Started,
-                        }
-                    };
+                    let wheel = matches!(
+                        source,
+                        Some(wl_pointer::AxisSource::Wheel | wl_pointer::AxisSource::WheelTilt)
+                    );
+                    let phase = axis_phase(
+                        pointer_data.phase,
+                        horizontal.stop || vertical.stop,
+                        has_discrete_scroll,
+                        wheel,
+                    );
 
                     // Update the phase.
                     pointer_data.phase = phase;
@@ -217,6 +212,25 @@ impl PointerHandler for WinitState {
                     )
                 },
             }
+        }
+    }
+}
+
+/// The phase of one axis frame, after `previous`.
+///
+/// A scroll that a finger drives (a touchpad) opens with `Started` and closes with the
+/// compositor's `axis_stop` as `Ended`. A mouse wheel never sends `axis_stop`, so its frames are
+/// only ever `Moved`: a hi-res wheel's frames between two whole notches carry no discrete step,
+/// and treating one of them as `Started` opened a gesture that nothing ever closed (#17871).
+fn axis_phase(previous: TouchPhase, stop: bool, discrete: bool, wheel: bool) -> TouchPhase {
+    if stop {
+        TouchPhase::Ended
+    } else if discrete || wheel {
+        TouchPhase::Moved
+    } else {
+        match previous {
+            TouchPhase::Started | TouchPhase::Moved => TouchPhase::Moved,
+            _ => TouchPhase::Started,
         }
     }
 }
@@ -502,3 +516,26 @@ delegate_dispatch!(WinitState: [ WpCursorShapeDeviceV1: GlobalData] => SeatState
 delegate_dispatch!(WinitState: [ZwpPointerConstraintsV1: GlobalData] => PointerConstraintsState);
 delegate_dispatch!(WinitState: [ZwpLockedPointerV1: GlobalData] => PointerConstraintsState);
 delegate_dispatch!(WinitState: [ZwpConfinedPointerV1: GlobalData] => PointerConstraintsState);
+
+#[cfg(test)]
+mod axis_phase_tests {
+    use super::axis_phase;
+    use crate::event::TouchPhase;
+
+    #[test]
+    fn a_finger_scroll_starts_and_its_stop_ends_it() {
+        let start = axis_phase(TouchPhase::Ended, false, false, false);
+        assert_eq!(start, TouchPhase::Started);
+        assert_eq!(axis_phase(start, false, false, false), TouchPhase::Moved);
+        assert_eq!(axis_phase(TouchPhase::Moved, true, false, false), TouchPhase::Ended);
+    }
+
+    /// #17871: a wheel's frame between two notches has no discrete step, and no stop ever follows.
+    #[test]
+    fn a_wheel_never_starts_a_scroll() {
+        for previous in [TouchPhase::Ended, TouchPhase::Started, TouchPhase::Moved] {
+            assert_eq!(axis_phase(previous, false, false, true), TouchPhase::Moved);
+            assert_eq!(axis_phase(previous, false, true, true), TouchPhase::Moved);
+        }
+    }
+}

@@ -10,7 +10,8 @@ depends on it.
 | Extension | What is read |
 |-----------|--------------|
 | `.ply` | ASCII, binary little-endian and binary big-endian PLY: the `vertex` element's `x`, `y`, `z` (any numeric type) and its `red`, `green`, `blue` when present (bytes, 16-bit or 0…1 floats). Every other scalar vertex property (intensity, a class, a time…) is kept, by its name in the file, to colour and filter the cloud by; it is whole-numbered when its type is an integer. The `edge` element (`vertex1`, `vertex2`) and the `face` element (`vertex_indices`, a face as a fan of triangles) become segments and triangles between the points, with their own properties. Other elements are passed over. |
-| `.xyz`, `.pts` | Text, a point per line: `x y z`, optionally followed by `r g b` (six numbers) or by an intensity and `r g b` (seven or more, as PTS files write it). Spaces, tabs, commas or semicolons separate the numbers; `#` and `//` start comments; a PTS file's first line (its count) is skipped. |
+| `.pcd` | The Point Cloud Library's PCD, with its points stored as text (`DATA ascii`), as binary rows (`binary`) or as an LZF-compressed block (`binary_compressed`): the fields `x`, `y`, `z` (any numeric type) and the packed `rgb` or `rgba` field when present (its alpha is passed over). Every other field with one value a point (intensity, a label, a normal's parts…) is kept, by its name in the file, to colour and filter the cloud by; it is whole-numbered when its `TYPE` is `I` or `U`. A field with several values a point (a descriptor) and the padding fields named `_` are passed over. A grid of points (`WIDTH` by `HEIGHT`) is read as its points in order, and the points it marks as missing (`nan`) are left out with a warning. `VIEWPOINT`, where the scanner stood, is not applied: the points keep the file's coordinates. |
+| `.xyz`, `.pts`, `.asc` | Text, a point per line: `x y z`, optionally followed by `r g b` (six numbers) or by an intensity and `r g b` (seven or more, as PTS files write it). Spaces, tabs, commas or semicolons separate the numbers; `#` and `//` start comments; a PTS file's first line (its count) is skipped. An `.asc` file that is an ESRI grid of heights (it starts with `ncols`) is refused: it holds rows of heights, not points. |
 
 A PLY file with faces can also be inserted as a mesh body with **Insert Mesh**
 (`file.insert_mesh`), which makes it solid geometry rather than a reference.
@@ -110,9 +111,12 @@ A cloud keeps at most `max_points` points (5,000,000 unless asked, at most 20,00
 file is thinned evenly, one point in *n*, and the result says how many were kept. Thinning would
 cut a file's edges and faces, so a thinned file leaves them out, with a warning; raise `max_points`
 to keep them. A cloud holds at most 20,000,000 segments and as many triangles. Files up to
-1 GiB are read. The points are stored single precision relative to the cloud's first point (kept
-double precision), so a scan far from the origin keeps its detail; they travel inside the design
-file as a binary part (12 bytes a point, 3 more with colours).
+1 GiB are read; a larger one is read when the limit for STEP and import files is raised
+(Preferences › General › Largest file to open, or `--max-file-size`), and a file over the limit is
+refused before it is read, saying how to raise it. The points are stored single precision relative
+to the cloud's first point (kept double precision), so a scan far from the origin keeps its
+detail; they travel inside the design file as a binary part (12 bytes a point, 3 more with
+colours).
 
 ## Deviation from a body
 

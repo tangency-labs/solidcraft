@@ -932,6 +932,10 @@ pub struct Assembly {
     pub traces: Vec<crate::motion::MotionTrace>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exploded: Vec<crate::motion::ExplodedView>,
+    /// The parts an import placed, each group held where they are by one record rather than a
+    /// rigid joint per placement (`rigid-groups`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rigid_groups: Vec<RigidGroup>,
     /// The bill of materials views numbered, with their saved item numbers.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub item_numbers: Vec<crate::bom::ItemNumbers>,
@@ -1009,6 +1013,7 @@ impl Assembly {
             && self.studies.is_empty()
             && self.traces.is_empty()
             && self.exploded.is_empty()
+            && self.rigid_groups.is_empty()
             && self.item_numbers.is_empty()
     }
 }
@@ -1690,6 +1695,11 @@ impl Placements<'_, '_, '_> {
 /// on at most: larger ones are only checked (a group with more values moves only those of its
 /// loops that need to move, `moving_loops_values`).
 const MAX_LOOP_VALUES: usize = 64;
+/// Values a group of loops is solved with when it cannot be narrowed to the loops that need to
+/// move (`moving_loops_values`): a ring of links, where every loop of the group runs through the
+/// value that moves, is one group of them all and cannot be narrowed. The group is solved whole,
+/// as long as it is this big, so that closing such a ring does not lock the model up (#18880).
+const MAX_LOOP_VALUES_WHOLE: usize = 256;
 const MAX_LOOPS: usize = 100;
 /// Loop-closing joints one solve takes on at most, over all its groups: a part placed by several
 /// relations closes a loop with each one after the first, so a panel of parts has many small
@@ -2303,6 +2313,11 @@ fn close_group(
         // Too many to move at once: only the loops that need to move, or none.
         match moving_loops_values(tree, closing, moves, asm, held, linked, vals, scale) {
             Some(few) => vars = few,
+            // The group cannot be narrowed: every loop of it runs through the value that moves (a
+            // ring of links), or none of them needs to move. It is solved whole when it is small
+            // enough to solve, so that closing such a ring moves the model instead of locking it
+            // up (#18880).
+            None if vars.len() <= MAX_LOOP_VALUES_WHOLE => {}
             None => return Some(BTreeMap::new()),
         }
     }
@@ -2549,7 +2564,9 @@ pub fn solve_holding_with_analysis(doc: &Document, st: &ModelState, held: &Held,
     let asm = &doc.assembly;
     let mut sol = Solution::default();
     let mut vals = joint_values(asm);
-    let Built { tree, mut placed, closing, mut dof } = build(doc, st, &vals, &mut sol);
+    // The rigid groups' joints, after the design's own.
+    let held_contents = doc.rigid_group_joints();
+    let Built { tree, mut placed, closing, mut dof } = build(doc, st, &held_contents, &vals, &mut sol);
     let mut stuck = BTreeSet::new();
     if !closing.is_empty() {
         (sol.values, stuck) = close_loops(&tree, &closing, asm, held, &mut vals);
@@ -2596,7 +2613,7 @@ pub fn solve_holding_with_analysis(doc: &Document, st: &ModelState, held: &Held,
     let bad: Vec<u64> = placed.iter().filter(|(_, m)| !crate::is_placement(m)).map(|(occ, _)| *occ).collect();
     for occ in bad {
         placed.remove(&occ);
-        for j in asm.joints.iter().filter(|j| !j.suppressed && (j.a.occurrence == occ || j.b.occurrence == occ)) {
+        for j in asm.joints.iter().chain(&held_contents).filter(|j| !j.suppressed && (j.a.occurrence == occ || j.b.occurrence == occ)) {
             sol.errors.push((j.id, j.name.clone(), format!("it would place occurrence {occ} outside a rigid placement within 1e9 mm")));
         }
     }
@@ -2625,9 +2642,9 @@ struct Built<'a> {
 /// the **earlier-queued parent** wins the tie (the original behaviour, predating `BinaryHeap`).
 /// Two runs of the same design place identically; a design's tree can still differ from
 /// `BinaryHeap`'s, which broke ties by joint creation index instead.
-fn build<'a>(doc: &'a Document, st: &'a ModelState, vals: &Values, sol: &mut Solution) -> Built<'a> {
+fn build<'a>(doc: &'a Document, st: &'a ModelState, held_contents: &'a [Joint], vals: &Values, sol: &mut Solution) -> Built<'a> {
     let asm = &doc.assembly;
-    let joints: Vec<&Joint> = asm.joints.iter().filter(|j| !j.suppressed).take(MAX_JOINTS).collect();
+    let joints: Vec<&Joint> = asm.joints.iter().chain(held_contents).filter(|j| !j.suppressed).take(MAX_JOINTS).collect();
     // Joint frames in component coordinates (errors leave the joint out). An origin several joints
     // share (a panel face every part sits on) is found once.
     let mut frames: BTreeMap<u64, JointFrames> = BTreeMap::new();
@@ -2705,7 +2722,7 @@ fn build<'a>(doc: &'a Document, st: &'a ModelState, vals: &Values, sol: &mut Sol
     sol.fixed = placed.keys().copied().collect();
     let mut tree =
         // Every joint's values are known, suppressed ones too (their motion links still set values).
-        Tree { joints: asm.joints.iter().map(|j| (j.id, j)).collect(), frames, fixed: placed.clone(), parent: BTreeMap::new(), order: Vec::new() };
+        Tree { joints: asm.joints.iter().chain(held_contents).map(|j| (j.id, j)).collect(), frames, fixed: placed.clone(), parent: BTreeMap::new(), order: Vec::new() };
     let mut used: BTreeSet<u64> = BTreeSet::new();
 
     // An occurrence's degrees of freedom are the distinct values that move it: those of the
@@ -2927,6 +2944,10 @@ pub use face::{end_faces, face_name_at, named_face_spot, pin_end, round_end_at};
 mod relations;
 pub use reach::{REACH_TOL, Reach, Reached, reach};
 pub use relations::relation_values;
+
+#[path = "joints_rigid_groups.rs"]
+mod rigid_groups;
+pub use rigid_groups::RigidGroup;
 
 /// The rest angle that turns B least as joint `j` is made, as B sits now: none or a half turn
 /// about the joint's z. Origins whose x is chosen for them (a face, a circle, a point without

@@ -957,8 +957,73 @@ fn inspect_design_lists_joint_definitions() {
     assert_eq!(d["joints"][0]["name"], "Glue", "{d}");
     assert_eq!(d["joints"][0]["a"]["snap"]["type"], "face_center", "{d}");
     assert_eq!(d["joints"][0]["b"]["resolves"], true, "{d}");
+    assert!(d.get("joint_summary").is_none(), "nothing left out, nothing summarised: {d}");
     let d = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false, "joints": false}));
     assert!(d.get("joints").is_none(), "{d}");
+
+    // A sub-assembly held together as an import holds it: with `joints: "summary"` its rigid
+    // joints are counted, not listed.
+    for opts in [crate::Options::default(), crate::Options { compact: true }] {
+        let mut s = Server::new(Box::new(Headless::default())).with_options(opts);
+        let mut exec = |command: &str, params: Value| tool(&mut s, "execute", json!({"command": command, "params": params}));
+        for (name, corner) in [("A", [0, 0, 0]), ("B", [20, 0, 0])] {
+            exec("component.activate", json!({"component": "root"}));
+            exec("component.create", json!({"name": name}));
+            exec("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": corner}));
+        }
+        exec("joint.as_built", json!({"type": "rigid", "name": "Glue", "a": "A", "b": "B"}));
+        exec("component.activate", json!({"component": "root"}));
+        exec("component.create", json!({"name": "Kit", "grounded": false}));
+        for name in ["P1", "P2"] {
+            exec("component.create", json!({"name": name, "parent": "Kit", "activate": false, "grounded": false}));
+        }
+        exec("joint.rigid_group", json!({"occurrences": ["Kit", "P1", "P2"]}));
+        // By default every joint is listed, as before the filters.
+        let d = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false}));
+        assert_eq!(d["joints"].as_array().map(Vec::len), Some(3), "{d}");
+        assert!(d.get("joint_summary").is_none(), "{d}");
+        let d = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false, "joints": "summary"}));
+        let names: Vec<&str> = d["joints"].as_array().into_iter().flatten().filter_map(|j| j["name"].as_str()).collect();
+        assert_eq!(names, ["Glue"], "{d}");
+        assert_eq!(d["joint_summary"]["by_type"], json!({"rigid": 3}), "{d}");
+        assert_eq!(d["joint_summary"]["rigid_groups"][0]["name"], "Kit", "{d}");
+        assert_eq!(d["joint_summary"]["rigid_groups"][0]["members"], 3, "{d}");
+    }
+}
+
+/// A backend whose `joint.list` fails, as an app busy or from before the summary might.
+struct NoJointList(Headless);
+impl crate::Backend for NoJointList {
+    fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
+        if params.get("command").and_then(Value::as_str) == Some("joint.list") {
+            return Err("joint.list unavailable".into());
+        }
+        crate::Backend::call(&mut self.0, method, params)
+    }
+    fn has_ui(&self) -> bool {
+        false
+    }
+    fn in_process(&self) -> bool {
+        true
+    }
+    fn describe(&self) -> String {
+        "headless without joint.list".into()
+    }
+}
+
+/// `joints: "summary"` when the summary can't be had still says what the filter left out.
+#[test]
+fn inspect_design_keeps_the_omitted_count_without_a_summary() {
+    let mut s = Server::new(Box::new(NoJointList(Headless::default())));
+    let mut exec = |command: &str, params: Value| tool(&mut s, "execute", json!({"command": command, "params": params}));
+    exec("component.create", json!({"name": "Kit", "grounded": false}));
+    for name in ["P1", "P2"] {
+        exec("component.create", json!({"name": name, "parent": "Kit", "activate": false, "grounded": false}));
+    }
+    exec("joint.rigid_group", json!({"occurrences": ["Kit", "P1", "P2"]}));
+    let d = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false, "joints": "summary"}));
+    assert_eq!(d["joint_summary"]["omitted"], json!({"joints": 2, "by_type": {"rigid": 2}}), "{d}");
+    assert!(d["joint_summary"]["error"].as_str().is_some_and(|e| e.contains("joint.list unavailable")), "{d}");
 }
 
 /// `set_parameter` takes the new value as `value` or as `expression` (the name parameters.change
@@ -2825,6 +2890,9 @@ fn compact_execute_keeps_changes_ids_and_default_replies() {
                 if o.contains_key("created_bodies") {
                     o.remove("bodies");
                 }
+                if o.get("warning").is_some_and(Value::is_null) {
+                    o.remove("warning");
+                }
                 for key in ["points", "curves", "constraints", "dimensions"] {
                     if o.get(key).is_some_and(|v| o.get("created").and_then(|c| c.get(key)) == Some(v)) {
                         o.remove(key);
@@ -2842,6 +2910,93 @@ fn compact_execute_keeps_changes_ids_and_default_replies() {
         let error = raw_tool(&mut s, "execute", json!({"command": "not.a.command", "verbose": false}));
         assert_eq!(error["result"]["isError"], true);
     }
+}
+
+/// #18831: a compact reply counts an export's repeated mesh warnings and keeps the worst of each
+/// kind; a lone warning of a kind, and any other warning, stays as it is.
+#[test]
+fn compact_reply_counts_repeated_mesh_warnings() {
+    let mut warnings: Vec<String> = (0..130)
+        .map(|i| format!("Node: face {i}: smallest angle {:.2}°, short of the 25° asked (stopped by: Corner)", 24.0 - f64::from(i) * 0.08))
+        .collect();
+    warnings.push("Node: face 200: its shaping stopped at a bound (Points) with the 25° asked reached (smallest angle 25.04°)".into());
+    warnings.push("Node: face 201: its shaping stopped at a bound (Points) with the 25° asked reached (smallest angle 25.01°)".into());
+    warnings.push(
+        "Node: face 7: its shared boundary was kept. Its triangles lie up to 1.200e-3 mm off the surface, past it (chord tolerance 1.000e-3 mm)"
+            .into(),
+    );
+    warnings.push("Lid has a print face but was written as it lies".into());
+    let reply = json!({"path": "node.stl", "bytes": 84, "format": "StlBinary", "warnings": warnings});
+    let compact = crate::tools::compact(reply.clone());
+    assert_eq!(compact["warning_count"], json!(134), "{compact}");
+    assert_eq!(
+        compact["warnings"],
+        json!([
+            "130 faces short of the 25° asked (stopped by: Corner); the sharpest: smallest angle 13.68° (\"Node\": face 129); bodies: \"Node\" (130)",
+            "2 faces whose shaping stopped at a bound (Points) with the 25° asked reached; the sharpest: smallest angle 25.01° (\"Node\": face 201); bodies: \"Node\" (2)",
+            "Node: face 7: its shared boundary was kept. Its triangles lie up to 1.200e-3 mm off the surface, past it (chord tolerance 1.000e-3 mm)",
+            "Lid has a print face but was written as it lies",
+        ]),
+        "{compact}"
+    );
+    // One warning of each kind is left as it is, and nothing is counted.
+    let few = json!({"warnings": ["Node: face 3: smallest angle 12.94°, short of the 25° asked (stopped by: Corner)", "something else"]});
+    assert_eq!(crate::tools::compact(few.clone()), few);
+    // A null `error` stays, so a client can read it; a null `warning` goes.
+    let built = crate::tools::compact(json!({"feature": 1, "name": "Box1", "error": null, "warning": null}));
+    assert_eq!(built, json!({"feature": 1, "name": "Box1", "error": null}));
+    // A script reply without `bytes` (an older app) keeps the script: nothing says it was written.
+    let old_app = json!({"path": "s.json", "script": {"commands": []}, "steps": 0, "omitted": []});
+    assert_eq!(crate::tools::compact(old_app.clone()), old_app);
+}
+
+/// #18831: with `verbose: false`, a batch that adds parameters, builds a part and exports it
+/// replies with each step's new values and the export's warnings counted, and a script written
+/// to a file is not repeated in the reply; with `verbose: true` everything stays.
+#[test]
+fn compact_batch_reply_of_parameters_export_and_script() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-mcp-quiet-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("disc.stl");
+    let script = dir.join("disc.json");
+    let steps = json!([
+        {"command": "parameters.add", "params": {"name": "R", "expression": "20 mm"}},
+        {"command": "parameters.add", "params": {"name": "H", "expression": "8 mm"}},
+        {"command": "solid.cylinder", "params": {"radius": "R", "height": "H", "body_name": "Disc"}},
+        {"command": "solid.hole", "params": {"position": [12, 0, 8], "diameter": 6.3, "depth": 3.1}},
+        {"command": "solid.hole", "params": {"position": [-12, 0, 8], "diameter": 6.3, "depth": 3.1}},
+        {"command": "solid.hole", "params": {"position": [0, 12, 8], "diameter": 6.3, "depth": 3.1}},
+        {"command": "solid.fillet", "params": {"edges": [[15.15, 0, 8], [-8.85, 0, 8], [3.15, 12, 8]], "radius": 1.0}},
+        {"command": "file.export_stl", "params": {"path": stl}},
+        {"command": "timeline.export_script", "params": {"path": script}},
+    ]);
+    let mut s = server();
+    let full = tool(&mut s, "batch", json!({"commands": steps}));
+    tool(&mut s, "new_design", json!({}));
+    let r = tool(&mut s, "batch", json!({"commands": steps, "verbose": false}));
+    let written = std::fs::read_to_string(&script).unwrap_or_default();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(full["results"][0]["display_value"], json!(20.0), "{full}");
+    assert_eq!(r["results"][0], json!({"name": "R", "unit": "mm", "value": 20.0}), "{r}");
+    assert!(r["results"][2].get("warning").is_none() && full["results"][2]["warning"].is_null(), "a null warning is left out: {r}");
+    // The rounded hole rims leave three faces whose shaping stopped at a bound: one line in the
+    // compact reply.
+    let export = &r["results"][7];
+    let n = full["results"][7]["warnings"].as_array().map_or(0, Vec::len);
+    assert!(n >= 2, "the part should give the export several warnings: {full}");
+    assert_eq!(export["warning_count"], json!(n), "{r}");
+    assert_eq!(export["warnings"].as_array().map(Vec::len), Some(1), "{r}");
+    assert!(export["warnings"][0].as_str().is_some_and(|w| w.starts_with(&format!("{n} faces "))), "{r}");
+    let exported = &r["results"][8];
+    assert!(full["results"][8]["script"].is_object(), "{full}");
+    assert!(exported.get("script").is_none(), "{r}");
+    assert_eq!(exported["path"], json!(script), "{r}");
+    assert_eq!(exported["absolute_path"], json!(script), "the compact reply keeps the file's full path: {r}");
+    assert_eq!(exported["bytes"], json!(written.len()), "{r}");
+    assert!(written.contains("\"timeline.add\""), "the script is still written in full: {written}");
+    // The compact reply is a fraction of the full one.
+    let (full_len, compact_len) = (full.to_string().len(), r.to_string().len());
+    assert!(compact_len * 2 < full_len, "compact {compact_len} bytes, full {full_len} bytes: {r}");
 }
 
 /// #9180: a compact sketch reply counts the points of a spline's poles instead of listing them,
