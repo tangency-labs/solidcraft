@@ -691,7 +691,7 @@ fn action_matrix_worker() {
         // With ACTION_MATRIX_UNFOLD, sheet metal must still unfold and fold back after the action.
         if r.is_ok() && std::env::var_os("ACTION_MATRIX_UNFOLD").is_some() {
             let t = Instant::now();
-            let sheets: Vec<String> = scratch.model.state().sheets.iter().map(|sh| sh.body.clone()).collect();
+            let sheets: Vec<String> = scratch.model.state().surface_sheets.iter().map(|sh| sh.body.clone()).collect();
             let mut r = Ok(());
             for body in &sheets {
                 for id in ["sheet.unfold", "sheet.refold"] {
@@ -1407,7 +1407,7 @@ fn a_hole_square_to_a_45_degree_flange() {
     let gone = before - volume(&s);
     let expected = std::f64::consts::PI * 1.724 * 1.724 * 2.5;
     assert!((gone - expected).abs() < 0.1, "the hole took {gone} mm³, not {expected}");
-    let sheets: Vec<String> = s.model.state().sheets.iter().map(|sh| sh.body.clone()).collect();
+    let sheets: Vec<String> = s.model.state().surface_sheets.iter().map(|sh| sh.body.clone()).collect();
     assert!(!sheets.is_empty());
     for body in sheets {
         for id in ["sheet.unfold", "sheet.refold"] {

@@ -45,13 +45,12 @@ const WALL: f64 = 21.0;
 /// because the old integrator leaked differently through each: they now agree to 1e-11.
 const THREE_TOGETHER: f64 = 9524.343805690;
 
-/// Every fix but `geometric_g2_continuity`.
+/// Every fix.
 fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    let mut f = UpstreamFixes::all();
-    f.geometric_g2_continuity = false;
-    k.fixes = f;
-    k
+    Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Kernel::default()
+    }
 }
 
 fn read(k: &mut Kernel) -> Brep {

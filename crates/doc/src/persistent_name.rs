@@ -2,7 +2,8 @@
 //!
 //! A face name says what made the face: a feature and its role there (`F2:top`, `F2:side:l4`), a
 //! fillet or chamfer and the edge it rounds (`F5:blend(<edge>)`), a shell and the face it offsets
-//! (`F3:inner(<face>)`), or, without history, a body and an index (`Body1:face:3`). Suffixes
+//! (`F3:inner(<face>)`), a sheet's corner relief wall and the edge between where its two bends
+//! stand (`F4:relief(<edge>)`), or, without history, a body and an index (`Body1:face:3`). Suffixes
 //! follow: a pattern copy (`@F7.2`), a piece of a split face told apart by the faces around it
 //! (`#[<face>,…]`, `#k` after it for a tie), an older design's numbered piece (`#k`). An edge is
 //! the two faces it separates, `~k` for one of several between them; a seam, whose two sides are
@@ -16,6 +17,7 @@
 //! face     = base { suffix }
 //! base     = FEATURE ":" "blend" "(" edge ")"
 //!          | FEATURE ":" "inner" "(" face ")"
+//!          | FEATURE ":" "relief" "(" edge ")"  (its role, as written)
 //!          | FEATURE ":" role
 //!          | text                              (`<body>:face:<k>`, or any other text)
 //! suffix   = COPY | "#[" face { "," face } "]" [HASH] | HASH

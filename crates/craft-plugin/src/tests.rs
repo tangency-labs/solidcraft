@@ -75,7 +75,7 @@ fn named_files_permissions_require_access_and_unique_names() {
 fn hostile_manifest_fields_return_errors() {
     assert!(matches!(
         parse_manifest(&serde_json::to_vec(&manifest()).unwrap(), "another-folder"),
-        Err(HostError::InvalidManifest { field, reason }) if field == "id" && reason.contains("does not match")
+        Err(HostError::InvalidManifest { field, reason }) if field == "id" && reason.contains("does not match") && reason.contains("rename the folder to")
     ));
     for change in [
         |value: &mut Value| value["runtime"]["module"] = json!("../plugin.wasm"),
@@ -289,6 +289,33 @@ fn an_importer_claims_extensions_needs_formats_and_never_mixes_with_commands() {
     command(&|v| v["runtime"]["limits"] = json!({"fuel":1,"memory_mib":1,"deadline_ms":60000}), "deadline_ms");
 }
 
+#[test]
+fn a_plugin_that_keeps_design_data_names_storage_and_its_data_format() {
+    let mut keeps = manifest();
+    keeps["capabilities"] = json!(["commands@0.1", "storage@0.1"]);
+    keeps["runtime"]["data_format"] = json!(3);
+    assert_eq!(parse(&keeps).unwrap().runtime.unwrap().data_format, Some(3));
+    let refused = |change: &dyn Fn(&mut Value), field: &str| {
+        let mut value = keeps.clone();
+        change(&mut value);
+        assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field: f, .. }) if f == field), "{field}");
+    };
+    refused(
+        &|v| {
+            v["runtime"].as_object_mut().unwrap().remove("data_format");
+        },
+        "runtime.data_format",
+    );
+    refused(&|v| v["runtime"]["data_format"] = json!(0), "runtime.data_format");
+    refused(&|v| v["runtime"]["data_format"] = json!(MAX_DATA_FORMAT + 1), "runtime.data_format");
+    refused(&|v| v["capabilities"] = json!(["commands@0.1"]), "runtime.data_format");
+    // An importer keeps nothing in the open design.
+    let mut importing = importer();
+    importing["capabilities"] = json!(["formats@0.1", "storage@0.1"]);
+    importing["runtime"]["data_format"] = json!(1);
+    assert!(matches!(parse(&importing), Err(HostError::InvalidManifest { field, .. }) if field == "capabilities"));
+}
+
 fn empty_item() -> LossItem {
     LossItem { severity: LossSeverity::Info, title: String::new(), subject: String::new(), message: String::new(), code: String::new() }
 }
@@ -312,4 +339,85 @@ fn a_loss_report_is_bounded_printable_text() {
         ..LossReport::default()
     };
     assert!(empty.validate().is_err());
+}
+
+#[test]
+fn entry_arguments_are_checked_as_strictly_as_app_commands() {
+    let schema = json!({"type":"object","required":["teeth"],"properties":{
+        "teeth":{"type":"integer","minimum":6,"maximum":200},
+        "module":{"type":"number","exclusiveMinimum":0},
+        "name":{"type":"string","maxLength":8},
+        "up_axis":{"type":"string","oneOf":[{"const":"as_is","title":"As in the file"},{"const":"stand_up","title":"Stand up"}]},
+        "bodies":{"type":"array","items":{"type":"string"},"maxItems":2},
+        "free":{"type":"object","additionalProperties":true},
+        "fixed":{"type":"object"}
+    }});
+    assert_eq!(check_input(&schema, &json!({"teeth": 20})), Ok(()));
+    assert_eq!(check_input(&schema, &json!({"teeth": 20, "up_axis": "stand_up", "bodies": ["b1"], "free": {"any": 1}})), Ok(()));
+    let field = |value: Value| match check_input(&schema, &value) {
+        Err(HostError::InvalidInput { field, .. }) => field,
+        other => panic!("{value} gave {other:?}"),
+    };
+    assert_eq!(field(json!({})), "params.teeth");
+    assert_eq!(field(json!({"teeth": 2.5})), "params.teeth");
+    assert_eq!(field(json!({"teeth": 4})), "params.teeth");
+    assert_eq!(field(json!({"teeth": 20, "module": 0})), "params.module");
+    assert_eq!(field(json!({"teeth": 20, "name": "much too long"})), "params.name");
+    assert_eq!(field(json!({"teeth": 20, "up_axis": "sideways"})), "params.up_axis");
+    assert_eq!(field(json!({"teeth": 20, "bodies": [1]})), "params.bodies[0]");
+    assert_eq!(field(json!({"teeth": 20, "bodies": ["a", "b", "c"]})), "params.bodies");
+    assert_eq!(field(json!({"teeth": 20, "extra": true})), "params.extra", "an undeclared field is refused");
+    assert_eq!(field(json!([20])), "params");
+    assert_eq!(field(json!({"teeth": 20, "fixed": {"any": 1}})), "params.fixed.any", "an object schema takes only what it declares");
+    // The listed schema says what the check does.
+    assert_eq!(strict_input_schema(&schema)["additionalProperties"], false);
+    assert_eq!(strict_input_schema(&schema)["properties"]["free"]["additionalProperties"], true);
+    assert_eq!(strict_input_schema(&schema)["properties"]["fixed"]["additionalProperties"], false);
+    // A hostile schema is bounded, never a crash.
+    let mut deep = json!({"type":"object"});
+    for _ in 0..100 {
+        deep = json!({"type":"object","properties":{"a":deep}});
+    }
+    let mut value = json!({});
+    for _ in 0..100 {
+        value = json!({"a": value});
+    }
+    assert!(check_input(&deep, &value).is_err());
+}
+
+#[test]
+fn additional_property_schemas_are_listed_as_strictly_as_they_are_checked() {
+    let schema = json!({"type":"object","additionalProperties":{"type":"object","properties":{"x":{}}}});
+    let listed = strict_input_schema(&schema);
+    assert_eq!(listed["additionalProperties"]["additionalProperties"], false);
+    for candidate in [&schema, &listed] {
+        assert_eq!(check_input(candidate, &json!({"k":{"x":1}})), Ok(()));
+        assert!(matches!(check_input(candidate, &json!({"k":{"x":1,"y":2}})),
+            Err(HostError::InvalidInput { field, .. }) if field == "params.k.y"));
+    }
+}
+
+#[test]
+fn schema_composition_does_not_implicitly_close_object_constraints() {
+    let schema = json!({"type":"object","allOf":[{"properties":{"a":{"type":"integer"}}}]});
+    let listed = strict_input_schema(&schema);
+    assert!(listed.get("additionalProperties").is_none());
+    assert_eq!(check_input(&schema, &json!({"a":1})), Ok(()));
+    assert_eq!(check_input(&listed, &json!({"a":1})), Ok(()));
+    for keyword in ["oneOf", "anyOf"] {
+        let mut schema = json!({"type":"object","properties":{"a":{},"b":{}}});
+        schema[keyword] = json!([{"type":"object","required":["a"]},{"type":"object","required":["b"]}]);
+        let listed = strict_input_schema(&schema);
+        assert_eq!(listed["additionalProperties"], false);
+        assert!(listed[keyword][0].get("additionalProperties").is_none());
+        for candidate in [&schema, &listed] {
+            assert_eq!(check_input(candidate, &json!({"a":1})), Ok(()));
+            assert_eq!(check_input(candidate, &json!({"b":2})), Ok(()));
+            assert!(check_input(candidate, &json!({})).is_err());
+            assert!(check_input(candidate, &json!({"a":1,"extra":2})).is_err());
+        }
+        // An explicitly closed branch still refuses undeclared fields.
+        schema[keyword][0]["additionalProperties"] = json!(false);
+        assert!(check_input(&schema, &json!({"a":1})).is_err());
+    }
 }
