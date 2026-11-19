@@ -82,7 +82,7 @@ pub struct Run {
 
 impl Run {
     /// Pixels the run's first pyramid level draws, the unit of the per-frame budget.
-    #[allow(dead_code, reason = "the per-frame area budget uses it")]
+
     pub fn region_area(&self) -> u64 {
         self.members.iter().fold(0_u64, |sum, m| sum.saturating_add(m.region.area()))
     }
@@ -142,4 +142,48 @@ pub fn reach(steps: usize, offset: f32) -> u32 {
         total += (2.0 * f64::from(offset) + 1.0) * 2.0_f64.powi(level);
     }
     (total.ceil() + 2.0_f64.powi(steps)).min(f64::from(u32::MAX)) as u32
+}
+
+/// What one frame of one window may spend on blur. Beyond it the later markers keep their plain
+/// translucent fill, one marker at a time, and the earlier ones keep blurring.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Budget {
+    /// Summed region pixels over all members.
+    pub area: u64,
+    /// Snapshots, each costing two passes per pyramid step however small its members.
+    pub runs: usize,
+    /// Markers that get a binding of their own.
+    pub members: usize,
+}
+
+impl Budget {
+    /// The budget for a window of `screen` pixels: eight screens of blurred area, 64 runs, 256 markers.
+    pub fn for_screen(screen: [u32; 2]) -> Self {
+        Self { area: u64::from(screen[0]).saturating_mul(u64::from(screen[1])).saturating_mul(8), runs: 64, members: 256 }
+    }
+}
+
+/// Keep, in paint order, the members that fit `budget`. A member that does not fit is dropped and
+/// the following ones are still tried; a run left without members is dropped.
+pub fn within_budget(runs: Vec<Run>, budget: Budget) -> Vec<Run> {
+    let (mut area, mut members) = (0_u64, 0_usize);
+    let mut kept: Vec<Run> = Vec::new();
+    for run in runs {
+        if kept.len() >= budget.runs {
+            break;
+        }
+        let mut taken = Vec::new();
+        for member in run.members {
+            let next = area.saturating_add(member.region.area());
+            if next <= budget.area && members < budget.members {
+                area = next;
+                members += 1;
+                taken.push(member);
+            }
+        }
+        if !taken.is_empty() {
+            kept.push(Run { start_job: taken[0].job, members: taken });
+        }
+    }
+    kept
 }

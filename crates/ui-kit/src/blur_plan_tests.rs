@@ -154,3 +154,31 @@ fn reach_grows_with_steps_and_offset_and_survives_bad_input() {
     assert_eq!(reach(3, -1.0), 0);
     assert!(reach(usize::MAX, f32::MAX) > 0);
 }
+
+fn run_of(jobs: &[(usize, PxRect)]) -> Run {
+    Run { start_job: jobs[0].0, members: jobs.iter().map(|(job, region)| Member { job: *job, region: *region }).collect() }
+}
+
+#[test]
+fn a_budget_drops_the_markers_that_do_not_fit_and_keeps_the_rest() {
+    let big = px(0, 0, 100, 100);
+    let small = px(200, 0, 210, 10);
+    let runs = vec![run_of(&[(0, big), (2, small)]), run_of(&[(4, big)]), run_of(&[(6, small)])];
+    let budget = Budget { area: 10_000 + 100 + 100, runs: 8, members: 8 };
+    let kept = within_budget(runs, budget);
+    // The second `big` does not fit; the small ones do.
+    let jobs: Vec<Vec<usize>> = kept.iter().map(|r| r.members.iter().map(|m| m.job).collect()).collect();
+    assert_eq!(jobs, [vec![0, 2], vec![6]]);
+    assert_eq!(kept[1].start_job, 6, "a run starts at its first kept member");
+}
+
+#[test]
+fn a_budget_caps_runs_and_members() {
+    let r = px(0, 0, 4, 4);
+    let runs: Vec<Run> = (0..5).map(|i| run_of(&[(i * 2, r), (i * 2 + 1, r)])).collect();
+    assert_eq!(within_budget(runs.clone(), Budget { area: u64::MAX, runs: 3, members: 100 }).len(), 3);
+    let kept = within_budget(runs, Budget { area: u64::MAX, runs: 100, members: 3 });
+    assert_eq!(kept.iter().map(|r| r.members.len()).sum::<usize>(), 3);
+    assert!(within_budget(Vec::new(), Budget::for_screen([10, 10])).is_empty());
+    assert_eq!(Budget::for_screen([u32::MAX, u32::MAX]).area, u64::MAX);
+}

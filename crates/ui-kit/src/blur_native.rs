@@ -9,7 +9,8 @@ thread_local! { static CURRENT: RefCell<Option<Current>> = const { RefCell::new(
 thread_local! { static SURFACE_ALPHA: std::cell::Cell<Option<u8>> = const { std::cell::Cell::new(None) }; }
 /// Target memory all windows may hold together.
 const BUDGET: u64 = 256 * 1024 * 1024;
-const MAX_MARKERS: usize = 256;
+/// Markers one window may emit in a frame: a bound on memory for hostile input, far above any real UI.
+const MAX_MARKERS: usize = 4096;
 /// A window that has not begun a frame for this many `begin` calls (of any window) has closed:
 /// its resources are released.
 const STALE_AFTER: u64 = 600;
@@ -426,7 +427,7 @@ struct Inner {
     gpu_bytes: u64,
     markers: Vec<Marker>,
     /// Per marker of this frame: the planner gave it a region, so its blur is ready when it draws.
-    planned: Vec<bool>,
+    planned: Vec<Option<usize>>,
     counts: Counters,
     failure: Option<&'static str>,
     serial: u64,
@@ -474,10 +475,6 @@ pub fn decorate(painter: &Painter, frame: Frame, content: Rect, ordinary: Shape)
             return ordinary;
         }
         if inner.markers.len() >= MAX_MARKERS {
-            inner.failure = Some("blur panel limit exceeded");
-            inner.gpu = None;
-            inner.gpu_bytes = 0;
-            inner.counts.clear_live();
             return ordinary;
         }
         let index = inner.markers.len();
@@ -509,14 +506,12 @@ impl CallbackTrait for PanelMarker {
             return;
         }
         let Some(marker) = inner.markers.get(self.index).copied() else { return };
-        if !inner.planned.get(self.index).copied().unwrap_or(false) {
-            return;
-        }
+        let Some(slot) = inner.planned.get(self.index).copied().flatten() else { return };
         let Some(gpu) = inner.gpu.as_ref() else { return };
         if gpu.ready_serial != inner.serial {
             return;
         }
-        let Some(binding) = gpu.markers.get(self.index) else { return };
+        let Some(binding) = gpu.markers.get(slot) else { return };
         let mut p = [0.0; 12];
         p[2] = u8::from(self.shared.host.format.is_srgb()) as f32;
         let r = info.viewport;
@@ -556,7 +551,7 @@ impl Shared {
     /// Make window `id`'s resources fit `size` and `steps`, and give it one binding per marker.
     /// `false` leaves the failure on the window for the capability report. Targets of other
     /// windows are released, least recently painted first, to stay inside the shared budget.
-    fn ensure(&self, windows: &mut Windows, id: u64, size: [u32; 2], steps: usize, offset: f32) -> bool {
+    fn ensure(&self, windows: &mut Windows, id: u64, size: [u32; 2], steps: usize, offset: f32, bindings: usize) -> bool {
         let device = &self.host.device;
         let fail = |windows: &mut Windows, reason: &'static str| {
             if let Some(inner) = windows.map.get_mut(&id) {
@@ -604,12 +599,11 @@ impl Shared {
             inner.gpu_bytes = bytes;
             inner.counts.live_bytes += bytes;
         }
-        let count = inner.markers.len();
         let serial = inner.serial;
         let Inner { gpu, counts, .. } = &mut *inner;
         let Some(gpu) = gpu else { return false };
         gpu.ready_serial = serial;
-        let (_, failed) = egui_wgpu::capture_errors(device, || gpu.grow_markers(device, count, counts));
+        let (_, failed) = egui_wgpu::capture_errors(device, || gpu.grow_markers(device, bindings, counts));
         if let Some(error) = failed {
             log::warn!("blur marker resources refused: {error}");
             return fail(windows, "GPU refused blur marker resources");
@@ -665,23 +659,23 @@ impl FrameCompositor for Shared {
         // The runs are planned before encoding: which markers share one snapshot, and which
         // pixels each of them needs.
         let pad = if self.whole_frame { u32::MAX } else { blur_plan::reach(steps, offset) };
-        let runs = plan_runs(jobs, screen, &marker_ids, pad);
+        let runs = blur_plan::within_budget(plan_runs(jobs, screen, &marker_ids, pad), blur_plan::Budget::for_screen(screen.size_in_pixels));
         if runs.is_empty() {
             return false;
         }
         let (composition, pipeline, binding) = {
             let Ok(mut windows) = self.windows.lock() else { return false };
-            if !self.ensure(&mut windows, id, screen.size_in_pixels, steps, offset) {
+            if !self.ensure(&mut windows, id, screen.size_in_pixels, steps, offset, runs.iter().map(|run| run.members.len()).sum()) {
                 return false;
             }
             let Some(inner) = windows.map.get_mut(&id) else { return false };
             let count = inner.markers.len();
             inner.planned.clear();
-            inner.planned.resize(count, false);
-            for member in runs.iter().flat_map(|run| &run.members) {
+            inner.planned.resize(count, None);
+            for (slot, member) in runs.iter().flat_map(|run| &run.members).enumerate() {
                 let index = jobs.get(member.job).and_then(callback_identity).and_then(|identity| marker_index(&marker_ids, identity));
                 if let Some(planned) = index.and_then(|index| inner.planned.get_mut(index)) {
-                    *planned = true;
+                    *planned = Some(slot);
                 }
             }
             let Some(gpu) = inner.gpu.as_ref() else { return false };
