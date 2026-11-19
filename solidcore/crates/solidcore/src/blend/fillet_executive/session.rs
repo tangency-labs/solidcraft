@@ -6188,7 +6188,7 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                                 _ => None,
                             }));
                         }
-                        'sample: for t_a in at {
+                        for t_a in at {
                             let p = curve_a.evaluate_point(k, t_a)?;
                             // Main classifies the sample first and drops a sample off its
                             // face before any of the geometry below. The classification is
@@ -6196,59 +6196,41 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                             // (an error main would only reach for a sample on the face),
                             // the sample is classified at once, as main did: off the face
                             // it is dropped, on it the error is main's.
-                            // the sample's foot on band `b`'s run: the nearest of its edges'
-                            let mut foot: Option<(f64, bool)> = None;
-                            for &(j, [end0, end1]) in &run_ends {
-                                let Some((curve_j, ivl_j, [start_j, stop_j])) = edge_curves.get(j)
-                                else {
-                                    continue;
-                                };
-                                let on_edge = match curve_j.drop_point(
-                                    k,
-                                    ivl_j,
-                                    p,
-                                    None,
-                                    crate::math::BIG_DOUBLE,
-                                    None,
-                                    SolverOperation::Minimize,
-                                ) {
-                                    Ok(v) => v,
-                                    Err(error) => {
-                                        if sample_off_face(k, self.target, *face_a, p)? {
-                                            continue 'sample;
-                                        }
-                                        return Err(error);
-                                    }
-                                };
-                                if !on_edge.success {
-                                    continue;
-                                }
-                                let t = on_edge.parameter;
-                                let e = match curve_j.evaluate_point(k, t) {
-                                    Ok(e) => e,
-                                    Err(error) => {
-                                        if sample_off_face(k, self.target, *face_a, p)? {
-                                            continue 'sample;
-                                        }
-                                        return Err(error);
-                                    }
-                                };
-                                // A constrained closest point can return an endpoint one
-                                // parameter ulp inside the interval. It is still beside
-                                // the band: testing only t would extend the band's chord
-                                // across the face and falsely catch a distant rail (#2903).
-                                // Use the existing solver tolerance in geometric space,
-                                // independent of the edge curve's parameterization. An end
-                                // the run's next edge continues from is no end of the band.
-                                let at_run_end = (end0
-                                    && (t <= ivl_j.min() || (e - *start_j).length() <= tol))
-                                    || (end1
-                                        && (t >= ivl_j.max() || (e - *stop_j).length() <= tol));
-                                let dist = (p - e).length();
-                                if foot.is_none_or(|(best, _)| dist < best) {
-                                    foot = Some((dist, at_run_end));
-                                }
-                            }
+                            // the sample's foot on band `b`'s run: the nearest of its edges'.
+                            // Where it cannot be found on an edge of the run (an evaluation
+                            // fails, or the drop finds no point), the sample is classified at
+                            // once (#19243).
+                            let run_p = run_ends.iter().map(|&(j, ends)| {
+                                edge_curves
+                                    .get(j)
+                                    .map(|edge| (edge, ends))
+                                    .ok_or_else(band_stage_failed)
+                            });
+                            let foot = foot_on_run(
+                                p,
+                                run_p,
+                                |&((curve_j, ivl_j, _), _), q| drop_onto_edge(k, curve_j, ivl_j, q),
+                                |&((curve_j, _, _), _), t| curve_j.evaluate_point(k, t),
+                                || sample_off_face(k, self.target, *face_a, p),
+                            )?;
+                            let FootOnRun::Found {
+                                edge: ((_, ivl_j, [start_j, stop_j]), [end0, end1]),
+                                parameter: t,
+                                point: e,
+                            } = foot
+                            else {
+                                continue;
+                            };
+                            // A constrained closest point can return an endpoint one
+                            // parameter ulp inside the interval. It is still beside
+                            // the band: testing only t would extend the band's chord
+                            // across the face and falsely catch a distant rail (#2903).
+                            // Use the existing solver tolerance in geometric space,
+                            // independent of the edge curve's parameterization. An end
+                            // the run's next edge continues from is no end of the band.
+                            let at_run_end = (end0
+                                && (t <= ivl_j.min() || (e - *start_j).length() <= tol))
+                                || (end1 && (t >= ivl_j.max() || (e - *stop_j).length() <= tol));
                             let on_rail = match curve_b.drop_point(
                                 k,
                                 &ivl_b,
@@ -6265,9 +6247,6 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                                     }
                                     return Err(error);
                                 }
-                            };
-                            let Some((_, at_run_end)) = foot else {
-                                continue; // beside the band, not across it
                             };
                             if at_run_end || !on_rail.success {
                                 continue; // beside the band, not across it
@@ -6297,33 +6276,18 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                             // point), the sample is classified as for its own evaluations: off
                             // the face it is dropped, on it the failure is returned. No other
                             // point stands in for that foot (#19243).
-                            let feet = run_ends.iter().map(|&(j, _)| {
-                                let (curve_j, ivl_j, _) =
-                                    edge_curves.get(j).ok_or_else(band_stage_failed)?;
-                                let on = curve_j.drop_point(
-                                    k,
-                                    ivl_j,
-                                    r,
-                                    None,
-                                    crate::math::BIG_DOUBLE,
-                                    None,
-                                    SolverOperation::Minimize,
-                                )?;
-                                if !on.success {
-                                    return Err(band_stage_failed());
-                                }
-                                curve_j.evaluate_point(k, on.parameter)
-                            });
-                            let e = match nearest_foot(r, feet) {
-                                Ok(Some(q)) => q,
-                                // the run always holds band `b`'s edge
-                                Ok(None) => return Err(band_stage_failed()),
-                                Err(error) => {
-                                    if sample_off_face(k, self.target, *face_a, p)? {
-                                        continue;
-                                    }
-                                    return Err(error);
-                                }
+                            let run_r = run_ends
+                                .iter()
+                                .map(|&(j, _)| edge_curves.get(j).ok_or_else(band_stage_failed));
+                            let foot_r = foot_on_run(
+                                r,
+                                run_r,
+                                |&(curve_j, ivl_j, _), q| drop_onto_edge(k, curve_j, ivl_j, q),
+                                |&(curve_j, _, _), t| curve_j.evaluate_point(k, t),
+                                || sample_off_face(k, self.target, *face_a, p),
+                            )?;
+                            let FootOnRun::Found { point: e, .. } = foot_r else {
+                                continue;
                             };
                             let mut chord = e - r;
                             let width = chord.length();
@@ -6400,23 +6364,95 @@ fn band_stage_failed() -> SolidError {
     )
 }
 
-/// The nearest to `point` of `feet`, its feet on the edges of a band's run (one per edge,
-/// each found or failed), or `None` for a run of no edges. The first failure is returned
-/// whatever the other edges give: the nearest foot found where one edge's could not be is
-/// not the point's foot on the run (#19243).
-fn nearest_foot(
+/// A point's foot on a band's run, as the band check finds it ([`foot_on_run`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum FootOnRun<E> {
+    /// The nearest of the point's feet on the run's edges: the edge it lies on, its
+    /// parameter there and the foot.
+    Found {
+        edge: E,
+        parameter: f64,
+        point: crate::math::Point3,
+    },
+    /// A foot could not be found on an edge of the run, and the band check's sample lies
+    /// off its face: the sample is dropped.
+    SampleOffFace,
+}
+
+/// The band check's search for `point`'s foot on a band's run (`run`, one entry per edge):
+/// on each edge, the closest point (`drop_onto`) evaluated at its parameter (`evaluate`),
+/// and the nearest of those.
+///
+/// Where a foot cannot be found on an edge (a missing edge, a drop or an evaluation that
+/// fails, or a drop that finds no point), nothing stands in for it, neither another edge's
+/// foot nor another point (#19243). The sample is classified as for its other evaluations
+/// (`off_face`): off its face it is dropped ([`FootOnRun::SampleOffFace`]), on it the failure
+/// is returned. A drop that finds no point, and a run without edges, are a
+/// [`band_stage_failed`] defect: a bounded curve always has a closest point, and the run
+/// always holds its band's edge.
+///
+/// # Errors
+/// Those of `run`, `drop_onto`, `evaluate` and `off_face`, for a sample on its face.
+fn foot_on_run<E>(
     point: crate::math::Point3,
-    feet: impl IntoIterator<Item = Result<crate::math::Point3>>,
-) -> Result<Option<crate::math::Point3>> {
-    let mut nearest: Option<(f64, crate::math::Point3)> = None;
-    for foot in feet {
-        let q = foot?;
-        let dist = (point - q).length();
-        if nearest.is_none_or(|(best, _)| dist < best) {
-            nearest = Some((dist, q));
+    run: impl IntoIterator<Item = Result<E>>,
+    mut drop_onto: impl FnMut(&E, crate::math::Point3) -> Result<crate::curve::curve::p6::DroppedPoint>,
+    mut evaluate: impl FnMut(&E, f64) -> Result<crate::math::Point3>,
+    off_face: impl FnOnce() -> Result<bool>,
+) -> Result<FootOnRun<E>> {
+    let mut nearest: Option<(f64, E, f64, crate::math::Point3)> = None;
+    for edge in run {
+        let foot_on_edge = || -> Result<(E, f64, crate::math::Point3)> {
+            let edge = edge?;
+            let on = drop_onto(&edge, point)?;
+            if !on.success {
+                return Err(band_stage_failed());
+            }
+            let q = evaluate(&edge, on.parameter)?;
+            Ok((edge, on.parameter, q))
+        };
+        match foot_on_edge() {
+            Ok((edge, parameter, q)) => {
+                let dist = (point - q).length();
+                if nearest.as_ref().is_none_or(|&(best, ..)| dist < best) {
+                    nearest = Some((dist, edge, parameter, q));
+                }
+            }
+            Err(error) => {
+                if off_face()? {
+                    return Ok(FootOnRun::SampleOffFace);
+                }
+                return Err(error);
+            }
         }
     }
-    Ok(nearest.map(|(_, q)| q))
+    match nearest {
+        Some((_, edge, parameter, point)) => Ok(FootOnRun::Found {
+            edge,
+            parameter,
+            point,
+        }),
+        None => Err(band_stage_failed()),
+    }
+}
+
+/// The closest point to `point` of a band run's edge curve over `interval` (the band check's
+/// drop).
+fn drop_onto_edge(
+    k: &Kernel,
+    curve: &crate::curve::curve::Curve,
+    interval: &crate::geom::extent1d::Extent1d,
+    point: crate::math::Point3,
+) -> Result<crate::curve::curve::p6::DroppedPoint> {
+    curve.drop_point(
+        k,
+        interval,
+        point,
+        None,
+        crate::math::BIG_DOUBLE,
+        None,
+        crate::geom::global_solver::SolverOperation::Minimize,
+    )
 }
 
 /// Whether `p` lies off `face` (the band check's classification of a sample).
@@ -8487,33 +8523,101 @@ mod tests {
         );
     }
 
-    /// The band check's foot of a rail point on its band's run (#19243): the nearest of its
-    /// feet on the run's edges where every edge gives one, and where any edge's foot cannot
-    /// be found (here an injected failure, standing in for a drop or an evaluation that
-    /// fails), that failure, never the nearest of the other edges' feet.
+    /// The band check's search for a point's foot on a band's run (#19243). Every way the
+    /// foot on one edge can fail (a drop that fails, a drop that finds no point, an
+    /// evaluation that fails), before, between or after edges whose feet are found, returns
+    /// the failure for a sample on its face and drops a sample off it; no other edge's foot
+    /// stands in for it. With every foot found, the nearest is kept and the sample is not
+    /// classified.
     #[test]
-    fn a_rail_point_foot_that_cannot_be_found_is_not_replaced() {
+    fn a_foot_that_cannot_be_found_on_the_run_is_not_replaced() {
+        use crate::curve::curve::p6::DroppedPoint;
+        use std::cell::Cell;
+        /// How a test edge's foot comes out.
+        #[derive(Debug, Clone, Copy, PartialEq)]
+        enum Edge {
+            /// Its foot is found, here.
+            At(Point3),
+            /// Its drop fails.
+            DropFails,
+            /// Its drop finds no point.
+            NoPoint,
+            /// Its drop finds a point whose evaluation fails.
+            EvaluationFails,
+        }
+        fn failure() -> SolidError {
+            SolidError::invalid_input("test", "injected failure")
+        }
         let point = Point3::new(0.0, 0.0, 0.0);
         let near = Point3::new(1.0, 0.0, 0.0);
         let far = Point3::new(0.0, 5.0, 0.0);
-        assert_eq!(
-            nearest_foot(point, [Ok(far), Ok(near)]).unwrap(),
-            Some(near)
-        );
-        assert_eq!(nearest_foot(point, Vec::new()).unwrap(), None);
-        // a failing edge before, between and after edges whose feet are found
-        for feet in [
-            vec![Err(band_stage_failed()), Ok(far)],
-            vec![Ok(far), Err(band_stage_failed()), Ok(near)],
-            vec![Ok(near), Err(band_stage_failed())],
-            vec![Err(band_stage_failed())],
-        ] {
-            let error = nearest_foot(point, feet).unwrap_err();
-            assert_eq!(
-                error.kind(),
-                band_stage_failed().kind(),
-                "the failure is returned as it came: {error}"
+        let classified = Cell::new(0);
+        let search = |run: &[Edge], off_face: bool| {
+            let foot = foot_on_run(
+                point,
+                run.iter().map(|&edge| Ok(edge)),
+                |&edge, _| match edge {
+                    Edge::DropFails => Err(failure()),
+                    Edge::NoPoint => Ok(DroppedPoint::default()),
+                    Edge::At(_) | Edge::EvaluationFails => Ok(DroppedPoint {
+                        success: true,
+                        parameter: 0.5,
+                        distance: 0.0,
+                    }),
+                },
+                |&edge, _| match edge {
+                    Edge::At(q) => Ok(q),
+                    _ => Err(failure()),
+                },
+                || {
+                    classified.set(classified.get() + 1);
+                    Ok(off_face)
+                },
             );
+            foot.map(|f| match f {
+                FootOnRun::Found { edge, point, .. } => Some((edge, point)),
+                FootOnRun::SampleOffFace => None,
+            })
+        };
+        // every foot found: the nearest, and the sample is not classified
+        let found = search(&[Edge::At(far), Edge::At(near)], false).unwrap();
+        assert_eq!(found, Some((Edge::At(near), near)));
+        assert_eq!(classified.get(), 0);
+        // a run without edges is a defect, not a point
+        assert_eq!(
+            search(&[], false).unwrap_err().kind(),
+            band_stage_failed().kind()
+        );
+        for failing in [Edge::DropFails, Edge::NoPoint, Edge::EvaluationFails] {
+            for run in [
+                vec![failing, Edge::At(far)],
+                vec![Edge::At(far), failing, Edge::At(near)],
+                vec![Edge::At(near), failing],
+                vec![failing],
+            ] {
+                classified.set(0);
+                let on_face = search(&run, false);
+                let kind = if failing == Edge::NoPoint {
+                    band_stage_failed().kind()
+                } else {
+                    failure().kind()
+                };
+                assert_eq!(
+                    on_face.as_ref().map_err(SolidError::kind),
+                    Err(kind),
+                    "a sample on its face gets the failure"
+                );
+                assert_eq!(
+                    search(&run, true).unwrap(),
+                    None,
+                    "a sample off its face is dropped"
+                );
+                assert_eq!(
+                    classified.get(),
+                    2,
+                    "the sample is classified once per search"
+                );
+            }
         }
     }
 }
