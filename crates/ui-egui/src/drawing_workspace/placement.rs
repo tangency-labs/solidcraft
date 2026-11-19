@@ -199,11 +199,11 @@ pub(crate) fn on_sheet(
     sheet: u64,
     cursor: Option<Vec2>,
     clicked: bool,
-) -> bool {
-    let Some(mut placement) = app.drawing_workspace.placement.take() else { return false };
+) {
+    let Some(mut placement) = app.drawing_workspace.placement.take() else { return };
     if placement.owner != (app.session.uid, drawing.id, sheet) || placement.parent.is_some_and(|id| drawing.view(id).is_none()) {
         super::close_panel(app);
-        return false;
+        return;
     }
     if let Some((at, beside, request)) = cursor.and_then(|cursor| placement.target(drawing, cursor)) {
         placement.update_preview(app, painter.ctx(), request.clone());
@@ -237,7 +237,7 @@ pub(crate) fn on_sheet(
                     placement.parent = reply["view"].as_str().and_then(solidcraft_engine::doc::ids::decode);
                     if placement.parent.is_none() {
                         super::close_panel(app);
-                        return true;
+                        return;
                     }
                 }
                 Ok(_) => {}
@@ -247,5 +247,4 @@ pub(crate) fn on_sheet(
         }
     }
     app.drawing_workspace.placement = Some(placement);
-    true
 }

@@ -1,0 +1,42 @@
+{
+  "ar": {
+    "ui.drawing_parts_list.number": "اكتب عددًا من المليمترات.",
+    "ui.drawing_parts_list.place": "انقر على الورقة لوضع قائمة الأجزاء. بالقرب من زاوية الإطار تلتصق بتلك الزاوية.",
+    "ui.drawing_parts_list.renumber": "إعادة الترقيم من الرسم غير متاحة بعد."
+  },
+  "de": {
+    "ui.drawing_parts_list.number": "Geben Sie eine Zahl in Millimetern ein.",
+    "ui.drawing_parts_list.place": "Klicken Sie auf das Blatt, um die Stückliste zu platzieren. Nahe einer Ecke des Rahmens rastet sie an dieser Ecke ein.",
+    "ui.drawing_parts_list.renumber": "Neu nummerieren ist in einer Zeichnung noch nicht möglich."
+  },
+  "en": {
+    "ui.drawing_parts_list.number": "Type a number of millimetres.",
+    "ui.drawing_parts_list.place": "Click the sheet to place the parts list. Near a corner of the border, it snaps to that corner.",
+    "ui.drawing_parts_list.renumber": "Renumbering from a drawing isn't available yet."
+  },
+  "he": {
+    "ui.drawing_parts_list.number": "הקלידו מספר במילימטרים.",
+    "ui.drawing_parts_list.place": "לחצו על הגיליון כדי למקם את רשימת החלקים. ליד פינה של המסגרת היא נצמדת לפינה זו.",
+    "ui.drawing_parts_list.renumber": "מספור מחדש מתוך שרטוט עדיין אינו זמין."
+  },
+  "ja": {
+    "ui.drawing_parts_list.number": "ミリメートル単位の数値を入力してください。",
+    "ui.drawing_parts_list.place": "シートをクリックして部品表を配置します。枠の角の近くでは、その角にスナップします。",
+    "ui.drawing_parts_list.renumber": "図面からの番号の振り直しはまだ使用できません。"
+  },
+  "ko": {
+    "ui.drawing_parts_list.number": "밀리미터 단위의 숫자를 입력하세요.",
+    "ui.drawing_parts_list.place": "시트를 클릭하여 부품 목록을 배치하세요. 테두리 모서리 근처에서는 그 모서리에 맞춰집니다.",
+    "ui.drawing_parts_list.renumber": "도면에서 번호 다시 매기기는 아직 사용할 수 없습니다."
+  },
+  "vi": {
+    "ui.drawing_parts_list.number": "Nhập một số tính bằng milimét.",
+    "ui.drawing_parts_list.place": "Bấm vào tờ bản vẽ để đặt danh mục chi tiết. Gần một góc của khung, danh mục sẽ bám vào góc đó.",
+    "ui.drawing_parts_list.renumber": "Chưa thể đánh số lại từ bản vẽ."
+  },
+  "zh": {
+    "ui.drawing_parts_list.number": "请输入以毫米为单位的数字。",
+    "ui.drawing_parts_list.place": "点击图纸以放置明细表。靠近图框的角时，它会吸附到该角。",
+    "ui.drawing_parts_list.renumber": "暂不支持从工程图重新编号。"
+  }
+}

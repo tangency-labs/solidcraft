@@ -16,6 +16,7 @@ pub(crate) mod dimension;
 mod first_sheet;
 pub(crate) mod note;
 mod panels;
+pub(crate) mod parts_list;
 pub(crate) mod placement;
 
 use panels::Tool;
@@ -31,6 +32,7 @@ pub struct State {
     note: Option<note::Draft>,
     view_edit: Option<panels::ViewEdit>,
     dimension: Option<dimension::Draft>,
+    parts_list: Option<parts_list::Draft>,
     add_sheet: Option<panels::AddSheet>,
     rename_sheet: Option<u64>,
     sheet_menu: Option<SheetMenu>,
@@ -75,6 +77,7 @@ pub fn enter(app: &mut SolveApp, drawing: bool) -> Result<(), String> {
         app.drawing_workspace.note = None;
         app.drawing_workspace.view_edit = None;
         app.drawing_workspace.dimension = None;
+        app.drawing_workspace.parts_list = None;
         app.drawing_workspace.add_sheet = None;
         app.drawing_workspace.rename_sheet = None;
         app.drawing_workspace.sheet_menu = None;
@@ -146,6 +149,16 @@ pub(crate) fn placing_dimension(app: &SolveApp) -> bool {
     app.drawing_workspace.options == Some(Tool::Dimension(None))
 }
 
+pub(crate) fn placing_parts_list(app: &SolveApp) -> bool {
+    app.drawing_workspace.options == Some(Tool::PartsList(None))
+}
+
+/// A tool that places what it makes with a click on the sheet is open: the sheet's own clicks,
+/// double-clicks and drags wait while it is.
+pub(crate) fn placing_on_sheet(app: &SolveApp) -> bool {
+    placing_view(app) || placing_note(app) || placing_dimension(app) || placing_parts_list(app)
+}
+
 pub fn can_open_options(id: &str) -> bool {
     Tool::for_command(id).is_some() || matches!(id, "drawing.sheet.add" | "drawing.sheet.set")
 }
@@ -164,6 +177,7 @@ pub fn close_panel(app: &mut SolveApp) -> bool {
     app.drawing_workspace.note = None;
     app.drawing_workspace.view_edit = None;
     app.drawing_workspace.dimension = None;
+    app.drawing_workspace.parts_list = None;
     app.drawing_workspace.add_sheet = None;
     app.drawing_workspace.first_sheet = None;
     app.drawing_workspace.settings = None;
@@ -877,6 +891,8 @@ fn panel_fields(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     } else if let Some(Tool::Note(selected)) = app.drawing_workspace.options {
         note::editor(app, ui, selected);
+    } else if let Some(Tool::PartsList(selected)) = app.drawing_workspace.options {
+        parts_list::editor(app, ui, selected);
     } else if let Some(Tool::Edit(view)) = app.drawing_workspace.options {
         if panels::view_editor(app, ui, view) {
             close_panel(app);

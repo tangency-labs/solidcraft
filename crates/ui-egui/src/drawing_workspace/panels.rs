@@ -1,14 +1,9 @@
 use serde_json::{Value, json};
-use solidcraft_engine::doc::drawing::{
-    Drawing, MAX_DPI, MAX_NAME_BYTES, MIN_DPI, Sheet,
-    dimension::DimensionKind,
-    table::{Kind, MassFormat, PartsList},
-};
+use solidcraft_engine::doc::drawing::{Drawing, MAX_DPI, MAX_NAME_BYTES, MIN_DPI, Sheet, dimension::DimensionKind};
 use solidcraft_engine::doc::ids;
 use solidcraft_engine::geom::{
     drawing_sheet::{DrawingBorderProfile, Orientation, PaperSize, Sheet as Paper, SheetSize},
     drawing_view::Scale,
-    table::Heading,
     title_block::{self, TitleBlock},
 };
 use solidcraft_engine::render::VisualStyle;
@@ -80,6 +75,15 @@ fn caption(ui: &mut egui::Ui, id: &'static str) {
     ui_kit::text(ui, tr(id), ui_kit::Text::Note(id));
 }
 
+/// A text field with its `unit` written at its right end, inside it: true on Enter.
+pub(super) fn unit_field(ui: &mut egui::Ui, value: &mut String, hint: &str, unit: &str) -> (bool, egui::Response) {
+    let t = Tokens::get();
+    let (enter, response) = ui_kit::text_field_reserving(ui, value, hint, t.space_24);
+    let at = response.rect.right_center() - egui::vec2(t.space_8, 0.0);
+    ui.painter().text(at, egui::Align2::RIGHT_CENTER, unit, egui::FontId::monospace(t.font_small), t.form_dim);
+    (enter, response)
+}
+
 pub(super) fn finish_placement(ui: &mut egui::Ui) -> bool {
     ui.separator();
     ui.horizontal(|ui| {
@@ -117,8 +121,7 @@ pub(super) fn tool_body(app: &SolveApp, ui: &mut egui::Ui, tool: Tool) {
         Tool::Base | Tool::Projected => base_view(ui, &app.session.doc.name, tool == Tool::Projected),
         Tool::Edit(_) => {}
         Tool::Dimension(selected) => dimension(ui, drawing, sheet, selected),
-        Tool::Note(_) => {}
-        Tool::PartsList(table) => parts_list(ui, drawing, sheet, table, &app.session.doc.name),
+        Tool::Note(_) | Tool::PartsList(_) => {}
     }
 }
 
@@ -302,58 +305,6 @@ fn dimension(ui: &mut egui::Ui, drawing: Option<&Drawing>, sheet: Option<u64>, s
             }
         }
     }
-}
-
-fn parts_list(ui: &mut egui::Ui, drawing: Option<&Drawing>, sheet: Option<u64>, selected: Option<u64>, source: &str) {
-    let stored = drawing.and_then(|drawing| {
-        drawing
-            .tables
-            .iter()
-            .find(|table| matches!(table.kind, Kind::PartsList(_)) && selected.map_or_else(|| Some(table.sheet) == sheet, |id| table.id == id))
-    });
-    let fallback = drawing.and_then(|drawing| {
-        let of =
-            drawing.sheets.iter().find(|candidate| Some(candidate.id) == sheet).and_then(|sheet| sheet.documents).or_else(|| {
-                drawing.sources.first().map(|source| solidcraft_engine::doc::drawing::SheetComponent { source: source.id, component: 0 })
-            })?;
-        Some(
-            Kind::PartsList(PartsList {
-                of,
-                view: Default::default(),
-                group: Default::default(),
-                fold: false,
-                purchased_contents: false,
-                mass: MassFormat::default(),
-            })
-            .default_table(),
-        )
-    });
-    let table = stored.map(|stored| &stored.table).or(fallback.as_ref());
-    ui.add_enabled_ui(false, |ui| {
-        choice(ui, tr("ui.drawing_panel.model"), 0, &[source]);
-        segments(
-            ui,
-            tr("ui.drawing_panel.heading"),
-            usize::from(table.is_some_and(|table| table.heading == Heading::Bottom)),
-            &[tr("ui.top"), tr("ui.bottom")],
-        );
-        text(ui, tr("ui.drawing_panel.row_height"), &format!("{} mm", table.map_or(7.0, |table| table.row_height_mm)));
-        ui_kit::section_heading(ui, tr("ui.drawing_panel.columns"));
-        if let Some(table) = table {
-            for column in &table.columns {
-                let mut width = column.width_mm.map_or_else(|| tr("ui.drawing_panel.auto").to_owned(), |value| format!("{value} mm"));
-                ui_kit::row(ui, &column.heading, |ui| {
-                    ui.horizontal(|ui| {
-                        let mut printed = column.printed;
-                        ui_kit::checkbox(ui, "", &mut printed);
-                        ui_kit::text_field(ui, &mut width, "");
-                    });
-                });
-            }
-        }
-    });
-    ui_kit::section_heading(ui, tr("ui.drawing_panel.items"));
-    pending(ui, tr("ui.drawing_panel.renumber"));
 }
 
 #[derive(Clone)]
@@ -766,18 +717,7 @@ fn sheet_fields(app: &mut SolveApp, ui: &mut egui::Ui, sheet: &Sheet) {
     let dpi_id = ui.make_persistent_id(("sheet_settings_dpi", app.session.uid, sheet.id));
     let mut dpi = context.data(|data| data.get_temp::<String>(dpi_id)).unwrap_or_else(|| sheet.dpi.to_string());
     let picture = tr("ui.drawing_settings.picture");
-    let (enter, response) = ui_kit::row(ui, picture, |ui| {
-        let t = Tokens::get();
-        let (enter, response) = ui_kit::text_field_reserving(ui, &mut dpi, "", t.space_24);
-        ui.painter().text(
-            response.rect.right_center() - egui::vec2(t.space_8, 0.0),
-            egui::Align2::RIGHT_CENTER,
-            "dpi",
-            egui::FontId::monospace(t.font_small),
-            t.form_dim,
-        );
-        (enter, response)
-    });
+    let (enter, response) = ui_kit::row(ui, picture, |ui| unit_field(ui, &mut dpi, "", "dpi"));
     ui_kit::below_row_control(ui, picture, ui.available_width(), |ui| {
         settings_note(ui, "ui.drawing_settings.picture_help");
     });

@@ -506,16 +506,28 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     let hover = response.hover_pos().filter(|p| !crate::shell::covered(app, *p)).map(|p| at.paper(p));
     let on_paper = hover.filter(|p| (0.0..=size.x).contains(&p.x) && (0.0..=size.y).contains(&p.y));
     let placement_painter = painter.with_clip_rect(sheet_rect.intersect(painter.clip_rect()));
-    let placing = crate::drawing_workspace::placement::on_sheet(app, &placement_painter, at, &drawing, sheet, on_paper, response.clicked());
-    let placing_note = crate::drawing_workspace::placing_note(app);
-    if placing_note && let Some(point) = on_paper {
+    // Read before the tools run: a click that places something closes its tool, and isn't the
+    // sheet's own click too.
+    let placing = crate::drawing_workspace::placing_on_sheet(app);
+    crate::drawing_workspace::placement::on_sheet(app, &placement_painter, at, &drawing, sheet, on_paper, response.clicked());
+    if crate::drawing_workspace::placing_note(app)
+        && let Some(point) = on_paper
+    {
         crate::drawing_workspace::note::on_sheet(app, &placement_painter, at.screen(point), point, sheet, response.clicked());
     }
-    let placing_dimension = crate::drawing_workspace::placing_dimension(app);
-    if placing_dimension && let Some(point) = on_paper {
+    if crate::drawing_workspace::placing_dimension(app)
+        && let Some(point) = on_paper
+    {
         crate::drawing_workspace::dimension::on_sheet(app, &placement_painter, at, sheet, point, HOVER_BAND / at.scale, response.clicked());
     }
-    let placing = placing || placing_note || placing_dimension;
+    if crate::drawing_workspace::placing_parts_list(app)
+        && let Some(point) = on_paper
+        && let Some(record) = drawing.sheets.iter().find(|record| record.id == sheet)
+    {
+        // Twice the hover band: a corner is easier to reach than an edge.
+        let band = 2.0 * HOVER_BAND / at.scale;
+        crate::drawing_workspace::parts_list::on_sheet(app, &placement_painter, at, record, point, band, response.clicked());
+    }
     view_tools::Canvas { at, painter: &painter, response: &response, drawing: &drawing, sheet, objects: &view.objects, free: free_area(app, canvas) }
         .show(app, ui, placing);
     view_tools::box_select(app, ui, &painter, &response, at, &drawing, &view.objects, canvas, box_free && !placing);
