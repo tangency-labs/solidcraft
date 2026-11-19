@@ -203,7 +203,8 @@ fn opening_shows_the_bodies_meshed_so_far_in_order_adding_to_the_picture_before(
         s.execute("solid.box", &json!({"length":10,"width":10,"height":10,"corner":[20 * k, 0, 0],"operation":"new"})).unwrap();
     }
     let mut app = SolveApp::new(s, crate::Services::default());
-    app.viewport.gpu = Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+    app.viewport.gpu =
+        Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false, edges: false });
     let world = crate::open_meshing::session_world(&app.session);
     assert_eq!(world.bodies.len(), 5);
     crate::open_meshing::without_threads(|| crate::open_meshing::start(&mut app, None));
