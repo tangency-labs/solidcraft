@@ -1671,8 +1671,14 @@ mod tests {
         // 2^e in four factors: exact across the whole range, overflow only past it
         let one = v(1.0, 0.0, 0.0);
         assert_eq!(times_pow2(one, 3068).x, f64::INFINITY);
-        assert_eq!(times_pow2(v(2f64.powi(-1022), 0.0, 0.0), 2045).x, 2f64.powi(1023));
-        assert_eq!(times_pow2(v(2f64.powi(1023), 0.0, 0.0), -2045).x, 2f64.powi(-1022));
+        assert_eq!(
+            times_pow2(v(2f64.powi(-1022), 0.0, 0.0), 2045).x,
+            2f64.powi(1023)
+        );
+        assert_eq!(
+            times_pow2(v(2f64.powi(1023), 0.0, 0.0), -2045).x,
+            2f64.powi(-1022)
+        );
         assert_eq!(times_pow2(one, -5).x, 1.0 / 32.0);
         assert_eq!(times_pow2(one, 0).x, 1.0);
         assert_eq!(scaled_length(Vec3::ZERO), 0.0);
