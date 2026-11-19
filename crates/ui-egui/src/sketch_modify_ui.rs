@@ -86,9 +86,10 @@ pub fn pattern_limit(app: &SolveApp, extra: &Map<String, Value>) -> usize {
     app.session.pattern_limit_for(existing)
 }
 
-/// How to raise `limit` when a quantity runs into it; nothing at the fixed ceiling (#7824).
-fn limit_hint(limit: usize) -> &'static str {
-    if limit < solidcraft_engine::sketch::MAX_PATTERN_COPIES { " (raise the limit in Preferences › Sketch)" } else { "" }
+/// Whether a quantity over `limit` can be allowed by raising the limit in Preferences › Sketch:
+/// not at the fixed ceiling (#7824).
+fn raisable(limit: usize) -> bool {
+    limit < solidcraft_engine::sketch::MAX_PATTERN_COPIES
 }
 
 /// The engine's own cap on the offsets `sketch.offset` stacks one behind the other.
@@ -904,8 +905,12 @@ fn signed_length(app: &SolveApp, label: &str, text: &str, flip: bool) -> Result<
 fn whole(app: &SolveApp, label: &str, text: &str, limit: usize) -> Result<u64, String> {
     let v = app.session.doc.eval(text.trim(), ValueKind::Unitless).map_err(|e| format!("{label}: {e}"))?;
     if !v.is_finite() || !(1.0..=limit as f64).contains(&v) || (v - v.round()).abs() > 1e-9 {
-        let hint = if v.is_finite() && v > limit as f64 { limit_hint(limit) } else { "" };
-        return Err(format!("{label} must be a whole number from 1 to {limit}{hint}"));
+        let id = if v.is_finite() && v > limit as f64 && raisable(limit) {
+            "sketch.error.pattern_quantity_raise"
+        } else {
+            "sketch.error.pattern_quantity"
+        };
+        return Err(solidcraft_ui_text::format(id, &[("label", solidcraft_ui_text::tr_label(label)), ("limit", &limit.to_string())]));
     }
     Ok(v.round() as u64)
 }
@@ -1113,7 +1118,8 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 return Err("Spacing 2 must be a non-zero number".into());
             }
             if n1.saturating_mul(n2) > limit as u64 {
-                return Err(format!("Quantity and Quantity 2 together must make at most {limit} instances{}", limit_hint(limit)));
+                let id = if raisable(limit) { "sketch.error.pattern_total_raise" } else { "sketch.error.pattern_total" };
+                return Err(solidcraft_ui_text::format(id, &[("limit", &limit.to_string())]));
             }
             let mut p = json!({"entities": entities, "count": count, "spacing": spacing, "count2": count2, "spacing2": spacing2, "alignment": alignment, "alignment2": alignment2, "reversed": reversed, "reversed2": reversed2});
             // A picked direction that has no component in the sketch plane is reported rather

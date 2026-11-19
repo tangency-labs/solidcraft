@@ -2,41 +2,73 @@
   "en": {
     "cmd.sketch_pattern_limit": "Sketch Pattern Limit",
     "prefs.sketch.pattern_limit": "Most instances per pattern",
-    "prefs.sketch.pattern_limit_note": "Counts the original. Larger patterns take longer to solve, and very large ones may not solve."
+    "prefs.sketch.pattern_limit_note": "Counts the original. Larger patterns take longer to solve, and very large ones may not solve.",
+    "sketch.error.pattern_quantity": "{label} must be a whole number from 1 to {limit}",
+    "sketch.error.pattern_quantity_raise": "{label} must be a whole number from 1 to {limit} (raise the limit in Preferences › Sketch)",
+    "sketch.error.pattern_total": "Quantity and Quantity 2 together must make at most {limit} instances",
+    "sketch.error.pattern_total_raise": "Quantity and Quantity 2 together must make at most {limit} instances (raise the limit in Preferences › Sketch)"
   },
   "de": {
     "cmd.sketch_pattern_limit": "Grenze für Skizzenmuster",
     "prefs.sketch.pattern_limit": "Max. Exemplare pro Muster",
-    "prefs.sketch.pattern_limit_note": "Das Original zählt mit. Größere Muster brauchen länger zum Lösen, sehr große lassen sich eventuell nicht lösen."
+    "prefs.sketch.pattern_limit_note": "Das Original zählt mit. Größere Muster brauchen länger zum Lösen, sehr große lassen sich eventuell nicht lösen.",
+    "sketch.error.pattern_quantity": "{label} muss eine ganze Zahl von 1 bis {limit} sein",
+    "sketch.error.pattern_quantity_raise": "{label} muss eine ganze Zahl von 1 bis {limit} sein (Grenze unter Einstellungen › Skizze erhöhen)",
+    "sketch.error.pattern_total": "Anzahl und Anzahl 2 dürfen zusammen höchstens {limit} Exemplare ergeben",
+    "sketch.error.pattern_total_raise": "Anzahl und Anzahl 2 dürfen zusammen höchstens {limit} Exemplare ergeben (Grenze unter Einstellungen › Skizze erhöhen)"
   },
   "ja": {
     "cmd.sketch_pattern_limit": "スケッチパターンの上限",
     "prefs.sketch.pattern_limit": "パターンの最大インスタンス数",
-    "prefs.sketch.pattern_limit_note": "元の図形も数えます。大きなパターンほど解くのに時間がかかり、非常に大きなパターンは解けないことがあります。"
+    "prefs.sketch.pattern_limit_note": "元の図形も数えます。大きなパターンほど解くのに時間がかかり、非常に大きなパターンは解けないことがあります。",
+    "sketch.error.pattern_quantity": "{label}は1から{limit}までの整数にしてください",
+    "sketch.error.pattern_quantity_raise": "{label}は1から{limit}までの整数にしてください（上限は 環境設定 › スケッチ で引き上げられます）",
+    "sketch.error.pattern_total": "数量と数量 2 を合わせて、インスタンスは{limit}個までにしてください",
+    "sketch.error.pattern_total_raise": "数量と数量 2 を合わせて、インスタンスは{limit}個までにしてください（上限は 環境設定 › スケッチ で引き上げられます）"
   },
   "ko": {
     "cmd.sketch_pattern_limit": "스케치 패턴 한도",
     "prefs.sketch.pattern_limit": "패턴당 최대 인스턴스 수",
-    "prefs.sketch.pattern_limit_note": "원본도 포함합니다. 패턴이 클수록 해석에 시간이 더 걸리며, 매우 큰 패턴은 해석되지 않을 수 있습니다."
+    "prefs.sketch.pattern_limit_note": "원본도 포함합니다. 패턴이 클수록 해석에 시간이 더 걸리며, 매우 큰 패턴은 해석되지 않을 수 있습니다.",
+    "sketch.error.pattern_quantity": "{label}은(는) 1에서 {limit} 사이의 정수여야 합니다",
+    "sketch.error.pattern_quantity_raise": "{label}은(는) 1에서 {limit} 사이의 정수여야 합니다 (한도는 환경 설정 › 스케치에서 높일 수 있습니다)",
+    "sketch.error.pattern_total": "수량과 수량 2를 합쳐 인스턴스는 최대 {limit}개여야 합니다",
+    "sketch.error.pattern_total_raise": "수량과 수량 2를 합쳐 인스턴스는 최대 {limit}개여야 합니다 (한도는 환경 설정 › 스케치에서 높일 수 있습니다)"
   },
   "zh": {
     "cmd.sketch_pattern_limit": "草图阵列上限",
     "prefs.sketch.pattern_limit": "每个阵列的最多实例数",
-    "prefs.sketch.pattern_limit_note": "包括原始对象。阵列越大求解越慢，过大的阵列可能无法求解。"
+    "prefs.sketch.pattern_limit_note": "包括原始对象。阵列越大求解越慢，过大的阵列可能无法求解。",
+    "sketch.error.pattern_quantity": "{label}必须是 1 到 {limit} 之间的整数",
+    "sketch.error.pattern_quantity_raise": "{label}必须是 1 到 {limit} 之间的整数（可在 首选项 › 草图 中提高上限）",
+    "sketch.error.pattern_total": "数量与数量 2 合计最多只能生成 {limit} 个实例",
+    "sketch.error.pattern_total_raise": "数量与数量 2 合计最多只能生成 {limit} 个实例（可在 首选项 › 草图 中提高上限）"
   },
   "ar": {
     "cmd.sketch_pattern_limit": "حد نمط الرسم التخطيطي",
     "prefs.sketch.pattern_limit": "أقصى عدد من النسخ لكل نمط",
-    "prefs.sketch.pattern_limit_note": "يشمل العدد الأصل. تستغرق الأنماط الأكبر وقتًا أطول للحل، وقد لا تُحل الأنماط الكبيرة جدًا."
+    "prefs.sketch.pattern_limit_note": "يشمل العدد الأصل. تستغرق الأنماط الأكبر وقتًا أطول للحل، وقد لا تُحل الأنماط الكبيرة جدًا.",
+    "sketch.error.pattern_quantity": "يجب أن تكون {label} عددًا صحيحًا من 1 إلى {limit}",
+    "sketch.error.pattern_quantity_raise": "يجب أن تكون {label} عددًا صحيحًا من 1 إلى {limit} (ارفع الحد من التفضيلات › رسم)",
+    "sketch.error.pattern_total": "يجب ألا يتجاوز مجموع النسخ الناتجة عن الكمية والكمية 2 معًا {limit} نسخة",
+    "sketch.error.pattern_total_raise": "يجب ألا يتجاوز مجموع النسخ الناتجة عن الكمية والكمية 2 معًا {limit} نسخة (ارفع الحد من التفضيلات › رسم)"
   },
   "he": {
     "cmd.sketch_pattern_limit": "מגבלת מערך סקיצה",
     "prefs.sketch.pattern_limit": "מספר מופעים מרבי לכל מערך",
-    "prefs.sketch.pattern_limit_note": "כולל את המקור. פתרון של מערכים גדולים יותר אורך זמן רב יותר, וייתכן שמערכים גדולים מאוד לא ייפתרו."
+    "prefs.sketch.pattern_limit_note": "כולל את המקור. פתרון של מערכים גדולים יותר אורך זמן רב יותר, וייתכן שמערכים גדולים מאוד לא ייפתרו.",
+    "sketch.error.pattern_quantity": "{label} חייבת להיות מספר שלם בין 1 ל-{limit}",
+    "sketch.error.pattern_quantity_raise": "{label} חייבת להיות מספר שלם בין 1 ל-{limit} (אפשר להעלות את המגבלה בהעדפות › סקיצה)",
+    "sketch.error.pattern_total": "כמות וכמות 2 יחד חייבות ליצור לכל היותר {limit} מופעים",
+    "sketch.error.pattern_total_raise": "כמות וכמות 2 יחד חייבות ליצור לכל היותר {limit} מופעים (אפשר להעלות את המגבלה בהעדפות › סקיצה)"
   },
   "vi": {
     "cmd.sketch_pattern_limit": "Giới hạn mảng phác thảo",
     "prefs.sketch.pattern_limit": "Số phiên bản tối đa mỗi mảng",
-    "prefs.sketch.pattern_limit_note": "Tính cả bản gốc. Mảng càng lớn thì giải càng lâu, và mảng rất lớn có thể không giải được."
+    "prefs.sketch.pattern_limit_note": "Tính cả bản gốc. Mảng càng lớn thì giải càng lâu, và mảng rất lớn có thể không giải được.",
+    "sketch.error.pattern_quantity": "{label} phải là số nguyên từ 1 đến {limit}",
+    "sketch.error.pattern_quantity_raise": "{label} phải là số nguyên từ 1 đến {limit} (tăng giới hạn trong Tùy chọn cài đặt › Phác thảo)",
+    "sketch.error.pattern_total": "Số lượng và Số lượng 2 cộng lại chỉ được tạo tối đa {limit} phiên bản",
+    "sketch.error.pattern_total_raise": "Số lượng và Số lượng 2 cộng lại chỉ được tạo tối đa {limit} phiên bản (tăng giới hạn trong Tùy chọn cài đặt › Phác thảo)"
   }
 }

@@ -1261,6 +1261,26 @@ fn dialog_caps_quantities_at_the_session_limit() {
     assert_eq!(out["curves"].as_array().map(Vec::len), Some(1199));
 }
 
+/// The window's limit refusals are whole translated sentences, the hint how to raise the limit
+/// included, so no English is left in them.
+#[test]
+fn dialog_limit_refusals_are_translated() {
+    let mut h = seeded_sketch();
+    let _japanese = solidcraft_ui_text::scope("ja");
+    let quantity = solidcraft_ui_text::tr_label("Quantity").to_string();
+    for (count, count2, id, args) in [
+        ("38", "38", "sketch.error.pattern_total_raise", vec![("limit", "500")]),
+        ("600", "1", "sketch.error.pattern_quantity_raise", vec![("label", quantity.as_str()), ("limit", "500")]),
+        ("0", "1", "sketch.error.pattern_quantity", vec![("label", quantity.as_str()), ("limit", "500")]),
+    ] {
+        rect_pattern(&mut h, count, count2);
+        let d = h.app.dialog.clone().unwrap();
+        let error = apply_commands(&h.app, &d).unwrap_err();
+        assert_eq!(error, solidcraft_ui_text::format(id, &args), "{count} × {count2}");
+        assert!(!error.chars().any(|c| c.is_ascii_alphabetic()), "{count} × {count2}: {error}");
+    }
+}
+
 /// A pattern made under a higher limit can be edited in the window after the limit is lowered,
 /// but not grown past its own size.
 #[test]
