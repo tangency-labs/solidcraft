@@ -424,6 +424,21 @@ fn cylinder_of(faces: &Faces, face: usize) -> Option<(UnitVec3, Vec3, f64, bool)
     Some((a, *o, *r, !*convex))
 }
 
+/// The cylinder at an indexed face bounded by circular rims normal to its axis.
+pub fn cylinder_between_rims(b: &Body, face: usize) -> Option<CylinderFace> {
+    let Surf::Cylinder { o, a, r, convex } = surf_of(b.record(), face)? else { return None };
+    let axis = a.unit()?;
+    let (mut start, mut end) = (f64::INFINITY, f64::NEG_INFINITY);
+    for rim in crate::face_edge_indices(b, face).into_iter().filter_map(|edge| crate::edge_circle(b, edge)) {
+        if axis.dot(rim.axis).abs() > 1.0 - 1e-9 {
+            let along = (rim.center - o).dot(axis);
+            start = start.min(along);
+            end = end.max(along);
+        }
+    }
+    (end > start).then_some(CylinderFace { axis_point: o, axis, radius: r, start, end, internal: !convex })
+}
+
 pub fn cylinder_face_at(b: &Body, p: Vec3) -> Option<CylinderFace> {
     let size = b.size();
     let tol = (size * 1e-3).max(1e-3);

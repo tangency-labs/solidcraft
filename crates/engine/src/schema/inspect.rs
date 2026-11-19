@@ -196,10 +196,9 @@ pub struct ModelFace {
     /// For a cylindrical face: its axis and radius.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cylinder: Option<FaceCylinder>,
-    /// For a folded sheet's face: `sheet:<body>:<panel>:<side>`, where the panel is `base` or a
-    /// flange's tag `F<feature>.<k>` and the side is `top`, `bottom`, `rim.<edge>`, `bend.inner`
-    /// or `bend.outer`. It is taken wherever a face name is, and holds while sizes change and
-    /// flanges come and go.
+    /// For a flat-model sheet's face: `sheet:<body>:<panel>:<side>`, the side `top`, `bottom`,
+    /// `rim.<edge>`, `bend.inner` or `bend.outer`. It is taken wherever a face name is. A sheet
+    /// made from surfaces has none: its faces' names are the model's, after what made each.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sheet_face: Option<String>,
 }
@@ -505,9 +504,31 @@ pub struct DocumentInspectResult {
     pub redo: usize,
     /// The parts of the origin that are hidden, by name.
     pub hidden_origin: Vec<String>,
+    /// What imports found wrong with the geometry of the parts they brought in, as the Browser
+    /// marks it; left out when nothing is.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub defects: Vec<GeometryDefect>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// What an import found wrong with a part's geometry: on the body made of the part, or, for a
+/// part that was not imported, on the component that would have held it.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct GeometryDefect {
+    /// The body made of the part; absent for a part that was not imported.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    /// The component (id) that holds a part that was not imported, or the nearest one above it
+    /// that the import made.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub component: Option<u64>,
+    /// What kind of problem: `imported_as_surfaces`, `face_left_out`, `open_body`,
+    /// `faces_not_shown`, `needs_repair`, `repaired`, `not_imported` or `refused`.
+    pub kind: String,
+    /// The import's note, in its own words.
+    pub detail: String,
 }
 
 /// A parameter of the design.
@@ -637,7 +658,9 @@ pub struct BodyFigures {
     /// Its centre of mass at uniform density; `null` unless it is closed.
     pub center_of_mass: Option<[f64; 3]>,
     pub bbox: BoundingBox,
-    /// Faces, with split pieces of one analytic surface counted once.
+    /// Faces, with split pieces of one analytic surface counted once. These, the edges and the
+    /// vertices count the body's stored B-rep: a sheet metal body's perforation holes, which its
+    /// volume, area and centre of mass leave out, are not in it and are not counted.
     pub faces: i64,
     pub edges: i64,
     pub vertices: i64,
@@ -656,7 +679,8 @@ pub struct BodyFigures {
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct BodyFailure {
     pub error: String,
-    /// Topology counts, when available.
+    /// The counts known of a body that could not be measured, where a reply has them
+    /// (`inspect.measure` has none).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub faces: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]

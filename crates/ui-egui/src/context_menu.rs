@@ -136,6 +136,8 @@ pub enum Target {
         folder: String,
         scope: String,
     },
+    /// The quick menu at the cursor: the commands that take the selection (#5501).
+    Quick,
 }
 
 /// A command entry: label, icon, shortcut and enablement come from the registry.
@@ -218,6 +220,8 @@ pub struct MenuState {
     opener: Option<Rect>,
     /// The menu was on screen in an earlier frame. Until then a press is the opening click's own.
     shown: bool,
+    /// Clicks and selections the quick menu follows.
+    pub(crate) quick: crate::quick_menu::Watch,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -362,12 +366,12 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         ],
         Target::Body { name } => {
             let mut v = body_items(app, std::slice::from_ref(name), true);
-            // A selected browser body hands every selected body to the mesh dialogs (#12334).
-            // A row outside the selection still opens them with only the body right-clicked.
+            // A selected browser body hands every selected body to Export as well as the
+            // mesh dialogs (#18902). A row outside the selection still targets only that row.
             let selected = sel_bodies(app);
             if selected.len() > 1 && selected.contains(name) {
                 for item in &mut v {
-                    if item.id == "ui.saveMesh" || item.id == "ui.sendToSlicer" {
+                    if matches!(item.id.as_str(), "ui.export" | "ui.saveMesh" | "ui.sendToSlicer") {
                         item.params = Some(json!({ "bodies": selected }));
                     }
                 }
@@ -394,6 +398,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Link { index } => link_items(app, *index),
         Target::ToolbarCommand { id } => crate::toolbar_custom::command_items(app, id),
         Target::Toolbar => crate::toolbar_custom::toolbar_items(app),
+        Target::Quick => crate::quick_menu::items(app),
         Target::HistoryControls => crate::timeline::transport_items(app),
         Target::HistoryFolder => crate::timeline::history_folder_items(app),
         Target::Timeline { feature } => crate::timeline::feature_items(app, *feature),
@@ -414,18 +419,12 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
             for (w, icon) in [("Animation", "ws_animate"), ("Simulation", ""), ("Manufacture", "")] {
                 v.push(act("ui.workspace", w, icon).key("coming later").on(false));
             }
-            // Drawings are a preview, turned on in Preferences > Design; off, Drawing stays
-            // "coming later" as before.
-            if crate::drawing_workspace::enabled(app) {
-                v.push(
-                    act("ui.workspace.drawing", "Drawing", "ws_drawing")
-                        .with(json!({"workspace":"drawing"}))
-                        .key(if drawing { "current" } else { "UI preview" })
-                        .on(app.session.active_sketch.is_none() && app.tool.is_none() && app.dialog.is_none() && !app.file_load.busy()),
-                );
-            } else {
-                v.push(act("ui.workspace", "Drawing", "ws_drawing").key("coming later").on(false));
-            }
+            v.push(
+                act("ui.workspace.drawing", "Drawing", "ws_drawing")
+                    .with(json!({"workspace":"drawing"}))
+                    .key(if drawing { "current" } else { "" })
+                    .on(app.session.active_sketch.is_none() && app.tool.is_none() && app.dialog.is_none() && !app.file_load.busy()),
+            );
             v
         }
         Target::Units => crate::prefs::UNITS
@@ -651,7 +650,62 @@ fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
 
 /// The canvas menus put Repeat on
 /// top, then what fits the selection, our extras after a separator.
+/// A Drawing tool's row: its icon and key from the registry, on when the ribbon's button for it
+/// opens the tool (the registry's entry for it only reserves its place, and reads as off).
+fn tool(app: &SolveApp, id: &str, label: &str, enabled: bool) -> Item {
+    let mut item = cmd(app, id, label);
+    item.enabled = enabled && crate::drawing_workspace::can_open_options(id);
+    item
+}
+
+/// The sheet's menu in the Drawing workspace, laid out as a sketch's: what the selection takes
+/// (Edit, Delete), the tools, then Undo and Redo.
+fn drawing_items(app: &SolveApp) -> Vec<Item> {
+    use solidcraft_engine::doc::ids::encode;
+    let mut v = Vec::new();
+    let drawing = app.session.drawing("drawing.inspect").ok();
+    let chosen: Vec<u64> = app
+        .session
+        .selection
+        .iter()
+        .filter_map(|s| match s {
+            Sel::Drawing { drawing: d, object } if drawing.is_some_and(|open| open.id == *d) => Some(*object),
+            _ => None,
+        })
+        .collect();
+    if let ([one], Some(drawing)) = (&chosen[..], drawing) {
+        let object = json!({"object": encode(*one)});
+        if drawing.view(*one).is_some() {
+            v.push(act("ui.drawingEdit", "Edit View", "edit").with(object.clone()));
+            v.push(
+                tool(app, "drawing.view.projected.planned", "Projected View", drawing.can_project_from(*one).is_ok())
+                    .with(json!({"parent": encode(*one)})),
+            );
+        } else if drawing.dimension(*one).is_some() {
+            v.push(act("ui.drawingEdit", "Edit Text", "edit").with(object));
+        } else if drawing.notes.by_id(*one).is_some() {
+            v.push(act("ui.drawingEdit", "Edit Note", "edit").with(object));
+        }
+    }
+    if !chosen.is_empty() {
+        v.push(act("ui.delete", "Delete", "delete").key("Del"));
+        v.push(Item::sep());
+    }
+    if drawing.is_some() {
+        for (id, label) in [("drawing.view.base.planned", "Base View"), ("drawing.dimension", "Dimension"), ("drawing.note", "Note")] {
+            v.push(tool(app, id, label, true));
+        }
+        v.push(Item::sep());
+    }
+    v.push(cmd(app, "edit.undo", "Undo").on(!app.session.undo.is_empty()));
+    v.push(cmd(app, "edit.redo", "Redo").on(!app.session.redo.is_empty()));
+    v
+}
+
 fn viewport_items(app: &SolveApp) -> Vec<Item> {
+    if crate::drawing_workspace::active(app) {
+        return drawing_items(app);
+    }
     let sel = &app.session.selection;
     let has = |f: fn(&Sel) -> bool| sel.iter().any(f);
     let mut v = Vec::new();
@@ -1195,7 +1249,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
                 .on(moved || joints.iter().any(|j| j.captured.is_some() && j.kind != solidcraft_engine::doc::joints::JointKind::Rigid)),
         ];
         // An imported assembly moves as one until its rigid group is released.
-        if !app.session.contents_joints(id).is_empty() {
+        if app.session.contents_held(id) {
             placement.push(cmd(app, "component.unlock", "Unlock Contents").with(json!({ "component": id })));
         }
         v.push(group("Placement", "move", placement));
@@ -1511,61 +1565,95 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     {
         v.push(cmd(app, "sketch.dimension", "Arc Length Dimension").with(json!({ "entities": [arc], "type": "arc_length" })));
     }
-    let mut c = Vec::new();
+    // The constraints whose commands take this selection (`CommandSpec::for_selection`, #5501).
+    // Fix/Unfix has its own row above. The rules read only the selection's sketch geometry: a
+    // box that also took constraint icons still offers what its lines and points take.
+    let geometry: Vec<Sel> = app.session.selection.iter().filter(|s| !matches!(s, Sel::SketchConstraint { .. })).cloned().collect();
     let n = ents.len();
-    let (l, r, p) = (lines.len(), rounds.len(), points.len());
-    if l == 1 && n == 1 {
-        c.push(cmd(app, "sketch.constraint.horizontal_vertical", "Horizontal/Vertical").with(json!({ "line": lines[0] })));
-    }
+    let (l, p) = (lines.len(), points.len());
+    // Two points, or a point and a line, align horizontally or vertically: one row for each.
+    let mut align = Vec::new();
     if p == 2 && n == 2 {
-        c.push(cmd(app, "sketch.constraint.coincident", "Coincident").with(json!({ "a": points[0], "b": points[1] })));
-        c.extend(alignment_items(&app.session.selection));
+        align.extend(alignment_items(&geometry));
     }
-    if p == 1 && curves.len() == 1 && n == 2 {
-        c.push(cmd(app, "sketch.constraint.coincident", "Coincident").with(json!({ "a": picked[0], "b": picked[1] })));
-        if l == 1 {
-            c.push(cmd(app, "sketch.constraint.midpoint", "MidPoint").with(json!({ "point": points[0], "line": lines[0] })));
-            // #617: the point can also be aligned with the line (a circle's centre with a square's edge).
-            if let Some(align) = crate::tools::point_line_points(&ss.sketch, &json!(points[0]), &lines[0]) {
-                c.push(
-                    act("ui.horizontalConstraint", "Horizontal Constraint", "c_hv")
-                        .with(json!({"points": align, "mode": "horizontal", "if_redundant": "refuse"})),
-                );
-                c.push(
-                    act("ui.verticalConstraint", "Vertical Constraint", "c_hv")
-                        .with(json!({"points": align, "mode": "vertical", "if_redundant": "refuse"})),
-                );
-            }
-        }
+    if p == 1
+        && l == 1
+        && n == 2
+        && let Some(points) = crate::tools::point_line_points(&ss.sketch, &json!(points[0]), &lines[0])
+    {
+        // #617: the point can also be aligned with the line (a circle's centre with a square's edge).
+        align.push(
+            act("ui.horizontalConstraint", "Horizontal Constraint", "c_hv")
+                .with(json!({"points": points, "mode": "horizontal", "if_redundant": "refuse"})),
+        );
+        align.push(
+            act("ui.verticalConstraint", "Vertical Constraint", "c_hv").with(json!({"points": points, "mode": "vertical", "if_redundant": "refuse"})),
+        );
     }
-    if l == 2 && n == 2 {
-        let ab = json!({ "a": lines[0], "b": lines[1] });
-        c.push(cmd(app, "sketch.constraint.parallel", "Parallel").with(ab.clone()));
-        c.push(cmd(app, "sketch.constraint.perpendicular", "Perpendicular").with(ab.clone()));
-        c.push(cmd(app, "sketch.constraint.collinear", "Collinear").with(ab.clone()));
-        c.push(cmd(app, "sketch.constraint.equal", "Equal").with(ab.clone()));
-        c.push(cmd(app, "sketch.constraint.midpoint", "MidPoint").with(ab));
-    }
-    if r == 2 && n == 2 {
-        let ab = json!({ "a": rounds[0], "b": rounds[1] });
-        c.push(cmd(app, "sketch.constraint.concentric", "Concentric").with(ab.clone()));
-        c.push(cmd(app, "sketch.constraint.equal", "Equal").with(ab.clone()));
-        c.push(cmd(app, "sketch.constraint.tangent", "Tangent").with(ab));
-    }
-    if r == 1 && p == 1 && n == 2 {
-        c.push(cmd(app, "sketch.constraint.concentric", "Concentric").with(json!({ "a": picked[0], "b": picked[1] })));
-    }
-    if l == 1 && r == 1 && n == 2 {
-        c.push(cmd(app, "sketch.constraint.tangent", "Tangent").with(json!({ "a": picked[0], "b": picked[1] })));
-    }
-    if p == 2 && l == 1 && n == 3 {
-        c.push(cmd(app, "sketch.constraint.symmetry", "Symmetry").with(json!({ "a": points[0], "b": points[1], "line": lines[0] })));
-    }
+    let mut c: Vec<Item> = solidcraft_engine::command_specs()
+        .into_iter()
+        .filter(|spec| spec.tab == "SKETCH" && spec.panel == "CONSTRAINTS" && spec.id != "sketch.constraint.fix")
+        .filter(|spec| align.is_empty() || spec.id != "sketch.constraint.horizontal_vertical")
+        .filter(|spec| spec.selection.is_some() && spec.disabled_refusal(&app.session).is_none())
+        .filter_map(|spec| {
+            solidcraft_engine::sketch_selection::params_for(spec.id, &app.session, &geometry).map(|params| cmd(app, spec.id, spec.label).with(params))
+        })
+        .collect();
+    c.extend(align);
+    // The rows this menu had before #5501 keep their order; the ones it adds follow, in
+    // toolbar order.
+    let before = legacy_constraint_order(l, rounds.len(), p, curves.len(), n);
+    let rank = |item: &Item| before.iter().position(|id| *id == item.id.as_str()).unwrap_or(before.len());
+    c.sort_by_key(rank);
     if !c.is_empty() {
         v.push(Item::heading("Constraints"));
         v.extend(c);
     }
     v
+}
+
+/// The constraint rows the sketch menu offered before it took them from the commands (#5501),
+/// in their order then, for `l` lines, `r` circles or arcs, `p` points and `curves` curves out of
+/// `n` entities.
+fn legacy_constraint_order(l: usize, r: usize, p: usize, curves: usize, n: usize) -> Vec<&'static str> {
+    const ALIGN: [&str; 2] = ["ui.horizontalConstraint", "ui.verticalConstraint"];
+    let mut order = Vec::new();
+    if l == 1 && n == 1 {
+        order.push("sketch.constraint.horizontal_vertical");
+    }
+    if p == 2 && n == 2 {
+        order.push("sketch.constraint.coincident");
+        order.extend(ALIGN);
+    }
+    if p == 1 && curves == 1 && n == 2 {
+        order.push("sketch.constraint.coincident");
+        if l == 1 {
+            order.push("sketch.constraint.midpoint");
+            order.extend(ALIGN);
+        }
+    }
+    if l == 2 && n == 2 {
+        order.extend([
+            "sketch.constraint.parallel",
+            "sketch.constraint.perpendicular",
+            "sketch.constraint.collinear",
+            "sketch.constraint.equal",
+            "sketch.constraint.midpoint",
+        ]);
+    }
+    if r == 2 && n == 2 {
+        order.extend(["sketch.constraint.concentric", "sketch.constraint.equal", "sketch.constraint.tangent"]);
+    }
+    if r == 1 && p == 1 && n == 2 {
+        order.push("sketch.constraint.concentric");
+    }
+    if l == 1 && r == 1 && n == 2 {
+        order.push("sketch.constraint.tangent");
+    }
+    if p == 2 && l == 1 && n == 3 {
+        order.push("sketch.constraint.symmetry");
+    }
+    order
 }
 
 /// Where on the active sketch's plane the viewport menu was opened (sketch coordinates).
@@ -1651,6 +1739,16 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             let keep_midpoints = selection.iter().any(|s| matches!(s, Sel::SketchMidpoint { .. }));
             if app.run("sketch.constraint.horizontal_vertical", p).is_ok() && keep_midpoints {
                 let _ = app.run("select.set", json!({"items": selection}));
+            }
+        }
+        "ui.drawingEdit" => {
+            if let Some(object) = p.get("object").and_then(Value::as_str).and_then(solidcraft_engine::doc::ids::decode) {
+                crate::drawing_workspace::edit(app, object, at);
+            }
+        }
+        "drawing.view.projected.planned" if item.params.is_some() => {
+            if let Some(parent) = p.get("parent").and_then(Value::as_str).and_then(solidcraft_engine::doc::ids::decode) {
+                crate::drawing_workspace::start_projected(app, parent);
             }
         }
         "ui.finishSketch" => app.finish_sketch(),
@@ -1787,7 +1885,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             let name = crate::export_name::offered(app, body, body.unwrap_or(&app.session.doc.name));
             app.pick_save_command(
                 &format!("{name}.step"),
-                &["step", "stp", "igs", "stl", "3mf", "obj", "glb"],
+                &["step", "stp", "igs", "stl", "3mf", "obj", "glb", "usd", "usda", "usdc", "usdz"],
                 "file.export",
                 json!({"bodies": bodies}),
             );
@@ -2457,6 +2555,10 @@ fn in_selection(app: &SolveApp, sel: &Sel) -> bool {
 /// multi-selection keeps the whole selection (#3733), as does one of a selected body (#5849). `held`: the keys held at that click.
 /// On the view gizmo it opens the gizmo's own menu and leaves the selection alone.
 pub fn open(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held) {
+    if crate::drawing_workspace::active(app) {
+        let under = crate::drawing_sheet_page::hovered(app);
+        return open_on_sheet(app, at, held, under);
+    }
     if crate::viewport::view_gizmo_at(app, at) {
         return open_for(app, at, Target::ViewGizmo);
     }
@@ -2474,10 +2576,7 @@ pub fn open(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held) {
     });
     crate::select_other::close(app);
     if let Some(sel) = crate::viewport::sketch_constraint_at(app, at, app.viewport.hover.as_ref()) {
-        if !in_selection(app, &sel) {
-            let _ = app.run("select.set", json!({ "items": [sel] }));
-            app.menu.picked = Some((at, before, app.session.selection.clone()));
-        }
+        select_under(app, at, before, sel);
     } else if app.session.active_sketch.is_none()
         && let Some(h) = app.viewport.hover.clone()
         && let Some((_, sel)) = crate::viewport::candidate(app, &[h])
@@ -2497,6 +2596,35 @@ pub fn open(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held) {
         app.menu.picked = Some((at, before, app.session.selection.clone()));
     }
     open_for(app, at, Target::Viewport);
+}
+
+/// A right-click on something not selected selects it first, so the menu is about what is under
+/// the cursor; something already in the selection keeps the whole selection.
+fn select_under(app: &mut SolveApp, at: Pos2, before: Vec<Sel>, sel: Sel) {
+    if !in_selection(app, &sel) {
+        let _ = app.run("select.set", json!({ "items": [sel] }));
+        app.menu.picked = Some((at, before, app.session.selection.clone()));
+    }
+}
+
+/// [`open`] in the Drawing workspace: `under` is what the sheet page found under the pointer,
+/// selected first unless it is already part of the selection. Empty paper keeps the selection, as
+/// empty space does in a sketch.
+fn open_on_sheet(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held, under: Option<Sel>) {
+    app.menu.opened = Some((at, held));
+    app.menu.picked = None;
+    app.menu.over_geometry = false;
+    app.menu.section_plane = None;
+    app.menu.face = None;
+    app.menu.plane = None;
+    crate::select_other::close(app);
+    if let Some(sel) = under {
+        let before = app.session.selection.clone();
+        select_under(app, at, before, sel);
+    }
+    open_for(app, at, Target::Viewport);
+    // The ring holds the model's commands: the sheet's menu is the list.
+    app.menu.radial = false;
 }
 
 /// Open a menu for a target (the radial ring only for the viewport).
@@ -2561,7 +2689,8 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
         | Target::HistoryControls
         | Target::Workspace
         | Target::NamedViews
-        | Target::ViewGizmo => true,
+        | Target::ViewGizmo
+        | Target::Quick => true,
         Target::Body { name } => crate::open_meshing::session_world(&app.session).body(name).is_some(),
         Target::Sketch { id } | Target::ReplaceSketchFile { sketch: id, .. } => {
             doc.feature(*id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. }))
@@ -2822,6 +2951,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     track_hold(app, ctx);
     show_rename(app, ctx);
     crate::design_properties::show_object(app, ctx);
+    crate::quick_menu::watch(app, ctx);
     let Some(at) = app.viewport.context_menu else { return };
     let screen = ctx.content_rect();
     let target = app.menu.target.clone();
@@ -2911,6 +3041,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
         });
     inside |= resp.response.contains_pointer() || resp.response.rect.contains(pointer.unwrap_or(Pos2::ZERO));
+    // The quick menu closes when the pointer moves well away from it without picking.
+    if target == Target::Quick && app.menu.submenu.is_empty() && crate::quick_menu::left(resp.response.rect, pointer) {
+        close(app);
+        return;
+    }
     let mut leftward = false;
     for (depth, rows) in levels.iter().copied().enumerate().skip(1) {
         let Some(row) = seen.get(depth - 1).and_then(|s| s.anchor) else { break };
@@ -3837,7 +3972,7 @@ mod workspace_menu_tests {
         assert!(rows.windows(2).all(|pair| pair[0].bottom() <= pair[1].top()));
         assert!(rows[0].top() > opener.bottom());
         assert_eq!(rows[0].width(), 450.0);
-        assert!(items(&h.app, &Target::Workspace).iter().skip(2).all(|item| !item.enabled));
+        assert!(items(&h.app, &Target::Workspace).iter().skip(2).filter(|item| item.id != "ui.workspace.drawing").all(|item| !item.enabled));
         h.step(&json!({"click":{"handle":"workspace:menu:animation"}})).unwrap();
         assert!(!crate::render_workspace::active(&h.app));
         assert!(h.app.viewport.context_menu.is_some());

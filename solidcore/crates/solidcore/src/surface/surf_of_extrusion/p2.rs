@@ -160,7 +160,8 @@ pub struct ExtrusionIntersection {
     pub surface2_uv_curves: Vec<Option<Curve>>,
     /// `pOptCurveTypes`: the kind of each intersection.
     pub curve_types: Vec<TsectCurveType>,
-    /// `pOptDeviations`: a bound on each curve's distance from the surfaces.
+    /// `pOptDeviations`: distance bounds from the surfaces. Coincident patch
+    /// boundaries carry their certified control-net bound.
     pub deviations: Vec<f64>,
 }
 
@@ -640,6 +641,7 @@ impl SurfOfExtrusion {
         // init output
         let mut out = ExtrusionIntersection::default();
         let mut deviation = 0.0_f64;
+        let mut patch_output = None;
 
         // plane and ExtrusionSurface locals
         let plane_normal = plane.position().z_axis();
@@ -1115,7 +1117,7 @@ impl SurfOfExtrusion {
                 .iter()
                 .map(|s| first_param(&s.start.parameters))
                 .collect();
-            let mut patch = Vec::new();
+            let mut patch = None;
             if !ranges.is_empty() {
                 let inputs = PatchInputs {
                     gen,
@@ -1144,11 +1146,7 @@ impl SurfOfExtrusion {
                         .iter()
                         .any(|&(a, b)| a - EFF_ZERO_PARAM <= t && t <= b + EFF_ZERO_PARAM)
                 });
-                // Profile residual and sweep drift add, including when clipping
-                // replaces every copied boundary with a side on the target plane.
-                deviation =
-                    deviation.max((p.profile_deviation + sweep_displacement) * (1.0 + gamma(1)));
-                patch = p.curves;
+                patch = Some(p);
             }
             // arrive here for the PointSolutions
 
@@ -1275,9 +1273,15 @@ impl SurfOfExtrusion {
             }
 
             // the coincident patches' boundaries (not upstream)
-            for (c, t) in patch {
-                out.curves_3d.push(c);
-                out.curve_types.push(t);
+            if let Some(p) = patch {
+                // The patch certificate covers profile residual and boundary rounding;
+                // add sweep drift even when clipping makes every side on the plane.
+                let bound = (p.deviation + sweep_displacement) * (1.0 + gamma(1));
+                patch_output = Some((out.curves_3d.len(), bound));
+                for (c, t) in p.curves {
+                    out.curves_3d.push(c);
+                    out.curve_types.push(t);
+                }
             }
         } else {
             // this is not a special case intersection:
@@ -1314,6 +1318,9 @@ impl SurfOfExtrusion {
                 };
                 out.curve_types.push(t);
             }
+            let deviation = patch_output
+                .filter(|(start, _)| ii >= *start)
+                .map_or(deviation, |(_, bound)| deviation.max(bound));
             out.deviations.push(deviation);
         }
 
@@ -3116,6 +3123,11 @@ mod tests {
     /// exact place by as much (the generator's points are plane evaluations), which
     /// moves the area by at most the perimeter times that in UV (`2 gap`).
     fn assert_region(r: &ExtrusionIntersection, plane: &Plane, want: f64) {
+        assert_region_closing_to(r, plane, want, 16.0 * f64::EPSILON);
+    }
+
+    /// `assert_region` with the closing gap `rel m` (`16 eps` there).
+    fn assert_region_closing_to(r: &ExtrusionIntersection, plane: &Plane, want: f64, rel: f64) {
         assert!(!r.needs_more_intersections);
         assert!(!r.curves_3d.is_empty());
         assert!(
@@ -3144,7 +3156,7 @@ mod tests {
             .flatten()
             .map(|p| p.max_dimension())
             .fold(0.0, f64::max);
-        let gap = 16.0 * f64::EPSILON * m;
+        let gap = rel * m;
         let mut mate = vec![0; ends.len()];
         for (a, &(_, p)) in ends.iter().enumerate() {
             let near: Vec<usize> = (0..ends.len())
@@ -3240,6 +3252,21 @@ mod tests {
                         assert!(r.curves_3d.is_empty());
                         continue;
                     }
+                    // Each copy reaches |z| = d at a generator control point.
+                    // A reported deviation must enclose that distance, including
+                    // the rounding of computing the control-net bound.
+                    assert_eq!(r.deviations.len(), r.curves_3d.len());
+                    assert!(r.deviations.iter().all(|&v| v.is_finite() && v >= d));
+                    for (curve, &deviation) in r.curves_3d.iter().zip(&r.deviations) {
+                        let ivl = curve.natural_interval();
+                        for t in [ivl.min(), ivl.mid(), ivl.max()] {
+                            let distance = curve.evaluate_point(&k, t).unwrap().z.abs();
+                            assert!(
+                                distance <= deviation,
+                                "d {d:e} shape {shape}: distance {distance:e} exceeds deviation {deviation:e}"
+                            );
+                        }
+                    }
                     // the sweep (length 2 along Y) of a generator 3 long in X
                     assert_region(&r, &plane, 6.0);
                     if shape < 2 {
@@ -3254,6 +3281,49 @@ mod tests {
                             ],
                         );
                     }
+                }
+            }
+        }
+    }
+
+    /// Positive rational weights keep the generator at z = d. Clipping the
+    /// sweep to the plane's domain returns plane-made sides at z = 0, whose
+    /// deviation must still cover their distance d from the extrusion.
+    #[test]
+    fn clipped_rational_patch_reports_the_generator_offset() {
+        let k = k();
+        for scale in [1e-3, 1.0, 1e3] {
+            let d = 1e-12 * scale;
+            let s = swept(
+                &k,
+                &[(0.0, 0.0, d), (scale, 0.0, d), (2.0 * scale, 0.0, d)],
+                Some(0.5),
+                Vec3::Y * scale,
+            );
+            let plane = xy_plane(Extent2d::from_bounds(
+                0.5 * scale,
+                -0.5 * scale,
+                1.5 * scale,
+                0.5 * scale,
+            ));
+            let dom = Extent2d::from_bounds(0.0, -1.0, 1.0, 1.0);
+            let r = s
+                .intersect_with_plane(&k, &dom, &plane, &plane.natural_uv_domain(), None)
+                .unwrap();
+            assert!(!r.needs_more_intersections, "scale {scale:e}");
+            assert_eq!(r.curves_3d.len(), 4);
+            assert_eq!(r.surface1_uv_curves.len(), r.curves_3d.len());
+            assert_eq!(r.surface2_uv_curves.len(), r.curves_3d.len());
+            assert_eq!(r.curve_types.len(), r.curves_3d.len());
+            assert_eq!(r.deviations.len(), r.curves_3d.len());
+            for ((curve, kind), &deviation) in
+                r.curves_3d.iter().zip(&r.curve_types).zip(&r.deviations)
+            {
+                assert_eq!(*kind, TsectCurveType::RegionBoundary);
+                assert!(deviation.is_finite() && deviation >= d);
+                let ivl = curve.natural_interval();
+                for t in [ivl.min(), ivl.mid(), ivl.max()] {
+                    assert_eq!(curve.evaluate_point(&k, t).unwrap().z, 0.0);
                 }
             }
         }
@@ -3719,6 +3789,254 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Review r5: a `0.5 x 0.5` swept square at `x = 1e12`, swept
+    /// along `x` and along `y`. Its directrices (`0.5` long) are below `SM_EFF_ZERO`
+    /// of their coordinates (`1.0`) but are real edges: the boundary is the whole
+    /// closed square, as at the origin, not its two copies alone.
+    #[test]
+    fn small_regions_far_from_the_origin_are_closed() {
+        let k = k();
+        for x0 in [0.0, 1e12] {
+            for euv in [(1.0, 0.0), (0.0, 1.0)] {
+                let dom = Extent2d::from_bounds(x0 - 10.0, -10.0, x0 + 10.0, 10.0);
+                let plane = xy_plane(dom);
+                let gen: &[(f64, f64)] = if euv.0 == 1.0 {
+                    &[(x0, 0.0), (x0, 0.5)]
+                } else {
+                    &[(x0, 0.0), (x0 + 0.5, 0.0)]
+                };
+                let r = uv_polyline(&k, &plane, gen, euv, (0.0, 0.5));
+                assert_eq!(r.curves_3d.len(), 4, "x0 {x0:e}, sweep {euv:?}");
+                assert_region(&r, &plane, 0.25);
+            }
+        }
+    }
+
+    /// The review r1 corner probes of #18771: the UV box `[o, o + 10 s]^2` of the
+    /// plane (`rotated_plane` or `xy_plane`), swept along the UV direction at angle
+    /// `th`, with `c` the box corner of least `mu` (`-sin th u + cos th w`) and
+    /// `inner(a, b) = o + (1 + 8 (a, b)) s`, `f = (f0, f1, f2)`:
+    /// - kind 0: the generator `c`-`inner(f0, f1)` over `v` in `[-30 s, 30 s]` (its
+    ///   directrix at `c` touches the box only there): the box cut to
+    ///   `mu <= mu(inner(f0, f1))`;
+    /// - kind 1: the fold `inner(f0, f1)`-`c`-`inner(f2, f0)` over `[-1e4 s, 1e4 s]`
+    ///   (the slab, its `alpha` line touching the box at `c`): the box cut to `mu`
+    ///   at most the larger of the two inner points';
+    /// - kind 2: the line through `c` along `d = inner(f0, f1) - c`, from `c - d/2` to
+    ///   `c + d`, over `[0, 3 s]` (its copy at `v = 0` crosses both sides at `c`): the
+    ///   parallelogram cut to the box.
+    ///
+    /// The answer and the region's UV area.
+    fn corner_probe(
+        k: &Kernel,
+        kind: usize,
+        rot: bool,
+        o: f64,
+        s: f64,
+        th: f64,
+        f: (f64, f64, f64),
+    ) -> (ExtrusionIntersection, Plane, f64) {
+        type Probe = (Vec<(f64, f64)>, (f64, f64), Vec<Point2>);
+        let dom = Extent2d::from_bounds(o, o, o + 10.0 * s, o + 10.0 * s);
+        let plane = if rot {
+            rotated_plane(dom)
+        } else {
+            xy_plane(dom)
+        };
+        let euv = (th.cos(), th.sin());
+        let mu = |p: (f64, f64)| -euv.1 * p.0 + euv.0 * p.1;
+        let corners = [
+            (o, o),
+            (o + 10.0 * s, o),
+            (o + 10.0 * s, o + 10.0 * s),
+            (o, o + 10.0 * s),
+        ];
+        let c = corners
+            .iter()
+            .copied()
+            .min_by(|a, b| mu(*a).total_cmp(&mu(*b)))
+            .unwrap();
+        let inner = |a: f64, b: f64| (o + (1.0 + 8.0 * a) * s, o + (1.0 + 8.0 * b) * s);
+        let pt = |p: (f64, f64)| Point2::new(p.0, p.1);
+        let boxp: Vec<Point2> = corners.iter().map(|&p| pt(p)).collect();
+        let below = |top: f64| cut(&boxp, &|p: Point2| top - mu((p.x, p.y)));
+        let (gen, v, region): Probe = match kind {
+            0 => {
+                let a = inner(f.0, f.1);
+                (vec![c, a], (-30.0 * s, 30.0 * s), below(mu(a)))
+            }
+            1 => {
+                let (a, b) = (inner(f.0, f.1), inner(f.2, f.0));
+                (vec![a, c, b], (-1e4 * s, 1e4 * s), below(mu(a).max(mu(b))))
+            }
+            _ => {
+                let a = inner(f.0, f.1);
+                let d = (a.0 - c.0, a.1 - c.1);
+                let (p0, p1) = ((c.0 - 0.5 * d.0, c.1 - 0.5 * d.1), (c.0 + d.0, c.1 + d.1));
+                let h = (3.0 * s * euv.0, 3.0 * s * euv.1);
+                let par = [p0, p1, (p1.0 + h.0, p1.1 + h.1), (p0.0 + h.0, p0.1 + h.1)];
+                let par: Vec<Point2> = par.iter().map(|&p| pt(p)).collect();
+                (vec![p0, p1], (0.0, 3.0 * s), cut_to_box(&par, &dom))
+            }
+        };
+        let r = uv_polyline(k, &plane, &gen, euv, v);
+        (r, plane, uv_area(&region).abs())
+    }
+
+    /// The length of the shortest answer curve (end to end).
+    fn shortest_curve(r: &ExtrusionIntersection) -> f64 {
+        r.curves_3d
+            .iter()
+            .map(|c| {
+                let n = gen_base(c)
+                    .unwrap()
+                    .canonical()
+                    .unwrap()
+                    .control_points
+                    .clone();
+                n[0].distance(*n.last().unwrap())
+            })
+            .fold(f64::INFINITY, f64::min)
+    }
+
+    /// Review r1 of #18771, items 2 and 4: at unit scale a directrix or slab line
+    /// through a domain corner, the sweep near a side, gives two computed points
+    /// `1e-13` apart that are one point of the region. They are one point to their
+    /// computed errors (a `mu` error over the sweep's component along the side), so
+    /// the region builds, closed and of the right area, as on main; the head of
+    /// #18771 declined each (the gap above `16 eps m`, below `SM_EFF_ZERO`).
+    #[test]
+    fn corner_coincident_regions_at_unit_scale_build() {
+        let k = k();
+        let cases = [
+            (
+                0,
+                4.714_068_012_625_690_86,
+                (
+                    0.784_676_612_296_307_9,
+                    0.082_079_752_251_084_21,
+                    0.121_534_392_499_686_12,
+                ),
+            ),
+            (
+                1,
+                -1.153_269_977_747_679e-3,
+                (
+                    0.848_373_173_117_043_3,
+                    0.887_478_476_998_965_9,
+                    0.135_842_471_966_865_72,
+                ),
+            ),
+            (
+                1,
+                4.714_645_337_743_938_57,
+                (
+                    0.907_369_364_922_563_3,
+                    0.338_473_897_099_659_25,
+                    0.037_817_098_211_816_56,
+                ),
+            ),
+            (
+                2,
+                3.563_739_902_634_357_03,
+                (
+                    0.716_500_464_656_385,
+                    0.904_557_459_929_209,
+                    0.726_036_532_991_460_3,
+                ),
+            ),
+        ];
+        for (i, &(kind, th, f)) in cases.iter().enumerate() {
+            let o = if i == 3 { 0.0 } else { 1.0 };
+            let (r, plane, area) = corner_probe(&k, kind, true, o, 1.0, th, f);
+            assert_region(&r, &plane, area);
+        }
+    }
+
+    /// Review r1 of #18771, item 3: far from the origin the same coincidences leave
+    /// two computed points of rounding noise apart (`6e-9` at `1e6` with `s = 1e3`,
+    /// `2e-12` at `37`), above `16 eps m`: the head of #18771 emitted each as a tiny
+    /// boundary edge. Within their computed errors and `SM_EFF_ZERO m` they are no
+    /// edge: every curve is longer than `1e-3 s` and the boundary closes (to rounding
+    /// at `37`, to the dropped noise below `SM_EFF_ZERO m` at `1e6`) around the
+    /// region's area.
+    #[test]
+    fn corner_noise_far_from_the_origin_gives_no_tiny_edge() {
+        let k = k();
+        let (r, plane, area) = corner_probe(
+            &k,
+            0,
+            true,
+            1e6,
+            1e3,
+            4.689_916_370_853_183_03,
+            (
+                0.831_315_404_509_208_6,
+                0.327_520_607_221_003_6,
+                0.206_703_038_557_221_83,
+            ),
+        );
+        assert!(shortest_curve(&r) > 1.0, "{}", shortest_curve(&r));
+        assert_region_closing_to(&r, &plane, area, EFF_ZERO);
+        let (r, plane, area) = corner_probe(
+            &k,
+            2,
+            false,
+            37.0,
+            1.0,
+            3.469_142_466_323_665_16e-3,
+            (
+                0.677_557_068_372_655_4,
+                0.888_683_823_425_455_3,
+                0.834_298_343_197_838_4,
+            ),
+        );
+        assert!(shortest_curve(&r) > 1e-3, "{}", shortest_curve(&r));
+        assert_region(&r, &plane, area);
+    }
+
+    /// Review r2 of #18771, B1: a slab in the box `[0, 1e-3]^2` of `z = 0`, swept at
+    /// 30 degrees, from the fold `a`-`c`-`b` whose generator then leaves the plane to
+    /// `z = 1e5`. The slab's `beta` line passes `1e-10` in `mu` above the corner
+    /// `(0, 0)`, so the polygon has a real edge `1.15e-10` long there (above
+    /// `SM_EFF_ZERO` and far above `SM_EFF_ZERO m`, `m = 1e-3`). The far control
+    /// point (read by the evaluations at `b`) makes the error bound of the
+    /// generator's evaluations about `2e-10`, which puts the two ends within their
+    /// bounds: at a8f0d30cd the slab merged them (without the `SM_EFF_ZERO m` cap)
+    /// and lost the edge. The edge stays, with the region's five sides and exact area.
+    #[test]
+    fn slab_keeps_a_real_short_edge_beside_a_far_generator() {
+        let k = k();
+        let dom = Extent2d::from_bounds(0.0, 0.0, 1e-3, 1e-3);
+        let plane = xy_plane(dom);
+        let th = std::f64::consts::FRAC_PI_6;
+        let (sn, cs) = th.sin_cos();
+        let mu = |p: (f64, f64)| -sn * p.0 + cs * p.1;
+        let at_mu = |u: f64, m: f64| (u, (m + sn * u) / cs);
+        let (a, c, b) = (at_mu(5e-4, 1e-10), at_mu(6e-4, -2e-4), at_mu(3e-4, -1e-4));
+        let far = (b.0, b.1, 1e5);
+        let pts = [(a.0, a.1, 0.0), (c.0, c.1, 0.0), (b.0, b.1, 0.0), far];
+        let s = swept(&k, &pts, None, Vec3::new(cs, sn, 0.0));
+        let gdom = Extent2d::from_bounds(0.0, -1.0, 3.0, 1.0);
+        let r = s
+            .intersect_with_plane(&k, &gdom, &plane, &plane.natural_uv_domain(), None)
+            .unwrap();
+        let (alpha, beta) = (mu(c), mu(a).max(mu(b)));
+        let boxp = [
+            Point2::new(0.0, 0.0),
+            Point2::new(1e-3, 0.0),
+            Point2::new(1e-3, 1e-3),
+            Point2::new(0.0, 1e-3),
+        ];
+        let region = cut(&boxp, &|p: Point2| mu((p.x, p.y)) - alpha);
+        let region = cut(&region, &|p: Point2| beta - mu((p.x, p.y)));
+        assert_eq!(region.len(), 5);
+        assert_eq!(r.curves_3d.len(), 5, "{:?}", r.curves_3d.len());
+        let short = shortest_curve(&r);
+        assert!(short > 1e-10 && short < 2e-10, "{short:e}");
+        assert_region(&r, &plane, uv_area(&region).abs());
     }
 
     #[test]

@@ -332,11 +332,12 @@ impl C3 {
     /// +1 or -1 when its angular speed keeps that sign all along (certified on each Bézier piece
     /// from the Bernstein coefficients of `X Y' - Y X'`, which has the speed's sign as the
     /// weights are positive), 0 when it does not turn, `None` when it turns back or this cannot
-    /// be certified.
+    /// be certified: also when no piece holds any of `r` (a spline that couldn't be split has
+    /// none), since nothing was checked.
     pub fn turn_sign(&self, r: [f64; 2], o: Vec3, u: Vec3, v: Vec3) -> Option<f64> {
         use crate::bspline::{HPoint, bezier_segment};
         let C3::Spline { pieces, .. } = self else { return None };
-        let mut sign = 0f64;
+        let (mut sign, mut checked) = (0f64, false);
         for (span, ctrl) in pieces {
             let (a, b) = (r[0].max(span[0]), r[1].min(span[1]));
             let len = span[1] - span[0];
@@ -364,6 +365,7 @@ impl C3 {
             };
             let n: Vec<f64> = bernstein_product(&x, &d(&y)).iter().zip(bernstein_product(&y, &d(&x))).map(|(a, b)| a - b).collect();
             let s = definite_sign(&n, 0)?;
+            checked = true;
             if s != 0. {
                 if sign != 0. && s != sign {
                     return None;
@@ -371,7 +373,7 @@ impl C3 {
                 sign = s;
             }
         }
-        Some(sign)
+        checked.then_some(sign)
     }
 
     /// Points whose hull holds the spline's part `r`: the projected control points of its

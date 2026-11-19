@@ -251,6 +251,15 @@ Scripts and MCP use the same command, for example on a 20 mm box:
 ```
 `type: "g2"` is an alias. Existing fillets still default to circular, constant-radius G1 blends.
 
+To round several edges at different radii in one fillet (where rounding them one after another
+cannot meet at their shared corners), scripts give `edge_radii`: one radius per picked edge, in
+the order of `edges`. `radius` stays the nominal radius (usually the first). It takes a constant,
+exact, rolling-corner, mitred fillet of the picked edges alone (`tangent_chain: false`); with any
+other option, or a count that does not match the edges, the command is refused, saying why:
+```json
+{"command": "solid.fillet", "params": {"edges": [[20, 0, 10], [40, 15, 10]], "radius": 1, "edge_radii": [1, "3 mm"], "tangent_chain": false}}
+```
+
 Where three or more rounded edges meet at a corner, the Fillet dialog shows **Corners**: **Ball**
 (the default, a piece of the rolling ball's sphere, tangent (G1) to each round) or **Smooth
 patch** (`corner: "g2"`: the corner is set back along each edge and filled with a
@@ -414,7 +423,7 @@ still be added through `set`. The fields of the common features:
 |---|---|
 | Extrude | `extent`: {`distance`, `direction`: positive\|negative\|symmetric, `distance2`, `start_offset`, `through_all`, `taper`, `to`, `to_offset`, `from`}; `operation`: new_body\|join\|cut\|intersect; `targets`; `profiles`; `sketch`; `thin`: {`curves`, `thickness`, `side`: center\|inside\|outside\|two_sides, `thickness2`} |
 | Revolve | `angle`, `angle2`, `symmetric`, `axis`, `to`, `operation`, `targets`, `profiles`, `sketch` |
-| Fillet | `radius`, `edges` (a point on each edge), `body`, `style` |
+| Fillet | `radius`, `edges` (a point on each edge), `body`, `style`, `edge_radii` (one radius per edge) |
 | Chamfer | `distance`, `distance2` or `angle`, `flip`, `edges`, `body` |
 | Box | `length`, `width`, `height`, `corner`, `operation` |
 | Cylinder | `radius`, `height`, `base`, `axis`, `operation`, `references` (an `edge` point and a `distance` each, as a hole's) |

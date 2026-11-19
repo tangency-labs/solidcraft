@@ -40,6 +40,10 @@
 //! | `offset_vertex_image` (private)                             | not upstream: a vertex's image on its face's offset (WR-736; opt-in) |
 //!
 //! Deviations:
+//! - **Disappearing periodic seams.** Genuine support roots bound each SSI
+//!   component's active interval. A seam outside that interval emits a boundary
+//!   event; its branch is identified by an already mated opposite boundary,
+//!   rather than proximity to the old edge. Seam walks use explicit visited sets.
 //! - **Curved tangent crossings.** A local operation may create two intersection
 //!   branches beside an originally tangent edge. A plane/curved pair keeps the curved
 //!   face's side. Two curved faces require a proved unique physical component
@@ -172,6 +176,10 @@
 //!   for each edge: the face caches are not kept from one edge to the next, where
 //!   upstream's stay on the surfaces between curve replacements.
 //! - **Recursion.** None.
+//! - **Periodic seam topology (#18803).** An SSI component that does not meet a
+//!   same-face seam's chart boundary in its active support interval ends on the
+//!   genuine boundary beyond that seam. The supports must give one agreeing root. The selected mate reports
+//!   these ends so the executive can rebuild the periodic quotient boundary.
 //!
 //! As the fork does (#483; fork 4803d6d, since #2009), `HaveTangentGaps` skips a sample
 //! it cannot evaluate (upstream measured an unset point); `ClosestPoint`'s status stays
@@ -255,12 +263,43 @@ const OP_ANALYTICS_EXACT: &str = "offset::offset_geometry_creation::make_edges_o
 /// way ([`OffsetGeometryCreation::replace_edge_curves`] with `inverted`), so that the
 /// edge still ends where its neighbours' offsets do; the merge resolves the faces that
 /// turned inside out with it.
-#[derive(Debug, Clone, Copy)]
-struct TrimmedEdge {
+#[derive(Debug, Clone)]
+struct TrimmedEdge<O> {
     /// The trim interval (increasing).
     interval: Extent1d,
     /// The trim points run against the base edge use.
     inverted: bool,
+    /// Material boundaries reached through a chart seam that disappears.
+    periodic_ends: Vec<PeriodicBoundaryEnd<O>>,
+}
+
+/// An intersection end whose old chart seam no longer meets the intersection.
+/// The end instead meets the genuine boundary beyond that seam. All handles name
+/// the original B-rep; `point` is on the displaced supports.
+#[derive(Debug, Clone, Copy)]
+pub struct PeriodicBoundaryEnd<O> {
+    /// The genuine original intersection edge use being rebuilt.
+    pub edgeuse: O,
+    /// Its original endpoint.
+    pub vertex: O,
+    /// The original same-face seam edge use to remove from this boundary.
+    pub seam: O,
+    /// The genuine original boundary edge use beyond the seam, on its face.
+    pub across: O,
+    /// The new intersection endpoint on that boundary's displaced support.
+    pub point: Point3,
+}
+
+enum BoundaryRoot {
+    NoCut,
+    One(f64, Point3),
+    Unresolved,
+}
+
+enum PeriodicEnd<O> {
+    Ordinary,
+    Root(f64, Vec<PeriodicBoundaryEnd<O>>),
+    Unresolved,
 }
 
 /// The most whole turns `exact_piece` moves a conic's angle by (a guard: the angles
@@ -529,6 +568,25 @@ fn tangent_gap_samples<B>(
 /// on a miss is stored once and its handle returned again on later hits.
 /// [`OffsetExecutive::offset_edgeuse`] follows `GetOffsetEdgeuse`'s exactly-one rule.
 pub trait OffsetExecutive<O> {
+    /// A genuine boundary whose paired curves were successfully installed.
+    fn has_mated_edgeuse(&self, original: O) -> bool {
+        let _ = original;
+        false
+    }
+    /// Records completion, rather than a traversal mark, of an edge mitre.
+    fn note_mated_edgeuse(&mut self, original: O) -> Result<()> {
+        let _ = original;
+        Ok(())
+    }
+    /// Records a selected intersection end that passes an obsolete periodic seam.
+    /// Candidate curves never notify this: only the installed intersection does.
+    fn note_periodic_boundary_end(&mut self, event: PeriodicBoundaryEnd<O>) -> Result<()> {
+        let _ = event;
+        Err(SolidError::Unsupported {
+            operation: OP_TRIM,
+            reason: "the offset adapter cannot reconstruct a periodic boundary event",
+        })
+    }
     /// `GetInset`.
     fn inset(&self) -> bool;
     /// `GetExtendConvexEdges`.
@@ -1950,6 +2008,33 @@ fn drop_index<T>(list: &mut Vec<T>, index: usize) {
     });
 }
 
+/// Not upstream (tangency-labs/solidcraft#16727): whether `old` on `old_ivl` lies on `new` on
+/// `new_ivl`: its points a quarter, a half and three quarters of the way along its interval each
+/// drop onto `new` within `tol` (a global drop, so the two curves' parameterisations need not
+/// agree). Ends that agree prove nothing about the curve between them: a face turned about a hinge
+/// through both ends of one of its edges keeps those ends while the edge between them moves. With
+/// the two ends, these are five points: for a line or a conic (the exact class of a plane
+/// face's edges), five points on another of the same plane determine it, so the old curve lies on
+/// the new one exactly when they agree; for a freeform edge they are a check at the edge's
+/// tolerance, not a proof.
+fn curve_lies_on(
+    k: &Kernel,
+    old: &Curve,
+    old_ivl: &Extent1d,
+    new: &Curve,
+    new_ivl: &Extent1d,
+    tol: f64,
+) -> Result<bool> {
+    for f in [0.25, 0.5, 0.75] {
+        let p = old.evaluate_point(k, old_ivl.evaluate(f))?;
+        let d = new.drop_point(k, new_ivl, p, None, tol, None, SolverOperation::Minimize)?;
+        if !(d.success && d.distance <= tol) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 /// The fork's `sm_ExactPiece` (tangency-labs/smlib@fddc366, behind
 /// [`crate::kernel::UpstreamFixes::offset_analytic_mate_edges`]): the exact line or
 /// conic of `exact` that `marched` (a marched intersection piece) approximates, as a
@@ -3318,6 +3403,19 @@ impl OffsetGeometryCreation {
             let curve_start = curve_of(brep, c3)?.evaluate_point(k, c3_ivl.min())?;
             let curve_end = curve_of(brep, c3)?.evaluate_point(k, c3_ivl.max())?;
 
+            // Not upstream: ends that agree say "no change" only where the old curve lies on the
+            // new one between them ([`curve_lies_on`]).
+            let lies_on = |brep: &_| {
+                curve_lies_on(
+                    k,
+                    curve_of(brep, eu_curve)?,
+                    &edge_ivl,
+                    curve_of(brep, c3)?,
+                    &c3_ivl,
+                    edge_tol,
+                )
+            };
+
             // (not upstream: where asked, the pair's joint decision, see `KeepOld`)
             let keep_old = |_: &mut _| -> Result<bool> {
                 Ok(match keep {
@@ -3330,6 +3428,7 @@ impl OffsetGeometryCreation {
             if !inverted
                 && distance(edgeuse_start, curve_start) < edge_tol
                 && distance(edgeuse_end, curve_end) < edge_tol
+                && lies_on(brep)?
                 && keep_old(brep)?
             {
                 // No change in ends of curve - don't bother using the inputs - delete them and get out.
@@ -3342,6 +3441,7 @@ impl OffsetGeometryCreation {
             if !inverted
                 && distance(edgeuse_start, curve_end) < edge_tol
                 && distance(edgeuse_end, curve_start) < edge_tol
+                && lies_on(brep)?
                 && keep_old(brep)?
             {
                 // No change in ends of curve - just delete the curves and get out
@@ -3481,6 +3581,462 @@ impl OffsetGeometryCreation {
             .map(|t| t.interval))
     }
 
+    /// Whether an SSI component reaches a periodic seam's chart boundary. The line
+    /// covers the complete extended chart, rather than the old seam's short trim.
+    fn intersects_periodic_chart<O: ClassObject + SolutionObject>(
+        k: &Kernel,
+        brep: &mut impl OffsetBrep<O>,
+        executive: &mut impl OffsetExecutive<O>,
+        seam: O,
+        uv: O,
+        active: &Extent1d,
+    ) -> Result<bool> {
+        let radial = brep
+            .edgeuse_radial(seam)?
+            .ok_or(dangling("seam without radial"))?;
+        let a = edgeuse_normalized_evaluate(k, brep, seam, 0.5, true, false, true)?;
+        let z = edgeuse_normalized_evaluate(k, brep, radial, 0.5, true, false, true)?;
+        let face = brep
+            .edgeuse_face(seam)?
+            .ok_or(dangling("seam without face"))?;
+        let surface = brep
+            .face_surface(face)?
+            .ok_or(dangling("face without surface"))?;
+        let natural = surface_of(brep, surface)?.natural_uv_domain_with_nurb(k)?;
+        let offset = executive
+            .offset_edgeuse(seam)
+            .ok_or(dangling("seam without offset"))?;
+        let offset_face = brep
+            .edgeuse_face(offset)?
+            .ok_or(dangling("seam offset without face"))?;
+        let offset_surface = brep
+            .face_surface(offset_face)?
+            .ok_or(dangling("face without surface"))?;
+        let (_, domain) = executive.get_create_extended_surface(k, brep, offset_surface)?;
+        let edge = brep
+            .edgeuse_edge(seam)?
+            .ok_or(dangling("seam without edge"))?;
+        let tolerance = brep.edge_tolerance(edge)?.max(brep.brep_tolerance(edge)?);
+        let uv_tolerance = crate::surface::surface::p1::map_to_2d(
+            k,
+            tolerance,
+            Point2::new(a.x, a.y),
+            surface_of(brep, offset_surface)?,
+        )?;
+        if !uv_tolerance.is_finite() || uv_tolerance < 0.0 {
+            return Err(SolidError::invalid_input(
+                OP_TRIM,
+                "invalid chart tolerance",
+            ));
+        }
+        // The two uses of a seam differ by its chart period. This identifies the
+        // periodic coordinate without an angular or distance threshold.
+        let (lo, hi) = if (a.x - z.x).abs() > (a.y - z.y).abs() {
+            let x = if (a.x - natural.min().x).abs() <= (a.x - natural.max().x).abs() {
+                natural.min().x
+            } else {
+                natural.max().x
+            };
+            (
+                Point3::new(x, domain.min().y, 0.0),
+                Point3::new(x, domain.max().y, 0.0),
+            )
+        } else {
+            let y = if (a.y - natural.min().y).abs() <= (a.y - natural.max().y).abs() {
+                natural.min().y
+            } else {
+                natural.max().y
+            };
+            (
+                Point3::new(domain.min().x, y, 0.0),
+                Point3::new(domain.max().x, y, 0.0),
+            )
+        };
+        let chart_curve = Curve::from(BSplineCurve::create_line_segment(3, lo, hi)?);
+        let candidate = curve_of(brep, uv)?;
+        let roots: SolutionArray<O> = candidate.global_curve_intersect(
+            k,
+            active,
+            &chart_curve,
+            &chart_curve.natural_interval(),
+            uv_tolerance,
+            &CurveIntersectOptions {
+                skip_global_coincidence_check: false,
+                handles: [Some(uv), None],
+                analytic_handles: [None, None],
+            },
+        )?;
+        Ok(!roots.is_empty())
+    }
+
+    /// Genuine boundary uses reached at the far ends of connected same-face seams.
+    /// The explicit visited list bounds the walk by the source topology's edge count.
+    fn boundaries_beyond_seam<O: ClassObject + SolutionObject>(
+        k: &Kernel,
+        brep: &mut impl OffsetBrep<O>,
+        seam: O,
+        vertex: O,
+    ) -> Result<Vec<O>> {
+        let face = brep
+            .edgeuse_face(seam)?
+            .ok_or(dangling("seam without face"))?;
+        let faceuse = brep
+            .edgeuse_faceuse(seam)?
+            .ok_or(dangling("seam without face use"))?;
+        let mut pending = vec![(seam, vertex)];
+        let mut visited = Vec::new();
+        let mut boundaries = Vec::new();
+        while let Some((current, near)) = pending.pop() {
+            k.check_cancelled(OP_TRIM)?;
+            let edge = brep
+                .edgeuse_edge(current)?
+                .ok_or(dangling("seam without edge"))?;
+            if visited.contains(&edge) {
+                continue;
+            }
+            visited.push(edge);
+            let Some(far) = brep.edge_other_vertex(edge, near)? else {
+                continue;
+            };
+            for next in brep.vertex_edges(far)? {
+                if next == edge {
+                    continue;
+                }
+                for use_ in brep.edge_edgeuses(next)? {
+                    if brep.edgeuse_faceuse(use_)? != Some(faceuse) {
+                        continue;
+                    }
+                    let radial = brep
+                        .edgeuse_radial(use_)?
+                        .ok_or(dangling("edge use without radial"))?;
+                    if brep.edgeuse_face(radial)? == Some(face)
+                        && brep.edge_is_seam_of_face_surface(k, next, face)?
+                    {
+                        if !visited.contains(&next) {
+                            pending.push((use_, far));
+                        }
+                    } else if !boundaries.contains(&use_) {
+                        boundaries.push(use_);
+                    }
+                }
+            }
+        }
+        Ok(boundaries)
+    }
+
+    /// The genuine third supports at the other end of an original intersection.
+    /// Same-pair edges and periodic seams carry no additional material constraint.
+    fn opposite_end_boundaries<O: ClassObject + SolutionObject>(
+        k: &Kernel,
+        brep: &mut impl OffsetBrep<O>,
+        edgeuse: O,
+        vertex: O,
+    ) -> Result<Vec<O>> {
+        let edge = brep
+            .edgeuse_edge(edgeuse)?
+            .ok_or(dangling("edge use without edge"))?;
+        let Some(far) = brep.edge_other_vertex(edge, vertex)? else {
+            return Ok(Vec::new());
+        };
+        let radial = brep
+            .edgeuse_radial(edgeuse)?
+            .ok_or(dangling("edge use without radial"))?;
+        let faces = [brep.edgeuse_face(edgeuse)?, brep.edgeuse_face(radial)?];
+        let faceuses = [
+            brep.edgeuse_faceuse(edgeuse)?,
+            brep.edgeuse_faceuse(radial)?,
+        ];
+        let mut boundaries = Vec::new();
+        for other_edge in brep.vertex_edges(far)? {
+            if other_edge == edge {
+                continue;
+            }
+            for use_ in brep.edge_edgeuses(other_edge)? {
+                if !faceuses.contains(&brep.edgeuse_faceuse(use_)?) {
+                    continue;
+                }
+                let across = brep
+                    .edgeuse_radial(use_)?
+                    .ok_or(dangling("edge use without radial"))?;
+                if faces.contains(&brep.edgeuse_face(across)?) {
+                    continue;
+                }
+                let face = brep
+                    .edgeuse_face(use_)?
+                    .ok_or(dangling("edge use without face"))?;
+                if !brep.edge_is_seam_of_face_surface(k, other_edge, face)?
+                    && !boundaries.contains(&use_)
+                {
+                    boundaries.push(use_);
+                }
+            }
+        }
+        Ok(boundaries)
+    }
+
+    /// One reported root of a genuine boundary's displaced support on this SSI
+    /// component. Distinct curve parameters do not establish endpoint ownership.
+    fn unique_boundary_root<O: ClassObject + SolutionObject>(
+        k: &Kernel,
+        brep: &mut impl OffsetBrep<O>,
+        executive: &mut impl OffsetExecutive<O>,
+        curve: O,
+        across: O,
+        tolerance: f64,
+    ) -> Result<BoundaryRoot> {
+        let radial = brep
+            .edgeuse_radial(across)?
+            .ok_or(dangling("boundary without radial"))?;
+        let offset = executive
+            .offset_edgeuse(radial)
+            .ok_or(dangling("boundary without offset"))?;
+        let face = brep
+            .edgeuse_face(offset)?
+            .ok_or(dangling("offset boundary without face"))?;
+        let surface = brep
+            .face_surface(face)?
+            .ok_or(dangling("face without surface"))?;
+        let (extended, domain) = executive.get_create_extended_surface(k, brep, surface)?;
+        let interval = curve_of(brep, curve)?.natural_interval();
+        let roots = surface_global_curve_intersect(
+            k, brep, extended, &domain, curve, &interval, tolerance,
+        )?;
+        let mut root: Option<(f64, Point3)> = None;
+        for solution in roots.as_slice() {
+            if solution.solution_type == SolutionType::RangeOfValues {
+                return Ok(BoundaryRoot::Unresolved);
+            }
+            let parameter = solution.start.param(0)?;
+            let point = curve_of(brep, curve)?.evaluate_point(k, parameter)?;
+            if !(parameter.is_finite()
+                && point.x.is_finite()
+                && point.y.is_finite()
+                && point.z.is_finite())
+            {
+                return Ok(BoundaryRoot::Unresolved);
+            }
+            if let Some((previous_parameter, _)) = root {
+                // The solver preserves reports across chart seams and closed
+                // curve ends. Only identical parameters identify the same point
+                // of this curve; spatial proximity cannot merge material roots.
+                if parameter != previous_parameter {
+                    return Ok(BoundaryRoot::Unresolved);
+                }
+            } else {
+                root = Some((parameter, point));
+            }
+        }
+        Ok(match root {
+            Some((t, point)) => BoundaryRoot::One(t, point),
+            None => BoundaryRoot::NoCut,
+        })
+    }
+
+    /// Whether an already constructed opposite boundary contains the support
+    /// root. This identifies the source branch by incidence, without ranking
+    /// unrelated SSI branches by their midpoints. None means it is not mated yet.
+    #[allow(clippy::too_many_arguments)]
+    fn root_on_mated_boundary<O: ClassObject + SolutionObject>(
+        k: &Kernel,
+        brep: &mut impl OffsetBrep<O>,
+        executive: &impl OffsetExecutive<O>,
+        across: O,
+        point: Point3,
+        tolerance: f64,
+    ) -> Result<Option<bool>> {
+        let edge = brep
+            .edgeuse_edge(across)?
+            .ok_or(dangling("boundary without edge"))?;
+        let mut mated = false;
+        for use_ in brep.edge_edgeuses(edge)? {
+            mated |= executive.has_mated_edgeuse(use_);
+        }
+        if !mated {
+            return Ok(None);
+        }
+        let offset = executive
+            .offset_edgeuse(across)
+            .ok_or(dangling("boundary without offset"))?;
+        let offset_edge = brep
+            .edgeuse_edge(offset)?
+            .ok_or(dangling("offset boundary without edge"))?;
+        let handle = brep
+            .edge_curve(offset_edge)?
+            .ok_or(dangling("boundary without curve"))?;
+        let interval = brep.edge_interval(offset_edge)?;
+        let curve = curve_of(brep, handle)?;
+        let solutions: SolutionArray<O> = curve.global_point_solve(
+            k,
+            &interval,
+            SolverOperation::Minimize,
+            point,
+            tolerance,
+            SolutionRequested::Single,
+            &GlobalPointSolveOptions::default(),
+        )?;
+        let Some(solution) = solutions.get(0) else {
+            return Ok(Some(false));
+        };
+        let gap = curve
+            .evaluate_point(k, solution.start.param(0)?)?
+            .distance(point);
+        Ok(Some(gap.is_finite() && gap <= tolerance))
+    }
+
+    /// A disappearing chart seam is not a material constraint. The genuine
+    /// supports at the opposite end and beyond the seam bound the active SSI
+    /// interval. Chart crossings outside this interval do not retain the seam.
+    #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+    fn periodic_boundary_end<O: ClassObject + SolutionObject>(
+        k: &Kernel,
+        brep: &mut impl OffsetBrep<O>,
+        executive: &mut impl OffsetExecutive<O>,
+        edgeuse: O,
+        vertex: O,
+        curve: O,
+        neighbours: &[O],
+        uvs: &[Option<O>],
+    ) -> Result<PeriodicEnd<O>> {
+        let base = brep
+            .edgeuse_edge(edgeuse)?
+            .ok_or(dangling("edge use without edge"))?;
+        // A closed edge's sole endpoint is its chart cut, not a material end to
+        // replace by a third support. Its periodic trimming is unchanged.
+        if brep.edge_is_closed(base)? {
+            return Ok(PeriodicEnd::Ordinary);
+        }
+        let tolerance = brep.brep_tolerance(base)?;
+        let mut events = Vec::new();
+        let mut root: Option<(f64, Point3)> = None;
+        let mut retained_seam = false;
+        'seams: for (index, &seam) in neighbours.iter().enumerate() {
+            let e = brep
+                .edgeuse_edge(seam)?
+                .ok_or(dangling("edge use without edge"))?;
+            let face = brep
+                .edgeuse_face(seam)?
+                .ok_or(dangling("edge use without face"))?;
+            let radial = brep
+                .edgeuse_radial(seam)?
+                .ok_or(dangling("edge use without radial"))?;
+            if brep.edgeuse_face(radial)? != Some(face)
+                || !brep.edge_is_seam_of_face_surface(k, e, face)?
+            {
+                continue;
+            }
+            let uv = uvs
+                .get(index)
+                .copied()
+                .flatten()
+                .ok_or(dangling("SSI without UV curve"))?;
+            let boundaries = Self::boundaries_beyond_seam(k, brep, seam, vertex)?;
+            let opposite = Self::opposite_end_boundaries(k, brep, edgeuse, vertex)?;
+            if boundaries.is_empty() || opposite.is_empty() {
+                // With no material end on one side, the whole component is its
+                // active interval. A chart crossing retains the seam; without a
+                // crossing there is no proved replacement endpoint.
+                let interval = curve_of(brep, curve)?.natural_interval();
+                if Self::intersects_periodic_chart(k, brep, executive, seam, uv, &interval)? {
+                    retained_seam = true;
+                    continue;
+                }
+                return Ok(PeriodicEnd::Unresolved);
+            }
+            let mut seam_root: Option<(f64, Point3)> = None;
+            for &across in &boundaries {
+                let candidate =
+                    match Self::unique_boundary_root(k, brep, executive, curve, across, tolerance)?
+                    {
+                        BoundaryRoot::One(t, p) => (t, p),
+                        BoundaryRoot::NoCut => {
+                            // This component never meets the rim support. It cannot
+                            // undergo the seam/rim incidence change considered here;
+                            // its chart crossing remains the trimming constraint.
+                            let interval = curve_of(brep, curve)?.natural_interval();
+                            if Self::intersects_periodic_chart(
+                                k, brep, executive, seam, uv, &interval,
+                            )? {
+                                retained_seam = true;
+                                continue 'seams;
+                            }
+                            return Ok(PeriodicEnd::Unresolved);
+                        }
+                        BoundaryRoot::Unresolved => return Ok(PeriodicEnd::Unresolved),
+                    };
+                if let Some((previous_parameter, _)) = seam_root {
+                    if candidate.0 != previous_parameter {
+                        return Ok(PeriodicEnd::Unresolved);
+                    }
+                } else {
+                    seam_root = Some(candidate);
+                }
+            }
+            let Some((parameter, point)) = seam_root else {
+                return Ok(PeriodicEnd::Unresolved);
+            };
+            let mut far_root: Option<(f64, Point3)> = None;
+            let mut far_boundary_roots = Vec::new();
+            for across in opposite {
+                let BoundaryRoot::One(t, p) =
+                    Self::unique_boundary_root(k, brep, executive, curve, across, tolerance)?
+                else {
+                    return Ok(PeriodicEnd::Unresolved);
+                };
+                let candidate = (t, p);
+                far_boundary_roots.push((across, p));
+                if let Some((previous_parameter, _)) = far_root {
+                    if candidate.0 != previous_parameter {
+                        return Ok(PeriodicEnd::Unresolved);
+                    }
+                } else {
+                    far_root = Some(candidate);
+                }
+            }
+            let Some((far_parameter, _)) = far_root else {
+                return Ok(PeriodicEnd::Unresolved);
+            };
+            let active = Extent1d::from_min_max(parameter, far_parameter);
+            if Self::intersects_periodic_chart(k, brep, executive, seam, uv, &active)? {
+                retained_seam = true;
+                continue;
+            }
+            let mut owned_branch = false;
+            for (across, point) in far_boundary_roots {
+                match Self::root_on_mated_boundary(k, brep, executive, across, point, tolerance)? {
+                    Some(true) => owned_branch = true,
+                    Some(false) => return Ok(PeriodicEnd::Unresolved),
+                    None => {}
+                }
+            }
+            if !owned_branch {
+                return Ok(PeriodicEnd::Unresolved);
+            }
+            if let Some((previous_parameter, _)) = root {
+                if parameter != previous_parameter {
+                    return Ok(PeriodicEnd::Unresolved);
+                }
+            } else {
+                root = Some((parameter, point));
+            }
+            for across in boundaries {
+                events.push(PeriodicBoundaryEnd {
+                    edgeuse,
+                    vertex,
+                    seam,
+                    across,
+                    point,
+                });
+            }
+        }
+        if retained_seam && root.is_some() {
+            return Ok(PeriodicEnd::Unresolved);
+        }
+        match root {
+            Some((parameter, _)) => Ok(PeriodicEnd::Root(parameter, events)),
+            None => Ok(PeriodicEnd::Ordinary),
+        }
+    }
+
     /// [`Self::trim_extended_edge`] with the order of its trim points: the trim interval,
     /// and whether the edge's offset is inverted (see [`TrimmedEdge`]).
     ///
@@ -3500,7 +4056,7 @@ impl OffsetGeometryCreation {
         uv_curve_base: Option<O>,
         uv_curve_other_base: Option<O>,
         mark: MarkType,
-    ) -> Result<Option<TrimmedEdge>> {
+    ) -> Result<Option<TrimmedEdge<O>>> {
         // locals
         let mut trim_ivl = Extent1d::new();
         let tan_tol_deg = self.tangency_tol_degrees();
@@ -3512,6 +4068,7 @@ impl OffsetGeometryCreation {
         let mut ends = [0.0_f64; 2];
         // (not upstream) whether each trim point is a cut by a neighbour's offset surface
         let mut cuts = [false; 2];
+        let mut periodic_ends = Vec::new();
         // for two iterations - find a one 3DCurve trim point
         for i in 0..2 {
             let mut solutions: SolutionArray<O> = SolutionArray::with_capacity(16);
@@ -3641,6 +4198,37 @@ impl OffsetGeometryCreation {
                     }
                 }
             } // end 2nd iteration branch
+
+            let genuine_pair = match other_base_edgeuse {
+                Some(other) => brep.edgeuse_face(base_edgeuse)? != brep.edgeuse_face(other)?,
+                None => false,
+            };
+            if genuine_pair {
+                match Self::periodic_boundary_end(
+                    k,
+                    brep,
+                    executive,
+                    base_edgeuse,
+                    base_vertex,
+                    curve_3d,
+                    &tan_eus,
+                    &tan_uvs,
+                )? {
+                    PeriodicEnd::Ordinary => {}
+                    PeriodicEnd::Unresolved => return Ok(None),
+                    PeriodicEnd::Root(parameter, events) => {
+                        trim_ivl.add_value(parameter);
+                        if let Some(end) = ends.get_mut(i) {
+                            *end = parameter;
+                        }
+                        if let Some(cut) = cuts.get_mut(i) {
+                            *cut = true;
+                        }
+                        periodic_ends.extend(events);
+                        continue;
+                    }
+                }
+            }
 
             // (WR-736, #2611, #2769) a lamina edge's offset (the lifted curve, on its own face's offset) ends, at a vertex
             // whose next edge is lamina or a tangent sector, at the vertex's own image
@@ -4151,6 +4739,7 @@ impl OffsetGeometryCreation {
             Ok(Some(TrimmedEdge {
                 interval: trim_ivl,
                 inverted,
+                periodic_ends,
             }))
         } else {
             Ok(None)
@@ -4966,6 +5555,7 @@ impl OffsetGeometryCreation {
         let Some(TrimmedEdge {
             interval: trim_ivl,
             inverted,
+            periodic_ends,
         }) = trimmed
         else {
             // TrimExtendedEdge() call did not work
@@ -5038,6 +5628,14 @@ impl OffsetGeometryCreation {
                 inverted,
             )?;
         } // end pOtherOffsetEdgeuse existence check
+
+        executive.note_mated_edgeuse(edgeuse)?;
+        if let Some(other) = other_edgeuse {
+            executive.note_mated_edgeuse(other)?;
+        }
+        for event in periodic_ends {
+            executive.note_periodic_boundary_end(event)?;
+        }
 
         // all done
         Ok(())
@@ -5317,6 +5915,8 @@ impl OffsetGeometryCreation {
         let mut min_curve: Option<usize> = None;
         let mut trim_ivl = Extent1d::new();
         let mut inverted = false;
+        let mut periodic_ends = Vec::new();
+        let mut periodic_curve = None;
 
         // for every intersection solution
         for ii in 0..curves_3d.len() {
@@ -5388,8 +5988,26 @@ impl OffsetGeometryCreation {
             if let Some(TrimmedEdge {
                 interval: my_trim,
                 inverted: my_inverted,
+                periodic_ends: my_periodic_ends,
             }) = my_trim
             {
+                if !my_periodic_ends.is_empty() {
+                    if periodic_curve.is_some() {
+                        return Err(SolidError::Unsupported {
+                            operation: OP_MATE,
+                            reason: "more than one SSI branch owns the periodic boundary event",
+                        });
+                    }
+                    periodic_curve = Some(ii);
+                    min_curve = Some(ii);
+                    trim_ivl = my_trim;
+                    inverted = my_inverted;
+                    periodic_ends = my_periodic_ends;
+                    continue;
+                }
+                if periodic_curve.is_some() {
+                    continue;
+                }
                 // when there is more than 1 intersection curve to check
                 if curves_3d.len() > 1 {
                     // save the trimmed XSectCurve that has the smallest change from the original 3DCurve.
@@ -5404,12 +6022,14 @@ impl OffsetGeometryCreation {
                         min_dist = dist;
                         trim_ivl = my_trim;
                         inverted = my_inverted;
+                        periodic_ends = my_periodic_ends;
                     }
                 } else {
                     // only 1 curve to check branch - use this curve
                     trim_ivl = my_trim;
                     inverted = my_inverted;
                     min_curve = Some(0);
+                    periodic_ends = my_periodic_ends;
                 }
             }
         } // end iter every extended Surf/Surf intersection
@@ -5505,6 +6125,12 @@ impl OffsetGeometryCreation {
                     executive.note_inverted_face(face);
                 }
             }
+        }
+
+        executive.note_mated_edgeuse(edgeuse)?;
+        executive.note_mated_edgeuse(other_edgeuse)?;
+        for event in periodic_ends {
+            executive.note_periodic_boundary_end(event)?;
         }
 
         // all done
