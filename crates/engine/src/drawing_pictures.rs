@@ -48,7 +48,8 @@ pub fn groups(d: &Drawing, sheet: u64) -> Vec<Group> {
 
 /// A logo in a title block cell on one sheet.
 struct Logo<'a> {
-    /// What its picture names: a number no placement on the sheet has, as a source is opaque.
+    /// What its picture names: a number no placement or view picture on the sheet has, as a source
+    /// is opaque.
     source: u64,
     file: &'a ImageFile,
     rect: Aabb2,
@@ -69,8 +70,9 @@ fn logos(d: &Drawing, sheet: u64) -> Vec<Logo<'_>> {
     let Some(record) = d.sheets.iter().find(|record| record.id == sheet) else { return Vec::new() };
     let (Some(block), Some(border)) = (&record.title_block, &record.border) else { return Vec::new() };
     let Some(layout) = border.layout(&record.sheet).ok().and_then(|on_sheet| block.layout(&on_sheet).ok()) else { return Vec::new() };
-    let placements: BTreeSet<u64> = on_sheet(d, sheet).map(|place| place.id).collect();
-    let mut sources = (1u64..).filter(|source| !placements.contains(source));
+    let mut taken: BTreeSet<u64> = on_sheet(d, sheet).map(|place| place.id).collect();
+    taken.extend(crate::drawing_picture::sources_on(d, sheet));
+    let mut sources = (1u64..).filter(|source| !taken.contains(source));
     let logo = |(cell, placed): (&solidcraft_geom::title_block::Cell, &solidcraft_geom::title_block::CellLayout)| {
         let CellKind::Text(text) = &cell.kind else { return None };
         let file = d.images.by_id(text.image?)?;
@@ -85,14 +87,31 @@ pub fn logo_items(d: &Drawing, sheet: u64) -> Vec<Item> {
     logos(d, sheet).iter().map(|logo| Item::Picture(Picture { source: logo.source, rect: logo.rect, opacity: 1.0 })).collect()
 }
 
+/// One image on a sheet, placed or a logo.
+pub(crate) struct Placed {
+    /// What its picture names.
+    pub(crate) source: u64,
+    /// The file it shows, by id.
+    pub(crate) file: u64,
+    pub(crate) rect: Aabb2,
+    /// The id a refusal names: a placement's, or a logo's file's.
+    pub(crate) named: u64,
+}
+
+/// The images on sheet `sheet` of `d`: its placements by id, then its logos in its block's cell order.
+pub(crate) fn placed(d: &Drawing, sheet: u64) -> Vec<Placed> {
+    let placements = on_sheet(d, sheet).map(|place| Placed { source: place.id, file: place.image, rect: rect(place), named: place.id });
+    let logos = logos(d, sheet).into_iter().map(|logo| Placed { source: logo.source, file: logo.file.id, rect: logo.rect, named: logo.file.id });
+    placements.chain(logos).collect()
+}
+
 /// A file's pixels, or why it has none.
 type Decoded = Result<sheet_image::SheetImage, String>;
 
-/// The pixels of the images on one sheet, for the writers.
+/// The pixels of the images on one sheet, for the writers and the sheet page.
 pub struct Provider<'a> {
-    /// Each source: the file it shows, where it sits, and the id a refusal names (a placement's, or
-    /// a logo's file's).
-    places: BTreeMap<u64, (u64, Aabb2, u64)>,
+    /// Each image on the sheet, by source.
+    places: BTreeMap<u64, Placed>,
     /// Each file the placements show, by id, and its pixels once a writer has asked for them.
     files: BTreeMap<u64, (&'a ImageFile, OnceCell<Decoded>)>,
 }
@@ -102,15 +121,11 @@ impl<'a> Provider<'a> {
     /// than [`MAX_IMAGE_PIXELS`] between them, which is 256 MB.
     pub fn new(d: &'a Drawing, sheet: u64) -> Result<Provider<'a>, String> {
         let (mut places, mut files) = (BTreeMap::new(), BTreeMap::new());
-        for place in on_sheet(d, sheet) {
-            places.insert(place.id, (place.image, rect(place), place.id));
-            if let Some(file) = d.images.by_id(place.image) {
+        for place in placed(d, sheet) {
+            if let Some(file) = d.images.by_id(place.file) {
                 files.entry(file.id).or_insert((file, OnceCell::new()));
             }
-        }
-        for logo in logos(d, sheet) {
-            places.insert(logo.source, (logo.file.id, logo.rect, logo.file.id));
-            files.entry(logo.file.id).or_insert((logo.file, OnceCell::new()));
+            places.insert(place.source, place);
         }
         let total: u64 = files.values().map(|(file, _)| file.pixels.iter().map(|side| u64::from(*side)).product::<u64>()).sum();
         if total > MAX_IMAGE_PIXELS {
@@ -120,7 +135,8 @@ impl<'a> Provider<'a> {
     }
 }
 
-fn decode(file: &ImageFile) -> Decoded {
+/// The pixels of `file`, decoded within the decoder's caps, or why it has none.
+pub(crate) fn decode(file: &ImageFile) -> Decoded {
     let bytes = base64_decode(&file.data).ok_or("its file isn't base64")?;
     sheet_image::SheetImage::decode(&bytes)
 }
@@ -128,10 +144,10 @@ fn decode(file: &ImageFile) -> Decoded {
 impl Pictures for Provider<'_> {
     fn rows(&self, source: u64, grid: &PixelGrid, window: GridWindow) -> Result<Vec<u8>, String> {
         let place = self.places.get(&source).ok_or_else(|| format!("image {}: it isn't on this sheet", ids::encode(source)))?;
-        let named = |why: String| format!("image {}: {why}", ids::encode(place.2));
-        let (file, pixels) = self.files.get(&place.0).ok_or_else(|| named("the drawing doesn't have its file".into()))?;
+        let named = |why: String| format!("image {}: {why}", ids::encode(place.named));
+        let (file, pixels) = self.files.get(&place.file).ok_or_else(|| named("the drawing doesn't have its file".into()))?;
         let image = pixels.get_or_init(|| decode(file)).as_ref().map_err(|why| named(why.clone()))?;
-        image.rows(place.1, grid, window).map_err(named)
+        image.rows(place.rect, grid, window).map_err(named)
     }
 }
 

@@ -5319,3 +5319,165 @@ fn only_the_drawing_closed_last_keeps_its_pictures_pixels() {
     run(&mut s, "drawing.close", json!({}));
     assert_eq!(pixels(&s), Some(0), "its lines are kept, its pixels aren't");
 }
+
+/// Places `bytes` on sheet `sheet` over `rect_mm` through `drawing.image.add`: the placement's id.
+fn place_image(s: &mut Session, folder: &crate::tests::Folder, bytes: &[u8], sheet: u64, rect_mm: [f64; 4]) -> u64 {
+    let file = folder.path("image.png");
+    std::fs::write(&file, bytes).unwrap();
+    let reply = run(s, "drawing.image.add", json!({"sheet": ids::encode(sheet), "file": file, "rect_mm": rect_mm}));
+    ids::decode(reply["image"].as_str().unwrap()).unwrap()
+}
+
+/// Shows `bytes` in the legal owner's cell of every sheet's title block, the built-in block set on
+/// sheet `sheet` first.
+fn show_logo(s: &mut Session, folder: &crate::tests::Folder, bytes: &[u8], sheet: u64) {
+    let block = serde_json::to_value(solidcraft_geom::title_block::default_block()).unwrap();
+    run(s, "drawing.sheet.set", json!({"sheet": ids::encode(sheet), "title_block": block}));
+    let file = folder.path("logo.png");
+    std::fs::write(&file, bytes).unwrap();
+    run(s, "drawing.title_block.logo", json!({"cell": "legal_owner", "file": file}));
+}
+
+/// The page's picture `source` of a sheet's answer.
+fn picture_of(answer: &SheetView, source: u64) -> &SheetPicture {
+    answer.pictures.iter().find(|p| p.source == source).unwrap_or_else(|| panic!("no picture {source}: {:?}", brief(&answer.pictures)))
+}
+
+/// What each picture is, without its rows.
+fn brief(pictures: &[SheetPicture]) -> Vec<String> {
+    let one = |p: &SheetPicture| format!("{} {:?} rows {:?} stale {} why {:?}", p.source, p.grid, p.rows.as_ref().map(|r| r.len()), p.stale, p.why);
+    pictures.iter().map(one).collect()
+}
+
+/// A whole PNG of two by two green pixels.
+fn green_png() -> Vec<u8> {
+    let pixels = image::RgbaImage::from_pixel(2, 2, image::Rgba([0, 160, 0, 255]));
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    pixels.write_to(&mut bytes, image::ImageFormat::Png).unwrap();
+    bytes.into_inner()
+}
+
+/// A placed image and a title block's logo are handed to the page as pixels, as a shaded view's
+/// pictures are (#18413): waiting at first, then whole, on the grid the sheet's dpi gives each, and
+/// the export's own rows on that grid, byte for byte. No bodies are read for them.
+#[test]
+fn a_placed_image_and_a_logo_hand_the_page_their_pixels() {
+    use crate::drawing_pictures::tests::red_blue;
+    let folder = crate::tests::Folder::new("page-image-pixels");
+    let (mut s, sheet, _) = front_and_top();
+    show_logo(&mut s, &folder, &red_blue(), sheet);
+    let placed = place_image(&mut s, &folder, &red_blue(), sheet, [10.0, 20.0, 35.4, 32.7]);
+    let first = extract(&mut s, sheet).unwrap();
+    assert!(first.drawing_pictures && first.pictures.len() == 2, "{:?}", brief(&first.pictures));
+    assert!(first.pictures.iter().all(|p| p.rows.is_none() && p.stale && p.why.is_none()), "{:?}", brief(&first.pictures));
+    let done = settled(&mut s, sheet);
+    assert!(!done.drawing_pictures && done.pictures.len() == 2, "{:?}", brief(&done.pictures));
+    let d = s.drawing("test").unwrap().clone();
+    let provider = crate::drawing_pictures::Provider::new(&d, sheet).unwrap();
+    for picture in done.pictures.iter() {
+        assert!(!picture.stale && picture.why.is_none() && picture.grid.pitch == 25.4 / DEFAULT_DPI, "{:?}", brief(std::slice::from_ref(picture)));
+        let grid = picture.grid;
+        let whole = GridWindow { x0: 0, y0: 0, x1: grid.width, y1: grid.height };
+        let export = solidcraft_geom::paper::Pictures::rows(&provider, picture.source, &grid, whole).unwrap();
+        assert!(**picture.rows.as_ref().unwrap() == export[..], "the page's pixels are the export's");
+    }
+    assert!(picture_of(&done, placed).grid.width >= 300, "{:?}", picture_of(&done, placed).grid);
+    assert!(s.drawing_scenes.bodies.is_none(), "no bodies read for an image");
+}
+
+/// An image's pixels are made once: settled again, after a view moves and a sheet is added, they are
+/// the same rows. A new dpi, rectangle or file makes them again, the last ones shown stale until then.
+#[test]
+fn a_sheet_images_pixels_are_made_once_until_its_file_rect_or_dpi_changes() {
+    let folder = crate::tests::Folder::new("page-image-once");
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let placed = place_image(&mut s, &folder, &crate::drawing_pictures::tests::red_blue(), sheet, [10.0, 20.0, 60.0, 45.0]);
+    let rows_of = |answer: &SheetView| picture_of(answer, placed).rows.clone().unwrap();
+    let first = rows_of(&settled(&mut s, sheet));
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"place": {"at": [160.0, 150.0]}}}));
+    run(&mut s, "drawing.sheet.add", json!({}));
+    let same = settled(&mut s, sheet);
+    assert!(Arc::ptr_eq(&rows_of(&same), &first) && !picture_of(&same, placed).stale, "made once");
+
+    run(&mut s, "drawing.sheet.set", json!({"sheet": ids::encode(sheet), "dpi": DEFAULT_DPI / 2.0}));
+    let answer = extract(&mut s, sheet).unwrap();
+    let picture = picture_of(&answer, placed);
+    assert!(answer.drawing_pictures && picture.stale && Arc::ptr_eq(picture.rows.as_ref().unwrap(), &first), "the last pixels, stale");
+    let half = settled(&mut s, sheet);
+    let at_half = rows_of(&half);
+    assert!(!Arc::ptr_eq(&at_half, &first) && picture_of(&half, placed).grid.pitch == 25.4 / (DEFAULT_DPI / 2.0));
+
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let at = d.sheet_images.index_of(placed).unwrap();
+    Arc::make_mut(&mut d.sheet_images[at]).rect_mm = [10.0, 20.0, 110.0, 70.0];
+    s.doc_mut().put_drawing(Arc::new(d));
+    let wider = settled(&mut s, sheet);
+    assert!(!Arc::ptr_eq(&rows_of(&wider), &at_half) && picture_of(&wider, placed).grid.width > picture_of(&half, placed).grid.width);
+
+    let other = place_image(&mut s, &folder, &green_png(), sheet, [200.0, 20.0, 220.0, 40.0]);
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let green = d.sheet_images.by_id(other).unwrap().image;
+    let at = d.sheet_images.index_of(placed).unwrap();
+    Arc::make_mut(&mut d.sheet_images[at]).image = green;
+    d.drop_unused_images();
+    s.doc_mut().put_drawing(Arc::new(d));
+    let swapped = settled(&mut s, sheet);
+    assert_eq!(rows_of(&swapped)[..4], [0, 160, 0, 255], "the new file's pixels");
+}
+
+/// The page's pixels of a sheet's images are capped together, before any file decodes: five 300 mm
+/// squares at 300 dpi are 62.8 million pixels, each tried, so each says its file won't decode; the
+/// sixth would make 75.4 million, over 67,108,864, so it says that instead.
+#[test]
+fn a_sheets_image_pixels_are_capped_together() {
+    let folder = crate::tests::Folder::new("page-image-cap");
+    let (mut s, sheet, _) = front_and_top();
+    let header = crate::drawing_pictures::tests::png(2, 1);
+    let mut placed: Vec<u64> =
+        (0..6).map(|i| place_image(&mut s, &folder, &header, sheet, [f64::from(i), 0.0, 300.0 + f64::from(i), 300.0])).collect();
+    placed.sort_unstable();
+    let answer = settled(&mut s, sheet);
+    let why = |id: u64| picture_of(&answer, id).why.clone().unwrap_or_default();
+    for id in &placed[..5] {
+        assert!(why(*id).contains("not a whole PNG or JPEG"), "{}", why(*id));
+    }
+    let capped = why(placed[5]);
+    assert!(capped.contains("67108864") && capped.contains(&ids::encode(placed[5])), "{capped}");
+    assert!(answer.pictures.iter().all(|p| p.rows.is_none()) && !answer.drawing_pictures);
+}
+
+/// A file that won't decode hands the page why, naming the placement, and isn't tried again.
+#[test]
+fn an_image_that_wont_decode_hands_the_page_why() {
+    let folder = crate::tests::Folder::new("page-image-why");
+    let (mut s, sheet, _) = front_and_top();
+    let id = place_image(&mut s, &folder, &crate::drawing_pictures::tests::png(2, 1), sheet, [10.0, 20.0, 60.0, 45.0]);
+    let answer = settled(&mut s, sheet);
+    let picture = picture_of(&answer, id);
+    let why = picture.why.clone().unwrap_or_default();
+    assert!(
+        picture.rows.is_none() && !picture.stale && why.contains(&ids::encode(id)) && why.contains("not a whole PNG or JPEG"),
+        "{:?}",
+        brief(std::slice::from_ref(picture))
+    );
+    assert!(!answer.drawing_pictures && !step(&mut s), "not tried again");
+}
+
+/// A logo's source is never a view picture's, even when the view's id is the small number a logo
+/// would take: the page has both, each with its own pixels.
+#[test]
+fn a_logo_never_takes_a_views_picture_source() {
+    let folder = crate::tests::Folder::new("page-logo-source");
+    let (mut s, sheet, _) = shaded_front([200.0, 150.0]);
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    d.views[0] = Arc::new(View { id: 1, ..(*d.views[0]).clone() });
+    d.validate().unwrap();
+    s.doc_mut().put_drawing(Arc::new(d));
+    show_logo(&mut s, &folder, &crate::drawing_pictures::tests::red_blue(), sheet);
+    let answer = settled(&mut s, sheet);
+    assert_eq!(answer.pictures.len(), 2, "{:?}", brief(&answer.pictures));
+    assert!(answer.pictures.iter().all(|p| p.rows.is_some() && !p.stale), "{:?}", brief(&answer.pictures));
+    let view = picture_of(&answer, 1);
+    let logo = answer.pictures.iter().find(|p| p.source != 1).unwrap();
+    assert!(view.grid != logo.grid, "{:?}", brief(&answer.pictures));
+}

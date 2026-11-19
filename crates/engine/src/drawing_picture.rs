@@ -16,7 +16,7 @@
 //! find a view's pictures by one rule ([`view_pictures`]) and draw each the one way ([`PictureRows`]).
 
 use std::cell::{Cell, OnceCell};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use solidcore_record::Vec2;
 use solidcraft_doc::drawing::Drawing;
@@ -84,6 +84,12 @@ pub fn view_parts(set: &ShownSet, styles: Styles) -> Vec<Vec<Part>> {
 /// The source of a view's picture `index` of `count`, bottom first.
 fn source(view: u64, index: usize, count: usize) -> u64 {
     if index + 1 == count { view } else { view ^ UNDER }
+}
+
+/// Every source the pictures of the views on sheet `sheet` of `d` can have ([`source`]): a sheet's
+/// image takes none of them, as the page and the writers tell pictures apart by source.
+pub(crate) fn sources_on(d: &Drawing, sheet: u64) -> BTreeSet<u64> {
+    d.views.iter().filter(|view| view.sheet == sheet).flat_map(|view| [view.id, view.id ^ UNDER]).collect()
 }
 
 /// View `view`'s pictures as scene items over `rect`, its boundary, bottom first.

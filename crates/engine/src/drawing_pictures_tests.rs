@@ -349,3 +349,43 @@ fn the_scene_holds_a_logo_with_or_without_its_cache() {
     assert_eq!(block_group(&cached.scene), block_group(&built.scene));
     assert!(matches!(block_group(&cached.scene).items[0], Item::Picture(_)));
 }
+
+/// A plain gradient of `side` by `side` pixels, as a PNG and as a JPEG.
+fn gradient(side: u32) -> [Vec<u8>; 2] {
+    let pixels = image::RgbaImage::from_fn(side, side, |x, y| image::Rgba([(x * 255 / side) as u8, (y * 255 / side) as u8, 128, 255]));
+    let encoded = |format| {
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(pixels.clone()).to_rgb8().write_to(&mut bytes, format).unwrap();
+        bytes.into_inner()
+    };
+    [encoded(image::ImageFormat::Png), encoded(image::ImageFormat::Jpeg)]
+}
+
+/// The timing probe for the sheet page's image pixels (#18413): a decode, then the rows of a
+/// 100 mm and a 250 mm square at 300 dpi, for 1000², 4000² and 8000² files. Run by hand, `--ignored`.
+#[test]
+#[ignore = "a timing probe, run by hand"]
+fn probe_image_pixel_times() {
+    for side in [1000, 4000, 8000] {
+        for (format, bytes) in ["png", "jpeg"].into_iter().zip(gradient(side)) {
+            let started = std::time::Instant::now();
+            let image = sheet_image::SheetImage::decode(&bytes).unwrap();
+            let decoded = started.elapsed();
+            for mm in [100.0, 250.0] {
+                let picture = Picture { source: 1, rect: Aabb2 { min: Vec2::new(10.0, 10.0), max: Vec2::new(10.0 + mm, 10.0 + mm) }, opacity: 1.0 };
+                let grid = picture.grid(300.0).unwrap();
+                let window = GridWindow { x0: 0, y0: 0, x1: grid.width, y1: grid.height };
+                let started = std::time::Instant::now();
+                let rows = image.rows(picture.rect, &grid, window).unwrap();
+                let made = started.elapsed();
+                eprintln!(
+                    "PROBE {side}² {format} ({} KB): decode {decoded:?}; {mm} mm, {}×{} px: rows {made:?} ({} MB)",
+                    bytes.len() / 1024,
+                    grid.width,
+                    grid.height,
+                    rows.len() >> 20
+                );
+            }
+        }
+    }
+}

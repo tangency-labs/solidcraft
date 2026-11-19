@@ -434,6 +434,36 @@ fn a_shaded_views_picture_is_painted_on_the_page() {
     );
 }
 
+/// A placed image is painted on the sheet page as its pixels, over its rectangle, once drawn: not only
+/// its dashed frame (#18413).
+#[test]
+fn a_placed_image_shows_its_pixels_not_its_frame() {
+    let (mut h, _) = plate_sheet();
+    // A whole PNG of two pixels, red then blue.
+    let png = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAADklEQVR4nGP4z8AAQv8BD/kD/YURmXYAAAAASUVORK5CYII=";
+    let folder = std::env::temp_dir().join(format!("solidcraft-page-image-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap();
+    let file = folder.join("image.png");
+    std::fs::write(&file, solidcraft_engine::doc::canvas::base64_decode(png).unwrap()).unwrap();
+    let sheet = solidcraft_engine::doc::ids::encode(active_sheet(&h.app).unwrap());
+    let rect = [300.0, 40.0, 380.0, 80.0];
+    let placed = h.app.run("drawing.image.add", json!({"sheet": sheet, "file": file, "rect_mm": rect})).unwrap();
+    let source = solidcraft_engine::doc::ids::decode(placed["image"].as_str().unwrap()).unwrap();
+    settle(&mut h);
+    let _ = std::fs::remove_dir_all(&folder);
+    let shown = page(&mut h)["pictures"].as_array().unwrap().iter().find(|p| p["source"] == source).cloned();
+    assert_eq!(shown.as_ref().map(|p| p["shown"].clone()), Some(json!("pixels")), "{}", page(&mut h)["pictures"]);
+    let paper = crate::scenario::rect_of("sheet:paper").unwrap();
+    let screen = |x: f64, y: f64| pos2(paper.left() + (x / 420.0) as f32 * paper.width(), paper.bottom() - (y / 297.0) as f32 * paper.height());
+    let expected = Rect::from_two_pos(screen(rect[0], rect[1]), screen(rect[2], rect[3]));
+    let meshes = textured(&h.shapes);
+    assert!(
+        meshes.iter().any(|(_, b)| (b.min - expected.min).length() < 1.5 && (b.max - expected.max).length() < 1.5),
+        "a textured mesh covers the image's place {expected:?}: {:?}",
+        meshes.iter().map(|(_, b)| *b).collect::<Vec<_>>()
+    );
+}
+
 /// A picture of a `width` × `height` grid, one millimetre a pixel, with its lower-left corner at the
 /// sheet's origin: red pixels, or none (`rows: None`) and `why`.
 fn hand_picture(source: u64, width: u32, height: u32, rows: bool, why: Option<&str>) -> SheetPicture {
