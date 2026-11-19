@@ -27,7 +27,7 @@
 //!   ([`crate::certify::nearest_with_rounding`]); the move is `closer` where this branch's
 //!   upper end is below main's lower end on some face and `farther` on none; `equal` where
 //!   the enclosures meet and this branch's upper end is at most main's plus the rounding the
-//!   two upper ends carry (each its evaluation's slack and γ_8 of its distance); `farther`
+//!   two upper ends carry (each its evaluation's slack and `γ_8` of its distance); `farther`
 //!   otherwise ([`class_of`]: most lower ends here are 0, where meeting alone proves
 //!   nothing). A tolerance must cover its vertex's distance to its edges' curve ends and to
 //!   the end images of their uses' trims (enclosed in intervals), and its edges' needs (below: the

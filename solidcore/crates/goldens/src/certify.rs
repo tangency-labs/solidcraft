@@ -158,7 +158,7 @@ pub(crate) fn nearest(
 }
 
 /// [`nearest`], with the rounding its upper end adds to the computed distance from `p` to
-/// the foot's surface point: the evaluation's slack at the foot and γ_8 of the distance's
+/// the foot's surface point: the evaluation's slack at the foot and `γ_8` of the distance's
 /// coordinates, the two terms counted below (infinite where the evaluation is not bounded).
 ///
 /// # Panics
