@@ -1821,6 +1821,61 @@ pub(crate) mod tests {
         assert_eq!(joint_angle(&mut h, arm), 0.0);
     }
 
+    /// The control channel reads the solved joint pose the preview shows: the angle a limited
+    /// hinge reached, and the joint a motion link moved with it (#19437).
+    #[test]
+    fn the_control_channel_reports_the_solved_joint_pose_of_a_preview() {
+        let (mut h, arm, follower) = joint_drive_design();
+        h.app.run("joint.motion_link", json!({"a": arm, "b": follower, "ratio": 0.5})).unwrap();
+        let source = h.app.session.doc.clone();
+        let undo = h.app.session.undo.len();
+
+        // Nothing is previewed: the reply says so.
+        let empty = h.call("control.joint_pose", json!({}));
+        assert_eq!(empty["ok"], true, "{empty}");
+        assert_eq!(empty["result"]["pose"], Value::Null, "{empty}");
+
+        // Drive Joints asks for more than the hinge allows.
+        h.app.start("joint.drive");
+        h.frames(4);
+        let Some(d) = h.app.dialog.as_mut() else { panic!("the drive dialog") };
+        if let crate::dialogs::Kind::Assembly(crate::dialogs_assembly::Asm::Drive { values, .. }) = &mut d.kind {
+            values[0] = "120 deg".into();
+        }
+        h.frames(2);
+        // The preview runs on a worker thread: wait for it as the other preview tests do.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while h.app.preview.busy {
+            assert!(std::time::Instant::now() < deadline, "the drive preview did not finish");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            h.frame();
+        }
+        assert!(h.app.preview.active, "the viewport shows the pose");
+
+        let r = h.call("control.joint_pose", json!({}));
+        assert_eq!(r["ok"], true, "{r}");
+        let pose = &r["result"]["pose"];
+        assert_eq!(pose["source"], "joint.drive", "{r}");
+        // The hinge reached its limit, and the follower came with it.
+        let angle = |joint: u64| {
+            pose["joints"]
+                .as_array()
+                .and_then(|joints| joints.iter().find(|j| j["joint"] == joint))
+                .and_then(|j| j["values"].as_array())
+                .and_then(|values| values.first())
+                .map(|v| (v["value"].as_f64().unwrap(), v["unit"].as_str().unwrap().to_string()))
+        };
+        assert_eq!(angle(arm), Some((90.0, "deg".to_string())), "{r}");
+        assert_eq!(angle(follower), Some((45.0, "deg".to_string())), "{r}");
+
+        // Reading again changes nothing: no undo step, no new design.
+        let again = h.call("control.joint_pose", json!({}));
+        assert_eq!(again["result"]["pose"], *pose, "{again}");
+        assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &source));
+        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(joint_angle(&mut h, arm), 0.0, "the preview does not change the design");
+    }
+
     #[test]
     fn external_joint_drive_ends_when_the_sketch_plane_editor_opens() {
         let (mut h, arm, _) = joint_drive_design();
