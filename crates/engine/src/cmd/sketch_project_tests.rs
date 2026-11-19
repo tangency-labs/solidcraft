@@ -2764,8 +2764,8 @@ fn bossed_plate() -> Session {
 }
 
 /// The farthest a point of the whole-body projection on `sketch` lies from the true outline: every
-/// edge of the body, sampled finely on its exact curve, and each round wall's two outline lines
-/// (where the view runs along the wall), in the sketch's coordinates.
+/// edge of the body but a round wall's seam, sampled finely on its exact curve, and each round
+/// wall's two outline lines (where the view runs along the wall), in the sketch's coordinates.
 fn farthest_from_true_outline(s: &Session, sketch: u64) -> f64 {
     let state = s.model.state();
     let solved = state.sketch(sketch).unwrap();
@@ -2775,6 +2775,11 @@ fn farthest_from_true_outline(s: &Session, sketch: u64) -> f64 {
     let q = solidcore_ops::query::Query::new(record);
     let mut truth: Vec<(solidcore_record::Vec2, solidcore_record::Vec2)> = Vec::new();
     for e in 0..record.edges.len() {
+        // A round wall's seam is an edge but no outline: one face lies on both its sides.
+        let uses = q.edge_faces(e);
+        if uses.len() == 2 && uses[0] == uses[1] {
+            continue;
+        }
         let [t0, t1] = q.edge_interval(e).unwrap();
         let pts: Vec<_> = (0..=4000).map(|k| plane.to_local(q.edge_at(e, t0 + (t1 - t0) * f64::from(k) / 4000.0).unwrap().0)).collect();
         truth.extend(pts.windows(2).map(|w| (w[0], w[1])));

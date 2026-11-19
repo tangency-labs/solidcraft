@@ -2270,10 +2270,12 @@ fn exact_silhouette(body: &crate::ModelBody, plane: &Plane) -> Option<Vec<LinkGe
     };
     let mut edges = Vec::new();
     for (e, edge) in rec.edges.iter().enumerate() {
-        let mut faces = q.edge_faces(e);
+        let uses = q.edge_faces(e);
+        let mut faces = uses.clone();
         faces.sort_unstable();
         faces.dedup();
-        if faces.is_empty() {
+        // A wire bounds no face; a seam (one face on both sides, a round wall's) is no outline.
+        if faces.is_empty() || (faces.len() == 1 && uses.len() > 1) {
             continue;
         }
         let accept = 4.0 * edge.tolerance.max(1e-7) + size * 1e-7;
