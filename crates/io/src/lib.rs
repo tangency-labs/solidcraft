@@ -40,7 +40,7 @@ mod mutate;
 mod native_cad;
 pub use native_cad::{
     NATIVE_CAD_EXTS, NativeDesign, USD_EXTS, cadmpeg_step_records, detects_freecad, is_freecad_path, is_native_cad_path, is_usd_path,
-    native_cad_design, native_cad_records, native_cad_to_step, read_usd, usd_from_step, usd_records,
+    native_cad_design, native_cad_records, native_cad_to_step, read_usd, usd_from_design, usd_records,
 };
 pub mod paper;
 mod pat;
@@ -703,7 +703,8 @@ pub enum Format {
     /// and decal images; written by the engine, since it is several files.
     Sdf,
     /// OpenUSD: `.usda` text, `.usdc` (or `.usd`) binary, or a `.usdz` package, chosen by the
-    /// file's extension ([`usd_from_step`]); written by the engine from the STEP it writes.
+    /// file's extension ([`usd_from_design`]); written from the design, which holds the
+    /// components and looks.
     Usd,
 }
 

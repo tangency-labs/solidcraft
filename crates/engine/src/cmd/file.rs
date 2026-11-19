@@ -118,7 +118,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&EXPORT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::FileExportResult>)
-        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|glb|urdf|sdf|json (default from extension; sdf: a Gazebo model folder, as file.export_sdf (the path is the folder, a `.sdf` ending dropped; name?, static?, model_uris?, quality?); docs/sdf.md; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic and roughness as materials; a transparent body or face, or a body a render setup gives an image texture or optics, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10), images?: bool (default false; true: each shown canvas and decal is written as a textured quad, its image next to the URDF); quality?: standard|fine|finest (STL, OBJ, 3MF and GLB: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies)"),
+        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|glb|urdf|sdf|json (default from extension; sdf: a Gazebo model folder, as file.export_sdf (the path is the folder, a `.sdf` ending dropped; name?, static?, model_uris?, quality?); docs/sdf.md; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic and roughness as materials; a transparent body or face, or a body a render setup gives an image texture or optics, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10), images?: bool (default false; true: each shown canvas and decal is written as a textured quad, its image next to the URDF); quality?: standard|fine|finest (STL, OBJ, 3MF, GLB and OpenUSD: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies)"),
     // One command per format, so each File › Export item can have a key of its own; started
     // from a key or command search, the app opens the save picker (the mesh dialog for STL and
     // 3MF). Each takes `file.export`'s parameters for its format, without `format`.
@@ -2521,7 +2521,7 @@ fn export_to(
         return export_glb(s, cmd, path, bodies, quality);
     }
     if format == Format::Usd {
-        return export_usd(s, path, bodies);
+        return export_usd(s, path, bodies, quality);
     }
     let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
     // What meshing the bodies reported (STL and 3MF): each face the mesh path left short of the
@@ -2929,22 +2929,19 @@ fn usd_encoding(name: &str) -> &'static str {
     }
 }
 
-/// The OpenUSD export: the bodies written as STEP, as `file.export` writes STEP (a design with
-/// components, when no bodies are chosen, as a STEP assembly), then restated as OpenUSD by
-/// cadmpeg; the path's extension picks text (`.usda`), binary (`.usdc`, `.usd`) or a package
-/// (`.usdz`). Written atomically, so a refusal or a failed write leaves a file already there as it
-/// was. What the file could not carry is in the reply's warnings.
-fn export_usd(s: &Session, path: &str, bodies: &[String]) -> Result<Value> {
+/// The OpenUSD export: the design written into cadmpeg's neutral model (its components and
+/// placements when no bodies are chosen, each body's exact B-rep and its mesh at `quality`, and
+/// the looks the design shows), then written as OpenUSD by cadmpeg; the path's extension picks
+/// text (`.usda`), binary (`.usdc`, `.usd`) or a package (`.usdz`). Written atomically, so a
+/// refusal or a failed write leaves a file already there as it was. What the file could not carry
+/// is in the reply's warnings.
+fn export_usd(s: &Session, path: &str, bodies: &[String], quality: solidcraft_io::MeshQuality) -> Result<Value> {
     solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
-    let step = if bodies.is_empty() && !s.doc.occurrences.is_empty() {
-        solidcraft_io::step_assembly(&s.doc, &s.doc.painted(&s.model.state()), &name)?
-    } else {
-        let quality = solidcraft_io::MeshQuality::default();
-        solidcraft_io::export_with_parts_noted(&s.doc.painted(&*s.world_state()?), bodies, &[], Format::Step, &name, &s.doc.metadata, quality, None)?
-            .0
-    };
-    let (bytes, warnings) = solidcraft_io::usd_from_step(&step, path).map_err(EngineError::Other)?;
+    let world = s.world_state()?;
+    // The placements the world has, uncaptured moves included, so the assembly is written where
+    // the design shows it, as chosen bodies are.
+    let doc = s.placed_document();
+    let (bytes, warnings) = solidcraft_io::usd_from_design(&doc, &s.model.state(), &world, bodies, path, quality).map_err(EngineError::Other)?;
     solidcraft_io::write_atomic(std::path::Path::new(path), &bytes, false).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let reply =
         ExportResult { path: path.to_string(), bytes: bytes.len(), format: format!("{:?}", Format::Usd), warnings, ..ExportResult::default() };
