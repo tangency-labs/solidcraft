@@ -200,36 +200,10 @@ impl crate::Document {
     }
 }
 
-/// Image kind and pixel size from the file header (PNG or JPEG).
+/// Image kind and pixel size from the file header (PNG or JPEG), as the file stores them: before its
+/// EXIF orientation ([`solidcraft_render::image_orientation`], which reads the header).
 pub fn image_info(b: &[u8]) -> Option<(&'static str, [u32; 2])> {
-    if b.len() > 24 && b.starts_with(b"\x89PNG\r\n\x1a\n") {
-        let w = u32::from_be_bytes([*b.get(16)?, *b.get(17)?, *b.get(18)?, *b.get(19)?]);
-        let h = u32::from_be_bytes([*b.get(20)?, *b.get(21)?, *b.get(22)?, *b.get(23)?]);
-        return (w > 0 && h > 0).then_some(("png", [w, h]));
-    }
-    if b.starts_with(&[0xFF, 0xD8]) {
-        // Walk the markers to a start-of-frame.
-        let mut i = 2;
-        while i + 9 < b.len() {
-            if *b.get(i)? != 0xFF {
-                i += 1;
-                continue;
-            }
-            let m = *b.get(i + 1)?;
-            if m == 0xD8 || m == 0x01 || (0xD0..=0xD7).contains(&m) || m == 0xFF {
-                i += if m == 0xFF { 1 } else { 2 };
-                continue;
-            }
-            let len = usize::from(u16::from_be_bytes([*b.get(i + 2)?, *b.get(i + 3)?]));
-            if matches!(m, 0xC0..=0xC3 | 0xC5..=0xC7 | 0xC9..=0xCB | 0xCD..=0xCF) {
-                let h = u32::from(u16::from_be_bytes([*b.get(i + 5)?, *b.get(i + 6)?]));
-                let w = u32::from(u16::from_be_bytes([*b.get(i + 7)?, *b.get(i + 8)?]));
-                return (w > 0 && h > 0).then_some(("jpeg", [w, h]));
-            }
-            i += 2 + len;
-        }
-    }
-    None
+    solidcraft_render::image_orientation::header(b).map(|header| (header.format, header.stored))
 }
 
 const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";

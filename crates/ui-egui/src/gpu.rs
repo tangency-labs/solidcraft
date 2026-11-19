@@ -27,7 +27,7 @@ fn background_uv(image: egui::Vec2, rect: egui::Rect, window: egui::Rect) -> egu
 fn decode_background(bytes: &[u8], limit: u32) -> Result<egui::ColorImage, String> {
     // Upright, as every viewer shows it: a photo stored turned by its EXIF orientation (#19138).
     let reader = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format().map_err(|e| e.to_string())?;
-    let (mut image, _) = solidcraft_engine::upright_image::decode_upright(reader).map_err(|e| e.to_string())?;
+    let (mut image, _) = solidcraft_engine::render::image_orientation::decode_upright(reader).map_err(|e| e.to_string())?;
     if image.width().max(image.height()) > limit {
         image = image.resize(limit, limit, image::imageops::FilterType::Triangle);
     }

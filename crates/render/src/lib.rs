@@ -10,6 +10,7 @@ mod curve_display;
 pub mod film;
 mod gif;
 pub mod glass_model;
+pub mod image_orientation;
 pub mod job;
 pub mod lighting;
 pub mod mapping;
