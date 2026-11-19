@@ -5,6 +5,23 @@ use std::path::PathBuf;
 use serde_json::{Value, json};
 use solidcraft_ui_egui::{icon_svg, scenario::Harness, workspace};
 
+/// The stack the audit runs on.
+///
+/// The test harness runs every test on a thread with a 2 MiB stack, and the audit drives every
+/// window of the app: the app's own state is a large value the harness builds on the stack, so
+/// the audit needs more room than the harness gives it and overflowed that stack (#19459). The
+/// audit runs on a thread with room for it, so its own stack no longer depends on the harness.
+const AUDIT_STACK_BYTES: usize = 16 * 1024 * 1024;
+
+/// Run `body` on a thread with [`AUDIT_STACK_BYTES`] of stack, and wait for it. A panic in the
+/// body fails the test.
+fn with_room_for_the_audit(body: impl FnOnce() + Send + 'static) {
+    let handle = std::thread::Builder::new().name("icon-audit".into()).stack_size(AUDIT_STACK_BYTES).spawn(body).expect("the audit's thread starts");
+    if let Err(payload) = handle.join() {
+        std::panic::resume_unwind(payload);
+    }
+}
+
 /// A harness whose feature windows don't choose their operation (`auto_operation`): this test
 /// opens every window only to look at its icons, and each choice would run a Join on the design.
 fn harness() -> Harness {
@@ -390,6 +407,12 @@ fn context_rows(h: &mut Harness, prefix: &str, requested: &mut BTreeMap<String, 
 
 #[test]
 fn requested_menu_icons_have_artwork_and_match_manifest() {
+    with_room_for_the_audit(audit_every_requested_menu_icon);
+}
+
+/// The audit's body: it drives every window of the app and collects the icons each one asked
+/// for. It runs on a thread of its own, with the stack [`with_room_for_the_audit`] gives it.
+fn audit_every_requested_menu_icon() {
     let evidence = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/icon-audit/surfaces.txt");
     if evidence.exists() {
         std::fs::remove_file(&evidence).unwrap();
