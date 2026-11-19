@@ -5987,6 +5987,7 @@
   "ui.export_keymap_tip": "Klawisze, ulubione z okna S i pasek narzędzi, jako plik",
   "ui.export_selects_only_body": "Zaznaczaj jedyną bryłę przy eksporcie siatki",
   "ui.export_selects_only_body_tip": "Eksportuj STL, Eksportuj 3MF i Wyślij do slicera zaczynają z zaznaczoną bryłą projektu, gdy jest ona jedyna.",
+  "ui.export_usd": "Eksportuj OpenUSD",
   "ui.extend": "Wydłuż",
   "ui.extent": "Zakres",
   "ui.extent_type": "Typ zakresu",
