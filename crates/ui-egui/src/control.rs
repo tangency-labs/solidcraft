@@ -1610,7 +1610,231 @@ pub(crate) fn write_screenshot(image: &egui::ColorImage, path: &str) -> Result<(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
+    pub(crate) fn joint_drive_design() -> (crate::scenario::Harness, u64, u64) {
+        let mut h = crate::scenario::Harness::new();
+        for (name, x) in [("Frame", 0), ("Arm", 30), ("Follower", 60)] {
+            h.app.run("component.activate", json!({"component": "root"})).unwrap();
+            h.app.run("component.create", json!({"name": name})).unwrap();
+            h.app.run("solid.box", json!({"length": 20, "width": 10, "height": 10, "corner": [x, 0, 0]})).unwrap();
+        }
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.app.run("occurrence.ground", json!({"occurrence": "Frame:1", "grounded": true})).unwrap();
+        let hinge = |app: &mut crate::SolveApp, b: &str| {
+            app.run("joint.as_built", json!({"type": "revolute", "a": "Frame:1", "b": b, "limits": [[0, 90]]})).unwrap()["joint"].as_u64().unwrap()
+        };
+        let arm = hinge(&mut h.app, "Arm:1");
+        let follower = hinge(&mut h.app, "Follower:1");
+        (h, arm, follower)
+    }
+
+    fn send_joint_drive(
+        h: &mut crate::scenario::Harness,
+        socket: Option<&std::sync::Arc<()>>,
+        params: serde_json::Value,
+    ) -> std::sync::mpsc::Receiver<serde_json::Value> {
+        let (mut req, reply) = super::ControlRequest::new("control.joint_drive", params);
+        req.connection = socket.map(std::sync::Arc::downgrade);
+        assert!(req.ticket.take());
+        h.app.run_control(&h.ctx, req);
+        reply
+    }
+
+    fn joint_drive(h: &mut crate::scenario::Harness, socket: &std::sync::Arc<()>, params: serde_json::Value) -> serde_json::Value {
+        send_joint_drive(h, Some(socket), params).try_recv().unwrap()
+    }
+
+    fn begin_joint_drive(h: &mut crate::scenario::Harness, socket: &std::sync::Arc<()>, joint: u64) -> u64 {
+        let document_id = h.app.session.document_id.clone();
+        let r = joint_drive(h, socket, json!({"action": "begin", "document_id": document_id, "joint": joint}));
+        assert_eq!(r["ok"], true, "{r}");
+        r["result"]["movement"].as_u64().unwrap()
+    }
+
+    fn joint_angle(h: &mut crate::scenario::Harness, joint: u64) -> f64 {
+        h.app.run("joint.inspect", json!({"joint": joint})).unwrap()["joints"][0]["values"][0]["value"].as_f64().unwrap()
+    }
+
+    pub(crate) fn assert_local_editor_interrupts_joint_drive(
+        h: &mut crate::scenario::Harness,
+        joint: u64,
+        open_editor: impl FnOnce(&mut crate::SolveApp),
+    ) {
+        let client = std::sync::Arc::new(());
+        let angle = joint_angle(h, joint);
+        let history = (h.app.session.undo.len(), h.app.session.redo.len());
+        let source = h.app.session.doc.clone();
+        let document_id = h.app.session.document_id.clone();
+        let movement = begin_joint_drive(h, &client, joint);
+        let r = joint_drive(h, &client, json!({"action": "update", "movement": movement, "value": 30}));
+        assert_eq!(r["result"]["values"][0]["value"], 30.0, "{r}");
+        assert!(h.app.preview.active);
+
+        let revision = h.app.session.revision;
+        open_editor(&mut h.app);
+        assert_eq!(h.app.session.revision, revision, "opening the editor preserves the session revision");
+        h.app.drain_control(&h.ctx);
+        assert!(!h.app.control_joint_drive.active() && !h.app.preview.active);
+        let finish = joint_drive(h, &client, json!({"action": "finish", "movement": movement}));
+        assert_eq!(finish["ok"], false, "{finish}");
+        let begin = joint_drive(h, &client, json!({"action": "begin", "document_id": document_id, "joint": joint}));
+        assert_eq!(begin["ok"], false, "{begin}");
+        assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &source));
+        assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+        assert_eq!(joint_angle(h, joint), angle);
+    }
+
+    #[test]
+    fn external_joint_drive_commits_one_undo_including_its_linked_joint() {
+        let (mut h, arm, follower) = joint_drive_design();
+        h.app.run("joint.motion_link", json!({"a": arm, "b": follower, "ratio": 0.5})).unwrap();
+        let client = std::sync::Arc::new(());
+        let source = h.app.session.doc.clone();
+        let undo = h.app.session.undo.len();
+        let movement = begin_joint_drive(&mut h, &client, arm);
+        for (requested, reached) in [(15.0, 15.0), (30.0, 30.0), (120.0, 90.0)] {
+            let r = joint_drive(&mut h, &client, json!({"action": "update", "movement": movement, "value": requested}));
+            assert_eq!(r["ok"], true, "{r}");
+            assert_eq!(r["result"]["values"][0]["value"], reached, "{r}");
+            assert!(h.app.preview.active && !h.app.preview.replaced.is_empty());
+            assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &source));
+            assert_eq!(h.app.session.undo.len(), undo);
+            assert_eq!(joint_angle(&mut h, arm), 0.0);
+        }
+        let rejected = joint_drive(&mut h, &client, json!({"action": "update", "movement": movement, "value": 1e12}));
+        assert_eq!(rejected["ok"], false, "{rejected}");
+        assert!(h.app.preview.active);
+        h.app.status_undo = true;
+        let finish = joint_drive(&mut h, &client, json!({"action": "finish", "movement": movement}));
+        assert_eq!(finish, json!({"ok": true, "result": {"changed": true}}));
+        assert!(!h.app.preview.active);
+        assert!(!h.app.status_undo);
+        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert_eq!((joint_angle(&mut h, arm), joint_angle(&mut h, follower)), (90.0, 45.0));
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!((joint_angle(&mut h, arm), joint_angle(&mut h, follower)), (0.0, 0.0));
+        h.app.run("edit.redo", json!({})).unwrap();
+        assert_eq!((joint_angle(&mut h, arm), joint_angle(&mut h, follower)), (90.0, 45.0));
+    }
+
+    #[test]
+    fn external_joint_drive_cancel_and_unchanged_finish_leave_redo() {
+        let (mut h, arm, _) = joint_drive_design();
+        h.app.run("joint.drive", json!({"joint": arm, "value": 15})).unwrap();
+        h.app.run("edit.undo", json!({})).unwrap();
+        let client = std::sync::Arc::new(());
+        let start = h.app.session.doc.clone();
+        let undo = h.app.session.undo.len();
+        let movement = begin_joint_drive(&mut h, &client, arm);
+        let r = joint_drive(&mut h, &client, json!({"action": "update", "movement": movement, "value": 45}));
+        assert_eq!(r["ok"], true, "{r}");
+        let r = joint_drive(&mut h, &client, json!({"action": "cancel", "movement": movement}));
+        assert_eq!(r, json!({"ok": true, "result": {"cancelled": true}}));
+        assert!(!h.app.preview.active);
+        let movement = begin_joint_drive(&mut h, &client, arm);
+        let r = joint_drive(&mut h, &client, json!({"action": "update", "movement": movement, "value": 0}));
+        assert_eq!(r["ok"], true, "{r}");
+        let r = joint_drive(&mut h, &client, json!({"action": "finish", "movement": movement}));
+        assert_eq!(r, json!({"ok": true, "result": {"changed": false}}));
+        assert_eq!(h.app.session.undo.len(), undo);
+        assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &start));
+        assert_eq!(h.app.session.redo.len(), 1);
+        h.app.run("edit.redo", json!({})).unwrap();
+        assert_eq!(joint_angle(&mut h, arm), 15.0);
+    }
+
+    #[test]
+    fn external_joint_drive_ends_on_disconnect_or_tab_leave_and_checks_the_owner() {
+        let (mut h, arm, _) = joint_drive_design();
+        let client = std::sync::Arc::new(());
+        let other = std::sync::Arc::new(());
+        let invalid = json!({"action": "begin", "document_id": "stale", "joint": arm});
+        assert_eq!(joint_drive(&mut h, &client, invalid)["ok"], false);
+        let document_id = h.app.session.document_id.clone();
+        let internal = send_joint_drive(&mut h, None, json!({"action": "begin", "document_id": document_id, "joint": arm}));
+        assert_eq!(internal.try_recv().unwrap()["ok"], false);
+
+        let movement = begin_joint_drive(&mut h, &client, arm);
+        let update = json!({"action": "update", "movement": movement, "value": 30});
+        let finish = json!({"action": "finish", "movement": movement});
+        assert_eq!(joint_drive(&mut h, &other, update.clone())["ok"], false);
+        assert_eq!(joint_drive(&mut h, &client, update)["ok"], true);
+        assert_eq!(joint_drive(&mut h, &other, finish.clone())["ok"], false);
+        assert!(h.app.preview.active);
+        drop(client);
+        h.app.drain_control(&h.ctx);
+        assert!(!h.app.control_joint_drive.active() && !h.app.preview.active);
+        assert_eq!(joint_angle(&mut h, arm), 0.0);
+
+        let movement = begin_joint_drive(&mut h, &other, arm);
+        let finish = json!({"action": "finish", "movement": movement});
+        let r = joint_drive(&mut h, &other, json!({"action": "update", "movement": movement, "value": 15}));
+        assert_eq!(r["ok"], true, "{r}");
+        crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
+        crate::documents::switch(&mut h.app, 0);
+        assert_eq!(h.app.session.document_id, document_id);
+        assert_eq!(joint_drive(&mut h, &other, finish)["ok"], false);
+        assert!(!h.app.preview.active);
+        assert_eq!(joint_angle(&mut h, arm), 0.0);
+    }
+
+    #[test]
+    fn external_joint_drive_discards_worker_after_a_separate_joint_edit() {
+        let (mut h, arm, independent_joint) = joint_drive_design();
+        let client = std::sync::Arc::new(());
+        let movement = begin_joint_drive(&mut h, &client, arm);
+        let source_undo = h.app.session.undo.len();
+        h.app.apply_off_thread = Some(std::time::Duration::ZERO);
+        let working = send_joint_drive(&mut h, Some(&client), json!({"action": "update", "movement": movement, "value": 45}));
+        assert_eq!(working.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty));
+        h.app.run("joint.drive", json!({"joint": independent_joint, "value": 15})).unwrap();
+        h.app.drain_control(&h.ctx);
+        assert_eq!(working.try_recv().unwrap()["ok"], false);
+        let finish = joint_drive(&mut h, &client, json!({"action": "finish", "movement": movement}));
+        assert_eq!(finish["ok"], false, "{finish}");
+        assert!(!h.app.preview.active);
+        assert_eq!(h.app.session.undo.len(), source_undo + 1);
+        assert_eq!((joint_angle(&mut h, arm), joint_angle(&mut h, independent_joint)), (0.0, 15.0));
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(joint_angle(&mut h, independent_joint), 0.0);
+    }
+
+    #[test]
+    fn external_joint_drive_ends_when_local_move_handles_open() {
+        let (mut h, arm, _) = joint_drive_design();
+        let occurrence = h.app.session.doc.assembly.joints.iter().find(|joint| joint.id == arm).unwrap().b.occurrence;
+        h.app.run("select.set", json!({"items": [{"type": "occurrence", "path": [occurrence]}]})).unwrap();
+        h.app.preferences.assembly_move_handles = true;
+        let client = std::sync::Arc::new(());
+        let movement = begin_joint_drive(&mut h, &client, arm);
+        let r = joint_drive(&mut h, &client, json!({"action": "update", "movement": movement, "value": 30}));
+        assert_eq!(r["ok"], true, "{r}");
+        assert!(h.app.preview.active);
+        h.app.start("occurrence.move");
+        assert!(h.app.viewport.joint_handles.is_some());
+        let r = joint_drive(&mut h, &client, json!({"action": "finish", "movement": movement}));
+        assert_eq!(r["ok"], false, "{r}");
+        assert!(!h.app.preview.active);
+        let document_id = h.app.session.document_id.clone();
+        let r = joint_drive(&mut h, &client, json!({"action": "begin", "document_id": document_id, "joint": arm}));
+        assert_eq!(r["ok"], false, "{r}");
+        assert_eq!(joint_angle(&mut h, arm), 0.0);
+    }
+
+    #[test]
+    fn external_joint_drive_ends_when_the_sketch_plane_editor_opens() {
+        let (mut h, arm, _) = joint_drive_design();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        let sketch = h.app.session.active_sketch.unwrap();
+        h.app.run("sketch.line", json!({"points": [[0, 0], [20, 10]]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        assert_local_editor_interrupts_joint_drive(&mut h, arm, |app| {
+            crate::browser::redefine_sketch(app, sketch);
+            assert_eq!(app.tree.redefine, Some(sketch));
+            assert!(app.dialog.is_none() && app.session.active_sketch.is_none());
+        });
+    }
+
     fn panel_command_app() -> crate::SolveApp {
         use crate::panel_runtime::*;
         let h = PanelMountHarness::new(false).unwrap();

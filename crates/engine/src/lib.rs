@@ -55,6 +55,7 @@ pub mod status_details;
 pub mod status_items;
 pub mod timing;
 pub mod title_block_text;
+pub mod upright_image;
 pub mod view;
 
 use solidcraft_geom::prelude::*;
@@ -490,6 +491,18 @@ pub struct Preview {
     pub replies: Vec<Value>,
 }
 
+impl Preview {
+    fn visible_world(before: &Session, after: &Session, replies: Vec<Value>) -> Result<Self> {
+        let visible = |session: &Session| -> Result<Arc<ModelState>> {
+            let world = session.world_state()?;
+            let mut shown = (*world).clone();
+            shown.bodies.retain(|body| session.body_visible(&body.name));
+            Ok(Arc::new(shown))
+        };
+        Ok(Self { before: visible(before)?, after: visible(after)?, replies })
+    }
+}
+
 /// Prepared world geometry depends on design/model identity and placement context, not
 /// selection or the view revision. Retained Arcs prevent pointer reuse after a design closes.
 #[derive(Clone)]
@@ -556,6 +569,17 @@ impl ComputedCommands {
                 && session.plugin_state == source.plugin_state))
     }
 
+    /// Whether the resulting document differs in content from its source.
+    pub fn changes_document(&self) -> bool {
+        self.source.doc != self.computed.doc
+    }
+
+    /// Show the prepared model in occurrence coordinates, with visibility applied, and return
+    /// the replies from its evaluation.
+    pub fn preview_visible_world(&self) -> Result<Preview> {
+        Preview::visible_world(&self.source, &self.computed, self.steps.iter().map(|step| step.reply.clone()).collect())
+    }
+
     /// Prepare display tessellation before returning the transaction to the window; a model that
     /// cannot be placed is the error.
     pub fn warm_meshes(&self, keep_going: impl Fn() -> bool + Sync) -> Result<()> {
@@ -598,9 +622,14 @@ pub struct Session {
     pub active_sketch: Option<u64>,
     /// Explicitly owned sheet edit, independent of the model sketch being edited.
     pub active_sheet_sketch: Option<Arc<SheetSketchEdit>>,
-    /// The drawing open (by id): drawing commands change it, and the model's wait until it is
-    /// closed ([`cmd::Part`]).
+    /// The drawing open (by id): drawing commands change it. The model's commands work with it
+    /// open too ([`cmd::Part`]); the views they leave out of date wait for the drawing's Update.
     pub open_drawing: Option<u64>,
+    /// The host shows the model (the app's Design and Render): undo, redo and the shared sketch
+    /// tools take the model's part even with a drawing open or a sheet sketch entered in it, so
+    /// each workspace works on its own part and none holds another. Off (the default), they take
+    /// the open drawing's ([`Session::history_part`], [`Session::sheet_sketching`]).
+    pub model_focus: bool,
     /// The design as it was when the open sketch was entered, for Cancel Sketch.
     pub(crate) sketch_entry: Option<SketchEntry>,
     /// Sketch temporarily shown while editing a feature that consumes it. View state only.
@@ -1066,6 +1095,7 @@ impl Session {
             active_sketch: None,
             active_sheet_sketch: None,
             open_drawing: None,
+            model_focus: false,
             sketch_entry: None,
             feature_edit_sketch: None,
             selection: Vec::new(),
@@ -1460,6 +1490,18 @@ impl Session {
         self.forget_consumed_sketches();
         self.forget_dirty_answer();
         self.model.forget_fingerprints();
+    }
+
+    /// Whose steps undo and redo go through: the open drawing's (by id), or the model's (`None`),
+    /// with none open or when [`Session::model_focus`] is set.
+    pub fn history_part(&self) -> Option<u64> {
+        self.open_drawing.filter(|_| !self.model_focus)
+    }
+
+    /// A sheet sketch of the open drawing is being edited, and the host isn't showing the model
+    /// ([`Session::model_focus`]): the shared sketch tools work on it, not on the model's sketch.
+    pub fn sheet_sketching(&self) -> bool {
+        !self.model_focus && self.active_sheet_sketch.as_ref().is_some_and(|entry| self.open_drawing == Some(entry.drawing))
     }
 
     /// The drawing open, for `cmd`.
@@ -2274,15 +2316,16 @@ impl Session {
         // The command, the evaluation it causes and the refresh after it: one profiler span.
         let _span = solidcraft_profile::span("command", spec.id);
         let host_viewport = self.render_viewport.clone();
+        let model_focus = self.model_focus;
         let host_jobs = self.render_jobs.host.clone();
         let additional_jobs = self.render_jobs.additional.clone();
         let live = spec.live.filter(|_| params.get("live").and_then(Value::as_bool) == Some(true));
-        // A disabled model command must not evaluate a stale model merely because
-        // it was tried from a drawing. Shared sheet tools read only drawing data.
+        // A disabled command must not evaluate a stale model merely because it was tried from a
+        // drawing. Shared sheet tools read only drawing data.
         if self.open_drawing.is_some() {
             spec.allowed(self).map_err(|why| EngineError::Disabled(spec.id.to_string(), why))?;
         }
-        let reads_model = spec.reads_model && !(self.open_drawing.is_some() && spec.part == cmd::Part::Sketch);
+        let reads_model = spec.reads_model && !(self.sheet_sketching() && spec.part == cmd::Part::Sketch);
         // What an import's SMLib check found since it was shown is in the model a command reads.
         self.model.settle_import_checks();
         if live.is_none() {
@@ -2297,7 +2340,14 @@ impl Session {
         let open_drawing = self.open_drawing;
         let redo_watch_before = self.redo_watch.clone();
         let mut before = Snapshot {
-            part: open_drawing.filter(|_| matches!(spec.part, cmd::Part::Drawing | cmd::Part::Open | cmd::Part::Sketch)),
+            part: open_drawing.filter(|_| match spec.part {
+                cmd::Part::Drawing => true,
+                // A shared sketch tool's step is the drawing's on a sheet sketch, else the model's;
+                // a delete's is the drawing's when it deletes the drawing's objects.
+                cmd::Part::Sketch => self.sheet_sketching(),
+                cmd::Part::Open => cmd::delete::in_drawing(self, params),
+                cmd::Part::Model | cmd::Part::Any => false,
+            }),
             ..Snapshot::of(self, spec.label)
         };
         let ids = self.ids.clone();
@@ -2385,11 +2435,20 @@ impl Session {
         // New/open/recover can replace the Session. Device ownership belongs to the host,
         // so its capability metadata survives those document lifecycle commands.
         self.render_viewport = host_viewport;
+        // Which workspace undoes what is the host's too, whichever design is open.
+        self.model_focus = model_focus;
         if self.render_jobs.host.is_none() && host_jobs.is_some() {
             self.set_render_job_host(host_jobs)?;
         }
         for (host, _) in additional_jobs {
             self.register_render_job_host(host)?;
+        }
+        // A model sketch entered while a sheet sketch is edited, with the host not showing the
+        // model (a script), ends the sheet sketch as Finish would: its edits are already in the
+        // drawing. The shared sketch tools can reach one sketch only, and the model's is what
+        // the command asked for; the model's command is never the one refused.
+        if !self.model_focus && self.active_sketch.is_some() && before.active_sketch.is_none() && self.active_sheet_sketch.is_some() {
+            self.active_sheet_sketch = None;
         }
         // A command that closed the drawing, or opened another, ends its sheet scenes.
         drawing_scene::forget_closed(self);
@@ -2560,15 +2619,16 @@ impl Session {
             return v;
         }
         let Some(out) = v.as_object_mut() else { return v };
-        if self.open_drawing.is_some() {
-            if let Some(entry) =
-                self.active_sheet_sketch.as_ref().or(before.active_sheet_sketch.as_ref()).filter(|entry| self.open_drawing == Some(entry.drawing))
-            {
-                let current = self.doc.drawing(entry.drawing).and_then(|drawing| drawing.sheet_sketch(entry.sketch));
-                if let Some(after) = current.filter(|record| record.sheet == entry.sheet) {
-                    let previous = before.doc.drawing(entry.drawing).and_then(|drawing| drawing.sheet_sketch(entry.sketch));
-                    out.insert("created".into(), cmd::sketch_created(previous.map(|record| &record.sketch), &after.sketch));
-                }
+        if let Some(entry) = self
+            .active_sheet_sketch
+            .as_ref()
+            .or(before.active_sheet_sketch.as_ref())
+            .filter(|entry| !self.model_focus && self.open_drawing == Some(entry.drawing))
+        {
+            let current = self.doc.drawing(entry.drawing).and_then(|drawing| drawing.sheet_sketch(entry.sketch));
+            if let Some(after) = current.filter(|record| record.sheet == entry.sheet) {
+                let previous = before.doc.drawing(entry.drawing).and_then(|drawing| drawing.sheet_sketch(entry.sketch));
+                out.insert("created".into(), cmd::sketch_created(previous.map(|record| &record.sketch), &after.sketch));
             }
             return v; // never fall back to the model after a sheet cancellation
         }
@@ -2667,6 +2727,7 @@ impl Session {
             active_sketch: self.active_sketch,
             active_sheet_sketch: self.active_sheet_sketch.clone(),
             open_drawing: self.open_drawing,
+            model_focus: self.model_focus,
             sketch_entry: None,
             feature_edit_sketch: self.feature_edit_sketch,
             selection: self.selection.clone(),
@@ -3074,14 +3135,8 @@ impl Session {
 
     /// World preview with each session's visibility applied, including new body placements.
     pub fn preview_visible_world(&self, commands: &[(String, Value)]) -> Result<Preview> {
-        let visible = |session: &Session| -> Result<Arc<solidcraft_doc::ModelState>> {
-            let world = session.world_state()?;
-            let mut shown = (*world).clone();
-            shown.bodies.retain(|body| session.body_visible(&body.name));
-            Ok(Arc::new(shown))
-        };
         let (after, replies) = self.scratch().preview_in_place(commands, None)?;
-        Ok(Preview { before: visible(self)?, after: visible(&after)?, replies })
+        Preview::visible_world(self, &after, replies)
     }
 
     /// Run `commands` on a [`Session::scratch`] copy that keeps the undo and redo stacks: what

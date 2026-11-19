@@ -1,16 +1,16 @@
 //! Other CAD formats read through [cadmpeg](https://github.com/cadmpeg/cadmpeg): FreeCAD
-//! `.FCStd` and Rhino `.3dm`. cadmpeg decodes the file into its neutral model (CADIR). By default
+//! `.FCStd` and Rhino `.3dm`, and OpenUSD both ways ([`usd`]). cadmpeg decodes the file into its neutral model (CADIR). By default
 //! cadmpeg's STEP writer restates that as STEP, which the Import feature then reads and keeps like
 //! any STEP file ([`native_cad_to_step`]); with [`crate::StepReader::Cadmpeg`] (the Preferences
 //! switch "Import with cadmpeg", off by default) the model is read straight into B-rep records
 //! ([`cadir_records`]) and the Import feature keeps those records, with no STEP text in between.
 //!
 //! Only codecs for open formats are compiled in (the workspace enables cadmpeg-registry's
-//! `fcstd`, `rhino` and `step` features alone). cadmpeg's codecs for commercial formats, and its
+//! `fcstd`, `rhino`, `step` and `usd` features alone). cadmpeg's codecs for commercial formats, and its
 //! `sat` codec (a ShapeManager stream decoder that reads ACIS as one dialect), are not built.
 //!
-//! This module is the importer seam: the one place cadmpeg is called, returning the STEP text or
-//! the records plus warnings. A cadmpeg-based STEP reader could be added here later and chosen by a setting, to
+//! This module is the cadmpeg seam: the one place cadmpeg is called, returning the STEP text, the
+//! records or the OpenUSD bytes plus warnings. A cadmpeg-based STEP reader could be added here later and chosen by a setting, to
 //! compare with our own STEP reader, without changing that reader.
 
 /// File extensions read through cadmpeg (lower case).
@@ -83,6 +83,12 @@ pub fn native_cad_design(bytes: &[u8], file: &str) -> Result<NativeDesign, Strin
     Ok(design)
 }
 
+/// [`traced_records`]'s records alone.
+#[cfg(test)]
+pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, system: &str, colours: bool) -> solidcraft_kernel::ImportRecords {
+    traced_records(ir, product, system, colours).0
+}
+
 /// `ir`'s bodies as an import kept as records, written by `system`: each body region assembled
 /// into a record by `solidcore_cadir`, its pcurves without a closed form made as a STEP import's
 /// are ([`solidcraft_kernel::import_trims`]). Nothing passes through STEP text. CADIR's bodies
@@ -90,9 +96,15 @@ pub fn native_cad_design(bytes: &[u8], file: &str) -> Result<NativeDesign, Strin
 /// file has a product structure (occurrences), the tree is that structure and each body is placed
 /// once for each use of its part ([`assembly`]); otherwise the bodies are one product called
 /// `product`. With `colours`, each body takes the colours the file gives it and its faces
-/// ([`paint_of`]). What could not be read (and what was repaired on the way) is in the warnings,
-/// each naming its body.
-pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, system: &str, colours: bool) -> solidcraft_kernel::ImportRecords {
+/// ([`Looks::paint_of`]). What could not be read (and what was repaired on the way) is in the
+/// warnings, each naming its body. Also returns where each record body came from ([`validation::Origin`]), for checking the file's own
+/// figures ([`validation::check`]).
+fn traced_records(
+    ir: &cadmpeg_ir::document::CadIr,
+    product: &str,
+    system: &str,
+    colours: bool,
+) -> (solidcraft_kernel::ImportRecords, Vec<validation::Origin>) {
     use solidcraft_kernel::{ImportRecords, RecordBody, StepNode};
     let _span = solidcraft_profile::span("import", "cadir.records");
     let read = solidcore_cadir::read_bodies(ir, Some(solidcraft_kernel::import_trims()));
@@ -123,9 +135,10 @@ pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, sys
         unplaced.push(assembly::Unplaced { body: r.body, record });
     }
     warnings.extend(read.failures.iter().map(|f| format!("{}: not imported: {}", label(&f.body), f.message)));
-    let (bodies, tree) = if ir.model.occurrences.is_empty() {
-        let bodies: Vec<RecordBody> = unplaced.into_iter().map(|u| u.record).collect();
+    let (bodies, tree, origins) = if ir.model.occurrences.is_empty() {
         let identity = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+        let origins = unplaced.iter().map(|u| validation::Origin { body: u.body.clone(), world: identity }).collect();
+        let bodies: Vec<RecordBody> = unplaced.into_iter().map(|u| u.record).collect();
         let tree = vec![StepNode {
             name: product.to_string(),
             transform: identity,
@@ -134,14 +147,15 @@ pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, sys
             left_out: Vec::new(),
             children: Vec::new(),
         }];
-        (bodies, tree)
+        (bodies, tree, origins)
     } else {
         assembly::placed(ir, product, unplaced, &mut warnings)
     };
-    ImportRecords { bodies, tree, warnings, system: system.to_string() }
+    (ImportRecords { bodies, tree, warnings, system: system.to_string() }, origins)
 }
 
 mod assembly;
+mod validation;
 
 /// A file's appearances by what they colour: whole bodies and single faces (CADIR ids).
 struct Looks<'a> {
@@ -197,6 +211,31 @@ impl<'a> Looks<'a> {
 }
 mod design;
 pub use design::NativeDesign;
+
+mod usd;
+pub use usd::{USD_EXTS, is_usd_path};
+
+/// `step` (STEP text SolidCraft wrote for the bodies to export) as an OpenUSD file called `file`:
+/// `.usda` text, `.usdc` or `.usd` binary, or a `.usdz` package. Returns the file's bytes and what
+/// it could not carry. Panics inside cadmpeg become errors.
+pub fn usd_from_step(step: &[u8], file: &str) -> Result<(Vec<u8>, Vec<String>), String> {
+    solidcraft_kernel::guard("cadmpeg USD export", || usd::from_step(step, file).map_err(solidcraft_kernel::KernelError::Invalid)).map_err(
+        |e| match e {
+            solidcraft_kernel::KernelError::Invalid(m) => m,
+            e => e.to_string(),
+        },
+    )
+}
+
+/// An OpenUSD file (`file` is its name) read for a mesh import: each mesh a mesh body, the prim
+/// tree a component plan and the materials the bodies' looks, as a glTF file is read
+/// ([`crate::read_gltf`]); and whether the file says Y is up. Panics inside cadmpeg become errors.
+pub fn read_usd(bytes: &[u8], file: &str) -> crate::Result<(crate::GltfImport, bool)> {
+    solidcraft_kernel::guard("cadmpeg USD import", || usd::read(bytes, file).map_err(solidcraft_kernel::KernelError::Invalid)).map_err(|e| match e {
+        solidcraft_kernel::KernelError::Invalid(m) => crate::IoError::Invalid(m),
+        e => crate::IoError::Invalid(e.to_string()),
+    })
+}
 
 pub(crate) use convert::step_route::hidden_items;
 pub use convert::step_route::native_cad_to_step;
@@ -271,7 +310,7 @@ mod convert {
             .ok_or_else(|| format!("{name}: unrecognised file contents"))?;
         let format = codec.id().as_str().to_string();
         if !accepted.contains(&format.as_str()) {
-            return Err(format!("{name}: {format} files are not supported (FreeCAD .FCStd and Rhino .3dm only)"));
+            return Err(format!("{name}: {format} files are not supported here"));
         }
 
         // Decode in memory under the caps, at the depth the caller chose: the records read the
@@ -433,10 +472,22 @@ mod convert {
             "step" => "",
             other => other,
         };
-        let records = super::cadir_records(&ir, &product, system, format == "step");
+        let (mut records, origins) = super::traced_records(&ir, &product, system, format == "step");
         if records.bodies.is_empty() {
             let why = records.warnings.first().map(|w| format!(" ({w})")).unwrap_or_default();
             return Err(format!("{name}: this {format} file has no solids that can be imported{why}"));
+        }
+        // The file's own figures for its parts, checked against the bodies (built once: the
+        // design's evaluation finds them in the recent imports). A part that differs is a warning
+        // about the file kept with its records, so the import's report (the History tooltip, the
+        // status line, Copy Warning Message) has it, as SolidCraft's reader reports the file.
+        if !ir.model.declared_measures.is_empty()
+            && let Ok(imp) = solidcraft_kernel::records_import_shared(&records)
+        {
+            let notes = super::validation::check(&ir, &records, &origins, &imp);
+            if !notes.is_empty() {
+                records = solidcraft_kernel::records_noted(records, &imp, notes).map_err(|e| e.to_string())?.0;
+            }
         }
         Ok((records, warnings, format == "fcstd"))
     }

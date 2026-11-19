@@ -2932,8 +2932,8 @@ fn compact_reply_counts_repeated_mesh_warnings() {
     assert_eq!(
         compact["warnings"],
         json!([
-            "130 faces short of the 25° asked (stopped by: Corner); the sharpest: smallest angle 13.68° (Node: face 129); bodies: \"Node\" (130)",
-            "2 faces whose shaping stopped at a bound (Points) with the 25° asked reached; the sharpest: smallest angle 25.01° (Node: face 201); bodies: \"Node\" (2)",
+            "130 faces short of the 25° asked (stopped by: Corner); the sharpest: smallest angle 13.68° (\"Node\": face 129); bodies: \"Node\" (130)",
+            "2 faces whose shaping stopped at a bound (Points) with the 25° asked reached; the sharpest: smallest angle 25.01° (\"Node\": face 201); bodies: \"Node\" (2)",
             "Node: face 7: its shared boundary was kept. Its triangles lie up to 1.200e-3 mm off the surface, past it (chord tolerance 1.000e-3 mm)",
             "Lid has a print face but was written as it lies",
         ]),

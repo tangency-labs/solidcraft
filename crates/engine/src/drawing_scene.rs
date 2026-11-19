@@ -509,6 +509,9 @@ pub struct LineHit {
     pub source: Source,
     /// How far the point is from it, on paper.
     pub distance_mm: f64,
+    /// The stroke as the view draws it, in paper millimetres from the sheet's lower-left corner: the
+    /// edge projected, which a Dimension tool reads to tell a straight edge from a round one.
+    pub path: Vec<Seg2>,
 }
 
 /// The line under `point_mm` on sheet `sheet` of the drawing open, within `band_mm`: in the view
@@ -535,7 +538,12 @@ pub fn line_at(s: &mut Session, sheet: u64, point_mm: Vec2, band_mm: f64) -> Res
     else {
         return Ok(None);
     };
-    Ok(Some(LineHit { view, body, source, distance_mm }))
+    let path = match group.items.get(at) {
+        // A shift keeps an arc's radius and angles, as [`moved`] has it.
+        Some(Item::Stroke { path, .. }) => path.iter().map(|seg| seg.mapped(|p| p + centre, ArcMap::turn(0.0, false))).collect(),
+        _ => Vec::new(),
+    };
+    Ok(Some(LineHit { view, body, source, distance_mm, path }))
 }
 
 /// The id of the sheet `named` names in `drawing` (its id or its one name), refused as `cmd`: the
