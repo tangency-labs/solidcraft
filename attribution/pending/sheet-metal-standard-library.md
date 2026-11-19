@@ -1,1 +1,0 @@
-| assets/sheet-metal/standard-library.json | SolidCraft contributors | Original; gauge thicknesses worked out from the Manufacturers' Standard Gauge weights, 15 U.S.C. 206 and the Brown & Sharpe formula, K-factors and radii from the generic tables its `sources` list cite (facts, not copied text); the standard sheet metal library (#18304) | MIT OR Apache-2.0 |
