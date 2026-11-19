@@ -4559,6 +4559,7 @@ mod test_support;
 const STARTED_WITH_VALUES: &[&str] = &[
     "body.print_face",
     "browser.visibility",
+    "component.move_features",
     "component.relink",
     "occurrence.properties",
     "select.filter",

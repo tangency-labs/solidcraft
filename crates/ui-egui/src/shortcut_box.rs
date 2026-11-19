@@ -264,11 +264,14 @@ pub fn search(app: &SolveApp, q: &str) -> Vec<Row> {
 
 /// Whether search lists command `c` (#9734): it has a place in the ribbon, runs with no values,
 /// or starting it does something of its own (a dialog, a tool, the Render workspace's settings,
-/// values `start` gives it). The rest exist for scripts and agents; picking one only fails with
+/// the Drawing workspace's options panel, values `start` gives it). The rest exist for scripts and agents; picking one only fails with
 /// a missing value ("`name` is required"), so search leaves them out unless their exact id is
 /// typed, or `search_lists_script_commands` is on.
 pub(crate) fn listed(app: &SolveApp, c: &solidcraft_engine::CommandSpec) -> bool {
-    crate::workspace::destination(c).is_some() || !needs_values(c.id) || app.starts_its_own_way(c.id)
+    crate::workspace::destination(c).is_some()
+        || !needs_values(c.id)
+        || app.starts_its_own_way(c.id)
+        || crate::drawing_workspace::can_open_options(c.id)
 }
 
 /// The commands search leaves out now: the ones `listed` refuses.
@@ -854,6 +857,21 @@ mod tests {
         // The window works the set out once per revision of the design.
         refresh_hidden(&mut app);
         assert_eq!(app.sbox.hidden.as_ref().map(|(revision, h)| (*revision, h.len())), Some((app.session.revision, hidden.len())));
+    }
+
+    /// In the Drawing workspace, picking a drawing command that opens its options panel does
+    /// something, so search lists it even though it needs values to run (#9734).
+    #[test]
+    fn search_in_the_drawing_workspace_lists_every_command_that_opens_its_options() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        app.ui.tab = "DRAWING LAYOUT".into();
+        assert!(crate::drawing_workspace::active(&app));
+        let ids: Vec<&str> = search(&app, "").into_iter().map(|(id, ..)| id).collect();
+        let opening: Vec<&str> = command_specs().into_iter().map(|c| c.id).filter(|id| crate::drawing_workspace::can_open_options(id)).collect();
+        assert!(!opening.is_empty());
+        for id in opening {
+            assert!(ids.contains(&id), "{id} opens its options in Drawing, but search leaves it out");
+        }
     }
 
     /// Every command `SolveApp::start` handles by name does something when picked, so search
