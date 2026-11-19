@@ -351,9 +351,9 @@ pub struct MeshInserted {
     /// How many components were made below it (a glTF file's nodes). Only when there are some.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subcomponents: Option<usize>,
-    /// How many rigid joints hold its contents together. Only when `subcomponents` is given.
+    /// How many occurrences its rigid group holds together. Only when `subcomponents` is given.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rigid_joints: Option<usize>,
+    pub rigid_members: Option<usize>,
     /// With `origin`: the shift, [x, y, z] in mm, that moved the import to the origin; absent
     /// when it was not moved.
     #[serde(default, skip_serializing_if = "Option::is_none")]

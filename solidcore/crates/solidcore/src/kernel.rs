@@ -179,6 +179,7 @@ pub struct WorkCounters {
     ball_certified_roots: Cell<u64>,
     blends_recertified: Cell<u64>,
     vertex_drops: Cell<u64>,
+    seam_tests: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -349,6 +350,18 @@ impl WorkCounters {
         self.vertex_drops.get()
     }
 
+    /// Edges and vertices of a face asked whether they are a seam or a pole of it while a
+    /// face intersection classifies its curves on the face (docs/booleans.md, "Seams and
+    /// poles"): each edge [`crate::topology::edge::face_on_both_sides`] is asked about and
+    /// each vertex [`crate::topology::vertex::inside_face`] is asked about, for a curve's
+    /// boundary edges and vertices, its reach and the face's own seam. A face without a
+    /// seam has no pole either, so once its edges are found to hold none, its curves skip
+    /// both questions until the B-rep changes. Not the fork's (#18705).
+    #[must_use]
+    pub fn seam_tests(&self) -> u64 {
+        self.seam_tests.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
@@ -370,6 +383,12 @@ impl WorkCounters {
         self.ball_certified_roots.set(0);
         self.blends_recertified.set(0);
         self.vertex_drops.set(0);
+        self.seam_tests.set(0);
+    }
+
+    /// Counts one edge or vertex asked whether it is a seam or a pole of a face.
+    pub(crate) fn add_seam_test(&self) {
+        self.seam_tests.set(self.seam_tests.get().saturating_add(1));
     }
 
     /// Counts one vertex a classified curve is solved against.

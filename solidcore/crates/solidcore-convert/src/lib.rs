@@ -31,7 +31,7 @@
 //! | [`BlendDefinition`](solidcore_record::brep::blend::BlendDefinition) (a face's blend) | `FaceDefinition` | [`blend::blend`] | [`blend::record_blend`] |
 //!
 //! [`brep`] converts the record's B-rep to the kernel's body and back; [`cell_grid`] the cell
-//! grid's spec and plan.
+//! grid's spec and plan; [`develop`] a sheet metal part's surfaces and its flat pattern.
 
 #![forbid(unsafe_code)]
 #![deny(clippy::disallowed_methods)]
@@ -39,6 +39,7 @@
 pub mod blend;
 pub mod brep;
 pub mod cell_grid;
+pub mod develop;
 
 use solidcore::eval as k;
 use solidcore::prism::profile as kp;

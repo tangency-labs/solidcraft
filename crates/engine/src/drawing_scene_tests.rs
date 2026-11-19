@@ -1816,6 +1816,45 @@ fn a_deferred_drawing_closed_during_a_change_keeps_its_dimensions_until_it_is_up
     assert_eq!(out[2], json!(ids::encode(id)));
 }
 
+/// A model change made with the drawing open (the model is no longer locked while one is) marks
+/// its views out of date exactly as one made while it was closed: a deferred drawing keeps its last
+/// lines and lists its views and their dimension out of date until Update reads the model again; an
+/// automatic one lists every view out of date until the page draws them.
+#[test]
+fn a_model_change_with_the_drawing_open_marks_its_views_out_of_date() {
+    let (mut s, sheet, [front, top]) = front_and_top();
+    let id = front_edge(&mut s, front);
+    let open = s.open_drawing;
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    run(&mut s, "drawing.update", json!({}));
+    let before = settled(&mut s, sheet);
+    assert!(listed(&mut s, sheet).is_empty());
+    let block = s.doc.features[0].id;
+    run(&mut s, "timeline.edit", json!({"feature": block.to_string(), "set": {"length": 120}}));
+    assert_eq!(s.open_drawing, open, "the drawing stays open");
+
+    let held = settled(&mut s, sheet);
+    assert_eq!(bytes(&held.scene), bytes(&before.scene), "its last views and dimension");
+    let mut views: Vec<Value> = listed(&mut s, sheet);
+    assert_eq!(views.len(), 3, "the views, then the dimension: {views:?}");
+    assert_eq!(views.pop(), Some(json!(ids::encode(id))));
+    views.sort_by_key(|v| v.as_str().map(str::to_string));
+    let mut expected = vec![json!(ids::encode(front)), json!(ids::encode(top))];
+    expected.sort_by_key(|v| v.as_str().map(str::to_string));
+    assert_eq!(views, expected);
+
+    run(&mut s, "drawing.update", json!({}));
+    let now = settled(&mut s, sheet);
+    assert_eq!(bytes(&now.scene), bytes(&built(&s, sheet).scene), "read again: 120 long");
+    assert!(listed(&mut s, sheet).is_empty());
+
+    run(&mut s, "drawing.set", json!({"updates": "automatic"}));
+    settled(&mut s, sheet);
+    assert!(all_are(&status_of(&mut s).1, "current"));
+    run(&mut s, "timeline.edit", json!({"feature": block.to_string(), "set": {"length": 90}}));
+    assert!(all_are(&status_of(&mut s).1, "out_of_date"), "a model edit with the drawing open marks every view");
+}
+
 /// A dimension gone while its drawing was closed (a checkpoint from before it was added, restored) is
 /// not shown, listed or kept when the drawing opens again, held.
 #[test]

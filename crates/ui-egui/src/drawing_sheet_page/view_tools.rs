@@ -1,8 +1,11 @@
-//! Selection and move interaction for saved drawing views.
+//! Selection and move interaction on a drawing sheet. What is selected is the session's
+//! selection (`Sel::Drawing`), picked with the same click, Shift/Ctrl and box rules as the model,
+//! so Delete, Escape and Select All work on it through the shared paths.
 use egui::{Align2, PointerButton, Rect, Stroke, pos2};
 use serde_json::json;
 use solidcore_record::Vec2;
 use solidcraft_engine::{
+    Sel,
     doc::{drawing::Drawing, ids::encode},
     drawing_scene::{self, SheetObject},
     geom::{Aabb2, paper::ObjectKind},
@@ -17,7 +20,6 @@ use crate::{
 
 #[derive(Default)]
 pub(super) struct State {
-    selected: Option<u64>,
     drag: Option<Drag>,
     delete: Option<u64>,
     undo: Option<(u64, f64, &'static str)>,
@@ -52,12 +54,89 @@ pub(super) fn owns_drag(app: &SolveApp, response: &egui::Response, at: OnScreen,
             || (response.dragged_by(PointerButton::Primary) && origin(app, response, at, objects).is_some()))
 }
 
+/// Cancel a view's drag or its delete confirmation; the selection stays (Escape clears it next).
 pub(super) fn clear(app: &mut SolveApp) -> bool {
     let state = &mut app.drawing_workspace.page.view_tools;
-    let selected = state.selected.take().is_some();
     let dragging = state.drag.take().is_some();
     let deleting = state.delete.take().is_some();
-    selected || dragging || deleting
+    dragging || deleting
+}
+
+/// The objects of drawing `drawing` selected now.
+pub(super) fn selected(app: &SolveApp, drawing: u64) -> Vec<u64> {
+    app.session
+        .selection
+        .iter()
+        .filter_map(|s| match s {
+            Sel::Drawing { drawing: d, object } if *d == drawing => Some(*object),
+            _ => None,
+        })
+        .collect()
+}
+
+fn pick(drawing: u64, object: u64) -> Sel {
+    Sel::Drawing { drawing, object }
+}
+
+/// The model's box selection on the sheet: a primary drag from empty paper, a window to the right
+/// and a crossing box to the left (or the lasso, when it is on), adding with Shift or Ctrl.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn box_select(
+    app: &mut SolveApp,
+    ui: &egui::Ui,
+    painter: &egui::Painter,
+    response: &egui::Response,
+    at: OnScreen,
+    drawing: &Drawing,
+    objects: &[SheetObject],
+    canvas: Rect,
+    free: bool,
+) {
+    if !free || app.drawing_workspace.page.view_tools.drag.is_some() {
+        app.viewport.boxsel = None;
+        return;
+    }
+    let origin = ui.input(|input| input.pointer.press_origin());
+    if response.dragged_by(PointerButton::Primary)
+        && let (Some(a), Some(b)) = (origin, response.interact_pointer_pos())
+        && canvas.contains(a)
+        && !crate::shell::covered(app, a)
+        && drawing_scene::hit(objects, at.paper(a), HOVER_BAND / at.scale).is_none()
+    {
+        let lasso = app.ui.lasso_select;
+        app.viewport.boxsel = Some(match app.viewport.boxsel.take() {
+            Some(mut drawn) if lasso && drawn.is_lasso() => {
+                drawn.extend(b);
+                drawn
+            }
+            _ if lasso => crate::selection::BoxSel::lasso(&[a, b]),
+            _ => crate::selection::BoxSel::from_drag(a, b),
+        });
+    }
+    if let Some(bx) = &app.viewport.boxsel {
+        crate::viewport::paint_box_selection(painter, bx, false);
+    }
+    if response.drag_stopped()
+        && let Some(bx) = app.viewport.boxsel.take()
+    {
+        let mods = ui.input(|input| input.modifiers);
+        let (add, _) =
+            crate::tool_modifiers::selection_click(crate::tool_modifiers::Held::from_modifiers(mods), app.preferences.selection_shift_add_only);
+        let items: Vec<Sel> = objects
+            .iter()
+            .filter(|object| drawing.has_object(object.object))
+            .filter(|object| {
+                let r = at.rect(&object.boundary_mm.unwrap_or(object.bounds_mm));
+                bx.takes(&[r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()])
+            })
+            .map(|object| pick(drawing.id, object.object))
+            .collect();
+        if let Err(error) = app.run("select.set", json!({"items": items, "add": add})) {
+            app.set_status(error, true);
+        }
+    } else if !ui.input(|input| input.pointer.primary_down()) {
+        app.viewport.boxsel = None;
+    }
 }
 
 pub(super) struct Canvas<'a> {
@@ -73,22 +152,31 @@ pub(super) struct Canvas<'a> {
 impl Canvas<'_> {
     pub(super) fn show(self, app: &mut SolveApp, ui: &mut egui::Ui, placing: bool) {
         let mut state = std::mem::take(&mut app.drawing_workspace.page.view_tools);
-        state.selected = state.selected.filter(|id| self.drawing.view(*id).is_some_and(|view| view.sheet == self.sheet));
+        let mods = ui.input(|input| input.modifiers);
+        let (add, toggle) =
+            crate::tool_modifiers::selection_click(crate::tool_modifiers::Held::from_modifiers(mods), app.preferences.selection_shift_add_only);
         if placing {
             state.drag = None;
         } else if self.response.drag_started_by(PointerButton::Primary)
             && let Some((view, pointer)) = origin(app, self.response, self.at, self.objects)
             && let Ok(from) = self.drawing.view_centre(view)
         {
-            state.selected = Some(view);
+            // A drag from a view moves it, as a drag from selected geometry moves it in the model.
+            if !selected(app, self.drawing.id).contains(&view) {
+                crate::viewport::select(app, Some(pick(self.drawing.id, view)), false, false);
+            }
             state.drag = Some(Drag { view, from, pointer, revision: app.session.revision });
         } else if self.response.clicked() && state.delete.is_none() {
+            // The model's click: replace, or add and toggle with Shift and Ctrl; nothing clears.
             let hover = self.response.hover_pos().filter(|point| !crate::shell::covered(app, *point));
-            state.selected = hover.and_then(|point| view_at(self.objects, self.at.paper(point), self.at));
+            let hit = hover
+                .and_then(|point| drawing_scene::hit(self.objects, self.at.paper(point), HOVER_BAND / self.at.scale))
+                .filter(|hit| self.drawing.has_object(hit.object));
+            crate::viewport::select(app, hit.map(|hit| pick(self.drawing.id, hit.object)), add, toggle);
         }
 
         if let Some(drag) = state.drag {
-            if drag.revision != app.session.revision || state.selected != Some(drag.view) {
+            if drag.revision != app.session.revision || !selected(app, self.drawing.id).contains(&drag.view) {
                 state.drag = None;
             } else if let Some(pointer) = self.response.interact_pointer_pos() {
                 let alt = ui.input(|input| input.modifiers.alt);
@@ -108,8 +196,8 @@ impl Canvas<'_> {
                 state.drag = None;
             }
         } else if !placing
-            && let Some(selected) = state.selected
-            && let Some(object) = self.objects.iter().find(|object| object.object == selected && object.kind == ObjectKind::View)
+            && let [one] = selected(app, self.drawing.id)[..]
+            && let Some(object) = self.objects.iter().find(|object| object.object == one && object.kind == ObjectKind::View)
         {
             self.card(app, &mut state, *object);
         }
@@ -247,7 +335,6 @@ impl Canvas<'_> {
                 }),
             ) {
                 Ok(_) => {
-                    state.selected = None;
                     self.notice(app, state, "ui.drawing_view_selection.deleted");
                 }
                 Err(error) => app.set_status(error, true),

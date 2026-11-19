@@ -1784,17 +1784,14 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                     crate::stand_up::offer(app, &request.path, &running.before, Some(&made.result));
                 }
                 crate::frame_watch::step(app, "stand-up offer");
-                let warnings = made.result.get("warnings").and_then(Value::as_array);
                 if let Kind::Recover { .. } = request.kind {
                     recovered(app, request);
                 } else {
                     app.set_status(
                         if made.result.get("read_only").and_then(Value::as_bool) == Some(true) {
                             solidcraft_ui_text::tr("document.opened_read_only").to_string()
-                        } else if let Some(summary) = crate::timeline::import_status(app, &made.result) {
+                        } else if let Some(summary) = crate::timeline::import_warning_status(app, &made.result) {
                             summary
-                        } else if let Some(w) = warnings.filter(|w| !w.is_empty()) {
-                            format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or(""))
                         } else {
                             // Built here, outside the window's language scope: in the language
                             // chosen, as the other statuses of this file are.

@@ -10,7 +10,7 @@
 //! negated, so each URDF value still equals SolidCraft's).
 
 use solidcraft_geom::prelude::*;
-use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
 use solidcore_record::Vec3;
 use solidcraft_doc::joints::{self, Joint, JointKind};
@@ -175,8 +175,13 @@ fn sanitise(raw: &str, file: bool) -> String {
 }
 
 /// Unique names over links, joints and files (SDFormat refuses a joint named like a link).
+/// `next` keeps, for each name asked for twice, the suffix to try next, so a thousand joints
+/// that sanitise to one name take a thousand steps, not half a million.
 #[derive(Default)]
-struct Names(HashSet<String>);
+struct Names {
+    taken: HashSet<String>,
+    next: HashMap<String, usize>,
+}
 
 impl Names {
     fn take(&mut self, raw: &str) -> String {
@@ -186,22 +191,27 @@ impl Names {
     /// it, so `t-base` and `t-Base` would be one file.
     fn file(&mut self, raw: &str) -> String {
         let base = sanitise(raw, true);
-        let mut name = base.clone();
-        let mut k = 2;
-        while !self.0.insert(name.to_ascii_lowercase()) {
-            name = format!("{base}_{k}");
-            k += 1;
-        }
-        format!("{name}.stl")
+        format!("{}.stl", self.free(base, true))
     }
     fn unique(&mut self, base: String) -> String {
-        let mut name = base.clone();
-        let mut k = 2;
-        while !self.0.insert(name.clone()) {
-            name = format!("{base}_{k}");
-            k += 1;
+        self.free(base, false)
+    }
+    /// `base`, else `base_2`, `base_3`, ... the first one not taken (compared in lower case when
+    /// `fold`). Names are never given back, so every suffix below the one kept for `base` is
+    /// taken, and the search starts there.
+    fn free(&mut self, base: String, fold: bool) -> String {
+        let key = |n: &str| if fold { n.to_ascii_lowercase() } else { n.to_string() };
+        if self.taken.insert(key(&base)) {
+            return base;
         }
-        name
+        let k = self.next.entry(key(&base)).or_insert(2);
+        loop {
+            let name = format!("{base}_{k}");
+            *k += 1;
+            if self.taken.insert(key(&name)) {
+                return name;
+            }
+        }
     }
 }
 
@@ -552,7 +562,9 @@ pub fn urdf(doc: &Document, st: &ModelState, stem: &str, options: &UrdfOptions) 
     // both origins resolving.
     let exists = |occ: u64| occ == 0 || doc.occurrences.iter().any(|o| o.id == occ);
     let mut usable: Vec<(&Joint, Mat)> = Vec::new();
-    for j in doc.assembly.joints.iter().filter(|j| !j.suppressed).take(joints::MAX_JOINTS) {
+    // A rigid group holds its parts as rigid joints would.
+    let all = doc.joints_with_rigid_groups();
+    for j in all.iter().filter(|j| !j.suppressed).take(joints::MAX_JOINTS) {
         let fa =
             joints::resolve_origin(doc, st, &j.a).ok().map(|frame| j.offset_frame_a(frame)).filter(|_| joints::resolve_origin(doc, st, &j.b).is_ok());
         match fa {
@@ -927,5 +939,22 @@ mod tests {
         // File systems that ignore case would make these one file.
         assert_eq!(n.file("t-base"), "t-base.stl");
         assert_eq!(n.file("t-Base"), "t-Base_2.stl");
+    }
+
+    #[test]
+    fn many_joints_with_one_name_take_one_step_each() {
+        // A rigid group's joints can sanitise to one name (`part-a:1`, `part a:1`); each picks
+        // up the next suffix instead of trying every taken one again from `_2`.
+        let mut n = Names::default();
+        assert_eq!(n.take("Joint_3"), "Joint_3");
+        assert_eq!(n.take("Joint"), "Joint");
+        assert_eq!(n.take("Joint"), "Joint_2");
+        assert_eq!(n.take("Joint"), "Joint_4", "a suffix already taken is skipped");
+        for _ in 0..20_000 {
+            n.take("part-a:1");
+        }
+        assert_eq!(n.next.get("part_a_1"), Some(&20_001));
+        assert_eq!(n.take("part a:1"), "part_a_1_20001");
+        assert_eq!(n.take("part_a_1_20001"), "part_a_1_20001_2");
     }
 }
