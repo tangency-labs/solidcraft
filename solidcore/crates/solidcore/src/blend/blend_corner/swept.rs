@@ -111,8 +111,8 @@ pub struct TurnRefusal {
     /// `cpWhy`.
     pub comment: String,
     /// The edge whose blend no size builds (the fork's `NoteFitRadius(0.0, edge)` before
-    /// the refusal), for the executive to note: the first round's edge at a sharp concave
-    /// side edge.
+    /// the refusal), for the executive to note: the first round's edge at a sharp side edge
+    /// the ball cannot pass.
     pub fit_edge: Option<EdgeId>,
 }
 
@@ -223,12 +223,20 @@ fn offset_radius(solver: &FilletSolver, rail: usize, op: &'static str) -> Result
 /// `SmBlendCorner::Classify`'s Swept part (the fork's e647dac and 1fcbdb7; reached with
 /// `GetSweptTurns()` on a Turn): whether the blend corner builds a Swept turn at `vertex`,
 /// two blended edge uses `solver_eus` among `all_eus`. `None` where it does; else the
-/// refusal: a sharp concave side edge the ball cannot pass ([`FilletErrorType::NoRoom`],
-/// naming the radius the edge must be rounded at first), and, not built yet
+/// refusal: a sharp side edge the ball cannot pass ([`FilletErrorType::NoRoom`], naming the
+/// radius the edge must be rounded at first), and, not built yet
 /// ([`FilletErrorType::CornerUnsupported`]), a corner of four edges, rounds that share no
-/// face, unequal, variable or non-circular rounds, a tangent side edge, and a side edge
-/// that is not a straight line square (within the fillet's tolerance over the radius) to
-/// both rounded edges with a planar common face.
+/// face, rounds of different convexity, unequal, variable or non-circular rounds, a tangent
+/// side edge, and a side edge that is not a straight line square (within the fillet's
+/// tolerance over the radius) to both rounded edges with a planar common face.
+///
+/// The ball can circle the side edge only where its own side of the faces there is the wide
+/// one. A concave round's ball lies in the air and a convex round's in the material; a concave
+/// side edge has the narrow wedge in the air, a convex one in the material. So the turn passes
+/// where the side edge and the rounds differ in convexity (a boss base's concave rounds round
+/// its convex upright edge, an L's convex top rounds round its concave inner edge) and is
+/// refused where they agree (a pocket rim's concave rounds at its concave corner edge, a
+/// box's convex rounds at its convex corner edge).
 ///
 /// # Errors
 ///
@@ -291,14 +299,26 @@ pub fn classify_swept(
         solvers.solver_of_edgeuse(eu2_)?,
     ];
     let side_edge = eu1::edge(b, side)?.ok_or_else(nul)?;
-    if is_concave_edge(k, b, side_edge)? {
+    let concave = [
+        is_concave_edge(k, b, eu1::edge(b, eu1_)?.ok_or_else(nul)?)?,
+        is_concave_edge(k, b, eu1::edge(b, eu2_)?.ok_or_else(nul)?)?,
+    ];
+    if concave[0] != concave[1] {
+        return refuse(
+            FilletErrorType::CornerUnsupported,
+            "Fillet Error: a swept turn is built between rounds of one convexity (not yet between a round that adds material and one that takes it off)",
+        );
+    }
+    let side_concave = is_concave_edge(k, b, side_edge)?;
+    if side_concave == concave[0] {
         let radius = offset_radius(fs[0], 0, OP_CLASSIFY)?;
-        // no radius builds a swept turn past a sharp concave side edge: its size is not the
-        // cause (the fork's pExec->NoteFitRadius(0.0, pEU1->GetEdge()))
+        // no radius builds a swept turn past the side edge: its size is not the cause (the
+        // fork's pExec->NoteFitRadius(0.0, pEU1->GetEdge()))
+        let kind = if side_concave { "concave" } else { "convex" };
         return Ok(Some(TurnRefusal {
             error: FilletErrorType::NoRoom,
             comment: format!(
-                "Fillet Error: a swept turn cannot pass the sharp concave corner edge between the rounds; round that edge at a radius of at least {} first",
+                "Fillet Error: a swept turn cannot pass the sharp {kind} corner edge between the rounds; round that edge at a radius of at least {} first",
                 fmt_g(radius)
             ),
             fit_edge: eu1::edge(b, eu1_)?,

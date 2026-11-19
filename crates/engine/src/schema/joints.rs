@@ -999,7 +999,7 @@ pub enum ValueUnit {
 }
 
 /// One of a joint's values, as `joint.list` gives it (rounded for reading).
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, JsonSchema)]
 pub struct NamedValue {
     /// The coordinate's name (angle, distance, slide, …).
     pub name: String,
@@ -2533,7 +2533,7 @@ pub struct ReachLoopStop {
 }
 
 /// A joint a reach moved.
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, JsonSchema)]
 pub struct ReachedJoint {
     /// The joint, by id.
     pub joint: u64,

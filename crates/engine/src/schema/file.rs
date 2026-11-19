@@ -630,6 +630,11 @@ pub struct OpenParams {
     /// Default: solidcraft.
     #[serde(default)]
     pub reader: Option<ReaderParam>,
+    /// For an OpenUSD file only (refused for any other): what it brings in, `meshes` (its meshes
+    /// as mesh bodies) or `exact` (its exact B-rep where it has one as B-rep bodies of an Import
+    /// feature, its other meshes as mesh bodies). Default: meshes.
+    #[serde(default)]
+    pub geometry: Option<super::insert_mesh::GeometryParam>,
     /// For a 3MF, STL, OBJ or glTF file only (refused for any other): true moves the mesh so its
     /// box is centred on X and Y with its base on Z = 0. Default: false.
     #[serde(default)]

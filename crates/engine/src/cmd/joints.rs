@@ -416,6 +416,25 @@ fn effective_value_list(s: &Session, id: u64) -> Option<Vec<NamedValue>> {
     Some(named_value_list(j, vals.get(&id).map(Vec::as_slice).unwrap_or(&j.values)))
 }
 
+/// The joints a preview posed: the ones its commands drove, and the ones whose values the
+/// commands changed (a motion link's follower, a joint a closed loop moved). Their values are
+/// as the solver placed them, after motion links and limits, as `joint.inspect` and
+/// `joint.drive` give them.
+pub(crate) fn posed_joints(before: &Session, after: &Session, replies: &[Value]) -> Vec<ReachedJoint> {
+    let was = joints::joint_values(&before.doc.assembly);
+    let now = joints::joint_values(&after.doc.assembly);
+    let mut ids: std::collections::BTreeSet<u64> = replies.iter().filter_map(|r| r.get("joint").and_then(Value::as_u64)).collect();
+    ids.extend(after.doc.assembly.joints.iter().filter(|j| was.get(&j.id) != now.get(&j.id)).map(|j| j.id));
+    after
+        .doc
+        .assembly
+        .joints
+        .iter()
+        .filter(|j| ids.contains(&j.id))
+        .map(|j| ReachedJoint { joint: j.id, name: j.name.clone(), values: named_value_list(j, now.get(&j.id).unwrap_or(&j.values)) })
+        .collect()
+}
+
 fn occurrence_name(s: &Session, id: u64) -> String {
     s.doc.occurrences.iter().find(|o| o.id == id).map(|o| o.name.clone()).unwrap_or_else(|| id.to_string())
 }
