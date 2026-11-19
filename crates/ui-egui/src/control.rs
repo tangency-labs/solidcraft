@@ -1155,6 +1155,9 @@ fn ui_set(app: &mut SolveApp, p: &Value) -> Outcome {
             }
             u.ribbon_context = app.ui.ribbon_context.clone();
             app.ui = u;
+            if v != app.session.visibility {
+                crate::control_joint_drive::discard(app);
+            }
             app.session.visibility = v;
             ok(ui_state(app))
         }
@@ -1739,6 +1742,46 @@ pub(crate) mod tests {
         assert_eq!(h.app.session.undo.len(), undo);
         assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &start));
         assert_eq!(h.app.session.redo.len(), 1);
+        h.app.run("edit.redo", json!({})).unwrap();
+        assert_eq!(joint_angle(&mut h, arm), 15.0);
+    }
+
+    #[test]
+    fn external_joint_drive_ends_when_ui_set_changes_visibility() {
+        let (mut h, arm, _) = joint_drive_design();
+        h.app.run("joint.drive", json!({"joint": arm, "value": 15})).unwrap();
+        h.app.run("edit.undo", json!({})).unwrap();
+        let source = h.app.session.doc.clone();
+        let revision = h.app.session.revision;
+        let history = (h.app.session.undo.len(), h.app.session.redo.len());
+        assert_eq!(history.1, 1);
+        let client = std::sync::Arc::new(());
+        let movement = begin_joint_drive(&mut h, &client, arm);
+        let r = joint_drive(&mut h, &client, json!({"action": "update", "movement": movement, "value": 45}));
+        assert_eq!(r["result"]["values"][0]["value"], 45.0, "{r}");
+        assert!(h.app.preview.active);
+        let body = h.app.preview.replaced.first().unwrap().clone();
+
+        let hidden = h.app.session.visibility.hidden_bodies.clone();
+        let r = h.call("ui.set", json!({"hiddenBodies": hidden}));
+        assert_eq!(r["ok"], true, "{r}");
+        assert!(h.app.control_joint_drive.active() && h.app.preview.active);
+        let show_grid = !h.app.ui.show_grid;
+        let r = h.call("ui.set", json!({"showGrid": show_grid}));
+        assert_eq!(r["ok"], true, "{r}");
+        assert_eq!(h.app.ui.show_grid, show_grid);
+        assert!(h.app.control_joint_drive.active() && h.app.preview.active);
+
+        let r = h.call("ui.set", json!({"hiddenBodies": [body]}));
+        assert_eq!(r["ok"], true, "{r}");
+        assert!(!h.app.control_joint_drive.active() && !h.app.preview.active);
+        assert!(h.app.session.visibility.hidden_bodies.contains(&body));
+        let finish = joint_drive(&mut h, &client, json!({"action": "finish", "movement": movement}));
+        assert_eq!(finish["ok"], false, "{finish}");
+        assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &source));
+        assert_eq!(h.app.session.revision, revision);
+        assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+        assert_eq!(joint_angle(&mut h, arm), 0.0);
         h.app.run("edit.redo", json!({})).unwrap();
         assert_eq!(joint_angle(&mut h, arm), 15.0);
     }
