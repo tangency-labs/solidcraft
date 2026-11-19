@@ -8,6 +8,7 @@
 
 // Components: each takes plain data and returns the action chosen.
 pub mod app_bar;
+pub mod app_bar_layout;
 pub mod blur;
 pub mod browser;
 pub mod frame;

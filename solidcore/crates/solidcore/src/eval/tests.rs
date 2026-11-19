@@ -274,6 +274,45 @@ fn analytic_forms_refuse_invalid_angular_domains() {
     }
 }
 
+/// A torus face's quarters along its tube: a whole turn that starts off a quarter line needs five
+/// (its seam's second use lies past four from the quarter it starts in), whatever quarter it
+/// starts in, negative angles included; one that starts on a quarter line, or within the
+/// tolerance's angle of one, or is a turn only to rounding, needs four; less than a turn the
+/// quarters it crosses.
+#[test]
+fn a_whole_turn_round_a_tube_off_a_quarter_line_spans_five_quarters() {
+    let torus = Surface::Torus {
+        frame: Frame {
+            origin: [0.0; 3],
+            x_axis: [1.0, 0.0, 0.0],
+            y_axis: [0.0, 1.0, 0.0],
+        },
+        major_radius: 2.5,
+        minor_radius: 1.8,
+        tube_start: 0.0,
+    };
+    let q = |v: [f64; 2], tol: f64| form::tube_quarters(&torus, [[0.0, FRAC_PI_2], v], tol);
+    // The seam of #18778's bend, in the tube's second quarter.
+    let seam = 1.910_828_950_980_659_5;
+    for k in 0..4 {
+        let start = seam + f64::from(k) * FRAC_PI_2;
+        assert_eq!(q([start, start + TAU], 1e-7), Some(5), "{start}");
+        assert_eq!(q([-start, TAU - start], 1e-7), Some(5), "{start}");
+        let on = f64::from(k) * FRAC_PI_2;
+        assert_eq!(q([on, on + TAU], 0.0), Some(4), "{on}");
+    }
+    // A turn to rounding, a start a rounding short of a quarter line within the tolerance's
+    // angle (1e-6 / 1.8), and one farther short than that.
+    assert_eq!(q([0.0, TAU * (1.0 + 0.5e-9)], 0.0), Some(4));
+    let near = FRAC_PI_2 - 1e-9;
+    assert_eq!(q([near, near + TAU], 1e-6), Some(4));
+    let short = FRAC_PI_2 - 1e-5;
+    assert_eq!(q([short, short + TAU], 1e-6), Some(5));
+    // Less than a turn: from the second quarter into the fourth, and two whole quarters.
+    assert_eq!(q([seam, seam + std::f64::consts::PI], 1e-7), Some(3));
+    assert_eq!(q([0.0, std::f64::consts::PI], 0.0), Some(2));
+}
+
 /// Keep the existing rounding window around one complete turn and the exact form it chooses.
 #[test]
 fn analytic_forms_keep_the_existing_whole_turn_rounding_window() {

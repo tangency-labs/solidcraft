@@ -98,7 +98,9 @@ use crate::topology::brep::p1::SetRegionVoidType;
 use crate::topology::brep::p2 as brep_p2;
 use crate::topology::face::p4 as face_p4;
 use crate::topology::VertexuseId;
-use crate::topology::{vertex, Brep, EdgeId, FaceId, LoopId, RegionId, ShellId, VertexId};
+use crate::topology::{
+    vertex, Brep, EdgeId, FaceId, FaceuseId, LoopId, RegionId, ShellId, VertexId,
+};
 use std::collections::BTreeMap;
 
 /// A pending topology allocation with attributes borrowed from a database reader.
@@ -2907,6 +2909,39 @@ pub fn stitch_and_orient_with_identity(
     options: &StitchAndOrientOptions,
     identity: Option<crate::query::brep::BrepIdentity<'_>>,
 ) -> Result<()> {
+    stitch_and_orient_searching(k, b, options, identity, None)
+}
+
+/// [`stitch_and_orient_with_identity`] of the faces of one solid, in a B-rep that held
+/// nothing else, of which `outside` is a face use on the solid's outside. The glue that
+/// closes the solid's shell makes the half of the split region that face use is in the
+/// infinite one, where upstream's fires a ray to find it
+/// ([`crate::heal::stitch::p1::Stitch::outside`]); the stitch's end searches as ever. Not
+/// upstream. The caller answers for the premise, which is why this is not an option of
+/// [`StitchAndOrientOptions`]: a B-rep that already holds a face, a wire or a loose
+/// vertex has shells the closing glue's search places, and a face use that is not on the
+/// outside names the wrong half.
+///
+/// # Errors
+///
+/// Those of [`stitch_and_orient`].
+pub(crate) fn stitch_and_orient_one_solid(
+    k: &mut Kernel,
+    b: &mut Brep,
+    options: &StitchAndOrientOptions,
+    identity: Option<crate::query::brep::BrepIdentity<'_>>,
+    outside: FaceuseId,
+) -> Result<()> {
+    stitch_and_orient_searching(k, b, options, identity, Some(outside))
+}
+
+fn stitch_and_orient_searching(
+    k: &mut Kernel,
+    b: &mut Brep,
+    options: &StitchAndOrientOptions,
+    identity: Option<crate::query::brep::BrepIdentity<'_>>,
+    outside: Option<FaceuseId>,
+) -> Result<()> {
     k.check_cancelled(OP)?;
     let mut lamina = 0;
     let mut tolerance = initial_stitch_tolerance(b.tolerance(), options.stitch_tolerance);
@@ -2917,6 +2952,7 @@ pub fn stitch_and_orient_with_identity(
         options.allow_spine_edges,
         &mut lamina,
         identity,
+        outside,
     )?;
     if lamina > 1 {
         tolerance = if options.stitch_tolerance <= 0.0 {
@@ -2931,6 +2967,7 @@ pub fn stitch_and_orient_with_identity(
             options.allow_spine_edges,
             &mut lamina,
             identity,
+            outside,
         )?;
     }
     plain_edit(k, b, |k, b, env| {
@@ -3039,15 +3076,27 @@ fn stitch_faces(
     allow_spine: bool,
     lamina: &mut usize,
     identity: Option<crate::query::brep::BrepIdentity<'_>>,
+    outside: Option<FaceuseId>,
 ) -> Result<()> {
-    let out = crate::topology::brep::p4::stitch_faces_with_identity(
-        k,
-        b,
-        tolerance,
-        None,
-        allow_spine,
-        identity,
-    )?;
+    let out = if let Some(outside) = outside {
+        crate::topology::brep::p4::stitch_one_solid_with_identity(
+            k,
+            b,
+            tolerance,
+            allow_spine,
+            identity,
+            outside,
+        )?
+    } else {
+        crate::topology::brep::p4::stitch_faces_with_identity(
+            k,
+            b,
+            tolerance,
+            None,
+            allow_spine,
+            identity,
+        )?
+    };
     *lamina = usize::try_from(out.lamina_edges)
         .map_err(|_| SolidError::invalid_input(OP, "lamina edge count"))?;
     Ok(())
@@ -3855,6 +3904,7 @@ mod tests {
             tolerance,
             false,
             &mut lamina,
+            None,
             None,
         );
         let r = stitch_and_orient(&mut k, &mut b, &StitchAndOrientOptions::default());
