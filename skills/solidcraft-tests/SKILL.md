@@ -1,6 +1,6 @@
 ---
 name: solidcraft-tests
-description: "Use when writing, placing or running tests in SolidCraft: a regression test for a bug, an engine test for a command, a UI scenario, a reference (oracle) test, goldens, or when CI fails a test you did not touch."
+description: "Use for writing, placing or running SolidCraft tests, or CI test failures: regression, engine, UI, oracle and goldens."
 ---
 
 # Where tests go and how to run them
@@ -8,6 +8,7 @@ description: "Use when writing, placing or running tests in SolidCraft: a regres
 The long form is `docs/book/src/dev/testing.md`.
 
 ## Placement
+- New tests and list entries go next to related items, not at the end of a shared file.
 - A regression test goes into its area's existing test file (booleans, blends, shell, STEP, naming, ...), never a new file named after the bug (#3226).
 - Engine tests sit next to the code or in `*_tests.rs` files, measured against a value you can derive.
 - UI scenarios are JSON in `crates/ui-egui/tests/scenarios/*.json`. Put `{"pending": "why"}` in a scenario that records a bug before it is fixed, and remove it in the fixing PR.

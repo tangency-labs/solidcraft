@@ -196,6 +196,8 @@ the most complete description of the house style.
 
 ## Tests
 
+New tests and list entries go next to related items, not at the end of a shared file.
+
 | What | Where | Run |
 |---|---|---|
 | Unit and engine tests | next to the code, or `*_tests.rs` files | `cargo xtask test` (or `cargo test --workspace --profile ci`) |
