@@ -682,6 +682,8 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             DOCUMENT_WATCH.publish(&app.session.document_id, revision);
             ok(json!({"document_id": app.session.document_id, "revision": revision}))
         }
+        // The solved joint pose the preview shows: what a client follows a joint with (#19437).
+        "control.joint_pose" => ok(crate::control_joint_pose::snapshot(app)),
         // What the MCP server bridged to this app shapes its output with (Preferences › AI).
         "mcp.options" => ok(json!({"compact": app.preferences.mcp_compact})),
         "ui.messages" => ok(crate::messages::control(app, p)),
