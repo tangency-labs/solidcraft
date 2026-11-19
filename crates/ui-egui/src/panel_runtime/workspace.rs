@@ -589,9 +589,7 @@ impl WorkspacePanelHost {
         let workspace = &state.layout.workspace;
         let remembered = catalogue.state().remembered(workspace);
         let made = self.remembered_reservations.as_ref().filter(|made| {
-            remembered.is_some_and(|stored| *made.bytes == *stored.bytes())
-                && made.workspace == *workspace
-                && made.registry == *service.registry()
+            remembered.is_some_and(|stored| *made.bytes == *stored.bytes()) && made.workspace == *workspace && made.registry == *service.registry()
         });
         let mut reservations = match made {
             Some(made) => made.reservations.clone(),
