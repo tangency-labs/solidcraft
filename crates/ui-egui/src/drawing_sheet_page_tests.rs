@@ -499,6 +499,38 @@ fn text_of(h: &mut Harness, id: u64) -> (Vec2, Value) {
     (centre, read)
 }
 
+/// With the Dimension tool in hand a placed dimension still drags, as in a sketch: its text
+/// follows the pointer in one undo step, the tool stays in hand, and nothing is picked or added.
+/// Over the dimension's text it is the dimension that lights up, not the edge under it.
+#[test]
+fn a_placed_dimension_drags_while_the_dimension_tool_is_in_hand() {
+    let (mut h, _) = plate_sheet();
+    let id = h.app.session.drawing("drawing.inspect").unwrap().dimensions[0].id;
+    assert!(crate::drawing_workspace::start(&mut h.app, "drawing.dimension"));
+    h.frames(4);
+    let (from, before) = text_of(&mut h, id);
+    h.step(&json!({"move": on_screen(from.x, from.y)})).unwrap();
+    h.frames(2);
+    assert_eq!(page(&mut h)["hover"]["object"], solidcraft_engine::doc::ids::encode(id), "the dimension is what lights up");
+    assert_eq!(crate::drawing_workspace::dimension::hovered_shape(&h.app), None, "no edge is shaded under its text");
+    let undo = h.app.session.undo.len();
+    h.step(&json!({"drag": [on_screen(from.x, from.y), on_screen(from.x + 15.0, from.y + 12.0)], "steps": 6})).unwrap();
+    h.frames(2);
+    assert!(crate::dim_view::dragged().is_none(), "the drag ended");
+    let (to, after) = text_of(&mut h, id);
+    assert!((to - (from + Vec2::new(15.0, 12.0))).len() < 1.0, "the text followed the pointer: {from:?} -> {to:?}");
+    assert!(number(&after["record"]["offset_mm"]) > number(&before["record"]["offset_mm"]) + 10.0, "{before}\n{after}");
+    assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step for the whole drag");
+    assert!(crate::drawing_workspace::placing_dimension(&h.app), "the tool is still in hand");
+    assert!(crate::drawing_workspace::dimension::picked_shapes(&h.app).is_empty(), "nothing was picked");
+    assert_eq!(h.app.session.drawing("drawing.inspect").unwrap().dimensions.len(), 1, "and no dimension was added");
+
+    // A click on an edge still picks for a new dimension: the edge the placed dimension measures
+    // too, which lies inside its box but is not its text.
+    click_paper(&mut h, 150.0, 185.0);
+    assert_eq!(crate::drawing_workspace::dimension::picked_shapes(&h.app).len(), 1, "the top edge, under the dimension's lines");
+}
+
 /// A placed dimension's text drags, as a sketch dimension's does: it follows the pointer by the
 /// same drag (`dim_view`), and the whole drag is one undo step.
 #[test]
