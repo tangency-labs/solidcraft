@@ -449,7 +449,7 @@ fn operation_length_defaults_follow_every_design_unit() {
         ("solid.move", &["0", "0", "0"]),
         ("construct.plane.offset", &["0"]),
         ("inspect.section", &["0"]),
-        ("surface.extrude", &["10"]),
+        ("surface.extrude", &["10", ""]),
         ("surface.offset", &["2"]),
         ("surface.ruled", &["10"]),
         ("surface.thicken", &["2"]),
