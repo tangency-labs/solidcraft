@@ -643,7 +643,7 @@ fn an_edge_named_by_a_piece_of_a_face_that_is_whole_again_is_found() {
 fn an_edge_saved_with_faces_named_by_index_in_its_qualifiers_is_found_at_its_pick() {
     const SAVED: &str = "F5:side:l1#[F2:face:6,F3:face:7]|F5:top#[F2:face:6,F3:face:7]";
     let pick = Vec3::new(20., 8., 8.);
-    let design = |chamfer: Option<&str>| {
+    let design = |spheres: bool, chamfer: Option<&str>| {
         let mut features = serde_json::json!([
             {"id": 1, "name": "Base", "type": "box", "body_names": ["Body1"], "corner": [0, 0, 0], "length": "40", "width": "20", "height": "5", "operation": "new_body"},
             {"id": 2, "name": "Ball", "type": "sphere", "center": [10, 10, 5], "radius": "4", "operation": "join"},
@@ -674,6 +674,9 @@ fn an_edge_saved_with_faces_named_by_index_in_its_qualifiers_is_found_at_its_pic
                 "extent": {"convention": "total_distance", "direction": "positive", "distance": "3"}
             }
         ]);
+        if let Some(list) = features.as_array_mut().filter(|_| !spheres) {
+            list.retain(|f| f["id"] != 2 && f["id"] != 3);
+        }
         if let (Some(name), Some(list)) = (chamfer, features.as_array_mut()) {
             list.push(serde_json::json!({
                 "id": 6, "name": "Ch", "type": "chamfer", "distance": "0.5", "edges": [[pick.x, pick.y, pick.z]],
@@ -686,7 +689,7 @@ fn an_edge_saved_with_faces_named_by_index_in_its_qualifiers_is_found_at_its_pic
         model.evaluate(&doc);
         model
     };
-    let wall = design(None);
+    let wall = design(true, None);
     assert!(wall.result(5).unwrap().error.is_none(), "{:?}", wall.result(5));
     let state = wall.state();
     let before = state.body("Body1").unwrap();
@@ -694,10 +697,23 @@ fn an_edge_saved_with_faces_named_by_index_in_its_qualifiers_is_found_at_its_pic
     let hit = crate::name_lookup::locate_edge(before, SAVED, pick).unwrap_or_else(|e| panic!("{SAVED}: {e}"));
     assert!(hit.on_point, "the edge under the saved pick");
     assert_eq!(hit.point, pick);
+    let reach = (before.body.size() * 2e-3).max(1e-3);
+    let through = solidcraft_kernel::edge_distance(&before.body, hit.edge, pick).unwrap();
+    assert!(through.is_some_and(|d| d <= reach), "the found edge runs through the pick: {through:?}");
+    // The spheres' faces are named by index and not verified, so they tell no piece apart: the
+    // piece between them is the wall's side and top without a qualifier.
+    let names = crate::naming::edge_names(before);
+    assert_eq!(names.get(hit.edge).map(String::as_str), Some("F5:side:l1|F5:top"), "{names:?}");
     // The same name at a point on no edge (the middle of the wall's side) finds nothing.
     assert!(crate::name_lookup::locate_edge(before, SAVED, Vec3::new(20., 8., 6.5)).is_err());
+    // Without the spheres the side is whole, beside no face named by its index: the piece the name
+    // told apart is gone, and the name finds nothing (#11731).
+    let plain = design(false, None);
+    let state_plain = plain.state();
+    let whole = state_plain.body("Body1").unwrap();
+    assert!(crate::name_lookup::locate_edge(whole, SAVED, pick).is_err(), "{:?}", crate::naming::edge_names(whole));
 
-    let saved = design(Some(SAVED));
+    let saved = design(true, Some(SAVED));
     assert!(saved.result(6).unwrap().error.is_none(), "{:?}", saved.result(6));
     // A chamfer on one open edge whose ends meet an untouched face (a sphere's) adds its face,
     // replaces the edge with two plus one across each end, and splits each end's vertex in two.
@@ -710,7 +726,7 @@ fn an_edge_saved_with_faces_named_by_index_in_its_qualifiers_is_found_at_its_pic
         "faces, edges and vertices"
     );
     // The chamfer is the one a pick there makes today, with no saved name.
-    let picked = design(Some(""));
+    let picked = design(true, Some(""));
     assert!(picked.result(6).unwrap().error.is_none(), "{:?}", picked.result(6));
     let state_picked = picked.state();
     let today = state_picked.body("Body1").unwrap();

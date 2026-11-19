@@ -313,7 +313,8 @@ fn two_pieces_told_apart_by_one_blend_both_answer_to_a_stored_name() {
 /// neighbours apart: the next evaluation can give that index to another face, so an exact piece
 /// qualified by it could change its name or take another's. Pieces only such faces tell apart
 /// are numbered and unverified, and a stored name qualified by an index finds no piece by its name
-/// alone (an edge saved with one is found only where its pick still lies, #19455).
+/// alone (an edge saved with one is found only where its pick still lies beside such a face,
+/// #19455).
 #[test]
 fn a_face_named_by_its_index_never_qualifies_an_exact_piece() {
     let groove = |name: &str| Named { name: name.to_string(), verified: false, ..Named::default() };
