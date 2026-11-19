@@ -3109,7 +3109,9 @@ mod wr664_near_knot_trims {
                     let gap = start.distance(end);
                     let closed = solidcore::math::EFF_ZERO * (1.0 + start.x.abs().max(start.y.abs()));
                     println!("WR664 {name}: face {f:?} at ({}, {}) gap {gap:e} (closed below {closed:e})", start.x, start.y);
-                    if gap > closed {
+                    // Written to accept: a NaN gap or bound counts the corner as open.
+                    let closes = gap.is_finite() && closed.is_finite() && gap <= closed;
+                    if !closes {
                         open.push((f, start.x, start.y, gap));
                     }
                 }
