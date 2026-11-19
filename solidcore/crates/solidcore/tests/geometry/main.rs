@@ -193,6 +193,8 @@ mod wr3_segment_box_containment;
 mod wr406_uv_trim_reversal_check;
 #[path = "../wr46_twist_simple_duw.rs"]
 mod wr46_twist_simple_duw;
+#[path = "../wr493_class_proofs.rs"]
+mod wr493_class_proofs;
 #[path = "../wr493_corner_sphere_polar_domain.rs"]
 mod wr493_corner_sphere_polar_domain;
 #[path = "../wr501_torus_major_radius_from_origin.rs"]
