@@ -199,6 +199,9 @@ pub struct Page {
     /// The sheet's pictures' pixels on the GPU: they change apart from the marks, as each is drawn.
     pictures: PictureTextures,
     view_tools: view_tools::State,
+    /// The views waiting for their first lines, each with the revision its box was worked out at
+    /// and the box (none when it has none yet).
+    waiting: HashMap<u64, (u64, Option<Aabb2>)>,
     /// The object under the pointer on the last frame, as the selection names it: what a
     /// right-click's menu is about.
     hover: Option<solidcraft_engine::Sel>,
@@ -219,6 +222,7 @@ impl Default for Page {
             marks: None,
             pictures: PictureTextures::default(),
             view_tools: Default::default(),
+            waiting: HashMap::new(),
             hover: None,
             shown: None,
         }
@@ -249,6 +253,7 @@ pub(crate) fn select_sheet(app: &mut SolveApp, sheet: u64) {
         page.marks = None;
         page.pictures = PictureTextures::default();
         page.view_tools = Default::default();
+        page.waiting.clear();
         page.hover = None;
         page.shown = None;
     }
@@ -592,6 +597,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
         marks.paint_lit(&painter, &at, visible, ppp as f32, &app.drawing_workspace.page.pictures, &lit, t.accent);
     }
     let states = view_states(&painter, &at, &view.views, &view.stale, &view.objects);
+    let first_lines = waiting_views(app, &painter, &at, &drawing, &view);
     // Views a deferred drawing holds stay out of date without being worked on: their words say so.
     let waiting = view.stale.len() + view.stale_dimensions.len();
     if working {
@@ -624,6 +630,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
         "ink": hex(ink),
         "generation": view.generation,
         "views": states,
+        "waiting_views": first_lines.iter().copied().map(encode).collect::<Vec<_>>(),
         "pictures": app.drawing_workspace.page.pictures.inspect(),
         "working": working,
         "hover": hit.map(|h| json!({"object": encode(h.object), "kind": kind_name(h.kind), "on_edge": h.on_edge, "lit": lit.contains(&h.object)})),
@@ -737,15 +744,54 @@ fn view_states(painter: &egui::Painter, at: &OnScreen, views: &[drawing_scene::V
         }
         // D26's shape for Needs update, ahead of the words.
         let mark = if out_of_date { "⟳ " } else { "" };
-        let text = format!("{mark}{}", words.join(" · "));
-        let galley = painter.layout_no_wrap(text, egui::FontId::proportional(t.font_label), colour);
-        let at = r.left_top() + vec2(t.space_4, -(galley.size().y + t.space_8));
-        let chip = Rect::from_min_size(at, galley.size()).expand2(vec2(t.space_4, t.space_2));
-        painter.rect_filled(chip, chip.height() / 2.0, t.panel);
-        painter.galley(at, galley, colour);
-        crate::scenario::publish_rect(&format!("sheet:view:{}:state", solidcraft_engine::doc::ids::encode(state.view)), chip);
+        say(painter, r, format!("{mark}{}", words.join(" · ")), colour, state.view);
     }
     out
+}
+
+/// A view's state in words on a chip above its box `r`, for every state alike.
+fn say(painter: &egui::Painter, r: Rect, text: String, colour: Color32, view: u64) {
+    let t = Tokens::get();
+    let galley = painter.layout_no_wrap(text, egui::FontId::proportional(t.font_label), colour);
+    let at = r.left_top() + vec2(t.space_4, -(galley.size().y + t.space_8));
+    let chip = Rect::from_min_size(at, galley.size()).expand2(vec2(t.space_4, t.space_2));
+    painter.rect_filled(chip, chip.height() / 2.0, t.panel);
+    painter.galley(at, galley, colour);
+    crate::scenario::publish_rect(&format!("sheet:view:{}:state", solidcraft_engine::doc::ids::encode(view)), chip);
+}
+
+/// The views placed on the sheet whose first lines are still being worked out: each says
+/// "Projecting…" where it will sit, from the frame it is placed, so a view that takes long is
+/// never silence. Their ids, for `ui.inspect`. A view drawn before keeps its last
+/// lines and says Needs update instead ([`view_states`]).
+fn waiting_views(
+    app: &mut SolveApp,
+    painter: &egui::Painter,
+    at: &OnScreen,
+    drawing: &solidcraft_engine::doc::drawing::Drawing,
+    view: &drawing_scene::SheetView,
+) -> Vec<u64> {
+    let t = Tokens::get();
+    let revision = app.session.revision;
+    let waiting: Vec<u64> =
+        view.stale.iter().copied().filter(|id| !view.objects.iter().any(|o| o.kind == ObjectKind::View && o.object == *id)).collect();
+    app.drawing_workspace.page.waiting.retain(|id, (seen, _)| *seen == revision && waiting.contains(id));
+    for id in &waiting {
+        // Where it will sit, from the model's extents as they are: looked up once, not each frame.
+        let boundary = match app.drawing_workspace.page.waiting.get(id) {
+            Some((_, boundary)) => *boundary,
+            None => {
+                let boundary =
+                    solidcraft_engine::drawing_view::on_sheet(&app.session, drawing, *id, drawing_scene::CMD).ok().map(|placed| placed.boundary);
+                app.drawing_workspace.page.waiting.insert(*id, (revision, boundary));
+                boundary
+            }
+        };
+        let Some(boundary) = boundary else { continue };
+        // The words alone, where the other states say theirs: no outline round an empty place.
+        say(painter, at.rect(&boundary), solidcraft_ui_text::tr("ui.sheet_page.projecting").to_owned(), t.text_dim, *id);
+    }
+    waiting
 }
 
 /// What is said beside a view: why it draws nothing, and whether it needs an update (D26's
