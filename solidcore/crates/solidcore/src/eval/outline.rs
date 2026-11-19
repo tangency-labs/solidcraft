@@ -21,6 +21,8 @@
 // A comparison that is not true takes the refusing branch, so a NaN is refused too.
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 
+pub mod pieces;
+
 use super::query::Query;
 use super::vec::VecExt;
 use crate::math::Vec3;
