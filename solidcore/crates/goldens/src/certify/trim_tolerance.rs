@@ -1479,6 +1479,40 @@ fn stitched_bodies(unit: &str, name: &str) -> Vec<Brep> {
     bodies
 }
 
+/// #18166 regression: `heal.stitch_p1` `cov_tjunc9_into_shell` raises vertex 22 with an edge
+/// its stitch cover raised (`edge::set_tolerance` keeps a vertex at least its edges'
+/// tolerance), but an edge of that vertex ends 1.02 from it, under 1.1e-3. When the cover
+/// raises an edge it now raises each of the edge's vertices to its proved distance to the
+/// ends of all its edges (`topology::edgeuse::p3` `cover_vertex_ends`), so every vertex of
+/// the stitched body covers its edges' ends ([`vertex_covers_its_ends`]).
+#[test]
+fn a_stitch_cover_keeps_its_vertices_covering_their_edges_ends() {
+    let bodies = stitched_bodies("heal.stitch_p1", "cov_tjunc9_into_shell");
+    let k = Kernel::default();
+    let mut bad = Vec::new();
+    let mut checked = 0;
+    for (i, b) in bodies.iter().enumerate() {
+        for (v, rec) in b.vertices().iter() {
+            if solidcore::topology::vertex::edges(b, v, None)
+                .expect("edges")
+                .is_empty()
+            {
+                continue;
+            }
+            checked += 1;
+            if !vertex_covers_its_ends(&k, b, v, rec.tolerance) {
+                bad.push(format!(
+                    "body {i} vertex {}: tol {:e}",
+                    v.index(),
+                    rec.tolerance
+                ));
+            }
+        }
+    }
+    assert!(checked > 0, "no vertex with an edge");
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
+}
+
 /// What leaves edge `e` of `b` uncovered: each of its trims ([`trim_bounds`]) and each face on
 /// which it holds no trim ([`face_bound`]) whose enclosure is not within its tolerance; and how
 /// many trims and faces were checked.
