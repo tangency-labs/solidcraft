@@ -18,6 +18,7 @@ pub(super) enum Source {
 }
 
 /// A solid item read and oriented where the file defines it, placed by each of its instances.
+#[derive(Clone)]
 pub(super) struct Part {
     pub body: Body,
     /// The shells are closed.
@@ -90,6 +91,40 @@ pub(super) fn prepare(ex: &Exchange, job: &Job) -> Prepared {
     // Counted on the part (a placement meshes the same faces).
     let missing = if job.check_mesh { solidcraft_profile::scope("import", "step.mesh_check", || part.body.unmeshed_faces()) } else { 0 };
     Ok(Made { body, missing, part, read })
+}
+
+/// What [`heal`] did with a part.
+pub(super) enum Healed {
+    /// Healed: the part with its body and file faces replaced, what the import says of it, and
+    /// SMLib's check of the body kept ([`crate::ToleranceHeal::check`]: `None` when it passes),
+    /// and for each face of it the face of the part it was ([`crate::ToleranceHeal::face_source`]).
+    Kept(Box<Part>, String, Option<crate::CheckFailure>, Vec<usize>),
+    /// Nothing the heal could prove, or a result whose check is not better: the part as it was.
+    NotKept,
+    /// The heal could not run (the part as it was): never a reason to change it.
+    CouldNotRun(KernelError),
+    /// The token over the import's work stopped it (the part as it was).
+    Stopped,
+}
+
+/// A part whose check fails, healed of its tolerance-scale defects
+/// ([`crate::heal_tolerance_defects`]) when that can be proved and leaves the check failing
+/// fewer tests: a new part, with its body and its faces' file faces (the heal only removes
+/// faces) replaced. Otherwise [`Healed`] says why not.
+pub(super) fn heal(part: &Part, item: u64) -> Healed {
+    let (body, heal) = match crate::tolerance_heal::heal_tolerance_defects(&part.body) {
+        Ok(Some(healed)) => healed,
+        Ok(None) => return Healed::NotKept,
+        Err(KernelError::Heal(crate::HealFailure::Stopped)) => return Healed::Stopped,
+        Err(e) => return Healed::CouldNotRun(e),
+    };
+    let Some(face_origin) = heal.face_source.iter().map(|&f| part.face_origin.get(f).copied()).collect::<Option<Vec<u64>>>() else {
+        return Healed::CouldNotRun(KernelError::Heal(crate::HealFailure::CouldNotRun(format!(
+            "the heal of item #{item} named a face the part does not have"
+        ))));
+    };
+    let healed = Part { body, closed: part.closed, file_faces: part.file_faces, face_origin, refused: part.refused.clone() };
+    Healed::Kept(Box::new(healed), format!("healed SMLib's check failures: {}", heal.summary()), heal.check, heal.face_source)
 }
 
 /// The part's body where its instance goes: the very same body at the identity (it keeps the

@@ -13,6 +13,11 @@ pub struct Drawing {
     done: std::sync::mpsc::Receiver<Done>,
 }
 
+/// Whether no drawing view is being drawn on a worker thread.
+pub fn idle(app: &SolveApp) -> bool {
+    app.drawing_job.is_none()
+}
+
 /// Takes up what a worker has done, then starts on the next view out of date or picture to set up,
 /// and says whether any work is still waiting. In the browser, or when no thread can start, it does
 /// that work here.

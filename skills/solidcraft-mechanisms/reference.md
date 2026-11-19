@@ -148,7 +148,7 @@ The same pattern moved the solar wings of the SELENE rover (`Rover-v7.solidcraft
 | Call | Size |
 |---|---|
 | `component.list` | **140 KB** on SELENE (a 4x4 transform per occurrence). Avoid it; use `occurrence.properties`. |
-| `joint.list` | about 0.5 KB per joint: 16 KB for 29 joints |
+| `joint.list` | about 0.5 KB per joint: 16 KB for 29 joints, 230 KB for an imported assembly of 682 rigid joints; `moving_only`, `exclude_rigid_groups`, `occurrences` and `dof_free_only` cut that to the rows that matter, `omitted` counts the rest |
 | `motion.play` | about 0.2 KB per occurrence, per step: 9 KB on SELENE |
 | `motion.export` | the same per sample; pass `samples`, or `path` to write it to a file |
 | `joint.create`, `joint.drive`, `joint.motion_link`, `joint.gear`, `joint.rack_pinion`, `joint.screw` | the `dof` list of every occurrence again, 40 B each; `quiet: true` leaves it out |

@@ -201,6 +201,21 @@ fn first_point(b: &Body) -> [f64; 3] {
     [p.x, p.y, p.z]
 }
 
+#[test]
+fn source_chord_coordinates_cross_the_import_geometry_seam() {
+    use crate::import_geometry::chord_coordinates;
+    use solidcore_record::Vec2;
+
+    assert_eq!(
+        chord_coordinates(Vec2::new(0.875, 0.15625), 0.25, 1.5).unwrap(),
+        Vec2::new(0.5, 0.125)
+    );
+    assert!(matches!(
+        chord_coordinates(Vec2::ZERO, 0.0, 0.0),
+        Err(Error::Refused { .. })
+    ));
+}
+
 /// A translation, a rotation, a mirror and a non-uniform scale each move the body they are given
 /// as their closed forms say: the volume times the determinant's size, a valid solid after.
 #[test]

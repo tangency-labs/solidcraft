@@ -34,7 +34,7 @@ Each case runs as the rig runs it, with the kernel's operations traced at the bo
 - `<area>/<case>.json`: one entry. A ladder case's area is `ladder/<tier>`.
 - `<area>/<case>.bodies.json.gz`: the entry's operand records, `{"b<n>": record}`, gzip.
 - `<area>/<case>.jpg`: the case's render, where it has one: the site's case gallery shows it.
-- `fixes.json`: the `UpstreamFixes` flags turned on, the same for every entry (SolidCraft's `fixes()`).
+- `held_back.json`: the `UpstreamFixes` flags SolidCraft holds back (`HELD_BACK`); every other flag is on, the same for every entry (SolidCraft's `fixes()`, built in tests by `tests/support/solidcraft_fixes.rs`).
 - `manifest.json`: the counts per area and every case that isn't expressible, with its reasons.
 - `known_failing.json`: the kernel cases that fail today, the one list: `case` (`<area>/<case>`), `issue` and `reason`. Seeded from the entries' `rig.known_failing`; an entry whose `issue` is `to file` has none yet.
 
@@ -44,6 +44,7 @@ Each case runs as the rig runs it, with the kernel's operations traced at the bo
 |---|---|
 | `case`, `area`, `sources`, `what` | The case, as SolidCraft's rig names it. |
 | `calls` | The operations in execution order: `op`, `inputs` (bodies `b<n>`), `params`, and `outputs` or `error`. Keep discarded tool construction and handled attempts too, even when their outputs do not reach the final bodies. |
+| `refused_as` | Optional string on a call with `error`: a part of the error's text the replay must give. Without it any error matches the traced refusal; with it a different failure (a blend that fails inside instead of being refused) does not. |
 | `continued` | Optional boolean on a call with `error`. `true` means the application handled this refusal: replay must observe a refusal, continue to any later calls, and grade the final result. A handled refusal can be the last call when the application keeps an earlier body. Omitted or `false` keeps the terminal-refusal behavior. A marker after a terminal refusal is invalid. |
 | `bodies` | The operand bodies given as records: `trusted` and `keeping_splines` say how SolidCraft read each record into the kernel. |
 | `params` | The operation's arguments as SolidCraft passed them. A pick by points is `{kind, points, tolerance, picked}`: each point's pick is `{index, at}`, the entity's index in the body's list of its kind and where it is (an edge's ends, a vertex's point), or `{miss}`. |
@@ -105,7 +106,7 @@ To export a case from SolidCraft instead of writing it: draft it there as `tests
 cargo test --release -p solidcore-ops --test kernel_cases -- --ignored --nocapture
 ```
 
-replays every entry through `solidcore-ops`' public operations, with the fixes in `fixes.json`, and grades it against its `rig` values (a hand-written entry, against `expected`): the bodies' count, their face, edge and vertex counts against the records' (`outcome.raw_counts`; the rig's merge faces across analytic surfaces) exactly, the volume within `expected.tolerance` (the rig's relative 1e-3 where none is given), and every refusal where the rig's trace has one. It prints, per area, pass, fail, unsupported (not the kernel's alone, rated unsupported by the rig, or not carried by the conversion yet), unported (an operation `solidcore-ops` doesn't have yet, named) and known-failing, and fails on a case that fails, a listed case whose result moves from the rig's (fixed, or failing differently: shrink the list), or a hang. The test is `#[ignore]`d, so the workspace run skips it; run it with `--ignored`. Environment: `KERNEL_CASES_AREA` (comma-separated areas, `ladder` taking every tier: the CI shards), `KERNEL_CASES_CASE` (a substring of the case's path), `KERNEL_CASES_TIMEOUT_S` (180 by default), `KERNEL_CASES_REPORT` (a file for the table) and `KERNEL_CASES_REPORT_ONLY` (report without failing).
+replays every entry through `solidcore-ops`' public operations, with SolidCraft's fixes (every flag on but those in `held_back.json`), and grades it against its `rig` values (a hand-written entry, against `expected`): the bodies' count, their face, edge and vertex counts against the records' (`outcome.raw_counts`; the rig's merge faces across analytic surfaces) exactly, the volume within `expected.tolerance` (the rig's relative 1e-3 where none is given), and every refusal where the rig's trace has one. It prints, per area, pass, fail, unsupported (not the kernel's alone, rated unsupported by the rig, or not carried by the conversion yet), unported (an operation `solidcore-ops` doesn't have yet, named) and known-failing, and fails on a case that fails, a listed case whose result moves from the rig's (fixed, or failing differently: shrink the list), or a hang. The test is `#[ignore]`d, so the workspace run skips it; run it with `--ignored`. Environment: `KERNEL_CASES_AREA` (comma-separated areas, `ladder` taking every tier: the CI shards), `KERNEL_CASES_CASE` (a substring of the case's path), `KERNEL_CASES_TIMEOUT_S` (180 by default), `KERNEL_CASES_REPORT` (a file for the table) and `KERNEL_CASES_REPORT_ONLY` (report without failing).
 
 ## Updating
 
