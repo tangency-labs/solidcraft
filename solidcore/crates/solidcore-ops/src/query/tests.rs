@@ -640,3 +640,61 @@ fn a_ray_names_a_face_it_cannot_meet_exactly() {
         Err(0)
     );
 }
+
+/// A tetrahedron seen from above: its slanted face faces the viewer, its floor faces away and its
+/// two upright faces are edge-on, so its outline is the slanted face's three edges, each whole.
+#[test]
+fn a_tetrahedrons_outline_from_above_is_its_slanted_faces_edges() {
+    let b = tetra();
+    let q = Query::new(&b);
+    let out = q.outline_stretches(Vec3::new(0., 0., 1.), 1.0).unwrap();
+    // Face 2 (corners 1, 2, 3) is the slanted one: its edges join those corners.
+    let corner = |p: Vec3| {
+        TETRA
+            .iter()
+            .position(|c| len(Vec3::new(p.x - c[0], p.y - c[1], p.z - c[2])) < 1e-12)
+    };
+    let mut ends: Vec<[usize; 2]> = out
+        .iter()
+        .map(|s| {
+            assert!(s.whole, "{s:?}");
+            let mut e = [corner(s.ends[0]).unwrap(), corner(s.ends[1]).unwrap()];
+            e.sort_unstable();
+            e
+        })
+        .collect();
+    ends.sort_unstable();
+    assert_eq!(ends, vec![[1, 2], [1, 3], [2, 3]], "{out:?}");
+}
+
+/// A tube's side seen across its axis is an open sheet: its border faces the viewer on the half of
+/// each circle nearer the viewer, and that half is its outline. The half crosses each circle's
+/// start, so it is two stretches, and the stretches stop where the side turns edge-on, square to
+/// the view on the axis. The seam is never outline.
+#[test]
+fn a_tubes_outline_across_its_axis_is_its_rims_near_halves() {
+    let b = tube();
+    let q = Query::new(&b);
+    let out = q.outline_stretches(Vec3::X, 10.0).unwrap();
+    assert!(out.iter().all(|s| s.edge != 1), "the seam: {out:?}");
+    for rim in [0usize, 2] {
+        let mine: Vec<_> = out.iter().filter(|s| s.edge == rim).collect();
+        assert_eq!(mine.len(), 2, "rim {rim}: {out:?}");
+        let [t0, t1] = q.edge_interval(rim).unwrap();
+        for s in mine {
+            assert!(!s.whole);
+            for (t, p) in s.range.iter().zip(s.ends) {
+                if *t != t0 && *t != t1 {
+                    // Edge-on: on the plane x = 1 through the axis, 2 from it.
+                    assert!(
+                        (p.x - 1.).abs() < 1e-9 && ((p.y - 2.).abs() - 2.).abs() < 1e-9,
+                        "{p:?}"
+                    );
+                } else {
+                    // The circle's start, on the side facing the viewer.
+                    assert!((p.x - 3.).abs() < 1e-9, "{p:?}");
+                }
+            }
+        }
+    }
+}
