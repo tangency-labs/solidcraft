@@ -1938,6 +1938,9 @@ preference_settings! {
     /// Pressing an active tool or dialog's shortcut again closes it, as Esc does. Off: the key
     /// starts the tool or dialog again.
     shortcut_again_ends_tool: bool = true, PAGE_SKETCH;
+    /// Move/Copy Sketch Entities has only its X Distance arrow, and a drawn 3D point clicked gets
+    /// its own arrows instead of dragging freely, as before #7664. Off by default.
+    sketch_move_classic: bool = false, PAGE_SKETCH;
     /// A sketch tool's shortcut pressed again before the first point steps to the tool's next
     /// creation mode (#2459). Off (the default): the key starts the tool again, as it always has.
     shortcut_cycles_modes: bool = false, PAGE_SKETCH;
