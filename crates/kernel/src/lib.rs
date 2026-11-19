@@ -234,6 +234,7 @@ pub use prism_curve::{PlanarPiece, PlanarSpline};
 pub use prism_measure::{PrismSection, certified_prism_equivalent, certified_prism_section};
 pub use repair::{Hole, RebuiltFace, RefusedFace, RepairOptions, RepairRefusal, RepairReport, SewnGap, repair};
 pub use sew::{EdgeSpec, FaceSpec, MAX_CHAIN_POINTS, SurfSpec, sew, sew_touching, sew_touching_traced};
+pub use solidcore_ops::member_turn::{ParallelTurnError, parallel_turn};
 pub use solidcore_tess::{DisplayGuide, DisplayGuidePoint, GuidedMesh};
 pub use solidcraft_smlib::hold_a_kernel;
 pub use solidcraft_smlib::start;

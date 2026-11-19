@@ -527,6 +527,45 @@ fn evaluations_that_move_nothing_keep_the_frame_bodies() {
     assert_eq!(work.moved, 0, "the edit after idle evaluations must reuse the moved plate: {work:?}");
 }
 
+/// A Frame Member is built turned by the Rotate steps after it, so their turns (and the
+/// parameters their angles use) are in its fingerprint and the key its result is cached under;
+/// with none left, the keys are what they were before, and designs without turns keep theirs.
+#[test]
+fn a_frame_without_turns_keeps_its_fingerprint() {
+    let kind = |v: serde_json::Value| serde_json::from_value::<FeatureKind>(v).unwrap();
+    let mut doc = Document::new("frame");
+    doc.set_param("tilt", "20 deg", None, None).unwrap();
+    let frame = doc
+        .add_feature(
+            kind(serde_json::json!({"type": "frame_member", "path_sketch": 1,
+                "profile": {"source": "library", "profile": {"kind": "rect_tube", "width": 40, "height": 40, "wall": 3}}})),
+            None,
+        )
+        .unwrap();
+    let key = |doc: &Document| {
+        let vals = super::evaluation_values(doc).0;
+        let f = doc.feature(frame).unwrap();
+        let steps = super::ImportDigests::default();
+        let fp = super::chain_fingerprint(doc, &vals, f, 0, false, &steps, None);
+        // And the key its result is cached under, which leaves the chain out.
+        (fp, super::EvalKey::new(doc, &vals, f, fp, 0, &ModelState::default(), &steps, 0).whole)
+    };
+    let before = key(&doc);
+    let turn = doc
+        .add_feature(kind(serde_json::json!({"type": "frame_member_turn", "member": {"feature": frame, "line": "l1"}, "angle": "tilt"})), None)
+        .unwrap();
+    let turned = key(&doc);
+    assert!(turned.0 != before.0 && turned.1 != before.1, "the turn is in the keys");
+    doc.set_param("tilt", "40 deg", None, None).unwrap();
+    let tilted = key(&doc);
+    assert!(tilted.0 != turned.0 && tilted.1 != turned.1, "so is the value of the parameter its angle uses");
+    doc.features.iter_mut().filter(|f| f.id == turn).for_each(|f| f.suppressed = true);
+    assert_eq!(key(&doc), before, "a suppressed turn isn't");
+    doc.features.iter_mut().filter(|f| f.id == turn).for_each(|f| f.suppressed = false);
+    doc.delete_feature(turn).unwrap();
+    assert_eq!(key(&doc), before);
+}
+
 #[test]
 fn an_imported_file_is_fingerprinted_by_its_text() {
     let doc = placed_imports(2);

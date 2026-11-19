@@ -79,6 +79,7 @@ pub const DOCUMENTED: &[&str] = &[
     "form.surface",
     "frame.end_cap",
     "frame.member",
+    "frame.rotate_member",
     "inspect.accessibility",
     "inspect.center_of_mass",
     "inspect.colored_components",
