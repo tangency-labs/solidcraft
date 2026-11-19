@@ -1171,7 +1171,7 @@ fn surface_extrude_dialog_ends_at_a_picked_face() {
         Some(solidcraft_engine::doc::FeatureKind::SurfaceExtrude { extent, .. }) => extent.clone(),
         _ => panic!("the surface extrude"),
     };
-    let top = |h: &Harness| solidcraft_kernel::measure(&h.app.session.world_state().unwrap().body("Sheet").unwrap().body).unwrap().bbox.max.z;
+    let top = |h: &Harness| solidcraft_engine::kernel::measure(&h.app.session.world_state().unwrap().body("Sheet").unwrap().body).unwrap().bbox.max.z;
 
     h.step(&json!({"call":"ui.editFeature","params":{"feature":"Wall"}})).unwrap();
     h.frames(4);
