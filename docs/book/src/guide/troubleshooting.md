@@ -151,17 +151,17 @@ A graphics driver can crash the app while it starts, before SolidCraft can show 
 old Intel Vulkan driver, `igvk64.dll`, did). Windows' Event Viewer names the driver under
 *Windows Logs › Application* ("Faulting module name").
 
-SolidCraft on Windows starts Vulkan first and loads no other graphics API when Vulkan opens the
-window. Where Vulkan has no graphics card or its device fails to start (older Intel graphics,
-virtual machines, Remote Desktop), SolidCraft starts again on Direct3D 12, then OpenGL, each only
-on a graphics card, and only then software rendering. Later launches of that version go straight
-to the API that worked. From 0.11.1 until this change Direct3D 12 came first;
+SolidCraft on Windows starts Vulkan first and loads no other graphics API when Vulkan has a
+graphics card. Direct3D 12 and then OpenGL are tried only on a computer without one (older Intel
+graphics, virtual machines, Remote Desktop), each only with a graphics card, and software
+rendering only after both. A Vulkan device that fails to start falls back to Direct3D 12, then to
+software rendering, and later launches of that version go straight to the API that worked. From 0.11.1 until this change Direct3D 12 came first;
 before 0.11.1 the app started Vulkan, Direct3D 12 and OpenGL together.
 
 If a graphics driver crashes the app while it starts a graphics API, the next launch knows
 which API it was and skips it on this computer, going on in the same order. Safe mode and
-software rendering leave it out too, so that driver is not loaded again. A new SolidCraft
-version tries it once more. Choosing the API in **Preferences > Graphics > Graphics
+software rendering leave it out too, so that driver is not loaded again (unless every API has
+crashed, when all are tried again). A new SolidCraft version tries it once more. Choosing the API in **Preferences > Graphics > Graphics
 API**, or setting `WGPU_BACKEND`, still starts it. This works the same on every system.
 
 Choose **Preferences > Graphics > Graphics API** to select an API for the next start.
