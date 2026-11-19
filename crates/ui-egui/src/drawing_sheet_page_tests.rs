@@ -39,6 +39,85 @@ fn note_tool_places_text_on_the_active_sheet() {
     assert_eq!(note.content.0, vec![solidcraft_engine::geom::cell::Part::Text("Deburr all edges".to_owned())]);
 }
 
+/// A right-click on the sheet opens the menu a sketch's right-click opens: it selects what is under
+/// the pointer first, offers Edit and Delete for it, then the tools, then Undo and Redo. On empty
+/// paper the selection stays, and a right-click with a tool in hand puts the tool down.
+#[test]
+fn right_click_opens_the_shared_menu_on_what_is_under_the_pointer() {
+    use solidcraft_engine::Sel;
+    let (mut h, _) = plate_sheet();
+    let dimension = h.app.session.drawing("drawing.inspect").unwrap().dimensions[0].id;
+    let read = h.app.run("drawing.dimension.inspect", json!({"dimension": solidcraft_engine::doc::ids::encode(dimension)})).unwrap();
+    let corners: Vec<[f64; 2]> = serde_json::from_value(read["layout"]["text_boxes"][0].clone()).unwrap();
+    let (x, y) = corners.iter().fold((0.0, 0.0), |sum, p| (sum.0 + p[0] / 4.0, sum.1 + p[1] / 4.0));
+    let screen = |x: f64, y: f64| {
+        let paper = crate::scenario::rect_of("sheet:paper").unwrap();
+        [paper.left() + paper.width() * x as f32 / 420.0, paper.bottom() - paper.height() * y as f32 / 297.0]
+    };
+    let labels = |h: &Harness| -> Vec<String> {
+        crate::context_menu::describe(&h.app)["items"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|item| item["label"].as_str().map(str::to_owned))
+            .collect()
+    };
+    let picked = |h: &Harness| -> Vec<u64> {
+        h.app.session.selection.iter().filter_map(|s| if let Sel::Drawing { object, .. } = s { Some(*object) } else { None }).collect()
+    };
+
+    h.step(&json!({"click": screen(x, y), "button": "right"})).unwrap();
+    h.frames(3);
+    assert_eq!(picked(&h), [dimension], "the right-click selects the dimension under it");
+    let rows = labels(&h);
+    assert_eq!(&rows[..2], ["Edit Text", "Delete"], "{rows:?}");
+    for row in ["Base View", "Dimension", "Note", "Undo", "Redo"] {
+        assert!(rows.iter().any(|label| label == row), "{row} is offered: {rows:?}");
+    }
+    let undo = h.app.session.undo.len();
+    crate::context_menu::pick(&mut h.app, "Delete").unwrap();
+    h.frames(4);
+    assert!(h.app.session.drawing("drawing.inspect").unwrap().dimension(dimension).is_none(), "the menu's Delete is the Delete key's");
+    assert_eq!(h.app.session.undo.len(), undo + 1, "in one undo step");
+
+    // Empty paper: no Edit or Delete, the tools and Undo; Undo brings the dimension back.
+    h.step(&json!({"click": screen(300.0, 60.0), "button": "right"})).unwrap();
+    h.frames(3);
+    let rows = labels(&h);
+    assert_eq!(rows.first().map(String::as_str), Some("Base View"), "{rows:?}");
+    crate::context_menu::pick(&mut h.app, "Undo").unwrap();
+    h.settle();
+    assert!(h.app.session.drawing("drawing.inspect").unwrap().dimension(dimension).is_some());
+
+    // A view's menu edits it; the selection of several things keeps to Delete.
+    h.step(&json!({"click": screen(140.0, 180.0), "button": "right"})).unwrap();
+    h.frames(3);
+    let rows = labels(&h);
+    assert_eq!(&rows[..3], ["Edit View", "Projected View", "Delete"], "{rows:?}");
+    crate::context_menu::pick(&mut h.app, "Edit View").unwrap();
+    h.frames(3);
+    assert!(crate::drawing_workspace::inspector_visible(&h.app), "Edit opens the view's options, as a double-click does");
+    crate::drawing_workspace::close_panel(&mut h.app);
+
+    // The menu's tools start as their ribbon buttons do. With a tool in hand a right-click puts
+    // it down, as it finishes a sketch tool.
+    h.step(&json!({"click": screen(300.0, 60.0), "button": "right"})).unwrap();
+    h.frames(3);
+    crate::context_menu::pick(&mut h.app, "Note").unwrap();
+    h.frames(3);
+    assert!(crate::drawing_workspace::placing_note(&h.app));
+    h.step(&json!({"click": screen(300.0, 60.0), "button": "right"})).unwrap();
+    h.frames(3);
+    assert!(!crate::drawing_workspace::placing_note(&h.app));
+    assert_eq!(crate::context_menu::describe(&h.app)["open"], false, "and opens no menu");
+
+    // `ui.menu` at a point opens the same menu on what is there.
+    h.call("ui.menu", json!({"x": screen(140.0, 180.0)[0], "y": screen(140.0, 180.0)[1]}));
+    h.frames(4);
+    assert_eq!(labels(&h).first().map(String::as_str), Some("Edit View"));
+    h.call("ui.menu", json!({"close": true}));
+}
+
 #[test]
 fn dimension_tool_places_a_view_edge_length() {
     let (mut h, front) = plate_sheet();

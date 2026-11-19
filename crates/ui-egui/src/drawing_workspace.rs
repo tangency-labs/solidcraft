@@ -204,6 +204,23 @@ pub(crate) fn start_projected(app: &mut SolveApp, parent: u64) -> bool {
     true
 }
 
+/// Edit object `object` of the open drawing, as a double-click on it does (the menu's Edit).
+pub(crate) fn edit(app: &mut SolveApp, object: u64) {
+    let Ok(drawing) = app.session.drawing("drawing.inspect") else { return };
+    let kind = if drawing.view(object).is_some() {
+        "view"
+    } else if drawing.dimension(object).is_some() {
+        "dimension"
+    } else if drawing.notes.by_id(object).is_some() {
+        "note"
+    } else if drawing.tables.by_id(object).is_some() {
+        "parts_list"
+    } else {
+        return;
+    };
+    edit_object(app, kind, object);
+}
+
 pub(super) fn edit_object(app: &mut SolveApp, kind: &str, object: u64) {
     let tool = match kind {
         "view" => Tool::Edit(Some(object)),

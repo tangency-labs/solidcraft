@@ -650,7 +650,62 @@ fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
 
 /// The canvas menus put Repeat on
 /// top, then what fits the selection, our extras after a separator.
+/// A Drawing tool's row: its icon and key from the registry, on when the ribbon's button for it
+/// opens the tool (the registry's entry for it only reserves its place, and reads as off).
+fn tool(app: &SolveApp, id: &str, label: &str, enabled: bool) -> Item {
+    let mut item = cmd(app, id, label);
+    item.enabled = enabled && crate::drawing_workspace::can_open_options(id);
+    item
+}
+
+/// The sheet's menu in the Drawing workspace, laid out as a sketch's: what the selection takes
+/// (Edit, Delete), the tools, then Undo and Redo.
+fn drawing_items(app: &SolveApp) -> Vec<Item> {
+    use solidcraft_engine::doc::ids::encode;
+    let mut v = Vec::new();
+    let drawing = app.session.drawing("drawing.inspect").ok();
+    let chosen: Vec<u64> = app
+        .session
+        .selection
+        .iter()
+        .filter_map(|s| match s {
+            Sel::Drawing { drawing: d, object } if drawing.is_some_and(|open| open.id == *d) => Some(*object),
+            _ => None,
+        })
+        .collect();
+    if let ([one], Some(drawing)) = (&chosen[..], drawing) {
+        let object = json!({"object": encode(*one)});
+        if drawing.view(*one).is_some() {
+            v.push(act("ui.drawingEdit", "Edit View", "edit").with(object.clone()));
+            v.push(
+                tool(app, "drawing.view.projected.planned", "Projected View", drawing.can_project_from(*one).is_ok())
+                    .with(json!({"parent": encode(*one)})),
+            );
+        } else if drawing.dimension(*one).is_some() {
+            v.push(act("ui.drawingEdit", "Edit Text", "edit").with(object));
+        } else if drawing.notes.by_id(*one).is_some() {
+            v.push(act("ui.drawingEdit", "Edit Note", "edit").with(object));
+        }
+    }
+    if !chosen.is_empty() {
+        v.push(act("ui.delete", "Delete", "delete").key("Del"));
+        v.push(Item::sep());
+    }
+    if drawing.is_some() {
+        for (id, label) in [("drawing.view.base.planned", "Base View"), ("drawing.dimension", "Dimension"), ("drawing.note", "Note")] {
+            v.push(tool(app, id, label, true));
+        }
+        v.push(Item::sep());
+    }
+    v.push(cmd(app, "edit.undo", "Undo").on(!app.session.undo.is_empty()));
+    v.push(cmd(app, "edit.redo", "Redo").on(!app.session.redo.is_empty()));
+    v
+}
+
 fn viewport_items(app: &SolveApp) -> Vec<Item> {
+    if crate::drawing_workspace::active(app) {
+        return drawing_items(app);
+    }
     let sel = &app.session.selection;
     let has = |f: fn(&Sel) -> bool| sel.iter().any(f);
     let mut v = Vec::new();
@@ -1686,6 +1741,16 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 let _ = app.run("select.set", json!({"items": selection}));
             }
         }
+        "ui.drawingEdit" => {
+            if let Some(object) = p.get("object").and_then(Value::as_str).and_then(solidcraft_engine::doc::ids::decode) {
+                crate::drawing_workspace::edit(app, object);
+            }
+        }
+        "drawing.view.projected.planned" if item.params.is_some() => {
+            if let Some(parent) = p.get("parent").and_then(Value::as_str).and_then(solidcraft_engine::doc::ids::decode) {
+                crate::drawing_workspace::start_projected(app, parent);
+            }
+        }
         "ui.finishSketch" => app.finish_sketch(),
         "ui.cancelSketch" => app.cancel_sketch(),
         "ui.relinkSource" | "ui.relinkPlacement" => {
@@ -2490,6 +2555,10 @@ fn in_selection(app: &SolveApp, sel: &Sel) -> bool {
 /// multi-selection keeps the whole selection (#3733), as does one of a selected body (#5849). `held`: the keys held at that click.
 /// On the view gizmo it opens the gizmo's own menu and leaves the selection alone.
 pub fn open(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held) {
+    if crate::drawing_workspace::active(app) {
+        let under = crate::drawing_sheet_page::hovered(app);
+        return open_on_sheet(app, at, held, under);
+    }
     if crate::viewport::view_gizmo_at(app, at) {
         return open_for(app, at, Target::ViewGizmo);
     }
@@ -2507,10 +2576,7 @@ pub fn open(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held) {
     });
     crate::select_other::close(app);
     if let Some(sel) = crate::viewport::sketch_constraint_at(app, at, app.viewport.hover.as_ref()) {
-        if !in_selection(app, &sel) {
-            let _ = app.run("select.set", json!({ "items": [sel] }));
-            app.menu.picked = Some((at, before, app.session.selection.clone()));
-        }
+        select_under(app, at, before, sel);
     } else if app.session.active_sketch.is_none()
         && let Some(h) = app.viewport.hover.clone()
         && let Some((_, sel)) = crate::viewport::candidate(app, &[h])
@@ -2530,6 +2596,35 @@ pub fn open(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held) {
         app.menu.picked = Some((at, before, app.session.selection.clone()));
     }
     open_for(app, at, Target::Viewport);
+}
+
+/// A right-click on something not selected selects it first, so the menu is about what is under
+/// the cursor; something already in the selection keeps the whole selection.
+fn select_under(app: &mut SolveApp, at: Pos2, before: Vec<Sel>, sel: Sel) {
+    if !in_selection(app, &sel) {
+        let _ = app.run("select.set", json!({ "items": [sel] }));
+        app.menu.picked = Some((at, before, app.session.selection.clone()));
+    }
+}
+
+/// [`open`] in the Drawing workspace: `under` is what the sheet page found under the pointer,
+/// selected first unless it is already part of the selection. Empty paper keeps the selection, as
+/// empty space does in a sketch.
+fn open_on_sheet(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held, under: Option<Sel>) {
+    app.menu.opened = Some((at, held));
+    app.menu.picked = None;
+    app.menu.over_geometry = false;
+    app.menu.section_plane = None;
+    app.menu.face = None;
+    app.menu.plane = None;
+    crate::select_other::close(app);
+    if let Some(sel) = under {
+        let before = app.session.selection.clone();
+        select_under(app, at, before, sel);
+    }
+    open_for(app, at, Target::Viewport);
+    // The ring holds the model's commands: the sheet's menu is the list.
+    app.menu.radial = false;
 }
 
 /// Open a menu for a target (the radial ring only for the viewport).
