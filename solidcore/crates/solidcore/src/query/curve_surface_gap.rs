@@ -1534,14 +1534,12 @@ fn reparametrisation(
         return Ok(None);
     };
     // |C(ψ(s)) - S(W(s))| in double arithmetic (only steering), with `ψ(s)` and the image point
+    // (`ψ(s)` by `psi_at`, not enclosed: a reparametrisation's checks are a thousand of these
+    // per trim, and only which points it gets, never whether its bound holds, depends on them)
     let off = |psi: &NurbsCurve, si: f64| -> Result<Option<(f64, f64, crate::math::Point3)>> {
-        let Some(r) = psi_over(psi, Ivl::from(si), 0, [lo, hi])? else {
+        let Some(at) = psi_at(psi, si, [lo, hi]) else {
             return Ok(None);
         };
-        let Some(r0) = r.first() else {
-            return Ok(None);
-        };
-        let at = 0.5 * (r0.lo + r0.hi);
         let (Some(p), Some(c)) = (image(si)?, ignored(curve.evaluate_point(k, at))?) else {
             return Ok(None);
         };
@@ -1686,6 +1684,36 @@ fn hermite_psi(points: &[(f64, f64)], [lo, hi]: [f64; 2]) -> Option<NurbsCurve> 
         return None;
     }
     Some(NurbsCurve { p: 3, n, u, pw })
+}
+
+/// `ψ(s)` of a reparametrisation [`hermite_psi`] built, in double arithmetic (de Boor's
+/// algorithm on its non-rational control values), clamped to `[lo, hi]`: the steering value of
+/// [`reparametrisation`]'s checks, not an enclosure. `None` outside `ψ`'s domain or where the
+/// value is not finite.
+fn psi_at(psi: &NurbsCurve, s: f64, [lo, hi]: [f64; 2]) -> Option<f64> {
+    let p = psi.p;
+    let (&d0, &d1) = (psi.u.get(p)?, psi.u.get(psi.n)?);
+    if !(d0 <= s && s <= d1) {
+        return None;
+    }
+    // the span `[u_k, u_k+1)` holding `s` (the last non-empty one at the domain's end)
+    let span = psi.u.get(p..psi.n)?;
+    let k = p + span.partition_point(|&x| x <= s).saturating_sub(1);
+    let mut d: Vec<f64> = (0..=p)
+        .map(|j| psi.pw.get(4 * (k + j - p)).copied())
+        .collect::<Option<_>>()?;
+    for r in 1..=p {
+        for j in (r..=p).rev() {
+            let i = k + j - p;
+            let (&ui, &uip) = (psi.u.get(i)?, psi.u.get(i + p + 1 - r)?);
+            let den = uip - ui;
+            let a = if den > 0.0 { (s - ui) / den } else { 0.0 };
+            let (&prev, &cur) = (d.get(j - 1)?, d.get(j)?);
+            *d.get_mut(j)? = (1.0 - a) * prev + a * cur;
+        }
+    }
+    let at = *d.get(p)?;
+    at.is_finite().then(|| at.max(lo).min(hi))
 }
 
 /// A proved upper bound on the distance between the curve `curve` (`C`, an edge's curve) over
@@ -2183,6 +2211,43 @@ mod tests {
         )
         .unwrap()
         .unwrap()
+    }
+
+    /// `psi_at` is `ψ` where its enclosure is: inside [`psi_over`]'s enclosure of a point (to
+    /// a few units in the last place), at the points it passes through and between them.
+    #[test]
+    fn psi_at_is_within_psi_over() {
+        let points = [
+            (0.0, 0.0),
+            (0.1, 0.13),
+            (0.25, 0.24),
+            (0.25 + 1e-9, 0.2400001),
+            (0.6, 0.55),
+            (0.61, 0.62),
+            (1.0, 1.0),
+        ];
+        let psi = hermite_psi(&points, [0.0, 1.0]).unwrap();
+        for &(s, t) in &points {
+            let at = psi_at(&psi, s, [0.0, 1.0]).unwrap();
+            assert!(
+                (at - t).abs() <= 4.0 * f64::EPSILON,
+                "{s}: {at} against {t}"
+            );
+        }
+        for i in 0..=1000 {
+            let s = f64::from(i) / 1000.0;
+            let at = psi_at(&psi, s, [0.0, 1.0]).unwrap();
+            let r = psi_over(&psi, Ivl::from(s), 0, [0.0, 1.0])
+                .unwrap()
+                .unwrap()[0];
+            let pad = 4.0 * f64::EPSILON;
+            assert!(
+                r.lo - pad <= at && at <= r.hi + pad,
+                "{s}: {at} not in {r:?}"
+            );
+        }
+        assert_eq!(psi_at(&psi, -1e-9, [0.0, 1.0]), None);
+        assert_eq!(psi_at(&psi, 1.0 + 1e-9, [0.0, 1.0]), None);
     }
 
     /// A budget the open pieces outlast leaves the gap not enclosed, where the whole budget
