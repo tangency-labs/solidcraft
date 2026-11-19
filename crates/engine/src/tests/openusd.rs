@@ -93,6 +93,13 @@ fn an_assembly_exports_to_openusd_and_reads_back_in_place() {
         assert_eq!(r["component_name"], "bracket", "{file}: {r}");
         assert_eq!(shown_boxes(&opened), bracket_boxes(), "{file}");
     }
+    // `format` may say OpenUSD, or the encoding the extension picks, but not another encoding.
+    let path = dir.join("named.usdc").to_string_lossy().to_string();
+    for f in ["usd", "usdc", "USDC"] {
+        assert_eq!(run(&mut s, "file.export", json!({"path": path, "format": f}))["format"], "Usd", "{f}");
+    }
+    let e = s.execute("file.export", &json!({"path": path, "format": "usda"})).unwrap_err().to_string();
+    assert!(e.contains("disagrees with the path's extension"), "{e}");
     // Chosen bodies only.
     let path = dir.join("loose.usda").to_string_lossy().to_string();
     run(&mut s, "file.export", json!({"path": path, "bodies": ["Loose"]}));

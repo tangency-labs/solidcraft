@@ -18,6 +18,7 @@
 //! | [`OffsetFailure::SeamOpened`]          | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::ExactCurveUncut`]     | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::TangentBranchUncertified`] | `SM_ERR` (solidcore-native)            |
+//! | [`OffsetFailure::PeriodicBranchAmbiguous`] | `SM_ERR` (solidcore-native)            |
 //! | [`OffsetFailure::TangentEndOffCurve`]  | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::LooseTangentEdge`]    | `SM_ERR` (WR-530, solidcore-native)       |
 //! | [`OffsetFailure::FacesApart`]          | `SM_ERR` (solidcore-native)               |
@@ -194,6 +195,9 @@ pub enum OffsetFailure {
     /// Two curved faces tangent at the old edge now cross, but the intersection
     /// branch on their retained sides has not been certified.
     TangentBranchUncertified,
+    /// More than one surface-surface intersection branch claims the same periodic
+    /// boundary event, so the branch through that event is ambiguous.
+    PeriodicBranchAmbiguous,
     /// In a local operation, the new surfaces of `face` and of its neighbour across an
     /// edge meet nowhere near the edge, so no extension of either makes them meet there
     /// and the edge cannot be found again. (The reach,
@@ -399,6 +403,7 @@ impl OffsetFailure {
             Self::ExactCurveUncut
             | Self::TangentEndOffCurve
             | Self::TangentBranchUncertified
+            | Self::PeriodicBranchAmbiguous
             | Self::DistanceUnresolved { .. }
             | Self::ToleranceUnresolved { .. }
             | Self::Failed(_)
@@ -448,6 +453,7 @@ impl OffsetFailure {
             | Self::TangentEndOffCurve
             | Self::LooseTangentEdge { .. }
             | Self::TangentBranchUncertified
+            | Self::PeriodicBranchAmbiguous
             | Self::FacesApart { .. }
             | Self::PastSide { .. }
             | Self::ReachUncertified { .. }
@@ -483,6 +489,7 @@ impl OffsetFailure {
             | Self::TangentEndOffCurve
             | Self::LooseTangentEdge { .. }
             | Self::TangentBranchUncertified
+            | Self::PeriodicBranchAmbiguous
             | Self::FacesApart { .. }
             | Self::PastSide { .. }
             | Self::ReachUncertified { .. }
@@ -509,6 +516,7 @@ impl OffsetFailure {
             | Self::TangentEndOffCurve
             | Self::LooseTangentEdge { .. }
             | Self::TangentBranchUncertified
+            | Self::PeriodicBranchAmbiguous
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. }
             | Self::Failed(_)
@@ -542,6 +550,7 @@ impl OffsetFailure {
             | Self::TangentEndOffCurve
             | Self::LooseTangentEdge { .. }
             | Self::TangentBranchUncertified
+            | Self::PeriodicBranchAmbiguous
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. } => ErrorKind::Unsupported,
             Self::DistanceUnresolved { .. } | Self::ToleranceUnresolved { .. } => {
@@ -800,6 +809,10 @@ impl core::fmt::Display for OffsetFailure {
             Self::TangentBranchUncertified => f.write_str(
                 "two curved faces tangent at the old edge now cross, but the intersection \
                  branch on their retained sides has no certificate",
+            ),
+            Self::PeriodicBranchAmbiguous => f.write_str(
+                "more than one surface-surface intersection branch claims the same periodic \
+                 boundary event, so the branch through that event is ambiguous",
             ),
             Self::LooseTangentEdge {
                 edge,
@@ -1112,6 +1125,12 @@ mod tests {
                 false,
                 false,
             ),
+            (
+                O::PeriodicBranchAmbiguous,
+                ErrorKind::Unsupported,
+                false,
+                false,
+            ),
         ];
         let row = |o: &O| -> usize {
             match o {
@@ -1139,6 +1158,7 @@ mod tests {
                 O::LooseTangentEdge { .. } => 21,
                 O::WallsMeetAcross { .. } => 22,
                 O::PastSide { .. } => 23,
+                O::PeriodicBranchAmbiguous => 24,
             }
         };
         for (i, (o, class, phrase, defect)) in pinned.iter().enumerate() {

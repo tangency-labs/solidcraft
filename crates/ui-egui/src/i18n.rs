@@ -234,6 +234,15 @@ pub fn tr_engine_error(error: &str) -> String {
     use solidcraft_ui_text::{format, tr};
     // `EngineError::BadParams` carries `invalid parameters for `<command>`: ` in front.
     let text = error.strip_prefix("invalid parameters for `").and_then(|rest| rest.split_once("`: ")).map_or(error, |(_, text)| text);
+    for (english, id) in [
+        ("Boundary Fill cell points must be away from tool boundaries", "boundary_fill.error.boundary_point"),
+        ("Boundary Fill needs closed solid tools; open surface and mesh tools are not supported", "boundary_fill.error.closed_tools"),
+        ("Boundary Fill did not produce a closed solid cell", "boundary_fill.error.open_cell"),
+    ] {
+        if text == english {
+            return tr(id).to_string();
+        }
+    }
     if let Some((name, ids)) = text
         .strip_prefix("ambiguous component `")
         .and_then(|rest| rest.strip_suffix("; use a numeric component ID"))
@@ -347,6 +356,23 @@ mod tests {
         assert_eq!(super::tr_engine_error(&message), expected);
         assert_eq!(super::tr_engine_error(&format!("invalid parameters for `component.delete`: {message}")), expected);
         assert_eq!(super::tr_engine_error("another error"), "another error");
+    }
+
+    #[test]
+    fn boundary_fill_refusals_are_translated() {
+        install();
+        let _scope = scope("de");
+        for (english, id) in [
+            ("Boundary Fill cell points must be away from tool boundaries", "boundary_fill.error.boundary_point"),
+            ("Boundary Fill needs closed solid tools; open surface and mesh tools are not supported", "boundary_fill.error.closed_tools"),
+            ("Boundary Fill did not produce a closed solid cell", "boundary_fill.error.open_cell"),
+        ] {
+            assert_eq!(Locale::for_language("en").text(id), english);
+            let expected = Locale::for_language("de").text(id);
+            assert_ne!(expected, english);
+            assert_eq!(super::tr_engine_error(english), expected);
+            assert_eq!(super::tr_engine_error(&format!("invalid parameters for `solid.boundary_fill`: {english}")), expected);
+        }
     }
 
     #[test]

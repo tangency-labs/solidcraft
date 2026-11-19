@@ -353,7 +353,10 @@ fn resolve_uncached(
             let mesh = b.mesh();
             match kind {
                 LinkKind::Intersect => section(plane, &mesh, None),
-                _ => silhouette(plane, &mesh, Some(&b.body)),
+                _ => match exact_silhouette(b, plane) {
+                    Some(g) if !g.is_empty() => g,
+                    _ => silhouette(plane, &mesh, Some(&b.body)),
+                },
             }
         }
         LinkSource::Vertex { body, at } => {
@@ -796,26 +799,41 @@ fn projected_edges(body: &crate::ModelBody, mesh: &Mesh, plane: &Plane, edges: &
 /// round's edges end a few 1e-5 mm short of their neighbours (#8284); the sketch only shares a
 /// point between ends 1e-7 apart, and without it the outline has no closed profile.
 fn meet_at_shared_ends(geom: &mut [LinkGeom], gap: f64) {
-    let mut seen: Vec<Vec2> = Vec::new();
-    let mut snap = |p: &mut Vec2| match seen.iter().find(|q| q.dist(*p) <= gap) {
-        Some(q) => *p = *q,
-        None => seen.push(*p),
-    };
-    for g in geom {
-        match g {
-            LinkGeom::Line(a, b) | LinkGeom::Arc { a, b, .. } | LinkGeom::Conic { a, b, .. } => {
-                snap(a);
-                snap(b);
-            }
-            LinkGeom::Spline { pts, periodic: false, .. } => {
-                if let Some(first) = pts.first_mut() {
-                    snap(first);
-                }
-                if let Some(last) = pts.last_mut() {
-                    snap(last);
-                }
-            }
-            _ => {}
+    let met = solidcore_ops::outline::meet_at_shared_ends(geom.iter().cloned().map(outline_piece).collect(), gap);
+    for (g, m) in geom.iter_mut().zip(met) {
+        *g = link_of_piece(m);
+    }
+}
+
+/// Link geometry as an outline piece of the kernel's ([`solidcore_ops::outline::Piece`]), field
+/// by field.
+fn outline_piece(g: LinkGeom) -> solidcore_ops::outline::Piece {
+    use solidcore_ops::outline::Piece;
+    match g {
+        LinkGeom::Point(p) => Piece::Point(p),
+        LinkGeom::Line(a, b) => Piece::Line(a, b),
+        LinkGeom::Circle(c, r) => Piece::Circle(c, r),
+        LinkGeom::Arc { c, a, b } => Piece::Arc { c, a, b },
+        LinkGeom::Conic { a, apex, b, rho } => Piece::Conic { a, apex, b, rho },
+        LinkGeom::Ellipse { c, major, minor } => Piece::Ellipse { c, major, minor },
+        LinkGeom::Spline { pts, control, degree, periodic, nurbs } => {
+            Piece::Spline { pts, control, degree, periodic, nurbs: nurbs.map(|n| (n.knots, n.weights)) }
+        }
+    }
+}
+
+/// An outline piece of the kernel's as link geometry, field by field.
+fn link_of_piece(g: solidcore_ops::outline::Piece) -> LinkGeom {
+    use solidcore_ops::outline::Piece;
+    match g {
+        Piece::Point(p) => LinkGeom::Point(p),
+        Piece::Line(a, b) => LinkGeom::Line(a, b),
+        Piece::Circle(c, r) => LinkGeom::Circle(c, r),
+        Piece::Arc { c, a, b } => LinkGeom::Arc { c, a, b },
+        Piece::Conic { a, apex, b, rho } => LinkGeom::Conic { a, apex, b, rho },
+        Piece::Ellipse { c, major, minor } => LinkGeom::Ellipse { c, major, minor },
+        Piece::Spline { pts, control, degree, periodic, nurbs } => {
+            LinkGeom::Spline { pts, control, degree, periodic, nurbs: nurbs.map(|(knots, weights)| solidcraft_sketch::Nurbs { knots, weights }) }
         }
     }
 }
@@ -2217,6 +2235,98 @@ fn surface_facing(m: &Mesh, t: &[u32; 3], flat: Vec3) -> Vec3 {
         }
     }
     sum.normalized().unwrap_or(flat)
+}
+
+/// The outline of a solid seen along the sketch normal, from its exact faces and edges: the
+/// stretches of its edges between a face that faces the sketch and one that does not (and of an
+/// open sheet's border where its face faces the sketch; the kernel's
+/// [`Query::outline_stretches`](solidcore_ops::query::Query::outline_stretches)), each projected exactly as an edge link
+/// projects it ([`exact_edges`], or the kernel's projection of the stretch), and the silhouettes of
+/// its curved faces as the drawing's hidden lines trace them ([`hlr::silhouettes`]). A face faces
+/// the sketch where its normal out of the material leans toward it; edge-on is away, as in
+/// [`silhouette`]. A circle seen at a slant is an ellipse: its stretches come out as exact
+/// elliptical arcs, not lines and circular arcs fitted to the mesh (which bulged the wrong way and
+/// ran to hundreds of curves on a sketch at 45 degrees).
+///
+/// `None` for a mesh body, a body hidden lines leave out (a freeform face, a trim they cannot
+/// read), or an edge or face the kernel cannot read exactly here: the mesh's outline is traced
+/// then ([`silhouette`]).
+///
+/// [`hlr::silhouettes`]: solidcraft_geom::hlr::silhouettes
+fn exact_silhouette(body: &crate::ModelBody, plane: &Plane) -> Option<Vec<LinkGeom>> {
+    use solidcraft_geom::hlr;
+    if body.body.is_mesh() {
+        return None;
+    }
+    let rec = body.body.record();
+    let n = plane.normal();
+    let size = body.body.size().max(1e-9);
+    let q = solidcore_ops::query::Query::new(rec);
+    let mut edges = Vec::new();
+    // The stretches of the edges on the outline, each projected as an edge link projects it.
+    for stretch in q.outline_stretches(n, size).ok()? {
+        let e = stretch.edge;
+        let edge = rec.edges.get(e)?;
+        let geom = if stretch.whole {
+            let mut g = exact_edges(body, plane, &[e]).ok()?.pop().flatten()?;
+            at_vertices(body, plane, e, &mut g);
+            g
+        } else {
+            let pieces = solidcore_ops::spline_projection::project_curve(
+                edge.parameters(),
+                stretch.range,
+                true,
+                stretch.ends,
+                plane,
+                body.body.planar_edges_tolerance(),
+                &mut 262_144,
+            )?;
+            let classified =
+                solidcore_ops::conic_projection::classify_pieces(plane, &pieces, solidcraft_sketch::MAX_SPLINE_POINTS, solidcraft_sketch::MAX_COORD)
+                    .ok()?;
+            projection_links(classified).ok()?
+        };
+        // Tidied by the kernel: an edge seen end on is a point of the outline, not a curve of it.
+        edges.extend(solidcore_ops::outline::tidy_stretch(geom.into_iter().map(outline_piece).collect()));
+    }
+    // The silhouettes of the curved faces, traced where they lie inside them.
+    let opts = hlr::Options { trim_samples: 1024, threads: 1, ..hlr::Options::default() };
+    let def = hlr::prepare(rec, &opts).ok()?;
+    if !def.report.freeform_faces.is_empty() || !def.report.unsupported_trims.is_empty() {
+        return None;
+    }
+    let view = hlr::View { x: plane.x, y: plane.y, d: n };
+    let placed = hlr::Placement { body: 0, rotation: [Vec3::X, Vec3::Y, Vec3::Z], translation: Vec3::ZERO - plane.origin };
+    let mut sils = Vec::new();
+    for s in hlr::silhouettes(&def, &placed, &view, &opts).ok()? {
+        match s.accuracy {
+            solidcraft_geom::section::CurveAccuracy::Analytic => {
+                let pieces: Vec<LinkGeom> = s.geometry.iter().map(LinkGeom::from_seg).collect::<Option<_>>()?;
+                sils.extend(solidcore_ops::outline::tidy_silhouette(pieces.into_iter().map(outline_piece).collect()));
+            }
+            _ => {
+                let pts: Vec<Vec2> = s.points.iter().map(|p| Vec2::new(p[0], p[1])).collect();
+                // A traced silhouette along an edge already in the outline (a round's end, where
+                // the view grazes the round) is that edge.
+                if pts.iter().all(|p| edges.iter().any(|g| solidcore_ops::outline::near(g, *p, size * 1e-6))) {
+                    continue;
+                }
+                let tol = size * 1e-5;
+                let mut fitted = Vec::new();
+                match as_spline(&pts, tol) {
+                    Some(sp) => fitted.push(sp),
+                    None => fit_chain(&pts, Some(tol), &mut fitted),
+                }
+                sils.extend(fitted.into_iter().map(outline_piece));
+            }
+        }
+    }
+    // A silhouette ends where it meets an edge, on the face's trim: within its chords of the
+    // edge's own end there. Edges come first, so their exact ends are the ones kept.
+    let mut out = edges;
+    out.extend(sils);
+    let out = solidcore_ops::outline::meet_at_shared_ends(out, 8.0 * def.report.max_trim_chord + size * 1e-7);
+    Some(solidcore_ops::outline::drop_coincident(out, (size * 1e-9).max(1e-7)).into_iter().map(link_of_piece).collect())
 }
 
 /// The outline of a body seen along the sketch normal: mesh edges between triangles facing the

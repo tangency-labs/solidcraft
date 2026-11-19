@@ -109,7 +109,7 @@ fn mitred_rounds_follow_the_moved_top() {
     check(&mut Kernel::default());
 }
 
-/// With every fix but `geometric_g2_continuity` the rounds' sections are the ball's exact
+/// With every fix the rounds' sections are the ball's exact
 /// circles and the mitres the blend corner's exact plane sections: the body is the box
 /// 40 x 30 x 29 less each top edge's spandrel `(1 - pi/4) r^2` along it and plus, at each
 /// corner, what the two spandrel prisms share, `(5/3 - pi/2) r^3`, to 1e-9.
@@ -119,7 +119,6 @@ fn mitred_rounds_follow_the_moved_top_with_every_fix() {
         fixes: solidcore::kernel::UpstreamFixes::all(),
         ..Kernel::default()
     };
-    k.fixes.geometric_g2_continuity = false;
     let r = 3.0_f64;
     let pi = core::f64::consts::PI;
     let want = 40.0 * 30.0 * 29.0 - (1.0 - pi / 4.0) * r * r * 140.0
