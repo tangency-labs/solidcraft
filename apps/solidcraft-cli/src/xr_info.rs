@@ -45,7 +45,7 @@ fn load_entry() -> Result<openxr::Entry, String> {
 
 /// Probe the OpenXR runtime and build a JSON diagnostic report.
 /// Never fails — every error is recorded inside the JSON so the exit code is always 0.
-fn probe() -> Value {
+pub(crate) fn probe() -> Value {
     let mut report = json!({
         "openxr": {
             "runtime": Value::Null,

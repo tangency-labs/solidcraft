@@ -52,6 +52,7 @@ mod recipe;
 mod render;
 mod spatial;
 mod xr_info;
+mod xr_plan;
 
 use std::process::ExitCode;
 
@@ -129,6 +130,8 @@ const USAGE_LICENCES: &str = "  solidcraft-cli licences\n";
 const USAGE_GPU: &str = "  solidcraft-cli gpu [--policy auto|hardware|software|cpu]\n      (the GPU adapters a headless render can open, best first, the one the policy picks and the tier it\n       lands on: gpu, gpu-software, or the CPU rasterizer (auto with no adapter, or cpu); the policy defaults\n       to SOLIDCRAFT_GPU, else auto; exits with an error when hardware or software finds no such adapter)\n";
 /// `xr-info`'s lines in the usage.
 const USAGE_XR_INFO: &str = "  solidcraft-cli xr-info [--summary]\n      (probe the OpenXR runtime, head-mounted display and Vulkan compatibility; --summary prints a\n       plain-language verdict for someone testing on their own headset; Phase 0 of #2172)\n";
+/// `xr-plan`'s lines in the usage.
+const USAGE_XR_PLAN: &str = "  solidcraft-cli xr-plan\n      (the swapchain size, sample count and format a Phase 1 session would ask for, from the same\n       probe as xr-info; renders nothing and opens no session; Phase 1 groundwork for #2172)\n";
 /// `icon`'s lines in the usage.
 const USAGE_ICON: &str = "  solidcraft-cli icon --out icon.png [--size 256] | --out icon.ico\n";
 /// `fuzz-one`'s lines in the usage: a seed and the flags of one fuzz run.
@@ -170,6 +173,7 @@ const COMMANDS: &[Command] = &[
     Command { name: "licenses", usage: USAGE_LICENCES, listed: false },
     Command { name: "gpu", usage: USAGE_GPU, listed: true },
     Command { name: "xr-info", usage: USAGE_XR_INFO, listed: true },
+    Command { name: "xr-plan", usage: USAGE_XR_PLAN, listed: true },
     Command { name: "icon", usage: USAGE_ICON, listed: true },
     Command { name: "bench-edit", usage: USAGE_BENCH_EDIT, listed: false },
     Command { name: "save-stress", usage: USAGE_SAVE_STRESS, listed: false },
@@ -222,6 +226,7 @@ fn main() -> ExitCode {
         Some("exec") => cmd_exec(&args[1..]),
         Some("gpu") => cmd_gpu(&args[1..]),
         Some("xr-info") => xr_info::cmd(&args[1..]),
+        Some("xr-plan") => xr_plan::cmd(&args[1..]),
         Some("commands") => {
             use std::io::Write as _;
             let mut s = Session::default();
