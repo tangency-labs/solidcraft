@@ -179,6 +179,7 @@ pub struct WorkCounters {
     ball_certified_roots: Cell<u64>,
     blends_recertified: Cell<u64>,
     vertex_drops: Cell<u64>,
+    seam_tests: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -349,6 +350,18 @@ impl WorkCounters {
         self.vertex_drops.get()
     }
 
+    /// Edges and vertices of a face asked whether they are a seam or a pole of it while a
+    /// face intersection classifies its curves on the face (docs/booleans.md, "Seams and
+    /// poles"): each edge [`crate::topology::edge::face_on_both_sides`] is asked about and
+    /// each vertex [`crate::topology::vertex::inside_face`] is asked about, for a curve's
+    /// boundary edges and vertices, its reach and the face's own seam. A face without a
+    /// seam has no pole either, so once its edges are found to hold none, its curves skip
+    /// both questions until the B-rep changes. Not the fork's (#18705).
+    #[must_use]
+    pub fn seam_tests(&self) -> u64 {
+        self.seam_tests.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
@@ -370,6 +383,12 @@ impl WorkCounters {
         self.ball_certified_roots.set(0);
         self.blends_recertified.set(0);
         self.vertex_drops.set(0);
+        self.seam_tests.set(0);
+    }
+
+    /// Counts one edge or vertex asked whether it is a seam or a pole of a face.
+    pub(crate) fn add_seam_test(&self) {
+        self.seam_tests.set(self.seam_tests.get().saturating_add(1));
     }
 
     /// Counts one vertex a classified curve is solved against.
@@ -867,12 +886,47 @@ pub struct Kernel {
     /// tree.
     #[cfg(feature = "profile")]
     pub profiler: crate::profile::Profiler,
+    /// Test-only seam of the curved coincident strip's drop ([`StripProbe`]); shared with
+    /// the kernel copies an operation makes.
+    #[cfg(test)]
+    pub(crate) strip_probe: Arc<std::sync::Mutex<StripProbe>>,
     /// Not upstream, test only (feature `wr57-replay`): the seam of the goldens' WR-57
     /// substitution replay ([`crate::surface::surface::replay`]). No hook by default, and
     /// then it changes nothing. Shared with the kernel copies an operation makes for its
     /// caches, which call through the same seam.
     #[cfg(feature = "wr57-replay")]
     pub replay: crate::surface::surface::replay::ReplaySeam,
+}
+
+/// Test-only seam of `boolean::topology_intersector::curved_strip`
+/// (tangency-labs/solidcraft#18166): where an operation's topology intersector drops the
+/// curves over curved coincident strips, each run in `runs` is made first on a copy of the
+/// operation's real intersection list, and the number of intervals it drops appended to
+/// `dropped`. `active` is the run being made; its perturbations are read by the drop's
+/// checks.
+#[cfg(test)]
+#[derive(Debug, Default)]
+pub(crate) struct StripProbe {
+    /// The runs still to make (taken by the first drop reached).
+    pub(crate) runs: Vec<StripProbeRun>,
+    /// The intervals each run dropped, in order.
+    pub(crate) dropped: Vec<usize>,
+    /// The run being made.
+    pub(crate) active: Option<StripProbeRun>,
+}
+
+/// One run of [`StripProbe`]: the drop at tolerance `tol`, with `extra` added to the
+/// strip's enclosure, the dropped curve's gap and N's piece's gap (in that order), and,
+/// with `event_on_n`, a synthetic interval end on N at the middle of its piece.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct StripProbeRun {
+    /// The tolerance the drop is called with.
+    pub(crate) tol: f64,
+    /// Added to the strip's bound, the curve's gap and N's piece's gap.
+    pub(crate) extra: [f64; 3],
+    /// A synthetic interval end on N inside its piece.
+    pub(crate) event_on_n: bool,
 }
 
 impl Default for Kernel {
@@ -915,6 +969,8 @@ impl Kernel {
             coons_tangency_log: RefCell::new(None),
             #[cfg(feature = "profile")]
             profiler: crate::profile::Profiler::default(),
+            #[cfg(test)]
+            strip_probe: Arc::default(),
             #[cfg(feature = "wr57-replay")]
             replay: crate::surface::surface::replay::ReplaySeam::default(),
         }

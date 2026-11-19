@@ -65,7 +65,8 @@ const STEP_SHARE: f64 = 0.1;
 pub fn reach(doc: &Document, st: &ModelState, r: &Reach) -> Result<Reached, String> {
     let asm = &doc.assembly;
     let vals = joint_values(asm);
-    let built = build(doc, st, &vals, &mut Solution::default());
+    let held_contents = doc.rigid_group_joints();
+    let built = build(doc, st, &held_contents, &vals, &mut Solution::default());
     let tree = &built.tree;
     if tree.fixed.contains_key(&r.occurrence) {
         return Err("it is fixed in place (grounded, or the part its joints are placed from)".into());

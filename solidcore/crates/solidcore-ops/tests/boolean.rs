@@ -239,6 +239,66 @@ fn a_cylinder_sunk_a_hair_into_a_flat_face_joins_it() {
     }
 }
 
+/// A 0.68 mm sphere and a box whose edge runs 1.5e-4 inside it, 4.2e-6 deep, across the
+/// sphere's seam, with a corner 9.8e-6 outside the sphere (`ub175` of the kernel's golden unit
+/// `boolean.api_brep`). The vertex on the seam stands for three points up to 2.17e-5 apart and
+/// the corner's for two 9.97e-6 apart, and each kept a tolerance short of them, so the union,
+/// the intersection and the difference failed their checks. Each is now one valid solid, with
+/// or without the fixes, and their volumes add up: union + common = sphere + box and
+/// difference + common = sphere, within 1e-6 of the sphere (measured 2e-7; the lens the edge
+/// cuts off is 3e-6 of it at most).
+#[test]
+fn a_box_edge_grazing_a_tiny_sphere_across_its_seam_gives_valid_solids() {
+    let c = [
+        0.000_620_018_136_026_583_4,
+        -0.000_460_304_429_701_722_37,
+        0.000_076_983_630_377_661_13,
+    ];
+    let r = 0.000_681_902_795_490_716_8_f64;
+    let o = [
+        0.000_510_378_840_547_897,
+        -0.000_598_367_716_621_174,
+        0.000_197_124_463_185_099_34,
+    ];
+    let d = [
+        0.000_776_710_634_559_774_7,
+        0.000_535_188_654_593_634_2,
+        0.000_719_601_710_449_030_5,
+    ];
+    let sphere = 4.0 / 3.0 * PI * r * r * r;
+    let block = d[0] * d[1] * d[2];
+    for fixes in [false, true] {
+        if fixes {
+            all_fixes();
+        }
+        let run = |op: BooleanOp| {
+            let a = make_sphere(c, r).unwrap();
+            let b = make_box(o, d).unwrap();
+            let body = boolean(a, b, op)
+                .unwrap_or_else(|e| panic!("{op:?} fixes {fixes}: {e:?}"))
+                .unwrap();
+            assert!(
+                body.is_manifold_solid().unwrap(),
+                "{op:?} fixes {fixes}: not a manifold solid"
+            );
+            assert_eq!(body.solid_count().unwrap(), 1, "{op:?} fixes {fixes}");
+            body.volume(1e-9).unwrap()
+        };
+        let union = run(BooleanOp::Union);
+        let common = run(BooleanOp::Intersect);
+        let difference = run(BooleanOp::Subtract);
+        let off = [
+            union + common - sphere - block,
+            difference + common - sphere,
+        ];
+        // Written to accept: a NaN volume fails.
+        assert!(
+            off.iter().all(|v| v.abs() <= 1e-6 * sphere),
+            "fixes {fixes}: union {union:e} common {common:e} difference {difference:e} against sphere {sphere:e} and box {block:e}"
+        );
+    }
+}
+
 /// Two equal cylinders side by side, touching along a line. Their faces leave the line
 /// together and part as the square of the distance over the radius, so the fixed steps off
 /// the line took two large ones for one surface, and the union failed (100 times the size)
@@ -3228,4 +3288,120 @@ fn a_short_edge_joined_onto_a_body_read_coarser_is_kept() {
             assert!(near(got, want), "{plate_tolerance}: {got} vs {want}");
         }
     }
+}
+
+/// The area two circles of radii `a` and `b` whose centres are `d` apart have in common.
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn circles_common_area(a: f64, b: f64, d: f64) -> f64 {
+    if d >= a + b {
+        return 0.0;
+    }
+    if d <= (a - b).abs() {
+        return PI * a.min(b).powi(2);
+    }
+    let ta = ((d * d + a * a - b * b) / (2.0 * d * a)).acos();
+    let tb = ((d * d + b * b - a * a) / (2.0 * d * b)).acos();
+    a * a * ta + b * b * tb - 0.5 * ((-d + a + b) * (d + a - b) * (d - a + b) * (d + a + b)).sqrt()
+}
+
+/// A ball of radius 2 cut flat at z = 1.2, then drilled by a cylinder of radius 0.19 from
+/// z = -0.4 up to the flat, whose wall passes `d` outside the flat rim's vertex (1.6, 0, 1.2)
+/// on the sphere's seam: the vertex is `d` inside the tool (tangency-labs/solidcore#3339, the
+/// Dutchman stress item S0314). For d within the tolerance the wall/sphere curve runs from the
+/// rim, within d of the seam, down to where it crosses the seam (2.8e-4 below the vertex at
+/// d = 1e-5): that run was taken for a curve mislabelled as on the seam and removed, and
+/// nothing else meets the sphere there, since the seam has the sphere on both sides. The
+/// wall was left open there and the cut came back empty or not closed for d = 5e-6 to
+/// 1.5e-5. Each cut is one valid solid of the volume of the ball, less its cap of height 0.8
+/// (π h² (3R − h) / 3), less the part of the cylinder inside the ball, the integral over z of
+/// the area the drill's circle has in common with the ball's section of radius √(4 − z²): the
+/// cylinder's whole area below z0, where √(4 − z0²) = ρ + 0.19 for its axis ρ from the ball's,
+/// and a lens above, integrated by Simpson's rule on each side of z0 (20000 steps each: its
+/// error is far inside the check's 1e-7). d = 1e-6 and 2e-5 are not covered: the run is then
+/// within a tolerance of the vertex, or starts just past it, and those still fail `SmFace`
+/// tests 29 and 31.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn a_drill_grazing_the_seam_vertex_of_a_cut_balls_rim_cuts_it() {
+    all_fixes();
+    let (big, r, flat, bottom): (f64, f64, f64, f64) = (2.0, 0.19, 1.2, -0.4);
+    let vertex = [(big * big - flat * flat).sqrt(), 0.0];
+    // the direction from the vertex to the drill's axis (the issue's placement)
+    let (ux, uy): (f64, f64) = (-0.011_280_0, 0.189_655_0);
+    let n = (ux * ux + uy * uy).sqrt();
+    let (ux, uy) = (ux / n, uy / n);
+    let simpson = |f: &dyn Fn(f64) -> f64, a: f64, b: f64| {
+        let n = 20_000;
+        let h = (b - a) / f64::from(n);
+        let mut s = f(a) + f(b);
+        for i in 1..n {
+            s += f(a + h * f64::from(i)) * if i % 2 == 1 { 4.0 } else { 2.0 };
+        }
+        s * h / 3.0
+    };
+    let cap = PI * (big - flat).powi(2) * (3.0 * big - (big - flat)) / 3.0;
+    for d in [-1e-5, 0.0, 5e-6, 1e-5, 1.5e-5, 4e-5, 1e-4] {
+        let axis = [vertex[0] + (r - d) * ux, vertex[1] + (r - d) * uy];
+        let rho = axis[0].hypot(axis[1]);
+        let section = |z: f64| circles_common_area(r, (big * big - z * z).sqrt(), rho);
+        let z0 = (big * big - (rho + r).powi(2)).sqrt();
+        let drilled = PI * r * r * (z0 - bottom) + simpson(&section, z0, flat);
+        let want = 4.0 / 3.0 * PI * big.powi(3) - cap - drilled;
+        let ball = make_sphere([0.0; 3], big).unwrap();
+        let block = make_box([-3.0, -3.0, flat], [6.0, 6.0, 2.0]).unwrap();
+        let cut = boolean(ball, block, BooleanOp::Subtract).unwrap().unwrap();
+        let drill =
+            solidcore_ops::make_cylinder([axis[0], axis[1], bottom], r, flat - bottom).unwrap();
+        let got = boolean(cut, drill, BooleanOp::Subtract)
+            .unwrap_or_else(|e| panic!("d {d}: {e:?}"))
+            .unwrap_or_else(|| panic!("d {d}: empty"));
+        let report = got.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "d {d}: {}", report.text);
+        assert_eq!(got.solid_count().unwrap(), 1, "d {d}");
+        assert!(got.is_manifold_solid().unwrap(), "d {d}");
+        let v = volume(&got);
+        assert!((v - want).abs() <= 1e-7 * want, "d {d}: {v} vs {want}");
+    }
+}
+
+/// #17527's cut as SolidCraft passed it: a part with a 2.1 mm hole, less a revolved counterbore
+/// (a 4.25 mm bore, a 45° cone down to the hole's radius, a disc closing it). The sketch's revolve
+/// axis is 1.19e-5 off the hole's axis, so the tool's rim (radius 2.1000073) lies 4.6e-6 to
+/// 1.9e-5 from the hole's wall: in it, within the rim's tolerance, but nowhere within the proto
+/// topology's. The cone and the disc each meet the wall along the rim in a curve of their own.
+/// Their overlapping proto edges were replaced by the rim classified within half the zone
+/// tolerance, which found it nowhere in the wall, so the cut failed in `make_faceuse`; with the
+/// rim classified within its own tolerance, a piece of the disc's circle outside the overlap
+/// stayed beside its replacement and was related twice ("another entity is already related").
+/// The cut is one valid solid, the same as the cut by the tool moved onto the hole's axis.
+#[test]
+fn a_traced_revolved_counterbore_a_hair_off_the_holes_axis_cuts_the_part() {
+    all_fixes();
+    let body = traced_operands("issue_17527_revolve_cut_round_edge");
+    let cut = |dy: f64| {
+        let tool = body("tool");
+        tool.transform(&[
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, dy, 0.0, 1.0],
+        ])
+        .unwrap();
+        boolean(body("target"), tool, BooleanOp::Subtract)
+            .unwrap()
+            .unwrap()
+    };
+    // the tool moved by the offset of its axis from the hole's: no rim off the wall
+    let want = cut(1.1866e-5).volume(1e-9).unwrap();
+    let r = cut(0.0);
+    let report = r.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(r.solid_count().unwrap(), 1);
+    // the part's 41 faces (the hole's wall now ends at the rim), the bore and the cone
+    assert_eq!(r.counts().unwrap(), [43, 104, 65]);
+    let v = r.volume(1e-9).unwrap();
+    assert!(
+        (v - want).abs() < 1e-3,
+        "volume {v}, on the hole's axis {want}"
+    );
 }

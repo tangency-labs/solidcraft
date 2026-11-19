@@ -44,6 +44,19 @@
 //!   to the face at either point (`COINCIDENT_TANGENT_SINE`, the coincidence check's angle) runs in
 //!   the face there: those two points are the ends of a stretch the edge and the face share and
 //!   stay two.
+//! - **An edge lying in a face, off it by more than the system zone tolerance** (not
+//!   upstream, #17527). Two face pairs at an edge of one B-rep that lies within its tolerance
+//!   of a face of the other (a revolved tool's rim in a hole's wall, its axis 1.2e-5 off the
+//!   hole's) each give their own curve along the edge, and the proto edges of the two overlap.
+//!   `ResolveOverlappingProtoEdges` replaces such a group with the edge's curve classified
+//!   against the face. Upstream classifies it within the manager's tolerance (half the zone
+//!   tolerance), where the edge lies in the face nowhere: the group was deleted and nothing
+//!   replaced it, and the loop stayed open. Here the curve is classified within the edge's own
+//!   tolerance where that is the larger, as the face pairs classified it, and the group takes in
+//!   every other proto edge all of whose definitions come from the same edge and face
+//!   ([`ProtoTopologyManager::absorb_pieces_of_edge_in_face`]): the replacement holds every
+//!   piece of the edge in the face, so a piece left out was imprinted twice and related to one
+//!   edge of the other B-rep twice ("another entity is already related to the other one").
 //! - **Removed proto edges** (SolidCraft fix, tangency-labs/smlib 93efd6d, UB-239).
 //!   Upstream's `SplitIntersectingProtoEdges` deletes the combined-away proto edge while
 //!   other proto edges (overlap lists) still name it (`CombineProtoEdge` hands its
@@ -342,7 +355,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         pc1: &mut PointClassification<O>,
         pc2: &mut PointClassification<O>,
     ) -> Result<(Option<ProtoVertexId>, bool)> {
-        self.find_or_create_proto_vertex_crossing(k, geometry, pc1, pc2, None)
+        self.find_or_create_proto_vertex_crossing(k, geometry, pc1, pc2, None, [false; 2])
     }
 
     /// [`ProtoTopologyManager::find_or_create_proto_vertex_pcs`] for an end of a curve
@@ -351,7 +364,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// edge as far as the curve's crossing of the edge is known ([`crossing_region`]), and
     /// a proto vertex is found where the regions are not proved apart. With no `crossing`,
     /// two classifications onto edges are the crossing of those two edges; any other point
-    /// is known to its tolerance alone.
+    /// is known to its tolerance alone. Not upstream (tangency-labs/solidcore#3339): `along`
+    /// says, for `pc1` and `pc2`, whether the interval runs along the seam its end lies on
+    /// ([`runs_along_seam`]): the curve does not cross that seam there, so it fixes no reach
+    /// along it.
     ///
     /// # Errors
     ///
@@ -363,6 +379,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         pc1: &mut PointClassification<O>,
         pc2: &mut PointClassification<O>,
         crossing: Option<(O, f64)>,
+        along: [bool; 2],
     ) -> Result<(Option<ProtoVertexId>, bool)> {
         // Skip PtXSects that don't classify to Region, Face, Edge, or Vertex in both Breps
         if !can_imprint(pc1.point_class()) {
@@ -436,7 +453,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let point_tol = self.proto_vertex_tolerance_of_pcs(k, geometry, deviation, pc1, pc2)?;
         let point_tol = zone_tol3d(k, point_tol);
         let limit = crate::query::face::p2::proto_vertex_capture_distance(self);
-        let region = crossing_region(k, geometry, crossing, pc1, pc2, position, point_tol, limit)?;
+        let region = crossing_region(
+            k, geometry, crossing, along, pc1, pc2, position, point_tol, limit,
+        )?;
         let within = self.find_proto_vertex_within(k, position, point_tol, Some(&region))?;
         let found = self.find_proto_vertex_holding(k, geometry, position, pc1, pc2, within)?;
 
@@ -517,12 +536,17 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         if can_imprint(ci1.start.point_class()) && can_imprint(ci2.start.point_class()) {
             // (the curve the interval lies on, and its parameter at this end)
             let crossing = classification1.curve().map(|c| (c, ci1.interval.min()));
+            let along = [
+                runs_along_seam(geometry, &ci1.start, &ci1.mid, &ci2.mid)?,
+                runs_along_seam(geometry, &ci2.start, &ci2.mid, &ci1.mid)?,
+            ];
             start_pv = ignore_soft(self.find_or_create_proto_vertex_crossing(
                 k,
                 geometry,
                 &mut ci1.start,
                 &mut ci2.start,
                 crossing,
+                along,
             ))?
             .and_then(|r| r.0);
             // not upstream (WR-410, #1059): a later crossing with a smaller gap over sine
@@ -543,12 +567,17 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         if can_imprint(ci1.end.point_class()) && can_imprint(ci2.end.point_class()) {
             // (the curve the interval lies on, and its parameter at this end)
             let crossing = classification1.curve().map(|c| (c, ci1.interval.max()));
+            let along = [
+                runs_along_seam(geometry, &ci1.end, &ci1.mid, &ci2.mid)?,
+                runs_along_seam(geometry, &ci2.end, &ci2.mid, &ci1.mid)?,
+            ];
             end_pv = ignore_soft(self.find_or_create_proto_vertex_crossing(
                 k,
                 geometry,
                 &mut ci1.end,
                 &mut ci2.end,
                 crossing,
+                along,
             ))?
             .and_then(|r| r.0);
             // not upstream (WR-410, #1059): a later crossing with a smaller gap over sine
@@ -1816,7 +1845,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             .saturating_add(MAX_OVERLAP_GROUPS_BASE);
         // repeat the index when the list was changed by removing a group
         while let Some(&pe) = self.proto_edges().get(ii) {
-            let group = self.overlapping_pe_group(pe)?;
+            let mut group = self.overlapping_pe_group(pe)?;
             let found_group = !group.is_empty();
 
             // skip PEs not in a Overlapping PE Group
@@ -1864,6 +1893,12 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     topo2 = t2;
                 }
             }
+
+            // Not upstream (#17527): a group on an edge of one B-rep and a face of the other
+            // is replaced by the edge's curve classified against that face, every piece of the
+            // edge that lies in the face. Every other proto edge all of whose definitions lie on
+            // that edge and in that face is one of those pieces again, and goes with the group.
+            self.absorb_pieces_of_edge_in_face(&mut group, topo1, topo2)?;
 
             // PFs keep a list of coincident PEs. Check every ProtoFace: the group can be
             // coincident with more than one, and its PEs are deleted below.
@@ -2065,8 +2100,14 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 let ivl = geometry
                     .edge_interval(edge)
                     .ok_or(dangling("edge is unknown"))?;
-                let mut cc1 = new_curve_classification(k, handle, ivl, tol)?;
-                let mut cc2 = new_curve_classification(k, handle, ivl, tol)?;
+                // Not upstream (#17527): the edge's curve is classified within the edge's
+                // own tolerance where that is the larger (see the module's Deviations).
+                let edge_tol = geometry
+                    .topology_tolerance(edge)
+                    .ok_or(dangling("edge is unknown"))?;
+                let curve_tol = max2(tol, edge_tol);
+                let mut cc1 = new_curve_classification(k, handle, ivl, curve_tol)?;
+                let mut cc2 = new_curve_classification(k, handle, ivl, curve_tol)?;
 
                 // Pick a SrcFace object for the SrcEdge object
                 let faces = geometry.edge_faces(edge)?;
@@ -2151,6 +2192,67 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         }
 
         Ok(deleted_curves)
+    }
+}
+
+impl<O: ClassObject> ProtoTopologyManager<O> {
+    /// Not upstream (#17527): adds to an overlapping proto edge `group` whose lowest source
+    /// topology is an edge in one B-rep and a face in the other (`topo1`, `topo2`, either
+    /// way round) every other listed proto edge that has definitions and all of whose
+    /// definitions come from that edge and that face. Each such definition was classified
+    /// on the edge and in the face; [`Self::resolve_overlapping_proto_edges`] replaces the
+    /// group with every piece of the edge that lies in the face, so a piece left out would
+    /// stand beside its own replacement, and the two would be related to one edge of the
+    /// other B-rep. Overlap is found by the ends of one piece dropped on the other within the
+    /// zone tolerance, so where the edge lies further than that from the face's own curve
+    /// (an edge within its tolerance of the face, off it by more than the system zone
+    /// tolerance) a piece can share the edge and the face with the group without being
+    /// found overlapping it. Groups of any other kind are left as they are.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for a deleted proto edge or edge definition.
+    fn absorb_pieces_of_edge_in_face(
+        &self,
+        group: &mut Vec<ProtoEdgeId>,
+        topo1: Option<O>,
+        topo2: Option<O>,
+    ) -> Result<()> {
+        let (Some(t1), Some(t2)) = (topo1, topo2) else {
+            return Ok(());
+        };
+        let kinds = (t1.class_kind(), t2.class_kind());
+        if kinds != (ClassObjectKind::Edge, ClassObjectKind::Face)
+            && kinds != (ClassObjectKind::Face, ClassObjectKind::Edge)
+        {
+            return Ok(());
+        }
+        for &pe in self.proto_edges() {
+            if group.contains(&pe) {
+                continue;
+            }
+            let eds = self
+                .proto_edge(pe)
+                .ok_or(dangling("proto edge is deleted"))?
+                .edge_definitions();
+            if eds.is_empty() {
+                continue;
+            }
+            let mut all = true;
+            for &ed in eds {
+                let d = self
+                    .edge_def(ed)
+                    .ok_or(dangling("edge definition is deleted"))?;
+                if as_topology(d.src_topo(1)) != topo1 || as_topology(d.src_topo(2)) != topo2 {
+                    all = false;
+                    break;
+                }
+            }
+            if all {
+                group.push(pe);
+            }
+        }
+        Ok(())
     }
 }
 
@@ -2523,13 +2625,16 @@ fn edge_direction<O: ClassObject>(
 /// known along the edge only to the tolerance over the sine of that angle, which nothing
 /// here encloses: its reach is `limit` (an edge 1e-9 into a plane crosses it at 2.8e-5 rad,
 /// so its two crossings 1.4e-4 apart are one point with the end of the line the two touch
-/// along). Of several crossings the one known worst counts. Any other point has the ball
+/// along). Of several crossings the one known worst counts. Not upstream
+/// (tangency-labs/solidcore#3339): an edge `along` marks (the interval runs along that seam,
+/// [`runs_along_seam`]) is not crossed there and gives no crossing. Any other point has the ball
 /// of its tolerance.
 #[allow(clippy::too_many_arguments)] // the point, what fixes it and how well
 fn crossing_region<O: ClassObject>(
     k: &Kernel,
     geometry: &impl ProtoBrep<O>,
     crossing: Option<(O, f64)>,
+    along: [bool; 2],
     pc1: &PointClassification<O>,
     pc2: &PointClassification<O>,
     position: Vec3,
@@ -2550,7 +2655,12 @@ fn crossing_region<O: ClassObject>(
     // parameter, the edge's classification)
     let mut crossings = Vec::new();
     if let Some((curve, t)) = crossing.and_then(|(c, t)| geometry.curve(c).map(|c| (c, t))) {
-        for (edge, pc) in [(edge1, pc1), (edge2, pc2)] {
+        for ((edge, pc), along) in [(edge1, pc1), (edge2, pc2)].into_iter().zip(along) {
+            // (not upstream, tangency-labs/solidcore#3339: an interval running along a seam
+            // ends where it leaves it, not where it crosses it)
+            if along {
+                continue;
+            }
             if let Some((e, s)) = edge {
                 crossings.push((Some((curve, t)), e, s, pc));
             }
@@ -2591,6 +2701,41 @@ fn crossing_region<O: ClassObject>(
         stray.map(|stray| (reach, stray)),
         limit,
     ))
+}
+
+/// Not upstream (tangency-labs/solidcore#3339): whether an interval whose end classifies as
+/// `end` and middle as `mid` runs along a seam that end lies on, inside the other B-rep's
+/// face (`other_mid`): both on the same edge, one with the same face on every use. A seam bounds no material (docs/booleans.md, "Seams and
+/// poles"), so the face pair that classified the run is the only one that meets it there,
+/// and where the run leaves the seam is where its curve does, known to its own tolerance:
+/// an intersection curve running within the tolerance of the seam does not cross it at
+/// that end, and its angle to the seam fixes no reach along it ([`crossing_region`]).
+///
+/// # Errors
+///
+/// Those of the edge's use walk.
+fn runs_along_seam<O: ClassObject>(
+    geometry: &impl ProtoBrep<O>,
+    end: &PointClassification<O>,
+    mid: &PointClassification<O>,
+    other_mid: &PointClassification<O>,
+) -> Result<bool> {
+    if other_mid.point_class() != PointClassType::Face {
+        return Ok(false);
+    }
+    let Some(e) = end.edge_object() else {
+        return Ok(false);
+    };
+    if mid.edge_object() != Some(e) {
+        return Ok(false);
+    }
+    let faces = geometry.edge_use_faces(e)?;
+    Ok(match faces.split_first() {
+        Some((first, rest)) => {
+            first.is_some() && !rest.is_empty() && rest.iter().all(|f| f == first)
+        }
+        None => false,
+    })
 }
 
 /// Not upstream (WR-410; the SolidCraft fork's `sm_CrossingSine`): the sine of the angle

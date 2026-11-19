@@ -55,6 +55,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         "path: a .sc design → a new component linked to it, holding its solid bodies as placed in that design and a copy of its design properties; \
          configuration?: a row name or id (null or omitted: the saved source state); name? (default: the design's name); parent?: component id or name (default: the active one); \
          translate?: [x,y,z] in mm from the destination parent's origin (default [0,0,0], also with reuse); \
+         axis?: [x,y,z], angle?: radians or \"30 deg\", origin?: [x,y,z]; \
+         matrix?: [12 or 16 numbers] (row-major 3x4 or 4x4, its translation column numbers or length expressions) or to_matrix?: [12 or 16 numbers]; \
+         tolerance?: largest accepted |RᵀR − I| (default 1e-9, at most 1e-3); \
          reuse?: bool (default false): insert a free occurrence, reusing an existing link to the same file and configuration when available",
     ),
     CommandSpec::new("component.update_links", "Update Links", crate::checked!("component.update_links", update_links))
@@ -638,14 +641,73 @@ fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
     serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
-fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "component.insert_design";
-    let selection = configuration_key(p, None, cmd)?;
-    let given = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "`path` is required"))?;
+/// Placement transform for `component.insert_design`: accepts `to_matrix` or `matrix` (row-major
+/// 3x4 or 4x4, with length expressions in the translation column), or `translate`, `axis`, `angle`,
+/// and `origin`.
+fn placement_transform(s: &Session, p: &Value, cmd: &str) -> Result<(solidcraft_doc::Mat, Option<solidcraft_doc::ExpressedMove>)> {
+    let matrix = p.get("matrix");
+    let to_matrix = p.get("to_matrix");
+    if matrix.is_some() && to_matrix.is_some() {
+        return Err(bad(cmd, "give either to_matrix or matrix, not both"));
+    }
+    if let Some(key) = ["to_matrix", "matrix"].into_iter().find(|k| p.get(*k).is_some()) {
+        if let Some(k) = ["translate", "axis", "angle", "origin"].into_iter().find(|k| p.get(*k).is_some()) {
+            return Err(bad(cmd, format!("give either {key} or {k}, not both")));
+        }
+        let m = matrix.or(to_matrix).ok_or_else(|| bad(cmd, "matrix"))?;
+        let (numbers, kept) =
+            super::component::matrix::with_exprs(m, |e| s.doc.eval(e, solidcraft_doc::expr::Kind::Length).map_err(|err| err.to_string()), cmd)?;
+        let tolerance = super::component::matrix::tolerance(p, cmd)?;
+        let transform = super::component::matrix::rigid(&numbers, tolerance, cmd)?;
+        if !solidcraft_doc::is_placement(&transform) {
+            return Err(bad(cmd, "placement transform exceeds supported numeric range"));
+        }
+        let expressed = if kept.iter().any(Option::is_some) {
+            Some(solidcraft_doc::ExpressedMove {
+                translate: kept,
+                at: [transform[3][0], transform[3][1], transform[3][2]],
+                frame: solidcraft_doc::IDENTITY,
+                world: false,
+                origin: Default::default(),
+                origin_at: [0.0; 3],
+                rotation: solidcraft_doc::IDENTITY,
+                grounded_ok: false,
+            })
+        } else {
+            None
+        };
+        return Ok((transform, expressed));
+    }
+
     let translate = match p.get("translate") {
         None => solidcore_record::Vec3::ZERO,
         Some(v) => vec3(v).filter(|t| t.is_finite() && t.len() < 1e9).ok_or_else(|| bad(cmd, "`translate` must be [x, y, z] in mm"))?,
     };
+    let axis = super::component::move_vector(p, "axis", solidcore_record::Vec3::Z, false, cmd)?;
+    let angle = match p.get("angle") {
+        Some(Value::String(e)) => s.doc.eval(e, solidcraft_doc::expr::Kind::Angle).map_err(|e| bad(cmd, e.to_string()))?,
+        None => 0.0,
+        Some(value) => value.as_f64().ok_or_else(|| bad(cmd, "angle must be a number or angle expression"))?,
+    };
+    let origin = super::component::move_vector(p, "origin", solidcore_record::Vec3::ZERO, true, cmd)?;
+    if !(translate.is_finite() && axis.is_finite() && angle.is_finite() && origin.is_finite()) {
+        return Err(bad(cmd, "non-finite placement"));
+    }
+    if angle != 0.0 && axis.normalized().is_none() {
+        return Err(bad(cmd, "rotation axis must have a finite nonzero length"));
+    }
+    let transform = solidcraft_doc::rigid(translate, origin, axis, angle);
+    if !solidcraft_doc::is_placement(&transform) {
+        return Err(bad(cmd, "placement transform exceeds supported numeric range"));
+    }
+    Ok((transform, None))
+}
+
+fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "component.insert_design";
+    let selection = configuration_key(p, None, cmd)?;
+    let given = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "`path` is required"))?;
+    let (transform, expressed) = placement_transform(s, p, cmd)?;
     // A network or device path is judged from its text, as given, before anything reads it.
     link_refused(s.path.as_deref(), given).map_err(|e| bad(cmd, e.to_string()))?;
     let file = absolute(Path::new(given));
@@ -671,9 +733,12 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
             let parent = if p.get("parent").is_some() { component_key(s, p, "parent", cmd)? } else { s.active_component };
             // Reuse the definition, not another placement's captured or pending move.
             // Insert Design places from the parent origin whether the link is new or reused.
-            let mut transform = solidcraft_doc::IDENTITY;
-            transform[3] = [translate.x, translate.y, translate.z, 1.0];
             let occurrence = s.doc_mut().add_occurrence(component, parent, transform)?;
+            if let Some(expressed) = expressed
+                && let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == occurrence)
+            {
+                o.expressed_moves.push(expressed);
+            }
             return reply(cmd, InsertDesignResult { inserted: DesignInserted::Reused { occurrence, component }, param_warnings: Vec::new() });
         }
     }
@@ -706,7 +771,10 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
         f.link_faces = faces;
     }
     if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| Some(o.id) == occ) {
-        o.transform[3] = [translate.x, translate.y, translate.z, 1.0];
+        o.transform = transform;
+        if let Some(expressed) = expressed {
+            o.expressed_moves.push(expressed);
+        }
     }
     let path = stored(s.path.as_deref(), &file);
     s.doc_mut().links.insert(

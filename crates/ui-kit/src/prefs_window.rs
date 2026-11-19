@@ -254,8 +254,13 @@ pub fn show<S: Host>(ctx: &egui::Context, host: &mut S, pages: &[Page<S>], optio
         return None;
     }
     hold(host);
-    if host.window_ref().reveal.as_ref().is_some_and(settings_search::Reveal::expired) {
-        host.window().reveal = None;
+    // The window's copy carries the outline's time: it is set into the context every frame.
+    let now = ctx.input(|i| i.time) * 1000.0;
+    if let Some(reveal) = host.window().reveal.as_mut() {
+        reveal.start(now);
+        if reveal.expired(now) {
+            host.window().reveal = None;
+        }
     }
     let sink = settings_search::shift_key_sink(ctx);
     settings_search::set_key_sink_prev(ctx, sink);
