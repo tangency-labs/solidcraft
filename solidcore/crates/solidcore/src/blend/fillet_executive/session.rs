@@ -6514,15 +6514,29 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                                 continue;
                             };
                             // A constrained closest point can return an endpoint one
-                            // parameter ulp inside the interval. It is still beside
-                            // the band: testing only t would extend the band's chord
-                            // across the face and falsely catch a distant rail (#2903).
-                            // Use the existing solver tolerance in geometric space,
-                            // independent of the edge curve's parameterization. An end
-                            // the run's next edge continues from is no end of the band.
+                            // parameter ulp inside the interval. Use the existing solver
+                            // tolerance in geometric space, independent of the edge curve's
+                            // parameterization. An end the run's next edge continues from is
+                            // no end of the band.
                             let at_run_end = (end0
                                 && (t <= ivl_j.min() || (e - *start_j).length() <= tol))
                                 || (end1 && (t >= ivl_j.max() || (e - *stop_j).length() <= tol));
+                            // Not the fork's (#18563): a sample past the run's end is judged
+                            // only where that end is an end of edge `b` itself (below);
+                            // otherwise it is beside the band: testing only t would extend the
+                            // band's chord across the face and falsely catch a distant rail
+                            // (#2903), and an end on another edge of the run (a tangent
+                            // chain's) says nothing of band `b`'s width. A closed edge (both
+                            // ends one point) has no end to run on past.
+                            let own_end_b = edge_curves
+                                .get(b)
+                                .map(|(_, _, ends)| *ends)
+                                .filter(|[q0, q1]| (*q0 - *q1).length() > tol)
+                                .filter(|ends| ends.iter().any(|&q| (e - q).length() <= tol));
+                            let past_end = match own_end_b {
+                                Some(ends) if at_run_end && band_has_ends => Some(ends),
+                                _ => None,
+                            };
                             let on_rail = match curve_b.drop_point(
                                 k,
                                 &ivl_b,
@@ -6540,7 +6554,7 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                                     return Err(error);
                                 }
                             };
-                            if !on_rail.success {
+                            if (at_run_end && past_end.is_none()) || !on_rail.success {
                                 continue; // beside the band, not across it
                             }
                             let r = match curve_b.evaluate_point(k, on_rail.parameter) {
@@ -6559,35 +6573,44 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                             {
                                 continue; // past the section that ends the band
                             }
-                            if at_run_end {
-                                // Not the fork's (#18563): `p` lies past the end of the run,
+                            if let Some([q0, q1]) = past_end {
+                                // Not the fork's (#18563): `p` lies past an end of edge `b`,
                                 // beside rail `b`'s kept part. Where that part runs on past
-                                // the end of a run of one edge (a round running out onto a
-                                // face beyond its edge's end, as onto the sphere that trims a
-                                // block's corner), the band runs on with it: a sample in it
-                                // refuses as one beside the edge does. A run of several edges
-                                // ends at another blend's edge, whose section says nothing of
-                                // band `b`'s width.
-                                if run.len() == 1
-                                    && band_has_ends
-                                    && inside_band_past_run_end(
-                                        k,
-                                        curve_b,
-                                        &ivl_b,
-                                        PastRunEnd {
-                                            end: e,
-                                            sample: p,
-                                            on_rail: (on_rail.parameter, r),
-                                            kept_ends: [
-                                                (kept_b.min(), band_ends_b[0]),
-                                                (kept_b.max(), band_ends_b[1]),
-                                            ],
-                                        },
-                                        tol,
-                                        apart,
-                                    )?
-                                    && !sample_off_face(k, self.target, *face_a, p)?
-                                {
+                                // the edge's end (a round running out onto a face beyond it,
+                                // as onto the sphere that trims a block's corner), the band
+                                // runs on with it: a sample in it refuses as one beside the
+                                // edge does. Where the judgement cannot be made (an
+                                // evaluation fails), the sample is classified as for its own
+                                // evaluations: off the face it is dropped, on it the failure
+                                // is returned (#19243).
+                                let other_end = if (e - q0).length() <= (e - q1).length() {
+                                    q1
+                                } else {
+                                    q0
+                                };
+                                let inside = match inside_band_past_run_end(
+                                    k,
+                                    curve_b,
+                                    &ivl_b,
+                                    PastRunEnd {
+                                        end: e,
+                                        other_end,
+                                        sample: p,
+                                        on_rail: (on_rail.parameter, r),
+                                        kept: [kept_b.min(), kept_b.max()],
+                                    },
+                                    tol,
+                                    apart,
+                                ) {
+                                    Ok(inside) => inside,
+                                    Err(error) => {
+                                        if sample_off_face(k, self.target, *face_a, p)? {
+                                            continue;
+                                        }
+                                        return Err(error);
+                                    }
+                                };
+                                if inside && !sample_off_face(k, self.target, *face_a, p)? {
                                     return Ok(false);
                                 }
                                 continue;
@@ -6677,33 +6700,38 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
     }
 }
 
-/// A sample of the band check whose foot on a band's run is the run's end
+/// A sample of the band check whose foot on a band's run is an end of the band's own edge
 /// ([`inside_band_past_run_end`]).
 #[derive(Clone, Copy)]
 struct PastRunEnd {
-    /// The run's end: the sample's foot on the run.
+    /// The edge's end: the sample's foot on the run.
     end: crate::math::Point3,
+    /// The edge's other end.
+    other_end: crate::math::Point3,
     /// The sample.
     sample: crate::math::Point3,
     /// The point of the band's rail nearest the sample, by its parameter, inside the rail's
     /// kept part.
     on_rail: (f64, crate::math::Point3),
-    /// The ends of the rail's kept part, by their parameters.
-    kept_ends: [(f64, crate::math::Point3); 2],
+    /// The parameters of the ends of the rail's kept part.
+    kept: [f64; 2],
 }
 
-/// The band check past a band's run of one edge (#18563): whether the sample lies in the band's
-/// run-on, the part of the band beside the rail's kept part past the run's end. The band's
-/// section at the run's end goes from the rail's point across from the end to the end; the
-/// run-on is the rail's part from there to the kept end nearer the run's end, and beside it the
-/// band is taken as that section carried along the rail. So the sample is in it where its
-/// nearest point of the rail lies strictly within that part, and it lies on the end's side of
-/// the rail, further than `tol` from it and short of the section's width by more than `apart`,
-/// as the check beside the edge judges a sample. A rail without a point across from the end, or
-/// a section no wider than `2 apart`, takes no band there.
+/// The band check past an end of a band's own edge (#18563): whether the sample lies in the
+/// band's run-on, the part of the band beside the rail's kept part past the edge's end. The
+/// band's section at that end goes from the rail's point across from the end to the end. The
+/// run-on is the rail's part from that point to the end of its kept part on the side away from
+/// the edge (the side the point across from the edge's other end does not lie on). The sample
+/// is in the run-on's band where its nearest point of the rail lies strictly within the
+/// run-on, and it lies on the end's side of the rail in the end section's direction, further
+/// than `tol` from the rail and short of that section's width by more than `apart`, as the
+/// check beside the edge judges a sample. The section's direction is the end's, not the rail's
+/// at the sample's nearest point: the two agree where the run-on is straight and stays on a
+/// plane. A rail without a point across from either end, or a section no wider than `2 apart`,
+/// takes no band there.
 ///
 /// # Errors
-/// Those of the drop onto the rail and its evaluation.
+/// Those of the drops onto the rail and its evaluation.
 fn inside_band_past_run_end(
     k: &Kernel,
     rail: &crate::curve::curve::Curve,
@@ -6715,32 +6743,33 @@ fn inside_band_past_run_end(
     use crate::geom::global_solver::SolverOperation;
     let PastRunEnd {
         end,
+        other_end,
         sample,
         on_rail: (t, r),
-        kept_ends: [(t0, q0), (t1, q1)],
+        kept: [t0, t1],
     } = at;
-    let across = rail.drop_point(
-        k,
-        ivl,
-        end,
-        None,
-        crate::math::BIG_DOUBLE,
-        None,
-        SolverOperation::Minimize,
-    )?;
-    if !across.success {
+    let drop = |q| {
+        rail.drop_point(
+            k,
+            ivl,
+            q,
+            None,
+            crate::math::BIG_DOUBLE,
+            None,
+            SolverOperation::Minimize,
+        )
+    };
+    let across = drop(end)?;
+    let across_other = drop(other_end)?;
+    if !across.success || !across_other.success {
         return Ok(false);
     }
-    // the kept end past the run's end: the one nearer the run's end
-    let t_far = if (q0 - end).length() <= (q1 - end).length() {
-        t0
+    // the run-on: from the point across from the end to the kept end on the side away from
+    // the point across from the edge's other end
+    let (lo, hi) = if across_other.parameter <= across.parameter {
+        (across.parameter, t1)
     } else {
-        t1
-    };
-    let (lo, hi) = if across.parameter <= t_far {
-        (across.parameter, t_far)
-    } else {
-        (t_far, across.parameter)
+        (t0, across.parameter)
     };
     if !(t > lo && t < hi) {
         return Ok(false);
