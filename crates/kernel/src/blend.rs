@@ -416,11 +416,6 @@ fn carried_on_round(body: &Body, pick: Vec3, reach: f64, blend: impl Fn(&Body) -
     // the blend itself fails with the face carried on, so carrying it on does not apply.
     let carry = |c: &solidcore_ops::CarriedFace| -> std::result::Result<Body, Option<FailedStep>> {
         let plane = Plane { origin: v(c.origin), x: v(c.along), y: v(c.across) };
-        // The slab's ends in the face's plane: from the edge's start it runs `s0` along the edge
-        // for each unit across it, and from the edge's end `s1` (both 0 between square ends).
-        let [p0, p1, p2, p3] = c.outline;
-        let (s0, s1) = ((p3[0] - p0[0]) / (p3[1] - p0[1]), (p2[0] - p1[0]) / (p2[1] - p1[1]));
-        let length = p1[0] - s1 * p1[1];
         let rect = Loop2::polygon(&c.outline.map(|p| Vec2::new(p[0], p[1])));
         let what = "building the slab that carries the face on";
         let slab = crate::build::extrude(&plane, &[Region2 { outer: rect, holes: vec![] }], c.depth[0], c.depth[1]).map_err(failed(what))?;
@@ -439,11 +434,9 @@ fn carried_on_round(body: &Body, pick: Vec3, reach: f64, blend: impl Fn(&Body) -
         let prism = crate::thicken(&sheet, 2.0 * room, true).map_err(failed("thickening the flat face's sheet"))?;
         // Past the edge's line the fill stands over the other face, not over the flat face's
         // outline, and is kept whole: between the slab's two ends, as far as the slab reaches.
-        let (from, to) = if c.other_side > 0.0 { (0.0, room.min(p2[1])) } else { (-room.min(-p0[1]), 0.0) };
-        // (exactly 0 and `length` between square ends)
-        let (start, end) = (|across: f64| 0.0 + s0 * across, |across: f64| length + s1 * across);
-        let beyond = Loop2::polygon(&[Vec2::new(start(from), from), Vec2::new(end(from), from), Vec2::new(end(to), to), Vec2::new(start(to), to)]);
         let what = "building the box past the edge's line";
+        let beyond = c.past_edge(room).map_err(|e| failed(what)(KernelError::Failed(e.to_string())))?;
+        let beyond = Loop2::polygon(&beyond.map(|p| Vec2::new(p[0], p[1])));
         let beyond = crate::build::extrude(&plane, &[Region2 { outer: beyond, holes: vec![] }], -room, room).map_err(failed(what))?;
         let beyond = beyond.into_iter().next().ok_or_else(|| nothing(what))?;
         let what = "joining the face's prism and the box past the edge's line";
