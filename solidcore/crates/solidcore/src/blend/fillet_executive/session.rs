@@ -5281,6 +5281,13 @@ impl FaceConstructionAccess<FilletObject> for SessionObjects<'_> {
             .copied()
             .map(FilletObject::Geometry))
     }
+    fn faces_bound_open_ends(
+        &mut self,
+        k: &mut Kernel,
+        executive: &mut FilletExecutive<FilletObject>,
+    ) -> Result<()> {
+        self.bound_open_fillet_ends(k, executive)
+    }
     fn faces_make_face(
         &mut self,
         k: &mut Kernel,

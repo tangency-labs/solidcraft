@@ -112,6 +112,7 @@ mod pinch_tests;
 mod planar_faces_tests;
 mod plane_fit;
 mod point_path;
+pub mod point_thread;
 mod polybool;
 mod polyhedron;
 mod prism;
@@ -191,7 +192,7 @@ pub use continuity_order::{Construction, Continuity};
 pub use corner_g2::{CURVATURE_SHARE, DEFAULT_SETBACK_FACTOR};
 pub use curvature_comb::{CombTooth, MAX_COMB_TEETH, MIN_COMB_TEETH, comb_edge_near, edge_comb, edge_distance, iso_comb};
 pub use delete_face::delete_faces;
-pub use distance::{BodyDistance, DistanceShape, Members, body_distance, edges_closest, point_closest};
+pub use distance::{BodyDistance, DistanceShape, Members, body_distance, edges_closest, faces_closest, point_closest};
 pub use draft_corners::{CornerFill, CornerOption, CornerRefusal, CornerReport, DraftCorner, draft_corners};
 pub use emboss::{cylinder_emboss_anchor, emboss_cylinder, emboss_cylinder_at, has_cylinder_emboss_wall, infer_cylinder_emboss};
 pub use fair::{
@@ -199,7 +200,7 @@ pub use fair::{
     fair_faces, fair_net, fair_nurbs_curve, fair_nurbs_surface, fair_surface,
 };
 pub use fill::{PATCH_ANGLE_TOL_DEG, PatchReport, PatchSpec, patch_edges_crowned, patch_edges_report, patch_edges_with};
-pub use helix::{loft_aligned, loft_to_point, sweep_helix, sweep_helix_mesh, sweep_helix_radial};
+pub use helix::{loft_to_point, sweep_helix, sweep_helix_mesh, sweep_helix_radial};
 pub use iges_in::{MAX_IGES_BYTES, iges_import, iges_to_step};
 pub use iges_out::iges_export_bodies;
 pub use intersection::{MeetingEdge, meeting_edges};

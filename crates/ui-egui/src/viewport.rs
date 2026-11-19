@@ -1467,32 +1467,66 @@ pub(crate) fn warm_shared_tris(mesh: &std::sync::Arc<solidcraft_engine::geom::Me
 /// where the renderer draws instances' edges, its shared edges, by the mesh's address (the mesh
 /// held, so its address stays its own). Made on the window thread, the first scene to show each
 /// part spent most of its time on them (a third of a second at a time for a hundred copies of a
-/// large assembly). Kept while the design is open, the triangles and edges shared with the scenes.
-pub(crate) type WarmedParts = std::sync::Arc<std::sync::Mutex<std::collections::HashMap<usize, WarmedPart>>>;
+/// large assembly). Each part is made once while the design is open, the triangles and edges
+/// shared with the scenes once one takes them.
+#[derive(Clone, Default)]
+pub(crate) struct WarmedParts(std::sync::Arc<std::sync::Mutex<std::collections::HashMap<usize, WarmSlot>>>);
+
+/// One part's slot in [`WarmedParts`]: its mesh, and what is made of it (`None`: taken by a
+/// scene). The first placement to reach the part makes it; the others wait for that one.
+struct WarmSlot {
+    mesh: std::sync::Arc<solidcraft_engine::geom::Mesh>,
+    made: Option<std::sync::Arc<std::sync::OnceLock<WarmMade>>>,
+}
+
+/// A part's shared vertices and shared edges (`None`: not wanted).
+type WarmMade = (std::sync::Arc<crate::gpu::SharedTris>, Option<std::sync::Arc<crate::gpu::SharedEdges>>);
 
 /// One part made ahead: its mesh, shared vertices and shared edges (`None`: not wanted).
 pub(crate) type WarmedPart =
     (std::sync::Arc<solidcraft_engine::geom::Mesh>, std::sync::Arc<crate::gpu::SharedTris>, Option<std::sync::Arc<crate::gpu::SharedEdges>>);
 
-/// Make `mesh`'s shared vertices and (with `edges`) its shared edges into `parts`, once.
-pub(crate) fn warm_part(parts: &WarmedParts, mesh: &std::sync::Arc<solidcraft_engine::geom::Mesh>, edges: bool) {
-    let key = std::sync::Arc::as_ptr(mesh) as usize;
-    if parts.lock().map_or(true, |p| p.get(&key).is_some_and(|(m, _, _)| std::sync::Arc::ptr_eq(m, mesh))) {
-        return;
-    }
-    let tris = std::sync::Arc::new(crate::gpu::SharedTris::new(mesh));
-    let edges = edges.then(|| make_shared_edges(mesh));
-    if let Ok(mut p) = parts.lock() {
-        p.insert(key, (mesh.clone(), tris, edges));
+impl WarmedParts {
+    /// The parts made and not taken yet.
+    #[cfg(test)]
+    pub(crate) fn ready(&self) -> Vec<WarmedPart> {
+        let Ok(p) = self.0.lock() else { return Vec::new() };
+        p.values().filter_map(|s| s.made.as_ref()?.get().map(|(t, e)| (s.mesh.clone(), t.clone(), e.clone()))).collect()
     }
 }
 
-/// `mesh`'s part made ahead, if the design being opened has it, taken: the scenes keep it from
-/// then on, so the parts made ahead hold nothing once all are shown.
-fn taken_part(parts: Option<&WarmedParts>, mesh: &std::sync::Arc<solidcraft_engine::geom::Mesh>) -> Option<WarmedPart> {
-    let mut p = parts?.lock().ok()?;
+/// Make `mesh`'s shared vertices and (with `edges`) its shared edges into `parts`, once while the
+/// design is open: a placement that finds the part being made waits for it, and one that finds
+/// it taken makes nothing. The map is locked only to find or claim the part's slot, never while
+/// a part is made.
+pub(crate) fn warm_part(parts: &WarmedParts, mesh: &std::sync::Arc<solidcraft_engine::geom::Mesh>, edges: bool) {
     let key = std::sync::Arc::as_ptr(mesh) as usize;
-    p.get(&key).is_some_and(|(m, _, _)| std::sync::Arc::ptr_eq(m, mesh)).then(|| p.remove(&key)).flatten()
+    let once = {
+        let Ok(mut p) = parts.0.lock() else { return };
+        match p.get(&key).filter(|s| std::sync::Arc::ptr_eq(&s.mesh, mesh)) {
+            Some(slot) => match &slot.made {
+                Some(once) => once.clone(),
+                None => return,
+            },
+            None => {
+                let once = std::sync::Arc::new(std::sync::OnceLock::new());
+                p.insert(key, WarmSlot { mesh: mesh.clone(), made: Some(once.clone()) });
+                once
+            }
+        }
+    };
+    once.get_or_init(|| (std::sync::Arc::new(crate::gpu::SharedTris::new(mesh)), edges.then(|| make_shared_edges(mesh))));
+}
+
+/// `mesh`'s part made ahead, if the design being opened has it made, taken: the scenes keep it
+/// from then on, so the parts made ahead hold nothing once all are shown (the slot stays, so the
+/// part is not made again).
+fn taken_part(parts: Option<&WarmedParts>, mesh: &std::sync::Arc<solidcraft_engine::geom::Mesh>) -> Option<WarmedPart> {
+    let mut p = parts?.0.lock().ok()?;
+    let slot = p.get_mut(&(std::sync::Arc::as_ptr(mesh) as usize)).filter(|s| std::sync::Arc::ptr_eq(&s.mesh, mesh))?;
+    let (tris, edges) = slot.made.as_ref()?.get()?.clone();
+    slot.made = None;
+    Some((mesh.clone(), tris, edges))
 }
 
 /// The shared vertices made ahead for `mesh`, taken from the warmed ones.
@@ -2063,9 +2097,8 @@ type SharedEdgesCache = std::sync::Arc<
 >;
 
 /// `mesh`'s model edges as the shaded view draws them, for the renderer to draw at each of its
-/// placements: each segment with the faces beside it in `mesh`'s own triangles (the triangles the
-/// placements are drawn from), and coarser copies for placements small on screen, simplified as
-/// a block's edges are ([`crate::edge_detail`]). Made once per mesh.
+/// placements, and coarser copies for placements small on screen, simplified as a block's edges
+/// are ([`crate::edge_detail`]). Made once per mesh.
 fn shared_edges(cache: &SharedEdgesCache, mesh: &std::sync::Arc<solidcraft_engine::geom::Mesh>) -> std::sync::Arc<crate::gpu::SharedEdges> {
     let key = std::sync::Arc::as_ptr(mesh) as usize;
     if let Ok(c) = cache.lock()
@@ -12514,7 +12547,7 @@ mod tests {
             assert!(began.elapsed().as_secs() < 60, "meshed");
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        let warmed: Vec<WarmedPart> = crate::open_meshing::warmed_parts(&app).unwrap().lock().unwrap().values().cloned().collect();
+        let warmed: Vec<WarmedPart> = crate::open_meshing::warmed_parts(&app).unwrap().ready();
         assert_eq!(warmed.len(), 1, "one part, made once for its placements");
         let (_, tris, edges) = &warmed[0];
         let edges = edges.as_ref().expect("its edges made too");
@@ -12526,9 +12559,35 @@ mod tests {
             assert!(std::sync::Arc::ptr_eq(&m.tris, tris), "the triangles made ahead");
             assert!(m.edges.as_ref().is_some_and(|e| std::sync::Arc::ptr_eq(e, edges)), "the edges made ahead");
         }
-        assert!(crate::open_meshing::warmed_parts(&app).unwrap().lock().unwrap().is_empty(), "taken by the scene");
+        let parts = crate::open_meshing::warmed_parts(&app).unwrap();
+        assert!(parts.ready().is_empty(), "taken by the scene");
+        // Another placement reaching the part after a scene took it makes none again.
+        let (mesh, _, _) = &warmed[0];
+        warm_part(&parts, mesh, true);
+        assert!(parts.ready().is_empty(), "made once while the design is open");
         let again = build_scene(&app);
         assert!(again.instanced.iter().filter_map(|m| m.edges.as_ref()).all(|e| std::sync::Arc::ptr_eq(e, edges)), "and kept");
+    }
+
+    /// A design opened before the GPU viewport is ready (its pipelines still being made) is
+    /// meshed again for that viewport once it is: its repeated part's shared vertices and edges
+    /// are made ahead all the same.
+    #[test]
+    fn a_design_opened_before_the_gpu_viewport_is_ready_makes_its_parts_for_it() {
+        let mut app = three_placed_parts(PARTS[0]);
+        let gpu = app.viewport.gpu.map(|g| GpuTarget { edges: true, ..g });
+        app.viewport.gpu = None;
+        crate::open_meshing::start(&mut app, None);
+        app.viewport.gpu = gpu;
+        crate::open_meshing::tick(&mut app, &egui::Context::default());
+        let began = std::time::Instant::now();
+        while crate::open_meshing::progress(&app).is_some_and(|(done, all)| done < all) {
+            assert!(began.elapsed().as_secs() < 60, "meshed");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let warmed = crate::open_meshing::warmed_parts(&app).unwrap().ready();
+        assert_eq!(warmed.len(), 1, "the part made for the GPU viewport");
+        assert!(warmed[0].2.is_some(), "with its edges");
     }
 
     /// A part's shared edges have a level as fine as a block simplifies a part's edges for a

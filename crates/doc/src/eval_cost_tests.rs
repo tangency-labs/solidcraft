@@ -2560,8 +2560,8 @@ fn a_circular_pattern_of_a_through_hole_cuts_its_copies_at_once() {
     let disc = std::f64::consts::PI * 2500.0 * 1.5;
     let v = disc_volume(&model);
     assert!((v - (disc - 29.0 * hole)).abs() < 1e-3 * hole, "{v}");
-    // The same copies again, landing in the holes cut already: each is intersected, and each
-    // still counts as a copy that removes no material.
+    // The same copies again, landing in the holes cut already: they are intersected together, in
+    // one boolean, and each still counts as a copy that removes no material.
     let hole_id = doc.features.iter().find(|f| f.name == "Hole").unwrap().id;
     hole_pattern(&mut doc, hole_id, 29);
     let work = counted(|| model.evaluate(&doc));
@@ -2569,9 +2569,30 @@ fn a_circular_pattern_of_a_through_hole_cuts_its_copies_at_once() {
     assert!(again.error.is_none(), "{again:?}");
     // (The kernel may add a note on a retry of a boolean on faces that lie on each other.)
     assert!(again.warning.as_deref().is_some_and(|w| w.starts_with("28 of 28 cut copies remove no material")), "{again:?}");
-    assert_eq!(work.miss_intersects, 28, "{work:?}");
+    assert_eq!(work.miss_intersects, 1, "{work:?}");
     assert!((disc_volume(&model) - v).abs() < 1e-3 * hole);
     assert!(model.results.iter().any(|r| r.id == pattern && r.warning.is_none()));
+}
+
+/// The copies of a pattern that remove no material are tested against the target in one boolean,
+/// not one a copy (#18396): a body with many faces makes every boolean cost seconds, and a
+/// design of many patterns pays that a copy at a time.
+#[test]
+fn the_copies_that_remove_no_material_are_tested_in_one_boolean() {
+    // The same copies again, landing in the holes cut already: they remove no material, and
+    // the kernel is asked about all of them at once. The count of the copies that remove no
+    // material does not change: all 28 still count.
+    let mut doc = Document::new("cut nothing");
+    disc_with_hole_pattern(&mut doc, 20.0, 29);
+    let mut model = Model::new();
+    counted(|| model.evaluate(&doc));
+    let hole_id = doc.features.iter().find(|f| f.name == "Hole").unwrap().id;
+    hole_pattern(&mut doc, hole_id, 29);
+    let work = counted(|| model.evaluate(&doc));
+    let again = model.results.last().unwrap();
+    assert!(again.error.is_none(), "{again:?}");
+    assert!(again.warning.as_deref().is_some_and(|w| w.starts_with("28 of 28 cut copies remove no material")), "{again:?}");
+    assert_eq!(work.miss_intersects, 1, "{work:?}");
 }
 
 #[test]
@@ -3217,6 +3238,7 @@ fn an_imports_healed_parts_replace_its_bodies_once_its_checks_end() {
         kind: kernel::IssueKind::Repaired,
         item: Some(1),
         part: String::new(),
+        paths: Vec::new(),
         faces: 0,
         times: 1,
         detail: "healed SMLib's check failures".into(),
@@ -3236,7 +3258,7 @@ fn an_imports_healed_parts_replace_its_bodies_once_its_checks_end() {
         vec![kernel::HealedBody { index: 0, body: healed, face_origin, face_source: face_source.clone() }],
     );
     let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
-    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), checks: checks.clone() }));
+    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, checks: checks.clone() }));
 
     assert!(model.settle_import_checks(), "a heal changes the import");
     assert!(model.settle_import_checks(), "until an evaluation brings it in, it is still owed");
@@ -3255,7 +3277,7 @@ fn an_imports_healed_parts_replace_its_bodies_once_its_checks_end() {
 
     // The same heal settled again: nothing to do.
     let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
-    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), checks }));
+    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, checks }));
     assert!(!model.settle_import_checks());
     model.evaluate(&doc);
     assert_eq!(model.last_recomputed, 0);
@@ -3282,6 +3304,7 @@ fn a_heal_the_next_read_finds_again_is_told_once() {
         kind: kernel::IssueKind::Repaired,
         item: Some(1),
         part: String::new(),
+        paths: Vec::new(),
         faces: 0,
         times: 1,
         detail: "healed SMLib's check failures".into(),
@@ -3298,7 +3321,7 @@ fn a_heal_the_next_read_finds_again_is_told_once() {
     };
     let ended = |model: &mut Model, checks: kernel::ImportChecks| {
         let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
-        r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), checks }));
+        r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, checks }));
     };
     ended(&mut model, run());
     assert!(model.settle_import_checks());
@@ -3379,6 +3402,7 @@ fn a_heal_that_ends_after_the_preference_turned_off_leaves_no_healed_note() {
         kind: kernel::IssueKind::Repaired,
         item: Some(1),
         part: String::new(),
+        paths: Vec::new(),
         faces: 0,
         times: 1,
         detail: "healed SMLib's check failures".into(),
@@ -3390,7 +3414,7 @@ fn a_heal_that_ends_after_the_preference_turned_off_leaves_no_healed_note() {
         vec![kernel::HealedBody { index: 0, body: healed, face_origin: vec![0; n], face_source: (0..n).collect() }],
     );
     let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
-    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), checks }));
+    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, checks }));
 
     assert!(model.settle_import_checks_under(false), "an evaluation is owed: the import is read again");
     assert!(!model.has_import_heals(), "the heal is not taken");

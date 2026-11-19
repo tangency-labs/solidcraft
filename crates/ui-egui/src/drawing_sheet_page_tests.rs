@@ -39,6 +39,174 @@ fn note_tool_places_text_on_the_active_sheet() {
     assert_eq!(note.content.0, vec![solidcraft_engine::geom::cell::Part::Text("Deburr all edges".to_owned())]);
 }
 
+/// A right-click on the sheet opens the menu a sketch's right-click opens: it selects what is under
+/// the pointer first, offers Edit and Delete for it, then the tools, then Undo and Redo. On empty
+/// paper the selection stays, and a right-click with a tool in hand puts the tool down.
+#[test]
+fn right_click_opens_the_shared_menu_on_what_is_under_the_pointer() {
+    use solidcraft_engine::Sel;
+    let (mut h, _) = plate_sheet();
+    let dimension = h.app.session.drawing("drawing.inspect").unwrap().dimensions[0].id;
+    let read = h.app.run("drawing.dimension.inspect", json!({"dimension": solidcraft_engine::doc::ids::encode(dimension)})).unwrap();
+    let corners: Vec<[f64; 2]> = serde_json::from_value(read["layout"]["text_boxes"][0].clone()).unwrap();
+    let (x, y) = corners.iter().fold((0.0, 0.0), |sum, p| (sum.0 + p[0] / 4.0, sum.1 + p[1] / 4.0));
+    let screen = |x: f64, y: f64| {
+        let paper = crate::scenario::rect_of("sheet:paper").unwrap();
+        [paper.left() + paper.width() * x as f32 / 420.0, paper.bottom() - paper.height() * y as f32 / 297.0]
+    };
+    let labels = |h: &Harness| -> Vec<String> {
+        crate::context_menu::describe(&h.app)["items"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|item| item["label"].as_str().map(str::to_owned))
+            .collect()
+    };
+    let picked = |h: &Harness| -> Vec<u64> {
+        h.app.session.selection.iter().filter_map(|s| if let Sel::Drawing { object, .. } = s { Some(*object) } else { None }).collect()
+    };
+
+    h.step(&json!({"click": screen(x, y), "button": "right"})).unwrap();
+    h.frames(3);
+    assert_eq!(picked(&h), [dimension], "the right-click selects the dimension under it");
+    let rows = labels(&h);
+    assert_eq!(&rows[..2], ["Edit Text", "Delete"], "{rows:?}");
+    for row in ["Base View", "Dimension", "Note", "Undo", "Redo"] {
+        assert!(rows.iter().any(|label| label == row), "{row} is offered: {rows:?}");
+    }
+    let undo = h.app.session.undo.len();
+    crate::context_menu::pick(&mut h.app, "Delete").unwrap();
+    h.frames(4);
+    assert!(h.app.session.drawing("drawing.inspect").unwrap().dimension(dimension).is_none(), "the menu's Delete is the Delete key's");
+    assert_eq!(h.app.session.undo.len(), undo + 1, "in one undo step");
+
+    // Empty paper: no Edit or Delete, the tools and Undo; Undo brings the dimension back.
+    h.step(&json!({"click": screen(300.0, 60.0), "button": "right"})).unwrap();
+    h.frames(3);
+    let rows = labels(&h);
+    assert_eq!(rows.first().map(String::as_str), Some("Base View"), "{rows:?}");
+    crate::context_menu::pick(&mut h.app, "Undo").unwrap();
+    h.settle();
+    assert!(h.app.session.drawing("drawing.inspect").unwrap().dimension(dimension).is_some());
+
+    // A view's menu edits it; the selection of several things keeps to Delete.
+    h.step(&json!({"click": screen(140.0, 180.0), "button": "right"})).unwrap();
+    h.frames(3);
+    let rows = labels(&h);
+    assert_eq!(&rows[..3], ["Edit View", "Projected View", "Delete"], "{rows:?}");
+    crate::context_menu::pick(&mut h.app, "Edit View").unwrap();
+    h.frames(3);
+    assert!(crate::drawing_workspace::inspector_visible(&h.app), "Edit opens the view's options, as a double-click does");
+    crate::drawing_workspace::close_panel(&mut h.app);
+
+    // The menu's tools start as their ribbon buttons do. With a tool in hand a right-click puts
+    // it down, as it finishes a sketch tool.
+    h.step(&json!({"click": screen(300.0, 60.0), "button": "right"})).unwrap();
+    h.frames(3);
+    crate::context_menu::pick(&mut h.app, "Note").unwrap();
+    h.frames(3);
+    assert!(crate::drawing_workspace::placing_note(&h.app));
+    h.step(&json!({"click": screen(300.0, 60.0), "button": "right"})).unwrap();
+    h.frames(3);
+    assert!(!crate::drawing_workspace::placing_note(&h.app));
+    assert_eq!(crate::context_menu::describe(&h.app)["open"], false, "and opens no menu");
+
+    // `ui.menu` at a point opens the same menu on what is there.
+    h.call("ui.menu", json!({"x": screen(140.0, 180.0)[0], "y": screen(140.0, 180.0)[1]}));
+    h.frames(4);
+    assert_eq!(labels(&h).first().map(String::as_str), Some("Edit View"));
+    h.call("ui.menu", json!({"close": true}));
+}
+
+/// A double-click on a dimension or a note edits its text where it is, in the box a sketch
+/// dimension's value is typed in: Enter changes it in one undo step, Esc leaves it, and the
+/// number typed back (or nothing) shows the measured number again.
+#[test]
+fn double_click_edits_a_dimensions_or_a_notes_text_in_place() {
+    let (mut h, _) = plate_sheet();
+    let encode = solidcraft_engine::doc::ids::encode;
+    let dimension = h.app.session.drawing("drawing.inspect").unwrap().dimensions[0].id;
+    let note = h.app.run("drawing.note.add", json!({"anchor": {"sheet": "Sheet 1"}, "at": [300, 230], "content": "DEBURR"})).unwrap();
+    let note = solidcraft_engine::doc::ids::decode(note["note"].as_str().unwrap()).unwrap();
+    settle(&mut h);
+    let screen = |x: f64, y: f64| {
+        let paper = crate::scenario::rect_of("sheet:paper").unwrap();
+        [paper.left() + paper.width() * x as f32 / 420.0, paper.bottom() - paper.height() * y as f32 / 297.0]
+    };
+    let read = |h: &mut Harness| h.app.run("drawing.dimension.inspect", json!({"dimension": encode(dimension)})).unwrap();
+    let text_at = |h: &mut Harness| {
+        let corners: Vec<[f64; 2]> = serde_json::from_value(read(h)["layout"]["text_boxes"][0].clone()).unwrap();
+        let (x, y) = corners.iter().fold((0.0, 0.0), |sum, p| (sum.0 + p[0] / 4.0, sum.1 + p[1] / 4.0));
+        screen(x, y)
+    };
+    let measured = read(&mut h)["text"].as_str().unwrap().to_owned();
+    let type_over = |h: &mut Harness, at: [f32; 2], text: &str, end: &str| {
+        h.step(&json!({"click": at, "double": true})).unwrap();
+        h.frames(4);
+        assert!(crate::dim_view::editing(), "the double-click opens the box");
+        assert!(!crate::drawing_workspace::inspector_visible(&h.app), "not the side panel");
+        h.step(&json!({"key": "A", "cmd": true})).unwrap();
+        if text.is_empty() {
+            h.step(&json!({"key": "Delete"})).unwrap();
+        } else {
+            h.step(&json!({"text": text})).unwrap();
+        }
+        h.step(&json!({"key": end})).unwrap();
+        h.frames(4);
+        assert!(!crate::dim_view::editing(), "{end} closes the box");
+    };
+
+    let undo = h.app.session.undo.len();
+    let at = text_at(&mut h);
+    type_over(&mut h, at, "100 TYP", "Enter");
+    assert_eq!(read(&mut h)["text"], "100 TYP");
+    assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
+    let at = text_at(&mut h);
+    type_over(&mut h, at, "nothing", "Escape");
+    assert_eq!(read(&mut h)["text"], "100 TYP", "Esc leaves the text");
+    // Another text over the first is one step back to the first; the measured number typed over
+    // a text shows the number again, measured, not kept as a text of its own.
+    let undo = h.app.session.undo.len();
+    let at = text_at(&mut h);
+    type_over(&mut h, at, "SEE NOTE", "Enter");
+    assert_eq!(read(&mut h)["text"], "SEE NOTE");
+    assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
+    h.step(&json!({"key": "Z", "cmd": true})).unwrap();
+    h.settle();
+    assert_eq!(read(&mut h)["text"], "100 TYP", "undone in one step, to the text before");
+    let at = text_at(&mut h);
+    type_over(&mut h, at, &measured, "Enter");
+    assert!(read(&mut h)["record"]["override_text"].is_null(), "the number typed over a text is measured again");
+    h.step(&json!({"key": "Z", "cmd": true})).unwrap();
+    h.settle();
+    assert_eq!(read(&mut h)["text"], "100 TYP");
+    let at = text_at(&mut h);
+    type_over(&mut h, at, "", "Enter");
+    assert_eq!(read(&mut h)["text"], measured.as_str(), "an empty text shows the measured number again");
+    assert!(read(&mut h)["record"]["override_text"].is_null());
+    let undo = h.app.session.undo.len();
+    let at = text_at(&mut h);
+    type_over(&mut h, at, &measured, "Enter");
+    assert!(read(&mut h)["record"]["override_text"].is_null(), "the number typed back stays measured");
+    assert_eq!(h.app.session.undo.len(), undo, "and is no step");
+
+    // A note: its text box is to the right of and below where it is placed.
+    let bounds = {
+        let sheet = crate::drawing_sheet_page::active_sheet(&h.app).unwrap();
+        let view = drawing_scene::extract(&mut h.app.session, sheet).unwrap();
+        view.objects.iter().find(|object| object.object == note).unwrap().bounds_mm
+    };
+    let at = screen((bounds.min.x + bounds.max.x) / 2.0, (bounds.min.y + bounds.max.y) / 2.0);
+    type_over(&mut h, at, "DEBURR ALL EDGES", "Enter");
+    let drawing = h.app.session.drawing("drawing.inspect").unwrap();
+    assert_eq!(drawing.notes.by_id(note).unwrap().content.0, vec![solidcraft_engine::geom::cell::Part::Text("DEBURR ALL EDGES".to_owned())]);
+
+    // A view has no one text: its options open, as before.
+    h.step(&json!({"click": screen(140.0, 180.0), "double": true})).unwrap();
+    h.frames(4);
+    assert!(!crate::dim_view::editing() && crate::drawing_workspace::inspector_visible(&h.app));
+}
+
 #[test]
 fn dimension_tool_places_a_view_edge_length() {
     let (mut h, front) = plate_sheet();

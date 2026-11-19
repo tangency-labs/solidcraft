@@ -247,6 +247,8 @@ pub struct OffsetExecutive {
     /// inverted (its neighbours' offsets crossed over it; `TrimmedEdge`), which
     /// `resolve_crossing_loops` resolves when they have one loop.
     pub(super) inverted_faces: BTreeSet<FaceId>,
+    /// Genuine endpoints beyond a periodic chart seam, resolved before gap closure.
+    pub(super) periodic_boundary_ends: Vec<super::periodic_boundary::BoundaryEnd>,
     /// Not in the fork (solidcore#3329): each wall carried on past a region of a face its
     /// loops wind round the other way within a wall, and the strip that carries it on
     /// (`resolve_crossing_loops`); the merge does not intersect the two.
@@ -255,6 +257,8 @@ pub struct OffsetExecutive {
     /// uses whose edge `EdgeuseOffset` could not mate (`MateEdges` failed); the merge
     /// intersects their faces' offsets as upstream does, not taking them as mated.
     pub(super) unmated_edgeuses: BTreeSet<EdgeuseId>,
+    /// Source uses whose paired edge curves were successfully installed.
+    pub(super) mated_edgeuses: BTreeSet<EdgeuseId>,
     /// The faces of a local operation and the surfaces replacing theirs, in step (the
     /// part of `SmLocalOperationGeometryCreation` the executive reads: `m_vFaces`,
     /// `m_vSurfaces`).
@@ -315,8 +319,10 @@ impl OffsetExecutive {
             collapsed_faces: Vec::new(),
             collapsed_displacements: Vec::new(),
             inverted_faces: BTreeSet::new(),
+            periodic_boundary_ends: Vec::new(),
             wall_extensions: Vec::new(),
             unmated_edgeuses: BTreeSet::new(),
+            mated_edgeuses: BTreeSet::new(),
             local_faces: Vec::new(),
             local_surfaces: Vec::new(),
         }
@@ -646,6 +652,8 @@ impl OffsetExecutive {
         self.faceuse_extension_reaches.clear();
         self.edge_bounds.clear();
         self.crossing_edgeuses.clear();
+        self.periodic_boundary_ends.clear();
+        self.mated_edgeuses.clear();
         self.wall_extensions.clear();
     }
 

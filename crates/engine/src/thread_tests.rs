@@ -139,6 +139,56 @@ fn conical_thread_fades_on_a_sharp_point_and_refuses_a_full_depth_there() {
 }
 
 #[test]
+fn conical_thread_keeps_the_requested_runout_inside_the_free_shank_end() {
+    use solidcraft_kernel::PointClass::{Inside, Outside};
+
+    for (ease, near_end) in [(json!(null), Outside), (json!("short"), Inside)] {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius":4,"height":3,"body_name":"Screw"}));
+        run(&mut s, "solid.cone", json!({"radius":4,"height":-8,"operation":"join","targets":["Screw"]}));
+        let mut params = json!({"face":[4,0,1],"designation":"M8x1.25","modeled":true,"point":"follow"});
+        if !ease.is_null() {
+            params["ease_out"] = ease;
+        }
+        run(&mut s, "solid.thread", params);
+        let state = s.model.state();
+        let body = &state.body("Screw").unwrap().body;
+        let at = |z: f64, r: f64| {
+            let a = 2.0 * PI * z / 1.25;
+            Vec3::new(-a.sin() * r, a.cos() * r, z)
+        };
+        // Short fades over 1.25 pitches, starting at 3 - 1.5625 mm. At
+        // z = 0.75 the depth is still nominal. At z = 2.75 only 16% remains.
+        assert_eq!(body.classify_point(at(0.75, 3.7)).unwrap(), Outside);
+        assert_eq!(body.classify_point(at(2.75, 3.7)).unwrap(), near_end);
+        assert_eq!(body.classify_point(at(2.75, 3.95)).unwrap(), Outside);
+    }
+}
+
+#[test]
+fn conical_thread_caps_fade_on_a_shallow_point() {
+    use solidcraft_kernel::PointClass::{Inside, Outside};
+
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius":4,"height":3,"body_name":"Screw"}));
+    run(&mut s, "solid.cone", json!({"radius":4,"top_radius":3.9,"height":-1,"operation":"join","targets":["Screw"]}));
+    run(&mut s, "solid.thread", json!({"face":[4,0,1],"designation":"M8x1.25","modeled":true,"point":"follow","point_depth":"fade"}));
+    let state = s.model.state();
+    let body = &state.body("Screw").unwrap().body;
+    let at = |z: f64, r: f64| {
+        let a = 2.0 * PI * z / 1.25;
+        Vec3::new(-a.sin() * r, a.cos() * r, z)
+    };
+    // The midpoint stock radius is 3.95 mm. The Fade rule limits the
+    // groove to half the 0.05 mm radial rise, leaving a 3.925 mm root.
+    assert_eq!(body.classify_point(at(-0.5, 3.921)).unwrap(), Inside);
+    assert_eq!(body.classify_point(at(-0.5, 3.929)).unwrap(), Outside);
+    let shank_root = 4.0 - 5.0 * 3f64.sqrt() / 16.0 * 1.25;
+    assert_eq!(body.classify_point(at(1.5, shank_root - 0.004)).unwrap(), Inside);
+    assert_eq!(body.classify_point(at(1.5, shank_root + 0.004)).unwrap(), Outside);
+}
+
+#[test]
 fn conical_thread_sharp_point_mesh_includes_all_of_its_faces() {
     let mut s = Session::default();
     run(&mut s, "solid.cylinder", json!({"radius":1.5,"height":3,"body_name":"Screw"}));

@@ -11,6 +11,7 @@ use std::cell::OnceCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::Serialize;
+use solidcore_ops::thread_face::{AxialFace, PointGeometryError, Profile, reverses_axis};
 use solidcore_record::Vec3;
 use solidcore_record::brep::{Brep, Edge, Loop};
 use solidcraft_geom::{Mesh, UnitVec3};
@@ -420,7 +421,7 @@ pub struct CylinderFace {
 fn cylinder_of(faces: &Faces, face: usize) -> Option<(UnitVec3, Vec3, f64, bool)> {
     let Some(Surf::Cylinder { o, a, r, convex }) = faces.surf(face) else { return None };
     let a = a.unit()?;
-    let a = if a.x + a.y * 1e-3 + a.z * 1e-6 < 0.0 { -a } else { a };
+    let a = if reverses_axis((*a).into()) { -a } else { a };
     Some((a, *o, *r, !*convex))
 }
 
@@ -435,39 +436,21 @@ pub struct ThreadFace {
 
 impl ThreadFace {
     fn of(faces: &Faces<'_>, index: usize) -> Option<Self> {
-        let (axis, axis_point, radius, internal, slope) = match faces.surf(index)? {
-            Surf::Cylinder { .. } => {
-                let (axis, origin, radius, internal) = cylinder_of(faces, index)?;
-                (axis, origin, Some(radius), internal, 0.0)
-            }
-            Surf::Cone { v, a, half, convex } => {
-                let a = a.unit()?;
-                let axis = if a.x + a.y * 1e-3 + a.z * 1e-6 < 0.0 { -a } else { a };
-                (axis, *v, None, !*convex, a.dot(*axis) * half.tan())
-            }
+        let (origin, direction, profile, internal) = match *faces.surf(index)? {
+            Surf::Cylinder { o, a, r, convex } => (o, a, Profile::Cylinder(r), !convex),
+            Surf::Cone { v, a, half, convex } => (v, a, Profile::Cone(half), !convex),
             _ => return None,
         };
-        // Round rims normal to the axis have constant axial coordinate. A generator is
-        // straight, so its end vertices give its entire axial range. Use the kernel's
-        // trimmed-face query for picking, including faces with more general trims.
-        let (start, end) = faces
-            .vertices(index)
-            .into_iter()
-            .map(|p| (p - axis_point).dot(axis))
-            .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), z| (a.min(z), b.max(z)));
-        let wide = if slope < 0.0 { start } else { end };
-        let radius = radius.unwrap_or(wide * slope);
-        (start.is_finite() && end > start && radius.is_finite() && radius > 0.0).then_some(Self {
-            index,
-            axis: CylinderFace { axis_point, axis, radius, start, end, internal },
-            slope,
-        })
+        let vertices = faces.vertices(index).into_iter().map(Into::into);
+        let AxialFace { axis, extent: [start, end], radius, slope, .. } =
+            AxialFace::measure(origin.into(), direction.into(), profile, internal, vertices)?;
+        let axis = Vec3::from(axis).unit()?;
+        Some(Self { index, axis: CylinderFace { axis_point: origin, axis, radius, start, end, internal }, slope })
     }
 
-    /// Evaluate the analytic radius at an axial coordinate.
-    pub fn radius_at(self, z: f64) -> f64 {
-        let wide = if self.slope < 0.0 { self.axis.start } else { self.axis.end };
-        self.axis.radius + self.slope * (z - wide)
+    fn geometry(self) -> AxialFace {
+        let CylinderFace { axis_point, axis, radius, start, end, internal } = self.axis;
+        AxialFace { origin: axis_point.into(), axis: (*axis).into(), extent: [start, end], radius, slope: self.slope, internal }
     }
 }
 
@@ -485,41 +468,30 @@ pub fn thread_face_at(b: &Body, p: Vec3) -> Option<(f64, ThreadFace)> {
 /// Return the rim's side (0 for the low end), the small or far end, and its signed slope.
 pub fn thread_point(b: &Body, shank: ThreadFace, from: Option<Vec3>) -> Result<(usize, f64, f64)> {
     let invalid = |why: &str| crate::KernelError::Invalid(why.into());
-    let c = shank.axis;
+    let geometry = shank.geometry();
     let tol = (b.size() * 1e-7).max(1e-7);
-    let along = |p: Vec3| (p - c.axis_point).dot(c.axis);
-    let side_of = |z: f64| usize::from((z - c.start).abs() > (z - c.end).abs());
-    let requested = from.map(|p| side_of(along(p)));
+    let requested = from.map(|p| geometry.nearest_end(p.into()));
     let faces = Faces::new(b.record(), tol);
     let mut candidates = BTreeMap::new();
     for e in crate::offset::face_edges(b.record(), shank.index) {
         let Some(edge) = b.record().edges.get(e as usize) else { continue };
-        let at = edge.vertices.iter().filter_map(|&v| b.record().vertices.get(v as usize)).map(|v| along(Vec3::from(v.point)));
-        for (side, end) in [(0, c.start), (1, c.end)] {
+        let at = edge.vertices.iter().filter_map(|&v| b.record().vertices.get(v as usize)).map(|v| geometry.project(v.point));
+        for (side, end) in geometry.extent.into_iter().enumerate() {
             if requested.is_some_and(|s| s != side) || !at.clone().any(|z| (z - end).abs() <= tol) {
                 continue;
             }
             for index in faces_of(edge).into_iter().filter(|&i| i != shank.index) {
                 let Some(cone) = ThreadFace::of(&faces, index).filter(|c| c.slope != 0.0) else { continue };
-                let v = cone.axis.axis_point - c.axis_point;
-                let direction = cone.axis.axis.dot(*c.axis);
-                if direction.abs() < 1.0 - 1e-9 || (v - c.axis * v.dot(c.axis)).len() > tol {
-                    return Err(invalid("the screw point is not on the shank's axis"));
-                }
-                let lo = along(cone.axis.axis_point + cone.axis.axis * cone.axis.start);
-                let hi = along(cone.axis.axis_point + cone.axis.axis * cone.axis.end);
-                let far = if side == 0 { lo.min(hi) } else { lo.max(hi) };
-                if (far - end).abs() <= tol {
-                    // A coaxial cone at the other end of this edge is not a point at this end.
+                let Some((far, slope)) = geometry.point_at_end(cone.geometry(), side == 0, tol).map_err(|error| {
+                    invalid(match error {
+                        PointGeometryError::NonCoaxial => "the screw point is not on the shank's axis",
+                        PointGeometryError::Widens => "the screw point widens away from the shank",
+                        PointGeometryError::RadiusMismatch => "the screw point does not meet the shank at its radius",
+                    })
+                })?
+                else {
                     continue;
-                }
-                let slope = direction * cone.slope;
-                if (far - end) * slope >= 0.0 || cone.axis.internal {
-                    return Err(invalid("the screw point widens away from the shank"));
-                }
-                if (cone.radius_at((end - v.dot(c.axis)) / direction) - c.radius).abs() > tol {
-                    return Err(invalid("the screw point does not meet the shank at its radius"));
-                }
+                };
                 if let Some((other, _)) = candidates.insert(side, (far, slope))
                     && (far - other).abs() > tol
                 {
