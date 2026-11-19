@@ -27,6 +27,7 @@ pub mod drawing_scene;
 mod drawing_table_paper;
 pub mod drawing_view;
 pub mod easyprint;
+mod failure_codes;
 pub mod frames;
 pub mod fuzz;
 #[cfg(not(target_arch = "wasm32"))]
@@ -159,7 +160,10 @@ impl EngineError {
     pub(crate) fn of_feature(r: &solidcraft_doc::FeatureResult, error: String) -> EngineError {
         match &r.error_code {
             _ if r.internal => EngineError::Internal(String::new(), error),
-            Some(code) => EngineError::Feature(Box::new(FeatureFailure { error, code: code.clone() })),
+            Some(code) => {
+                failure_codes::note(&error, code);
+                EngineError::Feature(Box::new(FeatureFailure { error, code: code.clone() }))
+            }
             None => EngineError::Other(error),
         }
     }
@@ -188,6 +192,8 @@ impl From<solidcraft_io::IoError> for EngineError {
 }
 
 pub type Result<T> = std::result::Result<T, EngineError>;
+
+pub use failure_codes::failure_code_of;
 
 /// Why [`Session::drawn`] gives no design for a drawing's source.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
