@@ -1044,3 +1044,34 @@ fn configuration_escape_discards_a_cell_edit() {
     h.frames(3);
     assert_eq!(config_cell(&h, &first, 0), before, "Escape discards");
 }
+
+/// A suppression column is a check box ([T-692](https://tickets.solidcraft.io/t/692)): a click or
+/// Space toggles it, and Tab and Enter move on from it, as from a value cell, without toggling.
+#[test]
+fn configuration_suppression_cells_are_check_boxes() {
+    let mut h = fixture();
+    let feature = h.app.session.doc.features[0].name.clone();
+    h.app.run("config.configure", json!({"params":["width"],"features":[feature]})).unwrap();
+    h.app.run("config.row", json!({"name":"Small"})).unwrap();
+    h.app.start("config.table");
+    h.frames(4);
+    let suppressed = |h: &Harness, row: &str| config_cell(h, row, 1);
+    let rows: Vec<String> = h.app.session.doc.configs.rows.iter().map(|r| r.name.clone()).collect();
+    let (first, second) = (&rows[0], &rows[1]);
+    assert_eq!(suppressed(&h, first), "false");
+    let column = format!("suppress:{feature}");
+    let checkbox = h.output.accesskit_update.as_ref().unwrap().nodes.iter().filter(|(_, n)| n.role() == egui::accesskit::Role::CheckBox).count();
+    assert!(checkbox >= 2, "one check box per row, not a text box");
+    h.step(&json!({"click":{"handle":format!("config:cell:{first}:{column}")}})).unwrap();
+    h.frames(2);
+    assert_eq!(suppressed(&h, first), "true", "a click suppresses");
+    h.run(&json!([{"key":"Space"}, {"frames":2}])).unwrap();
+    assert_eq!(suppressed(&h, first), "false", "Space toggles the focused box");
+    h.run(&json!([{"key":"Enter"}, {"frames":2}])).unwrap();
+    assert_eq!(suppressed(&h, first), "false", "Enter moves on rather than toggling");
+    h.run(&json!([{"key":"Space"}, {"frames":2}])).unwrap();
+    assert_eq!(suppressed(&h, second), "true", "Enter moved down the column");
+    h.run(&json!([{"click":{"handle":format!("config:cell:{first}:param:width")}}, {"frames":2}, {"key":"Tab"}, {"frames":2}, {"key":"Space"}, {"frames":2}]))
+        .unwrap();
+    assert_eq!(suppressed(&h, first), "true", "Tab lands in the box");
+}
