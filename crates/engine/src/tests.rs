@@ -5489,6 +5489,29 @@ fn boundary_fill_cells() {
     assert!(s.execute("solid.boundary_fill", &json!({"tools": ["A"], "cells": [[100, 100, 100]]})).is_err());
 }
 
+/// An open square tube crossing two cylinders cannot be treated as a solid operand.
+#[test]
+fn boundary_fill_refuses_open_tube_tools_without_changing_the_design() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [100, 0, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}, "name": "Section"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-10, 0], "p1": [10, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "surface.extrude", json!({"sketch": "Section", "distance": 180, "body_name": "Tube"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 105, "height": 100, "base": [0, 0, -40], "body_name": "Inner"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 270, "height": 100, "base": [0, 0, -40], "body_name": "Outer"}));
+    assert!(s.model.state().body("Tube").unwrap().body.is_surface());
+    for remove_tools in [false, true] {
+        let before = s.doc.to_json();
+        let error = s
+            .execute("solid.boundary_fill", &json!({"tools": ["Tube", "Inner", "Outer"], "cells": [[175, 0, 10]], "remove_tools": remove_tools}))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("Boundary Fill needs closed solid tools"), "{error}");
+        assert_eq!(s.doc.to_json(), before);
+        assert_eq!(s.model.state().bodies.len(), 3);
+    }
+}
+
 /// Rectangles name their sides and corners, so they can be dimensioned without inspecting the
 /// sketch first, whichever way round the corners were given.
 #[test]
