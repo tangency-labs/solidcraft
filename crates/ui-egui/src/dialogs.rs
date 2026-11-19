@@ -3751,6 +3751,11 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
         if matches!(d.kind, Kind::SketchModify(_)) && awaiting_selection(&error) {
             return;
         }
+        // Extrude can open at 0 (`extrude_start` custom): no depth yet is where it starts, not a
+        // failure. OK stays off and no preview is drawn until a distance is typed or pulled.
+        if matches!(d.kind, Kind::Extrude { .. }) && error.ends_with("extrude distance is zero") {
+            return;
+        }
         // Other dialogs say so on OK ("select a plane first", "pick an axis"): that is what is
         // left to pick, not a failure, so it is shown plainly, with no Create Issue (#3292, #3773).
         // An operation on a part the kernel refuses: the part, what is wrong with it, and what
@@ -5313,6 +5318,7 @@ pub(crate) fn length_default(s: &Session, number: &str) -> String {
 /// The distance a new Extrude dialog opens with (`extrude_start`): 10 in the design's unit, as
 /// before, unless the preference asks for the last new extrude's distance or a typed one. A value
 /// that isn't a usable length (none remembered yet, a custom entry that doesn't read) gives the 10.
+/// A typed 0 is kept: the dialog opens with no depth until one is typed or pulled.
 pub(crate) fn extrude_start_distance(app: &SolveApp) -> String {
     use crate::prefs::ExtrudeStart;
     let p = &app.preferences;
@@ -5321,9 +5327,10 @@ pub(crate) fn extrude_start_distance(app: &SolveApp) -> String {
         ExtrudeStart::LastUsed => Some(p.extrude_last_distance.trim()),
         ExtrudeStart::Custom => Some(p.extrude_custom_distance.trim()),
     };
-    match wanted {
-        Some(text) if usable_extrude_distance(app, text).is_some() => text.to_string(),
-        _ => length_default(&app.session, "10"),
+    match wanted.and_then(|text| Some((text, app.session.doc.eval(text, ValueKind::Length).ok().filter(|v| v.is_finite())?))) {
+        Some((_, v)) if v.abs() <= 1e-9 => length_default(&app.session, "0"),
+        Some((text, _)) => text.to_string(),
+        None => length_default(&app.session, "10"),
     }
 }
 

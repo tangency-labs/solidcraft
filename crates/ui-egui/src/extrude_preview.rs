@@ -576,6 +576,57 @@ mod tests {
         assert_eq!(error, engine, "the same error as the extrusion's own");
     }
 
+    /// A Custom start of 0 (`extrude_start`): the dialog opens at `0 mm` with nothing drawn and OK
+    /// waiting, without a red refusal; a distance typed into it previews and OKs, and 0 again is
+    /// quiet. The default (10) and a Custom 10 still open with the preview.
+    #[test]
+    fn extrude_opens_at_zero_quietly_and_a_typed_distance_previews() {
+        for (custom, shown, previews) in
+            [(None, "10 mm", true), (Some("0 mm"), "0 mm", false), (Some("0"), "0 mm", false), (Some("10 mm"), "10 mm", true)]
+        {
+            let mut h = Harness::new();
+            if let Some(text) = custom {
+                h.app.preferences.extrude_start = crate::prefs::ExtrudeStart::Custom;
+                h.app.preferences.extrude_custom_distance = text.into();
+            }
+            h.app.run("solid.box", json!({"length":4,"width":3,"height":5,"body_name":"Stock"})).unwrap();
+            let world = h.app.session.world_state().unwrap();
+            let face = world
+                .body("Stock")
+                .unwrap()
+                .body
+                .faces(0.001)
+                .unwrap()
+                .into_iter()
+                .find(|face| face.plane_normal.is_some_and(|n| n.z > 0.99))
+                .unwrap();
+            h.app.session.selection = vec![Sel::Face { body: "Stock".into(), index: face.index, point: face.centroid }];
+            let before = h.app.session.doc.clone();
+            h.app.start("solid.extrude");
+            h.frames(3);
+            let Kind::Extrude { distance, .. } = &h.app.dialog.as_ref().unwrap().kind else { panic!("not an Extrude dialog") };
+            assert_eq!(distance, shown, "{custom:?}");
+            assert!(Arc::ptr_eq(&h.app.session.doc, &before), "{custom:?}: opening Extrude changes nothing");
+            assert!(crate::scenario::handle_at("dialog:create_issue").is_none(), "{custom:?}: no red refusal");
+            assert_eq!(h.app.viewport.corner_ok, previews, "{custom:?}: OK only with a distance");
+            if previews {
+                continue;
+            }
+            let colors = Colors::from_tokens(&solidcraft_theme::Tokens::get());
+            for (typed, previews) in [("5 mm", true), ("0 mm", false)] {
+                if let Kind::Extrude { distance, .. } = &mut h.app.dialog.as_mut().unwrap().kind {
+                    *distance = typed.into();
+                }
+                h.frames(3);
+                let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+                let result = StraightPreview::default().compute(&h.app, &commands, colors);
+                assert_eq!(result.is_some_and(|r| r.is_ok()), previews, "{typed}");
+                assert_eq!(h.app.viewport.corner_ok, previews, "{typed}");
+                assert!(crate::scenario::handle_at("dialog:create_issue").is_none(), "{typed}: no red refusal");
+            }
+        }
+    }
+
     #[test]
     fn profile_feedback_keeps_holes_and_skips_unsupported_curves() {
         let mut harness = Harness::new();

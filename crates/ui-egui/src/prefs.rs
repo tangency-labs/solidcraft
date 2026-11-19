@@ -791,7 +791,8 @@ impl StandUpUnknown {
 pub enum ExtrudeStart {
     /// The distance of the last new extrude applied (`extrude_last_distance`); 10 until there is one.
     LastUsed,
-    /// The length typed in `extrude_custom_distance`; 10 while it isn't a usable length.
+    /// The length typed in `extrude_custom_distance`, 0 included (no depth until one is typed or
+    /// pulled); 10 while it isn't a usable length.
     Custom,
     /// 10 in the design's unit, as before (the default). A saved value this version doesn't know
     /// reads as this.
