@@ -3,6 +3,15 @@
 //! Bernstein convex hulls enclose the reduced rational normal everywhere.
 //! Exact input knot restrictions reuse the ray query's outward interval insertion.
 //! A work limit or uncertain sign refuses the chart; samples never establish acceptance.
+//!
+//! One part of the chart is left unproven: a piece that keeps an original chart
+//! corner, is at most 2^-12 of its tile along each axis, and whose control hull is
+//! bounded inside `CORNER_JOIN_MM` of that corner.
+//! Two rim sides that meet tangentially give a corner normal that is zero in exact
+//! arithmetic, and any rounded rotation of such a cap turns it into a normal of a
+//! few ulps with either sign, so the chart folds inside a few ulps of the corner.
+//! That fold is smaller than the distance at which two side ends already count as
+//! one corner, so the same length bounds what the proof leaves out.
 
 use crate::eval::ray_spline::{reserved, Axis, Grid, MAX_CONTROLS};
 use crate::eval::ray_tensor::{Control, Interval as I};
@@ -12,6 +21,18 @@ use crate::{Result, SolidError, Vec3};
 const OP: &str = "geom::form_fill::regularity";
 const MAX_WORK: usize = 20_000_000;
 const MAX_DEPTH: usize = 24;
+// A piece that keeps an original chart corner may be halved this often, so that
+// it can shrink inside `CORNER_JOIN_MM` of the corner: 48 halvings per axis reach
+// the spacing of adjacent doubles in the unit parameter square.
+const MAX_CORNER_DEPTH: usize = 96;
+// Halvings left to a piece cut off such a corner piece beyond `MAX_DEPTH`.
+const BESIDE_CORNER_SPLITS: usize = 6;
+// A corner piece is left unproven only once it was halved this often along each
+// axis. The ordinary proof has then had its whole depth, and what is left out
+// reaches at most 2^-12 of the tile along either edge, so an edge that collapses
+// onto its corner is still refused: the rest of that edge has to be proven.
+const MIN_CORNER_HALVINGS: usize = MAX_DEPTH / 2;
+const CORNER_JOIN_MM: f64 = super::CORNER_JOIN_MM;
 // On fully inserted clamped axes nu=p*spans_u+1 and nv=q*spans_v+1.
 // Three reduced-normal components hold 3*(3p)*(3q) coefficients per tile,
 // so their total is strictly below 27 times the already bounded native grid.
@@ -274,7 +295,9 @@ fn scalar_times(w: &Poly, a: &Normal, work: &mut usize) -> Result<Normal> {
         w.product(z, work)?,
     ])
 }
-fn reduced_normal(degree: [usize; 2], controls: &[Control], work: &mut usize) -> Result<Normal> {
+/// The homogeneous coordinates X, Y, Z, W of one tile as four polynomials.
+type Position = [Poly; 4];
+fn homogeneous(degree: [usize; 2], controls: &[Control]) -> Result<Position> {
     let component = |axis| {
         Poly::new(
             degree,
@@ -288,8 +311,11 @@ fn reduced_normal(degree: [usize; 2], controls: &[Control], work: &mut usize) ->
                 .collect::<Result<_>>()?,
         )
     };
-    let x = [component(0)?, component(1)?, component(2)?];
-    let w = component(3)?;
+    Ok([component(0)?, component(1)?, component(2)?, component(3)?])
+}
+fn reduced_normal(position: &Position, work: &mut usize) -> Result<Normal> {
+    let [a, b, c, w] = position;
+    let x = [a.clone(), b.clone(), c.clone()];
     let [a, b, c] = &x;
     let xu = [
         a.derivative(0, work)?,
@@ -301,7 +327,7 @@ fn reduced_normal(degree: [usize; 2], controls: &[Control], work: &mut usize) ->
         b.derivative(1, work)?,
         c.derivative(1, work)?,
     ];
-    let first = scalar_times(&w, &cross(&xu, &xv, work)?, work)?;
+    let first = scalar_times(w, &cross(&xu, &xv, work)?, work)?;
     let second = scalar_times(&w.derivative(1, work)?, &cross(&xu, &x, work)?, work)?;
     let third = scalar_times(&w.derivative(0, work)?, &cross(&x, &xv, work)?, work)?;
     let [a, b, c] = first;
@@ -461,9 +487,87 @@ fn separated_along(
         .collect();
     positive(&Poly::new(x.degree, values)?, corners)
 }
-fn prove_normal(normal: Normal, corners: [bool; 4], work: &mut usize) -> Result<bool> {
-    let mut stack = vec![(normal, corners, 0usize)];
-    while let Some((normal, corners, depth)) = stack.pop() {
+/// Whether the whole piece is bounded inside `CORNER_JOIN_MM` of one of its
+/// corners that is an original chart corner. With positive weights the piece lies
+/// in the convex hull of its Cartesian controls, and a ball is convex, so every
+/// control inside the ball puts every point of the piece inside it.
+fn joins_corner(position: &Position, original: [bool; 4], work: &mut usize) -> Result<bool> {
+    let [x, y, z, w] = position;
+    if w.values.iter().any(|w| w.lo <= 0.0) {
+        return Ok(false);
+    }
+    let [p, q] = w.degree;
+    let limit = CORNER_JOIN_MM * CORNER_JOIN_MM;
+    for ((u, v), original) in [(0, 0), (p, 0), (0, q), (p, q)].into_iter().zip(original) {
+        if !original {
+            continue;
+        }
+        spend(work, w.values.len())?;
+        let weight = w.at(u, v)?;
+        let corner = [
+            x.at(u, v)?.div(weight),
+            y.at(u, v)?.div(weight),
+            z.at(u, v)?.div(weight),
+        ];
+        let inside = x
+            .values
+            .iter()
+            .zip(&y.values)
+            .zip(&z.values)
+            .zip(&w.values)
+            .all(|(((&x, &y), &z), &w)| {
+                let square =
+                    [x, y, z]
+                        .into_iter()
+                        .zip(corner)
+                        .fold(I::ZERO, |sum, (value, corner)| {
+                            let offset = value.div(w).sub(corner);
+                            sum.add(offset.mul(offset))
+                        });
+                square.is_finite() && square.hi <= limit
+            });
+        if inside {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+/// One part of a tile still to be proven. `zeros` marks its corners where an
+/// exactly zero normal is allowed, `original` its corners that are original chart
+/// corners, and `position` is kept only while it has such a corner. `halved`
+/// counts its halvings along U and V; `depth` is what its depth limit is held to.
+struct Piece {
+    normal: Normal,
+    zeros: [bool; 4],
+    original: [bool; 4],
+    position: Option<Position>,
+    halved: [usize; 2],
+    depth: usize,
+}
+fn prove_normal(
+    normal: Normal,
+    corners: [bool; 4],
+    original: [bool; 4],
+    position: Option<Position>,
+    work: &mut usize,
+) -> Result<bool> {
+    let mut stack = vec![Piece {
+        normal,
+        zeros: corners,
+        original,
+        position: position.filter(|_| original.contains(&true)),
+        halved: [0, 0],
+        depth: 0,
+    }];
+    while let Some(Piece {
+        normal,
+        zeros: corners,
+        original,
+        position,
+        halved,
+        depth,
+    }) = stack.pop()
+    {
         spend(work, 1)?;
         let [x, y, z] = &normal;
         let center = [x.middle(work)?, y.middle(work)?, z.middle(work)?];
@@ -535,22 +639,90 @@ fn prove_normal(normal: Normal, corners: [bool; 4], work: &mut usize) -> Result<
         if separated {
             continue;
         }
-        if depth >= MAX_DEPTH {
+        // The signs are unresolved. A piece that keeps an original chart corner
+        // is left unproven once it is small along both axes and all of it is
+        // bounded inside the corner join length; until then it is halved further
+        // than any other piece.
+        if let Some(position) = &position {
+            if halved.iter().all(|&count| count >= MIN_CORNER_HALVINGS)
+                && joins_corner(position, original, work)?
+            {
+                continue;
+            }
+        }
+        let limit = if position.is_some() {
+            MAX_CORNER_DEPTH
+        } else {
+            MAX_DEPTH
+        };
+        if depth >= limit {
             return Ok(false);
         }
-        let axis = split_axis(&normal);
+        let [halved_u, halved_v] = halved;
+        // Past the ordinary depth a corner piece is halved evenly, so that it
+        // shrinks onto its corner and not along one edge.
+        let axis = if position.is_some() && depth >= MAX_DEPTH && halved_u != halved_v {
+            usize::from(halved_v < halved_u)
+        } else {
+            split_axis(&normal)
+        };
+        let halved = if axis == 0 {
+            [halved_u + 1, halved_v]
+        } else {
+            [halved_u, halved_v + 1]
+        };
         let [a, b, c] = normal;
         let [a0, a1] = a.halve(axis, work)?;
         let [b0, b1] = b.halve(axis, work)?;
         let [c0, c1] = c.halve(axis, work)?;
-        let [c00, c10, c01, c11] = corners;
-        let (left, right) = if axis == 0 {
-            ([c00, false, c01, false], [false, c10, false, c11])
-        } else {
-            ([c00, c10, false, false], [false, false, c01, c11])
+        let halves = |[f00, f10, f01, f11]: [bool; 4]| {
+            if axis == 0 {
+                ([f00, false, f01, false], [false, f10, false, f11])
+            } else {
+                ([f00, f10, false, false], [false, false, f01, f11])
+            }
         };
-        stack.push(([a1, b1, c1], right, depth + 1));
-        stack.push(([a0, b0, c0], left, depth + 1));
+        let (left, right) = halves(corners);
+        let (left_original, right_original) = halves(original);
+        let (left_position, right_position) = match &position {
+            Some([x, y, z, w]) => {
+                let [x0, x1] = x.halve(axis, work)?;
+                let [y0, y1] = y.halve(axis, work)?;
+                let [z0, z1] = z.halve(axis, work)?;
+                let [w0, w1] = w.halve(axis, work)?;
+                (
+                    Some([x0, y0, z0, w0]).filter(|_| left_original.contains(&true)),
+                    Some([x1, y1, z1, w1]).filter(|_| right_original.contains(&true)),
+                )
+            }
+            None => (None, None),
+        };
+        // A piece cut off a corner piece that was already past the ordinary
+        // depth keeps a few halvings of its own.
+        let next = |kept: &Option<Position>| {
+            if position.is_some() && kept.is_none() {
+                (depth + 1).min(MAX_DEPTH - BESIDE_CORNER_SPLITS)
+            } else {
+                depth + 1
+            }
+        };
+        let (left_depth, right_depth) = (next(&left_position), next(&right_position));
+        stack.push(Piece {
+            normal: [a1, b1, c1],
+            zeros: right,
+            original: right_original,
+            position: right_position,
+            halved,
+            depth: right_depth,
+        });
+        stack.push(Piece {
+            normal: [a0, b0, c0],
+            zeros: left,
+            original: left_original,
+            position: left_position,
+            halved,
+            depth: left_depth,
+        });
     }
     Ok(true)
 }
@@ -592,6 +764,11 @@ fn prove_seam(a: &Normal, b: &Normal, axis: usize, work: &mut usize) -> Result<b
 /// Certify local regularity throughout a positive homogeneous tensor cap, including
 /// consistent directed normals across every native knot seam. At the four original
 /// chart corners alone an exactly zero normal is allowed; edge interiors must be regular.
+///
+/// One piece at each original chart corner may stay unproven: it is at most
+/// 2^-12 of its tile along each axis and is bounded inside `CORNER_JOIN_MM` of the
+/// corner. A corner normal of a few ulps with the wrong sign, as a rounded rotation
+/// of a tangent corner leaves, folds the chart there. All the rest is proven regular.
 ///
 /// Returns false when the chart is singular or its signs remain unresolved within
 /// the fixed budget. Invalid inputs, allocations, and budget exhaustion return errors.
@@ -682,7 +859,8 @@ pub fn certify(
             if tile.iter().any(|p| p[3].lo <= 0.0) {
                 return Ok(false);
             }
-            let mut normal = reduced_normal(degree, &tile, &mut work)?;
+            let position = homogeneous(degree, &tile)?;
+            let mut normal = reduced_normal(&position, &mut work)?;
             let allowed = [
                 i == 0 && j == 0 && zeros[0],
                 i + 1 == us.len() && j == 0 && zeros[1],
@@ -716,7 +894,7 @@ pub fn certify(
                     }
                 }
             }
-            if !prove_normal(normal.clone(), allowed, &mut work)? {
+            if !prove_normal(normal.clone(), allowed, original, Some(position), &mut work)? {
                 return Ok(false);
             }
             normals.push(normal);
@@ -894,6 +1072,70 @@ mod tests {
                 "nonplanar={nonplanar}"
             );
         }
+    }
+
+    /// S=(u+v, uv+v², 0) of the test above, with the control beside the corner
+    /// (0,0) along V lifted in Y, then turned about Z and moved by `shift`.
+    /// Neither turned nor moved, its directed corner normal is exactly 2*lift.
+    fn tangent_corner(lift: f64, turn: f64, shift: [f64; 2]) -> Vec<[f64; 4]> {
+        let (sin, cos) = turn.sin_cos();
+        (0..3)
+            .flat_map(|j| {
+                (0..2).map(move |i| {
+                    let (u, v) = (f64::from(i), f64::from(j) / 2.0);
+                    let x = u + v;
+                    let y = u * v
+                        + if j == 2 { 1.0 } else { 0.0 }
+                        + if (i, j) == (0, 1) { lift } else { 0.0 };
+                    [
+                        x * cos - y * sin + shift[0],
+                        x * sin + y * cos + shift[1],
+                        0.0,
+                        1.0,
+                    ]
+                })
+            })
+            .collect()
+    }
+
+    #[test]
+    fn accepts_a_tangent_corner_whose_reversed_normal_folds_inside_the_corner_join() {
+        // The corner normal is -2^-39 against an interior normal of u+v, so the
+        // chart folds where u+v is below about 2^-39: 2e-12 mm from the corner,
+        // far inside the 1e-9 mm at which two side ends are one corner.
+        let controls = tangent_corner(-(2.0_f64.powi(-40)), 0.0, [0.0, 0.0]);
+        let ([_, _, z], zero) =
+            corner_normal(controls[0], controls[1], controls[2], [1, 2], false).unwrap();
+        assert!(!zero && z.hi < 0.0, "the corner normal is reversed: {z:?}");
+        assert!(polynomial([1, 2], &controls).unwrap());
+    }
+
+    #[test]
+    fn refuses_a_reversed_corner_whose_fold_reaches_past_the_corner_join() {
+        // The same corner with a normal of -2^-19 folds the chart out to about
+        // 2e-6 mm from the corner, two thousand times the corner join length.
+        // The piece inside the join length is left out; the fold beside it is not.
+        let controls = tangent_corner(-(2.0_f64.powi(-20)), 0.0, [0.0, 0.0]);
+        assert!(!matches!(polynomial([1, 2], &controls), Ok(true)));
+    }
+
+    #[test]
+    fn accepts_a_tangent_corner_cap_turned_by_any_whole_degree() {
+        // Turning about a point away from the corner rounds its three collinear
+        // controls, which leaves a corner normal of a few ulps with either sign.
+        // Every turned copy is the same cap, so every one is accepted.
+        let mut reversed = 0;
+        for degrees in 0..360 {
+            let controls = tangent_corner(0.0, f64::from(degrees).to_radians(), [37.25, -11.5]);
+            let ([_, _, z], _) =
+                corner_normal(controls[0], controls[1], controls[2], [1, 2], false).unwrap();
+            reversed += usize::from(z.hi < 0.0);
+            assert!(
+                polynomial([1, 2], &controls).unwrap(),
+                "turned by {degrees} degrees, corner normal {z:?}"
+            );
+        }
+        assert!(reversed > 0, "no turn reversed the corner normal");
     }
 
     #[test]
