@@ -1071,6 +1071,117 @@ fn cadmpeg_export_refuses_what_it_cannot_write() {
     assert!(r.is_ok(), "an odd design panicked");
 }
 
+/// `bytes`, an IGES file, read by cadmpeg's IGES decoder into records and an Import feature, as
+/// a STEP file is with the cadmpeg reader (there is no cadmpeg IGES import route yet).
+fn iges_by_cadmpeg(bytes: &[u8]) -> crate::StepFeature {
+    let (format, decoded) = convert::decode_at("x.igs", "igs", bytes, &["iges"], cadmpeg_core::decode::DecodeDepth::Full).unwrap();
+    assert_eq!(format, "iges");
+    let records = cadir_records(&decoded.into_parts().0, "x", "", true);
+    crate::records_import_feature((records, Vec::new(), false), "x.igs", crate::StepNames::default()).unwrap()
+}
+
+/// An imported body's colour: its own, else the one colour every face of it has (cadmpeg's STEP
+/// writer styles a body's faces, each with the body's colour).
+fn colour_of(b: &solidcraft_kernel::ImportedBody) -> Option<[f32; 3]> {
+    b.color.or_else(|| {
+        let faces = &b.body.paint()?.faces;
+        let first = faces.first()?.color;
+        (faces.len() == b.body.face_count() && faces.iter().all(|f| f.color == first)).then_some(first)
+    })
+}
+
+/// A 10 × 20 × 30 mm box and a cylinder of radius 6 mm, 15 mm high at x = 80 mm (volume
+/// π·36·15), coloured #0040FF.
+fn box_and_cylinder() -> (solidcraft_doc::Document, Vec<(i64, [i64; 6])>) {
+    let mut doc = solidcraft_doc::Document::new("Parts");
+    add_box(&mut doc, solidcore_record::Vec3::ZERO, [10.0, 20.0, 30.0], 0);
+    add_cylinder(&mut doc);
+    let names: Vec<String> = evaluated(&doc).state().bodies.iter().map(|b| b.name.clone()).collect();
+    doc.appearances.bodies.insert(names[1].clone(), solidcraft_doc::appearance::Look::custom([0, 64, 255], 1.0));
+    let mut want =
+        vec![solid(6000.0, [0.0, 0.0, 0.0, 10.0, 20.0, 30.0]), solid(std::f64::consts::PI * 36.0 * 15.0, [74.0, -6.0, 0.0, 86.0, 6.0, 15.0])];
+    want.sort();
+    (doc, want)
+}
+
+/// cadmpeg writes STEP (AP242 edition 1, as SolidCraft's own writer declares) and IGES 5.3 from
+/// the design: a box with a coloured cylinder, and the galvanometer (a part placed twice). Each
+/// file reads back through SolidCraft's own reader and through cadmpeg's, every solid with the
+/// volume and box the design's dimensions give, the cylinder in its colour. STEP keeps the
+/// assembly: each needle under Galvanometer › Frame › Needle; IGES has none here, so its bodies
+/// are where the design shows them, with a warning.
+#[test]
+fn cadmpeg_writes_step_and_iges_that_both_readers_read_back() {
+    let (parts, parts_want) = box_and_cylinder();
+    let blue = [0.0, 64.0 / 255.0, 1.0];
+    for (label, doc, want) in [("parts", parts, parts_want), ("galvanometer", galvanometer(), galvanometer_solids())] {
+        for (file, format) in [("x.step", crate::Format::Step), ("x.igs", crate::Format::Iges)] {
+            let (bytes, warnings) = exported(&doc, file, format).unwrap_or_else(|e| panic!("{label} {file}: {e}"));
+            let assembly = label == "galvanometer";
+            let flattened = warnings.iter().any(|w| w.contains("components and placements are not written"));
+            assert_eq!(flattened, assembly && format == crate::Format::Iges, "{label} {file}: {warnings:?}");
+            // STEP names the components but not the solids; nothing else is reported lost.
+            let unnamed = warnings.iter().any(|w| w.contains("the bodies' names are not written"));
+            assert_eq!(unnamed, format == crate::Format::Step, "{label} {file}: {warnings:?}");
+            assert_eq!(warnings.len(), usize::from(flattened) + usize::from(unnamed), "{label} {file}: {warnings:?}");
+            let ours = crate::step_import_feature_read(&bytes, file, crate::StepNames::default(), crate::StepReader::SolidCraft).unwrap();
+            assert_eq!(solids(&ours), want, "{label} {file}: SolidCraft's reader");
+            let theirs = match format {
+                crate::Format::Step => {
+                    crate::step_import_feature_read(&bytes, file, crate::StepNames::default(), crate::StepReader::Cadmpeg).unwrap()
+                }
+                _ => iges_by_cadmpeg(&bytes),
+            };
+            assert_eq!(solids(&theirs), want, "{label} {file}: cadmpeg's reader");
+            let theirs: Vec<_> = theirs.import.bodies.iter().map(|b| (colour_of(b), b.path.clone())).collect();
+            if format == crate::Format::Step {
+                assert!(ours.import.schema.contains("AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF"), "{}", ours.import.schema);
+            }
+            let ours: Vec<_> = ours.import.bodies.iter().map(|b| (colour_of(b), b.path.clone())).collect();
+            for (reader, bodies) in [("SolidCraft", ours), ("cadmpeg", theirs)] {
+                if !assembly {
+                    let coloured: Vec<[f32; 3]> = bodies.iter().filter_map(|(c, _)| *c).collect();
+                    assert_eq!(coloured.len(), 1, "{label} {file} {reader}: only the cylinder is coloured: {bodies:?}");
+                    for (got, want) in coloured[0].iter().zip(blue) {
+                        assert!((f64::from(*got) - want).abs() < 1e-3, "{label} {file} {reader}: {coloured:?}");
+                    }
+                } else if format == crate::Format::Step {
+                    let needles = bodies.iter().filter(|(_, p)| p.iter().map(String::as_str).eq(["Galvanometer", "Frame", "Needle"])).count();
+                    assert_eq!(needles, 2, "{label} {file} {reader}: {bodies:?}");
+                }
+            }
+        }
+    }
+}
+
+/// STEP written by cadmpeg has no mesh beside the exact shape, so a face's own look is bound to
+/// its B-rep face: a grey box with a red top face reads back, through both readers, with one red
+/// face and the others grey.
+#[test]
+fn cadmpeg_step_keeps_a_faces_own_colour() {
+    let mut doc = solidcraft_doc::Document::new("Block");
+    add_box(&mut doc, solidcore_record::Vec3::ZERO, [10.0, 20.0, 30.0], 0);
+    let body = evaluated(&doc).state().bodies[0].name.clone();
+    doc.appearances.bodies.insert(body.clone(), solidcraft_doc::appearance::Look::custom([128, 128, 128], 1.0));
+    doc.appearances.faces.push(solidcraft_doc::appearance::FaceLook {
+        body,
+        point: solidcore_record::Vec3::new(5.0, 10.0, 30.0),
+        look: solidcraft_doc::appearance::Look::custom([255, 0, 0], 1.0),
+        name: None,
+        strict_name: false,
+        certificate: None,
+    });
+    let (bytes, warnings) = exported(&doc, "x.step", crate::Format::Step).unwrap();
+    assert!(warnings.iter().all(|w| w.contains("the bodies' names are not written")), "{warnings:?}");
+    for reader in [crate::StepReader::SolidCraft, crate::StepReader::Cadmpeg] {
+        let read = crate::step_import_feature_read(&bytes, "x.step", crate::StepNames::default(), reader).unwrap();
+        let [b] = read.import.bodies.as_slice() else { panic!("{reader:?}: one body") };
+        let faces = &b.body.paint().unwrap_or_else(|| panic!("{reader:?}: no paint")).faces;
+        let red = faces.iter().filter(|f| f.color[0] > 0.99 && f.color[1] < 0.01 && f.color[2] < 0.01).count();
+        assert_eq!(red, 1, "{reader:?}: {faces:?}");
+    }
+}
+
 /// A part an AP242 file gives as triangles alone: a 1 cm tetrahedron, as a TRIANGULATED_SURFACE_SET
 /// in a TESSELLATED_SHAPE_REPRESENTATION, in centimetres.
 const TETRAHEDRON_PART: &str = "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((''),'2;1');\nFILE_NAME('tetrahedron','',(''),(''),'','','');\n\

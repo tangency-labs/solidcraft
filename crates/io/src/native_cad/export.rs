@@ -9,6 +9,11 @@
 //!   line; any other body is written as its mesh, with a warning naming it. It writes no
 //!   assemblies, no looks (one colour a body), and meshes without a name or colour, so each body
 //!   is written where the design shows it, and each of those is a warning too.
+//! - STEP and IGES, when asked for (`file.export`'s `writer: cadmpeg`; SolidCraft's own writers
+//!   are the default): STEP AP242 edition 1, as SolidCraft's own writer declares, with the product
+//!   structure and the looks as each face's colour (a face's own look on that face), but no solid
+//!   names (a warning says so); IGES 5.3 with each body's name and colour where the design shows
+//!   it, as cadmpeg's IGES writer writes no assemblies (a warning says so).
 //! - FreeCAD `.FCStd`: refused. cadmpeg 0.6.12's FreeCAD writer only writes back a FreeCAD file it
 //!   read (it patches the file's own `Document.xml` and makes none), so it cannot write a design.
 
@@ -37,6 +42,8 @@ const RHINO: Writes = Writes {
     appearances: false,
     linear: false,
     planar_pcurves: false,
+    stated_pcurves: false,
+    solid_names: true,
     admit: Some(rhino_admits),
 };
 
@@ -48,11 +55,52 @@ fn rhino_admits(ir: &CadIr) -> Result<(), String> {
     build_encoder(Codec::Rhino).plan(EncodeInput::new(ir, None), TargetRequest::Explicit(RHINO_TARGET)).map(|_| ()).map_err(|e| e.to_string())
 }
 
+/// STEP: the product structure, each body's exact shape (a mesh only for mesh bodies, as AP242
+/// tessellated geometry), looks as styled colours in sRGB, as SolidCraft's own STEP writer gives
+/// them, a face's own look on its B-rep face.
+const STEP: Writes = Writes {
+    label: "STEP",
+    products: true,
+    brep_meshes: false,
+    bound_meshes: true,
+    appearances: true,
+    linear: false,
+    planar_pcurves: true,
+    stated_pcurves: false,
+    solid_names: false,
+    admit: None,
+};
+
+/// The STEP schema written: AP242 edition 1, the one SolidCraft's own STEP writer declares.
+const STEP_TARGET: &str = "ap242e1";
+
+/// IGES: no product records (cadmpeg's IGES writer drops them), each body's exact shape, one
+/// sRGB colour a body.
+const IGES: Writes = Writes {
+    label: "IGES",
+    products: false,
+    brep_meshes: false,
+    bound_meshes: true,
+    appearances: false,
+    linear: false,
+    planar_pcurves: true,
+    stated_pcurves: true,
+    solid_names: true,
+    admit: None,
+};
+
+/// The IGES version written: 5.3, as SolidCraft's own IGES writer writes.
+const IGES_TARGET: &str = "5.3";
+
 /// Losses cadmpeg reports that say nothing to the person exporting: a USD mesh's points are
 /// single precision, which every USD mesh is (the exact B-rep beside it keeps double precision;
 /// a mesh that is a body's only geometry is said when the rounding can matter,
-/// [`mesh_only_rounds`]); a Rhino mesh's normals are single precision, as every 3DM mesh's are.
-const QUIET_LOSSES: [&str; 2] = [VERTEX_PRECISION, "rhino/mesh.normal-precision-reduced"];
+/// [`mesh_only_rounds`]); a Rhino mesh's normals are single precision, as every 3DM mesh's are; and
+/// STEP has no place for a pcurve's own parameter range or an edge's and a vertex's tolerance
+/// (micrometres or less from SolidCraft's records), which SolidCraft's own STEP writer does not
+/// write either.
+const QUIET_LOSSES: [&str; 4] =
+    [VERTEX_PRECISION, "rhino/mesh.normal-precision-reduced", "step/pcurve.use-native-metadata", "step/topology.metadata-not-represented"];
 
 /// cadmpeg's USD loss for points written in single precision.
 const VERTEX_PRECISION: &str = "usd/export.vertex-precision";
@@ -106,6 +154,8 @@ pub(super) fn from_design(
         Format::Rhino if cfg!(target_arch = "wasm32") => return Err(format!("{name}: {RHINO_IN_BROWSER}")),
         Format::Rhino => (Codec::Rhino, RHINO_TARGET, RHINO),
         Format::FreeCad => return Err(format!("{name}: {FREECAD_REFUSED}")),
+        Format::Step => (Codec::Step, STEP_TARGET, STEP),
+        Format::Iges => (Codec::Iges, IGES_TARGET, IGES),
         other => return Err(format!("{name}: {other:?} is not written through cadmpeg")),
     };
     let stem = std::path::Path::new(&name).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();

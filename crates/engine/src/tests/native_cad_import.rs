@@ -376,3 +376,87 @@ fn rhino_and_freecad_export_check_their_format() {
     assert_eq!(std::fs::read(&fcstd).unwrap(), b"kept");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A body's colour: its own, else the one colour every face of it has.
+fn colour_of(b: &solidcraft_kernel::Body) -> Option<[f32; 3]> {
+    b.color().or_else(|| {
+        let faces = &b.paint()?.faces;
+        let first = faces.first()?.color;
+        (faces.len() == b.face_count() && faces.iter().all(|f| f.color == first)).then_some(first)
+    })
+}
+
+/// [`exact_boxes`] and the cylinder: radius 6 mm, 15 mm high at x = 80 mm.
+fn all_boxes() -> Vec<[i64; 6]> {
+    let mut want = exact_boxes();
+    want.push(um([74.0, -6.0, 0.0, 86.0, 6.0, 15.0]));
+    want.sort();
+    want
+}
+
+/// `file.export` writes STEP and IGES with SolidCraft's own writers unless `writer: cadmpeg`
+/// asks for cadmpeg's. Each file, by either writer, reads back through SolidCraft's reader (and a
+/// STEP file through cadmpeg's too) with every body where the design shows it, the volume the
+/// design's dimensions give and the cylinder in its colour. The default writes the same file as
+/// `writer: solidcraft`, which is not cadmpeg's.
+#[test]
+fn file_export_writes_step_and_iges_with_either_writer() {
+    let (dir, _) = file("step-writer", "unused", b"");
+    let mut s = parts();
+    let volume_want = 1000.0 + 2.0 * (4000.0 + 1000.0) + std::f64::consts::PI * 36.0 * 15.0;
+    let blue = [0.0, 64.0 / 255.0, 1.0];
+    for ext in ["step", "igs"] {
+        let mut texts = Vec::new();
+        for writer in [None, Some("solidcraft"), Some(" CadMpeg ")] {
+            let path = dir.join(format!("parts-{}.{ext}", writer.map_or("default", str::trim))).to_string_lossy().to_string();
+            let mut p = json!({"path": path});
+            if let Some(w) = writer {
+                p["writer"] = json!(w);
+            }
+            let out = run(&mut s, "file.export", p);
+            assert_eq!(out["format"], if ext == "step" { "Step" } else { "Iges" }, "{out}");
+            let text = std::fs::read_to_string(&path).unwrap();
+            // cadmpeg's writers name themselves in the file's header; SolidCraft's do not.
+            assert_eq!(text.contains("cadmpeg"), writer.is_some_and(|w| w.trim().eq_ignore_ascii_case("cadmpeg")), "{ext} {writer:?}");
+            texts.push(text);
+            let readers: &[&str] = if ext == "step" { &["solidcraft", "cadmpeg"] } else { &["solidcraft"] };
+            for reader in readers {
+                let mut back = Session::default();
+                run(&mut back, "file.insert_step", json!({"path": path, "reader": reader}));
+                assert_eq!(shown_boxes(&back), all_boxes(), "{ext} {writer:?} {reader}");
+                assert!((volume(&mut back) - volume_want).abs() < 1e-3, "{ext} {writer:?} {reader}");
+                let world = back.world_state().unwrap();
+                let coloured: Vec<[f32; 3]> = world.bodies.iter().filter_map(|b| colour_of(&b.body)).collect();
+                assert!(
+                    coloured.iter().any(|c| c.iter().zip(blue).all(|(g, w)| (f64::from(*g) - w).abs() < 1e-3)),
+                    "{ext} {writer:?} {reader}: the cylinder's colour: {coloured:?}"
+                );
+            }
+        }
+        // The default and `solidcraft` write the same file but for the header's time stamp.
+        let body = |t: &str| t.split_once("DATA;").or_else(|| t.split_once("S      1")).map(|(_, b)| b.to_string()).unwrap_or_default();
+        assert_eq!(body(&texts[0]).lines().count(), body(&texts[1]).lines().count(), "{ext}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `writer` is for STEP and IGES only, and takes solidcraft or cadmpeg; anything else is refused
+/// before a file is written.
+#[test]
+fn the_writer_option_is_refused_where_it_does_not_apply() {
+    let (dir, _) = file("step-writer-refused", "unused", b"");
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 30}));
+    for (name, writer) in
+        [("a.stl", "cadmpeg"), ("a.3mf", "solidcraft"), ("a.usda", "cadmpeg"), ("a.3dm", "cadmpeg"), ("a.step", "other"), ("a.igs", "")]
+    {
+        let path = dir.join(name).to_string_lossy().to_string();
+        let e = s.execute("file.export", &json!({"path": path, "writer": writer})).expect_err(name).to_string();
+        assert!(e.contains("`writer`"), "{name}: {e}");
+        assert!(!std::path::Path::new(&path).exists(), "{name}");
+    }
+    let path = dir.join("a.step").to_string_lossy().to_string();
+    let e = s.execute("file.export", &json!({"path": path, "writer": 1})).expect_err("a number").to_string();
+    assert!(e.contains("`writer`"), "{e}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

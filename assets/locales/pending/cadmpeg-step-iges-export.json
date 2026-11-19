@@ -1,0 +1,42 @@
+{
+  "en": {
+    "settings.cadmpeg_export": "Write STEP and IGES files with cadmpeg, from the design, instead of with SolidCraft's own writers",
+    "prefs.cadmpeg_export": "Export STEP and IGES with cadmpeg"
+  },
+  "es": {
+    "settings.cadmpeg_export": "Escribir los archivos STEP e IGES con cadmpeg, a partir del diseño, en lugar de con los escritores propios de SolidCraft",
+    "prefs.cadmpeg_export": "Exportar STEP e IGES con cadmpeg"
+  },
+  "de": {
+    "settings.cadmpeg_export": "STEP- und IGES-Dateien mit cadmpeg aus der Konstruktion schreiben statt mit den eigenen Schreibern von SolidCraft",
+    "prefs.cadmpeg_export": "STEP und IGES mit cadmpeg exportieren"
+  },
+  "fr": {
+    "settings.cadmpeg_export": "Écrire les fichiers STEP et IGES avec cadmpeg, à partir de la conception, plutôt qu'avec les écrivains de SolidCraft",
+    "prefs.cadmpeg_export": "Exporter STEP et IGES avec cadmpeg"
+  },
+  "ar": {
+    "settings.cadmpeg_export": "كتابة ملفات STEP وIGES باستخدام cadmpeg من التصميم، بدلاً من كاتبات SolidCraft الخاصة",
+    "prefs.cadmpeg_export": "تصدير STEP وIGES باستخدام cadmpeg"
+  },
+  "he": {
+    "settings.cadmpeg_export": "כתיבת קובצי STEP ו-IGES בעזרת cadmpeg מתוך התכן, במקום בכותבים של SolidCraft עצמה",
+    "prefs.cadmpeg_export": "ייצוא STEP ו-IGES בעזרת cadmpeg"
+  },
+  "ja": {
+    "settings.cadmpeg_export": "STEP と IGES ファイルを SolidCraft 独自のライターではなく、cadmpeg で設計から書き出す",
+    "prefs.cadmpeg_export": "cadmpeg で STEP と IGES をエクスポート"
+  },
+  "vi": {
+    "settings.cadmpeg_export": "Ghi tệp STEP và IGES bằng cadmpeg từ thiết kế, thay vì bằng bộ ghi riêng của SolidCraft",
+    "prefs.cadmpeg_export": "Xuất STEP và IGES bằng cadmpeg"
+  },
+  "zh": {
+    "settings.cadmpeg_export": "使用 cadmpeg 从设计写出 STEP 和 IGES 文件，而不是使用 SolidCraft 自己的写入器",
+    "prefs.cadmpeg_export": "使用 cadmpeg 导出 STEP 和 IGES"
+  },
+  "ko": {
+    "settings.cadmpeg_export": "SolidCraft 자체 작성기 대신 cadmpeg로 설계에서 STEP 및 IGES 파일 쓰기",
+    "prefs.cadmpeg_export": "cadmpeg로 STEP 및 IGES 내보내기"
+  }
+}

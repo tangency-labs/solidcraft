@@ -7,7 +7,7 @@
 //! ([`cadir_records`]) and the Import feature keeps those records, with no STEP text in between.
 //!
 //! Only codecs for open formats are compiled in (the workspace enables cadmpeg-registry's
-//! `fcstd`, `rhino`, `step` and `usd` features alone). cadmpeg's codecs for commercial formats, and its
+//! `fcstd`, `iges`, `rhino`, `step` and `usd` features alone; IGES is only written, when asked for). cadmpeg's codecs for commercial formats, and its
 //! `sat` codec (a ShapeManager stream decoder that reads ACIS as one dialect), are not built.
 //!
 //! This module is the cadmpeg seam: the one place cadmpeg is called, returning the STEP text, the
@@ -412,7 +412,9 @@ pub(crate) use export::FREECAD_REFUSED;
 
 /// The bodies of `world` (the design's model placed in the world; all of them when `bodies` is
 /// empty) as a `format` file called `file`, written by cadmpeg: OpenUSD ([`crate::Format::Usd`],
-/// the extension picking the encoding) or Rhino ([`crate::Format::Rhino`]); FreeCAD is refused,
+/// the extension picking the encoding), Rhino ([`crate::Format::Rhino`]), or STEP and IGES
+/// ([`crate::Format::Step`], [`crate::Format::Iges`]: SolidCraft's own writers are the default; this is
+/// the choice of writing them with cadmpeg); FreeCAD is refused,
 /// as cadmpeg cannot write a new FreeCAD file yet. With no bodies chosen, a design with components
 /// keeps them where the format holds them: `model`, the model before placing, holds each
 /// component's bodies. Meshes are made at `quality`. Returns the file's bytes and what it could not

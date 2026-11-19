@@ -58,6 +58,14 @@ colour. A face's own colour is not written. The reply's warnings name each body 
 FreeCAD files cannot be exported yet: cadmpeg only writes back a FreeCAD file it read. Rhino export is
 not available in the browser yet.
 
+STEP and IGES are written by SolidCraft's own writers. To compare them with cadmpeg's, turn on
+Preferences › General › Export STEP and IGES with cadmpeg (off by default), or pass `writer: "cadmpeg"`
+to `file.export` (`writer` applies to STEP and IGES only). cadmpeg then writes the file from the design:
+STEP AP242 (edition 1, as SolidCraft's writer declares) with the components and placements, each
+body's colour and each face's own colour, but without the bodies' names, and IGES 5.3 with each body where the design shows it,
+named and in its colour, as cadmpeg's IGES writer writes no assemblies. The reply's warnings say what
+the file leaves out.
+
 Opening a STEP, IGES, FreeCAD or Rhino file creates a design with the file's bodies as a base feature, and
 inserting one adds them to the current design. Later features build on them. A FreeCAD file's
 sketches and features are rebuilt as SolidCraft features instead, so its dimensions can be edited;
