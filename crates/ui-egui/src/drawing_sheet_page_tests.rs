@@ -499,6 +499,38 @@ fn text_of(h: &mut Harness, id: u64) -> (Vec2, Value) {
     (centre, read)
 }
 
+/// With the Dimension tool in hand a placed dimension still drags, as in a sketch: its text
+/// follows the pointer in one undo step, the tool stays in hand, and nothing is picked or added.
+/// Over the dimension's text it is the dimension that lights up, not the edge under it.
+#[test]
+fn a_placed_dimension_drags_while_the_dimension_tool_is_in_hand() {
+    let (mut h, _) = plate_sheet();
+    let id = h.app.session.drawing("drawing.inspect").unwrap().dimensions[0].id;
+    assert!(crate::drawing_workspace::start(&mut h.app, "drawing.dimension"));
+    h.frames(4);
+    let (from, before) = text_of(&mut h, id);
+    h.step(&json!({"move": on_screen(from.x, from.y)})).unwrap();
+    h.frames(2);
+    assert_eq!(page(&mut h)["hover"]["object"], solidcraft_engine::doc::ids::encode(id), "the dimension is what lights up");
+    assert_eq!(crate::drawing_workspace::dimension::hovered_shape(&h.app), None, "no edge is shaded under its text");
+    let undo = h.app.session.undo.len();
+    h.step(&json!({"drag": [on_screen(from.x, from.y), on_screen(from.x + 15.0, from.y + 12.0)], "steps": 6})).unwrap();
+    h.frames(2);
+    assert!(crate::dim_view::dragged().is_none(), "the drag ended");
+    let (to, after) = text_of(&mut h, id);
+    assert!((to - (from + Vec2::new(15.0, 12.0))).len() < 1.0, "the text followed the pointer: {from:?} -> {to:?}");
+    assert!(number(&after["record"]["offset_mm"]) > number(&before["record"]["offset_mm"]) + 10.0, "{before}\n{after}");
+    assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step for the whole drag");
+    assert!(crate::drawing_workspace::placing_dimension(&h.app), "the tool is still in hand");
+    assert!(crate::drawing_workspace::dimension::picked_shapes(&h.app).is_empty(), "nothing was picked");
+    assert_eq!(h.app.session.drawing("drawing.inspect").unwrap().dimensions.len(), 1, "and no dimension was added");
+
+    // A click on an edge still picks for a new dimension: the edge the placed dimension measures
+    // too, which lies inside its box but is not its text.
+    click_paper(&mut h, 150.0, 185.0);
+    assert_eq!(crate::drawing_workspace::dimension::picked_shapes(&h.app).len(), 1, "the top edge, under the dimension's lines");
+}
+
 /// A placed dimension's text drags, as a sketch dimension's does: it follows the pointer by the
 /// same drag (`dim_view`), and the whole drag is one undo step.
 #[test]
@@ -545,6 +577,47 @@ fn a_note_drags_like_a_sketch_dimensions_text() {
         assert!((at(&h) - from).len() < 1e-9, "undo puts it back");
         h.app.run("edit.redo", json!({})).unwrap();
     }
+}
+
+/// A drag from one of several selected things moves them all together by the pointer's way, as
+/// a sketch drags its selected geometry, in one undo step: here a view, a note on the sheet and a
+/// dimension on another view. The view's own dimension goes with it once, not twice.
+#[test]
+fn a_selection_drags_together_in_one_undo_step() {
+    use solidcraft_engine::Sel;
+    let (mut h, front) = plate_sheet();
+    let decode = |v: &Value, key: &str| solidcraft_engine::doc::ids::decode(v[key].as_str().unwrap()).unwrap();
+    let drawing = h.app.session.drawing("drawing.inspect").unwrap().clone();
+    let front_id = solidcraft_engine::doc::ids::decode(&front).unwrap();
+    let right = drawing.views.iter().find(|view| view.id != front_id).unwrap().id;
+    let on_front = drawing.dimensions[0].id;
+    let note = h.app.run("drawing.note.add", json!({"anchor": {"sheet": "Sheet 1"}, "at": [300, 230], "content": "DEBURR"})).unwrap();
+    let note = decode(&note, "note");
+    let side =
+        h.app.run("drawing.dimension.add", json!({"view": solidcraft_engine::doc::ids::encode(right), "kind": {"length": {"edge": [100, 40, 20]}}}));
+    let side = decode(&side.unwrap(), "dimension");
+    settle(&mut h);
+    h.app.session.selection = [front_id, note, side].map(|object| Sel::Drawing { drawing: drawing.id, object }).to_vec();
+    let centre = |h: &Harness| h.app.session.drawing("drawing.inspect").unwrap().view_centre(front_id).unwrap();
+    let note_at = |h: &Harness| Vec2::from(h.app.session.drawing("drawing.inspect").unwrap().notes.by_id(note).unwrap().at);
+    let (front_from, note_from, side_from, own_from) = (centre(&h), note_at(&h), text_of(&mut h, side).0, text_of(&mut h, on_front).0);
+    let undo = h.app.session.undo.len();
+    let sheet = crate::drawing_sheet_page::active_sheet(&h.app).unwrap();
+    let bounds = drawing_scene::extract(&mut h.app.session, sheet).unwrap().objects.iter().find(|object| object.object == note).unwrap().bounds_mm;
+    let grab = (bounds.min + bounds.max) * 0.5;
+    let by = Vec2::new(20.0, -15.0);
+    h.step(&json!({"drag": [on_screen(grab.x, grab.y), on_screen(grab.x + by.x, grab.y + by.y)], "steps": 6})).unwrap();
+    h.frames(2);
+    assert!(crate::dim_view::dragged().is_none(), "the drag ended");
+    let moved = |what: &str, from: Vec2, to: Vec2| assert!((to - (from + by)).len() < 1.0, "{what} moved by {:?}, not {by:?}", to - from);
+    moved("the view", front_from, centre(&h));
+    moved("the note", note_from, note_at(&h));
+    moved("the other view's dimension", side_from, text_of(&mut h, side).0);
+    moved("the view's own dimension", own_from, text_of(&mut h, on_front).0);
+    assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step for the whole drag");
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert!((centre(&h) - front_from).len() < 1e-9 && (note_at(&h) - note_from).len() < 1e-9, "one undo puts them all back");
+    assert!((text_of(&mut h, side).0 - side_from).len() < 1e-6, "and the dimension");
 }
 
 /// What the pointer is over, and what is selected, is lit in the accent colour as in a sketch,

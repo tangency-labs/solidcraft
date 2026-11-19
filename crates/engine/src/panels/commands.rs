@@ -727,7 +727,7 @@ fn merge_envelopes(current: &LayoutEnvelope, mut next: LayoutEnvelope, registry:
         }
     }
     next.section_order = order;
-    super::persistence::merge_retained_priority_context(&mut next, &current_priorities, &incoming_priorities)?;
+    merge_retained_priority_context(&mut next, &current_priorities, &incoming_priorities)?;
     let layout = next.layout.clone();
     with_live_layout(&next, layout, registry)
 }

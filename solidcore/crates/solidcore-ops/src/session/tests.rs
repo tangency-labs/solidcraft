@@ -202,6 +202,36 @@ fn a_refusal_keeps_the_kernel_code_it_came_from() {
     assert_eq!(take_failure_code(), None);
 }
 
+/// An attempt a call tries and gives up after its refusal was noted puts the note back: the
+/// refusal it returns keeps the code of the kernel error it was typed from, not the attempt's.
+#[test]
+fn a_given_up_attempt_leaves_the_refusals_code() {
+    all_fixes();
+    let _ = take_failure_code();
+    let r: Result<Result<()>> = run("tries again", |_| {
+        let refusal = status(SolidError::invalid_input("the first pass", "no"));
+        let note = note();
+        // the attempt notes its own kernel error, of the same variant, and is given up
+        drop(status(SolidError::invalid_input(
+            "the attempt",
+            "no either",
+        )));
+        note_back(note);
+        Ok(Err(refusal))
+    });
+    assert!(matches!(
+        r,
+        Ok(Err(Error::Refused {
+            operation: "the first pass",
+            ..
+        }))
+    ));
+    assert_eq!(
+        take_failure_code().map(|c| c.operation),
+        Some("the first pass")
+    );
+}
+
 /// A panicking failure callback loses nothing of the call's result.
 #[test]
 fn a_panicking_hook_keeps_the_calls_result() {
