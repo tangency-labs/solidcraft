@@ -1435,6 +1435,330 @@ fn a_plate_with_a_through_hole() {
     }
 }
 
+/// A plate 10 mm deep and 5 mm thick whose side at x = 10 leans out to x = 15 at its bottom,
+/// with a through hole of radius 2 about (8, 5): the hole's top rim touches the top face's edge
+/// x = 10 at the one point (10, 5, 5), where the rim's vertex is a vertex of that edge too, and
+/// the leaning side runs clear of the hole below it. The top face is written with the hole as a
+/// bound of its own, as a boolean writes it.
+fn plate_with_a_hole_touching_an_edge() -> p21::Exchange {
+    let mut w = W::default();
+    let at = |w: &mut W, p: V| (w.vertex(p), p);
+    let [a0, b0, c0, d0] = [[0.0, 0.0, 0.0], [15.0, 0.0, 0.0], [15.0, 10.0, 0.0], [0.0, 10.0, 0.0]].map(|p| at(&mut w, p));
+    let [a, b, c, d] = [[0.0, 0.0, 5.0], [10.0, 0.0, 5.0], [10.0, 10.0, 5.0], [0.0, 10.0, 5.0]].map(|p| at(&mut w, p));
+    // Where the rim touches the edge, and the bottom rim's vertex under it.
+    let (touch, under) = (at(&mut w, [10.0, 5.0, 5.0]), at(&mut w, [10.0, 5.0, 0.0]));
+    let line = |w: &mut W, p: (u64, V), q: (u64, V)| w.line_edge(p, q, true, 1.0);
+    let bottom = [line(&mut w, a0, b0), line(&mut w, b0, c0), line(&mut w, c0, d0), line(&mut w, d0, a0)];
+    let top = [line(&mut w, a, b), line(&mut w, b, touch), line(&mut w, touch, c), line(&mut w, c, d), line(&mut w, d, a)];
+    let up = [line(&mut w, a0, a), line(&mut w, b0, b), line(&mut w, c0, c), line(&mut w, d0, d)];
+    let rim = |w: &mut W, v: u64, h: f64| {
+        let k = w.circle([8.0, 5.0, h], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 2.0);
+        w.add(format!("EDGE_CURVE('',#{v},#{v},#{k},.T.)"))
+    };
+    let rims = [rim(&mut w, under.0, 0.0), rim(&mut w, touch.0, 5.0)];
+    let seam = line(&mut w, under, touch);
+    let axis = w.axis([8.0, 5.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let surface = w.add(format!("CYLINDRICAL_SURFACE('',#{axis},2.)"));
+    let wall = side(&mut w, &Cyl { circles: rims, seam, surface }, false);
+    // Each face's outer bound counter-clockwise about its outward normal, then its hole.
+    let face = |w: &mut W, uses: &[(u64, bool)], hole: Option<(u64, bool)>, o: V, z: V, x: V| {
+        let oes: Vec<u64> = uses.iter().map(|&(e, forward)| w.oe(e, forward)).collect();
+        let mut bounds = vec![w.bound(&oes, false, true)];
+        if let Some((e, forward)) = hole {
+            let oe = w.oe(e, forward);
+            bounds.push(w.bound(&[oe], false, true));
+        }
+        let plane = w.plane(o, z, x);
+        w.face(&bounds, plane, true)
+    };
+    let lean = 0.5_f64.sqrt();
+    let faces = [
+        face(
+            &mut w,
+            &[(top[0], true), (top[1], true), (top[2], true), (top[3], true), (top[4], true)],
+            Some((rims[1], false)),
+            a.1,
+            [0.0, 0.0, 1.0],
+            [1.0, 0.0, 0.0],
+        ),
+        face(
+            &mut w,
+            &[(bottom[3], false), (bottom[2], false), (bottom[1], false), (bottom[0], false)],
+            Some((rims[0], true)),
+            a0.1,
+            [0.0, 0.0, -1.0],
+            [1.0, 0.0, 0.0],
+        ),
+        face(&mut w, &[(bottom[0], true), (up[1], true), (top[0], false), (up[0], false)], None, a0.1, [0.0, -1.0, 0.0], [1.0, 0.0, 0.0]),
+        face(&mut w, &[(up[3], true), (top[3], false), (up[2], false), (bottom[2], true)], None, d0.1, [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]),
+        face(&mut w, &[(up[0], true), (top[4], false), (up[3], false), (bottom[3], true)], None, a0.1, [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+        face(
+            &mut w,
+            &[(bottom[1], true), (up[2], true), (top[2], false), (top[1], false), (up[1], false)],
+            None,
+            b0.1,
+            [lean, 0.0, lean],
+            [0.0, 1.0, 0.0],
+        ),
+        wall,
+    ];
+    let shell = closed_shell(&mut w, &faces);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('plate',#{shell})"));
+    w.file(&[solid])
+}
+
+/// A hole whose rim touches its face's outer edge at one vertex (tangency-labs/solidcraft#19165:
+/// a part from OpenCascade's booleans) is no bound of its own: the kernel takes no face whose
+/// loops share a vertex (its face tests 32, 38 and 39 refused the body, and every feature on it
+/// after). The face's one loop runs along the outer edge to the vertex, round the rim and on
+/// along the edge, and bounds the same region: the solid has the faces, edges, vertices and
+/// volume it is written with, and the kernel's check passes it.
+#[test]
+fn a_hole_that_touches_its_faces_outer_edge_at_one_vertex_is_in_the_outer_loop() {
+    let s = one_solid(&plate_with_a_hole_touching_an_edge());
+    assert!(!s.sheet);
+    assert_eq!(counts(&s.brep), [2, 1, 7, 16, 10]);
+    let b = &s.brep;
+    let (body, _) = solidcore_ops::body::Body::from_record(b, false).unwrap();
+    assert!(body.is_manifold_solid().unwrap());
+    let report = body.check(solidcore_ops::check::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{report}");
+    assert_eq!(body.counts().unwrap(), [7, 16, 10]);
+    // The leaning prism less the hole: 10 x (10 + 15) / 2 x 5 - pi 2^2 x 5.
+    let volume = 625.0 - 20.0 * PI;
+    let mass = body.mass_properties(1e-9).unwrap();
+    assert!((mass.volume - volume).abs() < 1e-8 * volume, "{} vs {volume}", mass.volume);
+    let touch = b.vertices.iter().position(|v| v.point == [10.0, 5.0, 5.0]).unwrap() as u32;
+    // The top face: the five edges of its outline and the rim between the two that meet at the
+    // vertex, the rim run clockwise about the face's normal as a hole is.
+    let rim = b.edges.iter().position(|e| matches!(e.curve, BCurve::Circle { .. }) && e.vertices == [touch; 2]).unwrap() as u32;
+    let tops: Vec<&Face> =
+        b.faces.iter().filter(|f| matches!(f.surface, BSurface::Plane { .. }) && f.loops.iter().any(|l| uses_edge(l, rim))).collect();
+    let [top] = tops.as_slice() else { panic!("{} plane faces on the rim", tops.len()) };
+    let [Loop::Edges { edges }] = top.loops.as_slice() else { panic!("{} loops", top.loops.len()) };
+    assert_eq!(edges.len(), 6);
+    let starts: Vec<u32> = edges.iter().map(|u| b.edges[u.edge as usize].vertices[usize::from(!u.forward)]).collect();
+    assert_eq!(starts.iter().filter(|v| **v == touch).count(), 2, "through the vertex twice: {starts:?}");
+    let at = edges.iter().position(|u| u.edge == rim).unwrap();
+    let (before, after) = (&edges[(at + 5) % 6], &edges[(at + 1) % 6]);
+    for u in [before, after] {
+        assert!(matches!(b.edges[u.edge as usize].curve, BCurve::Line { .. }));
+    }
+    assert_eq!(starts[at], touch);
+    assert_eq!(starts[(at + 1) % 6], touch);
+    // The bottom face keeps its hole as a loop of its own: nothing touches there.
+    assert_eq!(b.faces.iter().filter(|f| f.loops.len() == 2).count(), 1);
+    faces_away(b, 0, |p| {
+        let r = (p[0] - 8.0).hypot(p[1] - 5.0);
+        if (r - 2.0).abs() < 1e-6 {
+            [8.0 + (p[0] - 8.0) * 2.0, 5.0 + (p[1] - 5.0) * 2.0, p[2]]
+        } else {
+            [p[0].clamp(0.5, 5.0), p[1].clamp(0.5, 9.5), 2.5]
+        }
+    });
+    assert!(s.notes.iter().any(|n| n.contains("made one loop")), "{:?}", s.notes);
+}
+
+/// Whether loop `l` runs along edge `e`.
+fn uses_edge(l: &Loop, e: u32) -> bool {
+    matches!(l, Loop::Edges { edges } if edges.iter().any(|u| u.edge == e))
+}
+
+/// A hole that touches its face's outer loop at two vertices cuts the face in two, which is no
+/// one loop: a square sheet whose hole reaches from the middle of one side to the middle of the
+/// opposite one keeps its two loops as written, and the reader's notes name the face and where
+/// its loops touch.
+#[test]
+fn a_hole_that_touches_its_faces_outer_loop_at_two_vertices_is_left_and_named() {
+    let mut w = W::default();
+    let at = |w: &mut W, p: V| (w.vertex(p), p);
+    let ring = |w: &mut W, corners: &[(u64, V)]| -> Vec<u64> {
+        let n = corners.len();
+        (0..n)
+            .map(|k| {
+                let e = w.line_edge(corners[k], corners[(k + 1) % n], true, 1.0);
+                w.oe(e, true)
+            })
+            .collect()
+    };
+    let (right, left) = (at(&mut w, [10.0, 5.0, 0.0]), at(&mut w, [0.0, 5.0, 0.0]));
+    let square =
+        [at(&mut w, [0.0, 0.0, 0.0]), at(&mut w, [10.0, 0.0, 0.0]), right, at(&mut w, [10.0, 10.0, 0.0]), at(&mut w, [0.0, 10.0, 0.0]), left];
+    // Clockwise about +z, as a hole runs.
+    let diamond = [right, at(&mut w, [5.0, 3.0, 0.0]), left, at(&mut w, [5.0, 7.0, 0.0])];
+    let (outer, hole) = (ring(&mut w, &square), ring(&mut w, &diamond));
+    let bounds = [w.bound(&outer, true, true), w.bound(&hole, false, true)];
+    let plane = w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let face = w.face(&bounds, plane, true);
+    let open = w.add(format!("OPEN_SHELL('',(#{face}))"));
+    let model = w.add(format!("SHELL_BASED_SURFACE_MODEL('sheet',(#{open}))"));
+    let s = one_solid(&w.file(&[model]));
+    assert!(s.sheet);
+    assert_eq!(counts(&s.brep), [1, 1, 1, 10, 8]);
+    assert_eq!(s.brep.faces[0].loops.len(), 2);
+    let named = format!("face #{face}: its loops touch at (10, 5, 0) mm and are left as written: ");
+    assert!(s.notes.iter().any(|n| n.starts_with(&named)), "{:?}", s.notes);
+    assert!(!s.notes.iter().any(|n| n.contains("made one loop")), "{:?}", s.notes);
+}
+
+/// [`cylinder`] with each rim circle from its vertex to a second VERTEX_POINT at the same point,
+/// as OpenCascade's booleans can write a hole's rim (tangency-labs/solidcraft#18784).
+fn cylinder_with_twin_rim_ends(w: &mut W, c: [f64; 2], r: f64, z: [f64; 2]) -> Cyl {
+    let p = |h: f64| [c[0] + r, c[1], h];
+    let (v0, v1) = (w.vertex(p(z[0])), w.vertex(p(z[1])));
+    let circle = |w: &mut W, v: u64, h: f64| {
+        let k = w.circle([c[0], c[1], h], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], r);
+        let end = w.vertex(p(h));
+        w.add(format!("EDGE_CURVE('',#{v},#{end},#{k},.T.)"))
+    };
+    let circles = [circle(w, v0, z[0]), circle(w, v1, z[1])];
+    let seam = w.line_edge((v0, p(z[0])), (v1, p(z[1])), true, 1.0);
+    let a = w.axis([c[0], c[1], 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let surface = w.add(format!("CYLINDRICAL_SURFACE('',#{a},{})", real(r)));
+    Cyl { circles, seam, surface }
+}
+
+/// A closed cylinder: its two caps (each bounded by one rim) and its side (rims and seam).
+fn closed_cylinder(twin_rim_ends: bool) -> p21::Exchange {
+    let mut w = W::default();
+    let c = if twin_rim_ends {
+        cylinder_with_twin_rim_ends(&mut w, [1.0, 2.0], 5.0, [0.0, 10.0])
+    } else {
+        cylinder(&mut w, [1.0, 2.0], 5.0, [0.0, 10.0])
+    };
+    let side_face = side(&mut w, &c, true);
+    let ob = w.oe(c.circles[0], false);
+    let bottom_bound = w.bound(&[ob], true, true);
+    let bottom_plane = w.plane([1.0, 2.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let bottom = w.face(&[bottom_bound], bottom_plane, false);
+    let ot = w.oe(c.circles[1], true);
+    let top_bound = w.bound(&[ot], true, true);
+    let top_plane = w.plane([1.0, 2.0, 10.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let top = w.face(&[top_bound], top_plane, true);
+    let shell = closed_shell(&mut w, &[bottom, side_face, top]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('',#{shell})"));
+    w.file(&[solid])
+}
+
+/// A cylinder whose rims are full circles each from one VERTEX_POINT to a second one at the same
+/// point (tangency-labs/solidcraft#18784): each rim is a full turn whose two ends are one vertex,
+/// so its caps' one-edge loops and its side's loop close, and it reads as the same closed solid
+/// as the cylinder whose rims have one vertex each.
+#[test]
+fn a_full_circle_edge_between_two_vertices_at_one_point_closes_its_loop() {
+    let (one, two) = (one_solid(&closed_cylinder(false)), one_solid(&closed_cylinder(true)));
+    assert!(!two.sheet);
+    assert_eq!(counts(&two.brep), [2, 1, 3, 3, 2]);
+    assert_eq!(counts(&one.brep), counts(&two.brep));
+    faces_away(&two.brep, 0, |p| [1.0, 2.0, p[2].clamp(1.0, 9.0)]);
+    for e in two.brep.edges.iter().filter(|e| matches!(e.curve, BCurve::Circle { .. })) {
+        let [a0, a1] = solidcore_ops::label::edge_curve_interval(e).unwrap();
+        assert!((a1 - a0 - TAU).abs() < 1e-12, "a full turn: {a0} {a1}");
+        assert_eq!(e.vertices[0], e.vertices[1]);
+    }
+}
+
+/// A unit square sheet bounded by one closed edge on a closed polygon spline round it (its seam
+/// at (1, 0.5)), from the vertex there to itself, or with `twin_ends` to a second VERTEX_POINT at
+/// the same point.
+fn spline_outline(twin_ends: bool) -> p21::Exchange {
+    let mut w = W::default();
+    let start = [1.0, 0.5, 0.0];
+    let v = w.vertex(start);
+    let end = if twin_ends { w.vertex(start) } else { v };
+    let pts: Vec<u64> = [start, [1.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0], [1.0, 0.0, 0.0], start].iter().map(|p| w.pt(*p)).collect();
+    let c =
+        w.add(format!("B_SPLINE_CURVE_WITH_KNOTS('',1,({}),.POLYLINE_FORM.,.T.,.F.,(2,1,1,1,1,2),(0.,1.,2.,3.,4.,5.),.UNSPECIFIED.)", list(&pts)));
+    let e = w.add(format!("EDGE_CURVE('',#{v},#{end},#{c},.T.)"));
+    let oe = w.oe(e, true);
+    let bound = w.bound(&[oe], true, true);
+    let plane = w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let face = w.face(&[bound], plane, true);
+    let shell = w.add(format!("OPEN_SHELL('',(#{face}))"));
+    let model = w.add(format!("SHELL_BASED_SURFACE_MODEL('',(#{shell}))"));
+    w.file(&[model])
+}
+
+/// A closed spline edge written with two vertices at one point is read as the same edge written
+/// with one: the whole spline, not an empty piece of it between one point and itself.
+#[test]
+fn a_closed_spline_edge_between_two_vertices_at_one_point_is_its_one_vertex_edge() {
+    let (one, two) = (one_solid(&spline_outline(false)), one_solid(&spline_outline(true)));
+    assert_eq!(counts(&two.brep), [1, 1, 1, 1, 1]);
+    assert_eq!(counts(&one.brep), counts(&two.brep));
+    let (a, b) = (&one.brep.edges[0], &two.brep.edges[0]);
+    assert_eq!(a.curve, b.curve);
+    assert_eq!(a.interval, b.interval);
+    assert_eq!(b.vertices[0], b.vertices[1]);
+}
+
+/// A LINE edge between two vertices at one point is refused as the LINE edge with one vertex is:
+/// joining its ends never makes an edge of no length.
+#[test]
+fn a_line_edge_between_two_vertices_at_one_point_is_refused_as_a_closed_edge() {
+    for twin_ends in [false, true] {
+        let mut w = W::default();
+        let p = [1.0, 2.0, 3.0];
+        let v = w.vertex(p);
+        let end = if twin_ends { w.vertex(p) } else { v };
+        let (o, d) = (w.pt(p), w.dir([1.0, 0.0, 0.0]));
+        let vec = w.add(format!("VECTOR('',#{d},1.)"));
+        let line = w.add(format!("LINE('',#{o},#{vec})"));
+        let e = w.add(format!("EDGE_CURVE('',#{v},#{end},#{line},.T.)"));
+        let ex = w.file(&[e]);
+        with_builder(&ex, |b| {
+            let err = b.edge(e).err().unwrap_or_default();
+            assert!(err.contains("a closed edge on a line"), "twin ends {twin_ends}: {err}");
+        });
+    }
+}
+
+/// Two vertices at one point that are the two ends of a circle edge not read yet meet: a loop
+/// read before that edge joins them, as the edge itself would.
+#[test]
+fn the_two_ends_at_one_point_of_an_edge_read_later_meet() {
+    let mut w = W::default();
+    let p = [3.0, 0.0, 0.0];
+    let (v0, v1) = (w.vertex(p), w.vertex(p));
+    let k = w.circle([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 3.0);
+    let circle = w.add(format!("EDGE_CURVE('',#{v0},#{v1},#{k},.T.)"));
+    let ex = w.file(&[circle]);
+    with_builder(&ex, |b| {
+        let (a, z) = (b.vertex(v0).unwrap(), b.vertex(v1).unwrap());
+        assert!(b.meet(a, z).unwrap());
+        let (e, _) = b.edge(circle).unwrap();
+        let [s, t] = b.asm.edges[e as usize].vertices;
+        assert_eq!(s, t);
+    });
+}
+
+/// A circle edge from A to a second vertex C at A's point, read after an earlier loop joined A
+/// with B, where B and C are the two ends of a LINE 1.5e-7 mm long (within their 1e-7 mm
+/// tolerances): the circle's two ends meet as any two vertices do, so they are not joined across
+/// the LINE, and the LINE keeps its two vertices.
+#[test]
+fn a_two_vertex_circle_never_joins_the_two_ends_of_a_line_read_after_it() {
+    let mut w = W::default();
+    let (a, c, bp) = ([0.0; 3], [0.0; 3], [1.5e-7, 0.0, 0.0]);
+    let (va, vb, vc) = (w.vertex(a), w.vertex(bp), w.vertex(c));
+    let k = w.circle([-1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 1.0);
+    let circle = w.add(format!("EDGE_CURVE('',#{va},#{vc},#{k},.T.)"));
+    let line = w.line_edge((vb, bp), (vc, c), true, 1.0);
+    let ex = w.file(&[circle, line]);
+    with_builder(&ex, |b| {
+        let (ia, ib) = (b.vertex(va).unwrap(), b.vertex(vb).unwrap());
+        // An earlier loop meets A and B: they are apart by less than their tolerances.
+        assert!(b.meet(ib, ia).unwrap());
+        let _ = b.edge(circle);
+        let (e, _) = b.edge(line).unwrap();
+        b.join_vertices().unwrap();
+        let [s, t] = b.asm.edges[e as usize].vertices;
+        assert_ne!(s, t, "the LINE keeps its two vertices");
+        let ic = b.vertex(vc).unwrap();
+        assert_ne!(b.find(ib), b.find(ic));
+    });
+}
+
 #[test]
 fn a_closed_shell_beside_open_shells_reads_each_open_shell_as_a_sheet() {
     // A closed shell beside two open ones: the closed shell is a solid body and each open shell a

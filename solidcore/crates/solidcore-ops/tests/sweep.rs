@@ -3,7 +3,7 @@
 //! a refused draft corner's reason, a planar sheet's one face. Then the arcs of a profile on one
 //! circle: the queries and the join an application's one-wall rule is built on, and their
 //! refusals. They run under the rig's fix set
-//! (the corpus's `fixes.json`), as SolidCraft's rig ran them: with every fix off, a quarter
+//! (SolidCraft's preset, `solidcraft_fixes.rs`), as SolidCraft's rig ran them: with every fix off, a quarter
 //! torus's volume is 1.3e-9 off its closed form.
 // TODO(d0b44726f): the cases with arcs (extrude_circle*, sweep_circle_*, loft_two_circles,
 // planar_faces_with_a_hole, the joins) take the kernel's arcs as exact circles, at bound 0 by
@@ -18,6 +18,9 @@
     clippy::unwrap_used,
     dead_code
 )]
+
+#[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
 
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
@@ -494,19 +497,11 @@ fn run(op: &Op) -> solidcore_ops::Result<Body> {
     }
 }
 
-/// The rig's fix set, the corpus's `fixes.json`, on the calling thread's kernel. The setting
-/// is thread-local, so every test thread sets it: a `Once` would give the rig's set to the first
-/// thread only.
+/// The rig's fix set, SolidCraft's preset (`solidcraft_fixes.rs`), on the calling thread's
+/// kernel. The setting is thread-local, so every test thread sets it: a `Once` would give the
+/// rig's set to the first thread only.
 fn rig_fixes() {
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../solidcore/tests/kernel_cases/fixes.json"
-    );
-    let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}"));
-    // A flat JSON array of flag names: every other piece between quotes.
-    let names: Vec<&str> = text.split('"').skip(1).step_by(2).collect();
-    assert!(!names.is_empty(), "{path}: no fixes");
-    solidcore_ops::session::set_thread_fixes(names).unwrap();
+    solidcore_ops::session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
 }
 
 fn check(name: &str) {

@@ -182,7 +182,7 @@ fn assert_sound(k: &mut Kernel, mut wall: Brep, label: &str) {
     );
 }
 
-/// SolidCraft's fixes (`kernel_cases/fixes.json`): the same sound body, with loop-gap closure unconditional.
+/// SolidCraft's fixes (`support/solidcraft_fixes.rs`): the same sound body, with loop-gap closure unconditional.
 #[test]
 fn solidcraft_fixes_shell_the_square_to_circle_loft() {
     let (mut k, result) = shell(&solidcraft_fixes(), true);

@@ -48,19 +48,20 @@ pub struct Mesh {
     pub size: f64,
 }
 
-/// The fixes the app runs with, as the kernel rig and solidcore's tests name them
-/// (`crates/smlib/src/core.rs` checks that the two lists agree).
-const APP_FIXES: &str = include_str!("../../solidcore/tests/kernel_cases/fixes.json");
+/// The fixes the app holds back from its preset of every fix on, as the kernel rig and
+/// solidcore's tests name them (`crates/smlib/src/core.rs` checks that the list equals the
+/// app's `HELD_BACK`).
+const APP_HELD_BACK: &str = include_str!("../../solidcore/tests/kernel_cases/held_back.json");
 
-/// The fix set [`APP_FIXES`] names.
+/// The fix set the app runs with: every fix on except those [`APP_HELD_BACK`] names.
 fn app_fixes() -> Result<UpstreamFixes, String> {
-    let names: Vec<String> =
-        serde_json::from_str(APP_FIXES).map_err(|e| format!("reading the fixes preset: {e}"))?;
-    let mut fixes = UpstreamFixes::default();
+    let names: Vec<String> = serde_json::from_str(APP_HELD_BACK)
+        .map_err(|e| format!("reading the held-back fixes: {e}"))?;
+    let mut fixes = UpstreamFixes::all();
     for name in &names {
         *fixes
             .flag_mut(name)
-            .ok_or_else(|| format!("the fixes preset names an unknown fix `{name}`"))? = true;
+            .ok_or_else(|| format!("the held-back fixes name an unknown fix `{name}`"))? = false;
     }
     Ok(fixes)
 }
@@ -240,7 +241,12 @@ mod tests {
             .filter(|(_, on)| *on)
             .map(|(name, _)| name)
             .collect();
-        let preset: Vec<String> = serde_json::from_str(APP_FIXES).unwrap();
+        let held: Vec<String> = serde_json::from_str(APP_HELD_BACK).unwrap();
+        let preset: Vec<&str> = UpstreamFixes::NAMES
+            .iter()
+            .copied()
+            .filter(|name| !held.iter().any(|h| h == name))
+            .collect();
         assert!(!preset.is_empty());
         assert_eq!(on, preset);
     }
