@@ -17,7 +17,7 @@ use crate::dialogs::{Dialog, Kind, check, curves_sketch, form_row, input_rows_ra
 use crate::selection::{
     CONSTRUCTION_POINTS, EXTERNAL_POINTS, ORIGIN, POINTS, PROFILES, SKETCH_LINES, SNAP_POINTS, SelInput, SelectionExt as _, VERTICES, is_point,
 };
-use crate::ui_kit::{Button, button, choice_row, expr_row, hint_row, text_row};
+use crate::ui_kit::{Button, button, choice_row, expr_row, hint_row, row_height, sized_row, text_row};
 use crate::viewport::Hit;
 
 /// The anchors as `frame.member` names them, and their labels.
@@ -1179,18 +1179,24 @@ fn group_rows(ui: &mut egui::Ui, m: &mut Member, inputs: &mut [SelInput]) {
     let count = m.groups.len().max(1);
     let mut show = None;
     let (mut add, mut remove) = (false, false);
-    form_row(ui, solidcraft_ui_text::tr("ui.frame_member.groups"), |ui| {
-        ui.horizontal_wrapped(|ui| {
+    // A regular form row clips to one line. Reserve a line for every chip and action so their
+    // paint and click targets stay inside the row at the default dialog width.
+    let lines = count + 1 + usize::from(count > 1);
+    let height = row_height() * lines as f32 + ui.spacing().item_spacing.y * (lines - 1) as f32;
+    sized_row(ui, solidcraft_ui_text::tr("ui.frame_member.groups"), height, |ui| {
+        ui.vertical(|ui| {
             for k in 0..count {
                 let label = solidcraft_ui_text::format("ui.frame_member.group", &[("number", &(k + 1).to_string())]);
                 let style = if k == m.current { Button::SmallSelected } else { Button::Small };
-                if button(ui, label, style).clicked() && k != m.current {
-                    show = Some(k);
-                }
+                ui.horizontal(|ui| {
+                    if button(ui, label, style).clicked() && k != m.current {
+                        show = Some(k);
+                    }
+                });
             }
-            add = button(ui, solidcraft_ui_text::tr("ui.frame_member.new_group"), Button::Small).clicked();
+            ui.horizontal(|ui| add = button(ui, solidcraft_ui_text::tr("ui.frame_member.new_group"), Button::Small).clicked());
             if count > 1 {
-                remove = button(ui, solidcraft_ui_text::tr("ui.frame_member.remove_group"), Button::Small).clicked();
+                ui.horizontal(|ui| remove = button(ui, solidcraft_ui_text::tr("ui.frame_member.remove_group"), Button::Small).clicked());
             }
         });
     });

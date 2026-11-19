@@ -2841,6 +2841,54 @@ fn switching_groups_keeps_picks_and_placement_through_an_edit() {
 }
 
 #[test]
+fn group_buttons_stay_visible_and_new_group_is_clickable_at_default_dialog_width() {
+    use crate::scenario::Harness;
+    use solidcraft_ui_registry::{handle_at, rect_of};
+
+    for (width, height) in [(1280, 720), (800, 600)] {
+        for count in [1, 3] {
+            let mut h = Harness::new();
+            h.app = frame_app();
+            h.call("ui.resize", json!({"width": width, "height": height}));
+            let lines = frame_lines(&h.app);
+            let mut d = dialog_on(&mut h.app, &lines[..1]);
+            if let Kind::Frame(m) = &mut d.kind {
+                for _ in 1..count {
+                    m.add_group(&mut d.inputs);
+                }
+                m.show(0, &mut d.inputs);
+            }
+            h.app.dialog = Some(d);
+            h.frames(3);
+
+            let visible = rect_of("dialog:card").unwrap().intersect(h.ctx.content_rect());
+            let row = rect_of("dialog:row:Groups").unwrap();
+            if count == 1 {
+                assert!(rect_of("dialog:row:All Lines").unwrap().bottom() <= row.top());
+            }
+            for label in (1..=count).map(|k| format!("Group {k}")).chain(["New Group".into()]) {
+                let key = format!("dialog:button:Groups:{label}");
+                let rect = rect_of(&key).unwrap();
+                assert!(
+                    visible.contains_rect(rect) && row.contains_rect(rect),
+                    "{width}x{height}, {count} groups: {key} {rect:?}, row {row:?}, visible {visible:?}"
+                );
+                assert!(visible.contains(handle_at(&key).unwrap()));
+            }
+            for k in 1..=count {
+                crate::test_support::click(&mut h, &format!("dialog:button:Groups:Group {k}"));
+                assert_eq!(member(h.app.dialog.as_mut().unwrap()).current, k - 1);
+            }
+            crate::test_support::click(&mut h, "dialog:button:Groups:New Group");
+            let d = h.app.dialog.as_mut().unwrap();
+            assert_eq!(member(d).groups.len(), count + 1, "{width}x{height}, {count} groups: New Group must respond to a click");
+            assert_eq!(member(d).current, count);
+            assert!(d.inputs[0].items.is_empty());
+        }
+    }
+}
+
+#[test]
 fn removing_the_shown_group_keeps_its_neighbours_values() {
     let mut app = frame_app();
     let lines = frame_lines(&app);
