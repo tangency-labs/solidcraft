@@ -21,6 +21,7 @@ use crate::pbr;
 mod ao;
 pub use ao::GroundAo;
 mod clouds;
+mod edges;
 mod indirect;
 pub use clouds::{CELL_SIZE, Cell, CloudFilter, CloudStyle, ColorMode, FILTERS, GpuCloud, cloud_cell};
 #[cfg(not(target_arch = "wasm32"))]
@@ -46,8 +47,13 @@ pub const PBR_SIZE: usize = pbr::VERTEX_SIZE;
 /// Line instance: a, b (3 × f32 each), palette index (u32), width in pixels (f32).
 pub const LINE_SIZE: usize = 32;
 /// Placement of an [`InstancedMesh`]: the rows of its rigid move (3 × 4 f32; a point's x, y and z
-/// are each row's dot product with (p, 1)), then its palette index (u32).
-pub const INSTANCE_SIZE: usize = 52;
+/// are each row's dot product with (p, 1)), then its palette index (u32), then its edges' and its
+/// hidden edges' palette indices (u32 each; drawn from [`InstancedMesh::edges`]).
+pub const INSTANCE_SIZE: usize = 60;
+/// Model edges drawn this wide (pixels), as a body's edges in its block are.
+pub const EDGE_WIDTH: f32 = 1.3;
+/// Hidden model edges drawn this wide (pixels).
+pub const HIDDEN_EDGE_WIDTH: f32 = 1.0;
 
 /// An index into a scene's [`Palette`]. Deliberately not convertible from a colour: every
 /// producer must go through a palette, and the compiler should say so.
@@ -245,8 +251,10 @@ fn octahedral6(n: [f32; 3]) -> u32 {
 /// [`MAX_SECTION_PLANES`] planes, 6 more `vec4`s (the last carries the ambient occlusion
 /// radius), the 8 analysis colours, their flags, the depth direction, the model matrix, the two
 /// whole-body highlight colours, the section hatch colours, the product lights (a flag and
-/// count, then 21 lights of 4 `vec4`s), each section plane's hatch and the sky (`uniform_bytes`).
-const UNIFORM_SIZE: u64 = 480 + 16 * (2 * MAX_SECTION_PLANES as u64 - 1) + 16 * solidcraft_viewport::hatch::HATCH_COLOURS as u64 + 16 + 21 * 64 + 16;
+/// count, then 21 lights of 4 `vec4`s), the inverse of the view-projection matrix, each section
+/// plane's hatch and the sky (`uniform_bytes`).
+const UNIFORM_SIZE: u64 =
+    480 + 16 * (2 * MAX_SECTION_PLANES as u64 - 1) + 16 * solidcraft_viewport::hatch::HATCH_COLOURS as u64 + 16 + 21 * 64 + 16 + 64;
 
 /// The identity, column-major: a scene drawn where it was built.
 const IDENTITY: [[f32; 4]; 4] = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
@@ -523,15 +531,47 @@ pub struct InstancedMesh {
     pub levels: Vec<(Arc<SharedTris>, f32)>,
     /// The triangles enclose a volume (see [`PlannedBody::closed`]).
     pub closed: bool,
+    /// The part's model edges, drawn at every placement in each placement's edge colours (where
+    /// the renderer draws edges this way, [`GpuTarget::edges`]); `None` when its edges are drawn
+    /// from the scene's blocks.
+    pub edges: Option<Arc<SharedEdges>>,
 }
 
 impl InstancedMesh {
     /// Add a placement: `rows` of its rigid move (see [`INSTANCE_SIZE`]) and its palette index.
     pub fn place(&mut self, rows: [[f32; 4]; 3], color: PaletteIndex) {
+        self.place_edged(rows, color, PaletteIndex(0), PaletteIndex(0));
+    }
+
+    /// [`InstancedMesh::place`], with the palette indices its edges and hidden edges are drawn in.
+    pub fn place_edged(&mut self, rows: [[f32; 4]; 3], color: PaletteIndex, edge: PaletteIndex, hidden: PaletteIndex) {
         for v in rows.iter().flatten() {
             self.instances.extend_from_slice(&v.to_le_bytes());
         }
-        self.instances.extend_from_slice(&color.0.to_le_bytes());
+        for index in [color, edge, hidden] {
+            self.instances.extend_from_slice(&index.0.to_le_bytes());
+        }
+    }
+
+    /// Its edges at every placement as line records ([`LINE_SIZE`]), in the placement's edge
+    /// colour, appended to `lines` (and to `hidden`, in its hidden edge colour, when `hidden`
+    /// is given): the lines the GPU draws from [`InstancedMesh::edges`], at full detail.
+    pub fn expand_edges_into(&self, lines: &mut Vec<u8>, mut hidden: Option<&mut Vec<u8>>) {
+        let Some((records, _)) = self.edges.as_ref().and_then(|e| e.levels.first()) else { return };
+        let f = |b: &[u8], i: usize| b.get(i..i + 4).and_then(|x| x.try_into().ok()).map_or(0.0, f32::from_le_bytes);
+        let u = |b: &[u8], i: usize| b.get(i..i + 4).and_then(|x| x.try_into().ok()).map_or(0, u32::from_le_bytes);
+        for inst in self.instances.as_chunks::<INSTANCE_SIZE>().0 {
+            let rows = [0, 1, 2].map(|r| [f(inst, 16 * r), f(inst, 16 * r + 4), f(inst, 16 * r + 8), f(inst, 16 * r + 12)]);
+            let moved = |p: [f32; 3]| rows.map(|r| r[0] * p[0] + r[1] * p[1] + r[2] * p[2] + r[3]);
+            let (edge, hide) = (PaletteIndex(u(inst, 52)), PaletteIndex(u(inst, 56)));
+            for seg in records.as_chunks::<EDGE_SEG_SIZE>().0 {
+                let (a, b) = (moved([f(seg, 0), f(seg, 4), f(seg, 8)]), moved([f(seg, 16), f(seg, 20), f(seg, 24)]));
+                lines.extend_from_slice(&line_record(a, b, edge, EDGE_WIDTH.to_bits()));
+                if let Some(h) = hidden.as_deref_mut() {
+                    h.extend_from_slice(&line_record(a, b, hide, HIDDEN_EDGE_WIDTH.to_bits()));
+                }
+            }
+        }
     }
 
     /// Its triangles at every placement, as the GPU draws them, appended to `out` (laid out as
@@ -557,6 +597,118 @@ impl InstancedMesh {
     /// How many placements it is drawn at.
     pub fn count(&self) -> usize {
         self.instances.len() / INSTANCE_SIZE
+    }
+}
+
+/// Bytes of one model edge segment of [`SharedEdges`], in the part's own frame:
+///
+/// | bytes | field |
+/// |---|---|
+/// | 0..12 | `a`: one end (3 × f32) |
+/// | 12..16 | `flags` (u32): bit 0, a vertex marker (a = b); the rest are free (hover, selection, visibility) |
+/// | 16..28 | `b`: the other end (3 × f32) |
+/// | 28..32 | `edge` (u32): the B-rep edge's index in its mesh's `edges` |
+/// | 32..48 | `side[0]`: the unit direction (3 × f32) across the segment into the triangle of the face on that side, then that triangle's height from the segment (f32, mm): how far the face surely reaches; 0 when there is no face on that side |
+/// | 48..64 | `side[1]`: the same for the face on the other side |
+/// | 64..72 | `faces` (2 × u32): the B-rep faces on the two sides, [`NO_FACE`] for none |
+/// | 72..80 | spare (2 × u32) |
+///
+/// Made from the same triangles the placement is drawn from ([`SharedEdges::new`]), so the
+/// sides describe the faces as drawn.
+pub const EDGE_SEG_SIZE: usize = 80;
+/// [`EDGE_SEG_SIZE`]'s face id for no face.
+pub const NO_FACE: u32 = u32::MAX;
+
+/// A part's model edges for drawing at each of its placements ([`InstancedMesh::edges`]):
+/// segment records ([`EDGE_SEG_SIZE`]) in the part's frame, full detail first, then coarser
+/// copies, each with how far it strays from the edges (mm, in the part's frame). A placement is
+/// drawn from the coarsest whose deviation stays under [`EDGE_PX`] where it is drawn.
+#[derive(Clone, Debug, Default)]
+pub struct SharedEdges {
+    pub levels: Vec<(Vec<u8>, f32)>,
+}
+
+/// How far (pixels) a coarser level of a placement's edges may stray from its edges: as far as a
+/// body's edges in its block are simplified (`edge_detail::TOLERANCE_PX` in the UI).
+pub const EDGE_PX: f32 = 0.25;
+
+impl SharedEdges {
+    /// The edges of `mesh` (`shown`: which of its `edges` are drawn), each polyline's segments
+    /// with the faces beside them found in `mesh`'s own triangles, and `levels` coarser copies:
+    /// `(tolerance, simplified polylines)` from a caller that knows how it simplifies (their
+    /// segments carry no faces).
+    pub fn new(mesh: &solidcore_tess::Mesh, shown: impl Fn(usize) -> bool, levels: Vec<(f32, Vec<Vec<[f32; 3]>>)>) -> SharedEdges {
+        // Each triangle edge by its two ends' positions, with the triangle's third corner and
+        // its face: a segment of a model edge finds the triangle of each face beside it there.
+        let key = |p: [f32; 3]| p.map(|x| (x + 0.0).to_bits());
+        let mut sides: std::collections::HashMap<([u32; 3], [u32; 3]), Vec<([f32; 3], u32)>> = std::collections::HashMap::new();
+        for (t, tri) in mesh.triangles.iter().enumerate() {
+            let p = tri.map(|i| mesh.positions.get(i as usize).map_or([0.0; 3], |v| v.to_f32()));
+            let face = mesh.tri_face.get(t).copied().unwrap_or(NO_FACE);
+            for k in 0..3 {
+                let (a, b, c) = (p[k], p[(k + 1) % 3], p[(k + 2) % 3]);
+                let (ka, kb) = (key(a), key(b));
+                let pair = if ka <= kb { (ka, kb) } else { (kb, ka) };
+                sides.entry(pair).or_default().push((c, face));
+            }
+        }
+        let mut full = Vec::new();
+        for (i, polyline) in mesh.edges.iter().enumerate().filter(|(i, _)| shown(*i)) {
+            let faces = mesh.edge_faces.get(i).map(Vec::as_slice).unwrap_or_default();
+            for w in polyline.windows(2) {
+                let [a, b] = [w[0].to_f32(), w[1].to_f32()];
+                let (ka, kb) = (key(a), key(b));
+                let found = sides.get(&if ka <= kb { (ka, kb) } else { (kb, ka) });
+                let side = |face: Option<&u32>| -> ([f32; 4], u32) {
+                    let Some(&face) = face else { return ([0.0; 4], NO_FACE) };
+                    let Some((c, _)) = found.into_iter().flatten().find(|(_, f)| *f == face) else { return ([0.0; 4], face) };
+                    inward(a, b, *c).map_or(([0.0; 4], face), |s| (s, face))
+                };
+                let (s0, f0) = side(faces.first());
+                let (s1, f1) = side(faces.get(1));
+                push_edge_seg(&mut full, a, b, 0, u32::try_from(i).unwrap_or(u32::MAX), [s0, s1], [f0, f1]);
+            }
+        }
+        let mut out = SharedEdges { levels: vec![(full, 0.0)] };
+        for (tolerance, polylines) in levels {
+            let mut records = Vec::new();
+            for polyline in &polylines {
+                for w in polyline.windows(2) {
+                    push_edge_seg(&mut records, w[0], w[1], 0, u32::MAX, [[0.0; 4]; 2], [NO_FACE; 2]);
+                }
+            }
+            out.levels.push((records, tolerance));
+        }
+        out
+    }
+
+    /// Segments at full detail.
+    pub fn segments(&self) -> usize {
+        self.levels.first().map_or(0, |(r, _)| r.len() / EDGE_SEG_SIZE)
+    }
+}
+
+/// The side of segment `a`–`b` toward `c`: the unit direction across the segment toward `c` and
+/// `c`'s distance from the segment's line; `None` when `c` is on that line.
+fn inward(a: [f32; 3], b: [f32; 3], c: [f32; 3]) -> Option<[f32; 4]> {
+    let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    let len2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+    if len2 <= f32::EPSILON {
+        return None;
+    }
+    let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    let t = (ac[0] * d[0] + ac[1] * d[1] + ac[2] * d[2]) / len2;
+    let across = [ac[0] - t * d[0], ac[1] - t * d[1], ac[2] - t * d[2]];
+    let h = (across[0] * across[0] + across[1] * across[1] + across[2] * across[2]).sqrt();
+    (h > 1e-9 && h.is_finite()).then(|| [across[0] / h, across[1] / h, across[2] / h, h])
+}
+
+/// One [`EDGE_SEG_SIZE`] record onto `out`.
+fn push_edge_seg(out: &mut Vec<u8>, a: [f32; 3], b: [f32; 3], flags: u32, edge: u32, sides: [[f32; 4]; 2], faces: [u32; 2]) {
+    let words = a.into_iter().map(f32::to_bits).chain([flags]).chain(b.into_iter().map(f32::to_bits)).chain([edge]);
+    let words = words.chain(sides.into_iter().flatten().map(f32::to_bits)).chain(faces).chain([0, 0]);
+    for w in words {
+        out.extend_from_slice(&w.to_le_bytes());
     }
 }
 
@@ -633,6 +785,16 @@ pub struct GpuScene {
     pub hover_instanced: Vec<InstancedMesh>,
     /// Whole selected bodies, as `hover_instanced`, in the selection colour.
     pub selected_instanced: Vec<InstancedMesh>,
+    /// The instanced meshes' edges are drawn hidden too, faint, where the model hides them
+    /// (Shaded with Hidden Edges), as the blocks' `hidden` lines are.
+    pub instanced_hidden_edges: bool,
+    /// Whole lit bodies' edges drawn again from their parts' shared edges (a highlight scene's;
+    /// the model draws those bodies' edges that way): each placement's edge palette index holds
+    /// the halo's style and its hidden edge index the line's over it ([`lit_line_style`]).
+    pub lit_instanced_edges: Vec<InstancedMesh>,
+    /// Whole selected bodies' hidden edges drawn again from their parts' shared edges, each
+    /// placement's edge palette index holding their style.
+    pub lit_instanced_hidden: Vec<InstancedMesh>,
     /// The model's bodies, a few at a time, drawn before the loose geometry above (`tris`,
     /// `trans`, `lines` and `hidden` of each block, in order, then the scene's own). A block
     /// that comes back unchanged keeps its buffers: a design changing one body at a time (an
@@ -666,6 +828,7 @@ impl GpuScene {
             out.hidden.extend_from_slice(&block.bytes.hidden);
         }
         for m in std::mem::take(&mut self.instanced) {
+            m.expand_edges_into(&mut out.lines, self.instanced_hidden_edges.then_some(&mut out.hidden));
             match m.look {
                 InstanceLook::Opaque | InstanceLook::Pbr => m.expand_into(&mut out.tris),
                 InstanceLook::Faded => m.expand_into(&mut out.trans),
@@ -1422,6 +1585,9 @@ enum SharedGpu {
     Indexed { vertices: wgpu::Buffer, indices: wgpu::Buffer, count: u32 },
     /// Too large for one buffer: unshared, in as many buffers as it takes.
     Unshared(Batch),
+    /// In the indirect draws' arena ([`indirect::Arena`]), `count` indices from `first_index`,
+    /// not uploaded a second time.
+    InArena { vertices: wgpu::Buffer, indices: wgpu::Buffer, first_index: u32, count: u32, base_vertex: i32 },
 }
 
 impl SharedGpu {
@@ -1551,6 +1717,10 @@ struct InstancedDraw {
     placements: Vec<u8>,
     /// Which placements the levels hold now, with their level (none drawn yet: `None`).
     shown: Option<Vec<(u32, u8)>>,
+    /// The part's edges ([`InstancedMesh::edges`]), drawn at its placements ([`edges`]).
+    edges: Option<Arc<SharedEdges>>,
+    /// Which placements' edges are drawn now, with their edge level (`None`: all, in full).
+    edges_shown: Option<Vec<(u32, u8)>>,
 }
 
 impl InstancedDraw {
@@ -1576,6 +1746,12 @@ impl LevelDraw {
                 pass.set_vertex_buffer(0, vertices.slice(..));
                 pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..*count, 0, 0..self.count);
+                tally.triangles(*count, self.count);
+            }
+            SharedGpu::InArena { vertices, indices, first_index, count, base_vertex } => {
+                pass.set_vertex_buffer(0, vertices.slice(..));
+                pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(*first_index..first_index.saturating_add(*count), *base_vertex, 0..self.count);
                 tally.triangles(*count, self.count);
             }
             SharedGpu::Unshared(batch) => {
@@ -2039,6 +2215,16 @@ struct Batches {
     instanced: Vec<InstancedDraw>,
     /// `instanced` drawn by indirect draws, where the device can ([`indirect`]).
     indirect: Option<indirect::Indirect>,
+    /// The instanced meshes' triangles in one pair of buffers, where the device draws them
+    /// indirectly: each mesh uploaded once, kept from scene to scene ([`indirect::Arena`]).
+    arena: Option<Arc<indirect::Arena>>,
+    /// `instanced`'s edges, drawn from the parts' shared edges ([`edges`]).
+    edges: Option<edges::Edges>,
+    /// [`GpuScene::instanced_hidden_edges`].
+    hidden_edges: bool,
+    /// [`GpuScene::lit_instanced_edges`] and [`GpuScene::lit_instanced_hidden`].
+    lit_shared_edges: Option<edges::Edges>,
+    lit_shared_hidden: Option<edges::Edges>,
     /// Whole highlighted bodies redrawn from `planned` (the scene's own plans are not used).
     hover_planned: Vec<Arc<solidcore_tess::TessPlan>>,
     selected_planned: Vec<Arc<solidcore_tess::TessPlan>>,
@@ -2151,16 +2337,47 @@ impl Batches {
                 Some((tess, encoder)) => self.planned(device, tess, encoder, &sc.planned, donor.as_deref_mut()),
                 None => Vec::new(),
             };
-            self.instanced = self.instanced(device, &sc.instanced, donor.as_deref());
-            self.indirect = if indirect::supported(device) { indirect::Indirect::new(device, &self.instanced, self.indirect.as_ref()) } else { None };
+            // On a device that draws them indirectly, the meshes go into the arena (only those it
+            // lacks are uploaded) and are drawn from it, even one at a time: none is uploaded twice.
+            self.arena = if indirect::supported(device) {
+                let meshes: Vec<Arc<SharedTris>> = sc
+                    .instanced
+                    .iter()
+                    .filter(|m| m.count() > 0)
+                    .flat_map(|m| std::iter::once(&m.tris).chain(m.levels.iter().map(|(t, _)| t)))
+                    .cloned()
+                    .collect();
+                indirect::Arena::holding(device, queue, &meshes, self.arena.as_ref()).map(|(arena, uploaded)| {
+                    self.uploads.geometry += uploaded;
+                    arena
+                })
+            } else {
+                None
+            };
+            let arena = self.arena.clone();
+            self.instanced = self.instanced(device, &sc.instanced, donor.as_deref(), arena.as_deref());
+            self.indirect = arena.clone().and_then(|a| indirect::Indirect::new(device, &self.instanced, a));
+            // The instanced edges, and the lit ones drawn again over them, from one segment
+            // buffer: a lit part's edges are the model's, uploaded once.
+            let mut uploaded = 0;
+            let mut shared_edges = |parts: &[edges::Part<'_>], before: Option<&edges::Edges>| {
+                let (e, up) = edges::Edges::new(device, queue, bgl.edges.as_ref()?, parts, before)?;
+                uploaded += up;
+                Some(e)
+            };
+            self.edges = shared_edges(&edges::Part::of_draws(&self.instanced), self.edges.as_ref());
+            self.lit_shared_edges = shared_edges(&edges::Part::of_meshes(&sc.lit_instanced_edges), self.edges.as_ref());
+            self.lit_shared_hidden = shared_edges(&edges::Part::of_meshes(&sc.lit_instanced_hidden), self.edges.as_ref());
+            self.uploads.geometry += uploaded;
+            self.hidden_edges = sc.instanced_hidden_edges;
             self.hover_planned = sc.hover_planned.clone();
             self.selected_planned = sc.selected_planned.clone();
             self.hover_blocks = sc.hover_blocks.clone();
             self.selected_blocks = sc.selected_blocks.clone();
             self.recoloured = sc.recoloured.clone();
             self.lit_edges = sc.lit_edges.clone();
-            self.hover_instanced = self.instanced(device, &sc.hover_instanced, donor.as_deref());
-            self.selected_instanced = self.instanced(device, &sc.selected_instanced, donor.as_deref());
+            self.hover_instanced = self.instanced(device, &sc.hover_instanced, donor.as_deref(), arena.as_deref());
+            self.selected_instanced = self.instanced(device, &sc.selected_instanced, donor.as_deref(), arena.as_deref());
             let mut kept = std::mem::take(&mut self.blocks);
             let mut order = Vec::with_capacity(sc.blocks.len());
             let mut geometry = 0;
@@ -2260,9 +2477,16 @@ impl Batches {
         }
     }
 
-    /// The instanced meshes on the GPU: triangles uploaded once per key (kept while the key comes
-    /// back with the same bytes), placements every time.
-    fn instanced(&mut self, device: &wgpu::Device, meshes: &[InstancedMesh], donor: Option<&Batches>) -> Vec<InstancedDraw> {
+    /// The instanced meshes on the GPU: triangles drawn from `arena` where it holds them, else
+    /// uploaded once per key (kept while the key comes back with the same bytes); placements
+    /// every time.
+    fn instanced(
+        &mut self,
+        device: &wgpu::Device,
+        meshes: &[InstancedMesh],
+        donor: Option<&Batches>,
+        arena: Option<&indirect::Arena>,
+    ) -> Vec<InstancedDraw> {
         let mut kept = std::mem::take(&mut self.instanced_tris);
         let mut out = Vec::with_capacity(meshes.len());
         for m in meshes {
@@ -2275,15 +2499,21 @@ impl Batches {
             for (i, (tris, error)) in std::iter::once((&m.tris, 0.0f32)).chain(m.levels.iter().map(|(t, e)| (t, *e))).enumerate() {
                 let key = Arc::as_ptr(tris) as usize;
                 let shared = || donor?.instanced_tris.get(&key).filter(|(b, _)| Arc::ptr_eq(b, tris)).cloned();
-                let gpu = match kept.remove(&key).or_else(|| self.instanced_tris.remove(&key)).filter(|(b, _)| Arc::ptr_eq(b, tris)).or_else(shared) {
-                    Some(t) => t,
-                    None => match SharedGpu::new(device, tris) {
-                        Some(g) => {
-                            self.uploads.geometry += (tris.vertices.len() + tris.indices.len() * 4) as u64;
-                            (tris.clone(), Arc::new(g))
+                let in_arena = arena.and_then(|a| a.place(tris));
+                let gpu = match in_arena {
+                    Some(g) => (tris.clone(), Arc::new(g)),
+                    None => {
+                        match kept.remove(&key).or_else(|| self.instanced_tris.remove(&key)).filter(|(b, _)| Arc::ptr_eq(b, tris)).or_else(shared) {
+                            Some(t) => t,
+                            None => match SharedGpu::new(device, tris) {
+                                Some(g) => {
+                                    self.uploads.geometry += (tris.vertices.len() + tris.indices.len() * 4) as u64;
+                                    (tris.clone(), Arc::new(g))
+                                }
+                                None => continue,
+                            },
                         }
-                        None => continue,
-                    },
+                    }
                 };
                 // Until the first cull, every placement is drawn in full.
                 let Some(instances) = buffer_init(device, "sc_instances", &placements, wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST)
@@ -2293,10 +2523,22 @@ impl Batches {
                 self.uploads.placements += placements.len() as u64;
                 let count = if i == 0 { count } else { 0 };
                 levels.push(LevelDraw { tris: gpu.1.clone(), src: tris.clone(), flat: tris.flat, error, instances, count });
-                self.instanced_tris.insert(key, gpu);
+                // A mesh in the arena is drawn from there: it keeps no buffers of its own.
+                if !matches!(*gpu.1, SharedGpu::InArena { .. }) {
+                    self.instanced_tris.insert(key, gpu);
+                }
             }
             if !levels.is_empty() {
-                out.push(InstancedDraw { look: m.look, closed: m.closed, levels, bounds: m.tris.bounds, placements, shown: None });
+                out.push(InstancedDraw {
+                    look: m.look,
+                    closed: m.closed,
+                    levels,
+                    bounds: m.tris.bounds,
+                    placements,
+                    shown: None,
+                    edges: m.edges.clone(),
+                    edges_shown: None,
+                });
             }
         }
         out
@@ -2330,7 +2572,27 @@ impl Batches {
         self.cull_blocks(vp);
         let mut changed = false;
         let f = |b: &[u8], i: usize| b.get(i..i + 4).and_then(|x| x.try_into().ok()).map_or(0.0, f32::from_le_bytes);
+        let mut edges_changed = false;
         for (n, d) in self.instanced.iter_mut().enumerate() {
+            if self.edges.is_some()
+                && let Some(e) = d.edges.clone()
+            {
+                let shown: Vec<(u32, u8)> = d
+                    .placements
+                    .as_chunks::<INSTANCE_SIZE>()
+                    .0
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, p)| {
+                        let rows = [0, 1, 2].map(|r| [f(&p[..], 16 * r), f(&p[..], 16 * r + 4), f(&p[..], 16 * r + 8), f(&p[..], 16 * r + 12)]);
+                        placed_box_in_view(&rows, &d.bounds, vp).then(|| (i as u32, edges::level_for(&e, &rows, &d.bounds, vp, size)))
+                    })
+                    .collect();
+                if d.edges_shown.as_ref() != Some(&shown) {
+                    d.edges_shown = Some(shown);
+                    edges_changed = true;
+                }
+            }
             let batched = self.indirect.as_ref().is_some_and(|x| x.batches(n));
             let errors: Vec<f32> = d.levels.iter().map(|l| l.error).collect();
             let mut shown: Vec<(u32, u8)> = d
@@ -2387,6 +2649,9 @@ impl Batches {
         }
         if changed && let Some(indirect) = self.indirect.as_mut() {
             indirect.write(device, queue, &self.instanced);
+        }
+        if edges_changed && let Some(edges) = self.edges.as_mut() {
+            edges.write(device, queue, &edges::Part::of_draws(&self.instanced));
         }
     }
 
@@ -2613,10 +2878,15 @@ pub struct Renderer {
     line: wgpu::RenderPipeline,
     /// Lines behind the model (depth test >).
     line_hidden: wgpu::RenderPipeline,
+    /// Instanced edges, where the device draws them ([`edges`]).
+    edge_pipes: Option<edges::Pipelines>,
     /// The scene's own lines in another colour and width ([`LitEdges`], `vs_line_lit`), where
     /// they are seen and where the model hides them.
     line_lit: wgpu::RenderPipeline,
     line_lit_hidden: wgpu::RenderPipeline,
+    /// The model's edges' depth alone, before its see-through faces: a faded or see-through face
+    /// behind an edge then leaves it alone instead of blending over it ([`EDGE_DEPTH_BIAS`]).
+    line_depth: wgpu::RenderPipeline,
     overlay: wgpu::RenderPipeline,
     /// Reference planes, axes and the ground shadow: as `trans` and `line`, but not cut by a section.
     guide_trans: wgpu::RenderPipeline,
@@ -2880,6 +3150,9 @@ pub const SHADER: &str = include_str!("../shaders/viewport.wgsl");
 pub(crate) struct Group0 {
     pub layout: wgpu::BindGroupLayout,
     pub environment: Environment,
+    /// Group 3 of the instanced edge pipelines (their segments), where the renderer draws
+    /// instanced edges ([`edges`]).
+    pub edges: Option<wgpu::BindGroupLayout>,
 }
 
 fn tri_layout() -> wgpu::VertexBufferLayout<'static> {
@@ -2970,6 +3243,10 @@ pub struct GpuTarget {
     /// bodies may be drawn from their plans too (they need no sorting on the CPU). Set by the
     /// renderer ([`Renderer::target`]); asking for it does not make it so.
     pub oit: bool,
+    /// The renderer draws instanced meshes' edges from each part's shared edges
+    /// ([`InstancedMesh::edges`]), at every placement, in one draw: a scene leaves those bodies'
+    /// edges out of its blocks. Set by the renderer, as `oit` is.
+    pub edges: bool,
 }
 
 impl GpuTarget {
@@ -3575,6 +3852,15 @@ impl Renderer {
                 pipeline("sc_lines_hidden", "vs_line", "fs_line", line_layout(), depth(wgpu::CompareFunction::Greater, false), alpha),
                 pipeline("sc_lines_lit", "vs_line_lit", "fs_line", line_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
                 pipeline("sc_lines_lit_hidden", "vs_line_lit", "fs_line", line_layout(), depth(wgpu::CompareFunction::Greater, false), alpha),
+                // Depth only: the colour stays as it is.
+                pipeline(
+                    "sc_lines_depth",
+                    "vs_line",
+                    "fs_line_depth",
+                    line_layout(),
+                    pushed(wgpu::CompareFunction::LessEqual, true, EDGE_DEPTH_BIAS),
+                    Some(wgpu::BlendState { color: KEEP, alpha: KEEP }),
+                ),
             )
         };
         let lines_all = || {
@@ -3625,7 +3911,58 @@ impl Renderer {
                 tri_hl_planned,
             ) = see_through_tris.join();
             let ((glass_far_flat, glass_near_flat, trans_flat), tri_hl_instanced_flat) = see_through_flat.join();
-            let (line, line_hidden, line_lit, line_lit_hidden) = lines.join();
+            let (line, line_hidden, line_lit, line_lit_hidden, line_depth) = lines.join();
+            // Instanced edges: their own module (the viewport's shaders and the edge shaders,
+            // which read a storage buffer in the vertex stage), only where the device can.
+            let edge_layout = edges::supported(device).then(|| edges::bind_layout(device));
+            let edge_pipes = edge_layout.as_ref().map(|edge_bgl| {
+                let source = format!("{SHADER}\n{}\n{}", pbr::SOURCE, edges::SHADER);
+                let module = device
+                    .create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("sc_edges"), source: wgpu::ShaderSource::Wgsl(source.into()) });
+                let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("sc_edges"),
+                    bind_group_layouts: &[Some(&bgl), None, None, Some(edge_bgl)],
+                    immediate_size: 0,
+                });
+                let pipe_with = |label: &str, vs: &str, fs: &str, depth_stencil: Option<wgpu::DepthStencilState>, blend: Option<wgpu::BlendState>| {
+                    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                        label: Some(label),
+                        layout: Some(&layout),
+                        vertex: wgpu::VertexState {
+                            module: &module,
+                            entry_point: Some(vs),
+                            buffers: &[Some(edges::instance_layout())],
+                            compilation_options: Default::default(),
+                        },
+                        primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
+                        depth_stencil,
+                        multisample: wgpu::MultisampleState { count: t.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
+                        fragment: Some(wgpu::FragmentState {
+                            module: &module,
+                            entry_point: Some(fs),
+                            targets: &[Some(wgpu::ColorTargetState { format: t.format, blend, write_mask: wgpu::ColorWrites::ALL })],
+                            compilation_options: Default::default(),
+                        }),
+                        multiview_mask: None,
+                        cache: None,
+                    })
+                };
+                let pipe = |label: &str, vs: &str, compare: wgpu::CompareFunction| pipe_with(label, vs, "fs_line", depth(compare, false), alpha);
+                edges::Pipelines {
+                    depth: pipe_with(
+                        "sc_edges_inst_depth",
+                        "vs_edge_inst",
+                        "fs_line_depth",
+                        pushed(wgpu::CompareFunction::LessEqual, true, EDGE_DEPTH_BIAS),
+                        Some(wgpu::BlendState { color: KEEP, alpha: KEEP }),
+                    ),
+                    visible: pipe("sc_edges_inst", "vs_edge_inst", wgpu::CompareFunction::LessEqual),
+                    hidden: pipe("sc_edges_inst_hidden", "vs_edge_inst_hidden", wgpu::CompareFunction::Greater),
+                    lit_a: pipe("sc_edges_inst_lit_a", "vs_edge_inst_lit_a", wgpu::CompareFunction::LessEqual),
+                    lit_b: pipe("sc_edges_inst_lit_b", "vs_edge_inst_lit_b", wgpu::CompareFunction::LessEqual),
+                    lit_hidden: pipe("sc_edges_inst_lit_hidden", "vs_edge_inst_lit_a", wgpu::CompareFunction::Greater),
+                }
+            });
             let (overlay, guide_line) = lines_all.join();
             let (ss_blit, copy_blit, ss_filter) = blits.join();
             let (depth_reset, section_stencil) = resets.join();
@@ -3643,7 +3980,7 @@ impl Renderer {
                 section_stencil,
                 #[cfg(test)]
                 resolve_clears: 0,
-                target: GpuTarget { oit: oit.is_some(), ..t },
+                target: GpuTarget { oit: oit.is_some(), edges: edge_pipes.is_some(), ..t },
                 window,
                 max_texture: device.limits().max_texture_dimension_2d,
                 ss_blit,
@@ -3707,13 +4044,15 @@ impl Renderer {
                 xray,
                 line,
                 line_hidden,
+                edge_pipes,
                 line_lit,
                 line_lit_hidden,
+                line_depth,
                 overlay,
                 guide_trans: guide_trans.join(),
                 guide_line,
                 uniform,
-                uniform_bgl: Group0 { layout: bgl.clone(), environment: environment.clone() },
+                uniform_bgl: Group0 { layout: bgl.clone(), environment: environment.clone(), edges: edge_layout.clone() },
                 bind,
                 linear_out: t.format.is_srgb(),
                 model: Batches::default(),
@@ -3767,6 +4106,16 @@ pub const FACE_STEPS: i32 = 8;
 /// 3.5 px) may lose its outer edge on one side where it lies on a steep face. The section cap,
 /// which writes its own depth, adds the same in the shader.
 pub const FACE_SLOPE: f32 = 1.0;
+/// The model's edges' depth, written before its see-through faces are drawn (`line_depth`): pushed
+/// back as [`FACE_BIAS`] pushes an opaque face, so a see-through body's own faces at its edges
+/// still pass and tint them, while a face further behind (faded context, another see-through body)
+/// fails and leaves the edge alone. The slope term is the line's own (flat across its width), so
+/// where a body's face recedes steeply from its edge, the part of it under the line's far half is
+/// behind the line and does not tint it, as an opaque face does not cover its edge.
+const EDGE_DEPTH_BIAS: wgpu::DepthBiasState = FACE_BIAS;
+/// A blend that leaves the target's colour as it is.
+const KEEP: wgpu::BlendComponent =
+    wgpu::BlendComponent { src_factor: wgpu::BlendFactor::Zero, dst_factor: wgpu::BlendFactor::One, operation: wgpu::BlendOperation::Add };
 /// The removed material of a preview, drawn translucent: behind the faces it shares with the new
 /// shape, so twice [`FACE_BIAS`].
 const GHOST_BIAS: wgpu::DepthBiasState = wgpu::DepthBiasState { constant: 2 * FACE_STEPS, slope_scale: 2.0 * FACE_SLOPE, clamp: 0.0 };
@@ -4618,18 +4967,38 @@ impl Renderer {
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
         lines(pass, &res.line_hidden, &m.hidden);
         in_moving(pass, &|pass, mv| lines(pass, &res.line_hidden, &mv.hidden));
+        // Instanced bodies' hidden edges, from their parts' shared edges.
+        let instanced_edges = |pass: &mut wgpu::RenderPass<'static>, b: &Batches, hidden: bool| {
+            if let (Some(e), Some(p)) = (&b.edges, &res.edge_pipes)
+                && (!hidden || b.hidden_edges)
+            {
+                e.draw(pass, if hidden { &p.hidden } else { &p.visible }, tally);
+            }
+        };
+        instanced_edges(pass, m, true);
+        in_moving(pass, &|pass, mv| instanced_edges(pass, mv, true));
         pass.set_bind_group(0, scene_bind(h, &res.bind), &[]);
         lit_lines(pass, &res.line_lit_hidden, &m.blocks, &h.lit_edges, |e| e.hidden, tally);
+        if let (Some(e), Some(p)) = (&h.lit_shared_hidden, &res.edge_pipes) {
+            e.draw(pass, &p.lit_hidden, tally);
+        }
         lines(pass, &res.line_hidden, &h.hidden);
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
         lines(pass, &res.line, &m.lines);
         in_moving(pass, &|pass, mv| lines(pass, &res.line, &mv.lines));
+        pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
+        instanced_edges(pass, m, false);
+        in_moving(pass, &|pass, mv| instanced_edges(pass, mv, false));
         pass.set_bind_group(0, scene_bind(sk, &res.bind), &[]);
         lines(pass, &res.line, &sk.lines);
         pass.set_bind_group(0, scene_bind(h, &res.bind), &[]);
         // Whole bodies' edges first, so an edge or a face's outline lit over them keeps its own.
         lit_lines(pass, &res.line_lit, &m.blocks, &h.lit_edges, |e| e.halo, tally);
         lit_lines(pass, &res.line_lit, &m.blocks, &h.lit_edges, |e| e.core, tally);
+        if let (Some(e), Some(p)) = (&h.lit_shared_edges, &res.edge_pipes) {
+            e.draw(pass, &p.lit_a, tally);
+            e.draw(pass, &p.lit_b, tally);
+        }
         lines(pass, &res.line, &h.lines);
         lines(pass, &res.guide_line, &h.guide_lines);
         pass.set_bind_group(0, scene_bind(pv, &res.bind), &[]);
@@ -4658,6 +5027,22 @@ impl Renderer {
         pass.set_bind_group(0, scene_bind(sk, &res.bind), &[]);
         tris(pass, &res.guide_trans, &sk.shadow);
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
+        // The model's edges' depth, so the see-through faces drawn next do not blend over an edge
+        // in front of them (they write no depth, and the edges were drawn before them). Only
+        // where there are any: the edges are drawn a second time.
+        let see_through = m.see_through() || moving.is_some_and(|mv| mv.see_through()) || sk.trans.is_some() || h.trans.is_some();
+        if see_through {
+            lines(pass, &res.line_depth, &m.lines);
+            in_moving(pass, &|pass, mv| lines(pass, &res.line_depth, &mv.lines));
+            // And the instanced bodies' edges.
+            let edge_depth = |pass: &mut wgpu::RenderPass<'static>, b: &Batches| {
+                if let (Some(e), Some(p)) = (&b.edges, &res.edge_pipes) {
+                    e.draw_uncounted(pass, &p.depth);
+                }
+            };
+            edge_depth(pass, m);
+            in_moving(pass, &|pass, mv| edge_depth(pass, mv));
+        }
         if phase == Phase::BeforeSeeThrough {
             return;
         }
@@ -5092,7 +5477,8 @@ fn local_direction(model: &[[f32; 4]; 4], d: [f32; 3]) -> [f32; 3] {
 }
 
 fn uniform_bytes_placing(cb: &Frame, w: f32, h: f32, linear: bool, reversed: bool, model: [[f32; 4]; 4]) -> Vec<u8> {
-    let mut v: Vec<f32> = gpu_view_proj_turned(cb.view_proj, cb.turned_depth, reversed).iter().flatten().copied().collect();
+    let gpu_vp = gpu_view_proj_turned(cb.view_proj, cb.turned_depth, reversed);
+    let mut v: Vec<f32> = gpu_vp.iter().flatten().copied().collect();
     v.extend([cb.back[0], cb.back[1], cb.back[2], if linear { 1.0 } else { 0.0 }]);
     v.extend([w.max(1.0), h.max(1.0), 0.0, if cb.outline { 1.0 } else { 0.0 }]);
     v.extend(cb.clip.iter().flatten());
@@ -5125,6 +5511,9 @@ fn uniform_bytes_placing(cb: &Frame, w: f32, h: f32, linear: bool, reversed: boo
         let light = cb.product_lights.as_ref().and_then(|lights| lights.get(index)).copied().unwrap_or([0.0; 16]);
         v.extend(light.map(|value| if value.is_finite() { value } else { 0.0 }));
     }
+    // The view-projection's inverse, to find a pixel's point in the world from its depth
+    // (`fs_ao_term_screen`).
+    v.extend(inverse(gpu_vp).iter().flatten());
     let vp = solidcraft_viewport::Mat4(cb.view_proj.map(|c| c.map(f64::from)));
     for (c, hatch) in cb.clip.iter().zip(cb.clip_hatch) {
         let n = Vec3::new(f64::from(c[0]), f64::from(c[1]), f64::from(c[2]));
@@ -5133,6 +5522,38 @@ fn uniform_bytes_placing(cb: &Frame, w: f32, h: f32, linear: bool, reversed: boo
     }
     v.extend(cb.sky.map(|value| if value.is_finite() { value } else { 0.0 }));
     v.iter().flat_map(|x| x.to_le_bytes()).collect()
+}
+
+/// The inverse of a 4 × 4 matrix (by columns), worked out in `f64`; zero where it has none.
+fn inverse(m: [[f32; 4]; 4]) -> [[f32; 4]; 4] {
+    // A matrix's columns read as rows are its transpose, whose inverse read back as rows is the
+    // inverse's columns: rows or columns, the same steps give the answer laid out as given.
+    let mut a: [[f64; 8]; 4] = std::array::from_fn(|r| {
+        std::array::from_fn(|c| {
+            if c < 4 {
+                f64::from(m[r][c])
+            } else if c - 4 == r {
+                1.0
+            } else {
+                0.0
+            }
+        })
+    });
+    for col in 0..4 {
+        let Some(pivot) = (col..4).max_by(|&x, &y| a[x][col].abs().total_cmp(&a[y][col].abs())) else { return [[0.0; 4]; 4] };
+        if !a[pivot][col].is_normal() {
+            return [[0.0; 4]; 4];
+        }
+        a.swap(col, pivot);
+        let p = a[col][col];
+        a[col].iter_mut().for_each(|x| *x /= p);
+        let row = a[col];
+        for (_, other) in a.iter_mut().enumerate().filter(|(r, _)| *r != col) {
+            let f = other[col];
+            other.iter_mut().zip(row).for_each(|(x, y)| *x -= f * y);
+        }
+    }
+    std::array::from_fn(|r| std::array::from_fn(|c| a[r][c + 4] as f32))
 }
 
 /// The shader's analysis colours (`ana_c`: draft positive, between, negative; reachable,
@@ -5198,7 +5619,7 @@ mod tests {
             [mapped[0], mapped[1], mapped[2], mapped[3]]
         };
         let format = wgpu::TextureFormat::Rgba8Unorm;
-        let r = Renderer::new(&device, GpuTarget { format, depth: None, samples: 1, tess: false, oit: false }, None);
+        let r = Renderer::new(&device, GpuTarget { format, depth: None, samples: 1, tess: false, oit: false, edges: false }, None);
         let mut batches = Batches::default();
         let previous = block(1);
         let slot: SceneSlot = Arc::new(Mutex::new(Some(scene(&previous))));
@@ -5362,7 +5783,8 @@ mod tests {
             return;
         };
         let depth = crate::depth_format(&device, true);
-        let target = super::GpuTarget { format: wgpu::TextureFormat::Rgba8Unorm, depth: Some(depth), samples: 1, tess: false, oit: false };
+        let target =
+            super::GpuTarget { format: wgpu::TextureFormat::Rgba8Unorm, depth: Some(depth), samples: 1, tess: false, oit: false, edges: false };
         let compiles = super::tessellation(&adapter, &device, &queue, crate::SHADER, false).is_some();
         for (shader, expected) in [(crate::SHADER, compiles), ("not a shader", false)] {
             let mut later = super::TessLater::start(&adapter, &device, &queue, shader, false);
@@ -5454,6 +5876,31 @@ mod tests {
         let previous = super::frame_key(&frame);
         frame.product_lights = Some(Vec::new());
         assert_ne!(super::frame_key(&frame), previous);
+    }
+
+    /// The uniform carries the inverse of the view-projection it carries, just before the planes'
+    /// hatch: the ambient occlusion finds a pixel's point in the world from its depth with it.
+    #[test]
+    fn the_uniform_carries_the_inverse_of_its_view_projection() {
+        let mut f = cached_frame();
+        f.view_proj = solidcraft_viewport::Camera::default().view_proj(1.5, 40.0).to_f32();
+        for reversed in [false, true] {
+            let bytes = super::uniform_bytes(&f, 64.0, 64.0, false, reversed);
+            let v: Vec<f32> = bytes.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
+            let at = v.len() - 4 - 4 * super::MAX_SECTION_PLANES - 16;
+            let vp: [[f32; 4]; 4] = std::array::from_fn(|c| std::array::from_fn(|r| v[4 * c + r]));
+            let inv: [[f32; 4]; 4] = std::array::from_fn(|c| std::array::from_fn(|r| v[at + 4 * c + r]));
+            for (c, column) in inv.iter().enumerate() {
+                for r in 0..4 {
+                    let product: f32 = vp.iter().zip(column).map(|(vp_column, x)| vp_column[r] * x).sum();
+                    let want = if r == c { 1.0 } else { 0.0 };
+                    assert!((product - want).abs() < 1e-4, "reversed {reversed}: (vp · inv)[{r}][{c}] = {product}");
+                }
+            }
+        }
+        // A matrix with no inverse gives zeros, never infinities.
+        assert_eq!(super::inverse([[0.0; 4]; 4]), [[0.0; 4]; 4]);
+        assert_eq!(super::inverse([[1.0, 0.0, 0.0, 0.0], [2.0, 0.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]), [[0.0; 4]; 4]);
     }
 
     /// The uniform fills the shader's `U` exactly, the section's planes and their hatch included.
@@ -5726,7 +6173,7 @@ mod glass_tests {
             ..Default::default()
         }))
         .expect("the OpenGL adapter opens a device");
-        let window = GpuTarget { format: wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false };
+        let window = GpuTarget { format: wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false, edges: false };
         // Ten world units span 32 pixels here; a four-pixel line covers over 100 pixels.
         // A point or a very short line stays a small cap, never a fill over the viewport.
         let cases = [
@@ -5994,8 +6441,11 @@ mod glass_tests {
     fn a_material_edit_uploads_material_rows_only() {
         let Ok((_, device, queue)) = crate::open_headless(crate::test_env::policy()) else { return };
         let format = wgpu::TextureFormat::Rgba8Unorm;
-        let mut r =
-            Renderer::new(&device, GpuTarget { format, depth: Some(crate::depth_format(&device, true)), samples: 1, tess: false, oit: false }, None);
+        let mut r = Renderer::new(
+            &device,
+            GpuTarget { format, depth: Some(crate::depth_format(&device, true)), samples: 1, tess: false, oit: false, edges: false },
+            None,
+        );
         let mut b = BlockBuilder::default();
         b.triangle([[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], [[0.0, 0.0, 1.0]; 3], PaletteIndex(0), TriClass::Pbr);
         let bytes = b.freeze();
@@ -6025,8 +6475,11 @@ mod glass_tests {
     fn a_colour_edit_keeps_the_sorted_glass_stream() {
         let Ok((_, device, queue)) = crate::open_headless(crate::test_env::policy()) else { return };
         let format = wgpu::TextureFormat::Rgba8Unorm;
-        let mut r =
-            Renderer::new(&device, GpuTarget { format, depth: Some(crate::depth_format(&device, true)), samples: 1, tess: false, oit: false }, None);
+        let mut r = Renderer::new(
+            &device,
+            GpuTarget { format, depth: Some(crate::depth_format(&device, true)), samples: 1, tess: false, oit: false, edges: false },
+            None,
+        );
         let mut palette = Palette::with_stable(vec![[200, 0, 0, 128]]);
         let mut b = BlockBuilder::default();
         b.triangle([[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], [[0.0, 0.0, 1.0]; 3], PaletteIndex(0), TriClass::Glass);
@@ -6076,7 +6529,7 @@ mod glass_tests {
         let (_, device, queue) = crate::open_headless(crate::test_env::policy()).ok()?;
         let depth = crate::depth_format(&device, true);
         let format = wgpu::TextureFormat::Rgba8Unorm;
-        let mut r = Renderer::new(&device, GpuTarget { format, depth: Some(depth), samples, tess: false, oit: false }, None);
+        let mut r = Renderer::new(&device, GpuTarget { format, depth: Some(depth), samples, tess: false, oit: false, edges: false }, None);
         assert!(r.oit.is_some(), "this device does order-independent transparency");
         if !oit {
             r.oit = None;
@@ -6348,8 +6801,8 @@ mod glass_tests {
         let surface = solidcraft_viewport::surface::OpaqueSurface::new(Vec3::new(0.8, 0.1, 0.1), 0.0, 0.6, 1.5).unwrap();
         for depth in [wgpu::TextureFormat::Depth24PlusStencil8, crate::depth_format(&device, true)] {
             for samples in [1, 4] {
-                let target = GpuTarget { format, depth: Some(depth), samples, tess: false, oit: false };
-                let window = GpuTarget { format, depth: None, samples: 1, tess: false, oit: false };
+                let target = GpuTarget { format, depth: Some(depth), samples, tess: false, oit: false, edges: false };
+                let window = GpuTarget { format, depth: None, samples: 1, tess: false, oit: false, edges: false };
                 let mut renderer = Renderer::with_window_target(&device, target, window, None);
                 // Preserve the original built/PBR cases, and exercise the new
                 // upstream open-body batch with the same independent pixels.
@@ -6451,6 +6904,7 @@ mod glass_tests {
                             look: InstanceLook::Opaque,
                             levels: Vec::new(),
                             closed: false,
+                            edges: None,
                         };
                         for (x, z, color) in [(-4.5, 1.0, front), (4.5, -1.0, rear)] {
                             let rows = [[1.0, 0.0, 0.0, x], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, z]];
@@ -6518,7 +6972,7 @@ mod glass_tests {
         let Some((_, device, queue)) = crate::open_headless(crate::test_env::policy()).ok() else { return };
         let depth = crate::depth_format(&device, true);
         let format = wgpu::TextureFormat::Rgba8Unorm;
-        let mut renderer = Renderer::new(&device, GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false }, None);
+        let mut renderer = Renderer::new(&device, GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false, edges: false }, None);
         let mut frame = test_frame(GpuScene::default(), 2.0);
         // A dot (labelled 2, red in the palette) and a bead across the view, filtered by 5 (a
         // range) and the label 2 (a set).
@@ -6568,7 +7022,7 @@ mod glass_tests {
         let Some((_, device, queue)) = crate::open_headless(crate::test_env::policy()).ok() else { return };
         let depth = crate::depth_format(&device, true);
         let format = wgpu::TextureFormat::Rgba8Unorm;
-        let target = GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false };
+        let target = GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false, edges: false };
         let mut renderer = Renderer::new(&device, target, None);
         let mut draw = |version: u64, at_start: f32, at_end: f32, mask: u32| {
             let mut frame = test_frame(GpuScene::default(), 1.0);
@@ -6610,7 +7064,7 @@ mod glass_tests {
         let Some((_, device, queue)) = crate::open_headless(crate::test_env::policy()).ok() else { return };
         let depth = crate::depth_format(&device, true);
         let format = wgpu::TextureFormat::Rgba8Unorm;
-        let target = GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false };
+        let target = GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false, edges: false };
         let mut renderer = Renderer::new(&device, target, None);
         // Looking along -z from the origin: a point shows at x/d, y/d at distance d = -z.
         let (near, far) = (0.1f32, 1000.0f32);
@@ -6657,7 +7111,7 @@ mod glass_tests {
         let Some((_, device, queue)) = crate::open_headless(crate::test_env::policy()).ok() else { return };
         let depth = crate::depth_format(&device, true);
         let format = wgpu::TextureFormat::Rgba8Unorm;
-        let mut r = Renderer::new(&device, GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false }, None);
+        let mut r = Renderer::new(&device, GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false, edges: false }, None);
         // Supersampled: the picture is drawn into a texture, so it can be cached.
         let mut frame = test_frame(test_scene(), 2.0);
         let first = render_frame(&mut r, &device, &queue, &frame, true);
@@ -6680,8 +7134,8 @@ mod glass_tests {
         let Some((_, device, queue)) = crate::open_headless(crate::test_env::policy()).ok() else { return };
         let depth = crate::depth_format(&device, true);
         let format = wgpu::TextureFormat::Rgba8Unorm;
-        let scene_target = GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false };
-        let window_target = GpuTarget { format, depth: None, samples: 1, tess: false, oit: false };
+        let scene_target = GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false, edges: false };
+        let window_target = GpuTarget { format, depth: None, samples: 1, tess: false, oit: false, edges: false };
         let mut direct = Renderer::new(&device, scene_target, None);
         let mut split = Renderer::with_window_target(&device, scene_target, window_target, None);
         // Each renderer takes the scene out of its slot: a frame of its own for each.
@@ -6703,8 +7157,8 @@ mod glass_tests {
         let Some((_, device, queue)) = crate::open_headless(crate::test_env::policy()).ok() else { return };
         let depth = crate::depth_format(&device, true);
         let format = wgpu::TextureFormat::Rgba8Unorm;
-        let scene_target = GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false };
-        let window_target = GpuTarget { format, depth: None, samples: 1, tess: false, oit: false };
+        let scene_target = GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false, edges: false };
+        let window_target = GpuTarget { format, depth: None, samples: 1, tess: false, oit: false, edges: false };
         let limit = device.limits().max_texture_dimension_2d;
         let red = |pixels: &[u8]| pixels.get((32 * 64 + 32) * 4..(32 * 64 + 32) * 4 + 4).is_some_and(|p| p[0] > 200 && p[1] < 60 && p[2] < 60);
         // Supersampled 4× (a wide, flat viewport) and at the viewport's own size: each frame is
@@ -6741,7 +7195,7 @@ mod glass_tests {
         if ![format, depth].iter().all(|f| adapter.get_texture_format_features(*f).flags.sample_count_supported(4)) {
             return;
         }
-        let window = GpuTarget { format, depth: None, samples: 1, tess: false, oit: false };
+        let window = GpuTarget { format, depth: None, samples: 1, tess: false, oit: false, edges: false };
         let mut r = Renderer::with_window_target(&device, GpuTarget { depth: Some(depth), samples: 4, ..window }, window, None);
         let middle = |pixels: &[u8]| -> [i32; 4] {
             let at = (32 * 64 + 32) * 4;
@@ -6789,7 +7243,7 @@ mod glass_tests {
         };
         let depth = crate::depth_format(&device, true);
         let format = wgpu::TextureFormat::Rgba8Unorm;
-        let target = GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false };
+        let target = GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false, edges: false };
         let frames = |r: &mut Renderer| {
             for i in 0..6 {
                 // A new camera each frame: the picture is drawn again, not blitted.
@@ -6835,7 +7289,7 @@ mod glass_tests {
         let Some((_, device, queue)) = crate::open_headless(crate::test_env::policy()).ok() else { return };
         let depth = crate::depth_format(&device, true);
         let format = wgpu::TextureFormat::Rgba8Unorm;
-        let mut r = Renderer::new(&device, GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false }, None);
+        let mut r = Renderer::new(&device, GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false, edges: false }, None);
         let middle = |pixels: &[u8]| -> [i32; 4] {
             let at = (32 * 64 + 32) * 4;
             std::array::from_fn(|i| pixels.get(at + i).map_or(-1, |v| i32::from(*v)))
@@ -6868,7 +7322,7 @@ mod glass_tests {
         };
         let depth = crate::depth_format(&device, true);
         for format in [wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureFormat::Bgra8Unorm, wgpu::TextureFormat::Bgra8UnormSrgb] {
-            let window = GpuTarget { format, depth: None, samples: 1, tess: false, oit: false };
+            let window = GpuTarget { format, depth: None, samples: 1, tess: false, oit: false, edges: false };
             for samples in [1, 4] {
                 if ![format, depth].iter().all(|f| adapter.get_texture_format_features(*f).flags.sample_count_supported(samples)) {
                     continue;
@@ -6934,6 +7388,59 @@ mod glass_tests {
         assert!(either[0] > 100 && either[2] > 100, "both colours show: {either:?}");
     }
 
+    /// An edge of a see-through body in front was washed out wherever a faded or see-through face
+    /// lay behind it: neither those faces nor the edges write depth, and the faces were drawn
+    /// after the edges, so they blended over them as if the edge were behind. An edge now hides
+    /// the see-through faces behind it, sorted or not, and one behind a see-through face is still
+    /// seen through it. A line thinner than a pixel covers only part of it, so the faces behind
+    /// still show in the rest.
+    #[test]
+    fn see_through_faces_behind_an_edge_do_not_wash_it_out() {
+        let (blue, red, black) = ([40, 80, 220, 128], [220, 40, 40, 128], [0, 0, 0, 255]);
+        // A see-through square at z = 5 with an edge across it at `edge_z`, and `behind` (a faded
+        // or see-through square at z = -5, or nothing).
+        let scene = |edge_z: f32, behind: Option<bool>, width: f32| {
+            let mut sc = GpuScene::default();
+            let front = sc.color(blue);
+            let back = sc.color(red);
+            let square = [[-5.0, -5.0], [5.0, -5.0], [5.0, 5.0], [-5.0, -5.0], [5.0, 5.0], [-5.0, 5.0]];
+            for p in square {
+                sc.glass_tri([p[0], p[1], 5.0], [0.0, 0.0, 1.0], front);
+            }
+            for p in square {
+                match behind {
+                    Some(true) => sc.trans_tri([p[0], p[1], -5.0], [0.0, 0.0, 1.0], back),
+                    Some(false) => sc.glass_tri([p[0], p[1], -5.0], [0.0, 0.0, 1.0], back),
+                    None => {}
+                }
+            }
+            let edge = sc.color(black);
+            // Through the middle pixel's centre (64 pixels over 20 units), which a line thinner
+            // than a pixel, drawn a pixel wide, must cover to be seen there.
+            let y = -10.0 / 64.0;
+            sc.line([-5.0, y, edge_z], [5.0, y, edge_z], edge, width, false);
+            sc
+        };
+        let near = |a: [u8; 4], b: [u8; 4]| a.iter().zip(b).all(|(x, y)| x.abs_diff(y) <= 3);
+        for oit in [true, false] {
+            let Some(alone) = middle_pixel(scene(5.0, None, 4.0), oit) else {
+                eprintln!("skipping: no GPU adapter");
+                return;
+            };
+            for faded in [true, false] {
+                let shown = middle_pixel(scene(5.0, Some(faded), 4.0), oit).unwrap();
+                assert!(near(shown, alone), "oit {oit}, faded {faded}: the front edge looks as it does with nothing behind: {shown:?} vs {alone:?}");
+            }
+            // An edge behind the front square is still seen through it.
+            let behind = middle_pixel(scene(-5.0, Some(true), 4.0), oit).unwrap();
+            assert!(behind[2] > 60, "oit {oit}: an edge behind a see-through face is tinted by it: {behind:?}");
+            // A line narrower than a pixel leaves part of it to the face behind.
+            let thin_alone = middle_pixel(scene(5.0, None, 0.75), oit).unwrap();
+            let thin = middle_pixel(scene(5.0, Some(true), 0.75), oit).unwrap();
+            assert!(!near(thin, thin_alone), "oit {oit}: the faded face behind still shows past a thin line: {thin:?} vs {thin_alone:?}");
+        }
+    }
+
     #[test]
     fn glass_is_drawn_far_to_near() {
         // Two triangles at z = 5 and z = -5, given near first; looking down from +Z.
@@ -6951,6 +7458,38 @@ mod glass_tests {
         // Seen from below, the order flips.
         let sorted = sort_back_to_front(&sc.glass, [0.0, 0.0, -1.0]);
         assert_eq!(f32::from_le_bytes(sorted[8..12].try_into().unwrap()), 5.0);
+    }
+
+    /// A model edge's segment record carries, for each of the two faces beside it, the unit
+    /// direction across the segment into that face's triangle, how far the triangle reaches from
+    /// the segment, and the face: found in the triangles the part is drawn from.
+    #[test]
+    fn an_edge_segment_records_the_faces_on_both_sides() {
+        let mesh = solidcore_tess::Mesh {
+            positions: vec![Vec3::ZERO, Vec3::X, Vec3::new(0.0, 2.0, 0.0), Vec3::new(0.0, 0.0, 3.0)],
+            normals: vec![Vec3::Z; 4],
+            triangles: vec![[0, 1, 2], [0, 3, 1]],
+            tri_face: vec![4, 7],
+            edges: vec![vec![Vec3::ZERO, Vec3::X], vec![Vec3::X, Vec3::new(0.0, 2.0, 0.0)]],
+            edge_faces: vec![vec![4, 7], vec![4]],
+            ..Default::default()
+        };
+        let e = SharedEdges::new(&mesh, |_| true, Vec::new());
+        assert_eq!(e.segments(), 2);
+        let (records, _) = &e.levels[0];
+        let f = |at: usize| f32::from_le_bytes(records[at..at + 4].try_into().unwrap());
+        let u = |at: usize| u32::from_le_bytes(records[at..at + 4].try_into().unwrap());
+        // The shared edge: face 4 lies toward +y (2 mm), face 7 toward +z (3 mm).
+        assert_eq!([f(0), f(4), f(8), f(16), f(20), f(24)], [0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        assert_eq!(u(28), 0, "the B-rep edge's index");
+        assert_eq!([f(32), f(36), f(40), f(44)], [0.0, 1.0, 0.0, 2.0]);
+        assert_eq!([f(48), f(52), f(56), f(60)], [0.0, 0.0, 1.0, 3.0]);
+        assert_eq!([u(64), u(68)], [4, 7]);
+        // The open edge has a face on one side only.
+        let second = EDGE_SEG_SIZE;
+        assert!(f(second + 44) > 0.0, "face 4 is beside it");
+        assert_eq!([f(second + 48), f(second + 60)], [0.0, 0.0], "no face on the other side");
+        assert_eq!([u(second + 64), u(second + 68)], [4, NO_FACE]);
     }
 
     /// `GpuScene::merged` keeps every triangle the scene holds: the blocks' PBR runs as well as
@@ -6973,6 +7512,7 @@ mod glass_tests {
             look: InstanceLook::Pbr,
             levels: Vec::new(),
             closed: true,
+            edges: None,
         };
         instanced.place([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]], PaletteIndex(1));
         let scene = GpuScene { blocks: vec![SceneBlock { key: 3, bytes: b.freeze() }], instanced: vec![instanced], ..GpuScene::default() };

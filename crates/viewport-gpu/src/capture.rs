@@ -80,7 +80,7 @@ impl Capturer {
         let samples =
             if samples > 1 && flags(FORMAT).sample_count_supported(samples) && flags(depth).sample_count_supported(samples) { samples } else { 1 };
         let scopes = error_scopes(&device);
-        let renderer = Renderer::new(&device, GpuTarget { format: FORMAT, depth: Some(depth), samples, tess: false, oit: false }, None);
+        let renderer = Renderer::new(&device, GpuTarget { format: FORMAT, depth: Some(depth), samples, tess: false, oit: false, edges: false }, None);
         let background = background_pipeline(&device, samples, depth);
         caught(scopes).map_or(Ok(()), |e| Err(GpuError::Pipeline(e)))?;
         let max_side = device.limits().max_texture_dimension_2d.min(MAX_SIDE);
@@ -838,6 +838,7 @@ mod tests {
                     look: crate::view::InstanceLook::Opaque,
                     levels: Vec::new(),
                     closed: true,
+                    edges: None,
                 };
                 let mut sc = GpuScene::default();
                 let red = sc.color([200, 30, 30, 255]);

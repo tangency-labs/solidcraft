@@ -1853,9 +1853,10 @@ fn fillet_edge_radii_default_to_none_round_trip_and_are_checked() {
     let mut m = Model::new();
     m.evaluate(&opened);
     assert!(m.results.iter().all(|r| r.error.is_none()), "{:?}", m.results.iter().map(|r| &r.error).collect::<Vec<_>>());
-    let spandrel = |r: f64| (1.0 - std::f64::consts::PI / 4.0) * r * r;
     let v = measure(&m.state().bodies[0].body).unwrap().volume;
-    let want = 12000.0 - 40.0 * (spandrel(1.0) + spandrel(2.0));
+    // A 40 x 30 x 10 block, two 40-long edges rounded at 1 and 2: each round of radius r on a
+    // 90 deg edge of length L removes (1 - pi/4) r^2 L, so 12000 - 40 (1 - pi/4) (1 + 4).
+    let want = 11957.07963267949;
     assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
     for (bad, says) in [
         (fillet(&["1"], false, Default::default()), "gives 1 radii for 2 picked edges"),
@@ -2071,6 +2072,17 @@ fn feature_kind_key_and_type_name_mappings() {
     assert_eq!(FeatureKind::type_name_to_kind_key("BaseFeature"), Some("import"));
     assert_eq!(FeatureKind::type_name_to_kind_key("MeshFeature"), Some("mesh_import"));
     assert_eq!(FeatureKind::type_name_to_kind_key("NonExistent"), None);
+    // Convert of picked faces, Convert of a whole body and Recognize: each its own type name,
+    // which leads back to its kind.
+    for kind in [
+        serde_json::json!({"type": "sheet_convert", "body": "B", "face": [0, 0, 0]}),
+        serde_json::json!({"type": "sheet_surface_convert", "body": "B"}),
+        serde_json::json!({"type": "sheet_recognize", "body": "B"}),
+    ] {
+        let key = kind["type"].as_str().unwrap_or_default().to_string();
+        let kind = serde_json::from_value::<FeatureKind>(kind).unwrap();
+        assert_eq!(FeatureKind::type_name_to_kind_key(kind.type_name()), Some(key.as_str()), "{key}");
+    }
 }
 
 /// An extruded ellipse has one side face, and a spline in a profile one wall, each named by its

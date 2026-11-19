@@ -276,3 +276,16 @@ fn the_record_covers_every_variant() {
         }
     }
 }
+
+/// A conversion's first face is a face pick with bends or without (#6748): it gets a persistent
+/// name and follows its face as the model changes, like the faces picked after it. `main` walked
+/// it as a bare position when no bends were given, from the flat model's plate conversion.
+#[test]
+fn a_conversion_without_bends_still_picks_its_first_face() {
+    let o = serde_json::json!([1.0, 2.0, 3.0]);
+    for bends in [serde_json::json!([]), serde_json::json!([[4.0, 5.0, 6.0]])] {
+        let v = serde_json::json!({"type": "sheet_convert", "body": "B", "face": o, "faces": [o], "bends": bends});
+        let kind: FeatureKind = serde_json::from_value(v).unwrap();
+        assert_eq!(kind.face_points().len(), 2, "bends {bends}: both picked faces are face picks");
+    }
+}
