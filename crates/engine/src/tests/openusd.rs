@@ -533,3 +533,48 @@ fn physics_writes_joints_grounding_and_mass() {
     assert!(!text.contains("Physics"), "{text}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A built-in surface bound in a render setup is written into an OpenUSD package with
+/// `render_setup`: its four images are members and the body's mesh has coordinates.
+#[cfg(feature = "bundled-render-library")]
+#[test]
+fn a_render_setups_builtin_surface_is_packaged() {
+    let dir = temp_dir("surface");
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 2, "body_name": "Coupon"}));
+    run(
+        &mut s,
+        "render.library.surface.bind",
+        json!({"name": "Maps", "set": {"job": {"method": "gpu_path", "options": {}}}, "surface": {"id": "SURF-001", "body_index": 0, "body_name": "Coupon"}}),
+    );
+    let path = dir.join("coupon.usdz");
+    let reply = run(&mut s, "file.export", json!({"path": path.to_string_lossy(), "render_setup": "Maps"}));
+    // The reply leaves out an empty list of warnings.
+    let warnings: Vec<String> = serde_json::from_value(reply["warnings"].clone()).unwrap_or_default();
+    assert!(warnings.is_empty(), "{warnings:?}");
+    // A package's member names are plain bytes in its headers.
+    let bytes = std::fs::read(&path).unwrap();
+    let mut names = std::collections::BTreeSet::new();
+    for at in (0..bytes.len()).filter(|i| bytes[*i..].starts_with(b"textures/")) {
+        if let Some(end) = bytes[at..].windows(4).position(|w| w == b".png") {
+            names.insert(String::from_utf8_lossy(&bytes[at..at + end + 4]).to_string());
+        }
+    }
+    assert_eq!(names.len(), 4, "{names:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Without the built-in surfaces' images in the build, the body is written with its look, and a
+/// warning says so; a setup that does not exist is refused.
+#[test]
+fn a_render_setup_without_its_images_warns_and_a_missing_setup_is_refused() {
+    let dir = temp_dir("nosurface");
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 2, "body_name": "Coupon"}));
+    let path = dir.join("coupon.usdz");
+    let refused = s.execute("file.export", &json!({"path": path.to_string_lossy(), "render_setup": "Nowhere"}));
+    assert!(refused.unwrap_err().to_string().contains("no render setup named `Nowhere`"));
+    let refused = s.execute("file.export", &json!({"path": dir.join("c.stl").to_string_lossy(), "render_setup": "Maps"}));
+    assert!(refused.unwrap_err().to_string().contains("`render_setup` is for OpenUSD"));
+    let _ = std::fs::remove_dir_all(&dir);
+}

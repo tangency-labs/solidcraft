@@ -112,12 +112,26 @@ pub(super) fn from_design(
         other => return Err(format!("{name}: {other:?} is not written through cadmpeg")),
     };
     let stem = std::path::Path::new(&name).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+    // Images go inside a package; a layer alone would name files the export does not write.
+    let mut early = Vec::new();
+    let unpackaged;
+    let options = if !options.surfaces.is_empty() && target != "usdz" {
+        early.push(format!(
+            "the images of render setup `{}` are written only in a .usdz package: the bodies are written with their looks",
+            options.surfaces.first().map(|p| p.setup.as_str()).unwrap_or_default()
+        ));
+        unpackaged = super::CadmpegOptions { surfaces: Vec::new(), ..options.clone() };
+        &unpackaged
+    } else {
+        options
+    };
     let built = cadir_out::design_for(doc, model, world, bodies, options, &stem, quality, writes).map_err(|e| format!("{name}: {e}"))?;
     let label = writes.label;
     let plan = build_encoder(codec)
         .plan(EncodeInput::new(&built.ir, None), TargetRequest::Explicit(target))
         .map_err(|e| format!("{name}: could not write {label}: {e}"))?;
-    let mut warnings = built.warnings;
+    let mut warnings = early;
+    warnings.extend(built.warnings);
     let rounds = mesh_only_rounds(&built.ir);
     for l in &plan.report().losses {
         let code = l.code.to_string();

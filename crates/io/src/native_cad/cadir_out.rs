@@ -169,6 +169,7 @@ pub(crate) fn design_for(
     let structured = assembly && writes.products;
     let unplaced = doc.occurrences.iter().find(|o| !solidcraft_doc::is_placement(&o.transform));
     b.physics = options.physics && writes.products && CadmpegOptions::physics_fits(doc, bodies);
+    b.surfaces = &options.surfaces;
     if options.physics && !b.physics {
         b.warnings
             .push("joints and mass are written only for the whole design with its components and rigid placements: no physics is written".into());
@@ -233,6 +234,13 @@ struct Builder<'a> {
     physics: bool,
     /// Each component's bodies' masses in its frame, when [`Self::physics`].
     masses: HashMap<u64, Vec<crate::urdf::BodyMass>>,
+    /// The image textures a render setup gives bodies ([`super::cadir_textures`]).
+    surfaces: &'a [crate::SurfacePlan],
+    /// The texture images written.
+    texture_assets: super::cadir_textures::Assets,
+    /// The textured appearances made, by plain appearance (`None`: a body's colour, which the
+    /// key then holds) and projection.
+    textured: HashMap<(Option<AppearanceId>, String), AppearanceId>,
     ir: CadIr,
     warnings: Vec<String>,
     looks: HashMap<LookKey, AppearanceId>,
@@ -253,6 +261,9 @@ impl<'a> Builder<'a> {
             hidden,
             physics: false,
             masses: HashMap::new(),
+            surfaces: &[],
+            texture_assets: super::cadir_textures::Assets::default(),
+            textured: HashMap::new(),
             ir: CadIr::empty(),
             warnings: Vec::new(),
             looks: HashMap::new(),
@@ -352,6 +363,72 @@ impl<'a> Builder<'a> {
         }
     }
 
+    /// The render setup's textures of model body `b` of component `component`, with the matrix
+    /// from its definition frame to its mesh's, when every shown placement (`shown`) has them
+    /// alike; else none, with a warning when some placement has them.
+    fn surface(&mut self, b: &ModelBody, component: u64, shown: &[Vec<u64>]) -> Option<(&'a crate::SurfacePlan, Mat)> {
+        let surfaces = self.surfaces;
+        let bound: Vec<&crate::SurfacePlan> = surfaces.iter().filter(|p| p.definition == b.definition_name() && p.component == component).collect();
+        // The reference is a shown placement's: a hidden one's images do not count.
+        let first = *bound.iter().find(|p| shown.contains(&p.path)).or(bound.first())?;
+        let covered = !shown.is_empty() && shown.iter().all(|path| bound.iter().any(|p| &p.path == path && super::cadir_textures::same(p, first)));
+        if !covered {
+            self.warnings.push(format!(
+                "{}: render setup `{}` gives its placements different images (or some none): written with its look, as the file gives a component's body one mesh",
+                clean(&b.name).unwrap_or_else(|| "a body".into()),
+                first.setup
+            ));
+            return None;
+        }
+        let to_mesh = match self.doc.model_body_offset(b) {
+            Some(offset) => solidcraft_doc::mat_mul(offset, &b.source_transform),
+            None => b.source_transform,
+        };
+        Some((first, to_mesh))
+    }
+
+    /// The appearance `plain` (else one of colour `colour`) with `plan`'s images, made once.
+    fn textured(
+        &mut self,
+        plain: Option<AppearanceId>,
+        colour: Option<Color>,
+        plan: &crate::SurfacePlan,
+        refs: &[cadmpeg_ir::appearance::TextureRef],
+    ) -> Result<AppearanceId, String> {
+        // With no appearance of its own, the colour it falls back to tells two apart too.
+        let fallback = if plain.is_none() { colour.map(|c| [c.r(), c.g(), c.b(), c.a()].map(f32::to_bits)) } else { None };
+        let projection =
+            format!("{:?}", (plan.origin, plan.u, plan.v, plan.flip_v, fallback, refs.iter().map(|r| (&r.slot, &r.asset_guid)).collect::<Vec<_>>()));
+        let key = (plain.clone(), projection);
+        if let Some(id) = self.textured.get(&key) {
+            return Ok(id.clone());
+        }
+        let id: AppearanceId = id("textured-appearance", self.textured.len())?;
+        let base = plain.as_ref().and_then(|p| self.ir.model.appearances.iter().find(|a| a.id == *p)).cloned();
+        let mut appearance = base.unwrap_or_else(|| Appearance {
+            id: id.clone(),
+            name: None,
+            asset_guid: None,
+            library_id: None,
+            visual_guid: None,
+            physical_token: None,
+            schema: None,
+            category: None,
+            base_color: colour,
+            properties: BTreeMap::new(),
+            textures: Vec::new(),
+        });
+        appearance.id = id.clone();
+        appearance.name = Some(match &appearance.name {
+            Some(n) => format!("{n} {}", plan.setup),
+            None => plan.setup.clone(),
+        });
+        appearance.textures = refs.to_vec();
+        self.ir.model.appearances.push(appearance);
+        self.textured.insert(key, id.clone());
+        Ok(id)
+    }
+
     /// Body `id` written hidden.
     fn hide(&mut self, id: &BodyId) {
         if let Some(body) = self.ir.model.bodies.iter_mut().find(|x| x.id == *id) {
@@ -411,7 +488,8 @@ impl<'a> Builder<'a> {
         let mut ids = Vec::with_capacity(sel.len());
         for b in sel {
             let meshes = self.ir.model.tessellations.len();
-            match self.body(b, &b.body, &b.name)? {
+            let surface = self.surfaces.iter().find(|p| p.world == b.name).map(|p| (p, b.source_transform));
+            match self.body(b, &b.body, &b.name, surface)? {
                 Some(id) => {
                     if self.hidden.bodies.contains(&b.name) {
                         self.hide(&id);
@@ -475,7 +553,8 @@ impl<'a> Builder<'a> {
                 },
                 _ => None,
             };
-            if let Some(id) = self.body(b, framed.as_ref().unwrap_or(&b.body), b.definition_name())?
+            let surface = self.surface(b, owner, shown.get(&owner).map(Vec::as_slice).unwrap_or_default());
+            if let Some(id) = self.body(b, framed.as_ref().unwrap_or(&b.body), b.definition_name(), surface)?
                 && let Some(list) = owned.get_mut(key)
             {
                 let paths = shown.get(&owner).map(Vec::as_slice).unwrap_or_default();
@@ -616,7 +695,13 @@ impl<'a> Builder<'a> {
     /// component's frame), named `name`: its B-rep and, where the writer takes one, its mesh.
     /// `None` when nothing of it could be written, with a warning naming it, or when it is
     /// written as a mesh of its own, with no body record ([`Writes::bound_meshes`]).
-    fn body(&mut self, b: &ModelBody, geometry: &solidcraft_kernel::Body, name: &str) -> Result<Option<BodyId>, String> {
+    fn body(
+        &mut self,
+        b: &ModelBody,
+        geometry: &solidcraft_kernel::Body,
+        name: &str,
+        surface: Option<(&'a crate::SurfacePlan, Mat)>,
+    ) -> Result<Option<BodyId>, String> {
         let shown = clean(&b.name).unwrap_or_else(|| "a body".into());
         let n = self.bodies;
         self.bodies += 1;
@@ -663,11 +748,14 @@ impl<'a> Builder<'a> {
         let look = doc.model_body_look(b);
         let mut face_looks: BTreeMap<u32, AppearanceId> = BTreeMap::new();
         let faces = doc.face_colors(b);
+        // The body's own appearance, for its textured variant.
+        let mut own: Option<AppearanceId> = None;
         match &id {
             Some(id) if self.writes.appearances => {
                 match &look {
                     Some(look) => {
                         let a = self.appearance(look)?;
+                        own = Some(a.clone());
                         self.bind(AppearanceTarget::Body(id.clone()), a)?;
                     }
                     None => self.set_colour(id, b),
@@ -706,8 +794,36 @@ impl<'a> Builder<'a> {
             }
         }
         let Some(mesh) = mesh else { return Ok(id) };
-        match self.tessellation(&prefix, id.as_ref(), &mesh, &face_looks) {
-            Ok(()) => {}
+        // A render setup's textures: the mesh's coordinates in its images, and the body's and its
+        // faces' appearances with the images, bound to the mesh (the exact shape keeps the plain
+        // look).
+        let mut textures = None;
+        if let (Some((plan, to_mesh)), Some(id), true) = (surface, &id, self.writes.appearances) {
+            match super::cadir_textures::coordinates(&mesh.positions, plan, &to_mesh) {
+                Some(coordinates) => {
+                    let refs =
+                        super::cadir_textures::references(plan, &mut self.texture_assets, &mut self.ir.model.assets, &shown, &mut self.warnings);
+                    if !refs.is_empty() {
+                        let colour = self.ir.model.bodies.iter().find(|x| x.id == *id).and_then(|x| x.color);
+                        let body_look = self.textured(own.clone(), colour, plan, &refs)?;
+                        for a in face_looks.values_mut() {
+                            *a = self.textured(Some(a.clone()), None, plan, &refs)?;
+                        }
+                        textures = Some((coordinates, body_look));
+                    }
+                }
+                None => {
+                    self.warnings.push(format!("{shown}: the projection of render setup `{}` is not finite: written without its images", plan.setup))
+                }
+            }
+        }
+        let (coordinates, textured_look) = textures.unzip();
+        match self.tessellation(&prefix, id.as_ref(), &mesh, &face_looks, coordinates) {
+            Ok(()) => {
+                if let Some(a) = textured_look {
+                    self.bind(AppearanceTarget::Tessellation(format!("{prefix}:tessellation#0")), a)?;
+                }
+            }
             Err(e) if has_brep => self.warnings.push(format!("{shown}: its mesh was not written ({e}), so the file's writer meshes it")),
             Err(e) => {
                 self.warnings.push(format!("{shown}: not written: {e}"));
@@ -786,6 +902,7 @@ impl<'a> Builder<'a> {
         body: Option<&BodyId>,
         mesh: &solidcraft_geom::Mesh,
         face_looks: &BTreeMap<u32, AppearanceId>,
+        coordinates: Option<cadmpeg_ir::tessellation::TextureCoordinates>,
     ) -> Result<(), String> {
         if mesh.triangles.is_empty() {
             return Err("its mesh has no triangles".into());
@@ -798,6 +915,9 @@ impl<'a> Builder<'a> {
         .then(|| mesh.normals.iter().map(|n| Vector3::new(n.x, n.y, n.z)).collect());
         let lanes = TessellationMesh::from_list_lanes(positions, mesh.triangles.clone(), normals).map_err(|e| e.to_string())?;
         let mut t = Tessellation::new(id.clone(), lanes, Vec::new()).map_err(|e| e.to_string())?.with_body(body.cloned());
+        if let Some(coordinates) = coordinates {
+            t = t.with_texture_coordinates(vec![coordinates]).map_err(|e| e.to_string())?;
+        }
         if !face_looks.is_empty() && mesh.tri_face.len() == mesh.triangles.len() {
             let mut groups: BTreeMap<Option<u32>, Vec<u32>> = BTreeMap::new();
             for (i, f) in mesh.tri_face.iter().enumerate() {

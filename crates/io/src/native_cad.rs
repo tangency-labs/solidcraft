@@ -408,6 +408,7 @@ pub use usd::{USD_EXTS, is_usd_path};
 
 mod cadir_out;
 mod cadir_physics;
+mod cadir_textures;
 mod export;
 
 /// What the design's view hides, for an export that writes it: bodies by their world name
@@ -426,6 +427,43 @@ pub struct CadmpegOptions {
     pub hidden: Hidden,
     /// OpenUSD: the joints, grounding and each component's mass written as physics.
     pub physics: bool,
+    /// OpenUSD: the image textures a render setup gives bodies, written into a `.usdz` package.
+    pub surfaces: Vec<SurfacePlan>,
+}
+
+/// One image map of a [`SurfacePlan`]: its SHA-256 (hex), naming the file it is written as, and its
+/// PNG or JPEG bytes.
+#[derive(Clone, Debug)]
+pub struct SurfaceMap {
+    pub sha256: String,
+    pub bytes: std::sync::Arc<[u8]>,
+}
+
+/// The image maps a render setup gives one placement of a body: the textures of the body's look
+/// for an OpenUSD export.
+#[derive(Clone, Debug)]
+pub struct SurfacePlan {
+    /// The render setup's name.
+    pub setup: String,
+    /// The body as the design holds it: its definition name and component.
+    pub definition: String,
+    pub component: u64,
+    /// The placement bound (empty for a body of the design itself) and the body's world name.
+    pub path: Vec<u64>,
+    pub world: String,
+    /// The projection, in the body's definition frame (mm): a point `p` is at
+    /// `((p − origin)·u / |u|², (p − origin)·v / |v|²)` in the images, repeating.
+    pub origin: [f64; 3],
+    pub u: [f64; 3],
+    pub v: [f64; 3],
+    /// The image's v runs the other way (the built-in surfaces' images are stored so).
+    pub flip_v: bool,
+    /// How strongly the normal map tilts the surface, 0 to 1.
+    pub normal_strength: f64,
+    pub base_color: Option<SurfaceMap>,
+    pub normal: Option<SurfaceMap>,
+    pub roughness: Option<SurfaceMap>,
+    pub metallic: Option<SurfaceMap>,
 }
 
 impl CadmpegOptions {
