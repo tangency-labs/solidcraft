@@ -1080,12 +1080,19 @@ impl<'c> Stitch<'c> {
         delete: EdgeId,
         inside: Option<&[FaceuseId]>,
     ) -> Result<()> {
+        // (the faces the join gives `keep`: not upstream, #18166)
+        let joined = edge::faces(b, delete, None)?;
         // (an edit context's glue searches at each closed shell, as upstream)
         if let Some(edits) = self.edits.as_deref_mut() {
-            edits.glue_edges(k, b, keep, orientation, dist, nest, delete, inside)
+            edits.glue_edges(k, b, keep, orientation, dist, nest, delete, inside)?;
         } else {
-            glue_edges_searching(k, b, keep, orientation, dist, nest, half, delete, inside)
+            glue_edges_searching(k, b, keep, orientation, dist, nest, half, delete, inside)?;
         }
+        // Not upstream (#18166): the join keeps `keep`'s curve for the deleted edge's faces,
+        // which the deleted edge's own tolerance covered; the tolerance is raised to cover the
+        // kept curve's proved distance to each of them that holds no trim
+        // ([`crate::topology::edgeuse::p3::cover_joined_faces`]).
+        crate::topology::edgeuse::p3::cover_joined_faces(k, b, keep, &joined)
     }
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn edit_squeeze_edge(

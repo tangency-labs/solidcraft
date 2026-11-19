@@ -692,10 +692,22 @@ fn certified_gap(
 /// `(lo, hi)`, so no first piece has one inside it ([`certified_gap`] passes the curves'
 /// [`kinks`]).
 ///
-/// `budget` is the most pieces the bisection may make, [`MAX_PIECES`] when `None`. Without one
-/// a piece left open when the pieces run out is bounded as it stands, as one cut to the
-/// deepest; with one, the gap is then not enclosed (`None`): a caller that only acts on a bound
-/// at most a few times its tolerance can afford neither the whole budget nor the looser bound.
+/// `budget` is the most pieces the bisection may make while it may still show the bound at most
+/// `enough`, [`MAX_PIECES`] when `None`. Without one a piece left open when the pieces run out
+/// is bounded as it stands, as one cut to the deepest; with one, the gap is then not enclosed
+/// (`None`): a caller that only acts on a bound at most a few times its tolerance can afford
+/// neither the whole budget nor the looser bound for a gap just within `enough`, which only
+/// fine pieces close below it.
+///
+/// With a budget, the pieces already proved are not cut further. Every end value a piece
+/// evaluates is part of the bound of a piece that closes, and no cut lowers it (a cut piece's
+/// halves evaluate the same ends), so the bound is at least the largest end value `seen` so far:
+/// - a piece whose bound is at most `seen` closes as it stands, since cutting it cannot lower
+///   the bound, and closing it keeps the bound's value;
+/// - once `seen` is above `over`, so is the bound: it is infinite at once;
+/// - once `seen` is above `enough`, the bound is not at most `enough` whatever the cuts, and
+///   the pieces still open bound a gap the caller acts on: they get the whole [`MAX_PIECES`],
+///   not the budget, which only stops the search for a bound at most `enough`.
 fn bisect(
     [lo, hi]: [f64; 2],
     first_pieces: usize,
@@ -730,9 +742,13 @@ fn bisect(
     stack.reverse();
     let mut worst = 0.0_f64;
     let mut made = stack.len();
-    let max_pieces = budget.unwrap_or(MAX_PIECES);
+    // (the largest end value evaluated, with a budget: the bound is at least it)
+    let mut seen = f64::NEG_INFINITY;
     while let Some((a, b, depth, parent)) = stack.pop() {
         let mid = 0.5 * (a + b);
+        // (the budget holds while the bound may still be at most `enough`)
+        let capped = budget.filter(|_| seen <= enough);
+        let max_pieces = capped.unwrap_or(MAX_PIECES);
         // (a piece that cannot be cut further is bounded as it is: the bound holds whether or
         // not the second term has shrunk, closing only makes it tight)
         let out_of_pieces = made + 2 > max_pieces;
@@ -741,10 +757,17 @@ fn bisect(
         match piece(a, b) {
             Ok(Some(p)) => {
                 let bound = (Ivl::from(p.ends) + Ivl::from(p.with_slack)).hi;
-                let closed = bound <= enough || p.closes(parent, relative, floor);
+                if budget.is_some() {
+                    seen = seen.max(p.ends);
+                    if seen > over {
+                        return Ok(Some(f64::INFINITY));
+                    }
+                }
+                let proved = budget.is_some() && bound <= seen;
+                let closed = bound <= enough || proved || p.closes(parent, relative, floor);
                 if last || closed {
                     // (an open piece the budget stopped is not bounded as it stands)
-                    if !closed && budget.is_some() && out_of_pieces {
+                    if !closed && capped.is_some() && out_of_pieces {
                         return Ok(None);
                     }
                     if bound > over {
@@ -863,6 +886,181 @@ pub fn curve_face_gap_bound(
         return Ok(None);
     };
     certified_gap(k, curve, &correspondence, &net, range, FIRST_PIECES, floor)
+}
+
+/// Not upstream (#18166): a proved upper bound on the distance from every point of `curve`
+/// over its parameters `range` to the surface of face `face` over that surface's parameter
+/// box, as [`curve_face_gap_bound`], but one that tends to the largest distance itself as the
+/// pieces shrink. [`curve_face_gap_bound`] matches the curve to the surface by one fixed
+/// correspondence through the nearest points of [`CORRESPONDENCE_POINTS`] samples, so its
+/// bound stops at that correspondence's own error between the samples (a curve lying in a
+/// plane face, 3e-14 from it, was bounded at 4.9e-5: `primitive.api_primitives` gen0083).
+/// Here every piece's two ends are matched to their own nearest points on the surface, and
+/// the piece to the straight map between them in the surface's parameters ([`surface_piece`]):
+/// each end value is then the end's distance to the surface, a cut drops the curve's point at
+/// the cut afresh, and the second-order term shrinks with the piece.
+///
+/// A piece whose bound is at most `enough` closes as it stands, and so does one within the
+/// largest end value `seen` so far (the bound is at least that, and no cut lowers it: the
+/// halves keep their ends' nearest points). While `seen` is at most `enough` a piece above
+/// it is cut until it closes below `enough`, at [`CLOSE_ABSOLUTE`] or at the bottom, so a gap
+/// just within `enough` is shown within it; once `seen` is above `enough` the pieces close at
+/// a thousandth of their end values or `floor`, as [`curve_face_gap_bound`]'s. Once `seen` is
+/// above `over`, so is the bound: it is infinite at once. An `enough` of `f64::NEG_INFINITY`
+/// and an `over` of `f64::INFINITY` give the bound to the tightness `floor` asks.
+///
+/// Each nearest point is a witness only (`dist(C(t), S) <= |C(t) - S(w)|` for any `w` in the
+/// parameter box): where the surface's point is not dropped at a cut, the straight map's
+/// middle stands for it, and the bound holds either way.
+///
+/// `None` when the gap is not enclosed: as [`curve_face_gap_bound`], and where the nearest
+/// point of one of the first pieces' ends is not found.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling face; the kernel's unported and cancelled statuses.
+pub fn curve_face_gap_bound_within(
+    k: &Kernel,
+    brep: &crate::topology::Brep,
+    face: crate::topology::FaceId,
+    curve: &BSplineCurve,
+    range: [f64; 2],
+    floor: f64,
+    [enough, over]: [f64; 2],
+) -> Result<Option<f64>> {
+    use crate::error::ignored;
+    use crate::surface::surface::p4::NoObject;
+    use crate::surface::surface::p5::DropPointOptions;
+
+    let [lo, hi] = range;
+    if !(lo.is_finite() && hi.is_finite() && lo < hi && floor.is_finite() && floor >= 0.0) {
+        return Ok(None);
+    }
+    let rec = brep.face(face)?;
+    let Some(surface) = rec.surface.as_ref() else {
+        return Ok(None);
+    };
+    let surface = surface.clone_for_evaluation()?;
+    let domain = &rec.uv_domain;
+    let Ok(cn) = NurbsCurve::of(curve) else {
+        return Ok(None);
+    };
+    let (Some(&d0), Some(&d1)) = (cn.u.get(cn.p), cn.u.get(cn.n)) else {
+        return Ok(None);
+    };
+    if !(d0 <= lo && hi <= d1) {
+        return Ok(None);
+    }
+    let evaluated = Curve::from(curve.clone_exact());
+    // (the nearest point of the curve's point at `t`, from `guess`; `None` where it is not found)
+    let drop_at = |t: f64, guess: Option<Point2>| -> Result<Option<Point2>> {
+        let Some(point) =
+            ignored(evaluated.evaluate(k, t, 0, true, false))?.and_then(|d| d.into_iter().next())
+        else {
+            return Ok(None);
+        };
+        let opts = DropPointOptions {
+            guess_uv: guess,
+            ..DropPointOptions::default()
+        };
+        let drop = ignored(surface.drop_point::<NoObject>(k, point, domain, &opts))?;
+        Ok(drop.filter(|d| d.success).map(|d| d.result_uv))
+    };
+    // The first pieces' ends: equally spaced, and every kink of the curve, so no first piece
+    // has a corner inside it ([`certified_gap`]); their nearest points are followed from the
+    // middle out to each end, each drop started from its neighbour's ([`correspondence`]).
+    let mut cuts: Vec<f64> = (0..=FIRST_PIECES)
+        .map(|j| {
+            if j == FIRST_PIECES {
+                hi
+            } else {
+                lo + (hi - lo) * (j as f64) / (FIRST_PIECES as f64)
+            }
+        })
+        .collect();
+    cuts.extend(kinks(&cn, lo, hi));
+    cuts.sort_by(f64::total_cmp);
+    cuts.dedup();
+    let n = cuts.len();
+    let mid = n / 2;
+    let mut feet: Vec<Option<Point2>> = vec![None; n];
+    let order = (mid..n)
+        .map(|i| (i, (i > mid).then(|| i - 1)))
+        .chain((0..mid).rev().map(|i| (i, Some(i + 1))));
+    for (i, from) in order {
+        let Some(&t) = cuts.get(i) else {
+            return Ok(None);
+        };
+        let guess = from.and_then(|j| feet.get(j).copied().flatten());
+        let Some(uv) = drop_at(t, guess)? else {
+            return Ok(None);
+        };
+        if let Some(slot) = feet.get_mut(i) {
+            *slot = Some(uv);
+        }
+    }
+    let feet: Vec<Point2> = feet.into_iter().flatten().collect();
+    let Some(net) = NetSurface::of(k, &surface, &feet)? else {
+        return Ok(None);
+    };
+    // (each piece with its ends' nearest points, its depth and its parent's slack, infinite
+    // for a first piece)
+    let mut stack: Vec<(f64, f64, [Point2; 2], u32, f64)> = Vec::new();
+    for (ts, ws) in cuts.windows(2).zip(feet.windows(2)) {
+        if let ([a, b], [wa, wb]) = (ts, ws) {
+            stack.push((*a, *b, [*wa, *wb], 0, f64::INFINITY));
+        }
+    }
+    stack.reverse();
+    let mut worst = 0.0_f64;
+    let mut made = stack.len();
+    let mut seen = f64::NEG_INFINITY;
+    while let Some((a, b, ends, depth, parent)) = stack.pop() {
+        k.check_cancelled(OP)?;
+        let mid = 0.5 * (a + b);
+        let last = depth >= MAX_DEPTH || !(a < mid && mid < b) || made + 2 > MAX_PIECES;
+        let mut slack = f64::INFINITY;
+        match surface_piece(&cn, [a, b], &net, ends, a, b) {
+            Ok(Some(p)) => {
+                let bound = (Ivl::from(p.ends) + Ivl::from(p.with_slack)).hi;
+                seen = seen.max(p.ends);
+                if seen > over {
+                    return Ok(Some(f64::INFINITY));
+                }
+                // (while the bound may still be at most `enough`, a piece above it is cut on)
+                let (relative, at_least) = if seen <= enough {
+                    (0.0, 0.0)
+                } else {
+                    (CLOSE_RELATIVE, floor)
+                };
+                let closed =
+                    bound <= enough || bound <= seen || p.closes(parent, relative, at_least);
+                if last || closed {
+                    if bound > over {
+                        return Ok(Some(f64::INFINITY));
+                    }
+                    worst = worst.max(bound);
+                    continue;
+                }
+                slack = p.slack;
+            }
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            // a box past the net, on a knot line of too low a continuity: a smaller piece may
+            // clear it; at the bottom the gap is not enclosed
+            Ok(None) | Err(_) => {
+                if last {
+                    return Ok(None);
+                }
+            }
+        }
+        let [wa, wb] = ends;
+        let straight = Point2::new(0.5 * (wa.x + wb.x), 0.5 * (wa.y + wb.y));
+        let wm = drop_at(mid, Some(straight))?.unwrap_or(straight);
+        made += 2;
+        stack.push((mid, b, [wm, wb], depth + 1, slack));
+        stack.push((a, mid, [wa, wm], depth + 1, slack));
+    }
+    Ok(worst.is_finite().then_some(worst))
 }
 
 /// The correspondence `W` of `curve` over `[lo, hi]` on `surface` (module docs): a cubic
@@ -1039,6 +1237,74 @@ fn clamp_ivl(x: Ivl, a: f64, b: f64) -> Ivl {
     Ivl::new(x.lo.max(lo).min(hi), x.hi.min(hi).max(lo))
 }
 
+/// The bound of one piece `[a, b]` of the curve against the surface `s`, matched to it by the
+/// straight map from `range` onto `[w0, w1]` ([`target_piece`]'s surface target): the larger
+/// end value plus `h^2 / 8 sup |g''|` with the surface's slack past its net, or the Lipschitz
+/// form `h sup |g'|` where the box crosses a knot line the surface is only C^0 across. `None`
+/// when some enclosure is not finite.
+fn surface_piece(
+    cn: &NurbsCurve,
+    range: [f64; 2],
+    s: &NetSurface,
+    [w0, w1]: [Point2; 2],
+    a: f64,
+    b: f64,
+) -> Result<Option<PieceBound>> {
+    let mut ends = 0.0_f64;
+    for t in [a, b] {
+        let at = Ivl::from(t);
+        let Some(c0) = curve_derivs_over(cn, at, 0, None)?.first().copied() else {
+            return Ok(None);
+        };
+        let w = V3 {
+            x: clamp_ivl(along(at, range, [w0.x, w1.x]), w0.x, w1.x),
+            y: clamp_ivl(along(at, range, [w0.y, w1.y]), w0.y, w1.y),
+            z: Ivl::from(0.0),
+        };
+        let q = s.partials(&[w], 0, 0)?.0.at(0, 0);
+        let Some(g) = norm_upper(minus(c0, q)) else {
+            return Ok(None);
+        };
+        ends = ends.max(g);
+    }
+    let span = Ivl::new(a, b);
+    let h = Ivl::from(b) - Ivl::from(a);
+    let cd = curve_derivs_over(cn, span, 2, None)?;
+    let (Some(c1), Some(c2)) = (cd.get(1).copied(), cd.get(2).copied()) else {
+        return Ok(None);
+    };
+    let (u1, v1) = (slope(range, [w0.x, w1.x]), slope(range, [w0.y, w1.y]));
+    let w = V3 {
+        x: clamp_ivl(along(span, range, [w0.x, w1.x]), w0.x, w1.x),
+        y: clamp_ivl(along(span, range, [w0.y, w1.y]), w0.y, w1.y),
+        z: Ivl::from(0.0),
+    };
+    // (S o w)'' = S_uu u'^2 + 2 S_uv u'v' + S_vv v'^2 where the surface is C^1
+    // across every knot line the box crosses; else g is Lipschitz, with the
+    // one-sided first partials hulled
+    let term = match s.partials(&[w], 2, 1) {
+        Ok((p, slack)) => {
+            let mut swpp = scaled(p.at(2, 0), u1 * u1);
+            swpp = plus(swpp, scaled(p.at(1, 1), Ivl::from(2.0) * u1 * v1));
+            swpp = plus(swpp, scaled(p.at(0, 2), v1 * v1));
+            let Some(m) = norm_upper(minus(c2, swpp)) else {
+                return Ok(None);
+            };
+            (h * h * Ivl::from(m) * Ivl::from(0.125), slack)
+        }
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Err(_) => {
+            let (p, slack) = s.partials(&[w], 1, 0)?;
+            let sw = plus(scaled(p.at(1, 0), u1), scaled(p.at(0, 1), v1));
+            let Some(m) = norm_upper(minus(c1, sw)) else {
+                return Ok(None);
+            };
+            (h * Ivl::from(m), slack)
+        }
+    };
+    Ok(PieceBound::with(ends, term.0, term.1))
+}
+
 /// The bound of one piece `[a, b]` of the curve against the target (a surface's with its slack
 /// past its net, as [`second_term`]), `None` when some enclosure is not finite (module docs; the same chord bound as [`piece`] with the straight map in place of the
 /// correspondence `W`). A target curve whose
@@ -1051,6 +1317,9 @@ fn target_piece(
     a: f64,
     b: f64,
 ) -> Result<Option<PieceBound>> {
+    if let Prepared::Surface(s, w) = target {
+        return surface_piece(cn, range, s, *w, a, b);
+    }
     let mut ends = 0.0_f64;
     for t in [a, b] {
         let at = Ivl::from(t);
@@ -1059,14 +1328,8 @@ fn target_piece(
         };
         let q = match target {
             Prepared::Point(p) => *p,
-            Prepared::Surface(s, [w0, w1]) => {
-                let w = V3 {
-                    x: clamp_ivl(along(at, range, [w0.x, w1.x]), w0.x, w1.x),
-                    y: clamp_ivl(along(at, range, [w0.y, w1.y]), w0.y, w1.y),
-                    z: Ivl::from(0.0),
-                };
-                s.partials(&[w], 0, 0)?.0.at(0, 0)
-            }
+            // (bounded by `surface_piece` above)
+            Prepared::Surface(..) => return Ok(None),
             Prepared::Curve(dn, [s0, s1]) => {
                 let s = clamp_ivl(along(at, range, [*s0, *s1]), *s0, *s1);
                 let Some(d0) = curve_derivs_over(dn, s, 0, None)?.first().copied() else {
@@ -1090,38 +1353,8 @@ fn target_piece(
     // where it is not defined over the piece
     let (g1, g2) = match target {
         Prepared::Point(_) => (c1, Some(c2)),
-        Prepared::Surface(s, [w0, w1]) => {
-            let (u1, v1) = (slope(range, [w0.x, w1.x]), slope(range, [w0.y, w1.y]));
-            let w = V3 {
-                x: clamp_ivl(along(span, range, [w0.x, w1.x]), w0.x, w1.x),
-                y: clamp_ivl(along(span, range, [w0.y, w1.y]), w0.y, w1.y),
-                z: Ivl::from(0.0),
-            };
-            // (S o w)'' = S_uu u'^2 + 2 S_uv u'v' + S_vv v'^2 where the surface is C^1
-            // across every knot line the box crosses; else g is Lipschitz, with the
-            // one-sided first partials hulled
-            let term = match s.partials(&[w], 2, 1) {
-                Ok((p, slack)) => {
-                    let mut swpp = scaled(p.at(2, 0), u1 * u1);
-                    swpp = plus(swpp, scaled(p.at(1, 1), Ivl::from(2.0) * u1 * v1));
-                    swpp = plus(swpp, scaled(p.at(0, 2), v1 * v1));
-                    let Some(m) = norm_upper(minus(c2, swpp)) else {
-                        return Ok(None);
-                    };
-                    (h * h * Ivl::from(m) * Ivl::from(0.125), slack)
-                }
-                Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                Err(_) => {
-                    let (p, slack) = s.partials(&[w], 1, 0)?;
-                    let sw = plus(scaled(p.at(1, 0), u1), scaled(p.at(0, 1), v1));
-                    let Some(m) = norm_upper(minus(c1, sw)) else {
-                        return Ok(None);
-                    };
-                    (h * Ivl::from(m), slack)
-                }
-            };
-            return Ok(PieceBound::with(ends, term.0, term.1));
-        }
+        // (bounded by `surface_piece` above)
+        Prepared::Surface(..) => return Ok(None),
         Prepared::Curve(dn, [s0, s1]) => {
             let w1 = slope(range, [*s0, *s1]);
             let s = clamp_ivl(along(span, range, [*s0, *s1]), *s0, *s1);
@@ -1794,7 +2027,9 @@ pub fn trim_image_gap_bound_up_to(
 /// An `enough` of `f64::NEG_INFINITY` is [`trim_image_gap_bound_up_to`].
 ///
 /// `budget` caps the bisection's pieces as for [`bisect`]: `None` is the whole budget, with a
-/// piece still open at its end bounded as it stands; with a cap, such a gap is not enclosed.
+/// piece still open at its end bounded as it stands; with a cap, which holds only while the
+/// bound may still be at most `enough`, a gap the cap stops is not enclosed, and pieces within
+/// the largest end value close as they stand.
 ///
 /// # Errors
 ///
@@ -1944,6 +2179,66 @@ mod tests {
                 .unwrap()
                 .is_none()
         ));
+    }
+
+    /// A curve bowing within a plane parallel to a box's face is bounded against the face
+    /// by its height to within a thousandth, whatever the bow, by the bound that drops every
+    /// piece's ends afresh (#18166); one asked whether it is within a hundredth past the
+    /// height is shown within it, and a bound past `over` is infinite.
+    #[test]
+    fn a_curve_bowing_over_a_face_is_bounded_by_its_height_as_the_pieces_shrink() {
+        let mut k = Kernel::default();
+        let b = crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
+            .unwrap();
+        let lift = 6.8e-5;
+        let z = 3.0 + lift;
+        let bow = NurbCurve::new(
+            vec![
+                CPoint::new(0.2, 0.3, z, NOW),
+                CPoint::new(0.9, 0.5, z, NOW),
+                CPoint::new(0.3, 1.7, z, NOW),
+            ],
+            2,
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let bow = BSplineCurve::from_nurb(bow, 3, false);
+        let faces = crate::query::api_queries::get_faces(&b).unwrap();
+        let run = |f, within: [f64; 2]| {
+            curve_face_gap_bound_within(&k, &b, f, &bow, [0.0, 1.0], 1e-9, within).unwrap()
+        };
+        let tight: Vec<f64> = faces
+            .iter()
+            .filter_map(|&f| run(f, [f64::NEG_INFINITY, f64::INFINITY]))
+            .collect();
+        let nearest = tight.iter().copied().fold(f64::INFINITY, f64::min);
+        assert!(
+            nearest >= lift && nearest <= lift * (1.0 + 1e-3),
+            "{nearest:e} against {lift:e}: {tight:?}"
+        );
+        let top = faces
+            .iter()
+            .copied()
+            .find(|&f| run(f, [f64::NEG_INFINITY, f64::INFINITY]) == Some(nearest))
+            .unwrap();
+        let within = run(top, [1.01 * lift, f64::INFINITY]);
+        assert!(
+            within.is_some_and(|g| g >= lift && g <= 1.01 * lift),
+            "{within:?}"
+        );
+        assert_eq!(run(top, [0.5 * lift, 0.5 * lift]), Some(f64::INFINITY));
+        // an empty range encloses nothing
+        assert!(curve_face_gap_bound_within(
+            &k,
+            &b,
+            top,
+            &bow,
+            [0.5, 0.5],
+            1e-9,
+            [f64::NEG_INFINITY, f64::INFINITY]
+        )
+        .unwrap()
+        .is_none());
     }
 
     /// The top face of a box (its plane `surface`, its UV domain mapped to `[0, 1]^2` by
@@ -2250,19 +2545,19 @@ mod tests {
         assert_eq!(psi_at(&psi, 1.0 + 1e-9, [0.0, 1.0]), None);
     }
 
-    /// A budget the open pieces outlast leaves the gap not enclosed, where the whole budget
-    /// bounds the pieces it stops as they stand (#18166); a budget the pieces close within
-    /// gives the bound without one, bit for bit.
+    /// A budget the open pieces outlast leaves a gap just within `enough` not enclosed, where
+    /// the whole budget bounds the pieces it stops as they stand (#18166); a budget the pieces
+    /// close within gives the bound without one, bit for bit.
     #[test]
     fn a_budget_run_out_is_not_enclosed() {
-        let run = |relative: f64, budget: Option<usize>| {
+        let run = |relative: f64, enough: f64, budget: Option<usize>| {
             bisect(
                 [0.0, 1.0],
                 32,
                 &[],
                 relative,
                 0.0,
-                [f64::NEG_INFINITY, f64::INFINITY],
+                [enough, f64::INFINITY],
                 budget,
                 |a, b| {
                     let h = b - a;
@@ -2271,14 +2566,52 @@ mod tests {
             )
             .unwrap()
         };
-        // (closing at 0.1 h² <= 1e-13 needs pieces of 1e-6: more than 1 << 11)
-        assert_eq!(run(0.0, Some(1 << 11)), None);
-        assert!(run(0.0, None).is_some_and(|g| g >= 1.0));
+        // (closing at 0.1 h² <= 5e-14 needs pieces of 7e-7: more than 1 << 11)
+        let just_within = 1.0 + 1.0e-13;
+        assert_eq!(run(0.0, just_within, Some(1 << 11)), None);
+        assert!(run(0.0, just_within, None).is_some_and(|g| g >= 1.0));
         // (closing at 0.1 h² <= 1e-3 needs no cut of the 32 first pieces)
         assert_eq!(
-            run(CLOSE_RELATIVE, Some(1 << 11)).map(f64::to_bits),
-            run(CLOSE_RELATIVE, None).map(f64::to_bits)
+            run(CLOSE_RELATIVE, f64::NEG_INFINITY, Some(1 << 11)).map(f64::to_bits),
+            run(CLOSE_RELATIVE, f64::NEG_INFINITY, None).map(f64::to_bits)
         );
+    }
+
+    /// With a budget, a gap whose end values already pass `enough` is bounded with every
+    /// piece, not the budget (the budget only stops the search for a bound at most `enough`),
+    /// a piece whose bound is within the largest end value closes as it stands, and an end
+    /// value past `over` gives an infinite bound at once (#18166).
+    #[test]
+    fn a_budget_stops_only_the_search_below_enough() {
+        // (end values 1 at the middle, 0.5 elsewhere; a term 0.1 h² closes at h of 1e-6)
+        let piece = |a: f64, b: f64| {
+            let h = b - a;
+            let ends = if a <= 0.5 && 0.5 <= b { 1.0 } else { 0.5 };
+            Ok(PieceBound::with(ends, Ivl::from(0.1 * h * h), 0.0))
+        };
+        let run = |[enough, over]: [f64; 2], budget: Option<usize>| {
+            bisect(
+                [0.0, 1.0],
+                32,
+                &[],
+                0.0,
+                1.0e-13,
+                [enough, over],
+                budget,
+                piece,
+            )
+            .unwrap()
+        };
+        // (past `enough` = 0.9 at the middle: the budget of 64 does not stop it)
+        let g = run([0.9, f64::INFINITY], Some(64));
+        assert!(
+            g.is_some_and(|g| (1.0..=1.0 + 1.0e-12).contains(&g)),
+            "{g:?}"
+        );
+        // (within `enough` = 1.0 + 1e-13 everywhere: the budget stops it)
+        assert_eq!(run([1.0 + 1.0e-13, f64::INFINITY], Some(64)), None);
+        // (an end value past `over`)
+        assert_eq!(run([0.9, 0.95], Some(64)), Some(f64::INFINITY));
     }
 
     /// A slack no cut shrinks (a trim past its surface's net, #18166) does not hold a piece

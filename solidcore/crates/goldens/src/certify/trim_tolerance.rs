@@ -13,7 +13,7 @@
 //! - an edge: `B` is [`trim_image_gap_bound`] of each of its UV trims, a proved upper bound on
 //!   the Hausdorff distance between the edge curve and the trim's image on its face (so on the
 //!   true gap `g`); on a face of the edge where it holds no UV trim, `B` is the proved bound
-//!   ([`curve_face_gap_bound`]) on the distance from its curve to the face's surface
+//!   ([`curve_face_gap_bound_within`]) on the distance from its curve to the face's surface
 //!   (a UV trim that is a line is enclosed as its NURB, the segment between its two control
 //!   points, which is the line's geometry up to the slack [`line_evaluation_slack`] bounds,
 //!   added to `B`; see `use_bound`);
@@ -34,7 +34,7 @@ use solidcore::curve::curve::Curve;
 use solidcore::kernel::Kernel;
 use solidcore::nurbs::math::{gamma, CPoint};
 use solidcore::query::curve_surface_gap::{
-    curve_face_gap_bound, line_evaluation_slack, trim_image_gap_bound,
+    curve_face_gap_bound_within, line_evaluation_slack, trim_image_gap_bound,
 };
 use solidcore::surface::surface::p2::SurfaceKind;
 use solidcore::topology::edgeuse::p1 as eu1;
@@ -632,7 +632,8 @@ fn face_trims_covered(k: &Kernel, b: &Brep, f: FaceId) -> Result<f64, String> {
 }
 
 /// A proved bound on the distance from `e`'s curve over its interval to the surface of its
-/// face `f` ([`curve_face_gap_bound`], floor a thousandth of `n`), plus the rounding of the
+/// face `f` ([`curve_face_gap_bound_within`], floor a thousandth of `n`, cut until shown within
+/// `n` where it is), plus the rounding of the
 /// curve's evaluation against its NURBS data (none for a B-spline or an ellipse, evaluated on
 /// it; for a line, evaluated analytically, [`line_evaluation_slack`]); `None` where it is not
 /// enclosed or the curve is of another kind.
@@ -650,9 +651,20 @@ fn face_bound(k: &Kernel, b: &Brep, e: EdgeId, f: FaceId, n: f64) -> Option<f64>
         _ => return None,
     };
     let ivl = rec.interval;
-    curve_face_gap_bound(k, b, f, bs, [ivl.min(), ivl.max()], FLOOR * n)
-        .expect("the bound")
-        .map(|g| (g + slack) * (1.0 + 4.0 * f64::EPSILON))
+    // (pieces whose bound shows the gap within `n` close at once; a gap just within it is cut
+    // until shown so)
+    let enough = n / (1.0 + 4.0 * f64::EPSILON) - slack;
+    curve_face_gap_bound_within(
+        k,
+        b,
+        f,
+        bs,
+        [ivl.min(), ivl.max()],
+        FLOOR * n,
+        [enough, f64::INFINITY],
+    )
+    .expect("the bound")
+    .map(|g| (g + slack) * (1.0 + 4.0 * f64::EPSILON))
 }
 
 /// The bounds that certify `e`'s tolerance `n`, one per checked gap, for every face of the
@@ -1793,6 +1805,63 @@ fn an_edge_face_without_a_trim_is_bounded_against_its_surface() {
             .collect();
         assert!(!trims.is_empty() && certified(&trims), "{trims:?}");
     }
+}
+
+/// #18166 regression: `heal.stitch_p2` `cov_tjunc8_do_cand_v` joins an edge onto edge 3,
+/// which keeps its own curve for the joined edge's face, 2.427e-4 from that face's surface,
+/// and upstream raises the tolerance only to the two curves' distance (`GlueEdges`,
+/// `UpdateObjectTolerance`): edge 3 was left at 2.181e-4. The join now raises it to the kept
+/// curve's proved distance to every face it gains without a trim
+/// (`topology::edgeuse::p3::cover_joined_faces`), so every edge of the stitched body is within
+/// its tolerance of each face on which it holds no trim ([`face_bound`]).
+#[test]
+fn a_stitch_join_keeps_its_edge_covering_the_faces_it_joins() {
+    let unit = "heal.stitch_p2";
+    let runner = crate::registry()
+        .into_iter()
+        .find(|u| u.id() == unit)
+        .expect("the unit");
+    let ctx = CaseContext {
+        root: repo_root(),
+        seeds: 16,
+    };
+    let cases = runner.cases(&ctx).expect("cases");
+    let case = cases
+        .iter()
+        .find(|c| c.name == "cov_tjunc8_do_cand_v")
+        .expect("the case");
+    super::watch_written();
+    let out = runner.run_rust(case);
+    let bodies = super::take_written();
+    out.expect("the case runs");
+    let k = Kernel::default();
+    let mut bad = Vec::new();
+    let mut checked = 0;
+    for (i, b) in bodies.iter().enumerate() {
+        for (e, rec) in b.edges().iter() {
+            for f in edge::faces(b, e, None).expect("faces") {
+                let trimmed = rec.edgeuses.iter().any(|&eu| {
+                    eu1::face(b, eu).expect("face") == Some(f)
+                        && b.edgeuse(eu).expect("use").uv_trim_curve.is_some()
+                });
+                if trimmed {
+                    continue;
+                }
+                checked += 1;
+                let x = face_bound(&k, b, e, f, rec.tolerance);
+                if !matches!(x, Some(x) if x <= rec.tolerance) {
+                    bad.push(format!(
+                        "body {i} edge {} face {}: tol {:e}, B {x:?}",
+                        e.index(),
+                        f.index(),
+                        rec.tolerance
+                    ));
+                }
+            }
+        }
+    }
+    assert!(checked > 0, "no face without a trim");
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
 }
 
 /// #18162 regression: `heal.stitch_p2` `cov_tjunc11_do_nonmanifold_gaps` closes a corner's

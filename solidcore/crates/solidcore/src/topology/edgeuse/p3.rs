@@ -1863,7 +1863,7 @@ fn other_trims_bound(
         }
     }
     for (f, _) in faces.into_iter().filter(|(_, trimmed)| !trimmed) {
-        match edge_face_gap_bound(k, b, e, f, fit)? {
+        match edge_face_gap_bound(k, b, e, f, fit, [lowered, lowered])? {
             Some(gap) if gap.is_finite() && gap <= lowered => worst = worst.max(gap),
             _ => return Ok(None),
         }
@@ -1871,21 +1871,74 @@ fn other_trims_bound(
     Ok(Some(worst))
 }
 
-/// Not upstream (#18166): a proved bound on the distance from `e`'s curve over its interval to
-/// the surface of its face `f` (`curve_face_gap_bound`, cut to a thousandth of `fit` as
-/// [`trim_deviation_bound`]), plus the rounding of a line's analytic evaluation against its
-/// NURBS data (`line_evaluation_slack`); `None` where it is not enclosed or the curve is not a
-/// B-spline, an ellipse or a line.
+/// Not upstream (#18166): raises `e`'s tolerance to cover the proved distance of its curve to
+/// the surface of each face of `faces` that a join just gave it (`GlueEdges`: the faces of the
+/// edge it deleted), where none of `e`'s uses on that face holds a UV trim. The join keeps
+/// `e`'s curve for the deleted edge's faces and raises the tolerance to the two curves'
+/// distance only (`UpdateObjectTolerance`), which does not cover that curve's distance to
+/// those faces: the deleted edge's own tolerance covered its own curve there. A face whose
+/// distance is not enclosed, or whose bound is within the tolerance, is left as upstream
+/// leaves it (`heal.stitch_p2` cov_tjunc8: a face joined 2.43e-4 from the kept curve under a
+/// tolerance of 2.18e-4).
 ///
 /// # Errors
 ///
-/// Those of `curve_face_gap_bound`.
+/// [`SolidError::NotFound`] for a dangling id; those of `curve_face_gap_bound_within`.
+pub(crate) fn cover_joined_faces(
+    k: &Kernel,
+    b: &mut Brep,
+    e: EdgeId,
+    faces: &[FaceId],
+) -> Result<()> {
+    let mut trimmed: Vec<FaceId> = Vec::new();
+    for &x in &b.edge(e)?.edgeuses {
+        if b.edgeuse(x)?.uv_trim_curve.is_none() {
+            continue;
+        }
+        if let Some(fu) = faceuse(b, x)? {
+            if let Some(f) = faceuse_face(b, fu)? {
+                trimmed.push(f);
+            }
+        }
+    }
+    let mut done: Vec<FaceId> = Vec::new();
+    for &f in faces {
+        if done.contains(&f) || trimmed.contains(&f) {
+            continue;
+        }
+        done.push(f);
+        if !crate::topology::edge::faces(b, e, None)?.contains(&f) {
+            continue;
+        }
+        let tol = b.edge(e)?.tolerance;
+        let fit = fit_tolerance(k, b, e)?;
+        match edge_face_gap_bound(k, b, e, f, fit, [tol, f64::INFINITY])? {
+            Some(gap) if gap.is_finite() && gap > tol => {
+                crate::topology::edge::set_tolerance(b, e, gap, true, true)?;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Not upstream (#18166): a proved bound on the distance from `e`'s curve over its interval to
+/// the surface of its face `f` (`curve_face_gap_bound_within`, cut to a thousandth of `fit` as
+/// [`trim_deviation_bound`], and until shown within `within` where it is; above `over` it is
+/// infinite), plus the rounding of a line's analytic evaluation against its NURBS data
+/// (`line_evaluation_slack`); `None` where it is not enclosed or the curve is not a B-spline,
+/// an ellipse or a line.
+///
+/// # Errors
+///
+/// Those of `curve_face_gap_bound_within`.
 fn edge_face_gap_bound(
     k: &Kernel,
     b: &Brep,
     e: EdgeId,
     f: FaceId,
     fit: f64,
+    [within, over]: [f64; 2],
 ) -> Result<Option<f64>> {
     let rec = b.edge(e)?;
     let Some(curve) = rec.curve.as_ref() else {
@@ -1906,13 +1959,16 @@ fn edge_face_gap_bound(
         _ => return Ok(None),
     };
     let ivl = rec.interval;
-    let gap = crate::query::curve_surface_gap::curve_face_gap_bound(
+    // (the caller only asks whether the bound is within `within`)
+    let enough = within / (1.0 + 4.0 * f64::EPSILON) - slack;
+    let gap = crate::query::curve_surface_gap::curve_face_gap_bound_within(
         k,
         b,
         f,
         bs,
         [ivl.min(), ivl.max()],
         TRIM_BOUND_FLOOR * fit,
+        [enough, over],
     )?;
     Ok(gap.map(|g| (g + slack) * (1.0 + 4.0 * f64::EPSILON)))
 }

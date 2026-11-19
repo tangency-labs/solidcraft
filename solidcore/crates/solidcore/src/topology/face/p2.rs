@@ -82,8 +82,9 @@
 //!   tolerance), it is raised to the edited trim's proved distance from the edge curve
 //!   when that is larger and at most twice the tolerance (`keep_trim_covered`: a larger
 //!   bound is the enclosure's slack as often as the trim's move, and stays upstream's);
-//!   it is never lowered. Both bounds bisect into at most `KEEP_COVERED_PIECES` (64)
-//!   pieces; a trim not enclosed within them raises nothing.
+//!   it is never lowered. The edited trim's bound may stop at `KEEP_COVERED_PIECES` (64)
+//!   pieces only while it may still show the trim within the tolerance (then nothing is
+//!   raised); a trim an end value shows past it is bounded with every piece it needs.
 //! - **Not upstream (#14257): the end move is spread.** Upstream moves each trim's end
 //!   control point alone onto the vertex's UV point, which turns the end control leg by
 //!   any angle when the gap is not small against it (WR-794). Here the control points
@@ -3560,11 +3561,17 @@ const KEEP_COVERED_PIECES: usize = 64;
 /// net a trim just within its tolerance costs a deep bisection each time (the
 /// `crashes/2992` rig case bounds over a thousand such trims, all still covered).
 ///
-/// Both bounds stop at [`KEEP_COVERED_PIECES`] pieces, and a trim not enclosed within them
-/// raises nothing (the tolerance stays upstream's): the bound reached when the pieces run out
-/// is not one to raise a tolerance to. A trim lying within 2% of its tolerance along its whole
-/// length is closed below it only by fine pieces: in the same rig case 260 such trims took
-/// about 1150 pieces and 80 ms each, 20 s of the union's 26 s, and none of them raised.
+/// The edited trim's bound has a budget of [`KEEP_COVERED_PIECES`] pieces, which holds only
+/// while the bound may still show the trim within its tolerance: a trim lying within 2% of
+/// its tolerance along its whole length is closed below it only by fine pieces (in the same
+/// rig case 260 such trims took about 1150 pieces and 80 ms each, 20 s of the union's 26 s,
+/// and none of them raised), and one the budget stops there raises nothing. Once an end value
+/// of a piece is past the tolerance, the trim is not within it whatever the cuts, and the
+/// pieces still open are cut as far as the bisection goes, only those not yet within the
+/// largest end value (`bisect` in `query::curve_surface_gap`): the raise then covers the trim
+/// (#18166, `crashes/stitched_corner`: three edges left uncovered by a budget for all
+/// pieces). The trim before the edit is bounded without a budget: it is bounded only where
+/// the edited trim raises.
 fn keep_trim_covered(
     k: &Kernel,
     b: &mut Brep,
@@ -3616,7 +3623,7 @@ fn keep_trim_covered(
             &before.trim,
             before.fit,
             [before.tolerance; 2],
-            Some(KEEP_COVERED_PIECES),
+            None,
         )?,
         Some(was) if was <= before.tolerance
     );
