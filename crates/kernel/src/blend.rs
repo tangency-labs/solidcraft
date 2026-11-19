@@ -2571,7 +2571,7 @@ mod tests {
 
         let angle = 45f64.to_radians();
         assert!(matches!(plain(6.45, angle), Err(KernelError::Failed(_))));
-        assert!(matches!(plain(8.0, angle), Err(KernelError::TooLarge(why)) if why.contains("times the distances given")));
+        assert!(matches!(plain(8.0, angle), Err(KernelError::TooLarge(why)) if why.contains("the largest distance that fits is")));
         let (largest, mut last) = carried(6.43, angle);
         assert_eq!(crate::encode_native_body(&largest).unwrap(), crate::encode_native_body(&plain(6.43, angle).unwrap()).unwrap());
         for d in [6.44, 6.45, 6.5, 7.0, 8.0] {

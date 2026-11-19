@@ -370,21 +370,27 @@ fn framed(canvas: Rect, area: Rect, size: Vec2, true_size: f64) -> (Vec2, f64) {
 fn free_area(app: &SolveApp, canvas: Rect) -> Rect {
     let mut area = crate::shell::workspace_content(app, crate::shell::content_rect(app, canvas));
     // The ribbon, the Browser and the History float over the canvas in the classic layout: the
-    // sheet is framed beside them, not under them (#19070). Each takes the side it lies on.
+    // sheet is framed beside them, not under them (#19070). Each takes the side that costs the paper the least room.
     let around = area;
     for cover in app.shell.cards.iter().copied().chain(app.shell.browser.filter(|_| app.ui.show_browser)).chain(app.shell.history) {
         if !cover.is_finite() || !cover.is_positive() || !cover.intersects(area) {
             continue;
         }
-        let (dx, dy) = (cover.center().x - around.center().x, cover.center().y - around.center().y);
-        // A wide strip (the ribbon, the History) takes the top or the bottom; a tall one (the
-        // Browser) takes the left or the right.
-        if cover.width() >= cover.height() {
-            if dy < 0.0 { area.min.y = area.min.y.max(cover.bottom()) } else { area.max.y = area.max.y.min(cover.top()) }
-        } else if dx < 0.0 {
-            area.min.x = area.min.x.max(cover.right());
-        } else {
-            area.max.x = area.max.x.min(cover.left());
+        // The cover takes the side that costs the paper the least room, whatever its shape: a
+        // short or folded side Browser is wider than tall, yet still takes the left, and the
+        // ribbon, which reaches the right edge too, takes the top.
+        let cost = [
+            (cover.right() - area.min.x).max(0.0) * area.height(),
+            (area.max.x - cover.left()).max(0.0) * area.height(),
+            (cover.bottom() - area.min.y).max(0.0) * area.width(),
+            (area.max.y - cover.top()).max(0.0) * area.width(),
+        ];
+        let nearest = (0..4).min_by(|&a, &b| cost[a].total_cmp(&cost[b])).unwrap_or(0);
+        match nearest {
+            0 => area.min.x = area.min.x.max(cover.right()),
+            1 => area.max.x = area.max.x.min(cover.left()),
+            2 => area.min.y = area.min.y.max(cover.bottom()),
+            _ => area.max.y = area.max.y.min(cover.top()),
         }
     }
     if !area.is_positive() {

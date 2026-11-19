@@ -570,7 +570,7 @@ fn stream_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
 /// take finished results. Called once per frame.
 pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     crate::control_joint_drive::expire(app);
-    if app.control_joint_drive.active() {
+    if app.control_joint_drive.active() || !crate::ui_kit::numeric_preview_ready(ctx) {
         return;
     }
     // A Mirror's operation follows whether a copy meets the body it was made from: Join when one
@@ -1520,6 +1520,39 @@ mod tests {
             tint_new: true,
             cut_tint: true,
         }
+    }
+
+    #[test]
+    fn a_unit_prefix_waits_before_scheduling_the_next_preview() {
+        let ctx = crate::fonts::test_context();
+        crate::params_dialog::install_expressions(&ctx);
+        let mut harness = crate::scenario::Harness::new();
+        let app = &mut harness.app;
+        let mut text = "2".to_owned();
+        let mut id = egui::Id::NULL;
+        crate::ui_kit::test_support::raw_frame(&ctx, egui::RawInput { time: Some(0.0), ..Default::default() }, |ui| {
+            id = crate::ui_kit::checked_field(ui, &mut text, "", false).1.id;
+        });
+        ctx.memory_mut(|m| m.request_focus(id));
+        crate::ui_kit::test_support::raw_frame(
+            &ctx,
+            egui::RawInput { time: Some(0.01), events: vec![egui::Event::Text("m".into())], ..Default::default() },
+            |ui| {
+                crate::ui_kit::checked_field(ui, &mut text, "", false);
+            },
+        );
+        app.preview.active = true;
+        text = "2mm".into();
+        // As in the app, scheduling precedes this frame's dialog inputs.
+        crate::ui_kit::test_support::raw_frame(&ctx, egui::RawInput { time: Some(0.02), ..Default::default() }, |ui| {
+            update(app, ui.ctx());
+            assert!(app.preview.active, "retain the preview while the previous pass's unit is pending");
+            crate::ui_kit::checked_field(ui, &mut text, "", false);
+        });
+        crate::ui_kit::test_support::raw_frame(&ctx, egui::RawInput { time: Some(0.03), ..Default::default() }, |ui| {
+            update(app, ui.ctx());
+            assert!(!app.preview.active, "the completed value reaches the scheduler immediately; no dialog clears this preview");
+        });
     }
 
     #[test]
