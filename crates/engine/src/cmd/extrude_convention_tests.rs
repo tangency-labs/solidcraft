@@ -285,6 +285,30 @@ fn the_second_side_takes_through_all_and_to_object() {
     }
 }
 
+/// A Join whose two To Object sides end on different bodies joins both of them, and the second
+/// side is for Two Sides: a symmetric extrude refuses it (#18691).
+#[test]
+fn a_join_to_objects_on_both_sides_joins_both_bodies() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":20,"width":20,"height":5,"corner":[-10,-10,5],"body_name":"Up"}));
+    run(&mut s, "solid.box", json!({"length":20,"width":20,"height":5,"corner":[-10,-10,-10],"body_name":"Down"}));
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Pin"}));
+    run(&mut s, "sketch.circle.center", json!({"center":[0,0],"radius":2}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch":"Pin","to":[0,0,5],"to2":[0,0,-5],"operation":"join","name":"Pin"}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let st = s.model.state();
+    assert_eq!(st.bodies.len(), 1, "the pin, Up and Down are one body: {:?}", st.bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>());
+    let volume = solidcraft_kernel::measure(&st.bodies[0].body).unwrap().volume;
+    let want = 2.0 * 20.0 * 20.0 * 5.0 + std::f64::consts::PI * 4.0 * 10.0;
+    assert!((volume - want).abs() < 0.5, "{volume} mm3, want {want}");
+    for second in [json!({"through_all2":true}), json!({"to2":[0,0,-5]})] {
+        let mut p = json!({"sketch":"Pin","distance":"3 mm","direction":"symmetric","operation":"new","name":"Sym"});
+        p.as_object_mut().unwrap().extend(second.as_object().unwrap().clone());
+        assert!(s.execute("solid.extrude", &p).is_err(), "{second}: a symmetric extrude has no second extent");
+    }
+}
+
 /// Through all keeps the side a saved negative distance points to (#10415): switching an inward
 /// cut to Through All must not turn it to the plane's positive side. A 40 mm cube round the
 /// origin, and an r5 hole sketched 10 mm above its middle: positive reaches 10 mm up to the

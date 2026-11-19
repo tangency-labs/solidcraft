@@ -872,7 +872,11 @@ fn two_sides_second_side_has_its_own_extent_type() {
         let crate::dialogs::Kind::Extrude { all2: shown_all2, .. } = &d.kind else { panic!("extrude") };
         assert_eq!(*shown_all2, all2);
         assert_eq!(d.inputs.iter().any(|i| i.label == crate::dialogs::TO_OBJECT2), to2);
+        // The hidden Distance 2 text is not read while the second side is All or To Object.
+        let Some(crate::dialogs::Dialog { kind: crate::dialogs::Kind::Extrude { distance2, .. }, .. }) = &mut h.app.dialog else { panic!("extrude") };
+        *distance2 = "1 +".into();
         h.step(&json!({"widget":"OK"})).unwrap();
+        assert!(h.app.dialog.is_none(), "OK waited on the hidden Distance 2: {:?}", h.app.dialog.as_ref().map(|d| &d.error));
         let saved = extent(&h);
         assert_eq!((saved.through_all2, saved.to2.is_some()), (all2, to2), "OK keeps the second side's extent");
     }
