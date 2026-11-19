@@ -401,8 +401,8 @@ mod tests {
         // `offset * (1 - 1e-12)`. The sections are the profile offset inward by
         // `s = z tan 0.5 degrees`: lines moved in by s, arcs of radius r - s about the same
         // centres, so the area is `(2a - 2s)(2b - 2s) - (4 - pi)(r - s)^2` and the volume
-        // its integral over the height. Every height builds four planar and four conical
-        // walls and two caps: 10 faces, 24 edges, 16 vertices.
+        // its integral over the height. Every height builds a wall along each of the four
+        // lines and four arcs and two caps: 10 faces, 24 edges, 16 vertices.
         use crate::mass::integrator::properties::brep_volume_default;
         use crate::topology::brep::outward_solid_failure;
         let (a, b, r) = (111.48254626441849, 41.48254626441848, 8.982546264418483);

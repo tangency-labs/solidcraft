@@ -45,11 +45,11 @@
 //!
 //! Deviations:
 //! - **Classifying an offset (#18514).** [`curve_classify`] discards a trimmed offset
-//!   whose mid point is proved closer than the offset distance to an original curve
-//!   (the distance to the solve's nearest point with its rounding and that point's
-//!   error bound), not one whose solved distance is below `distance * (1 -
-//!   SM_EFF_ZERO)`: an offset's mid point lies exactly the offset distance from its own
-//!   curve, and that test flipped on the distance's rounding.
+//!   whose mid point is proved closer than `distance * (1 - SM_EFF_ZERO)` to an original
+//!   curve (the distance to the solve's nearest point widened by its rounding and that
+//!   point's error bound), not one whose solved distance alone is below it: an offset's
+//!   mid point lies the offset distance from its own curve, and that test flipped on the
+//!   distance's rounding.
 //! - **Nesting.** `with_curves` and `set_segment` return `InvalidInput` when any segment curve would nest
 //!   deeper than [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING)
 //!   (32; upstream fixtures nest at most 3), which bounds the recursive dispatch,
@@ -1949,10 +1949,10 @@ impl SolutionObject for OrigHandle {
 /// With its `originator` (the offset map attribute's original curve), a curve whose
 /// mid-parameter tangent opposes the originator's there is a bow tie (discard).
 /// Otherwise the curve is discarded when its mid point is proved closer than
-/// `offset_distance` to any of `orig_curves` (minimum distance solves within
-/// `offset_distance + 2 xsect_tol_3d`; the proof as `proved_closer` makes it, a
-/// SolidCraft change for #18514; upstream discards below `offset_distance * (1 -
-/// SM_EFF_ZERO)`).
+/// `offset_distance * (1 - SM_EFF_ZERO)` to any of `orig_curves` (minimum distance solves
+/// within `offset_distance + 2 xsect_tol_3d`; the proof as `proved_closer` makes it with
+/// the rounding of the solve's nearest point, a SolidCraft change for #18514; upstream
+/// compares the solved distance alone).
 ///
 /// # Errors
 ///
@@ -2046,15 +2046,7 @@ pub(crate) fn curve_classify_cached(
             )?;
             if let Some(s) = sols.get(0) {
                 let t = s.start.parameters.first().copied();
-                if proved_closer(
-                    k,
-                    orig,
-                    t,
-                    p,
-                    s.start.solution_value,
-                    offset_distance,
-                    cutoff,
-                )? {
+                if proved_closer(k, orig, t, p, s.start.solution_value, cutoff)? {
                     // Within offset distance of this curve.
                     return Ok(false);
                 }
@@ -2064,19 +2056,26 @@ pub(crate) fn curve_classify_cached(
     Ok(true)
 }
 
-/// Whether the point `p` is proved closer than `distance` to `orig`, given the point solve's
-/// nearest point on it, at parameter `t` with the solve's distance `solved` (SolidCraft
-/// change, #18514). The point of `orig` at `t` is evaluated again, and `p` is closer when
+/// Whether the point `p`, as given, is proved closer than upstream's `cutoff` (`offset
+/// distance * (1 - SM_EFF_ZERO)`) to `orig`, given the point solve's nearest point on it at
+/// parameter `t` and the solve's distance `solved` (SolidCraft change, #18514). The point of
+/// `orig` at `t` (clamped to its natural interval) is evaluated again, and `p` is closer when
 /// the distance between them, widened by its own rounding ([`certified::distance`]) and
 /// twice the point's coordinate error ([`Curve::point_error_bound`]; a norm is within
-/// `sqrt 3 < 2` times a coordinate's), stays below `distance`: that point lies on `orig`,
-/// so `p` is then closer to `orig` than `distance`. Where it is not proved, `p` is not
-/// taken as closer. The mid point of a trimmed offset lies exactly the offset distance from
-/// its own curve, at its foot, and the rounding of that distance grows with the
-/// coordinates, not with the distance: about 1e-12 of an offset of 0.017 at 111 from the
-/// origin, which upstream's `distance * (1 - SM_EFF_ZERO)` (`cutoff`) did not cover, so
-/// it dropped such an offset at single offset distances. A curve kind with no point error
-/// bound, or a solution with no parameter, keeps that test of `solved`.
+/// `sqrt 3 < 2` times a coordinate's), stays below `cutoff`: that point lies on `orig`.
+/// Where it is not proved, `p` is not taken as closer.
+///
+/// Upstream compares `solved` with `cutoff` alone. The mid point of a trimmed offset lies the
+/// offset distance from its own curve, at its foot, up to the rounding of evaluating it, and
+/// the rounding of that distance grows with the coordinates, not with the offset: about 1e-12
+/// of an offset of 0.017 at 111 from the origin, past upstream's margin, so it dropped such
+/// an offset at single offset distances. The bound is added to upstream's margin, so the
+/// margin is never narrower than upstream's, and a piece inside by less than the bound,
+/// which grows with the coordinates as the rounding does, is kept. `p`'s own rounding is
+/// not in the bound (an offset curve has no point error bound): `p` is the point the piece
+/// is built through. A curve kind with no point error bound
+/// ([`Curve::point_error_bound`] is `None`: an offset or a composite, for one) keeps
+/// upstream's test of `solved`, as does a solution with no parameter.
 ///
 /// # Errors
 ///
@@ -2087,11 +2086,14 @@ fn proved_closer(
     t: Option<f64>,
     p: Point3,
     solved: f64,
-    distance: f64,
     cutoff: f64,
 ) -> Result<bool> {
-    let Some((t, error)) = t.and_then(|t| Some((t, orig.point_error_bound(t)?))) else {
-        return Ok(solved < cutoff);
+    let upstream = solved < cutoff;
+    let Some(t) = t.map(|t| orig.natural_interval().clamp_value(t)) else {
+        return Ok(upstream);
+    };
+    let Some(error) = orig.point_error_bound(t) else {
+        return Ok(upstream);
     };
     let q = orig.evaluate_point(k, t)?;
     let d = certified::distance(p, q);
@@ -2099,7 +2101,7 @@ fn proved_closer(
         value: d.value,
         bound: d.bound + 2.0 * error,
     };
-    Ok(near.at_most(distance).is_yes())
+    Ok(near.at_most(cutoff).is_yes())
 }
 
 // ---- sorted break lists ---------------------------------------------------------------
@@ -2801,33 +2803,72 @@ mod tests {
         assert!((nested_box.max() - Vec3::new(4.0, 5.0, 6.0)).length() < 1e-12);
     }
 
+    /// [`proved_closer`] for the point `above` the middle of `orig` (a line along x at
+    /// y = z = 0), offset `d`: the solved distance, upstream's answer and the proof's.
+    fn closer_above(k: &Kernel, orig: &Curve, d: f64, above: f64) -> (bool, bool) {
+        let t = orig.natural_interval().evaluate(0.5);
+        let foot = orig.evaluate_point(k, t).unwrap();
+        let p = foot + Vec3::new(0.0, above, 0.0);
+        let solved = p.distance(foot);
+        let cutoff = d * (1.0 - EFF_ZERO);
+        let proved = proved_closer(k, orig, Some(t), p, solved, cutoff).unwrap();
+        (solved < cutoff, proved)
+    }
+
     #[test]
     fn a_point_is_closer_to_a_curve_only_where_its_rounding_proves_it() {
-        // #18514: a line 1000 from the origin and an offset of 0.0175 above its middle.
-        // The line's point error bound there is about 3e-11 (`crv_point_error`), so a point
-        // 3e-12 of the offset (5e-14) closer than the offset is not proved closer: upstream's
-        // `offset * (1 - 1e-12)` dropped it. Half the offset is proved closer. Without the
-        // solve's parameter the solved distance is tested as upstream tests it.
+        // #18514: a line 1000 from the origin, an offset of 0.0175 above its middle.
+        // `crv_point_error` bounds the line's points (degree 1: 2p + 2 = 4 levels) by
+        // e = 16 * 4 * eps * 1010 = 1.4e-11. A point 3e-12 of the offset (5e-14) inside it
+        // is below upstream's cutoff `d (1 - 1e-12)` (d - 1.75e-14), but not proved
+        // closer: the bound is 2e. One e inside is not proved either; four are, and so is
+        // half the offset.
         let k = Kernel::default();
         let orig = line([1000.0, 0.0, 0.0], [1010.0, 0.0, 0.0]);
-        let t = orig.natural_interval().evaluate(0.5);
-        let foot = orig.evaluate_point(&k, t).unwrap();
+        let e = orig
+            .point_error_bound(orig.natural_interval().evaluate(0.5))
+            .unwrap();
+        let expected = 16.0 * 4.0 * f64::EPSILON * 1010.0;
+        assert!((e - expected).abs() <= 1e-3 * expected, "{e}");
         let d = 0.0175;
-        let cutoff = d * (1.0 - EFF_ZERO);
-        let error = orig.point_error_bound(t).unwrap();
-        assert!(error > 1e-12 && error < 1e-10, "{error}");
-        for (above, closer) in [(d, false), (d * (1.0 - 3e-12), false), (0.5 * d, true)] {
-            let p = foot + Vec3::new(0.0, above, 0.0);
-            let solved = p.distance(foot);
+        for (above, upstream, proved) in [
+            (d, false, false),
+            (d * (1.0 - 3e-12), true, false),
+            (d - e, true, false),
+            (d - 4.0 * e, true, true),
+            (0.5 * d, true, true),
+        ] {
             assert_eq!(
-                proved_closer(&k, &orig, Some(t), p, solved, d, cutoff).unwrap(),
-                closer,
+                closer_above(&k, &orig, d, above),
+                (upstream, proved),
                 "{above}"
             );
         }
-        let p = foot + Vec3::new(0.0, d * (1.0 - 3e-12), 0.0);
-        let solved = p.distance(foot);
-        assert!(solved < cutoff);
-        assert!(proved_closer(&k, &orig, None, p, solved, d, cutoff).unwrap());
+        // An offset of 10 from a line 100 from the origin: upstream's margin, 1e-11, is wider
+        // than the bound, 2 * 16 * 4 * eps * 110 = 3.1e-12. A point 1e-12 inside, kept
+        // upstream, is kept; one 4e-12 past upstream's cutoff is dropped, as upstream drops it.
+        let orig = line([100.0, 0.0, 0.0], [110.0, 0.0, 0.0]);
+        let d = 10.0;
+        assert_eq!(closer_above(&k, &orig, d, d - 1e-12), (false, false));
+        let past = d * (1.0 - EFF_ZERO) - 4e-12;
+        assert_eq!(closer_above(&k, &orig, d, past), (true, true));
+        // A curve kind with no point error bound (a composite) keeps upstream's test.
+        let composite = Curve::from(
+            CompositeCurve::with_curves(
+                3,
+                vec![line([0.0; 3], [10.0, 0.0, 0.0])],
+                false,
+                None,
+                None,
+            )
+            .unwrap(),
+        );
+        assert!(composite.point_error_bound(5.0).is_none());
+        let p = Vec3::new(5.0, 0.0175 * (1.0 - 3e-12), 0.0);
+        let solved = p.y;
+        let cutoff = 0.0175 * (1.0 - EFF_ZERO);
+        assert!(proved_closer(&k, &composite, Some(5.0), p, solved, cutoff).unwrap());
+        let p = Vec3::new(5.0, 0.0175, 0.0);
+        assert!(!proved_closer(&k, &composite, Some(5.0), p, p.y, cutoff).unwrap());
     }
 }
