@@ -1476,18 +1476,28 @@ pub(crate) fn rounds_too_small(body: &Body, picks: &[Vec3], edges: &[usize], rad
 /// Whether the point uncovered is material is the body's exact point classification.
 pub(crate) fn rounds_into_hollow(body: &Body, picks: &[Vec3], edges: &[usize], radii: &[f64]) -> Result<()> {
     let rec = Faces::of(body)?;
+    // The refused edge that opens at the smallest radius: that radius is the largest that keeps
+    // every refused edge's round out of its hollow, and the refusal names it, so a fillet feature
+    // searches for the largest radius that fits from there (`named_fit`).
+    let mut first: Option<(f64, usize, f64, Vec3)> = None;
     for (i, (&e, &r)) in edges.iter().zip(radii).enumerate() {
         let Some(section) = Section::of(&rec, e) else { continue };
         // Only an opening under the round's radius (less the tolerance) refuses it.
-        let Some((_, at)) = section.opening(body, &rec, edges, radii, r - section.tolerance)? else { continue };
-        let pick = picks.get(i).map(|p| format!(" at ({:.3}, {:.3}, {:.3})", p.x, p.y, p.z)).unwrap_or_default();
-        return Err(KernelError::TooLarge(format!(
-            "the round of radius {r} mm on the edge{pick} would cut through the material behind it into the hollow at ({:.3}, {:.3}, \
-             {:.3}) and open the part",
-            at.x, at.y, at.z
-        )));
+        let Some((opens, at)) = section.opening(body, &rec, edges, radii, r - section.tolerance)? else { continue };
+        if first.is_none_or(|(least, ..)| opens < least) {
+            first = Some((opens, i, r, at));
+        }
     }
-    Ok(())
+    let Some((opens, i, r, at)) = first else { return Ok(()) };
+    let pick = picks.get(i).map(|p| format!(" at ({:.3}, {:.3}, {:.3})", p.x, p.y, p.z)).unwrap_or_default();
+    Err(KernelError::TooLarge(format!(
+        "the round of radius {r} mm on the edge{pick} would cut through the material behind it into the hollow at ({:.3}, {:.3}, \
+         {:.3}) and open the part; {}",
+        at.x,
+        at.y,
+        at.z,
+        largest_fit_note("radius", opens)
+    )))
 }
 
 /// The section of a round of a straight, convex edge between two planar faces, as
@@ -3316,6 +3326,10 @@ mod tests {
         assert!(matches!(e, KernelError::TooLarge(_)), "{e}");
         let e = e.to_string();
         assert!(e.contains("into the hollow at (0.000, 30.000, 40.000) and open the part"), "{e}");
+        // The refusal names the radius it opens at, 4 + 2 sqrt2 to the micrometre, so a fillet
+        // feature searches for the largest that fits from there.
+        let named = named_fit(&e).unwrap();
+        assert!((named - (4.0 + 2.0 * std::f64::consts::SQRT_2)).abs() <= 5e-7, "{e}");
         let (largest, _) = fillet_max(&case, &[top], 7.0, FilletTurn::Mitre).unwrap().unwrap();
         assert!((largest - 6.828).abs() < 1e-9, "{largest}");
 

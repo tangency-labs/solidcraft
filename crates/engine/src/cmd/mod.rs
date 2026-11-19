@@ -57,6 +57,7 @@ mod drawing_table;
 mod drawing_ui;
 mod drawing_view;
 mod edit;
+mod envelopes;
 mod face;
 mod features;
 mod features_more;

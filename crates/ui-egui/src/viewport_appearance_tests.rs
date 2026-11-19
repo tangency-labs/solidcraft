@@ -305,8 +305,9 @@ fn appearance_edits_upload_palette_rows_only() {
 /// to the indirect draws' buffer alone, not to buffers of their own as well, and its shared
 /// edges (where the device draws them) to the edges' buffer; a scene adding a part that fits
 /// the buffers' room uploads that part's triangles and edges alone, not again every part before
-/// it (a design being opened adds parts at every scene); and the same parts again upload none.
-/// Every placement is drawn each time. Skipped without a GPU adapter.
+/// it (a design being opened adds parts at every scene); and the same parts again upload none,
+/// nor a highlight lighting a placement's edges. Every placement is drawn each time. Skipped
+/// without a GPU adapter.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_placed_parts_triangles_and_edges_are_uploaded_once_and_a_part_added_alone_after() {
@@ -378,6 +379,14 @@ fn a_placed_parts_triangles_and_edges_are_uploaded_once_and_a_part_added_alone_a
     let (again, triangles) = draw(2);
     assert_eq!(again.geometry, 0, "the same parts upload no triangles or edges");
     assert_eq!(triangles, drawn(2), "and are drawn as before");
+    // A placement lit (hovered or selected) draws its edges again from the model's segment
+    // buffer: the highlight uploads none of them.
+    if with_edges {
+        let lit = crate::gpu::GpuScene { lit_instanced_edges: scene(1).instanced, ..Default::default() };
+        let lit: crate::gpu::SceneSlot = std::sync::Arc::new(std::sync::Mutex::new(Some(lit)));
+        frames.frame(crate::scale_tests::view_frame(&app, SIZE, (key, &none), (1, &lit)));
+        assert_eq!(frames.highlight_uploads().geometry, 0, "a lit part's edges are the model's");
+    }
 }
 
 /// A body out of the view is left out of its block's draws: two boxes far apart, drawn with

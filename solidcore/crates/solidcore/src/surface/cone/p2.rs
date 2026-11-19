@@ -974,6 +974,14 @@ impl Cone {
 
     // ---- IsNurbSurfaceCone -------------------------------------------------------
 
+    /// The height (the distance between its end circles' centres) below which
+    /// [`Self::is_nurb_surface_cone`] refuses a NURB as a disk, not a cone, and
+    /// [`Self::rebuild_step_from_nurb_parameters`] refuses to rebuild one. Named so that the
+    /// rotational sweep, which builds no analytic cone lower than this, and these tests use
+    /// the same number (tangency-labs/solidcraft#17085). Above it a form can still be refused
+    /// by the other tests.
+    pub(crate) const MIN_HEIGHT: f64 = EFF_ZERO_SQRT;
+
     /// The cone `test_surface` is (`IsNurbSurfaceCone`), or `None`: the surface must be
     /// rational, of degree 1 with two control points in one direction and degree 2 in
     /// the other, whose knots have the multiplicities `[3, 2, .., 2, 3]`; its
@@ -1089,7 +1097,7 @@ impl Cone {
         let height = nurb_z_axis.length();
 
         // not a cone - height of cone is degenerate (cone is a disk)
-        if height < EFF_ZERO_SQRT {
+        if height < Self::MIN_HEIGHT {
             return Ok(None);
         }
         nurb_z_axis = nurb_z_axis.unitize_or_z();
@@ -1658,7 +1666,7 @@ impl Cone {
         let height = nurb_z_axis.length();
 
         // not a cone - height of cone is degenerate (cone is a disk)
-        if height < EFF_ZERO_SQRT {
+        if height < Self::MIN_HEIGHT {
             return Err(SolidError::surface_failed(
                 OP_REBUILD,
                 "the cone's height is degenerate",
