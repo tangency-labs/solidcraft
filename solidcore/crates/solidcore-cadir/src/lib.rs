@@ -21,8 +21,26 @@
 //! shell's faces and each face's loops are counted against their caps (the STEP reader's), and
 //! a face or loop used twice in it is refused, so the work of reading a region grows with the
 //! model's size, never with how often it names one face or loop.
+//!
+//! The other way, [`write_body`] writes a record into a CADIR model as one body, by the same
+//! conventions, so that reading it back gives the record written, as much of it as the reader
+//! takes: one record per region (a record of a solid and a sheet comes back as two, and one of
+//! sheets apart from each other as one each), without its shells' wire edges, and with the
+//! pcurves that have no closed form only when a [`Trims`] is given (but on a face that winds
+//! round its axis more than a turn, whose pcurves the reader follows along each edge itself, with
+//! or without one); an edge or face written as its NURBS form comes back as that form. Two
+//! things written do not come back as they were:
+//! - A procedural surface (a blend, a ball patch, a placed revolution) is written as its NURBS
+//!   net, with no definition, and comes back as a spline face: not as its definition, nor with
+//!   its certificate (a procedural blend's bound ε is written as the face's tolerance, which the
+//!   reader does not read back). Writing and reading a record does not keep procedural geometry.
+//! - The pcurves written are not read: the reader makes each use's pcurve again, in closed form
+//!   where it has one, else by the [`Trims`] given (on a face that winds round its axis more than
+//!   a turn, from the edge itself). A pcurve made so is the kernel's, on its own parameter and
+//!   knots, not the one written, so `Trims` does not keep a record's own (u, v) curves.
 
 mod geometry;
+mod write;
 
 use std::collections::{HashMap, HashSet};
 
@@ -44,6 +62,7 @@ use solidcore_step::topology::{
 const MAX_LEFT_OUT_ROUNDS: usize = 8;
 
 use geometry::R;
+pub use write::{WriteError, Written, write_body};
 
 /// One body region read into a record.
 #[derive(Clone, Debug)]
@@ -99,7 +118,10 @@ pub fn read_bodies(ir: &CadIr, trims: Option<&dyn Trims>) -> Bodies {
         let id = body.id.as_str().to_string();
         let kind = match body.kind {
             BodyKind::Solid => Some(Kind::Solid),
-            BodyKind::Sheet | BodyKind::General => Some(Kind::Model),
+            BodyKind::Sheet => Some(Kind::Model),
+            // A region of closed shells alone is a solid's, its outer shell first and then its
+            // voids'; one with an open shell is a sheet's.
+            BodyKind::General => Some(Kind::General),
             BodyKind::Wire => None,
         };
         let Some(kind) = kind else { continue };
@@ -278,15 +300,24 @@ impl<'a> Model<'a> {
         budget: &mut usize,
     ) -> R<Solid> {
         let of_region = self.face_indices(id);
-        let open = Kind::Open {
-            voids: matches!(kind, Kind::Solid)
-                && self.regions.get(id).is_some_and(|r| r.shells.len() > 1),
-            outer: true,
+        let shells = self.regions.get(id).map_or(0, |r| r.shells.len());
+        // A solid's region, and a general body's of closed shells alone (a solid's with voids:
+        // its outer shell, then its cavities), comes in as a solid with faces left out: a shell
+        // still closed bounds its own region, a cavity's a void. Any other region of a general
+        // body (one with an open shell, or of one closed shell) is a surface model's, as a
+        // sheet's is: a closed shell left whole still bounds material.
+        let solid = match kind {
+            Kind::Solid => true,
+            Kind::General => shells > 1 && self.closed_shells(id),
+            _ => false,
         };
-        let open = if matches!(kind, Kind::Model) {
-            Kind::Model
+        let open = if solid {
+            Kind::Open {
+                voids: shells > 1,
+                outer: true,
+            }
         } else {
-            open
+            Kind::Model
         };
         let mut skip = HashSet::new();
         let mut left_out = Vec::new();
@@ -320,6 +351,159 @@ impl<'a> Model<'a> {
             }
         }
         Err(refusal)
+    }
+
+    /// Whether every shell of region `id` is closed, as the model writes it: each edge of its
+    /// faces' loops used at least twice among them, but for an edge that collapses to a point
+    /// (no curve, or a degenerate one: [`Builder::join_collapsed`]), which no loop keeps. A face
+    /// on a sphere whose loops hold no edges (none, or its poles alone) is the whole sphere,
+    /// closed on itself: the reader gives it a meridian seam used twice
+    /// (`Assembly::add_face`), so it closes its shell as it does on a first read, though the
+    /// model writes no edge for it. A shell with neither edges nor such a face is not closed,
+    /// nor is a region the model does not have, or a shell it does not. Two edges the reader
+    /// makes one ([`Model::twin_edges`]) count as one.
+    fn closed_shells(&self, id: &str) -> bool {
+        let Some(region) = self.regions.get(id) else {
+            return false;
+        };
+        let twins = self.twin_edges(id);
+        region.shells.iter().all(|s| {
+            let Some(shell) = self.shells.get(s.as_str()) else {
+                return false;
+            };
+            let mut uses: HashMap<&str, usize> = HashMap::new();
+            let whole_sphere = shell
+                .faces()
+                .iter()
+                .take(MAX_FACES)
+                .filter_map(|f| self.faces.get(f.as_str()))
+                .any(|&(_, face)| self.whole_sphere(face));
+            let Some(edges) = self.edges_of(shell) else {
+                return false;
+            };
+            for e in edges {
+                *uses.entry(twins.get(e).copied().unwrap_or(e)).or_default() += 1;
+            }
+            (whole_sphere || !uses.is_empty())
+                && uses.iter().all(|(e, n)| {
+                    *n >= 2 || self.edges.get(e).is_some_and(|edge| self.collapses(edge))
+                })
+        })
+    }
+
+    /// The edge of each use in `shell`'s faces' loops, as the reader reads them: at most the
+    /// faces a model may have and the loops a face may have (a face listing a loop over and over
+    /// is not walked over and over). `None` when a use is missing.
+    fn edges_of(&self, shell: &'a Shell) -> Option<Vec<&'a str>> {
+        shell
+            .faces()
+            .iter()
+            .take(MAX_FACES)
+            .filter_map(|f| self.faces.get(f.as_str()))
+            .flat_map(|&(_, face)| face.loops.iter().take(MAX_BOUNDS))
+            .filter_map(|l| match &self.loops.get(l.as_str())?.boundary {
+                LoopBoundary::Ring(ring) => Some(ring.coedges().iter().take(MAX_LOOP)),
+                LoopBoundary::Vertex { .. } => None,
+            })
+            .flatten()
+            .map(|c| self.coedges.get(c.as_str()).map(|c| c.edge.as_str()))
+            .collect()
+    }
+
+    /// Whether `edge` collapses to its vertex: it has no curve, or a degenerate one.
+    fn collapses(&self, edge: &Edge) -> bool {
+        match edge.carrier.curve() {
+            None => true,
+            Some(c) => self
+                .curves
+                .get(c.as_str())
+                .is_some_and(|c| geometry::degenerate(&c.geometry)),
+        }
+    }
+
+    /// The edges of region `id` that `Assembly::finish` makes one with another
+    /// (`merge_twin_edges`), each to the one it is made: of the edges used once among the
+    /// region's faces, the two alone between one pair of vertices apart, on the same curve over
+    /// the same stated interval. The reader's vertices are the model's but where an edge
+    /// collapses ([`Builder::join_collapsed`]), so only edges between vertices no collapsing edge
+    /// of the region ends at are compared: their pairs are the reader's. Any other pair the
+    /// reader may make one is left two, as before.
+    fn twin_edges(&self, id: &str) -> HashMap<&'a str, &'a str> {
+        let mut twins = HashMap::new();
+        let Some(region) = self.regions.get(id) else {
+            return twins;
+        };
+        let mut uses: HashMap<&'a str, usize> = HashMap::new();
+        for shell in region
+            .shells
+            .iter()
+            .filter_map(|s| self.shells.get(s.as_str()))
+        {
+            for e in self.edges_of(shell).into_iter().flatten() {
+                *uses.entry(e).or_default() += 1;
+            }
+        }
+        let edges: Vec<&'a Edge> = uses
+            .keys()
+            .filter_map(|e| self.edges.get(e).copied())
+            .collect();
+        let joined: HashSet<&str> = edges
+            .iter()
+            .filter(|edge| self.collapses(edge))
+            .flat_map(|edge| [edge.start.as_str(), edge.end.as_str()])
+            .collect();
+        let mut by_vertices: HashMap<(&str, &str), Vec<&'a Edge>> = HashMap::new();
+        for edge in edges {
+            let (a, b) = (edge.start.as_str(), edge.end.as_str());
+            if uses.get(edge.id.as_str()) == Some(&1)
+                && a != b
+                && !joined.contains(a)
+                && !joined.contains(b)
+                && !self.collapses(edge)
+            {
+                by_vertices
+                    .entry((a.min(b), a.max(b)))
+                    .or_default()
+                    .push(edge);
+            }
+        }
+        for pair in by_vertices.values() {
+            let [x, y] = pair.as_slice() else {
+                continue;
+            };
+            let (Some(cx), Some(cy)) = (x.carrier.curve(), y.carrier.curve()) else {
+                continue;
+            };
+            let (Some(rx), Some(ry)) = (x.param_range(), y.param_range()) else {
+                continue;
+            };
+            if cx == cy && rx.get() == ry.get() {
+                twins.insert(y.id.as_str(), x.id.as_str());
+            }
+        }
+        twins
+    }
+
+    /// Whether `face` is a whole sphere as the reader makes one: on a sphere, with no loop that
+    /// holds an edge (`Builder::face`, `Assembly::add_face`).
+    fn whole_sphere(&self, face: &Face) -> bool {
+        let edged = face.loops.iter().any(|l| {
+            self.loops
+                .get(l.as_str())
+                .is_none_or(|l| matches!(l.boundary, LoopBoundary::Ring(_)))
+        });
+        !edged
+            && self.surfaces.get(face.surface.as_str()).is_some_and(|s| {
+                matches!(
+                    geometry::surface(&s.geometry, self.fit),
+                    Ok(Some((
+                        geometry::FaceSurface::Record(
+                            solidcore_record::brep::Surface::Sphere { .. }
+                        ),
+                        _
+                    )))
+                )
+            })
     }
 
     /// The face a refusal names: by its model index (`face #12`, as the assembly stage names a
