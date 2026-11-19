@@ -94,7 +94,7 @@ pub struct BarButton<'a> {
     pub enabled: bool,
     /// Narrower on a compact bar.
     pub narrow: bool,
-    /// Left out of a compact bar (its shortcut and menus remain).
+    /// Yields before primary actions when space is scarce.
     pub wide_only: bool,
 }
 
@@ -205,6 +205,10 @@ pub enum BarAction {
     },
     /// The version's link.
     Version,
+    /// An app-owned control, including a quick-access command by layout id.
+    App {
+        id: String,
+    },
 }
 
 /// The bar drawn: what was chosen, and the places it leaves to the app.
@@ -213,6 +217,17 @@ pub struct BarOut {
     /// Space reserved for the app-owned control before Home.
     pub leading: Option<Rect>,
     pub actions: Vec<BarAction>,
+    /// Hidden layout ids in bar order.
+    pub overflow: Vec<String>,
+    /// Core rows already have labels and actions; the host completes app-owned rows.
+    pub overflow_items: Vec<OverflowItem>,
+    pub overflow_button: Option<Rect>,
+    /// Draw only this prefix of the host's quick-access list.
+    pub quick_count: usize,
+    pub tabs_end: f32,
+    pub managed: Option<Rect>,
+    pub managed_labeled: bool,
+    pub reserved_offers: bool,
     /// The File button, where its menu opens.
     pub file: Rect,
     /// The quick-access buttons: the first one's centre x and the step between them.
@@ -375,6 +390,18 @@ fn icon_button(ui: &mut egui::Ui, bar: Rect, at: f32, b: &BarButton, compact: bo
 /// Draws the bar in `bar`, its controls within `content` (the title bar's room between the
 /// window's own buttons).
 pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOut {
+    show_with_offers(ui, data, bar, content, Offers::default())
+}
+
+/// Measured app-owned transient controls, present from the first frame.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Offers {
+    pub update: Option<f32>,
+    pub managed: Option<f32>,
+}
+
+/// Draws the bar with explicitly measured transient controls.
+pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect, offers: Offers) -> BarOut {
     use crate::app_bar_layout::{application, layout};
 
     let t = Tokens::get();
@@ -396,18 +423,23 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
         search: data.search.then(|| (crate::CommandSearch::closed_width(ui.ctx(), data.search_shortcut), crate::CommandSearch::compact_width(26.0))),
         assistant: data.assistant,
         version: version.as_ref().map(|(_, galley)| galley.size().x),
-        offered: solidcraft_ui_registry::rect_of("titlebar:update").map(|u| u.width()),
+        offered: offers.update,
+        managed: offers.managed,
         pixels_per_point: ui.ctx().pixels_per_point(),
     };
     let spec = application::spec(r.width(), content.left() - r.left(), r.right() - content.right(), measured);
-    let geometry = layout(&spec).application.unwrap_or_default();
+    let placed = layout(&spec);
+    let geometry = placed.application.clone().unwrap_or_default();
+    let visible = |id: &str| geometry.visible.iter().any(|s| s == id);
     let compact = geometry.compact;
     let rect = |span: application::Span, height| {
         Rect::from_min_max(pos2(r.left() + span.left, r.center().y - height / 2.0), pos2(r.left() + span.right, r.center().y + height / 2.0))
     };
     let mut actions = Vec::new();
-    (data.mark)(ui.painter(), pos2(r.left() + geometry.mark, r.center().y));
-    if !compact {
+    if visible("logo") {
+        (data.mark)(ui.painter(), pos2(r.left() + geometry.mark, r.center().y));
+    }
+    if geometry.name_visible {
         ui.painter().text(
             pos2(r.left() + geometry.name, r.center().y),
             Align2::LEFT_CENTER,
@@ -420,24 +452,29 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
     // Home.
     let home = rect(geometry.home, 32.0);
     let idle = data.home.enabled;
-    let home_response = ui.interact(home, ui.scope_id().with("appbar_home"), if idle { Sense::click() } else { Sense::hover() });
-    home_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, idle, data.home.tip));
-    for name in h.home {
-        solidcraft_ui_registry::publish_handle(name, home.center());
+    if visible("home") {
+        let home_response = ui.interact(home, ui.scope_id().with("appbar_home"), if idle { Sense::click() } else { Sense::hover() });
+        home_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, idle, data.home.tip));
+        for name in h.home {
+            solidcraft_ui_registry::publish_handle(name, home.center());
+        }
+        for name in h.home_rect {
+            solidcraft_ui_registry::publish_rect(name, home);
+        }
+        if idle && (home_response.hovered() || home_response.has_focus()) {
+            ui.painter().rect_filled(home.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
+        }
+        crate::icons::paint_app_bar(ui.painter(), home.shrink(7.0), data.home.icon, if idle { 1.0 } else { 0.35 });
+        if home_response.backing_on_hover_text(data.home.tip).clicked() && idle {
+            actions.push(BarAction::Home);
+        }
     }
-    for name in h.home_rect {
-        solidcraft_ui_registry::publish_rect(name, home);
+    if visible("brand") && geometry.brand_separator < geometry.file.left {
+        separator(ui, r, r.left() + geometry.brand_separator, "brand", h);
     }
-    if idle && (home_response.hovered() || home_response.has_focus()) {
-        ui.painter().rect_filled(home.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
-    }
-    crate::icons::paint_app_bar(ui.painter(), home.shrink(7.0), data.home.icon, if idle { 1.0 } else { 0.35 });
-    if home_response.backing_on_hover_text(data.home.tip).clicked() && idle {
-        actions.push(BarAction::Home);
-    }
-    separator(ui, r, r.left() + geometry.brand_separator, "brand", h);
-    // The File menu's text button, .
-    let (file, clicked) = text_button(ui, rect(geometry.file, 26.0), (data.file, data.file), data.file_open, idle, "file");
+    // The File menu's text button.
+    let file = rect(geometry.file, 26.0);
+    let clicked = visible("file") && text_button(ui, file, (data.file, data.file), data.file_open, idle, "file").1;
     for name in h.file {
         solidcraft_ui_registry::publish_handle(name, file.center());
     }
@@ -460,7 +497,9 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
     }
     let quick = geometry.quick.map(|(at, step)| (r.left() + at, step));
     // The document tabs follow the file actions.
-    separator(ui, r, r.left() + geometry.documents_separator, "documents", h);
+    if visible("documents") {
+        separator(ui, r, r.left() + geometry.documents_separator, "documents", h);
+    }
     let tabs_start = r.left() + geometry.tabs_start;
     let report = rect(geometry.report, if data.report.icon_only { 32.0 } else { 26.0 });
     let report_label = geometry.report_labeled;
@@ -469,7 +508,7 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
         solidcraft_ui_registry::publish_target(h.search, search);
     }
     let help = r.left() + geometry.help;
-    if icon_button(ui, r, help, &data.help, compact, h) {
+    if visible("help") && icon_button(ui, r, help, &data.help, compact, h) {
         actions.push(BarAction::Help { x: help });
     }
     // An offer (a newer release) sits before the right cluster, in the space up to the file
@@ -478,50 +517,57 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
     let offer = rect(geometry.offer, report.height());
     let offer_labeled = geometry.offer_labeled;
     // Report a bug.
-    let response = ui.interact(report, ui.scope_id().with("sc_report_button"), Sense::click());
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), data.report.label));
-    solidcraft_ui_registry::publish_target(h.report, report);
-    let hot = response.hovered() || response.has_focus();
-    // A neutral pill shaped like the link pills: the bug mark, and the label where there is room.
-    let capsule_rect = Rect::from_center_size(report.center(), vec2(report.width().min(if report_label { f32::MAX } else { 28.0 }), PILL_HEIGHT));
-    // Neutral: a raised control in the theme's own colours, the same shape as the link pills.
-    let (neutral, ink) = (t.app_bar.lerp_to_gamma(t.app_bar_text, 0.12), t.app_bar_text);
-    capsule(ui, capsule_rect, neutral, hot);
-    let tip = if report_label {
-        let icon = Rect::from_center_size(pos2(capsule_rect.left() + 14.0, capsule_rect.center().y), vec2(16.0, 16.0));
-        crate::icons::paint_ink(ui.painter(), icon, "bug_report", ink);
-        ui.painter().text(
-            pos2(capsule_rect.left() + REPORT_TEXT_X, capsule_rect.center().y),
-            Align2::LEFT_CENTER,
-            data.report.label,
-            report_font,
-            ink,
-        );
-        data.report.tip
-    } else {
-        crate::icons::paint_ink(ui.painter(), Rect::from_center_size(capsule_rect.center(), vec2(16.0, 16.0)), "bug_report", ink);
-        if data.report.icon_only { data.report.label } else { data.report.tip }
-    };
-    if response.backing_on_hover_text(tip).clicked() {
-        actions.push(BarAction::Report);
+    if visible("report") {
+        let response = ui.interact(report, ui.scope_id().with("sc_report_button"), Sense::click());
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), data.report.label));
+        solidcraft_ui_registry::publish_target(h.report, report);
+        let hot = response.hovered() || response.has_focus();
+        // A neutral pill shaped like the link pills: the bug mark, and the label where there is room.
+        let capsule_rect = Rect::from_center_size(report.center(), vec2(report.width().min(if report_label { f32::MAX } else { 28.0 }), PILL_HEIGHT));
+        // Neutral: a raised control in the theme's own colours, the same shape as the link pills.
+        let (neutral, ink) = (t.app_bar.lerp_to_gamma(t.app_bar_text, 0.12), t.app_bar_text);
+        capsule(ui, capsule_rect, neutral, hot);
+        let tip = if report_label {
+            let icon = Rect::from_center_size(pos2(capsule_rect.left() + 14.0, capsule_rect.center().y), vec2(16.0, 16.0));
+            crate::icons::paint_ink(ui.painter(), icon, "bug_report", ink);
+            ui.painter().text(
+                pos2(capsule_rect.left() + REPORT_TEXT_X, capsule_rect.center().y),
+                Align2::LEFT_CENTER,
+                data.report.label,
+                report_font,
+                ink,
+            );
+            data.report.tip
+        } else {
+            crate::icons::paint_ink(ui.painter(), Rect::from_center_size(capsule_rect.center(), vec2(16.0, 16.0)), "bug_report", ink);
+            if data.report.icon_only { data.report.label } else { data.report.tip }
+        };
+        if response.backing_on_hover_text(tip).clicked() {
+            actions.push(BarAction::Report);
+        }
     }
     // The link pills, left of the assistant.
     for (p, span) in data.pills.iter().zip(&geometry.pills).rev() {
-        pill(ui, r, rect(*span, PILL_HEIGHT), p, h, &mut actions);
+        if span.right > span.left {
+            let p = Pill { labelled: p.labelled && span.right - span.left > 45.0, ..*p };
+            pill(ui, r, rect(*span, PILL_HEIGHT), &p, h, &mut actions);
+        }
     }
     // Settings sits immediately left of Help.
     let gear = rect(geometry.settings, 32.0);
-    let gresp = ui.interact(gear, ui.scope_id().with("sc_prefs_button"), Sense::click());
-    if gresp.hovered() || gresp.has_focus() {
-        ui.painter().rect_filled(gear.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
+    if visible("settings") {
+        let gresp = ui.interact(gear, ui.scope_id().with("sc_prefs_button"), Sense::click());
+        if gresp.hovered() || gresp.has_focus() {
+            ui.painter().rect_filled(gear.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
+        }
+        crate::icons::paint_app_bar(ui.painter(), gear.shrink(7.0), data.settings.icon, 1.0);
+        solidcraft_ui_registry::publish_rect(h.settings, gear);
+        solidcraft_ui_registry::publish_handle(h.settings, gear.center());
+        if gresp.backing_on_hover_text(data.settings.tip).clicked() {
+            actions.push(BarAction::Button { id: data.settings.id.to_string() });
+        }
     }
-    crate::icons::paint_app_bar(ui.painter(), gear.shrink(7.0), data.settings.icon, 1.0);
-    solidcraft_ui_registry::publish_rect(h.settings, gear);
     let assistant = geometry.assistant.map(|span| rect(span, 32.0));
-    solidcraft_ui_registry::publish_handle(h.settings, gear.center());
-    if gresp.backing_on_hover_text(data.settings.tip).clicked() {
-        actions.push(BarAction::Button { id: data.settings.id.to_string() });
-    }
     if let Some((v, galley)) = version
         && let Some(span) = geometry.version
     {
@@ -541,7 +587,45 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
             actions.push(BarAction::Version);
         }
     }
-    BarOut { leading, actions, file, quick, offer, offer_labeled, tabs_start, controls_left, search, assistant }
+    let overflow_button = placed.overflow_button.map(|(x, w)| Rect::from_center_size(pos2(r.left() + x + w / 2.0, r.center().y), vec2(w, 32.0)));
+    if let Some(button) = overflow_button {
+        let more = solidcraft_ui_text::tr("ui.app_bar_more");
+        let b = BarButton { id: "overflow", icon: "chevron", tip: more, enabled: true, narrow: false, wide_only: false };
+        // Stable names independent of a host's handle prefixes.
+        for handle in ["titlebar:overflow", "appbar:overflow"] {
+            solidcraft_ui_registry::publish_target(handle, button);
+        }
+        if icon_button(ui, r, button.center().x, &b, false, h) {
+            let pass = ui.ctx().cumulative_pass_nr();
+            ui.ctx().data_mut(|d| {
+                let id = egui::Id::unique("sc_appbar_overflow_open");
+                let open = d.get_temp::<bool>(id).unwrap_or(false);
+                d.insert_temp(id, !open);
+                d.insert_temp(id.with("opened"), pass);
+            });
+        }
+    }
+    let overflow_items = overflow_items(data, &placed.overflow, overflow_button.map_or(r.left(), |b| b.left()));
+    BarOut {
+        leading,
+        actions,
+        file,
+        quick,
+        offer,
+        offer_labeled,
+        tabs_start,
+        controls_left,
+        search,
+        assistant,
+        overflow: placed.overflow,
+        overflow_items,
+        overflow_button,
+        quick_count: geometry.quick_count,
+        tabs_end: r.left() + geometry.tabs_end,
+        managed: geometry.managed.map(|s| rect(s, 26.0)),
+        managed_labeled: geometry.managed_labeled,
+        reserved_offers: geometry.reserved_offers,
+    }
 }
 
 /// Where the tab strip publishes its parts: each prefix is followed by the tab's place.
@@ -1850,7 +1934,9 @@ fn file_rows(ui: &mut egui::Ui, rows: &[FileRow], chosen: &mut Option<String>, i
     for row in rows {
         match row {
             FileRow::Item(item) => {
-                let row = crate::Item::action(&item.label, &item.label, &item.icon).key(&item.key).on_if(item.enabled);
+                let row = crate::Item::action(if item.id.starts_with("appbar:overflow:") { &item.id } else { &item.label }, &item.label, &item.icon)
+                    .key(&item.key)
+                    .on_if(item.enabled);
                 if crate::menu::list_row(ui, &row).is_some() {
                     *chosen = Some(item.id.clone());
                     if in_sub {
@@ -1902,8 +1988,110 @@ pub fn file_menu(ctx: &egui::Context, rows: &[FileRow], at: Pos2, id: egui::Id, 
             });
         });
     });
-    let close = chosen.is_some() || (!just_opened && resp.response.clicked_elsewhere());
+    let close = chosen.is_some() || ctx.input(|i| i.key_pressed(egui::Key::Escape)) || (!just_opened && resp.response.clicked_elsewhere());
     FileMenuOut { chosen, close }
+}
+
+/// A hidden control, with its original action and enabled state.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OverflowItem {
+    pub id: String,
+    pub label: String,
+    pub icon: String,
+    pub enabled: bool,
+    pub action: BarAction,
+}
+
+fn overflow_items(data: &AppBar, ids: &[String], anchor: f32) -> Vec<OverflowItem> {
+    ids.iter()
+        .map(|id| {
+            let action = || BarAction::App { id: id.clone() };
+            let mut row = OverflowItem { id: id.clone(), label: String::new(), icon: String::new(), enabled: true, action: action() };
+            let mut button = None;
+            match id.as_str() {
+                "home" => {
+                    button = Some(data.home);
+                    row.label = data.home.tip.to_string();
+                    row.action = BarAction::Home;
+                }
+                "settings" => {
+                    button = Some(data.settings);
+                    row.label = solidcraft_ui_text::tr("ui.preferences").to_string();
+                    row.action = BarAction::Button { id: data.settings.id.to_string() };
+                }
+                "help" => {
+                    button = Some(data.help);
+                    row.label = data.help.tip.to_string();
+                    row.action = BarAction::Help { x: anchor };
+                }
+                "report" => {
+                    row.label = data.report.label.to_string();
+                    row.icon = "bug_report".to_string();
+                    row.action = BarAction::Report;
+                }
+                "version" => {
+                    row.label = data.version.map_or("", |v| v.text).to_string();
+                    row.icon = "help".to_string();
+                    row.action = BarAction::Version;
+                }
+                _ => {
+                    if let Some(i) = id.strip_prefix("action:").and_then(|i| i.parse::<usize>().ok()).and_then(|i| data.actions.get(i)) {
+                        button = Some(*i);
+                        let key = match i.id {
+                            "save" => "ui.save",
+                            "undo" => "ui.undo",
+                            "redo" => "ui.redo",
+                            _ => "",
+                        };
+                        row.label = if key.is_empty() { i.tip.to_string() } else { solidcraft_ui_text::tr(key).to_string() };
+                        row.action = BarAction::Button { id: i.id.to_string() };
+                    }
+                    if let Some(p) = id.strip_prefix("pill:").and_then(|i| i.parse::<usize>().ok()).and_then(|i| data.pills.get(i)) {
+                        row.label = p.name.to_string();
+                        row.icon = p.icon.to_string();
+                        row.action = BarAction::Pill { id: p.id.to_string() };
+                    }
+                }
+            }
+            if let Some(b) = button {
+                row.icon = b.icon.to_string();
+                row.enabled = b.enabled;
+            }
+            row
+        })
+        .collect()
+}
+
+/// Call after show: draw the More menu while its button is open, using the File menu surface.
+/// Returns the original chosen action and closes after a choice, Escape or an outside click.
+/// App-owned rows must have their label, icon and availability filled by the host.
+pub fn overflow_menu(ctx: &egui::Context, rows: &[OverflowItem], button: Option<Rect>) -> Option<BarAction> {
+    let id = egui::Id::unique("sc_appbar_overflow_open");
+    let Some(button) = button else {
+        ctx.data_mut(|d| d.insert_temp(id, false));
+        return None;
+    };
+    if !ctx.data(|d| d.get_temp::<bool>(id).unwrap_or(false)) {
+        return None;
+    }
+    let menu_rows: Vec<FileRow> = rows
+        .iter()
+        .map(|row| {
+            FileRow::Item(FileItem {
+                id: format!("appbar:overflow:{}", row.id),
+                label: row.label.clone(),
+                key: String::new(),
+                icon: row.icon.clone(),
+                enabled: row.enabled,
+            })
+        })
+        .collect();
+    let just_opened = ctx.data(|d| d.get_temp::<u64>(id.with("opened"))) == Some(ctx.cumulative_pass_nr());
+    let out = file_menu(ctx, &menu_rows, button.left_bottom(), id.with("area"), just_opened);
+    if out.close {
+        ctx.data_mut(|d| d.insert_temp(id, false));
+    }
+    out.chosen.and_then(|chosen| rows.iter().find(|r| format!("appbar:overflow:{}", r.id) == chosen && r.enabled).map(|r| r.action.clone()))
 }
 
 /// The workspace switcher at the ribbon's left end: the workspace's icon and name over a caption
