@@ -12,6 +12,7 @@ use crate::ui_kit::{self, Container, Edge, Surface};
 use solidcraft_theme::Tokens;
 
 pub(crate) mod browser;
+pub(crate) mod dimension;
 mod first_sheet;
 pub(crate) mod note;
 mod panels;
@@ -29,6 +30,12 @@ pub struct State {
     placement: Option<placement::Placement>,
     note: Option<note::Draft>,
     view_edit: Option<panels::ViewEdit>,
+    dimension: Option<dimension::Draft>,
+    dimension_edit: Option<panels::DimensionEdit>,
+    /// The object whose options the panel shows because it was selected (it alone), and the one
+    /// thing selected when that was last looked at: see [`follow_selection`].
+    shown_for: Option<u64>,
+    selection_seen: Option<u64>,
     add_sheet: Option<panels::AddSheet>,
     rename_sheet: Option<u64>,
     sheet_menu: Option<SheetMenu>,
@@ -37,6 +44,11 @@ pub struct State {
     strip: Option<Rect>,
     strip_sizes: [Option<egui::Vec2>; 2],
     settings: Option<Rect>,
+    /// What was selected in the other workspace when Drawing was entered (Design's selection while
+    /// in Drawing, the drawing's while not): each workspace gets its own back when entered again.
+    selection_away: Vec<solidcraft_engine::Sel>,
+    /// The session's selection is Drawing's (else Design's).
+    selection_is_drawings: bool,
     /// The sheet page's camera, zoom and drawn marks: screen only, never saved.
     pub(crate) page: crate::drawing_sheet_page::Page,
 }
@@ -45,38 +57,32 @@ pub fn active(app: &SolveApp) -> bool {
     matches!(app.ui.tab.as_str(), "DRAWING LAYOUT" | "DRAWING ANNOTATE" | "DRAWING PARTS" | "DRAWING REVIEW")
 }
 
-/// Whether drawings are turned on (Preferences > Design > Drawings, off by default). Off, the app
-/// shows no Drawing workspace; a design's drawings are still read and saved as they are.
-pub fn enabled(app: &SolveApp) -> bool {
-    app.preferences.drawings_preview
-}
-
-/// Leave the Drawing workspace once drawings are turned off (or a saved layout put the app there
-/// while they are off).
-pub fn reconcile(app: &mut SolveApp) {
-    if !enabled(app) && active(app) {
-        let _ = enter(app, false);
-    }
-}
-
 pub fn enter(app: &mut SolveApp, drawing: bool) -> Result<(), String> {
     if drawing {
-        if !enabled(app) {
-            return Err(solidcraft_ui_text::tr("ui.drawings_preview_off").to_string());
-        }
         if app.session.active_sketch.is_some() || app.tool.is_some() || app.dialog.is_some() || app.file_load.busy() {
             return Err("Finish the current operation before entering Drawing".into());
         }
         if !active(app) {
             app.drawing_workspace.previous_tab = Some(app.ui.tab.clone());
             app.ui.tab = "DRAWING LAYOUT".into();
+            swap_selection(app);
+            sync_history(app);
+            open_a_drawing(app);
         }
     } else if active(app) {
+        // The drawing stays open, on its sheet and zoom, with a sheet sketch being edited still
+        // being edited, for when Drawing is entered again: the model's commands work with either.
         app.ui.tab = app.drawing_workspace.previous_tab.take().unwrap_or_else(|| "MODEL".into());
+        swap_selection(app);
+        sync_history(app);
         app.drawing_workspace.options = None;
         app.drawing_workspace.placement = None;
         app.drawing_workspace.note = None;
         app.drawing_workspace.view_edit = None;
+        app.drawing_workspace.dimension = None;
+        app.drawing_workspace.dimension_edit = None;
+        app.drawing_workspace.shown_for = None;
+        app.drawing_workspace.selection_seen = None;
         app.drawing_workspace.add_sheet = None;
         app.drawing_workspace.rename_sheet = None;
         app.drawing_workspace.sheet_menu = None;
@@ -88,6 +94,45 @@ pub fn enter(app: &mut SolveApp, drawing: bool) -> Result<(), String> {
     app.ui.ribbon_context = None;
     app.cancel_view_animation();
     Ok(())
+}
+
+/// Entering Drawing with no drawing open opens one: the design's first, fitted on its first
+/// sheet. A drawing left open when Drawing was left is still open, on its sheet and zoom. A design
+/// without drawings starts on the page that makes one.
+fn open_a_drawing(app: &mut SolveApp) {
+    if app.session.open_drawing.is_some() {
+        return;
+    }
+    let Some(id) = app.session.doc.drawings.first().map(|d| d.id) else { return };
+    match app.run("drawing.open", serde_json::json!({"drawing": solidcraft_engine::doc::ids::encode(id)})) {
+        Ok(_) => crate::drawing_sheet_page::fit(app),
+        Err(error) => app.set_status(error, true),
+    }
+}
+
+/// Puts the selection kept for the workspace being entered back, and keeps the one of the
+/// workspace being left: picking on a sheet never changes what Design has selected, and the
+/// reverse. Drawing's own is kept only while its objects are still there.
+pub(crate) fn swap_selection(app: &mut SolveApp) {
+    if app.drawing_workspace.selection_is_drawings == active(app) {
+        return;
+    }
+    app.drawing_workspace.selection_is_drawings = active(app);
+    let mut back = std::mem::take(&mut app.drawing_workspace.selection_away);
+    let session = &app.session;
+    back.retain(|item| match item {
+        solidcraft_engine::Sel::Drawing { drawing, object } => {
+            session.open_drawing == Some(*drawing) && session.doc.drawing(*drawing).is_some_and(|d| d.has_object(*object))
+        }
+        _ => true,
+    });
+    app.drawing_workspace.selection_away = std::mem::replace(&mut app.session.selection, back);
+}
+
+/// Undo and redo take the steps of the workspace shown: the open drawing's in Drawing, the
+/// model's everywhere else, a drawing open or not.
+pub(crate) fn sync_history(app: &mut SolveApp) {
+    app.session.model_focus = !active(app);
 }
 
 pub fn reset_document(app: &mut SolveApp) {
@@ -103,6 +148,19 @@ pub(crate) fn placing_view(app: &SolveApp) -> bool {
 
 pub(crate) fn placing_note(app: &SolveApp) -> bool {
     app.drawing_workspace.options == Some(Tool::Note(None))
+}
+
+pub(crate) fn placing_dimension(app: &SolveApp) -> bool {
+    app.drawing_workspace.options == Some(Tool::Dimension(None))
+}
+
+/// The Drawing tool that does on a sheet what the sketch tool `command` does in a sketch, if
+/// there is one: it starts from that tool's key, so the key learnt in a sketch works here.
+pub(crate) fn counterpart(command: &'static str) -> Option<&'static str> {
+    match command {
+        "sketch.dimension" => Some("drawing.dimension"),
+        _ => None,
+    }
 }
 
 pub fn can_open_options(id: &str) -> bool {
@@ -122,14 +180,78 @@ pub fn close_panel(app: &mut SolveApp) -> bool {
     app.drawing_workspace.placement = None;
     app.drawing_workspace.note = None;
     app.drawing_workspace.view_edit = None;
+    app.drawing_workspace.dimension = None;
+    app.drawing_workspace.dimension_edit = None;
+    app.drawing_workspace.shown_for = None;
     app.drawing_workspace.add_sheet = None;
     app.drawing_workspace.first_sheet = None;
     app.drawing_workspace.settings = None;
     open
 }
 
+/// Esc with the panel open: a tool's or a double-click's panel closes (true), and the selection
+/// stays for the next Esc. The panel that shows the selected object's options is not a step of its
+/// own: Esc clears the selection, as in a sketch, and the panel goes with it.
+pub(crate) fn escape_panel(app: &mut SolveApp) -> bool {
+    let state = &app.drawing_workspace;
+    if state.shown_for.is_some() && state.options.and_then(Tool::object) == state.shown_for {
+        return false;
+    }
+    close_panel(app)
+}
+
+/// The one view, dimension or note selected shows its options in the right panel, where a tool
+/// shows its own, and they go when it is no longer the selection. A tool in hand, the sheet's
+/// settings or a panel opened another way stays as it is; the panel closed by hand stays closed
+/// until the selection changes.
+fn follow_selection(app: &mut SolveApp) {
+    let one = match &app.session.selection[..] {
+        [solidcraft_engine::Sel::Drawing { drawing, object }] if app.session.open_drawing == Some(*drawing) => Some(*object),
+        _ => None,
+    };
+    if one == app.drawing_workspace.selection_seen {
+        return;
+    }
+    app.drawing_workspace.selection_seen = one;
+    let state = &app.drawing_workspace;
+    let ours = state.shown_for.is_some() && state.options.and_then(Tool::object) == state.shown_for;
+    let free =
+        !state.settings_open && state.add_sheet.is_none() && state.first_sheet.is_none() && state.placement.is_none() && state.options.is_none();
+    if !ours && !free {
+        app.drawing_workspace.shown_for = None;
+        return;
+    }
+    if ours {
+        close_panel(app);
+    }
+    let kind = one.and_then(|object| {
+        let drawing = app.session.drawing("drawing.inspect").ok()?;
+        if drawing.view(object).is_some() {
+            Some("view")
+        } else if drawing.dimension(object).is_some() {
+            Some("dimension")
+        } else if drawing.notes.by_id(object).is_some() {
+            Some("note")
+        } else {
+            None
+        }
+    });
+    if let (Some(object), Some(kind)) = (one, kind) {
+        edit_object(app, kind, object);
+        app.drawing_workspace.shown_for = Some(object);
+    }
+}
+
 /// Toolbar clicks inspect options. Engine execution still uses command parameters directly.
 pub fn start(app: &mut SolveApp, id: &str) -> bool {
+    // Select All selects what is on the sheet shown.
+    if id == "select.all" && active(app) && app.session.open_drawing.is_some() {
+        let sheet = active_sheet(app).map(solidcraft_engine::doc::ids::encode);
+        if let Err(error) = app.run("select.all", serde_json::json!({"sheet": sheet})) {
+            app.set_status(error, true);
+        }
+        return true;
+    }
     if !active(app) || !can_open_options(id) {
         return false;
     }
@@ -151,6 +273,57 @@ pub(crate) fn start_projected(app: &mut SolveApp, parent: u64) -> bool {
     close_panel(app);
     app.drawing_workspace.placement = Some(tool);
     app.drawing_workspace.options = Some(Tool::Projected);
+    true
+}
+
+/// Edit object `object` of the open drawing, as a double-click on it at `at` does (the menu's Edit,
+/// with `at` where the menu was opened).
+pub(crate) fn edit(app: &mut SolveApp, object: u64, at: egui::Pos2) {
+    let Ok(drawing) = app.session.drawing("drawing.inspect") else { return };
+    let kind = if drawing.view(object).is_some() {
+        "view"
+    } else if drawing.dimension(object).is_some() {
+        "dimension"
+    } else if drawing.notes.by_id(object).is_some() {
+        "note"
+    } else if drawing.tables.by_id(object).is_some() {
+        "parts_list"
+    } else {
+        return;
+    };
+    // A dimension's or a note's text is edited where it is drawn; the menu has no pointer on it,
+    // so the box opens where the menu was opened.
+    // From a row of the browser there is no place on the sheet to put the box: its options open.
+    let on_sheet = app.viewport.rect.is_some_and(|sheet| sheet.contains(at)) && !crate::shell::covered(app, at);
+    if on_sheet && edit_in_place(app, object, at) {
+        return;
+    }
+    edit_object(app, kind, object);
+}
+
+/// A double-click on a dimension or a one-line note edits its text where it is, in the box a
+/// sketch dimension's value is typed in (true: the box opened at `at`). Anything else (a view, a
+/// table, a chain dimension, a note with fields or several lines) has no single text: its options
+/// open instead ([`edit_object`]).
+pub(crate) fn edit_in_place(app: &mut SolveApp, object: u64, at: egui::Pos2) -> bool {
+    use crate::dim_view::SheetText;
+    use solidcraft_engine::geom::cell::Part;
+    let Ok(drawing) = app.session.drawing("drawing.inspect").cloned() else { return false };
+    let (target, title, text) = if drawing.dimension(object).is_some() {
+        let Ok(read) = app.run("drawing.dimension.inspect", serde_json::json!({"dimension": solidcraft_engine::doc::ids::encode(object)})) else {
+            return false;
+        };
+        let Some(text) = read["text"].as_str().filter(|text| !text.contains('\n')) else { return false };
+        (SheetText::Dimension(object), "ui.drawing_panel.dimension", text.to_owned())
+    } else if let Some(note) = drawing.notes.by_id(object) {
+        let text = note.content.0.iter().map(|part| if let Part::Text(text) = part { Some(text.as_str()) } else { None }).collect::<Option<String>>();
+        let Some(text) = text.filter(|text| !text.contains('\n')) else { return false };
+        (SheetText::Note(object), "ui.drawing_panel.note", text)
+    } else {
+        return false;
+    };
+    close_panel(app);
+    crate::dim_view::edit_sheet_text(target, solidcraft_ui_text::tr(title), text, at);
     true
 }
 
@@ -184,6 +357,7 @@ fn panel_width(app: &SolveApp) -> f32 {
 /// The sheet page draws the open drawing's sheet; with no drawing open there is no paper, sample
 /// geometry or camera, only a note.
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
+    follow_selection(app);
     if crate::drawing_sheet_page::show(app, ui) {
         return;
     }
@@ -831,6 +1005,12 @@ fn panel_fields(app: &mut SolveApp, ui: &mut egui::Ui) {
         if panels::view_editor(app, ui, view) {
             close_panel(app);
         }
+    } else if placing_dimension(app) {
+        dimension::panel(app, ui);
+    } else if let Some(Tool::Dimension(Some(placed))) = app.drawing_workspace.options {
+        if panels::dimension_editor(app, ui, placed) {
+            close_panel(app);
+        }
     } else if let Some(tool) = app.drawing_workspace.options {
         panels::tool_body(app, ui, tool);
         if panels::footer(ui, tool) {
@@ -846,29 +1026,196 @@ mod tests {
     use super::*;
     use crate::scenario::Harness;
 
-    /// Drawings are off until Preferences > Design turns them on: Drawing stays "coming later" in
-    /// the workspace menu and the workspace refuses to open; turned off again, the app leaves it.
+    /// The Drawing workspace is a normal workspace: it opens with default preferences.
     #[test]
-    fn drawings_stay_off_until_turned_on() {
+    fn drawing_workspace_opens_with_default_preferences() {
         let mut h = Harness::new();
         h.app.home.open = false;
-        assert!(!h.app.preferences.drawings_preview, "off by default");
-        let drawing_row = |app: &SolveApp| {
-            crate::context_menu::items(app, &crate::context_menu::Target::Workspace).into_iter().find(|item| item.label == "Drawing").unwrap()
-        };
-        let off = drawing_row(&h.app);
-        assert!(!off.enabled && off.id == "ui.workspace", "{:?}", off.id);
-        assert!(crate::workspace::enter(&mut h.app, "drawing").is_err());
-        assert!(!active(&h.app));
-        h.app.preferences.drawings_preview = true;
-        let on = drawing_row(&h.app);
+        let on =
+            crate::context_menu::items(&h.app, &crate::context_menu::Target::Workspace).into_iter().find(|item| item.label == "Drawing").unwrap();
         assert!(on.enabled && on.id == "ui.workspace.drawing");
         crate::workspace::enter(&mut h.app, "drawing").unwrap();
         assert!(active(&h.app));
-        h.app.preferences.drawings_preview = false;
-        h.frames(2);
-        assert!(!active(&h.app), "turning drawings off leaves the Drawing workspace");
-        assert_eq!(h.app.ui.tab, "MODEL");
+    }
+
+    /// A preferences file written while Drawings was a setting still loads: the retired key is
+    /// ignored and the other settings in it are kept.
+    #[test]
+    fn saved_preferences_with_the_retired_drawings_key_still_load() {
+        let mut h = Harness::new();
+        h.app.load_prefs(r#"{"preferences":{"drawings_preview":false,"default_units":"in"}}"#);
+        assert_eq!(h.app.preferences.default_units, "in");
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
+        assert!(active(&h.app));
+    }
+
+    /// A box in Drawing, with a drawing of one base view open: its id.
+    fn drawing_with_a_view(h: &mut Harness) -> Option<u64> {
+        h.app.home.open = false;
+        h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
+        h.app.run("drawing.create", serde_json::json!({})).unwrap();
+        h.app.run("drawing.view.base", serde_json::json!({"sheet":"Sheet 1","scale":"1:1","position_mm":[150,150]})).unwrap();
+        h.app.session.open_drawing
+    }
+
+    /// A design saved with a drawing and opened again shows that drawing when Drawing is entered,
+    /// on its first sheet, not the page that starts a new drawing.
+    #[test]
+    fn a_saved_drawing_opens_again_when_drawing_is_entered() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-drawing-reopen-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("plate.solidcraft").to_string_lossy().into_owned();
+        let mut h = Harness::new();
+        let drawing = drawing_with_a_view(&mut h);
+        assert!(drawing.is_some());
+        h.app.run("file.save", serde_json::json!({"path": path})).unwrap();
+        h.app.run("doc.open", serde_json::json!({"path": path})).unwrap();
+        assert!(!active(&h.app) && h.app.session.open_drawing.is_none(), "a design opens in Design");
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
+        h.frames(4);
+        assert_eq!(h.app.session.open_drawing, drawing, "entering Drawing opens the design's drawing");
+        let first = h.app.session.drawing("test").unwrap().sheets[0].id;
+        assert_eq!(active_sheet(&h.app), Some(first), "on its first sheet");
+        assert!(crate::scenario::handle_at("drawing:first:standard").is_none(), "not the new-drawing page");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Leaving Drawing leaves the drawing open: the model changes in Design with it open, and coming
+    /// back finds the same drawing. Undo takes the steps of the workspace shown: the drawing's in
+    /// Drawing, the model's in Design and Render.
+    #[test]
+    fn leaving_drawing_keeps_the_drawing_open_and_each_workspace_undoes_its_own() {
+        let mut h = Harness::new();
+        let drawing = drawing_with_a_view(&mut h);
+        crate::workspace::enter(&mut h.app, "design").unwrap();
+        assert!(!active(&h.app));
+        assert_eq!(h.app.session.open_drawing, drawing, "leaving Drawing keeps the drawing open");
+        h.app.run("solid.box", serde_json::json!({"length":5,"width":5,"height":5})).unwrap();
+        let features = h.app.session.doc.features.len();
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
+        assert_eq!(h.app.session.open_drawing, drawing, "the same drawing");
+        let views = |h: &Harness| h.app.session.drawing("test").unwrap().views.len();
+        assert_eq!(views(&h), 1);
+        h.app.run("edit.undo", serde_json::json!({})).unwrap();
+        assert_eq!(views(&h), 0, "undo in Drawing takes back the drawing's step");
+        assert_eq!(h.app.session.doc.features.len(), features, "and not the model's");
+        crate::workspace::enter(&mut h.app, "render").unwrap();
+        assert_eq!(h.app.session.open_drawing, drawing, "Render leaves Drawing the same way");
+        crate::workspace::enter(&mut h.app, "design").unwrap();
+        h.app.run("edit.undo", serde_json::json!({})).unwrap();
+        assert_eq!(h.app.session.doc.features.len(), features - 1, "undo in Design takes back the model's step");
+        assert_eq!(views(&h), 0, "and leaves the drawing's alone");
+    }
+
+    /// With a drawing open, a model edit in Design (the box's length) works, and the drawing's view
+    /// of it is out of date when Drawing is entered again. Drawing → Design → Drawing keeps the
+    /// drawing on the same sheet and zoom, and Design's tab, selection, camera and history are as
+    /// Design left them.
+    #[test]
+    fn workspaces_keep_their_own_state_and_model_edits_mark_the_views() {
+        let mut h = Harness::new();
+        let drawing = drawing_with_a_view(&mut h);
+        crate::workspace::enter(&mut h.app, "design").unwrap();
+        h.app.ui.tab = "SURFACE".into();
+        let body = h.app.session.model.state().bodies[0].name.clone();
+        h.app.run("select.set", serde_json::json!({"items":[{"type":"body","name":body}]})).unwrap();
+        let (selected, cam, undo, redo) = (h.app.session.selection.clone(), h.app.cam, h.app.session.undo.len(), h.app.session.redo.len());
+        assert!(!selected.is_empty());
+
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
+        let first = h.app.session.drawing("test").unwrap().sheets[0].id;
+        solidcraft_engine::drawing_scene::extract(&mut h.app.session, first).unwrap();
+        while solidcraft_engine::drawing_scene::step(&mut h.app.session) {}
+        let current = h.app.run("drawing.status", serde_json::json!({})).unwrap();
+        assert_eq!(current["views"][0]["status"], "current", "{current}");
+        h.app.run("drawing.sheet.add", serde_json::json!({"name":"Second"})).unwrap();
+        h.frames(3);
+        let second = h.app.session.drawing("test").unwrap().sheets[1].id;
+        select_sheet(&mut h.app, second);
+        h.frames(3);
+        let view = h.app.session.drawing("test").unwrap().views[0].id;
+        let picked = serde_json::json!({"type":"drawing","drawing":solidcraft_engine::doc::ids::encode(drawing.unwrap()),"object":solidcraft_engine::doc::ids::encode(view)});
+        h.app.run("select.set", serde_json::json!({"items":[picked]})).unwrap();
+        let sheet_selection = h.app.session.selection.clone();
+        let page = |h: &Harness| {
+            let shown = crate::drawing_sheet_page::inspect(&h.app);
+            (shown["drawing"].clone(), shown["sheet"].clone(), shown["zoom"].clone(), shown["visible_mm"].clone())
+        };
+        let shown = page(&h);
+        assert_eq!(shown.1, serde_json::json!(solidcraft_engine::doc::ids::encode(second)));
+        let drawing_steps = h.app.session.undo.len();
+
+        crate::workspace::enter(&mut h.app, "design").unwrap();
+        h.frames(3);
+        assert_eq!(h.app.ui.tab, "SURFACE", "Design's tab");
+        assert_eq!(h.app.session.selection, selected, "Design's selection");
+        assert_eq!(h.app.cam, cam, "Design's camera");
+        assert_eq!(h.app.session.undo.len(), drawing_steps, "the drawing's new sheet is its own step");
+        assert!(undo < drawing_steps && h.app.session.redo.len() == redo);
+        let block = h.app.session.doc.features[0].id;
+        h.app.run("timeline.edit", serde_json::json!({"feature": block.to_string(), "set": {"length": 60}})).unwrap();
+        assert_eq!(h.app.session.open_drawing, drawing, "the model edit leaves the drawing open");
+        let status = h.app.run("drawing.status", serde_json::json!({})).unwrap();
+        assert_eq!(status["views"][0]["status"], "out_of_date", "the view of the edited box: {status}");
+
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
+        h.frames(3);
+        assert_eq!(h.app.session.open_drawing, drawing, "the same drawing");
+        assert_eq!(active_sheet(&h.app), Some(second), "on the same sheet");
+        assert_eq!(page(&h), shown, "at the same zoom and place");
+        assert_eq!(h.app.session.selection, sheet_selection, "with its own selection");
+    }
+
+    /// The drawing open when Drawing was left is still open when it is entered again, not the
+    /// design's first; a design opened afresh starts on its first drawing.
+    #[test]
+    fn the_drawing_left_last_comes_back_not_the_first() {
+        let mut h = Harness::new();
+        drawing_with_a_view(&mut h);
+        h.app.run("drawing.create", serde_json::json!({"name":"Second"})).unwrap();
+        let ids: Vec<u64> = h.app.session.doc.drawings.iter().map(|d| d.id).collect();
+        let (first, later) = (ids[0], ids[1]);
+        h.app.run("drawing.open", serde_json::json!({"drawing": solidcraft_engine::doc::ids::encode(later)})).unwrap();
+        crate::workspace::enter(&mut h.app, "design").unwrap();
+        assert_eq!(h.app.session.open_drawing, Some(later));
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
+        assert_eq!(h.app.session.open_drawing, Some(later), "the drawing left last");
+        crate::workspace::enter(&mut h.app, "design").unwrap();
+        h.app.run("drawing.close", serde_json::json!({})).unwrap();
+        reset_document(&mut h.app);
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
+        assert_eq!(h.app.session.open_drawing, Some(first), "a fresh start opens the design's first drawing");
+    }
+
+    /// A sheet sketch being edited never holds Design: Drawing can be left with it open, the
+    /// model's commands and sketch tools work on the model there, undo takes the model's steps, and
+    /// back in Drawing the sheet sketch is still being edited.
+    #[test]
+    fn a_sheet_sketch_stays_open_in_drawing_while_design_changes_the_model() {
+        let mut h = Harness::new();
+        let drawing = drawing_with_a_view(&mut h);
+        let sheet = h.app.session.drawing("test").unwrap().sheets[0].id;
+        h.app.run("drawing.sketch.create", serde_json::json!({"owner": solidcraft_engine::doc::ids::encode(sheet)})).unwrap();
+        let sketch = h.app.session.active_sheet_sketch.clone();
+        crate::workspace::enter(&mut h.app, "design").unwrap();
+        assert!(!active(&h.app));
+        assert_eq!(h.app.session.open_drawing, drawing);
+        let features = h.app.session.doc.features.len();
+        h.app.run("solid.box", serde_json::json!({"length":5,"width":5,"height":5})).unwrap();
+        assert_eq!(h.app.session.doc.features.len(), features + 1, "the model changes with the sheet sketch open");
+        h.app.run("edit.undo", serde_json::json!({})).unwrap();
+        assert_eq!(h.app.session.doc.features.len(), features, "undo in Design takes back the model's step");
+        assert_eq!(h.app.session.active_sheet_sketch, sketch, "and leaves the sheet sketch being edited");
+        h.app.run("sketch.create", serde_json::json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.circle.center", serde_json::json!({"center": [0, 0], "radius": 3})).unwrap();
+        h.app.run("sketch.finish", serde_json::json!({})).unwrap();
+        assert!(h.app.session.active_sketch.is_none(), "Finish in Design finishes the model's sketch");
+        assert_eq!(h.app.session.active_sheet_sketch, sketch, "and leaves the sheet sketch alone");
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
+        assert!(h.app.session.sheet_sketching(), "back in Drawing the sheet sketch is still being edited");
+        h.app.run("sketch.finish", serde_json::json!({})).unwrap();
+        assert!(h.app.session.active_sheet_sketch.is_none());
     }
 
     #[test]
@@ -879,7 +1226,6 @@ mod tests {
         let mut h = Harness::new();
         h.app.home.open = false;
         h.app.run("solid.box", json!({"length":60,"width":35,"height":12})).unwrap();
-        h.app.preferences.drawings_preview = true;
         enter(&mut h.app, true).unwrap();
         h.app.run("drawing.create", json!({})).unwrap();
         let created = h.app.run("drawing.view.base", json!({"sheet":"Sheet 1","scale":"1:1","position_mm":[175,140]})).unwrap();
@@ -912,6 +1258,146 @@ mod tests {
         assert_eq!(centre(&h), Vec2::new(175.0, 140.0));
     }
 
+    /// A blank sheet's ribbon offers every tool that has a working panel: a click opens it.
+    #[test]
+    fn a_blank_sheets_working_tools_open_from_the_ribbon() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
+        enter(&mut h.app, true).unwrap();
+        h.frames(4);
+        h.app.run("drawing.create", serde_json::json!({})).unwrap();
+        h.frames(6);
+        for (tab, id, tool) in [
+            ("DRAWING LAYOUT", "drawing.view.base.planned", Tool::Base),
+            ("DRAWING ANNOTATE", "drawing.dimension", Tool::Dimension(None)),
+            ("DRAWING ANNOTATE", "drawing.note", Tool::Note(None)),
+            ("DRAWING PARTS", "drawing.parts_list", Tool::PartsList(None)),
+        ] {
+            close_panel(&mut h.app);
+            h.app.ui.tab = tab.into();
+            h.frames(4);
+            assert!(crate::scenario::handle_at(&format!("button:{id}")).is_some(), "{id} is on {tab}");
+            h.step(&serde_json::json!({"click":{"handle":format!("button:{id}")}})).unwrap();
+            h.frames(4);
+            assert_eq!(h.app.drawing_workspace.options, Some(tool), "{id} opens its panel from the ribbon");
+            let spec = solidcraft_engine::find_command(id).unwrap();
+            assert!(!crate::toolbar::coming_soon(&h.app, spec), "{id} is drawn as a working tool, not faded");
+        }
+        for id in ["drawing.update.planned", "drawing.view.section.planned", "drawing.export.planned"] {
+            let spec = solidcraft_engine::find_command(id).unwrap();
+            assert!(crate::toolbar::coming_soon(&h.app, spec), "{id} opens nothing yet: faded, coming soon");
+        }
+        assert_eq!(h.app.tr("ui.drawing_ribbon.planned"), "Coming soon");
+    }
+
+    /// A drawing's views and notes are picked, selected all, cleared and deleted with the model's
+    /// own controls: click, Shift-click, Ctrl+A, Escape and Delete on the session's selection.
+    #[test]
+    fn drawing_objects_take_the_shared_selection_keys() {
+        use serde_json::json;
+        use solidcraft_engine::Sel;
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
+        enter(&mut h.app, true).unwrap();
+        h.app.run("drawing.create", json!({})).unwrap();
+        h.app.run("drawing.view.base", json!({"sheet":"Sheet 1","scale":"1:1","position_mm":[120,150]})).unwrap();
+        h.app.run("drawing.view.base", json!({"sheet":"Sheet 1","scale":"1:1","position_mm":[260,150],"view":"top"})).unwrap();
+        let sheet = crate::drawing_sheet_page::active_sheet(&h.app).unwrap();
+        let began = std::time::Instant::now();
+        while began.elapsed() < std::time::Duration::from_secs(10) {
+            h.frame();
+            if crate::drawing_jobs::idle(&h.app)
+                && solidcraft_engine::drawing_scene::extract(&mut h.app.session, sheet)
+                    .is_ok_and(|v| v.objects.iter().filter(|o| o.kind == solidcraft_engine::geom::paper::ObjectKind::View).count() >= 2)
+            {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        h.frames(4);
+        let drawing = h.app.session.drawing("drawing.inspect").unwrap().clone();
+        let [a, b] = [drawing.views[0].id, drawing.views[1].id];
+        let size = drawing.sheets[0].sheet.size_mm().unwrap();
+        let screen = |h: &Harness, view: u64| {
+            let paper = crate::scenario::rect_of("sheet:paper").unwrap();
+            let c = h.app.session.drawing("drawing.inspect").unwrap().view_centre(view).unwrap();
+            [paper.left() + (c.x / size.x) as f32 * paper.width(), paper.bottom() - (c.y / size.y) as f32 * paper.height()]
+        };
+        let picked = |h: &Harness| -> Vec<u64> {
+            h.app.session.selection.iter().filter_map(|s| if let Sel::Drawing { object, .. } = s { Some(*object) } else { None }).collect()
+        };
+
+        h.step(&json!({"click": screen(&h, a)})).unwrap();
+        h.frames(2);
+        assert_eq!(picked(&h), [a], "a click selects the view under it");
+        h.step(&json!({"click": screen(&h, b), "shift": true})).unwrap();
+        h.frames(2);
+        assert_eq!(picked(&h), [a, b], "Shift-click adds, as in the model");
+
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(h.app.session.selection.is_empty(), "Escape clears the selection");
+
+        h.step(&json!({"key":"A", "cmd": true})).unwrap();
+        h.frames(2);
+        assert_eq!(picked(&h), [a, b], "Ctrl+A selects everything on the sheet");
+
+        assert!(start(&mut h.app, "drawing.note"));
+        h.frames(2);
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.drawing_workspace.options, None, "Escape puts the tool down first");
+        assert_eq!(picked(&h), [a, b], "and keeps the selection for the next press");
+
+        let undo = h.app.session.undo.len();
+        h.step(&json!({"click": screen(&h, a)})).unwrap();
+        h.frames(2);
+        h.step(&json!({"key":"Delete"})).unwrap();
+        h.frames(4);
+        let left = h.app.session.drawing("drawing.inspect").unwrap();
+        assert!(left.view(a).is_none() && left.view(b).is_some(), "Delete removes only the selected view");
+        assert_eq!(h.app.session.undo.len(), undo + 1, "in one undo step");
+        assert!(h.app.session.selection.is_empty());
+
+        h.step(&json!({"key":"Z", "cmd": true})).unwrap();
+        h.frames(2);
+        assert!(h.app.session.drawing("drawing.inspect").unwrap().view(a).is_some(), "Ctrl+Z brings it back");
+        h.step(&json!({"key":"Y", "cmd": true})).unwrap();
+        h.frames(2);
+        assert!(h.app.session.drawing("drawing.inspect").unwrap().view(a).is_none(), "and Ctrl+Y deletes it again");
+    }
+
+    /// The key that starts Dimension in a sketch starts Dimension on a sheet: D, or whatever key
+    /// Sketch Dimension was rebound to.
+    #[test]
+    fn the_sketch_dimension_key_starts_the_dimension_tool_on_a_sheet() {
+        use serde_json::json;
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
+        enter(&mut h.app, true).unwrap();
+        h.app.run("drawing.create", json!({})).unwrap();
+        h.app.run("drawing.view.base", json!({"sheet":"Sheet 1","scale":"1:1","position_mm":[120,150]})).unwrap();
+        h.frames(8);
+        assert!(!placing_dimension(&h.app));
+        h.step(&json!({"key":"D"})).unwrap();
+        h.frames(2);
+        assert!(placing_dimension(&h.app), "D starts Dimension, as in a sketch");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(!placing_dimension(&h.app), "and Esc puts it down");
+
+        h.call("ui.shortcut", json!({"command": "sketch.dimension", "key": "M"}));
+        h.step(&json!({"key":"D"})).unwrap();
+        h.frames(2);
+        assert!(!placing_dimension(&h.app), "the old key no longer starts it");
+        h.step(&json!({"key":"M"})).unwrap();
+        h.frames(2);
+        assert!(placing_dimension(&h.app), "the key Sketch Dimension was rebound to does");
+    }
+
     #[test]
     fn base_view_places_projected_views_until_escape() {
         use solidcraft_engine::doc::drawing::view::{ViewKind, ViewPlace};
@@ -920,7 +1406,6 @@ mod tests {
         let mut h = Harness::new();
         h.app.home.open = false;
         h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
-        h.app.preferences.drawings_preview = true;
         enter(&mut h.app, true).unwrap();
         h.app.run("drawing.create", serde_json::json!({})).unwrap();
         h.frames(6);
@@ -970,7 +1455,6 @@ mod tests {
         let mut h = Harness::new();
         h.app.home.open = false;
         h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
-        h.app.preferences.drawings_preview = true;
         enter(&mut h.app, true).unwrap();
         h.app.run("drawing.create", serde_json::json!({})).unwrap();
         let view = h.app.run("drawing.view.base", serde_json::json!({"sheet":"Sheet 1","scale":"1:1","position_mm":[310,180]})).unwrap();
@@ -990,7 +1474,6 @@ mod tests {
         let mut h = Harness::new();
         h.app.home.open = false;
         h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
-        h.app.preferences.drawings_preview = true;
         enter(&mut h.app, true).unwrap();
         h.frames(4);
         assert!(h.app.session.open_drawing.is_none());
@@ -1010,7 +1493,6 @@ mod tests {
         let mut h = Harness::new();
         h.app.home.open = false;
         h.app.run("solid.box", serde_json::json!({"length":100,"width":60,"height":12})).unwrap();
-        h.app.preferences.drawings_preview = true;
         enter(&mut h.app, true).unwrap();
         h.frames(4);
         h.step(&serde_json::json!({"click":{"handle":"drawing:first:standard"}})).unwrap();
@@ -1027,7 +1509,6 @@ mod tests {
         h.app.home.open = false;
         h.app.ui.show_browser = true;
         h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
-        h.app.preferences.drawings_preview = true;
         enter(&mut h.app, true).unwrap();
         h.app.run("drawing.create", serde_json::json!({})).unwrap();
         h.app.run("drawing.sheet.add", serde_json::json!({"name":"Inspection sheet"})).unwrap();
@@ -1048,7 +1529,6 @@ mod tests {
         let mut h = Harness::new();
         h.app.home.open = false;
         h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
-        h.app.preferences.drawings_preview = true;
         enter(&mut h.app, true).unwrap();
         h.app.run("drawing.create", serde_json::json!({})).unwrap();
         let added = h.app.run("drawing.sheet.add", serde_json::json!({})).unwrap();
@@ -1074,7 +1554,6 @@ mod tests {
         h.app.ui.show_browser = true;
         h.app.preferences.drawing_sheets_visibility = "off".into();
         h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
-        h.app.preferences.drawings_preview = true;
         enter(&mut h.app, true).unwrap();
         h.app.run("drawing.create", serde_json::json!({})).unwrap();
         let added = h.app.run("drawing.sheet.add", serde_json::json!({"name":"Detail"})).unwrap();
@@ -1094,13 +1573,61 @@ mod tests {
         assert_eq!(h.app.session.drawing("drawing.inspect").unwrap().sheets.len(), 1);
     }
 
+    /// The browser's rows of what is on a sheet take the clicks the design's browser rows take: a
+    /// click selects the object (Shift adds), and a right-click opens the sheet's menu on it.
+    #[test]
+    fn browser_rows_select_their_objects_and_open_the_sheets_menu() {
+        use serde_json::json;
+        use solidcraft_engine::{Sel, doc::ids::encode};
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.ui.show_browser = true;
+        h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
+        enter(&mut h.app, true).unwrap();
+        h.app.run("drawing.create", json!({})).unwrap();
+        let view = h.app.run("drawing.view.base", json!({"sheet":"Sheet 1","scale":"1:1","position_mm":[150,150],"view":"top"})).unwrap();
+        h.app.run("drawing.dimension.add", json!({"view": view["view"], "kind": {"length": {"edge": [20, 0, 3]}}})).unwrap();
+        h.app.run("drawing.note.add", json!({"anchor": {"sheet": "Sheet 1"}, "at": [250, 220], "content": "DEBURR"})).unwrap();
+        h.frames(8);
+        let drawing = h.app.session.drawing("drawing.inspect").unwrap().clone();
+        let sheet = encode(drawing.sheets[0].id);
+        let (view, dimension, note) = (drawing.views[0].id, drawing.dimensions[0].id, drawing.notes[0].id);
+        let handle = |kind: &str, object: u64| format!("drawing:browser:sheet:{sheet}:{kind}:{}", encode(object));
+        let picked = |h: &Harness| -> Vec<u64> {
+            h.app.session.selection.iter().filter_map(|s| if let Sel::Drawing { object, .. } = s { Some(*object) } else { None }).collect()
+        };
+
+        h.step(&json!({"click": {"handle": handle("dimension", dimension)}})).unwrap();
+        h.frames(3);
+        assert_eq!(picked(&h), [dimension], "a click on the row selects the dimension");
+        h.step(&json!({"click": {"handle": handle("view", view)}, "shift": true})).unwrap();
+        h.frames(3);
+        assert_eq!(picked(&h), [dimension, view], "Shift-click adds, as in the model");
+
+        // A right-click on a row outside the selection selects it, and the menu is about it.
+        h.step(&json!({"click": {"handle": handle("note", note)}, "button": "right"})).unwrap();
+        h.frames(3);
+        assert_eq!(picked(&h), [note]);
+        let menu = crate::context_menu::describe(&h.app);
+        let rows: Vec<&str> = menu["items"].as_array().unwrap().iter().filter_map(|item| item["label"].as_str()).collect();
+        assert_eq!(&rows[..2], ["Edit Note", "Delete"], "{rows:?}");
+        crate::context_menu::pick(&mut h.app, "Edit Note").unwrap();
+        h.frames(3);
+        assert!(!crate::dim_view::editing() && inspector_visible(&h.app), "from the browser, Edit opens the note's options");
+        close_panel(&mut h.app);
+        h.step(&json!({"click": {"handle": handle("note", note)}, "button": "right"})).unwrap();
+        h.frames(3);
+        crate::context_menu::pick(&mut h.app, "Delete").unwrap();
+        h.frames(4);
+        assert!(h.app.session.drawing("drawing.inspect").unwrap().notes.by_id(note).is_none(), "the menu's Delete deletes it");
+    }
+
     #[test]
     fn sheet_chooser_switches_canvas_and_falls_back_after_delete() {
         let mut h = Harness::new();
         h.app.home.open = false;
         h.app.ui.show_browser = true;
         h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
-        h.app.preferences.drawings_preview = true;
         enter(&mut h.app, true).unwrap();
         let first = h.app.run("drawing.create", serde_json::json!({})).unwrap()["sheets"][0]["id"].as_str().unwrap().to_string();
         h.frames(4);
@@ -1139,7 +1666,6 @@ mod tests {
         let revision = h.app.session.revision;
         let undo = h.app.session.undo.len();
         let cam = h.app.cam;
-        h.app.preferences.drawings_preview = true;
         enter(&mut h.app, true).unwrap();
         assert!(start(&mut h.app, "drawing.view.base.planned"));
         h.frames(2);
@@ -1167,7 +1693,6 @@ mod tests {
             h.app.ui.layout = layout;
             h.call("ui.resize", serde_json::json!({"width":1400,"height":1000}));
             h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
-            h.app.preferences.drawings_preview = true;
             enter(&mut h.app, true).unwrap();
             h.app.run("drawing.create", serde_json::json!({})).unwrap();
             let revision = h.app.session.revision;
@@ -1244,7 +1769,6 @@ mod tests {
             h.call("ui.resize", serde_json::json!({"width":960,"height":600}));
             h.app.preferences.drawing_panel_width = 560.0;
             h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
-            h.app.preferences.drawings_preview = true;
             enter(&mut h.app, true).unwrap();
             h.app.run("drawing.create", serde_json::json!({})).unwrap();
             h.app.drawing_workspace.settings_open = true;

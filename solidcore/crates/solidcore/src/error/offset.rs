@@ -18,9 +18,11 @@
 //! | [`OffsetFailure::SeamOpened`]          | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::ExactCurveUncut`]     | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::TangentBranchUncertified`] | `SM_ERR` (solidcore-native)            |
+//! | [`OffsetFailure::PeriodicBranchAmbiguous`] | `SM_ERR` (solidcore-native)            |
 //! | [`OffsetFailure::TangentEndOffCurve`]  | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::LooseTangentEdge`]    | `SM_ERR` (WR-530, solidcore-native)       |
 //! | [`OffsetFailure::FacesApart`]          | `SM_ERR` (solidcore-native)               |
+//! | [`OffsetFailure::PastSide`]            | `SM_ERR` (#18564, solidcore-native)       |
 //! | [`OffsetFailure::ReachUncertified`]    | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::LoopGapUncertified`]  | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::Unsound`]             | `SM_ERR` (solidcore-native)               |
@@ -193,6 +195,9 @@ pub enum OffsetFailure {
     /// Two curved faces tangent at the old edge now cross, but the intersection
     /// branch on their retained sides has not been certified.
     TangentBranchUncertified,
+    /// More than one surface-surface intersection branch claims the same periodic
+    /// boundary event, so the branch through that event is ambiguous.
+    PeriodicBranchAmbiguous,
     /// In a local operation, the new surfaces of `face` and of its neighbour across an
     /// edge meet nowhere near the edge, so no extension of either makes them meet there
     /// and the edge cannot be found again. (The reach,
@@ -202,6 +207,21 @@ pub enum OffsetFailure {
     FacesApart {
         /// The face, of the operation's input.
         face: FaceId,
+    },
+    /// In a local operation, the plane of `face` moves past where the surface of `side`, a
+    /// face beside it across an edge, ends: the sphere's or the cylinder's extent along the
+    /// plane's normal stops short of the new plane, so no extension of the side meets it.
+    /// The two met at an angle before the move (a plane moved off a round it was tangent to
+    /// is not this: a wall closes that gap). `largest` is how far the plane could move and
+    /// still meet the side: the distance from its old place to the side's extent there
+    /// (#18564). Refused before anything changes.
+    PastSide {
+        /// The moved face, of the operation's input.
+        face: FaceId,
+        /// The face beside it whose surface ends, of the operation's input.
+        side: FaceId,
+        /// How far the face could move and still meet the side.
+        largest: f64,
     },
     /// In a local operation, a surface beside an edge or at a vertex of `face` moves, and
     /// how far the surfaces there must be extended to meet has no certified bound
@@ -369,6 +389,7 @@ impl OffsetFailure {
             | Self::WallsMeetAcross { face, .. }
             | Self::SeamOpened { face }
             | Self::FacesApart { face }
+            | Self::PastSide { face, .. }
             | Self::ReachUncertified { face } => Some(EntityRef::Face(face)),
             Self::WallsTouch { face, .. } | Self::LoopsCross { face, .. } => {
                 face.map(EntityRef::Face)
@@ -382,6 +403,7 @@ impl OffsetFailure {
             Self::ExactCurveUncut
             | Self::TangentEndOffCurve
             | Self::TangentBranchUncertified
+            | Self::PeriodicBranchAmbiguous
             | Self::DistanceUnresolved { .. }
             | Self::ToleranceUnresolved { .. }
             | Self::Failed(_)
@@ -431,7 +453,9 @@ impl OffsetFailure {
             | Self::TangentEndOffCurve
             | Self::LooseTangentEdge { .. }
             | Self::TangentBranchUncertified
+            | Self::PeriodicBranchAmbiguous
             | Self::FacesApart { .. }
+            | Self::PastSide { .. }
             | Self::ReachUncertified { .. }
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. }
@@ -465,7 +489,9 @@ impl OffsetFailure {
             | Self::TangentEndOffCurve
             | Self::LooseTangentEdge { .. }
             | Self::TangentBranchUncertified
+            | Self::PeriodicBranchAmbiguous
             | Self::FacesApart { .. }
+            | Self::PastSide { .. }
             | Self::ReachUncertified { .. }
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. }
@@ -484,11 +510,13 @@ impl OffsetFailure {
             | Self::WallsMeetAcross { .. }
             | Self::SeamOpened { .. }
             | Self::FacesApart { .. }
+            | Self::PastSide { .. }
             | Self::ReachUncertified { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
             | Self::LooseTangentEdge { .. }
             | Self::TangentBranchUncertified
+            | Self::PeriodicBranchAmbiguous
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. }
             | Self::Failed(_)
@@ -516,11 +544,13 @@ impl OffsetFailure {
             Self::EdgeVanishes { .. } => ErrorKind::OffsetEdgeVanishes,
             Self::SeamOpened { .. }
             | Self::FacesApart { .. }
+            | Self::PastSide { .. }
             | Self::ReachUncertified { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
             | Self::LooseTangentEdge { .. }
             | Self::TangentBranchUncertified
+            | Self::PeriodicBranchAmbiguous
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. } => ErrorKind::Unsupported,
             Self::DistanceUnresolved { .. } | Self::ToleranceUnresolved { .. } => {
@@ -744,6 +774,17 @@ impl core::fmt::Display for OffsetFailure {
                  edge: no extension makes them meet there",
                 face.index()
             ),
+            Self::PastSide {
+                face,
+                side,
+                largest,
+            } => write!(
+                f,
+                "face {} moves past where the surface of face {} beside it ends: it meets \
+                 that side only while it moves less than {largest}",
+                face.index(),
+                side.index()
+            ),
             Self::ReachUncertified { face } => write!(
                 f,
                 "a surface beside an edge or at a vertex of face {} moves, and how far the \
@@ -768,6 +809,10 @@ impl core::fmt::Display for OffsetFailure {
             Self::TangentBranchUncertified => f.write_str(
                 "two curved faces tangent at the old edge now cross, but the intersection \
                  branch on their retained sides has no certificate",
+            ),
+            Self::PeriodicBranchAmbiguous => f.write_str(
+                "more than one surface-surface intersection branch claims the same periodic \
+                 boundary event, so the branch through that event is ambiguous",
             ),
             Self::LooseTangentEdge {
                 edge,
@@ -1070,6 +1115,22 @@ mod tests {
                 false,
                 false,
             ),
+            (
+                O::PastSide {
+                    face,
+                    side: face,
+                    largest: 480.0,
+                },
+                ErrorKind::Unsupported,
+                false,
+                false,
+            ),
+            (
+                O::PeriodicBranchAmbiguous,
+                ErrorKind::Unsupported,
+                false,
+                false,
+            ),
         ];
         let row = |o: &O| -> usize {
             match o {
@@ -1096,6 +1157,8 @@ mod tests {
                 O::StageFailed => 20,
                 O::LooseTangentEdge { .. } => 21,
                 O::WallsMeetAcross { .. } => 22,
+                O::PastSide { .. } => 23,
+                O::PeriodicBranchAmbiguous => 24,
             }
         };
         for (i, (o, class, phrase, defect)) in pinned.iter().enumerate() {

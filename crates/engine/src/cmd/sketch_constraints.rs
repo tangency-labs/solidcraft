@@ -34,6 +34,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_smooth")
         .enabled(in_sketch)
+        .from_selection(super::sketch_selection::curvature)
         .contract(&CURVATURE_CONTRACT)
         .output(output_schema_for::<ConstraintAdded>)
         .params("a, b: two curves sharing an end point (curvature continuous, G2)"),
@@ -41,6 +42,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_polygon")
         .enabled(in_sketch)
+        .from_selection(super::sketch_selection::polygon)
         .contract(&POLYGON_CONTRACT)
         .output(output_schema_for::<PolygonResult>)
         .params("lines: [line ids] of a closed chain: equal sides with every corner on one circle (a regular polygon)"),

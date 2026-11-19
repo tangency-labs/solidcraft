@@ -550,7 +550,25 @@ fn corpus_mass(name: &str, lower: Option<(Tolerances<'_>, Tolerances<'_>)>) -> (
 ///
 /// Main 3a0f49b09's values per file, made by this file's functions on main: the read's
 /// digest, the lazily made UV trims' digest, the rebuilding read's digest, and the
-/// bits of `corpus.parity`'s area and volume.
+/// bits of `corpus.parity`'s area and volume. The mass integrator's knot-line split (trim
+/// pieces and closure strips end where a trim crosses a surface knot line) since moved
+/// 17 of those area and volume entries, on 14 files; they are main's with that split,
+/// each classified against a certified enclosure in goldens'
+/// `mass_knot_line_moved_rows_are_classified`.
+///
+/// `Fillet/bottle.smb`'s three digests are #17896's (retiring `keep_operand_uv_trims`).
+/// Its area and volume bits are main's. The digests moved only in the surface points they
+/// sample along face 15's trims (a surface of revolution); every UV trim, edge curve,
+/// tolerance and vertex of the read is bit for bit main's, pinned by
+/// [`bottle_read_moves_only_face_15s_net_and_one_rebuilt_uv_at_rounding`]. The rebuilding
+/// read refits the trims on that surface, and one UV coordinate moves by 8e-31. `CPoint::affine2` keeps a coordinate that both of its
+/// inputs share exactly (PROVEN: a convex combination of equal values). The surface's
+/// generator is made through it (`create_generator_from_angle`,
+/// `gen_adjust_step_interval`), so its shared coordinates are now exact rather than an
+/// ulp off. The surface's net is the rotation of that generator, so 105 of its control
+/// points move, each by at most 1.86e-17 times its point's magnitude: below one unit
+/// roundoff of that magnitude, at rounding (MEASURED; the same test pins the net on a grid
+/// of `2^-44` of each point's magnitude).
 const MAIN: [(&str, [u64; 5]); 28] = [
     (
         "Fillet/blade_hub_1.smb",
@@ -559,7 +577,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x410172437ab22187,
             0x41949589187dc360,
             0x40c8bf351a4d4317,
-            0x40cb1472e2daad8a,
+            0x40cb1472e2cf47a6,
         ],
     ),
     (
@@ -569,7 +587,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x8ce78a827602a435,
             0x9d95007e0e59fd13,
             0x40c6f745308c0c73,
-            0x40c837c714dc148a,
+            0x40c837c714d80c99,
         ],
     ),
     (
@@ -579,17 +597,17 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x3a137639560123dc,
             0x19b6267d7bab4376,
             0x40c94ce71acf47de,
-            0x40c96aa73761feba,
+            0x40c96aa73746aab0,
         ],
     ),
     (
         "Fillet/bottle.smb",
         [
-            0x569b0994d89a8785,
-            0x20f9e5358be089e4,
-            0x56d4f90e1a00266f,
+            0xf25190ec5d448d82,
+            0xc4a72239b7834c83,
+            0x93ae057464ce886f,
             0x40408f20e135de78,
-            0x40262233c6fff91f,
+            0x40262233c6c42c0b,
         ],
     ),
     (
@@ -598,8 +616,8 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0xb5359aa30f9be919,
             0xa92d78f82fd63550,
             0x73843118350f3240,
-            0x409f327abf0704e1,
-            0x40adb03a50d6ac5b,
+            0x409f327abf06f6f4,
+            0x40adb03a50d6aa6d,
         ],
     ),
     (
@@ -629,7 +647,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x410172437ab22187,
             0x41949589187dc360,
             0x40c8bf351a4d4317,
-            0x40cb1472e2daad8a,
+            0x40cb1472e2cf47a6,
         ],
     ),
     (
@@ -639,7 +657,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x8ce78a827602a435,
             0x9d95007e0e59fd13,
             0x40c6f745308c0c73,
-            0x40c837c714dc148a,
+            0x40c837c714d80c99,
         ],
     ),
     (
@@ -698,7 +716,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0xc883abda5a4672f7,
             0xbef2111c0d616bcc,
             0xe9468e03f3395efe,
-            0x405664215d2967d8,
+            0x405664215d2a2cc7,
             0x7ff8000000000000,
         ],
     ),
@@ -708,7 +726,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x8f07277297df6078,
             0xcd50069fef891ecf,
             0x67b61d59d84afc0d,
-            0x4085e633bce84e1d,
+            0x4085e633bce85549,
             0x7ff8000000000000,
         ],
     ),
@@ -718,7 +736,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0xb3a46ba2e4d3817b,
             0x894d776ca5ba209d,
             0xfea47f8f2838bbe2,
-            0x40735d27cb8cc7eb,
+            0x40735d27cb8cc80f,
             0x7ff8000000000000,
         ],
     ),
@@ -729,7 +747,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x1f46996340f01656,
             0x2732c82601be613b,
             0x40821911bbfe80e6,
-            0x40895b346dbc001b,
+            0x40895b3470b2c59b,
         ],
     ),
     (
@@ -768,8 +786,8 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x6c2688581ef72501,
             0x934916761febf75d,
             0x629b7badfc0138a6,
-            0x40ff8cfbe4b56c96,
-            0x4130d86087906c9b,
+            0x40ff8cfbe4b56c95,
+            0x4130d860879069ed,
         ],
     ),
     (
@@ -789,7 +807,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x68482310d17f07be,
             0xbfc5158946937f01,
             0x40ff28e1cf641cd3,
-            0x4130d6e013e89aee,
+            0x4130d6e013e89a3e,
         ],
     ),
     (
@@ -828,8 +846,8 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x462faca60ad813f0,
             0x88a9396a602fe93c,
             0x692f780f5f318bf3,
-            0x40d2a6a844e34477,
-            0x40f8a3124b2291b7,
+            0x40d2a6a844e34874,
+            0x40f8a3124b22bf69,
         ],
     ),
 ];
@@ -847,15 +865,14 @@ const MAIN: [(&str, [u64; 5]); 28] = [
 ///   not at the raised one;
 /// - `corpus.parity`'s areas are main's bit for bit; its volumes are main's bit for bit
 ///   with the moved tolerances set back to main's, and as read differ only on
-///   `Fillet/corner_box.smb` and `Fillet/test1.smb`, by 1 ulp: the volume integrates
-///   about the middle of the B-rep's box, which is grown by the edge and vertex
-///   tolerances (`CalculateBoundingBox`, `bExpandByZoneTol3d`). Each pair is classified
-///   against a certified enclosure `[lo, hi]` of the exact volume
-///   (`mass::enclosure::enclose_volume`, which reads no edge tolerance), asked
-///   `1e-9 * |V|` wide, the goldens' relative tolerance. On `test1` it reaches that width
-///   and both values lie below `lo`, so the larger, this branch's, is closer to the exact
-///   volume. On `corner_box` it stops at its cell budget, wider than asked, holding both
-///   values: neither can be told farther.
+///   `Fillet/corner_box.smb`, by 1 ulp: the volume integrates about the middle of the
+///   B-rep's box, which is grown by the edge and vertex tolerances
+///   (`CalculateBoundingBox`, `bExpandByZoneTol3d`). The pair is classified against a
+///   certified enclosure `[lo, hi]` of the exact volume (`mass::enclosure::enclose_volume`,
+///   which reads no edge tolerance), asked `1e-9 * |V|` wide, the goldens' relative
+///   tolerance. It stops at its cell budget, wider than asked, holding both values:
+///   neither can be told farther. (`Fillet/test1.smb`'s as-read volume differed by 1 ulp
+///   too, before the knot-line split; with it, its as-read and set-back volumes agree.)
 #[test]
 fn corpus_reads_change_only_the_covered_tolerances() {
     let mut failures = Vec::new();
@@ -933,35 +950,23 @@ fn corpus_reads_change_only_the_covered_tolerances() {
         }
     }
     assert_eq!((raised, moved), (206, 296));
-    assert_eq!(
-        moved_volumes,
-        ["Fillet/corner_box.smb", "Fillet/test1.smb"],
-        "{failures:#?}"
-    );
+    assert_eq!(moved_volumes, ["Fillet/corner_box.smb"], "{failures:#?}");
     let classes: Vec<_> = volume_classes.iter().map(|&(n, c, ..)| (n, c)).collect();
     assert_eq!(
         classes,
-        [
-            ("Fillet/corner_box.smb", "both enclosed"),
-            ("Fillet/test1.smb", "closer")
-        ],
+        [("Fillet/corner_box.smb", "both enclosed")],
         "{volume_classes:?}"
     );
-    // (the doc's claims on the widths, against the asked width rather than as printed
-    // digits, which move with any change to the enclosure's cells: `test1`'s enclosure is
-    // as narrow as asked, so its "closer" is decided within the goldens' relative
-    // tolerance; `corner_box`'s spent its cell budget wider than asked, so "both
-    // enclosed" is all it can say)
+    // (the doc's claim on the width, against the asked width rather than as printed
+    // digits, which move with any change to the enclosure's cells: `corner_box`'s spent
+    // its cell budget wider than asked, so "both enclosed" is all it can say)
     let widths: Vec<_> = volume_classes
         .iter()
         .map(|&(n, _, lo, hi, asked, stop)| (n, stop, hi - lo <= asked))
         .collect();
     assert_eq!(
         widths,
-        [
-            ("Fillet/corner_box.smb", EnclosureStop::Budget, false),
-            ("Fillet/test1.smb", EnclosureStop::Reached, true)
-        ],
+        [("Fillet/corner_box.smb", EnclosureStop::Budget, false)],
         "{volume_classes:?}"
     );
     assert!(failures.is_empty(), "{failures:#?}");
@@ -1730,9 +1735,16 @@ fn fillet_result(name: &str, edge: usize, radius: f64) -> (u64, Vec<u64>) {
 
 /// Main 3a0f49b09's [`fillet_result`] digests per [`FILLETS`] entry, made by this file's
 /// functions on main; entry 7 (`open_shell` e5) is main bcfb4b98e's, after #18402 moved
-/// that fillet's result (the other 28 are unchanged there). The 19 equal digests (`0x30d463838d7fca03`) are bottle
+/// that fillet's result (the other 28 are unchanged there). Entry 14 (`bottle` e8 r0.1) is #18401's:
+/// that PR moves this fillet's digest and mass in their last bits, and its tree before
+/// #18230 makes the same digest and mass bit for bit. The 19 equal digests (`0xb5382d964fe60518`) are bottle
 /// fillets: main refuses each (status 1001) and leaves the read body, so all digest the
-/// same body and status.
+/// same body and status. #17896 moved those 19 digests and entry 14's (main's were
+/// `0x30d463838d7fca03` and `0x7442b43a428ea1ca`) through the bottle's read alone (see
+/// [`MAIN`]): only the surface points sampled along face 15's trims move. Every vertex,
+/// edge and tolerance of the read is bit for bit main's
+/// ([`bottle_read_moves_only_face_15s_net_and_one_rebuilt_uv_at_rounding`]); entry 14's mass
+/// is bit for bit main's (MEASURED).
 const FILLET_MAIN: [u64; 29] = [
     0x24f613f551b1b3ab,
     0x241377ca06fbe761,
@@ -1743,31 +1755,34 @@ const FILLET_MAIN: [u64; 29] = [
     0x2dd7a7af4ca5bb1e,
     0x51f6abb34e90bff2,
     0xb716929faf389955,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0xef8776a78d7d7cbb,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0x902afd170f1e23a9,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
 ];
 
 /// Main 3a0f49b09's mass bits for the rows whose mass moved in the expectations:
 /// `source-file-corner_box-edge4`, `-edge8`, `-edge9` and
-/// `stubs4-delete-edge-bottle-e8-r0.1` ([`FILLETS`] 1, 2, 3 and 14).
+/// `stubs4-delete-edge-bottle-e8-r0.1` ([`FILLETS`] 1, 2, 3 and 14). Entry 14's are main's
+/// (see [`FILLET_MAIN`]) with the mass integrator's knot-line split, which moved that row
+/// since; its entries are classified against a certified enclosure in goldens'
+/// `mass_knot_line_moved_rows_are_classified`.
 const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
     (
         1,
@@ -1824,17 +1839,17 @@ const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
         14,
         [
             0x40408bcce093b407,
-            0x402621896e50fcb0,
-            0x402621896e50fcb0,
-            0x3f10d1c99a559158,
-            0x3f13efa09958129b,
-            0x4000a10fe9da9881,
-            0x4050316571691566,
-            0x4050a9c3826e8ec1,
-            0x40151aaab5c59a6f,
-            0x3f6aed515da75eee,
-            0x3f66b6a18cf50b4e,
-            0xbf3c98659ef8970b,
+            0x402621896ddff25f,
+            0x402621896ddff25f,
+            0x3f10d1d4e45e4676,
+            0x3f13efa0c2fbe9dc,
+            0x4000a10fe9b1ffd5,
+            0x4050316570dd030e,
+            0x4050a9c381d79ffa,
+            0x40151aaab4b869fc,
+            0x3f6aed519268bff5,
+            0x3f66b6ad970f60ae,
+            0xbf3c98793964b142,
         ],
     ),
 ];
@@ -1863,4 +1878,124 @@ fn moved_fillet_rows_keep_main_geometry_and_mass() {
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// Feeds `c` rounded to a grid of `2^-44 * scale` (a negative zero fed as zero), or `c`
+/// itself for no `scale`.
+fn feed_on_grid(d: &mut Digest, c: f64, scale: Option<f64>) {
+    match scale {
+        Some(s) => d.f64((c / (s * 2f64.powi(-44))).round() + 0.0),
+        None => d.f64(c),
+    }
+}
+
+/// Feeds an edge use's UV trim without the surface: its interval and 17 uv points along it
+/// (`u64::MAX` for no trim or an error); with `grid`, each coordinate on the grid of
+/// [`feed_on_grid`] scaled by `max(1, |c|)`.
+fn digest_uv(d: &mut Digest, k: &Kernel, b: &Brep, eu: solidcore::topology::EdgeuseId, grid: bool) {
+    let Some(trim) = b.edgeuse(eu).unwrap().uv_trim_curve.clone() else {
+        d.u64(u64::MAX);
+        return;
+    };
+    let ivl = trim.natural_interval();
+    d.f64(ivl.min());
+    d.f64(ivl.max());
+    for i in 0..=16 {
+        match trim.evaluate_point(k, ivl.evaluate(f64::from(i) / 16.0)) {
+            Ok(p) => [p.x, p.y]
+                .into_iter()
+                .for_each(|c| feed_on_grid(d, c, grid.then(|| c.abs().max(1.0)))),
+            Err(_) => d.u64(u64::MAX),
+        }
+    }
+}
+
+/// Feeds every face's surface net, its control points' `x, y, z` on the grid of
+/// [`feed_on_grid`] scaled by the point's magnitude `|P|`, and `w` on the grid scaled by
+/// `1`. A face whose surface has no net feeds `u64::MAX`.
+fn digest_nets(d: &mut Digest, b: &Brep) {
+    use solidcore::surface::surface::p2::SurfaceKind;
+    for (_, f) in b.faces().iter() {
+        let net = f.surface.as_ref().and_then(|s| match s.kind() {
+            SurfaceKind::BSpline(x) => x.gw_nurb(),
+            SurfaceKind::Plane(x) => x.base().gw_nurb(),
+            SurfaceKind::SurfOfRevolution(x) => x.base().gw_nurb(),
+            SurfaceKind::SurfOfExtrusion(x) => x.base().gw_nurb(),
+            SurfaceKind::Cone(x) => x.rev().base().gw_nurb(),
+            SurfaceKind::Sphere(x) => x.base().base().gw_nurb(),
+            SurfaceKind::Torus(x) => x.base().base().gw_nurb(),
+            _ => None,
+        });
+        let Some(n) = net else {
+            d.u64(u64::MAX);
+            continue;
+        };
+        for row in n.cpts() {
+            for c in row {
+                let size = (c.x * c.x + c.y * c.y + c.z * c.z).sqrt();
+                for v in [c.x, c.y, c.z] {
+                    feed_on_grid(d, v, Some(size));
+                }
+                feed_on_grid(d, c.w, Some(1.0));
+            }
+        }
+    }
+}
+
+/// A corpus read's digest without the points its surfaces evaluate: the face
+/// tolerances; each edge's tolerance, interval and 17 curve points; each vertex's tolerance
+/// and point; each edge use's UV trim ([`digest_uv`], on its grid for `rebuild`), as read
+/// and again after the lazy trims are made; and the surface nets on their grid
+/// ([`digest_nets`]).
+fn read_without_surface_points(name: &str, rebuild: bool) -> u64 {
+    use solidcore::topology::edgeuse::p3 as eu3;
+    let mut k = Kernel::default();
+    let mut b = read_corpus(&mut k, name, rebuild);
+    let mut d = Digest::new();
+    for (_, f) in b.faces().iter() {
+        d.f64(f.tolerance);
+    }
+    let edges: Vec<_> = b.edges().iter().map(|(id, _)| id).collect();
+    for &e in &edges {
+        d.f64(b.edge(e).unwrap().tolerance);
+        digest_curve(&mut d, &k, &b, e);
+    }
+    for (_, v) in b.vertices().iter() {
+        d.f64(v.tolerance);
+        for c in [v.point.x, v.point.y, v.point.z] {
+            d.f64(c);
+        }
+    }
+    let eus: Vec<_> = b.edgeuses().iter().map(|(id, _)| id).collect();
+    for &eu in &eus {
+        digest_uv(&mut d, &k, &b, eu, rebuild);
+    }
+    for &eu in &eus {
+        if b.edgeuse(eu).unwrap().edge.is_none() {
+            continue;
+        }
+        let made = eu3::get_or_create_uv_trim_curve(&k, &mut b, eu, false, false, true)
+            .map(|r| r.status.is_ok());
+        d.u64(u64::from(matches!(made, Ok(true))));
+        digest_uv(&mut d, &k, &b, eu, rebuild);
+    }
+    digest_nets(&mut d, &b);
+    d.0
+}
+
+/// #17896 moves `Fillet/bottle.smb`'s digests in [`MAIN`] only through face 15's net:
+/// every face, edge and vertex tolerance, edge curve, vertex and UV trim of the read is main
+/// f760fd440's bit for bit. The net and the rebuilding read's trims agree with main's on
+/// the grid of [`feed_on_grid`]: the rebuilt trims differ in one coordinate by 8e-31, and
+/// 105 control points of face 15 differ by at most 1.86e-17 of their magnitude (MEASURED,
+/// a dump of both nets).
+#[test]
+fn bottle_read_moves_only_face_15s_net_and_one_rebuilt_uv_at_rounding() {
+    for (rebuild, main) in [
+        (false, 0xa600_8eab_0d09_6dd5),
+        (true, 0x57fd_ee59_a641_5de8),
+    ] {
+        let got = read_without_surface_points("Fillet/bottle.smb", rebuild);
+        assert_eq!(got, main, "bottle read (rebuild {rebuild}) is not main's");
+    }
 }

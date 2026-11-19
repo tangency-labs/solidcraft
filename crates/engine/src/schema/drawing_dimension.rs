@@ -408,6 +408,17 @@ pub struct AddParams {
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String")]
     pub override_text: Option<String>,
+    /// Where its text's centre goes, in paper mm from the sheet's lower-left corner, as edit's drag
+    /// takes it: it sets `offset_mm` and `text`, so the Dimension tool places a new one where the
+    /// pointer is.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Point2")]
+    pub text_to_mm: Option<Point2>,
+    /// A point its dimension line, arc or leader passes through, as `text_to_mm` and as edit's drag
+    /// takes it: it sets `offset_mm`, or a radial one's `text`.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Point2")]
+    pub line_through_mm: Option<Point2>,
     /// True to answer what it would add, adding nothing: no id is taken and no undo step made.
     /// Default: false.
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]

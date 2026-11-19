@@ -67,89 +67,13 @@ pub(crate) use measure::{
 pub(crate) use solidcore_ops::Body;
 
 /// The fixes this backend runs with: every one of solidcore's opt-in fixes of upstream SMLib
-/// defects (`UpstreamFixes`, each naming its record and issue), whether or not the C++ fork has it,
-/// unless it appears broken. A test checks none is left off but those in `HELD_BACK`, so moving the
-/// solidcore pin to a rev with a new flag fails until it is added here.
+/// defects (`UpstreamFixes`, each naming its record and issue), whether or not the C++ fork has it.
+/// A flag new to the solidcore pin is on without an edit here, and a retired flag drops out of
+/// `UpstreamFixes::all` on its own. A fix that is broken is fixed or removed in solidcore, never
+/// held off here.
 pub(crate) fn fixes() -> UpstreamFixes {
-    let mut f = UpstreamFixes::default();
-    f.fillet_refuse_face_consuming_blends = true;
-    f.fillet_chamfer_cone_on_arc = true;
-    f.keep_operand_uv_trims = true;
-    f.proto_vertex_miss_is_false = true;
-    f.revolve_analytic_profile_faces = true;
-    f.join_touching_loops = true;
-    f.offset_analytic_mate_edges = true;
-    f.uv_trim_corner_end_points_only = true;
-    f.bspline_trim_preserves_uv_spans = true;
-    f.boolean_vertex_by_best_crossing = true;
-    f.classify_edge_interval = true;
-    f.new_edge_vertex_tolerance_covers_gap = true;
-    f.fillet_point_step_per_point = true;
-    f.analytic_copy_keeps_parameterization = true;
-    f.offset_extension_from_base = true;
-    f.fillet_cleanup_keeps_target_faces = true;
-    f.found_torus_sphere_keep_tested_nurb = true;
-    f.shell_edges_on_analytics_exact = true;
-    f.fillet_patch_keeps_fillet_edges = true;
-    f.fillet_refuse_overlapping_bands = true;
-    f.ssi_tangent_curve_tracer = true;
-    f.fillet_knife_edge_rounds = true;
-    f.linear_sweep_arc_is_cylinder = true;
-    f.fillet_trace_reaches_rails = true;
-    // The fork's commits that reached `SMLIB_REV` at eaa998a (tangency-labs/smlib#68, #69, #70).
-    f.curve_loop_normal_from_area = true;
-    // The fork's commits in `SMLIB_REV` 2fc375f, ported to solidcore since.
-    f.offset_extension_as_itself = true;
-    f.fillet_variable_span_follows_fillet = true;
-    f.simple_coincidence_crossing_is_point = true;
-    f.ssi_proto_topology_statuses_pass_on = true;
-    f.fillet_rail_trim_at_near_knot = true;
-    f.corner_patch_face_side_twist = true;
-    f.fillet_exact_round_classes = true;
-    f.surface_continuity_checks_last_v_knot = true;
-    f.geometric_g2_continuity = true;
-    f.degen_param_tiebreak_uses_actual_param = true;
-    f.local_surface_intersect_guards_max_boundary_retry = true;
-    f.edgeuse_convexity_propagates_step_off_failure = true;
-    f.point_class_gap_3d_propagates_no_drop_error = true;
-    // Held back: see `HELD_BACK`.
-    f.fillet_refuse_rounds_breaking_through = false;
-    f.keep_exact_pcurves = true;
-    f.closed_smooth_pole_tangent_limit = true;
-    // Held back: see `HELD_BACK`.
-    f.fillet_round_ends_on_outline = false;
-    f.fillet_chamfer_corner = true;
-    f.brep_ray_classifies_current_trims = true;
-    f.seam_vertex_stays_on_seam = true;
-    f
+    UpstreamFixes::all()
 }
-
-/// The fixes held off, each with the case and the numbers that show it broken: a volume or topology
-/// wrong against the analytic value, a check failure, a crash, sound geometry refused that builds
-/// without the flag, or a large slowdown. Differing from the C++ kernel is no such evidence: a fix
-/// the fork doesn't have stays on, and where solidcore builds what SMLib refuses, a result right
-/// against its closed form is a win.
-///
-/// `fillet_refuse_rounds_breaking_through` (WR-707, solidcore#2311): sound geometry refused. At
-/// solidcore 9856ffee5, with it on, the fillet rig's 1668-fillet-both-sides-of-thin-wall-r7 is
-/// refused as breaking through the wall into the hollow behind it ("the largest radius that fits is
-/// 6.828 mm"), where with it off it builds the closed form, 39509.938 (at 8ddce9016 it refused 11
-/// rig cases that pass with it off; at this pin the other 270 fillet rig cases come out as with it
-/// off).
-///
-/// `fillet_round_ends_on_outline` (WR-730, solidcore#2541): volumes wrong against their closed
-/// forms, and rounds too big for their faces built instead of refused. With it on, each of these
-/// passes with it off: `fillet_over_a_cliff` measures 721.832 against the closed form's 693.205;
-/// `a_round_wider_than_its_faces_overflows_onto_its_tangent_sides` 6125.719 against 6107.529;
-/// `taper_follows_the_room_along_the_edge` 4210.926 against 4195.579; the round larger than the
-/// cube in `hostile_inputs_are_errors` builds (4773.168 against the 1094.853 its refusal leaves),
-/// as do the fillets the CLI's `run_strict` and `json_out` tests need to fail; and
-/// `a_corner_round_wider_than_its_faces_overflows_and_takes_the_corners_other_edges`,
-/// `overflow_goes_first`, `corners_refuse_what_they_cannot_build` and
-/// `fillet_edge_removed_by_a_larger_overflowing_round_is_noted` are refused (too large, no room,
-/// status 1001), where with it off they build. Measured again at solidcore 9856ffee5: the same.
-#[cfg(test)]
-const HELD_BACK: &[&str] = &["fillet_refuse_rounds_breaking_through", "fillet_round_ends_on_outline"];
 
 /// A new kernel, with this backend's fixes.
 fn fresh() -> Kernel {
@@ -470,26 +394,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_upstream_fix_is_on_unless_shown_broken() {
-        let f = fixes();
-        let flags: Vec<(&str, bool)> = f.flags().collect();
-        let off: Vec<&str> = flags.iter().filter(|(name, on)| !on && !HELD_BACK.contains(name)).map(|(name, _)| *name).collect();
+    fn every_upstream_fix_is_on() {
+        let off: Vec<&str> = fixes().flags().filter(|(_, on)| !on).map(|(name, _)| name).collect();
         assert!(off.is_empty(), "UpstreamFixes flags are off: {off:?}");
-        for name in HELD_BACK {
-            assert!(flags.contains(&(*name, false)), "{name} is on or gone: drop it from HELD_BACK");
-        }
-    }
-
-    /// solidcore's tests and kernel rig read this preset from `kernel_cases/fixes.json`: the file
-    /// names exactly the flags `fixes()` turns on.
-    #[test]
-    fn the_kernel_corpus_fix_list_is_this_preset() {
-        let listed: Vec<String> = serde_json::from_str(include_str!("../../../solidcore/crates/solidcore/tests/kernel_cases/fixes.json")).unwrap();
-        let mut listed: Vec<&str> = listed.iter().map(String::as_str).collect();
-        listed.sort_unstable();
-        let mut on: Vec<&str> = fixes().flags().filter(|(_, on)| *on).map(|(name, _)| name).collect();
-        on.sort_unstable();
-        assert_eq!(listed, on, "kernel_cases/fixes.json must list exactly the flags fixes() turns on");
     }
 
     #[test]
