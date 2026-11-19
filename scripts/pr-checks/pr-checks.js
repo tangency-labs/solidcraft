@@ -12,6 +12,9 @@
 
 const SKIP_LABEL = 'not-a-duplicate';
 const DEFAULT_LABEL = 'changes-default';
+// A change with no preference to keep the old behaviour behind is still allowed when the owner
+// approved it: the label says so, and the line names the approval instead of a preference.
+const OWNER_LABEL = 'owner-approved';
 // PRs opened before this predate the template line; they pass the defaults check with a notice.
 const DEFAULTS_ENFORCED_FROM = Date.parse('2026-10-25T00:00:00Z');
 // PRs opened before this predate the picture rule; they pass the picture check with a notice.
@@ -45,7 +48,8 @@ function parseClosing(body, repoFullName) {
   return [...found].sort((a, b) => a - b);
 }
 
-// -> { status: 'missing' | 'malformed' | 'no' | 'yes', preference?, detail? }
+// -> { status: 'missing' | 'malformed' | 'no' | 'yes' | 'owner', preference?, detail? }
+// 'owner' is `yes — <what>, approved by the owner`: valid only on a PR with OWNER_LABEL.
 function parseDefaults(body) {
   const m = stripNoise(body, { inlineCode: false }).replace(/\*\*/g, '').match(/^[ \t]*(?:[-*][ \t]+)?Changes a default:[ \t]*(.*?)[ \t]*$/im);
   if (!m) return { status: 'missing' };
@@ -57,13 +61,18 @@ function parseDefaults(body) {
     if (pref && pref[1].trim() && !/^<.*>$/.test(pref[2])) {
       return { status: 'yes', detail: pref[1].trim(), preference: pref[2] };
     }
+    const owner = yes[1].match(/^(.*?)[ ,;]*\bapproved by the owner\.?$/i);
+    if (owner && owner[1].trim() && !/^<.*>$/.test(owner[1].trim())) {
+      return { status: 'owner', detail: owner[1].trim() };
+    }
   }
   return { status: 'malformed', detail: value };
 }
 
 const DEFAULTS_HELP =
-  'Add one line to the description: `Changes a default: no`, or ' +
-  '`Changes a default: yes — <what>, old behaviour kept behind preference <name>`. ' +
+  'Add one line to the description: `Changes a default: no`, ' +
+  '`Changes a default: yes — <what>, old behaviour kept behind preference <name>`, or, on a PR ' +
+  `labelled ${OWNER_LABEL}, \`Changes a default: yes — <what>, approved by the owner\`. ` +
   '(UX defaults only; a kernel result change is \'no\'.)';
 
 function isBot(user) {
@@ -259,6 +268,8 @@ async function checkDefaults({ github, context, core }) {
     core.setFailed(`The description has no "Changes a default:" line. ${DEFAULTS_HELP}`);
   } else if (result.status === 'malformed') {
     core.setFailed(`Could not read "Changes a default: ${result.detail}". ${DEFAULTS_HELP}`);
+  } else if (result.status === 'owner' && !hasLabel(pull, OWNER_LABEL)) {
+    core.setFailed(`"Changes a default: yes — ${result.detail}, approved by the owner" needs the ${OWNER_LABEL} label; without it, name the preference the old behaviour is kept behind. ${DEFAULTS_HELP}`);
   }
   return result;
 }
@@ -269,22 +280,23 @@ async function syncDefaultLabel({ github, context, core }) {
   const { status } = parseDefaults(pull.body);
   const has = hasLabel(pull, DEFAULT_LABEL);
   const args = { ...context.repo, issue_number: pull.number };
+  const changes = status === 'yes' || status === 'owner';
   try {
-    if (status === 'yes' && !has) {
+    if (changes && !has) {
       await github.rest.issues.addLabels({ ...args, labels: [DEFAULT_LABEL] });
-    } else if (status !== 'yes' && has) {
+    } else if (!changes && has) {
       await github.rest.issues.removeLabel({ ...args, name: DEFAULT_LABEL });
     }
   } catch (e) {
     // A fork PR's token is read-only: say so instead of failing the check.
     if (e.status !== 403) throw e;
-    core.notice(`Could not ${status === 'yes' ? 'add' : 'remove'} the ${DEFAULT_LABEL} label (read-only token); a maintainer sets it.`);
+    core.notice(`Could not ${changes ? 'add' : 'remove'} the ${DEFAULT_LABEL} label (read-only token); a maintainer sets it.`);
   }
   core.info(`Defaults line: ${status}`);
 }
 
 module.exports = {
-  DEFAULTS_ENFORCED_FROM,  SKIP_LABEL, DEFAULT_LABEL, stripNoise, parseClosing, parseDefaults, isBot, isDocsOnly,
+  DEFAULTS_ENFORCED_FROM,  SKIP_LABEL, DEFAULT_LABEL, OWNER_LABEL, stripNoise, parseClosing, parseDefaults, isBot, isDocsOnly,
   findDuplicates, checkDuplicate, checkDefaults, syncDefaultLabel,
   PICTURE_ENFORCED_FROM, hasPicture, needsPicture, checkPicture,
   isTestFile, isKernelSource, testChangeReason, changedTestLines, testEdits, checkTestChange,

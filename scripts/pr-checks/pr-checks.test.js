@@ -126,6 +126,36 @@ test('checkDefaults fails when missing, passes docs-only and bots', async () => 
   assert.equal(f.failures.length, 0);
 });
 
+test('parseDefaults owner-approved form', () => {
+  const r = pc.parseDefaults('Changes a default: yes — links are no longer re-read on open, approved by the owner');
+  assert.equal(r.status, 'owner');
+  assert.equal(r.detail, 'links are no longer re-read on open');
+  assert.equal(pc.parseDefaults('Changes a default: yes - x; approved by the owner.').status, 'owner');
+  assert.equal(pc.parseDefaults('Changes a default: yes — approved by the owner').status, 'malformed');
+  assert.equal(pc.parseDefaults('Changes a default: yes — <what>, approved by the owner').status, 'malformed');
+  assert.equal(pc.parseDefaults('Changes a default: yes. x, approved by the owner').status, 'malformed');
+});
+
+test('checkDefaults takes the owner-approved form only with the owner-approved label', async () => {
+  const files = [{ filename: 'crates/a.rs' }];
+  const body = 'Changes a default: yes — a, approved by the owner';
+  const me = mk(20, 'alice', body, { created_at: '2026-11-19T00:00:00Z' });
+  let f = fakes(me, { files });
+  await pc.checkDefaults(f);
+  assert.equal(f.failures.length, 1);
+  assert.match(f.failures[0], /owner-approved/);
+
+  f = fakes({ ...me, labels: [{ name: 'owner-approved' }] }, { files });
+  assert.equal((await pc.checkDefaults(f)).status, 'owner');
+  assert.equal(f.failures.length, 0);
+});
+
+test('syncDefaultLabel counts the owner-approved form as a default change', async () => {
+  const f = fakes(mk(1, 'a', 'Changes a default: yes — a, approved by the owner'));
+  await pc.syncDefaultLabel(f);
+  assert.deepEqual(f.calls, [['add', ['changes-default']]]);
+});
+
 test('syncDefaultLabel adds and removes', async () => {
   const yes = 'Changes a default: yes — a, old behaviour kept behind preference p';
   let f = fakes(mk(1, 'a', yes));
