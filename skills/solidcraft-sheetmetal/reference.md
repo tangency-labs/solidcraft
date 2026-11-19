@@ -60,6 +60,18 @@ An `edges` entry is `[x,y,z]` on a top or bottom edge, `{x,y,z}`, or
 - `sheet.perforate`: `diameter`, `pitch`, `margin?`, `pattern?` (`staggered`|`square`), `body?`,
   `sketch?`+`profiles?`; holes go in the flat pattern, the DXF and the volume, not the B-rep.
 
+### `sheet.hardware`
+- `sheet.hardware {"kind":"nut","thread":"M3","position":[x,y,z]}` (or `sketch`+`points?`, `single?`): the
+  mounting hole of a self-clinching nut, flush nut (`flush_nut`), stud or standoff, cut through the sheet
+  and recorded on the hole (`hardware`: kind, thread, `length`, `part` such as `nut.m3`). `length` is
+  required for a stud or standoff and refused for a nut; `diameter?` is the table's size to 0.08 mm over.
+- The hole is a plain through hole: folded, in the flat pattern and in the DXF. It has no thread of its
+  own. Sizes: `docs/hardware-catalogue.md` (nuts M2.5-M8, flush nuts M2.5-M6, studs M3-M8, standoffs M3-M5).
+- A sheet thinner than the hardware needs is refused. A centre nearer an edge, a cut-out or a bend than
+  the table's minimum is a `warning` in the reply (the hole is still cut); a bend is measured to where the
+  bend starts. A later change of gauge warns instead of failing the timeline.
+- Redefine with `timeline.redefine {"command":"sheet.hardware"}`, never `solid.hole`.
+
 ### `sheet.flat_pattern`, `sheet.export_dxf`, `sheet.export_bend_table`
 - `sheet.flat_pattern {"body":"..."}` answers `flat_size_mm` (`[x,y,thickness]`), `outline`,
   `cutouts`, `cutout_shapes`, `pockets`, `bends` (`bend`, `angle_deg`, `included_angle_deg`,

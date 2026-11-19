@@ -4,8 +4,8 @@ use serde_json::{Value, json};
 use super::{
     BendTableFormatParam, BendTableParams, BendTableResult, ConvertParams, DxfCurvesParam, DxfLayersParam, DxfNoteHeight, DxfTextParam,
     ExportDxfParams, ExportDxfResult, FixedPoint, FlangeEdges, FlangeParams, FlangePosition, FlangeTypeParam, FlatPatternParams, FlatPatternResult,
-    FoldParams, FoldPoints, FoldPosition, FoldStays, HeightFromParam, HemParams, MaterialSide, MeasureBodyParams, PathFlangeParams, PerforateParams,
-    PerforationPattern, RecognizeParams, ReliefShapeParam, SheetEdgePoint, SheetPoints, ThenSteps, UnfoldParams,
+    FoldParams, FoldPoints, FoldPosition, FoldStays, HardwareParams, HardwareResult, HeightFromParam, HemParams, MaterialSide, MeasureBodyParams,
+    PathFlangeParams, PerforateParams, PerforationPattern, RecognizeParams, ReliefShapeParam, SheetEdgePoint, SheetPoints, ThenSteps, UnfoldParams,
 };
 use crate::Session;
 use crate::schema::features::FeatureResult;
@@ -68,6 +68,10 @@ fn schemas_and_the_key_check_agree() {
         ]),
     );
     assert_keys(input_schema_for::<PerforateParams>(), &keys(&["body", "diameter", "margin", "pattern", "pitch", "profiles", "sketch"]));
+    assert_keys(
+        input_schema_for::<HardwareParams>(),
+        &keys(&["diameter", "direction", "flip", "kind", "length", "points", "position", "single", "sketch", "targets", "thread"]),
+    );
     assert_keys(input_schema_for::<HemParams>(), &keys(&["body", "edges", "flip", "gap", "length"]));
     assert_keys(
         input_schema_for::<FoldParams>(),
@@ -821,4 +825,19 @@ fn export_dxf_replies_match_the_output_schema() {
     let r = s.execute("sheet.export_dxf", &json!({"cures": "arcs"})).unwrap_or_else(|e| panic!("{e}"));
     assert!(r.get("param_warnings").is_some(), "{r}");
     assert!(conforms(schema, schema, &r), "{r}");
+}
+
+#[test]
+fn hardware_replies_match_the_output_schema() {
+    let schema = output_schema_for::<HardwareResult>();
+    let schema = schema.as_value();
+    let mut s = sheet();
+    let r = quiet(&mut s, "sheet.hardware", json!({"kind": "stud", "thread": "M4", "length": "10 mm", "position": [50, 30, 2.5]}));
+    assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+    assert_eq!((&r["hardware"]["kind"], &r["hardware"]["part"], &r["hardware"]["length"]), (&json!("stud"), &json!("stud.m4"), &json!(10.0)), "{r}");
+    // A nut has no length: the key is null, and the feature's own keys are there too.
+    let r = quiet(&mut s, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": [20, 30, 2.5]}));
+    assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+    assert_eq!(r["hardware"]["length"], Value::Null);
+    assert!(r["feature"].is_u64() && r["bodies"].is_array(), "{r}");
 }

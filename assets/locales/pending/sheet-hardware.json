@@ -1,0 +1,34 @@
+{
+  "ar": {
+    "cmd.sheet_hardware": "عناصر التثبيت بالكبس",
+    "help.sheet.hardware": "يقص ثقب التركيب لصامولة ذاتية التثبيت أو مسمار أو دعامة في صفيحة معدنية ويسجل عنصر التثبيت عليه. استخدمه لوضع عناصر التثبيت بالكبس مع فحص سماكة الصفيحة والمسافات إلى الحواف."
+  },
+  "de": {
+    "cmd.sheet_hardware": "Einpresselement",
+    "help.sheet.hardware": "Schneidet das Montageloch für eine Einpressmutter, einen Einpressbolzen oder einen Abstandshalter in ein Blech und merkt sich das Element. Zum Setzen von Einpresselementen, mit Prüfung von Blechdicke und Randabständen."
+  },
+  "en": {
+    "cmd.sheet_hardware": "Press-in Hardware",
+    "help.sheet.hardware": "Cuts the mounting hole of a self-clinching nut, stud or standoff in a sheet and records the hardware on it. Use it to place press-in hardware with the sheet's thickness and the edge distances checked."
+  },
+  "he": {
+    "cmd.sheet_hardware": "חומרת הצמדה בלחיצה",
+    "help.sheet.hardware": "חותך את חור ההרכבה של אום, פין או דיסטנס שנלחצים לתוך הפח, ורושם עליו את החומרה. מתאים להצבת חומרה בלחיצה, עם בדיקת עובי הפח והמרחקים מהקצוות."
+  },
+  "ja": {
+    "cmd.sheet_hardware": "圧入ハードウェア",
+    "help.sheet.hardware": "板金に圧入するナット、スタッド、スタンドオフの取り付け穴を開け、そのハードウェアを穴に記録します。板厚と端からの距離を確認しながら圧入部品を配置するときに使います。"
+  },
+  "ko": {
+    "cmd.sheet_hardware": "압입 하드웨어",
+    "help.sheet.hardware": "판금에 압입하는 너트, 스터드, 스탠드오프의 장착 구멍을 뚫고 그 부품을 구멍에 기록합니다. 판 두께와 가장자리까지의 거리를 확인하며 압입 부품을 배치할 때 사용합니다."
+  },
+  "vi": {
+    "cmd.sheet_hardware": "Phụ kiện ép chặt",
+    "help.sheet.hardware": "Cắt lỗ lắp cho đai ốc, chốt hoặc trụ đỡ tự ép vào tấm kim loại và ghi lại phụ kiện trên lỗ. Dùng để đặt phụ kiện ép chặt, có kiểm tra độ dày tấm và khoảng cách tới mép."
+  },
+  "zh": {
+    "cmd.sheet_hardware": "压铆件",
+    "help.sheet.hardware": "在钣金上切出压铆螺母、压铆螺柱或压铆隔离柱的安装孔，并在孔上记录该五金件。用于放置压铆件，并检查板厚和到边的距离。"
+  }
+}
