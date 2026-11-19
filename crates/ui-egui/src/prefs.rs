@@ -1741,8 +1741,8 @@ preference_settings! {
     /// counterclockwise and the counterclockwise arrow rolls clockwise (`invert_curved_roll_arrows`,
     /// #10483). Off by default: each arrow rolls the view the way it curls.
     invert_curved_roll_arrows: bool = false, PAGE_NAVIGATION;
-    /// The axes navigator has the orbit and roll arrows around it, as the custom navigator does
-    /// (`axes_navigator_arrows`). On by default; off, the signed axes stand alone.
+    /// The axes navigator has the two curved roll arrows at its top right, as the custom navigator
+    /// does (`axes_navigator_arrows`). On by default; off, the signed axes stand alone.
     axes_navigator_arrows: bool = true, PAGE_NAVIGATION;
     /// How much of the view the model fills when Home, Fit, an opened design or a navigator
     /// view change frames it (0.1 to 1; #10091): 1, the default, fills the room between the

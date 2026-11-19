@@ -93,12 +93,10 @@ const ROLL_ARROWS: [(&str, egui::Vec2, egui::Vec2, bool, &str); 2] = [
     ("clockwise", vec2(72.0, -42.0), vec2(20.0, 40.0), true, "Rotate view clockwise 90°"),
 ];
 
-/// `p` is on one of the arrows [`arrows`] draws around `c`: the navigator under them leaves it
-/// to the arrow (no axis tip pick, no orbit drag).
-pub(super) fn on_arrow(c: Pos2, scale: f32, p: Pos2) -> bool {
-    let orbit = ORBIT_ARROWS.iter().map(|(_, offset, _, _)| Rect::from_center_size(c + *offset * scale, vec2(ORBIT_BUTTON, ORBIT_BUTTON) * scale));
-    let roll = ROLL_ARROWS.iter().map(|(_, offset, size, _, _)| Rect::from_center_size(c + *offset * scale, *size * scale));
-    orbit.chain(roll).any(|r| r.contains(p))
+/// `p` is on one of the roll arrows [`roll_arrows`] draws around `c`: the navigator under them
+/// leaves it to the arrow (no axis tip pick, no orbit drag).
+pub(super) fn on_roll_arrow(c: Pos2, scale: f32, p: Pos2) -> bool {
+    ROLL_ARROWS.iter().any(|(_, offset, size, _, _)| Rect::from_center_size(c + *offset * scale, *size * scale).contains(p))
 }
 
 /// The four orbit arrows and the two roll arrows around a gizmo centred at `c`: painted while the gizmo is `active`.
@@ -123,6 +121,11 @@ pub(super) fn arrows(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Pain
             arrow(painter, at, direction * scale, hovered, t);
         }
     }
+    roll_arrows(app, ui, painter, c, scale, active, t);
+}
+
+/// The two curved roll arrows at the top right of a gizmo centred at `c`: painted while the gizmo is `active`.
+pub(super) fn roll_arrows(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, c: Pos2, scale: f32, active: bool, t: Tokens) {
     for (action, offset, size, clockwise, tooltip) in ROLL_ARROWS {
         let (action, tooltip) = match app.preferences.invert_curved_roll_arrows.then(|| inverted_roll(action)).flatten() {
             Some(swapped) => (swapped, if swapped == "clockwise" { "Rotate view clockwise 90°" } else { "Rotate view counterclockwise 90°" }),
