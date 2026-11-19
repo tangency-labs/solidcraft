@@ -1213,7 +1213,39 @@ pub fn eval_with(s: &str, lookup: &dyn Fn(&str) -> Result<Value, DocError>) -> R
 
 /// Evaluate an expression reading bare numbers next to lengths / angles in `defaults`.
 pub fn eval_with_defaults(s: &str, lookup: &dyn Fn(&str) -> Result<Value, DocError>, defaults: Defaults) -> Result<Value, DocError> {
-    Compiled::new(s)?.eval(lookup, defaults)
+    let (toks, spans) = tokens(s)?;
+    run(s, &toks, &spans, lookup, defaults)
+}
+
+/// The tokens of `s` and where each lies in it; an empty expression refused.
+fn tokens(s: &str) -> Result<(Vec<Tok>, Vec<(usize, usize)>), DocError> {
+    let (toks, spans): (Vec<Tok>, Vec<(usize, usize)>) = lex_spans(s)?.into_iter().map(|(t, a, b)| (t, (a, b))).unzip();
+    if toks.is_empty() {
+        if let Some((name, _)) = definition(s) {
+            return Err(DocError::Expr(format!("`{name} =` needs a value after the `=`")));
+        }
+        return Err(DocError::Expr("empty expression".into()));
+    }
+    Ok((toks, spans))
+}
+
+/// The value of the expression `text`, read as `toks`, in `N`.
+fn run<N: Real>(
+    text: &str,
+    toks: &[Tok],
+    spans: &[(usize, usize)],
+    lookup: &dyn Fn(&str) -> Result<Value<N>, DocError>,
+    defaults: Defaults,
+) -> Result<Value<N>, DocError> {
+    let mut p = Parser { toks, spans, pos: 0, lookup, depth: 0, defaults };
+    let v = p.expr()?;
+    if p.pos < p.toks.len() {
+        return Err(DocError::Expr(format!("unexpected input in `{text}`")));
+    }
+    if !v.v.is_finite() {
+        return Err(DocError::Expr(format!("`{text}` is not a finite number")));
+    }
+    Ok(v)
 }
 
 /// An expression read into tokens once, to be evaluated many times: in another number type, or
@@ -1226,27 +1258,18 @@ pub struct Compiled {
 
 impl Compiled {
     pub fn new(s: &str) -> Result<Compiled, DocError> {
-        let (toks, spans): (Vec<Tok>, Vec<(usize, usize)>) = lex_spans(s)?.into_iter().map(|(t, a, b)| (t, (a, b))).unzip();
-        if toks.is_empty() {
-            if let Some((name, _)) = definition(s) {
-                return Err(DocError::Expr(format!("`{name} =` needs a value after the `=`")));
-            }
-            return Err(DocError::Expr("empty expression".into()));
-        }
+        let (toks, spans) = tokens(s)?;
         Ok(Compiled { text: s.to_string(), toks, spans })
     }
 
     /// Its value, in `N`, with names resolved by `lookup`.
     pub fn eval<N: Real>(&self, lookup: &dyn Fn(&str) -> Result<Value<N>, DocError>, defaults: Defaults) -> Result<Value<N>, DocError> {
-        let mut p = Parser { toks: &self.toks, spans: &self.spans, pos: 0, lookup, depth: 0, defaults };
-        let v = p.expr()?;
-        if p.pos < p.toks.len() {
-            return Err(DocError::Expr(format!("unexpected input in `{}`", self.text)));
-        }
-        if !v.v.is_finite() {
-            return Err(DocError::Expr(format!("`{}` is not a finite number", self.text)));
-        }
-        Ok(v)
+        run(&self.text, &self.toks, &self.spans, lookup, defaults)
+    }
+
+    /// How many tokens it has: what evaluating it costs, roughly.
+    pub fn size(&self) -> usize {
+        self.toks.len()
     }
 }
 
@@ -2047,6 +2070,34 @@ mod tests {
         let half_pi = std::f64::consts::FRAC_PI_2;
         let c = at("cos(x * 1 rad)", half_pi, half_pi).unwrap();
         assert!(c.contains(0.0) && c.contains(half_pi.cos()), "{c:?}");
+    }
+
+    /// The snapped steps never decrease, which `Real::step` needs to prove them over a range:
+    /// walked a float at a time across the snap windows' edges and around large numbers.
+    #[test]
+    fn the_snapped_steps_never_decrease() {
+        let steps: [(&str, fn(f64) -> f64); 5] = [
+            ("floor", |x| whole(x).floor()),
+            ("ceil", |x| whole(x).ceil()),
+            ("round", |x| whole(x).round()),
+            ("trunc", |x| whole(x).trunc()),
+            ("mod's quotient", quotient_class),
+        ];
+        for centre in [0.0, 0.5, 1.0, -1.0, 2.5, 3.0, -3.0, 1e6, 1e12 - 1.0, 1e12, -1e12, 2f64.powi(52), 2f64.powi(53), 1e15] {
+            for (name, f) in steps {
+                let mut x = centre;
+                for _ in 0..64 {
+                    x = x.next_down();
+                }
+                let mut before = f(x);
+                for _ in 0..128 {
+                    x = x.next_up();
+                    let now = f(x);
+                    assert!(now >= before, "{name} decreases at {x:e}: {before} then {now}");
+                    before = now;
+                }
+            }
+        }
     }
 
     #[test]
