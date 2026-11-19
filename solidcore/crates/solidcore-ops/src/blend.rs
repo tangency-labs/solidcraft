@@ -2356,7 +2356,9 @@ pub struct CarriedFace {
     /// The unit direction in the face's plane square to the edge; `along` × `across` is the
     /// face's outward normal.
     pub across: [f64; 3],
-    /// The slab's rectangle in (`along`, `across`) from `origin`.
+    /// The slab's outline in (`along`, `across`) from `origin`: the edge from its first side
+    /// to its second, each end along the trace of the face that ends the round there. A
+    /// rectangle between ends square to the edge.
     pub outline: [[f64; 2]; 4],
     /// The slab's extent along the outward normal, up to the face's plane.
     pub depth: [f64; 2],
@@ -2373,7 +2375,9 @@ pub struct CarriedFace {
 /// edge on the body with that face carried on as a slab and keeping what the round adds
 /// within the face's outline. None where that does not give the round of an unbounded face:
 /// the edge is not straight and concave, no face of it is flat, or an end of it has no flat
-/// face square to it.
+/// face that ends the round there (one whose plane holds the carried face's normal: a face
+/// square to the edge, or one leaning up to 60 degrees from that, which then carries on only
+/// the face of the edge whose normal its plane holds).
 ///
 /// # Errors
 /// [`Error::Argument`] for an index past the edges or a radius not finite, positive and at
