@@ -464,3 +464,128 @@ pub fn drop_coincident(geom: Vec<Piece>, tol: f64) -> Vec<Piece> {
     out.extend(others);
     out
 }
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
+    use super::*;
+
+    fn v(x: f64, y: f64) -> Vec2 {
+        Vec2::new(x, y)
+    }
+
+    /// A unit circle's quarter from angle `a` as a conic: control at the corner of the tangents,
+    /// weight cos 45 degrees.
+    fn quarter(a: f64) -> Piece {
+        let h = std::f64::consts::FRAC_PI_4;
+        let w = h.cos();
+        let at = |t: f64| v(t.cos(), t.sin());
+        Piece::Conic {
+            a: at(a),
+            apex: at(a + h) * (1.0 / w),
+            b: at(a + 2.0 * h),
+            rho: w / (1.0 + w),
+        }
+    }
+
+    #[test]
+    fn four_quarter_conics_of_a_circle_are_the_circle() {
+        let h = std::f64::consts::FRAC_PI_2;
+        let out = round_conics((0..4).map(|k| quarter(f64::from(k) * h)).collect());
+        let [Piece::Circle(c, r)] = out.as_slice() else {
+            panic!("{out:?}")
+        };
+        assert!(len(*c) < 1e-12 && (r - 1.0).abs() < 1e-12, "{out:?}");
+    }
+
+    #[test]
+    fn a_quarter_conic_is_a_counter_clockwise_arc_and_lies_on_it() {
+        let out = round_conics(vec![quarter(0.0)]);
+        let [arc @ Piece::Arc { c, a, b }] = out.as_slice() else {
+            panic!("{out:?}")
+        };
+        assert!(len(*c) < 1e-12 && dist(*a, v(1.0, 0.0)) < 1e-12 && dist(*b, v(0.0, 1.0)) < 1e-12);
+        let m = std::f64::consts::FRAC_PI_4;
+        assert!(near(arc, v(m.cos(), m.sin()), 1e-12));
+        assert!(!near(arc, v(-1.0, 0.0), 1e-6), "the other side of the circle");
+    }
+
+    #[test]
+    fn a_rational_spline_with_double_knots_is_its_conic_spans() {
+        let (a, b) = (quarter(0.0), quarter(std::f64::consts::FRAC_PI_2));
+        let (Piece::Conic { a: p0, apex: p1, b: p2, rho }, Piece::Conic { apex: p3, b: p4, .. }) = (&a, &b) else {
+            unreachable!()
+        };
+        let w = rho / (1.0 - rho);
+        // End weights of 2 on the shared point: the same curve, its spans' ends brought to one.
+        let spline = Piece::Spline {
+            pts: vec![*p0, *p1, *p2, *p3, *p4],
+            control: true,
+            degree: 2,
+            periodic: false,
+            nurbs: Some((vec![0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0], vec![1.0, w, 1.0, w, 1.0])),
+        };
+        let spans = conic_spans(spline);
+        assert_eq!(spans.len(), 2, "{spans:?}");
+        for (got, want) in spans.iter().zip([a, b]) {
+            let (Piece::Conic { rho: r1, .. }, Piece::Conic { rho: r2, .. }) = (got, &want) else {
+                panic!("{got:?}")
+            };
+            assert!((r1 - r2).abs() < 1e-15);
+        }
+        // Single inner knots are not spans of conics.
+        let smooth = Piece::Spline {
+            pts: vec![v(0.0, 0.0), v(1.0, 1.0), v(2.0, 0.0), v(3.0, 1.0)],
+            control: true,
+            degree: 2,
+            periodic: false,
+            nurbs: Some((vec![0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0], vec![1.0; 4])),
+        };
+        assert_eq!(conic_spans(smooth.clone()), vec![smooth]);
+    }
+
+    #[test]
+    fn a_conic_seen_edge_on_is_the_line_it_covers() {
+        // Its control past its end: the curve runs out beyond b and back.
+        let g = flat_conic(Piece::Conic {
+            a: v(0.0, 0.0),
+            apex: v(4.0, 0.0),
+            b: v(2.0, 0.0),
+            rho: 0.4,
+        });
+        let Piece::Line(p, q) = g else { panic!("{g:?}") };
+        assert!(dist(p, v(0.0, 0.0)) < 1e-12 && q.x > 2.0 && q.y.abs() < 1e-12, "{g:?}");
+    }
+
+    #[test]
+    fn lines_on_one_line_and_repeated_pieces_are_drawn_once() {
+        let out = drop_coincident(
+            vec![
+                Piece::Line(v(0.0, 0.0), v(2.0, 0.0)),
+                Piece::Circle(v(5.0, 5.0), 1.0),
+                Piece::Line(v(3.0, 0.0), v(1.0, 0.0)),
+                Piece::Circle(v(5.0, 5.0), 1.0),
+                Piece::Line(v(0.0, 1.0), v(1.0, 1.0)),
+            ],
+            1e-9,
+        );
+        assert_eq!(
+            out,
+            vec![
+                Piece::Line(v(0.0, 0.0), v(3.0, 0.0)),
+                Piece::Line(v(0.0, 1.0), v(1.0, 1.0)),
+                Piece::Circle(v(5.0, 5.0), 1.0),
+            ]
+        );
+    }
+
+    #[test]
+    fn ends_within_the_gap_meet_at_the_first() {
+        let mut g = vec![
+            Piece::Line(v(0.0, 0.0), v(1.0, 0.0)),
+            Piece::Line(v(1.0 + 1e-6, 0.0), v(1.0, 1.0)),
+        ];
+        meet_at_shared_ends(&mut g, 1e-5);
+        assert_eq!(g[1], Piece::Line(v(1.0, 0.0), v(1.0, 1.0)));
+    }
+}
