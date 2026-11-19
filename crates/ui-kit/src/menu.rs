@@ -559,6 +559,7 @@ impl<'a> MenuItem<'a> {
             painter.rect(icon, t.radius_sm, color, t.control_border_stroke(t.control_border), egui::StrokeKind::Inside);
         } else if !self.icon.is_blank() {
             match self.icon {
+                Icon::Kit(name @ ("window_here" | "window_other")) => icons::paint_ink(&painter, icon, name, t.text_dim),
                 Icon::Kit(name) if self.danger => icons::paint_danger(&painter, icon, name, 1.0),
                 Icon::Kit(name) if hot => icons::paint_ink(&painter, icon, name, dim),
                 plain => plain.paint_plain(&painter, icon, 1.0),
@@ -1036,6 +1037,48 @@ mod tests {
         assert_eq!(frame(key(egui::Key::ArrowDown)), (Some(0), false));
         assert_eq!(frame(key(egui::Key::ArrowUp)), (Some(2), false));
         assert_eq!(frame(key(egui::Key::Enter)), (Some(2), true));
+    }
+
+    #[test]
+    fn pop_out_window_menu_fits_small_screens_and_restores_focus() {
+        use crate::window_options_menu::{self, Action, CardHeaders, TopBar, WindowMenu};
+
+        let ctx = crate::test_support::context();
+        let screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(320.0, 220.0));
+        let anchor = Rect::from_min_size(pos2(276.0, 4.0), vec2(32.0, 26.0));
+        let id = egui::Id::unique("test-window-options");
+        let menu = WindowMenu {
+            title: "Window 2",
+            displays: &[],
+            card_headers: CardHeaders::Always,
+            keep_on_top: false,
+            ribbon: true,
+            ribbon_auto_hide: true,
+            panels: false,
+            top_bar: TopBar::Always,
+        };
+        let frame = |events, open| {
+            let mut action = None;
+            let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), events, ..Default::default() }, |ui| {
+                let response = ui.interact(anchor, id, egui::Sense::click());
+                action = window_options_menu::show(ui, response, open, &menu);
+            });
+            output.textures_delta.clear();
+            action
+        };
+
+        frame(vec![], true);
+        frame(vec![], false);
+        let area = ctx.memory(|memory| memory.area_rect(id.with("window_options").with("popup"))).unwrap();
+        assert!(screen.contains_rect(area), "{area:?} exceeds {screen:?}");
+        frame(key(egui::Key::ArrowDown), false);
+        frame(key(egui::Key::ArrowDown), false);
+        assert_eq!(frame(key(egui::Key::ArrowRight), false), Some(Action::TopBar(TopBar::Edge)));
+        frame(key(egui::Key::ArrowDown), false);
+        frame(key(egui::Key::ArrowDown), false);
+        assert_eq!(frame(key(egui::Key::ArrowRight), false), Some(Action::CardHeaders(CardHeaders::Hover)));
+        frame(key(egui::Key::Escape), false);
+        assert!(ctx.memory(|memory| memory.has_focus(id)));
     }
 
     #[test]

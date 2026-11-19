@@ -63,6 +63,85 @@ pub enum NavMode {
     Zoom,
 }
 
+/// Each GPU callback consumes its view's pending scenes after all tiles are laid out. Keep the
+/// slots separate, along with the keys and geometry used to build those scenes.
+#[derive(Default)]
+pub(crate) struct ViewScenes {
+    retired: bool,
+    ss_view: (u64, f64),
+    slot: SceneSlot,
+    key: u64,
+    lod: std::sync::Mutex<crate::display_lod::Lod>,
+    lod_view: u64,
+    lod_rest: CameraRest,
+    last_scene: std::sync::Mutex<Option<GpuScene>>,
+    lod_waiting: std::sync::Mutex<Vec<(usize, std::sync::Arc<solidcraft_engine::geom::Mesh>)>>,
+    lods_seen: u64,
+    patches: u64,
+    sketch_slot: SceneSlot,
+    sketch_key: u64,
+    wireframe: crate::wireframe_silhouettes::Outlines,
+    hl_slot: SceneSlot,
+    hl_key: u64,
+    scene_target: Option<u64>,
+    drag: Option<drag_layer::DragLayer>,
+    scene_world: Option<drag_layer::SceneWorld>,
+    moving_slot: SceneSlot,
+    moving_key: u64,
+    body_tris: std::sync::Mutex<std::collections::HashMap<String, crate::gpu::BlockTris>>,
+    body_lines: std::sync::Mutex<std::collections::HashMap<String, (u64, std::ops::Range<u32>)>>,
+}
+
+impl ViewScenes {
+    /// Drop a closed view's caches once. A later swap reactivates its fresh upload slots.
+    pub(crate) fn retire_uploads(&mut self) {
+        if !self.retired {
+            *self = Self::default();
+            self.retired = true;
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn mark_uploaded_for_test(&mut self, key: u64) -> [SceneSlot; 4] {
+        self.key = key;
+        self.sketch_key = key;
+        self.hl_key = key;
+        self.moving_key = key;
+        [self.slot.clone(), self.sketch_slot.clone(), self.hl_slot.clone(), self.moving_slot.clone()]
+    }
+
+    #[cfg(test)]
+    pub(crate) fn upload_slots_for_test(&self) -> [SceneSlot; 4] {
+        [self.slot.clone(), self.sketch_slot.clone(), self.hl_slot.clone(), self.moving_slot.clone()]
+    }
+
+    pub(crate) fn swap(&mut self, vp: &mut ViewportState) {
+        self.retired = false;
+        std::mem::swap(&mut self.ss_view, &mut vp.ss_view);
+        std::mem::swap(&mut self.slot, &mut vp.slot);
+        std::mem::swap(&mut self.key, &mut vp.key);
+        std::mem::swap(&mut self.lod, &mut vp.lod);
+        std::mem::swap(&mut self.lod_view, &mut vp.lod_view);
+        std::mem::swap(&mut self.lod_rest, &mut vp.lod_rest);
+        std::mem::swap(&mut self.last_scene, &mut vp.last_scene);
+        std::mem::swap(&mut self.lod_waiting, &mut vp.lod_waiting);
+        std::mem::swap(&mut self.lods_seen, &mut vp.lods_seen);
+        std::mem::swap(&mut self.patches, &mut vp.patches);
+        std::mem::swap(&mut self.sketch_slot, &mut vp.sketch_slot);
+        std::mem::swap(&mut self.sketch_key, &mut vp.sketch_key);
+        std::mem::swap(&mut self.wireframe, &mut vp.wireframe);
+        std::mem::swap(&mut self.hl_slot, &mut vp.hl_slot);
+        std::mem::swap(&mut self.hl_key, &mut vp.hl_key);
+        std::mem::swap(&mut self.scene_target, &mut vp.scene_target);
+        std::mem::swap(&mut self.drag, &mut vp.drag);
+        std::mem::swap(&mut self.scene_world, &mut vp.scene_world);
+        std::mem::swap(&mut self.moving_slot, &mut vp.moving_slot);
+        std::mem::swap(&mut self.moving_key, &mut vp.moving_key);
+        std::mem::swap(&mut self.body_tris, &mut vp.body_tris);
+        std::mem::swap(&mut self.body_lines, &mut vp.body_lines);
+    }
+}
+
 #[derive(Default)]
 pub struct ViewportState {
     /// Touchscreen gesture ownership and contacts for the shared camera handler.
@@ -150,6 +229,27 @@ pub struct ViewportState {
     /// The last pick (its key and hits): reused while nothing it depends on changed.
     last_pick: Option<(u64, Vec<Hit>)>,
     pub rect: Option<Rect>,
+    /// The view being drawn when the window shows several together ([`crate::view_tiles`]): its
+    /// frame goes to the GPU as a tile of its own. None: the one viewport.
+    pub(crate) tile: Option<u64>,
+    /// A native window has a separate renderer slot for its ground and every tile.
+    window_scene_slots: Option<std::collections::HashMap<Option<u64>, u64>>,
+    /// The cards of a tiled window with the body of each (below its header), for their controls.
+    pub(crate) cards: Vec<(u64, Rect)>,
+    /// A press in a tiled canvas asks for focus once this frame's controls have run.
+    pub(crate) pending_tile_focus: Option<u64>,
+    /// The shown view's picture runs over this rectangle, larger than its own: the view is framed
+    /// in its rectangle and fills the rest behind everything ([`crate::view_tiles`]). One frame only.
+    pub(crate) bleed: Option<Rect>,
+    /// The view being drawn is a card of a tiled window: what belongs to the whole window (the
+    /// notices, the legends) is the focused view's to draw, once.
+    pub(crate) card: bool,
+    pub(crate) compass_view: Option<u64>,
+    /// The free area of a tiled window, where the notices lie instead of the focused view's frame.
+    pub(crate) window: Option<Rect>,
+    /// The shapes of the last tile's picture and background in the paint list, so the window can
+    /// lay them under the cards.
+    pub(crate) backdrop: Option<std::ops::Range<usize>>,
     pub(crate) layout: Option<crate::viewport_layout::Layout>,
     pub(crate) palette_rect: Option<Rect>,
     /// None before the host's early confirmation paint; Some(NOTHING) means
@@ -201,6 +301,8 @@ pub struct ViewportState {
     patches: u64,
     /// Model scenes built since the viewport started (a scene with levels filled in is not one).
     pub(crate) scenes_built: u64,
+    /// The GPU target that last received this view's scene uploads.
+    scene_target: Option<u64>,
     /// Ground geometry is reused independently of the camera-dependent sketch/grid scene.
     shadow: std::sync::Mutex<Option<ShadowGeometry>>,
     pub(crate) sketch_slot: SceneSlot,
@@ -449,6 +551,20 @@ impl ViewportState {
 
 fn display_proj(app: &SolveApp) -> Proj {
     projection(app, app.viewport.rect.unwrap_or_else(|| Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))))
+}
+
+/// `vp`, the projection of a view framed in `frame`, for a picture painted over the larger `paint`:
+/// the model lands where it does in `frame` and the picture fills the rest.
+fn framed_in_paint(vp: &Mat4, frame: Rect, paint: Rect) -> Mat4 {
+    if frame == paint || !paint.is_positive() {
+        return *vp;
+    }
+    let (half_w, half_h) = (f64::from(paint.width()) / 2.0, f64::from(paint.height()) / 2.0);
+    let sx = f64::from(frame.width()) / f64::from(paint.width());
+    let sy = f64::from(frame.height()) / f64::from(paint.height());
+    let tx = f64::from(frame.center().x - paint.center().x) / half_w;
+    let ty = -f64::from(frame.center().y - paint.center().y) / half_h;
+    Mat4([[sx, 0.0, 0.0, 0.0], [0.0, sy, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [tx, ty, 0.0, 1.0]]).mul(vp)
 }
 
 /// World ↔ screen mapping for the current frame.
@@ -3909,6 +4025,7 @@ pub(crate) fn pick_cached(app: &mut SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit
     for v in [app.cam.yaw, app.cam.pitch, app.cam.roll, app.cam.distance, app.cam.target.x, app.cam.target.y, app.cam.target.z] {
         v.to_bits().hash(&mut h);
     }
+    app.session.uid.hash(&mut h);
     app.session.revision.hash(&mut h);
     (std::sync::Arc::as_ptr(&crate::open_meshing::shown_world(app)) as usize).hash(&mut h);
     app.session.active_sketch.hash(&mut h);
@@ -5505,6 +5622,7 @@ fn hovered_body(app: &SolveApp) -> Option<String> {
 fn highlight_geometry_key(app: &SolveApp) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     let selected = app.highlighted();
+    app.session.uid.hash(&mut h);
     app.session.revision.hash(&mut h);
     (std::sync::Arc::as_ptr(&crate::open_meshing::shown_world(app)) as usize).hash(&mut h);
     serde_json::to_string(&selected).unwrap_or_default().hash(&mut h);
@@ -5514,6 +5632,7 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
     app.preferences.show_selected_hidden_edges.hash(&mut h);
     app.viewport.hover_feature.hash(&mut h);
     app.viewport.hover_bodies.hash(&mut h);
+    crate::select_other::hovered_body(app).hash(&mut h);
     app.viewport.hover_plane.hash(&mut h);
     app.viewport.hover_origin.hash(&mut h);
     app.preferences.browser_hover_shows_origin.hash(&mut h);
@@ -6423,6 +6542,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
     // Timeline modifiers light only their resulting faces; browser rows light whole bodies.
     let mut hovered = app.viewport.hover_feature.map(|id| feature_geometry(app, id)).unwrap_or_default();
     hovered.extend(app.viewport.hover_bodies.iter().map(|name| Sel::Body { name: name.clone() }));
+    hovered.extend(crate::select_other::hovered_body(app).map(|name| Sel::Body { name: name.to_owned() }));
     hovered.extend(component_hover.into_iter().flatten());
     let body_hover = hovered_body(app);
     hovered.extend(body_hover.iter().map(|name| Sel::Body { name: name.clone() }));
@@ -6841,7 +6961,56 @@ fn preparing_note(app: &SolveApp, painter: &egui::Painter, rect: Rect) {
     painter.text(rect.center(), Align2::CENTER_CENTER, app.tr("starting.view"), FontId::proportional(t.font_body), t.text_dim);
 }
 
+impl ViewportState {
+    #[cfg(test)]
+    pub(crate) fn upload_slots_for_test(&self) -> [SceneSlot; 4] {
+        [self.slot.clone(), self.sketch_slot.clone(), self.hl_slot.clone(), self.moving_slot.clone()]
+    }
+
+    #[cfg(test)]
+    pub(crate) fn upload_keys_for_test(&self) -> [u64; 4] {
+        [self.key, self.sketch_key, self.hl_key, self.moving_key]
+    }
+
+    pub(crate) fn invalidate_view_uploads(&mut self) {
+        self.key = 0;
+        self.sketch_key = 0;
+        self.hl_key = 0;
+        self.drag = None;
+        self.scene_world = None;
+    }
+}
+
+impl ViewportState {
+    pub(crate) fn isolate_window_scenes(&mut self) {
+        self.window_scene_slots = Some(Default::default());
+    }
+
+    pub(crate) fn window_scene_slots(&self) -> impl Iterator<Item = u64> + '_ {
+        self.window_scene_slots.iter().flat_map(|slots| slots.values().copied())
+    }
+
+    pub(crate) fn retain_window_scene_slots(&mut self, owned: Option<&[u64]>) -> impl Iterator<Item = u64> + '_ {
+        if let Some(slots) = &mut self.window_scene_slots {
+            slots.retain(|view, _| owned.is_some_and(|views| view.is_none_or(|view| views.contains(&view))));
+        }
+        self.window_scene_slots()
+    }
+
+    pub(crate) fn scene_slot(&mut self) -> Option<u64> {
+        let Some(slots) = &mut self.window_scene_slots else { return self.tile };
+        // The lower half belongs to tile ids in the main window and slot 0.
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1 << 63);
+        Some(*slots.entry(self.tile).or_insert_with(|| NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)))
+    }
+}
+
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let scene_slot = app.viewport.scene_slot();
+    if app.viewport.scene_target != scene_slot {
+        app.viewport.invalidate_view_uploads();
+        app.viewport.scene_target = scene_slot;
+    }
     crate::joint_handles::sync(app);
     let t = Tokens::get();
     let rect = ui.max_rect();
@@ -6987,9 +7156,13 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         && !corner_hovered
         && !manipulator_dragging;
     app.viewport.quiet_motion = still.then(|| QuietMotion::record(app, ui, &resp, rect, axes, proj)).flatten();
-    let painter = ui.painter_at(rect);
-    solidcraft_viewport_egui::paint_background(&painter, rect, t.viewport_top, t.viewport_bottom);
-    crate::gpu::paint_background_picture(app, &painter, rect);
+    // The picture may run past the view's own rectangle (the focused view of a tiled window).
+    let paint = app.viewport.bleed.take().unwrap_or(rect);
+    let layer = ui.layer_id();
+    let backdrop_from = ui.ctx().graphics_mut(|g| g.entry(layer).next_idx().0);
+    let painter = ui.painter_at(paint);
+    solidcraft_viewport_egui::paint_background(&painter, paint, t.viewport_top, t.viewport_bottom);
+    crate::gpu::paint_background_picture(app, &painter, paint);
 
     // ---- model ----
     crate::frame_watch::step(app, "viewport before the model");
@@ -7036,11 +7209,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         crate::frame_watch::step(app, "highlight scene");
         let ppp = ui.ctx().pixels_per_point();
-        let size_px = [rect.width() * ppp, rect.height() * ppp];
-        let ssaa = supersampling(app, ui.ctx(), proj.vp.to_f32(), size_px);
-        let ao_samples = ao_samples(app, ui.ctx(), proj.vp.to_f32(), size_px);
+        let size_px = [paint.width() * ppp, paint.height() * ppp];
+        let paint_vp = framed_in_paint(&proj.vp, rect, paint);
+        let ssaa = supersampling(app, ui.ctx(), paint_vp.to_f32(), size_px);
+        let ao_samples = ao_samples(app, ui.ctx(), paint_vp.to_f32(), size_px);
         let (clip, clip_hatch) = section_clip(app);
-        let cb = ViewportCallback(Frame {
+        let frame = Frame {
             product_lights: None,
             ssaa,
             ao_samples,
@@ -7062,8 +7236,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let [r, g, b, _] = t.section_cap.to_normalized_gamma_f32();
                 [r, g, b, if section_hatch(app) { 1.0 } else { 0.0 }]
             },
-            view_proj: proj.vp.to_f32(),
-            turned_depth: Some(proj.vp.turned_depth_f32()),
+            view_proj: paint_vp.to_f32(),
+            turned_depth: Some(paint_vp.turned_depth_f32()),
             back: proj.cam.back().to_f32(),
             size_px,
             images: crate::ref_images::gpu_images(app),
@@ -7092,8 +7266,17 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }),
             sky: sky_uniform(crate::safe_graphics::dark_parts_shading(app), crate::safe_graphics::material_finish(app), proj.cam.up),
             moving,
-        });
-        painter.add(egui_wgpu::Callback::new_paint_callback(rect, cb));
+        };
+        match app.viewport.scene_slot() {
+            // A tile is its own paint callback: it does not go through the blur's source.
+            Some(slot) => {
+                painter.add(egui_wgpu::Callback::new_paint_callback(paint, solidcraft_viewport_egui::TileCallback(slot, frame)));
+            }
+            None => {
+                painter.add(egui_wgpu::Callback::new_paint_callback(rect, ViewportCallback(frame)));
+            }
+        }
+
         // The graphics card had no memory for the view's frame (#7296): say once why it looks
         // coarser.
         if !app.viewport.lowered_noted && app.viewport.draw_stats.as_ref().is_some_and(|s| s.lock().is_ok_and(|s| s.lowered)) {
@@ -7105,10 +7288,16 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     } else if app.viewport.gpu_preparing {
         preparing_note(app, &painter, rect);
     }
-    let overlay_rect = crate::shell::bottom_readout_rect(app, rect);
-    crate::viewport_details::legacy_legends(app, ui, overlay_rect);
-    placement_note(app, &painter, overlay_rect);
-    crate::frame_rate::paint(app, ui, &painter, overlay_rect);
+    app.viewport.backdrop = app.viewport.tile.map(|_| backdrop_from..ui.ctx().graphics_mut(|g| g.entry(layer).next_idx().0));
+    // The notices and legends belong to the window, not to a view: a card leaves them to the focused one.
+    let card = app.viewport.card;
+    let notice = app.viewport.window.unwrap_or(rect);
+    let overlay_rect = crate::shell::bottom_readout_rect(app, notice);
+    if !card {
+        crate::viewport_details::legacy_legends(app, ui, overlay_rect);
+        placement_note(app, &painter, overlay_rect);
+        crate::frame_rate::paint(app, ui, &painter, overlay_rect);
+    }
 
     // ---- interaction ----
     // Pencil mode: a finger double-tap on a planar face sketches on it (`pencil`).
@@ -7803,17 +7992,22 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::sketch_line_arc::paint_mode(app, ui, &painter, &proj);
     crate::design_properties::overlay(app, &painter, &proj);
     crate::sketch_dims::show(app, ui, &proj);
-    crate::select_other::show(app, ui.ctx());
-    crate::viewport_status::show(app, ui.ctx(), rect);
-    crate::viewport_status_fixture::show(app, ui.ctx(), rect);
+    if !card {
+        crate::select_other::show(app, ui.ctx());
+        crate::viewport_status::show(app, ui.ctx(), notice);
+        crate::viewport_status_fixture::show(app, ui.ctx(), notice);
+    }
     // The operations under way first, then the selection's measurement in the corner (clear of
     // them), then the notices and the agent chip above both, so the 3D mouse picture can keep
     // clear of them all.
-    crate::operations::show(app, ui, overlay_rect);
-    let readout = quick_measure_readout(app, ui, overlay_rect);
-    let mut toasts = transient_messages(app, ui, rect, readout);
-    toasts.extend(app.operations.rect);
-    if app.preferences.space_mouse_in_view
+    if !card {
+        crate::operations::show(app, ui, overlay_rect);
+    }
+    let readout = if card { None } else { quick_measure_readout(app, ui, overlay_rect) };
+    let mut toasts = if card { Vec::new() } else { transient_messages(app, ui, notice, readout) };
+    toasts.extend(app.operations.rect.filter(|_| !card));
+    if !card
+        && app.preferences.space_mouse_in_view
         && app.space_mouse.calibrating.is_none()
         && let Some(device) = &app.space_mouse.device
     {
@@ -9457,7 +9651,7 @@ pub(crate) fn scene_palette(dark: bool, mode: solidcraft_theme::ColorVision) -> 
 pub(crate) fn refresh_layout(app: &mut SolveApp, ctx: &egui::Context) {
     if let Some(rect) = app.viewport.rect {
         if app.universal_panel_frame().is_some() {
-            let Ok(usable) = crate::shell::host_usable(app) else {
+            let Ok(usable) = control_region(app, rect) else {
                 // Refuse new control placement without inventing an occupied
                 // viewport. An early pair already painted remains authoritative.
                 app.viewport.layout = Some(crate::viewport_layout::Layout {
@@ -9475,7 +9669,9 @@ pub(crate) fn refresh_layout(app: &mut SolveApp, ctx: &egui::Context) {
             };
             let navigation = if app.ui.show_navigation_bar { crate::navigation_bar_view::measured(app, ctx, rect).rect } else { Rect::NOTHING };
             let orbit = crate::navigation_bar_view::canvas_caps(app).orbit;
-            app.viewport.layout = Some(if let Some(confirm) = app.viewport.host_confirm {
+            app.viewport.layout = Some(if app.viewport.card {
+                crate::viewport_layout::Layout::host_with_axis(rect, &usable, crate::view_gizmo::style(app), egui::Vec2::ZERO, navigation, orbit)
+            } else if let Some(confirm) = app.viewport.host_confirm {
                 crate::viewport_layout::Layout::host_with_retained_confirm(rect, &usable, crate::view_gizmo::style(app), confirm, navigation, orbit)
             } else if orbit {
                 crate::viewport_layout::Layout::host(rect, &usable, crate::view_gizmo::style(app), crate::view_confirm::size(app), navigation)
@@ -9504,6 +9700,11 @@ pub(crate) fn refresh_layout(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
+/// The free space for the controls of one view, bounded by its frame when tiled.
+pub(crate) fn control_region(app: &SolveApp, rect: Rect) -> solidcraft_engine::panels::PanelResult<crate::panel_runtime::HostUsableRegion> {
+    crate::shell::host_usable_in(app, crate::view_tiles::shown(app).then_some(rect))
+}
+
 /// The opt-in host paints its existing controls after resolving actual Area
 /// visibility. This does not render the scene or call navigation::handle again.
 pub(crate) fn show_host_controls(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
@@ -9513,6 +9714,15 @@ pub(crate) fn show_host_controls(app: &mut SolveApp, ui: &mut egui::Ui, rect: Re
         if !crate::render_workspace::active(app) {
             crate::view_angles::show(app, ui, rect);
         }
+    }
+    crate::navigation_bar_view::show(app, ui, rect);
+}
+
+/// Controls inside a tiled card, acting on the view the app is standing in for.
+pub(crate) fn show_card_controls(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
+    refresh_layout(app, ui.ctx());
+    if crate::navigation_bar_view::canvas_caps(app).orbit {
+        axis_view(app, ui, rect);
     }
     crate::navigation_bar_view::show(app, ui, rect);
 }
@@ -9528,8 +9738,17 @@ fn axis_center(app: &SolveApp, rect: Rect) -> Pos2 {
 /// How far the signed-axis compass is lifted inside its reserved box.
 pub(crate) const AXIS_CENTER_LIFT: f32 = 4.0;
 
+fn compass_enabled(app: &SolveApp) -> bool {
+    let views = &app.docs.views;
+    app.viewport.compass_view.and_then(|id| views.get(id)).unwrap_or_else(|| views.active()).compass
+}
+
 pub(crate) fn axis_rect(app: &SolveApp, rect: Rect) -> Rect {
-    app.viewport
+    if !compass_enabled(app) {
+        return Rect::NOTHING;
+    }
+    let axis = app
+        .viewport
         .layout
         .as_ref()
         .filter(|layout| layout.viewport == rect || layout.viewport == crate::render_workspace::camera_rect(app, rect))
@@ -9537,7 +9756,13 @@ pub(crate) fn axis_rect(app: &SolveApp, rect: Rect) -> Rect {
         .unwrap_or_else(|| {
             let size = axis_view_size(crate::view_gizmo::style(app));
             Rect::from_min_size(pos2(rect.right() - size, rect.top()), vec2(size, size))
-        })
+        });
+    // The edge bar leaves the native caption controls visible over the canvas.
+    app.shell.top_bar_overlays[2].filter(|caption| caption.intersects(axis)).map_or(axis, |caption| {
+        let available = (rect.bottom() - axis.bottom()).max(0.0);
+        let offset = (caption.bottom() - axis.top() + AXIS_CENTER_LIFT).clamp(0.0, available);
+        axis.translate(vec2(0.0, offset))
+    })
 }
 
 /// The camera's view axes, as the view compass takes them.
@@ -9570,6 +9795,11 @@ fn axis_hit(tips: &[crate::view_compass::Tip], p: Pos2) -> Option<usize> {
 /// Dragging anywhere on the view navigator orbits about the selected origin or the camera target. A stationary press
 /// on a tip chooses its view. Floating windows own their input over the gizmo.
 fn axis_view_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) -> bool {
+    if !compass_enabled(app) {
+        app.viewport.axis_drag = None;
+        app.viewport.axis_warp = None;
+        return false;
+    }
     let pos = ui.input(|i| i.pointer.interact_pos());
     let may_start = ui.is_enabled() && ui.rect_contains_pointer(rect) && !pos.is_some_and(|p| crate::shell::covered(app, p));
     let mut drag = crate::view_compass::Drag { at: app.viewport.axis_drag, warp: app.viewport.axis_warp };
@@ -9622,6 +9852,9 @@ pub(crate) fn view_gizmo_at(app: &SolveApp, p: Pos2) -> bool {
 }
 
 pub(crate) fn axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
+    if !compass_enabled(app) {
+        return;
+    }
     gizmo_menu(app, ui, rect);
     let shown = crate::view_gizmo::shown(app);
     match shown.style {
@@ -9695,6 +9928,26 @@ pub fn look_at_selection(app: &mut SolveApp) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn native_picture_slots_keep_ground_and_hidden_views_but_forget_foreign_ownership() {
+        let mut viewport = super::ViewportState::default();
+        viewport.isolate_window_scenes();
+        let ground = viewport.scene_slot().unwrap();
+        viewport.tile = Some(7);
+        let hidden = viewport.scene_slot().unwrap();
+        viewport.tile = Some(8);
+        let moved = viewport.scene_slot().unwrap();
+        assert!(ground >= 1 << 63 && hidden >= 1 << 63 && moved >= 1 << 63);
+        let live: Vec<_> = viewport.retain_window_scene_slots(Some(&[7])).collect();
+        assert!(live.contains(&ground) && live.contains(&hidden));
+        assert!(!live.contains(&moved));
+        viewport.tile = Some(7);
+        assert_eq!(viewport.scene_slot(), Some(hidden));
+        viewport.tile = Some(8);
+        assert_ne!(viewport.scene_slot(), Some(moved));
+        assert!(viewport.retain_window_scene_slots(None).next().is_none());
+    }
+
     use super::*;
     use crate::navigation::*;
 
@@ -10890,6 +11143,38 @@ mod tests {
         assert_eq!(at(&mut app, 1.45, 3.0), (AO_SAMPLES, false), "wireframe draws no AO");
     }
 
+    #[test]
+    fn neighbouring_views_settle_their_ambient_occlusion_independently() {
+        use solidcraft_viewport_gpu::view::{AO_SAMPLES, AO_SAMPLES_MOVING};
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.preferences.ambient_occlusion = true;
+        let ctx = egui::Context::default();
+        let sample = |app: &mut SolveApp, time: f64, x: f32| {
+            let mut matrix = [[0.0; 4]; 4];
+            for (i, row) in matrix.iter_mut().enumerate() {
+                row[i] = 1.0;
+            }
+            matrix[3][0] = x;
+            let mut samples = 0;
+            ctx.run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |ui| {
+                samples = ao_samples(app, ui.ctx(), matrix, [800.0, 600.0]);
+            })
+            .textures_delta
+            .clear();
+            samples
+        };
+        assert_eq!(sample(&mut app, 1.0, 1.0), AO_SAMPLES_MOVING);
+        let mut first = ViewScenes::default();
+        first.swap(&mut app.viewport);
+        assert_eq!(sample(&mut app, 1.02, 2.0), AO_SAMPLES_MOVING);
+        let mut second = ViewScenes::default();
+        second.swap(&mut app.viewport);
+        first.swap(&mut app.viewport);
+        assert_eq!(sample(&mut app, 1.3, 1.0), AO_SAMPLES);
+        first.swap(&mut app.viewport);
+        second.swap(&mut app.viewport);
+        assert_eq!(sample(&mut app, 1.32, 2.0), AO_SAMPLES);
+    }
     /// Supersampling (#1288): the sample design drawn at 2× and filtered down shows the same
     /// model (the same pixels covered, give or take its outline) with smoothed edges: pixels part
     /// model, part background, which a single-sampled frame does not have. Skipped without a GPU
@@ -12570,6 +12855,88 @@ mod tests {
         assert!(!published(&app).instanced[0].levels.is_empty());
     }
 
+    /// Completing one view's mesh levels republishes that view's scene. A parked view with a
+    /// different visual style must never receive the completed scene or its renderer key.
+    #[test]
+    fn completing_mesh_levels_keeps_each_views_scene_and_style() {
+        let mut app = single_reference_grid(100);
+        app.ui.visual_style = 2;
+        let wire_key = scene_key(&app);
+        publish_model_scene(&mut app, wire_key);
+        let wire = app.viewport.last_scene.lock().unwrap().clone().unwrap();
+        assert!(wire.instanced.is_empty());
+        assert!(wire.clone().merged().tris.is_empty(), "the wire view has no shaded model triangles");
+        // Imported triangles have no authored model edges. Their wireframe is a
+        // view-dependent silhouette buffer, published through the sketch/feedback slot.
+        let wire_projection = projection(&app, Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0)));
+        for _ in 0..256 {
+            refresh_wireframe(&mut app, &wire_projection);
+            if !app.viewport.wireframe.busy() {
+                break;
+            }
+        }
+        assert!(!app.viewport.wireframe.busy(), "the bounded fixture completes its silhouette work");
+        refresh_sketch_scene(&mut app, &wire_projection);
+        let wire_segments = app.viewport.wireframe.segments().to_vec();
+        assert!(!wire_segments.is_empty(), "the imported grid has visible wireframe outlines");
+        let wire_feedback = app.viewport.sketch_slot.lock().unwrap().clone().unwrap();
+        assert!(!wire_feedback.lines.is_empty(), "the actual wireframe upload contains its outline lines");
+        app.viewport.lod_view = 11;
+        app.viewport.lod_rest.wait(101, 0.0);
+        let mut wire_view = ViewScenes::default();
+        wire_view.swap(&mut app.viewport);
+
+        app.ui.visual_style = 1;
+        let shaded_key = scene_key(&app);
+        assert_ne!(shaded_key, wire_key);
+        publish_model_scene(&mut app, shaded_key);
+        let shaded = app.viewport.last_scene.lock().unwrap().clone().unwrap();
+        assert_eq!(shaded.instanced.len(), 1);
+        assert!(shaded.instanced[0].levels.is_empty());
+        assert!(!app.viewport.lod_waiting.lock().unwrap().is_empty());
+        app.viewport.lod_view = 22;
+        app.viewport.lod_rest.wait(202, 10.0);
+        let mut shaded_view = ViewScenes::default();
+        shaded_view.swap(&mut app.viewport);
+
+        // The shared geometry job finishes while both view-specific publications are parked.
+        let began = std::time::Instant::now();
+        while app.viewport.mesh_lods.busy() {
+            assert!(began.elapsed() < std::time::Duration::from_secs(60), "levels finish off the window thread");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        wire_view.swap(&mut app.viewport);
+        assert_eq!(app.viewport.lod_view, 11);
+        assert_eq!(app.viewport.lod_rest.wait(101, 250.0), 0.0, "the neighbour camera does not reset this view's refinement rest");
+        assert_eq!(published_key(&app), wire_key);
+        assert!(!publish_levels(&mut app), "another view's completed levels cannot republish into the wireframe slot");
+        let unchanged = app.viewport.slot.lock().unwrap().clone().unwrap();
+        assert!(unchanged.instanced.is_empty());
+        assert_eq!(unchanged.lines, wire.lines, "the wireframe model scene keeps its own style");
+        assert!(unchanged.clone().merged().tris.is_empty(), "a shaded neighbor cannot supply the wire model scene");
+        assert_eq!(app.viewport.wireframe.segments(), wire_segments.as_slice(), "the wire view retains its classified outlines");
+        let unchanged_feedback = app.viewport.sketch_slot.lock().unwrap().clone().unwrap();
+        assert_eq!(unchanged_feedback.lines, wire_feedback.lines, "the wireframe feedback slot retains its own nonempty lines");
+        assert_eq!(app.viewport.patches, 0);
+        wire_view.swap(&mut app.viewport);
+
+        shaded_view.swap(&mut app.viewport);
+        assert!(publish_levels(&mut app), "the parked shaded scene receives its own completed levels");
+        let patched_key = published_key(&app);
+        assert_ne!(patched_key, shaded_key);
+        let patched = app.viewport.slot.lock().unwrap().clone().unwrap();
+        assert_eq!(patched.instanced.len(), 1);
+        assert!(!patched.instanced[0].levels.is_empty());
+        assert!(std::sync::Arc::ptr_eq(&patched.instanced[0].tris, &shaded.instanced[0].tris));
+        assert!(!publish_levels(&mut app), "each completion is published once per view");
+        assert_eq!(app.viewport.scenes_built, 2, "levels patch the scene without a third build");
+        shaded_view.swap(&mut app.viewport);
+        wire_view.swap(&mut app.viewport);
+        assert_eq!(published_key(&app), wire_key, "the neighbour keeps its renderer key after the patch");
+        wire_view.swap(&mut app.viewport);
+        shaded_view.swap(&mut app.viewport);
+        assert_eq!(published_key(&app), patched_key, "returning to the first view keeps its LOD patch key");
+    }
     #[test]
     fn hovering_an_imported_mesh_face_reuses_its_model_triangles() {
         let mut app = single_reference_grid(2);
@@ -16976,6 +17343,19 @@ mod tests {
         assert!(h.app.viewport.hover.is_some(), "closing the dialog must restore model highlights");
         h.call("ui.click", json!({"x": p.x, "y": p.y}));
         assert!(!h.app.session.selection.is_empty());
+    }
+
+    #[test]
+    fn compass_stays_below_pop_out_caption_buttons() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let view = Rect::from_min_size(Pos2::ZERO, vec2(380.0, 325.0));
+        let original = axis_rect(&app, view);
+        let captions = Rect::from_min_max(pos2(240.0, 0.0), pos2(380.0, 34.0));
+        app.shell.top_bar_overlays[2] = Some(captions);
+        let moved = axis_rect(&app, view);
+        assert_eq!(moved.right(), original.right());
+        assert_eq!(moved.size(), original.size());
+        assert!(moved.top() - AXIS_CENTER_LIFT >= captions.bottom());
     }
 
     #[test]

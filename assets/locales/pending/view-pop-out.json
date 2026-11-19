@@ -1,0 +1,26 @@
+{
+  "ar": {
+    "cmd.tab.view.pop_out": "فتح في نافذة جديدة"
+  },
+  "de": {
+    "cmd.tab.view.pop_out": "In neuem Fenster öffnen"
+  },
+  "en": {
+    "cmd.tab.view.pop_out": "Open View in New Window"
+  },
+  "he": {
+    "cmd.tab.view.pop_out": "פתיחה בחלון חדש"
+  },
+  "ja": {
+    "cmd.tab.view.pop_out": "新しいウィンドウで開く"
+  },
+  "ko": {
+    "cmd.tab.view.pop_out": "새 창에서 열기"
+  },
+  "vi": {
+    "cmd.tab.view.pop_out": "Mở trong cửa sổ mới"
+  },
+  "zh": {
+    "cmd.tab.view.pop_out": "在新窗口中打开"
+  }
+}
