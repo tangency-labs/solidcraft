@@ -1273,6 +1273,32 @@ fn mesh_corner_normals_survive_welding_reflection_and_nonuniform_scale() {
 }
 
 #[test]
+fn packed_mesh_winding_repairs_pairs_and_leaves_non_manifold_edges_alone() {
+    let positions = [
+        [0., 0., 0.],
+        [1., 0., 0.],
+        [0., 1., 0.],
+        [1., 1., 0.],
+        [10., 0., 0.],
+        [11., 0., 0.],
+        [10., 1., 0.],
+        [10., 0., 1.],
+        [10., -1., 0.],
+        [0., 0., 0.],
+    ];
+    let triangles = [[0, 9, 1], [0, 1, 2], [1, 2, 3], [4, 5, 6], [4, 5, 7], [4, 5, 8]];
+    let mut normals = [[0., 0., 1., 0., 0., 1., 0., 0., 1.]; 6];
+    normals[2] = [1., 0., 0., 0., 1., 0., 0., 0., 1.];
+
+    let body = crate::Body::from_packed_mesh(&positions, &triangles, &normals).unwrap();
+    let (welded_positions, welded_triangles) = body.triangle_mesh().unwrap();
+    assert_eq!(welded_positions.len(), 9);
+    assert_eq!(welded_triangles, &[[0, 1, 2], [1, 3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]]);
+    assert_eq!(body.triangle_corner_normals().unwrap()[1], [Vec3::X, Vec3::Z, Vec3::Y]);
+    assert!(!body.is_closed_mesh());
+}
+
+#[test]
 fn mesh_bodies_move_measure_and_refuse_solid_ops() {
     // Unit cube as 12 triangles with repeated corners (welded on construction).
     let c = |i: u32| Vec3::new((i & 1) as f64 * 10.0, ((i >> 1) & 1) as f64 * 10.0, ((i >> 2) & 1) as f64 * 10.0);
