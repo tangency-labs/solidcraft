@@ -596,10 +596,46 @@ pub const TORUS: &[AssertReportLabel] = &[
     ),
 ];
 
+/// `sAssertCurveBoundedSurface_list` (`source/SMLib/src/SmCurveBoundedSurface.cpp`).
+/// Upstream's `SM_GetAssertLabelList` has no case for the class, so its reports read
+/// [`DEFAULT`] and every test past 0 reads past its end; [`label_list`] keeps that, and
+/// the curve-bounded check labels those tests from this table instead.
+pub const CURVE_BOUNDED_SURFACE: &[AssertReportLabel] = &[
+    l(
+        AssertType::NestedTest,
+        "UNKNOWN",
+        Some("Contained BasisSurface must pass its AssertValid tests"),
+    ),
+    l(
+        AssertType::NestedTest,
+        "UNKNOWN",
+        Some("Contained 3DBoundaries curve must pass its AssertValid tests"),
+    ),
+    l(
+        AssertType::NestedTest,
+        "UNKNOWN",
+        Some("Contained UVBoundaries curve must pass its AssertValid tests"),
+    ),
+    l(
+        AssertType::Pointer,
+        "Base Surface Context",
+        Some("Basis surface context must be this surface context"),
+    ),
+    l(
+        AssertType::Pointer,
+        "3D Curves Context",
+        Some("3D Curves context must be this surface context"),
+    ),
+    l(
+        AssertType::Pointer,
+        "UV Curves Context",
+        Some("UV Curves context must be this surface context"),
+    ),
+];
+
 /// Not upstream (WR-539, the fork's tangency-labs/smlib@daba678): [`TORUS`] with the
-/// fork's test 5, "Self Intersection". Only the torus check with
-/// `Kernel::fixes.torus_check_spindle_apex` reports from it; `SM_GetAssertLabelList`
-/// ([`label_list`]) keeps upstream's [`TORUS`].
+/// fork's test 5, "Self Intersection". Only the spindle torus check reports from it;
+/// `SM_GetAssertLabelList` ([`label_list`]) keeps upstream's [`TORUS`].
 pub const TORUS_WITH_SPINDLE_APEX: &[AssertReportLabel] = &[
     l(
         AssertType::Radius,

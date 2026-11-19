@@ -10,6 +10,7 @@
 pub mod agent_setup;
 pub mod batch_params;
 pub mod batch_preflight;
+pub mod browser_find;
 pub mod capture;
 pub mod cmd;
 pub mod control_auth;
@@ -21,6 +22,7 @@ pub mod drawing_dimension_paper;
 pub mod drawing_note_paper;
 pub mod drawing_picture;
 pub mod drawing_pictures;
+pub mod drawing_revision_paper;
 pub mod drawing_scene;
 mod drawing_table_paper;
 pub mod drawing_view;
@@ -41,6 +43,7 @@ pub mod recovery;
 pub mod render_jobs;
 pub mod render_lights;
 pub mod render_preparation;
+pub mod report_issue;
 pub mod sample;
 pub mod schema;
 #[cfg(not(target_arch = "wasm32"))]
@@ -52,6 +55,7 @@ pub mod status_details;
 pub mod status_items;
 pub mod timing;
 pub mod title_block_text;
+pub mod upright_image;
 pub mod view;
 
 use solidcraft_geom::prelude::*;
@@ -63,9 +67,10 @@ use solidcore_record::Vec3;
 use solidcraft_doc::{Document, Model, ModelState};
 
 pub use cmd::settings::{MAX_PROFILE_NAME, profile_name};
+pub use cmd::sketch_selection;
 pub use cmd::{
-    Addition, CommandInfo, CommandSpec, LinkProblem, LinkState, OpenSteps, addition, auto_operation, command_specs, dimension_roles, extrude_reach,
-    find_command, resolve_design_links, shown_scope, standard_view, use_import_cache_dir,
+    Addition, CommandInfo, CommandSpec, FromSelection, LinkProblem, LinkState, OpenSteps, addition, auto_operation, command_specs, dimension_roles,
+    extrude_reach, find_command, normalize_command_id, resolve_design_links, shown_scope, standard_view, use_import_cache_dir,
 };
 pub use solidcraft_doc as doc;
 pub use solidcraft_doc::Visibility;
@@ -95,6 +100,9 @@ pub enum EngineError {
     Other(String),
     #[error("plugin: {0}")]
     Plugin(#[from] craft_plugin::HostError),
+    /// A plugin failed while it ran or was refused before it ran: named, with its file.
+    #[error("{}", .0.text())]
+    PluginFailed(Box<plugin::PluginFailure>),
     /// The host's pre-command check ([`Session::set_command_check`]) refused the command; the
     /// message is the reason it gave.
     #[error("{reason}")]
@@ -133,6 +141,14 @@ impl From<solidcraft_kernel::KernelError> for EngineError {
 }
 
 impl EngineError {
+    /// The plugin host's error underneath, for a program to tell refusals apart.
+    pub fn host_error(&self) -> Option<&craft_plugin::HostError> {
+        match self {
+            EngineError::Plugin(error) => Some(error),
+            EngineError::PluginFailed(failure) => Some(&failure.error),
+            _ => None,
+        }
+    }
     /// The error a failed feature's result reports: internal when the kernel caught a panic.
     pub(crate) fn of_feature(r: &solidcraft_doc::FeatureResult, error: String) -> EngineError {
         if r.internal { EngineError::Internal(String::new(), error) } else { EngineError::Other(error) }
@@ -253,7 +269,7 @@ impl Sel {
     pub(crate) fn body_name(&self) -> Option<&str> {
         match self {
             Sel::Body { name } => Some(name),
-            Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => Some(body),
+            Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } if !body.is_empty() => Some(body),
             _ => None,
         }
     }
@@ -373,6 +389,8 @@ pub struct Snapshot {
     /// The part of the design the step changed: a drawing (by id), or the model and the list of
     /// drawings (`None`). Undo and redo go through one part's steps (`edit.undo`).
     pub part: Option<u64>,
+    /// The Section Analysis before a step that changed it (none: the step left it alone).
+    pub section: Option<SectionState>,
 }
 
 impl Snapshot {
@@ -387,8 +405,18 @@ impl Snapshot {
             pending_moves: s.pending_moves.clone(),
             visibility: s.visibility.clone(),
             part: None,
+            section: None,
         }
     }
+}
+
+/// A Section Analysis as an undo step keeps it. View state, never saved with the design.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SectionState {
+    pub planes: Vec<SectionPlane>,
+    pub hidden: Vec<SectionPlane>,
+    pub hatch: bool,
+    pub folder: Option<Vec<u64>>,
 }
 
 /// Where the open sketch was entered (`sketch.create`, `sketch.edit`): the design before it and
@@ -463,6 +491,18 @@ pub struct Preview {
     pub replies: Vec<Value>,
 }
 
+impl Preview {
+    fn visible_world(before: &Session, after: &Session, replies: Vec<Value>) -> Result<Self> {
+        let visible = |session: &Session| -> Result<Arc<ModelState>> {
+            let world = session.world_state()?;
+            let mut shown = (*world).clone();
+            shown.bodies.retain(|body| session.body_visible(&body.name));
+            Ok(Arc::new(shown))
+        };
+        Ok(Self { before: visible(before)?, after: visible(after)?, replies })
+    }
+}
+
 /// Prepared world geometry depends on design/model identity and placement context, not
 /// selection or the view revision. Retained Arcs prevent pointer reuse after a design closes.
 #[derive(Clone)]
@@ -529,6 +569,17 @@ impl ComputedCommands {
                 && session.plugin_state == source.plugin_state))
     }
 
+    /// Whether the resulting document differs in content from its source.
+    pub fn changes_document(&self) -> bool {
+        self.source.doc != self.computed.doc
+    }
+
+    /// Show the prepared model in occurrence coordinates, with visibility applied, and return
+    /// the replies from its evaluation.
+    pub fn preview_visible_world(&self) -> Result<Preview> {
+        Preview::visible_world(&self.source, &self.computed, self.steps.iter().map(|step| step.reply.clone()).collect())
+    }
+
     /// Prepare display tessellation before returning the transaction to the window; a model that
     /// cannot be placed is the error.
     pub fn warm_meshes(&self, keep_going: impl Fn() -> bool + Sync) -> Result<()> {
@@ -571,9 +622,14 @@ pub struct Session {
     pub active_sketch: Option<u64>,
     /// Explicitly owned sheet edit, independent of the model sketch being edited.
     pub active_sheet_sketch: Option<Arc<SheetSketchEdit>>,
-    /// The drawing open (by id): drawing commands change it, and the model's wait until it is
-    /// closed ([`cmd::Part`]).
+    /// The drawing open (by id): drawing commands change it. The model's commands work with it
+    /// open too ([`cmd::Part`]); the views they leave out of date wait for the drawing's Update.
     pub open_drawing: Option<u64>,
+    /// The host shows the model (the app's Design and Render): undo, redo and the shared sketch
+    /// tools take the model's part even with a drawing open or a sheet sketch entered in it, so
+    /// each workspace works on its own part and none holds another. Off (the default), they take
+    /// the open drawing's ([`Session::history_part`], [`Session::sheet_sketching`]).
+    pub model_focus: bool,
     /// The design as it was when the open sketch was entered, for Cancel Sketch.
     pub(crate) sketch_entry: Option<SketchEntry>,
     /// Sketch temporarily shown while editing a feature that consumes it. View state only.
@@ -709,8 +765,15 @@ pub struct Session {
     /// What was copied in another design, to paste here (`component.paste_from_design`). The
     /// host puts it here; each design's own copies stay in its own clipboard.
     pub foreign_copy: Option<Arc<ForeignCopy>>,
-    /// Section Analysis: a view cut by a plane (origin, unit normal; the normal side is hidden).
-    pub section: Option<(Vec3, Vec3)>,
+    /// Section Analysis: a view cut by planes, at most [`view::MAX_SECTION_PLANES`]: what lies
+    /// on the normal side of any one is hidden (none: no section).
+    pub section: Vec<SectionPlane>,
+    /// The section's planes hidden with their eye: kept, cutting nothing (`inspect.section`'s
+    /// `hide` and `show`).
+    pub section_hidden: Vec<SectionPlane>,
+    /// The Analysis folder hidden with its eye (`inspect.section`'s `folder: false`): the hidden
+    /// planes that come back when it is shown (none: the folder is shown).
+    pub section_folder: Option<Vec<u64>>,
     /// Whether the section's cut faces are hatched (`inspect.section`'s `hatch`; on by default).
     pub section_hatch: bool,
     /// Component identification colours are enabled when present; view state only.
@@ -748,6 +811,9 @@ pub struct Session {
     pub(crate) drawing_scenes: drawing_scene::Cache,
     /// The visibility the design file holds (what `is_dirty` compares with).
     saved_visibility: Visibility,
+    /// The design as `doc.open` made it from a STEP, IGES or mesh file, never saved yet: while it
+    /// is still that, closing it loses nothing the file doesn't hold ([`Session::unchanged_import`]).
+    opened_import: Option<Arc<Document>>,
     /// States to go back to (`edit.checkpoint`, `edit.restore_checkpoint`): how batches of
     /// commands are undone however long the undo history is.
     pub(crate) checkpoints: Vec<Checkpoint>,
@@ -782,7 +848,7 @@ pub struct LiveEdit {
     pub report: solidcraft_sketch::SolveReport,
 }
 
-/// The design, active sketch, open drawing, pending positions and undo history at an `edit.checkpoint`.
+/// The design, active sketch, open drawing, pending positions, undo history and section at an `edit.checkpoint`.
 #[derive(Clone, Debug)]
 pub(crate) struct Checkpoint {
     pub id: u64,
@@ -796,6 +862,7 @@ pub(crate) struct Checkpoint {
     pub undo: Vec<Snapshot>,
     pub redo: Vec<Snapshot>,
     redo_watch: Option<RedoWatch>,
+    pub section: SectionState,
 }
 
 /// A way of shading the model's faces to judge their shape (view state, not part of the design).
@@ -813,6 +880,56 @@ pub enum SurfaceAnalysis {
     /// Green where a tool coming along `dir` reaches the face (facing it, nothing above), red
     /// elsewhere.
     Access { dir: Vec3 },
+}
+
+/// One plane of a Section Analysis: what lies on its normal's side is hidden, whatever the other
+/// planes keep. View state only.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+pub struct SectionPlane {
+    /// Its number in the section, from 1 (`inspect.section`'s `remove` takes it).
+    pub id: u64,
+    pub origin: Vec3,
+    /// Unit length.
+    pub normal: Vec3,
+}
+
+impl SectionPlane {
+    /// The plane as (normal, d): what lies where normal·p > d is hidden.
+    pub fn clip(&self) -> (Vec3, f64) {
+        (self.normal, self.normal.dot(self.origin))
+    }
+
+    /// Its cut faces' hatch (an index into `solidcraft_viewport::SECTION_HATCH_ANGLES`), kept by its id.
+    pub fn hatch(&self) -> usize {
+        solidcraft_viewport::section_hatch_of(self.id)
+    }
+
+    /// Whether the plane keeps `p` (within `eps`).
+    pub fn keeps(&self, p: Vec3, eps: f64) -> bool {
+        self.normal.dot(p - self.origin) <= eps
+    }
+}
+
+impl Session {
+    /// The Section Analysis as an undo step keeps it.
+    pub fn section_state(&self) -> SectionState {
+        SectionState {
+            planes: self.section.clone(),
+            hidden: self.section_hidden.clone(),
+            hatch: self.section_hatch,
+            folder: self.section_folder.clone(),
+        }
+    }
+
+    pub fn set_section_state(&mut self, state: SectionState) {
+        let was_on = !self.section.is_empty();
+        (self.section, self.section_hidden, self.section_hatch, self.section_folder) = (state.planes, state.hidden, state.hatch, state.folder);
+        self.status_slot(crate::status_items::StatusId::Section, !self.section.is_empty());
+        if !was_on && !self.section.is_empty() {
+            self.status_activated(crate::status_items::StatusId::Section);
+        }
+        self.refresh_display();
+    }
 }
 
 /// One seam measured by `inspect.continuity`, where the viewport shades it: the stations it was
@@ -938,14 +1055,34 @@ impl Session {
     }
 
     /// The model `doc`'s file kept, when it is `doc`'s evaluation and the cache is not turned off.
+    /// A model evaluated with the tolerance heal preference ([`solidcraft_kernel::heals_tolerance_defects`])
+    /// set the other way holds other results (its imports healed or as read, Repair healing first
+    /// or not): evaluated again.
     pub(crate) fn saved_model(doc: &Arc<Document>, saved: Option<&solidcraft_doc::SavedModel>) -> Option<Model> {
         saved
             .filter(|_| solidcraft_geom::env::var_os("NO_MODEL_CACHE").is_none())
             .and_then(|saved| Model::adopt(doc, saved).map_err(|e| log::info!("the saved model is not used: {e}")).ok())
+            .filter(|model| model.heals() == solidcraft_kernel::heals_tolerance_defects())
     }
 
-    /// A session on `doc` evaluated as `model`, with what it hides.
+    /// `doc` with each fold that keeps no side of its line that stays (a design saved before
+    /// folds kept one) given the side it folds now, and `model` evaluated on it: from then on that
+    /// side stays, wherever the fold's line moves. As they are where every fold keeps its side.
+    fn with_fold_sides(doc: Arc<Document>, mut model: Model) -> (Arc<Document>, Model) {
+        match doc.with_fold_sides(&model) {
+            Some(settled) => {
+                let doc = Arc::new(settled);
+                model.evaluate_shared(&doc);
+                (doc, model)
+            }
+            None => (doc, model),
+        }
+    }
+
+    /// A session on `doc` evaluated as `model`, with what it hides. A design opened from before
+    /// folds kept which side stays has each fold's side settled first ([`Self::with_fold_sides`]).
     pub(crate) fn with_model(doc: Arc<Document>, visibility: Visibility, model: Model) -> Self {
+        let (doc, model) = Self::with_fold_sides(doc, model);
         Session {
             stop: Default::default(),
             is_copy: false,
@@ -958,6 +1095,7 @@ impl Session {
             active_sketch: None,
             active_sheet_sketch: None,
             open_drawing: None,
+            model_focus: false,
             sketch_entry: None,
             feature_edit_sketch: None,
             selection: Vec::new(),
@@ -981,7 +1119,7 @@ impl Session {
             project_construction: false,
             disabled_plugins: Default::default(),
             plugin_limits: plugin::default_host_limits(),
-            plugin_state: Default::default(),
+            plugin_state: plugin::AppState::for_process(),
             param_check: schema::ParamCheck::Off,
             easyprint_upload: None,
             keep_print_faces: true,
@@ -1007,7 +1145,9 @@ impl Session {
             sketch_clipboard: None,
             appearance_clipboard: None,
             foreign_copy: None,
-            section: None,
+            section: Vec::new(),
+            section_hidden: Vec::new(),
+            section_folder: None,
             section_hatch: true,
             colored_components: None,
             analysis: None,
@@ -1022,6 +1162,7 @@ impl Session {
             next_checkpoint: 1,
             replacements: 0,
             saved_visibility: visibility.clone(),
+            opened_import: None,
             visibility,
             camera: None,
             render_viewport: None,
@@ -1144,6 +1285,21 @@ impl Session {
     /// component moved and not captured yet (#9736).
     pub fn is_dirty(&self) -> bool {
         self.document_differs() || self.visibility != self.saved_visibility || self.moved_uncaptured()
+    }
+
+    /// The design is a STEP, IGES or mesh file just opened (`doc.open`) and not changed since:
+    /// not saved as a design yet, so [`Session::is_dirty`], but closing it loses nothing the file
+    /// doesn't hold, and its tab closes without asking (#15111).
+    pub fn unchanged_import(&self) -> bool {
+        self.path.is_none()
+            && self.opened_import.as_ref().is_some_and(|opened| Arc::ptr_eq(opened, &self.doc) || **opened == *self.doc)
+            && self.visibility == self.saved_visibility
+            && !self.moved_uncaptured()
+    }
+
+    /// Remember the design as `doc.open` just made it from another kind of file.
+    pub(crate) fn opened_from_import(&mut self) {
+        self.opened_import = Some(self.doc.clone());
     }
 
     /// A component was moved and its position not captured yet (#9736). The placements of an
@@ -1334,6 +1490,18 @@ impl Session {
         self.forget_consumed_sketches();
         self.forget_dirty_answer();
         self.model.forget_fingerprints();
+    }
+
+    /// Whose steps undo and redo go through: the open drawing's (by id), or the model's (`None`),
+    /// with none open or when [`Session::model_focus`] is set.
+    pub fn history_part(&self) -> Option<u64> {
+        self.open_drawing.filter(|_| !self.model_focus)
+    }
+
+    /// A sheet sketch of the open drawing is being edited, and the host isn't showing the model
+    /// ([`Session::model_focus`]): the shared sketch tools work on it, not on the model's sketch.
+    pub fn sheet_sketching(&self) -> bool {
+        !self.model_focus && self.active_sheet_sketch.as_ref().is_some_and(|entry| self.open_drawing == Some(entry.drawing))
     }
 
     /// The drawing open, for `cmd`.
@@ -1551,6 +1719,19 @@ impl Session {
         w
     }
 
+    /// `sketches`, built for this design's model (failed sketches shown with their last geometry,
+    /// [`solidcraft_doc::Model::failed_sketch_shown`]), placed where [`Session::world_state`]
+    /// places sketches. Display only: no state a command reads has them.
+    pub fn sketches_placed(&self, sketches: Vec<Arc<solidcraft_doc::SolvedSketch>>) -> Result<Vec<Arc<solidcraft_doc::SolvedSketch>>> {
+        if sketches.is_empty() || self.doc.occurrences.is_empty() {
+            return Ok(sketches);
+        }
+        let mut only = solidcraft_doc::ModelState::default();
+        only.sketches = sketches;
+        let placed = solidcraft_doc::world_state_reusing(&self.placed_document(), &only, &mut Default::default())?;
+        Ok(self.authored_sketches(placed)?.sketches)
+    }
+
     /// `w` with the active component's sketches shown at the placement being authored.
     fn authored_sketches(&self, mut w: solidcraft_doc::ModelState) -> Result<solidcraft_doc::ModelState> {
         // Sketch definitions are displayed once, at the placement currently being authored.
@@ -1637,6 +1818,23 @@ impl Session {
     }
 
     pub fn refresh(&mut self) {
+        let _ = self.refresh_with_joint_report();
+    }
+
+    /// Settle what the imports' background checks found ([`solidcraft_doc::Model::settle_import_checks`]),
+    /// and when they healed parts the design does not show yet, evaluate it again: except during
+    /// a live edit, which a refresh would end (a later call does it). Returns whether it refreshed.
+    pub fn settle_import_checks(&mut self) -> bool {
+        if self.model.settle_import_checks() && self.live_links.is_none() {
+            self.refresh();
+            return true;
+        }
+        false
+    }
+
+    /// Refresh normally, retaining the last joint solve for commands that report its outcome.
+    fn refresh_with_joint_report(&mut self) -> Option<solidcraft_doc::joints::Solution> {
+        let mut solved = None;
         if self.model.evaluate_shared(&self.doc) {
             self.evaluations = self.evaluations.saturating_add(1);
         }
@@ -1666,7 +1864,9 @@ impl Session {
             // the design now holds, and the joints solved for that model, a few times at most.
             for _ in 0..3 {
                 let before = self.doc.clone();
-                self.solve_joints();
+                if let Some(solution) = self.solve_joints() {
+                    solved = Some(solution);
+                }
                 if Arc::ptr_eq(&before, &self.doc) || before.occurrences == self.doc.occurrences {
                     break;
                 }
@@ -1680,6 +1880,7 @@ impl Session {
         {
             self.active_sketch = None;
         }
+        solved
     }
 
     /// Solve the joints, unless nothing they read changed since this session last solved them:
@@ -1687,16 +1888,17 @@ impl Session {
     /// its features (the joints read those only through the model). A command that refreshes on
     /// its own (a parameter change) is refreshed again after it, and that second solve would
     /// find every occurrence where it is.
-    fn solve_joints(&mut self) {
+    fn solve_joints(&mut self) -> Option<solidcraft_doc::joints::Solution> {
         let state = self.model.state();
         let settled = self.joints_settled.as_ref().is_some_and(|(doc, model)| {
             std::sync::Weak::as_ptr(model) == Arc::as_ptr(&state) && (Arc::ptr_eq(doc, &self.doc) || same_but_features(doc, &self.doc))
         });
         if settled {
-            return;
+            return None;
         }
-        cmd::joints::place(self);
+        let solved = cmd::joints::place(self);
         self.joints_settled = Some((self.doc.clone(), Arc::downgrade(&self.model.state())));
+        Some(solved)
     }
 
     /// [`Session::refresh`] after the design changed from `previous`; a change that only renamed
@@ -1723,7 +1925,7 @@ impl Session {
         {
             self.revision += 1;
             if !self.doc.assembly.joints.is_empty() {
-                self.solve_joints();
+                let _ = self.solve_joints();
             }
             return;
         }
@@ -1774,6 +1976,21 @@ impl Session {
             reserve.extend(
                 made.iter().filter(|n| solidcraft_doc::is_counted_body_name(n) && !self.doc.reserved_body_names.contains(**n)).map(|n| n.to_string()),
             );
+            // A pattern of several bodies stores its names source by source, so after its count
+            // changes they are stored again as the copies have them now (#12114). Filled in
+            // slot by slot, a name of the old count would stay in a later source's place. One
+            // saved before then reads its names in order; stored as its copies have them, they
+            // mean the same copies read source by source. The copies of a source the pattern
+            // left out keep the names stored for them, in their places.
+            let left_out = r.state.pattern_left_out(f.id);
+            if f.pins_every_body_name() && (f.pattern_names_in_order || made.len() != f.body_names.len() || !left_out.is_empty()) {
+                let made: Vec<String> = made.iter().map(|n| n.to_string()).collect();
+                let names = f.pattern_pins(&made, left_out).map_or(made, |(names, _)| names);
+                if f.pattern_names_in_order || names != f.body_names {
+                    pins.push((f.id, names));
+                }
+                continue;
+            }
             // Nothing to pin when every slot the bodies take already holds a name.
             if made.len() <= f.body_names.len() && f.body_names.iter().take(made.len()).all(|slot| !slot.trim().is_empty()) {
                 continue;
@@ -1800,10 +2017,67 @@ impl Session {
         for (id, names) in pins {
             if let Some(f) = doc.feature_mut(id) {
                 f.body_names = names;
+                // Stored as the copies have them now: read source by source from here on (#12114).
+                f.pattern_names_in_order = false;
             }
         }
         doc.reserved_body_names.extend(reserve);
         // The pinned names are the ones the bodies have: no result changes, so none is evaluated.
+        self.model.refingerprint_shared(&self.doc, keep);
+    }
+
+    /// Whether a link of a sketch still has the guessed name its design dropped as it opened.
+    pub(crate) fn has_dropped_link_names(&self) -> bool {
+        self.doc.features.iter().any(|f| self.doc.sketch(f.id).is_ok_and(|sk| sk.links.iter().any(|l| l.name_dropped)))
+    }
+
+    /// The names `whole` (this design with its whole timeline evaluated, names pinned) found for
+    /// the links this design still has marked `name_dropped`, as `(sketch, link, vertex, edge)`.
+    pub(crate) fn dropped_link_pins(&self, whole: &Session) -> Vec<(u64, String, Option<String>, Option<String>)> {
+        let mut pins = Vec::new();
+        for f in &self.doc.features {
+            let (Ok(mine), Ok(theirs)) = (self.doc.sketch(f.id), whole.doc.sketch(f.id)) else { continue };
+            for l in mine.links.iter().filter(|l| l.name_dropped) {
+                let Some(found) = theirs.links.iter().find(|x| x.id == l.id && !x.name_dropped) else { continue };
+                if found.vertex_name.is_some() || found.edge_name.is_some() {
+                    pins.push((f.id, l.id.clone(), found.vertex_name.clone(), found.edge_name.clone()));
+                }
+            }
+        }
+        pins
+    }
+
+    /// Store the vertex and edge names of the links whose guessed names their design dropped as
+    /// it opened (`Link::name_dropped`, #17229): each was found by its point, and keeps the name
+    /// of what it was found on from now on, as an edit of its sketch stores it. The evaluated
+    /// sketches already give the links those names, so nothing is evaluated again. A link not
+    /// found (its sketch failed or is rolled back) stays marked.
+    fn pin_dropped_link_names(&mut self) {
+        if self.model.is_stale() {
+            return;
+        }
+        let mut pins: Vec<(u64, String, Option<String>, Option<String>)> = Vec::new();
+        for f in &self.doc.features {
+            let Ok(saved) = self.doc.sketch(f.id) else { continue };
+            if !saved.links.iter().any(|l| l.name_dropped) {
+                continue;
+            }
+            let Some(r) = self.model.result(f.id).filter(|r| r.error.is_none() && !r.skipped && !r.stale) else { continue };
+            let Some(solved) = r.state.sketch(f.id) else { continue };
+            for l in saved.links.iter().filter(|l| l.name_dropped) {
+                let Some(found) = solved.sketch.links.iter().find(|x| x.id == l.id && !x.lost) else { continue };
+                if found.vertex_name.is_some() || found.edge_name.is_some() {
+                    pins.push((f.id, l.id.clone(), found.vertex_name.clone(), found.edge_name.clone()));
+                }
+            }
+        }
+        if pins.is_empty() {
+            return;
+        }
+        let ids: Vec<u64> = pins.iter().map(|(id, ..)| *id).collect();
+        let keep = self.model.pinned_prefix(&self.doc, &ids);
+        store_link_names(self.doc_mut(), pins);
+        // The stored names are the ones the evaluation found: no result changes.
         self.model.refingerprint_shared(&self.doc, keep);
     }
 
@@ -1944,6 +2218,9 @@ impl Session {
         // after the refresh below (the same checks `settle` runs on an edit's own solve).
         let solved_geometry: std::collections::BTreeMap<u64, solidcraft_sketch::Sketch> =
             self.model.results.iter().filter_map(|r| r.state.sketch(r.id).map(|k| (r.id, k.sketch.clone()))).collect();
+        // Whose 3D constraints held before the edit: only those can it break (#10608).
+        let wires_held: std::collections::BTreeSet<u64> =
+            self.model.results.iter().filter(|r| r.state.sketch(r.id).is_some_and(|k| k.report.wires_ok())).map(|r| r.id).collect();
         // Quantity changes alter topology, so store the regenerated instances in the same
         // transaction as the parameter edit. Later picks and undo must see those same ids.
         let mut updated: Vec<_> = self
@@ -1971,12 +2248,26 @@ impl Session {
         }
         self.refresh();
         for r in &self.model.results {
+            // A value a 3D dimension or point of this sketch cannot take (#10608) is refused like
+            // one that conflicts; an error from upstream is not the edit's to refuse.
+            if r.error.is_some()
+                && solved_before.contains_key(&r.id)
+                && let Ok(sk) = self.doc.sketch(r.id)
+                && !sk.wire_constraints.is_empty()
+                && let Err(e) = self.doc.apply_wire_values(&self.doc.evaluation_values(), &mut sk.clone())
+            {
+                return Err(EngineError::Other(format!("sketch `{}`: {e}; the values were not changed", r.name)));
+            }
             let (Some(before), Some(k)) = (solved_before.get(&r.id), r.state.sketch(r.id)) else { continue };
             if own_values(&k.sketch) == *before {
                 continue;
             }
             if !k.report.keeps_orientation() {
                 let why = k.report.failure(|f| format!("its constraints would conflict ({f})"));
+                return Err(EngineError::Other(format!("sketch `{}`: {why}; the values were not changed", r.name)));
+            }
+            if let Some(w) = k.report.wires.as_ref().filter(|w| !w.ok && wires_held.contains(&r.id)) {
+                let why = w.failure(|f| format!("its 3D constraints would conflict ({f})"));
                 return Err(EngineError::Other(format!("sketch `{}`: {why}; the values were not changed", r.name)));
             }
             // The value changed this sketch and it still solves: refuse it the way `settle`
@@ -2025,15 +2316,18 @@ impl Session {
         // The command, the evaluation it causes and the refresh after it: one profiler span.
         let _span = solidcraft_profile::span("command", spec.id);
         let host_viewport = self.render_viewport.clone();
+        let model_focus = self.model_focus;
         let host_jobs = self.render_jobs.host.clone();
         let additional_jobs = self.render_jobs.additional.clone();
         let live = spec.live.filter(|_| params.get("live").and_then(Value::as_bool) == Some(true));
-        // A disabled model command must not evaluate a stale model merely because
-        // it was tried from a drawing. Shared sheet tools read only drawing data.
+        // A disabled command must not evaluate a stale model merely because it was tried from a
+        // drawing. Shared sheet tools read only drawing data.
         if self.open_drawing.is_some() {
             spec.allowed(self).map_err(|why| EngineError::Disabled(spec.id.to_string(), why))?;
         }
-        let reads_model = spec.reads_model && !(self.open_drawing.is_some() && spec.part == cmd::Part::Sketch);
+        let reads_model = spec.reads_model && !(self.sheet_sketching() && spec.part == cmd::Part::Sketch);
+        // What an import's SMLib check found since it was shown is in the model a command reads.
+        self.model.settle_import_checks();
         if live.is_none() {
             self.live_links = None;
             if reads_model && self.model.is_stale() {
@@ -2045,11 +2339,19 @@ impl Session {
         self.check_command(spec, params)?;
         let open_drawing = self.open_drawing;
         let redo_watch_before = self.redo_watch.clone();
-        let before = Snapshot {
-            part: open_drawing.filter(|_| matches!(spec.part, cmd::Part::Drawing | cmd::Part::Open | cmd::Part::Sketch)),
+        let mut before = Snapshot {
+            part: open_drawing.filter(|_| match spec.part {
+                cmd::Part::Drawing => true,
+                // A shared sketch tool's step is the drawing's on a sheet sketch, else the model's;
+                // a delete's is the drawing's when it deletes the drawing's objects.
+                cmd::Part::Sketch => self.sheet_sketching(),
+                cmd::Part::Open => cmd::delete::in_drawing(self, params),
+                cmd::Part::Model | cmd::Part::Any => false,
+            }),
             ..Snapshot::of(self, spec.label)
         };
         let ids = self.ids.clone();
+        let section_before = self.section_state();
         // Where new geometry goes: not in the design, but a replay needs it (component.activate).
         let active_before = (self.active_component, self.active_occurrence_path.clone());
         let replacements = self.replacements;
@@ -2062,12 +2364,13 @@ impl Session {
         if outermost {
             frames::reset_inner_undoable();
         }
-        let mapped = if outermost {
+        let mut mapped = if outermost {
             frames::forget_picks();
             frames::to_local(self, spec.id, params)?
         } else {
             None
         };
+        let _copy_context = outermost.then(|| frames::copy_context(spec.id, mapped.as_mut()));
         let params = mapped.as_ref().unwrap_or(params);
         if outermost {
             crash::command_begin(self, spec.id, given);
@@ -2132,11 +2435,20 @@ impl Session {
         // New/open/recover can replace the Session. Device ownership belongs to the host,
         // so its capability metadata survives those document lifecycle commands.
         self.render_viewport = host_viewport;
+        // Which workspace undoes what is the host's too, whichever design is open.
+        self.model_focus = model_focus;
         if self.render_jobs.host.is_none() && host_jobs.is_some() {
             self.set_render_job_host(host_jobs)?;
         }
         for (host, _) in additional_jobs {
             self.register_render_job_host(host)?;
+        }
+        // A model sketch entered while a sheet sketch is edited, with the host not showing the
+        // model (a script), ends the sheet sketch as Finish would: its edits are already in the
+        // drawing. The shared sketch tools can reach one sketch only, and the model's is what
+        // the command asked for; the model's command is never the one refused.
+        if !self.model_focus && self.active_sketch.is_some() && before.active_sketch.is_none() && self.active_sheet_sketch.is_some() {
+            self.active_sheet_sketch = None;
         }
         // A command that closed the drawing, or opened another, ends its sheet scenes.
         drawing_scene::forget_closed(self);
@@ -2160,6 +2472,11 @@ impl Session {
         // Hiding or showing (`browser.visibility`) leaves the document alone, so it needs its own
         // test: it is saved with the design and has an undo step of its own.
         let hidden = self.visibility != before.visibility;
+        // A Section Analysis is view state outside the design, with undo steps of its own.
+        let sectioned = self.section_state() != section_before;
+        if sectioned {
+            before.section = Some(section_before);
+        }
         let result = match r {
             Ok((v, live_edit)) => {
                 let v = if changed { self.with_created(spec.id, params, &before, v) } else { v };
@@ -2212,12 +2529,20 @@ impl Session {
                     }
                     if pin {
                         self.pin_body_names();
+                        self.pin_dropped_link_names();
                     }
                     // Checkpoint restoration restores matching provenance with history;
                     // its rollback delta must not re-mark the reverted owners.
                     if spec.id != "edit.restore_checkpoint" {
                         self.note_redo_changes(&previous_doc, hidden);
                     }
+                } else if sectioned && spec.undoable {
+                    let part = before.part;
+                    self.undo.push(before);
+                    if self.undo.len() > MAX_UNDO {
+                        self.undo.remove(0);
+                    }
+                    self.redo.retain(|step| step.part != part);
                 }
                 Ok(v)
             }
@@ -2227,6 +2552,9 @@ impl Session {
                 self.redo_watch = redo_watch_before;
                 self.open_drawing = open_drawing;
                 self.active_sheet_sketch = before.active_sheet_sketch.clone();
+                if let Some(section) = before.section.take() {
+                    self.set_section_state(section);
+                }
                 if changed || hidden || self.pending_moves != before.pending_moves {
                     // A refused sheet edit can have published its candidate before a later
                     // constraint-policy check. The same proof used for successful drawing
@@ -2291,15 +2619,16 @@ impl Session {
             return v;
         }
         let Some(out) = v.as_object_mut() else { return v };
-        if self.open_drawing.is_some() {
-            if let Some(entry) =
-                self.active_sheet_sketch.as_ref().or(before.active_sheet_sketch.as_ref()).filter(|entry| self.open_drawing == Some(entry.drawing))
-            {
-                let current = self.doc.drawing(entry.drawing).and_then(|drawing| drawing.sheet_sketch(entry.sketch));
-                if let Some(after) = current.filter(|record| record.sheet == entry.sheet) {
-                    let previous = before.doc.drawing(entry.drawing).and_then(|drawing| drawing.sheet_sketch(entry.sketch));
-                    out.insert("created".into(), cmd::sketch_created(previous.map(|record| &record.sketch), &after.sketch));
-                }
+        if let Some(entry) = self
+            .active_sheet_sketch
+            .as_ref()
+            .or(before.active_sheet_sketch.as_ref())
+            .filter(|entry| !self.model_focus && self.open_drawing == Some(entry.drawing))
+        {
+            let current = self.doc.drawing(entry.drawing).and_then(|drawing| drawing.sheet_sketch(entry.sketch));
+            if let Some(after) = current.filter(|record| record.sheet == entry.sheet) {
+                let previous = before.doc.drawing(entry.drawing).and_then(|drawing| drawing.sheet_sketch(entry.sketch));
+                out.insert("created".into(), cmd::sketch_created(previous.map(|record| &record.sketch), &after.sketch));
             }
             return v; // never fall back to the model after a sheet cancellation
         }
@@ -2315,8 +2644,8 @@ impl Session {
         v
     }
 
-    /// Remember the design, active sketch, open drawing, pending positions and undo history;
-    /// returns the checkpoint's id.
+    /// Remember the design, active sketch, open drawing, pending positions, undo history and
+    /// section; returns the checkpoint's id.
     pub fn checkpoint(&mut self) -> u64 {
         let id = self.next_checkpoint;
         self.next_checkpoint += 1;
@@ -2331,6 +2660,7 @@ impl Session {
             visibility: self.visibility.clone(),
             redo: self.redo.clone(),
             redo_watch: self.redo_watch.clone(),
+            section: self.section_state(),
         });
         if self.checkpoints.len() > MAX_CHECKPOINTS {
             self.checkpoints.remove(0);
@@ -2358,6 +2688,9 @@ impl Session {
         self.undo = c.undo;
         self.redo = c.redo;
         self.redo_watch = c.redo_watch;
+        if self.section_state() != c.section {
+            self.set_section_state(c.section);
+        }
         self.selection.clear();
         self.prune_sheet_sketch_edit();
         if self.render_only_change(&before) {
@@ -2394,6 +2727,7 @@ impl Session {
             active_sketch: self.active_sketch,
             active_sheet_sketch: self.active_sheet_sketch.clone(),
             open_drawing: self.open_drawing,
+            model_focus: self.model_focus,
             sketch_entry: None,
             feature_edit_sketch: self.feature_edit_sketch,
             selection: self.selection.clone(),
@@ -2446,7 +2780,9 @@ impl Session {
             sketch_clipboard: self.sketch_clipboard.clone(),
             appearance_clipboard: self.appearance_clipboard.clone(),
             foreign_copy: self.foreign_copy.clone(),
-            section: None,
+            section: Vec::new(),
+            section_hidden: Vec::new(),
+            section_folder: None,
             section_hatch: true,
             colored_components: None,
             analysis: None,
@@ -2469,6 +2805,7 @@ impl Session {
             drawing_scenes: Default::default(),
             saved_visibility: self.saved_visibility.clone(),
             dimension_values: self.dimension_values.clone(),
+            opened_import: self.opened_import.clone(),
             evaluations: 0,
             motion_traces: self.motion_traces.clone(),
             command_check: self.command_check.clone(),
@@ -2498,20 +2835,31 @@ impl Session {
         }
         let mut expected = (*original.doc).clone();
         expected.marker = source.doc.marker;
-        // Rolling the marker solves the joints again and stores where that puts each occurrence.
+        // Rolling the marker solves the joints again and stores where that puts each occurrence...
         if expected.occurrences.len() == source.doc.occurrences.len() {
-            for (e, s) in expected.occurrences.iter_mut().zip(&source.doc.occurrences) {
-                if e.id == s.id {
+            for e in &mut expected.occurrences {
+                if let Some(s) = source.doc.occurrences.iter().find(|s| s.id == e.id) {
                     e.transform = s.transform;
+                    e.expressed_moves.clone_from(&s.expressed_moves);
+                }
+            }
+        }
+        // ...and stores the solved degrees of freedom, offsets, and angles of matching joints...
+        if expected.assembly.joints.len() == source.doc.assembly.joints.len() {
+            for e in &mut expected.assembly.joints {
+                if let Some(s) = source.doc.assembly.joints.iter().find(|s| s.id == e.id) {
+                    e.values.clone_from(&s.values);
+                    e.offset = s.offset;
+                    e.angle = s.angle;
                 }
             }
         }
         // ...and works out each coupled joint's ratio and lift from the faces at that marker.
         if expected.assembly.links.len() == source.doc.assembly.links.len() {
-            for (e, s) in expected.assembly.links.iter_mut().zip(&source.doc.assembly.links) {
-                if (e.a, e.ia, e.b, e.ib) == (s.a, s.ia, s.b, s.ib) {
+            for e in &mut expected.assembly.links {
+                if let Some(s) = source.doc.assembly.links.iter().find(|s| (s.a, s.ia, s.b, s.ib) == (e.a, e.ia, e.b, e.ib)) {
                     e.ratio = s.ratio;
-                    e.lift = s.lift.clone();
+                    e.lift.clone_from(&s.lift);
                 }
             }
         }
@@ -2787,14 +3135,8 @@ impl Session {
 
     /// World preview with each session's visibility applied, including new body placements.
     pub fn preview_visible_world(&self, commands: &[(String, Value)]) -> Result<Preview> {
-        let visible = |session: &Session| -> Result<Arc<solidcraft_doc::ModelState>> {
-            let world = session.world_state()?;
-            let mut shown = (*world).clone();
-            shown.bodies.retain(|body| session.body_visible(&body.name));
-            Ok(Arc::new(shown))
-        };
         let (after, replies) = self.scratch().preview_in_place(commands, None)?;
-        Ok(Preview { before: visible(self)?, after: visible(&after)?, replies })
+        Preview::visible_world(self, &after, replies)
     }
 
     /// Run `commands` on a [`Session::scratch`] copy that keeps the undo and redo stacks: what
@@ -2913,6 +3255,8 @@ pub fn script_steps(script: &Value) -> Result<&Vec<Value>> {
 #[cfg(test)]
 mod boolean_regression_tests;
 #[cfg(test)]
+mod browser_find_tests;
+#[cfg(test)]
 mod computed_commands_tests;
 #[cfg(test)]
 mod construct_tests;
@@ -2993,6 +3337,16 @@ pub(crate) fn as_saved<'a>(doc: &'a Document, visibility: &Visibility, dimension
 fn own_values(sk: &solidcraft_sketch::Sketch) -> std::collections::BTreeMap<String, f64> {
     let mut values: std::collections::BTreeMap<_, _> =
         sk.constraints.iter().filter(|c| c.param.is_some() && !c.driven).filter_map(|c| Some((c.id.clone(), c.kind.value()?))).collect();
+    // 3D dimensions, and 3D points placed by expressions (#10608).
+    for c in &sk.wire_constraints {
+        match &c.kind {
+            solidcraft_sketch::WireConstraintKind::Fix { at, exprs: Some(_), .. } => {
+                values.extend([(format!("{}.x", c.id), at.x), (format!("{}.y", c.id), at.y), (format!("{}.z", c.id), at.z)]);
+            }
+            k if c.param.is_some() && !c.driven => values.extend(k.value().map(|v| (c.id.clone(), v))),
+            _ => {}
+        }
+    }
     for p in &sk.patterns {
         use solidcraft_sketch::SketchPatternKind;
         let inputs = match p.kind {
@@ -3008,6 +3362,11 @@ fn own_values(sk: &solidcraft_sketch::Sketch) -> std::collections::BTreeMap<Stri
         }
     }
     values
+}
+
+/// Whether a saved file is the current design or one of its linked components.
+pub fn session_uses_file(session: &Session, path: &str) -> bool {
+    cmd::file_library_uses_file(session, path)
 }
 
 /// Capabilities are fixed at registration; availability is live device/host state.
@@ -3103,4 +3462,17 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         && *visibility == b.visibility
         && *drawings == b.drawings
         && *next_component_color_index == b.next_component_color_index
+}
+
+/// Store `pins` (sketch, link, vertex name, edge name) on the links they name: a name the link
+/// already has stays, and the link is no longer marked `name_dropped`.
+pub(crate) fn store_link_names(doc: &mut Document, pins: Vec<(u64, String, Option<String>, Option<String>)>) {
+    for (id, link, vertex, edge) in pins {
+        let Ok(sk) = doc.sketch_mut(id) else { continue };
+        if let Some(l) = sk.links.iter_mut().find(|l| l.id == link) {
+            l.vertex_name = l.vertex_name.take().or(vertex);
+            l.edge_name = l.edge_name.take().or(edge);
+            l.name_dropped = false;
+        }
+    }
 }

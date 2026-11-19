@@ -29,7 +29,8 @@ pub struct SheetSceneParams {
 /// dimension's lines and arrowheads (object: the dimension), each note of a view (object: the
 /// note), each view's label (object: the view) and each balloon's circle, number and leader (object:
 /// the balloon), then each parts list's and revision table's (object: the table), then each note on
-/// the sheet and each fill and each sheet sketch, then the title block's (object: the sheet).
+/// the sheet, each revision tag's triangle and text (object: the tag), each fill and each sheet
+/// sketch, then the title block's (object: the sheet).
 #[derive(Debug, Serialize)]
 #[serde(transparent)]
 pub struct SheetPaperScene(pub solidcraft_geom::paper::Scene);
@@ -53,6 +54,7 @@ impl JsonSchema for SheetPaperScene {
                 ObjectKind::RevisionTable,
                 ObjectKind::Fill,
                 ObjectKind::Sketch,
+                ObjectKind::RevisionTag,
                 ObjectKind::TitleBlock,
             ],
             true,
@@ -98,6 +100,21 @@ pub struct SheetSceneView {
     /// Its label, when it draws one (a view placed apart from its projection place).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<SheetSceneLabel>,
+    /// A section view's hatching, one entry per body it cut, in the order the view shows them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hatches: Vec<SheetSceneHatch>,
+}
+
+/// One body's hatching in a section view: its lines' angle on paper (45 or 135 degrees) and
+/// spacing, or painted solid when its cut faces are too thin to hatch.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SheetSceneHatch {
+    pub body: String,
+    pub angle_deg: f64,
+    pub spacing_mm: f64,
+    pub filled: bool,
+    /// How many hatch lines it drew: none when it is filled.
+    pub strokes: usize,
 }
 
 impl From<ViewState> for SheetSceneView {
@@ -109,6 +126,17 @@ impl From<ViewState> for SheetSceneView {
             reason: v.status.reason().or(v.why),
             stats: v.stats.map(Into::into),
             label,
+            hatches: v
+                .hatches
+                .into_iter()
+                .map(|h| SheetSceneHatch {
+                    body: h.body,
+                    angle_deg: h.angle.to_degrees(),
+                    spacing_mm: h.spacing_mm,
+                    filled: h.filled,
+                    strokes: h.strokes,
+                })
+                .collect(),
         }
     }
 }
@@ -172,6 +200,15 @@ pub struct SheetSceneBalloon {
     pub row_status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub item: Option<String>,
+    pub drawn: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
+}
+
+/// One revision tag on the sheet: whether it is in the scene, with why not, or why its text is left out.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SheetSceneTag {
+    pub tag: String,
     pub drawn: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub why: Option<String>,
@@ -410,6 +447,9 @@ pub struct SheetSceneResult {
     pub balloons: Vec<SheetSceneBalloon>,
     /// Each table on the sheet, by id.
     pub tables: Vec<SheetSceneTable>,
+    /// Each revision tag on the sheet, in the drawing's order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<SheetSceneTag>,
     /// The views, dimensions, notes, balloons and sketches a deferred drawing shows as they last were.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub out_of_date: Vec<String>,

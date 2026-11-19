@@ -119,6 +119,72 @@ pub fn is_placement(m: &Mat) -> bool {
         && (m[3][3] - 1.0).abs() < 1e-9
 }
 
+/// Capture a sketch's foreign construction plane in its author's frame. A new choice replaces
+/// any previous capture; root sketches and references inside their own component stay live.
+pub fn capture_sketch_plane_placement(doc: &Document, plane: &mut PlaneRef, author: u64, frame: &Mat) -> Result<()> {
+    let mut current = plane;
+    for _ in 0..=64 {
+        match current {
+            PlaneRef::Construction { feature, placement } => {
+                let source = doc.feature(feature.0).ok_or_else(|| DocError::Unknown(format!("construction plane {feature}")))?;
+                if !matches!(source.kind, FeatureKind::ConstructionPlane { .. }) {
+                    return Err(DocError::Invalid(format!("feature {feature} is not a construction plane")));
+                }
+                if author == 0 || source.component == author {
+                    *placement = None;
+                    return Ok(());
+                }
+                let source_frame = doc.component_transform(source.component);
+                if !is_placement(frame) || !is_placement(&source_frame) {
+                    return Err(DocError::Invalid("invalid construction plane capture frame".into()));
+                }
+                let inverse = mat_inverse(frame).ok_or_else(|| DocError::Invalid("sketch author placement cannot be inverted".into()))?;
+                let captured = mat_mul(&inverse, &source_frame);
+                if !is_placement(&captured) {
+                    return Err(DocError::Invalid("invalid captured construction plane placement".into()));
+                }
+                *placement = Some(captured);
+                return Ok(());
+            }
+            PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::ThroughPoint { base, .. } => {
+                current = base
+            }
+            _ => return Ok(()),
+        }
+    }
+    Err(DocError::Invalid("construction plane nesting exceeds 64".into()))
+}
+
+/// Re-express a captured construction plane when its author or source definition changes
+/// coordinate frames. Occurrence motion leaves the captured relationship alone.
+pub fn reframe_plane_placements(plane: &mut PlaneRef, author: &Mat, source: impl Fn(u64) -> Mat) -> Result<()> {
+    let mut current = plane;
+    for _ in 0..=64 {
+        match current {
+            PlaneRef::Construction { feature, placement } => {
+                if let Some(saved) = placement {
+                    let from = source(feature.0);
+                    if !is_placement(author) || !is_placement(&from) || !is_placement(saved) {
+                        return Err(DocError::Invalid("invalid construction plane frame change".into()));
+                    }
+                    let inverse = mat_inverse(&from).ok_or_else(|| DocError::Invalid("construction plane source frame cannot be inverted".into()))?;
+                    let next = mat_mul(&mat_mul(author, saved), &inverse);
+                    if !is_placement(&next) {
+                        return Err(DocError::Invalid("invalid reframed construction plane placement".into()));
+                    }
+                    *saved = next;
+                }
+                return Ok(());
+            }
+            PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::ThroughPoint { base, .. } => {
+                current = base
+            }
+            _ => return Ok(()),
+        }
+    }
+    Err(DocError::Invalid("construction plane nesting exceeds 64".into()))
+}
+
 /// A rigid transform: rotation by `angle` about `axis` through `origin`, then a translation.
 pub fn rigid(translate: Vec3, origin: Vec3, axis: Vec3, angle: f64) -> Mat {
     let k = axis.normalized().unwrap_or(Vec3::Z);
@@ -218,7 +284,14 @@ pub struct ExpressedShift {
     /// In the occurrence's parent frame (mm).
     pub shift: Vec3,
     /// What each of its expressed moves works out to now, in order.
-    pub at: Vec<[f64; 3]>,
+    pub at: Vec<ExpressedAt>,
+}
+
+/// What an [`ExpressedMove`]'s expressions work out to: the translation and the turn's origin.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ExpressedAt {
+    pub translate: [f64; 3],
+    pub origin: [f64; 3],
 }
 
 /// How many expressed moves one occurrence keeps.
@@ -244,27 +317,84 @@ pub struct ExpressedMove {
     /// moves to another parent. Older designs read as local.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub world: bool,
+    /// Per axis, the expression typed for the point the move turns about (`origin`), `None` for a
+    /// number. A move without a turn has no use for it and keeps none.
+    #[serde(default, skip_serializing_if = "origin_is_numbers")]
+    pub origin: [Option<String>; 3],
+    /// What `origin` worked out to when it was last applied (mm, along `frame`'s axes).
+    #[serde(default, skip_serializing_if = "is_zero3")]
+    pub origin_at: [f64; 3],
+    /// The move's turn (a rotation matrix, along the axes it was typed in), which makes the point
+    /// it turns about move the occurrence by the part of it the turn leaves behind.
+    #[serde(default = "identity", skip_serializing_if = "is_identity")]
+    pub rotation: Mat,
+    /// Made with `move_grounded`: it moves the occurrence on a parameter change even while the
+    /// occurrence is grounded. Without it a grounded occurrence stays put.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub grounded_ok: bool,
+}
+
+fn origin_is_numbers(o: &[Option<String>; 3]) -> bool {
+    o.iter().all(Option::is_none)
+}
+
+fn is_zero3(v: &[f64; 3]) -> bool {
+    *v == [0.0; 3]
 }
 
 impl ExpressedMove {
-    /// The translation the expressions give now, or why they can't: an unknown name, a wrong
-    /// unit, or a length too large.
-    pub fn eval(&self, params: &crate::joints::Params) -> Result<[f64; 3]> {
-        let mut out = self.at;
-        for (slot, e) in out.iter_mut().zip(&self.translate) {
-            let Some(e) = e else { continue };
-            let v = params.eval(e, crate::expr::Kind::Length).map_err(|err| DocError::Invalid(format!("translate `{e}`: {err}")))?;
-            if !v.is_finite() || v.abs() > 1e9 {
-                return Err(DocError::Invalid(format!("translate `{e}` gives {v}")));
+    /// What the expressions give now, or why they can't: an unknown name, a wrong unit, or a
+    /// length too large.
+    pub fn eval(&self, params: &crate::joints::Params) -> Result<ExpressedAt> {
+        let one = |what: &str, exprs: &[Option<String>; 3], from: [f64; 3]| -> Result<[f64; 3]> {
+            let mut out = from;
+            for (slot, e) in out.iter_mut().zip(exprs) {
+                let Some(e) = e else { continue };
+                let v = params.eval(e, crate::expr::Kind::Length).map_err(|err| DocError::Invalid(format!("{what} `{e}`: {err}")))?;
+                if !v.is_finite() || v.abs() > 1e9 {
+                    return Err(DocError::Invalid(format!("{what} `{e}` gives {v}")));
+                }
+                *slot = v;
             }
-            *slot = v;
-        }
-        Ok(out)
+            Ok(out)
+        };
+        Ok(ExpressedAt { translate: one("translate", &self.translate, self.at)?, origin: one("origin", &self.origin, self.origin_at)? })
     }
 
-    /// The expressions it keeps, with the axis each moves along.
-    pub fn exprs(&self) -> impl Iterator<Item = (&'static str, &str)> {
-        ["x", "y", "z"].into_iter().zip(&self.translate).filter_map(|(axis, e)| e.as_deref().map(|e| (axis, e)))
+    /// What the move was last applied with.
+    pub fn applied(&self) -> ExpressedAt {
+        ExpressedAt { translate: self.at, origin: self.origin_at }
+    }
+
+    /// How far the move takes the occurrence in its parent's frame when its expressions work out
+    /// to `now` instead of what they did: the translation's change, plus the change of the point
+    /// the turn is about taken round (`origin - R origin`).
+    pub fn shift(&self, now: &ExpressedAt) -> Vec3 {
+        let d = |a: [f64; 3], b: [f64; 3]| Vec3::new(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+        let o = d(now.origin, self.origin_at);
+        // The primitive refuses only a number that is not finite: `now.origin` is bounded by `eval`
+        // and `rotation` is a rigid matrix the commands checked, so for a stored move it does not
+        // fail. Were it to, no extra move (the turn's own part is gone) is the safe reading.
+        let kept = solidcore_ops::affine::pivot_displacement(&self.rotation, [o.x, o.y, o.z]).map_or(Vec3::ZERO, |k| Vec3::new(k[0], k[1], k[2]));
+        apply_vector(&self.frame, d(now.translate, self.at) + kept)
+    }
+
+    /// The expressions it keeps, with what each is for (`translate y`, `origin x`).
+    pub fn exprs(&self) -> Vec<(String, &str)> {
+        let mut out = Vec::new();
+        for (what, list) in [("translate", &self.translate), ("origin", &self.origin)] {
+            for (axis, e) in ["x", "y", "z"].into_iter().zip(list) {
+                if let Some(e) = e.as_deref() {
+                    out.push((format!("{what} {axis}"), e));
+                }
+            }
+        }
+        out
+    }
+
+    /// Every expression it keeps, to change.
+    pub fn exprs_mut(&mut self) -> impl Iterator<Item = &mut String> {
+        self.translate.iter_mut().chain(self.origin.iter_mut()).flatten()
     }
 }
 
@@ -291,7 +421,7 @@ fn map_plane_ref(m: &Mat, p: &mut PlaneRef) {
         }
         PlaneRef::AtAngle { base, axis_origin, axis_dir, line, pivot, .. } => {
             map_plane_ref(m, base);
-            *axis_origin = apply_point(m, *axis_origin);
+            map_point_expr(m, axis_origin);
             *axis_dir = apply_vector(m, *axis_dir);
             if let Some(g) = line {
                 map_geo_ref(m, g);
@@ -452,6 +582,20 @@ impl Document {
     /// A branch stops past [`MAX_PLACEMENT_DEPTH`] levels, the walk past [`MAX_PLACEMENTS`] placements.
     pub fn placements(&self) -> Vec<(u64, Vec<u64>, Mat)> {
         crate::occurrence_tree::OccurrenceTree::new(self).placements_with(|o| o.transform)
+    }
+
+    /// Every placement inside `component`, `component` itself first: (component, occurrence
+    /// path ids from `component`, transform into `component`'s frame). Limited as
+    /// [`Document::placements`] is.
+    pub fn placements_within(&self, component: u64) -> Vec<(u64, Vec<u64>, Mat)> {
+        crate::occurrence_tree::OccurrenceTree::new(self).placements_from(component, |o| o.transform)
+    }
+
+    /// [`Document::placements_within`], or `None` when the walk stopped at a limit before it
+    /// reached every placement.
+    pub fn all_placements_within(&self, component: u64) -> Option<Vec<(u64, Vec<u64>, Mat)>> {
+        let (placements, complete) = crate::occurrence_tree::OccurrenceTree::new(self).walk_from(component, |o| o.transform);
+        complete.then_some(placements)
     }
 
     /// Whether [`Document::placements`] reaches every placement. Its walk stops at
@@ -626,15 +770,17 @@ impl Document {
             let mut shift = Vec3::ZERO;
             let mut at = Vec::with_capacity(o.expressed_moves.len());
             for m in &o.expressed_moves {
-                let now = m.eval(&params).unwrap_or(m.at);
-                let d = Vec3::new(now[0] - m.at[0], now[1] - m.at[1], now[2] - m.at[2]);
-                shift += apply_vector(&m.frame, d);
+                let now = m.eval(&params).unwrap_or_else(|_| m.applied());
+                // A grounded occurrence stays put, except for the moves made with `move_grounded`.
+                // The others keep up with the parameters all the same, so that ungrounding it
+                // later doesn't jump by everything that changed meanwhile.
+                if !o.grounded || m.grounded_ok {
+                    shift += m.shift(&now);
+                }
                 at.push(now);
             }
-            if o.grounded {
-                // A grounded occurrence stays put, but its moves keep up with the parameters so
-                // that ungrounding it later doesn't jump by everything that changed meanwhile.
-                if o.expressed_moves.iter().zip(&at).any(|(m, now)| m.at != *now) {
+            if shift == Vec3::ZERO {
+                if o.expressed_moves.iter().zip(&at).any(|(m, now)| m.applied() != *now) {
                     out.push(ExpressedShift { occurrence: o.id, shift: Vec3::ZERO, at });
                 }
                 continue;
@@ -658,7 +804,7 @@ impl Document {
                 }
             }
             for (m, at) in o.expressed_moves.iter_mut().zip(&s.at) {
-                m.at = *at;
+                (m.at, m.origin_at) = (at.translate, at.origin);
             }
         }
     }

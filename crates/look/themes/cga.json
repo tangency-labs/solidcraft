@@ -48,10 +48,10 @@
     ],
     "control_border": "#55ffff",
     "control_fill": "#000000",
-    "cube_border": "#55ffff",
-    "cube_face": "#000000",
-    "cube_hover": "#aa00aa",
-    "cube_text": "#ffffff",
+    "navigator_border": "#55ffff",
+    "navigator_face": "#000000",
+    "navigator_hover": "#aa00aa",
+    "navigator_text": "#ffffff",
     "dialog_bg": "#000000",
     "dialog_body": "#000000",
     "dialog_border": "#55ffff",
@@ -106,6 +106,13 @@
     "interference": "#ff5555",
     "joint_axis": "#aaaaaa",
     "joint_manipulator": "#ffff55",
+    "library_highlights": [
+      "#ff5555",
+      "#ffff55",
+      "#55ff55",
+      "#5555ff",
+      "#ff55ff"
+    ],
     "logo": [
       "#ffffff",
       "#55ffff",

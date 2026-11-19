@@ -17,6 +17,7 @@
 // The range tests refuse NaN by negation (`!(x > y)`), kept as written.
 #![allow(clippy::neg_cmp_op_on_partial_ord, clippy::nonminimal_bool)]
 
+use std::collections::BTreeMap;
 use std::f64::consts::PI;
 
 use solidcore::curve::arc::{self, ArcDefinition};
@@ -24,6 +25,7 @@ use solidcore::curve::curve::{Curve as KCurve, CurveKind};
 use solidcore::curve::from_parameters::record_of;
 use solidcore::curve::line::Line;
 use solidcore::curve::path::{self, PathDoubt, PathPiece, PathShape, PathTolerances};
+use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::tol::{context_zone_tol_3d, SmallTopoType, USE_DEFAULT};
 use solidcore::geom::vector3d::{Point3, Vec3};
 use solidcore::heal::stitch::p1::api_stitch_into_solid;
@@ -37,7 +39,9 @@ use solidcore::sweep::api_brep::{
     create_curve_sweep_with_placements, create_linear_sweep, create_rotational_sweep,
     CornerRefusal as KRefusal, OffsetCornerType, TaperExtrude,
 };
-use solidcore::sweep::api_surfaces::create_skin_primitive;
+use solidcore::sweep::api_surfaces::{
+    create_skin_primitive, create_skin_primitive_with_sources, SkinSources,
+};
 use solidcore::sweep::directed;
 use solidcore::sweep::extrude::{self as kextrude, Draft, ExtrudeTolerances};
 use solidcore::sweep::screw;
@@ -950,6 +954,69 @@ pub fn sweep_placed(
     Ok((body, placed, route))
 }
 
+/// A closed loft section for [`match_loft_sections`]: its sketch plane and its loop in the
+/// plane's coordinates, end to end.
+#[derive(Clone, Debug)]
+pub struct LoftSection {
+    /// The section's plane.
+    pub plane: solidcore_record::Plane,
+    /// The loop, in the plane's coordinates.
+    pub segs: Vec<solidcore_record::Seg2>,
+}
+
+/// A section as a loft's walls are built through it ([`match_loft_sections`]): its segments,
+/// and for each the indices of the given section's segments it runs over (increasing).
+#[derive(Clone, Debug, PartialEq)]
+pub struct MatchedSection {
+    /// The segments, in the plane's coordinates.
+    pub segs: Vec<solidcore_record::Seg2>,
+    /// For each segment, the given segments it runs over.
+    pub from: Vec<Vec<usize>>,
+}
+
+/// A loft's closed sections, in loft order, matched as its walls are built through them (the
+/// kernel's `sweep::loft_sections::match_loft_sections`): each wound the way the one before it
+/// is, cut to the vertices it shares with the others (a corner pairs with the corner it lines up
+/// with, a vertex only one section has splits the others' segments where it lands, a full circle
+/// splits at the directions of the section it follows), and started at the segment that joins the
+/// first segment of the section before it. `None` when the match would give a section more than
+/// `max_segments` segments, or the sections are too large to pair: valid sections the caller
+/// builds another way.
+///
+/// # Errors
+/// [`Error::Argument`] for a section with no segments, no length or a point that is not finite,
+/// plane axes that move its points by more than the zone tolerance (their skew from a frame of
+/// perpendicular unit vectors times the section's extent past 1e-5), or a circle whose centre,
+/// radius or angles are not finite; [`Error::Invariant`] when the pairing breaks down.
+pub fn match_loft_sections(
+    sections: &[LoftSection],
+    max_segments: usize,
+) -> Result<Option<Vec<MatchedSection>>> {
+    use solidcore::sweep::loft_sections as kl;
+    let given: Vec<kl::LoftSection> = sections
+        .iter()
+        .map(|s| kl::LoftSection {
+            origin: convert::vec3(s.plane.origin),
+            x: convert::vec3(s.plane.x),
+            y: convert::vec3(s.plane.y),
+            segs: s.segs.iter().map(convert::seg2).collect(),
+        })
+        .collect();
+    let matched = match kl::match_loft_sections(&given, max_segments) {
+        Err(e) if kl::too_large(&e) => return Ok(None),
+        r => r.map_err(argument_or_status)?,
+    };
+    Ok(Some(
+        matched
+            .into_iter()
+            .map(|m| MatchedSection {
+                segs: m.segs.iter().map(convert::record_seg2).collect(),
+                from: m.from,
+            })
+            .collect(),
+    ))
+}
+
 /// A skin through `sections` (`SmApiCreateSkinPrimitive`), `degree` (1 to 3) across them.
 ///
 /// # Errors
@@ -974,6 +1041,97 @@ pub fn loft(sections: &[Vec<Curve>], degree: u32, cap: bool) -> Result<Body> {
             Err(e) => Ok(Err(status(e))),
         }
     })
+}
+
+/// The kernel's trace of a skin: each side face with the curves it is skinned from, if traced.
+type Traced = Option<Vec<(FaceId, Vec<usize>)>>;
+
+/// A sheet skinned through `sections` as [`loft`] skins them, uncapped, and which curves each of
+/// its record faces (in order) is skinned from: indices, ascending, into the sections' curves
+/// taken section by section (curve `k` of section `s` is `s n + k`, for `n` curves a section);
+/// `None` when the kernel did not trace the skin. Every section has the same number of curves,
+/// joined end to end (open or closed). One skin takes its parameters across the sections from
+/// every column at once, so neighbouring faces share their seam; columns skinned each on its own
+/// take parameters of their own, and their seams part (tangency-labs/solidcraft#14048). The skin
+/// joins each section's curves into one, each over its own parameter span, so a line is first a
+/// NURBS line and every B-spline is reparameterised onto [0, 1] (the same curve): the sections
+/// then join at the same knots. The sources are the kernel's trace of the skin
+/// (`create_skin_primitive_with_sources`): a curve with a kink of its own runs along several
+/// faces, curves that continue each other at the same speed can share one, and a closed section
+/// the skin turns to match its neighbour gives a face other curves there than in the others.
+///
+/// # Errors
+/// [`Error::Argument`] for fewer than two sections, sections of different counts of curves, a
+/// degree outside 1 to 3, more than [`MAX_CURVES`] curves in all or a curve refused; the
+/// kernel's status; [`Error::Empty`].
+pub fn loft_sheet(sections: &[Vec<Curve>], degree: u32) -> Result<(Body, Option<Vec<Vec<usize>>>)> {
+    let n = sections.first().map_or(0, Vec::len);
+    if sections.len() < 2
+        || !(1..=3).contains(&degree)
+        || n == 0
+        || sections.iter().any(|s| s.len() != n)
+    {
+        return Err(Error::Argument);
+    }
+    let all: Vec<Curve> = sections.iter().flatten().map(nurbs_line).collect();
+    let made = run(
+        "loft_sheet",
+        |k| -> solidcore::Result<Out<(Brep, Traced)>> {
+            let mut made = parsed!(parse(k, &all));
+            let unit = Extent1d::from_min_max(0.0, 1.0);
+            for c in &mut made.curves {
+                if matches!(c.kind(), CurveKind::BSpline(_)) {
+                    c.edit_parameterization(k, &unit)?;
+                }
+            }
+            let counts = vec![n; sections.len()];
+            let (skin, sources) = match create_skin_primitive_with_sources(
+                k,
+                &counts,
+                &made.refs(),
+                degree as usize,
+                false,
+            ) {
+                Ok(r) => r,
+                Err(e) => return Ok(Err(status(e))),
+            };
+            let traced = match sources {
+                SkinSources::Traced(faces) => Some(faces),
+                SkinSources::NotTraced { .. } => None,
+            };
+            Ok(finish(k, skin.brep, Expect::FACES)?.map(|b| (b, traced)))
+        },
+    )?;
+    let (brep, traced) = made?;
+    let body = Body::new(brep);
+    let Some(traced) = traced else {
+        return Ok((body, None));
+    };
+    let (_, order) = body.to_record()?;
+    let mut sources: BTreeMap<FaceId, Vec<usize>> = traced.into_iter().collect();
+    // every face of an uncapped skin is a side face, traced
+    let faces = order
+        .faces
+        .iter()
+        .map(|f| sources.remove(f))
+        .collect::<Option<Vec<_>>>()
+        .ok_or(Error::Exception)?;
+    Ok((body, Some(faces)))
+}
+
+/// `c` as [`loft_sheet`] skins it: a line as a NURBS line over [0, 1], any other curve as it is.
+fn nurbs_line(c: &Curve) -> Curve {
+    match c {
+        Curve::Line { start, end } => Curve::Nurbs {
+            degree: 1,
+            points: vec![
+                [start[0], start[1], start[2], 1.0],
+                [end[0], end[1], end[2], 1.0],
+            ],
+            knots: vec![0.0, 0.0, 1.0, 1.0],
+        },
+        _ => c.clone(),
+    }
 }
 
 /// A pyramid from the planar `section` (one closed loop of lines, in order) to `apex` (off the

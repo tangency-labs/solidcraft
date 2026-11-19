@@ -1,7 +1,7 @@
 //! Conics and Béziers as cubics (#4890 A3b): an ellipse or hyperbola arc (a conic of weight other
 //! than 1) or a Bézier above degree 3 as cubic Béziers within a given distance of it, for the walk,
-//! so every writer draws them with the cubics it already writes. Circular arcs are the shared
-//! `paper::cubics` helper's; this takes the rest with its signature: the error asked for and the
+//! so every writer draws them with the cubics it already writes. Circular arcs stay arcs (PDF
+//! makes its own cubics); this takes the rest with its signature: the error asked for and the
 //! bound that holds, both in the curve's own units, and [`Seg2::Cubic`] pieces.
 //!
 //! The bound is proved, not sampled. Each piece's cubic has the curve's ends and end tangents, and

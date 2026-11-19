@@ -1,7 +1,10 @@
 use serde_json::{Value, json};
 use solidcraft_io::MAX_DRAWING_BYTES;
 
-use super::{DrawingBoundsParams, DrawingBoundsResult, DrawingInserted, ExportDxfParams, ExportDxfResult, InsertDxfParams, InsertSvgParams};
+use super::{
+    AirfoilInserted, DrawingBoundsParams, DrawingBoundsResult, DrawingInserted, ExportDxfParams, ExportDxfResult, InsertAirfoilParams,
+    InsertDxfParams, InsertSvgParams,
+};
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
 use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
@@ -10,6 +13,9 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 const DXF: &str = "0\nSECTION\n2\nENTITIES\n0\nLINE\n10\n0\n20\n0\n11\n30\n21\n0\n0\nLINE\n10\n30\n20\n0\n11\n30\n21\n20\n0\nLINE\n10\n30\n20\n20\n11\n0\n21\n20\n0\nLINE\n10\n0\n20\n20\n11\n0\n21\n0\n0\nENDSEC\n0\nEOF\n";
 
 const SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20mm" height="10mm" viewBox="0 0 20 10"><rect x="0" y="0" width="20" height="10"/><text x="2" y="5" font-size="3">Hi</text></svg>"#;
+
+/// A six-point section with an open trailing edge, as a Selig file.
+const DAT: &str = "Six\n1 0.002\n0.5 0.06\n0.1 0.04\n0 0\n0.1 -0.03\n0.5 -0.04\n1 -0.002\n";
 
 /// An SVG with geometry but no sheet: no viewBox, no width and no height.
 const SVG_NO_SHEET: &str = r#"<svg xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1" width="4" height="3"/></svg>"#;
@@ -29,6 +35,10 @@ fn schemas_and_the_key_check_agree() {
     let insert = ["align", "angle", "at", "fixed", "height", "name", "path", "plane", "scale", "size_from", "sketch", "text", "tolerance", "width"];
     assert_keys(input_schema_for::<InsertDxfParams>(), &insert);
     assert_keys(input_schema_for::<InsertSvgParams>(), &insert);
+    assert_keys(
+        input_schema_for::<InsertAirfoilParams>(),
+        &["angle", "at", "chord", "flip", "format", "name", "path", "pivot", "plane", "sketch", "text", "tolerance"],
+    );
     assert_keys(input_schema_for::<ExportDxfParams>(), &["join", "layer", "layers", "path", "sketch", "units"]);
     assert_keys(input_schema_for::<DrawingBoundsParams>(), &["format", "path", "text"]);
 }
@@ -61,6 +71,29 @@ fn strict_keeps_todays_errors() {
         ("sketch.export_dxf", json!({"sketch": [1]})),
         ("sketch.export_dxf", json!({"sketch": -1})),
         ("sketch.export_dxf", json!({"sketch": 1.5})),
+        // The airfoil insert reads `text` or `path` first, then `chord` and the rest, so a case
+        // puts one bad key after a good source and chord (serde reads the keys in order).
+        ("sketch.insert_airfoil", json!({"chord": 100, "path": ""})),
+        ("sketch.insert_airfoil", json!({"chord": 100, "path": "  "})),
+        ("sketch.insert_airfoil", json!({"chord": 100, "path": 5})),
+        ("sketch.insert_airfoil", json!({"chord": 100, "path": "x".repeat(4096)})),
+        ("sketch.insert_airfoil", json!({"chord": 100, "text": "x".repeat(solidcraft_io::MAX_AIRFOIL_BYTES + 1)})),
+        ("sketch.insert_airfoil", json!({"chord": 0, "text": DAT})),
+        ("sketch.insert_airfoil", json!({"chord": -5, "text": DAT})),
+        ("sketch.insert_airfoil", json!({"chord": null, "text": DAT})),
+        ("sketch.insert_airfoil", json!({"chord": "wide", "text": DAT})),
+        ("sketch.insert_airfoil", json!({"chord": [1], "text": DAT})),
+        ("sketch.insert_airfoil", json!({"chord": 100, "pivot": "x", "text": DAT})),
+        ("sketch.insert_airfoil", json!({"chord": 100, "pivot": null, "text": DAT})),
+        ("sketch.insert_airfoil", json!({"chord": 100, "pivot": [0.25], "text": DAT})),
+        ("sketch.insert_airfoil", json!({"angle": "x", "chord": 100, "text": DAT})),
+        ("sketch.insert_airfoil", json!({"angle": null, "chord": 100, "text": DAT})),
+        ("sketch.insert_airfoil", json!({"chord": 100, "flip": "yes", "text": DAT})),
+        ("sketch.insert_airfoil", json!({"chord": 100, "flip": 1, "text": DAT})),
+        ("sketch.insert_airfoil", json!({"chord": 100, "format": "csv", "text": DAT})),
+        ("sketch.insert_airfoil", json!({"chord": 100, "format": 5, "text": DAT})),
+        ("sketch.insert_airfoil", json!({"chord": 100, "sketch": true, "text": DAT})),
+        ("sketch.insert_airfoil", json!({"chord": 100, "sketch": 1.5, "text": DAT})),
     ];
     for (id, text) in [("sketch.insert_dxf", DXF), ("sketch.insert_svg", SVG)] {
         for extra in [
@@ -164,6 +197,27 @@ fn the_types_read_like_the_handler() {
     assert_eq!(issues(json!({"text": "x", "sketch": true})), ["`sketch` must be an id or a name"]);
     assert_eq!(issues(json!({"text": "x", "wdth": 5})), ["unknown key `wdth`; did you mean `width`?"]);
     assert!(issues(json!({"text": "x", "width": 5, "height": "x", "path": 5})).is_empty());
+    let airfoil = |p: Value| serde_json::from_value::<InsertAirfoilParams>(p).is_ok();
+    let airfoil_issues = |p: Value| crate::schema::issues("sketch.insert_airfoil", &p).into_iter().map(|i| i.message).collect::<Vec<_>>();
+    assert!(airfoil(json!({"text": "x", "chord": 100})) && airfoil(json!({"path": "a.dat", "chord": 0.5})));
+    assert!(airfoil(json!({"text": "x", "path": 5, "chord": 100})) && airfoil(json!({"text": "x", "path": "", "chord": 100})));
+    assert!(airfoil(
+        json!({"text": "x", "chord": 100, "pivot": -0.5, "at": [1, 2], "angle": -3, "flip": true, "tolerance": 0.01, "format": "Lednicer"})
+    ));
+    assert!(airfoil(json!({"text": "x", "chord": 100, "plane": 5, "name": [1], "sketch": "S", "flip": null, "format": null, "tolerance": -1})));
+    assert!(!airfoil(json!({"text": "x"})) && !airfoil(json!({"path": "", "chord": 100})) && !airfoil(json!({"path": 5, "chord": 100})));
+    assert!(
+        !airfoil(json!({"text": "x", "chord": 0})) && !airfoil(json!({"text": "x", "chord": "100"})) && !airfoil(json!({"text": "x", "chord": null}))
+    );
+    assert!(!airfoil(json!({"text": "x", "chord": 100, "pivot": null})) && !airfoil(json!({"text": "x", "chord": 100, "flip": "yes"})));
+    assert!(!airfoil(json!({"text": "x", "chord": 100, "format": "dat"})) && !airfoil(json!({"text": "x", "chord": 100, "at": [1]})));
+    assert_eq!(airfoil_issues(json!({"text": "x"})), ["`chord` is required"]);
+    assert_eq!(airfoil_issues(json!({"text": "x", "chord": -1})), ["`chord` must be a positive number (mm)"]);
+    assert_eq!(airfoil_issues(json!({"text": "x", "chord": 1, "pivot": "x"})), ["`pivot` must be a number (a share of the chord)"]);
+    assert_eq!(airfoil_issues(json!({"text": "x", "chord": 1, "flip": 0})), ["`flip` must be true or false"]);
+    assert_eq!(airfoil_issues(json!({"text": "x", "chord": 1, "format": "csv"})), ["`format` must be \"selig\" or \"lednicer\""]);
+    assert_eq!(airfoil_issues(json!({"path": " ", "chord": 1})), ["give `path` or `text`"]);
+    assert_eq!(airfoil_issues(json!({"text": "x", "chord": 1, "chrd": 5})), ["unknown key `chrd`; did you mean `chord`?"]);
     let export = |p: Value| serde_json::from_value::<ExportDxfParams>(p).is_ok();
     assert!(export(json!({})) && export(json!({"sketch": null, "path": null})) && export(json!({"sketch": "S", "path": ""})));
     assert!(export(json!({"sketch": 3, "path": "a.dxf"})) && !export(json!({"sketch": true})) && !export(json!({"path": 5})));
@@ -212,6 +266,30 @@ fn the_schemas_take_what_the_handlers_read() {
         let read_path = &schema.as_value()["anyOf"][1]["properties"]["path"];
         assert_eq!(read_path["pattern"], json!(crate::schema::types::not_blank_pattern()));
     }
+    takes(
+        input_schema_for::<InsertAirfoilParams>(),
+        &[
+            (json!({"text": "x", "chord": 100}), true),
+            (
+                json!({"path": "a.dat", "chord": 100, "pivot": 0.25, "at": [1, 2], "angle": 5, "flip": true, "tolerance": 0.01, "format": "selig"}),
+                true,
+            ),
+            (json!({"text": "x", "chord": 100, "plane": "XZ", "name": "Root", "sketch": "Sketch1"}), true),
+            (json!({}), false),
+            (json!({"chord": 100}), false),
+            (json!({"text": "x"}), false),
+            (json!({"text": "x", "chord": 0}), false),
+            (json!({"text": "x", "chord": "100"}), false),
+            (json!({"text": "x", "chord": 100, "flip": "yes"}), false),
+            (json!({"text": "x", "chord": 100, "at": [1]}), false),
+            (json!({"text": "x", "chord": 100, "chrd": 5}), false),
+            (json!({"path": "x".repeat(4096), "chord": 100}), false),
+            (json!({"text": "x", "path": 5, "chord": 100}), true),
+        ],
+    );
+    let airfoil_schema = input_schema_for::<InsertAirfoilParams>();
+    let read_path = &airfoil_schema.as_value()["anyOf"][1]["properties"]["path"];
+    assert_eq!(read_path["pattern"], json!(crate::schema::types::not_blank_pattern()));
     takes(
         input_schema_for::<ExportDxfParams>(),
         &[
@@ -365,6 +443,30 @@ fn replies_match_the_output_schema() {
     let r = run(&mut s, "sketch.insert_svg", json!({"text": SVG, "angle": 15}));
     matches(output_schema_for::<DrawingInserted>(), &r);
     assert_eq!((r["curves"].as_u64(), r["texts"].as_u64()), (Some(4), Some(1)), "{r}");
+    // The airfoil insert, into the sketch being edited and into a new one, from text and a file.
+    let dat_file = dir.join("six.dat");
+    std::fs::write(&dat_file, DAT).unwrap();
+    let airfoil_keys: std::collections::BTreeSet<String> =
+        ["bulge", "created_sketch", "curves", "deviation", "format", "info", "merged", "name", "points", "sketch", "te_gap", "trailing_edge"]
+            .map(String::from)
+            .into();
+    for p in [
+        json!({"text": DAT, "chord": 100}),
+        json!({"text": DAT, "chord": 50, "pivot": 0.25, "at": {"x": 1, "y": 2}, "angle": 90, "flip": true, "tolerance": 0.01, "format": "Selig", "plane": 7, "name": [1], "path": 5}),
+        json!({"path": dat_file.to_string_lossy(), "text": null, "chord": 100, "sketch": id, "flip": null, "format": null}),
+    ] {
+        let r = run(&mut s, "sketch.insert_airfoil", p);
+        matches(output_schema_for::<AirfoilInserted>(), &r);
+        assert_eq!(keys(&r), airfoil_keys, "{r}");
+        assert_eq!((r["sketch"].as_u64(), r["created_sketch"].clone(), r["curves"].as_u64()), (Some(id), Value::Null, Some(2)), "{r}");
+        assert_eq!((r["name"].as_str(), r["format"].as_str(), r["points"].as_u64()), (Some("Six"), Some("selig"), Some(7)), "{r}");
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    let r = run(&mut s, "sketch.insert_airfoil", json!({"text": DAT, "chord": 100, "plane": "XZ", "name": "Six"}));
+    matches(output_schema_for::<AirfoilInserted>(), &r);
+    assert_eq!(r["created_sketch"], r["sketch"], "{r}");
+    assert_eq!(r["trailing_edge"], "open", "{r}");
+    run(&mut s, "sketch.finish", json!({}));
     let r = run(&mut s, "sketch.insert_svg", json!({"path": svg_path, "width": 40, "align": "center", "at": [10, 10]}));
     assert_eq!(r["texts"], 1, "{r}");
     s.execute("sketch.finish", &json!({})).unwrap();

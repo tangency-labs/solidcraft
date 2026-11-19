@@ -22,6 +22,9 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     };
     let mut edit: Option<Value> = None;
+    // "Follow a frame in the sketch" clicked: Some(true) ties the image to a construction
+    // rectangle in a sketch (Frame Sketch), Some(false) sets it free again (#18405).
+    let mut follow: Option<bool> = None;
     let (units, decimals) = (app.session.doc.units.clone(), app.preferences.length_decimals);
     let title_id = if m.straighten {
         "browser.straighten_title"
@@ -77,7 +80,27 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                     ui_kit::row(ui, solidcraft_ui_text::tr_label("Distance"), |ui| ui_kit::length_field(ui, &mut m.distance, &units, decimals));
                     m.distance = m.distance.clamp(0.001, 1e6);
                 }
+            } else if c.anchor.is_some() {
+                if ui_kit::checkbox_row(ui, "canvas_follow_frame", solidcraft_ui_text::tr("browser.canvas_follow_frame"), true) {
+                    follow = Some(false);
+                }
+                // Its sketch's points place, turn and size it: only its look is edited here.
+                ui_kit::text(ui, solidcraft_ui_text::tr("browser.canvas_anchored"), ui_kit::Text::Note("canvas_anchored"));
+                let (mut op, mut flip) = (c.opacity, c.flip);
+                let mut changed =
+                    ui_kit::row(ui, solidcraft_ui_text::tr_label("Opacity"), |ui| ui_kit::slider(ui, &mut op, 0.0..=1.0, Default::default()))
+                        .changed();
+                if ui_kit::checkbox_row(ui, "flip", solidcraft_ui_text::tr_label("Flip"), flip) {
+                    flip = !flip;
+                    changed = true;
+                }
+                if changed {
+                    edit = Some(json!({ "canvas": name, "opacity": op, "flip": flip }));
+                }
             } else {
+                if ui_kit::checkbox_row(ui, "canvas_follow_frame", solidcraft_ui_text::tr("browser.canvas_follow_frame"), false) {
+                    follow = Some(true);
+                }
                 let (mut x, mut y, mut w, mut ang, mut op, mut flip) = (c.center.x, c.center.y, c.width, c.angle.to_degrees(), c.opacity, c.flip);
                 let mut changed = false;
                 changed |=
@@ -106,6 +129,19 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
             app.session.undo.truncate(m.depth);
             app.session.undo.extend(keep);
         }
+    }
+    match follow {
+        Some(true) => {
+            if let Err(e) = app.run("canvas.frame_sketch", json!({ "canvas": c.id })) {
+                app.set_status(e, true);
+            }
+        }
+        Some(false) => {
+            if let Err(e) = app.run("canvas.edit", json!({ "canvas": c.id, "anchor": null })) {
+                app.set_status(e, true);
+            }
+        }
+        None => {}
     }
     if action == ui_kit::Action::Ok {
         let (id, p) = if m.straighten {
@@ -145,7 +181,7 @@ pub(crate) fn click(app: &mut SolveApp, proj: &Proj, screen: Pos2) -> bool {
         return false;
     };
     let (vals, _) = doc.param_values();
-    let Ok(plane) = doc.canvas_plane(&vals, &c) else {
+    let Ok(plane) = doc.canvas_plane(&vals, &c, &app.session.model.state()) else {
         return false;
     };
     let (origin, direction) = proj.ray(screen);
@@ -182,7 +218,7 @@ pub(crate) fn paint_marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) 
         return;
     };
     let (vals, _) = doc.param_values();
-    let Ok(plane) = doc.canvas_plane(&vals, c) else {
+    let Ok(plane) = doc.canvas_plane(&vals, c, &app.session.model.state()) else {
         return;
     };
     let t = Tokens::get();
@@ -303,7 +339,7 @@ mod tests {
         let proj = crate::viewport::projection(&h.app, rect);
         let c = h.app.session.doc.canvases[0].clone();
         let (vals, _) = h.app.session.doc.param_values();
-        let plane = h.app.session.doc.canvas_plane(&vals, &c).unwrap();
+        let plane = h.app.session.doc.canvas_plane(&vals, &c, &h.app.session.model.state()).unwrap();
         let screen = |x: f64, y: f64| proj.to_screen(plane.to_world(solidcore_record::Vec2::new(x, y))).expect("on screen");
         let status = |h: &crate::scenario::Harness| h.app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default();
         assert!(super::click(&mut h.app, &proj, screen(c.center.x - 15.0, c.center.y - 5.0)));
@@ -352,7 +388,7 @@ mod tests {
         let proj = crate::viewport::projection(&h.app, rect);
         let c = h.app.session.doc.canvases[0].clone();
         let (vals, _) = h.app.session.doc.param_values();
-        let plane = h.app.session.doc.canvas_plane(&vals, &c).unwrap();
+        let plane = h.app.session.doc.canvas_plane(&vals, &c, &h.app.session.model.state()).unwrap();
         let ax = c.center.x - 20.0;
         let bx = c.center.x + 20.0;
         let sa = proj.to_screen(plane.to_world(solidcore_record::Vec2::new(ax, c.center.y))).expect("point A on screen");

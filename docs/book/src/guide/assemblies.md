@@ -51,6 +51,8 @@ also saves every joint's current values, and **Revert Position** puts the joints
 clamped to their limits, together with the parts, as one undo step. SolidCraft asks before the
 next command if a move wasn't captured. **Ground** fixes an occurrence in place, and
 **Unground** (the same row of **Placement** in the browser's context menu) frees it again.
+A joint solve that moves a part drops the part's move not captured, so the part is shown where
+its joints put it; an exploded view stays shown.
 
 The design's first part is grounded when it is made: the first occurrence placed directly in the
 design by **New Component**, **Create Components from Bodies** or an import. Parts made after it,
@@ -70,7 +72,9 @@ does not move, and a part that joints hold to something grounded moves only as f
 allow (below). Dragging any member of a chain joined to nothing grounded moves the whole chain,
 preserving its joint values. Shared nested definitions move in every instance; the selected
 instance follows the pointer even when its parent is rotated differently from the first one. A drag that starts on empty space, on a part that can't move, or
-with Shift, Ctrl (Cmd) or Alt held draws a selection box instead. Other uncaptured moves stay
+with Shift, Ctrl (Cmd) or Alt held draws a selection box instead. A drag over a selected part
+grabs that part, even where another part is in front of it: select a copy's row in the Browser
+to drag it off a grounded copy placed on top of it. Other uncaptured moves stay
 pending. Scripts and agents do the same with `occurrence.drag {occurrence or path, at, point}`,
 which moves the placement by `point - at` in world coordinates and answers the placements it
 `moved`.
@@ -105,8 +109,15 @@ part placed at a station follows the station. Other moves of it (a drag, another
 undo, saving and opening keep the expressions. Renaming a parameter carries into them, and
 deleting one they use is refused. A move by expressions is captured at once (`capture: false` is
 refused with them). If an expression stops working out (say a parameter becomes an angle), the
-part stays where it is until it works out again. The rotation (`axis`, `angle`, `origin`) and a
-`matrix` are still worked out once, when the move is made.
+part stays where it is until it works out again.
+
+The same holds for the `origin` a move turns about (a part that turns about a point that follows a
+parameter is carried by what the turn leaves behind when the point moves), for the translation
+column of a `matrix` (the last entry of each of the first three rows, or entries 4, 8 and 12 of a
+flat one; the rotation entries are numbers), and for the `matrix` of `file.insert_step`, which
+places the new part the same way. A grounded part stays put, as with `translate`. The turn's
+`angle`, the rotation entries of a `matrix` and an absolute placement (`to`, `to_matrix`) are
+worked out once, when the move is made.
 
 Paste New copies nested component definitions, sketches, feature histories and generated
 dimension parameters. Repeated child instances remain shared within the new copy. Materials,
@@ -157,13 +168,19 @@ point, its x and y running along the two edges into the face. The edge, the face
 are found again by name, so a bracket set 40 mm in from a panel's corner (a planar joint with
 values `[40, 40, 0]`) stays 40 mm in from that corner when the panel changes size.
 
-A joint's offset, angle and values can be typed as expressions over the design's parameters
+A joint's Z offset, angle and values can be typed as expressions over the design's parameters
 (`"offset": "gap + 2"`, `"values": ["travel"]`). The joint keeps them and works them out again
 whenever the design changes, so a part seated `gap` above a panel moves with `gap`. Renaming a
 parameter carries into the joints that use it, and deleting one they use is refused. If an
 expression stops working out (say a parameter becomes an angle), the joint is left out of the
 solve and `joint.solve` gives the reason, instead of placing the part from old numbers. Typing a
 plain number, or driving the value, drops that expression.
+
+**Edit Joint → Position** shows **Offset X**, **Offset Y** and **Offset Z**. X and Y move along
+the saved first attachment's axes. Their expressions are evaluated once, as during creation;
+scripts use `offset_x` and `offset_y`. Older designs keep their saved attachment positions,
+with X and Y initially zero for additional shifts from those positions. Assembly constraints
+keep their existing controls and reference geometry until changed to a plain joint.
 
 **Relations** are joints that tie only part of a placement, so a part is placed the way a
 designer describes it, one relation at a time: `parallel` (z along z, free to move and turn
@@ -312,6 +329,21 @@ part ("Pedestal:1 is not connected to anything grounded"), the Drive Joints dial
 row, `motion.play` lists such joints under `unmoved`, and `joint.list` names every such chain under
 `floating`. Ground a part of the chain, or join it to a grounded part (a rigid as-built joint keeps
 it where it is), and it moves.
+
+An imported assembly holds each of its parts with a rigid joint, so `joint.list` on it can run to
+hundreds of rows. Filters keep only the rows asked for: `moving_only` leaves out rigid and
+suppressed joints, `exclude_rigid` every rigid joint, `exclude_rigid_groups` only the rigid joints
+that hold a component's contents together (the ones Unlock Contents removes), `kinds` keeps the
+listed joint types, and `occurrences` keeps the joints with an end at those parts or at a part
+inside them. `dof_free_only` lists only the parts that can still move under `dof`, and
+`joint.solve` takes it too. The reply's `omitted` counts what was left out, by type, and
+`summary: true` adds every joint counted by type, with one row per component for the rigid joints
+that hold its contents (the 20 largest; `more_rigid_groups` counts the rest). `joint.inspect` takes the same filters.
+
+Driving a joint turns the side that is held by no grounded part, with everything joined to it
+rigidly. A rigid joint whose origin is lost (its face was deleted) still holds its two parts as
+they are, so the parts beyond it move with the side that turns. A joint between two grounded
+parts has nothing to turn: the reason says "both sides are held by grounded parts" and names them.
 
 `joint.drive` answers the joint's values as `joint.list` gives them, in degrees and millimetres
 with their units and limits, and `moved` says whether any part moved. A joint's origins are mated
@@ -547,8 +579,8 @@ the component shares them, Paste New copies them, and they are saved with the co
 `component.metadata.set {component, part_number?, description?, revision?, bom_type?, material?, bom_quantity?, virtual?, values?, properties?}`
 changes them in one undo step (an empty value removes a field). The root component is the
 design itself: its properties are `document.metadata`'s. Standard parts (`parts.insert`) get a
-part number from their standard and size (`ISO 4762 M6x20`, or a bearing's designation) and a
-description; **Change Part Size** renumbers them, keeping a field you changed yourself.
+part number from their standard and size (`ISO 4762 M6x20`, `GOST 7798-70 M12x60`, or a bearing's
+designation) and a description; **Change Part Size** renumbers them, keeping a field you changed yourself.
 
 **Bill of Materials** (`assembly.bom`, on the **INSPECT** panel) counts the placed components:
 
@@ -681,3 +713,19 @@ no geometry, such as grease, paint, a label or packaging: it is listed in every 
 quantity and weighs nothing. It holds nothing: it can't be the active component, and any command
 that would put a body, a sketch or a component into it is refused. An empty component can be
 made virtual with `component.metadata.set {component, virtual: true}`.
+
+## Finding things in the browser
+
+The magnifier in the Browser panel's header (or Ctrl+F with the pointer over the browser, unless you gave Ctrl+F to a command) opens a
+search box in the header, in place of the panel's title. The box holds the magnifier, the field, a filter and **×**. It finds components, bodies, sketches, joints, and construction planes, axes and points by name. It finds the text anywhere in a name,
+ignoring case. With `*` (any text) or `?` (any one character) in it, the whole name must match:
+`*:1` finds every first instance. Each placement of a component is found on its own, so a bolt
+placed six times is listed six times, each under the components that hold it.
+
+Only the matches and their parents stay in the tree, opened for the search; closing a row there
+leaves the tree's own folds as they were. The filter narrows the search to the kinds
+you tick, each with how many it matches, or with nothing typed lists everything of those kinds;
+**All kinds** clears them. **Select all** selects what was found, and **Hide others** hides every
+body it didn't find; the line under the field then says how many it hid, with **Undo**. Esc, **×**
+or the magnifier in the box ends the search and closes the box. Scripts and agents
+search the same way with `browser.find`.

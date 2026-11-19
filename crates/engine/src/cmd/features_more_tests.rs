@@ -447,6 +447,130 @@ fn rib_to_the_next_face_fills_the_corner() {
     assert!(rel(volume(&mut s), 7500.0 + 400.0) < 1e-6);
 }
 
+/// A rib whose curve stops short of a curved wall runs its end on to the wall (#13019): a base,
+/// a wall at x = 0..5 and above them a cylinder along X (bottom at z = 29 in the sketch plane);
+/// the rib's line runs up from the base at x = 20 and stops at z = 25. Without `extend` (the
+/// default, and every design saved before the option) the rib ends at the line's end as it did.
+#[test]
+fn rib_runs_its_ends_on_to_a_curved_wall() {
+    let added = |extend: bool| {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 60, "width": 20, "height": 5, "corner": [0, 0, 0], "body_name": "P"}));
+        run(&mut s, "solid.box", json!({"length": 5, "width": 20, "height": 40, "corner": [0, 0, 0], "operation": "join"}));
+        run(&mut s, "solid.cylinder", json!({"radius": 6, "height": 40, "base": [0, 10, 35], "axis": "X", "operation": "join"}));
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 10, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "RibSketch"}));
+        run(&mut s, "sketch.line", json!({"points": [[20, 5], [20, 25]], "ids": ["l1"]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let before = volume(&mut s);
+        let mut rib = json!({"sketch": "RibSketch", "curves": ["l1"], "thickness": 4});
+        if extend {
+            rib["extend"] = json!(true);
+        }
+        run(&mut s, "solid.rib", rib);
+        assert_eq!(measure(&mut s)["body_count"], 1);
+        volume(&mut s) - before
+    };
+    // Up to the line's end: 15 from the line to the wall, 20 high, 4 thick.
+    let short = added(false);
+    assert!(rel(short, 1200.0) < 1e-6, "{short}");
+    // On to the cylinder, which is 29 above the base at the sketch plane and 29.34 at the rib's
+    // faces: at least 4 higher, and below the cylinder's axis.
+    let long = added(true);
+    assert!(long > 1200.0 + 15.0 * 4.0 * 4.0 * 0.98 && long < 1200.0 + 15.0 * 4.0 * 10.0, "{long}");
+}
+
+#[test]
+fn rib_ending_flush_with_a_wall_keeps_a_square_end() {
+    // A tray 60 x 40 x 20 with 3 mm walls and floor (16788 mm³); a rib on XZ at y = 20 along
+    // z = 12, 4 thick, runs down to the floor at z = 3. An end flush with the inner face of a
+    // wall (x = 3 or x = 57) must stay square, whichever way the line runs.
+    for (from, to, volume_expected) in [
+        (3.0, 57.0, 16788.0 + 54.0 * 4.0 * 9.0),
+        (57.0, 3.0, 16788.0 + 54.0 * 4.0 * 9.0),
+        (10.0, 57.0, 16788.0 + 47.0 * 4.0 * 9.0),
+        (3.0, 50.0, 16788.0 + 47.0 * 4.0 * 9.0),
+        (10.0, 50.0, 16788.0 + 40.0 * 4.0 * 9.0),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 20, "corner": [0, 0, 0], "operation": "new", "body_name": "T"}));
+        run(&mut s, "solid.box", json!({"length": 54, "width": 34, "height": 20, "corner": [3, 3, 3], "operation": "cut", "targets": ["T"]}));
+        run(&mut s, "sketch.create", json!({"plane": "XZ", "offset": 20, "name": "R"}));
+        run(&mut s, "sketch.line", json!({"points": [[from, -12.0], [to, -12.0]], "ids": ["l1"]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.rib", json!({"sketch": "R", "curves": ["l1"], "thickness": 4}));
+        let v = volume(&mut s);
+        assert!(rel(v, volume_expected) < 1e-6, "{from} -> {to}: {v}, expected {volume_expected}");
+        assert_eq!(measure(&mut s)["body_count"], 1, "{from} -> {to}");
+    }
+}
+
+#[test]
+fn rib_finds_a_tray_floor_whatever_the_tray_length() {
+    // An open tray L x 30 x 12 with 2 mm walls and floor, a rib line across it at z = 8 on the
+    // mid plane x = L / 2: the rib runs down to the floor. Finding the material side and the
+    // floor by samples spaced by the tray's size passed over the 2 mm floor at some lengths
+    // and refused the rib (#16874). Without `extend` (the default) it builds as before; with its
+    // ends run on (`extend`, #13019) the rib reaches
+    // the side walls at y = 2 and 28 and is 26 long; a thin rib's outline closes there too.
+    let sizes = [(40.0, 0.1), (80.0, 0.1), (100.0, 0.1), (150.0, 0.1), (160.0, 0.1), (200.0, 0.1), (400.0, 0.1), (400.0, 4.0)];
+    for ((l, t), extend) in sizes.into_iter().flat_map(|size| [(size, false), (size, true)]) {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": l, "width": 30, "height": 12, "corner": [0, 0, 0], "operation": "new", "body_name": "T"}));
+        run(&mut s, "solid.box", json!({"length": l - 4.0, "width": 26, "height": 12, "corner": [2, 2, 2], "operation": "cut", "targets": ["T"]}));
+        let tray = l * 30.0 * 12.0 - (l - 4.0) * 26.0 * 10.0;
+        assert!(rel(volume(&mut s), tray) < 1e-9, "L = {l}");
+        run(&mut s, "sketch.create", json!({"plane": "YZ", "offset": l / 2.0, "name": "R"}));
+        run(&mut s, "sketch.line", json!({"points": [[5, 8], [25, 8]], "closed": false}));
+        run(&mut s, "sketch.finish", json!({}));
+        let mut rib = json!({"sketch": "R", "curves": ["l1"], "thickness": t});
+        if extend {
+            rib["extend"] = json!(true);
+        }
+        run(&mut s, "solid.rib", rib);
+        // 20 long (26 with its ends run on), 6 from the line down to the floor; it goes into the
+        // 2 mm floor to merge but not out below it, however thick the rib.
+        let long = if extend { 26.0 } else { 20.0 };
+        assert!(rel(volume(&mut s), tray + long * 6.0 * t) < 1e-6, "L = {l}, t = {t}, extend = {extend}: {}", volume(&mut s));
+        assert_eq!(measure(&mut s)["body_count"], 1, "L = {l}, t = {t}, extend = {extend}");
+    }
+}
+
+/// A rib meets a face that curves across its thickness along both of its faces, not only on its
+/// mid plane (#18261). A tube (outside radius 10, bore 7) stands on a plate; a rib 12 thick on
+/// XZ runs from a line at x = 25 to the tube. On the mid plane the tube is at x = 10, at the
+/// rib's faces (y = ±6) at x = 8: a wall run to the mid plane's face, plus at most half the
+/// 3 mm tube wall, stopped at x = 8.5 and left a sliver of air at the rib's faces, wider the
+/// thicker the rib. The wall must close against the tube across its whole thickness, and still
+/// not come out into the bore.
+#[test]
+fn rib_meets_a_curved_face_across_its_whole_thickness() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 80, "width": 80, "height": 5, "corner": [-40, -40, 0], "body_name": "Seat"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 40, "base": [0, 0, 5], "axis": "Z", "operation": "join"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 7, "height": 40, "base": [0, 0, 5], "axis": "Z", "operation": "cut"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "R"}));
+    run(&mut s, "sketch.line", json!({"points": [[25, 5], [25, 35]], "ids": ["l1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.rib", json!({"sketch": "R", "curves": ["l1"], "thickness": 12}));
+    assert_eq!(measure(&mut s)["body_count"], 1);
+    let class = |p: [f64; 3]| {
+        let bodies = &s.model.state().bodies;
+        bodies.iter().any(|b| b.body.classify_point(solidcore_record::Vec3::new(p[0], p[1], p[2])).unwrap() == solidcraft_kernel::PointClass::Inside)
+    };
+    // Just outside the tube (radius 10.03) near the rib's face, between the tube and where the
+    // old wall stopped: material now.
+    for z in [8.0, 20.0, 32.0] {
+        assert!(class([8.25, 5.7, z]), "a gap between the rib and the tube at z = {z}");
+        assert!(class([8.25, -5.7, z]), "a gap between the rib and the tube at z = {z}");
+    }
+    // The bore stays clear.
+    for p in [[6.5, 0.0, 20.0], [5.0, 4.0, 20.0], [0.0, 0.0, 20.0]] {
+        assert!(!class(p), "the rib came out into the bore at {p:?}");
+    }
+    // Beside the rib, outside the tube, nothing was added.
+    assert!(!class([8.25, 6.5, 20.0]));
+}
+
 #[test]
 fn rib_with_a_depth_and_web() {
     let mut s = bracket();
@@ -486,6 +610,26 @@ fn rib_along_the_sketch_normal_reaches_the_body() {
     assert!(rel(volume(&mut s), 4000.0 + 128.0) < 1e-6, "{}", volume(&mut s));
     let e = s.execute("solid.rib", &json!({"sketch": "Front", "curves": ["l1"], "thickness": 2, "direction": "sideways"}));
     assert!(e.is_err_and(|e| e.to_string().contains("unknown direction")));
+}
+
+#[test]
+fn rib_along_the_sketch_normal_stops_at_a_thin_plate() {
+    // A 0.5 thick plate 3.8 behind the sketch (y = -6.2..-5.7) and a 300 long block far
+    // beyond it. Steps of the block's size (about 1.5) passed over the plate and ran the rib
+    // on to the block, 310 away (#16874); it stops at the plate, going into it but not out
+    // beyond it.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 0.5, "height": 10, "corner": [0, -6.2, 0], "operation": "new", "body_name": "Plate"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 300, "height": 10, "corner": [0, 300, 0], "operation": "new", "body_name": "Block"}));
+    let before = volume(&mut s);
+    assert!(rel(before, 100.0 + 60000.0) < 1e-9, "{before}");
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, -10, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Front"}));
+    run(&mut s, "sketch.line", json!({"points": [[2, 5], [18, 5]], "ids": ["l1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.rib", json!({"sketch": "Front", "curves": ["l1"], "thickness": 2, "direction": "normal"}));
+    // 16 long, 2 thick, the 3.8 to the plate; what goes into the plate adds nothing.
+    let added = volume(&mut s) - before;
+    assert!(rel(added, 32.0 * 3.8) < 1e-6, "{added}");
 }
 
 #[test]
@@ -2681,6 +2825,89 @@ fn an_import_saved_by_an_older_step_reader_opens_with_its_bodies_in_place() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// #16857: a solid of an inserted STEP file that this reader leaves out takes no other body's
+/// name. The file holds three solids in one product; opened by a reader that can't read the
+/// middle one, the bodies were paired with the stored names by their place among the bodies
+/// read, so the last solid took the middle one's name, the Move after the import failed on the
+/// last name, and saving kept only two names. Bodies are matched by the solid they were read
+/// from: the last solid keeps its name and its move, and the middle solid's name keeps its
+/// slot, so it comes back on that solid once the solid reads again. Checked for a design that
+/// stored each body's STEP item and for one saved before items were stored (0.30.1), which is
+/// matched by the solids' order in the file.
+#[test]
+fn a_solid_left_out_on_opening_keeps_its_name_and_gives_it_to_no_other_body() {
+    use solidcraft_doc::FeatureKind;
+    use solidcraft_doc::kernel::StepNode;
+    let dir = std::env::temp_dir().join(format!("solidcraft-16857-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("abc.step").to_string_lossy().to_string();
+    let mut src = Session::default();
+    for (name, x, height) in [("Alpha", -5, 10), ("Bravo", 15, 20), ("Charlie", 35, 30)] {
+        run(&mut src, "solid.box", json!({"length": 10, "width": 10, "height": height, "corner": [x, -5, 0], "body_name": name}));
+    }
+    run(&mut src, "file.export", json!({"path": path}));
+    let text = std::fs::read_to_string(&path).unwrap();
+    // The same file with Bravo's solid unreadable: its shell is an entity the file doesn't have.
+    let solid = text.find("MANIFOLD_SOLID_BREP('Bravo',#").expect("Bravo is a solid of its own in the file");
+    let shell = solid + "MANIFOLD_SOLID_BREP('Bravo',".len();
+    let end = shell + text[shell..].find(')').unwrap();
+    let broken = format!("{}#999999{}", &text[..shell], &text[end..]);
+
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path": path}));
+    let names: Vec<String> = s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(names, ["Alpha", "Bravo", "Charlie"]);
+    run(&mut s, "solid.move", json!({"bodies": ["Charlie"], "translate": [0, 0, 20]}));
+    let charlie = placed_bounds(&s, "Charlie");
+    assert!(about(charlie.min.x, 35.0) && about(charlie.min.z, 20.0) && about(charlie.max.z, 50.0), "{charlie:?}");
+    let alpha = placed_bounds(&s, "Alpha");
+
+    fn strip_items(nodes: &mut [StepNode]) {
+        for n in nodes {
+            n.items.clear();
+            n.left_out.clear();
+            strip_items(&mut n.children);
+        }
+    }
+    for saved_before_items in [false, true] {
+        let mut doc = (*s.doc).clone();
+        let f = doc.features.iter_mut().find(|f| matches!(f.kind, FeatureKind::Import { .. })).unwrap();
+        if let FeatureKind::Import { step, components, .. } = &mut f.kind {
+            assert!(components.iter().all(|n| n.items.len() == n.bodies.len()), "the insert stores each body's item: {components:?}");
+            if saved_before_items {
+                strip_items(components);
+            }
+            *step = broken.as_str().into();
+        }
+        let opened = Session::opened(doc, None);
+        let what = if saved_before_items { "saved before items" } else { "with items" };
+        let now: Vec<String> = opened.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
+        assert_eq!(now, ["Alpha", "Charlie"], "{what}");
+        let errors: Vec<_> = opened.model.results.iter().filter_map(|r| r.error.clone()).collect();
+        assert!(errors.is_empty(), "{what}: the Move finds Charlie: {errors:?}");
+        assert!(shifted(alpha, placed_bounds(&opened, "Alpha"), [0.0; 3]), "{what}");
+        let got = placed_bounds(&opened, "Charlie");
+        assert!(shifted(charlie, got, [0.0; 3]), "{what}: Charlie opened at {got:?}, was at {charlie:?}");
+        // Bravo's name stays in the feature, after the bodies the file gives now.
+        let f = opened.doc.features.iter().find(|f| matches!(f.kind, FeatureKind::Import { .. })).unwrap();
+        assert_eq!(f.body_names, ["Alpha", "Charlie", "Bravo"], "{what}");
+
+        // Saved as it is and read by a reader that reads Bravo again: each solid has its name.
+        let mut again = (*opened.doc).clone();
+        let f = again.features.iter_mut().find(|f| matches!(f.kind, FeatureKind::Import { .. })).unwrap();
+        if let FeatureKind::Import { step, .. } = &mut f.kind {
+            *step = text.as_str().into();
+        }
+        let back = Session::opened(again, None);
+        let now: Vec<String> = back.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
+        assert_eq!(now, ["Alpha", "Bravo", "Charlie"], "{what}");
+        let bravo = placed_bounds(&back, "Bravo");
+        assert!(about(bravo.min.x, 15.0) && about(bravo.max.z, 20.0), "{what}: {bravo:?}");
+        assert!(shifted(charlie, placed_bounds(&back, "Charlie"), [0.0; 3]), "{what}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A 20 × 30 × 8 plate made in its own component and stood up by its placement (turned
 /// `angle` degrees about X), the way an imported part set upright is: in the world it lies
 /// flat at `x0`..`x0 + 20`, y 0..30, z 0..8. The design is active again afterwards.
@@ -3065,4 +3292,113 @@ fn move_origin_and_matrix_apply_to_each_repeated_placement() {
         assert!(b.min.dist(Vec3::new(50.0, 50.0, 0.0)) < 1e-6 && b.max.dist(Vec3::new(80.0, 70.0, 8.0)) < 1e-6, "{b:?}");
         assert_eq!(s.undo.len(), undo + 1);
     }
+}
+
+/// A ball of radius 12.5 resting on the origin, revolved from a half disc sketched upright on
+/// the XZ plane, with a 10 wide slot cut from its top down to z = 15 right through it (walls at
+/// x = ±5). The ball's seam ends on the top of the x = +5 wall's arc, so that arc is two edges in
+/// the record and its mirror one (#16122).
+fn slotted_ball() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"name": "Sketch1", "plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 25]]}));
+    run(&mut s, "sketch.arc.three_point", json!({"start": [0, 0], "through": [12.5, 12.5], "end": [0, 25]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"sketch": "Sketch1", "axis": "Z", "angle": "360 deg", "operation": "new", "body_name": "Ball"}));
+    run(&mut s, "sketch.create", json!({"name": "Sketch2", "plane": {"origin": [0, 0, 15], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [5, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Sketch2", "distance": 15, "operation": "cut"}));
+    s
+}
+
+/// The record edge passing nearest `p`, sampled along its exact curve.
+fn record_edge_near(body: &solidcraft_kernel::Body, p: solidcore_record::Vec3) -> usize {
+    let off = |e: &solidcore_record::brep::Edge| {
+        let c = solidcraft_geom::brep::eval::CurveEval::new(e.parameters()).unwrap();
+        let [t0, t1] = e.interval;
+        (0..=256).filter_map(|k| c.point(t0 + (t1 - t0) * k as f64 / 256.0)).map(|q| q.dist(p)).fold(f64::INFINITY, f64::min)
+    };
+    let (i, d) = body.record().edges.iter().map(off).enumerate().min_by(|a, b| a.1.total_cmp(&b.1)).unwrap();
+    assert!(d < 0.05, "no edge passes near {p:?} (nearest {i} at {d})");
+    i
+}
+
+/// The reporter's two picks on the slotted ball: one half of the seam-split x = +5 arc and the
+/// middle of the whole x = -5 arc. The half is one edge with its other half, the mirror arc
+/// alone; rounding either arc from one pick removes the same material.
+#[test]
+fn a_slot_arc_split_by_a_balls_seam_selects_and_rounds_like_its_mirror() {
+    use solidcore_record::Vec3;
+    let half_pick = Vec3::new(5.0, -7.16004021723299, 21.435908825062725);
+    let mirror_pick = Vec3::new(-5.0, 0.0, 23.956439237387144);
+    let s = slotted_ball();
+    let state = s.model.state();
+    let ball = state.body("Ball").unwrap();
+    let half = record_edge_near(&ball.body, half_pick);
+    let other_half = record_edge_near(&ball.body, Vec3::new(5.0, 7.16004021723299, 21.435908825062725));
+    assert_ne!(half, other_half, "the seam splits the x = +5 arc in the record");
+    let mut both = vec![half, other_half];
+    both.sort_unstable();
+    assert_eq!(ball.whole_edge(half), both);
+    assert_eq!(ball.whole_edge(other_half), both);
+    let mirror = record_edge_near(&ball.body, mirror_pick);
+    assert_eq!(ball.whole_edge(mirror), vec![mirror]);
+    // The rounds guard the leaving direction `whole_edge` now shares with the blend chain walk
+    // and the round running on across the seam vertex (#13752), not the grouping above.
+    let before = body_volume(&s, "Ball");
+    let removed = |pick: Vec3| {
+        let mut s = slotted_ball();
+        run(&mut s, "solid.fillet", json!({"edges": [[pick.x, pick.y, pick.z]], "radius": 2}));
+        let body = s.model.state().body("Ball").unwrap().body.clone();
+        assert!(body.validity().is_empty(), "{:?}", body.validity());
+        before - body_volume(&s, "Ball")
+    };
+    let (plus, minus) = (removed(half_pick), removed(mirror_pick));
+    assert!((plus - 89.8218).abs() < 1e-2, "rounding the split arc removes {plus}");
+    assert!((plus - minus).abs() < 1e-3, "the split arc's round removes {plus}, its mirror's {minus}");
+}
+
+/// A cut To a point on the curved wall of the body it cuts (#11923): the wall runs along the
+/// extrusion, so the cut can never reach it, and the point stands for the plane through it, as a
+/// point in space does. A 12 mm square on the top of a cylinder (r 20, 25 tall) cut To a point on
+/// the wall half way down takes a 12 x 12 x 12.5 slot.
+#[test]
+fn a_cut_to_a_point_on_a_wall_along_the_cut_stops_at_that_height() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.circle.center", json!({"center":[0.0,0.0],"radius":20.0}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance":25.0}));
+    let before = volume(&mut s);
+    run(&mut s, "sketch.create", json!({"plane":"XY","offset":25.0}));
+    run(&mut s, "sketch.rectangle.center", json!({"center":[0.0,0.0],"corner":[6.0,6.0]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"direction":"negative","distance":"12.5 mm","operation":"cut","profiles":[0],"to":[14.14,14.14,12.5]}));
+    let removed = before - volume(&mut s);
+    assert!((removed - 12.0 * 12.0 * 12.5).abs() < 1e-3 * 1800.0, "removed {removed} vs 1800");
+}
+
+/// #11923 keeps main's trim where the wall crosses the profile, even a profile too narrow to hold
+/// a vertex of the wall's mesh: a 0.05 mm slot from x 18 to 22 at y 3 crosses a post (r 20, axis
+/// Z) under a plate at z 10. Extruded To a point on the post's wall at z 2, the tool is trimmed
+/// to the body, the piece outside the post from z 0 to the plate, not ended at z 2.
+#[test]
+fn a_narrow_profile_across_a_wall_along_the_extrusion_keeps_the_trim_to_the_body() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"base":[0,0,0],"axis":[0,0,1],"radius":20,"height":40,"body_name":"Post"}));
+    run(&mut s, "solid.box", json!({"corner":[-30,-30,10],"length":60,"width":60,"height":2,"body_name":"Plate"}));
+    run(&mut s, "solid.combine", json!({"target":"Post","tools":["Plate"],"operation":"join"}));
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Slot"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[18.0,2.975],"p1":[22.0,3.025]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch":"Slot","to":[20,0,2],"body_name":"W"}));
+    let outside = (22.0 - (20.0f64 * 20.0 - 9.0).sqrt()) * 0.05;
+    let v = body_volume(&s, "W");
+    assert!(
+        (v - outside * 10.0).abs() < 0.02 * outside * 10.0,
+        "volume {v}: trimmed to the body is {}, ended at z 2 is {}",
+        outside * 10.0,
+        0.2 * 2.0
+    );
 }

@@ -8,7 +8,7 @@ use super::*;
 use crate::drawing_scene::tests::{front_and_top, nest};
 use crate::schema::output_schema_for;
 use crate::schema::tests::conforms;
-use crate::tests::Folder;
+use crate::tests::{Folder, png_size};
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     s.execute(id, &p).unwrap()
@@ -283,6 +283,38 @@ fn a_sheet_exports_on_its_paper() {
     assert!(refused(&mut s, json!({"sheet": id, "paper": null})).contains("paper"));
 }
 
+/// Each format agrees with the sheet's own size (#4894, W23-3): A3 is 420 x 297 mm in the SVG, and
+/// 2481 x 1754 pixels at 150 dpi in each colour's PNG header (420 and 297 mm are 2480.3 and 1753.9
+/// pixels, and a sheet's grid rounds each side outward). Saved with the design and opened
+/// again, the sheet exports the same bytes in every format and colour. PDF and DXF join as their
+/// writers land.
+#[test]
+fn each_format_agrees_with_the_sheet_and_exports_the_same_once_reopened() {
+    let (mut s, sheet, _) = front_and_top();
+    let id = ids::encode(sheet);
+    let exports = |s: &mut Session| {
+        let mut all = vec![run(s, CMD, json!({"sheet": id}))["svg"].clone()];
+        for colour in ["grey", "black_white", "rgb", "transparent"] {
+            all.push(run(s, CMD, json!({"sheet": id, "format": "png", "dpi": 150, "colour": colour}))["data"].clone());
+        }
+        all
+    };
+    let before = exports(&mut s);
+    let svg = before[0].as_str().unwrap();
+    assert!(svg.contains(r#"width="420mm" height="297mm" viewBox="0 0 420 297""#), "{}", &svg[..svg.len().min(300)]);
+    for data in &before[1..] {
+        let png = data.as_str().and_then(base64_decode).unwrap();
+        assert_eq!((&png[12..16], png_size(&png)), (&b"IHDR"[..], (2481, 1754)));
+    }
+    let drawing = ids::encode(s.drawing("test").unwrap().id);
+    let folder = Folder::new("drawing-export-agree");
+    run(&mut s, "file.save", json!({"path": folder.path("sheet.solidcraft")}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": folder.path("sheet.solidcraft")}));
+    run(&mut opened, "drawing.open", json!({"drawing": drawing}));
+    assert!(exports(&mut opened) == before, "a format exports differently once reopened");
+}
+
 /// A document held for the reply takes up to its limit and is refused past it, naming the way out.
 #[test]
 fn a_reply_holds_a_document_up_to_its_limit() {
@@ -513,4 +545,51 @@ fn exact_sheet_freeforms_match_the_scene_schema_and_export_via_shared_grid() {
     }
     assert!(std::sync::Arc::ptr_eq(&doc, &s.doc) && std::sync::Arc::ptr_eq(&model, &s.model.state()));
     assert_eq!((s.evaluations, s.undo.len(), s.redo.len()), (evaluations, undo, redo));
+}
+
+/// The drawing milestone's plate (acceptance case 84, #4894) by commands alone: modelled from its
+/// parameters, a top view at 1:2 and the views projected below and right of it, its length, width
+/// and first bore dimensioned. Saved with the design and opened again, the sheet exports the same
+/// SVG, byte for byte, and each dimension reads the same.
+#[test]
+fn the_milestone_plate_exports_the_same_after_it_is_saved_and_opened() {
+    let mut s = Session::default();
+    let script: Value = serde_json::from_str(include_str!("../../../../examples/acceptance/drawing_m2.json")).unwrap();
+    let made = s.run_script(&script).unwrap();
+    let size = |reply: &Value| {
+        let b = &reply["boundary_mm"];
+        [0, 1].map(|i| b["max"][i].as_f64().unwrap() - b["min"][i].as_f64().unwrap())
+    };
+    let top = made.last().unwrap();
+    let below = run(&mut s, "drawing.view.projected", json!({"parent": top["view"], "side": "below"}));
+    let right = run(&mut s, "drawing.view.projected", json!({"parent": top["view"], "side": "right"}));
+    // 100 x 80 x 20 at half size: the top shows length by width, below it length by thickness,
+    // right of it thickness by width.
+    for (view, expected) in [(top, [50.0, 40.0]), (&below, [50.0, 10.0]), (&right, [10.0, 40.0])] {
+        let [w, h] = size(view);
+        assert!((w - expected[0]).abs() < 1e-6 && (h - expected[1]).abs() < 1e-6, "{view}");
+    }
+    // The first bore's rim, by a point on it.
+    let mut dimensions = Vec::new();
+    for (kind, value) in [
+        (json!({"length": {"edge": [50, 0, 20]}}), 100.0),
+        (json!({"length": {"edge": [0, 40, 20]}}), 80.0),
+        (json!({"radial": {"edge": [25, 20, 20]}}), 10.0),
+    ] {
+        let added = run(&mut s, "drawing.dimension.add", json!({"view": top["view"], "kind": kind}));
+        assert!((added["value"].as_f64().unwrap() - value).abs() < 1e-9, "{added}");
+        dimensions.push((added["dimension"].clone(), added["value"].clone(), added["text"].clone()));
+    }
+    let svg = run(&mut s, CMD, json!({"sheet": "Sheet 1"}))["svg"].clone();
+    let drawing = ids::encode(s.drawing("test").unwrap().id);
+    let folder = Folder::new("drawing-m2-plate");
+    run(&mut s, "file.save", json!({"path": folder.path("plate.solidcraft")}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": folder.path("plate.solidcraft")}));
+    run(&mut opened, "drawing.open", json!({"drawing": drawing}));
+    assert_eq!(run(&mut opened, CMD, json!({"sheet": "Sheet 1"}))["svg"], svg);
+    for (dimension, value, text) in dimensions {
+        let read = run(&mut opened, "drawing.dimension.inspect", json!({"dimension": dimension}));
+        assert_eq!((&read["value"], &read["text"], &read["status"]), (&value, &text, &json!("ok")), "{read}");
+    }
 }

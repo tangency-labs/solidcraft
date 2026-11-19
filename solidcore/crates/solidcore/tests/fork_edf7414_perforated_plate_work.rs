@@ -8,15 +8,19 @@
 //!
 //! The fork's test checked a ratio of times (`t256 <= 8 t64 + 0.1`), which tripped under
 //! load. It now counts the work (`SmWorkCounters`, here [`Kernel::work_counters`]) and
-//! prints the time without checking it. With `boolean_skips_faces_apart` the holes' boxes
+//! prints the time without checking it. With WR-527's box tests the holes' boxes
 //! lie apart, so the unions pair no faces, and the cut pairs the plate's one face with each
 //! hole: k^2 face pairs, 64 and 256, four times the pairs for four times the holes. Each
 //! hole imprinted in the plate lies outside the other holes' boxes, so no inner loop is
-//! classified: 0 and 0. With that box test switched off the same run classifies
-//! 4032 = 64 x 63 and 65280 = 256 x 255 loops, the n^2 the count is there to catch (the
-//! fork's numbers and the port's). With the flag off (upstream) the port also pairs every
-//! face, 2080 = 64 x 65 / 2 and 32896 = 256 x 257 / 2 pairs, so the test fails. The plate
+//! classified: 0 and 0. Without that box test (the fork before edf7414, and this port
+//! before it became the only path) the same run classified 4032 = 64 x 63 and
+//! 65280 = 256 x 255 loops, the n^2 the count is there to catch. Upstream also pairs every face, 2080 = 64 x 65 / 2 and
+//! 32896 = 256 x 257 / 2 pairs, which this test refuses. The plate
 //! keeps its exact area either way.
+//!
+//! Not the fork's: the same plate as a solid, 12 thick, with its holes cut in 3D by one
+//! `boolean_lists` call (`plate_cut_marks_one_face_for_each_face_it_deletes`,
+//! `plate_cut_solves_no_proto_vertex_that_has_proto_edges`).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -27,14 +31,22 @@
 use std::f64::consts::PI;
 use std::time::Instant;
 
-use solidcore::boolean::api_brep::{boolean_2d, Boolean2d, Boolean2dOutcome};
+use solidcore::boolean::api_brep::{
+    boolean as boolean_3d, boolean_2d, boolean_lists, boolean_union, Boolean2d, Boolean2dOutcome,
+};
 use solidcore::curve::curve::Curve;
 use solidcore::curve::ellipse::Ellipse;
+use solidcore::geom::a_object::BooleanOperation;
 use solidcore::geom::axis2_placement::Axis2Placement;
-use solidcore::mass::integrator::properties::brep_area;
+use solidcore::kernel::UpstreamFixes;
+use solidcore::mass::integrator::properties::{brep_area, brep_volume_default};
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::create_line_segment;
+use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::primitive::api_trim_ops::create_planar_faces;
+use solidcore::topology::brep::p1;
+use solidcore::topology::brep::p2::is_manifold_solid;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::{Brep, Kernel};
 
 const RADIUS: f64 = 2.0;
@@ -78,7 +90,6 @@ fn plate(k: &mut Kernel, w: f64) -> Brep {
 /// and its inner loops classified (none), and returns the face pairs.
 fn plate_pairs(n: u32) -> u64 {
     let mut k = Kernel::default();
-    k.fixes.boolean_skips_faces_apart = true;
     let t0 = Instant::now();
     k.work_counters.reset();
     let mut holes = Vec::new();
@@ -171,7 +182,6 @@ fn plate_and_hole_curves(k: &mut Kernel, n: u32) -> (Vec<Curve>, f64) {
 fn plate_in_one_call_walks(n: u32) -> u64 {
     let mut k = Kernel::new(&solidcore::kernel::KernelOptions::default());
     k.memoize_curve_caches = true; // the count is the shortcut's, whatever `curve-memo-off` says
-    k.fixes.boolean_skips_faces_apart = true;
     let (curves, w) = plate_and_hole_curves(&mut k, n);
     let t0 = Instant::now();
     k.work_counters.reset();
@@ -365,4 +375,218 @@ fn plate_extruded_walks(n: u32) -> u64 {
 fn an_extruded_plate_walks_each_hole_a_fixed_number_of_times() {
     assert_eq!(plate_extruded_walks(8), 2 * 3 * 64 + 4);
     assert_eq!(plate_extruded_walks(16), 2 * 3 * 256 + 4);
+}
+
+/// The solid plate, 12 thick, minus `n` x `n` cylinders r 4 through it on the 20 mm
+/// pitch, in one `boolean_lists` call with SolidCraft's fixes: checks the cut (a wall
+/// for each hole, three edges for each hole, the exact volume) and returns the faces its
+/// shell traversals marked and the point solves it ran of a proto vertex against a proto
+/// edge.
+fn plate_cut_counts(n: u32) -> (u64, u64) {
+    let mut k = Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Kernel::default()
+    };
+    let (w, thick, radius) = (PITCH * f64::from(n), 12.0, 4.0);
+    let plate = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), w, w, thick).unwrap();
+    let mut tools = Vec::new();
+    for i in 0..n {
+        for j in 0..n {
+            let (x, y) = (PITCH * (f64::from(i) + 0.5), PITCH * (f64::from(j) + 0.5));
+            let base = Point3::new(x, y, -1.0);
+            tools.push(create_cylinder(&mut k, base, radius, thick + 2.0).unwrap());
+        }
+    }
+    let holes = (n * n) as usize;
+    k.work_counters.reset();
+    let mut cut = boolean_lists(&mut k, &[plate], &[], &tools, &[], 3)
+        .unwrap()
+        .breps;
+    let marked = k.work_counters.shell_traversal_faces();
+    let solves = k.work_counters.proto_vertex_point_solves();
+    assert_eq!(cut.len(), 1);
+    let cut = &mut cut[0];
+    assert_eq!(p1::faces(cut, None).unwrap().len(), holes + 6);
+    assert_eq!(p1::edges(cut, None).unwrap().len(), 3 * holes + 12);
+    let volume = brep_volume_default(&k, cut, 1e-6).unwrap();
+    let exact = w * w * thick - holes as f64 * PI * radius * radius * thick;
+    println!("plate minus {holes} cylinders: volume {volume:.6}, exact {exact:.6}");
+    println!("  {marked} faces marked by shell traversals");
+    println!("  {solves} point solves of a proto vertex against a proto edge");
+    assert!(
+        (volume - exact).abs() <= 1e-6 * exact,
+        "volume {volume}, exact {exact}"
+    );
+    (marked, solves)
+}
+
+/// The cut deletes the two discs each cylinder cuts out of the plate's top and bottom,
+/// and each deletion asks whether the disc's one vertex is still joined to the shell.
+/// It is, through the first face at that vertex: one face marked for each face deleted,
+/// 2 N for N holes. Walking on over the rest of the shell marked
+/// (7/2) N^2 + (23/2) N faces: 2475 for 25 holes and 36150 for 100.
+#[test]
+fn plate_cut_marks_one_face_for_each_face_it_deletes() {
+    let marked = (plate_cut_counts(5).0, plate_cut_counts(10).0);
+    assert_eq!(marked, (2 * 25, 2 * 100));
+}
+
+/// Each cylinder meets the plate's top and bottom in a circle: a closed proto edge that
+/// starts and ends at its one proto vertex, 2 N of each for N holes. The boolean removes
+/// a proto vertex lying on a proto edge only when it has no proto edges of its own, and
+/// here every proto vertex has one, so nothing can be removed and no point solve is
+/// needed: 0 and 0. Solving each proto vertex against every other proto edge ran
+/// 4 N^2 - 2 N solves: 2450 for 25 holes and 39800 for 100.
+#[test]
+fn plate_cut_solves_no_proto_vertex_that_has_proto_edges() {
+    let solves = (plate_cut_counts(5).1, plate_cut_counts(10).1);
+    assert_eq!(solves, (0, 0));
+}
+
+// ---- the plate as a solid, cut a group of holes at a time ---------------------------------
+
+/// The solid version, as SolidCraft cuts a pattern of holes: a 2 mm plate with `n` x `n`
+/// holes r 0.5 on a 2.54 mm pitch, cut as cylinders a group of 8 at a time, one group after
+/// another, then checked. Returns the drops of the plate's vertices onto the curves the cuts
+/// classify on its faces.
+///
+/// A vertex can only meet a curve within the drop's tolerance, and a hole's circles lie far
+/// from the vertices of the holes cut before: only the 2 drops of each hole's own cut are
+/// solved, 32 and 72 for 16 and 36 holes, where every curve used to be dropped onto every
+/// vertex in the plate, 352 and 1528, growing with the square of the holes. The plate keeps
+/// one cylinder face per hole and checks clean either way.
+fn solid_plate_vertex_drops(n: u32) -> u64 {
+    const HOLE: f64 = 0.5;
+    const STEP: f64 = 2.54;
+    let mut k = Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Kernel::default()
+    };
+    k.memoize_curve_caches = true; // the count is the shortcut's, whatever `curve-memo-off` says
+    let w = STEP * f64::from(n + 1);
+    let mut plate = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), w, w, 2.0).unwrap();
+    let holes: Vec<Brep> = (0..n * n)
+        .map(|i| {
+            let (x, y) = (STEP * f64::from(i % n + 1), STEP * f64::from(i / n + 1));
+            create_cylinder(&mut k, Point3::new(x, y, -1.0), HOLE, 4.0).unwrap()
+        })
+        .collect();
+    k.work_counters.reset();
+    let mut holes = holes.into_iter();
+    loop {
+        let group: Vec<Brep> = holes.by_ref().take(8).collect();
+        let mut group = group.into_iter();
+        let Some(first) = group.next() else { break };
+        let tool = group.fold(first, |a, b| boolean_union(&mut k, a, b).unwrap());
+        plate = boolean_3d(&mut k, plate, tool, BooleanOperation::Difference)
+            .unwrap()
+            .result;
+    }
+    plate.use_arena_naming().unwrap();
+    let lines = check_brep(&mut k, &mut plate, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    assert!(is_manifold_solid(&plate).unwrap());
+    assert_eq!(plate.face_list().len(), 6 + (n * n) as usize);
+    let drops = k.work_counters.vertex_drops();
+    println!("solid plate with {} holes: {drops} vertex drops", n * n);
+    drops
+}
+
+#[test]
+fn a_solid_plate_cut_a_group_at_a_time_drops_only_its_own_vertices() {
+    assert_eq!(solid_plate_vertex_drops(4), 32);
+    assert_eq!(solid_plate_vertex_drops(6), 72);
+}
+
+// ---- a plate joined onto its own top: one face meeting many ------------------------------
+
+/// The plate with `n` x `n` holes extruded from `z0` to `z1` (as [`plate_extruded_walks`]'
+/// plate, with every fix on as SolidCraft runs).
+fn plate_prism(k: &mut Kernel, n: u32, z0: f64, z1: f64) -> Brep {
+    use solidcore::eval::Frame;
+    use solidcore::math::Point2;
+    use solidcore::prism::extrude::extrude_region;
+    use solidcore::prism::profile::{Loop2, Region2, Seg2};
+
+    let w = PITCH * f64::from(n + 1);
+    let q = Point2::new;
+    let corners = [q(0.0, 0.0), q(w, 0.0), q(w, w), q(0.0, w)];
+    let outer = Loop2 {
+        segs: (0..4)
+            .map(|i| Seg2::Line {
+                a: corners[i],
+                b: corners[(i + 1) % 4],
+            })
+            .collect(),
+    };
+    let holes = (0..n * n)
+        .map(|i| {
+            let center = q(PITCH * f64::from(i % n + 1), PITCH * f64::from(i / n + 1));
+            Loop2 {
+                segs: vec![Seg2::Arc {
+                    center,
+                    radius: RADIUS,
+                    start: 0.0,
+                    sweep: 2.0 * PI,
+                }],
+            }
+            .reversed()
+        })
+        .collect();
+    let frame = Frame {
+        origin: [0.0; 3],
+        x_axis: [1.0, 0.0, 0.0],
+        y_axis: [0.0, 1.0, 0.0],
+    };
+    extrude_region(k, &frame, &Region2 { outer, holes }, z0, z1).unwrap()
+}
+
+/// The plate with `n` x `n` holes, 12 thick, and the same plate stacked on its top, 12
+/// more, joined in one boolean (as an extrude of the top face that joins): checks the
+/// join's exact volume and returns the seam and pole tests it ran
+/// ([`solidcore::kernel::WorkCounters::seam_tests`]).
+///
+/// The face the two plates share has an edge for each hole and no seam: each plate's side
+/// of it is scanned for one once, not once for every face it meets, and the curves on it
+/// ask nothing more. The count left grows as the holes, 47 for each hole and 40 more: 228
+/// and 792 for 4 and 16 holes (a hole's wall closes on itself across a seam, so the curves
+/// on it still ask about its edges and vertices). Asking, for every curve on the shared
+/// face, about every edge and vertex of it ran 14 N^2 + 163 N + 416 tests for N holes:
+/// 1292 and 6608, and 24428 for 36 (#18705).
+fn stacked_plate_seam_tests(n: u32) -> u64 {
+    let mut k = Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Kernel::default()
+    };
+    let below = plate_prism(&mut k, n, 0.0, 12.0);
+    let above = plate_prism(&mut k, n, 12.0, 24.0);
+    let t0 = Instant::now();
+    k.work_counters.reset();
+    let mut joined = boolean_union(&mut k, below, above).unwrap();
+    let seconds = t0.elapsed().as_secs_f64();
+    let tests = k.work_counters.seam_tests();
+    let pairs = k.work_counters.face_pairs();
+    let w = PITCH * f64::from(n + 1);
+    let holes = n * n;
+    let volume = brep_volume_default(&k, &mut joined, 1e-9).unwrap();
+    let exact = 24.0 * (w * w - f64::from(holes) * PI * RADIUS * RADIUS);
+    println!(
+        "plate with {holes} holes joined onto its top: {seconds:.3} s, {pairs} face pairs, \
+         {tests} seam and pole tests, faces {}, edges {}",
+        joined.face_list().len(),
+        joined.edge_list().len()
+    );
+    assert!(
+        (volume - exact).abs() <= 1e-7 * exact,
+        "volume {volume}, exact {exact}"
+    );
+    tests
+}
+
+#[test]
+fn a_plate_joined_onto_its_top_tests_each_face_for_a_seam_once() {
+    let counts = [2, 4].map(stacked_plate_seam_tests);
+    assert_eq!(counts, [47 * 4 + 40, 47 * 16 + 40]);
 }

@@ -157,7 +157,7 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
         Some(given) => Some(linked_source(cmd, s, given)?),
         None => None,
     };
-    if linked.is_none() && s.doc.features.is_empty() {
+    if linked.is_none() && !s.doc.has_something_to_draw() {
         return Err(bad(cmd, "the design is empty: there is nothing to draw yet"));
     }
     let name = request.name.unwrap_or_else(|| s.doc.name.clone());

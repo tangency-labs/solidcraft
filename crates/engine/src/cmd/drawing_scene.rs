@@ -19,7 +19,7 @@ use crate::drawing_scene::{BalloonState, CMD, DimensionState, NoteState, TableSt
 use crate::schema::drawing_scene::{
     DimensionStatusResult, DrawingStatusParams, DrawingStatusResult, DrawingUpdateParams, DrawingUpdateResult, HitResult, LineHitResult,
     SheetHitParams, SheetHitResult, SheetLineParams, SheetLineResult, SheetPaperScene, SheetSceneBalloon, SheetSceneDimension, SheetSceneNote,
-    SheetSceneParams, SheetSceneResult, SheetSceneTable, ViewStatusResult,
+    SheetSceneParams, SheetSceneResult, SheetSceneTable, SheetSceneTag, ViewStatusResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -199,13 +199,14 @@ fn scene(s: &mut Session, p: &Value) -> Result<Value> {
     let d = s.drawing(CMD)?.clone();
     let sheet = crate::drawing_scene::sheet_id(&d, &request.sheet, CMD)?;
     let built = crate::drawing_scene::as_shown(s, &d, sheet)?;
-    let out_of_date = built.out_of_date.iter().map(|id| ids::encode(*id)).collect();
+    let out_of_date = built.out_of_date.iter().map(|(id, _)| ids::encode(*id)).collect();
     let views = built.views.into_iter().map(Into::into).collect();
     let objects = built.objects.into_iter().map(Into::into).collect();
     let dimensions = dimension_results(built.dimensions);
     let notes = note_results(built.notes);
     let balloons = balloon_results(built.balloons);
     let tables = table_results(built.tables);
+    let tags = built.tags.into_iter().map(|t| SheetSceneTag { tag: ids::encode(t.tag), drawn: t.drawn, why: t.why }).collect();
     let sketches = built.sketches.into_iter().map(Into::into).collect();
     let fills = built.fills.into_iter().map(Into::into).collect();
     let reply = SheetSceneResult {
@@ -217,6 +218,7 @@ fn scene(s: &mut Session, p: &Value) -> Result<Value> {
         notes,
         balloons,
         tables,
+        tags,
         out_of_date,
         sketches,
         fills,

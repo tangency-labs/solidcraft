@@ -960,6 +960,14 @@ fn from_sheet(e: drawing_sheet::Invalid) -> DocError {
     DocError::Invalid(e.to_string())
 }
 
+impl crate::Document {
+    /// Whether a drawing of this design has anything to draw: a design with no features is empty.
+    /// `drawing.create` refuses an empty design, and the app greys its New Drawing entry by the same rule.
+    pub fn has_something_to_draw(&self) -> bool {
+        !self.features.is_empty()
+    }
+}
+
 #[cfg(test)]
 #[path = "drawing_tests.rs"]
 mod tests;

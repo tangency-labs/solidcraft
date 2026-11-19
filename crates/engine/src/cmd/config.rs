@@ -308,7 +308,8 @@ fn row(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, "delete rules before deleting the last configuration row"));
         }
         let t = &mut s.doc_mut().configs;
-        t.rows.remove(i);
+        let removed = t.rows.remove(i);
+        t.row_identities.remove(&removed.id);
         if t.active.as_deref() == Some(name.as_str()) {
             t.active = None;
         }
@@ -691,6 +692,36 @@ mod tests {
         // A row the table hasn't got is refused as the command names it.
         let e = super::put_row(&mut s.scratch(), super::RowKey::Id(999_999), "config.activate").err().map(|e| e.to_string()).unwrap_or_default();
         assert!(e.contains("config.activate") && e.contains("999999"), "{e}");
+    }
+
+    #[test]
+    fn configuration_creation_identity_survives_edits_and_undo_but_not_replacement() {
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name": "L", "expression": "25 mm"}));
+        run(&mut s, "config.configure", json!({"params": ["L"]}));
+        run(&mut s, "config.row", json!({"name": "First", "values": {"L": "30 mm"}}));
+        let id = s.doc.configs.row("First".into()).unwrap().id;
+        let identity = s.doc.configs.row_identity(id).unwrap();
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(s.doc.configs.row_identity(id), None);
+        run(&mut s, "edit.redo", json!({}));
+        assert_eq!(s.doc.configs.row_identity(id), Some(identity));
+        run(&mut s, "config.row", json!({"name": id, "rename": "Renamed", "values": {"L": "35 mm"}}));
+        assert_eq!(s.doc.configs.row_identity(id), Some(identity));
+        run(&mut s, "config.row", json!({"name": id, "delete": true}));
+        assert_eq!(s.doc.configs.row_identity(id), None);
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(s.doc.configs.row_identity(id), Some(identity));
+        run(&mut s, "edit.undo", json!({}));
+        run(&mut s, "edit.undo", json!({}));
+        // Save and reopen after undo: the numeric counter can rewind, but a new row is distinct.
+        let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+        let mut s = Session::new(reopened);
+        run(&mut s, "config.row", json!({"name": "Replacement", "values": {"L": "80 mm"}}));
+        let replacement = s.doc.configs.row("Replacement".into()).unwrap().id;
+        assert_eq!(replacement, id);
+        assert_ne!(s.doc.configs.row_identity(replacement), Some(identity));
+        assert!(s.doc.configs.row_identity(replacement).is_some());
     }
 
     #[test]

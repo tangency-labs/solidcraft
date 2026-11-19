@@ -57,12 +57,32 @@ fn to_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     if loops.is_empty() {
         return Err(bad(cmd, "no outline found in the image (it needs a drawing that stands out from its background)"));
     }
+    // An anchored canvas is traced where its frame shows it: into its sketch's plane, each pixel
+    // placed through the frame's corners (stretched, turned and mirrored as shown).
+    let anchored = canvas.anchor.as_ref().and_then(|a| {
+        let frame = s.doc.canvas_anchor_frame(&canvas, a, &s.model.state()).ok()?;
+        match s.doc.feature(a.sketch).map(|f| &f.kind) {
+            Some(solidcraft_doc::FeatureKind::Sketch { plane, .. }) => Some((plane.clone(), frame)),
+            _ => None,
+        }
+    });
     // Image pixels -> canvas plane: width as the canvas, centred, turned and mirrored like it.
-    let sc = canvas.width / w as f64;
+    let sc = match &anchored {
+        Some((_, [bl, br, _, _])) => (*br - *bl).len() / w as f64,
+        None => canvas.width / w as f64,
+    };
     let (half_w, half_h) = (w as f64 * sc / 2.0, h as f64 * sc / 2.0);
     let (sin, cos) = canvas.angle.sin_cos();
     let (center, flip) = (canvas.center, canvas.flip);
+    let frame = anchored.as_ref().map(|(_, k)| *k);
+    let (wf, hf) = (w as f64, h as f64);
     let tf = move |q: Vec2| -> Vec2 {
+        if let Some([bl, br, _, tl]) = frame {
+            // Pixel (0, h) is the image's bottom-left corner, (w, h) its bottom-right, (0, 0) its top-left.
+            let xyz = |p: Vec2| [p.x, p.y, 0.0];
+            let [x, y, _] = solidcore_ops::affine::parallelogram_point(xyz(bl), xyz(br - bl), xyz(tl - bl), q.x / wf, 1.0 - q.y / hf);
+            return Vec2::new(x, y);
+        }
         let mut u = q.x * sc - half_w;
         let v = half_h - q.y * sc;
         if flip {
@@ -82,8 +102,9 @@ fn to_sketch(s: &mut Session, p: &Value) -> Result<Value> {
             cur = seg.end();
         }
     }
-    let name = str_(p, "name").map(str::to_string).unwrap_or_else(|| format!("{} sketch", canvas.name));
-    let r = super::sketch::create_sketch_with_plane(s, &json!({ "name": name }), canvas.plane.clone(), None)?;
+    let name = str_(p, "name").map(str::to_string).unwrap_or_else(|| s.doc.free_sketch_name(&format!("{} sketch", canvas.name)));
+    let plane = anchored.map_or_else(|| canvas.plane.clone(), |(plane, _)| plane);
+    let r = super::sketch::create_sketch_with_plane(s, &json!({ "name": name }), plane, None)?;
     // `sketch.create` always reports the id of the sketch it made.
     let id = r.get("sketch").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "could not start a sketch on the canvas"))?;
     let tol = (sc * 0.01).max(1e-6);

@@ -1,9 +1,170 @@
-use crate::{Document, ModelBody, ModelState};
+use crate::{Document, ModelBody, ModelState, PlaneRef};
 use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{LinkGeom, LinkKind, LinkSource, Sketch};
 use std::collections::BTreeMap;
 use std::sync::Arc;
+
+#[test]
+fn tilted_spline_projection_keeps_one_exact_curve() {
+    use solidcore_record::{Seg2, Vec2};
+    use solidcraft_sketch::{CurveKind, LinkGeom, Nurbs};
+
+    let from = Plane::XY.offset(9.);
+    let to = Plane::new(Vec3::new(-2., 3., 1.), Vec3::new(0.8, 0., 0.6), Vec3::Y).unwrap();
+    for (control, periodic, rational) in [(false, false, false), (false, true, false), (true, false, false), (true, false, true)] {
+        let mut sketch = Sketch::default();
+        let mut points: Vec<Vec2> = [[0., 0.], [5., 18.], [25., -5.], [40., 9.], [50., 1.]].into_iter().map(|[x, y]| Vec2::new(x, y)).collect();
+        if periodic {
+            points.push(points[0]);
+        }
+        let pts = points.iter().map(|p| sketch.add_point(*p, None).unwrap()).collect();
+        let nurbs = rational.then(|| Nurbs { knots: vec![0., 0., 0., 0., 0.3, 1., 1., 1., 1.], weights: vec![1., 0.8, 1.4, 0.9, 1.] });
+        let fit_spans = (!control).then(|| solidcraft_sketch::fit_beziers_mode(&points, periodic).unwrap());
+        let chords: Vec<_> = points.windows(2).map(|p| p[0].dist(p[1]).max(1e-9)).collect();
+        let total: f64 = chords.iter().sum();
+        let expected: Vec<Vec2> = (0..=128)
+            .map(|i| {
+                let t = f64::from(i) / 128.;
+                if let Some(spans) = &fit_spans {
+                    // Compact knots follow source chord parameter, while the open sketch's
+                    // public t advances uniformly per span. Compare the same geometric point.
+                    let mut u = t * total;
+                    let mut span = 0;
+                    while span + 1 < spans.len() && u > chords[span] {
+                        u -= chords[span];
+                        span += 1;
+                    }
+                    let [p0, p1, p2, p3] = spans[span];
+                    Seg2::Cubic { p0, p1, p2, p3 }.point_at((u / chords[span]).clamp(0., 1.))
+                } else {
+                    solidcraft_sketch::spline_point_mode(&points, control, 3, false, nurbs.as_ref(), t)
+                }
+            })
+            .map(|p| to.to_local(from.to_world(p)))
+            .collect();
+        sketch.add_curve(CurveKind::Spline { pts, control, degree: 3, periodic, nurbs, handles: Vec::new() }, Some("source")).unwrap();
+        let report = solidcraft_sketch::solve(&mut sketch);
+        let mut state = ModelState::default();
+        state.sketches.push(Arc::new(crate::eval::SolvedSketch {
+            feature: 1,
+            name: "Source".into(),
+            plane: from,
+            sketch,
+            report,
+            profiles: Vec::new(),
+            profiles_3d: Vec::new(),
+            ends: Default::default(),
+        }));
+        let resolved = crate::project::resolve(
+            &Document::default(),
+            &BTreeMap::new(),
+            &state,
+            &to,
+            LinkKind::Project,
+            &LinkSource::SketchCurve { sketch: 1, curve: "source".into() },
+        )
+        .unwrap();
+        assert!(matches!(resolved.geom.as_slice(), [LinkGeom::Spline { .. }]), "projected spline must stay one spline: {:?}", resolved.geom);
+        let mut projected = Sketch::default();
+        let link = projected.add_link(LinkKind::Project, resolved.source, &resolved.geom).unwrap();
+        let ci = projected.link_curves(&link)[0];
+        assert!(projected.reverse_spline(ci).is_err(), "linked curves follow their source");
+        projected.break_link(&link).unwrap();
+        for reversed in [false, true, false] {
+            if reversed {
+                projected.reverse_spline(ci).unwrap();
+            }
+            let CurveKind::Spline { pts, control: projected_control, degree, periodic, nurbs, .. } = &projected.curves[ci].kind else {
+                panic!("projection is not a spline")
+            };
+            let points: Vec<Vec2> = pts.iter().map(|p| projected.point(*p).unwrap()).collect();
+            for (i, expected) in expected.iter().enumerate() {
+                let t = i as f64 / 128.;
+                let actual = solidcraft_sketch::spline_point_mode(
+                    &points,
+                    *projected_control,
+                    *degree,
+                    *periodic,
+                    nurbs.as_ref(),
+                    if reversed { 1. - t } else { t },
+                );
+                assert!(
+                    actual.dist(*expected) < 1e-8,
+                    "control={control}, periodic={periodic}, rational={rational}, reversed={reversed}, t={t}, actual={actual:?}, expected={expected:?}"
+                );
+            }
+            if reversed {
+                projected.reverse_spline(ci).unwrap();
+            }
+        }
+    }
+}
+
+#[test]
+fn projecting_a_fit_spline_keeps_edited_tangent_handles_on_parallel_and_tilted_planes() {
+    use solidcraft_sketch::{CurveKind, LinkGeom};
+
+    let from = Plane::XY.offset(9.);
+    let tilted = Plane::new(Vec3::new(-2., 3., 1.), Vec3::new(0.8, 0., 0.6), Vec3::Y).unwrap();
+    for periodic in [false, true] {
+        let mut sketch = Sketch::default();
+        let mut points = vec![Vec2::new(0., 0.), Vec2::new(8., 13.), Vec2::new(20., -2.)];
+        if periodic {
+            points.push(points[0]);
+        }
+        let pts = points.iter().map(|p| sketch.add_point(*p, None).unwrap()).collect();
+        let curve = sketch
+            .add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic, nurbs: None, handles: Vec::new() }, Some("source"))
+            .unwrap();
+        sketch.add_spline_handles(curve).unwrap();
+        let CurveKind::Spline { handles, .. } = &sketch.curves[curve].kind else { panic!("not a spline") };
+        let handle = handles[1];
+        sketch.points[handle].pos += Vec2::new(3., -2.);
+        for reversed in [false, true] {
+            let mut source = sketch.clone();
+            if reversed {
+                source.reverse_spline(curve).unwrap();
+            }
+            let report = solidcraft_sketch::solve(&mut source);
+            let CurveKind::Spline { pts, handles, .. } = &source.curves[curve].kind else { panic!("not a spline") };
+            let points: Vec<_> = pts.iter().map(|p| source.point(*p).unwrap()).collect();
+            let handles: Vec<_> = handles.iter().map(|p| source.point(*p).unwrap()).collect();
+            let expected = solidcraft_sketch::fit_beziers_with_handles(&points, &handles, periodic).unwrap();
+            let mut state = ModelState::default();
+            state.sketches.push(Arc::new(crate::eval::SolvedSketch {
+                feature: 1,
+                name: "Source".into(),
+                plane: from,
+                sketch: source,
+                report,
+                profiles: Vec::new(),
+                profiles_3d: Vec::new(),
+                ends: Default::default(),
+            }));
+            for to in [Plane::XY, tilted] {
+                let resolved = crate::project::resolve(
+                    &Document::default(),
+                    &BTreeMap::new(),
+                    &state,
+                    &to,
+                    LinkKind::Project,
+                    &LinkSource::SketchCurve { sketch: 1, curve: "source".into() },
+                )
+                .unwrap();
+                assert_eq!(resolved.geom.len(), expected.len(), "one exact curve per handled span");
+                for (actual, span) in resolved.geom.iter().zip(&expected) {
+                    let LinkGeom::Spline { pts, control: true, degree: 3, .. } = actual else { panic!("not an exact cubic: {actual:?}") };
+                    assert_eq!(pts.len(), 4);
+                    for (actual, point) in pts.iter().zip(span) {
+                        let expected = to.to_local(from.to_world(*point));
+                        assert!(actual.dist(expected) < 1e-10, "periodic={periodic}, reversed={reversed}: {actual:?} != {expected:?}");
+                    }
+                }
+            }
+        }
+    }
+}
 
 fn named_box(name: &str, width: f64, height: f64) -> ModelBody {
     let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(width, width, height)).unwrap();
@@ -13,6 +174,110 @@ fn named_box(name: &str, width: f64, height: f64) -> ModelBody {
     let mut result = ModelBody::new(name.into(), body, 1);
     result.names = crate::naming::NameCell::known(Arc::new(names));
     result
+}
+
+/// `error` fails a sketch for one projection, the one kept by `name`, without printing the name.
+fn lost_one(error: &crate::DocError, name: &str) -> bool {
+    matches!(error, crate::DocError::LostProjections { links, .. } if links.len() == 1 && links[0].name == name) && !error.to_string().contains(name)
+}
+
+/// Five faces projected from `Source`, which goes: the sketch fails once, naming every projection
+/// by its source and curves and counting them, never by the faces' persistent names. Each link is
+/// marked lost and keeps its curves, and the message reads back as the sketch's.
+#[test]
+fn a_sketch_whose_projected_faces_are_gone_names_each_projection_as_the_user_sees_it() {
+    let doc = Document::default();
+    let mut initial = ModelState::default();
+    initial.bodies.push(named_box("Source", 20., 10.));
+    let plane = Plane::XY.offset(20.);
+    let source = LinkSource::Face { body: "Source".into(), at: Vec3::new(1., 1., 10.) };
+    let resolved = crate::project::resolve(&doc, &BTreeMap::new(), &initial, &plane, LinkKind::Project, &source).unwrap();
+    let mut sketch = Sketch::default();
+    for _ in 0..5 {
+        sketch.add_link(LinkKind::Project, source.clone(), &resolved.geom).unwrap();
+    }
+    for link in &mut sketch.links {
+        link.face_name = Some("shared:top".into());
+    }
+    let saved = sketch.clone();
+    let error = crate::project::refresh_links(&doc, &BTreeMap::new(), &ModelState::default(), &plane, &mut sketch).unwrap_err().in_feature("Outline");
+    let crate::DocError::LostProjections { links, .. } = &error else { panic!("{error}") };
+    let ids: Vec<&str> = links.iter().map(|l| l.link.as_str()).collect();
+    assert_eq!(ids, saved.links.iter().map(|l| l.id.as_str()).collect::<Vec<_>>());
+    let first = &links[0];
+    assert_eq!(first.what, "projected face of Source");
+    assert_eq!(first.curves, saved.link_curves(&first.link).iter().map(|&c| saved.curves[c].id.clone()).collect::<Vec<_>>());
+    assert_eq!(first.curves.len(), 4, "the face's four edges");
+    assert!(sketch.links.iter().all(|l| !l.lost), "the failing refresh marks nothing in the sketch it was given");
+    assert_eq!(sketch.curves, saved.curves);
+    let text = error.to_string();
+    assert!(!text.contains("shared:top"), "{text}");
+    assert!(text.starts_with("Outline: 5 projected references are lost: projected face of Source (curves l1, l2, l3, l4), "), "{text}");
+    assert!(text.ends_with(" and 2 more; delete each projection or project it again"), "{text}");
+    let read = crate::lost_projection_parts(&text).unwrap();
+    assert_eq!((read.feature, read.count, read.more), ("Outline", 5, 2));
+    assert!(read.listed.starts_with("projected face of Source (curves l1, l2, l3, l4)") && !read.listed.ends_with("more"), "{}", read.listed);
+    assert_eq!(crate::reselect_parts(&text), None);
+
+    let one = crate::DocError::LostProjections { feature: String::new(), links: vec![first.clone()] }.in_feature("Outline").to_string();
+    assert_eq!(one, "Outline: projected face of Source (curves l1, l2, l3, l4) is lost; delete the projection or project it again");
+    let listed = "projected face of Source (curves l1, l2, l3, l4)";
+    assert_eq!(crate::lost_projection_parts(&one), Some(crate::LostProjectionsText { feature: "Outline", count: 1, listed, more: 0 }));
+    // Read back by its own wording: a sketch name holding ": " or a projection's kind, and the
+    // error of a feature built from the sketch, which puts its own words in front.
+    for feature in [
+        "Base: top",
+        "sketch `Base: top` failed: Base: top",
+        "Base: projected top",
+        "Sketch3: included rim",
+        "sketch `projected outline` failed: projected outline",
+    ] {
+        let renamed = error.clone().to_string().replacen("Outline", feature, 1);
+        let read = crate::lost_projection_parts(&renamed).unwrap();
+        assert_eq!((read.feature, read.count, read.more), (feature, 5, 2), "{renamed}");
+        let one = one.replacen("Outline", feature, 1);
+        assert_eq!(crate::lost_projection_parts(&one), Some(crate::LostProjectionsText { feature, count: 1, listed, more: 0 }), "{one}");
+    }
+}
+
+/// A projection's label names its kind and lists its curves, four of them and then "…", or its
+/// points when it gives no curve; a link of each kind lost by name is named by its kind.
+#[test]
+fn a_lost_projection_is_labelled_by_its_kind_and_its_curves_or_points() {
+    let lost = |curves: &[&str], points: &[&str]| crate::LostProjection {
+        link: "j1".into(),
+        what: "projected face of Source".into(),
+        curves: curves.iter().map(|c| c.to_string()).collect(),
+        points: points.iter().map(|p| p.to_string()).collect(),
+        name: "shared:top".into(),
+    };
+    assert_eq!(lost(&["l1", "l2", "l3", "l4", "a1", "a2"], &["p1"]).label(), "projected face of Source (curves l1, l2, l3, l4, …)");
+    assert_eq!(lost(&["l1", "l2", "l3", "l4"], &[]).label(), "projected face of Source (curves l1, l2, l3, l4)");
+    assert_eq!(lost(&["l1"], &["p1", "p2"]).label(), "projected face of Source (curve l1)");
+    assert_eq!(lost(&[], &["p1"]).label(), "projected face of Source (point p1)");
+    assert_eq!(lost(&[], &["p1", "p2"]).label(), "projected face of Source (points p1, p2)");
+    assert_eq!(lost(&[], &[]).label(), "projected face of Source");
+
+    let doc = Document::default();
+    let mut initial = ModelState::default();
+    initial.bodies.push(named_box("Source", 20., 10.));
+    let plane = Plane::XY.offset(20.);
+    let source = LinkSource::Face { body: "Source".into(), at: Vec3::new(1., 1., 10.) };
+    let resolved = crate::project::resolve(&doc, &BTreeMap::new(), &initial, &plane, LinkKind::Project, &source).unwrap();
+    for (kind, what) in [
+        (LinkKind::Project, "projected face of Source"),
+        (LinkKind::Intersect, "intersected face of Source"),
+        (LinkKind::Include, "included face of Source"),
+    ] {
+        let mut sketch = Sketch::default();
+        sketch.add_link(kind, source.clone(), &resolved.geom).unwrap();
+        sketch.links[0].face_name = Some("shared:top".into());
+        let error = crate::project::refresh_links(&doc, &BTreeMap::new(), &ModelState::default(), &plane, &mut sketch).unwrap_err();
+        let crate::DocError::LostProjections { links, .. } = &error else { panic!("{kind:?}: {error}") };
+        assert_eq!(links.iter().map(|l| l.what.as_str()).collect::<Vec<_>>(), [what], "{kind:?}");
+        let text = error.in_feature("Outline").to_string();
+        assert_eq!(crate::lost_projection_parts(&text).map(|t| (t.feature, t.count)), Some(("Outline", 1)), "{text}");
+    }
 }
 
 #[test]
@@ -41,9 +306,9 @@ fn named_manual_projection_keeps_its_body_and_face_at_shared_boundaries() {
     let saved = sketch.clone();
     let mut missing = ModelState::default();
     missing.bodies.push(named_box("Control", 5., 10.));
-    // Its body gone, the named face finds nothing: the sketch fails, asking for it again.
+    // Its body gone, the named face finds nothing: the sketch fails, naming the projection.
     let error = crate::project::refresh_links(&doc, &BTreeMap::new(), &missing, &plane, &mut sketch).unwrap_err();
-    assert!(matches!(&error, crate::DocError::Reselect { reference, .. } if reference == "shared:top"), "{error}");
+    assert!(lost_one(&error, "shared:top"), "{error}");
     assert_eq!(sketch.curves, saved.curves);
     assert_eq!(sketch.points, saved.points);
     assert_eq!(sketch.links[0].id, link);
@@ -199,7 +464,7 @@ fn numbered_round_face_projection_recovers_the_whole_face() {
     let mut outside = doc.sketch(3).unwrap().clone();
     outside.links[0].source = LinkSource::Face { body: "Body1".into(), at: Vec3::new(-19.87, -2.3, 12.) };
     let error = crate::project::refresh_links(&doc, &BTreeMap::new(), &state, &Plane::YZ, &mut outside).unwrap_err();
-    assert!(matches!(&error, crate::DocError::Reselect { reference, .. } if reference == "F2:side:c1#1"), "{error}");
+    assert!(lost_one(&error, "F2:side:c1#1"), "{error}");
 }
 
 #[test]
@@ -369,6 +634,84 @@ fn an_edge_named_by_a_piece_of_a_face_that_is_whole_again_is_found() {
     assert!(crate::name_lookup::locate_edge(body, &gone, near).is_err(), "{gone}");
 }
 
+/// #18459: an edge picked on the start cap of a one-sided extrude is still found once an edit
+/// makes the extrude symmetric, on the cap at the end where the start cap lay, facing the same
+/// way: the low cap of an extrude that went along the sketch normal, the high cap of one that went
+/// against it. A symmetric extrude that does not know the way it went finds no `start` edge.
+#[test]
+fn an_edge_on_the_start_cap_is_found_when_the_extrude_becomes_symmetric() {
+    let evaluate = |doc: &Document| {
+        let mut model = crate::Model::new();
+        model.evaluate(doc);
+        model
+    };
+    let one_sided = |direction: &str| {
+        let doc = Document {
+            features: serde_json::from_value(serde_json::json!([
+                {
+                    "id": 1, "name": "Sketch1", "type": "sketch", "plane": {"name": "XY", "type": "origin"},
+                    "sketch": {
+                        "points": [
+                            {"fixed": true, "id": "origin", "pos": [0., 0.]},
+                            {"fixed": false, "id": "p1", "pos": [0., 0.]},
+                            {"fixed": false, "id": "p2", "pos": [10., 0.]},
+                            {"fixed": false, "id": "p3", "pos": [10., 16.1]},
+                            {"fixed": false, "id": "p4", "pos": [0., 16.1]}
+                        ],
+                        "curves": [
+                            {"a": 1, "b": 2, "construction": false, "id": "l1", "type": "line"},
+                            {"a": 2, "b": 3, "construction": false, "id": "l2", "type": "line"},
+                            {"a": 3, "b": 4, "construction": false, "id": "l3", "type": "line"},
+                            {"a": 4, "b": 1, "construction": false, "id": "l4", "type": "line"}
+                        ],
+                        "constraints": [],
+                        "counters": {"k": 0, "l": 4, "p": 4}
+                    }
+                },
+                {
+                    "id": 2, "name": "Extrude1", "type": "extrude", "body_names": ["Body1"],
+                    "extent": {"convention": "total_distance", "direction": direction, "distance": "6"},
+                    "operation": "new_body", "profiles": {"loops": [["l1", "l2", "l3", "l4"]], "type": "curves"}, "sketch": 1
+                }
+            ]))
+            .unwrap(),
+            ..Document::default()
+        };
+        crate::format::read(&doc.to_json()).unwrap()
+    };
+    // The start cap lies on the sketch plane, where the edge was picked.
+    let near = Vec3::new(0., 8.05, 0.);
+    for (direction, way, high) in [("positive", crate::Direction::Positive, false), ("negative", crate::Direction::Negative, true)] {
+        let doc = one_sided(direction);
+        let model = evaluate(&doc);
+        let state = model.state();
+        let names = crate::naming::edge_names(state.body("Body1").unwrap());
+        let picked = names.iter().find(|n| n.contains("F2:start") && n.contains("F2:side:l4")).expect("the side's edge on the start cap").clone();
+        // The edit makes it symmetric and records the way it went.
+        let old = doc.feature(2).unwrap().clone();
+        let mut new = old.clone();
+        if let crate::FeatureKind::Extrude { extent, .. } = &mut new.kind {
+            extent.direction = crate::Direction::Symmetric;
+        }
+        crate::keep_one_sided_direction(&model, &old, &mut new);
+        let crate::FeatureKind::Extrude { extent, .. } = &new.kind else { panic!("an extrude") };
+        assert_eq!(extent.one_sided_direction, Some(way), "{direction}");
+        let mut symmetric = doc.clone();
+        *symmetric.feature_mut(2).unwrap() = new.clone();
+        let model = evaluate(&symmetric);
+        let state = model.state();
+        let hit = crate::name_lookup::locate_edge(state.body("Body1").unwrap(), &picked, near).unwrap_or_else(|e| panic!("{picked}: {e}"));
+        assert_eq!(hit.point.z > 0.0, high, "{direction}: the edge on the cap facing the way the start cap did: {:?}", hit.point);
+        // Without the record no cap answers to `start`.
+        if let crate::FeatureKind::Extrude { extent, .. } = &mut symmetric.feature_mut(2).unwrap().kind {
+            extent.one_sided_direction = None;
+        }
+        let model = evaluate(&symmetric);
+        let state = model.state();
+        assert!(crate::name_lookup::locate_edge(state.body("Body1").unwrap(), &picked, near).is_err(), "{direction}: {picked}");
+    }
+}
+
 /// #13464: a mesh's flat patch outline drops a corner part way along a side, even when single
 /// precision has moved it off the line (as an STL's corners are), and when the loop starts there.
 #[test]
@@ -476,7 +819,7 @@ fn numbered_edge_projection_recovers_the_edge_between_whole_faces() {
     let mut elsewhere = saved;
     elsewhere.links[0].source = LinkSource::Edge { body: "Ring".into(), at: Vec3::new(0., -10., 5.) };
     let error = crate::project::refresh_links(&doc, &BTreeMap::new(), &state, &Plane::XY, &mut elsewhere).unwrap_err();
-    assert!(matches!(&error, crate::DocError::Reselect { reference, .. } if reference == numbered), "{error}");
+    assert!(lost_one(&error, numbered), "{error}");
 }
 
 /// A drafted face's edge is a circle seen at a slant: an ellipse. The sketch takes it as the
@@ -503,6 +846,10 @@ fn a_drafted_face_projects_its_edge_as_one_ellipse() {
     let source = LinkSource::Face { body: "Drafted".into(), at: Vec3::new(0.0, 0.0, 30.0) };
     let resolved = crate::project::resolve(&doc, &BTreeMap::new(), &initial, &plane, LinkKind::Project, &source).unwrap();
     // The edge comes to the sketch as one ellipse, not as the point set of a spline.
+    let [LinkGeom::Ellipse { c, major, minor }] = resolved.geom.as_slice() else { panic!("{:?}", resolved.geom) };
+    assert!(c.len() < 1e-10);
+    assert!((major.dist(*c) - 20.0 / angle.cos()).abs() < 1e-10);
+    assert!((minor - 20.0).abs() < 1e-10);
     assert!(
         resolved.geom.iter().any(|g| matches!(g, LinkGeom::Ellipse { .. })),
         "a drafted face's edge is an ellipse, not a point set: {:?}",
@@ -633,11 +980,17 @@ fn named_vertex_projection_moves_past_closer_neighbor_and_fails_when_removed() {
     // Plane::XZ has local y_dir = -Z, so z = 40 projects to local y = -40.
     assert!((pt.x - 10.0).abs() < 1e-6 && (pt.y + 40.0).abs() < 1e-6, "vertex followed to height 40: {pt:?}");
 
-    // If the top face is gone, the named vertex fails with Reselect instead of snapping elsewhere.
+    // If the top face is gone, the named vertex fails the sketch, named as a projected vertex with
+    // its point, instead of snapping elsewhere.
     let mut renamed = taller;
     renamed.bodies[0].names = crate::naming::NameCell::known(Arc::new(vec!["other".into(); 6]));
     let error = crate::project::refresh_links(&doc, &BTreeMap::new(), &renamed, &plane, &mut sketch).unwrap_err();
-    assert!(matches!(&error, crate::DocError::Reselect { reference, .. } if reference == &vertex_name), "{error}");
+    assert!(lost_one(&error, &vertex_name), "{error}");
+    let point = &sketch.points[sketch.link_points(&link_id)[0]].id;
+    assert_eq!(
+        error.to_string(),
+        format!("this sketch: projected vertex of Block (point {point}) is lost; delete the projection or project it again")
+    );
 }
 
 #[test]
@@ -649,3 +1002,79 @@ fn mesh_body_has_no_vertex_names() {
     );
     assert!(crate::naming::vertex_names(&mb).is_empty());
 }
+
+/// #17534: a construction plane of another component, projected onto a sketch, is brought
+/// into the sketch's frame: the projected line is the intersection of the two planes, and
+/// not a line parallel to it, in the plane's own frame.
+#[test]
+fn a_projected_plane_of_another_component_lands_where_the_two_planes_meet() {
+    // A body with two parallel faces: the midplane between them is the XZ plane at y = 10.
+    let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(20., 20., 20.)).unwrap();
+    let mut st = ModelState::default();
+    st.bodies.push(ModelBody::new("Case".into(), body, 1));
+    let faces = st.bodies[0].body.faces(0.01).unwrap();
+    let face_at = |y: f64| {
+        faces
+            .iter()
+            .find(|f| f.plane_normal.is_some_and(|n| n.dot(Vec3::Y).abs() > 0.99) && (f.centroid.y - y).abs() < 1e-6)
+            .map(|f| f.centroid)
+            .unwrap()
+    };
+    // The design: a part placed in the world, turned half about X and lifted 100 mm, and a
+    // construction plane in the root component, halfway between the body's two XZ faces.
+    let mut doc = Document::new("midplane");
+    doc.components.push(crate::Component { id: 7, name: "Part".into(), ..Default::default() });
+    doc.occurrences.push(crate::Occurrence {
+        id: 20,
+        component: 7,
+        parent: 0,
+        name: "Part".into(),
+        transform: PART_FRAME,
+        grounded: false,
+        expressed_moves: Vec::new(),
+        bom_type: None,
+    });
+    let mid = doc
+        .add_feature(
+            crate::FeatureKind::ConstructionPlane {
+                plane: PlaneRef::Midplane {
+                    a: Box::new(crate::construct::GeoRef::Face { at: face_at(0.), name: None }),
+                    b: Box::new(crate::construct::GeoRef::Face { at: face_at(20.), name: None }),
+                },
+            },
+            Some("Mid"),
+        )
+        .unwrap();
+    let vals = doc.param_values().0;
+    // The plane as it was built, in the root component's frame.
+    let built = doc.resolve_plane_in(&vals, &PlaneRef::Construction { feature: crate::FeatureId(mid), placement: None }, 0, 0, Some(&st)).unwrap();
+    assert!((built.origin.y - 10.).abs() < 1e-9, "the midplane is halfway between the two faces: {built:?}");
+    st.construct.push(crate::construct::Construct {
+        feature: mid,
+        name: "Mid".into(),
+        geom: crate::construct::ConstructGeom::Plane(built),
+        bodies: Vec::new(),
+    });
+    // The sketch stands in the part's frame: its own XY plane.
+    let resolved = crate::project::resolve_at(
+        &doc,
+        &vals,
+        &st,
+        &Plane::XY,
+        LinkKind::Project,
+        &LinkSource::Plane { name: "Mid".into() },
+        Some(&(7, PART_FRAME)),
+    )
+    .unwrap();
+    let LinkGeom::Line(a, b) = &resolved.geom[0] else { panic!("the plane projects to a line: {:?}", resolved.geom) };
+    // The part is turned half about X and lifted 100 mm, so the root's midplane at y = 10
+    // lies at y = 90 in the part's frame: the trace of the two planes is there.
+    assert!(
+        (a.y - 90.).abs() < 1e-9 && (b.y - 90.).abs() < 1e-9,
+        "the projected line is the intersection of the midplane and the sketch plane: {a:?} {b:?}"
+    );
+    assert!((a.x - b.x).abs() > 1e-9, "the projected line runs along the sketch plane: {a:?} {b:?}");
+}
+
+/// Where the part of the test above stands: turned half about X and lifted 100 mm.
+const PART_FRAME: crate::Mat = [[1.0, 0.0, 0.0, 0.0], [0.0, -1.0, 0.0, 0.0], [0.0, 0.0, -1.0, 0.0], [0.0, 100.0, 0.0, 1.0]];

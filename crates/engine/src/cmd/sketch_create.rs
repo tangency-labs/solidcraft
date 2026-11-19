@@ -13,7 +13,10 @@ macro_rules! text_style_doc {
     };
 }
 
-use super::sketch::{add_c, circumcircle, edit, ids_of, mark_construction, req_parg_in, slot_parts};
+use super::sketch::{
+    add_c, circumcircle, corner_arg, edit, ids_of, length_expr, mark_construction, place_point, req_parg_in, slot_parts, slot_width,
+    slot_width_dimension,
+};
 use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, num, req_vec2, str_, string_list};
@@ -101,7 +104,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&SLOT_CENTER_POINT_CONTRACT)
         .output(output_schema_for::<crate::schema::sketch_shapes::SlotResult>)
-        .params(concat!("center: slot centre, end: one arc centre, width; returns centre_line and middle", created_doc!())),
+        .params(concat!("center: slot centre, end: one arc centre, width: number or expression (an expression naming a parameter is a dimension driven by it); returns centre_line and middle", created_doc!())),
     CommandSpec::new("sketch.slot.arc_three_point", "Three Point Arc Slot", crate::checked!("sketch.slot.arc_three_point", arc_slot_three))
         .in_sketch_part()
         .at("SKETCH", "CREATE")
@@ -109,7 +112,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&ARC_SLOT_THREE_CONTRACT)
         .output(output_schema_for::<ArcSlotResult>)
-        .params(concat!("start, through, end: points on the centre arc, width; returns centre_arc and middle", created_doc!())),
+        .params(concat!("start, through, end: points on the centre arc, width: number or expression (an expression naming a parameter is a dimension driven by it); returns centre_arc and middle", created_doc!())),
     CommandSpec::new("sketch.slot.arc_center", "Center Point Arc Slot", crate::checked!("sketch.slot.arc_center", arc_slot_center))
         .in_sketch_part()
         .at("SKETCH", "CREATE")
@@ -117,7 +120,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&ARC_SLOT_CENTER_CONTRACT)
         .output(output_schema_for::<ArcSlotResult>)
-        .params(concat!("center, start: centre arc start, end: direction of the centre arc end (counter-clockwise) or sweep: degrees (0 < sweep < 360), width; returns centre_arc and middle", created_doc!())),
+        .params(concat!("center, start: centre arc start, end: direction of the centre arc end (counter-clockwise) or sweep: degrees (0 < sweep < 360), width: number or expression (an expression naming a parameter is a dimension driven by it); returns centre_arc and middle", created_doc!())),
     CommandSpec::new("sketch.ellipse", "Ellipse", crate::checked!("sketch.ellipse", ellipse))
         .in_sketch_part()
         .at("SKETCH", "CREATE")
@@ -126,7 +129,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&ELLIPSE_CONTRACT)
         .output(output_schema_for::<DrawResult>)
         .params(concat!(
-        "center, major: end of the major axis [x,y], minor: a point the ellipse passes through on the minor side [x,y] | minor_radius. Also adds its major and minor axes as construction lines through the centre (their ends: the major end and the point opposite it, and the two ends of the minor axis on the ellipse), held by midpoint, perpendicular and point-on-curve constraints, so a half-axis is the distance from the centre to an axis end and an axis line's length is a full axis; axes?: bool (default true; false: the ellipse alone, as the Ellipse tool draws it with Draw ellipses with their axes off)",
+        "center, major: end of the major axis [x,y] (a coordinate of either may be an expression over the design's parameters and the sketch's other points (\"p1.x\"): the point follows them), minor: a point the ellipse passes through on the minor side [x,y] | minor_radius: number or expression (an expression naming a parameter is a dimension driven by it). Also adds its major and minor axes as construction lines through the centre (their ends: the major end and the point opposite it, and the two ends of the minor axis on the ellipse), held by midpoint, perpendicular and point-on-curve constraints, so a half-axis is the distance from the centre to an axis end and an axis line's length is a full axis; axes?: bool (default true; false: the ellipse alone, as the Ellipse tool draws it with Draw ellipses with their axes off)",
         created_doc!()
     )),
     CommandSpec::new("sketch.spline.fit_point", "Fit Point Spline", crate::checked!("sketch.spline.fit_point", spline_fit))
@@ -144,7 +147,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&SPLINE_CONTROL_CONTRACT)
         .output(output_schema_for::<DrawResult>)
-        .params(concat!("points: control points (2…500), cubic", created_doc!())),
+        .params(concat!("points: control points (2…500), cubic; periodic?: boolean (default false): closes the control polygon into a loop (at least 4 points)", created_doc!())),
     CommandSpec::new("sketch.spline.control_point_5", "Control Point Spline (Degree 5)", crate::checked!("sketch.spline.control_point_5", spline_cv5))
         .in_sketch_part()
         .at("SKETCH", "CREATE")
@@ -152,7 +155,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&SPLINE_CONTROL_CONTRACT)
         .output(output_schema_for::<DrawResult>)
-        .params(concat!("points: control points (2…500), degree 5", created_doc!())),
+        .params(concat!("points: control points (2…500), degree 5; periodic?: boolean (default false): closes the control polygon into a loop (at least 6 points)", created_doc!())),
     CommandSpec::new("sketch.spline.insert_point", "Add Spline Point", crate::checked!("sketch.spline.insert_point", spline_insert_point))
         .icon("spline")
         .enabled(in_sketch)
@@ -486,15 +489,33 @@ pub(super) fn text_link<'a>(sk: &'a Sketch, entity: &str) -> Option<&'a str> {
 
 /// Transform a text source as a unit; generated outlines remain linked and editable.
 pub(super) fn move_text(sk: &mut Sketch, link: &str, translate: Vec2, rotation: f64, center: Vec2, copy: bool) -> Result<Vec<usize>> {
+    let (sin, cos) = rotation.sin_cos();
+    let place = move |q: Vec2| {
+        let q = q - center;
+        center + Vec2::new(q.x * cos - q.y * sin, q.x * sin + q.y * cos) + translate
+    };
+    transform_text(sk, "sketch.move", link, &place, rotation, 1.0, copy)
+}
+
+/// Place a text source as a unit: its baseline start goes where `place` takes it, its angle
+/// turns by `rotation` and its height scales by `factor`. Generated outlines remain linked and
+/// editable.
+pub(super) fn transform_text(
+    sk: &mut Sketch,
+    cmd: &str,
+    link: &str,
+    place: &dyn Fn(Vec2) -> Vec2,
+    rotation: f64,
+    factor: f64,
+    copy: bool,
+) -> Result<Vec<usize>> {
     let Some(LinkSource::Text { text, at, height, angle, font, style, mut exprs }) = sk.link(link).map(|l| l.source.clone()) else {
-        return Err(bad("sketch.move", "the selected source is not text"));
+        return Err(bad(cmd, "the selected source is not text"));
     };
     if style.path.is_some() {
-        return Err(bad("sketch.move", "a text on a path follows its curve: move the curve, or take the text off it"));
+        return Err(bad(cmd, "a text on a path follows its curve: move the curve, or take the text off it"));
     }
-    let q = at - center;
-    let (sin, cos) = rotation.sin_cos();
-    let moved = center + Vec2::new(q.x * cos - q.y * sin, q.x * sin + q.y * cos) + translate;
+    let moved = place(at);
     // What the move changes is a number now, not the expression it was; the rest stays.
     if (moved.x - at.x).abs() > 1e-12 {
         exprs.x = None;
@@ -505,7 +526,10 @@ pub(super) fn move_text(sk: &mut Sketch, link: &str, translate: Vec2, rotation: 
     if rotation.abs() > 1e-12 {
         exprs.angle = None;
     }
-    let (at, angle) = (moved, angle + rotation);
+    if (factor - 1.0).abs() > 1e-12 {
+        exprs.height = None;
+    }
+    let (at, height, angle) = (moved, height * factor, angle + rotation);
     let geom = solidcraft_sketch::text_geometry_styled(font.as_deref(), &text, at, height, angle, &style, None)?;
     let source = LinkSource::Text { text, at, height, angle, font, style, exprs };
     let link = if copy {
@@ -513,7 +537,7 @@ pub(super) fn move_text(sk: &mut Sketch, link: &str, translate: Vec2, rotation: 
     } else {
         sk.set_link_source(link, source);
         if sk.update_link(link, &geom)? {
-            return Err(bad("sketch.move", "moving text must preserve its outline topology; edit the text source first"));
+            return Err(bad(cmd, "moving text must preserve its outline topology; edit the text source first"));
         }
         link.to_owned()
     };
@@ -653,7 +677,7 @@ fn joint_derivatives(sk: &Sketch, ci: usize, pi: usize, order: usize, leaving: b
 fn blend(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.blend_curve";
     let order = blend_order(p, cmd)?;
-    let on_sheet = s.open_drawing.is_some();
+    let on_sheet = s.sheet_sketching();
     if on_sheet && order > 2 {
         return Err(bad(cmd, "sheet sketches support G1/G2 blends; higher-order splines need their own bounded record contract"));
     }
@@ -756,10 +780,17 @@ fn infinite_line(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn ellipse(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.ellipse";
-    let (c, m) = (req_vec2(cmd, p, "center")?, req_vec2(cmd, p, "major")?);
+    // The centre and the major end follow the parameters a coordinate typed as an expression
+    // names, and a minor radius typed as one is a dimension driven by them, as for a circle.
+    // A coordinate may read another point's coordinate: it is worked out against the sketch.
+    let sk = sketch_store::read_for_command(s, p, cmd)?;
+    let ((c, ec), (m, em)) =
+        (corner_arg(&s.doc, &sk, p, "center", cmd, s.sheet_sketching())?, corner_arg(&s.doc, &sk, p, "major", cmd, s.sheet_sketching())?);
     let u = (m - c).normalized().ok_or_else(|| bad(cmd, "the major axis end must differ from the centre"))?;
     let a = c.dist(m);
-    let r = match (num(p, "minor_radius"), p.get("minor").and_then(crate::params::vec2)) {
+    let typed = if p.get("minor_radius").is_some_and(Value::is_string) { Some(length_expr(s, p, "minor_radius", cmd)?) } else { None };
+    let size = typed.as_ref().and_then(|(_, e)| e.clone());
+    let r = match (typed.map(|(r, _)| r).or_else(|| num(p, "minor_radius")), p.get("minor").and_then(crate::params::vec2)) {
         (Some(r), _) => r,
         (None, Some(q)) => {
             // Minor radius so the ellipse passes through q.
@@ -781,13 +812,21 @@ fn ellipse(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Value::Bool(b)) => *b,
         Some(_) => return Err(bad(cmd, "`axes` must be true or false")),
     };
-    let (out, info) = edit(s, p, cmd, false, |sk, _| {
+    let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let ci = sk.add_point(c, None)?;
         let mi = sk.add_point(m, None)?;
+        place_point(sk, Some(&ci), ec);
+        place_point(sk, Some(&mi), em);
         let e = sk.add_curve(CurveKind::Ellipse { c: ci, m: mi, r }, None)?;
         mark_construction(sk, &[e], p);
+        let mut cons = Vec::new();
+        if let Some(expr) = &size {
+            let unit = solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string();
+            let pname = doc.new_model_param(expr, &unit);
+            cons.push(sk.add_constraint(ConstraintKind::Radius { c: e, value: r }, Some(pname))?);
+        }
         if !axes {
-            return Ok((ids_of(sk, &[e]), Vec::new()));
+            return Ok((ids_of(sk, &[e]), cons));
         }
         // Its major and minor axes, construction lines through the centre that bisects both:
         // the major one ends at the major end, the minor one is perpendicular to it and ends
@@ -801,12 +840,12 @@ fn ellipse(s: &mut Session, p: &Value) -> Result<Value> {
                 cu.construction = true;
             }
         }
-        let cons = vec![
+        cons.extend([
             add_c(sk, ConstraintKind::Midpoint { p: ci, l: major })?,
             add_c(sk, ConstraintKind::Midpoint { p: ci, l: minor })?,
             add_c(sk, ConstraintKind::Perpendicular { a: minor, b: major })?,
             add_c(sk, ConstraintKind::PointOnCurve { p: n1, c: e })?,
-        ];
+        ]);
         Ok((ids_of(sk, &[e]), cons))
     })?;
     drawn(out, info)
@@ -833,19 +872,20 @@ fn point_list(sk: &mut Sketch, doc: &solidcraft_doc::Document, p: &Value, cmd: &
 }
 
 fn spline(s: &mut Session, p: &Value, cmd: &str, control: bool, degree: u8) -> Result<Value> {
-    let on_sheet = s.open_drawing.is_some();
+    let on_sheet = s.sheet_sketching();
     let periodic = match p.get("periodic") {
         None => false,
         Some(Value::Bool(v)) => *v,
         _ => return Err(bad(cmd, "periodic must be boolean")),
     };
-    if periodic && (control || degree != 3) {
+    if periodic && !control && degree != 3 {
         return Err(bad(cmd, "periodic mode requires a cubic fit spline"));
     }
     let p = &super::sketch_project::snap_points(s, p, cmd)?;
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let mut pts = point_list(sk, doc, p, cmd, on_sheet)?;
         if periodic
+            && !control
             && sk.point(*pts.first().ok_or_else(|| bad(cmd, "missing first point"))?)
                 != sk.point(*pts.last().ok_or_else(|| bad(cmd, "missing last point"))?)
         {
@@ -973,7 +1013,7 @@ fn spline_reverse(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn conic(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.conic";
-    let on_sheet = s.open_drawing.is_some();
+    let on_sheet = s.sheet_sketching();
     let rho = num(p, "rho").unwrap_or(0.5);
     if !(rho > 1e-6 && rho < 1.0 - 1e-6) {
         return Err(bad(cmd, "`rho` must be between 0 and 1"));
@@ -1001,7 +1041,7 @@ fn conic(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn midpoint_line(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.line.midpoint";
-    let on_sheet = s.open_drawing.is_some();
+    let on_sheet = s.sheet_sketching();
     let end = req_vec2(cmd, p, "end")?;
     let p = &super::sketch_project::snap_points(s, p, cmd)?;
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
@@ -1133,7 +1173,7 @@ pub fn tangent_arc_starts_at(sk: &Sketch, start: &str) -> bool {
 
 fn arc_tangent(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.arc.tangent";
-    let on_sheet = s.open_drawing.is_some();
+    let on_sheet = s.sheet_sketching();
     // An id ends the arc on that point, so a chain can close; coordinates make a new point.
     let end_ref = p.get("end").and_then(Value::as_str);
     let at = if end_ref.is_some() { None } else { Some(req_vec2(cmd, p, "end")?) };
@@ -1237,7 +1277,7 @@ fn tangent_curves(sk: &Sketch, p: &Value, cmd: &str, n: usize) -> Result<Vec<usi
 /// A circle tangent to `curves`, solved from a start near `near`.
 fn tangent_circle(s: &mut Session, p: &Value, cmd: &str, n: usize, radius: Option<String>) -> Result<Value> {
     let near = req_vec2(cmd, p, "near")?;
-    let on_sheet = s.open_drawing.is_some();
+    let on_sheet = s.sheet_sketching();
     let (out, info) = edit(s, p, cmd, true, |sk, doc| {
         let cs = tangent_curves(sk, p, cmd, n)?;
         let r0 = match &radius {
@@ -1289,15 +1329,11 @@ fn circle_three_tan(s: &mut Session, p: &Value) -> Result<Value> {
     tangent_circle(s, p, "sketch.circle.three_tangent", 3, None)
 }
 
-fn width(p: &Value, cmd: &str) -> Result<f64> {
-    num(p, "width").filter(|w| *w > 1e-9).ok_or_else(|| bad(cmd, "`width` must be positive"))
-}
-
 fn slot_center_point(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.slot.center_point";
     let (c, e) = (req_vec2(cmd, p, "center")?, req_vec2(cmd, p, "end")?);
-    let w = width(p, cmd)?;
-    reply(slot_parts(s, p, cmd, c * 2.0 - e, e, w)?)
+    let (w, driven) = slot_width(s, p, cmd)?;
+    reply(slot_parts(s, p, cmd, c * 2.0 - e, e, w, driven.as_deref())?)
 }
 
 /// Arc slot around `o` (centre-line radius `r`) from angle `t0` sweeping `sweep` (> 0).
@@ -1306,7 +1342,9 @@ fn slot_center_point(s: &mut Session, p: &Value) -> Result<Value> {
 /// construction chords to both cap centres held equal, so it stays halfway along the arc however
 /// the slot is edited or dragged. On the arc's circle equal chords leave two places (the middle
 /// and the point opposite); the solver keeps the one it is drawn at. The middle adds no freedom.
-fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, sweep: f64, w: f64) -> Result<Value> {
+/// `width` is the slot's width and, when it names parameters, its expression ([`slot_width`]).
+fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, sweep: f64, width: (f64, Option<String>)) -> Result<Value> {
+    let (w, driven) = width;
     let h = w / 2.0;
     if h >= r {
         return Err(bad(cmd, "the slot is wider than its centre arc's diameter"));
@@ -1318,7 +1356,7 @@ fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, swe
     let at = |t: f64, rr: f64| o + Vec2::from_angle(t) * rr;
     let mut centre_arc = None;
     let mut middle = None;
-    let (out, info) = edit(s, p, cmd, false, |sk, _| {
+    let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let oc = sk.add_point(o, None)?;
         let ps = sk.add_point(at(t0, r), None)?;
         let pe = sk.add_point(at(t1, r), None)?;
@@ -1352,6 +1390,7 @@ fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, swe
             }
         }
         cons.push(add_c(sk, ConstraintKind::Equal { a: to_s, b: to_e })?);
+        cons.extend(slot_width_dimension(sk, doc, cap_e, w, driven.as_deref())?);
         middle = sk.points.get(mid).map(|q| q.id.clone());
         Ok((ids_of(sk, &[outer, cap_e, inner, cap_s]), cons))
     })?;
@@ -1361,7 +1400,7 @@ fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, swe
 fn arc_slot_three(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.slot.arc_three_point";
     let (a, t, b) = (req_vec2(cmd, p, "start")?, req_vec2(cmd, p, "through")?, req_vec2(cmd, p, "end")?);
-    let w = width(p, cmd)?;
+    let w = slot_width(s, p, cmd)?;
     let (o, r) = circumcircle(a, t, b).ok_or_else(|| bad(cmd, "the points are collinear"))?;
     let ang = |q: Vec2| (q - o).angle();
     let span = |from: f64, to: f64| (to - from).rem_euclid(std::f64::consts::TAU);
@@ -1373,7 +1412,7 @@ fn arc_slot_three(s: &mut Session, p: &Value) -> Result<Value> {
 fn arc_slot_center(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.slot.arc_center";
     let (o, a) = (req_vec2(cmd, p, "center")?, req_vec2(cmd, p, "start")?);
-    let w = width(p, cmd)?;
+    let w = slot_width(s, p, cmd)?;
     let r = o.dist(a);
     if r < 1e-9 {
         return Err(bad(cmd, "the points must differ from the centre"));
