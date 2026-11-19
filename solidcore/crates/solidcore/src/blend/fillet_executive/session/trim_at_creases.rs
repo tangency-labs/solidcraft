@@ -112,13 +112,25 @@ fn smos_min(a: f64, b: f64) -> f64 {
 
 /// `SmFilletSolver::IsTangentEdge` (the fork's bacd0bb): whether the two faces at the
 /// manifold edge `e` meet tangentially there (`sm_TestManifoldTangentRollover`).
-fn is_tangent_edge(k: &Kernel, b: &mut Brep, e: EdgeId, tangency_tol_rad: f64) -> Result<bool> {
+fn is_tangent_edge(
+    k: &Kernel,
+    b: &mut Brep,
+    e: EdgeId,
+    parameter: f64,
+    tangency_tol_rad: f64,
+) -> Result<bool> {
     if !edge::is_manifold(b, e)? {
         return Ok(false);
     }
     Ok(
-        crate::blend::fillet_solver::p1::test_manifold_tangent_rollover(k, b, e, tangency_tol_rad)?
-            .0,
+        crate::blend::fillet_solver::p1::test_manifold_tangent_rollover_at(
+            k,
+            b,
+            e,
+            parameter,
+            tangency_tol_rad,
+        )?
+        .0,
     )
 }
 
@@ -901,7 +913,7 @@ fn pieces_in_face_to_ends(
     tol: f64,
     pieces: &mut Vec<Curve>,
     along: &mut Vec<(Curve, bool)>,
-) -> Result<()> {
+) -> Result<Vec<(EdgeId, f64)>> {
     let natural = crease.natural_interval();
     let runs = face::p2::classify_free_curve_on_face(k, b, f, crease, natural, tol, true)?;
     // which runs a piece was run on over
@@ -978,7 +990,17 @@ fn pieces_in_face_to_ends(
         }
         along.push((piece, taken));
     }
-    Ok(())
+    Ok(runs
+        .iter()
+        .flat_map(|run| {
+            [
+                run.start.1.zip(run.start_edge_param),
+                run.end.1.zip(run.end_edge_param),
+            ]
+            .into_iter()
+            .flatten()
+        })
+        .collect())
 }
 
 /// #17673: the pieces of the crease `crease` (on face `f` of `target`) that lie inside the
@@ -1623,15 +1645,21 @@ impl FilletSession<'_> {
         let mut faces_of: BTreeMap<FilletObject, Vec<(FilletGeomId, Option<FaceId>)>> =
             BTreeMap::new();
         let mut approx = Vec::new();
-        let mut tangency = 0.0;
+        let mut tangency = Vec::new();
         let mut blended_edges: Vec<EdgeId> = Vec::new();
         for &solver in &solvers {
             let FilletObject::Solver(id) = solver else {
                 return Err(invalid("object is not a solver"));
             };
-            let base = self.objects.solver(id)?.base();
+            let active_solver = self.objects.solver(id)?;
+            let base = active_solver.base();
             approx.push(base.approx_tol_3d);
-            tangency = smos_max(tangency, base.tangency_tolerance());
+            let budget = if let Some(offsets) = active_solver.constant_offsets()? {
+                base.constant_offset_rollover_tolerance(k, self.objects.target, offsets)
+            } else {
+                base.tangency_tolerance()
+            };
+            tangency.push(budget);
             let eu = base
                 .edgeuse(0)?
                 .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
@@ -1759,7 +1787,7 @@ impl FilletSession<'_> {
             &faces_of,
             &blended_edges,
             &approx,
-            tangency,
+            &tangency,
             &section_ends,
             &mut note,
         );
@@ -1783,7 +1811,7 @@ impl FilletSession<'_> {
         faces_of: &BTreeMap<FilletObject, Vec<(FilletGeomId, Option<FaceId>)>>,
         blended_edges: &[EdgeId],
         approx: &[f64],
-        tangency: f64,
+        tangency: &[f64],
         section_ends: &[SectionEnd],
         note: &mut Option<Refusal>,
     ) -> Result<()> {
@@ -1873,6 +1901,13 @@ impl FilletSession<'_> {
         // WR-717: the body's edges those creases stand for
         let mut crease_edges: Vec<EdgeId> = Vec::new();
         for s in crate::topology::brep::p1::faces(&sheet, None)? {
+            // Each round uses its own section budget; a shared corner must meet all.
+            let tangent_budget = if let Some(&i) = round_of.get(&s) {
+                tangency.get(i).copied()
+            } else {
+                tangency.iter().copied().reduce(f64::min)
+            }
+            .ok_or_else(|| SolidError::blend_missing(OP, "the sheet face's tangency budget"))?;
             let mut sheet_box =
                 crate::query::face::p1::calculate_bounding_box(k, &sheet, s, false)?;
             sheet_box.expand_absolute(on_tol);
@@ -1947,8 +1982,9 @@ impl FilletSession<'_> {
                 // each crease where it lies inside both faces
                 let mut in_face = Vec::new();
                 let mut along = Vec::new();
+                let mut seam_events = Vec::new();
                 for c in &found {
-                    pieces_in_face_to_ends(
+                    seam_events.extend(pieces_in_face_to_ends(
                         k,
                         c,
                         self.objects.target,
@@ -1956,7 +1992,7 @@ impl FilletSession<'_> {
                         tol,
                         &mut in_face,
                         &mut along,
-                    )?;
+                    )?);
                 }
                 // Not the fork's (WR-717, #2385): a crease that runs along an edge of the
                 // face, within tolerance, is that edge. The sheet is split along it as along
@@ -1990,12 +2026,18 @@ impl FilletSession<'_> {
                     // rolls on) at a sharp edge. One that runs on from it tangentially (a
                     // round already on the face) is no cliff: the rail would roll over
                     // onto it, and the ball does not fit between.
-                    for e in face::p4::edges(self.objects.target, f, None, false, None)? {
+                    for (e, parameter) in seam_events {
                         for g in edge::faces(self.objects.target, e, None)? {
                             if g != f
                                 && supports.contains(&g)
                                 && rolled_on.contains(&g)
-                                && is_tangent_edge(k, self.objects.target, e, tangency)?
+                                && is_tangent_edge(
+                                    k,
+                                    self.objects.target,
+                                    e,
+                                    parameter,
+                                    tangent_budget,
+                                )?
                             {
                                 // the fork's NoteFitOnFace(g) (49f393d, WR-696)
                                 let face =

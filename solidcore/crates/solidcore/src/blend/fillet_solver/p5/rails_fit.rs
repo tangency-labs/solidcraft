@@ -32,7 +32,7 @@ use super::{RailClassificationContext, OP};
 use crate::blend::fillet_classification::FilletClassObject;
 use crate::blend::fillet_geom::p1::{FilletBrep, FilletGeomType};
 use crate::blend::fillet_solver::p1::{
-    test_manifold_tangent_rollover, FilletSolver, FilletSolverOps,
+    test_manifold_tangent_rollover_at, FilletSolver, FilletSolverOps,
 };
 use crate::curve::curve::Curve;
 use crate::error::{EntityRef, Result, SolidError};
@@ -51,7 +51,7 @@ use crate::topology::{edge, edgeuse::p1 as eu, Brep, EdgeId, FaceId};
 /// What [`FilletSolver::rails_fit_their_faces_judged_with_ops`] finds of a solver's rails
 /// (the fork's `RailsFitTheirFaces(rbFit, rbRollsOver, rbIntoMaterial)`).
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(clippy::struct_excessive_bools)] // the fork's three out-flags and one judgement of the same run
+#[allow(clippy::struct_excessive_bools)] // the fork's out-flags and the same runs' wrap/material judgements
 pub struct RailsFit {
     /// `rbFit`: every rail stays on its face (`false` = a rail leaves its face between
     /// the filleted edge's ends, or is nowhere on it).
@@ -61,15 +61,22 @@ pub struct RailsFit {
     /// `rbIntoMaterial`: a rail that leaves its face runs on inside the body (judged only
     /// when asked; `false` otherwise).
     pub into_material: bool,
+    /// Every judged exit and return is locally concave at its classified parameter.
+    /// False when material was not judged or a boundary was not classified.
+    pub boundaries_into_material: bool,
     /// Not upstream (#10876): for each run of a rail off its face that makes `fit` false,
     /// the edge it leaves the face across (`None` where it leaves at no classified edge, or
     /// a rail nowhere on its face), in the order found: where the blend overflows, for the
     /// blend corner's Roll-over's second pass to tell an overflow across the cliff at V.
     pub left_across: Vec<Option<EdgeId>>,
+    /// The classified return boundary of each judged off-face run between two on-face
+    /// stretches. Kept separate so the corner Roll-over retains its exit-only contract.
+    pub return_across: Vec<Option<EdgeId>>,
     /// Not the fork's (tangency-labs/solidcore#2175): a closed rail leaves its face past
     /// one end of the filleted edge and comes back onto it past the other, round the far
-    /// side of the rail. The face is smaller than the blend beyond both ends, not cut off
-    /// by a cliff between them.
+    /// side of the rail. An open edge's face is smaller than the blend beyond both ends;
+    /// on a closed edge the labels instead refer to its periodic seam. Only a certified
+    /// concave crash on a closed edge may trim such a run at both boundaries.
     pub wraps_past_both_ends: bool,
 }
 
@@ -137,6 +144,32 @@ pub fn is_concave_edge(k: &Kernel, target: &mut Brep, edge_id: EdgeId) -> Result
             "the edge has no material edge use",
         )),
     }
+}
+
+/// The material-side radial-sector test at an actual crossing, rather than the
+/// whole-edge samples: a spline seam can change convexity along its length.
+fn is_concave_edge_at(
+    k: &Kernel,
+    target: &mut Brep,
+    edge_id: EdgeId,
+    parameter: f64,
+) -> Result<bool> {
+    if !edge::is_manifold(target, edge_id)? {
+        return Ok(false);
+    }
+    let Some(use_) = material_use(target, edge_id)? else {
+        return Ok(false);
+    };
+    let radial = eu::radial(target, use_)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the material edge use's radial"))?;
+    let options = eu2::StepOffOptions::default();
+    let first = eu2::evaluate_binormal_step_off(k, target, use_, parameter, 0.0, &options)?;
+    let second = eu2::evaluate_binormal_step_off(k, target, radial, parameter, 0.0, &options)?;
+    // The same sign criterion as IsConvexRadialSector at zero angular tolerance.
+    Ok(
+        !(second.face_normal.dot(first.binormal) > -crate::math::EFF_ZERO
+            && first.face_normal.dot(second.binormal) > -crate::math::EFF_ZERO),
+    )
 }
 
 /// Whether the edge bounds material: a use of it in a loop of a shell of a region that is
@@ -582,7 +615,9 @@ impl FilletSolver {
         let mut fit = true;
         let mut rolls_over = false;
         let mut into_material = false;
+        let mut boundaries_into_material = judge_material;
         let mut left_across = Vec::new();
+        let mut return_across = Vec::new();
         let mut wraps_past_both_ends = false;
         // the filleted edge (a rail that leaves its face across it is not leaving past a cliff)
         let filleted = match solver.solver().edgeuse(0)? {
@@ -598,7 +633,9 @@ impl FilletSolver {
                     fit: true,
                     rolls_over: false,
                     into_material: false,
+                    boundaries_into_material: false,
                     left_across: Vec::new(),
+                    return_across: Vec::new(),
                     wraps_past_both_ends: false,
                 });
             }
@@ -762,14 +799,45 @@ impl FilletSolver {
                         continue;
                     }
                     if let Some(side) = side {
-                        let tolerance = solver.solver().tangency_tolerance;
-                        if test_manifold_tangent_rollover(k, target, side, tolerance)?.0 {
+                        let tolerance = solver.rollover_tolerance(k, target)?;
+                        if test_manifold_tangent_rollover_at(
+                            k,
+                            target,
+                            side,
+                            leave.t_param(),
+                            tolerance,
+                        )?
+                        .0
+                        {
                             rolls_over = true;
                             continue; // a rollover onto the next face
                         }
                     }
                     fit = false;
                     left_across.push(side);
+                    let leaves_into_material = judge_material
+                        && match side {
+                            Some(edge) => is_concave_edge_at(k, target, edge, leave.t_param())?,
+                            None => false,
+                        };
+                    boundaries_into_material &= leaves_into_material;
+                    if j > 0 && j_last + 1 < n {
+                        let returns_across = match (last.end.point_class(), last.end.object()) {
+                            (PointClassType::Edge, Some(object)) => match object.target_entity()? {
+                                EntityRef::Edge(edge) => Some(edge),
+                                _ => None,
+                            },
+                            _ => None,
+                        };
+                        boundaries_into_material &= judge_material
+                            && match returns_across {
+                                Some(edge) => {
+                                    is_concave_edge_at(k, target, edge, last.end.t_param())?
+                                }
+                                None => false,
+                            };
+                        return_across.push(returns_across);
+                    }
                     // only a run that is itself judged off its face (not one passed over
                     // above as trimmed, tangent at the filleted edge or rolled over)
                     if wraps {
@@ -777,8 +845,8 @@ impl FilletSolver {
                     }
                     if judge_material {
                         // the edge it leaves across (or the face's edge nearest where it leaves)
-                        let inside = if let Some(side) = side {
-                            is_concave_edge(k, target, side)?
+                        let inside = if side.is_some() {
+                            leaves_into_material
                         } else {
                             let leave_point = curve.evaluate_point(k, d_leave)?;
                             inside_material(k, target, face, leave_point)?
@@ -790,6 +858,7 @@ impl FilletSolver {
                 }
                 if !on_face {
                     fit = false;
+                    boundaries_into_material = false;
                     left_across.push(None);
                     if judge_material {
                         // the rail's point nearest the middle of the filleted edge
@@ -824,7 +893,9 @@ impl FilletSolver {
             fit,
             rolls_over,
             into_material,
+            boundaries_into_material,
             left_across,
+            return_across,
             wraps_past_both_ends,
         })
     }

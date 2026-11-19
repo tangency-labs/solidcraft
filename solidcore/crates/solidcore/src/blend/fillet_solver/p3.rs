@@ -1086,7 +1086,7 @@ fn edge_object(
 /// `pCurve->GlobalPointSolve(crIvl, SM_SO_MINIMIZE, crPnt, SM_EFF_ZERO_SQRT, NULL, NULL,
 /// SM_SR_SINGLE, rSolutions)`: the parameter of the first solution, `None` when there
 /// is none. With `ignore_failure` (`SE(...)`) a failed solve finds nothing.
-fn drop_param(
+pub(crate) fn drop_param(
     k: &Kernel,
     curve: &Curve,
     interval: &Extent1d,

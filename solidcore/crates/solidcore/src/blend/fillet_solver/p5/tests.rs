@@ -410,7 +410,7 @@ impl RecoveryOps for Script {
     fn trim_rails(&mut self, _: &mut Recovery<'_>, _: FilletGeomId) -> Result<()> {
         self.call("trim")
     }
-    fn tangent(&mut self, _: &mut Recovery<'_>, _: EdgeId) -> Result<bool> {
+    fn tangent(&mut self, _: &mut Recovery<'_>, _: EdgeId, _: Point3) -> Result<bool> {
         self.call("tangent")?;
         Ok(true)
     }

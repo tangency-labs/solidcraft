@@ -2729,6 +2729,32 @@ pub trait SolverGeometryAccess<O: ClassObject + SolutionObject + Ord> {
         let _ = (k, solver, left_across);
         Ok(false)
     }
+    /// Whether a fixed-offset solver's every off-face rail run enters material across
+    /// classified concave exit and return seams. Unknown boundaries, varying offsets
+    /// and rails wholly off their support cannot establish this. A wrapped run also
+    /// requires a topologically closed filleted edge.
+    ///
+    /// # Errors
+    /// Those of the manifold/material-side tests.
+    fn geometry_overflows_into_material(
+        &mut self,
+        k: &mut Kernel,
+        solver: O,
+        left_across: &[Option<crate::topology::EdgeId>],
+        return_across: &[Option<crate::topology::EdgeId>],
+        wraps: bool,
+        boundaries_into_material: bool,
+    ) -> Result<bool> {
+        let _ = (
+            k,
+            solver,
+            left_across,
+            return_across,
+            wraps,
+            boundaries_into_material,
+        );
+        Ok(false)
+    }
     /// The fork's mitred-pair test of the overflow-first stop (WR-634,
     /// tangency-labs/smlib@9ba2b12): for an Nx2 corner whose `IsMitre` is set, the edges
     /// of its two filleted edge uses (`GetFilletedEdgeuses`), in order; `None` for any
@@ -3116,8 +3142,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     /// together with a rail rolling over a tangent edge; an overflow with the global
     /// merge on (a fillet end on more than one face).
     ///
-    /// An accepted overflow is built by the session's `DoFilleting`, which subtracts the
-    /// region the blends remove (`SubtractRemovalRegion`).
+    /// A fixed-offset concave round entering an adjoining concave wall is accepted
+    /// when all exits have that classification and its end sections fit. Accepted
+    /// overflows use the session's crease trim on the original blend sheet.
     ///
     /// # Errors
     /// The refusal as `SM_ERR`, noted in the error info; those of the checks.
@@ -3132,6 +3159,8 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         // Not upstream (#10876): the concave overflow of the Roll-over's second pass across
         // the cliff, a blend whose edge ends at V: accepted, trimmed at the creases
         let mut rolled_overflow = false;
+        let mut concave_crash = false;
+        let mut takes_overflow = false;
         let mut round_into_material = false;
         let mut rolls_over = false;
         let mut wraps = false;
@@ -3143,13 +3172,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             if judged.rolls_over {
                 rolls_over = true;
             }
-            if judged.wraps_past_both_ends {
-                wraps = true;
-            }
             // the fork's tangency-labs/smlib@a307480: an end section that runs off its end
             // face overflows it the same way
-            let fit = judged.fit && access.geometry_end_sections_fit(k, solver, self)?;
-            if fit {
+            let mut end_fit = judged.fit && access.geometry_end_sections_fit(k, solver, self)?;
+            if judged.fit && end_fit {
                 continue;
             }
             overflow = true;
@@ -3157,26 +3183,52 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             if let Some(edge) = access.geometry_overflow_edge(solver)? {
                 overflowing.push(edge);
             }
-            if access.geometry_blend_adds_material(k, solver)? {
+            let adds_material = access.geometry_blend_adds_material(k, solver)?;
+            takes_overflow |= !adds_material;
+            if adds_material && !judged.fit {
+                end_fit = access.geometry_end_sections_fit(k, solver, self)?;
+            }
+            let crashes = adds_material
+                && judged.into_material
+                && !judged.rolls_over
+                && end_fit
+                && access.geometry_overflows_into_material(
+                    k,
+                    solver,
+                    &judged.left_across,
+                    &judged.return_across,
+                    judged.wraps_past_both_ends,
+                    judged.boundaries_into_material,
+                )?;
+            wraps |= judged.wraps_past_both_ends && !crashes;
+            if crashes {
+                // The original sheet intersects each adjoining concave face: trim that
+                // sheet at the creases, rather than retracing it as a tangent rollover.
+                concave_crash = true;
+            } else if adds_material {
                 // the event's only where its rails leave across the cliff's rim at V and its
                 // end sections stay on their end faces (an end section's overflow is not
                 // located, so it is never taken for the event's)
                 if self.roll_over_pass
                     && access.geometry_overflows_at_roll_over(k, solver, &judged.left_across)?
-                    && access.geometry_end_sections_fit(k, solver, self)?
+                    && end_fit
                 {
                     rolled_overflow = true;
                 } else {
                     concave_overflow = true;
                 }
             }
-            if judged.into_material && !access.geometry_generator_is_linear(solver)? {
+            if judged.into_material && !crashes && !access.geometry_generator_is_linear(solver)? {
                 round_into_material = true;
             }
         }
+        // A supported concave crash does not authorize an unrelated convex overflow.
+        if concave_crash && takes_overflow {
+            concave = true;
+        }
         // whether the other blends add material (concave), when one overflows
         let mut index = 0;
-        while overflow && !concave_overflow && !rolled_overflow && !concave {
+        while overflow && !concave_overflow && !rolled_overflow && !concave_crash && !concave {
             let Some(solver) = self.solvers.get(index).copied() else {
                 break;
             };
@@ -3218,7 +3270,8 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         if overflow {
             // the Roll-over's concave chain (#10876) overflows the cliff at V by
             // construction (`rolled_overflow`, not refused): the material it adds past the
-            // cliff is trimmed at the creases; any other concave overflow is refused
+            // cliff is trimmed at the creases. A fixed-offset concave crash is also
+            // trimmed; other concave overflows are refused.
             let why = if wraps {
                 // not the fork's (tangency-labs/solidcore#2175): no cliff cuts the face off;
                 // it is smaller than the blend beyond both ends of the edge

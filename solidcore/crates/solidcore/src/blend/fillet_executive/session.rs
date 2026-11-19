@@ -5552,6 +5552,47 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
             .iter()
             .all(|side| side.is_some_and(|e| rim.contains(&e))))
     }
+    fn geometry_overflows_into_material(
+        &mut self,
+        _k: &mut Kernel,
+        solver: FilletObject,
+        left_across: &[Option<EdgeId>],
+        return_across: &[Option<EdgeId>],
+        wraps: bool,
+        boundaries_into_material: bool,
+    ) -> Result<bool> {
+        use crate::blend::fillet_solver::p5::edge_bounds_material;
+        let FilletObject::Solver(id) = solver else {
+            return Err(invalid("object is not a solver"));
+        };
+        if self.solver(id)?.constant_offsets()?.is_none()
+            || left_across.is_empty()
+            || !boundaries_into_material
+        {
+            return Ok(false);
+        }
+        if wraps {
+            let FilletObject::Topology(FilletBody::Target, EntityRef::Edge(edge)) =
+                self.geometry_edge(solver)?
+            else {
+                return Err(invalid("solver edge is not a target edge"));
+            };
+            if !crate::topology::edge::is_closed(self.target, edge)? {
+                return Ok(false);
+            }
+        }
+        for &side in left_across.iter().chain(return_across) {
+            let Some(edge) = side else {
+                return Ok(false);
+            };
+            if !crate::topology::edge::is_manifold(self.target, edge)?
+                || !edge_bounds_material(self.target, edge)?
+            {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
     fn geometry_mitred_corner_edges(
         &self,
         corner: FilletObject,

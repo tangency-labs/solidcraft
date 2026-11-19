@@ -168,7 +168,9 @@ impl ExecutiveAccess<Handle> for Access {
             fit: true,
             rolls_over: false,
             into_material: false,
+            boundaries_into_material: false,
             left_across: Vec::new(),
+            return_across: Vec::new(),
             wraps_past_both_ends: false,
         })
     }

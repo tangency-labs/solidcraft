@@ -410,10 +410,22 @@ continued cliff face, so the rim moves down.*
 Keeping the edge instead (the ball rolling on the rim, the spine continuing as the other offset
 meeting the rim's pipe) is a possible future option, never the default.
 
-Concave overflow is designed to keep the cliff edge instead: the added material is trimmed flush
-with the cliff faces continued, so it never passes the cliff, the default of T-FLEX on Parasolid
-[52]. This is the Roll-over's trim (§3.2), and the Roll-over build provides it; until it lands, no
-concave overflow is trimmed this way. Convex overflow still moves the sharp edge.
+A fixed-offset concave round whose rail runs into an adjoining concave wall is trimmed at its crease with
+that wall by the same construction. Every off-face run's exit and return must cross classified
+manifold edges locally concave at those parameters; whole-edge samples cannot establish this
+when a spline seam changes convexity. The end sections must fit their end faces. A run wrapping past both
+end labels is eligible only on a topologically closed edge, where those labels refer to the
+periodic seam rather than physical ends. The original round is cut on the
+adjoining wall; it is not retraced as a tangent rollover. At a fixed-offset rail crossing, support tangency
+requires the Join section-gap bound `2 o tan(a/2)` to be below the body's intersection tolerance,
+where `o` is the solver's largest absolute support offset and `a` the tangent-plane angle. The
+angular budget is also capped by the solver's angle tolerance.
+
+Concave overflow hanging over a cliff is designed to keep the cliff edge instead: the added
+material is trimmed flush with the cliff faces continued, so it never passes the cliff, the
+default of T-FLEX on Parasolid [52]. The Roll-over's trim (§3.2) provides this for its identified
+corner event; other concave hanging-cliff overflows remain refused. Convex overflow still moves
+the sharp edge.
 
 A round bigger than the wall it rolls on ends on the body's outline (#2541, opt-in
 `fillet_round_ends_on_outline`, WR-730). This applies where the round on the continued wall
