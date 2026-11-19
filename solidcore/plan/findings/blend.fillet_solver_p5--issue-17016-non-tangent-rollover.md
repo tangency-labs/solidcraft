@@ -212,3 +212,25 @@ record-reopened result with CheckAll. Engine job 1795055279.048636-fe7e02c6 also
 regressions (2 passed, 0 failed, exit 0), including the original 21-command
 six-section loft and save/reopen. Full command results are recorded in
 reports/issue-17016/validation.md.
+
+## Review follow-ups
+
+A rail that crosses a vertex shared with a tangent boundary edge. The face
+classification names an edge only for a run end that lies on an edge; an end
+classified at a vertex gave no seam event, so the crease refusal
+(`CreaseAcrossTangentEdge`) did not see the crossing, though the same crossing
+on the edge was refused. Each run now also records the vertex of an end
+classified at a vertex, and every edge that meets that vertex becomes a seam
+event at the vertex's own parameter on it (its interval start where it starts
+there, else its end). The refusal then tests each of those edges as before. The
+check is the existing tangent test; nothing new is tolerated. The regression is
+`a_crease_through_a_vertex_gives_a_seam_event_for_each_edge_there` in the
+existing `trim_at_creases.rs` tests: a crease through a box's top corner gives
+an event for each of the three edges there.
+
+A non-finite crossing evaluation. The concave test at a crossing was the
+negation of the convex check, so a NaN dot product came out as concave, which
+authorises crease trimming. The two dot products are now tested for finiteness
+first and a non-finite one is a typed blend failure. The regression is
+`a_non_finite_radial_sector_dot_is_refused_not_concave` in the existing
+`fillet_solver/p5.rs` tests.

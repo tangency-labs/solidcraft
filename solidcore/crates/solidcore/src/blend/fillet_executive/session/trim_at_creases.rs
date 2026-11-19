@@ -994,7 +994,7 @@ fn pieces_in_face_to_ends(
         }
         along.push((piece, taken));
     }
-    Ok(runs
+    let mut events: Vec<(EdgeId, f64)> = runs
         .iter()
         .flat_map(|run| {
             [
@@ -1004,7 +1004,24 @@ fn pieces_in_face_to_ends(
             .into_iter()
             .flatten()
         })
-        .collect())
+        .collect();
+    // A run end classified at a vertex names no edge, yet the rail crosses every edge that
+    // meets there: each is an event, at the parameter of the vertex on it.
+    for v in runs
+        .iter()
+        .flat_map(|run| [run.start_vertex, run.end_vertex])
+        .flatten()
+    {
+        for e in vertex::edges(b, v, None)? {
+            let at_start = edge::start_vertex(b, e)? == Some(v);
+            let range = edge::interval(b, e)?;
+            let parameter = if at_start { range.min() } else { range.max() };
+            if !events.contains(&(e, parameter)) {
+                events.push((e, parameter));
+            }
+        }
+    }
+    Ok(events)
 }
 
 /// #17673: the pieces of the crease `crease` (on face `f` of `target`) that lie inside the
@@ -2946,6 +2963,67 @@ mod tests {
         assert!(bound > tol, "the gate refuses: bound {bound} > tol {tol}");
         // and the S is not taken as a straight edge
         assert!(straight_ends(&k, &c).unwrap().is_none());
+    }
+
+    /// A crease that crosses the top of a box at a corner vertex ends its run at that vertex,
+    /// which names no edge. The seam events still carry every edge that meets the vertex, at
+    /// the vertex's parameter on it, so the tangent-edge refusal sees the crossing.
+    #[test]
+    fn a_crease_through_a_vertex_gives_a_seam_event_for_each_edge_there() {
+        use crate::primitive::api_primitives::create_box;
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Point3::ZERO, 40.0, 20.0, 10.0).unwrap();
+        let corner = Point3::new(40.0, 20.0, 10.0);
+        let v = b
+            .vertices()
+            .ids()
+            .find(|&v| b.vertex(v).unwrap().point.distance(corner) < 1e-9)
+            .unwrap();
+        // the top: the face at the corner whose two edges there both lie at z = 10
+        let top = edge_faces_at(&b, v)
+            .into_iter()
+            .find(|&f| {
+                let es = vertex::edges(&b, v, Some(f)).unwrap();
+                es.len() == 2
+                    && es.iter().all(|&e| {
+                        let other = edge::other_vertex(&b, e, Some(v)).unwrap().unwrap();
+                        (b.vertex(other).unwrap().point.z - 10.0).abs() < 1e-9
+                    })
+            })
+            .unwrap();
+        // in the plane of the top, from inside it through the corner and on past it
+        let crease: Curve =
+            Line::from_points(Point3::new(30.0, 10.0, 10.0), Point3::new(50.0, 30.0, 10.0), 3)
+                .into();
+        let (mut in_face, mut along) = (Vec::new(), Vec::new());
+        let events =
+            pieces_in_face_to_ends(&k, &crease, &mut b, top, TOL, &mut in_face, &mut along)
+                .unwrap();
+        for e in vertex::edges(&b, v, None).unwrap() {
+            let range = edge::interval(&b, e).unwrap();
+            let at = if edge::start_vertex(&b, e).unwrap() == Some(v) {
+                range.min()
+            } else {
+                range.max()
+            };
+            assert!(
+                events.contains(&(e, at)),
+                "edge {e:?} at the corner, parameter {at}, is a seam event: {events:?}"
+            );
+        }
+    }
+
+    /// The faces the edges at `v` lie on.
+    fn edge_faces_at(b: &Brep, v: crate::topology::VertexId) -> Vec<FaceId> {
+        let mut out = Vec::new();
+        for e in vertex::edges(b, v, None).unwrap() {
+            for f in edge::faces(b, e, None).unwrap() {
+                if !out.contains(&f) {
+                    out.push(f);
+                }
+            }
+        }
+        out
     }
 
     /// The leftover check refuses what a move left off and passes a body that holds

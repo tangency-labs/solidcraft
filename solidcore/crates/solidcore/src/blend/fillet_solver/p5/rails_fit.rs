@@ -166,10 +166,26 @@ fn is_concave_edge_at(
     let first = eu2::evaluate_binormal_step_off(k, target, use_, parameter, 0.0, &options)?;
     let second = eu2::evaluate_binormal_step_off(k, target, radial, parameter, 0.0, &options)?;
     // The same sign criterion as IsConvexRadialSector at zero angular tolerance.
-    Ok(
-        !(second.face_normal.dot(first.binormal) > -crate::math::EFF_ZERO
-            && first.face_normal.dot(second.binormal) > -crate::math::EFF_ZERO),
+    concave_from_dots(
+        second.face_normal.dot(first.binormal),
+        first.face_normal.dot(second.binormal),
     )
+}
+
+/// The sign test of [`is_concave_edge_at`] on its two dot products. A non-finite one is
+/// refused, not classified as concave.
+///
+/// # Errors
+///
+/// `SM_ERR` for a non-finite dot product.
+pub(super) fn concave_from_dots(first_dot: f64, second_dot: f64) -> Result<bool> {
+    if !first_dot.is_finite() || !second_dot.is_finite() {
+        return Err(SolidError::blend_failed(
+            OP,
+            "the radial sector test at a crossing is not finite",
+        ));
+    }
+    Ok(!(first_dot > -crate::math::EFF_ZERO && second_dot > -crate::math::EFF_ZERO))
 }
 
 /// Whether the edge bounds material: a use of it in a loop of a shell of a region that is
