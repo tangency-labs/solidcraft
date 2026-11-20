@@ -1113,6 +1113,7 @@ impl Model {
                 id: f.id,
                 name: f.name.clone(),
                 error: None,
+                error_code: None,
                 internal: false,
                 warning: r.get("warning").map(|w| text(Some(w))).transpose()?,
                 import_report: r
@@ -1169,6 +1170,7 @@ impl Model {
                     cache_key(f, r.fingerprint, local, ctx, &before),
                     CachedEval {
                         error: None,
+                        error_code: None,
                         warning: r.warning.clone(),
                         import_report: r.import_report.clone(),
                         repair: r.repair.clone(),

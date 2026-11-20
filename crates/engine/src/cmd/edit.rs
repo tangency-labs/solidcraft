@@ -1487,6 +1487,7 @@ fn inspect_feature(s: &mut Session, p: &Value) -> Result<Value> {
         omitted,
         inputs,
         error: r.and_then(|r| r.error.clone()),
+        error_code: r.and_then(|r| r.error_code.as_ref()).map(Into::into),
         warning: r.and_then(|r| r.warning.clone()),
     };
     reply(cmd, TimelineInspectResult { inspected: Inspected::Feature(Box::new(info)), param_warnings: Vec::new() })
@@ -1607,6 +1608,9 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     // Profiles picked by index or point are kept by their curves, as when the feature was made.
     if nf.kind.clone().profile_sels_mut() != f.kind.clone().profile_sels_mut() {
         super::features::stable_profiles(s, &mut nf.kind, false)?;
+    }
+    if nf.kind.constructor_profile_sketch() != f.kind.constructor_profile_sketch() {
+        nf.profile_frame = super::features::cross_component_profile_frame_for(s, nf.component, &nf.kind);
     }
     // A body Pattern's copy names move with the bodies they copy (#12114). Names the edit gives
     // are in the order the copies are made, as they always were: they are read that way, not
@@ -2679,6 +2683,9 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         slot.suppressed = old.suppressed;
         if let Some((names, _)) = cap_names {
             slot.body_names = names;
+        }
+        if old.kind.constructor_profile_sketch() != new.kind.constructor_profile_sketch() {
+            slot.profile_frame = new.profile_frame;
         }
         slot.kind = new.kind;
         slot.edge_refs = new.edge_refs;

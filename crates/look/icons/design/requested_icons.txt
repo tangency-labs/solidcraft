@@ -125,7 +125,6 @@ drawing_model_dimensions	false
 drawing_note	false
 drawing_parts_list	false
 drawing_parts_renumber	false
-drawing_print	false
 drawing_replace_model	false
 drawing_revision	false
 drawing_revision_table	false
@@ -225,6 +224,7 @@ panel_dock_bottom	false
 panel_dock_left	false
 panel_dock_right	false
 panel_float	false
+panel_popout	false
 panel_reset_height	false
 params	false
 paste	false

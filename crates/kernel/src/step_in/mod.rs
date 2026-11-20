@@ -1300,10 +1300,20 @@ impl Reader {
             let (u1, u2) = (self.units_of(r1), self.units_of(r2));
             if ope.name() == "ITEM_DEFINED_TRANSFORMATION" {
                 let p = ope.params();
-                let (i1, i2) = (
+                let (mut i1, mut i2) = (
                     p.get(2).and_then(Param::as_ref_id).ok_or("bad transformation")?,
                     p.get(3).and_then(Param::as_ref_id).ok_or("bad transformation")?,
                 );
+                // item_1 normally goes with rep_1 and item_2 with rep_2, but some writers
+                // cross them (rep_1 the component, item_1 the assembly's placement). Where an
+                // item is listed says whose it is: swap only when the lists say so plainly
+                // (both items listed in the assembly is the usual order).
+                let (side1, side2) = (self.rep_closure(&[r1]), self.rep_closure(&[r2]));
+                let lists = |side: &[u64], item: u64| side.iter().any(|r| self.reps.get(r).is_some_and(|rep| rep.0.contains(&item)));
+                let (i1_in_1, i1_in_2, i2_in_1, i2_in_2) = (lists(&side1, i1), lists(&side2, i1), lists(&side1, i2), lists(&side2, i2));
+                if (i1_in_2 && !i1_in_1 && !i2_in_2) || (i2_in_1 && !i2_in_2 && !i1_in_1) {
+                    std::mem::swap(&mut i1, &mut i2);
+                }
                 let m1 = self.placement_matrix(i1, u1)?;
                 let m2 = self.placement_matrix(i2, u2)?;
                 // rep_1 is normally the component: map its item onto the assembly's item.
