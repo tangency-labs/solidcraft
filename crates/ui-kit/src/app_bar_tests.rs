@@ -2,7 +2,106 @@
 use super::*;
 
 #[test]
-fn app_bar_spaces_repeat_sanitize_persist_and_have_sixteen_point_slots() {
+fn app_bar_minimal_is_exact_and_object_identity_does_not_affect_selection() {
+    use crate::app_bar_items::{ItemId, Layout, Preset, Zone};
+    let defaults = Layout::default_for(["solid.box", "solid.extrude"]);
+    let mut layout = defaults.clone();
+    layout.add_space(Zone::End, None, &defaults);
+    layout.add_separator(Zone::End, None, &defaults);
+    let objects = |layout: &Layout| {
+        layout
+            .items
+            .iter()
+            .filter(|p| matches!(ItemId::parse(&p.id), Some(ItemId::Separator(_) | ItemId::Space(_))))
+            .map(|p| p.id.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+    let previous = objects(&layout);
+    layout.set_preset(Preset::Minimal, &defaults);
+    assert!(objects(&layout).is_disjoint(&previous));
+    for (zone, expected) in [
+        (Zone::Start, vec!["space", "file", "separator", "save", "undo", "redo", "separator", "space"]),
+        (Zone::End, vec!["space", "help", "settings"]),
+    ] {
+        let rows: Vec<_> =
+            layout.items.iter().filter(|p| p.shown && p.zone == zone).map(|p| p.id.split_once(':').map_or(p.id.as_str(), |(kind, _)| kind)).collect();
+        assert_eq!(rows, expected);
+    }
+    assert!(layout.items.iter().filter(|p| p.id.starts_with("quick:")).all(|p| !p.shown));
+    assert_eq!(layout.preset(&defaults), Preset::Minimal);
+    assert!(!layout.set_shown("file", false, &defaults));
+    let mut renamed = layout.clone();
+    for (n, p) in renamed.items.iter_mut().enumerate() {
+        if let Some((kind @ ("space" | "separator"), _)) = p.id.split_once(':') {
+            p.id = format!("{kind}:{}", n + 100);
+        }
+    }
+    assert_eq!(renamed.preset(&defaults), Preset::Minimal);
+    renamed.add_separator(Zone::End, None, &defaults);
+    assert_eq!(renamed.preset(&defaults), Preset::Custom);
+    let mut extra_space = layout.clone();
+    extra_space.add_space(Zone::End, None, &defaults);
+    assert_eq!(extra_space.preset(&defaults), Preset::Custom);
+    let mut reordered = layout.clone();
+    assert!(reordered.move_step("file", true, &defaults));
+    assert_eq!(reordered.preset(&defaults), Preset::Custom);
+    let previous = objects(&layout);
+    layout.set_preset(Preset::Minimal, &defaults);
+    assert!(objects(&layout).is_disjoint(&previous));
+    assert_eq!(layout.preset(&defaults), Preset::Minimal);
+}
+
+#[test]
+fn app_bar_layout_background_is_quiet_but_assistant_and_focus_keep_full_ink() {
+    let t = Tokens::get();
+    for hovered in [false, true] {
+        let normal = edit_item_background(t, Control::Documents, hovered);
+        for control in [Control::Separator, Control::Space] {
+            assert_eq!(edit_item_background(t, control, hovered), normal.gamma_multiply(0.4));
+        }
+    }
+    let ctx = crate::test_support::context();
+    let rect = Rect::from_min_size(pos2(20.0, 20.0), vec2(ITEM_HEIGHT, ITEM_HEIGHT));
+    let render = |control| {
+        crate::test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| {
+            let response = ui.interact(rect, egui::Id::unique("assistant_ink"), Sense::hover());
+            paint_control(ui, rect, control, &response, 1.0);
+        })
+    };
+    // Kit contexts deliberately have no host icon artwork. The real status mark shares
+    // the base SVG's passive painter, so its token colour verifies that disabling the
+    // interaction did not multiply either mark or icon opacity.
+    let assistant = render(Control::Assistant { state: crate::AssistantEntryState::Ready, open: false });
+    assert!(
+        assistant.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Circle(c) if c.radius == 4.0 && c.fill == Tokens::get().agent_ok)),
+        "the Assistant painter preserves full-strength token ink"
+    );
+    editing(&ctx, true, None);
+    let line = render(Control::Separator);
+    assert!(
+        line.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::LineSegment { stroke, .. } if stroke.color == Tokens::get().app_bar_text)),
+        "the separator line itself keeps full foreground ink"
+    );
+}
+
+#[test]
+fn app_bar_focus_ring_uses_the_background_geometry_and_theme_accent() {
+    let ctx = crate::test_support::context();
+    let square = Rect::from_min_size(pos2(10.0, 10.0), vec2(ITEM_HEIGHT, ITEM_HEIGHT));
+    for (rect, radius) in [
+        (square, ITEM_RADIUS),
+        (Rect::from_min_size(square.min, vec2(80.0, ITEM_HEIGHT)), ITEM_RADIUS),
+        (Rect::from_min_size(pos2(10.0, 10.0), vec2(90.0, PILL_HEIGHT)), ITEM_PILL_RADIUS),
+        (Rect::from_min_size(pos2(10.0, 10.0), vec2(74.0, 46.0)), 9),
+    ] {
+        assert_eq!(focus_ring_geometry(rect, radius), (rect, radius));
+        let out = crate::test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| paint_focus(ui.painter(), rect, radius));
+        assert!(out.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.rect == rect && r.corner_radius == egui::CornerRadius::same(radius) && r.stroke == Stroke::new(1.5, Tokens::get().accent) && r.stroke_kind == egui::StrokeKind::Middle)));
+    }
+}
+
+#[test]
+fn app_bar_spaces_repeat_sanitize_persist_and_have_eleven_point_slots() {
     use crate::app_bar_items::{ItemId, Layout, Placement, Preset, Zone as SavedZone};
     use crate::app_bar_layout::application::{SPACE_WIDTH, spec_with_items};
     let defaults = Layout::default();
@@ -25,7 +124,7 @@ fn app_bar_spaces_repeat_sanitize_persist_and_have_sixteen_point_slots() {
     for preset in [Preset::Default, Preset::Minimal, Preset::Full, Preset::Compact] {
         let mut reset = saved.clone();
         reset.set_preset(preset, &defaults);
-        assert!(!reset.items.iter().any(|p| p.id.starts_with("space:")));
+        assert_eq!(reset.items.iter().filter(|p| p.id.starts_with("space:")).count(), if preset == Preset::Minimal { 3 } else { 0 });
     }
     saved.items.extend((0..1000).map(|_| Placement { id: b.clone(), zone: SavedZone::End, shown: true }));
     saved.items.push(Placement { id: "space:NaN".into(), zone: SavedZone::End, shown: true });
@@ -106,7 +205,7 @@ fn app_bar_default_dividers_migrate_once_and_removal_survives_loading() {
     assert!(edited.items.iter().any(|p| p.id == "separator:2"));
     for preset in [Preset::Minimal, Preset::Compact] {
         edited.set_preset(preset, &defaults);
-        assert!(!edited.items.iter().any(|p| p.id.starts_with("separator:")));
+        assert_eq!(edited.items.iter().filter(|p| p.id.starts_with("separator:")).count(), if preset == Preset::Minimal { 2 } else { 0 });
         assert_eq!(Layout::from_value(&edited.to_value(), &defaults), edited);
         assert_eq!(edited.preset(&defaults), preset);
     }
@@ -294,10 +393,7 @@ fn app_bar_separators_repeat_renumber_remove_and_bound_hostile_input() {
     for preset in [Preset::Default, Preset::Minimal, Preset::Full, Preset::Compact] {
         let mut reset = saved.clone();
         reset.set_preset(preset, &defaults);
-        assert_eq!(
-            reset.items.iter().filter(|p| p.id.starts_with("separator:")).count(),
-            if matches!(preset, Preset::Default | Preset::Full) { 2 } else { 0 }
-        );
+        assert_eq!(reset.items.iter().filter(|p| p.id.starts_with("separator:")).count(), if preset == Preset::Compact { 0 } else { 2 });
     }
 }
 
@@ -349,7 +445,7 @@ fn app_bar_preset_selection_is_derived_with_first_match_winning() {
 }
 
 #[test]
-fn app_bar_edit_mode_changes_only_separator_ladders_and_measured_card_padding() {
+fn app_bar_edit_mode_changes_only_separator_widths() {
     let rig = BarRig::new(1280.0);
     let snapshot =
         |out: &BarOut| (out.edit_items.iter().map(|p| (p.id.clone(), p.zone, p.left, p.right, p.locked)).collect::<Vec<_>>(), out.overflow.clone());
@@ -362,9 +458,9 @@ fn app_bar_edit_mode_changes_only_separator_ladders_and_measured_card_padding() 
     for normal in &before.0 {
         if normal.4 {
             continue;
-        } // Fixed document tabs use the space left after the two cards.
+        } // Flexible document tabs use the space left after widened separators.
         let edited = after.0.iter().find(|p| p.0 == normal.0).unwrap();
-        let delta = if normal.0.starts_with("separator:") { 15.0 } else { 0.0 };
+        let delta = if normal.0.starts_with("separator:") { 10.0 } else { 0.0 };
         assert_eq!(edited.3 - edited.2, normal.3 - normal.2 + delta);
     }
     assert!(after.0.iter().any(|p| p.0 == "report"));
@@ -372,7 +468,7 @@ fn app_bar_edit_mode_changes_only_separator_ladders_and_measured_card_padding() 
 }
 
 #[test]
-fn app_bar_separator_and_padding_mode_changes_glide_and_resize_still_snaps() {
+fn app_bar_separator_mode_changes_glide_and_resize_still_snaps() {
     let mut rig = BarRig::new(1920.0);
     let mut style = rig.ctx.global_style().as_ref().clone();
     style.animation_time = 0.15;
@@ -599,7 +695,10 @@ fn app_bar_edit_presets_and_hostile_operations_keep_sanitize_guarantees() {
         layout.set_preset(preset, &defaults);
         let shown: Vec<_> = layout.items.iter().filter(|p| p.shown).map(|p| p.id.as_str()).collect();
         match preset {
-            Preset::Minimal => assert_eq!(shown, ["file", "save", "undo", "redo", "settings", "help"]),
+            Preset::Minimal => assert_eq!(
+                shown.iter().map(|id| id.split_once(':').map_or(*id, |(kind, _)| kind)).collect::<Vec<_>>(),
+                ["space", "file", "separator", "save", "undo", "redo", "separator", "space", "space", "help", "settings"]
+            ),
             Preset::Full | Preset::Default | Preset::Custom => assert!(defaults.items.iter().all(|p| shown.contains(&p.id.as_str()))),
             Preset::Compact => assert!(["donate", "discord", "report", "version"].iter().all(|id| !shown.contains(id))),
         }
@@ -1484,7 +1583,7 @@ fn assert_sound(spec: &Spec, placed: &Placed) {
 }
 
 fn assert_edit_cards(spec: &Spec, placed: &Placed) {
-    use crate::app_bar_layout::application::{CARD_PADDING, GAP};
+    use crate::app_bar_layout::application::CARD_PADDING;
     let g = placed.application.as_ref().unwrap();
     for (zone, card) in [Zone::Start, Zone::End].into_iter().zip(g.cards) {
         let Some(card) = card else { continue };
@@ -1498,28 +1597,27 @@ fn assert_edit_cards(spec: &Spec, placed: &Placed) {
             .collect();
         let first = slots.iter().map(|p| p.x).fold(f32::INFINITY, f32::min);
         let last = slots.iter().map(|p| p.right()).fold(f32::NEG_INFINITY, f32::max);
-        assert!((first - card.left - CARD_PADDING).abs() < EPS);
-        assert!((card.right - last - CARD_PADDING).abs() < EPS);
+        assert!(card.left <= first + EPS && first - card.left <= CARD_PADDING + EPS);
+        assert!(card.right >= last - EPS && card.right - last <= CARD_PADDING + EPS);
         assert!(card.left >= spec.captions_left - EPS);
-        let caption_gap = if spec.captions_right > 0.0 { GAP } else { 0.0 };
-        assert!(card.right + caption_gap <= (spec.width - spec.captions_right).max(spec.captions_left) + EPS);
+        assert!(card.right <= (spec.width - spec.captions_right).max(spec.captions_left) + EPS);
         for (item, p) in spec.items.iter().zip(&placed.placements) {
             if (item.locked || matches!(item.id.as_str(), "managed" | "offered"))
                 && let Some(p) = p
             {
-                assert!(card.right + GAP <= p.x + EPS || p.right() + GAP <= card.left + EPS, "card {card:?} overlaps fixed {} {p:?}", item.id);
+                assert!(card.right <= p.x + EPS || p.right() <= card.left + EPS, "card {card:?} overlaps fixed {} {p:?}", item.id);
             }
         }
         if let Some((x, width)) = placed.overflow_button {
-            assert!(card.right + GAP <= x + EPS || x + width + GAP <= card.left + EPS);
+            assert!(card.right <= x + EPS || x + width <= card.left + EPS);
         }
     }
 }
 
 #[test]
-fn app_bar_edit_separator_delta_and_symmetric_cards_fit_between_chrome_at_every_width() {
+fn app_bar_edit_separator_delta_and_paint_cards_stay_between_chrome_at_every_width() {
     use crate::app_bar_items::{Layout, Zone as SavedZone};
-    use crate::app_bar_layout::application::{CARD_PADDING, EDIT_SEPARATOR_WIDTH, SEPARATOR_WIDTH, SPACE_WIDTH, set_editing, spec_with_items};
+    use crate::app_bar_layout::application::{EDIT_SEPARATOR_WIDTH, SEPARATOR_WIDTH, SPACE_WIDTH, set_editing, spec_with_items};
     let defaults = Layout::default_for(["a", "b", "c", "d", "e"]);
     for mixed in [false, true] {
         let mut saved = defaults.clone();
@@ -1538,6 +1636,15 @@ fn app_bar_edit_separator_delta_and_symmetric_cards_fit_between_chrome_at_every_
                 &["a", "b", "c", "d", "e"],
                 &["donate", "discord"],
             );
+            let mut bare = normal.clone();
+            bare.items.retain(|p| !p.id.starts_with("separator:"));
+            let plain = layout(&bare);
+            set_editing(&mut bare, true);
+            let decorated = layout(&bare);
+            assert_eq!(plain.placements, decorated.placements, "paint cards consume no layout space");
+            assert_eq!(plain.overflow, decorated.overflow);
+            assert_eq!(plain.centre, decorated.centre);
+            assert_eq!(plain.overflow_button, decorated.overflow_button);
             let mut edited = normal.clone();
             set_editing(&mut edited, true);
             for (a, b) in normal.items.iter().zip(&edited.items) {
@@ -1562,7 +1669,7 @@ fn app_bar_edit_separator_delta_and_symmetric_cards_fit_between_chrome_at_every_
             assert_eq!(normal, edited, "leaving edit mode restores the exact spec");
         }
     }
-    assert_eq!(height(true), ITEM_HEIGHT + CARD_PADDING * 2.0);
+    assert_eq!(height(true), height(false));
 }
 
 /// The default bar never overlaps and stays inside its room at any width, with the caption
@@ -1968,7 +2075,7 @@ fn app_bar_application_never_overlaps_at_any_width() {
                     assert_sound(&spec, &placed);
                     for item in spec.items.iter().filter(|i| i.locked || i.never_overflow) {
                         assert!(!placed.overflow.contains(&item.id), "locked {} at {width}/{bits}/{quick}", item.id);
-                        if spec.width - spec.captions_left - spec.captions_right >= if has(9) { 244.0 } else { 232.0 } {
+                        if spec.width - spec.captions_left - spec.captions_right >= 232.0 {
                             assert!(placed.placements[index_of(&spec, &item.id)].is_some(), "locked {} fits at {width}/{bits}/{quick}", item.id);
                         }
                     }

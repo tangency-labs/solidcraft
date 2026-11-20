@@ -83,6 +83,8 @@ pub use solidcraft_ui_kit::frame;
 pub mod frame_rate;
 pub mod gizmo;
 pub mod gpu;
+#[cfg(any(windows, test))]
+mod hand_cursor;
 pub mod help;
 pub use solidcraft_ui_kit::history_bar;
 mod history_folds;
@@ -4196,6 +4198,8 @@ impl SolveApp {
         render_workspace::displayed::finish(self, ui.ctx());
         documents::sync_views(self);
         documents::sync_window_title(self, ui.ctx());
+        #[cfg(windows)]
+        hand_cursor::apply(ui.ctx());
     }
 
     fn cad_ui(&mut self, ui: &mut egui::Ui, report_input: &mut Option<issue_report::CadInput>) {

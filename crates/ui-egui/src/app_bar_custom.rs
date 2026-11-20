@@ -180,8 +180,9 @@ fn zones(content: Rect, out: &app_bar::BarOut) -> [(Zone, Rect); 2] {
         }
         if !left.is_finite() {
             let edge = if zone == Zone::Start { out.tabs_start } else { out.tabs_end };
-            left = edge;
-            right = edge + 12.0;
+            let gap = ui_kit::app_bar_layout::application::GAP;
+            left = if zone == Zone::Start { edge - gap } else { edge };
+            right = left + gap;
         }
         let mut lo = content.left();
         let mut hi = content.right();
@@ -197,15 +198,18 @@ fn zones(content: Rect, out: &app_bar::BarOut) -> [(Zone, Rect); 2] {
     })
 }
 
-/// Paint the cards whose padding the shared layout already reserved.
+/// Cards use existing gaps only and never reserve layout space.
 pub(crate) fn backing(ui: &egui::Ui, content: Rect, out: &app_bar::BarOut, shapes: [egui::layers::ShapeIdx; 2]) {
     let t = solidcraft_theme::Tokens::get();
     for ((zone, rect), shape) in zones(content, out).into_iter().zip(shapes) {
+        if out.cards.into_iter().flatten().all(|card| card != rect) {
+            continue;
+        }
         ui.painter().set(
             shape,
             egui::Shape::Vec(vec![
-                egui::Shape::rect_filled(rect, 10, app_bar::edit_palette(t).card),
-                egui::Shape::rect_stroke(rect, 10, Stroke::new(1.0, t.border), egui::StrokeKind::Inside),
+                egui::Shape::rect_filled(rect, 9, app_bar::edit_palette(t).card),
+                egui::Shape::rect_stroke(rect, 9, Stroke::new(1.0, t.border), egui::StrokeKind::Inside),
             ]),
         );
         crate::scenario::publish_rect(if zone == Zone::Start { "appbar:zone:start" } else { "appbar:zone:end" }, rect);
@@ -215,7 +219,6 @@ pub(crate) fn bar(app: &mut SolveApp, ui: &mut egui::Ui, content: Rect, out: &ap
     if !app.toolbar_custom.app_bar_customizing {
         return;
     }
-    let t = solidcraft_theme::Tokens::get();
     if ui.input(|i| i.pointer.primary_pressed()) {
         ui.ctx().data_mut(|d| d.remove::<bool>(Id::unique("appbar_cancelled_press")));
     }
@@ -227,15 +230,15 @@ pub(crate) fn bar(app: &mut SolveApp, ui: &mut egui::Ui, content: Rect, out: &ap
         }
         let response = ui.interact(rect, Id::unique(("appbar_edit", &item.id)), Sense::click_and_drag());
         if response.contains_pointer() && !drag.as_ref().is_some_and(|d| d.active) {
-            ui.ctx().set_cursor_icon(app_bar::drag_cursor(false));
+            ui.ctx().set_cursor_icon(app_bar::drag_cursor(response.is_pointer_button_down_on()));
         }
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label_icon(app, &item.id).0));
         crate::scenario::publish_target(&format!("appbar:edit:{}", item.id), rect);
-        app_bar::paint_decoration(ui, &item.id, |painter| {
-            if response.has_focus() && !drag.as_ref().is_some_and(|d| d.active) {
-                painter.rect_stroke(rect.shrink(0.5), 7, Stroke::new(1.5, t.accent), egui::StrokeKind::Inside);
-            }
-        });
+        if response.has_focus() && !drag.as_ref().is_some_and(|d| d.active) {
+            let version = format!("v{}", crate::update::current_version());
+            let visual = control(app, &item.id, &version);
+            app_bar::paint_item_focus(ui, &item.id, app_bar::item_rect(rect, visual), app_bar::control_radius(visual));
+        }
         if response.has_focus() {
             if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Delete)) {
                 run(app, &json!({"item":item.id,"action":"hide"}));
@@ -287,16 +290,13 @@ pub(crate) fn bar(app: &mut SolveApp, ui: &mut egui::Ui, content: Rect, out: &ap
             app_bar_items::drop_slot(held.pointer.x, centre, &out.edit_items, preview_id)
         });
         if held.active
-            && let Some(slot) = &held.slot
+            && held.slot.is_some()
+            && let Some(item) = out.edit_items.iter().find(|p| p.id == preview_id)
         {
-            let gap = out
-                .edit_items
-                .iter()
-                .find(|p| p.id == preview_id)
-                .map_or(Rect::from_min_size(pos2(slot.x, content.top() + 2.0), vec2(32.0, content.height() - 4.0)), |p| {
-                    Rect::from_min_max(pos2(p.left, content.top() + 2.0), pos2(p.right, content.bottom() - 2.0))
-                });
-            ui_kit::insertion_marker(ui.painter(), gap.left(), gap.top(), gap.bottom());
+            let version = format!("v{}", crate::update::current_version());
+            let visual = control(app, &held.id, &version);
+            let body = app_bar::item_rect(Rect::from_min_max(pos2(item.left, content.top()), pos2(item.right, content.bottom())), visual);
+            app_bar::paint_item_outline(ui, preview_id, body, app_bar::control_radius(visual), 1.0);
         }
         let pass = ui.ctx().cumulative_pass_nr();
         if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
@@ -458,14 +458,13 @@ fn tile(app: &mut SolveApp, ui: &mut egui::Ui, id: &str, version: &str) {
     let on_bar = app.toolbar_custom.app_bar.items.iter().any(|p| p.id == id && p.shown) && !returning;
     let placeable = !on_bar && !empty;
     if placeable && response.contains_pointer() && !app_bar::is_dragging(ui.ctx()) {
-        ui.ctx().set_cursor_icon(app_bar::drag_cursor(false));
+        ui.ctx().set_cursor_icon(app_bar::drag_cursor(response.is_pointer_button_down_on()));
     }
     app_bar::paint_hover(ui, &format!("tray:{id}"), cell, 9, placeable && response.contains_pointer(), |ui| {
-        let palette = app_bar::edit_palette(t);
         ui.painter().rect_filled(
             cell,
             9,
-            if placeable && response.contains_pointer() && !app_bar::is_dragging(ui.ctx()) { palette.hover } else { palette.item },
+            app_bar::edit_item_background(t, control(app, id, version), placeable && response.contains_pointer() && !app_bar::is_dragging(ui.ctx())),
         );
         if !empty {
             if returning {
@@ -476,7 +475,7 @@ fn tile(app: &mut SolveApp, ui: &mut egui::Ui, id: &str, version: &str) {
                 9,
                 Stroke::new(
                     1.0,
-                    if returning || response.has_focus() {
+                    if returning {
                         t.accent
                     } else if id == "space" {
                         t.app_bar_text.gamma_multiply(0.24)
@@ -493,6 +492,9 @@ fn tile(app: &mut SolveApp, ui: &mut egui::Ui, id: &str, version: &str) {
                 ui.interact(badge, ui.scope_id().with(("badge", id)), Sense::hover())
                     .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Image, true, app.tr("app_bar.on_bar")));
             }
+        }
+        if response.has_focus() {
+            app_bar::paint_focus(ui.painter(), cell, 9);
         }
         let label_rect = Rect::from_min_max(pos2(cell.left(), cell.bottom() + t.space_4), pos2(cell.right(), rect.bottom()));
         crate::scenario::publish_rect(&format!("appbar:label:{id}"), label_rect);

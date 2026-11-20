@@ -263,6 +263,7 @@ impl Layout {
             return;
         }
         self.sanitize(defaults);
+        let mut used: std::collections::HashSet<_> = self.items.iter().chain(&defaults.items).map(|p| p.id.clone()).collect();
         let future: Vec<_> = self.items.iter().filter(|p| ItemId::parse(&p.id).is_none()).cloned().collect();
         *self = defaults.clone();
         for item in &mut self.items {
@@ -277,6 +278,26 @@ impl Layout {
         if matches!(preset, Preset::Minimal | Preset::Compact) {
             self.items.retain(|p| !p.id.starts_with("separator:"));
         }
+        if preset == Preset::Minimal {
+            let mut rows = Vec::new();
+            for (zone, ids) in [
+                (Zone::Start, &["space", "file", "separator", "save", "undo", "redo", "separator", "space"][..]),
+                (Zone::End, &["space", "help", "settings"][..]),
+            ] {
+                for &kind in ids {
+                    if matches!(kind, "separator" | "space") {
+                        if let Some(id) = (0..=MAX_ITEMS * 2).map(|n| format!("{kind}:{n}")).find(|id| !used.contains(id)) {
+                            used.insert(id.clone());
+                            rows.push(Placement { id, zone, shown: true });
+                        }
+                    } else if let Some(item) = self.items.iter().find(|p| p.id == kind) {
+                        rows.push(Placement { zone, shown: true, ..item.clone() });
+                    }
+                }
+            }
+            rows.extend(self.items.drain(..).filter(|p| !matches!(p.id.as_str(), "file" | "save" | "undo" | "redo" | "help" | "settings")));
+            self.items = rows;
+        }
         self.sanitize(defaults);
     }
 
@@ -284,7 +305,21 @@ impl Layout {
     pub fn preset(&self, defaults: &Self) -> Preset {
         let mut current = self.clone();
         current.sanitize(defaults);
-        let known = |layout: &Self| layout.items.iter().filter(|p| ItemId::parse(&p.id).is_some()).cloned().collect::<Vec<_>>();
+        let known = |layout: &Self| {
+            layout
+                .items
+                .iter()
+                .filter_map(|p| {
+                    let item = ItemId::parse(&p.id)?;
+                    let kind = match item {
+                        ItemId::Separator(_) => "separator".to_owned(),
+                        ItemId::Space(_) => "space".to_owned(),
+                        _ => p.id.clone(),
+                    };
+                    Some((kind, p.zone, p.shown))
+                })
+                .collect::<Vec<_>>()
+        };
         for preset in [Preset::Default, Preset::Minimal, Preset::Full, Preset::Compact] {
             let mut expected = defaults.clone();
             expected.set_preset(preset, defaults);

@@ -132,7 +132,7 @@ pub(crate) fn offer_pill(
         ui.painter().rect_filled(rect, radius, t.accent);
     }
     if response.has_focus() {
-        ui.painter().rect_stroke(rect.expand(2.0), Tokens::outset_radius(radius, 2.0), Stroke::new(1.0, t.app_bar_text), egui::StrokeKind::Outside);
+        app_bar::paint_focus(ui.painter(), rect, if label.is_some() { app_bar::ITEM_PILL_RADIUS } else { app_bar::ITEM_RADIUS });
     }
     let glyph_x = if label.is_some() { rect.left() + icon_x } else { rect.center().x };
     let icon_size = if label.is_some() { app_bar::PILL_ICON_SIZE } else { app_bar::ITEM_ICON_SIZE };
@@ -4964,6 +4964,77 @@ mod app_bar_tests {
     use super::*;
 
     #[test]
+    fn toolbar_hand_cursor_pixels_are_original_cached_bounded_and_outlined() {
+        use std::sync::Arc;
+        let t = Tokens::dark();
+        let fill = t.on_accent.to_opaque().to_array();
+        let outline = t.app_bar.to_opaque().to_array();
+        for held in [false, true] {
+            let icon = app_bar::drag_cursor(held);
+            let (image, fallback) = crate::hand_cursor::request(icon).unwrap();
+            assert_eq!(image.size, [32, 32]);
+            assert_eq!(image.rgba.len(), 32 * 32 * 4);
+            assert!(image.hotspot.into_iter().all(|coordinate| coordinate < 32));
+            assert!(image.rgba.chunks_exact(4).any(|p| p == fill.as_slice()));
+            assert!(image.rgba.chunks_exact(4).any(|p| p == outline.as_slice()));
+            assert!(image.rgba.chunks_exact(4).any(|p| p[3] == 0));
+            let pixel = (usize::from(image.hotspot[1]) * 32 + usize::from(image.hotspot[0])) * 4;
+            assert_eq!(image.rgba.get(pixel..pixel + 4), Some(fill.as_slice()));
+            let (again, _) = crate::hand_cursor::request(icon).unwrap();
+            assert!(Arc::ptr_eq(&image.rgba, &again.rgba));
+            assert_eq!(fallback, if held { egui::CursorIcon::Grabbing } else { egui::CursorIcon::PointingHand });
+        }
+        assert_ne!(crate::hand_cursor::generate(false).rgba, crate::hand_cursor::generate(true).rgba);
+        assert!(crate::hand_cursor::request(egui::CursorIcon::Default).is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn toolbar_hand_cursor_output_sets_bitmaps_and_clears_sticky_artwork() {
+        let ctx = ui_kit::test_support::context();
+        for icon in [egui::CursorIcon::Grab, egui::CursorIcon::Grabbing, egui::CursorIcon::Text] {
+            let output = ui_kit::test_support::raw_frame(&ctx, egui::RawInput::default(), |_| {
+                ctx.set_cursor_icon(icon);
+                crate::hand_cursor::apply(&ctx);
+            });
+            assert_eq!(output.platform_output.cursor_image.is_some(), icon != egui::CursorIcon::Text);
+            assert_eq!(output.platform_output.cursor_icon, if icon == egui::CursorIcon::Grab { egui::CursorIcon::PointingHand } else { icon });
+        }
+    }
+
+    #[test]
+    fn toolbar_focus_rings_hug_bar_bodies_and_follow_lifted_tile_cells() {
+        use crate::scenario::{Harness, rect_of};
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1920,"height":1000}));
+        h.app.start("ui.appBarCustomize");
+        h.frames(12);
+        for id in ["file", "save", "report", "version", "donate", "discord"] {
+            if rect_of(&format!("appbar:edit:{id}")).is_none() {
+                continue;
+            }
+            h.ctx.memory_mut(|m| m.request_focus(egui::Id::unique(("appbar_edit", id))));
+            h.frames(12);
+            let hit = rect_of(&format!("appbar:edit:{id}")).unwrap();
+            let pill = matches!(id, "report" | "donate" | "discord");
+            let body = Rect::from_center_size(hit.center(), vec2(hit.width(), if pill { app_bar::PILL_HEIGHT } else { app_bar::ITEM_HEIGHT }));
+            let mut shapes = Vec::new();
+            for clipped in &h.shapes {
+                tray_paint_leaves(&clipped.shape, &mut shapes);
+            }
+            assert!(shapes.iter().any(|s| matches!(s, egui::Shape::Rect(r) if (r.rect.min - body.min).length() < 0.1 && (r.rect.max - body.max).length() < 0.1 && r.corner_radius == egui::CornerRadius::same(if pill { app_bar::ITEM_PILL_RADIUS } else { app_bar::ITEM_RADIUS }) && r.stroke == Stroke::new(1.5, Tokens::get().accent))), "{id}: focus matches {body:?}; focused {:?}; rings {:?}", h.ctx.memory(|m| m.focused()), shapes.iter().filter_map(|s| if let egui::Shape::Rect(r) = s { (r.stroke.width == 1.5).then_some((r.rect, r.stroke)) } else { None }).collect::<Vec<_>>());
+        }
+        crate::app_bar_custom::run(&mut h.app, &json!({"item":"save","action":"hide"}));
+        h.frames(2);
+        let cell = rect_of("appbar:cell:save").unwrap();
+        h.ctx.memory_mut(|m| m.request_focus(egui::Id::unique(("appbar_tile", "save"))));
+        h.step(&json!({"move":[cell.center().x,cell.center().y]})).unwrap();
+        h.frames(12);
+        assert!(h.shapes.iter().any(|clipped| matches!(&clipped.shape, egui::Shape::Rect(r) if ((clipped.transform_after_tessellation * r.rect.min).y - cell.top() + 2.0).abs() <= 0.1 && r.rect.size() == cell.size() && r.corner_radius == egui::CornerRadius::same(9) && r.stroke == Stroke::new(1.5, Tokens::get().accent))), "tile focus follows its lifted cell after pixel snapping");
+    }
+
+    #[test]
     fn app_bar_space_tile_places_repeatable_items_and_delete_persists() {
         use crate::scenario::{Harness, handle_at};
         use ui_kit::app_bar_items::{Layout, Preset};
@@ -5013,7 +5084,12 @@ mod app_bar_tests {
         let at = resting.center();
         h.step(&json!({"move":[at.x,at.y]})).unwrap();
         h.frames(8);
-        assert_eq!(h.output.cursor_icon, app_bar::drag_cursor(false));
+        if cfg!(windows) {
+            assert_eq!(h.output.cursor_icon, egui::CursorIcon::PointingHand, "fallback for the requested bitmap");
+            assert!(h.output.cursor_image.is_some());
+        } else {
+            assert_eq!(h.output.cursor_icon, app_bar::drag_cursor(false));
+        }
         assert_eq!(rect_of("appbar:edit:separator:1"), Some(resting), "hover lift cannot move the hit target");
         let press =
             |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
@@ -5052,7 +5128,7 @@ mod app_bar_tests {
         h.app.start("ui.appBarCustomize");
         h.frames(6);
         let after: Vec<_> = keys.iter().map(|key| crate::scenario::rect_of(key).unwrap().size()).collect();
-        assert_eq!(before, after, "only separators change item width; card padding moves the stacks");
+        assert_eq!(before, after, "only separators change width; cards do not measure padding");
         assert_eq!(h.app.toolbar_custom.app_bar, saved);
         let mut leaves = Vec::new();
         for clipped in &h.shapes {
@@ -5085,8 +5161,8 @@ mod app_bar_tests {
                         || body.height() == app_bar::PILL_HEIGHT
                 );
             }
-            assert!(last + ui_kit::app_bar_layout::application::CARD_PADDING <= card.right() + 0.1);
-            let captions = if h.app.custom_titlebar { crate::window_chrome::WIDTH + ui_kit::app_bar_layout::application::GAP } else { 0.0 };
+            assert!(last <= card.right() + 0.1);
+            let captions = if h.app.custom_titlebar { crate::window_chrome::WIDTH } else { 0.0 };
             assert!(card.right() <= 1280.0 - captions + 0.1);
             if let Some(tab) = crate::scenario::rect_of("tab:close:0") {
                 assert!(!card.intersects(tab));
@@ -5316,9 +5392,8 @@ mod app_bar_tests {
         h.frames(3);
         h.step(&json!({"click":{"handle":"appbar:preset:Minimal"}})).unwrap();
         h.frames(2);
-        let mut expected = Layout::default();
-        expected.set_preset(Preset::Minimal, &Layout::default());
-        assert_eq!(h.app.toolbar_custom.app_bar, expected);
+        assert_eq!(h.app.toolbar_custom.app_bar.preset(&Layout::default()), Preset::Minimal);
+        let expected = h.app.toolbar_custom.app_bar.clone(); // Object ids are intentionally fresh.
         let home = crate::scenario::handle_at("appbar:tile:home").unwrap();
         h.step(&json!({"drag":[[home.x,home.y],[home.x,700.0]]})).unwrap();
         h.frames(12);
@@ -5365,6 +5440,14 @@ mod app_bar_tests {
         h.frame_with(vec![egui::Event::PointerMoved(save), press(save, true)]);
         let undo = handle_at("appbar:undo").unwrap();
         h.frame_with(vec![egui::Event::PointerMoved(undo)]);
+        h.frames(12);
+        let hit = crate::scenario::rect_of("appbar:edit:save").unwrap();
+        let body = Rect::from_center_size(hit.center(), vec2(hit.width(), app_bar::ITEM_HEIGHT));
+        let mut shapes = Vec::new();
+        for clipped in &h.shapes {
+            tray_paint_leaves(&clipped.shape, &mut shapes);
+        }
+        assert!(shapes.iter().any(|s| matches!(s, egui::Shape::Rect(r) if (r.rect.min - body.min).length() < 0.1 && (r.rect.max - body.max).length() < 0.1 && r.stroke == Stroke::new(1.0, Tokens::get().accent) && r.corner_radius == egui::CornerRadius::same(app_bar::ITEM_RADIUS))), "placement uses the real item's rounded accent border at {body:?}; outlines {:?}", shapes.iter().filter_map(|s| if let egui::Shape::Rect(r) = s { (r.stroke.width == 1.0 && r.stroke.color == Tokens::get().accent).then_some(r.rect) } else { None }).collect::<Vec<_>>());
         h.frame_with(vec![egui::Event::Key {
             key: egui::Key::Escape,
             physical_key: None,

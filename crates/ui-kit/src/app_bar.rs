@@ -247,7 +247,7 @@ pub fn paint_item(ui: &mut egui::Ui, rect: Rect, control: Control<'_>, response:
                     ui.painter().rect_filled(
                         item_rect(rect, control),
                         control_radius(control),
-                        if hovered { edit_palette(Tokens::get()).hover } else { edit_palette(Tokens::get()).item },
+                        edit_item_background(Tokens::get(), control, hovered),
                     );
                 }
                 paint_control(ui, rect, control, response, opacity);
@@ -277,17 +277,10 @@ pub fn icon_control(control: Control<'_>) -> bool {
     matches!(control, Control::Icon { .. } | Control::Command { .. } | Control::Documents | Control::Assistant { .. })
 }
 
-/// Winit 0.30's Windows backend maps Grab/Grabbing to IDC_SIZEALL. IDC_HAND is
-/// exposed through PointingHand, so use that for an actual hand when hovering on Windows.
-/// One mapping for movable bar controls, tray tiles and draggable document/view tabs.
+/// One native/web request for movable controls and tabs. The app's Windows output hook
+/// supplies original bitmap hands and a fallback without changing feature code.
 pub fn drag_cursor(dragging: bool) -> egui::CursorIcon {
-    if dragging {
-        egui::CursorIcon::Grabbing
-    } else if cfg!(target_os = "windows") {
-        egui::CursorIcon::PointingHand
-    } else {
-        egui::CursorIcon::Grab
-    }
+    if dragging { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Grab }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -314,6 +307,40 @@ pub fn edit_palette(t: Tokens) -> EditPalette {
 
 pub fn control_radius(control: Control<'_>) -> u8 {
     if matches!(control, Control::Pill { .. } | Control::Report { .. }) { ITEM_PILL_RADIUS } else { ITEM_RADIUS }
+}
+
+/// Layout objects stay grab-able without competing with command buttons.
+pub fn edit_item_background(t: Tokens, control: Control<'_>, hovered: bool) -> egui::Color32 {
+    let palette = edit_palette(t);
+    let fill = if hovered { palette.hover } else { palette.item };
+    fill.gamma_multiply(if matches!(control, Control::Separator | Control::Space) { 0.4 } else { 1.0 })
+}
+
+/// Focus hugs the actual background. No widget-rect expansion or alternate corners.
+pub fn focus_ring_geometry(rect: Rect, radius: u8) -> (Rect, u8) {
+    (rect, radius)
+}
+
+pub fn paint_outline(painter: &Painter, rect: Rect, radius: u8, width: f32) {
+    let (rect, radius) = focus_ring_geometry(rect, radius);
+    if rect.is_finite() && rect.is_positive() {
+        painter.rect_stroke(rect, radius, Stroke::new(width, Tokens::get().accent), egui::StrokeKind::Middle);
+    }
+}
+
+pub fn paint_focus(painter: &Painter, rect: Rect, radius: u8) {
+    paint_outline(painter, rect, radius, 1.5);
+}
+
+/// App-owned edit responses share the native item's paint offsets, including hover lift.
+pub fn paint_item_outline(ui: &egui::Ui, id: &str, rect: Rect, radius: u8, width: f32) {
+    let lift =
+        ui.ctx().data(|d| d.get_temp::<HoverLift>(egui::Id::unique(("appbar_hover_lift", ui.ctx().viewport_id(), id)))).map_or(0.0, |s| s.drawn);
+    paint_outline(ui.painter(), drawn_rect(ui.ctx(), id, rect).translate(vec2(0.0, lift)), radius, width);
+}
+
+pub fn paint_item_focus(ui: &egui::Ui, id: &str, rect: Rect, radius: u8) {
+    paint_item_outline(ui, id, rect, radius, 1.5);
 }
 
 pub fn dragging(ctx: &egui::Context, active: bool) {
@@ -399,9 +426,9 @@ pub fn tray_accent() -> (egui::Color32, egui::Color32) {
 /// The bar's height: the window's title bar on desktop builds.
 pub const HEIGHT: f32 = 34.0;
 
-/// Edit cards keep six points above and below the square controls, without clipping.
-pub fn height(editing: bool) -> f32 {
-    if editing { ITEM_HEIGHT + crate::app_bar_layout::application::CARD_PADDING * 2.0 } else { HEIGHT }
+/// Cards only paint into the existing gaps; editing never resizes the bar.
+pub fn height(_editing: bool) -> f32 {
+    HEIGHT
 }
 /// The least width of a document tab before the tabs scroll behind the » list.
 const MIN_TAB: f32 = 90.0;
@@ -597,9 +624,6 @@ pub fn paint_control(ui: &mut egui::Ui, rect: Rect, control: Control<'_>, respon
                 if hot {
                     p.rect_filled(rect, ITEM_RADIUS, t.app_bar_hover);
                 }
-                if response.has_focus() {
-                    p.rect_stroke(rect.shrink(1.0), ITEM_RADIUS, Stroke::new(1.0, t.app_bar_text), egui::StrokeKind::Inside);
-                }
                 crate::icons::paint_app_bar(p, Rect::from_center_size(rect.center(), vec2(ITEM_ICON_SIZE, ITEM_ICON_SIZE)), "document_browser", 1.0);
             }
             Control::Icon { icon, size: _, enabled } => {
@@ -637,14 +661,9 @@ pub fn paint_control(ui: &mut egui::Ui, rect: Rect, control: Control<'_>, respon
                     if enabled { t.app_bar_text } else { t.app_bar_text.gamma_multiply(0.35) },
                 );
             }
-            Control::Pill { data, lift, veil, focused } => paint_link_pill(
-                ui,
-                Rect::from_center_size(rect.center(), vec2(rect.width(), PILL_HEIGHT)),
-                &data,
-                lift,
-                veil,
-                focused || response.has_focus(),
-            ),
+            Control::Pill { data, lift, veil, .. } => {
+                paint_link_pill(ui, Rect::from_center_size(rect.center(), vec2(rect.width(), PILL_HEIGHT)), &data, lift, veil)
+            }
             Control::Report { label, labelled } => {
                 let capsule_rect =
                     Rect::from_center_size(rect.center(), vec2(rect.width().min(if labelled { f32::MAX } else { PILL_HEIGHT }), PILL_HEIGHT));
@@ -690,13 +709,19 @@ pub fn paint_control(ui: &mut egui::Ui, rect: Rect, control: Control<'_>, respon
                 }
                 // Retain the shared icon and live status mark while the bar owns its uniform
                 // background. A passive response suppresses the entry's smaller hover frame.
-                let passive = ui.new_child(egui::UiBuilder::new().max_rect(rect).disabled());
+                let mut passive = ui.new_child(egui::UiBuilder::new().max_rect(rect).disabled());
+                // Disabling suppresses native interaction/hover chrome, but must not fade
+                // the real icon or status badge relative to the other bar controls.
+                passive.set_opacity(ui.opacity());
                 // assistant_entry's icon has a seven-point inset; this passive paint target
                 // produces the shared icon without changing the square item slot.
                 let entry = Rect::from_center_size(rect.center(), egui::Vec2::splat(ITEM_ICON_SIZE + 2.0 * (t.space_6 + 1.0)));
                 let quiet = passive.interact(entry, passive.scope_id().with("assistant_mark"), Sense::hover());
                 crate::assistant_entry(&passive, &quiet, state, false, ui.ctx().global_style().animation_time > 0.0);
             }
+        }
+        if response.has_focus() || matches!(control, Control::Pill { focused: true, .. }) {
+            paint_focus(ui.painter(), rect, control_radius(control));
         }
     }
 }
@@ -753,15 +778,12 @@ pub fn preview_control(ui: &mut egui::Ui, cell: Rect, control: Control<'_>, opac
     }
 }
 
-fn paint_link_pill(ui: &egui::Ui, rect: Rect, p: &Pill<'_>, lift: f32, veil: f32, focused: bool) {
+fn paint_link_pill(ui: &egui::Ui, rect: Rect, p: &Pill<'_>, lift: f32, veil: f32) {
     let t = Tokens::get();
     let ink = t.app_bar_text;
     let x_rect = pill_close(rect);
     let fill = p.fill.lerp_to_gamma(ink, 0.08 * lift);
     ui.painter().rect_filled(rect, ITEM_PILL_RADIUS, fill);
-    if focused {
-        ui.painter().rect_stroke(rect, ITEM_PILL_RADIUS, Stroke::new(1.0, ink), egui::StrokeKind::Inside);
-    }
     let icon = Rect::from_center_size(
         pos2(rect.left() + crate::app_bar_layout::application::CONTENT_PADDING + PILL_ICON_SIZE / 2.0, rect.center().y),
         vec2(PILL_ICON_SIZE, PILL_ICON_SIZE),
@@ -859,7 +881,7 @@ pub enum BarAction {
 /// The bar drawn: what was chosen, and the places it leaves to the app.
 #[derive(Debug)]
 pub struct BarOut {
-    /// Measured edit cards, including all six-point padding, in Start/End order.
+    /// Paint-only edit cards clamped into existing gaps, in Start/End order.
     pub cards: [Option<Rect>; 2],
     /// Actual control hit regions, in screen coordinates, for editing the saved item list.
     pub edit_items: Vec<crate::app_bar_items::DropItem>,
@@ -1277,7 +1299,20 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
         }
     }
     BarOut {
-        cards: geometry.cards.map(|span| span.map(|span| rect(span, height(true)))),
+        cards: [(geometry.cards[0], crate::app_bar_layout::Zone::Start), (geometry.cards[1], crate::app_bar_layout::Zone::End)].map(
+            |(span, zone)| {
+                span.map(|span| {
+                    let body = spec
+                        .items
+                        .iter()
+                        .zip(&placed.placements)
+                        .filter(|(i, p)| i.zone == zone && !i.locked && p.is_some() && !matches!(i.id.as_str(), "managed" | "offered"))
+                        .map(|(i, _)| if i.id == "report" || i.id.starts_with("pill:") { PILL_HEIGHT } else { ITEM_HEIGHT })
+                        .fold(0.0_f32, f32::max);
+                    rect(span, (body + 2.0 * application::CARD_PADDING).min(r.height()))
+                })
+            },
+        ),
         edit_items,
         quick_slots: geometry.quick_slots.iter().map(|&(i, x)| (i, r.left() + x)).collect(),
         leading,
