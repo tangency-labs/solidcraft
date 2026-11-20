@@ -16,7 +16,7 @@
 )] // test helpers
 
 use solidcore::blend::fillet_geom::p2::{srf_srf_intersection, SrfSrfCurves, SrfSrfOptions};
-use solidcore::error::blend::BlendFailure;
+use solidcore::error::ErrorKind;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::vector2d::Point2;
@@ -512,8 +512,8 @@ fn a_heading_along_neither_way_round_is_refused() {
             .err()
             .unwrap_or_else(|| panic!("{from} -> {to}, {what}: an arc was built"));
             assert_eq!(
-                e.blend_failure(),
-                Some(&BlendFailure::StageFailed),
+                (e.kind(), e.is_defect()),
+                (ErrorKind::StageFailed, true),
                 "{from} -> {to}, {what}: {e:?}"
             );
         }
@@ -538,7 +538,11 @@ fn a_heading_along_neither_way_round_is_refused() {
     )
     .err()
     .unwrap_or_else(|| panic!("half circle 20 -> 110 heading down: an arc was built"));
-    assert_eq!(e.blend_failure(), Some(&BlendFailure::StageFailed), "{e:?}");
+    assert_eq!(
+        (e.kind(), e.is_defect()),
+        (ErrorKind::StageFailed, true),
+        "{e:?}"
+    );
     // heading up, the half circle's arc
     let mut up = heading(20.0, 1.0);
     check_arc(
@@ -745,10 +749,11 @@ fn a_curve_through_a_closure_off_a_seam_it_crosses_keeps_the_drop_error() {
         };
         // the drop's failure: no finer class than a stage that failed (#15034)
         assert_eq!(
-            (e.operation(), e.blend_failure()),
+            (e.operation(), e.kind(), e.is_defect()),
             (
                 "blend::fillet_geom::p2::srf_srf_intersection",
-                Some(&BlendFailure::StageFailed)
+                ErrorKind::StageFailed,
+                true
             ),
             "{from} -> {to}: {e:?}"
         );
