@@ -39,6 +39,39 @@ fn declared_inputs_effects_and_slots_are_readable() {
 }
 
 #[test]
+fn declared_property_order_survives_manifest_and_entry_round_trips() {
+    let bytes = br#"{"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.1"],"runtime":{
+        "module":"plugin.wasm","commands":[],"entries":[{"name":"make","input_schema":{
+            "type":"object","required":["alpha","zeta"],"properties":{
+                "zeta":{"type":"number","default":1.5},
+                "extra":{"type":"number","default":2,"x-solidcraft-visible-when":{"field":"mode","eq":true}},
+                "mode":{"type":"boolean","default":false},
+                "alpha":{"type":"object","properties":{
+                    "z/n~":{"type":"array","items":{"type":"object","properties":{
+                        "tail":{"type":"string","default":"tail"},
+                        "head":{"type":["string","null"],"default":null}
+                    }}},
+                    "a":{"type":"boolean","default":true}
+                }}
+            },"allOf":[{"properties":{"after":{"type":"number"},"before":{"type":"number"}}}]
+        }}]
+    }}"#;
+    let manifest = parse_manifest(bytes, "sample").unwrap();
+    let mut entry = manifest.runtime.as_ref().unwrap().entries[0].clone();
+    let original: Value = serde_json::from_slice(bytes).unwrap();
+    assert_eq!(entry.input_schema, original["runtime"]["entries"][0]["input_schema"], "schema values retain ordinary JSON behaviour");
+    for _ in 0..2 {
+        assert_eq!(entry.input_property_order[""], ["zeta", "extra", "mode", "alpha"]);
+        assert_eq!(entry.input_property_order["/properties/alpha"], ["z/n~", "a"]);
+        assert_eq!(entry.input_property_order["/properties/alpha/properties/z~1n~0/items"], ["tail", "head"]);
+        assert_eq!(entry.input_property_order["/allOf/0"], ["after", "before"]);
+        entry = serde_json::from_value(serde_json::to_value(&entry).unwrap()).unwrap();
+    }
+    let round_trip = parse_manifest(&serde_json::to_vec(&manifest).unwrap(), "sample").unwrap();
+    assert_eq!(round_trip.runtime.unwrap().entries[0].input_property_order, entry.input_property_order);
+}
+
+#[test]
 fn schema_properties_must_be_objects_even_in_nested_inputs() {
     for schema in [
         json!({"type":"object","properties":[]}),
