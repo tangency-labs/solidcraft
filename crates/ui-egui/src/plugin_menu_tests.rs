@@ -316,11 +316,8 @@ fn dialog_field_order_and_initial_picks_require_explicit_opt_in() {
         open_entry(&mut h.app, 0, 0);
         let fields = h.app.plugin_menu.dialog().unwrap().fields.as_ref().unwrap();
         let keys: Vec<&str> = fields.iter().map(|(field, _)| field.key.as_str()).collect();
-        let expected = if declared {
-            ["zeta", "z_pick", "a_pick", "alpha", "b_required"]
-        } else {
-            ["a_pick", "z_pick", "b_required", "alpha", "zeta"]
-        };
+        let expected =
+            if declared { ["zeta", "z_pick", "a_pick", "alpha", "b_required"] } else { ["a_pick", "z_pick", "b_required", "alpha", "zeta"] };
         assert_eq!(keys, expected, "recording declaration order alone does not opt in");
         let first = if declared { "z_pick" } else { "a_pick" };
         for key in ["a_pick", "z_pick"] {
