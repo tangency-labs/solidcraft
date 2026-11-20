@@ -10700,7 +10700,7 @@ mod tests {
         assert!(crate::scenario::rect_of("prefs:panel_layout:save_popover").is_some());
         h.step(&json!({"click":{"handle":"prefs:panel_layout:replace"}})).unwrap();
         h.frames(2);
-        assert!(crate::scenario::rect_of("prefs:panel_layout:replace_confirm").is_some(), "a full library still requires explicit confirmation");
+        assert!(crate::scenario::handle_at("dialog:Replace").is_some(), "a full library still requires explicit confirmation");
         assert_eq!(crate::panel_runtime::user_preset_names(&h.app).len(), 64);
     }
 
@@ -10722,24 +10722,27 @@ mod tests {
         h
     }
 
+    fn open_layout_menu(h: &mut crate::scenario::Harness, name: &str, row: &str) {
+        h.step(&json!({"click":{"handle":format!("prefs:panel_layout:menu:{name}")}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click":{"handle":format!("prefs:panel_layout:{row}")}})).unwrap();
+        h.frames(2);
+    }
+
     #[test]
     fn deleting_a_saved_layout_from_its_menu_asks_first_and_keeps_the_panels() {
         let mut h = layout_page_with_a_saved_layout();
         let layout = h.app.panel_runtime().unwrap().layout().layout().clone();
         assert!(crate::scenario::rect_of("prefs:panel_layout:custom").is_none(), "the panels match the saved layout");
-        h.step(&json!({"click":{"handle":"prefs:panel_layout:menu:Bench setup"}})).unwrap();
+        open_layout_menu(&mut h, "Bench setup", "delete");
+        assert!(crate::scenario::handle_at("dialog:Delete").is_some(), "Delete asks first, in the shared confirmation");
+        h.step(&json!({"key":"Escape"})).unwrap();
         h.frames(2);
-        h.step(&json!({"click":{"handle":"prefs:panel_layout:delete"}})).unwrap();
-        h.frames(2);
-        assert!(crate::scenario::rect_of("prefs:panel_layout:delete_popover").is_some(), "Delete asks first");
-        h.step(&json!({"click":{"handle":"prefs:panel_layout:delete_cancel"}})).unwrap();
-        h.frames(2);
+        assert!(h.app.prefs_window.shell.open, "the first Escape belongs to the confirmation");
+        assert!(crate::scenario::handle_at("dialog:Delete").is_none());
         assert_eq!(crate::panel_runtime::user_preset_names(&h.app), ["Bench setup"], "Cancel keeps the layout");
-        h.step(&json!({"click":{"handle":"prefs:panel_layout:menu:Bench setup"}})).unwrap();
-        h.frames(2);
-        h.step(&json!({"click":{"handle":"prefs:panel_layout:delete"}})).unwrap();
-        h.frames(2);
-        h.step(&json!({"click":{"handle":"prefs:panel_layout:delete_confirm"}})).unwrap();
+        open_layout_menu(&mut h, "Bench setup", "delete");
+        h.step(&json!({"click":{"handle":"dialog:Delete"}})).unwrap();
         h.frames(3);
         assert!(crate::panel_runtime::user_preset_names(&h.app).is_empty());
         assert_eq!(h.app.panel_runtime().unwrap().layout().layout(), &layout, "deleting the applied layout leaves the panels where they are");
@@ -10753,25 +10756,48 @@ mod tests {
     }
 
     #[test]
+    fn replacing_a_saved_layout_from_its_menu_asks_in_the_shared_confirmation() {
+        use solidcraft_engine::panels::{LayoutAction, Mutation};
+        let mut h = layout_page_with_a_saved_layout();
+        let section = h.app.panel_runtime().unwrap().layout().layout().sections.first().unwrap().id.clone();
+        h.app
+            .dispatch_panel_layout(LayoutAction::Apply { expected_revision: None, mutations: vec![Mutation::Collapse { section, collapsed: false }] })
+            .unwrap();
+        h.frames(2);
+        open_layout_menu(&mut h, "Bench setup", "menu_replace");
+        assert!(crate::scenario::handle_at("dialog:Replace").is_some(), "Replace asks first, in the shared confirmation");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(h.app.prefs_window.shell.open);
+        let unmatched = |h: &crate::scenario::Harness| {
+            crate::panel_runtime::layout_preferences_view(&h.app).unwrap().entries.iter().any(|entry| entry.name == "Bench setup" && !entry.matches)
+        };
+        assert!(unmatched(&h), "Cancel keeps the saved arrangement");
+        open_layout_menu(&mut h, "Bench setup", "menu_replace");
+        h.step(&json!({"click":{"handle":"dialog:Replace"}})).unwrap();
+        h.frames(3);
+        assert!(!unmatched(&h), "Replace saves the current panels under the name");
+        assert_eq!(crate::panel_runtime::user_preset_names(&h.app), ["Bench setup"]);
+    }
+
+    #[test]
     fn the_delete_key_asks_before_deleting_a_saved_layout_and_ignores_built_ins() {
         let mut h = layout_page_with_a_saved_layout();
         h.step(&json!({"click":{"handle":"prefs:panel_layout:tile:Bench setup"}})).unwrap();
         h.frames(2);
         h.step(&json!({"key":"Delete"})).unwrap();
         h.frames(2);
-        assert!(crate::scenario::rect_of("prefs:panel_layout:delete_popover").is_some(), "the Delete key asks first");
-        h.step(&json!({"key":"Enter"})).unwrap();
-        h.frames(2);
-        assert_eq!(crate::panel_runtime::user_preset_names(&h.app), ["Bench setup"], "Cancel has the focus, so Enter keeps the layout");
-        h.step(&json!({"key":"Delete"})).unwrap();
-        h.frames(2);
+        assert!(crate::scenario::handle_at("dialog:Delete").is_some(), "the Delete key asks first");
         h.step(&json!({"key":"Escape"})).unwrap();
         h.frames(2);
         assert!(h.app.prefs_window.shell.open, "the first Escape belongs to the confirmation");
         assert_eq!(crate::panel_runtime::user_preset_names(&h.app), ["Bench setup"]);
+        h.step(&json!({"click":{"handle":"prefs:panel_layout:tile:Bench setup"}})).unwrap();
+        h.frames(2);
         h.step(&json!({"key":"Delete"})).unwrap();
         h.frames(2);
-        h.step(&json!({"click":{"handle":"prefs:panel_layout:delete_confirm"}})).unwrap();
+        // Enter answers with the primary action, Delete, as in the app's other delete confirmations.
+        h.step(&json!({"key":"Enter"})).unwrap();
         h.frames(3);
         assert!(crate::panel_runtime::user_preset_names(&h.app).is_empty());
 
@@ -10780,7 +10806,7 @@ mod tests {
         h.frames(2);
         h.step(&json!({"key":"Delete"})).unwrap();
         h.frames(2);
-        assert!(crate::scenario::rect_of("prefs:panel_layout:delete_popover").is_none(), "a built-in layout can't be deleted");
+        assert!(crate::scenario::handle_at("dialog:Delete").is_none(), "a built-in layout can't be deleted");
         assert!(crate::panel_runtime::layout_preferences_view(&h.app).unwrap().entries.iter().any(|entry| entry.name == builtin));
     }
 
