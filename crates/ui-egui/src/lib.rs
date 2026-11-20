@@ -4370,6 +4370,7 @@ impl SolveApp {
         plugin_menu::show(self, ui.ctx());
         stand_up::show(self, ui.ctx());
         prefs_notice::show(self, ui.ctx());
+        file_load::show_refusal(self, ui.ctx());
         context_menu::show(self, ui.ctx());
         mouse_gesture::show(self, ui.ctx());
         delete::show(self, ui.ctx());

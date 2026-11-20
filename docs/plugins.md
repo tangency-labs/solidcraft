@@ -597,7 +597,10 @@ Only an importer may say `open`.
 - **Failures.** A failure fails that one import, named with the plugin and the file ("Sample
   could not open bracket.smp: ...", or "Sample does not support bracket.smp: ..." for
   `unsupported`), and the next one gets a fresh instance. The compiled component stays in memory, so the next file opens
-  without compiling again; nothing compiled is written to disk.
+  without compiling again; nothing compiled is written to disk. Return `unsupported(reason)` for a
+  deliberate refusal meant for the user: File › Open and drag-and-drop open show the plugin's name
+  and its reason as plain text in a dialog with OK. Traps and other failures use the status line.
+  Scripts and MCP return the existing typed error and the reason without opening a dialog.
 - **Limits.** An importer's component may be up to 64 MiB, its deadline up to 10 minutes, and its
   `stack_kib` up to 64 MiB (a command may ask for at most 1 MiB). Its fuel has to fit the user's ceiling in Preferences › Plugins, and
   its memory too unless the user approved more at install. Build it for `wasm32-unknown-unknown` and wrap it with
