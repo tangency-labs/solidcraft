@@ -2035,7 +2035,8 @@ pub(crate) fn cover_joined_faces(
         // Past the limit (#18166): a bound the B-rep check refuses as an edge tolerance is a
         // proved raise taken only where the edge is seen that far from the face: at least
         // `1 / COVER_CONVERGED` (half) of it at a sample ([`sampled_face_gap`]; a stitch
-        // over a real gap, `heal.stitch_p1` `cube2_into_shell`, 0.17; the edge then covers
+        // over a real gap, as in `heal.stitch_p1`/`heal.stitch_p2`, where the gaps measured
+        // 1.01e-2 to 1.02; the edge then covers
         // the face, and fails the B-rep check's test 59 as
         // [`within_edge_tolerance_limit`] says). Otherwise (the UNPROVED fallback) it is the
         // enclosure not converging (`create_cylindrical_box` at radius 1e4, thickness 1e-3:
