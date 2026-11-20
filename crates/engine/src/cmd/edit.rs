@@ -36,6 +36,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&ASSISTANT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::edit::AssistantResult>)
         .params("Show or hide Assistant in the app. Headless calls are refused without changing the design"),
+    CommandSpec::new("ui.appBarReset", "Reset App Bar", crate::checked!("ui.appBarReset", app_bar_reset))
+        .any_part()
+        .icon("restore")
+        .noundo()
+        .doc_only()
+        .contract(&APP_BAR_RESET_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::AppBarResetResult>)
+        .params("Reset the saved application bar layout in the connected app; returns {reset: true}. Headless sessions validate the request only; no dialog or design change"),
     CommandSpec::new("ui.palette", "Search Commands", crate::checked!("ui.palette", palette))
         .icon("zoom")
         .key("S")
@@ -314,6 +322,12 @@ const ASSISTANT_CONTRACT: crate::schema::TypedContract<crate::schema::edit::Assi
 
 fn assistant(_s: &mut Session, _p: &Value) -> Result<Value> {
     Err(EngineError::Other("ui.assistant shows or hides Assistant in the app; no assistant panel exists in a headless session".into()))
+}
+
+const APP_BAR_RESET_CONTRACT: crate::schema::TypedContract<crate::schema::edit::AppBarResetParams> = crate::schema::TypedContract::new();
+
+fn app_bar_reset(_s: &mut Session, _p: &Value) -> Result<Value> {
+    reply("ui.appBarReset", crate::schema::edit::AppBarResetResult { reset: true })
 }
 
 const PALETTE_CONTRACT: crate::schema::TypedContract<crate::schema::edit::PaletteParams> = crate::schema::TypedContract::new();
