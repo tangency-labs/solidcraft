@@ -42,15 +42,6 @@ fn each_schema_type_becomes_its_field_with_limits_labels_and_defaults() {
 
 #[test]
 fn described_field_labels_and_values_show_the_same_tooltip() {
-    field_tooltips(true);
-}
-
-#[test]
-fn fields_without_descriptions_have_no_label_or_value_tooltip() {
-    field_tooltips(false);
-}
-
-fn field_tooltips(described: bool) {
     for mut property in [
         json!({"type":"number","default":2}),
         json!({"type":"number"}),
@@ -62,9 +53,7 @@ fn field_tooltips(described: bool) {
         json!({"type":"array","x-solidcraft-selection":{"version":1,"accept":["edge"]}}),
     ] {
         property["title"] = json!("Saw kerf");
-        if described {
-            property["description"] = json!("Width removed by the saw blade");
-        }
+        property["description"] = json!("Width removed by the saw blade");
         let mut h = crate::scenario::Harness::new();
         let mut command = entry("cut", "edit", json!([]));
         command.input_schema = json!({"type":"object","required":["kerf"],"properties":{"kerf":property}});
@@ -93,20 +82,72 @@ fn field_tooltips(described: bool) {
                 h.frame_with(vec![egui::Event::PointerMoved(at)]);
                 h.frames(4);
                 let context = format!("{property}: label={label}, idle={idle}");
-                if described {
-                    let mut found = false;
-                    for shape in &h.shapes {
-                        crate::test_support::each_shape(&shape.shape, &mut |shape| {
-                            if let egui::Shape::Text(text) = shape {
-                                found |= text.galley.text() == "Width removed by the saw blade";
-                            }
-                        });
-                    }
-                    assert!(found, "description is painted on hover: {context}");
-                } else {
-                    assert!(egui::Tooltip::seconds_since_last_tooltip(&h.ctx) > 0.0, "no tooltip on hover: {context}");
+                let mut found = false;
+                for shape in &h.shapes {
+                    crate::test_support::each_shape(&shape.shape, &mut |shape| {
+                        if let egui::Shape::Text(text) = shape {
+                            found |= text.galley.text() == "Width removed by the saw blade";
+                        }
+                    });
                 }
+                assert!(found, "description is painted on hover: {context}");
             }
+        }
+    }
+}
+
+#[test]
+fn fields_without_descriptions_keep_picking_help_and_clipped_label_tooltips() {
+    let title = "A long plugin field label that must be clipped in the label column";
+    let label = format!("{title} *");
+    let mut h = crate::scenario::Harness::new();
+    let mut command = entry("cut", "edit", json!([]));
+    command.input_schema = json!({"type":"object","required":["kerf"],"properties":{
+        "kerf":{"type":"array","title":title,"x-solidcraft-selection":{"version":1,"accept":["edge"]}}
+    }});
+    h.app.plugin_menu.listed = vec![listed("saw", vec![command])];
+    h.app.plugin_menu.loaded = true;
+    h.app.home.open = false;
+    open_entry(&mut h.app, 0, 0);
+    h.app.plugin_menu.dialogs.last_mut().unwrap().preview = false;
+    h.ctx.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
+    h.frames(4);
+    for idle in [false, true] {
+        if idle {
+            h.app.dialog = None;
+            h.frames(3);
+        }
+        for hover_label in [false, true] {
+            h.frame_with(vec![egui::Event::PointerGone]);
+            h.frames(3);
+            if hover_label {
+                let mut clipped = false;
+                for shape in &h.shapes {
+                    crate::test_support::each_shape(&shape.shape, &mut |shape| {
+                        if let egui::Shape::Text(text) = shape {
+                            clipped |= text.galley.text() == label && text.galley.elided;
+                        }
+                    });
+                }
+                assert!(clipped, "the label must actually be clipped: idle={idle}");
+            }
+            let at = if hover_label {
+                crate::scenario::rect_of(&format!("dialog:label:{label}")).expect("field label").center()
+            } else {
+                crate::scenario::handle_at("plugin_dialog:field:kerf").expect("selection value")
+            };
+            h.frame_with(vec![egui::Event::PointerMoved(at)]);
+            h.frames(4);
+            let expected = if hover_label { label.as_str() } else { "click edges or faces (click to pick into this input)" };
+            let mut found = false;
+            for shape in &h.shapes {
+                crate::test_support::each_shape(&shape.shape, &mut |shape| {
+                    if let egui::Shape::Text(text) = shape {
+                        found |= text.galley.text() == expected && !text.galley.elided;
+                    }
+                });
+            }
+            assert!(found, "default tooltip is painted: label={hover_label}, idle={idle}, expected={expected}");
         }
     }
 }
