@@ -2459,8 +2459,13 @@ mod tests {
         let mut attrs = AttributeSink::new(&mut store, &mut all, 0);
         // a version 31 line curve type is SM_ERR
         let mut db = ascii_reader("Object Type 14001\n");
-        assert!(read_curve_from_db(&k, 3, 31, &mut attrs, &mut db, true)
-            .is_err_and(|e| e.upstream_status() == Some(1001)));
+        assert!(
+            read_curve_from_db(&k, 3, 31, &mut attrs, &mut db, true).is_err_and(|e| e
+                .upstream_status()
+                == Some(1001)
+                && e.topology_failure()
+                    == Some(&TopologyFailure::RecordTypeUnknown { type_code: 14001 }))
+        );
         // version 31 B-spline line segment with an attribute index into an empty slot
         let text = "Object Type 14033\n1\n1\n0\n3\n0 0 0\n1 1 1\n0\n0\n1\n1\n1 0\n";
         let mut db = ascii_reader(text);

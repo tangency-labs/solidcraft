@@ -213,8 +213,21 @@ pub enum TopologyFailure {
     /// A face of the caller's body has no surface. [`ErrorKind::InvalidInput`].
     FaceWithoutSurface,
     /// A surface of revolution or extrusion has no generator curve, which its record
-    /// needs. [`ErrorKind::Unsupported`].
+    /// needs (only the `empty()` constructors leave it out). [`ErrorKind::InvalidInput`].
     SurfaceWithoutGenerator,
+    /// An edge of the caller's body has no edge use, so it is on no loop or wire (an edge
+    /// added and never linked, or one no edge-use record of a file names).
+    /// [`ErrorKind::InvalidInput`].
+    EdgeWithoutEdgeuses,
+    /// An edge's curve resolves to no owning edge: it has no owner, or the caller's owner
+    /// map does not resolve the edge use or generated curve that owns it.
+    /// [`ErrorKind::InvalidInput`].
+    CurveOwnerUnresolved,
+    /// A face's surface has no owning face. [`ErrorKind::InvalidInput`].
+    SurfaceWithoutOwningFace,
+    /// The topology solver asked for the B-rep's cache on a view the caller made without
+    /// one. [`ErrorKind::InvalidInput`].
+    SolveViewWithoutCache,
     /// A B-rep cache was asked for a type that is neither a B-rep nor a poly B-rep.
     /// [`ErrorKind::InvalidInput`].
     CacheTargetNotBrep,
@@ -311,6 +324,10 @@ impl TopologyFailure {
             | Self::EdgeWithoutCurve
             | Self::FaceWithoutSurface
             | Self::SurfaceWithoutGenerator
+            | Self::EdgeWithoutEdgeuses
+            | Self::CurveOwnerUnresolved
+            | Self::SurfaceWithoutOwningFace
+            | Self::SolveViewWithoutCache
             | Self::NoInputStream
             | Self::AttributeSlotEmpty => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_)
@@ -360,6 +377,11 @@ impl TopologyFailure {
             | Self::NotOnOwnerList
             | Self::EdgeWithoutCurve
             | Self::FaceWithoutSurface
+            | Self::SurfaceWithoutGenerator
+            | Self::EdgeWithoutEdgeuses
+            | Self::CurveOwnerUnresolved
+            | Self::SurfaceWithoutOwningFace
+            | Self::SolveViewWithoutCache
             | Self::CacheTargetNotBrep
             | Self::NoInputStream
             | Self::RecordTypeUnknown { .. }
@@ -371,8 +393,7 @@ impl TopologyFailure {
             | Self::EdgeNotDeletable
             | Self::InnerLoopsOnBothSides
             | Self::LaminaEdgeIsStrut
-            | Self::NoPlaneProjection
-            | Self::SurfaceWithoutGenerator => ErrorKind::Unsupported,
+            | Self::NoPlaneProjection => ErrorKind::Unsupported,
             Self::CurveNotApproximated
             | Self::AllocationFailed
             | Self::NoProjectedCurves
@@ -492,10 +513,18 @@ impl core::fmt::Display for TopologyFailure {
             }
             Self::NothingToLink => f.write_str("an object to link is missing"),
             Self::NotOnOwnerList => f.write_str("the object is not on this list"),
-            Self::EdgeWithoutCurve => f.write_str("an edge has no curve"),
-            Self::FaceWithoutSurface => f.write_str("a face has no surface"),
+            Self::EdgeWithoutCurve => f.write_str("the edge has no curve"),
+            Self::FaceWithoutSurface => f.write_str("the face has no surface"),
             Self::SurfaceWithoutGenerator => {
                 f.write_str("the swept surface has no generator curve")
+            }
+            Self::EdgeWithoutEdgeuses => f.write_str("the edge has no edge use"),
+            Self::CurveOwnerUnresolved => {
+                f.write_str("the edge's curve resolves to no owning edge")
+            }
+            Self::SurfaceWithoutOwningFace => f.write_str("the face's surface has no owning face"),
+            Self::SolveViewWithoutCache => {
+                f.write_str("the solve needs the B-rep's cache, and the view has none")
             }
             Self::CacheTargetNotBrep => {
                 f.write_str("a B-rep cache is only for a B-rep or a poly B-rep")
@@ -877,7 +906,23 @@ mod tests {
             (
                 T::SurfaceWithoutGenerator,
                 SM_ERR_NULL_POINTER,
-                K::Unsupported,
+                K::InvalidInput,
+            ),
+            (T::EdgeWithoutEdgeuses, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (
+                T::CurveOwnerUnresolved,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (
+                T::SurfaceWithoutOwningFace,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (
+                T::SolveViewWithoutCache,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
             ),
             (T::CacheTargetNotBrep, SM_ERR, K::InvalidInput),
             (T::NoInputStream, SM_ERR_NULL_POINTER, K::InvalidInput),
@@ -905,6 +950,15 @@ mod tests {
             .into_error();
         assert_eq!(e.cause(), Some(&cause));
         assert!(e.is_defect());
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        // a net the proof refuses as input (`recertify`'s `InvalidInput`) reads as no defect
+        let cause = SolidError::invalid_input(op, "the net is not within its bound");
+        let e = Failure::new(op, T::BlendRecordNotProved)
+            .caused_by(cause.clone())
+            .into_error();
+        assert_eq!(e.cause(), Some(&cause));
+        assert!(!e.is_defect(), "{e:?}");
+        assert_eq!(e.kind(), K::Failed);
         assert_eq!(e.upstream_status(), Some(SM_ERR));
     }
 
