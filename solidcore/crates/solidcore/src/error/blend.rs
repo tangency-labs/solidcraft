@@ -50,6 +50,8 @@
 //! | [`BlendFailure::KeptFeatureNotBuilt`] | its stop's kind ([`KeepStop`]): [`ErrorKind::NotFound`] (2), [`ErrorKind::Unsupported`] (5) or [`ErrorKind::Failed`] (6) |
 //! | [`BlendFailure::CreaseTrimNotBuilt`] | its stop's kind ([`CreaseTrimStop`]): [`ErrorKind::NotFound`] (2), [`ErrorKind::Degenerate`] (3), [`ErrorKind::Unsupported`] (5) or [`ErrorKind::Failed`] (6) |
 //! | [`BlendFailure::Trace`]               | the cause's ([`TraceFailure::class`])         |
+//! | [`BlendFailure::InputMissing`]         | [`ErrorKind::InvalidInput`] (1): the caller's missing input |
+//! | [`BlendFailure::QuadricReadbackMismatch`] | [`ErrorKind::NotWithinTolerance`] (9) |
 //! | the phrase causes ([`BlendFailure::Failed`], [`BlendFailure::Missing`], ...) | their status's kind, as before the record; neither defect nor refusal |
 //!
 //! **Statuses.** Each failure also records, for difftest and the goldens only, the status
@@ -80,6 +82,8 @@
 //! | [`BlendFailure::SectionNotProved`], [`BlendFailure::SectionDegenerate`], [`BlendFailure::SectionUnsupported`], [`BlendFailure::RadiusLawNotPositive`], [`BlendFailure::SectionInputInvalid`] | `SM_ERR` |
 //! | [`BlendFailure::Solver`]               | its cause's ([`SolverFailure`]: `SM_ERR`, or `SM_ERR_NULL_POINTER` for a missing input of the caller's, a centre line with no B-spline form, a rail curve not of a B-spline class, a surface cache not built, a side surface that misses its end plane and a side edge not on the rail's face) |
 //! | [`BlendFailure::WeldNotBuilt`]         | `SM_ERR`                          |
+//! | [`BlendFailure::InputMissing`]         | `SM_ERR_NULL_POINTER`             |
+//! | [`BlendFailure::QuadricReadbackMismatch`] | `SM_ERR` |
 //!
 //! **The phrase causes** ([`BlendFailure::Failed`] to [`BlendFailure::PassedOn`]) are the
 //! shape the blend sites were converted to before the record, some of them refusals not yet
@@ -734,6 +738,69 @@ pub enum BlendFailure {
     /// the gap named: not a fact of the geometry and not a defect, so no size is named. Its
     /// class is [`ErrorKind::Unsupported`]. Not upstream.
     WeldNotBuilt(WeldGap),
+    /// An input supplied by the blend routine's caller (a solver slot or the body's
+    /// topology or geometry) is not there: invalid input ([`ErrorKind::InvalidInput`]),
+    /// not a defect or refusal. Status `SM_ERR_NULL_POINTER`; not a phrase cause.
+    InputMissing(BlendInput),
+    /// The natural quadric read off a support surface is not that surface at the point:
+    /// its distance exceeds the tolerance or its normal turns from the surface's.
+    /// Not within tolerance ([`ErrorKind::NotWithinTolerance`]); status `SM_ERR`.
+    QuadricReadbackMismatch {
+        /// The point's distance from the quadric.
+        distance: f64,
+        /// The largest distance allowed.
+        tolerance: f64,
+        /// The quadric normal dotted with the surface normal.
+        normal_dot: f64,
+        /// The smallest normal dot product allowed.
+        minimum_normal_dot: f64,
+    },
+}
+
+/// Which caller-supplied input of a blend routine is missing ([`BlendFailure::InputMissing`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum BlendInput {
+    /// The solver's edge use on a rail.
+    SolverEdgeuse {
+        /// The rail's index.
+        rail: usize,
+    },
+    /// The edge of an edge use in the caller's body.
+    EdgeuseEdge {
+        /// The edge use whose edge is missing.
+        edgeuse: crate::topology::EdgeuseId,
+    },
+    /// The evaluation curve of an edge in the caller's body.
+    EdgeCurve {
+        /// The edge whose evaluation curve is missing.
+        edge: crate::topology::EdgeId,
+    },
+    /// The solver's support surface on a rail.
+    SupportSurface {
+        /// The rail's index.
+        rail: usize,
+    },
+    /// The solver's surface generator.
+    SurfaceGenerator,
+}
+
+impl BlendInput {
+    /// What is missing, including the rail or topology id where known.
+    #[must_use]
+    pub fn what(self) -> String {
+        match self {
+            Self::SolverEdgeuse { rail } => format!("the solver's edge use on rail {rail}"),
+            Self::EdgeuseEdge { edgeuse } => {
+                format!("the edge use's edge (edge use {})", edgeuse.index())
+            }
+            Self::EdgeCurve { edge } => {
+                format!("the edge's evaluation curve (edge {})", edge.index())
+            }
+            Self::SupportSurface { rail } => format!("the solver's support surface on rail {rail}"),
+            Self::SurfaceGenerator => "the solver's surface generator".into(),
+        }
+    }
 }
 
 /// A shape of the edges at a filleted vertex that the fillet corner topology
@@ -2677,6 +2744,7 @@ impl BlendFailure {
             | Self::NoBlendedEdgeNearExtension
             | Self::KeptFeatureNotBuilt(_)
             | Self::CreaseTrimNotBuilt(_)
+            | Self::QuadricReadbackMismatch { .. }
             | Self::Failed(_) => SM_ERR,
             Self::Trace(t) => t.comparison_status(),
             Self::Missing(_)
@@ -2694,6 +2762,7 @@ impl BlendFailure {
             | Self::LawCornerNotFound { .. }
             | Self::EdgeUseWithoutEdge
             | Self::BoundSurfaceRemoved
+            | Self::InputMissing(_)
             | Self::CornerPatchFaceNotFound { .. } => SM_ERR_NULL_POINTER,
             Self::CornerShapeNotBuilt(shape) => shape.upstream_status(),
             Self::NoEdgesGiven
@@ -2743,7 +2812,9 @@ impl BlendFailure {
     /// [`BlendFailure::CornerShapeNotBuilt`], [`ErrorKind::NotFound`] for
     /// [`BlendFailure::CornerPointDropUnresolved`], and the step's class
     /// ([`MixedStep::class`], [`CornerStep::class`]) for [`BlendFailure::MixedCornerUnbuildable`]
-    /// and [`BlendFailure::CornerUnbuildable`]. A phrase
+    /// and [`BlendFailure::CornerUnbuildable`], [`ErrorKind::InvalidInput`] for
+    /// [`BlendFailure::InputMissing`] and [`ErrorKind::NotWithinTolerance`] for
+    /// [`BlendFailure::QuadricReadbackMismatch`]. A phrase
     /// cause keeps the kind of its status ([`ErrorKind::Failed`], [`ErrorKind::Missing`],
     /// [`ErrorKind::InvalidInput`], ...), as before the record ([`BlendFailure::is_phrase`]).
     #[must_use]
@@ -2762,6 +2833,7 @@ impl BlendFailure {
             Self::SkinPastStationCap { .. }
             | Self::NotCertified { .. }
             | Self::SectionNotProved(_)
+            | Self::QuadricReadbackMismatch { .. }
             | Self::PlaneCurveFitCap { .. } => ErrorKind::NotWithinTolerance,
             Self::PlaneCurveTouches { .. } | Self::SectionDegenerate(_) => ErrorKind::Degenerate,
             Self::RadiusLawNotPositive { .. } | Self::SectionInputInvalid(_) => {
@@ -2822,6 +2894,7 @@ impl BlendFailure {
             | Self::EdgeUseWithoutEdge
             | Self::BoundSurfaceRemoved
             | Self::CornerInputInvalid { .. }
+            | Self::InputMissing(_)
             | Self::FilletSetUpInvalid(_) => ErrorKind::InvalidInput,
             Self::ClosedCliffWouldNotSplit { .. }
             | Self::CornerRefused
@@ -2945,6 +3018,8 @@ impl BlendFailure {
             | Self::RadiusLawNotPositive { .. }
             | Self::SectionInputInvalid(_)
             | Self::NotCertified { .. }
+            | Self::InputMissing(_)
+            | Self::QuadricReadbackMismatch { .. }
             | Self::WeldNotBuilt(_) => true,
         }
     }
@@ -3287,6 +3362,16 @@ impl core::fmt::Display for BlendFailure {
                 self.class()
             ),
             Self::BandInputMissing(input) => write!(f, "{} is missing", input.what()),
+            Self::InputMissing(input) => write!(f, "{} is missing", input.what()),
+            Self::QuadricReadbackMismatch {
+                distance,
+                tolerance,
+                normal_dot,
+                minimum_normal_dot,
+            } => write!(
+                f,
+                "the quadric read off the support surface does not match it: distance {distance} (tolerance {tolerance}), normal dot {normal_dot} (minimum {minimum_normal_dot})"
+            ),
             Self::CliffInputMissing { face, input } => {
                 write!(f, "cliff face {face:?} is missing its {}", input.what())
             }
@@ -3784,6 +3869,71 @@ mod tests {
             assert_eq!(e.sized(), class.sized(), "{cause:?}");
             assert!(!e.is_port_failure(), "{cause:?}");
         }
+    }
+
+    #[test]
+    fn missing_blend_inputs_are_invalid_inputs_with_the_null_pointer_status() {
+        use crate::topology::{EdgeId, EdgeuseId};
+        let cases = [
+            (
+                BlendInput::SolverEdgeuse { rail: 0 },
+                "the solver's edge use on rail 0 is missing",
+            ),
+            (
+                BlendInput::EdgeuseEdge {
+                    edgeuse: EdgeuseId::from_index(4),
+                },
+                "the edge use's edge (edge use 4) is missing",
+            ),
+            (
+                BlendInput::EdgeCurve {
+                    edge: EdgeId::from_index(7),
+                },
+                "the edge's evaluation curve (edge 7) is missing",
+            ),
+            (
+                BlendInput::SupportSurface { rail: 1 },
+                "the solver's support surface on rail 1 is missing",
+            ),
+            (
+                BlendInput::SurfaceGenerator,
+                "the solver's surface generator is missing",
+            ),
+        ];
+        for (input, message) in cases {
+            let cause = BlendFailure::InputMissing(input);
+            assert_eq!(cause.class(), ErrorKind::InvalidInput);
+            assert!(!cause.is_phrase() && cause.replaces_upstream_status());
+            let e = SolidError::blend("blend::op", cause);
+            assert_eq!(e.kind(), ErrorKind::InvalidInput);
+            assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER));
+            assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+            assert!(!e.is_defect() && !e.is_refusal() && !e.sized());
+            assert_eq!(e.blend_failure(), Some(&cause));
+            assert_eq!(e.to_string(), format!("blend::op: {message}"));
+        }
+    }
+
+    #[test]
+    fn a_quadric_readback_mismatch_names_its_measurements_and_keeps_sm_err() {
+        let cause = BlendFailure::QuadricReadbackMismatch {
+            distance: 0.25,
+            tolerance: 0.01,
+            normal_dot: 0.9,
+            minimum_normal_dot: 0.99,
+        };
+        assert_eq!(cause.class(), ErrorKind::NotWithinTolerance);
+        assert!(!cause.is_phrase() && cause.replaces_upstream_status());
+        let e = SolidError::blend("blend::op", cause);
+        assert_eq!(e.kind(), ErrorKind::NotWithinTolerance);
+        assert_eq!(e.sm_status(), Some(SM_ERR));
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert!(!e.is_defect() && !e.is_refusal() && !e.sized());
+        assert_eq!(e.blend_failure(), Some(&cause));
+        assert_eq!(
+            e.to_string(),
+            "blend::op: the quadric read off the support surface does not match it: distance 0.25 (tolerance 0.01), normal dot 0.9 (minimum 0.99)"
+        );
     }
 
     #[test]
