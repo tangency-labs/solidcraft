@@ -301,3 +301,48 @@ pub(in crate::cmd) fn export_plans(s: &Session, name: &str, command: &str, warni
     }
     Ok(plans)
 }
+
+/// The optics render setup `name` gives the design's bodies, for an export: one plan per binding.
+/// What the export cannot write (a glass model, subsurface scattering, transmissive shadows) is a
+/// warning naming the body; a binding whose body is gone is left out with a warning.
+pub(in crate::cmd) fn optics_plans(s: &Session, name: &str, command: &str, warnings: &mut Vec<String>) -> Result<Vec<solidcraft_io::OpticsPlan>> {
+    let Some(setup) = s.doc.render.setups.get(name) else { return Ok(Vec::new()) };
+    if setup.optics.is_empty() {
+        return Ok(Vec::new());
+    }
+    let identities = match targets(s, command) {
+        Ok(identities) => identities,
+        Err(e) => {
+            warnings.push(format!("render setup `{name}`: its optics are not written: {e}"));
+            return Ok(Vec::new());
+        }
+    };
+    let mut plans = Vec::new();
+    for binding in setup.optics.iter() {
+        let Some(world) = identities.get(&binding.target) else {
+            warnings.push(format!("render setup `{name}`: a body given optics is gone or changed: left out"));
+            continue;
+        };
+        let optics = &binding.optics;
+        for (unwritten, what) in [
+            (optics.model.is_some(), "its glass model"),
+            (optics.subsurface.is_some(), "its subsurface scattering"),
+            (optics.shadow_transmission, "its transmissive shadows"),
+        ] {
+            if unwritten {
+                warnings.push(format!("{world}: render setup `{name}`: {what} has no OpenUSD form here: left out"));
+            }
+        }
+        plans.push(solidcraft_io::OpticsPlan {
+            setup: name.to_string(),
+            definition: binding.target.definition.clone(),
+            component: binding.target.component,
+            path: binding.target.occurrence_path.clone(),
+            world: world.clone(),
+            ior: optics.ior,
+            absorption_per_mm: optics.absorption_per_mm,
+            thin_sheet: optics.boundary == solidcraft_doc::render_optics::OpticalBoundary::ThinSheet,
+        });
+    }
+    Ok(plans)
+}

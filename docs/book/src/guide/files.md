@@ -60,6 +60,9 @@ With `images: true` and a `.usdz` path, each picture shown on the model (a decal
 into the package as a body of its own in its component, named after it: a quad lifted 0.2 mm off each
 side, its image as its colour and, for a PNG with transparency, its opacity. A hidden picture is not
 written; a `.usda` or `.usdc` file, or an export of chosen bodies, leaves the pictures out with a warning.
+With `render_setup`, a body the setup gives optics is written as glass, in every encoding: the setup's
+index of refraction, and full transmission on the MaterialX OpenPBR shader with the colour 1 mm of the
+absorption leaves (a reader of the preview surface alone shows it opaque, and a warning says so).
 Collision shapes are not written yet.
 
 **File → Export Rhino…** (`file.export` with a `.3dm` path) writes a Rhino 8 file through cadmpeg, from

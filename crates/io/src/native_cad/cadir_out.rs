@@ -180,6 +180,7 @@ pub(crate) fn design_for(
             options.decals.len()
         ));
     }
+    b.optics = &options.optics;
     if options.physics && !b.physics {
         b.warnings
             .push("joints and mass are written only for the whole design with its components and rigid placements: no physics is written".into());
@@ -248,6 +249,11 @@ struct Builder<'a> {
     surfaces: &'a [crate::SurfacePlan],
     /// The pictures shown on the model, each written as a body of its own.
     decals: &'a [crate::DecalPlan],
+    /// The optics a render setup gives bodies.
+    optics: &'a [crate::OpticsPlan],
+    /// The appearances with optics made, by plain appearance (`None`: a body's colour) and
+    /// optics.
+    optical: HashMap<(Option<AppearanceId>, String), AppearanceId>,
     /// The decal bodies written so far.
     decal_count: usize,
     /// The texture images written.
@@ -278,6 +284,8 @@ impl<'a> Builder<'a> {
             surfaces: &[],
             decals: &[],
             decal_count: 0,
+            optics: &[],
+            optical: HashMap::new(),
             texture_assets: super::cadir_textures::Assets::default(),
             textured: HashMap::new(),
             ir: CadIr::empty(),
@@ -465,6 +473,65 @@ impl<'a> Builder<'a> {
         Ok(Some(body))
     }
 
+    /// The render setup's optics of model body `b` of component `component`, when every shown
+    /// placement (`shown`) has them alike; else none, with a warning when some placement has them.
+    fn optics_of(&mut self, b: &ModelBody, component: u64, shown: &[Vec<u64>]) -> Option<&'a crate::OpticsPlan> {
+        let all = self.optics;
+        let bound: Vec<&crate::OpticsPlan> = all.iter().filter(|p| p.definition == b.definition_name() && p.component == component).collect();
+        // The reference is a shown placement's: a hidden one's optics do not count.
+        let first = *bound.iter().find(|p| shown.contains(&p.path)).or(bound.first())?;
+        let alike = |p: &crate::OpticsPlan| (p.ior, p.absorption_per_mm, p.thin_sheet) == (first.ior, first.absorption_per_mm, first.thin_sheet);
+        let covered = !shown.is_empty() && shown.iter().all(|path| bound.iter().any(|p| &p.path == path && alike(p)));
+        if !covered {
+            self.warnings.push(format!(
+                "{}: render setup `{}` gives its placements different optics (or some none): written without them, as the file gives a component's body one look",
+                clean(&b.name).unwrap_or_else(|| "a body".into()),
+                first.setup
+            ));
+            return None;
+        }
+        Some(first)
+    }
+
+    /// The appearance `plain` (else one of colour `colour`) with `optics`' properties, made once.
+    fn with_optics(&mut self, plain: Option<AppearanceId>, colour: Option<Color>, optics: &crate::OpticsPlan) -> Result<AppearanceId, String> {
+        let properties = super::cadir_textures::optics_properties(optics);
+        // With no appearance of its own, the colour it falls back to tells two apart too.
+        let fallback = if plain.is_none() { colour.map(|c| [c.r(), c.g(), c.b(), c.a()].map(f32::to_bits)) } else { None };
+        let key = (plain.clone(), format!("{:?}", (properties.as_slice(), fallback)));
+        if let Some(id) = self.optical.get(&key) {
+            return Ok(id.clone());
+        }
+        let id: AppearanceId = id("optics-appearance", self.optical.len())?;
+        let base = plain.as_ref().and_then(|p| self.ir.model.appearances.iter().find(|a| a.id == *p)).cloned();
+        let mut appearance = base.unwrap_or_else(|| Appearance {
+            id: id.clone(),
+            name: None,
+            asset_guid: None,
+            library_id: None,
+            visual_guid: None,
+            physical_token: None,
+            schema: None,
+            category: None,
+            base_color: colour,
+            properties: BTreeMap::new(),
+            textures: Vec::new(),
+        });
+        appearance.id = id.clone();
+        appearance.name = Some(match &appearance.name {
+            Some(n) => format!("{n} {}", optics.setup),
+            None => optics.setup.clone(),
+        });
+        for (name, value) in properties {
+            if let (Some(name), Some(value)) = (NonBlankString::new(name), FiniteReal::new(value)) {
+                appearance.properties.insert(name, value);
+            }
+        }
+        self.ir.model.appearances.push(appearance);
+        self.optical.insert(key, id.clone());
+        Ok(id)
+    }
+
     /// The appearance `plain` (else one of colour `colour`) with `plan`'s images, made once.
     fn textured(
         &mut self,
@@ -567,7 +634,8 @@ impl<'a> Builder<'a> {
         for b in sel {
             let meshes = self.ir.model.tessellations.len();
             let surface = self.surfaces.iter().find(|p| p.world == b.name).map(|p| (p, b.source_transform));
-            match self.body(b, &b.body, &b.name, surface)? {
+            let optics = self.optics.iter().find(|p| p.world == b.name);
+            match self.body(b, &b.body, &b.name, surface, optics)? {
                 Some(id) => {
                     if self.hidden.bodies.contains(&b.name) {
                         self.hide(&id);
@@ -636,8 +704,10 @@ impl<'a> Builder<'a> {
                 },
                 _ => None,
             };
-            let surface = self.surface(b, owner, shown.get(&owner).map(Vec::as_slice).unwrap_or_default());
-            if let Some(id) = self.body(b, framed.as_ref().unwrap_or(&b.body), b.definition_name(), surface)?
+            let placements = shown.get(&owner).map(Vec::as_slice).unwrap_or_default();
+            let surface = self.surface(b, owner, placements);
+            let optics = self.optics_of(b, owner, placements);
+            if let Some(id) = self.body(b, framed.as_ref().unwrap_or(&b.body), b.definition_name(), surface, optics)?
                 && let Some(list) = owned.get_mut(key)
             {
                 let paths = shown.get(&owner).map(Vec::as_slice).unwrap_or_default();
@@ -792,6 +862,7 @@ impl<'a> Builder<'a> {
         geometry: &solidcraft_kernel::Body,
         name: &str,
         surface: Option<(&'a crate::SurfacePlan, Mat)>,
+        optics: Option<&'a crate::OpticsPlan>,
     ) -> Result<Option<BodyId>, String> {
         let shown = clean(&b.name).unwrap_or_else(|| "a body".into());
         let n = self.bodies;
@@ -845,15 +916,35 @@ impl<'a> Builder<'a> {
             Some(id) if self.writes.appearances => {
                 match &look {
                     Some(look) => {
-                        let a = self.appearance(look)?;
+                        let mut a = self.appearance(look)?;
+                        if let Some(o) = optics {
+                            a = self.with_optics(Some(a), None, o)?;
+                        }
                         own = Some(a.clone());
                         self.bind(AppearanceTarget::Body(id.clone()), a)?;
                     }
-                    None => self.set_colour(id, b),
+                    None => {
+                        self.set_colour(id, b);
+                        if let Some(o) = optics {
+                            let colour = self.ir.model.bodies.iter().find(|x| x.id == *id).and_then(|x| x.color);
+                            let a = self.with_optics(None, colour, o)?;
+                            own = Some(a.clone());
+                            self.bind(AppearanceTarget::Body(id.clone()), a)?;
+                        }
+                    }
+                }
+                if let Some(o) = optics {
+                    self.warnings.push(format!(
+                        "{shown}: the optics of render setup `{}` are written as the MaterialX shader's transmission: a reader of the preview surface alone shows it opaque",
+                        o.setup
+                    ));
                 }
                 if self.writes.bound_meshes {
                     for (face, look) in &faces {
-                        let a = self.appearance(look)?;
+                        let mut a = self.appearance(look)?;
+                        if let Some(o) = optics {
+                            a = self.with_optics(Some(a), None, o)?;
+                        }
                         if let Ok(face) = u32::try_from(*face) {
                             face_looks.insert(face, a);
                         }
@@ -892,8 +983,19 @@ impl<'a> Builder<'a> {
         if let (Some((plan, to_mesh)), Some(id), true) = (surface, &id, self.writes.appearances) {
             match super::cadir_textures::coordinates(&mesh.positions, plan, &to_mesh) {
                 Some(coordinates) => {
-                    let refs =
+                    let mut refs =
                         super::cadir_textures::references(plan, &mut self.texture_assets, &mut self.ir.model.assets, &shown, &mut self.warnings);
+                    // Glass transmits: a metallic map would drive OpenPBR's metalness, which takes
+                    // the transmission away, so a body given optics is written without it.
+                    if let Some(o) = optics
+                        && refs.iter().any(|r| r.slot.starts_with("metallic"))
+                    {
+                        refs.retain(|r| !r.slot.starts_with("metallic"));
+                        self.warnings.push(format!(
+                            "{shown}: the metallic image of render setup `{}` is not written, as its optics make it glass, which a metal does not transmit",
+                            o.setup
+                        ));
+                    }
                     if !refs.is_empty() {
                         let colour = self.ir.model.bodies.iter().find(|x| x.id == *id).and_then(|x| x.color);
                         let body_look = self.textured(own.clone(), colour, plan, &refs)?;

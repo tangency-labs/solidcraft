@@ -493,14 +493,6 @@ pub(super) fn bound_bodies(s: &Session, cmd: &str) -> Result<std::collections::B
     Ok(out)
 }
 
-/// The placed bodies (by world name) that render setup `setup` gives optics: what an export that
-/// writes the setup's images still cannot hold.
-pub(super) fn optics_bodies(s: &Session, cmd: &str, setup: &str) -> Result<std::collections::BTreeSet<String>> {
-    let Some(x) = s.doc.render.setups.get(setup).filter(|x| !x.optics.is_empty()) else { return Ok(Default::default()) };
-    let names = surface_bindings::targets(s, cmd)?;
-    Ok(x.optics.iter().filter_map(|b| names.get(&b.target).cloned()).collect())
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;

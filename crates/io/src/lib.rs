@@ -39,9 +39,9 @@ pub mod limits;
 mod mutate;
 mod native_cad;
 pub use native_cad::{
-    CadmpegOptions, DecalPlan, Hidden, NATIVE_CAD_EXTS, NativeDesign, SurfaceMap, SurfacePlan, USD_EXTS, cadmpeg_export, cadmpeg_step_records,
-    detects_freecad, is_freecad_path, is_native_cad_path, is_usd_path, native_cad_design, native_cad_records, native_cad_to_step, read_usd,
-    usd_from_design, usd_records,
+    CadmpegOptions, DecalPlan, Hidden, NATIVE_CAD_EXTS, NativeDesign, OpticsPlan, SurfaceMap, SurfacePlan, USD_EXTS, cadmpeg_export,
+    cadmpeg_step_records, detects_freecad, is_freecad_path, is_native_cad_path, is_usd_path, native_cad_design, native_cad_records,
+    native_cad_to_step, read_usd, usd_from_design, usd_records,
 };
 pub mod paper;
 mod pat;
