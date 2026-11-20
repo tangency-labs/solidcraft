@@ -16,7 +16,7 @@ pub(super) struct BackingSlot {
 
 impl BackingSlot {
     pub(super) fn reserve(ctx: &Context, layer: egui::LayerId) -> Option<Self> {
-        if !crate::blur::enabled() || ctx.viewport_id() != egui::ViewportId::ROOT {
+        if !crate::blur::enabled() {
             return None;
         }
         let painter = ctx.layer_painter(layer);
@@ -41,7 +41,7 @@ pub(super) fn show_combo<R>(
     combo: egui::ComboBox,
     body: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::InnerResponse<Option<R>> {
-    if !crate::blur::enabled() || ui.ctx().viewport_id() != egui::ViewportId::ROOT {
+    if !crate::blur::enabled() {
         return combo.show_ui(ui, body);
     }
     let popup = widget.with("popup");
@@ -72,6 +72,17 @@ pub(super) fn show_combo<R>(
 pub struct BackingPopup<'a>(egui::Popup<'a>);
 
 impl<'a> BackingPopup<'a> {
+    pub fn get_id(&self) -> Id {
+        self.0.get_id()
+    }
+    pub fn open_bool(mut self, value: &'a mut bool) -> Self {
+        self.0 = self.0.open_bool(value);
+        self
+    }
+    pub fn at_position(mut self, value: egui::Pos2) -> Self {
+        self.0 = self.0.at_position(value);
+        self
+    }
     pub fn frame(mut self, frame: Frame) -> Self {
         self.0 = self.0.frame(frame);
         self
@@ -142,7 +153,7 @@ impl BackingModal {
         self
     }
     pub fn show<R>(self, ctx: &Context, body: impl FnOnce(&mut egui::Ui) -> R) -> egui::ModalResponse<R> {
-        if !crate::blur::enabled() || ctx.viewport_id() != egui::ViewportId::ROOT {
+        if !crate::blur::enabled() {
             return self.modal.show(ctx, body);
         }
         // Blur the preceding UI before native dimming, then blur the dialog's immediate
@@ -163,8 +174,13 @@ pub trait BackingTooltipExt: Sized {
     fn backing_on_hover_text(self, text: impl Into<WidgetText>) -> Self;
     fn backing_on_disabled_hover_text(self, text: impl Into<WidgetText>) -> Self;
     fn backing_on_hover_text_at_pointer(self, text: impl Into<WidgetText>) -> Self;
+    /// The tooltip opens beside `beside` (left of it, else right), not over the widget: for a row of
+    /// a list that must stay readable while one of its rows is hovered.
+    fn backing_on_hover_text_beside(self, beside: egui::Rect, text: impl Into<WidgetText>) -> Self;
     fn backing_show_tooltip_ui(&self, body: impl FnOnce(&mut egui::Ui));
     fn backing_show_tooltip_text(&self, text: impl Into<WidgetText>);
+    /// A feature's status tooltip ([`crate::StatusTip`]), given to a screen reader as plain text.
+    fn backing_on_hover_status(self, tip: &crate::StatusTip) -> Self;
 }
 
 /// What egui's `on_hover_text` does besides showing the tip: a widget that has an accessibility
@@ -211,6 +227,12 @@ impl BackingTooltipExt for egui::Response {
         show_backing_tooltip(self.id, egui::Tooltip::for_enabled(&self).at_pointer().gap(12.0), body);
         self
     }
+    fn backing_on_hover_status(self, tip: &crate::StatusTip) -> Self {
+        if self.ctx.has_accesskit_node(self.id) {
+            describe_for_accessibility(&self, &tip.plain());
+        }
+        self.backing_on_hover_ui(|ui| tip.show(ui))
+    }
     fn backing_on_hover_text(self, text: impl Into<WidgetText>) -> Self {
         let text = text.into();
         describe_for_accessibility(&self, text.text());
@@ -232,6 +254,21 @@ impl BackingTooltipExt for egui::Response {
             ui.set_max_width(ui.spacing().tooltip_width);
             ui.label(text);
         })
+    }
+    fn backing_on_hover_text_beside(self, beside: egui::Rect, text: impl Into<WidgetText>) -> Self {
+        let text = text.into();
+        describe_for_accessibility(&self, text.text());
+        let mut tip = egui::Tooltip::for_enabled(&self).gap(6.0);
+        tip.popup = tip.popup.anchor(beside).align(egui::RectAlign::LEFT_END).align_alternatives(&[
+            egui::RectAlign::LEFT_START,
+            egui::RectAlign::RIGHT_END,
+            egui::RectAlign::RIGHT_START,
+        ]);
+        show_backing_tooltip(self.id, tip, |ui| {
+            ui.set_max_width(ui.spacing().tooltip_width);
+            ui.label(text);
+        });
+        self
     }
     fn backing_show_tooltip_ui(&self, body: impl FnOnce(&mut egui::Ui)) {
         let popup = egui::Popup::from_response(self).kind(egui::PopupKind::Tooltip);
@@ -540,6 +577,7 @@ pub struct Container {
     surface: Surface,
     layout: LayoutMode,
     joined: Option<DockEdges>,
+    see_through: bool,
 }
 
 impl Container {
@@ -548,7 +586,7 @@ impl Container {
     }
 
     pub fn for_layout(layout: LayoutMode, surface: Surface) -> Self {
-        Self { surface, layout, joined: None }
+        Self { surface, layout, joined: None, see_through: false }
     }
 
     /// Floating workspace cards retain their shared chrome even in compact ribbon layouts.
@@ -680,6 +718,19 @@ impl Container {
         self
     }
 
+    /// This surface is translucent only so the model shows through it, or because a host is
+    /// fading it (a dimmed bar, a Browser the user made see-through), never as a glass
+    /// material: it must not blur what is behind it. The theme's blur radius is untouched.
+    pub fn see_through(mut self) -> Self {
+        self.see_through = true;
+        self
+    }
+
+    /// Whether this adaptive surface is a glass material that blurs its backdrop.
+    pub fn blurs(self) -> bool {
+        self.adaptive() && !self.see_through
+    }
+
     /// Shell-owned placement policy, shared by current and future adaptive panels.
     pub fn floating(self) -> bool {
         matches!(self.surface, Surface::Panel | Surface::Feature | Surface::Palette | Surface::Chrome) && self.layout == LayoutMode::Floating
@@ -768,11 +819,7 @@ impl Container {
 
     /// Stock Frame path for backing cards; no additional inset chrome is introduced.
     pub fn show_backing<R>(ui: &mut egui::Ui, frame: Frame, body: impl FnOnce(&mut egui::Ui) -> R) -> egui::InnerResponse<R> {
-        if !crate::blur::enabled()
-            || frame.fill.a() == 0
-            || (frame.fill.a() == 255 && ui.painter().opacity() >= 1.0)
-            || ui.ctx().viewport_id() != egui::ViewportId::ROOT
-        {
+        if !crate::blur::enabled() || !crate::blur::wants_backdrop(frame.fill, ui.painter().opacity(), ui.painter().is_visible()) {
             return frame.show(ui, body);
         }
         let slot = ui.painter().add(egui::Shape::Noop);
@@ -794,11 +841,7 @@ impl Container {
         frame: Frame,
         body: impl FnOnce(&mut egui::Ui) -> R,
     ) -> egui::InnerResponse<R> {
-        if !crate::blur::enabled()
-            || frame.fill.a() == 0
-            || (frame.fill.a() == 255 && ui.painter().opacity() >= 1.0)
-            || ui.ctx().viewport_id() != egui::ViewportId::ROOT
-        {
+        if !crate::blur::enabled() || !crate::blur::wants_backdrop(frame.fill, ui.painter().opacity(), ui.painter().is_visible()) {
             return panel.frame(frame).show(ui, body);
         }
         let slot = BackingSlot::reserve(ui.ctx(), ui.layer_id());
@@ -808,9 +851,9 @@ impl Container {
         })
     }
 
-    fn background(self, ctx: &Context, frame: Frame) -> Option<Background> {
+    fn background(self, _ctx: &Context, frame: Frame) -> Option<Background> {
         // Keep the off path to boundary checks only: no painter, shape slot or allocation.
-        if crate::blur::enabled() && ctx.viewport_id() == egui::ViewportId::ROOT && frame.fill.a() > 0 { Some(crate::blur::decorate) } else { None }
+        if crate::blur::enabled() && !self.see_through && frame.fill.a() > 0 { Some(crate::blur::decorate) } else { None }
     }
 
     pub(super) fn show_frame_background<R>(
@@ -890,7 +933,7 @@ impl Container {
     /// Semantic manually painted workspace surface; HUDs keep `paint_frame`.
     pub fn paint_background(self, painter: &egui::Painter, frame: Frame, content: egui::Rect) {
         let shape = frame.paint(content);
-        painter.add(if crate::blur::enabled() { crate::blur::decorate(painter, frame, content, shape) } else { shape });
+        painter.add(if crate::blur::enabled() && !self.see_through { crate::blur::decorate(painter, frame, content, shape) } else { shape });
     }
 
     pub fn paint_panel_frame(painter: &egui::Painter, frame: Frame, content: egui::Rect) {

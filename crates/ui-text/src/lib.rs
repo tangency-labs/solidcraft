@@ -21,6 +21,10 @@ pub type Messages = BTreeMap<String, String>;
 /// The id of the fallback catalog.
 const ENGLISH_ID: &str = "en";
 
+/// The English shared catalogue as JSON (`locales/en.json`): the messages the shared crates own.
+/// A shared crate's tests read it to check that the ids the crate names are in it.
+pub const SHARED_ENGLISH: &str = include_str!("../locales/en.json");
+
 /// One language's messages, parsed from JSON (`{"id": "text", …}`) the first time they are read.
 pub struct Catalog {
     pub id: &'static str,
@@ -310,7 +314,16 @@ pub struct ResolvedLabels {
 
 /// Shared controls can render supplied translations verbatim while retaining catalog messages.
 pub fn resolved_labels() -> ResolvedLabels {
-    let previous = RESOLVED_LABELS.with(|labels| labels.replace(true));
+    label_scope(true)
+}
+
+/// Restore catalog lookup for content embedded in a surface with pretranslated labels.
+pub fn catalog_labels() -> ResolvedLabels {
+    label_scope(false)
+}
+
+fn label_scope(resolved: bool) -> ResolvedLabels {
+    let previous = RESOLVED_LABELS.with(|labels| labels.replace(resolved));
     ResolvedLabels { previous, _thread: std::marker::PhantomData }
 }
 

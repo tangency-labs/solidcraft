@@ -11,23 +11,26 @@ use solidcraft_sketch::CurveKind;
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, str_, string_list};
-use crate::schema::inspect::{BodiesDetail, DocumentBodies, TimelineDetail, TimelineRow};
+use crate::schema::inspect::{BodiesDetail, DocumentBodies, GeometryDefect, TimelineDetail, TimelineRow};
 use crate::schema::inspect::{
-    BodyFailure, BodyFeaturesParams, BodyFigures, BodyListParams, BodyMeasurement, BodyName, BodyNames, BodyOutcome, BoundingBox, CommandEntry,
-    CommandsParams, CurveShape, DocumentBody, DocumentBodyDetail, DocumentInspectParams, DocumentInspectResult, DocumentParam, DocumentSketch,
-    FaceCylinder, KernelCounts, ListedMaterial, MaterialAssignParams, MaterialAssignResult, MaterialListParams, MaterialListResult, MeasureParams,
-    MeasureResult, MeasureTotal, Measured, MeasuredBodies, MeasuredBody, ModelBodyFeatures, ModelEdge, ModelEdges, ModelFace, ModelFaces,
-    ModelThread, ModelThreads, ModelThreadsParams, SketchConstraint, SketchCurve, SketchInspectParams, SketchInspected, SketchPoint, SketchProfile,
-    SketchWire, SplineTangentHandle, TimelineEntry, TimelineSummary, WireArcInfo,
+    BodyFailure, BodyFeaturesParams, BodyFigures, BodyListParams, BodyMeasurement, BodyName, BodyNames, BodyOutcome, BoundingBox,
+    ColoredComponentsParams, ColoredComponentsResult, CommandEntry, CommandsParams, CurveShape, DocumentBody, DocumentBodyDetail,
+    DocumentInspectParams, DocumentInspectResult, DocumentParam, DocumentRevisionParams, DocumentSketch, FaceCylinder, KernelCounts, ListedMaterial,
+    MaterialAssignParams, MaterialAssignResult, MaterialListParams, MaterialListResult, MeasureParams, MeasureResult, MeasureTotal, Measured,
+    MeasuredBodies, MeasuredBody, ModelBodyFeatures, ModelEdge, ModelEdges, ModelFace, ModelFaces, ModelThread, ModelThreads, ModelThreadsParams,
+    PointFixedBy, RevisionResult, SketchConstraint, SketchCurve, SketchInspectParams, SketchInspected, SketchPoint, SketchProfile, SketchWire,
+    SplineTangentHandle, TimelineEntry, TimelineSummary, WireArcInfo,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
+const COLORED_COMPONENTS_CONTRACT: TypedContract<ColoredComponentsParams> = TypedContract::new();
 const BODY_LIST_CONTRACT: TypedContract<BodyListParams> = TypedContract::new();
 const THREADS_CONTRACT: TypedContract<ModelThreadsParams> = TypedContract::new();
 const BODY_FEATURES_CONTRACT: TypedContract<BodyFeaturesParams> = TypedContract::new();
 const MEASURE_CONTRACT: TypedContract<MeasureParams> = TypedContract::new();
 const DOCUMENT_INSPECT_CONTRACT: TypedContract<DocumentInspectParams> = TypedContract::new();
+const DOCUMENT_REVISION_CONTRACT: TypedContract<DocumentRevisionParams> = TypedContract::new();
 const SKETCH_INSPECT_CONTRACT: TypedContract<SketchInspectParams> = TypedContract::new();
 const MATERIAL_ASSIGN_CONTRACT: TypedContract<MaterialAssignParams> = TypedContract::new();
 const MATERIAL_LIST_CONTRACT: TypedContract<MaterialListParams> = TypedContract::new();
@@ -43,20 +46,24 @@ pub(super) mod appearance_gestures;
 mod body_features;
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("inspect.colored_components", "Component Colors", colored_components)
-        .at("SOLID", "INSPECT").icon("colored_components").noundo()
+    CommandSpec::new("inspect.colored_components", "Component Colors", crate::checked!("inspect.colored_components", colored_components))
+        .at("SOLID", "INSPECT")
+        .icon("colored_components")
+        .noundo()
+        .contract(&COLORED_COMPONENTS_CONTRACT)
+        .output(output_schema_for::<ColoredComponentsResult>)
         .params("enabled?: bool (omitted: toggle); temporary component colours, without changing appearances"),
     CommandSpec::new("inspect.measure", "Measure", crate::checked!("inspect.measure", measure))
         .at("SOLID", "INSPECT")
         .icon("measure")
         .key("I")
-        .noundo()
+        .noundo().read_only()
         .contract(&MEASURE_CONTRACT)
         .output(output_schema_for::<MeasureResult>)
         .params("bodies?: [names] (default all); names_only?: bool (each world body's name and its definition's, nothing measured) → closed per body; volume_mm3, center_of_mass, density_g_cm3 and mass_g only for closed, consistently oriented bodies; area, bbox and counts for all; total.open_bodies_skipped counts bodies excluded from volume/mass totals; or items: [1-2 selections] (face/edge: type, body, and point on it or index from model.faces/model.edges, or both) → length/area/volume; a face's perimeter_mm, with outer_perimeter_mm and inner_perimeter_mm on a flat face with holes; diameter, radius, circumference or arc_length/angle_deg of circles, arcs and cylinders; slot sizes; min (distance_mm, from, to), max, center_distance (centre to centre, or from an axis) and angle"),
     CommandSpec::new("document.inspect", "Inspect Design", crate::checked!("document.inspect", inspect))
         .icon("inspect")
-        .noundo()
+        .noundo().read_only()
         .contract(&DOCUMENT_INSPECT_CONTRACT)
         .output(output_schema_for::<DocumentInspectResult>)
         .params(
@@ -64,7 +71,12 @@ pub static COMMANDS: &[CommandSpec] = &[
              timeline?: true (default) | \"summary\" (each feature as id, name, type, with error, warning, suppressed and rolled_back only when set) | false (left out); \
              bodies?: true (default) | \"names\" (only the body names, nothing measured) | false (left out)",
         ),
-    CommandSpec::new("document.revision", "Design Revision", revision).icon("inspect").noundo().params(
+    CommandSpec::new("document.revision", "Design Revision", crate::checked!("document.revision", revision))
+        .icon("inspect")
+        .noundo()
+        .contract(&DOCUMENT_REVISION_CONTRACT)
+        .output(output_schema_for::<RevisionResult>)
+        .params(
         "→ document_id (this open design's id: kept while it stays open, another for each design started or opened), \
          revision (moves whenever the design, what is hidden or a component's uncaptured position changes, \
          never on a selection or a view; from one counter for the whole run, so it never repeats). Read-only",
@@ -72,26 +84,24 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.inspect", "Inspect Sketch", crate::checked!("sketch.inspect", sketch_inspect))
         .at("SKETCH", "INSPECT")
         .icon("inspect")
-        .noundo()
+        .noundo().read_only()
         .contract(&SKETCH_INSPECT_CONTRACT)
         .output(output_schema_for::<SketchInspected>)
         .params("sketch?: id|name (default active)"),
     CommandSpec::new("model.edges", "List Edges", crate::checked!("model.edges", model_edges))
         .icon("inspect")
-        .noundo()
+        .noundo().read_only()
         .contract(&BODY_LIST_CONTRACT)
         .output(output_schema_for::<ModelEdges>)
         .params("body: name"),
     CommandSpec::new("model.faces", "List Faces", crate::checked!("model.faces", model_faces))
         .icon("inspect")
-        .noundo()
+        .noundo().read_only()
         .contract(&BODY_LIST_CONTRACT)
         .output(output_schema_for::<ModelFaces>)
         .params(
         "body: name → per face: index, name (what face.delete, sheet.convert `face`, solid.shell … take in place of a point), exact, area, centroid (not always on the face), \
-         plane_normal, point (a point on the face that picks it), cylinder? ({origin, axis, radius} of a cylindrical face), \
-         sheet_face? (a folded sheet's face: `sheet:<body>:<panel>:<side>`, panel base or a flange's tag F<feature>.<k>, side top | bottom | rim.<edge> | bend.inner | bend.outer; \
-         taken wherever a face name is, and it holds while sizes change and flanges come and go)",
+         plane_normal, point (a point on the face that picks it), cylinder? ({origin, axis, radius} of a cylindrical face)",
     ),
     CommandSpec::new("model.threads", "List Threads", crate::checked!("model.threads", model_threads))
         .icon("inspect")
@@ -124,7 +134,8 @@ pub static COMMANDS: &[CommandSpec] = &[
              appearance?: library name or stable starter.* ID (appearance.library) | color: \"#rrggbb\" or [r, g, b] (0–255), opacity? (0–1, default 1); \
              name?: inert copied look label (requires color, mutually exclusive with appearance); pbr?: {metallic:0..1, roughness:0.045..1, dielectric_ior:1..3} (requires color/appearance and opacity 1); a starter ID or registered starter name resolves its recipe before color overrides; omitted pbr retains that response and pbr: null explicitly clears it. Unavailable glass recipes refuse through either selector. Other custom labels with an explicit color retain legacy scalar behavior. Neither appearance nor color (or color: null): clear, so the face follows its body, the body its component, the component its material",
     ),
-    CommandSpec::new("appearance.copy", "Copy Look", appearance_gestures::copy).icon("copy").noundo().key("Ctrl+Alt+C")
+    CommandSpec::new("appearance.copy", "Copy Look", crate::checked!("appearance.copy", appearance_gestures::copy)).icon("copy").noundo().key("Ctrl+Alt+C")
+        .contract(&COPY_CONTRACT).output(crate::schema::output_schema_for::<AppearanceCopyResult>)
         .params("target: appearance.chain target. Copies its resolved look to a transient session clipboard. No document change or dialogs."),
     CommandSpec::new("appearance.paste", "Paste Look", appearance_gestures::paste).icon("paste").key("Ctrl+Alt+V")
         .params("bodies/faces/components: appearance.assign targets. Applies the copied look atomically in one undo step; no dialogs."),
@@ -156,11 +167,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<MaterialListResult>)
         .params("→ built-in and design-owned materials (user: true, look, optional physical_card/physical_validation/density_comparison). Read-only; candidate engineering records do not certify sources or supply a solver"),
     CommandSpec::new("engine.commands", "List Commands", crate::checked!("engine.commands", commands))
+        .any_part()
         .icon("list")
         .noundo()
         .contract(&COMMANDS_CONTRACT)
         .output(output_schema_for::<Vec<CommandEntry>>),
-    CommandSpec::new("engine.describe", "Describe Command", crate::checked!("engine.describe", describe))
+    CommandSpec::new("engine.describe", "Describe Command", crate::checked!("engine.describe", describe)).any_part()
         .icon("list")
         .noundo()
         .doc_only()
@@ -187,8 +199,10 @@ pub(super) fn measure_body(
     definitions: Option<&solidcraft_doc::ModelState>,
 ) -> Result<solidcraft_kernel::BodyMeasure> {
     let mut measured = b.measure()?;
+    // A sheet's perforation fields (#732): their holes, which the body does not have, come off
+    // what it measures.
     if let Some(state) = definitions
-        && let Some(sheet) = state.sheets.iter().find(|sheet| sheet.body == b.definition_name() && !sheet.perforations.is_empty())
+        && let Some(sheet) = state.surface_sheets.iter().find(|sheet| sheet.body == b.definition_name() && !sheet.perforations.is_empty())
     {
         let definition = state.body(b.definition_name()).ok_or_else(|| EngineError::Other(format!("missing sheet body `{}`", sheet.body)))?;
         // A body transfer moves the geometry and sheet metadata together. Apply only
@@ -285,17 +299,10 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
             b.density_g_cm3 = Some(rho);
             b.mass_g = Some(v * rho / 1000.0);
         }
-        // Only Measure exposes sheet boundary counts; document.inspect keeps kernel counts.
-        if let Some(sheet) = definitions.sheets.iter().find(|sheet| sheet.body == source) {
-            let (df, de, dv) = sheet.round_hole_correction();
-            match &mut b.measurement.outcome {
-                BodyOutcome::Measured(f) => {
-                    f.faces = count(f.kernel.faces) + df;
-                    f.edges = count(f.kernel.edges) + de;
-                    f.vertices = count(f.kernel.vertices) + dv;
-                }
-                BodyOutcome::Failed(x) => (x.faces, x.edges, x.vertices) = (Some(df), Some(de), Some(dv)),
-            }
+        // A sheet made from surfaces (#6748) is sheet metal: its perforation fields' holes are
+        // taken off its volume, area and centre where each body is measured (`measure_body`);
+        // its counts are its stored B-rep's, which has no such holes (see `BodyFigures::faces`).
+        if definitions.surface_sheets.iter().any(|sk| sk.body == source) {
             b.sheet_metal = Some(true);
         }
         bodies.push(b);
@@ -410,6 +417,7 @@ fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Opti
             world: plane.to_world(p.pos).into(),
             fixed: locked.get(i).copied().unwrap_or(false),
             link: p.link.clone(),
+            fixed_by: p.exprs.as_deref().map(|e| PointFixedBy { x: e.x.clone(), y: e.y.clone() }),
             fully_constrained: ss.report.point_determined.get(i).copied().unwrap_or(false),
         })
         .collect();
@@ -486,11 +494,34 @@ fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Opti
     Some(SketchInspected {
         id,
         name: ss.name.clone(),
-        plane: serde_json::to_value(ss.plane).unwrap_or_default(),
+        plane: ss.plane.into(),
+        world_plane: plane.into(),
         status: ss.report.status.into(),
-        dof: ss.report.dof,
-        fully_constrained: ss.report.fully_constrained(),
+        dof: ss.report.shown_dof(),
+        fully_constrained: ss.report.shown_dof() == 0,
+        planar_dof: ss.report.dof,
         failing: ss.report.failing.clone(),
+        // The 3D constraints' solve (#10608): its freedoms are in `dof`, its failures here.
+        wires_solve: serde_json::to_value(&ss.report.wires).unwrap_or_default(),
+        // As the planar constraints are listed: a dimension's parameter expression, and an angle in
+        // degrees beside the stored radians.
+        wire_constraints: Value::Array(
+            sk.wire_constraints
+                .iter()
+                .map(|c| {
+                    let mut v = serde_json::to_value(c).unwrap_or_default();
+                    if let Some(o) = v.as_object_mut() {
+                        if let Some(p) = &c.param {
+                            o.insert("expression".into(), json!(s.doc.param(p).map(|x| x.expr.clone())));
+                        }
+                        if let (true, Some(value)) = (c.kind.is_angle(), c.kind.value()) {
+                            o.insert("degrees".into(), json!(value.to_degrees()));
+                        }
+                    }
+                    v
+                })
+                .collect(),
+        ),
         curves,
         points,
         constraints,
@@ -560,7 +591,37 @@ impl Session {
 /// `document.revision`: the design's id and [`Session::design_revision`].
 fn revision(s: &mut Session, _p: &Value) -> Result<Value> {
     let revision = s.design_revision();
-    Ok(json!({"document_id": s.document_id, "revision": revision}))
+    reply("document.revision", RevisionResult { document_id: s.document_id.clone(), revision, param_warnings: Vec::new() })
+}
+
+/// What imports found wrong with the bodies and components they made
+/// (`solidcraft_doc::import_defects`): each body's notes, then each component's parts that were
+/// not imported.
+fn geometry_defects(s: &Session) -> Vec<GeometryDefect> {
+    use solidcraft_doc::import_defects;
+    let kind = |k: solidcraft_doc::kernel::IssueKind| serde_json::to_value(k).ok().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default();
+    let st = s.model.state();
+    let mut out: Vec<GeometryDefect> = st
+        .bodies
+        .iter()
+        .flat_map(|b| {
+            import_defects::body_import_issues(&s.model, b).into_iter().map(|i| GeometryDefect {
+                body: Some(b.name.clone()),
+                component: None,
+                kind: kind(i.kind),
+                detail: i.detail.clone(),
+            })
+        })
+        .collect();
+    for (component, issues) in import_defects::component_import_issues(&s.doc, &s.model) {
+        out.extend(issues.into_iter().map(|i| GeometryDefect {
+            body: None,
+            component: Some(component),
+            kind: kind(i.kind),
+            detail: i.detail.clone(),
+        }));
+    }
+    out
 }
 
 fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
@@ -591,12 +652,14 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             .map(|(i, f)| {
                 let r = s.model.result(f.id);
                 let (error, warning) = (r.and_then(|r| r.error.clone()), r.and_then(|r| r.warning.clone()));
+                let error_code = r.and_then(|r| r.error_code.as_ref()).map(Into::into);
                 if timeline_detail == TimelineDetail::Summary {
                     return TimelineRow::Summary(TimelineSummary {
                         id: f.id,
                         name: f.name.clone(),
                         kind: f.kind.type_name().to_string(),
                         error,
+                        error_code,
                         warning,
                         suppressed: f.suppressed.then_some(true),
                         rolled_back: (i >= marker).then_some(true),
@@ -609,6 +672,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
                     suppressed: f.suppressed,
                     rolled_back: i >= marker,
                     error,
+                    error_code,
                     warning,
                     ms: r.map(|r| r.ms),
                 })
@@ -649,8 +713,9 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             let mut v = DocumentSketch {
                 id: ss.feature,
                 name: ss.name.clone(),
-                dof: ss.report.dof,
+                dof: ss.report.shown_dof(),
                 status: ss.report.status.into(),
+                wires_ok: ss.report.wires_ok(),
                 curves: ss.sketch.curves.len(),
                 profiles: ss.profiles.len(),
                 visible: crate::view::sketch_shown(s, ss.feature),
@@ -682,6 +747,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             timeline,
             bodies,
             sketches,
+            defects: geometry_defects(s),
             selection: serde_json::to_value(&s.selection).unwrap_or_default(),
             undo: s.undo.len(),
             redo: s.redo.len(),
@@ -727,10 +793,6 @@ fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {
     let names = solidcraft_doc::naming::face_names(b);
     let tol = (b.body.size() * 2e-3).max(1e-3);
     let spots = solidcraft_doc::naming::face_spots(b);
-    // A folded sheet's faces also have the readable names its sheet gives them, worked out in
-    // the body's own coordinates.
-    let model = s.model.state();
-    let sheet_names = model.body(&b.name).map(|own| solidcraft_doc::sheet::body_sheet_face_names(&model, own)).unwrap_or_default();
     let faces = b
         .body
         .faces(tol)?
@@ -752,7 +814,6 @@ fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {
                 plane_normal: f.plane_normal.map(Into::into),
                 point: spot.map(|x| x.point.into()),
                 cylinder,
-                sheet_face: sheet_names.get(f.index).and_then(|n| n.as_ref().map(|n| n.to_string())),
             }
         })
         .collect();
@@ -762,8 +823,11 @@ fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {
 const DESCRIBE_CONTRACT: crate::schema::TypedContract<crate::schema::inspect::DescribeParams> = crate::schema::TypedContract::new();
 
 /// A command's prose documentation and, for converted commands, its schemas.
-fn describe(_s: &mut Session, p: &Value) -> Result<Value> {
+fn describe(s: &mut Session, p: &Value) -> Result<Value> {
     let id = p.get("command").and_then(Value::as_str).ok_or_else(|| crate::params::bad("engine.describe", "`command` must be a command id"))?;
+    if let Some(entry) = crate::plugin::describe_entry(s, id)? {
+        return Ok(entry);
+    }
     let spec = super::find_command(id).ok_or_else(|| crate::EngineError::UnknownCommand(id.to_string()))?;
     let reply = crate::schema::inspect::DescribeResult {
         id: spec.id.to_string(),
@@ -777,7 +841,27 @@ fn describe(_s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn commands(s: &mut Session, _p: &Value) -> Result<Value> {
-    let list: Vec<CommandEntry> = crate::command_specs().iter().map(|c| c.info(s).into()).collect();
+    let mut list: Vec<CommandEntry> = crate::command_specs().iter().map(|c| c.info(s).into()).collect();
+    for (package_id, path) in &s.plugin_state.packages {
+        if let Ok(package) = crate::plugin::read_package(path)
+            && let Some(runtime) = package.manifest.runtime
+        {
+            for entry in runtime.entries {
+                list.push(CommandEntry {
+                    id: format!("{package_id}.{}", entry.name),
+                    label: entry.name,
+                    tab: String::new(),
+                    panel: String::new(),
+                    icon: "play".into(),
+                    shortcut: None,
+                    params: "approval, params: declared entry inputs (engine.describe)".into(),
+                    enabled: !s.disabled_plugins.contains(package_id),
+                    disabled_reason: s.disabled_plugins.contains(package_id).then(|| "plugin is disabled".into()),
+                    planned: None,
+                });
+            }
+        }
+    }
     typed_reply("engine.commands", list)
 }
 
@@ -821,14 +905,15 @@ pub(crate) fn color_param(v: &Value) -> Option<[u8; 3]> {
 }
 
 use crate::schema::appearance::{
-    AppearanceAssignParams, AppearanceAssignResult, AppearanceLibraryParams, AppearanceLibraryResult, AppearanceListParams, AppearanceListResult,
-    BodyLooks, ComponentLookReply, FaceIndexLook, FaceLookReply, FaceSpot, LibraryAppearance, LookInDesign, LookReply, PbrReply, PlainAppearance,
-    StarterAppearance,
+    AppearanceAssignParams, AppearanceAssignResult, AppearanceCopyParams, AppearanceCopyResult, AppearanceLibraryParams, AppearanceLibraryResult,
+    AppearanceListParams, AppearanceListResult, BodyLooks, ComponentLookReply, FaceIndexLook, FaceLookReply, FaceSpot, LibraryAppearance,
+    LookInDesign, LookReply, PbrReply, PlainAppearance, StarterAppearance,
 };
 
 const ASSIGN_CONTRACT: TypedContract<AppearanceAssignParams> = TypedContract::new();
 const LIBRARY_CONTRACT: TypedContract<AppearanceLibraryParams> = TypedContract::new();
 const LIST_CONTRACT: TypedContract<AppearanceListParams> = TypedContract::new();
+const COPY_CONTRACT: TypedContract<AppearanceCopyParams> = TypedContract::new();
 
 /// An appearance command's reply, built from its schema's type so the two can't drift apart.
 fn appearance_reply(cmd: &str, r: impl serde::Serialize) -> Result<Value> {
@@ -1004,7 +1089,7 @@ pub(super) fn appearance_look(cmd: &str, p: &Value) -> Result<Option<solidcraft_
 }
 
 fn dist_to(b: &solidcraft_doc::ModelBody, p: solidcore_record::Vec3) -> f64 {
-    let bb = b.mesh().bounds();
+    let bb = b.body.exact_bounds().unwrap_or_else(|_| b.outline_bounds());
     let c = solidcore_record::Vec3::new(p.x.clamp(bb.min.x, bb.max.x), p.y.clamp(bb.min.y, bb.max.y), p.z.clamp(bb.min.z, bb.max.z));
     c.dist(p)
 }
@@ -1173,5 +1258,5 @@ fn colored_components(s: &mut Session, p: &Value) -> Result<Value> {
     } else if !enabled {
         s.colored_components = None;
     }
-    Ok(json!({"enabled": enabled}))
+    typed_reply("inspect.colored_components", ColoredComponentsResult { enabled, param_warnings: Vec::new() })
 }

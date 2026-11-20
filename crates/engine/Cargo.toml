@@ -9,7 +9,8 @@ license.workspace = true
 workspace = true
 
 [features]
-default = []
+default = ["plugins"]
+plugins = ["dep:craft-plugin-wasm"]
 # Optional authored texture/HDR bytes; the command registry and metadata remain available.
 bundled-render-library = []
 raytrace-cpu = ["solidcraft-render/raytrace-cpu"]
@@ -35,7 +36,14 @@ name = "sketch_target_bench"
 required-features = ["solver-profiling"]
 
 [dependencies]
+craft-plugin = { workspace = true }
 solidcraft-viewport = { workspace = true }
+# The printed look of an inserted circuit board (src/cmd/board_layers.rs): its layers drawn
+# into an image; both already in the tree (ui-egui, render).
+tiny-skia = { workspace = true }
+png = { workspace = true }
+solidcore-ops = { workspace = true }
+solidcraft-views = { workspace = true }
 solidcore-record = { workspace = true }
 solidcraft-color = { workspace = true }
 solidcraft-control = { workspace = true }
@@ -46,10 +54,16 @@ solidcraft-doc = { workspace = true }
 solidcraft-io = { workspace = true }
 solidcraft-render = { workspace = true }
 solidcraft-profile = { workspace = true }
+solidcraft-ui-text = { workspace = true }
+# the app-neutral panel placement core (engine::panels re-exports it)
+solidcraft-panel-layout = { workspace = true }
 # reference pictures for inspect.compare_picture (PNG and JPEG decode, PNG encode)
 image = { workspace = true, features = ["jpeg"] }
+# an SVG canvas or decal image, drawn into a PNG as it is inserted (src/cmd/canvas_svg.rs)
+resvg = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 toml_edit = "0.25"
 schemars = { workspace = true }
 serde_path_to_error = { workspace = true }
@@ -58,11 +72,16 @@ log = { workspace = true }
 web-time = { workspace = true }
 
 [dev-dependencies]
+solidcore-ops = { workspace = true }
 solidcraft-profile = { workspace = true, features = ["enabled"] }
 # Model-cache tests also run in a source tarball build (no git commit).
-solidcraft-io = { workspace = true, features = ["trust-unknown-source"] }
+solidcraft-io = { workspace = true, features = ["dxf-legacy-baseline-tests", "trust-unknown-source"] }
 # Normal CI exercises profiling assertions without enabling the production feature.
 solidcraft-sketch = { workspace = true, features = ["solver-profiling"] }
+# Sheet metal tests read the joints of a sheet made from surfaces.
+solidcraft-develop = { workspace = true }
+# Sheet PDF tests inflate the pages' content to read them back.
+flate2 = { workspace = true }
 
 [[example]]
 name = "render_resource_workflow"
@@ -71,3 +90,10 @@ required-features = ["raytrace-cpu"]
 [[example]]
 name = "wood_texture_workflow"
 required-features = ["raytrace-cpu"]
+
+[target.'cfg(any(target_arch = "x86_64", target_arch = "aarch64"))'.dependencies]
+# Component-model sandbox; no WASI, cache deserialization, network or process imports.
+craft-plugin-wasm = { workspace = true, optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+wat = "1"

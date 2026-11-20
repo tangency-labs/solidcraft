@@ -30,6 +30,11 @@ pub trait Expressions: Send + Sync {
     /// Whether `unit`, the text after a literal's number as written (" mm", "in", ""), is a unit
     /// of the language. An empty unit is a unit-less number.
     fn is_unit(&self, unit: &str) -> bool;
+    /// Whether this nonempty spelling can still grow into a longer unit ("m" into "mm").
+    /// Hosts without overlapping unit spellings keep immediate previews.
+    fn unit_is_prefix(&self, _unit: &str) -> bool {
+        false
+    }
     /// Offer completion and stepping for this frame under the editor `response` over `text`.
     /// Returns true when either changed the text; that frame's Enter then accepts the change
     /// instead of submitting.
@@ -43,6 +48,10 @@ pub trait Expressions: Send + Sync {
     /// The length typed as `text` in millimetres: a bare number is in the display unit (`scale`
     /// units per millimetre), an explicit unit is honoured. None when `text` is not a length.
     fn parse_length_mm(&self, text: &str, scale: f64) -> Option<f64>;
+    /// Step size in this unit for a label drag, given the viewport's half-height in millimetres and current value.
+    fn scrub_step(&self, _unit: &str, _half_height_mm: Option<f64>, current_value: f64) -> f64 {
+        scrub_step(current_value)
+    }
 }
 
 /// Where a context keeps its installed [`Expressions`].
@@ -58,6 +67,60 @@ pub fn install_expressions(ctx: &egui::Context, expressions: Arc<dyn Expressions
 /// The expression language installed in `ctx`, if any.
 pub fn expressions(ctx: &egui::Context) -> Option<Arc<dyn Expressions>> {
     ctx.data(|data| data.get_temp::<Arc<dyn Expressions>>(expressions_id()))
+}
+
+/// Where a context keeps its active viewport view scale (view half-height in millimetres).
+fn view_scale_id() -> egui::Id {
+    egui::Id::unique("sc_kit_view_scale")
+}
+
+/// Set the viewport half-height in millimetres for scale-adaptive scrubbing.
+pub fn set_viewport_half_height(ctx: &egui::Context, half_height: f64) {
+    if half_height.is_finite() && half_height > 0.0 {
+        ctx.data_mut(|d| d.insert_temp(view_scale_id(), half_height));
+    }
+}
+
+/// The viewport half-height in millimetres, if installed in `ctx`.
+pub fn viewport_half_height(ctx: &egui::Context) -> Option<f64> {
+    ctx.data(|d| d.get_temp::<f64>(view_scale_id()))
+}
+
+/// Where a context keeps the ID of the row currently being scrubbed, if any.
+fn scrub_active_id() -> egui::Id {
+    egui::Id::unique("sc_kit_scrub_active")
+}
+
+pub fn set_scrubbing(ctx: &egui::Context, id: egui::Id, active: bool) {
+    ctx.data_mut(|d| {
+        if active {
+            d.insert_temp(scrub_active_id(), id);
+        } else if d.get_temp::<egui::Id>(scrub_active_id()) == Some(id) {
+            d.remove::<egui::Id>(scrub_active_id());
+        }
+    });
+}
+
+/// Whether a value label scrub drag is currently active in `ctx`.
+pub fn is_scrubbing(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<egui::Id>(scrub_active_id())).is_some()
+}
+
+/// Quantize `raw` to the nearest 1, 2, or 5 in its power of ten.
+pub fn snap_to_125(raw: f64) -> f64 {
+    let raw = raw.max(1e-9);
+    let p = 10f64.powf(raw.log10().floor());
+    let m = raw / p;
+    let mantissa = if m < 1.5 {
+        1.0
+    } else if m < 3.5 {
+        2.0
+    } else if m < 7.5 {
+        5.0
+    } else {
+        10.0
+    };
+    mantissa * p
 }
 
 /// A plain number typed into a field, with a decimal point or a decimal comma (#1347): "2.5"
@@ -103,16 +166,30 @@ pub struct Count<'a> {
 }
 
 /// Expression editor for a whole-number count (a pattern's quantity), with up and down step
-/// arrows at its right edge. An arrow steps the evaluated count by one and stays within the
-/// limits: a plain number is replaced, an expression keeps its parameters and gains or adjusts
-/// a trailing `+ n`. The text changes as if typed, so previews follow. Returns accepted Enter.
+/// arrows at its right edge and Up/Down keys when focused. Each step changes the evaluated
+/// count by one within the limits: a plain number is replaced, while an expression keeps its
+/// parameters and gains or adjusts a trailing `+ n`. The text changes as if typed, so previews
+/// follow. Returns accepted Enter.
 /// Tokens: field tokens, `control_border`, `selected_bg`, `form_ink`, `form_dim`.
 pub fn count_field(ui: &mut Ui, value: &mut String, limits: &Count<'_>) -> bool {
+    // Remember the editor id across frames, so the key is handled before TextEdit sees it.
+    // At a limit, keep ordinary text editing; only the focused field steps.
+    let focus_id = ui.scope_id().with(("count_field", label(ui)));
+    let focused = ui.ctx().data(|d| d.get_temp::<egui::Id>(focus_id)).is_some_and(|id| ui.memory(|m| m.has_focus(id)));
+    let keyboard_step = if ui.is_enabled() && focused {
+        [(egui::Key::ArrowUp, 1), (egui::Key::ArrowDown, -1)].into_iter().find_map(|(key, delta)| {
+            let next = step_count(value, delta, limits)?;
+            ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, key)).then_some(next)
+        })
+    } else {
+        None
+    };
     let t = Tokens::get();
     let reserve = (t.control_height * 0.75).round();
     let (enter, _, response) = editor_reserving(ui, value, "", true, reserve);
+    ui.ctx().data_mut(|d| d.insert_temp(focus_id, response.id));
     let row = label(ui).to_owned();
-    if let Some(next) = step_arrows(ui, response.rect, reserve, &row, |delta| step_count(value, delta, limits)) {
+    if let Some(next) = keyboard_step.or_else(|| step_arrows(ui, response.rect, reserve, &row, |delta| step_count(value, delta, limits))) {
         *value = next;
     }
     enter
@@ -232,11 +309,11 @@ pub fn scrub_step(number: f64) -> f64 {
     10f64.powf(decade - 2.0)
 }
 
-/// `anchor` moved by `points` of drag at `step` per point, on the step's grid. A value that
-/// starts at zero or above stays there: a drag never turns a size negative.
-pub fn scrubbed(anchor: f64, points: f32, step: f64) -> f64 {
+/// `anchor` moved by `points` of drag at `step` per point, on the step's grid.
+/// When `clamp_positive` is true, a value that starts at zero or above stops at zero.
+pub fn scrubbed(anchor: f64, points: f32, step: f64, clamp_positive: bool) -> f64 {
     let moved = ((anchor + f64::from(points) * step) / step).round() * step;
-    let moved = if anchor >= 0.0 { moved.max(0.0) } else { moved };
+    let moved = if clamp_positive && anchor >= 0.0 { moved.max(0.0) } else { moved };
     // Literal values are capped where `literal` reads them; a drag never leaves that range.
     if moved.is_finite() && moved.abs() < LITERAL_CAP { moved } else { anchor }
 }
@@ -266,9 +343,15 @@ struct Scrub {
 /// the speed, Ctrl (Cmd on a Mac) for ten times. The text changes as if typed, so previews
 /// follow, and the dialog's OK still makes the one command (and the one undo step). A field
 /// holding an expression or a parameter is left alone. Returns whether the text changed.
-pub(super) fn scrub(ui: &Ui, label: &Response, value: &mut String) -> bool {
+pub(super) fn scrub(ui: &Ui, label: &Response, value: &mut String, clamp_positive: bool) -> bool {
     let id = label.id.with("sc_scrub");
-    let Some(now) = expressions(ui.ctx()).and_then(|e| literal(e.as_ref(), value)).filter(|_| ui.is_enabled()) else {
+    let Some(expr) = expressions(ui.ctx()) else {
+        set_scrubbing(ui.ctx(), id, false);
+        ui.ctx().data_mut(|data| data.remove::<Scrub>(id));
+        return false;
+    };
+    let Some(now) = literal(expr.as_ref(), value).filter(|_| ui.is_enabled()) else {
+        set_scrubbing(ui.ctx(), id, false);
         ui.ctx().data_mut(|data| data.remove::<Scrub>(id));
         return false;
     };
@@ -276,9 +359,11 @@ pub(super) fn scrub(ui: &Ui, label: &Response, value: &mut String) -> bool {
         ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
     }
     if !label.dragged() {
+        set_scrubbing(ui.ctx(), id, false);
         ui.ctx().data_mut(|data| data.remove::<Scrub>(id));
         return false;
     }
+    set_scrubbing(ui.ctx(), id, true);
     let factor = ui.input(|i| {
         if i.modifiers.shift {
             0.1
@@ -293,14 +378,16 @@ pub(super) fn scrub(ui: &Ui, label: &Response, value: &mut String) -> bool {
         return false;
     };
     let base = ui.ctx().data(|data| data.get_temp::<Scrub>(id));
+    let base_step = expr.scrub_step(&now.unit, viewport_half_height(ui.ctx()), now.number);
+    let target_step = base_step * factor;
     // A new drag starts from where it was pressed; a changed modifier starts over from here.
     let state = match base {
-        Some(state) if (state.step - scrub_step(state.anchor) * factor).abs() <= state.step * 1e-9 => state,
-        Some(_) => Scrub { anchor: now.number, origin: x, step: scrub_step(now.number) * factor },
-        None => Scrub { anchor: now.number, origin: pressed, step: scrub_step(now.number) * factor },
+        Some(state) if (state.step - target_step).abs() <= state.step * 1e-9 => state,
+        Some(_) => Scrub { anchor: now.number, origin: x, step: target_step },
+        None => Scrub { anchor: now.number, origin: pressed, step: target_step },
     };
     let points = x - state.origin;
-    let text = scrub_text(scrubbed(state.anchor, if points.is_finite() { points } else { 0.0 }, state.step), state.step, &now);
+    let text = scrub_text(scrubbed(state.anchor, if points.is_finite() { points } else { 0.0 }, state.step, clamp_positive), state.step, &now);
     ui.ctx().data_mut(|data| data.insert_temp(id, state));
     if text == *value {
         return false;
@@ -903,6 +990,9 @@ fn editor_reserving(ui: &mut Ui, value: &mut String, hint: &str, completion: boo
     super::layout::publish_geometry(ui, &response);
     // A completion's Enter accepts the suggestion, rather than submitting the dialog.
     let completed = completion && expressions(ui.ctx()).is_some_and(|e| e.complete(ui, &response, value));
+    if completion {
+        super::note_numeric_edit(ui, &response, Some(value), response.changed(), completed);
+    }
     (!completed && response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)), response.changed(), response)
 }
 
@@ -913,14 +1003,35 @@ fn dropdown_arrow(ui: &Ui, rect: egui::Rect, _visuals: &egui::style::WidgetVisua
 
 /// Native dropdown with kit arrow and scenario option handles. Tokens: `text_dim; scope control/font tokens`.
 pub fn dropdown(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&str]) -> Response {
+    dropdown_indexed(ui, id, selected, options, false)
+}
+
+/// Close after keyboard or accessibility selection, return focus to the trigger, and keep
+/// the Enter that picked the option from submitting the enclosing form.
+pub fn dropdown_with_keyboard_close(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&str]) -> Response {
+    dropdown_indexed(ui, id, selected, options, true)
+}
+
+fn dropdown_indexed(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&str], close_on_keyboard: bool) -> Response {
     let text = options.get(*selected).copied().map(solidcraft_ui_text::tr_label).unwrap_or("");
     let row = label(ui).to_string();
-    dropdown_menu(ui, id, text, |ui| {
+    let mut restore_focus = false;
+    let trigger = dropdown_menu(ui, id, text, |ui| {
         for (index, option) in options.iter().enumerate() {
             let response = ui.selectable_value(selected, index, solidcraft_ui_text::tr_label(option));
             solidcraft_ui_registry::publish_target(&format!("dialog:{row}:{option}"), response.rect);
+            // Non-pointer activation does not trigger the popup's click-to-close.
+            if close_on_keyboard && response.clicked() && !response.clicked_by(egui::PointerButton::Primary) {
+                ui.close();
+                restore_focus = true;
+            }
         }
-    })
+    });
+    if restore_focus {
+        trigger.request_focus();
+        ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+    }
+    trigger
 }
 
 /// The standard dropdown with a leading application icon on the current value and each option.
@@ -1244,11 +1355,22 @@ pub fn cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, in
 
 /// Stable-ID cell/name editor with a caller-supplied character cap. Tokens: cell_editor tokens.
 pub fn bounded_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, invalid: bool, limit: usize) -> Response {
-    cell_editor_frame(ui, id, value, hint, invalid, limit, true)
+    cell_editor_frame(ui, id, value, hint, invalid, limit, EditorSurface::Form)
 }
 
-fn cell_editor_frame(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, invalid: bool, limit: usize, frame: bool) -> Response {
-    let t = Tokens::get();
+enum EditorSurface {
+    Form,
+    Frameless,
+    Shell,
+}
+
+fn cell_editor_frame(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, invalid: bool, limit: usize, surface: EditorSurface) -> Response {
+    let mut t = Tokens::get();
+    let frame = !matches!(surface, EditorSurface::Frameless);
+    if matches!(surface, EditorSurface::Shell) {
+        t.control_fill = t.field;
+        t.form_ink = t.text;
+    }
     let editor = text_input(egui::TextEdit::singleline(value))
         .char_limit(limit)
         .id(id)
@@ -1337,11 +1459,13 @@ pub fn wide_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &st
                 if ui.is_sizing_pass() {
                     response.request_focus();
                 }
-                // It wraps but stays one line: Enter ends the edit as in a single-line field.
+                // It wraps but stays one line: Enter (or Shift+Enter, which moves up a row) ends the
+                // edit as in a single-line field.
                 // Raw events, as the table reads them: an accepted completion has already taken its Enter.
                 let enter = ui.input(|i| {
                     i.raw.events.iter().any(|e| {
-                        matches!(e, egui::Event::Key { key: egui::Key::Enter, pressed: true, repeat: false, modifiers, .. } if *modifiers == egui::Modifiers::NONE)
+                        matches!(e, egui::Event::Key { key: egui::Key::Enter, pressed: true, repeat: false, modifiers, .. }
+                            if *modifiers == egui::Modifiers::NONE || modifiers.shift_only())
                     })
                 });
                 if response.has_focus() && enter {
@@ -1405,6 +1529,22 @@ pub fn search_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -
     solidcraft_theme::TabAccent::number_focus(ui, &response);
     t.input_bevel(ui, &response);
     response
+}
+
+/// Search on application chrome uses the shell palette, including custom themes.
+pub fn shell_search_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -> Response {
+    let t = Tokens::get();
+    ui.scope(|ui| {
+        let visuals = ui.visuals_mut();
+        visuals.weak_text_color = Some(t.text_dim);
+        visuals.selection.bg_fill = t.accent_soft;
+        visuals.selection.stroke = egui::Stroke::new(1.0, t.accent);
+        for state in [&mut visuals.widgets.inactive, &mut visuals.widgets.hovered, &mut visuals.widgets.active] {
+            state.bg_stroke = egui::Stroke::new(1.0, t.border);
+        }
+        cell_editor_frame(ui, id, value, hint, false, usize::MAX, EditorSurface::Shell)
+    })
+    .inner
 }
 
 /// Compact icon action opening the shared searchable menu.
@@ -1672,7 +1812,10 @@ fn scalar_field_impl(ui: &mut Ui, value: &mut f64, range: std::ops::RangeInclusi
 /// Length held in millimetres, dragged or typed in the design's units ("0.5 in", "2 cm + 3 mm" parse).
 /// Tokens: control_height, scope control/font tokens.
 pub fn length_field(ui: &mut Ui, value: &mut f64, units: &str, decimals: u8) -> Response {
-    let response = ui.add(length_drag(ui, value, units, decimals));
+    let typed = std::cell::Cell::new(None);
+    let response = ui.add(length_drag(ui, value, units, decimals, &typed));
+    let typed = typed.take();
+    super::note_numeric_edit(ui, &response, typed.as_deref(), typed.is_some(), typed.is_none() && response.changed());
     Tokens::get().input_bevel(ui, &response);
     solidcraft_ui_registry::publish_target(&format!("dialog:length:{}", label(ui)), response.rect);
     response
@@ -1680,7 +1823,10 @@ pub fn length_field(ui: &mut Ui, value: &mut f64, units: &str, decimals: u8) -> 
 
 /// A model-space length with tool-specific bounds and drag step, shown in design units.
 pub fn bounded_length_field(ui: &mut Ui, value: &mut f64, units: &str, decimals: u8, range: std::ops::RangeInclusive<f64>, speed: f64) -> Response {
-    let response = ui.add(length_drag(ui, value, units, decimals).range(range).speed(speed));
+    let typed = std::cell::Cell::new(None);
+    let response = ui.add(length_drag(ui, value, units, decimals, &typed).range(range).speed(speed));
+    let typed = typed.take();
+    super::note_numeric_edit(ui, &response, typed.as_deref(), typed.is_some(), typed.is_none() && response.changed());
     solidcraft_ui_registry::publish_target(&format!("dialog:length:{}", label(ui)), response.rect);
     response
 }
@@ -1750,7 +1896,7 @@ pub fn password_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str)
 /// Bounded integer or decimal preference with its original drag step and unit suffix.
 /// Tokens: scope control/font tokens. Values and limits are caller data.
 pub fn number_field<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range: std::ops::RangeInclusive<T>, speed: f64, suffix: &str) -> Response {
-    bounded_number_field(ui, value, range, speed, suffix, true)
+    bounded_number_field(ui, value, range, speed, suffix, true, false)
 }
 
 /// A bounded editor that preserves an existing out-of-range value until the person edits it.
@@ -1763,7 +1909,12 @@ pub fn number_field_preserving<T: egui::emath::Numeric>(
     speed: f64,
     suffix: &str,
 ) -> Response {
-    bounded_number_field(ui, value, range, speed, suffix, false)
+    bounded_number_field(ui, value, range, speed, suffix, false, false)
+}
+
+/// A number editor for narrow columns that displays large magnitudes in scientific notation.
+pub fn compact_number_field(ui: &mut Ui, value: &mut f64, range: std::ops::RangeInclusive<f64>, speed: f64, suffix: &str) -> Response {
+    bounded_number_field(ui, value, range, speed, suffix, true, true)
 }
 
 fn bounded_number_field<T: egui::emath::Numeric>(
@@ -1773,10 +1924,24 @@ fn bounded_number_field<T: egui::emath::Numeric>(
     speed: f64,
     suffix: &str,
     clamp_existing: bool,
+    compact: bool,
 ) -> Response {
-    let response = ui.add(
-        egui::DragValue::new(value).range(range).clamp_existing_to_range(clamp_existing).speed(speed).suffix(suffix).custom_parser(parse_number),
-    );
+    let mut widget =
+        egui::DragValue::new(value).range(range).clamp_existing_to_range(clamp_existing).speed(speed).suffix(suffix).custom_parser(parse_number);
+    if compact {
+        let id = ui.next_auto_id();
+        let ctx = ui.ctx().clone();
+        widget = widget.custom_formatter(move |value, decimals| {
+            if ctx.memory(|memory| memory.has_focus(id)) {
+                value.to_string()
+            } else if value.abs() >= 1e6 {
+                format!("{value:.3e}")
+            } else {
+                egui::emath::format_with_decimals_in_range(value, decimals)
+            }
+        });
+    }
+    let response = ui.add(widget);
     if response.has_focus() {
         super::settings_search::note_key_sink(ui.ctx());
     }
@@ -1919,27 +2084,32 @@ pub fn message_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) 
 /// Keep the stored value untouched unless the user actually changes the field.
 /// The units, formatting and parsing come from the host's [`Expressions`]; without one the
 /// field edits plain millimetres.
-fn length_drag<'a>(ui: &Ui, value: &'a mut f64, units: &str, decimals: u8) -> egui::DragValue<'a> {
+fn length_drag<'a>(ui: &Ui, value: &'a mut f64, units: &str, decimals: u8, typed: &'a std::cell::Cell<Option<String>>) -> egui::DragValue<'a> {
     let drag = egui::DragValue::new(value).speed(0.5);
     let Some(host) = expressions(ui.ctx()) else {
         return drag.suffix(" mm").custom_formatter(move |mm, _| format!("{mm:.*}", usize::from(decimals.min(8)))).custom_parser(parse_number);
     };
     let (scale, unit) = host.unit_scale(units);
     let parser = Arc::clone(&host);
-    drag.suffix(format!(" {unit}"))
-        .custom_formatter(move |mm, _| host.length_number(mm, unit, decimals))
-        .custom_parser(move |text| parser.parse_length_mm(text, scale))
+    drag.suffix(format!(" {unit}")).custom_formatter(move |mm, _| host.length_number(mm, unit, decimals)).custom_parser(move |text| {
+        typed.set(Some(text.to_owned()));
+        parser.parse_length_mm(text, scale)
+    })
 }
 
 /// Small model-anchored value editor. Retains its focus ID and native hit height so it does
 /// not intercept nearby canvas picks; the owner keeps completion and selection handling.
 /// With `keep_tab` Tab stays with the field (the caller acts on it) instead of moving the
-/// keyboard to the next widget.
-pub fn canvas_value_field(ui: &mut Ui, id: egui::Id, value: &mut String, keep_tab: bool) -> Response {
+/// keyboard to the next widget. `hint` is a label shown, translated, while the field is empty
+/// (what stands in for a value there); `""` for none.
+pub fn canvas_value_field(ui: &mut Ui, id: egui::Id, value: &mut String, keep_tab: bool, hint: &str) -> Response {
     let t = Tokens::get();
     let width = grown_width(ui, value, &egui::TextStyle::Body.resolve(ui.style()), t.space_24 * 3.0);
     // At least that wide: in an area the space left is last frame's width, which can't grow.
     let mut edit = egui::TextEdit::singleline(value).id(id).desired_width(width).min_size(vec2(width, 0.0)).background_color(t.input_fill());
+    if !hint.is_empty() {
+        edit = edit.hint_text(solidcraft_ui_text::tr_label(hint).to_owned());
+    }
     if keep_tab {
         edit = edit.event_filter(egui::EventFilter { tab: true, horizontal_arrows: true, ..Default::default() });
     }
@@ -2003,7 +2173,7 @@ pub fn library_cell(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, m
     let response = ui
         .scope_builder(egui::UiBuilder::new().max_rect(field).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
             ui.set_clip_rect(ui.clip_rect().intersect(field));
-            cell_editor_frame(ui, id, value, hint, false, usize::MAX, false)
+            cell_editor_frame(ui, id, value, hint, false, usize::MAX, EditorSurface::Frameless)
         })
         .inner;
     let button = egui::Rect::from_min_max(egui::pos2(split, rect.top()), rect.max);

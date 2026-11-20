@@ -1,0 +1,916 @@
+//! Drawing views of the session's model (W07, #5866): what a view shows and how far it reaches,
+//! and where a saved view sits on its sheet (#4816). The snapshot command and saved views use it;
+//! their pictures (W17b) will too.
+//!
+//! A view shows the bodies the design places, where its occurrences place it ([`shown`]), less what
+//! it chooses to leave out ([`ShownSet::of_view`]). The browser's eye counts for nothing: hiding a
+//! part in the model never changes a drawing. A body placed through a reference occurrence is a
+//! reference part: it doesn't set the view's extents when model parts are there too ([`measure`]).
+
+use std::borrow::Cow;
+use std::cell::OnceCell;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::fmt;
+use std::sync::Arc;
+
+use solidcore_record::{Plane, Vec2};
+use solidcraft_doc::config::RowKey;
+use solidcraft_doc::drawing::cutting_line::SectionKind;
+use solidcraft_doc::drawing::view::{Cut, ResolvedView, SetBy, View, ViewKind};
+use solidcraft_doc::drawing::{Drawing, Sheet};
+use solidcraft_doc::drawing_view::{Exploded, Pose, StudyStep, ViewConfiguration};
+use solidcraft_doc::{MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, ModelBody, ModelState, ids};
+use solidcraft_geom::drawing_detail::{Boundary, Shape};
+use solidcraft_geom::drawing_view::{Scale, ViewFrame};
+use solidcraft_geom::paper::line::LineGroup;
+use solidcraft_geom::{Aabb2, EPS};
+use solidcraft_render::VisualStyle;
+
+use crate::params::bad;
+use crate::{Result, Session};
+
+#[path = "drawing_view_exact.rs"]
+mod exact;
+#[path = "drawing_view_hatch.rs"]
+mod hatch;
+#[path = "drawing_view_lines.rs"]
+mod lines;
+#[path = "drawing_view_threads.rs"]
+mod threads;
+
+pub use exact::{Fallback, PreparedBodies};
+pub use hatch::{BodyHatch, CutFaces, FLATTEN_MM, Hatching, hatches};
+pub use lines::{CHORD_MM, CHORD_RANGE, LineRequest, Lines, MIN_MODEL_CHORD_MM, Made, Piece, Stats, ViewLine, lines, paper_group, paper_lines};
+pub use threads::ThreadLine;
+
+#[path = "drawing_view_flat.rs"]
+mod flat;
+
+pub use flat::{Flat, bend_dashes_mm, flat, flat_from, flat_group};
+
+/// The paper millimetres each way of a view's boundary when there's nothing to measure, round its
+/// centre, so it can still be picked, moved and deleted.
+pub const PLACEHOLDER_MM: f64 = 20.0;
+
+/// How far a view reaches on its own plane, in model millimetres.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Extents {
+    /// The bodies' box in the plane's own coordinates ([`Plane::to_local`]).
+    pub model: Aabb2,
+    /// How far a curved face may lie outside its display mesh: the largest display tolerance.
+    pub error_mm: f64,
+    pub bodies: usize,
+}
+
+/// Why a view has nothing to measure.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Unmeasured {
+    /// The assembly places more than a view walks, so a view of it would leave parts out.
+    PastWalkLimit,
+    NoBodies,
+    /// The bodies of the assembly can't be placed.
+    NotPlaced,
+    /// The view's `source` and `hide` leave nothing, as when the occurrences it drew were deleted.
+    NothingChosen,
+    /// The exploded view it draws is no longer in the design.
+    NoExplodedView,
+    /// Its joints can't be driven to the position it draws.
+    NotPosed,
+    /// The row of the configuration table it draws is no longer in the design.
+    NoConfiguration,
+    /// The row of the configuration table it draws can't be put on the design: its values don't
+    /// apply (a hostile file), or a sketch would collapse with them.
+    NotConfigured,
+    /// A flat pattern view's body has no flat pattern ([`flat`] says why).
+    NoFlat,
+    /// It is a section view whose cutting line keeps none of its parts.
+    CutAway,
+}
+
+/// Why a choice of occurrences that draws nothing is refused.
+pub const NOTHING_CHOSEN: &str = "the source and hide leave no bodies to draw";
+
+impl Unmeasured {
+    /// Its name in replies.
+    pub fn name(self) -> &'static str {
+        match self {
+            Unmeasured::PastWalkLimit => "past_walk_limit",
+            Unmeasured::NoBodies => "no_bodies",
+            Unmeasured::NotPlaced => "not_placed",
+            Unmeasured::NothingChosen => "nothing_chosen",
+            Unmeasured::NoExplodedView => "no_exploded_view",
+            Unmeasured::NotPosed => "not_posed",
+            Unmeasured::NoConfiguration => "no_configuration",
+            Unmeasured::NotConfigured => "not_configured",
+            Unmeasured::NoFlat => "no_flat",
+            Unmeasured::CutAway => "cut_away",
+        }
+    }
+}
+
+impl fmt::Display for Unmeasured {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Unmeasured::PastWalkLimit => write!(
+                f,
+                "the assembly is deeper than {MAX_PLACEMENT_DEPTH} levels or has more than {MAX_PLACEMENTS} placements: a view of it would leave parts out"
+            ),
+            Unmeasured::NoBodies => f.write_str("the view's source has no bodies"),
+            Unmeasured::NotPlaced => f.write_str("the assembly's bodies can't be placed"),
+            Unmeasured::NothingChosen => write!(f, "{NOTHING_CHOSEN}: the occurrences it chose may have been deleted"),
+            Unmeasured::NoExplodedView => f.write_str("the exploded view it draws is no longer in the design"),
+            Unmeasured::NotPosed => f.write_str("its position can't be placed"),
+            Unmeasured::NoConfiguration => f.write_str("the configuration it draws is no longer in the design"),
+            Unmeasured::NotConfigured => f.write_str("its configuration can't be applied to the design"),
+            Unmeasured::NoFlat => f.write_str("the view's body has no flat pattern"),
+            Unmeasured::CutAway => f.write_str("its cutting line keeps none of the parts"),
+        }
+    }
+}
+
+/// One body a view shows.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Shown {
+    /// Its index among the world state's bodies: the body in place, with its mesh.
+    pub index: usize,
+    /// The occurrences that place it, from the design's root.
+    pub path: Vec<u64>,
+    /// Its definition's body name.
+    pub body: String,
+    /// It is placed through a reference occurrence ([`solidcraft_doc::Document::reference_occurrences`]).
+    pub reference: bool,
+}
+
+/// How a view draws its two kinds of part.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Styles {
+    pub display: VisualStyle,
+    pub reference: VisualStyle,
+    pub reference_hides_model: bool,
+}
+
+impl From<&ResolvedView> for Styles {
+    fn from(view: &ResolvedView) -> Styles {
+        Styles { display: view.visual_style.value, reference: view.reference_style.value, reference_hides_model: view.reference_hides_model.value }
+    }
+}
+
+impl Styles {
+    /// Leaves out the lines of a part shaded with no lines: its picture draws it, and it still
+    /// hides what lies behind it. A part shaded with its edges keeps its exact lines (visible, and
+    /// hidden too for shaded with hidden edges), drawn over its picture, so where the picture's
+    /// tessellated outline and the exact lines differ, the lines win.
+    pub fn leave_shaded_to_pictures(&self, lines: &mut Lines) {
+        let shaded = |reference: bool| (if reference { self.reference } else { self.display }) == VisualStyle::Shaded;
+        lines.lines.retain(|l| !shaded(l.reference));
+        lines.threads.retain(|t| !shaded(t.reference));
+    }
+}
+
+/// What a view shows, worked out once per request: the world state and each body it shows, in the
+/// world state's order. The extents and the lines read it.
+#[derive(Clone)]
+pub struct ShownSet {
+    pub state: Arc<ModelState>,
+    pub bodies: Vec<Shown>,
+    /// In a section view, which of its parts it draws uncut, and why ([`measured`]).
+    pub uncut: Option<String>,
+    /// In a section view, the bodies its plane cut, by their index among the state's bodies (the
+    /// ones it hatches), and how each tells its cut faces ([`CutFaces`]).
+    pub cut: BTreeMap<usize, CutFaces>,
+}
+
+impl ShownSet {
+    /// The shown body in place.
+    pub fn body(&self, shown: &Shown) -> Option<&ModelBody> {
+        self.state.bodies.get(shown.index)
+    }
+
+    /// The bodies under one of the `source` occurrence paths (all of them when there is none;
+    /// `[]` takes the design's own bodies) and under no `hide` path, in the same order.
+    pub fn keep(mut self, source: Option<&[Vec<u64>]>, hide: &[Vec<u64>]) -> ShownSet {
+        let source: Option<HashSet<&[u64]>> = source.map(|paths| paths.iter().map(Vec::as_slice).collect());
+        let hide: HashSet<&[u64]> = hide.iter().map(Vec::as_slice).collect();
+        self.bodies.retain(|b| chosen(&b.path, source.as_ref(), &hide));
+        self
+    }
+
+    /// What saved view `view` shows of the set: [`ShownSet::keep`] by what it resolves to, which a
+    /// view that chooses nothing skips. Paths no occurrence makes any more match no body.
+    pub fn of_view(&self, view: &ResolvedView) -> Cow<'_, ShownSet> {
+        let (source, hide) = (view.occurrences.value.as_deref(), view.hide.value.as_deref().unwrap_or_default());
+        if source.is_none() && hide.is_empty() { Cow::Borrowed(self) } else { Cow::Owned(self.clone().keep(source, hide)) }
+    }
+}
+
+/// Whether a body placed by `path` is drawn: under a `source` path (`[]` only for the design's own
+/// bodies) and under no `hide` path. Each of the path's heads is one look-up, so a body costs at
+/// most 64 of them however many paths there are.
+fn chosen(path: &[u64], source: Option<&HashSet<&[u64]>>, hide: &HashSet<&[u64]>) -> bool {
+    let heads = || (1..=path.len()).filter_map(|n| path.get(..n));
+    let wanted = source.is_none_or(|set| if path.is_empty() { set.contains(path) } else { heads().any(|h| set.contains(h)) });
+    wanted && !heads().any(|h| hide.contains(h))
+}
+
+/// Why a saved view doesn't draw what an occurrence path places ([`left_out`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LeftOut {
+    /// A `hide` path covers it: that path, and the view that set it.
+    Hidden { by: Vec<u64>, set_by: SetBy },
+    /// No `source` path takes it: the view that set the source.
+    NotChosen { set_by: SetBy },
+}
+
+/// Why saved view `view` doesn't draw the body that occurrence path `path` places, if it doesn't:
+/// [`chosen`] asked about one path, with the `hide` path that covers it. No model is read.
+pub fn left_out(view: &ResolvedView, path: &[u64]) -> Option<LeftOut> {
+    let source: Option<HashSet<&[u64]>> = view.occurrences.value.as_deref().map(|paths| paths.iter().map(Vec::as_slice).collect());
+    let hide: HashSet<&[u64]> = view.hide.value.as_deref().unwrap_or_default().iter().map(Vec::as_slice).collect();
+    if chosen(path, source.as_ref(), &hide) {
+        return None;
+    }
+    let by = (1..=path.len()).filter_map(|n| path.get(..n)).find(|head| hide.contains(head));
+    Some(match by {
+        Some(by) => LeftOut::Hidden { by: by.to_vec(), set_by: view.hide.set_by },
+        None => LeftOut::NotChosen { set_by: view.occurrences.set_by },
+    })
+}
+
+/// The state of the design a view draws (#13048): its configuration, its exploded choice and its
+/// position, the one key of the session it draws from. A configuration is its row's id, so views of one
+/// row share one copy. A position's values are kept as their bits, by joint, so views with the same
+/// position share one copy (`-0.0` is kept as `0.0`); a study step as itself, so views of one step
+/// share one copy. A step and the values it gives, typed as joints, make two copies that draw alike.
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Choice {
+    configuration: Option<u64>,
+    exploded: Exploded,
+    pose: Vec<(u64, Vec<u64>)>,
+    study: Option<StudyStep>,
+}
+
+impl Choice {
+    /// What saved view `view` draws, as it saves it. The key of the session it draws from is
+    /// [`ViewSessions::choice`].
+    pub fn of(view: &ResolvedView) -> Choice {
+        let mut pose: Vec<(u64, Vec<u64>)> = match &view.pose.value {
+            Pose::Designed | Pose::Study(_) => Vec::new(),
+            Pose::Joints(joints) => joints.iter().map(|j| (j.joint, j.values.iter().map(|v| (v + 0.0).to_bits()).collect())).collect(),
+        };
+        pose.sort();
+        let study = if let Pose::Study(at) = view.pose.value { Some(at) } else { None };
+        let configuration = match view.configuration.value {
+            ViewConfiguration::Active => None,
+            ViewConfiguration::Row(row) => Some(row),
+        };
+        Choice { configuration, exploded: view.exploded.value, pose, study }
+    }
+
+    /// Whether it draws the design as it places its parts, as the default choice does.
+    pub fn is_placed(&self) -> bool {
+        self.configuration.is_none() && self.exploded == Exploded::Assembled && self.pose.is_empty() && self.study.is_none()
+    }
+
+    /// Whether making its copy evaluates the design, so only its view's job makes it, off the window's
+    /// thread ([`crate::drawing_scene::Job::run`]). A row of the configuration table does: on a key
+    /// ([`ViewSessions::choice`]) it is a row other than the one the design is in, or one the design no
+    /// longer has, and putting it on the copy evaluates the design. A position or an exploded view
+    /// doesn't: it only moves parts already built (0.02-0.38 ms a copy on the test assemblies), so any
+    /// reader makes it, the window's frame paths included.
+    pub fn evaluates(&self) -> bool {
+        self.row().is_some()
+    }
+
+    /// The row of the configuration table its copy is put in, if any; on a key, see
+    /// [`Choice::evaluates`].
+    pub fn row(&self) -> Option<u64> {
+        self.configuration
+    }
+}
+
+/// A copy of the design a view draws from ([`copy_for`]), and the features its configuration row fails
+/// to build that the design builds, each as `name: error`, as `config.activate` says them.
+pub struct ViewCopy {
+    pub session: Session,
+    pub failing: Vec<String>,
+}
+
+/// The sessions the views of one read of a drawing draw from (#13048): the design as it places its
+/// parts, and a copy for each other state a view draws ([`Choice`]), made the first time a view asks
+/// for it and shared by every view that draws it. A copy costs what placing every body again costs
+/// (its world state misses the session's cache), and a copy of another configuration an evaluation of
+/// the design, so one read makes each at most once. The design is never changed.
+pub struct ViewSessions<'a> {
+    placed: &'a Session,
+    /// Whether the design still matches its active row ([`ViewSessions::matches`]).
+    matches: OnceCell<bool>,
+    copies: BTreeMap<Choice, std::result::Result<ViewCopy, Unmeasured>>,
+}
+
+impl<'a> ViewSessions<'a> {
+    /// The views' sessions, where `placed` is the design as it places its parts.
+    pub fn new(placed: &'a Session) -> ViewSessions<'a> {
+        ViewSessions { placed, matches: OnceCell::new(), copies: BTreeMap::new() }
+    }
+
+    /// The key of the session saved view `view` draws from: what it draws ([`Choice::of`]), less a row
+    /// that is the design's active row while the design still matches it ([`ViewSessions::matches`]),
+    /// which draws the design itself, with no copy. A row that isn't the active one, or that the design
+    /// no longer has, never asks. Every map of views by what they draw is keyed by it.
+    pub fn choice(&self, view: &ResolvedView) -> Choice {
+        let choice = Choice::of(view);
+        let own = |row: &u64| self.placed.doc.configs.active_row().is_some_and(|active| active.id == *row) && self.matches();
+        Choice { configuration: choice.configuration.filter(|row| !own(row)), ..choice }
+    }
+
+    /// Whether the design is still in its active row ([`solidcraft_doc::Document::configuration_matches`]):
+    /// asked once, the first time a view needs it.
+    pub fn matches(&self) -> bool {
+        *self.matches.get_or_init(|| self.placed.doc.configuration_matches())
+    }
+
+    /// The session saved view `view` draws from, or why it can't be drawn ([`copy_for`]).
+    pub fn of(&mut self, view: &ResolvedView) -> std::result::Result<&Session, Unmeasured> {
+        let choice = self.choice(view);
+        self.drawing(&choice).map(|(from, _)| from)
+    }
+
+    /// The session the views whose key is `choice` ([`ViewSessions::choice`]) draw from, and the
+    /// features it fails to build that the design builds ([`ViewCopy`]).
+    pub fn drawing(&mut self, choice: &Choice) -> std::result::Result<(&Session, &[String]), Unmeasured> {
+        if choice.is_placed() {
+            return Ok((self.placed, &[]));
+        }
+        let placed = self.placed;
+        let copy = self.copies.entry(choice.clone()).or_insert_with(|| copy_for(placed, choice));
+        copy.as_ref().map(|copy| (&copy.session, copy.failing.as_slice())).map_err(|why| *why)
+    }
+
+    /// How many copies it made.
+    pub fn copies(&self) -> usize {
+        self.copies.values().filter(|copy| copy.is_ok()).count()
+    }
+
+    /// The session view `view` of `d` draws from, where its dimensions, balloons and notes on its model
+    /// are read, so they measure its parts where it draws them (#13048). A view whose copy can't be
+    /// made draws its placeholder, so the sheet draws none of its records: they read as the design
+    /// places its parts, as they did before each view read its own.
+    pub fn of_view(&mut self, d: &Drawing, view: u64) -> &Session {
+        let placed = self.placed;
+        match d.resolve_view(view) {
+            Ok(view) => {
+                let choice = self.choice(&view);
+                self.drawing(&choice).map_or(placed, |(from, _)| from)
+            }
+            Err(_) => placed,
+        }
+    }
+
+    /// What `read` (a resolver: [`solidcraft_doc::Document::resolve_dimensions`], `resolve_notes`
+    /// or `resolve_balloons`) gives for `records` of `d`, each its id and its view's, each read on
+    /// the session its view draws from ([`ViewSessions::of_view`]), in `records`' order. One call per
+    /// state of the assembly, so each body's names are worked out once per state, not per record.
+    pub fn read_on<T>(
+        &mut self,
+        d: &Drawing,
+        records: &[(u64, u64)],
+        read: impl Fn(&solidcraft_doc::Document, &solidcraft_doc::Model, &Drawing, &[u64]) -> solidcraft_doc::Result<Vec<T>>,
+    ) -> solidcraft_doc::Result<Vec<T>> {
+        let mut states: BTreeMap<Choice, Vec<usize>> = BTreeMap::new();
+        for (at, (_, view)) in records.iter().enumerate() {
+            let choice = d.resolve_view(*view).map(|view| self.choice(&view)).unwrap_or_default();
+            states.entry(choice).or_default().push(at);
+        }
+        let mut out: Vec<Option<T>> = records.iter().map(|_| None).collect();
+        let placed = self.placed;
+        for (choice, ats) in states {
+            let from = self.drawing(&choice).map_or(placed, |(from, _)| from);
+            let ids: Vec<u64> = ats.iter().filter_map(|at| records.get(*at)).map(|(id, _)| *id).collect();
+            for (at, one) in ats.into_iter().zip(read(&from.doc, &from.model, d, &ids)?) {
+                if let Some(slot) = out.get_mut(at) {
+                    *slot = Some(one);
+                }
+            }
+        }
+        Ok(out.into_iter().flatten().collect())
+    }
+}
+
+/// A copy of `placed` as a view drawing `choice` draws it: its configuration row put on it as
+/// `config.activate` puts one ([`crate::cmd::put_row`]: the row's values and rules, the design
+/// evaluated), then its position's joints driven to their values as `joint.drive` drives them (the
+/// limits, closed loops, motion links and contact sets alike), or to a study step's as `motion.play`
+/// drives them (a step past the study's end at its last), skipping a joint or study the design no
+/// longer has, then its exploded view's parts moved out from there, as `explode.show` shows them,
+/// written into the copy's own design so every reader of where the parts are sees them. Or why it
+/// can't be: the row is no longer in the design (found before anything is evaluated) or can't be put
+/// on it, the exploded view is no longer in the design or moves a part out of range (a hostile file),
+/// or the joints can't be driven.
+pub fn copy_for(placed: &Session, choice: &Choice) -> std::result::Result<ViewCopy, Unmeasured> {
+    use crate::cmd::motion::{drive_with_contact, explode_moves, exploded_at, keyed, values_at};
+    // From where the design places its parts: an occurrence move not captured yet is left out.
+    let mut copy = placed.scratch();
+    copy.pending_moves.clear();
+    // The configuration first: the position and the explode start from the geometry it builds.
+    let mut failing = Vec::new();
+    if let Some(row) = choice.configuration {
+        copy.doc.configs.row(RowKey::Id(row)).ok_or(Unmeasured::NoConfiguration)?;
+        // Whatever keeps it off is said as `NotConfigured`: the message, and the command it names, are dropped.
+        let put = crate::cmd::put_row(&mut copy, RowKey::Id(row), crate::drawing_scene::CMD).map_err(|_| Unmeasured::NotConfigured)?;
+        failing = put.new_errors;
+    }
+    // A study sets the values it keys, and the joints' other values follow the solve; joint values
+    // set every value they give.
+    let study = choice.study.and_then(|at| at.drawn(&copy.doc.assembly.studies));
+    let (want, given): (Vec<(u64, Vec<f64>)>, BTreeSet<(u64, usize)>) = match study {
+        Some((m, step)) => (values_at(&copy, m, f64::from(step)), keyed(m)),
+        None => {
+            let want: Vec<(u64, Vec<f64>)> =
+                choice.pose.iter().map(|(joint, bits)| (*joint, bits.iter().map(|b| f64::from_bits(*b)).collect())).collect();
+            let given = want.iter().flat_map(|(joint, values)| (0..values.len()).map(move |i| (*joint, i))).collect();
+            (want, given)
+        }
+    };
+    let joints = &copy.doc.assembly.joints;
+    let want: Vec<(u64, Vec<f64>)> = want.into_iter().filter(|(joint, _)| joints.iter().any(|j| j.id == *joint)).collect();
+    if !want.is_empty() {
+        drive_with_contact(&mut copy, &want, &given).map_err(|_| Unmeasured::NotPosed)?;
+    }
+    if let Exploded::View(id) = choice.exploded {
+        let view = copy.doc.assembly.exploded.iter().find(|v| v.id == id).ok_or(Unmeasured::NoExplodedView)?;
+        let moves = exploded_at(&explode_moves(&copy, view), 1.0);
+        if !moves.values().all(solidcraft_doc::is_placement) {
+            return Err(Unmeasured::NotPlaced);
+        }
+        // What `world_state` would do with them as pending moves, once, in the copy's design.
+        for o in &mut copy.doc_mut().occurrences {
+            if let Some(m) = moves.get(&o.id) {
+                o.transform = *m;
+            }
+        }
+    }
+    Ok(ViewCopy { session: copy, failing })
+}
+
+/// The joints saved view `view`'s position names that `s`'s design no longer has, in its order. The
+/// view draws with the rest ([`copy_for`]).
+pub fn gone_joints(s: &Session, view: &ResolvedView) -> Vec<u64> {
+    let Pose::Joints(joints) = &view.pose.value else { return Vec::new() };
+    joints.iter().map(|j| j.joint).filter(|id| !s.doc.assembly.joints.iter().any(|joint| joint.id == *id)).collect()
+}
+
+/// What the sheet says beside saved view `view`, drawn from `s` (#13048), as a drawn note says why:
+/// that its configuration row rebuilds with `failing` features that the design builds ([`ViewCopy`]),
+/// and that its position names joints or a motion study `s`'s design no longer has. With none of its
+/// joints left, or its study gone, it draws the design's placement.
+pub fn state_reason(s: &Session, view: &ResolvedView, failing: &[String]) -> Option<String> {
+    let plural = |n: usize| if n == 1 { "" } else { "s" };
+    let configuration = match view.configuration.value {
+        ViewConfiguration::Row(id) if !failing.is_empty() => {
+            let row = s.doc.configs.row(RowKey::Id(id)).map_or("", |row| row.name.as_str());
+            Some(format!("its configuration `{row}` rebuilds with {} failing feature{}", failing.len(), plural(failing.len())))
+        }
+        _ => None,
+    };
+    let position = match view.pose.value {
+        Pose::Study(at) => at.drawn(&s.doc.assembly.studies).is_none().then(|| "its position names a motion study the design no longer has".into()),
+        _ => Some(gone_joints(s, view).len())
+            .filter(|gone| *gone > 0)
+            .map(|gone| format!("its position names {gone} joint{} the design no longer has", plural(gone))),
+    };
+    match (configuration, position) {
+        (Some(configuration), Some(position)) => Some(format!("{configuration}; {position}")),
+        (configuration, position) => configuration.or(position),
+    }
+}
+
+/// What saved view `view` draws from `sessions`: every body its session places ([`shown`]), or why
+/// there's nothing to show.
+pub fn shown_by(sessions: &mut ViewSessions, view: &ResolvedView) -> std::result::Result<ShownSet, Unmeasured> {
+    shown(sessions.of(view)?)
+}
+
+/// Every body the design places, or why there's nothing to show: the assembly places more than a
+/// view walks, or it has no bodies.
+pub fn shown(s: &Session) -> std::result::Result<ShownSet, Unmeasured> {
+    if !s.doc.placements_complete() {
+        return Err(Unmeasured::PastWalkLimit);
+    }
+    let state = s.world_state().map_err(|_| Unmeasured::NotPlaced)?;
+    // The world state names each placed body as this walk does, so its name finds its path.
+    let mut placed: BTreeMap<String, (Vec<u64>, String)> =
+        s.doc.body_frames_with_source(&s.model.state()).into_iter().map(|(name, body, _, path, _)| (name, (path, body))).collect();
+    let references = s.doc.reference_occurrences();
+    let bodies: Vec<Shown> = state
+        .bodies
+        .iter()
+        .enumerate()
+        .map(|(index, b)| {
+            let (path, body) = placed.remove(&b.name).unwrap_or_else(|| (Vec::new(), b.definition_name().to_string()));
+            let reference = path.iter().any(|occurrence| references.contains(occurrence));
+            Shown { index, path, body, reference }
+        })
+        .collect();
+    if bodies.is_empty() { Err(Unmeasured::NoBodies) } else { Ok(ShownSet { state, bodies, uncut: None, cut: BTreeMap::new() }) }
+}
+
+/// A saved view on its sheet.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OnSheet {
+    /// Its box on the sheet, in paper millimetres.
+    pub boundary: Aabb2,
+    /// Its design's extents on its plane; with nothing to measure, the placeholder's box there,
+    /// [`PLACEHOLDER_MM`] each way on paper round the plane's origin.
+    pub extents: Extents,
+    /// Why there's nothing to measure, when there isn't.
+    pub unmeasured: Option<Unmeasured>,
+}
+
+/// Why section view `view` can't be drawn yet, if it can't (#13046): only a full section's lines
+/// are cut so far, and a shaded part's picture isn't. The sheet scene refuses it; its settings stay
+/// editable. Pictures and dimensions leave out every section view for now.
+pub fn not_cut_yet(view: &ResolvedView) -> Option<&'static str> {
+    match view.cut.as_ref()?.line.kind() {
+        SectionKind::Full if view.visual_style.value.is_shaded() || view.reference_style.value.is_shaded() => {
+            Some("not supported yet: a shaded section view")
+        }
+        SectionKind::Full => None,
+        SectionKind::Half => Some("not supported yet: a half section"),
+        SectionKind::Offset => Some("not supported yet: an offset section"),
+        SectionKind::Aligned => Some("not supported yet: an aligned section"),
+    }
+}
+
+/// Why saved view `view` can't be drawn yet, if it can't, as it draws its parts apart (#13048): its
+/// shaded parts' pictures are rendered from the design as it builds and places its parts. Its lines
+/// alone draw. Exploded comes first, as an exploded view of a position is still exploded, then posed,
+/// as a position of a row is still a position.
+pub fn not_drawable_apart(view: &ResolvedView) -> Option<&'static str> {
+    if !(view.visual_style.value.is_shaded() || view.reference_style.value.is_shaded()) {
+        None
+    } else if view.exploded.value != Exploded::Assembled {
+        Some("not supported yet: a shaded view of an exploded view")
+    } else if view.pose.value != Pose::Designed {
+        Some("not supported yet: a shaded view in a position of its own")
+    } else if view.configuration.value != ViewConfiguration::Active {
+        Some("not supported yet: a shaded view of a configuration of its own")
+    } else {
+        None
+    }
+}
+
+/// Why flat pattern view `view` can't be drawn, if it can't: it draws one body's flat, so it is never
+/// exploded or posed, and a configuration of its own needs that configuration's flat, not read yet.
+/// Nothing for a view of the model.
+pub fn not_drawable_flat(view: &ResolvedView) -> Option<&'static str> {
+    if view.flat.is_none() {
+        None
+    } else if view.exploded.value != Exploded::Assembled {
+        Some("a flat pattern view is never exploded: it draws one body's flat")
+    } else if view.pose.value != Pose::Designed {
+        Some("a flat pattern view has no position: it draws one body's flat")
+    } else if view.configuration.value != ViewConfiguration::Active {
+        Some("not supported yet: a flat pattern view of a configuration of its own")
+    } else {
+        None
+    }
+}
+
+/// Why nothing on saved view `view` can point at the model, if nothing can (#13030): a flat pattern
+/// view draws its body's flat, whose edges aren't the model's, so no dimension, balloon or note
+/// leader has a place on it. A note on it that points at nothing is drawn.
+pub fn no_model_edges(view: &View) -> Option<&'static str> {
+    let why = "a flat pattern view draws its body's flat, not the model's edges: nothing on it points at the model";
+    matches!(view.kind, ViewKind::Flat { .. }).then_some(why)
+}
+
+/// What saved view `view` shows of `shown`, with its extents on its plane, or why there's nothing to
+/// measure: the one rule its boundary, its fitted scale and its lines are worked out by.
+pub fn measured<'a>(
+    shown: &'a std::result::Result<ShownSet, Unmeasured>,
+    view: &ResolvedView,
+) -> std::result::Result<(Cow<'a, ShownSet>, Extents), Unmeasured> {
+    let set = shown.as_ref().map_err(|why| *why)?.of_view(view);
+    if set.bodies.is_empty() {
+        return Err(Unmeasured::NothingChosen);
+    }
+    // Only a full section is cut so far ([`not_cut_yet`]): the others measure their bodies whole.
+    let set = match &view.cut {
+        Some(cut) if cut.line.kind() == SectionKind::Full => Cow::Owned(sectioned(&set, cut)?),
+        _ => set,
+    };
+    let extents = measure(&set, &view.basis)?;
+    Ok((set, extents))
+}
+
+/// What a full section view along `cut` shows of `set`: each model body cut by the line's plane, the
+/// side its arrows point to kept ([`ModelBody::section`], which remembers it), and a body with nothing
+/// on that side left out. Reference parts show whole around the cut, as context. Mesh bodies have no
+/// faces to cut, so they show whole, and so does a body whose cut fails: [`ShownSet::uncut`] says
+/// which. Each body keeps its place among the state's bodies, so picking a line still finds its part.
+fn sectioned(set: &ShownSet, cut: &Cut) -> std::result::Result<ShownSet, Unmeasured> {
+    let plane = cut.line.planes(&cut.parent).map_err(|e| e.to_string()).and_then(|p| p.into_iter().next().ok_or_else(|| "no plane".into()));
+    let mut state = ModelState::clone(&set.state);
+    let (mut bodies, mut meshes, mut failed, mut why_failed) = (Vec::new(), 0usize, 0usize, None);
+    let mut cut_bodies = BTreeMap::new();
+    for shown in &set.bodies {
+        let Some(body) = set.body(shown) else { continue };
+        if shown.reference {
+            bodies.push(shown.clone());
+            continue;
+        }
+        if body.body.is_mesh() {
+            meshes += 1;
+            bodies.push(shown.clone());
+            continue;
+        }
+        match plane.clone().and_then(|plane| body.section(&plane).map_err(|e| e.to_string())) {
+            Ok(Some(section)) => {
+                if let Some(slot) = state.bodies.get_mut(shown.index) {
+                    // A body that only touches the plane is shown whole, and nothing of it is hatched.
+                    let telling = plane.as_ref().ok().and_then(|plane| hatch::cut_faces(&body.body, &section.body, plane));
+                    if let Some(telling) = telling {
+                        cut_bodies.insert(shown.index, telling);
+                    }
+                    *slot = section;
+                }
+                bodies.push(shown.clone());
+            }
+            Ok(None) => {}
+            Err(why) => {
+                failed += 1;
+                why_failed.get_or_insert(why);
+                bodies.push(shown.clone());
+            }
+        }
+    }
+    if set.bodies.iter().any(|b| !b.reference) && !bodies.iter().any(|b| !b.reference) {
+        return Err(Unmeasured::CutAway);
+    }
+    let count = |n: usize, what: &str| if n == 1 { format!("1 {what}body is") } else { format!("{n} {what}bodies are") };
+    let meshes = (meshes > 0).then(|| format!("{} drawn uncut: a mesh has no faces to cut", count(meshes, "mesh ")));
+    let failed = why_failed.map(|why| format!("{} drawn uncut: {why}", count(failed, "")));
+    let uncut = match (meshes, failed) {
+        (Some(meshes), Some(failed)) => Some(format!("{meshes}; {failed}")),
+        (meshes, failed) => meshes.or(failed),
+    };
+    Ok(ShownSet { state: Arc::new(state), bodies, uncut, cut: cut_bodies })
+}
+
+/// The extents of the bodies `shown` holds, seen on `basis`, or that they have nothing to measure:
+/// of its model parts when it has any, as a reference part only shows around them, else of its
+/// reference parts.
+pub fn measure(shown: &ShownSet, basis: &Plane) -> std::result::Result<Extents, Unmeasured> {
+    let has_model = shown.bodies.iter().any(|b| !b.reference);
+    let bodies = shown.bodies.iter().filter(|b| !(has_model && b.reference)).filter_map(|b| shown.body(b));
+    let extents = bodies.fold(Extents { model: Aabb2::EMPTY, error_mm: 0.0, bodies: 0 }, |e, body| Extents {
+        model: e.model.union(&body.mesh_bounds_in(basis)),
+        error_mm: e.error_mm.max(body.display_tol()),
+        bodies: e.bodies + 1,
+    });
+    if extents.model.is_empty() { Err(Unmeasured::NoBodies) } else { Ok(extents) }
+}
+
+/// What a view of `shown` shows on `basis`: its `extents`, each side grown on its own towards the box
+/// that also holds its reference parts, `percent` of the way. A side no reference part passes stays
+/// exactly where it is, and at 0 no reference part is measured.
+pub fn shows(shown: &ShownSet, basis: &Plane, extents: &Extents, percent: f64) -> Aabb2 {
+    if percent <= 0.0 {
+        return extents.model;
+    }
+    let references = shown.bodies.iter().filter(|b| b.reference).filter_map(|b| shown.body(b));
+    let all = references.fold(extents.model, |all, body| all.union(&body.mesh_bounds_in(basis)));
+    let part = percent / 100.0;
+    let side = |from: f64, to: f64| if from == to { from } else { from * (1.0 - part) + to * part };
+    let model = extents.model;
+    Aabb2 {
+        min: Vec2::new(side(model.min.x, all.min.x), side(model.min.y, all.min.y)),
+        max: Vec2::new(side(model.max.x, all.max.x), side(model.max.y, all.max.y)),
+    }
+}
+
+/// The view through `basis` at `scale` on paper, with the middle of the model's box (model mm on its
+/// plane) at `centre`, however far reference parts grow what it shows, so it stays lined up with its
+/// projected views: the one rule the snapshot and saved views are placed by.
+pub fn frame(basis: Plane, scale: Scale, model: &Aabb2, centre: Vec2, cmd: &str) -> Result<ViewFrame> {
+    ViewFrame::new(basis, scale, model.center(), centre).map_err(|e| bad(cmd, e.to_string()))
+}
+
+/// The frame saved view `view` draws through, its middle at `centre` on paper: [`frame`]'s, the
+/// model's middle there, except a detail view's, whose boundary's centre is there, so the region
+/// it shows sits on its place whatever else the model holds.
+pub fn view_frame(view: &ResolvedView, model: &Aabb2, centre: Vec2, cmd: &str) -> Result<ViewFrame> {
+    match view.detail {
+        Some(boundary) => ViewFrame::new(view.basis, view.scale.value, boundary.centre(), centre).map_err(|e| bad(cmd, e.to_string())),
+        None => frame(view.basis, view.scale.value, model, centre, cmd),
+    }
+}
+
+/// A detail view's boundary as `frame` draws it: the window its lines are cut to, on paper.
+pub fn detail_window(boundary: &Boundary, frame: &ViewFrame) -> Shape {
+    let map = frame.paper_map();
+    match boundary.shape() {
+        Shape::Circle { centre, radius } => Shape::Circle { centre: map.apply(centre), radius: radius * map.scale() },
+        Shape::Rectangle(b) => {
+            let (a, c) = (map.apply(b.min), map.apply(b.max));
+            Shape::Rectangle(Aabb2 { min: Vec2::new(a.x.min(c.x), a.y.min(c.y)), max: Vec2::new(a.x.max(c.x), a.y.max(c.y)) })
+        }
+    }
+}
+
+/// Why detail view `view` can't be drawn yet, if it can't: its region is cut from its lines, and a
+/// shaded part's picture isn't cut yet.
+pub fn not_detailed_yet(view: &ResolvedView) -> Option<&'static str> {
+    let shaded = view.visual_style.value.is_shaded() || view.reference_style.value.is_shaded();
+    (view.detail.is_some() && shaded).then_some("not supported yet: a shaded detail view")
+}
+
+/// Saved view `id` of `drawing`, one of `s`'s design's drawings, on its sheet: the extents of what it
+/// shows on its plane ([`measured`]; a view's source is the design the drawing is in), grown by
+/// [`shows`], at its scale, with the model's middle on its centre ([`Drawing::view_centre`]); with nothing to
+/// measure, a placeholder [`PLACEHOLDER_MM`] each way round its centre. It reads the model as it
+/// is evaluated: no model is evaluated, but a view of another configuration evaluates a copy of the
+/// design ([`copy_for`]); the design is unchanged.
+pub fn on_sheet(s: &Session, drawing: &Drawing, id: u64, cmd: &str) -> Result<OnSheet> {
+    on_sheet_from(&mut ViewSessions::new(s), drawing, id, cmd)
+}
+
+/// Where a saved view puts what it draws on its sheet ([`on_its_sheet`]).
+pub(crate) struct ViewOnSheet {
+    /// The frame its records are laid out through, centred on the view.
+    pub frame: ViewFrame,
+    /// The view's centre, in paper mm from the sheet's lower-left corner.
+    pub centre: Vec2,
+    /// Its sheet's size, in paper mm.
+    pub size: Vec2,
+    /// The line group its lines and records are drawn in.
+    pub line_group: LineGroup,
+}
+
+/// Where saved view `id` of `d` puts what it draws on its sheet, as the sheet draws it: its frame,
+/// centre, sheet size and line group, measured from where the design places its parts ([`on_sheet`];
+/// an occurrence move not captured yet is left out). Or, in the sheet's words
+/// ([`crate::drawing_scene::NOT_DRAWN`]), that it isn't drawn: no such view, a style the sheet can't
+/// draw yet, a section view (what points at its cut faces is in no part yet, #13046), or nothing to
+/// measure. A view that draws no model edges, a flat
+/// pattern view ([`no_model_edges`]), has no place for what points at the model
+/// ([`crate::drawing_scene::NO_PLACE`]).
+pub(crate) fn on_its_sheet(s: &Session, d: &Drawing, id: u64, cmd: &str) -> std::result::Result<ViewOnSheet, &'static str> {
+    use crate::drawing_scene::{NO_PLACE, NOT_DRAWN, designed};
+    let copy = (!s.pending_moves.is_empty()).then(|| designed(s));
+    let s = copy.as_ref().unwrap_or(s);
+    let view = d.resolve_view(id).map_err(|_| NOT_DRAWN)?;
+    if d.view(id).and_then(no_model_edges).is_some() {
+        return Err(NO_PLACE);
+    }
+    // Not yet on a section view: its cut faces' edges are in no part (#13046).
+    if not_drawable_apart(&view).is_some() || view.cut.is_some() {
+        return Err(NOT_DRAWN);
+    }
+    let on = on_sheet(s, d, id, cmd).ok().filter(|on| on.unmeasured.is_none()).ok_or(NOT_DRAWN)?;
+    let sheet = d.views.iter().find(|v| v.id == id).and_then(|v| d.sheets.iter().find(|sheet| sheet.id == v.sheet));
+    let (Ok(through), Ok(centre), Some(Ok(size))) =
+        (view_frame(&view, &on.extents.model, Vec2::ZERO, cmd), d.view_centre(id), sheet.map(|sheet| sheet.sheet.size_mm()))
+    else {
+        return Err(NOT_DRAWN);
+    };
+    Ok(ViewOnSheet { frame: through, centre, size, line_group: view.line_group.value })
+}
+
+/// [`on_sheet`], drawn from `sessions`: one read of several views makes each copy once.
+pub fn on_sheet_from(sessions: &mut ViewSessions, drawing: &Drawing, id: u64, cmd: &str) -> Result<OnSheet> {
+    let view = drawing.resolve_view(id).map_err(|e| bad(cmd, e.to_string()))?;
+    if let Some(of) = &view.flat {
+        return flat_on_sheet(drawing, id, &flat(sessions.placed, of, cmd), cmd);
+    }
+    let centre = drawing.view_centre(id).map_err(|e| bad(cmd, e.to_string()))?;
+    let shown = shown_by(sessions, &view);
+    let measured = measured(&shown, &view).map(|(set, e)| (e, shows(&set, &view.basis, &e, view.reference_shown_percent)));
+    placed(&view, measured, centre, cmd)
+}
+
+/// Flat pattern view `id` of `drawing` on its sheet, from its `flat` as already read: [`on_sheet`] for
+/// a flat view, so a command that has read the flat doesn't read it again.
+pub fn flat_on_sheet(drawing: &Drawing, id: u64, flat: &Result<Flat>, cmd: &str) -> Result<OnSheet> {
+    let view = drawing.resolve_view(id).map_err(|e| bad(cmd, e.to_string()))?;
+    let centre = drawing.view_centre(id).map_err(|e| bad(cmd, e.to_string()))?;
+    placed(&view, flat_measured(flat), centre, cmd)
+}
+
+/// A flat pattern view's extents and what it shows, from its [`flat`]: [`placed`]'s input.
+pub fn flat_measured(flat: &Result<Flat>) -> std::result::Result<(Extents, Aabb2), Unmeasured> {
+    let flat = flat.as_ref().map_err(|_| Unmeasured::NoFlat)?;
+    Ok((Extents { model: flat.model, error_mm: 0.0, bodies: 1 }, flat.model))
+}
+
+/// A view drawing as `view` does on its sheet, from what [`measure`] and [`shows`] said of it, with the
+/// model's middle on `centre`; with nothing to measure, the placeholder.
+pub fn placed(view: &ResolvedView, measured: std::result::Result<(Extents, Aabb2), Unmeasured>, centre: Vec2, cmd: &str) -> Result<OnSheet> {
+    let scale = view.scale.value;
+    let (extents, shows, unmeasured) = match measured {
+        Ok((extents, shows)) => (extents, shows, None),
+        Err(why) => {
+            let half = PLACEHOLDER_MM / 2.0 / scale.factor();
+            let model = Aabb2 { min: Vec2::new(-half, -half), max: Vec2::new(half, half) };
+            (Extents { model, error_mm: 0.0, bodies: 0 }, model, Some(why))
+        }
+    };
+    // A detail view's boundary is its region's: it shows nothing past it.
+    let shows = view.detail.map_or(shows, |region| region.shape().bounds());
+    let boundary = view_frame(view, &extents.model, centre, cmd)?.boundary(&shows).map_err(|e| bad(cmd, e.to_string()))?;
+    Ok(OnSheet { boundary, extents, unmeasured })
+}
+
+/// Each of `views` of `drawing` (one of `s`'s design's) whose boundary leaves its sheet's drawing
+/// space ([`Sheet::drawing_space`]), sides included, or lies over its title block, with where it
+/// sits: what a change of paper or block, or a move to another sheet, leaves outside. Nothing is moved.
+pub fn outside(s: &Session, drawing: &Drawing, views: &[u64], cmd: &str) -> Result<Vec<(u64, OnSheet)>> {
+    let (mut out, mut sessions) = (Vec::new(), ViewSessions::new(s));
+    for &id in views {
+        let view = drawing.view(id).ok_or_else(|| bad(cmd, format!("no view {}", ids::encode(id))))?;
+        let placed = on_sheet_from(&mut sessions, drawing, id, cmd)?;
+        if leaves(sheet(drawing, view.sheet, cmd)?, &placed, cmd)? {
+            out.push((id, placed));
+        }
+    }
+    Ok(out)
+}
+
+/// Sheet `id` of `drawing`.
+pub fn sheet<'a>(drawing: &'a Drawing, id: u64, cmd: &str) -> Result<&'a Sheet> {
+    drawing.sheets.iter().find(|s| s.id == id).map(|s| &**s).ok_or_else(|| bad(cmd, format!("no sheet {}", ids::encode(id))))
+}
+
+/// Where a sheet's views belong: inside `space` and off `block`. One rule for the views [`outside`]
+/// lists, the views `drawing.check` lists and the scale a view is fitted at.
+#[derive(Clone, Copy, Debug)]
+pub struct Room {
+    pub space: Aabb2,
+    pub block: Option<Aabb2>,
+}
+
+impl Room {
+    /// `sheet`'s: its drawing space ([`Sheet::drawing_space`]) and its title block.
+    pub fn on(sheet: &Sheet, cmd: &str) -> Result<Room> {
+        let space = sheet.drawing_space().map_err(|e| bad(cmd, e.to_string()))?;
+        let block = sheet.title_block_outline().map_err(|e| bad(cmd, e.to_string()))?;
+        Ok(Room { space, block })
+    }
+
+    /// Whether `boundary` is off the block: drawn up to it, a side on its outline, it is.
+    pub fn clear_of_block(&self, boundary: &Aabb2) -> bool {
+        self.block.is_none_or(|block| !block.inflated(-EPS).overlaps(boundary))
+    }
+
+    /// Whether `boundary` is where a view belongs. Drawn up to the border, its sides on it, it is
+    /// inside: the margin takes rounding.
+    pub fn holds(&self, boundary: &Aabb2) -> bool {
+        let space = self.space.inflated(EPS);
+        space.contains(boundary.min) && space.contains(boundary.max) && self.clear_of_block(boundary)
+    }
+}
+
+/// Whether a view `placed` on `sheet` isn't where its [`Room`] says: [`outside`]'s rule.
+pub fn leaves(sheet: &Sheet, placed: &OnSheet, cmd: &str) -> Result<bool> {
+    Ok(!Room::on(sheet, cmd)?.holds(&placed.boundary))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A `source` path takes everything under it, `[]` only the design's own bodies, and a `hide`
+    /// path wins over a `source` path above it.
+    #[test]
+    fn a_body_is_drawn_under_a_source_path_and_no_hide_path() {
+        let set = |paths: &[&'static [u64]]| paths.iter().copied().collect::<HashSet<&[u64]>>();
+        let paths: [&[u64]; 5] = [&[], &[1], &[1, 2], &[1, 2, 3], &[4]];
+        let cases: [(Option<HashSet<&[u64]>>, HashSet<&[u64]>, [bool; 5]); 4] = [
+            (None, set(&[&[1, 2]]), [true, true, false, false, true]),
+            (Some(set(&[&[1, 2]])), set(&[]), [false, false, true, true, false]),
+            (Some(set(&[&[]])), set(&[]), [true, false, false, false, false]),
+            (Some(set(&[&[1], &[4]])), set(&[&[1, 2]]), [false, true, false, false, true]),
+        ];
+        for (source, hide, want) in cases {
+            let got = paths.map(|p| chosen(p, source.as_ref(), &hide));
+            assert_eq!(got, want, "{source:?} {hide:?}");
+        }
+    }
+
+    /// Seeded paths and choices: `chosen` always agrees with the rule worked out the long way.
+    #[test]
+    fn seeded_choices_agree_with_the_rule() {
+        let pick = |seed: u64, salt: u64, n: u64| ((seed ^ salt).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 33) % n;
+        let path = |seed: u64, salt: u64| -> Vec<u64> { (0..pick(seed, salt, 4)).map(|i| 1 + pick(seed, salt + 10 + i, 3)).collect() };
+        for seed in 1..=500u64 {
+            let sources: Vec<Vec<u64>> = (0..pick(seed, 1, 3)).map(|i| path(seed, 100 + i * 20)).collect();
+            let hides: Vec<Vec<u64>> = (0..pick(seed, 2, 3)).map(|i| path(seed, 200 + i * 20)).filter(|p| !p.is_empty()).collect();
+            let body = path(seed, 3);
+            let source = (pick(seed, 4, 2) == 0).then(|| sources.iter().map(Vec::as_slice).collect::<HashSet<&[u64]>>());
+            let hide: HashSet<&[u64]> = hides.iter().map(Vec::as_slice).collect();
+            let under = |p: &Vec<u64>| if p.is_empty() { body.is_empty() } else { body.starts_with(p) };
+            let long_way = (source.is_none() || sources.iter().any(under)) && !hides.iter().any(under);
+            assert_eq!(chosen(&body, source.as_ref(), &hide), long_way, "seed {seed}: {body:?} {sources:?} {hides:?}");
+        }
+    }
+}

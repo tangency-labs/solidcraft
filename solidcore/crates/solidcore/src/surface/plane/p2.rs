@@ -25,10 +25,15 @@
 //!   the geometric tolerance is returned as a point curve at the interval midpoint,
 //!   including a trailing interval at the source curve's end. The extent bound
 //!   includes arithmetic rounding.
-//! - **Plane first with a torus (opt-in, not upstream).** With
-//!   `fixes.plane_first_torus_section_exact` (WR-721, #2405) `GlobalSurfaceIntersect` takes a
-//!   torus's own plane section (`Torus::intersect_with_plane_owned_into`, its orders and UV
-//!   curves swapped as for a surface of revolution); upstream has no torus case and marches it.
+//! - **Domain sides in contact (not upstream).** `MakeNewPlaneEllipse` collapses an
+//!   ellipse's two crossings of a domain side to one touching point also where it overlaps
+//!   the side by up to a contact tolerance its caller gives, read as every contact site
+//!   reads it (`within_contact_tol`; [`Plane::make_new_plane_ellipse_in_contact`]; zero,
+//!   upstream's, by [`Plane::make_new_plane_ellipse`]).
+//! - **Plane first with a torus (not upstream).** `GlobalSurfaceIntersect` takes a torus's
+//!   own plane section (`Torus::intersect_with_plane_owned_into`, its orders and UV curves
+//!   swapped as for a surface of revolution; WR-721, #2405); upstream has no torus case and
+//!   marches it.
 //! - **Arguments.** Out-params become return values; `SmContext` arguments are
 //!   dropped. `GlobalSurfaceIntersect`'s and `IntersectWithPlane`'s optional output
 //!   arrays are always filled ([`SurfaceIntersection`]; a plane/plane intersection has
@@ -58,10 +63,9 @@
 //!   [`PlaneIntersectWarning::NearlySingular`], not as an error. `GlobalSurfaceIntersect`
 //!   stops on it as upstream's `SER` does ([`stop_on_warning`]: a surface failure whose
 //!   comparison status is `SM_ERR_WARNING`).
-//! - **Upstream fix WR-652 / #1056.** The opt-in
-//!   [`crate::kernel::UpstreamFixes::plane_recognition_origin_after_axes`] places a
-//!   recognised plane's origin using its final orthogonal axes. It is off by default
-//!   to preserve SMLib's original arithmetic.
+//! - **Upstream fix WR-652.** A recognised plane's origin is placed using its final
+//!   orthogonal axes; SMLib places it along the Y axis before that axis is made
+//!   perpendicular.
 //! - **Recognisers** after the plane in `GlobalSurfaceIntersect`: the surface of
 //!   revolution's and the cone's (`SmCone::IntersectWithPlane`, also for a cylinder)
 //!   special cases run; the sphere and extrusion need surface kinds not in
@@ -90,7 +94,7 @@ use crate::geom::pseudo_box::PseudoBox;
 use crate::geom::solution_array::{
     ObjectKind, SolutionArray, SolutionObject, SolutionType, SortKey,
 };
-use crate::geom::tol::{are_same, is_zero, is_zero_to_tol, ZONE_TOL_3D};
+use crate::geom::tol::{are_same, is_zero, is_zero_to_tol, within_contact_tol, ZONE_TOL_3D};
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
 use crate::kernel::Kernel;
@@ -506,10 +510,9 @@ impl Plane {
     /// near the centre (angle tolerance `tolerance_scale * 1e-4` degrees), and ten test
     /// points lie within `SM_EFF_ZERO_SQRT * (1 + |origin|)` of the plane built from
     /// the `(0, 0)` derivatives. The plane is re-parameterised to the natural domain
-    /// of `test` (which makes its NURB). `None` when `test` is not a plane. By default,
-    /// the origin is computed before orthogonalizing the Y axis, matching SMLib. Set
-    /// [`crate::kernel::UpstreamFixes::plane_recognition_origin_after_axes`] to use the
-    /// final axes and avoid magnifying a small adjustment across a distant UV minimum.
+    /// of `test` (which makes its NURB). `None` when `test` is not a plane. The origin
+    /// is placed along the final, perpendicular axes (WR-652), so a small adjustment of
+    /// the Y axis is not magnified across a distant UV minimum.
     ///
     /// # Errors
     ///
@@ -597,12 +600,6 @@ impl Plane {
         let x_axis = x_axis.unitize_or_z();
         let mut y_axis = y_axis.unitize_or_z();
 
-        // Move the origin to correspond to the zero [u=0, v=0] parameter.
-        // Keep this calculation before axis orthogonalization for upstream-default parity.
-        let mut new_origin = origin
-            - uv_domain.min().x * x_axis * uv_scale.x
-            - uv_domain.min().y * y_axis * uv_scale.y;
-
         // Force XAxis and YAxis to be nicely perpendicular
         if x_axis.dot(y_axis).abs() > EFF_ZERO {
             y_axis = x_axis.cross(y_axis).cross(x_axis);
@@ -611,13 +608,12 @@ impl Plane {
             })?;
         }
 
-        // The opt-in upstream fix anchors the origin using the final axes, so a nonzero
-        // domain minimum does not amplify the small Y-axis adjustment.
-        if k.fixes.plane_recognition_origin_after_axes {
-            new_origin = origin
-                - uv_domain.min().x * x_axis * uv_scale.x
-                - uv_domain.min().y * y_axis * uv_scale.y;
-        }
+        // Move the origin to correspond to the zero [u=0, v=0] parameter, along the
+        // final axes (WR-652: upstream used the Y axis before it was made perpendicular,
+        // so a domain far from v = 0 magnified the turn).
+        let new_origin = origin
+            - uv_domain.min().x * x_axis * uv_scale.x
+            - uv_domain.min().y * y_axis * uv_scale.y;
 
         // construct temporary new plane (m_pNurb == NULL)
         let mut plane = Self::new(new_origin, x_axis, y_axis, uv_scale, &uv_domain);
@@ -1261,6 +1257,38 @@ impl Plane {
         anal_ivl: &Extent1d,
         tol: f64,
     ) -> Result<Vec<Curve>> {
+        self.make_new_plane_ellipse_in_contact(
+            k, uv_domain, center, radius_x, radius_y, x_axis, y_axis, anal_ivl, tol, 0.0,
+        )
+    }
+
+    /// [`Plane::make_new_plane_ellipse`] where an ellipse overlapping a side of the domain
+    /// past touching by up to `contact_tol` (not proved past it, `within_contact_tol`)
+    /// touches that side at one point, as it does by less than half `tol` (upstream's
+    /// [B10]); zero is upstream's. Not upstream: a face's domain is the box of its trims,
+    /// so a side of it runs along the face's own boundary where that boundary reaches the
+    /// box. A circle a hair past a round edge there, by up to the contact tolerance at which
+    /// the edge and the circle touch (docs/booleans.md §6, "Circles a hair less than
+    /// tangent"), was cut at the side, its two ends the lens's half length off the touch,
+    /// where no other site of the boolean put a vertex.
+    ///
+    /// # Errors
+    ///
+    /// As [`Plane::make_new_plane_ellipse`].
+    #[allow(clippy::too_many_arguments, clippy::too_many_lines)] // one upstream function
+    pub(crate) fn make_new_plane_ellipse_in_contact(
+        &self,
+        k: &Kernel,
+        uv_domain: &Extent2d,
+        center: Point3,
+        radius_x: f64,
+        radius_y: f64,
+        x_axis: Vec3,
+        y_axis: Vec3,
+        anal_ivl: &Extent1d,
+        tol: f64,
+        contact_tol: f64,
+    ) -> Result<Vec<Curve>> {
         // init output
         let mut crvs: Vec<Curve> = Vec::new();
 
@@ -1393,7 +1421,11 @@ impl Plane {
                     // About 10 deg: just to avoid a sqrt when not close.
                     // Max dist from ellipse to line between the two solutions:
                     let h = rad - sqrt(rad * rad - dist * dist * 0.25);
-                    if h < tol / 2.0 {
+                    // the contact as every contact site reads it (`within_contact_tol`)
+                    let size = center.max_dimension() + max2(radius_x, radius_y);
+                    if h < tol / 2.0
+                        || (contact_tol > 0.0 && within_contact_tol(h, contact_tol, size))
+                    {
                         params = vec![(a0 + a1) / 2.0];
                     }
                 }
@@ -1680,9 +1712,9 @@ pub(crate) fn global_surface_intersect_into<O: SolutionObject + Copy + PartialEq
             need_nurb_intersection = x.needs_more_intersections;
             *out = SurfaceIntersection::from(x);
         }
-        // Not upstream (WR-721, #2405, opt-in): the torus's own plane section, as for a
-        // surface of revolution (upstream has no SmTorus case: the default branch)
-        SurfaceKind::Torus(torus) if k.fixes.plane_first_torus_section_exact => {
+        // Not upstream (WR-721, #2405): the torus's own plane section, as for a surface of
+        // revolution (upstream has no SmTorus case: the default branch)
+        SurfaceKind::Torus(torus) => {
             // the plane's boxes take its face's tolerance
             let need = torus.intersect_with_plane_owned_into(
                 k,
@@ -1695,8 +1727,7 @@ pub(crate) fn global_surface_intersect_into<O: SolutionObject + Copy + PartialEq
             core::mem::swap(&mut out.surface1_uv_curves, &mut out.surface2_uv_curves);
             need_nurb_intersection = need?;
         }
-        SurfaceKind::Torus(_)
-        | SurfaceKind::BSpline(_)
+        SurfaceKind::BSpline(_)
         | SurfaceKind::ProceduralBlend(_)
         | SurfaceKind::BallPatch(_)
         | SurfaceKind::CurveBounded(_)
@@ -1815,21 +1846,16 @@ mod tests {
         assert!(Plane::is_nurb_surface_plane(k, &twisted, 1.0)
             .unwrap()
             .is_none());
-        let mut fixed_kernel = Kernel::default();
-        fixed_kernel.fixes.plane_recognition_origin_after_axes = true;
-        assert!(Plane::is_nurb_surface_plane(&fixed_kernel, &twisted, 1.0)
-            .unwrap()
-            .is_none());
     }
 
     #[test]
-    fn plane_origin_after_axes_fix_is_opt_in_and_domain_local() {
+    fn plane_origin_after_axes_is_domain_local() {
         const SHEAR: f64 = 3.2e-8;
+        let k = Kernel::default();
         let domain_cases = [
             Extent2d::from_bounds(2.0, 4.0, 3.0, 5.0),
             Extent2d::from_bounds(2.0, -5.0, 3.0, -4.0),
         ];
-        assert!(!Kernel::default().fixes.plane_recognition_origin_after_axes);
 
         for domain in domain_cases {
             let surface = skewed_bilinear(domain, SHEAR);
@@ -1838,80 +1864,49 @@ mod tests {
             let upper_uv = domain.max();
             let expected_lower = surface.evaluate_point(lower_uv).unwrap();
 
-            let default_kernel = Kernel::default();
-            let default_plane = Plane::is_nurb_surface_plane(&default_kernel, &surface, 1.0)
+            let plane = Plane::is_nurb_surface_plane(&k, &surface, 1.0)
                 .unwrap()
                 .unwrap();
-            let default_lower_error = default_plane.evaluate_point(lower_uv) - expected_lower;
-            let expected_shift = -domain.min().y * 40.0 * SHEAR;
-            assert!((default_lower_error.x - expected_shift).abs() < 1.0e-12);
-            assert!(default_lower_error.y.abs() < 1.0e-12);
-            assert_eq!(default_plane.natural_uv_domain(), domain);
-            assert_eq!(default_plane.step_uv_domain(), domain);
-            assert!((default_plane.uv_scale().x - 2.0).abs() < 1.0e-12);
-            assert!((default_plane.uv_scale().y - 40.0).abs() < 1.0e-12);
-
-            let mut fixed_kernel = Kernel::default();
-            fixed_kernel.fixes.plane_recognition_origin_after_axes = true;
-            let fixed_plane = Plane::is_nurb_surface_plane(&fixed_kernel, &surface, 1.0)
-                .unwrap()
-                .unwrap();
-            assert_eq!(fixed_plane.natural_uv_domain(), domain);
-            assert_eq!(fixed_plane.step_uv_domain(), domain);
-            assert_eq!(fixed_plane.uv_scale(), default_plane.uv_scale());
-            assert!(
-                fixed_plane
-                    .evaluate_point(lower_uv)
-                    .distance(expected_lower)
-                    < 1.0e-10
-            );
-            assert!(fixed_plane
+            assert_eq!(plane.natural_uv_domain(), domain);
+            assert_eq!(plane.step_uv_domain(), domain);
+            assert!((plane.uv_scale().x - 2.0).abs() < 1.0e-12);
+            assert!((plane.uv_scale().y - 40.0).abs() < 1.0e-12);
+            // Upstream's corner was `-v_min * 40 * SHEAR` off along X (5.12e-6 and
+            // -6.4e-6 here); along the final axes the lower corner is on the surface.
+            assert!(plane.evaluate_point(lower_uv).distance(expected_lower) < 1.0e-10);
+            assert!(plane
                 .position()
                 .x_axis()
-                .is_perpendicular_to(fixed_plane.position().y_axis(), 1.0e-10));
-            assert!((fixed_plane.position().x_axis().length() - 1.0).abs() < 1.0e-12);
-            assert!((fixed_plane.position().y_axis().length() - 1.0).abs() < 1.0e-12);
+                .is_perpendicular_to(plane.position().y_axis(), 1.0e-10));
+            assert!((plane.position().x_axis().length() - 1.0).abs() < 1.0e-12);
+            assert!((plane.position().y_axis().length() - 1.0).abs() < 1.0e-12);
 
+            // The upper corner is off by the patch's own span times the shear, the
+            // limit of an orthogonal plane on a sheared parameterisation.
             let expected_upper = surface.evaluate_point(upper_uv).unwrap();
-            let upper_residual = fixed_plane.evaluate_point(upper_uv) - expected_upper;
+            let upper_residual = plane.evaluate_point(upper_uv) - expected_upper;
             assert!((upper_residual.x + 40.0 * SHEAR).abs() < 1.0e-12);
             assert!(upper_residual.y.abs() < 1.0e-12);
         }
 
-        // With a zero minimum, recomputing the origin with the final axis is identical.
+        // With a zero minimum the origin is the surface's (0, 0) point.
         let zero_domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let surface = skewed_bilinear(zero_domain, SHEAR);
-        let baseline = Plane::is_nurb_surface_plane(&Kernel::default(), &surface, 1.0)
+        let plane = Plane::is_nurb_surface_plane(&k, &surface, 1.0)
             .unwrap()
             .unwrap();
-        let mut fixed_kernel = Kernel::default();
-        fixed_kernel.fixes.plane_recognition_origin_after_axes = true;
-        let fixed = Plane::is_nurb_surface_plane(&fixed_kernel, &surface, 1.0)
-            .unwrap()
-            .unwrap();
-        assert_eq!(baseline.position(), fixed.position());
-        assert_eq!(baseline.uv_scale(), fixed.uv_scale());
-        assert_eq!(baseline.step_uv_domain(), fixed.step_uv_domain());
-        assert_eq!(baseline.natural_uv_domain(), fixed.natural_uv_domain());
-        for uv in [zero_domain.min(), zero_domain.max()] {
-            assert_eq!(baseline.evaluate_point(uv), fixed.evaluate_point(uv));
-        }
+        let corner = surface.evaluate_point(zero_domain.min()).unwrap();
+        assert!(plane.position().origin().distance(corner) < 1.0e-12);
 
-        // An already orthogonal frame is also unaffected by enabling the correction.
+        // An already orthogonal frame reproduces the surface at both corners.
         let orthogonal_domain = Extent2d::from_bounds(2.0, 4.0, 3.0, 5.0);
         let orthogonal = skewed_bilinear(orthogonal_domain, 0.0);
-        let baseline = Plane::is_nurb_surface_plane(&Kernel::default(), &orthogonal, 1.0)
+        let plane = Plane::is_nurb_surface_plane(&k, &orthogonal, 1.0)
             .unwrap()
             .unwrap();
-        let fixed = Plane::is_nurb_surface_plane(&fixed_kernel, &orthogonal, 1.0)
-            .unwrap()
-            .unwrap();
-        assert_eq!(baseline.position(), fixed.position());
-        assert_eq!(baseline.uv_scale(), fixed.uv_scale());
-        assert_eq!(baseline.step_uv_domain(), fixed.step_uv_domain());
-        assert_eq!(baseline.natural_uv_domain(), fixed.natural_uv_domain());
         for uv in [orthogonal_domain.min(), orthogonal_domain.max()] {
-            assert_eq!(baseline.evaluate_point(uv), fixed.evaluate_point(uv));
+            let expected = orthogonal.evaluate_point(uv).unwrap();
+            assert!(plane.evaluate_point(uv).distance(expected) < 1.0e-12);
         }
     }
 

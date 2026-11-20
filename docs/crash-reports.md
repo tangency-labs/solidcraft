@@ -97,11 +97,12 @@ A folder `crashes/<YYYYMMDD-HHMMSS>-<signature>/`:
   - `count`: how many matching reports have been recorded; repeats update the existing report.
   - `first_seen`, `last_seen`: UTC timestamps when the report was first and most recently recorded. For `unclean_exit`, these are detection times at a later launch, not the exact times the sessions ended. The session start in `message` may be much earlier; the report does not imply a failure in the currently open design.
   - `notes`: what is missing and why, for example a design too large to copy
-  - `startup_phase`: `{step, ms}` when the app died before it drew its first frame: the step it
-    was in (`window`, `graphics instance`, `window surface`, `adapter request`, `adapter chosen`,
+  - `startup_phase`: `{step, ms}` when the app died before it was up: the step it was in
+    (`window`, `graphics instance`, `window surface`, `adapter request`, `adapter chosen`,
     `device creation`, `egui renderer (shader compile)`, `surface configure`, `app setup`,
-    `viewport pipelines (shader compile)`, `first frame`, `first frame (present)`) and how many
-    milliseconds after launch it began. `system.environment` names the renderer (backend, GPU,
+    `first frame (present)`, which shows the window with its starting page, then the setup run
+    behind that page: `viewport pipelines (shader compile)`, `design`, `recovery`, `first frame`)
+    and how many milliseconds after launch it began. `system.environment` names the renderer (backend, GPU,
     driver) as soon as the adapter is picked, so it is there even when the device never started.
   - `native` (Windows and macOS): what the native crash handler caught: `code`, `name`,
     `address` (of the faulting instruction), `module`, `offset` (into the module), `detail` (for
@@ -133,6 +134,10 @@ Windows) still gets the startup step. Windows can also keep its own dumps of eve
   restarts the journal from the autosaved design. A clean exit deletes it. The journal file
   is locked while its app runs, so at the next start, a journal nobody holds belongs to an
   app that died.
+- **After an update:** a journal of another version whose app had started up, was between
+  commands and left no native crash record is only logged, not reported: an update or an
+  installer closing the app ends it that way. A journal that stopped recording at its size
+  limit is still reported.
 - **A panic** captures its backtrace only the first time its signature is seen. The
   signature is the place plus the message, with numbers ignored.
 - **Limits:**

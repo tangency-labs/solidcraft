@@ -161,6 +161,7 @@ use super::tay::{
 };
 use super::taylor_model::Tm;
 use crate::error::{Result, SolidError};
+use crate::geom::krawczyk::{contraction, k_operator};
 use crate::kernel::Kernel;
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::surface::surface::Surface;
@@ -280,6 +281,38 @@ pub fn curve_derivs_over(
     ld: usize,
     piece: Option<usize>,
 ) -> Result<Vec<V3<Ivl>>> {
+    derivs_over(cn, s, ld, piece, None)
+}
+
+/// [`curve_derivs_over`] of the curve moved by `−about`: the derivatives of `C − about`,
+/// the homogeneous curve's point derivatives taken less `about` times the weight's, in
+/// intervals, before the quotient. The derivatives of order above 0 are those of `C`;
+/// enclosed about a point near `s` they are far narrower where the weights vary (the
+/// quotient's `w_i C` terms are of the size of `C − about`, not of `C`'s distance from the
+/// origin), as [`nurbs_partials_over_piece_about`] encloses a surface's partials.
+///
+/// # Errors
+///
+/// As [`curve_derivs_over`].
+pub fn curve_derivs_over_about(
+    cn: &NurbsCurve,
+    s: Ivl,
+    ld: usize,
+    piece: Option<usize>,
+    about: [f64; 3],
+) -> Result<Vec<V3<Ivl>>> {
+    derivs_over(cn, s, ld, piece, Some(about))
+}
+
+/// [`curve_derivs_over`], of the curve moved by `−about` where given
+/// ([`curve_derivs_over_about`]).
+fn derivs_over(
+    cn: &NurbsCurve,
+    s: Ivl,
+    ld: usize,
+    piece: Option<usize>,
+    about: Option<[f64; 3]>,
+) -> Result<Vec<V3<Ivl>>> {
     let k0 = piece.unwrap_or_else(|| span(&cn.u, cn.p, cn.n, s.lo));
     let k1 = piece.unwrap_or_else(|| span(&cn.u, cn.p, cn.n, s.hi));
     let fixed = piece.is_some();
@@ -324,6 +357,12 @@ pub fn curve_derivs_over(
                 y = y + nj * Ivl::from(pw_at(&cn.pw, li + 1));
                 z = z + nj * Ivl::from(pw_at(&cn.pw, li + 2));
                 w = w + nj * Ivl::from(pw_at(&cn.pw, li + 3));
+            }
+            if let Some([ox, oy, oz]) = about {
+                // (A − o w): the homogeneous form of C − o
+                x = x - Ivl::from(ox) * w;
+                y = y - Ivl::from(oy) * w;
+                z = z - Ivl::from(oz) * w;
             }
             if let (Some(ad), Some(wd)) = (am.get_mut(d), wm.get_mut(d)) {
                 *ad = V3 { x, y, z };
@@ -412,7 +451,60 @@ pub fn nurbs_partials_over_piece(
     vb: f64,
     lk: usize,
 ) -> Result<Partials<Ivl>> {
-    partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk, None)
+    partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk, None, Shift::None)
+}
+
+/// [`nurbs_partials_over_piece`] of the surface moved by `−about`: the partials of
+/// `S − about`, the homogeneous net's point derivatives taken less `about` times the
+/// weight's, in intervals, before the quotient. The partials of order above 0 are those of
+/// `S`; enclosed about a point near the box they are far narrower where the weights vary
+/// (the quotient's `w_ij S` terms are of the size of `S − about`, not of `S`'s distance
+/// from the origin).
+///
+/// # Errors
+///
+/// As [`nurbs_partials_over_piece`].
+#[allow(clippy::too_many_arguments)]
+pub fn nurbs_partials_over_piece_about(
+    cn: &Nurbs,
+    ku: usize,
+    kv: usize,
+    ua: f64,
+    ub: f64,
+    va: f64,
+    vb: f64,
+    lk: usize,
+    about: [f64; 3],
+) -> Result<Partials<Ivl>> {
+    partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk, None, Shift::About(about))
+}
+
+/// The piece's control weights' range where the box lies inside its closed knot span (the
+/// weight there is a convex combination of them), else `None`.
+#[allow(clippy::too_many_arguments)]
+fn span_weights(
+    cn: &Nurbs,
+    ku: usize,
+    kv: usize,
+    ua: f64,
+    ub: f64,
+    va: f64,
+    vb: f64,
+) -> Option<Ivl> {
+    let inside = |u: &[f64], k: usize, a: f64, b: f64| {
+        knot(u, k as isize) <= a && b <= knot(u, k as isize + 1)
+    };
+    if !(inside(&cn.u, ku, ua, ub) && inside(&cn.v, kv, va, vb)) {
+        return None;
+    }
+    let mut h: Option<Ivl> = None;
+    for i in (ku + 1).saturating_sub(cn.p + 1)..=ku {
+        for j in (kv + 1).saturating_sub(cn.q + 1)..=kv {
+            let w = Ivl::from(pw_at(&cn.pw, 4 * (i * cn.nv + j) + 3));
+            h = Some(h.map_or(w, |x| x.hull(w)));
+        }
+    }
+    h
 }
 
 /// [`nurbs_partials_over_piece`] for a box inside the piece's closed knot span (not the
@@ -436,25 +528,67 @@ pub fn nurbs_partials_within_span(
     vb: f64,
     lk: usize,
 ) -> Result<Partials<Ivl>> {
-    let inside = |u: &[f64], k: usize, a: f64, b: f64| {
-        knot(u, k as isize) <= a && b <= knot(u, k as isize + 1)
-    };
-    let hull = if inside(&cn.u, ku, ua, ub) && inside(&cn.v, kv, va, vb) {
-        let mut h: Option<Ivl> = None;
-        for i in (ku + 1).saturating_sub(cn.p + 1)..=ku {
-            for j in (kv + 1).saturating_sub(cn.q + 1)..=kv {
-                let w = Ivl::from(pw_at(&cn.pw, 4 * (i * cn.nv + j) + 3));
-                h = Some(h.map_or(w, |x| x.hull(w)));
-            }
-        }
-        h
-    } else {
-        None
-    };
-    partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk, hull)
+    let hull = span_weights(cn, ku, kv, ua, ub, va, vb);
+    partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk, hull, Shift::None)
 }
 
-/// [`nurbs_partials_over_piece`], the weight's enclosure cut to `weights` where given.
+/// [`nurbs_partials_within_span`], the quotient taken about the box's middle point: the
+/// partials of `S` itself, enclosed as `(S − o) + o` with `o` the surface's point at the
+/// box's middle (rounded to doubles).
+///
+/// The partials of order above 0 of `S − o` and `S` are the same functions, and `P[0][0]`
+/// is `S − o` plus the constant `o`, so the result encloses exactly what
+/// [`nurbs_partials_within_span`] encloses. It is an enclosure for any finite `o`: the
+/// homogeneous net of `S − o` is `(w_i (P_i − o), w_i)`, so its point derivatives are the
+/// net's `A − o w`, taken in rounded interval arithmetic ([`Ivl`]'s products and
+/// differences round outward) and then put through the same quotient, and the last `+ o`
+/// rounds outward too. Only the width depends on `o`: the quotient's `w_ij P[a−i][b−j]`
+/// terms are of the size of `S − o` over the box, not of `S`'s distance from the origin,
+/// so on a rational face far from the origin every partial is far narrower. A box that is
+/// one point, and a box where `o` is not finite (the weight's middle value 0 or not
+/// finite), are enclosed as [`nurbs_partials_within_span`] encloses them, bit for bit: at
+/// a point every term is of rounding's size whatever `o` is, and the shift would only add
+/// its own two roundings.
+///
+/// # Errors
+///
+/// As [`nurbs_partials_over_piece`].
+#[allow(clippy::too_many_arguments)]
+pub fn nurbs_partials_within_span_centred(
+    cn: &Nurbs,
+    ku: usize,
+    kv: usize,
+    ua: f64,
+    ub: f64,
+    va: f64,
+    vb: f64,
+    lk: usize,
+) -> Result<Partials<Ivl>> {
+    let hull = span_weights(cn, ku, kv, ua, ub, va, vb);
+    // a point has no Taylor terms over the box to narrow: the shift would only add its
+    // two roundings to P[0][0]
+    let shift = if ua == ub && va == vb {
+        Shift::None
+    } else {
+        Shift::Middle
+    };
+    partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk, hull, shift)
+}
+
+/// The point the rational quotient of [`partials_over_piece`] is taken about.
+#[derive(Clone, Copy)]
+enum Shift {
+    /// The origin: the partials of `S`.
+    None,
+    /// `about`: the partials of `S − about` ([`nurbs_partials_over_piece_about`]).
+    About([f64; 3]),
+    /// The surface's point at the box's middle `o`, added back: the partials of `S`
+    /// ([`nurbs_partials_within_span_centred`]).
+    Middle,
+}
+
+/// [`nurbs_partials_over_piece`], the weight's enclosure cut to `weights` where given, the
+/// quotient taken about the point `shift` names.
 #[allow(clippy::too_many_arguments)]
 fn partials_over_piece(
     cn: &Nurbs,
@@ -466,6 +600,7 @@ fn partials_over_piece(
     vb: f64,
     lk: usize,
     weights: Option<Ivl>,
+    shift: Shift,
 ) -> Result<Partials<Ivl>> {
     let um = 0.5 * (ua + ub);
     let vm = 0.5 * (va + vb);
@@ -488,6 +623,31 @@ fn partials_over_piece(
                 }
             }
             *hab = h;
+        }
+    }
+    // the point the quotient is taken about, and whether it is added back to P[0][0]
+    let (about, add_back) = match shift {
+        Shift::None => (None, false),
+        Shift::About(o) => (Some(o), false),
+        Shift::Middle => {
+            // the surface's point at the middle, as doubles: any finite point is sound,
+            // this one makes S − o smallest over the box
+            let h = at2(&hm, 0, 0, [IZ; 4]);
+            let w = h[3].mid();
+            let o = [h[0].mid() / w, h[1].mid() / w, h[2].mid() / w];
+            let finite = o.iter().all(|x| x.is_finite());
+            (finite.then_some(o), finite)
+        }
+    };
+    if let Some(o) = about {
+        for row in &mut hm {
+            for h in row.iter_mut() {
+                // (A − o w): the homogeneous form of S − o
+                let w = h[3];
+                for (he, &oe) in h.iter_mut().zip(&o) {
+                    *he = *he - Ivl::from(oe) * w;
+                }
+            }
         }
     }
     let du = Ivl::new(ua, ub) - Ivl::from(um);
@@ -582,6 +742,19 @@ fn partials_over_piece(
             );
         }
     }
+    if let (true, Some(o)) = (add_back, about) {
+        // S = (S − o) + o, rounded outward
+        let p = out.at(0, 0);
+        out.set(
+            0,
+            0,
+            V3 {
+                x: p.x + Ivl::from(o[0]),
+                y: p.y + Ivl::from(o[1]),
+                z: p.z + Ivl::from(o[2]),
+            },
+        );
+    }
     Ok(out)
 }
 
@@ -603,7 +776,7 @@ pub fn leader_series_over(
     let piece = piece.unwrap_or_else(|| span(&leader.u, leader.p, leader.n, s.mid()));
     let d = curve_derivs_over(leader, s, tr.s() + 1, Some(piece))?;
     let mut l = VSer::constant(VZ);
-    let mut d1 = l;
+    let mut d1 = l.clone();
     let mut fact = 1.0_f64;
     for j in 0..=tr.s() {
         if j > 0 {
@@ -643,7 +816,7 @@ pub fn leader_series_piecewise(
 ) -> Result<(VSer<Ivl>, VSer<Ivl>)> {
     let hull = |a: &mut VSer<Ivl>, b: &VSer<Ivl>| {
         for (sa, sb) in a.a.iter_mut().zip(&b.a) {
-            for (ra, rb) in sa.c.iter_mut().zip(&sb.c) {
+            for (ra, rb) in sa.c.iter_mut().zip(sb.c.iter()) {
                 for (x, y) in ra.iter_mut().zip(rb) {
                     *x = x.hull(*y);
                 }
@@ -789,7 +962,7 @@ pub fn inverse4(a: &[[f64; 4]; 4]) -> Result<[[f64; 4]; 4]> {
 }
 
 /// The proved enclosure of a span (`sm_GnEnclose`'s outputs).
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Enclosure {
     /// The feet's series over the span (`rF`).
     pub f: [VSer<Ivl>; 2],
@@ -808,10 +981,6 @@ fn ivl_at(x: &[Ivl; 4], i: usize) -> Ivl {
     x.get(i).copied().unwrap_or(IZ)
 }
 
-fn f_at(x: &[f64; 4], i: usize) -> f64 {
-    x.get(i).copied().unwrap_or(f64::NAN)
-}
-
 /// The system over the partials `p` (`sSys` with `apP` at `asP`).
 fn system<'a>(
     p: &'a [Partials<Ivl>; 2],
@@ -824,8 +993,8 @@ fn system<'a>(
     let [p0, p1] = p;
     GnSystem {
         p: [p0, p1],
-        leader: *leader,
-        tangent: *tangent,
+        leader: leader.clone(),
+        tangent: tangent.clone(),
         r,
         side,
         hold: false,
@@ -909,7 +1078,9 @@ pub(crate) fn knot_cuts(
     Ok(at
         .iter()
         .zip(at.iter().skip(1))
-        .map(|(&a, &b)| (a, b, span(knots, p, n, 0.5 * (a + b))))
+        // The left endpoint selects the span to its right. A rounded midpoint
+        // can land on the next knot when the subinterval is only one ulp wide.
+        .map(|(&a, &b)| (a, b, span(knots, p, n, a)))
         .collect())
 }
 
@@ -1310,7 +1481,8 @@ pub(crate) fn span_at(faces_n: [&Nurbs; 2], a: &GnStation, b: &GnStation) -> Spa
 /// **Across a knot line below `C^2` (not the fork's, tangency-labs/solidcraft#14284).** The
 /// piecewise enclosure ([`SpanAt::piecewise`], no definitions) for a use of order 1 or less
 /// (`order_s` here; `gn_enclose_over_using`'s `use_order` where the caller asks for more
-/// orders than its own use takes, as the definition box's centred form does) whose first box (the guesses' hull) crosses a face's knot line below
+/// orders than its own use takes, as the definition box's centred form does) whose box (the
+/// guesses' hull, or a box the one solve's iterations form, #15183) crosses a face's knot line below
 /// [`FEET_BOX_CONTINUITY`] by count (a rational circle's doubled quarter knot is `C^0` by
 /// count, `C^1` only to rounding) takes the feet cell by cell instead of refusing them: each
 /// polynomial piece of such a face the box touches, continued over the whole box, is the
@@ -1342,8 +1514,12 @@ pub(crate) fn span_at(faces_n: [&Nurbs; 2], a: &GnStation, b: &GnStation) -> Spa
 /// box that crosses no such
 /// line, a use of order 2 or more (a mean-value form of a definition over its box, which
 /// needs the face `C^2` across it), and an enclosure with definitions take the one solve
-/// over the hull of the cells' partials as before. A box that crosses such a line only once
-/// the iterations grow it is refused as before.
+/// over the hull of the cells' partials as before. Where the guesses' hull misses such a line
+/// and the one solve's contraction forms a box across it (#15183: a root on the line, just
+/// outside the guesses), that box is one the one solve can never prove (`knot_cuts` refuses
+/// its partials), so the loop stops there before evaluating anything over it, and the cell
+/// path starts from the hull of the first box and that one, each face's cells listed from
+/// the hull (`from_the_crossing`).
 ///
 /// # Errors
 ///
@@ -1393,34 +1569,54 @@ pub(crate) fn gn_enclose_over_using(
     use_order: usize,
 ) -> Result<Option<Enclosure>> {
     crate::profile::profile_scope!(k, "blend::certificate::gn_enclose_over");
-    if at.piecewise && use_order <= 1 && defs.is_none() {
-        let (_, x0) = guess_box(at);
-        let [f0, f1] = faces_n;
-        let low = [
-            crosses_low_line_at(f0, &x0, 0),
-            crosses_low_line_at(f1, &x0, 1),
-        ];
+    let divert = at.piecewise && use_order <= 1 && defs.is_none();
+    let enclose = |cells: [FaceCell; 2], over: Option<[Ivl; 4]>| {
+        enclose_over_cells(
+            k, faces_n, leader_n, at, r, side, n, order_s, law, None, ends, cells, over, false,
+        )
+    };
+    let (_, x0) = guess_box(at);
+    if divert {
+        let low = low_lines_in(faces_n, &x0);
         if low.iter().any(|&l| l) {
-            let enclose = |cells: [FaceCell; 2], over: Option<[Ivl; 4]>| {
-                enclose_over_cells(
-                    k, faces_n, leader_n, at, r, side, n, order_s, law, None, ends, cells, over,
-                )
-            };
             return enclose_by_cells(faces_n, ends, at.s, &x0, low, enclose);
         }
     }
     let cells = [FaceCell::Hull; 2];
-    Ok(
-        match enclose_over_cells(
-            k, faces_n, leader_n, at, r, side, n, order_s, law, defs, ends, cells, None,
-        )? {
-            Inner::Proved(e) => {
-                let (enc, _) = *e;
-                Some(enc)
-            }
-            Inner::Excluded | Inner::Straddles(_) | Inner::Unproved => None,
-        },
-    )
+    match enclose_over_cells(
+        k, faces_n, leader_n, at, r, side, n, order_s, law, defs, ends, cells, None, divert,
+    )? {
+        Inner::Proved(e) => {
+            let (enc, _) = *e;
+            Ok(Some(enc))
+        }
+        // the one solve formed a box across such a line (#15183): from the hull of its first
+        // box and that one, cell by cell, each face's cells listed from the hull
+        Inner::Crosses(b) => {
+            let (x1, low) = from_the_crossing(faces_n, &x0, &b);
+            enclose_by_cells(faces_n, ends, at.s, &x1, low, enclose)
+        }
+        Inner::Excluded | Inner::Straddles(_) | Inner::Unproved => Ok(None),
+    }
+}
+
+/// Whether each face's part of the box `x` crosses one of its knot lines below
+/// [`FEET_BOX_CONTINUITY`].
+fn low_lines_in(faces_n: [&Nurbs; 2], x: &[Ivl; 4]) -> [bool; 2] {
+    let [f0, f1] = faces_n;
+    [crosses_low_line_at(f0, x, 0), crosses_low_line_at(f1, x, 1)]
+}
+
+/// The cell path's first box when the one solve forms `b` across a knot line below `C^2`
+/// (#15183): the hull of its first box `x0` and `b` (the loop's boxes share their centre, so
+/// in each coordinate the wider), and the faces whose part of that hull crosses such a line.
+/// The faces are read from the hull, not from `b`: a coordinate where `b` is the narrower can
+/// cross a line in the hull alone, and a face listed whole there would be refused on every
+/// cell.
+fn from_the_crossing(faces_n: [&Nurbs; 2], x0: &[Ivl; 4], b: &[Ivl; 4]) -> ([Ivl; 4], [bool; 2]) {
+    let x1 = core::array::from_fn(|i| ivl_at(x0, i).hull(ivl_at(b, i)));
+    let low = low_lines_in(faces_n, &x1);
+    (x1, low)
 }
 
 /// How [`enclose_over_cells`] takes a face's partials over a box in the piecewise
@@ -1439,6 +1635,8 @@ enum Inner {
     Proved(Box<(Enclosure, [Ivl; 4])>),
     Excluded,
     Straddles([Ivl; 4]),
+    /// The one solve's next box, across a knot line below `C^2` (only where asked to divert).
+    Crosses([Ivl; 4]),
     Unproved,
 }
 
@@ -1615,7 +1813,7 @@ fn boxes_meet(a: &[Ivl; 4], b: &[Ivl; 4]) -> bool {
 }
 
 fn ser_hull(a: &mut Ser<Ivl>, b: &Ser<Ivl>) {
-    for (ra, rb) in a.c.iter_mut().zip(&b.c) {
+    for (ra, rb) in a.c.iter_mut().zip(b.c.iter()) {
         for (ca, cb) in ra.iter_mut().zip(rb) {
             *ca = ca.hull(*cb);
         }
@@ -1750,7 +1948,7 @@ fn enclose_by_cells(
                     let wk = widened(&k);
                     grow = Some(core::array::from_fn(|i| ivl_at(&g, i).hull(ivl_at(&wk, i))));
                 }
-                Inner::Unproved => return Err(not_decided()),
+                Inner::Crosses(_) | Inner::Unproved => return Err(not_decided()),
             }
         }
         match grow {
@@ -1791,6 +1989,7 @@ fn enclose_over_cells(
     ends: [EndContinuation; 2],
     cells: [FaceCell; 2],
     over: Option<[Ivl; 4]>,
+    divert: bool,
 ) -> Result<Inner> {
     let s = at.s;
     let tr = Trunc::new(order_s, n)?;
@@ -1933,30 +2132,8 @@ fn enclose_over_cells(
         );
         let jm = jac.map(|row| row.map(Ivl::mid));
         y = gn_try!(inverse4(&jm), Inner::Unproved);
-        q = 0.0;
-        for (i, (yi, ci)) in y.iter().zip(cm.iter_mut()).enumerate() {
-            let mut row = 0.0_f64;
-            for (j, cij) in ci.iter_mut().enumerate() {
-                let mut c = Ivl::from(if i == j { 1.0 } else { 0.0 });
-                for (&yik, jk) in yi.iter().zip(&jac) {
-                    c = c - Ivl::from(yik) * jk.get(j).copied().unwrap_or(IZ);
-                }
-                *cij = c;
-                row = round_up(row + c.mag());
-            }
-            q = cmax(q, row);
-        }
-        let mut kk = [IZ; 4];
-        for (i, ((yi, ci), ki)) in y.iter().zip(&cm).zip(kk.iter_mut()).enumerate() {
-            let mut k = Ivl::from(f_at(&xm, i));
-            for (&yij, gj) in yi.iter().zip(&sg) {
-                k = k - Ivl::from(yij) * gj.at(0, 0);
-            }
-            for (j, &cij) in ci.iter().enumerate() {
-                k = k + cij * (ivl_at(&bx_, j) - Ivl::from(f_at(&xm, j)));
-            }
-            *ki = k;
-        }
+        (cm, q) = contraction(&y, &jac);
+        let kk = k_operator(&xm, &y, &sg.each_ref().map(|g| g.at(0, 0)), &cm, &bx_);
         let verdict = classify_k(&kk, &bx_);
         let inside = q < 1.0 && verdict == KVerdict::Inside;
         if inside {
@@ -2009,6 +2186,16 @@ fn enclose_over_cells(
                 }
                 *xi = Ivl::new(mi - rr, mi + rr);
             }
+            // a box across a knot line below C^2, for a use of order 1 or less: the one solve
+            // can never prove it (`knot_cuts` refuses its partials, so the next step's Jacobian
+            // is refused and nothing is proved), so it goes cell by cell (#15183). Decided by
+            // where the box lies, before anything is evaluated over it
+            if divert && cells == [FaceCell::Hull; 2] && over.is_none() {
+                let [f0, f1] = faces_n;
+                if crosses_low_line_at(f0, &bx_, 0) || crosses_low_line_at(f1, &bx_, 1) {
+                    return Ok(Inner::Crosses(bx_));
+                }
+            }
         }
     }
     if !proved {
@@ -2043,34 +2230,15 @@ fn enclose_over_cells(
         let Ok(yc) = inverse4(&jac.map(|row| row.map(Ivl::mid))) else {
             break;
         };
-        let mut cc = [[IZ; 4]; 4];
-        let mut qc = 0.0_f64;
-        for (i, (yi, ci)) in yc.iter().zip(cc.iter_mut()).enumerate() {
-            let mut row = 0.0_f64;
-            for (j, cij) in ci.iter_mut().enumerate() {
-                let mut c = Ivl::from(if i == j { 1.0 } else { 0.0 });
-                for (&yik, jk) in yi.iter().zip(&jac) {
-                    c = c - Ivl::from(yik) * jk.get(j).copied().unwrap_or(IZ);
-                }
-                *cij = c;
-                row = round_up(row + c.mag());
-            }
-            qc = cmax(qc, row);
-        }
+        let (cc, qc) = contraction(&yc, &jac);
         let contracts = qc < 1.0;
         if !contracts {
             break;
         }
         let mut next = bx_;
         let mut empty = false;
-        for (i, ((yi, ci), xi)) in yc.iter().zip(&cc).zip(next.iter_mut()).enumerate() {
-            let mut kv = Ivl::from(f_at(&xc, i));
-            for (&yij, gj) in yi.iter().zip(&sgc) {
-                kv = kv - Ivl::from(yij) * gj.at(0, 0);
-            }
-            for (j, &cij) in ci.iter().enumerate() {
-                kv = kv + cij * (ivl_at(&bx_, j) - Ivl::from(f_at(&xc, j)));
-            }
+        let kc = k_operator(&xc, &yc, &sgc.each_ref().map(|g| g.at(0, 0)), &cc, &bx_);
+        for (xi, kv) in next.iter_mut().zip(kc) {
             let lo = cmax(xi.lo, kv.lo);
             let hi = cmin(xi.hi, kv.hi);
             let holds = lo <= hi;
@@ -2274,7 +2442,7 @@ pub fn gn_fourth_over(
 /// The series `sm_GnFourthOver` hands a varying thumbweight's row terms (its `pF`, `pV`,
 /// `pFm`, `pVm`, `pdMid`, 7102bc5): the feet's and V's over the span to order
 /// `4 + SM_GN_TAYLOR` in s, at its middle to one less, and the middle.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PieceSeries {
     /// `pF`: the feet over the span.
     pub f: [VSer<Ivl>; 2],
@@ -2439,10 +2607,10 @@ fn fourth_of(
     mid: f64,
 ) -> (Fourth, Option<PieceSeries>) {
     let series = PieceSeries {
-        f: e5.f,
-        v: e5.v,
-        fm: e4.f,
-        vm: e4.v,
+        f: e5.f.clone(),
+        v: e5.v.clone(),
+        fm: e4.f.clone(),
+        vm: e4.v.clone(),
         mid,
     };
     let (mut m4, mut uv4, mut m4_lo, mut uv4_lo, mut uv4_fork, mut uv4_lo_fork) = UNPROVED_FOURTH;
@@ -3257,7 +3425,7 @@ fn meet_fourth(old: &Fourth, tm: &Fourth) -> Fourth {
 /// where one is empty (they do not both hold the same function).
 fn meet_vser(a: &mut VSer<Ivl>, b: &VSer<Ivl>) -> bool {
     for (sa, sb) in a.a.iter_mut().zip(&b.a) {
-        for (ra, rb) in sa.c.iter_mut().zip(&sb.c) {
+        for (ra, rb) in sa.c.iter_mut().zip(sb.c.iter()) {
             for (x, y) in ra.iter_mut().zip(rb) {
                 let (lo, hi) = (cmax(x.lo, y.lo), cmin(x.hi, y.hi));
                 let common = lo <= hi;
@@ -5513,7 +5681,9 @@ mod tests {
                 judged += 1;
             }
         }
-        eprintln!("{judged} samples, {unenclosed} pieces not enclosed, {old_unproved} of {wedges} wedges unproved by the interval terms");
+        eprintln!(
+            "{judged} samples, {unenclosed} pieces not enclosed, {old_unproved} of {wedges} wedges unproved by the interval terms"
+        );
         assert_eq!(unenclosed, 0);
         assert_eq!(judged, 48 * 101);
         assert!(2 * old_unproved > wedges, "{old_unproved} of {wedges}");
@@ -5894,6 +6064,18 @@ mod tests {
     /// the Hermite remainder's) are orders of magnitude wider.
     #[test]
     fn feet_taylor_models_hold_every_sampled_station_on_curved_faces() {
+        // The certificate used over half a megabyte in a single frame, before its
+        // station solver and incremental workspace. Exercise the same path with
+        // synthetic curved supports on the stack available to a Windows main thread.
+        std::thread::Builder::new()
+            .stack_size(1 << 20)
+            .spawn(check_feet_taylor_models_on_curved_faces)
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    fn check_feet_taylor_models_on_curved_faces() {
         let k = Kernel::default();
         let mut next = rng(0x5bd1_e995_a3c6_4f2b);
         let order = 4 + TAYLOR;
@@ -6799,6 +6981,17 @@ mod tests {
         }
     }
 
+    #[test]
+    fn knot_cuts_keeps_the_span_just_below_a_knot() {
+        let knot = 0.5_f64;
+        let lo = knot.next_down();
+        let knots = [0.0, 0.0, 0.0, knot, 1.0, 1.0, 1.0];
+        assert_eq!(
+            knot_cuts(&knots, 2, 4, lo, knot, 1).unwrap(),
+            [(lo, knot, 2)],
+        );
+    }
+
     /// A span whose feet's box crosses two knot lines of a face (three pieces in u) is not
     /// enclosed whole: it is refused by name ("cut the span"), and one level down, as
     /// `gn_certify_span` cuts it, each half crosses one line and is proved cell by cell. The
@@ -6911,6 +7104,208 @@ mod tests {
                         "[{lo}, {hi}]: foot {f} at s {s}: {w:?} not in {got:?}"
                     );
                 }
+            }
+        }
+    }
+
+    /// #15183: a root on the circle's quarter knot just outside the guesses' box. The ball and
+    /// cone of the quarter-knot test over pieces [0.5, 0.5 + h] (h = 0.004 halved as the
+    /// certificate's levels halve it), whose start puts the cone foot exactly on `u = 0.25`
+    /// (the leader's middle, theta = 90 degrees); the guesses' cone u is moved so their box
+    /// starts a few ulps past the knot (wr698's edge 46 missed it by 2e-10). The one solve's
+    /// contraction forms a box across the line, which it could never prove; that box goes
+    /// cell by cell, and the feet are proved, on the closed form.
+    #[test]
+    fn a_root_on_a_knot_line_past_the_guesses_is_proved_cell_by_cell() {
+        let k = Kernel::default();
+        let (bot, r) = (5.0, 2.0);
+        let a = 30.0_f64.to_radians();
+        let foot_h = r * (1.0 - a.sin());
+        let height = 2.0 * foot_h;
+        let top = bot - height * a.tan();
+        let fp = plane(Vec3::ZERO, Vec3::X, Vec3::Y);
+        let fc = upright_cone(&k, bot, top, height);
+        let rho = bot + r * (1.0 - a.sin()) / a.cos();
+        let frame = Axis2Placement::new(Vec3::new(0.0, 0.0, r), Vec3::X, Vec3::Y);
+        let leader = BSplineCurve::create_circle_segment(
+            3,
+            &frame,
+            rho,
+            60.0,
+            120.0,
+            NurbCircleParam::Quadratic,
+        )
+        .unwrap();
+        let ln = NurbsCurve::of(&leader).unwrap();
+        let (np, nc) = (nurbs(&k, &fp), nurbs(&k, &fc));
+        let faces = [&fp, &fc];
+        let lpt = |s: f64| leader.evaluate_point(s).unwrap();
+        let foot_c = |s: f64| {
+            let l = lpt(s);
+            let q = (rho - r * a.cos()) / rho;
+            Vec3::new(l.x * q, l.y * q, foot_h)
+        };
+        let (cu, cv) = nearest_uv(&nc, foot_c(0.3));
+        let pc = nurbs_partials(
+            &nc,
+            span(&nc.u, nc.p, nc.nu, cu),
+            span(&nc.v, nc.q, nc.nv, cv),
+            cu,
+            cv,
+            1,
+        );
+        let nrm = vec3(pc.at(1, 0)).cross(vec3(pc.at(0, 1)));
+        let out = Vec3::new(foot_c(0.3).x, foot_c(0.3).y, 0.0);
+        let side_c = if nrm.dot(out) > 0.0 { 1.0 } else { -1.0 };
+        let (rr, side) = ([r, r], [1.0, side_c]);
+        let st = |s: f64| {
+            let l = lpt(s);
+            let (u, v) = nearest_uv(&nc, foot_c(s));
+            station(&k, faces, &leader, s, [l.x, l.y, u, v], rr, side)
+        };
+        let ends = [EndContinuation::of(&fp), EndContinuation::of(&fc)];
+        // the piece [0.5, 0.5 + h], its guesses' cone u lifted so their box starts a few ulps
+        // past the knot (the real case's scale, wr698's edge 46: 2e-10)
+        let piece = |h: f64| {
+            let (sa, sb) = (0.5, 0.5 + h);
+            let (sta, stb) = (st(sa), st(sb));
+            let mut at = SpanAt {
+                s: Ivl::new(sa, sb),
+                xa: core::array::from_fn(|c| sta.x[c].at(0, 0)),
+                xb: core::array::from_fn(|c| stb.x[c].at(0, 0)),
+                ku: [0; 2],
+                kv: [0; 2],
+                leader: None,
+                piecewise: true,
+            };
+            // the box's half width grows with |u| (its 1e-9 (1 + |m|)), so the lift is taken
+            // twice, the second against the lifted box
+            for _ in 0..2 {
+                let (_, x0) = guess_box(&at);
+                let lift = 0.25 - x0[2].lo + 8.0 * f64::EPSILON * 0.25;
+                at.xa[2] += lift;
+                at.xb[2] += lift;
+            }
+            at
+        };
+        let enclose = |at: &SpanAt| {
+            gn_enclose_over(&k, [&np, &nc], &ln, at, rr, side, 0, 1, None, None, ends)
+        };
+        // cut as the certificate's levels cut a span: measured (15183-1p, the guesses lifted
+        // by 1e-6 then), over the whole 0.004 the one solve's first box has q = 1.16, so it
+        // never contracts and forms no box: the span's length, not the knot, which the levels
+        // answer by halving
+        let mut proved = None;
+        for level in 0..=SPAN_MAX_LEVEL {
+            let h = 0.004 / f64::from(1_u32 << level);
+            let at = piece(h);
+            let (_, x0) = guess_box(&at);
+            assert!(
+                x0[2].lo > 0.25 && x0[2].lo - 0.25 < 1.0e-14,
+                "level {level}: the guesses' box {:?} is not just past the knot",
+                x0[2]
+            );
+            assert_eq!(low_lines_in([&np, &nc], &x0), [false, false]);
+            if let Some(e) = enclose(&at).unwrap() {
+                proved = Some((level, at, e));
+                break;
+            }
+        }
+        let (level, at, e) = proved.expect("proved by SPAN_MAX_LEVEL");
+        let u = e.x[2].at(0, 0);
+        assert!(
+            u.lo <= 0.25 && 0.25 <= u.hi,
+            "the cone foot's u {u:?} misses the knot"
+        );
+        for s in [at.s.lo, at.s.hi] {
+            let (l, c) = (lpt(s), foot_c(s));
+            let fp_s = Vec3::new(l.x, l.y, 0.0);
+            for (f, want) in [(0, fp_s), (1, c)] {
+                let x = &e.f[f];
+                let got = V3 {
+                    x: x.a[0].c[0][0],
+                    y: x.a[1].c[0][0],
+                    z: x.a[2].c[0][0],
+                };
+                assert!(
+                    holds(got, want),
+                    "level {level}: foot {f} at s {s}: {want:?} not in {got:?}"
+                );
+            }
+        }
+    }
+
+    /// #15183: the cell path's first box from a crossing is the hull of the one solve's first
+    /// box and the crossing one, and each face's cells are read from the hull: here face 0
+    /// crosses its line in the first box only (the crossing box is narrower there) and face 1
+    /// in the crossing box only, so both are taken cell by cell.
+    #[test]
+    fn cells_after_a_crossing_are_read_from_the_hull() {
+        let net = |u: Vec<f64>, rows: &[[f64; 3]]| {
+            let mut pw = Vec::new();
+            for row in rows {
+                pw.extend([row[0], row[1], row[2], 1.0]);
+            }
+            Nurbs {
+                p: 1,
+                q: 1,
+                nu: rows.len() / 2,
+                nv: 2,
+                u,
+                v: vec![-3.0, -3.0, 3.0, 3.0],
+                pw,
+            }
+        };
+        let fold = || {
+            net(
+                vec![-1.0, -1.0, 0.0, 1.0, 1.0],
+                &[
+                    [-1.0, -3.0, 0.0],
+                    [-1.0, 3.0, 0.0],
+                    [0.0, -3.0, 0.0],
+                    [0.0, 3.0, 0.0],
+                    [1.0, -3.0, -0.5],
+                    [1.0, 3.0, -0.5],
+                ],
+            )
+        };
+        let (f0, f1) = (fold(), fold());
+        let flat = Ivl::new(-0.5, 0.5);
+        let first = [Ivl::new(-0.01, 0.01), flat, Ivl::new(0.002, 0.004), flat];
+        let crossing = [Ivl::new(0.001, 0.002), flat, Ivl::new(-0.01, 0.01), flat];
+        assert_eq!(low_lines_in([&f0, &f1], &first), [true, false]);
+        assert_eq!(low_lines_in([&f0, &f1], &crossing), [false, true]);
+        let (x1, low) = from_the_crossing([&f0, &f1], &first, &crossing);
+        assert_eq!(low, [true, true]);
+        assert_eq!(x1[0], Ivl::new(-0.01, 0.01));
+        assert_eq!(x1[2], Ivl::new(-0.01, 0.01));
+    }
+
+    /// The cell path's trigger is `knot_cuts`' refusal, box by box, across multiplicities: a
+    /// cubic's simple knot (`C^2`, not low), double (`C^1`) and triple (`C^0`), and a rational
+    /// circle's doubled quarter knot (`C^0` by count); boxes across, touching, beside and on
+    /// the knot.
+    #[test]
+    fn the_trigger_is_knot_cuts_refusal() {
+        let k = Kernel::default();
+        let cone = nurbs(&k, &upright_cone(&k, 5.0, 3.0, 4.0));
+        let mut nets: Vec<(Nurbs, f64)> = (1..=3).map(|m| (cubic_with_knot(m), 1.0)).collect();
+        nets.push((cone, 0.25));
+        for (n, at) in &nets {
+            for (lo, hi) in [
+                (at - 0.1, at + 0.1),
+                (at - 0.1, *at),
+                (*at, at + 0.1),
+                (*at, *at),
+                (at - 0.2, at - 0.1),
+                (at + 0.1, at + 0.2),
+            ] {
+                assert_eq!(
+                    crosses_low_line(&n.u, n.p, lo, hi, FEET_BOX_CONTINUITY),
+                    knot_cuts(&n.u, n.p, n.nu, lo, hi, FEET_BOX_CONTINUITY).is_err(),
+                    "degree {} knot {at} box [{lo}, {hi}]",
+                    n.p
+                );
             }
         }
     }
@@ -7044,5 +7439,73 @@ mod tests {
             SolidError::blend_failed(OP, "no piece covers the parameter")
         );
         assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
+    }
+
+    /// A quarter circle r 0.2 about (−300, 0, 1), the rational quadratic: over a piece of
+    /// width 2.4e-4, its derivatives enclosed about the point at the piece's middle are of
+    /// the circle's size, where enclosed about the origin they are of 300's (the quotient's
+    /// `w' C` terms); both meet the derivatives enclosed at points of the piece, and so
+    /// does the moved point plus `about` the point.
+    #[test]
+    fn a_rational_curve_far_from_the_origin_is_enclosed_about_a_near_point() {
+        let (r, w) = (0.2, core::f64::consts::FRAC_1_SQRT_2);
+        let points = [(-300.0 + r, 0.0, 1.0), (-300.0 + r, r, w), (-300.0, r, 1.0)];
+        let mut pw = Vec::new();
+        for (x, y, weight) in points {
+            pw.extend_from_slice(&[x * weight, y * weight, weight, weight]);
+        }
+        let cn = NurbsCurve {
+            p: 2,
+            n: 3,
+            u: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            pw,
+        };
+        let s = Ivl::new(0.5, 0.5 + 2.44e-4);
+        let middle = curve_derivs_over(&cn, Ivl::from(s.mid()), 0, None).unwrap();
+        let about = [middle[0].x.mid(), middle[0].y.mid(), middle[0].z.mid()];
+        let plain = curve_derivs_over(&cn, s, 2, None).unwrap();
+        let near = curve_derivs_over_about(&cn, s, 2, None, about).unwrap();
+        let width = |i: Ivl| i.hi - i.lo;
+        assert!(
+            width(plain[1].x) > 100.0 * width(near[1].x),
+            "{:?} against {:?}",
+            plain[1].x,
+            near[1].x
+        );
+        for d in 1..=2 {
+            for i in [near[d].x, near[d].y, near[d].z] {
+                assert!(width(i) < 1e-3, "order {d}: {i:?}");
+            }
+        }
+        // at its start the quarter's middle: (−300 + r/√2, r/√2, 1), along (−1, 1)
+        let half = r * core::f64::consts::FRAC_1_SQRT_2;
+        let near_value = |i: Ivl, v: f64| i.lo <= v + 1e-12 && v - 1e-12 <= i.hi;
+        assert!(near_value(near[0].x + Ivl::from(about[0]), -300.0 + half));
+        assert!(near_value(near[0].y + Ivl::from(about[1]), half));
+        assert!(near_value(near[0].z + Ivl::from(about[2]), 1.0));
+        let along = near[1].x + near[1].y;
+        assert!(along.lo <= 0.0 && 0.0 <= along.hi, "{along:?}");
+        for t in [s.lo, s.mid(), s.hi] {
+            let at = curve_derivs_over(&cn, Ivl::from(t), 2, None).unwrap();
+            // both hold the derivative at t
+            let holds = |a: Ivl, b: Ivl| a.lo <= b.hi && b.lo <= a.hi;
+            for d in 1..=2 {
+                for (a, b) in [
+                    (near[d].x, at[d].x),
+                    (near[d].y, at[d].y),
+                    (near[d].z, at[d].z),
+                ] {
+                    assert!(holds(a, b), "order {d} at {t}: {b:?} apart from {a:?}");
+                }
+            }
+            let point = [
+                near[0].x + Ivl::from(about[0]),
+                near[0].y + Ivl::from(about[1]),
+                near[0].z + Ivl::from(about[2]),
+            ];
+            for (a, b) in point.into_iter().zip([at[0].x, at[0].y, at[0].z]) {
+                assert!(holds(a, b), "point at {t}: {b:?} apart from {a:?}");
+            }
+        }
     }
 }

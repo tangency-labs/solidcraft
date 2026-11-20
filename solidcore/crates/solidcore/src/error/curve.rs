@@ -19,9 +19,23 @@
 //! | [`CurveFailure::Failed`]             | `SM_ERR`                 |
 //! | [`CurveFailure::Missing`]            | `SM_ERR_NULL_POINTER`    |
 //! | [`CurveFailure::ZeroDirection`]      | `SM_ERR_INVALID_INPUT`   |
+//! | [`CurveFailure::SingleLinearCurve`]  | `SM_ERR`                 |
+//! | [`CurveFailure::InfiniteTangent`], [`CurveFailure::ZeroTangent`], [`CurveFailure::PointOnCurveWhenMaximising`] | `SM_ERR` |
+//! | [`CurveFailure::StageFailed`]        | the site's (`SM_ERR`, or `SM_ERR_NULL_POINTER` for an `NER`) |
+//! | [`CurveFailure::PointSolveOptionMissing`] | `SM_ERR_NULL_POINTER` |
+//! | [`CurveFailure::Defect`]             | the site's (`SM_ERR`, or another through `with_status`) |
 //!
-//! Deviations: not upstream. A routine's failure says in a phrase what went wrong; the
-//! failure's `operation` path says which routine. No failure names an entity: the sites they
+//! **The record** (#15034). A check that refuses builds a typed cause with its numbers
+//! ([`CurveFailure::SingleLinearCurve`], [`CurveFailure::InfiniteTangent`], ...); a stage that
+//! fails with no reason the kernel names is a [`CurveFailure::StageFailed`], a defect
+//! ([`ErrorKind::StageFailed`]), keeping the error of the call it made as its cause where it
+//! has one. The phrase causes ([`CurveFailure::Failed`], [`CurveFailure::Missing`],
+//! [`CurveFailure::ZeroDirection`]) are sites not yet converted, and so is a
+//! [`CurveFailure::StageFailed`] not yet reviewed: a reviewed one is a
+//! [`CurveFailure::Defect`] with its reason (the conversion guide:
+//! `docs/failure-codes-and-reproduction.md` §6).
+//!
+//! Deviations: not upstream. The failure's `operation` path says which routine. No failure names an entity: the sites they
 //! replace named none. The failures that are checks of a caller's arguments stay
 //! [`crate::SolidError::InvalidInput`].
 
@@ -61,6 +75,47 @@ pub enum CurveFailure {
     /// A direction a curve routine needs is the zero vector, as the phrase says (for example
     /// "the projected curve's auxiliary direction").
     ZeroDirection(&'static str),
+    /// The only curve whose area normal is asked is a line: one line spans no plane.
+    SingleLinearCurve,
+    /// The curve's tangent at `t` is infinite, so the closest-point function cannot be
+    /// scaled down to evaluate there.
+    InfiniteTangent {
+        /// The curve parameter.
+        t: f64,
+    },
+    /// The curve's tangent at `t` is zero where the curve is not degenerate: a
+    /// singularity, where the closest-point function has no direction to step.
+    ZeroTangent {
+        /// The curve parameter.
+        t: f64,
+    },
+    /// The point lies on the curve at `t`, where a solve for the farthest point finds no
+    /// extremum (the gap is zero there).
+    PointOnCurveWhenMaximising {
+        /// The curve parameter.
+        t: f64,
+    },
+    /// A stage of a curve routine failed with no reason the kernel names: a defect
+    /// ([`ErrorKind::StageFailed`]). The failure holds the operation, the status the C++
+    /// reports (for the goldens only), where it was built, and the error of the call it made
+    /// where it has one. The form not yet reviewed: new code builds
+    /// [`CurveFailure::Defect`], a named cause or a refusal instead.
+    StageFailed,
+    /// A failure that is the kernel's fault, reviewed at its site, with the written reason:
+    /// `why` names the step that failed and why that is the kernel's fault, not the
+    /// geometry's. A defect ([`ErrorKind::StageFailed`]); status `SM_ERR` unless its site
+    /// says otherwise.
+    Defect {
+        /// The step that failed, and why that is the kernel's fault.
+        why: &'static str,
+    },
+    /// A ray solve ([`crate::curve::curve::SolverOperation::Rayfire`] or
+    /// `Signed3dDirectedMinimize`) was called without `option`, which it requires: the
+    /// caller's argument, so of kind [`ErrorKind::InvalidInput`], not a defect.
+    PointSolveOptionMissing {
+        /// The option left out.
+        option: PointSolveOption,
+    },
     /// A piece `[a, b]` of a length bracket lies outside the knot span
     /// `[span_start, span_end]` it is blossomed in: the bracket's rounding bound holds only
     /// for a piece within its span (a port invariant: the halving keeps every piece within).
@@ -76,6 +131,26 @@ pub enum CurveFailure {
     },
 }
 
+/// A required option of [`crate::curve::curve::p3::PointSolveOptions`] that a ray solve
+/// was called without ([`CurveFailure::PointSolveOptionMissing`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PointSolveOption {
+    /// `distance_tolerance`, the largest ray / curve gap.
+    DistanceTolerance,
+    /// `vectors`, whose first entry is the ray's direction.
+    Vectors,
+}
+
+impl core::fmt::Display for PointSolveOption {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::DistanceTolerance => "distance tolerance",
+            Self::Vectors => "vectors",
+        })
+    }
+}
+
 impl CurveFailure {
     /// The status the C++ reports for it (a comparison detail): `SM_ERR`, except
     /// `SM_ERR_NULL_POINTER` for [`CurveFailure::Missing`] and `SM_ERR_INVALID_INPUT` for
@@ -85,8 +160,14 @@ impl CurveFailure {
             Self::LengthBelowFloor { .. }
             | Self::LengthPastPieceCap { .. }
             | Self::Failed(_)
+            | Self::SingleLinearCurve
+            | Self::InfiniteTangent { .. }
+            | Self::ZeroTangent { .. }
+            | Self::PointOnCurveWhenMaximising { .. }
+            | Self::StageFailed
+            | Self::Defect { .. }
             | Self::PieceOutsideSpan { .. } => SM_ERR,
-            Self::Missing(_) => SM_ERR_NULL_POINTER,
+            Self::Missing(_) | Self::PointSolveOptionMissing { .. } => SM_ERR_NULL_POINTER,
             Self::ZeroDirection(_) => SM_ERR_INVALID_INPUT,
         }
     }
@@ -94,8 +175,10 @@ impl CurveFailure {
     /// Its stable [`ErrorKind`]: [`ErrorKind::NotWithinTolerance`] for a length bracket's
     /// refusal (the accuracy asked is finer than the computation resolves); for a routine's
     /// failure, the kind of the status it replaced ([`ErrorKind::Failed`],
-    /// [`ErrorKind::Missing`], [`ErrorKind::InvalidInput`]); [`ErrorKind::PortInvariant`] for a
-    /// piece outside its span, a port invariant broken.
+    /// [`ErrorKind::Missing`], [`ErrorKind::InvalidInput`]) and that of the status of a typed
+    /// cause that replaced one; [`ErrorKind::StageFailed`] for a stage that failed, reviewed
+    /// or not, a defect;
+    /// [`ErrorKind::PortInvariant`] for a piece outside its span, a port invariant broken.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
@@ -103,14 +186,22 @@ impl CurveFailure {
                 ErrorKind::NotWithinTolerance
             }
             Self::PieceOutsideSpan { .. } => ErrorKind::PortInvariant,
-            Self::Failed(_) | Self::Missing(_) | Self::ZeroDirection(_) => {
+            Self::StageFailed | Self::Defect { .. } => ErrorKind::StageFailed,
+            Self::PointSolveOptionMissing { .. } => ErrorKind::InvalidInput,
+            Self::Failed(_)
+            | Self::Missing(_)
+            | Self::ZeroDirection(_)
+            | Self::SingleLinearCurve
+            | Self::InfiniteTangent { .. }
+            | Self::ZeroTangent { .. }
+            | Self::PointOnCurveWhenMaximising { .. } => {
                 ErrorKind::of_status(self.comparison_status())
             }
         }
     }
 
-    /// True for a failure that replaced a C++ status the routine returns
-    /// ([`CurveFailure::Failed`], [`CurveFailure::Missing`], [`CurveFailure::ZeroDirection`]):
+    /// True for a failure that replaced a C++ status the routine returns (every cause but
+    /// the length bracket's refusals and a piece outside its span):
     /// it answers with that status the way the `Upstream` it replaced did
     /// ([`crate::error::upstream_status`]). A length bracket's refusal, and a piece outside its
     /// span, are solidcore's own and replaced none.
@@ -120,7 +211,16 @@ impl CurveFailure {
             Self::LengthBelowFloor { .. }
             | Self::LengthPastPieceCap { .. }
             | Self::PieceOutsideSpan { .. } => false,
-            Self::Failed(_) | Self::Missing(_) | Self::ZeroDirection(_) => true,
+            Self::Failed(_)
+            | Self::Missing(_)
+            | Self::ZeroDirection(_)
+            | Self::SingleLinearCurve
+            | Self::InfiniteTangent { .. }
+            | Self::ZeroTangent { .. }
+            | Self::PointOnCurveWhenMaximising { .. }
+            | Self::StageFailed
+            | Self::Defect { .. }
+            | Self::PointSolveOptionMissing { .. } => true,
         }
     }
 }
@@ -156,6 +256,21 @@ impl core::fmt::Display for CurveFailure {
             Self::Failed(what) => f.write_str(what),
             Self::Missing(what) => write!(f, "{what} is missing"),
             Self::ZeroDirection(what) => write!(f, "{what} is the zero vector"),
+            Self::SingleLinearCurve => f.write_str("the only curve is a line, which spans no plane"),
+            Self::InfiniteTangent { t } => write!(f, "the curve's tangent at t = {t} is infinite"),
+            Self::ZeroTangent { t } => write!(
+                f,
+                "the curve's tangent at t = {t} is zero where the curve is not degenerate"
+            ),
+            Self::PointOnCurveWhenMaximising { t } => write!(
+                f,
+                "the point lies on the curve at t = {t}, where a farthest-point solve finds no extremum"
+            ),
+            Self::StageFailed => write!(f, "{}", ErrorKind::StageFailed),
+            Self::Defect { why } => write!(f, "{}: {why}", ErrorKind::StageFailed),
+            Self::PointSolveOptionMissing { option } => {
+                write!(f, "the ray solve was called without its {option}")
+            }
         }
     }
 }
@@ -163,6 +278,7 @@ impl core::fmt::Display for CurveFailure {
 impl crate::SolidError {
     /// [`crate::SolidError::Failed`] for a curve routine that fails with `failure`.
     #[must_use]
+    #[track_caller]
     pub(crate) fn curve(operation: &'static str, failure: CurveFailure) -> Self {
         Failure::new(operation, failure).into_error()
     }
@@ -180,6 +296,17 @@ impl crate::SolidError {
     #[must_use]
     pub(crate) fn curve_missing(operation: &'static str, what: &'static str) -> Self {
         Self::curve(operation, CurveFailure::Missing(what))
+    }
+
+    /// [`crate::SolidError::Failed`] for a stage of a curve routine that failed with no
+    /// reason the kernel names ([`CurveFailure::StageFailed`], a defect), with `status`, the
+    /// one the C++ reports (`SM_ERR`, or `SM_ERR_NULL_POINTER` for an `NER`).
+    #[must_use]
+    #[track_caller]
+    pub(crate) fn curve_stage_failed(operation: &'static str, status: i32) -> Self {
+        Failure::new(operation, CurveFailure::StageFailed)
+            .with_status(status)
+            .into_error()
     }
 
     /// The curve failure behind this error, for a [`crate::SolidError::Failed`] with a
@@ -246,6 +373,64 @@ mod tests {
         assert_eq!(SolidError::sm_err("curve::op").curve_failure(), None);
     }
 
+    /// A stage that failed is a defect that keeps its site's status; a typed cause keeps
+    /// the status and kind of the bare status it replaced.
+    #[test]
+    fn a_stage_failure_is_a_defect_and_a_typed_cause_keeps_its_status() {
+        super::super::tests::assert_stage_failure(
+            &SolidError::curve_stage_failed("curve::op", SM_ERR_NULL_POINTER),
+            "curve::op",
+            SM_ERR_NULL_POINTER,
+        );
+        super::super::tests::assert_stage_failure(
+            &SolidError::curve_stage_failed("curve::op", SM_ERR),
+            "curve::op",
+            SM_ERR,
+        );
+        for cause in [
+            CurveFailure::SingleLinearCurve,
+            CurveFailure::InfiniteTangent { t: 0.25 },
+            CurveFailure::ZeroTangent { t: 0.5 },
+            CurveFailure::PointOnCurveWhenMaximising { t: 0.75 },
+        ] {
+            let e = SolidError::curve("curve::op", cause);
+            assert_eq!(e.upstream_status(), Some(SM_ERR), "{cause:?}");
+            assert_eq!(e.kind(), ErrorKind::Failed, "{cause:?}");
+            assert!(!e.is_defect(), "{cause:?}");
+            assert!(e.is_status_answer(), "{cause:?}");
+        }
+        assert_eq!(
+            SolidError::curve("curve::op", CurveFailure::InfiniteTangent { t: 0.25 }).to_string(),
+            "curve::op: the curve's tangent at t = 0.25 is infinite"
+        );
+    }
+
+    /// A reviewed defect is of class 127 with the stage failure's status, and says why.
+    #[test]
+    fn a_reviewed_defect_is_class_127_with_its_reason() {
+        let why = "the cache rebuilt a moment ago has no span at a parameter inside the curve";
+        let defect = CurveFailure::Defect { why };
+        super::super::tests::assert_defect(
+            &SolidError::curve("curve::op", defect),
+            &SolidError::curve_stage_failed("curve::op", SM_ERR),
+            "curve::op",
+            SM_ERR,
+            &format!("curve::op: stage_failed: {why}"),
+        );
+        let missing = Failure::new("curve::op", defect)
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error();
+        super::super::tests::assert_defect(
+            &missing,
+            &SolidError::curve_stage_failed("curve::op", SM_ERR_NULL_POINTER),
+            "curve::op",
+            SM_ERR_NULL_POINTER,
+            &format!("curve::op: stage_failed: {why}"),
+        );
+        assert_eq!(missing.curve_failure(), Some(&defect));
+        assert!(defect.replaces_upstream_status());
+    }
+
     /// A length bracket's refusals report what they reported before the curve routines'
     /// failures joined them: status `SM_ERR`, kind `not_within_tolerance`, no upstream status
     /// (they replaced none), and the same text.
@@ -290,14 +475,51 @@ mod tests {
     /// whose conversion waits on other open work.
     #[test]
     fn the_curve_routines_build_no_bare_statuses() {
-        super::super::bare_scan::assert_waiting(
-            "curve",
-            31,
-            &[
-                ("curve/curve/p3.rs", 9),
-                ("curve/curve/p7.rs", 3),
-                ("curve/ellipse/p1.rs", 6),
+        super::super::bare_scan::assert_waiting("curve", 31, &[("curve/ellipse/p1.rs", 13)]);
+    }
+
+    /// The sites that build a curve phrase cause only fall:
+    /// per file, in the library code of `solidcore` and `solidcore-ops`, as
+    /// [`super::super::site_scan`] counts them. A PR that converts sites lowers its
+    /// files' counts here, and a file at 0 loses its line (the conversion guide:
+    /// `docs/failure-codes-and-reproduction.md` §6).
+    #[test]
+    fn the_curve_phrase_cause_sites_only_shrink() {
+        use super::super::site_scan::{assert_pinned, crate_sites, Builder, Scan, Wrappers};
+        const PHRASES: Scan = Scan {
+            builders: &[
+                Builder::Variant("CurveFailure", "Failed"),
+                Builder::Variant("CurveFailure", "Missing"),
+                Builder::Variant("CurveFailure", "ZeroDirection"),
+                Builder::Method("curve_failed", Some(1)),
+                Builder::Method("curve_missing", Some(1)),
             ],
-        );
+            wrappers: Wrappers::Phrase,
+        };
+        #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
+        const PINNED: &[(&str, usize)] = &[
+            ("solidcore/src/curve/composite_curve/p1.rs", 6),
+            ("solidcore/src/curve/composite_curve/p2.rs", 2),
+            ("solidcore/src/curve/conic.rs", 1),
+            ("solidcore/src/curve/crv_in_volume.rs", 5),
+            ("solidcore/src/curve/crv_on_surf.rs", 2),
+            ("solidcore/src/curve/curve/p1.rs", 13),
+            ("solidcore/src/curve/curve/p2.rs", 9),
+            ("solidcore/src/curve/curve/p3.rs", 1),
+            ("solidcore/src/curve/curve/p4.rs", 7),
+            ("solidcore/src/curve/curve/p5.rs", 11),
+            ("solidcore/src/curve/curve/p6.rs", 2),
+            ("solidcore/src/curve/curve/p8.rs", 8),
+            ("solidcore/src/curve/curve/p9.rs", 5),
+            ("solidcore/src/curve/curve_cache.rs", 7),
+            ("solidcore/src/curve/ellipse/p2.rs", 15),
+            ("solidcore/src/curve/hyperbola.rs", 3),
+            ("solidcore/src/curve/line.rs", 4),
+            ("solidcore/src/curve/offset_curve.rs", 8),
+            ("solidcore/src/curve/parabola.rs", 2),
+            ("solidcore/src/curve/projected_curve.rs", 7),
+            ("solidcore/src/curve/tangent_field.rs", 3),
+        ];
+        assert_pinned("curve phrase-cause sites", &crate_sites(&PHRASES), PINNED);
     }
 }

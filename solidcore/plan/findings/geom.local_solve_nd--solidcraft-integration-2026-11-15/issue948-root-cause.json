@@ -1,0 +1,162 @@
+{
+  "baseline": "be6ecb06420d501a8362d6de3d0de7ef324dafb9",
+  "toolchain": "1.99.1",
+  "scope": "Read-only production; all source edits and logging in private copies/helpers. No index/ref/public changes.",
+  "source_sha256": {
+    "crates/solidcore/src/geom/local_solve_nd.rs": "c8ec9a7d07cf79aa0678ad53ced788a234ba5ff9bd80bfa0cc05de437ab697f8",
+    "crates/solidcore/src/curve/curve/p1.rs": "b0e8ad9603162645e9f97f2711ab3897a21bd07f5c1d6b03c2389e8a19eeb353",
+    "crates/solidcore/tests/issue_948_ruled_skin_difference.rs": "5a93f8811d2eebccb74ae77f819bb7e5a22b49d643d7f4b5545a65265b2a9546",
+    "crates/solidcore/tests/wr_614_coincident_strip_crossing.rs": "64e10a5bbe097828a8573e9717612a89e0be328602dd408abdbbe1e272534f7e"
+  },
+  "baseline_rlib_sha256": "5646e0da930d96a25d5d4500ead082efa10715e9f5bee97ec1520b804c561a4a",
+  "operand_debug_bytes_equal": {
+    "outer": true,
+    "inner": true
+  },
+  "baseline_measurements": {
+    "nd_off": {
+      "outer_volume": 358147.9798812461,
+      "inner_volume": 433334.8951727807,
+      "result_volume": 74838.01953194464,
+      "vertices": 683,
+      "edges": 1237,
+      "faces": 556
+    },
+    "nd_on": {
+      "outer_volume": 358147.9798812461,
+      "inner_volume": 433334.8951727807,
+      "result_volume": 0.0,
+      "vertices": 682,
+      "edges": 1236,
+      "faces": 556
+    }
+  },
+  "refined_range_event": {
+    "start": [
+      0.0,
+      0.7632131633423296
+    ],
+    "end": [
+      0.7372758233088273,
+      0.7617633973585559
+    ],
+    "old_end_deviation": 1.5721731499031345e-05,
+    "candidate": [
+      2.336339553063178e-09,
+      0.7632131633377573
+    ],
+    "candidate_deviation": 3.552713678800501e-14,
+    "at_end": true,
+    "legacy_fractions": [
+      3.1688812778071267e-09,
+      3.15377213233603e-09
+    ],
+    "corrected_fractions": [
+      0.9999999968311187,
+      0.9999999968462279
+    ],
+    "unchanged_shift_limit": 0.002,
+    "legacy_accepted": true,
+    "corrected_accepted": false,
+    "old_end_point": [
+      278.24362300157213,
+      -53.818723003651186,
+      115.08423694358456
+    ],
+    "candidate_point": [
+      278.2538527725873,
+      -53.08152092197427,
+      115.08221735261854
+    ],
+    "old_end_to_candidate_distance_decimal": "0.73727582097304433460176455921446030009797040824847993105111568458243259993166568"
+  },
+  "range_trace_lines": {
+    "legacy": [
+      "RANGE_REFINE range_fix=false at_end=true old_start=SolutionEnd { solution_value: 1.5888218580782548e-14, parameters: [0.0, 0.7632131633423296, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] } old_end=SolutionEnd { solution_value: 1.5721731499031345e-5, parameters: [0.7372758233088273, 0.7617633973585559, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] } candidate=CurveIntersection { my_param: 2.336339553063178e-9, other_param: 0.7632131633377573, deviation: 3.552713678800501e-14 } frac1=3.1688812778071267e-9 frac2=3.15377213233603e-9 limit=0.002 accepted=true",
+      "RANGE_REFINE range_fix=false at_end=false old_start=SolutionEnd { solution_value: 1.410080884741298e-5, parameters: [2.003869549487389, 0.22705957038047703, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] } old_end=SolutionEnd { solution_value: 3.552713678800501e-14, parameters: [2.728540784815031, 0.2255865653599899, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] } candidate=CurveIntersection { my_param: 2.728540784648235, other_param: 0.22558656536032887, deviation: 2.842170943040401e-14 } frac1=0.9999999997698323 frac2=0.9999999997698725 limit=0.002 accepted=false",
+      "RANGE_REFINE range_fix=false at_end=true old_start=SolutionEnd { solution_value: 1.4210854715202004e-14, parameters: [0.0, 0.1731324392054232, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] } old_end=SolutionEnd { solution_value: 2.0073265421249244e-6, parameters: [1.9485706069911296e-8, 0.17313229040076053, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] } candidate=CurveIntersection { my_param: 0.0, other_param: 0.1731324392054245, deviation: 4.081757258616412e-14 } frac1=0.0 frac2=-8.76660743998059e-9 limit=0.002 accepted=true",
+      "RANGE_REFINE range_fix=false at_end=true old_start=SolutionEnd { solution_value: 2.929642751054232e-14, parameters: [0.0, 0.17313243112640242, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] } old_end=SolutionEnd { solution_value: 1.8983431970211519e-6, parameters: [1.8427766836353026e-8, 0.17313229040076053, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] } candidate=CurveIntersection { my_param: 0.0, other_param: 0.1731324311264051, deviation: 6.394884621840902e-14 } frac1=0.0 frac2=-1.913148728327485e-8 limit=0.002 accepted=true",
+      "RANGE_REFINE range_fix=false at_end=false old_start=SolutionEnd { solution_value: 1.397583898221275e-5, parameters: [2.0038695480581694, 0.5153071976789826, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] } old_end=SolutionEnd { solution_value: 4.263256414560601e-14, parameters: [2.721886099228778, 0.5167666763920766, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] } candidate=CurveIntersection { my_param: 2.7218860985677362, other_param: 0.5167666763907329, deviation: 4.263256414560601e-14 } frac1=0.9999999990793501 frac2=0.9999999990793268 limit=0.002 accepted=false",
+      "RANGE_REFINE range_fix=false at_end=false old_start=SolutionEnd { solution_value: 1.3815236146753765e-5, parameters: [1.3407103686614443, 0.977853446922734, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] } old_end=SolutionEnd { solution_value: 5.90221124448794e-14, parameters: [2.0123465522507136, 0.9791647028201576, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] } candidate=CurveIntersection { my_param: 2.0123465496788837, other_param: 0.9791647028151241, deviation: 1.7302846319304764e-13 } frac1=0.9999999961707992 frac2=0.9999999961613761 limit=0.002 accepted=false"
+    ],
+    "corrected": [
+      "RANGE_REFINE range_fix=true at_end=true old_start=SolutionEnd { solution_value: 1.5888218580782548e-14, parameters: [0.0, 0.7632131633423296, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] } old_end=SolutionEnd { solution_value: 1.5721731499031345e-5, parameters: [0.7372758233088273, 0.7617633973585559, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] } candidate=CurveIntersection { my_param: 2.336339553063178e-9, other_param: 0.7632131633377573, deviation: 3.552713678800501e-14 } frac1=0.9999999968311187 frac2=0.9999999968462279 limit=0.002 accepted=false",
+      "RANGE_REFINE range_fix=true at_end=false old_start=SolutionEnd { solution_value: 1.410080884741298e-5, parameters: [2.003869549487389, 0.22705957038047703, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] } old_end=SolutionEnd { solution_value: 3.552713678800501e-14, parameters: [2.728540784815031, 0.2255865653599899, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] } candidate=CurveIntersection { my_param: 2.728540784648235, other_param: 0.22558656536032887, deviation: 2.842170943040401e-14 } frac1=0.9999999997698323 frac2=0.9999999997698725 limit=0.002 accepted=false",
+      "RANGE_REFINE range_fix=true at_end=true old_start=SolutionEnd { solution_value: 1.4210854715202004e-14, parameters: [0.0, 0.1731324392054232, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] } old_end=SolutionEnd { solution_value: 2.0073265421249244e-6, parameters: [1.9485706069911296e-8, 0.17313229040076053, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] } candidate=CurveIntersection { my_param: 0.0, other_param: 0.1731324392054245, deviation: 4.081757258616412e-14 } frac1=1.0 frac2=1.0000000087666074 limit=0.002 accepted=false",
+      "RANGE_REFINE range_fix=true at_end=true old_start=SolutionEnd { solution_value: 2.929642751054232e-14, parameters: [0.0, 0.17313243112640242, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] } old_end=SolutionEnd { solution_value: 1.8983431970211519e-6, parameters: [1.8427766836353026e-8, 0.17313229040076053, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] } candidate=CurveIntersection { my_param: 0.0, other_param: 0.1731324311264051, deviation: 6.394884621840902e-14 } frac1=1.0 frac2=1.0000000191314873 limit=0.002 accepted=false",
+      "RANGE_REFINE range_fix=true at_end=false old_start=SolutionEnd { solution_value: 1.397583898221275e-5, parameters: [2.0038695480581694, 0.5153071976789826, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] } old_end=SolutionEnd { solution_value: 4.263256414560601e-14, parameters: [2.721886099228778, 0.5167666763920766, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] } candidate=CurveIntersection { my_param: 2.7218860985677362, other_param: 0.5167666763907329, deviation: 4.263256414560601e-14 } frac1=0.9999999990793501 frac2=0.9999999990793268 limit=0.002 accepted=false",
+      "RANGE_REFINE range_fix=true at_end=false old_start=SolutionEnd { solution_value: 1.3815236146753765e-5, parameters: [1.3407103686614443, 0.977853446922734, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] } old_end=SolutionEnd { solution_value: 5.90221124448794e-14, parameters: [2.0123465522507136, 0.9791647028201576, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] } candidate=CurveIntersection { my_param: 2.0123465496788837, other_param: 0.9791647028151241, deviation: 1.7302846319304764e-13 } frac1=0.9999999961707992 frac2=0.9999999961613761 limit=0.002 accepted=false"
+    ]
+  },
+  "wr614_target_matrix": {
+    "base": "be6ecb06420d501a8362d6de3d0de7ef324dafb9",
+    "source": "solidcore/crates/solidcore/tests/wr_614_coincident_strip_crossing.rs",
+    "test": "wr_614_wider_protruding_box_keeps_exit_crossing",
+    "compile_exit_code": 0,
+    "results": [
+      {
+        "nd": "off",
+        "range": "off",
+        "exit_code": 0,
+        "log": "wr614-nd-off-range-off.log"
+      },
+      {
+        "nd": "off",
+        "range": "on",
+        "exit_code": 0,
+        "log": "wr614-nd-off-range-on.log"
+      },
+      {
+        "nd": "on",
+        "range": "off",
+        "exit_code": 0,
+        "log": "wr614-nd-on-range-off.log"
+      },
+      {
+        "nd": "on",
+        "range": "on",
+        "exit_code": 0,
+        "log": "wr614-nd-on-range-on.log"
+      }
+    ]
+  },
+  "wr614_full_file_matrix": {
+    "base": "be6ecb06420d501a8362d6de3d0de7ef324dafb9",
+    "test_scope": "complete unchanged WR614 test file, only existing flag controls",
+    "results": [
+      {
+        "nd": "off",
+        "range": "off",
+        "exit_code": 0,
+        "log": "wr614-all-nd-off-range-off.log"
+      },
+      {
+        "nd": "off",
+        "range": "on",
+        "exit_code": 0,
+        "log": "wr614-all-nd-off-range-on.log"
+      },
+      {
+        "nd": "on",
+        "range": "off",
+        "exit_code": 0,
+        "log": "wr614-all-nd-on-range-off.log"
+      },
+      {
+        "nd": "on",
+        "range": "on",
+        "exit_code": 0,
+        "log": "wr614-all-nd-on-range-on.log"
+      }
+    ]
+  },
+  "nd_and_range_original_948_tests": {
+    "exit_code": 0,
+    "passed": 2,
+    "failed": 0,
+    "ignored": 0,
+    "log": "issue948-main-nd-and-range.log"
+  },
+  "first_affected_stage": "imprint; operand construction is byte-identical",
+  "minimal_general_response": "Use the existing WR-383 oriented endpoint shift guard with the N-D failed-evaluation correction; reverify all touched behavior and preserve claim boundaries. Do not disable the N-D fix, snap case-specific values, or accept zero volume."
+}

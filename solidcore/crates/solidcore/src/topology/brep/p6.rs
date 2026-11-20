@@ -24,10 +24,16 @@
 //! scan resumes past the count of distributed face uses; the port keeps that. A deleted
 //! region (`delete pRegion`, after `SM_NO_DESTRUCTION`) leaves its arena like a deleted
 //! shell; the infinite region moves to the head of the region list.
-//! Opt-in (WR-584, fork tangency-labs/smlib@69c5198):
-//! [`UpstreamFixes::boolean_new_face_closure_both_sides`](crate::kernel::UpstreamFixes::boolean_new_face_closure_both_sides)
-//! makes the closure test search from the face use and its mate at once
-//! ([`tr::closure_traversal_from_both_sides`]): the same answer without marks.
+//! Not upstream (WR-584, fork tangency-labs/smlib@69c5198): the closure test searches
+//! from the face use and its mate at once ([`tr::closure_traversal_from_both_sides`]):
+//! the same answer without marks, where upstream walks the shell from one side.
+//! Not upstream (WR-18287): after the split the inner shell, the side of the closed
+//! boundary that encloses its region, is put first in its region's list; upstream leaves
+//! the old region's list as it was, a void's shell possibly ahead of it.
+//! Not upstream (WR-797): a shell to nest is sampled at its first edge use, in stored
+//! order, whose step of 20 edge tolerances stays in its face's UV domain; upstream steps
+//! off the first edge use of the first face use only and fails where that face is
+//! narrower than the step.
 //! `MakeFaceTopology`: the caller's [`Marks`] hold the objects' mark values (the
 //! `SmNewMarkAndLock` block claims and releases a new mark, also on error). New objects
 //! get their `SmTopology` record in the [`NotifyEnv`] under its identity, which also
@@ -972,7 +978,14 @@ fn build_face(
     // Next - see if new Face splits the existing region - move shell children
     // appropriately
     if !options.edge_loops.is_empty() {
-        let split = test_closure_split_region_attempt_with_state(k, brep, marks, env, true, fu2)?;
+        let split = test_closure_split_region_attempt_with_state(
+            k,
+            brep,
+            marks,
+            env,
+            InfiniteHalf::Searched,
+            fu2,
+        )?;
         out.shell = split.shell;
         out.region = split.region;
         split.status?;
@@ -1321,10 +1334,7 @@ fn assign_uv_curves(
             // set pUVCurve->ParameterRange = assoc Edgeuse->Edge->ParamRange
             let edge = deref(brep.edgeuse(e)?.edge)?;
             let interval = crate::topology::edge::interval(brep, edge)?;
-            ignore_status(crate::error::passed_on(
-                curve.edit_parameterization(&interval),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            curve.edit_parameterization(&interval)?;
 
             ignore_status(
                 crate::topology::edgeuse::p2::check_and_set_uv_trim_curve(
@@ -1364,6 +1374,32 @@ pub fn test_closure_split_region(
         test_closure_split_region_attempt(k, brep, marks, env, do_infinite_region_testing, start)?;
     attempt.status?;
     Ok((attempt.shell, attempt.region))
+}
+
+/// How a split of the infinite region tells which of its two halves is the infinite one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InfiniteHalf {
+    /// It does not: the region that was split stays the infinite one
+    /// (`bDoInfiniteRegionTesting = FALSE`).
+    Stays,
+    /// `FindAndSetInfiniteRegion`: a ray fired at the new shell
+    /// (`bDoInfiniteRegionTesting = TRUE`).
+    Searched,
+    /// Not upstream. The half this face use is in: its maker knows the face use to lie on
+    /// the outside of the solid whose shell closed (a primitive knows it from the surface
+    /// it made). No ray is fired. A face use the edit has since removed is in neither
+    /// half, and the split searches.
+    Of(FaceuseId),
+}
+
+impl InfiniteHalf {
+    const fn testing(do_infinite_region_testing: bool) -> Self {
+        if do_infinite_region_testing {
+            Self::Searched
+        } else {
+            Self::Stays
+        }
+    }
 }
 
 /// Native status and outputs written by `TestClosureSplitRegion` before it exits.
@@ -1407,12 +1443,32 @@ pub fn test_closure_split_region_attempt(
     do_infinite_region_testing: bool,
     start: FaceuseId,
 ) -> Result<RegionSplitAttempt> {
+    test_closure_split_region_attempt_telling(
+        k,
+        brep,
+        marks,
+        env,
+        InfiniteHalf::testing(do_infinite_region_testing),
+        start,
+    )
+}
+
+/// [`test_closure_split_region_attempt`] for a caller that says how a split of the
+/// infinite region tells its infinite half ([`InfiniteHalf`]).
+pub(crate) fn test_closure_split_region_attempt_telling(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    marks: &mut Marks,
+    env: &mut NotifyEnv<'_>,
+    infinite_half: InfiniteHalf,
+    start: FaceuseId,
+) -> Result<RegionSplitAttempt> {
     test_closure_split_region_attempt_with_state(
         k,
         brep,
         marks,
         &mut NotifyState::from_env(env),
-        do_infinite_region_testing,
+        infinite_half,
         start,
     )
 }
@@ -1422,7 +1478,7 @@ fn test_closure_split_region_attempt_with_state(
     brep: &mut Brep,
     marks: &mut Marks,
     env: &mut NotifyState<'_>,
-    do_infinite_region_testing: bool,
+    infinite_half: InfiniteHalf,
     start: FaceuseId,
 ) -> Result<RegionSplitAttempt> {
     let mut attempt = RegionSplitAttempt {
@@ -1430,15 +1486,7 @@ fn test_closure_split_region_attempt_with_state(
         shell: None,
         region: None,
     };
-    let status = split_region_into(
-        k,
-        brep,
-        marks,
-        env,
-        do_infinite_region_testing,
-        start,
-        &mut attempt,
-    );
+    let status = split_region_into(k, brep, marks, env, infinite_half, start, &mut attempt);
     finish_split_attempt(attempt, status)
 }
 
@@ -1447,7 +1495,7 @@ fn split_region_into(
     brep: &mut Brep,
     marks: &mut Marks,
     env: &mut NotifyState<'_>,
-    do_infinite_region_testing: bool,
+    infinite_half: InfiniteHalf,
     start: FaceuseId,
     attempt: &mut RegionSplitAttempt,
 ) -> Result<()> {
@@ -1461,18 +1509,107 @@ fn split_region_into(
         return Ok(());
     }
     let mut lock = MarkLock::new(std::slice::from_mut(&mut k.context), 0, ALL_MARKS)?;
+    let mut pieces = Vec::new();
     let result = split_closed(
         k,
         brep,
         marks,
         env,
-        do_infinite_region_testing,
+        infinite_half,
         start,
         &lock,
         attempt,
+        &mut pieces,
     );
     lock.release(std::slice::from_mut(&mut k.context))?;
-    result
+    result?;
+    split_vertex_joined_pieces(k, brep, marks, env, infinite_half, &pieces, 0)
+}
+
+/// (not upstream, #18851) The split hands each piece of the old shell joined to the rest
+/// only at a vertex to one of the two shells as a whole, by a ray fire. A piece that is
+/// both sides of a closed set of faces (the walls of a void that touches the rest at a
+/// vertex, as a void touching a notch's wall along a line does) then has both sides in
+/// one shell, the void's inside among the material's faces, and the void is lost. Each
+/// such piece is split again, as the glue would have split it, had it been joined by
+/// edges: the void becomes a region of its own, void where the region across its faces is
+/// material (and material where that is void). A piece with a lamina edge, or whose
+/// sides are already in different shells, is left as it is. `depth` bounds the nesting.
+fn split_vertex_joined_pieces(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    marks: &mut Marks,
+    env: &mut NotifyState<'_>,
+    infinite_half: InfiniteHalf,
+    pieces: &[FaceuseId],
+    depth: usize,
+) -> Result<()> {
+    const MAX_DEPTH: usize = 16;
+    if depth >= MAX_DEPTH {
+        return Ok(());
+    }
+    for &fu in pieces {
+        let seed = brep.faceuse(fu)?;
+        let Some(mate) = seed.mate else { continue };
+        if seed.shell.is_none() || brep.faceuse(mate)?.shell != seed.shell {
+            continue;
+        }
+        let mut attempt = RegionSplitAttempt {
+            status: Ok(()),
+            shell: None,
+            region: None,
+        };
+        let mut lock = MarkLock::new(std::slice::from_mut(&mut k.context), 0, ALL_MARKS)?;
+        let mut nested = Vec::new();
+        let result = if tr::has_lamina_edge(brep, split_link(seed.face)?)? {
+            Ok(())
+        } else {
+            split_closed(
+                k,
+                brep,
+                marks,
+                env,
+                infinite_half,
+                fu,
+                &lock,
+                &mut attempt,
+                &mut nested,
+            )
+        };
+        lock.release(std::slice::from_mut(&mut k.context))?;
+        // as the glue's own split, a native failure leaves the region unsplit
+        if let Err(error) = result {
+            if matches!(
+                error,
+                SolidError::Unported { .. }
+                    | SolidError::Cancelled { .. }
+                    | SolidError::InvalidInput { .. }
+                    | SolidError::PortInvariant { .. }
+                    | SolidError::NotFound { .. }
+            ) {
+                return Err(error);
+            }
+            continue;
+        }
+        // The new region is across the piece's faces from the region it was split out of:
+        // material where that is void, void where that is material.
+        if let Some(region) = attempt.region {
+            let mut across = None;
+            for side in [fu, mate] {
+                let shell = split_link(brep.faceuse(side)?.shell)?;
+                let r = split_link(brep.shell(shell)?.region)?;
+                if r != region {
+                    across = Some(r);
+                }
+            }
+            if let Some(across) = across {
+                let is_void = i32::from(brep.region(across)?.is_void == 0);
+                brep.region_mut(region)?.is_void = is_void;
+            }
+        }
+        split_vertex_joined_pieces(k, brep, marks, env, infinite_half, &nested, depth + 1)?;
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
@@ -1481,20 +1618,17 @@ fn split_closed(
     brep: &mut Brep,
     marks: &mut Marks,
     env: &mut NotifyState<'_>,
-    do_infinite_region_testing: bool,
+    infinite_half: InfiniteHalf,
     start: FaceuseId,
     lock: &MarkLock,
     attempt: &mut RegionSplitAttempt,
+    pieces: &mut Vec<FaceuseId>,
 ) -> Result<()> {
-    // WR-584 (opt-in, fork tangency-labs/smlib@69c5198): search from both sides at
-    // once. Same answer; no walk across the whole shell, no marks (nothing below
-    // reads the walk's marks: the replacement claims a new mark before it moves).
-    let closed = if k.fixes.boolean_new_face_closure_both_sides {
-        tr::closure_traversal_from_both_sides(brep, start)?
-    } else {
-        tr::closure_traversal(k, brep, marks, start, lock, None)?
-    };
-    if !closed {
+    // Not upstream (WR-584, fork tangency-labs/smlib@69c5198): search from both sides
+    // at once. Same answer; no walk across the whole shell, no marks (nothing below
+    // reads the walk's marks: the replacement claims a new mark before it moves). A
+    // missing radial the search meets fails here, before the new shell and region exist.
+    if !tr::closure_traversal_from_both_sides(brep, start)? {
         return Ok(());
     }
     let new_shell = brep.add_shell_record(Shell {
@@ -1583,16 +1717,37 @@ fn split_closed(
 
     // If the oldRegion was the infiniteRegion,
     // figure out which child is the new InfiniteRegion, if requested.
-    if do_infinite_region_testing && Some(old_region) == brep.infinite_region() {
-        // Find and set the actual InfiniteRegion (using the cached bbox).
-        brep_p5::find_and_set_infinite_region(
-            k,
-            brep,
-            &query,
-            Some(new_shell),
-            SetRegionVoidType::InfiniteRegionSwap,
-            Some(&brep_bbox),
-        )?;
+    if infinite_half != InfiniteHalf::Stays && Some(old_region) == brep.infinite_region() {
+        // (not upstream) the half the caller's outside face use is in
+        let known = match infinite_half {
+            InfiniteHalf::Of(outside) => brep
+                .faceuse(outside)
+                .ok()
+                .and_then(|faceuse| faceuse.shell)
+                .and_then(|shell| brep.shell(shell).ok())
+                .and_then(|shell| shell.region)
+                .filter(|region| [old_region, new_region].contains(region)),
+            _ => None,
+        };
+        if let Some(region) = known {
+            // set as the search sets the half it finds
+            crate::topology::brep::p1::reset_infinite_region(
+                k,
+                brep,
+                Some(region),
+                SetRegionVoidType::InfiniteRegionSwap,
+            )?;
+        } else {
+            // Find and set the actual InfiniteRegion (using the cached bbox).
+            brep_p5::find_and_set_infinite_region(
+                k,
+                brep,
+                &query,
+                Some(new_shell),
+                SetRegionVoidType::InfiniteRegionSwap,
+                Some(&brep_bbox),
+            )?;
+        }
     }
 
     // new_shell holds `replaced` (connected to start through edge uses, marked);
@@ -1643,6 +1798,7 @@ fn split_closed(
             rays,
             &faceuses,
             &mut replaced_all,
+            pieces,
         )?;
     }
 
@@ -1657,6 +1813,21 @@ fn split_closed(
     if shells.len() > 1 {
         let rays = split_link(shells_for_rays)?;
         nest_shells(k, brep, &query, &split, rays, &shells)?;
+    }
+
+    // Not upstream (WR-18287): the inner shell's region lies inside the split's closed
+    // boundary, so the inner shell encloses that region's other shells and comes first
+    // (`SmBrep::AssertValid` test 12). Upstream leaves the old region's list as it was, where
+    // a shell that stayed in the region, such as a void's, can come first.
+    if let Some(rays) = shells_for_rays {
+        let region = split_link(brep.shell(rays.inner)?.region)?;
+        let list = &mut brep.region_mut(region)?.shells;
+        if let Some(at) = list.iter().position(|&s| s == rays.inner) {
+            // SmRegion::SetList(InnerShell): the circular list now starts at it
+            if let (Some(tail), Some(head)) = (list.get(at..), list.get(..at)) {
+                *list = tail.iter().chain(head).copied().collect();
+            }
+        }
     }
 
     remove_empty_split_objects(k, brep, env, old_shell, new_shell)
@@ -1758,6 +1929,7 @@ fn distribute_faceuses(
     rays: RayShells,
     faceuses: &[FaceuseId],
     replaced_all: &mut Vec<FaceuseId>,
+    pieces: &mut Vec<FaceuseId>,
 ) -> Result<()> {
     let mark = lock.mark_type();
     let mut more_replaced = Vec::new();
@@ -1862,6 +2034,8 @@ fn distribute_faceuses(
         // mark and move faceuse and all faceuses connected to it through edgeuses to
         // the MoveShell
         tr::faceuse_shell_replacement(k, brep, marks, fu, move_shell, &mut more_replaced, lock)?;
+        // (not upstream, #18851) the piece, for `split_vertex_joined_pieces`
+        pieces.push(fu);
         // add MoreReplacedFaceuses to the list of distributed faceuses
         replaced_all.extend_from_slice(&more_replaced);
 
@@ -2026,10 +2200,9 @@ fn nest_shells(
 /// `nest_shells` fires), tells whether it lies inside. A candidate inside exactly one
 /// other, itself inside none, has its outside shell moved into that solid's region,
 /// its own region marked void and its faces swapped to point into the cavity.
-/// Deeper nesting is left as built. With `Kernel::fixes.revolve_holed_profile_void`
-/// (WR-529), a B-rep whose infinite region holds one shell, more than two regions and
-/// only closed face-use shells gets its void flags from the nesting instead
-/// ([`super::p1::set_region_is_void_flags_for_nested_solids`]).
+/// Deeper nesting is left as built. A B-rep whose infinite region holds one shell, more
+/// than two regions and only closed face-use shells gets its void flags from the nesting
+/// instead (WR-529, [`super::p1::set_region_is_void_flags_for_nested_solids`]).
 pub(crate) fn nest_closed_shells_as_cavities(
     k: &mut Kernel,
     brep: &mut Brep,
@@ -2038,12 +2211,12 @@ pub(crate) fn nest_closed_shells_as_cavities(
     let Some(infinite) = brep.infinite_region() else {
         return Ok(());
     };
-    // Not upstream (WR-529, opt-in `revolve_holed_profile_void`; the fork's
-    // tangency-labs/smlib@38b4212): the stitch may have nested the shells itself (a hole in
-    // the profile: the ring it turns into lies inside the ring around it, in that ring's
-    // region) and left the region inside the inner shell material. Where every shell is
-    // closed the regions alternate material and void from the infinite region in.
-    if k.fixes.revolve_holed_profile_void && brep.region(infinite)?.shells.len() < 2 {
+    // Not upstream (WR-529; the fork's tangency-labs/smlib@38b4212): the stitch may have
+    // nested the shells itself (a hole in the profile: the ring it turns into lies inside
+    // the ring around it, in that ring's region) and left the region inside the inner shell
+    // material. Where every shell is closed the regions alternate material and void from
+    // the infinite region in.
+    if brep.region(infinite)?.shells.len() < 2 {
         let regions = super::p1::regions(brep, None)?;
         if regions.len() <= 2 {
             return Ok(());
@@ -2178,28 +2351,44 @@ pub(crate) fn nest_closed_shells_as_cavities(
     Ok(())
 }
 
-// A point on a shell to classify: a point stepped off the first edge of its first
-// face use (or the vertex of its vertex loop), a point on its wire, or its vertex.
+// A point on a shell to classify: a point stepped off the first edge use, in stored
+// order, whose step stays in its face's UV domain (or the vertex of the first face
+// use's vertex loop), a point on its wire, or its vertex.
 fn shell_point(k: &Kernel, brep: &mut Brep, shell_id: ShellId) -> Result<Point3> {
     let shell = brep.shell(shell_id)?;
     if shell.is_faceuse_shell() {
         let fu = shell
             .first_faceuse()?
             .ok_or_else(|| SolidError::topology_missing(OP, "the shell's first face use"))?;
-        let edgeuses = eu::faceuse_edgeuses(brep, fu, false, None)?;
-        if let Some(&first_eu) = edgeuses.first() {
-            let edge = split_link(brep.edgeuse(first_eu)?.edge)?;
-            let step_dist = 20.0 * crate::topology::edge::tolerance(brep, edge)?;
-            let parameter = brep.edge(edge)?.interval.evaluate(0.4567);
-            return Ok(eu2::evaluate_binormal_step_off(
-                k,
-                brep,
-                first_eu,
-                parameter,
-                step_dist,
-                &StepOffOptions::default(),
-            )?
-            .point);
+        let faceuses = shell.get_faceuses()?;
+        if !eu::faceuse_edgeuses(brep, fu, false, None)?.is_empty() {
+            // Not upstream (WR-797), which steps off the first edge use only and fails
+            // where its face is narrower than the step. Any point of the shell serves, so
+            // the point is taken at the first edge use, in stored order, whose step of 20
+            // edge tolerances stays in its face's UV domain.
+            let mut first_left_face = None;
+            for fu in faceuses {
+                for edgeuse in eu::faceuse_edgeuses(brep, fu, false, None)? {
+                    let edge = split_link(brep.edgeuse(edgeuse)?.edge)?;
+                    let step_dist = 20.0 * crate::topology::edge::tolerance(brep, edge)?;
+                    let parameter = brep.edge(edge)?.interval.evaluate(0.4567);
+                    match eu2::evaluate_binormal_step_off_or_left_face(
+                        k,
+                        brep,
+                        edgeuse,
+                        parameter,
+                        step_dist,
+                        &StepOffOptions::default(),
+                    )? {
+                        Ok(stepped) => return Ok(stepped.point),
+                        Err(left_face) => first_left_face = first_left_face.or(Some(left_face)),
+                    }
+                }
+            }
+            // no face of the shell is wide enough: the first edge use's error, as before
+            return Err(first_left_face.unwrap_or_else(|| {
+                SolidError::topology_missing(OP, "the shell's first edge use")
+            }));
         }
         let loopuses = eu::faceuse_loopuses(brep, fu, false, None)?;
         let Some(&lu) = loopuses.first() else {
