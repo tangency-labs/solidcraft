@@ -695,7 +695,7 @@ fn add_mesh(
     // A mesh file is read up to the limit for STEP and import files, which Preferences raise
     // (#17446, #14548).
     let bytes = solidcraft_io::limits::read(path, solidcraft_io::limits::Kind::Step).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    let (mut mf, plan, looks) = if gltf {
+    let (mut mf, plan, looks, mut prepared) = if gltf {
         let dir = std::path::Path::new(path).parent().map(std::path::Path::to_path_buf).unwrap_or_default();
         let mut load =
             |name: &str| solidcraft_io::limits::read(&dir.join(name).to_string_lossy(), solidcraft_io::limits::Kind::Step).map_err(|e| e.to_string());
@@ -703,25 +703,33 @@ fn add_mesh(
         if !import::mesh_plan_fits(&g.plan) {
             g.flatten();
         }
-        (g.feature, Some(g.plan), g.looks)
+        (g.feature, Some(g.plan), g.looks, None)
     } else if usd {
         let (mut g, y_up) = solidcraft_io::read_usd(&bytes, path).map_err(err)?;
         file_y_up = y_up;
         if !import::mesh_plan_fits(&g.plan) {
             g.flatten();
         }
-        (g.feature, Some(g.plan), g.looks)
+        (g.feature, Some(g.plan), g.looks, None)
     } else {
-        (solidcraft_io::mesh_import_feature_in(&bytes, path, unit.map_or(1.0, |(_, mm)| mm)).map_err(err)?, None, Vec::new())
+        let (feature, prepared) = solidcraft_io::mesh_import_feature_in_prepared(&bytes, path, unit.map_or(1.0, |(_, mm)| mm)).map_err(err)?;
+        (feature, None, Vec::new(), prepared)
     };
+    drop(bytes);
     if let Some(angle) = crease_angle
         && let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = &mut mf.kind
     {
+        if angle != 0.0 || meshes.iter().any(|mesh| !mesh.corner_normals.is_empty()) {
+            // Smoothing or removing authored normals changes the input to the evaluator.
+            prepared = None;
+        }
         for mesh in meshes {
             if angle == 0.0 {
                 // Keep the original flat display path, including its normalization
                 // and storage behavior, when the caller opts out of imported shading.
-                mesh.corner_normals = Default::default();
+                if !mesh.corner_normals.is_empty() {
+                    mesh.corner_normals = Default::default();
+                }
             } else {
                 mesh.generate_crease_normals(angle).map_err(|e| bad("file.insert_mesh", e.to_string()))?;
             }
@@ -731,7 +739,7 @@ fn add_mesh(
     let cname = import::component_name(path, name);
     let tree = match &plan {
         Some(p) if !p.places.is_empty() => import::Tree::Mesh(p),
-        _ => import::Tree::Flat,
+        _ => import::Tree::Flat(prepared),
     };
     let (id, placed) = import::add_in_component(s, mf.kind, &fname, mf.body_names, &[], &cname, tree)?;
     let bodies = created_bodies(s, id);
@@ -1104,7 +1112,7 @@ fn add_kicad(s: &mut Session, path: &str, name: Option<&str>, options: &solidcra
     let feature = imported.feature;
     let feature_name = name.filter(|n| !n.trim().is_empty()).unwrap_or(&feature.name).to_string();
     let component_name = import::component_name(path, name);
-    let tree = if imported.plan.places.is_empty() { import::Tree::Flat } else { import::Tree::Mesh(&imported.plan) };
+    let tree = if imported.plan.places.is_empty() { import::Tree::Flat(None) } else { import::Tree::Mesh(&imported.plan) };
     // A board hides none of its own bodies; its layers are all wanted.
     let (id, placed) = import::add_in_component(s, feature.kind, &feature_name, feature.body_names, &[], &component_name, tree)?;
     // The board stands at the origin: its lower-left outline corner goes to X = Y = 0, not to the
