@@ -31,7 +31,8 @@
 //!   bounds (`span_bounds`: the rational Bezier hodograph for the speed, and the conic's
 //!   curvature identity for the radius) clear the test's tolerance. No solution of the search
 //!   could then fail the test, so the verdict is the search's. Every other curve is
-//!   searched as upstream does.
+//!   searched as upstream does, and every curve is with `Kernel::memoize_curve_caches`
+//!   off.
 //! - **Out-params, contexts.** Outputs are return values; `SmContext` arguments (and
 //!   the local context of `TrimGap`) only choose where upstream allocates and are
 //!   dropped. `IsSegmentLine` and `IsOnPlane` leave some outputs unset on some paths;
@@ -939,7 +940,8 @@ pub(crate) struct SpanBounds {
 /// The cross product of the first two derivatives is `4 w0 w1 w2 (P1 - P0) x (P2 - P1) /
 /// W^3`. So the speed is at least `h / (w_max^2 L)` on a span of length `L`, and the radius
 /// of curvature `|C'|^3 / |C' x C''|` at least `(h / w_max^2)^3 w_min^3 / (4 w0 w1 w2
-/// |(P1 - P0) x (P2 - P1)|)`, which is infinite on a straight segment.
+/// |(P1 - P0) x (P2 - P1)|)`, which is infinite on a straight segment. Both are computed
+/// with each segment's weights divided by its largest, which changes neither.
 pub(crate) fn span_bounds(cur: &crate::nurbs::crv_basic::Curve) -> Option<SpanBounds> {
     let degree = cur.degree();
     if !(degree == 1 || degree == 2) {
@@ -988,36 +990,46 @@ pub(crate) fn span_bounds(cur: &crate::nurbs::crv_basic::Curve) -> Option<SpanBo
         if length.is_nan() || length <= 0.0 {
             return None;
         }
-        if degree == 1 {
+        // A segment's weights are divided by their largest, which leaves the curve as it
+        // is (a rational curve is the same for weights all scaled by one factor) and keeps
+        // their products from underflowing; a term that is still not finite gives `None`,
+        // so the curve is searched as before.
+        let (speed, radius) = if degree == 1 {
             let (Some((p0, w0)), Some((p1, w1))) = (point(s), point(s + 1)) else {
                 return None;
             };
             let w_max = w0.max(w1);
-            bounds.speed = bounds
-                .speed
-                .min(w0 * w1 * (p1 - p0).length() / (w_max * w_max * length));
-            continue;
-        }
-        let (Some((p0, w0)), Some((p1, w1)), Some((p2, w2))) =
-            (point(2 * s), point(2 * s + 1), point(2 * s + 2))
-        else {
-            return None;
+            let (w0, w1) = (w0 / w_max, w1 / w_max);
+            (w0 * w1 * (p1 - p0).length() / length, f64::INFINITY)
+        } else {
+            let (Some((p0, w0)), Some((p1, w1)), Some((p2, w2))) =
+                (point(2 * s), point(2 * s + 1), point(2 * s + 2))
+            else {
+                return None;
+            };
+            let w_max = w0.max(w1).max(w2);
+            let (w0, w1, w2) = (w0 / w_max, w1 / w_max, w2 / w_max);
+            let h = origin_distance_to_triangle(
+                (p1 - p0) * (2.0 * w0 * w1),
+                (p2 - p0) * (w0 * w2),
+                (p2 - p1) * (2.0 * w1 * w2),
+            );
+            let w_min = w0.min(w1).min(w2);
+            let turn = (p1 - p0).cross(p2 - p1).length();
+            let radius = if turn > 0.0 {
+                h.powi(3) * w_min.powi(3) / (4.0 * w0 * w1 * w2 * turn)
+            } else {
+                f64::INFINITY
+            };
+            (h / length, radius)
         };
-        let h = origin_distance_to_triangle(
-            (p1 - p0) * (2.0 * w0 * w1),
-            (p2 - p0) * (w0 * w2),
-            (p2 - p1) * (2.0 * w1 * w2),
-        );
-        let (w_min, w_max) = (w0.min(w1).min(w2), w0.max(w1).max(w2));
-        let numerator = h / (w_max * w_max);
-        bounds.speed = bounds.speed.min(numerator / length);
-        let turn = (p1 - p0).cross(p2 - p1).length();
-        if turn > 0.0 {
-            let radius = numerator.powi(3) * w_min.powi(3) / (4.0 * w0 * w1 * w2 * turn);
-            bounds.radius = bounds.radius.min(radius);
+        if !(speed.is_finite() && speed >= 0.0 && radius >= 0.0) || radius.is_nan() {
+            return None;
         }
+        bounds.speed = bounds.speed.min(speed);
+        bounds.radius = bounds.radius.min(radius);
     }
-    (!bounds.speed.is_nan() && !bounds.radius.is_nan()).then_some(bounds)
+    Some(bounds)
 }
 
 /// Whether a lower bound of a curve property clears the tolerance a test reads: by a
@@ -2080,8 +2092,14 @@ impl BSplineCurve {
 
         // for debug - data at failing tests
         let dim = self.dim;
-        // closed-form lower bounds of this curve's speed and radius (#11574)
-        let bounds = span_bounds(cur);
+        // closed-form lower bounds of this curve's speed and radius (#11574): a shortcut
+        // that never changes a result, taken only with `Kernel::memoize_curve_caches`
+        // (off, every search runs in full, to check that)
+        let bounds = if k.memoize_curve_caches {
+            span_bounds(cur)
+        } else {
+            None
+        };
         if !degenerate && !analytic {
             // for non degenerate curves
             let mut idx = 1usize;
@@ -2346,11 +2364,12 @@ impl BSplineCurve {
             let solutions = if radius_sized {
                 // Not upstream (#11574): a curve proved to have no radius of curvature below
                 // `radius_tol` has no solution the test below could fail
-                let clears = copy_curve
-                    .nurb
-                    .as_ref()
-                    .and_then(span_bounds)
-                    .is_some_and(|b| bound_clears(b.radius, radius_tol));
+                let clears = k.memoize_curve_caches
+                    && copy_curve
+                        .nurb
+                        .as_ref()
+                        .and_then(span_bounds)
+                        .is_some_and(|b| bound_clears(b.radius, radius_tol));
                 let (radii_ok, sols) = if clears {
                     (true, Vec::new())
                 } else {
@@ -3275,6 +3294,83 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A quadratic span whose weights are all near `1e-200` (their products underflow
+    /// unscaled) has the bounds of the same span with weights near 1, below its least speed
+    /// and radius: the weights are scaled by their largest first.
+    #[test]
+    fn span_bounds_hold_for_weights_whose_products_underflow() {
+        let points = [
+            Vec3::new(-0.0005, 0.25, 0.0),
+            Vec3::new(0.0, -0.25, 0.0),
+            Vec3::new(0.0005, 0.25, 0.0),
+        ];
+        // a rational span (equal weights are stored as a polynomial one)
+        let plain = conic_chain(2, &points, &[1.0, 0.9, 1.0]);
+        assert!(plain.nurb.as_ref().unwrap().is_rational());
+        // the same span with its homogeneous control points (w x, w y, w z, w) times 1e-200
+        let mut tiny = plain.clone();
+        for c in tiny.nurb.as_mut().unwrap().cpts_mut() {
+            c.x *= 1e-200;
+            c.y *= 1e-200;
+            if c.z != crate::nurbs::math::NOZ {
+                c.z *= 1e-200;
+            }
+            c.w *= 1e-200;
+        }
+        assert!(tiny
+            .nurb
+            .as_ref()
+            .unwrap()
+            .cpts()
+            .iter()
+            .all(|c| c.w > 0.0 && c.w < 1e-199));
+        let b = span_bounds(tiny.nurb.as_ref().unwrap()).unwrap();
+        let p = span_bounds(plain.nurb.as_ref().unwrap()).unwrap();
+        let close = |a: f64, b: f64| (a - b).abs() <= 1e-12 * a.abs().max(b.abs());
+        assert!(
+            close(b.speed, p.speed) && close(b.radius, p.radius),
+            "{b:?} {p:?}"
+        );
+        let (mut speed, mut radius) = (f64::INFINITY, f64::INFINITY);
+        for i in 0..=2000 {
+            let (s, r) = speed_and_radius(&plain, f64::from(i) / 2000.0);
+            speed = speed.min(s);
+            radius = radius.min(r);
+        }
+        assert!(
+            b.speed.is_finite() && b.speed <= speed * (1.0 + 1e-12),
+            "{b:?} {speed}"
+        );
+        assert!(
+            b.radius.is_finite() && b.radius <= radius * (1.0 + 1e-12),
+            "{b:?} {radius}"
+        );
+    }
+
+    /// With `Kernel::memoize_curve_caches` off every search runs in full: the check of a
+    /// circle's trim, whose bounds clear both tolerances, runs no search with it on and
+    /// both with it off (`nurbs::b_spline_curve::property_analysis`).
+    #[cfg(feature = "profile")]
+    #[test]
+    #[allow(clippy::field_reassign_with_default)] // a kernel differing in one switch
+    fn the_memo_off_switch_runs_every_search() {
+        let (trim, plane) = circle_trim_on_plane((50.0, 50.0, 1.5), (100.0, 100.0));
+        let runs = |memo: bool| {
+            let mut k = Kernel::default();
+            k.memoize_curve_caches = memo;
+            let _ = k.take_profile();
+            assert!(failed_tests(&k, &trim, Some(&plane)).is_empty());
+            k.take_profile()
+                .summary
+                .iter()
+                .filter(|s| s.name == "nurbs::b_spline_curve::property_analysis")
+                .map(|s| s.count)
+                .sum::<u64>()
+        };
+        assert_eq!(runs(true), 0);
+        assert_eq!(runs(false), 2);
     }
 
     /// WR-560 (fork tangency-labs/smlib 54ca3e0, #1524): the trim of a r 0.003 hole on a

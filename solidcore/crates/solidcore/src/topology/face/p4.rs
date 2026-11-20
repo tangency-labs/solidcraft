@@ -118,7 +118,8 @@
 //!   reads the lists. Properties `HasSeamProblem` makes for itself and drops
 //!   (`FaceProps::touch_lists_read` false) are read only by its doubly periodic cases, so
 //!   on a surface periodic in one direction the classification leaves them empty. The
-//!   lists change no classification and no seam verdict there.
+//!   lists change no classification and no seam verdict there. With
+//!   `Kernel::memoize_curve_caches` off they are collected anyway.
 
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::Curve;
@@ -2036,7 +2037,10 @@ pub fn has_seam_problem_mut<O: LoopObject, M: CurveOnClassifyBrep<O>>(
     // by the properties' later stages (`LoopProps::set_props`, stage 3's loop
     // classification). Properties made for this call alone reach neither, unless the
     // surface is doubly periodic by the flags used below.
-    let touches_read = props.touch_lists_read || (periodic_u && periodic_v);
+    // (a shortcut that never changes a result: with `Kernel::memoize_curve_caches` off the
+    // lists are collected anyway, to check that)
+    let touches_read =
+        !k.memoize_curve_caches || props.touch_lists_read || (periodic_u && periodic_v);
 
     // periodic in U
     if periodic_u {

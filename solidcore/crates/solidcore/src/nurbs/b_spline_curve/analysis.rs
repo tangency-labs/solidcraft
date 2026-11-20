@@ -14,6 +14,14 @@
 //! 8843967), so a search that fails must run to report its failure, which no bound on
 //! the curve's speed or radius predicts.
 //!
+//! Not upstream (tangency-labs/solidcraft#11574): one closed-form exception,
+//! `span_bounds` in `p3.rs`. On a curve of degree 1 or 2 made of Bezier spans (straight
+//! segments and conic arcs), it bounds the speed and the radius of curvature from below,
+//! exactly up to rounding. A search whose bound clears its tolerance is not run: no
+//! solution could fail its test, but a numeric failure of that search is then not
+//! reported either, which is the WR-663 trade-off this exception makes for such curves.
+//! It is off with `Kernel::memoize_curve_caches`, as the memo is.
+//!
 //! Deviations: not upstream. No recursion.
 
 use std::collections::{BTreeMap, VecDeque};
