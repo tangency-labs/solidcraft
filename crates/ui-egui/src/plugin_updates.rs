@@ -33,6 +33,8 @@ pub struct Offer {
     pub url: String,
     /// The asset's sha256 from GitHub's `digest`, lowercase hex.
     pub sha256: String,
+    /// The `owner/repo` it came from.
+    pub repo: String,
 }
 
 /// What one round found, and how long GitHub asked to wait when it hit the rate limit.
@@ -101,7 +103,7 @@ pub fn parse_release(json: &[u8], repo: &str, id: &str) -> Result<Offer, FetchEr
                 .filter(|hex| hex.len() == 64 && hex.bytes().all(|c| c.is_ascii_hexdigit()))
                 .map(str::to_ascii_lowercase)
                 .ok_or_else(|| FetchError::Failed(std::format!("the latest release lists no sha256 digest for {id}.zip")))?;
-            Ok(Offer { version, url: url.to_string(), sha256 })
+            Ok(Offer { version, url: url.to_string(), sha256, repo: repo.to_string() })
         })
 }
 
@@ -130,7 +132,8 @@ pub(crate) fn offered<'a>(app: &'a SolveApp, plugin: &Plugin) -> Option<&'a Offe
     let state = &app.plugin_updates;
     let busy = state.download.as_ref().is_some_and(|d| d.id == plugin.id) || state.pending.as_ref().is_some_and(|p| p.id == plugin.id);
     let offer = state.offers.get(&plugin.id)?;
-    (plugin.updates.is_some() && !busy && is_newer(&offer.version, &plugin.version)).then_some(offer)
+    let same_repo = plugin.updates.as_ref().is_some_and(|repo| repo.eq_ignore_ascii_case(&offer.repo));
+    (same_repo && !busy && is_newer(&offer.version, &plugin.version)).then_some(offer)
 }
 
 fn checks_allowed(app: &SolveApp) -> bool {
@@ -186,7 +189,7 @@ fn poll_check(app: &mut SolveApp) {
 }
 
 /// Update: download the offered `.zip` beside the plugins, off the window thread.
-pub(crate) fn start(app: &mut SolveApp, plugin: &Plugin) {
+pub(crate) fn start(app: &mut SolveApp, ctx: &egui::Context, plugin: &Plugin) {
     let Some(offer) = offered(app, plugin).cloned() else { return };
     if app.plugin_updates.download.is_some() || app.plugin_updates.pending.is_some() || crate::plugins::busy(app) {
         app.set_status(app.tr("prefs.plugin_busy").to_owned(), true);
@@ -196,8 +199,10 @@ pub(crate) fn start(app: &mut SolveApp, plugin: &Plugin) {
     let path = dir.join(".updates").join(std::format!("{}-{}.zip", plugin.id, offer.version));
     let version = offer.version.clone();
     let (send, done) = std::sync::mpsc::channel();
+    let ctx = ctx.clone();
     let spawned = std::thread::Builder::new().name("plugin-update-download".into()).spawn(move || {
         let _ = send.send(fetch(&download, &offer, path));
+        ctx.request_repaint();
     });
     if spawned.is_ok() {
         app.set_status(format("plugin_update.downloading", &[("plugin", &plugin.name), ("version", &version)]), false);

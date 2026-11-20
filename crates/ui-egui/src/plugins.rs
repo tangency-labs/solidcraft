@@ -776,7 +776,7 @@ fn plugin_card(app: &mut SolveApp, ui: &mut egui::Ui, dir: &Path, plugin: &Plugi
     if let Some(update) = update {
         crate::scenario::publish_target(&format!("prefs:plugin:{}:update", plugin.id), update.rect);
         if update.clicked() {
-            crate::plugin_updates::start(app, plugin);
+            crate::plugin_updates::start(app, ui.ctx(), plugin);
         }
     }
     crate::scenario::publish_target(&format!("prefs:plugin:{}:remove", plugin.id), remove.rect);
