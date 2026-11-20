@@ -1840,13 +1840,15 @@ fn move_z_mixed_plane_and_drawn_picks_lift_together() {
     let plane = s.world_state().unwrap().sketch(sketch).unwrap().plane;
     let (x, y, n) = (plane.x, plane.y, plane.normal());
     let undo = s.undo.len();
-    run(&mut s, "sketch.move", json!({"entities":[format!("{point}@0"), plane_line.clone()],"translate":[0,2],"z":3}));
+    let r = run(&mut s, "sketch.move", json!({"entities":[format!("{point}@0"), plane_line.clone()],"translate":[0,2],"z":3}));
     assert_eq!(s.undo.len(), undo + 1, "one undo step");
     let wires = s.world_state().unwrap().sketch(sketch).unwrap().sketch.wires.clone();
     let shown = wires.iter().find(|q| q.id == point).unwrap().fit.clone();
     near(shown[0], Vec3::new(17.0, 32.0, 45.0) + y * 2.0 + n * 3.0);
+    let lifted_id = r["curves"].as_array().unwrap().iter().filter_map(|c| c.as_str()).find(|c| *c != point).unwrap();
+    let lifted = &wires.iter().find(|w| w.id == lifted_id).unwrap().fit;
+    assert_eq!(lifted.len(), 2, "the plane line is lifted as one drawn line");
     let a = plane.origin + y * 2.0 + n * 3.0;
-    let b = a + x * 10.0;
-    let lifted = wires.iter().any(|w| w.fit.len() == 2 && w.fit[0].dist(a) < 1e-7 && w.fit[1].dist(b) < 1e-7);
-    assert!(lifted, "the plane line is lifted 3 along the normal: {:?}", wires.iter().map(|w| &w.fit).collect::<Vec<_>>());
+    near(lifted[0], a);
+    near(lifted[1], a + x * 10.0);
 }

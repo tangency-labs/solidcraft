@@ -4443,8 +4443,12 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
         Some(v) => v.as_f64().filter(|z| z.is_finite() && z.abs() <= 1e6).ok_or_else(|| bad(cmd, "`z` must be a distance in mm"))?,
     };
     let rotate_constraints = bool_(p, "rotate_constraints").unwrap_or(true);
-    let sketch = sketch_store::target(s, p, cmd)?;
-    let state = s.model.state().sketch(sketch).map(|ss| ss.sketch.clone());
+    let state = if s.sheet_sketching() {
+        None
+    } else {
+        let sketch = sketch_store::target(s, p, cmd)?;
+        s.model.state().sketch(sketch).map(|ss| ss.sketch.clone())
+    };
     let wires: Vec<String> = state.as_ref().map(|sk| sk.wires.iter().map(|w| w.id.clone()).collect()).unwrap_or_default();
     let (mut moved_drawn, mut plane_picks) = (Vec::new(), Vec::new());
     for e in string_list(cmd, p, "entities")? {
