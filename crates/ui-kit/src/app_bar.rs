@@ -1849,7 +1849,8 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
     let view_typed = strip.view_rename.as_ref().map(|(k, r)| (*k, r.text.clone()));
     let new_tab_width = if strip.pop_out { 0.0 } else { 34.0 };
     let min_views = if strip.switcher_always && !strip.views_as_tabs { 1 } else { 2 };
-    let expands = |tab: &DocTab| strip.shown_selected == Some(strip.selected) && (tab.views.len() >= min_views || strip.pop_out || strip.view_rename.is_some());
+    let expands =
+        |tab: &DocTab| strip.shown_selected == Some(strip.selected) && (tab.views.len() >= min_views || strip.pop_out || strip.view_rename.is_some());
     let geom = strip.tabs.get(strip.selected).copied().filter(expands).map(|tab| {
         let room = (x1 - x0 - new_tab_width - MIN_TAB * n.saturating_sub(1) as f32).max(0.0);
         measure(ui, strip, &tab, typed.as_deref().unwrap_or(tab.name), view_typed.as_ref().map(|(k, text)| (*k, text.as_str())), room)
