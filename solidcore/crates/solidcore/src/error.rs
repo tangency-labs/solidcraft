@@ -66,6 +66,14 @@
 //! distinctions between cases). [`SolidError::is_port_failure`] tells a solidcore defect
 //! or missing port from a failure of the operation on its input (#1452).
 //!
+//! **Converting a site.** Every failure ends up a named cause, a refusal, or the
+//! area's `Defect { why }`: a failure reviewed at its site as the kernel's fault, of class
+//! [`ErrorKind::StageFailed`] (127), whose `why` names the step that failed and why that is
+//! the kernel's fault. The sites not there yet (phrase causes, bare statuses, and the
+//! unreviewed `StageFailed`) are counted per file by test-only scans, and the counts only
+//! fall. The conversion guide, with the rules a conversion keeps (first: the site's status
+//! stays), is `docs/failure-codes-and-reproduction.md` §6.
+//!
 //! **Comparison with the pinned C++.** difftest compares each failure with the status
 //! the pinned C++ reports for the same input. A failure records that status privately,
 //! where it is made (the status depends on the call path, not only on the reason), and
@@ -95,14 +103,18 @@ pub mod offset;
 mod phrase_sites;
 pub mod primitive;
 pub mod query;
+#[cfg(test)]
+mod site_scan;
+#[cfg(test)]
+mod stage_sites;
 pub mod surface;
 pub mod sweep;
 pub mod topology;
 
 use crate::math::Point3;
 use crate::topology::{
-    BrepId, EdgeId, EdgeuseId, FaceId, FaceuseId, LoopId, LoopuseId, RegionId, ShellId, VertexId,
-    VertexuseId,
+    Brep, BrepId, EdgeId, EdgeuseId, FaceId, FaceuseId, LoopId, LoopuseId, RegionId, ShellId,
+    VertexId, VertexuseId,
 };
 
 /// Shorthand for `core::result::Result<T, SolidError>`.
@@ -169,23 +181,6 @@ pub(crate) fn passed_on<T>(r: Result<T>, pass_on: bool) -> Result<Result<T>> {
 /// `pass_on` its error is returned, without it the status is ignored as upstream.
 pub(crate) fn ignore_or_pass_on<T>(r: Result<T>, pass_on: bool) -> Result<()> {
     ignore_status(passed_on(r, pass_on)?)
-}
-
-/// [`ignored`] of a call whose status SMLib drops and the fork passes on: with
-/// `pass_on` its error is returned, without it the value is `None` as upstream.
-pub(crate) fn ignored_or_pass_on<T>(r: Result<T>, pass_on: bool) -> Result<Option<T>> {
-    ignored(passed_on(r, pass_on)?)
-}
-
-/// A status a port helper hands back in its value (`None` for `SM_SUCCESS`) where SMLib
-/// drops it and the fork passes it on (`SER(...)`): returned as the error with
-/// `pass_on`, dropped without (except [`SolidError::Unported`] and
-/// [`SolidError::Cancelled`], which always propagate).
-pub(crate) fn status_passed_on(status: Option<SolidError>, pass_on: bool) -> Result<()> {
-    match status {
-        Some(e) if pass_on || e.is_unported_or_cancelled() => Err(e),
-        _ => Ok(()),
-    }
 }
 
 /// A reference to one topological entity, used as error context.
@@ -568,7 +563,8 @@ fn fmt_entity(entity: Option<EntityRef>) -> String {
 /// An edge of the caller's body (the target an operation edits), as a failure's [`Site`]
 /// names it. Built only by the mapping from an operation's own objects to the caller's
 /// body (for the blend, [`TargetEdge::of_fillet_object`], the mapping the fillet session's
-/// `fit_size` uses), so an id of an intermediate body cannot be named.
+/// `fit_size` uses; for offsets, [`TargetEdge::of_offset_edgeuse`], the executive's
+/// provenance), so an id of an intermediate body cannot be named.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TargetEdge(EdgeId);
 
@@ -594,6 +590,22 @@ fn target_entity(
 }
 
 impl TargetEdge {
+    /// The caller's edge the executive made an offset edge use from, also consulting
+    /// its mate's provenance. Missing or ambiguous provenance names no caller edge.
+    #[must_use]
+    pub(crate) fn of_offset_edgeuse(
+        executive: &crate::offset::offset_executive::p1::OffsetExecutive,
+        original: &Brep,
+        offset: &Brep,
+        edgeuse: EdgeuseId,
+    ) -> Option<Self> {
+        executive
+            .original_edge(original, offset, edgeuse)
+            .ok()
+            .flatten()
+            .map(Self)
+    }
+
     /// The edge of the caller's body a blend object is: `Some` only for an edge of the fillet
     /// session's target body.
     #[must_use]
@@ -614,6 +626,17 @@ impl TargetEdge {
 }
 
 impl TargetFace {
+    /// The caller's face the executive made an offset face from. Missing or
+    /// ambiguous provenance names no caller face.
+    #[must_use]
+    pub(crate) fn of_offset_face(
+        executive: &crate::offset::offset_executive::p1::OffsetExecutive,
+        original: &Brep,
+        face: FaceId,
+    ) -> Option<Self> {
+        executive.original_face(original, face).map(Self)
+    }
+
     /// The face of the caller's body a blend object is: `Some` only for a face of the fillet
     /// session's target body.
     #[must_use]
@@ -2066,7 +2089,6 @@ mod tests {
             passed_on::<()>(Err(e.clone()), false).map(|_| ()),
             Err(e.clone())
         );
-        assert_eq!(status_passed_on(Some(e.clone()), false), Err(e.clone()));
         assert_eq!(SolidError::nl_ser("op")(e.clone()), e);
         assert!(!SolidError::sm_err("t").is_not_certified());
     }
@@ -2083,6 +2105,31 @@ mod tests {
         assert!(e.is_status_answer(), "{e:?}");
         assert!(!e.is_port_failure(), "{e:?}");
         assert_eq!(e.to_string(), format!("{operation}: stage_failed"));
+    }
+
+    /// `defect` is a failure of `operation` reviewed as the kernel's fault (an area's
+    /// `Defect { why }`): class [`ErrorKind::StageFailed`] (127), a defect, neither a
+    /// refusal nor sized, with `status` for the goldens, read by the decisions that read a
+    /// status as `twin` (the area's unreviewed failure of the same status) is, and worded
+    /// `text`.
+    pub(in crate::error) fn assert_defect(
+        defect: &SolidError,
+        twin: &SolidError,
+        operation: &str,
+        status: i32,
+        text: &str,
+    ) {
+        let e = defect;
+        assert_eq!(e.kind(), ErrorKind::StageFailed, "{e:?}");
+        assert_eq!(e.kind().code(), 127, "{e:?}");
+        assert!(e.is_defect() && !e.is_refusal() && !e.sized(), "{e:?}");
+        assert_eq!(e.operation(), operation, "{e:?}");
+        assert_eq!(e.sm_status(), Some(status), "{e:?}");
+        assert_eq!(twin.sm_status(), Some(status), "{twin:?}");
+        assert_eq!(e.upstream_status(), twin.upstream_status(), "{e:?}");
+        assert_eq!(e.is_status_answer(), twin.is_status_answer(), "{e:?}");
+        assert!(!e.is_port_failure(), "{e:?}");
+        assert_eq!(e.to_string(), text);
     }
 
     #[test]
@@ -3382,5 +3429,41 @@ pub(crate) mod replaced_upstream_samples {
             assert_eq!(e.upstream_status(), None, "{e:?}");
         }
         natives
+    }
+
+    /// The sites that build a generic phrase cause, a [`Reason::Failed`] (directly, or
+    /// through `SolidError::stage_failed`, `entity_missing` or `failed_after`), only fall:
+    /// per file, in the library code of `solidcore` and `solidcore-ops`, as
+    /// [`super::site_scan`] counts them. A PR that converts sites lowers its
+    /// files' counts here, and a file at 0 loses its line (the conversion guide:
+    /// `docs/failure-codes-and-reproduction.md` §6).
+    #[test]
+    fn the_generic_phrase_cause_sites_only_shrink() {
+        use super::site_scan::{assert_pinned, crate_sites, Builder, Scan, Wrappers};
+        const PHRASES: Scan = Scan {
+            builders: &[
+                Builder::Variant("Reason", "Failed"),
+                Builder::Method("stage_failed", Some(1)),
+                Builder::Method("entity_missing", Some(1)),
+                Builder::Method("failed_after", Some(1)),
+            ],
+            wrappers: Wrappers::Phrase,
+        };
+        #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
+        const PINNED: &[(&str, usize)] = &[
+            ("solidcore/src/boolean/api_brep.rs", 2),
+            ("solidcore/src/boolean/merge/p1.rs", 17),
+            ("solidcore/src/boolean/merge/p2.rs", 4),
+            ("solidcore/src/boolean/merge/p3.rs", 15),
+            ("solidcore/src/boolean/merge/p4.rs", 5),
+            ("solidcore/src/boolean/merge/p4/arena_pair.rs", 2),
+            ("solidcore/src/boolean/merge/p4/kernel_adapter.rs", 1),
+            ("solidcore/src/boolean/merge/p5.rs", 11),
+            ("solidcore/src/boolean/topology_intersector/p1.rs", 10),
+            ("solidcore/src/boolean/topology_intersector/p2.rs", 4),
+            ("solidcore/src/boolean/topology_intersector/p3.rs", 10),
+            ("solidcore/src/offset/offset_executive/p2.rs", 1),
+        ];
+        assert_pinned("generic phrase-cause sites", &crate_sites(&PHRASES), PINNED);
     }
 }

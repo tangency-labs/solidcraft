@@ -1,5 +1,5 @@
-//! A sheet's paper scene (`geom::paper`) in a file: SVG (A3, #4890), sheet PNG (A4) and PDF (P1);
-//! DXF follows.
+//! A sheet's paper scene (`geom::paper`) in a file: SVG (A3, #4890), sheet PNG (A4), PDF (P1) and
+//! DXF.
 
 use std::fmt::Write;
 
@@ -7,12 +7,14 @@ use solidcraft_geom::paper::Grid;
 
 use crate::{IoError, Result};
 
+mod dxf;
 mod flatten;
 mod pdf;
 mod png;
 mod svg;
 
-pub use pdf::{PdfOptions, PdfReport, paper_pdf, paper_pdf_pages};
+pub use dxf::{DxfReport, paper_dxf};
+pub use pdf::{PdfOptions, PdfPictures, PdfReport, paper_pdf, paper_pdf_pages, paper_pdf_pages_with};
 pub use png::{DPI, MAX_PICTURE_DPI, MAX_POINTS, PICTURE_DPI, PngColour, PngOptions, PngReport, paper_png};
 pub use svg::{SvgReport, paper_svg, paper_svg_on};
 

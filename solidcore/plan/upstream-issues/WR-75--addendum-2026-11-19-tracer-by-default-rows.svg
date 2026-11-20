@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="780" height="400" viewBox="0 0 780 400">
+  <title>wr75-rows</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect x="0" y="0" width="780" height="400" fill="#ffffff"/>
+    <rect x="110" y="70" width="150" height="130" fill="#f0f0f0"/>
+    <rect x="275" y="70" width="150" height="130" fill="#f0f0f0"/>
+    <rect x="440" y="70" width="150" height="130" fill="#f0f0f0"/>
+    <rect x="605" y="70" width="150" height="130" fill="#f0f0f0"/>
+    <rect x="110" y="230" width="150" height="130" fill="#f0f0f0"/>
+    <rect x="275" y="230" width="150" height="130" fill="#f0f0f0"/>
+    <rect x="440" y="230" width="150" height="130" fill="#f0f0f0"/>
+    <rect x="605" y="230" width="150" height="130" fill="#f0f0f0"/>
+    <circle cx="185" cy="295" r="5" fill="#1f6fb2"/>
+    <circle cx="350" cy="295" r="40" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <circle cx="466" cy="135" r="5" fill="#000000"/>
+    <circle cx="564" cy="135" r="5" fill="#000000"/>
+    <line x1="466" y1="295" x2="564" y2="295" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <line x1="640" y1="295" x2="720" y2="295" fill="none" stroke="#555555" stroke-width="2" stroke-miterlimit="10"/>
+    <circle cx="680" cy="295" r="5" fill="#1f6fb2"/>
+    <text transform="matrix(1 0 0 1 110 36)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">Goldens rows the tracer moves (schematic, in the plane of contact)</tspan></text>
+    <text transform="matrix(1 0 0 1 110 62)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">crossing branches</tspan></text>
+    <text transform="matrix(1 0 0 1 275 62)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">contact circle</tspan></text>
+    <text transform="matrix(1 0 0 1 440 62)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">contact line</tspan></text>
+    <text transform="matrix(1 0 0 1 605 62)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">plane on torus</tspan></text>
+    <text transform="matrix(1 0 0 1 20 140)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">main</tspan></text>
+    <text transform="matrix(1 0 0 1 20 300)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">this PR</tspan></text>
+    <text transform="matrix(1 0 0 1 320 140)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555"><tspan x="0" y="0">no curve</tspan></text>
+    <text transform="matrix(1 0 0 1 650 140)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555"><tspan x="0" y="0">no curve</tspan></text>
+    <text transform="matrix(1 0 0 1 450 160)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">two touching end points</tspan></text>
+    <text transform="matrix(1 0 0 1 450 320)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">one tangent curve</tspan></text>
+    <text transform="matrix(1 0 0 1 300 352)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">one tangent curve</tspan></text>
+    <text transform="matrix(1 0 0 1 615 320)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">a curve 0.175 long</tspan></text>
+    <text transform="matrix(1 0 0 1 615 336)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">where the section is</tspan></text>
+    <text transform="matrix(1 0 0 1 615 352)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">the point (#19274)</tspan></text>
+    <text transform="matrix(1 0 0 1 110 384)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">Crossing curves are unchanged; the new items are traced by the tracer.</tspan></text>
+    <path d="M125 90 C165 115 205 155 245 180" fill="none" stroke="#555555" stroke-width="2" stroke-miterlimit="10"/>
+    <path d="M125 180 C165 155 205 115 245 90" fill="none" stroke="#555555" stroke-width="2" stroke-miterlimit="10"/>
+    <path d="M125 250 C165 275 205 315 245 340" fill="none" stroke="#555555" stroke-width="2" stroke-miterlimit="10"/>
+    <path d="M125 340 C165 315 205 275 245 250" fill="none" stroke="#555555" stroke-width="2" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 140 354)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">touching point</tspan></text>
+    <line x1="185" y1="302" x2="185" y2="342" fill="none" stroke="#555555" stroke-width="0.75" stroke-miterlimit="10"/>
+  </g>
+</svg>

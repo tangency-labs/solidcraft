@@ -63,6 +63,18 @@
 //! | [`set_surface_closure`]                         | `sm_SetSurfaceClosure`                     |
 //!
 //! Deviations:
+//! - **Failures (#15034).** No check in this file decides a refusal: every failure is a
+//!   step that could not go on (an object or record that is not there, editing that is
+//!   off, a fillet B-rep edge that matches nothing, a fillet surface that does not cross
+//!   the edge's curve, a drop or an intersection that found nothing, two adjacent fillet
+//!   surfaces that both need adjusting), so each is a [`BlendFailure::StageFailed`], a
+//!   defect, built where it happens (its origin is that file and line) and keeping
+//!   upstream's status for the goldens: `SM_ERR_NULL_POINTER` for a `NER`,
+//!   `SM_ERR_BAD_INTERSECTIONS` for an empty start-point drop, `SM_ERR` otherwise.
+//! - **A rail the fillet B-rep splits** (WR-19502, not upstream).
+//!   [`FilletBrep::fillet_brep_pieces_along`] finds the edges of the stitched fillet B-rep
+//!   that cover a rail end to end where none matches it whole, so that the edge map can
+//!   split the rail there.
 //! - **Object model.** Upstream's `SmFilletVertexuse`, `SmFilletVertex`,
 //!   `SmFilletEdgeuse` and `SmFilletEdge` derive from the topology classes and live in
 //!   the pseudo B-rep `SmFilletBrep` (an `SmBrep`). Here [`FilletBrep`] owns a
@@ -107,10 +119,9 @@
 //!   that B-rep ([`FilletSurfaceOwner`]) and resolve the face's surface in it; callers
 //!   that run before any face is made pass `None`, and a transferred surface without
 //!   (or with another) owner is refused with `InvalidInput`.
-//! - **Trim failures (#483).** With `Kernel::fixes.fillet_trim_status` enabled,
-//!   `trim_geom` propagates curve/surface trim and interval-intersection errors.
-//!   Default behaviour drops ordinary statuses and installs unset intersections,
-//!   as pinned C++ does. Earlier successful edits and parameter snapping remain;
+//! - **Trim failures (#483, WR-604).** `trim_geom` returns curve/surface trim and
+//!   interval-intersection errors, as the fork does; upstream drops them and installs
+//!   unset intersections. Earlier successful edits and parameter snapping remain;
 //!   the operation is not transactional.
 //! - **Arguments.** Out-params become return values; `SmContext` arguments are the
 //!   [`Kernel`]; `int iDebugLevel` arguments and debug drawing are dropped.
@@ -202,7 +213,7 @@ use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::Curve;
 use crate::curve::hermite_curve::HermiteCurve;
 use crate::error::blend::BlendFailure;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::line_line_closest_point;
@@ -214,7 +225,7 @@ use crate::intersect::curve_class::p1::CurveClassification;
 use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::intersect::surface_intersector::p1::{SrfIndex, TsectPnt};
 use crate::kernel::Kernel;
-use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE};
+use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
@@ -684,7 +695,7 @@ impl<'c> CornerLookup<'c> {
         // the NULL its NER would return for
         self.table
             .and_then(|table| usize::try_from(id.0).ok().and_then(|i| table.get(i)))
-            .ok_or_else(|| SolidError::blend_missing(OP_CORNER, "the corner"))
+            .ok_or_else(|| missing(OP_CORNER))
     }
 
     /// `pCorner->GetExtendedSurface(pOriginalFace)`
@@ -1429,9 +1440,13 @@ impl FilletGeom {
             Some(FilletSurfaceStorage::Owned(surface)) => Ok(Some(surface)),
             Some(FilletSurfaceStorage::ManagedFace { body, face }) => {
                 let owner = managed_owner(owner, *body)?;
-                Ok(Some(owner.face(*face)?.surface.as_ref().ok_or_else(
-                    || SolidError::blend_missing(OP_FILLET_SURFACE, "the fillet face's surface"),
-                )?))
+                Ok(Some(
+                    owner
+                        .face(*face)?
+                        .surface
+                        .as_ref()
+                        .ok_or_else(|| missing(OP_FILLET_SURFACE))?,
+                ))
             }
         }
     }
@@ -1450,9 +1465,13 @@ impl FilletGeom {
             Some(FilletSurfaceStorage::Owned(surface)) => Ok(Some(surface)),
             Some(FilletSurfaceStorage::ManagedFace { body, face }) => {
                 let owner = managed_owner(owner, *body)?;
-                Ok(Some(owner.face_mut(*face)?.surface.as_mut().ok_or_else(
-                    || SolidError::blend_missing(OP_FILLET_SURFACE, "the fillet face's surface"),
-                )?))
+                Ok(Some(
+                    owner
+                        .face_mut(*face)?
+                        .surface
+                        .as_mut()
+                        .ok_or_else(|| missing(OP_FILLET_SURFACE))?,
+                ))
             }
         }
     }
@@ -1485,8 +1504,7 @@ impl FilletGeom {
         if let Some(s) = own {
             return Ok(Some(s));
         }
-        let fs =
-            solver.ok_or_else(|| SolidError::blend_missing(OP_OFFSET, "the geometry's solver"))?;
+        let fs = solver.ok_or_else(|| missing(OP_OFFSET))?;
         Ok(fs.surface(rail_index)?.map(|slot| &slot.surface))
     }
 
@@ -1680,10 +1698,7 @@ impl FilletBrep {
         // upstream dereferences m_pInfiniteRegion unchecked: SmFilletBrep() runs SmBrep(),
         // which always creates the infinite region, so it is never NULL there
         let Some(reg) = infinite_region(&self.brep) else {
-            return Err(SolidError::blend_missing(
-                OP_EDGEUSE,
-                "the fillet B-rep's infinite region",
-            ));
+            return Err(missing(OP_EDGEUSE));
         };
         let mut shells = region_shells(&self.brep, reg)?;
         if shells.is_empty() {
@@ -1691,9 +1706,7 @@ impl FilletBrep {
             let (_shell, _new_v) = make_shell_vertex_topology(&mut self.brep, reg)?;
             shells = region_shells(&self.brep, reg)?;
         }
-        let shell = *shells
-            .first()
-            .ok_or_else(|| SolidError::blend_missing(OP_EDGEUSE, "the infinite region's shell"))?;
+        let shell = *shells.first().ok_or_else(|| missing(OP_EDGEUSE))?;
         // SmEdgeuse(), then m_pSorLU = sShells[0], m_tEdgeuseType = SmShell_TYPE
         let eu = self.brep.add_edgeuse_record(Edgeuse {
             owner: EdgeuseOwner::Shell(Some(shell)),
@@ -1778,12 +1791,10 @@ impl FilletBrep {
                 "fillet edge is not live",
             )
         })?;
-        let class = record.curve_class.as_mut().ok_or_else(|| {
-            SolidError::blend_missing(
-                "blend::fillet_geom::with_rail_classification",
-                "the fillet edge's curve classification",
-            )
-        })?;
+        let class = record
+            .curve_class
+            .as_mut()
+            .ok_or_else(|| missing("blend::fillet_geom::with_rail_classification"))?;
         call(&self.brep, class)
     }
 
@@ -1920,12 +1931,7 @@ impl FilletBrep {
                     "classification object is not a vertex",
                 ))
             }
-            None => {
-                return Err(SolidError::blend_missing(
-                    OP_VERT_ON_VERT,
-                    "the classification object",
-                ))
-            }
+            None => return Err(missing(OP_VERT_ON_VERT)),
         };
         self.set_vertex_point(v, point)?;
         self.fillet_vertex_mut(v)?.set_status(FilStatus::Processed);
@@ -1971,22 +1977,14 @@ impl FilletBrep {
                     "classification object is not an edge use",
                 ))
             }
-            None => {
-                return Err(SolidError::blend_missing(
-                    OP_CLIFF,
-                    "the classification object",
-                ))
-            }
+            None => return Err(missing(OP_CLIFF)),
         };
-        let edge = target
-            .edgeuse(eu)?
-            .edge
-            .ok_or_else(|| SolidError::blend_missing(OP_CLIFF, "the edge use's edge"))?;
+        let edge = target.edgeuse(eu)?.edge.ok_or_else(|| missing(OP_CLIFF))?;
         let curve_3d = target
             .edge(edge)?
             .curve
             .as_ref()
-            .ok_or_else(|| SolidError::blend_missing(OP_CLIFF, "the edge's curve"))?;
+            .ok_or_else(|| missing(OP_CLIFF))?;
         let ivl = curve_3d.natural_interval();
 
         // get FilletSurface/OrigBrepCurve intersection marking this FilletVertex Position3d
@@ -2001,17 +1999,15 @@ impl FilletBrep {
             &ivl,
             this_approx_tol_3d,
         )?;
-        let first = solutions.get(0).ok_or_else(|| {
-            SolidError::blend_failed(
-                OP_CLIFF,
-                "the fillet surface does not cross the edge's curve",
-            )
-        })?;
+        let first = solutions.get(0).ok_or_else(|| stage_failed(OP_CLIFF))?;
 
         // side effect: Set SmFilletVertex::m_vPoint = XSectPoint(FilletSurface, Orig BrepCurve)
-        let t = first.start.parameters.first().copied().ok_or_else(|| {
-            SolidError::blend_failed(OP_CLIFF, "the crossing has no curve parameter")
-        })?;
+        let t = first
+            .start
+            .parameters
+            .first()
+            .copied()
+            .ok_or_else(|| stage_failed(OP_CLIFF))?;
         let pnt = curve_3d.evaluate_point(k, t)?;
         self.set_vertex_point(v, pnt)?;
         self.fillet_vertex_mut(v)?.set_status(FilStatus::Processed);
@@ -2071,13 +2067,12 @@ impl FilletBrep {
     pub fn vertex_fillet_geoms(&self, v: VertexId) -> Result<Vec<FilletGeomId>> {
         let mut geoms = Vec::new();
         for vu in vertexuses(&self.brep, v)? {
-            let eu = eu1::vertexuse_edgeuse(&self.brep, vu)?
-                .ok_or_else(|| SolidError::blend_missing(OP_VERTEX, "the vertex use's edge use"))?;
+            let eu = eu1::vertexuse_edgeuse(&self.brep, vu)?.ok_or_else(|| missing(OP_VERTEX))?;
             let e = self
                 .brep
                 .edgeuse(eu)?
                 .edge
-                .ok_or_else(|| SolidError::blend_missing(OP_VERTEX, "the edge use's edge"))?;
+                .ok_or_else(|| missing(OP_VERTEX))?;
 
             // skip edges not of type SM_FE_RAIL
             if self.fillet_edge(e)?.fillet_edge_type() != FilletEdgeType::Rail {
@@ -2108,13 +2103,12 @@ impl FilletBrep {
         opt_fillet_rail: Option<EdgeId>,
     ) -> Result<Option<VertexuseId>> {
         for vu in vertexuses(&self.brep, v)? {
-            let eu = eu1::vertexuse_edgeuse(&self.brep, vu)?
-                .ok_or_else(|| SolidError::blend_missing(OP_VERTEX, "the vertex use's edge use"))?;
+            let eu = eu1::vertexuse_edgeuse(&self.brep, vu)?.ok_or_else(|| missing(OP_VERTEX))?;
             let e = self
                 .brep
                 .edgeuse(eu)?
                 .edge
-                .ok_or_else(|| SolidError::blend_missing(OP_VERTEX, "the edge use's edge"))?;
+                .ok_or_else(|| missing(OP_VERTEX))?;
             let edge_type = self.fillet_edge(e)?.fillet_edge_type();
 
             // when edge is a RAIL or CLIFF_RAIL type
@@ -2222,15 +2216,16 @@ impl FilletBrep {
         // delete all connected edgeuses and the edgeuses' connected vertexuses
         let uses = edge_unit::edgeuses(&self.brep, e, None, None)?;
         for eu in uses {
-            let vu =
-                self.brep.edgeuse(eu)?.vertexuse.ok_or_else(|| {
-                    SolidError::blend_missing(OP_EDGE, "the edge use's vertex use")
-                })?;
+            let vu = self
+                .brep
+                .edgeuse(eu)?
+                .vertexuse
+                .ok_or_else(|| missing(OP_EDGE))?;
             let v = self
                 .brep
                 .vertexuse(vu)?
                 .vertex
-                .ok_or_else(|| SolidError::blend_missing(OP_EDGE, "the vertex use's vertex"))?;
+                .ok_or_else(|| missing(OP_EDGE))?;
             self.brep.vertex_mut(v)?.vertexuses.retain(|&x| x != vu);
             // delete pEU (~SmTopology: unlinked from the edge's list)
             self.brep.edge_mut(e)?.edgeuses.retain(|&x| x != eu);
@@ -2259,7 +2254,7 @@ impl FilletBrep {
     pub fn delete_wire_fillet_edge(&mut self, k: &mut Kernel, e: EdgeId) -> Result<()> {
         // check state - m_bEditingEnabled must be on
         if !self.editing_enabled {
-            return Err(SolidError::blend_failed(OP_EDGE, "editing is disabled"));
+            return Err(stage_failed(OP_EDGE));
         }
         self.fillet_edge(e)?;
         let uses = edge_unit::edgeuses(&self.brep, e, None, None)?;
@@ -2298,10 +2293,8 @@ impl FilletBrep {
     /// A blend failure (`SM_ERR_NULL_POINTER`) for an edge without a primary
     /// edge use or a primary use without a mate.
     pub fn original_uv_curve(&self, e: EdgeId) -> Result<Option<&Curve>> {
-        let primary = primary_edgeuse(&self.brep, e)?
-            .ok_or_else(|| SolidError::blend_missing(OP_EDGE, "the edge's primary edge use"))?;
-        let mate_eu = mate(&self.brep, primary)?
-            .ok_or_else(|| SolidError::blend_missing(OP_EDGE, "the primary edge use's mate"))?;
+        let primary = primary_edgeuse(&self.brep, e)?.ok_or_else(|| missing(OP_EDGE))?;
+        let mate_eu = mate(&self.brep, primary)?.ok_or_else(|| missing(OP_EDGE))?;
         Ok(self.brep.edgeuse(mate_eu)?.uv_trim_curve.as_ref())
     }
 
@@ -2327,10 +2320,12 @@ impl FilletBrep {
         self.fillet_edge(e)?;
 
         // get this Fillet Edge's curve
-        let curve_3d =
-            self.brep.edge(e)?.curve.as_ref().ok_or_else(|| {
-                SolidError::blend_missing(OP_FIND_EDGE, "the fillet edge's curve")
-            })?;
+        let curve_3d = self
+            .brep
+            .edge(e)?
+            .curve
+            .as_ref()
+            .ok_or_else(|| missing(OP_FIND_EDGE))?;
         if curve_3d.is_degenerate(k, EFF_ZERO, None)? {
             return Ok(());
         }
@@ -2354,9 +2349,7 @@ impl FilletBrep {
         // First just look for a matching midpoint.
         for &pe in edges {
             let edge = fillet_brep.edge(pe)?;
-            let edge_curve = edge.curve.as_ref().ok_or_else(|| {
-                SolidError::blend_missing(OP_FIND_EDGE, "the fillet B-rep edge's curve")
-            })?;
+            let edge_curve = edge.curve.as_ref().ok_or_else(|| missing(OP_FIND_EDGE))?;
 
             // let sEdgePnt = edge midPoint
             let edge_pnt = edge_curve.evaluate_point(k, edge.interval.evaluate(0.5))?;
@@ -2427,9 +2420,7 @@ impl FilletBrep {
         {
             if let Some(best) = best_edge1.filter(|&b| Some(b) != record.fillet_brep_edge1) {
                 let edge = fillet_brep.edge(best)?;
-                let edge_curve = edge.curve.as_ref().ok_or_else(|| {
-                    SolidError::blend_missing(OP_FIND_EDGE, "the fillet B-rep edge's curve")
-                })?;
+                let edge_curve = edge.curve.as_ref().ok_or_else(|| missing(OP_FIND_EDGE))?;
                 let mut on_curve = true;
                 for end in 0..2 {
                     if !on_curve {
@@ -2474,10 +2465,137 @@ impl FilletBrep {
             return Ok(());
         }
 
-        Err(SolidError::blend_failed(
-            OP_FIND_EDGE,
-            "no fillet B-rep edge matches the fillet edge",
-        ))
+        Err(stage_failed(OP_FIND_EDGE))
+    }
+
+    /// (Not upstream; #19502) Where the stitch split rail `e` in the fillet B-rep: the
+    /// intervals of `e`'s curve that edges of `fillet_brep` (of `edges`), each proved to
+    /// follow it, cover end to end, two or more, in the order of the curve's parameter.
+    /// `None` when an edge matches `e`
+    /// as [`Self::find_fillet_brep_edge`] finds one (by its midpoint), or when the edges
+    /// proved to follow `e`'s curve (`coincidence_bound`, within each edge's tolerance) do
+    /// not cover it end to end.
+    ///
+    /// Two rounds whose rails meet along part of one of them (a full round whose rails run
+    /// unequal lengths) share one edge there in the stitched fillet B-rep, and the longer
+    /// rail runs on as another: no one edge has its midpoint, so each piece is mapped on
+    /// its own once the rail is split where the fillet B-rep splits it.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::NotFound`] for an edge that is not a fillet edge or a dangling id;
+    /// those of the evaluations and the drops.
+    pub fn fillet_brep_pieces_along(
+        &self,
+        k: &Kernel,
+        e: EdgeId,
+        fillet_brep: &Brep,
+        edges: &[EdgeId],
+    ) -> Result<Option<Vec<Extent1d>>> {
+        self.fillet_edge(e)?;
+        let Some(curve_3d) = self.brep.edge(e)?.curve.as_ref() else {
+            return Ok(None);
+        };
+        if curve_3d.is_degenerate(k, EFF_ZERO, None)? {
+            return Ok(None);
+        }
+        let ivl = curve_3d.natural_interval();
+        let pnt = curve_3d.evaluate_point(k, ivl.evaluate(0.5))?;
+
+        // the parameter of `p` on the rail's curve, where it lies on it within `tol`
+        let on_rail = |p: Point3, tol: f64| -> Result<Option<f64>> {
+            let dropped =
+                curve_3d.drop_point(k, &ivl, p, None, tol, None, SolverOperation::Minimize)?;
+            if !dropped.success {
+                return Ok(None);
+            }
+            let q = curve_3d.evaluate_point(k, dropped.parameter)?;
+            Ok((q.distance(p) <= tol).then_some(dropped.parameter))
+        };
+
+        let ends = [
+            curve_3d.evaluate_point(k, ivl.min())?,
+            curve_3d.evaluate_point(k, ivl.max())?,
+        ];
+        // First, by evaluations alone: an edge with the rail's midpoint and ends is the
+        // rail's whole (FindFilletBrepEdge's match), and there is nothing to split. This is
+        // every rail of a fillet that built before, so the drops below run only for a rail
+        // no edge matches whole. An edge with the rail's midpoint alone is a middle piece,
+        // the rail running on past both its ends (a plate at each end of a wall). A rail
+        // is split only where two or more edges cover it end to end, so one matched by its
+        // midpoint with ends a little off it maps as before.
+        for &pe in edges {
+            let edge = fillet_brep.edge(pe)?;
+            let Some(edge_curve) = edge.curve.as_ref() else {
+                continue;
+            };
+            let tol = edge.tolerance;
+            let mid = edge_curve.evaluate_point(k, edge.interval.evaluate(0.5))?;
+            if mid.distance(pnt) >= tol {
+                continue;
+            }
+            let a = edge_curve.evaluate_point(k, edge.interval.min())?;
+            let b = edge_curve.evaluate_point(k, edge.interval.max())?;
+            let whole = |p: Point3| ends.iter().any(|e| e.distance(p) <= tol);
+            if whole(a) && whole(b) {
+                return Ok(None);
+            }
+        }
+
+        let mut pieces: Vec<(f64, f64, f64)> = Vec::new();
+        for &pe in edges {
+            let edge = fillet_brep.edge(pe)?;
+            let Some(edge_curve) = edge.curve.as_ref() else {
+                continue;
+            };
+            let tol = edge.tolerance;
+            let a = edge_curve.evaluate_point(k, edge.interval.min())?;
+            let b = edge_curve.evaluate_point(k, edge.interval.max())?;
+            let (Some(ta), Some(tb)) = (on_rail(a, tol)?, on_rail(b, tol)?) else {
+                continue;
+            };
+            // the edge follows the rail over the piece: a bound over the whole of both,
+            // never samples (`coincidence_bound`, the booleans' test for coincident edges:
+            // exact for lines, certified for B-splines on one parameterisation; any other
+            // pair has none, and is not taken)
+            let piece = Extent1d::from_min_max(ta.min(tb), ta.max(tb));
+            let bound = crate::boolean::api_brep::coincidence_bound(
+                edge_curve,
+                &edge.interval,
+                curve_3d,
+                &piece,
+            );
+            if !bound.is_some_and(|d| d <= tol) {
+                continue;
+            }
+            pieces.push((piece.min(), piece.max(), tol));
+        }
+        if pieces.len() < 2 {
+            return Ok(None);
+        }
+        pieces.sort_by(|x, y| x.0.total_cmp(&y.0));
+
+        // end to end: from the curve's start, each piece starting where the one before
+        // ends, to its end
+        let at = |t: f64| curve_3d.evaluate_point(k, t);
+        let mut out = Vec::new();
+        let mut from = ivl.min();
+        for (i, &(t0, t1, tol)) in pieces.iter().enumerate() {
+            if at(from)?.distance(at(t0)?) > tol || t1 <= from {
+                return Ok(None);
+            }
+            let to = if i + 1 == pieces.len() {
+                if at(t1)?.distance(at(ivl.max())?) > tol {
+                    return Ok(None);
+                }
+                ivl.max()
+            } else {
+                t1
+            };
+            out.push(Extent1d::from_min_max(from, to));
+            from = to;
+        }
+        Ok(Some(out))
     }
 
     // ---- SmFilletGeom ---------------------------------------------------------------
@@ -2503,16 +2621,13 @@ impl FilletBrep {
         let rail = self
             .geom(g)?
             .rail(rail_index)
-            .ok_or_else(|| SolidError::blend_missing(OP_RAIL_VU, "the rail"))?;
-        let mut eu = primary_edgeuse(&self.brep, rail)?
-            .ok_or_else(|| SolidError::blend_missing(OP_RAIL_VU, "the rail's primary edge use"))?;
+            .ok_or_else(|| missing(OP_RAIL_VU))?;
+        let mut eu = primary_edgeuse(&self.brep, rail)?.ok_or_else(|| missing(OP_RAIL_VU))?;
         if self.brep.edgeuse(eu)?.orientation == OrientType::Opposite {
-            eu = mate(&self.brep, eu)?
-                .ok_or_else(|| SolidError::blend_missing(OP_RAIL_VU, "the edge use's mate"))?;
+            eu = mate(&self.brep, eu)?.ok_or_else(|| missing(OP_RAIL_VU))?;
         }
         if end_index != 0 {
-            eu = mate(&self.brep, eu)?
-                .ok_or_else(|| SolidError::blend_missing(OP_RAIL_VU, "the edge use's mate"))?;
+            eu = mate(&self.brep, eu)?.ok_or_else(|| missing(OP_RAIL_VU))?;
         }
         Ok(self.brep.edgeuse(eu)?.vertexuse)
     }
@@ -2524,25 +2639,21 @@ impl FilletBrep {
     /// # Errors
     ///
     /// A blend failure (`SM_ERR_NULL_POINTER`) for a missing rail;
-    /// [`SolidError::Unported`] from a trim; [`SolidError::NotFound`] for dangling ids.
-    /// With [`crate::kernel::UpstreamFixes::fillet_trim_status`] (or
-    /// [`crate::kernel::UpstreamFixes::fillet_statuses_pass_on`]) enabled, every
-    /// curve/surface trim and interval-intersection error is propagated. Earlier
-    /// successful edits and parameter snapping remain when a later step fails.
+    /// [`SolidError::NotFound`] for dangling ids; every curve/surface trim and
+    /// interval-intersection error (upstream drops them and goes on with an unset
+    /// interval; WR-604). Earlier successful edits and parameter snapping remain when a
+    /// later step fails.
     pub fn trim_geom(
         &mut self,
         k: &Kernel,
         g: FilletGeomId,
         trim_interval: &mut Extent1d,
     ) -> Result<()> {
-        // fork 9b7cd48 passes these on (SER), as `fillet_trim_status` does
-        let pass_on = k.fixes.fillet_trim_status || k.fixes.fillet_statuses_pass_on;
+        // upstream drops these statuses; fork 9b7cd48 passes them on (SER)
         let geom = self.geom(g)?;
         let mut rails: Vec<EdgeId> = Vec::new();
         for rail in geom.rails {
-            rails.push(
-                rail.ok_or_else(|| SolidError::blend_missing(OP_TRIM, "a rail of the geometry"))?,
-            );
+            rails.push(rail.ok_or_else(|| missing(OP_TRIM))?);
         }
         rails.extend_from_slice(&geom.other_rails1);
         rails.extend_from_slice(&geom.other_rails2);
@@ -2554,19 +2665,8 @@ impl FilletBrep {
             let edge = self.brep.edge_mut(rail)?;
             if let Some(curve) = edge.curve.as_mut() {
                 // may snap sIvl by tol to existing knots
-                let trimmed =
-                    curve.trim_with_zone_tol(k, trim_interval, TrimMode::Notify, rail_tol);
-                if pass_on {
-                    trimmed?;
-                } else {
-                    ignore_non_unported(trimmed)?;
-                }
-                let intersection = edge.interval.intersect(trim_interval);
-                let temp = if pass_on {
-                    intersection?
-                } else {
-                    intersection.unwrap_or_else(|_| Extent1d::new())
-                };
+                curve.trim_with_zone_tol(k, trim_interval, TrimMode::Notify, rail_tol)?;
+                let temp = edge.interval.intersect(trim_interval)?;
                 set_interval(&mut self.brep, rail, &temp)?;
             }
         }
@@ -2575,12 +2675,7 @@ impl FilletBrep {
 
         // Spine curve:
         if let Some(center) = geom.center_line_curve.as_mut() {
-            let trimmed = center.trim(k, trim_interval, TrimMode::Notify);
-            if pass_on {
-                trimmed?;
-            } else {
-                ignore_non_unported(trimmed)?;
-            }
+            center.trim(k, trim_interval, TrimMode::Notify)?;
         }
 
         // Fillet Surface:
@@ -2588,32 +2683,14 @@ impl FilletBrep {
             let mut domain = surface.natural_uv_domain_with_nurb(k)?;
             // Trimming is in the u-direction.
             let u_domain = domain.u_interval();
-            let intersection = u_domain.intersect(trim_interval);
-            let temp = if pass_on {
-                intersection?
-            } else {
-                intersection.unwrap_or_else(|_| Extent1d::new())
-            };
+            let temp = u_domain.intersect(trim_interval)?;
             domain.set_u_interval(&temp);
 
             // trim to domain
-            let trimmed = surface.trim_with_domain(k, &mut domain);
-            if pass_on {
-                trimmed?;
-            } else {
-                ignore_non_unported(trimmed)?;
-            }
+            surface.trim_with_domain(k, &mut domain)?;
         }
 
         Ok(())
-    }
-}
-
-/// Ignores a status upstream does not check, but never a missing dependency.
-fn ignore_non_unported<T>(result: Result<T>) -> Result<()> {
-    match result {
-        Err(error) if error.is_unported_or_cancelled() => Err(error),
-        _ => Ok(()),
     }
 }
 
@@ -2739,8 +2816,7 @@ fn solution_uv<O: SolutionObject>(solutions: &SolutionArray<O>, index: usize) ->
 /// that is not a B-spline surface (the `SM_CAST_PTR` upstream); those of the
 /// evaluations.
 pub fn evaluate_mate(k: &Kernel, brep: &Brep, face: FaceId, uv: Point2) -> Result<Point3> {
-    let surface = face2::surface(brep, face)?
-        .ok_or_else(|| SolidError::blend_missing(OP_EVALUATE_MATE, "the face's surface"))?;
+    let surface = face2::surface(brep, face)?.ok_or_else(|| missing(OP_EVALUATE_MATE))?;
     // SM_CAST_PTR(SmBSplineSurface, ..) and NER before the domain test: B-spline surfaces
     // and the kinds deriving from them (planes, surfaces of revolution, cones, spheres,
     // tori); the other kinds fail the cast
@@ -2756,10 +2832,7 @@ pub fn evaluate_mate(k: &Kernel, brep: &Brep, face: FaceId, uv: Point2) -> Resul
             | SurfaceKind::ProceduralBlend(_)
             | SurfaceKind::BallPatch(_)
     ) {
-        return Err(SolidError::blend_missing(
-            OP_EVALUATE_MATE,
-            "the face's B-spline surface",
-        ));
+        return Err(missing(OP_EVALUATE_MATE));
     }
     let natural_uv_domain = surface.natural_uv_domain_with_nurb(k)?;
     if natural_uv_domain.contains_point(uv, 0.0) {
@@ -2777,10 +2850,7 @@ pub fn evaluate_mate(k: &Kernel, brep: &Brep, face: FaceId, uv: Point2) -> Resul
             SurfaceKind::ProceduralBlend(pb) => pb.net().evaluate_point_on_extended_surface(uv),
             // (the fork's SmBallPatch is an SmBSplineSurface too: its net)
             SurfaceKind::BallPatch(pb) => pb.net().evaluate_point_on_extended_surface(uv),
-            _ => Err(SolidError::blend_missing(
-                OP_EVALUATE_MATE,
-                "the face's B-spline surface",
-            )),
+            _ => Err(missing(OP_EVALUATE_MATE)),
         }
     }
 }
@@ -2809,7 +2879,7 @@ pub fn surface_drop_point<O: SolutionObject>(
         return Err(if e.is_unported_or_cancelled() {
             e
         } else {
-            SolidError::blend_missing(OP_SURFACE_DROP_POINT, "the surface's cache")
+            missing(OP_SURFACE_DROP_POINT)
         });
     }
     let domain = surface.natural_uv_domain_with_nurb(k)?;
@@ -2838,10 +2908,7 @@ pub fn surface_drop_point<O: SolutionObject>(
     }
 
     // Unable to drop point
-    Err(SolidError::blend_failed(
-        OP_SURFACE_DROP_POINT,
-        "the point drops onto the surface at no tolerance",
-    ))
+    Err(stage_failed(OP_SURFACE_DROP_POINT))
 }
 
 /// Whether the surface is closed in `param` over `domain` (`IsClosed`).
@@ -3004,15 +3071,15 @@ pub fn two_pnts_intersection(
     )
 }
 
-/// The start-point drops of `sm_TwoPntsIntersection`: an empty success is
-/// `SM_ERR_BAD_INTERSECTIONS`, any other status passes through.
+/// The start-point drops of `sm_TwoPntsIntersection`: an empty success is a
+/// [`BlendFailure::StageFailed`] keeping `SM_ERR_BAD_INTERSECTIONS`, any other status passes
+/// through.
 fn drop_or_bad<O: SolutionObject>(r: Result<SolutionArray<O>>) -> Result<SolutionArray<O>> {
     let solutions = r?;
     if solutions.is_empty() {
-        return Err(SolidError::blend(
-            OP_TWO_PNTS,
-            BlendFailure::BadIntersections("the start point drops onto the surfaces nowhere"),
-        ));
+        return Err(Failure::new(OP_TWO_PNTS, BlendFailure::StageFailed)
+            .with_status(SM_ERR_BAD_INTERSECTIONS)
+            .into_error());
     }
     Ok(solutions)
 }
@@ -3020,12 +3087,10 @@ fn drop_or_bad<O: SolutionObject>(r: Result<SolutionArray<O>>) -> Result<Solutio
 /// `DropVectors(uv, TRUE, TRUE, 1, &direction, &uv_dir)`.
 fn drop_vector(k: &Kernel, surface: &Surface, uv: Point2, direction: Vec3) -> Result<Vec2> {
     let dropped = drop_vectors_at(k, surface, uv, Side::Left, Side::Left, &[direction])?;
-    dropped.first().copied().ok_or_else(|| {
-        SolidError::blend_failed(
-            OP_TWO_PNTS,
-            "the direction drops onto the surface as no vector",
-        )
-    })
+    dropped
+        .first()
+        .copied()
+        .ok_or_else(|| stage_failed(OP_TWO_PNTS))
 }
 
 /// `sm_FindStepoffUV`: the guess UVs for `PointOnPlaneSolve`: for each of the solver's
@@ -3047,12 +3112,9 @@ pub fn find_stepoff_uv(
 ) -> Result<[Point2; 2]> {
     let mut uvs = [Point2::new(0.0, 0.0); 2];
     for (slot, edgeuse) in uvs.iter_mut().zip(solver.solver.edgeuses) {
-        let eu = edgeuse
-            .ok_or_else(|| SolidError::blend_missing(OP_STEPOFF, "the solver's edge use"))?;
-        let face = edgeuse_face(brep, eu)?
-            .ok_or_else(|| SolidError::blend_missing(OP_STEPOFF, "the edge use's face"))?;
-        face2::surface(brep, face)?
-            .ok_or_else(|| SolidError::blend_missing(OP_STEPOFF, "the face's surface"))?;
+        let eu = edgeuse.ok_or_else(|| missing(OP_STEPOFF))?;
+        let face = edgeuse_face(brep, eu)?.ok_or_else(|| missing(OP_STEPOFF))?;
+        face2::surface(brep, face)?.ok_or_else(|| missing(OP_STEPOFF))?;
         // Step off the edge along the binormal direction
         let step = evaluate_binormal_step_off(
             k,
@@ -3064,8 +3126,7 @@ pub fn find_stepoff_uv(
         )?;
         // The step-off needs the B-rep mutably, so the face's surface (checked above,
         // in upstream's order) is borrowed again after it.
-        let surface = face2::surface(brep, face)?
-            .ok_or_else(|| SolidError::blend_missing(OP_STEPOFF, "the face's surface"))?;
+        let surface = face2::surface(brep, face)?.ok_or_else(|| missing(OP_STEPOFF))?;
         let tol = solver.solver.approx_tol_3d;
         // Make the surface think that it is a standalone surface (point testing off).
         let solutions = surface.global_point_solve_point_test_off::<NoObject>(
@@ -3079,10 +3140,7 @@ pub fn find_stepoff_uv(
             SolutionRequested::Single,
         )?;
         if solutions.is_empty() {
-            return Err(SolidError::blend_failed(
-                OP_STEPOFF,
-                "the step-off point drops onto the face's surface nowhere",
-            ));
+            return Err(stage_failed(OP_STEPOFF));
         }
         *slot = solution_uv(&solutions, 0);
     }
@@ -3257,8 +3315,7 @@ fn normalized_drop(
     pos: Point3,
     domain: &Extent2d,
 ) -> Result<(bool, bool, Point2, f64)> {
-    let surface = face2::surface(brep, face)?
-        .ok_or_else(|| SolidError::blend_missing(OP_CLASSIFY, "the face's surface"))?;
+    let surface = face2::surface(brep, face)?.ok_or_else(|| missing(OP_CLASSIFY))?;
     let opts = DropPointOptions {
         guess_uv: None,
         operation: SolverOperation::Normalize,
@@ -3477,7 +3534,7 @@ pub fn create_cubic_rail_rail_interpolant(
             .get(i)
             .copied()
             .flatten()
-            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))
+            .ok_or_else(|| missing(OP))
     };
     // First, calculate the intersection of two rails
     let rail_index = fil_solver1
@@ -3489,8 +3546,7 @@ pub fn create_cubic_rail_rail_interpolant(
     // Derive guess uv point here
     let mut eu = solver_edgeuse(fil_solver1.solver(), rail_index)?;
     let eu_vertex = |brep: &Brep, eu: EdgeuseId| -> Result<(VertexuseId, Option<VertexId>)> {
-        let vu = eu1::vertexuse(brep, eu)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's vertex use"))?;
+        let vu = eu1::vertexuse(brep, eu)?.ok_or_else(|| missing(OP))?;
         Ok((vu, vertexuse_unit::vertex(brep, vu)?))
     };
     if eu_vertex(brep, eu)?.1 != Some(corner_vert) {
@@ -3498,16 +3554,9 @@ pub fn create_cubic_rail_rail_interpolant(
     }
     let (vu, _) = eu_vertex(brep, eu)?;
     // ComputeUVPoint(sUVGuess) with its default bOKToMakeUVTrimCurve = TRUE; its status
-    // is ignored, so a failure leaves SmPoint2d()'s (SM_UNDEF_DOUBLE, SM_UNDEF_DOUBLE);
+    // is ignored upstream, so a failure leaves SmPoint2d()'s undefined point;
     // fork 9b7cd48 passes this on (SER)
-    let uv_guess = match crate::error::passed_on(
-        vertexuse_unit::compute_uv_point(k, brep, vu, true),
-        k.fixes.fillet_statuses_pass_on,
-    )? {
-        Ok(uv) => uv,
-        Err(e) if e.is_unported_or_cancelled() => return Err(e),
-        Err(_) => Point2::new(UNDEF_DOUBLE, UNDEF_DOUBLE),
-    };
+    let uv_guess = vertexuse_unit::compute_uv_point(k, brep, vu, true)?;
 
     let mut tsect_pnt1 = TsectPnt::default();
     let mut tsect_pnt2 = TsectPnt::default();
@@ -3524,15 +3573,12 @@ pub fn create_cubic_rail_rail_interpolant(
         hold_end_radii,
     )?;
     if !found_intersection {
-        return Err(SolidError::blend_failed(
-            OP,
-            "the rails' cubic interpolant finds no intersection",
-        ));
+        return Err(stage_failed(OP));
     }
     let rail_srf = match rail_index {
         0 => SrfIndex::First,
         1 => SrfIndex::Second,
-        _ => return Err(SolidError::blend_missing(OP, "the rail's surface index")),
+        _ => return Err(missing(OP)),
     };
     // SmPoint2d to SmPoint3d: z = 0
     let uv_pnt = Point3::from(tsect_pnt1.uv_pos(rail_srf));
@@ -3690,12 +3736,14 @@ pub fn examine_n_fix_fillet_geoms_with_solvers(
 
     // check state - only high degree bspline surfaces can be examined
     {
-        let surface1 = fb.geom(geom1)?.fillet_surface(None)?.ok_or_else(|| {
-            SolidError::blend_missing(OP_EXAMINE, "the first geometry's fillet surface")
-        })?;
-        let surface2 = fb.geom(geom2)?.fillet_surface(None)?.ok_or_else(|| {
-            SolidError::blend_missing(OP_EXAMINE, "the second geometry's fillet surface")
-        })?;
+        let surface1 = fb
+            .geom(geom1)?
+            .fillet_surface(None)?
+            .ok_or_else(|| missing(OP_EXAMINE))?;
+        let surface2 = fb
+            .geom(geom2)?
+            .fillet_surface(None)?
+            .ok_or_else(|| missing(OP_EXAMINE))?;
         if surface1.degree_with_nurb(k, SurfParamType::U)? < 3
             || surface2.degree_with_nurb(k, SurfParamType::U)? < 3
             || !surface1.is_kind_of(BSplineSurface::TYPE)?
@@ -3717,9 +3765,10 @@ pub fn examine_n_fix_fillet_geoms_with_solvers(
         .zip(adjust_surf.iter_mut())
         .zip(orient.iter_mut())
     {
-        let surface = fb.geom(geom)?.fillet_surface(None)?.ok_or_else(|| {
-            SolidError::blend_missing(OP_EXAMINE, "the geometry's fillet surface")
-        })?;
+        let surface = fb
+            .geom(geom)?
+            .fillet_surface(None)?
+            .ok_or_else(|| missing(OP_EXAMINE))?;
         let domain = surface.natural_uv_domain_with_nurb(k)?;
         let (uv1, uv2) = if at_start {
             (domain.evaluate(0.0, 0.0), domain.evaluate(0.0, 1.0))
@@ -3752,10 +3801,7 @@ pub fn examine_n_fix_fillet_geoms_with_solvers(
     }
     if adjust0 && adjust1 {
         // Can not adjust both surfaces
-        return Err(SolidError::blend_failed(
-            OP_EXAMINE,
-            "both fillet surfaces need adjusting",
-        ));
+        return Err(stage_failed(OP_EXAMINE));
     }
 
     // Copy one row of control points from the 'good' fillet to the 'bad' fillet.
@@ -3769,9 +3815,7 @@ pub fn examine_n_fix_fillet_geoms_with_solvers(
         let from_surface = fb
             .geom_mut(from_geom)?
             .fillet_surface_mut(None)?
-            .ok_or_else(|| {
-                SolidError::blend_missing(OP_EXAMINE, "the source geometry's fillet surface")
-            })?;
+            .ok_or_else(|| missing(OP_EXAMINE))?;
         let Some(bs) = b_spline_net_mut(from_surface) else {
             return Ok(());
         };
@@ -3783,9 +3827,7 @@ pub fn examine_n_fix_fillet_geoms_with_solvers(
         let to_surface = fb
             .geom_mut(to_geom)?
             .fillet_surface_mut(None)?
-            .ok_or_else(|| {
-                SolidError::blend_missing(OP_EXAMINE, "the target geometry's fillet surface")
-            })?;
+            .ok_or_else(|| missing(OP_EXAMINE))?;
         // Not upstream (#17015): a blend by its definition takes the row on a copy, whose
         // net's distance from the definition is proved again before it replaces the blend.
         // The row moves the net's end by about the gap the join closes, so the old bound
@@ -3824,16 +3866,12 @@ pub fn examine_n_fix_fillet_geoms_with_solvers(
     let adjust_solver = if adjust0 { solver1 } else { solver2 };
     let (surf_domain, rails) = {
         let g = fb.geom(adjust_fg)?;
-        let surface = g.fillet_surface(None)?.ok_or_else(|| {
-            SolidError::blend_missing(OP_EXAMINE, "the adjusted geometry's fillet surface")
-        })?;
+        let surface = g.fillet_surface(None)?.ok_or_else(|| missing(OP_EXAMINE))?;
         (surface.natural_uv_domain_with_nurb(k)?, g.rails)
     };
 
     for (kk, rail) in rails.into_iter().enumerate() {
-        let rail = rail.ok_or_else(|| {
-            SolidError::blend_missing(OP_EXAMINE, "a rail of the adjusted geometry")
-        })?;
+        let rail = rail.ok_or_else(|| missing(OP_EXAMINE))?;
         let iso_parameter = if kk == 1 {
             surf_domain.max().y
         } else {
@@ -3842,9 +3880,10 @@ pub fn examine_n_fix_fillet_geoms_with_solvers(
 
         // Produce iso-curve for rail
         let iso = {
-            let surface = fb.geom(adjust_fg)?.fillet_surface(None)?.ok_or_else(|| {
-                SolidError::blend_missing(OP_EXAMINE, "the adjusted geometry's fillet surface")
-            })?;
+            let surface = fb
+                .geom(adjust_fg)?
+                .fillet_surface(None)?
+                .ok_or_else(|| missing(OP_EXAMINE))?;
             surface.create_iso_parametric_curve(
                 k,
                 SurfParamType::V,
@@ -3965,13 +4004,12 @@ fn drop_rail_onto_offset_surface(
     rail: EdgeId,
     dist_tol: f64,
 ) -> Result<()> {
-    let solver = adjust_solver
-        .ok_or_else(|| SolidError::blend_missing(OP_EXAMINE, "the adjusted geometry's solver"))?;
+    let solver = adjust_solver.ok_or_else(|| missing(OP_EXAMINE))?;
     // SmFilletSolver::GetSurface(k); NER(pOffsetSurf). The offset distance is set to
     // 0 on a copy (upstream sets it on the solver's surface and restores it below).
     let mut offset_surf = solver
         .surface(rail_index)?
-        .ok_or_else(|| SolidError::blend_missing(OP_EXAMINE, "the solver's offset surface"))?
+        .ok_or_else(|| missing(OP_EXAMINE))?
         .surface
         .clone();
     let offset_surf = &mut offset_surf;
@@ -3983,7 +4021,7 @@ fn drop_rail_onto_offset_surface(
         .edge(rail)?
         .curve
         .as_ref()
-        .ok_or_else(|| SolidError::blend_missing(OP_EXAMINE, "the rail's curve"))?;
+        .ok_or_else(|| missing(OP_EXAMINE))?;
     let domain = offset_natural_uv_domain(offset_surf);
     let drop = offset_surface_drop_curve(
         k,
@@ -4005,10 +4043,8 @@ fn drop_rail_onto_offset_surface(
     // Will replace the original UV-curve when we have only one result
     if let Ok([uv_curve]) = <[Curve; 1]>::try_from(uv_curves) {
         // upstream dereferences the primary edge use and its mate unchecked
-        let prim_eu = primary_edgeuse(fb.brep(), rail)?
-            .ok_or_else(|| SolidError::blend_missing(OP_EXAMINE, "the rail's primary edge use"))?;
-        let mate_eu = mate(fb.brep(), prim_eu)?
-            .ok_or_else(|| SolidError::blend_missing(OP_EXAMINE, "the primary edge use's mate"))?;
+        let prim_eu = primary_edgeuse(fb.brep(), rail)?.ok_or_else(|| missing(OP_EXAMINE))?;
+        let mate_eu = mate(fb.brep(), prim_eu)?.ok_or_else(|| missing(OP_EXAMINE))?;
         // SetUVCurve(pUVCurve) with its defaults (bDeleteOldCurve = FALSE, bDbgWarnLeaks =
         // TRUE); upstream then deletes the curve it replaced
         fb.set_edgeuse_uv_curve(mate_eu, Some(uv_curve), false, true)?;
@@ -4312,6 +4348,21 @@ pub fn set_surface_closure(k: &Kernel, surf: &Surface, domain: &Extent2d) -> Res
     Ok(ret)
 }
 
+/// A step whose object is not there (upstream's `NER`): a defect keeping
+/// `SM_ERR_NULL_POINTER` (#15034).
+#[track_caller]
+fn missing(op: &'static str) -> SolidError {
+    Failure::new(op, BlendFailure::StageFailed)
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
+/// A step that could not go on, with nothing finer to say (#15034 rule 2).
+#[track_caller]
+fn stage_failed(op: &'static str) -> SolidError {
+    SolidError::blend(op, BlendFailure::StageFailed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4380,18 +4431,15 @@ mod tests {
         (fb, g, rails)
     }
 
-    /// #13790: a start point that drops onto the surfaces nowhere is a typed bad-intersections
-    /// failure that keeps the `SM_ERR_BAD_INTERSECTIONS` status of the bare `Upstream` it
-    /// replaced; any other status passes through untouched.
+    /// #13790, #15034: a start point that drops onto the surfaces nowhere is a stage failure
+    /// that keeps the `SM_ERR_BAD_INTERSECTIONS` status of the bare `Upstream` it replaced;
+    /// any other status passes through untouched.
     #[test]
-    fn an_empty_start_point_drop_is_a_typed_bad_intersections_failure() {
+    fn an_empty_start_point_drop_is_a_stage_failure_keeping_bad_intersections() {
         let e = drop_or_bad::<NoObject>(Ok(SolutionArray::new())).unwrap_err();
         assert_eq!(
-            e,
-            SolidError::blend(
-                OP_TWO_PNTS,
-                BlendFailure::BadIntersections("the start point drops onto the surfaces nowhere"),
-            )
+            (e.operation(), e.blend_failure()),
+            (OP_TWO_PNTS, Some(&BlendFailure::StageFailed))
         );
         assert_eq!(e.upstream_status(), Some(SM_ERR_BAD_INTERSECTIONS));
         assert_eq!(e.sm_status(), Some(SM_ERR_BAD_INTERSECTIONS));
@@ -4403,152 +4451,8 @@ mod tests {
     }
 
     #[test]
-    fn trim_geom_default_drops_each_rail_curve_error_and_continues() {
-        let k = Kernel::default();
-        assert!(!k.fixes.fillet_trim_status);
-        for failed in 0..4 {
-            let (mut fb, g, rails) = trim_test_geom();
-            fb.brep_mut().edge_mut(rails[failed]).unwrap().curve =
-                Some(Curve::from(trim_test_curve(0.5)));
-            fb.geom_mut(g).unwrap().center_line_curve = Some(Curve::from(trim_test_curve(1.0)));
-            fb.geom_mut(g)
-                .unwrap()
-                .set_fillet_surface(Some(bilinear_patch()));
-            let mut interval = Extent1d::from_min_max(0.25, 0.75);
-            fb.trim_geom(&k, g, &mut interval).unwrap();
-            for (i, rail) in rails.iter().enumerate() {
-                let edge = fb.brep().edge(*rail).unwrap();
-                assert_eq!(edge.interval, interval);
-                assert_eq!(
-                    edge.curve.as_ref().unwrap().natural_interval(),
-                    if i == failed {
-                        Extent1d::from_min_max(0.0, 0.5)
-                    } else {
-                        interval
-                    }
-                );
-            }
-            let geom = fb.geom(g).unwrap();
-            assert_eq!(
-                geom.center_line_curve.as_ref().unwrap().natural_interval(),
-                interval
-            );
-            assert_eq!(
-                geom.fillet_surface(None)
-                    .unwrap()
-                    .unwrap()
-                    .natural_uv_domain_if_built()
-                    .u_interval(),
-                interval
-            );
-        }
-    }
-
-    #[test]
-    fn trim_geom_default_installs_unset_rail_intersection_and_continues() {
-        let k = Kernel::default();
-        for failed in 0..4 {
-            let (mut fb, g, rails) = trim_test_geom();
-            fb.brep_mut().edge_mut(rails[failed]).unwrap().interval =
-                Extent1d::from_min_max(2.0, 3.0);
-            let mut interval = Extent1d::from_min_max(0.25, 0.75);
-            fb.trim_geom(&k, g, &mut interval).unwrap();
-            for (i, rail) in rails.iter().enumerate() {
-                let edge = fb.brep().edge(*rail).unwrap();
-                assert_eq!(
-                    edge.interval,
-                    if i == failed {
-                        Extent1d::new()
-                    } else {
-                        interval
-                    }
-                );
-                assert_eq!(edge.curve.as_ref().unwrap().natural_interval(), interval);
-            }
-        }
-    }
-
-    #[test]
-    fn trim_geom_default_drops_center_error_and_trims_surface() {
-        let k = Kernel::default();
-        let (mut fb, g, _) = trim_test_geom();
-        let geom = fb.geom_mut(g).unwrap();
-        geom.center_line_curve = Some(Curve::from(trim_test_curve(0.5)));
-        geom.set_fillet_surface(Some(bilinear_patch()));
-        let mut interval = Extent1d::from_min_max(0.25, 0.75);
-        fb.trim_geom(&k, g, &mut interval).unwrap();
-        let geom = fb.geom(g).unwrap();
-        assert_eq!(
-            geom.center_line_curve.as_ref().unwrap().natural_interval(),
-            Extent1d::from_min_max(0.0, 0.5)
-        );
-        assert_eq!(
-            geom.fillet_surface(None)
-                .unwrap()
-                .unwrap()
-                .natural_uv_domain_if_built()
-                .u_interval(),
-            interval
-        );
-    }
-
-    #[test]
-    fn trim_geom_default_drops_surface_intersection_and_trim_errors() {
-        let k = Kernel::default();
-        for mut interval in [
-            Extent1d::from_min_max(2.0, 3.0),
-            Extent1d::from_min_max(0.5, 0.5),
-        ] {
-            let (mut fb, g, rails) = trim_test_geom();
-            for rail in rails {
-                fb.brep_mut().edge_mut(rail).unwrap().curve = None;
-            }
-            fb.geom_mut(g)
-                .unwrap()
-                .set_fillet_surface(Some(bilinear_patch()));
-            fb.trim_geom(&k, g, &mut interval).unwrap();
-            assert_eq!(
-                fb.geom(g)
-                    .unwrap()
-                    .fillet_surface(None)
-                    .unwrap()
-                    .unwrap()
-                    .natural_uv_domain_if_built()
-                    .u_interval(),
-                Extent1d::from_min_max(0.0, 1.0)
-            );
-        }
-    }
-
-    /// Fork 9b7cd48 (`SmFilletGeom::Trim`: `SER( pRail->Trim(..) )`): with
-    /// `fillet_statuses_pass_on` alone (not `fillet_trim_status`) a rail curve that
-    /// cannot be trimmed returns its error; with neither flag the trim carries on.
-    #[test]
-    fn fillet_statuses_pass_on_trim_geom_returns_a_failed_rail_trim() {
-        for pass_on in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.fillet_statuses_pass_on = pass_on;
-            let (mut fb, g, rails) = trim_test_geom();
-            fb.brep_mut().edge_mut(rails[0]).unwrap().curve =
-                Some(Curve::from(trim_test_curve(0.5)));
-            let mut interval = Extent1d::from_min_max(0.25, 0.75);
-            let mut failing_curve = trim_test_curve(0.5);
-            let expected = failing_curve
-                .trim(&k, &mut interval, TrimMode::Notify)
-                .unwrap_err();
-            let r = fb.trim_geom(&k, g, &mut interval);
-            if pass_on {
-                assert_eq!(r.unwrap_err(), expected);
-            } else {
-                assert_ne!(r, Err(expected));
-            }
-        }
-    }
-
-    #[test]
     fn trim_geom_propagates_each_rail_curve_error_and_stops() {
-        let mut k = Kernel::default();
-        k.fixes.fillet_trim_status = true;
+        let k = Kernel::default();
         for failed in 0..4 {
             let (mut fb, g, rails) = trim_test_geom();
             fb.brep_mut().edge_mut(rails[failed]).unwrap().curve =
@@ -4572,8 +4476,7 @@ mod tests {
 
     #[test]
     fn trim_geom_does_not_install_failed_rail_intersection() {
-        let mut k = Kernel::default();
-        k.fixes.fillet_trim_status = true;
+        let k = Kernel::default();
         let (mut fb, g, rails) = trim_test_geom();
         let old = Extent1d::from_min_max(2.0, 3.0);
         fb.brep_mut().edge_mut(rails[0]).unwrap().interval = old;
@@ -4600,8 +4503,7 @@ mod tests {
 
     #[test]
     fn trim_geom_propagates_center_line_error_before_surface_edit() {
-        let mut k = Kernel::default();
-        k.fixes.fillet_trim_status = true;
+        let k = Kernel::default();
         let (mut fb, g, _) = trim_test_geom();
         let geom = fb.geom_mut(g).unwrap();
         geom.center_line_curve = Some(Curve::from(trim_test_curve(0.5)));
@@ -4625,8 +4527,7 @@ mod tests {
 
     #[test]
     fn trim_geom_rejects_disjoint_surface_domain() {
-        let mut k = Kernel::default();
-        k.fixes.fillet_trim_status = true;
+        let k = Kernel::default();
         let (mut fb, g, rails) = trim_test_geom();
         for rail in rails {
             fb.brep_mut().edge_mut(rail).unwrap().curve = None;
@@ -4653,8 +4554,7 @@ mod tests {
 
     #[test]
     fn trim_geom_propagates_surface_trim_failure() {
-        let mut k = Kernel::default();
-        k.fixes.fillet_trim_status = true;
+        let k = Kernel::default();
         let (mut fb, g, rails) = trim_test_geom();
         for rail in rails {
             fb.brep_mut().edge_mut(rail).unwrap().curve = None;
@@ -4672,8 +4572,7 @@ mod tests {
 
     #[test]
     fn trim_geom_keeps_successful_snapping_and_trims_all_geometry() {
-        let mut k = Kernel::default();
-        k.fixes.fillet_trim_status = true;
+        let k = Kernel::default();
         let (mut fb, g, rails) = trim_test_geom();
         fb.geom_mut(g).unwrap().center_line_curve = Some(Curve::from(trim_test_curve(1.0)));
         fb.geom_mut(g)
@@ -5139,10 +5038,10 @@ mod tests {
         .unwrap_err();
         // the real drop runs on rail 0 (a failed drop skips the rail); rail 1 has no
         // solver offset surface, which upstream dereferences without a check
-        // #13790: a typed blend failure with the status of the bare `Upstream` it replaced
+        // #13790, #15034: a stage failure with the status of the bare `Upstream` it replaced
         assert_eq!(
-            err,
-            SolidError::blend_missing(OP_EXAMINE, "the solver's offset surface")
+            (err.operation(), err.blend_failure()),
+            (OP_EXAMINE, Some(&BlendFailure::StageFailed))
         );
         assert_eq!(err.upstream_status(), Some(1006));
         // the offset distance was zeroed for the drop and restored
@@ -5201,8 +5100,8 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(
-            err,
-            SolidError::blend_missing(OP_EXAMINE, "the adjusted geometry's solver")
+            (err.operation(), err.blend_failure()),
+            (OP_EXAMINE, Some(&BlendFailure::StageFailed))
         );
         assert_eq!(err.upstream_status(), Some(1006));
         // and with the good surface meeting the corner nothing is adjusted
@@ -5299,7 +5198,12 @@ mod tests {
                 identity,
                 body: &body
             })),
-            Err(e) if e == SolidError::blend_missing(OP_FILLET_SURFACE, "the fillet face's surface")
+            Err(e) if (e.operation(), e.blend_failure(), e.upstream_status())
+                == (
+                    OP_FILLET_SURFACE,
+                    Some(&BlendFailure::StageFailed),
+                    Some(SM_ERR_NULL_POINTER)
+                )
         ));
     }
 

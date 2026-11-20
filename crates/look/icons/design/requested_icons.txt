@@ -163,6 +163,8 @@ eye	false
 fastener	false
 feature_group	false
 fillet	false
+filter	false
+find_kinds	false
 finish	false
 finish_edit	false
 fit	false
@@ -239,6 +241,7 @@ plane_auto	false
 plane_axis_point	false
 plane_midplane	false
 plane_perpendicular	false
+plane_square_to_line	false
 plane_tangent	false
 plane_three_points	false
 plane_two_edges	false
@@ -292,6 +295,7 @@ revolve	false
 rib	false
 rigid_group	false
 rollback	false
+rotate_member	false
 save	false
 scale	false
 screw	false
@@ -378,7 +382,6 @@ unfold	false
 update	false
 warning	false
 web	false
-ws_animate	false
 ws_design	false
 ws_drawing	false
 ws_render	false

@@ -56,7 +56,7 @@ use solidcore::{Brep, SolidError};
 
 use crate::body::Body;
 use crate::error::status;
-use crate::{Error, Result};
+use crate::{Error, FailureCode, Result};
 
 /// The kernels waiting between calls, the one given back last at the end.
 static IDLE: Mutex<Vec<Kernel>> = Mutex::new(Vec::new());
@@ -67,13 +67,18 @@ static IDLE: Mutex<Vec<Kernel>> = Mutex::new(Vec::new());
 static STEP: OnceLock<f64> = OnceLock::new();
 static FIXES: Mutex<Option<UpstreamFixes>> = Mutex::new(None);
 
-/// A failed call, as the failure callback sees it.
+/// A failed call, as the failure callback sees it. More fields come (the call's arguments,
+/// `docs/failure-codes-and-reproduction.md` 3.2): read it by its fields, never build it.
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct Failure<'a> {
     /// The call's name.
     pub call: &'a str,
     /// Why it failed: its error, or the refusal its answer carries.
     pub why: &'a str,
+    /// What failed, as stable data ([`FailureCode`]): the same code
+    /// [`take_failure_code`] gives after the call.
+    pub code: FailureCode,
     /// Its input bodies by the names the call gives them, each as a binary `.smb` (or why it
     /// could not be written), as they are after the call: a refused or failed edit has put its
     /// body back as it came in ([`with_body`]).
@@ -265,6 +270,45 @@ thread_local! {
     static DETAIL: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
     /// The call running on this thread ([`current_call`]).
     static CURRENT: Cell<Option<&'static str>> = const { Cell::new(None) };
+    /// The code of the last failed call on this thread ([`take_failure_code`]).
+    static CODE: Cell<Option<FailureCode>> = const { Cell::new(None) };
+    /// The last kernel error the call running on this thread typed into an [`Error`] ([`noted`]):
+    /// its kind's code, its operation, and the name of the variant it became.
+    static NOTED: Cell<Option<(u16, &'static str, &'static str)>> = const { Cell::new(None) };
+}
+
+/// `r`, the kernel's error `e` as ops types it, noted for the call running on this thread: when
+/// the call's answer refuses with an error of `r`'s variant (`r` itself, or `r` with what the
+/// call adds to it, a point, an index), its [`FailureCode`] is `e`'s kind and operation, not a
+/// failure ops decided itself. Every place ops types a kernel error into an [`Error`] passes it
+/// here; outside a call it is `r`, untouched. The last note wins: a call that types two kernel
+/// errors into one variant, drops one and refuses with the other, reports the later one's code,
+/// so a call that tries and gives up something puts its earlier note back ([`note_back`]).
+pub(crate) fn noted(e: &SolidError, r: Error) -> Error {
+    noted_as(e.kind().code(), e.operation(), r)
+}
+
+/// What the call running on this thread noted last ([`noted`]), for work that tries something
+/// and gives it up to put back ([`note_back`]): a refusal it returns is the one noted before.
+pub(crate) type Note = Option<(u16, &'static str, &'static str)>;
+
+/// The note of the call running on this thread, to put back with [`note_back`].
+pub(crate) fn note() -> Note {
+    NOTED.try_with(Cell::get).ok().flatten()
+}
+
+/// Puts back a note taken with [`note`], forgetting what was noted since.
+pub(crate) fn note_back(n: Note) {
+    let _ = NOTED.try_with(|c| c.set(n));
+}
+
+/// [`noted`] for a kernel error already taken apart: its kind's code and its operation.
+pub(crate) fn noted_as(kind: u16, operation: &'static str, r: Error) -> Error {
+    if in_call() {
+        // (a thread being torn down notes nothing)
+        let _ = NOTED.try_with(|n| n.set(Some((kind, operation, r.name()))));
+    }
+    r
 }
 
 #[cfg(test)]
@@ -357,17 +401,37 @@ pub fn take_failure_detail() -> Option<String> {
     DETAIL.with(std::cell::RefCell::take)
 }
 
+/// What the last call on this thread that failed failed with, as stable data
+/// ([`FailureCode`]): for an application's failure reports, to group them by and to match a
+/// replay against, beside the typed error it words for its users. Every failure of a call the
+/// session runs gives one, a refusal its answer carries included; a cancellation is no failure
+/// and gives none. An argument an operation refuses before it starts a call is no call's
+/// failure and leaves none: an application that wants a code for it makes one
+/// ([`FailureCode::of_ops`]). Taken, as
+/// [`take_failure_detail`] is: the next call returns `None` until a call on this thread fails
+/// again, so an application takes it before a call (to drop an older one) and after the call
+/// fails.
+///
+/// The code is the kernel's for a call the kernel failed: its error's kind and operation, the
+/// error ops' answer refuses with being that kernel error as ops types it. It is
+/// [`FailureCode::OPS`] with the [`Error`]'s variant name for a failure ops decided itself (an
+/// argument refused, a result its own checks refuse, a panic caught).
+#[must_use]
+pub fn take_failure_code() -> Option<FailureCode> {
+    CODE.with(Cell::take)
+}
+
 /// How a call's value reads: whether it is a refusal, for the calls whose answer can carry one.
 pub(crate) trait Answer {
     /// The refusal this value carries, if it is one.
-    fn refusal(&self) -> Option<String> {
+    fn refusal(&self) -> Option<Error> {
         None
     }
 }
 
 impl<T> Answer for Result<T> {
-    fn refusal(&self) -> Option<String> {
-        self.as_ref().err().map(Error::to_string)
+    fn refusal(&self) -> Option<Error> {
+        self.as_ref().err().cloned()
     }
 }
 
@@ -461,6 +525,8 @@ fn run_with<T: Answer>(
     // the operands as they come in, for a call that consumes them, when someone will read them
     let snapshot = (before && hook.is_some()).then(|| written(&k, inputs));
     STOPPED.with(|d| d.set(None));
+    // a kernel error an earlier call typed is not this call's
+    NOTED.with(|n| n.set(None));
     // this thread collects profiles: the call's alone (earlier calls on this kernel left
     // records in it, dropped here)
     #[cfg(feature = "profile")]
@@ -496,6 +562,8 @@ fn run_with<T: Answer>(
     let stopped = STOPPED
         .with(Cell::take)
         .unwrap_or_else(|| token.as_ref().is_some_and(CancelToken::is_cancelled));
+    let noted = NOTED.with(Cell::take);
+    let mut kernel_code = None;
     let (r, fit) = match caught {
         // Cancelled during the call: no result, even one the kernel finished first, and a
         // kernel whose caches it may have left half-built is not used again.
@@ -503,6 +571,7 @@ fn run_with<T: Answer>(
         Ok(Ok(v)) => (Ok(v), true),
         Ok(Err(e)) => {
             DETAIL.with(|d| d.replace(Some(e.to_string())));
+            kernel_code = Some(FailureCode::of_kernel(call, &e));
             (Err(status(e)), true)
         }
         Err(p) => (
@@ -517,12 +586,25 @@ fn run_with<T: Answer>(
     }
     k.cancel = None;
     // A cancellation is the application's own: no failure to report.
-    let why = match &r {
+    let failed = match &r {
         Err(Error::Cancelled) => None,
         Ok(v) => v.refusal(),
-        Err(e) => Some(e.to_string()),
+        Err(e) => Some(e.clone()),
     };
-    let report = why.and_then(|why| {
+    let why = failed.map(|e| {
+        // the kernel's error the call failed with, or the one its refusal is as ops typed it
+        let code = kernel_code.unwrap_or_else(|| match noted {
+            Some((kind, operation, typed)) if typed == e.name() => FailureCode {
+                call,
+                kind,
+                operation,
+            },
+            _ => FailureCode::of_ops(call, &e),
+        });
+        CODE.with(|c| c.set(Some(code)));
+        (e.to_string(), code)
+    });
+    let report = why.and_then(|(why, code)| {
         let hook = hook?;
         // The kernel the call ran on, or the one that replaced it after a panic; still inside
         // the call, so nothing reenters, and the writer's own panic is caught.
@@ -530,17 +612,18 @@ fn run_with<T: Answer>(
             Some(taken) => taken,
             None => written(&k, inputs),
         };
-        Some((hook, why, inputs))
+        Some((hook, why, code, inputs))
     });
     drop(depth);
     give_back(k);
-    if let Some((hook, why, inputs)) = report {
+    if let Some((hook, why, code, inputs)) = report {
         IN_HOOK.with(|h| h.set(true));
         // A panicking callback loses nothing of the call's result.
         let _ = catch_unwind(AssertUnwindSafe(|| {
             hook(&Failure {
                 call,
                 why: &why,
+                code,
                 inputs,
             });
         }));
