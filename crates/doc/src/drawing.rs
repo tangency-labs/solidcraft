@@ -77,6 +77,7 @@ mod fill;
 pub mod fold;
 pub mod image;
 pub mod note;
+pub mod sheet_set;
 mod sketch;
 pub mod symbol;
 pub mod table;
@@ -240,6 +241,10 @@ const RECORD_FIELDS: &[&str] = &[
     "tables",
     "notes",
     "revisions",
+    // Where image files, placements and logos are set aside (`image::set_aside`).
+    "image_files",
+    "placed_images",
+    "logo_cells",
 ];
 
 /// Move the elements of the list `key` that don't read as `T` out of a newer build's drawing.
@@ -540,6 +545,7 @@ impl Drawing {
     fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> Result<Drawing> {
         DRAWING.check_numbers(&v, "properties")?;
         DRAWING.upgrade(&mut v, version, applied)?;
+        image::take_back(&mut v);
         sketch::check_raw(&v).map_err(damaged)?;
         fill::check_raw(&v).map_err(damaged)?;
         let mut d: Drawing = serde_json::from_value(v).map_err(damaged)?;
@@ -614,14 +620,12 @@ impl Drawing {
     pub fn to_json(&self) -> Result<String> {
         self.validate()?;
         let unsaved = |e: serde_json::Error| DocError::Invalid(format!("drawing not saved: {e}"));
-        let text = match &self.newer_file {
-            None => serde_json::to_string_pretty(self).map_err(unsaved)?,
-            Some(file) => {
-                let mut value = serde_json::to_value(self).map_err(unsaved)?;
-                file.restore(&mut value);
-                serde_json::to_string_pretty(&value).map_err(unsaved)?
-            }
-        };
+        let mut value = serde_json::to_value(self).map_err(unsaved)?;
+        image::set_aside(&mut value);
+        if let Some(file) = &self.newer_file {
+            file.restore(&mut value);
+        }
+        let text = serde_json::to_string_pretty(&value).map_err(unsaved)?;
         require(text.len() <= MAX_DRAWING_BYTES, || format!("drawing too large to save (at most {} MiB)", MAX_DRAWING_BYTES >> 20))?;
         Ok(text)
     }
@@ -634,15 +638,7 @@ impl Drawing {
 
     /// The position of the sheet `named` names: by id, else by a name only one sheet has.
     pub fn sheet_index(&self, named: &str) -> Result<usize> {
-        if let Some(i) = ids::decode(named).and_then(|id| self.sheets.iter().position(|s| s.id == id)) {
-            return Ok(i);
-        }
-        let mut called = self.sheets.iter().enumerate().filter(|(_, s)| s.name == named).map(|(i, _)| i);
-        match (called.next(), called.next()) {
-            (Some(i), None) => Ok(i),
-            (Some(_), Some(_)) => Err(DocError::Invalid(format!("more than one sheet is called `{named}`: give its id"))),
-            (None, _) => Err(DocError::Invalid(format!("no sheet `{named}`"))),
-        }
+        by_id::named_index(&self.sheets, named, "sheet", |sheet| sheet.id, |sheet| &sheet.name)
     }
 
     /// Whether `id` names an object a sheet shows: a view, a dimension or a balloon.

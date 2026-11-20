@@ -770,6 +770,7 @@ fn state() -> FilletExecutive<Handle> {
         fit_kind: FitKind::Radius,
         fit_setback: -1.0,
         rollover_adjusting: false,
+        rolled_beside_band: false,
     }
 }
 
@@ -905,9 +906,7 @@ fn piecewise_return_restores_both_temporary_flags_on_success_and_error() {
 fn stitching_retries_exactly_five_times_doubles_tolerance_then_passes_on_orientation_error() {
     let gathered = SolidError::topology(
         "topology::brep::p3",
-        crate::error::topology::TopologyFailure::Inconsistent(
-            crate::topology::brep::p3::GATHERED_BOTH_SIDES,
-        ),
+        crate::error::topology::TopologyFailure::GatheredBothSides,
     );
     // (lamina, orientation error, keeps_open answer, unify error, asked, kept)
     for (lamina, error, keeps_open, unify_error, asked, kept) in [

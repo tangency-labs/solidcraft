@@ -139,6 +139,23 @@ pub struct Built {
     /// Bodies the preview only moves, drawn moved on the GPU instead of built where they land
     /// (a Move). `scene` is not read then.
     pub layer: Option<Layer>,
+    /// The joints the preview posed, with their effective values now: the ones it drove and the
+    /// ones it moved (a motion link's follower, a joint a closed loop moved). Empty when the
+    /// preview posed no joint.
+    pub joints: Vec<solidcraft_engine::schema::joints::ReachedJoint>,
+    /// The last view command from a previewed plugin run, applied with its first drawn result.
+    pub plugin_view: Option<Value>,
+}
+
+/// The solved joint pose a preview shows: the joints it posed, with what posed them and the
+/// generation that counts the completed poses.
+pub struct JointPose {
+    /// What posed it: the command that opened the preview (`None`: nothing named it).
+    pub source: Option<&'static str>,
+    /// The generation of the completed pose: each pose applied to the preview a new one.
+    pub generation: u64,
+    /// The joints the pose posed, with their effective values now.
+    pub joints: Vec<solidcraft_engine::schema::joints::ReachedJoint>,
 }
 
 /// What a preview only moves, as a layer of its own ([`crate::gpu::MovingLayer`]): scenes built
@@ -202,6 +219,8 @@ pub struct PreviewState {
     pub busy: bool,
     /// Extent of the preview scene.
     pub bounds: Aabb3,
+    /// The view command belonging to the currently shown plugin result.
+    plugin_view: Option<Value>,
     /// Time the last preview took (ms), for `ui.inspect`.
     pub ms: f64,
     started: f64,
@@ -234,6 +253,17 @@ pub struct PreviewState {
     /// the ghost), and the renderer keeps the moving one only as long as every frame draws it
     /// ([`PreviewState::layer_not_drawn`]).
     layer: Option<(u64, solidcraft_engine::doc::Mat)>,
+    /// The solved joint pose the preview shows: the joints it posed, with what posed them and
+    /// the generation that counts the completed poses. `None`: no joint preview is up.
+    pub pose: Option<JointPose>,
+    /// Counts the completed poses: each pose applied to the preview a new generation, so a
+    /// reader can tell one pose from the next. It is not the design's revision.
+    generation: u64,
+    /// What poses the preview: the command that opened it (`None`: nothing named it).
+    source: Option<&'static str>,
+    /// The design's public revision (`document.revision`) the preview was computed against: a
+    /// pose of another revision is not the pose of this design.
+    base_revision: Option<u64>,
 }
 
 impl PreviewState {
@@ -314,7 +344,7 @@ impl PreviewState {
         }
     }
 
-    fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.straight.clear();
         self.moving.clear();
         self.detach();
@@ -322,6 +352,7 @@ impl PreviewState {
         self.running_stream_key = None;
         self.shown_key = None;
         self.error = None;
+        self.plugin_view = None;
         self.applied = None;
         self.stopped = None;
         self.placed = None;
@@ -332,6 +363,9 @@ impl PreviewState {
         self.sketches.clear();
         self.busy = false;
         self.rolled_back = false;
+        self.pose = None;
+        self.source = None;
+        self.base_revision = None;
         self.hide_scene();
     }
 
@@ -340,9 +374,28 @@ impl PreviewState {
     /// state (another slot, empty) would leave the old preview drawn over the next design.
     pub fn reset(&mut self) {
         self.detach();
-        let (slot, key, detached) = (std::mem::take(&mut self.slot), self.key, std::mem::take(&mut self.detached));
-        *self = PreviewState { slot, key, detached, layer_serial: self.layer_serial, ..PreviewState::default() };
+        let (slot, key, detached, generation) = (std::mem::take(&mut self.slot), self.key, std::mem::take(&mut self.detached), self.generation);
+        *self = PreviewState { slot, key, detached, layer_serial: self.layer_serial, generation, ..PreviewState::default() };
         self.set_scene(GpuScene::default());
+    }
+
+    /// The pose the preview shows, when it belongs to the design of `revision`: a pose of
+    /// another revision is not the pose of this design, and goes.
+    pub(crate) fn pose(&mut self, revision: u64) -> Option<&JointPose> {
+        if self.base_revision != Some(revision) {
+            self.pose = None;
+        }
+        self.pose.as_ref()
+    }
+
+    /// What poses the preview, and the design it was computed against: a reader of the pose
+    /// knows what posed it and which design it belongs to.
+    pub(crate) fn set_source(&mut self, source: Option<&'static str>, revision: u64) {
+        if self.base_revision != Some(revision) {
+            self.pose = None;
+        }
+        self.source = source;
+        self.base_revision = Some(revision);
     }
 
     fn set_scene(&mut self, sc: GpuScene) {
@@ -350,6 +403,23 @@ impl PreviewState {
             *slot = Some(sc);
         }
         self.key = self.key.wrapping_add(1);
+    }
+
+    pub(crate) fn show_joint_drive(&mut self, key: u64, start: f64, built: Built, source: &'static str, revision: u64) {
+        self.started = start;
+        self.set_source(Some(source), revision);
+        self.apply(key, Ok(built));
+    }
+
+    /// The pose a completed preview shows: the joints it posed. A preview that poses no joint
+    /// leaves no pose: what it shows is the design as it was.
+    fn set_pose(&mut self, joints: Vec<solidcraft_engine::schema::joints::ReachedJoint>) {
+        if joints.is_empty() {
+            self.pose = None;
+            return;
+        }
+        self.generation = self.generation.wrapping_add(1);
+        self.pose = Some(JointPose { source: self.source, generation: self.generation, joints });
     }
 
     fn apply(&mut self, key: u64, job: Job) {
@@ -361,6 +431,7 @@ impl PreviewState {
                 self.replaced = b.replaced;
                 self.outlines = b.outlines;
                 self.bounds = b.bounds;
+                self.plugin_view = b.plugin_view;
                 self.active = true;
                 self.error = b.error;
                 self.applied = b.applied;
@@ -369,6 +440,7 @@ impl PreviewState {
                 self.tapered = b.tapered;
                 self.mirror_meets = b.mirror_meets;
                 self.points = b.points;
+                self.set_pose(b.joints);
                 match b.layer {
                     // The scenes of this key are up: only the motion changes, nothing is uploaded.
                     Some(Layer { key, scenes: None, motion }) if self.layer_shown() == Some(key) => self.layer = Some((key, motion)),
@@ -397,6 +469,7 @@ impl PreviewState {
             // them (a 1 mm extrusion still drawn at 0 mm), so nothing is drawn.
             Err(e) => {
                 self.hide_scene();
+                self.plugin_view = None;
                 self.sketches.clear();
                 self.error = Some(e);
                 self.applied = None;
@@ -406,6 +479,7 @@ impl PreviewState {
                 self.mirror_meets = None;
                 self.mirror_decided = None;
                 self.points.clear();
+                self.pose = None;
             }
         }
     }
@@ -564,6 +638,10 @@ fn stream_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
 /// Keep the preview in step with the open dialog: start a computation when its inputs changed,
 /// take finished results. Called once per frame.
 pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
+    crate::control_joint_drive::expire(app);
+    if app.control_joint_drive.active() || !crate::ui_kit::numeric_preview_ready(ctx) {
+        return;
+    }
     // A Mirror's operation follows whether a copy meets the body it was made from: Join when one
     // overlaps or touches its body, New Body when none does. It is set once for each pick of
     // bodies and plane, so an operation picked by hand afterwards stays until they change.
@@ -597,6 +675,12 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     colors.tint_new = app.preferences.preview_tint_new_faces;
     colors.cut_tint = app.preferences.cut_preview_tint;
     let mut key = job_key(&cmds, app.session.revision, colors);
+    // A reopened dialog must not inherit a result (or an in-flight run) from the old dialog.
+    if let Some((id, _, _)) = &plugin {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (key, id).hash(&mut h);
+        key = h.finish();
+    }
     // A Move is drawn as a layer where the view allows it (`move_preview::layered`), and built
     // where it lands where not: when the view changes between the two, it is computed again.
     if crate::move_preview::is_move(&cmds) {
@@ -606,7 +690,12 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let stream_key = stream_key(&cmds, app.session.revision, colors);
     let tool = as_new_body(&cmds).is_some();
+    // What poses the preview, and the design it was computed against: a reader of the pose knows
+    // what posed it and which design it belongs to.
+    let source = app.dialog.as_ref().filter(|d| d.previews() && d.preview_enabled).and_then(|d| d.command());
+    let revision = app.session.design_revision();
     let pv = &mut app.preview;
+    pv.set_source(source, revision);
     pv.poll(key, stream_key);
     if pv.running.is_none() && pv.shown_key != Some(key) {
         pv.started = crate::now_ms();
@@ -632,6 +721,16 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
         spawn(&mut app.preview, key, scratch, cmds, colors, tool, Arc::new(Progress::default()));
     }
     app.preview.busy = app.preview.running.is_some();
+    // Both worker results and the web's synchronous results are ready before their first draw.
+    if app.preview.shown_key == Some(key)
+        && app.preview.active
+        && app.preview.error.is_none()
+        && !app.preview.bounds.is_empty()
+        && let Some((id, _, _)) = &plugin
+    {
+        let view = app.preview.plugin_view.take();
+        crate::plugin_menu::preview_drawn(app, *id, view);
+    }
     if app.preview.busy {
         ctx.request_repaint_after(std::time::Duration::from_millis(16));
     }
@@ -924,6 +1023,8 @@ fn build_copies(before: &ModelState, after: &ModelState, sources: &[String], c: 
         points: Vec::new(),
         placed: None,
         layer: None,
+        joints: Vec::new(),
+        plugin_view: None,
     }
 }
 
@@ -976,6 +1077,8 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
         points: Vec::new(),
         placed: None,
         layer: None,
+        joints: Vec::new(),
+        plugin_view: None,
     }
 }
 
@@ -1077,20 +1180,24 @@ fn build_as(before: &ModelState, after: &ModelState, c: Colors, combine: Option<
     }
     for a in &after.bodies {
         let am = a.mesh();
-        let old = before.body(&a.name).map(|b| b.mesh());
+        let old_body = before.body(&a.name);
+        // A placement changes no surface: compare the shared source geometry before asking
+        // which faces differ in world coordinates (or reading the source's old history).
+        let moved = old_body.is_some_and(|b| a.display_moved_from(b).is_some());
+        let old = old_body.map(|b| b.mesh());
         if old.as_ref().is_some_and(|bm| same(bm, &am)) {
             continue;
         }
         // Material removed from a body (a hole, a pocket): its new faces also show through the
         // body in the cut colour, so the cut is seen from any side. A combine's cut shows its
         // tools instead, as ghosts that bodies in front of them hide.
-        let cut = c.cut_tint && combine.is_none() && old.as_ref().is_some_and(|bm| am.measure().volume < bm.measure().volume - 1e-6);
+        let cut = !moved && c.cut_tint && combine.is_none() && old.as_ref().is_some_and(|bm| am.measure().volume < bm.measure().volume - 1e-6);
         // Which of the body's faces the feature made, asked only when something is drawn from
         // the answer: the cut above, and the tint the preference offers. A changed body is
         // otherwise drawn as itself, so a preview looks like the model and nothing has to be
         // worked out face by face.
         let new_face: Vec<bool> = match &old {
-            Some(bm) if cut || tint_new => {
+            Some(bm) if !moved && (cut || tint_new) => {
                 let mut new = new_faces(&am, am.tri_face.iter().max().map_or(0, |m| *m as usize + 1), bm);
                 // The kernel recorded which faces the operation that made this body generated,
                 // i.e. has no face of an input under it. The two answers are taken together
@@ -1242,6 +1349,8 @@ fn build_as(before: &ModelState, after: &ModelState, c: Colors, combine: Option<
         points,
         placed: None,
         layer: None,
+        joints: Vec::new(),
+        plugin_view: None,
     }
 }
 
@@ -1514,6 +1623,39 @@ mod tests {
     }
 
     #[test]
+    fn a_unit_prefix_waits_before_scheduling_the_next_preview() {
+        let ctx = crate::fonts::test_context();
+        crate::params_dialog::install_expressions(&ctx);
+        let mut harness = crate::scenario::Harness::new();
+        let app = &mut harness.app;
+        let mut text = "2".to_owned();
+        let mut id = egui::Id::NULL;
+        crate::ui_kit::test_support::raw_frame(&ctx, egui::RawInput { time: Some(0.0), ..Default::default() }, |ui| {
+            id = crate::ui_kit::checked_field(ui, &mut text, "", false).1.id;
+        });
+        ctx.memory_mut(|m| m.request_focus(id));
+        crate::ui_kit::test_support::raw_frame(
+            &ctx,
+            egui::RawInput { time: Some(0.01), events: vec![egui::Event::Text("m".into())], ..Default::default() },
+            |ui| {
+                crate::ui_kit::checked_field(ui, &mut text, "", false);
+            },
+        );
+        app.preview.active = true;
+        text = "2mm".into();
+        // As in the app, scheduling precedes this frame's dialog inputs.
+        crate::ui_kit::test_support::raw_frame(&ctx, egui::RawInput { time: Some(0.02), ..Default::default() }, |ui| {
+            update(app, ui.ctx());
+            assert!(app.preview.active, "retain the preview while the previous pass's unit is pending");
+            crate::ui_kit::checked_field(ui, &mut text, "", false);
+        });
+        crate::ui_kit::test_support::raw_frame(&ctx, egui::RawInput { time: Some(0.03), ..Default::default() }, |ui| {
+            update(app, ui.ctx());
+            assert!(!app.preview.active, "the completed value reaches the scheduler immediately; no dialog clears this preview");
+        });
+    }
+
+    #[test]
     fn correcting_inputs_clears_old_errors_and_discards_late_old_jobs() {
         let mut pv = PreviewState {
             shown_key: Some(1),
@@ -1550,6 +1692,84 @@ mod tests {
         assert_eq!(pv.error.as_deref(), Some("current invalid expression"), "current errors still prevent invalid Apply");
     }
 
+    #[test]
+    fn a_joint_preview_does_not_report_a_pose_from_an_older_design() {
+        fn finish_preview(h: &mut crate::scenario::Harness) {
+            for _ in 0..8 {
+                let Some((key, rx)) = h.app.preview.running.take() else { break };
+                let job = rx.recv_timeout(std::time::Duration::from_secs(60)).unwrap();
+                h.app.preview.running_stream_key = None;
+                h.app.preview.running_tool = false;
+                h.app.preview.running_motion = false;
+                h.app.preview.apply(key, job);
+                h.frame();
+            }
+            assert!(!h.app.preview.busy, "the real preview workers completed");
+        }
+        fn angle(reply: &Value, joint: u64) -> f64 {
+            let reached = reply["result"]["pose"]["joints"].as_array().unwrap().iter().find(|j| j["joint"] == joint).unwrap();
+            assert_eq!(reached["values"][0]["unit"], "deg");
+            reached["values"][0]["value"].as_f64().unwrap()
+        }
+
+        let (mut h, arm, _) = crate::control::tests::joint_drive_design();
+        let started = h.call("ui.start", json!({"command": "joint.drive", "params": {"joint": arm, "values": [45]}}));
+        assert_eq!(started["ok"], true, "{started}");
+        finish_preview(&mut h);
+        let first = h.call("control.joint_pose", json!({}));
+        assert_eq!(first["ok"], true, "{first}");
+        assert_eq!(first["result"]["busy"], false, "{first}");
+        assert!((angle(&first, arm) - 45.0).abs() < 1e-6);
+        let generation = first["result"]["pose"]["generation"].as_u64().unwrap();
+
+        // Hold only scheduling: the real UI may not detach this empty receiver as stale.
+        let (held, rx) = std::sync::mpsc::channel::<Job>();
+        h.app.preview.running = Some((h.app.preview.shown_key.unwrap(), rx));
+        h.app.preview.running_progress = None;
+        h.app.preview.running_stream_key = None;
+        h.app.preview.running_motion = false;
+        h.app.preview.running_tool = false;
+        let d = h.app.dialog.as_mut().unwrap();
+        let crate::dialogs::Kind::Assembly(crate::dialogs_assembly::Asm::Drive { values, .. }) = &mut d.kind else { panic!("Drive Joints is open") };
+        values[0] = "60 deg".into();
+        h.frame();
+        let same = h.call("control.joint_pose", json!({}));
+        assert_eq!(same["ok"], true, "{same}");
+        assert_eq!(same["result"]["busy"], true, "{same}");
+        assert_eq!(same["result"]["revision"], first["result"]["revision"]);
+        assert_eq!(same["result"]["pose"], first["result"]["pose"], "same-design updates retain the last completed pose");
+
+        h.app.run("joint.limits", json!({"joint": arm, "min": 0, "max": 30})).unwrap();
+        let committed = h.app.session.doc.clone();
+        let history = (h.app.session.undo.len(), h.app.session.redo.len());
+        let revision = h.app.session.design_revision();
+        assert_ne!(revision, first["result"]["revision"].as_u64().unwrap());
+        // Read after the UI updates: an earlier read would clear the mismatched old pose
+        // before set_source could relabel it, masking the frame-order regression (#19603).
+        h.frame();
+        let changed = h.call("control.joint_pose", json!({}));
+        assert_eq!(changed["ok"], true, "{changed}");
+        assert_eq!(changed["result"]["document_id"], first["result"]["document_id"]);
+        assert_eq!(changed["result"]["revision"], revision);
+        assert_eq!(changed["result"]["busy"], true, "{changed}");
+        assert!(changed["result"]["pose"].is_null(), "{changed}");
+        assert_eq!(h.app.preview.generation, generation, "clearing is not a completed pose");
+        assert!(Arc::ptr_eq(&h.app.session.doc, &committed));
+        assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+
+        // The obsolete receiver disconnects; the ordinary UI starts the new limits' worker.
+        drop(held);
+        h.frame();
+        finish_preview(&mut h);
+        let finished = h.call("control.joint_pose", json!({}));
+        assert_eq!(finished["result"]["revision"], revision);
+        assert_eq!(finished["result"]["busy"], false, "{finished}");
+        assert!((angle(&finished, arm) - 30.0).abs() < 1e-6);
+        assert!(finished["result"]["pose"]["generation"].as_u64().unwrap() > generation);
+        assert!(Arc::ptr_eq(&h.app.session.doc, &committed));
+        assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+    }
+
     fn pose() -> Built {
         Built {
             scene: GpuScene::default(),
@@ -1565,6 +1785,8 @@ mod tests {
             points: Vec::new(),
             placed: None,
             layer: None,
+            joints: Vec::new(),
+            plugin_view: None,
         }
     }
 

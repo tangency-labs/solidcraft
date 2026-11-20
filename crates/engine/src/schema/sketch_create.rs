@@ -369,7 +369,7 @@ fn point_arg_schema(generator: &mut SchemaGenerator, snaps: bool) -> Schema {
     let mut forms = vec![
         json!(point),
         json!({
-            "description": "[x, y] where a coordinate may be an expression over the design's parameters, such as [\"w / 2\", 5]: a point that follows the parameters and is fixed; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point.",
+            "description": "[x, y] where a coordinate may be an expression over the design's parameters and the sketch's other points (\"p1.x\"), such as [\"w / 2\", 5]: a point that follows the parameters and is fixed; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point.",
             "type": "array", "items": coordinate, "minItems": 2, "maxItems": 2
         }),
         json!({"description": "An existing point's id such as \"l1.end\" or \"p3\", or a snap such as \"mid:l1\".", "type": "string"}),
@@ -382,7 +382,7 @@ fn point_arg_schema(generator: &mut SchemaGenerator, snaps: bool) -> Schema {
         forms.push(json!({"description": "A point on a model edge [x, y, z] in mm, projected into the sketch.", "type": "object", "properties": {"on_edge": model}, "required": ["on_edge"]}));
         "A sketch point: [x, y] in mm (a coordinate may be an expression), an existing point's id (\"l1.end\"), {ref} or {at}, a snap as text (\"mid:<line>\", \"on:<curve>:x,y\", \"x:<a>+<b>:x,y\", \"vertex:x,y,z\"), or a model {vertex} or {on_edge}."
     } else {
-        "A sketch point: [x, y] in mm (a coordinate may be an expression over the design's parameters), an existing point's id such as \"l1.end\", or {ref} or {at}."
+        "A sketch point: [x, y] in mm (a coordinate may be an expression over the design's parameters or over another point's coordinate, \"p1.x\"), an existing point's id such as \"l1.end\", or {ref} or {at}."
     };
     json_schema!({"description": description, "anyOf": forms})
 }
@@ -510,31 +510,25 @@ impl JsonSchema for BlendContinuity {
     }
 }
 
-/// `periodic`, as `spline` reads it: true or false (`null` too is refused). Only a cubic fit
-/// point spline (`FIT`) can be periodic; the control point splines refuse `true`.
+/// `periodic`, as `spline` reads it: true or false (`null` too is refused).
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Periodic<const FIT: bool>(pub bool);
+pub struct Periodic(pub bool);
 
-impl<'de, const FIT: bool> Deserialize<'de> for Periodic<FIT> {
+impl<'de> Deserialize<'de> for Periodic {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         match Value::deserialize(d)? {
-            Value::Bool(b) if FIT || !b => Ok(Periodic(b)),
-            Value::Bool(_) => Err(D::Error::custom(whole("periodic mode requires a cubic fit spline"))),
+            Value::Bool(b) => Ok(Periodic(b)),
             _ => Err(D::Error::custom(whole("periodic must be boolean"))),
         }
     }
 }
 
-impl<const FIT: bool> JsonSchema for Periodic<FIT> {
+impl JsonSchema for Periodic {
     fn schema_name() -> Cow<'static, str> {
-        if FIT { "PeriodicFit" } else { "PeriodicNever" }.into()
+        "Periodic".into()
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
-        if FIT {
-            json_schema!({"description": "Close the spline smoothly through its points (needs at least 3 distinct points). Default: false.", "type": "boolean"})
-        } else {
-            json_schema!({"description": "Not available for a control point spline: only false is accepted. Default: false.", "type": "boolean", "const": false})
-        }
+        json_schema!({"description": "Close the spline. A fit spline passes smoothly through its points (cubic, at least 3 distinct points); a control point spline wraps its control polygon into a loop (degree 3 or 5, at least degree + 1 points). Default: false.", "type": "boolean"})
     }
 }
 
@@ -1123,8 +1117,8 @@ pub struct FitPointSplineParams {
     pub points: Option<SplinePoints>,
     /// Close it smoothly through its points. Default: false.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Periodic<true>")]
-    pub periodic: Option<Periodic<true>>,
+    #[schemars(with = "Periodic")]
+    pub periodic: Option<Periodic>,
     /// Make it construction geometry. Default: false.
     #[serde(default)]
     pub construction: Option<bool>,
@@ -1142,10 +1136,10 @@ pub struct ControlPointSplineParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "SplinePoints")]
     pub points: Option<SplinePoints>,
-    /// Refused as true: only a cubic fit point spline can be periodic. Default: false.
+    /// Close the control polygon into a loop. Default: false.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Periodic<false>")]
-    pub periodic: Option<Periodic<false>>,
+    #[schemars(with = "Periodic")]
+    pub periodic: Option<Periodic>,
     /// Make it construction geometry. Default: false.
     #[serde(default)]
     pub construction: Option<bool>,
@@ -1156,6 +1150,38 @@ pub struct ControlPointSplineParams {
 
 fn points_required(schema: &mut Schema) {
     require(schema, "points");
+}
+
+/// Draw a control point spline with its own knots and weights (`sketch.spline.control_knots`): the
+/// clamped B-spline of `degree` over its points, with exactly the knots it is given (#19524).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = knots_required)]
+pub struct ControlKnotsSplineParams {
+    /// The control points.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SplinePoints")]
+    pub points: Option<SplinePoints>,
+    /// The degree: 1 to 9.
+    pub degree: u8,
+    /// The clamped knot vector: points + degree + 1 non-decreasing numbers, the first and last
+    /// degree + 1 equal to the domain's ends, no interior knot repeated more than degree times.
+    pub knots: Vec<f64>,
+    /// One positive weight per point; none: all 1. A weighted spline must have degree 2 (a
+    /// rational quadratic, exact as conics).
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    pub weights: Option<Vec<f64>>,
+    /// Make it construction geometry. Default: false.
+    #[serde(default)]
+    pub construction: Option<bool>,
+    /// The sketch (default: the one being edited).
+    #[serde(default)]
+    pub sketch: Option<SketchTarget>,
+}
+
+fn knots_required(schema: &mut Schema) {
+    require(schema, "points");
+    require(schema, "degree");
+    require(schema, "knots");
 }
 
 /// Join the end points of two curves with a blend curve: a tangent spline (g1), or one Bézier that

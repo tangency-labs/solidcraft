@@ -3,6 +3,7 @@
 # SolidError (checked arithmetic, .get(), a length check) and drop its row. `proven` marks
 # a site that cannot panic, with the reason; it is exempt from the ratchet.
 file	fn	pattern	n	status	code	reason
+crates/solidcore-cadir/src/lib.rs	Model::region_tolerance	f64::clamp	1	proven	clamp(MIN_TOLERANCE, MAX_FIT_TOLERANCE)	constant bounds MIN_TOLERANCE (1e-7) <= MAX_FIT_TOLERANCE (1.0)
 crates/solidcore-cadir/src/lib.rs	tolerance	f64::clamp	1	proven	clamp(MIN_TOLERANCE, MAX_FIT_TOLERANCE)	constant bounds MIN_TOLERANCE (1e-7) <= MAX_FIT_TOLERANCE (1.0)
 crates/solidcore-step/src/eval.rs	BSplineSurface::point	with_capacity	1	proven	Vec::with_capacity(nu)	nu = points.len(), already in memory
 crates/solidcore-step/src/eval.rs	expanded	with_capacity	1	proven	Vec::with_capacity(total)	total == points + degree + 1 with degree < points, checked just above: at most twice the points, already in memory
@@ -305,7 +306,6 @@ crates/solidcore/src/blend/fillet_executive/session/keep_features.rs	FilletSessi
 crates/solidcore/src/blend/fillet_executive/session/keep_features.rs	FilletSession::keep_features_on	with_capacity	2	open	Vec::with_capacity(2 * rim_curves.len())	
 crates/solidcore/src/blend/fillet_executive/session/keep_features.rs	FilletSession::keep_features_on	with_capacity	3	proven	Vec::with_capacity(sheet_faces.len())	sheet_faces.len(), an in-memory collection
 crates/solidcore/src/blend/fillet_executive/session/keep_features.rs	FilletSession::keep_features_on	with_capacity	4	proven	Vec::with_capacity(blended_edges.len())	blended_edges.len(), an in-memory collection
-crates/solidcore/src/blend/fillet_executive/session/outline_rims.rs	FilletSession::end_round_on_outline	with_capacity	1	proven	Vec::with_capacity(2)	constant capacity
 crates/solidcore/src/blend/fillet_executive/session/surface.rs	SessionObjects::allocate_surface_surface_solver	with_capacity	1	proven	Vec::with_capacity(2)	constant capacity
 crates/solidcore/src/blend/fillet_executive/session/two_offsets.rs	FilletSession::prepare_chamfers_along	f64::clamp	1	proven	clamp(-1.0, 1.0)	constant bounds, min <= max
 crates/solidcore/src/blend/fillet_geom/p2.rs	FilletBrep::calc_rail_rail_interpolation_with_solvers	int-rem	1	open	(index + 2) % total_edges	
@@ -350,10 +350,6 @@ crates/solidcore/src/blend/fillet_intersector/skin_bound.rs	BallFamily::radius_v
 crates/solidcore/src/blend/fillet_intersector/skin_bound.rs	BallFamily::radius_vanishes_on	f64::clamp	2	proven	clamp(lo, hi)	range is [lo, hi] with lo < hi: BallFamily::through returns None unless above(hi, lo), which a NaN fails
 crates/solidcore/src/blend/fillet_intersector/skin_bound.rs	BallFamily::through	with_capacity	1	proven	Vec::with_capacity(nodes.len())	n = nodes.len(), an existing slice (at most five balls); f64 is no larger than a Ball
 crates/solidcore/src/blend/fillet_intersector/skin_bound.rs	linear_through	Ord::clamp	1	proven	clamp(1, n.saturating_sub(1).max(1))	min 1 <= max, which is at least 1
-crates/solidcore/src/blend/fillet_outline.rs	decide	with_capacity	1	proven	Vec::with_capacity(2)	constant capacity
-crates/solidcore/src/blend/fillet_outline.rs	decide	with_capacity	2	proven	Vec::with_capacity(2)	constant capacity
-crates/solidcore/src/blend/fillet_outline.rs	decide	with_capacity	3	proven	Vec::with_capacity(2)	constant capacity
-crates/solidcore/src/blend/fillet_outline.rs	outline_supports	with_capacity	1	proven	Vec::with_capacity(2)	constant capacity
 crates/solidcore/src/blend/fillet_overflow.rs	extend	Vec::insert	1	proven	insert(0, (q, rev))	index 0 is never past the end
 crates/solidcore/src/blend/fillet_overflow.rs	twice_area	int-rem	1	proven	(p + 1) % uv.len()	inside uv.iter().enumerate(), so uv.len() > 0
 crates/solidcore/src/blend/fillet_removal.rs	relink	Vec::remove	1	proven	remove(at)	at is position() in the same Vec
@@ -556,6 +552,9 @@ crates/solidcore/src/heal/heal_data/p3.rs	HealData::fix_coin_vertices	int-div	1	
 crates/solidcore/src/heal/stitch/p1.rs	sort_by_param	Vec::insert	1	proven	insert(0, ii)	index 0 is never past the end
 crates/solidcore/src/heal/stitch/p1.rs	sort_by_param	Vec::insert	2	proven	insert(lmax, ii)	returns Err when lmax > sorted.len()
 crates/solidcore/src/heal/stitch/p1.rs	sort_by_param	int-div	1	proven	(lmin + lmax) / 2	constant non-zero divisor
+crates/solidcore/src/hlr.rs	context	Ord::clamp	1	proven	clamp(1, MAX_THREADS)	constant bounds, 1 <= MAX_THREADS
+crates/solidcore/src/hlr/curve.rs	on_both_surfaces	step_by	1	proven	step_by(stride)	stride is at least 1: (samples.len() / MAX_SAMPLES).max(1) just above
+crates/solidcore/src/hlr/surface.rs	sampled_box	chunks	1	proven	chunks(FORM_STEPS + 1)	constant non-zero size
 crates/solidcore/src/intersect/adv_surface_intersector.rs	AdvSurfaceIntersector::local_solve	copy_from_slice	1	proven	copy_from_slice(&[mn.x, mn.y, mn.z, mx.x, mx.y, mx.z, 1.0])	destination prefix and source array have identical literal lengths in fixed MAX_PARAMS = 10 storage
 crates/solidcore/src/intersect/adv_surface_intersector.rs	AdvSurfaceIntersector::local_solve	copy_from_slice	2	proven	copy_from_slice(&[a.x, a.y, b.x, b.y, c.x, c.y, d.x, d.y])	destination prefix and source array have identical literal lengths in fixed MAX_PARAMS = 10 storage
 crates/solidcore/src/intersect/adv_surface_intersector.rs	AdvSurfaceIntersector::local_solve	copy_from_slice	3	proven	copy_from_slice(&[mn.x, mn.y, mn.z, mx.x, mx.y, mx.z])	destination prefix and source array have identical literal lengths in fixed MAX_PARAMS = 10 storage
@@ -908,8 +907,8 @@ crates/solidcore/src/surface/plane/p1.rs	Plane::plane_overlap	windows	1	proven	w
 crates/solidcore/src/surface/plane/p1.rs	Plane::plane_overlap	with_capacity	1	proven	Vec::with_capacity(5)	constant capacity
 crates/solidcore/src/surface/plane/p1.rs	Plane::surface_overlap	with_capacity	1	open	Vec::with_capacity(bdrys_3d1.len())	
 crates/solidcore/src/surface/plane/p1.rs	transpose	int-div	1	open	a.len() / num_rows	
-crates/solidcore/src/surface/plane/p2.rs	Plane::make_new_plane_ellipse	int-rem	1	proven	((ii + count) - 1) % count	inside for ii in 0..count, so count > 0
-crates/solidcore/src/surface/plane/p2.rs	Plane::make_new_plane_ellipse	int-rem	2	proven	(ii + 1) % count	inside for ii in 0..count, so count > 0
+crates/solidcore/src/surface/plane/p2.rs	Plane::make_new_plane_ellipse_in_contact	int-rem	1	proven	((ii + count) - 1) % count	inside for ii in 0..count, so count > 0
+crates/solidcore/src/surface/plane/p2.rs	Plane::make_new_plane_ellipse_in_contact	int-rem	2	proven	(ii + 1) % count	inside for ii in 0..count, so count > 0
 crates/solidcore/src/surface/procedural_blend/convert.rs	corner_from_record	with_capacity	1	open	Vec::with_capacity(r.rounds.len())	
 crates/solidcore/src/surface/procedural_blend/convert.rs	non_decreasing	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore/src/surface/procedural_sweep.rs	ProceduralSweep::create	windows	1	proven	windows(2)	constant non-zero size

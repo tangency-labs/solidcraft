@@ -24,8 +24,9 @@
 use solidcore::geom::attribute::AttributeStore;
 use solidcore::mass::enclosure::EnclosureStop;
 use solidcore::topology::brep::p10::TopologyEnv;
-use solidcore::topology::brep::p7::read_from_file;
+use solidcore::topology::brep::p7::{read_from_data, read_from_file};
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+use solidcore::topology::brep_data::BrepData;
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::edgeuse::p1::max_edge_face_gap;
 use solidcore::topology::topology::NotifyRecords;
@@ -121,7 +122,7 @@ fn revolution_mold_edges_cover_their_gaps() {
 }
 
 /// The UV trim of the sphere's use of `Fillet/sphere_plane.smb`'s circle edge (edge 3),
-/// built after the read: the file's trim fails `sm_CheckUVTrimCurve` and is dropped, so
+/// built after the read once the caller has dropped the file's trim, so
 /// `GetOrCreateUVTrimCurve` makes it. Returns the curve's interval ends and 65 points
 /// along it, and the edge's tolerance.
 fn sphere_plane_circle_trim(k: &Kernel, b: &mut Brep) -> (Vec<[u64; 2]>, f64) {
@@ -164,6 +165,13 @@ fn sphere_plane_trim_fit_does_not_grow_with_the_gap_cover() {
     let e = EdgeId::from_index(3);
     let raised = b.edge(e).unwrap().tolerance;
     assert!(raised > 1.0e-5, "the circle edge is raised: {raised:e}");
+    // the sphere's trim made again after the read (the read keeps the file's own trim,
+    // WR-493)
+    for eu in b.edge(e).unwrap().edgeuses.clone() {
+        if eu1::face(&b, eu).unwrap() == Some(FaceId::from_index(0)) {
+            eu1::set_uv_trim_curve(&mut b, eu, eu1::UvTrimCurveArg::Null, 0.0, true, None).unwrap();
+        }
+    }
     let (healed, tol) = sphere_plane_circle_trim(&k, &mut b);
 
     // the same read with the circle edge at the tolerance before the gap cover, and the
@@ -262,7 +270,11 @@ fn corpus_key(e: solidcore::EntityRef) -> solidcore::geom::object::ObjectRef {
 }
 
 /// Reads a corpus file as `corpus.parity` does (`rebuild` false), or with the UV trims
-/// rebuilt (`bRebuildUVTrimCurves`, `topology.face_p3`'s `_rebuild` rows).
+/// rebuilt (`bRebuildUVTrimCurves`, `topology.face_p3`'s `_rebuild` rows), with the
+/// tolerances the read's kept-trim cover raised after the healer put back as the healer
+/// left them ([`undo_trim_cover`]): the replay is of the healer's gap cover, against
+/// main's reads before the kept-trim cover (tangency-labs/solidcraft#19295), whose own
+/// raises are replayed by goldens' `tolsub::replay`.
 fn read_corpus(k: &mut Kernel, name: &str, rebuild: bool) -> Brep {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../upstream/TestFiles/pt_TestFiles")
@@ -278,8 +290,82 @@ fn read_corpus(k: &mut Kernel, name: &str, rebuild: bool) -> Brep {
         records: &mut records,
         next_key: 1 << 62,
     };
-    read_from_file(k, &mut b, bytes, FileType::Ascii, rebuild, &mut env).unwrap();
+    if REFIT.with(std::cell::Cell::get) {
+        // `read_from_file`'s two halves, with each found sphere's file NURB replaced
+        // between them ([`with_fitted_spheres`])
+        let mut data = BrepData::read_from_file(k, bytes, FileType::Ascii).unwrap();
+        assert!(fit_spheres(k, &mut data) > 0, "{name}: no sphere found");
+        read_from_data(k, &mut b, data, rebuild, &mut env).unwrap();
+    } else {
+        read_from_file(k, &mut b, bytes, FileType::Ascii, rebuild, &mut env).unwrap();
+    }
+    undo_trim_cover(&mut b);
     b
+}
+
+thread_local! {
+    /// Whether [`read_corpus`] puts back upstream's fitted sphere NURBs.
+    static REFIT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Runs `f` with every [`read_corpus`] read building each sphere found in a NURBS on the
+/// sphere as upstream's `IsNurbSurfaceSphere` returns it, with its NURB made from the
+/// fitted circles: main's build before the WR-493 retirement, which keeps the file's
+/// NURB (goldens' `refit` seam, whose replays show it is main's build bit for bit).
+fn with_fitted_spheres<T>(f: impl FnOnce() -> T) -> T {
+    struct Clear;
+    impl Drop for Clear {
+        fn drop(&mut self) {
+            REFIT.with(|r| r.set(false));
+        }
+    }
+    REFIT.with(|r| r.set(true));
+    let _clear = Clear;
+    f()
+}
+
+/// Replaces each B-spline surface of `data` that `CopyAndAddAnalytics` finds to be a
+/// sphere (its recognisers in their order: the plane, the cone, then the sphere, each at
+/// tolerance scale 1) by that sphere with upstream's fitted NURB; returns how many.
+fn fit_spheres(k: &Kernel, data: &mut BrepData) -> usize {
+    use solidcore::surface::cone::Cone;
+    use solidcore::surface::plane::Plane;
+    use solidcore::surface::sphere::Sphere;
+    use solidcore::surface::surface::{Surface, SurfaceKind};
+    assert!(!k.fixes.analytic_copy_keeps_parameterization);
+    let mut replaced = 0;
+    for s in &mut data.surfaces {
+        let SurfaceKind::BSpline(srf) = s.object.kind() else {
+            continue;
+        };
+        if Plane::is_nurb_surface_plane(k, srf, 1.0).unwrap().is_some()
+            || Cone::is_nurb_surface_cone(k, srf, 1.0).unwrap().is_some()
+        {
+            continue;
+        }
+        if let Some(sphere) = Sphere::fitted_nurb_surface_sphere(k, srf, 1.0).unwrap() {
+            s.object = Surface::from(sphere);
+            replaced += 1;
+        }
+    }
+    replaced
+}
+
+/// Puts back every edge and vertex tolerance the read's kept-trim cover raised
+/// ([`Brep::trim_cover_raises`]) to the value the read had made before it, checking each
+/// still holds the raised value.
+fn undo_trim_cover(b: &mut Brep) {
+    let raises = b.trim_cover_raises().clone();
+    for (e, (before, after)) in raises.edges {
+        let r = b.edge_mut(e).unwrap();
+        assert_eq!(r.tolerance.to_bits(), after.to_bits(), "{e:?}");
+        r.tolerance = before;
+    }
+    for (v, (before, after)) in raises.vertices {
+        let r = b.vertex_mut(v).unwrap();
+        assert_eq!(r.tolerance.to_bits(), after.to_bits(), "{v:?}");
+        r.tolerance = before;
+    }
 }
 
 /// FNV-1a over the bits of the values fed to it.
@@ -873,9 +959,19 @@ const MAIN: [(&str, [u64; 5]); 28] = [
 ///   tolerance. It stops at its cell budget, wider than asked, holding both values:
 ///   neither can be told farther. (`Fillet/test1.smb`'s as-read volume differed by 1 ulp
 ///   too, before the knot-line split; with it, its as-read and set-back volumes agree.)
+///
+/// With the WR-493 retirement, the two files here with a sphere found in a NURBS
+/// (`Fillet/sphere_plane.smb`, `Solids/revolution_mold.smb`) also keep the file's NURB and
+/// trims on those faces (`wr493_class_proofs`'
+/// `found_spheres_and_tori_keep_the_file_nurb_and_trims`), so their reads differ from
+/// main's by that too (asserted). With upstream's fitted sphere NURB put back
+/// ([`with_fitted_spheres`]) all of the above holds for them against main's values as for
+/// every other file; they are asserted to be those two files only. (`sphere_plane`'s
+/// volume is NaN in [`MAIN`], main's own value, and compared by its bits.)
 #[test]
 fn corpus_reads_change_only_the_covered_tolerances() {
     let mut failures = Vec::new();
+    let mut wr493 = Vec::new();
     let mut raised = 0;
     let mut moved = 0;
     let mut moved_volumes = Vec::new();
@@ -885,17 +981,46 @@ fn corpus_reads_change_only_the_covered_tolerances() {
         let vertices = entries(MOVED_VERTICES, name);
         raised += edges.len();
         moved += vertices.len();
-        let (read_digest, lazy_digest) = replay(name, false, edges, vertices, true, &mut failures);
         let rebuild_edges = entries(REBUILD_RAISED_EDGES, name);
         let rebuild_vertices = entries(REBUILD_MOVED_VERTICES, name);
-        let (rebuild_digest, _) = replay(
-            name,
-            true,
-            rebuild_edges,
-            rebuild_vertices,
-            false,
-            &mut failures,
-        );
+        let wr = WR493_READS.contains(&name);
+        if wr {
+            // the found spheres keep the file's NURB and trims, so these reads are not
+            // main's (asserted; the replays' own checks hold on them as on every file),
+            // and with upstream's fitted NURB put back they are, as every other file is
+            let (read_digest, _) = replay(name, false, edges, vertices, true, &mut failures);
+            let (rebuild_digest, _) = replay(
+                name,
+                true,
+                rebuild_edges,
+                rebuild_vertices,
+                false,
+                &mut failures,
+            );
+            if read_digest == read_main || rebuild_digest == rebuild_main {
+                failures.push(format!("{name}: read as main's"));
+            }
+            wr493.push(name);
+        }
+        let fit = |f: &mut dyn FnMut()| {
+            if wr {
+                with_fitted_spheres(f);
+            } else {
+                f();
+            }
+        };
+        let (mut read_digest, mut lazy_digest, mut rebuild_digest) = (0, 0, 0);
+        fit(&mut || {
+            (read_digest, lazy_digest) = replay(name, false, edges, vertices, true, &mut failures);
+            (rebuild_digest, _) = replay(
+                name,
+                true,
+                rebuild_edges,
+                rebuild_vertices,
+                false,
+                &mut failures,
+            );
+        });
         for (what, now, main) in [
             ("read", read_digest, read_main),
             ("lazy trims", lazy_digest, lazy_main),
@@ -905,8 +1030,11 @@ fn corpus_reads_change_only_the_covered_tolerances() {
                 failures.push(format!("{name}: {what} digest {now:#x}, main {main:#x}"));
             }
         }
-        let (area, volume) = corpus_mass(name, None);
-        let (area0, volume0) = corpus_mass(name, Some((edges, vertices)));
+        let (mut area, mut volume, mut area0, mut volume0) = (0.0, 0.0, 0.0, 0.0);
+        fit(&mut || {
+            (area, volume) = corpus_mass(name, None);
+            (area0, volume0) = corpus_mass(name, Some((edges, vertices)));
+        });
         if area.to_bits() != area_main || area0.to_bits() != area_main {
             failures.push(format!(
                 "{name}: area {:#x} / lowered {:#x}, main {area_main:#x}",
@@ -925,7 +1053,8 @@ fn corpus_reads_change_only_the_covered_tolerances() {
             // 1e-9 * |V| wide, the goldens' relative tolerance)
             let main = f64::from_bits(volume_main);
             let mut k = Kernel::default();
-            let mut b = read_corpus(&mut k, name, false);
+            let mut b = Brep::new_with_infinite_region().unwrap();
+            fit(&mut || b = read_corpus(&mut k, name, false));
             let asked = 1e-9 * main.abs();
             let e = solidcore::mass::enclosure::enclose_volume(&k, &mut b, asked).unwrap();
             let class = if e.lo <= volume.min(main) && volume.max(main) <= e.hi {
@@ -951,6 +1080,7 @@ fn corpus_reads_change_only_the_covered_tolerances() {
     }
     assert_eq!((raised, moved), (206, 296));
     assert_eq!(moved_volumes, ["Fillet/corner_box.smb"], "{failures:#?}");
+    assert_eq!(wr493, WR493_READS);
     let classes: Vec<_> = volume_classes.iter().map(|&(n, c, ..)| (n, c)).collect();
     assert_eq!(
         classes,
@@ -971,6 +1101,11 @@ fn corpus_reads_change_only_the_covered_tolerances() {
     );
     assert!(failures.is_empty(), "{failures:#?}");
 }
+
+/// The files of [`MAIN`] with a sphere found in a NURBS, whose reads the WR-493
+/// retirement changes too: they are replayed against main's with upstream's fitted
+/// sphere NURB put back ([`with_fitted_spheres`]).
+const WR493_READS: [&str; 2] = ["Fillet/sphere_plane.smb", "Solids/revolution_mold.smb"];
 
 /// Edges whose tolerance the read raises: per file, (edge index, main's tolerance bits).
 const RAISED_EDGES: &[(&str, &[(u32, u64)])] = &[
@@ -1744,7 +1879,9 @@ fn fillet_result(name: &str, edge: usize, radius: f64) -> (u64, Vec<u64>) {
 /// [`MAIN`]): only the surface points sampled along face 15's trims move. Every vertex,
 /// edge and tolerance of the read is bit for bit main's
 /// ([`bottle_read_moves_only_face_15s_net_and_one_rebuilt_uv_at_rounding`]); entry 14's mass
-/// is bit for bit main's (MEASURED).
+/// is bit for bit main's (MEASURED). Since #18918 entry 14 is that PR's: its near-knot rail
+/// trim (WR-664) moves a rail's cut onto the rail's nearby knot, which moves this fillet's
+/// geometry within the zone tolerance.
 const FILLET_MAIN: [u64; 29] = [
     0x24f613f551b1b3ab,
     0x241377ca06fbe761,
@@ -1760,7 +1897,7 @@ const FILLET_MAIN: [u64; 29] = [
     0xb5382d964fe60518,
     0xb5382d964fe60518,
     0xb5382d964fe60518,
-    0x902afd170f1e23a9,
+    0x6c4db4a115acc49e,
     0xb5382d964fe60518,
     0xb5382d964fe60518,
     0xb5382d964fe60518,
@@ -1781,8 +1918,10 @@ const FILLET_MAIN: [u64; 29] = [
 /// `source-file-corner_box-edge4`, `-edge8`, `-edge9` and
 /// `stubs4-delete-edge-bottle-e8-r0.1` ([`FILLETS`] 1, 2, 3 and 14). Entry 14's are main's
 /// (see [`FILLET_MAIN`]) with the mass integrator's knot-line split, which moved that row
-/// since; its entries are classified against a certified enclosure in goldens'
-/// `mass_knot_line_moved_rows_are_classified`.
+/// since (its entries are classified against a certified enclosure in goldens'
+/// `mass_knot_line_moved_rows_are_classified`), and #18918's near-knot rail trim, which
+/// moves them within the zone tolerance (the row's certified mass enclosure in goldens'
+/// `round_definition_rows` holds the new values).
 const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
     (
         1,
@@ -1838,18 +1977,18 @@ const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
     (
         14,
         [
-            0x40408bcce093b407,
-            0x402621896ddff25f,
-            0x402621896ddff25f,
-            0x3f10d1d4e45e4676,
-            0x3f13efa0c2fbe9dc,
-            0x4000a10fe9b1ffd5,
-            0x4050316570dd030e,
-            0x4050a9c381d79ffa,
-            0x40151aaab4b869fc,
-            0x3f6aed519268bff5,
-            0x3f66b6ad970f60ae,
-            0xbf3c98793964b142,
+            0x40408bccdfac28b0,
+            0x402621896ddff26a,
+            0x402621896ddff26a,
+            0x3f10d1d4e45e263c,
+            0x3f13efa0c2faa159,
+            0x4000a10fe9b1ffdc,
+            0x4050316570dd0323,
+            0x4050a9c381d7a010,
+            0x40151aaab4b86a08,
+            0x3f6aed5192670272,
+            0x3f66b6ad970f2ece,
+            0xbf3c9879396462ce,
         ],
     ),
 ];
