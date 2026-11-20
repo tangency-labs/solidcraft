@@ -26,10 +26,11 @@ use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use solidcore_ops::sweep::{
     arcs_on_one_circle, curves_meet, extrude, face_section, join_arcs, loft, loft_sheet,
-    loft_to_point, loft_with_ends, planar_faces, project_curves, revolve, screw_sweep,
-    sweep_placed, sweep_stations, Affine, CornerRefusal, Curve, DraftCorner, Ends, Join, LoftEnd,
-    PathCheck, SweepFrame, SweepRoute, Verdict,
+    loft_to_point, planar_faces, project_curves, revolve, screw_sweep, sweep_placed,
+    sweep_stations, Affine, CornerRefusal, Curve, DraftCorner, Ends, Join, PathCheck, SweepFrame,
+    SweepRoute, Verdict,
 };
+use solidcore_ops::sweep::{loft_with_ends, LoftEnd};
 use solidcore_ops::{make_box, Body, CheckLevel, Error};
 
 const Z: [f64; 3] = [0.0, 0.0, 1.0];
