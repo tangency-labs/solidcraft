@@ -4904,7 +4904,7 @@ mod view_key_tests {
                     let run = |unseen: bool| {
                         let mut h = crate::scenario::Harness::new();
                         h.app.home.open = false;
-                        crate::prefs::choose_nav_preset(&mut h.app.preferences, preset);
+                        h.app.preferences.navigation.choose_preset(preset);
                         h.call("ui.view", serde_json::json!({"view":"iso"}));
                         h.frames(2);
                         let rect = h.app.viewport.rect.unwrap();
