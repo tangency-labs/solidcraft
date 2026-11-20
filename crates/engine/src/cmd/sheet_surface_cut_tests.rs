@@ -138,6 +138,25 @@ fn a_corner_rounded_through_the_sheet_is_an_arc_of_its_outline() {
     assert!((exact_volume(&s) - want).abs() < 1e-6 * want, "{} vs {want}", exact_volume(&s));
 }
 
+#[test]
+fn a_large_base_flange_keeps_a_small_corner_round_in_the_body_and_flat() {
+    let mut s = Session::default();
+    let (t, r) = (0.7, 3.0);
+    rule(&mut s, "Test", t, 0.44, t, t);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [860, 2160]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base", "body_name": "Plate"}));
+    let before = exact_volume(&s);
+    run(&mut s, "solid.fillet", json!({"edges": [[0, 0, t / 2.0]], "radius": r, "tangent_chain": false}));
+
+    // The corner loses the part of an r × r square outside the quarter circle, through the sheet.
+    let removed = before - exact_volume(&s);
+    let want = t * r * r * (1.0 - PI / 4.0);
+    assert!((removed - want).abs() < 1e-6, "removed {removed} mm³, expected {want}");
+    assert_eq!(dxf_entities(&mut s), (4, 1, 0));
+}
+
 /// What a sheet can't keep is refused, and the sheet stays as it was: a countersink and a
 /// chamfered face edge (walls not square to the sheet), a notch through a bend from the edge.
 #[test]

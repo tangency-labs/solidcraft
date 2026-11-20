@@ -22,7 +22,7 @@ pub struct DrawingCreateParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String")]
     pub name: Option<String>,
-    /// A built-in's name (`drawing.template.list`) or a .json template file
+    /// A built-in's name (`drawing.template.list`) or a .json or .scdwg template file
     /// (`drawing.template.save`): the design's kind's built-in when not given.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String")]
@@ -160,7 +160,7 @@ fn revision_numbering_schema(_: &mut SchemaGenerator) -> Schema {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct TemplateApplyParams {
-    /// A built-in's name, as `drawing.template.list` lists it, or a .json template file
+    /// A built-in's name, as `drawing.template.list` lists it, or a .json or .scdwg template file
     /// (`drawing.template.save`). Its sheet in each sheet's place is applied, its last for the
     /// sheets past its own.
     pub template: String,
