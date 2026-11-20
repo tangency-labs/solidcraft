@@ -4358,6 +4358,8 @@ fn capture_position_invalidates_construction_axis_point_move_rotate_about_and_sk
                 origin: Some(crate::point_expr(Vec3::new(10.0, 0.0, 0.0))),
                 angle: Some("90 deg".into()),
                 copy: false,
+                carry: Vec::new(),
+                leave: Vec::new(),
                 copy_frames: Vec::new(),
             },
             Some("MoveAbout"),

@@ -219,7 +219,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         )),
     CommandSpec::new("solid.combine", "Combine", crate::checked!("solid.combine", combine)).begins_edit()
         .at("SOLID", "MODIFY")
-        .icon("combine")
+        .icon("boolean_union")
         .contract(&COMBINE_CONTRACT)
         .output(output_schema_for::<CombineResult>)
         .params(concat!(
@@ -479,6 +479,8 @@ pub static COMMANDS: &[CommandSpec] = &[
             "matrix?: rigid row-major 3x4 or 4x4, flat or rows (instead of translate/axis/angle/origin); ",
             "tolerance?: matrix rotation tolerance (default 1e-9, at most 1e-3); ",
             "copy?: bool (default false; true keeps originals and transforms copies); ",
+            "carry?: [construction names or ids] (also moved with the bodies, e.g. a Center Pole at fixed points); ",
+            "leave?: [construction names or ids] (built on the bodies but left where they are); ",
             "occurrences?: [occurrence paths, root first] (only with copy: copies each component independently and transforms the copies in world space; reply lists them in occurrences); ",
             "name?, body_name?, body_names?",
         )),
@@ -3325,6 +3327,8 @@ fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
             angle: expr(p, "angle"),
             copy,
             copy_frames,
+            carry: construction_ids(s, cmd, p, "carry")?,
+            leave: construction_ids(s, cmd, p, "leave")?,
         },
     )?;
     if copy {
@@ -3332,6 +3336,32 @@ fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
         super::print_face::copies_keep_print_faces(s, &reply, &bodies);
     }
     Ok(reply)
+}
+
+/// The construction features listed under `key` (names or feature ids), by id; empty when absent.
+fn construction_ids(s: &Session, cmd: &str, p: &Value, key: &str) -> Result<Vec<u64>> {
+    let Some(list) = p.get(key) else { return Ok(Vec::new()) };
+    let Some(list) = list.as_array() else { return Err(bad(cmd, format!("`{key}` must list construction features"))) };
+    list.iter()
+        .map(|v| {
+            let f = match v {
+                Value::Number(n) => n.as_u64().and_then(|id| s.doc.feature(id)),
+                Value::String(name) => s.doc.find_feature(name),
+                _ => None,
+            };
+            match f {
+                Some(f)
+                    if matches!(
+                        f.kind,
+                        FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. } | FeatureKind::ConstructionPlane { .. }
+                    ) =>
+                {
+                    Ok(f.id)
+                }
+                _ => Err(bad(cmd, format!("`{key}`: {v} is not a construction feature"))),
+            }
+        })
+        .collect()
 }
 
 /// A copy keeps the look and the material of the body it came from (#6423): the copy is the same
