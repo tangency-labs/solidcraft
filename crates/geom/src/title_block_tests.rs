@@ -508,13 +508,15 @@ fn a_drawing_border_that_isnt_finite_holds_no_block() {
 /// refused without panicking, and an accepted one placed on a sheet it fits (any standard size,
 /// either way, with or without the filing margin, any drawing border line) keeps every cell inside
 /// the outline, apart from the others, with its label and value box inside it, and every value box
-/// padded from the drawing border's line.
+/// padded from the drawing border's line. Each round mutates one of the block's cells at random, so the
+/// rounds grow with the cell count (4000 for twelve cells, 6000 for eighteen) to keep as many mutations
+/// on each cell, and the same floors on how many are accepted and laid out.
 #[test]
 fn fuzzed_definitions_never_panic_and_an_accepted_one_lays_out_inside_its_outline() {
     const NUMBERS: [f64; 9] = [0.0, -0.0, 1e-9, 1e5, -1e5, 1000.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY];
     let mut rng = Lcg(0x7b1c);
     let (mut accepted, mut laid_out) = (0, 0);
-    for _ in 0..4000 {
+    for _ in 0..6000 {
         let mut block = default_block();
         for _ in 0..1 + (rng.unit() * 3.0) as usize {
             let i = (rng.unit() * 18.0) as usize % 18;
@@ -566,7 +568,7 @@ fn fuzzed_definitions_never_panic_and_an_accepted_one_lays_out_inside_its_outlin
         }
     }
     // Fewer lay out than accepted: about two in five meet a 5 or 10 mm border line, which leaves most blocks no room.
-    assert!(accepted > 350 && laid_out > 200, "{accepted} accepted, {laid_out} laid out");
+    assert!(accepted > 400 && laid_out > 200, "{accepted} accepted, {laid_out} laid out");
 }
 
 /// The built-in block's eighteen cells, by name: the twelve of the layout approved on #3875, then
