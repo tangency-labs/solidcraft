@@ -2408,8 +2408,7 @@ fn curve_on_classify_body<O: ClassObject>(
         }
 
         // WR-305: an interval running along a boundary edge between two points on it is
-        // on that edge (straight pieces always, by their ends; curved ones with
-        // `classify_edge_interval`)
+        // on that edge (straight pieces by their ends, curved ones by `curve_runs_along`)
         cc.classify_edge_interval(k, &*objects, ii)?;
 
         // classify the interval - avoiding point classification if possible
