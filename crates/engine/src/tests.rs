@@ -4063,6 +4063,24 @@ fn split_body_of_a_body_of_two_pieces_splits_both() {
     }
 }
 
+/// #15943: legs a split leaves apart are a body each; the part below keeps "Block (1)".
+#[test]
+fn split_body_through_two_legs_makes_a_body_of_each_leg() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 30, "body_name": "Block"}));
+    run(&mut s, "solid.box", json!({"corner": [15, -1, 10], "length": 10, "width": 22, "height": 25, "operation": "cut", "targets": ["Block"]}));
+    run(&mut s, "solid.split_body", json!({"body": "Block", "plane": {"origin": [0, 0, 20], "normal": [0, 0, 1]}}));
+    let st = s.world_state().unwrap();
+    let pieces: Vec<(String, usize, f64)> =
+        st.bodies.iter().map(|b| (b.name.clone(), b.body.lumps().unwrap().len(), solidcraft_kernel::measure(&b.body).unwrap().volume)).collect();
+    assert_eq!(pieces.iter().map(|p| p.0.as_str()).collect::<Vec<_>>(), ["Block", "Block (1)", "Block (2)"], "{pieces:?}");
+    assert!(pieces.iter().all(|p| p.1 == 1), "{pieces:?}");
+    assert!(rel(pieces[1].2, 14000.0) < 1e-6, "{pieces:?}");
+    for leg in [&pieces[0], &pieces[2]] {
+        assert!(rel(leg.2, 3000.0) < 1e-6, "{pieces:?}");
+    }
+}
+
 /// Fillet types: chord length (radius from the face angle) and a radius varying along the
 /// edge; volumes from the removed material.
 #[test]
