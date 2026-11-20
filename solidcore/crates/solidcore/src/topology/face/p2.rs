@@ -3575,6 +3575,9 @@ const KEEP_COVERED_PIECES: usize = 64;
 /// ([`within_edge_tolerance_limit`](crate::topology::edgeuse::p3::within_edge_tolerance_limit))
 /// raises nothing: the edit would be refused with the body.
 ///
+/// A corner where an edge's curve ends farther from the vertex than the edge's tolerance is
+/// not edited at all ([`fix_uv_trim_curves_notified`]), so there is nothing to cover there.
+///
 /// A trim the edit left as it was (its geometry the same, bit for bit) at a tolerance not
 /// lowered is not bounded at all: it is covered after the edit exactly where it was before.
 ///

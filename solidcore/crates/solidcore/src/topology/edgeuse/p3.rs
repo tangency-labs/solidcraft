@@ -1883,7 +1883,8 @@ fn lowered_covers_rounding(b: &Brep, e: EdgeId, bound: f64, lowered: f64) -> Res
 /// Not upstream (#18166): whether `tolerance` is one the B-rep check accepts for an edge of
 /// `b`: below [`LARGE_SMALL_SIZE_RATIO`](crate::geom::tol::LARGE_SMALL_SIZE_RATIO) times the
 /// B-rep's tolerance (`ValidatePointers` test 59, the limit the validation's own tolerance
-/// growth keeps under). A raise past it leaves a body the check refuses.
+/// growth keeps under). A raise past it leaves a body the check refuses; the stitch's cover
+/// raises past it on purpose where the gap is seen that wide ([`cover_joined_faces`]).
 pub(crate) fn within_edge_tolerance_limit(b: &Brep, tolerance: f64) -> bool {
     tolerance < crate::geom::tol::LARGE_SMALL_SIZE_RATIO * b.tolerance()
 }
@@ -1965,9 +1966,12 @@ fn other_trims_bound(
 /// (`UpdateObjectTolerance`), which does not cover that curve's distance to those faces: the
 /// deleted edge's own tolerance covered its own curve there (`heal.stitch_p2` `cov_tjunc8`: a
 /// face joined 2.43e-4 from the kept curve under a tolerance of 2.18e-4). A face with no
-/// finite bound, or whose bound is within the tolerance, is left as upstream leaves it.
+/// finite bound, or whose bound is within the tolerance, is left as upstream leaves it, and
+/// so is one whose bound is past the B-rep check's edge tolerance limit
+/// ([`within_edge_tolerance_limit`]) and more than [`COVER_CONVERGED`] times the largest
+/// distance sampled from the edge to its surface ([`sampled_face_gap`]): UNPROVED, below.
 ///
-/// The tolerance is raised to the face's proved bound only, whatever it is (a raise covers a
+/// The tolerance is raised to the face's proved bound only, never to a sample (a raise covers a
 /// proved distance, never an assumed one: `primitive.api_primitives` gen0353, an ellipse at
 /// `z = 4.5e8` 1.2e-7 from its faces by samples, is bounded far from the origin only at
 /// 4.76e4, and to 1e-6 by the enclosure moved to the curve, `query::curve_surface_gap`
@@ -2022,9 +2026,9 @@ pub(crate) fn cover_joined_faces(
             continue;
         };
         // UNPROVED fallback (#18166): a bound the B-rep check refuses as an edge tolerance is
-        // taken only where the edge is seen that far from the face: more than
-        // `1 / COVER_CONVERGED` of it at a sample ([`sampled_face_gap`]; a stitch over a real
-        // gap, `heal.stitch_p1` `cov_tjunc9_into_shell`). Otherwise it is the enclosure not
+        // taken only where the edge is seen that far from the face: at least
+        // `1 / COVER_CONVERGED` (half) of it at a sample ([`sampled_face_gap`]; a stitch over
+        // a real gap, `heal.stitch_p2` `cube2_into_shell`, 0.17). Otherwise it is the enclosure not
         // converging (`create_cylindrical_box` at radius 1e4, thickness 1e-3: 3.49 for a
         // joined arc whose samples lie within rounding of the cylinder, B-rep tolerance
         // 1e-5), and the edge is left as upstream leaves it, not proved to cover the face.
@@ -2036,13 +2040,18 @@ pub(crate) fn cover_joined_faces(
         // surface's drop finds the nearest point, which it does not certify; otherwise it is
         // larger (see [`sampled_face_gap`]). An overstated sample can only take the proved
         // bound (sound, if loose), never an unproved value.
-        if !within_edge_tolerance_limit(b, gap) {
+        // (the settling's re-bound, at the coarser fit of the raised tolerance, is held to the
+        // same rule: under the limit for a bound taken under it, within the sampled gate's
+        // reach for one taken past it)
+        let reach = if within_edge_tolerance_limit(b, gap) {
+            crate::geom::tol::LARGE_SMALL_SIZE_RATIO * b.tolerance()
+        } else {
             match sampled_face_gap(k, b, e, f)? {
-                Some(seen) if gap <= COVER_CONVERGED * seen => {}
+                Some(seen) if gap <= COVER_CONVERGED * seen => COVER_CONVERGED * seen,
                 _ => continue,
             }
-        }
-        settle.push((f, f64::INFINITY));
+        };
+        settle.push((f, reach));
         if gap > tol {
             crate::topology::edge::set_tolerance(b, e, gap, true, true)?;
             raised = true;
@@ -2067,7 +2076,8 @@ const COVER_SAMPLES: u32 = 32;
 
 /// Not upstream (#18166): the largest distance from `e`'s curve, at the ends of
 /// [`COVER_SAMPLES`] equal pieces of its interval, to the closest point found on the surface
-/// of face `f` (`surface_closest_point`). Each is a distance to a point of the surface, so
+/// of face `f` (`surface_closest_point`), measured from the curve's point to the point found.
+/// Each is a distance to a point of the surface, so
 /// at least the true distance at that sample (MEASURED, not a bound): equal to it when the
 /// drop's global search finds the nearest point, which it does not certify, and larger
 /// otherwise; the evaluated point and the distance carry a few ulps of rounding of the
@@ -2089,11 +2099,13 @@ fn sampled_face_gap(k: &Kernel, b: &Brep, e: EdgeId, f: FaceId) -> Result<Option
         let t = rec
             .interval
             .evaluate(f64::from(i) / f64::from(COVER_SAMPLES));
-        let Ok(p) = curve.evaluate_point(k, t) else {
-            return Ok(None);
+        let p = match curve.evaluate_point(k, t) {
+            Ok(p) => p,
+            Err(err) if err.is_unported_or_cancelled() => return Err(err),
+            Err(_) => return Ok(None),
         };
         match crate::query::api_queries::surface_closest_point(k, &surface, p) {
-            Ok(c) => most = most.max(c.closest.distance),
+            Ok(c) => most = most.max(p.distance(c.closest.point)),
             Err(err) if err.is_unported_or_cancelled() => return Err(err),
             Err(_) => return Ok(None),
         }
@@ -2112,7 +2124,8 @@ fn sampled_face_gap(k: &Kernel, b: &Brep, e: EdgeId, f: FaceId) -> Result<Option
 /// (`primitive.api_primitives` gen1108: a line 5.5e8 long, raised to 1.17e-5 for its
 /// trimless face, with a trim bounded at 2.8e-5 under the tolerance of 1e-5 it came with).
 /// A trim whose bound is not enclosed, or is past the B-rep check's limit
-/// ([`within_edge_tolerance_limit`]), is left as upstream leaves it.
+/// ([`within_edge_tolerance_limit`]), is left as upstream leaves it (UNPROVED; stricter
+/// than [`cover_joined_faces`], which takes a face bound past the limit where it is seen).
 ///
 /// # Errors
 ///
@@ -2125,8 +2138,10 @@ fn cover_raised_trims(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
             continue;
         };
         if let Some(bound) = raised_trim_bound(k, b, x, trim, tol)? {
-            // (UNPROVED fallback, as [`cover_joined_faces`]: a bound past the B-rep check's
-            // limit is the enclosure's, and that trim is left as upstream leaves it)
+            // (UNPROVED fallback: a bound past the B-rep check's limit is left as upstream
+            // leaves it, with no sampled gate as [`cover_joined_faces`] has for a face; after a
+            // raise past the limit no bound above the raised tolerance is taken, and a trim
+            // whose bound is above it stays uncovered)
             if bound.is_finite() && bound > reach && within_edge_tolerance_limit(b, bound) {
                 reach = bound;
             }
@@ -2353,7 +2368,8 @@ const SETTLE_ROUNDS: usize = 8;
 /// fit after the raise is the raised tolerance ([`edge_face_gap_bound`] with the tolerance as
 /// both fit and target), at which a bound can come out a rounding above the one found before
 /// (the bisection stops at a coarser floor). Raised again to such a bound (below the
-/// face's cap: none for a joined face, the one [`keep_trimless_faces_covered`] gives) for at most
+/// face's cap: for a joined face the B-rep check's edge tolerance limit, or past it the
+/// sampled gate's reach, [`cover_joined_faces`]; the one [`keep_trimless_faces_covered`] gives) for at most
 /// [`SETTLE_ROUNDS`] rounds; each bound is proved, so each raise covers a proved distance.
 ///
 /// # Errors
