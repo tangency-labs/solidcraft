@@ -60,6 +60,8 @@ circle_tt	false
 circle_ttt	false
 close	false
 coil	false
+collision_auto	false
+collision_hull	false
 colored_components	false
 combine	false
 compare	false

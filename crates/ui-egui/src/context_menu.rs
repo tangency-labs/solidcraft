@@ -159,20 +159,23 @@ pub enum Target {
 /// Collision Shape ▸ a choice for `target` (a body, or a component's bodies).
 fn collision_menu(app: &SolveApp, target: serde_json::Value) -> Item {
     let mut menu = cmd(app, "body.collision", "Collision Shape");
+    // Each choice shows its own shape; the command's icon is the body.
     menu.children = [
-        ("auto", "Automatic"),
-        ("mesh", "Full mesh"),
-        ("convex_hull", "Convex hull"),
-        ("box", "Box"),
-        ("cylinder", "Cylinder"),
-        ("sphere", "Sphere"),
-        ("none", "No collision"),
+        ("auto", "Automatic", "collision_auto"),
+        ("mesh", "Full mesh", "mesh_body"),
+        ("convex_hull", "Convex hull", "collision_hull"),
+        ("box", "Box", "box"),
+        ("cylinder", "Cylinder", "cylinder"),
+        ("sphere", "Sphere", "sphere"),
+        ("none", "No collision", "contact_off"),
     ]
     .into_iter()
-    .map(|(shape, label)| {
+    .map(|(shape, label, icon)| {
         let mut p = target.clone();
         p["shape"] = json!(shape);
-        cmd(app, "body.collision", label).with(p)
+        let mut item = cmd(app, "body.collision", label).with(p);
+        item.icon = icon.into();
+        item
     })
     .collect();
     menu
@@ -4636,6 +4639,21 @@ mod tests {
         let item = remove_tube(&items(&h.app, &Target::Body { name: bodies[3].clone() })).cloned().unwrap();
         assert!(item.enabled);
         assert_eq!(item.params, Some(json!({"members": [{"feature": rail, "line": line_of(&h, rail, &bodies[3])}]})), "the row's own tube");
+    }
+
+    /// Collision Shape ▸ each choice shows its own shape, a drawn icon and not the body's cube
+    /// the command has, nor the placeholder.
+    #[test]
+    fn each_collision_shape_choice_has_its_own_icon() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"})).unwrap();
+        let menu = items(&h.app, &Target::Body { name: "Block".into() });
+        let shapes = menu.iter().find(|i| i.id == "body.collision").expect("a body offers Collision Shape");
+        let icons: Vec<&str> = shapes.children.iter().map(|c| &*c.icon).collect();
+        assert_eq!(icons, ["collision_auto", "mesh_body", "collision_hull", "box", "cylinder", "sphere", "contact_off"]);
+        for icon in icons {
+            assert!(!crate::icon_svg::resolve(icon).placeholder, "{icon} is drawn");
+        }
     }
 }
 
