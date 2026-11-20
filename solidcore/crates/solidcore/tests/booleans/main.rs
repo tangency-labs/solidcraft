@@ -59,6 +59,8 @@ mod issue_1526_boolean_2d_faces_apart;
 mod issue_1631_caller_keyed_ops_check;
 #[path = "../issue_1730_application_attribute_handlers.rs"]
 mod issue_1730_application_attribute_handlers;
+#[path = "../issue_18166_g2_round_cut_by_carried_body.rs"]
+mod issue_18166_g2_round_cut_by_carried_body;
 #[path = "../issue_2010_plain_brep_copy.rs"]
 mod issue_2010_plain_brep_copy;
 #[path = "../issue_2110_tangent_cylinders_union.rs"]
