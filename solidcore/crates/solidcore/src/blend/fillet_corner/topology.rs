@@ -210,10 +210,15 @@ pub(crate) fn cusp_side_edge(
     let cos_tol = corner.tangency_tol_radians.cos();
     for side in [
         *need(
-            all.get((index + total - 1) % total),
+            (index + total - 1)
+                .checked_rem(total)
+                .and_then(|i| all.get(i)),
             "preceding side edge use",
         )?,
-        *need(all.get((index + 1) % total), "following side edge use")?,
+        *need(
+            (index + 1).checked_rem(total).and_then(|i| all.get(i)),
+            "following side edge use",
+        )?,
     ] {
         let side_edge = edge_of(target, side)?;
         if side_edge == filleted_edge
