@@ -1342,10 +1342,9 @@ mod tests {
         );
     }
 
-    /// What builds a phrase cause in source: the helpers, and each phrase cause by name. A
-    /// new cause is placed here (the match has no wildcard), so the test below checks it
-    /// names every phrase cause there is.
-    fn phrase_needle(cause: &BlendFailure) -> Option<&'static str> {
+    /// The variant name of a phrase cause, `None` for any other cause. A new cause is placed
+    /// here (the match has no wildcard), so the test below sees every phrase variant.
+    fn phrase_variant_name(cause: &BlendFailure) -> Option<&'static str> {
         match cause {
             BlendFailure::NoRoom(_)
             | BlendFailure::StationDidNotConverge { .. }
@@ -1360,23 +1359,33 @@ mod tests {
             | BlendFailure::CreasePieceEndUnbuildable { .. }
             | BlendFailure::BandInputMissing(_)
             | BlendFailure::NotCertified { .. } => None,
-            BlendFailure::Failed(_) => Some("BlendFailure::Failed("),
-            BlendFailure::Missing(_) => Some("BlendFailure::Missing("),
-            BlendFailure::InvalidValue(_) => Some("BlendFailure::InvalidValue("),
-            BlendFailure::Inconsistent(_) => Some("BlendFailure::Inconsistent("),
-            BlendFailure::BadIntersections(_) => Some("BlendFailure::BadIntersections("),
-            BlendFailure::NotConverged(_) => Some("BlendFailure::NotConverged("),
-            BlendFailure::OutsideDomain(_) => Some("BlendFailure::OutsideDomain("),
-            BlendFailure::NotWithinTolerance(_) => Some("BlendFailure::NotWithinTolerance("),
-            BlendFailure::PassedOn { .. } => Some("BlendFailure::PassedOn {"),
+            BlendFailure::Failed(_) => Some("Failed"),
+            BlendFailure::Missing(_) => Some("Missing"),
+            BlendFailure::InvalidValue(_) => Some("InvalidValue"),
+            BlendFailure::Inconsistent(_) => Some("Inconsistent"),
+            BlendFailure::BadIntersections(_) => Some("BadIntersections"),
+            BlendFailure::NotConverged(_) => Some("NotConverged"),
+            BlendFailure::OutsideDomain(_) => Some("OutsideDomain"),
+            BlendFailure::NotWithinTolerance(_) => Some("NotWithinTolerance"),
+            BlendFailure::PassedOn { .. } => Some("PassedOn"),
         }
     }
 
-    /// `phrase_needle` names a cause exactly when it is a phrase cause, so the per-file pins
-    /// in `error/phrase_sites.rs`, which search for those names, count every phrase cause.
+    /// `phrase_variant_name` names a cause exactly when it is a phrase cause, and the
+    /// `BlendFailure` variants the per-file scan (`phrase_sites::BLEND`) counts are exactly
+    /// those names, so the per-file pins in `error/phrase_sites.rs` see every phrase cause.
     #[test]
-    fn phrase_needle_names_exactly_the_phrase_causes() {
+    fn the_phrase_scan_lists_exactly_the_phrase_variants() {
+        use super::super::site_scan::Builder;
         use crate::blend::fillet_executive::NoRoomReason as R;
+        let scanned: Vec<&str> = super::super::phrase_sites::BLEND
+            .builders
+            .iter()
+            .filter_map(|b| match b {
+                Builder::Variant("BlendFailure", v) => Some(*v),
+                _ => None,
+            })
+            .collect();
         let causes = [
             BlendFailure::NoRoom(R::BallDoesNotFit),
             BlendFailure::StationDidNotConverge {
@@ -1426,12 +1435,18 @@ mod tests {
                 status: SM_ERR,
             },
         ];
+        let mut names = Vec::new();
         for cause in &causes {
-            assert_eq!(
-                phrase_needle(cause).is_some(),
-                cause.is_phrase(),
-                "{cause:?}"
-            );
+            let name = phrase_variant_name(cause);
+            assert_eq!(name.is_some(), cause.is_phrase(), "{cause:?}");
+            names.extend(name);
         }
+        names.sort_unstable();
+        let mut scanned = scanned;
+        scanned.sort_unstable();
+        assert_eq!(
+            scanned, names,
+            "phrase_sites::BLEND must list exactly the phrase variants of BlendFailure"
+        );
     }
 }
