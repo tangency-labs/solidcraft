@@ -1,14 +1,17 @@
 //! Radial embossing of profiles wrapped round cylindrical walls, outside or inside (a bore, where
 //! raised is towards the axis), built on the body's schema 4 record: the wall's face
 //! loses the profiles' footprints, and each profile adds its walls and its raised or sunk cap
-//! (the wall's cylinder at the new radius). A segment along the axis or round the wall keeps an
-//! exact line or arc and a planar wall; any other (a curve, a diagonal) is fitted: cubic
-//! B-spline edges and a ruled spline wall within a quarter of the body's tolerance of the true
-//! wrap, with fitted pcurves on the wall's and the cap's forms (the record's pcurve routine
-//! makes only exact ones). On a complete cylinder or coaxial sleeve the profiles keep between
-//! its endcaps and walls; on any other body (a partial wall) they keep inside the picked face, a
-//! rectangle in angle and height, and an exact boolean checks that the raised or sunk material
-//! meets nothing else of the body (#12029).
+//! (the wall's cylinder at the new radius). On a wall whose form is on its frame's quarter grid,
+//! a segment along the axis or round the wall keeps an exact line or arc and a planar wall; any
+//! other segment (a curve, a diagonal, or any segment at all on a wall stored on arcs of its own,
+//! as an extruded sketch arc is) is fitted: cubic B-spline edges and a ruled spline wall within
+//! a quarter of the body's tolerance of the true wrap, with fitted pcurves on the wall's and the
+//! cap's forms (the record's pcurve routine makes only exact ones). On a complete cylinder or
+//! coaxial sleeve the profiles keep between its endcaps and walls; on any other body (a partial
+//! wall) they keep inside the picked face, a rectangle in angle and height, and an exact boolean
+//! of the body with an annular sector over the mapped profiles' angles and heights (a hundredth
+//! of the depth off the wall) checks that the raised or sunk material meets nothing else of the
+//! body (#12029).
 use crate::assemble::{AFace, AUse, Assembly};
 use crate::body::Body;
 use crate::history::Change;
@@ -455,7 +458,24 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
             candidates.push((fi, o, a, r, convex, radial, tangent, alo, ahi));
         }
         // Several walls of one radius can touch the sketch's plane (a revolved part's walls at
-        // different heights): the saved pick names the one between its own ends.
+        // different heights, either side of a groove). Those whose angles and heights the
+        // profiles cannot reach (conservative bounds) are not candidates; of the rest, the saved
+        // pick names the one between its own ends.
+        if candidates.len() > 1 {
+            let mut reached = Vec::new();
+            for c in candidates {
+                let (fi, o, a, r, tangent, alo, ahi) = (c.0, c.1, c.2, c.3, c.6, c.7, c.8);
+                let along = profile_interval_overlaps(plane, regions, o, tangent, alo * r, ahi * r)?;
+                let up = match face_axial_bounds(&rec, fi, o, a)? {
+                    Some((lo, hi)) => profile_interval_overlaps(plane, regions, o, a, lo, hi)?,
+                    None => true,
+                };
+                if along && up {
+                    reached.push(c);
+                }
+            }
+            candidates = reached;
+        }
         if candidates.len() > 1
             && let Some(at) = anchor
         {
@@ -514,10 +534,16 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
             // exterior cylindrical face of the body is that wall (a stepped or interrupted
             // cylinder was refused above), stored as several faces between its seams. So the
             // pick lies on it wherever it is on the cylinder between the endcaps (#3782). On a
-            // partial wall, between the picked face's ends.
+            // partial wall, on the picked face itself: between its ends and within its angles,
+            // so a pick on a neighbouring face of the same cylinder names that face, not this one.
             let h = (at - o).dot(axis);
             let v = at - o - axis * h;
-            if (v.len() - r).abs() > tol * 10.0 || h <= lo + tol || h >= hi - tol {
+            let off_face = whole.is_none() && {
+                // Onto the turn the face's angles start (a whole-turn face's run past ±π).
+                let angle = alo + (v.dot(tangent).atan2(v.dot(radial)) - alo).rem_euclid(std::f64::consts::TAU);
+                angle <= alo + tol / r || angle >= ahi - tol / r
+            };
+            if (v.len() - r).abs() > tol * 10.0 || h <= lo + tol || h >= hi - tol || off_face {
                 return Err(fail("saved selection no longer identifies the sketch's cylindrical face"));
             }
         }
@@ -1097,7 +1123,8 @@ impl Wrap {
     /// A profile loop wrapped onto the wall: its footprint at the wall's radius and its cap's
     /// loop at `rr`, both running as the loop does, and one side wall per segment between them
     /// (each loop seen from outside the body). A segment along the axis or round the wall keeps
-    /// its exact line or arc and a planar wall; any other is fitted ([`Wrap::fitted`]).
+    /// its exact line or arc and a planar wall where [`Wrap::exact`] allows (a wall on its
+    /// frame's quarter grid); any other is fitted ([`Wrap::fitted`]).
     fn wrapped_loop(&self, asm: &mut Assembly, lp: &Loop2, rr: f64, shell: usize) -> Result<(Vec<AUse>, Vec<AUse>, Vec<AFace>)> {
         let corners: Vec<Vec2> = lp.segs.iter().map(Seg2::start).collect();
         let base: Vec<u32> = corners.iter().map(|p| asm.vertex(self.at(*p, self.r))).collect::<Result<_>>()?;
@@ -2322,10 +2349,32 @@ mod tests {
         .unwrap()
         .unwrap();
         let grooved = crate::boolean(&crate::cylinder(Vec3::ZERO, Vec3::Z, 10., 30.).unwrap(), &ring, crate::BoolOp::Cut).unwrap().unwrap();
-        let e = emboss_cylinder(&grooved, &plane(), &[profile()], 1.).unwrap_err();
+        // The profile reaches only the lower wall, so it needs no pick; one reaching both does.
+        let low_wall = emboss_cylinder(&grooved, &plane(), &[profile()], 1.).unwrap();
+        assert!((volume(&low_wall) - volume(&grooved) - 21.).abs() < 1e-6 * 20.);
+        let across =
+            Region2 { outer: Loop2::polygon(&[Vec2::new(-2., 10.), Vec2::new(2., 10.), Vec2::new(2., 18.), Vec2::new(-2., 18.)]), holes: vec![] };
+        let e = emboss_cylinder(&grooved, &plane(), std::slice::from_ref(&across), 1.).unwrap_err();
         assert!(e.to_string().contains("ambiguous"), "{e}");
         let low_wall = emboss_cylinder_at(&grooved, Vec3::Y * 10. + Vec3::Z * 7.5, &plane(), &[profile()], 1.).unwrap();
         assert!((volume(&low_wall) - volume(&grooved) - 21.).abs() < 1e-6 * 20.);
         assert!(emboss_cylinder_at(&grooved, Vec3::Y * 10. + Vec3::Z * 20., &plane(), &[profile()], 1.).is_err());
+        // A wall split by two shallow slots into two faces of one cylinder and height: a pick on
+        // the other face does not name the face the sketch touches.
+        let slot = |lo: Vec3, hi: Vec3| crate::box_solid(lo, hi).unwrap();
+        let slotted = crate::boolean(
+            &crate::cylinder(Vec3::ZERO, Vec3::Z, 10., 20.).unwrap(),
+            &slot(Vec3::new(-1., -20., -1.), Vec3::new(1., -8., 21.)),
+            crate::BoolOp::Cut,
+        )
+        .unwrap()
+        .unwrap();
+        let slotted = crate::boolean(&slotted, &slot(Vec3::new(8., -1., -1.), Vec3::new(20., 1., 21.)), crate::BoolOp::Cut).unwrap().unwrap();
+        assert_eq!(slotted.shell_count(), 1);
+        let on_face = emboss_cylinder_at(&slotted, Vec3::new(0., 10., 10.), &plane(), &[profile()], 1.).unwrap();
+        assert!((volume(&on_face) - volume(&slotted) - 21.).abs() < 1e-6 * 20.);
+        let other = Vec3::new(1., -1., 0.).normalized().unwrap() * 10. + Vec3::Z * 10.;
+        let e = emboss_cylinder_at(&slotted, other, &plane(), &[profile()], 1.).unwrap_err();
+        assert!(e.to_string().contains("no longer identifies"), "{e}");
     }
 }

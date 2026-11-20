@@ -871,9 +871,10 @@ fn emboss_text_wraps_onto_a_half_tube() {
         let before = volume(&mut s);
         run(&mut s, "solid.emboss", json!({"sketch": "Text", "face": [0.0, 20.0, 13.0], "depth": 1, "mode": mode}));
         assert_eq!(s.model.state().body("Tube").unwrap().body.shell_count(), 1);
-        let change = (volume(&mut s) - before).abs();
-        let want = area * (rr * rr - 400.).abs() / 40.;
-        assert!((change - want).abs() < 1e-4 * want, "{mode}: {change} vs {want}");
+        // Signed: an emboss adds material and a deboss takes it away.
+        let change = volume(&mut s) - before;
+        let want = area * (rr * rr - 400.) / 40.;
+        assert!((change - want).abs() < 1e-4 * want.abs(), "{mode}: {change} vs {want}");
     }
 }
 
