@@ -24,7 +24,6 @@ fn stack_reserve(path: &str) -> u64 {
 #[cfg(all(windows, target_env = "msvc"))]
 #[test]
 fn the_cli_reserves_the_kernel_stack_for_its_main_thread() {
-    for exe in [env!("CARGO_BIN_EXE_solidcraft-cli"), env!("CARGO_BIN_EXE_solvecraft-cli")] {
-        assert!(stack_reserve(exe) >= KERNEL_STACK, "{exe}: main stack {} under 8 MiB", stack_reserve(exe));
-    }
+    let exe = env!("CARGO_BIN_EXE_solidcraft-cli");
+    assert!(stack_reserve(exe) >= KERNEL_STACK, "{exe}: main stack {} under 8 MiB", stack_reserve(exe));
 }

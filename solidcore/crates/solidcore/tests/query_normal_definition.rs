@@ -35,14 +35,12 @@ use solidcore::{Brep, Kernel, SolidError};
 /// `TWIST_TAN`: tan 30 degrees.
 const TWIST_TAN: f64 = 0.577_350_269_189_625_76;
 
-/// The kernel SolidCraft runs: every fix on but `geometric_g2_continuity`.
+/// The kernel SolidCraft runs: every fix on.
 fn solidcraft_kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     k.fixes = f;
     k

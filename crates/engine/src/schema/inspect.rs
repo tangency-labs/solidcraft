@@ -196,11 +196,6 @@ pub struct ModelFace {
     /// For a cylindrical face: its axis and radius.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cylinder: Option<FaceCylinder>,
-    /// For a flat-model sheet's face: `sheet:<body>:<panel>:<side>`, the side `top`, `bottom`,
-    /// `rim.<edge>`, `bend.inner` or `bend.outer`. It is taken wherever a face name is. A sheet
-    /// made from surfaces has none: its faces' names are the model's, after what made each.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sheet_face: Option<String>,
 }
 
 /// A cylindrical face's axis and radius.
@@ -504,9 +499,31 @@ pub struct DocumentInspectResult {
     pub redo: usize,
     /// The parts of the origin that are hidden, by name.
     pub hidden_origin: Vec<String>,
+    /// What imports found wrong with the geometry of the parts they brought in, as the Browser
+    /// marks it; left out when nothing is.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub defects: Vec<GeometryDefect>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// What an import found wrong with a part's geometry: on the body made of the part, or, for a
+/// part that was not imported, on the component that would have held it.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct GeometryDefect {
+    /// The body made of the part; absent for a part that was not imported.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    /// The component (id) that holds a part that was not imported, or the nearest one above it
+    /// that the import made.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub component: Option<u64>,
+    /// What kind of problem: `imported_as_surfaces`, `face_left_out`, `open_body`,
+    /// `faces_not_shown`, `needs_repair`, `repaired`, `not_imported` or `refused`.
+    pub kind: String,
+    /// The import's note, in its own words.
+    pub detail: String,
 }
 
 /// A parameter of the design.
@@ -1137,15 +1154,35 @@ pub struct SketchInspectParams {
     pub sketch: Option<SketchTarget>,
 }
 
+/// A sketch plane: its origin and orthonormal axes. Its normal is `x_dir` crossed with `y_dir`.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SketchPlaneReply {
+    /// The sketch origin, in mm.
+    pub origin: [f64; 3],
+    /// Sketch X, a unit direction.
+    pub x_dir: [f64; 3],
+    /// Sketch Y, a unit direction perpendicular to X.
+    pub y_dir: [f64; 3],
+}
+
+impl From<solidcore_record::Plane> for SketchPlaneReply {
+    fn from(plane: solidcore_record::Plane) -> Self {
+        Self { origin: plane.origin.into(), x_dir: plane.x.into(), y_dir: plane.y.into() }
+    }
+}
+
 /// What `sketch.inspect` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct SketchInspected {
     /// The sketch's feature id.
     pub id: u64,
     pub name: String,
-    /// Where it lies, as saved.
-    #[schemars(with = "Map<String, Value>")]
-    pub plane: Value,
+    /// The evaluated plane in its component's coordinates, including resolved face attachments.
+    pub plane: SketchPlaneReply,
+    /// The frame used by `points[].world`, including pending moves and the active authoring path.
+    /// Without an explicit authoring path for the sketch's component, uses its first placement.
+    /// If the placed model has no copy of the sketch, uses the component-local `plane`, as the points do.
+    pub world_plane: SketchPlaneReply,
     pub status: SketchStatus,
     /// Its remaining degrees of freedom (0: fully constrained).
     pub dof: usize,

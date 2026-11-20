@@ -100,6 +100,8 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result
         by_component.entry(doc.model_body_component(body)).or_default().push(body);
     }
     let mut chosen = None;
+    // A face holds the picked point but has no exact plane: a curved face (or a flat one the kernel does not know as a plane), not a missing one.
+    let mut curved = false;
     let mut work = state.bodies.len().saturating_add(doc.occurrences.len());
     for (component, path, placement) in placements {
         let Some(bodies) = by_component.get(&component) else {
@@ -156,6 +158,7 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result
                 } else {
                     body.body.face_plane(index).or_else(|| body.body.planar_face(index))
                 }) else {
+                    curved = true;
                     continue;
                 };
                 // The exact plane's own origin lies on the face's plane: the distance test and the
@@ -182,8 +185,13 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result
             }
         }
     }
-    let (body, index, path, plane) =
-        chosen.ok_or_else(|| bad(cmd, "the selected planar face no longer exists; choose another face or an explicit fixed plane"))?;
+    let (body, index, path, plane) = chosen.ok_or_else(|| {
+        if curved {
+            bad(cmd, "the selected face is curved or is not an exact plane; choose a flat face or an explicit fixed plane")
+        } else {
+            bad(cmd, "the selected planar face no longer exists; choose another face or an explicit fixed plane")
+        }
+    })?;
     if fixed {
         return Ok(PlaneRef::Custom { plane });
     }

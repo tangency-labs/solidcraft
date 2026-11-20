@@ -13,6 +13,11 @@
 //! | [`SurfaceFailure::InvalidValue`]   | `SM_ERR_INVALID_INPUT`         |
 //! | [`SurfaceFailure::OutsideDomain`]  | `SM_ERR_OUTSIDE_OF_DOMAIN`     |
 //! | [`SurfaceFailure::OffSurface`]     | `SM_ERR_NOT_WITHIN_TOLERANCE`  |
+//! | [`SurfaceFailure::Defect`]         | `SM_ERR` (or the site's, through `with_status`) |
+//!
+//! [`SurfaceFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
+//! reason: a defect ([`ErrorKind::StageFailed`], class 127). The phrase causes are sites
+//! not yet converted (the conversion guide: `docs/failure-codes-and-reproduction.md` §6).
 //!
 //! Deviations: not upstream. A failure says in a phrase what went wrong; the failure's
 //! `operation` path says which routine. A failure names an entity only where the site it
@@ -46,13 +51,21 @@ pub enum SurfaceFailure {
     /// A point is farther from the surface than the tolerance, as the phrase says (for
     /// example "the point is off the surface"): an inversion's answer.
     OffSurface(&'static str),
+    /// A failure that is the kernel's fault, reviewed at its site, with the written reason:
+    /// `why` names the step that failed and why that is the kernel's fault, not the
+    /// geometry's. A defect ([`ErrorKind::StageFailed`]); status `SM_ERR` unless its site
+    /// says otherwise.
+    Defect {
+        /// The step that failed, and why that is the kernel's fault.
+        why: &'static str,
+    },
 }
 
 impl SurfaceFailure {
     /// The status the C++ reports for the failure (a comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::Failed(_) => SM_ERR,
+            Self::Failed(_) | Self::Defect { .. } => SM_ERR,
             Self::Missing(_) => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
             Self::OutsideDomain(_) => SM_ERR_OUTSIDE_OF_DOMAIN,
@@ -63,9 +76,13 @@ impl SurfaceFailure {
     /// The failure's stable [`ErrorKind`]: the kind of the status it replaced
     /// ([`ErrorKind::Failed`], [`ErrorKind::Missing`], [`ErrorKind::InvalidInput`],
     /// [`ErrorKind::OutsideDomain`], [`ErrorKind::NotWithinTolerance`]).
+    /// [`SurfaceFailure::Defect`] is [`ErrorKind::StageFailed`], a defect.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
-        ErrorKind::of_status(self.comparison_status())
+        match self {
+            Self::Defect { .. } => ErrorKind::StageFailed,
+            _ => ErrorKind::of_status(self.comparison_status()),
+        }
     }
 }
 
@@ -77,6 +94,7 @@ impl core::fmt::Display for SurfaceFailure {
             | Self::OutsideDomain(what)
             | Self::OffSurface(what) => f.write_str(what),
             Self::Missing(what) => write!(f, "{what} is missing"),
+            Self::Defect { why } => write!(f, "{}: {why}", ErrorKind::StageFailed),
         }
     }
 }
@@ -268,5 +286,116 @@ mod tests {
     #[test]
     fn the_surface_routines_build_no_bare_statuses() {
         super::super::bare_scan::assert_waiting("surface", 51, &[]);
+    }
+
+    /// A reviewed defect is of class 127 with the status of the phrase cause it replaces,
+    /// and says why.
+    #[test]
+    fn a_reviewed_defect_is_class_127_with_its_reason() {
+        let why = "the B-spline form the surface just converted to has no control net, which conversion always gives";
+        let defect = SurfaceFailure::Defect { why };
+        let op = "surface::op";
+        super::super::tests::assert_defect(
+            &SolidError::surface(op, defect),
+            &SolidError::surface(op, SurfaceFailure::Failed("x")),
+            op,
+            SM_ERR,
+            &format!("{op}: stage_failed: {why}"),
+        );
+        let missing = Failure::new(op, defect)
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error();
+        super::super::tests::assert_defect(
+            &missing,
+            &SolidError::surface(op, SurfaceFailure::Missing("x")),
+            op,
+            SM_ERR_NULL_POINTER,
+            &format!("{op}: stage_failed: {why}"),
+        );
+        assert_eq!(missing.surface_failure(), Some(&defect));
+    }
+
+    /// The sites that build a surface phrase cause only fall:
+    /// per file, in the library code of `solidcore` and `solidcore-ops`, as
+    /// [`super::super::site_scan`] counts them. A PR that converts sites lowers its
+    /// files' counts here, and a file at 0 loses its line (the conversion guide:
+    /// `docs/failure-codes-and-reproduction.md` §6).
+    #[test]
+    fn the_surface_phrase_cause_sites_only_shrink() {
+        use super::super::site_scan::{assert_pinned, crate_sites, Builder, Scan, Wrappers};
+        const PHRASES: Scan = Scan {
+            builders: &[
+                Builder::Variant("SurfaceFailure", "Failed"),
+                Builder::Variant("SurfaceFailure", "Missing"),
+                Builder::Variant("SurfaceFailure", "InvalidValue"),
+                Builder::Variant("SurfaceFailure", "OutsideDomain"),
+                Builder::Variant("SurfaceFailure", "OffSurface"),
+                Builder::Method("surface_failed", Some(1)),
+                // the WR-57 replay seam's own constructor of a taped answer (feature
+                // `wr57-replay`), which only the goldens call: not a kernel site
+                Builder::Shared(
+                    "solidcore/src/surface/surface/replay",
+                    "surface_failed",
+                    Some(1),
+                ),
+                Builder::Method("surface_missing", Some(1)),
+            ],
+            wrappers: Wrappers::Phrase,
+        };
+        #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
+        const PINNED: &[(&str, usize)] = &[
+            ("solidcore/src/surface/b_spline_volume.rs", 4),
+            ("solidcore/src/surface/b_spline_volume_n_lib.rs", 1),
+            ("solidcore/src/surface/ball_patch.rs", 8),
+            ("solidcore/src/surface/bend_volume.rs", 2),
+            ("solidcore/src/surface/cone/p1.rs", 12),
+            ("solidcore/src/surface/cone/p2.rs", 14),
+            ("solidcore/src/surface/cone/p3.rs", 3),
+            ("solidcore/src/surface/extend.rs", 2),
+            ("solidcore/src/surface/extend/analytic.rs", 25),
+            ("solidcore/src/surface/extend/ball.rs", 16),
+            ("solidcore/src/surface/extend/blend.rs", 6),
+            ("solidcore/src/surface/extend/sides.rs", 2),
+            ("solidcore/src/surface/from_parameters.rs", 1),
+            ("solidcore/src/surface/implicit.rs", 9),
+            ("solidcore/src/surface/offset_surface.rs", 27),
+            ("solidcore/src/surface/plane/p1.rs", 3),
+            ("solidcore/src/surface/plane/p2.rs", 9),
+            ("solidcore/src/surface/procedural_blend.rs", 9),
+            ("solidcore/src/surface/procedural_blend/convert.rs", 13),
+            ("solidcore/src/surface/procedural_blend/offset.rs", 5),
+            ("solidcore/src/surface/side.rs", 7),
+            ("solidcore/src/surface/sphere.rs", 16),
+            ("solidcore/src/surface/srf_in_volume.rs", 4),
+            ("solidcore/src/surface/surf_of_extrusion/p1.rs", 16),
+            ("solidcore/src/surface/surf_of_extrusion/p2.rs", 13),
+            ("solidcore/src/surface/surf_of_revolution/p1.rs", 10),
+            ("solidcore/src/surface/surf_of_revolution/p2.rs", 6),
+            ("solidcore/src/surface/surf_of_revolution/p3.rs", 21),
+            ("solidcore/src/surface/surface/approximate.rs", 10),
+            ("solidcore/src/surface/surface/p1.rs", 8),
+            ("solidcore/src/surface/surface/p10.rs", 7),
+            ("solidcore/src/surface/surface/p11.rs", 21),
+            ("solidcore/src/surface/surface/p2.rs", 21),
+            ("solidcore/src/surface/surface/p3.rs", 3),
+            ("solidcore/src/surface/surface/p4.rs", 19),
+            ("solidcore/src/surface/surface/p5.rs", 2),
+            ("solidcore/src/surface/surface/p6.rs", 22),
+            ("solidcore/src/surface/surface/p7.rs", 21),
+            ("solidcore/src/surface/surface/p8.rs", 33),
+            ("solidcore/src/surface/surface/p9.rs", 33),
+            ("solidcore/src/surface/surface_cache/face_context.rs", 1),
+            ("solidcore/src/surface/surface_cache/p1.rs", 17),
+            ("solidcore/src/surface/surface_cache/p2.rs", 5),
+            ("solidcore/src/surface/surface_cache/p3.rs", 1),
+            ("solidcore/src/surface/surface_point_solve/p1.rs", 5),
+            ("solidcore/src/surface/surface_point_solve/p2.rs", 8),
+            ("solidcore/src/surface/torus.rs", 15),
+            ("solidcore/src/surface/trim_srf_cache.rs", 4),
+            ("solidcore/src/surface/unbend_volume.rs", 2),
+            ("solidcore/src/surface/volume/p1.rs", 8),
+            ("solidcore/src/surface/volume/p2.rs", 6),
+        ];
+        assert_pinned("surface phrase-cause sites", &crate_sites(&PHRASES), PINNED);
     }
 }

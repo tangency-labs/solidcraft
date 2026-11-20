@@ -61,8 +61,17 @@ pub fn start(app: &mut SolveApp, command: &'static str, params: Value) -> bool {
         }
         // No thread to write on: save here, as before.
     }
-    let _ = app.run(command, params);
+    let r = app.run(command, params);
+    offer_container(app, &r);
     false
+}
+
+/// A JSON save refused because the design holds binary data (images, plugin files): its toast
+/// offers Save as .sc, so that data is saved rather than left out.
+fn offer_container<T>(app: &mut SolveApp, r: &Result<T, String>) {
+    if r.as_ref().err().is_some_and(|e| e.contains(solidcraft_engine::io::JSON_CANT_CARRY)) && app.status.as_ref().is_some_and(|s| s.2) {
+        app.status_save_sc = true;
+    }
 }
 
 /// Take up a finished save (`wait`: wait for a running one).
@@ -98,6 +107,7 @@ pub fn tick(app: &mut SolveApp, wait: bool) {
         app.set_status(solidcraft_ui_text::format("operations.cancelled", &[("name", &name)]), false);
     } else {
         app.finish_command(command, &r);
+        offer_container(app, &r);
         // Saving a newer SolidCraft's file keeps what this version can't read, unless it was changed
         // around: then the save says what went.
         if let Some(first) = r.as_ref().ok().and_then(|v| v["warnings"].as_array()).and_then(|w| w.first()).and_then(serde_json::Value::as_str) {
@@ -266,7 +276,7 @@ mod tests {
         assert_eq!(listed["operations"][0]["cancelling"], true, "{listed}");
         h.frame();
         let shown = |h: &crate::scenario::Harness| {
-            h.app.operations.rows(crate::now_ms()).find(|(r, _)| r.key == "save:file.save_as").and_then(|(r, _)| r.status())
+            h.app.operations.rows(crate::operations::frame_ms(&h.ctx)).find(|(r, _)| r.key == "save:file.save_as").and_then(|(r, _)| r.status())
         };
         assert_eq!(shown(&h), Some(solidcraft_ui_text::tr("operations.cancelling").to_string()), "drawn while it stops");
         // The worker stops before replacing the file: cancelled, not an error, still unsaved.
@@ -279,5 +289,25 @@ mod tests {
         // Its row fades out saying it was cancelled, not still cancelling.
         h.frame();
         assert_eq!(shown(&h), Some(solidcraft_ui_text::tr("operations.stopped").to_string()));
+    }
+
+    /// A design holding binary data (here a plugin's file) can't be a plain JSON design: Save As
+    /// .json is refused, writes nothing, keeps the design unsaved, and its toast offers Save as .sc.
+    #[test]
+    fn a_json_save_of_binary_data_is_refused_and_offers_a_container() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        h.app.session.doc_mut().plugin_data.insert("gears/blobs/table.bin".into(), vec![0, 1, 2, 255].into());
+        let path = h.dir.join("Gears.json");
+        super::start(&mut h.app, "file.save_as", json!({"path": path.to_string_lossy()}));
+        super::tick(&mut h.app, true);
+        assert!(!path.exists() && h.app.session.is_dirty(), "nothing written, nothing lost");
+        let (text, _, error) = h.app.status.clone().unwrap();
+        assert!(error && text.contains("plugin files"), "{text}");
+        assert!(h.app.status_save_sc, "the toast offers Save as .sc");
+        h.frame();
+        // Any other message takes the offer away.
+        h.app.set_status("Saved", false);
+        assert!(!h.app.status_save_sc);
     }
 }

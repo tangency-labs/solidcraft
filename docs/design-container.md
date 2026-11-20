@@ -1,6 +1,6 @@
 # Design containers, version 1
 
-New designs use `.sc`; `.solidcraft` and `.solvecraft` remain supported legacy extensions. Opening detects the ZIP
+New designs use `.sc`; `.solidcraft` remains a supported legacy extension. Opening detects the ZIP
 local-header signature (`50 4b 03 04`) independently of the name; otherwise it uses
 the existing JSON design reader and migrations. Plain JSON remains a fully supported,
 self-contained input/output format. `io::write_design` keeps its JSON contract;
@@ -108,8 +108,10 @@ either retain that document or fail required-part CRC/hash validation. Optional
 preview success never validates source blobs or makes a document editable. An invalid required blob still
 fails the later document read. ZIP directory scans can touch a bounded suffix of a
 stored blob; deferral means not loading or decoding the complete payload, not zero
-physical reads of its byte range. Optional cache metadata is capped at 16 MiB;
-larger metadata misses the cache and uses the normal authoritative part-size budget.
+physical reads of its byte range. Standalone previews cap `document.json` at 16 MiB.
+When opening a design with a model cache, Open can check the cache against the full
+`document.json` within the authoritative part-size budget. Open reuses those bytes
+for document validation and loading.
 
 ## Model cache
 
@@ -126,8 +128,9 @@ the final state fits.
 
 The model is the whole evaluation: every feature's result (warning, boolean
 diagnostics, whether it was skipped, its fingerprint) and the state after it
-(bodies, solved sketches, construction geometry, sheet metal bodies, threads and
-the blend records later features read), and the body check mode it was evaluated
+(bodies, solved sketches, construction geometry, sheet metal bodies, threads,
+the blend records later features read, and the bodies each body pattern left out,
+whose copies keep their stored names), and the body check mode it was evaluated
 under (`each_step`, `each_feature` or `off`): a design opened under another mode is
 evaluated again. A body made by constant-radius rounds is recorded with the edges they
 rounded and their radii, and the body they were made on (stored like any other body,

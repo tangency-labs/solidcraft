@@ -657,6 +657,25 @@ pub(crate) fn suggested(s: &Session, picks: &[Sel], o: &Options) -> Option<Strin
     })
 }
 
+/// The size to fill in for a face automatic sizing has none for: a metric cylinder past the coarse
+/// table (a Ø150 shaft) takes a size with its pitch (`M150x4`), which the Size and Pitch rows then
+/// offer to change. The dialog records it as filled in, apart from the suggestion, so a new face
+/// replaces it but an authored size stays.
+pub(crate) fn large_size(s: &Session, picks: &[Sel], o: &Options) -> Option<String> {
+    if o.form != ThreadForm::Metric {
+        return None;
+    }
+    picks.first().and_then(|sel| match sel {
+        Sel::Face { body, point, .. } => {
+            let world = crate::open_meshing::session_world(s);
+            let mut state = solidcraft_engine::doc::ModelState::default();
+            state.bodies = world.bodies.iter().filter(|candidate| candidate.name == *body).cloned().collect();
+            solidcraft_engine::cmd::large_thread_size(&state, *point)
+        }
+        _ => None,
+    })
+}
+
 /// A saved thread's dialog: every option as saved, with its picks.
 pub(crate) fn reopen(d: &mut Dialog, s: &Session, feature: &Feature) {
     let kind = &feature.kind;
@@ -762,6 +781,7 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, feature: &Feature) {
         designation: designation.clone().unwrap_or_default(),
         length: length.as_ref().map(expr).unwrap_or_default(),
         suggested: None,
+        filled: None,
         of: Vec::new(),
         options,
     };

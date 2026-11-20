@@ -163,7 +163,11 @@ fn sketch_on_a_face_follows_a_moved_body() {
 }
 
 /// A 1 x 1 PNG for canvases.
-const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+fn png_1x1() -> Vec<u8> {
+    let mut out = std::io::Cursor::new(Vec::new());
+    image::RgbaImage::from_pixel(1, 1, image::Rgba([0, 0, 0, 255])).write_to(&mut out, image::ImageFormat::Png).unwrap();
+    out.into_inner()
+}
 
 /// Canvases belong to the active component and move with its occurrence; one put on a moved
 /// component's face from the root sits on the face (and stays the root's).
@@ -172,17 +176,17 @@ fn canvases_move_with_their_component() {
     let mut s = moved_part();
     let part = s.active_component;
     assert_ne!(part, 0);
-    run(&mut s, "canvas.insert", json!({"data": PNG, "plane": "XY", "name": "Plan"}));
+    run(&mut s, "canvas.insert", json!({"path": crate::tests::image_file(&png_1x1()), "plane": "XY", "name": "Plan"}));
     run(
         &mut s,
         "construct.plane.three_points",
         json!({"a": {"point": [50, 0, 5]}, "b": {"point": [51, 0, 5]}, "c": {"point": [50, 1, 5]}, "name": "ImagePlane"}),
     );
-    run(&mut s, "canvas.insert", json!({"data": PNG, "plane": "ImagePlane", "name": "OnPoints"}));
+    run(&mut s, "canvas.insert", json!({"path": crate::tests::image_file(&png_1x1()), "plane": "ImagePlane", "name": "OnPoints"}));
     // From the root, on the moved block's top face (world).
     run(&mut s, "component.activate", json!({"component": "root"}));
-    run(&mut s, "canvas.insert", json!({"data": PNG, "plane": {"face": [65, 10, 10]}, "name": "Lid", "width": 10}));
-    run(&mut s, "canvas.insert", json!({"data": PNG, "plane": "XZ", "name": "Root"}));
+    run(&mut s, "canvas.insert", json!({"path": crate::tests::image_file(&png_1x1()), "plane": {"face": [65, 10, 10]}, "name": "Lid", "width": 10}));
+    run(&mut s, "canvas.insert", json!({"path": crate::tests::image_file(&png_1x1()), "plane": "XZ", "name": "Root"}));
     let (vals, _) = s.doc.param_values();
     let world = |s: &Session, name: &str| {
         let c = s.doc.canvases.iter().find(|c| c.name == name).unwrap();
@@ -210,7 +214,7 @@ fn canvases_move_with_their_component() {
     let root = s.doc.canvases.iter().find(|c| c.name == "Root").unwrap();
     assert!(near(s.doc.canvas_plane(&vals, root, &s.model.state()).unwrap().origin, Vec3::ZERO));
     // The component survives a save and reopen.
-    let back = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    let back = solidcraft_io::read_design(&solidcraft_io::write_design_container(&s.doc).unwrap()).unwrap();
     assert_eq!(back.canvases, s.doc.canvases);
 }
 
@@ -1120,6 +1124,27 @@ fn a_blend_found_by_a_world_pick_keeps_its_part() {
     run(&mut s, "timeline.redefine", json!({"feature": "Edge", "command": "solid.chamfer", "params": {"edges": [[20, 0, 50]], "distance": 2}}));
     check(&s, 15000.0, BLOCK - 4.0 * CUT, "redefined");
     assert_eq!(blend_body(&s).as_deref(), Some("Cap block"));
+}
+
+/// Edit Feature of a Delete Face in a moved component sends its face picks in the world, as
+/// the dialog shows them; they map into the component's frame like Offset Faces' (#17120).
+#[test]
+fn a_delete_face_in_a_moved_part_redefines_from_world_picks() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Part"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "Block"}));
+    run(&mut s, "solid.cylinder", json!({"base": [10, 10, -1], "radius": 3, "height": 12, "body_name": "Drill"}));
+    run(&mut s, "solid.combine", json!({"target": "Block", "tools": ["Drill"], "operation": "cut"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.ground", json!({"occurrence": "Part:1", "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "translate": [0, 40, 0]}));
+    run(&mut s, "component.activate", json!({"component": "Part"}));
+    run(&mut s, "face.delete", json!({"faces": [[13, 50, 5]], "body": "Block", "name": "Unhole"}));
+    let solid = 20.0 * 20.0 * 10.0;
+    assert!((body_volume(&s, "Block") - solid).abs() < 1e-6 * solid, "made: {}", body_volume(&s, "Block"));
+    run(&mut s, "timeline.redefine", json!({"feature": "Unhole", "command": "face.delete", "params": {"faces": [[13, 50, 5]], "body": "Block"}}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    assert!((body_volume(&s, "Block") - solid).abs() < 1e-6 * solid, "redefined: {}", body_volume(&s, "Block"));
 }
 
 /// A corner of a moved part is refused at the point picked, in the world.

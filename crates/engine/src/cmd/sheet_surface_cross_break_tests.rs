@@ -123,7 +123,6 @@ fn cross_break_marks_the_diagonals_in_the_flat_pattern_and_dxf() {
     let (before, volume_before, outline_before) = (run(&mut s, "inspect.measure", json!({})), volume(&mut s), flat(&mut s)["outline"].clone());
     run(&mut s, "sheet.cross_break", json!({"face": [150, 100, 0.8], "inset": "5 mm"}));
     let f = flat(&mut s);
-    assert_eq!(f["surfaces"], json!(true), "a sheet made from surfaces");
     // 5 mm along each diagonal of the 300 x 200 panel (whose length is √130000).
     let (dx, dy) = (5.0 * 300.0 / 130_000f64.sqrt(), 5.0 * 200.0 / 130_000f64.sqrt());
     let want = [[dx, dy, 300.0 - dx, 200.0 - dy], [dx, 200.0 - dy, 300.0 - dx, dy]];

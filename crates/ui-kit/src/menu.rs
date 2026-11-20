@@ -826,21 +826,25 @@ pub fn workspace_menu(ui: &mut egui::Ui, menu: &WorkspaceMenu<'_>, key_row: Opti
                 let ppp = ui.ctx().pixels_per_point().max(0.5);
                 let origin = pos2((origin.x * ppp).round() / ppp, (origin.y * ppp).round() / ppp);
                 ui.painter().galley(origin, galley, text);
-                let badge = solidcraft_ui_text::tr(if planned {
-                    "ui.workspace_planned"
+                // Only what isn't plain gets a pill: the workspace you're in, and the ones still to come.
+                // One you can open just has its name, as any menu row.
+                let badge = if planned {
+                    Some("ui.workspace_planned")
                 } else if current {
-                    "ui.workspace_current"
+                    Some("ui.workspace_current")
                 } else {
-                    "ui.workspace_available"
-                });
-                let badge = ui.painter().layout_no_wrap(
-                    badge.to_string(),
-                    FontId::proportional(solidcraft_theme::Tokens::get().font_small),
-                    if current { t.on_accent } else { accent },
-                );
-                let badge_rect = Rect::from_min_size(pos2(badge_x, y - 8.0), badge.size() + vec2(t.space_12, t.space_3));
-                ui.painter().rect_filled(badge_rect, t.radius_lg, if current { accent } else { soft });
-                ui.painter().galley(badge_rect.min + vec2(t.space_6, t.space_3 / 2.0), badge, accent);
+                    None
+                };
+                if let Some(badge) = badge {
+                    let badge = ui.painter().layout_no_wrap(
+                        solidcraft_ui_text::tr(badge).to_string(),
+                        FontId::proportional(solidcraft_theme::Tokens::get().font_small),
+                        if current { t.on_accent } else { accent },
+                    );
+                    let badge_rect = Rect::from_min_size(pos2(badge_x, y - 8.0), badge.size() + vec2(t.space_12, t.space_3));
+                    ui.painter().rect_filled(badge_rect, t.radius_lg, if current { accent } else { soft });
+                    ui.painter().galley(badge_rect.min + vec2(t.space_6, t.space_3 / 2.0), badge, accent);
+                }
                 let line = |content: String, y: f32| {
                     let mut job =
                         egui::text::LayoutJob::simple_singleline(content, FontId::proportional(solidcraft_theme::Tokens::get().font_body), text);
