@@ -2168,6 +2168,14 @@ mod tests {
         assert_eq!(body(&sjis("諢階"), &sjis("ネジ穴の面取り"), b""), ["諢階"], "Shift_JIS, three-byte UTF-8 by chance");
         // Beside a single-byte encoding, UTF-8 reads as UTF-8.
         assert_eq!(body("Größe".as_bytes(), &encoding_rs::WINDOWS_1252.encode("Gehäuse").0, b""), ["Größe"], "UTF-8 beside windows-1252");
+        // A piece longer than the detector's sample, with its legacy text after an ASCII start
+        // (a long comment here; an IGES file without quotes is one such piece): the detector
+        // sees the piece's lines with 8-bit bytes, not its start.
+        let comment = [b"/* ".as_slice(), &vec![b'a'; ENCODING_SAMPLE_BYTES + 10], b"\n", &gbk("说明"), b" */\n"].concat();
+        let solid = with_name(&step, "MANIFOLD_SOLID_BREP", &gbk("切除-拉伸3"));
+        let at = solid.windows(5).position(|w| w == b"DATA;").unwrap();
+        let bytes = [&solid[..at], &comment, &solid[at..]].concat();
+        assert_eq!(step_import_feature(&bytes, "t.step").unwrap().body_names, ["切除-拉伸3"], "legacy text after a long ASCII start");
         // Strings and comments are pieces of their own; a doubled quote stays inside its string.
         let text: &[u8] = b"#1=A('it''s',/* a 'note' */'x');'open";
         let pieces: Vec<&[u8]> = step_pieces(text).collect();
