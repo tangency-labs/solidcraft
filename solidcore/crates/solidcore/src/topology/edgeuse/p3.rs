@@ -2028,6 +2028,14 @@ pub(crate) fn cover_joined_faces(
         // converging (`create_cylindrical_box` at radius 1e4, thickness 1e-3: 3.49 for a
         // joined arc whose samples lie within rounding of the cylinder, B-rep tolerance
         // 1e-5), and the edge is left as upstream leaves it, not proved to cover the face.
+        // The sample never stands in for a proof: it only chooses between the proved bound
+        // and upstream's value, and the tolerance is set to one of those, never to a sample.
+        // It may choose because the distance from a point of the curve to the surface is a
+        // lower bound on the greatest gap, which the proved bound encloses: a bound within
+        // twice it has converged. A sample as computed is that distance only when the
+        // surface's drop finds the nearest point, which it does not certify; otherwise it is
+        // larger (see [`sampled_face_gap`]). An overstated sample can only take the proved
+        // bound (sound, if loose), never an unproved value.
         if !within_edge_tolerance_limit(b, gap) {
             match sampled_face_gap(k, b, e, f)? {
                 Some(seen) if gap <= COVER_CONVERGED * seen => {}
@@ -2060,9 +2068,12 @@ const COVER_SAMPLES: u32 = 32;
 /// Not upstream (#18166): the largest distance from `e`'s curve, at the ends of
 /// [`COVER_SAMPLES`] equal pieces of its interval, to the closest point found on the surface
 /// of face `f` (`surface_closest_point`). Each is a distance to a point of the surface, so
-/// at least the true distance at that sample: a sample, not a bound, used only to tell a
-/// real gap from an enclosure that did not converge. `None` without a curve or surface, or
-/// where a sample is not evaluated or dropped.
+/// at least the true distance at that sample (MEASURED, not a bound): equal to it when the
+/// drop's global search finds the nearest point, which it does not certify, and larger
+/// otherwise; the evaluated point and the distance carry a few ulps of rounding of the
+/// coordinates. Used only to tell a real gap from an enclosure that did not converge
+/// ([`cover_joined_faces`]). `None` without a curve or surface, or where a sample is not
+/// evaluated or dropped.
 ///
 /// # Errors
 ///
