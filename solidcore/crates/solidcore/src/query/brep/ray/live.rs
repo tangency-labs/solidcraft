@@ -21,7 +21,7 @@
 use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::BTreeMap;
 
-use super::{cache_handle, face_surface_cache, prepare_surface_cache};
+use super::{cache_handle, prepare_surface_cache};
 use crate::curve::curve::Curve;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
@@ -557,19 +557,6 @@ impl SurfaceSolveContext<CacheObject> for LiveSurfaceContext<'_, '_, '_> {
         };
         self.0.cache(k, face)
     }
-    fn surface_cache_state(
-        &mut self,
-        k: &Kernel,
-        surface: &Surface,
-        handle: Option<CacheObject>,
-    ) -> Result<SurfaceCache<CacheObject>> {
-        let face = match handle {
-            Some(CacheObject::Surface(face)) => face,
-            None => return crate::surface::surface::p2::surface_cache(k, surface, None),
-            Some(_) => return Err(SolidError::invalid_input(OP, "expected surface handle")),
-        };
-        self.0.faces.cache_state_mapped(k, face, Ok)
-    }
     fn face_queries(&self) -> Option<&dyn FaceQueries<CacheObject>> {
         Some(self)
     }
@@ -674,8 +661,7 @@ impl<'a> BrepFaceServices<'a> {
         face: FaceId,
         map: impl Fn(CacheObject) -> Result<P>,
     ) -> Result<SurfaceCache<P>> {
-        // (a kept cache without tree, made for `cache_state_mapped`, is made again
-        // and built: its first `GetTree`)
+        // (a kept cache has its tree: `prepare_surface_cache` builds it)
         if let Some(cache) = self
             .caches
             .try_borrow()
@@ -689,39 +675,6 @@ impl<'a> BrepFaceServices<'a> {
             k,
             &mut **self.brep.try_borrow_mut().map_err(borrow_conflict)?,
             face,
-        )?;
-        let result = cache.map_handles(map)?;
-        self.caches
-            .try_borrow_mut()
-            .map_err(borrow_conflict)?
-            .insert(face, cache);
-        Ok(result)
-    }
-
-    /// The face's cache as `smsurf_GetSurfaceCache` hands it out without a `GetTree`
-    /// (the state bits `GlobalPointSolve`'s fast-drop face test reads): the kept cache,
-    /// else a new one kept without the tree its factory defers
-    /// (`face_surface_cache`), until a solve's [`BrepFaceServices::cache_mapped`]
-    /// builds it.
-    fn cache_state_mapped<P: Copy + PartialEq>(
-        &self,
-        k: &Kernel,
-        face: FaceId,
-        map: impl Fn(CacheObject) -> Result<P>,
-    ) -> Result<SurfaceCache<P>> {
-        if let Some(cache) = self
-            .caches
-            .try_borrow()
-            .map_err(borrow_conflict)?
-            .get(&face)
-        {
-            return cache.map_handles(map);
-        }
-        let cache = face_surface_cache(
-            k,
-            &mut **self.brep.try_borrow_mut().map_err(borrow_conflict)?,
-            face,
-            false,
         )?;
         let result = cache.map_handles(map)?;
         self.caches
@@ -788,18 +741,6 @@ impl SurfaceSolveContext<CacheObject> for BrepFaceServices<'_> {
         match handle {
             Some(CacheObject::Surface(face)) => self.cache(k, face),
             // a surface outside the B-rep: its own cache, as a solve without context
-            None => crate::surface::surface::p2::surface_cache(k, surface, None),
-            Some(_) => Err(SolidError::invalid_input(OP, "expected surface handle")),
-        }
-    }
-    fn surface_cache_state(
-        &mut self,
-        k: &Kernel,
-        surface: &Surface,
-        handle: Option<CacheObject>,
-    ) -> Result<SurfaceCache<CacheObject>> {
-        match handle {
-            Some(CacheObject::Surface(face)) => self.cache_state_mapped(k, face, Ok),
             None => crate::surface::surface::p2::surface_cache(k, surface, None),
             Some(_) => Err(SolidError::invalid_input(OP, "expected surface handle")),
         }
@@ -896,26 +837,6 @@ impl SurfaceSolveContext<SideObject> for SidedFaceServices<'_> {
             _ => Err(SolidError::invalid_input(OP, "expected surface handle")),
         }
     }
-    fn surface_cache_state(
-        &mut self,
-        k: &Kernel,
-        surface: &Surface,
-        handle: Option<SideObject>,
-    ) -> Result<SurfaceCache<SideObject>> {
-        let Some(SideObject(i, c)) = handle else {
-            return crate::surface::surface::p2::surface_cache(k, surface, None);
-        };
-        let services = self
-            .0
-            .get(i)
-            .ok_or_else(|| SolidError::invalid_input(OP, "handle of an absent B-rep"))?;
-        match c {
-            CacheObject::Surface(face) => {
-                services.cache_state_mapped(k, face, |c| Ok(SideObject(i, c)))
-            }
-            _ => Err(SolidError::invalid_input(OP, "expected surface handle")),
-        }
-    }
     fn face_queries(&self) -> Option<&dyn FaceQueries<SideObject>> {
         Some(self)
     }
@@ -1009,21 +930,6 @@ impl SurfaceSolveContext<CurveFaceObject> for CurveFaceServices<'_, '_> {
             Some(CurveFaceObject::Brep(CacheObject::Surface(face))) => {
                 self.0
                     .cache_mapped(k, face, |c| Ok(CurveFaceObject::Brep(c)))
-            }
-            None => crate::surface::surface::p2::surface_cache(k, surface, None),
-            Some(_) => Err(SolidError::invalid_input(OP, "expected surface handle")),
-        }
-    }
-    fn surface_cache_state(
-        &mut self,
-        k: &Kernel,
-        surface: &Surface,
-        handle: Option<CurveFaceObject>,
-    ) -> Result<SurfaceCache<CurveFaceObject>> {
-        match handle {
-            Some(CurveFaceObject::Brep(CacheObject::Surface(face))) => {
-                self.0
-                    .cache_state_mapped(k, face, |c| Ok(CurveFaceObject::Brep(c)))
             }
             None => crate::surface::surface::p2::surface_cache(k, surface, None),
             Some(_) => Err(SolidError::invalid_input(OP, "expected surface handle")),

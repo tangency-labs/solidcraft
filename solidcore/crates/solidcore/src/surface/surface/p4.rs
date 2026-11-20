@@ -1732,7 +1732,10 @@ impl Surface {
                         let cache = if let Some(cache) = cache {
                             cache
                         } else {
-                            built = context.surface_cache_state(k, self, surface)?;
+                            // (upstream reads the state bits of whatever cache the
+                            // surface has; the port gives the cache with its tree, so
+                            // the bits do not depend on what ran before)
+                            built = context.build_surface_cache(k, self, surface)?;
                             &built
                         };
                         if cache.is_trimmed()

@@ -21,7 +21,7 @@
 //!   evaluation copy (keeping its owner and cache slot) through the B-rep's
 //!   [`BrepFaceServices`], so its trimmed cache reaches the face as upstream's does
 //!   through `GetFace()`. `smsurf_GetSurfaceCache(this)` before the intersection is that
-//!   context's [`SurfaceSolveContext::surface_cache_state`] (upstream only reads the
+//!   context's [`SurfaceSolveContext::build_surface_cache`] (upstream only reads the
 //!   cache's continuity there, and ignores it).
 //! - **Statuses.** A face whose surface section fails is skipped, as upstream's
 //!   `continue`; so is a face whose trimming fails. [`SolidError::Unported`] always
@@ -195,7 +195,7 @@ pub fn surface_planar_section_curves(
     let use_surface_edges = [true, false];
     let found = if let Some((context, handle)) = context {
         // get surface cache (upstream then reads its continuity and ignores it)
-        context.surface_cache_state(k, surface, handle)?;
+        context.build_surface_cache(k, surface, handle)?;
         surface.global_surface_intersect_with_context(
             k,
             [handle, None],
@@ -208,7 +208,6 @@ pub fn surface_planar_section_curves(
             ang_tol_rad,
         )?
     } else {
-        crate::surface::surface::p1::note_surface_cache(k, surface);
         surface.global_surface_intersect(
             k,
             uv_domain,

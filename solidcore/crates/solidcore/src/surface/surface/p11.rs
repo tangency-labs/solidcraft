@@ -65,12 +65,13 @@
 //!   `Kernel::fixes.local_surface_intersect_guards_max_boundary_retry`).
 //! - **Surface cache history.** `LiftCurve` reads the surface cache's continuity arrays
 //!   (its C0 knot splits, and `GetDomainWithContinuity`'s C1 domain around each
-//!   segment's start point) without building the cache's tree, so the arrays are empty
-//!   while no earlier call has built it, and a point off the natural domain then gets
-//!   the whole domain instead of one the end-knot discontinuities shrink to nothing.
-//!   Both reads go through [`continuity_surface_cache`], which follows the surface's
-//!   cache slot ([`Surface::cache_tree_state`]; `plan/findings.md`, "surface cache
-//!   history").
+//!   segment's start point) without building the cache's tree. Upstream's arrays are
+//!   empty while no earlier call has built it: the surface is then not split at its C0
+//!   knots, and a point off the natural domain gets the whole domain instead of one the
+//!   end-knot discontinuities shrink to nothing, so the lift depends on what ran
+//!   before. Both reads go through [`continuity_surface_cache`], which always gives the
+//!   surface's arrays ([`Surface::continuities`]): the lift is the same under every
+//!   history.
 //! - Debug-only work (`SM_ASSERT`, `SM_DEBUG_CODE` drawing) is not ported.
 
 use crate::curve::composite_curve::CompositeCurve;
@@ -2053,8 +2054,8 @@ impl Surface {
         } else {
             // Right now step surfaces will not be created that have discontinuities.
             if !matches!(self.kind(), SurfaceKind::Step(_)) {
-                // NER: no surface cache (no GetTree: the continuity arrays are empty
-                // unless the cache's tree was built)
+                // NER: no surface cache (no GetTree: the cache has its surface's
+                // continuity arrays whether its tree is built or not)
                 let cache = continuity_surface_cache(
                     k,
                     self,
@@ -2808,5 +2809,117 @@ mod tests {
         let p2 = s2.evaluate_point(&k, zero.other_uv).unwrap();
         assert!((p1.x - 0.5).abs() <= 1e-9 && p1.z.abs() <= 1e-9, "{p1:?}");
         assert!(p1.distance(p2) <= 1e-9, "{p1:?} {p2:?}");
+    }
+
+    /// A roof: two planes meeting at a C0 crease, `S(u, v) = (2u, v, 1 - |2u - 1|)` over
+    /// `[0, 1]²`, degree 1 in both directions with the interior u knot 1/2.
+    fn roof() -> Surface {
+        let row = |x: f64, z: f64| vec![CPoint::new(x, 0.0, z, 1.0), CPoint::new(x, 1.0, z, 1.0)];
+        Surface::from(
+            BSplineSurface::from_data(
+                2,
+                1,
+                1,
+                1,
+                4,
+                3,
+                &[row(0.0, 0.0), row(1.0, 1.0), row(2.0, 0.0)],
+                &[0.0, 0.0, 0.5, 1.0, 1.0],
+                &[0.0, 0.0, 1.0, 1.0],
+            )
+            .unwrap(),
+        )
+    }
+
+    /// `LiftCurve` across the crease of [`roof`], on a surface cache made without tree
+    /// (during a Boolean operation; upstream's arrays are then empty, the curve is not
+    /// split at the crease, and the fit refines towards it and reports a deviation of
+    /// about 1.7e-4, beyond the tolerance): the cache has the surface's continuity
+    /// arrays, the UV line is split at u = 1/2 (`intersect_and_split`), the fit is
+    /// within the tolerance, the lifted curve lies on the roof (the distance of a point to the
+    /// roof is at most `|z - (1 - |x - 1|)| / √2`), passes over the ridge at
+    /// `S(1/2, 1/2) = (1, 1/2, 1)`, and is the same curve whatever ran before: lifted
+    /// outside a Boolean operation, after a tree build, or after the arrays were asked
+    /// for (#20054).
+    #[test]
+    fn lift_curve_splits_at_a_crease_on_a_cache_without_tree() {
+        use crate::surface::surface::p1::{continuity_surface_cache, get_surface_cache};
+        let tol = 1e-6;
+        let dom = Extent2d::from_points(Point2::new(0.0, 0.0), Point2::new(1.0, 1.0));
+        let uv_line = Curve::from(crate::curve::line::Line::from_points(
+            Point3::new(0.1, 0.2, 0.0),
+            Point3::new(0.9, 0.8, 0.0),
+            2,
+        ));
+        let interval = Extent1d::from_min_max(0.0, 1.0);
+        let lift = |k: &Kernel, s: &Surface| {
+            s.lift_curve(k, &dom, &uv_line, &interval, tol, false)
+                .unwrap()
+        };
+
+        // during a Boolean operation the cache has no tree, but its arrays
+        let mut k = Kernel::default();
+        k.context.set_doing_boolean(true);
+        let s = roof();
+        let cache = continuity_surface_cache::<()>(&k, &s, None, None).unwrap();
+        assert!(cache.tree().is_none());
+        assert_eq!(
+            cache.u_continuities(),
+            [
+                ContinuityType::Discontinuous,
+                ContinuityType::C0,
+                ContinuityType::Discontinuous
+            ]
+        );
+        let treeless = lift(&k, &roof());
+        assert!(
+            treeless.max_approx_dev <= tol,
+            "the fit is {:e} off",
+            treeless.max_approx_dev
+        );
+
+        // the lifted curve lies on the roof and runs over its ridge
+        let curve = &treeless.curve;
+        let ivl = curve.natural_interval();
+        let mut nearest_ridge = f64::INFINITY;
+        for i in 0..=1000 {
+            let p = curve
+                .evaluate_point(&k, ivl.evaluate(f64::from(i) / 1000.0))
+                .unwrap();
+            let off = (p.z - (1.0 - (p.x - 1.0).abs())).abs() / 2.0_f64.sqrt();
+            assert!(off <= tol, "{p:?} is {off:e} off the roof");
+            nearest_ridge = nearest_ridge.min(p.distance(Point3::new(1.0, 0.5, 1.0)));
+        }
+        assert!(
+            nearest_ridge <= 1e-3,
+            "the lift cuts the ridge by {nearest_ridge:e}"
+        );
+        let ends = [ivl.min(), ivl.max()].map(|t| curve.evaluate_point(&k, t).unwrap());
+        let want = [(0.1, 0.2), (0.9, 0.8)]
+            .map(|(u, v)| roof().evaluate_point(&k, Point2::new(u, v)).unwrap());
+        for (got, want) in ends.iter().zip(&want) {
+            assert!(got.distance(*want) <= tol, "{got:?} vs {want:?}");
+        }
+
+        // the same curve under every other history
+        let same = |other: &LiftedCurve| {
+            assert_eq!(
+                format!("{:?}", other.curve),
+                format!("{:?}", treeless.curve)
+            );
+            assert_eq!(other.max_approx_dev, treeless.max_approx_dev);
+        };
+        k.context.set_doing_boolean(false);
+        same(&lift(&k, &roof()));
+        let built = roof();
+        get_surface_cache::<()>(&k, &built, None)
+            .unwrap()
+            .get_tree(&k)
+            .unwrap();
+        k.context.set_doing_boolean(true);
+        same(&lift(&k, &built));
+        let asked = roof();
+        asked.continuities(&k).unwrap();
+        same(&lift(&k, &asked));
     }
 }

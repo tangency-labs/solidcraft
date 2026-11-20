@@ -98,11 +98,9 @@
 //!   flags and rejects a face-owned trimmed build without a [`CacheFace`](crate::surface::trim_srf_cache::CacheFace)
 //!   adapter, instead of silently building a plain cache. [`SurfaceCache::subdivide_node`]
 //!   does not call `GetTree` (it needs a built tree and fails without one).
-//! - **Cache slot.** Filling the continuity arrays (`BuildTreeBase`) also marks the
-//!   cache slot of the cache's surface built
-//!   ([`CacheTreeState::Built`](crate::surface::surface::CacheTreeState)), so that a
-//!   later cache made for the same surface object shows its continuities as upstream's
-//!   reused cache does.
+//! - **Continuity arrays.** `BuildTreeBase` takes them from the surface's memo
+//!   ([`Surface::continuities`]); a cache without tree gets the same arrays on request
+//!   ([`SurfaceCache::fill_continuities`]), where upstream's stay empty until `GetTree`.
 
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
@@ -118,7 +116,7 @@ use crate::nurbs::nurbs_srf::split_srf;
 use crate::nurbs::srf_basic::Direction;
 use crate::nurbs::srf_basic::Surface as NurbSurface;
 use crate::surface::procedural_blend::NetScope;
-use crate::surface::surface::{CacheTreeState, Surface, SurfaceKind};
+use crate::surface::surface::{Surface, SurfaceKind};
 
 use crate::geom::geom_utility::p2::ContinuityType;
 
@@ -1051,29 +1049,26 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         self.auxs_mut().clear();
 
         // set the continuities (continuity is in the opposite direction to the query)
-        let u_conts = calculate_continuities(k, self.surface(), SurfParamType::U)?;
-        let v_conts = calculate_continuities(k, self.surface(), SurfParamType::V)?;
-        self.set_continuities(u_conts, v_conts);
-        // the surface's cache now has its continuity arrays (its cache slot, shared
-        // with the surface the cache was made from)
-        self.surface().set_cache_tree_state(CacheTreeState::Built);
+        let conts = self.surface().continuities(k)?;
+        self.set_continuities(conts.u.clone(), conts.v.clone());
         self.build_tree_base_nodes(k, u_count, v_count, tester)
     }
 
-    /// Sets the continuity arrays a cache of this surface already has when its tree
-    /// was built before (the surface's cache slot is
-    /// [`CacheTreeState::Built`](crate::surface::surface::CacheTreeState)) but this cache
-    /// is made without building one (during a Boolean operation): upstream reuses the
-    /// built cache, whose `BuildTreeBase` computed them from the same surface.
+    /// Gives a cache whose continuity arrays are not set yet (its tree is not built: it
+    /// was made during a Boolean operation) the arrays of its surface
+    /// ([`Surface::continuities`]), the ones its tree build sets. Upstream's arrays stay
+    /// empty until `GetTree`; here a reader of them gets the same answer whether the
+    /// tree is built or not. Arrays already set are kept.
     ///
     /// # Errors
     ///
-    /// Those of `SmSurface::CalculateContinuities` ([`SolidError::Unported`] for kinds
-    /// without iso curves).
-    pub fn restore_continuities(&mut self, k: &Kernel) -> Result<()> {
-        let u_conts = calculate_continuities(k, self.surface(), SurfParamType::U)?;
-        let v_conts = calculate_continuities(k, self.surface(), SurfParamType::V)?;
-        self.set_continuities(u_conts, v_conts);
+    /// Those of [`Surface::continuities`] ([`SolidError::Unported`] for kinds without
+    /// iso curves).
+    pub fn fill_continuities(&mut self, k: &Kernel) -> Result<()> {
+        if self.u_continuities().is_empty() && self.v_continuities().is_empty() {
+            let conts = self.surface().continuities(k)?;
+            self.set_continuities(conts.u.clone(), conts.v.clone());
+        }
         Ok(())
     }
 
@@ -1322,14 +1317,6 @@ fn half_box(
 
 /// `SmSurface::CalculateContinuities(eSurfParam, ..)`: the continuity at every unique
 /// knot of the surface in `dir`.
-fn calculate_continuities(
-    k: &Kernel,
-    surface: &Surface,
-    dir: SurfParamType,
-) -> Result<Vec<ContinuityType>> {
-    Ok(surface.calculate_continuities(k, dir)?.1)
-}
-
 /// `sm_InitNurbSurfaceMemory` with the sizes of `like` on zero-filled block memory.
 fn zeroed_like(like: &NurbSurface) -> Result<NurbSurface> {
     let (p, q) = like.degrees();

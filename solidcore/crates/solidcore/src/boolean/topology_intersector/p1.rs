@@ -209,7 +209,7 @@ use crate::surface::surface::p2::TsectCurveType;
 use crate::surface::surface::p5::{DropPoint, DropPointOptions};
 use crate::surface::surface::Surface;
 use crate::surface::surface_cache::face_context::{
-    prepare_face_surface_cache, prepare_face_surface_cache_state, FaceQueries, PreparedFaceQueries,
+    prepare_face_surface_cache, FaceQueries, PreparedFaceQueries,
 };
 use crate::surface::surface_cache::SurfaceCache;
 use crate::topology::proto_topology::p2::exactly_placed;
@@ -4161,18 +4161,11 @@ impl<O> core::fmt::Debug for FaceCacheTarget<'_, O> {
 const OP_FACE_CACHES: &str = "boolean::topology_intersector::p1::solve_with_face_caches";
 
 /// The face surface caches a topology solve has asked for, by face handle: each
-/// built once on the face's B-rep by [`solve_with_face_caches`] (or the failure of
-/// that build), and the face the solve is waiting for (with whether it asked for the
-/// tree, a solve's `GetTree`, or only the cache's state bits).
+/// built once on the face's B-rep, with its tree, by [`solve_with_face_caches`] (or the
+/// failure of that build), and the face the solve is waiting for.
 struct FaceCaches<O> {
-    pending: Cell<Option<(O, bool)>>,
+    pending: Cell<Option<O>>,
     built: BTreeMap<O, Result<SurfaceCache<O>>>,
-    /// The caches as `smsurf_GetSurfaceCache` hands them to `GlobalPointSolve`'s
-    /// fast-drop face test before any `GetTree` ([`prepare_face_surface_cache_state`]).
-    states: BTreeMap<O, Result<SurfaceCache<O>>>,
-    /// The faces whose cache the attempt has asked for with its tree so far: from then
-    /// on upstream's cache, kept with the surface, has its tree.
-    tree_requested: RefCell<BTreeSet<O>>,
     /// UV trim curves the face classifications of the solve asked for
     /// (`SmEdgeuse::GetOrCreateUVTrimCurve`), made on the B-rep between attempts.
     trims: crate::query::brep::RayPreparation,
@@ -4227,46 +4220,10 @@ impl<O: ClassObject + SolutionObject + Ord, G: IntersectorBrep<O> + ?Sized> Surf
                 SolidError::entity_missing(OP_FACE_CACHES, "a face for the surface")
             })?;
         match self.0.caches.built.get(&face) {
-            Some(Ok(cache)) => {
-                self.0.caches.tree_requested.borrow_mut().insert(face);
-                cache.map_handles(Ok)
-            }
-            Some(Err(e)) => Err(e.clone()),
-            None => {
-                self.0.caches.pending.set(Some((face, true)));
-                Err(SolidError::PreparationRequired {
-                    operation: OP_FACE_CACHES,
-                })
-            }
-        }
-    }
-
-    fn surface_cache_state(
-        &mut self,
-        k: &Kernel,
-        surface: &Surface,
-        handle: Option<O>,
-    ) -> Result<SurfaceCache<O>> {
-        let Some(handle) = handle else {
-            return self.build_surface_cache(k, surface, None);
-        };
-        if surface.face()?.is_none() {
-            return self.build_surface_cache(k, surface, Some(handle));
-        }
-        let face =
-            self.0.inner().surface_face(handle)?.ok_or_else(|| {
-                SolidError::entity_missing(OP_FACE_CACHES, "a face for the surface")
-            })?;
-        // after the attempt's first GetTree of the face's cache, upstream's cache has
-        // its tree
-        if self.0.caches.tree_requested.borrow().contains(&face) {
-            return self.build_surface_cache(k, surface, Some(handle));
-        }
-        match self.0.caches.states.get(&face) {
             Some(Ok(cache)) => cache.map_handles(Ok),
             Some(Err(e)) => Err(e.clone()),
             None => {
-                self.0.caches.pending.set(Some((face, false)));
+                self.0.caches.pending.set(Some(face));
                 Err(SolidError::PreparationRequired {
                     operation: OP_FACE_CACHES,
                 })
@@ -4667,14 +4624,11 @@ where
     let mut caches = FaceCaches {
         pending: Cell::new(None),
         built: BTreeMap::new(),
-        states: BTreeMap::new(),
-        tree_requested: RefCell::new(BTreeSet::new()),
         trims: crate::query::brep::RayPreparation::default(),
         classified_faces: RefCell::new(Vec::new()),
     };
     loop {
         caches.classified_faces.borrow_mut().clear();
-        caches.tree_requested.borrow_mut().clear();
         let result = solve(&FaceCacheObjects {
             geometry: &*geometry,
             caches: &caches,
@@ -4691,40 +4645,22 @@ where
             caches.trims.prepare(k, target.brep, request)?;
             continue;
         }
-        let Some((face, get_tree)) = caches.pending.take() else {
+        let Some(face) = caches.pending.take() else {
             return result;
         };
-        let made = if get_tree {
-            &mut caches.built
-        } else {
-            &mut caches.states
-        };
-        if made.contains_key(&face) {
+        if caches.built.contains_key(&face) {
             return Err(SolidError::invalid_input(
                 OP_FACE_CACHES,
                 "face cache preparation made no progress",
             ));
         }
-        if get_tree {
-            if let Some(list) = built_with_tree.as_deref_mut() {
-                list.push(face);
-            }
+        if let Some(list) = built_with_tree.as_deref_mut() {
+            list.push(face);
         }
-        let cache = match geometry.face_cache_target(face) {
-            Ok(t) if get_tree => {
-                prepare_face_surface_cache(k, t.brep, t.face, t.surface, &*t.handles, &*t.entities)
-            }
-            Ok(t) => prepare_face_surface_cache_state(
-                k,
-                t.brep,
-                t.face,
-                t.surface,
-                &*t.handles,
-                &*t.entities,
-            ),
-            Err(e) => Err(e),
-        };
-        made.insert(face, cache);
+        let cache = geometry.face_cache_target(face).and_then(|t| {
+            prepare_face_surface_cache(k, t.brep, t.face, t.surface, &*t.handles, &*t.entities)
+        });
+        caches.built.insert(face, cache);
     }
 }
 

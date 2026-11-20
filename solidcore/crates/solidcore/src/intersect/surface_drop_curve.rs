@@ -1088,7 +1088,9 @@ impl<'s> SurfaceDropCurve<'s> {
         let iso = cache.iso_boundary_curves(k, &uv_domain, cci_tol / 3.0)?;
         let mut iso_curves: Vec<Curve> = iso.curves.to_vec();
 
-        // add every Surface U internal continuity boundary to sIsoCurves array
+        // add every Surface U internal continuity boundary to sIsoCurves array (the
+        // cache's arrays, its tree built or not: upstream's are empty until GetTree)
+        cache.fill_continuities(k)?;
         let u_conts: Vec<ContinuityType> = cache.u_continuities().to_vec();
         let (u_knots, _) = surface.knots_with_nurb(k, SurfParamType::U, None)?;
         for ii in 1..u_conts.len().saturating_sub(1) {
