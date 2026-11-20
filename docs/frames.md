@@ -51,9 +51,7 @@ the selected body (or the last body of the active component).
 
 **Corner Type** (`corner`) cuts the members where two of them meet: `none` (the default, members
 overlap as before), `mitre`, `butt` or `auto` (shown as **Auto**, **None**, **Mitre** and **Butt**).
-**Auto** is described in its own section below. A new Frame Member made in the dialog starts on Auto;
-the preference **New Frame Members start on Corner Type None** (Tools page, `frame_starts_on_none`)
-keeps the old start, members left overlapping.
+**Auto** is described in its own section below. A new Frame Member made in the dialog starts on None.
 
 **Coped** (`coped`, a tick box to the right of Fit Ends to Earlier Frames, unticked by default) copes
 every butt joint of the frame: the tube that gives way is cut to the other tube's real outer shape

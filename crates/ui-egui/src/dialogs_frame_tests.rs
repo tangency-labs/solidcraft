@@ -1925,38 +1925,26 @@ fn remove_tube_drops_the_overrides_naming_it() {
     crate::dialogs::run_dialog(&mut app, &d).unwrap();
 }
 
-/// A new Frame Member starts on Auto with Fit Ends to Earlier Frames ticked, unflipped, with no
-/// overrides, even after one made with Butt; its command says so.
+/// A new Frame Member starts on None (members left overlapping, the command's own default) with Fit
+/// Ends to Earlier Frames ticked, unflipped, with no overrides, even after one made with Butt; its
+/// command sends no corner, and under None no fit_ends.
 #[test]
-fn a_new_frame_member_starts_on_auto_with_fit_ends() {
+fn a_new_frame_member_starts_on_none_with_fit_ends() {
     let mut app = frame_app();
     let lines = frame_lines(&app);
     let mut d = dialog_on(&mut app, &lines);
     assert_eq!(d.inputs[2].label, "Corner Overrides");
     let m = member(&mut d);
-    assert_eq!((CORNER_TYPES[m.corner].0, m.flip, m.fit_ends, m.overrides.len()), ("auto", false, true, 0));
+    assert_eq!((CORNER_TYPES[m.corner].0, m.flip, m.fit_ends, m.overrides.len()), ("none", false, true, 0));
     let p = &apply_commands(&app, &d).unwrap()[0].1;
-    assert_eq!((&p["corner"], &p["fit_ends"]), (&json!("auto"), &json!(true)), "{p}");
+    assert!(p.get("corner").is_none() && p.get("fit_ends").is_none(), "{p}");
     assert!(p.get("flip").is_none() && p.get("corners").is_none(), "{p}");
     member(&mut d).corner = corner_type("butt");
     let c = apply_commands(&app, &d).unwrap();
     run_all(&mut app, c);
     app.dialog = None;
     let mut d = dialog_on(&mut app, &lines);
-    assert_eq!(CORNER_TYPES[member(&mut d).corner].0, "auto");
-}
-
-/// With the preference "New Frame Members start on Corner Type None" a new Frame Member starts on
-/// None, as before Auto, and its command sends no corner.
-#[test]
-fn the_frame_starts_on_none_preference_keeps_the_old_start() {
-    let mut app = frame_app();
-    app.preferences.frame_starts_on_none = true;
-    let lines = frame_lines(&app);
-    let mut d = dialog_on(&mut app, &lines);
     assert_eq!(CORNER_TYPES[member(&mut d).corner].0, "none");
-    let p = &apply_commands(&app, &d).unwrap()[0].1;
-    assert!(p.get("corner").is_none() && p.get("fit_ends").is_none(), "{p}");
 }
 
 /// Fit Ends to Earlier Frames unticked writes nothing, and under None, ticked or not, neither.
@@ -1965,6 +1953,7 @@ fn fit_ends_unticked_writes_nothing() {
     let mut app = frame_app();
     let lines = frame_lines(&app);
     let mut d = dialog_on(&mut app, &lines);
+    member(&mut d).corner = corner_type("auto");
     member(&mut d).fit_ends = false;
     let p = &apply_commands(&app, &d).unwrap()[0].1;
     assert!(p["corner"] == "auto" && p.get("fit_ends").is_none(), "{p}");
@@ -1987,6 +1976,8 @@ fn flip_is_hidden_under_auto() {
     let lines = frame_lines(&h.app);
     h.app.session.selection = lines.iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
     h.app.start("frame.member");
+    h.frames(2);
+    member(h.app.dialog.as_mut().unwrap()).corner = corner_type("auto");
     h.frames(2);
     assert!(h.widgets("Flip").is_empty(), "no Flip under Auto");
     assert!(h.widget("Fit Ends to Earlier Frames").is_some());
@@ -2049,6 +2040,7 @@ fn under_auto_a_three_tube_point_is_an_override() {
     let members = lines_at(&app, 0.0, 0.0);
     assert_eq!(members.len(), 3, "{members:?}");
     let mut d = dialog_on(&mut app, &lines);
+    member(&mut d).corner = corner_type("auto");
     d.active = 2;
     d.pick(&app.session, corner.clone());
     assert_eq!(d.inputs[2].items, std::slice::from_ref(&corner), "{:?}", d.error);
@@ -2079,6 +2071,7 @@ fn an_auto_override_names_the_pairs_ending_at_its_corner() {
     let at = |app: &SolveApp, x: f64, y: f64| Sel::SketchPoint { id: format!("{frame}:{}", point_at(app, x, y)) };
     let mid = Sel::SketchPoint { id: format!("{frame}:mid") };
     let mut d = dialog_on(&mut app, &lines);
+    member(&mut d).corner = corner_type("auto");
     d.active = 0;
     pick_all(&app, &mut d, &[at(&app, 0.0, 0.0), mid.clone()]);
     assert_eq!((path(&d).len(), d.error.as_deref()), (6, None));
@@ -2645,6 +2638,7 @@ fn a_crossing_point_override_is_a_crossing_row_with_flip() {
     let lines = frame_lines(&h.app);
     let x = Sel::ExternalSketchPoint { sketch: frame, id: "x".into() };
     let mut d = dialog_on(&mut h.app, &lines);
+    member(&mut d).corner = corner_type("auto");
     d.active = 2;
     d.pick(&h.app.session, x.clone());
     assert_eq!(d.inputs[2].items, std::slice::from_ref(&x), "{:?}", d.error);
@@ -2752,6 +2746,7 @@ fn a_crossing_where_a_tube_also_ends_is_a_crossing_override() {
     let lines = frame_lines(&h.app);
     let x = Sel::ExternalSketchPoint { sketch: frame, id: point_at(&h.app, 300.0, 200.0) };
     let mut d = dialog_on(&mut h.app, &lines);
+    member(&mut d).corner = corner_type("auto");
     d.active = 2;
     d.pick(&h.app.session, x.clone());
     assert_eq!(d.inputs[2].items, std::slice::from_ref(&x), "{:?}", d.error);

@@ -432,7 +432,7 @@ impl Member {
             pair_ids: Vec::new(),
             ghost: false,
             picked_tubes: Vec::new(),
-            corner: AUTO,
+            corner: NONE,
             flip: false,
             fit_ends: true,
             coped: false,
@@ -500,7 +500,7 @@ const NEEDS_PARTNER: &str = "A point needs another point after it";
 const PICK_SECOND: &str = "Pick the second point";
 
 /// The dialog for Frame Member.
-pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
+pub fn start(_app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     (id == "frame.member").then(|| {
         let inputs = vec![
             SelInput::new("Path", PATH, true).ordered_points(),
@@ -510,12 +510,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             // sketch's instead).
             SelInput::new("Corner Overrides", EXTERNAL_POINTS, true),
         ];
-        let mut m = Member::new();
-        // The old start, members left overlapping, is kept behind a preference (#17854).
-        if app.preferences.frame_starts_on_none {
-            m.corner = NONE;
-        }
-        (Kind::Frame(m), inputs)
+        (Kind::Frame(Member::new()), inputs)
     })
 }
 

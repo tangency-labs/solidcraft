@@ -1347,9 +1347,6 @@ preference_settings! {
     show_view_angles: bool = false, PAGE_GRAPHICS;
     /// Show world X/Y/Z component dimensions beside the total distance in Measure.
     measure_axis_distances: bool = true, PAGE_TOOLS;
-    /// A new Frame Member made in the dialog starts on Corner Type None, members left overlapping,
-    /// as before Auto (#17854). Off: it starts on Auto. Scripts and designs are unaffected.
-    frame_starts_on_none: bool = false, PAGE_TOOLS => check_id_help("prefs.frame_starts_on_none", "prefs.frame_starts_on_none_help");
     /// Perspective view's vertical field of view in radians (#5364), 15° to 90°. The view reads a
     /// saved value outside that range as the default ([`perspective_fov`]).
     perspective_fov: f64 = PERSPECTIVE_FOV, PAGE_GRAPHICS, accept(15f64.to_radians()..=90f64.to_radians());
