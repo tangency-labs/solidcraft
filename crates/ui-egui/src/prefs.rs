@@ -10990,6 +10990,22 @@ mod tests {
         assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Axes);
     }
 
+    /// #19749: the cube navigator is a choice again, and a settings file that names it reads as
+    /// the cube instead of falling back to the signed axes.
+    #[test]
+    fn the_cube_navigator_is_offered_again_and_a_saved_cube_reads_as_the_cube() {
+        let saved = json!({"navigator_style": "cube", "length_decimals": 4});
+        let p = super::lenient(&saved);
+        assert_eq!(serde_json::to_value(p.navigator_style).unwrap(), json!("cube"), "a saved cube reads as the cube");
+        assert_eq!(p.length_decimals, 4, "the rest of the saved preferences are kept");
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"open":"Navigation"}));
+        super::reveal_preference(&mut h, "prefs:navigator");
+        let cube = crate::scenario::rect_of("prefs:navigator:Cube").expect("the cube is offered").center();
+        h.call("ui.click", json!({"x":cube.x,"y":cube.y}));
+        assert_eq!(serde_json::to_value(h.app.preferences.navigator_style).unwrap(), json!("cube"), "picking the cube picks the cube");
+    }
+
     #[test]
     fn navigator_picker_preserves_axes_and_follows_preferences_transactions() {
         let old: Prefs = serde_json::from_value(json!({"nav":"solidworks"})).unwrap();
