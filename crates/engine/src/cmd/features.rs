@@ -3975,11 +3975,15 @@ fn hole_reference_params(s: &Session, p: &Value, cmd: &str) -> Result<Vec<solidc
     Ok(out)
 }
 
-/// The body whose face is nearest `p` (within its pick tolerance), when it belongs to another
-/// component than the active one.
+/// The body whose face is nearest `p` (within its pick tolerance), among the bodies a pick made
+/// there met, when it belongs to another component than the active one.
 fn body_of_other_component_at(s: &Session, p: Vec3) -> Option<String> {
     let st = s.model.state();
-    let body = body_with_face_at(&st, p, |_| true)?;
+    // A pick made on the placed model names the bodies under it: another part with a face at the
+    // same point in its own frame only (two leaves of a hinge, one turned) is not the one picked
+    // (#18057), as for a face pick (#419).
+    let picked = crate::frames::picked(p);
+    let body = body_with_face_at(&st, p, |b| picked.as_ref().is_none_or(|names| names.iter().any(|n| n == b.definition_name())))?;
     (s.doc.model_body_component(body) != s.active_component).then(|| body.name.clone())
 }
 
