@@ -247,10 +247,18 @@ pub struct OffsetExecutive {
     /// inverted (its neighbours' offsets crossed over it; `TrimmedEdge`), which
     /// `resolve_crossing_loops` resolves when they have one loop.
     pub(super) inverted_faces: BTreeSet<FaceId>,
+    /// Genuine endpoints beyond a periodic chart seam, resolved before gap closure.
+    pub(super) periodic_boundary_ends: Vec<super::periodic_boundary::BoundaryEnd>,
+    /// Not in the fork (solidcore#3329): each wall carried on past a region of a face its
+    /// loops wind round the other way within a wall, and the strip that carries it on
+    /// (`resolve_crossing_loops`); the merge does not intersect the two.
+    pub(super) wall_extensions: Vec<(FaceId, FaceId)>,
     /// Not upstream (WR-344 refinement, tangency-labs/solidcore#1795): the original edge
     /// uses whose edge `EdgeuseOffset` could not mate (`MateEdges` failed); the merge
     /// intersects their faces' offsets as upstream does, not taking them as mated.
     pub(super) unmated_edgeuses: BTreeSet<EdgeuseId>,
+    /// Source uses whose paired edge curves were successfully installed.
+    pub(super) mated_edgeuses: BTreeSet<EdgeuseId>,
     /// The faces of a local operation and the surfaces replacing theirs, in step (the
     /// part of `SmLocalOperationGeometryCreation` the executive reads: `m_vFaces`,
     /// `m_vSurfaces`).
@@ -311,7 +319,10 @@ impl OffsetExecutive {
             collapsed_faces: Vec::new(),
             collapsed_displacements: Vec::new(),
             inverted_faces: BTreeSet::new(),
+            periodic_boundary_ends: Vec::new(),
+            wall_extensions: Vec::new(),
             unmated_edgeuses: BTreeSet::new(),
+            mated_edgeuses: BTreeSet::new(),
             local_faces: Vec::new(),
             local_surfaces: Vec::new(),
         }
@@ -641,6 +652,9 @@ impl OffsetExecutive {
         self.faceuse_extension_reaches.clear();
         self.edge_bounds.clear();
         self.crossing_edgeuses.clear();
+        self.periodic_boundary_ends.clear();
+        self.mated_edgeuses.clear();
+        self.wall_extensions.clear();
     }
 
     /// Records how far the surface of original face `face` must be extended for its
@@ -2003,6 +2017,11 @@ impl OffsetExecutive {
                 }
             }
         }
+        // (not in the fork, solidcore#3329) a wall and the strip carrying it on share a
+        // surface
+        for &(wall, strip) in &self.wall_extensions {
+            relate_surface_pair(result, &mut no_ssi, wall, strip)?;
+        }
         self.clear_relations();
         // Shrink the geometry - this helps some for self intersections
         shrink_geometry(kernel, required(self.offset_brep.as_mut())?)?;
@@ -2479,6 +2498,15 @@ impl OffsetExecutive {
         } else {
             Vec::new()
         };
+        // Not upstream: a face of a local operation that keeps its surface is the copy of
+        // its own surface and loops, so its edge uses keep the UV curves copied with them as
+        // their trim curves. Dropped again from the lifted edges, a trim curve ending at a
+        // pole can end there at another parameter (every one lifts to the pole) and then
+        // runs elsewhere through the face, so `map_edgeuses` finds no original edge use
+        // for it and a kept edge loses its offset (#17598).
+        let keeps_uv_curves = self.operation == OffsetOperation::LocalOperation
+            && self.local_faces.contains(&face_id)
+            && !self.moved_faces.contains(&face_id);
         let input = FaceCurvesInput {
             loops,
             curves_3d: None,
@@ -2503,6 +2531,7 @@ impl OffsetExecutive {
             None,
             &this_face,
             &vertex_slots,
+            keeps_uv_curves,
             &mut owners,
             &mut offset_env(notifications, offset_key_of),
         ) {
@@ -3456,6 +3485,47 @@ mod tests {
 
     fn executive() -> OffsetExecutive {
         OffsetExecutive::new(OffsetOperation::SolidOffset, 0.125, 1.0e-6)
+    }
+
+    #[test]
+    fn periodic_events_keep_distinct_supports_and_roots() {
+        use super::super::periodic_boundary::{record_boundary_end, BoundaryEnd};
+
+        let first = BoundaryEnd {
+            edgeuse: EdgeuseId::from_index(0),
+            vertex: VertexId::from_index(0),
+            seam: EdgeuseId::from_index(1),
+            across: EdgeuseId::from_index(2),
+            point: Vec3::new(1.0, 0.0, 0.0),
+        };
+        let other_support = BoundaryEnd {
+            across: EdgeuseId::from_index(3),
+            ..first
+        };
+        let other_root = BoundaryEnd {
+            point: Vec3::new(2.0, 0.0, 0.0),
+            ..first
+        };
+        // The other use of the same seam observes an otherwise identical event.
+        let duplicate = BoundaryEnd {
+            seam: EdgeuseId::from_index(4),
+            ..first
+        };
+        for observations in [
+            [first, other_support, other_root, duplicate],
+            [duplicate, other_root, other_support, first],
+        ] {
+            let mut events = Vec::new();
+            for event in observations {
+                record_boundary_end(&mut events, event);
+            }
+            assert_eq!(events.len(), 3);
+            for expected in [first, other_support, other_root] {
+                assert!(events.iter().any(|event| {
+                    event.across == expected.across && event.point == expected.point
+                }));
+            }
+        }
     }
 
     fn add_use(brep: &mut Brep, min: f64, max: f64, length: f64) -> EdgeuseId {

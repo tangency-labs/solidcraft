@@ -414,7 +414,7 @@ fn angled_attachment_tracks_source_plane_and_reopens() {
     let solidcraft_doc::FeatureKind::Sketch { plane, .. } = &mut s.doc_mut().feature_mut(id).unwrap().kind else { panic!("not sketch") };
     *plane = solidcraft_doc::PlaneRef::AtAngle {
         base: Box::new(plane.clone()),
-        axis_origin: Vec3::ZERO,
+        axis_origin: solidcraft_doc::point_expr(Vec3::ZERO),
         axis_dir: Vec3::X,
         angle: "90 deg".into(),
         line: None,

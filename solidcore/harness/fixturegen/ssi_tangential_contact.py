@@ -16,9 +16,9 @@ surface is an exact NURBS of a closed form, so the contact is known exactly:
 
 Each case's `upstream_ref` states the exact contact. Every case also runs with the
 operands swapped (`-swapped`), as the intersector is not symmetric. The difftest gate
-compares the pinned C++ with the default Rust kernel (parity); the opt-in tracer
-(`Kernel::fixes.ssi_tangent_curve_tracer`) is checked against the closed forms in
-`crates/solidcore/tests/issue_395_tangential_contact_corpus.rs`.
+compared the pinned C++ with the default Rust kernel (parity) while the tracer was
+opt-in; the kernel's results, the tracer's included, are checked against the closed
+forms in `crates/solidcore/tests/issue_395_tangential_contact_corpus.rs`.
 
 Run from the repo root: `python3 -I harness/fixturegen/ssi_tangential_contact.py`.
 """
