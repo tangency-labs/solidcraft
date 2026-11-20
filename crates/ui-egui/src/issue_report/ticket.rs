@@ -362,7 +362,7 @@ pub fn evidence(
 
 /// The failed operation a draft was made for: its command and parameters as the command API
 /// took them, and its error.
-fn failing_of(draft: &Draft) -> Option<payload::Failing> {
+fn failing_of(app: &SolveApp, draft: &Draft) -> Option<payload::Failing> {
     if let Some((id, json)) = &draft.crash {
         let v: Value = serde_json::from_str(json).unwrap_or_default();
         let command = v.get("command").and_then(|c| c.get("command")).and_then(Value::as_str).map(str::to_string);
@@ -377,11 +377,22 @@ fn failing_of(draft: &Draft) -> Option<payload::Failing> {
             _ => None,
         };
         let code = (!kind.is_empty()).then(|| format!("{kind} ({id})"));
-        return Some(payload::Failing { command, params, error, origin, code });
+        return Some(payload::Failing { command, params, error, origin, code, failure_code: None });
     }
     let super::Origin::View { error: Some(error) } = &draft.origin else { return None };
     let (command, params) = draft.failed_command.clone().map_or((None, None), |(c, p)| (Some(c), Some(p)));
-    Some(payload::Failing { command, params, error: error.clone(), origin: None, code: None })
+    // The kernel call the error was made from, by its stable code: as a failed command or a
+    // preview gave it, else as a feature of the timeline that fails with this error keeps it.
+    let failure_code = solidcraft_engine::failure_code_of(error).or_else(|| {
+        let error = error.trim();
+        app.session
+            .model
+            .results
+            .iter()
+            .find(|r| r.error.as_deref().is_some_and(|e| !e.is_empty() && error.contains(e)))
+            .and_then(|r| r.error_code.clone())
+    });
+    Some(payload::Failing { command, params, error: error.clone(), origin: None, code: None, failure_code })
 }
 
 /// The description a failed operation's report starts with: what failed, how, and a line
@@ -440,7 +451,7 @@ pub fn outgoing(draft: &Draft, ticket: &TicketDraft) -> payload::Outgoing {
 
 /// The form for a draft, pre-filled with what the app knows.
 pub fn new_ticket(app: &mut SolveApp, draft: &Draft, ctx: Option<&egui::Context>) -> TicketDraft {
-    let failing = failing_of(draft);
+    let failing = failing_of(app, draft);
     let evidence = evidence(app, ctx, failing.clone(), draft.crash.clone());
     let label = draft.title_prefix.trim_end_matches(": ").to_string();
     let (title, description) = match &failing {
@@ -787,7 +798,7 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
     if retake {
         // Retake brings the whole report up to date, not only its picture; what was typed and
         // ticked stays.
-        ticket.evidence = evidence(app, Some(ctx), failing_of(draft), draft.crash.clone());
+        ticket.evidence = evidence(app, Some(ctx), failing_of(app, draft), draft.crash.clone());
     }
     if github {
         // The public GitHub draft, as before tickets: same answers.

@@ -39,6 +39,7 @@ mod draft_corners;
 mod emboss;
 #[cfg(test)]
 mod face_source_tests;
+pub mod failure;
 mod fair;
 mod fill;
 #[cfg(test)]
@@ -194,6 +195,7 @@ pub use delete_face::delete_faces;
 pub use distance::{BodyDistance, DistanceShape, Members, body_distance, edges_closest, faces_closest, point_closest};
 pub use draft_corners::{CornerFill, CornerOption, CornerRefusal, CornerReport, DraftCorner, draft_corners};
 pub use emboss::{cylinder_emboss_anchor, emboss_cylinder, emboss_cylinder_at, has_cylinder_emboss_wall, infer_cylinder_emboss};
+pub use failure::ErrorCode;
 pub use fair::{
     FairCurve, FairNet, FairOptions, FairReport, MAX_FAIR_ITERATIONS, MAX_FAIR_POINTS, fair_bspline_curve, fair_bspline_surface, fair_curve,
     fair_faces, fair_net, fair_nurbs_curve, fair_nurbs_surface, fair_surface,
