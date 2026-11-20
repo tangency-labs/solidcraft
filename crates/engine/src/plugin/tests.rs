@@ -1809,7 +1809,10 @@ mod install_zip {
         let folder = root.join("plugins/gears");
         let checked_folder = s.execute("plugin.check", &json!({"path":folder})).unwrap();
         assert_eq!(checked_folder["ok"], true, "{checked_folder}");
-        assert_eq!(checked_folder["problems"].as_array().unwrap().len(), 2);
+        // Builds without plugin execution also report an unrelated component warning.
+        let folder_warnings: Vec<_> = checked_folder["problems"].as_array().unwrap().iter().filter(|p| p["field"] == "x-solidcraft-swatch").collect();
+        assert_eq!(folder_warnings.len(), 2);
+        assert!(folder_warnings.iter().all(|p| p["severity"] == "warning"));
         std::fs::remove_dir_all(root).unwrap();
     }
 
