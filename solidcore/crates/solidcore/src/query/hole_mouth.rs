@@ -121,11 +121,11 @@ fn face_lip(
         }
         n => n?,
     };
-    let lip = match plane_lip(n.value, n.bound, dir, radius)? {
-        None if sheet => plane_lip(-n.value, n.bound, dir, radius)?,
-        lip => lip,
+    let (lip, side) = match plane_lip(n.value, n.bound, dir, radius)? {
+        None if sheet => (plane_lip(-n.value, n.bound, dir, radius)?, -n.value),
+        lip => (lip, n.value),
     };
-    if lip.is_none() || surface.is_planar(k, face_tol)?.is_planar || convex(surface, on, n.value) {
+    if lip.is_none() || surface.is_planar(k, face_tol)?.is_planar || convex(surface, on, side) {
         return Ok(lip);
     }
     Err(SolidError::Unsupported {

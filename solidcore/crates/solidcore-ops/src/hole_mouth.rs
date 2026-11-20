@@ -32,6 +32,7 @@ impl Body {
 #[cfg(test)]
 mod tests {
     use crate::boolean::{boolean, BooleanOp};
+    use crate::trim::remove_faces;
     use crate::{make_box, make_cylinder, make_sphere, session, Error};
 
     fn all_fixes() {
@@ -116,6 +117,31 @@ mod tests {
         let pit = boolean(block, tip, BooleanOp::Subtract).unwrap().unwrap();
         assert!(matches!(
             pit.hole_mouth_lip([20.0, 15.0, 2.4], [0.0, 0.0, 1.0], 6.0),
+            Err(Error::Unsupported(_))
+        ));
+    }
+
+    /// A hemispherical sheet takes the tangent plane from its convex side; from the centre's
+    /// side its face is concave and refused.
+    #[test]
+    fn hole_mouth_lip_of_a_spherical_sheet_from_either_side() {
+        all_fixes();
+        let ball = make_sphere([0.0, 0.0, 0.0], 5.0).unwrap();
+        let half = make_box([-10.0, -10.0, -10.0], [20.0, 10.0, 20.0]).unwrap();
+        let dome = boolean(ball, half, BooleanOp::Subtract).unwrap().unwrap();
+        let (_, order) = dome.to_record().unwrap();
+        let flat = (0..order.faces.len())
+            .find(|&f| dome.face_plane_normal(&order, f).unwrap().is_some())
+            .unwrap();
+        let sheet = remove_faces(&dome, &order, &[flat]).unwrap();
+        let s = std::f64::consts::FRAC_1_SQRT_2;
+        let outside = sheet
+            .hole_mouth_lip([0.0, 5.0, 0.0], [0.0, -s, -s], 2.0)
+            .unwrap()
+            .unwrap();
+        assert!((outside - 2.0).abs() < 1e-9, "{outside}");
+        assert!(matches!(
+            sheet.hole_mouth_lip([0.0, 5.0, 0.0], [0.0, 1.0, 0.0], 2.0),
             Err(Error::Unsupported(_))
         ));
     }
