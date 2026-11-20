@@ -148,6 +148,22 @@ fn check_passes_good_packages_and_names_each_broken_one_with_its_fix() {
 }
 
 #[test]
+fn check_reports_invalid_conditional_fields_without_running_wasm() {
+    let scratch = Scratch::new();
+    for condition in [json!({"field":"missing","eq":true}), json!({"field":"size","eq":1})] {
+        let mut manifest = command_manifest();
+        manifest["runtime"]["entries"][0]["input_schema"] = json!({"type":"object","properties":{
+            "size":{"type":"number","x-solidcraft-visible-when":condition}}});
+        let path = package(&scratch.0, &manifest, &command_component("unreachable"), &[]);
+        let output = cli(&["plugin", "check", &path, "--json"]);
+        assert!(!output.status.success(), "{}", text(&output.stdout));
+        let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["ok"], false);
+        assert!(text(&output.stdout).contains("input_schema"));
+    }
+}
+
+#[test]
 fn test_runs_the_packages_cases_on_the_real_host() {
     let scratch = Scratch::new();
     let one_box = json!({"entry":"make","expect":{"reply":{"result":{}},"model":{"body_count":1,"total":{"volume_mm3":24}}}});
