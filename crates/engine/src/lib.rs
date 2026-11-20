@@ -32,6 +32,7 @@ pub mod frames;
 pub mod fuzz;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod gpg;
+pub mod kernel_case;
 pub mod licences;
 mod mesh_lines;
 pub mod occurrences;
