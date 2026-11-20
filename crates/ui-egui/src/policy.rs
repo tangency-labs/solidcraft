@@ -94,11 +94,7 @@ impl Layer {
                 None
             }
         };
-        Layer {
-            check_for_updates: switch(CHECK_FOR_UPDATES),
-            usage_statistics: switch(USAGE_STATISTICS),
-            organization: text(ORGANIZATION_NAME),
-        }
+        Layer { check_for_updates: switch(CHECK_FOR_UPDATES), usage_statistics: switch(USAGE_STATISTICS), organization: text(ORGANIZATION_NAME) }
     }
 
     /// Whether any value is set.
