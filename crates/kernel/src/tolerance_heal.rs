@@ -142,9 +142,10 @@ pub enum HealFailure {
 /// record's. A failure met while the token is stopped is [`HealFailure::Stopped`], whatever
 /// failed: as the import's check takes it.
 pub fn heal_tolerance_defects(body: &Body) -> Result<Option<(Body, ToleranceHeal)>> {
-    let Some((ops, order)) = body.ops_body() else {
+    let Some(form) = body.ops_body() else {
         return Ok(None);
     };
+    let (ops, order) = &*form;
     let heal = || solidcore_ops::heal::heal_tolerance_defects(ops, order);
     let healed = match solidcraft_smlib::stop::token() {
         Some(token) => solidcore_ops::cancel::within(&token, heal),

@@ -38,7 +38,8 @@ impl Body {
     /// is used twice and is not open. Mesh bodies and topology the kernel cannot read are errors.
     pub fn open_edge_count(&self) -> Result<usize> {
         self.require_brep("open boundary edges")?;
-        let (body, _) = self.ops_body().ok_or_else(|| failed("open boundary edges: the body's topology could not be read"))?;
+        let form = self.ops_body().ok_or_else(|| failed("open boundary edges: the body's topology could not be read"))?;
+        let (body, _) = &*form;
         solidcore_ops::stitch::open_edges(body).map(|edges| edges.len()).map_err(|e| failed(format!("open boundary edges: {e}")))
     }
 }

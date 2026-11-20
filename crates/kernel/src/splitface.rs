@@ -637,7 +637,8 @@ fn split_by(body: &Body, tool: &SplitTool) -> Result<Vec<Body>> {
 /// The two heights are told apart by a tolerance of the body's own, never more than a quarter of
 /// the distance between them.
 pub fn face_split_if_on_face(tool: &Body, target: &Body, face: usize, plane: &Plane, start: f64, far: f64) -> Result<Option<Vec<Body>>> {
-    let (ops_target, order) = target.ops_body().ok_or_else(|| invalid("the To object is not a solid body"))?;
+    let target_form = target.ops_body().ok_or_else(|| invalid("the To object is not a solid body"))?;
+    let (ops_target, order) = &*target_form;
     let n = plane.normal();
     let mut out = Vec::new();
     for part in split_body(tool, &SplitTool::Face { body: target, face })? {
@@ -654,7 +655,8 @@ pub fn face_split_if_on_face(tool: &Body, target: &Body, face: usize, plane: &Pl
             .filter_map(|i| part.planar_face(i))
             .map(|p| solidcore_ops::cap::PlanarFace { origin: a3(p.origin), normal: a3(p.normal()) })
             .collect();
-        let (ops_part, part_order) = part.ops_body().ok_or_else(|| invalid("a piece of the prism is not a solid body"))?;
+        let part_form = part.ops_body().ok_or_else(|| invalid("a piece of the prism is not a solid body"))?;
+        let (ops_part, part_order) = &*part_form;
         match solidcore_ops::cap::prism_part(ops_target, order, face, ops_part, part_order, &planar, &section_edges(&part), &cut)
             .map_err(|e| KernelError::Failed(format!("split prism: {e}")))?
         {

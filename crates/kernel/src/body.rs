@@ -4,6 +4,7 @@ use solidcore_record::brep::{self, Brep, Curve, Loop, Shell, Surface};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::{Aabb3, Mesh};
 
+use crate::form_cell::FormCell;
 use crate::history::BodyHistory;
 use crate::{KernelError, Result, guard};
 
@@ -174,13 +175,12 @@ pub struct Body {
     /// What placing the record needs, worked out once and shared by clones and lazily placed
     /// copies because they share its topology ([`Placing`]).
     pub(crate) placing: std::sync::Arc<Placing>,
-    /// The body in SMLib, built from `record` on first use (or kept from the operation that
-    /// made it), shared by clones because they share the record.
-    pub(crate) smlib: std::sync::Arc<std::sync::OnceLock<std::result::Result<solidcraft_smlib::Brep, Refusal>>>,
+    /// The body in SMLib, built from `record` on first use and shared by clones because they
+    /// share the record ([`FormCell`]).
+    pub(crate) smlib: std::sync::Arc<FormCell<solidcraft_smlib::Brep, Refusal>>,
     /// The record as solidcore-ops' body, for the kernel's answers about its faces
-    /// ([`Body::flat_spline_face`]): made on first use, shared by clones as `smlib` is. None
-    /// when the record was refused, kept like `smlib`'s refusal so it is not tried again.
-    pub(crate) ops: std::sync::Arc<std::sync::OnceLock<Option<(solidcore_ops::Body, solidcore_ops::Order)>>>,
+    /// ([`Body::flat_spline_face`]): made on first use, shared by clones as `smlib` is.
+    pub(crate) ops: std::sync::Arc<FormCell<(solidcore_ops::Body, solidcore_ops::Order), ()>>,
     /// The record prepared for its outline ([`Body::outline_prepared`]): made on first use,
     /// shared by clones as `smlib` is.
     pub(crate) outline: std::sync::Arc<OutlinePrep>,
@@ -226,6 +226,55 @@ pub struct Body {
     /// again with it. Anything else that makes a body leaves it out, and so does every new
     /// history: the rounds are over the body its history is over.
     pub(crate) rounds: Option<std::sync::Arc<crate::blend_corner::Rounds>>,
+}
+
+/// A body's record as solidcore-ops' body, with the order of its entities ([`Body::ops_body`]).
+pub(crate) type OpsForm = std::sync::Arc<(solidcore_ops::Body, solidcore_ops::Order)>;
+
+/// A body's kernel forms ([`Body::kernel_forms`]) without the body: what lets them go once the
+/// body is only kept somewhere to find its result again. It keeps neither the body nor its forms.
+#[derive(Clone, Debug)]
+pub struct KernelForms {
+    smlib: std::sync::Weak<FormCell<solidcraft_smlib::Brep, Refusal>>,
+    ops: std::sync::Weak<FormCell<(solidcore_ops::Body, solidcore_ops::Order), ()>>,
+}
+
+impl KernelForms {
+    /// Lets the forms go, as [`Body::release_kernel_form`] does. Nothing when the body is gone.
+    pub fn release(&self) {
+        if let Some(cell) = self.smlib.upgrade() {
+            cell.release();
+        }
+        if let Some(cell) = self.ops.upgrade() {
+            cell.release();
+        }
+    }
+
+    /// Whether a form is kept now.
+    pub fn held(&self) -> bool {
+        self.smlib.upgrade().is_some_and(|cell| cell.holds()) || self.ops.upgrade().is_some_and(|cell| cell.holds())
+    }
+
+    /// Whether the body, with every clone of it, is gone: nothing is left to let go.
+    pub fn gone(&self) -> bool {
+        self.smlib.strong_count() == 0 && self.ops.strong_count() == 0
+    }
+
+    /// Has `count` go up whenever one of the forms is kept after it was let go: the body is in
+    /// use again, and holds a form until it is let go once more.
+    pub fn tell(&self, count: &std::sync::Arc<std::sync::atomic::AtomicU64>) {
+        if let Some(cell) = self.smlib.upgrade() {
+            cell.tell(count);
+        }
+        if let Some(cell) = self.ops.upgrade() {
+            cell.tell(count);
+        }
+    }
+
+    /// Whether these are `body`'s forms.
+    pub fn of(&self, body: &Body) -> bool {
+        std::ptr::eq(self.smlib.as_ptr(), std::sync::Arc::as_ptr(&body.smlib)) && std::ptr::eq(self.ops.as_ptr(), std::sync::Arc::as_ptr(&body.ops))
+    }
 }
 
 /// The meshes made of one record (see [`Body::keeping_meshes`]), by tolerance and angle. They
@@ -686,8 +735,8 @@ impl Body {
         Body {
             record: std::sync::Arc::new(record).into(),
             placing: std::sync::Arc::default(),
-            smlib: std::sync::Arc::new(std::sync::OnceLock::new()),
-            ops: std::sync::Arc::new(std::sync::OnceLock::new()),
+            smlib: std::sync::Arc::default(),
+            ops: std::sync::Arc::default(),
             outline: std::sync::Arc::default(),
             size,
             volume: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
@@ -743,17 +792,57 @@ impl Body {
     /// The body in SMLib, built from its record the first time it is asked for. The record is
     /// SMLib's own form (`SmBrepData`), imported as given: a record SMLib refuses is an error that
     /// names why, never repaired here.
-    pub fn smlib(&self) -> Result<&solidcraft_smlib::Brep> {
+    pub fn smlib(&self) -> Result<std::sync::Arc<solidcraft_smlib::Brep>> {
         self.require_brep("an SMLib operation")?;
-        self.smlib
-            .get_or_init(|| {
-                solidcraft_smlib::stop::unstoppable(|| solidcraft_smlib::Brep::from_record(&self.record, true))
-                    .map_err(|e| Refusal::of(&self.record, &e))
-            })
-            .as_ref()
-            .map_err(
-                |r| if r.internal { KernelError::Internal(format!("SMLib: {}", r.why)) } else { KernelError::Failed(format!("SMLib: {}", r.why)) },
-            )
+        let refused = |r: &Refusal| {
+            if r.internal { KernelError::Internal(format!("SMLib: {}", r.why)) } else { KernelError::Failed(format!("SMLib: {}", r.why)) }
+        };
+        let kept = || match self.smlib.refusal() {
+            Some(r) => Some(Err(refused(r))),
+            None => self.smlib.get().map(Ok),
+        };
+        if let Some(answer) = kept() {
+            return answer;
+        }
+        // Threads asking for the same body wait for the one making its form rather than make it
+        // too, then find it kept (or its refusal).
+        let _turn = self.smlib.making();
+        if let Some(answer) = kept() {
+            return answer;
+        }
+        let releases = self.smlib.releases();
+        match solidcraft_smlib::stop::unstoppable(|| solidcraft_smlib::Brep::from_record(&self.record, true)) {
+            Ok(b) => Ok(self.smlib.keep(b, releases)),
+            Err(e) => {
+                let why = Refusal::of(&self.record, &e);
+                // A record that gave its form before is not refused by this failure.
+                Err(self.smlib.refuse(why.clone()).map_or_else(|| refused(&why), refused))
+            }
+        }
+    }
+
+    /// Lets go of the body's kernel forms, its SMLib form ([`Body::smlib`]) and its
+    /// solidcore-ops form ([`Body::ops_body`]): the kernel's own topology of it and everything
+    /// its operations kept there (curve and surface caches, analyses), several times the
+    /// record. The record gives each again on its next use, as a design opened again makes
+    /// them. For a body that left the model and is only kept so that its result is found
+    /// again. A caller that holds a form keeps it until it is done, and a form being made now
+    /// goes to its caller and is not kept; a use after this keeps its form again.
+    pub fn release_kernel_form(&self) {
+        self.smlib.release();
+        self.ops.release();
+    }
+
+    /// The body's kernel forms, to let go later without keeping the body ([`KernelForms`]).
+    pub fn kernel_forms(&self) -> KernelForms {
+        KernelForms { smlib: std::sync::Arc::downgrade(&self.smlib), ops: std::sync::Arc::downgrade(&self.ops) }
+    }
+
+    /// For tests: whether the body keeps a kernel form now, made by a use ([`Body::smlib`],
+    /// [`Body::ops_body`]) and not let go since ([`Body::release_kernel_form`]).
+    #[doc(hidden)]
+    pub fn holds_kernel_form(&self) -> bool {
+        self.smlib.holds() || self.ops.holds()
     }
 
     /// Why SMLib refuses the body, if it does: the body is sent into SMLib as an operation
@@ -771,7 +860,7 @@ impl Body {
     /// [`Self::smlib_refusal`]); `None` when it took it or the body was not sent yet. Sends
     /// nothing.
     pub fn smlib_refused(&self) -> Option<&Refusal> {
-        self.smlib.get().and_then(|r| r.as_ref().err())
+        self.smlib.refusal()
     }
 
     /// The very same body (shared data), not just an equal-looking one. Its history (how an
@@ -966,36 +1055,44 @@ impl Body {
             Loop::Vertex { vertex } => Some(*vertex),
         })?;
         let point = v3(self.record.vertices.get(vertex as usize)?.point);
-        let (body, order) = self.ops_body()?;
+        let form = self.ops_body()?;
+        let (body, order) = &*form;
         let normal = body.face_plane_normal(order, index).ok()??;
         solidcore_record::Plane::from_normal(point, v3(normal.value))
     }
 
     /// The record as solidcore-ops' body and the order of its entities, made on first use and
-    /// kept for every later face. A refusal of the record is kept too, as `smlib`'s is: the same
+    /// kept for every later face ([`Body::release_kernel_form`] lets it go, and the next use
+    /// makes it again). A refusal of the record is kept too, as `smlib`'s is: the same
     /// record is refused the same way again. A refusal of the moment is not kept, so a later
     /// query tries again: a call from inside a kernel call or from solidcore-ops' failure
     /// callback ([`solidcore_ops::Error::Reentered`]), or a cancelled one. None for a mesh body.
-    pub(crate) fn ops_body(&self) -> Option<&(solidcore_ops::Body, solidcore_ops::Order)> {
-        if self.is_mesh() {
+    pub(crate) fn ops_body(&self) -> Option<OpsForm> {
+        if self.is_mesh() || self.ops.refusal().is_some() {
             return None;
         }
-        if let Some(kept) = self.ops.get() {
-            return kept.as_ref();
+        if let Some(form) = self.ops.get() {
+            return Some(form);
         }
+        let releases = self.ops.releases();
         // solidcore-ops' calls on this body run with the kernel's fix set.
         solidcraft_smlib::start();
-        // Converted outside the cell: a failure callback that asked about this body again
-        // would otherwise reenter the cell while it is being filled.
+        // Converted outside the cell, and without taking the turn to make it: a failure callback
+        // that asked about this body again would otherwise wait for the form it is part of making.
         match solidcraft_smlib::stop::unstoppable(|| solidcore_ops::Body::from_record(&self.record, true)) {
             Err(solidcore_ops::Error::Reentered | solidcore_ops::Error::Cancelled) => None,
-            made => self.ops.get_or_init(|| made.ok()).as_ref(),
+            Err(_) => {
+                self.ops.refuse(());
+                None
+            }
+            Ok(made) => Some(self.ops.keep(made, releases)),
         }
     }
 
     /// The face of `self` nearest `p` and its exact distance, or `None` for a mesh body or empty body.
     pub fn nearest_face(&self, p: Vec3) -> Option<(f64, usize)> {
-        let (ops, order) = self.ops_body()?;
+        let form = self.ops_body()?;
+        let (ops, order) = &*form;
         let reach = self.size().max(1.0) * 100.0;
         let dists = ops.face_distances_within(order, &[[p.x, p.y, p.z]], reach).ok()?;
         dists.into_iter().enumerate().filter_map(|(f, row)| Some((row.first().copied().flatten()?, f))).min_by(|a, b| a.0.total_cmp(&b.0))
@@ -1266,8 +1363,8 @@ impl Body {
         Some(Body {
             record: RecordCell::Moved(std::sync::Arc::new(LazyMove::new(source, motion, matrix))),
             placing: self.placing.clone(),
-            smlib: std::sync::Arc::new(std::sync::OnceLock::new()),
-            ops: std::sync::Arc::new(std::sync::OnceLock::new()),
+            smlib: std::sync::Arc::default(),
+            ops: std::sync::Arc::default(),
             outline: std::sync::Arc::default(),
             // A rigid motion keeps the size and the volume.
             size: self.size,
@@ -1885,7 +1982,8 @@ impl Body {
     /// index out of range, a point or tolerance that is not usable; `Err` for the kernel's
     /// failure.
     pub fn point_lies_on_face(&self, face_index: usize, point: Vec3, tolerance: f64) -> Result<Option<Vec3>> {
-        let Some((body, order)) = self.ops_body() else { return Ok(None) };
+        let Some(form) = self.ops_body() else { return Ok(None) };
+        let (body, order) = &*form;
         if face_index >= self.record.faces.len() {
             return Ok(None);
         }
@@ -1901,7 +1999,8 @@ impl Body {
     /// exact, no mesh. `None` for a face that is not, a mesh body, an index out of range or a
     /// direction or origin that is not usable; `Err` for the kernel's failure.
     pub fn face_square_level(&self, face_index: usize, direction: Vec3, origin: Vec3) -> Result<Option<solidcore_ops::SquareFaceLevel>> {
-        let Some((body, order)) = self.ops_body() else { return Ok(None) };
+        let Some(form) = self.ops_body() else { return Ok(None) };
+        let (body, order) = &*form;
         if face_index >= self.record.faces.len() {
             return Ok(None);
         }
@@ -1951,7 +2050,8 @@ impl Body {
                 depth: t,
             }));
         }
-        let (ops, order) = self.ops_body().ok_or_else(|| KernelError::Failed("ray: the body has no solidcore form".into()))?;
+        let form = self.ops_body().ok_or_else(|| KernelError::Failed("ray: the body has no solidcore form".into()))?;
+        let (ops, order) = &*form;
         let hit = ops.fire_ray(order, [origin.x, origin.y, origin.z], [d.x, d.y, d.z]).map_err(|e| KernelError::Failed(format!("ray: {e}")))?;
         let Some(hit) = hit else { return Ok(None) };
         let faces = crate::blend::Faces::of(self)?;

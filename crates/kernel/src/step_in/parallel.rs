@@ -213,7 +213,8 @@ fn smlib_body(record: &solidcore_record::brep::Brep) -> std::result::Result<(Bod
     let (canonical, body_order, prepared) = brep.to_native_prepared().map_err(|e| failed(KernelError::Failed(e.to_string())))?;
     let body = Body::from_smlib_record(canonical).map_err(failed)?;
     if let Some(prepared) = prepared {
-        let _ = body.smlib.set(Ok(prepared));
+        // Kept as the body's SMLib form, as its first use would make it.
+        body.smlib.keep(prepared, body.smlib.releases());
     }
     // SMLib's face i is the record's `smlib_order` face and the body's `body_order` face (an
     // empty order is the same one).

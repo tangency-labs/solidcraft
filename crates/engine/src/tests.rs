@@ -5946,6 +5946,197 @@ fn the_unsaved_changes_answer_follows_every_change() {
     check(&s, false, "shown again");
 }
 
+/// The bodies of `state` that keep a kernel form now.
+fn warm_bodies(state: &solidcraft_doc::ModelState) -> Vec<&str> {
+    state.bodies.iter().filter(|b| b.body.holds_kernel_form()).map(|b| b.name.as_str()).collect()
+}
+
+/// Every body of `state` is given its SMLib form, as an operation on it would.
+fn warm(state: &solidcraft_doc::ModelState) {
+    for b in &state.bodies {
+        b.body.smlib().unwrap();
+    }
+}
+
+/// A 5 mm cube `Other`, then `Block`, `w` x 30 x 10 with a 5 x 5 pocket through it
+/// (300 w − 250 mm³): `w` changes Block only.
+fn block_beside_a_cube() -> Session {
+    let mut s = Session::default();
+    build_block_beside_a_cube(&mut s);
+    s
+}
+
+fn build_block_beside_a_cube(s: &mut Session) {
+    run(s, "parameters.add", json!({"name": "w", "expression": "40 mm"}));
+    run(s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [0, 40, 0], "body_name": "Other"}));
+    run(s, "solid.box", json!({"length": "w", "width": 30, "height": 10, "body_name": "Block"}));
+    run(s, "solid.box", json!({"length": 5, "width": 5, "height": 20, "corner": [2, 2, 0], "operation": "cut", "targets": ["Block"]}));
+}
+
+/// #19629: the evaluation cache keeps the states of the values tried before and counts their
+/// bodies by their records, so those bodies keep no kernel form (several times the record): a
+/// body lets go of it when it leaves the model, and the record gives it again when the value
+/// comes back. A body the edit leaves in the model keeps its form.
+#[test]
+fn bodies_that_leave_the_model_let_go_of_their_kernel_forms() {
+    let mut s = block_beside_a_cube();
+    let first = s.model.state();
+    warm(&first);
+    assert_eq!(warm_bodies(&first), ["Other", "Block"]);
+    run(&mut s, "parameters.change", json!({"name": "w", "expression": "50 mm"}));
+    assert_eq!(warm_bodies(&first), ["Other"], "Block left the model, Other is still in it");
+    let second = s.model.state();
+    warm(&second);
+    let r = run(&mut s, "parameters.change", json!({"name": "w", "expression": "40 mm"}));
+    assert_eq!(r["recomputed"], 0, "the value set back is found in the cache: {r}");
+    assert_eq!(warm_bodies(&second), ["Other"]);
+    let back = s.model.state();
+    assert_eq!(warm_bodies(&back), ["Other"], "Block came back without its form");
+    let block = &back.body("Block").unwrap().body;
+    assert!(rel(block.smlib().unwrap().volume(1e-8).unwrap(), 11_750.0) < 1e-9, "made again from the record");
+    assert!(rel(volume(&mut s), 11_875.0) < 1e-9);
+}
+
+/// #19629: a session at rest lets nothing go: a command that changes no state and warms no body
+/// that had let go ends without a pass, and so does adopting nothing new.
+#[test]
+fn a_command_that_changes_nothing_runs_no_pass_over_the_bodies() {
+    let mut s = block_beside_a_cube();
+    let passes = |s: &Session| s.model.cache.lock().unwrap().release_passes;
+    run(&mut s, "inspect.measure", json!({}));
+    run(&mut s, "inspect.measure", json!({}));
+    let at_rest = passes(&s);
+    run(&mut s, "inspect.measure", json!({}));
+    run(&mut s, "select.clear", json!({}));
+    assert_eq!(passes(&s), at_rest);
+    run(&mut s, "parameters.change", json!({"name": "w", "expression": "50 mm"}));
+    assert!(passes(&s) > at_rest, "an edit is followed by one");
+}
+
+/// #19629: a model put back from an earlier copy of the session (as leaving an editor does) lets
+/// go of the bodies it replaces, although that copy held the same states when it was taken.
+#[test]
+fn a_model_put_back_from_an_earlier_copy_lets_go_of_the_bodies_it_replaces() {
+    let mut s = block_beside_a_cube();
+    warm(&s.model.state());
+    run(&mut s, "inspect.measure", json!({}));
+    let original = s.scratch();
+    run(&mut s, "parameters.change", json!({"name": "w", "expression": "50 mm"}));
+    let changed = s.model.state();
+    warm(&changed);
+    run(&mut s, "inspect.measure", json!({}));
+    assert_eq!(warm_bodies(&changed), ["Other", "Block"]);
+    s.accept_computed(original);
+    assert_eq!(warm_bodies(&changed), ["Other"]);
+}
+
+/// #19629: the cache keeps a body in what its feature changed after the state it was in is gone
+/// (here at once: the cache keeps one state). The body lets go of its forms all the same.
+#[test]
+fn a_body_the_cache_keeps_after_its_state_is_gone_lets_go_of_its_forms() {
+    let mut s = Session::default();
+    *s.model.cache.lock().unwrap() = solidcraft_doc::EvalCache::with_budget(1);
+    build_block_beside_a_cube(&mut s);
+    let first = s.model.state();
+    warm(&first);
+    let block = first.body("Block").unwrap().body.clone();
+    let state = std::sync::Arc::downgrade(&first);
+    drop(first);
+    run(&mut s, "parameters.change", json!({"name": "w", "expression": "50 mm"}));
+    assert!(state.upgrade().is_none(), "the state is gone");
+    assert!(!block.holds_kernel_form());
+    assert!(rel(volume(&mut s), 14_875.0) < 1e-9);
+}
+
+/// #19629: a model whose states no evaluation here made (a saved model opened as it was saved)
+/// lets go of the bodies its first edit replaces.
+#[test]
+fn the_first_edit_of_a_model_not_evaluated_here_lets_go_of_the_bodies_it_replaces() {
+    let mut s = block_beside_a_cube();
+    // The cache as a design just opened has it: nothing noted of the model it shows.
+    *s.model.cache.lock().unwrap() = solidcraft_doc::EvalCache::default();
+    let first = s.model.state();
+    warm(&first);
+    run(&mut s, "parameters.change", json!({"name": "w", "expression": "50 mm"}));
+    assert_eq!(warm_bodies(&first), ["Other"]);
+    // The body was noted in the cache before this one, and this cache hears of its form made
+    // again all the same.
+    first.body("Block").unwrap().body.smlib().unwrap();
+    assert_eq!(warm_bodies(&first), ["Other", "Block"]);
+    run(&mut s, "inspect.measure", json!({}));
+    assert_eq!(warm_bodies(&first), ["Other"]);
+}
+
+/// #19629: a copy still using a body after the session let its forms go makes them again; they
+/// are let go again at the end of the session's next command, one that only reads included.
+#[test]
+fn a_body_a_copy_used_after_it_left_the_session_lets_go_again() {
+    let mut s = block_beside_a_cube();
+    let first = s.model.state();
+    warm(&first);
+    let reader = s.scratch();
+    run(&mut s, "parameters.change", json!({"name": "w", "expression": "50 mm"}));
+    assert_eq!(warm_bodies(&first), ["Other"]);
+    reader.model.state().body("Block").unwrap().body.smlib().unwrap();
+    assert_eq!(warm_bodies(&first), ["Other", "Block"], "the reader's use keeps the form again");
+    drop(reader);
+    run(&mut s, "inspect.measure", json!({}));
+    assert_eq!(warm_bodies(&first), ["Other"]);
+}
+
+/// #19629: a copy of the session (a preview, a trial) shares the session's bodies, so it lets
+/// go of none; the bodies only the copy evaluated let go at the end of the session's next
+/// command, one that only reads included.
+#[test]
+fn bodies_only_a_copy_evaluated_let_go_after_the_sessions_next_command() {
+    let mut s = block_beside_a_cube();
+    let first = s.model.state();
+    warm(&first);
+    let mut trial = s.scratch();
+    run(&mut trial, "parameters.change", json!({"name": "w", "expression": "45 mm"}));
+    let tried = trial.model.state();
+    warm(&tried);
+    assert_eq!(warm_bodies(&first), ["Other", "Block"], "the copy lets go of nothing of the session's");
+    drop(trial);
+    assert_eq!(warm_bodies(&tried), ["Other", "Block"], "kept in the cache as the copy left it");
+    run(&mut s, "inspect.measure", json!({}));
+    assert_eq!(warm_bodies(&tried), ["Other"], "the copy's own body, which the session never held");
+    assert_eq!(warm_bodies(&first), ["Other", "Block"], "the session's model is as it was");
+}
+
+/// #19629: an edit computed on a copy and adopted in its place (as a dialog's OK does) lets go
+/// of the bodies it replaced, as an edit evaluated in place does, also when another command ran
+/// here between the computing and the adopting. Block at 50: 14 750 mm³.
+#[test]
+fn an_edit_adopted_from_a_copy_lets_go_of_the_bodies_it_replaced() {
+    let mut s = block_beside_a_cube();
+    let first = s.model.state();
+    warm(&first);
+    let edit = [("parameters.change".to_string(), json!({"name": "w", "expression": "50 mm"}))];
+    let prepared = s.scratch().compute_commands(&edit, None).unwrap();
+    assert_eq!(warm_bodies(&first), ["Other", "Block"], "computing on the copy lets go of nothing");
+    run(&mut s, "inspect.measure", json!({}));
+    assert_eq!(warm_bodies(&first), ["Other", "Block"], "the session still holds them");
+    s.accept_commands(prepared).unwrap();
+    assert_eq!(warm_bodies(&first), ["Other"]);
+    assert!(rel(volume(&mut s), 14_875.0) < 1e-9);
+}
+
+/// #19629: a feature behind the history marker keeps its result, and with it its body's forms;
+/// when that result is dropped (the feature built again for another value), they go.
+#[test]
+fn a_result_kept_behind_the_history_marker_keeps_its_forms_until_it_is_dropped() {
+    let mut s = block_beside_a_cube();
+    let last = s.model.state();
+    warm(&last);
+    run(&mut s, "timeline.roll_to", json!({"position": 2}));
+    assert_eq!(warm_bodies(&last), ["Other", "Block"], "the pocket's result is kept behind the marker");
+    run(&mut s, "parameters.change", json!({"name": "w", "expression": "50 mm"}));
+    run(&mut s, "timeline.roll_to", json!({"position": "end"}));
+    assert_eq!(warm_bodies(&last), ["Other"], "the pocket was built again for the new value");
+    assert!(rel(volume(&mut s), 14_875.0) < 1e-9);
+}
+
 /// Commands evaluated ahead (off the window thread) and then run for real take what was
 /// evaluated: on a design whose states are past the shared cache's budget the second run
 /// evaluated everything again, so an off-thread command cost twice its time.

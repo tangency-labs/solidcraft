@@ -660,7 +660,8 @@ pub struct PrismSection {
 /// left it a prism is one. `None` when that is not proved.
 pub fn certified_prism_section(body: &crate::Body, plane: &Plane) -> crate::Result<Option<PrismSection>> {
     crate::guard("certified prism section", || {
-        let Some((body, _)) = body.ops_body() else { return Ok(None) };
+        let Some(form) = body.ops_body() else { return Ok(None) };
+        let (body, _) = &*form;
         let section =
             solidcore_ops::prism::prism_section(body, plane).map_err(|e| crate::KernelError::Failed(format!("certified prism section: {e}")))?;
         Ok(section.map(|s| PrismSection { lo: s.lo, hi: s.hi, region: s.region, tolerance: s.tolerance }))

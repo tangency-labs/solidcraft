@@ -2627,6 +2627,60 @@ fn retained_bytes_matches_the_iterator_counts() {
     }
 }
 
+/// #19629: a body lets go of its kernel forms, which are several times its record once it was
+/// measured, and the record gives each again on its next use with the same answers. Clones
+/// share the forms, so letting go through one lets go for all. A 40 x 30 x 10 block less a
+/// Ø 10 hole through it: 12 000 − 250 π mm³, and the point 3 above the middle of its top's
+/// front half is 3 from the top, its nearest face.
+#[test]
+fn released_kernel_forms_are_made_again_from_the_record() {
+    let block = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 10.0)).unwrap();
+    let hole = cylinder(Vec3::new(20.0, 15.0, -5.0), Vec3::Z, 5.0, 30.0).unwrap();
+    let drilled = boolean(&block, &hole, BoolOp::Cut).unwrap().unwrap();
+    assert!(!drilled.holds_kernel_form(), "the record alone until a use asks for a form");
+    // The SMLib form.
+    let before = drilled.smlib().unwrap().volume(1e-8).unwrap();
+    assert!(drilled.holds_kernel_form());
+    drilled.clone().release_kernel_form();
+    assert!(!drilled.holds_kernel_form(), "clones share the form");
+    let after = drilled.smlib().unwrap().volume(1e-8).unwrap();
+    assert!(drilled.holds_kernel_form(), "made again by the next use");
+    assert_eq!(before.to_bits(), after.to_bits(), "the record gives the same body");
+    let exact = 12_000.0 - 250.0 * std::f64::consts::PI;
+    assert!((after - exact).abs() < 1e-6 * exact, "{after} against {exact}");
+    // The solidcore-ops form.
+    drilled.release_kernel_form();
+    let above = Vec3::new(20.0, 5.0, 13.0);
+    let near = drilled.nearest_face(above).unwrap();
+    assert!(drilled.holds_kernel_form());
+    drilled.clone().release_kernel_form();
+    assert!(!drilled.holds_kernel_form());
+    let again = drilled.nearest_face(above).unwrap();
+    assert!(drilled.holds_kernel_form(), "made again by the next use");
+    assert_eq!((near.0.to_bits(), near.1), (again.0.to_bits(), again.1), "the record gives the same body");
+    assert!((again.0 - 3.0).abs() < 1e-9, "{again:?}");
+    // A measurement on forms made again is the measurement on forms in use, to the bit.
+    let warm = format!("{:?}", crate::measure(&drilled).unwrap());
+    drilled.release_kernel_form();
+    assert_eq!(format!("{:?}", crate::measure(&drilled).unwrap()), warm);
+    // So is an operation: a slot cut into the block with its forms in use, and let go.
+    let slot = box_solid(Vec3::new(5.0, 10.0, 5.0), Vec3::new(10.0, 20.0, 15.0)).unwrap();
+    let on_warm = boolean(&drilled, &slot, BoolOp::Cut).unwrap().unwrap();
+    drilled.release_kernel_form();
+    slot.release_kernel_form();
+    let on_cold = boolean(&drilled, &slot, BoolOp::Cut).unwrap().unwrap();
+    assert_eq!(format!("{:?}", on_cold.record()), format!("{:?}", on_warm.record()));
+    // The forms are let go without the body in hand too, until the body itself is gone.
+    let forms = drilled.kernel_forms();
+    drilled.smlib().unwrap();
+    assert!(forms.held() && !forms.gone());
+    forms.release();
+    assert!(!drilled.holds_kernel_form() && !forms.held());
+    drop(drilled);
+    assert!(forms.gone());
+    forms.release();
+}
+
 /// #881: a pleated band lofted to a nearly flat one, both 18 vertices from (-26, 3), counter-
 /// clockwise and mirror-symmetric about x = 0. The zig-zag's centroid sits well above its first
 /// vertex, so that vertex pointed nowhere near the lead's: the loft started three vertices round,

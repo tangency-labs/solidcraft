@@ -1926,6 +1926,18 @@ impl Session {
         false
     }
 
+    /// The bodies that left this session's model let go of their kernel forms
+    /// ([`solidcraft_doc::Model::release_left`], #19629): after a refresh, when an edit computed
+    /// on a copy is adopted, and at the end of every command, which is when a copy a command
+    /// only read through (a trial of parameter values) is done with. A front end that runs a
+    /// command on a copy of this session calls it when the copy's answer is back. A copy lets
+    /// go of nothing: its session still holds the bodies it started from.
+    pub fn release_left(&mut self) {
+        if !self.is_copy {
+            self.model.release_left();
+        }
+    }
+
     /// Refresh normally, retaining the last joint solve for commands that report its outcome.
     fn refresh_with_joint_report(&mut self) -> Option<solidcraft_doc::joints::Solution> {
         let mut solved = None;
@@ -1974,6 +1986,7 @@ impl Session {
         {
             self.active_sketch = None;
         }
+        self.release_left();
         solved
     }
 
@@ -2672,6 +2685,7 @@ impl Session {
         // lost link marked, so it can be repaired from inside it (#12085).
         if outermost {
             self.model.hold_failed_sketch(&self.doc, self.active_sketch);
+            self.release_left();
         }
         if let Some((before, changed, failed, seed)) = crash_outcome {
             // Refresh and body-name pinning can copy the shared document. Remember the final
@@ -3170,6 +3184,7 @@ impl Session {
         self.doc = computed.doc;
         self.ids = computed.ids;
         self.model = computed.model;
+        self.release_left();
         self.world_cache = computed.world_cache;
         let replaces = |part| {
             Some(part) == implicit_part
