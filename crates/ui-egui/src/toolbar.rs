@@ -574,6 +574,10 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     for (format, label) in crate::plugin_slots::export_slots(app) {
         rows.push(row(&format!("{PLUGIN_EXPORT}{format}"), &label, "", "export", shown));
     }
+    // Print the drawing shown: only in Drawing, where Ctrl+P does the same.
+    if crate::drawing_workspace::active(app) && app.session.open_drawing.is_some() {
+        rows.push(row("drawing.print", &format!("{}…", app.tr("ui.drawing_print.menu")), &key("drawing.print"), "export", true));
+    }
     rows.push(FileRow::Separator);
     rows.push(row("document.metadata", &format!("{}…", app.tr_label("Design Properties")), "", "settings", shown));
     rows.push(FileRow::Separator);
@@ -640,6 +644,7 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
         "file.export_urdf" => FileAction::Command("file.export_urdf").run(app),
         "file.export_sdf" => FileAction::Command("file.export_sdf").run(app),
         "document.metadata" => FileAction::Command("document.metadata").run(app),
+        "drawing.print" => app.start(id),
         "pointcloud.insert" | "file.send_to_slicer" => app.start(id),
         "save" => FileAction::Save.run(app),
         "save_as" => FileAction::SaveAs.run(app),

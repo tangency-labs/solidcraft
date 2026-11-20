@@ -2,7 +2,7 @@
 //! document rebuilds on load and optional display caches remain provisional. Bodies export
 //! as STL (binary or ASCII), OBJ, STEP and 3MF, and assemblies as URDF ([`urdf()`]); STEP, IGES,
 //! FreeCAD and Rhino files import as a base feature (see [`step_import_feature`]), 3MF and
-//! STL files as mesh bodies (see [`mesh_import_feature`]), PLY, PCD and XYZ files as point
+//! STL files as mesh bodies (see [`mesh_import_feature`]), PLY, PCD, E57 and XYZ files as point
 //! clouds (see [`read_point_cloud`]), and KiCad boards as a mesh substrate with referenced STEP
 //! component models.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
@@ -15,6 +15,7 @@ pub mod design_lock;
 mod design_metadata;
 mod dxf;
 mod dxf_out;
+mod e57;
 mod excellon;
 pub mod formats;
 mod gerber;
@@ -524,6 +525,16 @@ pub fn mesh_import_feature(bytes: &[u8], file: &str) -> Result<MeshFeature> {
 /// keeps the millimetre mesh and nothing of the unit. Only STL, OBJ and PLY files take a unit
 /// other than millimetres; a 3MF or glTF file says its own.
 pub fn mesh_import_feature_in(bytes: &[u8], file: &str, mm_per_unit: f64) -> Result<MeshFeature> {
+    mesh_import_feature_in_prepared(bytes, file, mm_per_unit).map(|(feature, _)| feature)
+}
+
+/// Read a mesh import and return the already validated mesh bodies, when the reader builds
+/// them to validate the source. The command can reuse them on its first evaluation.
+pub fn mesh_import_feature_in_prepared(
+    bytes: &[u8],
+    file: &str,
+    mm_per_unit: f64,
+) -> Result<(MeshFeature, Option<solidcraft_doc::PreparedMeshImport>)> {
     let _span = solidcraft_profile::span("import", "mesh_import_feature");
     if !mm_per_unit.is_finite() || mm_per_unit <= 0.0 {
         return Err(IoError::Invalid("the unit must be a positive number of millimetres".into()));
@@ -540,13 +551,13 @@ pub fn mesh_import_feature_in(bytes: &[u8], file: &str, mm_per_unit: f64) -> Res
         let mut no_files = |name: &str| Err(format!("`{name}` can't be read here"));
         let mut g = read_gltf(bytes, file, &mut no_files)?;
         g.flatten();
-        return Ok(g.feature);
+        return Ok((g.feature, None));
     }
     if is_usd_path(file) {
         own_units("OpenUSD")?;
         let (mut g, _) = read_usd(bytes, file)?;
         g.flatten();
-        return Ok(g.feature);
+        return Ok((g.feature, None));
     }
     // A mesh file is read up to the limit for STEP and import files, which Preferences raise
     // (#17446, #14548).
@@ -582,30 +593,31 @@ pub fn mesh_import_feature_in(bytes: &[u8], file: &str, mm_per_unit: f64) -> Res
             }
         }
     }
-    // Check every mesh now, so the command fails rather than the timeline.
-    let mut meshes = Vec::with_capacity(objects.len());
-    for o in &objects {
-        solidcraft_kernel::mesh_body_with_normals(&o.positions, &o.triangles, &o.corner_normals)
-            .map_err(|e| IoError::Invalid(format!("mesh `{}`: {e}", o.name)))?;
-        meshes.push(solidcraft_doc::MeshData {
-            name: o.name.clone(),
-            positions: o.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
-            triangles: o.triangles.iter().flatten().copied().collect(),
-            color: o.color,
-            corner_normals: o.corner_normals.iter().flatten().flat_map(|n| [n.x, n.y, n.z]).collect(),
-        });
-    }
     let name = match objects.as_slice() {
         [only] if !only.name.trim().is_empty() => only.name.clone(),
         _ => stem,
     };
+    // Drop the decoded arrays before building a body from the packed arrays.
+    let meshes: Vec<_> = objects
+        .into_iter()
+        .map(|object| solidcraft_doc::MeshData {
+            name: object.name,
+            positions: object.positions.into_iter().flat_map(<[f64; 3]>::from).collect(),
+            triangles: object.triangles.into_iter().flatten().collect(),
+            color: object.color,
+            corner_normals: object.corner_normals.into_iter().flatten().flat_map(<[f64; 3]>::from).collect(),
+        })
+        .collect();
+    // Check every mesh now, so the command fails rather than the timeline.
+    let prepared = solidcraft_doc::PreparedMeshImport::build(&meshes).map_err(|e| IoError::Invalid(e.to_string()))?;
     let file_name = path.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
-    Ok(MeshFeature {
+    let feature = MeshFeature {
         name,
-        body_names: objects.iter().map(|o| o.name.clone()).collect(),
+        body_names: meshes.iter().map(|m| m.name.clone()).collect(),
         kind: solidcraft_doc::FeatureKind::MeshImport { file: file_name, meshes },
         warnings,
-    })
+    };
+    Ok((feature, Some(prepared)))
 }
 
 /// Export formats.
@@ -1503,9 +1515,21 @@ pub fn read_design(bytes: &[u8]) -> Result<Document> {
     })
 }
 
-/// Design file bytes.
-pub fn write_design(doc: &Document) -> Vec<u8> {
-    doc.to_json().into_bytes()
+/// What a refused JSON save says, so a caller can offer a container instead.
+pub const JSON_CANT_CARRY: &str = "a .json design can't carry";
+
+/// Plain JSON design file bytes. A design that holds binary data (plugin files) can't be one:
+/// that data is kept only in a container, as its own parts, never as text. Saving such a design as
+/// JSON is refused, naming what it holds, rather than leaving the data out.
+pub fn write_design(doc: &Document) -> Result<Vec<u8>> {
+    let binary = doc.binary_data();
+    if !binary.is_empty() {
+        return Err(IoError::Invalid(format!(
+            "this design holds {} that {JSON_CANT_CARRY}: save it as a .{DESIGN_EXT} design",
+            binary.join(" and ")
+        )));
+    }
+    Ok(doc.to_json().into_bytes())
 }
 
 /// Parse a binary or ASCII STL (used by tests and round-trip checks): triangles.
@@ -1957,7 +1981,7 @@ mod tests {
         let (doc, m) = model();
         let s = String::from_utf8(export(&m.state(), &[], Format::Step, "t").unwrap()).unwrap();
         assert!(s.starts_with("ISO-10303-21;") && s.contains("CLOSED_SHELL"));
-        let back = read_design(&write_design(&doc)).unwrap();
+        let back = read_design(&write_design(&doc).unwrap()).unwrap();
         assert_eq!(back, doc);
         assert!(read_design(b"\xff\xfe").is_err());
         let dwg = read_design(b"AC1032\0\0\0\0\0\xff\xfe").unwrap_err().to_string();

@@ -613,8 +613,8 @@ impl JsonSchema for ReaderParam {
 /// the units and defaults of `sketch.insert_dxf` and `sketch.insert_svg`), a STEP, IGES,
 /// FreeCAD, Rhino, 3MF, STL, OBJ or glTF file (a new design holding the file as a component
 /// named after it, as `file.insert_step` and `file.insert_mesh` make), or a `.ply`, `.pcd`,
-/// `.xyz`, `.pts` or `.asc` point cloud (a new design holding it, as `pointcloud.insert` makes).
-/// The open design is replaced.
+/// `.e57`, `.xyz`, `.pts` or `.asc` point cloud (a new design holding it, as `pointcloud.insert`
+/// makes). The open design is replaced.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct OpenParams {

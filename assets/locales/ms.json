@@ -3785,7 +3785,6 @@
   "sketch_panel.plane_offset": "{plane}, diofset sebanyak {distance}",
   "sketch_panel.plane_origin": "Satah {plane}",
   "sketch_panel.redefine_title": "{command}: {name}",
-  "sketch_panel.sheet_attachment": "Dipaut pada muka rata jasad logam kepingan; ia mengikut panel itu apabila kepingan berubah.",
   "sketch_panel.text_hint": "Sunting teks dan penempatannya, kemudian tekan OK.",
   "sketch_panel.use_plane": "Guna satah {plane}",
   "sketch_text.align_center": "Tengah",

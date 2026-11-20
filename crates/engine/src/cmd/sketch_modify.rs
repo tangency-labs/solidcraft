@@ -2465,6 +2465,116 @@ fn corner_list(p: &Value, cmd: &str) -> Result<Vec<Value>> {
     }
 }
 
+/// The point a corner entry names: the point `point` references, or the shared end of the two
+/// lines `a` and `b` name.
+fn corner_point(sk: &Sketch, q: &Value) -> Option<usize> {
+    if let Some(r) = str_(q, "point") {
+        return sk.resolve_point(r);
+    }
+    let ends = |id: Option<&str>| {
+        id.and_then(|i| sk.curve_index(i)).and_then(|l| match sk.curves.get(l).map(|c| &c.kind) {
+            Some(CurveKind::Line { a, b }) => Some((*a, *b)),
+            _ => None,
+        })
+    };
+    let (Some((a0, a1)), Some((b0, b1))) = (ends(str_(q, "a")), ends(str_(q, "b"))) else { return None };
+    if a0 == b0 || a0 == b1 {
+        Some(a0)
+    } else if a1 == b0 || a1 == b1 {
+        Some(a1)
+    } else {
+        None
+    }
+}
+
+/// The corners symmetric to the one at point `p`, with the line each mirrors about: a Symmetry
+/// constraint ties a point to its mirror image, so the corner tied to the one being rounded is
+/// rounded with it (#18075).
+fn symmetric_twins(sk: &Sketch, p: usize) -> Vec<(usize, usize)> {
+    sk.constraints
+        .iter()
+        .filter_map(|k| match k.kind {
+            ConstraintKind::Symmetric { p: a, q: b, l } if a == p && b != p => Some((b, l)),
+            ConstraintKind::Symmetric { p: a, q: b, l } if b == p && a != p => Some((a, l)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The two ordinary lines that meet at the corner `twin` symmetric to the corner at `corner`, in
+/// the order that mirrors the sides `la` and `lb` of the corner they mirror: the side the mirror
+/// of `la` runs along comes first. None when the counterpart is not a corner two ordinary lines
+/// make.
+fn twin_sides(sk: &Sketch, corner: usize, twin: usize, la: usize, lb: usize, axis: usize) -> Option<(String, String)> {
+    let lines: Vec<usize> = (0..sk.curves.len())
+        .filter(|i| {
+            matches!(sk.curves.get(*i).map(|c| &c.kind), Some(CurveKind::Line { .. }))
+                && sk.curves[*i].kind.uses(twin)
+                && !sk.is_linked_curve(*i)
+                && !sk.is_ellipse_axis(*i)
+        })
+        .collect();
+    // A construction line ending there too (a diagonal that centres something) is not one of the
+    // corner's sides, as in [`corner`].
+    let sides: Vec<usize> = if lines.len() == 2 { lines } else { lines.into_iter().filter(|i| !sk.curves[*i].construction).collect() };
+    let [a, b] = sides[..] else { return None };
+    // The corners the command refuses when they are named: an infinite line has no corner, and an
+    // offset's output follows its source rather than being cut.
+    let ordinary = |l: usize| sk.curves.get(l).is_some_and(|c| !c.infinite && sk.offset_distance(&c.id).is_none());
+    if !ordinary(a) || !ordinary(b) || sk.curves.iter().any(|c| c.infinite && c.kind.uses(twin)) {
+        return None;
+    }
+    // The far end of a side: the one that is not the corner.
+    let far = |l: usize, at: usize| -> Option<Vec2> {
+        let CurveKind::Line { a, b } = sk.curves.get(l).map(|c| &c.kind)? else { return None };
+        let other = if *a == at { *b } else { *a };
+        sk.point(other)
+    };
+    // A point reflected about the symmetry line, as the Mirror tool reflects it.
+    let mirrored = |p: Vec2| -> Option<Vec2> {
+        let Shape::Line { a, b } = sk.shape(axis)? else { return None };
+        let u = (b - a).normalized()?;
+        let foot = a + u * (p - a).dot(u);
+        Some(foot * 2.0 - p)
+    };
+    // The sides in the order that mirrors the corner's own: the side the mirror of `la` runs
+    // along comes first, so a chamfer that measures different distances along its two sides keeps
+    // them on the mirrored sides.
+    let order = match (far(la, corner), far(lb, corner), far(a, twin), far(b, twin)) {
+        (Some(pa), Some(pb), Some(fa), Some(fb)) => match mirrored(pa).zip(mirrored(pb)) {
+            Some((ma, mb)) if ma.dist(fa) + mb.dist(fb) > ma.dist(fb) + mb.dist(fa) => (b, a),
+            _ => (a, b),
+        },
+        _ => (a, b),
+    };
+    let (first, second) = order;
+    Some((sk.curves.get(first)?.id.clone(), sk.curves.get(second)?.id.clone()))
+}
+
+/// The corners a fillet or chamfer works on, and the corners symmetric to them: a corner tied to
+/// another by a Symmetry constraint is cut with its counterpart, so the mirrored part of a sketch
+/// keeps the shape the other side has (#18075). The Mirror tool ties every copied point to its
+/// source that way, and a Symmetry constraint between two corners of one outline says the same.
+/// A counterpart that is not a corner two ordinary lines make is left alone, so a command that
+/// worked on its own still works.
+fn symmetric_corners(sk: &Sketch, corners: &[Value], cmd: &str) -> Vec<Value> {
+    let mut out = corners.to_vec();
+    let mut named: Vec<usize> = corners.iter().filter_map(|q| corner_point(sk, q)).collect();
+    for q in corners {
+        let Some(c) = corner_point(sk, q) else { continue };
+        let Ok((la, lb, _, _, _)) = corner(sk, q, cmd) else { continue };
+        for (twin, axis) in symmetric_twins(sk, c) {
+            if named.contains(&twin) {
+                continue;
+            }
+            let Some((a, b)) = twin_sides(sk, c, twin, la, lb, axis) else { continue };
+            named.push(twin);
+            out.push(json!({ "a": a, "b": b }));
+        }
+    }
+    out
+}
+
 fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.fillet";
     let r_expr = req_expr(cmd, p, "radius")?;
@@ -2475,6 +2585,8 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
         if !(r > 1e-9 && r < 1e8) {
             return Err(bad(cmd, "radius must be positive"));
         }
+        // A corner symmetric to another is rounded with it (#18075).
+        let corners = symmetric_corners(sk, &corners, cmd);
         let released = release_corner_offsets(sk, doc, &corners, cmd)?;
         let pname = if on_sheet { r_expr.to_string() } else { doc.new_model_param(&r_expr, "mm") };
         // The arcs by id: a fillet that takes a whole line removes it, which renumbers the curves.
@@ -2700,6 +2812,8 @@ fn round_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<Option<
 fn chamfer(s: &mut Session, p: &Value, cmd: &str, dists: impl Fn(f64) -> Result<(f64, f64)>) -> Result<Value> {
     let corners = corner_list(p, cmd)?;
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
+        // A corner symmetric to another is cut with it (#18075).
+        let corners = symmetric_corners(sk, &corners, cmd);
         let released = release_corner_offsets(sk, doc, &corners, cmd)?;
         // Every corner is cut alike, in one edit: a corner that can't be cut refuses them all.
         // A corner named twice (its point, then its two lines, say) would be cut again where

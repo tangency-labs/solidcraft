@@ -179,7 +179,7 @@ fn flat_face_attachments() -> Vec<(String, String, usize, Option<(u32, bool)>, O
                 Ok(created) => {
                     let id = created["sketch"].as_u64().unwrap_or(0);
                     match s.placed_document().sketch_face_attachment(id, &s.model) {
-                        FaceAttachmentStatus::Healthy { .. } | FaceAttachmentStatus::Sheet { .. } => {}
+                        FaceAttachmentStatus::Healthy { .. } => {}
                         other => problem = Some(format!("sketch attachment {other:?}")),
                     }
                     s.execute("sketch.finish", &json!({})).unwrap();
