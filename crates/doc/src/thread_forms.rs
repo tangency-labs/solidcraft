@@ -265,7 +265,7 @@ impl GrooveProfile {
 }
 
 impl ThreadForm {
-    pub const ALL: [ThreadForm; 11] = [
+    pub const ALL: &[ThreadForm] = &[
         ThreadForm::Metric,
         ThreadForm::Unified,
         ThreadForm::Trapezoidal,
@@ -296,7 +296,7 @@ impl ThreadForm {
     }
 
     pub fn from_name(s: &str) -> Option<ThreadForm> {
-        ThreadForm::ALL.into_iter().find(|f| f.name().eq_ignore_ascii_case(s.trim()))
+        ThreadForm::ALL.iter().copied().find(|f| f.name().eq_ignore_ascii_case(s.trim()))
     }
 
     /// The standard a form's profile and sizes come from.
