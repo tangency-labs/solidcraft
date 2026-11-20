@@ -288,6 +288,14 @@ pub(super) fn thread_on_in(st: &ModelState, feature: u64, component: Option<u64>
             }
         }
     }
+    if form == ThreadForm::Unified
+        && let Some(given) = ask.designation
+    {
+        form.check_class(given, cyl.internal).map_err(DocError::Invalid)?;
+        // Preserve the authored series and tolerance class, including UNEF/UN and decimal or
+        // fractional sizes absent from the catalogue. The parser has validated this callout.
+        designation = given.split_whitespace().collect::<Vec<_>>().join(" ").to_ascii_uppercase();
+    }
     let minor = 2.0 * form.groove(major, pitch, true).crest_r;
     let fits = if let Some(t) = tapped.as_ref().filter(|t| t.family != crate::TappedThreadFamily::Metric) {
         // The hole drilled for it, without borrowing an ISO minor-diameter rule.
