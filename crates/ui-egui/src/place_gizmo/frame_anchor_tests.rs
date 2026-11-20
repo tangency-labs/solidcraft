@@ -649,6 +649,34 @@ fn the_owned_area_goes_with_the_section() {
     release(&mut h, to);
 }
 
+/// An offset whose point on the line would be past the largest profile is refused by OK, naming
+/// the fields, rather than run without it.
+#[test]
+fn an_offset_past_the_largest_profile_is_refused() {
+    let mut h = post();
+    member(&mut h).anchor = index("bottom");
+    member(&mut h).offset = [String::new(), format!("{} mm", solidcraft_engine::doc::frame::MAX_PROFILE_SIZE)];
+    h.settle();
+    let err = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap_err();
+    assert!(err.contains("Offset A") && err.contains("Offset B"), "{err}");
+    assert_eq!(locate(&h), None, "no located point is left from other values");
+}
+
+/// A press in the corner of a hot point's square press area is the overlay's, not Select Other's.
+/// Seen too small for dots, arrows or arc, the marker alone is drawn and no area round the
+/// section is owned, so only the marker's own square takes the corner.
+#[test]
+fn a_press_in_a_hot_points_corner_is_owned() {
+    let mut h = post();
+    h.step(&json!({"call": "ui.camera", "params": {"target": [0, 0, 0], "distance": 20000}})).unwrap();
+    h.settle();
+    assert!(OWNED.with(|o| o.borrow().is_empty()), "a tiny section owns no area round it");
+    let c = DRAWN.with(|d| d.borrow().first().copied()).expect("the marker was drawn");
+    let corner = c + vec2(REACH - 0.5, REACH - 0.5);
+    assert!(c.distance(corner) > REACH, "outside the circle of reach");
+    assert!(contains_pointer(&h.app, corner));
+}
+
 /// Off, the dialog behaves as before: no section, no hot points, no marker.
 #[test]
 fn with_the_preference_off_nothing_is_drawn() {

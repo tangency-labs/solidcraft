@@ -21,7 +21,7 @@
 //! `frame_anchor:arrow_a`, `frame_anchor:arrow_b` and `frame_anchor:rotate` for `ui.handles`.
 
 use std::cell::RefCell;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use egui::{Pos2, vec2};
 use serde_json::{Value, json};
@@ -128,11 +128,12 @@ struct Shown {
 }
 
 /// A section the engine laid out for one set of `frame.member` parameters, with what it was
-/// worked out from.
+/// worked out from. The design and model are held weakly, for identity only: they are freed once
+/// the dialog or the design closes.
 struct Cached {
     params: String,
-    doc: Arc<Document>,
-    state: Arc<ModelState>,
+    doc: Weak<Document>,
+    state: Weak<ModelState>,
     component: u64,
     view: Result<SectionView, String>,
     /// The overlay's drawing of it, worked out the first time it is drawn.
@@ -160,7 +161,13 @@ thread_local! {
 pub(crate) fn contains_pointer(app: &SolveApp, p: Pos2) -> bool {
     app.applying.is_none()
         && app.dialog.as_ref().is_some_and(|d| serves(app, d))
-        && (DRAWN.with(|h| h.borrow().iter().any(|c| c.distance(p) <= REACH)) || OWNED.with(|o| o.borrow().iter().any(|r| r.contains(p))))
+        && (DRAWN.with(|h| h.borrow().iter().any(|c| press_area(*c).contains(p))) || OWNED.with(|o| o.borrow().iter().any(|r| r.contains(p))))
+}
+
+/// The press area of a hot point, the marker or the rotation handle centred at `c` (screen): the
+/// square [`contains_pointer`] tests, corners included.
+fn press_area(c: Pos2) -> egui::Rect {
+    egui::Rect::from_center_size(c, vec2(2.0 * REACH, 2.0 * REACH))
 }
 
 /// `f` on the cached section of `frame.member` parameters `p`, laid out now when no section of
@@ -171,7 +178,11 @@ fn cached<T>(app: &SolveApp, p: &Value, f: impl FnOnce(&mut Cached) -> T) -> Opt
     let state = s.model.state();
     CACHE.with(|c| {
         let mut c = c.borrow_mut();
-        c.retain(|entry| entry.component == s.active_component && Arc::ptr_eq(&entry.doc, &s.doc) && Arc::ptr_eq(&entry.state, &state));
+        c.retain(|entry| {
+            entry.component == s.active_component
+                && std::ptr::eq(entry.doc.as_ptr(), Arc::as_ptr(&s.doc))
+                && std::ptr::eq(entry.state.as_ptr(), Arc::as_ptr(&state))
+        });
         match c.iter().position(|entry| entry.params == params) {
             Some(i) => {
                 let hit = c.remove(i);
@@ -182,7 +193,14 @@ fn cached<T>(app: &SolveApp, p: &Value, f: impl FnOnce(&mut Cached) -> T) -> Opt
                 if c.len() >= CACHED {
                     c.remove(0);
                 }
-                c.push(Cached { params, doc: s.doc.clone(), state, component: s.active_component, view, shown: None });
+                c.push(Cached {
+                    params,
+                    doc: Arc::downgrade(&s.doc),
+                    state: Arc::downgrade(&state),
+                    component: s.active_component,
+                    view,
+                    shown: None,
+                });
             }
         }
         c.last_mut().map(f)
@@ -505,7 +523,6 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     if let Some(p) = ctx.pointer_latest_pos() {
         order.sort_by(|a, b| b.1.distance(p).total_cmp(&a.1.distance(p)));
     }
-    let area = |c: Pos2| egui::Rect::from_center_size(c, vec2(2.0 * REACH, 2.0 * REACH));
     let arrow_area = |a: &Arrow| egui::Rect::from_two_pos(a.tail, a.tip).expand(ARROW_REACH);
     // The area the hot points own, under their handles: a press there that takes no handle does
     // nothing (no box selection, no pick).
@@ -544,7 +561,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
         match target {
             Target::Dot(i) => {
                 let Some((dot, _)) = dots.get(i) else { continue };
-                let r = ui.interact(area(at), egui::Id::unique(("sc_frame_anchor_dot", dot.name)), egui::Sense::click());
+                let r = ui.interact(press_area(at), egui::Id::unique(("sc_frame_anchor_dot", dot.name)), egui::Sense::click());
                 if r.clicked() {
                     let index = dot.index;
                     with_dialog(app, |_, d| set_anchor(d, index));
@@ -558,8 +575,8 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
                     *slot = Some(ui.interact(arrow_area(a), *id, egui::Sense::drag()));
                 }
             }
-            Target::Rotate => rotate = Some(ui.interact(area(at), rotate_id, egui::Sense::drag())),
-            Target::Marker => marker = Some(ui.interact(area(at), marker_id, egui::Sense::drag())),
+            Target::Rotate => rotate = Some(ui.interact(press_area(at), rotate_id, egui::Sense::drag())),
+            Target::Marker => marker = Some(ui.interact(press_area(at), marker_id, egui::Sense::drag())),
         }
     }
     if marker.iter().chain(arrow_hits.iter().flatten()).chain(rotate.iter()).any(egui::Response::dragged) {
