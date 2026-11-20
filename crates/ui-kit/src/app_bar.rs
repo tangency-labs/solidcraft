@@ -135,6 +135,10 @@ pub struct Version<'a> {
 
 /// The bar as the app describes it this frame.
 pub struct AppBar<'a> {
+    /// Saved movable items; None uses today's default arrangement.
+    pub items: Option<&'a crate::app_bar_items::Layout>,
+    /// Stable command ids corresponding to the host's drawable quick-access buttons.
+    pub quick_ids: &'a [&'a str],
     /// The app's mark, painted centred at the point given, and its name beside it.
     pub mark: &'a dyn Fn(&Painter, Pos2),
     pub name: &'a str,
@@ -215,6 +219,8 @@ pub enum BarAction {
 /// The bar drawn: what was chosen, and the places it leaves to the app.
 #[derive(Debug)]
 pub struct BarOut {
+    /// Each quick button's source-list index and centre x, including reordered/cross-zone ones.
+    pub quick_slots: Vec<(usize, f32)>,
     /// Space reserved for the app-owned control before Home.
     pub leading: Option<Rect>,
     pub actions: Vec<BarAction>,
@@ -223,7 +229,7 @@ pub struct BarOut {
     /// Core rows already have labels and actions; the host completes app-owned rows.
     pub overflow_items: Vec<OverflowItem>,
     pub overflow_button: Option<Rect>,
-    /// Draw only this prefix of the host's quick-access list.
+    /// Number of drawn quick-access buttons. Use `quick_slots` to identify them in a custom list.
     pub quick_count: usize,
     pub tabs_end: f32,
     pub managed: Option<Rect>,
@@ -231,7 +237,7 @@ pub struct BarOut {
     pub reserved_offers: bool,
     /// The File button, where its menu opens.
     pub file: Rect,
-    /// The quick-access buttons: the first one's centre x and the step between them.
+    /// Default arrangement's first quick-access centre and step; custom lists use `quick_slots`.
     pub quick: Option<(f32, f32)>,
     /// Where an offer pill may go (right-aligned in it), and whether it may carry its label.
     pub offer: Rect,
@@ -440,7 +446,20 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
         managed: offers.managed,
         pixels_per_point: ui.ctx().pixels_per_point(),
     };
-    let spec = application::spec(r.width(), content.left() - r.left(), r.right() - content.right(), measured);
+    let dimensions = (r.width(), content.left() - r.left(), r.right() - content.right());
+    let spec = if let Some(items) = data.items {
+        application::spec_with_items(
+            dimensions,
+            measured,
+            items,
+            &data.actions.iter().map(|b| b.id).collect::<Vec<_>>(),
+            data.quick_ids,
+            // The existing Ko-fi action/registry id stays intact; its saved placement is donate.
+            &data.pills.iter().map(|p| if p.id == "kofi" { "donate" } else { p.id }).collect::<Vec<_>>(),
+        )
+    } else {
+        application::spec(dimensions.0, dimensions.1, dimensions.2, measured)
+    };
     let placed = layout(&spec);
     let geometry = placed.application.clone().unwrap_or_default();
     let visible = |id: &str| geometry.visible.iter().any(|s| s == id);
@@ -612,6 +631,7 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
     }
     let overflow_items = overflow_items(data, &placed.overflow, overflow_button.map_or(r.left(), |b| b.left()));
     BarOut {
+        quick_slots: geometry.quick_slots.iter().map(|&(i, x)| (i, r.left() + x)).collect(),
         leading,
         actions,
         file,

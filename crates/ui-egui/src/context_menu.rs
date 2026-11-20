@@ -2062,7 +2062,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         | "ui.toolbarTab"
         | "ui.shortcutPin"
         | "ui.quickAccessAdd"
-        | "ui.quickAccessRemove" => crate::toolbar_custom::run(app, &item.id, &p),
+        | "ui.quickAccessRemove"
+        | "ui.appBarReset" => crate::toolbar_custom::run(app, &item.id, &p),
         "ui.navigatorStyle" => {
             if let Some(style) = p.get("style").and_then(|s| serde_json::from_value(s.clone()).ok()) {
                 crate::view_gizmo::pick_style(app, style);

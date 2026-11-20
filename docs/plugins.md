@@ -277,6 +277,12 @@ at load time with an `invalid_manifest` error naming the composition's schema lo
 choice options using `x-solidcraft-when` remain supported. The 1,024-property condition limit
 applies only to object scopes declaring conditional rules; plain object scopes skip that limit.
 
+All applicable scopes share the same visible controller values. When any scope hides a
+controller, conditions in every scope see it as missing. Required checks and choice filters
+use that same view. Loading checks visibility dependency cycles across each combination of
+enclosing scopes and selected branches, including nested objects and array items. Mutually
+exclusive branches are checked separately.
+
 Put `x-solidcraft-when` on a `oneOf` option to offer it only when its condition is true. If the
 current choice becomes unavailable, the dialog selects a matching conditional default, or the
 first available option in schema order. With no available option, the choice is empty; a required
