@@ -279,6 +279,28 @@ joystick instead of the mouse wheel. Delete the file to undo it.
 </AppCfg>
 ```
 
+### Shift+right-click in Firefox
+
+In Firefox, holding Shift while you right-click opens Firefox's own menu (Save Image As…,
+Inspect and so on), and a web page can't stop it. On Linux, SolidCraft doesn't see the click at
+all: the face isn't selected and SolidCraft's menu doesn't open. On Windows, SolidCraft selects
+the face and opens its menu, and Firefox's menu opens on top. Chrome, Edge and the desktop app
+aren't affected.
+
+The gestures this blocks in Firefox, and what to use instead:
+
+- **Shift+right drag** to snap to the nearest standard or diagonal view (every preset): click an
+  axis on the axis view, or drag the axis view with Shift held, which snaps the same way.
+- **Shift+right drag** to pan in the Tinkercad preset: middle drag pans too.
+- **Shift+right drag** to zoom in the OpenSCAD preset: Shift+middle drag or the wheel zooms too.
+- **Shift+Alt+right drag** to zoom in the Alias preset: the wheel zooms too.
+
+To have Firefox pass Shift+right-click to the page, open `about:config`, search for
+`dom.event.contextmenu.shift_suppresses_event` and set it to `false`. It takes effect at once,
+without a restart. It applies to every website, though: Shift+right-click will no longer get
+past pages that block right-click. Firefox Sync doesn't copy it, so set it on each computer.
+Setting it back to `true` undoes it.
+
 ## CLI
 
 `solidcraft-cli` runs the same commands without a window:

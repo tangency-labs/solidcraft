@@ -75,6 +75,7 @@ pub enum MenuEntry {
     Heading(String),
     Separator,
     Row(MenuRow),
+    Percent { value: u32, label: String, target: String },
 }
 
 /// One row of a slot's menu.
@@ -119,6 +120,10 @@ pub enum NavAction {
     Item {
         menu: String,
         item: String,
+    },
+    Percent {
+        menu: String,
+        tenths: u32,
     },
     Context(ContextItem),
 }
@@ -209,7 +214,7 @@ pub fn show(ui: &mut egui::Ui, bar: &Bar<'_>, menu: impl FnOnce(&str) -> Menu) -
             if let Some(alias) = slot.alias {
                 solidcraft_ui_registry::publish_handle(alias, response.rect.center());
             }
-            context_menu(&response, Some(slot.index), &bar.labels, &mut action);
+            context_menu(&response, (slot.index != usize::MAX).then_some(slot.index), &bar.labels, &mut action);
             if response.clicked() && slot.kind != NavigationKind::Separator {
                 if slot.kind == NavigationKind::Menu {
                     open = if open == slot.id { String::new() } else { slot.id.to_owned() };
@@ -260,11 +265,11 @@ pub fn show(ui: &mut egui::Ui, bar: &Bar<'_>, menu: impl FnOnce(&str) -> Menu) -
                     None => overflow_menu(ui, bar, &mut open, &mut action),
                     Some(m) if m.entries.is_empty() => open.clear(),
                     Some(m) => {
-                        if let Some(item) = menu_rows(ui, &m.entries) {
-                            action = Some(NavAction::Item { menu: open.clone(), item });
-                            if m.close_on_pick {
+                        if let Some(picked) = menu_rows(ui, &open, &m.entries) {
+                            if m.close_on_pick && matches!(picked, NavAction::Item { .. }) {
                                 open.clear();
                             }
+                            action = Some(picked);
                         }
                     }
                 });
@@ -320,7 +325,7 @@ fn overflow_menu(ui: &mut egui::Ui, bar: &Bar<'_>, open: &mut String, action: &m
             item.selected = slot.selected;
         }
         let response = item.show(ui);
-        context_menu(&response, Some(slot.index), &bar.labels, action);
+        context_menu(&response, (slot.index != usize::MAX).then_some(slot.index), &bar.labels, action);
         solidcraft_ui_registry::publish_target(&format!("nav:slot:{}", slot.id), response.rect);
         if let Some(alias) = slot.alias {
             solidcraft_ui_registry::publish_handle(alias, response.rect.center());
@@ -338,17 +343,25 @@ fn overflow_menu(ui: &mut egui::Ui, bar: &Bar<'_>, open: &mut String, action: &m
 }
 
 /// A menu's rows; the id of the row picked, if any.
-fn menu_rows(ui: &mut egui::Ui, entries: &[MenuEntry]) -> Option<String> {
+fn menu_rows(ui: &mut egui::Ui, menu: &str, entries: &[MenuEntry]) -> Option<NavAction> {
     let mut picked = None;
     for entry in entries {
         match entry {
             MenuEntry::Heading(title) => crate::navigation_menu_heading(ui, title),
             MenuEntry::Separator => crate::navigation_menu_separator(ui),
+            MenuEntry::Percent { value, label, target } => {
+                let mut percent = *value as f32 / 10.0;
+                let response = crate::number_field(ui, &mut percent, 5.0..=3200.0, 1.0, " %").backing_on_hover_text(label);
+                solidcraft_ui_registry::publish_target(target, response.rect);
+                if response.changed() {
+                    picked = Some(NavAction::Percent { menu: menu.to_owned(), tenths: (percent * 10.0).round() as u32 });
+                }
+            }
             MenuEntry::Row(row) => {
                 let response = menu_row(ui, row);
                 if row.submenu.is_empty() {
                     if response.clicked() {
-                        picked = Some(row.id.clone());
+                        picked = Some(NavAction::Item { menu: menu.to_owned(), item: row.id.clone() });
                     }
                     continue;
                 }
@@ -357,7 +370,7 @@ fn menu_rows(ui: &mut egui::Ui, entries: &[MenuEntry]) -> Option<String> {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     for sub in &row.submenu {
                         if menu_row(ui, sub).clicked() {
-                            picked = Some(sub.id.clone());
+                            picked = Some(NavAction::Item { menu: menu.to_owned(), item: sub.id.clone() });
                             ui.close();
                         }
                     }

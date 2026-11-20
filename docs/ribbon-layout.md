@@ -28,7 +28,7 @@ SKETCH appears during sketch editing; with Preferences › Interface › **Keep 
 | INSERT | FILES | **`file.insert_step`**, **`file.insert_mesh`**, **`component.insert_design`**, `file.save_mesh` |
 | INSERT | IMAGES | **`canvas.insert`**, **`canvas.decal`**, **`canvas.edit`** |
 | INSERT | 2D | **`sketch.insert_dxf`**, **`sketch.insert_svg`** |
-| INSERT | LIBRARY | **`parts.fastener`**, **`parts.library`**, **`gear.insert`**, `parts.resize`, `parts.insert`, `gear.edit` |
+| INSERT | LIBRARY | **`parts.fastener`**, **`parts.library`**, **`parts.resize`**, `gear.insert`, `parts.insert`, `gear.edit` |
 | INSERT | LINKS | **`component.update_links`**, **`component.break_link`** |
 | INSPECT | MEASURE | **`inspect.measure`**, **`inspect.center_of_mass`**, **`component.properties`** |
 | INSPECT | SECTION | **`inspect.section`** |
@@ -49,7 +49,7 @@ SKETCH appears during sketch editing; with Preferences › Interface › **Keep 
 | SKETCH | REFERENCE | **`sketch.project`**, `sketch.intersect`, `sketch.include_3d`, `sketch.project_to_surface`, `sketch.intersection_curve`, `sketch.spun_profile`, `sketch.isoparametric_curve`, `sketch.fit_curves_to_section`, `sketch.insert_dxf`, `sketch.insert_svg`, `canvas.insert` |
 | SKETCH | FINISH SKETCH | **`sketch.finish`**, `sketch.finish_auto_constrain` |
 | SHEET METAL | SKETCH | **`sketch.create`** |
-| SHEET METAL | CREATE | **`sheet.flange`**, **`sheet.hem`**, **`sheet.fold`**, **`sheet.perforate`**, `sheet.convert` |
+| SHEET METAL | CREATE | **`sheet.flange`**, **`sheet.hem`**, **`sheet.fold`**, **`sheet.perforate`**, `sheet.convert`, `sheet.recognize` |
 | SHEET METAL | FLAT | **`sheet.unfold`**, **`sheet.refold`**, **`sheet.flat_pattern`** |
 | SHEET METAL | OUTPUT | **`sheet.export_dxf`**, **`sheet.export_bend_table`** |
 | SHEET METAL | RULES | **`sheet.manage_rules`** |

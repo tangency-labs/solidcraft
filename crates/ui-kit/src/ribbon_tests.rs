@@ -161,6 +161,7 @@ fn button(id: &'static str, enabled: bool) -> Button<'static> {
         name: id,
         icon: "box",
         size: ButtonSize { width: BUTTON_MAX_WIDTH, min_width: BUTTON_MIN_WIDTH },
+        planned: false,
         enabled,
         pressed: false,
         exit: false,

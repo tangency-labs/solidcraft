@@ -26,7 +26,8 @@ use solidcore_record::Vec3;
 
 use crate::{IoError, Result};
 
-/// Largest 3MF file we read.
+/// Largest 3MF file we read by default. The limit in force is the one for STEP and import files,
+/// which Preferences raise (#14548).
 pub const MAX_3MF_BYTES: usize = 512 << 20;
 /// Largest uncompressed part we read (zip bombs stop here).
 const MAX_PART: u64 = 1 << 30;
@@ -169,7 +170,7 @@ pub fn weld_tagged(positions: &[Vec3], triangles: &[[u32; 3]], tags: &[u32], eps
         };
         remap.push(i);
     }
-    let (mut tris, mut tags): (Vec<[u32; 3]>, Vec<u32>) = triangles
+    let (tris, tags): (Vec<[u32; 3]>, Vec<u32>) = triangles
         .iter()
         .enumerate()
         .filter_map(|(k, t)| {
@@ -177,6 +178,9 @@ pub fn weld_tagged(positions: &[Vec3], triangles: &[[u32; 3]], tags: &[u32], eps
             (a != b && b != c && c != a).then_some(([a, b, c], tags.get(k).copied().unwrap_or(0)))
         })
         .unzip();
+    // Folds first: while one is there its sides look matched, so a surface side running along
+    // it would not be split at the vertices on it and would stay open once the fold goes.
+    let (mut tris, mut tags) = cancel_folds(tris, tags);
     // T-junctions: split open sides at open-side vertices lying on them.
     for _ in 0..8 {
         let mut half: HashMap<(u32, u32), usize> = HashMap::new();
@@ -248,7 +252,56 @@ pub fn weld_tagged(positions: &[Vec3], triangles: &[[u32; 3]], tags: &[u32], eps
         tris = next;
         tags = next_tags;
     }
+    let (tris, tags) = cancel_folds(tris, tags);
     (verts, tris, tags)
+}
+
+/// Drops each pair of triangles on the same three vertices that run opposite ways: a fold of no
+/// area, left where welding collapsed a face's sliver triangles (thinner than the weld distance)
+/// onto their neighbours. Each side of the pair is then used once more each way than the surface
+/// needs, so the mesh is not manifold there; without the pair every side keeps one use each way.
+/// Copies running the same way are kept: dropping one of them could open the mesh.
+fn cancel_folds(tris: Vec<[u32; 3]>, tags: Vec<u32>) -> (Vec<[u32; 3]>, Vec<u32>) {
+    let key = |t: &[u32; 3]| {
+        let mut k = *t;
+        k.sort_unstable();
+        k
+    };
+    // The same cycle (one way round) whatever corner it starts at.
+    let turn = |t: &[u32; 3]| {
+        let mut r = *t;
+        let first = r.iter().enumerate().min_by_key(|(_, v)| **v).map_or(0, |(i, _)| i);
+        r.rotate_left(first);
+        r
+    };
+    let mut by: HashMap<[u32; 3], Vec<usize>> = HashMap::new();
+    for (i, t) in tris.iter().enumerate() {
+        by.entry(key(t)).or_default().push(i);
+    }
+    let mut dropped = vec![false; tris.len()];
+    let mut any = false;
+    for group in by.values().filter(|g| g.len() > 1) {
+        let Some(&first) = group.first() else { continue };
+        let Some(one_way) = tris.get(first).map(turn) else { continue };
+        let (fwd, back): (Vec<usize>, Vec<usize>) = group.iter().partition(|&&i| tris.get(i).map(turn) == Some(one_way));
+        // Paired from the last ones, so where a surface triangle and a fold share vertices the
+        // first one (the surface's, meshed before) is kept in its place.
+        for (a, b) in fwd.iter().rev().zip(back.iter().rev()) {
+            for i in [*a, *b] {
+                if let Some(d) = dropped.get_mut(i) {
+                    *d = true;
+                    any = true;
+                }
+            }
+        }
+    }
+    if !any {
+        return (tris, tags);
+    }
+    let keep = |i: usize| !dropped.get(i).copied().unwrap_or(false);
+    let tags = if tags.len() == tris.len() { tags.into_iter().enumerate().filter(|(i, _)| keep(*i)).map(|(_, t)| t).collect() } else { tags };
+    let tris = tris.into_iter().enumerate().filter(|(i, _)| keep(*i)).map(|(_, t)| t).collect();
+    (tris, tags)
 }
 
 /// The vertices of open sides binned on a grid, so the search for the vertices lying on a side
@@ -965,8 +1018,11 @@ fn flatten<'a>(
 
 /// Meshes of a 3MF package (one per build item, in millimetres) and warnings.
 pub fn read_3mf(bytes: &[u8]) -> Result<(Vec<MeshObject>, Vec<String>)> {
-    if bytes.len() > MAX_3MF_BYTES {
-        return bad(format!("file too large ({} MB)", bytes.len() >> 20));
+    // A 3MF package is read up to the limit for STEP and import files, which Preferences raise
+    // (#14548). Its parts are capped apart: a part at most 1 GB, the model parts together at most
+    // 1 GB, so a package that expands far does not.
+    if let Err(e) = crate::limits::check(crate::limits::Kind::Step, bytes.len() as u64) {
+        return bad(e);
     }
     let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| IoError::Invalid(format!("3MF is not a zip package: {e}")))?;
     if zip.len() > MAX_ENTRIES {
@@ -1781,7 +1837,7 @@ pub(crate) mod tests {
             };
             remap.push(i);
         }
-        let (mut tris, mut tags): (Vec<[u32; 3]>, Vec<u32>) = triangles
+        let (tris, tags): (Vec<[u32; 3]>, Vec<u32>) = triangles
             .iter()
             .enumerate()
             .filter_map(|(k, t)| {
@@ -1789,6 +1845,7 @@ pub(crate) mod tests {
                 (a != b && b != c && c != a).then_some(([a, b, c], tags.get(k).copied().unwrap_or(0)))
             })
             .unzip();
+        let (mut tris, mut tags) = super::cancel_folds(tris, tags);
         // T-junctions: split open sides at open-side vertices lying on them.
         for _ in 0..8 {
             let mut half: HashMap<(u32, u32), usize> = HashMap::new();
@@ -1855,6 +1912,8 @@ pub(crate) mod tests {
             tris = next;
             tags = next_tags;
         }
+        // The folds are dropped after the search, the same way in both.
+        let (tris, tags) = super::cancel_folds(tris, tags);
         (verts, tris, tags)
     }
 
@@ -1920,6 +1979,59 @@ pub(crate) mod tests {
         }
         let m = body.mesh(&solidcraft_kernel::MeshTolerance::chord(body.size() * 1e-5)).unwrap();
         assert_welds_as_all_pairs(&m.positions, &m.triangles, (body.size() * 1e-6).max(1e-7));
+    }
+
+    /// A face's sliver triangles thinner than the weld distance collapse onto their neighbours
+    /// when welded, leaving a fold: two triangles on the same three vertices, running opposite
+    /// ways (a phone case's corner faces imported from STEP did, at fine quality: 92 folds, 170
+    /// sides used four times). The weld drops each fold, so a closed body stays closed and
+    /// manifold; a copy running the same way is kept.
+    #[test]
+    fn weld_drops_folds_left_by_collapsed_slivers() {
+        let manifold = |t: &[[u32; 3]]| {
+            let mut uses: HashMap<(u32, u32), u32> = HashMap::new();
+            for t in t {
+                for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+                    *uses.entry((a, b)).or_default() += 1;
+                }
+            }
+            uses.iter().all(|(&(a, b), &n)| n == 1 && uses.get(&(b, a)) == Some(&1))
+        };
+        // A tetrahedron, closed and manifold.
+        let mut positions = vec![Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0)];
+        let tetra = [[0, 2, 1], [0, 1, 3], [1, 2, 3], [2, 0, 3]];
+        // On its face (1, 2, 3), a sliver strip: two triangles on points a hair off the face's
+        // corners, which weld onto them as the same triangle, one each way.
+        let hair = Vec3::new(1e-9, -1e-9, 1e-9);
+        positions.extend([Vec3::new(1.0, 0.0, 0.0) + hair, Vec3::new(0.0, 1.0, 0.0) + hair, Vec3::new(0.0, 0.0, 1.0) + hair]);
+        let mut triangles = tetra.to_vec();
+        triangles.extend([[4, 5, 6], [4, 6, 5]]);
+        let (v, t) = weld(&positions, &triangles, 1e-7);
+        assert_eq!(v.len(), 4);
+        assert_eq!(t, tetra.to_vec(), "the fold is gone, the tetrahedron kept as it was");
+        assert!(manifold(&t));
+
+        // A copy running the same way is not a fold: it stays.
+        let mut same = tetra.to_vec();
+        same.push([1, 2, 3]);
+        let (_, t) = weld(&positions[..4], &same, 1e-7);
+        assert_eq!(t.len(), 5);
+
+        // The tags follow the triangles that stay.
+        let tags: Vec<u32> = (10..16).collect();
+        let (_, t, g) = weld_tagged(&positions, &triangles, &tags, 1e-7);
+        assert_eq!((t.len(), g), (4, vec![10, 11, 12, 13]));
+
+        // A fold along a side with a T-junction: the face (1, 2, 3) is meshed as two triangles
+        // through v, the middle of side 1-2, so the face (0, 2, 1) must be split at v. A fold on
+        // (1, 2, 0) makes side 2-1 look matched; dropped only at the end, it would leave that side
+        // unsplit and the mesh open. Dropped first, the side is split and the mesh closes.
+        let mut positions = vec![Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0), Vec3::new(0.5, 0.5, 0.0)];
+        positions.extend([Vec3::new(1.0, 0.0, 0.0) + hair, Vec3::new(0.0, 1.0, 0.0) + hair, hair]);
+        let triangles = [[0, 2, 1], [0, 1, 3], [1, 4, 3], [4, 2, 3], [2, 0, 3], [5, 6, 7], [5, 7, 6]];
+        let (v, t) = weld(&positions, &triangles, 1e-7);
+        assert_eq!(v.len(), 5);
+        assert!(manifold(&t), "{t:?}");
     }
 
     /// A body far from the origin (a pattern spacing of "1e12 mm" gets there) welds without

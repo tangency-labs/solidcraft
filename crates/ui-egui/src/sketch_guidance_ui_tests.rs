@@ -3,7 +3,7 @@ use crate::scenario::Harness;
 use crate::sketch_modify_ui::{Mod, candidate};
 use crate::viewport::Hit;
 use serde_json::{Value, json};
-use solidcore_record::Vec3;
+use solidcore_record::{Vec2, Vec3};
 use solidcraft_engine::Sel;
 use solidcraft_engine::geom::prelude::*;
 
@@ -688,4 +688,79 @@ fn shift_in_a_sketch_doesnt_keep_the_snap_points() {
     assert!(rim.is_some(), "{:?}", h.app.viewport.woken);
     step(&mut h, json!({"move":{"world":[40,0,10]},"shift":true}));
     assert!(h.app.viewport.woken.item.is_some() && h.app.viewport.woken.item != rim, "{:?}", h.app.viewport.woken);
+}
+
+/// Draws a rectangle from `a` to `b` with the tool `cmd`, Shift held for the second corner when
+/// `square` is set, and returns the corner points the new curves span (width, height) and whether
+/// the sketch holds an Equal constraint.
+fn drawn_rectangle(cmd: &str, a: [f64; 2], b: [f64; 2], square: bool, preference: bool) -> ((f64, f64), bool) {
+    let mut h = fixture();
+    h.app.preferences.sketch_square_rectangles = preference;
+    step(&mut h, json!({"start": cmd}));
+    step(&mut h, json!({"click":{"sketch":a}}));
+    step(&mut h, json!({"move":{"sketch":b},"shift":square}));
+    step(&mut h, json!({"click":{"sketch":b},"shift":square}));
+    let world = crate::open_meshing::session_world(&h.app.session);
+    let sketch = &world.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    // The fixture's three lines come first: the rectangle's curves follow them.
+    let mut lo = Vec2::new(f64::MAX, f64::MAX);
+    let mut hi = Vec2::new(f64::MIN, f64::MIN);
+    for curve in sketch.curves.iter().skip(3) {
+        for p in curve.kind.ends().into_iter().flat_map(|(a, b)| [sketch.point(a), sketch.point(b)]).flatten() {
+            lo = Vec2::new(lo.x.min(p.x), lo.y.min(p.y));
+            hi = Vec2::new(hi.x.max(p.x), hi.y.max(p.y));
+        }
+    }
+    let equal = sketch.constraints.iter().any(|k| matches!(k.kind, solidcraft_engine::sketch::ConstraintKind::Equal { .. }));
+    ((hi.x - lo.x, hi.y - lo.y), equal)
+}
+
+#[test]
+fn shift_makes_a_two_point_rectangle_a_square_with_equal_sides() {
+    let ((w, h), equal) = drawn_rectangle("sketch.rectangle.two_point", [20.0, -30.0], [50.0, -15.0], true, true);
+    assert!((w - 30.0).abs() < 1e-6 && (h - 30.0).abs() < 1e-6, "{w} x {h}");
+    assert!(equal, "a square keeps its sides equal");
+    let ((w, h), equal) = drawn_rectangle("sketch.rectangle.two_point", [20.0, -30.0], [50.0, -15.0], false, true);
+    assert!((w - 30.0).abs() < 1e-6 && (h - 15.0).abs() < 1e-6, "{w} x {h}");
+    assert!(!equal, "without Shift nothing changes");
+}
+
+#[test]
+fn square_rectangles_preference_off_keeps_shift_for_midpoints() {
+    let ((w, h), equal) = drawn_rectangle("sketch.rectangle.two_point", [20.0, -30.0], [50.0, -15.0], true, false);
+    assert!((w - 30.0).abs() < 1e-6 && (h - 15.0).abs() < 1e-6, "{w} x {h}");
+    assert!(!equal);
+}
+
+#[test]
+fn typed_sizes_win_over_shift_and_leave_no_failed_equal() {
+    let mut h = fixture();
+    h.app.preferences.sketch_square_rectangles = true;
+    step(&mut h, json!({"start": "sketch.rectangle.two_point"}));
+    step(&mut h, json!({"click":{"sketch":[20.0, -30.0]}}));
+    step(&mut h, json!({"move":{"sketch":[50.0, -15.0]},"shift":true}));
+    for (text, next) in [("10", Some("Tab")), ("25", None)] {
+        step(&mut h, json!({"key": "A", "cmd": true}));
+        step(&mut h, json!({"text": text}));
+        if let Some(key) = next {
+            step(&mut h, json!({"key": key}));
+        }
+    }
+    step(&mut h, json!({"key": "Enter","shift":true}));
+    h.settle();
+    assert!(!matches!(&h.app.status, Some((_, _, true))), "no error: {:?}", h.app.status);
+    let world = crate::open_meshing::session_world(&h.app.session);
+    let sketch = &world.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    assert!(sketch.curves.len() >= 7, "the 10 x 25 rectangle was drawn");
+    assert!(
+        !sketch.constraints.iter().any(|k| matches!(k.kind, solidcraft_engine::sketch::ConstraintKind::Equal { .. })),
+        "the typed sizes define it, no Equal beside them"
+    );
+}
+
+#[test]
+fn shift_makes_a_centre_rectangle_a_square() {
+    let ((w, h), equal) = drawn_rectangle("sketch.rectangle.center", [30.0, -30.0], [40.0, -25.0], true, true);
+    assert!((w - 20.0).abs() < 1e-6 && (h - 20.0).abs() < 1e-6, "{w} x {h}");
+    assert!(equal);
 }

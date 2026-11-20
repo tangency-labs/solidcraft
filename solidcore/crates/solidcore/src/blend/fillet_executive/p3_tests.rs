@@ -54,6 +54,10 @@ struct Access {
     solver_tolerance: Option<f64>,
     brep_tolerances: Vec<f64>,
     stitch_lamina: u64,
+    /// What `keeps_open_result` answers.
+    keeps_open: bool,
+    /// What the open body's own orientation (`just_unify`) returns.
+    unify_error: Option<SolidError>,
     corner_metadata: Option<CornerView<Handle>>,
     corner_predicates: [bool; 2],
     corner_point: Point3,
@@ -165,6 +169,7 @@ impl ExecutiveAccess<Handle> for Access {
             rolls_over: false,
             into_material: false,
             left_across: Vec::new(),
+            continued_cliffs: Vec::new(),
             wraps_past_both_ends: false,
         })
     }
@@ -431,7 +436,11 @@ impl ExecutiveAccess<Handle> for Access {
         unify: bool,
         faces: Option<&mut Vec<Handle>>,
     ) -> Result<()> {
-        assert!(outward && !*solid && !unify && faces.is_none());
+        assert!(outward && !*solid && faces.is_none());
+        if unify {
+            self.events.push("unify");
+            return self.unify_error.clone().map_or(Ok(()), Err);
+        }
         self.events.push("orient");
         if self.created_attributes > 0 {
             assert!(
@@ -439,7 +448,11 @@ impl ExecutiveAccess<Handle> for Access {
                 "orientation must see temporary attributes"
             );
         }
-        self.orient_error.clone().map_or(Ok(()), Err) // ordinary errors are ignored
+        self.orient_error.clone().map_or(Ok(()), Err)
+    }
+    fn keeps_open_result(&mut self, _: &mut Kernel, _: Handle, _: &SolidError) -> Result<bool> {
+        self.events.push("keeps_open");
+        Ok(self.keeps_open)
     }
     fn calc_corner_vertices(
         &mut self,
@@ -745,6 +758,7 @@ fn state() -> FilletExecutive<Handle> {
         self_intersection_handler: None,
         mark_corner_patches: false,
         cliff_overflow: false,
+        continued_cliffs: BTreeMap::new(),
         open_ends: Vec::new(),
         overflow_first: false,
         classify_only: false,
@@ -758,6 +772,7 @@ fn state() -> FilletExecutive<Handle> {
         fit_kind: FitKind::Radius,
         fit_setback: -1.0,
         rollover_adjusting: false,
+        rolled_beside_band: false,
     }
 }
 
@@ -881,23 +896,71 @@ fn piecewise_return_restores_both_temporary_flags_on_success_and_error() {
     }
 }
 
+/// The stitch is retried five times with doubled tolerances; then the orientation's
+/// failure is the fillet's (fork 873c7c9, `SER( m_pTargetBrep->OrientTrimmedSurfaces(..) )`;
+/// upstream ignores it, WR-661). The one failure passed over is the closed-solid check's
+/// "face uses gathered from both sides" on a result left open (lamina edges), and only
+/// when `keeps_open_result` keeps that body (an open input whose boundary the result
+/// keeps, level-2 clean) and the open body's own orientation (outward, just unifying the
+/// normals, as `StitchAndOrient` runs it for lamina) then succeeds; otherwise the
+/// closed-solid check's failure is returned. No other failure asks.
 #[test]
-fn stitching_retries_exactly_five_times_doubles_tolerance_and_ignores_orientation_error() {
-    let mut executive = state();
-    executive.options.trimming = true;
-    let mut access = Access {
-        stitch_lamina: 1,
-        orient_error: Some(failure()),
-        ..Access::default()
-    };
-    let mut k = Kernel::default();
-    executive.do_filleting(&mut k, &mut access, None).unwrap();
-    assert_eq!(access.stitch_tolerances, [0.125, 0.25, 0.5, 1.0, 2.0]);
-    assert_eq!(access.events.last(), Some(&"orient"));
-    assert!(access.events.contains(&"post"));
-    assert!(executive.fillet.is_none());
-    assert!(executive.intersector.other_brep().is_none());
-    assert!(!access.editing);
+fn stitching_retries_exactly_five_times_doubles_tolerance_then_passes_on_orientation_error() {
+    let gathered = SolidError::topology(
+        "topology::brep::p3",
+        crate::error::topology::TopologyFailure::GatheredBothSides,
+    );
+    // (lamina, orientation error, keeps_open answer, unify error, asked, kept)
+    for (lamina, error, keeps_open, unify_error, asked, kept) in [
+        (1, failure(), true, None, false, false),
+        (1, gathered.clone(), true, None, true, true),
+        // the open body's own orientation fails: the closed-solid failure is returned
+        (1, gathered.clone(), true, Some(failure()), true, false),
+        // the open result is not kept (closed input left open, a gap, level-2 failure)
+        (1, gathered.clone(), false, None, true, false),
+        (0, gathered.clone(), true, None, false, false),
+    ] {
+        let unifies = asked && keeps_open;
+        let mut executive = state();
+        executive.options.trimming = true;
+        let mut access = Access {
+            stitch_lamina: lamina,
+            orient_error: Some(error.clone()),
+            keeps_open,
+            unify_error,
+            ..Access::default()
+        };
+        let mut k = Kernel::default();
+        let result = executive.do_filleting(&mut k, &mut access, None);
+        if kept {
+            assert_eq!(result, Ok(()), "lamina {lamina}");
+        } else {
+            assert_eq!(result, Err(error.clone()), "lamina {lamina}");
+        }
+        assert_eq!(
+            access.events.contains(&"keeps_open"),
+            asked,
+            "lamina {lamina} keeps_open {keeps_open}"
+        );
+        access.events.retain(|event| *event != "keeps_open");
+        assert_eq!(
+            access.events.last() == Some(&"unify"),
+            unifies,
+            "lamina {lamina} keeps_open {keeps_open}"
+        );
+        access.events.retain(|event| *event != "unify");
+        let tolerances: &[f64] = if lamina == 0 {
+            &[0.125]
+        } else {
+            &[0.125, 0.25, 0.5, 1.0, 2.0]
+        };
+        assert_eq!(access.stitch_tolerances, tolerances, "lamina {lamina}");
+        assert_eq!(access.events.last(), Some(&"orient"), "lamina {lamina}");
+        assert!(access.events.contains(&"post"));
+        assert!(executive.fillet.is_none());
+        assert!(executive.intersector.other_brep().is_none());
+        assert!(!access.editing);
+    }
 }
 
 #[test]
@@ -1132,10 +1195,8 @@ fn temporary_attributes_survive_orientation_and_are_cleaned_on_errors_or_deferra
             ..Access::default()
         };
         let result = executive.do_filleting(&mut Kernel::default(), &mut access, None);
-        assert_eq!(
-            result.is_err(),
-            error.as_ref().is_some_and(SolidError::is_unported)
-        );
+        // every orientation failure is passed on (fork 873c7c9 `SER`, WR-661)
+        assert_eq!(result.is_err(), error.is_some());
         assert_eq!(access.created_attributes, 1);
         assert!(access.attributes.is_empty());
         assert_eq!(access.events.last(), Some(&"delete_attr"));

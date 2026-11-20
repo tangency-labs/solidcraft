@@ -713,6 +713,25 @@ pub fn upward_edgeuse_of_face(
     Ok(None)
 }
 
+/// Not upstream: whether `face` lies on both sides of the edge, two of the edge's uses on
+/// the face's upward face use (a seam: the face closing on itself across the edge). Such an
+/// edge bounds no material; it is where the surface's parametrisation ends
+/// (docs/booleans.md, "Seams and poles").
+///
+/// # Errors
+///
+/// Those of the face use and edge use queries.
+pub fn face_on_both_sides(b: &Brep, e: EdgeId, face: FaceId) -> Result<bool> {
+    let upward = face2::upward_faceuse(b, face)?;
+    let mut count = 0usize;
+    for eu in edgeuses(b, e, None, None)? {
+        if eu1::face(b, eu)? == Some(face) && eu1::faceuse(b, eu)? == upward {
+            count += 1;
+        }
+    }
+    Ok(count >= 2)
+}
+
 // ---- radial sectors ---------------------------------------------------------------------
 
 /// The answer of [`find_radial_sector`] / [`find_radial_sector_of_curve`].

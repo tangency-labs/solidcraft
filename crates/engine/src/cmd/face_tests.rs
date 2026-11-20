@@ -661,3 +661,14 @@ fn replace_face_ignores_a_face_of_another_body_near_the_target_plane() {
         assert!((a - 600.0 * height).abs() < 1e-6, "A {height} at {corner:?}: A is {a}");
     }
 }
+
+/// #18061: a face with more edges than a profile can take is refused with its edge count and the
+/// limit, not "the face has no usable boundary"; a face with none keeps that message.
+#[test]
+fn a_face_with_too_many_edges_is_refused_with_its_count_and_the_limit() {
+    let many = super::profile_edge_count("solid.extrude", 6000).unwrap_err().to_string();
+    assert!(many.contains("the face has 6000 edges; a face used as a profile can have at most 5000"), "{many}");
+    assert!(super::profile_edge_count("solid.extrude", 5000).is_ok());
+    let none = super::profile_edge_count("solid.revolve", 0).unwrap_err().to_string();
+    assert!(none.contains("the face has no usable boundary"), "{none}");
+}

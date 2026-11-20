@@ -70,8 +70,15 @@
 //! - **`SmFindPCExtremaEFO::Evaluate`** is implemented for [`Curve`] (it calls the
 //!   virtual `IsDegenerate`). An infinite evaluated tangent returns `SM_ERR`
 //!   instead of looping forever while dividing infinity by ten; finite tangents
-//!   retain upstream's exact scaling operations and order. The separate
-//!   [`MAX_PC_SCALE_STEPS`] cap is retained as a backstop and returns
+//!   retain upstream's exact scaling operations and order. For the minimisation that
+//!   decides an intersection, `F` and `F'` are divided by `|C'|` where it is below 1
+//!   (not upstream, #17735): the step is unchanged, and the `|F| < SM_EFF_ZERO` stop,
+//!   which left the gap's component along a short curve's tangent up to
+//!   `SM_EFF_ZERO / |C'|` from a point on it (beyond the intersection's tolerance), leaves
+//!   it below `SM_EFF_ZERO` (the residual stop; the gap and angle tests stop as before). A
+//!   stop ends the iteration only; the intersection is decided by the foot's distance
+//!   against its tolerance. The
+//!   separate [`MAX_PC_SCALE_STEPS`] cap is retained as a backstop and returns
 //!   [`SolidError::InvalidInput`] after 400 divisions (a finite tangent needs at
 //!   most 310). Upstream loops forever on the infinite rational B-spline tangent
 //!   in fuzz `curve.curve_p9` fuzz01222.
@@ -839,7 +846,8 @@ impl EvalFunction for FindPcExtremaEfo<'_, Curve> {
     /// `SmFindPCExtremaEFO::Evaluate`: `F = (C(t) - P) . C'(t)` and
     /// `F' = C'.C' + (C - P).C''` (the second order term limited to `-0.95 C'.C'`,
     /// negated for [`SolverOperation::Maximize`]), all scaled by the power of ten
-    /// picked at the first call to keep `|C'|^2 <= 1e4`. Found when the gap or its
+    /// picked at the first call to keep `|C'|^2 <= 1e4`; when intersecting, both divided
+    /// by `|C'|` where it is below 1 (not upstream, #17735). Found when the gap or its
     /// squared angle from the normal plane is below the squared tolerance. A zero
     /// tangent is a solution on a degenerate curve and `SM_ERR` otherwise; a zero gap
     /// is `SM_ERR` when maximising.
@@ -953,6 +961,27 @@ impl EvalFunction for FindPcExtremaEfo<'_, Curve> {
         if self.solver_operation == SolverOperation::Maximize {
             // Let - sign of FofT rule
             out.f_prime = -out.f_prime;
+        }
+
+        // (not upstream, #17735) For an intersection, along a tangent shorter than 1, F
+        // and F' are divided by |C'|: F is then the gap's component along the unit
+        // tangent and the Newton step -F/F' is unchanged. The solve stops at
+        // |F| < SM_EFF_ZERO, and F = (C - P) . C' is that component times |C'|: undivided,
+        // a short tangent stopped it with the component up to SM_EFF_ZERO / |C'|, so a
+        // point on a 0.03 mm cubic was found 2e-11 off it and its intersection within the
+        // scaled zero (1.5e-11) reported no point. Divided, the residual stop leaves the
+        // component below SM_EFF_ZERO whatever the tangent (|C'| >= 1 already did). The
+        // angular test below, unchanged, stops with the gap within SM_EFF_ZERO of square
+        // to the tangent, a component below SM_EFF_ZERO times the gap. Neither bounds the
+        // distance (a stationary point that is not the point stops it too, as it did
+        // before): a stop only ends the iteration, and the intersection keeps the foot
+        // only when its distance |C - P| is within the tolerance
+        // (`CpGlobalSolver::local_solve_branch`). The tangent is not zero here (the test
+        // above).
+        if self.intersecting && tan_dot_tan < 1.0 {
+            let tan_len = tan_dot_tan.sqrt();
+            out.f /= tan_len;
+            out.f_prime /= tan_len;
         }
 
         // Done when GapSize goes to zero
@@ -1207,6 +1236,31 @@ impl Curve {
         opts: &PointSolveOptions<'_>,
         guess: f64,
     ) -> Result<(bool, Solution<O>)> {
+        self.local_point_solve_held(k, interval, op, test_point, opts, guess, false)
+    }
+
+    /// [`Curve::local_point_solve`] for a minimisation that decides an intersection
+    /// when `intersecting` (not upstream, #17735): the Newton solve's residual stop
+    /// (`|F| < SM_EFF_ZERO`) then leaves the gap's component along the tangent below
+    /// `SM_EFF_ZERO` ([`FindPcExtremaEfo::intersecting`]). The solve also stops on
+    /// [`FindPcExtremaEfo`]'s own tests, a gap below `SM_EFF_ZERO` or within an angle of
+    /// `SM_EFF_ZERO` of square to the tangent, which bounds that component only relative to
+    /// the gap. Whichever stop ends it, the solution's value is the foot's distance from the
+    /// point, which the intersection compares with its tolerance.
+    ///
+    /// # Errors
+    ///
+    /// As [`Curve::local_point_solve`].
+    pub(crate) fn local_point_solve_held<O: Copy>(
+        &self,
+        k: &Kernel,
+        interval: &Extent1d,
+        op: SolverOperation,
+        test_point: Point3,
+        opts: &PointSolveOptions<'_>,
+        guess: f64,
+        intersecting: bool,
+    ) -> Result<(bool, Solution<O>)> {
         let mut solution = Solution::new();
 
         // Final solution will be within the interval.
@@ -1321,6 +1375,7 @@ impl Curve {
             EFF_ZERO_SQ, // NR iter stops when gapSize or Angle from Perp gets smaller than SM_EFF_ZERO
             op,
         );
+        efo.intersecting = intersecting;
         let mut ls = LocalSolve1d::with_interval(*interval, false);
         // acceptable accuracy when Func(t) < tolerance
         let r = match ls.solve_it(&mut efo, guess, 1.0e-8) {
@@ -2686,6 +2741,75 @@ mod tests {
                 assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
                 assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER));
             }
+        }
+    }
+
+    #[test]
+    fn an_intersection_is_decided_by_the_distance_not_by_where_the_search_stops() {
+        // #17735: C(t) = (0.1 t (t - 1), 0.1 (1 - (1 - t)^3)) has |C'| < 1, so the search
+        // for a point on it divides F by |C'|. Its end C(1) = (0, 0.1) is a stationary
+        // point of the distance to P = C(0): the gap there is square to the tangent, so the
+        // search can stop at t = 1, 0.1 from P. That stop is no answer: the solution keeps
+        // its real distance, and the intersection keeps only points within its tolerance.
+        use crate::curve::curve::p1::GlobalPointSolveOptions;
+        use crate::geom::global_solver::SolutionRequested;
+        use crate::geom::solution_array::OperandObject;
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::CPoint;
+        let k = &Kernel::default();
+        let third = 1.0 / 30.0;
+        let pw = [(0.0, 0.0), (-third, 0.1), (-third, 0.1), (0.0, 0.1)]
+            .iter()
+            .map(|&(x, y)| CPoint::from_point(Vec3::new(x, y, 0.0)))
+            .collect();
+        let knots = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        let c = Curve::from(BSplineCurve::from_nurb(
+            NurbCurve::new(pw, 3, knots).unwrap(),
+            3,
+            false,
+        ));
+        let ivl = c.natural_interval();
+        let p = Vec3::ZERO;
+        let (found, at_end): (bool, Solution<()>) = c
+            .local_point_solve_held(
+                k,
+                &ivl,
+                SolverOperation::Minimize,
+                p,
+                &PointSolveOptions::default(),
+                1.0,
+                true,
+            )
+            .unwrap();
+        let t = at_end.start.parameters[0];
+        let gap = c.evaluate_point(k, t).unwrap().distance(p);
+        assert!(found);
+        assert!(
+            (at_end.start.solution_value - gap).abs() < 1e-15,
+            "{t} {gap}"
+        );
+        assert!(
+            (t - 1.0).abs() < 1e-9 && (gap - 0.1).abs() < 1e-9,
+            "{t} {gap}"
+        );
+        let tol = 1e-9;
+        let sols = c
+            .global_point_solve(
+                k,
+                &ivl,
+                SolverOperation::Intersect,
+                p,
+                tol,
+                SolutionRequested::All,
+                &GlobalPointSolveOptions::<OperandObject>::default(),
+            )
+            .unwrap();
+        assert!(!sols.is_empty());
+        for s in sols.as_slice() {
+            let t = s.start.parameters[0];
+            assert!(c.evaluate_point(k, t).unwrap().distance(p) <= tol, "{t}");
+            assert!(t.abs() < 1e-6, "{t}");
         }
     }
 

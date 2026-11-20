@@ -55,6 +55,10 @@ pub struct Failing {
     pub origin: Option<String>,
     /// The kernel's error code or type name, when there is one.
     pub code: Option<String>,
+    /// The stable code of the kernel call the failure was made from (`repro.failing.code`), by
+    /// which the ticket server groups identical failures: present only when it was made from one.
+    #[serde(default)]
+    pub failure_code: Option<solidcraft_engine::kernel::ErrorCode>,
 }
 
 /// What the dialog collected, shown to the user before anything is sent.
@@ -71,12 +75,17 @@ pub struct Evidence {
     pub session: serde_json::Map<String, Value>,
     /// The failed operation, when the report is about one.
     pub failing: Option<Failing>,
+    /// The commands run before it, oldest first (`repro.steps`), opens and selections included.
+    pub steps: Vec<Value>,
     /// The last lines of the log.
     pub log: Vec<String>,
     /// The 3D view as PNG.
     pub screenshot: Option<Vec<u8>>,
-    /// The open design: its file name and bytes.
+    /// The design the report is about: its file name and bytes.
     pub design: Option<(String, Vec<u8>)>,
+    /// Where that design came from when it is not the one open (a crash report's copy, a design
+    /// left for recovery), or why there is none: the message the dialog shows.
+    pub design_from: Option<&'static str>,
     /// A crash report: its id and JSON.
     pub crash: Option<(String, String)>,
 }
@@ -138,16 +147,38 @@ pub fn failing_json(f: &Failing) -> Value {
     if let Some(c) = &f.code {
         v["error_code"] = json!(c);
     }
+    if let Some(c) = &f.failure_code {
+        v["code"] = json!({"call": c.call, "kind": c.kind, "operation": c.operation});
+    }
     v
 }
 
-/// The text of "The failed operation", as the dialog shows it: exactly what is sent.
-pub fn repro_text(evidence: &Evidence) -> String {
+/// The text of "The failed operation", as the dialog shows it: exactly what is sent, `design`
+/// when the design's box is ticked.
+pub fn repro_text(evidence: &Evidence, design: bool) -> String {
+    serde_json::to_string_pretty(&repro_json(evidence, design)).unwrap_or_default()
+}
+
+/// What "The failed operation" sends: the session, the recent steps and the failed operation.
+/// A step's parameters and file name (names of things in the design) go only with the design
+/// (`design`), whose history holds them anyway.
+pub fn repro_json(evidence: &Evidence, design: bool) -> Value {
     let mut v = Value::Object(evidence.session.clone());
+    if !evidence.steps.is_empty() {
+        let steps = evidence.steps.iter().map(|s| {
+            let mut s = s.clone();
+            if !design && let Some(o) = s.as_object_mut() {
+                o.remove("params");
+                o.remove("file");
+            }
+            s
+        });
+        v["steps"] = Value::Array(steps.collect());
+    }
     if let Some(f) = &evidence.failing {
         v["failing"] = failing_json(f);
     }
-    serde_json::to_string_pretty(&v).unwrap_or_default()
+    v
 }
 
 /// Who agreed to the attachments: the person at the dialog, or an agent's call (with whoever
@@ -210,11 +241,7 @@ pub fn build_via(form: &Form, ticks: Ticks, evidence: &Evidence, client: &str, v
         ticket["os"] = json!(cut(&evidence.os, 100));
     }
     if ticks.repro {
-        let mut repro = Value::Object(evidence.session.clone());
-        if let Some(f) = &evidence.failing {
-            repro["failing"] = failing_json(f);
-        }
-        ticket["repro"] = repro;
+        ticket["repro"] = repro_json(evidence, ticks.design);
     }
     let mut files = Vec::new();
     let mut add = |name: String, content_type: &str, kind: &str, bytes: Vec<u8>| {

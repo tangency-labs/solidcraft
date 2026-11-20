@@ -320,12 +320,14 @@ impl Sketch {
         let id = if geom.is_empty() {
             let id = self.fresh("j")?;
             self.links.push(Link {
+                sketch_placements: Vec::new(),
                 id: id.clone(),
                 kind,
                 source,
                 face_name: None,
                 edge_name: None,
                 vertex_name: None,
+                curve_edges: Vec::new(),
                 auto_face: false,
                 lost: false,
                 name_dropped: false,

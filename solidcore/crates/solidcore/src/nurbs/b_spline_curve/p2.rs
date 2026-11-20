@@ -914,6 +914,16 @@ impl BSplineCurve {
         Ok((joined, breaks))
     }
 
+    /// Whether a segment ending at `last` and one starting at `first` are end to end as
+    /// [`BSplineCurve::create_by_joining`] requires: no further apart than
+    /// `1000 * sqrt(SM_EFF_ZERO) * (1 + max|last|)`. A caller that chains pieces for the
+    /// join tests them with this, so it never hands the join a pair it refuses.
+    pub(crate) fn ends_meet_for_join(last: Point3, first: Point3) -> bool {
+        let scaled_zero = EFF_ZERO_SQRT * 1000.0 * (1.0 + last.max_dimension());
+        // (written so a NaN distance does not meet)
+        last.distance(first) <= scaled_zero
+    }
+
     /// `CreateByJoining`, recording the segments' breaks in `breaks` when asked.
     fn join(
         segments: &mut [Self],
@@ -1081,8 +1091,7 @@ impl BSplineCurve {
                 }
             }
             // Make sure end-points are the same
-            let scaled_zero = EFF_ZERO_SQRT * 1000.0 * (1.0 + last_point.max_dimension());
-            if last_point.distance(first_pt) > scaled_zero {
+            if !Self::ends_meet_for_join(last_point, first_pt) {
                 return Err(invalid(OP_JOIN, "segments not end to end"));
             }
 

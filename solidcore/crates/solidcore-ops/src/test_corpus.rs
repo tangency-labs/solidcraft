@@ -19,6 +19,10 @@ use solidcore_convert::brep::{to_kernel, Order};
 use crate::session::{self, run};
 use crate::{Body, CheckLevel, Error};
 
+/// SolidCraft's fix preset, shared with solidcore's tests.
+#[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
+pub(crate) mod solidcraft_fixes;
+
 fn corpus() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../solidcore/tests/kernel_cases")
 }
@@ -92,11 +96,9 @@ pub(crate) fn raw_counts(e: &Value) -> [usize; 3] {
     ["faces", "edges", "vertices"].map(|k| c[k].as_u64().unwrap() as usize)
 }
 
-/// The rig's fix set (the corpus's `fixes.json`), as SolidCraft's rig ran.
+/// The rig's fix set (SolidCraft's preset, `solidcraft_fixes.rs`), as SolidCraft's rig ran.
 pub(crate) fn rig_fixes() {
-    let text = std::fs::read_to_string(corpus().join("fixes.json")).unwrap();
-    let names: Vec<String> = serde_json::from_str(&text).unwrap();
-    session::set_thread_fixes(names.iter().map(String::as_str)).unwrap();
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
 }
 
 /// `|a - b| / |b|`.
