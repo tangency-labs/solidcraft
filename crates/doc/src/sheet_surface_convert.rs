@@ -3545,6 +3545,68 @@ fn pushed(plane: &Plane, seg: &Seg2, id: &str, width: f64, flip: bool, (z0, z1):
     }
 }
 
+/// The surfaces of a contour flange's profile `segs` drawn `depth` into the material from the
+/// face the surfaces are (see [`SurfaceSheet::contour`]): each line shifted, each arc's radius
+/// changed, end to end again. The material lies on the right of the travel, or on the left when
+/// `flip`; a surface lies on the other side of the profile. Where two lines meet in a corner the
+/// shifted lines meet; an arc meets what is beside it tangentially, since a sharp corner at an
+/// arc has no closed form here.
+fn offset_profile(segs: &[Seg2], depth: f64, thickness: f64, flip: bool) -> Result<Vec<Seg2>> {
+    if depth == 0.0 {
+        return Ok(segs.to_vec());
+    }
+    let side = if flip { -1.0 } else { 1.0 };
+    // The way a surface lies from the profile at a point of travel `t`: away from the material.
+    let away = |t: Vec2| t.normalized().map(|d| Vec2::new(-d.y, d.x) * side);
+    let bad = || DocError::Invalid("a zero-length curve in the contour".into());
+    let mut at = Vec::with_capacity(segs.len() + 1);
+    at.push(segs.first().map(|s| s.start() + away(s.start_tangent()).unwrap_or(Vec2::ZERO) * depth).ok_or_else(bad)?);
+    for pair in segs.windows(2) {
+        let [a, b] = pair else { continue };
+        let (na, nb) = (away(a.end_tangent()).ok_or_else(bad)?, away(b.start_tangent()).ok_or_else(bad)?);
+        let (da, db) = (a.end_tangent().normalized().ok_or_else(bad)?, b.start_tangent().normalized().ok_or_else(bad)?);
+        let turn = da.cross(db).abs().atan2(da.dot(db));
+        let corner = a.end();
+        at.push(if turn <= SMOOTH {
+            corner + na * depth
+        } else if matches!((a, b), (Seg2::Line { .. }, Seg2::Line { .. })) {
+            let meet = 1.0 + na.dot(nb);
+            if !(meet > 1e-9) {
+                return err("a contour flange turns back on itself");
+            }
+            corner + (na + nb) * (depth / meet)
+        } else {
+            return err("not supported yet: a sharp corner at an arc of a contour flange whose profile lies inside the sheet's thickness");
+        });
+    }
+    at.push(segs.last().map(|s| s.end() + away(s.end_tangent()).unwrap_or(Vec2::ZERO) * depth).ok_or_else(bad)?);
+    let mut out = Vec::with_capacity(segs.len());
+    for (i, seg) in segs.iter().enumerate() {
+        let (Some(&from), Some(&to)) = (at.get(i), at.get(i + 1)) else { return err("a contour flange's profile has no surfaces") };
+        out.push(match *seg {
+            Seg2::Line { a, b } => {
+                let d = (b - a).normalized().ok_or_else(bad)?;
+                if !((to - from).dot(d) > 1e-9) {
+                    return err("a contour line is shorter than its shifted corners");
+                }
+                Seg2::Line { a: from, b: to }
+            }
+            Seg2::Arc { center, radius, start, sweep } => {
+                // The material lies inside the arc (toward its center) where the drawn arc is the
+                // roll's outside: the surface moves away from it, outward.
+                let inward = (sweep < 0.0) != flip;
+                let radius = if inward { radius + depth } else { radius - depth };
+                if !(radius.is_finite() && radius - if inward { thickness } else { 0.0 } > 1e-9) {
+                    return err("a contour arc's radius is no larger than the sheet is thick");
+                }
+                Seg2::Arc { center, radius, start, sweep }
+            }
+            Seg2::Cubic { .. } | Seg2::Conic { .. } | Seg2::Bezier { .. } => *seg,
+        });
+    }
+    Ok(out)
+}
+
 /// Why no contour flange is made along the sketch curve `id`, neither a line nor a circular arc:
 /// its panel would be free-form, and a free-form panel's flat has no closed form (#15743).
 pub(crate) fn free_form_contour(id: &str) -> DocError {
@@ -3661,6 +3723,14 @@ impl SurfaceSheet {
     /// sketch curve each piece was drawn on and the piece's key: the curve's id, with the piece's
     /// place on it where it was drawn in several (`s3.2`); each panel's key is the feature's and
     /// its piece's (see [`PanelMade::Contour`]).
+    ///
+    /// `depth` is how far into the material the drawn profile lies from the face the sheet's
+    /// surfaces are (0 on that face, half the thickness through the middle, the thickness on the
+    /// other face): each surface lies that far from the profile on the side away from the
+    /// material, so a drawn line's panel is the line shifted, a drawn arc's roll has its radius
+    /// less or more by it, and the virtual sharp of two lines is where their shifted lines meet,
+    /// while the bends' setbacks follow from the surfaces. `symmetric` takes `width` each way
+    /// across the plane, twice the width in all.
     #[allow(clippy::too_many_arguments)]
     pub fn contour(
         body: &str,
@@ -3669,6 +3739,8 @@ impl SurfaceSheet {
         plane: &Plane,
         segs: &[Seg2],
         width: f64,
+        depth: f64,
+        symmetric: bool,
         flip: bool,
         feature: u64,
         curves: &[(String, String)],
@@ -3693,6 +3765,13 @@ impl SurfaceSheet {
                 return err("a contour flange's profile crosses itself");
             }
         }
+        if !(depth.is_finite() && depth >= 0.0 && depth <= rule.thickness) {
+            return err("the contour flange's profile lies outside the sheet's thickness");
+        }
+        let segs = &*offset_profile(segs, depth, rule.thickness, flip)?;
+        // A symmetric flange runs `width` each way across the plane: from a plane a width back.
+        let back = Plane { origin: plane.origin - plane.normal() * width, x: plane.x, y: plane.y };
+        let (plane, width) = if symmetric { (&back, width * 2.0) } else { (plane, width) };
         let normal = plane.normal();
         let side = if flip { -1.0 } else { 1.0 };
         // Where a joint between two pieces runs, as heights above the plane: up its normal, or
