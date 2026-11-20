@@ -1342,36 +1342,42 @@ mod tests {
         );
     }
 
-    /// The variant name of a phrase cause, `None` for any other cause. A new cause is placed
-    /// here (the match has no wildcard), so the test below sees every phrase variant.
-    fn phrase_variant_name(cause: &BlendFailure) -> Option<&'static str> {
+    /// The number of `BlendFailure` variants. Adding a variant means adding an arm to
+    /// `variant_index_and_phrase_name` (the compiler asks for it), with the next index, and
+    /// raising this number; the test below then fails until `causes` holds the new variant.
+    const VARIANTS: usize = 22;
+
+    /// Each variant's distinct index in `0..VARIANTS`, and the variant name of a phrase cause
+    /// (`None` for any other cause). The match has no wildcard, so it is the inventory of
+    /// every variant there is.
+    fn variant_index_and_phrase_name(cause: &BlendFailure) -> (usize, Option<&'static str>) {
         match cause {
-            BlendFailure::NoRoom(_)
-            | BlendFailure::StationDidNotConverge { .. }
-            | BlendFailure::TrimLoopOpen
-            | BlendFailure::TrimLoopDoesNotSeparate
-            | BlendFailure::RemovalRefused(_)
-            | BlendFailure::StageFailed
-            | BlendFailure::Defect { .. }
-            | BlendFailure::SkinPastStationCap { .. }
-            | BlendFailure::SkinMeasureNotFinite { .. }
-            | BlendFailure::BallsNest { .. }
-            | BlendFailure::CreasePieceEndUnbuildable { .. }
-            | BlendFailure::BandInputMissing(_)
-            | BlendFailure::NotCertified { .. } => None,
-            BlendFailure::Failed(_) => Some("Failed"),
-            BlendFailure::Missing(_) => Some("Missing"),
-            BlendFailure::InvalidValue(_) => Some("InvalidValue"),
-            BlendFailure::Inconsistent(_) => Some("Inconsistent"),
-            BlendFailure::BadIntersections(_) => Some("BadIntersections"),
-            BlendFailure::NotConverged(_) => Some("NotConverged"),
-            BlendFailure::OutsideDomain(_) => Some("OutsideDomain"),
-            BlendFailure::NotWithinTolerance(_) => Some("NotWithinTolerance"),
-            BlendFailure::PassedOn { .. } => Some("PassedOn"),
+            BlendFailure::NoRoom(_) => (0, None),
+            BlendFailure::StationDidNotConverge { .. } => (1, None),
+            BlendFailure::TrimLoopOpen => (2, None),
+            BlendFailure::TrimLoopDoesNotSeparate => (3, None),
+            BlendFailure::RemovalRefused(_) => (4, None),
+            BlendFailure::StageFailed => (5, None),
+            BlendFailure::Defect { .. } => (6, None),
+            BlendFailure::SkinPastStationCap { .. } => (7, None),
+            BlendFailure::SkinMeasureNotFinite { .. } => (8, None),
+            BlendFailure::BallsNest { .. } => (9, None),
+            BlendFailure::CreasePieceEndUnbuildable { .. } => (10, None),
+            BlendFailure::BandInputMissing(_) => (11, None),
+            BlendFailure::NotCertified { .. } => (12, None),
+            BlendFailure::Failed(_) => (13, Some("Failed")),
+            BlendFailure::Missing(_) => (14, Some("Missing")),
+            BlendFailure::InvalidValue(_) => (15, Some("InvalidValue")),
+            BlendFailure::Inconsistent(_) => (16, Some("Inconsistent")),
+            BlendFailure::BadIntersections(_) => (17, Some("BadIntersections")),
+            BlendFailure::NotConverged(_) => (18, Some("NotConverged")),
+            BlendFailure::OutsideDomain(_) => (19, Some("OutsideDomain")),
+            BlendFailure::NotWithinTolerance(_) => (20, Some("NotWithinTolerance")),
+            BlendFailure::PassedOn { .. } => (21, Some("PassedOn")),
         }
     }
 
-    /// `phrase_variant_name` names a cause exactly when it is a phrase cause, and the
+    /// `causes` holds every variant once, `variant_index_and_phrase_name` names a cause exactly when it is a phrase cause, and the
     /// `BlendFailure` variants the per-file scan (`phrase_sites::BLEND`) counts are exactly
     /// those names, so the per-file pins in `error/phrase_sites.rs` see every phrase cause.
     #[test]
@@ -1436,11 +1442,19 @@ mod tests {
             },
         ];
         let mut names = Vec::new();
+        let mut indices = Vec::new();
         for cause in &causes {
-            let name = phrase_variant_name(cause);
+            let (index, name) = variant_index_and_phrase_name(cause);
+            indices.push(index);
             assert_eq!(name.is_some(), cause.is_phrase(), "{cause:?}");
             names.extend(name);
         }
+        indices.sort_unstable();
+        assert_eq!(
+            indices,
+            (0..VARIANTS).collect::<Vec<_>>(),
+            "`causes` must hold each BlendFailure variant exactly once"
+        );
         names.sort_unstable();
         let mut scanned = scanned;
         scanned.sort_unstable();
