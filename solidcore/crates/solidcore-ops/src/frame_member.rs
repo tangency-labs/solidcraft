@@ -36,8 +36,8 @@ impl std::error::Error for Failure {}
 struct Checked<T>(Result<T, Refusal>);
 
 impl<T> Answer for Checked<T> {
-    fn refusal(&self) -> Option<String> {
-        self.0.as_ref().err().map(ToString::to_string)
+    fn refusal(&self) -> Option<Error> {
+        self.0.as_ref().err().cloned().map(Error::FrameMember)
     }
 }
 
