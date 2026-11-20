@@ -4532,7 +4532,10 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
     let designation = str_(p, "designation").map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
     let form = match str_(p, "form") {
         Some(f) => ThreadForm::from_name(f).ok_or_else(|| {
-            bad(cmd, format!("unknown thread form `{f}` (metric, unified, trapezoidal, acme, buttress, buttress_asme, bspp, rp, bspt, npt or square)"))
+            bad(
+                cmd,
+                format!("unknown thread form `{f}` (metric, unified, trapezoidal, acme, buttress, buttress_asme, bspp, rp, bspt, npt or square)"),
+            )
         })?,
         None => designation.as_deref().and_then(ThreadForm::of_designation).unwrap_or_default(),
     };

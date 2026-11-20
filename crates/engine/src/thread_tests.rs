@@ -29,12 +29,9 @@ fn volume(s: &mut Session, b: &str) -> f64 {
 fn unified_shaft_threads_keep_their_size_class_and_form_after_reopen() {
     use solidcraft_doc::thread_forms::ThreadForm;
     for check in [crate::schema::ParamCheck::Off, crate::schema::ParamCheck::Strict] {
-        for (text, major, tpi) in [
-            ("1/4-20 UNC-2A", 6.35, 20.0),
-            ("#10-32 UNF", 4.826, 32.0),
-            ("0.25-32 UNEF-3A", 6.35, 32.0),
-            ("3/8-20 UN-1A", 9.525, 20.0),
-        ] {
+        for (text, major, tpi) in
+            [("1/4-20 UNC-2A", 6.35, 20.0), ("#10-32 UNF", 4.826, 32.0), ("0.25-32 UNEF-3A", 6.35, 32.0), ("3/8-20 UN-1A", 9.525, 20.0)]
+        {
             let mut s = Session { param_check: check, ..Session::default() };
             run(&mut s, "solid.cylinder", json!({"radius":major / 2.0,"height":10}));
             let reply = run(&mut s, "solid.thread", json!({"face":[major / 2.0,0,5],"designation":text}));
@@ -66,10 +63,8 @@ fn unified_thread_takes_a_drilled_hole_and_refuses_the_wrong_side_class() {
     run(&mut s, "solid.hole", json!({"position":[10,10,10],"diameter":5.1054}));
     let before = s.doc.to_json();
     for modeled in [false, true] {
-        let error = s
-            .execute("solid.thread", &json!({"face":[12.5527,10,5],"designation":"1/4-20 UNC-2A","modeled":modeled}))
-            .unwrap_err()
-            .to_string();
+        let error =
+            s.execute("solid.thread", &json!({"face":[12.5527,10,5],"designation":"1/4-20 UNC-2A","modeled":modeled})).unwrap_err().to_string();
         assert!(error.contains("hole needs 1B, 2B or 3B"), "{error}");
         assert_eq!(s.doc.to_json(), before);
     }
@@ -103,16 +98,10 @@ fn unified_threads_refuse_mismatched_shafts_and_suggest_a_catalogued_size() {
         let mut s = Session::default();
         run(&mut s, "solid.cylinder", json!({"radius":5,"height":10}));
         let before = s.doc.to_json();
-        let error = s
-            .execute("solid.thread", &json!({"face":[5,0,5],"designation":"1/4-20 UNC","modeled":modeled}))
-            .unwrap_err()
-            .to_string();
+        let error = s.execute("solid.thread", &json!({"face":[5,0,5],"designation":"1/4-20 UNC","modeled":modeled})).unwrap_err().to_string();
         assert!(error.contains("does not fit a 10.00 mm shaft") && error.contains("this shaft takes 3/8-16 UNC"), "{error}");
         assert_eq!(s.doc.to_json(), before);
-        let error = s
-            .execute("solid.thread", &json!({"face":[5,0,5],"designation":"3/8-16 UNC-2B","modeled":modeled}))
-            .unwrap_err()
-            .to_string();
+        let error = s.execute("solid.thread", &json!({"face":[5,0,5],"designation":"3/8-16 UNC-2B","modeled":modeled})).unwrap_err().to_string();
         assert!(error.contains("class 2B") && error.contains("shaft needs 1A, 2A or 3A"), "{error}");
         assert_eq!(s.doc.to_json(), before);
     }
@@ -120,11 +109,7 @@ fn unified_threads_refuse_mismatched_shafts_and_suggest_a_catalogued_size() {
 
 #[test]
 fn automatic_thread_sizing_stays_metric_until_unified_is_selected() {
-    for (form, designation, major, pitch) in [
-        (None, "M6", 6.0, 1.0),
-        (Some("metric"), "M6", 6.0, 1.0),
-        (Some("unified"), "1/4-20 UNC", 6.35, 1.27),
-    ] {
+    for (form, designation, major, pitch) in [(None, "M6", 6.0, 1.0), (Some("metric"), "M6", 6.0, 1.0), (Some("unified"), "1/4-20 UNC", 6.35, 1.27)] {
         let mut s = Session::default();
         run(&mut s, "solid.cylinder", json!({"radius":3.175,"height":10}));
         let mut params = json!({"face":[3.175,0,5]});
@@ -942,15 +927,7 @@ fn every_form_cuts_its_standard_profile() {
     let t7 = 7f64.to_radians().tan() + 1.0;
     let cases = [
         ("unified", "1/4-20 UNC-2A", 6.35, 1.27, 1.27 / 8.0, (30.0, 30.0), 3.175 - 5.0 * 1.27 * 3f64.sqrt() / 16.0),
-        (
-            "unified",
-            "#10-32 UNF",
-            4.826,
-            inch / 32.0,
-            inch / 256.0,
-            (30.0, 30.0),
-            2.413 - 5.0 * (inch / 32.0) * 3f64.sqrt() / 16.0,
-        ),
+        ("unified", "#10-32 UNF", 4.826, inch / 32.0, inch / 256.0, (30.0, 30.0), 2.413 - 5.0 * (inch / 32.0) * 3f64.sqrt() / 16.0),
         ("trapezoidal", "Tr20x4", 20.0, 4.0, 2.0 * (1.0 - 15f64.to_radians().tan()), (15.0, 15.0), 10.0 - 2.0 - tr_ac),
         (
             "acme",

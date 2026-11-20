@@ -643,9 +643,7 @@ impl ThreadForm {
     fn fit_sizes(self) -> Vec<(f64, f64)> {
         match self {
             ThreadForm::Metric => ISO_COARSE.to_vec(),
-            ThreadForm::Unified => {
-                crate::tapped_thread_sizes(crate::TappedThreadFamily::Unc).iter().map(|s| (s.major_diameter, s.pitch)).collect()
-            }
+            ThreadForm::Unified => crate::tapped_thread_sizes(crate::TappedThreadFamily::Unc).iter().map(|s| (s.major_diameter, s.pitch)).collect(),
             _ => self.sizes(),
         }
     }
@@ -770,9 +768,7 @@ fn unified_catalogue() -> Vec<crate::TappedThread> {
 fn unified_designation(s: &str) -> Option<(f64, f64, Option<&str>)> {
     let (size_pitch, suffix) = s.rsplit_once(char::is_whitespace)?;
     let (series, class) = suffix.split_once('-').map_or((suffix, None), |(s, c)| (s, Some(c)));
-    if !matches!(series, "UNC" | "UNF" | "UNEF" | "UN")
-        || class.is_some_and(|c| !matches!(c, "1A" | "2A" | "3A" | "1B" | "2B" | "3B"))
-    {
+    if !matches!(series, "UNC" | "UNF" | "UNEF" | "UN") || class.is_some_and(|c| !matches!(c, "1A" | "2A" | "3A" | "1B" | "2B" | "3B")) {
         return None;
     }
     let (size, tpi) = size_pitch.trim().rsplit_once('-')?;
@@ -888,8 +884,21 @@ mod tests {
         assert!(form.check_class("1/4-20 UNC", false).is_ok());
         assert!(form.check_class("1/4-20 UNC", true).is_ok());
         for text in [
-            "#13-32 UNC", "#-1-32 UN", "1/4-0 UNC", "1/4-NaN UNC", "1/0-20 UNC", "0-20 UNC", "1/4-20", "1/4-20 UNS",
-            "1/4-20 UNC-4A", "1/4-20 UNC-2A-extra", "1/4-20 UNC-", "1/4-20 UNC-2AA", "1/4-1e309 UN", "1e309-20 UN", "1/4-20 UNF extra",
+            "#13-32 UNC",
+            "#-1-32 UN",
+            "1/4-0 UNC",
+            "1/4-NaN UNC",
+            "1/0-20 UNC",
+            "0-20 UNC",
+            "1/4-20",
+            "1/4-20 UNS",
+            "1/4-20 UNC-4A",
+            "1/4-20 UNC-2A-extra",
+            "1/4-20 UNC-",
+            "1/4-20 UNC-2AA",
+            "1/4-1e309 UN",
+            "1e309-20 UN",
+            "1/4-20 UNF extra",
         ] {
             assert!(form.parse(text, 1).is_err(), "{text}");
         }
