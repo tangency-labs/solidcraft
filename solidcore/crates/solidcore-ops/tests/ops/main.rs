@@ -79,8 +79,12 @@ mod extend_split_sheet;
 mod face_cvs;
 #[path = "../face_surface_eval.rs"]
 mod face_surface_eval;
+#[path = "../failure_code.rs"]
+mod failure_code;
 #[path = "../fillet_sheets_long_run.rs"]
 mod fillet_sheets_long_run;
+#[path = "../heal.rs"]
+mod heal;
 #[path = "../issue_2843_round_on_tangent_line.rs"]
 mod issue_2843_round_on_tangent_line;
 #[path = "../issue_2844_loft_rim.rs"]

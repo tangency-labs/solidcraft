@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 use solidcore_record::brep::Brep;
-use solidcraft_engine::kernel::smlib_trace::{self, Event};
+use solidcraft_engine::kernel::smlib_trace::Event;
 
 use crate::read_json;
 
@@ -98,8 +98,7 @@ impl<'a> Trace<'a> {
     }
 }
 
-/// The entry of case `dir`, run with result `out`, into `root/<area>/<id>.json`, and the fix set
-/// into `root/fixes.json`.
+/// The entry of case `dir`, run with result `out`, into `root/<area>/<id>.json`.
 pub fn write(root: &Path, dir: &str, out: &Value, capture: Capture) -> Result<(), String> {
     let (area, id) = area_and_id(dir)?;
     let want = read_json(&format!("{dir}/expected.json"))?;
@@ -262,13 +261,7 @@ pub fn write(root: &Path, dir: &str, out: &Value, capture: Capture) -> Result<()
     std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
     let path = folder.join(format!("{id}.json"));
     let text = serde_json::to_string(&entry).map_err(|e| e.to_string())?;
-    std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;
-    // Cases run in parallel processes: each writes its own file and renames it over the shared
-    // one, so no reader sees a torn file (every process writes the same fix set).
-    let fixes = serde_json::to_string_pretty(&smlib_trace::fixes()).map_err(|e| e.to_string())?;
-    let own = root.join(format!("fixes.json.{}", std::process::id()));
-    std::fs::write(&own, fixes).map_err(|e| format!("{}: {e}", own.display()))?;
-    std::fs::rename(&own, root.join("fixes.json")).map_err(|e| format!("{}: {e}", root.display()))
+    std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 #[cfg(test)]

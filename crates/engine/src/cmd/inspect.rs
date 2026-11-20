@@ -11,7 +11,7 @@ use solidcraft_sketch::CurveKind;
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, str_, string_list};
-use crate::schema::inspect::{BodiesDetail, DocumentBodies, TimelineDetail, TimelineRow};
+use crate::schema::inspect::{BodiesDetail, DocumentBodies, GeometryDefect, TimelineDetail, TimelineRow};
 use crate::schema::inspect::{
     BodyFailure, BodyFeaturesParams, BodyFigures, BodyListParams, BodyMeasurement, BodyName, BodyNames, BodyOutcome, BoundingBox,
     ColoredComponentsParams, ColoredComponentsResult, CommandEntry, CommandsParams, CurveShape, DocumentBody, DocumentBodyDetail,
@@ -101,9 +101,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<ModelFaces>)
         .params(
         "body: name → per face: index, name (what face.delete, sheet.convert `face`, solid.shell … take in place of a point), exact, area, centroid (not always on the face), \
-         plane_normal, point (a point on the face that picks it), cylinder? ({origin, axis, radius} of a cylindrical face), \
-         sheet_face? (a folded sheet's face: `sheet:<body>:<panel>:<side>`, panel base or a flange's tag F<feature>.<k>, side top | bottom | rim.<edge> | bend.inner | bend.outer; \
-         taken wherever a face name is, and it holds while sizes change and flanges come and go)",
+         plane_normal, point (a point on the face that picks it), cylinder? ({origin, axis, radius} of a cylindrical face)",
     ),
     CommandSpec::new("model.threads", "List Threads", crate::checked!("model.threads", model_threads))
         .icon("inspect")
@@ -201,8 +199,10 @@ pub(super) fn measure_body(
     definitions: Option<&solidcraft_doc::ModelState>,
 ) -> Result<solidcraft_kernel::BodyMeasure> {
     let mut measured = b.measure()?;
+    // A sheet's perforation fields (#732): their holes, which the body does not have, come off
+    // what it measures.
     if let Some(state) = definitions
-        && let Some(sheet) = state.sheets.iter().find(|sheet| sheet.body == b.definition_name() && !sheet.perforations.is_empty())
+        && let Some(sheet) = state.surface_sheets.iter().find(|sheet| sheet.body == b.definition_name() && !sheet.perforations.is_empty())
     {
         let definition = state.body(b.definition_name()).ok_or_else(|| EngineError::Other(format!("missing sheet body `{}`", sheet.body)))?;
         // A body transfer moves the geometry and sheet metadata together. Apply only
@@ -299,7 +299,10 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
             b.density_g_cm3 = Some(rho);
             b.mass_g = Some(v * rho / 1000.0);
         }
-        if definitions.sheets.iter().any(|sheet| sheet.body == source) {
+        // A sheet made from surfaces (#6748) is sheet metal: its perforation fields' holes are
+        // taken off its volume, area and centre where each body is measured (`measure_body`);
+        // its counts are its stored B-rep's, which has no such holes (see `BodyFigures::faces`).
+        if definitions.surface_sheets.iter().any(|sk| sk.body == source) {
             b.sheet_metal = Some(true);
         }
         bodies.push(b);
@@ -591,6 +594,36 @@ fn revision(s: &mut Session, _p: &Value) -> Result<Value> {
     reply("document.revision", RevisionResult { document_id: s.document_id.clone(), revision, param_warnings: Vec::new() })
 }
 
+/// What imports found wrong with the bodies and components they made
+/// (`solidcraft_doc::import_defects`): each body's notes, then each component's parts that were
+/// not imported.
+fn geometry_defects(s: &Session) -> Vec<GeometryDefect> {
+    use solidcraft_doc::import_defects;
+    let kind = |k: solidcraft_doc::kernel::IssueKind| serde_json::to_value(k).ok().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default();
+    let st = s.model.state();
+    let mut out: Vec<GeometryDefect> = st
+        .bodies
+        .iter()
+        .flat_map(|b| {
+            import_defects::body_import_issues(&s.model, b).into_iter().map(|i| GeometryDefect {
+                body: Some(b.name.clone()),
+                component: None,
+                kind: kind(i.kind),
+                detail: i.detail.clone(),
+            })
+        })
+        .collect();
+    for (component, issues) in import_defects::component_import_issues(&s.doc, &s.model) {
+        out.extend(issues.into_iter().map(|i| GeometryDefect {
+            body: None,
+            component: Some(component),
+            kind: kind(i.kind),
+            detail: i.detail.clone(),
+        }));
+    }
+    out
+}
+
 fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
     let timeline_detail = TimelineDetail::read(p.get("timeline")).map_err(|e| bad("document.inspect", e))?;
     let bodies_detail = BodiesDetail::read(p.get("bodies")).map_err(|e| bad("document.inspect", e))?;
@@ -619,12 +652,14 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             .map(|(i, f)| {
                 let r = s.model.result(f.id);
                 let (error, warning) = (r.and_then(|r| r.error.clone()), r.and_then(|r| r.warning.clone()));
+                let error_code = r.and_then(|r| r.error_code.as_ref()).map(Into::into);
                 if timeline_detail == TimelineDetail::Summary {
                     return TimelineRow::Summary(TimelineSummary {
                         id: f.id,
                         name: f.name.clone(),
                         kind: f.kind.type_name().to_string(),
                         error,
+                        error_code,
                         warning,
                         suppressed: f.suppressed.then_some(true),
                         rolled_back: (i >= marker).then_some(true),
@@ -637,6 +672,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
                     suppressed: f.suppressed,
                     rolled_back: i >= marker,
                     error,
+                    error_code,
                     warning,
                     ms: r.map(|r| r.ms),
                 })
@@ -711,6 +747,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             timeline,
             bodies,
             sketches,
+            defects: geometry_defects(s),
             selection: serde_json::to_value(&s.selection).unwrap_or_default(),
             undo: s.undo.len(),
             redo: s.redo.len(),
@@ -756,10 +793,6 @@ fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {
     let names = solidcraft_doc::naming::face_names(b);
     let tol = (b.body.size() * 2e-3).max(1e-3);
     let spots = solidcraft_doc::naming::face_spots(b);
-    // A folded sheet's faces also have the readable names its sheet gives them, worked out in
-    // the body's own coordinates.
-    let model = s.model.state();
-    let sheet_names = model.body(&b.name).map(|own| solidcraft_doc::sheet::body_sheet_face_names(&model, own)).unwrap_or_default();
     let faces = b
         .body
         .faces(tol)?
@@ -781,7 +814,6 @@ fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {
                 plane_normal: f.plane_normal.map(Into::into),
                 point: spot.map(|x| x.point.into()),
                 cylinder,
-                sheet_face: sheet_names.get(f.index).and_then(|n| n.as_ref().map(|n| n.to_string())),
             }
         })
         .collect();

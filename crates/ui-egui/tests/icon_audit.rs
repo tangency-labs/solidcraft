@@ -489,7 +489,6 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
         drawing.app.home.open = false;
         // This scene audits the retained legacy management and docking controls.
         drawing.app.preferences.drawing_sheets_visibility = "legacy".into();
-        drawing.app.preferences.drawings_preview = true;
         workspace::enter(&mut drawing.app, "drawing").unwrap();
         drawing.frames(3);
         collect(&mut drawing, "Drawing sheet strip and browser", &mut requested);
@@ -535,8 +534,10 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     png.extend(400u32.to_be_bytes());
     png.extend(200u32.to_be_bytes());
     png.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
-    let data = solidcraft_engine::doc::canvas::base64_encode(&png);
-    let canvas = h.app.run("canvas.insert", json!({"data": data, "plane": "XY", "width": 80})).unwrap()["canvas"].clone();
+    let data = std::env::temp_dir().join(format!("solidcraft-icon-audit-{}.png", std::process::id()));
+    std::fs::write(&data, &png).unwrap();
+    let data = data.to_string_lossy().into_owned();
+    let canvas = h.app.run("canvas.insert", json!({"path": data, "plane": "XY", "width": 80})).unwrap()["canvas"].clone();
     menu(&mut h, json!({"type":"canvas","id":canvas}), "canvas", &mut requested);
     h.app.run("selection.delete", json!({"canvases": [canvas]})).unwrap();
     for selection in [
