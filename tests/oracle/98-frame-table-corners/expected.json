@@ -1,0 +1,25 @@
+{
+  "source": "analytic",
+  "method": "97-frame-mitre (V = 2025 (2000 - 8 sqrt 2)) plus 4 legs of 45 x 45 bar cut square 2 below the rails' undersides: 700 - 22.5 - 2 = 675.5 long; V = 2025 (2000 - 8 sqrt 2) + 4 x 2025 x 675.5; area = 97's area + 4 (4 x 45 x 675.5 + 2 x 2025); centre of mass at x = 300, y = 200 by symmetry, z by moments (rails at 0, legs at -362.25)",
+  "body_count": 8,
+  "volume_mm3": 9498639.740289556,
+  "area_mm2": 883433.7921806269,
+  "center_of_mass": [
+    300.0,
+    200.0,
+    -208.66871906856622
+  ],
+  "bbox": {
+    "min": [
+      -22.5,
+      -22.5,
+      -700.0
+    ],
+    "max": [
+      622.5,
+      422.5,
+      22.5
+    ]
+  },
+  "faces": 48
+}

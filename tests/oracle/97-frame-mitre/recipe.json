@@ -1,0 +1,167 @@
+{
+ "id": "97-frame-mitre",
+ "name": "Rectangular frame of mitred members",
+ "description": "A 600 x 400 frame in 45 x 45 bar on XY, every line through its section's centre and each line starting where the one before ends; the four corners mitred with a 2 mm weld gap between the cut faces.",
+ "exercises": [
+  "frame_member",
+  "frame_corner",
+  "mitre_joint"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm).",
+  "members": "frame_member lays one bar per sketch line, its section centred on the line and square to it; bodies are named after body_name, numbered on (Rail, Rail (2), ...) in sketch and line order.",
+  "corners": "frame_corner cuts both members where their middle lines meet on the plane halfway between them; each cut face stands gap / 2 back from that plane."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Frame",
+   "plane": {
+    "ref": "custom",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       600,
+       0
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       600,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       600,
+       400
+      ]
+     },
+     "id": "l2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       600,
+       400
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       400
+      ]
+     },
+     "id": "l3"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0,
+       400
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "id": "l4"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "frame_member",
+   "name": "Bars",
+   "sketch": "Frame",
+   "profile": {
+    "kind": "bar",
+    "width": 45,
+    "height": 45
+   },
+   "body_name": "Bar"
+  },
+  {
+   "op": "frame_corner",
+   "name": "Corner 1",
+   "members": [
+    "Bar",
+    "Bar (2)"
+   ],
+   "gap": 2
+  },
+  {
+   "op": "frame_corner",
+   "name": "Corner 2",
+   "members": [
+    "Bar (2)",
+    "Bar (3)"
+   ],
+   "gap": 2
+  },
+  {
+   "op": "frame_corner",
+   "name": "Corner 3",
+   "members": [
+    "Bar (3)",
+    "Bar (4)"
+   ],
+   "gap": 2
+  },
+  {
+   "op": "frame_corner",
+   "name": "Corner 4",
+   "members": [
+    "Bar (4)",
+    "Bar"
+   ],
+   "gap": 2
+  }
+ ]
+}

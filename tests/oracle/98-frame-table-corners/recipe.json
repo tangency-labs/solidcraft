@@ -1,0 +1,320 @@
+{
+ "id": "98-frame-table-corners",
+ "name": "Table frame: mitred rails on four legs",
+ "description": "A 600 x 400 frame of rails in 45 x 45 bar on XY and four legs of the same bar, 700 long, down from its corners; every line through its section's centre. Each corner is one three-member corner: the two rails mitred to each other and the leg ending flat under them, with a 2 mm weld gap.",
+ "exercises": [
+  "frame_member",
+  "frame_corner",
+  "mitre_joint",
+  "corner_post"
+ ],
+ "units": {
+  "length": "mm",
+  "angle": "deg",
+  "area": "mm2",
+  "volume": "mm3"
+ },
+ "conventions": {
+  "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+  "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm).",
+  "members": "frame_member lays one bar per sketch line, its section centred on the line and square to it; bodies are named after body_name, numbered on (Rail, Rail (2), ...) in sketch and line order.",
+  "corners": "frame_corner cuts its first two members where their middle lines meet on the plane halfway between them, each cut face gap / 2 back from that plane; a third member (a post) ends on the plane parallel to the first two, at the far side of their sections from it, gap back from it."
+ },
+ "parameters": [],
+ "features": [
+  {
+   "op": "sketch",
+   "name": "Frame",
+   "plane": {
+    "ref": "custom",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     1,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       600,
+       0
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       600,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       600,
+       400
+      ]
+     },
+     "id": "l2"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       600,
+       400
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       400
+      ]
+     },
+     "id": "l3"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0,
+       400
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "id": "l4"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "frame_member",
+   "name": "Rails",
+   "sketch": "Frame",
+   "profile": {
+    "kind": "bar",
+    "width": 45,
+    "height": 45
+   },
+   "body_name": "Rail"
+  },
+  {
+   "op": "sketch",
+   "name": "Front legs",
+   "plane": {
+    "ref": "custom",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     0,
+     1
+    ],
+    "normal": [
+     0,
+     -1,
+     0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       -700
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       600,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       600,
+       -700
+      ]
+     },
+     "id": "l2"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "sketch",
+   "name": "Back legs",
+   "plane": {
+    "ref": "custom",
+    "origin": [
+     0,
+     400,
+     0
+    ],
+    "x_dir": [
+     1,
+     0,
+     0
+    ],
+    "y_dir": [
+     0,
+     0,
+     1
+    ],
+    "normal": [
+     0,
+     -1,
+     0
+    ]
+   },
+   "entities": [
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       0,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       0,
+       -700
+      ]
+     },
+     "id": "l1"
+    },
+    {
+     "type": "line",
+     "start": {
+      "at": [
+       600,
+       0
+      ]
+     },
+     "end": {
+      "at": [
+       600,
+       -700
+      ]
+     },
+     "id": "l2"
+    }
+   ],
+   "constraints": [],
+   "dimensions": []
+  },
+  {
+   "op": "frame_member",
+   "name": "Front",
+   "sketch": "Front legs",
+   "profile": {
+    "kind": "bar",
+    "width": 45,
+    "height": 45
+   },
+   "body_name": "Front leg"
+  },
+  {
+   "op": "frame_member",
+   "name": "Back",
+   "sketch": "Back legs",
+   "profile": {
+    "kind": "bar",
+    "width": 45,
+    "height": 45
+   },
+   "body_name": "Back leg"
+  },
+  {
+   "op": "frame_corner",
+   "name": "Corner 1",
+   "members": [
+    "Rail (4)",
+    "Rail",
+    "Front leg"
+   ],
+   "gap": 2
+  },
+  {
+   "op": "frame_corner",
+   "name": "Corner 2",
+   "members": [
+    "Rail",
+    "Rail (2)",
+    "Front leg (2)"
+   ],
+   "gap": 2
+  },
+  {
+   "op": "frame_corner",
+   "name": "Corner 3",
+   "members": [
+    "Rail (2)",
+    "Rail (3)",
+    "Back leg (2)"
+   ],
+   "gap": 2
+  },
+  {
+   "op": "frame_corner",
+   "name": "Corner 4",
+   "members": [
+    "Rail (3)",
+    "Rail (4)",
+    "Back leg"
+   ],
+   "gap": 2
+  }
+ ]
+}

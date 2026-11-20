@@ -1,0 +1,25 @@
+{
+  "source": "analytic",
+  "method": "4 mitred 45 x 45 bars round a 600 x 400 rectangle, 2 gap: middle-line lengths L - 2 sqrt 2 (each end 1 / cos 45 back); V = 2025 (2 x 600 + 2 x 400 - 8 sqrt 2); area per bar = 4 x 45 Lc + 2 x 45 x 45 sqrt 2; centre of mass at the frame's centre by symmetry; bbox the outer corners, 22.5 outside the lines",
+  "body_count": 4,
+  "volume_mm3": 4027089.740289556,
+  "area_mm2": 380873.7921806269,
+  "center_of_mass": [
+    300.0,
+    200.0,
+    0.0
+  ],
+  "bbox": {
+    "min": [
+      -22.5,
+      -22.5,
+      -22.5
+    ],
+    "max": [
+      622.5,
+      422.5,
+      22.5
+    ]
+  },
+  "faces": 24
+}
