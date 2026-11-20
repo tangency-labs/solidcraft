@@ -15,6 +15,11 @@ use solidcraft_viewport::StandardView;
 /// `{pending: what | null, done?, reply?, lost?, running_s?}`).
 pub trait Backend {
     fn call(&mut self, method: &str, params: Value) -> Result<Value, String>;
+    /// Whether this session supports `plugin.tools`. A remote backend asks the app's
+    /// capabilities before sending this optional command; an older app gets no lookup.
+    fn supports_plugin_tools(&mut self) -> bool {
+        false
+    }
     /// True when a real window is attached (`ui.screenshot` can capture it).
     fn has_ui(&self) -> bool;
     fn describe(&self) -> String;
@@ -241,6 +246,9 @@ impl Headless {
     }
 }
 impl Backend for Headless {
+    fn supports_plugin_tools(&mut self) -> bool {
+        true
+    }
     fn call(&mut self, method: &str, p: Value) -> Result<Value, String> {
         let own = self.session.param_check;
         if matches!(method, "engine.execute" | "command" | "engine.batch" | "engine.script")

@@ -290,6 +290,12 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
             }
         }
     }
+    for pasted in &made {
+        let frame = s.doc.feature(pasted.id).and_then(|f| super::features::cross_component_profile_frame_for(s, f.component, &f.kind));
+        if let Some(f) = s.doc_mut().feature_mut(pasted.id) {
+            f.profile_frame = frame;
+        }
+    }
     s.refresh();
     let errors: Vec<PasteError> = made
         .iter()

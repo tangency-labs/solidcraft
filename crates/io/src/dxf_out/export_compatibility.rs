@@ -91,6 +91,9 @@ impl Budget {
             (Producer::FlatPattern, "BEND_DOWN") => Some((5, DxfLinetype::Dashed)),
             (Producer::FlatPattern, "BEND_NOTES") => Some((8, DxfLinetype::Continuous)),
             (Producer::FlatPattern, "PERFORATION") => Some((3, DxfLinetype::Continuous)),
+            // A roll's lines (where it starts and ends, and its middle), on a layer of their own so
+            // a reader of the bend layers doesn't take a roll for bends.
+            (Producer::FlatPattern, "ROLL") => Some((3, DxfLinetype::Continuous)),
             (Producer::FlatPattern, value) if pocket_name(value) => Some((3, DxfLinetype::Continuous)),
             _ => None,
         };
@@ -108,7 +111,7 @@ impl Budget {
                     || (layer == "VISIBLE" && matches!(shape, DxfShape::Circle { .. } | DxfShape::Arc { .. }))
             }
             Producer::FlatPattern => match layer {
-                "BEND_UP" | "BEND_DOWN" => matches!(shape, DxfShape::Line(..)),
+                "BEND_UP" | "BEND_DOWN" | "ROLL" => matches!(shape, DxfShape::Line(..)),
                 "BEND_NOTES" => matches!(shape, DxfShape::Text { .. }),
                 "PERFORATION" => matches!(shape, DxfShape::Circle { .. }),
                 _ => matches!(
@@ -166,7 +169,8 @@ fn pocket_name(name: &str) -> bool {
 impl DxfFile<DxfShape> {
     /// Compatibility contract for the existing flat-pattern producer after its
     /// source geometry is admitted. Counts name contours supplied to path_shapes,
-    /// bend records and already generated perforation holes. Actual consumption
+    /// bend records (a roll's line and a junction cut's two lines are planned as
+    /// bend records) and already generated perforation holes. Actual consumption
     /// is checked again by the one writer; a smaller forged plan cannot extend it.
     pub fn for_flat_pattern_export(contours: usize, bends: usize, perforations: usize) -> Result<Self> {
         let path_entities = mul(contours, path::MAX_PATH_ITEMS)?;
@@ -179,7 +183,8 @@ impl DxfFile<DxfShape> {
         let values = (path_entities as u128) * 129 + (bends as u128) * 6 + (perforations as u128) * 2;
         let values = usize::try_from(values).unwrap_or(usize::MAX);
         let text_bytes = usize::try_from((bends as u128) * 2048).unwrap_or(usize::MAX);
-        let budget = Budget::new(Producer::FlatPattern, add(contours, 9)?, entities, values, text_bytes)?;
+        // Layer 0 and the nine named roles, and at most one pocket layer per contour.
+        let budget = Budget::new(Producer::FlatPattern, add(contours, 10)?, entities, values, text_bytes)?;
         Self::with_export_budget(budget)
     }
 

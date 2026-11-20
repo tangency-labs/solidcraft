@@ -457,6 +457,8 @@ impl PanelController for VisibleSpecimen {
             ContentSlot::Inline => {
                 self.render_inline(ui, context, services)?;
             }
+            // The specimen never asks for header content.
+            ContentSlot::Title => {}
         }
         Ok(())
     }

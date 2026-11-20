@@ -511,6 +511,34 @@ fn cones_keep_their_pinned_volumes() {
     assert_near_closed_form(v, rounded_r8() - cone_pit_void());
 }
 
+/// The round beside the cone pit is a B-spline face whose trims cross three of its surface's v
+/// knot lines, where the trims' images have derivatives that are not smooth. The face's own
+/// trim pieces and its tolerant edges' gap-closure strips both integrate along those
+/// trims, and both end each piece at the crossings. So the volume at the default accuracy 1e-7
+/// equals the volume at 1e-12, to within the rounding bound of the volume's sum (as in
+/// `transposed_pins_lie_within_their_sums_rounding_of_the_references`).
+///
+/// A face whose pieces end at the crossings, with strips that run across them, is 1.7e-10 off
+/// at 1e-7. That is eight times the bound (MEASURED).
+#[test]
+fn cone_pit_volume_at_the_default_accuracy_is_converged() {
+    let (k, mut b) = rounded_body(cone_pit, 8.0).unwrap();
+    let store = AttributeStore::default();
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &|_| ObjectKey(0),
+    };
+    let default = brep_volume(&k, &mut b, 1e-7, &attrs).unwrap();
+    let tight = brep_volume(&k, &mut b, 1e-12, &attrs).unwrap();
+    let n = b.face_list().len();
+    let bound = gamma(u32::try_from(n - 1).unwrap()) * tight.abs();
+    assert!(
+        (default - tight).abs() <= bound,
+        "volume {default:.17} at 1e-7, {tight:.17} at 1e-12: {:e} apart, bound {bound:e}",
+        (default - tight).abs()
+    );
+}
+
 /// A boss's walls count as upright within the fillet's angular tolerance: at 19 degrees off they
 /// are carried down, at 30 and 45 the round is refused, as the fork.
 #[test]
@@ -548,7 +576,6 @@ fn rounded_rim_with_boss(boss: fn(&mut Kernel) -> Result<Brep>) -> (f64, f64) {
         fixes: UpstreamFixes::all(),
         ..Kernel::default()
     };
-    k.fixes.fillet_refuse_rounds_breaking_through = false;
     let block = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 10.0).unwrap();
     let feature = boss(&mut k).unwrap();
     let mut b = boolean_union(&mut k, block, feature).unwrap();
@@ -603,7 +630,6 @@ fn a_leaning_boss_on_a_rim_round_is_refused() {
         fixes: UpstreamFixes::all(),
         ..Kernel::default()
     };
-    k.fixes.fillet_refuse_rounds_breaking_through = false;
     let block = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 10.0).unwrap();
     let boss = create_cone(&mut k, Point3::new(17.0, 0.0, 10.0), 2.0, 1.0, 4.0).unwrap();
     let mut b = boolean_union(&mut k, block, boss).unwrap();
