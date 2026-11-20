@@ -1266,10 +1266,16 @@ pub fn tangent_chain(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
 /// faces, edges and surfaces.
 pub(crate) fn offset_round_edges(body: &Body, moved: &[usize], grown: bool) -> Result<Vec<Vec3>> {
     let rec = Faces::of(body)?;
+    let mut is_moved = vec![false; rec.rec.faces.len()];
+    for &f in moved {
+        if let Some(slot) = is_moved.get_mut(f) {
+            *slot = true;
+        }
+    }
     let mut out = Vec::new();
     for (e, edge) in rec.rec.edges.iter().enumerate() {
         let faces = rec.faces_of(e);
-        if faces.len() != 2 || !faces.iter().all(|f| moved.contains(&(*f as usize))) || smooth_join(&rec, e)? {
+        if faces.len() != 2 || !faces.iter().all(|f| is_moved.get(*f as usize).copied().unwrap_or(false)) || smooth_join(&rec, e)? {
             continue;
         }
         if convex_at(&rec, e, edge.vertices[0]) == Some(grown) {

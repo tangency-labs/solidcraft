@@ -254,6 +254,8 @@ pub enum OffsetEdges {
 }
 
 impl OffsetEdges {
+    /// `sharp`, or `round` (also `rounded`), in any case and with spaces round it; `None` for
+    /// anything else.
     pub fn parse(s: &str) -> Option<OffsetEdges> {
         Some(match s.to_ascii_lowercase().trim() {
             "sharp" => OffsetEdges::Sharp,
@@ -262,6 +264,7 @@ impl OffsetEdges {
         })
     }
 
+    /// Whether the edges stay sharp, the default, which a design leaves out when it saves.
     pub fn is_sharp(&self) -> bool {
         *self == OffsetEdges::Sharp
     }

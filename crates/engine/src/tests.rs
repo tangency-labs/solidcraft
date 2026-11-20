@@ -6093,7 +6093,8 @@ fn pin_pocket(extra: &[(&str, [f64; 3], [f64; 3])], params: Value) -> (Session, 
 /// 11 × 10 × 15; the other faces stay where they are.
 #[test]
 fn combine_cut_offset_of_picked_faces() {
-    let (s, v) = pin_pocket(&[], json!({"tools": ["Pin"], "offset": 0.5, "offset_faces": [[15, 20, 10], [25, 20, 10]]}));
+    // A face is a point on it, in any of the forms a face takes (`{point}` too).
+    let (s, v) = pin_pocket(&[], json!({"tools": ["Pin"], "offset": 0.5, "offset_faces": [{"point": [15, 20, 10]}, [25, 20, 10]]}));
     assert!(rel(v, 32000.0 - 11.0 * 10.0 * 15.0) < 1e-9, "{v}");
     let pin = solidcraft_kernel::measure(&s.model.state().body("Pin").unwrap().body).unwrap().volume;
     assert!(rel(pin, 3000.0) < 1e-9, "the tool is not changed: {pin}");
@@ -6157,6 +6158,20 @@ fn combine_offset_refusals() {
         (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset_faces": [[0, 0, 0]]}), "needs an `offset`"),
         (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_radius": 2}), "needs `offset_edges: round`"),
         (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_edges": "round", "offset_radius": -2}), "must be positive"),
+    ] {
+        let e = s.execute("solid.combine", &p).expect_err(&p.to_string()).to_string();
+        assert!(e.contains(says), "{p}: {e}");
+    }
+    assert_eq!(s.doc.features.len(), 2, "nothing was added");
+    // Without the schema check too, a value that is no expression is refused, never read as
+    // none: the cut would otherwise be saved without its clearance.
+    let mut s = Session { param_check: crate::schema::ParamCheck::Off, ..Session::default() };
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "A"}));
+    run(&mut s, "solid.box", json!({"corner": [10, 0, 0], "length": 20, "width": 20, "height": 20, "body_name": "B"}));
+    for (p, says) in [
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": [0.2]}), "`offset`"),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_edges": true}), "sharp or round"),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_edges": "round", "offset_radius": [2]}), "`offset_radius`"),
     ] {
         let e = s.execute("solid.combine", &p).expect_err(&p.to_string()).to_string();
         assert!(e.contains(says), "{p}: {e}");

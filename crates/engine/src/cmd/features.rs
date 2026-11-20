@@ -2570,8 +2570,16 @@ fn combine(s: &mut Session, p: &Value) -> Result<Value> {
         None => Operation::Join,
         Some(o) => Operation::parse(o).filter(|o| *o != Operation::NewBody).ok_or_else(|| bad(cmd, "operation must be join, cut or intersect"))?,
     };
-    // A cut's clearance (#3774): each tool grown by it before it cuts.
+    // A cut's clearance (#3774): each tool grown by it before it cuts. A value given that is no
+    // expression is refused, never read as none (`null` is none).
+    let given = |k: &str| p.get(k).is_some_and(|v| !v.is_null());
     let offset = expr(p, "offset");
+    if given("offset") && offset.is_none() {
+        return Err(bad(cmd, format!("`offset` {}", expr_problem(p.get("offset")))));
+    }
+    if given("offset_edges") && str_(p, "offset_edges").is_none() {
+        return Err(bad(cmd, "`offset_edges` must be sharp or round"));
+    }
     if let Some(d) = &offset {
         if op != Operation::Cut {
             return Err(bad(cmd, "`offset` is only for a cut"));
@@ -2597,6 +2605,9 @@ fn combine(s: &mut Session, p: &Value) -> Result<Value> {
     };
     // The rounding radius; none given: the offset's size.
     let offset_radius = expr(p, "offset_radius");
+    if given("offset_radius") && offset_radius.is_none() {
+        return Err(bad(cmd, format!("`offset_radius` {}", expr_problem(p.get("offset_radius")))));
+    }
     if let Some(r) = &offset_radius {
         if offset_edges != OffsetEdges::Round {
             return Err(bad(cmd, "`offset_radius` needs `offset_edges: round`"));

@@ -710,19 +710,19 @@ impl JsonSchema for TouchingParam {
     }
 }
 
-/// Combine's `offset_faces`: 1 to 1000 points on tool faces, as the handler reads them, with
-/// its message.
+/// Combine's `offset_faces`: 1 to 1000 faces of the tools, each as [`FaceRef`] reads it (a point
+/// on the face or its name), as the handler's `face::face_ref` reads them.
 #[derive(Clone, Debug, PartialEq)]
-pub struct ToolFacesParam(pub Vec<Vec3>);
+pub struct ToolFacesParam(pub Vec<FaceRef>);
 
-/// Combine's message for `offset_faces` it can't read.
+/// Combine's message for an `offset_faces` that isn't a list of 1 to 1000 faces.
 const TOOL_FACES_MESSAGE: &str = "`offset_faces` must list 1…1000 points on tool faces";
 
 impl<'de> Deserialize<'de> for ToolFacesParam {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let v = Value::deserialize(d)?;
         let faces = v.as_array().filter(|a| !a.is_empty() && a.len() <= 1000).ok_or_else(|| D::Error::custom(whole(TOOL_FACES_MESSAGE)))?;
-        faces.iter().map(params::vec3).collect::<Option<Vec<_>>>().map(ToolFacesParam).ok_or_else(|| D::Error::custom(whole(TOOL_FACES_MESSAGE)))
+        faces.iter().map(|f| FaceRef::deserialize(f).map_err(D::Error::custom)).collect::<Result<Vec<_>, _>>().map(ToolFacesParam)
     }
 }
 
@@ -731,10 +731,10 @@ impl JsonSchema for ToolFacesParam {
         "ToolFaces".into()
     }
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        let point = generator.subschema_for::<Point3>();
+        let face = generator.subschema_for::<FaceRef>();
         json_schema!({
-            "description": "Points in mm, one on each tool face that moves.",
-            "type": "array", "items": point, "minItems": 1, "maxItems": 1000
+            "description": "The tool faces that move, one entry on each: a point on the face or its name.",
+            "type": "array", "items": face, "minItems": 1, "maxItems": 1000
         })
     }
 }

@@ -388,6 +388,7 @@ fn combine_check_takes_what_the_schema_allows() {
         ),
         (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_faces": []}), false),
         (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_faces": [[1, 2]]}), false),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_faces": [{"point": [1, 2, 3]}, "Top"]}), true),
         (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_radius": [2]}), false),
     ] {
         let issues = crate::schema::issues("solid.combine", &p);
