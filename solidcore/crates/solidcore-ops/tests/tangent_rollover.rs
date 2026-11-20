@@ -1369,23 +1369,56 @@ fn corner_round(b: &Body, r4: f64, corpus: bool) -> Result<(), Error> {
     result.map(|_| ())
 }
 
-/// Next to r4 = 25 - sqrt 205, where the rail meets z = 5 at W, main's outcome stands:
-/// - 1e-3 past it, R lies past W by 1e-3 but within the body's tolerance of the side's edge
-///   on the foot round, which leaves W tangent to the top's edge (the side's lobe is thinner
-///   than the tolerance there): R is not inside the side, the turned-back end is not taken,
-///   and the rounds are refused as crossing at R, as on main;
+/// Next to r4 = 25 - sqrt 205, where the rail meets z = 5 at W:
+/// - 1e-3 past it, R = (-36, -65 - r4, 5) lies past W by 1e-3, 6.2e-4 inside the contact
+///   circle, where the side's lobe under the foot round is 3.875e-8 thick (the torus on
+///   x = -36 at R is at z = 5 + (5 - sqrt(25 - (23 - rho)^2)), rho = sqrt(18^2 + (y + 90)^2)).
+///   The rail and the lobe's edge END there, 3.9e-8 apart: the rounds meet, they do not cross
+///   (the corner round's material is at x >= -36, z <= 5, the foot round's at x <= -36,
+///   z >= 5; they share only the side's segment from R to W on z = 5).
+///   - Without the corpus's fixes the round builds, as it does past W by more
+///     ([`a_corner_round_whose_rail_ends_past_the_top_under_the_foot_round_builds`]): valid at
+///     the full check, and the kernel's certified enclosure of its volume holds the closed
+///     form (the input's plus 5 r4^2 (1 - pi / 4)), as does the computed volume. Main refused it
+///     as the rounds crossing at R: the joint there is judged by the vertex, left at W (1e-3
+///     from R) under the vertex's tolerance, and the lobe's edge kept 4.6e-5 under a trim that
+///     upstream's corner fix (`sm_FixUVTrimCurves`) had moved 1e-3 off its curve, uncovered.
+///     Its tolerance now covers its trim (#18166), and the joint at R is seen.
+///   - With them, main's outcome stands: refused as crossing at R.
 /// - 5e-6 past it, within the body's tolerance (1e-5), R is not past W: the rail ends on the
 ///   top's edge as on main, and the round builds valid (its volume, MEASURED, 1.4e-5 from the
 ///   closed form, which the end at W within the tolerance does not bound).
 #[test]
-fn a_corner_round_whose_rail_meets_the_top_next_to_w_keeps_main_s_outcome() {
+fn a_corner_round_whose_rail_meets_the_top_next_to_w_builds_where_the_rounds_meet() {
     let w = top_end_on_side();
     assert!((-65.0 - CORNER_ROUND_REACHES_W - w).abs() < 1e-12);
     for corpus in [true, false] {
         let r4 = CORNER_ROUND_REACHES_W + 1e-3;
-        match corner_round(&arm_boss_foot_only(), r4, corpus) {
-            Err(Error::RoundsCross { .. }) => {}
-            other => panic!("r4 {r4} corpus {corpus}: {other:?}"),
+        let b = arm_boss_foot_only();
+        let before = b.volume(1e-9).unwrap();
+        match (corpus, corner_round(&b, r4, corpus)) {
+            (true, Err(Error::RoundsCross { .. })) => {}
+            (false, Ok(())) => {
+                let report = b.check(CheckLevel::All).unwrap();
+                assert!(report.is_valid(), "r4 {r4} corpus {corpus}: {report}");
+                let expected = before + 5.0 * r4 * r4 * (1.0 - PI / 4.0);
+                let after = b.volume(1e-9).unwrap();
+                let (k, mut brep) = common::kernel_copy(&b);
+                let e = solidcore::mass::enclosure::enclose_volume(&k, &mut brep, 1e-2).unwrap();
+                assert!(
+                    e.lo <= expected && expected <= e.hi,
+                    "r4 {r4}: closed form {expected} outside [{}, {}]",
+                    e.lo,
+                    e.hi
+                );
+                assert!(
+                    e.lo <= after && after <= e.hi,
+                    "r4 {r4}: volume {after} outside [{}, {}]",
+                    e.lo,
+                    e.hi
+                );
+            }
+            (_, other) => panic!("r4 {r4} corpus {corpus}: {other:?}"),
         }
         let r4 = CORNER_ROUND_REACHES_W + 5e-6;
         let b = arm_boss_foot_only();
