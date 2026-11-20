@@ -4186,15 +4186,13 @@ impl FilletBrep {
         if !create_crv_on_3d || project_and_lift {
             // Lift the 3d curve
             let uv = uv_curve.as_ref().ok_or_else(|| missing(OP))?;
-            let lifted = face_srf.lift_curve_with_context(
+            let lifted = face_srf.lift_curve(
                 k,
                 &uv_domain,
                 uv,
                 &uv.natural_interval(),
                 approx_tol3d(k, tol),
                 false,
-                &mut services,
-                handle,
             )?;
             let mut c3 = lifted.curve;
 
@@ -4289,15 +4287,13 @@ impl FilletBrep {
                     // may have changed `target`, so its cache is made again from the
                     // face as it is now, where upstream reuses the one its surface keeps
                     // unless the face was marked modified)
-                    let lifted = face_srf.lift_curve_with_context(
+                    let lifted = face_srf.lift_curve(
                         k,
                         &uv_domain,
                         &new_uv,
                         &new_uv.natural_interval(),
                         approx_tol3d(k, tol),
                         false,
-                        &mut BrepFaceServices::new(target),
-                        handle,
                     )?;
                     curve_3d = Some(lifted.curve);
                     uv_curve = Some(new_uv);

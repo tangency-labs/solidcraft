@@ -879,16 +879,7 @@ impl FilletBrep {
         let curve = Curve::from(curve);
         let ivl = curve.natural_interval();
         let (new_3d_curve, uv_curve) = if curve_dim == 2 {
-            let lifted = surf.lift_curve_with_context(
-                k,
-                &uv_domain,
-                &curve,
-                &ivl,
-                tol,
-                false,
-                &mut services,
-                handle,
-            )?;
+            let lifted = surf.lift_curve(k, &uv_domain, &curve, &ivl, tol, false)?;
             (lifted.curve, curve)
         } else {
             // Project 3D curve onto the plane

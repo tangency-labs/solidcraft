@@ -143,7 +143,7 @@ const CONTINUITY_ANGLE: f64 = 0.5;
 /// ([`Surface::calculate_continuities`] in U and in V): the arrays a surface cache
 /// stores (`GetUContinuitiesArray`, `GetVContinuitiesArray`).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SurfaceContinuities {
+pub(crate) struct SurfaceContinuities {
     /// The continuity across each unique U knot.
     pub u: Vec<ContinuityType>,
     /// The continuity across each unique V knot.
@@ -334,7 +334,7 @@ impl Surface {
     /// # Errors
     ///
     /// Those of [`Surface::calculate_continuities`].
-    pub fn continuities(&self, k: &Kernel) -> Result<Arc<SurfaceContinuities>> {
+    pub(crate) fn continuities(&self, k: &Kernel) -> Result<Arc<SurfaceContinuities>> {
         let key = continuity_memo_key(k, self);
         if let Some(hit) = key.as_ref().and_then(|key| self.continuity_memo().get(key)) {
             return Ok(hit);
@@ -2824,8 +2824,8 @@ mod tests {
     /// [`Surface::continuities`] is `CalculateContinuities` in U and in V, the arrays a
     /// cache's tree build stores, and the same answer from every route: computed fresh,
     /// from the memo, through an evaluation copy (which shares the memo), after a copy
-    /// constructor or an edit (which start their own), during a Boolean operation, and
-    /// on a cache made without its tree ([`SurfaceCache::fill_continuities`]) (#20054).
+    /// constructor or an edit (which start their own), and during a Boolean operation,
+    /// while a cache of the surface made then has no tree and empty arrays (#20054).
     #[test]
     fn continuities_are_a_function_of_the_surface() {
         use crate::surface::surface::p1::get_surface_cache;
@@ -2851,18 +2851,18 @@ mod tests {
         assert!(Arc::ptr_eq(&first, &copy.continuities(&k).unwrap()));
         assert_eq!(*s.clone().continuities(&k).unwrap(), want);
 
-        // a cache whose tree is built stores them; one made without tree gets them
+        // a cache whose tree is built stores them; one made without tree has none, and
+        // the surface's answer is unchanged
         let built = get_surface_cache::<()>(&k, &s, None).unwrap();
         assert!(built.tree().is_some());
         assert_eq!(built.u_continuities(), want.u.as_slice());
         assert_eq!(built.v_continuities(), want.v.as_slice());
         k.context.set_doing_boolean(true);
-        let mut unbuilt = get_surface_cache::<()>(&k, &roof(), None).unwrap();
+        let fresh = roof();
+        let unbuilt = get_surface_cache::<()>(&k, &fresh, None).unwrap();
         assert!(unbuilt.tree().is_none());
-        unbuilt.fill_continuities(&k).unwrap();
-        assert_eq!(unbuilt.u_continuities(), want.u.as_slice());
-        assert_eq!(unbuilt.v_continuities(), want.v.as_slice());
-        assert_eq!(*roof().continuities(&k).unwrap(), want);
+        assert!(unbuilt.u_continuities().is_empty() && unbuilt.v_continuities().is_empty());
+        assert_eq!(*fresh.continuities(&k).unwrap(), want);
 
         // an edit starts a memo of its own: a reversed roof's arrays are its own
         k.context.set_doing_boolean(false);

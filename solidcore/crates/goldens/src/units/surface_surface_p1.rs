@@ -18,12 +18,15 @@
 //! (`harness/fixturegen/sil_adv.py`), and `silNNNN` cases come from their own seed stream.
 //!
 //! `DomCont` calls `GetDomainWithContinuity` (UB-83: upstream reads a null cache unless
-//! one was made first; solidcore makes the cache it reads). The `domhistNNNN` cases (their
-//! own seed stream) put half of their points off the surface domain (`off_domain`), where
-//! the end-knot discontinuities clamp the domain. They were made to pin the answer after
-//! a cache history (a cache made during a Boolean operation, then possibly built); that
-//! answer is now the same under every history (`Surface::continuities`), so they run with
-//! none.
+//! one was made first; the port's reads none). `history` runs real calls before it: the
+//! surface's cache requested during a Boolean operation (so its tree is deferred and its
+//! continuity arrays are empty), then its tree built or not, and the call made during the
+//! Boolean operation or after it. The `domhistNNNN` cases (their own seed stream) cover
+//! those histories, half of them at points off the surface domain, where the end-knot
+//! discontinuities clamp the domain. Upstream's answer there depends on the history (its
+//! arrays are empty until the tree is built); the port's must not, so every
+//! `domhistNNNN` expectation is the answer without history (`plan/findings/`, "surface
+//! cache history").
 //!
 //! Deferred cases: the paths into unported units (every surface cache build needs
 //! `SmSurface::CalculateContinuities`, `surface.surface_p6`: `Cache`, `BBox` of
@@ -45,12 +48,13 @@ use solidcore::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use solidcore::nurbs::knots::Side;
 use solidcore::surface::surface::p1::{
     base_is_degenerate_curve, base_is_degenerate_point, crossed_seam_or_pole,
-    evaluate_normal_section, find_uv_curve_ivl_in_domain, make_surface_cache,
+    evaluate_normal_section, find_uv_curve_ivl_in_domain, get_surface_cache, make_surface_cache,
     make_trim_srf_cache, FindSingularParamWithGivenTangentDir, StepSurface,
 };
 use solidcore::surface::surface::p2::IsoCurveLengthIntegrand;
-use solidcore::surface::surface::Surface;
+use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::surface::surface_cache::p1::SurfaceCache;
+use solidcore::error::SM_ERR;
 use solidcore::SolidError;
 
 use super::surface_surface_cache_p1::{
@@ -187,9 +191,12 @@ enum OpIn {
         cont: u8,
         uv: [f64; 2],
         vec: [f64; 2],
-        /// The point may lie off the surface domain (up to a side's length out).
+        /// What ran before the call: `0` nothing; otherwise the surface's cache was
+        /// requested during a Boolean operation (its tree deferred), then `1` the call
+        /// made during that Boolean operation, `2` the cache's tree built (`GetTree`)
+        /// and the call made during the Boolean operation, `3` the call made after it.
         #[serde(default)]
-        off_domain: bool,
+        history: u8,
     },
     /// `CreateSilhouetteCurves` on the (unwrapped) surface, translated first by
     /// `translate` (`Transform`) when given.
@@ -652,10 +659,36 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
                 Err(e) => Ok(vec![status(&e)]),
             }
         }
-        OpIn::DomCont { cont, uv, vec, .. } => {
+        OpIn::DomCont {
+            cont,
+            uv,
+            vec,
+            history,
+        } => {
             let s = run()?;
             let c = continuity(*cont)?;
-            let k = Kernel::default();
+            let mut k = Kernel::default();
+            if *history != 0 && !matches!(s.kind(), SurfaceKind::Step(_)) {
+                // the cache history: the surface's cache, requested while doing a
+                // Boolean operation (its tree deferred), its tree then built for 2
+                k.context.set_doing_boolean(true);
+                let made = get_surface_cache::<()>(&k, &s, None);
+                if made.as_ref().is_ok_and(|cache| cache.tree().is_some()) {
+                    return Err(harness("dom_cont: a cache requested during a Boolean operation has its tree"));
+                }
+                let built = made.and_then(|mut cache| {
+                    if *history == 2 {
+                        cache.get_tree(&k)?;
+                    }
+                    Ok(())
+                });
+                match built {
+                    Ok(()) => {}
+                    Err(e) if e.is_unported() => return Ok(Err(e)),
+                    Err(_) => return Ok(Ok(vec![f64::from(SM_ERR)])),
+                }
+            }
+            k.context.set_doing_boolean(matches!(history, 1 | 2));
             match s.domain_with_continuity(&k, c, p2(*uv), Vec2::new(vec[0], vec[1])) {
                 Ok(d) => {
                     let mut o = vec![0.0];
@@ -702,6 +735,9 @@ const MIN_SIL_TOL: f64 = 1e-6;
 const MIN_SIL_ANG: f64 = 1e-3;
 /// The largest continuity code.
 const MAX_CONTINUITY: u8 = 13;
+/// The longest cache history of a `dom_cont` case.
+const MAX_DOM_CONT_HISTORY: u8 = 3;
+
 fn fins(vs: &[f64]) -> bool {
     vs.iter().all(|&v| fin(v))
 }
@@ -823,10 +859,13 @@ fn keeps_contract(i: &Inputs) -> bool {
                     cont,
                     uv,
                     vec,
-                    off_domain,
+                    history,
                 } => {
-                    let reach = if *off_domain { 1.0 } else { 0.0 };
-                    *cont <= MAX_CONTINUITY && fins(vec) && uv_within(*uv, d, reach)
+                    let reach = if *history == 0 { 0.0 } else { 1.0 };
+                    *cont <= MAX_CONTINUITY
+                        && fins(vec)
+                        && *history <= MAX_DOM_CONT_HISTORY
+                        && uv_within(*uv, d, reach)
                 }
                 OpIn::Sil {
                     dom,
@@ -1098,7 +1137,7 @@ fn gen_case(rng: &mut Rng) -> Result<Inputs, HarnessError> {
             cont: rng.below(14) as u8,
             uv: gen_uv(rng, d),
             vec: [rng.uniform(-1.0, 1.0), rng.uniform(-1.0, 1.0)],
-            off_domain: false,
+            history: 0,
         },
     };
     Ok(Inputs { wrap, surf, op })
@@ -1167,13 +1206,14 @@ fn gen_sil(rng: &mut Rng) -> Result<Inputs, HarnessError> {
     })
 }
 
-/// Generated `DomCont` cases with points off the domain (their own seed stream,
+/// Generated `DomCont` cases with a cache history (their own seed stream,
 /// `surface.surface_p1:domhist`).
 pub const DOM_HIST_CASES: usize = 96;
 
-/// A `DomCont` case with `off_domain`: half the points in the domain, half off it (up to
-/// 90 % of a side out in u, v or both), where the end-knot discontinuities clamp the
-/// domain.
+/// A `DomCont` case after a cache history (`1` to `3`, see [`OpIn::DomCont`]): half the
+/// points in the domain, half off it (up to 90 % of a side out in u, v or both), where
+/// the end-knot discontinuities clamp the domain only when the cache's continuity
+/// arrays are filled.
 fn gen_dom_hist(rng: &mut Rng) -> Result<Inputs, HarnessError> {
     let surf = gen_surf(rng);
     // tiny surfaces split their surface cache past MAX_SUBDIVISION_NODES on the Rust side
@@ -1206,18 +1246,14 @@ fn gen_dom_hist(rng: &mut Rng) -> Result<Inputs, HarnessError> {
         }
     };
     let vec = [component(rng), component(rng)];
-    let cont = rng.below(14) as u8;
-    // the draw that picked a cache history (no longer modelled), kept so that the seed
-    // stream, and so every case's inputs, stay the same
-    let _ = rng.below(3);
     Ok(Inputs {
         wrap,
         surf,
         op: OpIn::DomCont {
-            cont,
+            cont: rng.below(14) as u8,
             uv,
             vec,
-            off_domain: true,
+            history: 1 + rng.below(3) as u8,
         },
     })
 }
@@ -1262,7 +1298,7 @@ impl UnitDiff for Runner {
             c.unit = self.id().to_string();
             v.push(c);
         }
-        // GetDomainWithContinuity off the domain: their own seed stream
+        // GetDomainWithContinuity after a cache history: their own seed stream
         // (`<unit>:domhist`); named `domhistNNNN`.
         let hist = CaseContext {
             seeds: ctx.seeds.max(DOM_HIST_CASES),

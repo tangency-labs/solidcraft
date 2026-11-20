@@ -27,4 +27,4 @@ pub mod replay;
 
 pub use p1::StepSurface;
 pub use p2::{Surface, SurfaceIntersection, SurfaceKind, TrimCacheSlot, TsectCurveType};
-pub use p6::SurfaceContinuities;
+pub(crate) use p6::SurfaceContinuities;

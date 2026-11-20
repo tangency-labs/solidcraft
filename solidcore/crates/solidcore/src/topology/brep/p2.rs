@@ -3495,15 +3495,13 @@ pub fn mate_lamina_edge_to_surface(
                     .as_ref()
                     .ok_or(null_deref("face without surface"))?
                     .clone_for_evaluation()?;
-                surface.lift_curve_with_context(
+                surface.lift_curve(
                     k,
                     &face_domain,
                     &side_curve,
                     &side_curve.natural_interval(),
                     tol,
                     true,
-                    &mut crate::query::brep::BrepFaceServices::new(b),
-                    Some(CacheObject::Surface(face)),
                 )?
             };
             let new_3d = lifted.curve;

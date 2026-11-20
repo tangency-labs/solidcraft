@@ -750,6 +750,22 @@ pub trait OffsetBrep<O>: ProtoGeometry<O> {
         Ok(cache)
     }
 
+    /// The surface cache as `smsurf_GetSurfaceCache` hands it to a reader of its state
+    /// bits only, without the solve's `GetTree` (`GlobalPointSolve`'s fast-drop face
+    /// test). Backends that keep face caches override this; the default is the
+    /// solve's cache.
+    fn prepare_surface_state_cache(
+        &mut self,
+        k: &Kernel,
+        surface: &Surface,
+        handle: Option<O>,
+    ) -> Result<SurfaceCache<O>>
+    where
+        O: Copy + PartialEq,
+    {
+        self.prepare_surface_solve_cache(k, surface, handle)
+    }
+
     /// Read-only face queries after cache preparation. One service resolves all
     /// owning B-reps in this operation's object space.
     fn prepared_face_queries(&self) -> Option<&dyn FaceQueries<O>> {
@@ -1150,6 +1166,15 @@ impl<O: ClassObject, B: OffsetBrep<O>> SurfaceSolveContext<O> for OffsetSurfaceS
         self.0.prepare_surface_solve_cache(k, surface, handle)
     }
 
+    fn surface_cache_without_get_tree(
+        &mut self,
+        k: &Kernel,
+        surface: &Surface,
+        handle: Option<O>,
+    ) -> Result<SurfaceCache<O>> {
+        self.0.prepare_surface_state_cache(k, surface, handle)
+    }
+
     fn face_queries(&self) -> Option<&dyn FaceQueries<O>> {
         self.0.prepared_face_queries()
     }
@@ -1169,7 +1194,7 @@ fn surface_global_curve_intersect<O: ClassObject + SolutionObject>(
     // `GlobalCurveIntersect` reaches the surface's cache through
     // `smsurf_GetSurfaceCache` where it needs it: its degenerate-curve point solve and
     // coincidence check read the cache before its `GetTree` (the fast-drop face test
-    // reads its state bits, here always of the built cache), so each step asks the context
+    // sees an unbuilt cache's state bits), so each step asks the context
     s.global_curve_intersect_with_context(
         k,
         [Some(curve), Some(surface)],
@@ -5693,15 +5718,13 @@ impl OffsetGeometryCreation {
         let edge_tol = brep.edge_tolerance(edge)?;
         let ext_surface = surface_of(brep, ext_surf_h)?.clone_for_evaluation()?;
         let lifted = ext_surface
-            .lift_curve_with_context(
+            .lift_curve(
                 k,
                 &ext_domain,
                 &Curve::from(uv_curve_extended.clone()),
                 &ext_ivl,
                 edge_tol / 3.0,
                 false,
-                &mut OffsetSurfaceSolveContext(brep),
-                Some(ext_surf_h),
             )?
             .curve;
         let lifted_curve = lifted;

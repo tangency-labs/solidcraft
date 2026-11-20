@@ -21,7 +21,7 @@
 //!   evaluation copy (keeping its owner and cache slot) through the B-rep's
 //!   [`BrepFaceServices`], so its trimmed cache reaches the face as upstream's does
 //!   through `GetFace()`. `smsurf_GetSurfaceCache(this)` before the intersection is that
-//!   context's [`SurfaceSolveContext::build_surface_cache`] (upstream only reads the
+//!   context's [`SurfaceSolveContext::surface_cache_without_get_tree`] (upstream only reads the
 //!   cache's continuity there, and ignores it).
 //! - **Statuses.** A face whose surface section fails is skipped, as upstream's
 //!   `continue`; so is a face whose trimming fails. [`SolidError::Unported`] always
@@ -195,7 +195,7 @@ pub fn surface_planar_section_curves(
     let use_surface_edges = [true, false];
     let found = if let Some((context, handle)) = context {
         // get surface cache (upstream then reads its continuity and ignores it)
-        context.build_surface_cache(k, surface, handle)?;
+        context.surface_cache_without_get_tree(k, surface, handle)?;
         surface.global_surface_intersect_with_context(
             k,
             [handle, None],
@@ -649,16 +649,7 @@ fn force_uv_curves(
         }
 
         // skip UVCurves whose 3D Approximations exceed tolerance
-        let lifted = surface.lift_curve_with_context(
-            k,
-            uv_domain,
-            &drop,
-            &drop_ivl,
-            face_tol / 3.0,
-            true,
-            &mut services,
-            handle,
-        )?;
+        let lifted = surface.lift_curve(k, uv_domain, &drop, &drop_ivl, face_tol / 3.0, true)?;
         if lifted.max_approx_dev > face_tol * 10.0 {
             continue;
         }

@@ -174,14 +174,16 @@ fn prepare_surface_cache(
     b: &mut Brep,
     face: FaceId,
 ) -> Result<SurfaceCache<CacheObject>> {
-    face_surface_cache(k, b, face)
+    face_surface_cache(k, b, face, true)
 }
 
 /// `smsurf_GetSurfaceCache` of `face`'s surface: the trimmed cache its factory makes
-/// (`CacheMakeOrValidate`), with its tree then built (a solve's `GetTree`, which creates
-/// the face's UV trim curves and implants its boundary). A reader of the cache's state
-/// bits alone (`GlobalPointSolve`'s fast-drop face test, no `GetTree` upstream) gets it
-/// built too: upstream's bits there depend on whether an earlier call built the tree.
+/// (`CacheMakeOrValidate`), with its tree then built when `get_tree` (a solve's
+/// `GetTree`, which creates the face's UV trim curves and implants its boundary).
+/// Without `get_tree`, a cache the factory leaves without tree (made during a Boolean
+/// operation) keeps the state bits the `SmTrimSrfCache` constructor set, as upstream's
+/// until its first `GetTree`. (Upstream reuses a cache an earlier call built, with the
+/// built tree's bits; the port keeps no record of that.)
 ///
 /// Deviation (WR-732, #2503), only with
 /// [`crate::kernel::UpstreamFixes::brep_ray_classifies_current_trims`]: the tree of a
@@ -192,7 +194,12 @@ fn prepare_surface_cache(
 /// [`SolidError::FaceTrimsUnavailable`]: the untrimmed surface would give a wrong
 /// answer. So is a face whose loops are open mid-edit: it has no boundary to implant
 /// (#2624).
-fn face_surface_cache(k: &Kernel, b: &mut Brep, face: FaceId) -> Result<SurfaceCache<CacheObject>> {
+fn face_surface_cache(
+    k: &Kernel,
+    b: &mut Brep,
+    face: FaceId,
+    get_tree: bool,
+) -> Result<SurfaceCache<CacheObject>> {
     let surface = b
         .face(face)?
         .surface
@@ -232,9 +239,11 @@ fn face_surface_cache(k: &Kernel, b: &mut Brep, face: FaceId) -> Result<SurfaceC
     }
     // A Boolean operation can defer the factory's tree build until GetTree. A plain
     // SmSurfaceCache (the factory's fallback) runs its own GetTree: no face boundary.
-    cache
-        .get_tree_with_face(k, &mut mapped)
-        .map_err(trims_failed)?;
+    if get_tree {
+        cache
+            .get_tree_with_face(k, &mut mapped)
+            .map_err(trims_failed)?;
+    }
     Ok(cache.into_base())
 }
 
@@ -500,57 +509,87 @@ mod tests {
         );
     }
 
-    /// The face cache `GlobalPointSolve`'s fast-drop face test reads has its tree and
-    /// the same state bits whether it is first asked for during a Boolean operation or
-    /// not (the tree build turns point testing off on a face without UV trim curves:
-    /// `blend.fillet_executive_p3` rollover-404), and asking again changes nothing.
+    /// During a Boolean operation `smsurf_GetSurfaceCache` defers the tree build
+    /// (`CacheMakeOrValidate`), so `GlobalPointSolve`'s fast-drop face test reads the
+    /// `SmTrimSrfCache` constructor's state bits until a solve's `GetTree` builds the
+    /// tree, whose build turns point testing off on a face without loops (the
+    /// `blend.fillet_executive_p3` rollover-404 case, a merged face without loop uses).
+    /// On a full torus whose face's loops are unlinked from it (`RemoveLoop`: a face
+    /// without loop uses, as the merged face mid-Boolean is) the context reader
+    /// ([`SurfaceSolveContext::surface_cache_without_get_tree`]) and the live reader
+    /// (`live_face_fast_drop_test`) both see point testing on while the tree is
+    /// deferred, as upstream does; once a solve's `GetTree` has built the context's
+    /// kept cache, the context reader sees it off.
     #[test]
-    fn fast_drop_face_cache_is_the_same_whatever_ran_before() {
-        let bits = |doing_boolean: bool| {
-            let mut k = Kernel::default();
-            let mut b = crate::primitive::api_primitives::create_box(
-                &mut k,
+    fn fast_drop_point_test_on_a_face_without_loops_while_the_tree_is_deferred() {
+        let mut k = Kernel::default();
+        // a torus whose single face has its loops unlinked
+        let loopless = |k: &mut Kernel| {
+            let mut b = crate::primitive::api_primitives::create_torus(
+                k,
                 crate::math::Point3::ZERO,
                 10.0,
-                10.0,
-                10.0,
+                2.0,
             )
             .unwrap();
-            let face = crate::topology::brep::p1::faces(&b, None)
+            let faces = crate::topology::brep::p1::faces(&b, None).unwrap();
+            assert_eq!(faces.len(), 1);
+            let face = faces[0];
+            for l in crate::topology::face::p2::loops(&b, face, false, None).unwrap() {
+                crate::topology::face::p1::remove_loop(&mut b, face, l).unwrap();
+            }
+            assert!(crate::topology::face::p2::loops(&b, face, false, None)
                 .unwrap()
-                .into_iter()
-                .next()
-                .unwrap();
-            let surface = b
-                .face(face)
-                .unwrap()
-                .surface
-                .as_ref()
-                .unwrap()
-                .clone_for_evaluation()
-                .unwrap();
-            k.context.set_doing_boolean(doing_boolean);
-            let handle = Some(CacheObject::Surface(face));
-            let mut services = BrepFaceServices::new(&mut b);
-            let first = services.build_surface_cache(&k, &surface, handle).unwrap();
-            k.context.set_doing_boolean(false);
-            let again = services.build_surface_cache(&k, &surface, handle).unwrap();
-            let of = |c: &SurfaceCache<CacheObject>| {
-                (
-                    c.tree().is_some(),
-                    c.is_trimmed(),
-                    c.point_test_enabled,
-                    c.have_t_surface_cache,
-                    c.u_continuities().to_vec(),
-                    c.v_continuities().to_vec(),
-                )
-            };
-            assert_eq!(of(&first), of(&again));
-            of(&first)
+                .is_empty());
+            (b, face)
         };
-        let outside = bits(false);
-        assert!(outside.0, "the fast drop's cache has its tree");
-        assert_eq!(bits(true), outside);
+        let (mut b, face) = loopless(&mut k);
+        let surface = b
+            .face(face)
+            .unwrap()
+            .surface
+            .as_ref()
+            .unwrap()
+            .clone_for_evaluation()
+            .unwrap();
+        k.context.set_doing_boolean(true);
+        let handle = Some(CacheObject::Surface(face));
+        let on = |c: &SurfaceCache<CacheObject>| {
+            c.is_trimmed() && c.point_test_enabled && !c.face_was_modified
+        };
+
+        // the live reader, on a B-rep made the same way
+        let (mut live_b, live_face) = loopless(&mut Kernel::default());
+        assert_eq!(live_face, face);
+        let mut live_on = None;
+        let uv = Point2::new(1.0, 1.0);
+        crate::intersect::point_class::live_face_fast_drop_test(
+            &k,
+            &mut live_b,
+            face,
+            &mut live_on,
+            uv,
+            1e-6,
+        )
+        .unwrap();
+
+        let mut services = BrepFaceServices::new(&mut b);
+        let state = services
+            .surface_cache_without_get_tree(&k, &surface, handle)
+            .unwrap();
+        assert!(state.tree().is_none());
+        assert!(on(&state));
+        assert_eq!(live_on, Some(on(&state)));
+
+        // a solve's GetTree builds the kept cache: point testing off on this face
+        let built = services.build_surface_cache(&k, &surface, handle).unwrap();
+        assert!(built.tree().is_some());
+        assert!(!built.point_test_enabled);
+        let state = services
+            .surface_cache_without_get_tree(&k, &surface, handle)
+            .unwrap();
+        assert!(state.tree().is_some());
+        assert!(!on(&state));
     }
 
     #[test]

@@ -99,8 +99,10 @@
 //!   adapter, instead of silently building a plain cache. [`SurfaceCache::subdivide_node`]
 //!   does not call `GetTree` (it needs a built tree and fails without one).
 //! - **Continuity arrays.** `BuildTreeBase` takes them from the surface's memo
-//!   ([`Surface::continuities`]); a cache without tree gets the same arrays on request
-//!   ([`SurfaceCache::fill_continuities`]), where upstream's stay empty until `GetTree`.
+//!   ([`Surface::continuities`]). The readers that call no `GetTree` upstream
+//!   (`GetDomainWithContinuity`, `LiftCurve`, `FindBoundaryStartPoints`) read that memo
+//!   instead of a cache's arrays, which stay empty until the tree is built, as
+//!   upstream's.
 
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
@@ -1054,24 +1056,6 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         self.build_tree_base_nodes(k, u_count, v_count, tester)
     }
 
-    /// Gives a cache whose continuity arrays are not set yet (its tree is not built: it
-    /// was made during a Boolean operation) the arrays of its surface
-    /// ([`Surface::continuities`]), the ones its tree build sets. Upstream's arrays stay
-    /// empty until `GetTree`; here a reader of them gets the same answer whether the
-    /// tree is built or not. Arrays already set are kept.
-    ///
-    /// # Errors
-    ///
-    /// Those of [`Surface::continuities`] ([`SolidError::Unported`] for kinds without
-    /// iso curves).
-    pub fn fill_continuities(&mut self, k: &Kernel) -> Result<()> {
-        if self.u_continuities().is_empty() && self.v_continuities().is_empty() {
-            let conts = self.surface().continuities(k)?;
-            self.set_continuities(conts.u.clone(), conts.v.clone());
-        }
-        Ok(())
-    }
-
     /// The rest of [`SurfaceCache::build_tree_base`] once the continuities are set.
     fn build_tree_base_nodes(
         &mut self,
@@ -1315,8 +1299,6 @@ fn half_box(
     }
 }
 
-/// `SmSurface::CalculateContinuities(eSurfParam, ..)`: the continuity at every unique
-/// knot of the surface in `dir`.
 /// `sm_InitNurbSurfaceMemory` with the sizes of `like` on zero-filled block memory.
 fn zeroed_like(like: &NurbSurface) -> Result<NurbSurface> {
     let (p, q) = like.degrees();
