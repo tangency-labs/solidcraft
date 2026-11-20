@@ -1585,6 +1585,30 @@ mod importers {
     }
 
     #[test]
+    fn importer_options_without_conditions_validate_before_entering_wasm() {
+        let (mut s, root) = installed("plain-options", &[("smp", &["smp"], false)]);
+        let mut manifest = importer_manifest("smp", &["smp"], false);
+        manifest["runtime"]["entries"][0]["input_schema"] = json!({"type":"object","required":["width"],"properties":{
+            "width":{"type":"number","minimum":1,"maximum":10}
+        }});
+        std::fs::write(root.join("plugins/smp/plugin.json"), manifest.to_string()).unwrap();
+        let file = put(&root, "bracket.smp", &design());
+        let mut importer = importer_for(&s, &file, None).unwrap().unwrap();
+        let before = s.doc.to_json();
+        for options in [json!({"width":0}), json!({}), json!({"width":"2"}), json!({"width":11})] {
+            let error = import_file(&mut s, &importer, &file, &options).unwrap_err();
+            assert!(matches!(error.host_error(), Some(HostError::InvalidInput { field, .. }) if field == "params.width"), "{error}");
+            assert_eq!(s.doc.to_json(), before);
+        }
+        assert!(import_file(&mut s, &importer, &file, &json!({"width":2})).is_ok());
+        // A cached catalog schema must not weaken the schema of the package being executed.
+        importer.input_schema = json!({});
+        let error = import_file(&mut s, &importer, &file, &json!({"width":0})).unwrap_err();
+        assert!(matches!(error.host_error(), Some(HostError::InvalidInput { field, .. }) if field == "params.width"), "{error}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn importer_options_omit_hidden_fields_before_entering_wasm() {
         let (mut s, root) = conditional_importer("conditional-hidden");
         // The guest traps unless the serialized options contain only {"mode":false}.

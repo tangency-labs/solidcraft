@@ -926,7 +926,6 @@ struct HookState {
     submitted: Option<u64>,
     pending: Option<PendingHook>,
     note: bool,
-    last_ready: Option<Value>,
 }
 
 fn hook_values(fields: &[(Field, Input)]) -> Value {
@@ -979,7 +978,6 @@ fn apply_hook_reply(dialog: &mut EntryDialog, generation: u64, update: solidcraf
     }
     refresh_conditions(fields);
     hook.observed = fields.iter().map(|(_, i)| i.clone()).collect();
-    hook.last_ready = params(fields).ok();
     true
 }
 
@@ -990,7 +988,8 @@ fn poll_hooks(app: &mut SolveApp, ctx: &egui::Context) {
         let Some(hook) = &mut dialog.hook else { continue };
         let Some(fields) = &mut dialog.fields else { continue };
         let values: Vec<Input> = fields.iter().map(|(_, i)| i.clone()).collect();
-        if values != hook.observed || dialog.session == app.session.uid && !Arc::ptr_eq(&hook.document, &app.session.doc) {
+        let document_changed = dialog.session == app.session.uid && !Arc::ptr_eq(&hook.document, &app.session.doc);
+        if values != hook.observed || document_changed {
             hook.document = app.session.doc.clone();
             hook.generation = hook.generation.wrapping_add(1);
             hook.changed_at = now;
@@ -999,8 +998,9 @@ fn poll_hooks(app: &mut SolveApp, ctx: &egui::Context) {
             for (field, input) in fields.iter_mut() {
                 field.hook = None;
                 field.controls = None;
-                if !field.edited
-                    && let Some(baseline) = field.hook_baseline.take()
+                if let Some(baseline) = field.hook_baseline.take()
+                    && !field.edited
+                    && !(document_changed && matches!(&baseline, Input::Selection(_)))
                 {
                     *input = baseline;
                 }
@@ -1014,9 +1014,6 @@ fn poll_hooks(app: &mut SolveApp, ctx: &egui::Context) {
             }
             refresh_conditions(fields);
             hook.observed = fields.iter().map(|(_, i)| i.clone()).collect();
-        }
-        if let Ok(ready) = params(fields) {
-            hook.last_ready = Some(ready);
         }
         let completed = hook.pending.as_ref().and_then(|(generation, reply)| match reply.try_recv() {
             Ok(reply) => Some((*generation, reply)),
@@ -1122,7 +1119,6 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
         submitted: None,
         pending: None,
         note: false,
-        last_ready: fields.as_ref().and_then(|f| params(f).ok()),
     });
     app.plugin_menu.dialogs.push(EntryDialog {
         id,
@@ -1342,15 +1338,7 @@ impl EntryDialog {
             return Err(solidcraft_ui_text::format("ui.plugin_dialog_needs_groups", &[("groups", &missing.join(", "))]));
         }
         let Some(fields) = &self.fields else { return Err(app.tr("ui.plugin_dialog_unsupported").into()) };
-        let ready = params(fields);
-        if ready.is_err()
-            && let Some(hook) = &self.hook
-            && hook.pending.is_some()
-            && let Some(last) = &hook.last_ready
-        {
-            return Ok(last.clone());
-        }
-        ready.map_err(|problem| match problem {
+        params(fields).map_err(|problem| match problem {
             Problem::Missing(label) => solidcraft_ui_text::format("ui.plugin_dialog_missing", &[("field", &label)]),
             Problem::Invalid(label) => solidcraft_ui_text::format("ui.plugin_dialog_invalid", &[("field", &label)]),
         })

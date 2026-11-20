@@ -351,8 +351,9 @@ write grants, in a fresh sandbox. Its independent budgets are at most 10,000,000
 memory and 250 ms, further capped by the entry's approved runtime limits and host ceilings.
 Compilation and execution happen on the command worker, outside the window thread.
 
-The dialog debounces changes for 120 ms. It remains interactive while waiting, retains its last
-validated input for Run, and drops replies from older generations. A user's edited field is
+The dialog debounces changes for 120 ms. It remains interactive while waiting and drops replies
+from older generations. Run uses the current fields: valid inputs remain runnable while the hook
+is pending, and an invalid or missing value keeps Run off. A user's edited field is
 never overwritten by the hook's `value` or `default`. A timeout, trap or error leaves the
 declarative fields in place with a quiet note.
 

@@ -35,6 +35,19 @@ pub fn declarative(schema: &Value, values: &Value, protected: &BTreeSet<String>)
             values.insert(key.clone(), value.clone());
         }
     }
+    // Unannotated schemas have no conditional order. Their ordinary defaults still
+    // belong to the shared input preparation, without replacing caller-owned values.
+    if let Some(properties) = schema.get("properties").and_then(Value::as_object) {
+        for (key, property) in properties {
+            if !rules.fields.contains_key(key)
+                && !protected.contains(key)
+                && !values.contains_key(key)
+                && let Some(default) = property.get("default")
+            {
+                values.insert(key.clone(), default.clone());
+            }
+        }
+    }
     Ok(Value::Object(values))
 }
 

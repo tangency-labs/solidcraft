@@ -60,6 +60,26 @@ fn hook_schema() -> Value {
 }
 
 #[test]
+fn dialog_hook_applies_unconditional_schema_defaults_without_overwriting_inputs() {
+    let schema = json!({"type":"object","required":["width"],"properties":{
+        "width":{"type":"number","default":3,"minimum":1}
+    }});
+    assert!(conditions::InputConditions::parse(&schema).unwrap().order.is_empty());
+    for reply in [None, Some("{}"), Some("not JSON")] {
+        let update = dialog::apply(&schema, &json!({}), &BTreeSet::new(), reply, true).unwrap();
+        assert_eq!(update.values, json!({"width":3}));
+        assert_eq!(update.warning.is_some(), reply == Some("not JSON"));
+        let update = dialog::apply(&schema, &json!({"width":12}), &BTreeSet::from(["width".into()]), reply, true).unwrap();
+        assert_eq!(update.values, json!({"width":12}));
+    }
+    let update = dialog::apply(&schema, &json!({"width":7}), &BTreeSet::new(), Some("{}"), true).unwrap();
+    assert_eq!(update.values, json!({"width":7}));
+    // An edited, cleared field is absent from a partial form's values but remains protected.
+    let update = dialog::apply(&schema, &json!({}), &BTreeSet::from(["width".into()]), Some("{}"), false).unwrap();
+    assert_eq!(update.values, json!({}));
+}
+
+#[test]
 fn dialog_hook_defaults_and_narrowed_choices_share_input_validation() {
     let patch = r#"{"width":{"default":24},"size":{"choices":["large"],"hint":"Available locally"}}"#;
     let update = dialog::apply(&hook_schema(), &json!({}), &BTreeSet::new(), Some(patch), true).unwrap();

@@ -281,6 +281,76 @@ fn dialog_hook_selection_defaults_preserve_viewport_edits() {
 }
 
 #[test]
+fn dialog_hook_discards_selection_baselines_when_the_document_changes() {
+    let schema = json!({"type":"object","properties":{
+        "bodies":{"type":"array","items":{"type":"string"},"maxItems":1},
+        "width":{"type":"number","default":1}
+    }});
+    for changed_document in [false, true] {
+        let mut h = hook_dialog_harness();
+        let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+        dialog.fields = form(&schema);
+        dialog.hook.as_mut().unwrap().schema = schema.clone();
+        let (_, input) = dialog.fields.as_mut().unwrap().iter_mut().find(|(f, _)| f.key == "bodies").unwrap();
+        *input = Input::Selection(vec![Sel::Body { name: "prefilled-a".into() }]);
+        let update = solidcraft_engine::plugin::dialog::apply(
+            &schema,
+            &json!({"bodies":["prefilled-a"],"width":1}),
+            &Default::default(),
+            Some(r#"{"bodies":{"value":["computed-b"]},"width":{"value":24}}"#),
+            false,
+        )
+        .unwrap();
+        assert!(apply_hook_reply(dialog, 0, update));
+        dialog.picked_on = Some(h.app.session.doc.clone());
+        let (send, receive) = std::sync::mpsc::channel();
+        dialog.hook.as_mut().unwrap().pending = Some((0, receive));
+        if changed_document {
+            Arc::make_mut(&mut h.app.session.doc).name = "Changed design".into();
+            sync_picks(&mut h.app);
+        } else {
+            set_input(h.app.plugin_menu.dialogs.last_mut().unwrap().fields.as_mut().unwrap(), "width", Input::Number(12.0));
+        }
+        poll_hooks(&mut h.app, &h.ctx);
+        let dialog = h.app.plugin_menu.dialog().unwrap();
+        let values = hook_values(dialog.fields.as_ref().unwrap());
+        let expected = (!changed_document).then(|| json!(["prefilled-a"]));
+        assert_eq!(values.get("bodies"), expected.as_ref(), "no old selection may be sent to the next hook");
+        assert_eq!(values["width"], if changed_document { 1.0 } else { 12.0 }, "ordinary field baselines still restore");
+        assert!(dialog.fields.as_ref().unwrap().iter().filter(|(f, _)| f.key == "bodies").all(|(f, _)| f.hook_baseline.is_none()));
+        assert!(dialog.hook.as_ref().unwrap().generation > 0);
+        drop(send);
+    }
+}
+
+#[test]
+fn dialog_hook_pending_rejects_invalid_current_inputs_instead_of_cached_parameters() {
+    let mut h = hook_dialog_harness();
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    set_input(dialog.fields.as_mut().unwrap(), "width", Input::Number(12.0));
+    poll_hooks(&mut h.app, &h.ctx);
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    let (send, receive) = std::sync::mpsc::channel();
+    let generation = dialog.hook.as_ref().unwrap().generation;
+    dialog.hook.as_mut().unwrap().pending = Some((generation, receive));
+    let id = dialog.id;
+    let queued = h.app.control_held.len();
+    for input in [Input::Typed(String::new()), Input::Typed("invalid".into()), Input::Number(0.0)] {
+        set_input(h.app.plugin_menu.dialogs.last_mut().unwrap().fields.as_mut().unwrap(), "width", input);
+        assert!(run_dialog(&mut h.app, id).is_err(), "invalid current fields must not submit the cached width");
+        assert_eq!(h.app.control_held.len(), queued);
+        assert!(h.app.plugin_menu.dialog().unwrap().running.is_none());
+    }
+    set_input(h.app.plugin_menu.dialogs.last_mut().unwrap().fields.as_mut().unwrap(), "width", Input::Number(18.0));
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap()["width"], 18.0);
+    run_dialog(&mut h.app, id).unwrap();
+    assert_eq!(h.app.control_held.len(), queued + 1);
+    assert_eq!(h.app.control_held.back().unwrap().params["params"]["params"]["width"], 18.0);
+    assert!(h.app.plugin_menu.dialog().unwrap().running.is_some());
+    drop(send);
+}
+
+#[test]
 fn dialog_hook_pending_accepts_widget_edits_and_drops_the_old_worker_reply() {
     let mut h = hook_dialog_harness();
     let (send, receive) = std::sync::mpsc::channel();
