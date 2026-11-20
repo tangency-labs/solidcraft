@@ -137,6 +137,10 @@ pub(super) struct GpuCull {
     words: [u32; 8],
     /// The view the placements were last culled for.
     culled_for: Option<([[f32; 4]; 4], [f32; 2])>,
+    /// Whether the last cull's counts are still to be copied back (the readback was busy).
+    counts_pending: bool,
+    /// The device's workgroups per dispatch dimension.
+    max_groups: u32,
     readback: wgpu::Buffer,
     state: Arc<AtomicU8>,
 }
@@ -220,7 +224,9 @@ impl GpuCull {
         }
         // The see-through placements go at the end of the triangles' half.
         let cpu_entries: Vec<(usize, usize, usize)> = tri_entries.iter().enumerate().skip(gpu_tri).map(|(e, x)| (e, x.0, x.1)).collect();
+        // A draw's levels need not be adjacent (entries are grouped by flat shading too).
         let mut cpu_draws: Vec<usize> = cpu_entries.iter().map(|e| e.1).collect();
+        cpu_draws.sort_unstable();
         cpu_draws.dedup();
         let cpu_placements: usize = cpu_draws.iter().filter_map(|i| draws.get(*i)).map(|d| d.placements.len() / INSTANCE_SIZE).sum();
         let cpu_from = u32::try_from(n - cpu_placements).ok()?;
@@ -228,7 +234,7 @@ impl GpuCull {
         let bytes = |words: &[u32]| -> Vec<u8> { words.iter().flat_map(|w| w.to_le_bytes()).collect() };
         let half = u64::try_from(n * INSTANCE_SIZE).ok()?;
         let limits = device.limits();
-        let largest = [scene.len() as u64 * 4, half * 2, n as u64 * 16];
+        let largest = [scene.len() as u64 * 4, args.len() as u64 * 4, half * 2, n as u64 * 16];
         if largest.iter().any(|b| *b > limits.max_storage_buffer_binding_size || *b > limits.max_buffer_size) {
             return None;
         }
@@ -239,6 +245,9 @@ impl GpuCull {
         let storage = wgpu::BufferUsages::STORAGE;
         let scene_buffer = super::buffer_init(device, "sc_cull_scene", &bytes(&scene), storage)?;
         let args_reset = bytes(&args);
+        // A buffer or bind group the device refuses leaves the scene to the CPU cull, its own
+        // buffers untouched.
+        let scopes = crate::error_scopes(device);
         let args_buffer = super::buffer_init(
             device,
             "sc_cull_args",
@@ -280,6 +289,10 @@ impl GpuCull {
                 wgpu::BindGroupEntry { binding: 4, resource: picks.as_entire_binding() },
             ],
         });
+        if let Some(reason) = crate::caught(scopes) {
+            log::warn!("instanced placements are culled on the CPU: {reason}");
+            return None;
+        }
         let edge_out_at = u32::try_from(n * PLACEMENT_WORDS).ok()?;
         indirect.cull_on_gpu(args_buffer.clone(), out.clone(), half);
         if let Some(e) = edges {
@@ -299,6 +312,8 @@ impl GpuCull {
             edge_segments: edge_entries.iter().map(|e| e.3).collect(),
             words,
             culled_for: None,
+            counts_pending: false,
+            max_groups: limits.max_compute_workgroups_per_dimension.max(1),
             readback,
             state: Arc::new(AtomicU8::new(IDLE)),
         })
@@ -333,6 +348,7 @@ impl GpuCull {
     ) {
         self.collect(indirect, edges);
         if !cpu_changed && self.culled_for == Some((*vp, size)) {
+            self.copy_counts(encoder);
             return;
         }
         self.culled_for = Some((*vp, size));
@@ -377,7 +393,7 @@ impl GpuCull {
 
         let n = self.words[0];
         let groups = n.div_ceil(GROUP);
-        let x = groups.clamp(1, 65_535);
+        let x = groups.clamp(1, self.max_groups);
         let y = groups.div_ceil(x).max(1);
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("sc_cull"), timestamp_writes: None });
@@ -389,9 +405,17 @@ impl GpuCull {
             pass.set_pipeline(&self.kernel.place);
             pass.dispatch_workgroups(x, y, 1);
         }
-        if self.state.load(Ordering::Acquire) == IDLE {
+        self.counts_pending = true;
+        self.copy_counts(encoder);
+    }
+
+    /// Copy the last cull's counts back for the statistics, in `encoder`, once the readback is
+    /// free: a cull while it was busy is copied in a later frame, even if the view stays put.
+    fn copy_counts(&mut self, encoder: &mut wgpu::CommandEncoder) {
+        if self.counts_pending && self.state.load(Ordering::Acquire) == IDLE {
             encoder.copy_buffer_to_buffer(&self.args, 0, &self.readback, 0, self.args_reset.len() as u64);
             self.state.store(COPIED, Ordering::Release);
+            self.counts_pending = false;
         }
     }
 
@@ -455,7 +479,11 @@ mod tests {
         };
         use solidcore_record::Vec3;
         use std::sync::{Arc, Mutex};
-        let Ok((_, device, queue)) = crate::open_headless(crate::test_env::policy()) else { return };
+        let (_, device, queue) = match crate::open_headless(crate::test_env::policy()) {
+            Ok(opened) => opened,
+            Err(error) if crate::test_env::skip_unless_required(crate::test_env::required(), &error) => return,
+            Err(error) => panic!("required GPU unavailable: {error}"),
+        };
         if !super::supported(&device) {
             return;
         }
