@@ -2849,7 +2849,7 @@ fn public_geometry_groups_a_skeletons_references_and_follows_deletes() {
     assert_eq!(s.doc.public_geometry.len(), 1, "a refusal publishes nothing");
 
     // It is saved and read back, and a skeleton that shares geometry stays a skeleton.
-    let reopened = solidcraft_io::read_design(&solidcraft_io::write_design(&s.doc)).unwrap();
+    let reopened = solidcraft_io::read_design(&solidcraft_io::write_design(&s.doc).unwrap()).unwrap();
     assert_eq!(reopened.public_geometry, s.doc.public_geometry);
     assert!(s.execute("component.set_kind", &json!({"component": skeleton, "kind": "normal"})).is_err());
     assert!(!s.doc.is_skeleton(part));

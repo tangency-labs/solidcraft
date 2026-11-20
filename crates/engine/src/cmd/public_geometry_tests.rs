@@ -142,7 +142,7 @@ fn a_geometry_copy_refuses_what_it_cannot_take_and_follows_its_features() {
     assert!(part.execute("geometry.update", &json!({"copies": ["Nobody"]})).is_err());
 
     // The copy is saved and read back, and it lets go of a deleted feature; its last takes it away.
-    let reopened = solidcraft_io::read_design(&solidcraft_io::write_design(&part.doc)).unwrap();
+    let reopened = solidcraft_io::read_design(&solidcraft_io::write_design(&part.doc).unwrap()).unwrap();
     assert_eq!(reopened.geometry_copies, part.doc.geometry_copies);
     run(&mut part, "timeline.delete", json!({"feature": "Deck"}));
     assert_eq!(part.doc.geometry_copies[0].items.len(), 1);
