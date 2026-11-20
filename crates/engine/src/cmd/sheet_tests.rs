@@ -9731,3 +9731,143 @@ fn a_spline_sheet_with_a_notch_at_its_edge_folds() {
         assert!((folded - flat - bend).abs() < 1e-3, "depth {depth}: the fold adds {} not {bend}", folded - flat);
     }
 }
+
+/// A 400 x 300 panel, 0.7 thick, R 0.7, hem gap 1.2, K 0.5 (so the folded sheet holds its flat
+/// area times the thickness), as in #19706.
+fn hem_panel(s: &mut Session) {
+    run(
+        s,
+        "sheet.manage_rules",
+        json!({"name": "S", "thickness": "0.7 mm", "bend_radius": "0.7 mm", "k_factor": "0.5", "hem_gap": "1.2 mm", "active": true}),
+    );
+    run(s, "sketch.create", json!({"plane": "XY", "name": "P"}));
+    run(s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [400, 300]}));
+    run(s, "sketch.finish", json!({}));
+    run(s, "sheet.flange", json!({"base": "P", "name": "Panel", "body_name": "Panel"}));
+}
+
+/// Where the metal of one flat panel of the sheet lies inside another's, near the points `at`:
+/// sampled `step` apart at five depths through each panel's thickness, within `within` of each
+/// point (in the panel's own chart), each such point tested against every other flat panel. The
+/// volume can't see this: the faces of two panels that pass through each other still bound the
+/// sum of their volumes.
+fn panel_overlaps(s: &Session, at: &[[f64; 3]], within: f64, step: f64) -> Vec<String> {
+    use solidcraft_develop::prelude::*;
+    let sh = &s.model.state().surface_sheets[0];
+    let t = sh.thickness;
+    let places = sh.folded_places().expect("the sheet folds");
+    let inside = |q: solidcore_record::Vec2, poly: &[solidcore_record::Vec2]| {
+        let n = poly.len();
+        let mut odd = false;
+        for k in 0..n {
+            let (a, b) = (poly[k], poly[(k + 1) % n]);
+            let d = b - a;
+            let u = ((q - a).dot(d) / d.dot(d).max(1e-30)).clamp(0.0, 1.0);
+            if (a + d * u).dist(q) < 1e-6 {
+                return false;
+            }
+            if (a.y > q.y) != (b.y > q.y) && q.x < a.x + (q.y - a.y) / (b.y - a.y) * (b.x - a.x) {
+                odd = !odd;
+            }
+        }
+        odd
+    };
+    let flat: Vec<(usize, solidcraft_develop::Rigid3, Vec<solidcore_record::Vec2>)> = sh
+        .sheet
+        .panels
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| matches!(p.surface, solidcraft_develop::Surface::Plane))
+        .filter_map(|(i, p)| Some((i, places.get(i).copied().flatten()?, p.region.outer.segs.iter().map(|g| g.start()).collect())))
+        .collect();
+    let mut out = Vec::new();
+    for (i, pi, poly) in &flat {
+        for c in at {
+            let o = pi.inverse().point(solidcore_record::Vec3::new(c[0], c[1], c[2]));
+            let n = (within / step).ceil() as i64;
+            for (u, v) in (-n..=n).flat_map(|u| (-n..=n).map(move |v| (u, v))) {
+                let q = solidcore_record::Vec2::new(o.x + (u as f64 + 0.5) * step, o.y + (v as f64 + 0.5) * step);
+                if !inside(q, poly) {
+                    continue;
+                }
+                for depth in [0.05, 0.25, 0.5, 0.75, 0.95] {
+                    let w = pi.point(solidcore_record::Vec3::new(q.x, q.y, t * depth));
+                    for (k, pk, other) in &flat {
+                        let l = pk.inverse().point(w);
+                        if k != i && l.z > 1e-6 && l.z < t - 1e-6 && inside(solidcore_record::Vec2::new(l.x, l.y), other) {
+                            out.push(format!("panel {i} at ({:.3}, {:.3}, {:.3}) is inside panel {k}", w.x, w.y, w.z));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The base's four corners, for [`panel_overlaps`].
+const HEM_PANEL_CORNERS: [[f64; 3]; 4] = [[0.0, 0.0, 0.0], [400.0, 0.0, 0.0], [0.0, 300.0, 0.0], [400.0, 300.0, 0.0]];
+
+/// Hems on edges that meet at a corner (#19706) build: each is the sheet carried on over its
+/// edge, and two of them close the corner where they meet, mitred on the line halving it, the
+/// rule's corner gap apart, as two flanges' returns do. Before, each was a strip the length of its
+/// edge, the two legs lay on each other in the corner, and the sew refused them ("ambiguous edge
+/// contact"). That holds for hems in one feature or two, on two, three or four edges, and for
+/// hems whose legs overlap in height without lying in one plane (gaps 1.2 and 1.4 or 1.6, less
+/// than a thickness apart). The folded sheet holds its flat area times the thickness (K 0.5), no
+/// panel's metal lies in another's at any corner, and it unfolds and refolds.
+#[test]
+fn hems_on_edges_that_meet_at_a_corner_build_mitred_at_the_corner() {
+    let (left, top, right, bottom) = (json!([0, 150, 0.7]), json!([200, 300, 0.7]), json!([400, 150, 0.7]), json!([200, 0, 0.7]));
+    let cases: Vec<(&str, Vec<Value>)> = vec![
+        ("two edges, one feature", vec![json!({"edges": [left, top], "length": 12})]),
+        ("two edges, two features", vec![json!({"edges": [left], "length": 12}), json!({"edges": [top], "length": 12})]),
+        ("three edges", vec![json!({"edges": [left, top, right], "length": 12})]),
+        ("four edges", vec![json!({"edges": [left, top, right, bottom], "length": 12})]),
+        ("gaps 1.2 and 1.4", vec![json!({"edges": [left], "length": 12}), json!({"edges": [top], "length": 12, "gap": 1.4})]),
+        ("gaps 1.2 and 1.6", vec![json!({"edges": [left], "length": 12}), json!({"edges": [top], "length": 12, "gap": 1.6})]),
+    ];
+    for (name, hems) in cases {
+        let mut s = Session::default();
+        hem_panel(&mut s);
+        for hem in hems {
+            run(&mut s, "sheet.hem", hem);
+        }
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "{name}: {:?}", s.model.results);
+        let overlaps = panel_overlaps(&s, &HEM_PANEL_CORNERS, 15.0, 0.25);
+        assert!(overlaps.is_empty(), "{name}: {} points, first {:?}", overlaps.len(), overlaps.first());
+        let folded = volume(&mut s);
+        run(&mut s, "sheet.unfold", json!({}));
+        let area: f64 = s.model.state().surface_sheets[0].shown().regions.iter().map(|r| r.area()).sum();
+        assert!(rel(folded, area * 0.7) < 1e-9, "{name}: folded {folded} vs flat {}", area * 0.7);
+        run(&mut s, "sheet.refold", json!({}));
+        assert!((volume(&mut s) - folded).abs() < 1e-6 * folded, "{name}: refolds");
+    }
+}
+
+/// Hems at a corner whose metal can't meet keep their square ends, each the length of its edge:
+/// one folded under and one over, or their gaps (1.2 and 3) more than a thickness apart. By hand
+/// (T 0.7, length 12, R = gap / 2): each mm of hem holds the half ring π/2·((R + T)² − R²) and
+/// the leg (12 − R − T)·T, on edges 300 and 400 long, beside the 400 x 300 x 0.7 base.
+#[test]
+fn hems_at_a_corner_whose_metal_cant_meet_keep_their_square_ends() {
+    let per_mm = |gap: f64| {
+        let r = gap / 2.0;
+        PI / 2.0 * ((r + 0.7f64).powi(2) - r * r) + (12.0 - r - 0.7) * 0.7
+    };
+    let cases = [("one under, one over", json!({"flip": true}), 1.2), ("gaps 1.2 and 3", json!({"gap": 3}), 3.0)];
+    for (name, extra, gap) in cases {
+        let mut s = Session::default();
+        hem_panel(&mut s);
+        run(&mut s, "sheet.hem", json!({"edges": [[0, 150, 0.7]], "length": 12}));
+        let mut top = json!({"edges": [[200, 300, 0.7]], "length": 12});
+        for (k, v) in extra.as_object().unwrap() {
+            top[k] = v.clone();
+        }
+        run(&mut s, "sheet.hem", top);
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "{name}: {:?}", s.model.results);
+        assert_eq!(panel_overlaps(&s, &HEM_PANEL_CORNERS, 15.0, 0.25), Vec::<String>::new(), "{name}");
+        let want = 400.0 * 300.0 * 0.7 + 300.0 * per_mm(1.2) + 400.0 * per_mm(gap);
+        assert!(rel(volume(&mut s), want) < 1e-9, "{name}: {} vs {want}", volume(&mut s));
+    }
+}

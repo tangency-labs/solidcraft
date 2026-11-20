@@ -1924,7 +1924,11 @@ impl SurfaceSheet {
             tails: (Tail::Keep, Tail::Keep),
             relief: (Relief::None, Relief::None),
         };
-        Ok(self.add_panel("hem", &edge, a, d, len, leg, bend))
+        let panel = self.add_panel("hem", &edge, a, d, len, leg, bend);
+        // Where it meets another hem at a corner of the panel, the two are each the sheet carried
+        // on over its edge, and they close the corner where those meet, as flanges do.
+        self.close_corners(self.sheet.joints.len() - 1)?;
+        Ok(panel)
     }
 }
 
@@ -1946,12 +1950,18 @@ pub(crate) fn close_corners_on(
 ) -> Result<()> {
     let t = sheet.thickness;
     let reach_of = |b: &Bend| (b.radius + t) * (b.angle / 2.0).tan();
+    // A hem: a half turn anchored at its tangent lines, as a half turn has no sharp.
+    let hem = |b: &Bend| b.datum == Datum::Tangent && b.angle >= std::f64::consts::PI - 1e-9;
     for k in 0..sheet.joints.len() {
         // The new bend as the corners closed so far left it.
         let Some(Joint { a: on_p, b: on_f, kind: JointKind::Bend(nb) }) = sheet.joints.get(j).cloned() else { return Ok(()) };
         let p = on_p.panel;
         let Some(Joint { a, b, kind: JointKind::Bend(ob) }) = sheet.joints.get(k).cloned() else { continue };
-        if k >= j || ob.datum != Datum::Sharp {
+        // Bends anchored at their sharps meet at the corner their sharps make. Two hems meet
+        // where their tangent lines on the panel cross, the panel's own corner: each is the
+        // sheet carried on over its edge, and they close where those two meet.
+        let hems = hem(&nb) && hem(&ob);
+        if k >= j || (ob.datum != Datum::Sharp && !hems) {
             continue;
         }
         // The other bend's anchor on the panel and on its flange, and the side of each its
@@ -2000,7 +2010,8 @@ pub(crate) fn close_corners_on(
         let (s1, s2) = ((c1 - on_p.origin).dot(on_p.dir), (c2 - on_q.origin).dot(on_q.dir));
         let nearer = |s: f64, len: f64| if s < len / 2.0 { 0.0 } else { len };
         let (e1, e2) = (nearer(s1, nb.length), nearer(s2, ob.length));
-        let reach = reach_of(&nb) + reach_of(&ob) + t;
+        // A hem's anchors are its tangent lines, so its corner lies at their ends.
+        let reach = if hems { t } else { reach_of(&nb) + reach_of(&ob) + t };
         if (s1 - e1).abs() > reach || (s2 - e2).abs() > reach {
             continue;
         }
@@ -2049,7 +2060,9 @@ pub(crate) fn close_corners_on(
         // (returns on two walls) meet on the line halving the corner between their bends.
         let line = match pf.z.cross(pw.z).normalized() {
             Some(line) => line,
-            None if pf.z.dot(pw.z) > 0.0 && (pw.shift - pf.shift).dot(pf.z).abs() < t * 0.5 => {
+            // Two hems' legs over the same face whose metal overlaps in height (their gaps
+            // within a thickness of each other) meet there too, though not quite in one plane.
+            None if pf.z.dot(pw.z) > 0.0 && (pw.shift - pf.shift).dot(pf.z).abs() < if hems { t } else { t * 0.5 } => {
                 let away = |place: &Rigid3, an: &Anchor, end: f64| {
                     let d = if end == 0.0 { an.dir } else { -an.dir };
                     place.vector(d.extend(0.0))
