@@ -1494,4 +1494,41 @@ mod tests {
             .is_err());
         assert_eq!(p.good_drop, Some(false));
     }
+
+    /// A zero tangent with the curve's degeneracy unknown has no angle to the normal: the
+    /// stop is a degenerate tangent (`SM_ERR`) that keeps the angle's error as its cause.
+    #[test]
+    fn set_properties_zero_tangent_keeps_the_angle_error() {
+        let k = Kernel::default();
+        let s = plane();
+        let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let mut p = DropPt::new(0.0, None);
+        p.uv_pd = [Point2::new(0.5, 0.5), Vec2::new(0.0, 0.0)];
+        p.crv_pd = [
+            Vec3::new(0.5, 0.5, 0.0),
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 0.0),
+        ];
+        let mut off = DropOffset::new(1.0, SS_NONE);
+        let e = p
+            .set_properties(&k, &s, &mut off, SS_NONE, 1e-6, &d, true)
+            .unwrap_err();
+        assert_eq!(
+            e.intersect_failure(),
+            Some(&IntersectFailure::DegenerateTangent)
+        );
+        assert_eq!(crate::error::upstream_status(&e), Some(SM_ERR));
+        assert!(
+            matches!(
+                e.cause(),
+                Some(SolidError::InvalidInput {
+                    operation: "geom::vector3d::Vec3::angle_between",
+                    ..
+                })
+            ),
+            "{:?}",
+            e.cause()
+        );
+        assert_eq!(p.good_drop, Some(false));
+    }
 }
