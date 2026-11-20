@@ -2838,6 +2838,10 @@ fn finish_pattern(
     // A placement picked by its path is placed again beside itself, in the component holding it,
     // moved as the pattern moves it in the world: so a part placed several times, or inside a
     // subassembly, is patterned from the placement picked, not from its first one.
+    // A placement a linked subassembly keeps is that design's to place, picked by its path too.
+    if let Some(why) = paths.iter().filter_map(|path| path.last()).find_map(|last| super::component_link::kept_occurrence_refusal(s, *last)) {
+        return Err(bad(cmd, why));
+    }
     shown_as_placed(s, paths.iter().map(|path| (format!("{path:?}"), path.as_slice())), cmd)?;
     for path in &paths {
         let lost = || bad(cmd, format!("no placement {path:?}"));

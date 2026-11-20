@@ -2027,6 +2027,12 @@ fn motion_link(s: &mut Session, p: &Value) -> Result<Value> {
                 .and_then(|i| usize::try_from(i).ok())
                 .filter(|i| *i < s.doc.assembly.links.len())
                 .ok_or_else(|| bad(cmd, "no such motion link"))?;
+            // The link replaced may be one a flexible occurrence has from its linked design.
+            if let Some(old) = s.doc.assembly.links.get(i)
+                && let Some(why) = super::component_link::linked_coupling_refusal(s, old.a, old.b)
+            {
+                return Err(bad(cmd, why));
+            }
             s.doc_mut().assembly.links[i] = l;
             i
         }

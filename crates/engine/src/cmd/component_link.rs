@@ -944,6 +944,17 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
             if keep.flexible == Some(true) {
                 let link = s.doc.links.get(&component).cloned().filter(|link| link.tree.is_some());
                 let link = link.ok_or_else(|| bad(cmd, "`flexible` needs the design's components, and the link to that design keeps it in one component (component.link_mode with `structure: true` changes that)"))?;
+                // Its joints are read from the design again, which takes the whole link to that
+                // reading: a design changed since the link last read it would change every other
+                // occurrence of it too, which only Update Links does.
+                let file = resolve(s.path.as_deref(), &link.path);
+                let now = DesignLink::file_digest(&read_link(&file, s.path.as_deref())?);
+                if link.file_sha256.as_deref().is_some_and(|read| read != now) {
+                    return Err(bad(
+                        cmd,
+                        "the linked design has changed since this design last read it: Update Links (component.update_links) first, then insert the flexible occurrence",
+                    ));
+                }
                 let mine = tree::Keep { structure: true, flexible: Some(true), occurrence: Some(occurrence) };
                 let (_, _, told, kept) = take_design(s, component, &link, &resolve(s.path.as_deref(), &link.path), configuration, mine, cmd)?;
                 warnings.extend(told);
@@ -1288,6 +1299,9 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
                 ));
             }
         }
+        // The model before the link's bodies are replaced: a joint that stays where it is when the
+        // link starts to keep components was found on these bodies, as in `take_design`.
+        let as_it_was = s.model.state();
         if let Some(f) = s.doc_mut().feature_mut(link.feature) {
             if !same {
                 // Bodies keep their names where the design still has as many.
@@ -1300,7 +1314,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             f.link_faces = faces;
         }
         s.refresh();
-        let changed = (structured && tree::sync(s, comp, link.feature, &source, keep, None, &mut warnings)?.changed) || changed;
+        let changed = (structured && tree::sync(s, comp, link.feature, &source, keep, Some(as_it_was.as_ref()), &mut warnings)?.changed) || changed;
         let changed = inherit_properties(s, comp, &properties)? || changed;
         if changed { updated.push(cname) } else { unchanged.push(cname) }
     }

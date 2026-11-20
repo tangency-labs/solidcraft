@@ -2179,3 +2179,160 @@ fn a_joint_origin_picked_in_a_second_placement_inside_a_linked_subassembly_follo
     assert!(solved.errors.is_empty() && solved.conflicts.is_empty(), "{:?} {:?}", solved.errors, solved.conflicts);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A placement picked by its path is patterned as the components are: one a linked subassembly
+/// keeps is refused, as `components` refuses it, and the design is left as it was.
+#[test]
+fn a_kept_placement_picked_by_its_path_is_not_patterned() {
+    let dir = scratch("pattern-kept-path");
+    let unit = save_unit(&dir);
+    let mut s = Session::default();
+    let inserted = run(&mut s, "component.insert_design", json!({"path": unit, "structure": true}));
+    let (top, occurrence) = (inserted["component"].as_u64().unwrap(), inserted["occurrence"].as_u64().unwrap());
+    let pin = placements(&s, component(&s, "pin"), top)[0];
+    let before = serde_json::to_string(&*s.doc).unwrap();
+    let e = s
+        .execute("solid.pattern.rectangular", &json!({"occurrences": [[occurrence, pin]], "dir1": [1, 0, 0], "count1": 2, "spacing1": 50}))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("linked subassembly unit"), "{e}");
+    assert_eq!(serde_json::to_string(&*s.doc).unwrap(), before, "the design is as it was");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `joint.motion_link` given the index of a link to replace checks that link's joints too, as
+/// `joint.couple` and `joint.delete` do: two ordinary joints may not take the place of the link
+/// a flexible occurrence has from its linked design.
+#[test]
+fn a_motion_link_does_not_replace_one_a_flexible_occurrence_has_from_its_design() {
+    let dir = scratch("motion-link-replace");
+    let unit = save_unit_of_hinges(&dir);
+    // The unit links its two hinges' joints: each turns as the other does.
+    let mut source = open(&unit);
+    run(&mut source, "joint.motion_link", json!({"a": "Hinge", "b": "hinge:2: Hinge", "ratio": 1}));
+    run(&mut source, "file.save", json!({}));
+    let mut s = Session::default();
+    run(&mut s, "component.insert_design", json!({"path": unit, "flexible": true}));
+    run(&mut s, "component.insert_design", json!({"path": unit, "reuse": true, "translate": [0, 0, 100], "flexible": true}));
+    // This design has no links of its own: both are the unit's, one for each occurrence.
+    assert_eq!(s.doc.assembly.links.len(), 2, "{:?}", s.doc.assembly.links);
+    let before = serde_json::to_string(&*s.doc).unwrap();
+    // One joint of each occurrence: a pair no single occurrence owns, so the pair itself is allowed.
+    let e = s.execute("joint.motion_link", &json!({"a": "Hinge", "b": "unit2:2: Hinge", "ratio": 1, "link": 0})).unwrap_err().to_string();
+    assert!(e.contains("linked subassembly"), "{e}");
+    assert_eq!(serde_json::to_string(&*s.doc).unwrap(), before, "the carried link is as it was");
+    // Added as a new link, the same pair is this design's own.
+    run(&mut s, "joint.motion_link", json!({"a": "Hinge", "b": "unit2:2: Hinge", "ratio": 1}));
+    assert_eq!(s.doc.assembly.links.len(), 3);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A part the linked design renames to a name this design's own part has keeps a name of its
+/// own: its placement takes the next free number, since commands find a placement by its name.
+#[test]
+fn a_part_renamed_in_its_linked_design_keeps_a_placement_name_of_its_own() {
+    let dir = scratch("rename-taken");
+    let unit = save_unit(&dir);
+    let mut s = Session::default();
+    let top = run(&mut s, "component.insert_design", json!({"path": unit, "structure": true}))["component"].as_u64().unwrap();
+    let pin = component(&s, "pin");
+    let own = run(&mut s, "component.create", json!({"name": "dowel", "activate": false}))["occurrence"].as_u64().unwrap();
+    let own_name = s.doc.occurrences.iter().find(|o| o.id == own).map(|o| o.name.clone()).unwrap();
+    assert_eq!(own_name, "dowel:1");
+    let mut source = open(&unit);
+    run(&mut source, "component.rename", json!({"component": "pin", "name": "dowel"}));
+    run(&mut source, "file.save", json!({}));
+    run(&mut s, "component.update_links", json!({}));
+    assert_eq!(s.doc.components.iter().find(|c| c.id == pin).map(|c| c.name.as_str()), Some("dowel"));
+    let mut names: Vec<&str> = s.doc.occurrences.iter().map(|o| o.name.as_str()).collect();
+    let all = names.len();
+    names.sort_unstable();
+    names.dedup();
+    assert_eq!(names.len(), all, "every placement has a name of its own: {names:?}");
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == own).map(|o| o.name.as_str()), Some("dowel:1"), "this design's own part keeps its name");
+    let renamed: Vec<&str> = s.doc.occurrences.iter().filter(|o| o.component == pin).map(|o| o.name.as_str()).collect();
+    assert_eq!(placements(&s, pin, top).len(), 2);
+    assert!(renamed.iter().all(|n| n.starts_with("dowel:") && *n != "dowel:1"), "{renamed:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// One more flexible occurrence of a linked design reads that design's joints again. When the
+/// design has changed since the link last read it, that reading would change the occurrences
+/// already here too: it is refused until Update Links has taken the change in, and then goes.
+#[test]
+fn a_flexible_occurrence_of_a_changed_design_waits_for_update_links() {
+    let dir = scratch("flexible-reuse-changed");
+    let hinge = save_hinge(&dir);
+    let mut s = Session::default();
+    run(&mut s, "component.insert_design", json!({"path": hinge, "flexible": true}));
+    let mut source = open(&hinge);
+    run(&mut source, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [50, 0, 0], "body_name": "Stop"}));
+    run(&mut source, "file.save", json!({}));
+    let before = serde_json::to_string(&*s.doc).unwrap();
+    let again = json!({"path": hinge, "reuse": true, "translate": [0, 100, 0], "flexible": true});
+    let e = s.execute("component.insert_design", &again).unwrap_err().to_string();
+    assert!(e.contains("Update Links"), "{e}");
+    assert_eq!(serde_json::to_string(&*s.doc).unwrap(), before, "the design is as it was");
+    run(&mut s, "component.update_links", json!({}));
+    let inserted = run(&mut s, "component.insert_design", again);
+    assert_eq!(inserted["joints"], 1, "{inserted}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A side named through the ordinary occurrence that holds a flexible one, where that is the
+/// flexible occurrence's only place, is on the same copy as the side named by the flexible
+/// occurrence itself: it solves, and is not refused as a second place.
+#[test]
+fn a_side_through_the_first_place_of_a_flexible_occurrence_is_on_its_copy() {
+    let dir = scratch("through-holder");
+    let hinge = save_hinge(&dir);
+    let mut s = Session::default();
+    let holder = run(&mut s, "component.create", json!({"name": "Holder", "activate": false}))["occurrence"].as_u64().unwrap();
+    let inserted = run(&mut s, "component.insert_design", json!({"path": hinge, "parent": "Holder", "flexible": true}));
+    let (top, flexible) = (inserted["component"].as_u64().unwrap(), inserted["occurrence"].as_u64().unwrap());
+    let arm = placements(&s, component(&s, "arm"), top)[0];
+    run(&mut s, "component.create", json!({"name": "Block", "activate": true}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "name": "On arm", "flip": true,
+               "a": {"occurrence": arm, "path": [holder, flexible, arm], "plane": "XY"},
+               "b": {"occurrence": "Block", "plane": "XY"}}),
+    );
+    let at = s.doc.assembly.joints.iter().position(|j| j.name == "On arm").unwrap();
+    for (occurrence, inside) in [(flexible, vec![arm]), (holder, vec![flexible, arm])] {
+        let side = &mut s.doc_mut().assembly.joints[at].a;
+        (side.occurrence, side.inside) = (occurrence, inside.clone());
+        let solved = solidcraft_doc::joints::solve(&s.doc, &s.model.state());
+        assert!(solved.errors.is_empty() && solved.conflicts.is_empty(), "{occurrence} {inside:?}: {:?} {:?}", solved.errors, solved.conflicts);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A side on a part a flexible occurrence's joints move, whose origin can't be found there, is
+/// left out of the solve and says so: taken as it is, it would hold the whole subassembly.
+#[test]
+fn a_side_whose_origin_is_lost_on_a_moving_copy_is_left_out_and_says_so() {
+    let dir = scratch("lost-origin-copy");
+    let (mut s, top, _first, second) = two_hinges(&dir);
+    let arm = placements(&s, component(&s, "arm"), top)[0];
+    run(&mut s, "component.create", json!({"name": "Block", "activate": true}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "name": "On arm", "flip": true,
+               "a": {"occurrence": arm, "path": [second, arm], "plane": "XY"},
+               "b": {"occurrence": "Block", "plane": "XY"}}),
+    );
+    let at = s.doc.assembly.joints.iter().position(|j| j.name == "On arm").unwrap();
+    // The arm is a plain box: it has no round face for this origin to find.
+    s.doc_mut().assembly.joints[at].a.snap = serde_json::from_value(json!({"type": "circle_center", "pick": [15, 10, 9]})).unwrap();
+    let solved = solidcraft_doc::joints::solve(&s.doc, &s.model.state());
+    let id = s.doc.assembly.joints[at].id;
+    assert!(solved.errors.iter().any(|(j, _, why)| *j == id && why.contains("can't be found")), "{:?}", solved.errors);
+    let _ = std::fs::remove_dir_all(&dir);
+}

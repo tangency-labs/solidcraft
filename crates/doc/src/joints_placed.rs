@@ -670,16 +670,20 @@ impl<'a> Copies<'a> {
             let Some((top, below)) = found.and_then(|i| Some((chain.get(i).copied()?, chain.get(i + 1..)?))) else { return On::Outside };
             (top, Cow::Owned(below.iter().map(|o| o.id).chain(side.inside.iter().copied()).collect()))
         } else {
-            // On an ordinary occurrence, through a flexible occurrence inside it: that is no
-            // first place of what the flexible occurrence's joints move.
+            // On an ordinary occurrence, through a flexible occurrence inside it. The way to
+            // that occurrence is its first place when it is the way through the first occurrence
+            // of each component above it (`first_chain`): the same copies as the side named by
+            // the flexible occurrence itself. Any other way is a second place of what its
+            // joints move.
             let through = side.inside.iter().position(|id| self.tops.contains_key(id));
-            let Some((top, below)) = through.and_then(|i| Some((side.inside.get(i)?, side.inside.get(i + 1..)?))) else { return On::Outside };
-            if below.iter().any(|inner| self.ids.any(*top, *inner))
-                && let Some(top) = self.index.at.get(top).copied()
-            {
-                return On::Elsewhere(top);
+            let Some((at, top, below)) = through.and_then(|i| Some((i, side.inside.get(i)?, side.inside.get(i + 1..)?))) else { return On::Outside };
+            let way = std::iter::once(side.occurrence).chain(side.inside.iter().take(at + 1).copied());
+            let first = self.index.chain(*top).iter().map(|o| o.id).eq(way);
+            match self.index.at.get(top).copied() {
+                Some(top) if first && !below.is_empty() => (top, Cow::Owned(below.to_vec())),
+                Some(top) if below.iter().any(|inner| self.ids.any(top.id, *inner)) => return On::Elsewhere(top),
+                _ => return On::Outside,
             }
-            return On::Outside;
         };
         if inside.is_empty() || inside.len() > MAX_PLACEMENT_DEPTH {
             return On::Outside;
@@ -902,21 +906,35 @@ pub(crate) fn expand(doc: &Document, st: &ModelState) -> Option<Expanded> {
     let copies = Copies::of(doc, false)?;
     let joints = &doc.assembly.joints;
     let mut rewrites: Vec<(usize, bool, JointOrigin)> = Vec::new();
-    let mut refused: Vec<(usize, &Occurrence)> = Vec::new();
+    // Joints left out of the solve: where, and why.
+    let mut refused: Vec<(usize, String)> = Vec::new();
     for (at, j) in joints.iter().enumerate().filter(|(_, j)| !j.suppressed) {
         for (second, side) in [(false, &j.a), (true, &j.b)] {
             match copies.on(side) {
                 On::Outside => {}
-                On::Elsewhere(top) => refused.push((at, top)),
+                On::Elsewhere(top) => refused.push((
+                    at,
+                    format!("a side is on a second place of an occurrence that the joints of `{}` move: join to the first place of it", top.name),
+                )),
                 // On the subassembly's occurrence already, through the occurrences it names:
                 // the solver reads that itself.
                 On::Inside { top, body, .. } if body == top.id && side.occurrence == top.id => {}
                 On::Inside { top, body, inside, from } => {
-                    // The frame on the occurrence the side's geometry is on; one that can't be
-                    // found is the solver's to report.
-                    let Ok(on_part) = resolve_on_part(doc, st, side) else { continue };
-                    let Some(to_body) = copies.index.down(copies.poses.as_ref(), top, &inside, from) else { continue };
-                    rewrites.push((at, second, JointOrigin::new(body, frame_snap(&mat_mul(&to_body, &on_part)))));
+                    // The frame on the occurrence the side's geometry is on. One that can't be
+                    // found on the subassembly's occurrence itself is the solver's to report.
+                    // On a copy its joints move, the side as it is would hold the whole
+                    // subassembly instead of that copy: the joint is left out, and says why.
+                    let frame = resolve_on_part(doc, st, side)
+                        .ok()
+                        .and_then(|on_part| Some(mat_mul(&copies.index.down(copies.poses.as_ref(), top, &inside, from)?, &on_part)));
+                    match frame {
+                        Some(frame) => rewrites.push((at, second, JointOrigin::new(body, frame_snap(&frame)))),
+                        None if body != top.id => refused.push((
+                            at,
+                            format!("a side's origin can't be found on the part of `{}` that its joints move: pick the origin again", top.name),
+                        )),
+                        None => {}
+                    }
                 }
             }
         }
@@ -938,16 +956,12 @@ pub(crate) fn expand(doc: &Document, st: &ModelState) -> Option<Expanded> {
         }
     }
     let mut errors = Vec::new();
-    for (at, top) in refused {
+    for (at, why) in refused {
         let Some(j) = assembly.joints.get_mut(at).filter(|j| !j.suppressed) else { continue };
         // Left out of the solve: taken as a frame it would stand where its occurrence was
-        // before the solve moved it.
+        // before the solve moved it, or hold what its occurrence holds.
         j.suppressed = true;
-        errors.push((
-            j.id,
-            j.name.clone(),
-            format!("a side is on a second place of an occurrence that the joints of `{}` move: join to the first place of it", top.name),
-        ));
+        errors.push((j.id, j.name.clone(), why));
     }
     // With nothing fixed among the joined occurrences, the first joint's A side is held: the
     // design's own occurrence there, which for a copy is the subassembly's occurrence.

@@ -266,14 +266,25 @@ pub(super) struct Synced {
 }
 
 /// Rename component `id` as `component.rename` does: its placements still named after it
-/// ("Old:2") follow.
+/// ("Old:2") follow. A name another placement of this design has already ("Pin:1", where the
+/// design has a part of that name of its own) is not taken twice: the placement gets the first
+/// free number instead, as a new one would, since commands find a placement by its name.
 fn rename(d: &mut Document, id: u64, name: &str) {
     let Some(c) = d.components.iter_mut().find(|c| c.id == id) else { return };
     let old = std::mem::replace(&mut c.name, name.to_string());
+    let mut taken: HashSet<String> = d.occurrences.iter().map(|o| o.name.clone()).collect();
+    let mut free = 1usize;
     for o in d.occurrences.iter_mut().filter(|o| o.component == id) {
         let k = o.name.strip_prefix(old.as_str()).and_then(|rest| rest.strip_prefix(':'));
         if let Some(k) = k.filter(|k| !k.is_empty() && k.bytes().all(|b| b.is_ascii_digit())) {
-            o.name = format!("{name}:{k}");
+            let mut new = format!("{name}:{k}");
+            while taken.contains(&new) {
+                new = format!("{name}:{free}");
+                free += 1;
+            }
+            taken.remove(&o.name);
+            taken.insert(new.clone());
+            o.name = new;
         }
     }
 }
@@ -624,6 +635,12 @@ pub(super) fn sync(
     for o in &d.occurrences {
         *counts.entry(o.component).or_default() += 1;
     }
+    // Where each occurrence the design has is, found once: the loop below only appends, so the
+    // places stay. The first of an id used twice, as `find` would take.
+    let mut index: HashMap<u64, usize> = HashMap::with_capacity(d.occurrences.len());
+    for (at, o) in d.occurrences.iter().enumerate() {
+        index.entry(o.id).or_insert(at);
+    }
     for o in &source.occurrences {
         let parent = if o.parent == 0 { Some(top) } else { components.get(&o.parent).copied() };
         let (Some(&component), Some(parent)) = (components.get(&o.component), parent) else { continue };
@@ -634,11 +651,11 @@ pub(super) fn sync(
             .occurrences
             .get(&o.id)
             .copied()
-            .filter(|id| was_placed.contains(id) && d.occurrences.iter().any(|x| x.id == *id && x.component == component))
+            .filter(|id| was_placed.contains(id) && index.get(id).and_then(|at| d.occurrences.get(*at)).is_some_and(|x| x.component == component))
             .filter(|id| placed.insert(*id));
         let id = match here {
             Some(id) => {
-                if let Some(x) = d.occurrences.iter_mut().find(|x| x.id == id) {
+                if let Some(x) = index.get(&id).and_then(|at| d.occurrences.get_mut(*at)) {
                     if x.parent != parent {
                         x.parent = parent;
                         moved.insert(id);
