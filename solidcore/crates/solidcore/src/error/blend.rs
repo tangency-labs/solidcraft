@@ -84,6 +84,18 @@ pub enum BlendFailure {
     /// and 129; [`no_room_class`]). A refusal: the failure's fit, where the
     /// check computed one, is the size that builds.
     NoRoom(NoRoomReason),
+    /// The interior section did not divide the periodic blend face. Status `SM_ERR`.
+    ClosedCliffWouldNotSplit {
+        /// The blend face in the sheet being trimmed.
+        face: crate::topology::FaceId,
+    },
+    /// A cliff face lacks geometry needed to trim the blend. Status `SM_ERR_NULL_POINTER`.
+    CliffInputMissing {
+        /// The face that lacks the input.
+        face: crate::topology::FaceId,
+        /// The missing geometry.
+        input: CliffInput,
+    },
     /// A fillet removal refuses the face it is asked to remove, for the reason named
     /// (classes 130 and 131; [`removal_class`]). A refusal that no size decides.
     RemovalRefused(RemovalRefusal),
@@ -284,6 +296,28 @@ pub enum BlendFailure {
     /// kind of that status ([`ErrorKind::Missing`]), as the phrase cause it replaces; typed,
     /// so not a phrase cause ([`BlendFailure::is_phrase`]).
     BandInputMissing(BandInput),
+}
+
+/// A face input required to trim a blend at a cliff.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CliffInput {
+    /// The face's surface.
+    Surface,
+    /// The planar support extending the wall.
+    Plane,
+    /// The face use facing out of the body.
+    OutwardFaceUse,
+}
+
+impl CliffInput {
+    const fn what(self) -> &'static str {
+        match self {
+            Self::Surface => "surface",
+            Self::Plane => "plane",
+            Self::OutwardFaceUse => "outward face use",
+        }
+    }
 }
 
 /// Which input of the planar-band contact query is missing ([`BlendFailure::BandInputMissing`]).
@@ -503,6 +537,7 @@ impl BlendFailure {
             | Self::StationDidNotConverge { .. }
             | Self::TrimLoopOpen
             | Self::TrimLoopDoesNotSeparate
+            | Self::ClosedCliffWouldNotSplit { .. }
             | Self::StageFailed
             | Self::Defect { .. }
             | Self::SkinPastStationCap { .. }
@@ -516,7 +551,9 @@ impl BlendFailure {
             | Self::PlaneCurveFitCap { .. }
             | Self::NotCertified { .. }
             | Self::Failed(_) => SM_ERR,
-            Self::Missing(_) | Self::BandInputMissing(_) => SM_ERR_NULL_POINTER,
+            Self::Missing(_) | Self::BandInputMissing(_) | Self::CliffInputMissing { .. } => {
+                SM_ERR_NULL_POINTER
+            }
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
             Self::BadIntersections(_) => SM_ERR_BAD_INTERSECTIONS,
@@ -551,6 +588,7 @@ impl BlendFailure {
             Self::RemovalRefused(reason) => removal_class(*reason),
             Self::StationDidNotConverge { .. } => ErrorKind::StationDidNotConverge,
             Self::TrimLoopOpen | Self::TrimLoopDoesNotSeparate => ErrorKind::TrimLeaks,
+            Self::ClosedCliffWouldNotSplit { .. } => ErrorKind::Failed,
             Self::StageFailed
             | Self::Defect { .. }
             | Self::SkinMeasureNotFinite { .. }
@@ -563,7 +601,7 @@ impl BlendFailure {
             Self::PlaneCurveLeavesDomain { .. } => ErrorKind::OutsideDomain,
             Self::BallsNest { .. } => ErrorKind::BallsFold,
             Self::CreasePieceEndUnbuildable { .. } => ErrorKind::Unsupported,
-            Self::BandInputMissing(_) => ErrorKind::Missing,
+            Self::BandInputMissing(_) | Self::CliffInputMissing { .. } => ErrorKind::Missing,
             Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -589,6 +627,7 @@ impl BlendFailure {
             | Self::StationDidNotConverge { .. }
             | Self::TrimLoopOpen
             | Self::TrimLoopDoesNotSeparate
+            | Self::ClosedCliffWouldNotSplit { .. }
             | Self::StageFailed
             | Self::Defect { .. }
             | Self::SkinPastStationCap { .. }
@@ -601,6 +640,7 @@ impl BlendFailure {
             | Self::PlaneCurveStepVanished { .. }
             | Self::PlaneCurveFitCap { .. }
             | Self::BandInputMissing(_)
+            | Self::CliffInputMissing { .. }
             | Self::NotCertified { .. } => false,
             Self::Failed(_)
             | Self::Missing(_)
@@ -629,6 +669,7 @@ impl BlendFailure {
             | Self::StationDidNotConverge { .. }
             | Self::TrimLoopOpen
             | Self::TrimLoopDoesNotSeparate
+            | Self::ClosedCliffWouldNotSplit { .. }
             | Self::StageFailed
             | Self::Defect { .. }
             | Self::SkinPastStationCap { .. }
@@ -641,6 +682,7 @@ impl BlendFailure {
             | Self::PlaneCurveStepVanished { .. }
             | Self::PlaneCurveFitCap { .. }
             | Self::BandInputMissing(_)
+            | Self::CliffInputMissing { .. }
             | Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -660,6 +702,10 @@ impl core::fmt::Display for BlendFailure {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::NoRoom(reason) => write!(f, "{}: {reason:?}", self.class()),
+            Self::ClosedCliffWouldNotSplit { face } => write!(
+                f,
+                "the closed cliff blend face {face:?} does not divide at its interior section"
+            ),
             Self::RemovalRefused(reason) => write!(f, "{}: {reason:?}", self.class()),
             Self::StationDidNotConverge {
                 s,
@@ -751,6 +797,7 @@ impl core::fmt::Display for BlendFailure {
             | Self::PassedOn { what, .. } => f.write_str(what),
             Self::Missing(what) => write!(f, "{what} is missing"),
             Self::BandInputMissing(input) => write!(f, "{} is missing", input.what()),
+            Self::CliffInputMissing { face, input } => write!(f, "cliff face {face:?} is missing its {}", input.what()),
             Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
             Self::NotCertified { halvings, stations } => write!(
                 f,
@@ -1522,7 +1569,7 @@ mod tests {
     /// The number of `BlendFailure` variants. Adding a variant means adding an arm to
     /// `variant_index_and_phrase_name` (the compiler asks for it), with the next index, and
     /// raising this number; the test below then fails until `causes` holds the new variant.
-    const VARIANTS: usize = 27;
+    const VARIANTS: usize = 29;
 
     /// Each variant's distinct index in `0..VARIANTS`, and the variant name of a phrase cause
     /// (`None` for any other cause). The match has no wildcard, so it is the inventory of
@@ -1556,6 +1603,8 @@ mod tests {
             BlendFailure::PlaneCurveLeavesDomain { .. } => (24, None),
             BlendFailure::PlaneCurveStepVanished { .. } => (25, None),
             BlendFailure::PlaneCurveFitCap { .. } => (26, None),
+            BlendFailure::ClosedCliffWouldNotSplit { .. } => (27, None),
+            BlendFailure::CliffInputMissing { .. } => (28, None),
         }
     }
 
@@ -1620,6 +1669,13 @@ mod tests {
             BlendFailure::TrimLoopOpen,
             BlendFailure::TrimLoopDoesNotSeparate,
             BlendFailure::RemovalRefused(RemovalRefusal::FaceGrowsPastDomain),
+            BlendFailure::ClosedCliffWouldNotSplit {
+                face: crate::topology::FaceId::from_index(0),
+            },
+            BlendFailure::CliffInputMissing {
+                face: crate::topology::FaceId::from_index(0),
+                input: CliffInput::Plane,
+            },
             BlendFailure::StageFailed,
             BlendFailure::Defect { why: "x" },
             BlendFailure::NotCertified {

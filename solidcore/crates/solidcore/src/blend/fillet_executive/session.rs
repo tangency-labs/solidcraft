@@ -7973,7 +7973,12 @@ impl SessionObjects<'_> {
             ));
         }
         // (#2905) the size that builds: the other blend's offset, on the wider one's edge
-        if let JoinTopology::RefusedUnequalOffsets { blend, builds } = built {
+        if let JoinTopology::RefusedUnequalOffsets {
+            blend,
+            builds,
+            kind,
+        } = built
+        {
             let location = match vertex {
                 Some(v) => crate::topology::vertex::point(target, v).ok(),
                 None => None,
@@ -8001,7 +8006,7 @@ impl SessionObjects<'_> {
             executive.note_fit_radius(
                 builds,
                 edge.map(|e| FilletObject::Topology(FilletBody::Target, EntityRef::Edge(e))),
-                crate::blend::fillet_executive::p3::FitKind::Radius,
+                kind,
             );
             return Err(SolidError::blend_failed(
                 "SmBlendCorner::MakeJoinTopology",

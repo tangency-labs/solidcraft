@@ -69,7 +69,7 @@ use crate::blend::fillet_overflow::{
 use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::line::Line;
-use crate::error::blend::BlendFailure;
+use crate::error::blend::{BlendFailure, CliffInput};
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::attribute::ids;
 use crate::geom::global_solver::SolverOperation;
@@ -1878,10 +1878,9 @@ impl FilletSession<'_> {
         solvers: &[FilletObject],
         round_of: &mut BTreeMap<FaceId, usize>,
         tol: f64,
-    ) -> Result<BTreeSet<FaceId>> {
-        let mut divided = BTreeSet::new();
+    ) -> Result<()> {
         if self.executive.continued_cliffs.is_empty() {
-            return Ok(divided);
+            return Ok(());
         }
         for (face, index) in round_of.clone() {
             let Some(solver) = solvers.get(index) else {
@@ -1891,8 +1890,15 @@ impl FilletSession<'_> {
                 continue;
             }
             let domain = face::p2::uv_domain(sheet, face)?;
-            let surface = face::p2::surface(sheet, face)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the cliff blend's surface"))?;
+            let surface = face::p2::surface(sheet, face)?.ok_or_else(|| {
+                SolidError::blend(
+                    OP,
+                    BlendFailure::CliffInputMissing {
+                        face,
+                        input: CliffInput::Surface,
+                    },
+                )
+            })?;
             if !surface.is_periodic(k, &domain, SurfParamType::U)? {
                 continue;
             }
@@ -1910,17 +1916,15 @@ impl FilletSession<'_> {
                 merge_curves(k, b, env, face, tol, vec![section], None)
             })?;
             if extra.is_empty() {
-                return Err(SolidError::blend_failed(
+                return Err(SolidError::blend(
                     OP,
-                    "the closed cliff blend does not divide at its interior section",
+                    BlendFailure::ClosedCliffWouldNotSplit { face },
                 ));
             }
             self.copy_divided_blend_face_mark(sheet, face, &extra)?;
-            divided.insert(face);
-            divided.extend(extra.iter().copied());
             round_of.extend(extra.into_iter().map(|part| (part, index)));
         }
-        Ok(divided)
+        Ok(())
     }
 
     /// The fork's `TrimAtCreases` from its tolerances on: `sheet` (the open ends cut)
@@ -1996,8 +2000,7 @@ impl FilletSession<'_> {
                 }
             }
         }
-        let divided =
-            self.divide_closed_cliff_strips(k, &mut sheet, solvers, &mut round_of, tol)?;
+        self.divide_closed_cliff_strips(k, &mut sheet, solvers, &mut round_of, tol)?;
         let mut kept_rounds: BTreeSet<usize> = BTreeSet::new();
         // #18646: each kept piece of a round's face, with its round
         let mut piece_round: BTreeMap<FaceId, usize> = BTreeMap::new();
@@ -2203,9 +2206,7 @@ impl FilletSession<'_> {
                 })?
                 .0;
             }
-            if divided.contains(&s) {
-                self.copy_divided_blend_face_mark(&sheet, s, &new_faces)?;
-            }
+            self.copy_divided_blend_face_mark(&sheet, s, &new_faces)?;
             // keep the pieces inside the target
             let mut all = vec![s];
             all.extend(new_faces);

@@ -27,7 +27,7 @@
 use super::{find_side_edgeuse, need, new_corner_vertex, radial};
 use crate::blend::fillet_corner::p1::face_by_two_edgeuses;
 use crate::blend::fillet_corner::p3::FilletCorner;
-use crate::blend::fillet_executive::session::SolverObject;
+use crate::blend::fillet_executive::{p3::FitKind, session::SolverObject};
 use crate::blend::fillet_geom::p1::{
     CornerLookup, FilletBrep, FilletCornerId, FilletEdgeType, FilletSolverId, FilletVertexType,
 };
@@ -99,10 +99,12 @@ pub enum JoinTopology {
     /// caller notes `SM_FILERR_NO_ROOM` at the vertex
     /// ([`JOIN_UNEQUAL_OFFSETS`]) and the fit `builds` on blend `blend`'s edge.
     RefusedUnequalOffsets {
-        /// The blend with the larger offset, 0 or 1 in the corner's order.
+        /// The blend with the larger offset or chord, 0 or 1 in the corner's order.
         blend: usize,
-        /// The other blend's offset there, which `blend` builds at.
+        /// The other blend's offset or chord length.
         builds: f64,
+        /// Whether the fit sizes a radius or a chord.
+        kind: FitKind,
     },
 }
 
@@ -255,7 +257,8 @@ pub(crate) fn tangent_cliff_join(
 /// Whether two blends at a Join are constant and differ: for each of the two faces of side
 /// `faces` first, its offset, and where the blends' offsets on a side differ by more than a
 /// loop's gap closes ([`LOOP_GAP_ZONES`] of the body's tolerance), the blend with the larger
-/// and the other's offset. Each blend's rails are on its own offsets, which
+/// and the other's offset. At a cliff join, constant-distance blends compare their chord
+/// lengths by the same rule. Each blend's rails are on its own offsets, which
 /// `SM_FE_CROSS_SECTION` cannot end both of. `None` for anything else: other solvers (a
 /// law's rails are the law's to meet), or one closed blend.
 fn unequal_blends(
@@ -263,31 +266,42 @@ fn unequal_blends(
     solvers: &[Option<SolverObject>],
     ids: &[Option<FilletSolverId>],
     faces: [Option<FaceId>; 2],
-) -> Result<Option<(usize, f64)>> {
-    let mut offsets = Vec::new();
-    for (&id, face) in ids.iter().zip(faces) {
-        let object = id
-            .and_then(|id| solvers.get(id.0 as usize))
-            .and_then(Option::as_ref);
-        let Some(SolverObject::ConstantRadius(object)) = object else {
-            return Ok(None);
-        };
-        let solver = &object.solver;
-        let rail = solver.find_index_of_rail_on_face(target, face)?;
-        let offset = |r: usize| -> Result<f64> {
-            let slot = solver.surface(r)?;
-            let slot = slot.ok_or_else(|| SolidError::blend_missing(OP, "the solver's surface"))?;
-            Ok(slot.surface.surface.offset_distance().abs())
-        };
-        offsets.push([offset(rail)?, offset(1 - rail.min(1))?]);
-    }
-    let [a, b] = offsets.as_slice() else {
+    cliff_join: bool,
+) -> Result<Option<(usize, f64, FitKind)>> {
+    let [Some(first), Some(second)] = ids else {
         return Ok(None);
     };
+    let object = |id: FilletSolverId| solvers.get(id.0 as usize).and_then(Option::as_ref);
+    let (first, second, kind) = match (object(*first), object(*second)) {
+        (Some(SolverObject::ConstantRadius(a)), Some(SolverObject::ConstantRadius(b))) => {
+            let offsets = |solver: &FilletSolver, face| -> Result<[f64; 2]> {
+                let rail = solver.find_index_of_rail_on_face(target, face)?;
+                let offset = |index| {
+                    solver
+                        .surface(index)?
+                        .map(|slot| slot.surface.surface.offset_distance().abs())
+                        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's surface"))
+                };
+                Ok([offset(rail)?, offset(1 - rail.min(1))?])
+            };
+            let [first_face, second_face] = faces;
+            (
+                offsets(&a.solver, first_face)?,
+                offsets(&b.solver, second_face)?,
+                FitKind::Radius,
+            )
+        }
+        (Some(SolverObject::ConstantDistance(a)), Some(SolverObject::ConstantDistance(b)))
+            if cliff_join =>
+        {
+            ([a.distance(); 2], [b.distance(); 2], FitKind::Chord)
+        }
+        _ => return Ok(None),
+    };
     let gap = LOOP_GAP_ZONES * target.tolerance();
-    for (&x, &y) in a.iter().zip(b) {
+    for (x, y) in first.into_iter().zip(second) {
         if (x - y).abs() > gap {
-            return Ok(Some(if x > y { (0, y) } else { (1, x) }));
+            return Ok(Some(if x > y { (0, y, kind) } else { (1, x, kind) }));
         }
     }
     Ok(None)
@@ -647,13 +661,13 @@ impl FilletCorner {
         }
         let (side, mut between) = join_sides(target, &solver_eus, &all_eus)?;
         let rolled = rolled_sides(target, solvers, &solver_eu_solvers, &side, &mut between)?;
+        let cliff_join = self
+            .blend
+            .is_some_and(crate::blend::blend_corner::BlendCorner::is_cliff_join);
         // the section's ends: on a side with an edge between the blends (where they change
         // face, or cross a face's seam) where the rails cross it, else (the first side)
         // through the vertex
-        if self
-            .blend
-            .is_some_and(crate::blend::blend_corner::BlendCorner::is_cliff_join)
-        {
+        if cliff_join {
             // The two rim segments meet here; neither bounds the shared section
             // on the continued support. The face beyond trims the sheet later.
             for edges in &mut between {
@@ -675,10 +689,14 @@ impl FilletCorner {
             fs.push(solver);
         }
         let first_side = side.get(first).copied().unwrap_or_default();
-        if let Some((blend, builds)) =
-            unequal_blends(target, solvers, &solver_eu_solvers, first_side)?
+        if let Some((blend, builds, kind)) =
+            unequal_blends(target, solvers, &solver_eu_solvers, first_side, cliff_join)?
         {
-            return Ok(JoinTopology::RefusedUnequalOffsets { blend, builds });
+            return Ok(JoinTopology::RefusedUnequalOffsets {
+                blend,
+                builds,
+                kind,
+            });
         }
         // the section's ends
         let mut ends = [None, None];
@@ -894,5 +912,40 @@ impl FilletCorner {
             }
         }
         Ok(fit)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::blend::fillet_standard_solver::p1::ConstantDistanceFs;
+
+    #[test]
+    fn cliff_join_requires_equal_chord_lengths() -> Result<()> {
+        let target = Brep::default();
+        let ids = [Some(FilletSolverId(0)), Some(FilletSolverId(1))];
+        let chord = |distance| {
+            Some(SolverObject::ConstantDistance(Box::new(
+                ConstantDistanceFs {
+                    solver: FilletSolver::new(1e-7, 1e-6, 1e-6),
+                    distance,
+                },
+            )))
+        };
+        let equal = [chord(1.0), chord(1.0)];
+        assert_eq!(
+            unequal_blends(&target, &equal, &ids, [None; 2], true)?,
+            None
+        );
+        let unequal = [chord(1.0), chord(2.0)];
+        assert_eq!(
+            unequal_blends(&target, &unequal, &ids, [None; 2], true)?,
+            Some((1, 1.0, FitKind::Chord))
+        );
+        assert_eq!(
+            unequal_blends(&target, &unequal, &ids, [None; 2], false)?,
+            None
+        );
+        Ok(())
     }
 }

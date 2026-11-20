@@ -49,6 +49,7 @@
 //! - **Refusals.** `rcWhy` is the returned [`ExtendOutcome::Refused`] comment.
 
 use crate::curve::curve::Curve;
+use crate::error::blend::{BlendFailure, CliffInput};
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -113,12 +114,11 @@ pub fn plane_of(k: &Kernel, surface: &Surface) -> Result<Option<(Point3, Vec3)>>
 
 /// The plane of a cliff, with the normal facing the body's exterior.
 pub(crate) fn outward_plane(k: &Kernel, body: &Brep, f: FaceId) -> Result<(Point3, Vec3)> {
-    let surface = face::p2::surface(body, f)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the cliff's surface"))?;
-    let (origin, normal) =
-        plane_of(k, surface)?.ok_or_else(|| SolidError::blend_missing(OP, "the cliff's plane"))?;
-    let outer = face::p2::outer_faceuse(body, f)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the cliff's outward faceuse"))?;
+    let missing = |input| SolidError::blend(OP, BlendFailure::CliffInputMissing { face: f, input });
+    let surface = face::p2::surface(body, f)?.ok_or_else(|| missing(CliffInput::Surface))?;
+    let (origin, normal) = plane_of(k, surface)?.ok_or_else(|| missing(CliffInput::Plane))?;
+    let outer =
+        face::p2::outer_faceuse(body, f)?.ok_or_else(|| missing(CliffInput::OutwardFaceUse))?;
     let orientation = crate::topology::edgeuse::p1::faceuse_orientation(body, outer)?;
     Ok((
         origin,
@@ -341,6 +341,23 @@ fn pieces_classed(
 /// # Errors
 /// Those of the classification.
 pub fn in_material(k: &Kernel, b: &mut Brep, point: Point3) -> Result<(bool, bool)> {
+    Ok(match material_location(k, b, point)? {
+        MaterialLocation::Inside => (true, false),
+        MaterialLocation::Boundary => (false, true),
+        MaterialLocation::Outside | MaterialLocation::Unknown => (false, false),
+    })
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum MaterialLocation {
+    Inside,
+    Outside,
+    Boundary,
+    Unknown,
+}
+
+/// Keep a proved void distinct from a boundary hit or an unclassified probe.
+fn material_location(k: &Kernel, b: &mut Brep, point: Point3) -> Result<MaterialLocation> {
     let zone = brep_zone_tol_3d(k, b, SmallTopoType::NormalSize);
     let id = match b.notify_serial() {
         Some(serial) => BrepId::from_index(u32::try_from(serial).map_err(|_| {
@@ -349,19 +366,18 @@ pub fn in_material(k: &Kernel, b: &mut Brep, point: Point3) -> Result<(bool, boo
         None => BrepId::from_index(0),
     };
     let class = BrepQuery::of_brep_with_id(id, b).point_3d_classify(k, b, point, zone, true)?;
-    match class.point_class() {
-        PointClassType::Region => {
-            let inside = match class.object() {
-                Some(EntityRef::Region(r)) => {
-                    b.infinite_region() != Some(r) && b.region(r)?.is_void() == 0
-                }
-                _ => false,
-            };
-            Ok((inside, false))
+    Ok(match (class.point_class(), class.object()) {
+        (PointClassType::Region, Some(EntityRef::Region(region))) => {
+            match crate::mass::integrator::properties::region_material(b, region) {
+                Ok(true) => MaterialLocation::Inside,
+                Ok(false) => MaterialLocation::Outside,
+                Err(SolidError::UnsureRegion { .. }) => MaterialLocation::Unknown,
+                Err(error) => return Err(error),
+            }
         }
-        PointClassType::Unknown => Ok((false, false)),
-        _ => Ok((false, true)),
-    }
+        (PointClassType::Region | PointClassType::Unknown, _) => MaterialLocation::Unknown,
+        _ => MaterialLocation::Boundary,
+    })
 }
 
 /// `sm_LoopCurve`: a curve of a loop, owned until a face takes it, and how it runs.
@@ -1234,8 +1250,13 @@ fn takes_off(
         step = step.min(0.5 * width);
     }
     let probe = p + inward * (side * step);
-    let (inside, _) = in_material(k, target, probe)?;
-    let mut belongs = inside != fills_void;
+    let location = material_location(k, target, probe)?;
+    let mut belongs = location
+        == if fills_void {
+            MaterialLocation::Outside
+        } else {
+            MaterialLocation::Inside
+        };
     let mut nearest = BIG_DOUBLE;
     let mut toward = Vec3::UNDEF;
     for &e in blended {
@@ -1343,4 +1364,41 @@ pub fn make_extension_face(
     )?;
     made.face
         .ok_or_else(|| SolidError::blend_missing(OP, "the extension face"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::primitive::api_primitives::create_box;
+
+    #[test]
+    fn a_boundary_probe_is_not_proved_outside() -> Result<()> {
+        let mut kernel = Kernel::default();
+        let mut target = create_box(&mut kernel, Point3::ZERO, 10.0, 10.0, 10.0)?;
+        assert_eq!(
+            material_location(&kernel, &mut target, Point3::new(5.0, 5.0, 5.0))?,
+            MaterialLocation::Inside
+        );
+        assert_eq!(
+            material_location(&kernel, &mut target, Point3::new(10.0, 5.0, 5.0))?,
+            MaterialLocation::Boundary
+        );
+        assert_eq!(
+            material_location(&kernel, &mut target, Point3::new(11.0, 5.0, 5.0))?,
+            MaterialLocation::Outside
+        );
+        let region = target
+            .regions()
+            .ids()
+            .find(|&r| Some(r) != target.infinite_region())
+            .expect("finite region of the box");
+        target
+            .region_mut(region)?
+            .set_is_void(crate::error::SM_UNSURE);
+        assert_eq!(
+            material_location(&kernel, &mut target, Point3::new(5.0, 5.0, 5.0))?,
+            MaterialLocation::Unknown
+        );
+        Ok(())
+    }
 }

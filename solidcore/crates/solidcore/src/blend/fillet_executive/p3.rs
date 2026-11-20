@@ -38,7 +38,7 @@
 //! edge of its face before the trace is not proved on the face beyond as trimmed
 //! ([`RailTrimAccess::rails_rolled_on_their_faces`]).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::blend::fillet_executive::p1::ExecutiveObjects;
 use crate::blend::fillet_executive::session::ball_regular::{BallCheck, BallStation};
@@ -3215,8 +3215,8 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         let mut overflow = false;
         let mut concave = false;
         let mut concave_overflow = false;
-        // A concave overflow whose cliff is known at an end or at a tangent join.
-        let mut bounded_concave_overflow = false;
+        // Solvers with a concave overflow bounded by an end or a tangent join.
+        let mut bounded = BTreeSet::new();
         let mut round_into_material = false;
         let mut rolls_over = false;
         let mut wraps = false;
@@ -3248,7 +3248,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 overflowing.push(edge);
             }
             if continued && fit {
-                bounded_concave_overflow = true;
+                bounded.insert(solver);
             } else if access.geometry_blend_adds_material(k, solver)? {
                 // the event's only where its rails leave across the cliff's rim at V and its
                 // end sections stay on their end faces (an end section's overflow is not
@@ -3257,7 +3257,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     && access.geometry_overflows_at_roll_over(k, solver, &judged.left_across)?
                     && access.geometry_end_sections_fit(k, solver, self)?
                 {
-                    bounded_concave_overflow = true;
+                    bounded.insert(solver);
                 } else {
                     concave_overflow = true;
                 }
@@ -3268,12 +3268,14 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         }
         // whether the other blends add material (concave), when one overflows
         let mut index = 0;
-        while overflow && !concave_overflow && !bounded_concave_overflow && !concave {
+        while overflow && !concave_overflow && !concave {
             let Some(solver) = self.solvers.get(index).copied() else {
                 break;
             };
             index += 1;
-            concave = access.geometry_blend_adds_material(k, solver)?;
+            if !bounded.contains(&solver) {
+                concave = access.geometry_blend_adds_material(k, solver)?;
+            }
         }
         // The fork's overflow-first stop (WR-634, tangency-labs/smlib@241f7ba): with
         // `SetOverflowFirst`, when blends of several edges overflow, nothing is built; with
@@ -3283,7 +3285,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 && overflow
                 && self.solvers.len() > 1
                 && !concave_overflow
-                && !bounded_concave_overflow
+                && bounded.is_empty()
                 && !concave
                 && !round_into_material)
         {
