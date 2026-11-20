@@ -16,8 +16,9 @@ view.
   the File menu (New, Open, Save, Save As, Export…), undo and redo, the Home tab (the start page)
   and one tab per open design (each with its own undo history, selection and camera; a dot marks
   unsaved changes). Double-click a design's tab to rename the design: type the name, then press
-  Enter or click elsewhere to keep it, or Esc to leave the old one (Preferences › Interface turns
-  this off, for a double-click that maximizes the window instead). On the right: Report a bug,
+  Enter or click elsewhere to keep it, or Esc to leave the old one. Double-click a view's sub-tab
+  (Model, Sketch 1…) to rename that view the same way (Preferences › Interface turns both off, for
+  a double-click on a design's tab that maximizes the window instead). On the right: Report a bug,
   Help (?), Preferences (which hold the theme) and the window's buttons. On Linux, to have your
   desktop's own title bar and window buttons instead, set
   `SOLIDCRAFT_TITLEBAR=system` or put `"titlebar": "system"` in `graphics.json` in the settings
