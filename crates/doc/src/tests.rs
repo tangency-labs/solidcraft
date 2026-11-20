@@ -922,6 +922,7 @@ fn a_coil_follows_its_sketch() {
             section: Default::default(),
             position: 0,
             start_angle: None,
+            taper: None,
             clockwise: false,
             operation: Operation::NewBody,
             targets: Vec::new(),

@@ -1671,6 +1671,11 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(angle = "Start angle")]
         start_angle: Option<Expr>,
+        /// Cone angle (expression, from the axis): the radius grows by `pitch · tan(taper)` per
+        /// turn, so the coil follows a cone (#4735). Absent or 0: a cylinder. Negative narrows.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Taper angle")]
+        taper: Option<Expr>,
         /// Turn the other way (left-handed).
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         clockwise: bool,

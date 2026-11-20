@@ -4875,7 +4875,7 @@ fn remembered_extra_keys(kind: &Kind) -> &'static [&'static str] {
         Some("solid.boundary_fill") => &["remove_tools"],
         Some("solid.thread") => &["modeled"],
         Some("solid.move") => &["copy"],
-        Some("solid.coil") => &["section", "section_position", "start_angle", "clockwise"],
+        Some("solid.coil") => &["section", "section_position", "start_angle", "taper", "clockwise"],
         _ => &[],
     }
 }
@@ -8402,6 +8402,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             section,
             position,
             start_angle,
+            taper,
             clockwise,
             operation,
             targets,
@@ -8437,6 +8438,9 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             };
             if let Some(a) = start_angle {
                 d.extra.insert("start_angle".into(), json!(a.to_string()));
+            }
+            if let Some(a) = taper {
+                d.extra.insert("taper".into(), json!(a.to_string()));
             }
             if *clockwise {
                 d.extra.insert("clockwise".into(), json!(true));

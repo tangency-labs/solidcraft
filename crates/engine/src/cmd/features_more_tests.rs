@@ -2827,6 +2827,68 @@ fn coil_from_a_sketch_profile_sweeps_its_plane() {
     assert!((b["max"][2].as_f64().unwrap_or(f64::NAN) - 24.5).abs() < 1e-6, "{m}");
 }
 
+/// solidcraft#4735: `taper` makes the radius grow by `pitch · tan(taper)` per turn; Pappus gives
+/// V = A · 2π · (R0 · n + c · n² / 2) for a circular section of area A.
+#[test]
+fn a_tapered_coil_follows_a_cone() {
+    use std::f64::consts::PI;
+    let (pitch, n, a) = (8.0, 3.0, PI * 4.0);
+    for (deg, want) in [(5.0_f64, 4986.09), (-5.0, 4488.73), (0.0, 4738.1)] {
+        let mut s = Session::default();
+        run(&mut s, "solid.coil", json!({"diameter": 40, "revolutions": n, "pitch": pitch, "section_size": 4, "taper": format!("{deg} deg")}));
+        let c = pitch * deg.to_radians().tan();
+        let pappus = a * 2.0 * PI * (20.0 * n + c * n * n / 2.0);
+        assert!(rel(volume(&mut s), pappus) < 1e-3, "{deg} deg: {} vs {pappus}", volume(&mut s));
+        assert!(rel(volume(&mut s), want) < 1e-3, "{deg} deg: {} vs {want}", volume(&mut s));
+    }
+    // The hand of the coil does not flip the taper: a left-handed coil widens too.
+    let mut s = Session::default();
+    run(&mut s, "solid.coil", json!({"diameter": 40, "revolutions": n, "pitch": pitch, "section_size": 4, "taper": "5 deg", "clockwise": true}));
+    assert!(rel(volume(&mut s), 4986.09) < 1e-3, "{}", volume(&mut s));
+}
+
+#[test]
+fn a_tapered_coil_from_a_sketch_profile_widens() {
+    use std::f64::consts::PI;
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Section"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, -0.5], "p1": [11, 0.5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.coil", json!({"sketch": "Section", "revolutions": 3, "pitch": 8, "taper": "5 deg"}));
+    let c = 8.0 * 5.0_f64.to_radians().tan();
+    let want = 2.0 * PI * 1.0 * (10.5 * 3.0 + c * 9.0 / 2.0);
+    assert!(rel(volume(&mut s), want) < 1e-3, "{} vs {want}", volume(&mut s));
+}
+
+#[test]
+fn a_taper_that_leaves_the_axis_or_the_range_is_refused() {
+    let mut s = Session::default();
+    let base = json!({"diameter": 40, "revolutions": 3, "pitch": 8, "section_size": 4});
+    for taper in ["85 deg", "-85 deg"] {
+        let mut p = base.clone();
+        p["taper"] = json!(taper);
+        let e = s.execute("solid.coil", &p).unwrap_err().to_string();
+        assert!(e.contains("80"), "{taper}: {e}");
+    }
+    // 20 mm of radius, 8 mm of pitch, 3 turns: -80 degrees closes in by 136 mm.
+    let mut p = base.clone();
+    p["taper"] = json!("-80 deg");
+    let e = s.execute("solid.coil", &p).unwrap_err().to_string();
+    assert!(e.contains("axis"), "{e}");
+    assert!(s.world_state().unwrap().bodies.is_empty(), "nothing was built");
+}
+
+#[test]
+fn a_coil_never_panics_on_a_hostile_taper() {
+    let mut s = Session::default();
+    for hostile in [json!(true), json!(1e308), json!(-1e308), json!("nope"), json!([]), json!("90 deg"), json!("1e308 deg"), json!("nan"), json!({})]
+    {
+        let p = json!({"diameter": 40, "revolutions": 3, "pitch": 8, "section_size": 4, "taper": hostile});
+        let result = s.execute("solid.coil", &p);
+        assert!(!matches!(result, Err(crate::EngineError::Internal(..))), "taper {hostile} panicked: {result:?}");
+    }
+}
+
 #[test]
 fn coil_from_a_sketch_cuts_a_thread_groove() {
     use std::f64::consts::PI;

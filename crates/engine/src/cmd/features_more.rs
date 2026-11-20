@@ -39,7 +39,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         ),
     CommandSpec::new("solid.coil", "Coil", crate::checked!("solid.coil", coil)).at("SOLID", "CREATE").icon("coil").contract(&COIL_CONTRACT).output(output_schema_for::<FeatureResult>).params(
         "diameter; two of revolutions (or turns), height, pitch; section_size; section?: circular|square; section_position?: inside|center|outside; \
-         base?: [x,y,z] (numbers in mm or length expressions; default: the origin); axis?: X|Y|Z|[x,y,z] (default Z); start_angle?; clockwise?: bool; \
+         base?: [x,y,z] (numbers in mm or length expressions; default: the origin); axis?: X|Y|Z|[x,y,z] (default Z); start_angle?; taper? (cone angle, -80..80 deg: the radius grows by pitch*tan(taper) per turn; default 0); clockwise?: bool; \
          sketch? (a sketch; its plane is the section plane, so its placement sets the radius and start phase), profiles? (default: all; one closed profile without holes); \
          operation?, targets?, name?, body_name?",
     ),
@@ -143,6 +143,10 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(a) = &start_angle {
         check_expr(s, a, Kind::Angle, cmd, "start_angle")?;
     }
+    let taper = expr(p, "taper");
+    if let Some(a) = &taper {
+        check_expr(s, a, Kind::Angle, cmd, "taper")?;
+    }
     let clockwise = bool_(p, "clockwise").unwrap_or(false);
     let operation = super::features::operation(p, cmd)?;
     add_feature(
@@ -160,6 +164,7 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
             section,
             position,
             start_angle,
+            taper,
             clockwise,
             operation,
             targets: string_list(cmd, p, "targets")?.into_iter().map(BodyName).collect(),

@@ -163,6 +163,23 @@ mod tests {
         assert!(sweep_helix(&pl, &region, Vec3::ZERO, Vec3::ZERO, 8.0, 3.0).is_err());
     }
 
+    /// solidcraft#4735: a coil whose radius grows at a constant rate per turn is the radial
+    /// sweep with a two-point law. Pappus: V = A · 2π · (R0 · n + c · n² / 2), c = pitch · tan(taper).
+    #[test]
+    fn a_tapered_coil_is_a_radial_sweep_with_a_linear_law() {
+        let pl = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Z };
+        let region = Region2 { outer: Loop2::circle(Vec2::new(20.0, 0.0), 2.0), holes: vec![] };
+        let (pitch, turns) = (8.0_f64, 3.0_f64);
+        for deg in [5.0_f64, -5.0] {
+            let c = pitch * deg.to_radians().tan();
+            let law = [(0.0, 0.0), (turns, c * turns)];
+            let b = sweep_helix_radial(&pl, &region, Vec3::ZERO, Vec3::Z, pitch, turns, &law, true).unwrap();
+            let v = crate::measure(&b).unwrap().volume;
+            let want = std::f64::consts::PI * 4.0 * std::f64::consts::TAU * (20.0 * turns + c * turns * turns / 2.0);
+            assert!((v - want).abs() / want < 1e-3, "{deg} deg: {v} vs {want}");
+        }
+    }
+
     #[test]
     fn pyramid() {
         let pl = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Y };
