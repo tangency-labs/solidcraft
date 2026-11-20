@@ -39,6 +39,28 @@
 //!   resets before reuse), instead of failing on the index. This copies an upstream defect
 //!   on purpose (UB-256,
 //!   `plan/upstream-issues/UB-256--insert-point-class-stale-interval-reference.md`).
+//! - **3D-distinct snaps (solidcore-native).** `FindInterval` snaps a parameter within
+//!   `SM_EFF_ZERO_PARAM` of an interval end to that end only when it is not strictly
+//!   inside the interval at a 3D distance of at least the pair intersection tolerance
+//!   (and more than the curve's scaled zero) from the end's point; such a parameter goes
+//!   on to the 3D tests (an interior point). Without a curve, or when that distance,
+//!   tolerance or scaled zero cannot be computed, upstream's snap stands (no new error;
+//!   unported, cancelled and uncertified still propagate).
+//!   Upstream snaps on the parameter alone, which on a fast-parametrised curve (a loop
+//!   bisector over an infinite cylinder's ±1234567 axial range) merged two edge
+//!   crossings 3.5e-3 apart and lost a loop crossing (#18342).
+//! - **Coincident vertices keep the first (solidcore-native).** When `InsertPointClass`
+//!   merges a vertex into a boundary held by another vertex, both gaps are zero to the
+//!   scaled zero of the boundary's vertex and their pre-snap parameters agree to the
+//!   parameter's scaled zero, the boundary keeps the vertex it has. Both `Combine` calls
+//!   (the boundary and its neighbour) still run; only their gap comparison is changed:
+//!   the input is given the gap of the boundary it merges into, so the two zero gaps
+//!   compare as equal and `Combine` keeps the boundary (`This`), copying the input's
+//!   surf/surf/surf point and moving the vertex to it as upstream does on a tie. The
+//!   neighbour is tied only when it holds the same vertex; any other neighbour (one still
+//!   unknown, say) is merged as upstream. Upstream compares the two gaps as they are,
+//!   rounding noise: which loop owned a seam crossing then changed with the model's
+//!   scale (#18342, `query.face_p4` gen0381).
 //! - **Out-params.** `FindInterval` returns a [`FoundInterval`]; `InsertPointClass` returns
 //!   `rbInsertionMade`; `sm_ChangeEdgePointClassToNearVertex` returns
 //!   `rbChangedToVertexFlag`; `MergePointClass`'s optional output arrays are
@@ -78,7 +100,7 @@ use crate::geom::geom_utility::p1::line_closest_point;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::tol::{
     are_parallel, are_same, are_same_to_tol, eff_zero_param, eff_zero_sq, is_zero_to_tol,
-    scaled_zero_sqrt_of, xsect_tol_3d_from_zones, ScaledZero,
+    scaled_zero_of_curve, scaled_zero_sqrt_of, xsect_tol_3d_from_zones, ScaledZero,
 };
 use crate::intersect::curve_class::p1::{
     object_dimension, src_zone_tol_3d_of, xsect_tol_2d_or_3d_for_classify_pair,
@@ -254,6 +276,27 @@ pub(super) fn are_coincident_maybe<O: ClassObject>(
         CoincidentMaybe::Unsure => Coincident::Unsure,
     };
     Ok((coin, position))
+}
+
+/// (not upstream) `input`, with the gap of the boundary `kept` when `tie` is set. Two
+/// vertices whose gaps are both zero to the scaled zero then compare as equal in
+/// `Combine`: the boundary keeps its vertex (`This`), and `Combine` still copies the
+/// input's surf/surf/surf point (and moves the vertex there) as upstream does on a tie.
+fn tied_to<O: ClassObject>(
+    input: &PointClassification<O>,
+    kept: &PointClassification<O>,
+    tie: bool,
+) -> PointClassification<O> {
+    let mut tied = *input;
+    if tie {
+        tied.set_gap_3d(kept.deviation());
+    }
+    tied
+}
+
+/// Whether the boundary `pc` is classified to the vertex `object`.
+fn holds_vertex<O: ClassObject>(pc: &PointClassification<O>, object: Option<O>) -> bool {
+    pc.point_class() == PointClassType::Vertex && object.is_some() && pc.object() == object
 }
 
 /// `SmCurveClassification::InsertAt(index, interval)`.
@@ -601,14 +644,34 @@ impl<O: ClassObject> CurveClassification<O> {
             }
 
             // done - when parameter is effectively equal to interval max - SM_IP_END
-            if param > ivl.max() - eff_zero_param {
+            // (unless it is strictly inside and a distinct point in 3D: see below)
+            if param > ivl.max() - eff_zero_param
+                && !self.distinct_from_end(
+                    k,
+                    geometry,
+                    test,
+                    param,
+                    param_obj_zone_tol_3d,
+                    IntervalPosition::End,
+                )?
+            {
                 out.index = i;
                 out.position = IntervalPosition::End;
                 return Ok(());
             }
 
             // done - when parameter is effectively equal to interval min - SM_IP_START
-            if param >= ivl.min() - eff_zero_param && param < ivl.min() + eff_zero_param {
+            if param >= ivl.min() - eff_zero_param
+                && param < ivl.min() + eff_zero_param
+                && !self.distinct_from_end(
+                    k,
+                    geometry,
+                    test,
+                    param,
+                    param_obj_zone_tol_3d,
+                    IntervalPosition::Start,
+                )?
+            {
                 out.index = i;
                 out.position = IntervalPosition::Start;
                 return Ok(());
@@ -712,6 +775,81 @@ impl<O: ClassObject> CurveClassification<O> {
             OP_FIND,
             "no interval holds the parameter",
         ))
+    }
+
+    /// Whether `param`, which `FindInterval` would snap to the `end` (start or end) of
+    /// interval `test` because it is within `SM_EFF_ZERO_PARAM` of it in parameter, is
+    /// strictly inside the interval and yet a distinct point in 3D: the curve point at
+    /// `param` is at least the pair intersection tolerance (`XSectTol3d` of the
+    /// parameter's object and the end's object, mapped to working space) away from the
+    /// curve point at the interval end, and more than the curve's scaled zero
+    /// (`SmTol::GetScaledZero` of the curve: `SM_EFF_ZERO` times its size), below which
+    /// its evaluation cannot tell points apart. Such a point is classified by the 3D
+    /// tests that follow instead of being snapped.
+    ///
+    /// Without a classification curve, or when a tolerance, point or scaled zero cannot
+    /// be computed, it answers `false` and upstream's parameter snap stands, as upstream
+    /// needed none of them to snap: a failure of this extra measurement is never a new
+    /// error of `FindInterval`. The exceptions propagate, as elsewhere in this file: an
+    /// unported callee, a cancellation or a certification refusal
+    /// (`SolidError::is_unported_or_cancelled`) is never answered for.
+    ///
+    /// A parameter tolerance alone cannot tell points apart on a fast-parametrised
+    /// curve: a loop bisector across an infinite cylinder spans the ±1234567 sentinel
+    /// axial range over [0, 1], so 1.2e-8 in parameter is 0.03 in 3D. There two
+    /// circle edges 3.5e-3 apart (a 3.5e-3 tall face at scale 1e-3) were snapped to
+    /// one boundary and merged, dropping a loop crossing.
+    fn distinct_from_end(
+        &self,
+        k: &Kernel,
+        geometry: &impl ClassGeometry<O>,
+        test: &CurveInterval<O>,
+        param: f64,
+        param_obj_zone_tol_3d: f64,
+        end: IntervalPosition,
+    ) -> Result<bool> {
+        let ivl = test.interval;
+        // only a parameter strictly inside the interval can become an interior point
+        if !(param > ivl.min() && param < ivl.max()) {
+            return Ok(false);
+        }
+        // a classification without a resolvable curve has no 3D separation to measure:
+        // keep upstream's parameter snap (which needs no curve)
+        let Some(curve) = self.curve().and_then(|c| geometry.curve(c)) else {
+            return Ok(false);
+        };
+        let (end_param, end_pc) = if end == IntervalPosition::Start {
+            (ivl.min(), &test.start)
+        } else {
+            (ivl.max(), &test.end)
+        };
+        // any failure to measure keeps upstream's snap, which needed none of these
+        let measured = || -> Result<bool> {
+            let tol = pair_tol(
+                k,
+                geometry,
+                self,
+                OP_FIND,
+                param,
+                param_obj_zone_tol_3d,
+                end_param,
+                end_pc.obj_zone_tol_3d(k, geometry)?,
+            )?;
+            let end_pt = curve.evaluate_point(k, end_param)?;
+            let classify_pt = curve.evaluate_point(k, param)?;
+            let dist = classify_pt.distance(end_pt);
+            if dist < tol {
+                return Ok(false);
+            }
+            // and beyond the curve's scaled zero (its size times SM_EFF_ZERO): closer
+            // points are not told apart by its evaluation
+            Ok(dist > scaled_zero_of_curve(k, curve)?)
+        };
+        match measured() {
+            Ok(distinct) => Ok(distinct),
+            Err(e) if e.is_unported_or_cancelled() => Err(e),
+            Err(_) => Ok(false),
+        }
     }
 
     /// The point classification at curve parameter `param`
@@ -967,6 +1105,10 @@ impl<O: ClassObject> CurveClassification<O> {
         // PointClassifications on existing boundaries are merged not inserted.
         // This big if-statement will check those cases on existing boundaries.
 
+        // (not upstream) whether the merge below compares the input as tied with the
+        // boundary: set for two vertices that are indistinguishable
+        let mut keep_found = false;
+
         // when inserting point param is on a boundary and Insertion is to be computed
         if !do_insertion
             && (position == IntervalPosition::Start || position == IntervalPosition::End)
@@ -1094,8 +1236,20 @@ impl<O: ClassObject> CurveClassification<O> {
                         // schedule insertion of new point at InputPreSnapParam
                         curve_param = pt_class_pre_snap_param;
                         do_insertion = true;
+                    } else {
+                        // the preSnap parameters are the same (upstream: SE_MSG only).
+                        // Not upstream: keep the found vertex. Upstream merges, and
+                        // `Combine` then keeps the vertex with the smaller gap; both gaps
+                        // are zero to the scaled zero tested above, so that comparison
+                        // orders rounding noise, and the vertex (hence the loop) that owns
+                        // this crossing changed with the model's scale (query.face_p4
+                        // gen0381: at scale 1e-3 the gaps 2.2e-19 and 0 kept the second
+                        // vertex, at scale 1 the gaps 2.2e-16 and 8.9e-16 the first). The
+                        // first vertex inserted is kept: the insertion order follows the
+                        // topology, which is the same at every scale. The merge below still
+                        // runs `Combine`, with the input tied to the boundary's gap.
+                        keep_found = true;
                     }
-                    // else the preSnap parameters are the same: SE_MSG only
                 }
                 // When the input PtClass Deviation is effectively zero and the found
                 // PtClass Deviation is large - replace the found PtClass with the input
@@ -1297,7 +1451,9 @@ impl<O: ClassObject> CurveClassification<O> {
         // when merging a start boundary point classification
         else if position == IntervalPosition::Start {
             let found_ivl = self.at_mut(index)?;
-            if a.combine(&mut found_ivl.start, point_class)? == Precedence::Other {
+            let found_object = found_ivl.start.object();
+            let input = tied_to(point_class, &found_ivl.start, keep_found);
+            if a.combine(&mut found_ivl.start, &input)? == Precedence::Other {
                 found_ivl.start = *point_class;
             }
             insertion_made = true;
@@ -1305,7 +1461,9 @@ impl<O: ClassObject> CurveClassification<O> {
             // remember to merge the neighbor interval's boundary point
             if index > 0 {
                 let found2 = self.at_mut(index - 1)?;
-                if a.combine(&mut found2.end, point_class)? == Precedence::Other {
+                let tie = keep_found && holds_vertex(&found2.end, found_object);
+                let input = tied_to(point_class, &found2.end, tie);
+                if a.combine(&mut found2.end, &input)? == Precedence::Other {
                     found2.end = *point_class;
                 }
             }
@@ -1313,7 +1471,9 @@ impl<O: ClassObject> CurveClassification<O> {
         // when merging an end boundary point classification
         else if position == IntervalPosition::End {
             let found_ivl = self.at_mut(index)?;
-            if a.combine(&mut found_ivl.end, point_class)? == Precedence::Other {
+            let found_object = found_ivl.end.object();
+            let input = tied_to(point_class, &found_ivl.end, keep_found);
+            if a.combine(&mut found_ivl.end, &input)? == Precedence::Other {
                 found_ivl.end = *point_class;
             }
             insertion_made = true;
@@ -1321,7 +1481,9 @@ impl<O: ClassObject> CurveClassification<O> {
             // remember to merge the neighbor interval's boundary point
             if index + 1 < self.size() {
                 let found2 = self.at_mut(index + 1)?;
-                if a.combine(&mut found2.start, point_class)? == Precedence::Other {
+                let tie = keep_found && holds_vertex(&found2.start, found_object);
+                let input = tied_to(point_class, &found2.start, tie);
+                if a.combine(&mut found2.start, &input)? == Precedence::Other {
                     found2.start = *point_class;
                 }
             }
@@ -2304,19 +2466,28 @@ fn piece_within_band(
     edge_params: [f64; 2],
     band: f64,
 ) -> bool {
-    let [s0, s1] = edge_params;
-    let (Some(c), Some(e)) = (
-        curve.piece_hull_points(interval),
-        edge_curve.piece_hull_points(&Extent1d::from_min_max(s0.min(s1), s0.max(s1))),
-    ) else {
-        return false;
-    };
-    let (Some(&(a, ea)), Some(&(b, eb))) = (c.first(), c.last()) else {
-        return false;
-    };
-    let (Some(&first), Some(&last)) = (e.first(), e.last()) else {
-        return false;
-    };
+    pieces_apart_bound(curve, interval, edge_curve, edge_params).is_some_and(|d| d < band)
+}
+
+/// Not upstream: a bound `d` such that every point of `curve` over `interval` is within `d`
+/// of the piece of `other` between `other_params` and every point of that piece within `d`
+/// of the curve over `interval`, the first of `other_params` paired with `interval`'s start;
+/// the sum [`piece_within_band`] compares (its docs). Both directions hold: the curve piece
+/// lies within `dev_c` of its chord and its chord within `dev_c` of it (the projection onto
+/// the chord's line covers the chord), the two chords within the end gaps of each other at
+/// every fraction, and likewise for the other piece. `None` when either piece has no
+/// certified hull; NaN propagates.
+fn pieces_apart_bound(
+    curve: &Curve,
+    interval: &Extent1d,
+    other: &Curve,
+    other_params: [f64; 2],
+) -> Option<f64> {
+    let [s0, s1] = other_params;
+    let c = curve.piece_hull_points(interval)?;
+    let e = other.piece_hull_points(&Extent1d::from_min_max(s0.min(s1), s0.max(s1)))?;
+    let (&(a, ea), &(b, eb)) = (c.first()?, c.last()?);
+    let (&first, &last) = (e.first()?, e.last()?);
     // the edge piece's end at the curve's start first
     let ((a2, ea2), (b2, eb2)) = if s0 <= s1 {
         (first, last)
@@ -2343,8 +2514,75 @@ fn piece_within_band(
     } else {
         gap_b
     };
-    let total = (dev_c + ends + dev_e) * (1.0 + gamma(3));
-    total < band
+    Some((dev_c + ends + dev_e) * (1.0 + gamma(3)))
+}
+
+/// Pieces [`curve_runs_along`] bounds before it refuses.
+const RUN_ALONG_PIECES: usize = 1024;
+
+/// Not upstream (WR-580): whether `curve` over `interval` and `other` over `other_interval`
+/// lie within `tol` of each other as wholes, each point of either within `tol` of a point of
+/// the other (their Hausdorff distance); decided on control points, never on samples.
+///
+/// The two are cut into pieces paired end to end, the curve's start with the end of `other`
+/// whose point is nearer to it; a pair is proved by [`pieces_apart_bound`] (each piece within
+/// its control points' distance from its chord, the chords within their end gaps). A pair
+/// whose bound is not below `tol` is halved: the curve at its middle parameter, `other` at the
+/// drop of the curve's middle point onto its piece. The drop only chooses where `other` is
+/// cut; any cut gives pieces that cover both curves, so the bound holds whatever it returns.
+/// Every pair proved, the curves are within `tol`. A pair that cannot be cut any further, a
+/// failed drop, a curve of a kind with no certified hull, or more than [`RUN_ALONG_PIECES`]
+/// pairs bounded proves nothing: `false`.
+///
+/// # Errors
+///
+/// Those of the evaluations and of the drops.
+pub(crate) fn curve_runs_along(
+    k: &Kernel,
+    curve: &Curve,
+    interval: &Extent1d,
+    other: &Curve,
+    other_interval: &Extent1d,
+    tol: f64,
+) -> Result<bool> {
+    let (t0, t1) = (interval.min(), interval.max());
+    let (u0, u1) = (other_interval.min(), other_interval.max());
+    let start = curve.evaluate_point(k, t0)?;
+    let reversed =
+        start.distance(other.evaluate_point(k, u1)?) < start.distance(other.evaluate_point(k, u0)?);
+    let (s0, s1) = if reversed { (u1, u0) } else { (u0, u1) };
+    let mut pending = vec![(t0, t1, s0, s1)];
+    let mut bounded = 0_usize;
+    while let Some((t0, t1, s0, s1)) = pending.pop() {
+        let piece = Extent1d::from_min_max(t0, t1);
+        // written so that a NaN bound refuses
+        if pieces_apart_bound(curve, &piece, other, [s0, s1]).is_some_and(|d| d < tol) {
+            continue;
+        }
+        bounded += 1;
+        let tm = 0.5 * (t0 + t1);
+        if bounded > RUN_ALONG_PIECES || !(t0 < tm && tm < t1) {
+            return Ok(false);
+        }
+        let mid = curve.evaluate_point(k, tm)?;
+        let (lo, hi) = (s0.min(s1), s0.max(s1));
+        let dropped = other.drop_point(
+            k,
+            &Extent1d::from_min_max(lo, hi),
+            mid,
+            None,
+            tol,
+            None,
+            SolverOperation::Minimize,
+        )?;
+        let sm = dropped.parameter;
+        if !(dropped.success && lo < sm && sm < hi) {
+            return Ok(false);
+        }
+        pending.push((tm, t1, sm, s1));
+        pending.push((t0, tm, s0, sm));
+    }
+    Ok(true)
 }
 
 /// An upper bound of the distance from `q` to the segment `[a, b]`: the distance to its
@@ -2524,6 +2762,68 @@ mod tests {
             .find_interval(&k, &geo, 1.5, BIG_DOUBLE, tol)
             .expect("inside");
         assert_eq!((r.index, r.position), (1, IntervalPosition::Inside));
+    }
+
+    /// #18342: on a line 2 469 134 long over [0, 1] (a loop bisector across an
+    /// infinite cylinder's ±1234567 axial sentinel range), a parameter 1.43e-9 inside
+    /// an interval end is within `SM_EFF_ZERO_PARAM` of it yet 3.5e-3 away in 3D: it is
+    /// an interior point, not that end. Within the 3D tolerance it still snaps.
+    #[test]
+    fn find_interval_does_not_snap_a_3d_distinct_point_on_a_fast_curve() {
+        let k = Kernel::default();
+        let line = Line::from_points(
+            Point3::new(0.0, 0.0, 1_234_567.0),
+            Point3::new(0.0, 0.0, -1_234_567.0),
+            3,
+        );
+        let geo = Geo(vec![Curve::from(line)]);
+        let mut cc = CurveClassification::<H>::new(&k);
+        cc.set_curve(Some(H(0, ClassObjectKind::Curve)), false);
+        cc.set_size(&k, 2).expect("size");
+        for (i, w) in [0.0, 0.5, 1.0].windows(2).enumerate() {
+            cc.at_mut(i).expect("interval").interval = Extent1d::from_min_max(w[0], w[1]);
+        }
+        let tol = 1e-7;
+        // 3.538e-3 above the end at 0.5 (z = 0): a distinct point inside interval 0
+        let far = 0.5 - 3.538e-3 / 2_469_134.0;
+        assert!(0.5 - far < crate::math::EFF_ZERO_PARAM);
+        let r = cc
+            .find_interval(&k, &geo, far, BIG_DOUBLE, tol)
+            .expect("far");
+        assert_eq!((r.index, r.position), (0, IntervalPosition::Inside));
+        // the same distance past the end, at the start of interval 1
+        let far = 0.5 + 3.538e-3 / 2_469_134.0;
+        let r = cc
+            .find_interval(&k, &geo, far, BIG_DOUBLE, tol)
+            .expect("far");
+        assert_eq!((r.index, r.position), (1, IntervalPosition::Inside));
+        // 1e-9 in 3D: the same point, snapped as before
+        let near = 0.5 - 1e-9 / 2_469_134.0;
+        let r = cc
+            .find_interval(&k, &geo, near, BIG_DOUBLE, tol)
+            .expect("near");
+        assert_eq!((r.index, r.position), (0, IntervalPosition::End));
+    }
+
+    #[test]
+    fn find_interval_snaps_on_the_parameter_without_a_curve() {
+        // no classification curve: no 3D separation to measure, so upstream's
+        // parameter snap stands instead of failing on the missing curve
+        let k = Kernel::default();
+        let geo = Geo(Vec::new());
+        let mut cc = CurveClassification::<H>::new(&k);
+        cc.set_size(&k, 2).expect("size");
+        for (i, w) in [0.0, 0.5, 1.0].windows(2).enumerate() {
+            cc.at_mut(i).expect("interval").interval = Extent1d::from_min_max(w[0], w[1]);
+        }
+        let r = cc
+            .find_interval(&k, &geo, 0.5 - 1e-9, BIG_DOUBLE, 1e-6)
+            .expect("snaps to the end");
+        assert_eq!((r.index, r.position), (0, IntervalPosition::End));
+        let r = cc
+            .find_interval(&k, &geo, 0.5 + 1e-9, BIG_DOUBLE, 1e-6)
+            .expect("snaps to the start");
+        assert_eq!((r.index, r.position), (1, IntervalPosition::Start));
     }
 
     #[test]

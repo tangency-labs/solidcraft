@@ -378,10 +378,16 @@ impl Sketch {
             .filter_map(|(k, p)| Some((self.points.get(id_point(k)?)?.id.clone(), self.points.get(*p)?.id.clone())))
             .collect();
         let mut curve_ids: BTreeMap<String, String> = BTreeMap::new();
+        // A new curve that is an old one keeps how the sketch used it: a projected outline set to
+        // construction stays out of profiles (#17732).
+        let mut curve_flags: BTreeMap<String, (bool, bool)> = BTreeMap::new();
         // The halves of a circle that is one curve now: the first half's id names the circle.
         let matched = curve_map.iter().map(|(k, (j, _))| (k, j));
         for (k, j) in arcs_on_circles.iter().chain(matched).chain(&id_curves) {
             if let (Some(new), Some(old)) = (self.curves.get(first_curve + j), curves.get(*k).and_then(|c| self.curves.get(*c))) {
+                if !curve_ids.contains_key(&new.id) {
+                    curve_flags.insert(new.id.clone(), (old.construction, old.centerline));
+                }
                 curve_ids.entry(new.id.clone()).or_insert_with(|| old.id.clone());
             }
         }
@@ -395,6 +401,9 @@ impl Sketch {
             }
         }
         for c in &mut self.curves {
+            if let Some((construction, centerline)) = curve_flags.get(&c.id) {
+                (c.construction, c.centerline) = (*construction, *centerline);
+            }
             if let Some(old) = curve_ids.get(&c.id) {
                 c.id.clone_from(old);
             }

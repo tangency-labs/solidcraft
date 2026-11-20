@@ -1923,7 +1923,10 @@ fn read_old_composite(
 /// `SM_ERR` for another type up to version 32; those of
 /// [`OffsetSurface::new`] for an offset surface; [`SolidError::InvalidInput`] for an attribute index past the table (upstream reads
 /// past the array), an ASCII type header that could not be read, or an exhausted
-/// [`AttributeSink`] key domain; those of the surface readers.
+/// [`AttributeSink`] key domain; `SM_ERR` for a procedural blend whose net is not proved
+/// within its bound of its definition again (not upstream: the read surface is an
+/// operand, [`crate::surface::procedural_blend::ProceduralBlend::recertify`]); those of
+/// the surface readers.
 pub fn read_surface_from_db(
     k: &Kernel,
     version: u64,
@@ -1975,6 +1978,22 @@ pub fn read_surface_from_db(
             }
         }
     };
+
+    // not upstream (§7 invariant 8): a blend by its definition read from a record is an
+    // operand only once its net is proved within its bound of its definition again; a
+    // record whose net is not is refused (a cancel, or a spent certificate budget, passes
+    // through as it is)
+    if let Some(blend) = surface.procedural_blend() {
+        blend.recertify(k).map_err(|e| {
+            if e.is_cancelled() || e.is_not_certified() {
+                return e;
+            }
+            SolidError::topology_failed(
+                OP_SURFACE,
+                "a procedural blend's net is not proved within its bound of its definition",
+            )
+        })?;
+    }
 
     // for current versions - read attributes
     if version > 30 && persist_attribs {

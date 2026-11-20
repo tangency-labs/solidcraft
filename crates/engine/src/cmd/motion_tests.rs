@@ -3,6 +3,7 @@ use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
 
 use crate::Session;
+use crate::tests::png_size;
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     match s.execute(id, &p) {
@@ -945,12 +946,6 @@ fn gif_frames(gif: &[u8]) -> (usize, usize, usize) {
             b => panic!("unexpected GIF block {b:#x}"),
         }
     }
-}
-
-/// A PNG's width and height (its IHDR).
-fn png_size(png: &[u8]) -> (u32, u32) {
-    let be = |i: usize| u32::from_be_bytes([png[i], png[i + 1], png[i + 2], png[i + 3]]);
-    (be(16), be(20))
 }
 
 #[test]

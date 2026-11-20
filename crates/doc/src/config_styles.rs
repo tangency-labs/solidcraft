@@ -12,6 +12,9 @@ pub(crate) fn shell_plane_family(planes: impl IntoIterator<Item = Option<solidco
     first.origin.is_finite() && first.x.is_finite() && first.y.is_finite() && planes.all(|plane| plane == Some(first))
 }
 
+/// The longest face or edge name a saved model reference keeps, in bytes.
+pub const MAX_REFERENCE_NAME_BYTES: usize = 512;
+
 /// Whether `value` is a literal 0 of `kind` (`0`, `0 mm`, `0 deg`). No parameter values are at
 /// hand here, so an expression that works out to 0 does not count.
 fn literal_zero(value: &str, kind: crate::expr::Kind) -> bool {
@@ -52,9 +55,9 @@ impl ConfigFaceTarget {
             certificate.validate()?;
         }
         if self.body.is_empty()
-            || self.body.len() > 128
+            || self.body.chars().count() > 128
             || self.name.is_empty()
-            || self.name.len() > 512
+            || self.name.len() > MAX_REFERENCE_NAME_BYTES
             || self.origin_feature == 0
             || [self.point.x, self.point.y, self.point.z].iter().any(|v| !v.is_finite() || v.abs() > 1e9)
         {
@@ -68,8 +71,8 @@ pub fn validate_face_target_json(target: &Value) -> Result<()> {
     let fields = target.as_object().ok_or_else(|| DocError::Invalid("face target must be an object".into()))?;
     if !(4..=5).contains(&fields.len())
         || fields.keys().any(|key| !["body", "origin_feature", "name", "point", "certificate"].contains(&key.as_str()))
-        || fields.get("body").and_then(Value::as_str).is_none_or(|body| body.is_empty() || body.len() > 128)
-        || fields.get("name").and_then(Value::as_str).is_none_or(|name| name.is_empty() || name.len() > 512)
+        || fields.get("body").and_then(Value::as_str).is_none_or(|body| body.is_empty() || body.chars().count() > 128)
+        || fields.get("name").and_then(Value::as_str).is_none_or(|name| name.is_empty() || name.len() > MAX_REFERENCE_NAME_BYTES)
         || fields.get("origin_feature").and_then(Value::as_u64).is_none_or(|id| id == 0)
         || fields.get("point").and_then(Value::as_array).is_none_or(|point| {
             point.len() != 3 || point.iter().any(|value| value.as_f64().is_none_or(|value| !value.is_finite() || value.abs() > 1e9))
@@ -106,8 +109,8 @@ pub fn validate_styles_json(value: &Value) -> Result<()> {
                 super::validate_certificate_json(certificate)?;
                 if !certificate.is_null()
                     && (face.get("strict_name").and_then(Value::as_bool) != Some(true)
-                        || face.get("body").and_then(Value::as_str).is_none_or(|body| body.is_empty() || body.len() > 128)
-                        || face.get("name").and_then(Value::as_str).is_none_or(|name| name.is_empty() || name.len() > 512)
+                        || face.get("body").and_then(Value::as_str).is_none_or(|body| body.is_empty() || body.chars().count() > 128)
+                        || face.get("name").and_then(Value::as_str).is_none_or(|name| name.is_empty() || name.len() > MAX_REFERENCE_NAME_BYTES)
                         || face.get("point").and_then(Value::as_array).is_none_or(|point| {
                             point.len() != 3 || point.iter().any(|value| value.as_f64().is_none_or(|value| !value.is_finite() || value.abs() > 1e9))
                         }))

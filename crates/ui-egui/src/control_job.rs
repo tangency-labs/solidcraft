@@ -47,7 +47,7 @@ use crate::control::ControlRequest;
 pub use solidcraft_control::{Cancel, Ticket};
 
 /// A stop flag for the work computing `ticket`'s request, which its cancel sets.
-fn progress_of(ticket: &Ticket) -> Arc<Progress> {
+pub(crate) fn progress_of(ticket: &Ticket) -> Arc<Progress> {
     let progress = Arc::new(Progress::default());
     let stop = Arc::clone(&progress);
     ticket.on_stop(move || stop.cancel());
@@ -116,8 +116,16 @@ const AHEAD_AREAS: &[&str] = &[
 const NAMES_A_FILE: &[&str] = &["path", "paths", "file", "files", "dir", "folder", "url", "out"];
 
 /// Commands that change nothing in the design and write a file: they run on a copy.
-const ANSWERED_ON_A_COPY: &[&str] =
-    &["file.export", "file.export_3mf", "file.export_obj", "file.export_step", "file.export_stl", "file.export_urdf", "file.save_mesh"];
+const ANSWERED_ON_A_COPY: &[&str] = &[
+    "file.export",
+    "file.export_3mf",
+    "file.export_obj",
+    "file.export_sdf",
+    "file.export_step",
+    "file.export_stl",
+    "file.export_urdf",
+    "file.save_mesh",
+];
 
 /// Commands that only read the design, which can take long on a large one (a measure of every
 /// body, an inspection that measures them, #4604; a clearance or interference check of every pair
@@ -126,6 +134,8 @@ const ANSWERED_ON_A_COPY: &[&str] =
 const READ_ON_A_COPY: &[&str] = &[
     "model.mesh",
     "plugin.inspect",
+    // Compiles the package's component to check it: tens of seconds for a large importer.
+    "plugin.check",
     "inspect.measure",
     "document.inspect",
     "inspect.clearance",
@@ -184,7 +194,17 @@ fn reading(req: &ControlRequest) -> Option<(&'static str, Value)> {
 
 /// Requests that change the design: they wait while one computes.
 pub(crate) fn changes_the_design(method: &str) -> bool {
-    matches!(method, "engine.execute" | "command" | "engine.script" | "engine.batch" | "document.import" | "document.saved")
+    matches!(
+        method,
+        "engine.execute"
+            | "command"
+            | "engine.script"
+            | "engine.batch"
+            | "document.import"
+            | "document.saved"
+            | "document.close"
+            | crate::control_joint_drive::METHOD
+    )
 }
 
 /// Whether `doc` is the design `session` shows, as it is or edited since (an undo step away).
@@ -252,11 +272,11 @@ fn label(app: &SolveApp, command: &str) -> String {
 
 /// Run `f` on a worker thread (with the request's folder scope, stopping early once `progress`
 /// is cancelled), answering on the returned channel. `None` without threads (the web).
-fn spawn(
+pub(crate) fn spawn<T: Send + 'static>(
     scope: Option<solidcraft_engine::io::vfs::PathScope>,
     progress: Arc<Progress>,
-    f: impl FnOnce() -> Option<Value> + Send + 'static,
-) -> Option<Receiver<Option<Value>>> {
+    f: impl FnOnce() -> T + Send + 'static,
+) -> Option<Receiver<T>> {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::Builder::new()
         .name("agent".into())
@@ -823,7 +843,13 @@ impl SolveApp {
                         // Move the redo stack instead of cloning the whole history on the window thread.
                         let redo = std::mem::take(&mut self.session.redo);
                         let replies = self.session.accept_commands(prepared);
-                        if replies.is_err() || Arc::ptr_eq(&before, &self.session.doc) {
+                        // A read or a failed run leaves this design's document as it was, so the
+                        // Start page stays up. An edit that landed shows this design, as clicking
+                        // its tab does (`documents::switch`). The dialog only runs on the session
+                        // it was opened on, so the cover that closes is that design's.
+                        if replies.is_ok() && !Arc::ptr_eq(&before, &self.session.doc) {
+                            self.home.open = false;
+                        } else {
                             self.session.redo = redo;
                         }
                         replies.map_err(|_| self.tr("ui.plugin_context_changed").to_string())
@@ -838,6 +864,9 @@ impl SolveApp {
                     }
                 }
                 crate::render_workspace::apply_command(self, "plugin.run", &reply)?;
+                // After the new geometry is in the live session, including a run that did not
+                // change the document. `accept_computed` does not copy the camera.
+                self.apply_plugin_view(&reply, None);
                 Ok(reply)
             });
             let result = self.command_completed("plugin.run", result);
@@ -919,6 +948,33 @@ impl SolveApp {
                 }
                 Err(TryRecvError::Empty) => i += 1,
             }
+        }
+    }
+
+    /// Move the camera the way the matching button does, for the last view command the plugin called.
+    pub(crate) fn apply_plugin_view(&mut self, reply: &Value, preview_bounds: Option<solidcraft_engine::geom::Aabb3>) {
+        let Some(kind) = reply.get("view").and_then(|view| view.get("kind")).and_then(Value::as_str) else { return };
+        match kind {
+            "fit" | "home" => {
+                if let Some(bounds) = preview_bounds {
+                    self.frame_view_bounds(kind == "home", Some(bounds));
+                } else {
+                    let id = if kind == "home" { "view.home" } else { "view.fit" };
+                    let _ = self.command_completed(id, Ok(json!({})));
+                }
+            }
+            "camera" => {
+                let Some(value) = reply.pointer("/view/camera").filter(|value| !value.is_null()) else { return };
+                let Ok(camera) = serde_json::from_value::<solidcraft_viewport::Camera>(value.clone()) else { return };
+                self.session.camera = Some(camera);
+                self.follow_view_request(true);
+            }
+            "navigate" => {
+                if let Some(inner) = reply.pointer("/view/reply").cloned() {
+                    let _ = self.command_completed("view.navigate", Ok(inner));
+                }
+            }
+            _ => {}
         }
     }
 }

@@ -68,9 +68,8 @@
 //!   [`SolidError::Unported`], which always propagates (also where
 //!   `FindInteriorCurves` skips a node pair whose `ComputePointValues` fails).
 //!   As the fork does (#483; fork e7ebc8d, since #2009), a failed alignment angle
-//!   aligns nothing; with `brep_edit_statuses_pass_on` the node boxes' intersection
-//!   and `tp_Newton`'s grown patches pass their statuses on. The intersector captures
-//!   that policy on construction. Public point computation
+//!   aligns nothing, and the node boxes' intersection and `tp_Newton`'s grown patches
+//!   pass their statuses on. Public point computation
 //!   retains its documented `SM_ERR` normalization of singularity failures.
 //! - **Base virtuals.** `FindInteriorCurves` calls the base `ComputePointValues` and
 //!   `TraceCurve` ([`SurfaceIntersector`] parts 2 and 4); the only virtual they reach
@@ -86,21 +85,19 @@
 //!   (cyclic tree links, which recurse forever upstream) is
 //!   [`SolidError::InvalidInput`], as is nesting past the base solver's
 //!   [`MAX_SOLVE_DEPTH`](crate::geom::global_solver::MAX_SOLVE_DEPTH).
-//! - **Tangential contact points** (not upstream, WR-74, tangency-labs/solidcore#394,
-//!   opt-in `Kernel::fixes.ssi_tangent_contact_points`, off by default). The node
+//! - **Tangential contact points** (not upstream, WR-74, tangency-labs/solidcore#394).
+//!   The node
 //!   pairs `FindInteriorCurves` drops (normals within 5 degrees, no local
 //!   intersection, normals within 2 degrees at the solution) seed the SolidCraft
 //!   fork's search for isolated tangential contacts (`tangent_contacts`,
 //!   tangency-labs/smlib@c26edbc), run after the loop for a non-self intersection.
 //!   Its Newton iterations are bounded loops (8 + 25 steps), no recursion.
-//! - **Opt-in fix (WR-79 part 2, #396).** With
-//!   `Kernel::fixes.ssi_low_angle_start_on_probation` (off by default),
-//!   `FindInteriorCurves` traces a start point below the 5/2 degree normal-angle tests
-//!   on probation (the SolidCraft fork's tangency-labs/smlib@30d25bf): kept only as a
-//!   closed loop whose box diagonal exceeds twice the tolerance and that is not
-//!   tangent, coincident or touching; skipped below `2 tol / modelSize` radians;
-//!   rejected traces and their start points are remembered. Off, the port matches the
-//!   pinned C++.
+//! - **Fix (WR-79 part 2, #396).** `FindInteriorCurves` traces a start point below
+//!   the 5/2 degree normal-angle tests on probation (the SolidCraft fork's
+//!   tangency-labs/smlib@30d25bf) where upstream skips it: kept only as a closed loop
+//!   whose box diagonal exceeds twice the tolerance and that is not tangent,
+//!   coincident or touching; skipped below `2 tol / modelSize` radians; rejected
+//!   traces and their start points are remembered.
 //! - **Singular start direction** (not upstream, WR-512). A curve starting at a
 //!   singularity takes its first direction from the first singular direction that
 //!   points into both domains, whose angle is the search's `dAngleMin`, before the
@@ -108,6 +105,11 @@
 //!   direction. Upstream leaves the output at `aSingDirections[0]`, so where the first
 //!   inside direction is the nearest (or the only one) the curve starts along a
 //!   direction that need not point into either domain.
+//! - **Closure is no self intersection** (not upstream, #18117). A self intersection also
+//!   rejects two patches that are neighbours across the surface's closure (one at the start
+//!   and one at the end of a direction it closes in, meeting across it), as it rejects two
+//!   that share a side: upstream reports a closed surface's seam as a self intersection,
+//!   so a closed offset surface failed its own validity test.
 //! - **Not ported.** `Dump` and the `SM_DEBUG_CODE` drawing blocks; `SM_ASSERT`s.
 
 use crate::curve::conic::{Conic, ConicType};
@@ -238,10 +240,10 @@ pub struct AdvSurfaceIntersector<'s, 't, O> {
     /// Nesting depth of [`GlobalSolve::solve_branch`] (bounds the recursion on cyclic
     /// tree links).
     solve_depth: usize,
-    /// Not upstream (the fork's `m_vTangentSeeds`, opt-in
-    /// `Kernel::fixes.ssi_tangent_curve_tracer`, WR-75): the UV pairs where
+    /// Not upstream (the fork's `m_vTangentSeeds`, WR-75): the UV pairs where
     /// [`AdvSurfaceIntersector::find_interior_curves`] found the normals (nearly)
-    /// parallel, seeds of the tangential curve pass.
+    /// parallel, seeds of the tangential curve pass (none where that pass does not run,
+    /// [`AdvSurfaceIntersector::trivial_solution_in_both_domains`]).
     pub(crate) tangent_curve_seeds: Vec<[Point2; 2]>,
 }
 
@@ -582,11 +584,9 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
     /// per intersecting leaf pair, and traces a curve from each candidate whose
     /// normals are at least 5 degrees apart, whose local intersection succeeds with
     /// normals at least 2 degrees apart and which is not on a curve found already.
-    /// The curves are appended to `out`. With
-    /// `Kernel::fixes.ssi_low_angle_start_on_probation` a candidate below either
-    /// angle (but at least `2 tol / modelSize` radians) is traced on probation and kept
-    /// only as a closed transversal loop larger than twice the tolerance (see the
-    /// module deviations).
+    /// The curves are appended to `out`. A candidate below either angle (but at least
+    /// `2 tol / modelSize` radians) is traced on probation and kept only as a closed
+    /// transversal loop larger than twice the tolerance (see the module deviations).
     ///
     /// # Errors
     ///
@@ -609,24 +609,22 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
         // curves): this loop only appends curves, so slot `i` stays curve `i`'s.
         let mut drop_caches = DropPointCaches::default();
 
-        // Opt-in (WR-74, #394): the patch UV domains of the node pairs that cannot
+        // Not upstream (WR-74, #394): the patch UV domains of the node pairs that cannot
         // start a crossing curve seed the tangential contact point search below.
         let mut tangent_seeds: Vec<[Extent2d; 2]> = Vec::new();
-        // Fix WR-79 part 2 (#396, opt-in): the 3D curves traced from low-angle start
-        // points and then rejected (and those start points), with their drop caches;
-        // later low-angle start points on them are not traced again.
-        let probation = k.fixes.ssi_low_angle_start_on_probation;
+        // Fix WR-79 part 2 (#396): the 3D curves traced from low-angle start points and
+        // then rejected (and those start points), with their drop caches; later
+        // low-angle start points on them are not traced again.
         let mut rejected_curves: Vec<Curve> = Vec::new();
         let mut rejected_caches = DropPointCaches::default();
         // The smallest normal angle worth tracing from: on a transversal loop of radius
         // r between surfaces of relative curvature radius R the normals differ by about
         // r/R, so loops above the tolerance on surfaces curved at model scale stay above
         // tol/modelSize, while tangent curves and tangent points fall below it.
-        let min_loop_angle_rad = if probation {
-            self.min_loop_angle_rad(k)?
-        } else {
-            0.0
-        };
+        let min_loop_angle_rad = self.min_loop_angle_rad(k)?;
+        // (WR-75) seeds of the tangential curve pass, which does not run where a self
+        // intersection's trivial solution lies in both domains (#18930)
+        let collect_tangent_curve_seeds = !self.trivial_solution_in_both_domains();
 
         // Now for each node pair do a test to see if produces a unique start point
         for sol in solutions.as_slice() {
@@ -639,9 +637,9 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
             let bss1 = self.base.surface(SrfIndex::First);
             let bss2 = self.base.surface(SrfIndex::Second);
 
-            // Skip cases where surface normals are very close (with the WR-79 fix:
-            // trace them on probation, keeping only a closed transversal loop larger
-            // than the tolerance)
+            // Cases where surface normals are very close (upstream skips them; the
+            // WR-79 fix traces them on probation, keeping only a closed transversal
+            // loop larger than the tolerance)
             let mut low_angle_start = false;
             {
                 let norm1 = surface_evaluate_normal(k, bss1, uv_guess1)?;
@@ -651,13 +649,10 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
                     angle_rad = PI - angle_rad;
                 }
                 if angle_rad * (180.0 / PI) < 5.0 {
-                    self.push_tangent_seed(k, &mut tangent_seeds, node1, node2)?;
-                    // (WR-75, opt-in) a seed of the tangential curve pass
-                    if k.fixes.ssi_tangent_curve_tracer {
+                    self.push_tangent_seed(&mut tangent_seeds, node1, node2)?;
+                    // (WR-75) a seed of the tangential curve pass
+                    if collect_tangent_curve_seeds {
                         self.tangent_curve_seeds.push([uv_guess1, uv_guess2]);
-                    }
-                    if !probation {
-                        continue;
                     }
                     low_angle_start = true;
                 }
@@ -680,7 +675,7 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
 
             // for nodes that do not intersect - skip to next node pair
             if !found_answer {
-                self.push_tangent_seed(k, &mut tangent_seeds, node1, node2)?;
+                self.push_tangent_seed(&mut tangent_seeds, node1, node2)?;
                 continue;
             }
 
@@ -689,7 +684,7 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
             let uv2 = Point2::new(start[2], start[3]);
             let surf_pnt = bss1.evaluate_point(k, uv)?;
 
-            // Skip cases where surface normals are very close
+            // Cases where surface normals are very close (traced on probation, above)
             {
                 let norm1 = surface_evaluate_normal(k, bss1, uv)?;
                 let norm2 = surface_evaluate_normal(k, bss2, uv2)?;
@@ -698,13 +693,10 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
                     angle_rad = PI - angle_rad;
                 }
                 if angle_rad * (180.0 / PI) < 2.0 {
-                    self.push_tangent_seed(k, &mut tangent_seeds, node1, node2)?;
-                    // (WR-75, opt-in) a seed of the tangential curve pass
-                    if k.fixes.ssi_tangent_curve_tracer {
+                    self.push_tangent_seed(&mut tangent_seeds, node1, node2)?;
+                    // (WR-75) a seed of the tangential curve pass
+                    if collect_tangent_curve_seeds {
                         self.tangent_curve_seeds.push([uv, uv2]);
-                    }
-                    if !probation {
-                        continue;
                     }
                     low_angle_start = true;
                 }
@@ -800,8 +792,8 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
             }
         }
 
-        // Opt-in (WR-74, #394): isolated tangential contact points
-        if k.fixes.ssi_tangent_contact_points && !self.base.doing_self_intersection {
+        // Not upstream (WR-74, #394): isolated tangential contact points
+        if !self.base.doing_self_intersection {
             tangent_contacts::find_tangent_contact_points(
                 k,
                 &self.base,
@@ -814,23 +806,31 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
         Ok(())
     }
 
-    /// Opt-in (WR-74, #394): records the patch UV domains of a node pair
-    /// `FindInteriorCurves` drops as a seed of the tangential contact point search
-    /// (nothing without `Kernel::fixes.ssi_tangent_contact_points`).
+    /// Not upstream (WR-74, #394): records the patch UV domains of a node pair
+    /// `FindInteriorCurves` drops as a seed of the tangential contact point search.
     fn push_tangent_seed(
         &self,
-        k: &Kernel,
         seeds: &mut Vec<[Extent2d; 2]>,
         node1: Option<NodeId>,
         node2: Option<NodeId>,
     ) -> Result<()> {
-        if k.fixes.ssi_tangent_contact_points {
-            seeds.push([
-                *self.patch(0, node1)?.aux.uv_domain(),
-                *self.patch(1, node2)?.aux.uv_domain(),
-            ]);
-        }
+        seeds.push([
+            *self.patch(0, node1)?.aux.uv_domain(),
+            *self.patch(1, node2)?.aux.uv_domain(),
+        ]);
         Ok(())
+    }
+
+    /// Not upstream (#18930): whether the trivial solution of a self intersection, a point of
+    /// the surface with itself at equal parameters, lies in both intersected domains: a self
+    /// intersection whose two domains overlap or touch (the patch pairs
+    /// [`Self::find_interior_curves`] rejects for the same reason). Every such point solves the
+    /// tangential curve pass's equations (`S(x) - S(x) = 0`, equal normals), so that pass is
+    /// not run there. Two disjoint domains of one surface hold no such point: the pass keeps
+    /// each solve in its own domain.
+    pub(crate) fn trivial_solution_in_both_domains(&self) -> bool {
+        let [d1, d2] = &self.base.uv_domains;
+        self.base.doing_self_intersection && !d1.are_disjoint(d2, 0.0)
     }
 
     /// The WR-79 fix's (#396 part 2) smallest normal angle worth tracing from:
@@ -1002,6 +1002,22 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
     }
 }
 
+/// Not upstream (#18117): whether two patch domains of a self intersection are neighbours
+/// across the surface's closure: in a direction the surface closes in over the intersected
+/// domain (`m_bClosedU`, `m_bClosedV`), one reaches the domain's start and the other its end,
+/// and their ranges across that direction overlap or touch. There the surface meets itself by
+/// its closure (its seam's two sides are one curve), which is no self intersection, as patches
+/// that share a side are none; upstream takes a closed surface's seam for one.
+fn neighbours_across_closure(base: &SurfaceIntersector<'_>, a: &Extent2d, b: &Extent2d) -> bool {
+    let dom = &base.uv_domains[0];
+    let ends_u = |p: &Extent2d, q: &Extent2d| p.u_min() <= dom.u_min() && q.u_max() >= dom.u_max();
+    let ends_v = |p: &Extent2d, q: &Extent2d| p.v_min() <= dom.v_min() && q.v_max() >= dom.v_max();
+    let meet_v = a.v_min() <= b.v_max() && b.v_min() <= a.v_max();
+    let meet_u = a.u_min() <= b.u_max() && b.u_min() <= a.u_max();
+    (base.closed_u[0] && meet_v && (ends_u(a, b) || ends_u(b, a)))
+        || (base.closed_v[0] && meet_u && (ends_v(a, b) || ends_v(b, a)))
+}
+
 impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for AdvSurfaceIntersector<'_, 't, O> {
     fn solver(&self) -> &GlobalSolver<'t, O> {
         &self.solver
@@ -1063,8 +1079,11 @@ impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for AdvSurfaceIntersector<'_
         }
 
         // If we are doing self intersection then reject case where domains are not
-        // disjoint.
-        if self.base.doing_self_intersection && !uv_domain1.are_disjoint(&uv_domain2, 0.0) {
+        // disjoint (not upstream, #18117: nor neighbours across the surface's closure).
+        if self.base.doing_self_intersection
+            && (!uv_domain1.are_disjoint(&uv_domain2, 0.0)
+                || neighbours_across_closure(&self.base, &uv_domain1, &uv_domain2))
+        {
             return Ok(false);
         }
 
@@ -1118,12 +1137,8 @@ impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for AdvSurfaceIntersector<'_
                 // Update the bounding box information in the solution.
                 let mut bbox = surface_node1.bbox;
                 bbox.expand_absolute(self.solver.tolerance_3d);
-                let mut result = match bbox.intersect(&surface_node2.bbox) {
-                    Ok(r) => r,
-                    // (fork e7ebc8d passes this status on: `SER`)
-                    Err(e) if self.base.edit_statuses => return Err(e),
-                    Err(_) => Extent3d::new(),
-                };
+                // (fork e7ebc8d passes this status on: `SER`)
+                let mut result = bbox.intersect(&surface_node2.bbox)?;
 
                 let solutions = &mut self.solver.solutions;
                 if solutions.is_empty() {

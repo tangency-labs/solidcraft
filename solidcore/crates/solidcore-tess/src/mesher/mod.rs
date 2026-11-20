@@ -183,13 +183,14 @@ pub(crate) struct SplitSide {
 }
 
 /// Most rounds of splitting the edge segments where a face's sampled boundary crosses itself:
-/// each round halves them, so their chords sag a quarter as far.
+/// each round inserts curve nodes at the crossing events, shared by every incident face.
 const MAX_UNTANGLE: u32 = 16;
 
 /// An error's own words, without its kind's prefix, for a message that names where it happened.
-fn detail(e: &TessError) -> &str {
+fn detail(e: &TessError) -> std::borrow::Cow<'_, str> {
     match e {
-        TessError::Invalid(m) | TessError::Failed(m) | TessError::Internal(m) => m,
+        TessError::Invalid(m) | TessError::Failed(m) | TessError::Internal(m) => std::borrow::Cow::Borrowed(m),
+        TessError::TooManyVertices { .. } => std::borrow::Cow::Owned(e.to_string()),
     }
 }
 
@@ -558,7 +559,7 @@ pub(crate) fn prepare(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpos
             fs
         })
         .collect();
-    let rules = size::Rules::new(tol, size::extent(b.vertices.iter().map(|v| Vec3::new(v.point[0], v.point[1], v.point[2]))), turn);
+    let rules = size::Rules::new(tol, size::extent(b), turn);
     // Each face's surface and target side length, then every edge once at the smaller size of
     // its faces; faces then read their nodes. A planar face costs microseconds and a curved
     // one about a hundred, so the pool is used only where curved faces (or intersection
@@ -912,7 +913,7 @@ struct Boundary {
 /// run closer than their chords sag (the two arcs of a thin lune, a sliver cap between two
 /// cylinders), the chords may cross although the curves do not, and no triangulation follows
 /// such a boundary. The edge segments whose chords cross another of the face (in its loop or
-/// another, see [`tangle::crossing`]) are halved at their curve parameter's middle, on the edge,
+/// another, see [`tangle::crossing`]) are split at their crossing fractions, on the edge,
 /// so every face of the edge gets the new nodes; the faces of every edge split are checked again,
 /// until no chords cross. Boundaries that still cross after [`MAX_UNTANGLE`] rounds, or would
 /// put more than [`edges::MAX_EDGE_NODES`] on an edge, are an error naming the face and edges.
@@ -969,7 +970,7 @@ fn untangle(
             return Ok(Vec::new());
         }
         if round == MAX_UNTANGLE {
-            // Halving cannot part two curves that touch or cross: where they come within the chord
+            // Refinement cannot part two curves that touch or cross: where they come within the chord
             // tolerance of each other, they share nodes.
             let faces: Vec<usize> = tangled.iter().map(|(fi, _)| *fi).collect();
             tangled = snap_touches(evals, edge_faces, tol, nodes, boundaries, face_boundary, &faces, why)?;
@@ -981,19 +982,21 @@ fn untangle(
                     es.sort_unstable();
                     es.dedup();
                     let kind = b.faces.get(*fi).map_or("?", |f| kind(&f.surface));
-                    (*fi, format!("face {fi} ({kind}): boundary crosses itself: edges {es:?} run closer together than their chords can follow after {MAX_UNTANGLE} halvings"))
+                    (*fi, format!("face {fi} ({kind}): boundary crosses itself: edges {es:?} run closer together than their chords can follow after {MAX_UNTANGLE} refinements"))
                 })
                 .collect());
         }
-        let mut split: Vec<(u32, u32)> = tangled.iter().flat_map(|(_, c)| c.iter().copied()).collect();
-        split.sort_unstable();
-        split.dedup();
+        // Keep the event's position. A crossing arbitrarily near an end can survive every
+        // midpoint split; evaluating the curve at the event parts its chords directly. The
+        // loop may traverse the edge backwards, while edge parameters always increase.
+        let faces: Vec<usize> = tangled.iter().map(|(fi, _)| *fi).collect();
+        let split = crossing_parameters(&faces, boundaries, evals, nodes);
         let mut redo: Vec<usize> = Vec::new();
-        for run in split.chunk_by(|a, c| a.0 == c.0) {
-            let Some(&(e, _)) = run.first() else { continue };
-            let segs: Vec<u32> = run.iter().map(|(_, k)| *k).collect();
-            let Some(slot) = nodes.get_mut(e as usize) else { continue };
-            if let Err(err) = edges::split_segments(b, e as usize, slot, &segs) {
+        for (e, ts) in split {
+            let Some(slot) = nodes.get_mut(e as usize) else {
+                continue;
+            };
+            if let Err(err) = edges::insert_crossings(b, e as usize, slot, &ts) {
                 for &fi in edge_faces.get(e as usize).into_iter().flatten() {
                     refuse(fi, &err, why);
                 }
@@ -1027,6 +1030,81 @@ fn untangle(
         }
     }
     Ok(Vec::new())
+}
+
+/// One parameter per physical event, independent of the number or traversal of its faces.
+/// The first reporting face in index order supplies the event's metric. Its parameter is
+/// computed once, under the directed pair of edge-segment identities, and reused by every
+/// face. Touch events also identify which node of the other segment lies on this one.
+fn crossing_parameters(
+    faces: &[usize],
+    boundaries: &[Boundary],
+    evals: &[poles::Face],
+    nodes: &[edges::Nodes],
+) -> std::collections::BTreeMap<u32, Vec<f64>> {
+    let mut faces = faces.to_vec();
+    faces.sort_unstable();
+    let mut events = std::collections::BTreeMap::new();
+    for fi in faces {
+        let (Some(fb), Some(s)) = (boundaries.get(fi), evals.get(fi)) else {
+            continue;
+        };
+        for event in tangle::events(s, fb.reach, &fb.loops) {
+            let segment = |(l, k): (usize, usize)| fb.segments.get(l)?.get(k).copied();
+            let (Some(at @ (e, j)), Some(other @ (oe, oj))) =
+                (segment(event.at), segment(event.other))
+            else {
+                continue;
+            };
+            let (Some(n), Some(on)) = (nodes.get(e as usize), nodes.get(oe as usize)) else {
+                continue;
+            };
+            let (Some(&t), Some(&u)) = (n.params.get(j as usize), n.params.get(j as usize + 1))
+            else {
+                continue;
+            };
+            let Some(start) = fb
+                .loops
+                .get(event.at.0)
+                .and_then(|lp| lp.pts.get(event.at.1))
+            else {
+                continue;
+            };
+            let forward = n.points.get(j as usize) == Some(start);
+            let end = if let Some(end) = event.end {
+                let Some(other_start) = fb
+                    .loops
+                    .get(event.other.0)
+                    .and_then(|lp| lp.pts.get(event.other.1))
+                else {
+                    continue;
+                };
+                let other_forward = on.points.get(oj as usize) == Some(other_start);
+                Some(
+                    oj + if other_forward {
+                        end as u32
+                    } else {
+                        1 - end as u32
+                    },
+                )
+            } else {
+                None
+            };
+            events.entry((at, other, end)).or_insert_with(|| {
+                let f = if forward {
+                    event.fraction
+                } else {
+                    1.0 - event.fraction
+                };
+                t + f * (u - t)
+            });
+        }
+    }
+    let mut split: std::collections::BTreeMap<u32, Vec<f64>> = std::collections::BTreeMap::new();
+    for (((e, _), _, _), t) in events {
+        split.entry(e).or_default().push(t);
+    }
+    split
 }
 
 /// Rounds of [`snap_touches`] before a face that still crosses itself is refused.
@@ -1141,13 +1219,16 @@ fn touch(fb: &Boundary, nodes: &[edges::Nodes], at: (usize, usize), seg: (u32, u
             }
             let f = (p - a).dot(ac) / len2;
             let d = p.dist_to_segment(a, c);
-            if !(f > 1e-6 && f < 1.0 - 1e-6 && d <= tol) || best.is_some_and(|(bd, _, _)| bd <= d) {
+            let t = ta + f * (tc - ta);
+            if !(f > 0.0 && f < 1.0 && t > ta && t < tc && p != a && p != c && d <= tol)
+                || best.is_some_and(|(bd, _, _)| bd <= d)
+            {
                 continue;
             }
             if l == at.0 && inside_out(lp, at.1, k, tol) {
                 continue;
             }
-            best = Some((d, ta + f * (tc - ta), p));
+            best = Some((d, t, p));
         }
     }
     best.map(|(_, t, p)| (t, p))
@@ -2307,11 +2388,12 @@ fn plan_face(
     }
     let mut all = uvs;
     all.extend(extra);
-    // Whatever the layout, no triangle leaves the surface by more than the tolerance.
+    // Whatever the layout, refine the curvature of the support while keeping the shared boundary fixed.
     if !planar {
         // Which nodes are poles, asked once per node over both passes.
         let poles = sag::Poles::new(s, reach);
-        if sag::refine(s, tol, &poles, &fixed, &mut all, &mut triangles, MAX_REFINE) {
+        let refinement = sag::refine(s, tol, &poles, &fixed, &mut all, &mut triangles, MAX_REFINE);
+        if refinement.capped {
             caps.push(crate::Cap::Refine);
         }
         // The mesh path's triangles are the surface's Delaunay ones, shaped in 3D: flips toward
@@ -2319,8 +2401,9 @@ fn plan_face(
         if matches!(purpose, Purpose::Display) {
             sag::flip(s, tol, &poles, &fixed, &all, &mut triangles);
         }
-        // A face a bound limited is named with the sag its triangles reach.
-        if !caps.is_empty() {
+        // Measure finished triangles with their held positions when a bound or a remaining
+        // departure involving the shared boundary can leave them outside the tolerance.
+        if !caps.is_empty() || refinement.boundary_has_residual(s, tol, &poles, &fixed, &all, &triangles) {
             let (sag, unmeasured) = sag::worst(s, &poles, &fixed, &all, &triangles);
             stats.over_tolerance.push(crate::OverTolerance { face: fi, sag, unmeasured, tol, within: sag <= tol && unmeasured == 0, caps: std::mem::take(&mut caps) });
         }

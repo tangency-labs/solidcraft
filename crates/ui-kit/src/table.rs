@@ -14,11 +14,13 @@ pub struct Column<'a> {
     flexible: bool,
     /// A width the user dragged the column to; it replaces the automatic width and stops sharing.
     manual: Option<f32>,
+    /// Held at the left edge while the table scrolls sideways.
+    frozen: bool,
 }
 
 impl<'a> Column<'a> {
     pub fn new(label: &'a str, width: f32) -> Self {
-        Self { label, width, min_content_width: 0.0, icon_only: false, flexible: false, manual: None }
+        Self { label, width, min_content_width: 0.0, icon_only: false, flexible: false, manual: None, frozen: false }
     }
 
     /// Hold the column at a width the user chose by dragging its header divider.
@@ -45,6 +47,14 @@ impl<'a> Column<'a> {
         self
     }
 
+    /// Hold the column at the table's left edge while the other columns scroll sideways beneath
+    /// it, as a spreadsheet freezes its first column. Only leading columns freeze: a frozen
+    /// column after an unfrozen one scrolls as usual.
+    pub fn frozen(mut self) -> Self {
+        self.frozen = true;
+        self
+    }
+
     /// Keep enough room for the measured cell controls, even in a narrow scrolling card.
     pub fn min_content_width(mut self, width: f32) -> Self {
         self.min_content_width = dimension(width);
@@ -60,6 +70,10 @@ pub struct Table<'a> {
     empty: String,
     empty_shown: bool,
     reveal: Option<egui::Rect>,
+    /// How far the table is scrolled sideways: frozen columns move right by this much.
+    scroll_x: f32,
+    /// How wide the table's visible part is.
+    view_width: f32,
 }
 
 /// Table grid with caller-supplied header actions through Table::headers.
@@ -81,6 +95,8 @@ pub fn table_custom<R>(ui: &mut Ui, id: &str, columns: &[Column<'_>], empty: &st
                 empty: empty.to_owned(),
                 empty_shown: false,
                 reveal: None,
+                scroll_x: viewport.left().max(0.0),
+                view_width: viewport.width(),
             };
             ui.spacing_mut().item_spacing.y = 0.0;
             let result = add(ui, &mut table);
@@ -164,6 +180,30 @@ fn column_widths(ui: &Ui, columns: &[Column<'_>], available: f32) -> Vec<f32> {
 }
 
 impl Table<'_> {
+    /// How many leading columns are frozen. None while they would take more than half of the
+    /// visible width: the other columns must keep room to be seen as the table scrolls.
+    fn frozen_count(&self) -> usize {
+        let frozen = self.columns.iter().take_while(|c| c.frozen).count();
+        let width = self.widths.iter().take(frozen).sum::<f32>() + Tokens::get().space_8 * frozen as f32;
+        if width > self.view_width * 0.5 { 0 } else { frozen }
+    }
+
+    /// The cell of column `index` that starts at `left` in the scrolled content: a frozen one
+    /// held at the visible left edge, the others where they are, clipped to the right of the
+    /// frozen columns so they pass beneath them.
+    fn place(&self, index: usize, cell: egui::Rect, first_left: f32) -> (egui::Rect, Option<f32>) {
+        let frozen = self.frozen_count();
+        if frozen == 0 || self.scroll_x <= 0.0 {
+            return (cell, None);
+        }
+        if index < frozen {
+            return (cell.translate(vec2(self.scroll_x, 0.0)), None);
+        }
+        let gap = Tokens::get().space_8;
+        let frozen_right = first_left + self.widths.iter().take(frozen).sum::<f32>() + gap * frozen.saturating_sub(1) as f32 + self.scroll_x;
+        (cell, Some(frozen_right + gap * 0.5))
+    }
+
     /// Reveal a newly inserted row through the enclosing card's vertical scroller.
     pub fn reveal_row(&mut self, rect: egui::Rect) {
         self.reveal = Some(rect);
@@ -189,23 +229,29 @@ impl Table<'_> {
         let (rect, _) = ui.allocate_exact_size(vec2(width, row_height()), egui::Sense::hover());
         let ppp = ui.ctx().pixels_per_point().max(0.5);
         let mut left = (rect.left() * ppp).round() / ppp + t.space_8;
+        let first_left = left;
         let mut dividers = Vec::new();
         for (index, (column, width)) in self.columns.iter().zip(&self.widths).enumerate() {
-            let cell = egui::Rect::from_min_size(egui::pos2(left, rect.top()), vec2(*width, rect.height()));
+            let at = egui::Rect::from_min_size(egui::pos2(left, rect.top()), vec2(*width, rect.height()));
+            let (cell, clip_left) = self.place(index, at, first_left);
             ui.scope_builder(
                 egui::UiBuilder::new().id_salt((&self.id, "header", index)).max_rect(cell).layout(egui::Layout::left_to_right(egui::Align::Center)),
                 |ui| {
-                    ui.set_clip_rect(ui.clip_rect().intersect(cell));
+                    let mut clip = ui.clip_rect().intersect(cell);
+                    if let Some(x) = clip_left {
+                        clip.min.x = clip.min.x.max(x);
+                    }
+                    ui.set_clip_rect(clip);
                     if !header(ui, index) && !column.icon_only {
                         header_label(ui, column.label);
                     }
                 },
             );
             solidcraft_ui_registry::publish_rect(&format!("dialog:column:{}:{}", self.id, column.label), cell);
-            if index + 1 < self.columns.len() {
+            if index + 1 < self.columns.len() && clip_left.is_none_or(|x| cell.right() > x) {
                 dividers.push((index, cell.right() + t.space_8 * 0.5));
             }
-            left = cell.right() + t.space_8;
+            left = at.right() + t.space_8;
         }
         ui.painter().hline(rect.x_range(), rect.bottom(), t.tertiary_border(t.dialog_rule));
         if let Some(key) = resize {
@@ -238,7 +284,8 @@ impl Table<'_> {
             None
         };
         if let Some(chosen) = chosen {
-            let count = self.columns.len().min(64);
+            // Bounded, with room for a configuration table's most columns.
+            let count = self.columns.len().min(1024);
             ui.ctx().data_mut(|m| {
                 let mut stored: Vec<Option<f32>> = m.get_persisted(key).unwrap_or_default();
                 stored.resize(count, None);
@@ -267,6 +314,15 @@ impl Table<'_> {
         response
     }
 
+    /// Keep the space of `count` rows that are not built (off screen in a virtualized grid), and
+    /// count them as rows, so the table does not say it is empty.
+    pub fn skip_rows(&mut self, ui: &mut Ui, count: usize) {
+        if count > 0 {
+            ui.allocate_space(vec2(0.0, super::table_row_height() * count as f32));
+            self.rows += count;
+        }
+    }
+
     /// The last, slim button line. Clicking asks the owner to insert a regular draft row. It is
     /// drawn as a normal button (solid border, body ink, hover highlight), not a placeholder.
     pub fn add_prompt(&mut self, ui: &mut Ui, label: &str, tooltip: &str) -> Response {
@@ -275,7 +331,16 @@ impl Table<'_> {
             super::text(ui, &self.empty, super::Text::Note(&self.id));
             self.empty_shown = true;
         }
-        let (rect, response) = ui.allocate_exact_size(vec2(self.width(), row_height() - t.space_4), egui::Sense::click());
+        let size = vec2(self.width(), row_height() - t.space_4);
+        let (rect, response) = if self.frozen_count() == 0 {
+            ui.allocate_exact_size(size, egui::Sense::click())
+        } else {
+            // With frozen columns the button stays in view as the table scrolls sideways.
+            let (full, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+            let shown =
+                egui::Rect::from_min_size(full.min + vec2(self.scroll_x, 0.0), vec2(full.width().min(self.view_width).max(0.0), full.height()));
+            (shown, ui.interact(shown, ui.make_persistent_id((&self.id, "add_prompt")), egui::Sense::click()))
+        };
         paint_icon_button(ui, rect, &response, solidcraft_ui_text::tr_label(label), false);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), solidcraft_ui_text::tr_label(label)));
         solidcraft_ui_registry::publish_handle(&format!("dialog:table:{}:add", self.id), rect.center());
@@ -299,11 +364,13 @@ impl Table<'_> {
         ui.push_id((&self.id, key), |ui| {
             add(&mut TableRow {
                 ui,
+                table: self,
                 widths: &self.widths,
                 columns: self.columns,
                 rect,
                 column: 0,
                 left,
+                first_left: left,
                 id: format!("dialog:table:{}:{key}", self.id),
             });
         });
@@ -314,11 +381,14 @@ impl Table<'_> {
 
 pub struct TableRow<'a> {
     ui: &'a mut Ui,
+    table: &'a Table<'a>,
     widths: &'a [f32],
     columns: &'a [Column<'a>],
     rect: egui::Rect,
     column: usize,
     left: f32,
+    /// Where the row's first cell starts, before any sideways scroll.
+    first_left: f32,
     id: String,
 }
 
@@ -327,7 +397,8 @@ impl TableRow<'_> {
     pub fn cell<R>(&mut self, add: impl FnOnce(&mut Ui) -> R) -> R {
         let width = self.widths.get(self.column).copied().unwrap_or(0.0);
         let label = self.columns.get(self.column).map_or("", |c| c.label);
-        let rect = egui::Rect::from_min_size(egui::pos2(self.left, self.rect.top()), vec2(width, self.rect.height()));
+        let at = egui::Rect::from_min_size(egui::pos2(self.left, self.rect.top()), vec2(width, self.rect.height()));
+        let (rect, clip_left) = self.table.place(self.column, at, self.first_left);
         solidcraft_ui_registry::publish_rect(&format!("{}:cell:{label}", self.id), rect);
         self.column += 1;
         self.left += width + Tokens::get().space_8;
@@ -339,7 +410,11 @@ impl TableRow<'_> {
                     .layout(egui::Layout::left_to_right(egui::Align::Center))
                     .ui_stack_info(egui::UiStackInfo::default().with_tag_value(super::layout::LABEL, label.to_owned())),
                 |ui| {
-                    ui.set_clip_rect(ui.clip_rect().intersect(rect));
+                    let mut clip = ui.clip_rect().intersect(rect);
+                    if let Some(x) = clip_left {
+                        clip.min.x = clip.min.x.max(x);
+                    }
+                    ui.set_clip_rect(clip);
                     ui.spacing_mut().text_edit_width = width;
                     add(ui)
                 },

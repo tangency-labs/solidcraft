@@ -102,22 +102,17 @@ fn a_step_body_the_file_marks_invisible_comes_in_hidden() {
 }
 
 #[test]
-fn imported_joints_do_not_reuse_deleted_ids() {
+fn imported_rigid_groups_do_not_reuse_released_ids() {
     let path = frame_file("joint-ids");
     let mut s = Session::default();
-    run(&mut s, "file.insert_step", json!({"path": path}));
-    let first: Vec<_> = s.doc.assembly.joints.iter().map(|j| j.id).collect();
-    assert!(!first.is_empty());
-    for id in &first {
-        run(&mut s, "joint.delete", json!({"joint": id}));
-    }
+    let first = run(&mut s, "file.insert_step", json!({"path": path}))["component"].clone();
+    let first_group = s.doc.assembly.rigid_groups.first().map(|g| g.id).expect("a rigid group");
+    run(&mut s, "component.unlock", json!({"component": first}));
     run(&mut s, "component.activate", json!({"component": "root"}));
     run(&mut s, "file.insert_step", json!({"path": path}));
-    assert!(!s.doc.assembly.joints.is_empty());
-    for joint in &s.doc.assembly.joints {
-        assert!(!first.contains(&joint.id), "import reused deleted joint {}", joint.id);
-        assert!(joint.id < s.doc.next_id, "import did not reserve joint {}", joint.id);
-    }
+    let [group] = s.doc.assembly.rigid_groups.as_slice() else { panic!("{:?}", s.doc.assembly.rigid_groups) };
+    assert_ne!(group.id, first_group, "import reused the released group's id");
+    assert!(group.id < s.doc.next_id, "import did not reserve its group's id");
 }
 
 /// `up: "y"` turns the file's bodies a quarter turn about X, Y becoming Z: the frame's height

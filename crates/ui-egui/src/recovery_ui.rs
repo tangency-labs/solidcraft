@@ -401,6 +401,22 @@ mod tests {
     }
 
     #[test]
+    fn scenario_crash_checkpoints_the_latest_zero_interval_autosave() {
+        let mut h = crate::scenario::Harness::new();
+        start(&mut h.app, &h.dir.join("recovery"), Duration::ZERO);
+        edit(&mut h.app);
+        h.app.autosave.as_mut().unwrap().save(&h.app.session).unwrap();
+        let saved = h.app.session.doc.features.len();
+        // The previous snapshot is saved, but the latest edit has not had a UI tick yet.
+        edit(&mut h.app);
+        let latest = h.app.session.doc.features.len();
+        assert!(latest > saved);
+        h.step(&json!({"restart":"crash"})).unwrap();
+        h.run(&json!([{ "widget":"Recover" }])).unwrap();
+        assert_eq!(h.app.session.doc.features.len(), latest, "the simulated crash must follow the zero-interval checkpoint");
+    }
+
+    #[test]
     fn dirty_background_tab_is_saved_and_offered_after_a_crash() {
         let (mut app, dir) = app("background", Duration::ZERO);
         name(&mut app, "Background A");
@@ -611,6 +627,37 @@ mod tests {
         fs::remove_dir(&blocked).unwrap();
         tick_and_wait(&mut app);
         assert_eq!(recovery::load(&dir, &id).unwrap().0.features.len(), 2);
+        drop(app);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A drawing the autosave leaves out (one that breaks a rule, or one too large to save) is
+    /// never skipped silently: the status line names it, and the rest of the design is kept (#3890).
+    #[test]
+    fn a_drawing_the_autosave_leaves_out_is_named_on_the_status_line() {
+        let (mut app, dir) = app("left-out-drawing", Duration::ZERO);
+        name(&mut app, "Plate");
+        edit(&mut app);
+        app.run("drawing.create", json!({"name": "Kept"})).unwrap();
+        app.run("drawing.create", json!({"name": "Broken"})).unwrap();
+        let mut doc = (*app.session.doc).clone();
+        let broken = doc.drawings.iter_mut().find(|d| d.name == "Broken").unwrap();
+        std::sync::Arc::make_mut(broken).language = "?".into();
+        app.session.doc = std::sync::Arc::new(doc);
+        let named = |app: &SolveApp| {
+            app.status.as_ref().is_some_and(|(message, _, error)| *error && message.starts_with(r#"autosave failed: drawing "Broken" ("#))
+        };
+        let deadline = Instant::now() + Duration::from_secs(60);
+        tick(&mut app);
+        while !named(&app) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+            tick(&mut app);
+        }
+        assert!(named(&app), "{:?}", app.status);
+        let saved = entries(&dir);
+        assert_eq!(saved.len(), 1);
+        let kept = recovery::load(&dir, &saved[0].id).unwrap().0;
+        assert_eq!(kept.drawings.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(), ["Kept"]);
         drop(app);
         fs::remove_dir_all(dir).unwrap();
     }

@@ -22,10 +22,13 @@ The app implements `PluginHost` and defines command policy, approval and transac
 grants. Its default denies hidden child names unless a more specific approved folder grant
 covers them; an app may override it to enforce its explicit scope policy.
 
-The [WIT](wit/plugin.wit) declares `craft:plugin@0.1.0`, world `command-plugin`: the
-capability `commands@0.1` (`CAPABILITIES`). A manifest lists the capabilities it needs
-(`"capabilities": ["commands@0.1"]`); `check_capabilities` refuses an unknown or newer one with
-`HostError::UnsupportedCapability`. While a version is 0.x, minors may break each other.
+The [WIT](wit/plugin.wit) declares `craft:plugin@0.2.0`, world `command-plugin`: the
+capability `commands@0.2` (`CAPABILITIES`). A manifest lists the capabilities it needs
+(`"capabilities": ["commands@0.2"]`); `check_capabilities` refuses an unknown or newer one with
+`HostError::UnsupportedCapability`. While a version is 0.x, minors may break each other. 0.2 added
+`plugin-error.unsupported`; the frozen [0.1 WIT](wit-0.1/plugin.wit) (`WIT_0_1`,
+`OLDER_CAPABILITIES`) is still served, so plugins built against it keep running.
+`HostError::OverCeiling` and `HostError::Exhausted` carry a limit's numbers.
 The [Wasm runtime](../craft-plugin-wasm/README.md) begins an app transaction and requests
 commit or rollback after guest execution. It stages granted file writes until the guest
 succeeds and the app commits. File publication after app commit is not atomic across
@@ -37,7 +40,7 @@ promise atomic rollback of all external effects.
 Invocation defaults are 10,000,000 fuel, 64 MiB memory and a 5000 ms deadline.
 `HostLimits` defaults to 100,000,000,000 fuel and 128 MiB. Callers must check requested
 budgets against their ceilings before execution. Fuel must be positive, memory is
-1..4096 MiB and the deadline is 1..30000 ms. Manifests are capped at 16 KiB.
+1..4096 MiB and the deadline is 1..30000 ms. Manifests are capped at 64 KiB.
 
 Commands are exact ids, intersected with the app catalog. A catalog command may carry a
 sensitive `group`; the guest calls it only when `permissions.command_groups` requests the

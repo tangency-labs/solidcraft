@@ -26,7 +26,8 @@ use solidcore_record::Vec3;
 
 use crate::{IoError, Result};
 
-/// Largest 3MF file we read.
+/// Largest 3MF file we read by default. The limit in force is the one for STEP and import files,
+/// which Preferences raise (#14548).
 pub const MAX_3MF_BYTES: usize = 512 << 20;
 /// Largest uncompressed part we read (zip bombs stop here).
 const MAX_PART: u64 = 1 << 30;
@@ -965,8 +966,11 @@ fn flatten<'a>(
 
 /// Meshes of a 3MF package (one per build item, in millimetres) and warnings.
 pub fn read_3mf(bytes: &[u8]) -> Result<(Vec<MeshObject>, Vec<String>)> {
-    if bytes.len() > MAX_3MF_BYTES {
-        return bad(format!("file too large ({} MB)", bytes.len() >> 20));
+    // A 3MF package is read up to the limit for STEP and import files, which Preferences raise
+    // (#14548). Its parts are capped apart: a part at most 1 GB, the model parts together at most
+    // 1 GB, so a package that expands far does not.
+    if let Err(e) = crate::limits::check(crate::limits::Kind::Step, bytes.len() as u64) {
+        return bad(e);
     }
     let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| IoError::Invalid(format!("3MF is not a zip package: {e}")))?;
     if zip.len() > MAX_ENTRIES {

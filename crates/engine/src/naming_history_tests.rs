@@ -1005,3 +1005,67 @@ fn a_sketch_on_a_face_of_a_two_sided_cut_keeps_its_attachment() {
     assert_eq!(error(&cold, "OnUpper"), None);
     assert_eq!(error(&cold, "OnLower"), None);
 }
+
+/// A sketch and an offset plane on the end face of a turned part keep their attachment after a
+/// modelled Thread on its side (#18460): the thread's cut keeps its history, so the end face it
+/// never touched keeps its exact name, and no groove face named from geometry takes that name.
+#[test]
+fn a_sketch_and_a_plane_on_the_end_face_of_a_threaded_revolve_keep_their_attachment() {
+    let mut s = Session::default();
+    // The XZ sketch's vertical runs along -Z: a round bar of radius 4 from z = -20 to z = 0.
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Profile"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [4, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"axis": "y", "angle": "360 deg", "body_name": "Part"}));
+    run(&mut s, "solid.thread", json!({"face": [4, 0, -10], "designation": "M8", "length": 10, "from": [4, 0, -20], "modeled": true}));
+    for (name, attach) in [
+        ("OnEnd", ("sketch.create", json!({"plane": {"face": [1, 0, 0]}, "name": "OnEnd"}))),
+        ("Above", ("construct.plane.offset", json!({"base": {"face": [1, 0, 0]}, "offset": 5, "name": "Above"}))),
+    ] {
+        let refused = s.execute(attach.0, &attach.1).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(refused.is_empty(), "{name} on the end face was refused: {refused}");
+        if attach.0 == "sketch.create" {
+            run(&mut s, "sketch.finish", json!({}));
+        }
+        assert_eq!(error(&s, name), None);
+    }
+}
+
+/// The faces of a modelled thread's groove are named by their index, which moves when the
+/// thread's length changes. No exact name leans on one (#18460): a feature on a face beside the
+/// groove finds that same face after the change, or fails asking for it again, never another.
+#[test]
+fn a_reference_beside_a_thread_s_groove_never_moves_to_another_face_when_the_thread_grows() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Profile"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [4, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"axis": "y", "angle": "360 deg", "body_name": "Part"}));
+    let thread = json!({"face": [4, 0, -10], "designation": "M8", "length": 10, "from": [4, 0, -20], "modeled": true, "name": "Thread"});
+    run(&mut s, "solid.thread", thread);
+    let no_exact_index = |s: &mut Session, when: &str| {
+        let faces = listed(s, "Part");
+        assert!(faces.iter().all(|(n, exact, _)| !*exact || !n.contains(":face:")), "{when}: {faces:?}");
+    };
+    no_exact_index(&mut s, "threaded");
+    // Planes on both end faces: the threaded end, which the groove runs into, and the other.
+    run(&mut s, "construct.plane.offset", json!({"base": {"face": [1, 0, -20]}, "offset": 5, "name": "Below"}));
+    run(&mut s, "construct.plane.offset", json!({"base": {"face": [1, 0, 0]}, "offset": 5, "name": "Above"}));
+    let stored = |s: &Session, name: &str| s.doc.find_feature(name).map(|f| f.face_names.clone()).unwrap_or_default();
+    let before = [stored(&s, "Below"), stored(&s, "Above")];
+    assert!(before.iter().flatten().all(|n| !n.contains(":face:")), "{before:?}");
+    run(&mut s, "timeline.edit", json!({"feature": "Thread", "set": {"length": "14"}}));
+    no_exact_index(&mut s, "grown");
+    for ((name, z), names) in [("Below", -20.0), ("Above", 0.0)].into_iter().zip(before) {
+        if error(&s, name).is_some() {
+            assert!(reselect(&s, name).is_some(), "{name} failed without asking for its face: {:?}", error(&s, name));
+            continue;
+        }
+        // Found: the stored name still names the end face it was made on.
+        let faces = listed(&mut s, "Part");
+        for n in &names {
+            let on: Vec<f64> = faces.iter().filter(|(f, _, _)| f == n).map(|(_, _, c)| c[2]).collect();
+            assert!(on.len() == 1 && (on[0] - z).abs() < 1e-3, "{name}: {n} is now at {on:?} in {faces:?}");
+        }
+    }
+}

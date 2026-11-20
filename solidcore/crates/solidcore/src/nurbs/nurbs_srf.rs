@@ -16,10 +16,14 @@
 //! | [`split_srf`]                         | `sm_SplitSrf`                               |
 //! | [`is_nsrf_degenerate`]                | `sm_IsNSrfDegenerate`                       |
 //! | [`srf_span_boxes`]                    | none (not upstream)                         |
+//! | [`srf_piece_box`]                     | none (not upstream)                         |
 //!
 //! Deviations:
 //! - [`srf_span_boxes`] is not upstream: the boxes of the control points of every knot
 //!   span, a certified cover of the surface used to prune coincidence queries.
+//! - [`srf_piece_box`] is not upstream: the box of the control points of the piece of
+//!   the surface over a parameter rectangle alone, which shrinks with the rectangle, for
+//!   clearance proofs that split a face's domain until its boxes are clear.
 //! - Out-params become return values. The optional `double*` outputs of
 //!   `sm_ComputeNetConstants` / `sm_ComputeSurfConstants` (NULL = not wanted) are a
 //!   [`ConstantsRequest`] in and [`NetConstants`] (`Some` for each requested value)
@@ -1163,6 +1167,65 @@ pub fn srf_span_boxes(sur: &Surface) -> Option<Vec<Extent3d>> {
     Some(boxes)
 }
 
+/// The box of the Euclidean control points of the piece of `sur` over
+/// `[u.0, u.1] x [v.0, v.1]` alone, grown by the error bound of their coordinates: `sur`
+/// split at the rectangle's sides ([`split_srf`], skipped at a side that is the natural
+/// domain's), so every point of the piece is a convex combination of those points and
+/// lies in the box. The bound is [`piece_slack`] of `sur`'s control points for the four
+/// splits (`p` convex-combination steps each in u, `q` each in v), which also covers the
+/// division by the weight.
+///
+/// `None`, meaning no certified box, when `sur` is not clamped, under the conditions of
+/// [`srf_span_boxes`], when the rectangle is not finite, is empty in u or v or reaches
+/// outside the natural domain, or when a split fails.
+///
+/// Not upstream.
+#[must_use]
+pub fn srf_piece_box(sur: &Surface, u: (f64, f64), v: (f64, f64)) -> Option<Extent3d> {
+    let (p, q) = sur.degrees();
+    let (u_knots, v_knots) = (sur.u_knots(), sur.v_knots());
+    nonempty_spans(u_knots, p, sur.n())?;
+    nonempty_spans(v_knots, q, sur.m())?;
+    if !is_clamped(u_knots, p) || !is_clamped(v_knots, q) {
+        return None;
+    }
+    let (u_first, u_last) = (*u_knots.first()?, *u_knots.last()?);
+    let (v_first, v_last) = (*v_knots.first()?, *v_knots.last()?);
+    let inside = |(lo, hi): (f64, f64), first: f64, last: f64| {
+        lo.is_finite() && hi.is_finite() && first <= lo && lo <= hi && hi <= last
+    };
+    if !inside(u, u_first, u_last) || !inside(v, v_first, v_last) {
+        return None;
+    }
+    let steps = p.checked_add(q)?.checked_mul(2)?;
+    let slack = piece_slack(sur.rows().flatten().copied(), steps)?;
+    let mut piece = sur.clone();
+    if u.0 > u_first {
+        piece = split_srf(&piece, u.0, Direction::U).ok()?.1;
+    }
+    if u.1 < u_last {
+        piece = split_srf(&piece, u.1, Direction::U).ok()?.0;
+    }
+    if v.0 > v_first {
+        piece = split_srf(&piece, v.0, Direction::V).ok()?.1;
+    }
+    if v.1 < v_last {
+        piece = split_srf(&piece, v.1, Direction::V).ok()?.0;
+    }
+    if !is_clamped(piece.u_knots(), p) || !is_clamped(piece.v_knots(), q) {
+        return None;
+    }
+    let mut bounds = points_box(
+        piece
+            .rows()
+            .flatten()
+            .map(|&c| hull_point(c))
+            .collect::<Option<Vec<_>>>()?,
+    )?;
+    bounds.expand_absolute(slack);
+    Some(bounds)
+}
+
 /// The control-point boxes of `pieces` (`None` when a point has no hull point).
 fn surface_piece_boxes(pieces: &[Surface]) -> Option<Vec<Extent3d>> {
     pieces
@@ -1598,6 +1661,71 @@ mod tests {
             assert!(boxes[0].contains_point(p, 1e-13), "p={p:?}");
         }
         assert_eq!(boxes[0].max_at(2), 2.0);
+    }
+
+    #[test]
+    fn a_piece_box_holds_its_rectangle_s_samples_and_shrinks_with_it() {
+        for s in [bicubic(), rational_patch(1.0, 3.0)] {
+            let (u0, u1) = (s.u_knots()[0], *s.u_knots().last().unwrap());
+            let (v0, v1) = (s.v_knots()[0], *s.v_knots().last().unwrap());
+            // The whole domain: the control net's box, grown by the rounding allowance.
+            let whole = srf_piece_box(&s, (u0, u1), (v0, v1)).unwrap();
+            let net = points_box(s.rows().flatten().map(|&c| hull_point(c).unwrap())).unwrap();
+            assert!(net.is_contained_by(&whole, 0.0));
+            assert!(whole.is_contained_by(&net, 1e-12));
+            // Rectangles inside one span, across the knots, and on the domain's sides.
+            for (u, v) in [
+                ((0.1, 0.3), (0.1, 0.4)),
+                ((0.3, 0.7), (0.2, 0.9)),
+                ((0.4, 0.5), (0.5, 0.75)),
+                ((u0, 0.2), (0.6, v1)),
+                ((0.9, u1), (v0, 0.05)),
+            ] {
+                let bx = srf_piece_box(&s, u, v).unwrap();
+                for p in surface_samples(&s, u, v) {
+                    assert!(bx.contains_point(p, 1e-13), "u={u:?} v={v:?} p={p:?}");
+                }
+                assert!(bx.is_contained_by(&whole, 1e-12), "u={u:?} v={v:?}");
+            }
+            // Halving a rectangle about a point shrinks its box towards the point.
+            let (cu, cv) = (0.45, 0.55);
+            let centre = s.eval(cu, cv, Side::Left, Side::Left).unwrap();
+            let mut half = 0.25;
+            let mut last = f64::INFINITY;
+            for _ in 0..20 {
+                let bx = srf_piece_box(&s, (cu - half, cu + half), (cv - half, cv + half)).unwrap();
+                assert!(bx.contains_point(centre, 1e-13), "half={half}");
+                let size = bx.size().length();
+                assert!(size < 0.75 * last, "half={half}: {size} after {last}");
+                last = size;
+                half *= 0.5;
+            }
+            assert!(last < 1e-4, "{last}");
+        }
+    }
+
+    #[test]
+    fn a_rectangle_that_is_empty_or_outside_the_domain_has_no_piece_box() {
+        let s = bicubic();
+        for (u, v) in [
+            ((0.2, 0.2), (0.1, 0.4)),
+            ((0.6, 0.3), (0.1, 0.4)),
+            ((0.1, 0.4), (0.5, 0.5)),
+            ((-1e-9, 0.4), (0.1, 0.4)),
+            ((0.1, 1.0 + 1e-9), (0.1, 0.4)),
+            ((0.1, 0.4), (0.1, f64::NAN)),
+            ((f64::NEG_INFINITY, 0.4), (0.1, 0.4)),
+        ] {
+            assert!(srf_piece_box(&s, u, v).is_none(), "u={u:?} v={v:?}");
+        }
+        for w in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            let r = rational_patch(1.0, w);
+            assert!(srf_piece_box(&r, (0.1, 0.4), (0.1, 0.4)).is_none(), "w={w}");
+        }
+        // Knots that are not clamped: no Bezier pieces to split.
+        let mut open = bicubic();
+        open.u_knots_mut()[0] = -0.5;
+        assert!(srf_piece_box(&open, (0.1, 0.4), (0.1, 0.4)).is_none());
     }
 
     #[test]

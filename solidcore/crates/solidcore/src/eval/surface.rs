@@ -591,8 +591,8 @@ impl SurfaceEval {
 
     /// A pcurve whose control points run a little past the knot range put on it, with a
     /// certified bound on how far that moves the surface under it, refused past `tolerance`
-    /// ([`super::collapse::pcurve_onto_knots`]); `None` when it is on the range. A polynomial
-    /// spline's only, any other surface refused.
+    /// ([`super::collapse::pcurve_onto_knots`]); `None` when it is on the range. A spline's
+    /// only (a rational one past one of its ranges), any other surface refused.
     pub fn pcurve_onto_knots(
         &self,
         pc: &Curve2,

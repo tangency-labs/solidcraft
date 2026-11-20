@@ -718,4 +718,47 @@ mod tests {
             ))
         );
     }
+
+    /// A rail crossing a side edge that joins both ends of the filleted edge (a loop of two
+    /// edges) is judged at the end nearer the crossing only. The filleted edge runs along x
+    /// from 0 to 10; a rail beside it at y = 1 that leaves its face at x = 4 and comes back
+    /// at x = 6, heading +x, is past neither end, so its run off the face is judged.
+    #[test]
+    fn a_side_edge_crossing_on_a_loop_of_two_edges_is_judged_at_its_nearer_end() {
+        let jets = [(Vec3::ZERO, Vec3::X), (Vec3::new(10.0, 0.0, 0.0), Vec3::X)];
+        let both = [0, 1];
+        let at = |x: f64| Vec3::new(x, 1.0, 0.0);
+        // mid-edge: leaving near the start heading in, coming back near the end heading out
+        assert_eq!(
+            rails_fit::crossing_end(&both, jets, at(4.0), Vec3::X, true),
+            None
+        );
+        assert_eq!(
+            rails_fit::crossing_end(&both, jets, at(6.0), Vec3::X, false),
+            None
+        );
+        // near an end, heading past it: leaving out past the end, coming back in past the start
+        assert_eq!(
+            rails_fit::crossing_end(&both, jets, at(9.5), Vec3::X, true),
+            Some(1)
+        );
+        assert_eq!(
+            rails_fit::crossing_end(&both, jets, at(0.5), Vec3::X, false),
+            Some(0)
+        );
+        // a side edge at one end only: that end, by the heading alone (an end face sloping
+        // back over the face is crossed before the end's cross section)
+        assert_eq!(
+            rails_fit::crossing_end(&[1], jets, at(4.0), Vec3::X, true),
+            Some(1)
+        );
+        assert_eq!(
+            rails_fit::crossing_end(&[1], jets, at(4.0), -Vec3::X, true),
+            None
+        );
+        assert_eq!(
+            rails_fit::crossing_end(&[], jets, at(9.5), Vec3::X, true),
+            None
+        );
+    }
 }

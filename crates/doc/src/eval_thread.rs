@@ -196,22 +196,27 @@ pub(super) fn thread_on(st: &ModelState, feature: u64, p: Vec3, ask: &ThreadAsk)
 /// coordinates, so two parts built alike (two screws of one size) each have a face at the same
 /// point, and without this the second part's thread went on the first part's body.
 pub(super) fn thread_on_in(st: &ModelState, feature: u64, component: Option<u64>, p: Vec3, ask: &ThreadAsk) -> Result<ThreadOn> {
-    let found: Vec<(usize, kernel::CylinderFace)> = st
-        .bodies
-        .iter()
-        .enumerate()
-        .filter(|(_, b)| !super::more::beyond_cylinder_reach(b, p))
-        .filter_map(|(i, b)| {
-            #[cfg(test)]
-            super::cost_tests::count(|c| c.cylinder_search += 1);
-            kernel::cylinder_face_at(&b.body, p).map(|c| (i, c))
-        })
-        .collect();
-    let own = |i: &usize| component.is_some_and(|c| st.bodies.get(*i).is_some_and(|b| b.component == c));
-    let any_own = found.iter().any(|(i, _)| own(i));
+    // The component's own bodies are searched first; the others only when none of its own has
+    // a face there (each body searched is tessellated).
+    let own = |b: &ModelBody| component.is_some_and(|c| b.component == c);
+    let search = |want_own: bool| -> Vec<(usize, kernel::CylinderFace)> {
+        st.bodies
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| own(b) == want_own && !super::more::beyond_cylinder_reach(b, p))
+            .filter_map(|(i, b)| {
+                #[cfg(test)]
+                super::cost_tests::count(|c| c.cylinder_search += 1);
+                kernel::cylinder_face_at(&b.body, p).map(|c| (i, c))
+            })
+            .collect()
+    };
+    let mut found = search(true);
+    if found.is_empty() {
+        found = search(false);
+    }
     let (bi, cyl) = found
         .into_iter()
-        .filter(|(i, _)| !any_own || own(i))
         .min_by(|a, b| {
             let dist = |c: &kernel::CylinderFace| ((p - c.axis_point - c.axis * (p - c.axis_point).dot(c.axis)).len() - c.radius).abs();
             dist(&a.1).total_cmp(&dist(&b.1))
@@ -958,7 +963,7 @@ fn cut_grouped(st: &ModelState, selected: &[ThreadOn], continuous_flanks: bool) 
         let body = kernel::boolean(&original.body, &tool, BoolOp::Cut)?.ok_or_else(|| DocError::Invalid("the threads removed everything".into()))?;
         // The check also keeps a bad shoulder trim on the established per-face fallback path.
         super::check_feature_body(&body)?;
-        let faces = crate::lineage::Lineage::unnamed_faces(tool.face_count());
+        let faces = crate::lineage::Lineage::unnamed(&tool);
         let lineage = original.traced().lineage.and_then(|lineage| crate::lineage::Lineage::step(&body, &[&lineage, &faces]));
         checked.push((original.name.clone(), body.clone()));
         if let Some(slot) = next.bodies.get_mut(index) {
@@ -1019,10 +1024,9 @@ fn cut_with_flanks(
             )));
         }
         let sleeve = ring(r_min, r_out, 0.0, hi - lo)?;
-        let faces = sleeve.face_count();
         let filled =
             kernel::boolean(&input.body, &sleeve, BoolOp::Union)?.ok_or_else(|| DocError::Invalid("narrowing the hole removed everything".into()))?;
-        let unnamed = crate::lineage::Lineage::unnamed_faces(faces);
+        let unnamed = crate::lineage::Lineage::unnamed(&sleeve);
         let lineage = input.lineage.and_then(|l| crate::lineage::Lineage::step(&filled, &[&l, &unnamed]));
         input = Traced { body: filled, lineage, recipe: None };
         groove_radius = r_min;
@@ -1041,10 +1045,9 @@ fn cut_with_flanks(
     let chamfer = |mut input: Traced| -> Result<Traced> {
         if tip != ThreadTip::None {
             for cone in tip_cones(&t, radius, ends, (tip, from_side), angle, depth, taper)? {
-                let faces = cone.face_count();
                 let cut =
                     kernel::boolean(&input.body, &cone, BoolOp::Cut)?.ok_or_else(|| DocError::Invalid("the chamfer removed everything".into()))?;
-                let unnamed = crate::lineage::Lineage::unnamed_faces(faces);
+                let unnamed = crate::lineage::Lineage::unnamed(&cone);
                 let lineage = input.lineage.and_then(|l| crate::lineage::Lineage::step(&cut, &[&l, &unnamed]));
                 input = Traced { body: cut, lineage, recipe: None };
             }
@@ -1054,7 +1057,7 @@ fn cut_with_flanks(
     if continuous_flanks {
         input = chamfer(input)?;
     }
-    let cut_grooves = |ends: [End; 2]| -> Result<(Option<Body>, usize, Option<Body>)> {
+    let cut_grooves = |ends: [End; 2]| -> Result<(Option<Body>, Body, Option<Body>)> {
         let tool = groove_tool(&t, cyl, ends, steep, ease, groove_radius, taper, continuous_flanks)?;
         #[cfg(test)]
         super::cost_tests::count(|c| c.thread_cuts += 1);
@@ -1070,7 +1073,7 @@ fn cut_with_flanks(
         } else {
             None
         };
-        Ok((cut, tool.face_count(), checked))
+        Ok((cut, tool, checked))
     };
     // A design that built with the square stop keeps building: where the kernel can't make the
     // trimmed cut, the groove stops clear of the shoulder as it did, and the feature says so.
@@ -1086,10 +1089,10 @@ fn cut_with_flanks(
             t.designation
         )
     });
-    let (nb, groove_faces, checked) = made?;
+    let (nb, groove_tool, checked) = made?;
     let nb = nb.ok_or_else(|| DocError::Invalid("the thread removed everything".into()))?;
     // The groove's faces have no role to name them by.
-    let groove = crate::lineage::Lineage::unnamed_faces(groove_faces);
+    let groove = crate::lineage::Lineage::unnamed(&groove_tool);
     let lineage = input.lineage.and_then(|l| crate::lineage::Lineage::step(&nb, &[&l, &groove]));
     let nb = Traced { body: nb, lineage, recipe: None };
     let nb = if continuous_flanks { nb } else { chamfer(nb)? };

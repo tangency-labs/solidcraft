@@ -13,11 +13,11 @@
 use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, FRAC_PI_3, FRAC_PI_4, PI, TAU};
 
 use solidcore_ops::prism::{
-    extrude_planar_regions, loop_holds, planar_regions_boolean, prism_equivalent, prism_section,
-    region_area, PrismSection,
+    extrude_planar_regions, fitted_loop, loop_holds, planar_regions_boolean, prism_equivalent,
+    prism_section, region_area, PrismSection,
 };
 use solidcore_ops::{make_box, make_cylinder, session, Body, BooleanOp, CheckLevel, Error};
-use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
 fn all_fixes() {
     session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
@@ -1337,6 +1337,76 @@ fn planar_region_api_rejects_hostile_values_and_budgets() {
     ));
 }
 
+#[test]
+fn a_prism_section_does_not_depend_on_the_query_frame_origin() {
+    all_fixes();
+    let body = make_cylinder([50.0, 50.0, -3.0], 5.0, 6.0).unwrap();
+    let exact_volume = 150.0 * PI;
+    for offset in [0.0, 300.0, 1000.0, 10000.0, -10000.0] {
+        let plane = Plane {
+            origin: Vec3::new(offset, offset, 7.0),
+            ..Plane::XY
+        };
+        let section = prism_section(&body, &plane)
+            .unwrap()
+            .unwrap_or_else(|| panic!("the same cylinder is a prism at origin {offset}"));
+        assert!((section.lo + 10.0).abs() <= section.tolerance);
+        assert!((section.hi + 4.0).abs() <= section.tolerance);
+        assert!(section.volume.lo <= exact_volume && exact_volume <= section.volume.hi);
+        assert!(section.region.holes.is_empty());
+        for segment in &section.region.outer.segs {
+            let Seg2::Arc { center, radius, .. } = segment else {
+                panic!("a cylinder's section is circular: {segment:?}");
+            };
+            assert!((center.x + offset - 50.0).abs() < 1e-8);
+            assert!((center.y + offset - 50.0).abs() < 1e-8);
+            assert!((radius - 5.0).abs() < 1e-8);
+        }
+    }
+    for offset in [1e20, f64::MAX] {
+        let plane = Plane {
+            origin: Vec3::new(offset, offset, 7.0),
+            ..Plane::XY
+        };
+        assert!(prism_section(&body, &plane).unwrap().is_none());
+    }
+    let moved = make_cylinder([500.0, 500.0, -3.0], 5.0, 6.0).unwrap();
+    let plane = Plane {
+        origin: Vec3::new(500.0, 500.0, 0.0),
+        ..Plane::XY
+    };
+    let section = prism_section(&moved, &plane).unwrap().unwrap();
+    assert!((section.lo + 3.0).abs() <= section.tolerance);
+    assert!((section.hi - 3.0).abs() <= section.tolerance);
+    assert!(section.volume.lo <= exact_volume && exact_volume <= section.volume.hi);
+}
+
+#[test]
+fn a_prism_section_refuses_a_wall_displaced_from_its_caps() {
+    use solidcore_record::brep::Surface;
+
+    all_fixes();
+    let body = make_cylinder([50.0, 50.0, -3.0], 5.0, 6.0).unwrap();
+    let (mut record, _) = body.to_record().unwrap();
+    let wall = record
+        .faces
+        .iter_mut()
+        .find(|face| matches!(face.surface, Surface::Cylinder { .. }))
+        .unwrap();
+    let Surface::Cylinder { frame, .. } = &mut wall.surface else {
+        unreachable!()
+    };
+    frame.origin[2] += 1000.0;
+    let Some(Surface::RationalSpline { homogeneous, .. }) = &mut wall.nurbs else {
+        panic!("the cylinder's wall has a rational net")
+    };
+    for p in homogeneous.iter_mut().flatten() {
+        p[2] += 1000.0 * p[3];
+    }
+    let (displaced, _) = Body::from_record(&record, true).unwrap();
+    assert!(prism_section(&displaced, &Plane::XY).unwrap().is_none());
+}
+
 /// A box cut by a cylinder through it, moved: a prism along its moved axis, and the same prism
 /// as itself moved the same way; the drilled box against a box drilled wider is not.
 #[test]
@@ -1409,6 +1479,98 @@ fn loop_holds_a_point_on_an_edge_line_off_the_loop() {
     assert_eq!(loop_holds(&sq, v(11.0, 10.0)), Some(false));
     assert_eq!(loop_holds(&sq, v(5.0, 5.0)), Some(true));
     assert_eq!(loop_holds(&sq, v(5.0, 0.0)), None);
+}
+
+#[test]
+fn directed_planar_sweep_preserves_record_coordinates() {
+    let center = v(10.0, 20.0);
+    assert_eq!(
+        solidcore_ops::prism::counterclockwise_sweep(center, v(12.0, 20.0), v(10.0, 23.0)),
+        Some(FRAC_PI_2)
+    );
+    assert_eq!(
+        solidcore_ops::prism::counterclockwise_sweep(center, center, v(10.0, 23.0)),
+        None
+    );
+}
+
+#[test]
+fn hatch_record_admission_bounds_conversion_before_geometry() {
+    use solidcore_ops::hatch::generate;
+    use solidcore_record::hatch::{Invalid, Pattern};
+    let pattern = Pattern::lines_45();
+    let line = Seg2::Line {
+        a: v(0.0, 0.0),
+        b: v(1.0, 0.0),
+    };
+    let mut region = Region2 {
+        outer: Loop2 {
+            segs: vec![line; solidcore::hatch::MAX_INPUT_PIECES + 1],
+        },
+        holes: Vec::new(),
+    };
+    assert_eq!(
+        generate(&pattern, &region),
+        Err(Invalid("input piece budget exhausted"))
+    );
+    region.outer.segs.pop();
+    assert_ne!(
+        generate(&pattern, &region),
+        Err(Invalid("input piece budget exhausted")),
+        "the exact ceiling remains inclusive"
+    );
+    let circle = Loop2::circle(v(0.0, 0.0), 5.0);
+    region = Region2 {
+        outer: circle.clone(),
+        holes: vec![circle.clone(), circle],
+    };
+    assert_eq!(
+        generate(&pattern, &region),
+        Err(Invalid("not supported yet: multiple circular hatch holes"))
+    );
+    region = Region2 {
+        outer: Loop2 {
+            segs: vec![line; 3],
+        },
+        holes: vec![Loop2::default(); solidcore::hatch::MAX_INPUT_PIECES / 3 + 1],
+    };
+    assert_eq!(
+        generate(&pattern, &region),
+        Err(Invalid("too many region holes"))
+    );
+}
+
+/// The section fit as Convert Mesh takes it (moved from SolidCraft's `mesh_convert.rs`
+/// `planar_boxes_are_exact_and_coarse_polygons_are_not_rounded`): a hexagon keeps its six sides,
+/// sixteen nodes too coarse for 0.001 keep sixteen, and within 0.2 they are the exact circle, one
+/// arc of one full turn round the centre at the radius.
+#[test]
+fn coarse_section_polygons_are_not_rounded_and_a_fine_one_is_the_exact_circle() {
+    let ring = |n: usize| -> Vec<Vec2> {
+        (0..n)
+            .map(|i| {
+                let angle = i as f64 * TAU / n as f64;
+                v(angle.cos() * 10., angle.sin() * 10.)
+            })
+            .collect()
+    };
+    assert_eq!(fitted_loop(&ring(6), 1., 1e-6).unwrap().segs.len(), 6);
+    assert_eq!(fitted_loop(&ring(16), 0.001, 1e-6).unwrap().segs.len(), 16);
+    let fitted = fitted_loop(&ring(16), 0.2, 1e-6).unwrap();
+    let [Seg2::Arc {
+        center,
+        radius,
+        sweep,
+        ..
+    }] = fitted.segs.as_slice()
+    else {
+        panic!("not one arc: {fitted:?}")
+    };
+    assert!(
+        center.x.hypot(center.y) < 1e-9 && (radius - 10.).abs() < 1e-9,
+        "centre {center:?}, radius {radius}"
+    );
+    assert!((sweep.abs() - TAU).abs() < 1e-9, "sweep {sweep}");
 }
 
 /// The point of the circle about `c` of radius `r` at angle `deg` (degrees).

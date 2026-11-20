@@ -267,6 +267,34 @@ impl CPoint {
         }
     }
 
+    /// `alpha*A + (1 - alpha)*B`, as [`Self::combine2`] with `beta = 1 - alpha`, but a
+    /// coordinate `A` and `B` share is that coordinate exactly (not upstream): the
+    /// combination is affine, so it is that value in exact arithmetic, where the rounded
+    /// `alpha*x + beta*x` can land an ulp off it. Knot insertion uses it, so a curve cut
+    /// out of one along an iso-line (a UV trim on a seam or a domain side) stays on it.
+    /// A non-finite `alpha` (a zero-length knot span) has no affine combination: the
+    /// result is [`Self::combine2`]'s, NaN included, so the failure stays visible.
+    #[must_use]
+    pub fn affine2(alpha: f64, a: Self, b: Self) -> Self {
+        let mut r = Self::combine2(alpha, a, 1.0 - alpha, b);
+        if !alpha.is_finite() {
+            return r;
+        }
+        if a.x == b.x {
+            r.x = a.x;
+        }
+        if a.y == b.y {
+            r.y = a.y;
+        }
+        if a.z == b.z {
+            r.z = a.z;
+        }
+        if a.w == b.w {
+            r.w = a.w;
+        }
+        r
+    }
+
     /// `alpha*A + beta*B` (`N_Combine2CPts`); a missing `z` in one operand drops that
     /// term, a missing `w` in either makes the result non-rational.
     #[must_use]

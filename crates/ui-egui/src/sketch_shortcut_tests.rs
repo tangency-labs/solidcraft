@@ -207,7 +207,6 @@ fn move_key_keeps_sketch_mode_behavior_and_honors_a_sketch_move_binding() {
 
     press(&mut h, "M");
     assert!(h.app.dialog.is_none(), "the default body Move shortcut is disabled in a sketch");
-    assert!(h.app.tree.occurrence_move.is_none());
     assert_eq!(h.app.session.active_sketch, sketch);
     assert_eq!(h.app.session.selection, selection);
 
@@ -217,7 +216,7 @@ fn move_key_keeps_sketch_mode_behavior_and_honors_a_sketch_move_binding() {
     assert!(matches!(dialog.kind, crate::dialogs::Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { .. })));
     assert_eq!(dialog.inputs[0].items, selection);
     assert_eq!(h.app.session.active_sketch, sketch);
-    assert!(h.app.tree.occurrence_move.is_none(), "M must not open component Move while editing its sketch");
+    assert!(crate::dialogs_move::moving(&h.app).is_none(), "M must not open component Move while editing its sketch");
 }
 
 /// With Keep model keys out of sketches on, sketches and the model have their own keys: with M
@@ -247,12 +246,35 @@ fn sketch_and_model_keys_are_kept_apart() {
     assert!(e.contains("already used"), "{e}");
 }
 
-/// #2459: by default a tool's shortcut pressed again starts the tool again, in the mode the key
-/// is bound to; the preference is off.
+/// Pressing an active tool or dialog's shortcut again closes it by default; auto-repeat does not,
+/// and with `shortcut_again_ends_tool` off the key starts the tool again as before.
 #[test]
-fn a_tools_shortcut_pressed_again_restarts_it_by_default() {
+fn a_tools_shortcut_pressed_again_closes_it_by_default() {
     let mut h = Harness::new();
     assert!(!h.app.preferences.shortcut_cycles_modes, "off by default");
+    assert!(h.app.preferences.shortcut_again_ends_tool, "on by default");
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.settle();
+    press(&mut h, "L");
+    assert_eq!(tool(&h), Some("sketch.line"));
+    crate::keymap::press(&mut h.app, "L", true);
+    assert_eq!(tool(&h), Some("sketch.line"), "key repeat keeps the tool");
+    press(&mut h, "L");
+    assert_eq!(tool(&h), None, "pressing L again closes the tool");
+    crate::keymap::press(&mut h.app, "L", true);
+    assert_eq!(tool(&h), None, "key repeat after closing does not reopen the tool");
+    h.app.finish_sketch();
+    h.settle();
+    press(&mut h, "E");
+    assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.extrude"));
+    crate::keymap::press(&mut h.app, "E", true);
+    assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.extrude"), "key repeat keeps the dialog");
+    press(&mut h, "E");
+    assert!(h.app.dialog.is_none(), "pressing E again closes the extrude dialog");
+    crate::keymap::press(&mut h.app, "E", true);
+    assert!(h.app.dialog.is_none(), "key repeat after closing does not reopen the dialog");
+    // The old way, behind the preference: pressing the key again restarts the tool.
+    h.app.preferences.shortcut_again_ends_tool = false;
     h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
     h.settle();
     press(&mut h, "R");
