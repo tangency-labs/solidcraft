@@ -9599,9 +9599,9 @@ fn axis_view_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) -> bool {
         let shown = crate::view_gizmo::shown(app);
         match shown.style {
             crate::prefs::NavigatorStyle::Custom if shown.shape.is_some() => body_gizmo::drag_origin(app, rect, p),
-            crate::prefs::NavigatorStyle::Axes | crate::prefs::NavigatorStyle::Custom => {
-                axis_rect(app, rect).contains(p) && !on_axes_arrow(app, rect, p)
-            }
+            // A press on a roll arrow may start an orbit too: a click on it still rolls (egui
+            // takes a press that moves past the drag threshold as a drag, not a click).
+            crate::prefs::NavigatorStyle::Axes | crate::prefs::NavigatorStyle::Custom => axis_rect(app, rect).contains(p),
         }
     });
     (app.viewport.axis_drag, app.viewport.axis_warp) = (drag.at, drag.warp);
@@ -17097,6 +17097,11 @@ mod tests {
         for side in ["left", "right", "up", "down"] {
             assert!(crate::scenario::handle_at(&format!("navigator:control:{side}")).is_none(), "no {side} orbit arrow");
         }
+        // A drag that starts on a roll arrow orbits, as one anywhere else on the navigator does.
+        let p = crate::scenario::handle_at("navigator:control:clockwise").unwrap();
+        let before = h.app.cam;
+        h.call("ui.drag", json!({"x0": p.x, "y0": p.y, "x1": p.x - 40.0, "y1": p.y + 10.0, "steps": 8}));
+        assert!(h.app.cam.back().dist(before.back()) > 1e-3, "the drag orbits the view");
     }
 
     /// A hovered end's label never covers a panel: in a right-to-left layout the Browser docks

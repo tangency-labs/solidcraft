@@ -177,12 +177,22 @@ fn label(painter: &egui::Painter, clip: Rect, c: Pos2, (name, d, at, depth): Tip
     let rightward =
         if at.x >= c.x { right.max.x <= clip.max.x || left.min.x < clip.min.x } else { left.min.x < clip.min.x && right.max.x <= clip.max.x };
     let pill = if rightward { right } else { left };
+    // Neither side has room (panels close on both sides): slide the pill back inside, its left
+    // edge first when it is wider than the room. The letter then gives way to the name.
+    let shift = if pill.min.x < clip.min.x {
+        clip.min.x - pill.min.x
+    } else if pill.max.x > clip.max.x {
+        (clip.max.x - pill.max.x).max(clip.min.x - pill.min.x)
+    } else {
+        0.0
+    };
+    let pill = pill.translate(vec2(shift, 0.0));
     painter.rect_filled(pill, r, colour);
-    if positive {
+    if positive && shift == 0.0 {
         let letter = painter.layout_no_wrap(name.to_uppercase(), crate::type_face::bold(t.font_compass), t.on_accent);
         painter.galley(at - crate::type_face::ink_centre(&letter), letter, t.on_accent);
     }
-    let x = if rightward { at.x + lead } else { at.x - lead - w };
+    let x = shift + if rightward { at.x + lead } else { at.x - lead - w };
     painter.galley(pos2(x, at.y - crate::type_face::ink_centre(&galley).y), galley, t.on_accent);
     pill
 }
@@ -417,7 +427,15 @@ mod tests {
                 let pill = label(ui.painter(), clip, c, x, Tokens::get());
                 assert!(clip.contains_rect(pill), "{pill:?} in {clip:?}");
                 assert!(pill.max.x <= x.2.x + 12.0, "it grew leftward from the right edge");
-                let minus_x = tips(&FRONT, pos2(200.0, 200.0)).into_iter().find(|t| t.0 == "-x").unwrap();
+                // Room on neither side alone, but enough in all (panels close on both sides): the
+            // pill slides back inside.
+            let names = [("view", solidcraft_ui_text::tr(view_name("x"))), ("opposite", solidcraft_ui_text::tr(view_name("-x")))];
+            let wide = solidcraft_ui_text::format("ui.view_compass_reverse", &names);
+            let w = ui.painter().layout_no_wrap(wide, crate::type_face::bold(Tokens::get().font_compass), egui::Color32::WHITE).size().x;
+            let narrow = Rect::from_min_max(pos2(x.2.x - w / 2.0 - 20.0, 0.0), pos2(x.2.x + w / 2.0 + 20.0, 400.0));
+            let pill = label(ui.painter(), narrow, c, (x.0, x.1, x.2, 1.0), Tokens::get());
+            assert!(narrow.contains_rect(pill), "{pill:?} in {narrow:?}");
+            let minus_x = tips(&FRONT, pos2(200.0, 200.0)).into_iter().find(|t| t.0 == "-x").unwrap();
                 let pill = label(ui.painter(), clip, pos2(200.0, 200.0), minus_x, Tokens::get());
                 assert!(pill.max.x <= minus_x.2.x + 12.0, "a left tip grows leftward");
             },
