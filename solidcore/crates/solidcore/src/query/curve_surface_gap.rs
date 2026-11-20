@@ -537,7 +537,7 @@ impl NetSurface {
             // part's width in the other direction)
             let mut gap = |ku: usize, kv: usize, kt: usize, across_u: bool, a: [f64; 4]| {
                 let (tu, tv) = if across_u { (kt, kv) } else { (ku, kt) };
-                let mid = |lo: f64, hi: f64| (lo + 0.5 * (hi - lo)).clamp(lo, hi);
+                let mid = |lo: f64, hi: f64| (lo + 0.5 * (hi - lo)).max(lo).min(hi);
                 let (mu, mv) = (mid(a[0], a[1]), mid(a[2], a[3]));
                 let own_m = self.piece_partials(tu, tv, mu, mu, mv, mv, 0)?.at(0, 0);
                 let cont_m = self.piece_partials(ku, kv, mu, mu, mv, mv, 0)?.at(0, 0);
