@@ -1,11 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<policyDefinitionResources xmlns="http://www.microsoft.com/GroupPolicy/PolicyDefinitions" revision="1.1" schemaVersion="1.0">
+<policyDefinitionResources xmlns="http://www.microsoft.com/GroupPolicy/PolicyDefinitions" revision="1.2" schemaVersion="1.0">
   <displayName>SolidCraft</displayName>
   <description>Settings an organization sets for the people who use SolidCraft on its computers.</description>
   <resources>
     <stringTable>
       <string id="SolidCraft">SolidCraft</string>
       <string id="SUPPORTED_SolidCraft_0_44">SolidCraft 0.44 or later</string>
+      <string id="SUPPORTED_SolidCraft_0_46">SolidCraft 0.46 or later</string>
       <string id="CheckForUpdates">Check for updates</string>
       <string id="CheckForUpdates_Explain">Controls whether SolidCraft asks GitHub for the latest release at start and once a day.
 
@@ -14,6 +15,16 @@ Enabled: SolidCraft checks at start and once a day. People cannot turn the check
 Disabled: SolidCraft never checks for updates, and Check now is unavailable. Use this when your organization deploys new versions itself.
 
 Not configured: each person chooses in Preferences, General, Updates.
+
+In Preferences the setting shows as set by the organization. The change applies the next time SolidCraft starts.</string>
+      <string id="UsageStatistics">Anonymous usage statistics</string>
+      <string id="UsageStatistics_Explain">Controls whether SolidCraft may send anonymous usage statistics: a random installation ID, the version, operating system and architecture, the minutes of use and how often each command ran, at most once a day.
+
+Disabled: SolidCraft sends no usage statistics and keeps none to send later. People cannot turn them on, and it shows no notice about them.
+
+Enabled: each person chooses in Preferences, Privacy.
+
+Not configured: each person chooses in Preferences, Privacy.
 
 In Preferences the setting shows as set by the organization. The change applies the next time SolidCraft starts.</string>
       <string id="OrganizationName">Organization name</string>
@@ -27,6 +38,7 @@ This policy only shows a name; it changes no setting. The change applies the nex
     </stringTable>
     <presentationTable>
       <presentation id="CheckForUpdates" />
+      <presentation id="UsageStatistics" />
       <presentation id="OrganizationName">
         <textBox refId="OrganizationName">
           <label>Organization name:</label>
