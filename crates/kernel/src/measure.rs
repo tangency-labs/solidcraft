@@ -108,20 +108,17 @@ pub fn measure_mass(b: &Body) -> Result<MassMeasure> {
 }
 
 /// How far `b` reaches along `plane`'s normal, measured from the plane: the least and greatest
-/// level of its points, `[low, high]`. The body is moved rigidly into the plane's own frame (the
-/// plane's x, y and normal become X, Y and Z) and its exact box read there, so the span is the
-/// body's own, not the shadow of its world box.
+/// level of its points, `[low, high]`, as solidcore-ops measures it
+/// ([`solidcore_ops::Body::levels_along`]: the body moved rigidly into the plane's own frame and
+/// its exact box read there), so the span is the body's own, not the shadow of its world box.
+/// A mesh body has no solidcore form and is refused.
 pub fn levels_along(b: &Body, plane: &solidcore_record::Plane) -> Result<[f64; 2]> {
-    use solidcraft_geom::prelude::*;
-    let (x, y, n, o) = (plane.x, plane.y, plane.normal(), plane.origin);
-    // Column-major: world to plane coordinates, each column one world axis's image, the last
-    // the translation.
-    let to_plane = [[x.x, y.x, n.x, 0.0], [x.y, y.y, n.y, 0.0], [x.z, y.z, n.z, 0.0], [-x.dot(o), -y.dot(o), -n.dot(o), 1.0]];
-    let bounds = crate::transform_matrix(b, to_plane)?.exact_bounds()?;
-    if !(bounds.min.z.is_finite() && bounds.max.z.is_finite()) {
-        return Err(crate::KernelError::Invalid("the body's reach along the plane's normal can't be measured".into()));
-    }
-    Ok([bounds.min.z, bounds.max.z])
+    let Some((ops, _)) = b.ops_body() else {
+        return Err(crate::KernelError::Failed("the body's reach along the plane's normal: the body has no solidcore form".into()));
+    };
+    let (o, x, y) = (plane.origin, plane.x, plane.y);
+    ops.levels_along([o.x, o.y, o.z], [x.x, x.y, x.z], [y.x, y.y, y.z])
+        .map_err(|e| crate::KernelError::Invalid(format!("the body's reach along the plane's normal can't be measured: {e}")))
 }
 
 #[cfg(test)]
