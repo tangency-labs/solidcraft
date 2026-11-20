@@ -1452,6 +1452,16 @@ impl KeptResults {
     }
 }
 
+/// The results of another copy of a model offered to its evaluation ([`Model::prime_also`]).
+#[derive(Clone, Debug)]
+struct Primed {
+    /// That copy's context ([`context_digest`] and the rest of what `evaluate` mixes in).
+    context: u64,
+    results: Arc<std::collections::HashMap<u64, FeatureResult>>,
+    /// The pose each of its pose-only features was evaluated at.
+    poses: Arc<std::collections::HashMap<u64, u64>>,
+}
+
 /// Where a model keeps its results besides the cache ([`Model::keep`]). A copy of the model
 /// starts without: it keeps nothing it computes for someone else's run.
 #[derive(Debug, Default)]
@@ -1808,9 +1818,11 @@ pub struct Model {
     /// context. These share the existing states, so rolling back does not surrender them to
     /// the bounded cache. A result leaves this map when its feature is active again or removed.
     rolled_results: std::collections::HashMap<u64, (u64, FeatureResult)>,
-    /// Results another copy of this model evaluated (ahead, off the window thread) that
-    /// `evaluate` takes for features they match ([`Model::prime`]), with that copy's context.
-    primed: Option<(u64, Arc<std::collections::HashMap<u64, FeatureResult>>)>,
+    /// Results other copies of this model evaluated (ahead, off the window thread, or for
+    /// another configuration row) that `evaluate` takes for features they match
+    /// ([`Model::prime`], [`Model::prime_also`]), each with that copy's context and the poses
+    /// its pose-only features were evaluated at.
+    primed: Vec<Primed>,
     /// Mesh bodies from the import reader, offered to the next evaluation only.
     prepared_meshes: Option<(u64, PreparedMeshImport)>,
     /// Shared with copies of this evaluator; states hold only a weak reference.
@@ -3954,13 +3966,34 @@ impl Model {
     /// has the same inputs here, instead of evaluating it again. Results that don't match are
     /// ignored, so a design changed meanwhile is evaluated as usual.
     pub fn prime(&mut self, ahead: &Model) {
+        self.primed.clear();
+        self.prime_also(ahead);
+    }
+
+    /// Offer the results `ahead` computed as well as those offered already ([`Model::prime`]):
+    /// a feature takes the first one offered whose inputs are its own here. A pose-only
+    /// feature's result is taken only where `ahead` evaluated it at the pose it has here: its
+    /// fingerprint leaves the placement out, and `ahead` may be a model built before the bodies
+    /// it places moved (another configuration row's).
+    pub fn prime_also(&mut self, ahead: &Model) {
         let results = ahead.results.iter().filter(|r| !r.skipped && !r.stale).map(|r| (r.id, r.clone())).collect();
-        self.primed = Some((ahead.context, Arc::new(results)));
+        self.primed.push(Primed { context: ahead.context, results: Arc::new(results), poses: Arc::new(ahead.poses.clone()) });
+    }
+
+    /// How many models' results are offered ([`Model::prime_also`]).
+    pub fn primed_count(&self) -> usize {
+        self.primed.len()
+    }
+
+    /// Stop offering the results offered after the first `count` ([`Model::primed_count`]),
+    /// keeping those an earlier caller offered.
+    pub fn unprime_after(&mut self, count: usize) {
+        self.primed.truncate(count);
     }
 
     /// Stop offering the results [`Model::prime`] took.
     pub fn unprime(&mut self) {
-        self.primed = None;
+        self.primed.clear();
     }
 
     /// Offer the import reader's validated bodies for the new feature's first evaluation.
@@ -4030,7 +4063,7 @@ impl Model {
         let mut rolled_results = std::mem::take(&mut self.rolled_results);
         self.context = ctx;
         self.import_digests = ImportDigests::of(doc, &self.import_digests, heal);
-        let primed = self.primed.as_ref().filter(|(context, _)| !self.no_cache && *context == ctx).map(|(_, results)| results.clone());
+        let primed: Vec<Primed> = self.primed.iter().filter(|p| !self.no_cache && p.context == ctx).cloned().collect();
         // Each feature's component, for `Document::legacy_body_component` on every body after
         // every feature without searching the timeline for each (the first feature with an id).
         let mut feature_component: std::collections::HashMap<u64, u64> = std::collections::HashMap::with_capacity(doc.features.len());
@@ -4259,7 +4292,13 @@ impl Model {
                     .as_ref()
                     .filter(|_| moved.is_empty())
                     .filter(current)
-                    .or_else(|| primed.as_ref().filter(|_| moved.is_empty()).and_then(|p| p.get(&f.id)).filter(current))
+                    .or_else(|| {
+                        primed.iter().filter(|_| moved.is_empty()).find_map(|p| {
+                            // posed where that model evaluated it, not only here
+                            let posed_there = pose.is_none_or(|pose| p.poses.get(&f.id) == Some(&pose));
+                            p.results.get(&f.id).filter(current).filter(|_| posed_there)
+                        })
+                    })
                     .filter(|r| r.error.is_some() || legacy_current(doc, f, &state, &r.state))
                 {
                     restored += 1;
