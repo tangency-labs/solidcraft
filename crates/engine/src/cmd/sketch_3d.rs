@@ -1069,12 +1069,13 @@ pub(super) fn lift(s: &mut Session, p: &Value, cmd: &str, curves: &[String], poi
     })
 }
 
-/// Moves drawn 3D picks along the plane as `f` moves plane geometry, keeping their height off it.
+/// Moves drawn 3D picks along the plane as `f` moves plane geometry, and by `z` along its normal.
 pub(super) fn move_drawn(
     s: &mut Session,
     p: &Value,
     cmd: &str,
     picks: &[(String, Option<usize>)],
+    z: f64,
     f: &dyn Fn(Vec2) -> Vec2,
 ) -> Result<(usize, Value)> {
     let id = sketch_store::target(s, p, cmd)?;
@@ -1102,7 +1103,7 @@ pub(super) fn move_drawn(
             let moved: Vec<(usize, Vec3)> = which
                 .into_iter()
                 .filter_map(|i| drawn.fit.get(i).map(|q| (i, *q)))
-                .map(|(i, q)| (i, plane.to_world(f(plane.to_local(q))) + plane.normal() * plane.height(q)))
+                .map(|(i, q)| (i, plane.to_world(f(plane.to_local(q))) + plane.normal() * (plane.height(q) + z)))
                 .collect();
             moves.extend(moved.into_iter().map(|(i, to)| (wire.clone(), i, to)));
         }

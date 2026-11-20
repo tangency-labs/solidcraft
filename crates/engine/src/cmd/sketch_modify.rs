@@ -160,7 +160,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "MODIFY")
         .icon("sketch_move")
         .enabled(in_sketch)
-        .params(concat!("entities: [ids], translate?: [dx,dy], angle?: deg, center?: [x,y], copy?: bool, z?: mm along the sketch's normal (3D sketches: the moved lines and fit-point splines become drawn 3D curves that far off the plane); rotate_constraints?: bool (default true; false keeps constraints unchanged); a rotation turns the constraints tied to the sketch axes when all their geometry moves (horizontal and vertical relations and dimensions swap at odd quarter turns and stay at half turns, line angles turn with the line) and removes the horizontal and vertical ones that cannot hold at other angles; picking a text outline or linked point transforms its whole text source once, and copies remain editable text; copy also accepts drawn 3D curves, preserving exact arcs and height above the sketch plane; a turned rectangle keeps its shape: parallel and perpendicular relations replace the horizontal and vertical ones lost; `wire@index` picks a drawn 3D point, a drawn curve's id the whole curve: they move along the plane with the rest, keeping their height off it; returns `released`: the constraints tying the moved geometry to what stays that the move let go, as {id, kind}, and `added`: the relations put in their place, as {id, kind}", created_doc!())),
+        .params(concat!("entities: [ids], translate?: [dx,dy], angle?: deg, center?: [x,y], copy?: bool, z?: mm along the sketch's normal (3D sketches: the moved lines and fit-point splines become drawn 3D curves that far off the plane, and drawn picks move that far along it); rotate_constraints?: bool (default true; false keeps constraints unchanged); a rotation turns the constraints tied to the sketch axes when all their geometry moves (horizontal and vertical relations and dimensions swap at odd quarter turns and stay at half turns, line angles turn with the line) and removes the horizontal and vertical ones that cannot hold at other angles; picking a text outline or linked point transforms its whole text source once, and copies remain editable text; copy also accepts drawn 3D curves, preserving exact arcs and height above the sketch plane; a turned rectangle keeps its shape: parallel and perpendicular relations replace the horizontal and vertical ones lost; `wire@index` picks a drawn 3D point, a drawn curve's id the whole curve: they move with the rest, along the plane and by `z` along its normal; returns `released`: the constraints tying the moved geometry to what stays that the move let go, as {id, kind}, and `added`: the relations put in their place, as {id, kind}", created_doc!())),
     CommandSpec::new("sketch.mirror", "Mirror", crate::checked!("sketch.mirror", mirror))
         .in_sketch_part()
         .contract(&MIRROR_CONTRACT)
@@ -4476,7 +4476,7 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
             _ => Vec2::ZERO,
         };
         let rot = rotate(c, ang);
-        let (_, info) = super::sketch_3d::move_drawn(s, p, cmd, &moved_drawn, &|q: Vec2| rot(q) + t)?;
+        let (_, info) = super::sketch_3d::move_drawn(s, p, cmd, &moved_drawn, z, &|q: Vec2| rot(q) + t)?;
         if plane_picks.is_empty() {
             let curves = moved_ids;
             return reply(
