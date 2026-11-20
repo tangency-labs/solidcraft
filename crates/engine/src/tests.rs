@@ -1288,6 +1288,7 @@ fn hostile_params_never_panic() {
         "thickness",
         "origin",
         "shape",
+        "reverse",
         "size",
         "web",
         "clip",
