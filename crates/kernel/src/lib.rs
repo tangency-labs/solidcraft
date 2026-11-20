@@ -37,6 +37,7 @@ mod delete_face;
 mod distance;
 mod draft_corners;
 mod emboss;
+mod face_pattern;
 #[cfg(test)]
 mod face_source_tests;
 pub mod failure;
@@ -199,6 +200,10 @@ pub use draft_corners::{CornerFill, CornerOption, CornerRefusal, CornerReport, D
 pub use emboss::{
     cylinder_emboss_anchor, emboss_anchor, emboss_cylinder, emboss_cylinder_at, emboss_project_face, has_cylinder_emboss_wall, infer_cylinder_emboss,
 };
+pub use face_pattern::{
+    FaceStation, Falloff, MAX_EDGE_POINTS, MAX_STATION_COUNT, Noise, PointDistance, attraction, face_edge_points, face_placement,
+    face_random_stations, face_stations, ramp,
+};
 pub use failure::ErrorCode;
 pub use fair::{
     FairCurve, FairNet, FairOptions, FairReport, MAX_FAIR_ITERATIONS, MAX_FAIR_POINTS, fair_bspline_curve, fair_bspline_surface, fair_curve,
@@ -209,10 +214,7 @@ pub use helix::{loft_to_point, sweep_helix, sweep_helix_mesh, sweep_helix_radial
 pub use iges_in::{MAX_IGES_BYTES, iges_import, iges_to_step};
 pub use iges_out::iges_export_bodies;
 pub use intersection::{MeetingEdge, meeting_edges};
-pub use iso::{
-    FaceStation, IsoLine, MAX_EDGE_POINTS, MAX_ISO_COUNT, MAX_STATION_COUNT, Noise, PointDistance, face_edge_points, face_random_stations,
-    face_stations, iso_curves, iso_grid,
-};
+pub use iso::{IsoLine, MAX_ISO_COUNT, iso_curves, iso_grid};
 pub use lip::{LipRefusal, raise_band, rim_band};
 pub use loft_blend::loft_blend;
 pub use matchsurf::{match_surface, seam_continuity};
