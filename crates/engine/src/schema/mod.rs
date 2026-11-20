@@ -88,6 +88,7 @@ pub mod drawing_table;
 pub mod drawing_view;
 pub mod edit;
 pub mod end_cap;
+pub mod face_edits;
 pub mod features;
 pub mod features_more;
 pub mod file;
