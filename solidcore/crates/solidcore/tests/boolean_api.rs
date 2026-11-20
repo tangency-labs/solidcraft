@@ -2018,6 +2018,21 @@ fn a_cone_lying_on_a_face_along_a_generator_touches_it_along_that_line() {
                 s * e + c * Vec3::new(0.0, 1.0, 0.0),
             );
             let cone_volume = PI * h * (big * big + big * small + small * small) / 3.0;
+            // Faces, edges and vertices. The box is 6, 12, 8, and its top face takes no edge: the
+            // line lies inside it. A pointed cone is 2, 2, 2 (wall and base; the base circle and
+            // the seam; the apex and the seam's foot), a frustum 3, 3, 2 (two circles and the
+            // seam, whose two ends are the vertices). Turned 0 the touching line is the seam, so
+            // the cone keeps those counts. Turned otherwise the line may also be kept as an edge
+            // of the cone, splitting its wall in two, each circle at the line's foot, and adding
+            // the line and its ends: 3, 4, 3 pointed (the apex is shared), 4, 6, 4 a frustum.
+            let plain = if small == 0.0 { [2, 2, 2] } else { [3, 3, 2] };
+            let split = if small == 0.0 { [3, 4, 3] } else { [4, 6, 4] };
+            let cones: Vec<[usize; 3]> = if turn == 0.0 {
+                vec![plain]
+            } else {
+                vec![plain, split]
+            };
+            let with_box = |c: &[usize; 3]| [c[0] + 6, c[1] + 12, c[2] + 8];
             for (name, op, want, cone_first) in [
                 ("box less cone", Op::Difference, 816.0, false),
                 ("cone less box", Op::Difference, cone_volume, true),
@@ -2046,6 +2061,16 @@ fn a_cone_lying_on_a_face_along_a_generator_touches_it_along_that_line() {
                     .unwrap()
                     .lines();
                 assert!(lines.is_empty(), "{case}: {lines:?}");
+                let got = counts(&out);
+                let allowed: Vec<[usize; 3]> = match name {
+                    "box less cone" => vec![[6, 12, 8]],
+                    "cone less box" => cones.clone(),
+                    _ => cones.iter().map(with_box).collect(),
+                };
+                assert!(
+                    allowed.contains(&got),
+                    "{case}: counts {got:?}, want one of {allowed:?}"
+                );
                 let v = brep_volume(&k, &mut out, 1e-7, &attrs).unwrap();
                 assert!(
                     (v - want).abs() <= VOLUME_REL_TOL * want,

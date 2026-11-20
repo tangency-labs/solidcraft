@@ -37,7 +37,9 @@
 //! face's sweep, else its crossings are tested; bare surfaces keep upstream's test.
 //! A plane holding a generator of a cone (a box's face against a cone lying on it) touches
 //! it along that generator: one tangent line in closed form, as for the cylinder, instead of
-//! a traced curve through the tangency, whose repeated points the check refuses.
+//! a traced curve through the tangency, whose repeated points the check refuses. It holds
+//! the generator within a face's zone tolerance; a bare plane that dips into the cone does
+//! only while its two crossings lie within `tol` of the generator, the cylinder's own test.
 //! WR-787 (#15429): parallel cylinders that both bound faces and overlap past touching by
 //! less than [`contact_tol_3d`] touch along one line; bare surfaces keep two crossings.
 //! No input-driven recursion is introduced.
@@ -504,19 +506,34 @@ impl Cone {
                 // and the circle's tangent where it meets the rim is the tangent plane there,
                 // whose normal leans from the axis toward that generator. Every other
                 // plane steep enough to cut the cone is traced in general, as before.
+                //
+                // The plane holds the generator when both of its ends are on the plane. Within a
+                // face's zone tolerance that is a contact, as for the cylinder (WR-510). A bare
+                // surface keeps the cylinder's upstream test. The plane may stand off the cone
+                // by up to `tol`. Where it dips in by `e`, it does so by `e / c` within a
+                // cross-section, `c` being the cosine of the plane's tilt from the axis. There it
+                // cuts a rim of radius at most `r` in a chord whose ends lie `sqrt(2 r e / c)`
+                // from the generator. The two crossings are one line only when that is within
+                // `tol`.
                 let zone_tol = zone_tols[0].unwrap_or(0.0).max(zone_tols[1].unwrap_or(0.0));
-                let on = tol.max(zone_tol);
                 let lean = normal - normal.dot(axis) * axis;
-                if lean.length() > EFF_ZERO {
+                let tilt = lean.length();
+                if tilt > EFF_ZERO {
                     let lean = lean.unitize_or_z();
+                    let reach = bot_radius.max(self.top_radius());
                     for d in [lean, -lean] {
                         let start = bottom + bot_radius * d;
                         let end = top + self.top_radius() * d;
-                        let off = |p: Point3| (p - plane_origin).dot(normal).abs();
-                        if off(start) <= on
-                            && off(end) <= on
-                            && angle_in_sweep(self, axis, d, ang_tol)?
-                        {
+                        // How far `p` lies past the plane, away from the axis: above 0 where the
+                        // plane cuts into the cone at that end.
+                        let side = d.dot(normal).signum();
+                        let held = |p: Point3| {
+                            let e = (p - plane_origin).dot(normal) * side;
+                            e.abs() <= zone_tol
+                                || (e <= 0.0 && -e <= tol)
+                                || (e > 0.0 && 2.0 * reach * e / tilt <= tol * tol)
+                        };
+                        if held(start) && held(end) && angle_in_sweep(self, axis, d, ang_tol)? {
                             add_plane_line(
                                 &mut out,
                                 plane,
@@ -1576,6 +1593,58 @@ mod tests {
         }
         let (more, out) = cut(Vec3::new(4.0, 0.0, 0.0) + 0.5 * normal);
         assert!(more && out.curves_3d.is_empty());
+    }
+
+    /// The plane of the test above dipped 5e-8 into the cone (toward its axis), cut at a
+    /// tolerance of 1e-7. Within a cross-section it dips in by e / c = 5e-8 * sqrt(10) / 3
+    /// (c = 3 / sqrt(10), the cosine of its tilt from the axis), so at z = 0 it cuts the rim of
+    /// radius 4 in a chord whose ends lie sqrt(2 * 4 * 5.27e-8) = 6.5e-4 from the generator:
+    /// two crossing curves, 6500 times the tolerance apart, are not one tangent line, and the
+    /// plane goes to the general intersection. Exactly on the generator it is the tangent line
+    /// at that tolerance too. Against a face whose zone tolerance is 1e-7, the dip is within
+    /// the zone, and the plane touches the face's wall along the generator, as a plane a hair
+    /// off a cylinder's wall does (WR-510).
+    #[test]
+    fn a_plane_dipped_into_a_cone_past_its_tolerance_crosses_it_instead_of_touching() {
+        let k = Kernel::default();
+        let mut c = Cone::new_bounded(
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            4.0,
+            2.0,
+            0.0,
+            360.0,
+            6.0,
+            false,
+            false,
+            false,
+        );
+        c.make_nurb(&k).unwrap();
+        let normal = Vec3::new(3.0, 0.0, 1.0).unitize_or_z();
+        let plane_domain = Extent2d::from_bounds(-20.0, -20.0, 20.0, 20.0);
+        let cut = |at: Vec3, zone: Option<f64>| {
+            let plane = Plane::from_normal(at, normal);
+            c.intersect_with_plane_owned(
+                &k,
+                &axial_domain(&k, &c, 0.0, 6.0),
+                &plane,
+                PlaneOwner::NoFace,
+                &plane_domain,
+                Some(1e-7),
+                [zone, zone],
+            )
+            .unwrap()
+        };
+        let on = Vec3::new(4.0, 0.0, 0.0);
+        let dipped = on - 5e-8 * normal;
+        let (more, out) = cut(dipped, None);
+        assert!(more && out.curves_3d.is_empty(), "{:?}", out.curve_types);
+        for (at, zone) in [(on, None), (dipped, Some(1e-7))] {
+            let (more, out) = cut(at, zone);
+            assert!(!more);
+            assert_eq!(out.curve_types, vec![TsectCurveType::Tangent]);
+        }
     }
 
     /// WR-510 (#1525): a plane parallel to a cylinder's axis, turned a hair off its wall,
