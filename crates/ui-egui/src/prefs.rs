@@ -1655,6 +1655,8 @@ preference_settings! {
     remember_stand_up: bool = true, PAGE_DESIGN => check_id("prefs.remember_stand_up");
     /// Reopen an unchanged CAD import from the existing saved-design model cache.
     reuse_imports: bool = true, PAGE_DESIGN => check_id("prefs.reuse_imports");
+    /// Ask for acknowledgement when an interactive importer deliberately refuses a file.
+    importer_refusal_dialog: bool = true, PAGE_DESIGN => check_id_help("prefs.importer_refusal_dialog", "prefs.importer_refusal_dialog_tip");
     /// A STEP part SMLib's check fails is healed of its tolerance-scale defects (edges shorter
     /// than their tolerance, slivers between coincident edges, curve pieces of no length) in the
     /// background once it is imported, and Repair heals a part first (#17689). Off: the part

@@ -1,35 +1,57 @@
 {
   "ar": {
-    "plugin_import.refused_title": "الاستيراد غير مدعوم"
+    "plugin_import.refused_title": "الاستيراد غير مدعوم",
+    "prefs.importer_refusal_dialog": "عرض حالات رفض الاستيراد في مربع حوار",
+    "prefs.importer_refusal_dialog_tip": "عرض اسم الملحق ورسالته مع زر موافق عندما يرفض ملفًا. عطّل هذا الخيار لعرض الرفض في سطر الحالة فقط."
   },
   "de": {
-    "plugin_import.refused_title": "Import nicht unterstützt"
+    "plugin_import.refused_title": "Import nicht unterstützt",
+    "prefs.importer_refusal_dialog": "Ablehnungen durch Importer in einem Dialog anzeigen",
+    "prefs.importer_refusal_dialog_tip": "Zeigt den Namen und die Meldung des Plugins mit OK an, wenn es eine Datei ablehnt. Ausschalten, um die Ablehnung nur in der Statuszeile zu melden."
   },
   "en": {
-    "plugin_import.refused_title": "Import not supported"
+    "plugin_import.refused_title": "Import not supported",
+    "prefs.importer_refusal_dialog": "Show importer refusals in a dialog",
+    "prefs.importer_refusal_dialog_tip": "Show the plugin's name and message with OK when it refuses a file. Turn off to report the refusal only in the status line."
   },
   "en-GB": {
-    "plugin_import.refused_title": "Import not supported"
+    "plugin_import.refused_title": "Import not supported",
+    "prefs.importer_refusal_dialog": "Show importer refusals in a dialog",
+    "prefs.importer_refusal_dialog_tip": "Show the plugin's name and message with OK when it refuses a file. Turn off to report the refusal only in the status line."
   },
   "es": {
-    "plugin_import.refused_title": "Importación no compatible"
+    "plugin_import.refused_title": "Importación no compatible",
+    "prefs.importer_refusal_dialog": "Mostrar los rechazos del importador en un diálogo",
+    "prefs.importer_refusal_dialog_tip": "Muestra el nombre y el mensaje del complemento con Aceptar cuando rechaza un archivo. Desactiva esta opción para mostrar el rechazo solo en la línea de estado."
   },
   "he": {
-    "plugin_import.refused_title": "הייבוא אינו נתמך"
+    "plugin_import.refused_title": "הייבוא אינו נתמך",
+    "prefs.importer_refusal_dialog": "הצגת סירובי ייבוא בתיבת דו־שיח",
+    "prefs.importer_refusal_dialog_tip": "הצגת שם התוסף וההודעה שלו עם אישור כשהוא מסרב לקובץ. כיבוי האפשרות מציג את הסירוב בשורת המצב בלבד."
   },
   "ja": {
-    "plugin_import.refused_title": "インポートはサポートされていません"
+    "plugin_import.refused_title": "インポートはサポートされていません",
+    "prefs.importer_refusal_dialog": "インポーターの拒否をダイアログに表示",
+    "prefs.importer_refusal_dialog_tip": "プラグインがファイルを拒否したときに、プラグイン名とメッセージを OK ボタン付きで表示します。オフにすると、拒否はステータス行にのみ表示されます。"
   },
   "ko": {
-    "plugin_import.refused_title": "가져오기를 지원하지 않음"
+    "plugin_import.refused_title": "가져오기를 지원하지 않음",
+    "prefs.importer_refusal_dialog": "가져오기 거부를 대화 상자로 표시",
+    "prefs.importer_refusal_dialog_tip": "플러그인이 파일을 거부하면 플러그인 이름과 메시지를 확인 버튼과 함께 표시합니다. 끄면 거부 메시지가 상태 표시줄에만 나타납니다."
   },
   "uk": {
-    "plugin_import.refused_title": "Імпорт не підтримується"
+    "plugin_import.refused_title": "Імпорт не підтримується",
+    "prefs.importer_refusal_dialog": "Показувати відмови імпортера в діалоговому вікні",
+    "prefs.importer_refusal_dialog_tip": "Показувати назву й повідомлення плагіна з кнопкою OK, коли він відмовляється відкрити файл. Вимкніть, щоб показувати відмову лише в рядку стану."
   },
   "vi": {
-    "plugin_import.refused_title": "Không hỗ trợ nhập"
+    "plugin_import.refused_title": "Không hỗ trợ nhập",
+    "prefs.importer_refusal_dialog": "Hiện thông báo từ chối nhập trong hộp thoại",
+    "prefs.importer_refusal_dialog_tip": "Hiện tên và thông báo của phần bổ trợ cùng nút OK khi từ chối tệp. Tắt để chỉ hiện thông báo từ chối trên dòng trạng thái."
   },
   "zh": {
-    "plugin_import.refused_title": "不支持此导入"
+    "plugin_import.refused_title": "不支持此导入",
+    "prefs.importer_refusal_dialog": "在对话框中显示导入器的拒绝消息",
+    "prefs.importer_refusal_dialog_tip": "插件拒绝文件时，在带有确定按钮的对话框中显示插件名称和消息。关闭后，拒绝消息仅显示在状态行中。"
   }
 }

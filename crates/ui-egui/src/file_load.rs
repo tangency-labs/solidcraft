@@ -1613,6 +1613,10 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// The app's shared message card, with plugin-controlled content rendered as plain text.
 pub(crate) fn show_refusal(app: &mut SolveApp, ctx: &egui::Context) {
+    if !app.preferences.importer_refusal_dialog {
+        app.file_load.refusals.clear();
+        return;
+    }
     let Some(refusal) = app.file_load.refusals.front().cloned() else { return };
     let solidcraft_engine::plugin::HostError::Unsupported { reason } = &refusal.error else { return };
     let (closed, action) =
@@ -1929,6 +1933,7 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                 // traps, invalid input and host failures keep the status-line path.
                 if request.kind == Kind::Open
                     && request.reply.is_none()
+                    && app.preferences.importer_refusal_dialog
                     && let Some(refusal) = failure.refusal
                 {
                     app.file_load.refusals.push_back(*refusal);

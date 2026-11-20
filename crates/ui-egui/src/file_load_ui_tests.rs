@@ -1626,6 +1626,39 @@ fn importer_refusal_from_file_open_and_drop_shows_an_acknowledgeable_dialog() {
 
 #[test]
 #[cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64")))]
+fn importer_refusals_use_only_the_status_line_when_dialogs_are_disabled() {
+    for dropped in [false, true] {
+        let (mut h, path) = importer_window(if dropped { "quiet-drop" } else { "quiet-open" }, b"U", "the model has no solids");
+        assert!(h.app.preferences.importer_refusal_dialog, "acknowledgement is on by default");
+        let reply = h.call("ui.prefs", json!({"importer_refusal_dialog":false}));
+        assert_eq!(reply["ok"], true);
+        let mut reopened = SolveApp::new(Session::default(), Default::default());
+        reopened.load_prefs(&h.app.prefs());
+        assert!(!reopened.preferences.importer_refusal_dialog, "the choice survives restart");
+        let before = h.app.session.doc.to_json();
+        h.app.home.open = !dropped;
+        if dropped {
+            h.app.drop_path(&path);
+        } else {
+            h.step(&json!({"choose_file":path})).unwrap();
+            h.app.start("doc.open");
+        }
+        finish_import(&mut h);
+        assert_eq!(h.app.session.doc.to_json(), before);
+        let status = h.app.status.as_ref().unwrap();
+        assert_eq!((status.0.as_str(), status.2), ("Sample Importer does not support refused.smp: the model has no solids", true));
+        assert!(h.widget("Sample Importer").is_none());
+        assert!(crate::scenario::handle_at("dialog:OK").is_none());
+
+        let (reply, _) = h.call_queued("engine.execute", json!({"command":"doc.open","params":{"path":path}}));
+        assert_eq!(reply["ok"], false);
+        assert_eq!(reply["plugin_error"], json!({"kind":"unsupported","plugin":"Sample Importer","reason":"the model has no solids"}));
+        assert!(crate::scenario::handle_at("dialog:OK").is_none());
+    }
+}
+
+#[test]
+#[cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64")))]
 fn importer_refusal_from_home_can_be_acknowledged_without_leaving_home() {
     let (mut h, path) = importer_window("home-refusal", b"U", "the model has no solids");
     h.app.home.open = true;
