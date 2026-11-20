@@ -14,6 +14,9 @@ use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 pub mod bidi;
+pub mod numbered;
+
+pub use numbered::{Filled, Msg};
 
 /// A catalog's messages: stable id → text.
 pub type Messages = BTreeMap<String, String>;
@@ -31,6 +34,8 @@ pub struct Catalog {
     pub name: &'static str,
     /// The catalog as JSON.
     pub source: &'static str,
+    /// The catalog as a table of numbered texts ([`numbered`]), or empty when the host has none.
+    table: &'static [u8],
     messages: OnceLock<Messages>,
     /// The messages in display order, for a catalog with right-to-left text (see [`bidi`]).
     shown: OnceLock<Option<Messages>>,
@@ -40,7 +45,13 @@ pub struct Catalog {
 
 impl Catalog {
     pub const fn new(id: &'static str, name: &'static str, source: &'static str) -> Self {
-        Self { id, name, source, messages: OnceLock::new(), shown: OnceLock::new(), label_ids: OnceLock::new() }
+        Self { id, name, source, table: &[], messages: OnceLock::new(), shown: OnceLock::new(), label_ids: OnceLock::new() }
+    }
+
+    /// [`Catalog::new`] with the catalog's table of numbered texts, for messages named by number
+    /// ([`Msg`]): what a build script made of the same messages with [`numbered::encode`].
+    pub const fn numbered(id: &'static str, name: &'static str, source: &'static str, table: &'static [u8]) -> Self {
+        Self { id, name, source, table, messages: OnceLock::new(), shown: OnceLock::new(), label_ids: OnceLock::new() }
     }
 
     /// The messages in reading order, as the catalog holds them. An invalid catalog is logged and
@@ -264,6 +275,12 @@ impl Locale {
 
     pub fn format(self, id: &str, args: &[(&str, &str)]) -> String {
         interpolate(self.text(id), args)
+    }
+
+    /// The message `msg` in this language, then in English, then empty (a table has no ids to
+    /// show in its place). Its placeholders are marks: fill them with [`Filled::tr`].
+    pub fn message(self, msg: Msg) -> &'static str {
+        numbered::lookup(self.0.table, msg.number()).or_else(|| numbered::lookup(english().table, msg.number())).unwrap_or_default()
     }
 }
 

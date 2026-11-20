@@ -1,38 +1,20 @@
-//! SolidCraft's message ids checked when a crate compiles.
+//! SolidCraft's message ids checked when a crate compiles, and turned into numbers.
 //!
 //! A message is looked up by its id (`app.tr("ui.file")`, `Locale::text`, `Locale::format`), and
 //! an id the catalogs do not have compiles: the window then shows the id itself. [`msg!`] moves
 //! that discovery to the compiler. It takes the id as a string literal, looks it up in the English
-//! catalog and expands to the same literal:
+//! catalog and expands to the message's number (`solidcraft_ui_text::Msg`), so the id itself is
+//! not in the program:
 //!
 //! ```ignore
-//! app.tr(msg!("ui.file"))
-//! locale.format(msg!("recovery.days_ago", count), &[("count", &days)])
+//! msg!("ui.file").tr()                                  // "File", in the current language
+//! msg!("recovery.days_ago", count = &days).tr()         // "{count} days ago", filled in
 //! ```
 //!
-//! - `msg!("id")`: the id is a message of the English catalog.
-//! - `msg!("id", name, ...)`: and the names are exactly the message's `{placeholders}`.
-//!
-//! ```
-//! use solidcraft_ui_text_macros::msg;
-//! assert_eq!(msg!("ui.file"), "ui.file");
-//! assert_eq!(msg!("recovery.days_ago", count), "recovery.days_ago");
-//! ```
-//!
-//! An id no catalog has does not compile, nor do names that are not the message's:
-//!
-//! ```compile_fail
-//! let _ = solidcraft_ui_text_macros::msg!("ui.no_message_has_this_id");
-//! ```
-//!
-//! ```compile_fail
-//! let _ = solidcraft_ui_text_macros::msg!("recovery.days_ago", days);
-//! ```
-//!
-//! ```compile_fail
-//! // `{count}` is not named.
-//! let _ = solidcraft_ui_text_macros::msg!("recovery.days_ago",);
-//! ```
+//! - `msg!("id")`: the id is a message of the English catalog. A `Msg`.
+//! - `msg!("id", name = value, ...)`: and the names are exactly the message's `{placeholders}`.
+//!   A `Filled`, its values (`&str`) put in the order the English text names them, so the names
+//!   are not in the program either.
 //!
 //! Anything else stops the build at the literal, with the nearest id when there is one. Only the
 //! English catalog is read: whether another language has the message stays with
@@ -41,10 +23,13 @@
 //!
 //! The English catalog is what the app builds it from (`crates/ui-egui/build.rs`):
 //! `assets/locales/en.json`, `crates/ui-text/locales/en.json` and the `en` messages of
-//! `assets/locales/pending/*.json`, found from the compiling crate's folder upwards. The macro
-//! only checks, and embeds nothing. Cargo does not know that a proc macro read a file, so a crate
-//! that uses `msg!` names the catalog folders in its build script (`cargo:rerun-if-changed`), as
-//! `solidcraft-ui-egui` does, to be compiled again when a message is added.
+//! `assets/locales/pending/*.json`, found from the compiling crate's folder upwards. Cargo does
+//! not know that a proc macro read a file, so a crate that uses `msg!` names the catalog folders
+//! in its build script (`cargo:rerun-if-changed`), as `solidcraft-ui-egui` does, to be compiled
+//! again when a message is added.
+//!
+//! The number is `solidcraft_ui_text::numbered::number` of the id (FNV-1a, 64 bits), computed
+//! here by a copy of it: this crate depends on no other of the workspace.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -64,38 +49,54 @@ const MAX_ANCESTORS: usize = 8;
 /// Ids nearer than this many edits are offered as the one meant.
 const MAX_EDITS: usize = 3;
 
-/// `"id"`, then the placeholder names, if any.
+/// `"id"`, then `name = value` for each placeholder, if any.
 struct Input {
     id: LitStr,
-    names: Option<Vec<Ident>>,
+    values: Option<Vec<(Ident, syn::Expr)>>,
 }
 
 impl Parse for Input {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
         let id: LitStr = input.parse()?;
         if input.is_empty() {
-            return Ok(Input { id, names: None });
+            return Ok(Input { id, values: None });
         }
         input.parse::<Token![,]>()?;
-        let names = Punctuated::<Ident, Token![,]>::parse_terminated(input)?;
-        Ok(Input { id, names: Some(names.into_iter().collect()) })
+        let pair = |input: ParseStream<'_>| -> syn::Result<(Ident, syn::Expr)> {
+            let name: Ident = input.parse()?;
+            input.parse::<Token![=]>()?;
+            Ok((name, input.parse()?))
+        };
+        let values = Punctuated::<(Ident, syn::Expr), Token![,]>::parse_terminated_with(input, pair)?;
+        Ok(Input { id, values: Some(values.into_iter().collect()) })
     }
 }
 
-/// A message id of the English catalog, as a string literal: see the crate's documentation.
+/// A message of the English catalog, by its number: see the crate's documentation.
 #[proc_macro]
 pub fn msg(input: TokenStream) -> TokenStream {
     let input = syn::parse_macro_input!(input as Input);
     match check(&input) {
-        Ok(()) => {
-            let id = &input.id;
-            quote!(#id).into()
+        Ok(order) => {
+            let number = number(&input.id.value());
+            let msg = quote!(::solidcraft_ui_text::Msg::checked(#number));
+            match order {
+                None => msg.into(),
+                Some(values) => quote!(::solidcraft_ui_text::Filled::checked(#msg, [#(#values),*])).into(),
+            }
         }
         Err(e) => e.to_compile_error().into(),
     }
 }
 
-fn check(input: &Input) -> syn::Result<()> {
+/// `solidcraft_ui_text::numbered::number`: FNV-1a over the id's bytes, 64 bits.
+fn number(id: &str) -> u64 {
+    id.bytes().fold(0xcbf2_9ce4_8422_2325, |hash: u64, byte| (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3))
+}
+
+/// The values in the order the English text names their placeholders (`None` for a message
+/// given without values), or why the message is refused.
+fn check(input: &Input) -> syn::Result<Option<Vec<&syn::Expr>>> {
     let catalog = catalog().as_ref().map_err(|why| syn::Error::new(input.id.span(), why))?;
     let id = input.id.value();
     let Some(text) = catalog.get(&id) else {
@@ -105,16 +106,27 @@ fn check(input: &Input) -> syn::Result<()> {
         );
         return Err(syn::Error::new(input.id.span(), message));
     };
-    let Some(names) = &input.names else { return Ok(()) };
     let wanted = placeholders(text);
-    let given: Vec<String> = names.iter().map(Ident::to_string).collect();
-    if let Some(extra) = names.iter().find(|name| !wanted.contains(&name.to_string())) {
+    let Some(values) = &input.values else {
+        return match wanted.first() {
+            None => Ok(None),
+            Some(first) => Err(syn::Error::new(
+                input.id.span(),
+                format!("`{id}` has the placeholder `{{{first}}}`: give it a value, `{first} = ...`; its text is {text:?}"),
+            )),
+        };
+    };
+    if let Some((extra, _)) = values.iter().find(|(name, _)| !wanted.contains(&name.to_string())) {
         return Err(syn::Error::new(extra.span(), format!("`{id}` has no placeholder `{{{extra}}}`: its text is {text:?}")));
     }
-    if let Some(missing) = wanted.iter().find(|name| !given.contains(name)) {
-        return Err(syn::Error::new(input.id.span(), format!("`{id}` also has the placeholder `{{{missing}}}`: its text is {text:?}")));
+    let mut ordered = Vec::new();
+    for name in &wanted {
+        match values.iter().find(|(given, _)| given == name) {
+            Some((_, value)) => ordered.push(value),
+            None => return Err(syn::Error::new(input.id.span(), format!("`{id}` also has the placeholder `{{{name}}}`: its text is {text:?}"))),
+        }
     }
-    Ok(())
+    Ok(Some(ordered))
 }
 
 /// The names in `{braces}` in `text`, each once, in order. A name is letters, digits and `_`;
@@ -245,6 +257,13 @@ mod tests {
         assert_eq!(nearest(&catalog, "ui.preference"), Some("ui.preferences"));
         assert_eq!(nearest(&catalog, "render.something_else"), None);
         assert_eq!((edits("", "abc"), edits("abc", "abc"), edits("kitten", "sitting")), (3, 0, 3));
+    }
+
+    /// The same number as `solidcraft_ui_text::numbered::number` gives (its own test has this value).
+    #[test]
+    fn a_number_is_the_text_crates() {
+        assert_eq!(number("ui.file"), 0xa1ef_8b5f_db45_ae41);
+        assert_eq!(number(""), 0xcbf2_9ce4_8422_2325);
     }
 
     /// The repository's own English catalog reads, with the messages of the app, of the shared
