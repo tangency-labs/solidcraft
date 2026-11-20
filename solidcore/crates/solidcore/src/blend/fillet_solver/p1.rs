@@ -2080,7 +2080,7 @@ pub(crate) fn wrap_closed_directions(
 
 /// An `SmBoolean` query whose failed evaluation upstream returns the status, read as
 /// `TRUE` (`SER` inside a boolean function); [`SolidError::Unported`] propagates.
-pub(super) fn bool_status(r: Result<bool>) -> Result<bool> {
+fn bool_status(r: Result<bool>) -> Result<bool> {
     match r {
         Ok(v) => Ok(v),
         Err(e)

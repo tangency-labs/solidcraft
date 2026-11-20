@@ -84,7 +84,7 @@
 //!   (tangency-labs/smlib@b5f2867, 7ac037e): `ClassifyExactBlend` and
 //!   `CalcExactFilletGeom` (`blend::fillet_exact`), whose failures are errors.
 
-use super::p1::{bool_status, FilletSolver, FilletSolverOps};
+use super::p1::{FilletSolver, FilletSolverOps};
 use super::p2::SolverErrorObject;
 use crate::blend::fillet_custom_solver::OffsetSurface;
 use crate::blend::fillet_executive::p3::ErrorInfo;
@@ -2253,10 +2253,10 @@ fn uv_periods_of(k: &Kernel, surfaces: &[Surface; 2]) -> Result<[[Option<f64>; 2
     for (surface, period) in surfaces.iter().zip(periods.iter_mut()) {
         let [pu, pv] = period;
         let nat = surface.natural_uv_domain_if_built();
-        if bool_status(surface.is_periodic(k, &nat, SurfParamType::U))? {
+        if surface.is_periodic(k, &nat, SurfParamType::U)? {
             *pu = Some(nat.size().x);
         }
-        if bool_status(surface.is_periodic(k, &nat, SurfParamType::V))? {
+        if surface.is_periodic(k, &nat, SurfParamType::V)? {
             *pv = Some(nat.size().y);
         }
     }
