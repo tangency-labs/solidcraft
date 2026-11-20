@@ -171,13 +171,16 @@ pub fn projection_symbol(projection: Projection, h: f64, centre: Vec2) -> [Item;
     [stroke(cone), stroke(circle(h)), stroke(circle(h / 2.0))]
 }
 
-/// The built-in block, 180 x 49 mm: the twelve cells of the layout approved on #3875, each under a
-/// 2.5 mm label, and no type, status or scale cell. Values come from the component the sheet
-/// documents, the drawing, its newest revision and the sheet; the legal owner is the drawing's
-/// `organization`, and the general tolerances start empty, for a shop's own.
+/// The built-in block, 180 x 59 mm: the twelve cells of the layout approved on #3875 and, above
+/// them, the six ISO 7200 fields a drawing sent to a shop carries (#20121): scale, document type,
+/// status, language, revision and department, each under a 2.5 mm label. Values come from the
+/// component the sheet documents, the drawing, its newest revision and the sheet; the legal owner is
+/// the drawing's `organization`, the scale is the sheet's, the language the drawing's and the revision
+/// the newest revision row's. The general tolerances, the document type, the status and the
+/// department start empty, for a shop's own.
 pub fn default_block() -> TitleBlock {
     use HAlign::{Centre, Left};
-    use Source::{Component, Drawing, Revision};
+    use Source::{Component, Drawing, Revision, Sheet};
     let field = |source, key: &str| Part::Field { source, key: key.into(), format: Format::default() };
     let text = |cap_mm, align, fit, parts| CellKind::Text(TextCell { content: Content(parts), cap_mm, align, fit, image: None });
     let most = |n| Fit { max_chars: Some(n), ..Fit::default() };
@@ -197,10 +200,16 @@ pub fn default_block() -> TitleBlock {
         ("legal_owner", [-180.0, 34.0, -100.0, 49.0], "Legal owner", text(3.5, Left, wrap, vec![field(Drawing, "organization")])),
         ("general_tolerances", [-100.0, 34.0, -30.0, 49.0], "General tolerances", text(2.5, Left, wrap, Vec::new())),
         ("projection", [-30.0, 34.0, 0.0, 49.0], "Projection", CellKind::ProjectionSymbol),
+        ("scale", [-180.0, 49.0, -158.0, 59.0], "Scale", text(3.5, Centre, most(9), vec![field(Sheet, "scale")])),
+        ("document_type", [-158.0, 49.0, -116.0, 59.0], "Document type", text(3.5, Left, most(24), Vec::new())),
+        ("document_status", [-116.0, 49.0, -86.0, 59.0], "Document status", text(3.5, Left, most(16), Vec::new())),
+        ("language", [-86.0, 49.0, -68.0, 59.0], "Language", text(3.5, Centre, most(5), vec![field(Drawing, "language")])),
+        ("revision", [-68.0, 49.0, -48.0, 59.0], "Revision", text(3.5, Centre, most(6), vec![field(Revision, "revision")])),
+        ("department", [-48.0, 49.0, 0.0, 59.0], "Department", text(3.5, Left, most(28), Vec::new())),
     ];
     let label = |text: &str| Some(Label { text: text.into(), cap_mm: 2.5 });
     let cells = cells.into_iter().map(|(name, rect_mm, text, kind)| Cell { name: name.into(), rect_mm, label: label(text), kind }).collect();
-    TitleBlock { size_mm: Vec2::new(180.0, 49.0), outline_line_mm: 0.7, cell_line_mm: 0.35, cells }
+    TitleBlock { size_mm: Vec2::new(180.0, 59.0), outline_line_mm: 0.7, cell_line_mm: 0.35, cells }
 }
 
 impl TitleBlock {

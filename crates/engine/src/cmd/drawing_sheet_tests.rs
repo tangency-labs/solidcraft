@@ -326,6 +326,43 @@ fn cells(s: &mut Session) -> BTreeMap<String, (String, Option<String>)> {
     cells.iter().map(|c| (text(&c["name"]).unwrap(), (text(&c["text"]).unwrap(), text(&c["value"])))).collect()
 }
 
+/// The built-in block has ISO 7200's cells (#20121). The scale follows the sheet's base view, the language
+/// the drawing's and the revision the newest revision row; the document type is the kind of drawing,
+/// and the status and the department start empty. Each takes typed text like any cell, and typing the
+/// value it has back follows it again.
+#[test]
+fn the_title_block_has_the_iso_7200_cells() {
+    let (mut s, _) = three_views();
+    let shown = cells(&mut s);
+    let own = |name: &str| shown.get(name).unwrap_or_else(|| panic!("no cell {name}")).clone();
+    assert_eq!(own("scale"), ("1:2".into(), None));
+    assert_eq!(own("language"), ("EN".into(), None));
+    assert_eq!(own("document_type").0, solidcraft_doc::drawing::template::PART_TYPE);
+    assert_eq!((own("document_status").0.as_str(), own("department").0.as_str(), own("revision").0.as_str()), ("", "", ""));
+    run(&mut s, "drawing.revision.add", json!({"set": {"revision": "B"}}));
+    assert_eq!(cells(&mut s)["revision"].0, "B");
+    for (cell, text) in [
+        ("scale", "NTS"),
+        ("document_type", "Fabrication drawing"),
+        ("document_status", "Released"),
+        ("language", "DE"),
+        ("revision", "C"),
+        ("department", "Sheet metal"),
+    ] {
+        run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block_overrides": {cell: text}}));
+        assert_eq!(cells(&mut s)[cell].0, text, "{cell}");
+    }
+    assert_eq!(cells(&mut s)["scale"], ("NTS".to_string(), Some("1:2".to_string())), "the value it hides follows the views");
+    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block_overrides": null}));
+    assert_eq!(cells(&mut s)["scale"], ("1:2".to_string(), None));
+    // Hostile text: long, empty and multi-script text is typed, never a panic.
+    for text in ["x".repeat(4000), String::new(), "\u{202e}Ünïcode 図面 \u{1f600}".to_string()] {
+        let reply = s.execute("drawing.sheet.set", &json!({"sheet": "Sheet 1", "title_block_overrides": {"department": text}}));
+        assert!(reply.is_ok() || reply.is_err());
+        run(&mut s, "drawing.inspect", json!({}));
+    }
+}
+
 /// Runs model command `id` with the drawing closed, then opens it again: the path of a drawing
 /// reopened after the model changed.
 fn on_model(s: &mut Session, id: &str, p: Value) {
