@@ -1690,6 +1690,9 @@ preference_settings! {
     /// the number read in the design's unit ("2 in" = 50.8 mm) never fits the part (#12418). On: it
     /// opens at the number 2 read in the design's unit, as before.
     fillet_legacy_radius: bool = false, PAGE_TOOLS => check_id_help("prefs.fillet_legacy_radius", "prefs.fillet_legacy_radius.help");
+    /// A new edge flange opens with Profile Sketch ticked, so on one edge it draws a sketch that
+    /// shapes it (#3516). Off by default: the flange is a plain rectangle, as before.
+    flange_profile_sketch: bool = false, PAGE_TOOLS => check_id_help("prefs.flange_profile_sketch", "prefs.flange_profile_sketch.help");
     /// Placing a Single hole snaps to the middle of the face and the centres of its round edges
     /// (`hole_place`). Off by default: a hole goes where it is clicked.
     hole_snaps: bool = false, PAGE_TOOLS => check("Snap to face and edge centres");
@@ -5465,6 +5468,23 @@ mod tests {
         assert!(restored.preferences.remember_dialog_values);
         reset_preferences(&mut app.preferences, PAGE_TOOLS);
         assert!(!app.preferences.remember_dialog_values);
+    }
+
+    /// New edge flanges draw a profile sketch (#3516): off by default, saved, and reset with the
+    /// Tools page.
+    #[test]
+    fn flange_profile_sketch_defaults_off_persists_and_resets() {
+        assert!(!Prefs::default().flange_profile_sketch);
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        assert!(!app.preferences.flange_profile_sketch);
+        set(&mut app, &json!({"flange_profile_sketch": true})).unwrap();
+        assert!(app.preferences.flange_profile_sketch);
+        assert_eq!(serde_json::to_value(&app.preferences).unwrap()["flange_profile_sketch"], true);
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&app.prefs());
+        assert!(restored.preferences.flange_profile_sketch);
+        reset_preferences(&mut app.preferences, PAGE_TOOLS);
+        assert!(!app.preferences.flange_profile_sketch);
     }
 
     #[test]
