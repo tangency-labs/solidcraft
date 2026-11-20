@@ -35,10 +35,11 @@ use solidcraft_geom::paper::MAX_SIDE_MM;
 use solidcraft_geom::table::Ballooned;
 
 use super::by_id::Record;
-use super::dimension::{Lookup, ModelEdge, Status, check_edge};
+use super::dimension::{Lookup, ModelEdge, Reference, Status, check_edge};
 use super::table::{Kind, PartsList, SheetTable};
 use super::{Drawing, require};
 use crate::bom::{self, Bom, Tree, Unlisted, item_text};
+use crate::feature_pairs::FeaturePairs;
 use crate::{DocError, Document, Model, ModelState, Result, ids};
 
 /// The most balloons a drawing may have.
@@ -66,6 +67,19 @@ impl Balloon {
     /// The part it numbers: the occurrences its edge's body is placed through, from the top.
     pub fn occurrence(&self) -> &[u64] {
         &self.edge.path
+    }
+
+    /// The model reference its arrow points at.
+    pub fn references(&self) -> [Reference<'_>; 1] {
+        [Reference::Edge(&self.edge)]
+    }
+
+    /// This balloon pointing at the edge the feature pairs make of its own, on the component placed
+    /// through occurrence path `to` instead of `from` ([`FeaturePairs::edge`]); `None` when it has
+    /// no pair. Every field named, beside [`Balloon::references`]: a new one must say how it moves.
+    pub fn moved(&self, pairs: &FeaturePairs, from: &[u64], to: &[u64]) -> Option<Balloon> {
+        let Balloon { id, view, edge, at, parts_list } = self;
+        Some(Balloon { id: *id, view: *view, edge: pairs.edge(edge, from, to)?, at: *at, parts_list: *parts_list })
     }
 }
 

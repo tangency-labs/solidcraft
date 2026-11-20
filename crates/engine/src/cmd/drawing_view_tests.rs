@@ -3443,17 +3443,6 @@ fn a_change_of_paper_lists_the_views_it_leaves_outside_and_moves_none() {
     assert_box(&listed[0], [290.0, 140.0], [310.0, 160.0]);
 }
 
-/// A refusal for a part the view leaves out says where the setting was set, for each kind of setter
-/// a resolved setting can name (#4896): a parent names its view, a sheet and a drawing say so, and a
-/// view's own setting and the default add nothing.
-#[test]
-fn a_left_out_part_says_where_each_kind_of_setter_set_it() {
-    assert_eq!(set_on(SetBy::Parent(7)), format!(" (set on view {})", ids::encode(7)));
-    assert_eq!(set_on(SetBy::Sheet), " (set on its sheet)");
-    assert_eq!(set_on(SetBy::Drawing), " (set on the drawing)");
-    assert_eq!((set_on(SetBy::This), set_on(SetBy::Default)), (String::new(), String::new()));
-}
-
 /// A view placed apart from its projection place is given the first free letter (#13044), as
 /// `projected`, `edit` and `move_to_sheet` place it; a base view and a view lined up with its parent
 /// get none, and a view lined up again keeps its own. A copy that doesn't need a letter never takes

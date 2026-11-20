@@ -76,6 +76,7 @@ use super::{Drawing, Units, add_by_id, in_id_order, require};
 use crate::config::MAX_REFERENCE_NAME_BYTES;
 use crate::construct::{MAX_VERTEX_EDGES, as_circle, as_line, point_tolerance, shared_ends};
 use crate::display_units::length_number;
+use crate::feature_pairs::FeaturePairs;
 use crate::format::MAX_REAL;
 use solidcraft_kernel::{FaceSurface, PointClass, edge_circle, face_surface};
 
@@ -247,6 +248,38 @@ impl ModelDimension {
             ModelDimension::Sketch { constraint: name, .. } | ModelDimension::Feature { param: name, .. } => name,
         }
     }
+
+    /// The same model dimension of the other component the feature pairs make of its own: its
+    /// sketch's or its feature's pair, with the constraint id or the label as it is (a copy keeps
+    /// them). `None` when that feature has no pair.
+    pub fn moved(&self, pairs: &FeaturePairs) -> Option<ModelDimension> {
+        let paired = |feature: &u64| pairs.features.get(feature).copied();
+        Some(match self {
+            ModelDimension::Sketch { sketch, constraint } => ModelDimension::Sketch { sketch: paired(sketch)?, constraint: constraint.clone() },
+            ModelDimension::Feature { feature, param } => ModelDimension::Feature { feature: paired(feature)?, param: param.clone() },
+        })
+    }
+}
+
+impl Dimension {
+    /// This dimension measuring, on the component placed through occurrence path `to`, what the
+    /// feature pairs make of what it measures through `from` ([`DimensionKind::moved`]); `None`
+    /// when one of its references has no pair. The model dimension it shows moves with it, or
+    /// goes when its feature has no pair. Every field is named, so a new one must say how it moves.
+    pub fn moved(&self, pairs: &FeaturePairs, from: &[u64], to: &[u64]) -> Option<Dimension> {
+        let Dimension { id, view, kind, offset_mm, text, decimals, override_text, last_good, from_model } = self;
+        Some(Dimension {
+            id: *id,
+            view: *view,
+            kind: kind.moved(pairs, from, to)?,
+            offset_mm: *offset_mm,
+            text: *text,
+            decimals: *decimals,
+            override_text: override_text.clone(),
+            last_good: *last_good,
+            from_model: from_model.as_ref().and_then(|model| model.moved(pairs)),
+        })
+    }
 }
 
 /// What a dimension measures.
@@ -313,6 +346,39 @@ impl DimensionKind {
     /// Whether it reads an angle, as its label says: between two edges, or a cone's.
     pub fn is_angle(&self) -> bool {
         label_of(self) == Some(LabelKind::Angle)
+    }
+
+    /// The same kind, measuring the references the feature pairs make of its own
+    /// ([`FeaturePairs::edge`], `point`, `face`), from occurrence path `from` to `to`; `None` when
+    /// one has no pair. Every kind in full, with no arm for the rest: a new one must say how it
+    /// moves, beside [`DimensionKind::references`].
+    pub fn moved(&self, pairs: &FeaturePairs, from: &[u64], to: &[u64]) -> Option<DimensionKind> {
+        let edge = |e: &ModelEdge| pairs.edge(e, from, to);
+        let point = |p: &ModelPoint| pairs.point(p, from, to);
+        let face = |f: &ModelFace| pairs.face(f, from, to);
+        let silhouette = |x: &Silhouette| Some(Silhouette { face: face(&x.face)?, side: x.side });
+        Some(match self {
+            DimensionKind::Linear { a, b, direction, reading } => {
+                DimensionKind::Linear { a: point(a)?, b: point(b)?, direction: *direction, reading: *reading }
+            }
+            DimensionKind::Length { edge: e, direction, reading } => {
+                DimensionKind::Length { edge: edge(e)?, direction: *direction, reading: *reading }
+            }
+            DimensionKind::Angle { a, b, reading, other_side } => {
+                DimensionKind::Angle { a: edge(a)?, b: edge(b)?, reading: *reading, other_side: *other_side }
+            }
+            DimensionKind::Radial { edge: e, diameter } => DimensionKind::Radial { edge: edge(e)?, diameter: *diameter },
+            DimensionKind::Chain { points, direction } => {
+                DimensionKind::Chain { points: points.iter().map(point).collect::<Option<_>>()?, direction: *direction }
+            }
+            DimensionKind::Cylinder { face: f } => DimensionKind::Cylinder { face: face(f)? },
+            DimensionKind::Sphere { face: f } => DimensionKind::Sphere { face: face(f)? },
+            DimensionKind::Cone { face: f } => DimensionKind::Cone { face: face(f)? },
+            DimensionKind::Silhouettes { a, b, direction } => {
+                DimensionKind::Silhouettes { a: silhouette(a)?, b: silhouette(b)?, direction: *direction }
+            }
+            DimensionKind::Faces { a, b, direction } => DimensionKind::Faces { a: face(a)?, b: face(b)?, direction: *direction },
+        })
     }
 }
 
@@ -736,6 +802,14 @@ impl Document {
     /// dimension lost.
     pub fn finds_one(&self, model: &Model, reference: Reference<'_>) -> bool {
         Lookup::new(self, model).finds_one(reference)
+    }
+
+    /// For each group of `references`, whether every one of them finds the one thing it names
+    /// ([`Document::finds_one`]), with one look-up for all of them: each body's names are worked
+    /// out once, however many references name it.
+    pub fn finds_each(&self, model: &Model, groups: &[Vec<Reference<'_>>]) -> Vec<bool> {
+        let mut lookup = Lookup::new(self, model);
+        groups.iter().map(|group| group.iter().all(|reference| lookup.finds_one(*reference))).collect()
     }
 
     /// The point `pick` names, as [`Document::edge_reference`] names an edge: a corner by the edges

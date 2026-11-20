@@ -1057,8 +1057,9 @@ fn a_dimension_can_measure_a_reference_parts_edge() {
 
 /// A dimension attaches only to parts its view draws. One with a corner on a part the view's hide
 /// leaves out is refused, and so is a chain whose last point is there, with the drawing left as it
-/// was. With the part drawn again it is added; a later hide keeps it, and inspect warns until the
-/// edit is undone.
+/// was. With the part drawn again it is added; a later hide keeps it, and until the edit is undone
+/// inspect warns, drawing.status lists it as not drawn with its status unchanged, and the sheet
+/// doesn't draw it.
 #[test]
 fn a_dimension_is_refused_on_a_part_its_view_leaves_out() {
     let mut s = Session::default();
@@ -1084,9 +1085,25 @@ fn a_dimension_is_refused_on_a_part_its_view_leaves_out() {
     assert!(added["warnings"].is_null(), "{added}");
     run(&mut s, "drawing.view.edit", json!({"view": v, "set": {"hide": [[block]]}}));
     let warned = run(&mut s, INSPECT, json!({"dimension": added["dimension"]}));
-    assert_eq!(warned["warnings"], json!([format!("view {v} doesn't draw this part now: {words}")]), "{warned}");
+    let now = format!("view {v} doesn't draw this part now: {words}");
+    assert_eq!(warned["warnings"], json!([now]), "{warned}");
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    // Its one entry in the status and in the sheet's scene, and whether the scene has its lines (a
+    // paper group names its object by number, not by the id's spelling).
+    let object = json!(ids::decode(added["dimension"].as_str().unwrap()).unwrap());
+    let read = |s: &mut Session| {
+        let status = run(s, "drawing.status", json!({}))["dimensions"][0].clone();
+        let scene = run(s, "drawing.scene", json!({"sheet": sheet}));
+        let lines = scene["scene"]["groups"].as_array().unwrap().iter().any(|g| g["object"] == object);
+        (status, scene["dimensions"][0].clone(), lines)
+    };
+    let (status, drawn, lines) = read(&mut s);
+    assert_eq!((&status["status"], &status["not_drawn"]), (&json!("ok"), &json!(words)), "{status}");
+    assert_eq!((&drawn["drawn"], &drawn["why"], lines), (&json!(false), &json!(now), false), "{drawn}");
     run(&mut s, "edit.undo", json!({}));
     assert!(run(&mut s, INSPECT, json!({"dimension": added["dimension"]}))["warnings"].is_null());
+    let (status, drawn, lines) = read(&mut s);
+    assert_eq!((status.get("not_drawn"), &drawn["drawn"], lines), (None, &json!(true), true), "{status} {drawn}");
 }
 
 /// A box with an 80 mm dimension on its top front edge, read once, and the drawing closed: the

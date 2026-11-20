@@ -9,14 +9,14 @@
 
 use std::borrow::Cow;
 use std::cell::OnceCell;
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
 
 use solidcore_record::{Plane, Vec2};
 use solidcraft_doc::config::RowKey;
 use solidcraft_doc::drawing::cutting_line::SectionKind;
-use solidcraft_doc::drawing::view::{Cut, ResolvedView, SetBy, View, ViewKind};
+use solidcraft_doc::drawing::view::{Cut, ResolvedView, Shows, View, ViewKind};
 use solidcraft_doc::drawing::{Drawing, Sheet};
 use solidcraft_doc::drawing_view::{Exploded, Pose, StudyStep, ViewConfiguration};
 use solidcraft_doc::{MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, ModelBody, ModelState, ids};
@@ -183,12 +183,9 @@ impl ShownSet {
         self.state.bodies.get(shown.index)
     }
 
-    /// The bodies under one of the `source` occurrence paths (all of them when there is none;
-    /// `[]` takes the design's own bodies) and under no `hide` path, in the same order.
-    pub fn keep(mut self, source: Option<&[Vec<u64>]>, hide: &[Vec<u64>]) -> ShownSet {
-        let source: Option<HashSet<&[u64]>> = source.map(|paths| paths.iter().map(Vec::as_slice).collect());
-        let hide: HashSet<&[u64]> = hide.iter().map(Vec::as_slice).collect();
-        self.bodies.retain(|b| chosen(&b.path, source.as_ref(), &hide));
+    /// The bodies `shows` draws ([`Shows::draws`]), in the same order.
+    pub fn keep(mut self, shows: &Shows) -> ShownSet {
+        self.bodies.retain(|b| shows.draws(&b.path));
         self
     }
 
@@ -196,41 +193,8 @@ impl ShownSet {
     /// view that chooses nothing skips. Paths no occurrence makes any more match no body.
     pub fn of_view(&self, view: &ResolvedView) -> Cow<'_, ShownSet> {
         let (source, hide) = (view.occurrences.value.as_deref(), view.hide.value.as_deref().unwrap_or_default());
-        if source.is_none() && hide.is_empty() { Cow::Borrowed(self) } else { Cow::Owned(self.clone().keep(source, hide)) }
+        if source.is_none() && hide.is_empty() { Cow::Borrowed(self) } else { Cow::Owned(self.clone().keep(&view.shows())) }
     }
-}
-
-/// Whether a body placed by `path` is drawn: under a `source` path (`[]` only for the design's own
-/// bodies) and under no `hide` path. Each of the path's heads is one look-up, so a body costs at
-/// most 64 of them however many paths there are.
-fn chosen(path: &[u64], source: Option<&HashSet<&[u64]>>, hide: &HashSet<&[u64]>) -> bool {
-    let heads = || (1..=path.len()).filter_map(|n| path.get(..n));
-    let wanted = source.is_none_or(|set| if path.is_empty() { set.contains(path) } else { heads().any(|h| set.contains(h)) });
-    wanted && !heads().any(|h| hide.contains(h))
-}
-
-/// Why a saved view doesn't draw what an occurrence path places ([`left_out`]).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum LeftOut {
-    /// A `hide` path covers it: that path, and the view that set it.
-    Hidden { by: Vec<u64>, set_by: SetBy },
-    /// No `source` path takes it: the view that set the source.
-    NotChosen { set_by: SetBy },
-}
-
-/// Why saved view `view` doesn't draw the body that occurrence path `path` places, if it doesn't:
-/// [`chosen`] asked about one path, with the `hide` path that covers it. No model is read.
-pub fn left_out(view: &ResolvedView, path: &[u64]) -> Option<LeftOut> {
-    let source: Option<HashSet<&[u64]>> = view.occurrences.value.as_deref().map(|paths| paths.iter().map(Vec::as_slice).collect());
-    let hide: HashSet<&[u64]> = view.hide.value.as_deref().unwrap_or_default().iter().map(Vec::as_slice).collect();
-    if chosen(path, source.as_ref(), &hide) {
-        return None;
-    }
-    let by = (1..=path.len()).filter_map(|n| path.get(..n)).find(|head| hide.contains(head));
-    Some(match by {
-        Some(by) => LeftOut::Hidden { by: by.to_vec(), set_by: view.hide.set_by },
-        None => LeftOut::NotChosen { set_by: view.occurrences.set_by },
-    })
 }
 
 /// The state of the design a view draws (#13048): its configuration, its exploded choice and its
@@ -847,44 +811,4 @@ impl Room {
 /// Whether a view `placed` on `sheet` isn't where its [`Room`] says: [`outside`]'s rule.
 pub fn leaves(sheet: &Sheet, placed: &OnSheet, cmd: &str) -> Result<bool> {
     Ok(!Room::on(sheet, cmd)?.holds(&placed.boundary))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A `source` path takes everything under it, `[]` only the design's own bodies, and a `hide`
-    /// path wins over a `source` path above it.
-    #[test]
-    fn a_body_is_drawn_under_a_source_path_and_no_hide_path() {
-        let set = |paths: &[&'static [u64]]| paths.iter().copied().collect::<HashSet<&[u64]>>();
-        let paths: [&[u64]; 5] = [&[], &[1], &[1, 2], &[1, 2, 3], &[4]];
-        let cases: [(Option<HashSet<&[u64]>>, HashSet<&[u64]>, [bool; 5]); 4] = [
-            (None, set(&[&[1, 2]]), [true, true, false, false, true]),
-            (Some(set(&[&[1, 2]])), set(&[]), [false, false, true, true, false]),
-            (Some(set(&[&[]])), set(&[]), [true, false, false, false, false]),
-            (Some(set(&[&[1], &[4]])), set(&[&[1, 2]]), [false, true, false, false, true]),
-        ];
-        for (source, hide, want) in cases {
-            let got = paths.map(|p| chosen(p, source.as_ref(), &hide));
-            assert_eq!(got, want, "{source:?} {hide:?}");
-        }
-    }
-
-    /// Seeded paths and choices: `chosen` always agrees with the rule worked out the long way.
-    #[test]
-    fn seeded_choices_agree_with_the_rule() {
-        let pick = |seed: u64, salt: u64, n: u64| ((seed ^ salt).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 33) % n;
-        let path = |seed: u64, salt: u64| -> Vec<u64> { (0..pick(seed, salt, 4)).map(|i| 1 + pick(seed, salt + 10 + i, 3)).collect() };
-        for seed in 1..=500u64 {
-            let sources: Vec<Vec<u64>> = (0..pick(seed, 1, 3)).map(|i| path(seed, 100 + i * 20)).collect();
-            let hides: Vec<Vec<u64>> = (0..pick(seed, 2, 3)).map(|i| path(seed, 200 + i * 20)).filter(|p| !p.is_empty()).collect();
-            let body = path(seed, 3);
-            let source = (pick(seed, 4, 2) == 0).then(|| sources.iter().map(Vec::as_slice).collect::<HashSet<&[u64]>>());
-            let hide: HashSet<&[u64]> = hides.iter().map(Vec::as_slice).collect();
-            let under = |p: &Vec<u64>| if p.is_empty() { body.is_empty() } else { body.starts_with(p) };
-            let long_way = (source.is_none() || sources.iter().any(under)) && !hides.iter().any(under);
-            assert_eq!(chosen(&body, source.as_ref(), &hide), long_way, "seed {seed}: {body:?} {sources:?} {hides:?}");
-        }
-    }
 }
