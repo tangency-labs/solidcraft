@@ -786,8 +786,10 @@ fn change(d: &mut Drawing, id: u64, set: &ViewSet, found: &Found) -> Result<Vec<
         view.place = place.0;
     }
     if let Some(degrees) = set.rotation {
-        // Not finite stays not finite, and the drawing's rules refuse it; rounding can give 360.
-        view.rotation = Some(degrees.rem_euclid(360.0)).filter(|r| *r < 360.0).unwrap_or(0.0);
+        // Kept to 0.01°, as its label prints it, so a view drawn turned never reads 0° or 360°; one that
+        // rounds to a whole turn isn't turned. JSON carries only finite numbers (NaN would become 0).
+        let kept = (degrees.rem_euclid(360.0) * 100.0).round() / 100.0;
+        view.rotation = if kept < 360.0 { kept } else { 0.0 };
         turned_apart(d, id)?;
     }
     // Placed apart, it needs a letter; then its label is typed over.

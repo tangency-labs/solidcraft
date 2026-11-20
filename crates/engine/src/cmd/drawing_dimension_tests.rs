@@ -2661,6 +2661,43 @@ fn a_drag_keeps_its_place_when_the_view_moves() {
     assert!(box_centre(&read).dist(Vec2::new(227.0, 178.0)) < 1e-9, "{read}");
 }
 
+/// A drag on a turned view lands where it is dropped, and saves what the same drag saves on the view
+/// unturned (#13044): the offset and the text's place are kept on the view's own axes. The front view
+/// turned a quarter turn about its centre (200, 150): the top front edge then runs up at x 185, from
+/// y 110 to 190. Its line dragged through (160, 150), where the turn takes (200, 190), runs from
+/// (160, 110) to (160, 190) with offset 25; its text dragged to (165, 165), where the turn takes
+/// (215, 185), is centred there. Both are saved as the unturned drags save them.
+#[test]
+fn a_drag_on_a_turned_view_saves_what_it_saves_unturned() {
+    let drags = |turn: f64, line: [f64; 2], text: [f64; 2]| {
+        let (mut s, view) = front_view();
+        run(&mut s, "drawing.view.edit", json!({"view": ids::encode(view), "set": {"rotation": turn}}));
+        let added = add(&mut s, view, json!({"length": {"edge": [40, 0, 30]}}));
+        let (_, along) = drag_to(&mut s, &added, json!({"line_through_mm": line}));
+        let (_, read) = drag_to(&mut s, &added, json!({"text_to_mm": text}));
+        (along, read)
+    };
+    let (_, flat) = drags(0.0, [200.0, 190.0], [215.0, 185.0]);
+    let (along, turned) = drags(90.0, [160.0, 150.0], [165.0, 165.0]);
+    let lines = layout_lines(&along, "dimension_lines");
+    let ends = |line: &Vec<Vec2>| line.iter().all(|q| (q.x - 160.0).abs() < 1e-9) && line.iter().any(|q| (q.y - 110.0).abs() < 1e-9);
+    assert!(lines.len() == 1 && ends(&lines[0]) && lines[0].iter().any(|q| (q.y - 190.0).abs() < 1e-9), "{along}");
+    assert!(box_centre(&turned).dist(Vec2::new(165.0, 165.0)) < 1e-9, "{turned}");
+    fn close(a: &Value, b: &Value) -> bool {
+        match (a, b) {
+            (Value::Number(x), Value::Number(y)) => (x.as_f64().unwrap() - y.as_f64().unwrap()).abs() < 1e-9,
+            (Value::Array(x), Value::Array(y)) => x.len() == y.len() && x.iter().zip(y).all(|(x, y)| close(x, y)),
+            (Value::Object(x), Value::Object(y)) => x.len() == y.len() && x.iter().all(|(k, v)| y.get(k).is_some_and(|w| close(v, w))),
+            _ => a == b,
+        }
+    }
+    for field in ["offset_mm", "text"] {
+        assert!(close(&turned["record"][field], &flat["record"][field]), "{field}: turned {turned}, unturned {flat}");
+    }
+    // The line drag alone saves the 25 mm on paper; the text drag then moves the line to the text, turned or not.
+    assert!((along["record"]["offset_mm"].as_f64().unwrap() - 25.0).abs() < 1e-9, "{along}");
+}
+
 /// A drag lands where an exploded view draws its dimension (#13048): from the bolt's top corner, lifted
 /// 50 by Apart, across to the plate's top corner, horizontal; its line dragged through (300, 200)
 /// runs through it there, not 25 higher, where the design's own bolt would put it.

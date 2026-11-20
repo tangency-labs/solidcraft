@@ -4886,7 +4886,7 @@ fn drawn_hatches(s: &Session, id: u64) -> (ShownSet, Vec<crate::drawing_view::Bo
     let view = s.drawing("test").unwrap().resolve_view(id).unwrap();
     let shown = crate::drawing_view::shown(s);
     let (set, extents) = crate::drawing_view::measured(&shown, &view).unwrap();
-    let frame = crate::drawing_view::frame(view.basis, view.scale.value, &extents.model, Vec2::ZERO, "test").unwrap();
+    let frame = crate::drawing_view::view_frame(&view, &extents.model, Vec2::ZERO, "test").unwrap();
     let hatching = crate::drawing_view::hatches(&set, view.cut.as_ref().unwrap(), &frame, view.line_group.value);
     assert_eq!(hatching.refused, vec![], "every cut body is hatched");
     assert_eq!(hatching.doubted, vec![], "no body is hatched in doubt");
@@ -5150,6 +5150,26 @@ fn a_sheet_draws_a_sections_hatching_and_says_so() {
     assert!(want.iter().all(|h| h["strokes"].as_u64().unwrap() > 0), "{want:?}");
 }
 
+/// A section view turned a quarter turn is still cut, and measured on its turned axes (#13044): each
+/// body's cut faces on paper are the unturned ones turned a quarter turn about the view's middle, and
+/// they are hatched inside, at the hatcher's 45° on paper.
+#[test]
+fn a_turned_section_view_is_cut_and_hatched_where_it_turns() {
+    let (mut s, _, cut) = drilled_with_tab();
+    let (set, flat) = drawn_hatches(&s, cut);
+    edit_view(&mut s, cut, json!({"rotation": 90}));
+    let (_, turned) = drawn_hatches(&s, cut);
+    assert_eq!(turned.len(), flat.len());
+    for (a, b) in flat.iter().zip(&turned) {
+        let (was, now) = (hatch_box(a), hatch_box(b));
+        let quarter = Aabb2 { min: Vec2::new(-was.max.y, was.min.x), max: Vec2::new(-was.min.y, was.max.x) };
+        let body = &set.bodies[a.shown].body;
+        assert!(now.min.dist(quarter.min) < 1e-6 && now.max.dist(quarter.max) < 1e-6, "{body}: {now:?}, not {quarter:?}");
+        assert!(!b.strokes.is_empty() && (b.angle - a.angle).abs() < 1e-12, "{body}");
+        assert_hatching_inside(b);
+    }
+}
+
 /// A flange `scale` times the size of a 100 mm one: a 30 mm bore and eight 10 mm holes on a 70 mm
 /// circle, 10 mm thick.
 fn flange(scale: f64) -> Session {
@@ -5231,9 +5251,13 @@ fn a_turned_view_turns_its_box_and_what_lines_up_with_it_is_placed_apart() {
     assert_eq!(back["rotation"], json!(0.0));
     let (back_size, back_centre) = boundary(&back);
     assert!((back_size - size).len() < EPS && (back_centre - centre).len() < EPS, "{back}");
-    for (given, kept) in [(-90.0, 270.0), (720.5, 0.5), (360.0, 0.0)] {
+    // Kept to 0.01°, as the label prints it: a turn too small to print is none, so no label says 0° or 360°.
+    let kept_cases = [(-90.0, 270.0), (720.5, 0.5), (360.0, 0.0), (30.004, 30.0), (12.346, 12.35), (0.004, 0.0), (359.996, 0.0), (-0.004, 0.0)];
+    for (given, kept) in kept_cases {
         edit_view(&mut s, top, json!({"rotation": given}));
         assert_eq!(saved(&s, top).rotation, kept, "{given}");
+        let text = s.drawing("test").unwrap().label_text(top).unwrap_or_default();
+        assert!(!text.contains(" 0°") && !text.contains("360°"), "{given}: {text}");
     }
     let why = edit_refused(&mut s, top, json!({"rotation": "30"}));
     assert!(why.contains("rotation"), "{why}");
