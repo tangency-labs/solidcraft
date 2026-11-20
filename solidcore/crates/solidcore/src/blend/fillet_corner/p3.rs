@@ -56,11 +56,10 @@
 //!   [`crate::blend::fillet_corner::p2`]'s, `SmFilletEdge::MakeFilletEdge` is
 //!   `FilletBrep::make_fillet_edge` and `ReCalcFilletGeom` is
 //!   `FilletBrep::re_calc_fillet_geom` on the corner's solvers.
-//! - **Face sides** (not upstream; WR-613, the fork's tangency-labs/smlib@7fd9fb0): with
-//!   `Kernel::fixes.corner_patch_face_side_twist`, `CreateCornerPatch` marks the
-//!   ordered edges that have an original face and builds its patch with
-//!   [`BSplineSurface::create_corner_blend_on_faces`]; without it the marks are `0`,
-//!   upstream's `CreateCornerBlend`.
+//! - **Face sides** (not upstream; WR-613, the fork's tangency-labs/smlib@7fd9fb0):
+//!   `CreateCornerPatch` marks the ordered edges that have an original face and builds
+//!   its patch with [`BSplineSurface::create_corner_blend_on_faces`], so the patch meets
+//!   the body's faces along those edges (upstream's `CreateCornerBlend` has no marks).
 //! - **Nx2 adjustments.** The replaced corner edge of the Nx2 topology adjustment is
 //!   deleted from the pseudo B-rep (`FilletBrep::delete_fillet_edge`, upstream's
 //!   `delete`).
@@ -328,6 +327,9 @@ pub struct FilletCorner {
     /// corner type, exact points and, until the patch takes it, the facet's face; set
     /// with [`Self::blend`] on a 3x3 chamfer corner that is the event.
     pub chamfer_corner: Option<crate::blend::blend_corner::chamfer::ChamferCorner>,
+    /// The chamfer event's configuration at a vertex of three but for chamfers of both
+    /// convexities (`ChamferClass::MixedConvexity`): as a bevel the corner is refused.
+    pub chamfer_mixed_convexity: bool,
     /// The fork's Setback's own members (`m_vSetBacks`, `m_lFillOrder`, `m_bConvexSetBack`,
     /// `m_bSetBackOverflows`, `m_pFill`; smlib#104, WR-697): set at its creation on a blend
     /// corner that is a Setback.
@@ -683,6 +685,7 @@ impl FilletCorner {
             swept: None,
             ball: None,
             chamfer_corner: None,
+            chamfer_mixed_convexity: false,
             setback: None,
             mixed: None,
             end_cap: None,
@@ -1132,6 +1135,16 @@ impl FilletCorner {
                                 Some(blend_corner(
                                     FilletCornerKind::NByTwo,
                                     BlendCornerEvent::Join,
+                                    BlendEnd::OnEndFace,
+                                ))
+                            } else if p1::check_nx1_degeneracy(k, b, vertex, eu0)? {
+                                // Not upstream (#16654): two edges of one pair of faces meet
+                                // at an angle only where those faces touch tangentially (two
+                                // tubes of one radius), and both blends shrink to the vertex
+                                // there: the blend corner's Turn, its mitre the vertex
+                                Some(blend_corner(
+                                    FilletCornerKind::NByTwo,
+                                    BlendCornerEvent::Turn,
                                     BlendEnd::OnEndFace,
                                 ))
                             } else {
@@ -1598,12 +1611,10 @@ impl FilletCorner {
                             .0
                             .and_then(bspline_part);
                         base_surface.clone_from(&env.target.face(orig_face)?.surface);
-                        if env.k.fixes.corner_patch_face_side_twist {
-                            face_sides |= u32::try_from(ii)
-                                .ok()
-                                .and_then(|ii| 1u32.checked_shl(ii))
-                                .unwrap_or(0);
-                        }
+                        face_sides |= u32::try_from(ii)
+                            .ok()
+                            .and_then(|ii| 1u32.checked_shl(ii))
+                            .unwrap_or(0);
                     } else {
                         // no Original Face branch - curve is only connected to filletSurfaces
                         // use primaryEdgeuse to get (neighborFace,UVTrimCurve) pair
@@ -2290,15 +2301,8 @@ impl FilletCorner {
                 .ok_or_else(|| invalid(OP_TOPO, "side edge without curve"))?;
 
             // fork 66b02de passes these on (SER)
-            let pass_on = k.fixes.fillet_statuses_pass_on;
-            let pnt1 = unchecked_point(crate::error::passed_on(
-                side_edge_curve.evaluate_point(k, edge_param1),
-                pass_on,
-            )?)?;
-            let pnt2 = unchecked_point(crate::error::passed_on(
-                side_edge_curve.evaluate_point(k, edge_param2),
-                pass_on,
-            )?)?;
+            let pnt1 = side_edge_curve.evaluate_point(k, edge_param1)?;
+            let pnt2 = side_edge_curve.evaluate_point(k, edge_param2)?;
 
             let dist = pnt1.distance(pnt2);
 
@@ -2494,17 +2498,6 @@ impl FilletCorner {
 
         // all done
         Ok(())
-    }
-}
-
-/// An evaluation whose status upstream ignores (`EvaluatePoint` without `SER`): a
-/// failure leaves the default-constructed point ([`Point3::UNDEF`]); an unported
-/// evaluator still propagates.
-pub(super) fn unchecked_point(r: Result<Point3>) -> Result<Point3> {
-    match r {
-        Ok(p) => Ok(p),
-        Err(e) if e.is_unported_or_cancelled() => Err(e),
-        Err(_) => Ok(Point3::UNDEF),
     }
 }
 

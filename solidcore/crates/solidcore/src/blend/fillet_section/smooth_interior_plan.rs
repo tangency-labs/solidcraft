@@ -73,23 +73,16 @@ pub struct SmoothInteriorPlan<'a> {
 impl<'a> SmoothInteriorPlan<'a> {
     /// Freezes widths and checks numerical G2 rail compatibility at each station.
     ///
-    /// Requires the procedural definition opt-in (`fillet_round_as_definition`). This is an
-    /// explicit preparation request, not a flag enabling corrected evaluation.
+    /// This is an explicit preparation request, not a flag enabling corrected evaluation.
     /// No threshold is supplied by the caller: checks use 512 machine epsilons
     /// times the measured jet scale. Passing them does not prove exact vanishing
     /// of rational coefficients, or the absence of an interior singularity.
     ///
     /// # Errors
-    /// Refuses non-G2 definitions, the missing opt-in, invalid partitions,
+    /// Refuses non-G2 definitions, invalid partitions,
     /// unrepresentable widths, nonfinite/singular rail jets, or rail jumps that
     /// violate the required vanishing orders. Propagates station solve errors.
     pub fn prepare(k: &Kernel, definition: &'a ProceduralBlend, initial: &[f64]) -> Result<Self> {
-        if !k.fixes.fillet_round_as_definition {
-            return Err(SolidError::invalid_input(
-                OP,
-                "correction preparation requires the procedural definition opt-in",
-            ));
-        }
         if definition.order() != 2 {
             return Err(SolidError::invalid_input(OP, "this correction plan supports G2 only; G3 needs a separate third-order face-smoothness proof"));
         }
@@ -151,13 +144,10 @@ impl<'a> SmoothInteriorPlan<'a> {
     /// Takes the full sided section jumps at an interior station and section height.
     ///
     /// # Errors
-    /// Invalid station index/height, the missing definition opt-in, or a solve error.
+    /// Invalid station index/height, or a solve error.
     pub fn jump_at(&self, k: &Kernel, station: usize, t: f64) -> Result<JumpJet> {
-        if !k.fixes.fillet_round_as_definition || !t.is_finite() || !(0.0..=1.0).contains(&t) {
-            return Err(SolidError::invalid_input(
-                OP,
-                "the procedural definition opt-in and a height in [0,1] required",
-            ));
+        if !t.is_finite() || !(0.0..=1.0).contains(&t) {
+            return Err(SolidError::invalid_input(OP, "a height in [0,1] required"));
         }
         let station = self
             .stations

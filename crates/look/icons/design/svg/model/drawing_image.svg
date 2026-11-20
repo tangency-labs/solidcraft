@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Insert drawing image</title>
+  <path d="M9.5 11L54.5 11A2.5 2.5 0 0 1 57 13.5L57 50.5A2.5 2.5 0 0 1 54.5 53L9.5 53A2.5 2.5 0 0 1 7 50.5L7 13.5A2.5 2.5 0 0 1 9.5 11Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="43" cy="23" r="5" fill="#b9ddf8" stroke="#236ead" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M10 45L24 27L36 41L42 34L54 47Z" fill="#b9ddf8" stroke="#236ead" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

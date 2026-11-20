@@ -1782,6 +1782,9 @@ fn classify_seam<O: LoopObject, M: CurveOnClassifyBrep<O>>(
     // inform the public - DoingSeams - user requested OuterSeamOnly value
     class.set_tgt_loops_only(outer_loop_only);
     class.set_ok_to_set_tolerance(false);
+    // not upstream: the seam curve itself is checked against the face's edges within both
+    // tolerances, as upstream does (docs/booleans.md, "Seams and poles")
+    class.set_source_reach(crate::intersect::curve_class::p1::SourceReach::Boundary);
 
     // classify the SeamCurve3d against this face (status ignored)
     match curve_on_classify_mut(k, f, &mut objects, false, &mut class, true, false, false) {

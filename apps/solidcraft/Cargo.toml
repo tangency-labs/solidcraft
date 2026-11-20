@@ -67,6 +67,9 @@ interprocess = "2.4"
 
 [target.'cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))'.dependencies]
 quick-xml = { workspace = true }
+# The window events eframe asks the app about before painting (`App::repaint_on_window_event`);
+# already in the tree through eframe.
+winit = { version = "0.30", default-features = false }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 hidapi = { version = "2.6.7", default-features = false, features = ["windows-native"] }

@@ -491,8 +491,55 @@ fn beyond_end_section(
         ));
     }
     let foot = edge_curve.evaluate_point(k, dropped.parameter)?;
+    // Not the fork's (#16654): the drop may stop at the far end of the edge, a local minimum
+    // (a point past the end of an arc of more than a half turn is nearest that end, yet moving
+    // in from the other end first takes it further away): an end nearer the point than the
+    // foot found is the nearest point of the edge.
+    let reach = foot.distance(leave_point);
+    let mut nearest: Option<(usize, f64)> = None;
+    for (index, end) in [ivl.min(), ivl.max()].into_iter().enumerate() {
+        let away = edge_curve.evaluate_point(k, end)?.distance(leave_point);
+        if away < reach - solver.approx_tol_3d && nearest.is_none_or(|(_, d)| away < d) {
+            nearest = Some((index, away));
+        }
+    }
+    if let Some((index, _)) = nearest {
+        return Ok(Some(index));
+    }
     for (index, end) in [ivl.min(), ivl.max()].into_iter().enumerate() {
         if foot.distance(edge_curve.evaluate_point(k, end)?) <= solver.approx_tol_3d {
+            return Ok(Some(index));
+        }
+    }
+    Ok(None)
+}
+
+/// The curve and interval of the solver's filleted edge (that of its first edge use).
+fn filleted_edge_curve<'b>(
+    solver: &FilletSolver,
+    target: &'b Brep,
+) -> Result<(&'b Curve, Extent1d)> {
+    let fil_edge = filleted_edge(solver, target)?;
+    Ok((
+        filleted_curve(target, fil_edge)?,
+        edge::interval(target, fil_edge)?,
+    ))
+}
+
+/// The end of the filleted edge (0 its interval's start, 1 its end) whose point the rail's
+/// point at `rail_param` is, within the solver's 3D tolerance, if any: where the round's
+/// cross section has shrunk to the edge's end vertex.
+fn at_end_vertex(
+    solver: &FilletSolver,
+    k: &Kernel,
+    target: &Brep,
+    rail: &Curve,
+    rail_param: f64,
+) -> Result<Option<usize>> {
+    let (edge_curve, ivl) = filleted_edge_curve(solver, target)?;
+    let point = rail.evaluate_point(k, rail_param)?;
+    for (index, end) in [ivl.min(), ivl.max()].into_iter().enumerate() {
+        if point.distance(edge_curve.evaluate_point(k, end)?) <= solver.approx_tol_3d {
             return Ok(Some(index));
         }
     }
@@ -696,6 +743,21 @@ impl FilletSolver {
                             false,
                         )?;
                         if back == Some(end) {
+                            continue;
+                        }
+                        // A run that leaves (or comes back) through an end's vertex itself, where
+                        // the round's faces turn tangent and its cross section shrinks to that
+                        // vertex (two tubes of one radius), and comes back (or leaves) past the
+                        // other end lies past the ends: past that vertex the rail is the
+                        // round's run on, which the ends trim (#16654).
+                        let d_back = last.interval.max();
+                        let pinched_leave =
+                            at_end_vertex(solver.solver(), k, target, &curve, d_leave)?;
+                        let pinched_back =
+                            at_end_vertex(solver.solver(), k, target, &curve, d_back)?;
+                        if (pinched_leave == Some(end) && back.is_some())
+                            || back.is_some_and(|b| pinched_back == Some(b))
+                        {
                             continue;
                         }
                         wraps = back.is_some();

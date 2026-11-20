@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
 
-use super::tests::{four_bar, meet, occ, part, pin, place, run};
+use super::tests::{cube_ring, four_bar, meet, occ, part, pin, place, run};
 use crate::Session;
 
 /// A planar arm about +Z on a grounded base: Shoulder at the origin, Upper 60 long, Elbow, Fore
@@ -144,6 +144,33 @@ fn a_limited_elbow_stops_the_reach_and_says_so() {
     let span = (60f64.powi(2) + 40f64.powi(2) + 2.0 * 60.0 * 40.0 * 30f64.to_radians().cos()).sqrt();
     assert!(r["error_mm"].as_f64().is_some_and(|e| (e - (100.0 - span)).abs() < 1e-4), "{r}");
     assert!((value(&mut s, "Elbow") - 30.0).abs() < 1e-12, "{r}");
+}
+
+/// #19760: the folding cube toy (`cube_ring`) with one pin of hinge 8 taken out, a plate dragged
+/// past where its pins' limits let it go. Each step pushed the pins at their limits and was cut
+/// back to them, so the reach crept along a limit in steps that each gained a little, until its
+/// work ran out: about half a second for every frame of a drag. Solved with those pins held at
+/// their limits, it settles in a few steps where the limits leave it closest, and reaching again
+/// for the same point gets no closer.
+#[test]
+fn a_reach_held_at_a_limit_settles_quickly() {
+    let mut s = cube_ring(&[30, 31]);
+    let plate = occ(&s, "H4");
+    let at = Vec3::new(-36.672, -2.706, 14.855);
+    for k in [1.0, 2.0] {
+        let to = Vec3::new(at.x, at.y + 2.0 * k, at.z + 1.5 * k);
+        let ask = solidcraft_doc::joints::Reach { occurrence: plate, point: at, to, axis: None, joints: None };
+        let st = s.model.state();
+        let first = solidcraft_doc::joints::reach(&s.doc, &st, &ask).unwrap_or_default();
+        // A tenth of the 200 000 placements one solve may spend; the crawl spent all of them.
+        assert!(first.work < 20_000, "frame {k}: {} placements", first.work);
+        let r = run(&mut s, "joint.reach", json!({"occurrence": "H4", "at": pt(at), "point": pt(to)}));
+        let miss = r["error_mm"].as_f64().unwrap_or(f64::NAN);
+        assert_eq!(r["reached"], false, "frame {k}: {r}");
+        let again = run(&mut s, "joint.reach", json!({"occurrence": "H4", "at": pt(at), "point": pt(to)}));
+        let closer = miss - again["error_mm"].as_f64().unwrap_or(f64::NAN);
+        assert!(closer < 1e-6, "frame {k}: a second reach got {closer} mm closer: {r} then {again}");
+    }
 }
 
 /// A linked elbow (elbow = −shoulder, so the forearm keeps pointing along +X) follows the

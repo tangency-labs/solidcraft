@@ -288,6 +288,19 @@ fn present_null_is_refused_but_absent_is_fine() {
     }
 }
 
+/// A box design's drawing, open, checking parameters at `level`, and its source's id: where the
+/// drawing commands' schemas are tested.
+pub(super) fn drawing_session(level: ParamCheck) -> (Session, Value) {
+    let mut s = Session::default();
+    let design = json!({"length": 40, "width": 30, "height": 10, "body_name": "Plate"});
+    for (id, p) in [("solid.box", design), ("drawing.create", json!({}))] {
+        s.execute(id, &p).unwrap_or_else(|e| panic!("{id}: {e}"));
+    }
+    s.param_check = level;
+    let id = s.execute("drawing.inspect", &json!({})).unwrap_or_else(|e| panic!("{e}"))["sources"][0]["id"].clone();
+    (s, id)
+}
+
 pub(super) fn sketch_rectangle(s: &mut Session) {
     for (id, p) in [
         ("sketch.create", json!({"plane": "XY"})),
@@ -474,7 +487,7 @@ fn ui_prefs_theme_options_output_schema_matches_serialized_reply() {
 /// `items`, `minItems`, `maxItems`, `uniqueItems`, `enum`, `minLength`, `maxLength`, `minimum`,
 /// `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `anyOf`, `not` and `$ref`. (`integer`
 /// here is what serde reads as one, so `1.0` is not.)
-pub(super) fn conforms(root: &Value, node: &Value, v: &Value) -> bool {
+pub(crate) fn conforms(root: &Value, node: &Value, v: &Value) -> bool {
     if let Some(name) = node.get("$ref").and_then(Value::as_str).and_then(|r| r.strip_prefix("#/$defs/")) {
         return root.get("$defs").and_then(|d| d.get(name)).is_some_and(|t| conforms(root, t, v));
     }
@@ -674,6 +687,33 @@ pub(super) fn assert_keys(schema: Schema, fields: &[&str]) {
     assert_eq!(schema_keys(v).into_iter().collect::<Vec<_>>(), fields);
     assert_eq!(v.get("additionalProperties"), Some(&json!(false)), "the schema refuses unknown keys too");
     assert_eq!(v.get("$schema").and_then(Value::as_str), Some("https://json-schema.org/draft/2020-12/schema"));
+}
+
+/// Every string the schema's `$defs` entry `def` allows by `enum` or `const`, however it nests
+/// them, sorted: a reply's closed list, which each module's test holds to the list's `ALL`.
+pub(super) fn closed_list(schema: &Schema, def: &str) -> Vec<String> {
+    fn walk(node: &Value, out: &mut Vec<String>) {
+        match node {
+            Value::Object(o) => o.iter().for_each(|(key, v)| match (key.as_str(), v) {
+                ("enum", Value::Array(list)) => out.extend(list.iter().filter_map(Value::as_str).map(str::to_string)),
+                ("const", Value::String(name)) => out.push(name.clone()),
+                _ => walk(v, out),
+            }),
+            Value::Array(list) => list.iter().for_each(|v| walk(v, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    walk(&schema.as_value()["$defs"][def], &mut out);
+    out.sort();
+    out
+}
+
+/// The names `values` serialize to, sorted: a closed list's `ALL`, for [`closed_list`].
+pub(super) fn names_of<T: serde::Serialize>(values: &[T]) -> Vec<String> {
+    let mut out: Vec<String> = values.iter().filter_map(|v| serde_json::to_value(v).ok()?.as_str().map(str::to_string)).collect();
+    out.sort();
+    out
 }
 
 /// A call with one problem that already fails gets the same error in strict as with the check
@@ -1116,7 +1156,9 @@ fn axis_lines_match_the_axis_reader() {
         (json!("Bore"), true),
         (json!({"dir": [0, 0, 1]}), true),
         (json!({"origin": [1, 2, 3], "dir": {"x": 0, "y": 1, "z": 0}}), true),
-        (json!({"origin": ["1 mm", 0, 0], "dir": [0, 0, 1]}), false),
+        (json!({"origin": ["1 mm", "r - 2 mm", 0], "dir": [0, 0, 1]}), true),
+        (json!({"origin": [true, 0, 0], "dir": [0, 0, 1]}), false),
+        (json!({"origin": [0, 0], "dir": [0, 0, 1]}), false),
         (json!({"dir": [0, 0, 1], "type": "world", "axis": "X"}), true),
         (json!({"edge": [1, 2, 3]}), true),
         (json!({"face": [1, 2, 3], "dir": [0, 0, 1]}), true),

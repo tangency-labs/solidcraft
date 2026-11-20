@@ -953,6 +953,16 @@ impl BSplineSurface {
         crate::nurbs::nurbs_srf::SurfaceCover::new(self.gw_nurb()?, depth)
     }
 
+    /// A box that holds the surface over `uv_domain` alone: that of the control points of
+    /// the piece over it ([`crate::nurbs::nurbs_srf::srf_piece_box`]). `None` without a
+    /// NURB or when no such piece is certain (a weight not positive, knots not clamped,
+    /// `uv_domain` empty or outside the natural domain). Not upstream.
+    #[must_use]
+    pub fn piece_box(&self, uv_domain: &Extent2d) -> Option<Extent3d> {
+        let (lo, hi) = (uv_domain.min(), uv_domain.max());
+        crate::nurbs::nurbs_srf::srf_piece_box(self.gw_nurb()?, (lo.x, hi.x), (lo.y, hi.y))
+    }
+
     /// The NURB, made first if missing (`GetOrCreateGwNurbPointer`).
     ///
     /// # Errors

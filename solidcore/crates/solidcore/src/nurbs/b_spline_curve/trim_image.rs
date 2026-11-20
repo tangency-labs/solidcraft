@@ -42,6 +42,22 @@
 //! range meets, and each of those pieces' polynomials is the surface at the points on it, so
 //! the piece clears only where it clears on every one of them.
 //!
+//! **A piece's (u, v) range**, here and in [`sliver_within`], is what two enclosures of it
+//! share ([`piece_range`]): the
+//! range of its power coefficients over `s` in `[-1, 1]`, and the range of the control
+//! points of its knot span. Over a knot span a B-spline curve is a convex combination of
+//! that span's control points (its basis functions are non-negative and sum to 1: the
+//! strong convex hull property, Piegl and Tiller, *The NURBS Book*, section 3.2), so the
+//! second holds the piece too, and it is exact: the control points are read, not computed.
+//! The first carries the rounding of the trim's evaluation in intervals. MEASURED on cubic
+//! trims that end on a coordinate of 1: the end point's enclosure is 2.7e-14 wide and the
+//! range of the piece that holds it passes 1 by 2.4e-14 to 6.7e-14 (106 to 300 units in the
+//! last place), more than [`KNOT_RANGE_SLACK`], however often the piece is halved. Without
+//! the second, no piece that touches the top of the surface's knot range was ever enclosed:
+//! a trim that ends on a sphere's pole at the top of its v range, or runs along its seam at
+//! the top of its u range, was never certified, nor was a sliver there (a side at 0
+//! escaped: a coordinate of 0 has no such rounding).
+//!
 //! **Rounding.** Every coefficient is computed in rounded interval arithmetic
 //! ([`Ivl`]): the surface's homogeneous control points and a non-rational trim's control
 //! points enter exactly (`Nurbs::of` and `NurbsCurve::of` copy them; a weight 1 multiplies
@@ -81,8 +97,10 @@ const MAX_PATCHES: usize = 4;
 
 /// How far, relative to the knots' largest end (or 1), a trim piece's parameter range may
 /// pass the surface's knot range and still be enclosed on the end span: 64 units in the
-/// last place, far above the rounding a point on the domain's boundary is widened by, and
-/// far below a trim that truly leaves the domain. In 3D the stretch enclosed on the end
+/// last place, far below a trim that truly leaves the domain. It is for a trim whose
+/// control points pass the knots by the rounding of whatever made them; the rounding of
+/// the piece's own enclosure is wider than this and is taken out by the control points'
+/// range instead ([`piece_range`]). In 3D the stretch enclosed on the end
 /// span's polynomial past the knots is at most `|∇S|` times that UV slack; that it holds
 /// no feature of the surface is ARGUED (it is rounding of a point on the boundary), not
 /// bounded.
@@ -250,7 +268,9 @@ const PARALLEL_ULPS: f64 = 64.0;
 ///   (every point is the middle's point plus the higher terms, each at most its
 ///   coefficient's magnitude over `s` in `[-1, 1]`);
 /// - its image's 3D diameter, bounded by the UV diameter times an enclosure of the
-///   surface's Jacobian norm `sqrt(|S_u|² + |S_v|²)` over the piece's UV box (from the
+///   surface's Jacobian norm `sqrt(|S_u|² + |S_v|²)` over the piece's UV box
+///   ([`piece_range`]: within the span's control points, so a sliver on the top of the
+///   surface's knot range does not pass it by the rounding of its coefficients) (from the
 ///   net's basis functions and their first derivatives over the box and the quotient rule,
 ///   in rounded intervals, on every polynomial patch the box meets), is at most
 ///   [`SLIVER_3D_ULPS`] `ε` times the larger of the surface net's largest coordinate and
@@ -329,10 +349,13 @@ pub(crate) fn sliver_within(
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Ok(None) | Err(_) => return Ok(false),
     };
-    let (ur, vr) = (
+    let taylor = (
         Ivl::checked((d0.x - ru).lo, (d0.x + ru).hi),
         Ivl::checked((d0.y - rv).lo, (d0.y + rv).hi),
     );
+    let Some((ur, vr)) = piece_range(&curve, span_t, taylor) else {
+        return Ok(false);
+    };
     let Some(jacobian) = jacobian_over(&net, ur, vr) else {
         return Ok(false);
     };
@@ -451,7 +474,9 @@ fn piece_clears(curve: &NurbsCurve, net: &Nurbs, a: f64, b: f64, tol: f64) -> Op
         cu.push(dj.x * scale);
         cv.push(dj.y * scale);
     }
-    let (ur, vr) = (range(&cu), range(&cv));
+    let Some((ur, vr)) = piece_range(curve, span_t, (range(&cu), range(&cv))) else {
+        return Some(false);
+    };
     let us = spans_met(&net.u, net.p, net.nu, ur)?;
     let vs = spans_met(&net.v, net.q, net.nv, vr)?;
     if us.len() * vs.len() > MAX_PATCHES {
@@ -465,6 +490,41 @@ fn piece_clears(curve: &NurbsCurve, net: &Nurbs, a: f64, b: f64, tol: f64) -> Op
         }
     }
     Some(true)
+}
+
+/// The (u, v) range of a piece of the polynomial trim `curve` inside its knot span `k`:
+/// what `taylor` (the ranges of the piece's power coefficients about its middle, its
+/// constant term widened by the other terms' magnitudes) and the range of the span's
+/// control points `k - p ..= k` share. Both hold every point of the piece (the module docs'
+/// "A piece's (u, v) range"), so what they share does. The control points' range is exact,
+/// so a trim whose control points lie within the surface's knots has no piece that passes
+/// them by the rounding of its coefficients.
+///
+/// `None` where the span has no control points, one of their weights is not 1 (the
+/// homogeneous coordinates are then not the point's), or the two ranges share nothing.
+fn piece_range(curve: &NurbsCurve, k: usize, taylor: (Ivl, Ivl)) -> Option<(Ivl, Ivl)> {
+    let mut hull: Option<(Ivl, Ivl)> = None;
+    for i in k.checked_sub(curve.p)?..=k {
+        let (x, y, w) = (
+            Ivl::from(*curve.pw.get(4 * i)?),
+            Ivl::from(*curve.pw.get(4 * i + 1)?),
+            *curve.pw.get(4 * i + 3)?,
+        );
+        let polynomial = w == 1.0;
+        if !polynomial {
+            return None;
+        }
+        hull = Some(hull.map_or((x, y), |(u, v)| (u.hull(x), v.hull(y))));
+    }
+    let (hu, hv) = hull?;
+    // both hold the piece, so they overlap (written to accept: a pair that does not is no
+    // range)
+    let shared = |a: Ivl, b: Ivl| {
+        let lo = if b.lo > a.lo { b.lo } else { a.lo };
+        let hi = if b.hi < a.hi { b.hi } else { a.hi };
+        (lo <= hi).then_some(Ivl::new(lo, hi))
+    };
+    Some((shared(taylor.0, hu)?, shared(taylor.1, hv)?))
 }
 
 /// The non-empty knot spans `k` (`U[k] < U[k+1]`, `p <= k < n`) that `x` meets; `None`

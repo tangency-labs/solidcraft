@@ -327,8 +327,14 @@ mod tests {
         let zip = zip.finish().unwrap().into_inner();
         let path = h.dir.join("gears.zip");
         std::fs::write(&path, &zip).unwrap();
-        review(&mut h.app, path.to_string_lossy().into_owned());
+        // Dropping the plugin archive has the same reviewed path as Install plugin...
+        // and never tries to open a design (#18761).
+        let (tabs, before) = (h.app.docs.count(), h.app.session.doc.to_json());
+        h.app.drop_path(&path.to_string_lossy());
+        assert!(!h.app.file_load.busy(), "the ZIP is not a design");
         crate::plugins::tick(&mut h.app, &h.ctx, true);
+        assert_eq!(h.app.docs.count(), tabs);
+        assert_eq!(h.app.session.doc.to_json(), before);
         let ask = h.app.plugin_install.ask.as_ref().expect("asks first");
         assert!(!plugins.join("gears").exists(), "nothing is written before the answer");
         let lines = permission_lines(&ask.plugin);
@@ -360,10 +366,13 @@ mod tests {
         assert!(grants.command_groups.contains("file"));
         assert_eq!(grants.folders[0].folder, h.dir);
         // A broken .zip is refused in plain words, with no question.
-        let bad = h.dir.join("bad.zip");
+        let bad = h.dir.join("bad.ZIP");
         std::fs::write(&bad, b"not a zip").unwrap();
-        review(&mut h.app, bad.to_string_lossy().into_owned());
+        h.app.drop_path(&bad.to_string_lossy());
+        assert!(!h.app.file_load.busy(), "a bad ZIP is still a package, not a design");
         crate::plugins::tick(&mut h.app, &h.ctx, true);
-        assert!(h.app.plugin_install.ask.is_none());
+        assert!(h.app.plugin_install.ask.is_none(), "an invalid ZIP never opens an approval dialog");
+        assert!(h.app.status.as_ref().is_some_and(|s| s.2), "the plugin review reports the invalid archive");
+        assert_eq!(h.app.docs.count(), tabs);
     }
 }

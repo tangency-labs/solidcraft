@@ -771,6 +771,22 @@ impl RecertifyMemo {
     pub fn is_empty(&self) -> bool {
         self.bounds.is_empty()
     }
+
+    /// Keeps `bound` for `key`, its keys holding at most `cap` bytes: past the cap the memo
+    /// starts again empty. A key larger than the cap on its own is not kept, and the memo is
+    /// left as it was, since emptying it would not make room for that key.
+    fn remember(&mut self, key: String, bound: f64, cap: usize) {
+        if key.len() > cap {
+            return;
+        }
+        if self.bytes + key.len() > cap {
+            self.bounds.clear();
+            self.bytes = 0;
+        }
+        // (a boxed key holds its length exactly, not a grown string's spare room)
+        self.bytes += key.len();
+        self.bounds.insert(key.into_boxed_str(), bound);
+    }
 }
 
 /// `pb`'s [`ProceduralBlend::recertify`], from the kernel's [`RecertifyMemo`] when it
@@ -797,14 +813,9 @@ fn recertify_remembered(
     }
     k.work_counters.add_blend_recertified();
     let bound = pb.recertify(k)?;
-    let mut memo = k.recertify_memo.borrow_mut();
-    if memo.bytes + key.len() > RECERTIFY_MEMO_BYTES {
-        memo.bounds.clear();
-        memo.bytes = 0;
-    }
-    // (a boxed key holds its length exactly, not a grown string's spare room)
-    memo.bytes += key.len();
-    memo.bounds.insert(key.into_boxed_str(), bound);
+    k.recertify_memo
+        .borrow_mut()
+        .remember(key, bound, RECERTIFY_MEMO_BYTES);
     Ok(bound)
 }
 
@@ -1417,6 +1428,34 @@ pub fn section_blend_rebuild(rec: &SectionBlendRecord) -> Result<Surface> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The memo keeps keys up to its cap, starts again empty when the next key would pass it,
+    /// and keeps no key larger than the cap on its own, so no such allocation outlives the call.
+    #[test]
+    fn the_recertify_memo_keeps_no_key_larger_than_its_cap() {
+        let mut memo = RecertifyMemo::default();
+        memo.remember("a".repeat(6), 1.0, 10);
+        memo.remember("b".repeat(4), 2.0, 10);
+        assert_eq!(
+            (memo.len(), memo.bytes),
+            (2, 10),
+            "two keys fill the cap exactly"
+        );
+        memo.remember("c".repeat(3), 3.0, 10);
+        assert_eq!(
+            (memo.len(), memo.bytes),
+            (1, 3),
+            "a key past the cap starts the memo again"
+        );
+        assert_eq!(memo.bounds.get("ccc"), Some(&3.0));
+        memo.remember("d".repeat(11), 4.0, 10);
+        assert_eq!(
+            (memo.len(), memo.bytes),
+            (1, 3),
+            "a key larger than the cap is not kept"
+        );
+        assert_eq!(memo.bounds.get("d".repeat(11).as_str()), None);
+    }
 
     /// The record conversion failures keep the operation, status, kind and entity of the bare
     /// `Upstream` statuses they replace (a sample).

@@ -21,6 +21,10 @@ pub type Messages = BTreeMap<String, String>;
 /// The id of the fallback catalog.
 const ENGLISH_ID: &str = "en";
 
+/// The English shared catalogue as JSON (`locales/en.json`): the messages the shared crates own.
+/// A shared crate's tests read it to check that the ids the crate names are in it.
+pub const SHARED_ENGLISH: &str = include_str!("../locales/en.json");
+
 /// One language's messages, parsed from JSON (`{"id": "text", …}`) the first time they are read.
 pub struct Catalog {
     pub id: &'static str,

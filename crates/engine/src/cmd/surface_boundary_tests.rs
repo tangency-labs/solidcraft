@@ -319,6 +319,38 @@ fn a_boundary_surface_and_a_loft_surface_on_one_curve_stitch() {
     assert_eq!(edges["edges"].as_array().map(Vec::len), Some(7), "{edges}");
 }
 
+/// A long, tilted pair of curved sheets: the leave direction at the first corner crosses both
+/// parameter boundaries. Reading its shape must not shrink a finite-difference step and carry
+/// its round-off error into every station of the requested G3 blend.
+#[test]
+fn a_g3_blend_at_a_curved_sheet_corner_keeps_both_seams() {
+    let mut s = Session::default();
+    for (name, x, start, end, through) in [
+        ("H0", 0, [0, 0], [150, 15], [75, 12]),
+        ("H1", 600, [0, 5], [150, 20], [75, 17]),
+        ("F0", 0, [180, 18], [320, -10], [250, 16]),
+        ("F1", 600, [180, 23], [320, -5], [250, 21]),
+    ] {
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [x, 0, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}, "name": name}));
+        run(&mut s, "sketch.arc.three_point", json!({"start": start, "end": end, "through": through}));
+        run(&mut s, "sketch.finish", json!({}));
+    }
+    for (name, a, b) in [("Hood", "H0", "H1"), ("Fender", "F0", "F1")] {
+        run(&mut s, "surface.loft", json!({"sections": [{"sketch": a, "curves": ["a1"]}, {"sketch": b, "curves": ["a1"]}], "body_name": name}));
+    }
+    run(
+        &mut s,
+        "surface.blend",
+        json!({"from": {"body": "Hood", "edges": [[300, 150, 17.5]]}, "to": {"body": "Fender", "edges": [[300, 180, 20.5]]}, "continuity": ["g3", "g3"], "stitch": true, "body_name": "Transition"}),
+    );
+    let result = run(&mut s, "inspect.continuity", json!({"body": "Transition", "edges": [[300, 150, 17.5], [300, 180, 20.5]], "samples": 257}));
+    let edges = result["bodies"][0]["edges"].as_array().unwrap();
+    assert_eq!(edges.len(), 2);
+    for edge in edges {
+        assert!(matches!(edge["order"].as_str(), Some("g3" | "g4")), "{}", edge["curvature_change_jump_per_mm2"]);
+    }
+}
+
 /// #17197: a boundary curve made of two sketch lines that meet at a sharp corner can't be fitted
 /// smoothly, so the surface is refused, and the refusal names the corner and how sharply the
 /// curve turns there. The V runs from (0, 0) to (10, 0) and then back up to (4, 6): it turns by

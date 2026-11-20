@@ -743,11 +743,13 @@ fn a_curve_through_a_closure_off_a_seam_it_crosses_keeps_the_drop_error() {
                 ends(&c)
             ),
         };
+        // the drop's failure: no finer class than a stage that failed (#15034)
         assert_eq!(
-            e.blend_failure(),
-            Some(&BlendFailure::Failed(
-                "the curve drops onto the first surface as no UV curve"
-            )),
+            (e.operation(), e.blend_failure()),
+            (
+                "blend::fillet_geom::p2::srf_srf_intersection",
+                Some(&BlendFailure::StageFailed)
+            ),
             "{from} -> {to}: {e:?}"
         );
     }
