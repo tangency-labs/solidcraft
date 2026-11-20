@@ -74,8 +74,11 @@ fn removed(theme: &str, plugins: &[crate::plugins::Plugin]) -> bool {
 /// A theme file's text, read whole if it is within its size limit.
 fn read(folder: &str, source: &str) -> Result<String, String> {
     let path = std::path::Path::new(folder).join(source);
-    let size = std::fs::metadata(&path).map_err(|e| format!("{source}: {e}"))?.len();
-    if size > solidcraft_engine::plugin::theme::MAX_THEME_BYTES as u64 {
+    let meta = std::fs::metadata(&path).map_err(|e| format!("{source}: {e}"))?;
+    if !meta.is_file() {
+        return Err(format!("{source}: not a file"));
+    }
+    if meta.len() > solidcraft_engine::plugin::theme::MAX_THEME_BYTES as u64 {
         return Err(format!("{source}: larger than {} KiB", solidcraft_engine::plugin::theme::MAX_THEME_BYTES / 1024));
     }
     std::fs::read_to_string(&path).map_err(|e| format!("{source}: {e}"))

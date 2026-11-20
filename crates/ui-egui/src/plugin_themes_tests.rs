@@ -73,6 +73,20 @@ fn a_plugin_theme_whose_file_is_broken_is_not_offered() {
     assert!(crate::theme_files::plugin_theme_choices().is_empty());
 }
 
+/// A theme source that names a folder is refused as not a file, before any size check.
+#[test]
+fn a_plugin_theme_whose_source_is_a_folder_is_not_offered() {
+    let mut h = Harness::new();
+    let dir = install(&mut h);
+    let source = dir.join("tints").join("night.json");
+    std::fs::remove_file(&source).unwrap();
+    std::fs::create_dir(&source).unwrap();
+    crate::plugins::tick(&mut h.app, &h.ctx, true);
+    assert!(!offered(&h));
+    let (message, _, error) = h.app.status.clone().expect("one status line");
+    assert!(error && message.contains("not a file"), "{message}");
+}
+
 /// The install review names a package's themes by their ids.
 #[test]
 fn the_install_review_lists_a_plugins_themes() {

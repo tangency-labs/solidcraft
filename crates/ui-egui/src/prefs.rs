@@ -2320,6 +2320,7 @@ impl Snapshot {
         let plugin_grants = std::mem::take(&mut app.preferences.plugin_grants);
         app.preferences = self.prefs;
         app.preferences.plugin_grants = plugin_grants;
+        app.plugin_themes.signature = None;
         crate::plugins::sync_policy(app);
         self.panel_visibility.restore(app);
         sync_surface_analysis(app);
