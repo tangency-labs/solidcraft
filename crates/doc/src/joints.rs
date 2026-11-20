@@ -2545,7 +2545,11 @@ fn least_squares(f: &mut dyn FnMut(&[f64]) -> Option<Vec<f64>>, x: &mut Vec<f64>
         }
         let mut stepped = false;
         while lambda < 1e12 {
-            if let Some(d) = bounded_step(&jtj, &g, x, bounds, lambda) {
+            let mut damped = jtj.clone();
+            for p in 0..n {
+                damped.add(p, p, lambda * (1.0 + jtj.get(p, p)));
+            }
+            if let Some(d) = bounded_step(&damped, &g, x, bounds) {
                 let next: Vec<f64> = x.iter().zip(&d).zip(bounds).map(|((v, dv), (lo, hi))| (v + dv).max(*lo).min(*hi)).collect();
                 if let Some(rn) = f(&next)
                     && norm(&rn) < norm(&r)
@@ -2575,20 +2579,16 @@ fn least_squares(f: &mut dyn FnMut(&[f64]) -> Option<Vec<f64>>, x: &mut Vec<f64>
 const STALLED: f64 = 0.99;
 const MAX_STALLED: usize = 3;
 
-/// One damped Gauss–Newton step `d` from `x` (the normal equations `jtj`, `g` = −Jᵀr, damping
-/// `lambda`) that stays within `bounds`: the least squares step with its values boxed in. A value
+/// One damped Gauss–Newton step `d` from `x` (the damped normal equations `damped`, `g` = −Jᵀr)
+/// that stays within `bounds`: the least squares step with its values boxed in. A value
 /// the step would take past one of its bounds is held at that bound and the step is solved again
 /// for the others; a held value is let go again where the step does better with it moving back
 /// inside. So a loop whose values sit at their limits (the pins of a folding toy, #18880) moves
 /// by the values that are free to move. Cut back to the bounds after an unbounded solve instead,
 /// the step spreads the motion over every value, the ones at a limit can't take their share, and
 /// the loops stay open: the solve crept along and stopped.
-fn bounded_step(jtj: &linalg::Mat, g: &[f64], x: &[f64], bounds: &[(f64, f64)], lambda: f64) -> Option<Vec<f64>> {
+fn bounded_step(damped: &linalg::Mat, g: &[f64], x: &[f64], bounds: &[(f64, f64)]) -> Option<Vec<f64>> {
     let n = x.len();
-    let mut damped = jtj.clone();
-    for p in 0..n {
-        damped.add(p, p, lambda * (1.0 + jtj.get(p, p)));
-    }
     // The values held at a bound: the move that takes each there, and whether it is the lower one.
     let mut held: Vec<Option<(f64, bool)>> = vec![None; n];
     let mut last = None;
