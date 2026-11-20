@@ -38,6 +38,7 @@
 //! | [`OffsetGeometryCreation::default_tangency_tol_radians`]    | the constructor's `m_dTangencyTolRadians` (half a degree in the fork's tangency-labs/smlib@2e1bb8c; opt-in) |
 //! | `first_cut_from_far_end` (private)                          | the fork's cut-first-from-the-far-end choice in `TrimExtendedEdge` (tangency-labs/smlib@2e1bb8c; opt-in) |
 //! | `offset_vertex_image` (private)                             | not upstream: a vertex's image on its face's offset (WR-736; opt-in) |
+//! | `passages_on_one_turn`, `middle_passage` (private)          | not upstream: a vertex image the continued curve passes on several turns, taken on the edge's (WR-736) |
 //!
 //! Deviations:
 //! - **Disappearing periodic seams.** Genuine support roots bound each SSI
@@ -62,7 +63,13 @@
 //!   `V + d n(V)` (`offset_vertex_image`), not at the crossing of the two edges' UV trim
 //!   curves (a parameter of the UV curve, which the lifted 3D curve does not keep: corners
 //!   landed up to 4.3e-5 apart) nor at the neighbour's offset vertex. Upstream's reading is
-//!   gone (no flag). Solidcore-native, no fork commit.
+//!   gone (no flag). Where the lifted curve passes the image more than once (an arc's UV
+//!   curve continued ten lengths each way runs round its circle several times), an open
+//!   edge takes it on one turn at both its ends: of the parameters of that one point, the
+//!   one nearest where the edge's middle drops onto the curve (`passages_on_one_turn`;
+//!   of that drop's own passages the one farthest from the curve's ends, `middle_passage`),
+//!   not whichever rounding leaves nearest the base vertex. Solidcore-native, no fork
+//!   commit.
 //! - **A tangent edge's ends and its other UV curve (#17514).** `trim_extended_edge` takes a
 //!   grazing cut by a neighbour's offset as a crossing where the end has no tangent
 //!   neighbour and the curve meets the offset at more than the tangency tolerance (the
@@ -292,7 +299,9 @@ pub struct PeriodicBoundaryEnd<O> {
 
 enum BoundaryRoot {
     NoCut,
-    One(f64, Point3),
+    /// The root's curve parameter, its point, and its (u, v) on the boundary's displaced,
+    /// extended support.
+    One(f64, Point3, Point2),
     Unresolved,
 }
 
@@ -1456,6 +1465,107 @@ fn seam_twin(k: &Kernel, curve: &Curve, t: f64, tol: f64) -> Result<Option<f64>>
     };
     let on_seam = distance(curve.evaluate_point(k, t)?, curve.evaluate_point(k, near)?) <= tol;
     Ok(on_seam.then_some(far))
+}
+
+/// Not upstream: the candidates left of `passages` (parameters of `curve`: the solutions
+/// of the vertex image `image` solved onto it) once the image counts once. The curve
+/// passes the image where a solution lies within `same_tol` of it. A curve that is an
+/// arc continued ten of its lengths each way (`ExtendTrimEdges`) runs round its circle
+/// more than once, five times for a quarter circle, so it passes the image on every
+/// turn. Those passages lie equally near `base_point`, the base vertex, but for
+/// rounding, which then decided the one the search took; and an end taken on another
+/// turn than the edge's other end gives the edge the rest of the circle, or the circle
+/// several times over. Where the solution nearest the base vertex (the search's choice)
+/// is a passage of the image, only the passage nearest `middle` along the curve stays:
+/// `middle` is where the edge's middle drops onto the curve ([`middle_passage`]), and an
+/// open edge's end is nearer its own middle than the same end a turn on. Both ends are
+/// then taken on the middle's turn. Solutions that are no passage of the image (the
+/// nearest points of a curve that misses it) stay as they are, and so do all of them
+/// where the nearest the base vertex is one of those.
+///
+/// Returns the indices kept, in order; none for no solution.
+///
+/// # Errors
+///
+/// Those of the evaluations.
+fn passages_on_one_turn(
+    k: &Kernel,
+    curve: &Curve,
+    passages: &[f64],
+    image: Point3,
+    base_point: Point3,
+    middle: f64,
+    same_tol: f64,
+) -> Result<Vec<usize>> {
+    // which solutions are passages of the image, the one nearest the base vertex, and of
+    // the passages the one nearest the edge's middle along the curve
+    let mut at_image = Vec::new();
+    let mut nearest: Option<(f64, bool)> = None;
+    let mut on_turn: Option<(f64, usize)> = None;
+    for (index, &t) in passages.iter().enumerate() {
+        let point = curve.evaluate_point(k, t)?;
+        let passes = distance(point, image) <= same_tol;
+        at_image.push(passes);
+        let off = distance(point, base_point);
+        if nearest.is_none_or(|(least, _)| off < least) {
+            nearest = Some((off, passes));
+        }
+        let away = (t - middle).abs();
+        if passes && on_turn.is_none_or(|(least, _)| away < least) {
+            on_turn = Some((away, index));
+        }
+    }
+    let taken_is_passage = nearest.is_some_and(|(_, passes)| passes);
+    let mut kept = Vec::new();
+    for (index, &passes) in at_image.iter().enumerate() {
+        if !(taken_is_passage && passes) || on_turn.is_some_and(|(_, at)| at == index) {
+            kept.push(index);
+        }
+    }
+    Ok(kept)
+}
+
+/// Not upstream: of `drops` (parameters of `curve`: the solutions of the point `middle`
+/// dropped onto it), the parameter that stands for the edge's middle in
+/// [`passages_on_one_turn`]. The nearest solution is the drop; a curve that runs round
+/// more than once passes the drop's point on every turn (the solutions within
+/// `same_tol` of it), and the one taken is the passage farthest from both ends of the
+/// curve, nearest the middle of its interval: a turn cut short by an end of the curve
+/// would lack one of the edge's ends. `ExtendTrimEdges` continues an edge as far each
+/// way, so that passage is on the turn the edge itself is on. `None` without a solution.
+///
+/// # Errors
+///
+/// Those of the evaluations.
+fn middle_passage(
+    k: &Kernel,
+    curve: &Curve,
+    drops: &[f64],
+    middle: Point3,
+    same_tol: f64,
+) -> Result<Option<f64>> {
+    let mut points = Vec::new();
+    let mut nearest: Option<(f64, Point3)> = None;
+    for &t in drops {
+        let point = curve.evaluate_point(k, t)?;
+        points.push(point);
+        let off = distance(point, middle);
+        if nearest.is_none_or(|(least, _)| off < least) {
+            nearest = Some((off, point));
+        }
+    }
+    let Some((_, drop)) = nearest else {
+        return Ok(None);
+    };
+    let centre = curve.natural_interval().evaluate(0.5);
+    let mut taken: Option<(f64, f64)> = None;
+    for (&t, &point) in drops.iter().zip(&points) {
+        let away = (t - centre).abs();
+        if distance(point, drop) <= same_tol && taken.is_none_or(|(least, _)| away < least) {
+            taken = Some((away, t));
+        }
+    }
+    Ok(taken.map(|(_, t)| t))
 }
 
 /// Not upstream (WR-673, #2174): whether the point of `curve` at `t` is the first trim
@@ -3821,7 +3931,7 @@ impl OffsetGeometryCreation {
         let roots = surface_global_curve_intersect(
             k, brep, extended, &domain, curve, &interval, tolerance,
         )?;
-        let mut root: Option<(f64, Point3)> = None;
+        let mut root: Option<(f64, Point3, Point2)> = None;
         for solution in roots.as_slice() {
             if solution.solution_type == SolutionType::RangeOfValues {
                 return Ok(BoundaryRoot::Unresolved);
@@ -3835,7 +3945,7 @@ impl OffsetGeometryCreation {
             {
                 return Ok(BoundaryRoot::Unresolved);
             }
-            if let Some((previous_parameter, _)) = root {
+            if let Some((previous_parameter, _, _)) = root {
                 // The solver preserves reports across chart seams and closed
                 // curve ends. Only identical parameters identify the same point
                 // of this curve; spatial proximity cannot merge material roots.
@@ -3843,11 +3953,12 @@ impl OffsetGeometryCreation {
                     return Ok(BoundaryRoot::Unresolved);
                 }
             } else {
-                root = Some((parameter, point));
+                let uv = Point2::new(solution.start.param(1)?, solution.start.param(2)?);
+                root = Some((parameter, point, uv));
             }
         }
         Ok(match root {
-            Some((t, point)) => BoundaryRoot::One(t, point),
+            Some((t, point, uv)) => BoundaryRoot::One(t, point, uv),
             None => BoundaryRoot::NoCut,
         })
     }
@@ -3903,11 +4014,111 @@ impl OffsetGeometryCreation {
         Ok(Some(gap.is_finite() && gap <= tolerance))
     }
 
+    /// Whether the candidate interval of `curve`, from its root `far_parameter` on the far
+    /// support beyond `across` toward its rim root `parameter`, leaves that support to the
+    /// side the original edge of `edgeuse` leaves it at its far vertex (the end that is not
+    /// `vertex`). The edge's side is the sign of its tangent there, directed toward `vertex`,
+    /// along the third face's surface normal; the candidate's is the sign of its tangent at
+    /// the far root, directed toward the rim root, along the normal of that face's
+    /// displaced, extended surface at the root's `far_uv`. A regular offset keeps its
+    /// base's parameters and orientation, so the two normals have one sense. `None` where
+    /// either tangent lies in its support's tangent plane or a value is not finite: no side
+    /// is established.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for missing topology; those of the evaluations.
+    #[allow(clippy::too_many_arguments)]
+    fn leaves_far_support_as_edge<O: ClassObject + SolutionObject>(
+        k: &Kernel,
+        brep: &mut impl OffsetBrep<O>,
+        executive: &mut impl OffsetExecutive<O>,
+        edgeuse: O,
+        vertex: O,
+        curve: O,
+        across: O,
+        far_parameter: f64,
+        parameter: f64,
+        far_uv: Point2,
+    ) -> Result<Option<bool>> {
+        let base = brep
+            .edgeuse_edge(edgeuse)?
+            .ok_or(dangling("edge use without edge"))?;
+        let base_curve = brep
+            .edge_curve(base)?
+            .ok_or(dangling("edge without curve"))?;
+        let interval = brep.edge_interval(base)?;
+        // A use along its edge starts at the interval's lower end.
+        let at_start = brep.edgeuse_vertex(edgeuse)? == Some(vertex);
+        let along = brep.edgeuse_orientation(edgeuse)? != OrientType::Opposite;
+        let (far_at, toward_vertex) = if at_start == along {
+            (interval.max(), -1.0)
+        } else {
+            (interval.min(), 1.0)
+        };
+        let edge_tangent = curve_of(brep, base_curve)?
+            .evaluate(k, far_at, 1, true, true)?
+            .get(1)
+            .copied()
+            .ok_or(dangling("tangent missing"))?
+            * toward_vertex;
+        let radial = brep
+            .edgeuse_radial(across)?
+            .ok_or(dangling("boundary without radial"))?;
+        let third = brep
+            .edgeuse_face(radial)?
+            .ok_or(dangling("boundary without face"))?;
+        let third_surface = brep
+            .face_surface(third)?
+            .ok_or(dangling("face without surface"))?;
+        let far = brep
+            .edge_other_vertex(base, vertex)?
+            .ok_or(dangling("edge without other vertex"))?;
+        let radial_end = if brep.edgeuse_vertex(radial)? == Some(far) {
+            0.0
+        } else {
+            1.0
+        };
+        let uv = edgeuse_normalized_evaluate(k, brep, radial, radial_end, true, false, true)?;
+        let before = edge_tangent.dot(surface_of(brep, third_surface)?.evaluate_normal(
+            k,
+            Point2::new(uv.x, uv.y),
+            Side::Left,
+            Side::Left,
+        )?);
+        let offset = executive
+            .offset_edgeuse(radial)
+            .ok_or(dangling("boundary without offset"))?;
+        let face = brep
+            .edgeuse_face(offset)?
+            .ok_or(dangling("offset boundary without face"))?;
+        let surface = brep
+            .face_surface(face)?
+            .ok_or(dangling("face without surface"))?;
+        let (extended, _) = executive.get_create_extended_surface(k, brep, surface)?;
+        let normal =
+            surface_of(brep, extended)?.evaluate_normal(k, far_uv, Side::Left, Side::Left)?;
+        let run = if parameter > far_parameter { 1.0 } else { -1.0 };
+        let after = curve_of(brep, curve)?
+            .evaluate(k, far_parameter, 1, true, true)?
+            .get(1)
+            .copied()
+            .ok_or(dangling("tangent missing"))?
+            .dot(normal)
+            * run;
+        if !(before.is_finite() && after.is_finite()) || before == 0.0 || after == 0.0 {
+            return Ok(None);
+        }
+        Ok(Some((before > 0.0) == (after > 0.0)))
+    }
+
     /// A disappearing chart seam is not a material constraint. The genuine
     /// supports at the opposite end and beyond the seam bound the active SSI
     /// interval. Chart crossings outside this interval do not retain the seam.
-    /// Without genuine supports on both sides, a chart miss does not establish
-    /// seam removal: ordinary endpoint trimming still supplies the constraint.
+    /// The active interval must leave each far support as the edge does; a rim root
+    /// behind the far end keeps the ordinary trim. Without genuine supports on both
+    /// sides, a chart miss does not establish seam removal: ordinary endpoint trimming
+    /// still supplies the constraint.
     #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
     fn periodic_boundary_end<O: ClassObject + SolutionObject>(
         k: &Kernel,
@@ -3966,7 +4177,7 @@ impl OffsetGeometryCreation {
                 let candidate =
                     match Self::unique_boundary_root(k, brep, executive, curve, across, tolerance)?
                     {
-                        BoundaryRoot::One(t, p) => (t, p),
+                        BoundaryRoot::One(t, p, _) => (t, p),
                         BoundaryRoot::NoCut => {
                             // This component never meets the rim support. It cannot
                             // undergo the seam/rim incidence change considered here;
@@ -3996,13 +4207,13 @@ impl OffsetGeometryCreation {
             let mut far_root: Option<(f64, Point3)> = None;
             let mut far_boundary_roots = Vec::new();
             for across in opposite {
-                let BoundaryRoot::One(t, p) =
+                let BoundaryRoot::One(t, p, far_uv) =
                     Self::unique_boundary_root(k, brep, executive, curve, across, tolerance)?
                 else {
                     return Ok(PeriodicEnd::Unresolved);
                 };
                 let candidate = (t, p);
-                far_boundary_roots.push((across, p));
+                far_boundary_roots.push((across, p, far_uv));
                 if let Some((previous_parameter, _)) = far_root {
                     if candidate.0 != previous_parameter {
                         return Ok(PeriodicEnd::Unresolved);
@@ -4014,13 +4225,40 @@ impl OffsetGeometryCreation {
             let Some((far_parameter, _)) = far_root else {
                 return Ok(PeriodicEnd::Unresolved);
             };
+            // The interval from the far root to the rim root is the edge's image only if it
+            // leaves every far support to the side the edge does. A rim root behind the far
+            // end bounds no part of this edge: the seam is not removed by it, and the
+            // ordinary trim supplies the constraint (#19714).
+            let mut leaves_as_edge = true;
+            for &(across, _, far_uv) in &far_boundary_roots {
+                match Self::leaves_far_support_as_edge(
+                    k,
+                    brep,
+                    executive,
+                    edgeuse,
+                    vertex,
+                    curve,
+                    across,
+                    far_parameter,
+                    parameter,
+                    far_uv,
+                )? {
+                    Some(true) => {}
+                    Some(false) => leaves_as_edge = false,
+                    None => return Ok(PeriodicEnd::Unresolved),
+                }
+            }
+            if !leaves_as_edge {
+                ordinary_end = true;
+                continue;
+            }
             let active = Extent1d::from_min_max(parameter, far_parameter);
             if Self::intersects_periodic_chart(k, brep, executive, seam, uv, &active)? {
                 ordinary_end = true;
                 continue;
             }
             let mut owned_branch = false;
-            for (across, point) in far_boundary_roots {
+            for (across, point, _) in far_boundary_roots {
                 match Self::root_on_mated_boundary(k, brep, executive, across, point, tolerance)? {
                     Some(true) => owned_branch = true,
                     Some(false) => return Ok(PeriodicEnd::Unresolved),
@@ -4088,6 +4326,9 @@ impl OffsetGeometryCreation {
         // (not upstream) whether each trim point is a cut by a neighbour's offset surface
         let mut cuts = [false; 2];
         let mut periodic_ends = Vec::new();
+        // (not upstream) where the base edge's middle drops onto the curve, once it is asked
+        // for: one parameter for both ends
+        let mut edge_middle: Option<Option<f64>> = None;
         // for two iterations - find a one 3DCurve trim point
         for i in 0..2 {
             let mut solutions: SolutionArray<O> = SolutionArray::with_capacity(16);
@@ -4256,7 +4497,11 @@ impl OffsetGeometryCreation {
             // offset vertex, snapped to within ten tolerances, nor the crossing of the two
             // edges' UV trim curves is taken: the crossing's parameter is the UV curve's,
             // which the lifted curve does not keep, and between tangent edges the crossing
-            // is ill-conditioned.
+            // is ill-conditioned. A curve that passes the image more than once (an arc
+            // continued round its circle) has it on every turn: an open edge takes it on
+            // the turn its middle drops onto, the same for both ends
+            // ([`passages_on_one_turn`]). A closed edge's one vertex is both its ends, and
+            // its passages all stay candidates for the search below.
             let vertex_image = !tan_eus.is_empty() && brep.edge_is_lamina(base_edge)?;
             if vertex_image {
                 let tol_3d = brep.brep_tolerance(base_edge)?;
@@ -4271,7 +4516,45 @@ impl OffsetGeometryCreation {
                     None,
                     SolutionRequested::All,
                 )?;
-                solutions.append(&on_curve);
+                let same_tol = 10.0 * self.this_approx_tol_3d;
+                let middle = if on_curve.len() > 1 && !brep.edge_is_closed(base_edge)? {
+                    if let Some(middle) = edge_middle {
+                        middle
+                    } else {
+                        let middle =
+                            Self::edge_middle_passage(k, brep, base_edgeuse, curve_3d, same_tol)?;
+                        edge_middle = Some(middle);
+                        middle
+                    }
+                } else {
+                    None
+                };
+                match middle {
+                    Some(middle) => {
+                        let passages = on_curve
+                            .as_slice()
+                            .iter()
+                            .map(|passage| passage.start.param(0))
+                            .collect::<Result<Vec<f64>>>()?;
+                        let kept = passages_on_one_turn(
+                            k,
+                            curve_of(brep, curve_3d)?,
+                            &passages,
+                            image,
+                            brep.vertex_point(base_vertex)?,
+                            middle,
+                            same_tol,
+                        )?;
+                        for index in kept {
+                            if let Some(passage) = on_curve.get(index) {
+                                solutions.add(passage);
+                            }
+                        }
+                    }
+                    None => {
+                        solutions.append(&on_curve);
+                    }
+                }
             }
             // (not upstream) the points of the mated neighbours whose new surfaces cross
             let mut crossing_ends: Option<SolutionArray<O>> = None;
@@ -4945,6 +5228,43 @@ impl OffsetGeometryCreation {
         } else {
             p1
         }))
+    }
+
+    /// Not upstream: where the middle of `base_edgeuse`'s edge drops onto `curve_3d`, for a
+    /// curve that may pass that point on more than one turn ([`middle_passage`]): every
+    /// solution of the edge's point half way along it is asked for.
+    ///
+    /// # Errors
+    ///
+    /// Those of the evaluations and the point solve; [`SolidError::InvalidInput`] for an
+    /// edge use without an edge.
+    fn edge_middle_passage<O: ClassObject + SolutionObject>(
+        k: &Kernel,
+        brep: &mut impl OffsetBrep<O>,
+        base_edgeuse: O,
+        curve_3d: O,
+        same_tol: f64,
+    ) -> Result<Option<f64>> {
+        let base_edge = brep
+            .edgeuse_edge(base_edgeuse)?
+            .ok_or(dangling("edge use without edge"))?;
+        let mid = edgeuse_normalized_evaluate(k, brep, base_edgeuse, 0.5, false, false, true)?; // FALSE = 3d Eval
+        let tol = brep.brep_tolerance(base_edge)?;
+        let drops = Self::point_solve(
+            k,
+            brep,
+            curve_3d,
+            SolverOperation::Minimize,
+            mid,
+            tol,
+            None,
+            SolutionRequested::All,
+        )?
+        .as_slice()
+        .iter()
+        .map(|drop| drop.start.param(0))
+        .collect::<Result<Vec<f64>>>()?;
+        middle_passage(k, curve_of(brep, curve_3d)?, &drops, mid, same_tol)
     }
 
     /// Not upstream (WR-736, #2611, #2769): the
@@ -8023,6 +8343,154 @@ mod tests {
         assert_eq!(smallest_tolerance(&[f64::NAN, 1e-5]), None);
         assert_eq!(smallest_tolerance(&[1e-5, f64::NAN]), None);
         assert_eq!(smallest_tolerance(&[]), None);
+    }
+
+    /// A quarter circle of radius 18 continued ten of its lengths each way, as
+    /// `ExtendTrimEdges` continues an edge's UV trim curve, runs round its circle several
+    /// times: its two ends and its middle are each passed more than once, every passage of
+    /// one of them the same point. Whichever passage of the middle the edge's middle drops
+    /// onto, the two ends are taken on that turn, however their passages are listed: the
+    /// curve between them is the quarter (it stays in the quarter's quadrant and passes
+    /// the middle once), not the other three quarters nor more than a turn. A solution at
+    /// another point stays a candidate, and nothing is dropped where the nearest the base
+    /// vertex is such a point or the curve misses the image.
+    #[test]
+    fn a_continued_arcs_ends_are_taken_on_one_turn() {
+        let k = Kernel::default();
+        let quarter = BSplineCurve::create_circle_segment(
+            3,
+            &Axis2Placement::default(),
+            18.0,
+            0.0,
+            90.0,
+            NurbCircleParam::Quadratic,
+        )
+        .unwrap();
+        let own = quarter.natural_interval();
+        let reach = 10.0 * own.length();
+        let continued = quarter
+            .create_extended_curve(own.min() - reach, ContinuityType::G1G2, true)
+            .unwrap()
+            .unwrap()
+            .create_extended_curve(own.max() + reach, ContinuityType::G1G2, true)
+            .unwrap()
+            .unwrap();
+        let curve = Curve::from(continued);
+        let whole = curve.natural_interval();
+        assert!(whole.min() < own.min() - 9.0 * own.length());
+        assert!(whole.max() > own.max() + 9.0 * own.length());
+        let at = |t: f64| curve.evaluate_point(&k, t).unwrap();
+        // the curve's passages of a point: where its distance to it, sampled 64 times a
+        // quarter's length, has a minimum, narrowed to the point itself
+        let passages_of = |point: Point3| {
+            let off = |t: f64| distance(at(t), point);
+            let step = own.length() / 64.0;
+            let mut passages = Vec::new();
+            let mut t = whole.min() + step;
+            while t + step <= whole.max() {
+                if off(t) < off(t - step) && off(t) <= off(t + step) {
+                    let (mut low, mut high) = (t - step, t + step);
+                    for _ in 0..80 {
+                        let third = (high - low) / 3.0;
+                        if off(low + third) < off(high - third) {
+                            high -= third;
+                        } else {
+                            low += third;
+                        }
+                    }
+                    let t = 0.5 * (low + high);
+                    if off(t) < 1e-6 {
+                        passages.push(t);
+                    }
+                }
+                t += step;
+            }
+            passages
+        };
+        let (start, end) = (Point3::new(18.0, 0.0, 0.0), Point3::new(0.0, 18.0, 0.0));
+        let half = 18.0 * std::f64::consts::FRAC_1_SQRT_2;
+        let middle = Point3::new(half, half, 0.0);
+        let (starts, ends, middles) = (passages_of(start), passages_of(end), passages_of(middle));
+        assert!(starts.len() > 1 && ends.len() > 1 && middles.len() > 1);
+        // the base vertices: the ends moved 2 off the curve's plane, as an offset leaves them
+        let lift = Vec3::new(0.0, 0.0, 2.0);
+        let tol = 1e-5;
+        for &on in &middles {
+            let mut trims = [0.0; 2];
+            for (trim, (point, passages)) in trims.iter_mut().zip([(start, &starts), (end, &ends)])
+            {
+                let kept = passages_on_one_turn(&k, &curve, passages, point, point + lift, on, tol)
+                    .unwrap();
+                assert_eq!(kept.len(), 1, "{passages:?}");
+                *trim = passages[kept[0]];
+                // listed the other way round, the same passage
+                let reversed: Vec<f64> = passages.iter().rev().copied().collect();
+                let kept =
+                    passages_on_one_turn(&k, &curve, &reversed, point, point + lift, on, tol)
+                        .unwrap();
+                assert_eq!(kept.len(), 1);
+                assert_eq!(reversed[kept[0]], *trim);
+            }
+            let [from, to] = trims;
+            assert!(distance(at(from), start) < 1e-6 && distance(at(to), end) < 1e-6);
+            assert!(from < on && on < to, "{from} {on} {to}");
+            let between = middles.iter().filter(|&&m| from < m && m < to).count();
+            assert_eq!(between, 1, "{from} to {to} passes the middle once");
+            for i in 0..=64 {
+                let point = at(from + (to - from) * f64::from(i) / 64.0);
+                assert!(point.x > -1e-6 && point.y > -1e-6, "{point:?}");
+            }
+        }
+        // the edge's middle stands for the passage farthest from the curve's ends, the one
+        // on the quarter itself (the curve reaches as far either way), however they are
+        // listed; its base point is the middle moved 2 off the plane
+        let own_middle = middle_passage(&k, &curve, &middles, middle + lift, tol)
+            .unwrap()
+            .unwrap();
+        assert!(
+            own.min() < own_middle && own_middle < own.max(),
+            "{own_middle}"
+        );
+        assert!(distance(at(own_middle), middle) < 1e-6);
+        let reversed: Vec<f64> = middles.iter().rev().copied().collect();
+        assert_eq!(
+            middle_passage(&k, &curve, &reversed, middle + lift, tol).unwrap(),
+            Some(own_middle)
+        );
+        // a drop elsewhere is no passage of the nearest one's point
+        let mut drops = vec![own.evaluate(0.9)];
+        drops.extend(&middles);
+        assert_eq!(
+            middle_passage(&k, &curve, &drops, middle + lift, tol).unwrap(),
+            Some(own_middle)
+        );
+        assert_eq!(middle_passage(&k, &curve, &[], middle, tol).unwrap(), None);
+        // a solution at another point (a third of the way along the quarter) stays, beside
+        // the one passage of the image left
+        let mut mixed = starts.clone();
+        mixed.push(own.evaluate(1.0 / 3.0));
+        let other = mixed.len() - 1;
+        let kept =
+            passages_on_one_turn(&k, &curve, &mixed, start, start + lift, middles[0], tol).unwrap();
+        assert_eq!(kept.len(), 2);
+        assert_eq!(kept[1], other);
+        // where the nearest the base vertex is that other point, the search takes it
+        // whatever is kept: everything stays
+        let kept =
+            passages_on_one_turn(&k, &curve, &mixed, start, at(mixed[other]) + lift, 0.0, tol)
+                .unwrap();
+        assert_eq!(kept.len(), mixed.len());
+        // a curve that misses the image passes it nowhere: its nearest points all stay
+        let off_curve = start + Vec3::new(0.0, 0.0, 1.0);
+        let kept = passages_on_one_turn(&k, &curve, &starts, off_curve, off_curve + lift, 0.0, tol)
+            .unwrap();
+        assert_eq!(kept.len(), starts.len());
+        // nothing to take from no solution
+        assert!(
+            passages_on_one_turn(&k, &curve, &[], start, start + lift, 0.0, tol)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     /// WR-673: an open edge's second trim point is passed over only where it is the first

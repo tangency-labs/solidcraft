@@ -1569,6 +1569,158 @@ fn a_loop_in_a_group_over_the_solvers_values_still_closes_and_drives() {
     }
 }
 
+/// #18880: a chain of links closed into a ring ties its loops into one group with more values
+/// than the loop solver moves at once. The group cannot be narrowed (every loop of it runs
+/// through the value that moves), so it stayed a conflict and nothing in it moved: the model
+/// locked up as soon as the loop was closed. The ring turns now, and the links follow.
+#[test]
+fn a_ring_of_links_closes_and_drives() {
+    let mut s = Session::default();
+    let n = 66usize;
+    for i in 0..n {
+        run(&mut s, "component.create", json!({"name": format!("L{i}"), "grounded": i == 0}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+    }
+    // The links on a circle, each joined to the next at the point between them.
+    let radius = n as f64 * 30.0 / (2.0 * std::f64::consts::PI);
+    let pin_point = |i: usize| {
+        let th = 2.0 * std::f64::consts::PI * (i as f64 + 0.5) / n as f64;
+        Vec3::new(radius * th.cos(), radius * th.sin(), 0.0)
+    };
+    for i in 0..n {
+        let j = (i + 1) % n;
+        let p = pin_point(i);
+        let side = |o: &str| json!({"occurrence": o, "point": [p.x, p.y, p.z], "z": [0.0, 0.0, 1.0]});
+        let r = run(
+            &mut s,
+            "joint.create",
+            json!({"type": "revolute", "a": side(&format!("L{i}")), "b": side(&format!("L{j}")), "flip": true, "name": format!("H{i}")}),
+        );
+        assert_eq!(r["conflicts"].as_array().map(Vec::len), Some(0), "H{i}: {r}");
+    }
+    // The ring is one loop: the drive turns the first link and the rest follow it.
+    let before = place(&s, "L1", Vec3::ZERO);
+    let r = run(&mut s, "joint.drive", json!({"joint": "H0", "value": 10}));
+    assert_eq!(r["moved"], true, "{r}");
+    assert!(r["stopped_by_loop"].is_null(), "{r}");
+    assert_eq!(r["conflicts"].as_array().map(Vec::len), Some(0), "{r}");
+    assert!((r["values"][0]["value"].as_f64().unwrap_or(f64::NAN) - 10.0).abs() < 1e-9, "{r}");
+    let after = place(&s, "L1", Vec3::ZERO);
+    assert!(after.dist(before) > 1.0, "the link did not move: {before:?} to {after:?}");
+}
+
+/// A joint of the folding cube toy: a pin (cylindrical) or the planar joint beside it.
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum Toy {
+    Pin,
+    Flat,
+}
+
+/// #18880: a folding cube toy, 8 cubes on a ring of 8 hinges, each hinge a plate on two pins, and
+/// on every pin a cylindrical joint (a quarter turn of limits) with a planar joint that keeps the
+/// plate against its cube (the joints of the report's design, at their places; the parts have no
+/// bodies). Joint `Jn` is row n: (kind, a, b, world point, z, angle limits from where it is,
+/// degrees). Every pin sits at one end of its limits; A2 is grounded.
+#[rustfmt::skip]
+pub(super) const CUBE_RING: [(Toy, &str, &str, [f64; 3], [f64; 3], Option<(f64, f64)>); 32] = [
+        (Toy::Pin, "A1", "H1", [-14.955, 10.121, 8.442], [-1.0, 0.0, 0.0], Some((-90.0, 0.0))),
+        (Toy::Pin, "H1", "B1", [-1.62, 10.121, 2.346], [1.0, 0.0, 0.0], Some((0.0, 90.0))),
+        (Toy::Flat, "A1", "H1", [-14.955, 10.121, 5.394], [-1.0, 0.0, 0.0], None),
+        (Toy::Flat, "H1", "B1", [-1.62, 10.121, 2.346], [-1.0, 0.0, 0.0], None),
+        (Toy::Pin, "H2", "A1", [-14.701, -2.96, 21.269], [0.0, -1.0, 0.0], Some((0.0, 90.0))),
+        (Toy::Flat, "A1", "H2", [-17.749, -2.96, 21.269], [0.0, -1.0, 0.0], None),
+        (Toy::Pin, "B2", "H2", [-20.797, 10.375, 21.269], [0.0, 1.0, 0.0], Some((-90.0, 0.0))),
+        (Toy::Flat, "B2", "H2", [-17.749, 10.375, 21.269], [0.0, 1.0, 0.0], None),
+        (Toy::Flat, "H3", "B1", [-14.701, 10.375, -10.481], [0.0, -1.0, 0.0], None),
+        (Toy::Pin, "H3", "B1", [-14.701, 10.375, -10.481], [0.0, 1.0, 0.0], Some((0.0, 90.0))),
+        (Toy::Flat, "A2", "H3", [-17.749, 10.375, -10.481], [0.0, 1.0, 0.0], None),
+        (Toy::Pin, "A2", "H3", [-20.797, -2.96, -10.481], [0.0, -1.0, 0.0], Some((-90.0, 0.0))),
+        (Toy::Flat, "H4", "B2", [-33.624, -2.706, 21.523], [0.0, 0.0, -1.0], None),
+        (Toy::Pin, "H4", "B2", [-33.624, -2.706, 21.523], [0.0, 0.0, 1.0], Some((-90.0, 0.0))),
+        (Toy::Flat, "H4", "A3", [-39.72, -2.706, 21.523], [0.0, 0.0, -1.0], None),
+        (Toy::Pin, "H4", "A3", [-39.72, -2.706, 8.188], [0.0, 0.0, -1.0], Some((-90.0, 0.0))),
+        (Toy::Flat, "H5", "A2", [-33.624, -2.706, -10.735], [0.0, 0.0, 1.0], None),
+        (Toy::Pin, "H5", "A2", [-33.624, -2.706, 2.6], [0.0, 0.0, 1.0], Some((-90.0, 0.0))),
+        (Toy::Flat, "B3", "H5", [-36.672, -2.706, 2.6], [0.0, 0.0, 1.0], None),
+        (Toy::Pin, "B3", "H5", [-39.72, -2.706, -10.735], [0.0, 0.0, -1.0], Some((0.0, 90.0))),
+        (Toy::Flat, "H6", "B3", [-52.547, 10.375, -10.481], [0.0, -1.0, 0.0], None),
+        (Toy::Pin, "H6", "B3", [-52.547, -2.96, -10.481], [0.0, -1.0, 0.0], Some((-90.0, 0.0))),
+        (Toy::Flat, "A4", "H6", [-55.595, 10.375, -10.481], [0.0, 1.0, 0.0], None),
+        (Toy::Pin, "H6", "A4", [-58.643, -2.96, -10.481], [0.0, -1.0, 0.0], Some((0.0, 90.0))),
+        (Toy::Flat, "H7", "A3", [-52.547, 10.375, 21.269], [0.0, -1.0, 0.0], None),
+        (Toy::Pin, "H7", "A3", [-52.547, -2.96, 21.269], [0.0, -1.0, 0.0], Some((0.0, 90.0))),
+        (Toy::Flat, "B4", "H7", [-55.595, 10.375, 21.269], [0.0, 1.0, 0.0], None),
+        (Toy::Pin, "B4", "H7", [-58.643, 10.375, 21.269], [0.0, 1.0, 0.0], Some((-90.0, 0.0))),
+        (Toy::Flat, "H8", "B4", [-71.724, 10.121, 8.442], [1.0, 0.0, 0.0], None),
+        (Toy::Pin, "H8", "B4", [-58.389, 10.121, 8.442], [1.0, 0.0, 0.0], Some((-90.0, 0.0))),
+        (Toy::Flat, "H8", "A4", [-71.724, 10.121, 2.346], [1.0, 0.0, 0.0], None),
+        (Toy::Pin, "H8", "A4", [-58.389, 10.121, 2.346], [1.0, 0.0, 0.0], Some((0.0, 90.0))),
+];
+
+/// The cube toy, built joint by joint, without the joints `without` (row numbers).
+pub(super) fn cube_ring(without: &[usize]) -> Session {
+    let mut s = Session::default();
+    for part in ["A1", "A2", "A3", "A4", "B1", "B2", "B3", "B4", "H1", "H2", "H3", "H4", "H5", "H6", "H7", "H8"] {
+        run(&mut s, "component.create", json!({"name": part, "grounded": part == "A2"}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+    }
+    for (n, (kind, a, b, p, z, limits)) in CUBE_RING.iter().enumerate().filter(|(n, _)| !without.contains(n)) {
+        let at = json!({"occurrence": a, "point": p, "z": z});
+        let kind = if *kind == Toy::Pin { "cylindrical" } else { "planar" };
+        let mut params = json!({"type": kind, "a": a, "b": b, "at": at, "name": format!("J{n}")});
+        if let Some((lo, hi)) = limits {
+            params["limits"] = json!([[lo, hi], null]);
+        }
+        let r = run(&mut s, "joint.as_built", params);
+        assert_eq!(r["conflicts"].as_array().map(Vec::len), Some(0), "J{n}: {r}");
+    }
+    s
+}
+
+/// #18880: the cube toy (`CUBE_RING`) has two ways to fold: hinges 1 and 8 on one line, or
+/// hinges 4 and 5 on another; the other four hinges can't turn. The loop solver cut each step
+/// back to the limits after solving it, so the pins that could not turn kept the loops open and
+/// the drive stopped a tenth of a degree in. Each fold moves through its pin's whole quarter turn
+/// now, and the hinges off its line stay where they are.
+#[test]
+fn a_ring_of_hinged_cubes_folds_both_ways() {
+    let mut s = cube_ring(&[]);
+    // The pin joints of hinge `h`.
+    let pins = |h: usize| -> Vec<String> {
+        let plate = format!("H{h}");
+        CUBE_RING
+            .iter()
+            .enumerate()
+            .filter(|(_, (kind, a, b, ..))| *kind == Toy::Pin && (*a == plate || *b == plate))
+            .map(|(n, _)| format!("J{n}"))
+            .collect()
+    };
+    // Each fold, from either hinge on its line: the pin driven and the other hinge on the line.
+    for (pin, mirror) in [("J0", 8usize), ("J29", 1), ("J13", 5)] {
+        // Hinges 2, 3, 6 and 7 are on neither line. (The hinges of the other fold may turn: a
+        // folded hinge's plate is free to swing on its two pins.)
+        let off_line: Vec<(String, Vec<f64>)> = [2, 3, 6, 7].into_iter().flat_map(pins).map(|j| (j.clone(), values_of(&s, &j))).collect();
+        let mirrored: Vec<(String, Vec<f64>)> = pins(mirror).into_iter().map(|j| (j.clone(), values_of(&s, &j))).collect();
+        // The whole quarter turn the pin's limits allow, and back.
+        for to in [-45.0, -90.0, 0.0] {
+            let r = run(&mut s, "joint.drive", json!({"joint": pin, "value": to}));
+            assert_eq!(r["moved"], true, "{pin} to {to}: {r}");
+            assert!(r["stopped_by_loop"].is_null(), "{pin} to {to}: {r}");
+            assert_eq!(r["conflicts"].as_array().map(Vec::len), Some(0), "{pin} to {to}: {r}");
+            assert!((r["values"][0]["value"].as_f64().unwrap_or(f64::NAN) - to).abs() < 1e-6, "{pin} to {to}: {r}");
+            if to == -90.0 {
+                // The hinge on the fold's line turns with it.
+                let turned = mirrored.iter().any(|(j, was)| (values_of(&s, j)[0] - was[0]).abs() > 0.1);
+                assert!(turned, "{pin} to {to}: the hinge {mirror} did not fold with it");
+            }
+            // The hinges off both lines can't turn and don't.
+            for (j, was) in &off_line {
+                assert!((values_of(&s, j)[0] - was[0]).abs() < 1e-6, "{pin} to {to}: {j} turned from {was:?} to {:?}", values_of(&s, j));
+            }
+        }
+    }
+}
+
 /// A slider-crank: crank 15 about the origin, rod 40, a piston sliding along X. Returns the crank
 /// pin and the wrist pin.
 fn slider_crank() -> (Session, Vec3, Vec3) {
@@ -2319,7 +2471,7 @@ fn joint_visibility_lookup_cost_by_hidden_joint_count() {
 fn older_designs_show_every_joint_and_new_joints_start_shown() {
     let (dir, path) = temp_design("legacy", "json");
     let mut s = hinged();
-    let mut legacy: Value = serde_json::from_slice(&solidcraft_io::write_design(&s.doc)).unwrap();
+    let mut legacy: Value = serde_json::from_slice(&solidcraft_io::write_design(&s.doc).unwrap()).unwrap();
     legacy["format"] = json!("solidcraft/19");
     legacy["visibility"] =
         json!({"hidden_bodies": [], "hidden_occurrences": [], "hidden_origin": ["XY"], "hidden_sketches": [], "shown_sketches": []});

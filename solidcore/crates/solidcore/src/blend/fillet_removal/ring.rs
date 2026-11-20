@@ -340,12 +340,16 @@ impl RingFilletRemoval {
     fn intersect_tangent_surfaces(&mut self, k: &Kernel, b: &mut Brep) -> Result<()> {
         let tol = self.tol_3d;
         let ssi = {
-            let surf0 = ner(crate::topology::face::p2::surface(b, self.tan_face(0)?)?)?;
-            let surf1 = ner(crate::topology::face::p2::surface(b, self.tan_face(1)?)?)?;
+            // (not upstream, #18575) copies without their faces (the copy constructor resets
+            // the owner): the sharp edge lies where the fillet was, off both faces, so the
+            // solve is of the untrimmed surfaces, and a face-owned surface's cache made
+            // without its face is not ported
+            let surf0 = ner(crate::topology::face::p2::surface(b, self.tan_face(0)?)?)?.clone();
+            let surf1 = ner(crate::topology::face::p2::surface(b, self.tan_face(1)?)?)?.clone();
             surf0.global_surface_intersect(
                 k,
                 &surf0.natural_uv_domain_with_nurb(k)?,
-                surf1,
+                &surf1,
                 &surf1.natural_uv_domain_with_nurb(k)?,
                 [true, true],
                 Some(tol / 4.0),

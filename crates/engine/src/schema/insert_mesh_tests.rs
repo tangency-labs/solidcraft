@@ -9,7 +9,10 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<InsertMeshParams>(), &["crease_angle_degrees", "folder", "name", "names", "origin", "path", "units", "up"]);
+    assert_keys(
+        input_schema_for::<InsertMeshParams>(),
+        &["crease_angle_degrees", "folder", "geometry", "name", "names", "origin", "path", "units", "up"],
+    );
 }
 
 #[test]
@@ -55,6 +58,12 @@ fn strict_keeps_todays_errors() {
         ("file.insert_mesh", json!({"path": "X.3MF", "units": "mm"})),
         ("file.insert_mesh", json!({"path": "x.ply", "units": "yd"})),
         ("file.insert_mesh", json!({"path": "x.ply", "up": "y"})),
+        // `geometry` is for an OpenUSD file only, whatever it says.
+        ("file.insert_mesh", json!({"path": "x.stl", "geometry": "exact"})),
+        ("file.insert_mesh", json!({"path": "x.glb", "geometry": 5})),
+        ("file.insert_mesh", json!({"path": "x.usda", "geometry": "nurbs"})),
+        ("file.insert_mesh", json!({"path": "x.usdz", "geometry": 5})),
+        ("file.insert_mesh", json!({"path": "does-not-exist.usda", "geometry": " Exact "})),
         // A file that isn't there.
         ("file.insert_mesh", json!({"path": "does-not-exist.stl"})),
         ("file.insert_mesh", json!({"path": "does-not-exist.glb", "up": "Z", "names": " Auto ", "folder": false})),
@@ -160,6 +169,8 @@ fn the_schema_takes_what_the_handler_reads() {
         (json!({"path": "a.obj", "crease_angle_degrees": 0}), true),
         (json!({"path": "a.obj", "crease_angle_degrees": 40.5}), true),
         (json!({"path": "a.obj", "crease_angle_degrees": 180}), true),
+        (json!({"path": "a.usda", "geometry": "EXACT"}), true),
+        (json!({"path": "a.usdz", "geometry": " Exact "}), true),
         // Left unread, so not shaped.
         (json!({"path": "a.stl", "names": 5, "folder": "x"}), true),
         (json!({"path": "a.glb", "up": null, "names": 5, "folder": "x"}), true),
@@ -193,6 +204,9 @@ fn the_patterns_are_pinned() {
         schema["$defs"]["StepNamesParam"]["pattern"],
         json!(format!("^[{ws}]*([aA][uU][tT][oO]|[sS][oO][lL][iI][dD]|[pP][rR][oO][dD][uU][cC][tT]|[iI][nN][sS][tT][aA][nN][cC][eE])[{ws}]*$"))
     );
+    // `geometry` is matched as the handler matches it, in any case and with spaces around it.
+    assert_eq!(schema["$defs"]["GeometryParam"]["pattern"], json!(format!("^[{ws}]*([mM][eE][sS][hH][eE][sS]|[eE][xX][aA][cC][tT])[{ws}]*$")));
+    assert!(schema["$defs"]["GeometryParam"].get("enum").is_none(), "an enum would refuse \"EXACT\"");
 }
 
 fn folder(name: &str) -> PathBuf {

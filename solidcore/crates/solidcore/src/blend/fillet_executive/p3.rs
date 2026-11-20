@@ -255,6 +255,13 @@ pub enum NoRoomReason {
     /// Named for the typed failure record ([`crate::error::ErrorKind::EndOverflowsSideEdge`]);
     /// its refusal notes it once it moves onto the record.
     EndOverflowsSideEdge,
+    /// An End on its end face whose rail passes over that face: the face falls away under
+    /// the round (a ridge between the round's other face and it), so the rail on a face of
+    /// the blended edge never reaches its surface and no section of it ends the round. Noted
+    /// only after the End's vertices or edges failed. The fit is the largest ball whose rail
+    /// still ends on the end face, less the fit margin, on the blended edge (not the fork's,
+    /// SolidCraft #19454).
+    EndPassesOverEndFace,
     /// An End's rail rolls over its face's tangent edge where the round ends at a smooth
     /// vertex. Named for the typed failure record
     /// ([`crate::error::ErrorKind::EndRollsIntoSmoothEnd`]); its refusal notes it once it moves
@@ -833,6 +840,12 @@ pub struct FilletExecutive<O> {
     /// smooth vertex that waited for the rails' rollover is built in. An End that would wait
     /// again then has no later pass to build its edges, so it fails instead.
     pub rollover_adjusting: bool,
+    /// Not upstream (#19242; `false` from the constructor, cleared before each rollover
+    /// decision): a round taken as apart rolled over a smooth edge onto a face another round
+    /// of the blend stands on. Only the bands' check compares that round's band with the
+    /// rolled rail, so [`Self::refuse_overlapping_bands`] runs it whatever
+    /// `fixes.fillet_refuse_overlapping_bands` says.
+    pub rolled_beside_band: bool,
 }
 
 /// What a refusal's fit sizes (the fork's `SM_FIT_RADIUS`, `SM_FIT_SCALE`, `SM_FIT_CHORD`).
@@ -2392,23 +2405,29 @@ pub trait BrepCreationAccess<O: ClassObject + SolutionObject + Ord>:
         solver: O,
     ) -> Result<Option<crate::blend::fillet_exact::RailBelowResolution>>;
 
-    /// `SmFilletSolver::BandsMeetAt` (the fork's, a3d6d81) over the executive's pairs of
-    /// `solvers` sharing a face, in its loop order (`a`, `b`, then each's face index): the
-    /// radius where their bands meet, with the first solver's edge, for each pair that
-    /// has one. None from the adapter over [`ExecutiveAccess`], which holds no solvers.
+    /// The contact size of each pair of blends sharing a face, with the size's kind,
+    /// limiting edge and face. Planar constant-width chamfer bands use their exact
+    /// bounded-curve separation, including endpoint contacts; the other constant-ball
+    /// classes use `SmFilletSolver::BandsMeetAt`.
     ///
     /// # Errors
-    /// The sizing's own errors.
-    fn creation_bands_meet(&mut self, k: &mut Kernel, solvers: &[O]) -> Result<Vec<(f64, O)>>;
+    /// Those of the sizing and the face's interior-point query.
+    fn creation_bands_meet(&mut self, k: &mut Kernel, solvers: &[O]) -> Result<Vec<BandFit<O>>>;
+}
 
-    /// Not the fork's (#3190's finding): the band refusal's fit as a scale of both blends,
-    /// from the band check's own quantities, where that is exact (two chamfers on a plane
-    /// face between parallel lines), with the first blend's edge; `None` elsewhere. The
-    /// session's `band_scale` says how.
-    ///
-    /// # Errors
-    /// Those of the topology and geometry lookups.
-    fn creation_band_scale(&mut self, k: &mut Kernel, solvers: &[O]) -> Result<Option<(f64, O)>>;
+/// A band contact's limiting size and the target entities that locate it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BandFit<O> {
+    /// The radius or common scale at which the bands meet.
+    pub size: f64,
+    /// What `size` measures.
+    pub kind: FitKind,
+    /// The first blend's target edge.
+    pub edge: O,
+    /// The shared target face, when the contact locates it.
+    pub face: Option<O>,
+    /// An interior point of the shared face, when it is named.
+    pub at: Option<Point3>,
 }
 
 /// Where a solver's convex blend would cut the part
@@ -2541,13 +2560,8 @@ where
         Ok(Vec::new())
     }
 
-    fn creation_bands_meet(&mut self, _k: &mut Kernel, _solvers: &[O]) -> Result<Vec<(f64, O)>> {
+    fn creation_bands_meet(&mut self, _k: &mut Kernel, _solvers: &[O]) -> Result<Vec<BandFit<O>>> {
         Ok(Vec::new())
-    }
-
-    fn creation_band_scale(&mut self, _k: &mut Kernel, _solvers: &[O]) -> Result<Option<(f64, O)>> {
-        // the adapter over ExecutiveAccess holds no solver geometry: no chamfer to judge
-        Ok(None)
     }
 }
 
@@ -3429,6 +3443,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     /// trims them (not upstream; opt-in `fixes.fillet_refuse_overlapping_bands`, WR-542:
     /// the fork's tangency-labs/smlib@c0d74ee, `SmFilletExecutive::BandsClearOtherRails`,
     /// called right after `FacesOutlastTheirBlends`). Fails with `FilletErrorType::NoRoom`.
+    /// Runs with the fix off too where [`Self::rolled_beside_band`] is set.
     ///
     /// # Errors
     /// The refusal as `SM_ERR`, noted in the error info; those of the check.
@@ -3437,29 +3452,30 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         k: &mut Kernel,
         access: &mut impl BrepCreationAccess<O>,
     ) -> Result<()> {
-        if k.fixes.fillet_refuse_overlapping_bands
+        if (k.fixes.fillet_refuse_overlapping_bands || self.rolled_beside_band)
             && !access.geometry_bands_clear_other_rails(k, &self.solvers)?
         {
-            // the fork's a3d6d81 (WR-696): the largest common radius at which the bands stay
-            // apart, where they meet (closed), the least over the pairs
             let solvers = self.solvers.clone();
-            for (meet, edge) in access.creation_bands_meet(k, &solvers)? {
-                if self.fit_radius < 0.0 || meet < self.fit_radius {
-                    self.note_fit_radius(meet, Some(edge), FitKind::Radius);
+            let mut site = None;
+            for fit in access.creation_bands_meet(k, &solvers)? {
+                if self.fit_radius < 0.0 || fit.size < self.fit_radius {
+                    self.note_fit_radius(fit.size, Some(fit.edge), fit.kind);
+                    site = Some(fit);
                 }
             }
-            // (not the fork's, #3190's finding) where no radius is common to both, the scale
-            // of both that leaves the face the fit margin, where that is exact
-            if self.fit_radius < 0.0 {
-                let solvers = self.solvers.clone();
-                if let Some((scale, edge)) = access.creation_band_scale(k, &solvers)? {
-                    self.note_fit_radius(scale, Some(edge), FitKind::Scale);
-                }
-            }
-            return self.record_no_room(
+            let refused = self.record_no_room(
                 NoRoomReason::BandsOverlap,
                 "Fillet Error: a blend's rail runs inside the band another blend takes off a face they share (the blends are larger than the face allows)",
             );
+            if let Some(fit) = site {
+                self.error.edge = Some(fit.edge);
+                self.error.vertex = None;
+                self.error.end_face = None;
+                self.error.side_face = fit.face;
+                self.error.location = fit.at;
+                self.error.no_room_without_site = false;
+            }
+            return refused;
         }
         Ok(())
     }
@@ -3685,6 +3701,11 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 let edges = ignore(access.edges_calculate(k, corner, self));
                 self.rollover_adjusting = false;
                 if edges?.is_none() {
+                    // an End refused as passing over its end face keeps that reason and
+                    // its fit (noted by the corner's edges)
+                    if self.error.no_room_reason() == Some(NoRoomReason::EndPassesOverEndFace) {
+                        return Err(failure());
+                    }
                     self.corner_vertex_failure(
                         access,
                         corner,
@@ -3742,6 +3763,11 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             let mut geom_index = 0;
             while let Some(geom) = access.faces_solver_geom(solver, geom_index)? {
                 if ignore(access.faces_make_face(k, geom, fillet, self))?.is_none() {
+                    // an End refused as passing over its end face keeps that reason and
+                    // its fit (noted by the face's blend's corner)
+                    if self.error.no_room_reason() == Some(NoRoomReason::EndPassesOverEndFace) {
+                        return Err(failure());
+                    }
                     self.record_solver_failure(
                         access.geometry_edge(solver)?,
                         2,

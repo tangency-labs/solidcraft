@@ -250,6 +250,18 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
         if framed == Some(app.cam) {
             app.fit_view();
         }
+        // Start one large visible scan's triangle index ahead of the pointer. Starting
+        // every scan here would let their BVH builders allocate scratch at the same time.
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some((scan, _)) = world
+            .bodies
+            .iter()
+            .filter(|body| app.body_visible(&body.name))
+            .filter_map(|body| body.body.triangle_mesh().map(|(_, triangles)| (body, triangles.len())))
+            .max_by_key(|(_, count)| *count)
+        {
+            app.viewport.pick_index.prefetch(&scan.mesh_in_place().0);
+        }
         crate::frame_watch::step(app, "frame the meshes");
         if let Some(key) = remember {
             crate::home::remember_source(&mut app.home, &app.session, &key);
@@ -351,7 +363,7 @@ pub(crate) fn warm(
     let (mesh, _) = b.mesh_in_place();
     // A part placed more than once has its shared vertices made with its part ([`warm_part`]).
     if shared && b.placed_definition().is_none_or(|id| !repeated.contains(&id)) {
-        crate::viewport::warm_shared_tris(&mesh);
+        crate::viewport::warm_shared_tris(&mesh, b);
     }
     // Its box, which framing the view reads for every body once they are all shown: worked out
     // there, on the window thread, it moved every point of every placement (a second for a
@@ -370,7 +382,7 @@ pub(crate) fn warm(
 fn warm_part(b: &ModelBody, parts: &crate::viewport::WarmedParts, edges: bool, q: solidcraft_engine::doc::display_quality::DisplayQuality) {
     use solidcraft_engine::doc::display_quality::DisplayQuality;
     let mesh = if q == DisplayQuality::Normal { b.mesh_in_place().0 } else { b.plan_mesh_in_place_at(q).unwrap_or_else(|| b.mesh_in_place()).0 };
-    crate::viewport::warm_part(parts, &mesh, edges);
+    crate::viewport::warm_part(parts, &mesh, edges, Some(b));
 }
 
 /// The parts the design being opened made ahead, while it is the one shown.

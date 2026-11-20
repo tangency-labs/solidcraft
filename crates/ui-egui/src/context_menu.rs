@@ -50,6 +50,10 @@ pub enum Target {
     OriginAxis {
         name: String,
     },
+    /// An origin point (O).
+    OriginPoint {
+        name: String,
+    },
     Component {
         id: u64,
     },
@@ -300,7 +304,7 @@ fn touched_bodies(app: &SolveApp) -> Vec<String> {
     for s in &app.session.selection {
         let b = match s {
             Sel::Body { name } => name,
-            Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => body,
+            Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } if !body.is_empty() => body,
             _ => continue,
         };
         if !v.contains(b) {
@@ -383,6 +387,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Plane { id } => plane_items(app, *id),
         Target::OriginPlane { name } => origin_plane_items(app, name),
         Target::OriginAxis { name } => origin_axis_items(app, name),
+        Target::OriginPoint { name } => origin_point_items(app, name),
         Target::Component { id } => component_items(app, *id),
         Target::Occurrence { path } => occurrence_items(app, path),
         Target::Group { id, scope } => crate::browser::group_items(app, *id, scope),
@@ -405,27 +410,23 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Workspace => {
             let rendering = crate::render_workspace::active(app);
             let drawing = crate::drawing_workspace::active(app);
-            let mut v = vec![
+            // Design, then Drawing (the owner's order), then Render: the workspaces there are. Ones still
+            // to come aren't listed.
+            vec![
                 act("ui.workspace.design", "Design", "ws_design").with(json!({"workspace":"design"})).key(if rendering || drawing {
                     ""
                 } else {
                     "current"
                 }),
-                act("ui.workspace.render", "Render", "ws_render")
-                    .with(json!({"workspace":"render"}))
-                    .key(if rendering { "current" } else { "" })
-                    .on(crate::render_workspace::entry_open(app)),
-            ];
-            for (w, icon) in [("Animation", "ws_animate"), ("Simulation", ""), ("Manufacture", "")] {
-                v.push(act("ui.workspace", w, icon).key("coming later").on(false));
-            }
-            v.push(
                 act("ui.workspace.drawing", "Drawing", "ws_drawing")
                     .with(json!({"workspace":"drawing"}))
                     .key(if drawing { "current" } else { "" })
                     .on(app.session.active_sketch.is_none() && app.tool.is_none() && app.dialog.is_none() && !app.file_load.busy()),
-            );
-            v
+                act("ui.workspace.render", "Render", "ws_render")
+                    .with(json!({"workspace":"render"}))
+                    .key(if rendering { "current" } else { "" })
+                    .on(crate::render_workspace::entry_open(app)),
+            ]
         }
         Target::Units => crate::prefs::UNITS
             .iter()
@@ -1046,6 +1047,12 @@ fn origin_plane_items(app: &SolveApp, name: &str) -> Vec<Item> {
 
 /// An origin axis: Show/Hide, as on a plane (an axis takes no sketch) (#8382).
 fn origin_axis_items(app: &SolveApp, name: &str) -> Vec<Item> {
+    let visible = !app.session.visibility.hidden_origin.iter().any(|h| h == name);
+    vec![act("ui.originPart", "Show/Hide", "eye").key("V").with(json!({ "keys": [name], "show": !visible }))]
+}
+
+/// An origin point: Show/Hide, as on an axis (#14554).
+fn origin_point_items(app: &SolveApp, name: &str) -> Vec<Item> {
     let visible = !app.session.visibility.hidden_origin.iter().any(|h| h == name);
     vec![act("ui.originPart", "Show/Hide", "eye").key("V").with(json!({ "keys": [name], "show": !visible }))]
 }
@@ -2374,6 +2381,7 @@ pub fn toggle_visibility(app: &mut SolveApp) {
         .iter()
         .filter_map(|s| match s {
             Sel::Plane { name } | Sel::Axis { name } | Sel::ConstructionPoint { name } => Some(name.clone()),
+            Sel::Vertex { body, .. } if body.is_empty() => Some("O".to_string()),
             _ => None,
         })
         .collect();
@@ -2607,10 +2615,10 @@ fn select_under(app: &mut SolveApp, at: Pos2, before: Vec<Sel>, sel: Sel) {
     }
 }
 
-/// [`open`] in the Drawing workspace: `under` is what the sheet page found under the pointer,
-/// selected first unless it is already part of the selection. Empty paper keeps the selection, as
-/// empty space does in a sketch.
-fn open_on_sheet(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held, under: Option<Sel>) {
+/// [`open`] in the Drawing workspace: `under` is what the sheet page found under the pointer, or
+/// the object whose row in the browser was right-clicked, selected first unless it is already part
+/// of the selection. Empty paper keeps the selection, as empty space does in a sketch.
+pub(crate) fn open_on_sheet(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held, under: Option<Sel>) {
     app.menu.opened = Some((at, held));
     app.menu.picked = None;
     app.menu.over_geometry = false;
@@ -2703,6 +2711,7 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
         Target::Timeline { feature: id } => feature(*id),
         Target::OriginPlane { name } => crate::prefs::OriginPlaneNames::PLANES.contains(&name.as_str()),
         Target::OriginAxis { name } => ["X", "Y", "Z"].contains(&name.as_str()),
+        Target::OriginPoint { name } => name == "O" || solidcraft_engine::origins::item(name).is_some_and(|(_, item)| item == "O"),
         Target::Component { id } => component(*id),
         Target::Occurrence { path } => app.session.occurrence_placement(path).is_ok(),
         // The scope is the row it is under: the component's own, or one of its placements.
@@ -3252,7 +3261,6 @@ pub fn finish_rename(app: &mut SolveApp, text: Option<&str>, commit: bool) -> Re
 fn workspace_style(item: &Item) -> Option<crate::ui_kit::WorkspaceStyle> {
     use crate::ui_kit::WorkspaceStyle;
     use solidcraft_theme::AccentRamp;
-    let planned = |slug, description| WorkspaceStyle { slug, description, tabs: None, ramp: None };
     Some(match item.label.as_str() {
         "Design" => {
             WorkspaceStyle { slug: "design", description: "ui.workspace_design_description", tabs: Some("ui.workspace_design_tabs"), ramp: None }
@@ -3263,10 +3271,9 @@ fn workspace_style(item: &Item) -> Option<crate::ui_kit::WorkspaceStyle> {
             tabs: Some("ui.workspace_render_tabs"),
             ramp: Some(AccentRamp::Render),
         },
-        "Animation" => planned("animation", "ui.workspace_animation_description"),
-        "Simulation" => planned("simulation", "ui.workspace_simulation_description"),
-        "Manufacture" => planned("manufacture", "ui.workspace_manufacture_description"),
-        "Drawing" => planned("drawing", "ui.workspace_drawing_description"),
+        "Drawing" => {
+            WorkspaceStyle { slug: "drawing", description: "ui.workspace_drawing_description", tabs: Some("ui.workspace_drawing_tabs"), ramp: None }
+        }
         _ => return None,
     })
 }
@@ -3965,17 +3972,13 @@ mod workspace_menu_tests {
         h.call("ui.resize", json!({"width":1200,"height":1000}));
         h.step(&json!({"click":{"handle":"ribbon:workspace"}})).unwrap();
         let opener = rect_of("ribbon:workspace").unwrap();
-        let rows: Vec<_> = ["design", "render", "animation", "simulation", "manufacture", "drawing"]
-            .iter()
-            .map(|slug| rect_of(&format!("workspace:menu:{slug}")).unwrap())
-            .collect();
+        // Design, Drawing (the owner's order), Render: no planned workspaces are listed.
+        let rows: Vec<_> = ["design", "drawing", "render"].iter().map(|slug| rect_of(&format!("workspace:menu:{slug}")).unwrap()).collect();
         assert!(rows.windows(2).all(|pair| pair[0].bottom() <= pair[1].top()));
         assert!(rows[0].top() > opener.bottom());
         assert_eq!(rows[0].width(), 450.0);
-        assert!(items(&h.app, &Target::Workspace).iter().skip(2).filter(|item| item.id != "ui.workspace.drawing").all(|item| !item.enabled));
-        h.step(&json!({"click":{"handle":"workspace:menu:animation"}})).unwrap();
-        assert!(!crate::render_workspace::active(&h.app));
-        assert!(h.app.viewport.context_menu.is_some());
+        assert_eq!(items(&h.app, &Target::Workspace).len(), 3, "only the workspaces there are");
+        assert!(rect_of("workspace:menu:animation").is_none(), "a planned workspace has no row");
         h.step(&json!({"click":{"handle":"workspace:menu:render"}})).unwrap();
         assert!(crate::render_workspace::active(&h.app));
         h.step(&json!({"click":{"handle":"ribbon:workspace"}})).unwrap();
