@@ -12816,6 +12816,7 @@ fn eval_feature_kind(
                     split_by_plane_traced(&input, &pl)?
                 }
             };
+            let parts = separate_new_lumps(parts, input.body.lumps().map_or(1, |l| l.len()))?;
             if parts.len() < 2 {
                 return Err(DocError::Invalid("the tool does not split the body".into()));
             }
@@ -15256,6 +15257,26 @@ fn split_by_plane_traced(input: &Traced, plane: &Plane) -> Result<Vec<Traced>> {
         parts.push(Traced::step(part, &[input, &tool]));
     }
     Ok(parts)
+}
+
+/// A split piece with more lumps than the body `had` becomes a piece per lump, as a cut's do
+/// (#15943); the extra lumps go after every piece, so the pieces keep their numbers.
+fn separate_new_lumps(parts: Vec<Traced>, had: usize) -> Result<Vec<Traced>> {
+    let mut kept = Vec::with_capacity(parts.len());
+    let mut more = Vec::new();
+    for part in parts {
+        let lumps = part.body.lumps()?;
+        if lumps.len() <= had {
+            kept.push(part);
+            continue;
+        }
+        let lineages = crate::lineage::Lineage::lumps(&part.body, part.lineage.as_ref(), &lumps);
+        let mut pieces = lumps.into_iter().zip(lineages).map(|(body, lineage)| Traced { body, lineage, recipe: None });
+        kept.extend(pieces.next());
+        more.extend(pieces);
+    }
+    kept.extend(more);
+    Ok(kept)
 }
 
 /// The plane a straight sketch line sweeps along its sketch's normal: through the line, its x
