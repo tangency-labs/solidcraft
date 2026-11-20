@@ -1591,8 +1591,9 @@ mod card_tests {
                 let (_, _, hits) = nav(&h.ctx);
                 let matches: Vec<_> = hits.iter().enumerate().filter(|(_, hit)| hit.page == crate::prefs::PAGE_ASSISTANT).collect();
                 assert_eq!(matches.len(), 1, "AI={ai} show={show}: {query} owns one editor");
-                // The three queries reach the same editor: one of them reveals it.
-                if query != "Pointer speed" {
+                // The three queries reach the same editor. Pointer speed reveals it in every state;
+                // the legacy Motion speed, which the visible row owns, once.
+                if query != "Pointer speed" && !(query == "Motion speed" && ai && show) {
                     continue;
                 }
                 set_cursor(&h.ctx, matches[0].0);

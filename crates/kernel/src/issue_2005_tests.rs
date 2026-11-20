@@ -61,18 +61,14 @@ fn one_full_arc_closes_like_a_sketch_circle() {
     }
 }
 
-/// The circle as a closed 36-gon from its first vertex round to it again (the last point computed,
-/// as a sketch circle's polyline is). The sweep is 0.13 % short of the tube along the 36-gon's
-/// length, and 0.38 % more (cos 5°) if the profile is taken in the mitre plane at a corner: inside
-/// the tube's 1 %.
+/// The circle as a closed 36-gon, as a sketch circle's polyline is drawn (its half arcs within
+/// 0.12 mm of their chords: 18 chords each, the last point computed). The sweep is 0.13 % short
+/// of the tube along the 36-gon's length, and 0.38 % more (cos 5°) if the profile is taken in the
+/// mitre plane at a corner: inside the tube's 1 %.
 #[test]
 fn closed_polyline_sweep_shares_its_starting_section() {
-    let path: Vec<Vec3> = (0..=36)
-        .map(|k| {
-            let a = TAU * f64::from(k) / 36.0;
-            Vec3::new(30.0 * a.cos(), 30.0 * a.sin(), 0.0)
-        })
-        .collect();
+    let path = crate::build::path_polyline_within(&circle_path(), 0.12).unwrap();
+    assert_eq!(path.len(), 37);
     let b = crate::sweep_path(&profile_plane(), &square(4.0), &path).unwrap();
     tube(&b, 64.0 * TAU * 30.0, 1);
 }

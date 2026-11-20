@@ -7069,7 +7069,8 @@ mod glass_tests {
         let mut encoder = device.create_command_encoder(&Default::default());
         r.prepare(device, queue, &mut encoder, &frame);
         if !r.pic.model.see_through() {
-            assert!(r.pic.ss.is_none(), "opaque geometry and the ground shadow use the direct path");
+            // A reused renderer keeps the offscreen target an earlier see-through picture drew in.
+            assert!(!r.pic.ss_ready, "opaque geometry and the ground shadow use the direct path");
         }
         {
             let mut pass = encoder
@@ -8086,6 +8087,30 @@ mod glass_tests {
             let thin = middle_pixel(scene(5.0, Some(true), 0.75), oit).unwrap();
             assert!(!near(thin, thin_alone), "oit {oit}: the faded face behind still shows past a thin line: {thin:?} vs {thin_alone:?}");
         }
+    }
+
+    /// The pictures of a thread share one renderer for each (samples, oit): an opaque square drawn
+    /// after see-through layers, which order-independent transparency draws offscreen in a target
+    /// the renderer keeps, still takes the direct path and looks as it did before. Skipped
+    /// without a GPU adapter.
+    #[test]
+    fn an_opaque_picture_after_a_see_through_one_takes_the_direct_path() {
+        let opaque = || {
+            let mut sc = GpuScene::default();
+            let red = sc.color([220, 40, 40, 255]);
+            for p in [[-5.0, -5.0], [5.0, -5.0], [5.0, 5.0], [-5.0, -5.0], [5.0, 5.0], [-5.0, 5.0]] {
+                sc.tri([p[0], p[1], 0.0], [0.0, 0.0, 1.0], red);
+            }
+            sc
+        };
+        let Some(before) = middle_pixel(opaque(), true) else {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        middle_pixel(two_layers([40, 80, 220, 128], [220, 40, 40, 128], true), true).unwrap();
+        let kept = MIDDLE_PIXEL_RENDERERS.with_borrow(|(_, renderers)| renderers.get(&(1, true)).is_some_and(|r| r.pic.ss.is_some()));
+        assert!(kept, "the see-through picture leaves its offscreen target on the renderer");
+        assert_eq!(middle_pixel(opaque(), true), Some(before), "the opaque square after it");
     }
 
     #[test]
