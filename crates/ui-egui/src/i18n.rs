@@ -908,31 +908,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn direct_ui_message_ids_exist_in_english_catalog() {
-        install();
-        // Catch a misspelled key before it is shown verbatim in the UI. Engine-table labels
-        // deliberately use the separate label adapter and fall back to their source text.
-        for source in [
-            include_str!("toolbar.rs"),
-            include_str!("prefs.rs"),
-            include_str!("documents.rs"),
-            include_str!("dialogs.rs"),
-            include_str!("browser.rs"),
-            include_str!("browser_search.rs"),
-            include_str!("sketch_palette.rs"),
-            include_str!("design_properties.rs"),
-            include_str!("home.rs"),
-        ] {
-            for call in [".tr(\"", "i18n::tr(\"", "i18n::format(\"", "ui_text::tr(\"", "ui_text::format(\""] {
-                for tail in source.split(call).skip(1) {
-                    let id = tail.split('"').next().unwrap();
-                    assert!(ENGLISH.messages().contains_key(id), "missing English message: {id}");
-                }
-            }
-        }
-    }
-
     /// `label()` resolves a literal by its English text (or, failing that, an id); `text()` only
     /// by id. A literal neither reaches is shown verbatim in every locale and nothing fails, so
     /// every label and id literal the UI passes is read from the source and checked against the
