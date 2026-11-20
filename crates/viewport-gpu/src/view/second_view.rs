@@ -95,7 +95,7 @@ impl Renderer {
         }
         let Some(view) = target.as_mut() else { return false };
         // See-through surfaces unsorted where the device can and has the memory, as in the window.
-        let mut see_through = self.oit.is_some() && (self.model.see_through() || (self.moving_on && self.moving.see_through()));
+        let mut see_through = self.oit.is_some() && (self.pic.model.see_through() || (self.pic.moving_on && self.pic.moving.see_through()));
         if see_through
             && view.oit.as_ref().is_none_or(|t| t.size != size)
             && let Some(p) = &self.oit
@@ -115,17 +115,17 @@ impl Renderer {
         let [w, h] = [size[0] as f32, size[1] as f32];
         let reversed = self.target.reversed_depth();
         if !see_through {
-            self.model.sort_glass(queue, frame.back);
+            self.pic.model.sort_glass(queue, frame.back);
         }
-        if self.moving_on
+        if self.pic.moving_on
             && let Some(mv) = &frame.moving
         {
             if !see_through {
-                self.moving.sort_glass(queue, local_direction(&mv.transform, frame.back));
+                self.pic.moving.sort_glass(queue, local_direction(&mv.transform, frame.back));
             }
             queue.write_buffer(&self.moving_uniform, 0, &uniform_bytes_placing(frame, w, h, self.linear_out, reversed, mv.transform));
         }
-        self.model.cull(device, queue, &frame.view_proj, [w, h]);
+        self.pic.model.cull(device, queue, &frame.view_proj, [w, h]);
         queue.write_buffer(&self.uniform, 0, &uniform_bytes(frame, w, h, self.linear_out, reversed));
 
         let [sx, sy] = [scissor[0].min(size[0]), scissor[1].min(size[1])];
@@ -169,19 +169,20 @@ impl Renderer {
         // happens): the window's own pictures always have the ground. A drag that ended since the
         // window's last `prepare` has no moving layer to draw: its uniform is the window's.
         self.ground_hidden = !ground;
-        let moving_on = self.moving_on;
-        self.moving_on &= frame.moving.is_some();
+        let moving_on = self.pic.moving_on;
+        self.pic.moving_on &= frame.moving.is_some();
         match (&self.oit, &view.oit, see_through && visible) {
             (Some(p), Some(t), true) => {
                 {
                     let mut first = pass(&mut encoder, true);
                     self.draw(frame, &mut first, Phase::BeforeSeeThrough, &tally);
                 }
-                p.accumulate(&mut encoder, t, ss.depth.as_ref(), stencil, |pass| {
+                // Not timed: the frame-rate readout's times are the window's.
+                p.accumulate(&mut encoder, t, ss.depth.as_ref(), stencil, None, |pass| {
                     pass.set_scissor_rect(sx, sy, sw, sh);
                     self.draw_see_through(pass, p, &tally);
                 });
-                p.composite(&mut encoder, t, &ss.color, ss.resolve.as_ref());
+                p.composite(&mut encoder, t, &ss.color, ss.resolve.as_ref(), None);
                 let mut over = pass(&mut encoder, false);
                 self.draw(frame, &mut over, Phase::AfterSeeThrough, &tally);
             }
@@ -193,7 +194,7 @@ impl Renderer {
             }
         }
         self.ground_hidden = false;
-        self.moving_on = moving_on;
+        self.pic.moving_on = moving_on;
         queue.submit([encoder.finish()]);
         true
     }

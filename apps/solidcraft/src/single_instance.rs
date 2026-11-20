@@ -153,16 +153,7 @@ pub fn listen(endpoint: &Endpoint, sink: Sink) -> bool {
     if write_token(&endpoint.token, &token).is_err() {
         return false;
     }
-    let Ok(name) = endpoint.name() else { return false };
-    // A socket file left by a crash is replaced; a live one was ruled out above.
-    #[allow(unused_mut)]
-    let mut options = ListenerOptions::new().name(name).try_overwrite(true);
-    #[cfg(unix)]
-    {
-        use interprocess::os::unix::local_socket::ListenerOptionsExt;
-        options = options.mode(0o600);
-    }
-    let Ok(listener) = options.create_sync() else { return false };
+    let Ok(listener) = create_listener(endpoint) else { return false };
     let busy = Arc::new(AtomicUsize::new(0));
     std::thread::Builder::new()
         .name("single-instance-listen".into())
@@ -186,6 +177,30 @@ pub fn listen(endpoint: &Endpoint, sink: Sink) -> bool {
             }
         })
         .is_ok()
+}
+
+/// The listener at `endpoint`, replacing a socket file left by a crash (a live one was ruled out
+/// before). On Unix only its owner may connect: the socket is made with mode 0600 where the system
+/// lets a socket's mode be set before it is bound (Linux, the BSDs), and otherwise (macOS)
+/// is given that mode just after. A request still needs the token, which only the owner can
+/// read, so the moment between the two lets nobody in.
+fn create_listener(endpoint: &Endpoint) -> std::io::Result<interprocess::local_socket::Listener> {
+    let options = || -> std::io::Result<ListenerOptions<'static>> { Ok(ListenerOptions::new().name(endpoint.name()?).try_overwrite(true)) };
+    #[cfg(unix)]
+    {
+        use interprocess::os::unix::local_socket::ListenerOptionsExt;
+        use std::os::unix::fs::PermissionsExt;
+        match options()?.mode(0o600).create_sync() {
+            Err(e) if e.kind() == std::io::ErrorKind::Unsupported => {
+                let listener = options()?.create_sync()?;
+                std::fs::set_permissions(&endpoint.socket, std::fs::Permissions::from_mode(0o600))?;
+                Ok(listener)
+            }
+            made => made,
+        }
+    }
+    #[cfg(not(unix))]
+    options()?.create_sync()
 }
 
 /// One connection: read the request, answer, and pass the files on.
@@ -335,6 +350,12 @@ mod tests {
         let endpoint = Endpoint::in_settings(&dir).unwrap();
         let (sink, got) = collecting();
         assert!(listen(&endpoint, sink));
+        // Only its owner may connect, on macOS too, where the mode is set after binding.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&endpoint.socket).unwrap().permissions().mode() & 0o777, 0o600);
+        }
         let file = dir.join("part.sc");
         std::fs::write(&file, b"x").unwrap();
         let file = file.to_string_lossy().into_owned();

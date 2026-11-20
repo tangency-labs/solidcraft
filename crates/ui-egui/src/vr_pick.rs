@@ -31,33 +31,38 @@ pub struct Part {
     pub bodies: Vec<String>,
 }
 
+/// One plane of a section: a point on it and the side it cuts away (model units).
+pub type Cut = ([f64; 3], [f64; 3]);
+
 /// The body the ray from `origin` along `direction` (model units, any length but zero) stops at,
-/// as a click in the design view would pick it; `None` when it misses or is not a ray. What
-/// `section` cuts away (a point on its plane and the side it cuts toward, model units) is passed
-/// through; without one nothing is cut away. The design view's own section is [`view_section`],
-/// worked out once for all the rays of a frame: with the Section dialog open it is worked out on
-/// a copy of the design.
-pub fn hit(app: &SolveApp, origin: [f64; 3], direction: [f64; 3], section: Option<([f64; 3], [f64; 3])>) -> Option<RayHit> {
+/// as a click in the design view would pick it; `None` when it misses or is not a ray. What the
+/// `section`'s planes cut away is passed through, as the design view's section does; with none,
+/// nothing is cut away. The design view's own section is [`view_section`], worked out once for
+/// all the rays of a frame: with the Section dialog open it is worked out on a copy of the
+/// design. A plane that is not one (a coordinate that is no number, no side) is no ray's.
+pub fn hit(app: &SolveApp, origin: [f64; 3], direction: [f64; 3], section: &[Cut]) -> Option<RayHit> {
     let o = Vec3::new(origin[0], origin[1], origin[2]);
     let d = Vec3::new(direction[0], direction[1], direction[2]).normalized()?;
     if ![o.x, o.y, o.z].iter().all(|v| v.is_finite()) {
         return None;
     }
     let v = |p: [f64; 3]| Vec3::new(p[0], p[1], p[2]);
-    let section = match section {
-        Some((at, _)) if !at.iter().all(|c| c.is_finite()) => return None,
-        Some((at, toward)) => Some((v(at), v(toward).normalized()?)),
-        None => None,
-    };
-    let (body, depth, point) = crate::view_pick::nearest_body(app, o, d, section)?;
+    let most = solidcraft_viewport_gpu::view::MAX_SECTION_PLANES;
+    let mut planes = Vec::with_capacity(section.len().min(most));
+    for (i, (at, toward)) in section.iter().take(most).enumerate() {
+        if !at.iter().all(|c| c.is_finite()) {
+            return None;
+        }
+        planes.push(solidcraft_engine::SectionPlane { id: i as u64 + 1, origin: v(*at), normal: v(*toward).normalized()? });
+    }
+    let (body, depth, point) = crate::view_pick::nearest_body(app, o, d, &planes)?;
     Some(RayHit { body, depth, point: [point.x, point.y, point.z] })
 }
 
-/// What the design view's own section cuts away (a point on its plane and the side it cuts
-/// toward, model units), as [`hit`] takes it: the open Section dialog's, a Slice's, or the
-/// design's section; `None` without one.
-pub fn view_section(app: &SolveApp) -> Option<([f64; 3], [f64; 3])> {
-    crate::viewport::section_plane(app).map(|(at, toward)| ([at.x, at.y, at.z], [toward.x, toward.y, toward.z]))
+/// The design view's own section, as [`hit`] takes it: the open Section dialog's planes, a
+/// Slice's, or the design's section; none without one.
+pub fn view_section(app: &SolveApp) -> Vec<Cut> {
+    crate::viewport::section_planes(app).iter().map(|p| ([p.origin.x, p.origin.y, p.origin.z], [p.normal.x, p.normal.y, p.normal.z])).collect()
 }
 
 /// The part `body` belongs to: its outermost placement, as the Browser selects it, or the body

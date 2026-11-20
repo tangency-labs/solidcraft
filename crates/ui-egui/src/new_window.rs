@@ -70,8 +70,7 @@ pub fn open_in_new_window(design: &Path, view: Option<&str>) -> Result<(), Strin
     {
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
         let line = command_line(&exe, design, view);
-        let mut command = std::process::Command::new(&exe);
-        command.args(&line[1..]).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+        let mut command = process_command(&exe, &line[1..]);
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -88,9 +87,33 @@ pub fn open_in_new_window(design: &Path, view: Option<&str>) -> Result<(), Strin
     }
 }
 
+/// A new application keeps its ordinary environment but must choose its own control port.
+#[cfg(not(target_arch = "wasm32"))]
+fn process_command(exe: &Path, args: &[OsString]) -> std::process::Command {
+    let mut command = std::process::Command::new(exe);
+    command
+        .args(args)
+        .env_remove("SOLIDCRAFT_CONTROL_PORT")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    command
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn another_process_keeps_its_arguments_but_not_the_parents_control_port() {
+        let args = command_line(Path::new("solidcraft"), Path::new("a b.sc"), Some("Render"));
+        let command = process_command(Path::new("solidcraft"), &args[1..]);
+        assert_eq!(command.get_args().collect::<Vec<_>>(), args[1..].iter().map(OsString::as_os_str).collect::<Vec<_>>());
+        let changes: Vec<_> = command.get_envs().collect();
+        assert!(changes.iter().any(|(key, value)| *key == "SOLIDCRAFT_CONTROL_PORT" && value.is_none()));
+        assert!(!changes.iter().any(|(key, _)| *key == "SOLIDCRAFT_CONTROL_TOKEN"), "authentication configuration is preserved");
+    }
 
     #[test]
     fn command_line_puts_view_before_design() {

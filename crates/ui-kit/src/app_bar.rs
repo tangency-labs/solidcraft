@@ -49,19 +49,11 @@ pub mod brand {
 /// The pills' height, and the least width at which the bar gives the first pill its label.
 pub const PILL_HEIGHT: f32 = 24.0;
 pub const PILL_LABEL_MIN: f32 = 1100.0;
-/// The gap before and between pills, and the × inside one.
-const PILL_GAP: f32 = 6.0;
+/// The × inside a pill.
 const PILL_X: f32 = 16.0;
 
 /// Space between the search field and Settings.
 pub const SEARCH_GAP: f32 = 4.0;
-/// Home's least place from the bar's left edge, and the least gap between the app's name and
-/// Home's button. 128 was Home's fixed place, sized for "SolidCraft": the name starts at 36 and is
-/// 65.1 wide in Plex Sans semibold at the theme's heading size (14), so it ends at 101.1, and Home's
-/// button starts at 108 (20 before its place), 6.9 after it. A longer name moves Home right by
-/// the same gap, rounded down so SolidCraft's bar stays put: 36 + 65.1 + 6 + 20 = 127.1, under 128.
-const HOME_MIN: f32 = 128.0;
-const NAME_GAP: f32 = 6.0;
 /// A bar narrower than this shows no product name, no Undo and Redo, and narrower file actions.
 const COMPACT: f32 = 640.0;
 /// Space the File menu keeps below its rows for its frame and a gap above the window's bottom.
@@ -171,13 +163,12 @@ pub struct AppBar<'a> {
     pub handles: Handles<'a>,
 }
 
-/// A menu's text button (File), its label starting 5 before `x`: its rect, and whether it
+/// A menu's text button (File), in its laid-out rect: its rect, and whether it
 /// was clicked while `idle`. Drawn held while its menu is `open`.
 /// It shows `label`; `name` is its accessible name.
-fn text_button(ui: &mut egui::Ui, r: Rect, x: f32, (label, name): (&str, &str), open: bool, idle: bool, salt: &str) -> (Rect, bool) {
+fn text_button(ui: &mut egui::Ui, rect: Rect, (label, name): (&str, &str), open: bool, idle: bool, salt: &str) -> (Rect, bool) {
     let t = Tokens::get();
     let galley = ui.painter().layout_no_wrap(label.to_string(), FontId::proportional(t.font_button), t.app_bar_text);
-    let rect = Rect::from_min_size(pos2(x - 13.0, r.center().y - 13.0), vec2(galley.size().x + 16.0, 26.0));
     let resp = ui.interact(rect, ui.scope_id().with(("ab", salt)), if idle { Sense::click() } else { Sense::hover() });
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, idle, name));
     if idle && (resp.hovered() || resp.has_focus() || open) {
@@ -298,27 +289,21 @@ fn pill_width(ui: &egui::Ui, p: &Pill) -> f32 {
     8.0 + 14.0 + label + 4.0 + PILL_X + 3.0
 }
 
-/// The room the pills take left of Report a bug: each with the gap before it.
-fn pills_width(ui: &egui::Ui, pills: &[Pill]) -> f32 {
-    pills.iter().map(|p| pill_width(ui, p) + PILL_GAP).sum()
-}
-
 /// A flat capsule `PILL_HEIGHT` tall in `fill`, a touch lighter while `hot`.
 fn capsule(ui: &egui::Ui, rect: Rect, fill: egui::Color32, hot: bool) {
     let fill = if hot { fill.lerp_to_gamma(egui::Color32::WHITE, 0.12) } else { fill };
     ui.painter().rect_filled(rect, egui::CornerRadius::same((rect.height() / 2.0) as u8), fill);
 }
 
-/// One pill, its right edge at `right`: returns its left edge. A flat capsule with full-height
+/// One pill in its laid-out rect. A flat capsule with full-height
 /// corners; hovering lightens its fill by about 8 % over 0.1 s. The × is a plain glyph, with a
 /// round translucent dark background (black at 38 %) that fades in while it is hovered. Edges are
 /// snapped to whole pixels so they stay crisp at any scale.
-fn pill(ui: &mut egui::Ui, bar: Rect, right: f32, p: &Pill, h: &Handles, actions: &mut Vec<BarAction>) -> f32 {
+fn pill(ui: &mut egui::Ui, bar: Rect, rect: Rect, p: &Pill, h: &Handles, actions: &mut Vec<BarAction>) {
     let t = Tokens::get();
     let ppp = ui.ctx().pixels_per_point();
     let snap = |v: f32| (v * ppp).round() / ppp;
-    let width = snap(pill_width(ui, p));
-    let rect = Rect::from_min_size(pos2(snap(right - width), snap(bar.center().y - PILL_HEIGHT / 2.0)), vec2(width, PILL_HEIGHT));
+    let rect = Rect::from_min_size(pos2(rect.left(), snap(bar.center().y - PILL_HEIGHT / 2.0)), vec2(rect.width(), PILL_HEIGHT));
     let x_rect = Rect::from_center_size(pos2(snap(rect.right() - 4.0 - PILL_X / 2.0), rect.center().y), vec2(PILL_X, PILL_X));
     let main = Rect::from_min_max(rect.min, pos2(x_rect.left(), rect.bottom()));
     let main_resp = ui.interact(main, ui.scope_id().with(("sc_pill", p.id)), Sense::click());
@@ -358,7 +343,6 @@ fn pill(ui: &mut egui::Ui, bar: Rect, right: f32, p: &Pill, h: &Handles, actions
     if x_resp.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(p.hide_tip).clicked() {
         actions.push(BarAction::HidePill { id: p.id.to_string() });
     }
-    rect.left() - PILL_GAP
 }
 
 /// A short divider between the bar's groups.
@@ -391,34 +375,50 @@ fn icon_button(ui: &mut egui::Ui, bar: Rect, at: f32, b: &BarButton, compact: bo
 /// Draws the bar in `bar`, its controls within `content` (the title bar's room between the
 /// window's own buttons).
 pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOut {
+    use crate::app_bar_layout::{application, layout};
+
     let t = Tokens::get();
     let h = &data.handles;
     let r = bar;
-    let left = content.left();
-    let compact = r.right() - left < COMPACT;
+    let report_font = FontId::proportional(t.font_button);
+    let label_width = ui.painter().layout_no_wrap(data.report.label.to_string(), report_font.clone(), t.app_bar_text).size().x;
+    let version = data.version.map(|v| (v, ui.painter().layout_no_wrap(v.text.to_string(), FontId::proportional(t.font_small), t.app_bar_text)));
+    let measured = application::Measurements {
+        origin: r.left(),
+        name: ui.painter().layout_no_wrap(data.name.to_string(), crate::type_face::semibold(t.font_heading), t.app_bar_text).size().x,
+        file: ui.painter().layout_no_wrap(data.file.to_string(), FontId::proportional(t.font_button), t.app_bar_text).size().x + 16.0,
+        leading: data.leading.map(|size| size.x),
+        actions: data.actions.iter().map(|b| b.wide_only).collect(),
+        quick: data.quick,
+        report: label_width,
+        report_icon_only: data.report.icon_only,
+        pills: data.pills.iter().map(|p| pill_width(ui, p)).collect(),
+        search: data.search.then(|| (crate::CommandSearch::closed_width(ui.ctx(), data.search_shortcut), crate::CommandSearch::compact_width(26.0))),
+        assistant: data.assistant,
+        version: version.as_ref().map(|(_, galley)| galley.size().x),
+        offered: solidcraft_ui_registry::rect_of("titlebar:update").map(|u| u.width()),
+        pixels_per_point: ui.ctx().pixels_per_point(),
+    };
+    let spec = application::spec(r.width(), content.left() - r.left(), r.right() - content.right(), measured);
+    let geometry = layout(&spec).application.unwrap_or_default();
+    let compact = geometry.compact;
+    let rect = |span: application::Span, height| {
+        Rect::from_min_max(pos2(r.left() + span.left, r.center().y - height / 2.0), pos2(r.left() + span.right, r.center().y + height / 2.0))
+    };
     let mut actions = Vec::new();
-    (data.mark)(ui.painter(), pos2(left + 20.0, r.center().y));
-    // Home's place: after the name as drawn, and never before HOME_MIN.
-    let mut x = if compact {
-        left + 56.0
-    } else {
-        let name = ui.painter().text(
-            pos2(left + 36.0, r.center().y),
+    (data.mark)(ui.painter(), pos2(r.left() + geometry.mark, r.center().y));
+    if !compact {
+        ui.painter().text(
+            pos2(r.left() + geometry.name, r.center().y),
             Align2::LEFT_CENTER,
             data.name,
             crate::type_face::semibold(t.font_heading),
             t.app_bar_text,
         );
-        // Home's button starts 20 before its place (32 wide, centred 4 before it).
-        (left + HOME_MIN).max(name.right() + NAME_GAP + 20.0)
-    };
-    let leading = data.leading.map(|size| {
-        let rect = Rect::from_center_size(pos2(x, r.center().y), size);
-        x += size.x + 8.0;
-        rect
-    });
+    }
+    let leading = geometry.leading.zip(data.leading).map(|(span, size)| rect(span, size.y));
     // Home.
-    let home = Rect::from_center_size(pos2(x - 4.0, r.center().y), vec2(32.0, 32.0));
+    let home = rect(geometry.home, 32.0);
     let idle = data.home.enabled;
     let home_response = ui.interact(home, ui.scope_id().with("appbar_home"), if idle { Sense::click() } else { Sense::hover() });
     home_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, idle, data.home.tip));
@@ -435,12 +435,9 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
     if home_response.backing_on_hover_text(data.home.tip).clicked() && idle {
         actions.push(BarAction::Home);
     }
-    x = home.right() + 8.0;
-    separator(ui, r, x, "brand", h);
-    x += 16.0;
+    separator(ui, r, r.left() + geometry.brand_separator, "brand", h);
     // The File menu's text button, .
-    let (file, clicked) = text_button(ui, r, x, (data.file, data.file), data.file_open, idle, "file");
-    x = file.right() + 17.0;
+    let (file, clicked) = text_button(ui, rect(geometry.file, 26.0), (data.file, data.file), data.file_open, idle, "file");
     for name in h.file {
         solidcraft_ui_registry::publish_handle(name, file.center());
     }
@@ -451,61 +448,35 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
         actions.push(BarAction::File { rect: file });
     }
     // The file actions, then the app's quick-access buttons.
-    let step = if compact { 22.0 } else { 34.0 };
-    for b in data.actions.iter().filter(|b| !(compact && b.wide_only)) {
-        if icon_button(ui, r, x, b, compact, h) {
+    for (b, at) in data.actions.iter().zip(&geometry.actions) {
+        if let Some(at) = at
+            && icon_button(ui, r, r.left() + at, b, compact, h)
+        {
             actions.push(BarAction::Button { id: b.id.to_string() });
         }
-        x += step;
     }
-    let mut quick = None;
-    if !compact && data.quick > 0 {
-        separator(ui, r, x - step / 2.0 + 8.0, "quick_access", h);
-        x += 8.0;
-        quick = Some((x, step));
-        x += data.quick as f32 * step;
+    if let Some(at) = geometry.quick_separator {
+        separator(ui, r, r.left() + at, "quick_access", h);
     }
+    let quick = geometry.quick.map(|(at, step)| (r.left() + at, step));
     // The document tabs follow the file actions.
-    let captions = r.right() - content.right();
-    let separator_x = x - step + if compact { 19.0 } else { 24.0 };
-    separator(ui, r, separator_x, "documents", h);
-    let tabs_start = separator_x + 10.0;
-    let report_font = FontId::proportional(t.font_button);
-    let label_width = ui.painter().layout_no_wrap(data.report.label.to_string(), report_font.clone(), t.app_bar_text).size().x;
-    // The version links to its release notes; measured here so Report a bug leaves it room.
-    let version = data.version.map(|v| (v, ui.painter().layout_no_wrap(v.text.to_string(), FontId::proportional(t.font_small), t.app_bar_text)));
-    let version_width = version.as_ref().map(|(_, galley)| galley.size().x);
-    let (report, report_label) = report_rect(r, captions, tabs_start, label_width, version_width, data.report.icon_only);
-    // The right-hand controls keep their places; the link pills sit left of them, in the room the
-    // document tabs leave (see `pills_w` below).
-    let anchor = report.left();
-    // Settings' left edge; the search field, when the bar holds it, sits just before it and moves
-    // the assistant and the end of the document tabs left by its width.
-    let gear_left = anchor - 68.0;
-    let search = data.search.then(|| search_rect(ui.ctx(), data.search_shortcut, r, gear_left - SEARCH_GAP, anchor - CLUSTER_BUTTONS - tabs_start));
-    let search_shift = search.map_or(0.0, |s| s.width() + SEARCH_GAP);
+    separator(ui, r, r.left() + geometry.documents_separator, "documents", h);
+    let tabs_start = r.left() + geometry.tabs_start;
+    let report = rect(geometry.report, if data.report.icon_only { 32.0 } else { 26.0 });
+    let report_label = geometry.report_labeled;
+    let search = geometry.search.map(|span| rect(span, 26.0));
     if let Some(search) = search {
         solidcraft_ui_registry::publish_target(h.search, search);
     }
-    if icon_button(ui, r, anchor - 18.0, &data.help, compact, h) {
-        actions.push(BarAction::Help { x: anchor - 18.0 });
+    let help = r.left() + geometry.help;
+    if icon_button(ui, r, help, &data.help, compact, h) {
+        actions.push(BarAction::Help { x: help });
     }
     // An offer (a newer release) sits before the right cluster, in the space up to the file
     // actions; labelled where Report a bug is (an icon-only one leaves it to fit by room).
-    let mut controls_left = anchor - CLUSTER_BUTTONS - search_shift;
-    let offer = Rect::from_min_max(pos2(x, report.top()), pos2(controls_left - 2.0, report.bottom()));
-    // The link pills sit left of the offer pill (which stays beside the assistant: the app draws it
-    // in `offer`, and its width is last frame's) or, with none, of the assistant. They are left out
-    // where the tabs would keep less than one tab's room (216) beside them, so a narrow bar looks as
-    // it did without them.
-    let offered = solidcraft_ui_registry::rect_of("titlebar:update").map_or(0.0, |u| u.width() + 4.0);
-    let pills_w = pills_width(ui, &data.pills);
-    let pills_shown = !data.pills.is_empty() && controls_left - offered - pills_w - tabs_start >= 216.0;
-    let pills_right = controls_left - 4.0 - offered;
-    if pills_shown {
-        controls_left -= pills_w + offered;
-    }
-    let offer_labeled = report_label || (data.report.icon_only && r.width() >= COMPACT);
+    let controls_left = r.left() + geometry.controls_left;
+    let offer = rect(geometry.offer, report.height());
+    let offer_labeled = geometry.offer_labeled;
     // Report a bug.
     let response = ui.interact(report, ui.scope_id().with("sc_report_button"), Sense::click());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), data.report.label));
@@ -535,27 +506,26 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
         actions.push(BarAction::Report);
     }
     // The link pills, left of the assistant.
-    let mut right = pills_right;
-    for p in data.pills.iter().rev().filter(|_| pills_shown) {
-        right = pill(ui, r, right, p, h, &mut actions);
+    for (p, span) in data.pills.iter().zip(&geometry.pills).rev() {
+        pill(ui, r, rect(*span, PILL_HEIGHT), p, h, &mut actions);
     }
     // Settings sits immediately left of Help.
-    let gear = Rect::from_center_size(pos2(anchor - 52.0, r.center().y), vec2(32.0, 32.0));
+    let gear = rect(geometry.settings, 32.0);
     let gresp = ui.interact(gear, ui.scope_id().with("sc_prefs_button"), Sense::click());
     if gresp.hovered() || gresp.has_focus() {
         ui.painter().rect_filled(gear.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
     }
     crate::icons::paint_app_bar(ui.painter(), gear.shrink(7.0), data.settings.icon, 1.0);
     solidcraft_ui_registry::publish_rect(h.settings, gear);
-    let assistant = data.assistant.then(|| Rect::from_center_size(pos2(anchor - 86.0 - search_shift, r.center().y), vec2(32.0, 32.0)));
+    let assistant = geometry.assistant.map(|span| rect(span, 32.0));
     solidcraft_ui_registry::publish_handle(h.settings, gear.center());
     if gresp.backing_on_hover_text(data.settings.tip).clicked() {
         actions.push(BarAction::Button { id: data.settings.id.to_string() });
     }
     if let Some((v, galley)) = version
-        && version_room(r, captions, tabs_start, galley.size().x).is_some()
+        && let Some(span) = geometry.version
     {
-        let vrect = Align2::RIGHT_CENTER.anchor_size(pos2(r.right() - 12.0 - captions, r.center().y), galley.size());
+        let vrect = rect(span, galley.size().y);
         let vresp = ui.interact(
             vrect.expand2(vec2(2.0, 4.0)).intersect(Rect::everything_right_of(report.right())),
             ui.scope_id().with("sc_version_link"),
@@ -767,6 +737,9 @@ pub struct TabStrip<'a> {
     /// The selected design's views are sub-tabs in its tab (option A); off, its tab has a view
     /// switcher (option B). Option A also falls back to B where the bar has no room for it.
     pub views_as_tabs: bool,
+    /// The selected design's tab has a view switcher even with its one view (off: a design with one
+    /// view is a plain tab). Ignored while `views_as_tabs` is on.
+    pub switcher_always: bool,
     pub view_text: ViewText<'a>,
     /// The rows of a view's right-click menu, of the menu of the + and of the switcher's footer.
     pub view_menu: &'a [TabMenuRow<'a>],
@@ -775,6 +748,17 @@ pub struct TabStrip<'a> {
     /// A view's name being edited in its sub-tab: its place in the design and the text.
     pub view_rename: Option<(usize, TabRename<'a>)>,
     pub plus_menu: &'a [TabMenuRow<'a>],
+    /// The layouts the Layout button offers, each drawn as a miniature (its id ends in the layout's
+    /// key: `single`, `side_by_side`, `stacked`, `large_and_two`, `grid`); empty: no button.
+    pub layout_menu: &'a [TabMenuRow<'a>],
+    /// The id of the layout shown now, outlined in the menu; empty for none.
+    pub layout_current: &'a str,
+    pub layout_tip: &'a str,
+    /// The id of the choice of what an empty place of a layout shows (a row of `layout_menu`
+    /// whose id starts with `fill.`, listed under the miniatures as a choice of one); empty for none.
+    pub layout_fill: &'a str,
+    /// The heading over those choices.
+    pub layout_fill_heading: &'a str,
     pub switcher_menu: &'a [TabMenuRow<'a>],
     /// A design tab released this far below the bar is torn off ([`is_tear_off`]); 0 turns it off.
     pub tear_off_below: f32,
@@ -826,12 +810,22 @@ pub enum TabAction {
         from: usize,
         to: usize,
     },
+    /// A view tab dragged from the strip over the workspace.
+    DockView {
+        view: usize,
+        pointer: Pos2,
+        released: bool,
+    },
     /// A row of a view's right-click menu, of the + menu, of the view switcher's footer.
     ViewMenu {
         view: usize,
         id: String,
     },
     PlusMenu {
+        id: String,
+    },
+    /// A layout chosen from the Layout button's menu.
+    LayoutMenu {
         id: String,
     },
     SwitcherMenu {
@@ -858,7 +852,7 @@ struct ViewDrag {
 /// How the selected design's tab is drawn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SelectedLayout {
-    /// A plain tab (a design with one view, or none).
+    /// A plain tab (a design with one view unless the switcher is asked for always, or none).
     Plain,
     /// Expanded into a pill with its views as sub-tabs.
     Pill,
@@ -866,10 +860,13 @@ pub enum SelectedLayout {
     Switcher,
 }
 
-/// How the selected design's tab is drawn: `views` views, the app asks for sub-tabs (`as_tabs`),
-/// the pill needs `pill_min` points at the least and the bar leaves it `room`.
-pub fn selected_layout(views: usize, as_tabs: bool, pill_min: f32, room: f32) -> SelectedLayout {
-    if views < 2 {
+/// How the selected design's tab is drawn: `views` views, the app asks for sub-tabs (`as_tabs`)
+/// or for a switcher even with one view (`switcher_always`, ignored with `as_tabs`), the pill needs
+/// `pill_min` points at the least and the bar leaves it `room`.
+pub fn selected_layout(views: usize, as_tabs: bool, switcher_always: bool, pill_min: f32, room: f32) -> SelectedLayout {
+    if views == 1 && switcher_always && !as_tabs {
+        SelectedLayout::Switcher
+    } else if views < 2 {
         SelectedLayout::Plain
     } else if as_tabs && pill_min <= room {
         SelectedLayout::Pill
@@ -1005,6 +1002,7 @@ const SLASH: f32 = 7.0;
 enum Popup {
     View(usize),
     Plus,
+    Layout,
     Switcher,
     More,
 }
@@ -1058,6 +1056,14 @@ fn view_width(label: f32, active: bool, state: ViewState) -> f32 {
     9.0 + 15.0 + 6.0 + label + dot + if active { 6.0 + 20.0 } else { 10.0 }
 }
 
+/// What the Layout button takes in the pill, beside its plus.
+const LAYOUT_BUTTON: f32 = 28.0;
+
+/// What a pill takes after its views: the + (and the Layout button), the separator and the close.
+fn pill_after(strip: &TabStrip) -> f32 {
+    PILL_AFTER + if strip.layout_menu.is_empty() { 0.0 } else { LAYOUT_BUTTON }
+}
+
 /// What a pill takes before its views: border, padding, the unsaved dot, the name and its separator.
 fn pill_before(dot: f32, name_w: f32) -> f32 {
     13.0 + dot + name_w + 10.0 + 1.0 + 8.0 + VIEW_GAP
@@ -1067,9 +1073,10 @@ fn more_label(strip: &TabStrip, hidden: usize) -> String {
     strip.view_text.more.replace("{n}", &hidden.to_string())
 }
 
-/// Whether tab `i` is the shown, selected design with a single view: its tab carries a small + after its name.
+/// Whether tab `i` is the shown, selected design with a single view while views are sub-tabs: its
+/// tab carries a small + after its name. With a switcher the tab stays as it was before views.
 fn small_plus(strip: &TabStrip, i: usize) -> bool {
-    i == strip.selected && strip.shown_selected == Some(i) && strip.tabs.get(i).is_some_and(|tab| tab.views.len() == 1)
+    strip.views_as_tabs && i == strip.selected && strip.shown_selected == Some(i) && strip.tabs.get(i).is_some_and(|tab| tab.views.len() == 1)
 }
 
 fn line_colour(t: &Tokens) -> egui::Color32 {
@@ -1095,13 +1102,24 @@ fn measure(ui: &egui::Ui, strip: &TabStrip, tab: &DocTab, name: &str, view_typed
     let active = tab.views.iter().position(|v| v.active).unwrap_or(0);
     let active_w = view_ws.get(active).copied().unwrap_or(0.0);
     let before = pill_before(dot, name_w);
-    let pill = before + view_ws.iter().map(|w| w + VIEW_GAP).sum::<f32>() + PILL_AFTER + TAB_MARGIN;
-    let pill_min = before + active_w + VIEW_GAP + more_w + VIEW_GAP + PILL_AFTER + TAB_MARGIN;
-    let kind = selected_layout(n, strip.views_as_tabs, pill_min, room);
+    let after = pill_after(strip);
+    let pill = before + view_ws.iter().map(|w| w + VIEW_GAP).sum::<f32>() + after + TAB_MARGIN;
+    let pill_min = before + active_w + VIEW_GAP + more_w + VIEW_GAP + after + TAB_MARGIN;
+    let kind = selected_layout(n, strip.views_as_tabs, strip.switcher_always, pill_min, room);
+    let kind = if view_typed.is_some() && kind == SelectedLayout::Plain { SelectedLayout::Switcher } else { kind };
     let shown = tab.views.get(active).map_or("", |v| v.name);
     let switch_w = 8.0 + 15.0 + 6.0 + text_width(ui, shown, view_font(true)).min(VIEW_LABEL_MAX) + 6.0 + badge_width(ui, n) + 6.0 + 13.0 + 4.0;
     let switcher = 13.0 + dot + name_w + 8.0 + SLASH + 8.0 + switch_w + 8.0 + 22.0 + 4.0;
     let width = if kind == SelectedLayout::Pill { pill.min(room) } else { switcher.min(room.max(MIN_TAB)) };
+    let (name_w, switch_w) = if kind == SelectedLayout::Switcher {
+        // The tab's painted frame is two points narrower than its allocation. Keep the
+        // switcher and close targets inside it before giving the design name any room.
+        let available = (width - 2.0 - (13.0 + dot + 8.0 + SLASH + 8.0 + 8.0 + 22.0 + 4.0)).max(0.0);
+        let name_w = name_w.min((available - switch_w.min(72.0)).max(0.0));
+        (name_w, switch_w.min((available - name_w).max(0.0)))
+    } else {
+        (name_w, switch_w)
+    };
     Geom { kind, index: strip.selected, width, dot, name_w, view_ws, more_w, switch_w }
 }
 
@@ -1148,6 +1166,7 @@ fn glyph_lines(icon: &str) -> &'static [&'static [(f32, f32)]] {
         ],
         "close" => &[&[(6.0, 6.0), (18.0, 18.0)], &[(18.0, 6.0), (6.0, 18.0)]],
         "duplicate" => &[&[(8.0, 8.0), (19.0, 8.0), (19.0, 19.0), (8.0, 19.0), (8.0, 8.0)], &[(5.0, 15.0), (5.0, 5.0), (15.0, 5.0)]],
+        "tiles" => &[&[(4.0, 4.0), (20.0, 4.0), (20.0, 20.0), (4.0, 20.0), (4.0, 4.0)], &[(12.0, 4.0), (12.0, 20.0)], &[(4.0, 12.0), (20.0, 12.0)]],
         "reopen" => &[
             &[(3.0, 12.0), (4.2, 16.5), (7.5, 19.8), (12.0, 21.0), (16.5, 19.8), (19.8, 16.5), (21.0, 12.0), (19.8, 7.5), (16.5, 4.2), (12.0, 3.0)],
             &[(3.0, 4.0), (3.0, 9.0), (8.0, 9.0)],
@@ -1157,7 +1176,7 @@ fn glyph_lines(icon: &str) -> &'static [&'static [(f32, f32)]] {
 }
 
 /// Draws a view's icon (`model`, `sketch`, `sheet`, `render` or `animation`, or the menu glyphs
-/// `rename`, `window`, `close`, `duplicate` and `reopen`; another name draws nothing) as strokes of `ink` in `r`.
+/// `rename`, `window`, `close`, `duplicate`, `tiles` and `reopen`; another name draws nothing) as strokes of `ink` in `r`.
 pub fn paint_view_glyph(p: &Painter, r: Rect, icon: &str, ink: egui::Color32) {
     let s = r.width() / 24.0;
     let stroke = Stroke::new(2.0 * s, ink);
@@ -1205,7 +1224,7 @@ fn menu_rows(ui: &mut egui::Ui, rows: &[TabMenuRow], keys: bool, others: bool, o
 /// Every view as a menu row (a check mark on the shown one, a hollow dot on one whose source
 /// changed, a dashed outline on a deleted one): the place of the one chosen. Rows are published
 /// under `prefix` and their place.
-fn view_list(ui: &mut egui::Ui, views: &[ViewTab], prefix: &str) -> Option<usize> {
+fn view_list(ui: &mut egui::Ui, views: &[ViewTab], prefix: &str, menu: &mut Option<(usize, Rect)>) -> Option<usize> {
     let t = Tokens::get();
     let mut chosen = None;
     for (k, view) in views.iter().enumerate() {
@@ -1226,7 +1245,9 @@ fn view_list(ui: &mut egui::Ui, views: &[ViewTab], prefix: &str) -> Option<usize
             }
             ViewState::Normal => {}
         }
-        if resp.clicked() {
+        if resp.secondary_clicked() {
+            *menu = Some((k, resp.rect));
+        } else if resp.clicked() {
             chosen = Some(k);
         }
     }
@@ -1397,10 +1418,12 @@ fn draw_pill(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g: &Ge
     separator(name_end + 0.5);
     let close = Rect::from_center_size(pos2(pr.right() - 17.0, cy), vec2(24.0, 24.0));
     separator(close.left() - 4.0);
-    let plus = Rect::from_center_size(pos2(close.left() - 20.0, cy), vec2(24.0, 24.0));
+    let has_layout = !strip.layout_menu.is_empty();
+    let layout = Rect::from_center_size(pos2(close.left() - 20.0, cy), vec2(24.0, 24.0));
+    let plus = if has_layout { layout.translate(vec2(-LAYOUT_BUTTON, 0.0)) } else { layout };
     let start = name_end + 1.0 + 8.0 + VIEW_GAP;
     let active = tab.views.iter().position(|v| v.active).unwrap_or(0);
-    let (first, count) = view_window(&g.view_ws, active, pr.right() - PILL_AFTER - start, g.more_w + VIEW_GAP);
+    let (first, count) = view_window(&g.view_ws, active, pr.right() - pill_after(strip) - start, g.more_w + VIEW_GAP);
     let mut x = start;
     for (k, view) in tab.views.iter().enumerate().skip(first).take(count) {
         let w = g.view_ws.get(k).copied().unwrap_or(0.0);
@@ -1410,21 +1433,148 @@ fn draw_pill(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g: &Ge
     if count < tab.views.len() {
         more_button(ui, strip, Rect::from_min_size(pos2(x, cy - VIEW_HEIGHT / 2.0), vec2(g.more_w, VIEW_HEIGHT)), tab.views.len() - count, pen);
     }
-    if let Some(d) = pen.drag.filter(|d| (first..first + count).contains(&d.from)) {
+    let pointer = ui.input(|i| i.pointer.interact_pos());
+    let released = ui.input(|i| i.pointer.primary_released());
+    if let Some((d, pointer)) = pen.drag.zip(pointer).filter(|(_, p)| p.y > pen.below + 6.0) {
+        pen.actions.push(TabAction::DockView { view: d.from, pointer, released });
+    } else if let Some(d) = pen.drag.filter(|d| (first..first + count).contains(&d.from)) {
         let widths: Vec<f32> = (first..first + count).map(|k| g.view_ws.get(k).copied().unwrap_or(0.0) + VIEW_GAP).collect();
         let left = ui.ctx().pointer_latest_pos().map_or(start, |p| p.x) - d.grab;
         let slot = drop_slot(left, start, &widths, first, d.from);
         let at = slot_left(start, &widths, first, d.from, slot) - 1.0;
         painter.line_segment([pos2(at, cy - 10.0), pos2(at, cy + 10.0)], Stroke::new(2.0, t.accent));
-        if ui.input(|i| i.pointer.primary_released()) {
-            if slot != d.from {
-                pen.actions.push(TabAction::ReorderView { from: d.from, to: slot });
-            }
-            pen.drag = None;
+        if released && slot != d.from {
+            pen.actions.push(TabAction::ReorderView { from: d.from, to: slot });
         }
     }
+    if released {
+        pen.drag = None;
+    }
     plus_button(ui, strip, plus, 14.0, pen);
+    if has_layout {
+        layout_button(ui, strip, layout, pen);
+    }
     close_design_button(ui, strip, tab, g, close, 12.0, pen);
+}
+
+/// The Layout button next to the +: always there, it opens the miniatures of the ways to arrange
+/// the design's views in the window.
+fn layout_button(ui: &mut egui::Ui, strip: &TabStrip, rect: Rect, pen: &mut Pen) {
+    let t = Tokens::get();
+    let resp = ui.interact(rect, ui.scope_id().with("view_layout"), Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, strip.layout_tip));
+    let open = pen.popup.is_some_and(|(which, ..)| which == Popup::Layout);
+    let hot = resp.hovered() || resp.has_focus() || open;
+    if hot {
+        ui.painter().rect_filled(rect, VIEW_RADIUS, t.app_bar_hover_button);
+    }
+    let glyph = Rect::from_center_size(rect.center(), vec2(15.0, 15.0));
+    paint_view_glyph(ui.painter(), glyph, "tiles", t.app_bar_text.gamma_multiply(if hot { 1.0 } else { 0.75 }));
+    let resp = resp.backing_on_hover_text(strip.layout_tip);
+    if resp.clicked() {
+        toggle(ui.ctx(), &mut pen.popup, Popup::Layout, pos2(rect.left(), pen.below), rect);
+    }
+}
+
+/// The key of a layout row's id (`layout.grid` is `grid`).
+fn layout_key(id: &str) -> &str {
+    id.rsplit('.').next().unwrap_or(id)
+}
+
+/// Paints the miniature of the layout `key` in `rect`: the focused view is the tinted cell and
+/// the others are framed.
+fn paint_layout(p: &Painter, rect: Rect, key: &str) {
+    let t = Tokens::get();
+    let inner = rect.shrink(6.0);
+    let gap = 3.0;
+    let (w, h) = (inner.width(), inner.height());
+    let half = |len: f32| (len - gap) / 2.0;
+    let cell = |x: f32, y: f32, cw: f32, ch: f32| Rect::from_min_size(inner.min + vec2(x, y), vec2(cw, ch));
+    let cells: Vec<Rect> = match key {
+        "side_by_side" => vec![cell(0.0, 0.0, half(w), h), cell(half(w) + gap, 0.0, half(w), h)],
+        "stacked" => vec![cell(0.0, 0.0, w, half(h)), cell(0.0, half(h) + gap, w, half(h))],
+        "large_and_two" => {
+            let big = w * 0.6;
+            vec![cell(0.0, 0.0, big, h), cell(big + gap, 0.0, w - big - gap, half(h)), cell(big + gap, half(h) + gap, w - big - gap, half(h))]
+        }
+        "grid" => vec![
+            cell(0.0, 0.0, half(w), half(h)),
+            cell(half(w) + gap, 0.0, half(w), half(h)),
+            cell(0.0, half(h) + gap, half(w), half(h)),
+            cell(half(w) + gap, half(h) + gap, half(w), half(h)),
+        ],
+        _ => vec![cell(0.0, 0.0, w, h)],
+    };
+    for (i, c) in cells.into_iter().enumerate() {
+        if i == 0 {
+            p.rect_filled(c, 3u8, t.accent_soft);
+        } else {
+            p.rect_filled(c, 3u8, t.panel_header);
+            p.rect_stroke(c, 3u8, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+        }
+    }
+}
+
+/// The Layout menu: a miniature and a name for each layout, the current one outlined. The id of
+/// the one chosen.
+fn layout_grid(ui: &mut egui::Ui, strip: &TabStrip) -> Option<String> {
+    const COLUMNS: usize = 3;
+    const THUMB: egui::Vec2 = vec2(88.0, 56.0);
+    let t = Tokens::get();
+    let mut chosen = None;
+    crate::menu::list_row(ui, &crate::Item::heading(strip.layout_tip));
+    ui.add_space(4.0);
+    ui.horizontal_wrapped(|ui| {
+        ui.set_max_width((THUMB.x + 30.0) * COLUMNS as f32);
+        ui.spacing_mut().item_spacing = vec2(6.0, 8.0);
+        for row in strip.layout_menu.iter().filter(|row| !row.heading && !row.id.starts_with("fill.")) {
+            let (rect, resp) = ui.allocate_exact_size(vec2(THUMB.x + 24.0, THUMB.y + 20.0), Sense::click());
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, solidcraft_ui_text::tr_label(row.label)));
+            let thumb = Rect::from_min_size(rect.min + vec2(12.0, 0.0), THUMB);
+            let current = row.id == strip.layout_current;
+            if resp.hovered() {
+                ui.painter().rect_filled(thumb.expand(2.0), 6u8, t.app_bar_hover_button);
+            }
+            ui.painter().rect_filled(thumb, 6u8, t.dialog_body);
+            let ring = if current { Stroke::new(2.0, t.accent) } else { Stroke::new(1.0, t.border) };
+            ui.painter().rect_stroke(thumb, 6u8, ring, egui::StrokeKind::Inside);
+            paint_layout(ui.painter(), thumb, layout_key(row.id));
+            ui.painter().text(
+                pos2(rect.center().x, thumb.bottom() + 11.0),
+                Align2::CENTER_CENTER,
+                solidcraft_ui_text::tr_label(row.label),
+                if current { crate::type_face::semibold(VIEW_FONT) } else { FontId::proportional(VIEW_FONT) },
+                t.text,
+            );
+            if resp.clicked() {
+                chosen = Some(row.id.to_string());
+            }
+        }
+    });
+    let fills: Vec<_> = strip.layout_menu.iter().filter(|row| row.id.starts_with("fill.")).collect();
+    if !fills.is_empty() {
+        ui.add_space(6.0);
+        ui.separator();
+        crate::menu::list_row(ui, &crate::Item::heading(strip.layout_fill_heading));
+        for row in fills {
+            let (rect, resp) = ui.allocate_exact_size(vec2((THUMB.x + 30.0) * COLUMNS as f32, 24.0), Sense::click());
+            let label = solidcraft_ui_text::tr_label(row.label);
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::RadioButton, true, label));
+            if resp.hovered() {
+                ui.painter().rect_filled(rect, 5u8, t.app_bar_hover_button);
+            }
+            let dot = pos2(rect.left() + 12.0, rect.center().y);
+            ui.painter().circle_stroke(dot, 6.0, Stroke::new(1.5, if row.id == strip.layout_fill { t.accent } else { t.text_dim }));
+            if row.id == strip.layout_fill {
+                ui.painter().circle_filled(dot, 3.0, t.accent);
+            }
+            ui.painter().text(pos2(rect.left() + 26.0, rect.center().y), Align2::LEFT_CENTER, label, FontId::proportional(VIEW_FONT), t.text);
+            if resp.clicked() {
+                chosen = Some(row.id.to_string());
+            }
+        }
+    }
+    chosen
 }
 
 /// The selected design's tab as one tab with a view switcher (option B) in `pr`: the name, a "/",
@@ -1434,10 +1584,12 @@ fn draw_switcher(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g:
     let t = Tokens::get();
     let painter = ui.painter().clone();
     let cy = pr.center().y;
-    painter.rect_filled(pr, t.radius_md, t.app_bar_tab_active);
+    painter.rect_filled(pr, PILL_RADIUS, t.app_bar_tab_active);
     let slash_x = pr.left() + 13.0 + g.dot + g.name_w + 8.0;
     painter.text(pos2(slash_x, cy), Align2::LEFT_CENTER, "/", FontId::proportional(t.font_button), t.app_bar_text.gamma_multiply(0.5));
-    if let Some(view) = tab.views.iter().find(|v| v.active).or(tab.views.first()) {
+    let shown =
+        pen.rename.as_ref().and_then(|(index, _)| tab.views.get(*index)).or_else(|| tab.views.iter().find(|v| v.active)).or(tab.views.first());
+    if let Some(view) = shown {
         let btn = Rect::from_min_size(pos2(slash_x + SLASH + 8.0, cy - VIEW_HEIGHT / 2.0), vec2(g.switch_w, VIEW_HEIGHT));
         let resp = ui.interact(btn, ui.scope_id().with("view_switcher"), Sense::click());
         let name = format!("{}: {}. {}", tab.name, view.name, strip.view_text.switch_view);
@@ -1448,20 +1600,32 @@ fn draw_switcher(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g:
         if resp.has_focus() {
             painter.rect_stroke(btn.expand(1.0), VIEW_RADIUS + 1, Stroke::new(2.0, t.accent), egui::StrokeKind::Outside);
         }
-        paint_view_glyph(&painter, Rect::from_center_size(pos2(btn.left() + 15.5, cy), vec2(15.0, 15.0)), view.icon, view.accent);
-        let galley = painter.layout_no_wrap(view.name.to_string(), view_font(true), t.app_bar_text);
-        let label_x = btn.left() + 29.0;
-        let label_w = galley.size().x.min(VIEW_LABEL_MAX);
-        let label_y = cy - galley.size().y / 2.0;
-        painter.with_clip_rect(Rect::from_min_size(pos2(label_x, btn.top()), vec2(label_w, VIEW_HEIGHT))).galley(
-            pos2(label_x, label_y),
-            galley,
-            t.app_bar_text,
-        );
-        let badge = count_badge(ui, pos2(label_x + label_w + 6.0, cy), tab.views.len(), true);
-        chevron_down(&painter, pos2(badge.right() + 12.5, cy), 13.0, t.app_bar_text.gamma_multiply(0.85));
-        if resp.backing_on_hover_text(strip.view_text.switch_view).clicked() {
-            toggle(ui.ctx(), &mut pen.popup, Popup::Switcher, pos2(btn.left(), pen.below), btn);
+        if let Some((index, rename)) = pen.rename.as_mut() {
+            let field = btn.shrink(2.0);
+            let done = rename_field(ui, field, rename, &strip.handles).map(|action| {
+                if action == TabAction::RenameDone { TabAction::ViewRenameDone { view: *index } } else { TabAction::ViewRenameCancelled }
+            });
+            pen.actions.extend(done);
+        } else {
+            let clip = ui.clip_rect();
+            ui.set_clip_rect(clip.intersect(btn));
+            let painter = painter.with_clip_rect(ui.clip_rect());
+            paint_view_glyph(&painter, Rect::from_center_size(pos2(btn.left() + 15.5, cy), vec2(15.0, 15.0)), view.icon, view.accent);
+            let galley = painter.layout_no_wrap(view.name.to_string(), view_font(true), t.app_bar_text);
+            let label_x = btn.left() + 29.0;
+            let label_w = galley.size().x.min(VIEW_LABEL_MAX).min((btn.width() - 29.0 - badge_width(ui, tab.views.len()) - 29.0).max(0.0));
+            let label_y = cy - galley.size().y / 2.0;
+            painter.with_clip_rect(Rect::from_min_size(pos2(label_x, btn.top()), vec2(label_w, VIEW_HEIGHT)).intersect(btn)).galley(
+                pos2(label_x, label_y),
+                galley,
+                t.app_bar_text,
+            );
+            let badge = count_badge(ui, pos2(label_x + label_w + 6.0, cy), tab.views.len(), true);
+            chevron_down(&painter, pos2(badge.right() + 12.5, cy), 13.0, t.app_bar_text.gamma_multiply(0.85));
+            if resp.backing_on_hover_text(strip.view_text.switch_view).clicked() {
+                toggle(ui.ctx(), &mut pen.popup, Popup::Switcher, pos2(btn.left(), pen.below), btn);
+            }
+            ui.set_clip_rect(clip);
         }
     }
     close_design_button(ui, strip, tab, g, Rect::from_center_size(pos2(pr.right() - 15.0, cy), vec2(22.0, 22.0)), 12.0, pen);
@@ -1480,6 +1644,7 @@ fn view_popups(ui: &mut egui::Ui, strip: &TabStrip, pen: &mut Pen) {
         return;
     }
     let h = strip.handles;
+    let mut next_menu = None;
     let resp = crate::Container::new(ui.ctx(), crate::Surface::Popup)
         .area(strip.id.with("view_popup_area"))
         .fixed_pos(at)
@@ -1491,9 +1656,10 @@ fn view_popups(ui: &mut egui::Ui, strip: &TabStrip, pen: &mut Pen) {
                     menu_rows(ui, strip.view_menu, true, views.len() > 1, off, h.menu_row).map(|id| TabAction::ViewMenu { view: k, id })
                 }
                 Popup::Plus => menu_rows(ui, strip.plus_menu, true, true, "", h.menu_row).map(|id| TabAction::PlusMenu { id }),
-                Popup::More => view_list(ui, views, &format!("{}:row:", h.view_more)).map(TabAction::SelectView),
+                Popup::Layout => layout_grid(ui, strip).map(|id| TabAction::LayoutMenu { id }),
+                Popup::More => view_list(ui, views, &format!("{}:row:", h.view_more), &mut next_menu).map(TabAction::SelectView),
                 Popup::Switcher => {
-                    let picked = view_list(ui, views, &format!("{}:row:", h.switcher)).map(TabAction::SelectView);
+                    let picked = view_list(ui, views, &format!("{}:row:", h.switcher), &mut next_menu).map(TabAction::SelectView);
                     crate::menu::Menu::separator(ui);
                     let footer = menu_rows(ui, strip.switcher_menu, true, true, "", h.menu_row).map(|id| TabAction::SwitcherMenu { id });
                     picked.or(footer)
@@ -1506,7 +1672,20 @@ fn view_popups(ui: &mut egui::Ui, strip: &TabStrip, pen: &mut Pen) {
     if resp.inner.is_some() || pressed_outside || ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
         pen.popup = None;
     }
+    if let Some((view, row)) = next_menu {
+        pen.popup = Some((Popup::View(view), row.right_top(), row, ui.ctx().cumulative_frame_nr()));
+        ui.ctx().request_repaint();
+    }
     pen.actions.extend(resp.inner);
+}
+
+/// Discard view-index popup and drag state when the host changes the shown design.
+/// Document-tab menus and the document list keep their independent state.
+pub fn clear_view_popup(ctx: &egui::Context, strip: egui::Id) {
+    ctx.data_mut(|data| {
+        data.remove::<PopupState>(strip.with("view_popup"));
+        data.remove::<ViewDrag>(strip.with("view_drag"));
+    });
 }
 
 /// Draws the document tabs in `r` from `x0` to `x1`: click to select, × to close, drag to
@@ -1522,8 +1701,11 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
     // The selected tab grows with a name being typed into it.
     let typed = strip.rename.as_ref().map(|r| r.text.clone());
     let view_typed = strip.view_rename.as_ref().map(|(k, r)| (*k, r.text.clone()));
-    // The selected design's several views: a pill or a switcher, as far as the bar has room.
-    let geom = strip.tabs.get(strip.selected).copied().filter(|tab| strip.shown_selected == Some(strip.selected) && tab.views.len() > 1).map(|tab| {
+    // The selected design's several views: a pill or a switcher, as far as the bar has room (one
+    // view gets a switcher only when the app asks for it always).
+    let min_views = if strip.switcher_always && !strip.views_as_tabs { 1 } else { 2 };
+    let expands = |tab: &DocTab| strip.shown_selected == Some(strip.selected) && (tab.views.len() >= min_views || strip.view_rename.is_some());
+    let geom = strip.tabs.get(strip.selected).copied().filter(expands).map(|tab| {
         let room = (x1 - x0 - 34.0 - MIN_TAB * n.saturating_sub(1) as f32).max(0.0);
         measure(ui, strip, &tab, typed.as_deref().unwrap_or(tab.name), view_typed.as_ref().map(|(k, text)| (*k, text.as_str())), room)
     });

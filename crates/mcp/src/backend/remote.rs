@@ -37,6 +37,8 @@ pub struct Remote {
     /// Whether the connected app checks a request's `param_check` itself (#9184), asked once per
     /// connection (the connection's serial number beside it); `None` until asked.
     app_checks: Option<(u64, bool)>,
+    /// Whether this connection advertises `plugin.tools`; never probe the command itself.
+    plugin_tools: Option<(u64, bool)>,
     /// The level the app said it checked the last reply at (`param_check` beside `ok`).
     echoed: Option<ParamCheck>,
 }
@@ -67,6 +69,7 @@ impl Remote {
             conn: Connection::new(solidcraft_engine::control_auth::APP, addr, token).with_progress(note),
             param_check: ParamCheck::Off,
             app_checks: None,
+            plugin_tools: None,
             echoed: None,
         }
     }
@@ -261,6 +264,22 @@ impl Remote {
 }
 
 impl Backend for Remote {
+    fn supports_plugin_tools(&mut self) -> bool {
+        if let Some((serial, supported)) = self.plugin_tools
+            && self.conn.is_connected()
+            && serial == self.conn.serial()
+        {
+            return supported;
+        }
+        let reply = self.conn.ask("control.capabilities", Self::scoped(json!({}))).ok();
+        let supported = match reply.as_ref().map(outcome) {
+            Some(Ok(c)) => Some(c["plugin_tools"] == true),
+            Some(Err(e)) if e.starts_with("unknown method") => Some(false),
+            _ => None,
+        };
+        self.plugin_tools = if self.conn.is_connected() { supported.map(|s| (self.conn.serial(), s)) } else { None };
+        supported.unwrap_or(false)
+    }
     fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
         match method {
             "control.pending" => Ok(self.conn.pending()),
@@ -344,6 +363,16 @@ impl Auto {
 }
 
 impl Backend for Auto {
+    fn supports_plugin_tools(&mut self) -> bool {
+        if self.remote.is_none() {
+            self.look_for_app();
+        }
+        match (&mut self.remote, &mut self.headless) {
+            (Some(r), _) => r.supports_plugin_tools(),
+            (None, Some(h)) => h.supports_plugin_tools(),
+            (None, None) => false,
+        }
+    }
     fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
         if self.remote.is_none() {
             self.look_for_app();

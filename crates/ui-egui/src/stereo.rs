@@ -85,7 +85,12 @@ pub(crate) fn test_frame() -> Frame {
         turned_depth: None,
         back: [0.0, 0.0, 1.0],
         size_px: [640.0, 480.0],
-        clip: [1.0, 0.0, 0.0, 5.0],
+        clip: {
+            let mut clip = [[0.0; 4]; solidcraft_viewport_gpu::view::MAX_SECTION_PLANES];
+            clip[0] = [1.0, 0.0, 0.0, 5.0];
+            clip
+        },
+        clip_hatch: [0; solidcraft_viewport_gpu::view::MAX_SECTION_PLANES],
         cap: [0.0; 4],
         images: Vec::new(),
         clouds: Vec::new(),
@@ -130,7 +135,7 @@ mod tests {
         stereo.publish(&frame(), camera, BACKGROUND);
         let source = stereo.take().expect("the frame's design view");
         assert_eq!((source.frame.key, source.frame.sketch_key), (7, 3));
-        assert_eq!(source.frame.clip, [1.0, 0.0, 0.0, 5.0]);
+        assert_eq!(source.frame.clip[0], [1.0, 0.0, 0.0, 5.0]);
         assert!(source.frame.outline);
         assert_eq!((source.frame.ssaa, source.frame.ao_radius), (1.0, 0.0));
         assert!(source.frame.upload_error.is_none());

@@ -224,10 +224,10 @@ fn light_with_a_stale_list_takes_out_nothing_else() {
 #[test]
 fn a_ray_stops_at_the_nearest_body() {
     let h = two_bodies();
-    let down = vr_pick::hit(&h.app, [25.0, 5.0, 100.0], [0.0, 0.0, -3.0], None).unwrap();
+    let down = vr_pick::hit(&h.app, [25.0, 5.0, 100.0], [0.0, 0.0, -3.0], &[]).unwrap();
     assert_eq!(down.body, "Two");
     assert!((down.depth - 90.0).abs() < 1e-6 && (down.point[2] - 10.0).abs() < 1e-6, "{down:?}");
-    let along = vr_pick::hit(&h.app, [-50.0, 5.0, 5.0], [1.0, 0.0, 0.0], None).unwrap();
+    let along = vr_pick::hit(&h.app, [-50.0, 5.0, 5.0], [1.0, 0.0, 0.0], &[]).unwrap();
     assert_eq!(along.body, "One", "the nearer of the two");
     assert!((along.depth - 50.0).abs() < 1e-6, "{along:?}");
 }
@@ -237,7 +237,7 @@ fn a_ray_stops_at_the_nearest_body() {
 #[test]
 fn a_ray_passes_through_what_the_section_cuts_away() {
     let h = two_bodies();
-    let hit = vr_pick::hit(&h.app, [-50.0, 5.0, 5.0], [1.0, 0.0, 0.0], Some(([15.0, 0.0, 0.0], [-1.0, 0.0, 0.0]))).unwrap();
+    let hit = vr_pick::hit(&h.app, [-50.0, 5.0, 5.0], [1.0, 0.0, 0.0], &[([15.0, 0.0, 0.0], [-1.0, 0.0, 0.0])]).unwrap();
     assert_eq!(hit.body, "Two");
     assert!((hit.depth - 70.0).abs() < 1e-6, "{hit:?}");
 }
@@ -248,15 +248,15 @@ fn a_ray_passes_through_what_the_section_cuts_away() {
 fn a_ray_that_misses_or_is_not_one_hits_nothing() {
     let h = two_bodies();
     let at = [-50.0, 5.0, 5.0];
-    assert_eq!(vr_pick::hit(&h.app, at, [-1.0, 0.0, 0.0], None), None, "pointing away");
-    assert_eq!(vr_pick::hit(&h.app, at, [0.0, 0.0, 0.0], None), None, "no length");
+    assert_eq!(vr_pick::hit(&h.app, at, [-1.0, 0.0, 0.0], &[]), None, "pointing away");
+    assert_eq!(vr_pick::hit(&h.app, at, [0.0, 0.0, 0.0], &[]), None, "no length");
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-        assert_eq!(vr_pick::hit(&h.app, [bad, 5.0, 5.0], [1.0, 0.0, 0.0], None), None, "origin {bad}");
-        assert_eq!(vr_pick::hit(&h.app, at, [1.0, bad, 0.0], None), None, "direction {bad}");
-        assert_eq!(vr_pick::hit(&h.app, at, [1.0, 0.0, 0.0], Some(([bad, 0.0, 0.0], [-1.0, 0.0, 0.0]))), None, "section at {bad}");
-        assert_eq!(vr_pick::hit(&h.app, at, [1.0, 0.0, 0.0], Some(([15.0, 0.0, 0.0], [bad, 0.0, 0.0]))), None, "section toward {bad}");
+        assert_eq!(vr_pick::hit(&h.app, [bad, 5.0, 5.0], [1.0, 0.0, 0.0], &[]), None, "origin {bad}");
+        assert_eq!(vr_pick::hit(&h.app, at, [1.0, bad, 0.0], &[]), None, "direction {bad}");
+        assert_eq!(vr_pick::hit(&h.app, at, [1.0, 0.0, 0.0], &[([bad, 0.0, 0.0], [-1.0, 0.0, 0.0])]), None, "section at {bad}");
+        assert_eq!(vr_pick::hit(&h.app, at, [1.0, 0.0, 0.0], &[([15.0, 0.0, 0.0], [bad, 0.0, 0.0])]), None, "section toward {bad}");
     }
-    assert_eq!(vr_pick::hit(&h.app, at, [1.0, 0.0, 0.0], Some(([15.0, 0.0, 0.0], [0.0, 0.0, 0.0]))), None, "a section with no side");
+    assert_eq!(vr_pick::hit(&h.app, at, [1.0, 0.0, 0.0], &[([15.0, 0.0, 0.0], [0.0, 0.0, 0.0])]), None, "a section with no side");
 }
 
 /// The design view's section is worked out once and handed to every ray
@@ -266,14 +266,14 @@ fn a_ray_that_misses_or_is_not_one_hits_nothing() {
 #[test]
 fn the_views_section_is_handed_to_the_rays() {
     let mut h = two_bodies();
-    assert_eq!(vr_pick::view_section(&h.app), None);
+    assert!(vr_pick::view_section(&h.app).is_empty());
     let v = solidcore_record::Vec3::new;
-    h.app.session.section = Some((v(15.0, 0.0, 0.0), v(-1.0, 0.0, 0.0)));
+    h.app.session.section = vec![solidcraft_engine::SectionPlane { id: 1, origin: v(15.0, 0.0, 0.0), normal: v(-1.0, 0.0, 0.0) }];
     let section = vr_pick::view_section(&h.app);
-    assert_eq!(section, Some(([15.0, 0.0, 0.0], [-1.0, 0.0, 0.0])));
+    assert_eq!(section, vec![([15.0, 0.0, 0.0], [-1.0, 0.0, 0.0])]);
     let at = [-50.0, 5.0, 5.0];
-    assert_eq!(vr_pick::hit(&h.app, at, [1.0, 0.0, 0.0], section).map(|r| r.body).as_deref(), Some("Two"), "cut as the view is");
-    assert_eq!(vr_pick::hit(&h.app, at, [1.0, 0.0, 0.0], None).map(|r| r.body).as_deref(), Some("One"), "nothing cut");
+    assert_eq!(vr_pick::hit(&h.app, at, [1.0, 0.0, 0.0], &section).map(|r| r.body).as_deref(), Some("Two"), "cut as the view is");
+    assert_eq!(vr_pick::hit(&h.app, at, [1.0, 0.0, 0.0], &[]).map(|r| r.body).as_deref(), Some("One"), "nothing cut");
 }
 
 /// Two top-level parts, `A` (grounded) at x 0..20 and `B` at x 30..50: the harness and `B`'s

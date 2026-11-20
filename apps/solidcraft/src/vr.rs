@@ -31,7 +31,7 @@ use solidcraft_ui_egui::SolveApp;
 use solidcraft_ui_egui::stereo::Source;
 use solidcraft_ui_egui::vr_pick::{self, Part};
 use solidcraft_ui_egui::vr_settings::{self as settings, Input, VrSettings};
-use solidcraft_viewport_gpu::view::{Renderer, ViewTarget};
+use solidcraft_viewport_gpu::view::{MAX_SECTION_PLANES, Renderer, ViewTarget};
 use solidcraft_vr::flick::{Direction, Flick};
 use solidcraft_vr::grab::WorldGrab;
 use solidcraft_vr::marks::{self, Style, Vertex};
@@ -222,14 +222,18 @@ impl Pointer {
         let mut pulses = [None; 2];
         // What the rays pass through: the headset's section, else the design view's, worked out
         // once for both (with the Section dialog open, on a copy of the design).
-        let mut view_section = None;
+        let mut view_section: Option<Vec<vr_pick::Cut>> = None;
         for hand in Hand::BOTH {
             let i = hand.index();
             let now = match (transform, hands[i].aim.as_ref()) {
                 (Some(t), Some(aim)) if free[i] => {
-                    let section = match cut {
-                        Some(p) => Some((p.origin, p.normal)),
-                        None => *view_section.get_or_insert_with(|| vr_pick::view_section(app)),
+                    let held;
+                    let section: &[vr_pick::Cut] = match cut {
+                        Some(p) => {
+                            held = [(p.origin, p.normal)];
+                            &held
+                        }
+                        None => view_section.get_or_insert_with(|| vr_pick::view_section(app)),
                     };
                     self.pointed_by(app, t, aim, section, ray_length[i])
                 }
@@ -267,16 +271,9 @@ impl Pointer {
     }
 
     /// What the ray from `aim` (its −Z) stops at, the model placed by `transform` and cut by
-    /// `section` (a point on its plane and the side it cuts toward, model units); nothing past
+    /// the `section`'s planes (each a point on it and the side it cuts away, model units); nothing past
     /// the ray's end (`ray_length`, metres).
-    fn pointed_by(
-        &mut self,
-        app: &SolveApp,
-        transform: &Transform,
-        aim: &Pose,
-        section: Option<([f64; 3], [f64; 3])>,
-        ray_length: f64,
-    ) -> Option<Pointed> {
+    fn pointed_by(&mut self, app: &SolveApp, transform: &Transform, aim: &Pose, section: &[vr_pick::Cut], ray_length: f64) -> Option<Pointed> {
         let [_, _, back] = aim.axes()?;
         let forward = back.map(|v| -v);
         let hit = vr_pick::hit(app, transform.to_model(aim.position), transform.direction_to_model(forward), section)?;
@@ -2401,7 +2398,10 @@ impl Gpu {
         let mut frame = source.frame.clone();
         // The headset's section in place of the window's.
         if let Some(plane) = cut {
-            frame.clip = plane.clip();
+            // One plane, the first; the others none (a zero normal).
+            frame.clip = [[0.0; 4]; MAX_SECTION_PLANES];
+            frame.clip[0] = plane.clip();
+            frame.clip_hatch = [0; MAX_SECTION_PLANES];
         }
         frame.back = back;
         frame.view_proj = view::to_f32(&seen.view_proj);
