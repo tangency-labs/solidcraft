@@ -260,6 +260,10 @@ fn refresh(app: &mut SolveApp, ctx: &egui::Context, force: bool) {
     if fresh && !force {
         return;
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    if !force && app.parts_library.listing.is_some() && app.parts_library.listed.as_ref().is_some_and(|(d, _)| *d == dir) {
+        return;
+    }
     app.parts_library.listed = Some((dir.clone(), now));
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -364,6 +368,9 @@ fn start_pictures(l: &mut LibraryState) {
         }
     }
     if !keys.is_empty() {
+        for key in &keys {
+            l.thumbs.insert(key.clone(), None);
+        }
         l.pictures = spawn_pictures(keys);
     }
 }
@@ -437,21 +444,18 @@ fn insert_allowing(app: &mut SolveApp, path: &Path, at: Vec3, hosts: &[String]) 
     }
 }
 
-/// The view: a card dropped on it inserts its part there.
-pub fn view_drop(app: &mut SolveApp, ui: &egui::Ui, rect: egui::Rect, proj: &crate::viewport::Proj) {
+/// The view: a card dropped on it inserts its part there. Returns where it will land, for
+/// [`paint_drop`] once the model is drawn.
+pub fn view_drop(app: &mut SolveApp, ui: &egui::Ui, rect: egui::Rect, proj: &crate::viewport::Proj) -> Option<egui::Pos2> {
     let ctx = ui.ctx();
     if !egui::DragAndDrop::has_payload_of_type::<Dragged>(ctx) {
-        return;
+        return None;
     }
     // Over the view, not the panel lying over it: a card clicked, or let go where it was picked
     // up, inserts nothing.
     let over_panel = |p: &egui::Pos2| app.parts_library.shown.is_some_and(|r| r.contains(*p)) || crate::shell::covered(app, *p);
-    let Some(pos) = ctx.pointer_hover_pos().filter(|p| rect.contains(*p) && !over_panel(p)) else { return };
-    // Where it will land.
+    let pos = ctx.pointer_hover_pos().filter(|p| rect.contains(*p) && !over_panel(p))?;
     let at = drop_point(app, proj, pos);
-    if let Some(s) = proj.to_screen(at) {
-        ui.painter().circle_stroke(s, Tokens::get().space_6, egui::Stroke::new(2.0, crate::workspace::tab_accent(&Tokens::get(), "MODEL").color));
-    }
     if ctx.input(|i| i.pointer.primary_released())
         && let Some(d) = egui::DragAndDrop::take_payload::<Dragged>(ctx)
     {
@@ -463,6 +467,12 @@ pub fn view_drop(app: &mut SolveApp, ui: &egui::Ui, rect: egui::Rect, proj: &cra
             Err(e) => app.set_status(e, true),
         }
     }
+    proj.to_screen(at)
+}
+
+/// The mark where a dragged part will land.
+pub fn paint_drop(painter: &egui::Painter, at: egui::Pos2) {
+    painter.circle_stroke(at, Tokens::get().space_6, egui::Stroke::new(2.0, crate::workspace::tab_accent(&Tokens::get(), "MODEL").color));
 }
 
 /// While a part is dragged: its name in a chip by the pointer, so it is clear what will be

@@ -7515,7 +7515,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         && !manipulator_dragging;
     app.viewport.quiet_motion = still.then(|| QuietMotion::record(app, ui, &resp, rect, axes, proj)).flatten();
     // A part dragged in from the parts library: where it lands, and the insert on release.
-    crate::parts_library::view_drop(app, ui, rect, &proj);
+    let drop_at = crate::parts_library::view_drop(app, ui, rect, &proj);
     // The picture may run past the view's own rectangle (the focused view of a tiled window).
     let paint = app.viewport.bleed.take().unwrap_or(rect);
     let layer = ui.layer_id();
@@ -8331,6 +8331,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::inference::track_and_show(app, &painter, &proj, tracking_cursor);
     crate::inference::show(app, &painter, &proj);
     crate::drag_snap::show(app, &painter, &proj);
+    if let Some(at) = drop_at {
+        crate::parts_library::paint_drop(&painter, at);
+    }
     crate::insert_handles::show(app, ui, &proj);
     crate::sketch_transform_ui::refresh(app);
     crate::sketch_transform_ui::show(app, ui, &proj);
