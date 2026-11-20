@@ -259,7 +259,7 @@ frame_trim
     Angle = frame_trim.angle (Angle)
     Offset = frame_trim.offset (Length)
     Gap = frame_trim.gap (Length)
-  expressions: frame_trim.angle, frame_trim.offset, frame_trim.gap
+  expressions: frame_trim.angle, frame_trim.offset, frame_trim.gap, 0, 0, 0
 emboss
   inputs:
     Depth = emboss.depth (Length)
