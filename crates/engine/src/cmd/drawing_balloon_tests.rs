@@ -92,7 +92,9 @@ fn a_balloon_is_refused_what_it_cant_point_at() {
     let nowhere = ids::encode(99);
     let cases = [
         (json!({"view": nowhere, "edge": {"point": [40, 0, 0], "path": [bracket]}, "at": [0, 0]}), format!("the drawing has no view {nowhere}")),
-        (json!({"view": v, "edge": [205, 0, 0], "at": [0, 0]}), "it points at a placed part: its edge's body is placed through an occurrence".into()),
+        (json!({"view": v, "edge": [205, 0, 0], "at": [0, 0]}), "a balloon points at a part placed as a component of an assembly: an edge with no `path` is on the design's own body, so place the part as a component and give its occurrence in the edge's `path`".into()),
+        // `path` belongs inside `edge` (#19882): at the top level it is an unknown field.
+        (json!({"view": v, "edge": [40, 0, 0], "path": [bracket], "at": [0, 0]}), "unknown field `path`".into()),
         (json!({"view": v, "edge": {"point": [40, 0, 0], "path": [999]}, "at": [0, 0]}), "no edge at [40, 0, 0]".into()),
         (json!({"view": v, "edge": {"point": [40, 20, 0], "path": [bracket]}, "at": [0, 0]}), "no edge at [40, 20, 0]".into()),
         (json!({"view": v, "edge": {"point": [40, 0, 0], "path": [bracket]}, "at": [5000.001, 0]}), "its place is at most 5000 mm on paper".into()),
