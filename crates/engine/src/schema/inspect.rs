@@ -543,6 +543,26 @@ pub struct DocumentParam {
     pub error: Option<String>,
 }
 
+/// A failed kernel call's stable code: equal for two failures of one kind at one place in the
+/// kernel, whatever the design, its numbers or its names, so failures are grouped by it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ErrorCodeReply {
+    /// The kernel call that failed, such as `blend`.
+    pub call: String,
+    /// The kernel's number for the kind of failure, never reused; 0 for one the kernel's
+    /// operations library decided itself.
+    pub kind: u16,
+    /// The kernel routine that failed (a module path), or for kind 0 the library's name of the
+    /// error.
+    pub operation: String,
+}
+
+impl From<&solidcraft_kernel::ErrorCode> for ErrorCodeReply {
+    fn from(c: &solidcraft_kernel::ErrorCode) -> Self {
+        ErrorCodeReply { call: c.call.clone(), kind: c.kind, operation: c.operation.clone() }
+    }
+}
+
 /// A feature of the timeline.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct TimelineEntry {
@@ -556,6 +576,9 @@ pub struct TimelineEntry {
     pub rolled_back: bool,
     /// Why it failed; `null` when it did not.
     pub error: Option<String>,
+    /// The stable code of the kernel call it failed with; present only when it failed with one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<ErrorCodeReply>,
     pub warning: Option<String>,
     /// How long it took to evaluate (ms); `null` when it has no result.
     pub ms: Option<f64>,
@@ -580,6 +603,9 @@ pub struct TimelineSummary {
     /// Why it failed; present only when it did.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// The stable code of the kernel call it failed with; present only when it failed with one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<ErrorCodeReply>,
     /// Present only when it has one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub warning: Option<String>,

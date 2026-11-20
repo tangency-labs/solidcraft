@@ -1,0 +1,34 @@
+{
+  "en": {
+    "report.kernel_case": "Include the failing operation's geometry (kernel case)",
+    "report.kernel_case_note": "Only the shapes the failing operation took, not your whole design, so we can replay the failure on the geometry kernel alone. Only you, triagers and admins can see it, and it is never made public."
+  },
+  "ar": {
+    "report.kernel_case": "تضمين الشكل الهندسي للعملية الفاشلة (حالة النواة)",
+    "report.kernel_case_note": "الأشكال التي أخذتها العملية الفاشلة فقط، وليس تصميمك كاملًا، لنتمكن من إعادة تشغيل الفشل على نواة الهندسة وحدها. لا يراها إلا أنت والمراجعون والمشرفون، ولا تُنشر أبدًا."
+  },
+  "de": {
+    "report.kernel_case": "Geometrie der fehlgeschlagenen Operation beifügen (Kernel-Fall)",
+    "report.kernel_case_note": "Nur die Formen, die die fehlgeschlagene Operation verwendet hat, nicht Ihr ganzes Design, damit wir den Fehler allein im Geometriekernel nachstellen können. Nur Sie, Triager und Administratoren können sie sehen, und sie wird nie öffentlich."
+  },
+  "he": {
+    "report.kernel_case": "לכלול את הגאומטריה של הפעולה שנכשלה (מקרה ליבה)",
+    "report.kernel_case_note": "רק הצורות שהפעולה שנכשלה קיבלה, לא כל העיצוב שלך, כדי שנוכל לשחזר את הכשל בליבת הגאומטריה בלבד. רק אתה, מטפלי הדיווחים והמנהלים יכולים לראות אותה, והיא לעולם לא מתפרסמת."
+  },
+  "ja": {
+    "report.kernel_case": "失敗した操作の形状を含める（カーネルケース）",
+    "report.kernel_case_note": "デザイン全体ではなく、失敗した操作が受け取った形状だけです。形状カーネル単体で失敗を再現するために使います。閲覧できるのはあなた、トリアージ担当者、管理者のみで、公開されることはありません。"
+  },
+  "ko": {
+    "report.kernel_case": "실패한 작업의 형상 포함 (커널 케이스)",
+    "report.kernel_case_note": "디자인 전체가 아니라 실패한 작업이 받은 형상만 포함되며, 형상 커널만으로 실패를 재현하는 데 쓰입니다. 본인, 분류 담당자, 관리자만 볼 수 있으며 공개되지 않습니다."
+  },
+  "vi": {
+    "report.kernel_case": "Đính kèm hình học của thao tác bị lỗi (trường hợp kernel)",
+    "report.kernel_case_note": "Chỉ các hình mà thao tác bị lỗi đã nhận, không phải toàn bộ thiết kế của bạn, để chúng tôi tái hiện lỗi chỉ trên kernel hình học. Chỉ bạn, người phân loại và quản trị viên mới xem được, và nó không bao giờ được công khai."
+  },
+  "zh": {
+    "report.kernel_case": "附上失败操作的几何体（内核用例）",
+    "report.kernel_case_note": "仅包含失败操作所使用的形状，而非整个设计，以便我们只在几何内核上重现该失败。只有你、分类人员和管理员可以查看，且绝不会公开。"
+  }
+}

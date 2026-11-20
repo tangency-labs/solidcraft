@@ -64,6 +64,8 @@ resvg = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+# a reported failure's kernel case: its operand records, gzipped (src/kernel_case.rs)
+flate2 = { workspace = true }
 toml_edit = "0.25"
 schemars = { workspace = true }
 serde_path_to_error = { workspace = true }

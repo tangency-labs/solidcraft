@@ -344,6 +344,16 @@ pub fn evidence(
         None => app.issue_report.steps.iter().cloned().collect(),
     };
     let (system_fields, system_text) = system(app, ctx);
+    // The failed operation rebuilt with the kernel's calls traced, as a rig case: only what the
+    // failing operation took. Made here, sent only when its box is ticked.
+    let kernel_case = match (&report, &failing) {
+        (None, Some(payload::Failing { command: Some(command), params: Some(params), .. })) => {
+            solidcraft_engine::kernel_case::rebuild(&app.session, command, params, crate::help::COMMIT)
+                .inspect_err(|why| log::info!(target: "report", "no kernel case for {command}: {why}"))
+                .ok()
+        }
+        _ => None,
+    };
     payload::Evidence {
         system: system_text,
         system_fields,
@@ -357,12 +367,13 @@ pub fn evidence(
         design,
         design_from,
         crash,
+        kernel_case,
     }
 }
 
 /// The failed operation a draft was made for: its command and parameters as the command API
 /// took them, and its error.
-fn failing_of(draft: &Draft) -> Option<payload::Failing> {
+fn failing_of(app: &SolveApp, draft: &Draft) -> Option<payload::Failing> {
     if let Some((id, json)) = &draft.crash {
         let v: Value = serde_json::from_str(json).unwrap_or_default();
         let command = v.get("command").and_then(|c| c.get("command")).and_then(Value::as_str).map(str::to_string);
@@ -377,11 +388,22 @@ fn failing_of(draft: &Draft) -> Option<payload::Failing> {
             _ => None,
         };
         let code = (!kind.is_empty()).then(|| format!("{kind} ({id})"));
-        return Some(payload::Failing { command, params, error, origin, code });
+        return Some(payload::Failing { command, params, error, origin, code, failure_code: None });
     }
     let super::Origin::View { error: Some(error) } = &draft.origin else { return None };
     let (command, params) = draft.failed_command.clone().map_or((None, None), |(c, p)| (Some(c), Some(p)));
-    Some(payload::Failing { command, params, error: error.clone(), origin: None, code: None })
+    // The kernel call the error was made from, by its stable code: as a failed command or a
+    // preview gave it, else as a feature of the timeline that fails with this error keeps it.
+    let failure_code = solidcraft_engine::failure_code_of(error).or_else(|| {
+        let error = error.trim();
+        app.session
+            .model
+            .results
+            .iter()
+            .find(|r| r.error.as_deref().is_some_and(|e| !e.is_empty() && error.contains(e)))
+            .and_then(|r| r.error_code.clone())
+    });
+    Some(payload::Failing { command, params, error: error.clone(), origin: None, code: None, failure_code })
 }
 
 /// The description a failed operation's report starts with: what failed, how, and a line
@@ -440,7 +462,7 @@ pub fn outgoing(draft: &Draft, ticket: &TicketDraft) -> payload::Outgoing {
 
 /// The form for a draft, pre-filled with what the app knows.
 pub fn new_ticket(app: &mut SolveApp, draft: &Draft, ctx: Option<&egui::Context>) -> TicketDraft {
-    let failing = failing_of(draft);
+    let failing = failing_of(app, draft);
     let evidence = evidence(app, ctx, failing.clone(), draft.crash.clone());
     let label = draft.title_prefix.trim_end_matches(": ").to_string();
     let (title, description) = match &failing {
@@ -455,7 +477,7 @@ pub fn new_ticket(app: &mut SolveApp, draft: &Draft, ctx: Option<&egui::Context>
     let mut ticks = payload::Ticks::default();
     if let Some(ask) = &draft.agent {
         // What the agent asked for, but the design and crash report stay the person's to tick.
-        ticks = payload::Ticks { design: false, crash: false, ..ask.ticks };
+        ticks = payload::Ticks { design: false, crash: false, kernel_case: false, ..ask.ticks };
         form.kind = ask.kind;
         form.app.clone_from(&ask.app);
         if !draft.title.is_empty() {
@@ -513,6 +535,17 @@ fn model_box(ticket: &mut TicketDraft, ui: &mut Ui) {
             note(ui, "report.design_hint", tr("report.design_hint"));
         }
     }
+}
+
+/// The kernel case's box, under the model's, for a failed operation that rebuilds as one: what it
+/// holds (the geometry the failing operation took, not the design) and who sees it. Off until
+/// ticked.
+fn kernel_case_box(ticket: &mut TicketDraft, ui: &mut Ui) {
+    let Some(case) = &ticket.evidence.kernel_case else { return };
+    let (name, size) = (case.name.clone(), payload::size_text(case.entry.len() + case.bodies.len()));
+    check(ui, "report.kernel_case", &mut ticket.ticks.kernel_case);
+    note(ui, "report.kernel_case_note", tr("report.kernel_case_note"));
+    note(ui, "report.kernel_case_file", &format("report.design_file", &[("name", &name), ("size", &size)]));
 }
 
 /// The other attachment boxes, each with what it holds.
@@ -769,6 +802,7 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
                         }
                         ui_kit::divider(ui, "report-model");
                         model_box(&mut ticket, ui);
+                        kernel_case_box(&mut ticket, ui);
                         ui_kit::divider(ui, "report-attach");
                         retake = attachments(app, draft, &mut ticket, ui);
                         ui_kit::divider(ui, "report-other");
@@ -787,7 +821,7 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
     if retake {
         // Retake brings the whole report up to date, not only its picture; what was typed and
         // ticked stays.
-        ticket.evidence = evidence(app, Some(ctx), failing_of(draft), draft.crash.clone());
+        ticket.evidence = evidence(app, Some(ctx), failing_of(app, draft), draft.crash.clone());
     }
     if github {
         // The public GitHub draft, as before tickets: same answers.

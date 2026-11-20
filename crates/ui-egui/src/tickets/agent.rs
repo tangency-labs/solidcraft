@@ -38,6 +38,8 @@ fn ask_of(r: &Request) -> Ask {
             screenshot: flag(p, "screenshot", true),
             design: flag(p, "design", false),
             crash: flag(p, "crash", false),
+            // the person's to tick, never an agent's
+            kernel_case: false,
         },
         kind,
         app: p.get("app").and_then(Value::as_str).filter(|a| !a.is_empty()).unwrap_or(api::DEFAULT_APP).chars().take(60).collect(),
@@ -106,7 +108,7 @@ fn start(app: &mut SolveApp, ctx: &egui::Context, r: &Request) {
     }
     ticket.form.kind = ask.kind;
     ticket.form.app.clone_from(&ask.app);
-    let ticks = payload::Ticks { design: false, crash: false, ..ask.ticks };
+    let ticks = payload::Ticks { design: false, crash: false, kernel_case: false, ..ask.ticks };
     if ticks.screenshot {
         ticket.evidence.screenshot = crate::control::view_png(app, 1280, 720).ok();
     }
