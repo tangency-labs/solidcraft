@@ -10709,6 +10709,13 @@ fn feature_tools_with_constructor(
                         Some(e) => val(vals, e, Kind::Length)?,
                         None => 0.0,
                     };
+                    // The second side ends on a level, so only a plane parallel to the sketch fits: the
+                    // first side cuts its tool back to a curved or slanted face, this one does not yet.
+                    if end_face.is_some_and(|face| square_face_level(&tst, face, &ss.plane).is_none()) {
+                        return Err(DocError::Invalid(
+                            "not supported yet: the second side's To Object on a curved face or a face not parallel to the sketch; pick a plane parallel to the sketch, a vertex or a point, or use a Distance".into(),
+                        ));
+                    }
                     let h = height_at(&tst, end_face, &ss.plane, centre, p.0);
                     let start = from + extent.start_offset.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?.unwrap_or(0.0);
                     let to = h + if h >= start { off } else { -off };
