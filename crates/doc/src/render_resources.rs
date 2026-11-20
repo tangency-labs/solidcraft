@@ -1,4 +1,7 @@
-//! Immutable, content-addressed HDR payloads carried by the design, never external paths.
+//! Immutable, content-addressed HDR payloads carried by the design, never external paths. The
+//! design holds their bytes; a container writes each to a part of its own and its record keeps an
+//! empty `data`. Nothing writes them as text: a plain JSON design can't hold them
+//! ([`crate::Document::binary_data`]), and an older one's base64 is decoded as it opens.
 
 use std::{collections::BTreeMap, fmt};
 
@@ -15,6 +18,43 @@ pub const SRGB_D65_PRIMARIES: [f64; 8] = [0.64, 0.33, 0.30, 0.60, 0.15, 0.06, 0.
 
 fn invalid(message: impl Into<String>) -> DocError {
     DocError::Invalid(message.into())
+}
+
+/// The HDR and texture files a container holds as parts of their own, by id, while its design is
+/// read ([`with_container_parts`]).
+#[derive(Default)]
+pub struct ContainerParts {
+    pub hdr: BTreeMap<HdrId, Vec<u8>>,
+    pub textures: BTreeMap<HdrId, Vec<u8>>,
+}
+
+thread_local! {
+    static CONTAINER_PARTS: std::cell::RefCell<ContainerParts> = std::cell::RefCell::default();
+}
+
+/// Runs `read` (a container's design being read) with the files it holds as parts: a resource
+/// whose record has an empty `data` takes its bytes from here, as they are. Outside it, an empty
+/// `data` names no file and the resource is refused.
+pub fn with_container_parts<T>(parts: ContainerParts, read: impl FnOnce() -> T) -> T {
+    struct Clear;
+    impl Drop for Clear {
+        fn drop(&mut self) {
+            CONTAINER_PARTS.with(|held| *held.borrow_mut() = ContainerParts::default());
+        }
+    }
+    CONTAINER_PARTS.with(|held| *held.borrow_mut() = parts);
+    let _clear = Clear;
+    read()
+}
+
+/// The bytes of the container's part for this HDR (`texture`: this texture). Every decode during
+/// the read gets them: a newer build's file may be checked a section at a time before the whole
+/// design is read.
+pub(crate) fn container_part(id: &HdrId, texture: bool) -> Option<Vec<u8>> {
+    CONTAINER_PARTS.with(|held| {
+        let held = held.borrow();
+        if texture { held.textures.get(id).cloned() } else { held.hdr.get(id).cloned() }
+    })
 }
 
 /// Exact SHA-256 of encoded source bytes. A small value keeps numerical GPU intent Copy.
@@ -106,9 +146,6 @@ impl HdrResource {
         // HdrSource only admits capacities at most MAX_HDR_BYTES on every target.
         self.source.retained_encoded_bytes() as usize
     }
-    pub fn base64(&self) -> Result<String> {
-        encode_hdr_base64(self.bytes())
-    }
 }
 
 impl fmt::Debug for HdrResource {
@@ -121,11 +158,13 @@ impl PartialEq for HdrResource {
         self.id == other.id && self.bytes() == other.bytes()
     }
 }
+/// Never the file as text: an empty `data`, which a container's record keeps beside the part that
+/// holds the bytes.
 impl Serialize for HdrResource {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
         let mut value = serializer.serialize_struct("HdrResource", 2)?;
         value.serialize_field("kind", "radiance_hdr")?;
-        value.serialize_field("data", &self.base64().map_err(serde::ser::Error::custom)?)?;
+        value.serialize_field("data", "")?;
         value.end()
     }
 }
@@ -185,7 +224,7 @@ impl<'de> Deserialize<'de> for HdrResources {
                         return Err(serde::de::Error::custom("too many or duplicate embedded HDR resources"));
                     }
                     let remaining = MAX_HDR_RESOURCE_BYTES.saturating_sub(resources.total_bytes()).min(MAX_HDR_BYTES);
-                    let resource = map.next_value_seed(ResourceSeed(remaining))?;
+                    let resource = map.next_value_seed(ResourceSeed(remaining, id))?;
                     if resource.id() != id {
                         return Err(serde::de::Error::custom("embedded HDR resource hash mismatch"));
                     }
@@ -198,7 +237,7 @@ impl<'de> Deserialize<'de> for HdrResources {
     }
 }
 
-struct ResourceSeed(usize);
+struct ResourceSeed(usize, HdrId);
 impl<'de> DeserializeSeed<'de> for ResourceSeed {
     type Value = HdrResource;
     fn deserialize<D: serde::Deserializer<'de>>(self, deserializer: D) -> std::result::Result<HdrResource, D::Error> {
@@ -221,8 +260,9 @@ impl<'de> serde::de::Visitor<'de> for ResourceSeed {
         enum Field {
             Kind,
             Data,
+            HdrBlob,
         }
-        let (mut kind, mut data) = (false, None);
+        let (mut kind, mut data, mut blob) = (false, None, false);
         while let Some(field) = map.next_key::<Field>()? {
             match field {
                 Field::Kind if !kind => {
@@ -230,13 +270,26 @@ impl<'de> serde::de::Visitor<'de> for ResourceSeed {
                     kind = true;
                 }
                 Field::Data if data.is_none() => data = Some(map.next_value_seed(PayloadSeed(self.0))?),
+                // The container's part: its bytes come with the read (`with_container_parts`), by id.
+                Field::HdrBlob if !blob => {
+                    map.next_value::<serde::de::IgnoredAny>()?;
+                    blob = true;
+                }
                 _ => return Err(serde::de::Error::custom("duplicate HDR resource field")),
             }
         }
         if !kind {
             return Err(serde::de::Error::missing_field("kind"));
         }
-        HdrResource::new(data.ok_or_else(|| serde::de::Error::missing_field("data"))?).map_err(serde::de::Error::custom)
+        let mut data = data.ok_or_else(|| serde::de::Error::missing_field("data"))?;
+        if blob && !data.is_empty() {
+            return Err(serde::de::Error::custom("an HDR resource's inline data beside its blob is ambiguous"));
+        }
+        // An empty `data`: the file is the container's part.
+        if data.is_empty() {
+            data = container_part(&self.1, false).ok_or_else(|| serde::de::Error::custom(format!("embedded HDR resource {} has no data", self.1)))?;
+        }
+        HdrResource::new(data).map_err(serde::de::Error::custom)
     }
 }
 
@@ -253,31 +306,12 @@ impl serde::de::Visitor<'_> for PayloadSeed {
         write!(f, "canonical base64 of at most {} HDR bytes", self.0)
     }
     fn visit_str<E: serde::de::Error>(self, value: &str) -> std::result::Result<Vec<u8>, E> {
+        // Empty: the file is a container's part (`container_part`). Otherwise an older design's base64.
+        if value.is_empty() {
+            return Ok(Vec::new());
+        }
         decode_base64(value, self.0).map_err(E::custom)
     }
-}
-
-/// The container hydrator uses the same bounded canonical wire representation as JSON.
-pub fn encode_hdr_base64(bytes: &[u8]) -> Result<String> {
-    if bytes.is_empty() || bytes.len() > MAX_HDR_BYTES {
-        return Err(invalid("HDR source must contain at most 16 MiB"));
-    }
-    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut encoded = String::new();
-    encoded.try_reserve_exact(bytes.len().div_ceil(3) * 4).map_err(|_| invalid("could not reserve HDR base64"))?;
-    for triple in bytes.chunks(3) {
-        let n = triple.iter().fold(0u32, |n, byte| (n << 8) | u32::from(*byte)) << ((3 - triple.len()) * 8);
-        for i in 0..4 {
-            if i <= triple.len() {
-                let index = ((n >> (18 - i * 6)) & 63) as usize;
-                let byte = ALPHABET.get(index).copied().ok_or_else(|| invalid("invalid base64 digit"))?;
-                encoded.push(char::from(byte));
-            } else {
-                encoded.push('=');
-            }
-        }
-    }
-    Ok(encoded)
 }
 
 pub(crate) fn decode_base64(value: &str, maximum: usize) -> Result<Vec<u8>> {
@@ -380,13 +414,14 @@ impl<'de> serde::de::Visitor<'de> for ResourceBudget {
         enum Field {
             Kind,
             Data,
+            HdrBlob,
         }
         #[derive(Deserialize)]
         #[serde(rename_all = "snake_case")]
         enum Kind {
             RadianceHdr,
         }
-        let (mut kind, mut size) = (false, None);
+        let (mut kind, mut size, mut blob) = (false, None, false);
         while let Some(field) = map.next_key::<Field>()? {
             match field {
                 Field::Kind if !kind => {
@@ -398,6 +433,13 @@ impl<'de> serde::de::Visitor<'de> for ResourceBudget {
                     kind = true;
                 }
                 Field::Data if size.is_none() => size = Some(map.next_value_seed(EncodedBudget(self.0))?),
+                Field::HdrBlob if !blob => {
+                    let raw: &serde_json::value::RawValue = map.next_value()?;
+                    if raw.get().len() > 128 {
+                        return Err(serde::de::Error::custom("invalid HDR blob reference"));
+                    }
+                    blob = true;
+                }
                 _ => return Err(serde::de::Error::custom("duplicate HDR resource field")),
             }
         }
@@ -422,6 +464,11 @@ impl<'de> DeserializeSeed<'de> for EncodedBudget {
 // allocation. Full canonical padding, stream, radiance and digest checks still follow.
 pub(crate) fn json_base64_length(raw: &str, maximum: usize) -> Result<usize> {
     let text = raw.strip_prefix('"').and_then(|s| s.strip_suffix('"')).ok_or_else(|| invalid("HDR data must be a base64 string"))?;
+    // Empty: the file is a container's part, bounded as the container reads it; outside one, the
+    // resource is refused as it is read.
+    if text.is_empty() {
+        return Ok(0);
+    }
     let mut bytes = text.as_bytes().iter().copied();
     let mut count = 0usize;
     let mut last = [0u8; 2];

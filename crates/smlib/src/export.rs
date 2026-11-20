@@ -126,6 +126,17 @@ impl Brep {
         }
         r
     }
+
+    /// Export the canonical record and, when a complex shell order was already confirmed,
+    /// prepare its runtime body for the STEP import's modelling check. The runtime body
+    /// is built from this export so it agrees with the body reconstructed from a saved file.
+    pub fn to_native_prepared(&self) -> Res<(b::Brep, Order, Option<Brep>)> {
+        let (record, order) = self.to_native_ordered()?;
+        let ready = (self.enclosing_shell_order_proven && record.regions.iter().skip(1).any(|region| region.shells.len() > 1))
+            .then(|| Self::from_proven_shell_order(&record).ok())
+            .flatten();
+        Ok((record, order, ready))
+    }
 }
 
 impl Brep {
@@ -619,20 +630,35 @@ fn trims(flat: View, n_edgeuses: usize) -> Res<Vec<Option<b::Curve2>>> {
 
 /// A trim along its edge, its parameter moved onto the edge record's ([`TrimMap`]): one whose
 /// edgeuse runs against the edge (`same` false) reversed exactly (points reversed, knots
-/// t ↦ a + b − t), then the knots mapped. SMLib keeps a trim on its edge's interval; where the
-/// ends differ by the rounding of SMLib's own or this remap (10⁻⁹ of the interval's magnitude,
-/// no floor: a micro edge on knots spanning 10⁻⁷ lies on [0, 6e-12]), or by more but at one point
-/// of the edge within its tolerance (`on_edge`: a circle on its NURBS form ending a rounding past
-/// its trim's quarter line), every knot within that of an end is that end, and the end spans left
-/// without length go with their control points. Farther is an error, as is an interval of at most
+/// t ↦ a + b − t on its domain [a, b], whose ends swap exactly), then the knots mapped. SMLib
+/// keeps a trim on its edge's interval; where the ends differ by the rounding of SMLib's own or
+/// this remap (10⁻⁹ of the interval's magnitude, no floor: a micro edge on knots spanning 10⁻⁷
+/// lies on [0, 6e-12]), or by more but at one point of the edge within its tolerance (`on_edge`:
+/// a circle on its NURBS form ending a rounding past its trim's quarter line), every knot within
+/// that of an end is that end, and the end spans left without length go with their control
+/// points. Farther is an error naming the end, as is (worded apart) an interval of at most
 /// `SM_EFF_ZERO` (10⁻¹², SMLib's absolute knot resolution: no trim fits on it).
 fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f64; 2], on_edge: &dyn Fn(f64, f64) -> bool) -> Res<b::Curve2> {
     fn along<T: Clone>(knots: &[f64], points: &[T], same: bool) -> (Vec<f64>, Vec<T>) {
         if same {
             return (knots.to_vec(), points.to_vec());
         }
-        let (a, b) = (knots.first().copied().unwrap_or(0.0), knots.last().copied().unwrap_or(0.0));
-        (knots.iter().rev().map(|t| a + b - t).collect(), points.iter().rev().cloned().collect())
+        // About the domain [a, b], whose ends swap exactly (as SMLib's `reverse_knots` swaps
+        // them): (a + b) − b is a only to the precision of b, so a start at 4.3e-12 on a domain
+        // ending at 3e-4 came back 1e-20 lower, off the edge's curve where it starts on the
+        // curve's first knot, and the whole solid was refused.
+        let degree = knots.len().saturating_sub(points.len() + 1);
+        let (a, b) = (knots.get(degree).copied().unwrap_or(0.0), knots.get(points.len()).copied().unwrap_or(0.0));
+        let reversed = |t: f64| {
+            if t == a {
+                b
+            } else if t == b {
+                a
+            } else {
+                a + b - t
+            }
+        };
+        (knots.iter().rev().map(|t| reversed(*t)).collect(), points.iter().rev().cloned().collect())
     }
     // The knots mapped, and the points with them: a knot within the slack of an end of the edge's
     // interval, inside or past it, is that end, and the end spans that leaves without length are
@@ -669,8 +695,22 @@ fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f6
                 None
             }
         };
-        let (Some(s0), Some(s1), false) = (end(a, t0), end(z, t1), t1 - t0 <= 1e-12) else {
-            return Err(invalid(format!("a UV trim on [{a}, {z}], its edge on [{t0}, {t1}] (SMLib's knot resolution is 1e-12)")));
+        let trim_on = || format!("a UV trim on [{a}, {z}], its edge on [{t0}, {t1}]");
+        if t1 - t0 <= 1e-12 {
+            return Err(invalid(format!("{}: the edge's interval is no longer than SMLib's knot resolution (1e-12)", trim_on())));
+        }
+        let (Some(s0), Some(s1)) = (end(a, t0), end(z, t1)) else {
+            // Which ends: more than a rounding apart and not one point of the edge.
+            let off: Vec<String> = [("start", a, t0), ("end", z, t1)]
+                .into_iter()
+                .filter(|(_, x, t)| end(*x, *t).is_none())
+                .map(|(which, x, t)| format!("its {which} {} from the edge's", (x - t).abs()))
+                .collect();
+            return Err(invalid(format!(
+                "{}: {}, more than a rounding and not at one point of the edge within its tolerance",
+                trim_on(),
+                off.join(" and ")
+            )));
         };
         // A knot within the rounding of an end is that end, and so is one past the end on the
         // side the trim runs over it, up to the trim's end; a knot inside the edge's interval
