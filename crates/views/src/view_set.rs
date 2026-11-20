@@ -6,7 +6,7 @@
 use serde_json::{Value, json};
 use solidcraft_viewport::ViewSpec;
 
-use crate::tiles::{Edge, Preset, Tiles};
+use crate::tiles::{Edge, Placement, Preset, Tiles};
 
 /// Most views one design keeps open (and most a saved set may hold).
 pub const MAX_VIEWS: usize = 64;
@@ -430,6 +430,31 @@ impl ViewSet {
         let shown = tiles.split_at(self.active, id, edge);
         self.prune_tiles();
         shown
+    }
+
+    /// What the window would show if it placed this view at the given target.
+    pub fn preview_placement(&self, id: u64, placement: Placement) -> Option<Tiles> {
+        if !self.get(id).is_some_and(|view| view.kind.can_tile()) || !self.active().kind.can_tile() {
+            return None;
+        }
+        let next = if let Some(tiles) = self.tiles.as_ref().filter(|tiles| tiles.contains(self.active)) {
+            tiles.placed(id, placement)
+        } else if matches!(placement, Placement::Split { .. }) {
+            Tiles::Leaf(self.active).placed(id, placement)
+        } else {
+            None
+        }?;
+        next.views().into_iter().all(|other| other == id || self.can_tile_with(id, other)).then_some(next)
+    }
+
+    /// Place an open view in the current window. Keep focus if it still has a cell.
+    pub fn place_tile(&mut self, id: u64, placement: Placement) -> bool {
+        let Some(tiles) = self.preview_placement(id, placement) else { return false };
+        if !tiles.contains(self.active) {
+            self.active = id;
+        }
+        self.tiles = Some(tiles);
+        true
     }
 
     /// Move a splitter of the layout ([`Tiles::set_ratio`]).

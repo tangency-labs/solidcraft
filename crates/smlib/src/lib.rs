@@ -89,6 +89,9 @@ pub enum Error {
     /// SMLib reported success but the operation did nothing: a blend that made no face, a face
     /// move or draft that moved no face.
     NoEffect,
+    /// A split tool runs into a face and ends inside it, leaving a crack, and no tool cuts any
+    /// face through: the tool, taken over its whole surface, does not reach across.
+    ToolStopsShort,
     /// The answer is not exact in the input's geometry (a box that would wrap round its
     /// surface, an analytic surface whose speed across a side varies along it).
     NotExact,
@@ -193,6 +196,7 @@ impl std::fmt::Display for Error {
                 corner + 1
             ),
             Error::NoEffect => write!(f, "SMLib made no change: it reported success, but the operation did nothing"),
+            Error::ToolStopsShort => write!(f, "the tool runs into the face but ends inside it, so it cuts nothing off"),
             Error::NotExact => write!(f, "SMLib cannot build this exactly in the input's geometry"),
             Error::Corner { why, at } => {
                 let at = format!("({:.4}, {:.4}, {:.4})", at[0], at[1], at[2]);

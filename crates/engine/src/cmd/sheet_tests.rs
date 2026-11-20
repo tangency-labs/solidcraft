@@ -4503,6 +4503,11 @@ fn fold_with_its_fixed_point_on_the_tongue_is_refused() {
     tongue_plate(&mut s, true, false);
     let e = s.execute("sheet.fold", &json!({"points": [[-8, -15, 2], [-8, 15, 2]], "fixed": [10, 0, 2], "angle": "45 deg"})).unwrap_err().to_string();
     assert!(e.contains("fixed point lies on a piece the fold frees"), "{e}");
+    // The fixed point on the tongue just past the line, inside the tongue's bend zone (x -9.12 …
+    // -6.88 at 45°): the bend would turn the material there, so it is refused the same way.
+    let e =
+        s.execute("sheet.fold", &json!({"points": [[-8, -15, 2], [-8, 15, 2]], "fixed": [-7.5, 0, 2], "angle": "45 deg"})).unwrap_err().to_string();
+    assert!(e.contains("fixed point lies on a piece the fold frees"), "{e}");
 }
 
 /// A plate cut by a sketch drawn on its top face after the base flange: each closed loop of
@@ -4611,6 +4616,40 @@ fn fold_beside_a_slanted_slit() {
     al2_plate(&mut s, slit, &[], &[]);
     let e = s.execute("sheet.fold", &json!({"points": [[-60, 0, 2], [60, 0, 2]], "fixed": [0, -30, 2], "angle": "45 deg"})).unwrap_err().to_string();
     assert!(e.contains("lie beside each other along it"), "{e}");
+    // A fold at its `start` or `end` puts the line on an edge of the zone, where the slit is not
+    // where it is in the zone's middle: drawn from the right edge to just right of the slit on
+    // the line (x 10.5), it takes the plate right of the slit alone.
+    for position in ["start", "end"] {
+        let mut s = Session::default();
+        al2_plate(&mut s, json!([[-60, -40], [60, -40], [60, 40], [50.5, 40], [0.5, -10], [0, -10], [50, 40], [-60, 40]]), &[], &[]);
+        let before = volume(&mut s);
+        run(&mut s, "sheet.fold", json!({"points": [[60, 0, 2], [10.6, 0, 2]], "fixed": [0, -30, 2], "angle": "45 deg", "position": position}));
+        assert!(rel(volume(&mut s), before) < 1e-3, "{position}: a fold keeps the material");
+        let bends = flat(&mut s)["bends"].as_array().map_or(0, Vec::len);
+        let bb = bbox(&mut s);
+        assert!(
+            bends == 1 && at(coord(&bb, "min", 0), -60.0) && coord(&bb, "max", 2) > 20.0,
+            "{position}: the plate right of the slit alone: {bends}: {bb}"
+        );
+    }
+}
+
+/// A bar held to the plate by two bridges across the fold's line, with 16 tabs off the plate
+/// beside the drawn bridge, nearer it than the far bridge: more chords than are tried in every
+/// combination. The line drawn on the near bridge bends the two bridges alone; the tabs, which
+/// part nothing the bar needs, stay flat.
+#[test]
+fn fold_past_many_tabs_bends_only_the_chords_that_part_the_panel() {
+    let mut outline =
+        vec![json!([-110, -30]), json!([110, -30]), json!([110, 20]), json!([-110, 20]), json!([-110, 3]), json!([-38, 3]), json!([-38, -3])];
+    for i in (0..16).rev() {
+        let x = -104.0 + 4.0 * f64::from(i);
+        outline.extend([json!([x + 2.0, -3]), json!([x + 2.0, 2]), json!([x, 2]), json!([x, -3])]);
+    }
+    outline.push(json!([-110, -3]));
+    let slot = json!([[-32, -3], [96, -3], [96, 3], [-32, 3]]);
+    let (bb, bends) = al2_fold(json!(outline), &[slot], &[], json!([[-37, 0, 2], [-33, 0, 2]]), json!([0, -20, 2]));
+    assert!(bends == 2 && coord(&bb, "max", 2) > 10.0, "the two bridges alone: {bends}: {bb}");
 }
 
 /// A round hole reaching into a straight-ended bend's zone leaves the zone's ends on the plate's

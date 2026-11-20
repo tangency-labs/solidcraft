@@ -50,7 +50,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("layout: single|side_by_side|stacked|large_and_two|grid → layout, shown: how many views the window shows together; fills the layout with the design's Model and Render views in tab order (the active one among them); single shows one view at a time again; never edits the design"),
     CommandSpec::new("tab.view.beside", "Show View Beside", crate::checked!("tab.view.beside", beside))
         .icon("copy").noundo().doc_only().contract(&BESIDE_CONTRACT).output(output_schema_for::<TabViewReply>)
-        .params("id?: the open Model or Render view to show (default: a new Model angle); edge?: left|right|top|bottom of the active view (default: right) → id, edge, shown; allows up to four views, including one Render view"),
+        .params("id?: the open Model or Render view to show (default: a new Model angle); edge?: left|right|top|bottom of the active view (default: right); placement?: requires id and replaces edge, {kind:empty,index}, {kind:replace,target}, or {kind:split,target,edge} → id, edge or placement, shown; allows up to four views, including one Render view"),
     CommandSpec::new("tab.view.list", "List Views", crate::checked!("tab.view.list", list))
         .icon("list").noundo().doc_only().contract(&NO_PARAMS_CONTRACT).output(output_schema_for::<TabViewReply>)
         .params("no parameters → views: [{id, kind, name, subject?, active}] of the shown design in tab order; read-only")];
@@ -124,8 +124,13 @@ fn layout(_s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn beside(_s: &mut Session, p: &Value) -> Result<Value> {
-    let request: TabViewBesideParams = parse("tab.view.beside", p)?;
-    reply("tab.view.beside", TabViewReply { id: request.id, edge: Some(request.edge.unwrap_or(TabViewEdge::Right)), ..Default::default() })
+    let cmd = "tab.view.beside";
+    let request: TabViewBesideParams = parse(cmd, p)?;
+    if request.placement.is_some() && (request.id.is_none() || request.edge.is_some()) {
+        return Err(bad(cmd, "placement requires id and takes the place of edge"));
+    }
+    let edge = request.placement.is_none().then_some(request.edge.unwrap_or(TabViewEdge::Right));
+    reply(cmd, TabViewReply { id: request.id, edge, placement: request.placement, ..Default::default() })
 }
 
 fn list(_s: &mut Session, p: &Value) -> Result<Value> {
