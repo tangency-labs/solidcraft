@@ -13,6 +13,7 @@ use solidcraft_sketch::CurveKind;
 use super::{ModelBody, ModelState, SolvedSketch, new_name, path_in_frame, select_profiles, sketch_in_feature_frame, val};
 use crate::expr::{Expr, Kind, Value};
 use crate::frame::{self, MAX_MEMBERS, MemberProfile};
+use crate::frame_library;
 use crate::{DocError, Document, Feature, FeatureId, FeatureKind, ProfileSel, Result};
 
 /// Most profiles a profile sketch may have for its material to be worked out.
@@ -72,7 +73,7 @@ struct Layout {
 }
 
 fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -> Result<Layout> {
-    let FeatureKind::FrameMember { path_sketch, lines, profile, anchor, locate, angle, mirror, .. } = &f.kind else {
+    let FeatureKind::FrameMember { path_sketch, lines, profile, anchor, locate, point, angle, mirror, .. } = &f.kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
     let ps = st.sketch(path_sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {path_sketch} (it must come earlier in the timeline)")))?;
@@ -80,25 +81,9 @@ fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &Mode
     let mapped =
         if ps.sketch.wires.is_empty() { Cow::Owned(sketch_in_feature_frame(doc, ps, f.component)?) } else { path_in_frame(doc, ps, f.component)? };
     let segments = member_lines(mapped.as_ref(), lines)?;
-    let (mut regions, description, origin) = profile_regions(vals, st, profile)?;
-    if *mirror {
-        regions = regions.iter().map(frame::mirrored).collect();
-    }
-    let at = match locate {
-        Some([x, y]) => {
-            // A design file is hostile input: the command checks the point, a file may not.
-            if !(x.is_finite() && y.is_finite() && x.abs() <= frame::MAX_PROFILE_SIZE && y.abs() <= frame::MAX_PROFILE_SIZE) {
-                return Err(DocError::Invalid(format!("frame member `locate` must be two finite lengths within {} mm", frame::MAX_PROFILE_SIZE)));
-            }
-            // `locate` is the profile point that sits on the line, measured from the profile's
-            // own origin (`Profile::origin`). The built-in region is centred on its bounding
-            // box, so that origin moves when the section's size changes, and the located point
-            // moves with it: the member stays attached at the same point of its section.
-            let p = origin + Vec2::new(*x, *y);
-            if *mirror { Vec2::new(-p.x, p.y) } else { p }
-        }
-        None => frame::anchor_point(&regions, *anchor),
-    };
+    let section = profile_regions(doc, vals, st, profile)?;
+    let description = section.description.clone();
+    let (regions, at) = placed_section(section, *anchor, point.as_deref(), *locate, *mirror)?;
     let turn = match angle {
         Some(e) => val(vals, e, Kind::Angle)?,
         None => 0.0,
@@ -234,6 +219,20 @@ pub fn member_line_ids(st: &ModelState, kind: &FeatureKind) -> Result<Vec<String
     Ok(member_lines(ps, lines)?.into_iter().map(|(id, _, _)| id).collect())
 }
 
+/// The section of profile sketch `sketch` as a member would take it (its material, or the
+/// `profiles` picked), in the sketch's own x and y: one piece of material, holes and all. This is
+/// what a library profile copies when it is made from a sketch.
+pub fn sketch_section(doc: &Document, st: &ModelState, sketch: crate::SketchId, profiles: &ProfileSel) -> Result<Vec<Region2>> {
+    let profile = MemberProfile::Sketch { sketch, profiles: profiles.clone() };
+    Ok(profile_regions(doc, &BTreeMap::new(), st, &profile)?.regions)
+}
+
+/// Where point `id` of sketch `sketch` is, in the sketch's own x and y.
+pub fn sketch_point(st: &ModelState, sketch: crate::SketchId, id: &str) -> Option<Vec2> {
+    let ss = st.sketch(sketch.0)?;
+    ss.sketch.point(ss.sketch.point_index(id)?)
+}
+
 /// The member lines of the frame sketch, each as (curve id, start, end) in its frame: the lines
 /// asked for, or every straight line drawn in it (not construction, not projected or otherwise
 /// linked, and with a length).
@@ -315,14 +314,88 @@ fn straight(pts: &[Vec3]) -> Option<(Vec3, Vec3)> {
     Some((a, b))
 }
 
-/// The regions of a member's profile, in the profile's own coordinates: one piece of material,
-/// holes and all; and what its members are named after when they have no name of their own.
-fn profile_regions(vals: &BTreeMap<String, Value>, st: &ModelState, profile: &MemberProfile) -> Result<(Vec<Region2>, String, Vec2)> {
-    let (regions, description, origin) = match profile {
-        MemberProfile::Library { profile } => {
-            let p = profile.resolve(|name, e, kind| val(vals, e, kind).map_err(|err| DocError::Invalid(format!("profile `{name}`: {err}"))))?;
-            let origin = p.origin();
-            (vec![p.region()?], profile.size.clone().unwrap_or_else(|| p.description()), origin)
+/// A member's section before it is placed on a line: its regions in the profile's own
+/// coordinates, its placement points, the point a library profile starts on, what its members
+/// are named after when they have no name of their own, and the profile's own origin (the point
+/// a built-in profile's dimensions are measured from, which `locate` is measured from).
+pub(super) struct MemberSection {
+    pub regions: Vec<Region2>,
+    pub points: Vec<(String, Vec2)>,
+    pub default_point: Option<String>,
+    pub description: String,
+    pub origin: Vec2,
+}
+
+/// The section's regions as they are placed (mirrored across the profile's y axis when asked), and
+/// the point of them that sits on the line: the placement point named `point`; else the `locate`d
+/// point, measured from the profile's origin; else `anchor` when it isn't the origin; else a library
+/// profile's default point; else the origin. A mirrored profile's bounding-box points are those of
+/// the mirrored outline (its `top_left` is still at the top left); the points its kind generates or
+/// its entry names move with the material (its `heel` stays the heel).
+pub(super) fn placed_section(
+    section: MemberSection,
+    anchor: frame::Anchor,
+    point: Option<&str>,
+    locate: Option<[f64; 2]>,
+    mirror: bool,
+) -> Result<(Vec<Region2>, Vec2)> {
+    let MemberSection { regions, points, default_point, origin, .. } = section;
+    let (regions, points) = if mirror {
+        let flipped: Vec<Region2> = regions.iter().map(frame::mirrored).collect();
+        let mut pts = frame_library::placement_points(&flipped, None, &[]);
+        pts.extend(points.into_iter().filter(|(n, _)| !frame_library::COMMON_POINTS.contains(&n.as_str())).map(|(n, v)| (n, Vec2::new(-v.x, v.y))));
+        (flipped, pts)
+    } else {
+        (regions, points)
+    };
+    let at = match (point, locate, default_point) {
+        (Some(name), _, _) => frame_library::find_point(&points, name)?,
+        (None, Some([x, y]), _) => {
+            // A design file is hostile input: the command checks the point, a file may not.
+            if !(x.is_finite() && y.is_finite() && x.abs() <= frame::MAX_PROFILE_SIZE && y.abs() <= frame::MAX_PROFILE_SIZE) {
+                return Err(DocError::Invalid(format!("frame member `locate` must be two finite lengths within {} mm", frame::MAX_PROFILE_SIZE)));
+            }
+            // Measured from the profile's own origin (`Profile::origin`): the built-in region is
+            // centred on its bounding box, so that origin moves when the section's size changes,
+            // and the located point moves with it.
+            let p = origin + Vec2::new(x, y);
+            if mirror { Vec2::new(-p.x, p.y) } else { p }
+        }
+        (None, None, _) if !anchor.is_origin() => frame::anchor_point(&regions, anchor),
+        (None, None, Some(name)) => frame_library::find_point(&points, &name)?,
+        (None, None, None) => Vec2::ZERO,
+    };
+    Ok((regions, at))
+}
+
+/// The section of a member's profile, in the profile's own coordinates: one piece of material,
+/// holes and all.
+pub(super) fn profile_regions(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, profile: &MemberProfile) -> Result<MemberSection> {
+    let (regions, description) = match profile {
+        MemberProfile::Library { profile: lp } => {
+            let p = lp.resolve(|name, e, kind| val(vals, e, kind).map_err(|err| DocError::Invalid(format!("profile `{name}`: {err}"))))?;
+            let regions = vec![p.region()?];
+            let points = frame_library::placement_points(&regions, Some(&p), &[]);
+            let description = lp.size.clone().unwrap_or_else(|| p.description());
+            return Ok(MemberSection { regions, points, default_point: None, description, origin: p.origin() });
+        }
+        MemberProfile::LibraryProfile { id } => {
+            let entry = doc
+                .library_profile(id)
+                .ok_or_else(|| DocError::Unknown(format!("library profile `{id}` (it was removed from the profile library)")))?;
+            let r = entry
+                .resolve(|label, e, kind| val(vals, e, kind).map_err(|err| DocError::Invalid(format!("profile `{label}`: {err}"))))
+                .map_err(|e| DocError::Invalid(format!("library profile {}: {e}", entry.name)))?;
+            if r.regions.len() != 1 {
+                return Err(DocError::Invalid(format!("library profile {} is {} separate pieces", entry.name, r.regions.len())));
+            }
+            return Ok(MemberSection {
+                regions: r.regions,
+                points: r.points,
+                default_point: entry.default_point.clone(),
+                description: entry.name.clone(),
+                origin: Vec2::ZERO,
+            });
         }
         MemberProfile::Sketch { sketch, profiles } => {
             let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?;
@@ -330,11 +403,14 @@ fn profile_regions(vals: &BTreeMap<String, Value>, st: &ModelState, profile: &Me
                 ProfileSel::All => material(ss)?,
                 sel => select_profiles(ss, sel)?,
             };
-            (solidcraft_sketch::merge_regions(&picked), ss.name.clone(), Vec2::ZERO)
+            (solidcraft_sketch::merge_regions(&picked), ss.name.clone())
         }
     };
     match regions.len() {
-        1 => Ok((regions, description, origin)),
+        1 => {
+            let points = frame_library::placement_points(&regions, None, &[]);
+            Ok(MemberSection { regions, points, default_point: None, description, origin: Vec2::ZERO })
+        }
         0 => Err(DocError::Invalid("the member profile has no area".into())),
         n => Err(DocError::Invalid(format!("the member profile is {n} separate pieces (pick one with `profiles`)"))),
     }

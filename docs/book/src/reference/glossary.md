@@ -346,6 +346,23 @@ now and is never saved: if the thing is lost, the note stays and has no leader.
 - **Elsewhere:** leader, leader line.
 - **For translators:** a drawn line; not a person who leads.
 
+### library profile
+
+A named frame profile kept in a design's profile library, which frame members are made from.
+
+An entry holds its section (a built-in profile from dimensions, or a section copied from a
+sketch), its placement points, and stock data: material, description and stock length. Members
+refer to it by id, so editing the entry changes every member made from it. The profile library is
+all of a design's library profiles.
+
+- **In SolidCraft:** `frame.library.list`, `frame.library.add`, `frame.library.edit`,
+  `frame.library.remove`, `frame.library.replace`; the `library` parameter of `frame.member`; the
+  `frame_profiles` design-file key; the Frame Member window's Library row and Save to Library.
+- **Don't use:** profile preset, stock table, catalogue part.
+- **Elsewhere:** profile library, structural member library, stock profile.
+- **For translators:** a frame profile (see *Words with more than one meaning*, "Profile"), not a
+  sketch profile or a settings profile.
+
 ### material
 
 The physical substance of a body, which sets its density and mechanical properties.
@@ -465,6 +482,22 @@ design, which then keeps a copy of its own. It is an app setting, not part of a 
 - **Don't use:** preset, template, library rule.
 - **Elsewhere:** rule library, sheet metal style library.
 - **For translators:** "personal" as in the user's own, not private or confidential.
+
+### placement point
+
+A named point of a frame profile that sits on a frame member's line.
+
+Every profile has its origin, centre, centroid, and the corners and edge middles of its bounding
+box. Each built-in kind adds its own (an angle's `heel_inside`, a channel's `web_back`), and a
+library profile can name more.
+
+- **In SolidCraft:** the `point` parameter of `frame.member`; `frame.profile.points`; a library
+  profile's `points` and `default_point`; the Frame Member window's Point row.
+- **Don't use:** anchor (the older name of the bounding-box points, kept as `frame.member`'s
+  `anchor`).
+- **Elsewhere:** placement point, locating point, insertion point.
+- **For translators:** a point on the profile's cross-section, not a sketch point or a
+  construction point.
 
 ### print face
 

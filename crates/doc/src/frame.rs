@@ -348,7 +348,7 @@ impl crate::walk::Walk for ProfileSpec {
     }
 }
 
-pub use crate::eval::frame_member::{member_line_ids, member_names, member_turns};
+pub use crate::eval::frame_member::{member_line_ids, member_names, member_turns, sketch_point, sketch_section};
 
 /// Where a frame member's cross-section comes from.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
@@ -366,6 +366,9 @@ pub enum MemberProfile {
         #[walk(profiles_of = sketch)]
         profiles: crate::ProfileSel,
     },
+    /// A profile of the design's profile library (`Document::frame_profiles`), by id: editing the
+    /// entry changes the members.
+    LibraryProfile { id: String },
 }
 
 impl Anchor {

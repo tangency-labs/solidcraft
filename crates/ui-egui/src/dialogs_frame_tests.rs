@@ -594,3 +594,102 @@ fn rotate_member_dial_sets_the_angle() {
     assert!(h.app.dialog.is_none());
     assert_eq!(turns(&h.app), ["-90 deg"]);
 }
+
+/// A library profile and a named placement point reach the command and come back when editing;
+/// the point names the dialog offers are the profile kind's own.
+#[test]
+fn a_library_profile_and_a_named_point() {
+    let mut app = frame_app();
+    app.run(
+        "frame.library.add",
+        json!({"name": "L50", "profile": {"kind": "angle", "width": 50, "height": 50, "thickness": 5}, "default_point": "heel"}),
+    )
+    .unwrap();
+    let lines = frame_lines(&app);
+    let mut d = dialog_on(&mut app, &lines[..1]);
+    let m = member(&mut d);
+    m.library = Some("lp1".into());
+    m.point = Some("heel_inside".into());
+    let c = apply_commands(&app, &d).unwrap();
+    let p = &c[0].1;
+    assert_eq!((&p["library"], &p["point"]), (&json!("lp1"), &json!("heel_inside")), "{p}");
+    assert!(p.get("profile").is_none() && p.get("anchor").is_none(), "{p}");
+    let names = point_names(&app, member(&mut d), false);
+    assert!(
+        names.starts_with(&["origin".to_string()]) && names.contains(&"heel_inside".to_string()) && names.contains(&"toe_y".to_string()),
+        "{names:?}"
+    );
+    run_all(&mut app, c);
+    assert_eq!(body_names(&app), ["L50"]);
+    let f = app.session.doc.features.last().unwrap().id;
+    let mut e = edit_dialog(&app, f, None).unwrap();
+    let m = member(&mut e);
+    assert_eq!((m.library.as_deref(), m.point.as_deref()), (Some("lp1"), Some("heel_inside")), "{m:?}");
+    assert_eq!(point_label("heel_inside"), "Heel inside");
+}
+
+/// Save to Library adds the dialog's built-in profile to the library, named after it and filed under
+/// its kind unless the dialog gives a name and a category (`/` between levels).
+#[test]
+fn save_to_library_adds_the_built_in_profile() {
+    let mut app = frame_app();
+    let lines = frame_lines(&app);
+    let d = dialog_on(&mut app, &lines[..1]);
+    let mut m = match &d.kind {
+        Kind::Frame(m) => m.clone(),
+        k => panic!("{k:?}"),
+    };
+    let id = save_to_library(&mut app, &m, &d.inputs).unwrap();
+    assert_eq!(id, "lp1");
+    assert_eq!(app.session.doc.frame_profiles[0].name, "Rect Tube 40x40x3");
+    // Saving the same profile again takes the next free name.
+    m.library = None;
+    save_to_library(&mut app, &m, &d.inputs).unwrap();
+    assert_eq!(app.session.doc.frame_profiles[1].name, "Rect Tube 40x40x3 (2)");
+    assert_eq!(app.session.doc.frame_profiles[1].category, ["Rectangular Tube"]);
+    m.save_name = " 40x40x3 SHS ".into();
+    m.save_category = "Steel / SHS (C350)/".into();
+    save_to_library(&mut app, &m, &d.inputs).unwrap();
+    let e = &app.session.doc.frame_profiles[2];
+    assert_eq!((e.name.as_str(), &e.category), ("40x40x3 SHS", &vec!["Steel".to_string(), "SHS (C350)".to_string()]));
+    // A name the library has already is refused, not renamed.
+    let err = save_to_library(&mut app, &m, &d.inputs).unwrap_err();
+    assert!(err.contains("already has a profile named"), "{err}");
+}
+
+/// The library's Type, Group and Size choices: folders one level down, the profiles in a folder and
+/// below, sizes in natural order, and the profiles without a category on their own.
+#[test]
+fn library_folders_and_sizes() {
+    let entry = |name: &str, category: &[&str]| frame_library::LibraryProfile {
+        id: name.into(),
+        name: name.into(),
+        category: category.iter().map(|c| c.to_string()).collect(),
+        section: frame_library::LibrarySection::Drawn { regions: Vec::new() },
+        points: Vec::new(),
+        default_point: None,
+        material: None,
+        description: None,
+        stock_length: None,
+    };
+    let library = vec![
+        entry("100x50x3.0 RHS", &["Steel", "RHS"]),
+        entry("63.5x38x2.5 RHS", &["Steel", "RHS"]),
+        entry("50x20x1.6 RHS", &["Steel", "RHS"]),
+        entry("50x20x2.0 RHS", &["Steel", "RHS"]),
+        entry("100 PFC", &["Steel", "Channel"]),
+        entry("Flat 50x6", &["Aluminium"]),
+        entry("Odd one", &[]),
+    ];
+    assert_eq!(subfolders(&library, &[]), ["Aluminium", "Steel"]);
+    assert_eq!(subfolders(&library, &["Steel".into()]), ["Channel", "RHS"]);
+    assert!(subfolders(&library, &["Aluminium".into()]).is_empty());
+    let names = |folder: &[&str]| -> Vec<String> {
+        let folder: Vec<String> = folder.iter().map(|f| f.to_string()).collect();
+        profiles_in(&library, &folder).iter().map(|e| e.name.clone()).collect()
+    };
+    assert_eq!(names(&["Steel", "RHS"]), ["50x20x1.6 RHS", "50x20x2.0 RHS", "63.5x38x2.5 RHS", "100x50x3.0 RHS"]);
+    assert_eq!(names(&["Steel"]), ["50x20x1.6 RHS", "50x20x2.0 RHS", "63.5x38x2.5 RHS", "100 PFC", "100x50x3.0 RHS"]);
+    assert_eq!(names(&[]), ["Odd one"]);
+    assert!(names(&["Timber"]).is_empty());
+}
