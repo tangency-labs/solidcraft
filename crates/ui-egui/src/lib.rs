@@ -1228,8 +1228,13 @@ impl SolveApp {
     }
 
     /// Translate text using the active language preference.
-    pub fn tr<'a>(&self, text: &'a str) -> &'a str {
+    pub fn tr<'a>(&self, text: impl solidcraft_ui_text::Key<'a>) -> &'a str {
         solidcraft_ui_text::Locale::for_language(&self.preferences.language).text(text)
+    }
+
+    /// A message with its placeholders' values (`msg!("id", name = value)`), in the active language.
+    pub fn fill<const N: usize>(&self, filled: solidcraft_ui_text::Filled<'_, N>) -> String {
+        solidcraft_ui_text::Locale::for_language(&self.preferences.language).fill(filled)
     }
 
     /// Translate a display label supplied by the engine, without changing its identifier.

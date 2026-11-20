@@ -18,6 +18,26 @@ pub mod numbered;
 
 pub use numbered::{Filled, Msg};
 
+/// What names a message to a lookup: its id, or its place among the English ids ([`Msg`], which
+/// `msg!` writes), so that a call reads the same either way: `tr("ui.file")`, `tr(msg!("ui.file"))`.
+pub trait Key<'a>: Copy {
+    #[doc(hidden)]
+    fn read(self, locale: Locale) -> &'a str;
+}
+
+/// An id, however it is held: `&str`, `&String`, `&&str`, `&Cow<str>`.
+impl<'a, T: AsRef<str> + ?Sized> Key<'a> for &'a T {
+    fn read(self, locale: Locale) -> &'a str {
+        locale.text_by_id(self.as_ref())
+    }
+}
+
+impl<'a> Key<'a> for Msg {
+    fn read(self, locale: Locale) -> &'a str {
+        locale.message(self)
+    }
+}
+
 /// A catalog's messages: stable id → text.
 pub type Messages = BTreeMap<String, String>;
 
@@ -247,7 +267,13 @@ impl Locale {
     }
 
     /// Stable message ID → translation → English → ID, in display order (see [`bidi`]).
-    pub fn text(self, id: &str) -> &str {
+    /// The message named by `key`: its id (`"ui.file"`), or its place from `msg!`, which is the
+    /// same message without the id in the program.
+    pub fn text<'a>(self, key: impl Key<'a>) -> &'a str {
+        key.read(self)
+    }
+
+    fn text_by_id(self, id: &str) -> &str {
         self.0.shown().get(id).or_else(|| english().messages().get(id)).map_or(id, String::as_str)
     }
 
@@ -279,6 +305,11 @@ impl Locale {
 
     /// The message `msg` in this language, then in English, then empty (a table has no ids to
     /// show in its place). Its placeholders are marks: fill them with [`Filled::tr`].
+    /// A message with its placeholders' values (`msg!("id", name = value)`), in this language.
+    pub fn fill<const N: usize>(self, filled: Filled<'_, N>) -> String {
+        filled.fill_in(self)
+    }
+
     pub fn message(self, msg: Msg) -> &'static str {
         numbered::lookup(self.0.table, msg).or_else(|| numbered::lookup(english().table, msg)).unwrap_or_default()
     }
@@ -373,8 +404,8 @@ pub fn language() -> &'static str {
     locale().0.id
 }
 
-pub fn tr(id: &str) -> &str {
-    locale().text(id)
+pub fn tr<'a>(key: impl Key<'a>) -> &'a str {
+    locale().text(key)
 }
 
 pub fn tr_label(label: &str) -> &str {

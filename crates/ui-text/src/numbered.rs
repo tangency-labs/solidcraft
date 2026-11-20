@@ -79,7 +79,11 @@ impl<'a, const N: usize> Filled<'a, N> {
 
     /// The message in this thread's language, filled in.
     pub fn tr(&self) -> String {
-        fill(self.msg.tr(), &self.values)
+        self.fill_in(crate::locale())
+    }
+
+    pub(crate) fn fill_in(&self, locale: crate::Locale) -> String {
+        fill(locale.message(self.msg), &self.values)
     }
 }
 
