@@ -66,16 +66,8 @@ fn ribbon_groups_refuse_unknown_entries_empty_groups_and_duplicates() {
         (json!([{"label":"Gears","entries":["missing"]}]), "0.entries", "unknown entry `missing`"),
         (json!([{"label":"Gears","entries":[]}]), "0.entries", "1..32 distinct entry names"),
         (json!([{"label":"Gears","entries":["make","make"]}]), "0.entries", "entry `make` is listed twice"),
-        (
-            json!([{"label":"Gears","entries":["make"]},{"label":"More","entries":["make"]}]),
-            "1.entries",
-            "entry `make` is listed twice",
-        ),
-        (
-            json!([{"label":"Gears","entries":["make"]},{"label":" Gears ","entries":["inspect"]}]),
-            "1.label",
-            "ribbon group `Gears` is listed twice",
-        ),
+        (json!([{"label":"Gears","entries":["make"]},{"label":"More","entries":["make"]}]), "1.entries", "entry `make` is listed twice"),
+        (json!([{"label":"Gears","entries":["make"]},{"label":" Gears ","entries":["inspect"]}]), "1.label", "ribbon group `Gears` is listed twice"),
     ] {
         let mut value = manifest();
         value["runtime"]["entries"] = json!(["make", "inspect"]);
