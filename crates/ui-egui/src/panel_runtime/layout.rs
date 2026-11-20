@@ -852,7 +852,10 @@ impl HostLayout {
             if !targets.insert(&control.target) {
                 return Err(error(Rule::DuplicateId, "duplicate typed host target"));
             }
-            if !control.bounds.contains_rect(control.ink) || !self.painted.iter().any(|paint| paint.contains_rect(control.ink)) {
+            if !self.capacity.contains_rect(control.bounds)
+                || !control.bounds.contains_rect(control.ink)
+                || !self.painted.iter().any(|paint| paint.contains_rect(control.ink))
+            {
                 return Err(error(Rule::Bounds, "host control outside paint"));
             }
         }

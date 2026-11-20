@@ -4652,6 +4652,17 @@ fn host_metrics_and_public_geometry_reject_hostile_values_before_pointer_arithme
 }
 
 #[test]
+fn host_layout_refuses_a_control_reaching_past_its_capacity() {
+    let h = host_logs(1, Zone::Left);
+    let mut layout = host_layout(&h, 1280.0, 800.0, Direction::Ltr);
+    layout.validate().unwrap();
+    let edge = right(layout.capacity);
+    let control = layout.controls.iter_mut().find(|control| matches!(control.target, HostPointerTarget::Header { .. })).unwrap();
+    control.bounds.size.width = edge - control.bounds.origin.x + 8.0;
+    assert_eq!(layout.validate().unwrap_err().detail, "host control outside paint");
+}
+
+#[test]
 fn raw_host_header_drag_joins_content_and_body_drags_cannot_rearrange_panels() {
     for scale in [1.0, 2.0] {
         let h = host_logs(2, Zone::Left);
