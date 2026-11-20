@@ -2328,6 +2328,47 @@ fn an_end_cap_closes_a_trimmed_members_end() {
     assert!(near3(cap.2, [-20.0, -20.0, 250.0]) && near3(cap.3, [20.0, 20.0, 256.0]), "{cap:?}");
 }
 
+/// The 40 x 20 section starts at (0, 0), so its centre is (20, 10), off the path.
+/// A 90-degree turn keeps that centre: bounds (10, -10)..(30, 30). Trimming at z=180
+/// leaves 40*20*180 material; the cap starts there, while the Rotate pivot stays at z=150.
+#[test]
+fn an_off_centre_rectangular_member_rotates_then_trims_and_caps_after_reopen() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Post path"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    run(&mut s, "sketch.line3d", json!({"points": [[0, 0, 0], [0, 0, 300]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "frame.member",
+        json!({"sketch": "Post path", "name": "Post member", "body_name": "Post", "anchor": "bottom_left",
+            "profile": {"kind": "bar", "width": 40, "height": 20}}),
+    );
+    let side = face_pick(&s, "Post", [40.0, 10.0, 150.0], [1.0, 0.0, 0.0]);
+    run(&mut s, "frame.rotate_member", json!({"face": side, "angle": "90 deg"}));
+    run(&mut s, "frame.trim", json!({"members": ["Post"], "to": {"plane": {"origin": [0, 0, 180], "normal": [0, 0, 1]}}, "end": "end"}));
+    let top = face_pick(&s, "Post", [20.0, 10.0, 180.0], [0.0, 0.0, 1.0]);
+    run(&mut s, "frame.end_cap", json!({"faces": [top], "thickness": 6}));
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    for mut session in [s, reopened] {
+        let post = measured(&mut session, "Post");
+        assert!(rel(post.1, 40.0 * 20.0 * 180.0) < 1e-9, "{post:?}");
+        assert!(near3(post.2, [10.0, -10.0, 0.0]) && near3(post.3, [30.0, 30.0, 180.0]), "{post:?}");
+        assert!(near3(post.4, [20.0, 10.0, 90.0]), "{post:?}");
+        let cap = measured(&mut session, "Post End Cap");
+        assert!(rel(cap.1, 40.0 * 20.0 * 6.0) < 1e-9, "{cap:?}");
+        assert!(near3(cap.2, [10.0, -10.0, 180.0]) && near3(cap.3, [30.0, 30.0, 186.0]), "{cap:?}");
+        let state = session.model.state();
+        let record = state.frame_members.iter().find(|r| r.body == "Post").unwrap();
+        assert!(record.ends[0].is_none());
+        let end = record.ends[1].as_ref().unwrap();
+        assert!((end.origin.z - 180.0).abs() < 1e-6 && end.normal().z > 1.0 - 1e-9, "{end:?}");
+        let solidcraft_doc::FeatureKind::FrameMemberTurn { member, .. } = &turn_step(&session).kind else { panic!("not a turn") };
+        let pivot = solidcraft_doc::end_cap::member_pivot(&session.doc, &state, member).unwrap();
+        assert!(near3([pivot.x, pivot.y, pivot.z], [20.0, 10.0, 150.0]), "{pivot:?}");
+    }
+}
+
 /// Moving the occurrence that places a trim's target face trims the member again: the incremental
 /// model gives what a model built from scratch does.
 #[test]
