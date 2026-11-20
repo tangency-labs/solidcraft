@@ -266,7 +266,7 @@ impl Locale {
 
     /// The message with the id `id`: in this language, then in English, then the id itself. For
     /// an id built at run time; one written in the code is `tr!("id")`, which checks it.
-    pub fn text<'a>(self, id: &'a str) -> &'a str {
+    pub fn text(self, id: &str) -> &str {
         self.own(id).or_else(|| english().messages().get(id).map(String::as_str)).unwrap_or(id)
     }
 
