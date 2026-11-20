@@ -348,7 +348,7 @@ fn material(ss: &SolvedSketch) -> Result<Vec<Region2>> {
     let drawn = solidcraft_sketch::find_drawn_profiles(&ss.sketch);
     let ps = solidcraft_sketch::without_text_counters(&ss.sketch, if drawn.is_empty() { ss.profiles.clone() } else { drawn });
     if ps.is_empty() {
-        return Err(DocError::Invalid(format!("{} has no closed profiles", ss.name)));
+        return Err(crate::eval::no_closed_profiles(ss));
     }
     if ps.len() > MAX_PROFILE_PIECES {
         return Err(DocError::Invalid(format!("{} has more than {MAX_PROFILE_PIECES} profiles (pick the member's with `profiles`)", ss.name)));

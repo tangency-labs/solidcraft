@@ -959,6 +959,52 @@ fn append_warning(warning: &mut Option<String>, note: String) {
     });
 }
 
+/// The refusal of a sketch that makes no closed profile, saying where it is open: how many of its
+/// profile curves' ends touch nothing, and the two nearest such ends of different curves with
+/// their gap (often a rounding gap a coincident constraint closes), so the curves to join are found
+/// without hunting. Positions are in the sketch's own coordinates.
+pub(crate) fn no_closed_profiles(ss: &SolvedSketch) -> DocError {
+    const COMPARED: usize = 2048;
+    let sk = &ss.sketch;
+    // Each open end with the curve it ends (the first ones only: the pairs are compared each with
+    // each), so the two ends of one stray curve are never offered as a gap to close.
+    let curve_of = |p: usize| sk.curves.iter().position(|c| c.kind.ends().is_some_and(|(a, b)| a == p || b == p));
+    let ends: Vec<(Vec2, Option<usize>)> = ss.ends.open.iter().take(COMPARED).filter_map(|&p| Some((sk.point(p)?, curve_of(p)))).collect();
+    let mut nearest: Option<(f64, Vec2, Vec2)> = None;
+    for (i, (a, ca)) in ends.iter().enumerate() {
+        for (b, cb) in ends.iter().skip(i + 1) {
+            if ca.is_some() && ca == cb {
+                continue;
+            }
+            let d = a.dist(*b);
+            if nearest.is_none_or(|(best, _, _)| d < best) {
+                nearest = Some((d, *a, *b));
+            }
+        }
+    }
+    // (a coordinate a hair below zero reads 0, not -0)
+    let coordinate = |v: f64| if v.abs() < 5e-7 { "0".to_string() } else { show_mm(v) };
+    let point = |v: Vec2| format!("({}, {})", coordinate(v.x), coordinate(v.y));
+    let count = ss.ends.open.len();
+    let which = if count > COMPARED { "two close ones" } else { "the nearest two" };
+    let where_open = match (ends.first(), nearest) {
+        (None, _) => String::new(),
+        (Some(_), Some((d, a, b))) => format!(
+            ": {count} ends of its curves touch no other curve, {which} {} mm apart at {} and {} in the sketch (sketch.loose_ends lists them; sketch.constraint.coincident joins two ends)",
+            show_mm(d),
+            point(a),
+            point(b)
+        ),
+        (Some((at, _)), None) if count == 1 => {
+            format!(": an end of its curves touches no other curve, at {} in the sketch (sketch.loose_ends lists the open ends)", point(*at))
+        }
+        (Some((at, _)), None) => {
+            format!(": {count} ends of its curves touch no other curve, one at {} in the sketch (sketch.loose_ends lists them)", point(*at))
+        }
+    };
+    DocError::Invalid(format!("{} has no closed profiles{where_open}", ss.name))
+}
+
 /// A length in mm, without trailing zeros.
 fn show_mm(v: f64) -> String {
     let s = format!("{v:.6}");
@@ -4879,7 +4925,7 @@ fn draft_corner_for(ss: &SolvedSketch, r: &Region2, distance: f64, taper: f64, n
 pub fn select_profiles(ss: &SolvedSketch, sel: &ProfileSel) -> Result<Vec<Region2>> {
     let ps = &ss.profiles;
     if ps.is_empty() {
-        return Err(DocError::Invalid(format!("{} has no closed profiles", ss.name)));
+        return Err(no_closed_profiles(ss));
     }
     let out: Vec<Region2> = match sel {
         // "All" means what was drawn: projected reference geometry (a face's auto-projected
