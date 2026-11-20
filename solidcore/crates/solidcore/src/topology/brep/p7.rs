@@ -1700,15 +1700,6 @@ fn make_face_with_curves_transfer_impl(
 
             // the end vertex
             let end_pt = curve.evaluate_point(k, end_param)?;
-            if end_pt.distance_squared(start_pt) < zone_tol * zone_tol && approx_len < zone_tol {
-                return Err(SolidError::topology(
-                    OP,
-                    TopologyFailure::CurveTooShort {
-                        length: approx_len,
-                        tolerance: zone_tol,
-                    },
-                ));
-            }
             // the loop's first vertex where only vertex slots follow to the loop's end and
             // one closes it
             let rest_vertices = (jj + 1..n).all(|i| is_vertex_slot(curve_total + i));

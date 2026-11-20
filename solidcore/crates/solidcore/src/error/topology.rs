@@ -216,15 +216,6 @@ pub enum TopologyFailure {
     /// The two edges the caller gave to glue do not share both their vertices.
     /// [`ErrorKind::InvalidInput`].
     EdgesNotSharingVertices,
-    /// A curve between two vertices of a new face's loop ends within `tolerance` of where it
-    /// starts, and its length, estimated from five chords, is below `tolerance` too: it
-    /// bounds nothing. [`ErrorKind::InvalidInput`].
-    CurveTooShort {
-        /// The curve's length estimated from five chords (`ApproximateLength`).
-        length: f64,
-        /// The zone tolerance both the end gap and the length are below.
-        tolerance: f64,
-    },
     /// The face's upward face use has no edge use (its loops are vertex loops, or it has
     /// none), so no edge gives a direction to vote with. [`ErrorKind::Unsupported`].
     FaceWithoutEdges,
@@ -678,7 +669,6 @@ impl TopologyFailure {
             | Self::SurfaceNotTransformable { .. }
             | Self::FaceListedTwice
             | Self::EdgesNotSharingVertices
-            | Self::CurveTooShort { .. }
             | Self::NoSectorForNewEdgeuse
             | Self::NoClassifiablePoint
             | Self::UvTrimCurvesNotMade
@@ -785,8 +775,7 @@ impl TopologyFailure {
             | Self::NoRegionsToKeepGiven
             | Self::NoFiniteRegion
             | Self::FaceListedTwice
-            | Self::EdgesNotSharingVertices
-            | Self::CurveTooShort { .. } => ErrorKind::InvalidInput,
+            | Self::EdgesNotSharingVertices => ErrorKind::InvalidInput,
             Self::CurveNotBSpline { .. }
             | Self::SurfaceWithoutNurbs { .. }
             | Self::FaceWithoutEdges
@@ -1051,11 +1040,6 @@ impl core::fmt::Display for TopologyFailure {
             Self::EdgesNotSharingVertices => {
                 f.write_str("the edges to glue do not share both vertices")
             }
-            Self::CurveTooShort { length, tolerance } => write!(
-                f,
-                "a curve between two vertices closes within {tolerance}, and its length \
-                 estimated from five chords, {length}, is below it"
-            ),
             Self::NoSectorForNewEdgeuse => {
                 f.write_str("no radial sector of the edge takes the new edge use")
             }
@@ -1814,10 +1798,6 @@ mod tests {
     fn the_face_copy_causes_keep_their_status_and_have_their_class() {
         use ErrorKind as K;
         let op = "topology::op";
-        let short = TopologyFailure::CurveTooShort {
-            length: 1e-9,
-            tolerance: 1e-6,
-        };
         let cases = [
             (
                 TopologyFailure::NoTrimmedBSpline,
@@ -1830,7 +1810,6 @@ mod tests {
                 SM_ERR,
                 K::InvalidInput,
             ),
-            (short, SM_ERR, K::InvalidInput),
             (TopologyFailure::NoSectorForNewEdgeuse, SM_ERR, K::Failed),
             (TopologyFailure::NoClassifiablePoint, SM_ERR, K::Failed),
             (TopologyFailure::UvTrimCurvesNotMade, SM_ERR, K::Failed),
@@ -1843,13 +1822,6 @@ mod tests {
             assert_eq!(e.topology_failure(), Some(&failure));
             assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
         }
-        // the measured length and the tolerance are in the message
-        assert!(
-            short
-                .to_string()
-                .contains("five chords, 0.000000001, is below"),
-            "{short}"
-        );
         // the trim curves' failure stays their cause, and decides defect or refusal
         let why = "a step the kernel got wrong";
         let cause = SolidError::topology(op, TopologyFailure::Defect { why });
