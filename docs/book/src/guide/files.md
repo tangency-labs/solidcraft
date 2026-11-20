@@ -430,6 +430,39 @@ Scripts, the CLI and the control channel never get these questions. `doc.open` o
 and reports `open_elsewhere` in its result (`read_only: true` opens it read-only), and `file.save`
 over a file that changed on disk fails with an error until it is given `overwrite: true`.
 
+## Designs in Git
+
+A design saved as `.json` is plain text, so Git shows what changed in it. A design saves as the
+same text each time, with a short list of numbers such as a point `[40.0, 6.0]` on one line. Choose
+`.json` with **Save As** for a design you keep in a repository.
+
+A `.sc` design is a container (a ZIP file), which Git shows only as changed binary data. To see its
+changes as text in `git diff`, `git log -p` and `git show`, have Git run `solidcraft-cli textconv`
+on it. Add these lines to the repository's `.gitattributes` and commit them.
+
+```text
+*.sc diff=solidcraft
+*.solidcraft diff=solidcraft
+```
+
+Then run this once on each computer.
+
+```text
+git config --global diff.solidcraft.textconv "solidcraft-cli textconv"
+git config --global diff.solidcraft.cachetextconv true
+```
+
+Git never runs a program that a repository names, which is why the second step is needed on each
+computer. If `solidcraft-cli` is not on your `PATH`, put its full path in the quotes, with forward
+slashes. `git diff --no-textconv` shows the raw change again.
+
+textconv prints the design first, laid out as a `.json` save lays it out. Then each other file the
+container holds, such as an imported STEP file, gets one line with its size and SHA-256, so a
+changed import shows as a changed line. The model cache, the preview and the signature log are
+left out, because they change on every save. A file textconv cannot show prints one line instead,
+and Git goes on with the rest of the diff. Web pages that show a repository's changes do not run
+textconv, so a `.sc` design still shows as binary there.
+
 ## Saving in the web app
 
 In Chrome, Edge and Opera, **Save As** opens your browser's save dialog and writes the
