@@ -22,11 +22,15 @@
 //! | [`TopologyFailure::NoRegionGiven`] | `SM_ERR_INVALID_INPUT` |
 //! | [`TopologyFailure::NoEdgeuseGiven`] | `SM_ERR_NULL_POINTER` |
 //! | [`TopologyFailure::NotInBrep`] | `SM_ERR` |
+//! | [`TopologyFailure::VertexNotInRegion`] | `SM_ERR` |
 //! | [`TopologyFailure::InfiniteRegionNotFirst`] | `SM_ERR` |
 //! | [`TopologyFailure::VertexNotOnEdge`] | `SM_ERR` |
 //! | [`TopologyFailure::ClosedEdge`] | `SM_ERR` |
+//! | [`TopologyFailure::NotLamina`] | `SM_ERR` |
+//! | [`TopologyFailure::LaminaNeighbourBound`] | `SM_ERR` |
 //! | [`TopologyFailure::TooFewEdgeuses`] | `SM_ERR` |
 //! | [`TopologyFailure::EdgeuseChainGap`] | `SM_ERR` |
+//! | [`TopologyFailure::HitNotOnBoundary`] | `SM_ERR` |
 //! | [`TopologyFailure::EdgeNotManifold`] | `SM_ERR` |
 //! | [`TopologyFailure::CurveNotBSpline`] | `SM_ERR_NULL_POINTER` |
 //! | [`TopologyFailure::NoTrimmedBSpline`] | `SM_ERR_INVALID_INPUT` |
@@ -38,6 +42,10 @@
 //! | [`TopologyFailure::NoFootOnSurface`] | `SM_ERR` |
 //! | [`TopologyFailure::TestVectorZero`] | `SM_ERR` |
 //! | [`TopologyFailure::SurfaceCacheNotMade`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::NoRadialSector`] | `SM_ERR` |
+//! | [`TopologyFailure::HitAtRayStart`] | `SM_ERR` |
+//! | [`TopologyFailure::CoincidenceUndecided`] | `SM_ERR` |
+//! | [`TopologyFailure::NoMatingCurve`] | `SM_ERR` |
 //! | [`TopologyFailure::CurveNotApproximated`] | `SM_ERR_NULL_POINTER` |
 //! | [`TopologyFailure::GatheredBothSides`] | `SM_ERR_ASSERT_FAILURE` |
 //! | [`TopologyFailure::EdgeNotDeletable`] | `SM_ERR` |
@@ -205,6 +213,12 @@ pub enum TopologyFailure {
     /// An entity the caller named (a region, a face) is not one of the B-rep's.
     /// [`ErrorKind::InvalidInput`].
     NotInBrep,
+    /// A vertex the caller named for an edge has no shell in the region the caller named
+    /// (the infinite region when the caller names none). [`ErrorKind::InvalidInput`].
+    VertexNotInRegion {
+        /// Whether it is the edge's end vertex (else its start vertex).
+        at_end: bool,
+    },
     /// The infinite region of the B-rep the caller gave is not first on its region list.
     /// [`ErrorKind::InvalidInput`].
     InfiniteRegionNotFirst,
@@ -214,6 +228,13 @@ pub enum TopologyFailure {
     /// The edge starts and ends at one vertex, which the routine does not take.
     /// [`ErrorKind::InvalidInput`].
     ClosedEdge,
+    /// The edge is not lamina (bounding one face only), which the routine needs.
+    /// [`ErrorKind::InvalidInput`].
+    NotLamina,
+    /// A neighbour of the lamina edge in its loop is neither lamina nor a seam of the
+    /// face's surface, so the face cannot be stretched to the mating surface there.
+    /// [`ErrorKind::InvalidInput`].
+    LaminaNeighbourBound,
     /// A corner blend was given `given` edge uses, fewer than the two it needs.
     /// [`ErrorKind::InvalidInput`].
     TooFewEdgeuses {
@@ -223,6 +244,8 @@ pub enum TopologyFailure {
     /// The edge uses given for a corner blend do not join end to end, even once the match
     /// tolerance has grown past a hundredfold. [`ErrorKind::InvalidInput`].
     EdgeuseChainGap,
+    /// The hit the caller gave names no face, edge or vertex. [`ErrorKind::InvalidInput`].
+    HitNotOnBoundary,
     /// A loop the marking crosses has an edge that is a wire, lamina or non-manifold,
     /// across which the marking cannot follow the face's neighbours.
     /// [`ErrorKind::Unsupported`].
@@ -277,6 +300,23 @@ pub enum TopologyFailure {
     /// that stopped it is the cause. Class `failed`; whether it is a defect or a refusal is
     /// its cause's.
     SurfaceCacheNotMade,
+    /// The curve's crossing of an edge falls in none of the edge's radial sectors.
+    /// Class `failed`.
+    NoRadialSector,
+    /// The nearest hit of the ray is `distance` along it, below `tolerance`: at the ray's
+    /// start or behind it. Class `failed`.
+    HitAtRayStart {
+        /// The ray parameter of the nearest hit.
+        distance: f64,
+        /// The distance below which a hit counts as at the start.
+        tolerance: f64,
+    },
+    /// The classification could not decide whether a maybe-coincident interval is
+    /// coincident. Class `failed`.
+    CoincidenceUndecided,
+    /// No curve of the intersection of the extended surfaces meets both of the lamina
+    /// edge's extended neighbours. Class `failed`.
+    NoMatingCurve,
     /// The edge's curve could be neither lifted nor approximated as a B-spline (the
     /// approximation's failure is the cause). Class `failed`; whether it is a defect or a
     /// refusal is its cause's ([`crate::SolidError::is_defect`] follows the chain).
@@ -670,11 +710,15 @@ impl TopologyFailure {
             | Self::Defect { .. }
             | Self::EditingDisabled
             | Self::NotInBrep
+            | Self::VertexNotInRegion { .. }
             | Self::InfiniteRegionNotFirst
             | Self::VertexNotOnEdge
             | Self::ClosedEdge
+            | Self::NotLamina
+            | Self::LaminaNeighbourBound
             | Self::TooFewEdgeuses { .. }
             | Self::EdgeuseChainGap
+            | Self::HitNotOnBoundary
             | Self::EdgeNotManifold
             | Self::FaceWithoutEdges
             | Self::WireEndSqueezed
@@ -682,6 +726,10 @@ impl TopologyFailure {
             | Self::SideUndecided { .. }
             | Self::NoFootOnSurface
             | Self::TestVectorZero
+            | Self::NoRadialSector
+            | Self::HitAtRayStart { .. }
+            | Self::CoincidenceUndecided
+            | Self::NoMatingCurve
             | Self::EdgeNotDeletable
             | Self::InnerLoopsOnBothSides
             | Self::LaminaEdgeIsStrut
@@ -802,12 +850,16 @@ impl TopologyFailure {
             | Self::NoRegionGiven
             | Self::NoEdgeuseGiven
             | Self::NotInBrep
+            | Self::VertexNotInRegion { .. }
             | Self::InfiniteRegionNotFirst
             | Self::VertexNotOnEdge
             | Self::ClosedEdge
+            | Self::NotLamina
+            | Self::LaminaNeighbourBound
             | Self::TooFewEdgeuses { .. }
             | Self::EdgeuseChainGap
             | Self::VertexHasEdges
+            | Self::HitNotOnBoundary
             | Self::FaceWithoutSurface
             | Self::EdgeWithoutCurve
             | Self::NoStartEdgeUse
@@ -915,11 +967,20 @@ impl core::fmt::Display for TopologyFailure {
             Self::NoRegionGiven => f.write_str("no region was given"),
             Self::NoEdgeuseGiven => f.write_str("no edge use was given"),
             Self::NotInBrep => f.write_str("the entity given is not one of the B-rep's"),
+            Self::VertexNotInRegion { at_end } => write!(
+                f,
+                "the {} vertex given has no shell in the region given",
+                if *at_end { "end" } else { "start" }
+            ),
             Self::InfiniteRegionNotFirst => {
                 f.write_str("the infinite region is not first on the B-rep's region list")
             }
             Self::VertexNotOnEdge => f.write_str("the surviving vertex is not on the edge"),
             Self::ClosedEdge => f.write_str("the edge starts and ends at one vertex"),
+            Self::NotLamina => f.write_str("the edge is not a lamina edge"),
+            Self::LaminaNeighbourBound => {
+                f.write_str("a neighbour of the lamina edge is neither lamina nor a seam")
+            }
             Self::TooFewEdgeuses { given } => {
                 write!(
                     f,
@@ -929,6 +990,7 @@ impl core::fmt::Display for TopologyFailure {
             Self::EdgeuseChainGap => {
                 f.write_str("the corner blend's edge uses do not join end to end")
             }
+            Self::HitNotOnBoundary => f.write_str("the hit names no face, edge or vertex"),
             Self::EdgeNotManifold => {
                 f.write_str("a loop to delete has a wire, lamina or non-manifold edge")
             }
@@ -973,6 +1035,23 @@ impl core::fmt::Display for TopologyFailure {
             ),
             Self::SurfaceCacheNotMade => {
                 f.write_str("the cache of the face's surface could not be made")
+            }
+            Self::NoRadialSector => f.write_str("the curve's radial sector has no edge use"),
+            Self::HitAtRayStart {
+                distance,
+                tolerance,
+            } => {
+                write!(
+                    f,
+                    "the nearest hit is at the ray's start ({distance} along it, below \
+                     {tolerance})"
+                )
+            }
+            Self::CoincidenceUndecided => {
+                f.write_str("a coincident interval could not be resolved")
+            }
+            Self::NoMatingCurve => {
+                f.write_str("no intersection curve meets both neighbouring edges")
             }
             Self::CurveNotApproximated => {
                 f.write_str("the edge's curve could not be made a B-spline")
@@ -1379,18 +1458,30 @@ mod tests {
             ),
             (TopologyFailure::NotInBrep, SM_ERR, K::InvalidInput),
             (
+                TopologyFailure::VertexNotInRegion { at_end: true },
+                SM_ERR,
+                K::InvalidInput,
+            ),
+            (
                 TopologyFailure::InfiniteRegionNotFirst,
                 SM_ERR,
                 K::InvalidInput,
             ),
             (TopologyFailure::VertexNotOnEdge, SM_ERR, K::InvalidInput),
             (TopologyFailure::ClosedEdge, SM_ERR, K::InvalidInput),
+            (TopologyFailure::NotLamina, SM_ERR, K::InvalidInput),
+            (
+                TopologyFailure::LaminaNeighbourBound,
+                SM_ERR,
+                K::InvalidInput,
+            ),
             (
                 TopologyFailure::TooFewEdgeuses { given: 1 },
                 SM_ERR,
                 K::InvalidInput,
             ),
             (TopologyFailure::EdgeuseChainGap, SM_ERR, K::InvalidInput),
+            (TopologyFailure::HitNotOnBoundary, SM_ERR, K::InvalidInput),
             (TopologyFailure::EdgeNotManifold, SM_ERR, K::Unsupported),
             (
                 TopologyFailure::CurveNotBSpline { entity: None },
@@ -1433,6 +1524,17 @@ mod tests {
                 SM_ERR_NULL_POINTER,
                 K::Failed,
             ),
+            (TopologyFailure::NoRadialSector, SM_ERR, K::Failed),
+            (
+                TopologyFailure::HitAtRayStart {
+                    distance: 0.0,
+                    tolerance: 1e-12,
+                },
+                SM_ERR,
+                K::Failed,
+            ),
+            (TopologyFailure::CoincidenceUndecided, SM_ERR, K::Failed),
+            (TopologyFailure::NoMatingCurve, SM_ERR, K::Failed),
             (
                 TopologyFailure::CurveNotApproximated,
                 SM_ERR_NULL_POINTER,
@@ -1979,7 +2081,6 @@ mod tests {
             ("solidcore/src/topology/brep/local_operation.rs", 5),
             ("solidcore/src/topology/brep/mirror.rs", 2),
             ("solidcore/src/topology/brep/p10.rs", 10),
-            ("solidcore/src/topology/brep/p2.rs", 16),
             ("solidcore/src/topology/brep/p6.rs", 29),
             ("solidcore/src/topology/brep/p7.rs", 13),
             ("solidcore/src/topology/brep/p8.rs", 15),
