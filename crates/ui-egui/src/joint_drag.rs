@@ -17,7 +17,7 @@ use solidcraft_engine::geom::Aabb3;
 use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
-use crate::viewport::{Hit, Proj};
+use crate::viewport::Proj;
 
 /// A drag under way.
 #[derive(Clone, Debug)]
@@ -76,17 +76,7 @@ fn turned(v: Vec3, k: Vec3, angle: f64) -> Vec3 {
 /// Begin a drag on the part under `p` when joints place it and leave it free to move (it is
 /// neither grounded nor fixed to what is). True when one began.
 pub fn start(app: &mut SolveApp, proj: &Proj, p: Pos2) -> bool {
-    // The face under the pointer, past the part's own edges and vertices (not past sketches or
-    // construction geometry in front of it).
-    let hits = crate::viewport::pick(app, proj, p);
-    let Some((body, at)) =
-        hits.into_iter().take_while(|h| matches!(h, Hit::Face { .. } | Hit::Edge { .. } | Hit::Vertex { .. })).find_map(|h| match h {
-            Hit::Face { body, point, .. } => Some((body, point)),
-            _ => None,
-        })
-    else {
-        return false;
-    };
+    let Some((body, at)) = crate::occurrence_drag::grabbed_face(app, proj, p) else { return false };
     let s = &app.session;
     let Some(occurrence) = crate::dialogs_assembly::occurrence_of_body(s, &body).filter(|o| *o != 0) else { return false };
     if !s.doc.assembly.joints.iter().any(|j| !j.suppressed && (j.a.occurrence == occurrence || j.b.occurrence == occurrence)) {
@@ -169,6 +159,7 @@ pub fn end(app: &mut SolveApp) {
 mod tests {
     use serde_json::{Value, json};
     use solidcore_record::Vec3;
+    use solidcraft_engine::Sel;
     use solidcraft_engine::doc::{apply_point, joints};
     use solidcraft_engine::geom::prelude::*;
 
@@ -253,6 +244,30 @@ mod tests {
         assert!(!h.app.session.log.iter().any(|l| l.contains("Reach")), "frames are not echoed: {:?}", h.app.session.log);
         run(&mut h, "edit.undo", json!({}));
         assert!(arm_at(&h, end).dist(end) < 1e-9, "{:?}", arm_at(&h, end));
+    }
+
+    /// #15648: a grounded cover over the arm's far end hides that end from above. With nothing
+    /// selected, a drag there draws a selection box; with the arm selected in the Browser, the
+    /// same drag turns the arm.
+    #[test]
+    fn a_selected_jointed_part_turns_where_a_grounded_part_is_in_front() {
+        let (mut h, end, a, b) = hinged_arm();
+        let cover = run(&mut h, "component.create", json!({"name": "Cover"}))["occurrence"].as_u64().expect("occurrence");
+        run(&mut h, "solid.box", json!({"length": 10, "width": 10, "height": 15, "corner": [50, -5, 0]}));
+        run(&mut h, "component.activate", json!({"component": "root"}));
+        run(&mut h, "occurrence.ground", json!({"occurrence": cover, "grounded": true}));
+        run(&mut h, "select.set", json!({"items": []}));
+        h.frames(2);
+        press_and_move(&mut h, a, b);
+        assert!(h.app.viewport.joint_drag.is_none() && h.app.viewport.boxsel.is_some(), "with nothing selected, the cover in front takes the drag");
+        release(&mut h, b);
+        assert!(arm_at(&h, end).dist(end) < 1e-9, "{:?}", arm_at(&h, end));
+        let arm = h.app.session.doc.find_component("Arm").and_then(|c| h.app.session.doc.occurrence_of(c)).map(|o| o.id).expect("the arm");
+        run(&mut h, "select.set", json!({"items": [Sel::Occurrence { path: vec![arm] }]}));
+        press_and_move(&mut h, a, b);
+        assert!(h.app.viewport.joint_drag.is_some() && h.app.viewport.boxsel.is_none(), "the drag turns the selected arm");
+        release(&mut h, b);
+        assert!(arm_at(&h, end).dist(Vec3::new(0.0, 55.0, 10.0)) < 0.5, "{:?}", arm_at(&h, end));
     }
 
     /// #5137: while a part is dragged along its joint, nothing under the pointer highlights; hover

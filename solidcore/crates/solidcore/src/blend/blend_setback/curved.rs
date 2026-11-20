@@ -116,7 +116,7 @@ fn circumcentre(a: Vec3, m: Vec3, b: Vec3) -> Option<Vec3> {
 }
 
 /// A net's four components as polynomials.
-fn comps(net: &Net) -> Result<[Tensor; 4]> {
+pub(super) fn comps(net: &Net) -> Result<[Tensor; 4]> {
     let mk = |c: usize| -> Result<Tensor> {
         let mut t = t_make(net.p, net.q);
         for (i, ti) in t.c.iter_mut().enumerate() {
@@ -2281,4 +2281,309 @@ pub(super) fn containment_curved(fill: &Fill, faces: &[Face], convex: bool) -> R
         }
     }
     Ok(0.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::nurbs::b_spline_curve::KnotType;
+    use crate::nurbs::b_spline_surface::{BSplineSurfaceForm, CanonicalSurfaceData, SurfParamType};
+    use crate::surface::surface::Surface;
+
+    /// The quarter circle about the z axis from (1, 0) to (0, 1): its rational quadratic
+    /// control points' (x, y) and weights.
+    const QX: [f64; 3] = [1.0, 1.0, 0.0];
+    const QY: [f64; 3] = [0.0, 1.0, 1.0];
+
+    fn qw() -> [f64; 3] {
+        [1.0, 0.5f64.sqrt(), 1.0]
+    }
+
+    /// A one-span patch of degree (2, q) swept about the z axis: u the quarter circle, v the
+    /// rows `(rho, z, weight)` (`q + 1` of them), control point `(i, j)` at
+    /// `(rho_j QX_i, rho_j QY_i, z_j)` of weight `QW_i weight_j`.
+    fn swept(rows: &[[f64; 3]]) -> BSplineSurface {
+        let q = rows.len() - 1;
+        let (mut pts, mut ws) = (Vec::new(), Vec::new());
+        for i in 0..3 {
+            for row in rows {
+                pts.push(Point3::new(row[0] * QX[i], row[0] * QY[i], row[1]));
+                ws.push(qw()[i] * row[2]);
+            }
+        }
+        BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 2,
+            v_degree: q,
+            control_points: &pts,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[3, 3],
+            v_multiplicities: &[q + 1, q + 1],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(ws.as_slice()),
+            uv_domain: None,
+        })
+        .unwrap()
+    }
+
+    /// A concave quadric about the z axis through the origin, the material outside it
+    /// (side -1): a bore (cylinder R 5), a spherical cavity (R 5) or a countersink (cone of
+    /// radius `4 + z`).
+    fn bore() -> Face {
+        Face {
+            kind: FaceKind::Cylinder,
+            radius: 5.0,
+            side: -1.0,
+            ..Face::default()
+        }
+    }
+
+    fn cavity() -> Face {
+        Face {
+            kind: FaceKind::Sphere,
+            ..bore()
+        }
+    }
+
+    fn countersink() -> Face {
+        Face {
+            kind: FaceKind::Cone,
+            radius: 4.0,
+            slope: 1.0,
+            ..bore()
+        }
+    }
+
+    /// `no_more_concave` on patches lying ON a concave face, so G1 to it along both columns:
+    /// a quarter of the bore (z 0 to 4), a piece of the spherical cavity (latitudes 0 to 45
+    /// degrees) and a quarter of the countersink (z 0 to 3). On each, `II + |k| I` is
+    /// singular wherever the face's least normal curvature k is reached (the cylinder's
+    /// circumferential direction everywhere, every direction on the sphere, the cone's
+    /// circumferential direction at z = 0). So the certificate must accept k = that least
+    /// curvature (-1/5, -1/5, and the cone's `-1 / (rho sqrt(1 + slope^2))` at rho 4,
+    /// `-1 / (4 sqrt 2)`): an equality, which a bound short of `|Pu x Pv|` on the columns
+    /// refuses. It must refuse a k of smaller size, where the face is more concave than k
+    /// allows (-1/10, -1/10, and 0.9 x the cone's): the check is not vacuous. A k that is
+    /// not negative, NaN included, is invalid input.
+    #[test]
+    fn no_more_concave_accepts_the_equality_and_refuses_a_smaller_k_on_quadrics() {
+        let (c45, t22, c22) = (0.5f64.sqrt(), (PI / 8.0).tan(), (PI / 8.0).cos());
+        // Each face's least normal curvature, from its geometry, II taken with the unit normal
+        // into the material (away from the axis or centre), so a concave face curves away
+        // from that normal and its normal curvatures are <= 0:
+        // - bore, a cylinder of radius R = 5: the rulings are straight (0); the
+        //   circumferential circle of radius R curves toward the axis, against the normal:
+        //   -1/R = -1/5, the least, everywhere.
+        let (bore, cavity, cone) = (bore(), cavity(), countersink());
+        let k_bore = -1.0 / bore.radius;
+        // - spherical cavity of radius R = 5: an umbilic surface, every direction -1/R = -1/5.
+        let k_cavity = -1.0 / cavity.radius;
+        // - countersink, a cone of radius rho = 4 + z (slope 1): its half-angle alpha has
+        //   tan alpha = slope (45 degrees). The rulings are straight (0). The circumferential
+        //   circle of radius rho has curvature 1/rho toward the axis, at the angle alpha to the
+        //   surface normal, so by Meusnier its normal curvature is -cos(alpha) / rho =
+        //   -1 / (rho sqrt(1 + slope^2)). It is most negative where rho is least: on the
+        //   patch (z 0 to 3) at z = 0, rho = 4: -1 / (4 sqrt 2).
+        let alpha = cone.slope.atan();
+        let k_cone = -alpha.cos() / cone.radius;
+        assert!((k_cone + 1.0 / (4.0 * 2f64.sqrt())).abs() <= 1e-15);
+        // The smaller k (of less size): -1/10, half the bore's and cavity's, and 0.9 x the
+        // cone's. Each face reaches its own least curvature on the patch, below that k, so
+        // II >= k I fails there and the certificate must refuse.
+        let cases = [
+            (
+                "bore",
+                bore,
+                vec![[5.0, 0.0, 1.0], [5.0, 4.0, 1.0]],
+                k_bore,
+                0.5 * k_bore,
+            ),
+            (
+                "spherical cavity",
+                cavity,
+                // the meridian arc from latitude 0 to 45 degrees, the rational quadratic about
+                // the centre: its middle control point at the tangents' meeting, (R, R tan
+                // 22.5 deg), of weight cos 22.5 deg
+                vec![
+                    [5.0, 0.0, 1.0],
+                    [5.0, 5.0 * t22, c22],
+                    [5.0 * c45, 5.0 * c45, 1.0],
+                ],
+                k_cavity,
+                0.5 * k_cavity,
+            ),
+            (
+                "countersink",
+                cone,
+                // the ruling from (rho 4, z 0) to (rho 7, z 3), on rho = 4 + z
+                vec![[4.0, 0.0, 1.0], [7.0, 3.0, 1.0]],
+                k_cone,
+                0.9 * k_cone,
+            ),
+        ];
+        // into the material (outside the cavity): the fill's convex side were it a fill
+        let into = Vec3::new(c45, c45, 0.0);
+        for (name, face, rows, k, smaller) in cases {
+            let patch = swept(&rows);
+            assert_eq!(
+                no_more_concave(&patch, &face, &face, into, k).unwrap(),
+                Some(true),
+                "{name}: the equality k {k} is certified"
+            );
+            assert_eq!(
+                no_more_concave(&patch, &face, &face, into, smaller).unwrap(),
+                Some(false),
+                "{name}: k {smaller}, the face more concave than it allows, is refused"
+            );
+            for bad in [0.0, 0.1, f64::NAN] {
+                assert!(
+                    no_more_concave(&patch, &face, &face, into, bad).is_err(),
+                    "{name}: k {bad} is invalid input"
+                );
+            }
+        }
+    }
+
+    /// `round_end_curvature` on a torus round inside a bore: axis z, the tube's centre
+    /// circle radius 10, tube radius 2; its section from -45 to 45 degrees about the tube's
+    /// innermost point (rho 8), the rails along u (the circumferential quarter circle), ending
+    /// at u = 0. With the normal toward the tube's centre the section's own curvature is
+    /// +1/2 and the circumferential `-cos(phi) / (10 - 2 cos phi)`, least -1/8 at the
+    /// section's MIDDLE (phi 0, not an end): k = -1/8. Turned the other way (the normal away
+    /// from the tube's centre) the section is convex circumferentially and concave across:
+    /// k = -1/2. Each is found by a certified bisection to `1e-13` of itself, each step's
+    /// certificate within `1e-12` of its terms' size (a few times the curvature here): k
+    /// within `1e-11` of itself. That bound holds because the least curvature sits at
+    /// phi = 0, the row's parameter 1/2: the first midpoint split of this symmetric
+    /// -45 to 45 degree section, where the halves' Bernstein end coefficients are the
+    /// values there exactly, so the certificate's slack is not spent on the subdivision's
+    /// enclosure (not because of the subdivision's depth). A section whose least point is
+    /// not at a split (an asymmetric one) would need a looser bound.
+    #[test]
+    fn round_end_curvature_of_a_torus_round_in_a_bore() {
+        // the tube's centre circle radius A = 10, its radius a = 2; the section's point at
+        // angle phi from the innermost point is at rho = A - a cos(phi), z = a sin(phi):
+        // phi = -45, 45 degrees at (A - a / sqrt 2, -+a / sqrt 2), and the middle control
+        // point where their tangents meet, (A - a sqrt 2, 0), of weight cos 45 deg
+        let (big_a, a) = (10.0, 2.0);
+        let s2 = 2f64.sqrt();
+        let c45 = 0.5f64.sqrt();
+        let torus = Surface::from(swept(&[
+            [big_a - a / s2, -a / s2, 1.0],
+            [big_a - a * s2, 0.0, c45],
+            [big_a - a / s2, a / s2, 1.0],
+        ]));
+        let round = Round {
+            surface: &torus,
+            along: SurfParamType::U,
+            end: 0.0,
+            corner_above: false,
+        };
+        let kernel = Kernel::default();
+        let k_in = round_end_curvature(&kernel, &round, Vec3::new(1.0, 0.0, 0.0)).unwrap();
+        let k_out = round_end_curvature(&kernel, &round, Vec3::new(-1.0, 0.0, 0.0)).unwrap();
+        // The expected values from the radii. On a surface of revolution the principal
+        // directions are the section and the circumferential circle, so the least normal
+        // curvature at a point is the lesser of those two. With the unit normal n toward the
+        // tube's centre:
+        // - the section is a circle of radius a curving toward the tube's centre, along n:
+        //   +1/a = +1/2;
+        // - the circumferential circle of radius rho = A - a cos(phi) curves toward the z
+        //   axis; n points away from the axis by cos(phi) (radially outward component), so by
+        //   Meusnier its normal curvature is -cos(phi) / (A - a cos(phi)). Over |phi| <= 45
+        //   deg it is least where cos(phi) is greatest, phi = 0 (the section's middle, not an
+        //   end): -1 / (A - a) = -1/8.
+        // So k = min(1/a, -1/(A - a)) = -1/8. Turned over (n away from the tube's centre)
+        // both signs flip: the section -1/a = -1/2, the circumferential cos(phi) / rho >= 0,
+        // so k = -1/a = -1/2.
+        let want_in = (1.0 / a).min(-1.0 / (big_a - a));
+        let want_out = -1.0 / a;
+        assert_eq!((want_in, want_out), (-0.125, -0.5));
+        assert!(
+            (k_in - want_in).abs() <= 1e-11 * want_in.abs(),
+            "toward the tube's centre: k {k_in}, not -1/8"
+        );
+        assert!(
+            (k_out - want_out).abs() <= 1e-11 * want_out.abs(),
+            "away from the tube's centre: k {k_out}, not -1/2"
+        );
+    }
+
+    /// `containment_curved` beside a concave quadric (material outside, side -1): a
+    /// quarter-cylinder patch about the bore's axis at radius 5.5 (z 0 to 3) lies in the
+    /// material and is certified contained (0); at 4.5 it lies in the bore and is refused
+    /// (infinite). Likewise a patch 0.5 outside and 0.5 inside the countersink (radius
+    /// `4 + z`, so `4.5 + z` and `3.5 + z`). The patches are not setback patches of a cycle
+    /// (`face` empty): no column is taken as lying on the face.
+    #[test]
+    fn containment_curved_accepts_a_contained_patch_and_refuses_one_past_the_face() {
+        for (name, face) in [("bore", bore()), ("countersink", countersink())] {
+            for off in [0.5, -0.5] {
+                let rows: Vec<[f64; 3]> = [0.0, 3.0]
+                    .iter()
+                    .map(|&z| [face.radius + face.slope * z + off, z, 1.0])
+                    .collect();
+                let fill = Fill {
+                    patches: vec![swept(&rows)],
+                    ..Fill::default()
+                };
+                // The expected sign from the geometry: each patch's points lie at
+                // distance rho_face(z) + off from the axis (a quarter circle at each z,
+                // linear between z 0 and 3 along the face's own ruling direction, so the
+                // radial offset is off all along). The material is outside the face
+                // (side -1): off = +0.5 is in it, -0.5 is in the hole.
+                let worst = containment_curved(&fill, &[face], true).unwrap();
+                if off > 0.0 {
+                    assert_eq!(worst, 0.0, "{name}, {off} into the material: contained");
+                } else {
+                    assert_eq!(worst, f64::INFINITY, "{name}, {off} past the face: refused");
+                }
+            }
+        }
+    }
+
+    /// `containment_curved` on a setback patch's column lying on a face (`fill.face` names
+    /// the face, so the form's `v^2` is divided out and its dropped `v^0`, `v^1`
+    /// coefficients checked to be rounding), on a concave corner's side (`convex = false`)
+    /// beside a sphere of radius 5 about the origin with the material inside it (side +1).
+    /// There the fill must lie outside the sphere, out of the material. Each patch is the
+    /// quarter circle in u swept along v by the rows `(rho, z)` `(5, 0)`, `(5 + b, 1)`,
+    /// `(5 + c, 2)` (weights 1 in v), so `rho(v) = 5 + 2 b v + (c - 2 b) v^2`, `z = 2 v`,
+    /// and its column v = 0 is the sphere's equator. The sphere's form at a point is
+    /// `rho^2 + z^2 - 25` times the u-weight squared:
+    /// - `b = 0, c = 1`: `rho = 5 + v^2`, the patch leaves the equator vertically, tangent to
+    ///   the sphere (G1 to it there), and `rho^2 + z^2 - 25 = 14 v^2 + v^4 >= 0`: outside
+    ///   the sphere everywhere, so contained (0). The form is `v^2 (14 + v^2)`, its `v^0`,
+    ///   `v^1` coefficients 0.
+    /// - `b = 0, c = -1`: `rho = 5 - v^2`, still tangent, but `-6 v^2 + v^4 < 0` on
+    ///   `0 < v <= 1`: inside the sphere, in the material: refused (infinite). The defect
+    ///   next to the accepted case is still caught after the division by `v^2`.
+    /// - `b = 1/2, c = 1`: `rho = 5 + v`, outside the sphere (`10 v + 5 v^2 > 0`) but not
+    ///   tangent to it along the column: the form's `v^1` coefficient is not rounding, so
+    ///   the patch is not G1 to its face there and is refused (infinite), the conservative
+    ///   side.
+    #[test]
+    fn containment_curved_on_a_column_lying_on_a_sphere() {
+        let sphere = Face {
+            kind: FaceKind::Sphere,
+            radius: 5.0,
+            side: 1.0,
+            ..Face::default()
+        };
+        for (b, c, contained) in [(0.0, 1.0, true), (0.0, -1.0, false), (0.5, 1.0, false)] {
+            let fill = Fill {
+                patches: vec![swept(&[
+                    [5.0, 0.0, 1.0],
+                    [5.0 + b, 1.0, 1.0],
+                    [5.0 + c, 2.0, 1.0],
+                ])],
+                face: vec![0],
+                ..Fill::default()
+            };
+            let worst = containment_curved(&fill, &[sphere], false).unwrap();
+            let want = if contained { 0.0 } else { f64::INFINITY };
+            assert_eq!(worst, want, "rows b {b}, c {c}: {worst}");
+        }
+    }
 }

@@ -101,7 +101,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let metadata = app.session.doc.metadata.clone();
     let title = solidcraft_ui_text::tr_label("Design Properties");
     let window = ui_kit::Window::new(egui::Id::unique("sc_design_properties"), "settings", title).fields();
-    let window = if let Some((pivot, at)) = crate::shell::floating_editor_anchor(app, ctx) { window.placed(pivot, at) } else { window };
+    let (pivot, at) = crate::shell::floating_editor_anchor(app, ctx);
+    let window = window.placed(pivot, at);
     let (closed, action) = window.show(ctx, true, |ui| {
         for (i, k) in keys(Owner::Design).enumerate() {
             let (key, label) = (k.name, solidcraft_ui_text::tr(k.label));
@@ -270,15 +271,16 @@ fn show_measuring(app: &mut SolveApp, ctx: &egui::Context) {
         }
         None => app.tr("ui.properties.measuring").to_string(),
     };
-    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_props"), "settings", &heading).actions("", "Close", None).show(ctx, true, |ui| {
-        ui.horizontal(|ui| {
-            ui.spinner();
-            ui_kit::text(ui, &text, ui_kit::Text::Note("measuring"));
+    let (closed, action) =
+        ui_kit::Window::new(egui::Id::unique("sc_props"), "settings", &heading).actions("", "ui.close", None).show(ctx, true, |ui| {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui_kit::text(ui, &text, ui_kit::Text::Note("measuring"));
+            });
+            if let Some((done, total)) = bodies.filter(|(_, total)| *total > 0) {
+                ui_kit::progress(ui, "properties_measuring", done as f32 / total as f32);
+            }
         });
-        if let Some((done, total)) = bodies.filter(|(_, total)| *total > 0) {
-            ui_kit::progress(ui, "properties_measuring", done as f32 / total as f32);
-        }
-    });
     if !(closed || action == ui_kit::Action::Cancel) {
         app.menu.props_measuring = Some(m);
     }
@@ -465,49 +467,50 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
     let copy_hint = app.tr("ui.properties.copy_value").to_string();
     let mut copied = false;
     let heading = window_title(&title, &v);
-    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_props"), "settings", &heading).actions("", "Close", None).show(ctx, true, |ui| {
-        // Each value copies itself as shown, unit and all, when clicked (#12218).
-        for (label, value) in &rows {
-            let label = solidcraft_ui_text::tr_label(label);
-            let name = format!("{label}: {value}");
-            ui_kit::row(ui, label, |ui| copied |= ui_kit::copy_cell(ui, value, &name, false, &copy_hint));
-        }
-        if let Some(first) = &first {
-            let name = format!("{first_label}: {first}");
-            ui_kit::row(ui, &first_label, |ui| copied |= ui_kit::copy_cell(ui, first, &name, false, &copy_hint));
-        }
-        if !inertia.is_empty() || unavailable {
-            ui_kit::section(ui, "sc_props_inertia", &section, true, |ui| {
-                if unavailable {
-                    ui_kit::text(ui, &unavailable_text, ui_kit::Text::Note("inertia_unavailable"));
-                    return;
-                }
-                ui_kit::text(ui, &note, ui_kit::Text::Note("inertia_note"));
-                for (n, (label, cells)) in inertia.iter().enumerate() {
-                    ui_kit::row(ui, label, |ui| {
-                        ui.columns(cells.len(), |columns| {
-                            for (i, (column, cell)) in columns.iter_mut().zip(cells).enumerate() {
-                                let name = cell_name(label, cells.len(), i, cell);
-                                copied |= ui_kit::copy_cell(column, cell, &name, true, &copy_hint);
-                            }
-                        })
-                    });
-                    // Under the tensor's last row: copy it whole.
-                    if n == 2
-                        && let Some(text) = &copy
-                    {
-                        ui_kit::row(ui, "", |ui| {
-                            let button = ui_kit::button(ui, &copy_label, ui_kit::Button::Small);
-                            crate::scenario::publish_handle("properties:copy_inertia", button.rect.center());
-                            if button.clicked() {
-                                ui.ctx().copy_text(text.clone());
-                            }
-                        });
+    let (closed, action) =
+        ui_kit::Window::new(egui::Id::unique("sc_props"), "settings", &heading).actions("", "ui.close", None).show(ctx, true, |ui| {
+            // Each value copies itself as shown, unit and all, when clicked (#12218).
+            for (label, value) in &rows {
+                let label = solidcraft_ui_text::tr_label(label);
+                let name = format!("{label}: {value}");
+                ui_kit::row(ui, label, |ui| copied |= ui_kit::copy_cell(ui, value, &name, false, &copy_hint));
+            }
+            if let Some(first) = &first {
+                let name = format!("{first_label}: {first}");
+                ui_kit::row(ui, &first_label, |ui| copied |= ui_kit::copy_cell(ui, first, &name, false, &copy_hint));
+            }
+            if !inertia.is_empty() || unavailable {
+                ui_kit::section(ui, "sc_props_inertia", &section, true, |ui| {
+                    if unavailable {
+                        ui_kit::text(ui, &unavailable_text, ui_kit::Text::Note("inertia_unavailable"));
+                        return;
                     }
-                }
-            });
-        }
-    });
+                    ui_kit::text(ui, &note, ui_kit::Text::Note("inertia_note"));
+                    for (n, (label, cells)) in inertia.iter().enumerate() {
+                        ui_kit::row(ui, label, |ui| {
+                            ui.columns(cells.len(), |columns| {
+                                for (i, (column, cell)) in columns.iter_mut().zip(cells).enumerate() {
+                                    let name = cell_name(label, cells.len(), i, cell);
+                                    copied |= ui_kit::copy_cell(column, cell, &name, true, &copy_hint);
+                                }
+                            })
+                        });
+                        // Under the tensor's last row: copy it whole.
+                        if n == 2
+                            && let Some(text) = &copy
+                        {
+                            ui_kit::row(ui, "", |ui| {
+                                let button = ui_kit::button(ui, &copy_label, ui_kit::Button::Small);
+                                crate::scenario::publish_handle("properties:copy_inertia", button.rect.center());
+                                if button.clicked() {
+                                    ui.ctx().copy_text(text.clone());
+                                }
+                            });
+                        }
+                    }
+                });
+            }
+        });
     if copied {
         app.set_status(solidcraft_ui_text::tr("ui.properties.value_copied"), false);
     }

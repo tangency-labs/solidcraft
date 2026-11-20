@@ -15,12 +15,15 @@ design · **3** Save · **4** Export: meshes, STEP, a DXF of the view, URDF, JSO
 | `.json` (self-contained plain JSON design) | yes | yes |
 | STEP (AP203, AP214, AP242) | solids, assemblies, units, names, colours | AP242 with names, colours and the component tree |
 | IGES 5.3 | manifold solids, or trimmed surfaces sewn into solids | manifold solids with names and colours |
-| FreeCAD `.FCStd`, Rhino `.3dm` | solids, through cadmpeg | |
+| FreeCAD `.FCStd` | sketches and features (Pad, Pocket, Revolution, Groove, Fillet, Chamfer, primitives, Mirrored, patterns), else solids, through cadmpeg | |
+| Rhino `.3dm` | solids, through cadmpeg | |
 | 3MF, STL, OBJ | mesh bodies | yes |
 | glTF 2.0 (`.glb`, `.gltf` with its `.bin` files) | mesh bodies in the node tree's components, materials as appearances | `.glb`: placed bodies with their colours, metallic and roughness, in metres with Y up |
+| OpenUSD (`.usd`, `.usda`, `.usdc`, `.usdz`), through cadmpeg | mesh bodies in the prim tree's components, materials as appearances; with `geometry: "exact"`, its B-reps as B-rep bodies | each part's exact B-rep and a mesh of it, colours, the component tree; in metres with Z up |
 | 3MF with face tags | as 3MF | each triangle tagged with its B-rep face, exact coordinates |
 | URDF | | the assembly as a robot: links with meshes, mass and inertia, joints from the assembly's joints |
 | DXF, SVG | into a sketch | sketches and flat patterns as DXF |
+| Airfoil coordinates (`.dat`, Selig or Lednicer) | into a sketch, as one spline at the chord you set | |
 | PNG, JPEG | canvases and decals | |
 
 **File → Export GLB…** (`file.export` with a `.glb` path) writes one binary glTF file for web viewers,
@@ -31,11 +34,36 @@ requires, through one root node. A transparent body or face, and a body that a r
 image texture or optics, are refused with a message that names the body, since the file would show it
 wrongly; leave such a body out with `bodies`. A refused export leaves a file already at the path as it was.
 
+**File → Export OpenUSD…** (`file.export` with a `.usd`, `.usda`, `.usdc` or `.usdz` path) writes an
+OpenUSD stage for NVIDIA Omniverse and Isaac Sim, Blender, Apple's tools and other USD viewers. The
+extension picks the encoding: `.usda` is text, `.usdc` and `.usd` are binary, and `.usdz` is a package of
+one binary file. The bodies are written as `file.export` writes STEP (a design with components, when no
+bodies are chosen, as its component tree), and cadmpeg restates that as USD. Each part is an `Xform` prim
+holding its exact B-rep (a `BrepArray` prim) and a mesh of it for viewers; a part placed more than once is
+written once, under the abstract `Prototypes` prim, and referenced at each placement. Colours become
+`UsdPreviewSurface` materials. The stage is in metres with Z up and says so in its metadata. Metallic,
+roughness, transparency and textures are not written yet, and neither are joints, masses or collision
+shapes.
+
 Opening a STEP, IGES, FreeCAD or Rhino file creates a design with the file's bodies as a base feature, and
-inserting one adds them to the current design. Later features build on them. Mesh bodies render,
+inserting one adds them to the current design. Later features build on them. A FreeCAD file's
+sketches and features are rebuilt as SolidCraft features instead, so its dimensions can be edited;
+when one cannot be, its bodies come in as a base feature and a warning says why (Preferences ›
+General › FreeCAD files turns the rebuild off). Mesh bodies render,
 measure, move and export, but solid features need B-rep bodies.
 
-Every imported file (STEP, IGES, 3MF, STL, OBJ or glTF) comes in as a new component named after the
+The stand-up offer for STEP and IGES files remembers your answer for unchanged files; Preferences › Design lets you turn this memory off or forget all remembered answers.
+
+Reopening an unchanged STEP or IGES file reuses its untouched import from a local cache,
+keyed by the file's SHA-256, import options and application build. It uses the same lossless,
+validated model cache as saved designs; a missing, damaged or incompatible entry imports
+again. Later edits and stand-up rotations are never stored in it, and your remembered
+stand-up answer still applies when you reopen. The cache keeps at most 512 MiB and 500 entries,
+removing the oldest first, in SolidCraft's data folder across updates. Preferences › Design ›
+**Reuse imports I've opened before** is on by default; turn it off to import every time,
+or use **Clear** beside it to remove cached imports without forgetting stand-up answers.
+
+Every imported file (STEP, IGES, 3MF, STL, OBJ, glTF or OpenUSD) comes in as a new component named after the
 file, so its bodies never mix with yours. A STEP assembly keeps its structure: its parts and
 sub-assemblies become nested components, and a part used several times is one component with an
 occurrence for each place. The imported assembly is rigid: moving its component moves everything,
@@ -50,6 +78,29 @@ file's axes). Each material's base colour, metal and roughness become the body's
 the model looks right in Render; textures, skins and animations are not imported. Scaled or
 mirrored nodes are baked into their meshes. Compressed meshes (Draco, meshopt) are refused with a
 message: save the file uncompressed first.
+
+An OpenUSD file (`.usd`, `.usda`, `.usdc` or `.usdz`) comes in the same way as a glTF file. cadmpeg reads
+the stage and composes it within its own layer: variants, internal references, inheritance and instancing.
+Each mesh becomes a mesh body, each placed prim a nested component, and a prim placed again with the same
+contents another occurrence of one component. Lengths become millimetres from the stage's `metersPerUnit`,
+and a stage that says Y is up (or says nothing, as OpenUSD then means Y) is turned to stand Z up
+(`up: "z"` keeps its axes). A material's base colour, opacity, metallic and roughness, or else a prim's
+constant display colour, become the body's appearance. Scaled or mirrored prims are baked into their
+meshes. Invisible prims, NURBS patches, B-rep with no mesh, curves, intrinsic shapes such as `Cube`,
+and references to other files are left out with a warning.
+
+With the `geometry: "exact"` parameter (on the `doc.open` and `file.insert_mesh` commands, and the
+MCP tools that call them), an OpenUSD file comes in by its exact geometry instead, as a FreeCAD or
+Rhino file read with cadmpeg does: each B-rep (a `BrepArray` prim's solids and shells, such as
+SolidCraft's own exports carry) becomes a B-rep body of one Import feature, with exact faces and edges
+to pick, fillet and measure, and only a mesh with no B-rep beside it becomes a mesh body of that
+feature. A mesh that only shows a B-rep (its fallback mesh) is not read a second time, unless that
+B-rep cannot be built: the body then comes in as its fallback mesh, with a warning saying why. A
+`NurbsPatch` is left out with a warning for now: its boundary is not read. The prim tree becomes the component tree, a part placed again another occurrence of it,
+and the stage's up axis stands the import up as for its meshes (`up: "z"` keeps its axes). Each body
+takes its material's base colour and opacity. Unlike the mesh import, metallic and roughness are not
+carried, a prim placed by a scale or a mirror is left out with the reason rather than baked, and an
+invisible prim comes in hidden. The default, `geometry: "meshes"`, is the mesh import above.
 
 A 3MF project saved by a slicer comes in too, also when it keeps its objects in model parts of
 their own inside the file (the 3MF Production extension): each object on the build plates becomes
@@ -199,11 +250,56 @@ retain world coordinates. A lost cross-component association refreshed by an old
 need an explicit relink or refresh when its source returns. Loading never guesses a numerical
 correction. Association records, coordinate arrays and placements are bounded and checked.
 
+## Airfoil coordinate files
+
+Wing sections are published as plain-text coordinate files (`.dat`): a name line, then `x y`
+pairs with the chord running from 0 to 1, in one of two layouts. **Selig** files hold one loop from
+the trailing edge over the upper side to the leading edge and back; **Lednicer** files give the two
+point counts, then the upper and the lower side, each from the leading edge. `sketch.insert_airfoil`
+reads either, told apart by the content (`format` overrides it), and draws the section into a
+sketch as one fit point spline through every point of the file, scaled to `chord` in millimetres.
+The spline is not closed round: the trailing edge stays sharp, and when the file leaves it open a
+straight line closes the gap, so the sketch has one profile to extrude or loft. `pivot` names the
+share of the chord that `at` places and `angle` turns about (0.25 for the quarter-chord line),
+`flip` mirrors the section across its chord line, and `tolerance` says how close two points must be
+to become one. Real files vary, and the reader takes what they do (CRLF, `#` comments, counts
+written as `61.0`, a leading edge written twice, an `x` a hair above 1); what it can't read it
+refuses with the file's name and line, and never reads a placeholder as 0.
+
+The reply says what came in: the name, the layout, the point count, whether the trailing edge is
+open or closed and its gap, how far at most a merged point is from the curve (0 unless points
+merged within the tolerance), and how far at most the spline bows from the straight lines between
+the file points, which shows an overshoot at the nose as a number. A sketch per section and a loft between them make a
+wing. `angle` turns counter-clockwise in the sketch plane, so on the planes below, whose sketch `y`
+points up (+Z), a positive angle lowers the leading edge: the usual washout at the tip.
+
+```json
+{"commands": [
+  {"command": "sketch.insert_airfoil", "params": {"path": "mh45.dat", "chord": 180, "pivot": 0.25, "plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Root"}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "sketch.insert_airfoil", "params": {"path": "mh45.dat", "chord": 120, "pivot": 0.25, "angle": 2, "plane": {"origin": [0, 400, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Tip"}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.loft", "params": {"sections": [{"sketch": "Root"}, {"sketch": "Tip"}], "body_name": "Wing"}}
+]}
+```
+
+## Opening a file while SolidCraft runs
+
+Opening a design from your file manager, or with `solidcraft part.sc`, while SolidCraft is already
+running opens it in that window, as File > Open does, and no second app starts. The two launches
+talk through a socket in your settings folder (a named pipe on Windows) that only you can reach;
+nothing listens on the network, and only file paths are sent. If the running window does not answer
+within a moment, the new launch starts normally. `solidcraft --new-instance part.sc` always starts
+a separate app.
+
 ## Large files
 
 SolidCraft opens STEP, IGES and the other CAD files it imports up to **512 MB**, and design files
-up to **256 MB**. A larger file is refused before it is read, and the message says how to raise
-the limit. In the desktop app you can raise both:
+up to **256 MB**. Mesh files (3MF, STL, OBJ, PLY) and point cloud files (PLY, PCD, E57, XYZ, PTS,
+ASC) follow the limit for import files: a point cloud file is read up to 1 GB, and more when that
+limit is raised.
+A larger file is refused before it is read, and the message says how to raise the limit. In the
+desktop app you can raise both:
 
 - **Preferences › General › Largest file to open** sets each limit in MB, from its default up to
   16 GB (16384 MB). It is kept between runs; Restore page defaults on the General page puts back 512 MB
@@ -219,9 +315,10 @@ Before you raise them:
 - **Memory:** a file is read whole, and what is built from it is held in memory beside it. Expect
   several times the file's size in RAM, more for finely detailed parts, and a long open and a slow
   view for an assembly with hundreds of thousands of faces.
-- **Saving:** a design keeps the text of a STEP import, compressed, and the design limit applies
-  to the saved file. An import whose compressed text doesn't fit in a design file is refused when
-  it is imported, so it never opens and then fails to save; raise the design file limit too, or
+- **Saving:** a design keeps the text of a STEP import, compressed. A design that grows past the
+  design limit is still saved (and autosaved), and the save says that the file is over the limit and
+  how to raise it to open the file again. An import whose compressed text doesn't fit in a design file is refused when
+  it is imported; raise the design file limit too, or
   open the file with `--max-file-size`, which raises both. Opening that design again needs the
   same limits.
 - **Web app:** the browser version keeps 512 MB and 256 MB: a browser tab can't hold larger files.

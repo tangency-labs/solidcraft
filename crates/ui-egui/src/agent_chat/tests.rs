@@ -4,7 +4,7 @@ use std::sync::mpsc::channel;
 fn transcript_clipboard_harness(layout: crate::ui_kit::LayoutMode) -> crate::scenario::Harness {
     let mut h = narrow_chat();
     h.app.ui.layout = layout;
-    h.app.preferences.agent_chat_width = 500.0;
+    resize_chat(&mut h, 500.0);
     h.app.agent_chat.items.push(Item::Agent { thought: false, text: "Transcript clipboard sentinel".into() });
     h.app.run("solid.box", json!({"length": 2, "width": 2, "height": 2, "body_name": "Cube"})).unwrap();
     h.app.run("select.set", json!({"items": [{"type": "body", "name": "Cube"}]})).unwrap();
@@ -113,7 +113,9 @@ fn transcript_shortcut_ownership_ends_when_the_panel_is_hidden() {
         transcript_click(&mut h, at);
         match hidden {
             "closed" => h.app.agent_chat.open = false,
-            "minimized" => h.app.preferences.agent_chat_minimized = true,
+            "minimized" => {
+                h.app.run_panel_command("panel.collapse", &json!({"target":{"type":"instance","id":"assistant"},"collapsed":true})).unwrap();
+            }
             _ => h.app.preferences.ai_features = false,
         }
         h.frame_with(vec![egui::Event::Paste("SolidCraft bodies".into())]);
@@ -183,6 +185,8 @@ fn select_all_in_the_transcript_takes_the_whole_conversation() {
         [(crate::ui_kit::LayoutMode::Docked, false), (crate::ui_kit::LayoutMode::Floating, false), (crate::ui_kit::LayoutMode::Floating, true)];
     for (dark, (layout, popped)) in [true, false].into_iter().flat_map(|dark| layouts.map(|l| (dark, l))) {
         let mut h = transcript_clipboard_harness(layout);
+        // The thought is shown open, so the test sees that it is drawn but not highlighted.
+        h.app.preferences.agent_thinking_folded = false;
         h.app.preferences.theme = if dark { "dark" } else { "light" }.into();
         h.app.ui.dark = dark;
         if popped {
@@ -581,19 +585,88 @@ fn merging_finds_the_turns_start_when_the_history_was_trimmed() {
         label: String::new(),
         doc: d.clone(),
         active_sketch: None,
+        active_sheet_sketch: None,
         pending_moves: Default::default(),
+        part: None,
         visibility: Default::default(),
+        section: None,
     };
     let docs: Vec<_> = (0..6).map(doc).collect();
     // The turn began at depth 3 with docs[3]; the history then lost its oldest step.
+    let start = UndoMark { depth: 3, top: Some(Box::new(snap(&docs[2]))) };
     let mut undo: Vec<_> = docs[1..6].iter().map(snap).collect();
-    assert_eq!(merge_undo(&mut undo, &docs[3], 3, "Agent"), 3);
+    assert_eq!(merge_undo(&mut undo, &docs[3], &start, "Agent"), 3);
     assert_eq!(undo.len(), 3);
     assert!(Arc::ptr_eq(&undo[2].doc, &docs[3]) && undo[2].label == "Agent");
+    // The step on top at the start is gone too: the first step is found by its design.
+    let mut undo: Vec<_> = docs[3..6].iter().map(snap).collect();
+    assert_eq!(merge_undo(&mut undo, &docs[3], &start, "Agent"), 3);
+    // A section step in the turn: the merged step brings back the section before it.
+    let mut undo: Vec<_> = docs[1..6].iter().map(snap).collect();
+    let before = solidcraft_engine::SectionState { hatch: true, ..Default::default() };
+    undo[3].section = Some(before.clone());
+    merge_undo(&mut undo, &docs[3], &start, "Agent");
+    assert_eq!(undo[2].section, Some(before.clone()));
     // A start that is no longer in the history: nothing is merged.
     let mut undo: Vec<_> = docs[1..6].iter().map(snap).collect();
-    assert_eq!(merge_undo(&mut undo, &doc(9), 3, "Agent"), 0);
+    let gone = UndoMark { depth: 3, top: Some(Box::new(snap(&doc(8)))) };
+    assert_eq!(merge_undo(&mut undo, &doc(9), &gone, "Agent"), 0);
     assert_eq!(undo.len(), 5);
+    // A drawing's step among the model's: each part keeps its own steps.
+    let mut undo: Vec<_> = docs[1..6].iter().map(snap).collect();
+    undo[3].part = Some(7);
+    assert_eq!(merge_undo(&mut undo, &docs[3], &start, "Agent"), 0);
+    assert_eq!(undo.len(), 5);
+    // A turn that made no step leaves the user's own last step alone, though a section step
+    // keeps the design it began with.
+    let mut undo: Vec<_> = docs[1..4].iter().map(snap).collect();
+    undo[2].section = Some(before.clone());
+    undo[2].doc = docs[3].clone();
+    let start = UndoMark::of(&undo);
+    assert_eq!(merge_undo(&mut undo, &docs[3], &start, "Agent"), 0);
+    assert_eq!((undo.len(), undo[2].label.as_str()), (3, ""));
+    // A full history of steps that all kept one design (section steps): the turn's steps follow
+    // the step on top at its start.
+    let step = |i: usize| solidcraft_engine::Snapshot { label: i.to_string(), ..snap(&docs[3]) };
+    let start = UndoMark::of(&[step(1), step(2), step(3)]);
+    let mut undo = vec![step(3), step(4), step(5)];
+    assert_eq!(merge_undo(&mut undo, &docs[3], &start, "Agent"), 2);
+}
+
+/// The user's own section step is theirs: a message that changed nothing does not take it over,
+/// and the chat's Undo of an agent's changes stops once the user has sectioned since.
+#[test]
+fn section_steps_stay_the_users() {
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+    app.run("inspect.section", json!({"plane": "XY", "at": 5})).unwrap();
+    let (_tx, rx) = channel::<ControlRequest>();
+    app.agent_chat.tools_rx = Some(rx);
+    app.agent_chat.state = Some(State::Busy);
+    start_turn(&mut app, "look".into(), false, None, Vec::new());
+    end_turn(&mut app);
+    assert_eq!(app.session.undo.len(), 2);
+    assert_eq!(app.session.undo.last().map(|s| s.label.as_str()), Some("Section Analysis"));
+    assert!(!app.agent_chat.items.iter().any(|i| matches!(i, Item::Changes { .. })));
+
+    let (mut app, tx) = app_in_a_turn();
+    let reply = ask(&tx, "engine.execute", boxed(0.0));
+    frame(&mut app);
+    assert_eq!(reply.recv_timeout(std::time::Duration::from_secs(30)).unwrap()["ok"], true);
+    end_turn(&mut app);
+    let n = app.agent_chat.items.iter().rposition(|i| matches!(i, Item::Changes { .. })).expect("the changes are listed");
+    let offered = |app: &SolveApp| UndoMark::current(&app.agent_chat.items, &app.session.undo).is_some();
+    assert!(offered(&app), "the chat offers Undo of the agent's changes");
+    app.run("inspect.section", json!({"plane": "XY", "at": 5})).unwrap();
+    assert!(!offered(&app), "but not once the user has sectioned since");
+    undo_changes(&mut app, n);
+    assert_eq!(app.session.section.len(), 1, "the user's section stays");
+    assert_eq!(app.session.doc.features.len(), 1, "and so does the agent's box");
+    assert!(matches!(app.agent_chat.items[n], Item::Changes { undone: false, .. }));
+    app.run("edit.undo", json!({})).unwrap();
+    assert!(offered(&app), "but again once the user's section is undone");
+    undo_changes(&mut app, n);
+    assert!(app.session.doc.features.is_empty() && matches!(app.agent_chat.items[n], Item::Changes { undone: true, .. }));
 }
 
 /// People who don't want AI never see it: with "Show AI features" off there is no button, the
@@ -655,8 +728,7 @@ fn the_chat_pops_out_into_its_own_window_and_docks_back() {
     h.frames(3);
     assert!(rect_of("agent_chat:panel").is_some() && rect_of("agent_chat:window").is_none(), "docked by default");
     assert!(!h.app.preferences.agent_chat_popped);
-    let pop = handle_at("agent_chat:pop_out").expect("a pop-out button in the header");
-    h.call("ui.click", json!({"x": pop.x, "y": pop.y}));
+    h.call("ui.agent_chat", json!({"popped": true}));
     h.frames(3);
     assert!(h.app.preferences.agent_chat_popped);
     assert!(rect_of("agent_chat:panel").is_none(), "the side panel is gone");
@@ -790,6 +862,49 @@ fn permission_modes_decide_what_asks() {
     let crash = ask(&tx, "engine.execute", json!({"command": "diagnostics.crash_reports"}));
     frame(&mut app);
     assert_eq!(crash.recv_timeout(std::time::Duration::from_secs(5)).unwrap()["ok"], false);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// "Always allow" on a modelling batch covers modelling batches only: a later batch that saves
+/// still asks, and allowing that one always remembers the save, not "batch".
+#[test]
+fn always_allowing_one_batch_does_not_allow_a_later_batchs_file_steps() {
+    let (mut app, tx) = app_in_a_turn();
+    app.agent_chat.running_id = "claude".into();
+    app.preferences.ai_permissions = agents::Mode::Ask;
+    let modelling = json!({"commands": [{"command": "solid.box", "params": {"length": 1, "width": 1, "height": 1}}]});
+    let first = ask(&tx, "engine.batch", modelling.clone());
+    frame(&mut app);
+    assert_eq!(app.agent_chat.waiting(), 1, "a modelling batch asks");
+    let id = app.agent_chat.held[0].id;
+    approve_always(&mut app, id);
+    frame(&mut app);
+    assert_eq!(first.recv_timeout(std::time::Duration::from_secs(30)).unwrap()["ok"], true);
+    assert!(agents::always_allowed(&app.preferences, "claude", "batch"));
+    let _second = ask(&tx, "engine.batch", modelling);
+    frame(&mut app);
+    assert_eq!(app.agent_chat.waiting(), 0, "modelling batches are remembered");
+    let dir = solidcraft_engine::io::vfs::temp_dir().join(format!("sc-agent-chat-batch-always-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let saving = json!({
+        "commands": [{"command": "solid.box"}, {"command": "FILE.SAVE", "params": {"path": dir.join("x.solidcraft").to_string_lossy()}}],
+        "allow_paths": [dir.to_string_lossy()],
+    });
+    let _third = ask(&tx, "engine.batch", saving.clone());
+    frame(&mut app);
+    assert_eq!(app.agent_chat.waiting(), 1, "a batch that saves still asks");
+    let id = app.agent_chat.held[0].id;
+    approve_always(&mut app, id);
+    assert!(agents::always_allowed(&app.preferences, "claude", "file.save"));
+    decline_all(&mut app, "test");
+    let _fourth = ask(&tx, "engine.batch", saving);
+    frame(&mut app);
+    assert_eq!(app.agent_chat.waiting(), 0, "the save itself was allowed always");
+    let exporting = json!({"commands": [{"command": "file.export", "params": {"path": dir.join("x.stl").to_string_lossy()}}], "allow_paths": [dir.to_string_lossy()]});
+    let _fifth = ask(&tx, "engine.batch", exporting);
+    frame(&mut app);
+    assert_eq!(app.agent_chat.waiting(), 1, "an export was never allowed");
+    decline_all(&mut app, "test");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -3197,12 +3312,24 @@ fn new_chat_clears_the_files_waiting_and_asks_first() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
+fn resize_chat(h: &mut crate::scenario::Harness, width: f32) {
+    h.frames(2);
+    h.app
+        .run_panel_command(
+            "panel.resize",
+            &json!({
+                "target":{"type":"instance","id":"assistant"},"size":{"width":width,"height":400},"thickness_only":true
+            }),
+        )
+        .unwrap();
+}
+
 /// A harness with the chat open at its narrowest and nothing to look for.
 fn narrow_chat() -> crate::scenario::Harness {
     let mut h = crate::scenario::Harness::new();
-    h.app.preferences.agent_chat_width = panel::MIN_WIDTH;
     h.app.agent_chat.open = true;
     h.app.agent_chat.detection = Some(Default::default());
+    resize_chat(&mut h, 280.0);
     h
 }
 
@@ -3616,19 +3743,13 @@ fn files_dropped_on_the_chat_attach_and_the_app_does_not_open_them() {
     assert!(!h.app.file_load.busy(), "the app doesn't open them as well");
     drop_files(&mut h, egui::pos2(300.0, 500.0), &[d.join("brief.md")]);
     assert_eq!(status(&h.app)["attachments"].as_array().map(Vec::len), Some(2), "over the 3D view: not the chat's");
-    // Folded to its strip, a drop on the strip is the chat's too.
-    h.call("ui.agent_chat", json!({"minimized": true}));
+    // Collapsing and closing release the body as an attachment drop target.
+    h.app.run_panel_command("panel.collapse", &json!({"target":{"type":"instance","id":"assistant"},"collapsed":true})).unwrap();
     h.frames(3);
-    let strip = h.app.agent_chat.drop_rect.expect("the strip takes drops");
-    assert!(strip.width() < 60.0, "{strip:?}");
-    drop_files(&mut h, strip.center(), &[d.join("brief.md")]);
-    assert_eq!(status(&h.app)["attachments"].as_array().map(Vec::len), Some(3));
-    // Closed: nothing is the chat's, wherever the pointer was.
+    assert!(h.app.agent_chat.drop_rect.is_none());
     h.app.agent_chat.open = false;
     h.frames(2);
     assert!(h.app.agent_chat.drop_rect.is_none());
-    drop_files(&mut h, strip.center(), &[d.join("brief.md")]);
-    assert_eq!(status(&h.app)["attachments"].as_array().map(Vec::len), Some(3));
     let _ = std::fs::remove_dir_all(&d);
 }
 
@@ -3692,9 +3813,36 @@ fn an_agents_markdown_is_drawn_as_blocks() {
     h.frames(3);
     assert!(h.widget("Copy").is_some(), "the code block has its Copy button");
     assert!(h.widget("↗ example.com").is_some(), "the link is a button that names where it goes");
+    // A table is drawn as a table: its cells show, not the `|---|` line.
+    h.app.agent_chat.items.push(Item::Agent { thought: false, text: "| Part | Mass |\n|---|---|\n| Gearbox | 12 kg |".into() });
+    h.frames(3);
+    assert!(h.widget("Gearbox").is_some(), "a cell of the table is drawn");
+    assert!(h.widget("|---|---|").is_none(), "the line under the header is not shown");
     // A hostile reply draws too (no panic, bounded work).
     h.app.agent_chat.items.push(Item::Agent { thought: false, text: "*".repeat(50_000) + &"[".repeat(5_000) + &"`a".repeat(5_000) });
     h.frames(3);
+    // So does a table with 16 columns and as many rows as the input allows (#16256): it stays
+    // preformatted text instead of becoming a couple of million labels.
+    h.app
+        .agent_chat
+        .items
+        .push(Item::Agent { thought: false, text: format!("{}\n{}\n{}", "| a ".repeat(16) + "|", "|---".repeat(16) + "|", "|\n".repeat(100_000)) });
+    h.frames(3);
+}
+
+/// A cell with a link is still one cell of the grid (#16256): the link button sits in the cell, not
+/// in a column of its own that would push the next cell under no header.
+#[test]
+fn a_table_cell_with_a_link_stays_in_its_column() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    h.frames(3);
+    h.app.agent_chat.items.push(Item::Agent { thought: false, text: "| Part | Mass |\n|---|---|\n| [Gear](https://example.com) | Steel |".into() });
+    h.frames(3);
+    let mass = h.widget("Mass").expect("the header of the second column");
+    let steel = h.widget("Steel").expect("the cell of the second column");
+    assert!((steel[0] - mass[0]).abs() < 20.0, "Steel ({steel:?}) is under Mass ({mass:?}), not in a third column");
+    assert!(h.widget("↗ example.com").is_some(), "the link keeps its button");
 }
 
 // ---- Attach selection (#2286) ----
@@ -3849,6 +3997,8 @@ fn assistant_marks_follow_chat_login_turns_and_approvals() {
 #[test]
 fn an_agent_without_the_design_tools_is_not_shown_as_ready() {
     let mut h = crate::scenario::Harness::new();
+    // The status badge belongs to the independent Assistant window.
+    h.app.preferences.agent_chat_popped = true;
     h.call("ui.agent_chat", json!({"open": true}));
     h.app.agent_chat.set_state(State::Ready);
     h.app.agent_chat.tools_available = Some(true);
@@ -4690,7 +4840,7 @@ fn a_split_wall_clicked_once_is_one_item() {
 /// boxes' feature ids and names, in order.
 fn picker_over_boxes(boxes: usize, timeline_left: bool) -> (crate::scenario::Harness, Vec<(u64, String)>) {
     let mut h = crate::scenario::Harness::new();
-    h.app.preferences.timeline_left = timeline_left;
+    h.app.run("view.history_layout", json!({"dock":if timeline_left { "left" } else { "bottom" }})).unwrap();
     h.call("ui.agent_chat", json!({"open": true}));
     for i in 0..boxes {
         h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": format!("Body{}", i + 1)})).expect("a box");
@@ -5518,6 +5668,27 @@ fn a_picture_only_prompt_and_a_thought_have_no_copy_message_action() {
     assert!(h.widget("Copy message").is_none(), "nothing to click");
 }
 
+/// #17072: a reply's thinking starts folded under a Thinking header, and its arrow opens it;
+/// with `agent_thinking_folded` off it is shown open, as before.
+#[test]
+fn a_thought_starts_folded_and_its_arrow_opens_it() {
+    for folded in [true, false] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.language = "en".into();
+        h.app.preferences.agent_thinking_folded = folded;
+        h.call("ui.agent_chat", json!({"open": true}));
+        h.frames(3);
+        h.app.agent_chat.items.push(Item::Agent { thought: true, text: "pondering the plate".into() });
+        h.frames(3);
+        assert!(h.widget("Thinking").is_some(), "the header, folded = {folded}");
+        assert_eq!(h.widget("pondering the plate").is_some(), !folded, "the thinking shows only when open");
+        let arrow = solidcraft_ui_registry::handle_at("agent_chat:thought:0").expect("the thought's arrow");
+        h.call("ui.click", json!({"x": arrow.x, "y": arrow.y}));
+        h.frames(3);
+        assert_eq!(h.widget("pondering the plate").is_some(), folded, "the arrow turns it over");
+    }
+}
+
 fn shared_assistant_harness() -> (crate::scenario::Harness, Script) {
     let mut h = narrow_chat();
     h.app.home.open = false;
@@ -5535,7 +5706,6 @@ fn shared_assistant_harness() -> (crate::scenario::Harness, Script) {
     h.app.run("sketch.finish", json!({})).unwrap();
     let feature = h.app.session.doc.features[0].id;
     h.app.run("select.set", json!({"items":[solidcraft_engine::Sel::Feature { id: feature }]})).unwrap();
-    h.app.preferences.shared_panel_layout = true;
     h.frames(6);
     assert!(h.app.panel_runtime().is_some());
     assert!(h.app.agent_chat.detecting.is_none(), "the deterministic discovery fixture starts no worker");
@@ -5571,57 +5741,45 @@ fn shared_assistant_body(h: &crate::scenario::Harness) -> egui::Rect {
     egui::Rect::from_min_size(egui::pos2(body.origin.x, body.origin.y), egui::vec2(body.size.width, body.size.height))
 }
 
-/// #15087: an agent that asks to sign in two ways, in the docked Assistant of a small window, with
-/// the default panel layout and the shared one. The sign-in box scrolls inside the panel, and the
-/// message box stays in view below it with nothing drawn over it.
+/// #15087: in a short docked Assistant, the sign-in box scrolls above the message box.
 #[test]
 fn a_long_sign_in_box_scrolls_inside_a_short_docked_assistant() {
     use solidcraft_ui_registry::{handle_at, rect_of};
-    for shared in [false, true] {
-        let (mut h, _script) = shared_assistant_harness();
-        h.app.preferences.shared_panel_layout = shared;
-        h.app.ui.show_browser = true;
-        h.app.ui.show_timeline = true;
-        h.call("ui.resize", json!({"width":960,"height":600}));
-        let terminal = |id: &str, name: &str, flag: &str| acp::AuthMethod {
-            id: id.into(),
-            name: name.into(),
-            description: format!("Sign in with {name}"),
-            kind: acp::AuthKind::Terminal { args: vec!["--cli".into(), "auth".into(), "login".into(), flag.into()], command: None },
-        };
-        h.app.agent_chat.argv = vec!["standin-agent".into()];
-        h.app.agent_chat.auth = vec![terminal("console", "Console", "--console"), terminal("subscription", "Subscription", "--claudeai")];
-        // A new chat: its tip is drawn below the sign-in box, where the conversation goes.
-        h.app.agent_chat.items.clear();
-        h.app.agent_chat.input.clear();
-        h.app.agent_chat.state = Some(State::NeedsAuth);
-        h.frames(8);
-        assert_eq!(h.app.panel_runtime().is_some(), shared);
-        let window = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(960.0, 600.0));
-        let body = if shared { shared_assistant_body(&h) } else { rect_of("agent_chat:panel").expect("the docked Assistant") };
-        let composer = rect_of("agent_chat:composer_footer").expect("the message box");
-        let providers = rect_of("agent_chat:providers").expect("the sign-in box's scroll area");
-        let conversation = rect_of("agent_chat:conversation").expect("the conversation");
-        assert!(window.expand(1.0).contains_rect(body), "shared {shared}: the Assistant {body:?} fits the window");
-        assert!(body.expand(1.0).contains_rect(composer), "shared {shared}: the message box {composer:?} stays inside {body:?}");
-        assert!(providers.bottom() <= composer.top() + 1.0, "shared {shared}: the sign-in box {providers:?} ends above the message box {composer:?}");
-        assert!(
-            conversation.bottom() <= composer.top() + 1.0,
-            "shared {shared}: the conversation {conversation:?} ends above the message box {composer:?}"
-        );
-        for _ in 0..10 {
-            if handle_at("agent_chat:auth_retry").is_some_and(|at| providers.contains(at)) {
-                break;
-            }
-            h.call("ui.scroll", json!({"x":providers.center().x,"y":providers.center().y,"delta":-300}));
-            h.frames(4);
+    let (mut h, _script) = shared_assistant_harness();
+    h.app.ui.show_browser = true;
+    h.app.ui.show_timeline = true;
+    h.call("ui.resize", json!({"width":960,"height":600}));
+    let terminal = |id: &str, name: &str, flag: &str| acp::AuthMethod {
+        id: id.into(),
+        name: name.into(),
+        description: format!("Sign in with {name}"),
+        kind: acp::AuthKind::Terminal { args: vec!["--cli".into(), "auth".into(), "login".into(), flag.into()], command: None },
+    };
+    h.app.agent_chat.argv = vec!["standin-agent".into()];
+    h.app.agent_chat.auth = vec![terminal("console", "Console", "--console"), terminal("subscription", "Subscription", "--claudeai")];
+    // A new chat: its tip is drawn below the sign-in box, where the conversation goes.
+    h.app.agent_chat.items.clear();
+    h.app.agent_chat.input.clear();
+    h.app.agent_chat.state = Some(State::NeedsAuth);
+    h.frames(8);
+    let window = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(960.0, 600.0));
+    let body = shared_assistant_body(&h);
+    let composer = rect_of("agent_chat:composer_footer").expect("the message box");
+    let providers = rect_of("agent_chat:providers").expect("the sign-in box's scroll area");
+    let conversation = rect_of("agent_chat:conversation").expect("the conversation");
+    assert!(window.expand(1.0).contains_rect(body), "the Assistant {body:?} fits the window");
+    assert!(body.expand(1.0).contains_rect(composer), "the message box {composer:?} stays inside {body:?}");
+    assert!(providers.bottom() <= composer.top() + 1.0, "the sign-in box {providers:?} ends above the message box {composer:?}");
+    assert!(conversation.bottom() <= composer.top() + 1.0, "the conversation {conversation:?} ends above the message box {composer:?}");
+    for _ in 0..10 {
+        if handle_at("agent_chat:auth_retry").is_some_and(|at| providers.contains(at)) {
+            break;
         }
-        let at = handle_at("agent_chat:auth_retry").expect("the I've signed in button is drawn");
-        assert!(
-            providers.contains(at),
-            "shared {shared}: scrolling the sign-in box brings I've signed in: connect again {at:?} into view {providers:?}"
-        );
+        h.call("ui.scroll", json!({"x":providers.center().x,"y":providers.center().y,"delta":-300}));
+        h.frames(4);
     }
+    let at = handle_at("agent_chat:auth_retry").expect("the I've signed in button is drawn");
+    assert!(providers.contains(at), "scrolling the sign-in box brings I've signed in: connect again {at:?} into view {providers:?}");
 }
 
 #[test]
@@ -5967,7 +6125,7 @@ fn drawn(h: &crate::scenario::Harness, text: &str) -> usize {
 fn timed_chat() -> (crate::scenario::Harness, Script) {
     let mut h = crate::scenario::Harness::new();
     h.call("ui.agent_chat", json!({"open": true}));
-    h.app.preferences.agent_chat_width = 520.0;
+    resize_chat(&mut h, 520.0);
     let script = Script::default();
     h.app.agent_chat.backend = Some(Box::new(script.clone()));
     h.app.agent_chat.state = Some(State::Ready);
@@ -6114,4 +6272,89 @@ fn lengths_of_time_read_in_seconds_minutes_and_hours() {
     assert_eq!(times::exact(&noon).as_deref(), Some("2026-11-04 12:00:00 UTC"));
     assert_eq!(times::running(&noon, noon.at + 30_000.0).as_deref(), Some("running for 30 s"));
     assert_eq!(times::took(&times::Stamp { at: 1.0, took: Some((61_000.0, true)) }).as_deref(), Some("Answered in 1 min"));
+}
+
+#[test]
+fn plugin_runs_always_keep_per_run_consent() {
+    for mode in [agents::Mode::All, agents::Mode::Edits, agents::Mode::Ask] {
+        for command in ["plugin.run", "PLUGIN.RUN"] {
+            let (mut app, tx) = app_in_a_turn();
+            app.agent_chat.running_id = "claude".into();
+            app.preferences.ai_permissions = mode;
+            agents::remember(&mut app.preferences, "claude", command);
+            let reply = ask(&tx, "engine.execute", json!({"command":command,"params":{"path":"sample","entry":"make"}}));
+            pump_tools(&mut app);
+            assert_eq!(app.agent_chat.waiting(), 1, "{mode:?}: {command}");
+            assert!(reply.try_recv().is_err(), "consent must precede dispatch");
+        }
+    }
+}
+
+/// A plugin tool the agent calls by name (`<plugin>.<entry>`) waits for the user's answer in
+/// every mode, even one that allows everything or remembers the tool; listing the plugin tools
+/// asks nothing; legacy named calls pass undeclared arguments through after approval.
+#[test]
+fn plugin_tools_go_through_the_chats_approval_and_never_skip_it() {
+    let dir = std::env::temp_dir().join(format!("sc-agent-chat-plugin-tool-{}", std::process::id()));
+    let folder = dir.join("gears");
+    std::fs::create_dir_all(&folder).unwrap();
+    let manifest = json!({"id":"gears","name":"Gears","version":"1","capabilities":["commands@0.1"],"runtime":{
+        "module":"plugin.wasm","commands":["solid.box"],"limits":{"fuel":100000,"memory_mib":1,"deadline_ms":5000},
+        "entries":[{"name":"make","effect":"edit","input_schema":{"type":"object","properties":{"teeth":{"type":"integer"}}}}]}});
+    std::fs::write(folder.join("plugin.json"), manifest.to_string()).unwrap();
+    for mode in [agents::Mode::All, agents::Mode::Edits, agents::Mode::Ask] {
+        let (mut app, tx) = app_in_a_turn();
+        app.session.plugin_state.packages.insert("gears".into(), folder.to_string_lossy().into_owned());
+        app.agent_chat.running_id = "claude".into();
+        app.preferences.ai_permissions = mode;
+        agents::remember(&mut app.preferences, "claude", "gears.make");
+        agents::remember(&mut app.preferences, "claude", "plugin.run");
+        let call = ask(&tx, "engine.execute", json!({"command":"gears.make","params":{"approval":"hash","params":{"teeth":20}}}));
+        pump_tools(&mut app);
+        assert_eq!(app.agent_chat.waiting(), 1, "{mode:?}: an edit entry asks first");
+        assert!(call.try_recv().is_err(), "{mode:?}: nothing runs before the answer");
+        let undeclared = ask(&tx, "engine.execute", json!({"command":"gears.make","params":{"approval":"hash","params":{"colour":"red"}}}));
+        pump_tools(&mut app);
+        assert!(undeclared.try_recv().is_err(), "legacy named inputs still wait for approval");
+        assert_eq!(app.agent_chat.waiting(), 2, "{mode:?}: undeclared inputs pass through the legacy call");
+        let list = ask(&tx, "engine.execute", json!({"command":"plugin.tools"}));
+        pump_tools(&mut app);
+        assert_eq!(app.agent_chat.waiting(), 2, "{mode:?}: listing asks nothing");
+        drop(list);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An importer plugin's code runs only after the user's answer, in every mode and after "always
+/// allow": a plugin importer tool (`file.import`), and `doc.open` of a file an installed importer
+/// opens, alone or in a batch. A file SolidCraft reads itself keeps the mode's answer.
+#[test]
+fn importer_plugins_always_ask_like_plugin_runs() {
+    let dir = std::env::temp_dir().join(format!("sc-agent-chat-importer-tool-{}", std::process::id()));
+    let folder = dir.join("plugins").join("smp");
+    std::fs::create_dir_all(&folder).unwrap();
+    let manifest = json!({"id":"smp","name":"Sample importer","version":"1","capabilities":["formats@0.1"],
+        "runtime":{"module":"plugin.wasm","commands":[],"entries":[{"name":"convert","kind":"importer","extensions":["smp"]}]}});
+    std::fs::write(folder.join("plugin.json"), manifest.to_string()).unwrap();
+    let file = dir.join("part.smp").to_string_lossy().into_owned();
+    let (mut app, tx) = app_in_a_turn();
+    app.session.plugin_state.plugins_dir = Some(dir.join("plugins"));
+    app.agent_chat.running_id = "claude".into();
+    app.preferences.ai_permissions = agents::Mode::All;
+    for command in ["file.import", "doc.open", "batch"] {
+        agents::remember(&mut app.preferences, "claude", command);
+    }
+    let calls = [
+        ask(&tx, "engine.execute", json!({"command":"file.import","params":{"path":file,"format":"smp.convert","options":{}}})),
+        ask(&tx, "engine.execute", json!({"command":"doc.open","params":{"path":file}})),
+        ask(&tx, "engine.batch", json!({"commands":[{"command":"solid.box","params":{}},{"command":"file.import","params":{"path":file}}]})),
+    ];
+    pump_tools(&mut app);
+    assert_eq!(app.agent_chat.waiting(), 3, "each plugin import waits for an answer");
+    assert!(calls.iter().all(|c| c.try_recv().is_err()), "nothing runs before the answer");
+    let session = &app.session;
+    assert!(crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"doc.open","params":{"path":file}})));
+    assert!(!crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"doc.open","params":{"path":"/tmp/part.step"}})));
+    assert!(!crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"solid.box","params":{}})));
+    let _ = std::fs::remove_dir_all(&dir);
 }

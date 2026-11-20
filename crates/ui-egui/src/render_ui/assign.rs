@@ -55,14 +55,14 @@ pub(crate) fn targets(app: &SolveApp, selected: &[Sel]) -> Result<Value, String>
     let mut components = std::collections::BTreeSet::new();
     let mut faces = Vec::new();
     for sel in selected {
-        if app.ui.pick_components
+        if app.picks_components()
             && let Some(id) = component(app, sel)
         {
             components.insert(id.to_string());
             continue;
         }
         match sel {
-            Sel::Face { body, point, .. } if !app.ui.pick_bodies && !app.ui.pick_components => {
+            Sel::Face { body, point, .. } if !app.picks_bodies() && !app.picks_components() => {
                 faces.push(json!({"body":body,"point":point}));
             }
             Sel::Body { name } => {
@@ -242,7 +242,7 @@ fn drop_preview(app: &SolveApp, look: Value, hit: &Hit, sel: &Sel, mods: Modifie
     let Hit::Face { body, index, point } = hit else {
         return Err("no face under cursor".into());
     };
-    let face = mods.shift || (!mods.ctrl && !mods.command && !app.ui.pick_bodies && !app.ui.pick_components);
+    let face = mods.shift || (!mods.ctrl && !mods.command && !app.picks_bodies() && !app.picks_components());
     if face {
         return Ok(Preview {
             look,
@@ -251,7 +251,7 @@ fn drop_preview(app: &SolveApp, look: Value, hit: &Hit, sel: &Sel, mods: Modifie
             bodies: Vec::new(),
         });
     }
-    let whole_component = mods.ctrl || mods.command || app.ui.pick_components;
+    let whole_component = mods.ctrl || mods.command || app.picks_components();
     if whole_component && let Some(id) = component(app, sel) {
         let bodies = crate::open_meshing::session_world(&app.session)
             .bodies
@@ -494,7 +494,7 @@ pub(crate) fn hover_tooltip(app: &mut SolveApp, response: &egui::Response, candi
 }
 
 pub(crate) fn selection_bar(app: &mut SolveApp, ui: &mut egui::Ui, free: egui::Rect) {
-    crate::shell::register_panel(app, "render:selection", None, None);
+    crate::shell::register_panel(app, "render:selection", None);
     if super::result_active(app) || app.render_workspace.view.stage != super::Stage::Look {
         return;
     }
@@ -540,7 +540,7 @@ pub(crate) fn selection_bar(app: &mut SolveApp, ui: &mut egui::Ui, free: egui::R
         ui_kit::selection_actions(ui, &selection_name(app, &sel), &actions)
     });
     crate::scenario::publish_rect("render:selection", pill.response.rect);
-    crate::shell::register_panel(app, "render:selection", Some(pill.response.rect), None);
+    crate::shell::register_panel(app, "render:selection", Some(pill.response.rect));
     match pill.inner {
         Some(0) => app.start("appearance.chain"),
         Some(1) => app.start("appearance.replace"),

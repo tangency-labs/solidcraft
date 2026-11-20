@@ -3,6 +3,7 @@
  {"start": "sketch.create"},
  {"click": {"plane": "XY"}},
  {"expect": {"sketching": true}},
+ {"call": "ui.camera", "params": {"target": [30, 10, 0], "distance": 180}},
  {"start": "sketch.rectangle.two_point"},
  {"click": {"sketch": [0, 0]}},
  {"click": {"sketch": [20, 10]}},

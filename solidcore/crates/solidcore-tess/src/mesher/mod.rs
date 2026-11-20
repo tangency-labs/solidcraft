@@ -54,6 +54,7 @@ pub(crate) mod pieces;
 pub(crate) mod poles;
 pub(crate) mod sag;
 pub(crate) mod seam;
+pub(crate) mod shape;
 pub(crate) mod size;
 pub(crate) mod surface;
 pub(crate) mod tangle;
@@ -118,14 +119,78 @@ const MAX_LINES: usize = 8192;
 const FLAT_MIN_ANGLE_DEG: f64 = 15.0;
 /// Most points Ruppert refinement may add to one face, beyond its seeds.
 const MAX_REFINE: usize = 20_000;
+/// Most points the mesh path's refinement for sag, side length and shape may add to one face,
+/// beyond its seeds ([`Purpose::Mesh`]; as many as its lattice may have): past it the face is
+/// named in [`PlanStats::unshaped`] ([`crate::ShapeLimit::Points`]).
+const MAX_MESH_REFINE: usize = 200_000;
+
+/// What a plan is for: the display's planner ([`plan`]), which takes the cheapest layout that
+/// suits each face, or the mesh path ([`crate::mesh()`]), which sends every face to constrained
+/// Delaunay with lattice seeds, refinement and shaping, and fills nothing leniently.
+#[derive(Clone, Copy)]
+pub(crate) enum Purpose<'a> {
+    Display,
+    Mesh(Shape<'a>),
+}
+
+/// The mesh path's rules beside the chord tolerance ([`crate::MeshSpec`]).
+#[derive(Clone, Copy)]
+pub(crate) struct Shape<'a> {
+    /// The smallest angle Ruppert refinement aims for (degrees, in (0, 30]).
+    pub(crate) min_angle: f64,
+    /// The longest side asked anywhere (mm); `None`: the rules' longest side
+    /// ([`size::Rules::max_len`]).
+    pub(crate) side: Option<f64>,
+    /// The caller's size function, where it gives one.
+    pub(crate) size_at: Option<size::SizeAt<'a>>,
+    /// Whether the face's shaping may split its boundary sides.
+    pub(crate) sides: Sides,
+}
+
+/// Whether the mesh path's shaping of a face may split its boundary sides ([`cdt::mesh`]).
+/// Ruppert refinement reaches its angle by splitting the sides a new point would encroach on;
+/// a side is an edge's segment, which the faces either side share, so a split is not kept in
+/// the face: it is put on the edge, as a node both faces take, and they are planned again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Sides {
+    /// It may: the sides it splits are returned ([`Planned::Split`]).
+    Split,
+    /// It may not: its shaping split only sides on no edge (a pole's collapsed side, the line a
+    /// seamless face is cut along), which no node can be put on.
+    Kept,
+    /// It may not: the rounds of splitting ran out ([`MAX_SPLIT_ROUNDS`]); where that leaves
+    /// it short, the face is named ([`crate::ShapeLimit::Rounds`]).
+    Exhausted,
+}
+
+/// Rounds of putting the boundary sides the mesh path's shaping splits on their edges and
+/// planning the faces of those edges again.
+const MAX_SPLIT_ROUNDS: usize = 16;
+
+/// A face planned: its plan, or on the mesh path the boundary sides its shaping split.
+pub(crate) enum Planned {
+    Face(FacePlan),
+    Split(Vec<SplitSide>),
+}
+
+/// A boundary side the mesh path's shaping split: its two end points (the shared edge nodes, in
+/// the face's loop order) and the fractions along it, in the triangulation's metric, where it
+/// was split.
+pub(crate) struct SplitSide {
+    from: Vec3,
+    to: Vec3,
+    at: Vec<f64>,
+}
+
 /// Most rounds of splitting the edge segments where a face's sampled boundary crosses itself:
-/// each round halves them, so their chords sag a quarter as far.
+/// each round inserts curve nodes at the crossing events, shared by every incident face.
 const MAX_UNTANGLE: u32 = 16;
 
 /// An error's own words, without its kind's prefix, for a message that names where it happened.
-fn detail(e: &TessError) -> &str {
+fn detail(e: &TessError) -> std::borrow::Cow<'_, str> {
     match e {
-        TessError::Invalid(m) | TessError::Failed(m) | TessError::Internal(m) => m,
+        TessError::Invalid(m) | TessError::Failed(m) | TessError::Internal(m) => std::borrow::Cow::Borrowed(m),
+        TessError::TooManyVertices { .. } => std::borrow::Cow::Owned(e.to_string()),
     }
 }
 
@@ -177,7 +242,7 @@ fn face_edges(f: &brep::Face) -> impl Iterator<Item = &brep::OrientedEdge> {
 /// tolerance `t` ([`crate::MeshTolerance`]): faces and edges are the record's, in its order.
 pub fn plan(b: &brep::Brep, t: &crate::MeshTolerance, size: f64) -> Result<(TessPlan, PlanStats)> {
     let (tol, turn) = t.rules(size);
-    plan_at(b, tol, turn)
+    plan_at(b, tol, turn, Purpose::Display)
 }
 
 /// What the planner reads of a body before it plans any face, in the record's order: each face's
@@ -201,6 +266,8 @@ pub(crate) struct Prepared {
     /// The edges kept to the strict rules though their faces are crowded.
     pub(crate) kept_strict: Vec<crate::RefusedEdge>,
     boundaries: Vec<Boundary>,
+    /// How each face's pcurves map to its surface's parameters.
+    params: Vec<surface::Params>,
     /// Why each face is left out, where it is.
     pub(crate) why: Vec<Option<TessError>>,
     /// The faces whose boundary still crosses itself, and why.
@@ -208,14 +275,16 @@ pub(crate) struct Prepared {
 }
 
 /// Plan the tessellation of `b` with chord tolerance `tol` and, when given, a facet angle no
-/// facet may turn more than (where it sags above the angle's floor). Faces and edges are the
-/// record's, in its order.
-pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result<(TessPlan, PlanStats)> {
+/// facet may turn more than (where it sags above the angle's floor), for `purpose`. Faces and
+/// edges are the record's, in its order.
+pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpose: Purpose<'_>) -> Result<(TessPlan, PlanStats)> {
     let faces = &b.faces;
-    let Prepared { rules, forward, edge_faces, evals, sizes, nodes, unsampled_edges, kept_strict, boundaries, why, tangled } = prepare(b, tol, turn)?;
+    let Prepared { rules, forward, edge_faces, evals, sizes, mut nodes, unsampled_edges, kept_strict, mut boundaries, params, why, tangled } =
+        prepare(b, tol, turn, purpose)?;
     let curved = evals.iter().filter(|e| !matches!(***e, EvalSurface::Plane { .. })).count();
-    let indexed: Vec<usize> = (0..faces.len()).collect();
-    let planned = crate::par::map("face tessellation", &indexed, curved >= PARALLEL_FACES, |&fi| {
+    // One face for `purpose`: its plan, oriented, with its poles of higher order; or the boundary
+    // sides the mesh path's shaping split.
+    let plan_one = |fi: usize, purpose, boundaries: &[Boundary]| -> Result<(Planned, PlanStats)> {
         if let Some(Some(e)) = why.get(fi) {
             return Err(e.clone());
         }
@@ -223,13 +292,16 @@ pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Res
             return Err(unsupported(format!("face {fi}: missing")));
         };
         let refused = tangled.iter().find(|(f, _)| *f == fi).map(|(_, why)| why.as_str());
-        let result = plan_or_fill(fi, kind(face.parameters()), eval, &fb.loops, &rules, *size, fb.reach, refused);
+        let result = plan_or_fill(fi, kind(face.parameters()), eval, &fb.loops, &rules, *size, fb.reach, refused, purpose);
         // A point whose poles the kernel could not tell refuses the face: nothing is taken for
         // its answer. Read before the plan's own error, which may be a later symptom of it.
         if let Some(why) = eval.refusal() {
             return Err(unsupported(format!("face {fi} ({}): {why}", kind(&face.surface))));
         }
-        let (fp, stats) = result?;
+        let (fp, stats) = match result? {
+            (Planned::Face(fp), stats) => (fp, stats),
+            split => return Ok(split),
+        };
         let fwd = forward.get(fi).copied().unwrap_or(true);
         let fp =
             FacePlan { flip: !fwd, triangles: if fwd { fp.triangles } else { fp.triangles.into_iter().map(|[a, b, c]| [a, c, b]).collect() }, ..fp };
@@ -238,8 +310,170 @@ pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Res
         let (poles, averaged) = crate::pole::plan_poles(fi, eval.kernel(), &fp, fb.reach);
         let mut stats = stats;
         stats.averaged_poles = averaged;
-        Ok((FacePlan { poles, ..fp }, stats))
-    });
+        Ok((Planned::Face(FacePlan { poles, ..fp }), stats))
+    };
+    // Every face once; on the mesh path, the boundary sides a face's shaping splits are put on
+    // their edges as nodes, and every face of those edges is planned again, until none splits
+    // one (or the rounds run out, when the faces left keep their sides whole and are named).
+    let shape = match purpose {
+        Purpose::Mesh(shape) => Some(shape),
+        Purpose::Display => None,
+    };
+    let mut slots: Vec<Option<Result<(FacePlan, PlanStats)>>> = faces.iter().map(|_| None).collect();
+    // The faces whose shaping split only sides on no edge: planned with their sides whole.
+    let mut kept = vec![false; faces.len()];
+    let mut todo: Vec<usize> = (0..faces.len()).collect();
+    for round in 0..=MAX_SPLIT_ROUNDS {
+        let last = round == MAX_SPLIT_ROUNDS;
+        let done = crate::par::map("face tessellation", &todo, curved >= PARALLEL_FACES, |&fi| {
+            let purpose = match shape {
+                Some(shape) => {
+                    let sides = if last { Sides::Exhausted } else if kept.get(fi).copied().unwrap_or(true) { Sides::Kept } else { Sides::Split };
+                    Purpose::Mesh(Shape { sides, ..shape })
+                }
+                None => Purpose::Display,
+            };
+            plan_one(fi, purpose, &boundaries)
+        });
+        // The new nodes of each edge (curve parameters), in edge order.
+        let mut split: std::collections::BTreeMap<usize, Vec<f64>> = std::collections::BTreeMap::new();
+        let mut again: Vec<usize> = Vec::new();
+        for (&fi, r) in todo.iter().zip(done) {
+            let r = match r {
+                Ok((Planned::Face(fp), s)) => Ok((fp, s)),
+                Ok((Planned::Split(sides), _)) => {
+                    let on = faces.get(fi).map_or_else(Vec::new, |f| on_edges(f, &nodes, &sides));
+                    if on.is_empty() {
+                        if let Some(k) = kept.get_mut(fi) {
+                            *k = true;
+                        }
+                        again.push(fi);
+                    }
+                    for (e, t) in on {
+                        split.entry(e).or_default().push(t);
+                    }
+                    continue;
+                }
+                Err(e) => Err(e),
+            };
+            if let Some(slot) = slots.get_mut(fi) {
+                *slot = Some(r);
+            }
+        }
+        let (mut moved, mut lost): (Vec<usize>, Vec<usize>) = (Vec::new(), Vec::new());
+        for (e, ts) in &split {
+            let fs = edge_faces.get(*e).map_or(&[][..], Vec::as_slice);
+            let inserted = nodes.get_mut(*e).map_or(Ok(()), |n| edges::insert_at(b, *e, n, ts));
+            match inserted {
+                Ok(()) => moved.extend(fs),
+                // An edge that cannot take the nodes leaves out the faces it bounds, naming it.
+                Err(why) => {
+                    for &fi in fs {
+                        if let (Some(slot), Some(f)) = (slots.get_mut(fi), faces.get(fi)) {
+                            *slot = Some(Err(unsupported(format!("face {fi} ({}): {}", kind(&f.surface), detail(&why)))));
+                        }
+                    }
+                    lost.extend(fs);
+                }
+            }
+        }
+        moved.sort_unstable();
+        moved.dedup();
+        // The faces of an edge that has new nodes read their boundary again, and may split once more.
+        for &fi in &moved {
+            if let Some(k) = kept.get_mut(fi) {
+                *k = false;
+            }
+            let rebuilt = match (faces.get(fi), evals.get(fi), params.get(fi)) {
+                (Some(face), Some(eval), Some(map)) => boundary(b, fi, face, eval, map, &nodes, &rules),
+                _ => Err(unsupported(format!("face {fi}: missing"))),
+            };
+            match rebuilt {
+                Ok(fb) => {
+                    if let Some(slot) = boundaries.get_mut(fi) {
+                        *slot = fb;
+                    }
+                    again.push(fi);
+                }
+                Err(e) => {
+                    if let Some(slot) = slots.get_mut(fi) {
+                        *slot = Some(Err(e));
+                    }
+                }
+            }
+        }
+        // The new nodes move chords: where two curves of a face run closer than their chords sag
+        // (two arcs leaving a vertex tangentially), a chord from a node put in may cross a chord
+        // of the other curve that crossed none before. The faces that moved are untangled as
+        // every face was before planning ([`untangle`]), and every face of an edge that takes
+        // nodes doing so is planned again; a face that still crosses itself is left out, named.
+        if !moved.is_empty() {
+            // Left out: faces left out before planning, and faces whose slot holds an error that
+            // stands (not planned again this round: an edge that could not take its nodes, a
+            // boundary that could not be read). A face planned again is untangled with the rest.
+            let mut replanned = vec![false; faces.len()];
+            for &fi in &again {
+                if let Some(r) = replanned.get_mut(fi) {
+                    *r = true;
+                }
+            }
+            for &fi in &lost {
+                if let Some(r) = replanned.get_mut(fi) {
+                    *r = false;
+                }
+            }
+            let mut left: Vec<Option<TessError>> = (0..faces.len())
+                .map(|fi| match slots.get(fi) {
+                    Some(Some(Err(e))) if !replanned.get(fi).copied().unwrap_or(false) => Some(e.clone()),
+                    _ => why.get(fi).cloned().flatten(),
+                })
+                .collect();
+            let was: Vec<Option<TessError>> = left.clone();
+            let counts: Vec<usize> = nodes.iter().map(|n| n.points.len()).collect();
+            let face_boundary = |fi: usize, nodes: &[edges::Nodes]| match (faces.get(fi), evals.get(fi), params.get(fi)) {
+                (Some(face), Some(eval), Some(map)) => boundary(b, fi, face, eval, map, nodes, &rules),
+                _ => Err(unsupported(format!("face {fi}: missing"))),
+            };
+            let still = untangle(b, &evals, &edge_faces, rules.tol, &mut nodes, &mut boundaries, &face_boundary, &mut left, Some(&moved))?;
+            for (e, n) in nodes.iter().enumerate() {
+                if counts.get(e) != Some(&n.points.len()) {
+                    // A face left out stays out: its boundary was not built again.
+                    for &fi in edge_faces.get(e).map_or(&[][..], Vec::as_slice).iter().filter(|fi| left.get(**fi).is_some_and(Option::is_none)) {
+                        if let Some(k) = kept.get_mut(fi) {
+                            *k = false;
+                        }
+                        again.push(fi);
+                    }
+                }
+            }
+            for (fi, (now, before)) in left.into_iter().zip(was).enumerate() {
+                if let (Some(e), None) = (now, before) {
+                    if let Some(slot) = slots.get_mut(fi) {
+                        *slot = Some(Err(e));
+                    }
+                    lost.push(fi);
+                }
+            }
+            for (fi, reason) in still {
+                if let Some(slot) = slots.get_mut(fi) {
+                    *slot = Some(Err(unsupported(reason)));
+                }
+                lost.push(fi);
+            }
+        }
+        // A face whose edge could not take its nodes stays left out.
+        lost.sort_unstable();
+        lost.dedup();
+        again.retain(|fi| lost.binary_search(fi).is_err());
+        again.sort_unstable();
+        again.dedup();
+        if again.is_empty() {
+            break;
+        }
+        todo = again;
+    }
+    let planned: Vec<Result<(FacePlan, PlanStats)>> =
+        slots.into_iter().enumerate().map(|(fi, s)| s.unwrap_or_else(|| Err(unsupported(format!("face {fi}: not planned"))))).collect();
     let mut plan = TessPlan::default();
     let mut stats = PlanStats { unsampled_edges, kept_strict, ..PlanStats::default() };
     // A face no method plans is left out, named in the stats, and the rest of the body is
@@ -263,6 +497,7 @@ pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Res
         stats.lenient.extend(s.lenient);
         stats.averaged_poles.extend(s.averaged_poles);
         stats.over_tolerance.extend(s.over_tolerance);
+        stats.unshaped.extend(s.unshaped);
     }
     if let Some(e) = first_error
         && stats.unmeshed.len() == faces.len()
@@ -280,9 +515,34 @@ pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Res
     Ok((plan, stats))
 }
 
+/// The curve parameters on face `f`'s edges where its shaping split boundary sides `sides`:
+/// each side is found as a segment of one of its edges (its two end nodes, either way round),
+/// each fraction along it taken to the same fraction of the segment's parameters. A side on no
+/// edge (a pole's collapsed side, a seam cut's line) has none.
+fn on_edges(f: &brep::Face, nodes: &[edges::Nodes], sides: &[SplitSide]) -> Vec<(usize, f64)> {
+    let mut out = Vec::new();
+    for side in sides.iter().filter(|s| s.from != s.to) {
+        let found = face_edges(f).find_map(|oe| {
+            let e = oe.edge as usize;
+            let n = nodes.get(e)?;
+            n.points.windows(2).zip(n.params.windows(2)).find_map(|(p, t)| match (p, t) {
+                ([a, b], [ta, tb]) if *a == side.from && *b == side.to => Some((e, *ta, *tb, false)),
+                ([a, b], [ta, tb]) if *a == side.to && *b == side.from => Some((e, *ta, *tb, true)),
+                _ => None,
+            })
+        });
+        if let Some((e, ta, tb, reversed)) = found {
+            out.extend(side.at.iter().map(|&f| (e, ta + (if reversed { 1.0 - f } else { f }) * (tb - ta))));
+        }
+    }
+    out
+}
+
 /// Every face's surface, size and boundary and every edge's nodes, as [`plan_at`] reads them
-/// ([`Prepared`]), with chord tolerance `tol` and the facet angle `turn`.
-pub(crate) fn prepare(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result<Prepared> {
+/// ([`Prepared`]), with chord tolerance `tol` and the facet angle `turn`, for `purpose`: on the
+/// mesh path every face, planar ones included, asks for the spec's side where its surface asks
+/// for no less, and every edge follows the caller's size function too.
+pub(crate) fn prepare(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpose: Purpose<'_>) -> Result<Prepared> {
     let faces = &b.faces;
     let forward = forward_faces(b);
     // The faces each edge bounds, each once, in the order of the edge's uses.
@@ -299,7 +559,7 @@ pub(crate) fn prepare(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Res
             fs
         })
         .collect();
-    let rules = size::Rules::new(tol, size::extent(b.vertices.iter().map(|v| Vec3::new(v.point[0], v.point[1], v.point[2]))), turn);
+    let rules = size::Rules::new(tol, size::extent(b), turn);
     // Each face's surface and target side length, then every edge once at the smaller size of
     // its faces; faces then read their nodes. A planar face costs microseconds and a curved
     // one about a hundred, so the pool is used only where curved faces (or intersection
@@ -340,6 +600,13 @@ pub(crate) fn prepare(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Res
         crate::par::map("face sizes", &evals, curved >= PARALLEL_SIZES, |s| Ok(size::face_size(s, &uv::domain(s), &rules)))
             .into_iter()
             .collect::<Result<_>>()?;
+    let (sizes, size_at) = match purpose {
+        Purpose::Display => (sizes, None),
+        Purpose::Mesh(shape) => {
+            let side = shape.side.unwrap_or(rules.max_len);
+            (sizes.into_iter().map(|(h, speed)| (h.min(side), speed)).collect(), shape.size_at)
+        }
+    };
     let face_h = |f: usize| sizes.get(f).map_or(rules.max_len, |(h, _)| *h);
     // A flat face asks for no size (infinite): an edge between flat faces is whole, one beside
     // a curved face takes the curved face's size, so both meet at the same nodes.
@@ -352,7 +619,7 @@ pub(crate) fn prepare(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Res
     let mut unsampled_edges: Vec<crate::RefusedEdge> = Vec::new();
     let mut nodes: Vec<edges::Nodes> = Vec::with_capacity(jobs.len());
     for (ei, r) in crate::par::map("edge nodes", &jobs, solved >= PARALLEL_CURVES || jobs.len() >= PARALLEL_EDGES, |(e, h)| {
-        edges::sample_edge(b, *e, &rules, *h)
+        edges::sample_edge_sized(b, *e, &rules, *h, size_at)
     })
     .into_iter()
     .enumerate()
@@ -409,8 +676,8 @@ pub(crate) fn prepare(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Res
             }
         });
     }
-    let tangled = untangle(b, &evals, &edge_faces, rules.tol, &mut nodes, &mut boundaries, &face_boundary, &mut why)?;
-    Ok(Prepared { rules, forward, edge_faces, evals, sizes, nodes, unsampled_edges, kept_strict, boundaries, why, tangled })
+    let tangled = untangle(b, &evals, &edge_faces, rules.tol, &mut nodes, &mut boundaries, &face_boundary, &mut why, None)?;
+    Ok(Prepared { rules, forward, edge_faces, evals, sizes, nodes, unsampled_edges, kept_strict, boundaries, params, why, tangled })
 }
 
 /// Face `fi`'s boundary, loop by loop: the shared edge nodes (each edge's last node is the next
@@ -646,10 +913,12 @@ struct Boundary {
 /// run closer than their chords sag (the two arcs of a thin lune, a sliver cap between two
 /// cylinders), the chords may cross although the curves do not, and no triangulation follows
 /// such a boundary. The edge segments whose chords cross another of the face (in its loop or
-/// another, see [`tangle::crossing`]) are halved at their curve parameter's middle, on the edge,
+/// another, see [`tangle::crossing`]) are split at their crossing fractions, on the edge,
 /// so every face of the edge gets the new nodes; the faces of every edge split are checked again,
 /// until no chords cross. Boundaries that still cross after [`MAX_UNTANGLE`] rounds, or would
 /// put more than [`edges::MAX_EDGE_NODES`] on an edge, are an error naming the face and edges.
+/// `only`: the faces looked at first (every face where `None`); every face of an edge split is
+/// looked at again, whichever it is.
 #[allow(clippy::too_many_arguments)]
 fn untangle(
     b: &brep::Brep,
@@ -660,6 +929,7 @@ fn untangle(
     boundaries: &mut [Boundary],
     face_boundary: &(dyn Fn(usize, &[edges::Nodes]) -> Result<Boundary> + Sync),
     why: &mut [Option<TessError>],
+    only: Option<&[usize]>,
 ) -> Result<Vec<(usize, String)>> {
     // An edge that cannot be split further (it has all the nodes an edge may have) leaves out
     // the faces it bounds, each naming it; so does a face whose boundary cannot then be read.
@@ -674,7 +944,18 @@ fn untangle(
     };
     let indexed: Vec<usize> = (0..boundaries.len()).collect();
     let curved = evals.iter().filter(|e| !matches!(***e, EvalSurface::Plane { .. })).count();
-    let left_out: Vec<bool> = why.iter().map(Option::is_some).collect();
+    let mut left_out: Vec<bool> = why.iter().map(Option::is_some).collect();
+    if let Some(only) = only {
+        let mut looked = vec![false; left_out.len()];
+        for &fi in only {
+            if let Some(l) = looked.get_mut(fi) {
+                *l = true;
+            }
+        }
+        for (l, k) in left_out.iter_mut().zip(looked) {
+            *l = *l || !k;
+        }
+    }
     let found: Vec<Vec<(u32, u32)>> = crate::par::map("boundary crossings", &indexed, curved >= PARALLEL_FACES, |&fi| {
         if left_out.get(fi).copied().unwrap_or(false) {
             return Ok(Vec::new());
@@ -689,10 +970,10 @@ fn untangle(
             return Ok(Vec::new());
         }
         if round == MAX_UNTANGLE {
-            // Halving cannot part two curves that touch or cross: where they come within the chord
+            // Refinement cannot part two curves that touch or cross: where they come within the chord
             // tolerance of each other, they share nodes.
             let faces: Vec<usize> = tangled.iter().map(|(fi, _)| *fi).collect();
-            tangled = snap_touches(evals, edge_faces, tol, nodes, boundaries, face_boundary, &faces)?;
+            tangled = snap_touches(evals, edge_faces, tol, nodes, boundaries, face_boundary, &faces, why)?;
             // Each face still crossing, with why: planned leniently, and named (`plan_or_fill`).
             return Ok(tangled
                 .iter()
@@ -701,19 +982,21 @@ fn untangle(
                     es.sort_unstable();
                     es.dedup();
                     let kind = b.faces.get(*fi).map_or("?", |f| kind(&f.surface));
-                    (*fi, format!("face {fi} ({kind}): boundary crosses itself: edges {es:?} run closer together than their chords can follow after {MAX_UNTANGLE} halvings"))
+                    (*fi, format!("face {fi} ({kind}): boundary crosses itself: edges {es:?} run closer together than their chords can follow after {MAX_UNTANGLE} refinements"))
                 })
                 .collect());
         }
-        let mut split: Vec<(u32, u32)> = tangled.iter().flat_map(|(_, c)| c.iter().copied()).collect();
-        split.sort_unstable();
-        split.dedup();
+        // Keep the event's position. A crossing arbitrarily near an end can survive every
+        // midpoint split; evaluating the curve at the event parts its chords directly. The
+        // loop may traverse the edge backwards, while edge parameters always increase.
+        let faces: Vec<usize> = tangled.iter().map(|(fi, _)| *fi).collect();
+        let split = crossing_parameters(&faces, boundaries, evals, nodes);
         let mut redo: Vec<usize> = Vec::new();
-        for run in split.chunk_by(|a, c| a.0 == c.0) {
-            let Some(&(e, _)) = run.first() else { continue };
-            let segs: Vec<u32> = run.iter().map(|(_, k)| *k).collect();
-            let Some(slot) = nodes.get_mut(e as usize) else { continue };
-            if let Err(err) = edges::split_segments(b, e as usize, slot, &segs) {
+        for (e, ts) in split {
+            let Some(slot) = nodes.get_mut(e as usize) else {
+                continue;
+            };
+            if let Err(err) = edges::insert_crossings(b, e as usize, slot, &ts) {
                 for &fi in edge_faces.get(e as usize).into_iter().flatten() {
                     refuse(fi, &err, why);
                 }
@@ -749,6 +1032,81 @@ fn untangle(
     Ok(Vec::new())
 }
 
+/// One parameter per physical event, independent of the number or traversal of its faces.
+/// The first reporting face in index order supplies the event's metric. Its parameter is
+/// computed once, under the directed pair of edge-segment identities, and reused by every
+/// face. Touch events also identify which node of the other segment lies on this one.
+fn crossing_parameters(
+    faces: &[usize],
+    boundaries: &[Boundary],
+    evals: &[poles::Face],
+    nodes: &[edges::Nodes],
+) -> std::collections::BTreeMap<u32, Vec<f64>> {
+    let mut faces = faces.to_vec();
+    faces.sort_unstable();
+    let mut events = std::collections::BTreeMap::new();
+    for fi in faces {
+        let (Some(fb), Some(s)) = (boundaries.get(fi), evals.get(fi)) else {
+            continue;
+        };
+        for event in tangle::events(s, fb.reach, &fb.loops) {
+            let segment = |(l, k): (usize, usize)| fb.segments.get(l)?.get(k).copied();
+            let (Some(at @ (e, j)), Some(other @ (oe, oj))) =
+                (segment(event.at), segment(event.other))
+            else {
+                continue;
+            };
+            let (Some(n), Some(on)) = (nodes.get(e as usize), nodes.get(oe as usize)) else {
+                continue;
+            };
+            let (Some(&t), Some(&u)) = (n.params.get(j as usize), n.params.get(j as usize + 1))
+            else {
+                continue;
+            };
+            let Some(start) = fb
+                .loops
+                .get(event.at.0)
+                .and_then(|lp| lp.pts.get(event.at.1))
+            else {
+                continue;
+            };
+            let forward = n.points.get(j as usize) == Some(start);
+            let end = if let Some(end) = event.end {
+                let Some(other_start) = fb
+                    .loops
+                    .get(event.other.0)
+                    .and_then(|lp| lp.pts.get(event.other.1))
+                else {
+                    continue;
+                };
+                let other_forward = on.points.get(oj as usize) == Some(other_start);
+                Some(
+                    oj + if other_forward {
+                        end as u32
+                    } else {
+                        1 - end as u32
+                    },
+                )
+            } else {
+                None
+            };
+            events.entry((at, other, end)).or_insert_with(|| {
+                let f = if forward {
+                    event.fraction
+                } else {
+                    1.0 - event.fraction
+                };
+                t + f * (u - t)
+            });
+        }
+    }
+    let mut split: std::collections::BTreeMap<u32, Vec<f64>> = std::collections::BTreeMap::new();
+    for (((e, _), _, _), t) in events {
+        split.entry(e).or_default().push(t);
+    }
+    split
+}
+
 /// Rounds of [`snap_touches`] before a face that still crosses itself is refused.
 const MAX_SNAP: u32 = 8;
 
@@ -762,7 +1120,7 @@ const MAX_SNAP: u32 = 8;
 /// polyline there: a slit, which bounds the face on neither side. A node is not snapped where the
 /// pinch would turn part of its loop inside out by more than the tolerance (two curves crossing
 /// at an angle: the boundary is wrong there, not within the tolerance). Every face of a changed
-/// edge has its boundary built again. Returns the faces whose boundaries still cross, with the
+/// edge has its boundary built again, except one already left out (`why`). Returns the faces whose boundaries still cross, with the
 /// crossing segments.
 #[allow(clippy::too_many_arguments)]
 fn snap_touches(
@@ -773,6 +1131,7 @@ fn snap_touches(
     boundaries: &mut [Boundary],
     face_boundary: &(dyn Fn(usize, &[edges::Nodes]) -> Result<Boundary> + Sync),
     faces: &[usize],
+    why: &[Option<TessError>],
 ) -> Result<Vec<(usize, Vec<(u32, u32)>)>> {
     let crossing = |fi: usize, fb: &Boundary| -> Vec<(usize, usize)> {
         let Some(s) = evals.get(fi) else { return Vec::new() };
@@ -780,7 +1139,8 @@ fn snap_touches(
     };
     let mut tangled: Vec<usize> = faces.to_vec();
     for _ in 0..MAX_SNAP {
-        let mut add: HashMap<u32, Vec<(f64, Vec3)>> = HashMap::new();
+        // In edge order, so the first edge that cannot take its nodes is the same every run.
+        let mut add: std::collections::BTreeMap<u32, Vec<(f64, Vec3)>> = std::collections::BTreeMap::new();
         for &fi in &tangled {
             let Some(fb) = boundaries.get(fi) else { continue };
             for (l, k) in crossing(fi, fb) {
@@ -804,6 +1164,10 @@ fn snap_touches(
         redo.dedup();
         tangled.clear();
         for fi in redo {
+            // A face already left out keeps its reason, as in [`untangle`]'s rounds.
+            if why.get(fi).is_some_and(Option::is_some) {
+                continue;
+            }
             let fb = face_boundary(fi, nodes)?;
             let crosses = !crossing(fi, &fb).is_empty();
             if let Some(slot) = boundaries.get_mut(fi) {
@@ -855,13 +1219,16 @@ fn touch(fb: &Boundary, nodes: &[edges::Nodes], at: (usize, usize), seg: (u32, u
             }
             let f = (p - a).dot(ac) / len2;
             let d = p.dist_to_segment(a, c);
-            if !(f > 1e-6 && f < 1.0 - 1e-6 && d <= tol) || best.is_some_and(|(bd, _, _)| bd <= d) {
+            let t = ta + f * (tc - ta);
+            if !(f > 0.0 && f < 1.0 && t > ta && t < tc && p != a && p != c && d <= tol)
+                || best.is_some_and(|(bd, _, _)| bd <= d)
+            {
                 continue;
             }
             if l == at.0 && inside_out(lp, at.1, k, tol) {
                 continue;
             }
-            best = Some((d, ta + f * (tc - ta), p));
+            best = Some((d, t, p));
         }
     }
     best.map(|(_, t, p)| (t, p))
@@ -1142,7 +1509,9 @@ fn holes_beside_outer(dom: &uv::Domain, loops: &mut [seam::Loop]) {
 /// refusal is the error (and [`plan`] leaves the face out, named). `refused`: a face whose
 /// boundary still crosses itself after [`untangle`] (two edges meeting tangentially at a cusp,
 /// whose chords cross however often they are halved), filled leniently straight away with that
-/// reason.
+/// reason. On the mesh path ([`Purpose::Mesh`]) nothing is filled leniently: the first refusal
+/// is the error.
+#[allow(clippy::too_many_arguments)]
 fn plan_or_fill(
     fi: usize,
     kind: &str,
@@ -1152,17 +1521,21 @@ fn plan_or_fill(
     size: (f64, [f64; 2]),
     reach: f64,
     refused: Option<&str>,
-) -> Result<(FacePlan, PlanStats)> {
+    purpose: Purpose<'_>,
+) -> Result<(Planned, PlanStats)> {
     let mut stats = PlanStats::default();
     let strict = match refused {
         Some(why) => Err(unsupported(why.to_string())),
-        None => plan_face(fi, kind, s, loops, rules, size, reach, &mut stats, Lenient::No),
+        None => plan_face(fi, kind, s, loops, rules, size, reach, &mut stats, Lenient::No, purpose),
     };
+    if let Purpose::Mesh(_) = purpose {
+        return strict.map(|planned| (planned, stats));
+    }
     match strict {
         Ok(fp) => Ok((fp, stats)),
         Err(first) => {
             let mut stats = PlanStats::default();
-            match plan_face(fi, kind, s, loops, rules, size, reach, &mut stats, Lenient::Yes) {
+            match plan_face(fi, kind, s, loops, rules, size, reach, &mut stats, Lenient::Yes, purpose) {
                 Ok(fp) => {
                     stats.lenient.push(RefusedFace { face: fi, reason: first.to_string() });
                     Ok((fp, stats))
@@ -1283,10 +1656,409 @@ pub(crate) fn polygons(s: &poles::Face, loops: &[seam::Loop], rules: &size::Rule
     Ok(Polygons { uvs, fixed, ranges, seamed })
 }
 
+/// A pole of the surface on a face's boundary, which the mesh path fans on its own
+/// ([`pole_caps`]).
+struct PoleCap {
+    /// The loop it is on (index into the face's loops).
+    lp: usize,
+    /// Its boundary nodes, in loop order: one, or its copies where the planner split the free
+    /// parameter there ([`polygons`]), and every node next to them that is a pole too: where a
+    /// face narrows to less than the reach, a stretch of its boundary is within the reach of one
+    /// collapsed side ([`pole_caps`]).
+    copies: Vec<usize>,
+    /// The boundary nodes before and after them in the loop.
+    before: usize,
+    after: usize,
+}
+
+/// The poles of the surface `s` on a face's boundary loops (`uvs` in `ranges`), as the display
+/// finds them ([`poles::Face::pole`], within `reach`): each run of
+/// boundary nodes at one pole, with the nodes either side. The parameters collapse there, so a
+/// triangulation in (u, v) meets the pole along a side that is one point in 3D, and its
+/// triangles crowd and fold toward it. The mesh path fans each pole's cap from the pole instead
+/// ([`cap_ring`], [`cap_fan`]). A run is every pole node in a row: the copies of one point, and
+/// where the face is narrower than the reach along a stretch of its boundary (a sliver tapering
+/// to a collapsed side), the nodes of that stretch, each within the reach of a collapsed line
+/// of the surface, whatever its point. No ring could lie between two of them, so they are one
+/// cap, fanned from the run.
+fn pole_caps(s: &poles::Face, uvs: &[[f64; 2]], ranges: &[std::ops::Range<usize>], reach: f64) -> std::result::Result<Vec<PoleCap>, String> {
+    let is_pole = |k: usize| uvs.get(k).is_some_and(|q| (0..2).any(|d| s.pole(*q, d, reach)));
+    let mut caps = Vec::new();
+    for (lp, r) in ranges.iter().enumerate() {
+        let n = r.len();
+        if n == 0 {
+            continue;
+        }
+        let at = |k: usize| r.start + k % n;
+        let pole: Vec<bool> = (0..n).map(|k| is_pole(at(k))).collect();
+        let pole_at = |k: usize| pole.get(k % n).copied().unwrap_or(false);
+        if pole.iter().all(|p| *p) {
+            return Err(format!("a loop of {n} nodes all at one pole"));
+        }
+        for k in 0..n {
+            // A run starts at a pole node whose predecessor is not a pole.
+            if !pole_at(k) || pole_at(k + n - 1) {
+                continue;
+            }
+            let mut copies = vec![at(k)];
+            while copies.len() < n && pole_at(k + copies.len()) {
+                copies.push(at(k + copies.len()));
+            }
+            if copies.len() + 2 > n {
+                return Err(format!("a loop of {n} nodes all at one pole"));
+            }
+            let (before, after) = (at(k + n - 1), at(k + copies.len()));
+            caps.push(PoleCap { lp, copies, before, after });
+        }
+    }
+    Ok(caps)
+}
+
+/// How much wider than the spec's angle a fan's angle at the pole is planned in the tangent
+/// plane: on a curved surface the ring's nodes lean away from it, so the angle in 3D is a little
+/// less ([`cap_ring`] checks it in 3D).
+const RING_MARGIN: f64 = 0.02;
+
+/// How near the farthest a ring may lie ([`ring_reach`]) the planner puts the nodes it asks for:
+/// a node put on an edge at a fraction of a chord lies about there, so the ring's chords keep the
+/// tolerance with room.
+const RING_ROOM: f64 = 0.9;
+
+/// How far the ring line of `cap` (straight in (u, v) from the boundary node before the pole to
+/// the one after it) turns round the pole in 3D, sampled, with the pole's point and the line's
+/// (u, v) ends.
+fn ring_turn(s: &EvalSurface, cap: &PoleCap, uvs: &[[f64; 2]], fixed: &[Vec3]) -> std::result::Result<(f64, Vec3, [f64; 2], [f64; 2]), String> {
+    const SAMPLES: usize = 64;
+    let (Some(&a), Some(&b), Some(&pole)) = (uvs.get(cap.before), uvs.get(cap.after), cap.copies.first().and_then(|&c| fixed.get(c))) else {
+        return Err("a pole's cap off its loop".into());
+    };
+    let point = |t: f64| {
+        let q = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+        s.derivs(q[0], q[1]).map(|d| d.0).ok_or_else(|| format!("the surface does not evaluate on a pole's ring at {q:?}"))
+    };
+    let mut turn = 0.0;
+    let mut last = point(0.0)?;
+    for i in 1..=SAMPLES {
+        let p = point(i as f64 / SAMPLES as f64)?;
+        turn += edges::turn(last - pole, p - pole);
+        last = p;
+    }
+    Ok((turn, pole, a, b))
+}
+
+/// The segments of a ring turning `turn` round its pole: as many as keep the fan's angle at the
+/// pole at least `min_angle` (with [`RING_MARGIN`]), and at least one per quarter turn, so the
+/// fan's triangles keep the angle at the pole by construction and are never obtuse there. A full
+/// turn at 25 degrees: 14 segments.
+fn ring_segments(turn: f64, min_angle: f64) -> usize {
+    let most = (turn / (min_angle * (1.0 + RING_MARGIN))).floor();
+    let least = (turn / std::f64::consts::FRAC_PI_2).ceil();
+    most.max(least).clamp(1.0, edges::MAX_EDGE_NODES as f64) as usize
+}
+
+/// The farthest from its pole a ring of `n` segments turning `turn` may lie (mm): each chord turns
+/// `turn / n` round the pole and sags `r (1 - cos(turn / 2n))` from a ring of radius `r`, which
+/// keeps the tolerance `tol` no farther than `tol / (1 - cos(turn / 2n))`; nor farther than the
+/// side asked `side`.
+fn ring_reach(tol: f64, side: f64, turn: f64, n: usize) -> f64 {
+    let half = 0.5 * turn / n.max(1) as f64;
+    (tol / (1.0 - half.cos())).min(side)
+}
+
+/// Where the boundary nodes either side of `cap`'s pole lie farther from it than its ring may
+/// (`reach`): the sides from them to the pole, each to be split on its edge at [`RING_ROOM`] of
+/// the reach, so the next plan's ring passes there. Empty where the ring may pass through them.
+fn ring_too_far(cap: &PoleCap, fixed: &[Vec3], reach: f64) -> Vec<SplitSide> {
+    // The sides into and out of the run: from the node before it to its first node, and from its
+    // last node to the one after it (one point where the run is a pole's copies).
+    let (Some(&c0), Some(&cm)) = (cap.copies.first(), cap.copies.last()) else { return Vec::new() };
+    let (Some(&first), Some(&last), Some(&before), Some(&after)) = (fixed.get(c0), fixed.get(cm), fixed.get(cap.before), fixed.get(cap.after)) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let (db, da) = (first.dist(before), last.dist(after));
+    let at = RING_ROOM * reach;
+    if db > reach {
+        out.push(SplitSide { from: before, to: first, at: vec![1.0 - at / db] });
+    }
+    if da > reach {
+        out.push(SplitSide { from: last, to: after, at: vec![at / da] });
+    }
+    out
+}
+
+/// Where the ring of `cap` (straight in (u, v) from the node before the pole to the one after it)
+/// would not lie inside the face: a node of any of the face's loops (`ranges`), across the ring's
+/// span, on the ring or on the pole's side of it, a side of a loop crossing the ring inside its
+/// span, or a node of the run itself on the other side
+/// (a pole's face of three sides whose third side, straight in (u, v), has nodes between the two
+/// it ends at: the ring runs along that side, and the rest of the face has no area). The pole's
+/// side is that of the run's node farthest from the ring line. The sides from those two nodes to
+/// the pole, each to be split at its middle on its edge, so the next plan's ring passes inside.
+/// Empty where the ring lies inside, and where the pole's side is not known (the run on the ring
+/// line, or a coordinate not finite): the face then goes on to the fan's own checks.
+fn ring_off_boundary(cap: &PoleCap, uvs: &[[f64; 2]], fixed: &[Vec3], ranges: &[std::ops::Range<usize>]) -> Vec<SplitSide> {
+    let (Some(&c0), Some(&cm)) = (cap.copies.first(), cap.copies.last()) else { return Vec::new() };
+    let (Some(&a), Some(&b)) = (uvs.get(cap.before), uvs.get(cap.after)) else { return Vec::new() };
+    let ab = [b[0] - a[0], b[1] - a[1]];
+    let across = |q: [f64; 2]| ab[0] * (q[1] - a[1]) - ab[1] * (q[0] - a[0]);
+    let along = |q: [f64; 2]| ab[0] * (q[0] - a[0]) + ab[1] * (q[1] - a[1]);
+    let run: Vec<f64> = cap.copies.iter().filter_map(|&k| uvs.get(k).map(|&q| across(q))).collect();
+    let pole_side = run.iter().copied().fold(0.0, |best: f64, x| if x.abs() > best.abs() { x } else { best });
+    let span = along(b);
+    if !(pole_side.is_finite() && pole_side != 0.0 && span.is_finite() && span > 0.0) || run.iter().any(|x| !x.is_finite()) {
+        return Vec::new();
+    }
+    let crossed = run.iter().any(|&x| x * pole_side < 0.0);
+    let ours = |k: usize| k == cap.before || k == cap.after || cap.copies.contains(&k);
+    let inside = |t: f64| t > 0.0 && t < span;
+    let near = || ranges.iter().flat_map(|r| r.clone()).filter(|k| !ours(*k)).filter_map(|k| uvs.get(k).copied()).any(|q| inside(along(q)) && !(across(q) * pole_side < 0.0));
+    // A side of a loop that crosses the ring inside its span, though both its ends lie past the
+    // ring's ends or across it (a hole reaching over the ring between its nodes). Sides with an
+    // end at the ring's ends or on the run are the cap's own.
+    let over = || {
+        ranges.iter().any(|r| {
+            let n = r.len();
+            (0..n).any(|k| {
+                let (i, j) = (r.start + k, r.start + (k + 1) % n);
+                let (Some(&p), Some(&q)) = (uvs.get(i), uvs.get(j)) else { return false };
+                let (x, y) = (across(p), across(q));
+                if ours(i) || ours(j) || !(x * y < 0.0) {
+                    return false;
+                }
+                let f = x / (x - y);
+                inside(along([p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f]))
+            })
+        })
+    };
+    let cuts = crossed || near() || over();
+    if !cuts {
+        return Vec::new();
+    }
+    let (Some(&first), Some(&last), Some(&before), Some(&after)) = (fixed.get(c0), fixed.get(cm), fixed.get(cap.before), fixed.get(cap.after)) else {
+        return Vec::new();
+    };
+    vec![SplitSide { from: before, to: first, at: vec![0.5] }, SplitSide { from: last, to: after, at: vec![0.5] }]
+}
+
+/// The inner nodes of the ring of `cap`: the line in (u, v) from the boundary node before the
+/// pole to the one after it (both ends count among its segments: a seam's two nodes are its
+/// ends, one point), divided evenly by the turn round the pole in 3D, not by its parameter (a
+/// rational spline's runs unevenly round its arcs), into [`ring_segments`] for the spec's angle
+/// `min_angle`, then fewer while
+/// the fan's angle at the pole between two neighbours falls short of it in 3D (down to one per
+/// quarter turn), so the fan keeps the angle. Where the ring lies farther out than its chords can
+/// keep the tolerance `tol` (the planner could not put nodes nearer the pole), it is divided more
+/// finely instead, so its chords keep the tolerance, and the face is named short of the angle.
+/// Each node's (u, v) and point; an error where the surface does not evaluate on the ring.
+fn cap_ring(s: &EvalSurface, cap: &PoleCap, uvs: &[[f64; 2]], fixed: &[Vec3], tol: f64, min_angle: f64) -> std::result::Result<Vec<([f64; 2], Vec3)>, String> {
+    /// Rounds of dividing the ring more finely where a chord still sags past the tolerance.
+    const MAX_FINER: usize = 16;
+    let (turn, pole, a, b) = ring_turn(s, cap, uvs, fixed)?;
+    let at = |t: f64| [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+    let point = |t: f64| {
+        let q = at(t);
+        s.derivs(q[0], q[1]).map(|d| d.0).ok_or_else(|| format!("the surface does not evaluate on a pole's ring at {q:?}"))
+    };
+    // The turn round the pole from the ring's start, sampled along it: each node is placed by
+    // its share of the whole turn, then bisected between the samples either side of it.
+    const SAMPLES: usize = 256;
+    const BISECTIONS: usize = 48;
+    let mut table: Vec<(f64, Vec3, f64)> = Vec::new();
+    let mut so_far = 0.0;
+    for i in 0..=SAMPLES {
+        let t = i as f64 / SAMPLES as f64;
+        let p = point(t)?;
+        if let Some(&(_, last, _)) = table.last() {
+            so_far += edges::turn(last - pole, p - pole);
+        }
+        table.push((t, p, so_far));
+    }
+    let whole = so_far;
+    let place = |share: f64| -> std::result::Result<f64, String> {
+        let goal = whole * share;
+        let Some(k) = table.windows(2).position(|w| matches!(w, [_, (_, _, b)] if *b >= goal)) else { return Ok(1.0) };
+        let (Some(&(t0, p0, c0)), Some(&(t1, _, _))) = (table.get(k), table.get(k + 1)) else { return Ok(1.0) };
+        let (mut lo, mut hi) = (t0, t1);
+        for _ in 0..BISECTIONS {
+            let mid = 0.5 * (lo + hi);
+            if c0 + edges::turn(p0 - pole, point(mid)? - pole) < goal {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        Ok(0.5 * (lo + hi))
+    };
+    let nodes = |n: usize| -> std::result::Result<Vec<(f64, [f64; 2], Vec3)>, String> {
+        (0..=n)
+            .map(|i| {
+                let t = if i == 0 { 0.0 } else if i == n { 1.0 } else { place(i as f64 / n as f64)? };
+                Ok((t, at(t), point(t)?))
+            })
+            .collect()
+    };
+    // A run of poles at more than one point is fanned from each of its points in turn, each to
+    // its share of the ring ([`cap_fan`]): the ring has an inner node, so no triangle of it has
+    // two boundary nodes in a row and the ring's end, which lie on one boundary curve.
+    let points = cap.copies.windows(2).filter(|w| matches!(w, [a, b] if fixed.get(*a) != fixed.get(*b))).count() + 1;
+    let fewest = if points > 1 { 2 } else { 1 };
+    let least = ring_segments(turn, std::f64::consts::FRAC_PI_2).max(fewest);
+    let mut n = ring_segments(turn, min_angle).max(fewest);
+    let mut ring = nodes(n)?;
+    // Fewer while a neighbour pair's angle at the pole in 3D falls short of the spec's.
+    while n > least && ring.windows(2).any(|w| matches!(w, [x, y] if edges::turn(x.2 - pole, y.2 - pole) < min_angle)) {
+        n -= 1;
+        ring = nodes(n)?;
+    }
+    // More finely where a chord sags past the tolerance.
+    for _ in 0..MAX_FINER {
+        let sags = ring.windows(2).any(|w| {
+            let [x, y] = w else { return false };
+            [0.25, 0.5, 0.75].iter().any(|f| point(x.0 + f * (y.0 - x.0)).is_ok_and(|p| p.dist_to_segment(x.2, y.2) > tol))
+        });
+        if !sags || n >= edges::MAX_EDGE_NODES {
+            break;
+        }
+        n = (n + n.div_ceil(4)).min(edges::MAX_EDGE_NODES);
+        ring = nodes(n)?;
+    }
+    // The inner nodes: the ends are the boundary's.
+    Ok(ring.into_iter().skip(1).take(n.saturating_sub(1)).map(|(_, q, p)| (q, p)).collect())
+}
+
+/// The fan of a pole's cap: the triangles from the pole's `copies` (boundary nodes, in loop
+/// order, at the points `pos`) to the ring `ring` (from the node before the pole to the one after
+/// it), in the numbering of `uv`, counter-clockwise in (u, v). The copies at one point: the first
+/// copy to every ring segment but the last, the copies to the ring's last inner node (triangles
+/// with two corners at the pole, which the planner leaves out, so the fan covers the cap in
+/// (u, v)), and the last copy to the last segment. A run at several points (a stretch of the
+/// boundary within the reach of a collapsed side) is fanned the same way from each point in
+/// turn, each to an even share of the ring's inner nodes, the step from one point to the next
+/// a triangle on the inner node where they meet. `None` where a triangle has no area in (u, v)
+/// or turns against the cap's polygon (the fan would overlap itself), or a run at several points
+/// has a ring with no inner node.
+fn cap_fan(copies: &[usize], ring: &[usize], uv: &[[f64; 2]], pos: &[Vec3]) -> Option<Vec<[u32; 3]>> {
+    let id = |k: usize| u32::try_from(k).ok();
+    let groups: Vec<&[usize]> = copies.chunk_by(|a, b| pos.get(*a) == pos.get(*b)).collect();
+    let cm = *copies.last()?;
+    let m = ring.len().checked_sub(1)?;
+    let inner_last = m.checked_sub(1)?;
+    let p = groups.len();
+    if p > 1 && inner_last < 1 {
+        return None;
+    }
+    // The ring node where each point's fan ends and the next one's starts: the `inner_last`
+    // segments up to the last inner node shared evenly among the points, each ending on an inner
+    // node (never before the first), the last point's on the last inner node.
+    let end = |g: usize| if g + 1 >= p { inner_last } else { ((g + 1) * inner_last / p).max(1) };
+    let mut tris: Vec<[usize; 3]> = Vec::new();
+    let mut from = 0;
+    for (g, run) in groups.iter().enumerate() {
+        let (&first, &last_copy) = (run.first()?, run.last()?);
+        let to = end(g);
+        for k in from..to {
+            tris.push([first, *ring.get(k)?, *ring.get(k + 1)?]);
+        }
+        let at = *ring.get(to)?;
+        for w in run.windows(2) {
+            let (&a, &b) = (w.first()?, w.get(1)?);
+            tris.push([b, a, at]);
+        }
+        if let Some(next) = groups.get(g + 1) {
+            tris.push([*next.first()?, last_copy, at]);
+        }
+        from = to;
+    }
+    let last = *ring.get(inner_last)?;
+    tris.push([cm, last, *ring.get(m)?]);
+    // Every triangle above runs the way the cap's polygon does (the ring from its start to its
+    // end, then the run back). The cap's polygon is simple, so triangles that all turn its way
+    // and share their sides as a fan does cover it exactly once: a triangle turning the other way
+    // (a run bending toward the ring past what its share of the ring can see) means an overlap,
+    // and the cap is not fanned.
+    let polygon: Vec<usize> = ring.iter().copied().chain(copies.iter().rev().copied()).collect();
+    let mut whole = 0.0;
+    for (k, &i) in polygon.iter().enumerate() {
+        let (p, q) = (*uv.get(i)?, *uv.get(*polygon.get((k + 1) % polygon.len())?)?);
+        whole += p[0] * q[1] - q[0] * p[1];
+    }
+    if !(whole.abs() > 0.0) {
+        return None;
+    }
+    tris.into_iter()
+        .map(|[a, b, c]| {
+            let (qa, qb, qc) = (*uv.get(a)?, *uv.get(b)?, *uv.get(c)?);
+            let area = (qb[0] - qa[0]) * (qc[1] - qa[1]) - (qb[1] - qa[1]) * (qc[0] - qa[0]);
+            if !(area * whole > 0.0) {
+                return None;
+            }
+            Some(if area > 0.0 { [id(a)?, id(b)?, id(c)?] } else { [id(a)?, id(c)?, id(b)?] })
+        })
+        .collect()
+}
+
+/// The fastest the surface `s` runs along u and along v (mm per parameter unit) over the box
+/// `bbox`, sampled on a 9 x 9 grid, and at least `mean`: a lattice of side `h / fast` in each
+/// parameter is no wider than `h` in 3D anywhere the samples see.
+fn fastest(s: &EvalSurface, bbox: [(f64, f64); 2], mean: [f64; 2]) -> [f64; 2] {
+    const SAMPLES: usize = 9;
+    let mut fast = mean;
+    let [(u0, u1), (v0, v1)] = bbox;
+    for i in 0..SAMPLES {
+        for j in 0..SAMPLES {
+            let u = u0 + (u1 - u0) * (i as f64 + 0.5) / SAMPLES as f64;
+            let v = v0 + (v1 - v0) * (j as f64 + 0.5) / SAMPLES as f64;
+            if let Some((_, su, sv)) = s.derivs(u, v) {
+                fast = [fast[0].max(su.len()), fast[1].max(sv.len())];
+            }
+        }
+    }
+    fast.map(|x| if x.is_finite() && x > 0.0 { x } else { 1.0 })
+}
+
+/// How near in 3D, as a fraction of the side asked there, a seed may lie to another seed or a
+/// boundary node ([`mesh_seeds`]).
+const SEED_GAP: f64 = 0.8;
+
+/// The mesh path's seeds of a face: the equilateral lattice of side `h / fast` over `bbox`
+/// inside the loops `polys` (no wider than `h` in 3D, see [`fastest`]), taken in its order
+/// where its point lies at least [`SEED_GAP`] of the side asked there (`h`, or less where
+/// `size_at` asks) from the boundary nodes `fixed` and the seeds taken before it, in 3D: where
+/// the surface runs slower than its fastest (towards a sphere's pole, round a torus's inside)
+/// the lattice crowds in 3D, and the seeds are thinned to the side. Whether the lattice was
+/// looked through ([`cdt::lattice_scanned`]).
+fn mesh_seeds(s: &EvalSurface, bbox: [(f64, f64); 2], h: f64, polys: &[&[[f64; 2]]], fast: [f64; 2], fixed: &[Vec3], size_at: Option<size::SizeAt<'_>>) -> (Vec<[f64; 2]>, bool) {
+    let (lattice, whole) = cdt::lattice_scanned(bbox, [h / fast[0], h / fast[1]], polys, fast);
+    if !(h.is_finite() && h > 0.0) {
+        return (lattice, whole);
+    }
+    // The points taken so far, by cell of a grid a side wide: every point nearer than the gap
+    // is in the cell of the seed or a neighbour.
+    let cell = |p: Vec3| [p.x, p.y, p.z].map(|x| (x / h).floor() as i64);
+    let mut taken: crate::hash::BitsMap<[i64; 3], Vec<Vec3>> = crate::hash::BitsMap::default();
+    for p in fixed {
+        taken.entry(cell(*p)).or_default().push(*p);
+    }
+    let mut seeds = Vec::new();
+    for q in lattice {
+        let Some((p, _, _)) = s.derivs(q[0], q[1]) else { continue };
+        let gap = SEED_GAP * size::local(h, size_at, p);
+        let [x, y, z] = cell(p);
+        let crowded = (-1..=1).any(|i| (-1..=1).any(|j| (-1..=1).any(|k| taken.get(&[x + i, y + j, z + k]).is_some_and(|ps| ps.iter().any(|o| o.dist(p) < gap)))));
+        if !crowded {
+            taken.entry([x, y, z]).or_default().push(p);
+            seeds.push(q);
+        }
+    }
+    (seeds, whole)
+}
+
 /// One face: boundary loops in 3D (shared edge nodes) to parameters and triangles.
 /// `size`: the face's target side length (mm) and the surface's mean speed along u and v.
 /// `reach`: how near a pole a point is taken as one ([`Boundary::reach`]). `lenient`: the last resort
-/// for a face no method could plan (see [`Lenient`]).
+/// for a face no method could plan (see [`Lenient`]). `purpose`: on the mesh path every face goes
+/// to constrained Delaunay ([`cdt::mesh`]), however it suits a cheaper layout.
 #[allow(clippy::too_many_arguments)]
 fn plan_face(
     fi: usize,
@@ -1298,7 +2070,8 @@ fn plan_face(
     reach: f64,
     stats: &mut PlanStats,
     lenient: Lenient,
-) -> Result<FacePlan> {
+    purpose: Purpose<'_>,
+) -> Result<Planned> {
     let tol = rules.tol;
     let (h, speed) = size;
     // The memory bounds that limit this face, if any ([`crate::Cap`]).
@@ -1338,7 +2111,172 @@ fn plan_face(
     // Planar and curved faces alike: a structured grid where the boundary runs along the
     // parameter box (a rectangle, a cylinder half), a Coons grid on four corners, else Delaunay.
     // The lenient fill is the constrained Delaunay alone: the caller names the face in the stats.
-    let (extra, triangles) = if lenient == Lenient::Yes {
+    // What limited the mesh path's shaping of the face, where it was shaped.
+    let mut unshaped: Option<Vec<crate::ShapeLimit>> = None;
+    let (extra, triangles) = if let Purpose::Mesh(shape) = purpose {
+        // The mesh path: every face, planar ones too, by constrained Delaunay with seeds a side
+        // apart in 3D, refined for sag and side length, then shaped by its triangles in 3D.
+        if planar {
+            stats.planar += 1;
+        } else {
+            stats.delaunay += 1;
+        }
+        let fast = fastest(s, bbox, speed);
+        // Each pole of the surface on the boundary is fanned on its own, from the pole to a
+        // ring through the boundary nodes either side of it; the rest of the face is bounded
+        // by the rings instead. Nodes are numbered: the boundary's, the rings', then the ones
+        // refinement adds.
+        let nb = uvs.len();
+        let caps = pole_caps(s, &uvs, &ranges, reach).map_err(|why| fail(&why))?;
+        // A ring through boundary nodes farther from the pole than a ring may lie would have
+        // chords off the surface by more than the tolerance at the fan's angle: the edges take
+        // nodes at the ring's reach first, and the face is planned again ([`plan_at`]).
+        if shape.sides == Sides::Split {
+            let far: Vec<SplitSide> = caps
+                .iter()
+                .map(|cap| {
+                    let (turn, pole, _, _) = ring_turn(s, cap, &uvs, &fixed)?;
+                    let reach = ring_reach(tol, size::local(h, shape.size_at, pole), turn, ring_segments(turn, shape.min_angle.to_radians()));
+                    let far = ring_too_far(cap, &fixed, reach);
+                    Ok(if far.is_empty() { ring_off_boundary(cap, &uvs, &fixed, &ranges) } else { far })
+                })
+                .collect::<std::result::Result<Vec<Vec<SplitSide>>, String>>()
+                .map_err(|why| fail(&why))?
+                .into_iter()
+                .flatten()
+                .collect();
+            if !far.is_empty() {
+                return Ok(Planned::Split(far));
+            }
+        }
+        let (mut nodes, mut pos): (Vec<[f64; 2]>, Vec<Vec3>) = (uvs.clone(), fixed.clone());
+        let mut fan: Vec<[u32; 3]> = Vec::new();
+        // The rings' sides, in the face's numbering.
+        let mut ring_sides: Vec<(u32, u32)> = Vec::new();
+        // The poles' copies, the fans' corners at the poles.
+        let pole_ids: std::collections::BTreeSet<u32> = caps.iter().flat_map(|c| c.copies.iter().filter_map(|&k| u32::try_from(k).ok())).collect();
+        // Each loop as the rest of the face runs it: its nodes, a cap's copies of its pole
+        // replaced by the cap's ring.
+        let mut runs: Vec<Vec<usize>> = ranges.iter().map(|r| r.clone().collect()).collect();
+        for cap in &caps {
+            let ring = cap_ring(s, cap, &uvs, &fixed, tol, shape.min_angle.to_radians()).map_err(|why| fail(&why))?;
+            let first = nodes.len();
+            for (q, p) in &ring {
+                nodes.push(*q);
+                pos.push(*p);
+            }
+            // The ring from the node before the pole to the one after it.
+            let ring_ids: Vec<usize> = std::iter::once(cap.before).chain(first..nodes.len()).chain(std::iter::once(cap.after)).collect();
+            fan.extend(cap_fan(&cap.copies, &ring_ids, &nodes, &pos).ok_or_else(|| fail("a pole's cap cannot be fanned in (u, v)"))?);
+            ring_sides.extend(ring_ids.windows(2).filter_map(|w| Some((u32::try_from(*w.first()?).ok()?, u32::try_from(*w.get(1)?).ok()?))));
+            if let Some(run) = runs.get_mut(cap.lp) {
+                // Started at the node after the pole, the loop ends with the node before it and
+                // the copies; the copies leave it, and the ring's inner nodes take their place.
+                let from = run.iter().position(|&k| k == cap.after).ok_or_else(|| fail("a pole's cap off its loop"))?;
+                run.rotate_left(from);
+                let at = run.iter().position(|&k| Some(&k) == cap.copies.first()).ok_or_else(|| fail("a pole's cap off its loop"))?;
+                if run.get(at..) != Some(cap.copies.as_slice()) {
+                    return Err(fail("a pole's copies apart on its loop"));
+                }
+                run.truncate(at);
+                run.extend(first..nodes.len());
+            }
+        }
+        // The rest of the face in its own numbering: its loops' nodes in order.
+        let mut map: Vec<usize> = Vec::new();
+        let mut mranges: Vec<std::ops::Range<usize>> = Vec::new();
+        for run in &runs {
+            let start = map.len();
+            map.extend(run.iter().copied());
+            mranges.push(start..map.len());
+        }
+        let muv: Vec<[f64; 2]> = map.iter().filter_map(|&k| nodes.get(k).copied()).collect();
+        if muv.len() != map.len() {
+            return Err(fail("a loop's node is missing"));
+        }
+        let mpolys: Vec<&[[f64; 2]]> = mranges.iter().filter_map(|r| muv.get(r.clone())).collect();
+        let (seeds, whole) = mesh_seeds(s, bbox, h, &mpolys, fast, &pos, shape.size_at);
+        let eval = |u: f64, v: f64| s.derivs(u, v).map(|(p, su, sv)| (p, su.cross(sv).normalized()));
+        let sag = cdt::Sag { eval: &eval, tol, h, turn: rules.turn, scale: fast };
+        let meshed = cdt::mesh(&muv, &mranges, &seeds, &sag, shape.size_at, MAX_MESH_REFINE).ok_or_else(|| fail("boundary crosses itself"))?;
+        let mut limits: Vec<crate::ShapeLimit> = Vec::new();
+        if !whole {
+            limits.push(crate::ShapeLimit::Seeds);
+        }
+        if meshed.capped {
+            limits.push(crate::ShapeLimit::Points);
+        }
+        // Its triangles in the face's numbering, with the caps' fans.
+        let base = nodes.len();
+        let global = |i: u32| -> Option<u32> {
+            let i = i as usize;
+            let g = if i < map.len() { *map.get(i)? } else { base + (i - map.len()) };
+            u32::try_from(g).ok()
+        };
+        // Each boundary node as the triangles name it ([`cdt::Meshed::merged`]): where a loop
+        // passes one point twice (a slit's two runs, the vertex where the slit leaves the rest of
+        // its loop), the triangles name its first node, so the shaping keys the boundary's sides
+        // by the same nodes and keeps every one of them.
+        let mut named: Vec<u32> = (0..nb).filter_map(|k| u32::try_from(k).ok()).collect();
+        for (k, m) in meshed.merged.iter().enumerate() {
+            if let (Some(&own), Some(g)) = (map.get(k), global(*m))
+                && let Some(slot) = named.get_mut(own)
+            {
+                *slot = g;
+            }
+        }
+        let mut tris: Vec<[u32; 3]> = Vec::new();
+        for t in &meshed.triangles {
+            let (Some(a), Some(b), Some(c)) = (global(t[0]), global(t[1]), global(t[2])) else { return Err(fail("a triangle's node is missing")) };
+            tris.push([a, b, c]);
+        }
+        let fans = tris.len()..tris.len() + fan.len();
+        tris.extend(fan);
+        for q in &meshed.extra {
+            nodes.push(*q);
+            pos.push(s.derivs(q[0], q[1]).map(|d| d.0).ok_or_else(|| fail(&format!("the surface does not evaluate at {q:?}")))?);
+        }
+        let point = |q: [f64; 2]| s.derivs(q[0], q[1]).map(|d| d.0);
+        // A 3D point's parameters on the surface, by the kernel's closest point, unwrapped to
+        // the parameters it is looked for from.
+        let dom = uv::domain(s);
+        let project = |p: Vec3, from: [f64; 2], accept: f64| -> Option<[f64; 2]> {
+            let q = solidcore::eval::plan::uv::project(s, &dom, p, Some(from), accept)?;
+            Some([uv::unwrap(q[0], from[0], dom.period[0]), uv::unwrap(q[1], from[1], dom.period[1])])
+        };
+        let whole_sides = match shape.sides {
+            Sides::Split => None,
+            Sides::Kept => Some(crate::ShapeLimit::SidesOnNoEdge),
+            Sides::Exhausted => Some(crate::ShapeLimit::Rounds),
+        };
+        let shaping = shape::Rules {
+            min_angle: shape.min_angle.to_radians(),
+            tol,
+            h,
+            size_at: shape.size_at,
+            budget: MAX_MESH_REFINE.saturating_sub(meshed.extra.len()),
+            whole: whole_sides,
+            project: &project,
+        };
+        // Shaped whole: the fans kept as they are, the rings split in the face where they must,
+        // the face's own boundary sides on their edges.
+        match shape::shape(&mut nodes, &mut pos, &mut tris, (&ranges, &named), (ring_sides.as_slice(), fans, &pole_ids), &point, &shaping) {
+            // The sides its shaping would split go on their edges first ([`plan_at`]).
+            shape::Shaped::Split(split) => {
+                let sides = split.into_iter().filter_map(|(i, j, at)| Some(SplitSide { from: *fixed.get(i)?, to: *fixed.get(j)?, at })).collect();
+                return Ok(Planned::Split(sides));
+            }
+            shape::Shaped::Done(more) => {
+                for l in more {
+                    if !limits.contains(&l) {
+                        limits.push(l);
+                    }
+                }
+            }
+        }
+        unshaped = Some(limits);
+        (nodes.split_off(nb), tris)
+    } else if lenient == Lenient::Yes {
         delaunay()?
     } else {
         let mut us = uv::divide(s, 0, bbox[0], bbox[1], rules, h, MAX_LINES);
@@ -1450,25 +2388,40 @@ fn plan_face(
     }
     let mut all = uvs;
     all.extend(extra);
-    // Whatever the layout, no triangle leaves the surface by more than the tolerance.
+    // Whatever the layout, refine the curvature of the support while keeping the shared boundary fixed.
     if !planar {
         // Which nodes are poles, asked once per node over both passes.
         let poles = sag::Poles::new(s, reach);
-        if sag::refine(s, tol, &poles, &fixed, &mut all, &mut triangles, MAX_REFINE) {
+        let refinement = sag::refine(s, tol, &poles, &fixed, &mut all, &mut triangles, MAX_REFINE);
+        if refinement.capped {
             caps.push(crate::Cap::Refine);
         }
-        sag::flip(s, tol, &poles, &fixed, &all, &mut triangles);
-        // A face a bound limited is named with the sag its triangles reach.
-        if !caps.is_empty() {
+        // The mesh path's triangles are the surface's Delaunay ones, shaped in 3D: flips toward
+        // the surface's normals, for shading, would undo their shape.
+        if matches!(purpose, Purpose::Display) {
+            sag::flip(s, tol, &poles, &fixed, &all, &mut triangles);
+        }
+        // Measure finished triangles with their held positions when a bound or a remaining
+        // departure involving the shared boundary can leave them outside the tolerance.
+        if !caps.is_empty() || refinement.boundary_has_residual(s, tol, &poles, &fixed, &all, &triangles) {
             let (sag, unmeasured) = sag::worst(s, &poles, &fixed, &all, &triangles);
             stats.over_tolerance.push(crate::OverTolerance { face: fi, sag, unmeasured, tol, within: sag <= tol && unmeasured == 0, caps: std::mem::take(&mut caps) });
+        }
+    }
+    // A face the mesh path left short of its shape is named with its smallest angle in 3D.
+    if let (Some(limits), Purpose::Mesh(shape)) = (unshaped, purpose) {
+        let at = |i: u32| fixed.get(i as usize).copied().or_else(|| all.get(i as usize).and_then(|q| s.derivs(q[0], q[1])).map(|d| d.0));
+        let smallest =
+            triangles.iter().filter_map(|t| Some(shape::smallest([at(t[0])?, at(t[1])?, at(t[2])?]))).fold(f64::INFINITY, f64::min).to_degrees();
+        if !limits.is_empty() || smallest < shape.min_angle {
+            stats.unshaped.push(crate::Unshaped { face: fi, smallest_angle: smallest, limits });
         }
     }
     // Both evaluators take a closed spline's parameters inside its active interval.
     for q in &mut all {
         *q = s.wrap(*q);
     }
-    Ok(FacePlan { face: u32::try_from(fi).unwrap_or(u32::MAX), surface: None, uv: all, fixed: fixed.into_iter().map(kernel::record_vec3).collect(), normals: Vec::new(), flip: false, triangles, poles: Vec::new() })
+    Ok(Planned::Face(FacePlan { face: u32::try_from(fi).unwrap_or(u32::MAX), surface: None, uv: all, fixed: fixed.into_iter().map(kernel::record_vec3).collect(), normals: Vec::new(), flip: false, triangles, poles: Vec::new() }))
 }
 
 /// A face's (u, v) region and what meshing it needs.
@@ -1742,3 +2695,5 @@ fn closed_boundary(ranges: &[std::ops::Range<usize>], fixed: &[Vec3], uvs: &[[f6
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod mesh_tests;

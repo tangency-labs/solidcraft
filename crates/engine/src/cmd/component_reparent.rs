@@ -65,13 +65,50 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(x) = scratch.doc_mut().occurrences.iter_mut().find(|x| x.id == id) {
         x.parent = to;
         x.transform = transform;
+        // A move typed in world axes takes them into the new parent's frame.
+        if x.expressed_moves.iter().any(|m| m.world) {
+            let mut frame = inverse;
+            frame[3] = [0.0, 0.0, 0.0, 1.0];
+            for m in x.expressed_moves.iter_mut().filter(|m| m.world) {
+                m.frame = frame;
+            }
+        }
     }
+    let old_placed = s.placed_document();
     // Once all its placements sit in the new parent, the component belongs there too, so what
     // follows the component tree (the parent's eye, its bodies) takes it along.
     if scratch.doc.occurrences.iter().filter(|x| x.component == o.component).all(|x| x.parent == to)
         && let Some(c) = scratch.doc_mut().components.iter_mut().find(|c| c.id == o.component)
     {
         c.parent = to;
+    }
+    // Reparenting can change the common ancestor of a feature and its cross-component profile
+    // sketch; rebase stored `profile_frame` matrices so bodies keep their world position.
+    let new_placed = scratch.placed_document();
+    let rebased_frames: Vec<(u64, solidcraft_doc::Mat)> = scratch
+        .doc
+        .features
+        .iter()
+        .filter_map(|f| {
+            let m = f.profile_frame?;
+            let sketch_id = f.kind.constructor_profile_sketch()?;
+            let owner = old_placed.feature(sketch_id)?.component;
+            let old_lca = old_placed.common_ancestor(f.component, owner);
+            let new_lca = new_placed.common_ancestor(f.component, owner);
+            if old_lca == new_lca {
+                return None;
+            }
+            let old_owner_in_lca = old_placed.component_transform_in(owner, old_lca);
+            let new_owner_in_lca = new_placed.component_transform_in(owner, new_lca);
+            let inv_old_o = solidcraft_doc::mat_inverse(&old_owner_in_lca)?;
+            let updated = solidcraft_doc::mat_mul(&new_owner_in_lca, &solidcraft_doc::mat_mul(&inv_old_o, &m));
+            solidcraft_doc::is_placement(&updated).then_some((f.id, updated))
+        })
+        .collect();
+    for (fid, frame) in rebased_frames {
+        if let Some(f) = scratch.doc_mut().feature_mut(fid) {
+            f.profile_frame = Some(frame);
+        }
     }
     // Face attachments found through it follow it too (#11063): a sketch on a face of a body
     // inside it kept the old path, which no longer starts at the design, and the move was refused.

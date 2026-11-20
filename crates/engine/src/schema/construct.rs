@@ -254,6 +254,20 @@ pub struct PlanePerpendicularParams {
     pub common: PlaneCommon,
 }
 
+/// Add a construction plane that passes through a point and is square to a line.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct PlaneSquareToLineParams {
+    /// The line the new plane is square to: a straight edge, a sketch line, X, Y, Z or a
+    /// construction axis (a circular edge or a cylinder, cone or torus face gives its axis).
+    pub line: GeoRefParam,
+    /// The point the new plane passes through: a vertex, sketch point, construction point or
+    /// fixed point, on the line or off it.
+    pub point: GeoRefParam,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: PlaneCommon,
+}
+
 /// Add a construction plane, axis or point (`construct.plane`, `construct.axis`,
 /// `construct.point`) with the first of the family's methods (`construct.plane.*`…, in the order
 /// the commands are listed) that takes the references in its reference parameters, with `with`.

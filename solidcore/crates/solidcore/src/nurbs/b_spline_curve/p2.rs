@@ -91,10 +91,9 @@
 //!   it passes `false` for `ApproximateCurve`'s `bOptCreateAnalytics` and forwards the
 //!   caller's `bOptMatchParameterization` in its own slot, where upstream passes it as
 //!   `bOptCreateAnalytics` and `FALSE` for matching.
-//! - **Statuses passed on (WR-663).** With the opt-in
-//!   `Kernel::fixes.query_statuses_pass_on`, `CreateAnalyticCurve`'s knot insertion and
-//!   `CreateSimpleOffset`'s frame are passed on, and `IsDegenerate` is `false` without a
-//!   NURB, as the fork (tangency-labs/smlib 8843967).
+//! - **Statuses passed on (WR-663).** `CreateAnalyticCurve`'s knot insertion and
+//!   `CreateSimpleOffset`'s frame are passed on where upstream ignores them, and
+//!   `IsDegenerate` is `false` without a NURB, as the fork (tangency-labs/smlib 8843967).
 
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::ellipse::{Ellipse, EllipseOptions};
@@ -835,12 +834,9 @@ impl BSplineCurve {
                             .get(i)
                             .copied()
                             .ok_or_else(|| invalid(OP_ANALYTIC, "knot index out of range"))?;
-                        // (status ignored upstream; passed on with the opt-in
-                        // `query_statuses_pass_on`, tangency-labs/smlib 8843967)
-                        let r = c.insert_one_knot(knot, 1);
-                        if k.fixes.query_statuses_pass_on {
-                            r?;
-                        }
+                        // (status ignored upstream; passed on as the fork,
+                        // tangency-labs/smlib 8843967)
+                        c.insert_one_knot(knot, 1)?;
                     }
                 }
 
@@ -916,6 +912,16 @@ impl BSplineCurve {
         let mut breaks = Vec::new();
         let joined = Self::join(segments, senses, Some(&mut breaks))?;
         Ok((joined, breaks))
+    }
+
+    /// Whether a segment ending at `last` and one starting at `first` are end to end as
+    /// [`BSplineCurve::create_by_joining`] requires: no further apart than
+    /// `1000 * sqrt(SM_EFF_ZERO) * (1 + max|last|)`. A caller that chains pieces for the
+    /// join tests them with this, so it never hands the join a pair it refuses.
+    pub(crate) fn ends_meet_for_join(last: Point3, first: Point3) -> bool {
+        let scaled_zero = EFF_ZERO_SQRT * 1000.0 * (1.0 + last.max_dimension());
+        // (written so a NaN distance does not meet)
+        last.distance(first) <= scaled_zero
     }
 
     /// `CreateByJoining`, recording the segments' breaks in `breaks` when asked.
@@ -1085,8 +1091,7 @@ impl BSplineCurve {
                 }
             }
             // Make sure end-points are the same
-            let scaled_zero = EFF_ZERO_SQRT * 1000.0 * (1.0 + last_point.max_dimension());
-            if last_point.distance(first_pt) > scaled_zero {
+            if !Self::ends_meet_for_join(last_point, first_pt) {
                 return Err(invalid(OP_JOIN, "segments not end to end"));
             }
 
@@ -1262,12 +1267,9 @@ impl BSplineCurve {
                 if radius < 0.0 {
                     radius *= -1.0;
                     let (origin, x_axis, y_axis) = frame.canonical();
-                    // (status ignored upstream; passed on with the opt-in
-                    // `query_statuses_pass_on`, tangency-labs/smlib 8843967)
-                    let r = frame.set_canonical(origin, -x_axis, -y_axis);
-                    if k.fixes.query_statuses_pass_on {
-                        r?;
-                    }
+                    // (status ignored upstream; passed on as the fork,
+                    // tangency-labs/smlib 8843967)
+                    frame.set_canonical(origin, -x_axis, -y_axis)?;
                 }
                 if radius < approx_tol_3d {
                     // Offset is a degenerate curve.
@@ -1499,13 +1501,10 @@ impl BSplineCurve {
             return curve_is_degenerate(k, self, tol3d, interval);
         }
 
-        // ensure existence of m_pNurb (a plain B-spline cannot make one; with the opt-in
-        // `query_statuses_pass_on` a curve without one is not shown degenerate,
-        // tangency-labs/smlib 8843967)
+        // ensure existence of m_pNurb (a plain B-spline cannot make one; a curve without
+        // one is not shown degenerate, as the fork, tangency-labs/smlib 8843967)
         let cur = match self.nurb_ref() {
-            Err(e) if k.fixes.query_statuses_pass_on && !e.is_unported_or_cancelled() => {
-                return Ok(false)
-            }
+            Err(e) if !e.is_unported_or_cancelled() => return Ok(false),
             r => r?,
         };
 
@@ -2201,13 +2200,9 @@ mod tests {
     #[test]
     fn issue_2009_curve_without_nurb_is_not_shown_degenerate() {
         // tangency-labs/smlib 8843967 (SmBSplineCurve::IsDegenerate): no NURB form, no
-        // degeneracy shown (FALSE); the port without the fix fails, where upstream
-        // reads a NULL NURB. Discriminating.
+        // degeneracy shown (FALSE), where upstream reads a NULL NURB.
         let c = BSplineCurve::new(3);
-        let mut on = Kernel::default();
-        on.fixes.query_statuses_pass_on = true;
-        assert!(c.is_degenerate(&Kernel::default(), 1e-6, None).is_err());
-        assert!(!c.is_degenerate(&on, 1e-6, None).unwrap());
+        assert!(!c.is_degenerate(&Kernel::default(), 1e-6, None).unwrap());
     }
 
     #[test]

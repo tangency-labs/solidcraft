@@ -12,6 +12,7 @@ pub(crate) struct Layout {
     /// The view without the panels (Browser, Assistant, workspace panels), but still counting
     /// the floating controls as drawn over it: where a fit puts the middle of the model. The
     /// compass and the navigation bar take room out of `drawable` without moving this.
+    /// Hosts keep a sweep-piece summary here; explicit framing resolves `panel_obstacles`.
     pub middle: Rect,
     pub content: Rect,
     pub axis_view: Rect,
@@ -21,22 +22,56 @@ pub(crate) struct Layout {
     /// Full bounded contour for the opt-in host. Legacy layouts keep their
     /// existing rectangle policy; rendering always uses `viewport`.
     pub usable: Option<crate::panel_runtime::HostUsableRegion>,
+    /// Panel footprints before floating controls. Keep the spanning-rectangle search
+    /// on explicit framing requests rather than every layout frame.
+    pub panel_obstacles: Option<Vec<solidcraft_engine::panels::LogicalRect>>,
 }
 
 /// How far the OK and Cancel pair sits in from the content's top right corner, and the space
 /// between it and the axis view moved down below it.
 const CORNER_INSET: f32 = 8.0;
 const CORNER_GAP: f32 = 4.0;
+/// Beyond this many obstacles, use a safe sweep piece rather than searching
+/// every spanning rectangle on the window thread.
+const MAX_SPANNING_OBSTACLES: usize = 16;
 
 /// Enumerate rectangles whose edges meet the viewport or a bounded number of overlays.
+///
+/// The answer for the same view and overlays is remembered: the search is quartic in their
+/// edges, and it ran several times at every frame (each pointer move) with the same inputs.
 pub(crate) fn free_rect(view: Rect, obstacles: &[Rect]) -> Rect {
+    let key = |r: &Rect| [r.min.x, r.min.y, r.max.x, r.max.y].map(f32::to_bits);
+    let wanted: Vec<[u32; 4]> = std::iter::once(&view).chain(obstacles).map(key).collect();
+    if let Some(found) = FREE_RECTS.with(|c| c.borrow().iter().find(|(k, _)| *k == wanted).map(|(_, r)| *r)) {
+        return found;
+    }
+    let found = free_rect_search(view, obstacles);
+    FREE_RECTS.with(|c| {
+        let mut c = c.borrow_mut();
+        if c.len() >= FREE_RECTS_KEPT {
+            c.remove(0);
+        }
+        c.push((wanted, found));
+    });
+    found
+}
+
+/// How many [`free_rect`] answers are remembered (a frame asks for a few).
+const FREE_RECTS_KEPT: usize = 8;
+
+thread_local! {
+    /// [`free_rect`]'s recent answers, by the bits of its view and overlays.
+    static FREE_RECTS: std::cell::RefCell<Vec<(Vec<[u32; 4]>, Rect)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn free_rect_search(view: Rect, obstacles: &[Rect]) -> Rect {
     if !view.is_finite() || !view.is_positive() {
         return Rect::NOTHING;
     }
     let mut xs = vec![view.left(), view.right()];
     let mut ys = vec![view.top(), view.bottom()];
     let obstacles: Vec<_> = obstacles.iter().map(|r| r.intersect(view)).filter(|r| r.is_positive() && r.is_finite()).collect();
-    if obstacles.len() > 16 {
+    if obstacles.len() > MAX_SPANNING_OBSTACLES {
         let obstacles: Vec<_> = obstacles.iter().copied().map(crate::panel_runtime::logical_rect).collect();
         return crate::panel_runtime::resolve_usable_region(crate::panel_runtime::logical_rect(view), &obstacles)
             .ok()
@@ -170,7 +205,17 @@ impl Layout {
         };
         let middle = largest_piece(usable);
         let drawable = region.as_ref().map(largest_piece).unwrap_or(Rect::NOTHING);
-        Self { viewport, drawable, middle, content: viewport, axis_view, navigation, confirm, usable: region }
+        Self {
+            viewport,
+            drawable,
+            middle,
+            content: viewport,
+            axis_view,
+            navigation,
+            confirm,
+            usable: region,
+            panel_obstacles: Some(usable.obstacles.clone()),
+        }
     }
 
     /// `corner` is the size of the OK and Cancel pair (#6709; zero while it is not shown): it is
@@ -185,47 +230,6 @@ impl Layout {
         corner: egui::Vec2,
         navigation: Rect,
     ) -> Self {
-        Self::build(viewport, content, docks, scale, style, corner, navigation, None)
-    }
-
-    /// Render fits stay between the docked panels, including beneath a short Browser card.
-    pub fn product(
-        viewport: Rect,
-        content: Rect,
-        docks: &[Rect],
-        scale: f32,
-        style: crate::prefs::NavigatorStyle,
-        corner: egui::Vec2,
-        navigation: Rect,
-    ) -> Self {
-        Self::build(viewport, content, docks, scale, style, corner, navigation, Some(crate::frame::Side::Right))
-    }
-
-    /// Render compass at the free canvas edge beside a left-hand Inspector.
-    pub fn product_left(
-        viewport: Rect,
-        content: Rect,
-        docks: &[Rect],
-        scale: f32,
-        style: crate::prefs::NavigatorStyle,
-        corner: egui::Vec2,
-        navigation: Rect,
-    ) -> Self {
-        Self::build(viewport, content, docks, scale, style, corner, navigation, Some(crate::frame::Side::Left))
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn build(
-        viewport: Rect,
-        content: Rect,
-        docks: &[Rect],
-        scale: f32,
-        style: crate::prefs::NavigatorStyle,
-        corner: egui::Vec2,
-        navigation: Rect,
-        inspector_side: Option<crate::frame::Side>,
-    ) -> Self {
-        let fit_in_content = inspector_side.is_some();
         let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
         let mut obstacles: Vec<_> = docks.iter().copied().filter(|r| r.is_finite()).map(|r| r.expand(4.0)).collect();
         // Navigation is anchored to the viewport, never to transient dialog space.
@@ -252,40 +256,25 @@ impl Layout {
         let confirm = below_bar(confirm);
         // The axis view starts below the pair while it is shown.
         let top = if confirm.is_positive() { confirm.bottom() + CORNER_GAP } else { available.top() };
-        let cube_size = if fit_in_content { 110.0 } else { super::viewport::axis_view_size(style) };
-        let axis_left = |size| {
-            if inspector_side == Some(crate::frame::Side::Left) { available.left() } else { available.right() - size }
-        };
-        let top = below_bar(Rect::from_min_size(pos2(axis_left(cube_size), top), vec2(cube_size, cube_size))).top();
-        let mut axis_view = if available.width() >= cube_size && available.bottom() - top >= cube_size {
-            Rect::from_min_size(pos2(axis_left(cube_size), top), vec2(cube_size, cube_size))
+        let axis_size = super::viewport::axis_view_size(style);
+        let axis_left = |size| available.right() - size;
+        let top = below_bar(Rect::from_min_size(pos2(axis_left(axis_size), top), vec2(axis_size, axis_size))).top();
+        let mut axis_view = if available.width() >= axis_size && available.bottom() - top >= axis_size {
+            Rect::from_min_size(pos2(axis_left(axis_size), top), vec2(axis_size, axis_size))
         } else {
             Rect::NOTHING
         };
-        // Preserve legacy control anchors. Product controls retain their existing
-        // vertical relocation policy; the universal host uses the full contour.
-        if fit_in_content {
-            for _ in 0..obstacles.len() {
-                let bottom = obstacles.iter().filter(|dock| axis_view.intersect(**dock).is_positive()).map(Rect::bottom).max_by(f32::total_cmp);
-                let Some(bottom) = bottom else { break };
-                axis_view = if available.bottom() - bottom >= cube_size {
-                    Rect::from_min_size(pos2(axis_view.left(), bottom), vec2(cube_size, cube_size))
-                } else {
-                    Rect::NOTHING
-                };
-            }
-        }
         // On tiny viewports keep the bottom controls usable rather than overlapping them.
         // This decision depends only on viewport size, never on an overlay.
         if axis_view.intersect(navigation).is_positive() {
-            let compact = (navigation.top() - top - 4.0).min(cube_size);
+            let compact = (navigation.top() - top - 4.0).min(axis_size);
             axis_view = if style != crate::prefs::NavigatorStyle::Axes && compact >= 96.0 {
                 Rect::from_min_size(pos2(axis_left(compact), top), vec2(compact, compact))
             } else {
                 Rect::NOTHING
             };
         }
-        let within = if fit_in_content { content } else { viewport };
+        let within = viewport;
         // Only the panels decide where the middle of the view is; the controls below are drawn
         // over the view and would otherwise push the model into a corner of it.
         let middle = free_rect(within, &obstacles);
@@ -296,7 +285,7 @@ impl Layout {
             }
         }
         let drawable = free_rect(within, &obstacles).shrink(16.0 / scale);
-        Self { viewport, drawable, middle, content, axis_view, navigation, confirm, usable: None }
+        Self { viewport, drawable, middle, content, axis_view, navigation, confirm, usable: None, panel_obstacles: None }
     }
 }
 
@@ -350,6 +339,9 @@ pub(crate) fn host_projection_layout(layout: &Layout, usable: &crate::panel_runt
         axis_view: Rect::NOTHING,
         confirm: Rect::NOTHING,
         usable: Some(region),
+        // Resolving these against the projection clips the panels without treating
+        // the controls baked into `usable` as panels that move the middle.
+        panel_obstacles: layout.panel_obstacles.clone(),
     })
 }
 
@@ -364,7 +356,16 @@ pub(crate) fn fit_host_bounds(
     fov: f64,
     share: f64,
 ) -> Option<Camera> {
-    use crate::panel_runtime::egui_rect;
+    let room = host_framing_room(cam, bounds, layout, usable)?;
+    let mut target = layout.clone();
+
+    target.drawable = room;
+    target.middle = room;
+    fit_bounds_sized(cam, bounds, &target, fov, share)
+}
+
+fn host_framing_room(cam: Camera, bounds: &Aabb3, layout: &Layout, usable: &crate::panel_runtime::HostUsableRegion) -> Option<Rect> {
+    use crate::panel_runtime::{egui_rect, logical_rect, resolve_usable_region};
     use solidcraft_engine::panels::Point;
     if bounds.is_empty() || !bounds.min.is_finite() || !bounds.max.is_finite() || !cam.is_valid() {
         return None;
@@ -378,19 +379,42 @@ pub(crate) fn fit_host_bounds(
     }
     let aspect = (width / height).clamp(0.0001, 10000.0) as f32;
     let region = framing_region(layout, usable)?;
-    let room = region.fit_rect_with_clearance(
-        aspect,
-        Point { x: layout.viewport.center().x, y: layout.viewport.center().y },
-        solidcraft_theme::Tokens::get().space_8,
-    )?;
-    let room = egui_rect(room);
-    if !room.is_positive() {
-        return None;
+    let middle = match &layout.panel_obstacles {
+        Some(panels) => {
+            let panels = resolve_usable_region(region.domain, panels).ok()?;
+            let room = if panels.obstacles.len() <= MAX_SPANNING_OBSTACLES {
+                panels.largest_rect()
+            } else {
+                panels.free.iter().max_by(|a, b| (a.size.width * a.size.height).total_cmp(&(b.size.width * b.size.height))).copied()
+            }?;
+            egui_rect(room).center()
+        }
+        None => layout.middle.center(),
+    };
+    let clearance = solidcraft_theme::Tokens::get().space_8;
+    // A largest movable footprint can sit beside the navigation bar and jump
+    // sides as the window changes size. Keep the panel-only centre and shrink
+    // the footprint, including its clearance, around the floating controls.
+    let mut low = 0.0_f32;
+    let mut high = region.domain.size.height.min(region.domain.size.width / aspect);
+    let mut centred = None;
+    for _ in 0..32 {
+        let height = low + (high - low) * 0.5;
+        if height <= low || height >= high {
+            break;
+        }
+        let room = Rect::from_center_size(middle, vec2(height * aspect, height));
+        if room.is_positive() && region.contains_rect(logical_rect(room.expand(clearance))) {
+            low = height;
+            centred = Some(room);
+        } else {
+            high = height;
+        }
     }
-    let mut target = layout.clone();
-    target.drawable = room;
-    target.middle = room;
-    fit_bounds_sized(cam, bounds, &target, fov, share)
+    // A floating control may cover the centre itself. In that case, use any
+    // available safe room rather than refusing to fit a visible model.
+    let room = centred.or_else(|| region.fit_rect_with_clearance(aspect, Point { x: middle.x, y: middle.y }, clearance).map(egui_rect))?;
+    room.is_positive().then_some(room)
 }
 
 /// Reposition an explicitly selected focus at the current zoom. Perspective
@@ -496,6 +520,9 @@ fn framing_point(layout: &Layout, hx: f64, hy: f64, hh: f64) -> Pos2 {
 /// Where Home and Fit put the middle of `bounds` on screen for `cam`'s direction in this layout, or `None` when
 /// they could not frame it.
 pub(crate) fn framing_centre(cam: Camera, bounds: &Aabb3, layout: &Layout) -> Option<Pos2> {
+    if let Some(usable) = &layout.usable {
+        return host_framing_room(cam, bounds, layout, usable).map(|room| room.center());
+    }
     if bounds.is_empty()
         || !bounds.min.is_finite()
         || !bounds.max.is_finite()

@@ -72,6 +72,8 @@ fn occurrence(id: u64, component: u64, parent: u64) -> Occurrence {
         name: format!("C{component}:{id}"),
         transform: rigid(t, Vec3::ZERO, Vec3::Z, 0.01 * id as f64),
         grounded: false,
+        bom_type: None,
+        expressed_moves: Vec::new(),
     }
 }
 
@@ -250,4 +252,16 @@ fn benchmark_placements_walk() {
             );
         }
     }
+}
+
+#[test]
+fn the_walk_says_when_it_stopped_short() {
+    let complete = |doc: &Document| OccurrenceTree::new(doc).walk_from(0, |o| o.transform).1;
+    assert!(complete(&chain(64)) && complete(&chain(65)), "the deepest walked level has no children");
+    assert!(!complete(&chain(66)), "a branch left past the depth cap");
+    let (_, wide) = shapes().pop().unwrap();
+    assert!(!complete(&wide), "stopped at MAX_PLACEMENTS");
+    assert!(wide.all_placements_within(0).is_none());
+    // Below the root the same walk is complete when the subtree is.
+    assert_eq!(chain(66).all_placements_within(10).map(|p| p.len()), Some(57));
 }

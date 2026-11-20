@@ -648,7 +648,7 @@ pub struct PrismSection {
     pub hi: f64,
     /// Its section, exact: lines and arcs, the outer loop counter-clockwise, the holes clockwise.
     pub region: solidcore_record::Region2,
-    /// How far the levels may be off the body's caps (the caps' vertices lie within it of them).
+    /// How far the levels and section may be off the body's caps, including frame conversion.
     pub tolerance: f64,
 }
 
@@ -660,30 +660,11 @@ pub struct PrismSection {
 /// left it a prism is one. `None` when that is not proved.
 pub fn certified_prism_section(body: &crate::Body, plane: &Plane) -> crate::Result<Option<PrismSection>> {
     crate::guard("certified prism section", || {
-        if body.is_mesh() || !body.size().is_finite() {
-            return Ok(None);
-        }
-        let record = crate::native::brep_record(body)?;
-        let tol = body.size().max(1.) * 1e-10;
-        let Some(c) = certificate(&record, body.size(), plane, tol) else { return Ok(None) };
-        let mut outer = None;
-        let mut holes = Vec::new();
-        for lp in c.loops {
-            let positive = lp.area.lo > 0.;
-            let lp = solidcore_record::Loop2 { segs: lp.segments.into_vec() };
-            if positive {
-                if outer.replace(lp).is_some() {
-                    return Ok(None);
-                }
-            } else {
-                holes.push(lp);
-            }
-        }
-        let Some(outer) = outer else { return Ok(None) };
-        // The caps' vertices are within twice the tolerance of their levels (`certificate`), and
-        // the levels are worked out from the plane's origin.
-        let tolerance = 2. * tol + 128. * f64::EPSILON * (plane.origin.len() + c.lo.abs() + c.hi.abs()).max(1.);
-        Ok(Some(PrismSection { lo: c.lo, hi: c.hi, region: solidcore_record::Region2 { outer, holes }, tolerance }))
+        let Some(form) = body.ops_body() else { return Ok(None) };
+        let (body, _) = &*form;
+        let section =
+            solidcore_ops::prism::prism_section(body, plane).map_err(|e| crate::KernelError::Failed(format!("certified prism section: {e}")))?;
+        Ok(section.map(|s| PrismSection { lo: s.lo, hi: s.hi, region: s.region, tolerance: s.tolerance }))
     })
 }
 
@@ -979,6 +960,17 @@ mod tests {
             wall_supports_cap(&shifted, &domain, &cap, Plane::XY.height(run.ends[0]), &Plane::XY, (0., 10.), 3e-9, &mut 2_000_000),
             Some(true)
         );
+        let mut displaced = actual;
+        displaced.faces[wall].surface = shifted;
+        if let Some(nurbs) = &mut displaced.faces[wall].nurbs {
+            match nurbs {
+                Surface::Spline { points, .. } => points.iter_mut().flatten().for_each(|p| p[2] += 1000.),
+                Surface::RationalSpline { homogeneous, .. } => homogeneous.iter_mut().flatten().for_each(|p| p[2] += 1000. * p[3]),
+                other => panic!("unexpected wall net {other:?}"),
+            }
+        }
+        let displaced = crate::Body::from_record(displaced).unwrap();
+        assert!(certified_prism_section(&displaced, &Plane::XY).unwrap().is_none());
     }
 
     #[test]

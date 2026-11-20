@@ -214,7 +214,6 @@ fn i1437_pole_gaps_are_not_seam_crossings() {
 fn i1437_sphere_properties_with_the_fix() {
     const R: f64 = 7.0;
     let mut k = Kernel::default();
-    k.fixes.precise_properties_body_length_scale = true;
     let mut b = create_sphere(&mut k, Point3::new(1.0, -2.0, 3.0), R).unwrap();
     let store = AttributeStore::default();
     let attrs = PropertyAttributes {

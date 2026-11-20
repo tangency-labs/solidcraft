@@ -7,6 +7,7 @@
 //! | Rust                                         | Upstream                                     |
 //! |----------------------------------------------|----------------------------------------------|
 //! | [`read_from_file`]                           | `SmBrep::ReadFromFile`                       |
+//! | [`read_from_data`]                           | `SmBrep::ReadFromFile` after the file is read |
 //! | [`make_face`], [`MakeFaceOptions`], [`NewFace`] | `SmBrep::MakeFace`                        |
 //! | [`make_face_with_curves`], [`make_face_with_curves_with_kernel_context`], [`make_face_with_curve_owners`], [`FaceCurvesInput`] | `SmBrep::MakeFaceWithCurves` |
 //! | [`glue_edges_general`]                       | `SmBrep::GlueEdgesGeneral`                   |
@@ -762,23 +763,34 @@ pub fn read_from_file(
     rebuild_uv_trim_curves_flag: bool,
     env: &mut TopologyEnv<'_>,
 ) -> Result<()> {
-    let mut brep_data = BrepData::read_from_file(k, data, file_type)?;
+    let brep_data = BrepData::read_from_file(k, data, file_type)?;
+    read_from_data(k, b, brep_data, rebuild_uv_trim_curves_flag, env)
+}
+
+/// [`read_from_file`] after its file is read into `brep_data`: the topology made from it,
+/// then the UV trim curves checked and fixed, or rebuilt with `rebuild_uv_trim_curves_flag`.
+///
+/// # Errors
+///
+/// As [`read_from_file`], less those of [`BrepData::read_from_file`].
+pub fn read_from_data(
+    k: &mut Kernel,
+    b: &mut Brep,
+    mut brep_data: BrepData,
+    rebuild_uv_trim_curves_flag: bool,
+    env: &mut TopologyEnv<'_>,
+) -> Result<()> {
     // MakeTopologyFromData(pBrepData, sAttributes, FALSE, TRUE, TRUE)
     make_topology_from_data(k, b, &mut brep_data, env, false, true, true)?;
     drop(brep_data);
 
-    // check the UV trim curves unless they are rebuilt (statuses ignored)
+    // check the UV trim curves unless they are rebuilt (statuses ignored upstream;
+    // passed on here, WR-658)
     if !rebuild_uv_trim_curves_flag {
-        ignore_status(crate::error::passed_on(
-            check_and_fix_uv_trim_curves(k, b),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        check_and_fix_uv_trim_curves(k, b)?;
     }
     if rebuild_uv_trim_curves_flag {
-        ignore_status(crate::error::passed_on(
-            rebuild_uv_trim_curves(k, b),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        rebuild_uv_trim_curves(k, b)?;
     }
     Ok(())
 }
@@ -1195,6 +1207,7 @@ pub fn make_face_with_curve_owners(
         crv_on_surf,
         this_face,
         &[],
+        false,
         curve_owners,
         env,
     )
@@ -1216,6 +1229,12 @@ pub fn make_face_with_curve_owners(
 /// gate checks the body. Crate-private for that reason: nothing outside the crate can make
 /// a face whose edges end off their vertices.
 ///
+/// (not upstream) With `keep_uv_curves` the UV curves given also become the edge uses' UV
+/// trim curves, as with curves on surface, while the 3D curves are lifted from them as
+/// without: a face rebuilt on its own surface from its own loops keeps its trim curves
+/// instead of having them dropped again later, which at a pole can end them at another
+/// parameter than the given one (every parameter there lifts to the one point).
+///
 /// # Errors
 /// As [`make_face_with_curves`].
 #[allow(clippy::too_many_arguments)]
@@ -1230,6 +1249,7 @@ pub(crate) fn make_face_with_curve_owners_at_vertices(
     crv_on_surf: Option<bool>,
     this_face: &dyn Fn(FaceId) -> ObjectRef,
     vertex_slots: &[usize],
+    keep_uv_curves: bool,
     curve_owners: &mut Vec<Option<EdgeId>>,
     env: &mut ed::NotifyEnv<'_>,
 ) -> Result<NewFace> {
@@ -1246,6 +1266,7 @@ pub(crate) fn make_face_with_curve_owners_at_vertices(
         crv_on_surf,
         this_face,
         vertex_slots,
+        keep_uv_curves,
         curve_owners,
         &mut ed::NotifyState::from_env(env),
         &mut out,
@@ -1339,6 +1360,7 @@ fn make_face_with_curves_impl(
         crv_on_surf,
         this_face,
         &[],
+        false,
         curve_owners,
         state,
         &mut out,
@@ -1373,6 +1395,7 @@ pub(crate) fn make_face_with_curves_transfer(
         crv_on_surf,
         this_face,
         &[],
+        false,
         &mut Vec::new(),
         &mut ed::NotifyState::from_env(env),
         out,
@@ -1392,6 +1415,7 @@ fn make_face_with_curves_transfer_impl(
     crv_on_surf: Option<bool>,
     this_face: &dyn Fn(FaceId) -> ObjectRef,
     vertex_slots: &[usize],
+    keep_uv_curves: bool,
     curve_owners: &mut Vec<Option<EdgeId>>,
     state: &mut ed::NotifyState<'_>,
     out: &mut NewFace,
@@ -1461,10 +1485,7 @@ fn make_face_with_curves_transfer_impl(
                     let entry = uv
                         .get_mut(index + jj)
                         .ok_or_else(|| null("loop counts exceed the curves"))?;
-                    ignore_status(crate::error::passed_on(
-                        entry.convert_to_2d(k),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
+                    entry.convert_to_2d(k)?;
                     let uv_curve = entry.clone_for_evaluation()?;
                     let new3d = if crv_on_surf {
                         let c = CrvOnSurf::new(
@@ -1483,18 +1504,11 @@ fn make_face_with_curves_transfer_impl(
                         }
                     } else {
                         let ivl = uv_curve.natural_interval();
-                        ignored(crate::error::passed_on(
-                            surface.lift_curve(
-                                k,
-                                uv_domain,
-                                &uv_curve,
-                                &ivl,
-                                zone_tol / 4.0,
-                                false,
-                            ),
-                            k.fixes.brep_edit_statuses_pass_on,
-                        )?)?
-                        .map(|l| l.curve)
+                        Some(
+                            surface
+                                .lift_curve(k, uv_domain, &uv_curve, &ivl, zone_tol / 4.0, false)?
+                                .curve,
+                        )
                     };
                     if new3d.is_some() {
                         to_check.push(s3d.len());
@@ -1546,21 +1560,17 @@ fn make_face_with_curves_transfer_impl(
                     let Some(Some(curve)) = s3d.get_mut(ci) else {
                         return Err(null("missing curve"));
                     };
-                    let deformed = ignored(crate::error::passed_on(
-                        curve.deform_to_end_point_targets_on_surface(
-                            k,
-                            new_start,
-                            new_end,
-                            true,
-                            None,
-                            InValueType::Unconstrained,
-                            None,
-                            InValueType::Unconstrained,
-                            Some((surface, None)),
-                        ),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?
-                    .flatten();
+                    let deformed = curve.deform_to_end_point_targets_on_surface(
+                        k,
+                        new_start,
+                        new_end,
+                        true,
+                        None,
+                        InValueType::Unconstrained,
+                        None,
+                        InValueType::Unconstrained,
+                        Some((surface, None)),
+                    )?;
                     if let Some(d) = deformed {
                         if let Some(slot) = s3d.get_mut(ci) {
                             *slot = Some(d);
@@ -1828,8 +1838,9 @@ fn make_face_with_curves_transfer_impl(
     result?;
     made.status?;
 
-    // with curves on surface: make the UV trim curves from the given UV curves
-    if crv_on_surf {
+    // with curves on surface (or, not upstream, when the caller keeps its UV curves): make
+    // the UV trim curves from the given UV curves
+    if crv_on_surf || keep_uv_curves {
         let face = out.face.ok_or_else(|| null("no new face"))?;
         // (upstream loops over cpOptUVCurves->GetSize(): a null array is dereferenced)
         let uv: Vec<Curve> = uv_curves
@@ -1890,7 +1901,7 @@ fn make_face_with_curves_transfer_impl(
 /// `SM_ERR` when the edges do not share both vertices; those of the radial sector, edge
 /// use and shell edits and of `SmBrep::Notify`'s representation checks;
 /// [`SolidError::Unported`] (see the module docs).
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)] // one upstream routine
+#[allow(clippy::too_many_arguments)] // upstream's argument list
 pub fn glue_edges_general(
     k: &mut Kernel,
     b: &mut Brep,
@@ -1898,6 +1909,42 @@ pub fn glue_edges_general(
     relative_orientation: OrientType,
     edge_gap: f64,
     do_region_nesting: bool,
+    to_delete: Option<EdgeId>,
+    inside_faceuses: Option<&[FaceuseId]>,
+    env: &mut ed::NotifyEnv<'_>,
+) -> Result<()> {
+    glue_edges_general_searching(
+        k,
+        b,
+        surviving,
+        relative_orientation,
+        edge_gap,
+        do_region_nesting,
+        p6::InfiniteHalf::Searched,
+        to_delete,
+        inside_faceuses,
+        env,
+    )
+}
+
+/// [`glue_edges_general`] for a caller that says how a split of the infinite region tells
+/// its infinite half: by the search (`InfiniteHalf::Searched`, upstream's behaviour), or
+/// from a face use the caller knows to lie outside the solid whose shell the glue closes
+/// (`InfiniteHalf::Of`, not upstream). Without `do_region_nesting` nothing is split and
+/// the argument is not read.
+///
+/// # Errors
+///
+/// Those of [`glue_edges_general`].
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)] // one upstream routine
+pub(crate) fn glue_edges_general_searching(
+    k: &mut Kernel,
+    b: &mut Brep,
+    surviving: Option<EdgeId>,
+    relative_orientation: OrientType,
+    edge_gap: f64,
+    do_region_nesting: bool,
+    infinite_half: p6::InfiniteHalf,
     to_delete: Option<EdgeId>,
     inside_faceuses: Option<&[FaceuseId]>,
     env: &mut ed::NotifyEnv<'_>,
@@ -1916,10 +1963,7 @@ pub fn glue_edges_general(
     // a wire edge is just deleted
     if ed::is_wire(b, del)? {
         // status ignored upstream
-        ignore_status(crate::error::passed_on(
-            delete_edge(k, b, del, env),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        delete_edge(k, b, del, env)?;
         return Ok(());
     }
 
@@ -2198,22 +2242,29 @@ pub fn glue_edges_general(
     }
 
     if do_region_nesting {
+        // Both region-nesting statuses stay ignored, as upstream does (the fork's 60a8a51
+        // `SER`s them). By now the edges are merged and their shells joined: a returned
+        // status would report this committed glue as failed, and a stitch that goes on past
+        // failed glues (`ignore_problems`) would then skip the glue's bookkeeping (the glued edge's
+        // tolerance raised to the gap it now spans). A region left unsplit here is what
+        // upstream leaves too.
         let mut marks = Marks::default();
         let mut new_region = None;
         for fu in test_split {
-            // status ignored; each call first resets rpNewRegion to NULL
-            let attempt = p6::test_closure_split_region_attempt(k, b, &mut marks, env, true, fu)?;
-            // (fork 60a8a51 passes the status on: `SER`)
-            if k.fixes.brep_edit_statuses_pass_on {
-                attempt.status?;
-            }
+            // each call first resets rpNewRegion to NULL
+            let attempt = p6::test_closure_split_region_attempt_telling(
+                k,
+                b,
+                &mut marks,
+                env,
+                infinite_half,
+                fu,
+            )?;
+            ignore_status(attempt.status)?;
             new_region = attempt.region;
         }
         if ed::is_spine(b, surv)? && new_region.is_none() {
-            ignore_status(crate::error::passed_on(
-                test_closure_split_region_edge(k, b, env, surv),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            ignore_status(test_closure_split_region_edge(k, b, env, surv))?;
         }
     }
     Ok(())
@@ -2641,12 +2692,9 @@ fn copy_faces_named(
             continue;
         };
         let s1 = fp2::surface(src, f)?.ok_or_else(|| null("face without surface"))?;
-        // (status ignored upstream, which then dereferences the null copy)
-        let s2 = ignored(crate::error::passed_on(
-            s1.copy_and_add_analytics(k),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?
-        .ok_or_else(|| null("CopyAndAddAnalytics failed (upstream dereferences null)"))?;
+        // (status ignored upstream, which then dereferences the null copy; fork 60a8a51
+        // passes it on)
+        let s2 = s1.copy_and_add_analytics(k)?;
         let dom = s2.natural_uv_domain_with_nurb(k)?;
         let input = FaceCurvesInput {
             loops: curves
@@ -3163,6 +3211,7 @@ mod tests {
                 None,
                 &face_ref,
                 vertex_slots,
+                false,
                 &mut owners,
                 &mut env,
             )
@@ -4219,7 +4268,9 @@ mod tests {
         let mut env = TopologyEnv {
             all_attributes: &[],
             attributes: &mut store,
-            key_of: &key_of,
+            // distinct, typed identities (`TopologyEnv::key_of`; the module's `key_of`
+            // names every object alike)
+            key_of: &crate::topology::loopuse::notify_ref,
             records: &mut records,
             next_key: 1,
         };

@@ -63,6 +63,7 @@ fn cache_kernel(k: &Kernel, context: &Context) -> Kernel {
         caches: crate::kernel::Caches::default(),
         context: context.metadata_copy(),
         fillet_point_step: core::cell::Cell::new(k.fillet_point_step.get()),
+        process_fillet_point_step: k.process_fillet_point_step,
         upstream_ub_passed: Vec::new(),
         memoize_curve_caches: k.memoize_curve_caches,
         fixes: k.fixes,
@@ -77,6 +78,8 @@ fn cache_kernel(k: &Kernel, context: &Context) -> Kernel {
             crate::topology::topology::NotifyRecords::new(),
         ),
         blend_w_memo: core::cell::RefCell::default(),
+        loop_area_memo: core::cell::RefCell::default(),
+        recertify_memo: core::cell::RefCell::default(),
         // (inside the caller's operation: a scope opened on the copy keeps its memo)
         blend_operation_scopes: std::sync::Arc::new(core::sync::atomic::AtomicU32::new(
             k.blend_operation_scopes
@@ -86,9 +89,17 @@ fn cache_kernel(k: &Kernel, context: &Context) -> Kernel {
         work_counters: crate::kernel::WorkCounters::default(),
         // (building cache trees makes no blend faces)
         blend_face_log: None,
+        // (building cache trees makes no corner patches)
+        coons_tangency_log: core::cell::RefCell::new(None),
         // (the caller's profiler: the copy's scopes record into its tree)
         #[cfg(feature = "profile")]
         profiler: k.profiler.clone(),
+        // (the test seam is shared: the copy's drops are the operation's)
+        #[cfg(test)]
+        strip_probe: k.strip_probe.clone(),
+        // (the caller's WR-57 replay seam, test only: the copy calls through it)
+        #[cfg(feature = "wr57-replay")]
+        replay: k.replay.clone(),
     }
 }
 
@@ -1229,16 +1240,33 @@ impl ManifoldIntersector for ManifoldKernelAdapter<'_> {
         face: FaceId,
         other_face: FaceId,
     ) -> Result<(Vec<FaceId>, Vec<FaceId>, bool)> {
-        let mates = &self.merge.intersector.edges;
-        let check = p1::check_face_coincidence(
-            primary,
-            other,
-            face,
-            other_face,
-            mates.primary_to_other(),
-            mates.other_to_primary(),
-        )?;
-        let p1::FaceCoincidenceCheck::NeedsMerge { edge_counts } = check else {
+        let check = |relations: &Relations, primary: &Brep, other: &Brep| {
+            p1::check_face_coincidence(
+                primary,
+                other,
+                face,
+                other_face,
+                relations.edges.primary_to_other(),
+                relations.edges.other_to_primary(),
+            )
+        };
+        let mut status = check(&self.merge.intersector, primary, other)?;
+        // Not upstream (coincident_edges): edges of the two faces that join the same related vertices
+        // within a certified tolerance of each other are one edge; related first, the imprint
+        // below does not copy each onto the other face as a second edge between the two
+        // vertices (coincident_edges).
+        if matches!(status, p1::FaceCoincidenceCheck::NeedsMerge { .. })
+            && crate::boolean::merge::coincident_edges::relate_coincident_edges(
+                primary,
+                other,
+                face,
+                other_face,
+                &mut self.merge.intersector,
+            )? > 0
+        {
+            status = check(&self.merge.intersector, primary, other)?;
+        }
+        let p1::FaceCoincidenceCheck::NeedsMerge { edge_counts } = status else {
             return Ok((vec![face], vec![other_face], false));
         };
         // `m_vTI.MergeCoincidentSurfaces(pBrepFace->GetSurface(), pOtherFace->GetSurface(),

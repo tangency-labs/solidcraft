@@ -33,8 +33,6 @@ pub struct NamingOrigin {
     pub depth: usize,
     /// Instance transforms of a pattern or mirror (its copies are named after their sources).
     pub mats: Vec<crate::Mat>,
-    /// The sheet metal bodies after a sheet feature (their folds place moved faces).
-    pub sheets: Vec<crate::sheet::SheetBody>,
 }
 
 /// The lazily computed names of a body, shared by its clones.
@@ -154,7 +152,8 @@ impl Drop for NameCell {
 }
 
 pub use crate::name_lookup::{
-    EdgeHit, FaceHit, LEGACY_MARK, face_has_name, faces_with_stem, legacy_name, locate_edge, locate_face, locate_face_on_body, locate_one,
+    EdgeHit, FaceHit, LEGACY_MARK, VertexHit, face_has_name, faces_with_stem, legacy_name, locate_edge, locate_face, locate_face_on_body, locate_one,
+    locate_vertex,
 };
 pub use crate::piece_names::parent_piece;
 
@@ -163,10 +162,6 @@ const MAX_DEPTH: usize = 400;
 
 /// Up to this many sample points per face.
 const SAMPLES: usize = 9;
-
-/// Up to this many sample points per face where a sheet's panel kept in place names the face it is
-/// part of (see [`geometric_names`]).
-const PANEL_SAMPLES: usize = 256;
 
 /// Unit normals of each face's triangles.
 fn normals(m: &Mesh, nf: usize) -> Vec<Vec<Vec3>> {
@@ -594,9 +589,18 @@ pub(crate) fn names(b: &ModelBody) -> Arc<Names> {
         .clone()
 }
 
-/// Pairs of faces of a body that share an edge (from its mesh's edges).
+/// Pairs of faces of a body that share an edge (from its exact B-rep edges).
 pub(crate) fn mesh_adjacency(b: &ModelBody) -> Vec<(usize, usize)> {
-    crate::history_names::face_pairs(b.mesh().edge_faces.iter().map(|fs| fs.iter().map(|f| *f as usize)))
+    crate::history_names::face_pairs(b.body.record().edges.iter().map(|e| {
+        let mut faces: Vec<usize> = Vec::with_capacity(e.uses.len());
+        for u in &e.uses {
+            let f = u.face as usize;
+            if !faces.contains(&f) {
+                faces.push(f);
+            }
+        }
+        faces.into_iter()
+    }))
 }
 
 /// Work out a body's face names from the feature that made it and the model before it, by
@@ -673,38 +677,6 @@ pub(crate) fn geometric_names(b: &ModelBody, o: &NamingOrigin, nf: usize) -> Vec
         }
         if let Some((_, k, got)) = best {
             names = got.into_iter().map(|n| n.map(|n| format!("{n}@F{fid}.{}", k + 1))).collect();
-        }
-    }
-    // A sheet feature that moved panels (a fold, an unfold): faces it carried along lie on the
-    // faces they were, taken back through the panel they are on.
-    if let (Some(after), Some(before), Some(input)) = (
-        o.sheets.iter().find(|s| s.body == b.name),
-        o.before.sheets.iter().find(|s| s.body == b.name),
-        inputs.iter().find(|(x, _, _)| x.name == b.name),
-    ) {
-        let input = std::slice::from_ref(input);
-        let mut dense: Option<Vec<Vec<Vec3>>> = None;
-        for (fi, (name, ps)) in names.iter_mut().zip(&pts).enumerate() {
-            if name.is_some() {
-                continue;
-            }
-            // The panel the feature kept in place (the base an unfold lays the flanges out beside)
-            // lies on its own face before, and that face names the whole face it is part of now:
-            // a flat face spans that panel, the panels laid out beside it and the bend strips
-            // between them, whatever share of it they take. The few sample points above may all
-            // miss it (a bend strip is many small triangles), so the face is looked at closer.
-            let dense = dense.get_or_insert_with(|| samples_up_to(&m, nf, PANEL_SAMPLES));
-            if let Some(kept) = dense.get(fi).and_then(|ps| plurality(ps, input, tol)) {
-                *name = Some(kept);
-                continue;
-            }
-            // A point on a bend lies on no panel and has no place before; the face's other points
-            // do. At least half of them must, so a face that is mostly bend is not named from a
-            // few points.
-            let back: Vec<Vec3> = ps.iter().filter_map(|p| after.point_before(before, *p)).collect();
-            if !back.is_empty() && back.len() * 2 >= ps.len() {
-                *name = vote(&back, input, tol, None);
-            }
         }
     }
     // A feature that built a tool and reported no history. Two meshes of one curved face are only
@@ -821,28 +793,6 @@ fn vote(ps: &[Vec3], inputs: &[(&ModelBody, FaceIndex, Arc<Vec<String>>)], tol: 
     }
     votes.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     votes.first().filter(|(_, n)| *n * 2 >= ps.len().max(1) && votes.get(1).is_none_or(|(_, other)| n > other)).map(|(n, _)| n.clone())
-}
-
-/// The input face the most of `ps` lie on (pieces counted as their face), if at least two and a
-/// sixteenth of them lie on one: the face a sheet's unmoved panel was part of.
-fn plurality(ps: &[Vec3], inputs: &[(&ModelBody, FaceIndex, Arc<Vec<String>>)], tol: f64) -> Option<String> {
-    let mut votes: Vec<(String, usize)> = Vec::new();
-    for p in ps {
-        for (_, idx, nm) in inputs {
-            if let Some(f) = idx.face_at(*p, tol)
-                && let Some(n) = nm.get(f)
-            {
-                let n = strip_piece(n);
-                match votes.iter_mut().find(|(v, _)| v == n) {
-                    Some(v) => v.1 += 1,
-                    None => votes.push((n.to_string(), 1)),
-                }
-                break;
-            }
-        }
-    }
-    votes.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    votes.first().filter(|(_, n)| *n >= 2 && *n * 16 >= ps.len()).map(|(n, _)| n.clone())
 }
 
 /// A face name without its piece qualifiers: the face it is a piece of (`F2:top` for
@@ -1148,6 +1098,83 @@ pub fn edge_names_at(b: &ModelBody, pts: &[Vec3]) -> Vec<String> {
                 .unwrap_or_default()
         })
         .collect()
+}
+
+/// Incident face indices (sorted, deduplicated) for each B-rep vertex in `record`.
+pub(crate) fn vertex_incident_faces(record: &solidcore_record::brep::Brep) -> Vec<Vec<u32>> {
+    let mut per_vertex = vec![Vec::new(); record.vertices.len()];
+    for edge in &record.edges {
+        for &v in &edge.vertices {
+            if let Some(fs) = per_vertex.get_mut(v as usize) {
+                fs.extend(edge.uses.iter().map(|u| u.face));
+            }
+        }
+    }
+    for fs in &mut per_vertex {
+        fs.sort_unstable();
+        fs.dedup();
+    }
+    per_vertex
+}
+
+/// Names of a body's vertices (by B-rep record vertex index): `<face A>|<face B>|…`, numbered
+/// with `~k` when repeated along the longest axis of their spread. Empty for a mesh body.
+pub fn vertex_names(b: &ModelBody) -> Vec<String> {
+    if b.body.is_mesh() {
+        return Vec::new();
+    }
+    let record = b.body.record();
+    let incident = vertex_incident_faces(record);
+    vertex_names_from_record(record, &incident, &face_names(b))
+}
+
+/// Names of `record`'s vertices from `incident` face indices and face names `faces`.
+pub(crate) fn vertex_names_from_record(record: &solidcore_record::brep::Brep, incident: &[Vec<u32>], faces: &[String]) -> Vec<String> {
+    let mut names: Vec<String> = incident
+        .iter()
+        .map(|fs| {
+            let mut n: Vec<&str> = fs.iter().filter_map(|f| faces.get(*f as usize).map(String::as_str)).filter(|s| !s.is_empty()).collect();
+            n.sort();
+            n.join("|")
+        })
+        .collect();
+    let mut non_empty = Vec::new();
+    let mut indices = Vec::new();
+    let mut non_empty_pts = Vec::new();
+    for (i, (n, v)) in names.iter().zip(&record.vertices).enumerate() {
+        if !n.is_empty() {
+            non_empty.push(n.clone());
+            indices.push(i);
+            non_empty_pts.push(vec![Vec3::new(v.point[0], v.point[1], v.point[2])]);
+        }
+    }
+    number_pieces(&mut non_empty, &non_empty_pts, '~');
+    for (i, n) in indices.into_iter().zip(non_empty) {
+        if let Some(slot) = names.get_mut(i) {
+            *slot = n;
+        }
+    }
+    names
+}
+
+/// Index in `b.body.record().vertices` of the vertex at `at`, within the body's pick reach.
+/// `None` for a mesh body, an orphan vertex with no incident faces, or a non-finite point.
+pub(crate) fn vertex_index_at(b: &ModelBody, at: Vec3) -> Option<usize> {
+    if b.body.is_mesh() || !at.is_finite() {
+        return None;
+    }
+    let record = b.body.record();
+    let incident = vertex_incident_faces(record);
+    let reach = (b.body.size() * 2e-3).max(1e-3);
+    record
+        .vertices
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| incident.get(*i).is_some_and(|fs| !fs.is_empty()))
+        .map(|(i, v)| (Vec3::new(v.point[0], v.point[1], v.point[2]).dist(at), i))
+        .filter(|(d, _)| d.is_finite() && *d <= reach)
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, i)| i)
 }
 
 /// Names of the faces holding each point (any body; empty when none does).
@@ -1519,8 +1546,7 @@ mod tests {
         let mut weak = vec![Arc::downgrade(&state)];
         for depth in 0..count {
             let mut next = body.clone();
-            next.names =
-                NameCell::new(Some(Arc::new(NamingOrigin { feature: feature.clone(), before: state, depth, mats: Vec::new(), sheets: Vec::new() })));
+            next.names = NameCell::new(Some(Arc::new(NamingOrigin { feature: feature.clone(), before: state, depth, mats: Vec::new() })));
             let mut next_state = ModelState::default();
             next_state.bodies.push(next);
             state = Arc::new(next_state);
@@ -1631,5 +1657,13 @@ mod tests {
         }
         assert_eq!(curves.nearest(Vec2::new(5., 0.)).map(|(_, id)| id).as_deref(), Some("c0_0"), "a tie keeps the first curve");
         assert!(curves.segs.iter().all(|(id, ..)| id != "guide"), "construction curves name nothing");
+    }
+
+    #[test]
+    fn mesh_adjacency_uses_exact_brep_edges() {
+        let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(4., 2., 1.)).unwrap();
+        let body = ModelBody::new("Cube".into(), body, 1);
+        let pairs = mesh_adjacency(&body);
+        assert_eq!(pairs.len(), 12);
     }
 }

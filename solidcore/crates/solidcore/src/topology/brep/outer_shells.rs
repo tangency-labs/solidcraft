@@ -81,10 +81,10 @@ mod tests {
     use crate::primitive::api_primitives::create_box;
     use crate::topology::brep::p1::regions;
 
-    /// The cup and lid of WR-265 on the default kernel, which leaves the cavity's shell first
-    /// in the solid region's list: for either operand order, the solid's outer shell is the one
-    /// mated to the infinite region, not its list head, and the cavity's outer shell is the
-    /// solid's other shell.
+    /// The cup and lid of WR-265, with the solid region's list reversed after the Boolean
+    /// (which puts the outer shell first) so that the cavity's shell is listed first: for
+    /// either operand order, the solid's outer shell is the one mated to the infinite region,
+    /// not its list head, and the cavity's outer shell is the solid's other shell.
     #[test]
     fn the_outer_shell_of_a_solid_whose_void_is_listed_first() {
         for lid_first in [false, true] {
@@ -97,7 +97,7 @@ mod tests {
                 .unwrap()
                 .result;
             let (a, b) = if lid_first { (lid, cup) } else { (cup, lid) };
-            let r = boolean(&mut k, a, b, BooleanOperation::Union)
+            let mut r = boolean(&mut k, a, b, BooleanOperation::Union)
                 .unwrap()
                 .result;
             let infinite = r.infinite_region().unwrap();
@@ -110,8 +110,12 @@ mod tests {
                 .iter()
                 .find(|&&g| g != infinite && r.region(g).unwrap().is_void() != 0)
                 .unwrap();
+            r.region_mut(solid).unwrap().shells.reverse();
             let shells = r.region(solid).unwrap().shells.clone();
             assert_eq!(shells.len(), 2, "lid first: {lid_first}");
+            for m in mated_shells(&r, shells[0]).unwrap() {
+                assert_ne!(r.shell(m).unwrap().region, Some(infinite));
+            }
             let outer = outer_shells(&r).unwrap();
             assert_eq!(outer.len(), 2, "lid first: {lid_first}");
             assert!(!outer.contains_key(&infinite));

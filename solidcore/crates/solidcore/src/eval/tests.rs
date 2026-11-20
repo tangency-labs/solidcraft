@@ -274,6 +274,45 @@ fn analytic_forms_refuse_invalid_angular_domains() {
     }
 }
 
+/// A torus face's quarters along its tube: a whole turn that starts off a quarter line needs five
+/// (its seam's second use lies past four from the quarter it starts in), whatever quarter it
+/// starts in, negative angles included; one that starts on a quarter line, or within the
+/// tolerance's angle of one, or is a turn only to rounding, needs four; less than a turn the
+/// quarters it crosses.
+#[test]
+fn a_whole_turn_round_a_tube_off_a_quarter_line_spans_five_quarters() {
+    let torus = Surface::Torus {
+        frame: Frame {
+            origin: [0.0; 3],
+            x_axis: [1.0, 0.0, 0.0],
+            y_axis: [0.0, 1.0, 0.0],
+        },
+        major_radius: 2.5,
+        minor_radius: 1.8,
+        tube_start: 0.0,
+    };
+    let q = |v: [f64; 2], tol: f64| form::tube_quarters(&torus, [[0.0, FRAC_PI_2], v], tol);
+    // The seam of #18778's bend, in the tube's second quarter.
+    let seam = 1.910_828_950_980_659_5;
+    for k in 0..4 {
+        let start = seam + f64::from(k) * FRAC_PI_2;
+        assert_eq!(q([start, start + TAU], 1e-7), Some(5), "{start}");
+        assert_eq!(q([-start, TAU - start], 1e-7), Some(5), "{start}");
+        let on = f64::from(k) * FRAC_PI_2;
+        assert_eq!(q([on, on + TAU], 0.0), Some(4), "{on}");
+    }
+    // A turn to rounding, a start a rounding short of a quarter line within the tolerance's
+    // angle (1e-6 / 1.8), and one farther short than that.
+    assert_eq!(q([0.0, TAU * (1.0 + 0.5e-9)], 0.0), Some(4));
+    let near = FRAC_PI_2 - 1e-9;
+    assert_eq!(q([near, near + TAU], 1e-6), Some(4));
+    let short = FRAC_PI_2 - 1e-5;
+    assert_eq!(q([short, short + TAU], 1e-6), Some(5));
+    // Less than a turn: from the second quarter into the fourth, and two whole quarters.
+    assert_eq!(q([seam, seam + std::f64::consts::PI], 1e-7), Some(3));
+    assert_eq!(q([0.0, std::f64::consts::PI], 0.0), Some(2));
+}
+
 /// Keep the existing rounding window around one complete turn and the exact form it chooses.
 #[test]
 fn analytic_forms_keep_the_existing_whole_turn_rounding_window() {
@@ -394,6 +433,71 @@ fn a_circles_forms_have_its_curvature() {
                 "{t}: {j:?}"
             );
         }
+    }
+}
+
+/// An arc that starts inside a quarter and ends past the fourth quarter line on from it needs five
+/// quarters of its frame's grid, which whole run a quarter past one turn. Its form is cut to it:
+/// it starts and ends where the arc does, its joints between are the grid's quarter lines, and it
+/// has the label's point at every angle's form parameter, as a form on whole quarters has. An arc
+/// that needs four keeps them whole.
+#[test]
+fn an_arcs_form_of_five_quarters_is_cut_to_the_arc() {
+    let f = tilted();
+    let circle = Curve::Circle {
+        frame: f.clone(),
+        radius: 7.0,
+    };
+    let ellipse = Curve::Ellipse {
+        frame: f,
+        radii: [7.0, 3.0],
+    };
+    // Across the x axis; a whole turn from inside a quarter; ending 0.02 degrees past a quarter
+    // line (an edge of a face that ends within its tolerance of one); starting as far before one.
+    let past = 0.02_f64.to_radians();
+    let arcs = [
+        [1.0, 6.5],
+        [-2.5, -2.5 + TAU],
+        [30.02_f64.to_radians(), TAU + past],
+        [FRAC_PI_2 - past, 4.5 * FRAC_PI_2],
+    ];
+    for c in [&circle, &ellipse] {
+        let label = CurveEval::new(c).unwrap();
+        for [t0, t1] in arcs {
+            let (form, on) = form::curve(c, [t0, t1]).unwrap();
+            let Curve::RationalSpline { knots, homogeneous } = &form else {
+                panic!("{form:?}")
+            };
+            assert_eq!(on, [form::param(t0), form::param(t1)]);
+            assert!(on[1] - on[0] <= 4.0 + 1e-12, "more than one turn: {on:?}");
+            let q = on[0].floor();
+            let joints = [1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0].map(|k| q + k);
+            let expected: Vec<f64> = [on[0]; 3]
+                .into_iter()
+                .chain(joints)
+                .chain([on[1]; 3])
+                .collect();
+            assert_eq!(knots, &expected, "[{t0}, {t1}]");
+            assert_eq!(homogeneous.len(), 11);
+            assert!(homogeneous.iter().all(|h| h[3] > 0.0), "{homogeneous:?}");
+            let e = CurveEval::new(&form).unwrap();
+            for k in 0..=400 {
+                let t = t0 + (t1 - t0) * f64::from(k) / 400.0;
+                let s = form::param(t).clamp(on[0], on[1]);
+                let (p, want) = (e.jet(s).unwrap().point, label.jet(t).unwrap().point);
+                assert!(
+                    close(p, want, 1e-14),
+                    "[{t0}, {t1}] at {t}: {p:?} vs {want:?}"
+                );
+            }
+        }
+        // Four quarters: the grid's own, whole.
+        let (form, on) = form::curve(c, [0.2, 6.2]).unwrap();
+        let Curve::RationalSpline { knots, .. } = &form else {
+            panic!("{form:?}")
+        };
+        assert_eq!((knots[0], knots[knots.len() - 1]), (0.0, 4.0));
+        assert_eq!(on, [form::param(0.2), form::param(6.2)]);
     }
 }
 
@@ -834,6 +938,55 @@ fn a_point_beside_a_pole_is_one_within_its_reach() {
     assert_eq!(sphere.pole([0.3, FRAC_PI_2]).unwrap(), [true, false]);
 }
 
+/// At the threshold, r = reach / 2: a form whose circles are no wider than the reach is thin,
+/// not collapsed. A cylinder of radius 0.049, 0.05 or 0.051 at a reach of 0.1 (a pin's round in a
+/// file of 0.1 mm uncertainty) is a pole nowhere; a ball of radius 0.05 only at its exact poles, a torus's tube
+/// of radius 0.05 nowhere. A ball a little wider still has its poles within the reach.
+#[test]
+fn a_surface_no_wider_than_the_reach_is_thin_not_a_pole() {
+    let reach = 0.1;
+    // A cylinder just under, at and just over r = reach / 2: a pole nowhere.
+    for k in [0.49, 0.5, 0.51] {
+        let cylinder = SurfaceEval::new(&Surface::Cylinder {
+            frame: a_frame(),
+            radius: k * reach,
+        })
+        .unwrap();
+        assert_eq!(
+            cylinder.pole_within([0.3, 0.5], reach).unwrap(),
+            [false, false],
+            "r = {k} reach"
+        );
+    }
+    let ball = SurfaceEval::new(&Surface::Sphere {
+        frame: a_frame(),
+        radius: 0.5 * reach,
+    })
+    .unwrap();
+    assert_eq!(ball.pole_within([0.3, 0.2], reach).unwrap(), [false, false]);
+    assert_eq!(
+        ball.pole_within([0.3, FRAC_PI_2], reach).unwrap(),
+        [true, false]
+    );
+    let wider = SurfaceEval::new(&Surface::Sphere {
+        frame: a_frame(),
+        radius: 0.501 * reach,
+    })
+    .unwrap();
+    assert_eq!(wider.pole_within([0.3, 0.2], reach).unwrap(), [true, false]);
+    let torus = SurfaceEval::new(&Surface::Torus {
+        frame: a_frame(),
+        major_radius: 4.0,
+        minor_radius: 0.5 * reach,
+        tube_start: 0.0,
+    })
+    .unwrap();
+    assert_eq!(
+        torus.pole_within([0.3, 0.2], reach).unwrap(),
+        [false, false]
+    );
+}
+
 /// A curve's curvature vector, exactly, on every kind: a circle's is 1/R towards its centre (as
 /// a conic and as its rational quadratic B-spline); an ellipse's at its vertices is a/b² and
 /// b/a²; a line is straight; and the circle where a plane z = 3 cuts a sphere of radius 5 about
@@ -1225,6 +1378,171 @@ fn a_loop_through_a_pole_closes_its_turn_from_the_seam() {
     );
 }
 
+/// A 5 mm sphere about z, its seam the meridian through +x (angle −π/2 at the south pole, π/2
+/// at the north), and the circle where the plane at `d` from the centre across direction
+/// `(cos a, sin a, 0)` meets it (angle 0 at its top, a quarter turn towards +y about it).
+fn sphere_seam_and_cut(a: f64, d: f64) -> (Surface, Curve, Curve) {
+    let r = 5.0f64;
+    let sphere = Surface::Sphere {
+        frame: Frame {
+            origin: [0.; 3],
+            x_axis: [1., 0., 0.],
+            y_axis: [0., 1., 0.],
+        },
+        radius: r,
+    };
+    let seam = Curve::Circle {
+        frame: Frame {
+            origin: [0.; 3],
+            x_axis: [1., 0., 0.],
+            y_axis: [0., 0., 1.],
+        },
+        radius: r,
+    };
+    let (s, c) = a.sin_cos();
+    let cut = Curve::Circle {
+        frame: Frame {
+            origin: [d * c, d * s, 0.],
+            x_axis: [0., 0., 1.],
+            y_axis: [-s, c, 0.],
+        },
+        radius: (r * r - d * d).sqrt(),
+    };
+    (sphere, seam, cut)
+}
+
+/// A sphere less a hole beside its seam (#16872: a ball with a bore in it, after a STEP round
+/// trip): the seam's loop, up the meridian and back down it, has no width, yet the face covers
+/// the whole turn with the hole in it, whichever loop comes first. Taken as wide as the hole, the
+/// face's form was a sliver and its seam loop enclosed nothing.
+#[test]
+fn a_sphere_less_a_hole_beside_its_seam_spans_the_whole_turn() {
+    let (sphere, seam, hole) = sphere_seam_and_cut(0.4, 4.8);
+    let seam_loop = vec![
+        (&seam, [-FRAC_PI_2, FRAC_PI_2], true),
+        (&seam, [-FRAC_PI_2, FRAC_PI_2], false),
+    ];
+    let hole_loop = vec![(&hole, [0., TAU], false)];
+    for loops in [
+        [seam_loop.clone(), hole_loop.clone()],
+        [hole_loop.clone(), seam_loop.clone()],
+    ] {
+        let [u, v] = form::extent(&sphere, &loops, 1e-9)
+            .unwrap()
+            .expect("an extent");
+        assert!((u[1] - u[0] - TAU).abs() < 1e-9, "one turn: {u:?}");
+        let from = u[0].rem_euclid(TAU);
+        assert!(from.min(TAU - from) < 1e-9, "from the seam: {u:?}");
+        let hole_u = 0.4 + ((u[0] - 0.4) / TAU).ceil() * TAU;
+        assert!(
+            hole_u > u[0] && hole_u < u[1],
+            "the hole in the turn: {u:?}"
+        );
+        assert!(
+            (v[0] + FRAC_PI_2).abs() < 1e-9 && (v[1] - FRAC_PI_2).abs() < 1e-9,
+            "{v:?}"
+        );
+    }
+}
+
+/// A sphere less a bore across its seam (#16872): its loop runs up the seam to the bore, round
+/// the bore's one side, up the seam to the north pole, down the seam's other use, round the
+/// bore's other side and down to the south pole. It passes both poles, so it closes whatever
+/// turns it takes there; the face lies on its left, so over the north pole it turns back a whole
+/// turn and the face covers it. Closing the loop instead took the turns of no width, a box just
+/// as wide as the bore, and the face came out as the bore turned over.
+#[test]
+fn a_loop_over_both_poles_turns_the_way_its_face_lies() {
+    let (sphere, seam, bore) = sphere_seam_and_cut(0.0, 4.0);
+    let below = [-FRAC_PI_2, -(0.6f64.asin())];
+    let above = [0.6f64.asin(), FRAC_PI_2];
+    let outer = [
+        (&seam, below, true),
+        (&bore, [std::f64::consts::PI, TAU], true),
+        (&seam, above, true),
+        (&seam, above, false),
+        (&bore, [0., std::f64::consts::PI], true),
+        (&seam, below, false),
+    ];
+    // Started anywhere round it, the loop takes the same turns.
+    for k in 0..outer.len() {
+        let l: Vec<_> = outer
+            .iter()
+            .cycle()
+            .skip(k)
+            .take(outer.len())
+            .copied()
+            .collect();
+        let [u, v] = form::extent(&sphere, &[l], 1e-9)
+            .unwrap()
+            .expect("an extent");
+        assert!(
+            (u[1] - u[0] - TAU).abs() < 1e-9,
+            "start {k}: one turn: {u:?}"
+        );
+        let from = u[0].rem_euclid(TAU);
+        assert!(
+            from.min(TAU - from) < 1e-9,
+            "start {k}: from the seam: {u:?}"
+        );
+        assert!(
+            (v[0] + FRAC_PI_2).abs() < 1e-9 && (v[1] - FRAC_PI_2).abs() < 1e-9,
+            "start {k}: {v:?}"
+        );
+    }
+}
+
+/// Half a dome of revolution, its profile a spline from the axis, bounded by a meridian into
+/// the pole, the meridian half a turn round back out of it and half the rim: the loop out of the
+/// pole is placed from the whole surface, not from the last point before the pole (across the
+/// axis, where the nearest-point search settled on the pole and the meridian and the rim's first
+/// point bounded nothing, leaving the box a sample short of half a turn).
+#[test]
+fn a_loop_out_of_a_revolutions_pole_reaches_the_meridian_it_leaves_on() {
+    let identity = [
+        [1., 0., 0., 0.],
+        [0., 1., 0., 0.],
+        [0., 0., 1., 0.],
+        [0., 0., 0., 1.],
+    ];
+    let profile = |side: f64| Curve::Spline {
+        knots: vec![0., 0., 0., 1., 1., 1.],
+        points: vec![[0., 0., 0.], [0., 2. * side, 0.], [1.5, 3. * side, 0.]],
+    };
+    let dome = Surface::PlacedRevolution {
+        profile: Box::new(profile(1.0)),
+        origin: [0.; 3],
+        axis: [1., 0., 0.],
+        matrix: identity,
+        forward: false,
+    };
+    let (east, west) = (profile(1.0), profile(-1.0));
+    let rim = Curve::Circle {
+        frame: Frame {
+            origin: [1.5, 0., 0.],
+            x_axis: [0., 1., 0.],
+            y_axis: [0., 0., 1.],
+        },
+        radius: 3.,
+    };
+    // The half below z = 0: in on the −y meridian, out on the +y one, back round the rim.
+    let lune = vec![
+        (&west, [0., 1.], false),
+        (&east, [0., 1.], true),
+        (&rim, [std::f64::consts::PI, TAU], false),
+    ];
+    let [u, v] = form::extent(&dome, &[lune], 1e-6)
+        .unwrap()
+        .expect("an extent");
+    assert!(
+        (u[1] - u[0] - std::f64::consts::PI).abs() < 1e-9,
+        "half a turn: {u:?}"
+    );
+    let to = u[1].rem_euclid(TAU);
+    assert!(to.min(TAU - to) < 1e-9, "to the +y meridian: {u:?}");
+    assert!(v[0].abs() < 1e-9 && (v[1] - 1.).abs() < 1e-9, "{v:?}");
+}
+
 /// A face's box reaches its boundary's extremes, not its samples' nearest ones.
 #[test]
 fn a_face_box_reaches_its_boundary_extremes() {
@@ -1253,6 +1571,126 @@ fn a_face_box_reaches_its_boundary_extremes() {
         (v[0] - 10.0).abs() < 1e-9 && (v[1] - 50.0).abs() < 1e-9,
         "{v:?}"
     );
+}
+
+/// A loop that goes round a cylinder once and backs up a little (along a notch: a slot wall, the
+/// curve where two drill points meet) has a box a little wider than a turn, but it does not wind:
+/// its face is one turn wide, like any other band. A loop that goes back more than a turn (a
+/// thread's flank, a screw's cylinder down its thread) keeps its box.
+#[test]
+fn a_loop_that_goes_round_once_and_backs_up_a_little_does_not_wind() {
+    let (r, h) = (20.0f64, 60.0);
+    let cylinder = Surface::Cylinder {
+        frame: Frame {
+            origin: [0.; 3],
+            x_axis: [1., 0., 0.],
+            y_axis: [0., 1., 0.],
+        },
+        radius: r,
+    };
+    let ring = |z: f64| Curve::Circle {
+        frame: Frame {
+            origin: [0., 0., z],
+            x_axis: [1., 0., 0.],
+            y_axis: [0., 1., 0.],
+        },
+        radius: r,
+    };
+    let ruling = |turns: f64| {
+        let a = turns * TAU;
+        Curve::Line {
+            start: [r * a.cos(), r * a.sin(), 0.],
+            end: [r * a.cos(), r * a.sin(), h],
+        }
+    };
+    let (bottom, top) = (ring(0.), ring(h));
+    // Once round and `back` turns back: forward 1 + back turns along the bottom, up the ruling
+    // there, back `back` turns along the top, down the ruling at the start.
+    let width = |back: f64| {
+        let (up, down) = (ruling(back), ruling(0.));
+        let l = vec![
+            (&bottom, [0., (1.0 + back) * TAU], true),
+            (&up, [0., 1.], true),
+            (&top, [0., back * TAU], false),
+            (&down, [0., 1.], false),
+        ];
+        let [u, _] = form::extent(&cylinder, &[l], 1e-9)
+            .unwrap()
+            .expect("an extent");
+        u[1] - u[0]
+    };
+    for back in [0.01, 0.1, 0.5] {
+        let w = width(back);
+        assert!((w - TAU).abs() < 1e-9, "backed up {back} turn: {w}");
+        assert!(!form::winds([[0.0, w], [0.0, 1.0]]));
+    }
+    // Back more than a turn: the box is the whole loop's.
+    let w = width(1.1);
+    assert!((w - 2.1 * TAU).abs() < 1e-9, "{w}");
+    assert!(form::winds([[0.0, w], [0.0, 1.0]]));
+}
+
+/// One edge that winds 33 times round a cylinder (a plane's section of it, run on for 33 turns)
+/// is measured 33 turns wide: sampled at 32 points it would step a turn and a thirty-second at a
+/// time and read as one turn.
+#[test]
+fn an_edge_that_winds_more_than_sixteen_turns_is_measured_whole() {
+    let r = 20.0f64;
+    let cylinder = Surface::Cylinder {
+        frame: Frame {
+            origin: [0.; 3],
+            x_axis: [1., 0., 0.],
+            y_axis: [0., 1., 0.],
+        },
+        radius: r,
+    };
+    let c = std::f64::consts::FRAC_1_SQRT_2;
+    let cut = Curve::Ellipse {
+        frame: Frame {
+            origin: [0., 0., 30.],
+            x_axis: [c, 0., c],
+            y_axis: [0., 1., 0.],
+        },
+        radii: [r * 2f64.sqrt(), r],
+    };
+    let turns = 33.0;
+    let [u, v] = form::extent(&cylinder, &[vec![(&cut, [0., turns * TAU], true)]], 1e-9)
+        .unwrap()
+        .expect("an extent");
+    assert!((u[1] - u[0] - turns * TAU).abs() < 1e-6, "{u:?}");
+    assert!(
+        (v[0] - 10.0).abs() < 1e-9 && (v[1] - 50.0).abs() < 1e-9,
+        "{v:?}"
+    );
+}
+
+/// An edge of a million turns is probed over a step of a whole turn at the start: that step
+/// projects back onto its start and would read as no winding, so the face's box would be one turn
+/// wide. The step is halved until it advances less than a quarter turn, and the edge is then
+/// refused as wound beyond what is measured.
+#[test]
+fn an_edge_of_a_million_turns_is_refused_not_read_as_one_turn() {
+    let r = 20.0f64;
+    let cylinder = Surface::Cylinder {
+        frame: Frame {
+            origin: [0.; 3],
+            x_axis: [1., 0., 0.],
+            y_axis: [0., 1., 0.],
+        },
+        radius: r,
+    };
+    let c = std::f64::consts::FRAC_1_SQRT_2;
+    let cut = Curve::Ellipse {
+        frame: Frame {
+            origin: [0., 0., 30.],
+            x_axis: [c, 0., c],
+            y_axis: [0., 1., 0.],
+        },
+        radii: [r * 2f64.sqrt(), r],
+    };
+    let turns = 1.0e6;
+    let found = form::extent(&cylinder, &[vec![(&cut, [0., turns * TAU], true)]], 1e-9).unwrap();
+    assert!(found.is_none(), "{found:?}");
 }
 
 /// The flux of `p / 3` through a whole sphere is its volume.
@@ -1473,5 +1911,88 @@ fn a_whole_turn_a_rounding_short_of_a_quarter_line_has_its_form_from_it() {
             form::surface_within(&cylinder, [[start, start + TAU], [0., 10.]], 2e-5).unwrap();
         assert_eq!(u_knots(&form), (q, q + 4.0), "seam at {start}");
         assert_eq!(domain[0], [q, q + 4.0], "seam at {start}");
+    }
+}
+
+/// A narrow lune between two meridians, up one to a pole and down the other to the opposite
+/// pole, keeps its width round the axis wherever the loop starts and wherever the lune lies,
+/// including across angle 0: the point found afresh past each pole is moved onto the branch of
+/// the point before it.
+#[test]
+fn a_lune_between_two_poles_keeps_its_width_round_the_axis() {
+    let r = 10.0f64;
+    let sphere = Surface::Sphere {
+        frame: Frame {
+            origin: [0.; 3],
+            x_axis: [1., 0., 0.],
+            y_axis: [0., 1., 0.],
+        },
+        radius: r,
+    };
+    let meridian = |a: f64| Curve::Circle {
+        frame: Frame {
+            origin: [0.; 3],
+            x_axis: [a.cos(), a.sin(), 0.],
+            y_axis: [0., 0., 1.],
+        },
+        radius: r,
+    };
+    for &(centre, width) in &[
+        (0.0, 0.2),
+        (0.0, 0.02),
+        (std::f64::consts::PI, 0.2),
+        (1.0, 0.5),
+        (-0.05, 0.3),
+        (6.2, 0.4),
+    ] {
+        let (a, b) = (
+            meridian(centre - width / 2.0),
+            meridian(centre + width / 2.0),
+        );
+        let loops = [
+            (
+                "up a, down b",
+                vec![
+                    (&a, [-FRAC_PI_2, FRAC_PI_2], true),
+                    (&b, [-FRAC_PI_2, FRAC_PI_2], false),
+                ],
+            ),
+            (
+                "up b, down a",
+                vec![
+                    (&b, [-FRAC_PI_2, FRAC_PI_2], true),
+                    (&a, [-FRAC_PI_2, FRAC_PI_2], false),
+                ],
+            ),
+            (
+                "from a's middle",
+                vec![
+                    (&a, [0., FRAC_PI_2], true),
+                    (&b, [-FRAC_PI_2, FRAC_PI_2], false),
+                    (&a, [-FRAC_PI_2, 0.], true),
+                ],
+            ),
+            (
+                "from b's middle",
+                vec![
+                    (&b, [-FRAC_PI_2, 0.], false),
+                    (&a, [-FRAC_PI_2, FRAC_PI_2], true),
+                    (&b, [0., FRAC_PI_2], false),
+                ],
+            ),
+        ];
+        for (name, lune) in loops {
+            let [u, v] = form::extent(&sphere, &[lune], 1e-9)
+                .unwrap()
+                .expect("an extent");
+            assert!(
+                (u[1] - u[0] - width).abs() < 1e-9,
+                "centre {centre}, width {width}, {name}: {u:?}"
+            );
+            assert!(
+                (v[0] + FRAC_PI_2).abs() < 1e-9 && (v[1] - FRAC_PI_2).abs() < 1e-9,
+                "centre {centre}, width {width}, {name}: {v:?}"
+            );
+        }
     }
 }

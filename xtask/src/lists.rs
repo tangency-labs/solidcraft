@@ -3,8 +3,8 @@
 //! (CONTRIBUTING.md, "Lists many changes add to"). Checked by `cargo xtask ci` and the Lists
 //! workflow; `--fix` rewrites them.
 //!
-//! - The message catalogs (`assets/locales/*.json`): one message per line, sorted by id, no
-//!   duplicate ids, as `serde_json` pretty-prints them.
+//! - The message catalogs (`assets/locales/*.json` and the shared `crates/ui-text/locales/*.json`):
+//!   one message per line, sorted by id, no duplicate ids, as `serde_json` pretty-prints them.
 //! - `tests/KNOWN_FAILING_TESTS`: one test a line with its cause, sorted, each test once
 //!   (checked only; `cargo xtask known-failing` reads it).
 //! - `tests/QUARANTINED_TESTS`: flaky tests, `<test> <issue> <date added> [why]`, sorted, an issue
@@ -13,29 +13,36 @@
 //!   cases go to solidcore's corpus (checked only).
 //! - Growing Rust lists: no written array lengths on more than ten lines of entries.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
 
 const LOCALES: &str = "assets/locales";
 
 pub fn run(root: &Path, fix: bool) -> Result<(), String> {
-    let dir = root.join(LOCALES);
-    let entries = std::fs::read_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    let mut files: Vec<_> = entries.filter_map(Result::ok).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "json")).collect();
+    let mut files = Vec::new();
+    for dir in [root.join(LOCALES), root.join(crate::pending::SHARED_LOCALES)] {
+        let entries = std::fs::read_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        files.extend(entries.filter_map(Result::ok).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "json")));
+    }
     files.sort();
-    let mut stale = Vec::new();
-    for path in files {
-        let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    // Each catalog is parsed and written out again on a core of its own.
+    let read = crate::parallel::map(&files, |path| {
+        let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
         let canonical = canonical(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+        Ok::<_, String>((text, canonical))
+    })?;
+    let mut stale = Vec::new();
+    for (path, read) in files.iter().zip(read) {
+        let (text, canonical) = read?;
         if canonical == text.replace("\r\n", "\n") {
             continue;
         }
         if fix {
-            std::fs::write(&path, &canonical).map_err(|e| format!("{}: {e}", path.display()))?;
+            std::fs::write(path, &canonical).map_err(|e| format!("{}: {e}", path.display()))?;
             println!("lists: sorted {}", path.display());
         } else {
-            stale.push(path.strip_prefix(root).unwrap_or(&path).display().to_string());
+            stale.push(path.strip_prefix(root).unwrap_or(path).display().to_string());
         }
     }
     if !stale.is_empty() {
@@ -81,6 +88,7 @@ const FIXED_ARRAYS: &[(&str, &str)] = &[
     ("crates/engine/src/cmd/parts.rs", "METRIC"),            // Standard metric screw diameters and pitches.
     ("crates/engine/src/cmd/parts.rs", "SHCS"),              // ISO 4762 socket-head cap screw dimensions.
     ("crates/engine/src/cmd/parts.rs", "WASHER"),            // ISO 7089 plain washer dimensions.
+    ("crates/io/src/e57.rs", "CRC_TABLE"),                   // CRC-32C lookup table: one entry per byte value.
     ("crates/ui-egui/src/dialogs_assembly.rs", "TYPES"),     // Joint types; TYPE_LABELS must stay the same length.
     ("crates/ui-egui/src/dialogs_assembly.rs", "TYPE_LABELS"), // Labels for TYPES, index for index.
     ("crates/ui-egui/src/space_mouse_calibration.rs", "STEP_PROMPTS"), // Labels for the twelve fixed calibration motions.
@@ -218,7 +226,7 @@ fn array_violations(source: &str) -> Result<Vec<String>, String> {
 }
 
 fn check_arrays(root: &Path) -> Result<(), String> {
-    fn scan(root: &Path, dir: &Path, failures: &mut Vec<String>) -> Result<(), String> {
+    fn scan(dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
         for entry in std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))? {
             let entry = entry.map_err(|e| e.to_string())?;
             let path = entry.path();
@@ -227,23 +235,33 @@ fn check_arrays(root: &Path) -> Result<(), String> {
             let name = name.to_string_lossy();
             if kind.is_dir() {
                 if !matches!(name.as_ref(), "target" | ".git" | "tests" | "benches") {
-                    scan(root, &path, failures)?;
+                    scan(&path, files)?;
                 }
             } else if kind.is_file() && path.extension().is_some_and(|e| e == "rs") && name != "tests.rs" && !name.ends_with("_tests.rs") {
-                let relative = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
-                let source = std::fs::read_to_string(&path).map_err(|e| format!("{relative}: {e}"))?;
-                for name in array_violations(&source).map_err(|e| format!("{relative}: {e}"))? {
-                    if !FIXED_ARRAYS.contains(&(relative.as_str(), name.as_str())) {
-                        failures.push(format!("{relative}: {name}"));
-                    }
-                }
+                files.push(path);
             }
         }
         Ok(())
     }
-    let mut failures = Vec::new();
+    let mut files = Vec::new();
     for dir in ["apps", "assets", "crates", "tools", "xtask"] {
-        scan(root, &root.join(dir), &mut failures)?;
+        scan(&root.join(dir), &mut files)?;
+    }
+    // Parsing is the cost, so the files are read and parsed on every core.
+    let found = crate::parallel::map(&files, |path| {
+        let relative = path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace('\\', "/");
+        let source = std::fs::read_to_string(path).map_err(|e| format!("{relative}: {e}"))?;
+        let names = array_violations(&source).map_err(|e| format!("{relative}: {e}"))?;
+        Ok::<_, String>((relative, names))
+    })?;
+    let mut failures = Vec::new();
+    for found in found {
+        let (relative, names) = found?;
+        for name in names {
+            if !FIXED_ARRAYS.contains(&(relative.as_str(), name.as_str())) {
+                failures.push(format!("{relative}: {name}"));
+            }
+        }
     }
     failures.sort();
     if failures.is_empty() {

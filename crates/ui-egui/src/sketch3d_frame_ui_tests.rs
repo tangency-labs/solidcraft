@@ -341,3 +341,19 @@ fn point3d_tool_places_points_and_stays() {
     assert!(wires[1].fit[0].dist(Vec3::new(20.0, 10.0, 10.0)) < 1e-6, "{:?}", wires[1].fit);
     assert!(h.app.tool.as_ref().is_some_and(|t| t.cmd == "sketch.point3d"), "the tool stays for the next point");
 }
+
+/// Snap points in 3D sketches (#11229): hovering a box's top edge wakes its middle, and the 3D
+/// Point tool takes the middle itself from just beside it on the edge (a woken point beats the
+/// edge it lies on within `snap_wake::ON`).
+#[test]
+fn point3d_takes_a_model_edges_woken_middle() {
+    let (mut h, _) = box_and_3d_sketch("Point3dSnap");
+    h.app.start("sketch.point3d");
+    h.frames(2);
+    h.step(&json!({"move": {"world": [12.5, 0, 10]}})).unwrap();
+    assert!(!h.app.viewport.woken.points.is_empty(), "hover {:?}", h.app.viewport.hover);
+    let [x, y] = h.at(&json!({"world": [15.02, 0, 10]})).unwrap();
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    let picked = crate::sketch3d::point_at(&h.app, &proj, egui::pos2(x as f32, y as f32));
+    assert!(picked.is_some_and(|(q, _)| q.dist(Vec3::new(15.0, 0.0, 10.0)) < 1e-6), "{picked:?}");
+}

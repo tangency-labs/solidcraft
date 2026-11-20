@@ -300,7 +300,7 @@ pub fn show(ui: &egui::Ui, free: Rect, place: Place, text: String, lead: Lead, a
         let room = Rect::from_min_size(at.min, vec2(row_width.max(at.width()), at.height()));
         let mut button_ui = egui::Ui::new(
             ui.ctx().clone(),
-            egui::Id::unique(("sc_toast_action", index)),
+            egui::Id::unique(("sc_toast_action", extras.close, label, index)),
             egui::UiBuilder::new().layer_id(ui.layer_id()).max_rect(room).layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
         button_ui.set_clip_rect(button_ui.clip_rect().intersect(r));

@@ -8,9 +8,10 @@
 //! |-----------------------------|-----------------------|
 //! | `is_cavity_region` (crate)  | `sm_IsCavityRegion`   |
 //!
-//! Deviations: opt-in (`Kernel::fixes.offset_keep_cavity_regions`, read by
-//! `do_extended_offset`). The body's `BrepPointSolve` runs on one point-solve cache of the
-//! body made by the caller (`p1`'s original-body solve, as `RemoveExcessFaces` uses it);
+//! Deviations: `do_extended_offset` asks only when the merge left two or more finite
+//! regions (with one there is nothing to select). The body's `BrepPointSolve` runs on
+//! one point-solve cache of the body made by the caller (`p1`'s original-body solve, as
+//! `RemoveExcessFaces` uses it);
 //! a failed internal point, point solve or normal skips the face as the fork does, but an
 //! unported dependency still propagates. No recursion.
 

@@ -15,7 +15,6 @@ use std::sync::{Arc, Mutex};
 use solidcore_record::Vec3;
 use solidcraft_viewport::hatch::Hatch;
 use solidcraft_viewport::{AnalysisMode, Camera, Rgb, SECTION_CAP, Scene, SceneMesh};
-use wgpu::util::DeviceExt;
 
 use crate::view::{AccessMap, DrawStats, Frame, GpuScene, GpuTarget, Palette, PaletteIndex, Renderer, analysis_colors, analysis_uniform};
 use crate::{GpuError, Result, caught, error_scopes};
@@ -35,8 +34,6 @@ const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 /// The viewport's pipelines on one device, drawing pictures offscreen. Pictures are drawn one at
 /// a time (callers on several threads take turns).
 pub struct Capturer {
-    device: wgpu::Device,
-    queue: wgpu::Queue,
     adapter: String,
     /// The adapter is a GPU driver running on the CPU (llvmpipe, lavapipe, WARP).
     software: bool,
@@ -51,14 +48,22 @@ pub struct Capturer {
 }
 
 struct State {
-    renderer: Renderer,
-    background: wgpu::RenderPipeline,
+    /// The device and what draws on it; `None` once closed ([`Capturer::close`]).
+    gpu: Option<Gpu>,
     /// The last picture's scene key and accessibility map version (each picture uploads anew).
     key: u64,
     access_version: u64,
     /// The resolve textures cleared before their first resolve (tests count them).
     #[cfg(test)]
     resolve_clears: u32,
+}
+
+/// A capturer's device, with its queue and the pipelines built on it.
+struct Gpu {
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    renderer: Renderer,
+    background: wgpu::RenderPipeline,
 }
 
 impl Capturer {
@@ -81,7 +86,7 @@ impl Capturer {
         let samples =
             if samples > 1 && flags(FORMAT).sample_count_supported(samples) && flags(depth).sample_count_supported(samples) { samples } else { 1 };
         let scopes = error_scopes(&device);
-        let renderer = Renderer::new(&device, GpuTarget { format: FORMAT, depth: Some(depth), samples, tess: false, oit: false }, None);
+        let renderer = Renderer::new(&device, GpuTarget { format: FORMAT, depth: Some(depth), samples, tess: false, oit: false, edges: false }, None);
         let background = background_pipeline(&device, samples, depth);
         caught(scopes).map_or(Ok(()), |e| Err(GpuError::Pipeline(e)))?;
         let max_side = device.limits().max_texture_dimension_2d.min(MAX_SIDE);
@@ -92,15 +97,12 @@ impl Capturer {
             depth,
             max_side,
             state: Mutex::new(State {
-                renderer,
-                background,
+                gpu: Some(Gpu { device, queue, renderer, background }),
                 key: 0,
                 access_version: 0,
                 #[cfg(test)]
                 resolve_clears: 0,
             }),
-            device,
-            queue,
             lost: Arc::default(),
         })
     }
@@ -122,14 +124,22 @@ impl Capturer {
     /// meets a loss the driver reports and marks it, where the picture's first upload would
     /// panic inside wgpu. As `egui_wgpu::DeviceLost::probe`: an empty submission only signals a
     /// fence, which a reset D3D12 device let through (#6528).
-    fn probe_lost(&self) -> bool {
+    fn probe_lost(&self, gpu: &Gpu) -> bool {
         if self.is_lost() {
             return true;
         }
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("device lost probe") });
+        let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("device lost probe") });
         encoder.insert_debug_marker("device lost probe");
-        self.queue.submit([encoder.finish()]);
+        gpu.queue.submit([encoder.finish()]);
         self.is_lost()
+    }
+
+    /// Close the device: it, its queue and its pipelines are dropped, once a picture being drawn
+    /// has ended. Pictures asked for afterwards fail and say so.
+    pub fn close(&self) {
+        // Also after a picture panicked: the device closes whatever that picture left.
+        let gpu = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner).gpu.take();
+        drop(gpu);
     }
 
     /// A device of its own, without a window (native only): the adapter `policy` picks
@@ -192,25 +202,38 @@ impl Capturer {
     /// [`Capturer::rgba`] with `highlight` drawn as the viewport draws its highlight scene
     /// (selection and hover feedback), over the model scene.
     pub fn rgba_highlighted(&self, scene: &Scene, highlight: Option<GpuScene>, cam: &Camera, width: u32, height: u32) -> Result<Vec<u8>> {
-        self.draw(scene, highlight, cam, width, height).map(|(rgba, _)| rgba)
+        self.draw(scene, highlight, cam, [width, height], 0.0).map(|(rgba, _)| rgba)
+    }
+
+    /// [`Capturer::rgba`] with ambient occlusion of `radius` (world units), as the viewport
+    /// shades with it on.
+    pub fn rgba_occluded(&self, scene: &Scene, cam: &Camera, width: u32, height: u32, radius: f32) -> Result<Vec<u8>> {
+        self.draw(scene, None, cam, [width, height], radius).map(|(rgba, _)| rgba)
     }
 
     /// [`Capturer::rgba`] and what the picture drew ([`DrawStats`]). Both come from the same
     /// turn on the device, so another thread's picture can't put its counts in their place.
     pub fn rgba_with_stats(&self, scene: &Scene, cam: &Camera, width: u32, height: u32) -> Result<(Vec<u8>, DrawStats)> {
-        self.draw(scene, None, cam, width, height)
+        self.draw(scene, None, cam, [width, height], 0.0)
     }
 
     /// The picture and what it drew, both read while this call has the device to itself.
-    fn draw(&self, scene: &Scene, highlight: Option<GpuScene>, cam: &Camera, width: u32, height: u32) -> Result<(Vec<u8>, DrawStats)> {
+    fn draw(
+        &self,
+        scene: &Scene,
+        highlight: Option<GpuScene>,
+        cam: &Camera,
+        [width, height]: [u32; 2],
+        ao_radius: f32,
+    ) -> Result<(Vec<u8>, DrawStats)> {
         if !(1..=self.max_side).contains(&width) || !(1..=self.max_side).contains(&height) {
             return Err(GpuError::Render(format!("a picture is 1 to {} pixels a side, not {width} × {height}", self.max_side)));
         }
-        if self.probe_lost() {
-            return Err(GpuError::DeviceLost);
-        }
         let mut state = self.state.lock().map_err(|_| GpuError::Render("an earlier picture failed on this device".into()))?;
         let state = &mut *state;
+        if self.probe_lost(state.gpu.as_ref().ok_or_else(closed)?) {
+            return Err(GpuError::DeviceLost);
+        }
         state.key = state.key.wrapping_add(1);
         let mode = scene.analysis.map(|a| a.mode);
         let access = match mode {
@@ -221,18 +244,26 @@ impl Capturer {
             _ => None,
         };
         let mut frame = frame(scene, cam, [width, height], state.key, access);
+        frame.ao_radius = ao_radius;
         // Always a highlight scene of the picture's own, empty without one: the renderer keeps
         // its last highlight scene while the slot is empty (as the viewport does until the next
         // is built), so the previous picture's highlight would show in this one.
         frame.hl_key = state.key;
         frame.hl_slot = Arc::new(Mutex::new(Some(highlight.unwrap_or_default())));
-        self.picture(state, &frame, scene.background.unwrap_or(BACKGROUND), [width, height])
+        let result = self.picture(state, &frame, scene.background.unwrap_or(BACKGROUND), [width, height]);
+        // Each capture uploads its own scene. Release the picture's buffers after readback or
+        // error so a long-lived capturer keeps its pipelines without holding the last mesh.
+        if let Some(gpu) = &mut state.gpu {
+            gpu.renderer.retain_views(&[]);
+        }
+        result
     }
 
     /// `frame` drawn over the `background` gradient, read back as straight RGBA, and what it
     /// drew (read while the caller holds `state`).
     fn picture(&self, state: &mut State, frame: &Frame, (top, bottom): (Rgb, Rgb), [width, height]: [u32; 2]) -> Result<(Vec<u8>, DrawStats)> {
-        let (device, queue) = (&self.device, &self.queue);
+        let Gpu { device, queue, renderer, background: background_pipeline } = state.gpu.as_mut().ok_or_else(closed)?;
+        let (device, queue) = (&*device, &*queue);
         let scopes = error_scopes(device);
         let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
         let texture = |label: &str, format: wgpu::TextureFormat, samples: u32, usage: wgpu::TextureUsages| {
@@ -252,7 +283,13 @@ impl Capturer {
         let depth = texture("sc_capture_depth", self.depth, self.samples, wgpu::TextureUsages::RENDER_ATTACHMENT);
         let (resolved_view, depth_view) = (resolved.create_view(&Default::default()), depth.create_view(&Default::default()));
         let multisampled_view = multisampled.as_ref().map(|t| t.create_view(&Default::default()));
-        let background = background_vertices(device, top, bottom);
+        let background = match background_vertices(device, top, bottom) {
+            Ok(b) => b,
+            Err(e) => {
+                let _ = caught(scopes);
+                return Err(e);
+            }
+        };
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("sc_capture") });
         // Multisampled, the picture's texture is written only by the resolve: cleared first, or
         // some AMD Radeon Direct3D 12 drivers read it back black or as garbage (#10140), as the
@@ -262,7 +299,11 @@ impl Capturer {
         {
             state.resolve_clears += _cleared;
         }
-        state.renderer.prepare(device, queue, &mut encoder, frame);
+        renderer.prepare(device, queue, &mut encoder, frame);
+        if let Some(reason) = renderer.take_refused_upload() {
+            let _ = caught(scopes);
+            return Err(GpuError::Render(reason));
+        }
         {
             let (view, resolve_target, store) = match &multisampled_view {
                 Some(ms) => (ms, Some(&resolved_view), wgpu::StoreOp::Discard),
@@ -291,10 +332,10 @@ impl Capturer {
                 })
                 .forget_lifetime();
             // The background first, as the viewport paints it before the model.
-            pass.set_pipeline(&state.background);
+            pass.set_pipeline(background_pipeline);
             pass.set_vertex_buffer(0, background.slice(..));
             pass.draw(0..6, 0..1);
-            state.renderer.paint(frame, &mut pass, [0.0, 0.0, width as f32, height as f32]);
+            renderer.paint(frame, &mut pass, [0.0, 0.0, width as f32, height as f32]);
         }
         let row = width * 4;
         let padded = row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
@@ -337,7 +378,7 @@ impl Capturer {
         if rgba.len() != (row as usize) * (height as usize) {
             return Err(GpuError::Render("the picture read back short".into()));
         }
-        let stats = state.renderer.stats().lock().map(|s| *s).unwrap_or_default();
+        let stats = renderer.stats().lock().map(|s| *s).unwrap_or_default();
         Ok((rgba, stats))
     }
 
@@ -348,13 +389,34 @@ impl Capturer {
     }
 }
 
+/// What a picture asked of a closed capturer fails with ([`Capturer::close`]).
+fn closed() -> GpuError {
+    GpuError::Render("the GPU device for pictures is closed".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+static SHARED: std::sync::OnceLock<Result<Capturer>> = std::sync::OnceLock::new();
+
 /// The process's headless capturer (native only), opened on first use on the adapter `policy`
 /// picks and kept, whatever later calls pass; the error when no adapter qualifies or the device
 /// fails (not retried). A host passes the same policy every time.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn shared(policy: crate::select::Policy) -> std::result::Result<&'static Capturer, &'static GpuError> {
-    static SHARED: std::sync::OnceLock<Result<Capturer>> = std::sync::OnceLock::new();
     SHARED.get_or_init(|| Capturer::headless(policy)).as_ref()
+}
+
+/// For a process about to exit on Linux with NVIDIA's own driver: close the device of [`shared`],
+/// if one was opened ([`Capturer::close`]). Without a display that driver's Vulkan runs on its EGL
+/// library, whose exit handler unloads `libnvidia-eglcore` while an open device's threads still
+/// run in it, and the process then ends with a segmentation fault after its work is done (#19431).
+/// Every other system and driver exits with the device open, as before.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn close_shared_before_exit() {
+    if crate::select::nvidia_linux_driver()
+        && let Some(Ok(capturer)) = SHARED.get()
+    {
+        capturer.close();
+    }
 }
 
 /// What draws this process's headless pictures (native only): the shared headless device, or the
@@ -438,7 +500,8 @@ fn frame(scene: &Scene, cam: &Camera, [width, height]: [u32; 2], key: u64, acces
         turned_depth: None,
         back: cam.back().to_f32(),
         size_px: [width as f32, height as f32],
-        clip: scene.clip.map_or([0.0; 4], |(n, d)| [n.x as f32, n.y as f32, n.z as f32, d as f32]),
+        clip: crate::view::clip_planes(&scene.clip),
+        clip_hatch: crate::view::clip_hatches(&(0..scene.clip.len()).map(|k| scene.clip_hatch.get(k).copied().unwrap_or(k)).collect::<Vec<_>>()),
         cap: [f32::from(cap.0) / 255.0, f32::from(cap.1) / 255.0, f32::from(cap.2) / 255.0, if scene.plain_cap { 0.0 } else { 1.0 }],
         images: Vec::new(),
         clouds: Vec::new(),
@@ -466,7 +529,7 @@ fn frame(scene: &Scene, cam: &Camera, [width, height]: [u32; 2], key: u64, acces
 /// scene hatches its cut by part ([`Scene::part_hatch`]), each body's colours are palette entries
 /// of its own, carrying its hatch.
 pub fn scene_geometry(scene: &Scene) -> GpuScene {
-    let by_part = scene.part_hatch.is_some() && scene.clip.is_some();
+    let by_part = scene.part_hatch.is_some() && !scene.clip.is_empty();
     // Per body, its colours' stable entries (by part), and the stable palette they make.
     let mut own: Vec<HashMap<[u8; 4], PaletteIndex>> = Vec::new();
     let mut stable: Vec<[u8; 4]> = Vec::new();
@@ -504,12 +567,14 @@ pub fn scene_geometry(scene: &Scene) -> GpuScene {
             let flat = (b - a).cross(c - a).normalized().unwrap_or(Vec3::Z);
             for (k, p) in t.iter().zip([a, b, c]) {
                 let n = mesh.normals.get(*k as usize).copied().filter(|n| n.is_finite() && n.len() > 0.5).unwrap_or(flat);
-                if m.glass() {
-                    sc.glass_tri(p.to_f32(), n.to_f32(), col);
-                } else if m.closed {
-                    sc.tri(p.to_f32(), n.to_f32(), col);
-                } else {
-                    sc.open_tri(p.to_f32(), n.to_f32(), col);
+                // A mesh with values gives each vertex its own ([`SceneMesh::values`]).
+                match m.values.as_ref().and_then(|v| v.get(*k as usize)).copied() {
+                    Some(value) if m.glass() => sc.glass_tri_value(p.to_f32(), n.to_f32(), col, value),
+                    Some(value) if m.closed => sc.tri_value(p.to_f32(), n.to_f32(), col, value),
+                    Some(value) => sc.open_tri_value(p.to_f32(), n.to_f32(), col, value),
+                    None if m.glass() => sc.glass_tri(p.to_f32(), n.to_f32(), col),
+                    None if m.closed => sc.tri(p.to_f32(), n.to_f32(), col),
+                    None => sc.open_tri(p.to_f32(), n.to_f32(), col),
                 }
             }
         }
@@ -576,7 +641,7 @@ fn fs(i: O) -> @location(0) vec4<f32> {
 /// Background vertex: NDC position (2 × f32) and sRGB colour (4 × u8).
 const BACKGROUND_VERTEX: u64 = 12;
 
-fn background_vertices(device: &wgpu::Device, top: Rgb, bottom: Rgb) -> wgpu::Buffer {
+fn background_vertices(device: &wgpu::Device, top: Rgb, bottom: Rgb) -> Result<wgpu::Buffer> {
     let mut bytes = Vec::with_capacity(6 * BACKGROUND_VERTEX as usize);
     let corner = |x: f32, y: f32| (x, y, if y > 0.0 { top } else { bottom });
     for (x, y, c) in [corner(-1.0, 1.0), corner(1.0, 1.0), corner(1.0, -1.0), corner(-1.0, 1.0), corner(1.0, -1.0), corner(-1.0, -1.0)] {
@@ -584,11 +649,7 @@ fn background_vertices(device: &wgpu::Device, top: Rgb, bottom: Rgb) -> wgpu::Bu
         bytes.extend_from_slice(&y.to_le_bytes());
         bytes.extend_from_slice(&[c.0, c.1, c.2, 255]);
     }
-    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("sc_capture_background"),
-        contents: &bytes,
-        usage: wgpu::BufferUsages::VERTEX,
-    })
+    crate::buffer_init(device, "sc_capture_background", &bytes, wgpu::BufferUsages::VERTEX)
 }
 
 fn background_pipeline(device: &wgpu::Device, samples: u32, depth: wgpu::TextureFormat) -> wgpu::RenderPipeline {
@@ -634,7 +695,7 @@ fn background_pipeline(device: &wgpu::Device, samples: u32, depth: wgpu::Texture
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::view::TRI_SIZE;
+    use crate::view::{TRI_COLOR_AT, TRI_SIZE};
     use solidcore_tess::Mesh;
     use std::sync::Arc;
 
@@ -651,7 +712,7 @@ mod tests {
 
     /// The colour of a triangle `scene_geometry` wrote (its first vertex's palette entry).
     fn color(scene: &GpuScene, bytes: &[u8]) -> Option<[u8; 4]> {
-        let index = bytes.get(TRI_SIZE - 4..TRI_SIZE)?.try_into().ok().map(u32::from_le_bytes)?;
+        let index = bytes.get(TRI_COLOR_AT..TRI_COLOR_AT + 4)?.try_into().ok().map(u32::from_le_bytes)?;
         scene.palette.get(crate::view::PaletteIndex(index))
     }
 
@@ -667,6 +728,7 @@ mod tests {
             opacity,
             closed: true,
             hatch: Default::default(),
+            values: None,
         };
         let geometry = |opacity: f32| scene_geometry(&Scene { meshes: vec![mesh(opacity)], ..Default::default() });
 
@@ -715,6 +777,42 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_capture_releases_its_scene_uploads_after_readback() {
+        let capturer = match Capturer::headless(crate::test_env::policy()) {
+            Ok(capturer) => capturer,
+            Err(error) if crate::test_env::skip_unless_required(crate::test_env::required(), &error) => return,
+            Err(error) => panic!("required GPU unavailable: {error}"),
+        };
+        let scene = Scene { meshes: vec![SceneMesh::solid(sheet(), Rgb(200, 30, 30))], ..Default::default() };
+        let cam = Camera::default();
+        let first = capturer.rgba_with_stats(&scene, &cam, 32, 24).unwrap();
+        assert!(first.1.triangles > 0, "the capture drew the mesh");
+        assert_eq!(capturer.rgba_with_stats(&scene, &cam, 32, 24).unwrap(), first);
+        let state = capturer.state.lock().unwrap();
+        let renderer = &state.gpu.as_ref().unwrap().renderer;
+        assert_eq!(renderer.uploads().geometry, 0, "the renderer released the model scene after readback");
+    }
+
+    /// A closed capturer has dropped its device and everything it drew with, and a picture asked
+    /// of it afterwards fails and says so. A host on NVIDIA's Linux driver closes the shared
+    /// capturer before it exits ([`close_shared_before_exit`]).
+    #[test]
+    fn a_closed_capturer_drops_its_device_and_draws_no_more_pictures() {
+        let Ok(capturer) = Capturer::headless(crate::test_env::policy()) else {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        capturer.rgba(&Scene::default(), &Camera::default(), 32, 24).unwrap();
+        capturer.close();
+        assert!(capturer.state.lock().unwrap().gpu.is_none(), "the device, its queue and its pipelines are dropped");
+        let after = capturer.rgba(&Scene::default(), &Camera::default(), 32, 24);
+        assert!(matches!(&after, Err(GpuError::Render(why)) if why.contains("closed")), "{:?}", after.err());
+        // Closing again changes nothing.
+        capturer.close();
+        assert!(capturer.rgba(&Scene::default(), &Camera::default(), 32, 24).is_err());
+    }
+
     /// Bodies dragged as a layer of their own ([`crate::view::MovingLayer`]) are drawn moved by
     /// its transform: the picture is the one of the bodies built where they were moved to, and
     /// the bodies go back to the model scene when the drag ends (on this machine's GPU, skipped
@@ -756,6 +854,38 @@ mod tests {
         assert_eq!(back, expected);
     }
 
+    /// A frame without a moving layer lets the layer's scene go: the same key handed in again
+    /// with nothing in its slot draws nothing, and a new key takes the scene waiting in its slot.
+    /// So who leaves its layer out of a frame (a preview hidden for a pick) hands the scene over
+    /// again under a new key (on this machine's GPU, skipped without one).
+    #[test]
+    fn a_moving_layer_left_out_of_a_frame_is_drawn_again_only_under_a_new_key() {
+        let Ok(capturer) = Capturer::headless_single_sample(crate::test_env::policy()) else {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        let wide = Mesh { positions: vec![Vec3::new(-1.0, 0.0, -0.5), Vec3::new(0.2, 0.0, -0.5), Vec3::new(-0.4, 0.0, 0.6)], ..(*sheet()).clone() };
+        let body = scene_geometry(&Scene { meshes: vec![SceneMesh::solid(Arc::new(wide), Rgb(200, 30, 30))], ..Default::default() });
+        let cam = Camera { distance: 6.0, ..Camera::default() };
+        let size = [64, 64];
+        let transform = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+        let Ok(mut state) = capturer.state.lock() else { panic!("capturer state") };
+        // The picture of an empty model scene with the layer `moving`, and how much of it is red.
+        let mut picture = |model: u64, moving: Option<(u64, Option<GpuScene>)>| {
+            let mut f = frame(&Scene::default(), &cam, size, model, None);
+            f.moving = moving.map(|(key, scene)| crate::view::MovingLayer { key, slot: Arc::new(Mutex::new(scene)), transform });
+            let drawn = capturer.picture(&mut state, &f, BACKGROUND, size).unwrap().0;
+            let red = drawn.chunks(4).filter(|p| p[0] > p[1].saturating_add(60)).count();
+            (drawn, red)
+        };
+        let (shown, red) = picture(1, Some((7, Some(body.clone()))));
+        assert!(red > 50, "the layer's body shows");
+        assert_eq!(picture(2, Some((7, None))).0, shown, "the same key again: the scene taken stays");
+        assert_eq!(picture(3, None).1, 0, "a frame without the layer");
+        assert_eq!(picture(4, Some((7, None))).1, 0, "the scene went with that frame: its key alone brings nothing back");
+        assert_eq!(picture(5, Some((8, Some(body)))).0, shown, "handed over again under a new key");
+    }
+
     /// A dragged component's parts drawn as instances (one copy of a part's triangles, placed
     /// many times) move with its layer too, lit flat or smooth: the layer built where the drag
     /// found them and moved by its transform draws what the model scene draws with the
@@ -783,6 +913,7 @@ mod tests {
                     look: crate::view::InstanceLook::Opaque,
                     levels: Vec::new(),
                     closed: true,
+                    edges: None,
                 };
                 let mut sc = GpuScene::default();
                 let red = sc.color([200, 30, 30, 255]);
@@ -817,6 +948,7 @@ mod tests {
             opacity: 0.5,
             closed: true,
             hatch: Default::default(),
+            values: None,
         };
         let sc = scene_geometry(&Scene { meshes: vec![mesh], ..Default::default() });
         assert_eq!(sc.tris.len(), 0);

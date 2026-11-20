@@ -12,6 +12,8 @@
 //! - `document.inspect {measure?}`: the design (parameters, timeline, bodies, sketches)
 //! - `document.export`, `document.import {text, name?}`, `document.saved {revision}`: the design
 //!   for a host that keeps the files itself (#8517)
+//! - document.close {document_id?}: close the active clean design, refusing unsaved changes
+//!   or a tab switched since document.revision (#18781); the last tab becomes blank.
 //! - `ui.inspect`: UI state, viewport rect, camera, tool and dialog
 //! - `ui.drag {x0, y0, x1, y1, button?, shift?, ctrl?, steps?, hold?}` (box selection, navigation;
 //!   `hold` keeps the button down that many frames before moving);
@@ -37,8 +39,8 @@
 //! - `ui.confirm {accept?}`: the Delete confirmation (without `accept`: what it lists)
 //! - `ui.shortcut {command, key?, slot?, replace?}`: a command's keys, or bind one ("" clears)
 //! - `ui.help {item?: about|updates|shortcuts|report}`: the Help menu; returns the version and diagnostics
-//! - `ui.prefs {...}`: the preferences (default_units, nav, zoom_reverse, orbit_around, msaa,
-//!   length_decimals, angle_decimals); returns them all
+//! - `ui.prefs {...}`: the preferences (default_units, default_projection, nav, zoom_reverse,
+//!   orbit_around, msaa, length_decimals, angle_decimals); returns them all
 //! - `ui.capture {action?: capture|revert|cancel}`: the Capture Position question
 //! - `ui.recover {action?: recover|discard|later, id?}`: the "Recover unsaved design?" prompt
 //! - `ui.agent_cursor {show?, speed?: 1–5 (times) | "instant", follow_camera?}`: the agent cursor
@@ -285,9 +287,22 @@ fn switches_design(step: &Value) -> Option<&'static str> {
     SWITCHES_DESIGN.into_iter().find(|id| is_command(command(step), id))
 }
 
+/// Package I/O runs through the dedicated worker, so it cannot share a synchronous batch.
+fn has_plugin_management_steps(steps: &[Value]) -> bool {
+    steps
+        .iter()
+        .any(|step| batch_step_command(step).is_some_and(|id| id.eq_ignore_ascii_case("plugin.install") || id.eq_ignore_ascii_case("plugin.remove")))
+}
+
 /// Why `engine.batch` refuses these steps before running any: a step loads a file or switches
 /// to another design (send such steps one by one).
 pub(crate) fn batch_refusal(steps: &[Value]) -> Option<String> {
+    if steps.iter().any(|step| batch_step_command(step).is_some_and(|id| id.eq_ignore_ascii_case("plugin.run"))) {
+        return Some(solidcraft_ui_text::tr("ui.plugin_standalone").into());
+    }
+    if has_plugin_management_steps(steps) {
+        return Some(solidcraft_ui_text::tr("ui.plugin_management_standalone").into());
+    }
     if let Some((i, c)) = steps.iter().enumerate().find_map(|(i, step)| switches_design(step).map(|c| (i, c))) {
         return Some(format!("engine.batch unavailable: step {i} ({c}) switches to another design"));
     }
@@ -410,6 +425,13 @@ fn batch(app: &mut SolveApp, q: params::Batch) -> Outcome {
 /// and the steps before it stay. Its words are the engine script's, or the panel error when a step
 /// is a panel command.
 fn script(app: &mut SolveApp, p: &Value) -> Outcome {
+    let steps = p.as_array().or_else(|| p.get("commands").and_then(Value::as_array));
+    if steps.is_some_and(|steps| steps.iter().any(|step| batch_step_command(step).is_some_and(|id| id.eq_ignore_ascii_case("plugin.run")))) {
+        return err(solidcraft_ui_text::tr("ui.plugin_standalone"));
+    }
+    if steps.is_some_and(|steps| has_plugin_management_steps(steps)) {
+        return err(solidcraft_ui_text::tr("ui.plugin_management_standalone"));
+    }
     let steps = match solidcraft_engine::script_steps(p) {
         Ok(steps) => steps,
         Err(e) => return err(e),
@@ -484,7 +506,7 @@ pub(crate) fn view_scene(app: &SolveApp, guides: solidcraft_engine::view::Guides
     let mut scene = solidcraft_engine::view::scene_with_thread_markings(
         &app.session,
         &app.cam,
-        crate::viewport::section_plane(app),
+        &crate::viewport::section_planes(app),
         solidcraft_engine::view::world_curve_parts,
         &palette,
         guides,
@@ -652,6 +674,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         "document.export" => wrap(crate::documents::export(app)),
         "document.import" => wrap(crate::documents::import(app, p)),
         "document.saved" => wrap(crate::documents::saved(app, p)),
+        "document.close" => wrap(crate::documents::close_clean(app, p)),
         // The connection already counts as subscribed (`DocumentWatch::join`), and its events start
         // from this answer: published first, so no event repeats it and none older follows.
         "control.subscribe" => {
@@ -659,6 +682,8 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             DOCUMENT_WATCH.publish(&app.session.document_id, revision);
             ok(json!({"document_id": app.session.document_id, "revision": revision}))
         }
+        // The solved joint pose the preview shows: what a client follows a joint with (#19437).
+        "control.joint_pose" => ok(crate::control_joint_pose::snapshot(app)),
         // What the MCP server bridged to this app shapes its output with (Preferences › AI).
         "mcp.options" => ok(json!({"compact": app.preferences.mcp_compact})),
         "ui.messages" => ok(crate::messages::control(app, p)),
@@ -668,7 +693,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         "ui.operations" => wrap(crate::operations::control(app, p)),
         "ui.home" => with(p, |q| ui_home(app, q)),
         "ui.set" => ui_set(app, p),
-        "ui.view" => with(p, |q| ui_view(app, q)),
+        "ui.view" => with(p, |q| ui_view(app, ctx, q)),
         "ui.camera" => wrap(camera(app, p)),
         "ui.palette" => ui_palette(app, p),
         "ui.start" => with(p, |q| ui_start(app, q)),
@@ -739,12 +764,9 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         "ui.help" => with(p, |q| ui_help(app, ctx, q)),
         "ui.selectOther" => wrap(crate::select_other::control(app, p)),
         "ui.menuPick" => with(p, |q: params::MenuPick| wrap(crate::context_menu::pick(app, &q.item))),
-        "ui.rename" => with(p, |q: params::Rename| {
-            if crate::context_menu::finish_rename(app, q.text.as_deref(), q.commit) {
-                ok(json!({"done": true}))
-            } else {
-                err("no rename in progress")
-            }
+        "ui.rename" => with(p, |q: params::Rename| match crate::context_menu::finish_rename(app, q.text.as_deref(), q.commit) {
+            Ok(()) => ok(json!({"done": true})),
+            Err(e) => err(e),
         }),
         "ui.window" => with(p, |q: params::Action| match crate::titlebar::window_action(app, ctx, q.action.as_deref().unwrap_or("")) {
             Ok(()) => ok(json!({"custom_titlebar": app.custom_titlebar, "maximized": ctx.input(|i| i.viewport().maximized)})),
@@ -954,14 +976,25 @@ fn ui_browser(app: &SolveApp) -> Outcome {
     }))
 }
 
-/// `ui.workspace {workspace?}`: enter the design or render workspace; returns the one shown.
+/// `ui.workspace {workspace?}`: enter the design, render or drawing workspace; returns the one shown.
 fn ui_workspace(app: &mut SolveApp, q: params::WorkspaceParams) -> Outcome {
     if let Some(w) = q.workspace
-        && let Err(e) = crate::render_workspace::enter(app, w == params::Workspace::Render)
+        && let Err(e) = crate::workspace::enter(app, w.as_str())
     {
         return err(e);
     }
-    ok(json!({"workspace":if crate::render_workspace::active(app) {"render"} else {"design"}}))
+    ok(json!({"workspace":current_workspace(app)}))
+}
+
+/// The workspace shown: drawing, render or design.
+fn current_workspace(app: &SolveApp) -> &'static str {
+    if crate::drawing_workspace::active(app) {
+        "drawing"
+    } else if crate::render_workspace::active(app) {
+        "render"
+    } else {
+        "design"
+    }
 }
 
 /// `ui.agent_cursor {show?, speed?, follow_camera?}`: the agent cursor's settings.
@@ -986,6 +1019,7 @@ fn ui_agent_cursor(app: &mut SolveApp, p: &Value) -> Outcome {
 fn ui_inspect(app: &SolveApp) -> Outcome {
     ok(json!({
         "render": crate::render_workspace::inspect_state(app),
+        "sheet_page": crate::drawing_sheet_page::inspect(app),
         "ui": ui_state(app),
         "visibility": app.session.visibility,
         "viewport": app.viewport.rect.map(|r| json!([r.left(), r.top(), r.width(), r.height()])),
@@ -1000,6 +1034,10 @@ fn ui_inspect(app: &SolveApp) -> Outcome {
         "frame_ms": app.frame_ms,
         "draw": app.viewport.draw_stats.as_ref().and_then(|s| s.lock().ok().map(|d| json!({
             "draw_calls": d.draw_calls, "triangles": d.triangles, "line_segments": d.line_segments, "supersampled": d.supersampled,
+            "gpu": d.gpu.map(|g| json!({
+                "span_us": g.span_us, "slowest": g.slowest, "slowest_us": g.slowest_us, "passes": g.passes,
+                "each": g.passes().iter().map(|(label, us)| json!({"pass": label, "us": us})).collect::<Vec<_>>(),
+            })),
         }))),
         "adapter": app.viewport.adapter,
         "file_busy": app.file_load.busy(),
@@ -1062,6 +1100,26 @@ fn ui_home(app: &mut SolveApp, q: params::Home) -> Outcome {
     ok(json!({"open": app.home.open, "recent": app.home.recent}))
 }
 
+/// Visibility lists name sets of items; order and repeated items do not change the view.
+fn same_visibility(a: &solidcraft_engine::Visibility, b: &solidcraft_engine::Visibility) -> bool {
+    fn same_items<T: Ord>(a: &[T], b: &[T]) -> bool {
+        a.iter().collect::<std::collections::BTreeSet<_>>() == b.iter().collect()
+    }
+    a == b
+        || (a.origin_hidden == b.origin_hidden
+            && same_items(&a.hidden_bodies, &b.hidden_bodies)
+            && same_items(&a.hidden_occurrences, &b.hidden_occurrences)
+            && same_items(&a.hidden_origin, &b.hidden_origin)
+            && same_items(&a.hidden_sketches, &b.hidden_sketches)
+            && same_items(&a.shown_sketches, &b.shown_sketches)
+            && same_items(&a.hidden_joints, &b.hidden_joints)
+            && same_items(&a.shown_component_origins, &b.shown_component_origins)
+            && same_items(&a.hidden_profiles, &b.hidden_profiles)
+            && same_items(&a.shown_dimensions, &b.shown_dimensions)
+            && same_items(&a.locked_bodies, &b.locked_bodies)
+            && same_items(&a.hidden_folders, &b.hidden_folders))
+}
+
 /// `ui.set {...UiState fields}`: UI state and what is hidden.
 fn ui_set(app: &mut SolveApp, p: &Value) -> Outcome {
     // What is hidden lives in the session (`browser.visibility`); `ui.set` still sets it.
@@ -1105,13 +1163,23 @@ fn ui_set(app: &mut SolveApp, p: &Value) -> Outcome {
                     v.hidden_folders.push(SKETCHES_FOLDER.to_string());
                 }
             }
-            if crate::workspace::render_tab(&u.tab) != crate::render_workspace::active(app)
-                && let Err(e) = crate::render_workspace::enter(app, crate::workspace::render_tab(&u.tab))
+            let destination = if crate::workspace::drawing_tab(&u.tab) {
+                "drawing"
+            } else if crate::workspace::render_tab(&u.tab) {
+                "render"
+            } else {
+                "design"
+            };
+            if destination != current_workspace(app)
+                && let Err(error) = crate::workspace::enter(app, destination)
             {
-                return err(e);
+                return err(error);
             }
             u.ribbon_context = app.ui.ribbon_context.clone();
             app.ui = u;
+            if !same_visibility(&v, &app.session.visibility) {
+                crate::control_joint_drive::discard(app);
+            }
             app.session.visibility = v;
             ok(ui_state(app))
         }
@@ -1120,8 +1188,20 @@ fn ui_set(app: &mut SolveApp, p: &Value) -> Outcome {
 }
 
 /// `ui.view {view, animate?}`: a standard view, snapped or animated.
-fn ui_view(app: &mut SolveApp, q: params::View) -> Outcome {
+fn ui_view(app: &mut SolveApp, ctx: &egui::Context, q: params::View) -> Outcome {
     let v = q.view.as_str();
+    if crate::drawing_workspace::active(app) {
+        if crate::dialogs_sheet::flat_active(app) && matches!(v, "fit" | "home") {
+            app.flat_view.fitted = false;
+            return ok(json!({"flat_pattern":true,"fitted":false}));
+        }
+        match v {
+            "fit" | "home" => crate::drawing_sheet_page::fit(app),
+            "actual_size" => crate::drawing_sheet_page::actual_size(app, ctx),
+            _ => return err(format!("unknown drawing view `{v}`")),
+        };
+        return ok(json!({"sheet_page": true}));
+    }
     // A name it doesn't know is refused before the view changes at all.
     if v != "fit" && v != "home" && StandardView::parse(v).is_none() {
         return err(format!("unknown view `{v}`"));
@@ -1429,7 +1509,7 @@ fn app_quit(app: &mut SolveApp, ctx: &egui::Context, q: params::Quit) -> Outcome
     } else {
         crate::documents::request_quit(app);
     }
-    if app.quit_requested {
+    if app.ready_to_quit() {
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
     ok(json!({"quitting": app.quit_requested, "asking": app.docs.closing.is_some()}))
@@ -1555,7 +1635,368 @@ pub(crate) fn write_screenshot(image: &egui::ColorImage, path: &str) -> Result<(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
+    pub(crate) fn joint_drive_design() -> (crate::scenario::Harness, u64, u64) {
+        let mut h = crate::scenario::Harness::new();
+        for (name, x) in [("Frame", 0), ("Arm", 30), ("Follower", 60)] {
+            h.app.run("component.activate", json!({"component": "root"})).unwrap();
+            h.app.run("component.create", json!({"name": name})).unwrap();
+            h.app.run("solid.box", json!({"length": 20, "width": 10, "height": 10, "corner": [x, 0, 0]})).unwrap();
+        }
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.app.run("occurrence.ground", json!({"occurrence": "Frame:1", "grounded": true})).unwrap();
+        let hinge = |app: &mut crate::SolveApp, b: &str| {
+            app.run("joint.as_built", json!({"type": "revolute", "a": "Frame:1", "b": b, "limits": [[0, 90]]})).unwrap()["joint"].as_u64().unwrap()
+        };
+        let arm = hinge(&mut h.app, "Arm:1");
+        let follower = hinge(&mut h.app, "Follower:1");
+        (h, arm, follower)
+    }
+
+    fn send_joint_drive(
+        h: &mut crate::scenario::Harness,
+        socket: Option<&std::sync::Arc<()>>,
+        params: serde_json::Value,
+    ) -> std::sync::mpsc::Receiver<serde_json::Value> {
+        let (mut req, reply) = super::ControlRequest::new("control.joint_drive", params);
+        req.connection = socket.map(std::sync::Arc::downgrade);
+        assert!(req.ticket.take());
+        h.app.run_control(&h.ctx, req);
+        reply
+    }
+
+    fn joint_drive(h: &mut crate::scenario::Harness, socket: &std::sync::Arc<()>, params: serde_json::Value) -> serde_json::Value {
+        send_joint_drive(h, Some(socket), params).try_recv().unwrap()
+    }
+
+    fn begin_joint_drive(h: &mut crate::scenario::Harness, socket: &std::sync::Arc<()>, joint: u64) -> u64 {
+        let document_id = h.app.session.document_id.clone();
+        let r = joint_drive(h, socket, json!({"action": "begin", "document_id": document_id, "joint": joint}));
+        assert_eq!(r["ok"], true, "{r}");
+        r["result"]["movement"].as_u64().unwrap()
+    }
+
+    fn joint_angle(h: &mut crate::scenario::Harness, joint: u64) -> f64 {
+        h.app.run("joint.inspect", json!({"joint": joint})).unwrap()["joints"][0]["values"][0]["value"].as_f64().unwrap()
+    }
+
+    pub(crate) fn assert_local_editor_interrupts_joint_drive(
+        h: &mut crate::scenario::Harness,
+        joint: u64,
+        open_editor: impl FnOnce(&mut crate::SolveApp),
+    ) {
+        let client = std::sync::Arc::new(());
+        let angle = joint_angle(h, joint);
+        let history = (h.app.session.undo.len(), h.app.session.redo.len());
+        let source = h.app.session.doc.clone();
+        let document_id = h.app.session.document_id.clone();
+        let movement = begin_joint_drive(h, &client, joint);
+        let r = joint_drive(h, &client, json!({"action": "update", "movement": movement, "value": 30}));
+        assert_eq!(r["result"]["values"][0]["value"], 30.0, "{r}");
+        assert!(h.app.preview.active);
+
+        let revision = h.app.session.revision;
+        open_editor(&mut h.app);
+        assert_eq!(h.app.session.revision, revision, "opening the editor preserves the session revision");
+        h.app.drain_control(&h.ctx);
+        assert!(!h.app.control_joint_drive.active() && !h.app.preview.active);
+        let finish = joint_drive(h, &client, json!({"action": "finish", "movement": movement}));
+        assert_eq!(finish["ok"], false, "{finish}");
+        let begin = joint_drive(h, &client, json!({"action": "begin", "document_id": document_id, "joint": joint}));
+        assert_eq!(begin["ok"], false, "{begin}");
+        assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &source));
+        assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+        assert_eq!(joint_angle(h, joint), angle);
+    }
+
+    #[test]
+    fn external_joint_drive_commits_one_undo_including_its_linked_joint() {
+        let (mut h, arm, follower) = joint_drive_design();
+        h.app.run("joint.motion_link", json!({"a": arm, "b": follower, "ratio": 0.5})).unwrap();
+        let client = std::sync::Arc::new(());
+        let source = h.app.session.doc.clone();
+        let undo = h.app.session.undo.len();
+        let movement = begin_joint_drive(&mut h, &client, arm);
+        for (requested, reached) in [(15.0, 15.0), (30.0, 30.0), (120.0, 90.0)] {
+            let r = joint_drive(&mut h, &client, json!({"action": "update", "movement": movement, "value": requested}));
+            assert_eq!(r["ok"], true, "{r}");
+            assert_eq!(r["result"]["values"][0]["value"], reached, "{r}");
+            assert!(h.app.preview.active && !h.app.preview.replaced.is_empty());
+            assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &source));
+            assert_eq!(h.app.session.undo.len(), undo);
+            assert_eq!(joint_angle(&mut h, arm), 0.0);
+        }
+        let rejected = joint_drive(&mut h, &client, json!({"action": "update", "movement": movement, "value": 1e12}));
+        assert_eq!(rejected["ok"], false, "{rejected}");
+        assert!(h.app.preview.active);
+        h.app.status_undo = true;
+        let finish = joint_drive(&mut h, &client, json!({"action": "finish", "movement": movement}));
+        assert_eq!(finish, json!({"ok": true, "result": {"changed": true}}));
+        assert!(!h.app.preview.active);
+        assert!(!h.app.status_undo);
+        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert_eq!((joint_angle(&mut h, arm), joint_angle(&mut h, follower)), (90.0, 45.0));
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!((joint_angle(&mut h, arm), joint_angle(&mut h, follower)), (0.0, 0.0));
+        h.app.run("edit.redo", json!({})).unwrap();
+        assert_eq!((joint_angle(&mut h, arm), joint_angle(&mut h, follower)), (90.0, 45.0));
+    }
+
+    #[test]
+    fn external_joint_drive_cancel_and_unchanged_finish_leave_redo() {
+        let (mut h, arm, _) = joint_drive_design();
+        h.app.run("joint.drive", json!({"joint": arm, "value": 15})).unwrap();
+        h.app.run("edit.undo", json!({})).unwrap();
+        let client = std::sync::Arc::new(());
+        let start = h.app.session.doc.clone();
+        let undo = h.app.session.undo.len();
+        let movement = begin_joint_drive(&mut h, &client, arm);
+        let r = joint_drive(&mut h, &client, json!({"action": "update", "movement": movement, "value": 45}));
+        assert_eq!(r["ok"], true, "{r}");
+        let r = joint_drive(&mut h, &client, json!({"action": "cancel", "movement": movement}));
+        assert_eq!(r, json!({"ok": true, "result": {"cancelled": true}}));
+        assert!(!h.app.preview.active);
+        let movement = begin_joint_drive(&mut h, &client, arm);
+        let r = joint_drive(&mut h, &client, json!({"action": "update", "movement": movement, "value": 0}));
+        assert_eq!(r["ok"], true, "{r}");
+        let r = joint_drive(&mut h, &client, json!({"action": "finish", "movement": movement}));
+        assert_eq!(r, json!({"ok": true, "result": {"changed": false}}));
+        assert_eq!(h.app.session.undo.len(), undo);
+        assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &start));
+        assert_eq!(h.app.session.redo.len(), 1);
+        h.app.run("edit.redo", json!({})).unwrap();
+        assert_eq!(joint_angle(&mut h, arm), 15.0);
+    }
+
+    #[test]
+    fn external_joint_drive_ends_when_ui_set_changes_visibility() {
+        let (mut h, arm, _) = joint_drive_design();
+        h.app.run("joint.drive", json!({"joint": arm, "value": 15})).unwrap();
+        h.app.run("edit.undo", json!({})).unwrap();
+        let source = h.app.session.doc.clone();
+        let revision = h.app.session.revision;
+        let history = (h.app.session.undo.len(), h.app.session.redo.len());
+        assert_eq!(history.1, 1);
+        let client = std::sync::Arc::new(());
+        let movement = begin_joint_drive(&mut h, &client, arm);
+        let r = joint_drive(&mut h, &client, json!({"action": "update", "movement": movement, "value": 45}));
+        assert_eq!(r["result"]["values"][0]["value"], 45.0, "{r}");
+        assert!(h.app.preview.active);
+        let body = h.app.preview.replaced.first().unwrap().clone();
+
+        let hidden = h.app.session.visibility.hidden_bodies.clone();
+        let r = h.call("ui.set", json!({"hiddenBodies": hidden}));
+        assert_eq!(r["ok"], true, "{r}");
+        assert!(h.app.control_joint_drive.active() && h.app.preview.active);
+        let show_grid = !h.app.ui.show_grid;
+        let r = h.call("ui.set", json!({"showGrid": show_grid}));
+        assert_eq!(r["ok"], true, "{r}");
+        assert_eq!(h.app.ui.show_grid, show_grid);
+        assert!(h.app.control_joint_drive.active() && h.app.preview.active);
+
+        let r = h.call("ui.set", json!({"hiddenBodies": [body]}));
+        assert_eq!(r["ok"], true, "{r}");
+        assert!(!h.app.control_joint_drive.active() && !h.app.preview.active);
+        assert!(h.app.session.visibility.hidden_bodies.contains(&body));
+        let finish = joint_drive(&mut h, &client, json!({"action": "finish", "movement": movement}));
+        assert_eq!(finish["ok"], false, "{finish}");
+        assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &source));
+        assert_eq!(h.app.session.revision, revision);
+        assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+        assert_eq!(joint_angle(&mut h, arm), 0.0);
+        h.app.run("edit.redo", json!({})).unwrap();
+        assert_eq!(joint_angle(&mut h, arm), 15.0);
+    }
+
+    #[test]
+    fn external_joint_drive_survives_reordered_and_repeated_visibility_items() {
+        let (mut h, arm, follower) = joint_drive_design();
+        let r = h.call(
+            "ui.set",
+            json!({
+                "hiddenFolders": ["c0/sketches", "c0/bodies"],
+                "hiddenBodies": ["Body1", "Body2"],
+                "hiddenOrigin": ["X", "Y"],
+                "hiddenSketches": [100, 200], "shownSketches": [100, 200],
+                "hiddenJoints": [arm, follower], "hiddenProfiles": [100, 200],
+                "shownDims": [100, 200], "lockedBodies": ["Body1", "Body2"]
+            }),
+        );
+        assert_eq!(r["ok"], true, "{r}");
+        let client = std::sync::Arc::new(());
+        let movement = begin_joint_drive(&mut h, &client, arm);
+        let r = joint_drive(&mut h, &client, json!({"action": "update", "movement": movement, "value": 45}));
+        assert_eq!(r["result"]["values"][0]["value"], 45.0, "{r}");
+
+        let r = h.call("ui.set", json!({"showSketches": false}));
+        assert_eq!(r["ok"], true, "{r}");
+        assert!(h.app.control_joint_drive.active() && h.app.preview.active);
+        let r = h.call(
+            "ui.set",
+            json!({
+                "hiddenFolders": ["c0/sketches", "c0/bodies", "c0/sketches"],
+                "hiddenBodies": ["Body2", "Body1", "Body2"],
+                "hiddenOrigin": ["Y", "X", "Y"],
+                "hiddenSketches": [200, 100, 200], "shownSketches": [200, 100, 200],
+                "hiddenJoints": [follower, arm, follower], "hiddenProfiles": [200, 100, 200],
+                "shownDims": [200, 100, 200], "lockedBodies": ["Body2", "Body1", "Body2"]
+            }),
+        );
+        assert_eq!(r["ok"], true, "{r}");
+        assert!(h.app.control_joint_drive.active() && h.app.preview.active);
+        assert_eq!(joint_angle(&mut h, arm), 0.0);
+        let finish = joint_drive(&mut h, &client, json!({"action": "finish", "movement": movement}));
+        assert_eq!(finish, json!({"ok": true, "result": {"changed": true}}));
+        assert_eq!(joint_angle(&mut h, arm), 45.0);
+    }
+
+    #[test]
+    fn external_joint_drive_ends_on_disconnect_or_tab_leave_and_checks_the_owner() {
+        let (mut h, arm, _) = joint_drive_design();
+        let client = std::sync::Arc::new(());
+        let other = std::sync::Arc::new(());
+        let invalid = json!({"action": "begin", "document_id": "stale", "joint": arm});
+        assert_eq!(joint_drive(&mut h, &client, invalid)["ok"], false);
+        let document_id = h.app.session.document_id.clone();
+        let internal = send_joint_drive(&mut h, None, json!({"action": "begin", "document_id": document_id, "joint": arm}));
+        assert_eq!(internal.try_recv().unwrap()["ok"], false);
+
+        let movement = begin_joint_drive(&mut h, &client, arm);
+        let update = json!({"action": "update", "movement": movement, "value": 30});
+        let finish = json!({"action": "finish", "movement": movement});
+        assert_eq!(joint_drive(&mut h, &other, update.clone())["ok"], false);
+        assert_eq!(joint_drive(&mut h, &client, update)["ok"], true);
+        assert_eq!(joint_drive(&mut h, &other, finish.clone())["ok"], false);
+        assert!(h.app.preview.active);
+        drop(client);
+        h.app.drain_control(&h.ctx);
+        assert!(!h.app.control_joint_drive.active() && !h.app.preview.active);
+        assert_eq!(joint_angle(&mut h, arm), 0.0);
+
+        let movement = begin_joint_drive(&mut h, &other, arm);
+        let finish = json!({"action": "finish", "movement": movement});
+        let r = joint_drive(&mut h, &other, json!({"action": "update", "movement": movement, "value": 15}));
+        assert_eq!(r["ok"], true, "{r}");
+        crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
+        crate::documents::switch(&mut h.app, 0);
+        assert_eq!(h.app.session.document_id, document_id);
+        assert_eq!(joint_drive(&mut h, &other, finish)["ok"], false);
+        assert!(!h.app.preview.active);
+        assert_eq!(joint_angle(&mut h, arm), 0.0);
+    }
+
+    #[test]
+    fn external_joint_drive_discards_worker_after_a_separate_joint_edit() {
+        let (mut h, arm, independent_joint) = joint_drive_design();
+        let client = std::sync::Arc::new(());
+        let movement = begin_joint_drive(&mut h, &client, arm);
+        let source_undo = h.app.session.undo.len();
+        h.app.apply_off_thread = Some(std::time::Duration::ZERO);
+        let working = send_joint_drive(&mut h, Some(&client), json!({"action": "update", "movement": movement, "value": 45}));
+        assert_eq!(working.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty));
+        h.app.run("joint.drive", json!({"joint": independent_joint, "value": 15})).unwrap();
+        h.app.drain_control(&h.ctx);
+        assert_eq!(working.try_recv().unwrap()["ok"], false);
+        let finish = joint_drive(&mut h, &client, json!({"action": "finish", "movement": movement}));
+        assert_eq!(finish["ok"], false, "{finish}");
+        assert!(!h.app.preview.active);
+        assert_eq!(h.app.session.undo.len(), source_undo + 1);
+        assert_eq!((joint_angle(&mut h, arm), joint_angle(&mut h, independent_joint)), (0.0, 15.0));
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(joint_angle(&mut h, independent_joint), 0.0);
+    }
+
+    #[test]
+    fn external_joint_drive_ends_when_local_move_handles_open() {
+        let (mut h, arm, _) = joint_drive_design();
+        let occurrence = h.app.session.doc.assembly.joints.iter().find(|joint| joint.id == arm).unwrap().b.occurrence;
+        h.app.run("select.set", json!({"items": [{"type": "occurrence", "path": [occurrence]}]})).unwrap();
+        h.app.preferences.assembly_move_handles = true;
+        let client = std::sync::Arc::new(());
+        let movement = begin_joint_drive(&mut h, &client, arm);
+        let r = joint_drive(&mut h, &client, json!({"action": "update", "movement": movement, "value": 30}));
+        assert_eq!(r["ok"], true, "{r}");
+        assert!(h.app.preview.active);
+        h.app.start("occurrence.move");
+        assert!(h.app.viewport.joint_handles.is_some());
+        let r = joint_drive(&mut h, &client, json!({"action": "finish", "movement": movement}));
+        assert_eq!(r["ok"], false, "{r}");
+        assert!(!h.app.preview.active);
+        let document_id = h.app.session.document_id.clone();
+        let r = joint_drive(&mut h, &client, json!({"action": "begin", "document_id": document_id, "joint": arm}));
+        assert_eq!(r["ok"], false, "{r}");
+        assert_eq!(joint_angle(&mut h, arm), 0.0);
+    }
+
+    /// The control channel reads the solved joint pose the preview shows: the angle a limited
+    /// hinge reached, and the joint a motion link moved with it (#19437).
+    #[test]
+    fn the_control_channel_reports_the_solved_joint_pose_of_a_preview() {
+        let (mut h, arm, follower) = joint_drive_design();
+        h.app.run("joint.motion_link", json!({"a": arm, "b": follower, "ratio": 0.5})).unwrap();
+        let source = h.app.session.doc.clone();
+        let undo = h.app.session.undo.len();
+
+        // Nothing is previewed: the reply says so.
+        let empty = h.call("control.joint_pose", json!({}));
+        assert_eq!(empty["ok"], true, "{empty}");
+        assert_eq!(empty["result"]["pose"], Value::Null, "{empty}");
+
+        // Drive Joints asks for more than the hinge allows.
+        h.app.start("joint.drive");
+        h.frames(4);
+        let Some(d) = h.app.dialog.as_mut() else { panic!("the drive dialog") };
+        if let crate::dialogs::Kind::Assembly(crate::dialogs_assembly::Asm::Drive { values, .. }) = &mut d.kind {
+            values[0] = "120 deg".into();
+        }
+        h.frames(2);
+        // The preview runs on a worker thread: wait for it as the other preview tests do.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while h.app.preview.busy {
+            assert!(std::time::Instant::now() < deadline, "the drive preview did not finish");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            h.frame();
+        }
+        assert!(h.app.preview.active, "the viewport shows the pose");
+
+        let r = h.call("control.joint_pose", json!({}));
+        assert_eq!(r["ok"], true, "{r}");
+        let pose = &r["result"]["pose"];
+        assert_eq!(pose["source"], "joint.drive", "{r}");
+        // The hinge reached its limit, and the follower came with it.
+        let angle = |joint: u64| {
+            pose["joints"]
+                .as_array()
+                .and_then(|joints| joints.iter().find(|j| j["joint"] == joint))
+                .and_then(|j| j["values"].as_array())
+                .and_then(|values| values.first())
+                .map(|v| (v["value"].as_f64().unwrap(), v["unit"].as_str().unwrap().to_string()))
+        };
+        assert_eq!(angle(arm), Some((90.0, "deg".to_string())), "{r}");
+        assert_eq!(angle(follower), Some((45.0, "deg".to_string())), "{r}");
+
+        // Reading again changes nothing: no undo step, no new design.
+        let again = h.call("control.joint_pose", json!({}));
+        assert_eq!(again["result"]["pose"], *pose, "{again}");
+        assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &source));
+        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(joint_angle(&mut h, arm), 0.0, "the preview does not change the design");
+    }
+
+    #[test]
+    fn external_joint_drive_ends_when_the_sketch_plane_editor_opens() {
+        let (mut h, arm, _) = joint_drive_design();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        let sketch = h.app.session.active_sketch.unwrap();
+        h.app.run("sketch.line", json!({"points": [[0, 0], [20, 10]]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        assert_local_editor_interrupts_joint_drive(&mut h, arm, |app| {
+            crate::browser::redefine_sketch(app, sketch);
+            assert_eq!(app.tree.redefine, Some(sketch));
+            assert!(app.dialog.is_none() && app.session.active_sketch.is_none());
+        });
+    }
+
     fn panel_command_app() -> crate::SolveApp {
         use crate::panel_runtime::*;
         let h = PanelMountHarness::new(false).unwrap();
@@ -1934,8 +2375,8 @@ mod tests {
             assert!(takeover.is_err());
             assert_eq!(crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap(), second);
             h.step(&json!({"panel_fixture":{"enabled":false}})).unwrap();
-            assert!(h.app.panel_runtime().is_none());
-            assert!(!h.app.universal_panel_host_enabled());
+            assert!(h.app.panel_runtime().is_some());
+            assert!(h.app.universal_panel_host_enabled());
         }
     }
 
@@ -2137,7 +2578,9 @@ mod tests {
         assert_eq!(crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap(), before);
         click_visible_guard(&mut h, &guard);
         h.step(&json!({"panel_fixture":{"enabled":false}})).unwrap();
-        assert!(h.app.panel_runtime().is_none());
+        let layout = h.app.panel_runtime().unwrap().layout().layout();
+        let browser = solidcraft_engine::panels::InstanceId::new("browser").unwrap();
+        assert!(layout.instance(&browser).is_ok(), "the workspace restores production panels after teardown");
     }
 
     #[test]
@@ -2346,6 +2789,57 @@ mod tests {
             out.textures_delta.clear();
         }
         assert!(app.synthetic.is_empty());
+    }
+
+    /// The control bridge closes clean designs only, without discarding unsaved work (#18781).
+    #[test]
+    fn document_close_refuses_dirty_or_switched_tabs_and_keeps_other_designs() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let empty = h.call("document.close", json!({}));
+        assert_eq!(empty["ok"], false, "{empty}");
+        assert_eq!(h.app.docs.count(), 1);
+
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+        let first = h.app.session.document_id.clone();
+        let old = h.app.session.doc.to_json();
+        for bad in [json!({"document_id":"different"}), json!({"force":true}), json!({"document_id":7}), json!([])] {
+            let reply = h.call("document.close", bad);
+            assert_eq!(reply["ok"], false, "{reply}");
+            assert_eq!(h.app.session.document_id, first);
+            assert_eq!(h.app.session.doc.to_json(), old);
+        }
+        let reply = h.call("document.close", json!({"document_id":first}));
+        assert_eq!(reply["ok"], false, "unsaved design is preserved: {reply}");
+        assert!(reply["error"].as_str().unwrap().contains("unsaved"));
+        assert!(h.app.docs.closing.is_none(), "no interactive prompt blocks an agent");
+        assert_eq!(h.app.session.doc.to_json(), old);
+
+        let path = h.dir.join("close-safe.solidcraft");
+        h.app.run("file.save_as", json!({"path": path.to_string_lossy()})).unwrap();
+        assert!(!h.app.session.is_dirty());
+        let reply = h.call("document.close", json!({"document_id":first}));
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(reply["result"]["closed_document_id"], first);
+        assert_ne!(reply["result"]["document_id"], first);
+        assert_eq!(reply["result"]["documents"], 1);
+        assert!(crate::documents::active_is_blank(&h.app));
+        assert!(h.app.docs.closing.is_none());
+        assert!(path.exists(), "closing never deletes the saved file");
+
+        h.app.run("solid.box", json!({"length":3,"width":4,"height":5,"body_name":"Keep"})).unwrap();
+        h.app.run("file.save_as", json!({"path": h.dir.join("keep.solidcraft").to_string_lossy()})).unwrap();
+        let kept = h.app.session.document_id.clone();
+        let unchanged = h.app.session.doc.to_json();
+        let new = h.call("ui.documents", json!({"action":"new"}));
+        assert_eq!(new["result"]["documents"].as_array().unwrap().len(), 2);
+        assert_ne!(h.app.session.document_id, kept);
+        let closed = h.call("document.close", json!({}));
+        assert_eq!(closed["ok"], true, "{closed}");
+        assert_eq!(closed["result"]["document_id"], kept);
+        assert_eq!(h.app.session.doc.to_json(), unchanged, "the other tab is unchanged");
+        assert_eq!(h.app.docs.count(), 1);
+        assert!(crate::control_job::changes_the_design("document.close"), "it must wait for computation");
     }
 
     /// #6646: `document.revision` names the active design and what it holds. The revision moves on
@@ -2570,7 +3064,7 @@ mod tests {
         app.start("inspect.section");
         let Some(crate::dialogs::Kind::Section { offset, .. }) = app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("no section dialog") };
         *offset = "15 mm".into();
-        assert!(app.session.section.is_none() && crate::viewport::section_plane(&app).is_some());
+        assert!(app.session.section.is_empty() && !crate::viewport::section_planes(&app).is_empty());
         let preview = render(&mut app, &dir.join("preview.png"));
         assert!(whole != preview, "the model render ignores the section the window shows");
         // Committed, it renders the same.
@@ -3150,7 +3644,7 @@ mod tests {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
         for d in [&root, &out] {
-            std::fs::write(d.join("part.solidcraft"), solidcraft_engine::io::write_design(&s.doc)).unwrap();
+            std::fs::write(d.join("part.solidcraft"), solidcraft_engine::io::write_design(&s.doc).unwrap()).unwrap();
         }
         s.execute("file.export", &json!({"path": out.join("part.step").to_string_lossy()})).unwrap();
         let load = |command: &str, d: &std::path::Path, file: &str| json!({"command": command, "params": {"path": d.join(file).to_string_lossy()}, "allow_paths": [root.to_string_lossy()]});

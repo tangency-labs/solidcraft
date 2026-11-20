@@ -654,8 +654,7 @@ impl Volume {
             _ => {}
         }
         match &self.kind {
-            VolumeKind::Transform(t) => t.evaluate_bounding_box_simple_with_kernel(
-                k,
+            VolumeKind::Transform(t) => t.evaluate_bounding_box_simple(
                 param_box,
                 param_pseudo_box,
                 proj_box,
@@ -905,7 +904,6 @@ impl Volume {
             non_zero_tangents,
             do_zero_sampling: true,
             with_compounding,
-            ..EvalOptions::default()
         };
         // sMat[2][2][2]
         let m = self.evaluate(param_point, 1, &opts)?;

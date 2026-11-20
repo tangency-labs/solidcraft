@@ -13,7 +13,7 @@
 //! | [`KnotVector::set_last_index`]         | `N_SetKnotIndex`                  |
 //! | [`KnotVector::is_param_out_of_bounds`] | `N_KnotVectorIsParamOutOfBounds`  |
 //! | [`KnotVector::is_end_param`]           | `N_KnotVectorIsEndParam`          |
-//! | [`KnotVector::validate`], [`KnotVector::validate_with_kernel`], [`KnotVector::validate_opt_in`] | `N_KnotVectorIsValid` |
+//! | [`KnotVector::validate`] | `N_KnotVectorIsValid` |
 //! | [`KnotVector::find_span`]              | `N_BasisFindSpan`                 |
 //! | [`KnotVector::find_span_and_mult`]     | `N_BasisFindSpanAndMult`          |
 //! | [`KnotVector::span_count`]             | `N_BasisGetSpanCount`             |
@@ -26,6 +26,7 @@
 //! | [`clamped_uniform`]                    | none (not upstream)               |
 //! | [`periodic_uniform`]                   | none (not upstream)               |
 //! | [`is_periodic`]                        | none (not upstream)               |
+//! | [`joints`]                             | none (not upstream)               |
 //!
 //! Deviations:
 //! - Out-params become return values ([`Basis`], tuples, `Vec`s sized by the callee).
@@ -45,13 +46,11 @@
 //!   where upstream would overflow them.
 //! - On `NL_NUM_ERR` upstream leaves `N` partly computed; [`KnotVector::basis_eval`]
 //!   returns only the error.
-//! - [`KnotVector::validate`] matches upstream `N_KnotVectorIsValid` (which accepts
-//!   degenerate `(p + 1)`-knot vectors with no span, `WR-24`);
-//!   [`KnotVector::validate_with_kernel`] and [`KnotVector::validate_opt_in`] add the
-//!   opt-in span check ([`crate::kernel::UpstreamFixes::knot_vector_valid_requires_span`]).
+//! - [`KnotVector::validate`] requires at least one strictly positive parameter span
+//!   (`WR-24`); upstream `N_KnotVectorIsValid` accepts degenerate `(p + 1)`-knot vectors
+//!   with no span.
 
 use crate::error::{nurbs::NurbsFailure, Result, SolidError};
-use crate::kernel::Kernel;
 
 /// Upstream `NL_MAXDEG`: the largest degree NLib supports.
 pub const MAX_DEGREE: usize = 17;
@@ -242,53 +241,29 @@ impl<'a> KnotVector<'a> {
     /// `p + 1`, the knots do not decrease, and no interior knot has multiplicity
     /// above `p`.
     ///
-    /// Matches pinned C++ parity (`require_span = false`); see
-    /// [`KnotVector::validate_with_kernel`] and [`KnotVector::validate_opt_in`] for
-    /// the opt-in `WR-24` span check.
-    ///
-    /// Errors with [`NurbsFailure::Knots`] (`NL_KNT_ERR`) when a check fails.
-    pub fn validate(&self, p: usize) -> Result<()> {
-        self.validate_opt_in(p, false)
-    }
-
-    /// Checks that this is a valid clamped knot vector for degree `p` using `k`'s
-    /// [`crate::kernel::UpstreamFixes::knot_vector_valid_requires_span`] setting
-    /// (upstream `N_KnotVectorIsValid`, `WR-24`).
-    ///
-    /// Errors with [`NurbsFailure::Knots`] (`NL_KNT_ERR`) when a check fails.
-    pub fn validate_with_kernel(&self, k: &Kernel, p: usize) -> Result<()> {
-        self.validate_opt_in(p, k.fixes.knot_vector_valid_requires_span)
-    }
-
-    /// Checks that this is a valid clamped knot vector for degree `p`
-    /// (upstream `N_KnotVectorIsValid`), optionally requiring at least one strictly
-    /// positive parameter span (`WR-24`).
-    ///
-    /// When `require_span` is `true`, additionally requires `m >= 2 * p + 1` (at least
+    /// It also requires (WR-24) `m >= 2 * p + 1` (at least
     /// `2 * p + 2` knots so the start and end `(p + 1)`-knot clamps do not overlap) and
     /// `U[0] < U[m]` (rejecting all-equal and `NaN` end knots), and checks interior-knot
     /// multiplicity (`<= p`) only on interior knots (`i < m - p`, so degree-`0` vectors
     /// such as `[0.0, 1.0]` with no interior knots pass).
     ///
     /// Errors with [`NurbsFailure::Knots`] (`NL_KNT_ERR`) when a check fails.
-    pub fn validate_opt_in(&self, p: usize, require_span: bool) -> Result<()> {
+    pub fn validate(&self, p: usize) -> Result<()> {
         const OP: &str = OP_VALIDATE;
         let knot_err = SolidError::nurbs(OP, NurbsFailure::Knots);
         let u = self.knots;
         let m = self.last_index();
 
-        if require_span {
-            if p.checked_mul(2)
-                .and_then(|v| v.checked_add(1))
-                .is_none_or(|min_m| m < min_m)
-            {
-                return Err(knot_err);
-            }
-            let u0 = rd(u, 0, OP)?;
-            let um = rd(u, m, OP)?;
-            if u0.is_nan() || um.is_nan() || u0 >= um {
-                return Err(knot_err);
-            }
+        if p.checked_mul(2)
+            .and_then(|v| v.checked_add(1))
+            .is_none_or(|min_m| m < min_m)
+        {
+            return Err(knot_err);
+        }
+        let u0 = rd(u, 0, OP)?;
+        let um = rd(u, m, OP)?;
+        if u0.is_nan() || um.is_nan() || u0 >= um {
+            return Err(knot_err);
         }
 
         // Check end knots.
@@ -323,7 +298,7 @@ impl<'a> KnotVector<'a> {
             while ie < end && rd(u, ie, OP)? == rd(u, ie + 1, OP)? {
                 ie += 1;
             }
-            if (!require_span || i < end) && ie - i + 1 > p {
+            if i < end && ie - i + 1 > p {
                 return Err(knot_err);
             }
             is = ie;
@@ -926,6 +901,25 @@ pub fn is_periodic(knots: &[f64], degree: usize) -> bool {
     })
 }
 
+/// The joints of a B-spline of `degree` on `knots` strictly inside `(t0, t1)`: each distinct
+/// knot there that `knots` holds at least `degree` times, in order. A B-spline is `degree − m`
+/// times continuously differentiable at a knot of multiplicity `m` (Piegl and Tiller, *The NURBS
+/// Book*, 2nd ed., §2.2, P2.5), so at a joint it is at most continuous: where the pieces of a
+/// chain meet, and where it can turn a corner. Equal knots count together where they are next
+/// to each other, as a knot vector, which never decreases, holds them.
+///
+/// Not upstream.
+#[must_use]
+pub fn joints(knots: &[f64], degree: usize, [t0, t1]: [f64; 2]) -> Vec<f64> {
+    knots
+        .chunk_by(|a, b| a == b)
+        .filter_map(|run| match *run {
+            [k, ..] if k > t0 && k < t1 && run.len() >= degree => Some(k),
+            _ => None,
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -994,8 +988,43 @@ mod tests {
                 .unwrap();
         }
     }
+
+    #[test]
+    fn joints_are_the_inner_knots_held_as_many_times_as_the_degree() {
+        // Degree 2 on [0, 0, 0, 1, 1, 2, 2, 2]: 1 is held twice, the degree, so the curve is
+        // 2 − 2 = 0 times differentiable there, a joint; the ends 0 and 2 are not inside.
+        let twice = [0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 2.0];
+        assert_eq!(joints(&twice, 2, [0.0, 2.0]), vec![1.0]);
+        // A cubic with 1 held twice and 2 three times: 2 is a joint, and 1 is not (the curve is
+        // 3 − 2 = 1 times differentiable there).
+        let cubic = [
+            0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 2.0, 3.0, 3.0, 3.0, 3.0,
+        ];
+        assert_eq!(joints(&cubic, 3, [0.0, 3.0]), vec![2.0]);
+        // A knot held past the degree (3 times at degree 2: a break) is a joint too.
+        let broken = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0];
+        assert_eq!(joints(&broken, 2, [0.0, 2.0]), vec![1.0]);
+        // A chain of three degree-7 pieces, its inner knots 1 and 2 held 7 times each: both are
+        // joints, and only those strictly inside the interval count (on [1, 3] the one at 1 is
+        // its start; on [0.5, 1.5] only 1 is inside).
+        let mut chain = vec![0.0; 8];
+        chain.extend([1.0; 7]);
+        chain.extend([2.0; 7]);
+        chain.extend([3.0; 8]);
+        assert_eq!(joints(&chain, 7, [0.0, 3.0]), vec![1.0, 2.0]);
+        assert_eq!(joints(&chain, 7, [1.0, 3.0]), vec![2.0]);
+        assert_eq!(joints(&chain, 7, [0.5, 1.5]), vec![1.0]);
+        // Degree 1, a polyline: every inner knot is a joint.
+        let polyline = [0.0, 0.0, 1.0, 2.0, 3.0, 3.0];
+        assert_eq!(joints(&polyline, 1, [0.0, 3.0]), vec![1.0, 2.0]);
+        // No inner knot, or inner knots that are not numbers: none.
+        let ends = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        assert!(joints(&ends, 2, [0.0, 1.0]).is_empty());
+        let nan = [0.0, 0.0, f64::NAN, f64::NAN, 1.0, 1.0];
+        assert!(joints(&nan, 1, [0.0, 1.0]).is_empty());
+    }
     use super::*;
-    use crate::kernel::UpstreamFixes;
+
     use crate::nurbs::math::{CPoint, NOW};
     use crate::nurbs::srf_basic::Surface;
 
@@ -1051,8 +1080,8 @@ mod tests {
         assert!(kv(&mult).validate(2).is_err());
         // Unclamped.
         assert!(kv(&[0.0, 1.0, 2.0, 3.0, 4.0, 5.0]).validate(2).is_err());
-        // Single knot, degree 0: upstream accepts it.
-        assert!(kv(&[1.0]).validate(0).is_ok());
+        // Single knot, degree 0: no span (WR-24; upstream accepts it).
+        assert!(kv(&[1.0]).validate(0).is_err());
     }
 
     #[test]
@@ -1276,12 +1305,7 @@ mod tests {
     }
 
     #[test]
-    fn wr24_degenerate_clamped_vectors_rejected_under_opt_in() {
-        let k_def = Kernel::default();
-        assert!(!k_def.fixes.knot_vector_valid_requires_span);
-        let mut k_opt = Kernel::default();
-        k_opt.fixes.knot_vector_valid_requires_span = true;
-
+    fn wr24_degenerate_clamped_vectors_rejected() {
         let expected_err = Err(SolidError::nurbs(OP_VALIDATE, NurbsFailure::Knots));
         let degen_cases: [(&[f64], usize); 5] = [
             (&[2.0, 2.0, 2.0, 2.0], 3),
@@ -1293,27 +1317,15 @@ mod tests {
         for (knots, p) in degen_cases {
             let v = kv(knots);
             assert_eq!(v.span_count(p), 0, "{knots:?} p={p}");
-            assert_eq!(v.validate(p), Ok(()), "{knots:?} p={p}");
-            assert_eq!(v.validate_opt_in(p, false), Ok(()), "{knots:?} p={p}");
-            assert_eq!(v.validate_with_kernel(&k_def, p), Ok(()), "{knots:?} p={p}");
-            assert_eq!(v.validate_opt_in(p, true), expected_err, "{knots:?} p={p}");
-            assert_eq!(
-                v.validate_with_kernel(&k_opt, p),
-                expected_err,
-                "{knots:?} p={p}"
-            );
+            assert_eq!(v.validate(p), expected_err, "{knots:?} p={p}");
         }
     }
 
     #[test]
     fn wr24_valid_and_invalid_vectors_and_extreme_degree() {
-        let k_def = Kernel::default();
-        let mut k_opt = Kernel::default();
-        k_opt.fixes.knot_vector_valid_requires_span = true;
-
         let expected_err = Err(SolidError::nurbs(OP_VALIDATE, NurbsFailure::Knots));
 
-        // Valid clamped vectors of degree >= 1 pass in both modes.
+        // Valid clamped vectors of degree >= 1 pass.
         let valid_both: [(&[f64], usize); 3] = [
             (&[0.0, 0.0, 1.0, 1.0], 1),
             (&[0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0], 2),
@@ -1322,21 +1334,15 @@ mod tests {
         for (knots, p) in valid_both {
             let v = kv(knots);
             assert_eq!(v.validate(p), Ok(()), "{knots:?} p={p}");
-            assert_eq!(v.validate_with_kernel(&k_def, p), Ok(()), "{knots:?} p={p}");
-            assert_eq!(v.validate_opt_in(p, true), Ok(()), "{knots:?} p={p}");
-            assert_eq!(v.validate_with_kernel(&k_opt, p), Ok(()), "{knots:?} p={p}");
         }
 
-        // Degree 0 single-span `[0.0, 1.0]` has no interior knots (`m = 1`): opt-in
-        // accepts it, whereas upstream's `ie <= m - p` loop runs `1 > p` at `i == m - p`.
+        // Degree 0 single-span `[0.0, 1.0]` has no interior knots (`m = 1`): it is
+        // accepted, whereas upstream's `ie <= m - p` loop runs `1 > p` at `i == m - p`.
         let v_deg0 = kv(&[0.0, 1.0]);
         assert_eq!(v_deg0.span_count(0), 1);
-        assert_eq!(v_deg0.validate(0), expected_err);
-        assert_eq!(v_deg0.validate_with_kernel(&k_def, 0), expected_err);
-        assert_eq!(v_deg0.validate_opt_in(0, true), Ok(()));
-        assert_eq!(v_deg0.validate_with_kernel(&k_opt, 0), Ok(()));
+        assert_eq!(v_deg0.validate(0), Ok(()));
 
-        // Invalid multiplicity, unclamped, unsorted, and NaN end-knot vectors fail in both modes.
+        // Invalid multiplicity, unclamped, unsorted, and NaN end-knot vectors fail.
         let invalid_both: [(&[f64], usize); 8] = [
             (&[0.0, 0.5, 1.0], 0),
             (&[0.0, 1.0, 2.0, 3.0], 1),
@@ -1359,29 +1365,15 @@ mod tests {
                 expected_err.clone()
             };
             assert_eq!(v.validate(p), expected_err, "{knots:?} p={p}");
-            assert_eq!(
-                v.validate_with_kernel(&k_def, p),
-                expected_err,
-                "{knots:?} p={p}"
-            );
-            assert_eq!(v.validate_opt_in(p, true), expected_err, "{knots:?} p={p}");
-            assert_eq!(
-                v.validate_with_kernel(&k_opt, p),
-                expected_err,
-                "{knots:?} p={p}"
-            );
         }
 
         // Extreme degrees fail cleanly with `NurbsFailure::Knots` without arithmetic overflow.
         for p in [usize::MAX / 2, usize::MAX - 1, usize::MAX] {
             let v = kv(&[0.0, 0.0, 1.0, 1.0]);
             assert_eq!(v.validate(p), expected_err, "p={p}");
-            assert_eq!(v.validate_with_kernel(&k_def, p), expected_err, "p={p}");
-            assert_eq!(v.validate_opt_in(p, true), expected_err, "p={p}");
-            assert_eq!(v.validate_with_kernel(&k_opt, p), expected_err, "p={p}");
         }
 
-        // `nurbs::srf_basic::Surface::is_valid_with_kernel` forwards the kernel setting.
+        // `nurbs::srf_basic::Surface::is_valid` checks both knot vectors the same way.
         let bilinear = Surface::new(
             vec![
                 vec![
@@ -1400,8 +1392,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(bilinear.is_valid(), Ok(()));
-        assert_eq!(bilinear.is_valid_with_kernel(&k_def), Ok(()));
-        assert_eq!(bilinear.is_valid_with_kernel(&k_opt), Ok(()));
 
         let constant_patch = Surface::new(
             vec![vec![CPoint::new(0.0, 0.0, 0.0, NOW)]],
@@ -1411,9 +1401,7 @@ mod tests {
             vec![0.0, 1.0],
         )
         .unwrap();
-        assert_eq!(constant_patch.is_valid(), expected_err);
-        assert_eq!(constant_patch.is_valid_with_kernel(&k_def), expected_err);
-        assert_eq!(constant_patch.is_valid_with_kernel(&k_opt), Ok(()));
+        assert_eq!(constant_patch.is_valid(), Ok(()));
 
         let bad_surface = Surface::new(
             vec![vec![
@@ -1427,15 +1415,5 @@ mod tests {
         )
         .unwrap();
         assert_eq!(bad_surface.is_valid(), expected_err);
-        assert_eq!(bad_surface.is_valid_with_kernel(&k_def), expected_err);
-        assert_eq!(bad_surface.is_valid_with_kernel(&k_opt), expected_err);
-
-        // `UpstreamFixes::flag_mut` toggles `knot_vector_valid_requires_span`.
-        let mut fixes = UpstreamFixes::default();
-        assert!(!fixes.knot_vector_valid_requires_span);
-        *fixes.flag_mut("knot_vector_valid_requires_span").unwrap() = true;
-        assert!(fixes.knot_vector_valid_requires_span);
-        *fixes.flag_mut("knot_vector_valid_requires_span").unwrap() = false;
-        assert!(!fixes.knot_vector_valid_requires_span);
     }
 }

@@ -87,14 +87,10 @@ fn unit_normal(normal: Vec3) -> Result<Vec3> {
         .map_err(|_| invalid("the plane normal has zero length"))
 }
 
-/// `pBrep->CalculateBoundingBox(BBox)` with its status ignored (the box then stays
-/// empty), and the length of its diagonal.
+/// `pBrep->CalculateBoundingBox(BBox)`, and the length of its diagonal. Upstream
+/// ignores the status (the box then stays empty); it is passed on here (WR-658).
 fn box_and_length(k: &Kernel, brep: &Brep) -> Result<(Extent3d, f64)> {
-    let bbox = ignored(crate::error::passed_on(
-        qbrep::calculate_bounding_box(k, brep, BoundingBoxOptions::default()),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?
-    .unwrap_or_else(Extent3d::new);
+    let bbox = qbrep::calculate_bounding_box(k, brep, BoundingBoxOptions::default())?;
     let diagonal = bbox.size();
     let length = diagonal.length();
     Ok((bbox, length))
@@ -177,10 +173,7 @@ pub fn project_brep_onto_plane(
 
     let mut plane = Axis2Placement::default();
     // (status ignored upstream; fork 4803d6d passes it on: `SER`)
-    let set = plane.set_canonical(plane_origin, y, z);
-    if k.fixes.brep_edit_statuses_pass_on {
-        set?;
-    }
+    plane.set_canonical(plane_origin, y, z)?;
 
     let invert_plane = plane.invert();
 
@@ -399,7 +392,7 @@ pub fn project_curve_onto_surface(
 /// makes with the curve's owner, on a copy when it has none yet), the `SmCrvOnSurf` override for a curve on a
 /// surface (and an `SmTangentField`, which inherits it); `SM_ERR` otherwise (the
 /// `SmCurve` base).
-fn plane_projection(
+pub(crate) fn plane_projection(
     k: &Kernel,
     curve: &Curve,
     plane_point: Point3,
