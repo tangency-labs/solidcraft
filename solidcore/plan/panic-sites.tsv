@@ -906,8 +906,8 @@ crates/solidcore/src/surface/plane/p1.rs	Plane::plane_overlap	windows	1	proven	w
 crates/solidcore/src/surface/plane/p1.rs	Plane::plane_overlap	with_capacity	1	proven	Vec::with_capacity(5)	constant capacity
 crates/solidcore/src/surface/plane/p1.rs	Plane::surface_overlap	with_capacity	1	open	Vec::with_capacity(bdrys_3d1.len())	
 crates/solidcore/src/surface/plane/p1.rs	transpose	int-div	1	open	a.len() / num_rows	
-crates/solidcore/src/surface/plane/p2.rs	Plane::make_new_plane_ellipse	int-rem	1	proven	((ii + count) - 1) % count	inside for ii in 0..count, so count > 0
-crates/solidcore/src/surface/plane/p2.rs	Plane::make_new_plane_ellipse	int-rem	2	proven	(ii + 1) % count	inside for ii in 0..count, so count > 0
+crates/solidcore/src/surface/plane/p2.rs	Plane::make_new_plane_ellipse_in_contact	int-rem	1	proven	((ii + count) - 1) % count	inside for ii in 0..count, so count > 0
+crates/solidcore/src/surface/plane/p2.rs	Plane::make_new_plane_ellipse_in_contact	int-rem	2	proven	(ii + 1) % count	inside for ii in 0..count, so count > 0
 crates/solidcore/src/surface/procedural_blend/convert.rs	corner_from_record	with_capacity	1	open	Vec::with_capacity(r.rounds.len())	
 crates/solidcore/src/surface/procedural_blend/convert.rs	non_decreasing	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore/src/surface/procedural_sweep.rs	ProceduralSweep::create	windows	1	proven	windows(2)	constant non-zero size

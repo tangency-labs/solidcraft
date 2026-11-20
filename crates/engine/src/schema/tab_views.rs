@@ -44,7 +44,7 @@ pub enum TabViewEdge {
     Bottom,
 }
 
-/// `tab.view.layout`: show the Model views of the design together.
+/// `tab.view.layout`: show the Model and Render views of the design together.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct TabViewLayoutParams {

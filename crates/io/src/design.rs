@@ -1322,8 +1322,9 @@ fn hydrate_hdr_resources<R: Read + Seek>(
             return Err(invalid("HDR resource key does not match its blob hash"));
         }
         total = total.checked_add(bytes.len()).ok_or_else(|| invalid("HDR resource size overflow"))?;
+        // The record keeps naming its part: a newer build's section this build keeps as it came
+        // still says which part it needs, so saving keeps the part too.
         parts.hdr.insert(id, bytes.to_vec());
-        value.as_object_mut().ok_or_else(|| invalid("invalid HDR metadata"))?.remove("hdr_blob");
     }
     Ok(!resources.is_empty())
 }
@@ -1455,7 +1456,6 @@ fn hydrate_texture_resources<R: Read + Seek>(
         }
         total = total.checked_add(bytes.len()).ok_or_else(|| invalid("texture resource size overflow"))?;
         parts.textures.insert(id, bytes.to_vec());
-        value.as_object_mut().ok_or_else(|| invalid("invalid texture metadata"))?.remove("texture_blob");
     }
     Ok(!resources.is_empty())
 }
@@ -3437,6 +3437,48 @@ mod tests {
         let duplicate = format!("{{\"render\":{{\"resources\":{{\"{id}\":{entry},\"{id}\":{entry}}}}}}}");
         entries.insert("document.json".into(), duplicate.into_bytes());
         assert!(crate::read_design(&package(&entries)).unwrap_err().to_string().contains("duplicate"));
+    }
+
+    /// A newer build's file whose render section this build can't read keeps that section as it
+    /// came, and with it the HDR and texture parts it names: saved again, the parts are the same bytes
+    /// and the section still names them. Nothing is dropped on save.
+    #[test]
+    fn a_newer_files_unread_render_section_keeps_its_hdr_and_texture_parts() {
+        use solidcraft_doc::render_resources::HdrResource;
+        use solidcraft_doc::render_texture_resources::{TextureProvenance, TextureResource};
+        let mut hdr = b"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\nPRIMARIES=0.64 0.33 0.30 0.60 0.15 0.06 0.3127 0.3290\n\n-Y 2 +X 4\n".to_vec();
+        for _ in 0..8 {
+            hdr.extend_from_slice(&[128, 64, 32, 129]);
+        }
+        let texture = include_bytes!("../../../assets/render/starter/materials/exports/SURF-027/base_color.png").to_vec();
+        let provenance = TextureProvenance {
+            author: "Original SolidCraft test".into(),
+            source: "original bundled diagnostic".into(),
+            license: "MIT OR Apache-2.0".into(),
+        };
+        let mut doc = document();
+        let render = Arc::make_mut(&mut doc.render);
+        let hdr_id = render.resources.insert(HdrResource::new(hdr.clone()).unwrap()).unwrap();
+        let texture_id = render.texture_resources.insert(TextureResource::new(texture.clone(), provenance).unwrap()).unwrap();
+        let mut entries = parts(&write_design_container(&doc).unwrap());
+        let (hdr_part, texture_part) = (format!("blobs/{hdr_id}.hdr"), format!("blobs/{texture_id}.texture"));
+        assert_eq!((&entries[&hdr_part], &entries[&texture_part]), (&hdr, &texture));
+        // A newer build saved it with a render setup this build can't read.
+        let mut metadata: Value = serde_json::from_slice(&entries["document.json"]).unwrap();
+        metadata["format"] = json!(solidcraft_doc::format::format_string(solidcraft_doc::format::FORMAT + 1));
+        metadata["render"]["setups"] = json!({"Future": {"job": {"method": "a_future_renderer"}}});
+        let section = metadata["render"].clone();
+        entries.insert("document.json".into(), serde_json::to_vec(&metadata).unwrap());
+
+        let opened = crate::read_design(&package(&entries)).unwrap();
+        assert!(opened.newer_file.is_some());
+        let resaved = parts(&write_design_container(&opened).unwrap());
+        assert_eq!(resaved.get(&hdr_part), Some(&hdr), "the HDR's bytes survive the save");
+        assert_eq!(resaved.get(&texture_part), Some(&texture), "the texture's bytes survive the save");
+        let again: Value = serde_json::from_slice(&resaved["document.json"]).unwrap();
+        assert_eq!(again["render"], section, "the section comes back as it came, naming its parts");
+        // And it opens again with them.
+        crate::read_design(&package(&resaved)).unwrap();
     }
 
     #[test]

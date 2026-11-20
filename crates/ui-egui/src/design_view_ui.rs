@@ -104,8 +104,12 @@ pub fn handle(app: &mut SolveApp, action: TabAction) -> bool {
         TabAction::PlusMenu { id } | TabAction::LayoutMenu { id } => return plus_row(app, &id),
         TabAction::SwitcherMenu { id } => return switcher_menu(app, &id),
         TabAction::TearOff(i) => {
-            documents::switch(app, i);
-            open_new_window(app, None);
+            if !app.file_picker_busy() {
+                documents::switch(app, i);
+                if app.docs.active == i {
+                    open_new_window(app, None);
+                }
+            }
         }
         _ => return false,
     }
@@ -122,9 +126,8 @@ fn view_menu(app: &mut SolveApp, index: usize, id: &str) -> bool {
             documents::view_duplicate(app, view);
         }
         VIEW_BESIDE => {
-            // Beside the shown view; a view that is not shown is shown first.
-            documents::view_activate(app, view);
-            return documents::view_beside(app, None, solidcraft_views::Edge::Right).is_some();
+            let beside = (view != app.docs.views.active().id).then_some(view);
+            return documents::view_beside(app, beside, solidcraft_views::Edge::Right).is_some();
         }
         VIEW_NEW_WINDOW => {
             let kind = app.docs.views.get(view).map(|v| v.kind.key());
@@ -282,6 +285,21 @@ pub fn show_notice(ui: &mut egui::Ui, notice: &Notice) -> Option<NoticeChoice> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tearing_off_a_tab_stops_when_a_file_picker_refuses_the_switch() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
+        documents::switch(&mut h.app, 0);
+        h.app.services.pick_open = Some(Box::new(|_| Box::pin(std::future::pending())));
+        h.app.pick_open(|_, _| {});
+        assert!(h.app.file_picker_busy());
+        h.app.status = None;
+        assert!(handle(&mut h.app, TabAction::TearOff(1)));
+        assert_eq!(h.app.docs.active, 0);
+        assert!(h.app.status.is_none(), "the refused switch does not try to open the active design");
+    }
 
     #[test]
     fn menu_ids_are_unique_and_plus_rows_name_every_kind() {

@@ -85,10 +85,11 @@ impl TryFrom<ImageRecord> for ImageFile {
     }
 }
 
-/// Its record, naming its part when a container is being written ([`crate::blob::collecting_parts`]).
+/// Its record, always naming its part (handed to the container being written,
+/// [`crate::blob::collecting_parts`]).
 impl Serialize for ImageFile {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
-        let part = crate::blob::add_part(&self.data, &self.format);
+        let part = Some(crate::blob::add_part(&self.data, &self.format));
         ImageRecord { id: self.id, format: self.format.clone(), pixels: self.pixels, data: String::new(), part }.serialize(serializer)
     }
 }

@@ -38,6 +38,7 @@ fn the_template_save_reply_matches_its_output_schema() {
     let saved = output_schema_for::<TemplateSaveResult>();
     let r = s.execute("drawing.template.save", &json!({"path": path})).unwrap();
     assert!(conforms(saved.as_value(), saved.as_value(), &r) && r.get("param_warnings").is_none(), "{r}");
+    let path = r["path"].as_str().unwrap().to_string();
     let applied = output_schema_for::<TemplateApplyResult>();
     let r = s.execute("drawing.template.apply", &json!({"template": path, "dry_run": true})).unwrap();
     assert!(conforms(applied.as_value(), applied.as_value(), &r) && r.get("param_warnings").is_none(), "{r}");

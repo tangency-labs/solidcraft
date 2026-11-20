@@ -1956,6 +1956,14 @@ impl SolveApp {
                 if id == "occurrence.ground" {
                     unground_joint_status(self, language, v);
                 }
+                // A template asked for as .json is saved as .scdwg beside it: say so.
+                if id == "drawing.template.save"
+                    && v.get("renamed_from").is_some_and(|from| !from.is_null())
+                    && let Some(path) = v.get("path").and_then(Value::as_str)
+                {
+                    let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    self.set_status(language.format("drawing.template_saved_as_scdwg", &[("name", &name)]), false);
+                }
                 if id == "file.new" {
                     // `file.new` starts from millimetres. Units of new designs still apply (#1205).
                     prefs::apply_new_design(self);
@@ -4157,6 +4165,18 @@ impl SolveApp {
         self.apply_look(ctx);
     }
 
+    /// Release pictures whose views no longer belong to any window. Native hosts call this
+    /// after all child scopes restore the root; Web calls it after its single root UI pass.
+    /// Keeping hidden/live slots avoids consuming their pending CPU scenes a second time.
+    pub fn retain_view_pictures(&mut self, state: Option<&egui_wgpu::RenderState>) {
+        let slots = documents::live_view_picture_slots(self);
+        if let Some(state) = state
+            && let Some(renderer) = state.renderer.write().callback_resources.get_mut::<solidcraft_viewport_gpu::view::Renderer>()
+        {
+            renderer.retain_views(&slots);
+        }
+    }
+
     /// Lay out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         plugins::tick(self, ui.ctx(), false);
@@ -4308,34 +4328,39 @@ impl SolveApp {
         // against those footprints; the render domain stays unchanged.
         self.viewport.host_windows = ui_kit::Container::host_window_regions(ui.ctx());
         if let Some(rect) = self.viewport.rect.filter(|rect| rect.is_positive() && rect.is_finite()) {
-            let mut controls = ui.new_child(egui::UiBuilder::new().id_salt("universal_panel_controls").max_rect(rect));
-            controls.set_clip_rect(controls.clip_rect().intersect(rect));
             if view_tiles::shown(self) {
                 view_tiles::card_controls(self, ui);
             }
+            let mut controls = view_tiles::controls_ui(ui, self.session.uid, self.docs.views.active().id, rect);
             render_workspace::host_result_overlays(self, &mut controls);
             viewport::show_host_controls(self, &mut controls, rect);
         }
         self.resolve_fit(ui.ctx());
         panel_runtime::finish_app_host(self, ui);
+        if view_tiles::focus_pressed(self) {
+            ui.ctx().request_repaint();
+        }
+    }
+
+    /// Whether the host can close after queued view preferences have reached disk.
+    pub fn ready_to_quit(&self) -> bool {
+        self.quit_requested && !crate::view_memory::pending()
     }
 
     fn show_workspace(&mut self, ui: &mut egui::Ui) {
         if drawing_workspace::active(self) {
             if dialogs_sheet::flat_active(self) {
-                // This is the existing source manufacturing inspector, not a drawing scene.
                 viewport::show(self, ui);
             } else {
-                // The model view is not drawn, so no shown dimension can be double-clicked.
                 dim_view::set_model_drawn(Vec::new());
                 drawing_workspace::show(self, ui);
             }
+        } else if view_tiles::shown(self) {
+            view_tiles::show(self, ui);
         } else if render_workspace::active(self) {
             // The model view is not drawn, so no shown dimension can be double-clicked.
             dim_view::set_model_drawn(Vec::new());
             render_workspace::show(self, ui);
-        } else if view_tiles::shown(self) {
-            view_tiles::show(self, ui);
         } else {
             viewport::show(self, ui);
         }

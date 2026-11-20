@@ -105,6 +105,10 @@ pub enum Error {
     /// (an offset refused with its reason, [`solidcore_ops::Error::OffsetRefused`]; a fillet or
     /// chamfer failed with the kernel's statement of why, [`solidcore_ops::Error::BlendFailed`]).
     Refused(solidcore_ops::Error),
+    /// SMLib rejected its input and solidcore said why (`SM_ERR_INVALID_INPUT` with its reason:
+    /// `SolidError::InvalidInput`, or solidcore-ops' `Refused`): the routine that rejected it and
+    /// what was wrong, rather than the bare status.
+    Rejected { operation: &'static str, reason: &'static str },
     /// A typed refusal together with the kernel's complete diagnostic, including its
     /// operation, entities and nested causes. The refusal remains available as data.
     RefusedWithDiagnostic { refusal: solidcore_ops::Error, diagnostic: String },
@@ -206,6 +210,7 @@ impl std::fmt::Display for Error {
             Error::Record(u) => write!(f, "{u}"),
             Error::Solidcore(e) => write!(f, "solidcore: {e}"),
             Error::Refused(e) => write!(f, "{e}"),
+            Error::Rejected { operation, reason } => write!(f, "SMLib rejected the input: {reason} ({operation})"),
             Error::RefusedWithDiagnostic { refusal, diagnostic } => write!(f, "{refusal}: {diagnostic}"),
             Error::Internal(e) => write!(f, "solidcore failed internally in {e}"),
             Error::Unported(what) => write!(f, "not supported yet: {what}"),
