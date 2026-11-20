@@ -156,6 +156,7 @@ pub const DOCUMENTED: &[&str] = &[
     "sheet.flat_pattern",
     "sheet.fold",
     "sheet.hem",
+    "sheet.jog",
     "sheet.manage_rules",
     "sheet.path_flange",
     "sheet.perforate",

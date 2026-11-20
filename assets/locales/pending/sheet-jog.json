@@ -6,7 +6,8 @@
     "Middle of Jog": "Middle of Jog",
     "Offset": "Offset",
     "Start of Jog": "Start of Jog",
-    "cmd.sheet_jog": "Jog"
+    "cmd.sheet_jog": "Jog",
+    "help.sheet.jog": "Steps a flat panel up or down by an offset along a sketch line: two bends and a short straight wall in one feature. Use it when a bracket, cover or mounting plate has to step over another part."
   },
   "ar": {
     "End of Jog": "نهاية الثني المتدرج",
@@ -15,7 +16,8 @@
     "Middle of Jog": "منتصف الثني المتدرج",
     "Offset": "الإزاحة",
     "Start of Jog": "بداية الثني المتدرج",
-    "cmd.sheet_jog": "ثني متدرج"
+    "cmd.sheet_jog": "ثني متدرج",
+    "help.sheet.jog": "يزيح لوحًا مسطحًا لأعلى أو لأسفل بمقدار إزاحة على امتداد خط رسم: ثنيتان وجدار مستقيم قصير في ميزة واحدة. استخدمه عندما يجب أن يتخطى حامل أو غطاء أو لوح تثبيت قطعة أخرى."
   },
   "he": {
     "End of Jog": "סוף כיפוף המדרגה",
@@ -24,7 +26,8 @@
     "Middle of Jog": "אמצע כיפוף המדרגה",
     "Offset": "היסט",
     "Start of Jog": "תחילת כיפוף המדרגה",
-    "cmd.sheet_jog": "כיפוף מדרגה"
+    "cmd.sheet_jog": "כיפוף מדרגה",
+    "help.sheet.jog": "מזיז לוח שטוח למעלה או למטה בהיסט לאורך קו סקיצה: שני כיפופים ודופן ישרה קצרה בתכונה אחת. מתאים כשתושבת, מכסה או לוח הרכבה צריכים לעבור מעל חלק אחר."
   },
   "ja": {
     "End of Jog": "ジョグの終点",
@@ -33,7 +36,8 @@
     "Middle of Jog": "ジョグの中央",
     "Offset": "オフセット",
     "Start of Jog": "ジョグの始点",
-    "cmd.sheet_jog": "ジョグ"
+    "cmd.sheet_jog": "ジョグ",
+    "help.sheet.jog": "スケッチ線に沿って平らな板をオフセット分だけ上下に段差を付けます。2つの曲げと短い直線の壁を1つのフィーチャーで作ります。ブラケット、カバー、取付板が別の部品をまたぐ必要があるときに使います。"
   },
   "vi": {
     "End of Jog": "Cuối chấn bậc",
@@ -42,7 +46,8 @@
     "Middle of Jog": "Giữa chấn bậc",
     "Offset": "Độ lệch",
     "Start of Jog": "Đầu chấn bậc",
-    "cmd.sheet_jog": "Chấn bậc"
+    "cmd.sheet_jog": "Chấn bậc",
+    "help.sheet.jog": "Tạo bậc cho một tấm phẳng lên hoặc xuống một khoảng dọc theo một đường phác thảo: hai lần uốn và một vách thẳng ngắn trong một tính năng. Dùng khi giá đỡ, nắp hoặc tấm gá cần vượt qua một chi tiết khác."
   },
   "zh": {
     "End of Jog": "错位终点",
@@ -51,6 +56,7 @@
     "Middle of Jog": "错位中点",
     "Offset": "偏移",
     "Start of Jog": "错位起点",
-    "cmd.sheet_jog": "错位折弯"
+    "cmd.sheet_jog": "错位折弯",
+    "help.sheet.jog": "沿草图线将平板按偏移量向上或向下错开：在一个特征中生成两道折弯和一段短直壁。用于支架、盖板或安装板需要跨过另一个零件时。"
   }
 }
