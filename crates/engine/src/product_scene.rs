@@ -1,5 +1,7 @@
 //! Product extraction shares evaluated placement and appearance resolution, not viewport policy.
 
+use solidcraft_doc::ModelBody;
+
 use crate::geom::Aabb3;
 use crate::render::{FaceAppearance, ProductMesh, ProductScene};
 use crate::{EngineError, Result, Session};
@@ -10,14 +12,20 @@ pub const MAX_PRODUCT_BODIES: usize = solidcraft_render::job::MAX_CPU_BODIES;
 /// Extract authoritative, visible geometry. Does not settle a live gesture implicitly.
 /// `render.scene` is the explicit model-reading command for that boundary.
 pub fn extract(s: &Session) -> Result<ProductScene> {
+    extract_where(s, |b| s.body_visible(&b.name))
+}
+
+/// [`extract`] for the bodies `keep` picks, whatever the browser shows: a drawing view draws every
+/// body the design places.
+pub fn extract_where(s: &Session, keep: impl Fn(&ModelBody) -> bool) -> Result<ProductScene> {
     if s.model.is_stale() {
         return Err(EngineError::Other("render scene is stale; finish the modelling gesture before previewing".into()));
     }
     let world = s.world_state()?;
     let mut scene = ProductScene { meshes: Vec::new(), bounds: Aabb3::EMPTY };
-    for body in world.bodies.iter().filter(|b| s.body_visible(&b.name)) {
+    for body in world.bodies.iter().filter(|b| keep(b)) {
         if scene.meshes.len() >= MAX_PRODUCT_BODIES {
-            return Err(EngineError::Other("render scene exceeds 262144 visible bodies".into()));
+            return Err(EngineError::Other("render scene exceeds 262144 bodies".into()));
         }
         let mesh = body.mesh();
         scene.bounds = scene.bounds.union(&mesh.bounds());
@@ -144,7 +152,7 @@ mod tests {
             assert!(Arc::ptr_eq(&m.mesh, &s.world_state().unwrap().body(&m.name).unwrap().mesh()));
         }
         s.selection = vec![Sel::Body { name: first.meshes[0].name.clone() }];
-        s.section = Some((Vec3::ZERO, Vec3::X));
+        s.section = vec![crate::SectionPlane { id: 1, origin: Vec3::ZERO, normal: Vec3::X }];
         s.analysis = Some(crate::SurfaceAnalysis::Zebra { stripes: 10.0 });
         let after = extract(&s).unwrap();
         for (a, b) in first.meshes.iter().zip(&after.meshes) {
@@ -157,6 +165,7 @@ mod tests {
         assert_eq!(active.meshes[1].opacity, 0.4, "no active-component fading");
         s.visibility.hidden_bodies.push(first.meshes[1].name.clone());
         assert_eq!(extract(&s).unwrap().meshes.len(), 1);
+        assert_eq!(extract_where(&s, |_| true).unwrap().meshes.len(), 2, "every body, the hidden one too");
         assert!(Arc::ptr_eq(&doc, &s.doc));
         assert_eq!(s.evaluations, 0);
     }
@@ -252,6 +261,7 @@ mod tests {
                     step: step.into(),
                     components: Vec::new(),
                     skip: Vec::new(),
+                    records: None,
                 },
                 None,
             )
