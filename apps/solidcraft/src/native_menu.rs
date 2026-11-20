@@ -36,13 +36,14 @@ const INSERTS: [(&str, FileAction); 3] = [
 ];
 
 /// File > Export entries.
-const EXPORTS: [(&str, FileAction); 7] = [
+const EXPORTS: [(&str, FileAction); 8] = [
     ("Export STL\u{2026}", FileAction::ExportMesh("stl")),
     ("Export 3MF\u{2026}", FileAction::ExportMesh("3mf")),
     ("Export STEP\u{2026}", FileAction::Export("step")),
     ("Export Current View as DXF\u{2026}", FileAction::Command("file.export_view_dxf")),
     ("Export OBJ\u{2026}", FileAction::Export("obj")),
     ("Export URDF\u{2026}", FileAction::Export("urdf")),
+    ("Export SDF Model\u{2026}", FileAction::Export("sdf")),
     ("Export Design as JSON\u{2026}", FileAction::Export("json")),
 ];
 
@@ -344,8 +345,8 @@ mod tests {
         leaves(&bar.menus, &mut entries);
         entries.retain(|i| i.id != "-");
         // App menu 2 + Quit; File: New, New Drawing, Open, 1 recent, Clear, 3 inserts, Save, Save As,
-        // JSON, Verify Signature, 7 exports, Properties; Edit 2; Window 1; Help 7.
-        assert_eq!(entries.len(), 3 + 5 + 3 + 4 + 7 + 1 + 2 + 1 + 7, "{:?}", entries.iter().map(|i| &i.id).collect::<Vec<_>>());
+        // JSON, Verify Signature, 8 exports, Properties; Edit 2; Window 1; Help 7.
+        assert_eq!(entries.len(), 3 + 5 + 3 + 4 + 8 + 1 + 2 + 1 + 7, "{:?}", entries.iter().map(|i| &i.id).collect::<Vec<_>>());
         for item in &entries {
             assert!(entry_of(&item.id, item.params.as_ref()).is_some(), "`{}` {:?} runs nothing", item.id, item.params);
         }

@@ -1113,6 +1113,7 @@ impl Model {
                 id: f.id,
                 name: f.name.clone(),
                 error: None,
+                error_code: None,
                 internal: false,
                 warning: r.get("warning").map(|w| text(Some(w))).transpose()?,
                 import_report: r
@@ -1163,11 +1164,13 @@ impl Model {
                 }
                 let local = fingerprint(doc, 0, f, &vals, false, &model.import_digests)
                     ^ placement_digest(doc, f, Some(&before))
-                    ^ construct_digest(doc, &vals, f, Some(&before));
+                    ^ construct_digest(doc, &vals, f, Some(&before))
+                    ^ turns_digest(doc, &vals, f).unwrap_or(0);
                 cache.states.put(
                     cache_key(f, r.fingerprint, local, ctx, &before),
                     CachedEval {
                         error: None,
+                        error_code: None,
                         warning: r.warning.clone(),
                         import_report: r.import_report.clone(),
                         repair: r.repair.clone(),

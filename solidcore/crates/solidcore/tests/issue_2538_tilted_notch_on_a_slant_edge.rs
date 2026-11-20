@@ -345,7 +345,7 @@ fn notch(tool: Tool, past: Past, mirror: bool, fixes: &UpstreamFixes) -> (f64, u
 /// The design of the issue (`v5`): both cap centres exactly on the box's face planes,
 /// and the seam on the line where the cylinder meets the slanted face on the material
 /// side. One closed solid of 641498.856 mm3, not a refusal, however the tool is built
-/// and whichever upstream fixes are on (SolidCraft runs all but its held-back ones).
+/// and whichever upstream fixes are on (SolidCraft runs all of them).
 #[test]
 fn the_design_notch_leaves_one_closed_solid() {
     let want = expected_volume(Past(0.0));

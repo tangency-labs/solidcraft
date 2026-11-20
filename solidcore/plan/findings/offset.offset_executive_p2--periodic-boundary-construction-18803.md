@@ -1,8 +1,9 @@
 # Periodic boundary reconstruction for an offset seam adjoining a closed rim
 
 Addendum to `offset.offset_executive_p2--stress-corpus-half-torus-topology-change-18803.md`.
-This is the first local boundary construction for issue #18803, not the complete
-sheet arrangement and winding-number cavity construction.
+Refs #18803. This is the first local boundary construction for that issue,
+covering S1983 and a retained-seam control. The complete sheet arrangement and
+winding-number cavity construction remain outside its scope.
 
 ## Construction and obligations
 
@@ -79,6 +80,29 @@ edge/body bounds. No mesh decides
 material, no analytic-kind/recipe branch selects the construction, and no
 failed construction triggers a different construction.
 
+## Review corrections
+
+Observations are grouped by source face and seam edge. Only the identical
+source edge use, vertex, support incidence and root point are deduplicated;
+the two uses of the seam may report that same observation. A different
+support or root remains in the group, so the planner's exactly-two-ends and
+one-closed-rim obligations see every constraint, independently of report order.
+
+The disappearing-seam construction applies only with genuine supports on
+both sides of its active interval. If either side lacks those supports,
+even an SSI component missing the source chart line retains ordinary
+endpoint trimming. This applicability decision precedes the chart query;
+it is not a retry after a failed reconstruction. A mixture of an ordinary
+constraint and a replacement event at one endpoint remains unresolved.
+The native regression splits a cylinder rim between its existing two
+supports, then checks the same exact half-rim trim with both the natural
+UV curve and its translation by two whole periods.
+
+Multiple SSI branches claiming the same event now return the typed
+`OffsetFailure::PeriodicBranchAmbiguous`. The edge-use mating policy
+propagates it without marking the edge as an ordinary unmated edge.
+Ordinary trim misses keep their existing unmated-edge handling.
+
 ## Independent values
 
 The S1983 shell volume remains the integral derived in the original finding:
@@ -88,6 +112,16 @@ A second test preserves the seam, using the same half-torus and a drill at
 `a = 37`, radius `0.95`, depth `4`, with inward wall `t = 0.01`. The displaced
 outer rim is `30 + (8 - t) = 37.99`; the displaced drill's outer meridian is
 `37 + (0.95 + t) = 37.96`. The seam still meets the SSI before the cap.
+
+The retained short seam has `y = 0`, with endpoints at `x = 37.99` on
+the opening and `x = 37.96` on the drill. Its latter height satisfies
+`z² = 7.99² - 7.96² = 0.4785`, between zero and the displaced cap at
+`z = 4.01`. Both ends therefore lie strictly beyond the drill centre
+`x = 37`. The other meridian reaches the cap at
+`x = 30 + sqrt(7.99² - 4.01²) = 30 + sqrt(47.76) < 37`.
+The control's topology assertion selects the unique nonclosed cavity edge
+with both ends beyond `x = 37`, then requires exactly two incidences on
+that same cavity face. No numerical nearness test selects the seam.
 
 Using the original finding's polar overlap integral H, its wall volume is
 
@@ -213,6 +247,41 @@ local renderer became available. No additional build was needed. The earlier
 CLI pictures of an independent constructive reference are not presented as
 this fix's output.
 
+## Review validation
+
+The combined exact-test run, buildq job `1795057753.582548-e45a1c89`, compiled
+successfully and exited 0. It selected only these six tests across `solidcore`
+and `solidcore-ops`:
+
+- `periodic_events_keep_distinct_supports_and_roots`: passed.
+- `periodic_chart_miss_without_a_third_support_keeps_ordinary_trim`: passed.
+- `periodic_branch_ambiguity_is_not_an_unmated_edge`: passed.
+- `every_offset_failure_keeps_its_class`: passed.
+- `a_half_torus_with_a_blind_hole_shells_open_at_its_bottom`: passed.
+- `a_half_torus_keeps_a_periodic_seam_when_its_offsets_still_meet`: passed,
+  including its new same-face incidence assertion.
+
+The kernel reported 4 passed, 0 failed, 0 ignored; operations reported 2
+passed, 0 failed, 0 ignored. Compilation took 2m35s; the operation tests took
+53.69s. No expected volume or golden changed. The run forced the lane's
+TMPDIR through Cargo's environment configuration and used RUST_BACKTRACE=1
+to execute locally. Root and solidcore formatting passed through buildq;
+`git diff --check` passed.
+
+The initial kernel compile exited 101 on test-only traversal names and a
+missing point type name, corrected before the passing run. Intermediate
+queued requests were canceled without execution (130) while consolidating
+the exact tests; formatting retries initially hit the two-job queue guard
+(2), then passed (0). Current clippy was canceled before execution (130)
+under the owner's focused-regression stop rule. No current clippy pass is
+claimed. The proposed scoped PR description is prepared, but GitHub's API
+was unreachable and its wrapper's guard logs were read-only here, so the
+actual PR description and any closing keyword could not be verified or
+updated.
+
 The remaining stress recipes and general offset-cell arrangement are outside
-this first self-contained construction. The full suite, wasm, goldens and
-repository-wide gates remain for CI after the owner pushes.
+this first self-contained construction. Keep issue #18803 open to track the
+other reported recipes; this PR must reference it with `Refs #18803`, without
+a closing keyword. Validation of two half-torus cases does not establish a fix
+for all 17 reported items. The full suite, wasm, goldens and repository-wide
+gates remain for CI after the owner pushes.

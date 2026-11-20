@@ -989,7 +989,7 @@ fn gap_is_singular(k: &Kernel, b: &Brep, f: FaceId, end: Point3, start: Point3) 
 /// The shift that takes a curve starting at `gap` from the end of the one before it onto
 /// that end, where `gap` is whole periods in a closed direction up to
 /// [`SEAM_WRAP_RESIDUAL`] (WR-491).
-fn seam_wrap_of_gap(gap: Vec3, periods: [Option<f64>; 2]) -> Vec3 {
+pub(crate) fn seam_wrap_of_gap(gap: Vec3, periods: [Option<f64>; 2]) -> Vec3 {
     let mut shift = Vec3::new(0.0, 0.0, 0.0);
     for (d, period, s) in [
         (gap.x, periods[0], &mut shift.x),

@@ -363,6 +363,38 @@ fn circular_rims_group_only_closed_cocircular_edges() {
 }
 
 #[test]
+fn circular_rims_keep_pieces_between_different_faces_apart() {
+    // #20049: two stacked discs of one radius, off axis. Their shared circle is three edges:
+    // edge 0 between the lower disc's top (face 0) and the upper disc's side, edges 1 and 2
+    // between that side and the upper disc's bottom (face 3), split at the side's seam
+    // (faces 1 and 2, joined across hidden seam edge 3).
+    let arc = |start: f64, sweep: f64| -> Vec<Vec3> {
+        (0..=32)
+            .map(|i| {
+                let a = start + sweep * i as f64 / 32.0;
+                Vec3::new(10.0 * a.cos(), 10.0 * a.sin(), 0.0)
+            })
+            .collect()
+    };
+    let pi = std::f64::consts::PI;
+    let mut m = Mesh {
+        positions: vec![Vec3::new(-10.0, -10.0, 0.0), Vec3::new(10.0, 10.0, 0.0)],
+        edges: vec![arc(0.0, pi), arc(pi, pi / 2.0), arc(1.5 * pi, pi / 2.0)],
+        edge_faces: vec![vec![1, 3], vec![1, 3], vec![2, 3], vec![1, 2]],
+        seams: vec![false, false, false, true],
+        ..Default::default()
+    };
+    // The pieces of one rim split only at the side's seam still go together.
+    assert_eq!(m.circular_rim(0), vec![0, 1, 2]);
+    assert_eq!(m.circular_rim(2), vec![0, 1, 2]);
+    // Edge 0 separates other faces: each piece is picked on its own.
+    m.edge_faces[0] = vec![0, 1];
+    for e in 0..3 {
+        assert_eq!(m.circular_rim(e), vec![e]);
+    }
+}
+
+#[test]
 fn surface_patches_cross_only_hidden_seams() {
     let mut m = Mesh { edge_faces: vec![vec![0, 1], vec![1, 2], vec![2, 3]], seams: vec![true, true, false], ..Default::default() };
     assert_eq!(m.surface_patch(0), vec![0, 1, 2]);

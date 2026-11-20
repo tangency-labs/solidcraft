@@ -40,6 +40,8 @@ fn folder(name: &str) -> std::path::PathBuf {
 fn picking_a_material_and_gauge_fills_the_manager_and_ok_makes_that_rule() {
     let mut h = manager();
     choose(&mut h, "sheet.library.material", "Aluminium 6061-T6");
+    // A millimetre design lists metric thicknesses first; the gauges are a pick away.
+    choose(&mut h, "sheet.library.series", "Gauges");
     choose(&mut h, "sheet.library.gauge", "14 ga (Brown & Sharpe)  0.0641 in");
     let commands = ok_commands(&h);
     let (command, p) = &commands[0];
@@ -66,6 +68,21 @@ fn picking_a_material_and_gauge_fills_the_manager_and_ok_makes_that_rule() {
     }
     let rule = h.app.session.doc.sheet_rule(None);
     assert_eq!((rule.name.as_str(), rule.material.as_str()), ("Aluminium 6061-T6, 14 ga", "Aluminium 6061-T6"));
+}
+
+#[test]
+fn a_metric_thickness_is_listed_first_in_a_millimetre_design_and_picked_as_a_gauge_is() {
+    let mut h = manager();
+    choose(&mut h, "sheet.library.material", "Mild steel (cold-rolled)");
+    choose(&mut h, "sheet.library.gauge", "1.5 mm");
+    let commands = ok_commands(&h);
+    let p = &commands[0].1;
+    // Air bending mild steel at the default R = T: the medium column's 0.43.
+    assert_eq!(
+        (p["name"].as_str(), p["thickness"].as_str(), p["k_factor"].as_str()),
+        (Some("Mild steel (cold-rolled), 1.5 mm"), Some("1.5 mm"), Some("0.43")),
+        "{p}"
+    );
 }
 
 #[test]

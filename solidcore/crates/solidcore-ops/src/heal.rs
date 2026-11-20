@@ -4,12 +4,14 @@
 //! coincident edges collapsed (`solidcore::heal::tolerance_defects`, where every edit is
 //! decided on a certified bound and no tolerance grows).
 //!
-//! The recipe: the full check of the body, the heal on a copy, the full check of the copy. The
-//! copy is kept only when no edge or vertex tolerance grew, its check fails fewer tests than
-//! the body's, and it fails no kind of test (its owner's class and number) more often than the
-//! body's did; else the body is given back as it was, with why. The re-check only ever
-//! refuses: each edit is accepted on its own certificate, and the check guards against what the
-//! edits did not foresee. It counts failures by kind, not by entity, so a new failure that
+//! The recipe: the heal on a copy, then, only when it proved an edit, the full check of the body
+//! and of the copy. The full check is the costliest step, and a heal that proves no edit leaves
+//! nothing to compare, so the body comes back as it was without being checked. The copy is kept
+//! only when no edge or vertex tolerance grew, its check fails fewer tests than the body's, and
+//! it fails no kind of test (its owner's class and number) more often than the body's did; else
+//! the body is given back as it was, with why. The re-check only ever refuses: each edit is
+//! accepted on its own certificate, and the check guards against what the edits did not
+//! foresee. It counts failures by kind, not by entity, so a new failure that
 //! takes the place of one the heal removed, of the same kind, is not told apart.
 //!
 //! SMLib's own healer (`SmHealData`, `HealBrep`) is not used: on bodies whose edges are shorter
@@ -47,8 +49,9 @@ pub struct HealedBody {
 /// What [`heal_tolerance_defects`] found and did.
 #[derive(Clone, Debug, PartialEq)]
 pub struct HealReport {
-    /// The full check of the body as it came.
-    pub before: CheckReport,
+    /// The full check of the body as it came; `None` when the heal proved no edit (or could
+    /// not run its edits), so there was nothing to compare and the body was not checked.
+    pub before: Option<CheckReport>,
     /// The full check of the healed copy; `None` when no heal was tried (the body passed, or
     /// the heal changed nothing).
     pub after: Option<CheckReport>,
@@ -166,22 +169,23 @@ fn summarise(healed: &Healed, report: &mut HealReport) {
 }
 
 /// `body` (its record faces in `order`, as [`Body::from_record`] gives it) healed of its
-/// tolerance-scale defects (module docs), or `None` (keep `body`) when it
-/// passes the full check, when nothing could be healed, or when the healed copy's check is not
-/// better (fewer failed tests, no kind failed more often); the report says which and why.
-/// `body` is unchanged.
+/// tolerance-scale defects (module docs), or `None` (keep `body`) when nothing could be healed,
+/// when it passes the full check, or when the healed copy's check is not better (fewer failed
+/// tests, no kind failed more often); the report says which and why. `body` is checked only
+/// when the heal proved an edit. `body` is unchanged.
 ///
 /// # Errors
 /// [`Error::Argument`] for an `order` not of `body`; [`Error::Cancelled`] when the caller's
 /// token stops it; those of the check ([`Body::check`]), of the copy and of the record
 /// conversion. A heal edit that fails otherwise is not an error: the body is kept, with why.
+/// An error from the heal's own run on a body the full check passes is not one either: that
+/// body needs no heal, and is given back as it is.
 pub fn heal_tolerance_defects(
     body: &Body,
     order: &Order,
 ) -> Result<(Option<HealedBody>, HealReport)> {
-    let before = body.check(CheckLevel::All)?;
     let mut report = HealReport {
-        before: before.clone(),
+        before: None,
         after: None,
         kept: false,
         squeezed_edges: 0,
@@ -192,10 +196,6 @@ pub fn heal_tolerance_defects(
         refused: Vec::new(),
         why_not: None,
     };
-    if before.is_valid() {
-        report.why_not = Some("the body passes the check".into());
-        return Ok((None, report));
-    }
     let made = run_on("heal_tolerance_defects", &[("brep", body)], |k| {
         let (mut a, copies, tolerances) = {
             let g = body.lock();
@@ -251,7 +251,22 @@ pub fn heal_tolerance_defects(
             Ok(a) => Ok((a, healed, copies)),
             Err(e) => Err(format!("the healed copy fails the result contract: {e:?}")),
         }))
-    })??;
+    });
+    // An error from the run is an error only for a body the check fails: a body it passes needs
+    // no heal, and is given back as it is.
+    let made = match made.and_then(|r| r) {
+        Ok(made) => made,
+        Err(Error::Cancelled) => return Err(Error::Cancelled),
+        Err(e) => {
+            let before = body.check(CheckLevel::All)?;
+            if !before.is_valid() {
+                return Err(e);
+            }
+            report.before = Some(before);
+            report.why_not = Some("the body passes the check".into());
+            return Ok((None, report));
+        }
+    };
     let (healed_brep, healed, copies) = match made {
         Ok(made) => made,
         Err(why) => {
@@ -262,6 +277,13 @@ pub fn heal_tolerance_defects(
     summarise(&healed, &mut report);
     if healed.squeezed.is_empty() && healed.collapsed.is_empty() && healed.cut_pieces.is_empty() {
         report.why_not = Some("nothing the heal takes could be proved".into());
+        return Ok((None, report));
+    }
+    // An edit was proved: the body's check decides whether the healed copy is better.
+    let before = body.check(CheckLevel::All)?;
+    report.before = Some(before.clone());
+    if before.is_valid() {
+        report.why_not = Some("the body passes the check".into());
         return Ok((None, report));
     }
     let candidate = Body::new(healed_brep);

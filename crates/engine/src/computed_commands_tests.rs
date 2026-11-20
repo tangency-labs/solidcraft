@@ -31,6 +31,33 @@ fn acceptance_preserves_file_history_and_prepared_world_without_evaluation() {
 }
 
 #[test]
+fn prepared_preview_includes_visibility_and_command_replies() {
+    let mut session = Session::default();
+    session.execute("solid.box", &json!({"length":1,"width":1,"height":1,"body_name":"Hidden"})).unwrap();
+    session.execute("browser.visibility", &json!({"items":["Hidden"],"visible":false})).unwrap();
+    let history = session.undo.len();
+    let document = session.doc.clone();
+    let prepared = session.scratch().compute_commands(&commands(), None).unwrap();
+
+    let preview = prepared.preview_visible_world().unwrap();
+    assert!(preview.before.bodies.is_empty());
+    assert_eq!(preview.after.bodies.len(), 1);
+    assert_eq!(preview.replies.as_slice(), std::slice::from_ref(&prepared.steps[0].reply));
+    assert!(prepared.changes_document());
+    assert!(Arc::ptr_eq(&document, &session.doc));
+    assert_eq!(session.undo.len(), history);
+}
+
+#[test]
+fn an_equal_document_in_a_new_allocation_is_unchanged() {
+    let session = Session::default();
+    let mut prepared = session.scratch().compute_commands(&[], None).unwrap();
+    prepared.computed.doc = Arc::new((*prepared.computed.doc).clone());
+    assert!(!Arc::ptr_eq(&prepared.source.doc, &prepared.computed.doc));
+    assert!(!prepared.changes_document());
+}
+
+#[test]
 fn failure_discards_the_entire_batch() {
     let session = Session::default();
     let document = session.doc.clone();
