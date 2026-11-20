@@ -3141,6 +3141,17 @@ impl FeatureKind {
         )
     }
 
+    /// Profile sketch id for a constructor feature that captures `Feature::profile_frame`.
+    pub fn constructor_profile_sketch(&self) -> Option<u64> {
+        match self {
+            FeatureKind::Extrude { sketch, .. }
+            | FeatureKind::Revolve { sketch, .. }
+            | FeatureKind::SurfaceExtrude { sketch, .. }
+            | FeatureKind::SurfaceRevolve { sketch, .. } => Some(sketch.0),
+            _ => None,
+        }
+    }
+
     /// Short type name (timeline tooltip, `inspect`).
     pub fn type_name(&self) -> &'static str {
         match self {

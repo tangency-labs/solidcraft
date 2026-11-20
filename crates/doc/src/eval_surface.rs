@@ -333,6 +333,9 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 &*super::axis_state(doc, st, f.component, axis)?,
                 &|name| construction_axis_in(Some(doc), st, name, f.component),
                 &|owner, curve| {
+                    if owner == sketch.0 {
+                        return sketch_line_world(&ss, curve);
+                    }
                     let solved =
                         st.sketch(owner).ok_or_else(|| DocError::Unknown(format!("sketch {owner} (it must come earlier in the timeline)")))?;
                     sketch_line_world(&sketch_in_feature_frame(doc, solved, f.component)?, curve)

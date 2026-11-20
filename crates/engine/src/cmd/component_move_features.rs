@@ -77,26 +77,46 @@ pub(super) fn move_features(s: &mut Session, p: &Value) -> Result<Value> {
             }
             f.kind.transform_geometry(&delta);
         }
-        if let Some(m) = f.profile_frame {
-            let sketch_id = f.kind.profile_sels().into_iter().next().map(|(id, _)| id);
-            let sketch_moved = sketch_id.is_some_and(|id| moving.contains(&id));
-            let old_owner = sketch_id.and_then(|id| s.doc.feature(id).map(|g| g.component));
-            let new_owner = if sketch_moved { Some(dest) } else { old_owner };
-            f.profile_frame = match (old_owner, new_owner) {
-                (_, Some(o)) if o == dest => None,
-                (Some(old_o), Some(new_o)) => {
-                    let old_lca = s.doc.common_ancestor(old.component, old_o);
-                    let new_lca = s.doc.common_ancestor(dest, new_o);
-                    let old_owner_in_lca = s.doc.component_transform_in(old_o, old_lca);
-                    let new_owner_in_lca = s.doc.component_transform_in(new_o, new_lca);
-                    let updated = mat_inverse(&old_owner_in_lca)
-                        .and_then(|inv_old_o| mat_inverse(&delta).map(|inv_d| mat_mul(&mat_mul(&new_owner_in_lca, &inv_old_o), &mat_mul(&m, &inv_d))))
-                        .filter(solidcraft_doc::is_placement)
-                        .unwrap_or(m);
-                    Some(updated)
-                }
-                _ => Some(m),
-            };
+        if let Some(m) = f.profile_frame
+            && let Some(sketch_id) = f.kind.constructor_profile_sketch()
+            && let Some(old_o) = s.doc.feature(sketch_id).map(|g| g.component)
+        {
+            let sketch_moved = moving.contains(&sketch_id);
+            let new_o = if sketch_moved { dest } else { old_o };
+            let old_lca = s.doc.common_ancestor(old.component, old_o);
+            let new_lca = s.doc.common_ancestor(dest, new_o);
+            let old_owner_in_lca = s.doc.component_transform_in(old_o, old_lca);
+            let new_owner_in_lca = s.doc.component_transform_in(new_o, new_lca);
+            let sketch_delta = if sketch_moved { mat_mul(&to_dest, &s.doc.component_transform(old_o)) } else { solidcraft_doc::IDENTITY };
+            let updated = mat_inverse(&old_owner_in_lca)
+                .and_then(|inv_old_o| {
+                    mat_inverse(&delta).map(|inv_d| mat_mul(&mat_mul(&new_owner_in_lca, &sketch_delta), &mat_mul(&inv_old_o, &mat_mul(&m, &inv_d))))
+                })
+                .filter(solidcraft_doc::is_placement)
+                .unwrap_or(m);
+            f.profile_frame = if new_o == dest && is_identity(&updated) { None } else { Some(updated) };
+        }
+    }
+    // Features outside `moved` whose captured profile sketch moved also need their frame rebased.
+    for f in &mut doc.features {
+        if moving.contains(&f.id) {
+            continue;
+        }
+        if let Some(m) = f.profile_frame
+            && let Some(sketch_id) = f.kind.constructor_profile_sketch()
+            && moving.contains(&sketch_id)
+            && let Some(old_o) = s.doc.feature(sketch_id).map(|g| g.component)
+        {
+            let old_lca = s.doc.common_ancestor(f.component, old_o);
+            let new_lca = s.doc.common_ancestor(f.component, dest);
+            let old_owner_in_lca = s.doc.component_transform_in(old_o, old_lca);
+            let new_owner_in_lca = s.doc.component_transform_in(dest, new_lca);
+            let sketch_delta = mat_mul(&to_dest, &s.doc.component_transform(old_o));
+            let updated = mat_inverse(&old_owner_in_lca)
+                .map(|inv_old_o| mat_mul(&mat_mul(&new_owner_in_lca, &sketch_delta), &mat_mul(&inv_old_o, &m)))
+                .filter(solidcraft_doc::is_placement)
+                .unwrap_or(m);
+            f.profile_frame = if dest == f.component && is_identity(&updated) { None } else { Some(updated) };
         }
     }
     // Attached sketches and embossed faces carry the placement of the body they sit on and of

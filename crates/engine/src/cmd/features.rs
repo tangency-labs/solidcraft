@@ -748,14 +748,8 @@ pub(super) fn check_count(s: &Session, e: &str, cmd: &str, what: &str) -> Result
 /// on `consumer` carry the built body rigidly with it while moves of the sketch's own component
 /// still propagate.
 pub(super) fn cross_component_profile_frame_for(s: &Session, consumer: u64, kind: &FeatureKind) -> Option<solidcraft_doc::Mat> {
-    let sketch = match kind {
-        FeatureKind::Extrude { sketch, .. }
-        | FeatureKind::Revolve { sketch, .. }
-        | FeatureKind::SurfaceExtrude { sketch, .. }
-        | FeatureKind::SurfaceRevolve { sketch, .. } => *sketch,
-        _ => return None,
-    };
-    let owner = s.doc.feature(sketch.0)?.component;
+    let sketch = kind.constructor_profile_sketch()?;
+    let owner = s.doc.feature(sketch)?.component;
     if owner == consumer {
         return None;
     }
@@ -764,8 +758,24 @@ pub(super) fn cross_component_profile_frame_for(s: &Session, consumer: u64, kind
     if consumer == lca {
         return None;
     }
-    let consumer_world = if consumer == s.active_component { s.active_component_frame() } else { placed.component_transform(consumer) };
-    let lca_inv = solidcraft_doc::mat_inverse(&placed.component_transform(lca))?;
+    let (consumer_world, lca_world) = if consumer == s.active_component {
+        let cw = s.active_component_frame();
+        let lw = if lca == 0 {
+            solidcraft_doc::IDENTITY
+        } else if let Some(path) = &s.active_occurrence_path
+            && let Some(pos) = path.iter().position(|occ_id| s.doc.occurrences.iter().any(|o| o.id == *occ_id && o.component == lca))
+            && let Ok(p) = s.occurrence_placement(&path[..=pos])
+            && p.component == lca
+        {
+            p.world
+        } else {
+            placed.component_transform(lca)
+        };
+        (cw, lw)
+    } else {
+        (placed.component_transform(consumer), placed.component_transform(lca))
+    };
+    let lca_inv = solidcraft_doc::mat_inverse(&lca_world)?;
     let consumer_in_lca = solidcraft_doc::mat_mul(&lca_inv, &consumer_world);
     solidcraft_doc::is_placement(&consumer_in_lca).then_some(consumer_in_lca)
 }

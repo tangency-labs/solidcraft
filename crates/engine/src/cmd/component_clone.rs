@@ -529,7 +529,7 @@ pub(super) fn build(
         }
         f.remap_clone(&features, &names, &bodies, &parameters, &occurrences, &scratch.doc)?;
         if f.profile_frame.is_some()
-            && let Some((old_sketch, _)) = old.kind.profile_sels().into_iter().next()
+            && let Some(old_sketch) = old.kind.constructor_profile_sketch()
             && features.contains_key(&old_sketch)
             && source.feature(old_sketch).and_then(|g| components.get(&g.component)).copied() == Some(f.component)
         {
