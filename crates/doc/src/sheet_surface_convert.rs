@@ -619,19 +619,28 @@ fn on_material(s: Vec2, e: Vec2, regions: &[Region2]) -> Vec<(Vec2, Vec2)> {
 }
 
 /// Where a region's outline crosses a line (a point and a unit direction), as lengths along the
-/// line from its point: the least and the greatest. `None` where it doesn't. Read off the curves
+/// line from its point: the least and the greatest. `None` where it doesn't. See
+/// [`crossings_across`].
+pub(crate) fn extent_across(r: &Region2, line: (Vec2, Vec2)) -> Option<(f64, f64)> {
+    let at = crossings_across(r, line);
+    at.first().copied().zip(at.last().copied())
+}
+
+/// Where a region's outline crosses a line (a point and a unit direction), as lengths along the
+/// line from its point, in order: the line runs inside the region from the first to the second,
+/// from the third to the fourth, and so on. Read off the curves
 /// themselves: an outline crosses where it passes from the line's left to its right or back, a
 /// point on the line counted with its right, and each segment ending where the next one starts
 /// (see [`crate::sheet_surface_cuts::holds`]). A line's crossing is found in closed form, and an
 /// arc's, in pieces between its circle's points furthest to either side of the line, along each
 /// of which it only nears the line or only leaves it; any other curve's by
 /// [`solidcraft_develop::crossings`], each crossing of its chords followed onto the curve itself.
-pub(crate) fn extent_across(r: &Region2, (p, u): (Vec2, Vec2)) -> Option<(f64, f64)> {
+pub(crate) fn crossings_across(r: &Region2, (p, u): (Vec2, Vec2)) -> Vec<f64> {
     use std::f64::consts::PI;
     let n = u.perp();
     let side = |q: Vec2| (q - p).dot(n);
-    let mut out: Option<(f64, f64)> = None;
-    let mut take = |along: f64| out = Some(out.map_or((along, along), |(lo, hi)| (lo.min(along), hi.max(along))));
+    let mut out: Vec<f64> = Vec::new();
+    let mut take = |along: f64| out.push(along);
     for l in std::iter::once(&r.outer).chain(&r.holes) {
         let ends = l.segs.iter().skip(1).chain(l.segs.first()).map(Seg2::start);
         for (s, end) in l.segs.iter().zip(ends) {
@@ -689,6 +698,7 @@ pub(crate) fn extent_across(r: &Region2, (p, u): (Vec2, Vec2)) -> Option<(f64, f
             }
         }
     }
+    out.sort_by(f64::total_cmp);
     out
 }
 
@@ -3252,12 +3262,6 @@ pub struct SurfaceSheet {
     /// a rim on one is made by that line (see [`RimEdge::Sketch`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sketch_curves: Vec<(String, String, Vec2, Vec2)>,
-    /// Each straight rim of its flat panels as last laid out: the panel, its edge in the panel's
-    /// chart and its name there (see [`crate::sheet::FaceNamer`]). A pick is named by them and
-    /// found again by its name, so a feature reads them here rather than laying the sheet out
-    /// again.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub rims: Vec<(usize, Vec2, Vec2, String)>,
     /// What each face of its body was made for, as it was last built (see [`SheetFace`]): what it
     /// reports to the model, which names its faces from it (#7990). Never a name.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -3592,7 +3596,6 @@ impl SurfaceSheet {
             perforations: Vec::new(),
             perforation_joints: Vec::new(),
             sketch_curves: Vec::new(),
-            rims: Vec::new(),
             parts: Vec::new(),
             recipes,
             holes: Vec::new(),
@@ -3783,7 +3786,6 @@ impl SurfaceSheet {
             perforations: Vec::new(),
             perforation_joints: Vec::new(),
             sketch_curves,
-            rims: Vec::new(),
             parts: Vec::new(),
             recipes,
             holes: Vec::new(),
@@ -4175,8 +4177,7 @@ impl SurfaceSheet {
     /// `body` with the sheet's bores cut from it, each from its panel where `frames` put it.
     fn bored(&self, mut body: Body, frames: &[Option<Rigid3>]) -> Result<Body> {
         for b in &self.bores {
-            let frame =
-                b.panel.and_then(|p| frames.get(p).copied().flatten()).ok_or_else(|| DocError::Invalid("a bored panel has no place".into()))?;
+            let frame = frames.get(b.panel).copied().flatten().ok_or_else(|| DocError::Invalid("a bored panel has no place".into()))?;
             let axis = frame.vector(b.axis);
             let base = frame.point(b.base);
             let Some(plane) = axis.normalized().and_then(|a| Plane::new(base, a.any_perp(), a.cross(a.any_perp()))) else { continue };
@@ -4293,9 +4294,8 @@ impl SurfaceSheet {
     }
 
     /// Keeps the flat `regions` of the development `dev` (joined from its `pieces`), with its
-    /// bends and their tabs, rolls and their lines, and its panels' rims.
+    /// bends and their tabs, and rolls and their lines.
     fn laid_out(&mut self, dev: &Development, pieces: &[(Piece, Region2)], regions: Vec<Region2>) -> Result<()> {
-        self.rims = crate::sheet::rims(&self.sheet, dev, pieces, &self.sketch_curves, &self.recipes);
         self.bends = dev
             .zones
             .iter()

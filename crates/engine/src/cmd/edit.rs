@@ -291,7 +291,7 @@ fn reply(cmd: &str, r: impl serde::Serialize) -> Result<Value> {
 }
 
 fn undo(s: &mut Session, _p: &Value) -> Result<Value> {
-    let at = latest(&s.undo, s.open_drawing).ok_or_else(|| nothing(s, "undo"))?;
+    let at = latest(&s.undo, s.history_part()).ok_or_else(|| nothing(s, "undo"))?;
     let prev = s.undo.get(at).cloned().ok_or_else(|| nothing(s, "undo"))?;
     let now = go_to(s, prev, "edit.undo")?;
     s.undo.remove(at);
@@ -301,7 +301,7 @@ fn undo(s: &mut Session, _p: &Value) -> Result<Value> {
 }
 
 fn redo(s: &mut Session, _p: &Value) -> Result<Value> {
-    let at = latest(&s.redo, s.open_drawing).ok_or_else(|| nothing(s, "redo"))?;
+    let at = latest(&s.redo, s.history_part()).ok_or_else(|| nothing(s, "redo"))?;
     let next = s.redo.get(at).cloned().ok_or_else(|| nothing(s, "redo"))?;
     let now = go_to(s, next, "edit.redo")?;
     s.redo.remove(at);
@@ -352,14 +352,14 @@ fn repeat(_s: &mut Session, _p: &Value) -> Result<Value> {
     ))
 }
 
-/// Takes the latest of `steps` on `part` (the open drawing, else the model): undo and redo go
-/// through one part's steps, and leave the others' where they are.
+/// Takes the latest of `steps` on `part` ([`Session::history_part`]: the open drawing, else the
+/// model): undo and redo go through one part's steps, and leave the others' where they are.
 fn latest(steps: &[Snapshot], part: Option<u64>) -> Option<usize> {
     steps.iter().rposition(|step| step.part == part)
 }
 
 fn nothing(s: &Session, what: &str) -> EngineError {
-    match s.open_drawing {
+    match s.history_part() {
         Some(_) => EngineError::Other(format!("nothing to {what} in this drawing (close it to {what} in the model)")),
         None => EngineError::Other(format!("nothing to {what}")),
     }
@@ -368,8 +368,8 @@ fn nothing(s: &Session, what: &str) -> EngineError {
 /// Put the session at `snap`; returns where it was, under the same label. A drawing's step puts
 /// back only that drawing. The model's step puts back the design as it was, but keeps each
 /// drawing the design had as it is now: each part's steps are undone in that part only. Neither
-/// opens or closes a drawing: a drawing's steps are taken while it is open, and the model's while
-/// none is.
+/// opens or closes a drawing: a drawing's steps are taken while it is open, and the model's with a
+/// drawing open or not.
 fn go_to(s: &mut Session, snap: Snapshot, cmd: &str) -> Result<Snapshot> {
     let was = Snapshot { part: snap.part, section: snap.section.as_ref().map(|_| s.section_state()), ..Snapshot::of(s, &snap.label) };
     let mut snap = match snap.part {
@@ -379,7 +379,8 @@ fn go_to(s: &mut Session, snap: Snapshot, cmd: &str) -> Result<Snapshot> {
             section: snap.section.clone(),
             ..was.clone()
         },
-        None => Snapshot { doc: drawings_from(snap.doc, &s.doc), ..snap },
+        // A sheet sketch being edited stays as it is: the model's steps never end or start one.
+        None => Snapshot { doc: drawings_from(snap.doc, &s.doc), active_sheet_sketch: s.active_sheet_sketch.clone(), ..snap },
     };
     snap.doc = Session::refreshed_sheet_fill_history_document(&s.doc, &snap.doc, snap.part, cmd)?;
     let same = Arc::ptr_eq(&s.doc, &snap.doc);
@@ -1486,9 +1487,38 @@ fn inspect_feature(s: &mut Session, p: &Value) -> Result<Value> {
         omitted,
         inputs,
         error: r.and_then(|r| r.error.clone()),
+        error_code: r.and_then(|r| r.error_code.as_ref()).map(Into::into),
         warning: r.and_then(|r| r.warning.clone()),
     };
     reply(cmd, TimelineInspectResult { inspected: Inspected::Feature(Box::new(info)), param_warnings: Vec::new() })
+}
+
+/// A hole made with length expressions keeps them in `at`; its `position` is the point they
+/// evaluate to. `solid.hole` calls both `position`, so an expression given as `position` here goes
+/// to `at`, where it is read and followed (#19632). Numbers alone stay in `position`.
+fn hole_position_expressions(mut set: Value, kind: &FeatureKind) -> Value {
+    if !matches!(kind, FeatureKind::Hole { .. }) {
+        return set;
+    }
+    let Some(o) = set.as_object_mut() else { return set };
+    if !o.contains_key("at")
+        && o.get("position").and_then(Value::as_array).is_some_and(|a| a.iter().any(Value::is_string))
+        && let Some(position) = o.remove("position")
+    {
+        o.insert("at".into(), position);
+    }
+    set
+}
+
+/// A Rotate step turns one member: an edit (`timeline.edit` or `timeline.redefine`) changes its
+/// angle, never which member it turns.
+fn keeps_member(old: &FeatureKind, new: &FeatureKind, cmd: &str) -> Result<()> {
+    match (old, new) {
+        (FeatureKind::FrameMemberTurn { member: before, .. }, FeatureKind::FrameMemberTurn { member: after, .. }) if before != after => {
+            Err(bad(cmd, "A Rotate step keeps its member"))
+        }
+        _ => Ok(()),
+    }
 }
 
 fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1498,6 +1528,7 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     let f = s.doc.feature(id).cloned().ok_or_else(|| bad(cmd, "feature"))?;
     let before = serde_json::to_value(&f).map_err(|e| EngineError::Other(e.to_string()))?;
     let set = expand_dotted(set, Some(&before), cmd, 0)?;
+    let set = hole_position_expressions(set, &f.kind);
     let set = &numbers_as_expressions(command_profiles(&set, cmd)?, &before);
     let mut v = before.clone();
     merge(&mut v, set, 0);
@@ -1517,6 +1548,7 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     if std::mem::discriminant(&nf.kind) != std::mem::discriminant(&f.kind) {
         return Err(bad(cmd, "the feature type cannot change"));
     }
+    keeps_member(&f.kind, &nf.kind, cmd)?;
     // serde drops fields the definition doesn't have without a word: refuse them, or a typo
     // would report success and change nothing.
     let after = serde_json::to_value(&nf).map_err(|e| EngineError::Other(e.to_string()))?;
@@ -1576,6 +1608,9 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     // Profiles picked by index or point are kept by their curves, as when the feature was made.
     if nf.kind.clone().profile_sels_mut() != f.kind.clone().profile_sels_mut() {
         super::features::stable_profiles(s, &mut nf.kind, false)?;
+    }
+    if nf.kind.constructor_profile_sketch() != f.kind.constructor_profile_sketch() {
+        nf.profile_frame = super::features::cross_component_profile_frame_for(s, nf.component, &nf.kind);
     }
     // A body Pattern's copy names move with the bodies they copy (#12114). Names the edit gives
     // are in the order the copies are made, as they always were: they are read that way, not
@@ -1831,28 +1866,59 @@ fn select_sharp_edges(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// In an open sketch, every curve of it (construction ones too) and every point of it on no
 /// curve, leaving out its origin and projected geometry; outside a sketch, every shown body.
-fn select_all(s: &mut Session, _p: &Value) -> Result<Value> {
-    let all: Vec<Sel> = match s.active_sketch {
-        Some(id) => {
-            let sk = super::sketch_store::read(&s.doc, id)?;
-            let own = sk.curves.iter().filter(|c| c.link.is_none());
-            let on_curve = |q: usize| own.clone().any(|c| c.kind.uses(q));
-            own.clone()
-                .map(|c| Sel::SketchCurve { id: c.id.clone(), sketch: None })
-                .chain(
-                    sk.points
-                        .iter()
-                        .enumerate()
-                        .filter(|(q, p)| p.link.is_none() && p.id != "origin" && !on_curve(*q))
-                        .map(|(_, p)| Sel::SketchPoint { id: p.id.clone() }),
-                )
+fn select_all(s: &mut Session, p: &Value) -> Result<Value> {
+    let request: crate::schema::select::SelectAllParams = crate::schema::read("select.all", p)?;
+    // The drawing's sheet, unless the model has the focus (the Design workspace with a drawing open).
+    let drawing = s.open_drawing.filter(|_| s.active_sketch.is_none() && !s.model_focus);
+    if drawing.is_none() && request.sheet.is_some() {
+        return Err(bad("select.all", "sheet: only with a drawing open"));
+    }
+    let all: Vec<Sel> = match (s.active_sketch, drawing) {
+        (None, Some(open)) => {
+            let d = s.drawing("select.all")?;
+            let sheet = match &request.sheet {
+                Some(named) => crate::drawing_scene::sheet_id(d, named, "select.all")?,
+                None => d.sheets.first().map(|sheet| sheet.id).ok_or_else(|| bad("select.all", "the drawing open has no sheet"))?,
+            };
+            let on = d.on_sheet(sheet);
+            on.views
+                .iter()
+                .chain(&on.dimensions)
+                .chain(&on.balloons)
+                .chain(&on.notes)
+                .filter(|object| d.has_object(**object))
                 .take(10_001)
+                .map(|object| Sel::Drawing { drawing: open, object: *object })
                 .collect()
         }
-        None => {
-            let hidden = &s.visibility.hidden_bodies;
-            s.world_state()?.bodies.iter().filter(|b| !hidden.contains(&b.name)).take(10_001).map(|b| Sel::Body { name: b.name.clone() }).collect()
-        }
+        (active, _) => match active {
+            Some(id) => {
+                let sk = super::sketch_store::read(&s.doc, id)?;
+                let own = sk.curves.iter().filter(|c| c.link.is_none());
+                let on_curve = |q: usize| own.clone().any(|c| c.kind.uses(q));
+                own.clone()
+                    .map(|c| Sel::SketchCurve { id: c.id.clone(), sketch: None })
+                    .chain(
+                        sk.points
+                            .iter()
+                            .enumerate()
+                            .filter(|(q, p)| p.link.is_none() && p.id != "origin" && !on_curve(*q))
+                            .map(|(_, p)| Sel::SketchPoint { id: p.id.clone() }),
+                    )
+                    .take(10_001)
+                    .collect()
+            }
+            None => {
+                let hidden = &s.visibility.hidden_bodies;
+                s.world_state()?
+                    .bodies
+                    .iter()
+                    .filter(|b| !hidden.contains(&b.name))
+                    .take(10_001)
+                    .map(|b| Sel::Body { name: b.name.clone() })
+                    .collect()
+            }
+        },
     };
     if all.len() > 10_000 {
         return Err(bad("select.all", "too many items"));
@@ -2307,6 +2373,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "plastic.snap_fit"
                 | "plastic.rest"
                 | "frame.end_cap"
+                | "frame.rotate_member"
                 | "frame.member"
         );
     if !constructor {
@@ -2473,6 +2540,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     if std::mem::discriminant(&new.kind) != std::mem::discriminant(&old.kind) && !(boundary(&new.kind) && boundary(&old.kind)) {
         return Err(bad(cmd, format!("{} is not a {} feature", old.name, cid)));
     }
+    keeps_member(&old.kind, &new.kind, cmd)?;
     // The trial still holds the old feature, so a plane offset from its own name was made there,
     // and once swapped in it would be built on itself (#3567).
     if new.kind.names_feature(old.id, &old.name) {
@@ -2614,6 +2682,9 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         slot.suppressed = old.suppressed;
         if let Some((names, _)) = cap_names {
             slot.body_names = names;
+        }
+        if old.kind.constructor_profile_sketch() != new.kind.constructor_profile_sketch() {
+            slot.profile_frame = new.profile_frame;
         }
         slot.kind = new.kind;
         slot.edge_refs = new.edge_refs;

@@ -20,8 +20,12 @@ use solidcore::query::api_queries::{
 use solidcore::query::brep::{BrepClassifier, BrepQuery, LiveBrepObjects, Ray};
 use solidcore::query::face::p1 as face_p1;
 use solidcore::topology::brep::outward_solid_failure;
+use solidcore::topology::brep::p3::{
+    brep_copy_mapped, merge_brep, notify_serial, topology_ref, with_kernel_callbacks,
+};
 use solidcore::topology::edgeuse::p1 as eu1;
 use solidcore::topology::face::p2::{self as face_p2, face_side_regions};
+use solidcore::topology::proto_topology::p1::CopyBrepMap;
 use solidcore::topology::{edge, face};
 use solidcore::topology::{Brep, BrepId, EdgeId, FaceId, FaceuseId, RegionId};
 use solidcore::{Kernel, Point3, Vec3};
@@ -30,13 +34,15 @@ use crate::blend::middle;
 use crate::body::Body;
 use crate::error::status;
 use crate::order::{self, Order};
-use crate::session::{answer, measure_body, read_body, with_body, Answer};
+use crate::session::{answer, measure_body, read_body, run_on, with_body, Answer};
+use crate::split::copies_of;
 use crate::{Error, Result};
 
 impl Answer for Vec<q::EdgeFaceGapSample> {}
 impl Answer for Distance {}
 impl Answer for solidcore::geom::extent3d::Extent3d {}
 impl Answer for [f64; 3] {}
+impl Answer for Vec<[f64; 3]> {}
 impl Answer for Vec<Option<f64>> {}
 impl Answer for Vec<Vec<Option<f64>>> {}
 impl Answer for Vec<Result<PointClass>> {}
@@ -319,14 +325,15 @@ pub struct EdgeCurve {
 }
 
 impl Answer for EdgeCurve {}
+impl Answer for MembersClosest {}
 
-/// The closest points of an edge's curve or a point and some faces and edges of a body
-/// ([`Body::closest_to_curve`], [`Body::closest_to_point`]).
+/// The closest points of selected exact geometry ([`Body::closest_to_curve`],
+/// [`Body::closest_to_point`], [`Body::closest_faces`]).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MembersClosest {
     /// The kernel solve's distance between the two points (not certified: a solve's).
     pub distance: f64,
-    /// On the curve (within its edge's interval), or the point itself.
+    /// On the first selection: its curve, point or trimmed faces.
     pub from: [f64; 3],
     /// On the faces (as they are trimmed) or edges (over their intervals).
     pub to: [f64; 3],
@@ -754,6 +761,99 @@ impl Body {
     ) -> Result<Option<MembersClosest>> {
         let probe = q::Probe::Point(point(p)?);
         self.closest_to(order, faces, edges, probe, "closest_to_point")
+    }
+
+    /// The closest points between selected trimmed faces of two bodies. The kernel solves
+    /// both faces' interiors, edges and vertices on their exact geometry. The bodies may be
+    /// the same body; their geometry and record orders are left unchanged.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an empty selection or an index past the faces; the kernel's
+    /// error when copying, solving or evaluating either witness fails.
+    pub fn closest_faces(
+        &self,
+        order: &Order,
+        faces: &[usize],
+        other: &Body,
+        other_order: &Order,
+        other_faces: &[usize],
+    ) -> Result<MembersClosest> {
+        if faces.is_empty() || other_faces.is_empty() {
+            return Err(Error::Argument);
+        }
+        let first = faces
+            .iter()
+            .map(|f| order::face(order, *f))
+            .collect::<Result<Vec<_>>>()?;
+        let second = other_faces
+            .iter()
+            .map(|f| order::face(other_order, *f))
+            .collect::<Result<Vec<_>>>()?;
+        if self.is_poisoned() || other.is_poisoned() {
+            return Err(Error::Internal(
+                "closest_faces: a body was left unfinished by an earlier panic".into(),
+            ));
+        }
+        run_on(
+            "closest_faces",
+            &[("first", self), ("second", other)],
+            |k| {
+                // A single measurement-only B-rep lets the existing live face services handle
+                // both selections, even when the original bodies overlap. Each copy has its own
+                // topology identities; compose the maps rather than assuming matching indices.
+                let (mut combined, first_map) = {
+                    let b = self.lock();
+                    brep_copy_mapped(k, &b)?
+                };
+                let (mut second_body, second_map) = {
+                    let b = other.lock();
+                    brep_copy_mapped(k, &b)?
+                };
+                let mapped = |map: &CopyBrepMap<EntityRef>, faces: &[FaceId]| {
+                    copies_of(map, faces, EntityRef::Face, |e| match e {
+                        EntityRef::Face(f) => Some(f),
+                        _ => None,
+                    })
+                    .ok_or_else(|| {
+                        solidcore::SolidError::invalid_input(
+                            "closest_faces",
+                            "a selected face has no copy",
+                        )
+                    })
+                };
+                let first = mapped(&first_map, &first)?;
+                let second = mapped(&second_map, &second)?;
+                let serial = notify_serial(&mut k.context, &mut second_body)?;
+                let source_key = move |e| topology_ref(serial, e);
+                let mut merged_map = CopyBrepMap::default();
+                with_kernel_callbacks(k, &mut combined, |k, b, env| {
+                    merge_brep(
+                        k,
+                        env,
+                        b,
+                        &second_body,
+                        &source_key,
+                        None,
+                        Some(&mut merged_map),
+                        false,
+                    )
+                })?;
+                let second = mapped(&merged_map, &second)?;
+                combined.refresh_cached_topology();
+                let c = q::closest_between_faces(
+                    k,
+                    &mut combined,
+                    BrepId::from_index(0),
+                    &first,
+                    &second,
+                )?;
+                Ok(MembersClosest {
+                    distance: c.distance,
+                    from: array(c.on_probe),
+                    to: array(c.on_members),
+                })
+            },
+        )
     }
 
     fn closest_to(
@@ -1323,6 +1423,51 @@ impl Body {
         }
         Ok(p)
     }
+
+    /// `count` points of record edge `edge`'s curve inside the edge, never at its ends: the
+    /// kernel's evaluation of the curve at the fractions k / (count + 1), k = 1 … count, of the
+    /// edge's parameter interval. They are spaced evenly in parameter, not in length: on a
+    /// line they are evenly spaced along it, on a rational arc or a spline they need not be. One
+    /// point is [`Body::edge_middle`]'s. For a caller that checks what happened along an edge,
+    /// not only at its middle: a blend that runs on past the end of its edge takes part of the
+    /// next one. The body is only read, never copied for a rollback.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for a `count` of 0 or past [`EDGE_POINTS_MAX`]; otherwise as
+    /// [`Body::edge_middle`].
+    pub fn edge_points(&self, order: &Order, edge: usize, count: usize) -> Result<Vec<[f64; 3]>> {
+        let n = match u32::try_from(count) {
+            Ok(n) if (1..=EDGE_POINTS_MAX).contains(&n) => n,
+            _ => return Err(Error::Argument),
+        };
+        let e = order::edge(order, edge)?;
+        let points = read_body("edge_points", self, |k, b| {
+            let interval = edge::interval(b, e)?;
+            let curve = edge::curve(b, e)?
+                .ok_or_else(|| solidcore::SolidError::null_pointer("ops::edge_points"))?;
+            let (lo, hi) = (interval.min(), interval.max());
+            (1..=n)
+                .map(|i| curve.evaluate_point(k, inside(lo, hi, i, n)).map(array))
+                .collect::<solidcore::Result<Vec<_>>>()
+        })?;
+        if !points.iter().flatten().all(|x| x.is_finite()) {
+            return Err(Error::Status(crate::error::INVALID_INPUT));
+        }
+        Ok(points)
+    }
+}
+
+/// The most points [`Body::edge_points`] gives along one edge.
+pub const EDGE_POINTS_MAX: u32 = 64;
+
+/// The parameter `i / (n + 1)` of the way along `[lo, hi]`: the `i`-th of `n` sample positions
+/// ops chooses inside the interval, as [`middle`] is the one position for `n` = 1.
+#[allow(
+    clippy::float_arithmetic,
+    reason = "a sample parameter ops chooses, not a geometric quantity (docs/layers.md)"
+)]
+fn inside(lo: f64, hi: f64, i: u32, n: u32) -> f64 {
+    lo + (hi - lo) * (f64::from(i) / (f64::from(n) + 1.0))
 }
 
 /// The use of face `f` that faces out of its material, chosen by the materiality of the
@@ -1426,6 +1571,80 @@ pub(crate) mod tests {
 
     fn all_fixes() {
         session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    }
+
+    /// The selected walls of nested cylinders are 35 - 20 = 15 apart, even though their
+    /// solids overlap. Preparing their common measurement B-rep must preserve both orders.
+    #[test]
+    fn closest_faces_of_nested_cylinders_are_their_radii_apart() {
+        all_fixes();
+        let a = crate::make_cylinder([0.0, 0.0, 0.0], 20.0, 5.0).unwrap();
+        let b = crate::make_cylinder([0.0, 0.0, 0.0], 35.0, 5.0).unwrap();
+        let (ao, bo) = (kernel_order(&a), kernel_order(&b));
+        let af = faces_on(&a, &ao, |s| matches!(s, SurfaceKind::Cone(_)));
+        let bf = faces_on(&b, &bo, |s| matches!(s, SurfaceKind::Cone(_)));
+        assert!(!af.is_empty() && !bf.is_empty());
+        for (a, ao, af, b, bo, bf, ra, rb) in [
+            (&a, &ao, &af, &b, &bo, &bf, 20.0, 35.0),
+            (&b, &bo, &bf, &a, &ao, &af, 35.0, 20.0),
+        ] {
+            let c = a.closest_faces(ao, af, b, bo, bf).unwrap();
+            assert!((c.distance - 15.0).abs() <= 1e-9, "{c:?}");
+            for (p, r) in [(c.from, ra), (c.to, rb)] {
+                assert!(
+                    (p[0] * p[0] + p[1] * p[1] - r * r).abs() <= 1e-9
+                        && p[2] >= -1e-9
+                        && p[2] <= 5.0 + 1e-9,
+                    "{c:?}"
+                );
+            }
+        }
+        assert_eq!(
+            a.closest_faces(&ao, &[], &b, &bo, &bf),
+            Err(Error::Argument)
+        );
+        assert_eq!(
+            a.closest_faces(&ao, &[usize::MAX], &b, &bo, &bf),
+            Err(Error::Argument)
+        );
+        assert_eq!(kernel_order(&a).faces, ao.faces);
+        assert_eq!(kernel_order(&b).faces, bo.faces);
+    }
+
+    /// Sphere centres (0, 0, 0) and (12, 16, 0) are 20 apart. Radii 5 and 8 leave
+    /// a gap of 7, at (3, 4, 0) and (7.2, 9.6, 0), inside the surfaces, away from the seams.
+    #[test]
+    fn closest_faces_include_surface_interior_minima() {
+        all_fixes();
+        let a = crate::make_sphere([0.0, 0.0, 0.0], 5.0).unwrap();
+        let b = crate::make_sphere([12.0, 16.0, 0.0], 8.0).unwrap();
+        let (ao, bo) = (kernel_order(&a), kernel_order(&b));
+        let af = faces_on(&a, &ao, |s| matches!(s, SurfaceKind::Sphere(_)));
+        let bf = faces_on(&b, &bo, |s| matches!(s, SurfaceKind::Sphere(_)));
+        let c = a.closest_faces(&ao, &af, &b, &bo, &bf).unwrap();
+        assert!((c.distance - 7.0).abs() <= 1e-9, "{c:?}");
+        assert!(
+            close(&c.from, &[3.0, 4.0, 0.0]) && close(&c.to, &[7.2, 9.6, 0.0]),
+            "{c:?}"
+        );
+    }
+
+    /// Separated unit boxes: the selected top at z = 1 and bottom at z = 4 come nearest
+    /// at corners (1, 1, 1) and (3, 4, 4), sqrt(2² + 3² + 3²) = sqrt(22) apart.
+    #[test]
+    fn closest_faces_keep_their_trimmed_boundaries() {
+        all_fixes();
+        let a = make_box([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap();
+        let b = make_box([3.0, 4.0, 4.0], [1.0, 1.0, 1.0]).unwrap();
+        let (ao, bo) = (kernel_order(&a), kernel_order(&b));
+        let af = faces_at(&a, &ao, |p| (p[2] - 1.0).abs() < 1e-9);
+        let bf = faces_at(&b, &bo, |p| (p[2] - 4.0).abs() < 1e-9);
+        let c = a.closest_faces(&ao, &af, &b, &bo, &bf).unwrap();
+        assert!((c.distance * c.distance - 22.0).abs() <= 1e-9, "{c:?}");
+        assert_eq!(c.from, [1.0, 1.0, 1.0]);
+        assert_eq!(c.to, [3.0, 4.0, 4.0]);
+        let c = a.closest_faces(&ao, &af, &a, &ao, &af).unwrap();
+        assert!(c.distance <= 1e-9, "{c:?}");
     }
 
     /// The order of a body made in the kernel with no record between: the kernel's own lists.

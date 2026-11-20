@@ -23,6 +23,7 @@
 //! of the face ([`Assembly::drop_inner_slits`]).
 
 use crate::vec::Vec3Geom as _;
+use std::collections::HashMap;
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use crate::kernel::{CurveEval, Starts, SurfaceEval};
@@ -378,10 +379,11 @@ fn restarted(surface: &BSurface, s: f64, period: f64) -> Option<BSurface> {
 
 impl Assembly<'_> {
     /// Start every B-spline surface closed around u that a face lies across the start of, without
-    /// winding round it, in the middle of the widest stretch of u the face leaves free: the face's
-    /// pcurves then run inside the surface's knots, as a kernel's trims have to (one crossing the
-    /// start had its pcurve clamped there, mm off its edge). Exact ([`restarted`]). Returns how
-    /// many surfaces were started anew.
+    /// winding round it, in the middle of the widest stretch of u the face leaves free, or at the
+    /// face's own seam where it goes once round bounded by one: the face's pcurves then run inside
+    /// the surface's knots, as a kernel's trims have to (one crossing the start had its pcurve
+    /// clamped there, mm off its edge). Exact ([`restarted`]). Returns how many surfaces were
+    /// started anew.
     pub(crate) fn start_splines_clear_of_faces(&mut self) -> R<usize> {
         let mut turned = 0;
         for fi in 0..self.faces.len() {
@@ -395,12 +397,13 @@ impl Assembly<'_> {
             let poles: Vec<Vec3> = spline_axis(&face.surface, &eval).iter().flat_map(|ax| ax.poles.iter().flatten().copied()).collect();
             // How far along u each loop of the face reaches, followed round from its first point
             // (unwrapped across the start); a face winding round is the seams' to handle. The
-            // widest loop bounds the face.
-            let mut widest: Option<(f64, f64)> = None;
+            // widest loop bounds the face, with the seam it has: an edge it uses twice.
+            let mut widest: Option<(f64, f64, Option<u32>)> = None;
             let mut winds = false;
             for l in &face.loops {
                 let Bound::Edges(es) = l else { continue };
                 winds |= self.winding(&eval, es, [Some(period), None], &poles)?[0] != 0;
+                let seam = es.iter().enumerate().find_map(|(i, &(e, _))| es.get(i + 1..)?.iter().any(|&(f, _)| f == e).then_some(e));
                 let mut last: Option<f64> = None;
                 let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
                 for &(e, _) in es {
@@ -415,22 +418,45 @@ impl Assembly<'_> {
                         last = Some(u);
                     }
                 }
-                if hi - lo > widest.map_or(f64::NEG_INFINITY, |(a, b)| b - a) {
-                    widest = Some((lo, hi));
+                if hi - lo > widest.map_or(f64::NEG_INFINITY, |(a, b, _)| b - a) {
+                    widest = Some((lo, hi, seam));
                 }
             }
-            let Some((lo, hi)) = widest else { continue };
+            let Some((lo, hi, seam)) = widest else { continue };
             // Across the start: a whole number of periods from it lies inside the reach, clear of
             // its ends (a face that only meets the start there runs inside the knots already).
             let start = u0 + ((hi - u0) / period).floor() * period;
             let clear = 1e-9 * period;
             let crossing = hi - start > clear && start - lo > clear;
-            if winds || !crossing || !(hi - lo < period) {
+            if winds {
                 continue;
             }
-            // The middle of the stretch the face leaves free.
-            let free = hi + 0.5 * (period - (hi - lo));
-            let at = u0 + (free - u0).rem_euclid(period);
+            let at = if hi - lo < period {
+                if !crossing {
+                    continue;
+                }
+                // The middle of the stretch the face leaves free.
+                let free = hi + 0.5 * (period - (hi - lo));
+                u0 + (free - u0).rem_euclid(period)
+            } else if let Some(e) = seam {
+                // A whole turn bounded by its own seam (the edges are followed along their
+                // curves, so a band's reach is two turns): started at the seam where that is off
+                // the start (a band round a hole as a general placement writes it, #18779), so
+                // the seam's two uses are the knots' two ends, a period apart. Off the start,
+                // both were given the seam's one u inside the knots, and the band enclosed no
+                // (u, v) area.
+                let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+                let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
+                let [a, b] = edge.interval;
+                let Some(q) = c.point(0.5 * (a + b)).and_then(|p| eval.project(p, None, f64::INFINITY)) else { continue };
+                let at = u0 + (q[0] - u0).rem_euclid(period);
+                if at - u0 <= clear || u0 + period - at <= clear {
+                    continue;
+                }
+                at
+            } else {
+                continue;
+            };
             let Some(surface) = restarted(&face.surface, at, period) else { continue };
             if let Some(f) = self.faces.get_mut(fi) {
                 f.surface = surface;
@@ -904,11 +930,29 @@ impl Assembly<'_> {
     /// rest. The face gets the torus's two seams (a circle round the axis and one round the
     /// tube, through a new vertex, in the middle of the widest stretches of longitude and tube
     /// angle its loops keep clear of, where its torus is turned to start) as its outer bound,
-    /// and its loops become its holes. Returns how many faces were completed.
+    /// and its loops become its holes. A face on a sphere is completed the same way
+    /// ([`Self::complete_sphere_outside`]). Returns how many faces were completed.
     pub(crate) fn complete_outsides(&mut self) -> R<usize> {
         let mut completed = 0;
+        // The faces each edge bounds, so a face's neighbours are found without a pass over all.
+        let mut users: HashMap<u32, Vec<usize>> = HashMap::new();
+        for (fi, f) in self.faces.iter().enumerate() {
+            for l in &f.loops {
+                if let Bound::Edges(es) = l {
+                    for (e, _) in es {
+                        users.entry(*e).or_default().push(fi);
+                    }
+                }
+            }
+        }
         for fi in 0..self.faces.len() {
             let Some(face) = self.faces.get(fi) else { continue };
+            if let BSurface::Sphere { frame, radius } = face.surface.clone() {
+                if self.complete_sphere_outside(fi, &frame, radius, &users)? {
+                    completed += 1;
+                }
+                continue;
+            }
             let BSurface::Torus { frame, major_radius, minor_radius, tube_start } = face.surface.clone() else { continue };
             let loops: Vec<Vec<(u32, bool)>> = face
                 .loops
@@ -970,7 +1014,18 @@ impl Assembly<'_> {
                     break;
                 }
             }
-            if !outside || !self.patch_beside(fi, &loops, o, z, major_radius, minor_radius)? {
+            let tol = self.tol;
+            let same = |s: &BSurface| match s {
+                BSurface::Torus { frame, major_radius: major, minor_radius: minor, .. } => {
+                    let (go, gz) = (Vec3::from(frame.origin), Vec3::from(frame.x_axis).cross(Vec3::from(frame.y_axis)));
+                    go.dist(o) <= tol
+                        && gz.cross(z).len() * (major_radius + minor_radius) <= tol
+                        && (major_radius - major).abs() <= tol
+                        && (minor_radius - minor).abs() <= tol
+                }
+                _ => false,
+            };
+            if !outside || !self.patch_beside(fi, &loops, &users, same) {
                 continue;
             }
             // The seams go through the middle of the widest stretch of longitude and of tube
@@ -1087,27 +1142,107 @@ impl Assembly<'_> {
         Ok(seated)
     }
 
-    /// A face sharing an edge with one of `loops` (of face `fi`) lies on the torus about `o`
-    /// and `z` of radii `major` and `minor`, and faces the same way as face `fi`.
-    fn patch_beside(&self, fi: usize, loops: &[Vec<(u32, bool)>], o: Vec3, z: Vec3, major: f64, minor: f64) -> R<bool> {
-        let Some(forward) = self.faces.get(fi).map(|f| f.forward) else { return Ok(false) };
-        let edges: std::collections::HashSet<u32> = loops.iter().flatten().map(|u| u.0).collect();
-        for (gi, g) in self.faces.iter().enumerate() {
-            if gi == fi || g.forward != forward {
-                continue;
-            }
-            let BSurface::Torus { frame, major_radius, minor_radius, .. } = &g.surface else { continue };
-            let (go, gz) = (Vec3::from(frame.origin), Vec3::from(frame.x_axis).cross(Vec3::from(frame.y_axis)));
-            let same = go.dist(o) <= self.tol
-                && gz.cross(z).len() * (major + minor) <= self.tol
-                && (major_radius - major).abs() <= self.tol
-                && (minor_radius - minor).abs() <= self.tol;
-            let shares = g.loops.iter().any(|l| matches!(l, Bound::Edges(es) if es.iter().any(|u| edges.contains(&u.0))));
-            if same && shares {
-                return Ok(true);
+    /// A face sharing an edge with one of `loops` (of face `fi`; `users` the faces each edge
+    /// bounds) lies on a surface `same` takes for face `fi`'s, and faces the same way as face `fi`.
+    fn patch_beside(&self, fi: usize, loops: &[Vec<(u32, bool)>], users: &HashMap<u32, Vec<usize>>, same: impl Fn(&BSurface) -> bool) -> bool {
+        let Some(forward) = self.faces.get(fi).map(|f| f.forward) else { return false };
+        loops
+            .iter()
+            .flatten()
+            .filter_map(|u| users.get(&u.0))
+            .flatten()
+            .any(|&gi| gi != fi && self.faces.get(gi).is_some_and(|g| g.forward == forward && same(&g.surface)))
+    }
+
+    /// Complete face `fi`, on the sphere about `frame` of `radius`, when it is the outside of its
+    /// loop, into the sphere less what the loop encloses (#15046), as [`Self::complete_outsides`]
+    /// does a torus face. A loop that winds round neither the axis nor a pole encloses a patch,
+    /// and run clockwise about the sphere's outward normal it bounds all the rest of the sphere.
+    /// A ball written as two faces sharing one loop, a cap and the rest round it, has the rest
+    /// so, and read as the cap turned over it came in with both faces on the cap and no mass.
+    /// As on a torus, the face is completed only where a face it shares an edge with lies on the
+    /// same sphere facing the same way. Its sphere is turned (any frame about its centre is the
+    /// same surface) to put the upper pole inside the patch, towards the loop's mean point, and
+    /// its x axis through the loop's first vertex: the loop then runs once round the axis the
+    /// way u falls, so the face covers the lower pole, and gets its seam to it as a cap bounded
+    /// by one circle does ([`Self::add_seams`]). Returns whether it was completed.
+    fn complete_sphere_outside(&mut self, fi: usize, frame: &Frame, radius: f64, users: &HashMap<u32, Vec<usize>>) -> R<bool> {
+        let Some(face) = self.faces.get(fi) else { return Ok(false) };
+        let [Bound::Edges(l)] = face.loops.as_slice() else { return Ok(false) };
+        if l.is_empty() || super::seam_only(l) {
+            return Ok(false);
+        }
+        let l = l.clone();
+        let o = Vec3::from(frame.origin);
+        let (x, y) = (Vec3::from(frame.x_axis), Vec3::from(frame.y_axis));
+        let z = x.cross(y);
+        // The loop's samples: their points, and as (longitude, latitude) on the sphere, the
+        // longitude unwrapped along it.
+        let (mut points, mut path): (Vec<Vec3>, Vec<[f64; 2]>) = (Vec::new(), Vec::new());
+        for &(e, forward) in &l {
+            let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+            let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
+            let [lo, hi] = edge.interval;
+            for k in 0..SAMPLES {
+                let s = k as f64 / SAMPLES as f64;
+                let t = if forward { lo + (hi - lo) * s } else { hi - (hi - lo) * s };
+                let p = c.point(t).ok_or("edge point")?;
+                points.push(p);
+                let d = p - o;
+                let h = d.dot(z);
+                let q = [d.dot(y).atan2(d.dot(x)), h.atan2((d - z * h).len())];
+                let q = match path.last() {
+                    Some(l) => [l[0] + wrap(q[0] - l[0]), q[1]],
+                    None => q,
+                };
+                path.push(q);
             }
         }
-        Ok(false)
+        let (Some(first), Some(last)) = (path.first(), path.last()) else { return Ok(false) };
+        // Back to the start: a loop that winds round the axis encloses a pole, not a patch.
+        let back = [last[0] + wrap(first[0] - last[0]), first[1]];
+        if (back[0] - first[0]).abs() > PI {
+            return Ok(false);
+        }
+        // Twice the signed area in (longitude, latitude): the sphere's natural normal is
+        // ∂u × ∂v, outward, and the loop is kept about it.
+        let mut twice = 0.0;
+        for (a, b) in path.iter().zip(path.iter().skip(1).chain(std::iter::once(&back))) {
+            twice += a[0] * b[1] - b[0] * a[1];
+        }
+        let tol = self.tol;
+        let same =
+            |s: &BSurface| matches!(s, BSurface::Sphere { frame: f, radius: r } if Vec3::from(f.origin).dist(o) <= tol && (r - radius).abs() <= tol);
+        if !(twice < 0.0) || !self.patch_beside(fi, std::slice::from_ref(&l), users, same) {
+            return Ok(false);
+        }
+        // The new axis, towards the loop's mean point, and the x axis through its first vertex.
+        let mean = points.iter().fold(Vec3::ZERO, |s, p| s + (*p - o)) * (1.0 / points.len() as f64);
+        let Some(up) = mean.normalized() else { return Ok(false) };
+        let start = self.vpoint(self.start(*l.first().ok_or("empty loop")?)?)? - o;
+        let Some(ex) = (start - up * start.dot(up)).normalized() else { return Ok(false) };
+        let ey = up.cross(ex);
+        // About it, the loop runs once round the way u falls (whole turns, as [`Turns`] counts
+        // them): else the patch is not one this turn makes a cap of. One through a pole is
+        // `add_seams`'s to close there.
+        let mut turned = 0.0;
+        let mut prev: Option<f64> = None;
+        for p in points.iter().chain(points.first()) {
+            let d = *p - o;
+            let a = d.dot(ey).atan2(d.dot(ex));
+            if let Some(b) = prev {
+                turned += wrap(a - b);
+            }
+            prev = Some(a);
+        }
+        if (turned / TAU).round() as i64 != -1 {
+            return Ok(false);
+        }
+        let seated = BSurface::Sphere { frame: Frame { origin: frame.origin, x_axis: arr(ex), y_axis: arr(ey) }, radius };
+        let Some(face) = self.faces.get_mut(fi) else { return Ok(false) };
+        face.surface = seated;
+        face.extent = None;
+        Ok(true)
     }
 
     /// The slit made the meridian seam of `surface` when it is a surface of revolution closed

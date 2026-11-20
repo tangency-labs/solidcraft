@@ -44,9 +44,12 @@ fn old_designs_open_upgrade_and_evaluate() {
         if got["body_count"].as_u64().unwrap_or(0) == 0 {
             problems.push(format!("{name}: no bodies"));
         }
-        // Saved again, it reads back the same.
-        let again = solidcraft_engine::doc::Document::from_json(&s.doc.to_json()).unwrap();
-        assert_eq!(again, *s.doc, "{name}: round trip");
+        // Saved again, it reads back the same: as plain JSON when it holds no binary data (which only
+        // a container keeps), and as a container.
+        if s.doc.binary_data().is_empty() {
+            let again = solidcraft_engine::doc::Document::from_json(&s.doc.to_json()).unwrap();
+            assert_eq!(again, *s.doc, "{name}: round trip");
+        }
         let package = solidcraft_engine::io::write_design_container(&s.doc).unwrap();
         let packaged = solidcraft_engine::io::read_design(&package).unwrap();
         assert_eq!(packaged, *s.doc, "{name}: container round trip after migration");
@@ -179,7 +182,7 @@ fn flat_face_attachments() -> Vec<(String, String, usize, Option<(u32, bool)>, O
                 Ok(created) => {
                     let id = created["sketch"].as_u64().unwrap_or(0);
                     match s.placed_document().sketch_face_attachment(id, &s.model) {
-                        FaceAttachmentStatus::Healthy { .. } | FaceAttachmentStatus::Sheet { .. } => {}
+                        FaceAttachmentStatus::Healthy { .. } => {}
                         other => problem = Some(format!("sketch attachment {other:?}")),
                     }
                     s.execute("sketch.finish", &json!({})).unwrap();

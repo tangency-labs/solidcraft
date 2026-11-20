@@ -13,8 +13,8 @@ use solidcraft_viewport::Camera;
 
 use crate::SolveApp;
 use crate::design_tab_prefs::DesignTabPrefs;
-use crate::design_views::{DesignView, ViewKind, ViewSet};
 use crate::ui_kit;
+use solidcraft_views::{DesignView, ViewKind, ViewSet};
 
 /// Continue transient shot queues without adopting their document or view into the active tab.
 pub(crate) fn advance_render_batches(app: &mut SolveApp, ctx: &egui::Context) {
@@ -60,6 +60,8 @@ pub struct DocSlot {
     pub(crate) tab: u64,
     /// The views of the design (its sub-tabs), kept while another design is shown.
     views: ViewSet,
+    /// What each of its views shows besides the camera ([`ViewInspect`]), kept while another design is shown.
+    inspect: ViewInspect,
     /// Opened behind the shown design: framed when it is first shown.
     fit: bool,
 }
@@ -129,6 +131,8 @@ fn put_work(app: &mut SolveApp, mut work: DocWork, before: u64) {
         }
     }
     crate::workspace::sync_context(app);
+    crate::drawing_workspace::swap_selection(app);
+    crate::drawing_workspace::sync_history(app);
 }
 
 /// The per-design part of the UI state the session doesn't keep (what is hidden, shown or locked
@@ -173,6 +177,7 @@ impl DocSlot {
             jobs: Default::default(),
             tab: next_tab(),
             views: ViewSet::new(),
+            inspect: ViewInspect::new(),
             fit: false,
         }
     }
@@ -184,9 +189,37 @@ pub(crate) fn next_tab() -> u64 {
     NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
+/// What a place of a layout shows when the design has no view for it yet (the Layout menu's
+/// "Empty cells show"). A choice for this session.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LayoutFill {
+    /// A new angle of the shown view: a copy of it.
+    #[default]
+    Angle,
+    /// The standard views in turn: front, right, top.
+    Standard,
+    /// An empty cell that asks what to show.
+    Picker,
+}
+
+impl LayoutFill {
+    pub const ALL: [LayoutFill; 3] = [LayoutFill::Angle, LayoutFill::Standard, LayoutFill::Picker];
+
+    /// The key the Layout menu's row has.
+    pub fn key(self) -> &'static str {
+        match self {
+            LayoutFill::Angle => "fill.angle",
+            LayoutFill::Standard => "fill.standard",
+            LayoutFill::Picker => "fill.picker",
+        }
+    }
+}
+
 /// The open designs: one slot per tab; the active tab's slot is empty (its design is in the app).
 #[derive(Default)]
 pub struct Documents {
+    /// What the places of a layout without a view show ([`LayoutFill`]).
+    pub(crate) layout_fill: LayoutFill,
     slots: Vec<Option<DocSlot>>,
     pub active: usize,
     /// A tab waiting for the answer to "save changes?".
@@ -212,6 +245,8 @@ pub struct Documents {
     active_tab: u64,
     /// The shown design's views ([`DocSlot::views`] for the others); see [`apply_view`].
     pub(crate) views: ViewSet,
+    /// What each of the shown design's views shows besides the camera ([`DocSlot::inspect`] for the others).
+    pub(crate) inspect: ViewInspect,
     /// A view's name being typed in its sub-tab ([`view_rename_start`]).
     pub(crate) view_rename: Option<ViewRename>,
 }
@@ -452,6 +487,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     // (`take_work`).
     crate::timeline::stop_playback(app);
     crate::sketch_text_move::cancel_drag(app);
+    crate::control_joint_drive::discard(app);
     let work = take_work(app);
     crate::dim_view::cancel();
     app.params = None;
@@ -485,6 +521,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
         jobs: app.swap_jobs(slot.jobs),
         tab: std::mem::replace(&mut app.docs.active_tab, slot.tab),
         views: std::mem::replace(&mut app.docs.views, slot.views),
+        inspect: std::mem::replace(&mut app.docs.inspect, slot.inspect),
         fit: false,
     };
     crate::browser::restore_reveals(app, slot.reveals);
@@ -664,13 +701,68 @@ pub(crate) fn sync_views(app: &mut SolveApp) {
 /// shows the new one ([`apply_view`]).
 fn change_views<T>(app: &mut SolveApp, change: impl FnOnce(&mut ViewSet) -> T) -> T {
     let before = app.docs.views.active().id;
+    keep_look(app);
     let result = change(&mut app.docs.views);
     let active = app.docs.views.active();
     if active.id != before {
         let active = active.clone();
         apply_view(app, &active);
+        show_look(app, &active);
     }
     result
+}
+
+/// The section and analyses each view of a design shows, by view id: a view that was never left
+/// has none and shows what the design shows now.
+pub(crate) type ViewInspect = std::collections::HashMap<u64, solidcraft_engine::InspectState>;
+
+/// Keep how the shown Model view looks at the design (its camera) with that view, so it comes back
+/// as it was left: two Model views of one design are two angles, not one.
+fn keep_look(app: &mut SolveApp) {
+    let active = app.docs.views.active();
+    if active.kind == ViewKind::Model {
+        let id = active.id;
+        app.docs.views.set_spec(id, solidcraft_viewport::ViewSpec::new(app.cam));
+        app.docs.inspect.insert(id, app.session.inspect());
+    }
+}
+
+/// Show `view` from the angle it was left at. A view that was never left (a new one) keeps the
+/// angle the design looks from now.
+fn show_look(app: &mut SolveApp, view: &DesignView) {
+    if view.kind == ViewKind::Model
+        && let Some(spec) = view.spec
+    {
+        app.cam = spec.camera;
+        app.cam_anim = None;
+    }
+    if view.kind == ViewKind::Model
+        && let Some(state) = app.docs.inspect.get(&view.id)
+    {
+        app.session.set_inspect(state.clone());
+    }
+}
+
+/// Run `draw` with the Model view `id` standing in for the shown one: its camera and analyses are
+/// the app's while `draw` runs, and what `draw` left them as (an orbit, a dragged cut) is kept with
+/// that view. The shown view's own come back afterwards. This is how the views of a tiled window
+/// are each drawn and handled by the one viewport code.
+pub(crate) fn with_view_look<T>(app: &mut SolveApp, id: u64, draw: impl FnOnce(&mut SolveApp) -> T) -> T {
+    let shown = (app.cam, app.cam_anim.take(), app.session.inspect());
+    if let Some(view) = app.docs.views.get(id).cloned() {
+        show_look(app, &view);
+    }
+    let out = draw(app);
+    app.docs.views.set_spec(id, solidcraft_viewport::ViewSpec::new(app.cam));
+    app.docs.inspect.insert(id, app.session.inspect());
+    (app.cam, app.cam_anim) = (shown.0, shown.1);
+    app.session.set_inspect(shown.2);
+    out
+}
+
+/// Make the view `id` the shown one, keeping the look of the one it replaces.
+pub(crate) fn focus_view(app: &mut SolveApp, id: u64) -> bool {
+    change_views(app, |views| views.activate(id))
 }
 
 /// Open a view of `kind` showing `subject` in the shown design and show it (`reuse`: one that
@@ -680,7 +772,7 @@ fn change_views<T>(app: &mut SolveApp, change: impl FnOnce(&mut ViewSet) -> T) -
 pub fn view_open(app: &mut SolveApp, kind: ViewKind, subject: Option<String>, reuse: bool) -> u64 {
     let prefs = DesignTabPrefs::from(&app.preferences);
     if !prefs.opens_sub_tab(kind) {
-        apply_view(app, &DesignView { id: 0, kind, name: String::new(), subject });
+        apply_view(app, &DesignView { id: 0, kind, name: String::new(), subject, spec: None });
         return app.docs.views.active().id;
     }
     change_views(app, |views| views.open(kind, subject, reuse && prefs.reuse_views))
@@ -705,6 +797,12 @@ fn remember_views_in(app: &SolveApp, i: usize, dir: &std::path::Path) {
     }
     let session = if i == app.docs.active { Some(&app.session) } else { app.docs.slots.get(i).and_then(Option::as_ref).map(|slot| &slot.session) };
     let (Some(path), Some(views)) = (session.and_then(|session| session.path.as_deref()), views_of(app, i)) else { return };
+    // The shown Model view is saved from the angle the design looks from now.
+    let mut views = views.clone();
+    if i == app.docs.active && views.active().kind == ViewKind::Model {
+        let id = views.active().id;
+        views.set_spec(id, solidcraft_viewport::ViewSpec::new(app.cam));
+    }
     if let Err(e) = crate::view_memory::remember(dir, path, views.to_json()) {
         log::warn!("could not remember the views of {path}: {e}");
     }
@@ -733,6 +831,7 @@ fn restore_views_in(app: &mut SolveApp, path: &str, dir: &std::path::Path) {
         app.docs.views = set;
         let active = app.docs.views.active().clone();
         apply_view(app, &active);
+        show_look(app, &active);
     } else if let Some(slot) = app.docs.slots.iter_mut().flatten().find(|slot| slot.session.path.as_deref().is_some_and(|p| same_path(p, path))) {
         slot.views = set;
     }
@@ -755,6 +854,11 @@ pub(crate) fn design_opened(app: &mut SolveApp, path: &str) {
 /// Close the view `id` of the shown design (never the last one; Reopen brings it back).
 pub fn view_close(app: &mut SolveApp, id: u64) -> bool {
     change_views(app, |views| views.close(id))
+}
+
+/// Stop showing the view `id` beside the others; it stays open, reached from the bar.
+pub fn view_unshow(app: &mut SolveApp, id: u64) -> bool {
+    change_views(app, |views| views.unshow(id))
 }
 
 /// Close the other views of the shown design, keeping `id`.
@@ -793,6 +897,84 @@ pub fn view_rename_start(app: &mut SolveApp, id: u64) -> bool {
 /// Copy the view `id` of the shown design next to it and show the copy.
 pub fn view_duplicate(app: &mut SolveApp, id: u64) -> Option<u64> {
     change_views(app, |views| views.duplicate(id))
+}
+
+/// Show the Model views of the shown design together as `preset`. A design with fewer Model views
+/// than the layout has places for gets copies of the shown view until it has enough (a second
+/// angle each). Returns how many views are shown now.
+pub fn view_layout(app: &mut SolveApp, preset: solidcraft_views::Preset) -> usize {
+    let shown = app.docs.views.active().clone();
+    if shown.kind != ViewKind::Model {
+        return 1;
+    }
+    let fill = app.docs.layout_fill;
+    if preset != solidcraft_views::Preset::Single && fill != LayoutFill::Picker {
+        let have = app.docs.views.views().iter().filter(|view| view.kind == ViewKind::Model).count();
+        for n in have..preset.tiles() {
+            let copied = match fill {
+                LayoutFill::Standard => view_copy_at(app, FILL_ANGLES[(n - 1).min(FILL_ANGLES.len() - 1)]),
+                _ => view_duplicate(app, shown.id),
+            };
+            if copied.is_none() {
+                break;
+            }
+        }
+        view_activate(app, shown.id);
+    }
+    if fill == LayoutFill::Picker {
+        return change_views(app, |views| views.set_layout_padded(preset));
+    }
+    change_views(app, |views| views.set_layout(preset))
+}
+
+/// The standard views the empty places of a layout get, in turn ([`LayoutFill::Standard`]).
+const FILL_ANGLES: [solidcraft_viewport::StandardView; 3] =
+    [solidcraft_viewport::StandardView::Front, solidcraft_viewport::StandardView::Right, solidcraft_viewport::StandardView::Top];
+
+/// A new Model view of the shown design looking from `angle`, next to the shown one, which stays
+/// the shown one. None when the design has no room for another view.
+fn view_copy_at(app: &mut SolveApp, angle: solidcraft_viewport::StandardView) -> Option<u64> {
+    let shown = app.docs.views.active().id;
+    let copy = view_duplicate(app, shown)?;
+    // The copy is shown now, its look in the app: turn it, and going back to the first keeps that.
+    app.cam.set_view(angle);
+    view_activate(app, shown);
+    Some(copy)
+}
+
+/// Show a new view looking from `angle` in the empty cell number `ordinal` of the layout.
+pub fn view_fill_angle(app: &mut SolveApp, ordinal: usize, angle: solidcraft_viewport::StandardView) -> Option<u64> {
+    let copy = view_copy_at(app, angle)?;
+    change_views(app, |views| views.fill_empty(ordinal, copy)).then_some(copy)
+}
+
+/// Show the open Model view `id` in the empty cell number `ordinal` of the layout.
+pub fn view_fill_open(app: &mut SolveApp, ordinal: usize, id: u64) -> bool {
+    change_views(app, |views| views.fill_empty(ordinal, id))
+}
+
+/// Close the empty cell number `ordinal` of the layout.
+pub fn view_close_empty(app: &mut SolveApp, ordinal: usize) -> bool {
+    change_views(app, |views| views.remove_empty(ordinal))
+}
+
+/// Show the Model view `id` beside the shown one, on `edge` of it; `None`: a new view that starts
+/// as a copy of the shown one. Returns the view now shown beside it, None when it cannot be (four
+/// views are shown, or either is not a Model view).
+pub fn view_beside(app: &mut SolveApp, id: Option<u64>, edge: solidcraft_views::Edge) -> Option<u64> {
+    let shown = app.docs.views.active().clone();
+    if shown.kind != ViewKind::Model || app.docs.views.tiles().is_some_and(|tiles| tiles.len() >= solidcraft_views::MAX_TILES) {
+        return None;
+    }
+    let id = match id {
+        Some(id) => id,
+        None => {
+            let copy = view_duplicate(app, shown.id)?;
+            view_activate(app, shown.id);
+            copy
+        }
+    };
+    change_views(app, |views| views.show_beside(id, edge)).then_some(id)
 }
 
 /// Move the view at place `from` of the shown design to place `to`.
@@ -856,6 +1038,24 @@ pub(crate) fn view_command(app: &mut SolveApp, command: &str, mut v: Value) -> R
             Some(asked)
         }
         "tab.view.duplicate" => Some(view_duplicate(app, asked).ok_or("there is no such view, or the design has too many views")?),
+        "tab.view.layout" => {
+            let preset = v.get("layout").and_then(Value::as_str).and_then(solidcraft_views::Preset::from_key).ok_or("unknown layout")?;
+            let shown = view_layout(app, preset);
+            v["shown"] = json!(shown);
+            None
+        }
+        "tab.view.beside" => {
+            let edge = match v.get("edge").and_then(Value::as_str) {
+                Some("left") => solidcraft_views::Edge::Left,
+                Some("top") => solidcraft_views::Edge::Top,
+                Some("bottom") => solidcraft_views::Edge::Bottom,
+                _ => solidcraft_views::Edge::Right,
+            };
+            let asked = v.get("id").and_then(Value::as_u64);
+            let id = view_beside(app, asked, edge).ok_or("a view is shown beside a Model view, at most four at a time")?;
+            v["shown"] = json!(app.docs.views.tiles().map_or(1, solidcraft_views::Tiles::len));
+            Some(id)
+        }
         "tab.view.move" => {
             let len = app.docs.views.len();
             let (from, to) = (place("from").filter(|n| *n < len), place("to").filter(|n| *n < len));
@@ -954,8 +1154,15 @@ pub(crate) fn same_path(a: &str, b: &str) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     {
         // canonicalize resolves symlinks and Windows long names/case using the filesystem.
-        // Never lowercase: Windows can also host case-sensitive directories.
-        if let (Ok(a), Ok(b)) = (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        // Never lowercase: Windows can also host case-sensitive directories. A path on a network
+        // location not allowed (other than the host the other path is on) or a device is never
+        // resolved: on Windows that connects to the host before any "network location" question.
+        use solidcraft_engine::io::vfs;
+        let reachable = |p: &str, other: &str| vfs::design_path_refusal(p, Some(other)).is_none();
+        if reachable(a, b)
+            && reachable(b, a)
+            && let (Ok(a), Ok(b)) = (vfs::canonicalize(a), vfs::canonicalize(b))
+        {
             return a == b;
         }
         // A deleted file can still select its live editing session. Path equality also
@@ -1055,7 +1262,7 @@ pub fn adopt(app: &mut SolveApp, session: Session) -> bool {
 pub fn export(app: &mut SolveApp) -> Result<Value, String> {
     let revision = app.session.design_revision();
     let design = app.session.design();
-    let text = String::from_utf8(solidcraft_engine::io::write_design(&design)).map_err(|e| e.to_string())?;
+    let text = String::from_utf8(solidcraft_engine::io::write_design(&design).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     Ok(json!({"name": design.name, "revision": revision, "dirty": app.session.is_dirty(), "format": "json", "text": text}))
 }
 
@@ -1874,6 +2081,8 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         .collect();
     let more_text = solidcraft_ui_text::tr("tab_strip.more");
     let plus_menu = crate::design_view_ui::plus_menu(solidcraft_theme::is_dark());
+    let layout_menu = crate::design_view_ui::layout_menu();
+    let layout_current = if app.docs.views.is_tiled() { "" } else { "layout.single" };
     let actions = {
         let mut strip = crate::app_bar::TabStrip {
             tabs: info
@@ -1918,10 +2127,16 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             },
             view_menu: &crate::design_view_ui::VIEW_MENU,
             view_right_row: crate::design_view_ui::VIEW_CLOSE_RIGHT,
-            view_rename: view_edit.as_mut().zip(view_place).map(|(r, place)| {
-                (place, crate::app_bar::TabRename { text: &mut r.text, focused: &mut r.focused, max: crate::design_views::MAX_NAME })
-            }),
+            view_rename: view_edit
+                .as_mut()
+                .zip(view_place)
+                .map(|(r, place)| (place, crate::app_bar::TabRename { text: &mut r.text, focused: &mut r.focused, max: solidcraft_views::MAX_NAME })),
             plus_menu: &plus_menu,
+            layout_menu: &layout_menu,
+            layout_current,
+            layout_tip: solidcraft_ui_text::tr_label("Show views together"),
+            layout_fill: app.docs.layout_fill.key(),
+            layout_fill_heading: solidcraft_ui_text::tr_label("Empty cells show"),
             switcher_menu: &SWITCHER_MENU,
             tear_off_below: TEAR_OFF_BELOW,
         };
@@ -2633,6 +2848,24 @@ mod tests {
         assert!(reuse_path(&mut a, "picker.solidcraft").is_err());
         assert_eq!(a.docs.active, 1);
         assert_eq!(a.docs.count(), 2);
+    }
+
+    /// A design's link to a network location not allowed is never resolved to see whether it is
+    /// an open design (Edit in Place asks that before the "network location" question).
+    #[test]
+    fn saved_path_identity_never_resolves_a_refused_network_path() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-tab-paths-net-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let open = dir.join("assembly.solidcraft").to_string_lossy().into_owned();
+        let calls = solidcraft_engine::io::vfs::file_calls();
+        for link in [r"\\server\share\part.solidcraft", "//server/share/part.solidcraft", r"\\.\pipe\part.solidcraft"] {
+            assert!(!same_path(&open, link), "{link}");
+            assert!(!same_path(link, &open), "{link}");
+        }
+        assert_eq!(solidcraft_engine::io::vfs::file_calls(), calls, "a refused path was resolved");
+        // Two paths on the same server (a design opened from it) are still compared.
+        assert!(same_path(r"\\files\share\a.solidcraft", r"\\files\share\a.solidcraft"));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -3693,15 +3926,83 @@ mod tests {
         h.frames(2);
         let sketch = h.app.session.active_sketch.unwrap();
         let active = h.app.docs.views.active().clone();
-        assert_eq!((active.kind, active.subject), (crate::design_views::ViewKind::Sketch, Some(sketch.to_string())));
+        assert_eq!((active.kind, active.subject), (solidcraft_views::ViewKind::Sketch, Some(sketch.to_string())));
         assert_eq!(h.app.docs.views.len(), before + 1);
         h.app.run("sketch.line", json!({"points": [[0, 0], [20, 10]]})).unwrap();
         h.app.run("sketch.finish", json!({})).unwrap();
         h.frames(2);
-        assert_eq!(h.app.docs.views.active().kind, crate::design_views::ViewKind::Model);
+        assert_eq!(h.app.docs.views.active().kind, solidcraft_views::ViewKind::Model);
         assert_eq!(h.app.docs.views.len(), before + 1, "the sketch's view stays");
         assert!(view_activate(&mut h.app, active.id));
         assert_eq!(h.app.session.active_sketch, Some(sketch), "showing it edits the sketch again");
+    }
+
+    /// Two Model views of one design are two angles: each keeps the camera it was left with, and a
+    /// new one starts from where the design looks now.
+    #[test]
+    fn model_views_keep_their_own_angle() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let first = h.app.docs.views.active().id;
+        h.app.cam.yaw = 0.25;
+        let second = view_open(&mut h.app, ViewKind::Model, None, false);
+        assert_ne!(first, second, "a second Model view is opened, not the first reused");
+        assert_eq!(h.app.cam.yaw, 0.25, "a new view starts from the angle the design looks from");
+        h.app.cam.yaw = 1.5;
+        assert!(view_activate(&mut h.app, first));
+        assert_eq!(h.app.cam.yaw, 0.25, "the first view comes back at its own angle");
+        assert!(view_activate(&mut h.app, second));
+        assert_eq!(h.app.cam.yaw, 1.5, "and the second at its own");
+        let copy = view_duplicate(&mut h.app, second).unwrap();
+        assert_eq!(h.app.cam.yaw, 1.5, "a copy starts at the angle of the view it copies");
+        h.app.cam.yaw = -0.5;
+        assert!(view_activate(&mut h.app, second));
+        assert_eq!(h.app.cam.yaw, 1.5);
+        assert!(view_activate(&mut h.app, copy));
+        assert_eq!(h.app.cam.yaw, -0.5);
+    }
+
+    /// A layout opens the views it needs, and a view standing in for the shown one is drawn from its
+    /// own angle and leaves the shown view's as it was.
+    #[test]
+    fn a_layout_opens_views_and_each_is_drawn_from_its_own_angle() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let first = h.app.docs.views.active().id;
+        h.app.cam.yaw = 0.25;
+        assert_eq!(view_layout(&mut h.app, solidcraft_views::Preset::SideBySide), 2);
+        assert!(h.app.docs.views.is_tiled());
+        assert_eq!(h.app.docs.views.active().id, first, "the view that was shown stays the focused one");
+        let other = h.app.docs.views.tiles().unwrap().views().into_iter().find(|id| *id != first).unwrap();
+        let yaw = with_view_look(&mut h.app, other, |app| {
+            app.cam.yaw = 2.0;
+            app.cam.yaw
+        });
+        assert_eq!(yaw, 2.0);
+        assert_eq!(h.app.cam.yaw, 0.25, "the focused view's angle is back");
+        assert!(focus_view(&mut h.app, other));
+        assert_eq!(h.app.cam.yaw, 2.0, "the other view kept the angle it was orbited to");
+        assert_eq!(view_layout(&mut h.app, solidcraft_views::Preset::Single), 1);
+        assert!(!h.app.docs.views.is_tiled());
+    }
+
+    /// Each Model view keeps its own section and analysis too, so one design can be inspected two
+    /// ways at once; the design itself is the same.
+    #[test]
+    fn model_views_keep_their_own_analysis() {
+        use solidcraft_engine::SurfaceAnalysis;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let first = h.app.docs.views.active().id;
+        let second = view_open(&mut h.app, ViewKind::Model, None, false);
+        h.app.session.analysis = Some(SurfaceAnalysis::Zebra { stripes: 8.0 });
+        assert!(view_activate(&mut h.app, first));
+        assert_eq!(h.app.session.analysis, None, "the first view never had the analysis");
+        h.app.session.analysis = Some(SurfaceAnalysis::Environment);
+        assert!(view_activate(&mut h.app, second));
+        assert_eq!(h.app.session.analysis, Some(SurfaceAnalysis::Zebra { stripes: 8.0 }));
+        assert!(view_activate(&mut h.app, first));
+        assert_eq!(h.app.session.analysis, Some(SurfaceAnalysis::Environment));
     }
 
     /// The Layout page's "Design tabs" choices govern the views: a kind kept out of sub-tabs is
@@ -4436,26 +4737,28 @@ mod tests {
         assert_eq!(drawings(&mut a), [Value::Null, expected]);
     }
 
-    /// K10 (#3890): a tab with its drawing open refuses model commands only in that tab. A sheet
-    /// sketch entered there is still active after a round trip.
+    /// K10 (#3890): a tab with its drawing open takes model commands, as every tab does, with a
+    /// sheet sketch being edited there too; the sheet sketch stays in its own tab and is still
+    /// active after a round trip.
     #[test]
-    fn a_tabs_model_commands_wait_only_in_that_tab() {
-        let gate = "a drawing is open: close it to change the model (drawing.close)";
+    fn a_tabs_sheet_sketch_waits_in_that_tab_and_holds_nothing() {
         let mut a = app();
         let [sheet, _] = two_sheet_drawing(&mut a);
-        let refused = |a: &mut SolveApp| a.run("solid.sphere", json!({"diameter": 4})).unwrap_err();
-        assert!(refused(&mut a).contains(gate), "{}", refused(&mut a));
+        // A sheet sketch is made, and finished, in Drawing.
+        crate::workspace::enter(&mut a, "drawing").unwrap();
+        a.run("solid.sphere", json!({"diameter": 4})).unwrap();
+        assert!(a.session.open_drawing.is_some(), "with the drawing still open");
+        a.run("drawing.sketch.create", json!({"owner": solidcraft_engine::doc::ids::encode(sheet)})).unwrap();
+        a.run("solid.sphere", json!({"diameter": 4})).unwrap();
+        assert!(a.session.active_sheet_sketch.is_some(), "a model command leaves the sheet sketch open");
         new_design(&mut a);
         a.run("solid.sphere", json!({"diameter": 4})).unwrap();
-        switch(&mut a, 0);
-        assert!(refused(&mut a).contains(gate));
-        a.run("drawing.sketch.create", json!({"owner": solidcraft_engine::doc::ids::encode(sheet)})).unwrap();
-        switch(&mut a, 1);
         assert!(a.session.active_sheet_sketch.is_none());
         switch(&mut a, 0);
         assert!(a.session.active_sheet_sketch.is_some(), "the sheet sketch waits in its tab");
+        crate::workspace::enter(&mut a, "drawing").unwrap();
         a.run("sketch.finish", json!({})).unwrap();
-        a.run("drawing.close", json!({})).unwrap();
+        assert!(a.session.active_sheet_sketch.is_none());
         a.run("solid.sphere", json!({"diameter": 4})).unwrap();
     }
 

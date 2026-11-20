@@ -289,6 +289,18 @@ pub struct WorkspacePanelHost {
     last_capacity: Option<LogicalRect>,
     last_domain: Option<LogicalRect>,
     last_chrome: Vec<LogicalRect>,
+    remembered_reservations: Option<RememberedReservations>,
+}
+
+/// The identities a workspace's remembered layout reserves, kept with the saved
+/// bytes, workspace and registry they were read from. Every frame captures the
+/// reservations, and reading them again means decoding the saved layout's JSON,
+/// so they are read again only when one of those changes.
+struct RememberedReservations {
+    bytes: std::sync::Arc<[u8]>,
+    workspace: WorkspaceId,
+    registry: PanelRegistry,
+    reservations: HostIdentityReservations,
 }
 
 fn validate_requested_opacity(opacity: Option<f32>) -> PanelResult<()> {
@@ -411,6 +423,7 @@ impl WorkspacePanelHost {
             last_capacity: None,
             last_domain: None,
             last_chrome: Vec::new(),
+            remembered_reservations: None,
         })
     }
     pub(crate) fn set_keyboard_shortcuts(&mut self, shortcuts: Vec<(ContextualPanelAction, egui::KeyboardShortcut)>) {
@@ -572,8 +585,26 @@ impl WorkspacePanelHost {
     /// reservations, before either widget or pointer identity generation.
     pub(crate) fn capture_reservations(&mut self, runtime: &PanelRuntime, catalogue: &dyn commands::LayoutCatalogue) -> PanelResult<()> {
         let service = runtime.layout();
-        let envelope = commands::current_envelope_snapshot(catalogue, &service.inspect(), service.registry())?;
-        let mut reservations = host_identity_reservations(&envelope)?;
+        let state = service.inspect();
+        let workspace = &state.layout.workspace;
+        let remembered = catalogue.state().remembered(workspace);
+        let made = self.remembered_reservations.as_ref().filter(|made| {
+            remembered.is_some_and(|stored| *made.bytes == *stored.bytes()) && made.workspace == *workspace && made.registry == *service.registry()
+        });
+        let mut reservations = match made {
+            Some(made) => made.reservations.clone(),
+            None => {
+                let envelope = commands::current_envelope_snapshot(catalogue, &state, service.registry())?;
+                let reservations = host_identity_reservations(&envelope)?;
+                self.remembered_reservations = remembered.map(|stored| RememberedReservations {
+                    bytes: stored.bytes().into(),
+                    workspace: workspace.clone(),
+                    registry: service.registry().clone(),
+                    reservations: reservations.clone(),
+                });
+                reservations
+            }
+        };
         reservations.include_layout(service.layout())?;
         if self.options.geometry.identity_reservations != reservations {
             self.invalidate_geometry();
