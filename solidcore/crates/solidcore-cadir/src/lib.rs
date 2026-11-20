@@ -57,6 +57,10 @@ pub struct Read {
     /// Where the body's placement puts the record (column-major 4 × 4, millimetres), when it
     /// moves it. Only a rigid placement is taken: a body placed otherwise is refused.
     pub placement: Option<[[f64; 4]; 4]>,
+    /// Why the region was refused whole, where it came in as an open surface of the faces that
+    /// read, without the faces the refusal names; `None` where it read as given. A reader with
+    /// another form of the body (a file's own mesh of it) may take that instead.
+    pub opened: Option<String>,
 }
 
 /// A body region that could not be read, and why.
@@ -139,24 +143,28 @@ pub fn read_bodies(ir: &CadIr, trims: Option<&dyn Trims>) -> Bodies {
                     &none,
                     &mut budget,
                 )
+                .map(|solid| (solid, None))
                 .or_else(|message| {
-                    model.without_named_faces(
-                        region.as_str(),
-                        kind,
-                        name,
-                        model.region_tolerance(region.as_str(), tolerance(ir)),
-                        trims,
-                        message,
-                        &mut budget,
-                    )
+                    model
+                        .without_named_faces(
+                            region.as_str(),
+                            kind,
+                            name,
+                            model.region_tolerance(region.as_str(), tolerance(ir)),
+                            trims,
+                            message.clone(),
+                            &mut budget,
+                        )
+                        .map(|solid| (solid, Some(message)))
                 });
             match read {
-                Ok(solid) => {
+                Ok((solid, opened)) => {
                     out.read.push(Read {
                         body: id.clone(),
                         region: k,
                         solid,
                         placement,
+                        opened,
                     });
                 }
                 Err(message) => out.failures.push(Failure {
