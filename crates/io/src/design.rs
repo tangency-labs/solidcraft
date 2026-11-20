@@ -357,8 +357,7 @@ fn write_container(
     }
     drawing::write(&mut writer, doc)?;
     for (key, data) in &doc.plugin_data {
-        let bytes = solidcraft_doc::canvas::base64_decode(data).ok_or_else(|| invalid(format!("plugin data `{key}` is not base64")))?;
-        writer.part(&format!("{}{key}", solidcraft_doc::plugin_data::PREFIX), &bytes, true)?;
+        writer.part(&format!("{}{key}", solidcraft_doc::plugin_data::PREFIX), data, true)?;
     }
     // The signature binds every authoritative part written above (never the optional caches), and
     // is written before them so their budget sees its bytes.
@@ -803,7 +802,12 @@ impl<R: Read + Seek> DesignContainerReader<R> {
 
     /// [`Self::geometry`] when [`Self::read_document`] follows: it validates the document.
     fn geometry_before_document(&mut self) -> Option<solidcraft_doc::SavedModel> {
-        let document = self.reader.document(16 << 20).ok()?;
+        if !self.has_model_cache() {
+            return None;
+        }
+        // Opening needs these same bytes for the authoritative document anyway. Point cloud
+        // properties can exceed the metadata budget of a standalone preview.
+        let document = self.reader.document(max_design()).ok()?;
         native_cache::read_geometry_before_document(&mut self.reader, &document).ok()
     }
 }
@@ -982,7 +986,7 @@ fn hydrate_plugin_data<R: Read + Seek>(doc: &mut Document, reader: &mut PackageR
             break;
         }
         if let Ok(bytes) = reader.limited_part(&name, part_limit(&name)) {
-            doc.plugin_data.insert(key.to_string(), solidcraft_doc::canvas::base64_encode(&bytes).into());
+            doc.plugin_data.insert(key.to_string(), bytes.into());
         }
     }
 }
@@ -1866,6 +1870,67 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn opening_adopts_the_model_with_large_point_cloud_metadata() {
+        use solidcore_record::Vec3;
+        use solidcraft_doc::point_cloud::{ColorBy, Colors, Column, Complex, Floats, On, PointCloud, Points};
+
+        let mut doc = Document::new("With a scan");
+        doc.add_feature(FeatureKind::MeshImport { file: "reference.obj".into(), meshes: vec![mesh()] }, None).unwrap();
+        // Three packed f32 columns put over 16 MiB of base64 in the metadata, even though the
+        // point coordinates themselves live in a separate binary part.
+        let count = 1_100_000;
+        let values = Floats(vec![1.0; count].into());
+        let id = doc.allocate_id().unwrap();
+        doc.point_clouds.push(PointCloud {
+            id,
+            name: "Scan".into(),
+            file: "scan.ply".into(),
+            origin: Vec3::ZERO,
+            points: Points::new(vec![0.0; 3 * count].into()),
+            colors: Colors::default(),
+            source_points: count as u64,
+            units: "mm".into(),
+            transform: solidcraft_doc::IDENTITY,
+            point_size: 2.0,
+            color_by: ColorBy::File,
+            color: None,
+            height_range: None,
+            visible: true,
+            complex: Complex {
+                columns: ["nx", "ny", "nz"]
+                    .into_iter()
+                    .map(|name| Column { name: name.into(), on: On::Point, integer: false, values: values.clone() })
+                    .collect(),
+                ..Complex::default()
+            },
+            color_property: None,
+            filters: Vec::new(),
+            source: String::new(),
+            max_points: None,
+        });
+        let mut evaluated = solidcraft_doc::Model::new();
+        evaluated.evaluate(&doc);
+        let saved = evaluated.saved(&doc).expect("the evaluated model can be kept");
+        let bytes = write_design_container_with_cache(&doc, DesignCompression::Fast, None, Some(&saved)).unwrap();
+        {
+            let mut reader = DesignContainerReader::new(Cursor::new(&bytes)).unwrap();
+            assert!(reader.has_model_cache(), "the cache was written");
+            assert!(reader.reader.document(max_design()).unwrap().len() > 16 << 20);
+            assert!(reader.preview().is_none(), "the standalone preview has a smaller metadata budget");
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scan.sc");
+        std::fs::write(&path, bytes).unwrap();
+        let (opened, cached) = read_design_file(path.to_str().unwrap(), None::<fn(DesignPreview)>).unwrap();
+        assert!(opened.point_clouds == doc.point_clouds, "the cloud and its properties round trip");
+        let adopted = solidcraft_doc::Model::adopt(&opened, &cached.expect("normal Open reads the saved model")).unwrap();
+        assert_eq!(adopted.last_recomputed, 0);
+        assert_eq!(adopted.state().bodies[0].body.triangle_mesh(), evaluated.state().bodies[0].body.triangle_mesh());
+    }
+
     /// A saved model of four features (5, 50, 20 and 1 ms) whose states each hold the eight
     /// bodies all of them share and eight of their own (a body each feature replaces). No
     /// document evaluated it.
@@ -2311,7 +2376,7 @@ mod tests {
         assert_eq!(restored, m);
         let mut doc = Document::new("shaded source");
         doc.add_feature(FeatureKind::MeshImport { file: "smooth.obj".into(), meshes: vec![m.clone()] }, None).unwrap();
-        for bytes in [crate::write_design(&doc), write_design_container(&doc).unwrap()] {
+        for bytes in [crate::write_design(&doc).unwrap(), write_design_container(&doc).unwrap()] {
             let back = crate::read_design(&bytes).unwrap();
             assert_eq!(back, doc);
             let mut model = solidcraft_doc::Model::new();
@@ -2510,8 +2575,9 @@ mod tests {
     }
 
     /// Plugin data under `plugins/<plugin-id>/` opens and saves back byte for byte with no plugin
-    /// installed, in a container and in a plain JSON design; a design without any has no
-    /// `plugins/` part, and a part that is not a plugin data name is not kept.
+    /// installed; a design without any has no `plugins/` part, and a part that is not a plugin data
+    /// name is not kept. The model holds the bytes, never text; a plain JSON design can't carry
+    /// them and refuses to save, while an older one's base64 still opens.
     #[test]
     fn plugin_data_round_trips_untouched_without_the_plugin() {
         let doc = document();
@@ -2543,9 +2609,23 @@ mod tests {
         assert!(metadata.get("plugin_data").is_none(), "the parts stand beside the design, not inside it");
         assert_eq!(crate::read_design(&package(&resaved)).unwrap(), opened);
 
-        // A plain JSON design carries the same data, and a container made from it has the parts.
-        let json = opened.to_json();
-        let from_json = Document::from_json(&json).unwrap();
+        assert_eq!(opened.plugin_data["gear-maker/cache/table.bin"].as_bytes(), binary, "the bytes, not text");
+
+        // A plain JSON design can't carry them: saving one is refused, naming them.
+        let refused = crate::write_design(&opened).unwrap_err().to_string();
+        assert!(refused.contains("plugin files") && refused.contains(".sc"), "{refused}");
+        assert!(!opened.to_json().contains("plugin_data"), "never written as text");
+
+        // An older plain JSON design kept them as base64: it opens with the bytes, and a container
+        // made from it has the parts. Text that is not base64 is left out; the design still opens.
+        let mut older: Value = serde_json::from_str(&opened.to_json()).unwrap();
+        older["plugin_data"] = json!({
+            "gear-maker/state.json": solidcraft_doc::canvas::base64_encode(br#"{"teeth":24}"#),
+            "gear-maker/cache/table.bin": solidcraft_doc::canvas::base64_encode(&binary),
+            "other-tool/notes.txt": solidcraft_doc::canvas::base64_encode(b"kept"),
+            "other-tool/broken.bin": "not base64!",
+        });
+        let from_json = Document::from_json(&older.to_string()).unwrap();
         assert_eq!(from_json.plugin_data, opened.plugin_data);
         assert_eq!(parts(&write_design_container(&from_json).unwrap())["plugins/gear-maker/cache/table.bin"], binary);
     }
@@ -2727,7 +2807,7 @@ mod tests {
         let bytes = write_design_container_with_preview(&doc, DesignCompression::Fast, Some(&DesignPreview { meshes: vec![too_large] })).unwrap();
         assert!(read_design_preview(&bytes).is_none());
         assert_eq!(crate::read_design(&bytes).unwrap(), doc);
-        assert!(read_design_preview(&crate::write_design(&doc)).is_none());
+        assert!(read_design_preview(&crate::write_design(&doc).unwrap()).is_none());
     }
 
     #[test]
@@ -2745,7 +2825,7 @@ mod tests {
         assert_eq!(entries.keys().filter(|n| n.ends_with(".png")).count(), 1);
         let json: Value = serde_json::from_slice(&entries["document.json"]).unwrap();
         assert_eq!(json["features"][2]["meshes"][0]["positions"], json!([]));
-        assert_eq!(crate::read_design(&crate::write_design(&reopened)).unwrap(), source);
+        assert_eq!(crate::read_design(&crate::write_design(&reopened).unwrap()).unwrap(), source);
         assert_eq!(write_design_container(&source).unwrap(), bytes, "deterministic archive");
         let compact = write_design_container_with_compression(&source, DesignCompression::Compact).unwrap();
         assert_eq!(crate::read_design(&compact).unwrap(), source);
@@ -3134,7 +3214,7 @@ mod tests {
             "com.acme.description": {"shop_id": 88123, "list": [1, 2.5, null, true, "x", {"deep": []}]},
         }))
         .unwrap();
-        let expected = crate::read_design(&crate::write_design(&doc)).unwrap();
+        let expected = crate::read_design(&crate::write_design(&doc).unwrap()).unwrap();
         assert_eq!(expected, doc);
         assert_eq!(crate::read_design(&write_design_container(&doc).unwrap()).unwrap(), expected);
     }
@@ -3151,7 +3231,7 @@ mod tests {
                 "environment":{"kind":"sky","rotation_rad":0.25,"intensity":0.5,"gradient":{"zenith":[0.4,0.2,0.1],"horizon":[0.7,0.6,0.3],"ground":[0.2,0.1,0.05]}}}}}
         }})).unwrap());
         assert!(doc.differs_only_in_render(&before));
-        for bytes in [crate::write_design(&doc), write_design_container(&doc).unwrap()] {
+        for bytes in [crate::write_design(&doc).unwrap(), write_design_container(&doc).unwrap()] {
             let reopened = crate::read_design(&bytes).unwrap();
             assert_eq!(reopened, doc);
             assert_eq!(reopened.render, doc.render);
@@ -3182,7 +3262,7 @@ mod tests {
         doc.render = Arc::new(render);
         let bytes = write_design_container(&doc).unwrap();
         assert_eq!(crate::read_design(&bytes).unwrap(), doc);
-        assert_eq!(crate::read_design(&crate::write_design(&doc)).unwrap(), doc);
+        assert_eq!(crate::read_design(&crate::write_design(&doc).unwrap()).unwrap(), doc);
         let original = parts(&bytes);
         let blob = format!("blobs/{id}.hdr");
         assert_eq!(original.keys().filter(|name| name.ends_with(".hdr")).count(), 1);
@@ -3264,7 +3344,7 @@ mod tests {
         render.setups.insert("Wood".into(), setup);
         let bytes = write_design_container(&doc).unwrap();
         assert_eq!(crate::read_design(&bytes).unwrap(), doc);
-        assert_eq!(crate::read_design(&crate::write_design(&doc)).unwrap(), doc);
+        assert_eq!(crate::read_design(&crate::write_design(&doc).unwrap()).unwrap(), doc);
         let original = parts(&bytes);
         let blob = format!("blobs/{id}.texture");
         assert_eq!(original.keys().filter(|name| name.ends_with(".texture")).count(), 1);
@@ -3371,7 +3451,7 @@ mod tests {
     }
 
     fn measure_storage(doc: &Document, label: &str) {
-        let json = crate::write_design(doc);
+        let json = crate::write_design(doc).unwrap();
         let container = write_design_container(doc).unwrap();
         let dir = std::env::var_os("CARGO_TARGET_DIR").map(std::path::PathBuf::from).unwrap_or_else(|| std::path::PathBuf::from("target"));
         std::fs::create_dir_all(&dir).unwrap();
@@ -3380,7 +3460,7 @@ mod tests {
         let mut timings = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
         for _ in 0..9 {
             let start = std::time::Instant::now();
-            std::hint::black_box(crate::write_design(doc));
+            std::hint::black_box(crate::write_design(doc).unwrap());
             timings[0].push(start.elapsed().as_secs_f64() * 1000.0);
             let start = std::time::Instant::now();
             std::hint::black_box(write_design_container(doc).unwrap());
@@ -3410,7 +3490,7 @@ mod tests {
             // Alternate ordering; include encoding, flushing, replacement and backup.
             for index in if round % 2 == 0 { [0, 1] } else { [1, 0] } {
                 let start = std::time::Instant::now();
-                let bytes = if index == 0 { crate::write_design(doc) } else { write_design_container(doc).unwrap() };
+                let bytes = if index == 0 { crate::write_design(doc).unwrap() } else { write_design_container(doc).unwrap() };
                 crate::write_atomic(&dir.join(format!("issue303-{label}-atomic-{index}.solidcraft")), &bytes, true).unwrap();
                 saves[index].push(start.elapsed().as_secs_f64() * 1000.0);
             }

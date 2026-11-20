@@ -175,9 +175,16 @@ fn the_window_switches_page_searches_and_highlights_and_cancel_restores_the_snap
 
     frame(&ctx, &mut fake, key(egui::Key::Enter));
     assert_eq!((fake.window.section, fake.window.filter.as_str()), (0, ""), "Enter opens the match's page and leaves search");
+    let first_draw = settings_search::current_reveal(&ctx).map(|r| r.until);
     frame(&ctx, &mut fake, Vec::new());
     assert_eq!(fake.drawn, ["alpha"]);
     assert!(registry::handle_at("test:revealed").is_some(), "the opened row is outlined");
+    // The outline's time starts when the row first draws, and later frames keep it.
+    let first_draw = first_draw.filter(|t| !t.is_nan()).or_else(|| settings_search::current_reveal(&ctx).map(|r| r.until));
+    frame(&ctx, &mut fake, Vec::new());
+    assert!(first_draw.is_some_and(|t| !t.is_nan()), "the row's first draw starts the outline's time");
+    assert_eq!(fake.window.reveal.as_ref().map(|r| r.until), first_draw, "the window keeps the time the row's first draw set");
+    assert_eq!(settings_search::current_reveal(&ctx).map(|r| r.until), first_draw);
 
     fake.values.grid = true;
     frame(&ctx, &mut fake, Vec::new());

@@ -949,7 +949,25 @@ impl Session {
 
     /// Whether an occurrence shows in the world: its own eye and every ancestor placement's
     /// eye along its path. A hidden placement hides its Origin folder and items too (#7313).
+    ///
+    /// Inlined, so that while nothing can hide a body the answer costs the caller no call: the
+    /// viewport asks about every body in several passes a frame, and in an assembly of tens of
+    /// thousands of bodies the calls alone took two fifths of the window thread.
+    #[inline]
     pub fn body_visible(&self, name: &str) -> bool {
+        self.shows_every_body() || self.body_shown_among_hidden(name)
+    }
+
+    /// Nothing can hide a body: no body, placement or folder is hidden and no sketch is open
+    /// (an open sketch's model leaves out bodies that later features remove).
+    #[inline]
+    fn shows_every_body(&self) -> bool {
+        let v = &self.visibility;
+        v.hidden_bodies.is_empty() && v.hidden_occurrences.is_empty() && v.hidden_folders.is_empty() && self.active_sketch.is_none()
+    }
+
+    /// [`Session::body_visible`] when something may hide the body.
+    fn body_shown_among_hidden(&self, name: &str) -> bool {
         if self.body_hidden_itself(name) || self.body_removed_later(name) {
             return false;
         }

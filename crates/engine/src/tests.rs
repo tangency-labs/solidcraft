@@ -1170,6 +1170,7 @@ fn hostile_params_never_panic() {
         "distance",
         "profiles",
         "direction",
+        "parallel_to",
         "distance2",
         "start_offset",
         "operation",

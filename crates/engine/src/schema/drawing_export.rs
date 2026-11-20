@@ -8,15 +8,20 @@ use super::drawing_scene::{
 };
 use super::drawing_sheet::sheet_ref;
 
-/// Write one sheet of the open drawing to a file, or return it.
+/// Write one sheet of the open drawing to a file, or return it; a PDF can hold several sheets.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(deny_unknown_fields)]
 pub struct ExportParams {
-    /// The sheet, by id or name.
-    #[serde(deserialize_with = "sheet_ref")]
-    pub sheet: String,
-    /// The file format (svg when not given). DXF is not supported yet.
+    /// The sheet, by id or name. A PDF given neither this nor `sheets` holds every sheet.
+    #[serde(default, deserialize_with = "some_sheet", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "String")]
+    pub sheet: Option<String>,
+    /// PDF only: the sheets, by id or name, one page each in this order.
+    #[serde(default, deserialize_with = "some_sheets", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Vec<String>")]
+    pub sheets: Option<Vec<String>>,
+    /// The file format (svg when not given).
     #[serde(default)]
     pub format: ExportFormat,
     /// The file to write, ending in the format's extension (the reply holds the document when
@@ -38,6 +43,26 @@ pub struct ExportParams {
     pub paper: ExportPaper,
 }
 
+/// [`sheet_ref`], for a key that may be absent (`null` is refused).
+fn some_sheet<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    sheet_ref(d).map(Some)
+}
+
+/// A list of [`sheet_ref`]s, for a key that may be absent (`null` is refused).
+fn some_sheets<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Vec<String>>, D::Error> {
+    match serde_json::Value::deserialize(d)? {
+        serde_json::Value::Array(items) => items
+            .into_iter()
+            .map(|item| match item {
+                serde_json::Value::String(s) => Ok(s),
+                _ => Err(serde::de::Error::custom("each must be a sheet's id or name")),
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(Some),
+        _ => Err(serde::de::Error::custom("must be a list of sheets' ids or names")),
+    }
+}
+
 /// A sheet export's file format.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -45,6 +70,9 @@ pub enum ExportFormat {
     #[default]
     Svg,
     Png,
+    /// Vector, at the sheet's paper size, one page a sheet.
+    Pdf,
+    /// Lines in millimetres, a layer for each kind of line; pictures left out.
     Dxf,
 }
 
@@ -54,6 +82,7 @@ impl ExportFormat {
         match self {
             ExportFormat::Svg => "svg",
             ExportFormat::Png => "png",
+            ExportFormat::Pdf => "pdf",
             ExportFormat::Dxf => "dxf",
         }
     }
@@ -118,12 +147,19 @@ pub struct ExportReport {
     /// A PNG's width and height in pixels.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pixels: Option<[u32; 2]>,
+    /// A DXF's pictures (shaded views, images), left out: it holds only lines.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pictures_left_out: Option<usize>,
 }
 
 /// What `drawing.export` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ExportResult {
+    /// The sheet, or a PDF's first page's.
     pub sheet: String,
+    /// A PDF's sheets, one page each, in page order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pages: Vec<String>,
     pub format: ExportFormat,
     /// The document's size in bytes.
     pub bytes: usize,
@@ -133,7 +169,10 @@ pub struct ExportResult {
     /// The SVG's text when no path was given.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub svg: Option<String>,
-    /// The document as base64 when no path was given and it is binary (PNG).
+    /// The DXF's text when no path was given.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dxf: Option<String>,
+    /// The document as base64 when no path was given and it is binary (PNG, PDF).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<String>,
     pub report: ExportReport,

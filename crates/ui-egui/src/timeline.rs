@@ -218,6 +218,8 @@ impl TimelineKind {
         match kind {
             FeatureKind::Sketch { .. } => Self::Sketch,
             FeatureKind::Extrude { sketch, .. } | FeatureKind::Revolve { sketch, .. } | FeatureKind::Sweep { sketch, .. } => Self::Profile(*sketch),
+            // Sheet metal drawn from a sketch: the base flange's outline and the contour flange's chain.
+            FeatureKind::SheetBase { sketch, .. } | FeatureKind::SheetContour { sketch, .. } => Self::Profile(*sketch),
             _ => Self::Other,
         }
     }
@@ -295,6 +297,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Pipe { .. } => "pipe",
         FeatureKind::FrameEndCap { .. } => "end_cap",
         FeatureKind::FrameMember { .. } => "frame_member",
+        FeatureKind::FrameMemberTurn { .. } => "rotate_member",
         FeatureKind::Emboss { .. } => "emboss",
         FeatureKind::ReplaceFace { .. } => "replace_face",
         FeatureKind::Align { .. } => "align",
@@ -1782,7 +1785,7 @@ mod tests {
             cases.push((format!("construct.point.{id}"), FeatureKind::ConstructionPoint { def }));
         }
         for (id, plane) in [
-            ("midplane", PlaneRef::Midplane { a: reference(), b: reference() }),
+            ("midplane", PlaneRef::Midplane { a: reference(), b: reference(), old_frame: false }),
             ("axis_point", PlaneRef::AxisPoint { axis: reference(), point: reference() }),
             ("two_edges", PlaneRef::TwoEdges { a: reference(), b: reference() }),
             ("three_points", PlaneRef::ThreePoints { a: reference(), b: reference(), c: reference() }),

@@ -13,6 +13,7 @@ use solidcraft_theme::Tokens;
 
 pub(crate) mod browser;
 pub(crate) mod dimension;
+pub(crate) mod export;
 mod first_sheet;
 pub(crate) mod note;
 mod panels;
@@ -30,6 +31,7 @@ pub struct State {
     placement: Option<placement::Placement>,
     note: Option<note::Draft>,
     view_edit: Option<panels::ViewEdit>,
+    export: Option<export::ExportForm>,
     dimension: Option<dimension::Draft>,
     dimension_hover: Option<dimension::Hover>,
     dimension_edit: Option<panels::DimensionEdit>,
@@ -182,6 +184,7 @@ pub fn close_panel(app: &mut SolveApp) -> bool {
     app.drawing_workspace.placement = None;
     app.drawing_workspace.note = None;
     app.drawing_workspace.view_edit = None;
+    app.drawing_workspace.export = None;
     app.drawing_workspace.dimension = None;
     app.drawing_workspace.dimension_hover = None;
     app.drawing_workspace.dimension_edit = None;
@@ -316,7 +319,14 @@ pub(crate) fn edit_in_place(app: &mut SolveApp, object: u64, at: egui::Pos2) -> 
         let Ok(read) = app.run("drawing.dimension.inspect", serde_json::json!({"dimension": solidcraft_engine::doc::ids::encode(object)})) else {
             return false;
         };
-        let Some(text) = read["text"].as_str().filter(|text| !text.contains('\n')) else { return false };
+        // Its text as a template (`{value}` is its measured number); a chain has none.
+        if read["text"].is_null() {
+            return false;
+        }
+        let text = read["record"]["override_text"].as_str().unwrap_or(solidcraft_engine::doc::drawing::dimension::VALUE_TOKEN);
+        if text.contains('\n') {
+            return false;
+        }
         (SheetText::Dimension(object), "ui.drawing_panel.dimension", text.to_owned())
     } else if let Some(note) = drawing.notes.by_id(object) {
         let text = note.content.0.iter().map(|part| if let Part::Text(text) = part { Some(text.as_str()) } else { None }).collect::<Option<String>>();
@@ -1040,6 +1050,10 @@ fn panel_fields(app: &mut SolveApp, ui: &mut egui::Ui) {
         if panels::view_editor(app, ui, view) {
             close_panel(app);
         }
+    } else if app.drawing_workspace.options == Some(Tool::Export) {
+        if export::panel(app, ui) {
+            close_panel(app);
+        }
     } else if placing_dimension(app) {
         dimension::panel(app, ui);
     } else if let Some(Tool::Dimension(Some(placed))) = app.drawing_workspace.options {
@@ -1317,6 +1331,35 @@ mod tests {
         assert!(h.app.session.drawing("drawing.inspect").unwrap().view(id).is_some(), "and Ctrl+Z brings it back");
     }
 
+    /// A view's panel offers every visual style, the shaded ones too: picking Shaded with visible
+    /// edges and OK saves the view in it.
+    #[test]
+    fn a_views_panel_shades_it() {
+        use serde_json::json;
+        use solidcraft_engine::render::VisualStyle;
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
+        enter(&mut h.app, true).unwrap();
+        h.frames(4);
+        h.app.run("drawing.create", json!({})).unwrap();
+        let made = h.app.run("drawing.view.base", json!({"sheet": "Sheet 1"})).unwrap();
+        let view = solidcraft_engine::doc::ids::decode(made["view"].as_str().unwrap()).unwrap();
+        h.frames(4);
+        edit(&mut h.app, view, egui::pos2(400.0, 300.0));
+        h.frames(4);
+        assert_eq!(h.app.drawing_workspace.options, Some(Tool::Edit(Some(view))));
+        h.step(&json!({"click": {"handle": "drawing:edit:style"}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"widget": "Shaded with visible edges"})).unwrap();
+        h.frames(2);
+        h.step(&json!({"widget": "OK"})).unwrap();
+        h.frames(2);
+        let style = h.app.session.drawing("drawing.inspect").unwrap().resolve_view(view).unwrap().visual_style.value;
+        assert_eq!(style, VisualStyle::ShadedVisible);
+        assert!(h.app.drawing_workspace.options.is_none(), "OK closes the panel");
+    }
+
     /// A blank sheet's ribbon offers every tool that has a working panel: a click opens it.
     #[test]
     fn a_blank_sheets_working_tools_open_from_the_ribbon() {
@@ -1332,6 +1375,7 @@ mod tests {
             ("DRAWING ANNOTATE", "drawing.dimension", Tool::Dimension(None)),
             ("DRAWING ANNOTATE", "drawing.note", Tool::Note(None)),
             ("DRAWING PARTS", "drawing.parts_list", Tool::PartsList(None)),
+            ("DRAWING REVIEW", "drawing.export", Tool::Export),
         ] {
             close_panel(&mut h.app);
             h.app.ui.tab = tab.into();
@@ -1343,7 +1387,7 @@ mod tests {
             let spec = solidcraft_engine::find_command(id).unwrap();
             assert!(!crate::toolbar::coming_soon(&h.app, spec), "{id} is drawn as a working tool, not faded");
         }
-        for id in ["drawing.update.planned", "drawing.view.section.planned", "drawing.export.planned"] {
+        for id in ["drawing.update.planned", "drawing.view.section.planned"] {
             let spec = solidcraft_engine::find_command(id).unwrap();
             assert!(crate::toolbar::coming_soon(&h.app, spec), "{id} opens nothing yet: faded, coming soon");
         }
@@ -1871,7 +1915,6 @@ mod tests {
             assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc));
             assert_eq!(h.app.cam, cam);
         }
-        assert!(!can_open_options("drawing.export.planned"));
         assert!(!can_open_options("drawing.update.planned"));
     }
 
