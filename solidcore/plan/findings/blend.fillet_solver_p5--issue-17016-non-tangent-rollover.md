@@ -220,13 +220,30 @@ classification names an edge only for a run end that lies on an edge; an end
 classified at a vertex gave no seam event, so the crease refusal
 (`CreaseAcrossTangentEdge`) did not see the crossing, though the same crossing
 on the edge was refused. Each run now also records the vertex of an end
-classified at a vertex, and every edge that meets that vertex becomes a seam
-event at the vertex's own parameter on it (its interval start where it starts
-there, else its end). The refusal then tests each of those edges as before. The
-check is the existing tangent test; nothing new is tolerated. The regression is
-`a_crease_through_a_vertex_gives_a_seam_event_for_each_edge_there` in the
+classified at a vertex, and each edge of the crease's face that meets that
+vertex becomes a seam event at the vertex's own parameter on it (its interval
+start where it starts there, else its end). The refusal then tests each of those
+edges as before. The check is the existing tangent test; nothing new is
+tolerated. The regression is
+`a_crease_through_a_vertex_gives_a_seam_event_for_each_face_edge_there` in the
 existing `trim_at_creases.rs` tests: a crease through a box's top corner gives
-an event for each of the three edges there.
+an event for each of the top's two edges there, and none for the vertical edge.
+
+Only the face's own edges. The first version made every edge at the vertex an
+event, whichever faces it bounds. That refused #2385's disc
+(`issue_2385_crease_along_edge::a_round_just_past_its_wall_builds`, r 2.0001):
+the round's crease on the bottom face runs along the bottom circle and its run
+ends at the circle's vertex, where the side face's seam also ends. The seam
+bounds the side face on both of its uses, so it is tangent (0 degrees); the
+side is a face the round rolls on, and the crease was refused with
+`CreaseAcrossTangentEdge`. But a seam between two uses of one face separates no
+face from the crease's face: the crease leaves the bottom there across the
+bottom circle, a 90 degree edge, which main judges and passes. The events at a
+vertex are now `vertex::edges(b, v, Some(f))`, the edges of the crease's face
+`f` there, and the disc builds as on main.
+`a_crease_through_a_seam_vertex_crosses_only_the_face_edges_there` (the same
+file) is the cylinder top's case: the seam is no event, the circle is, and the
+crease is not refused.
 
 A non-finite crossing evaluation. The concave test at a crossing was the
 negation of the convex check, so a NaN dot product came out as concave, which

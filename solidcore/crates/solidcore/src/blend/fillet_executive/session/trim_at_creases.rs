@@ -1005,14 +1005,18 @@ fn pieces_in_face_to_ends(
             .flatten()
         })
         .collect();
-    // A run end classified at a vertex names no edge, yet the rail crosses every edge that
-    // meets there: each is an event, at the parameter of the vertex on it.
+    // A run end classified at a vertex names no edge, yet the crease leaves the face there
+    // across each of the face's own edges that meet it: each is an event, at the parameter
+    // of the vertex on it. Edges at the vertex that bound other faces only (a seam of the
+    // face next door, between two uses of that one face) separate no face from this one,
+    // so the crease crosses none of them out of this face (#2385's disc: a crease along
+    // the bottom edge through the vertex at the foot of the side face's seam).
     for v in runs
         .iter()
         .flat_map(|run| [run.start_vertex, run.end_vertex])
         .flatten()
     {
-        for e in vertex::edges(b, v, None)? {
+        for e in vertex::edges(b, v, Some(f))? {
             let at_start = edge::start_vertex(b, e)? == Some(v);
             let range = edge::interval(b, e)?;
             let parameter = if at_start { range.min() } else { range.max() };
@@ -1261,7 +1265,7 @@ fn crease_piece(k: &Kernel, crease: &Curve, t0: f64, t1: f64) -> Result<Curve> {
 /// roll over onto it, and the ball does not fit between.
 ///
 /// The edges the crease crosses (`seam_events`, each with the parameter it crosses at,
-/// every edge at a vertex it crosses through included) are judged where it crosses them,
+/// each edge of `f` at a vertex it crosses through included) are judged where it crosses them,
 /// against the round's section budget `tangent_budget` (a spline seam's tangency varies
 /// along it). The face's other edges are judged as ever: at a fixed point of the edge,
 /// against the solvers' tangency tolerance `face_tangency`.
@@ -3010,10 +3014,11 @@ mod tests {
     }
 
     /// A crease that crosses the top of a box at a corner vertex ends its run at that vertex,
-    /// which names no edge. The seam events still carry every edge that meets the vertex, at
-    /// the vertex's parameter on it, so the tangent-edge refusal sees the crossing.
+    /// which names no edge. The seam events still carry each edge of the top that meets the
+    /// vertex, at the vertex's parameter on it, so the tangent-edge refusal sees the
+    /// crossing; the vertical edge there bounds the two side faces only and is no event.
     #[test]
-    fn a_crease_through_a_vertex_gives_a_seam_event_for_each_edge_there() {
+    fn a_crease_through_a_vertex_gives_a_seam_event_for_each_face_edge_there() {
         use crate::primitive::api_primitives::create_box;
         let mut k = Kernel::default();
         let mut b = create_box(&mut k, Point3::ZERO, 40.0, 20.0, 10.0).unwrap();
@@ -3046,6 +3051,7 @@ mod tests {
         let events =
             pieces_in_face_to_ends(&k, &crease, &mut b, top, TOL, &mut in_face, &mut along)
                 .unwrap();
+        let of_top = vertex::edges(&b, v, Some(top)).unwrap();
         for e in vertex::edges(&b, v, None).unwrap() {
             let range = edge::interval(&b, e).unwrap();
             let at = if edge::start_vertex(&b, e).unwrap() == Some(v) {
@@ -3053,9 +3059,11 @@ mod tests {
             } else {
                 range.max()
             };
-            assert!(
+            assert_eq!(
                 events.contains(&(e, at)),
-                "edge {e:?} at the corner, parameter {at}, is a seam event: {events:?}"
+                of_top.contains(&e),
+                "edge {e:?} at the corner, parameter {at}, is a seam event exactly when it \
+                 bounds the top: {events:?}"
             );
         }
     }
@@ -3073,14 +3081,14 @@ mod tests {
         out
     }
 
-    /// #17016: a crease that leaves the top of a cylinder through the vertex where its seam
-    /// starts ends its run at that vertex, which names no edge. The seam, an edge of the side
-    /// face only (tangent to itself all along), touches the top at that vertex alone; the
-    /// rail crossing there onto the side the blend rolls on is refused with
-    /// `CreaseAcrossTangentEdge`. Without the seam events at a vertex the seam is never
-    /// judged (it is not an edge of the top), and the top's own circle is sharp.
+    /// #17016, #2385: a crease that leaves the top of a cylinder through the vertex where its
+    /// seam starts ends its run at that vertex, which names no edge. The seam, an edge of
+    /// the side face only (tangent to itself all along), touches the top at that vertex
+    /// alone and separates no face from the top: the crease leaves the top there across the
+    /// top's own circle, which is sharp, so it is not refused. (Judging the seam refused
+    /// #2385's disc, whose crease runs along the bottom edge through the seam's foot.)
     #[test]
-    fn a_crease_through_a_vertex_on_a_tangent_edge_is_refused() {
+    fn a_crease_through_a_seam_vertex_crosses_only_the_face_edges_there() {
         use crate::primitive::api_primitives::create_cylinder;
         let mut k = Kernel::default();
         let mut b = create_cylinder(&mut k, Point3::ZERO, 10.0, 20.0).unwrap();
@@ -3115,9 +3123,12 @@ mod tests {
         let events =
             pieces_in_face_to_ends(&k, &crease, &mut b, top, TOL, &mut in_face, &mut along)
                 .unwrap();
+        // the circle is an event at the vertex's parameter on it; the seam is none
+        let range = edge::interval(&b, circle).unwrap();
+        assert!(events.contains(&(circle, range.min())), "{events:?}");
+        assert!(events.iter().all(|&(e, _)| e != seam), "{events:?}");
         // the fillet's default tangency, 10 degrees (`edge_refusals::DEFAULT_TANGENCY`): the
-        // seam is tangent at 0 degrees, the circle sharp at 90, so any budget between decides
-        // the same
+        // circle is sharp at 90 degrees, so any budget below that decides the same
         let tangency = 10.0 * (crate::math::PI / 180.0);
         let rolled_supports = BTreeSet::from([side]);
         let refused = crease_across_tangent_edge(
@@ -3130,13 +3141,7 @@ mod tests {
             tangency,
         )
         .unwrap();
-        let (face, r) = refused.expect("the rail crosses the tangent seam at the vertex");
-        assert_eq!(face, side);
-        assert!(matches!(r.code, FilletErrorType::NoRoom));
-        assert!(matches!(
-            r.reason,
-            Some(NoRoomReason::CreaseAcrossTangentEdge)
-        ));
+        assert!(refused.is_none(), "the circle at the vertex is sharp");
     }
 
     /// The leftover check refuses what a move left off and passes a body that holds
