@@ -278,6 +278,25 @@ fn a_revolve_from_a_turned_sub_components_face_joins_and_cuts_it_from_the_top_le
     }
 }
 
+/// A fixed face keeps no attachment, so the Cut's scope is the picked face's body (#5679): a
+/// quarter cylinder of radius 10 comes out of the turned part and the top level's body stays.
+#[test]
+fn a_fixed_face_revolve_from_the_top_level_cuts_the_picked_faces_body() {
+    let (mut s, placed) = turned_part(true);
+    let at = |x: f64, y: f64, z: f64| solidcraft_doc::apply_point(&placed, solidcore_record::Vec3::new(x, y, z));
+    let (top, origin, along) = (at(5.0, 5.0, 10.0), at(0.0, 0.0, 10.0), at(1.0, 0.0, 10.0));
+    let dir = along - origin;
+    run(
+        &mut s,
+        "solid.revolve",
+        json!({"face": [top.x, top.y, top.z], "fixed": true, "axis": {"origin": [origin.x, origin.y, origin.z], "dir": [dir.x, dir.y, dir.z]},
+               "angle": "180 deg", "direction": "symmetric", "operation": "cut"}),
+    );
+    let quarter = std::f64::consts::PI * 100.0 / 4.0 * 10.0;
+    assert!((body_volume(&s, "Stock") - (1000.0 - quarter)).abs() < 1e-3 * quarter, "Stock {}", body_volume(&s, "Stock"));
+    assert!((body_volume(&s, "Base") - 2000.0).abs() < 1e-6);
+}
+
 /// #5679 for Loft (and Sweep, through the same join target): with the top level active, a loft
 /// from a circle on the turned part's top face to one 5 mm above joins the part, in one piece.
 #[test]
@@ -447,13 +466,73 @@ fn rib_to_the_next_face_fills_the_corner() {
     assert!(rel(volume(&mut s), 7500.0 + 400.0) < 1e-6);
 }
 
+/// A rib whose curve stops short of a curved wall runs its end on to the wall (#13019): a base,
+/// a wall at x = 0..5 and above them a cylinder along X (bottom at z = 29 in the sketch plane);
+/// the rib's line runs up from the base at x = 20 and stops at z = 25. Without `extend` (the
+/// default, and every design saved before the option) the rib ends at the line's end as it did.
+#[test]
+fn rib_runs_its_ends_on_to_a_curved_wall() {
+    let added = |extend: bool| {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 60, "width": 20, "height": 5, "corner": [0, 0, 0], "body_name": "P"}));
+        run(&mut s, "solid.box", json!({"length": 5, "width": 20, "height": 40, "corner": [0, 0, 0], "operation": "join"}));
+        run(&mut s, "solid.cylinder", json!({"radius": 6, "height": 40, "base": [0, 10, 35], "axis": "X", "operation": "join"}));
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 10, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "RibSketch"}));
+        run(&mut s, "sketch.line", json!({"points": [[20, 5], [20, 25]], "ids": ["l1"]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let before = volume(&mut s);
+        let mut rib = json!({"sketch": "RibSketch", "curves": ["l1"], "thickness": 4});
+        if extend {
+            rib["extend"] = json!(true);
+        }
+        run(&mut s, "solid.rib", rib);
+        assert_eq!(measure(&mut s)["body_count"], 1);
+        volume(&mut s) - before
+    };
+    // Up to the line's end: 15 from the line to the wall, 20 high, 4 thick.
+    let short = added(false);
+    assert!(rel(short, 1200.0) < 1e-6, "{short}");
+    // On to the cylinder, which is 29 above the base at the sketch plane and 29.34 at the rib's
+    // faces: at least 4 higher, and below the cylinder's axis.
+    let long = added(true);
+    assert!(long > 1200.0 + 15.0 * 4.0 * 4.0 * 0.98 && long < 1200.0 + 15.0 * 4.0 * 10.0, "{long}");
+}
+
+#[test]
+fn rib_ending_flush_with_a_wall_keeps_a_square_end() {
+    // A tray 60 x 40 x 20 with 3 mm walls and floor (16788 mm³); a rib on XZ at y = 20 along
+    // z = 12, 4 thick, runs down to the floor at z = 3. An end flush with the inner face of a
+    // wall (x = 3 or x = 57) must stay square, whichever way the line runs.
+    for (from, to, volume_expected) in [
+        (3.0, 57.0, 16788.0 + 54.0 * 4.0 * 9.0),
+        (57.0, 3.0, 16788.0 + 54.0 * 4.0 * 9.0),
+        (10.0, 57.0, 16788.0 + 47.0 * 4.0 * 9.0),
+        (3.0, 50.0, 16788.0 + 47.0 * 4.0 * 9.0),
+        (10.0, 50.0, 16788.0 + 40.0 * 4.0 * 9.0),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 20, "corner": [0, 0, 0], "operation": "new", "body_name": "T"}));
+        run(&mut s, "solid.box", json!({"length": 54, "width": 34, "height": 20, "corner": [3, 3, 3], "operation": "cut", "targets": ["T"]}));
+        run(&mut s, "sketch.create", json!({"plane": "XZ", "offset": 20, "name": "R"}));
+        run(&mut s, "sketch.line", json!({"points": [[from, -12.0], [to, -12.0]], "ids": ["l1"]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.rib", json!({"sketch": "R", "curves": ["l1"], "thickness": 4}));
+        let v = volume(&mut s);
+        assert!(rel(v, volume_expected) < 1e-6, "{from} -> {to}: {v}, expected {volume_expected}");
+        assert_eq!(measure(&mut s)["body_count"], 1, "{from} -> {to}");
+    }
+}
+
 #[test]
 fn rib_finds_a_tray_floor_whatever_the_tray_length() {
     // An open tray L x 30 x 12 with 2 mm walls and floor, a rib line across it at z = 8 on the
     // mid plane x = L / 2: the rib runs down to the floor. Finding the material side and the
     // floor by samples spaced by the tray's size passed over the 2 mm floor at some lengths
-    // and refused the rib (#16874).
-    for (l, t) in [(40.0, 0.1), (80.0, 0.1), (100.0, 0.1), (150.0, 0.1), (160.0, 0.1), (200.0, 0.1), (400.0, 0.1), (400.0, 4.0)] {
+    // and refused the rib (#16874). Without `extend` (the default) it builds as before; with its
+    // ends run on (`extend`, #13019) the rib reaches
+    // the side walls at y = 2 and 28 and is 26 long; a thin rib's outline closes there too.
+    let sizes = [(40.0, 0.1), (80.0, 0.1), (100.0, 0.1), (150.0, 0.1), (160.0, 0.1), (200.0, 0.1), (400.0, 0.1), (400.0, 4.0)];
+    for ((l, t), extend) in sizes.into_iter().flat_map(|size| [(size, false), (size, true)]) {
         let mut s = Session::default();
         run(&mut s, "solid.box", json!({"length": l, "width": 30, "height": 12, "corner": [0, 0, 0], "operation": "new", "body_name": "T"}));
         run(&mut s, "solid.box", json!({"length": l - 4.0, "width": 26, "height": 12, "corner": [2, 2, 2], "operation": "cut", "targets": ["T"]}));
@@ -462,12 +541,53 @@ fn rib_finds_a_tray_floor_whatever_the_tray_length() {
         run(&mut s, "sketch.create", json!({"plane": "YZ", "offset": l / 2.0, "name": "R"}));
         run(&mut s, "sketch.line", json!({"points": [[5, 8], [25, 8]], "closed": false}));
         run(&mut s, "sketch.finish", json!({}));
-        run(&mut s, "solid.rib", json!({"sketch": "R", "curves": ["l1"], "thickness": t}));
-        // 20 long, 6 from the line down to the floor; it goes into the 2 mm floor to merge
-        // but not out below it, however thick the rib.
-        assert!(rel(volume(&mut s), tray + 20.0 * 6.0 * t) < 1e-6, "L = {l}, t = {t}: {}", volume(&mut s));
-        assert_eq!(measure(&mut s)["body_count"], 1, "L = {l}, t = {t}");
+        let mut rib = json!({"sketch": "R", "curves": ["l1"], "thickness": t});
+        if extend {
+            rib["extend"] = json!(true);
+        }
+        run(&mut s, "solid.rib", rib);
+        // 20 long (26 with its ends run on), 6 from the line down to the floor; it goes into the
+        // 2 mm floor to merge but not out below it, however thick the rib.
+        let long = if extend { 26.0 } else { 20.0 };
+        assert!(rel(volume(&mut s), tray + long * 6.0 * t) < 1e-6, "L = {l}, t = {t}, extend = {extend}: {}", volume(&mut s));
+        assert_eq!(measure(&mut s)["body_count"], 1, "L = {l}, t = {t}, extend = {extend}");
     }
+}
+
+/// A rib meets a face that curves across its thickness along both of its faces, not only on its
+/// mid plane (#18261). A tube (outside radius 10, bore 7) stands on a plate; a rib 12 thick on
+/// XZ runs from a line at x = 25 to the tube. On the mid plane the tube is at x = 10, at the
+/// rib's faces (y = ±6) at x = 8: a wall run to the mid plane's face, plus at most half the
+/// 3 mm tube wall, stopped at x = 8.5 and left a sliver of air at the rib's faces, wider the
+/// thicker the rib. The wall must close against the tube across its whole thickness, and still
+/// not come out into the bore.
+#[test]
+fn rib_meets_a_curved_face_across_its_whole_thickness() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 80, "width": 80, "height": 5, "corner": [-40, -40, 0], "body_name": "Seat"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 40, "base": [0, 0, 5], "axis": "Z", "operation": "join"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 7, "height": 40, "base": [0, 0, 5], "axis": "Z", "operation": "cut"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "R"}));
+    run(&mut s, "sketch.line", json!({"points": [[25, 5], [25, 35]], "ids": ["l1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.rib", json!({"sketch": "R", "curves": ["l1"], "thickness": 12}));
+    assert_eq!(measure(&mut s)["body_count"], 1);
+    let class = |p: [f64; 3]| {
+        let bodies = &s.model.state().bodies;
+        bodies.iter().any(|b| b.body.classify_point(solidcore_record::Vec3::new(p[0], p[1], p[2])).unwrap() == solidcraft_kernel::PointClass::Inside)
+    };
+    // Just outside the tube (radius 10.03) near the rib's face, between the tube and where the
+    // old wall stopped: material now.
+    for z in [8.0, 20.0, 32.0] {
+        assert!(class([8.25, 5.7, z]), "a gap between the rib and the tube at z = {z}");
+        assert!(class([8.25, -5.7, z]), "a gap between the rib and the tube at z = {z}");
+    }
+    // The bore stays clear.
+    for p in [[6.5, 0.0, 20.0], [5.0, 4.0, 20.0], [0.0, 0.0, 20.0]] {
+        assert!(!class(p), "the rib came out into the bore at {p:?}");
+    }
+    // Beside the rib, outside the tube, nothing was added.
+    assert!(!class([8.25, 6.5, 20.0]));
 }
 
 #[test]
@@ -608,19 +728,32 @@ fn cylinder_emboss_persists_selection_and_replays_radial_depth() {
 }
 
 #[test]
-fn cylinder_deboss_is_connected_and_unsupported_profile_failure_is_atomic() {
+fn cylinder_deboss_is_connected_a_circle_wraps_and_a_profile_past_the_wall_fails_atomically() {
     let mut s = cylinder_badge();
     let before = exact_cylinder_volume(&s);
     run(&mut s, "solid.emboss", json!({"sketch":"Badge","face":[0,10,7.5],"depth":1,"mode":"deboss","targets":["Sleeve"]}));
     assert!((exact_cylinder_volume(&s) - before + 19.0).abs() < 0.02);
     assert_eq!(s.model.state().body("Sleeve").unwrap().body.shell_count(), 1);
+    // A circle wraps round the wall (#5358): its area times (11² - 10²) / 20.
+    let mut round = cylinder_badge();
+    run(&mut round, "sketch.create", json!({"plane":{"origin":[0,10,0],"x_dir":[-1,0,0],"y_dir":[0,0,1]},"name":"Circle Badge"}));
+    run(&mut round, "sketch.circle.center", json!({"center":[0,7.5],"radius":1}));
+    run(&mut round, "sketch.finish", json!({}));
+    let v = exact_cylinder_volume(&round);
+    run(&mut round, "solid.emboss", json!({"sketch":"Circle Badge","face":[0,10,7.5],"depth":1,"targets":["Sleeve"]}));
+    let added = exact_cylinder_volume(&round) - v;
+    assert!((added - std::f64::consts::PI * 21. / 20.).abs() < 0.02, "{added}");
+    assert_eq!(round.model.state().body("Sleeve").unwrap().body.shell_count(), 1);
+    // A profile running past the top endcap is refused, leaving the design as it was.
     let mut bad = cylinder_badge();
-    run(&mut bad, "sketch.create", json!({"plane":{"origin":[0,10,0],"x_dir":[-1,0,0],"y_dir":[0,0,1]},"name":"Circle Badge"}));
-    run(&mut bad, "sketch.circle.center", json!({"center":[0,7.5],"radius":1}));
+    run(&mut bad, "sketch.create", json!({"plane":{"origin":[0,10,0],"x_dir":[-1,0,0],"y_dir":[0,0,1]},"name":"Tall Badge"}));
+    run(&mut bad, "sketch.rectangle.two_point", json!({"p0":[-2,15],"p1":[2,25]}));
     run(&mut bad, "sketch.finish", json!({}));
     let saved = bad.doc.to_json();
     let v = exact_cylinder_volume(&bad);
-    assert!(bad.execute("solid.emboss", &json!({"sketch":"Circle Badge","face":[0,10,7.5],"depth":1,"targets":["Sleeve"]})).is_err());
+    let error =
+        bad.execute("solid.emboss", &json!({"sketch":"Tall Badge","face":[0,10,7.5],"depth":1,"targets":["Sleeve"]})).unwrap_err().to_string();
+    assert!(error.contains("endcap"), "{error}");
     assert_eq!(bad.doc.to_json(), saved);
     assert_eq!(exact_cylinder_volume(&bad), v);
 }
@@ -667,6 +800,34 @@ fn cylinder_small_chord_pick_is_saved_on_the_exact_surface() {
     };
     assert!(((face.at.x * face.at.x + face.at.y * face.at.y).sqrt() - 0.1).abs() < 1e-12);
     assert_eq!(s.model.state().bodies.first().unwrap().body.shell_count(), 1);
+}
+
+/// Text wraps round a whole tube, outside and in its bore (#5358): each way it adds or removes
+/// the flat text's volume times `|rr² - r²| / 2r` per unit depth, the wrap keeping arc length.
+#[test]
+fn emboss_text_wraps_round_a_whole_tube_outside_and_in_its_bore() {
+    let mut flat = Session::default();
+    run(&mut flat, "solid.box", json!({"length": 60, "width": 60, "height": 20, "body_name": "Flat"}));
+    let flat_before = volume(&mut flat);
+    run(&mut flat, "sketch.create", json!({"plane": {"origin": [20, 20, 20], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Text"}));
+    run(&mut flat, "sketch.text", json!({"text": "Emboss", "at": [-10, 10], "height": 6}));
+    run(&mut flat, "sketch.finish", json!({}));
+    run(&mut flat, "solid.emboss", json!({"sketch": "Text", "depth": 1}));
+    let area = volume(&mut flat) - flat_before;
+    for (r, mode, rr) in [(20.0_f64, "emboss", 21.0_f64), (20., "deboss", 19.), (16., "emboss", 15.), (16., "deboss", 17.)] {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 30, "body_name": "Tube"}));
+        run(&mut s, "solid.cylinder", json!({"radius": 16, "height": 30, "operation": "cut", "targets": ["Tube"]}));
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [0, r, 0], "x_dir": [-1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Text"}));
+        run(&mut s, "sketch.text", json!({"text": "Emboss", "at": [-10, 10], "height": 6}));
+        run(&mut s, "sketch.finish", json!({}));
+        let before = volume(&mut s);
+        run(&mut s, "solid.emboss", json!({"sketch": "Text", "face": [0.0, r, 13.0], "depth": 1, "mode": mode}));
+        assert_eq!(s.model.state().body("Tube").unwrap().body.shell_count(), 1);
+        let change = (volume(&mut s) - before).abs();
+        let want = area * (rr * rr - r * r).abs() / (2. * r);
+        assert!((change - want).abs() < 1e-4 * want, "{mode} at {r}: {change} vs {want}");
+    }
 }
 
 #[test]
@@ -1312,7 +1473,7 @@ fn cylinder_auto_inference_retains_selected_holes_and_nested_islands() {
 }
 
 #[test]
-fn cylinder_auto_inference_refuses_ambiguity_curves_and_seam_crossing_atomically() {
+fn cylinder_auto_inference_refuses_ambiguity_and_seam_crossing_atomically_and_wraps_curves() {
     let mut s = cylinder_badge();
     run(&mut s, "solid.cylinder", json!({"radius":10,"height":20,"body_name":"Coincident"}));
     let before = s.doc.to_json();
@@ -1332,8 +1493,15 @@ fn cylinder_auto_inference_refuses_ambiguity_curves_and_seam_crossing_atomically
         run(&mut s, "sketch.finish", json!({}));
         let before = s.doc.to_json();
         let volume = exact_cylinder_volume(&s);
+        if circle {
+            // A circle wraps round the wall (#5358): its area times (11² - 10²) / 20.
+            run(&mut s, "solid.emboss", json!({"sketch":"Unsupported","depth":1}));
+            let want = std::f64::consts::PI * 21. / 20.;
+            assert!((exact_cylinder_volume(&s) - volume - want).abs() < 0.02, "{}", exact_cylinder_volume(&s) - volume);
+            continue;
+        }
         let error = s.execute("solid.emboss", &json!({"sketch":"Unsupported","depth":1})).unwrap_err().to_string();
-        assert!(error.contains(if circle { "orthogonal line" } else { "seam" }), "{error}");
+        assert!(error.contains("seam"), "{error}");
         assert_eq!(s.doc.to_json(), before);
         assert_eq!(exact_cylinder_volume(&s), volume);
     }
@@ -2724,6 +2892,89 @@ fn an_import_saved_by_an_older_step_reader_opens_with_its_bodies_in_place() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// #16857: a solid of an inserted STEP file that this reader leaves out takes no other body's
+/// name. The file holds three solids in one product; opened by a reader that can't read the
+/// middle one, the bodies were paired with the stored names by their place among the bodies
+/// read, so the last solid took the middle one's name, the Move after the import failed on the
+/// last name, and saving kept only two names. Bodies are matched by the solid they were read
+/// from: the last solid keeps its name and its move, and the middle solid's name keeps its
+/// slot, so it comes back on that solid once the solid reads again. Checked for a design that
+/// stored each body's STEP item and for one saved before items were stored (0.30.1), which is
+/// matched by the solids' order in the file.
+#[test]
+fn a_solid_left_out_on_opening_keeps_its_name_and_gives_it_to_no_other_body() {
+    use solidcraft_doc::FeatureKind;
+    use solidcraft_doc::kernel::StepNode;
+    let dir = std::env::temp_dir().join(format!("solidcraft-16857-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("abc.step").to_string_lossy().to_string();
+    let mut src = Session::default();
+    for (name, x, height) in [("Alpha", -5, 10), ("Bravo", 15, 20), ("Charlie", 35, 30)] {
+        run(&mut src, "solid.box", json!({"length": 10, "width": 10, "height": height, "corner": [x, -5, 0], "body_name": name}));
+    }
+    run(&mut src, "file.export", json!({"path": path}));
+    let text = std::fs::read_to_string(&path).unwrap();
+    // The same file with Bravo's solid unreadable: its shell is an entity the file doesn't have.
+    let solid = text.find("MANIFOLD_SOLID_BREP('Bravo',#").expect("Bravo is a solid of its own in the file");
+    let shell = solid + "MANIFOLD_SOLID_BREP('Bravo',".len();
+    let end = shell + text[shell..].find(')').unwrap();
+    let broken = format!("{}#999999{}", &text[..shell], &text[end..]);
+
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path": path}));
+    let names: Vec<String> = s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(names, ["Alpha", "Bravo", "Charlie"]);
+    run(&mut s, "solid.move", json!({"bodies": ["Charlie"], "translate": [0, 0, 20]}));
+    let charlie = placed_bounds(&s, "Charlie");
+    assert!(about(charlie.min.x, 35.0) && about(charlie.min.z, 20.0) && about(charlie.max.z, 50.0), "{charlie:?}");
+    let alpha = placed_bounds(&s, "Alpha");
+
+    fn strip_items(nodes: &mut [StepNode]) {
+        for n in nodes {
+            n.items.clear();
+            n.left_out.clear();
+            strip_items(&mut n.children);
+        }
+    }
+    for saved_before_items in [false, true] {
+        let mut doc = (*s.doc).clone();
+        let f = doc.features.iter_mut().find(|f| matches!(f.kind, FeatureKind::Import { .. })).unwrap();
+        if let FeatureKind::Import { step, components, .. } = &mut f.kind {
+            assert!(components.iter().all(|n| n.items.len() == n.bodies.len()), "the insert stores each body's item: {components:?}");
+            if saved_before_items {
+                strip_items(components);
+            }
+            *step = broken.as_str().into();
+        }
+        let opened = Session::opened(doc, None);
+        let what = if saved_before_items { "saved before items" } else { "with items" };
+        let now: Vec<String> = opened.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
+        assert_eq!(now, ["Alpha", "Charlie"], "{what}");
+        let errors: Vec<_> = opened.model.results.iter().filter_map(|r| r.error.clone()).collect();
+        assert!(errors.is_empty(), "{what}: the Move finds Charlie: {errors:?}");
+        assert!(shifted(alpha, placed_bounds(&opened, "Alpha"), [0.0; 3]), "{what}");
+        let got = placed_bounds(&opened, "Charlie");
+        assert!(shifted(charlie, got, [0.0; 3]), "{what}: Charlie opened at {got:?}, was at {charlie:?}");
+        // Bravo's name stays in the feature, after the bodies the file gives now.
+        let f = opened.doc.features.iter().find(|f| matches!(f.kind, FeatureKind::Import { .. })).unwrap();
+        assert_eq!(f.body_names, ["Alpha", "Charlie", "Bravo"], "{what}");
+
+        // Saved as it is and read by a reader that reads Bravo again: each solid has its name.
+        let mut again = (*opened.doc).clone();
+        let f = again.features.iter_mut().find(|f| matches!(f.kind, FeatureKind::Import { .. })).unwrap();
+        if let FeatureKind::Import { step, .. } = &mut f.kind {
+            *step = text.as_str().into();
+        }
+        let back = Session::opened(again, None);
+        let now: Vec<String> = back.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
+        assert_eq!(now, ["Alpha", "Bravo", "Charlie"], "{what}");
+        let bravo = placed_bounds(&back, "Bravo");
+        assert!(about(bravo.min.x, 15.0) && about(bravo.max.z, 20.0), "{what}: {bravo:?}");
+        assert!(shifted(charlie, placed_bounds(&back, "Charlie"), [0.0; 3]), "{what}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A 20 × 30 × 8 plate made in its own component and stood up by its placement (turned
 /// `angle` degrees about X), the way an imported part set upright is: in the world it lies
 /// flat at `x0`..`x0 + 20`, y 0..30, z 0..8. The design is active again afterwards.
@@ -2868,6 +3119,36 @@ fn a_converted_meshs_face_extrudes_on_a_fixed_plane_when_asked() {
     let not_a_bool =
         s.execute("solid.extrude", &json!({"face": [2, 2, 15], "distance": 5, "fixed": "yes"})).expect_err("fixed is a boolean").to_string();
     assert!(not_a_bool.contains("`fixed` must be true or false"), "{not_a_bool}");
+}
+
+/// #6612: a Join that names no body joins the picked face's body, as an extrude from a face
+/// does, and stores it as the target.
+#[test]
+fn a_converted_meshs_face_revolved_on_a_fixed_plane_joins_that_body() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-6612-revolve-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("Block.stl");
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "Block"}));
+    run(&mut s, "file.export", json!({"path": stl.to_string_lossy()}));
+    let mut s = Session::default();
+    run(&mut s, "file.insert_mesh", json!({"path": stl.to_string_lossy()}));
+    let _ = std::fs::remove_dir_all(&dir);
+    let names: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    let [name] = names.as_slice() else { panic!("{names:?}") };
+    run(&mut s, "mesh.convert", json!({"body": name}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0], "body_name": "Other"}));
+    run(
+        &mut s,
+        "solid.revolve",
+        json!({"face": [10, 10, 10], "fixed": true, "axis": {"origin": [0, 0, 10], "dir": [1, 0, 0]}, "angle": "90 deg", "operation": "join"}),
+    );
+    let Some(solidcraft_doc::Feature { kind: solidcraft_doc::FeatureKind::Revolve { targets, .. }, .. }) = s.doc.features.last() else {
+        panic!("a revolve")
+    };
+    let targets: Vec<&str> = targets.iter().map(|t| t.0.as_str()).collect();
+    assert_eq!(targets, [name.as_str()], "the join keeps to the picked face's body");
 }
 
 /// A 40 x 10 stadium (two lines, two tangent arcs) extruded 10 mm. The top rim runs on smoothly

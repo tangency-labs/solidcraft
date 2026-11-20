@@ -156,6 +156,8 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
         shift[3][1] = t.y;
         shift[3][2] = t.z;
     }
+    let copied_frames: BTreeMap<u64, solidcraft_doc::Mat> =
+        feats.iter().map(|f| (f.id, solidcraft_doc::mat_mul(&shift, frame_change.get(&f.component).unwrap_or(&solidcraft_doc::IDENTITY)))).collect();
     let mut names: BTreeMap<String, String> = BTreeMap::new();
     let mut made = Vec::new();
     for f in feats {
@@ -165,6 +167,20 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
         let moved = m.iter().enumerate().any(|(i, row)| row.iter().enumerate().any(|(j, v)| (v - if i == j { 1.0 } else { 0.0 }).abs() > 1e-12));
         // A body made by an earlier copy is the one this copy acts on (#613).
         kind.remap_bodies(&bodies);
+        if let FeatureKind::Sketch { plane, sketch } = &mut kind {
+            // Same-design pasted sketch links keep referring to their original definitions.
+            solidcraft_doc::project::reframe_link_sketch_placements(sketch, &m, |_| solidcraft_doc::IDENTITY)?;
+            // Construction planes copied earlier in the selection have already been remapped.
+            // Their definitions move too, unlike the external sources of sketch links.
+            solidcraft_doc::reframe_plane_placements(plane, &m, |id| {
+                sketches
+                    .iter()
+                    .find(|(_, mapped)| **mapped == id)
+                    .and_then(|(old, _)| copied_frames.get(old))
+                    .copied()
+                    .unwrap_or(solidcraft_doc::IDENTITY)
+            })?;
+        }
         if let FeatureKind::Sketch { plane, .. } = &mut kind
             && let Some(anchor) = super::sketch::face::anchor_mut(plane)
         {
@@ -227,10 +243,10 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
         let doc = s.doc_mut();
         if let FeatureKind::Sketch { sketch, .. } = &mut kind {
             // Each dimension of the copy gets its own parameter, with the same expression.
-            for c in &mut sketch.constraints {
-                if let Some(pn) = c.param.clone() {
+            for param in sketch.dimension_params_mut() {
+                if let Some(pn) = param.clone() {
                     let (e, u) = doc.param(&pn).map(|x| (x.expr.clone(), x.unit.clone())).unwrap_or_else(|| (pn.clone(), "mm".into()));
-                    c.param = Some(doc.new_model_param(&e, &u));
+                    *param = Some(doc.new_model_param(&e, &u));
                 }
             }
         }
@@ -259,6 +275,26 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
         sketches.insert(f.id, id);
         names.insert(f.name.clone(), new_name.clone());
         made.push(Pasted { id, name: new_name, from: f.name.clone() });
+    }
+    if s.pending_moves.is_empty() {
+        for pasted in &made {
+            solidcraft_doc::project::capture_missing_sketch_references(s.doc_mut(), pasted.id, Some(target_frame))?;
+        }
+    } else {
+        // Capture from the same pending design placements used to position the pasted geometry.
+        let mut placed = s.design_document().into_owned();
+        for pasted in &made {
+            solidcraft_doc::project::capture_missing_sketch_references(&mut placed, pasted.id, Some(target_frame))?;
+            if let (Some(captured), Some(stored)) = (placed.feature(pasted.id), s.doc_mut().feature_mut(pasted.id)) {
+                stored.kind = captured.kind.clone();
+            }
+        }
+    }
+    for pasted in &made {
+        let frame = s.doc.feature(pasted.id).and_then(|f| super::features::cross_component_profile_frame_for(s, f.component, &f.kind));
+        if let Some(f) = s.doc_mut().feature_mut(pasted.id) {
+            f.profile_frame = frame;
+        }
     }
     s.refresh();
     let errors: Vec<PasteError> = made
@@ -461,7 +497,7 @@ mod tests {
         let mut target = dimensioned_sketch();
         // The same numeric ID in the target must never become the sketch's missing plane.
         if let solidcraft_doc::FeatureKind::Sketch { plane, .. } = &mut source.doc_mut().feature_mut(1).unwrap().kind {
-            *plane = solidcraft_doc::PlaneRef::Construction { feature: 1.into() };
+            *plane = solidcraft_doc::PlaneRef::Construction { feature: 1.into(), placement: None };
         }
         run(&mut source, "timeline.copy", json!({"features": ["S"]}));
         target.foreign_copy = source.foreign_copy.clone();

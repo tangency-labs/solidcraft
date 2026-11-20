@@ -37,7 +37,12 @@ fn panel_arrow_bindings_and_cleared_defaults_survive_profile_export_import_and_a
 #[test]
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
-    assert_eq!(keys.len(), 103, "include the live panel drag preference among the current portable settings");
+    // Test change: show_design_view_switcher, the setting the owner asked for, is a portable key.
+    assert_eq!(
+        keys.len(),
+        108,
+        "include document browser visibility and sizing and the repeated-shortcut preference among the current portable settings"
+    );
     for key in [
         "nav",
         "maya_horizontal_zoom",
@@ -53,6 +58,8 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
         "nav_bridge_enabled",
         "nav_bridge_port",
         "language",
+        "library_thumbnail_size",
+        "show_document_browser",
         "suppress_sketch_snap",
     ] {
         assert!(keys.contains(&key), "{key} belongs in a profile");
@@ -528,7 +535,7 @@ fn general_profile_rows_save_replace_apply_and_show_real_state_in_both_themes() 
             assert!((computer.top() - held.bottom() - 8.0).abs() < 0.5);
         }
         assert!((profiles.top() - heading.bottom() - 38.0).abs() < 0.5, "{theme}: the first section has the same breathing room as later sections");
-        for (previous, next) in [("profiles", "language"), ("language", "saving")] {
+        for (previous, next) in [("profiles", "language"), ("language", "startup"), ("startup", "saving")] {
             let previous_body = crate::scenario::rect_of(&format!("prefs:section:{previous}:body")).unwrap();
             let next_header = crate::scenario::rect_of(&format!("prefs:section:{next}")).unwrap();
             assert!((next_header.top() - previous_body.bottom() - 38.0).abs() < 0.5, "{theme}: {previous} to {next}");
@@ -827,6 +834,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "keep_work_on_tab_switch",
         "language",
         "layout",
+        "library_thumbnail_size",
         "line_drag_draws_one",
         "line_hover_tangent_arc",
         "live_panel_drag_preview",
@@ -863,7 +871,11 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "right_drag_orbits",
         "select_other_hidden",
         "selection_shift_add_only",
+        "shortcut_again_ends_tool",
         "shortcut_cycles_modes",
+        "show_design_view_switcher",
+        "show_document_browser",
+        "show_selected_hidden_edges",
         "sketch_align_points",
         "sketch_auto_dimensions",
         "sketch_auto_locate",
@@ -907,7 +919,8 @@ fn profile_keys_cover_the_current_portable_preferences() {
     ];
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
-    assert_eq!(expected.len(), 103);
+    // Test change: one more portable key, show_design_view_switcher, the setting the owner asked for.
+    assert_eq!(expected.len(), 108);
     assert_eq!(actual, expected);
 }
 

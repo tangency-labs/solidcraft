@@ -61,8 +61,10 @@ pub const MAX_NETWORK_CURVES: usize = 32;
 const MAX_SPANS: usize = 512;
 /// Fewest spans the fitting starts with in one direction.
 const MIN_SPANS: usize = 8;
-/// Samples of a curve's arc-length table.
+/// Samples of a curve's arc-length table (its joints are added to them).
 const TABLE: usize = 256;
+/// Most joints of one curve ([`NetCurve::joints`]).
+const MAX_JOINTS: usize = 1024;
 /// How far a curve that crosses a G1 or G2 boundary may lean out of the face's tangent plane
 /// there (radians, about 1°).
 const TANGENT_TOL: f64 = 0.0175;
@@ -80,6 +82,20 @@ pub trait NetCurve {
     /// other curve of no length is refused.
     fn is_point(&self) -> bool {
         false
+    }
+
+    /// Where two of the curve's pieces meet with the largest change of direction, and that
+    /// change (radians, from 0 for pieces that meet tangent to π for one that turns back): named
+    /// when the curve cannot be fitted. `None` for a curve of one piece.
+    fn sharpest_joint(&self) -> Option<(Vec3, f64)> {
+        None
+    }
+
+    /// The parameters in `(0, 1)` where two of the curve's pieces meet. The curve may change
+    /// speed there, and its derivatives may jump: the network measures it, and fits it, piece by
+    /// piece. None for a curve of one piece.
+    fn joints(&self) -> Vec<f64> {
+        Vec::new()
     }
 }
 
@@ -157,32 +173,108 @@ pub struct Tolerances {
 }
 
 /// A curve measured by arc length: `point(s)` with `s` in `[0, 1]` (reversed when `flipped`).
+///
+/// The arc length is measured along a table of samples: evenly spaced in the curve's parameter,
+/// with the curve's joints added. Between the samples the curve's parameter follows a cubic
+/// spline through them, one per piece between joints ([`Piece`]), so the curve is as smooth along
+/// `s` as it is along its own parameter. A straight line between the samples would put a small
+/// change of speed at every sample wherever the curve's own speed varies, and the fit would have
+/// to chase each of them; a joint inside a sample's cell would put a change of speed there.
 struct Track<'a> {
     label: String,
     curve: Box<dyn NetCurve + 'a>,
-    /// Normalised arc length and curve parameter at each table sample.
+    /// Normalised arc length at each table sample, and the sample.
     s: Vec<f64>,
-    t: Vec<f64>,
     pts: Vec<Vec3>,
+    /// The map from `s` to the curve's parameter, piece by piece (none for a point).
+    pieces: Vec<Piece>,
+    /// Normalised arc length at each of the curve's joints (in its own direction).
+    joints: Vec<f64>,
     length: f64,
     flipped: bool,
     /// A side collapsed to a point ([`PointCurve`]).
     point: bool,
-    /// The finite-difference step of [`Track::ders`]: a quarter of the smallest table cell.
+    /// The finite-difference step of [`Track::ders`]: a quarter of the smallest cell between
+    /// the evenly spaced samples.
     step: f64,
+    /// The curve's sharpest joint ([`NetCurve::sharpest_joint`]).
+    joint: Option<(Vec3, f64)>,
     condition: Option<(Continuity, Box<dyn CrossFace + 'a>)>,
+}
+
+/// One piece of a curve, between two of its joints or ends: a cubic spline from normalised arc
+/// length to the curve's parameter through the table samples on the piece, with its slopes at the
+/// ends (interpolation with end derivatives and knots by averaging, the NURBS Book §9.2.1–9.2.2).
+/// The end slopes are one over the curve's speed there, from the curve itself: interpolation alone
+/// would leave them a little off where a piece has few samples, and the curve would change speed
+/// at the joint along `s` after all.
+struct Piece {
+    /// The piece's ends: arc length and parameter.
+    s: [f64; 2],
+    t: [f64; 2],
+    space: Space,
+    ctrl: Vec<f64>,
+}
+
+impl Piece {
+    /// The piece through `nodes` (arc length, parameter), both increasing, with the slopes
+    /// `dt/ds` at its ends (none where the curve stands still); a sample that doesn't move along
+    /// the curve adds nothing and is left out. None for a piece of no length.
+    fn new(nodes: &[(f64, f64)], slopes: [Option<f64>; 2]) -> SplineResult<Option<Piece>> {
+        let mut kept: Vec<(f64, f64)> = Vec::with_capacity(nodes.len());
+        for &n in nodes {
+            if kept.last().is_none_or(|l| n.0 > l.0) {
+                kept.push(n);
+            }
+        }
+        let (Some(&first), Some(&last)) = (kept.first(), kept.last()) else { return Ok(None) };
+        if kept.len() < 2 {
+            return Ok(None);
+        }
+        let mut conds: Vec<Cond> = kept.iter().map(|n| Cond { t: n.0, der: 0 }).collect();
+        let mut data: Vec<f64> = kept.iter().map(|n| n.1).collect();
+        for (at, slope) in [first.0, last.0].into_iter().zip(slopes) {
+            if let Some(m) = slope {
+                conds.push(Cond { t: at, der: 1 });
+                data.push(m);
+            }
+        }
+        let interp = Interpolant::lowest(conds, first.0, last.0)?;
+        let ctrl = interp.fit(&data)?;
+        Ok(Some(Piece { s: [first.0, last.0], t: [first.1, last.1], space: interp.space().clone(), ctrl }))
+    }
+
+    /// The curve's parameter at arc length `s` (on the piece).
+    fn param(&self, s: f64) -> SplineResult<f64> {
+        let t = self.space.eval(&self.ctrl, s.clamp(self.s[0], self.s[1]), 0)?;
+        Ok(t.clamp(self.t[0], self.t[1]))
+    }
 }
 
 impl<'a> Track<'a> {
     fn new(c: NetworkCurve<'a>) -> SplineResult<Track<'a>> {
         let NetworkCurve { label, mut curve, condition } = c;
-        let mut pts = Vec::with_capacity(TABLE + 1);
-        let mut t = Vec::with_capacity(TABLE + 1);
-        for k in 0..=TABLE {
-            let tk = k as f64 / TABLE as f64;
-            let p = curve.point(tk).filter(|p| p.is_finite()).ok_or_else(|| SplineError::Invalid(format!("{label} can't be evaluated")))?;
-            pts.push(p);
-            t.push(tk);
+        let mut joints = curve.joints();
+        if joints.len() > MAX_JOINTS {
+            return Err(SplineError::TooLarge(format!("{label} has more than {MAX_JOINTS} pieces")));
+        }
+        joints.retain(|j| j.is_finite() && *j > 0.0 && *j < 1.0);
+        joints.sort_by(f64::total_cmp);
+        joints.dedup();
+        // The evenly spaced samples, less any within 1e-9 of a joint, and the joints.
+        let mut t: Vec<(f64, bool)> = (0..=TABLE)
+            .map(|k| k as f64 / TABLE as f64)
+            .filter(|tk| !joints.iter().any(|j| (j - tk).abs() < 1e-9))
+            .map(|tk| (tk, false))
+            .chain(joints.iter().map(|j| (*j, true)))
+            .collect();
+        t.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let (t, is_joint): (Vec<f64>, Vec<bool>) = t.into_iter().unzip();
+        let point = curve.is_point();
+        let mut at = |tk: f64| curve.point(tk).filter(|p| p.is_finite()).ok_or_else(|| SplineError::Invalid(format!("{label} can't be evaluated")));
+        let mut pts = Vec::with_capacity(t.len());
+        for &tk in &t {
+            pts.push(at(tk)?);
         }
         let mut s = vec![0.0];
         let mut acc = 0.0;
@@ -190,7 +282,6 @@ impl<'a> Track<'a> {
             acc += w[0].dist(w[1]);
             s.push(acc);
         }
-        let point = curve.is_point();
         if point {
             // Its parameter runs evenly: every value is the same point.
             if acc > 1e-9 || !acc.is_finite() {
@@ -200,7 +291,20 @@ impl<'a> Track<'a> {
                 return invalid(format!("{label} is a point: a continuity condition needs a curve"));
             }
             let step = step(&t);
-            return Ok(Track { label, curve, s: t.clone(), t, pts, length: 0.0, flipped: false, point, step, condition: None });
+            return Ok(Track {
+                label,
+                curve,
+                s: t,
+                pts,
+                pieces: Vec::new(),
+                joints: Vec::new(),
+                length: 0.0,
+                flipped: false,
+                point,
+                step,
+                joint: None,
+                condition: None,
+            });
         }
         if !(acc > 1e-9 && acc.is_finite()) {
             return invalid(format!("{label} has no length"));
@@ -208,9 +312,32 @@ impl<'a> Track<'a> {
         for x in &mut s {
             *x /= acc;
         }
+        // The pieces between joints, each through its samples (a joint ends one and starts the
+        // next), with dt/ds at its ends: the normalised length over the curve's speed there, from
+        // a one-sided difference of second order inside the piece, a 64th of its end cell long.
+        let mut slope = |t0: f64, h: f64| -> SplineResult<Option<f64>> {
+            let (a, b, c) = (at(t0)?, at(t0 + h)?, at(t0 + 2.0 * h)?);
+            let speed = ((b - a) * 4.0 - (c - a)).len() / (2.0 * h.abs());
+            Ok((speed.is_finite() && speed > 1e-9 * acc).then(|| acc / speed))
+        };
+        let mut pieces = Vec::new();
+        let mut from = 0;
+        for k in 1..t.len() {
+            if is_joint[k] || k + 1 == t.len() {
+                let nodes: Vec<(f64, f64)> = (from..=k).map(|i| (s[i], t[i])).collect();
+                let slopes = [slope(t[from], (t[from + 1] - t[from]) / 64.0)?, slope(t[k], -(t[k] - t[k - 1]) / 64.0)?];
+                if let Some(piece) = Piece::new(&nodes, slopes)? {
+                    pieces.push(piece);
+                }
+                from = k;
+            }
+        }
+        let joints = s.iter().zip(&is_joint).filter(|(_, j)| **j).map(|(x, _)| *x).collect();
+        let even: Vec<f64> = s.iter().zip(&is_joint).filter(|(_, j)| !**j).map(|(x, _)| *x).collect();
         let condition = condition.filter(|(g, _)| *g != Continuity::G0);
-        let step = step(&s);
-        Ok(Track { label, curve, s, t, pts, length: acc, flipped: false, point, step, condition })
+        let step = step(&even);
+        let joint = curve.sharpest_joint();
+        Ok(Track { label, curve, s, pts, pieces, joints, length: acc, flipped: false, point, step, joint, condition })
     }
 
     fn continuity(&self) -> Continuity {
@@ -220,10 +347,24 @@ impl<'a> Track<'a> {
     /// The point at normalised arc length `s` (clamped to `[0, 1]`).
     fn point(&mut self, s: f64) -> SplineResult<Vec3> {
         let s = if self.flipped { 1.0 - s } else { s }.clamp(0.0, 1.0);
-        let k = self.s.partition_point(|x| *x <= s).saturating_sub(1).min(TABLE - 1);
-        let (s0, s1, t0, t1) = (self.s[k], self.s[k + 1], self.t[k], self.t[k + 1]);
-        let t = if s1 > s0 { t0 + (t1 - t0) * (s - s0) / (s1 - s0) } else { t0 };
+        let k = self.pieces.partition_point(|p| p.s[1] < s).min(self.pieces.len().saturating_sub(1));
+        let t = match self.pieces.get(k) {
+            Some(piece) => piece.param(s)?,
+            // A point: every parameter is the point.
+            None => s,
+        };
         self.curve.point(t).filter(|p| p.is_finite()).ok_or_else(|| SplineError::Invalid(format!("{} can't be evaluated", self.label)))
+    }
+
+    /// Normalised arc length at the curve's joints, in its current direction.
+    fn joint_params(&self) -> Vec<f64> {
+        self.joints.iter().map(|s| if self.flipped { 1.0 - s } else { *s }).collect()
+    }
+
+    /// Normalised arc length at table sample `i` of [`Track::polyline`].
+    fn sample_s(&self, i: usize) -> f64 {
+        let n = self.s.len();
+        if self.flipped { 1.0 - self.s.get(n.saturating_sub(1 + i)).copied().unwrap_or(0.0) } else { self.s.get(i).copied().unwrap_or(1.0) }
     }
 
     /// The table's points in the curve's current direction.
@@ -305,7 +446,9 @@ fn closest(a: &mut Track, b: &mut Track, tol: f64) -> SplineResult<Crossing> {
     let mut found: Vec<Crossing> = Vec::new();
     let mut miss: Option<(f64, Vec3)> = None;
     for m in starts {
-        let c = refine(a, b, m as f64 / TABLE as f64, (d[m].1 as f64 + 0.5) / TABLE as f64)?;
+        // From the sample of `a` and the middle of the nearest segment of `b`.
+        let (sa, rb) = (a.sample_s(m), (b.sample_s(d[m].1) + b.sample_s(d[m].1 + 1)) / 2.0);
+        let c = refine(a, b, sa, rb)?;
         let gap = a.point(c.s)?.dist(b.point(c.r)?);
         if gap <= tol {
             if !found.iter().any(|f| (f.s - c.s).abs() < 1e-6 && (f.r - c.r).abs() < 1e-6) {
@@ -425,6 +568,8 @@ struct Target<'f> {
     /// Derivatives (orders 1, 2, …) at the first and last parameter.
     ders: [Vec<Vec3>; 2],
     tol: f64,
+    /// The sharpest joint of the curve it follows, named when it cannot be fitted.
+    joint: Option<(Vec3, f64)>,
 }
 
 /// The common cubic space of a direction and each target's control points in it: breaks at
@@ -471,7 +616,7 @@ fn fit_direction(base: &[f64], ders: [usize; 2], targets: &mut [Target]) -> Spli
         }
         let interp = Interpolant::new(space.clone(), conds.clone())?;
         let mut ctrls = Vec::with_capacity(targets.len());
-        let mut worst: Option<(f64, String)> = None;
+        let mut worst: Option<(f64, String, Option<(Vec3, f64)>)> = None;
         for tg in targets.iter_mut() {
             let data: Vec<Vec3> = conds
                 .iter()
@@ -486,8 +631,8 @@ fn fit_direction(base: &[f64], ders: [usize; 2], targets: &mut [Target]) -> Spli
                 for q in [0.25, 0.75] {
                     let t = breaks[k] + (breaks[k + 1] - breaks[k]) * q;
                     let off = space.eval(&ctrl, t, 0)?.dist((tg.value)(t)?);
-                    if off > tg.tol && worst.as_ref().is_none_or(|(w, _)| off / tg.tol > *w) {
-                        worst = Some((off / tg.tol, format!("{} (off by {off:.2e} at the best fit)", tg.label)));
+                    if off > tg.tol && worst.as_ref().is_none_or(|(w, _, _)| off / tg.tol > *w) {
+                        worst = Some((off / tg.tol, format!("{} (off by {off:.2e} at the best fit)", tg.label), tg.joint));
                     }
                 }
             }
@@ -495,14 +640,26 @@ fn fit_direction(base: &[f64], ders: [usize; 2], targets: &mut [Target]) -> Spli
         }
         match worst {
             None => return Ok((space, ctrls)),
-            Some((_, what)) if spans * 2 > MAX_SPANS => {
-                return Err(SplineError::Unsupported(format!(
-                    "{what} can't be fitted closely enough: a curve with a sharp corner, or one that turns very sharply, can't be part of a boundary surface"
-                )));
+            Some((_, what, joint)) if spans * 2 > MAX_SPANS => {
+                // A joint is named only when it turns: pieces that meet tangent are no corner.
+                return Err(SplineError::Unsupported(match joint.filter(|(_, angle)| *angle > TANGENT_TOL) {
+                    Some((p, angle)) => format!(
+                        "{what} can't be fitted closely enough; its curves meet at {} turning by {:.1}°: a curve with a sharp corner, or one that turns very sharply, can't be part of a boundary surface",
+                        point_text(p),
+                        angle.to_degrees()
+                    ),
+                    None => format!("{what} can't be fitted closely enough: a curve that turns very sharply can't be part of a boundary surface"),
+                }));
             }
             Some(_) => m *= 2,
         }
     }
+}
+
+/// A point for a message, each coordinate to a thousandth of a millimetre.
+fn point_text(p: Vec3) -> String {
+    let c = |x: f64| (x * 1000.0).round() / 1000.0 + 0.0;
+    format!("({}, {}, {})", c(p.x), c(p.y), c(p.z))
 }
 
 /// Linear interpolation at `x` of `values` given at the increasing parameters `xs` (held
@@ -532,6 +689,21 @@ struct Placement {
 impl Placement {
     fn point(&self, track: &mut Track, x: f64) -> SplineResult<Vec3> {
         Ok(track.point(self.map.eval(x)[0])? + lerp_between(&self.at, &self.shift, x))
+    }
+
+    /// The network parameter at which the curve is at arc length `s`: the map's inverse, by
+    /// bisection (the map increases).
+    fn param_of(&self, s: f64) -> f64 {
+        let (mut lo, mut hi) = (0.0, 1.0);
+        for _ in 0..64 {
+            let mid = (lo + hi) / 2.0;
+            if self.map.eval(mid)[0] < s {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        (lo + hi) / 2.0
     }
 
     /// The first two derivatives by the network parameter at `x`.
@@ -909,13 +1081,17 @@ pub fn network_surface(u: Vec<NetworkCurve>, v: Vec<NetworkCurve>, tol: Toleranc
     if let Some(au) = &across_u {
         base_u.extend(au.knots());
     }
+    base_u.extend(joint_breaks(&us, &up));
     let base_u = sorted_breaks(base_u);
     let (u_space, u_ctrl) = {
         let us_cell = std::cell::RefCell::new(&mut us);
         let up_ref = &up;
         let mut targets: Vec<Target> = Vec::new();
         for i in 0..nu {
-            let label = us_cell.borrow()[i].label.clone();
+            let (label, joint) = {
+                let tracks = us_cell.borrow();
+                (tracks[i].label.clone(), tracks[i].joint)
+            };
             let cell = &us_cell;
             targets.push(Target {
                 label,
@@ -925,6 +1101,7 @@ pub fn network_surface(u: Vec<NetworkCurve>, v: Vec<NetworkCurve>, tol: Toleranc
                 }),
                 ders: [Vec::new(), Vec::new()],
                 tol: tol.fit,
+                joint,
             });
         }
         for cond in ends.iter().flatten() {
@@ -942,6 +1119,7 @@ pub fn network_surface(u: Vec<NetworkCurve>, v: Vec<NetworkCurve>, tol: Toleranc
                     }),
                     ders: [Vec::new(), Vec::new()],
                     tol: scale[order - 1] * 1e-4,
+                    joint: None,
                 });
             }
         }
@@ -990,13 +1168,17 @@ pub fn network_surface(u: Vec<NetworkCurve>, v: Vec<NetworkCurve>, tol: Toleranc
     let mut base_v: Vec<f64> = vec![0.0, 1.0];
     base_v.extend(vbar.iter().copied());
     base_v.extend(across_v.knots());
+    base_v.extend(joint_breaks(&vs, &vp));
     let base_v = sorted_breaks(base_v);
     let (v_space, v_ctrl) = {
         let vs_cell = std::cell::RefCell::new(&mut vs);
         let vp_ref = &vp;
         let mut targets: Vec<Target> = Vec::new();
         for (j, cd) in cross_ders.iter().enumerate() {
-            let label = vs_cell.borrow()[j].label.clone();
+            let (label, joint) = {
+                let tracks = vs_cell.borrow();
+                (tracks[j].label.clone(), tracks[j].joint)
+            };
             let cell = &vs_cell;
             let ders = [cd[0][..end_order[0]].to_vec(), cd[1][..end_order[1]].to_vec()];
             targets.push(Target {
@@ -1007,6 +1189,7 @@ pub fn network_surface(u: Vec<NetworkCurve>, v: Vec<NetworkCurve>, tol: Toleranc
                 }),
                 ders,
                 tol: tol.fit,
+                joint,
             });
         }
         fit_direction(&base_v, end_order, &mut targets)?
@@ -1166,6 +1349,14 @@ fn reorder<T>(items: Vec<T>, order: &[usize]) -> Vec<T> {
 fn transpose(m: &[Vec<Vec3>]) -> Vec<Vec<Vec3>> {
     let cols = m.first().map_or(0, Vec::len);
     (0..cols).map(|c| m.iter().map(|row| row.get(c).copied().unwrap_or(Vec3::ZERO)).collect()).collect()
+}
+
+/// The network parameters of the curves' joints. A curve's derivatives may jump at a joint (a
+/// natural cubic's third derivative does at each of its fit points), and a cubic spline follows
+/// such a jump only where it has a knot: without one there it converges slowly, and a curve that
+/// bends tightly at a joint can't be fitted within the tolerance at all.
+fn joint_breaks(tracks: &[Track], places: &[Placement]) -> Vec<f64> {
+    tracks.iter().zip(places).flat_map(|(t, p)| t.joint_params().into_iter().map(|s| p.param_of(s))).collect()
 }
 
 fn sorted_breaks(mut b: Vec<f64>) -> Vec<f64> {

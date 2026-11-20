@@ -487,6 +487,27 @@ impl Camera {
         self.yaw = (self.yaw + turn) % std::f64::consts::TAU;
         self.rotate_in_view(Vec3::new(-dy * 0.008, 0.0, 0.0));
     }
+    /// [`Camera::orbit_unlimited`] with the pointer's motion taken through the view's roll
+    /// (#12458): the part of it across the world's up axis as the screen shows it turns about
+    /// that axis, the part along it tilts about the level axis across the screen. The model
+    /// follows the cursor upright, upside down or rolled on its side, and the roll is kept.
+    /// Upright and upside down it is the same as [`Camera::orbit_unlimited`]; looking straight
+    /// along the up axis, the screen's own axes are used.
+    pub fn orbit_unlimited_through_roll(&mut self, dx: f64, dy: f64) {
+        if !self.is_valid() || !dx.is_finite() || !dy.is_finite() {
+            return;
+        }
+        let (right, up, _) = self.basis();
+        let world_up = self.up_dir();
+        // The world's up axis on screen (y down).
+        let (ux, uy) = (world_up.dot(right), -world_up.dot(up));
+        let len = ux.hypot(uy);
+        let (ux, uy) = if len > 1e-6 { (ux / len, uy / len) } else { (0.0, -1.0) };
+        let turn = (dy * ux - dx * uy) * 0.008;
+        let along = dx * ux + dy * uy;
+        self.yaw = (self.yaw + turn) % std::f64::consts::TAU;
+        self.rotate_in_view(Vec3::new(-along * uy * 0.008, -along * ux * 0.008, 0.0));
+    }
     pub fn set_view(&mut self, v: StandardView) {
         let lim = std::f64::consts::FRAC_PI_2 - 1e-6;
         let (y, p) = v.angles();
@@ -606,6 +627,7 @@ impl Camera {
             && self.roll.is_finite()
             && self.distance.is_finite()
             && self.distance > 0.0
+            && (0.0..std::f64::consts::PI).contains(&self.fov)
     }
     /// The view's orientation in degrees, as the viewport's View angles readout shows it (#6032).
     /// These are the camera's own angles: yaw in (−180, 180], pitch in [−90, 90], roll in
@@ -670,6 +692,16 @@ fn wrap_half_turn(a: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn camera_validation_refuses_nonfinite_and_inverted_perspective_lenses() {
+        for fov in [0.0, 0.6, std::f64::consts::PI - 1e-6] {
+            assert!(Camera { fov, ..Default::default() }.is_valid());
+        }
+        for fov in [-0.1, std::f64::consts::PI, 4.0, f64::NAN, f64::INFINITY] {
+            assert!(!Camera { fov, ..Default::default() }.is_valid());
+        }
+    }
 
     /// With the eye inside a large assembly's box the near plane is tiny beside the scene. The
     /// depth turned round in f64 still tells a nearer point from a farther one in f32; turned

@@ -137,6 +137,13 @@ The tests that decide each property, by the test numbers the check reports:
 | closed shells | a region's outer shell is a closed face-use shell (Brep 10, 11), its inner shells lie inside it (Brep 12), every region is reached across face uses (Brep 18, 19) | `assert_valid/brep.rs` | 0 |
 | no coincident topology | no two vertices, edges or faces coincide (`contains_coincident_topology`) | `validation/coincidence.rs` | 0 |
 
+Two loops of a face share no vertex, but one loop may pass through a vertex more than once. Where
+a hole touches its face's outer boundary at one point, or two holes touch, the face's boundary
+there is one loop: along the first to the vertex, round the second and on along the first. Tests
+32, 38 and 39 compare the vertices of a loop once each and loops in pairs, so they pass it. Import
+makes a file's loops that touch at one vertex that one loop
+([import-assembly.md](import-assembly.md), `finish`).
+
 A shell is closed (`Shell::is_closed`, `topology/shell.rs`) when a face use's mate lies in another
 shell: in the radial-edge structure the two sides of a closed shell's faces belong to the shells of
 two different regions.
@@ -239,8 +246,12 @@ sphere or cone has poles where a whole parameter line is one point. The B-rep ma
 
 A vertex at a shared classification boundary ends a coincident seam interval when that
 interval is on either side of the boundary. The near-miss check applies its existing local
-vertex-zone rule from both sides; a separate edge beside the seam still counts as a near miss
-(`intersect/curve_class/p7.rs`).
+vertex-zone rule from both sides; a separate edge whose coincident interval runs beside the
+seam still counts as a near miss (`intersect/curve_class/p7.rs`). At a vertex, the vertex zone
+is withheld where another edge at it runs beside the seam and bounds a face that one of the
+seam's own edges bounds too: the sliver test 36 is for. An edge at the vertex beside the seam
+on other faces, such as the tip of another hole's wall touching the face's wall along the
+seam, does not withhold it.
 When dropping a curve along a seam, equivalent parameter endpoints stay on one side only when
 the two are the same 3D point (a crossing keeps the approximation bound) (`intersect/surface_drop_lib/p1.rs`).
 Subdivision drops a pending endpoint again only when the new span makes its seam branch
@@ -280,7 +291,10 @@ make the UV trim curves (and adjust edge and vertex tolerances to the gaps they 
 4. Every edge whose tolerance differs from the one its gaps call for (`bad_small_zone_tol_3d` or
    `bad_large_zone_tol_3d`, either direction past `EFF_ZERO`) is re-measured with the formula of
    §5.2, its faces' largest tolerance as the floor, and set without the only-grow guard: a stored
-   tolerance larger than its gaps need shrinks.
+   tolerance larger than its gaps need shrinks. Where the formula's gain on the sampled gap would
+   take the edge to the pointer check's limit (1000 times the body's tolerance, §5.1), the edge
+   takes the certified bound of its edge/face gap instead (`curve_face_gap_bound`) when that
+   bound is under the limit; otherwise the formula stands and the check refuses the edge.
 5. Vertices the same way, the largest edge tolerance at each as the floor.
 
 The original tolerances are kept in the healer's properties (`orig_zone_tol_3d`) for the call, not

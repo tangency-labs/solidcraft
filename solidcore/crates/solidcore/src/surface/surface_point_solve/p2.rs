@@ -56,6 +56,11 @@
 //!   evaluate a procedural blend as its certified net
 //!   ([`crate::surface::procedural_blend::NetScope::new`]), the local solve as the
 //!   scope around the solve asks.
+//! - **Triangle guess kept (WR-444, #1164).** `FindPolygonGuess` keeps a suspicious
+//!   control-net triangle guess as a candidate against the nearest control point's and
+//!   returns whichever is nearer on the surface itself; upstream drops it, so a rational
+//!   surface whose control points are farther apart than its neighbouring parts can
+//!   lose a good guess.
 //! - The stepper's `IsLocalMin` / `IsLocalMax` are not used upstream and are not
 //!   ported. Debug-only drawing and `SM_ASSERT`s are omitted.
 
@@ -281,8 +286,8 @@ impl SurfPtGlobalSolver<'_> {
         let (mut best_idx_u, mut best_idx_v) = best_idx;
         let mut uv = Point2::UNDEF;
 
-        // The suspicious triangle guess, kept as a candidate with `fixes.point_solve_keeps_triangle_guess`
-        // (WR-444, #1164): the nearest control point found below can be worse.
+        // The suspicious triangle guess, kept as a candidate (WR-444, #1164): the nearest
+        // control point found below can be worse.
         let mut triangle: Option<(Point2, usize, usize)> = None;
 
         // find closest ControlPoint triangle with point closest to target
@@ -306,10 +311,7 @@ impl SurfPtGlobalSolver<'_> {
                         }
                     }
                 }
-                if suspicious
-                    && k.fixes.point_solve_keeps_triangle_guess
-                    && op != SolverOperation::Signed3dDirectedMaximize
-                {
+                if suspicious && op != SolverOperation::Signed3dDirectedMaximize {
                     triangle = Some((b.domain().clamp_point(uv), best_idx_u, best_idx_v));
                 }
                 suspicious
@@ -450,7 +452,7 @@ impl SurfPtGlobalSolver<'_> {
         let uv = b.domain().clamp_point(uv);
 
         // Return the better of the triangle guess and the control-point guess, judged on
-        // the surface itself (`fixes.point_solve_keeps_triangle_guess`, WR-444, #1164).
+        // the surface itself (WR-444, #1164).
         if let Some((tri_uv, tri_u, tri_v)) = triangle {
             let on_surface = |guess: Point2| match self.calc_func_val(k, guess) {
                 Ok(v) => Ok(Some(v)),
@@ -1625,7 +1627,8 @@ impl SurfPtSolveStepper<'_> {
     /// (a step of 5% of the domain). Near a singularity the point is inverted there.
     /// Returns [`TerminationReason::StillIterating`] (a step was taken),
     /// [`TerminationReason::FoundAnswerConverged`] (inverted at a singularity) or
-    /// [`TerminationReason::UnableToConverge`] (no step).
+    /// [`TerminationReason::UnableToConverge`] (no step, or, not upstream, a maximize
+    /// whose singular inversion kept its guess).
     ///
     /// # Errors
     ///
@@ -1669,16 +1672,20 @@ impl SurfPtSolveStepper<'_> {
             let surface = self.base.surface();
             let srf_domain = surface.natural_uv_domain_with_nurb(k)?;
 
-            match surface.invert_point_near_singularity(
+            // (not upstream: a maximize keeps the farthest drop, or its guess reported
+            // unconverged, WR-57)
+            match surface.invert_point_near_singularity_for(
                 k,
                 self.base.test_point(),
                 &srf_domain,
                 prev.uv(),
                 self.base.tight_tol(),
+                op == SolverOperation::Maximize,
             ) {
                 Ok(inverted) => {
                     self.set_uv(inverted.uv);
-                    return Ok(TerminationReason::FoundAnswerConverged); // end iteration.
+                    // end iteration (upstream: always `FoundAnswerConverged`)
+                    return Ok(inverted.reason);
                 }
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => {}
@@ -2304,13 +2311,13 @@ mod tests {
     /// #1164: on a rational surface whose control points are farther apart than its neighbouring
     /// parts, the nearest control point is on the wrong run. Upstream drops the control-net
     /// triangle guess for it, and from what is left (that control point's guess and the grid
-    /// search's) the solve finds nothing; with the fix the triangle guess is kept and the point is found.
+    /// search's) the solve finds nothing at u = 0.8395; the triangle guess is kept and the point
+    /// is found.
     #[test]
-    fn a_point_solve_finds_the_point_on_stacked_runs_with_the_fix() {
+    fn a_point_solve_finds_the_point_on_stacked_runs() {
         let (s, dom) = stacked_runs_strip(4);
-        let solve = |fixed: bool, target: Point3| {
-            let mut k = Kernel::default();
-            k.fixes.point_solve_keeps_triangle_guess = fixed;
+        let k = Kernel::default();
+        let solve = |target: Point3| {
             s.global_point_solve(
                 &k,
                 Some(Srf),
@@ -2323,35 +2330,30 @@ mod tests {
             )
             .unwrap()
         };
-        let at = |u: f64| {
-            eval_point(&Kernel::default(), &s, Point2::new(u, 0.5), Point3::UNDEF).unwrap()
+        let at = |u: f64| eval_point(&k, &s, Point2::new(u, 0.5), Point3::UNDEF).unwrap();
+        let on_surface = |sol: &Solution<Srf>, target: Point3| {
+            let uv = Point2::new(sol.start.param(0).unwrap(), sol.start.param(1).unwrap());
+            let d = eval_point(&k, &s, uv, Point3::UNDEF)
+                .unwrap()
+                .distance(target);
+            assert!(d < 1e-6, "{uv:?} is {d} from {target:?}");
         };
 
         // a point on the first run, inside the second span
         let target = at(0.8395);
-        assert_eq!(solve(false, target).len(), 0, "upstream finds the point");
-        let found = solve(true, target);
+        let found = solve(target);
         assert_eq!(found.len(), 1);
-        let sol = found.get(0).unwrap();
-        let uv = Point2::new(sol.start.param(0).unwrap(), sol.start.param(1).unwrap());
-        assert!(
-            eval_point(&Kernel::default(), &s, uv, Point3::UNDEF)
-                .unwrap()
-                .distance(target)
-                < 1e-6,
-            "{uv:?}"
-        );
+        on_surface(found.get(0).unwrap(), target);
 
-        // over the whole strip the fix never loses a point upstream finds, and finds some it
-        // misses
-        let mut gained = 0;
+        // every point along the strip is found, on the surface
         for i in 0..400 {
             let target = at(dom.u_interval().max() * (f64::from(i) + 0.5) / 400.0);
-            let (before, after) = (solve(false, target).len(), solve(true, target).len());
-            assert!(after >= before, "lost the point at {target:?}");
-            gained += usize::from(after > before);
+            let found = solve(target);
+            assert_ne!(found.len(), 0, "lost the point at {target:?}");
+            for j in 0..found.len() {
+                on_surface(found.get(j).unwrap(), target);
+            }
         }
-        assert!(gained > 0);
     }
 
     #[test]

@@ -319,6 +319,24 @@ impl NetCurve for SketchChain {
         let p = self.plane.to_world(seg.point_at(local));
         p.is_finite().then_some(p)
     }
+
+    /// The joint whose two segments' tangents there differ most: the angle between the end
+    /// tangent of one and the start tangent of the next (a rigid map to the model keeps it).
+    fn sharpest_joint(&self) -> Option<(Vec3, f64)> {
+        let mut sharpest: Option<(Vec3, f64)> = None;
+        for w in self.segs.windows(2) {
+            let (a, b) = (w[0].end_tangent(), w[1].start_tangent());
+            let Ok(angle) = solidcore_ops::joint_turn::joint_turn([a.x, a.y], [b.x, b.y]) else { continue };
+            if sharpest.is_none_or(|(_, most)| angle > most) {
+                sharpest = Some((self.plane.to_world(w[0].end()), angle));
+            }
+        }
+        sharpest
+    }
+
+    fn joints(&self) -> Vec<f64> {
+        self.starts.iter().skip(1).map(|s| s / self.total).collect()
+    }
 }
 
 /// A 3D polyline followed smoothly: a cubic through its points by chord length (fewer points, a
@@ -435,6 +453,10 @@ impl NetCurve for EdgeChain {
         let end = self.starts.get(k + 1).copied().unwrap_or(self.total);
         let local = if end > start { ((at - start) / (end - start)).clamp(0.0, 1.0) } else { 0.0 };
         along(self.edges.get(k)?, local)
+    }
+
+    fn joints(&self) -> Vec<f64> {
+        self.starts.iter().skip(1).map(|s| s / self.total).collect()
     }
 }
 
@@ -820,6 +842,54 @@ mod tests {
         let want = 2.0 * (r * r * theta - half * h);
         let faces = body.faces(0.01).unwrap();
         assert!((faces[0].area - want).abs() < 0.25, "area {} vs {want}", faces[0].area);
+    }
+
+    /// #19578: three hull sections, each a natural spline through fit points on a plane X =
+    /// const, loft to one face. The bow section bends to a 34 mm radius near its foot, where its
+    /// Bézier pieces meet tangent (0°) at different speeds and with a jump in the rate of change
+    /// of curvature; it was refused as a sharp corner ("off by 2.09e-2 at the best fit"). Every
+    /// point of every section lies on the face: within ten times the fit tolerance, which the fit
+    /// meets at the points it checks.
+    #[test]
+    fn smooth_spline_sections_with_a_tight_bend_loft() {
+        let v = Vec2::new;
+        let sections: [(f64, Vec<Vec2>); 3] = [
+            (0.0, vec![v(40.0, 1200.0), v(45.373332545769244, -62.868622627622926), v(17.293450399707694, -155.24526595568008), v(0.0, -160.0)]),
+            (
+                3000.0,
+                vec![
+                    v(0.0, -524.378317598476),
+                    v(638.6560651833474, -421.88139234818084),
+                    v(926.5359184238416, -145.54937416764426),
+                    v(1187.1799350211795, 1200.0),
+                ],
+            ),
+            (10000.0, vec![v(0.0, 0.0), v(1377.2647194380875, 394.8316231623623), v(1500.0, 1200.0)]),
+        ];
+        let plane = |x: f64| Plane::new(Vec3::new(x, 0.0, 0.0), Vec3::Y, Vec3::Z).unwrap();
+        let segs = |pts: &[Vec2]| -> Vec<Seg2> {
+            solidcore_ops::fit_projection::fit_beziers(pts, false)
+                .unwrap()
+                .into_iter()
+                .map(|[p0, p1, p2, p3]| Seg2::Cubic { p0, p1, p2, p3 })
+                .collect()
+        };
+        let curves: Vec<BoundaryCurve> =
+            sections.iter().enumerate().map(|(i, (x, pts))| sketch(&format!("U{}", i + 1), plane(*x), segs(pts))).collect();
+        let body = boundary_surface(&curves, &[]).unwrap();
+        assert!(body.is_surface() && body.face_count() == 1);
+        let s = face_surface(&body);
+        for (x, pts) in &sections {
+            let pl = plane(*x);
+            for seg in segs(pts) {
+                for k in 0..=20 {
+                    let p = pl.to_world(seg.point_at(k as f64 / 20.0));
+                    let [u, w] = s.project(p, None, f64::INFINITY).unwrap();
+                    let d = s.point([u, w]).unwrap().dist(p);
+                    assert!(d < 10.0 * FIT_TOLERANCE, "{p:?} is {d} mm from the face");
+                }
+            }
+        }
     }
 
     /// The angle between the two faces' normals across the edge at `p`.

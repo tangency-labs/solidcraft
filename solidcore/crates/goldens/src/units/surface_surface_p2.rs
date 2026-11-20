@@ -3009,6 +3009,9 @@ mod tests {
     }
 
     /// Both full crossing branches are distinct, monotone in x, and enclosed on z=x²=y².
+    /// Each branch comes out in two pieces split at the node, where the normals are
+    /// parallel (WR-77); the two pieces of a branch meet there and together run from
+    /// x = 1 to x = -1.
     #[test]
     fn review_crossing_node_has_both_complete_branches() {
         let case = crate::case::regression_case(&Runner, "tc_parabolic_cylinders_crossing_node");
@@ -3037,9 +3040,10 @@ mod tests {
                 None,
             )
             .unwrap();
-        assert_eq!(result.curves_3d.len(), 2);
+        assert_eq!(result.curves_3d.len(), 4);
         let tol = tol.unwrap();
         let mut branches = Vec::new();
+        let mut spans = Vec::new();
         let mut worst = 0.0_f64;
         for curve in &result.curves_3d {
             let CurveKind::BSpline(curve) = curve.kind() else {
@@ -3049,9 +3053,11 @@ mod tests {
             assert_eq!(net.degree(), 3);
             let start = net.cpts().first().unwrap();
             let end = net.cpts().last().unwrap();
-            let sign = if start.x * start.y > 0.0 { 1 } else { -1 };
+            // the sign of y / x at the end away from the node
+            let far = if start.x.abs() > end.x.abs() { start } else { end };
+            let sign = if far.x * far.y > 0.0 { 1 } else { -1 };
             branches.push(sign);
-            assert!((start.x - 1.0).abs() < 1e-12 && (end.x + 1.0).abs() < 1e-12);
+            spans.push((sign, [start.x, start.y, start.z], [end.x, end.y, end.z]));
             for segment in solidcore::nurbs::nurbs_crv::create_bez_segments(net).unwrap() {
                 let points = segment.cpts();
                 assert_eq!(points.len(), 4);
@@ -3092,10 +3098,90 @@ mod tests {
         branches.sort_unstable();
         assert_eq!(
             branches,
-            [-1, 1],
+            [-1, -1, 1, 1],
             "opposite branches cannot duplicate one another"
         );
+        for sign in [-1, 1] {
+            let mut pieces: Vec<_> = spans.iter().filter(|s| s.0 == sign).collect();
+            pieces.sort_by(|a, b| b.1[0].total_cmp(&a.1[0]));
+            let [(_, s0, e0), (_, s1, e1)] = pieces[..] else {
+                panic!("two pieces per branch");
+            };
+            // from x = 1 to the node, and on from the node to x = -1
+            assert!((s0[0] - 1.0).abs() < 1e-12 && (e1[0] + 1.0).abs() < 1e-12);
+            assert!(
+                e0.iter().zip(s1).all(|(a, b)| (a - b).abs() <= 1e-12),
+                "the pieces of a branch meet: {e0:?} {s1:?}"
+            );
+            assert!(e0.iter().all(|c| c.abs() <= tol), "they meet at the node: {e0:?}");
+        }
         eprintln!("crossing node: complete branches y=±x; enclosed residual {worst:e} <= {tol:e}");
+    }
+
+    /// The curve types of the intersection of upstream's case `name`.
+    fn curve_types(name: &str) -> Vec<sp2::TsectCurveType> {
+        let case = crate::case::regression_case(&Runner, name);
+        let input: Inputs = case.parse().unwrap();
+        let mut first = this_surface(input.this.as_ref().unwrap()).unwrap().unwrap();
+        let OpIn::Gssi {
+            dom,
+            other,
+            other_dom,
+            tol,
+            translate,
+        } = input.op
+        else {
+            panic!("intersection case");
+        };
+        let mut second = Surface::from(bss_of(&other).unwrap());
+        let k = Kernel::default();
+        if let Some(t) = translate {
+            let mut ax = Axis2Placement::default();
+            ax.translate(v3(t));
+            first.transform(&k, &ax, None).unwrap();
+            second.transform(&k, &ax, None).unwrap();
+        }
+        first
+            .global_surface_intersect(
+                &k,
+                &dom_of(dom),
+                &second,
+                &dom_of(other_dom),
+                [true, true],
+                tol,
+                None,
+            )
+            .unwrap()
+            .curve_types
+    }
+
+    /// Two surfaces that coincide over a region touch there everywhere, not along a curve
+    /// (#18930). With the tangent curve tracer, two of upstream's coincident pairs keep the
+    /// curves the marcher finds: the boundaries of the coincident region (and, for the two
+    /// surfaces of revolution, the crossing where they part), and no tangent curve. The
+    /// tracer's seeds on these pairs lie on domain edges and corners, the ends of the
+    /// region's boundary curves, where at most half of its probe circle is inside the domains.
+    #[test]
+    fn coincident_surfaces_get_no_tangent_curve_from_the_tracer() {
+        use sp2::TsectCurveType::{Coincident, Crossing};
+        for (name, want) in [
+            ("ssi_adv_ssi_rev_rev_coin_f0_f0", vec![Coincident, Coincident, Crossing]),
+            ("ssi_adv_ssi_coincident_torii_f0_f0", vec![Coincident; 4]),
+        ] {
+            assert_eq!(curve_types(name), want, "{name}");
+        }
+    }
+
+    /// Two spheres given in different parameters that coincide everywhere (#18930): the
+    /// intersection is the four boundaries of the region the domains share, with the tangent
+    /// curve tracer too. A seed at a pole of one sphere, where its parameters keep only the
+    /// meridian's direction, found the contact in two opposite directions there, and the
+    /// tracer traced the region's boundary as a tangent curve.
+    #[test]
+    fn a_pole_of_two_coincident_spheres_starts_no_tangent_curve() {
+        use sp2::TsectCurveType::Coincident;
+        let name = "ssi_adv_ssi_coincident_spheres2_f0_f0";
+        assert_eq!(curve_types(name), vec![Coincident; 4], "{name}");
     }
 
     /// The generators reach the ops with successful outcomes on the Rust side.

@@ -32,6 +32,7 @@ mod model;
 mod nurbs;
 mod offset;
 mod offset_topology;
+mod paper_text;
 mod pattern;
 mod periodic;
 pub mod pierce;
@@ -46,6 +47,7 @@ mod text;
 mod thin;
 mod union_find;
 mod wire;
+mod wire_solve;
 
 pub use curves::{
     MAX_SPLINE_POINTS, bspline_beziers, conic_point, conic_rho_from_point, ellipse_point, end_curvature, fit_beziers, fit_beziers_mode,
@@ -54,16 +56,17 @@ pub use curves::{
 };
 pub use decompose::Budget;
 pub use dims::{
-    DimFrame, DimLayout, chain_centres, default_text, default_text_offset, dim_frame, dim_frame_at, dim_layout, dim_layout_reaching, dim_reach,
-    encode_text,
+    DimFrame, DimLayout, DimSizes, DimText, LinearAxis, chain_centres, default_text, default_text_offset, dim_frame, dim_frame_at, dim_layout,
+    dim_layout_reaching, dim_layout_sized, dim_reach, encode_text, in_sector, linear_axis,
 };
 pub use ends::{END_TOL, EndReport, EndTouch, UntiedEnd, loose_ends};
 pub use equation::{EquationCurve, MAX_EQUATION_TEXT, VariableUnit};
 pub use fonts::{
-    DEFAULT_FONT_FAMILY, FontData, families_in, find_style_in, font_data, font_data_styled, font_file_path, installed_families, set_font_file_check,
+    DEFAULT_FONT_FAMILY, FontData, check_family, fallback, families_in, find_style_in, font_data, font_data_saved, font_data_styled, font_dirs,
+    font_file_path, font_override_dirs, installed_families, set_font_file_check,
 };
 pub use freeform_offset::{FreeformOffset, FreeformOffsetOutput, OFFSET_TOLERANCE};
-pub use link::{Link, LinkGeom, LinkKind, LinkSource, MAX_LINK_ENTITIES, SKETCH_AXIS_HALF, TextExprs, sketch_axis_geom};
+pub use link::{Link, LinkGeom, LinkKind, LinkSource, MAX_LINK_ENTITIES, SKETCH_AXIS_HALF, SketchPlacement, TextExprs, sketch_axis_geom};
 pub use model::{
     CEILING_CONSTRAINTS, CEILING_CURVES, CEILING_POINTS, Constraint, ConstraintKind, Curve, CurveKind, MAX_CONSTRAINTS, MAX_COORD, MAX_CURVES,
     MAX_POINTS, PointExprs, SPoint, Sketch, SketchBatch, SketchError, SketchView, TwoCircles,
@@ -71,8 +74,13 @@ pub use model::{
 pub use nurbs::Nurbs;
 pub use offset::OffsetChain;
 pub use offset_topology::{OffsetCreated, OffsetRole, OffsetRoleFlags, OffsetRoleKind, OffsetTopology};
+pub use paper_text::{
+    FlowedPaperText, Outcome, PaperFonts, PaperLines, PaperSourceFlow, PaperTextFlow, paper_fallback_notes, paper_font_note, paper_lines,
+    paper_lines_in, paper_lines_now, paper_text, paper_text_in, paper_text_now, paper_text_with_flow, paper_text_with_flow_in,
+    paper_text_with_flow_now,
+};
 pub use pattern::{PatternAlignment, PatternInstance, SketchPattern, SketchPatternKind};
-pub use periodic::periodic_beziers;
+pub use periodic::{periodic_beziers, validate_closed_control};
 pub use profiles::{
     CurvePick, ENDPOINT_JOIN_TOL, MAX_PROFILE_EDGES, Profile, ProfileSearch, distinct_curves, find_drawn_profiles, find_profiles,
     find_profiles_checked, merge_regions, profile_at_point, profile_by_curves, without_text_counters,
@@ -82,12 +90,17 @@ pub use shape::{Shape, intersections, intersections_within, nearest_crossing, ne
 pub use solver::solve_after_edit_with_analysis;
 pub use solver::{
     Analysis, CONSISTENT, DrivingValues, Hold, MAX_COMPONENT_VARS, SolveReport, SolveStatus, constraint_residual, determined_by, fillets_kept,
-    flips_from_stored, measure_dimension, move_line_towards, move_point_towards, point_along, solve, solve_after_edit, solve_after_link_move,
-    solve_after_value_edit, solve_holding, solve_with,
+    flips_from_stored, keep_point_order, keep_sides_at_zero, measure_dimension, move_line_towards, move_point_towards, point_along, solve,
+    solve_after_edit, solve_after_link_move, solve_after_value_edit, solve_holding, solve_with,
 };
-pub use text::{MAX_TEXT_CHARS, TextAlign, TextMetrics, TextStyle, TextVerticalAlign, text_geometry, text_geometry_in, text_geometry_styled};
+pub use text::{
+    MAX_TEXT_CHARS, TextAlign, TextMetrics, TextStyle, TextVerticalAlign, saved_text_geometry, text_geometry, text_geometry_in, text_geometry_styled,
+};
 pub use thin::{MAX_THIN_SEGMENTS, thin_wall_regions};
 pub use wire::{MAX_FIT_POINTS, MAX_WIRE_POINTS, Wire, WireArc, WireCurve, WireSpace, arc_from_3_points, arc_polyline, arc_sweep, fit_polyline};
+pub use wire_solve::{
+    Axis, MAX_WIRE_LENGTH, MAX_WIRE_ROWS, MAX_WIRE_VARS, OriginPlane, PointExprs3, WireConstraint, WireConstraintKind, WirePoint, WireReport,
+};
 
 #[cfg(test)]
 mod circle_edge_tests;

@@ -193,6 +193,9 @@ pub struct PanelView {
     /// The open design's revision: a message's changes can be undone from the chat while they
     /// left this very design.
     pub revision: super::Revision,
+    /// The undo history as a message's changes left it, while it still is: their Undo is offered
+    /// only then, so it never takes a step made after them.
+    pub undo_history: Option<super::Revision>,
     /// Length units and decimals for the summaries of what the agent did.
     pub units: String,
     pub decimals: u8,
@@ -237,6 +240,7 @@ impl PanelView {
             shown: shown(app),
             document: app.session.doc.name.clone(),
             revision: super::Revision::of(&app.session.doc),
+            undo_history: super::UndoMark::current(&app.agent_chat.items, &app.session.undo),
             units: app.session.doc.units.clone(),
             decimals: app.preferences.length_decimals,
             agents: agents::entries(app),
@@ -413,7 +417,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         refresh_gone(app);
         let view = PanelView::of(app, &ctx);
         let mut prefs = AgentPanelPrefs::read(&app.preferences);
-        window(&mut app.agent_chat, &view, &ctx, &mut prefs);
+        window(&mut app.agent_chat, &view, &ctx, &mut prefs, &mut app.blur);
         prefs.write(&mut app.preferences);
         hand_over(app, ui);
         light_hovered(app);
@@ -834,12 +838,14 @@ pub fn window_builder(document: &str, placed: bool, prefs: &AgentPanelPrefs) -> 
 /// go to another screen, or a window floating inside the app where the system can't open one.
 /// The system's close button closes the chat (it opens there again); Dock puts it back.
 #[cfg(not(target_arch = "wasm32"))]
-fn window(chat: &mut AgentChat, view: &PanelView, ctx: &egui::Context, prefs: &mut AgentPanelPrefs) {
+fn window(chat: &mut AgentChat, view: &PanelView, ctx: &egui::Context, prefs: &mut AgentPanelPrefs, blur: &mut crate::blur::State) {
     let builder = window_builder(&view.document, chat.window_placed, prefs);
     chat.window_placed = true;
     // The side panel isn't drawn: its place no longer counts as "in the chat".
     chat.panel_rect = None;
     ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("sc_agent_chat_window"), builder, |ui, class| {
+        // A window drawn inside the main one shares its frame; a native one begins its own.
+        let _blur = (class != egui::ViewportClass::EmbeddedWindow).then(|| blur.begin(ui.ctx()));
         // Root/embedded inputs are handled by SolveApp::logic. A native chat window owns
         // its input and must see the toggle before its text editor can consume the chord.
         // The window holds the panel, not the shared host, so the toggle works on the panel's
@@ -2218,13 +2224,13 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
                     }
                 });
             }
-            Item::Changes { steps, revision, undone } => {
+            Item::Changes { steps, revision, history, undone } => {
                 ui.horizontal(|ui| {
                     let text = trf("ui.agent_chat_changes", &[("n", &steps.to_string())]);
                     ui.label(RichText::new(text).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_caption));
                     if *undone {
                         ui.label(RichText::new(tr("ui.agent_chat_undone")).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_caption));
-                    } else if revision.same(current) {
+                    } else if revision.same(current) && view.undo_history.as_ref().is_some_and(|h| history.same(h)) {
                         let b =
                             ui_kit::button(ui, tr("ui.agent_chat_undo_changes"), ui_kit::Button::Normal).backing_on_hover_text(tr("ui.ai_undo_tip"));
                         solidcraft_ui_registry::publish_handle("agent_chat:undo", b.rect.center());
@@ -3065,6 +3071,7 @@ mod tests {
             shown: true,
             document: "Plate".into(),
             revision: Revision::of(&solidcraft_engine::Session::default().doc),
+            undo_history: None,
             units: "mm".into(),
             decimals: 2,
             agents: Vec::new(),

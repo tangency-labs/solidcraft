@@ -5,9 +5,13 @@
 use super::*;
 use solidcore_record::cell_grid::CellGridSpec;
 
-/// The most cells one grid cuts. The kernel's boolean and its check take time that grows with the
-/// square of the faces they meet, so the cap stays low until cells are cut without them.
-pub const MAX_CUT_CELLS: usize = 250;
+/// The most cells one grid cuts. The cut still takes time that grows faster than the cell count
+/// (release, i7-8809G, square cells through a 3 mm plate: 256 cells 6 s, 506 cells 22 s, 992 cells
+/// 83 s), so a large grid is slow but finishes. The tool holds one shell per cell and the kernel's
+/// record takes at most 1024 shells, so a bigger grid fails whatever the time: 1482 cells ended in
+/// "shell count". The cap stays under that limit, so the refusal names the count and the cap.
+pub const MAX_CUT_CELLS: usize = 1000;
+const _: () = assert!(MAX_CUT_CELLS < solidcore_record::brep::MAX_SHELLS, "one shell per cell must fit the record");
 
 /// Past this many cells the cut takes noticeable time, and the feature says so.
 pub const SLOW_CUT_CELLS: usize = 100;
@@ -31,21 +35,32 @@ pub(crate) fn tools(
         angle,
         anchor,
         clip,
+        keepout_clip,
+        snap_inset,
         margin,
         depth,
         through_all,
         direction,
         targets,
+        mode,
         ..
     } = &f.kind
     else {
         return Err(DocError::Invalid("not a cell grid".into()));
     };
-    // Sheet metal cuts become cut-outs of the flat pattern, which a grid of cells cannot be. Only
-    // the bodies the cut reaches count: its targets, else its participants, else its component.
+    // A cut of a sheet metal body is read back onto the sheet's panels, which a grid of cells is not
+    // yet. Only the bodies the cut reaches count: its targets, else its participants, else its
+    // component.
     let (_, scope) = boolean_scope(st, f, &crate::plain(targets));
-    if st.sheets.iter().any(|sheet| scope.contains(&sheet.body)) {
-        return Err(DocError::Invalid("not supported yet: a cell grid cannot cut sheet metal; use sheet.perforate".into()));
+    if st.surface_sheets.iter().any(|sheet| scope.contains(&sheet.body)) {
+        return Err(DocError::Invalid(match mode {
+            crate::CellGridMode::Cut => "not supported yet: a cell grid cannot cut sheet metal; use sheet.perforate".into(),
+            crate::CellGridMode::Raised => "not supported yet: a cell grid cannot add cells to sheet metal".into(),
+        }));
+    }
+    // Raised cells stand `depth` from the plane: "through all" has no far side to reach.
+    if *mode == crate::CellGridMode::Raised && *through_all {
+        return Err(DocError::Invalid("a raised cell grid stands `depth` high: give `depth`, not `through_all`".into()));
     }
     let ss = constructor_profile_in_frame(
         doc,
@@ -81,6 +96,20 @@ pub(crate) fn tools(
         },
         anchor,
         clip: *clip,
+        keepout_clip: *keepout_clip,
+        snap_inset: match snap_inset {
+            Some(e) => {
+                let n = val(vals, e, Kind::Unitless)?;
+                if !(n.is_finite() && n.fract() == 0.0 && (0.0..=f64::from(crate::CELL_GRID_MAX_SNAP_INSET)).contains(&n)) {
+                    return Err(DocError::Invalid(format!(
+                        "the snap inset is a whole number of lattice lines from 0 to {}, not {n}",
+                        crate::CELL_GRID_MAX_SNAP_INSET
+                    )));
+                }
+                n as u32
+            }
+            None => 0,
+        },
         margin: match margin {
             Some(e) => val(vals, e, Kind::Length)?,
             None => 0.0,
@@ -127,7 +156,7 @@ pub(crate) fn tools(
     for cell in &plan.cells {
         let pieces = solidcore_ops::cell_grid::cell_regions(cell).map_err(|e| DocError::Invalid(e.to_string()))?;
         for region in &pieces {
-            tools.extend(centered_extrude(&ss.plane, region, lo, hi, None, None, false)?);
+            tools.extend(centered_extrude(&ss.plane, region, lo, hi, None, None, false, None)?);
         }
     }
     // The cells lie apart by the web, so the kernel's own check of their boxes (which a

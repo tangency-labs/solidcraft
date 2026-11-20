@@ -18,7 +18,7 @@
 //! session: circular rounds per edge, each set-back vertex marked (`add_set_back_vertex`)
 //! before the corners are made, then `set_corner_setback` on the vertex's corner, and with
 //! a G2 corner the corner's patch marked (`set_mark_corner_patches`) for SolidCraft to
-//! replace; then `StitchAndOrient`. The fixes are the corpus's `fixes.json`. The values are
+//! replace; then `StitchAndOrient`. The fixes are SolidCraft's preset. The values are
 //! those the same calls give on the Setback (solidcore#2933), every one: counts, the
 //! patch's faces and the volume to 1e-9. The rig's values are the N x N corner's (013's
 //! filled corner) or SolidCraft's G2 patch's, so here the corner's own Setback fill is
@@ -32,6 +32,9 @@
     clippy::indexing_slicing
 )] // test helpers
 
+#[path = "support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 use solidcore::blend::blend_refusal::{BlendRefusal, SetbackTooShortWhy};
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_geom::p1::FilletCornerType;
@@ -39,7 +42,6 @@ use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::global_solver::SolverOperation;
-use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point3, BIG_DOUBLE};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
@@ -49,22 +51,13 @@ use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::{edge, EdgeId, VertexId};
 use solidcore::{Brep, Kernel, SolidError};
 
-/// The corpus's fix list (`tests/kernel_cases/fixes.json`, SolidCraft's), and
-/// `closed_smooth_pole_tangent_limit`, which the rig run turned on too.
+/// SolidCraft's whole preset (`support/solidcraft_fixes.rs`). That includes
+/// `closed_smooth_pole_tangent_limit`, which the rig run also turned on, and since the
+/// preset is `core::fixes()`, `fillet_chamfer_corner` and
+/// `brep_ray_classifies_current_trims`. Every value here is unchanged under them.
 fn solidcraft_fixes() -> Kernel {
-    let names: Vec<String> = serde_json::from_str(include_str!("kernel_cases/fixes.json")).unwrap();
-    let mut f = UpstreamFixes::default();
-    for name in names
-        .iter()
-        .map(String::as_str)
-        .chain(["closed_smooth_pole_tangent_limit"])
-    {
-        if let Some(flag) = f.flag_mut(name) {
-            *flag = true;
-        }
-    }
     Kernel {
-        fixes: f,
+        fixes: solidcraft_fixes::solidcraft_fixes(),
         ..Kernel::default()
     }
 }

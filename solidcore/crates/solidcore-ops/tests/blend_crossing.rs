@@ -1,9 +1,16 @@
 //! Rounds that overlap where a wall is thinner than both (SolidCraft #871): a plate with a
 //! narrower block on top and a window through both, rounded along every edge of both end faces.
 //! And rounds whose bands never meet, one of them ending at a crease (SolidCraft #16729).
+//! And rounds on the top edges of a block whose corners a sphere trims, whose rails cross past
+//! the edges' ends (SolidCraft #18563).
 #![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::panic)] // test helpers
 
 mod common;
+/// #16735's leak checks on a result body read into the kernel: test code measuring geometry,
+/// which this crate itself does not (docs/layers.md §4).
+#[path = "../../solidcore/tests/support/volume_leak.rs"]
+#[allow(clippy::disallowed_methods)]
+mod volume_leak;
 
 use solidcore::blend::definition_check::surface_kind_name;
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
@@ -15,6 +22,8 @@ use solidcore::Vec3;
 
 use common::*;
 use solidcore::kernel::Kernel;
+use solidcore_ops::boolean::boolean;
+use solidcore_ops::sweep::{extrude, Curve, DraftCorner};
 use solidcore_ops::*;
 
 const A: f64 = 12.744_373_655_385_26;
@@ -98,6 +107,68 @@ fn overlapping_rounds_are_refused_and_rounds_that_fit_close() {
         );
         assert!(c.check(CheckLevel::All).unwrap().is_valid());
     }
+}
+
+/// The ring of SolidCraft #18178: a 40 high disc of radius 14.5 less an equilateral triangle of
+/// side 21 about its axis (corners at radius 12.124), whose top ring is 2.376 wide at the
+/// triangle's corners. Chamfered 0.8 on the outer circle and the triangle's three top edges,
+/// the triangle's chamfers meet 0.8 / sin 30 = 1.6 out from each 60 degree corner, at radius
+/// 13.724, past the outer chamfer's contact line at 13.7: the lines cross there for a few
+/// hundredths, which the band check's samples step over, and the chamfer is refused as too
+/// large for the faces (the pieces between the crossings judged too). At 0.5 the corners reach
+/// 13.124 and the outer line lies at 14.0: the four chamfers on the one face stay apart and
+/// build a valid body a little smaller than the part.
+#[test]
+fn chamfers_crossing_at_a_ring_corner_are_refused_and_apart_build() {
+    const C: [[f64; 3]; 3] = [
+        [12.124_355_652_982_143, 0.0, -1.0],
+        [-6.062_177_826_491_071, 10.5, -1.0],
+        [-6.062_177_826_491_071, -10.5, -1.0],
+    ];
+    const EDGES: [[f64; 3]; 4] = [
+        [-14.5, 0.0, 40.0],
+        [3.031_088_913_245_535_6, 5.25, 40.0],
+        [-6.062_177_826_491_071, 0.0, 40.0],
+        [3.031_088_913_245_535_6, -5.25, 40.0],
+    ];
+    all_fixes();
+    let disc = make_cylinder([0.0; 3], 14.5, 40.0).unwrap();
+    let sides: Vec<Curve> = (0..3)
+        .map(|i| Curve::Line {
+            start: C[i],
+            end: C[(i + 1) % 3],
+        })
+        .collect();
+    let triangle = extrude(
+        &sides,
+        [0.0, 0.0, 1.0],
+        42.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    let ring = boolean(disc, triangle, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let edges: Vec<usize> = EDGES.iter().map(|&p| edge_at(&ring, p)).collect();
+    let c = ring.copy().unwrap();
+    match blend(&c, Blend::Chamfer, &edges, &[0.8], &[], Corners::Filled) {
+        Err(
+            Error::NoRoom
+            | Error::TooLarge {
+                why: Some(RoomReason::BandsOverlap),
+                ..
+            },
+        ) => {}
+        other => panic!("{other:?}"),
+    }
+    let whole = volume(&ring);
+    let c = ring.copy().unwrap();
+    blend(&c, Blend::Chamfer, &edges, &[0.5], &[], Corners::Filled).unwrap();
+    let v = volume(&c);
+    assert!(v > 0.99 * whole && v < whole, "{v} of {whole}");
+    assert!(c.check(CheckLevel::All).unwrap().is_valid());
 }
 
 /// tan 4 degrees: the slope of the creased wall's turned piece.
@@ -243,14 +314,47 @@ fn a_round_ending_at_a_crease_is_not_refused_over_rounds_it_never_reaches() {
         ([13, 32, 21, solid], &kinds(2, 0, 11))
     );
     let all = all.expect("A with B and C builds");
-    // A alone + B and C alone - the body before, the issue's 4183.769446 (each measured to its
-    // six decimals), and the counts the same sum
+    // A alone + B and C alone - the body before, and the counts the same sum
     assert!(
         rel(all.1, alone_a.1 + b_and_c.1 - before.1) < 1e-9,
         "A B C: {}",
         all.1
     );
-    assert!((all.1 - 4183.769446).abs() < 2e-6, "A B C: {}", all.1);
+    // The issue's figure, 4183.769446, came from the integrator before #16735, which leaked
+    // through the tolerant edges' gaps, and from B and C's corner patch with the retired
+    // `corner_patch_face_side_twist` on (4183.769449703 once #16735 closed the gaps). Pinned
+    // at the default kernel's body (MEASURED: no closed form for B and C's corner patch), to
+    // 1e-8: since #18640 retired that flag, the corner keeps the default kernel's patch, and
+    // main with the flag off reads this value to the last digit. The flag-on patch read
+    // farther from tangent on two of its sides (#18640). The move against the body's old
+    // leak bound (sum g L max|z - o_z| over its edge uses, the gaps g sampled at the
+    // closure's grid, `volume_leak::leak`) is printed as a diagnostic only; the volume's
+    // independence of the origin is asserted.
+    assert!(
+        (all.1 - 4_183.775_516_040_999).abs() < 1e-8,
+        "A B C: {}",
+        all.1
+    );
+    {
+        let b = creased_wall_arm(2.5);
+        let edges: Vec<usize> = [edge_a, edge_b, edge_c]
+            .iter()
+            .map(|&p| edge_at(&b, p))
+            .collect();
+        blend(&b, Blend::Round, &edges, &[r], &[], Corners::Filled).unwrap();
+        let (k, mut made) = kernel_copy(&b);
+        let l = volume_leak::leak(&k, &mut made, 1e-10, 8);
+        eprintln!(
+            "A B C (diagnostic, MEASURED): {} is {:e} from the issue's 4183.769446; old leak \
+             bound {:e} (sampled), origin spread {:e} (allowance {:e})",
+            all.1,
+            (all.1 - 4183.769446).abs(),
+            l.old_bound,
+            l.origin_spread,
+            l.origin_allowance
+        );
+        assert!(l.origin_spread <= l.origin_allowance, "A B C: {l:?}");
+    }
     assert_eq!((all.0, &all.2), ([15, 37, 24, solid], &kinds(3, 1, 11)));
 
     let overlapping = creased_wall_arm(0.5);
@@ -268,5 +372,91 @@ fn a_round_ending_at_a_crease_is_not_refused_over_rounds_it_never_reaches() {
             ..
         }) => {}
         other => panic!("crease at 0.5, A with C: {other:?}"),
+    }
+}
+
+/// SolidCraft #18563: a 60 x 40 x 25 block (`s` times as large) and a sphere of radius 35.75
+/// about its centre, intersected, so the sphere trims every vertical edge and the top face is
+/// the rectangle less the corners outside the circle of radius `rho` with
+/// `rho^2 = 35.75^2 - 12.5^2` about its centre. The four top edges end on the sphere and share
+/// no vertex.
+fn sphere_trimmed_block(s: f64) -> (Body, [usize; 4]) {
+    all_fixes();
+    let block = make_box([-30.0 * s, -20.0 * s, 0.0], [60.0 * s, 40.0 * s, 25.0 * s]).unwrap();
+    let ball = make_sphere([0.0, 0.0, 12.5 * s], 35.75 * s).unwrap();
+    let part = boolean(block, ball, BooleanOp::Intersect).unwrap().unwrap();
+    let top = [
+        [30.0, -10.0, 25.0],
+        [-30.0, 10.0, 25.0],
+        [-15.0, -20.0, 25.0],
+        [15.0, 20.0, 25.0],
+    ]
+    .map(|p| edge_at(&part, p.map(|c| c * s)));
+    (part, top)
+}
+
+/// Rounding the four top edges of [`sphere_trimmed_block`]: past the edges' ends, the rails of
+/// two neighbouring rounds on the top face run on as the lines `x = 30 - r` and `y = 20 - r`
+/// until they meet the sphere. They cross at `(30 - r, 20 - r)`, inside the top face while
+/// `(30 - r)^2 + (20 - r)^2 < rho^2`, so the largest round that fits solves
+/// `2 r^2 - 100 r + 1300 - rho^2 = 0`: `r = 25 - sqrt(625 - (1300 - rho^2) / 2)`, about 1.850.
+/// (At that radius the rounds' surfaces meet only at that point: their mitre's other points lie
+/// outside the sphere.) A larger round, on all four edges or on two neighbours alone, is refused
+/// for want of room and leaves the part as it was (the band check finds the overlap past the
+/// edges' ends; the largest size that fits is not named there). A smaller one builds a valid
+/// closed body of 14 faces, 38 edges and 26 vertices: the part's 10 faces, 26 edges and 18
+/// vertices (six planes and the four sphere faces between them; eight vertices round the top
+/// face, eight round the bottom, and two that split the side circles on the faces x = 30 and
+/// y = -20 at z = 12.5), and each round adds a face, three edges and two vertices.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn rounds_whose_rails_cross_past_their_edges_ends_on_a_sphere_are_refused() {
+    let rho2 = 35.75_f64.powi(2) - 12.5_f64.powi(2);
+    let fit = 25.0 - (625.0 - (1300.0 - rho2) / 2.0).sqrt();
+    assert!((fit - 1.850).abs() < 1e-3, "{fit}");
+    for s in [1.0, 40.0] {
+        let (part, top) = sphere_trimmed_block(s);
+        assert_eq!(part.counts().unwrap(), [10, 26, 18], "part at scale {s}");
+        let before = volume(&part);
+        // all four edges, and the two neighbours at one corner alone; the body is left as it was
+        for edges in [&top[..], &[top[0], top[3]][..]] {
+            for r in [2.0, fit + 0.01] {
+                let c = part.copy().unwrap();
+                match blend(&c, Blend::Round, edges, &[r * s], &[], Corners::Filled) {
+                    Err(Error::NoRoom) => {}
+                    other => panic!("scale {s}, {} edges, round {r}: {other:?}", edges.len()),
+                }
+                assert_eq!(c.counts().unwrap(), [10, 26, 18], "scale {s}, round {r}");
+                assert!(rel(volume(&c), before) < 1e-12, "scale {s}, round {r}");
+            }
+        }
+        // two opposite edges share the top face but their bands lie apart: they build at 2, two
+        // faces, six edges and four vertices more than the part
+        let c = part.copy().unwrap();
+        blend(
+            &c,
+            Blend::Round,
+            &[top[0], top[1]],
+            &[2.0 * s],
+            &[],
+            Corners::Filled,
+        )
+        .unwrap_or_else(|e| panic!("scale {s}, opposite edges: {e:?}"));
+        assert_eq!(
+            c.counts().unwrap(),
+            [12, 32, 22],
+            "scale {s}, opposite edges"
+        );
+        assert!(c.check(CheckLevel::All).unwrap().is_valid(), "scale {s}");
+        for r in [1.0, fit - 0.01] {
+            let c = part.copy().unwrap();
+            blend(&c, Blend::Round, &top, &[r * s], &[], Corners::Filled)
+                .unwrap_or_else(|e| panic!("scale {s}, round {r}: {e:?}"));
+            assert_eq!(c.counts().unwrap(), [14, 38, 26], "scale {s}, round {r}");
+            assert!(
+                c.check(CheckLevel::All).unwrap().is_valid(),
+                "scale {s}, round {r}"
+            );
+        }
     }
 }

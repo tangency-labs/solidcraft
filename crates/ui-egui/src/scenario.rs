@@ -128,6 +128,9 @@ pub struct Harness {
     queue: Option<std::sync::mpsc::Sender<ControlRequest>>,
     time: f64,
     size: egui::Vec2,
+    /// The pixels per point of the screen the window is on, as the platform reports it for each
+    /// screen (none: not reported, and egui takes 1).
+    pub screen_scale: Option<f32>,
     /// The camera as the last `camera` step left it.
     cam_mark: Option<solidcraft_viewport::Camera>,
 }
@@ -167,6 +170,7 @@ impl Harness {
             queue: None,
             time: 0.0,
             size: egui::vec2(1600.0, 1000.0),
+            screen_scale: None,
             cam_mark: None,
         };
         WIDTHS.with(|m| m.borrow_mut().clear());
@@ -205,15 +209,24 @@ impl Harness {
     /// One frame that receives all these events at once (a quick tap, or input queued during a
     /// slow frame), before any queued ones.
     pub fn frame_with(&mut self, events: Vec<egui::Event>) {
-        self.tick();
-        let mut raw = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, self.size)),
-            time: Some(self.time),
-            focused: true,
-            events,
-            ..Default::default()
-        };
-        self.app.raw_input_hook(&mut raw);
+        self.frame_with_pen(events, None);
+    }
+
+    /// One frame with these keys held (Shift, Ctrl, Alt) while `events` come in.
+    pub fn frame_with_modifiers(&mut self, mut events: Vec<egui::Event>, modifiers: egui::Modifiers) {
+        events.insert(0, egui::Event::ModifiersChanged(modifiers));
+        self.frame_with(events);
+    }
+
+    /// One frame with a release identified as a pen tip by the platform.
+    pub fn frame_with_pen(&mut self, events: Vec<egui::Event>, pen_release: Option<egui::Pos2>) {
+        self.frame_with_taps(events, crate::pencil::PlatformTaps { pen_release, ..Default::default() });
+    }
+
+    /// One frame with what the platform says about its taps (a pen tip lifted, a finger down).
+    pub fn frame_with_taps(&mut self, events: Vec<egui::Event>, taps: crate::pencil::PlatformTaps) {
+        let mut raw = self.input(events);
+        self.app.raw_input_hook_with_taps(&self.ctx, &mut raw, taps);
         let app = &mut self.app;
         let mut out = self.ctx.run_ui(raw, |ui| {
             app.logic(ui.ctx());
@@ -234,6 +247,22 @@ impl Harness {
         std::mem::take(&mut self.opened)
     }
 
+    /// The next frame's input: the window's size on its screen, `events`, and the time a frame on.
+    fn input(&mut self, events: Vec<egui::Event>) -> egui::RawInput {
+        self.tick();
+        let mut raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, self.size)),
+            time: Some(self.time),
+            focused: true,
+            events,
+            ..Default::default()
+        };
+        if let Some(scale) = self.screen_scale {
+            raw.viewports.entry(egui::ViewportId::ROOT).or_default().native_pixels_per_point = Some(scale);
+        }
+        raw
+    }
+
     pub fn frames(&mut self, n: usize) {
         for _ in 0..n {
             self.frame();
@@ -249,16 +278,7 @@ impl Harness {
     /// One frame in which files are dragged over the window (`hovered`) or dropped, the pointer
     /// last seen at `at`.
     pub fn drag_files(&mut self, at: egui::Pos2, hovered: Vec<egui::HoveredFile>, dropped: Vec<egui::DroppedFileHandle>) {
-        self.tick();
-        let raw = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, self.size)),
-            time: Some(self.time),
-            focused: true,
-            events: vec![egui::Event::PointerMoved(at)],
-            hovered_files: hovered,
-            dropped_files: dropped,
-            ..Default::default()
-        };
+        let raw = egui::RawInput { hovered_files: hovered, dropped_files: dropped, ..self.input(vec![egui::Event::PointerMoved(at)]) };
         let app = &mut self.app;
         let mut out = self.ctx.run_ui(raw, |ui| {
             app.logic(ui.ctx());
@@ -277,10 +297,14 @@ impl Harness {
             }
             self.frame();
         }
-        // A file opening, recovering or saving in the background, or a window checking what its
-        // material does: wait for it (as a person would).
+        // A file opening, recovering or saving in the background, a view being drawn on a worker,
+        // or a window checking what its material does: wait for it (as a person would).
         let began = std::time::Instant::now();
-        while (!self.app.file_load.idle() || self.app.saving.is_some() || crate::open_meshing::active(&self.app) || self.app.op_check.busy())
+        while (!self.app.file_load.idle()
+            || self.app.saving.is_some()
+            || crate::open_meshing::active(&self.app)
+            || self.app.op_check.busy()
+            || !crate::drawing_jobs::idle(&self.app))
             && began.elapsed() < std::time::Duration::from_secs(120)
         {
             self.frame();
@@ -989,7 +1013,7 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
                 approx(w, v, "canvas width")?;
             }
             "section" => {
-                if h.app.session.section.is_some() != v.as_bool().unwrap_or(false) {
+                if h.app.session.section.is_empty() == v.as_bool().unwrap_or(false) {
                     return Err(format!("section view: want {v}"));
                 }
             }
@@ -1188,3 +1212,15 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
 #[cfg(test)]
 #[path = "scenario_publication_tests.rs"]
 mod publication_tests;
+
+/// Writes `bytes` to an image file of its own for a test and returns its path: an image is given
+/// to `canvas.insert` and `canvas.decal` as a file, never as text.
+#[cfg(test)]
+pub(crate) fn image_file(bytes: &[u8]) -> String {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let dir = std::env::temp_dir().join(format!("solidcraft-ui-test-images-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(format!("{}.img", NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+    std::fs::write(&path, bytes).unwrap();
+    path.to_string_lossy().into_owned()
+}

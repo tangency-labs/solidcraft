@@ -10,6 +10,12 @@
 //! | [`BooleanFailure::EntityMissing`]   | `SM_ERR_NULL_POINTER`               |
 //! | [`BooleanFailure::SolidLeaks`]      | `SM_ERR` (WR-619, solidcore-native) |
 //! | [`BooleanFailure::RelateConflict`]  | `SM_ERR`                            |
+//! | [`BooleanFailure::Defect`]          | `SM_ERR` (or the site's, through `with_status`) |
+//!
+//! [`BooleanFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with
+//! its reason: a defect ([`ErrorKind::StageFailed`], class 127).
+//! [`BooleanFailure::StageFailed`] and [`BooleanFailure::EntityMissing`] are sites not yet
+//! converted (the conversion guide: `docs/failure-codes-and-reproduction.md` §6).
 //!
 //! Deviations: not upstream. A stage's failure names the stage ([`BooleanStage`]) and
 //! says in a phrase what went wrong; the handles the stages work on are the
@@ -95,7 +101,8 @@ impl core::fmt::Display for PlacedEntity {
 #[non_exhaustive]
 pub enum BooleanFailure {
     /// A stage could not continue, as the phrase says (for example "a different entity is
-    /// already related to it").
+    /// already related to it"). The form not yet reviewed: new code builds
+    /// [`BooleanFailure::Defect`], a named cause or a refusal instead.
     StageFailed {
         /// The stage.
         stage: BooleanStage,
@@ -110,8 +117,8 @@ pub enum BooleanFailure {
         /// What is missing.
         what: &'static str,
     },
-    /// A union would delete `face`, which bounds a solid against the outside, so the solid
-    /// would merge into the outside (opt-in `fixes.boolean_union_refuses_solid_leak`).
+    /// A union deleted `face`, which bounded a solid against the outside, and that solid's
+    /// side was left in no solid region: the solid merged into the outside (WR-619).
     SolidLeaks {
         /// The face, of the B-rep the operation edits.
         face: FaceId,
@@ -146,6 +153,16 @@ pub enum BooleanFailure {
         /// The tolerance that fits: anything below it reaches no vertex it does not bound.
         fits_below: Option<f64>,
     },
+    /// A failure that is the kernel's fault, reviewed at its site, with the written reason:
+    /// `why` names the step of `stage` that failed and why that is the kernel's fault, not
+    /// the geometry's. A defect ([`ErrorKind::StageFailed`]); status `SM_ERR` unless its
+    /// site says otherwise.
+    Defect {
+        /// The stage.
+        stage: BooleanStage,
+        /// The step that failed, and why that is the kernel's fault.
+        why: &'static str,
+    },
 }
 
 impl BooleanFailure {
@@ -157,7 +174,8 @@ impl BooleanFailure {
             Self::StageFailed { .. }
             | Self::EntityMissing { .. }
             | Self::RelateConflict { .. }
-            | Self::MergedVertexReaches { .. } => None,
+            | Self::MergedVertexReaches { .. }
+            | Self::Defect { .. } => None,
         }
     }
 
@@ -167,12 +185,14 @@ impl BooleanFailure {
             Self::StageFailed { .. }
             | Self::SolidLeaks { .. }
             | Self::RelateConflict { .. }
-            | Self::MergedVertexReaches { .. } => SM_ERR,
+            | Self::MergedVertexReaches { .. }
+            | Self::Defect { .. } => SM_ERR,
             Self::EntityMissing { .. } => SM_ERR_NULL_POINTER,
         }
     }
 
-    /// The failure's stable [`ErrorKind`].
+    /// The failure's stable [`ErrorKind`]: [`ErrorKind::StageFailed`] for
+    /// [`BooleanFailure::Defect`], a defect.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
@@ -181,6 +201,7 @@ impl BooleanFailure {
             | Self::RelateConflict { .. }
             | Self::MergedVertexReaches { .. } => ErrorKind::Failed,
             Self::EntityMissing { .. } => ErrorKind::Missing,
+            Self::Defect { .. } => ErrorKind::StageFailed,
         }
     }
 }
@@ -189,12 +210,15 @@ impl core::fmt::Display for BooleanFailure {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::StageFailed { stage, what } => write!(f, "{stage} failed: {what}"),
+            Self::Defect { stage, why } => {
+                write!(f, "{}: {stage} failed: {why}", ErrorKind::StageFailed)
+            }
             Self::EntityMissing { stage, what } => {
                 write!(f, "{stage} needs {what}, which the B-rep does not have")
             }
             Self::SolidLeaks { face } => write!(
                 f,
-                "the union would delete face {} and merge the solid it bounds into the outside",
+                "the union deleted face {} and the solid it bounded merged into the outside",
                 face.index()
             ),
             Self::RelateConflict {
@@ -271,5 +295,62 @@ impl crate::SolidError {
             },
         )
         .into_error()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::SolidError;
+
+    /// A reviewed defect is of class 127 with the stage failure's status, and names its
+    /// stage and why.
+    #[test]
+    fn a_reviewed_defect_is_class_127_with_its_reason() {
+        let why =
+            "the loop the imprint just closed has a free end, which its own walk never leaves";
+        let defect = BooleanFailure::Defect {
+            stage: BooleanStage::CloseLoop,
+            why,
+        };
+        let op = "boolean::op";
+        let e = super::super::Failure::new(op, defect).into_error();
+        super::super::tests::assert_defect(
+            &e,
+            &SolidError::boolean_stage_failed(op, BooleanStage::CloseLoop, "x"),
+            op,
+            SM_ERR,
+            &format!("{op}: stage_failed: closing an intersection loop failed: {why}"),
+        );
+        assert_eq!(e.entity(), None);
+        assert!(matches!(
+            e.failure().map(|f| &f.reason),
+            Some(super::super::Reason::Boolean(b)) if *b == defect
+        ));
+    }
+
+    /// The sites that build a Boolean phrase cause only fall:
+    /// per file, in the library code of `solidcore` and `solidcore-ops`, as
+    /// [`super::super::site_scan`] counts them. A PR that converts sites lowers its
+    /// files' counts here, and a file at 0 loses its line (the conversion guide:
+    /// `docs/failure-codes-and-reproduction.md` §6).
+    #[test]
+    fn the_boolean_phrase_cause_sites_only_shrink() {
+        use super::super::site_scan::{assert_pinned, crate_sites, Builder, Scan, Wrappers};
+        const PHRASES: Scan = Scan {
+            builders: &[
+                Builder::Variant("BooleanFailure", "EntityMissing"),
+                Builder::Method("boolean_entity_missing", Some(2)),
+            ],
+            wrappers: Wrappers::Phrase,
+        };
+        #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
+        const PINNED: &[(&str, usize)] = &[
+            ("solidcore/src/boolean/merge/p2.rs", 4),
+            ("solidcore/src/boolean/topology_intersector/p1.rs", 9),
+            ("solidcore/src/boolean/topology_intersector/p2.rs", 2),
+            ("solidcore/src/boolean/topology_intersector/p3.rs", 2),
+        ];
+        assert_pinned("Boolean phrase-cause sites", &crate_sites(&PHRASES), PINNED);
     }
 }

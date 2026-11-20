@@ -29,11 +29,17 @@ fn open(h: &mut Harness) {
     h.step(&json!({"call": "ui.view", "params": {"view": "iso"}})).unwrap();
     h.step(&json!({"call": "ui.view", "params": {"view": "fit"}})).unwrap();
     h.step(&json!({"call": "ui.editFeature", "params": {"feature": "Round"}})).unwrap();
+    // The preview's fillet runs on a worker thread; the loop ends as soon as it is in. The
+    // ceiling is only for a preview that never comes: with every test binary running at once,
+    // that thread can wait more than a minute for a core. A preview that ends in an error ends
+    // the wait at once.
     let began = std::time::Instant::now();
-    while (h.app.preview.busy || h.app.preview.tapered.is_empty()) && began.elapsed() < std::time::Duration::from_secs(60) {
+    let failed = |h: &Harness| !h.app.preview.busy && h.app.preview.error.is_some();
+    while (h.app.preview.busy || h.app.preview.tapered.is_empty()) && !failed(h) && began.elapsed() < std::time::Duration::from_secs(300) {
         h.frame();
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
+    assert!(!failed(h), "the fillet's preview failed: {:?}", h.app.preview.error);
     h.frames(4);
 }
 

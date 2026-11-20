@@ -7,12 +7,15 @@ use super::types::{
     AngleExpr, DirectionParam, FeatureCommon, IdOrName, LengthExpr, NumberExpr, PointExpr3, ProfilesParam, StringList, feature_common, present,
 };
 
-/// What the feature does with its cells. Only `cut` is built so far.
+/// What the feature does with its cells.
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CellGridModeParam {
     /// Cut the cells out of the bodies.
     Cut,
+    /// Add the cells as material: they stand `depth` from the sketch plane in `direction`, joined
+    /// to the bodies (a new body if there is none). Not with `through_all`.
+    Raised,
 }
 
 /// A cell's shape. Every shape has its inscribed diameter `size`.
@@ -53,10 +56,11 @@ pub enum CellClipParam {
     Free,
 }
 
-/// Fill the closed profiles of a sketch with cells of one shape and cut them out of the bodies:
-/// vents, speaker grilles, weight-saving pockets. A profile's outer loop is the field to fill;
-/// a loop inside it is a keep-out that no cell crosses. The cells are cut in one operation, a few
-/// hundred at most (the command help names the limit); a sheet metal body is refused (use
+/// Fill the closed profiles of a sketch with cells of one shape and cut them out of the bodies
+/// (vents, speaker grilles, weight-saving pockets), or with `mode: raised` stand them on the
+/// sketch plane as material (knurling, grip pads, standoffs). A profile's outer loop is the field to fill;
+/// a loop inside it is a keep-out that no cell crosses. The cells are cut in one operation, up to
+/// 1000 (the command help names the limit); a sheet metal body is refused (use
 /// `sheet.perforate`). The faces cut have no stable names yet.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -70,7 +74,7 @@ pub struct CellGridParams {
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "ProfilesParam")]
     pub profiles: Option<ProfilesParam>,
-    /// What to do with the cells. Default: cut.
+    /// What to do with the cells: cut them out, or raise them as material. Default: cut.
     #[serde(default)]
     pub mode: Option<CellGridModeParam>,
     /// The cells' shape. Default: hexagon.
@@ -97,20 +101,30 @@ pub struct CellGridParams {
     /// What happens to cells the field's edge crosses. Default: snap.
     #[serde(default)]
     pub clip: Option<CellClipParam>,
+    /// What happens to cells a keep-out's edge crosses (a loop inside the field). Default: the
+    /// same as `clip`, so one mode serves every loop.
+    #[serde(default)]
+    pub keepout_clip: Option<CellClipParam>,
+    /// With `clip: snap`, how many lattice lines further in each straight field edge moves after
+    /// it snaps: a whole number, default 0. The edge cells become whole cells and the rim a
+    /// whole number of grid rows thicker. Keep-outs are not moved.
+    #[serde(default)]
+    pub snap_inset: Option<NumberExpr>,
     /// The least clearance from a cell to every edge of the field and its keep-outs, with
     /// `clip: whole`. Default 0: a cell may touch an edge.
     #[serde(default)]
     pub margin: Option<LengthExpr>,
-    /// How deep the cells are cut along the sketch normal. Required unless `through_all`.
+    /// How deep the cells are cut, or how high they stand when raised, along the sketch normal.
+    /// Required unless `through_all`.
     #[serde(default)]
     pub depth: Option<LengthExpr>,
-    /// Cut through every body in the way, instead of `depth`.
+    /// Cut through every body in the way, instead of `depth`. Refused with `mode: raised`.
     #[serde(default)]
     pub through_all: Option<bool>,
-    /// Which way to cut. Default: positive (along the sketch normal).
+    /// Which way to cut or raise. Default: positive (along the sketch normal).
     #[serde(default)]
     pub direction: Option<DirectionParam>,
-    /// The bodies to cut. Default: the bodies of the active component (or `participants`).
+    /// The bodies to cut, or to join the raised cells to. Default: the bodies of the active component (or `participants`).
     #[serde(default)]
     pub targets: Option<StringList>,
     #[serde(flatten, deserialize_with = "feature_common")]

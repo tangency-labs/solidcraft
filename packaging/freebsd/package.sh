@@ -47,10 +47,8 @@ rm -rf "$WORK"
 # FreeBSD's install(1) has no -D: create the directories first.
 mkdir -p "$STAGE/bin" "$STAGE/share/applications" "$STAGE/share/mime/packages" \
   "$STAGE/share/metainfo" "$STAGE/share/icons" "$STAGE/share/doc/solidcraft"
-# solvecraft-cli: the old CLI name, forwarding to solidcraft-cli (compatibility shim,
-# docs/compatibility.md).
-install -m 755 "$BIN/solidcraft" "$BIN/solidcraft-cli" "$BIN/solvecraft-cli" "$STAGE/bin/"
-strip "$STAGE/bin/solidcraft" "$STAGE/bin/solidcraft-cli" "$STAGE/bin/solvecraft-cli" 2>/dev/null || true
+install -m 755 "$BIN/solidcraft" "$BIN/solidcraft-cli" "$STAGE/bin/"
+strip "$STAGE/bin/solidcraft" "$STAGE/bin/solidcraft-cli" 2>/dev/null || true
 # The desktop entry, MIME type, metainfo and icons are the freedesktop files Linux ships.
 install -m 644 "$LINUX/$APP_ID.desktop" "$STAGE/share/applications/$APP_ID.desktop"
 install -m 644 "$LINUX/$APP_ID.mime.xml" "$STAGE/share/mime/packages/$APP_ID.xml"
@@ -60,7 +58,7 @@ make_icons "$STAGE/bin/solidcraft-cli" "$WORK/icons"
 cp -R "$WORK/icons/hicolor" "$STAGE/share/icons/"
 copy_docs "$STAGE/share/doc/solidcraft"
 
-for f in bin/solidcraft bin/solidcraft-cli bin/solvecraft-cli "share/applications/$APP_ID.desktop" \
+for f in bin/solidcraft bin/solidcraft-cli "share/applications/$APP_ID.desktop" \
   "share/icons/hicolor/256x256/apps/$APP_ID.png" share/doc/solidcraft/LICENSE-MIT \
   share/doc/solidcraft/LICENSE-APACHE share/doc/solidcraft/THIRD-PARTY-LICENSES.txt; do
   if [ ! -e "$STAGE/$f" ]; then echo "error: $f is missing from the package" >&2; exit 1; fi

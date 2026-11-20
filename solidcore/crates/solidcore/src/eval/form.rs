@@ -8,10 +8,11 @@
 //! frame therefore has the same parameter at the same angle, whatever quarters it spans: a circle
 //! edge's form and its cylinder's form agree along it, so its pcurve is a straight line in (u, v).
 //! A form spans the quarters its interval needs (at most five for one turn), so an arc across the
-//! frame's x axis has a form like any other. A face of five would cover part of its surface twice:
-//! its frame is turned about its axis first ([`turned`], [`turn_quarters`]), so that it starts on
-//! a quarter line and its form spans four; a torus face's tube likewise starts from its tube start
-//! ([`tube_turned`], [`tube_quarters`]).
+//! frame's x axis has a form like any other. A curve's form of five is cut to its interval's ends
+//! ([`cut_to`]): whole, it would run a quarter past one turn. A face of five would cover part of
+//! its surface twice: its frame is turned about its axis first ([`turned`], [`turn_quarters`]),
+//! so that it starts on a quarter line and its form spans four; a torus face's tube likewise
+//! starts from its tube start ([`tube_turned`], [`tube_quarters`]).
 //!
 //! A circle or ellipse is the arcs (an ellipse scaled by its radii, which keeps it exact: its
 //! parameter is the eccentric angle). A cylinder or cone is the arcs times a degree-1 line along the
@@ -267,7 +268,10 @@ fn axes(f: &Frame) -> Option<(Vec3, Vec3, Vec3, Vec3)> {
 }
 
 /// The NURBS form of a line, circle or ellipse edge and its interval in the form's parameter;
-/// `None` for another kind, or an arc of more than one turn.
+/// `None` for another kind, or an arc of more than one turn. An arc's form is the quarters of its
+/// frame's grid that it needs; where those are five (it starts inside a quarter and ends past
+/// the fourth quarter line on from it), the first and the last are cut to the arc's ends, so
+/// the form does not run past one turn.
 pub fn curve(c: &Curve, [t0, t1]: [f64; 2]) -> Option<(Curve, [f64; 2])> {
     match c {
         Curve::Line { start, end } => {
@@ -290,15 +294,64 @@ pub fn curve(c: &Curve, [t0, t1]: [f64; 2]) -> Option<(Curve, [f64; 2])> {
 fn conic(frame: &Frame, [rx, ry]: [f64; 2], t: [f64; 2]) -> Option<(Curve, [f64; 2])> {
     let (o, x, y, _) = axes(frame)?;
     let grid = quarters(t, 0.0)?;
-    let (knots, pts) = arcs(grid.0, grid.1);
+    let on = params(t, grid);
+    let whole = arcs(grid.0, grid.1);
+    let (knots, pts) = match grid.1 {
+        5 => cut_to(&whole, on).unwrap_or(whole),
+        _ => whole,
+    };
     let homogeneous = pts
         .iter()
         .map(|([c, s], w)| hom(o + x * (rx * c) + y * (ry * s), *w))
         .collect();
-    Some((
-        Curve::RationalSpline { knots, homogeneous },
-        params(t, grid),
-    ))
+    Some((Curve::RationalSpline { knots, homogeneous }, on))
+}
+
+/// Quarter arcs ([`arcs`]) with the first and the last cut to `[s0, s1]`, form parameters inside
+/// those two arcs: the same curve at the same parameters, from `s0` to `s1` and no further. Five
+/// whole quarters run a quarter past one turn, and the kernel takes a conic's form for at most
+/// one (`curve::from_parameters::conic_on_form`); cut to an arc of at most one turn they are
+/// that arc. Each cut is the arc's blossom at its new ends, in homogeneous coordinates. `None`
+/// where an end is not inside its arc.
+fn cut_to(
+    (knots, pts): &(Vec<f64>, Vec<([f64; 2], f64)>),
+    [s0, s1]: [f64; 2],
+) -> Option<(Vec<f64>, Vec<([f64; 2], f64)>)> {
+    let (mut knots, mut pts) = (knots.clone(), pts.clone());
+    let (k, n) = (knots.len(), pts.len());
+    // Each new end as its own arc's parameter in [0, 1].
+    let (a, b) = (s0 - knots.first()?, s1 - (knots.last()? - 1.0));
+    if !(n >= 5 && (0.0..1.0).contains(&a) && b > 0.0 && b <= 1.0) {
+        return None;
+    }
+    let blossom = |arc: &[([f64; 2], f64)], u: f64, v: f64| -> Option<([f64; 2], f64)> {
+        let [([x0, y0], w0), ([x1, y1], w1), ([x2, y2], w2)] = arc else {
+            return None;
+        };
+        let (c0, c1, c2) = (
+            (1.0 - u) * (1.0 - v) * w0,
+            ((1.0 - u) * v + u * (1.0 - v)) * w1,
+            u * v * w2,
+        );
+        let w = c0 + c1 + c2;
+        (w > 0.0).then(|| {
+            (
+                [
+                    (c0 * x0 + c1 * x1 + c2 * x2) / w,
+                    (c0 * y0 + c1 * y1 + c2 * y2) / w,
+                ],
+                w,
+            )
+        })
+    };
+    let (start, end) = (pts.get(..3)?, pts.get(n - 3..)?);
+    let head = [blossom(start, a, a)?, blossom(start, a, 1.0)?];
+    let tail = [blossom(end, 0.0, b)?, blossom(end, b, b)?];
+    pts.splice(..2, head);
+    pts.splice(n - 2.., tail);
+    knots.get_mut(..3)?.fill(s0);
+    knots.get_mut(k - 3..)?.fill(s1);
+    Some((knots, pts))
 }
 
 /// The NURBS form of a cylinder, cone, sphere or torus face over `domain` (in the label's
@@ -421,13 +474,18 @@ pub fn turned(s: &Surface, angle: f64) -> Option<Surface> {
 /// How many quarters a torus face over `[u, v]` (its box on the label, as for
 /// [`surface_within`]) spans along its tube on the label's quarter grid ([`turn_quarters`] for
 /// the tube angle): five when the face does not start on a quarter line of the tube and more
-/// than three quarters are left to it. [`tube_turned`] puts its start on one. `None` for another
-/// surface.
+/// than three quarters are left to it, a whole turn round the tube included (its form of four
+/// quarters from the one it starts in ends short of its seam's second use). A whole turn is
+/// counted from its start, within the rounding [`face_quarters`] takes for one. [`tube_turned`]
+/// puts its start on one. `None` for another surface.
 pub fn tube_quarters(s: &Surface, [_, v]: [[f64; 2]; 2], tolerance: f64) -> Option<usize> {
     if !matches!(s, Surface::Torus { .. }) {
         return None;
     }
-    Some(face_quarters(v, reaches(s, v, tolerance).1)?.0 .1)
+    let reach = reaches(s, v, tolerance).1;
+    let whole = valid_angles(v) && v[1] - v[0] >= TAU * (1.0 - TURN_ROUNDING);
+    let v = if whole { [v[0], v[0] + TAU] } else { v };
+    Some(quarters(v, reach)?.1)
 }
 
 /// A torus with its tube start moved on by `angle`: the same surface, its tube angle parameter
@@ -535,14 +593,37 @@ fn surface_on(
         if !valid_interval(along) {
             return None;
         }
-        let (ring_grid, fa) = face_quarters(angles, 0.0)?;
-        let (a_knots, arcs_r) = arcs(ring_grid.0, ring_grid.1);
         let (p_knots, h) = profile_nurbs(profile, Some(along))?;
         let fp = match profile.as_ref() {
             Curve::Circle { .. } | Curve::Ellipse { .. } => curve(profile, along)?.1,
             _ => along,
         };
         let (o, x, y, k) = revolution_frame(&h, *origin, *axis)?;
+        // The angle `tolerance` makes on the widest circle the face's profile reaches about the
+        // axis, as a cylinder's ([`reaches`]): no wider than its control points' (the profile
+        // lies in their hull). A matrix that is not the identity may scale the placed surface,
+        // so its angle ends are taken as they are.
+        let identity = *matrix
+            == [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ];
+        let widest = h
+            .iter()
+            .map(|hp| {
+                let d = Vec3::new(hp[0] / hp[3], hp[1] / hp[3], hp[2] / hp[3]) - o;
+                (d - k * d.dot(k)).len()
+            })
+            .fold(0.0, f64::max);
+        let reach = if identity && tolerance > 0.0 && widest > 0.0 && widest.is_finite() {
+            tolerance / widest
+        } else {
+            0.0
+        };
+        let (ring_grid, fa) = face_quarters(angles, reach)?;
+        let (a_knots, arcs_r) = arcs(ring_grid.0, ring_grid.1);
         let net: Vec<Vec<[f64; 4]>> = arcs_r
             .iter()
             .map(|([c, s], wu)| {
@@ -950,8 +1031,11 @@ fn golden_max(f: &dyn Fn(f64) -> f64, a: f64, b: f64) -> f64 {
 ///
 /// A boundary point is on a pole when the label is collapsed there within `reach` mm (the
 /// face's edge or vertex tolerance: a pole row an importer left coinciding only to its own
-/// tolerance is a pole too), and its collapsed parameter then bounds nothing. `Ok(None)` where
-/// the label or a boundary point has no parameters; the classifier's refusal is the error.
+/// tolerance is a pole too), and its collapsed parameter then bounds nothing. A loop that turns
+/// more than once on poles and runs along a seam both ways turns the way its face's side says
+/// (the loops as the record keeps them, the face on their left in (u, v)), and a seam loop (a
+/// meridian up to a pole and back) spans the whole turn whatever holes the face has. `Ok(None)`
+/// where the label or a boundary point has no parameters; the classifier's refusal is the error.
 pub fn extent(
     label: &Surface,
     loops: &[Vec<(&Curve, [f64; 2], bool)>],
@@ -989,6 +1073,12 @@ fn extent_in(
         let mut bounds: Vec<(usize, usize, f64)> = Vec::new();
         let (mut crossings, mut on_pole) = (0usize, false);
         let mut first: Option<[f64; 2]> = None;
+        // Whether the loop starts or ends on a pole (its turn from its last point to its first
+        // is free there too), the directions a pole it passes collapses, the pole it is on, and
+        // the jump each crossing makes by the loop's side ([`pole_jump`]).
+        let (mut wraps, mut passes) = (false, [false; 2]);
+        let mut pole_at: Option<([f64; 2], [bool; 2])> = None;
+        let mut jumps: Vec<[f64; 2]> = Vec::new();
         for (c, [t0, t1], forward) in l {
             let curve = CurveEval::new(c).ok()?;
             // The point at `t` on the label, a periodic parameter unwrapped next to `near`.
@@ -1101,7 +1191,28 @@ fn extent_in(
                 } else {
                     t1 * (1.0 - f) + t0 * f
                 };
-                let q = at(t, prev)?;
+                // Past a pole the point before it says nothing of where the loop goes on (it is
+                // across the axis), and a nearest-point search started there settles on the
+                // pole itself, the nearest point on that side: a meridian back out of the pole,
+                // and the edge after it, would read as all pole and bound nothing. The point is
+                // found over the whole surface until the loop is off the pole again, then moved
+                // the whole periods that bring it nearest the point before the pole, so the loop
+                // stays on one branch across the pole (a narrow lune across angle 0 keeps its
+                // width instead of reading as the rest of the turn).
+                let q = if on_pole {
+                    let mut q = at(t, None)?;
+                    if let Some(p) = prev {
+                        for d in 0..2 {
+                            if let Some(Some(per)) = period.get(d) {
+                                let k = ((ix(&p, d) - ix(&q, d)) / per).round();
+                                *ixm(&mut q, d) = ix(&q, d) + k * per;
+                            }
+                        }
+                    }
+                    q
+                } else {
+                    at(t, prev)?
+                };
                 // At a pole the collapsed parameter is anything: it bounds nothing.
                 let pole = match eval.pole_within(q, reach) {
                     Ok(p) => p,
@@ -1112,10 +1223,20 @@ fn extent_in(
                 };
                 if pole.iter().any(|p| *p) {
                     on_pole = first.is_some();
+                    wraps |= first.is_none();
+                    for (s, p) in passes.iter_mut().zip(pole) {
+                        *s |= p;
+                    }
+                    pole_at = Some((q, pole));
                 } else {
                     if on_pole {
                         crossings += 1;
                         on_pole = false;
+                        let jump = match (prev, pole_at) {
+                            (Some(a), Some(on)) => pole_jump(a, q, on, period),
+                            _ => [0.0; 2],
+                        };
+                        jumps.push(jump);
                     }
                     first = first.or(Some(q));
                     prev = Some(q);
@@ -1173,9 +1294,47 @@ fn extent_in(
         // through a pole closes in (u, v), the pole taking up its turn (a hemisphere bounded by its
         // rim and its seam, down the seam to the pole and up it on the other side). Past the
         // first pole, the loop is moved the whole periods that close it.
+        //
+        // That holds for a loop with one free turn. One that passes a pole twice, counting the
+        // turn from its last point to its first (a sphere less a bore that crosses its seam, up
+        // the seam on one side of the bore, over the pole and down the other side), closes
+        // whatever its turns are, so closing it says nothing. Where it also runs along an edge
+        // both ways (a seam: the face spans the whole turn there), each crossing turns the way
+        // the face's side says instead ([`pole_jump`]). A loop with no seam (a narrow lune, up
+        // one meridian and down another) keeps closing: its width is the one it shows.
+        wraps |= on_pole;
+        let by_side = crossings + usize::from(wraps) >= 2
+            && l.iter().enumerate().any(|(i, (c, t, f))| {
+                l.iter()
+                    .skip(i + 1)
+                    .any(|(c2, t2, f2)| f != f2 && t == t2 && c == c2)
+            });
+        // The turn the points past each crossing are moved by: none before the first.
+        let turned: Vec<[f64; 2]> = std::iter::once([0.0; 2])
+            .chain(jumps.iter().scan([0.0; 2], |s, j| {
+                *s = [s[0] + j[0], s[1] + j[1]];
+                Some(*s)
+            }))
+            .collect();
         let last = prev;
-        let mut turned = 0.0;
+        let mut net_turn = 0.0;
         for d in 0..2 {
+            // A loop of no width round a periodic direction that passes a pole collapsing it
+            // runs up a meridian and back down it, a seam: the face it bounds covers the whole
+            // turn from there, whatever other loops (holes) it has.
+            if let Some(Some(per)) = period.get(d) {
+                let (raw_lo, raw_hi) = bounds
+                    .iter()
+                    .filter(|b| b.1 == d)
+                    .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), b| {
+                        (lo.min(b.2), hi.max(b.2))
+                    });
+                if ix(&passes, d) && raw_lo <= raw_hi && raw_hi - raw_lo <= 1e-9 * per {
+                    *ixm(&mut l_lo, d) = raw_lo;
+                    *ixm(&mut l_hi, d) = raw_lo + per;
+                    continue;
+                }
+            }
             let shift = match (period.get(d), first, last) {
                 (Some(Some(per)), Some(f), Some(e)) if crossings > 0 => {
                     -((ix(&e, d) - ix(&f, d)) / per).round() * per
@@ -1186,12 +1345,18 @@ fn extent_in(
                 // The loop's net angle, from its first point to its last (a whole number of turns
                 // where it closes).
                 if let (Some(f), Some(e)) = (first, last) {
-                    turned = ix(&e, 0) - ix(&f, 0) + shift;
+                    net_turn = ix(&e, 0) - ix(&f, 0) + shift;
                 }
             }
             for &(passed, dd, x) in &bounds {
                 if dd == d {
-                    let x = if passed > 0 { x + shift } else { x };
+                    let x = if by_side {
+                        x + turned.get(passed).map_or(0.0, |s| ix(s, d))
+                    } else if passed > 0 {
+                        x + shift
+                    } else {
+                        x
+                    };
                     *ixm(&mut l_lo, d) = ix(&l_lo, d).min(x);
                     *ixm(&mut l_hi, d) = ix(&l_hi, d).max(x);
                 }
@@ -1204,7 +1369,7 @@ fn extent_in(
                 .first()
                 .copied()
                 .flatten()
-                .map_or(0.0, |per| turned.abs().min(per));
+                .map_or(0.0, |per| net_turn.abs().min(per));
             back = back.max(ix(&l_hi, 0) - ix(&l_lo, 0) - own);
         }
         for d in 0..2 {
@@ -1259,6 +1424,40 @@ fn extent_in(
         }
     }
     (lo[0] < hi[0] && lo[1] < hi[1]).then_some([[lo[0], hi[0]], [lo[1], hi[1]]])
+}
+
+/// The whole periods a loop's points after a pole are moved by: `a` the last point before it,
+/// `b` the first after (unwrapped next to `a`), `p` the pole's parameters and `collapsed` the
+/// directions collapsed there. The loop has the face on its left in (u, v) (outer loops counter-clockwise
+/// about the natural normal), so along a pole's line it runs the way that keeps the face inside:
+/// with u collapsed, −u at the top of v and +u at the bottom; with v collapsed, +v at the top of
+/// u and −v at the bottom. It turns by more than nothing and at most one period that way: a
+/// meridian run up to the pole and straight back down (a seam) turns the whole period round.
+fn pole_jump(
+    a: [f64; 2],
+    b: [f64; 2],
+    (p, collapsed): ([f64; 2], [bool; 2]),
+    period: [Option<f64>; 2],
+) -> [f64; 2] {
+    let mut out = [0.0; 2];
+    for d in 0..2 {
+        let per = ix(&period, d).filter(|p| p.is_finite() && *p > 0.0);
+        let (true, Some(per)) = (ix(&collapsed, d), per) else {
+            continue;
+        };
+        let e = 1 - d;
+        let top = ix(&p, e) > ix(&a, e);
+        let sign = if (d == 0) == top { -1.0 } else { 1.0 };
+        let gap = sign * (ix(&b, d) - ix(&a, d));
+        let least = 1e-9 * per;
+        let k = if gap > least {
+            -((gap - least) / per).ceil() + 1.0
+        } else {
+            ((least - gap) / per).floor() + 1.0
+        };
+        *ixm(&mut out, d) = sign * k * per;
+    }
+    out
 }
 
 /// Element `d` (0 or 1) of a pair.
