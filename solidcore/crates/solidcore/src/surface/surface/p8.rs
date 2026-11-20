@@ -2523,6 +2523,8 @@ impl Surface {
     /// intersection; a curve coincident with the surface becomes the range(s) of its
     /// drop onto it; otherwise the curve and surface cache trees are solved and the
     /// solutions combined ([`super::p10::global_curve_intersect_combine_solutions`]).
+    /// A curve that lies on the surface over some knot spans only gives those spans
+    /// as ranges, and the trees are solved over the rest (not upstream, #19912).
     ///
     /// # Errors
     ///
@@ -2617,7 +2619,7 @@ impl Surface {
         &self,
         k: &Kernel,
         handles: [Option<O>; 2],
-        cache: Option<&mut SurfaceCache<O>>,
+        mut cache: Option<&mut SurfaceCache<O>>,
         mut context: Option<&mut dyn SurfaceSolveContext<O>>,
         uv_domain: &Extent2d,
         curve: &Curve,
@@ -2740,113 +2742,66 @@ impl Surface {
         let mut sols: SolutionArray<O> = SolutionArray::new();
 
         // Run quick not robust coincidence check.
-        let coincidence = if let Some(context) = context.as_mut() {
-            self.simple_coincidence_checker_with_context(
-                k,
-                uv_domain,
-                curve,
-                interval,
-                distance_tolerance,
-                true,
-                [curve_handle, surface_handle],
-                cache.as_deref(),
-                &mut **context,
-            )?
-        } else {
-            self.simple_coincidence_checker::<O>(
-                k,
-                uv_domain,
-                curve,
-                interval,
-                distance_tolerance,
-                true,
-                [curve_handle, surface_handle],
-            )?
-        };
-        let coincident = coincidence.is_some();
+        let coincident = self.curve_coincidence_found(
+            k,
+            handles,
+            cache.as_deref(),
+            context.as_deref_mut(),
+            uv_domain,
+            curve,
+            interval,
+            distance_tolerance,
+            true,
+        )?;
+
+        // the parts of the curve the general solve looks at: all of it, unless parts
+        // of it lie on the surface
+        let mut gaps = vec![*interval];
 
         // When Coincident - make 3Dcurve projection an interval solution
         //                   more than 1 when curve wanders in and out of surface
         //                   boundary by more than dDistanceTolerance
         if coincident {
-            // drop curve to surface (the drop's trace gets the surface's cache,
-            // `smsurf_GetSurfaceCache`: the face's, through a face-aware context)
-            let mut from_context;
-            let cache = match (cache, context.as_mut()) {
-                (Some(c), _) => Some(c),
-                (None, Some(context)) if self.face()?.is_some() => {
-                    from_context = context.build_surface_cache(k, self, surface_handle)?;
-                    Some(&mut from_context)
-                }
-                (None, _) => None,
-            };
-            let dropped = self.drop_and_trim_curve_in_context::<NoObject, O>(
+            let (uv_curves, dist_to_surface) = self.coincident_drop(
                 k,
-                cache,
+                surface_handle,
+                cache.as_deref_mut(),
+                context.as_deref_mut(),
                 uv_domain,
                 curve,
                 interval,
                 distance_tolerance,
-                true,
-                true,
-                None,
-                context.as_mut().map(|solver| DropSolveContext {
-                    solver: &mut **solver,
-                    handle: surface_handle,
-                }),
             )?;
-            let mut dist_to_surface = dropped.max_drop_to_surf;
-            let mut uv_curves: Vec<Curve> = dropped.uv_curves;
 
-            // DropAndTrimCurve() will miss curves that lie entirely within the
-            // boundaries of the surface. Use DropCurve() for that. [090827]
-            if uv_curves.is_empty() {
-                // To find totally interior curves, try dropping the whole curve to the
-                // surface asking only for those curves within dDistanceTolerance of the
-                // surface in the output.
-                if let Some((curves, dist, _deviation)) = ignored(surface_drop_curve(
+            // A curve that lies on the surface over some knot spans and leaves it over
+            // others (#19912): those spans become ranges, and the general solve looks
+            // for crossings over the rest.
+            let split = if dist_to_surface <= distance_tolerance {
+                None
+            } else {
+                self.coincident_spans(
                     k,
-                    self,
+                    handles,
+                    cache.as_deref_mut(),
+                    context.as_deref_mut(),
                     uv_domain,
                     curve,
                     interval,
                     distance_tolerance,
-                    false,
-                    context.as_mut().map(|solver| DropSolveContext {
-                        solver: &mut **solver,
-                        handle: surface_handle,
-                    }),
-                ))? {
-                    uv_curves = curves;
-                    dist_to_surface = dist;
+                )?
+            };
+
+            // Otherwise: a range solution per dropped curve
+            let Some((ranges, span_gaps)) = split else {
+                for uv_curve in &uv_curves {
+                    sols.add(&coincident_range(k, handles, uv_curve, dist_to_surface)?);
                 }
+                return Ok(sols);
+            };
+            for range in &ranges {
+                sols.add(range);
             }
-
-            // Set up a Solution for each dropped curve: Range solutions.
-            for uv_curve in &uv_curves {
-                let ivl = uv_curve.natural_interval();
-                let mut sol = Solution::<O>::new();
-                sol.num_variables = 3;
-                sol.solution_type = SolutionType::RangeOfValues;
-                sol.num_objects = 2;
-                sol.objects[0] = curve_handle;
-                sol.objects[1] = surface_handle;
-
-                let pnt = uv_curve.evaluate_point(k, ivl.min())?;
-                sol.start.solution_value = dist_to_surface;
-                *sol.start.param_mut(0)? = ivl.min();
-                *sol.start.param_mut(1)? = pnt.x;
-                *sol.start.param_mut(2)? = pnt.y;
-
-                let pnt = uv_curve.evaluate_point(k, ivl.max())?;
-                sol.end.solution_value = dist_to_surface;
-                *sol.end.param_mut(0)? = ivl.max();
-                *sol.end.param_mut(1)? = pnt.x;
-                *sol.end.param_mut(2)? = pnt.y;
-
-                sols.add(&sol);
-            }
-            return Ok(sols);
+            gaps = span_gaps;
         }
 
         // arrive here - need to do a general surf/curve intersection
@@ -2890,22 +2845,9 @@ impl Surface {
             .tree()
             .ok_or_else(|| SolidError::surface_missing(OP_CURVE, "the curve cache's tree"))?;
 
-        // instance the Solver
-        let mut gs = super::p1::CsiGlobalSolver::new(
-            k,
-            curve_tree,
-            surface_tree,
-            Some(surface_cache.surface()),
-            coincident,
-            *interval,
-            *uv_domain,
-        );
-        gs.curve = Some(curve);
-        gs.surface_cache = Some(surface_cache);
-        gs.face_queries = face_queries;
         // the solutions name the trees' owners (LocalSolve: the curve, sm_GetOriginalSurface)
         let surface_domain = surface_cache.surface().natural_uv_domain_with_nurb(k)?;
-        gs.operands = Some(SolveOperands {
+        let operands = SolveOperands {
             operands: [
                 curve_tree
                     .owner_object()?
@@ -2914,21 +2856,74 @@ impl Surface {
                     .owner_object()?
                     .map(|h| (h, OperandDomain::Surface(surface_domain))),
             ],
-        });
+        };
 
-        // traverse curve and surface sub-division trees
-        // for each sub-division leaf pair that has intersecting boundaries
-        //   call SmCSIGlobalSolver::LocalSolve()
-        gs.solve_it(
-            &SolveRequest {
-                operation: SolverOperation::Intersect,
-                solution_requested: SolutionRequested::All,
-                tolerance_3d: distance_tolerance,
-                best_answer_so_far_sq: BIG_DOUBLE,
-                opt_vectors: &[],
-            },
-            &mut sols,
-        )?;
+        // where the coincident ranges (all of `sols` so far) start and end
+        let mut range_ends = Vec::new();
+        for sol in sols.as_slice() {
+            range_ends.push(curve.evaluate_point(k, sol.start.param(0)?)?);
+            range_ends.push(curve.evaluate_point(k, sol.end.param(0)?)?);
+        }
+
+        // One solve per gap between the coincident ranges, each into its own array
+        // (the solver inserts in its own order and would compare with the ranges).
+        let mut found: Vec<Solution<O>> = sols.as_slice().to_vec();
+        for gap in &gaps {
+            // instance the Solver (not coincident: a coincident part is a range already)
+            let mut gs = super::p1::CsiGlobalSolver::new(
+                k,
+                curve_tree,
+                surface_tree,
+                Some(surface_cache.surface()),
+                false,
+                *gap,
+                *uv_domain,
+            );
+            gs.curve = Some(curve);
+            gs.surface_cache = Some(surface_cache);
+            gs.face_queries = face_queries;
+            gs.operands = Some(operands);
+
+            // traverse curve and surface sub-division trees
+            // for each sub-division leaf pair that has intersecting boundaries
+            //   call SmCSIGlobalSolver::LocalSolve()
+            let mut gap_sols = SolutionArray::new();
+            gs.solve_it(
+                &SolveRequest {
+                    operation: SolverOperation::Intersect,
+                    solution_requested: SolutionRequested::All,
+                    tolerance_3d: distance_tolerance,
+                    best_answer_so_far_sq: BIG_DOUBLE,
+                    opt_vectors: &[],
+                },
+                &mut gap_sols,
+            )?;
+
+            // A point within the tolerance of a range's end is that end, where the
+            // curve leaves the surface (the combining joins points the same way).
+            for sol in gap_sols.as_slice() {
+                if sol.solution_type == SolutionType::SingleValue && !range_ends.is_empty() {
+                    let at = curve.evaluate_point(k, sol.start.param(0)?)?;
+                    if range_ends
+                        .iter()
+                        .any(|end| at.distance(*end) <= distance_tolerance)
+                    {
+                        continue;
+                    }
+                }
+                found.push(*sol);
+            }
+        }
+
+        // the combining below wants the solutions in curve parameter order (one gap
+        // and no range is the solver's own order, kept as it was)
+        if gaps.len() != 1 || !sols.is_empty() {
+            found.sort_by(|a, b| a.start.parameters[0].total_cmp(&b.start.parameters[0]));
+        }
+        sols.reset();
+        for sol in &found {
+            sols.add(sol);
+        }
 
         // combine duplicate solutions - find coincident regions (the call is not
         // checked upstream, which returns SM_SUCCESS; passed on as the fork does,
@@ -2951,6 +2946,230 @@ impl Surface {
         )?;
         Ok(sols)
     }
+
+    /// `SimpleCoincidenceChecker` of `curve` over `interval` against this surface,
+    /// under the caller's face solve `context` when there is one: whether its samples
+    /// lie on the surface (all of them, or with `partial_coincidence_ok` enough of them).
+    #[allow(clippy::too_many_arguments)] // the solve's operands and options
+    fn curve_coincidence_found<'c, O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        handles: [Option<O>; 2],
+        cache: Option<&SurfaceCache<O>>,
+        context: Option<&mut (dyn SurfaceSolveContext<O> + 'c)>,
+        uv_domain: &Extent2d,
+        curve: &Curve,
+        interval: &Extent1d,
+        distance_tolerance: f64,
+        partial_coincidence_ok: bool,
+    ) -> Result<bool> {
+        let coincidence = if let Some(context) = context {
+            self.simple_coincidence_checker_with_context(
+                k,
+                uv_domain,
+                curve,
+                interval,
+                distance_tolerance,
+                partial_coincidence_ok,
+                handles,
+                cache,
+                context,
+            )?
+        } else {
+            self.simple_coincidence_checker::<O>(
+                k,
+                uv_domain,
+                curve,
+                interval,
+                distance_tolerance,
+                partial_coincidence_ok,
+                handles,
+            )?
+        };
+        Ok(coincidence.is_some())
+    }
+
+    /// The drop of a coincident `curve` over `interval` onto this surface: its UV
+    /// curves and the largest drop distance. `DropAndTrimCurve` keeps every curve;
+    /// when it finds none, `DropCurve` keeps those within `distance_tolerance`. The
+    /// drop's trace gets the surface's cache (`smsurf_GetSurfaceCache`: the face's,
+    /// through a face-aware context).
+    #[allow(clippy::too_many_arguments)] // the solve's operands and options
+    fn coincident_drop<'c, O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        surface_handle: Option<O>,
+        cache: Option<&mut SurfaceCache<O>>,
+        mut context: Option<&mut (dyn SurfaceSolveContext<O> + 'c)>,
+        uv_domain: &Extent2d,
+        curve: &Curve,
+        interval: &Extent1d,
+        distance_tolerance: f64,
+    ) -> Result<(Vec<Curve>, f64)> {
+        let mut from_context;
+        let cache = match (cache, context.as_mut()) {
+            (Some(c), _) => Some(c),
+            (None, Some(context)) if self.face()?.is_some() => {
+                from_context = context.build_surface_cache(k, self, surface_handle)?;
+                Some(&mut from_context)
+            }
+            (None, _) => None,
+        };
+        let dropped = self.drop_and_trim_curve_in_context::<NoObject, O>(
+            k,
+            cache,
+            uv_domain,
+            curve,
+            interval,
+            distance_tolerance,
+            true,
+            true,
+            None,
+            context.as_mut().map(|solver| DropSolveContext {
+                solver: &mut **solver,
+                handle: surface_handle,
+            }),
+        )?;
+        let mut dist_to_surface = dropped.max_drop_to_surf;
+        let mut uv_curves: Vec<Curve> = dropped.uv_curves;
+
+        // DropAndTrimCurve() will miss curves that lie entirely within the
+        // boundaries of the surface. Use DropCurve() for that. [090827]
+        if uv_curves.is_empty() {
+            // To find totally interior curves, try dropping the whole curve to the
+            // surface asking only for those curves within dDistanceTolerance of the
+            // surface in the output.
+            if let Some((curves, dist, _deviation)) = ignored(surface_drop_curve(
+                k,
+                self,
+                uv_domain,
+                curve,
+                interval,
+                distance_tolerance,
+                false,
+                context.as_mut().map(|solver| DropSolveContext {
+                    solver: &mut **solver,
+                    handle: surface_handle,
+                }),
+            ))? {
+                uv_curves = curves;
+                dist_to_surface = dist;
+            }
+        }
+        Ok((uv_curves, dist_to_surface))
+    }
+
+    /// The knot spans of `curve` over `interval` that lie on this surface, as range
+    /// solutions, and the intervals between them for the general solve (#19912).
+    ///
+    /// A span is one polynomial or rational piece, so it lies on an analytic surface
+    /// all along or meets it at isolated points only. A span lies on the surface when
+    /// all its samples do and its drop stays within `distance_tolerance`; it lies off
+    /// the surface when none of its samples does. The curve is split only when it has
+    /// both kinds of span; `None` otherwise (a curve within the tolerance's noise of
+    /// the surface all along has neither, and keeps the ranges of its whole drop).
+    #[allow(clippy::too_many_arguments)] // the solve's operands and options
+    fn coincident_spans<'c, O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        handles: [Option<O>; 2],
+        mut cache: Option<&mut SurfaceCache<O>>,
+        mut context: Option<&mut (dyn SurfaceSolveContext<O> + 'c)>,
+        uv_domain: &Extent2d,
+        curve: &Curve,
+        interval: &Extent1d,
+        distance_tolerance: f64,
+    ) -> Result<Option<SpanSplit<O>>> {
+        let (knots, _) = curve.knots(k, Some(interval))?;
+        let mut breaks = vec![interval.min()];
+        breaks.extend(knots.into_iter().filter(|&t| {
+            interval.contains_value(t, 0.0) && !interval.is_value_on_boundary(t, EFF_ZERO).0
+        }));
+        breaks.push(interval.max());
+
+        let mut ranges = Vec::new();
+        let mut gaps: Vec<Extent1d> = Vec::new();
+        let mut last_was_gap = false;
+        let mut found_off = false;
+        for pair in breaks.windows(2) {
+            let &[lo, hi] = pair else { continue };
+            let span = Extent1d::from_min_max(lo, hi);
+            let mut found = |partial_coincidence_ok| {
+                self.curve_coincidence_found(
+                    k,
+                    handles,
+                    cache.as_deref(),
+                    context.as_deref_mut(),
+                    uv_domain,
+                    curve,
+                    &span,
+                    distance_tolerance,
+                    partial_coincidence_ok,
+                )
+            };
+            if found(false)? {
+                let (uv_curves, dist_to_surface) = self.coincident_drop(
+                    k,
+                    handles[1],
+                    cache.as_deref_mut(),
+                    context.as_deref_mut(),
+                    uv_domain,
+                    curve,
+                    &span,
+                    distance_tolerance,
+                )?;
+                if dist_to_surface <= distance_tolerance {
+                    for uv_curve in &uv_curves {
+                        ranges.push(coincident_range(k, handles, uv_curve, dist_to_surface)?);
+                    }
+                    last_was_gap = false;
+                    continue;
+                }
+            } else if !found(true)? {
+                found_off = true;
+            }
+            match gaps.last_mut() {
+                Some(gap) if last_was_gap => gap.add_value(hi),
+                _ => gaps.push(span),
+            }
+            last_was_gap = true;
+        }
+        Ok((!ranges.is_empty() && found_off).then_some((ranges, gaps)))
+    }
+}
+
+/// A curve split into knot spans on and off a surface: the range solutions of the
+/// spans on it, and the intervals between them.
+type SpanSplit<O> = (Vec<Solution<O>>, Vec<Extent1d>);
+
+/// The range solution of a curve lying on a surface over the drop `uv_curve`
+/// (parameterised as the curve), at the drop distance `dist_to_surface`.
+fn coincident_range<O: SolutionObject>(
+    k: &Kernel,
+    [curve_handle, surface_handle]: [Option<O>; 2],
+    uv_curve: &Curve,
+    dist_to_surface: f64,
+) -> Result<Solution<O>> {
+    let ivl = uv_curve.natural_interval();
+    let mut sol = Solution::<O>::new();
+    sol.num_variables = 3;
+    sol.solution_type = SolutionType::RangeOfValues;
+    sol.num_objects = 2;
+    sol.objects[0] = curve_handle;
+    sol.objects[1] = surface_handle;
+
+    let pnt = uv_curve.evaluate_point(k, ivl.min())?;
+    sol.start.solution_value = dist_to_surface;
+    *sol.start.param_mut(0)? = ivl.min();
+    *sol.start.param_mut(1)? = pnt.x;
+    *sol.start.param_mut(2)? = pnt.y;
+
+    let pnt = uv_curve.evaluate_point(k, ivl.max())?;
+    sol.end.solution_value = dist_to_surface;
+    *sol.end.param_mut(0)? = ivl.max();
+    *sol.end.param_mut(1)? = pnt.x;
+    *sol.end.param_mut(2)? = pnt.y;
+    Ok(sol)
 }
 
 // ---- SmSPGlobalSolver::LocalSolve --------------------------------------------------------------------
