@@ -3960,3 +3960,179 @@ fn restarted_curve_errors_keep_their_step_messages() {
     let open = BCurve::Polyline { points: vec![[0.; 3], [1.; 3], [2.; 3]] };
     assert_eq!(crate::kernel::restart_curve(&open, 0.5).unwrap_err(), "spline seam endpoints do not coincide");
 }
+
+/// Check both display and export, including welded topology: a successful partial display is
+/// not a successful mesh of a closed imported solid.
+fn assert_closed_import_mesh(b: &Brep, size: f64, chord: f64) {
+    use solidcore_tess::{MeshSpec, MeshTolerance};
+    let plans = [
+        solidcore_tess::plan(b, &MeshTolerance::display(chord), size).unwrap(),
+        solidcore_tess::plan(b, &MeshTolerance::chord(chord), size).unwrap(),
+        solidcore_tess::mesh(b, &MeshSpec::chord(chord), size, None).unwrap(),
+    ];
+    for (plan, stats) in plans {
+        assert!(stats.unmeshed.is_empty(), "{stats:?}");
+        assert!(stats.lenient.is_empty(), "{stats:?}");
+        assert!(stats.edges_capped.is_empty(), "{stats:?}");
+        assert!(stats.over_tolerance.is_empty(), "{stats:?}");
+        let (mesh, refused) = plan.welded().unwrap();
+        assert!(refused.is_empty(), "{refused:?}");
+        assert!(!mesh.triangles.is_empty());
+        let mut sides: std::collections::BTreeMap<(u32, u32), (usize, i32)> = Default::default();
+        for t in &mesh.triangles {
+            assert!(t[0] != t[1] && t[1] != t[2] && t[2] != t[0], "{t:?}");
+            for k in 0..3 {
+                let (a, z) = (t[k], t[(k + 1) % 3]);
+                let s = sides.entry((a.min(z), a.max(z))).or_default();
+                s.0 += 1;
+                s.1 += if a < z { 1 } else { -1 };
+            }
+        }
+        assert!(sides.values().all(|s| *s == (2, 0)), "every mesh side has two opposing uses");
+        assert!((0..b.faces.len()).all(|f| mesh.tri_face.contains(&(f as u32))), "every imported face is meshed");
+    }
+}
+
+/// The unit box's top is the spline S(u,v) = (u, v + 0.016 u(1-u), 1). Its
+/// horizontal edges have quadratic pcurves v = y - 0.016 u(1-u). A straight pcurve
+/// between their ends misses the edge by 0.004 mm, inside half a 0.01 mm source uncertainty
+/// but outside half the importer's default precision. Supply the exact quadratic when asked.
+struct ParabolicTrims(std::sync::atomic::AtomicUsize);
+
+impl Trims for ParabolicTrims {
+    fn trims(&self, face: &TrimFace<'_>) -> std::result::Result<Vec<Vec<Curve2>>, String> {
+        assert!(face.tolerance <= DEFAULT_TOLERANCE);
+        let mut out = Vec::new();
+        for l in &face.loops {
+            let mut pcs = Vec::new();
+            for u in l {
+                if let Some(pc) = &u.pcurve {
+                    pcs.push(pc.clone());
+                    continue;
+                }
+                self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let e = &face.edges[u.edge as usize];
+                assert!(e.tolerance <= DEFAULT_TOLERANCE);
+                let curve = CurveEval::new(e.nurbs.unwrap_or(e.curve)).unwrap();
+                let [a, z] = e.interval;
+                let inverse = |t| {
+                    let p = curve.point(t).unwrap();
+                    [p.x, p.y - 0.016 * p.x * (1.0 - p.x)]
+                };
+                let (p, m, q) = (inverse(a), inverse(0.5 * (a + z)), inverse(z));
+                // A quadratic Bezier's middle coefficient is 2 C(1/2) - (C(0)+C(1))/2.
+                pcs.push(Curve2::Spline {
+                    knots: vec![a, a, a, z, z, z],
+                    points: vec![p, [0, 1].map(|d| 2.0 * m[d] - 0.5 * (p[d] + q[d])), q],
+                });
+            }
+            out.push(pcs);
+        }
+        Ok(out)
+    }
+}
+
+#[test]
+fn a_spline_face_imported_with_coarse_distance_accuracy_keeps_its_boundary_and_meshes() {
+    for uncertainty in [0.01, 0.005] {
+        let mut w = W::default();
+        let faces = box_faces(&mut w, [0.0; 3], [1.0; 3], BoxStyle::default(), &mut |_, _| Vec::new());
+        let top = w.s.lines().rfind(|l| l.contains("=PLANE(")).unwrap().to_string();
+        let id = top.split_once('=').unwrap().0;
+        let rows: Vec<String> = [(0.0, 0.0), (0.5, 0.008), (1.0, 0.0)]
+            .into_iter()
+            .map(|(x, bump)| {
+                let (a, z) = (w.pt([x, -0.016 + bump, 1.0]), w.pt([x, 1.0 + bump, 1.0]));
+                format!("(#{a},#{z})")
+            })
+            .collect();
+        let spline = format!(
+            "{id}=B_SPLINE_SURFACE_WITH_KNOTS('',2,1,({}),.UNSPECIFIED.,.F.,.F.,.F.,(3,3),(2,2),(0.,1.),(-0.016,1.),.UNSPECIFIED.);",
+            rows.join(",")
+        );
+        w.s = w.s.replace(&top, &spline);
+        let shell = closed_shell(&mut w, &faces);
+        let solid = w.add(format!("MANIFOLD_SOLID_BREP('spline box',#{shell})"));
+        let trims = ParabolicTrims(std::sync::atomic::AtomicUsize::new(0));
+        let read = read_solids_with(&w.file_with_uncertainty(&[solid], uncertainty), &trims);
+        assert!(read.failures.is_empty(), "{:?}", read.failures);
+        assert_eq!(read.solids.len(), 1);
+        let s = &read.solids[0];
+        assert!(!s.sheet);
+        assert_eq!(counts(&s.brep), [2, 1, 6, 12, 8]);
+        assert_eq!(s.brep.tolerance, uncertainty, "source tolerance is retained for accepting data");
+        assert!(trims.0.load(std::sync::atomic::Ordering::Relaxed) >= 2, "the horizontal boundaries need quadratic pcurves");
+        let f = s.brep.faces.iter().find(|f| matches!(f.surface, BSurface::Spline { .. })).unwrap();
+        let surface = SurfaceEval::new(f.parameters()).unwrap();
+        for l in &f.loops {
+            let Loop::Edges { edges } = l else { panic!("edge loop") };
+            for u in edges {
+                let e = &s.brep.edges[u.edge as usize];
+                let curve = CurveEval::new(e.parameters()).unwrap();
+                for k in 0..=16 {
+                    let t = e.interval[0] + (e.interval[1] - e.interval[0]) * f64::from(k) / 16.0;
+                    let q = solidcore_ops::pcurve::eval(&u.pcurve, t).unwrap();
+                    let gap = surface.point(q).unwrap().dist(curve.point(t).unwrap());
+                    assert!(gap < 1e-9, "accuracy {uncertainty}: the exact boundary lifts with gap {gap}");
+                }
+            }
+        }
+        assert_closed_import_mesh(&s.brep, 3f64.sqrt(), 1e-3);
+    }
+}
+
+#[test]
+fn a_small_cylinder_imported_with_coarse_distance_accuracy_meshes() {
+    for uncertainty in [0.01, 0.005] {
+        let mut w = W::default();
+        let (r, h) = (0.05, 0.1);
+        let c = cylinder(&mut w, [0.0; 2], r, [0.0, h]);
+        let wall = side(&mut w, &c, true);
+        let cap = |w: &mut W, k: usize| {
+            let plane = w.plane([0.0, 0.0, k as f64 * h], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+            let oe = w.oe(c.circles[k], k == 1);
+            let bound = w.bound(&[oe], true, true);
+            w.face(&[bound], plane, k == 1)
+        };
+        let (bottom, top) = (cap(&mut w, 0), cap(&mut w, 1));
+        let shell = closed_shell(&mut w, &[bottom, wall, top]);
+        let solid = w.add(format!("MANIFOLD_SOLID_BREP('small cylinder',#{shell})"));
+        let s = one_solid(&w.file_with_uncertainty(&[solid], uncertainty));
+        assert!(!s.sheet);
+        assert_eq!(counts(&s.brep), [2, 1, 3, 3, 2]);
+        assert_eq!(s.brep.tolerance, uncertainty);
+        assert!(s.brep.faces.iter().any(|f| matches!(f.surface, BSurface::Cylinder { .. })));
+        assert_closed_import_mesh(&s.brep, (8.0 * r * r + h * h).sqrt(), 1e-4);
+    }
+}
+
+/// A 2 um edge/plane gap inside a 10 um declaration still needs a 6 um allowance
+/// (SURFACE_GAP_MARGIN = 3), even though fitting new curves asks for only 1 um.
+#[test]
+fn a_measured_gap_smaller_than_source_uncertainty_keeps_its_pcurve_allowance() {
+    use crate::assembly::{Assembly, Bound, Kind};
+    let mut a = Assembly::new(0.01, None);
+    let points = [[0.0, 0.0, 0.002], [1.0, 0.0, 0.002], [1.0, 1.0, 0.002], [0.0, 1.0, 0.002]];
+    let vs: Vec<u32> = points.iter().map(|&p| a.add_vertex(p).unwrap()).collect();
+    let mut edges = Vec::new();
+    for k in 0..4 {
+        let next = (k + 1) % 4;
+        edges.push(a.add_edge(k as u64, BCurve::Line { start: points[k], end: points[next] }, [0.0, 1.0], [vs[k], vs[next]]).unwrap());
+    }
+    let plane = BSurface::Plane { frame: brep::Frame { origin: [0.0; 3], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] } };
+    let f = a.add_face(1, plane, vec![Bound::Edges(edges)], Some(0), true).unwrap();
+    let s = a.finish(1, "offset boundary".into(), vec![vec![(f, true)]], Kind::Model).unwrap();
+    assert!(s.sheet);
+    assert_eq!(s.brep.tolerance, 0.01);
+    let f = &s.brep.faces[0];
+    let surface = SurfaceEval::new(f.parameters()).unwrap();
+    let Loop::Edges { edges } = &f.loops[0] else { panic!("edge loop") };
+    for u in edges {
+        let e = &s.brep.edges[u.edge as usize];
+        let curve = CurveEval::new(e.parameters()).unwrap();
+        let q = solidcore_ops::pcurve::eval(&u.pcurve, 0.5).unwrap();
+        let gap = surface.point(q).unwrap().dist(curve.point(0.5).unwrap());
+        assert!((gap - 0.002).abs() < 1e-12, "the source geometry keeps its real gap");
+        assert_eq!(e.tolerance, 0.01);
+    }
+}
