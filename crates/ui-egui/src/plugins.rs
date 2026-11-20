@@ -80,7 +80,8 @@ pub struct Plugin {
     pub disabled: bool,
     pub groups: std::collections::BTreeSet<String>,
     pub entries: Vec<solidcraft_engine::plugin::Entry>,
-    /// The images its entries name, read from the package (`plugin_images`): each relative path
+    pub ribbon_groups: Vec<solidcraft_engine::plugin::RibbonGroup>,
+    /// The images its entries and ribbon groups name, read from the package (`plugin_images`): each relative path
     /// with the icon name it is drawn by.
     pub images: std::collections::BTreeMap<String, String>,
 }
@@ -148,6 +149,7 @@ fn check(m: Manifest, folder: &str) -> Result<Plugin, String> {
         disabled: false,
         groups: Default::default(),
         entries: Vec::new(),
+        ribbon_groups: Vec::new(),
         images: Default::default(),
     })
 }
@@ -166,9 +168,10 @@ fn read_plugin(dir: &Path, folder: &str) -> Result<(Plugin, bool), String> {
     let executable = parsed.runtime.is_some();
     if let Some(runtime) = parsed.runtime {
         plugin.entries = runtime.entries;
+        plugin.ribbon_groups = runtime.ribbon_groups;
         plugin.groups = runtime.permissions.command_groups;
     }
-    plugin.images = crate::plugin_images::load(dir, &plugin.id, &plugin.entries);
+    plugin.images = crate::plugin_images::load_with_groups(dir, &plugin.id, &plugin.entries, &plugin.ribbon_groups);
     Ok((plugin, executable))
 }
 
@@ -1562,6 +1565,7 @@ mod tests {
             disabled: false,
             groups: Default::default(),
             entries: Vec::new(),
+            ribbon_groups: Vec::new(),
             images: Default::default(),
             id: "ftc-frc-parts".into(),
             name: "FTC and FRC parts".into(),

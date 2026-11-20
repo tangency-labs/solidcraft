@@ -491,6 +491,9 @@ pub struct RuntimeManifest {
     /// A single file name within the package, never a directory or absolute path.
     pub module: String,
     pub entries: Vec<Entry>,
+    /// Explicit ribbon menus. Entries not named here keep their individual buttons.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ribbon_groups: Vec<RibbonGroup>,
     /// Exact app command ids, intersected with the app catalog by the runtime.
     pub commands: BTreeSet<String>,
     #[serde(default)]
@@ -504,6 +507,27 @@ pub struct RuntimeManifest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data_format: Option<u32>,
 }
+
+/// A plugin's opt-in ribbon button and the entries its menu lists, in order.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RibbonGroup {
+    pub label: String,
+    /// A package-relative SVG path, checked and loaded by the host like an entry icon.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    pub entries: Vec<String>,
+}
+
+/// The package-relative SVG paths a host may read for plugin icons.
+pub fn valid_icon_path(path: &str) -> bool {
+    (5..=128).contains(&path.len())
+        && path.ends_with(".svg")
+        && path.split('/').all(|part| {
+            !part.is_empty() && part != "." && part != ".." && part.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-'))
+        })
+}
+
 impl RuntimeManifest {
     /// Whether this runtime is an importer (world `importer-plugin`). A runtime's entries are all
     /// commands or all importers.
@@ -545,6 +569,7 @@ impl RuntimeManifest {
                 return Err(invalid("runtime.entries.slots", "requires at most 16 named menu or ribbon slots"));
             }
         }
+        self.validate_ribbon_groups()?;
         if self.commands.len() > 128 || self.commands.iter().any(|id| !valid_command_name(id)) {
             return Err(invalid("runtime.commands", "requires at most 128 exact command names"));
         }
@@ -563,6 +588,41 @@ impl RuntimeManifest {
             }
             if self.limits.deadline_ms > MAX_COMMAND_DEADLINE_MS {
                 return Err(invalid("runtime.limits.deadline_ms", "must be 1..30000"));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_ribbon_groups(&self) -> Result<()> {
+        if self.ribbon_groups.len() > 32 {
+            return Err(invalid("runtime.ribbon_groups", "requires at most 32 ribbon groups"));
+        }
+        let mut labels = BTreeSet::new();
+        let mut grouped = BTreeSet::new();
+        for (index, group) in self.ribbon_groups.iter().enumerate() {
+            let field = format!("runtime.ribbon_groups.{index}");
+            if !plain(&group.label, 80) {
+                return Err(invalid(format!("{field}.label"), "requires 1..80 printable characters"));
+            }
+            if !labels.insert(group.label.trim()) {
+                return Err(invalid(format!("{field}.label"), format!("ribbon group `{}` is listed twice", group.label.trim())));
+            }
+            if group.icon.as_deref().is_some_and(|icon| !valid_icon_path(icon)) {
+                return Err(invalid(format!("{field}.icon"), "must be a relative .svg path inside the package, at most 128 characters"));
+            }
+            if group.entries.is_empty() || group.entries.len() > 32 {
+                return Err(invalid(format!("{field}.entries"), "requires 1..32 distinct entry names"));
+            }
+            for name in &group.entries {
+                if !self.entries.iter().any(|entry| entry.name == *name) {
+                    return Err(invalid(format!("{field}.entries"), format!("unknown entry `{name}`; name an entry from runtime.entries")));
+                }
+                if !grouped.insert(name) {
+                    return Err(invalid(
+                        format!("{field}.entries"),
+                        format!("entry `{name}` is listed twice; an entry belongs to at most one ribbon group"),
+                    ));
+                }
             }
         }
         Ok(())

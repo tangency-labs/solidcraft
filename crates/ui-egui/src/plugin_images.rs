@@ -1,4 +1,4 @@
-//! Vector images a plugin package ships: a command's icon and pictures for a choice's options.
+//! Vector images a plugin package ships: command and ribbon group icons, and choice pictures.
 //!
 //! An entry's `input_schema` names them with [`KEY`]: at its top, the command's icon (its ribbon
 //! button, its menu rows and its dialog's header); on a `oneOf` option, that option's picture in
@@ -33,8 +33,20 @@ const MAX_IMAGES: usize = 64;
 
 /// Every image the entries' schemas name, read from the package at `dir`: each relative path
 /// with the icon name it is drawn by. Paths that are not usable are left out.
+#[cfg(test)]
 pub(crate) fn load(dir: &Path, plugin_id: &str, entries: &[solidcraft_engine::plugin::Entry]) -> BTreeMap<String, String> {
+    load_with_groups(dir, plugin_id, entries, &[])
+}
+
+/// Load entry images and explicit ribbon group icons through the same package and SVG checks.
+pub(crate) fn load_with_groups(
+    dir: &Path,
+    plugin_id: &str,
+    entries: &[solidcraft_engine::plugin::Entry],
+    groups: &[solidcraft_engine::plugin::RibbonGroup],
+) -> BTreeMap<String, String> {
     let mut named = Vec::new();
+    named.extend(groups.iter().filter_map(|group| group.icon.clone()));
     for entry in entries {
         named.extend(referenced(&entry.input_schema));
     }
@@ -66,11 +78,7 @@ pub(crate) fn referenced(schema: &Value) -> Vec<String> {
 /// Whether `rel` is a path this host reads: forward slashes, plain names (letters, digits, `.`,
 /// `_`, `-`), no `.` or `..`, ending in `.svg`, at most 128 characters.
 pub(crate) fn valid_path(rel: &str) -> bool {
-    (5..=128).contains(&rel.len())
-        && rel.ends_with(".svg")
-        && rel.split('/').all(|part| {
-            !part.is_empty() && part != "." && part != ".." && part.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-'))
-        })
+    solidcraft_engine::plugin::valid_icon_path(rel)
 }
 
 /// Read, check and add the image `rel` of the package at `dir`: the icon name it is drawn by.
