@@ -11652,12 +11652,13 @@ fn replay(
 
 /// What `f`'s copies of `src` do and change: `src`'s operation, its targets, else its participants
 /// (a primitive's or a hole's, #1108, #2755), and the feature whose scope takes them when it names
-/// none. That is `f`, or `f` in `src`'s component for an untargeted cut or intersect where `f`'s
-/// component has no body for it (#12996).
+/// none. That is `f`, or `f` in `src`'s component for an untargeted join, cut or intersect where
+/// `f`'s component has no body for it (#12996): a join's copies join that component's bodies, as
+/// the join did, not new bodies of `f` (#19451).
 fn copy_targets<'a>(st: &ModelState, f: &'a Feature, src: &Feature) -> (Operation, Vec<String>, std::borrow::Cow<'a, Feature>) {
     let (op, targets) = feature_op(src);
     let targets = if targets.is_empty() { src.participants.clone() } else { targets };
-    let own = matches!(op, Operation::Cut | Operation::Intersect)
+    let own = matches!(op, Operation::Join | Operation::Cut | Operation::Intersect)
         && targets.is_empty()
         && f.participants.is_empty()
         && src.component != f.component

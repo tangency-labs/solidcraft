@@ -1511,6 +1511,29 @@ fn part_and_mirror_plane() -> Session {
     s
 }
 
+/// [`part_with_a_boss_and_a_round`] with Boss joined into `targets` (none: the part's bodies),
+/// before Part is placed, Part active.
+fn part_with_a_boss(targets: &[&str]) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [-10, -20, 0], "body_name": "Base"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10, "name": "BossSketch"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [20, 5], "p1": [26, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5, "operation": "join", "targets": targets, "name": "Boss"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[30, 20, 5]], "radius": 2, "name": "Round"}));
+    s
+}
+
+/// Part turned 180° about Z and lifted 20, and MirrorPlane at x = −10, both made in the root.
+fn place_the_part(s: &mut Session) {
+    run(s, "component.activate", json!({"component": "root"}));
+    let turn = json!({"occurrence": "Part:1", "axis": [0, 0, 1], "angle": "180 deg", "origin": [0, 0, 0], "translate": [0, 0, 20]});
+    run(s, "occurrence.move", turn);
+    run(s, "component.capture_position", json!({}));
+    run(s, "construct.plane.offset", json!({"base": "YZ", "offset": -10, "name": "MirrorPlane"}));
+}
+
 /// #19451: a root mirror or pattern of a join drawn in a part placed turned and lifted adds the
 /// world copy of the boss: its top at x 0..6 across x = −10, at x −6..0 20 along x. The copy was
 /// made as if the part had no placement, turned with it, off Base.
@@ -1573,6 +1596,72 @@ fn a_mirror_of_a_mirrored_round_in_a_turned_part_rounds_the_image_of_its_copy() 
     assert!(rel(v, 16150.0 - 3.0 * ROUND) < 1e-9, "{v}");
     let want = [[-28.0, -18.0], [8.0, -18.0], [8.0, 18.0]];
     assert!(axes.len() == 3 && axes.iter().zip(want).all(|(a, w)| near2(*a, w)), "{axes:?}");
+}
+
+/// #19451: a root mirror or pattern of a join that names no body, drawn in a part placed turned
+/// and lifted, joins the part at the world copy of the boss, as the join did: Base takes the
+/// 150 mm³ boss again and no body is made. The copy was a new body at the part's own coordinates.
+#[test]
+fn a_copied_untargeted_join_in_a_turned_and_lifted_part_joins_the_part() {
+    for (command, params, x) in [
+        ("solid.mirror", json!({"features": ["Boss"], "plane": "MirrorPlane"}), 3.0),
+        ("solid.pattern.rectangular", json!({"features": ["Boss"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 20}), -3.0),
+    ] {
+        let mut s = part_with_a_boss(&[]);
+        place_the_part(&mut s);
+        let before = pockets(&mut s, "Base").0;
+        let r = run(&mut s, command, params);
+        assert!(r["warning"].is_null(), "{command}: {r}");
+        let (v, _, tops) = pockets(&mut s, "Base");
+        let bodies: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+        let case = format!("{command}: {bodies:?} {before} -> {v} {tops:?}");
+        assert!(bodies == ["Base"] && rel(v - before, 150.0) < 1e-9, "{case}");
+        let want = [[-23.0, -7.5, 35.0], [x, -7.5, 35.0]];
+        assert!(tops.len() == 2 && tops.iter().zip(want).all(|((_, at), w)| near(*at, w)), "{case}");
+    }
+}
+
+/// What a 1 mm round takes off an upright 5 mm edge of the boss.
+const BOSS_ROUND: f64 = (4.0 - PI) / 4.0 * 5.0;
+
+/// [`part_and_mirror_plane`] with an untargeted Boss and BossRound, 1 mm rounds of its two
+/// upright edges at x 26 (x −26 where it is shown), mirrored by Mirror across x = −10 with Boss.
+fn mirrored_untargeted_boss_and_its_rounds() -> Session {
+    let mut s = part_with_a_boss(&[]);
+    run(&mut s, "solid.fillet", json!({"edges": [[26, 10, 12.5], [26, 5, 12.5]], "radius": 1, "name": "BossRound"}));
+    place_the_part(&mut s);
+    let r = run(&mut s, "solid.mirror", json!({"features": ["Boss", "BossRound"], "plane": "MirrorPlane", "name": "Mirror"}));
+    assert!(r["warning"].is_null(), "{r}");
+    s
+}
+
+/// #19451: a root mirror of an untargeted join in a part placed turned and lifted and of the
+/// rounds of the edges it made rounds the copy's edges: the boss's image at x 0..6 has rounds
+/// about x 5, y −9 and y −6, as the boss has about x −25.
+#[test]
+fn a_mirrored_untargeted_join_and_its_rounds_in_a_turned_part_land_together() {
+    let mut s = mirrored_untargeted_boss_and_its_rounds();
+    let v = pockets(&mut s, "Base").0;
+    let axes = round_axes(&mut s, "Base", 1.0);
+    assert_eq!(s.model.state().bodies.len(), 1);
+    assert!(rel(v, 16000.0 + 2.0 * 150.0 - ROUND - 4.0 * BOSS_ROUND) < 1e-9, "{v}");
+    let want = [[-25.0, -9.0], [-25.0, -6.0], [5.0, -9.0], [5.0, -6.0]];
+    assert!(axes.len() == 4 && axes.iter().zip(want).all(|(a, w)| near2(*a, w)), "{axes:?}");
+}
+
+/// #19451: a root mirror across XZ of that mirror makes every copy of its copies: a third boss at
+/// x 0..6, y 5..10, its rounds about x 5, y 6 and y 9.
+#[test]
+fn a_mirror_of_a_mirrored_untargeted_join_and_its_rounds_lands_every_copy() {
+    let mut s = mirrored_untargeted_boss_and_its_rounds();
+    let r = run(&mut s, "solid.mirror", json!({"features": ["Mirror"], "plane": "XZ"}));
+    assert!(r["warning"].is_null(), "{r}");
+    let v = pockets(&mut s, "Base").0;
+    let axes = round_axes(&mut s, "Base", 1.0);
+    assert_eq!(s.model.state().bodies.len(), 1);
+    assert!(rel(v, 16000.0 + 3.0 * 150.0 - ROUND - 6.0 * BOSS_ROUND) < 1e-9, "{v}");
+    let want = [[-25.0, -9.0], [-25.0, -6.0], [5.0, -9.0], [5.0, -6.0], [5.0, 6.0], [5.0, 9.0]];
+    assert!(axes.len() == 6 && axes.iter().zip(want).all(|(a, w)| near2(*a, w)), "{axes:?}");
 }
 
 /// The same mirror made in the part, across x = −10 where it is shown (its own x = 10), copies
