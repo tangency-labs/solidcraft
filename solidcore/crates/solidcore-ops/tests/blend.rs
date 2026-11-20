@@ -5199,16 +5199,18 @@ fn a_round_between_two_cones_on_a_short_arc_reads_back_and_the_rim_rounds_after_
     assert!(b.is_manifold_solid().unwrap());
     let report = b.check(CheckLevel::All).unwrap();
     assert!(report.is_valid(), "{report}");
-    // the round keeps its definition: an exact round between the two cones
-    let (_, brep) = kernel_copy(&b);
-    let rounds = brep
-        .face_list()
-        .iter()
-        .filter(|&&f| {
-            let s = face::surface(&brep, f).unwrap().unwrap();
-            matches!(s.procedural_blend(), Some(BlendRef::Exact { .. }))
-        })
-        .count();
+    // the round keeps its definition: an exact round between the two cones (on the body
+    // itself: a copy through its `.smb` bytes keeps no definitions)
+    let rounds = {
+        let brep = b.kernel();
+        brep.face_list()
+            .iter()
+            .filter(|&&f| {
+                let s = face::surface(&brep, f).unwrap().unwrap();
+                matches!(s.procedural_blend(), Some(BlendRef::Exact { .. }))
+            })
+            .count()
+    };
     assert_eq!(rounds, 1);
 
     let slope = 0.25_f64;
