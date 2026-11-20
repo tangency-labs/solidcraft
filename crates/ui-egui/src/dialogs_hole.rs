@@ -711,6 +711,25 @@ mod tests {
     }
 
     #[test]
+    fn new_clearance_counterbore_follows_the_bolt_size() {
+        crate::i18n::install();
+        let app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        let mut form = crate::dialogs::Dialog::for_command(&app, "solid.hole").unwrap().kind;
+        let ctx = crate::fonts::test_context();
+        let mut counterbore_for = |size: &str| {
+            let Kind::Hole { kind, opts, cb_diameter, cb_depth, .. } = &mut form else { panic!("expected Hole") };
+            *kind = 1;
+            opts.clearance = true;
+            opts.clearance_size = size.into();
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| head_row(ui, opts, *kind, cb_diameter, cb_depth));
+            output.textures_delta.clear();
+            (cb_diameter.clone(), cb_depth.clone())
+        };
+        assert_eq!(counterbore_for("M3"), ("6.5 mm".to_string(), "3.5 mm".to_string()));
+        assert_eq!(counterbore_for("M5"), ("9.5 mm".to_string(), "5.5 mm".to_string()));
+    }
+
+    #[test]
     fn clearance_section_uses_the_table_or_the_typed_diameter() {
         let mut opts = HoleOpts { clearance: true, clearance_size: "M4".into(), ..HoleOpts::default() };
         let stale_diameter = |_: &str, _: ValueKind| Some(9.0);
