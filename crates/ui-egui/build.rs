@@ -99,6 +99,7 @@ fn merged_locales() -> Result<(), String> {
     }
     let out = std::path::Path::new(&std::env::var("OUT_DIR").map_err(|e| e.to_string())?).join("locales");
     std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
+    numbered_tables(&catalogs, &out)?;
     for (id, catalog) in catalogs {
         let text = serde_json::to_string(&catalog).map_err(|e| e.to_string())?;
         std::fs::write(out.join(format!("{id}.json")), text).map_err(|e| e.to_string())?;
@@ -134,4 +135,39 @@ fn scenario_tests() {
     }
     let path = std::path::Path::new(&std::env::var("OUT_DIR").unwrap_or_else(|_| ".".into())).join("scenario_tests.rs");
     let _ = std::fs::write(path, out);
+}
+
+/// `$OUT_DIR/locales/<id>.tbl`: each catalog as a table of numbered texts
+/// (`solidcraft_ui_text::numbered`), for messages named by number (`msg!`). A text is stored as it
+/// is shown (a right-to-left catalog's in display order, as `Catalog::shown` gives them) and with
+/// a mark for each placeholder, counted in the order the English text names them. Two ids with
+/// one number fail the build.
+fn numbered_tables(
+    catalogs: &std::collections::BTreeMap<String, serde_json::Map<String, serde_json::Value>>,
+    out: &std::path::Path,
+) -> Result<(), String> {
+    use solidcraft_ui_text::{bidi, numbered};
+    let english = catalogs.get("en").ok_or("no English catalog")?;
+    let mut numbers: std::collections::BTreeMap<u64, &str> = std::collections::BTreeMap::new();
+    for id in english.keys() {
+        if let Some(other) = numbers.insert(numbered::number(id), id) {
+            return Err(format!("`{other}` and `{id}` have the same number: rename one"));
+        }
+    }
+    for (locale, catalog) in catalogs {
+        let right_to_left = catalog.values().filter_map(|text| text.as_str()).any(bidi::has_rtl);
+        let mut table = std::collections::BTreeMap::new();
+        for (id, text) in catalog {
+            let (Some(text), Some(source)) = (text.as_str(), english.get(id).and_then(|t| t.as_str())) else { continue };
+            let order = numbered::placeholders(source);
+            if order.len() > numbered::MAX_PLACEHOLDERS {
+                return Err(format!("`{id}` has more than {} placeholders", numbered::MAX_PLACEHOLDERS));
+            }
+            let shown = if right_to_left { bidi::visual_template(text) } else { text.into() };
+            table.insert(numbered::number(id), numbered::template(&shown, &order));
+        }
+        let bytes = numbered::encode(&table).ok_or_else(|| format!("{locale}: the catalog does not fit a table"))?;
+        std::fs::write(out.join(format!("{locale}.tbl")), bytes).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }

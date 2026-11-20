@@ -6476,6 +6476,7 @@ dependencies = [
  "solidcraft-ui-kit",
  "solidcraft-ui-registry",
  "solidcraft-ui-text",
+ "solidcraft-ui-text-macros",
  "solidcraft-viewport",
  "solidcraft-viewport-egui",
  "solidcraft-viewport-gpu",

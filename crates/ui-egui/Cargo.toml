@@ -28,6 +28,8 @@ solidcraft-look = { workspace = true }
 solidcraft-ui-registry = { workspace = true }
 solidcraft-color = { workspace = true }
 solidcraft-ui-text = { workspace = true }
+# `msg!`: a message id the English catalog lacks does not compile, and becomes a number.
+solidcraft-ui-text-macros = { workspace = true }
 # The token contract every component draws with; the theme system here resolves and sets it.
 solidcraft-theme = { workspace = true }
 egui = { workspace = true }
@@ -87,3 +89,5 @@ pollster = { workspace = true }
 
 [build-dependencies]
 serde_json = { workspace = true }
+# The catalogs packed as tables of numbered texts (`solidcraft_ui_text::numbered`), in display order.
+solidcraft-ui-text = { workspace = true }

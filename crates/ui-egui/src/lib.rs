@@ -7,6 +7,11 @@
 //! right of the viewport, the command palette and a bottom or left-sidebar feature timeline.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
+// `msg!`: a message named by its id, checked against the English catalog when this crate
+// compiles and turned into its number, in every module.
+#[macro_use]
+extern crate solidcraft_ui_text_macros;
+
 use crate::ui_kit::recent_colors;
 
 pub mod access;
