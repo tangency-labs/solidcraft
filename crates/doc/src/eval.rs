@@ -13481,12 +13481,18 @@ fn drawn_tools_change_bodies(kind: &FeatureKind) -> bool {
 
 /// The component whose frame a feature's drawn tools are made in: its own for a feature with
 /// drawn tools (see [`drawn_tools_change_bodies`]), and its sketch's for a hole at sketch points,
-/// whose points are kept in that sketch's frame (#17623), and for a rib (#17655). `None` for every other feature: a hole
+/// whose points are kept in that sketch's frame (#17623), and for a rib (#17655). A mirror or
+/// pattern of features makes its copies' tools in its own frame, as a feature drawn there does: a
+/// copy that cuts a body of a component placed turned or lifted meets it where it is shown, not
+/// where that component's own frame puts the copy (#19451). `None` for every other feature: a hole
 /// at a picked position is kept in the frame of the body it was picked on.
 fn tools_component(doc: &Document, f: &Feature) -> Option<u64> {
     match &f.kind {
         FeatureKind::Hole { points: Some(sp), .. } => doc.feature(sp.sketch.0).map(|s| s.component),
         FeatureKind::Rib { sketch, .. } => doc.feature(sketch.0).map(|s| s.component),
+        FeatureKind::Pattern { features, bodies, .. } | FeatureKind::Mirror { features, bodies, .. } if !features.is_empty() && bodies.is_empty() => {
+            Some(f.component)
+        }
         kind if drawn_tools_change_bodies(kind) => Some(f.component),
         _ => None,
     }
