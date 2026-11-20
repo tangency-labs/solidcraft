@@ -489,6 +489,7 @@ timeline.inspect                  a listing of the timeline
 timeline.play                     plays the history back in the view: no new geometry
 timeline.rename                   a feature name
 timeline.rename_group             a group name
+ui.appBarReset                    the view: restores the app bar's default layout; tested in crates/engine/src/cmd/edit_tests.rs
 ui.assistant                      the view: camera, layout, display
 ui.dialog_ok                      the view: runs OK of the open feature dialog; tested in crates/engine/src/cmd/edit_tests.rs and crates/ui-egui/src/dialogs.rs
 ui.palette                        the view: the command search; tested in crates/ui-egui/src/keymap.rs
