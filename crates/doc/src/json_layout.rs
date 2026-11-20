@@ -101,6 +101,31 @@ pub fn compact(text: &str) -> String {
     out
 }
 
+/// How deeply `text` nests its lists and objects, counting the brackets outside strings. Laying out
+/// text indents each level, so text nested `n` deep lays out to about `n * n` bytes. A caller that
+/// lays out text from a file checks this first.
+pub fn depth(text: &str) -> usize {
+    let b = text.as_bytes();
+    let (mut depth, mut deepest) = (0usize, 0usize);
+    let mut i = 0;
+    while let Some(&c) = b.get(i) {
+        match c {
+            b'"' => {
+                i = string_end(b, i);
+                continue;
+            }
+            b'[' | b'{' => {
+                depth += 1;
+                deepest = deepest.max(depth);
+            }
+            b']' | b'}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        i += 1;
+    }
+    deepest
+}
+
 fn new_line(out: &mut String, depth: usize) {
     out.push('\n');
     for _ in 0..depth {
@@ -204,6 +229,18 @@ mod tests {
         for broken in ["", "[", "{\"a\":[1,2", "\"open", "\"esc\\", "]]}}", "[1,2,", "{\"k\":\"\u{e9}\"", "\u{e9}[1]", " \u{e9} \"x"] {
             let _ = pretty(broken);
             let _ = compact(broken);
+        }
+    }
+
+    /// The depth counts brackets outside strings only, and broken text never panics.
+    #[test]
+    fn depth_counts_brackets_outside_strings() {
+        assert_eq!(depth("{\"a\": [1, {\"b\": \"[[[{{\"}]}"), 3);
+        assert_eq!(depth("[]"), 1);
+        assert_eq!(depth("12"), 0);
+        assert_eq!(depth(&format!("{}{}", "[".repeat(500), "]".repeat(500))), 500);
+        for broken in ["]]]", "[\"open", "\"esc\\", "\u{e9}["] {
+            let _ = depth(broken);
         }
     }
 

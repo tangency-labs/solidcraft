@@ -84,11 +84,11 @@ fn a_preview_does_not_change_the_text() {
     assert_eq!(design_text(&with), design_text(&plain));
 }
 
-/// The model cache, the preview, the signature log and a plugin's own cache are left out. A blob
-/// whose bytes do not match the SHA-256 in its name says it is damaged. Text parts come first,
-/// then the other parts by name.
+/// The model cache, the preview and a plugin's own cache are left out. The signature log is shown,
+/// because only a signature changes it. A blob whose bytes do not match the SHA-256 in its name
+/// says it is damaged. Text parts come first, then the other parts by name.
 #[test]
-fn derived_parts_are_left_out_and_a_mismatched_blob_is_damaged() {
+fn caches_are_left_out_and_a_mismatched_blob_is_damaged() {
     let wrong = format!("blobs/{}.step", "0".repeat(64));
     let bytes = container(&[
         ("container.json", br#"{"format":"solidcraft-container/1"}"#),
@@ -102,9 +102,10 @@ fn derived_parts_are_left_out_and_a_mismatched_blob_is_damaged() {
         ("plugins/acme/data.json", b"{}"),
     ]);
     let expected = format!(
-        "# SolidCraft container {{\"format\":\"solidcraft-container/1\"}}\n# document.json\n{{\n  \"format\": \"solidcraft/64\",\n  \"name\": \"x\",\n  \"pos\": [1.0, 2.0]\n}}\n# drawings/abc.json\n{{\n  \"id\": \"abc\"\n}}\n# parts (name, bytes, SHA-256)\n{wrong} 4 {} damaged (its bytes do not match its name)\nplugins/acme/data.json 2 {}\n",
+        "# SolidCraft container {{\"format\":\"solidcraft-container/1\"}}\n# document.json\n{{\n  \"format\": \"solidcraft/64\",\n  \"name\": \"x\",\n  \"pos\": [1.0, 2.0]\n}}\n# drawings/abc.json\n{{\n  \"id\": \"abc\"\n}}\n# parts (name, bytes, SHA-256)\n{wrong} 4 {} damaged (its bytes do not match its name)\nplugins/acme/data.json 2 {}\nprovenance/log.cbor 1 {}\n",
         digest(b"data"),
         digest(b"{}"),
+        digest(b"\x80"),
     );
     assert_eq!(design_text(&bytes), expected);
 }
@@ -119,6 +120,50 @@ fn a_drawing_container_prints_its_drawing() {
     ]);
     let text = design_text(&bytes);
     assert!(text.contains("# drawing.json\n{\n  \"format\": \"solidcraft-drawing/1\",\n  \"sheets\": []\n}\n"), "{text}");
+}
+
+/// JSON nested deeper than serde_json reads a design is summed up in one line, never laid out.
+/// Laying out text nested `n` deep takes about `n * n` bytes, so a small file could take gigabytes.
+#[test]
+fn deeply_nested_json_is_summed_up() {
+    let deep = format!("{}{}", "[".repeat(100_000), "]".repeat(100_000));
+    let text = design_text(deep.as_bytes());
+    assert_eq!(text, format!("# JSON nested more than {MAX_DEPTH} levels deep ({} bytes, SHA-256 {})\n", deep.len(), digest(deep.as_bytes())));
+    let bytes = container(&[("container.json", br#"{"format":"solidcraft-container/1"}"#), ("document.json", deep.as_bytes())]);
+    let text = design_text(&bytes);
+    assert!(text.contains("# document.json\n# JSON nested more than") && text.len() < 1000, "{}", text.get(..200).unwrap_or_default());
+    let fits = format!("{}{}", "[".repeat(MAX_DEPTH), "]".repeat(MAX_DEPTH));
+    assert!(!design_text(fits.as_bytes()).starts_with("# "), "{MAX_DEPTH} levels are laid out");
+}
+
+/// A part that does not read (here its bytes no longer match the CRC-32 the ZIP keeps) is named
+/// as damaged, and the text ends with the SHA-256 of the whole file, so a change inside that part
+/// still shows in a diff.
+#[test]
+fn a_part_that_does_not_read_adds_the_hash_of_the_whole_file() {
+    let payload = b"payload that the test damages, kept uncompressed";
+    let mut writer = PackageWriter::new();
+    writer.part("container.json", br#"{"format":"solidcraft-container/1"}"#, true).unwrap();
+    writer.part("notes/readme.txt", payload, false).unwrap();
+    let mut bytes = writer.finish().unwrap();
+    let at = bytes.windows(payload.len()).position(|w| w == payload).unwrap();
+    bytes[at] ^= 0x20;
+    let text = design_text(&bytes);
+    assert!(text.contains("\nnotes/readme.txt damaged ("), "{text}");
+    assert!(text.ends_with(&format!("({} bytes, SHA-256 {})\n", bytes.len(), digest(&bytes))), "{text}");
+}
+
+/// A file too large to read whole is summed up from its bytes read a piece at a time, as one line
+/// with the same size and SHA-256 that reading it whole gives. Two files of one size that differ
+/// give different lines.
+#[test]
+fn a_large_file_is_summed_up_with_its_hash() {
+    let first: Vec<u8> = (0..3_000_000u32).map(|i| (i % 251) as u8).collect();
+    let mut second = first.clone();
+    second[2_999_999] ^= 1;
+    let line = large_file_text("too large", first.as_slice()).unwrap();
+    assert_eq!(line, summary("too large", &first));
+    assert_ne!(line, large_file_text("too large", second.as_slice()).unwrap());
 }
 
 /// Input that is not a design, or a container that does not open, gives one line with its size and
