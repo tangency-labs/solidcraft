@@ -2265,9 +2265,14 @@ pub fn answer_permission(app: &mut SolveApp, index: usize, option: Option<&str>)
 /// asked.
 fn on_permission(app: &mut SolveApp, question: Question) {
     let Question { key, title, kind, options, reads, writes, plan } = question;
+    let agent = app.agent_chat.running_id.clone();
+    let claude = runs_claude_code(app);
     let attached = reads.as_deref().is_some_and(|path| app.agent_chat.attached_by_path(path));
-    let plan_read = writes.is_none() && reads.as_deref().zip(app.agent_chat.plans.as_deref()).is_some_and(|(path, plans)| is_plan_file(plans, path));
-    if !attached && !plan_read && matches!(kind.as_deref(), Some("read" | "search")) && !acp::is_bridge_tool(&title, kind.as_deref()) && runs_claude_code(app) {
+    // Only Claude Code's plan is its own to write and read back; another agent's follow the mode.
+    let plans = app.agent_chat.plans.as_deref().filter(|_| claude);
+    let plan_file = writes.as_deref().zip(plans).is_some_and(|(path, plans)| is_plan_file(plans, path));
+    let plan_read = writes.is_none() && reads.as_deref().zip(plans).is_some_and(|(path, plans)| is_plan_file(plans, path));
+    if !attached && !plan_read && matches!(kind.as_deref(), Some("read" | "search")) && !acp::is_bridge_tool(&title, kind.as_deref()) && claude {
         let reject = options.iter().find(|o| o.kind == "reject_once").or_else(|| options.iter().find(|o| o.kind.starts_with("reject")));
         if let Some(b) = app.agent_chat.backend.as_mut() {
             b.answer_permission(key, reject.map(|o| o.id.as_str()));
@@ -2275,9 +2280,7 @@ fn on_permission(app: &mut SolveApp, question: Question) {
         app.agent_chat.push(Item::Notice { text: trf("ui.ai_declined_read", &[("title", &title)]), error: false });
         return;
     }
-    let agent = app.agent_chat.running_id.clone();
-    let plan_file = writes.as_deref().zip(app.agent_chat.plans.as_deref()).is_some_and(|(path, plans)| is_plan_file(plans, path));
-    if writes.is_some() && !plan_file && runs_claude_code(app) {
+    if writes.is_some() && !plan_file && claude {
         let decline = options.iter().find(|o| o.kind == "reject_once").map(|o| o.id.clone());
         if let Some(b) = app.agent_chat.backend.as_mut() {
             b.answer_permission(key, decline.as_deref());
@@ -2325,14 +2328,21 @@ fn runs_claude_code(app: &SolveApp) -> bool {
     agents::entries(app).iter().any(|entry| &entry.id == running && acp::is_claude_adapter(&entry.argv))
 }
 
-/// `path` is a plan file in the plan folder `plans`: a Markdown file right in it, not a link that
-/// leads out of it. A path through a link to the folder still counts; the folder must exist.
+/// `path` is a plan file in the plan folder `plans`: an absolute path to a Markdown file right in
+/// it, never a link. A path through a link to the folder still counts; the folder must exist.
 fn is_plan_file(plans: &std::path::Path, path: &std::path::Path) -> bool {
+    if !path.is_absolute() {
+        return false;
+    }
     let (Ok(plans), Some(folder), Some(name)) = (std::fs::canonicalize(plans), path.parent(), path.file_name()) else { return false };
     let markdown = std::path::Path::new(name).extension().is_some_and(|e| e.eq_ignore_ascii_case("md"));
     let in_folder = std::fs::canonicalize(folder).is_ok_and(|folder| folder == plans);
-    // A file that is already there (a plan being revised) must really be in the folder.
-    let stays = std::fs::canonicalize(path).map_or(true, |real| real.parent() == Some(plans.as_path()));
+    // A plan being revised must be a file really in the folder; a new one must not be there yet.
+    // A link, even one to nothing, is neither: where it leads can't be checked.
+    let stays = match std::fs::symlink_metadata(path) {
+        Ok(meta) => meta.is_file() && std::fs::canonicalize(path).is_ok_and(|real| real.parent() == Some(plans.as_path())),
+        Err(e) => e.kind() == std::io::ErrorKind::NotFound,
+    };
     markdown && in_folder && stays
 }
 

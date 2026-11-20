@@ -1027,8 +1027,9 @@ fn question(key: u64, title: String, kind: Option<&str>, options: Vec<Permission
 /// Claude Code's write tools are on only for its plan (#19571). Writing a Markdown file right in
 /// its plan folder is allowed at once, and the chat says so; any other write is declined without a
 /// question, even under Allow everything or after "Always allow": outside the folder, stepping out
-/// of it, not Markdown, in a folder below it, through a link in it that leads out, or before the
-/// agent started. Another agent's write goes through the user's mode as before.
+/// of it, not Markdown, in a folder below it, through a link in it that leads out or to nothing,
+/// a path that isn't absolute, or before the agent started. Another agent's write goes through the
+/// user's mode as before, even in the plan folder.
 #[test]
 fn claude_code_writes_only_its_plan() {
     let d = attachable("plans");
@@ -1082,7 +1083,14 @@ fn claude_code_writes_only_its_plan() {
     assert_eq!(answered(&script, 5).as_deref(), Some("permission: 5 Some(\"no\")"), "any other read");
     std::fs::remove_file(d.join("notes.md")).unwrap();
     agents::remember(&mut app.preferences, "claude-test", &format!("Write {}", d.join("notes.md").display()));
-    let elsewhere = [d.join("notes.md"), plans.join("../notes.md"), plans.join("plan.txt"), plans.join("deeper/plan.md"), d.join("missing/plan.md")];
+    let elsewhere = [
+        d.join("notes.md"),
+        plans.join("../notes.md"),
+        plans.join("plan.txt"),
+        plans.join("deeper/plan.md"),
+        d.join("missing/plan.md"),
+        std::path::PathBuf::from("plans/plan-a.md"),
+    ];
     for (n, path) in elsewhere.into_iter().enumerate() {
         let key = 10 + n as u64;
         on_permission(&mut app, write(key, path.clone()));
@@ -1095,6 +1103,9 @@ fn claude_code_writes_only_its_plan() {
         std::os::unix::fs::symlink(d.join("outside.md"), plans.join("link.md")).unwrap();
         on_permission(&mut app, write(20, plans.join("link.md")));
         assert_eq!(answered(&script, 20).as_deref(), Some("permission: 20 Some(\"no\")"), "a link in the folder that leads out of it");
+        std::os::unix::fs::symlink(d.join("not-yet.md"), plans.join("dangling.md")).unwrap();
+        on_permission(&mut app, write(22, plans.join("dangling.md")));
+        assert_eq!(answered(&script, 22).as_deref(), Some("permission: 22 Some(\"no\")"), "a link in the folder to nothing yet");
         std::os::unix::fs::symlink(&plans, d.join("plans-link")).unwrap();
         on_permission(&mut app, write(21, d.join("plans-link").join("plan-b.md")));
         assert_eq!(answered(&script, 21).as_deref(), Some("permission: 21 Some(\"allow\")"), "the folder reached through a link");
@@ -1105,6 +1116,9 @@ fn claude_code_writes_only_its_plan() {
     app.preferences.agent_permissions.insert("codex".into(), agents::Mode::Ask);
     on_permission(&mut app, write(30, d.join("notes.md")));
     assert!(matches!(app.agent_chat.items.last(), Some(Item::Permission { answer: None, .. })));
+    // Even a Markdown file in Claude Code's plan folder: only Claude Code's plan is allowed at once.
+    on_permission(&mut app, write(31, plans.join("plan-c.md")));
+    assert!(matches!(app.agent_chat.items.last(), Some(Item::Permission { key: 31, answer: None, .. })));
     let _ = std::fs::remove_dir_all(&d);
 }
 
