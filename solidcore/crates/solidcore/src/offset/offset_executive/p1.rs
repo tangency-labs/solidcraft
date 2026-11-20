@@ -573,16 +573,28 @@ impl OffsetExecutive {
     ///
     /// # Errors
     ///
-    /// [`SolidError::NotFound`] for a dangling id; `the edge's curve` is missing for a kept
-    /// edge without one.
+    /// [`SolidError::NotFound`] for a dangling id; a kept edge whose record carries no
+    /// curve is the kernel's own incomplete data: `OffsetFailure::Defect` on
+    /// `SM_ERR_NULL_POINTER` (the conversion guide §2), never a phrase cause.
     pub(crate) fn kept_edge_curves(
         &self,
         original: &Brep,
     ) -> Result<Vec<(EdgeId, super::clearance::KeptEdge)>> {
         let mut kept = Vec::new();
         for &e in &self.kept_edges {
-            let curve = edge::curve(original, e)?
-                .ok_or_else(|| SolidError::offset_missing(OP, "the edge's curve"))?;
+            // the record the kernel built for this original edge carries no curve: the
+            // kernel's own data is incomplete here (the conversion guide §2's
+            // kernel-built missing thing), kept on the status the phrase reported
+            let curve = edge::curve(original, e)?.ok_or_else(|| {
+                crate::error::Failure::new(
+                    OP,
+                    crate::error::offset::OffsetFailure::Defect {
+                        why: "the kept-edge collection reads the curve every original edge record carries, and this record has none, though the kernel writes each record with the curve it built the edge from",
+                    },
+                )
+                .with_status(crate::error::SM_ERR_NULL_POINTER)
+                .into_error()
+            })?;
             kept.push((
                 e,
                 super::clearance::KeptEdge {
