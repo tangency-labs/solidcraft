@@ -4,7 +4,11 @@ vertex definition on it, or on a seam edge it will split (an edge crossing the s
 within tolerance, #18689), is put onto the seam at the seam's point under the
 position `SmVertexDefinition::Resolve` works out, and when
 `GlueCoincidentBrepVertices` merges the vertices of one proto vertex it keeps the
-operand's own seam vertex over another's. Upstream moves a seam's vertex towards
+operand's own seam vertex over another's. When the merge copies a face of the other
+operand whose vertex holds its seam (ends a seam edge, or marks a pole of the face's
+surface) onto a mate in the result that holds none (`MakeFaceuse`), the mate takes
+the vertex's point, its tolerance grown by the move: a ball's pole on a tube's end
+circle within tolerance (#17468). Upstream moves a seam's vertex towards
 the other object, or keeps a nearby crossing's vertex in its place, and the seam
 edge then ends off the seam, which the face's seam test refuses (test 36) when
 another edge runs beside the seam there: a boss joined under a half torus's flat

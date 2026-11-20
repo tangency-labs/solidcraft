@@ -527,6 +527,58 @@ pub fn merge_vertex(
     Ok(Some(dest))
 }
 
+/// Not upstream (`seam_vertex_stays_on_seam`): whether `v` holds a seam of its faces in
+/// place: it ends a seam edge ([`vertex::ends_seam_edge`]), or it marks a pole of a face's
+/// surface ([`vertex::is_on_pole`]), where the seam of a ball ends whether or not the face
+/// keeps a seam edge.
+///
+/// # Errors
+/// Those of [`vertex::ends_seam_edge`] and [`vertex::is_on_pole`].
+pub(crate) fn holds_seam(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bool> {
+    Ok(vertex::ends_seam_edge(b, v)? || vertex::is_on_pole(k, b, v)?)
+}
+
+/// Not upstream (`seam_vertex_stays_on_seam`, #17468): moves `dest`, the primary mate of the
+/// other operand's `source`, to `source`'s point, for a `source` that holds its face's seam
+/// ([`holds_seam`]) and a `dest` that holds none. The imprint put `dest` where the
+/// neighbourhoods of the edge it split and of `source` overlap least, between the two
+/// (`merge_vertex_neighborhood`): left there, the copied face's edges end beside its seam,
+/// which the face's seam test refuses (test 36), as at a ball's pole on a tube's end circle
+/// within tolerance. `dest`'s tolerance grows by the move, so its old neighbourhood, and every
+/// gap it covered, stays inside the new one.
+///
+/// # Errors
+/// [`SolidError::NotFound`] for a dangling id; those of `SmVertex::SetPoint` and
+/// `SetTolerance`.
+pub fn take_seam_point(
+    brep: &mut Brep,
+    other: &Brep,
+    source: VertexId,
+    dest: VertexId,
+    copy: &mut VertexCopy<'_>,
+    context: Option<&mut Context>,
+) -> Result<()> {
+    let (old, at) = (brep.vertex(dest)?.point, other.vertex(source)?.point);
+    let moved = old.distance(at);
+    if moved > 0.0 {
+        let grown = vertex::tolerance(brep, dest)? + moved;
+        let this = (copy.destination_key)(EntityRef::Vertex(dest));
+        let key_of = copy.destination_key;
+        vertex::set_point(
+            brep,
+            dest,
+            at,
+            copy.records,
+            copy.attributes,
+            context,
+            this,
+            &|vu| key_of(EntityRef::Vertexuse(vu)),
+        )?;
+        vertex::set_tolerance(brep, dest, grown, true, true)?;
+    }
+    Ok(())
+}
+
 /// The intersection lists and live primary-to-other mate lookups used by cleanup.
 #[derive(Debug, Default)]
 pub struct CleanupRelations {

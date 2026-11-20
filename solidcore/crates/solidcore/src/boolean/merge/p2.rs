@@ -811,6 +811,17 @@ pub fn make_faceuse_attempt_with(
         {
             let v = vertex_of_vertexuse(other, vu)?;
 
+            // Not upstream (`seam_vertex_stays_on_seam`): a vertex that holds the face's
+            // seam keeps its point, so its mate moves there when the mate holds none
+            let mate = relations.vertices.primary(v);
+            let to_seam = match mate {
+                Some(mate) if ctx.kernel().fixes.seam_vertex_stays_on_seam => {
+                    p1::holds_seam(ctx.kernel(), other, v)?
+                        && !p1::holds_seam(ctx.kernel(), brep, mate)?
+                }
+                _ => false,
+            };
+
             // Merge the Vertex
             let brep_vertex = p1::merge_vertex(
                 brep,
@@ -821,6 +832,9 @@ pub fn make_faceuse_attempt_with(
                 &mut copy.vertices,
                 ctx.context(),
             )?;
+            if let (true, Some(mate)) = (to_seam, mate) {
+                p1::take_seam_point(brep, other, v, mate, &mut copy.vertices, ctx.context())?;
+            }
 
             // load VertexLoopuses into sLoopVertices
             if kk == 0 && vertex_loop {
