@@ -3815,6 +3815,50 @@ fn a_run_out_of_a_polygons_first_point_that_the_next_step_turns_back_past_is_tur
     assert_eq!(homogeneous[1], [1e-4, 0.0, 0.0, 0.5], "mirrored, keeping its weight");
 }
 
+/// A cubic through `points` on uniform knots.
+fn cubic(points: Vec<V>) -> BCurve {
+    let n = points.len();
+    let mut knots = vec![0.0; 4];
+    knots.extend((1..n - 3).map(|i| i as f64 / (n - 3) as f64));
+    knots.extend([1.0; 4]);
+    BCurve::Spline { knots, points }
+}
+
+/// A run out of a polygon's first point is mirrored only when every step of it runs back against
+/// the way the line goes on (from the first point to the end of the step that turns back on the
+/// run), by more than the 170 degrees the rule takes as turning back. A run of two steps straight
+/// back is mirrored whole. A start that leaves the right way and bends aside before a step turns
+/// back on the bend is left as written, its start tangent along +x; so is a run straight back
+/// whose step back passes the first point 15.5 degrees aslant of the run, which mirrored would
+/// leave the first point 15.5 degrees off the way the line goes on.
+#[test]
+fn a_run_out_of_a_polygons_first_point_is_mirrored_only_when_it_runs_against_the_way_the_line_goes_on() {
+    let tol = 1e-3;
+    // Two steps straight back, then on along +x: both points mirrored.
+    let back = cubic(vec![[0.0; 3], [-1e-4, 0.0, 0.0], [-2e-4, 0.0, 0.0], [4.0, 0.0, 0.0], [7.0, 0.0, 0.0], [10.0, 0.0, 0.0]]);
+    let (unfolded, moved) = unfolded_curve(&back, tol).expect("a run straight back");
+    assert_eq!(moved, 2);
+    let BCurve::Spline { points, .. } = &unfolded else { panic!("a spline") };
+    assert_eq!((points[1], points[2]), ([1e-4, 0.0, 0.0], [2e-4, 0.0, 0.0]));
+
+    // Out along +x, aside along +y, then a step back on the aside past the first point (review of
+    // the first version): the start already leaves the way the line goes on.
+    let written = vec![[0.0; 3], [2e-4, 0.0, 0.0], [2e-4, 1e-4, 0.0], [2e-4, -2e-4, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]];
+    let aside = cubic(written.clone());
+    let read = unfolded_curve(&aside, tol).map_or(aside.clone(), |(c, _)| c);
+    let BCurve::Spline { points, .. } = &read else { panic!("a spline") };
+    assert_eq!(points[..4], written[..4], "the start as written");
+    let (_, d) = CurveEval::new(&read).unwrap().derivs(0.0).unwrap();
+    assert!(d.x > 0.0 && d.y == 0.0 && d.z == 0.0, "the start tangent along +x: {d:?}");
+
+    // Straight back 2e-4, then a step 4.1e-4 long, 172 degrees round from the run, past the first
+    // point to 15.5 degrees off the run's reverse.
+    let a = 8f64.to_radians();
+    let past = [-2e-4 + 4.1e-4 * a.cos(), 4.1e-4 * a.sin(), 0.0];
+    let aslant = cubic(vec![[0.0; 3], [-2e-4, 0.0, 0.0], past, [7.0, 0.0, 0.0], [10.0, 0.0, 0.0]]);
+    assert!(unfolded_curve(&aslant, tol).is_none(), "a step back aslant of the run");
+}
+
 /// A 10 × 20 × 30 mm block, in a file of uncertainty 0.01 mm, whose edge from (0, 0, 30) to
 /// (0, 20, 30) is a cubic spline that first runs 1 um the wrong way (and 1e-9 mm down) before
 /// going on to its end, all inside its first Bezier piece: it leaves its start vertex, turns back

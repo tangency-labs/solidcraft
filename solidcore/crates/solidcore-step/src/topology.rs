@@ -1336,7 +1336,11 @@ const ROUNDING: f64 = f64::EPSILON + 3.0 * (0.5 * f64::EPSILON) / (1.0 - 3.0 * (
 ///
 /// At the line's first point the wiggle is the step before: a run out of the first point, no
 /// longer than `tol`, that the step after it turns back on and carries past the first point by
-/// more than the run. The first point is kept and the run is turned the way the line goes, each
+/// more than the run, every step of the run pointing more than [`TURNS_BACK_DEGREES`] away from
+/// the way the line goes on (from the first point to where the step back ends). A start that
+/// leaves aside, or bends aside before a step turns back on the bend, is not that wiggle and is
+/// left as it is: mirrored, it would leave the first point off the way the line goes on. The
+/// first point is kept and the run is turned the way the line goes, each
 /// of its points moved to its mirror image through the first point. The steps keep their lengths,
 /// so the curve or surface keeps its speed at its start and leaves it the way it goes on, without
 /// turning. Moved onto the first point, the run would stop it there: a zero-speed end, which the
@@ -1395,7 +1399,16 @@ fn unfold_line(line: &mut [[f64; 4]], original: &[[f64; 4]], tol: f64) {
             let run = first.dist(a);
             let mirror = |p: Vec3| Vec3::new(2.0 * first.x - p.x, 2.0 * first.y - p.y, 2.0 * first.z - p.z);
             let run_points: Vec<Vec3> = (1..=k).filter_map(|i| line.get(i).map(point)).collect();
-            if run <= tol && first.dist(b) > run && run_points.len() == k && run_points.iter().zip(1..).all(|(&p, i)| within(i, mirror(p))) {
+            // Every step of the run turns back on the way the line goes on, from the first point to
+            // the end of the step back: the run leaves the wrong way, not aside or on the line's way.
+            let on = Vec3::new(b.x - first.x, b.y - first.y, b.z - first.z);
+            let against = std::iter::once(first).chain(run_points.iter().copied()).zip(run_points.iter().copied()).all(|(p, q)| {
+                let s = Vec3::new(q.x - p.x, q.y - p.y, q.z - p.z);
+                let l = s.dist(origin);
+                l <= ROUNDING * (p.dist(origin) + q.dist(origin)) || s.x * on.x + s.y * on.y + s.z * on.z < cos_back * l * on.dist(origin)
+            });
+            if run <= tol && first.dist(b) > run && against && run_points.len() == k && run_points.iter().zip(1..).all(|(&p, i)| within(i, mirror(p)))
+            {
                 for (p, i) in run_points.into_iter().zip(1..) {
                     if let Some(h) = line.get_mut(i) {
                         let (m, w) = (mirror(p), h[3]);
