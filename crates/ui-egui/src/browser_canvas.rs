@@ -6,9 +6,9 @@
 
 use egui::{Pos2, Stroke, vec2};
 use serde_json::{Value, json};
+use solidcore_record::Plane;
 use solidcore_record::Vec2;
 use solidcraft_engine::doc::canvas::Canvas;
-use solidcore_record::Plane;
 use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
@@ -102,7 +102,8 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                 if ui_kit::checkbox_row(ui, "canvas_follow_frame", solidcraft_ui_text::tr("browser.canvas_follow_frame"), false) {
                     follow = Some(true);
                 }
-                let (mut x, mut y, mut w, mut h, mut ang, mut op, mut flip) = (c.center.x, c.center.y, c.width, c.height(), c.angle.to_degrees(), c.opacity, c.flip);
+                let (mut x, mut y, mut w, mut h, mut ang, mut op, mut flip) =
+                    (c.center.x, c.center.y, c.width, c.height(), c.angle.to_degrees(), c.opacity, c.flip);
                 let mut changed = false;
                 let mut height_changed = false;
                 changed |=
@@ -179,9 +180,18 @@ fn edit_handles(c: &Canvas, plane: &Plane, proj: &Proj) -> Vec<(u8, Pos2)> {
     let flip_v = rotation + along;
     let opacity = bl + (br - bl) * c.opacity.clamp(0.0, 1.0);
     [
-        (0, c.center), (1, bl), (1, br), (1, tr), (1, tl),
-        (2, rotation), (3, opacity), (4, flip_h), (5, flip_v),
-        (6, (br + tr) * 0.5), (6, (bl + tl) * 0.5), (7, top),
+        (0, c.center),
+        (1, bl),
+        (1, br),
+        (1, tr),
+        (1, tl),
+        (2, rotation),
+        (3, opacity),
+        (4, flip_h),
+        (5, flip_v),
+        (6, (br + tr) * 0.5),
+        (6, (bl + tl) * 0.5),
+        (7, top),
     ]
     .into_iter()
     .filter_map(|(kind, point)| proj.to_screen(plane.to_world(point)).map(|screen| (kind, screen)))
@@ -191,16 +201,17 @@ fn edit_handles(c: &Canvas, plane: &Plane, proj: &Proj) -> Vec<(u8, Pos2)> {
 /// Whether a calibration marker or Edit Canvas grip owns the pointer.
 pub(crate) fn owns_pointer(app: &SolveApp, proj: &Proj, screen: Pos2) -> bool {
     let Some(panel) = app.tree.canvas_panel.as_ref() else { return false };
-    if panel.dragging.is_some() || panel.edit_drag.is_some() { return true; }
+    if panel.dragging.is_some() || panel.edit_drag.is_some() {
+        return true;
+    }
     let doc = &app.session.doc;
     let Some(c) = doc.canvases.iter().find(|c| c.id == panel.canvas) else { return false };
     let (vals, _) = doc.param_values();
     let Ok(plane) = doc.canvas_plane(&vals, c, &app.session.model.state()) else { return false };
     if panel.picks_points() {
-        [panel.a, panel.b].into_iter().any(|point| {
-            proj.to_screen(plane.to_world(Vec2::new(point[0], point[1])))
-                .is_some_and(|p| p.distance(screen) <= 12.0)
-        })
+        [panel.a, panel.b]
+            .into_iter()
+            .any(|point| proj.to_screen(plane.to_world(Vec2::new(point[0], point[1]))).is_some_and(|p| p.distance(screen) <= 12.0))
     } else {
         edit_handles(c, &plane, proj).into_iter().any(|(_, p)| p.distance(screen) <= 12.0)
     }
@@ -225,11 +236,16 @@ pub(crate) fn drag(app: &mut SolveApp, proj: &Proj, screen: Option<Pos2>, presse
 
     if panel.picks_points() {
         if pressed && panel.dragging.is_none() {
-            panel.dragging = [panel.a, panel.b].into_iter().enumerate().filter_map(|(i, point)| {
-                let marker = proj.to_screen(plane.to_world(Vec2::new(point[0], point[1])))?;
-                Some((marker.distance(screen), i as u8))
-            }).filter(|(distance, _)| *distance <= 12.0)
-              .min_by(|a, b| a.0.total_cmp(&b.0)).map(|(_, i)| i);
+            panel.dragging = [panel.a, panel.b]
+                .into_iter()
+                .enumerate()
+                .filter_map(|(i, point)| {
+                    let marker = proj.to_screen(plane.to_world(Vec2::new(point[0], point[1])))?;
+                    Some((marker.distance(screen), i as u8))
+                })
+                .filter(|(distance, _)| *distance <= 12.0)
+                .min_by(|a, b| a.0.total_cmp(&b.0))
+                .map(|(_, i)| i);
         }
         let Some(index) = panel.dragging else { return false };
         let (origin, direction) = proj.ray(screen);
@@ -237,7 +253,11 @@ pub(crate) fn drag(app: &mut SolveApp, proj: &Proj, screen: Option<Pos2>, presse
             let local = plane.to_local(world);
             if on_image(&c, local) {
                 let point = [local.x, local.y];
-                if index == 0 { panel.a = point; } else { panel.b = point; }
+                if index == 0 {
+                    panel.a = point;
+                } else {
+                    panel.b = point;
+                }
                 panel.next = 1 - index;
             }
         }
@@ -249,24 +269,38 @@ pub(crate) fn drag(app: &mut SolveApp, proj: &Proj, screen: Option<Pos2>, presse
     let Some(world) = plane.intersect_ray(origin, direction) else { return panel.edit_drag.is_some() };
     let local = plane.to_local(world);
     if pressed && panel.edit_drag.is_none() {
-        let kind = edit_handles(&c, &plane, proj).into_iter()
+        let kind = edit_handles(&c, &plane, proj)
+            .into_iter()
             .filter_map(|(kind, marker)| (marker.distance(screen) <= 12.0).then_some((marker.distance(screen), kind)))
-            .min_by(|a, b| a.0.total_cmp(&b.0)).map(|(_, kind)| kind);
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, kind)| kind);
         if let Some(kind) = kind {
             if kind == 4 || kind == 5 {
                 let mut params = json!({"canvas": c.id, "flip": !c.flip});
-                if kind == 5 { params["angle"] = json!(c.angle.to_degrees() + 180.0); }
+                if kind == 5 {
+                    params["angle"] = json!(c.angle.to_degrees() + 180.0);
+                }
                 panel.edit_drag = Some(crate::browser::CanvasEditDrag {
-                    kind, depth: app.session.undo.len(), pointer: [local.x, local.y], center: [c.center.x, c.center.y],
-                    width: c.width, height: c.height(), angle: c.angle,
+                    kind,
+                    depth: app.session.undo.len(),
+                    pointer: [local.x, local.y],
+                    center: [c.center.x, c.center.y],
+                    width: c.width,
+                    height: c.height(),
+                    angle: c.angle,
                 });
                 app.tree.canvas_panel = Some(panel);
                 let _ = app.run("canvas.edit", params);
                 return true;
             }
             panel.edit_drag = Some(crate::browser::CanvasEditDrag {
-                kind, depth: app.session.undo.len(), pointer: [local.x, local.y], center: [c.center.x, c.center.y],
-                width: c.width, height: c.height(), angle: c.angle,
+                kind,
+                depth: app.session.undo.len(),
+                pointer: [local.x, local.y],
+                center: [c.center.x, c.center.y],
+                width: c.width,
+                height: c.height(),
+                angle: c.angle,
             });
         }
     }
@@ -275,9 +309,13 @@ pub(crate) fn drag(app: &mut SolveApp, proj: &Proj, screen: Option<Pos2>, presse
     let centre = Vec2::new(drag.center[0], drag.center[1]);
     let mut params = json!({"canvas": c.id});
     match drag.kind {
-        0 => { let next = centre + (local - start); params["center"] = json!([next.x, next.y]); }
+        0 => {
+            let next = centre + (local - start);
+            params["center"] = json!([next.x, next.y]);
+        }
         1 => {
-            let before = start.dist(centre); let after = local.dist(centre);
+            let before = start.dist(centre);
+            let after = local.dist(centre);
             if before > 1e-9 && after.is_finite() {
                 params["width"] = json!((drag.width * after / before).clamp(1e-6, 1e7));
                 if c.height.is_some() {
@@ -324,7 +362,6 @@ pub(crate) fn drag(app: &mut SolveApp, proj: &Proj, screen: Option<Pos2>, presse
     }
     true
 }
-
 
 /// The message id of the card's hint (and the status line) for what the user does next.
 pub(crate) fn hint(panel: &crate::browser::CanvasPanel) -> &'static str {
@@ -391,8 +428,10 @@ pub(crate) fn paint_marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) 
         let screens = c.corners().map(|point| proj.to_screen(plane.to_world(point)));
         if let [Some(bl), Some(br), Some(tr), Some(tl)] = screens {
             let outline = Stroke::new(1.5, t.sel_edge);
-            painter.line_segment([bl, br], outline); painter.line_segment([br, tr], outline);
-            painter.line_segment([tr, tl], outline); painter.line_segment([tl, bl], outline);
+            painter.line_segment([bl, br], outline);
+            painter.line_segment([br, tr], outline);
+            painter.line_segment([tr, tl], outline);
+            painter.line_segment([tl, bl], outline);
             for point in [bl, br, tr, tl] {
                 painter.rect_filled(egui::Rect::from_center_size(point, vec2(9.0, 9.0)), 1.0, t.manipulator);
             }
@@ -410,12 +449,24 @@ pub(crate) fn paint_marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) 
                 }
                 3 => {
                     painter.circle_filled(point, 6.0, t.accent);
-                    painter.text(point + vec2(9.0, 10.0), egui::Align2::LEFT_TOP, format!("{:.0}%", c.opacity * 100.0), egui::FontId::proportional(t.font_body), t.text);
+                    painter.text(
+                        point + vec2(9.0, 10.0),
+                        egui::Align2::LEFT_TOP,
+                        format!("{:.0}%", c.opacity * 100.0),
+                        egui::FontId::proportional(t.font_body),
+                        t.text,
+                    );
                 }
                 4 | 5 => {
                     painter.circle_filled(point, 9.0, t.manipulator);
                     painter.circle_stroke(point, 9.0, Stroke::new(1.5, t.text));
-                    painter.text(point, egui::Align2::CENTER_CENTER, if kind == 4 { "↔" } else { "↕" }, egui::FontId::proportional(t.font_body), t.text);
+                    painter.text(
+                        point,
+                        egui::Align2::CENTER_CENTER,
+                        if kind == 4 { "↔" } else { "↕" },
+                        egui::FontId::proportional(t.font_body),
+                        t.text,
+                    );
                 }
                 _ => {}
             }
@@ -439,8 +490,13 @@ pub(crate) fn paint_marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) 
             painter.line_segment([a, b], Stroke::new(1.5, t.sel_edge));
             let measured = Vec2::new(panel.a[0], panel.a[1]).dist(Vec2::new(panel.b[0], panel.b[1]));
             if measured.is_finite() && measured > 1e-9 {
-                painter.text(a + (b - a) * 0.5 + vec2(0.0, -10.0), egui::Align2::CENTER_BOTTOM,
-                    crate::canvas::format_len(doc, measured), egui::FontId::proportional(t.font_body), t.text);
+                painter.text(
+                    a + (b - a) * 0.5 + vec2(0.0, -10.0),
+                    egui::Align2::CENTER_BOTTOM,
+                    crate::canvas::format_len(doc, measured),
+                    egui::FontId::proportional(t.font_body),
+                    t.text,
+                );
             }
         }
     }
@@ -451,7 +507,13 @@ pub(crate) fn paint_marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) 
         let active = panel.next as usize == i;
         painter.circle_stroke(screen, 7.0, Stroke::new(if active { 2.0 } else { 1.5 }, if active { t.accent } else { t.sel_edge }));
         painter.circle_filled(screen, 2.5, if active { t.accent } else { t.sel_vertex });
-        painter.text(screen + vec2(10.0, -10.0), egui::Align2::LEFT_BOTTOM, if i == 0 { "A" } else { "B" }, egui::FontId::proportional(t.font_body), if active { t.accent } else { t.text });
+        painter.text(
+            screen + vec2(10.0, -10.0),
+            egui::Align2::LEFT_BOTTOM,
+            if i == 0 { "A" } else { "B" },
+            egui::FontId::proportional(t.font_body),
+            if active { t.accent } else { t.text },
+        );
     }
 }
 

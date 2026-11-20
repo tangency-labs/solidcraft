@@ -309,6 +309,7 @@ mod tests {
             plane: PlaneRef::Origin { name: "XY".into() },
             center: Vec2::new(0.0, 0.0),
             width: 10.0,
+            height: None,
             angle: 0.0,
             opacity: 1.0,
             flip,

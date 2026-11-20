@@ -302,9 +302,7 @@ fn calibrate(s: &mut Session, p: &Value) -> Result<Value> {
     if !a.x.is_finite() || !a.y.is_finite() || !b.x.is_finite() || !b.y.is_finite() {
         return Err(bad(cmd, "`a` and `b` must contain finite coordinates"));
     }
-    let d = num(p, "distance")
-        .filter(|d| d.is_finite() && *d > 1e-9)
-        .ok_or_else(|| bad(cmd, "`distance` must be positive"))?;
+    let d = num(p, "distance").filter(|d| d.is_finite() && *d > 1e-9).ok_or_else(|| bad(cmd, "`distance` must be positive"))?;
     let now = a.dist(b);
     if !now.is_finite() || now < 1e-9 {
         return Err(bad(cmd, "the points must differ"));
@@ -823,12 +821,17 @@ mod tests {
         // 1. Valid calibration with non-origin anchor Point A:
         // A is at (10, 20), B is at (40, 60). Distance measured = 50.
         // True desired distance = 100. Scale k = 2.0.
-        let cal = s.execute("canvas.calibrate", &json!({
-            "canvas": id,
-            "a": [10.0, 20.0],
-            "b": [40.0, 60.0],
-            "distance": 100.0
-        })).unwrap();
+        let cal = s
+            .execute(
+                "canvas.calibrate",
+                &json!({
+                    "canvas": id,
+                    "a": [10.0, 20.0],
+                    "b": [40.0, 60.0],
+                    "distance": 100.0
+                }),
+            )
+            .unwrap();
         assert_eq!(cal["width"].as_f64().unwrap(), 200.0);
         assert_eq!(s.doc.canvases[0].width, 200.0);
 
@@ -839,33 +842,75 @@ mod tests {
         assert!((s.doc.canvases[0].center.y - expected_center_y).abs() < 1e-9);
 
         // 2. Reject identical points (zero distance):
-        assert!(s.execute("canvas.calibrate", &json!({
-            "canvas": id, "a": [5.0, 5.0], "b": [5.0, 5.0], "distance": 50.0
-        })).is_err());
+        assert!(
+            s.execute(
+                "canvas.calibrate",
+                &json!({
+                    "canvas": id, "a": [5.0, 5.0], "b": [5.0, 5.0], "distance": 50.0
+                })
+            )
+            .is_err()
+        );
 
         // 3. Reject non-positive distance:
-        assert!(s.execute("canvas.calibrate", &json!({
-            "canvas": id, "a": [0.0, 0.0], "b": [10.0, 0.0], "distance": 0.0
-        })).is_err());
-        assert!(s.execute("canvas.calibrate", &json!({
-            "canvas": id, "a": [0.0, 0.0], "b": [10.0, 0.0], "distance": -10.0
-        })).is_err());
+        assert!(
+            s.execute(
+                "canvas.calibrate",
+                &json!({
+                    "canvas": id, "a": [0.0, 0.0], "b": [10.0, 0.0], "distance": 0.0
+                })
+            )
+            .is_err()
+        );
+        assert!(
+            s.execute(
+                "canvas.calibrate",
+                &json!({
+                    "canvas": id, "a": [0.0, 0.0], "b": [10.0, 0.0], "distance": -10.0
+                })
+            )
+            .is_err()
+        );
 
         // 4. Reject NaN / infinite coordinates:
-        assert!(s.execute("canvas.calibrate", &json!({
-            "canvas": id, "a": [f64::NAN, 0.0], "b": [10.0, 0.0], "distance": 50.0
-        })).is_err());
-        assert!(s.execute("canvas.calibrate", &json!({
-            "canvas": id, "a": [0.0, 0.0], "b": [10.0, f64::INFINITY], "distance": 50.0
-        })).is_err());
-        assert!(s.execute("canvas.calibrate", &json!({
-            "canvas": id, "a": [0.0, 0.0], "b": [10.0, 0.0], "distance": f64::INFINITY
-        })).is_err());
+        assert!(
+            s.execute(
+                "canvas.calibrate",
+                &json!({
+                    "canvas": id, "a": [f64::NAN, 0.0], "b": [10.0, 0.0], "distance": 50.0
+                })
+            )
+            .is_err()
+        );
+        assert!(
+            s.execute(
+                "canvas.calibrate",
+                &json!({
+                    "canvas": id, "a": [0.0, 0.0], "b": [10.0, f64::INFINITY], "distance": 50.0
+                })
+            )
+            .is_err()
+        );
+        assert!(
+            s.execute(
+                "canvas.calibrate",
+                &json!({
+                    "canvas": id, "a": [0.0, 0.0], "b": [10.0, 0.0], "distance": f64::INFINITY
+                })
+            )
+            .is_err()
+        );
 
         // 5. Reject extreme out-of-range sizes:
-        assert!(s.execute("canvas.calibrate", &json!({
-            "canvas": id, "a": [0.0, 0.0], "b": [10.0, 0.0], "distance": 1e8
-        })).is_err());
+        assert!(
+            s.execute(
+                "canvas.calibrate",
+                &json!({
+                    "canvas": id, "a": [0.0, 0.0], "b": [10.0, 0.0], "distance": 1e8
+                })
+            )
+            .is_err()
+        );
     }
 
     /// #18422: a decal on a curved face says the face is curved, not that it no longer exists;
@@ -989,7 +1034,6 @@ mod tests {
         ] {
             assert!((deg(now, target) - want).abs() < 1e-9, "{now} -> {target}: {}", deg(now, target));
         }
-
     }
 
     /// A canvas's world corners as the viewport and URDF export take them.
