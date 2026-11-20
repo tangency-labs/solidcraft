@@ -826,6 +826,11 @@ impl SolveApp {
             }
             return;
         }
+        if let Work::Plugin { progress, .. } = &job.work
+            && crate::plugin_menu::superseded(self, &job.req)
+        {
+            progress.cancel();
+        }
         if job.poll().is_none() && !job.req.ticket.is_cancelled() {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
             return;
@@ -845,6 +850,11 @@ impl SolveApp {
             {
                 Err(self.tr("ui.plugin_context_changed").to_string())
             } else {
+                if let Err(reply) = crate::plugin_menu::check_attempt(self, &job.req) {
+                    let _ = job.req.reply.send(reply);
+                    ctx.request_repaint();
+                    return;
+                }
                 prepared
                     .try_recv()
                     .map_err(|_| self.tr("ui.plugin_no_result").to_string())

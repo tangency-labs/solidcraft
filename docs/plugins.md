@@ -276,7 +276,7 @@ on the input schema and point to it with the following object-level annotation.
 ```json
 {
   "type": "object",
-  "x-solidcraft-options": {"field": "fit", "query": "@options"},
+  "x-solidcraft-options": {"field": "fit", "query": "@options", "retryOnDesignChange": true},
   "properties": {"fit": {"type": "string", "title": "Tooth pair"}}
 }
 ```
@@ -294,8 +294,21 @@ selects the first one and displays its optional summary.
 
 Use a stable, unique value for each option. Both Preview and Run send that value in `fit`.
 The lookup runs with the preview's restricted grants. Results belong to the current inputs and
-design revision. Switching options reuses the list. Changing the other inputs obtains a new
-list and selects its first option. A failed query keeps Run disabled and shows the reason.
+design revision. Switching options reuses the list. When the design changes before Run, the
+dialog refreshes the list. It keeps an explicit selection if its value is still available.
+A failed lookup shows the reason and keeps Run disabled.
+
+By default, a design change while Run is queued or computing leaves the dialog open for review.
+Set the optional boolean `retryOnDesignChange` to `true` for an edit confined to the current
+document that can safely run again after its old result is discarded. The host requires
+review if the plug-in requests or holds folder access or additional command groups.
+
+For example, clicking Run with `18-45` selected asks Mesh Pair to build that pair on those two
+cylinders. After an edit, the dialog rechecks the same inputs and targets on the updated
+design. If `18-45` still fits, it completes the request as one undo step, even if another pair
+now ranks first. If `18-45` drops out of the list, the dialog shows the current options and waits
+for another click on Run. If a selected face can no longer be identified, the dialog asks the
+user to pick the missing geometry again. Cancel also withdraws the pending retry.
 
 Supply 1–64 options. Values and labels can each use up to 256 UTF-8 bytes, and summaries up
 to 1,024. Each string must contain visible text and be free of control characters. The query

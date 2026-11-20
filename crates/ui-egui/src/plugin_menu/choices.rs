@@ -33,6 +33,10 @@ impl Request {
         let run = json!({"path":plugin.path, "approval":plugin.approval, "entry":entry, "params":base_params});
         Some(Self { session, revision, plugin: plugin.id.clone(), query: query.to_owned(), run })
     }
+
+    fn same_inputs(&self, other: &Self) -> bool {
+        self.session == other.session && self.plugin == other.plugin && self.query == other.query && self.run == other.run
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -60,6 +64,8 @@ enum Status {
 struct Current {
     request: Request,
     status: Status,
+    /// A selection made by the person. The plug-in's default can follow its ranking on each revision.
+    preferred: Option<String>,
 }
 
 struct Worker {
@@ -82,6 +88,27 @@ pub(super) struct State {
 }
 
 impl State {
+    /// `before` and `after` were built around a verified geometric rebind of the same picks.
+    /// Only carry the explicit preference. Even on those same faces a new query must establish
+    /// which options fit, along with their current dimensions and ranking.
+    pub(super) fn rebind(&mut self, before: &Request, after: &Request) {
+        let Some(current) = &mut self.current else { return };
+        if current.request != *before || before.revision == after.revision || current.preferred.is_none() {
+            return;
+        }
+        if let Some(worker) = &self.worker {
+            worker.progress.cancel();
+        }
+        current.request = after.clone();
+        current.status = Status::Waiting;
+    }
+
+    pub(super) fn forget_preference(&mut self) {
+        if let Some(current) = &mut self.current {
+            current.preferred = None;
+        }
+    }
+
     pub(super) fn sync(&mut self, request: Option<&Request>, scratch: impl FnOnce() -> Session) {
         self.sync_with(request, |request| start(request, scratch()));
     }
@@ -91,7 +118,10 @@ impl State {
             if let Some(worker) = &self.worker {
                 worker.progress.cancel();
             }
-            self.current = request.cloned().map(|request| Current { request, status: Status::Waiting });
+            self.current = request.map(|request| {
+                let preferred = self.current.take().filter(|previous| previous.request.same_inputs(request)).and_then(|previous| previous.preferred);
+                Current { request: request.clone(), status: Status::Waiting, preferred }
+            });
         }
         if let Some(worker) = &self.worker {
             match worker.reply.try_recv() {
@@ -117,7 +147,13 @@ impl State {
         }
         if let Some(current) = &mut self.current {
             current.status = match reply {
-                Some(Ok(options)) => Status::Ready { options, selected: 0 },
+                Some(Ok(options)) => {
+                    let selected = current.preferred.as_ref().and_then(|value| options.iter().position(|choice| &choice.value == value));
+                    if selected.is_none() {
+                        current.preferred = None;
+                    }
+                    Status::Ready { options, selected: selected.unwrap_or(0) }
+                }
                 Some(Err(error)) => Status::Failed(error),
                 None => Status::Failed(solidcraft_ui_text::tr("ui.plugin_no_result").into()),
             };
@@ -142,19 +178,36 @@ impl State {
     }
 
     pub(super) fn choose(&mut self, index: usize) {
-        if let Some(Current { status: Status::Ready { options, selected }, .. }) = &mut self.current
-            && index < options.len()
+        if let Some(Current { status: Status::Ready { options, selected }, preferred, .. }) = &mut self.current
+            && let Some(choice) = options.get(index)
         {
             *selected = index;
+            *preferred = Some(choice.value.clone());
         }
+    }
+
+    /// Apply the submitted choice only when the refreshed list contains that exact value.
+    pub(super) fn select_value(&mut self, value: &str) -> bool {
+        let View::Ready { options, .. } = self.view() else { return false };
+        let Some(index) = options.iter().position(|choice| choice.value == value) else { return false };
+        self.choose(index);
+        true
     }
 
     /// Run and Preview also check the request at the point of use: an edit can precede the
     /// next frame that syncs this dialog.
-    pub(super) fn selected(&self, request: &Request) -> Option<&str> {
+    fn selected_choice(&self, request: &Request) -> Option<&Choice> {
         let current = self.current.as_ref().filter(|current| &current.request == request)?;
         let Status::Ready { options, selected } = &current.status else { return None };
-        options.get(*selected).map(|choice| choice.value.as_str())
+        options.get(*selected)
+    }
+
+    pub(super) fn selected(&self, request: &Request) -> Option<&str> {
+        self.selected_choice(request).map(|choice| choice.value.as_str())
+    }
+
+    pub(super) fn selected_label(&self, request: &Request) -> Option<&str> {
+        self.selected_choice(request).map(|choice| choice.label.as_str())
     }
 }
 
@@ -225,6 +278,7 @@ mod tests {
             version: "1".into(),
             description: String::new(),
             disabled: false,
+            requests_folders: false,
             groups: Default::default(),
             entries: vec![],
             images: Default::default(),
@@ -298,7 +352,7 @@ mod tests {
     }
 
     #[test]
-    fn repeated_frames_reuse_the_answer_and_a_changed_request_selects_its_own_best() {
+    fn a_refresh_preserves_the_explicit_value_and_reads_its_new_label_and_rank() {
         let (a, b) = (request(2), request(3));
         let mut state = State::default();
         let (job, send, _) = worker();
@@ -318,11 +372,92 @@ mod tests {
         state.sync_with(Some(&b), |_| Ok(job));
         assert_eq!(state.selected(&a), None);
         assert_eq!(state.selected(&b), None);
-        send.send(Ok(options())).unwrap();
+        assert_eq!(state.selected_label(&a), None);
+        assert!(!state.select_value("coarse"), "the old result cannot authorize a run while refreshing");
+        let mut refreshed = options();
+        refreshed.insert(0, Choice { value: "medium".into(), label: "Medium".into(), summary: None });
+        refreshed[2].label = "Updated coarse".into();
+        send.send(Ok(refreshed)).unwrap();
         state.sync_with(Some(&b), no_start);
+        assert_eq!(state.selected(&b), Some("coarse"));
+        assert_eq!(state.selected_label(&b), Some("Updated coarse"));
+        assert!(matches!(state.view(), View::Ready { selected: 2, .. }));
+        assert!(!state.select_value("removed"));
+        assert_eq!(state.selected(&b), Some("coarse"));
+        assert!(state.select_value("fine"));
         assert_eq!(state.selected(&b), Some("fine"));
         state.sync_with(None, no_start);
         assert!(matches!(state.view(), View::Inactive));
+    }
+
+    #[test]
+    fn a_verified_face_rebind_preserves_only_the_explicit_preference() {
+        let geometry = |revision, index, x, style| {
+            Request::new(
+                1,
+                revision,
+                &plugin(),
+                "make",
+                json!({"style": style, "faces":[{"type":"face","body":"Blank",
+                "index":index,"point":[x,0,6]}]}),
+                "fit",
+                "list",
+            )
+            .unwrap()
+        };
+        let before = geometry(2, 1, 5.0, "spur");
+        let after = geometry(3, 2, 6.0, "spur");
+        let mut state = State::default();
+        let (job, send, _) = worker();
+        state.sync_with(Some(&before), |_| Ok(job));
+        send.send(Ok(options())).unwrap();
+        state.wait();
+        state.choose(1);
+        // An edited setting or explicit repick differs from the request that owned the choice.
+        for other in [geometry(2, 1, 5.0, "helical"), geometry(2, 0, 4.0, "spur")] {
+            state.rebind(&other, &after);
+            assert_eq!(state.selected(&before), Some("coarse"));
+            assert_eq!(state.selected(&after), None);
+        }
+        state.rebind(&before, &after);
+        assert!(matches!(state.view(), View::Waiting));
+        assert_eq!(state.selected(&before), None);
+        assert_eq!(state.selected(&after), None);
+        let (job, send, _) = worker();
+        state.sync_with(Some(&after), |_| Ok(job));
+        send.send(Ok(options())).unwrap();
+        state.wait();
+        assert_eq!(state.selected(&after), Some("coarse"));
+    }
+
+    #[test]
+    fn absent_choices_and_changed_inputs_use_the_fresh_default() {
+        fn complete(state: &mut State, request: &Request, items: Vec<Choice>) {
+            let (job, send, _) = worker();
+            state.sync_with(Some(request), |_| Ok(job));
+            send.send(Ok(items)).unwrap();
+            state.wait();
+        }
+        let mut state = State::default();
+        complete(&mut state, &request(1), options());
+        state.choose(1);
+        let mut fewer = options();
+        fewer.truncate(1);
+        complete(&mut state, &request(2), fewer);
+        assert!(!state.select_value("coarse"));
+        assert_eq!(state.selected(&request(2)), Some("fine"));
+
+        complete(&mut state, &request(3), options());
+        assert_eq!(state.selected(&request(3)), Some("fine"), "a previously missing choice does not silently reappear as the selection");
+        state.choose(1);
+        let new_inputs = Request::new(1, 3, &plugin(), "make", json!({"teeth":25}), "fit", "list").unwrap();
+        complete(&mut state, &new_inputs, options());
+        assert_eq!(state.selected(&new_inputs), Some("fine"), "new inputs get their own recommendation");
+        let mut reordered = options();
+        reordered.reverse();
+        let next = Request { revision: 4, ..new_inputs };
+        complete(&mut state, &next, reordered);
+        assert_eq!(state.selected(&next), Some("coarse"), "with no explicit choice the new best fit wins");
     }
 
     #[test]
