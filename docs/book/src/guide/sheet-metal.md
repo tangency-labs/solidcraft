@@ -61,11 +61,17 @@ rule works out to. A value that would make K less than 0 or more than 1 is refus
 message gives the range the value must be in for that thickness and radius. The chart's value
 is for one thickness and radius, so make one rule for each line of the chart you use.
 
+Changing **Unfold** in the dialog keeps the part as it is. Going to Bend Deduction or Bend
+Allowance fills the 90° row with the value the rule's K-factor gives, for you to type the chart's
+value over. Going between the two converts the value. Going back to K Factor puts the K-factor
+the 90° value works out to in the K Factor row.
+
 Picking a material and gauge from the standard library gives the rule a new thickness, so the
 rule goes back to **K Factor**, with the pick's K-factor. Set **Unfold** again and type the
 chart's value for the new thickness. A rule pack holds K-factors only: a rule that unfolds from
 a 90° value is exported with the K-factor it works out to, so the pack gives the same flat
-pattern.
+pattern. A rule whose thickness, radius or 90° value is a design's parameter has no K-factor
+outside that design: the export leaves it out and names it.
 
 ## Step by step
 

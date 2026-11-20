@@ -525,7 +525,12 @@ fn rules_dialog_unfolds_from_a_press_brake_charts_90_degree_value() {
         h.step(&json!({"click": {"handle": "dialog:Unfold:Bend Deduction"}})).unwrap();
         // The 90° field starts at the deduction K 0.5 gives, BD90 = 2·(1 + 2) − π, so switching alone
         // changes nothing and shows no error: OK stays on.
-        assert_eq!(shown(&h.app), Some((1, "2.858407 mm".into())), "prefilled from the rule's K-factor");
+        // In full: the field is saved as it stands when the user types nothing over it.
+        let prefilled = shown(&h.app).map(|(unfold, value)| (unfold, crate::length_input::eval(&h.app.session.doc, &value, ValueKind::Length)));
+        assert!(
+            matches!(&prefilled, Some((1, Ok(value))) if (value - (6.0 - std::f64::consts::PI)).abs() < 1e-11),
+            "prefilled from the rule's K-factor: {prefilled:?}"
+        );
         h.frames(2);
         assert_eq!(crate::scenario::count_of("dialog:ok:enabled"), Some(1.0), "no error before the user types");
         // The chart's BD90 3.2 mm: BA90 = 2·(1 + 2) − 3.2 = 2.8 mm.
@@ -547,14 +552,87 @@ fn rules_dialog_unfolds_from_a_press_brake_charts_90_degree_value() {
         h.step(&json!({"click": {"handle": "dialog:Unfold"}})).unwrap();
         h.step(&json!({"click": {"handle": "dialog:Unfold:Bend Allowance"}})).unwrap();
         assert_eq!(shown(&h.app), Some((2, "2.8 mm".into())), "converted to the equivalent allowance");
-        // Back to the K-factor: the rule's K Factor counts again.
+        // Back to the K-factor: the K Factor field takes the K the chart's value works out to,
+        // (2.8/(π/2) − 1)/2, not the 0.5 the rule had stored, so the part stays as it is.
         h.step(&json!({"click": {"handle": "dialog:Unfold"}})).unwrap();
         h.step(&json!({"click": {"handle": "dialog:Unfold:K Factor"}})).unwrap();
         h.step(&json!({"widget": "OK"})).unwrap();
         let back = h.app.session.doc.sheet_rule(None);
         assert_eq!((back.unfold_method.as_str(), back.unfold_value.as_str()), ("k_factor", ""), "a K Factor rule keeps no 90° value");
-        assert!((allowance(&mut h.app).unwrap_or(f64::NAN) - std::f64::consts::PI).abs() < 1e-9);
+        let k = back.k_factor.parse::<f64>().unwrap_or(f64::NAN);
+        assert!((k - (2.8 / std::f64::consts::FRAC_PI_2 - 1.0) / 2.0).abs() < 1e-11, "{}", back.k_factor);
+        assert!((allowance(&mut h.app).unwrap_or(f64::NAN) - 2.8).abs() < 1e-9);
     }
+}
+
+/// OK on the prefilled 90° value, with nothing typed over it, saves the part as it was: the field
+/// holds the value in full, not rounded for show (K 0.5, R 1, T 2: the allowance stays π).
+#[test]
+fn rules_dialog_saves_an_unedited_prefilled_90_degree_value_in_full() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sheet.manage_rules", json!({"name": "AL2", "thickness": "2 mm", "k_factor": 0.5, "bend_radius": "1 mm", "active": true})).unwrap();
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    h.app.run("sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20, "angle": "90 deg"})).unwrap();
+    h.step(&json!({"start": "sheet.manage_rules"})).unwrap();
+    h.frames(3);
+    h.step(&json!({"click": {"handle": "dialog:Unfold"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Unfold:Bend Deduction"}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"widget": "OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
+    assert_eq!(h.app.session.doc.sheet_rule(None).unfold_method, "deduction");
+    let allowance = h.app.session.execute("sheet.flat_pattern", &json!({})).unwrap()["bends"][0]["allowance"].as_f64();
+    assert!((allowance.unwrap_or(f64::NAN) - std::f64::consts::PI).abs() < 1e-9, "{allowance:?}");
+}
+
+/// Switching the Unfold choice keeps the part whichever way it goes (#6794): a value left by an
+/// earlier choice is not read as the new one's, a chart's value becomes the K Factor field, and
+/// `Thickness` in the bend radius is the rule's thickness.
+#[test]
+fn switching_the_unfold_choice_keeps_the_part_whichever_way_it_goes() {
+    use std::f64::consts::{FRAC_PI_2, PI};
+    let doc = solidcraft_engine::doc::Document::default();
+    let (k_factor, deduction, allowance) = (unfold_index("k_factor"), unfold_index("deduction"), unfold_index("allowance"));
+    let mm = |text: &str| crate::length_input::eval(&doc, text, ValueKind::Length).unwrap_or(f64::NAN);
+    let rule = |k: &str, radius: &str| vec!["2 mm".to_string(), k.to_string(), radius.to_string()];
+
+    // K 0.5, R 1, T 2: BD90 = 6 − π, BA90 = π. Deduction, back to K Factor, then Allowance: the
+    // deduction left in the hidden field is not handed on as an allowance.
+    let (mut main, mut extra) = (rule("0.5", "1 mm"), vec![String::new()]);
+    switch_unfold(&doc, &mut main, &mut extra, k_factor, deduction);
+    assert!((mm(&extra[0]) - (6.0 - PI)).abs() < 1e-11, "{}", extra[0]);
+    switch_unfold(&doc, &mut main, &mut extra, deduction, k_factor);
+    assert_eq!(main[1], "0.5", "the K Factor field already says this K: left as typed");
+    switch_unfold(&doc, &mut main, &mut extra, k_factor, allowance);
+    assert!((mm(&extra[0]) - PI).abs() < 1e-11, "{}", extra[0]);
+
+    // A chart's BD90 3.2 mm is K (2.8/(π/2) − 1)/2, about 0.3913, not the 0.5 in the K Factor
+    // field: K Factor takes it, and Bend Deduction again shows the 3.2 mm as it was typed.
+    let (mut main, mut extra) = (rule("0.5", "1 mm"), vec!["3.2 mm".to_string()]);
+    switch_unfold(&doc, &mut main, &mut extra, deduction, k_factor);
+    let k = main[1].parse::<f64>().unwrap_or(f64::NAN);
+    assert!((k - (2.8 / FRAC_PI_2 - 1.0) / 2.0).abs() < 1e-11, "{}", main[1]);
+    switch_unfold(&doc, &mut main, &mut extra, k_factor, deduction);
+    assert_eq!(extra[0], "3.2 mm");
+    // A K typed over it since then counts: the 3.2 mm no longer says the rule's K-factor.
+    main[1] = "0.5".into();
+    switch_unfold(&doc, &mut main, &mut extra, deduction, k_factor);
+    main[1] = "0.4".into();
+    switch_unfold(&doc, &mut main, &mut extra, k_factor, deduction);
+    assert!((mm(&extra[0]) - (6.0 - FRAC_PI_2 * (1.0 + 0.4 * 2.0))).abs() < 1e-11, "{}", extra[0]);
+
+    // The default rule's bend radius, `Thickness`, is the rule's 2 mm: BD90 = 2·(2 + 2) − π/2·(2 + 1).
+    let (mut main, mut extra) = (rule("0.5", "Thickness"), vec![String::new()]);
+    switch_unfold(&doc, &mut main, &mut extra, k_factor, deduction);
+    assert!((mm(&extra[0]) - (8.0 - 1.5 * PI)).abs() < 1e-11, "{}", extra[0]);
+
+    // A value no K-factor from 0 to 1 gives is the rule's error to report: nothing is rewritten.
+    let (mut main, mut extra) = (rule("0.5", "1 mm"), vec!["9 mm".to_string()]);
+    switch_unfold(&doc, &mut main, &mut extra, deduction, k_factor);
+    assert_eq!((main[1].as_str(), extra[0].as_str()), ("0.5", "9 mm"));
 }
 
 /// The rule manager's card widens to fit its longest label, as feature cards do (#10620): at
