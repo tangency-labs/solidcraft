@@ -100,7 +100,7 @@ pub(super) fn check_remove_tree(root: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn remove(s: &mut Session, id: &str) -> Result<RemoveResult> {
+pub fn remove(s: &mut Session, id: &str, remove_user_data: bool) -> Result<RemoveResult> {
     if !valid_id(id) {
         return Err(invalid("invalid plugin id"));
     }
@@ -118,6 +118,10 @@ pub fn remove(s: &mut Session, id: &str) -> Result<RemoveResult> {
     s.plugin_state.grants.remove(id);
     s.plugin_state.persist_stored()?;
     s.plugin_state.forget_stored(id)?;
+    if remove_user_data {
+        let settings = s.plugin_state.user_settings_dir().ok_or_else(|| invalid("no user settings folder is available"))?;
+        user_storage::remove(&settings, id)?;
+    }
     std::fs::remove_dir_all(path).map_err(io)?;
     s.plugin_state.packages.remove(id);
     s.disabled_plugins.remove(id);

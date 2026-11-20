@@ -96,7 +96,7 @@ The command surface exposes management without opening dialogs:
 | `plugin.check` | `{path}`: a package folder or `.zip` | `{ok, id, name, version, kind, approval, entries, problems: [{severity, field, problem, fix}]}`; installs nothing |
 | `plugin.install` | `{path, approval?, archive?, replace?, dry_run?, approve?: {command_groups, folders: [{name, path, read, write}], memory_mib?, input_folder?}}` | Package description and installation status, including declared `entry_points` |
 | `plugin.list` | `{}` | `{plugins: [{manifest, commands, disabled}]}` |
-| `plugin.remove` | `{id}` | `{id, removed: true}` |
+| `plugin.remove` | `{id, remove_user_data: false}` | `{id, removed: true}` |
 | `plugin.grants` | `{}` | `{grants: [{id, status, package_hash, command_groups, folders, memory_mib?, input_folder?}]}` |
 | `plugin.revoke` | `{id}` | `{id, revoked}` |
 | `plugin.tools` | `{name?}` | `{tools: [{name, kind, plugin, entry, plugin_name, plugin_version, description, effect, extensions, input_schema, approval?}]}`: every installed, enabled plugin's entries as tools for agents (below); `approval` only for the one tool `name` asks for |
@@ -137,7 +137,7 @@ solidcraft-cli --keep-plugin-approvals run import.json                          
   record that does not read, or holds more than an installation could approve, is ignored.
 - **Listing and revoking.** `plugin.grants` lists every record with its `status`: `current`, `changed`
   (install and approve again), `not_installed` or `unreadable`. `plugin.revoke {id}` deletes a plugin's
-  record and keeps the plugin installed; `plugin.remove {id}` deletes both. Both are commands, so the
+  record and keeps the plugin installed; `plugin.remove {id, remove_user_data: false}` deletes both. Both are commands, so the
   same calls work from `solidcraft-cli exec`, a `run` script, MCP and the desktop app's control channel:
 
   ```sh
@@ -616,6 +616,59 @@ and MCP give the English.
 `allowed`). The engine's own numbers for a stopped run (fuel used and left) go to the debug log.
 
 ## Plugin data in a design
+
+A plugin chooses the lifetime of each setting. Keep values that determine a particular part
+with the design using `storage@0.1`. Keep personal defaults, such as a shop's preferred hinge
+or sheet price, with the user using `user-storage@0.1`. A plugin can request both capabilities.
+
+### Per-user settings (`user-storage@0.1`)
+
+Add `"user-storage@0.1"` beside `"commands@0.2"` in the manifest's capabilities. No
+`runtime.data_format` is needed unless the plugin also uses design storage. The additive
+`craft:plugin/user-storage@0.2.0` host interface in the command world offers:
+
+| Call | Result |
+| --- | --- |
+| `get(key)` | The JSON string, or `none` for an absent key |
+| `set(key, value)` | Saves a JSON value supplied as a string |
+| `remove(key)` | Whether the key existed |
+| `list()` | The stored keys, sorted by name |
+
+All four return `result<…, plugin-error>`. JSON `null` is a value, distinct from an absent key.
+Only the calling plugin's entries can access its settings: no call accepts another plugin id
+or a file path. Existing plugins continue linking without the new import. This capability
+requires a command runtime; importers do not use it.
+
+Each plugin can keep at most **128 keys** and **65,536 bytes (64 KiB)** for the entire compact
+JSON object, including keys, values, quotes, braces and separators. Keys contain 1–128 UTF-8
+bytes without control characters. Invalid keys or JSON return `invalid-input`. Exceeding a
+budget returns typed `limit-exceeded` naming `user-storage keys (128)` or
+`user-storage total bytes (65536)`. Each `set` argument accepts at most 1 MiB of JSON text
+before parsing (`limit-exceeded: user-storage JSON input bytes (1048576)`); whitespace does not
+consume the compact map's budget. A refused write leaves the previous data intact.
+
+`set` and `remove` are refused from `read` entries, like design-storage writes. Changes are
+staged while the entry runs and published when the host commits it. Guest failures discard
+staged settings. As with existing granted file writes, a later file-publication error may report
+failure after settings have committed. A user-settings write **does not edit the design or add
+an undo step**. Undoing a modelling operation does not undo the user's settings. A settings-only entry declares `edit`, since it
+writes, but its successful run leaves the design unchanged.
+
+SolidCraft saves one `plugin-user-data/<plugin-id>.json` file in the user's settings folder,
+using an atomic replacement. It never embeds these settings in a design or shares them with
+another plugin. Desktop, scripts, MCP and CLI plugin calls use the same folder:
+`$XDG_DATA_HOME/solidcraft` (default `~/.local/share/solidcraft`) on Linux,
+`~/Library/Application Support/SolidCraft` on macOS, and `%APPDATA%/SolidCraft/data` on Windows.
+`SOLIDCRAFT_SETTINGS_DIR` selects an isolated settings folder for desktop and headless runs;
+`--plugins-dir` changes installed packages, not the settings folder.
+
+Removing a plugin in Preferences offers to remove its saved user settings too; the box starts
+unchecked (keep). Scripts and MCP must choose explicitly:
+`plugin.remove {"id":"gears", "remove_user_data":false}` keeps settings for reinstallation;
+`remove_user_data:true` deletes that plugin's settings. These programmatic calls never prompt.
+Revoking approvals or disabling the plugin keeps its settings.
+
+### Design storage (`storage@0.1`)
 
 A design container reserves `plugins/<plugin-id>/` for a plugin's own files. They are kept and
 saved back untouched when the plugin is missing, and opening a design never fails because a plugin

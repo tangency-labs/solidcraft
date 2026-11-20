@@ -1,0 +1,32 @@
+{
+  "ar": {
+    "prefs.plugin_remove_user_data": "احذف إعدادات المستخدم المحفوظة لهذه الإضافة أيضًا"
+  },
+  "de": {
+    "prefs.plugin_remove_user_data": "Auch die gespeicherten Benutzereinstellungen dieses Plugins entfernen"
+  },
+  "en": {
+    "prefs.plugin_remove_user_data": "Remove this plugin’s saved user settings too"
+  },
+  "en-GB": {
+    "prefs.plugin_remove_user_data": "Remove this plugin’s saved user settings too"
+  },
+  "he": {
+    "prefs.plugin_remove_user_data": "מחק גם את הגדרות המשתמש השמורות של תוסף זה"
+  },
+  "ja": {
+    "prefs.plugin_remove_user_data": "このプラグインの保存済みユーザー設定も削除する"
+  },
+  "ko": {
+    "prefs.plugin_remove_user_data": "이 플러그인의 저장된 사용자 설정도 삭제"
+  },
+  "uk": {
+    "prefs.plugin_remove_user_data": "Також видалити збережені налаштування користувача цього плагіна"
+  },
+  "vi": {
+    "prefs.plugin_remove_user_data": "Xóa cả cài đặt người dùng đã lưu của phần bổ trợ này"
+  },
+  "zh": {
+    "prefs.plugin_remove_user_data": "同时删除此插件保存的用户设置"
+  }
+}

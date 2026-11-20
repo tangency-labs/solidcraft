@@ -6,6 +6,7 @@ use std::collections::BTreeSet;
 
 #[derive(Default)]
 struct App {
+    user_data: BTreeMap<String, Value>,
     value: usize,
     saved: Option<usize>,
     begins: usize,
@@ -20,6 +21,22 @@ struct App {
     groups: BTreeSet<String>,
 }
 impl PluginHost for App {
+    fn user_storage_get(&mut self, key: &str) -> Result<Option<Value>> {
+        Ok(self.user_data.get(key).cloned())
+    }
+    fn user_storage_set(&mut self, key: &str, value: &Value) -> Result<()> {
+        let mut data = self.user_data.clone();
+        data.insert(key.into(), value.clone());
+        craft_plugin::check_user_storage(&data)?;
+        self.user_data = data;
+        Ok(())
+    }
+    fn user_storage_remove(&mut self, key: &str) -> Result<bool> {
+        Ok(self.user_data.remove(key).is_some())
+    }
+    fn user_storage_list(&mut self) -> Result<Vec<String>> {
+        Ok(self.user_data.keys().cloned().collect())
+    }
     fn command_catalog(&self) -> Vec<CommandSchema> {
         vec![CommandSchema {
             name: "app.write".into(),
@@ -91,6 +108,85 @@ fn component_for(version: &str, code: &str) -> Vec<u8> {
     assert!(template.contains(original));
     wat::parse_str(template.replacen(original, &format!("      {code}\n"), 1)).unwrap()
 }
+fn user_storage_component(code: &str) -> Vec<u8> {
+    wat::parse_str(include_str!("../user_storage_fixture.wat").replace("__CODE__", code)).unwrap()
+}
+fn user_storage_manifest() -> Manifest {
+    let mut m = manifest();
+    m.capabilities.push("user-storage@0.1".into());
+    m
+}
+const USER_SET: &str = "i32.const 512 i32.const 5 i32.const 2048 i32.const 2 i32.const 128 call $set";
+
+#[test]
+fn user_storage_wit_set_get_across_runs_list_and_remove() {
+    let mut app = App::default();
+    let mut m = user_storage_manifest();
+    m.capabilities = vec!["commands@0.2".into(), "user-storage@0.1.0".into()];
+    let padded = "i32.const 2050 i32.const 32 i32.const 70000 memory.fill
+        i32.const 512 i32.const 5 i32.const 2048 i32.const 70002 i32.const 128 call $set";
+    run(&mut app, &m, &user_storage_component(padded), "make", &json!({})).unwrap();
+    assert_eq!(app.user_data["hinge"], json!(42));
+    let read = "i32.const 512 i32.const 5 i32.const 128 call $get
+        i32.const 128 i32.load if unreachable end
+        i32.const 132 i32.load i32.const 1 i32.ne if unreachable end
+        i32.const 140 i32.load i32.const 2 i32.ne if unreachable end
+        i32.const 136 i32.load i32.load16_u i32.const 12852 i32.ne if unreachable end
+        i32.const 128 call $list
+        i32.const 128 i32.load if unreachable end
+        i32.const 136 i32.load i32.const 1 i32.ne if unreachable end
+        i32.const 132 i32.load i32.load offset=4 i32.const 5 i32.ne if unreachable end";
+    let mut read_manifest = m.clone();
+    read_manifest.runtime.as_mut().unwrap().entries[0].effect = Effect::Read;
+    run(&mut app, &read_manifest, &user_storage_component(read), "make", &json!({})).unwrap();
+    let remove = "i32.const 512 i32.const 5 i32.const 128 call $remove
+        i32.const 128 i32.load if unreachable end
+        i32.const 132 i32.load i32.eqz if unreachable end";
+    run(&mut app, &m, &user_storage_component(remove), "make", &json!({})).unwrap();
+    assert!(app.user_data.is_empty());
+}
+
+#[test]
+fn user_storage_wit_refuses_missing_capability_read_writes_invalid_json_and_limits() {
+    let mut app = App::default();
+    assert!(matches!(run(&mut app, &manifest(), &user_storage_component(USER_SET), "make", &json!({})), Err(HostError::PermissionDenied { .. })));
+    let mut m = user_storage_manifest();
+    m.runtime.as_mut().unwrap().entries[0].effect = Effect::Read;
+    for (code, import) in [(USER_SET, "user-storage.set"), ("i32.const 512 i32.const 5 i32.const 128 call $remove", "user-storage.remove")] {
+        assert_eq!(run(&mut app, &m, &user_storage_component(code), "make", &json!({})).unwrap_err(), craft_plugin::read_entry_refusal(import));
+    }
+    assert!(app.user_data.is_empty());
+    m.runtime.as_mut().unwrap().entries[0].effect = Effect::Edit;
+    let invalid = "i32.const 512 i32.const 5 i32.const 512 i32.const 5 i32.const 128 call $set";
+    assert!(matches!(run(&mut app, &m, &user_storage_component(invalid), "make", &json!({})), Err(HostError::InvalidInput { .. })));
+    // The fixture sees limit-exceeded (variant 2), even if it swallows the error.
+    for i in 0..craft_plugin::MAX_USER_STORAGE_KEYS {
+        app.user_data.insert(format!("k{i}"), json!(null));
+    }
+    let code = format!(
+        "{USER_SET} i32.const 128 i32.load i32.const 1 i32.ne if unreachable end i32.const 132 i32.load i32.const 2 i32.ne if unreachable end"
+    );
+    assert_eq!(
+        run(&mut app, &m, &user_storage_component(&code), "make", &json!({})).unwrap_err(),
+        HostError::LimitExceeded { limit: "user-storage keys (128)".into() }
+    );
+    app.user_data.clear();
+    app.user_data.insert("large".into(), json!("x".repeat(craft_plugin::MAX_USER_STORAGE_BYTES - 14)));
+    assert_eq!(
+        run(&mut app, &m, &user_storage_component(USER_SET), "make", &json!({})).unwrap_err(),
+        HostError::LimitExceeded { limit: "user-storage total bytes (65536)".into() }
+    );
+    m.runtime.as_mut().unwrap().limits.memory_mib = 2;
+    m.runtime.as_mut().unwrap().limits.fuel = 10_000_000;
+    let oversized_input = "i32.const 20 memory.grow i32.const -1 i32.eq if unreachable end
+        i32.const 2050 i32.const 32 i32.const 1048575 memory.fill
+        i32.const 512 i32.const 5 i32.const 2048 i32.const 1048577 i32.const 128 call $set";
+    assert_eq!(
+        run(&mut app, &m, &user_storage_component(oversized_input), "make", &json!({})).unwrap_err(),
+        HostError::LimitExceeded { limit: "user-storage JSON input bytes (1048576)".into() }
+    );
+}
+
 #[test]
 fn edit_commands_commit_as_one_transaction_and_instances_are_fresh() {
     let mut app = App::default();
@@ -275,6 +371,7 @@ fn state<H: PluginHost>(app: H) -> State<H> {
         commands: BTreeMap::new(),
         groups: BTreeSet::new(),
         effect: Effect::Edit,
+        user_storage: false,
         folders: BTreeMap::new(),
         staged: BTreeMap::new(),
         clock: false,

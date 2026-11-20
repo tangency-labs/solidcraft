@@ -8,7 +8,7 @@ no plugin code.
 
 | Item | Purpose |
 |---|---|
-| `PluginHost` | App command catalog and execution, transactions, file authorization, logging, progress and cancellation |
+| `PluginHost` | App command catalog and execution, transactions, file authorization, optional per-user settings, logging, progress and cancellation |
 | `CommandSchema`, `Effect` | Command input/output schemas and read/edit effects |
 | `Manifest`, `RuntimeManifest`, `Entry`, `UiSlot` | Package metadata, executable entries, declared inputs and placement preferences |
 | `parse_manifest`, `valid_id` | Bounded parsing and validation; package ids must match folder names |
@@ -34,6 +34,14 @@ commit or rollback after guest execution. It stages granted file writes until th
 succeeds and the app commits. File publication after app commit is not atomic across
 multiple targets; a publication failure can leave files changed. These contracts do not
 promise atomic rollback of all external effects.
+
+The additive `user-storage@0.1` capability exposes `user-storage` in the current command
+world. `PluginHost::user_storage_get/set/remove/list` default to refusal, so existing hosts
+still compile. Hosts that implement them authenticate the calling plugin, keep JSON values
+outside designs, and stage changes until commit. `check_user_storage` enforces 128 keys and
+64 KiB for the entire compact JSON map; `check_user_storage_key` enforces 1–128 UTF-8 bytes
+without control characters. The app chooses the per-user location and removal policy.
+Settings writes are external effects and do not add design undo steps.
 
 ## Limits and permissions
 
