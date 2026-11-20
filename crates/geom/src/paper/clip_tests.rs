@@ -284,29 +284,13 @@ fn a_dashed_curve_keeps_its_pattern() {
     assert!((dashes.phase_mm - (0.5 + before).rem_euclid(3.0)).abs() < 1e-8, "{dashes:?}, {before}");
 }
 
-/// How far `q` is from `seg`: exactly for a line and an arc; for a curve by `closest_param`, else
-/// by the nearest of 4096 samples, refined by halving the step about it (`closest_param` starts
-/// from 64 samples, and on a hairpin can settle on the other side of it).
+/// How far `q` is from `seg`: by `closest_param`, exact for a line and an arc; for a curve, if
+/// that is not on it, by the nearest of 4096 samples, refined by halving the step about it
+/// (`closest_param` starts from 64 samples, and on a hairpin can settle on the other side of it).
 fn distance(seg: &Seg2, q: Vec2) -> f64 {
-    match *seg {
-        Seg2::Line { a, b } => {
-            let (ab, aq) = (b - a, q - a);
-            let t = if ab.dot(ab) > 0.0 { (aq.dot(ab) / ab.dot(ab)).clamp(0.0, 1.0) } else { 0.0 };
-            return (a + ab * t).dist(q);
-        }
-        Seg2::Arc { center, radius, start, sweep } => {
-            let angle = (q.y - center.y).atan2(q.x - center.x);
-            let along = if sweep >= 0.0 { angle - start } else { start - angle };
-            if along.rem_euclid(std::f64::consts::TAU) <= sweep.abs() {
-                return (q.dist(center) - radius).abs();
-            }
-            return seg.start().dist(q).min(seg.end().dist(q));
-        }
-        _ => {}
-    }
     let d = |t: f64| seg.point_at(t.clamp(0.0, 1.0)).dist(q);
     let near = d(seg.closest_param(q));
-    if near < 1e-6 {
+    if near < 1e-6 || matches!(seg, Seg2::Line { .. } | Seg2::Arc { .. }) {
         return near;
     }
     let mut t = (0..=4096).map(|k| k as f64 / 4096.0).min_by(|a, b| d(*a).total_cmp(&d(*b))).unwrap_or(0.0);

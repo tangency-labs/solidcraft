@@ -599,20 +599,22 @@ mod tests {
         }
     }
 
-    /// A radius through a middle point, smooth: the removed volume is the balls' union.
+    /// A radius through a middle point, smooth: the removed volume is the balls' union. The law
+    /// is not symmetric (2 → 4 → 3), so the same solid started from the other end checks that the
+    /// radii are mapped along the edge's direction.
     #[test]
     fn variable_radius_through_a_middle_point() {
         let b = box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
         let (at, start) = (Vec3::new(10.0, 10.0, 30.0), Vec3::new(10.0, 0.0, 30.0));
-        let pts = [(0.0, 2.0), (0.5, 4.0), (1.0, 2.0)];
+        let pts = [(0.0, 2.0), (0.5, 4.0), (1.0, 3.0)];
         let s = fillet_variable_points(&b, at, start, &pts, true).unwrap();
         let law = RadiusSpline::through(&pts, true);
-        assert!((law.eval(0.5) - 4.0).abs() < 1e-12 && (law.eval(0.0) - 2.0).abs() < 1e-12);
+        assert!((law.eval(0.5) - 4.0).abs() < 1e-12 && (law.eval(0.0) - 2.0).abs() < 1e-12 && (law.eval(1.0) - 3.0).abs() < 1e-12);
         let removed = removed(&law, 20.0);
         let v = measure(&s).unwrap().volume;
         assert!(rel(6000.0 - v, removed) < 1e-4, "{} removed vs {removed}", 6000.0 - v);
         // Unsorted, from the other end: the same.
-        let r = fillet_variable_points(&b, at, Vec3::new(10.0, 20.0, 30.0), &[(1.0, 2.0), (0.0, 2.0), (0.5, 4.0)], true).unwrap();
+        let r = fillet_variable_points(&b, at, Vec3::new(10.0, 20.0, 30.0), &[(1.0, 2.0), (0.0, 3.0), (0.5, 4.0)], true).unwrap();
         assert!(rel(measure(&r).unwrap().volume, v) < 1e-9);
         // A middle radius too big for the faces, missing ends, bad positions: refused.
         assert!(fillet_variable_points(&b, at, start, &[(0.0, 2.0), (0.5, 40.0), (1.0, 2.0)], false).is_err());

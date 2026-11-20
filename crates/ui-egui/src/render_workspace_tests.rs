@@ -1318,20 +1318,28 @@ fn opaque_pbr_product_gpu_and_cpu_share_color_and_material_semantics() {
     let mut s = Session::default();
     s.execute("solid.sphere", &json!({"radius":10,"body_name":"Original sphere"})).unwrap();
     const SIZE: u32 = 256;
-    let mut previous = None;
-    // The diagonal sees each value of each parameter; both share one interpretation path.
-    for (metallic, roughness) in [(0.0, 0.2), (1.0, 0.65)] {
+    let assign = |s: &mut Session, metallic: f64, roughness: f64| {
         s.execute(
             "appearance.assign",
             &json!({"bodies":["Original sphere"],"color":"#b47846",
             "pbr":{"metallic":metallic,"roughness":roughness,"dielectric_ior":1.5}}),
         )
         .unwrap();
-        let scene = solidcraft_engine::product_scene::extract(&s).unwrap();
-        let (key, gpu) = gpu_scene(&scene).unwrap();
+        solidcraft_engine::product_scene::extract(s).unwrap()
+    };
+    // Each parameter alone changes the scene's key: round the four materials, one at a time.
+    let mut keys = Vec::new();
+    for (metallic, roughness) in [(0.0, 0.2), (0.0, 0.65), (1.0, 0.65), (1.0, 0.2)] {
+        keys.push(gpu_scene(&assign(&mut s, metallic, roughness)).unwrap().0);
+    }
+    for (i, key) in keys.iter().enumerate() {
+        assert!(!keys[..i].contains(key), "material {i} has a key of its own: {keys:?}");
+    }
+    // The diagonal sees each value of each parameter; both share one interpretation path.
+    for (metallic, roughness) in [(0.0, 0.2), (1.0, 0.65)] {
+        let scene = assign(&mut s, metallic, roughness);
+        let (_, gpu) = gpu_scene(&scene).unwrap();
         assert!(!class_vertices(&gpu, crate::gpu::TriClass::Pbr).is_empty() && class_vertices(&gpu, crate::gpu::TriClass::Opaque).is_empty());
-        assert_ne!(previous, Some(key));
-        previous = Some(key);
         let mut camera = Camera { fov: 0.0, ..Default::default() };
         camera.set_view(StandardView::Iso);
         camera.fit(&solidcraft_engine::render::view_bounds(&scene.bounds));
