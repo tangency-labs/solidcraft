@@ -250,6 +250,18 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
         if framed == Some(app.cam) {
             app.fit_view();
         }
+        // Start one large visible scan's triangle index ahead of the pointer. Starting
+        // every scan here would let their BVH builders allocate scratch at the same time.
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some((scan, _)) = world
+            .bodies
+            .iter()
+            .filter(|body| app.body_visible(&body.name))
+            .filter_map(|body| body.body.triangle_mesh().map(|(_, triangles)| (body, triangles.len())))
+            .max_by_key(|(_, count)| *count)
+        {
+            app.viewport.pick_index.prefetch(&scan.mesh_in_place().0);
+        }
         crate::frame_watch::step(app, "frame the meshes");
         if let Some(key) = remember {
             crate::home::remember_source(&mut app.home, &app.session, &key);
