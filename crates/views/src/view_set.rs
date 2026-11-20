@@ -137,11 +137,20 @@ impl ViewSet {
         !self.closed.is_empty()
     }
 
+    /// Whether a view can still be shown, including by reopening it.
+    pub fn has_open_or_closed(&self, id: u64) -> bool {
+        self.get(id).is_some() || self.closed.iter().any(|(_, view)| view.id == id)
+    }
+
     /// Open a view of `kind` showing `subject` and make it the active one. With `reuse`, a view
     /// already showing the same kind and subject is activated instead. A new view is named by
     /// kind and number ("Sketch 2") and goes last. Full (`MAX_VIEWS`): the active view stays.
+    /// An oversized subject or exhausted id space also keeps the active view unchanged.
     /// Returns the id of the view that is active now.
     pub fn open(&mut self, kind: ViewKind, subject: Option<String>, reuse: bool) -> u64 {
+        if subject.as_ref().is_some_and(|subject| subject.len() > MAX_SUBJECT) {
+            return self.active;
+        }
         if reuse && let Some(view) = self.views.iter().find(|view| view.kind == kind && view.subject == subject) {
             self.active = view.id;
             return view.id;
@@ -149,7 +158,7 @@ impl ViewSet {
         if self.views.len() >= MAX_VIEWS {
             return self.active;
         }
-        let id = self.take_id();
+        let Some(id) = self.take_id() else { return self.active };
         let name = self.default_name(kind);
         self.views.push(DesignView { id, kind, name, subject, spec: None });
         self.active = id;
@@ -196,6 +205,14 @@ impl ViewSet {
     /// back. The set keeps one view: when none would be left, a Model view takes their place. When
     /// the active view goes, the one left of it takes over (else the first). True when any went.
     pub fn drop_views(&mut self, keep: impl Fn(&DesignView) -> bool) -> bool {
+        // A replacement needs a fresh identity. Refuse before changing anything if the saved
+        // allocation watermark is exhausted, rather than emptying the set or reusing an id.
+        let replacement = if self.views.iter().any(&keep) {
+            None
+        } else {
+            let Some(id) = self.take_id() else { return false };
+            Some(id)
+        };
         let closed = self.closed.len();
         self.closed.retain(|(_, view)| keep(view));
         let Some(first_gone) = self.views.iter().position(|view| !keep(view)) else {
@@ -204,8 +221,7 @@ impl ViewSet {
         let left = self.index_of(self.active).unwrap_or(first_gone);
         let fallback = self.views.iter().take(left).rev().find(|view| keep(view)).map(|view| view.id);
         self.views.retain(&keep);
-        if self.views.is_empty() {
-            let id = self.take_id();
+        if let Some(id) = replacement {
             self.views.push(DesignView { id, kind: ViewKind::Model, name: ViewKind::Model.label().into(), subject: None, spec: None });
         }
         if self.get(self.active).is_none() {
@@ -283,7 +299,7 @@ impl ViewSet {
             return None;
         }
         let (kind, subject, spec) = (self.views[i].kind, self.views[i].subject.clone(), self.views[i].spec);
-        let copy = DesignView { id: self.take_id(), kind, name: self.default_name(kind), subject, spec };
+        let copy = DesignView { id: self.take_id()?, kind, name: self.default_name(kind), subject, spec };
         self.active = copy.id;
         self.views.insert(i + 1, copy);
         Some(self.active)
@@ -445,7 +461,9 @@ impl ViewSet {
             return None;
         }
         let mut closed = Vec::new();
-        for entry in value.get("closed").and_then(Value::as_array).into_iter().flatten() {
+        // Normal history is capped on write. Hostile histories cannot make loading allocate
+        // or compare an unbounded collection of discarded entries.
+        for entry in value.get("closed").and_then(Value::as_array).into_iter().flatten().rev().take(CLOSED_CAP) {
             let at = entry.get("at").and_then(Value::as_u64).and_then(|at| usize::try_from(at).ok());
             let view = entry.get("view").and_then(view_from_json);
             if let (Some(at), Some(view)) = (at, view)
@@ -455,8 +473,7 @@ impl ViewSet {
                 closed.push((at.min(MAX_VIEWS), view));
             }
         }
-        let skip = closed.len().saturating_sub(CLOSED_CAP);
-        closed.drain(..skip);
+        closed.reverse();
         let highest = used.iter().copied().max().unwrap_or(0);
         let next_id = value.get("next_id").and_then(Value::as_u64).unwrap_or(0).clamp(highest + 1, MAX_ID + 1);
         let active = value.get("active").and_then(Value::as_u64).filter(|id| views.iter().any(|view| view.id == *id)).unwrap_or(views[0].id);
@@ -466,10 +483,13 @@ impl ViewSet {
         Some(set)
     }
 
-    fn take_id(&mut self) -> u64 {
+    fn take_id(&mut self) -> Option<u64> {
+        if self.next_id > MAX_ID {
+            return None;
+        }
         let id = self.next_id;
         self.next_id += 1;
-        id
+        Some(id)
     }
 
     /// "Sketch 1", "Sketch 2"…: the first name of the kind no open view has. The first Model
@@ -726,6 +746,63 @@ mod tests {
         assert_eq!(set.views().iter().map(|view| view.id).collect::<Vec<_>>(), ids);
     }
 
+    #[test]
+    fn exhausted_saved_ids_never_allocate_an_unsaveable_view_or_empty_the_set() {
+        let mut saved = ViewSet::new().to_json();
+        saved["next_id"] = json!(MAX_ID);
+        let mut set = ViewSet::from_json(&saved).unwrap();
+        let last = set.open(ViewKind::Model, None, false);
+        assert_eq!(last, MAX_ID, "the final exact id remains usable");
+        assert_eq!(ViewSet::from_json(&set.to_json()).unwrap(), set);
+        let exhausted = set.clone();
+        assert_eq!(set.open(ViewKind::Sheet, None, false), last);
+        assert_eq!(set.duplicate(1), None);
+        assert!(!set.drop_views(|_| false), "a fresh fallback identity cannot be allocated");
+        assert_eq!(set, exhausted, "refusal happens before any open or closed view changes");
+        assert!(set.close(last));
+        assert_eq!(set.reopen(), Some(last), "existing identities can still be reopened");
+        assert_eq!(ViewSet::from_json(&set.to_json()).unwrap(), set);
+
+        saved["views"][0]["id"] = json!(MAX_ID);
+        saved["active"] = json!(MAX_ID);
+        saved["next_id"] = json!(u64::MAX);
+        let mut set = ViewSet::from_json(&saved).unwrap();
+        assert_eq!(set.open(ViewKind::Model, None, false), MAX_ID);
+        assert_eq!(set.duplicate(MAX_ID), None);
+        assert_eq!(ViewSet::from_json(&set.to_json()).unwrap(), set);
+    }
+
+    #[test]
+    fn subjects_opened_at_the_byte_limit_round_trip_and_oversized_subjects_are_refused() {
+        let mut set = ViewSet::new();
+        let subject = "é".repeat(MAX_SUBJECT / 2);
+        let id = set.open(ViewKind::Sheet, Some(subject.clone()), false);
+        assert_eq!(set.get(id).unwrap().subject.as_ref(), Some(&subject));
+        assert_eq!(ViewSet::from_json(&set.to_json()).unwrap(), set);
+        let before = set.clone();
+        for reuse in [false, true] {
+            assert_eq!(set.open(ViewKind::Sheet, Some(format!("{subject}x")), reuse), id);
+            assert_eq!(set, before, "the subject is not truncated or admitted into unsaveable state");
+        }
+    }
+
+    #[test]
+    fn hostile_closed_history_reads_only_the_bounded_latest_tail() {
+        let mut saved = ViewSet::new().to_json();
+        let entry = |id| json!({"at": 1, "view": {"id": id, "kind": "model", "name": "Closed"}});
+        let mut history = vec![entry(MAX_ID); 4096];
+        history.extend((2..=CLOSED_CAP as u64 + 1).map(entry));
+        saved["closed"] = json!(history);
+        saved["next_id"] = json!(0);
+        let mut set = ViewSet::from_json(&saved).unwrap();
+        assert_eq!(set.closed.len(), CLOSED_CAP);
+        assert_eq!(set.next_id, CLOSED_CAP as u64 + 2, "discarded history cannot affect allocation");
+        assert_eq!(ViewSet::from_json(&set.to_json()).unwrap(), set);
+        for id in (2..=CLOSED_CAP as u64 + 1).rev() {
+            assert_eq!(set.reopen(), Some(id), "the latest valid history keeps its original order");
+        }
+        assert_eq!(set.reopen(), None);
+    }
     #[test]
     fn json_round_trips_views_active_closed_and_ids() {
         let mut set = sketches(3);

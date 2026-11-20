@@ -1509,7 +1509,7 @@ fn app_quit(app: &mut SolveApp, ctx: &egui::Context, q: params::Quit) -> Outcome
     } else {
         crate::documents::request_quit(app);
     }
-    if app.quit_requested {
+    if app.ready_to_quit() {
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
     ok(json!({"quitting": app.quit_requested, "asking": app.docs.closing.is_some()}))

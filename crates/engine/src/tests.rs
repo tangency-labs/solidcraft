@@ -2868,6 +2868,58 @@ fn section_folder_hides_and_shows_its_planes() {
     assert!(s.execute("inspect.section", &json!({"folder": "no"})).is_err());
 }
 
+/// Switching linked views restores every section plane, its hidden-folder state and hatch,
+/// without turning a passive paint swap into a model, history or display edit.
+#[test]
+fn inspect_snapshots_keep_independent_multi_plane_sections_without_refreshing_display() {
+    let mut s = Session::default();
+    for params in [
+        json!({"plane": "XZ", "at": 15, "hatch": false}),
+        json!({"plane": "YZ", "at": 20, "add": true}),
+        json!({"plane": "XY", "at": 5, "add": true}),
+        json!({"hide": 3}),
+        json!({"folder": false}),
+    ] {
+        run(&mut s, "inspect.section", params);
+    }
+    s.colored_components = Some(());
+    let hidden_section = s.section_state();
+    assert!(hidden_section.planes.is_empty());
+    assert_eq!(hidden_section.hidden.len(), 3);
+    assert_eq!(hidden_section.folder, Some(vec![1, 2]));
+    assert!(!hidden_section.hatch);
+    let hidden_view = s.inspect();
+
+    for params in [
+        json!({"plane": "XZ", "at": -7, "hatch": true}),
+        json!({"plane": "YZ", "at": 11, "add": true}),
+        json!({"plane": "XY", "at": 2, "add": true}),
+        json!({"hide": 2}),
+    ] {
+        run(&mut s, "inspect.section", params);
+    }
+    s.colored_components = None;
+    let shown_section = s.section_state();
+    assert_eq!((shown_section.planes.len(), shown_section.hidden.len()), (2, 1));
+    assert_eq!(shown_section.folder, None);
+    assert!(shown_section.hatch);
+    let shown_view = s.inspect();
+    let doc = s.doc.clone();
+    let world = s.model.state();
+    let unchanged = (s.revision, s.visibility_revision, s.undo.len(), s.redo.len());
+    for _ in 0..3 {
+        s.set_inspect(hidden_view.clone());
+        assert_eq!(s.section_state(), hidden_section);
+        assert_eq!(s.inspect(), hidden_view);
+        s.set_inspect(shown_view.clone());
+        assert_eq!(s.section_state(), shown_section);
+        assert_eq!(s.inspect(), shown_view);
+        assert!(std::sync::Arc::ptr_eq(&s.doc, &doc));
+        assert!(std::sync::Arc::ptr_eq(&s.model.state(), &world));
+        assert_eq!((s.revision, s.visibility_revision, s.undo.len(), s.redo.len()), unchanged);
+    }
+}
+
 /// Hostile `inspect.section` parameters are refused and leave the section as it was.
 #[test]
 fn section_analysis_refuses_hostile_params() {

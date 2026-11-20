@@ -120,7 +120,8 @@ impl Renderer {
         let scopes = crate::error_scopes(device);
         let refused = self.product.take(device, queue, &self.uniform, &self.uniform_bgl, frame.key, &frame.slot, None, false).err();
         let caught = crate::caught(scopes);
-        let highlight_refused = self.highlight.take(device, queue, &self.uniform, &self.uniform_bgl, frame.hl_key, &frame.hl_slot, None, false).err();
+        let highlight_refused =
+            self.pic.highlight.take(device, queue, &self.uniform, &self.uniform_bgl, frame.hl_key, &frame.hl_slot, None, false).err();
         // Only a failed product upload drops the product batches; a refused highlight keeps the
         // product picture and is reported below. A refused scene stays in its slot, so the batches
         // carry no key and the next frame retries it. A scope error means the scene was taken and
@@ -239,7 +240,7 @@ impl Renderer {
         }
         // Render's build_highlight emits self-contained mesh triangles/edges, including
         // whole bodies; it intentionally does not reference the Design model's GPU plans.
-        let highlight = &self.highlight;
+        let highlight = &self.pic.highlight;
         pass.set_bind_group(0, scene_bind(highlight, &self.bind), &[]);
         for draw in highlight.hover_instanced.iter().chain(&highlight.selected_instanced).filter(|draw| draw.look == InstanceLook::Opaque) {
             draw.draw(pass, &depth.feedback_smooth, &depth.feedback_flat, tally);

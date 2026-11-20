@@ -14,7 +14,7 @@ pub struct ViewportCallback(pub Frame);
 /// A frame of one of several views drawn in the same window (tiles): the view `.0` keeps its own
 /// picture on the GPU, so the tiles of one egui frame do not draw over each other
 /// ([`Renderer::prepare_view`]).
-pub struct TileCallback(pub u32, pub Frame);
+pub struct TileCallback(pub u64, pub Frame);
 /// A transparent, depth-correct selection/hover layer over live product pixels.
 pub struct ProductHighlightCallback(pub Frame);
 
