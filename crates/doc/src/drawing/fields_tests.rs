@@ -230,9 +230,11 @@ fn sheet_metal_fields_show_only_what_every_sheet_body_agrees_on() {
 /// the `properties.finish` field still reads the free property alone.
 #[test]
 fn the_finish_field_reads_the_finish_property_then_the_free_one() {
+    fn part<'a>(metadata: &'a Metadata, properties: Option<&'a BTreeMap<String, String>>) -> Option<Component<'a>> {
+        Some(Component { name: "Bracket", metadata, properties, material: None, mass: None, sheet_metal: None })
+    }
     let d = drawing();
     let free = BTreeMap::from([("finish".to_string(), "Zinc plated".to_string())]);
-    let part = |metadata, properties| Some(Component { name: "Bracket", metadata, properties, material: None, mass: None, sheet_metal: None });
     let read = |component, key: &str| shown(&d, 0, component, vec![field(Source::Component, key)]);
     assert!(has_key(Source::Component, "finish") && has_key(Source::Component, "properties.finish"));
     let mut metadata = Metadata::default();

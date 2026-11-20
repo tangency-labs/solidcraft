@@ -6,9 +6,11 @@
 //! each may be set (the design, a component or both), how its value is checked and its label.
 //! It keeps every other key exactly as it was through open, edit and save. Other tools keep
 //! their own data under one reverse-DNS key each (`com.example.tool`), holding an object.
-//! A component's part properties have four more keys ([`PART_ONLY`]): its bill of materials type
-//! (`bom_type`), its static material (`material`), its quantity (`bom_quantity`) and whether it
-//! is virtual (`virtual`).
+//! A part's material (`material`: what it is made of as ordered, "5052-H32, 0.090 in") and finish
+//! (`finish`: free text such as "powder coat, RAL 9005, matt") are keys of both: a design with
+//! no component of its own to hold them (a single part) carries them itself. A component's part
+//! properties have three more keys ([`PART_ONLY`]): its bill of materials type (`bom_type`), its
+//! quantity (`bom_quantity`) and whether it is virtual (`virtual`).
 //!
 //! Reading never validates: a well-known key holding something other than text is kept as it
 //! is and reads as absent, so a file another tool wrote always opens. Writing through
@@ -32,6 +34,17 @@ pub const AUTHOR: &str = "author";
 pub const ORGANIZATION: &str = "organization";
 pub const DESCRIPTION: &str = "description";
 pub const LICENSE: &str = "license";
+
+/// What a part is made of as it is ordered (alloy, temper, thickness or gauge), typed in by hand in
+/// place of the materials worked out from its bodies (any text). It names, it doesn't weigh: mass
+/// still comes from the bodies' materials. A component holds it, and so does a design that is one
+/// part (a design has no component of its own).
+pub const MATERIAL: &str = "material";
+
+/// A part's finish, free text: the coating or surface treatment, with its colour, grade or gloss
+/// ("zinc plate, clear"). A component holds it, and so does a design that is one part.
+/// The windows offer common values to pick from, never enforced.
+pub const FINISH: &str = "finish";
 
 /// Where a key may be set: on the design, on a component, or on both.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -87,6 +100,8 @@ pub static KEYS: &[Key] = &[
     Key { name: AUTHOR, scope: Scope::Both, label: "ui.design_properties.author", check: text },
     Key { name: ORGANIZATION, scope: Scope::Both, label: "ui.design_properties.organization", check: text },
     Key { name: DESCRIPTION, scope: Scope::Both, label: "ui.design_properties.description", check: text },
+    Key { name: MATERIAL, scope: Scope::Both, label: "ui.design_properties.material", check: text },
+    Key { name: FINISH, scope: Scope::Both, label: "ui.design_properties.finish", check: text },
     Key { name: LICENSE, scope: Scope::Both, label: "ui.design_properties.license", check: text },
 ];
 
@@ -100,11 +115,6 @@ pub static BOM_KEYS: &[&str] = &[PART_NUMBER, DESCRIPTION, REVISION];
 /// doesn't list it and a design refuses it.
 pub const BOM_TYPE: &str = "bom_type";
 
-/// A component's static material: what its bill of materials rows say it is made of, typed in by
-/// hand in place of the materials worked out from its bodies (any text). It names, it doesn't
-/// weigh: mass still comes from the bodies' materials.
-pub const MATERIAL: &str = "material";
-
 /// What one placement of a component means in a bill of materials: an expression evaluated with
 /// the design's parameters, a length or (without a unit) a number of pieces. Without it, a
 /// placement is one piece. The bill of materials evaluates it (`bom::Amount`).
@@ -117,7 +127,7 @@ pub const VIRTUAL: &str = "virtual";
 
 /// The part properties only a component holds, none of them a row of [`KEYS`]: the Design
 /// Properties dialog doesn't list them and `document.metadata.set` refuses them.
-pub const PART_ONLY: [&str; 4] = [BOM_TYPE, MATERIAL, BOM_QUANTITY, VIRTUAL];
+pub const PART_ONLY: [&str; 3] = [BOM_TYPE, BOM_QUANTITY, VIRTUAL];
 
 /// Longest key, in bytes.
 pub const MAX_KEY_BYTES: usize = 128;
@@ -269,9 +279,13 @@ impl Metadata {
     pub fn bom_type(&self) -> BomType {
         self.text(BOM_TYPE).and_then(BomType::parse).unwrap_or_default()
     }
-    /// The component's static material, when one is typed in.
+    /// The static material, when one is typed in (a component's, or the design's own).
     pub fn material(&self) -> Option<&str> {
         self.text(MATERIAL)
+    }
+    /// The finish, when one is typed in (a component's, or the design's own).
+    pub fn finish(&self) -> Option<&str> {
+        self.text(FINISH)
     }
     /// The component's quantity expression, when it has one.
     pub fn bom_quantity(&self) -> Option<&str> {
@@ -328,7 +342,7 @@ fn check(owner: Owner, key: &str, value: Value) -> Result<Option<Value>> {
                     _ => Err(invalid(format!("`{VIRTUAL}` is true or false"))),
                 };
             }
-            MATERIAL | BOM_QUANTITY => return text(key, value),
+            BOM_QUANTITY => return text(key, value),
             _ => {}
         }
     }
@@ -484,8 +498,8 @@ mod tests {
         let other: Metadata = serde_json::from_value(json!({"material": 42})).unwrap();
         assert_eq!((other.material(), other.get(MATERIAL)), (None, Some(&json!(42))));
         assert!(other.others().next().is_none(), "SolidCraft reads it, so it isn't another tool's key");
-        assert!(!keys(Design).any(|k| k.name == MATERIAL), "the Design Properties dialog doesn't list it");
-        assert!(Metadata::default().set(Design, MATERIAL, json!("Steel")).is_err(), "a design has no static material");
+        assert!(keys(Design).any(|k| k.name == MATERIAL), "a design that is one part holds its own: the dialog lists it");
+        assert!(Metadata::default().set(Design, MATERIAL, json!("Steel")).is_ok());
     }
 
     #[test]

@@ -129,6 +129,7 @@ fn inserted_design_carries_its_part_properties_into_the_bom() {
     let source = dir.join("plate.solidcraft");
     let metadata = json!({
         "part_number": "PL-6624", "description": "Mounting plate", "revision": "B",
+        "material": "CRS, 16 ga", "finish": "Zinc plate, clear",
         "author": "Example author", "license": "CC0-1.0", "com.example.catalog": {"stock": 12}
     });
     let mut part = Session::default();
@@ -149,6 +150,7 @@ fn inserted_design_carries_its_part_properties_into_the_bom() {
         assert_eq!(bom["rows"][0]["part_number"], "PL-6624");
         assert_eq!(bom["rows"][0]["description"], "Mounting plate");
         assert_eq!(bom["rows"][0]["revision"], "B");
+        assert_eq!(bom["rows"][0]["finish"], "Zinc plate, clear", "a single part's own finish is its component's once inserted");
         assert_eq!(bom["rows"][0]["count"], 1);
         assert_eq!(s.undo.len(), undo + 1, "insertion including properties is one undo step");
         run(&mut s, "edit.undo", json!({}));

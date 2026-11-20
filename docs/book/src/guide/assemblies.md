@@ -590,9 +590,20 @@ revision, other tools' data under a reverse-DNS key (the same rules as the desig
 properties), and free text properties such as a material grade or a finish. Every occurrence of
 the component shares them, Paste New copies them, and they are saved with the component.
 `component.metadata {component}` reads them and
-`component.metadata.set {component, part_number?, description?, revision?, bom_type?, material?, bom_quantity?, virtual?, values?, properties?}`
+`component.metadata.set {component, part_number?, description?, revision?, bom_type?, material?, finish?, bom_quantity?, virtual?, values?, properties?}`
 changes them in one undo step (an empty value removes a field). The root component is the
-design itself: its properties are `document.metadata`'s. Standard parts (`parts.insert`) get a
+design itself: its properties are `document.metadata`'s.
+
+A part's **material** is what it is ordered as ("5052-H32, 0.090 in", "CRS, 16 ga") and its
+**finish** is free text ("powder coat, RAL 9005, matt", "zinc plate, clear", "#4 brushed, grain
+along length"); masking and no-coat notes stay ordinary notes. Both are text of your own: the
+windows offer common finishes to pick from and never hold you to them. A design that is one part has
+no component to hold them, so the design carries them itself: `document.metadata.set {values:
+{material, finish}}` (Design Properties in the window). They are in the bill of materials (a
+`finish` column in the rows and the CSV), in a drawing's parts list (a FINISH column on a new list)
+and in its title block, whose Material and Finish cells read them with nothing typed over. A part
+that has only a free property named `finish` (as parts did before) shows that one wherever a finish
+is shown. Standard parts (`parts.insert`) get a
 part number from their standard and size (`ISO 4762 M6x20`, `GOST 7798-70 M12x60`, or a bearing's
 designation) and a description; **Change Part Size** renumbers them, keeping a field you changed yourself.
 
@@ -663,7 +674,7 @@ in the one material an assembly around it shares, so two parts typed in as S355 
 S355. Where several definitions share a row, the first one's static material wins. It doesn't change
 the mass, which still comes from the bodies, and clearing it (empty or null) brings the worked-out
 material back.
-A free property such as a material grade stays in `properties`. `mass: true` adds `mass_g`: what one of the row's parts weighs in grams, with
+Each row also has `finish`: the part's finish, else a free property named `finish`. A free property such as a material grade stays in `properties`. `mass: true` adds `mass_g`: what one of the row's parts weighs in grams, with
 what is placed inside it except what the list shows as rows of their own beside it, so the rows of any
 list add up to the assembly. It adds `total_mass_g` beside the rows too: what the assembly weighs, measured
 from the design rather than added up from the rows. At the top level a row weighs all it holds. In parts only a part's contents
