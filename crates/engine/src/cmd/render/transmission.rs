@@ -180,7 +180,7 @@ mod tests {
         assert!(Arc::ptr_eq(&mesh, &scene.meshes[0].mesh));
         assert_eq!(scene.meshes[0].surface.unwrap().dielectric_ior(), 1.5);
         assert_eq!(saved, s.doc.to_json());
-        let reopened = crate::Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+        let reopened = crate::Session::new(solidcraft_io::read_design(&solidcraft_io::write_design_container(&s.doc).unwrap()).unwrap());
         assert!(!crate::product_scene::extract(&reopened).unwrap().has_transmission());
         assert!(
             s.execute(

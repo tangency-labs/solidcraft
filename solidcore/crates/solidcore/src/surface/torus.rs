@@ -82,9 +82,9 @@
 //! - **Recognition.** [`Torus::is_nurb_surface_torus`] returns `Some` where upstream
 //!   returns `TRUE` with a torus and an error where a `SER` call returns its status
 //!   (a truthy result without torus). `Notify(SM_NO_COPY)` (attribute copying) has no
-//!   equivalent. An opt-in fork fix: the torus keeps the tested NURB
-//!   (`Kernel::fixes.found_torus_sphere_keep_tested_nurb`, WR-493, off by default;
-//!   upstream keeps the NURB made from the fitted circles, ~1e-11 off the tested one).
+//!   equivalent. Always: the torus keeps the tested NURB (WR-493, the fork's
+//!   tangency-labs/smlib@7ea6a96; upstream keeps the NURB made from the fitted
+//!   circles, ~1e-11 off the tested one).
 //!   Always: the generator interval is measured signed in it and in
 //!   [`Torus::rebuild_step_from_nurb_parameters`] (WR-408; upstream's unsigned
 //!   `AngleBetween` mirrors an interval below the equator; the zero tolerance is
@@ -1089,11 +1089,9 @@ impl Torus {
     /// curve, and takes the NURB domain of `test` (through [`Self::reparameterize`]).
     /// `None` when `test` is not a torus (upstream default scale `1`).
     ///
-    /// With the opt-in
-    /// [`UpstreamFixes::found_torus_sphere_keep_tested_nurb`](crate::kernel::UpstreamFixes::found_torus_sphere_keep_tested_nurb)
-    /// (WR-493) the torus then keeps a copy of `test`'s NURB and rebuilds its analytic
-    /// data from it (`SetFromGwNurb`); by default it keeps the NURB made from the
-    /// fitted circles, as upstream. The generator's interval is measured signed (WR-408;
+    /// The torus then keeps a copy of `test`'s NURB and rebuilds its analytic data from
+    /// it (`SetFromGwNurb`; WR-493: upstream keeps the NURB made from the fitted
+    /// circles). The generator's interval is measured signed (WR-408;
     /// a failed angle is not a torus), and the major radius is measured from the torus
     /// origin (WR-501).
     ///
@@ -1289,16 +1287,26 @@ impl Torus {
         // InputSurface->NurbDomain (status ignored)
         ignore_status(torus.reparameterize(k, &test.natural_uv_domain()))?;
 
-        // not upstream (WR-493, opt-in; the SolidCraft fork's tangency-labs/smlib@7ea6a96):
-        // the torus keeps the NURB tested (SetFromGwNurb, whose rebuild's status is
-        // ignored)
-        if k.fixes.found_torus_sphere_keep_tested_nurb {
-            let nurb = test
-                .gw_nurb()
-                .ok_or_else(|| SolidError::surface_missing(OP_NURB_TORUS, "the tested NURB"))?;
-            torus.base.base.nurb = Some(copy_nurb_surface(nurb)).into();
-            torus.base.base.nurb_is_borrowed = false;
-            ignore_status(torus.rebuild_step_from_nurb_parameters(k))?;
+        // not upstream (WR-493; the SolidCraft fork's tangency-labs/smlib@7ea6a96): the
+        // torus keeps the NURB tested (SetFromGwNurb, whose rebuild's status is ignored).
+        // (`test` has a NURB: without one its degrees are 0 and the degree test above
+        // returned `None`; the error is kept for a NURB-less surface all the same.)
+        let nurb = test
+            .gw_nurb()
+            .ok_or_else(|| SolidError::surface_missing(OP_NURB_TORUS, "the tested NURB"))?;
+        torus.base.base.nurb = Some(copy_nurb_surface(nurb)).into();
+        torus.base.base.nurb_is_borrowed = false;
+        ignore_status(torus.rebuild_step_from_nurb_parameters(k))?;
+
+        // not upstream (#18195): the rebuild's horn-torus snap (the fork's af7a4d9) merges
+        // radii within its own tolerance, a thousand times the one the circles were found
+        // at here (2e-2 a hundred thousand units from the origin). A torus whose radii the
+        // rebuild moved by more than this test's tolerance no longer lies on the NURB it
+        // keeps: it is not found (the surface stays the NURB).
+        if (torus.major_radius() - maj_rad).abs() > scaled_zero
+            || (torus.minor_radius() - min_rad).abs() > scaled_zero
+        {
+            return Ok(None);
         }
 
         // (Notify(SM_NO_COPY) copies the test surface's attributes: not modelled)
@@ -2526,10 +2534,11 @@ mod tests {
     }
 
     /// tangency-labs/solidcore#1433: the torus R 10, r 3 is found in its NURB form;
-    /// with `found_torus_sphere_keep_tested_nurb` it keeps exactly that NURB.
+    /// it keeps exactly that NURB (WR-493; upstream keeps the one made from the fitted
+    /// circles, ~1e-11 off).
     #[test]
     fn issue_1433_torus_found_in_its_nurb_keeps_it() {
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         let t = Torus::create_canonical(
             &k,
             &Axis2Placement::default(),
@@ -2541,14 +2550,6 @@ mod tests {
         .unwrap();
         let nurbs = plain(&t);
 
-        // upstream: found, with the NURB made from the fitted circles
-        let found = Torus::is_nurb_surface_torus(&k, &nurbs, 1.0)
-            .unwrap()
-            .expect("a torus");
-        assert!((found.major_radius() - 10.0).abs() < 1e-9);
-        assert!((found.minor_radius() - 3.0).abs() < 1e-9);
-
-        k.fixes.found_torus_sphere_keep_tested_nurb = true;
         let found = Torus::is_nurb_surface_torus(&k, &nurbs, 1.0)
             .unwrap()
             .expect("a torus");
@@ -2561,12 +2562,49 @@ mod tests {
         assert!(o.length() < 1e-9, "{o:?}");
     }
 
+    /// #18195: a torus found in its NURB keeps that NURB, so its analytic radii must lie
+    /// on it. The rebuild's horn snap (radii within a thousand times the recognition's
+    /// tolerance merge) would make a ring torus a hundred thousand units out, 1e-3 short
+    /// of a horn, a horn torus 1e-3 off the NURB: it is not found. Nearer the origin the
+    /// same torus is found with its own radii, and a horn torus stays a horn torus.
+    #[test]
+    fn torus_found_in_its_nurb_keeps_radii_on_the_nurb() {
+        let k = Kernel::default();
+        let found = |cx: f64, maj: f64, min: f64| {
+            let frame = Axis2Placement::new(
+                Vec3::new(cx, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 0.0, 1.0),
+            );
+            let t = Torus::create_canonical(&k, &frame, maj, min, TorusOptions::default(), None)
+                .unwrap();
+            Torus::is_nurb_surface_torus(&k, &plain(&t), 1.0)
+                .unwrap()
+                .map(|f| (f.major_radius(), f.minor_radius()))
+        };
+        // the snap's tolerance: 2e-2 at 1e5, 2e-3 at 1e4
+        for (cx, min) in [(1.0e5, 9.999), (1.0e5, 9.99), (1.0e4, 9.999)] {
+            assert_eq!(found(cx, 10.0, min), None, "cx {cx} minor {min}");
+        }
+        for (cx, min) in [(1.0e4, 9.99), (0.0, 9.999)] {
+            let (maj, got) = found(cx, 10.0, min).expect("a torus");
+            assert!(
+                (maj - 10.0).abs() < 1e-9 && (got - min).abs() < 1e-9,
+                "{maj} {got}"
+            );
+        }
+        for cx in [0.0, 1.0e5] {
+            let (maj, min) = found(cx, 10.0, 10.0).expect("a horn torus");
+            assert_eq!(maj, min, "cx {cx}");
+            assert!((maj - 10.0).abs() < 1e-9, "cx {cx}: {maj}");
+        }
+    }
+
     /// Partial tori (swapped, inside out, below the equator, scaled, tiny) are found
-    /// with the flags on and keep their NURB; a perturbed NURB is not a torus.
+    /// and keep their NURB; a perturbed NURB is not a torus.
     #[test]
     fn torus_recognition_partial_scaled_and_non_matching() {
-        let mut k = Kernel::default();
-        k.fixes.found_torus_sphere_keep_tested_nurb = true;
+        let k = Kernel::default();
         let frame = Axis2Placement::new(
             Vec3::new(1.0, 2.0, 0.5),
             Vec3::new(0.0, 1.0, 0.0),

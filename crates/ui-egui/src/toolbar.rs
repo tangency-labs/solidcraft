@@ -570,6 +570,10 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     rows.push(row("file.export_urdf", app.tr_label("Export URDF…"), &key("file.export_urdf"), "export", shown));
     rows.push(row("file.export_sdf", app.tr_label("Export SDF Model…"), &key("file.export_sdf"), "export", shown));
     rows.push(row("export_json", app.tr_label("Export Design as JSON…"), "", "export", true));
+    // Print the drawing shown: only in Drawing, where Ctrl+P does the same.
+    if crate::drawing_workspace::active(app) && app.session.open_drawing.is_some() {
+        rows.push(row("drawing.print", &format!("{}…", app.tr("ui.drawing_print.menu")), &key("drawing.print"), "export", true));
+    }
     rows.push(FileRow::Separator);
     rows.push(row("document.metadata", &format!("{}…", app.tr_label("Design Properties")), "", "settings", shown));
     rows.push(FileRow::Separator);
@@ -628,6 +632,7 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
         "file.export_urdf" => FileAction::Command("file.export_urdf").run(app),
         "file.export_sdf" => FileAction::Command("file.export_sdf").run(app),
         "document.metadata" => FileAction::Command("document.metadata").run(app),
+        "drawing.print" => app.start(id),
         "pointcloud.insert" | "file.send_to_slicer" => app.start(id),
         "save" => FileAction::Save.run(app),
         "save_as" => FileAction::SaveAs.run(app),
@@ -2620,6 +2625,11 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     if crate::params_dialog::cancel_on_escape(app, ctx) {
         return;
     }
+    if crate::view_tiles::cancel_placement_on_escape(app, ctx) {
+        app.esc_handled = true;
+        app.last_escape = None;
+        return;
+    }
     // A dimension value that is taking the keyboard: letters belong to it (a parameter name
     // starting with L or D), even on the frame before its field holds the focus.
     let popup_owner = egui::Popup::is_any_open(ctx)
@@ -2725,7 +2735,12 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
             && !mods.shift
             && let Some(place) = view_place(k)
         {
-            drop(app.run("tab.view.activate", json!({"index": place})));
+            let key = crate::keymap::key_name(k, mods);
+            if crate::keymap::commands_for(app, &key).is_empty() {
+                drop(app.run("tab.view.activate", json!({"index": place})));
+            } else {
+                crate::keymap::press(app, &key, repeat);
+            }
             continue;
         }
         if mods.command {
@@ -2754,7 +2769,12 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 // Ctrl+Shift+W closes the design shown. A design is closed asking first when it is
                 // unsaved; closing the last one shows the start page (#5366).
                 Key::W if !mods.alt => {
-                    if mods.shift || app.docs.views.len() < 2 {
+                    let key = crate::keymap::key_name(k, mods);
+                    if mods.shift && !crate::keymap::commands_for(app, &key).is_empty() {
+                        crate::keymap::press(app, &key, repeat);
+                    } else if !mods.shift && app.docs.views.len() < 2 && app.view_windows.close_current() {
+                        continue;
+                    } else if mods.shift || app.docs.views.len() < 2 {
                         crate::documents::close(app, app.docs.active, false);
                     } else {
                         drop(app.run("tab.view.close", json!({})));
@@ -2909,6 +2929,23 @@ fn dropdown_cell(
 #[cfg(test)]
 mod header_report_tests {
     use super::*;
+
+    #[test]
+    fn custom_view_chords_run_before_builtin_view_shortcuts() {
+        for (chord, input) in [("Alt+1", json!({"key":"1", "alt":true})), ("Ctrl+Shift+W", json!({"key":"W", "cmd":true, "shift":true}))] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            let second = h.app.docs.views.open(solidcraft_views::ViewKind::Model, None, false);
+            crate::keymap::bind_at(&mut h.app, "view.grid", None, chord, true).unwrap();
+            h.frames(2);
+            let grid = h.app.ui.show_grid;
+            h.call("ui.key", input);
+            h.frames(2);
+            assert_eq!(h.app.ui.show_grid, !grid, "{chord} runs its assigned command");
+            assert_eq!(h.app.docs.views.active().id, second, "{chord} does not activate or close a view");
+            assert!(!h.app.home.open && h.app.docs.closing.is_none(), "{chord} does not close the design");
+        }
+    }
 
     #[test]
     fn escape_closes_file_menu_on_home_and_over_a_sketch_without_cancelling_it() {

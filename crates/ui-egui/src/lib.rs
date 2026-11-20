@@ -25,6 +25,7 @@ pub mod browser_search;
 #[cfg(test)]
 mod browser_search_tests;
 pub mod canvas;
+mod card_resize;
 pub mod cli_link;
 #[cfg(test)]
 mod colour_tokens_tests;
@@ -44,7 +45,6 @@ pub mod delete;
 pub mod design_properties;
 pub mod design_tab_prefs;
 pub mod design_view_ui;
-pub mod design_views;
 mod dialog_descriptor;
 pub mod dialogs;
 pub mod dialogs_appearance;
@@ -62,6 +62,7 @@ pub mod dialogs_move;
 pub mod dialogs_part_size;
 pub mod dialogs_parts;
 pub mod dialogs_plastic;
+pub mod dialogs_rotate_member;
 pub mod dialogs_save_mesh;
 pub mod dialogs_sheet;
 pub mod dialogs_surface;
@@ -384,6 +385,8 @@ mod view_confirm;
 pub mod view_gizmo;
 mod view_memory;
 pub mod view_pick;
+mod view_tiles;
+pub mod view_windows;
 pub mod viewport;
 mod viewport_details;
 mod viewport_layout;
@@ -532,6 +535,10 @@ pub struct Services {
     /// Select the local document library root; unavailable in browser hosts.
     pub pick_folder: Option<Box<dyn Fn() -> FilePickerFuture>>,
     pub show_in_folder: Option<Box<dyn Fn(&str)>>,
+    /// Open a file in the program the system opens its kind with (a PDF in its viewer, to print).
+    pub open_path: Option<Box<dyn Fn(&str) -> Result<(), String>>>,
+    /// A browser: open a document made in memory (its name, its media type, its bytes) in a new tab.
+    pub open_bytes: Option<Box<dyn Fn(&str, &str, &[u8]) -> Result<(), String>>>,
     /// Where the host reads the anti-aliasing preference at start (a small JSON file).
     pub graphics_path: Option<String>,
     /// Linux: the window system this run uses, `wayland` or `x11` (Preferences shows it, #3083).
@@ -814,6 +821,9 @@ pub struct SolveApp {
     pub status: Option<(String, f64, bool)>,
     /// The status message offers Undo (a click on it undoes the last step), as after an automatic stand-up.
     pub status_undo: bool,
+    /// The status message is a refused JSON save of a design with binary data in it, and offers
+    /// Save as .sc, so that data is never left out.
+    pub status_save_sc: bool,
     pub quit_requested: bool,
     /// Autosave into the recovery folder (the desktop app turns it on).
     pub autosave: Option<recovery_ui::Autosaves>,
@@ -960,6 +970,7 @@ pub struct SolveApp {
     pub(crate) frame_watch: frame_watch::Watch,
     /// The other open designs (tabs).
     pub docs: documents::Documents,
+    view_windows: view_windows::Windows,
     /// Last OS title inputs; unchanged frames allocate nothing and send no title command.
     pub(crate) window_title: documents::WindowTitle,
     /// The language the installed font fallback chain is ordered for (`ui_kit::type_face::fallback_order`);
@@ -1123,6 +1134,7 @@ impl SolveApp {
             last_escape: None,
             status: None,
             status_undo: false,
+            status_save_sc: false,
             quit_requested: false,
             autosave: None,
             locks: None,
@@ -1197,6 +1209,7 @@ impl SolveApp {
             open_meshing_next: false,
             frame_watch: Default::default(),
             docs: documents::Documents::default(),
+            view_windows: view_windows::Windows::default(),
             window_title: Default::default(),
             applied_fonts_language: "en".into(),
             applied_ui_font: String::new(),
@@ -1696,6 +1709,7 @@ impl SolveApp {
             Some("component.edit_in_place") => r.and_then(|v| edit_in_place::command_ran(self, &v).map(|queued| with_queued(v, queued))),
             Some("component.finish_edit") => r.and_then(|v| edit_in_place::finish_command(self).map(|queued| with_queued(v, queued))),
             Some(view) if view.starts_with("tab.view.") => r.and_then(|v| documents::view_command(self, view, v)),
+            Some(window) if window.starts_with("tab.window.") => r.and_then(|v| view_windows::command(self, window, v)),
             _ => r,
         };
         // A grant taken back here that the shared store still holds is not taken back: say so.
@@ -1945,6 +1959,14 @@ impl SolveApp {
                 }
                 if id == "occurrence.ground" {
                     unground_joint_status(self, language, v);
+                }
+                // A template asked for as .json is saved as .scdwg beside it: say so.
+                if id == "drawing.template.save"
+                    && v.get("renamed_from").is_some_and(|from| !from.is_null())
+                    && let Some(path) = v.get("path").and_then(Value::as_str)
+                {
+                    let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    self.set_status(language.format("drawing.template_saved_as_scdwg", &[("name", &name)]), false);
                 }
                 if id == "file.new" {
                     // `file.new` starts from millimetres. Units of new designs still apply (#1205).
@@ -3269,6 +3291,7 @@ impl SolveApp {
         self.messages.push(&text, error, at);
         self.status = Some((text, at, error));
         self.status_undo = false;
+        self.status_save_sc = false;
     }
 
     /// Tell the user when the open design came from a newer SolidCraft: the notice on the status
@@ -4009,6 +4032,24 @@ impl SolveApp {
         control::publish_design(self, &control::DOCUMENT_WATCH);
     }
 
+    /// Input for another viewport of the same app. Shared jobs are serviced by the root window.
+    pub(crate) fn view_window_logic(&mut self, ctx: &egui::Context) {
+        let _language = solidcraft_ui_text::scope(&self.preferences.language);
+        self.now = ctx.input(|i| i.time);
+        self.escape_owner = None;
+        self.esc_handled = false;
+        self.step_view_animation(ctx);
+        ui_kit::install_keyboard_focus(ctx);
+        if self.issue_report.draft.is_none() && self.file_picker.is_none() {
+            panel_runtime::reserve_host_input(self, ctx);
+            if !keymap::capturing(self) {
+                expression_complete::begin_frame(ctx);
+            }
+            sketch_construction::claim_typed_length(self, ctx);
+            toolbar::shortcuts(self, ctx);
+        }
+    }
+
     /// The frame's input before the app reads it: synthetic events, then what is typed while a
     /// capture hides the report waits for it (the control channel's typing too).
     pub fn raw_input_hook(&mut self, raw: &mut egui::RawInput) {
@@ -4146,6 +4187,22 @@ impl SolveApp {
         self.apply_look(ctx);
     }
 
+    /// Release pictures whose views no longer belong to any window. Native hosts call this
+    /// after all child scopes restore the root; Web calls it after its single root UI pass.
+    /// Keeping hidden/live slots avoids consuming their pending CPU scenes a second time.
+    pub fn retain_view_pictures(&mut self, state: Option<&egui_wgpu::RenderState>) {
+        if self.view_windows.is_child() {
+            return;
+        }
+        let mut slots = documents::live_view_picture_slots(self);
+        slots.extend(view_windows::retain_picture_slots(self));
+        if let Some(state) = state
+            && let Some(renderer) = state.renderer.write().callback_resources.get_mut::<solidcraft_viewport_gpu::view::Renderer>()
+        {
+            renderer.retain_views(&slots);
+        }
+    }
+
     /// Lay out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         plugins::tick(self, ui.ctx(), false);
@@ -4169,7 +4226,9 @@ impl SolveApp {
         self.cad_ui(ui, &mut report_input);
         semantic_content::finalize(self, ui.ctx());
         #[cfg(not(target_arch = "wasm32"))]
-        panel_runtime::show_desktop_windows(self, ui.ctx());
+        if !self.view_windows.is_child() {
+            panel_runtime::show_desktop_windows(self, ui.ctx());
+        }
         drop(report_input);
         // After everything else, on every page (the start page too, which returns early from
         // `cad_ui`): the window's edges resize it (#1381).
@@ -4297,25 +4356,36 @@ impl SolveApp {
         // against those footprints; the render domain stays unchanged.
         self.viewport.host_windows = ui_kit::Container::host_window_regions(ui.ctx());
         if let Some(rect) = self.viewport.rect.filter(|rect| rect.is_positive() && rect.is_finite()) {
-            let mut controls = ui.new_child(egui::UiBuilder::new().id_salt("universal_panel_controls").max_rect(rect));
-            controls.set_clip_rect(controls.clip_rect().intersect(rect));
+            if view_tiles::shown(self) {
+                view_tiles::card_controls(self, ui);
+            }
+            let mut controls = view_tiles::controls_ui(ui, self.session.uid, self.docs.views.active().id, rect);
             render_workspace::host_result_overlays(self, &mut controls);
             viewport::show_host_controls(self, &mut controls, rect);
         }
+        view_tiles::placement_overlay(self, ui.ctx());
         self.resolve_fit(ui.ctx());
         panel_runtime::finish_app_host(self, ui);
+        if view_tiles::focus_pressed(self) {
+            ui.ctx().request_repaint();
+        }
+    }
+
+    /// Whether the host can close after queued view preferences have reached disk.
+    pub fn ready_to_quit(&self) -> bool {
+        self.quit_requested && !crate::view_memory::pending()
     }
 
     fn show_workspace(&mut self, ui: &mut egui::Ui) {
         if drawing_workspace::active(self) {
             if dialogs_sheet::flat_active(self) {
-                // This is the existing source manufacturing inspector, not a drawing scene.
                 viewport::show(self, ui);
             } else {
-                // The model view is not drawn, so no shown dimension can be double-clicked.
                 dim_view::set_model_drawn(Vec::new());
                 drawing_workspace::show(self, ui);
             }
+        } else if view_tiles::shown(self) {
+            view_tiles::show(self, ui);
         } else if render_workspace::active(self) {
             // The model view is not drawn, so no shown dimension can be double-clicked.
             dim_view::set_model_drawn(Vec::new());
