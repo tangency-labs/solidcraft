@@ -211,8 +211,8 @@ impl<O: Copy + PartialEq> BrepCache<O> {
             (&mut surfaces, Some(NodeGeomType::Polygon)),
         ] {
             tree.set_owner_object(Some(TreeOwner::BrepCache));
-            if let Some(geom) = geom {
-                let top = tree.top_node().ok_or_else(|| missing_defect(NO_TOP))?;
+            // `new_spatial` made the tree with its top node just above
+            if let (Some(geom), Some(top)) = (geom, tree.top_node()) {
                 tree.node_mut(top)?.geom_type = geom;
             }
         }
@@ -344,10 +344,7 @@ impl<O: Copy + PartialEq> BrepCache<O> {
                 .ok_or_else(|| SolidError::topology(OP, TopologyFailure::FaceWithoutSurface))?
                 .face()?
                 .ok_or_else(|| {
-                    missing_defect(
-                        "a face's surface has no owning face, though binding a surface to a face \
-                         makes the face its owner",
-                    )
+                    SolidError::topology(OP, TopologyFailure::SurfaceWithoutOwningFace)
                 })?;
             let owner = face_id(b, owner, keys)?;
             match face_bounding_box(k, b, owner) {
@@ -435,12 +432,7 @@ fn resize_edge(
         .as_ref()
         .ok_or_else(|| SolidError::topology(OP, TopologyFailure::EdgeWithoutCurve))?
         .edge(owner_of)?
-        .ok_or_else(|| {
-            missing_defect(
-                "an edge's curve has no owning edge, though binding a curve to an edge makes the \
-                 edge (or its edge use) its owner",
-            )
-        })?;
+        .ok_or_else(|| SolidError::topology(OP, TopologyFailure::CurveOwnerUnresolved))?;
     let owner = edge_id(b, owner, keys)?;
     match crate::query::edge::calculate_bounding_box(
         k,
@@ -567,12 +559,8 @@ impl crate::intersect::topology_solver::p1::TopologyObjects<CacheObject> for Bre
         if object != CacheObject::Brep {
             return Err(SolidError::port_invariant(OP, "expected B-rep handle"));
         }
-        self.cache.ok_or_else(|| {
-            missing_defect(
-                "the solve asked for the B-rep's cache on a view made without one; only shape \
-                 solves, which read their own trees, are given such a view",
-            )
-        })
+        self.cache
+            .ok_or_else(|| SolidError::topology(OP, TopologyFailure::SolveViewWithoutCache))
     }
     fn curve(&self, object: CacheObject) -> Result<&crate::curve::curve::Curve> {
         let CacheObject::Curve(e) = object else {
@@ -895,7 +883,10 @@ mod tests {
     #[test]
     fn initialization_contract_and_atomic_build_failure() {
         let k = Kernel::default();
-        assert!(BrepCache::<CacheObject>::new(0).is_err_and(|e| e.upstream_status() == Some(1001)));
+        assert!(
+            BrepCache::<CacheObject>::new(0).is_err_and(|e| e.upstream_status() == Some(1001)
+                && e.topology_failure() == Some(&TopologyFailure::CacheTargetNotBrep))
+        );
         let mut cache = BrepCache::new(BREP_TYPE).unwrap();
         assert!(cache.vertex_tree().is_none());
         let b = Brep::new();

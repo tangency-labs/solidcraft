@@ -1364,6 +1364,22 @@ impl DatabaseWriter {
 mod tests {
     use super::*;
 
+    /// A read on a reader opened for nothing names the missing stream, with upstream's
+    /// `SM_ERR_NULL_POINTER`.
+    #[test]
+    fn a_read_without_a_stream_names_it() {
+        use crate::error::SM_ERR_NULL_POINTER;
+        let named = |r: Result<()>| {
+            r.is_err_and(|e| {
+                e.topology_failure() == Some(&TopologyFailure::NoInputStream)
+                    && e.upstream_status() == Some(SM_ERR_NULL_POINTER)
+            })
+        };
+        let mut db = DatabaseReader::new();
+        assert!(named(db.read_longs(1).map(drop)));
+        assert!(named(db.read_type(false).map(drop)));
+    }
+
     #[test]
     fn nesting_is_bounded() {
         let mut db = DatabaseReader::new();

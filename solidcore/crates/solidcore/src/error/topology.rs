@@ -116,6 +116,16 @@
 //! | [`TopologyFailure::NoFiniteRegion`] | `SM_ERR` |
 //! | [`TopologyFailure::FaceStitchFailed`] | `SM_ERR` |
 //! | [`TopologyFailure::SurfaceNotTransformable`] | `SM_ERR` |
+//! | [`TopologyFailure::SurfaceWithoutGenerator`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::EdgeWithoutEdgeuses`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::CurveOwnerUnresolved`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::SurfaceWithoutOwningFace`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::SolveViewWithoutCache`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::CacheTargetNotBrep`] | `SM_ERR` |
+//! | [`TopologyFailure::NoInputStream`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::RecordTypeUnknown`] | `SM_ERR` |
+//! | [`TopologyFailure::AttributeSlotEmpty`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::BlendRecordNotProved`] | `SM_ERR` |
 //!
 //! A named cause keeps the status of the phrase it replaced, unless its site overrides it
 //! through `with_status`.
@@ -532,8 +542,21 @@ pub enum TopologyFailure {
         entity: Option<EntityRef>,
     },
     /// A surface of revolution or extrusion has no generator curve, which its record
-    /// needs. [`ErrorKind::Unsupported`].
+    /// needs (only the `empty()` constructors leave it out). [`ErrorKind::InvalidInput`].
     SurfaceWithoutGenerator,
+    /// An edge of the caller's body has no edge use, so it is on no loop or wire (an edge
+    /// added and never linked, or one no edge-use record of a file names).
+    /// [`ErrorKind::InvalidInput`].
+    EdgeWithoutEdgeuses,
+    /// An edge's curve resolves to no owning edge: it has no owner, or the caller's owner
+    /// map does not resolve the edge use or generated curve that owns it.
+    /// [`ErrorKind::InvalidInput`].
+    CurveOwnerUnresolved,
+    /// A face's surface has no owning face. [`ErrorKind::InvalidInput`].
+    SurfaceWithoutOwningFace,
+    /// The topology solver asked for the B-rep's cache on a view the caller made without
+    /// one. [`ErrorKind::InvalidInput`].
+    SolveViewWithoutCache,
     /// A B-rep cache was asked for a type that is neither a B-rep nor a poly B-rep.
     /// [`ErrorKind::InvalidInput`].
     CacheTargetNotBrep,
@@ -690,6 +713,10 @@ impl TopologyFailure {
             | Self::VerticesShareNoRegion
             | Self::NoVertexSector { .. }
             | Self::SurfaceWithoutGenerator
+            | Self::EdgeWithoutEdgeuses
+            | Self::CurveOwnerUnresolved
+            | Self::SurfaceWithoutOwningFace
+            | Self::SolveViewWithoutCache
             | Self::NoInputStream
             | Self::AttributeSlotEmpty => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_)
@@ -772,6 +799,11 @@ impl TopologyFailure {
             | Self::VerticesShareNoRegion
             | Self::NoRegionsToKeepGiven
             | Self::NoFiniteRegion
+            | Self::SurfaceWithoutGenerator
+            | Self::EdgeWithoutEdgeuses
+            | Self::CurveOwnerUnresolved
+            | Self::SurfaceWithoutOwningFace
+            | Self::SolveViewWithoutCache
             | Self::CacheTargetNotBrep
             | Self::NoInputStream
             | Self::RecordTypeUnknown { .. }
@@ -788,8 +820,7 @@ impl TopologyFailure {
             | Self::NoPlaneProjection
             | Self::VertexLoopInSharedFace
             | Self::EdgeCurveNotJoinable { .. }
-            | Self::SurfaceNotTransformable { .. }
-            | Self::SurfaceWithoutGenerator => ErrorKind::Unsupported,
+            | Self::SurfaceNotTransformable { .. } => ErrorKind::Unsupported,
             Self::CurveNotApproximated
             | Self::AllocationFailed
             | Self::NoProjectedCurves
@@ -1036,6 +1067,14 @@ impl core::fmt::Display for TopologyFailure {
             }
             Self::SurfaceWithoutGenerator => {
                 f.write_str("the swept surface has no generator curve")
+            }
+            Self::EdgeWithoutEdgeuses => f.write_str("the edge has no edge use"),
+            Self::CurveOwnerUnresolved => {
+                f.write_str("the edge's curve resolves to no owning edge")
+            }
+            Self::SurfaceWithoutOwningFace => f.write_str("the face's surface has no owning face"),
+            Self::SolveViewWithoutCache => {
+                f.write_str("the solve needs the B-rep's cache, and the view has none")
             }
             Self::CacheTargetNotBrep => {
                 f.write_str("a B-rep cache is only for a B-rep or a poly B-rep")
@@ -1535,12 +1574,26 @@ mod tests {
         use TopologyFailure as T;
         let op = "topology::op";
         let cases = [
-            (T::EdgeWithoutCurve, SM_ERR_NULL_POINTER, K::InvalidInput),
-            (T::FaceWithoutSurface, SM_ERR_NULL_POINTER, K::InvalidInput),
             (
                 T::SurfaceWithoutGenerator,
                 SM_ERR_NULL_POINTER,
-                K::Unsupported,
+                K::InvalidInput,
+            ),
+            (T::EdgeWithoutEdgeuses, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (
+                T::CurveOwnerUnresolved,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (
+                T::SurfaceWithoutOwningFace,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (
+                T::SolveViewWithoutCache,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
             ),
             (T::CacheTargetNotBrep, SM_ERR, K::InvalidInput),
             (T::NoInputStream, SM_ERR_NULL_POINTER, K::InvalidInput),
@@ -1568,6 +1621,15 @@ mod tests {
             .into_error();
         assert_eq!(e.cause(), Some(&cause));
         assert!(e.is_defect());
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        // a net the proof refuses as input (`recertify`'s `InvalidInput`) reads as no defect
+        let cause = SolidError::invalid_input(op, "the net is not within its bound");
+        let e = Failure::new(op, T::BlendRecordNotProved)
+            .caused_by(cause.clone())
+            .into_error();
+        assert_eq!(e.cause(), Some(&cause));
+        assert!(!e.is_defect(), "{e:?}");
+        assert_eq!(e.kind(), K::Failed);
         assert_eq!(e.upstream_status(), Some(SM_ERR));
     }
 
