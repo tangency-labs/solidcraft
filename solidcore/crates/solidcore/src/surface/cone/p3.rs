@@ -1369,6 +1369,35 @@ mod tests {
         }
     }
 
+    /// tangency-labs/solidcraft#15727: with one axis 5e-12 rad off, the holes of the issue711 test
+    /// still cross in both lines, in either order; both were dropped and the cut came back empty.
+    #[test]
+    fn cylinders_a_hair_off_parallel_keep_both_crossing_lines() {
+        let k = Kernel::default();
+        let a = cylinder(&k, Vec3::new(6.0, 0.0, -1.0), false, false, false);
+        let mut b = Cone::new_cylinder_bounded(
+            Vec3::new(3.0, 5.196, -1.0),
+            Vec3::new(1.0, 0.0, -5e-12),
+            Vec3::Y,
+            5.0,
+            0.0,
+            360.0,
+            12.0,
+            false,
+            false,
+            false,
+        );
+        b.make_nurb(&k).unwrap();
+        let da = axial_domain(&k, &a, 1.0, 11.0);
+        let db = b.rev().base().natural_uv_domain();
+        for (a, da, b, db) in [(&a, da, &b, db), (&b, db, &a, da)] {
+            let (more, out) = a.intersect_with_cone(&k, &da, b, &db, Some(1e-7)).unwrap();
+            assert!(!more);
+            assert_axial_lines(&out, [a, b], 2, 0.0, 10.0);
+            assert_eq!(out.curve_types, vec![TsectCurveType::Crossing; 2]);
+        }
+    }
+
     #[test]
     fn issue711_axial_trims_respect_both_parameterizations_and_axis_directions() {
         let k = Kernel::default();
