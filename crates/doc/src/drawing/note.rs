@@ -6,6 +6,9 @@
 //!   symbols placed on a drawing can use it too.
 //! - **The place** is on paper: in millimetres from the sheet's lower-left corner for a note on a
 //!   sheet, and from the view's centre for any other, so that note moves with its view.
+//! - **The alignment** ([`Align`]) says which end of the text sits at the place: its start (left), its
+//!   middle (centre) or its end (right). A new note starts at its place; a note saved before this
+//!   had none, and stays centred.
 //! - **The content** is the title block's text with fields ([`Content`]), so a sheet's number works
 //!   in a note. It reads what a note can name: never an answer given when a block was placed, or a
 //!   table's row.
@@ -41,6 +44,42 @@ pub const MAX_NOTES: usize = 10_000;
 pub const MAX_LEADERS: usize = 16;
 /// The text heights a note may set, in millimetres of paper.
 pub const CAP_MM: RangeInclusive<f64> = 0.5..=100.0;
+
+/// Which end of a note's text sits at its place, and how its lines stand to one another: each line
+/// starts at it (left), is centred on it, or ends at it (right).
+///
+/// A note saved without one is centred, as every note was before it existed; the commands make a new
+/// note left. A centred note isn't saved with it, so such a drawing reads as before.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Align {
+    /// The text starts at the place.
+    Left,
+    /// The text is centred on the place.
+    #[default]
+    #[serde(alias = "center")]
+    Centre,
+    /// The text ends at the place.
+    Right,
+}
+
+impl Align {
+    /// How far along its line, from its start, a line `room` mm wide at most stands when its own text
+    /// is `width` mm: none for left, half what is spare for centre, all of it for right.
+    pub fn indent(self, room: f64, width: f64) -> f64 {
+        let spare = (room - width).max(0.0);
+        match self {
+            Align::Left => 0.0,
+            Align::Centre => spare * 0.5,
+            Align::Right => spare,
+        }
+    }
+
+    /// Whether it is the centre a note saved before alignments had, which a drawing doesn't save.
+    pub fn is_centre(&self) -> bool {
+        *self == Align::Centre
+    }
+}
 
 /// What a note belongs to.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -143,6 +182,9 @@ pub struct Note {
     /// The height of its capitals on paper, when it sets its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cap_mm: Option<f64>,
+    /// Which end of its text sits at its place. Centre when it isn't saved.
+    #[serde(default, skip_serializing_if = "Align::is_centre")]
+    pub align: Align,
     /// Its leaders beside its anchor's, in order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub branches: Vec<Branch>,
