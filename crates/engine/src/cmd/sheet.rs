@@ -1028,6 +1028,11 @@ fn rules(s: &mut Session, p: &Value) -> Result<Value> {
         let (vals, _) = s.doc.param_values();
         library_k_and_radius(s, cmd, p, entry, &vals, &mut rule, &mut notes)?;
     }
+    // A rule that unfolds from its K-factor keeps no 90° value: it saves as a rule did before the
+    // setting existed, and a later switch to a chart method starts from the K-factor it has then.
+    if sheet::UnfoldMethod::parse(&rule.unfold_method) == Some(sheet::UnfoldMethod::KFactor) {
+        rule.unfold_value.clear();
+    }
     if let Some(shape) = p.get("corner_relief_shape").filter(|v| !v.is_null()) {
         let shape = shape.as_str().and_then(solidcraft_doc::sheet::ReliefShape::parse);
         rule.corner_relief_shape = shape.ok_or_else(|| bad(cmd, "`corner_relief_shape` must be notch, round, rectangular or tear"))?.name().into();

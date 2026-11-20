@@ -3045,9 +3045,11 @@ fn the_unfold_method_is_a_rule_setting_checked_saved_and_undone() {
     }
     let mut older = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
     assert_eq!(listed(&mut older), (json!("k_factor"), json!(""), 0.5));
-    // Back to the K-factor: the 90° value stays in the rule but no longer counts.
+    // Back to the K-factor: the rule keeps no 90° value, and saves as it did before the setting.
     run(&mut s, "sheet.manage_rules", json!({"name": "Shop", "unfold_method": "k_factor"}));
-    assert_eq!(listed(&mut s), (json!("k_factor"), json!("3.2 mm"), 0.5));
+    assert_eq!(listed(&mut s), (json!("k_factor"), json!(""), 0.5));
+    let back = s.doc.to_json();
+    assert!(!back.contains("unfold_method") && !back.contains("unfold_value"), "{back}");
     // Undone like the rule's other changes.
     assert_eq!(s.undo.len(), undo + 3);
     for _ in 0..3 {
