@@ -13133,6 +13133,20 @@ impl PreparedMeshImport {
         bodies.map(Self)
     }
 
+    /// Keep an indexed source for the flat mesh that the STL reader has just validated.
+    /// The feature and its prepared body share the same source identity.
+    pub fn build_indexed_flat(mesh: &mut crate::MeshData) -> Result<Self> {
+        if !mesh.corner_normals.is_empty() {
+            return Self::build(std::slice::from_ref(mesh));
+        }
+        let crate::MeshData { name, positions, triangles, .. } = mesh;
+        let (body, indexed_positions, indexed_triangles) = Body::from_packed_flat_mesh_indexed(std::mem::take(positions), std::mem::take(triangles))
+            .map_err(|e| DocError::Invalid(format!("mesh `{name}`: {e}")))?;
+        *positions = indexed_positions.into();
+        *triangles = indexed_triangles.into();
+        Ok(Self(vec![(mesh.clone(), body)]))
+    }
+
     fn body(&self, index: usize, mesh: &crate::MeshData) -> Option<&Body> {
         let (input, body) = self.0.get(index)?;
         // The command can generate different shading normals before it adds the feature.
