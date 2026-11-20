@@ -834,6 +834,7 @@ fn add_usd_exact(s: &mut Session, path: &str, name: Option<&str>, y_up: Option<b
         names: solidcraft_io::StepNames::default(),
         folder: false,
         history: false,
+        force: false,
         flatten: false,
         reader: solidcraft_io::StepReader::Cadmpeg,
     };
