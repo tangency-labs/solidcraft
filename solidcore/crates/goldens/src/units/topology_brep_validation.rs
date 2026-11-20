@@ -464,7 +464,12 @@ impl UnitDiff for Runner {
         };
         output(&rust_protocol(&b, status, &reports)?)
     }
+    /// Draws as the unit drew when it also ran the coincidence search (WR-798, removed), so
+    /// every generated case is the body it was: the draw that chose the search (one in three)
+    /// and the search's `find_all` are drawn still, in their places, and a case that drew the
+    /// search, which drew no mutation, now checks the pointers of its body unmutated.
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
+        let searched = rng.below(3) == 0;
         let brep = match rng.below(4) {
             0 => BrepIn::Box {
                 origin: rng.point3(-10.0, 10.0),
@@ -485,7 +490,11 @@ impl UnitDiff for Runner {
                 lines: vec![[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1e-6]],
             },
         };
-        let mutation = rng.below(11) as u8;
+        let mutation = if searched {
+            0
+        } else {
+            rng.below(11) as u8
+        };
         let value = if matches!(mutation, 4 | 5) {
             rng.below(3) as f64
         } else {
@@ -493,12 +502,16 @@ impl UnitDiff for Runner {
                 .get(rng.below(6) as usize)
                 .copied()?
         };
+        let level = rng.below(5) as u8;
+        let walk = rng.below(2) == 0;
+        // the search's `find_all`
+        let _ = rng.below(2);
         serde_json::to_value(Inputs {
             brep,
             grid_faces: None,
             shared_boundaries: None,
-            level: rng.below(5) as u8,
-            walk: rng.below(2) == 0,
+            level,
+            walk,
             mutation,
             index: rng.below(100) as usize,
             value,
