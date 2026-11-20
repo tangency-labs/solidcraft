@@ -6303,7 +6303,6 @@
   "↑ ↓ choose · Enter / Tab complete · Esc dismiss": "↑ ↓ escolher · Enter / Tab completar · Esc fechar",
   "↑ ↓ choose · Enter applies this value": "↑ ↓ escolher · Enter aplica este valor",
   "↑ ↓ choose · Enter applies what you typed · Esc dismiss": "↑ ↓ escolher · Enter aplica o que você digitou · Esc dispensa",
-  "⌘Enter continues on GitHub.": "⌘Enter continua no GitHub.",
   "Add column": "Adicionar coluna",
   "Animation": "Animação",
   "Board colour": "Cor da placa",
@@ -6353,7 +6352,7 @@
   "ai.prefs.control_listening": "Ouvindo em 127.0.0.1:{port}",
   "ai.prefs.control_not_listening": "Não está ouvindo",
   "ai.prefs.control_port": "Porta",
-  "ai.prefs.control_port_note": "A porta que agentes de IA conectam neste computador (127.0.0.1). 27878 é o padrão: quando está em uso, a próxima porta livre é usada. Qualquer outra porta é usada exatamente. Aponte seu cliente MCP para a mesma porta, por exemplo solidcraft-cli mcp --connect 127.0.0.1:7878.",
+  "ai.prefs.control_port_note": "A porta que agentes de IA conectam neste computador (127.0.0.1). 27878 é o padrão: quando está em uso, a próxima porta livre é usada. Qualquer outra porta é usada exatamente. Aponte seu cliente MCP para a mesma porta, por exemplo solidcraft-cli mcp --connect 127.0.0.1:27878.",
   "ai.prefs.control_port_taken": "A porta {port} está em uso por outro programa (ou outra janela do SolidCraft). Escolha outra porta.",
   "browser.link.lift": "Elevação",
   "browser.link.no_profile": "Sem perfil de came",
@@ -6421,7 +6420,7 @@
   "constrain.rule_angle": "Ângulo",
   "constrain.rule_concentric": "Concêntrico",
   "constrain.rule_distance": "Distância",
-  "constrain.rule_flush": "Paralelo",
+  "constrain.rule_flush": "Rente",
   "constrain.rule_insert": "Inserção",
   "constrain.rule_mate": "Coincidente",
   "constrain.rule_parallel": "Paralelo",
@@ -6818,7 +6817,7 @@
   "ui.fit_loose": "Folga",
   "ui.fit_normal": "Normal",
   "ui.head_button": "Parafuso de cabeça botão (ISO 7380-1)",
-  "ui.head_socket": "Parafuso de cabeça sextavada (ISO 4762)",
+  "ui.head_socket": "Parafuso de cabeça cilíndrica com sextavado interno (ISO 4762)",
   "ui.hole_clearance": "Folga",
   "ui.insert_signed": "Inserido {name}; seu arquivo é assinado por {key} (não verificado)",
   "ui.insert_signed_unknown": "Inserido {name}; seu arquivo é assinado (não verificado)",
@@ -6888,5 +6887,6 @@
   "ui.verify_unsigned": "Este projeto não tem assinatura",
   "ui.verify_waits_for_file_operation": "Aguarde a operação de arquivo terminar antes de verificar a assinatura",
   "ui.view_compass_tip": "Vista de {axis}. Clique de novo para inverter. Arraste para orbitar.",
-  "ui.view_compass_tip_snap": "Vista de {axis}. Clique de novo para inverter. Arraste para orbitar; segure Shift para encaixar."
+  "ui.view_compass_tip_snap": "Vista de {axis}. Clique de novo para inverter. Arraste para orbitar; segure Shift para encaixar.",
+  "⌘Enter continues on GitHub.": "⌘Enter continua no GitHub."
 }
