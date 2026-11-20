@@ -858,6 +858,11 @@ pub(crate) fn fits(a: Accept, s: &Sel) -> bool {
     }
 }
 
+/// Feature forms that keep a saved whole-sketch selection until it is edited.
+fn tracks_profile_selection(kind: &Kind) -> bool {
+    matches!(kind, Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. } | Kind::Primitive { cmd: "solid.coil", .. })
+}
+
 impl Dialog {
     /// The command this dialog runs, whose icon and label its header shows.
     pub(crate) fn command(&self) -> Option<&'static str> {
@@ -1205,7 +1210,7 @@ impl Dialog {
                     at: None,
                     refs: Default::default(),
                 },
-                vec![SelInput::new("Profile", PROFILES, false)],
+                vec![SelInput::new("Profile", PROFILES, false), SelInput::new("Axis", AXIS_PICKS, false)],
             ),
             "solid.combine" => Dialog::new(
                 Kind::Combine { operation: 1, keep_tools: false },
@@ -1334,6 +1339,7 @@ impl Dialog {
             };
             let takes = |i: &SelInput| {
                 fits(i.accept, sel)
+                    && (i.accept != AXIS_PICKS || id != "solid.coil")
                     && (i.multi || i.items.is_empty())
                     && (planar_ok || i.accept & FACES != 0 || !matches!(sel, Sel::Face { .. }))
                     && (i.accept != AXIS_PICKS || takes_as_axis(s, sel))
@@ -1465,8 +1471,7 @@ impl Dialog {
         Dialog::new(Kind::EditParam { name: name.into(), expr: s.doc.param(name).map(|p| p.expr.clone()).unwrap_or_default() }, vec![])
     }
 
-    /// An Extrude or Revolve started from inside a sketch takes that sketch's profile, as it would
-    /// had the sketch stayed open, and keeps the sketch shown while it is open (#14128).
+    /// Extrude and Revolve take the sketch they start from (#14128).
     pub(crate) fn take_sketch_profile(&mut self, s: &Session, sketch: u64) {
         if !matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. }) {
             return;
@@ -1900,7 +1905,7 @@ impl Dialog {
         self.restore_value_focus = true;
     }
 
-    /// A sketch clicked in the Browser or the History while Extrude, Revolve or Emboss is open
+    /// A sketch clicked in the Browser or History while a profile-based feature form is open
     /// (#6106): Profiles takes every profile of what was drawn (`drawn_profiles`), as when the
     /// sketch is selected before the command starts. The island inside another profile's hole is
     /// left out, or it would fill the hole. False when the click is not one of those (the caller
@@ -1925,6 +1930,9 @@ impl Dialog {
             return false;
         }
         input.items = profiles;
+        if !input.multi {
+            self.advance();
+        }
         self.profile_selection_changed = true;
         self.focus = true;
         self.error = None;
@@ -1973,7 +1981,7 @@ impl Dialog {
             *sketch = None;
             self.extra.remove("path");
         }
-        if self.active == 0 && matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. }) {
+        if self.active == 0 && tracks_profile_selection(&self.kind) {
             self.profile_selection_changed = true;
         }
         let measure = matches!(self.kind, Kind::Measure { .. });
@@ -2051,7 +2059,7 @@ impl Dialog {
             *sketch = None;
             self.extra.remove("path");
         }
-        if self.active == 0 && matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. }) {
+        if self.active == 0 && tracks_profile_selection(&self.kind) {
             self.profile_selection_changed = true;
         }
         let measure = matches!(self.kind, Kind::Measure { .. });
@@ -2216,7 +2224,7 @@ impl Dialog {
         if empty && self.listed == Some(i) {
             self.listed = None;
         }
-        if i == 0 && matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. }) {
+        if i == 0 && tracks_profile_selection(&self.kind) {
             self.profile_selection_changed = true;
         }
         self.list_hover = None;
@@ -3447,6 +3455,9 @@ fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::pref
 
 /// Saved planes/vectors/axes are real inputs even when they have no selection chip.
 fn stored_input_reference_key(d: &Dialog, index: usize) -> Option<&'static str> {
+    if matches!(d.kind, Kind::Primitive { cmd: "solid.coil", .. }) && index == 1 {
+        return Some("axis");
+    }
     if matches!(d.kind, Kind::Split) && index == 1 {
         return Some("split_tool_mode");
     }
@@ -3485,7 +3496,22 @@ fn stored_input_reference_key(d: &Dialog, index: usize) -> Option<&'static str> 
     }
 }
 
-/// An explicit revolve axis as its dialog holds it, in the world: the origin evaluated with the
+/// A saved Coil sketch line that could not refill its pick. Keep it in the command parameters
+/// until the user supplies a replacement, while presenting empty controls for the axis.
+fn unresolved_coil_axis(d: &Dialog, s: &Session) -> bool {
+    if !matches!(d.kind, Kind::Primitive { cmd: "solid.coil", .. }) || d.inputs.get(1).is_none_or(|input| !input.items.is_empty()) {
+        return false;
+    }
+    let Some(FeatureKind::Coil { axis_ref: Some(AxisRef::SketchLine { curve, sketch }), .. }) =
+        d.editing.and_then(|(id, _)| s.doc.feature(id)).map(|f| &f.kind)
+    else {
+        return false;
+    };
+    let owner = sketch.map(Value::from);
+    d.extra.get("axis").is_some_and(|axis| axis.get("curve").and_then(Value::as_str) == Some(curve.as_str()) && axis.get("sketch") == owner.as_ref())
+}
+
+/// An explicit axis as its dialog holds it, in the world: the origin evaluated with the
 /// parameters (an untouched axis is restored as saved, expressions included:
 /// `solidcraft_engine::frames::to_local`). An origin that cannot be evaluated is kept as saved.
 pub(crate) fn line_axis_value(s: &Session, frame: &solidcraft_engine::doc::Mat, origin: &solidcraft_engine::doc::PointExpr, dir: Vec3) -> Value {
@@ -3526,8 +3552,10 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
     let mut toggle_list: Option<usize> = None;
     let mut hovered: Option<(usize, Sel)> = None;
     let shell_count = d.shell_faces(s).map(|faces| faces.len());
+    let unresolved_axis = unresolved_coil_axis(d, s);
     for (i, inp) in d.inputs.iter().enumerate().skip(range.start).take(range.end.saturating_sub(range.start)) {
-        let stored_reference = stored_input_reference_key(d, i).and_then(|key| d.extra.get(key)).filter(|_| inp.items.is_empty());
+        let stored_reference =
+            stored_input_reference_key(d, i).and_then(|key| d.extra.get(key)).filter(|_| inp.items.is_empty() && !(i == 1 && unresolved_axis));
         form_row(ui, inp.label, |ui| {
             ui.horizontal(|ui| {
                 let active = i == d.active && !text_focus;
@@ -4875,7 +4903,7 @@ fn remembered_extra_keys(kind: &Kind) -> &'static [&'static str] {
         Some("solid.boundary_fill") => &["remove_tools"],
         Some("solid.thread") => &["modeled"],
         Some("solid.move") => &["copy"],
-        Some("solid.coil") => &["section", "section_position", "start_angle", "clockwise"],
+        Some("solid.coil") => &["section", "section_position", "start_angle", "clockwise", "reversed"],
         _ => &[],
     }
 }
@@ -5016,13 +5044,15 @@ pub(crate) fn confirm(app: &mut SolveApp) {
 }
 
 /// A right-click in the viewport with a dialog open confirms its active input (#6159): it goes
-/// on to the next input that is still empty, and once every input holds something, runs OK as
-/// Enter does. An empty input the dialog can't make its feature without stays active, and the
-/// status line says what to pick.
+/// on to the next input that is still empty, and when there is none, runs OK as Enter does.
+/// An empty input the dialog can't make its feature without stays active, and the status line
+/// says what to pick.
 pub(crate) fn right_click(app: &mut SolveApp) {
     let Some(mut d) = app.dialog.take() else { return };
     if enter_applies(&d) && app.applying.is_none() {
-        let empty = |i: &usize| d.inputs.get(*i).is_some_and(|input| input.items.is_empty());
+        // Coil can use its own section and direction, so empty pick fields do not stop OK.
+        let coil = matches!(d.kind, Kind::Primitive { cmd: "solid.coil", .. });
+        let empty = |i: &usize| !coil && d.inputs.get(*i).is_some_and(|input| input.items.is_empty());
         let next = (d.active.saturating_add(1)..d.inputs.len()).chain(0..d.active.min(d.inputs.len())).find(empty);
         match d.active_input().filter(|input| input.items.is_empty()) {
             // An empty input is optional when the dialog makes its feature without it.
@@ -5934,7 +5964,8 @@ pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>
             let original_all = match &feature.kind {
                 FeatureKind::Extrude { sketch, profiles: ProfileSel::All, thin: None, .. }
                 | FeatureKind::Revolve { sketch, profiles: ProfileSel::All, .. }
-                | FeatureKind::Emboss { sketch, profiles: ProfileSel::All, .. } => Some(*sketch),
+                | FeatureKind::Emboss { sketch, profiles: ProfileSel::All, .. }
+                | FeatureKind::Coil { sketch: Some(sketch), profiles: ProfileSel::All, .. } => Some(*sketch),
                 _ => None,
             };
             // A thin extrude follows curves and takes no profiles: an extrude of every profile
@@ -6204,9 +6235,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             // handle follow the pick's sketch, and a bare id would revolve about whatever line
             // the profile sketch happens to number the same.
             let axis = match sels(d, 1).first() {
-                Some(Sel::Axis { name }) => json!(name),
-                Some(curve @ Sel::SketchCurve { .. }) => sketch_curve_axis(app, curve, sketch.as_u64())?,
-                Some(x) => axis_param(app, x)?,
+                Some(pick) => selected_axis_param(app, pick, sketch.as_u64())?,
                 None => stored_axis.clone().ok_or("select an axis")?,
             };
             let mut p = json!({"axis": axis, "angle": angle, "operation": OPS.get(*operation).copied().unwrap_or("new")});
@@ -6972,13 +7001,24 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             for (k, v) in fields {
                 p.insert((*k).into(), json!(v));
             }
-            if *cmd == "solid.coil"
-                && let Some((sketch, index)) = sels(d, 0).profiles().first().copied()
-            {
-                p.insert("sketch".into(), json!(sketch));
-                p.insert("profiles".into(), json!([index]));
-                p.remove("diameter");
-                p.remove("section_size");
+            if *cmd == "solid.coil" {
+                let (sketch, selected_profiles) = profiles();
+                // Like Revolve's qualified pick, keep the original owner when the profile
+                // changes. The saved axis and base remain in effect until the axis is replaced.
+                if let Some((id, _)) = d.editing
+                    && let Some(FeatureKind::Coil { sketch: Some(original), axis_ref: Some(AxisRef::SketchLine { curve, sketch: None }), .. }) =
+                        s.doc.feature(id).map(|f| &f.kind)
+                    && sketch.as_u64() != Some(original.0)
+                    && d.extra.get("axis") == Some(&json!({"curve": curve}))
+                {
+                    p.insert("axis".into(), json!({"sketch": original.0, "curve": curve}));
+                }
+                if !sketch.is_null() {
+                    p.insert("sketch".into(), sketch);
+                    p.insert("profiles".into(), selected_profiles);
+                    p.remove("diameter");
+                    p.remove("section_size");
+                }
             }
             if let Some((point, normal)) = *at {
                 match *cmd {
@@ -6987,7 +7027,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     }
                     "solid.cylinder" | "solid.coil" | "solid.cone" => {
                         p.insert("base".into(), pt(point));
-                        if let Some(n) = normal {
+                        if let Some(n) = normal.filter(|_| *cmd != "solid.coil" || !d.extra.contains_key("axis")) {
                             p.insert("axis".into(), pt(n));
                         }
                         // Reference edges (#6380) place the base by its distances from them.
@@ -7002,6 +7042,25 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 }
             } else {
                 crate::primitive_placement::params(s, cmd, &d.extra, &mut p);
+            }
+            // A refilled reference already carries its saved axis and base. A new pick
+            // clears the saved axis and supplies its own origin.
+            if *cmd == "solid.coil"
+                && !d.extra.contains_key("axis")
+                && let Some(sel) = sels(d, 1).first()
+            {
+                let profile_sketch = sels(d, 0).profiles().first().map(|(sketch, _)| *sketch);
+                let mut axis = coil_axis_param(app, sel, profile_sketch)?;
+                if axis.get("type").and_then(Value::as_str) == Some("placed_edge")
+                    && d.editing.and_then(|(id, _)| s.doc.feature(id)).is_none_or(|f| f.component == s.active_component)
+                    && let Some(path) = &s.active_occurrence_path
+                {
+                    axis["author_path"] = json!(path);
+                }
+                p.insert("axis".into(), axis);
+                if let Some((origin, _)) = axis_of(app, sel) {
+                    p.insert("base".into(), pt(origin));
+                }
             }
             p.insert("operation".into(), json!(OPS.get(*operation).copied().unwrap_or("new")));
             (cmd, Value::Object(p))
@@ -7075,12 +7134,17 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
     if let Value::Object(m) = &mut params {
         // A fillet option that doesn't apply with the others is never sent.
         let fillet = matches!(d.kind, Kind::Fillet { chamfer: false, .. });
+        let coil_profile = cmd == "solid.coil" && m.contains_key("sketch");
         for (k, v) in &d.extra {
             // Saved selection mode is editor state, not a command parameter.
             if matches!(d.kind, Kind::Split) && k == "split_tool_mode" {
                 continue;
             }
             if fillet && !dense::fillet_option_applies(&d.extra, k) {
+                continue;
+            }
+            // Keep the primitive section in the dialog while a sketch supplies the profile.
+            if coil_profile && matches!(k.as_str(), "diameter" | "section_size" | "section" | "section_position" | "start_angle") {
                 continue;
             }
             m.entry(k.clone()).or_insert_with(|| v.clone());
@@ -7382,14 +7446,64 @@ pub(crate) fn sketch_curve_axis(app: &SolveApp, sel: &Sel, profile_sketch: Optio
     if !origin.is_finite() || !dir.is_finite() {
         return Err(AXIS_PICK.into());
     }
-    let same = profile_sketch.and_then(|sketch| profile_axis_line(app, sketch, id)).is_some_and(|line| same_axis(line, (origin, dir)));
-    if same {
-        Ok(json!(id))
-    } else if let Some(owner) = sketch.filter(|owner| Some(*owner) != profile_sketch) {
-        Ok(json!({"sketch": owner, "curve": id}))
-    } else {
-        Ok(json!({"origin": pt(origin), "dir": pt(dir)}))
+    if let Some(owner) = sketch.filter(|owner| Some(*owner) != profile_sketch) {
+        return Ok(json!({"sketch": owner, "curve": id}));
     }
+    let same = profile_sketch.and_then(|sketch| profile_axis_line(app, sketch, id)).is_some_and(|line| same_axis(line, (origin, dir)));
+    if same { Ok(json!(id)) } else { Ok(json!({"origin": pt(origin), "dir": pt(dir)})) }
+}
+
+/// The shared axis-pick serializer for Revolve and Coil. Sketch lines keep their owner so
+/// repeated curve ids in different sketches cannot select a different axis on evaluation.
+fn selected_axis_param(app: &SolveApp, sel: &Sel, profile_sketch: Option<u64>) -> Result<Value, String> {
+    match sel {
+        Sel::Axis { name } => Ok(json!(name)),
+        Sel::SketchCurve { .. } => sketch_curve_axis(app, sel, profile_sketch),
+        _ => axis_param(app, sel),
+    }
+}
+
+/// A picked world axis is a persistent reference. A typed X, Y or Z is a direction at the base.
+fn coil_axis_param(app: &SolveApp, sel: &Sel, profile_sketch: Option<u64>) -> Result<Value, String> {
+    match sel {
+        Sel::Axis { name } if matches!(name.as_str(), "X" | "Y" | "Z") => Ok(json!({"type":"world","axis":name})),
+        Sel::Edge { body, index, point } => {
+            let s = &app.session;
+            let state = s.model.state();
+            let doc = s.placed_document();
+            let (_, source, _, path, frame) = doc.body_frames_with_source(&state).into_iter().find(|(world, ..)| world == body).ok_or(AXIS_PICK)?;
+            let source_body = state.body(&source).ok_or(AXIS_PICK)?;
+            if source_body.body.is_mesh() {
+                return axis_param(app, sel);
+            }
+            let name =
+                solidcraft_engine::doc::naming::edge_names(source_body).into_iter().nth(*index).filter(|name| !name.is_empty()).ok_or(AXIS_PICK)?;
+            let inverse = solidcore_ops::affine::inverse(&frame).map_err(|_| AXIS_PICK)?;
+            let at = solidcore_ops::affine::apply_point(&inverse, (*point).into());
+            Ok(json!({"type":"placed_edge", "body":source, "path":path, "at":at, "name":name}))
+        }
+        Sel::SketchCurve { id, .. } => {
+            let owner = picks_sketch(app, std::slice::from_ref(sel), None);
+            let state = crate::open_meshing::session_world(&app.session);
+            if owner.and_then(|owner| state.sketch(owner)).is_some_and(|sketch| sketch.sketch.wire_index(id).is_some()) {
+                // A straight 3D wire supplies its line in world coordinates.
+                axis_param(app, sel)
+            } else {
+                sketch_curve_axis(app, sel, profile_sketch)
+            }
+        }
+        _ => selected_axis_param(app, sel, profile_sketch),
+    }
+}
+
+/// Preview a picked Coil model edge with the same world direction as evaluation.
+pub(crate) fn coil_axis_preview(app: &SolveApp, sel: &Sel) -> Option<(Vec3, Vec3)> {
+    let (origin, dir) = axis_of(app, sel)?;
+    let dir = match sel {
+        Sel::Edge { body, .. } if !is_mesh_body(&app.session, body) => solidcraft_engine::doc::construct::canonical_dir(dir),
+        _ => dir,
+    };
+    Some((origin, dir))
 }
 
 /// The world line of curve `id` on `sketch`, when that curve is a line.
@@ -7813,6 +7927,19 @@ pub(crate) fn model_axis_sel(s: &Session, g: &solidcraft_engine::doc::construct:
     }
 }
 
+/// Refill the same axis selection for Revolve and Coil when editing a feature.
+pub(crate) fn axis_reference_pick(s: &Session, axis: &AxisRef, profile_sketch: Option<u64>) -> Option<Sel> {
+    match axis {
+        AxisRef::World { axis } => Some(Sel::Axis { name: axis.to_ascii_uppercase() }),
+        AxisRef::SketchAxis { axis } => Some(Sel::Axis { name: axis.to_ascii_lowercase() }),
+        AxisRef::SketchLine { curve, sketch } => Some(crate::selection::curve_pick(curve, sketch.or(profile_sketch)?, s.active_sketch)),
+        AxisRef::Model { geo: solidcraft_engine::doc::construct::GeoRef::Datum { datum } } => Some(Sel::Axis { name: datum.key() }),
+        AxisRef::Model { geo } => model_axis_sel(s, geo),
+        AxisRef::Construction { name } => Some(Sel::Axis { name: name.to_string() }),
+        AxisRef::Line { .. } => None,
+    }
+}
+
 /// A saved construction reference shown as the pick it stands for. Edit Feature keeps the
 /// reference itself until a new pick replaces it, so a fixed point or the origin has a pick too.
 fn saved_pick(s: &Session, reference: &solidcraft_engine::doc::construct::GeoRef) -> Option<Sel> {
@@ -8019,15 +8146,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             if let Some(inp) = d.inputs.get_mut(0) {
                 inp.items = items.into_iter().map(|index| Sel::Profile { sketch: sketch.0, index }).collect();
             }
-            let ax = match axis {
-                AxisRef::World { axis } => Some(Sel::Axis { name: axis.to_ascii_uppercase() }),
-                AxisRef::SketchAxis { axis } => Some(Sel::Axis { name: axis.to_ascii_lowercase() }),
-                AxisRef::SketchLine { curve, sketch: Some(owner) } => Some(crate::selection::curve_pick(curve, *owner, s.active_sketch)),
-                AxisRef::SketchLine { curve, sketch: None } => Some(crate::selection::curve_pick(curve, sketch.0, s.active_sketch)),
-                AxisRef::Model { geo } => model_axis_sel(s, geo),
-                AxisRef::Construction { name } => Some(Sel::Axis { name: name.to_string() }),
-                AxisRef::Line { .. } => None,
-            };
+            let ax = axis_reference_pick(s, axis, Some(sketch.0));
             if let Some(inp) = d.inputs.get_mut(1) {
                 inp.items = ax.into_iter().collect();
             }
@@ -8393,6 +8512,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
         FeatureKind::Coil {
             base,
             axis,
+            axis_ref,
+            reversed,
             sketch,
             profiles,
             diameter,
@@ -8406,7 +8527,15 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             operation,
             targets,
         } => {
+            use solidcraft_engine::doc::construct::GeoRef;
+
             let mut d = start("solid.coil")?;
+            // An edit starts from the saved Coil, including when the new dialog uses preselection.
+            for input in &mut d.inputs {
+                input.items.clear();
+            }
+            d.extra.clear();
+            d.profile_selection_changed = false;
             d.kind = Kind::Primitive {
                 cmd: "solid.coil",
                 fields: vec![
@@ -8427,6 +8556,51 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d.extra.insert("base".into(), pt_expr(base));
             d.extra.insert("axis".into(), pt3(axis.0));
+            if let Some(reference) = axis_ref {
+                let profile_sketch = sketch.map(|id| id.0);
+                let pick = match reference {
+                    AxisRef::Model { geo: geo @ GeoRef::PlacedEdge { .. } } => {
+                        solidcraft_engine::doc::construct::placed_edge_pick(&s.placed_document(), &s.model.state(), geo)
+                            .map(|(body, index, point)| Sel::Edge { body, index, point })
+                    }
+                    AxisRef::Model { geo: GeoRef::Edge { at, name: Some(name) } } => {
+                        solidcraft_engine::doc::construct::named_edge_pick(&st, *at, name).map(|(body, index, point)| Sel::Edge {
+                            body,
+                            index,
+                            point,
+                        })
+                    }
+                    _ => axis_reference_pick(s, reference, profile_sketch),
+                };
+                let (axis, pick) = match (reference, pick) {
+                    (AxisRef::SketchAxis { .. }, pick) => (serde_json::to_value(reference).ok()?, pick),
+                    (AxisRef::SketchLine { curve, sketch }, pick) => {
+                        // A deleted line leaves the field empty so a new pick can replace the saved reference.
+                        let axis = match sketch {
+                            Some(owner) => json!({"sketch": owner, "curve": curve}),
+                            None => json!({"curve": curve}),
+                        };
+                        let pick = pick.filter(|pick| coil_axis_param(app, pick, profile_sketch).is_ok());
+                        (axis, pick)
+                    }
+                    (AxisRef::Model { geo: geo @ (GeoRef::Edge { .. } | GeoRef::Face { .. } | GeoRef::PlacedEdge { .. }) }, pick) => {
+                        (serde_json::to_value(geo).ok()?, pick)
+                    }
+                    (_, Some(pick)) => (coil_axis_param(app, &pick, profile_sketch).ok()?, Some(pick)),
+                    (AxisRef::Line { origin, dir }, None) => (line_axis_value(s, &feature_frame(s, f.component), origin, dir.0), None),
+                    (AxisRef::Model { geo }, None) => (serde_json::to_value(geo).ok()?, None),
+                    _ => return None,
+                };
+                if let Some(pick) = pick
+                    && let Some(input) = d.inputs.get_mut(1)
+                {
+                    input.items = vec![pick];
+                }
+                d.extra.insert("axis".into(), axis);
+            }
+            if *reversed {
+                d.extra.insert("reversed".into(), json!(true));
+            }
             if *section == solidcraft_engine::doc::CoilSection::Square {
                 d.extra.insert("section".into(), json!("square"));
             }
@@ -9630,6 +9804,23 @@ mod right_click_tests {
             assert!(std::time::Instant::now() < deadline, "OK did not finish");
             h.frames(1);
         }
+    }
+
+    #[test]
+    fn a_right_click_confirms_a_primitive_coil_without_picks() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.right_click_confirms = true;
+        h.app.start("solid.coil");
+        h.frames(2);
+        assert!(h.app.dialog.as_ref().unwrap().inputs.iter().all(|input| input.items.is_empty()));
+        right_click(&mut h, json!({"world": [-30, -30, 0]}));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while let Some(dialog) = &h.app.dialog {
+            assert!(std::time::Instant::now() < deadline, "right click did not run OK: {:?}", dialog.error);
+            h.frames(1);
+        }
+        assert!(h.app.session.doc.features.iter().any(|f| matches!(f.kind, FeatureKind::Coil { sketch: None, .. })));
     }
 
     #[test]

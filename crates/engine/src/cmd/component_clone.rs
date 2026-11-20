@@ -515,6 +515,7 @@ pub(super) fn build(
             }
         }
     }
+    let source_roots = source.occurrences.iter().filter(|o| o.component == component).map(|o| o.id).collect();
     for old in &feats {
         let mut f = old.clone();
         f.id = *features.get(&old.id).ok_or_else(|| bad(CMD, "missing feature mapping"))?;
@@ -527,7 +528,14 @@ pub(super) fn build(
         } else if f.body_names.is_empty() {
             f.body_names = outputs.get(&old.id).cloned().unwrap_or_default();
         }
-        f.remap_clone(&features, &names, &bodies, &parameters, &occurrences, &scratch.doc)?;
+        let placements = solidcraft_doc::ClonePlacements {
+            occurrences: &occurrences,
+            source_roots: &source_roots,
+            root: root_occurrence,
+            doc: &scratch.doc,
+            same_document: !origin.other_design,
+        };
+        f.remap_clone(&features, &names, &bodies, &parameters, Some(&placements))?;
         if f.profile_frame.is_some()
             && let Some(old_sketch) = old.kind.constructor_profile_sketch()
             && features.contains_key(&old_sketch)
