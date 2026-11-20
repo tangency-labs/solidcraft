@@ -396,6 +396,11 @@ pub(super) fn view_label(d: &Drawing, view: &View) -> String {
                 let Some(next) = d.view(*parent) else { break };
                 at = next;
             }
+            ViewKind::Detail { parent, .. } => {
+                label.push_str("Detail of ");
+                let Some(next) = d.view(*parent) else { break };
+                at = next;
+            }
         }
     }
     label

@@ -324,6 +324,12 @@ pub(crate) struct OnScreen {
 }
 
 impl OnScreen {
+    /// A sheet shown one point a millimetre round its origin, for a tool's test.
+    #[cfg(test)]
+    pub(crate) fn for_test() -> OnScreen {
+        OnScreen { centre: Pos2::ZERO, target: Vec2::ZERO, scale: 1.0 }
+    }
+
     fn of(cam: &Camera, canvas: Rect) -> OnScreen {
         let scale = f64::from(canvas.height().max(1.0)) / (2.0 * cam.half_height());
         OnScreen { centre: canvas.center(), target: Vec2::new(cam.target.x, cam.target.y), scale }
@@ -527,6 +533,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     let on_paper = hover.filter(|p| (0.0..=size.x).contains(&p.x) && (0.0..=size.y).contains(&p.y));
     let placement_painter = painter.with_clip_rect(sheet_rect.intersect(painter.clip_rect()));
     let placing = crate::drawing_workspace::placement::on_sheet(app, &placement_painter, at, &drawing, sheet, on_paper, response.clicked());
+    if crate::drawing_workspace::placing_detail(app)
+        && let Some(point) = on_paper
+    {
+        crate::drawing_workspace::detail::on_sheet(app, &placement_painter, at, &view.objects, point, response.clicked());
+    }
     let placing_note = crate::drawing_workspace::placing_note(app);
     if placing_note && let Some(point) = on_paper {
         crate::drawing_workspace::note::on_sheet(app, &placement_painter, at, point, sheet, response.clicked());
@@ -560,7 +571,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     {
         crate::drawing_workspace::edit_in_place(app, hit.object, pointer);
     }
-    let placing = placing || placing_note || placing_dimension;
+    let placing = placing || placing_note || placing_dimension || crate::drawing_workspace::placing_detail(app);
     view_tools::Canvas { at, painter: &painter, response: &response, drawing: &drawing, sheet, objects: &view.objects, free: free_area(app, canvas) }
         .show(app, ui, placing);
     view_tools::box_select(app, ui, &painter, &response, at, &drawing, &view.objects, canvas, box_free && !placing);
