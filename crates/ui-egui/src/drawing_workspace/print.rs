@@ -46,11 +46,8 @@ pub(crate) fn start(app: &mut SolveApp) {
         }
         return;
     }
-    // In a browser: made at once, then shown in a new tab.
-    let made = app.run("drawing.print", json!({}));
-    let bytes = made.and_then(|reply| {
-        reply["data"].as_str().and_then(solidcraft_engine::doc::canvas::base64_decode).ok_or_else(|| tr("ui.drawing_print.failed").to_string())
-    });
+    // In a browser: made at once, its bytes as they are, then shown in a new tab.
+    let bytes = solidcraft_engine::print_pdf(&mut app.session).map_err(|e| format!("{}: {e}", tr("ui.drawing_print.failed")));
     match (bytes, &app.services.open_bytes) {
         (Ok(bytes), Some(open)) => match open(&name, "application/pdf", &bytes) {
             Ok(()) => app.set_status(tr("ui.drawing_print.opened"), false),

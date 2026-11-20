@@ -1,6 +1,5 @@
 use serde_json::{Value, json};
 use solidcraft_doc::MAX_PLACEMENT_DEPTH;
-use solidcraft_doc::canvas::base64_decode;
 use solidcraft_geom::paper::NoPictures;
 use solidcraft_io::paper::{PngColour, paper_png};
 
@@ -12,6 +11,22 @@ use crate::tests::{Folder, png_size};
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     s.execute(id, &p).unwrap()
+}
+
+/// Exports `p` to a file of its own (a PNG or PDF is always written to one): the reply and the
+/// file's bytes.
+fn export_file(s: &mut Session, mut p: Value) -> (Value, Vec<u8>) {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let folder = Folder::new(&format!("drawing-export-file-{}", NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+    let path = folder.path(&format!("sheet.{}", p["format"].as_str().unwrap_or("svg")));
+    p["path"] = json!(path);
+    let reply = run(s, CMD, p);
+    (reply, std::fs::read(&path).unwrap())
+}
+
+/// The bytes [`export_file`] writes.
+fn exported(s: &mut Session, p: Value) -> Vec<u8> {
+    export_file(s, p).1
 }
 
 fn refused(s: &mut Session, p: Value) -> String {
@@ -86,8 +101,8 @@ fn a_title_blocks_text_is_written_as_filled_outlines() {
     let svg = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}))["svg"].as_str().unwrap().to_string();
     assert!(runs > 12, "each label and value: {runs}");
     assert_eq!(svg.matches("<path fill=\"#000\" stroke=\"none\" d=\"M").count(), runs);
-    let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet), "format": "png", "dpi": 50}));
-    assert_eq!(reply["data"].as_str().and_then(base64_decode), Some(scene_png(&s, sheet, PngOptions { dpi: 50.0, colour: PngColour::Grey })));
+    let png = exported(&mut s, json!({"sheet": ids::encode(sheet), "format": "png", "dpi": 50}));
+    assert_eq!(png, scene_png(&s, sheet, PngOptions { dpi: 50.0, colour: PngColour::Grey }));
 }
 
 /// With a path the file holds the same SVG and the reply names it instead.
@@ -213,8 +228,8 @@ fn a_view_of_a_configuration_row_exports_as_the_row_builds_it() {
     assert_eq!(reply["svg"].as_str().map(str::as_bytes), Some(scene_svg(&s, sheet).as_slice()));
 }
 
-/// A sheet exports as its scene's PNG, byte for byte: in the reply as base64 data, grey at the
-/// sheet's own dpi when nothing says (300 for a new sheet, so A3 is 4961 x 3508 pixels: 420 and
+/// A sheet exports as its scene's PNG, byte for byte, written to a file (never into the reply), grey
+/// at the sheet's own dpi when nothing says (300 for a new sheet, so A3 is 4961 x 3508 pixels: 420 and
 /// 297 mm at 300 / 25.4 a millimetre, rounded; then 50 once the sheet says so), and at each colour
 /// and a chosen dpi; with a path (its extension in any case) the file holds it
 /// and the reply names it instead. The reply's shape is the SVG's, as its schema says.
@@ -223,22 +238,23 @@ fn a_sheet_exports_as_its_scenes_png() {
     let (mut s, sheet, _) = front_and_top();
     let id = ids::encode(sheet);
     let schema = output_schema_for::<ExportResult>();
-    let reply = run(&mut s, CMD, json!({"sheet": id, "format": "png"}));
+    // Without a path it is refused, naming the way that works: its bytes are never text.
+    assert!(refused(&mut s, json!({"sheet": id, "format": "png"})).contains("a PNG is written to a file: give `path`"));
+    let (reply, written) = export_file(&mut s, json!({"sheet": id, "format": "png"}));
     assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
     let png = scene_png(&s, sheet, PngOptions::default());
-    assert_eq!(reply["data"].as_str().and_then(base64_decode), Some(png.clone()));
+    assert_eq!(written, png);
     assert_eq!((reply["bytes"].as_u64(), &reply["report"]["pixels"]), (Some(png.len() as u64), &json!([4961, 3508])), "{reply}");
-    assert_eq!((reply.get("svg"), reply.get("path"), &reply["format"]), (None, None, &json!("png")));
+    assert_eq!((reply.get("svg"), reply.get("data"), &reply["format"]), (None, None, &json!("png")));
     run(&mut s, "drawing.sheet.set", json!({"sheet": id, "dpi": 50}));
-    let reply = run(&mut s, CMD, json!({"sheet": id, "format": "png"}));
     let png = scene_png(&s, sheet, PngOptions { dpi: 50.0, colour: PngColour::Grey });
-    assert_eq!(reply["data"].as_str().and_then(base64_decode), Some(png), "the sheet's own dpi");
+    assert_eq!(exported(&mut s, json!({"sheet": id, "format": "png"})), png, "the sheet's own dpi");
     for (colour, as_written) in
         [("grey", PngColour::Grey), ("black_white", PngColour::BlackWhite), ("rgb", PngColour::Rgb), ("transparent", PngColour::Transparent)]
     {
-        let reply = run(&mut s, CMD, json!({"sheet": id, "format": "png", "dpi": 25, "colour": colour}));
+        let (reply, written) = export_file(&mut s, json!({"sheet": id, "format": "png", "dpi": 25, "colour": colour}));
         let png = scene_png(&s, sheet, PngOptions { dpi: 25.0, colour: as_written });
-        assert_eq!(reply["data"].as_str().and_then(base64_decode), Some(png), "{colour}");
+        assert_eq!(written, png, "{colour}");
         assert_eq!(reply["report"]["pixels"], json!([414, 293]), "{colour}");
     }
     let folder = Folder::new("drawing-export-png");
@@ -255,7 +271,6 @@ fn a_sheet_exports_as_its_scenes_png() {
 fn a_sheet_exports_on_its_paper() {
     let (mut s, sheet, _) = front_and_top();
     let id = ids::encode(sheet);
-    let data = |reply: Value| reply["data"].as_str().and_then(base64_decode).unwrap();
     let plain = scene_svg(&s, sheet);
     let reply = run(&mut s, CMD, json!({"sheet": id, "paper": "white"}));
     assert_eq!(reply["svg"].as_str().map(str::as_bytes), Some(plain.as_slice()));
@@ -265,15 +280,15 @@ fn a_sheet_exports_on_its_paper() {
         asked.as_object_mut().unwrap().extend(colour.as_object().unwrap().clone());
         let mut white = asked.clone();
         white["paper"] = json!("white");
-        assert_eq!(data(run(&mut s, CMD, white)), data(run(&mut s, CMD, asked)), "{colour}");
+        assert_eq!(exported(&mut s, white), exported(&mut s, asked), "{colour}");
     }
     for (name, paper, hex) in [("blueprint", PaperColour::Blueprint, "#123A76"), ("prussian_blue", PaperColour::PrussianBlue, "#003153")] {
         let reply = run(&mut s, CMD, json!({"sheet": id, "paper": name}));
         let text = reply["svg"].as_str().unwrap();
         assert!(text.contains(&format!("fill=\"{hex}\"")) && text.contains("stroke=\"#E2EEFC\"") && !text.contains("#000"), "{name}");
         let png = scene_png(&s, sheet, PngOptions { dpi: 25.0, colour: PngColour::On(paper) });
-        assert_eq!(data(run(&mut s, CMD, json!({"sheet": id, "format": "png", "dpi": 25, "paper": name}))), png, "{name}");
-        assert_eq!(data(run(&mut s, CMD, json!({"sheet": id, "format": "png", "dpi": 25, "paper": name, "colour": "rgb"}))), png, "{name}");
+        assert_eq!(exported(&mut s, json!({"sheet": id, "format": "png", "dpi": 25, "paper": name})), png, "{name}");
+        assert_eq!(exported(&mut s, json!({"sheet": id, "format": "png", "dpi": 25, "paper": name, "colour": "rgb"})), png, "{name}");
         for colour in ["grey", "black_white", "transparent"] {
             let why = refused(&mut s, json!({"sheet": id, "format": "png", "paper": name, "colour": colour}));
             assert!(why.contains("a blue `paper` is rgb") && why.contains(colour), "{name}, {colour}: {why}");
@@ -294,18 +309,17 @@ fn each_format_agrees_with_the_sheet_and_exports_the_same_once_reopened() {
     let (mut s, sheet, _) = front_and_top();
     let id = ids::encode(sheet);
     let exports = |s: &mut Session| {
-        let mut all = vec![run(s, CMD, json!({"sheet": id}))["svg"].clone()];
+        let mut all = vec![run(s, CMD, json!({"sheet": id}))["svg"].as_str().unwrap().as_bytes().to_vec()];
         for colour in ["grey", "black_white", "rgb", "transparent"] {
-            all.push(run(s, CMD, json!({"sheet": id, "format": "png", "dpi": 150, "colour": colour}))["data"].clone());
+            all.push(exported(s, json!({"sheet": id, "format": "png", "dpi": 150, "colour": colour})));
         }
         all
     };
     let before = exports(&mut s);
-    let svg = before[0].as_str().unwrap();
+    let svg = String::from_utf8_lossy(&before[0]).into_owned();
     assert!(svg.contains(r#"width="420mm" height="297mm" viewBox="0 0 420 297""#), "{}", &svg[..svg.len().min(300)]);
-    for data in &before[1..] {
-        let png = data.as_str().and_then(base64_decode).unwrap();
-        assert_eq!((&png[12..16], png_size(&png)), (&b"IHDR"[..], (2481, 1754)));
+    for png in &before[1..] {
+        assert_eq!((&png[12..16], png_size(png)), (&b"IHDR"[..], (2481, 1754)));
     }
     let drawing = ids::encode(s.drawing("test").unwrap().id);
     let folder = Folder::new("drawing-export-agree");
@@ -391,7 +405,7 @@ fn what_it_cant_write_is_refused() {
 #[test]
 fn a_shaded_view_exports_its_picture() {
     let (mut s, sheet, [front, _]) = front_and_top();
-    let png = |s: &mut Session| run(s, CMD, json!({"sheet": ids::encode(sheet), "format": "png", "dpi": 25}))["data"].clone();
+    let png = |s: &mut Session| exported(s, json!({"sheet": ids::encode(sheet), "format": "png", "dpi": 25}));
     let lines_only = png(&mut s);
     let plain = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}))["svg"].as_str().unwrap().to_owned();
     assert!(!plain.contains("<image"), "lines only: {}", plain.len());
@@ -658,11 +672,11 @@ fn a_sheet_exports_as_a_vector_pdf_at_its_paper_size() {
     let (mut s, sheet, _) = front_and_top();
     let block = serde_json::to_value(solidcraft_geom::title_block::default_block()).unwrap();
     run(&mut s, "drawing.sheet.set", json!({"sheet": ids::encode(sheet), "title_block": block}));
-    let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet), "format": "pdf"}));
+    assert!(refused(&mut s, json!({"sheet": ids::encode(sheet), "format": "pdf"})).contains("a PDF is written to a file: give `path`"));
+    let (reply, bytes) = export_file(&mut s, json!({"sheet": ids::encode(sheet), "format": "pdf"}));
     let schema = output_schema_for::<ExportResult>();
     assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
     assert_eq!((&reply["format"], &reply["pages"]), (&json!("pdf"), &json!([ids::encode(sheet)])), "{reply}");
-    let bytes = base64_decode(reply["data"].as_str().unwrap()).unwrap();
     assert!(bytes.starts_with(b"%PDF-"), "a PDF");
     assert_eq!(reply["bytes"].as_u64(), Some(bytes.len() as u64));
     let pages = pdf_pages(&bytes);
@@ -682,7 +696,7 @@ fn a_sheet_exports_as_a_vector_pdf_at_its_paper_size() {
     assert!(ops.iter().filter(|op| **op == "f").count() > 12, "each title block label and value filled");
     assert!(!content.contains(" Do"), "lines only: no picture");
     let name = s.drawing("test").unwrap().sheets[0].name.clone();
-    assert_eq!(run(&mut s, CMD, json!({"sheet": name, "format": "pdf"}))["data"], reply["data"], "the same bytes by name");
+    assert_eq!(exported(&mut s, json!({"sheet": name, "format": "pdf"})), bytes, "the same bytes by name");
     let folder = Folder::new("drawing-export-pdf");
     let path = folder.path("Sheet 1.PDF");
     let written = run(&mut s, CMD, json!({"sheet": ids::encode(sheet), "format": "pdf", "path": path}));
@@ -698,9 +712,9 @@ fn a_drawing_exports_as_one_pdf_page_per_sheet() {
     let (mut s, first, _) = front_and_top();
     let added = run(&mut s, "drawing.sheet.add", json!({"size": {"standard": "a4"}, "orientation": "portrait"}));
     let second = ids::decode(added["sheet"].as_str().unwrap()).unwrap();
-    let all = run(&mut s, CMD, json!({"format": "pdf"}));
+    let (all, bytes) = export_file(&mut s, json!({"format": "pdf"}));
     assert_eq!(all["pages"], json!([ids::encode(first), ids::encode(second)]), "{all}");
-    let pages = pdf_pages(&base64_decode(all["data"].as_str().unwrap()).unwrap());
+    let pages = pdf_pages(&bytes);
     assert_eq!(pages.len(), 2);
     let d = s.drawing("test").unwrap().clone();
     for ((media, _), sheet) in pages.iter().zip(&d.sheets) {
@@ -713,9 +727,9 @@ fn a_drawing_exports_as_one_pdf_page_per_sheet() {
     let strokes = |content: &str| content.split_whitespace().filter(|t| *t == "S" || *t == "s").count();
     assert!(strokes(&pages[0].1) > strokes(&pages[1].1), "the views' lines on the first page only");
     // Chosen sheets, in the order given.
-    let chosen = run(&mut s, CMD, json!({"format": "pdf", "sheets": [ids::encode(second), d.sheets[0].name]}));
+    let (chosen, bytes) = export_file(&mut s, json!({"format": "pdf", "sheets": [ids::encode(second), d.sheets[0].name]}));
     assert_eq!(chosen["pages"], json!([ids::encode(second), ids::encode(first)]), "{chosen}");
-    let reversed = pdf_pages(&base64_decode(chosen["data"].as_str().unwrap()).unwrap());
+    let reversed = pdf_pages(&bytes);
     assert_eq!((reversed[0].0, reversed[1].0), (pages[1].0, pages[0].0));
     // Each sheet's views are reported, the first page's first.
     assert_eq!(chosen["views"].as_array().map(Vec::len), all["views"].as_array().map(Vec::len));
@@ -727,13 +741,12 @@ fn a_drawing_exports_as_one_pdf_page_per_sheet() {
 fn a_shaded_view_is_embedded_in_the_pdf() {
     let (mut s, sheet, [front, _]) = front_and_top();
     run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"visual_style": "shaded"}}));
-    let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet), "format": "pdf"}));
-    let bytes = base64_decode(reply["data"].as_str().unwrap()).unwrap();
+    let bytes = exported(&mut s, json!({"sheet": ids::encode(sheet), "format": "pdf"}));
     let text = String::from_utf8_lossy(&bytes);
     assert!(text.contains("/Subtype /Image"), "an image XObject");
     let pages = pdf_pages(&bytes);
     assert_eq!(pages[0].1.matches(" Do").count(), 2, "the front view's picture, and the top view's, which follows it");
-    assert_eq!(run(&mut s, CMD, json!({"sheet": ids::encode(sheet), "format": "pdf"}))["data"], reply["data"], "the same bytes twice");
+    assert_eq!(exported(&mut s, json!({"sheet": ids::encode(sheet), "format": "pdf"})), bytes, "the same bytes twice");
 }
 
 /// A DXF read back: each entity's type, its layer (group 8) and its own weight (group 370), in
@@ -821,22 +834,22 @@ fn a_sheet_exports_as_dxf_with_a_layer_for_each_kind_of_line() {
 }
 
 /// `drawing.print` is the whole drawing's PDF, as `drawing.export` makes it with no sheet named:
-/// the same bytes, every sheet a page, asking to print at actual size; with a path, written there.
+/// the same bytes, every sheet a page, asking to print at actual size, written to its path. The app's
+/// own print takes the same bytes in-process (`print_pdf`); the command never puts them in its reply.
 #[test]
 fn print_is_the_whole_drawings_pdf() {
     let (mut s, first, _) = front_and_top();
     let added = run(&mut s, "drawing.sheet.add", json!({}));
     let second = added["sheet"].clone();
-    let printed = run(&mut s, "drawing.print", json!({}));
-    let exported = run(&mut s, CMD, json!({"format": "pdf"}));
-    assert_eq!(printed["data"], exported["data"]);
-    assert_eq!(printed["pages"], json!([ids::encode(first), second]), "{printed}");
-    let bytes = base64_decode(printed["data"].as_str().unwrap()).unwrap();
-    assert!(String::from_utf8_lossy(&bytes).contains("/PrintScaling /None"));
     let folder = Folder::new("drawing-print");
     let path = folder.path("Drawing.pdf");
-    run(&mut s, "drawing.print", json!({"path": path}));
-    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    let printed = run(&mut s, "drawing.print", json!({"path": path}));
+    let bytes = std::fs::read(&path).unwrap();
+    assert_eq!(bytes, exported(&mut s, json!({"format": "pdf"})));
+    assert_eq!(printed["pages"], json!([ids::encode(first), second]), "{printed}");
+    assert!(String::from_utf8_lossy(&bytes).contains("/PrintScaling /None"));
+    assert_eq!(super::print_pdf(&mut s).unwrap(), bytes, "the app's print: the same bytes");
+    assert!(s.execute("drawing.print", &json!({})).unwrap_err().to_string().contains("give `path`"));
     for (p, why) in [(json!({"path": folder.path("Drawing.svg")}), "path must be a .pdf file"), (json!({"sheet": "Sheet 1"}), "sheet")] {
         let message = s.execute("drawing.print", &p).unwrap_err().to_string();
         assert!(message.contains(why), "{p}: {message}");
