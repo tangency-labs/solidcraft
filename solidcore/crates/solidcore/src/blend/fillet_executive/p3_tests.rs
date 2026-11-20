@@ -63,6 +63,15 @@ struct Access {
     corner_point: Point3,
     constant_results: Vec<bool>,
     corner_fail: Option<&'static str>,
+    /// The error each scripted stage fails with, by the stage's name ([`Access::stage`]).
+    stage_errors: BTreeMap<&'static str, SolidError>,
+}
+impl Access {
+    /// The result of the stage `name`: its scripted error, if any. A failure at `topology`
+    /// notes the corner's refusal (`SM_FILERR_NO_ROOM`) when `topology_noted` is scripted.
+    fn stage(&self, name: &'static str) -> Result<()> {
+        self.stage_errors.get(name).cloned().map_or(Ok(()), Err)
+    }
 }
 fn absent<T>() -> Result<T> {
     Err(invalid("test handle has no geometry"))
@@ -122,7 +131,11 @@ impl ExecutiveAccess<Handle> for Access {
         if self.corner_enables_global {
             executive.options.global_merge = true;
         }
-        Ok(())
+        if let Some(e) = self.stage_errors.get("topology_noted") {
+            executive.error.code = FilletErrorType::NoRoom as i32;
+            return Err(e.clone());
+        }
+        self.stage("topology")
     }
     fn corner_error_info(
         &self,
@@ -464,7 +477,7 @@ impl ExecutiveAccess<Handle> for Access {
         if self.corner_fail == Some("vertices") {
             Err(failure())
         } else {
-            Ok(())
+            self.stage("vertices")
         }
     }
     fn check_degeneracy(
@@ -489,7 +502,7 @@ impl ExecutiveAccess<Handle> for Access {
         _: &mut FilletExecutive<Handle>,
     ) -> Result<()> {
         self.events.push("adjust");
-        Ok(())
+        self.stage("adjust")
     }
     fn adjust_tangent_corner(
         &mut self,
@@ -498,7 +511,7 @@ impl ExecutiveAccess<Handle> for Access {
         _: &mut FilletExecutive<Handle>,
     ) -> Result<()> {
         self.events.push("adjust_tangent");
-        Ok(())
+        self.stage("adjust_tangent")
     }
     fn calc_corner_edges(
         &mut self,
@@ -507,7 +520,7 @@ impl ExecutiveAccess<Handle> for Access {
         _: &mut FilletExecutive<Handle>,
     ) -> Result<()> {
         self.events.push("corner_edges");
-        Ok(())
+        self.stage("edges")
     }
     fn calc_fillet_geom(
         &mut self,
@@ -515,6 +528,7 @@ impl ExecutiveAccess<Handle> for Access {
         _: Handle,
         executive: &mut FilletExecutive<Handle>,
     ) -> Result<()> {
+        self.stage("solver")?;
         executive.error.code = 6;
         Ok(())
     }
@@ -533,7 +547,7 @@ impl ExecutiveAccess<Handle> for Access {
         _: Handle,
         _: &mut FilletExecutive<Handle>,
     ) -> Result<()> {
-        Ok(())
+        self.stage("trim")
     }
     fn make_face_brep(
         &mut self,
@@ -544,6 +558,7 @@ impl ExecutiveAccess<Handle> for Access {
     ) -> Result<()> {
         assert!(executive.fillet.is_some());
         self.events.push("make_face");
+        self.stage("make_face")?;
         if self.append_geom {
             self.append_geom = false;
             self.geoms.push(Handle(9));
@@ -622,7 +637,7 @@ impl ExecutiveAccess<Handle> for Access {
         _: &mut FilletExecutive<Handle>,
     ) -> Result<()> {
         self.events.push("corner_geom");
-        Ok(())
+        self.stage("corner_geom")
     }
     fn geom_has_surface(&self, _: Handle) -> Result<bool> {
         absent()
@@ -1297,4 +1312,290 @@ fn tag_merge_component_retains_allocated_markers_when_merge_fails() {
     assert_eq!(access.attributes.get(&Handle(30)), Some(&vec![Handle(11)]));
     assert_eq!(access.events, ["new_attr", "merge"]);
     assert_eq!(executive.topo_edges, [Some(Handle(20))]);
+}
+
+// ---- a failed stage keeps its error as the cause of the executive's failure (#13790) ----
+
+/// The executive's run of `create_fillet_brep` (one corner, one solver with one geometry)
+/// whose stage `stage` fails with `error`.
+fn failing_at(stage: &'static str, error: SolidError) -> (FilletExecutive<Handle>, Result<()>) {
+    let mut executive = state();
+    executive.corners.push(Handle(7));
+    executive.solvers.push(Handle(3));
+    let mut access = Access {
+        corner_metadata: Some(corner()),
+        geoms: vec![Handle(8)],
+        stage_errors: BTreeMap::from([(stage, error)]),
+        ..Access::default()
+    };
+    let result = executive.create_fillet_brep(&mut Kernel::default(), &mut access, None);
+    (executive, result)
+}
+
+/// A stage error with no class (a bare status), a stage failure (a defect), and failures
+/// whose own causes are a refusal, a cancellation and an unported call: none of them is
+/// passed on by the executive, whatever their causes hold (decisions 2 and 3 of #19801).
+fn stage_errors() -> [SolidError; 5] {
+    use crate::error::blend::BlendFailure;
+    let over = |cause: SolidError| {
+        crate::error::Failure::new("test::stage", BlendFailure::Failed("the stage failed"))
+            .caused_by(cause)
+            .into_error()
+    };
+    [
+        SolidError::sm_err("test::stage"),
+        SolidError::blend("test::stage", BlendFailure::StageFailed),
+        over(SolidError::blend(
+            "test::corner",
+            BlendFailure::NoRoom(NoRoomReason::BallDoesNotFit),
+        )),
+        over(SolidError::Cancelled {
+            operation: "test::corner",
+        }),
+        over(SolidError::unported("SmTest::Call", "blend.test")),
+    ]
+}
+
+/// `e` is the executive's failure as it was before its cause was kept (the same operation,
+/// phrase, status and kind), now keeping `cause`, whose class it takes.
+fn assert_failure_keeps(e: &SolidError, cause: &SolidError) {
+    let bare = failure();
+    assert_eq!(e.operation(), OP, "{e:?}");
+    assert_eq!(e.blend_failure(), bare.blend_failure(), "{e:?}");
+    assert_eq!(e.sm_status(), Some(crate::error::SM_ERR), "{e:?}");
+    assert_eq!(e.upstream_status(), bare.upstream_status(), "{e:?}");
+    assert_eq!(e.kind(), bare.kind(), "{e:?}");
+    assert_eq!(e.entity(), None, "{e:?}");
+    assert_eq!(e.cause(), Some(cause), "{e:?}");
+    let source = std::error::Error::source(e.failure().unwrap()).map(ToString::to_string);
+    assert_eq!(source, Some(cause.to_string()));
+    assert_eq!(e.to_string(), format!("{bare}; caused by {cause}"));
+    // the kernel's chain-following properties now follow the kept cause
+    assert_eq!(e.is_defect(), cause.is_defect(), "{e:?}");
+    assert_eq!(e.is_refusal(), cause.is_refusal(), "{e:?}");
+    assert_eq!(e.sized(), cause.sized(), "{e:?}");
+    assert_eq!(e.is_port_failure(), cause.is_port_failure(), "{e:?}");
+    // a status answer (the failure has a status) unless its kept chain holds a port failure
+    // or a cancellation
+    let stopped = std::iter::successors(Some(cause), |c| c.cause()).any(SolidError::is_cancelled);
+    assert_eq!(
+        e.is_status_answer(),
+        !cause.is_port_failure() && !stopped,
+        "{e:?}"
+    );
+}
+
+/// Each stage whose failure the executive reports with its own failure (a corner's topology,
+/// vertex geometry, topology adjustment, tangent adjustment, edges and face geometry; a
+/// solver's geometry, rail trim and face) notes the same error info as before and returns
+/// the same failure, now keeping the stage's error as its cause.
+#[test]
+fn a_failed_stage_keeps_its_error_as_the_executives_cause() {
+    // (stage, (error code, error status, comment))
+    let corner = |comment| (3, 2, comment);
+    let solver = |status, comment| (4, status, comment);
+    let stages = [
+        (
+            "topology",
+            corner("Fillet Corner Error: Unable to Make Topology"),
+        ),
+        (
+            "vertices",
+            corner("Fillet Corner Error: Unable to Compute Geometry"),
+        ),
+        (
+            "adjust",
+            corner("Fillet Corner Error: Topology Adjustment Failure"),
+        ),
+        ("solver", solver(10, "Fillet Surface Computation Failure")),
+        (
+            "adjust_tangent",
+            corner("Fillet Corner Error: Topology Adjustment Failure"),
+        ),
+        (
+            "edges",
+            corner("Fillet Corner Error: Corner Edge Computation Failure"),
+        ),
+        (
+            "trim",
+            solver(
+                7,
+                "Fillet Surface Computation Failure: Unable to Trim Rail Curve",
+            ),
+        ),
+        (
+            "corner_geom",
+            corner("Fillet Corner Error: Corner Geometry Computation Failure"),
+        ),
+        (
+            "make_face",
+            solver(
+                2,
+                "Fillet Surface Computation Failure: Fillet Face Creation Error",
+            ),
+        ),
+    ];
+    for (stage, (code, status, comment)) in stages {
+        for cause in stage_errors() {
+            let (executive, result) = failing_at(stage, cause.clone());
+            let e = result.unwrap_err();
+            assert_failure_keeps(&e, &cause);
+            assert_eq!(executive.error.code, code, "{stage}");
+            assert_eq!(executive.error.status, status, "{stage}");
+            assert_eq!(executive.error.comment, comment, "{stage}");
+        }
+    }
+}
+
+/// A corner that noted its refusal at its topology (`SM_FILERR_NO_ROOM`) keeps that note,
+/// and the failure keeps the topology's error as its cause.
+#[test]
+fn a_corner_refused_at_its_topology_keeps_the_topologys_error() {
+    for cause in stage_errors() {
+        let (executive, result) = failing_at("topology_noted", cause.clone());
+        assert_failure_keeps(&result.unwrap_err(), &cause);
+        assert_eq!(executive.error.code, FilletErrorType::NoRoom as i32);
+        assert_eq!(
+            executive.error.comment,
+            ErrorInfo::<Handle>::default().comment
+        );
+    }
+}
+
+/// An unported call, a cancellation or unavailable face trims at a stage is passed on as it
+/// is, noting nothing (the stage's error itself decides, as before); a refusal of a corner's
+/// vertex geometry is passed on as it is, while a refusal at a stage that does not pass
+/// refusals on (the corner's edges) is the executive's failure, keeping it.
+#[test]
+fn a_stage_passes_on_only_what_it_passed_on_before() {
+    use crate::error::blend::BlendFailure;
+    let passed = [
+        SolidError::unported("SmTest::Call", "blend.test"),
+        SolidError::Cancelled {
+            operation: "test::stage",
+        },
+        SolidError::FaceTrimsUnavailable {
+            operation: "test::stage",
+            entity: crate::error::EntityRef::Face(crate::topology::FaceId::from_index(2)),
+        },
+    ];
+    for stage in ["topology", "vertices", "solver", "edges", "make_face"] {
+        for error in passed.clone() {
+            let (executive, result) = failing_at(stage, error.clone());
+            assert_eq!(result, Err(error), "{stage}");
+            // no corner or solver failure noted (the scripted solver geometry notes 6)
+            let noted_by_stages = if ["edges", "make_face"].contains(&stage) {
+                6
+            } else {
+                0
+            };
+            assert_eq!(executive.error.code, noted_by_stages, "{stage}");
+        }
+    }
+    let refusal = SolidError::blend(
+        "test::corner",
+        BlendFailure::NoRoom(NoRoomReason::BallDoesNotFit),
+    );
+    let (executive, result) = failing_at("vertices", refusal.clone());
+    assert_eq!(result, Err(refusal.clone()));
+    assert_eq!(executive.error.code, 0);
+    let (executive, result) = failing_at("edges", refusal.clone());
+    assert_failure_keeps(&result.unwrap_err(), &refusal);
+    assert_eq!(executive.error.code, 3);
+}
+
+/// A refusal or a cancellation among a stage error's causes changes nothing about what the
+/// executive passes on (decisions 2 and 3 of #19801): the corner's vertex geometry, which
+/// passes on a refusal it is given, reports the executive's failure for a failure over a
+/// refusal, and for a failure over a cancellation. Only the chain-following properties of the
+/// returned failure see them.
+#[test]
+fn a_refusal_or_a_cancellation_under_a_stage_error_is_not_passed_on() {
+    let [_, _, over_refusal, over_cancellation, _] = stage_errors();
+    for cause in [&over_refusal, &over_cancellation] {
+        assert!(!cause.is_unported_or_cancelled());
+        let (executive, result) = failing_at("vertices", cause.clone());
+        assert_failure_keeps(&result.unwrap_err(), cause);
+        assert_eq!(executive.error.code, 3);
+        assert_eq!(
+            executive.error.comment,
+            "Fillet Corner Error: Unable to Compute Geometry"
+        );
+    }
+    let refused = failing_at("vertices", over_refusal).1.unwrap_err();
+    assert!(refused.blend_failure() == failure().blend_failure());
+    assert!(refused.is_refusal() && refused.sized() && refused.is_status_answer());
+    let stopped = failing_at("vertices", over_cancellation).1.unwrap_err();
+    assert!(!stopped.is_cancelled() && !stopped.is_status_answer());
+}
+
+/// `DoFilleting`'s failure for a `CreateFilletBrep` that failed keeps that failure, which
+/// keeps its stage's error; a cancellation at a stage is passed on through both.
+#[test]
+fn do_filleting_keeps_the_failure_of_the_fillet_body() {
+    let run = |error: SolidError| {
+        let mut executive = state();
+        executive.corners.push(Handle(7));
+        let mut access = Access {
+            corner_metadata: Some(corner()),
+            stage_errors: BTreeMap::from([("vertices", error)]),
+            ..Access::default()
+        };
+        executive.do_filleting(&mut Kernel::default(), &mut access, None)
+    };
+    let stage = SolidError::sm_err("test::stage");
+    let e = run(stage.clone()).unwrap_err();
+    let created = e.cause().unwrap().clone();
+    assert_failure_keeps(&created, &stage);
+    assert_failure_keeps(&e, &created);
+    assert_eq!(e.root_cause(), &stage);
+    let cancelled = SolidError::Cancelled {
+        operation: "test::stage",
+    };
+    assert_eq!(run(cancelled.clone()), Err(cancelled));
+}
+
+/// The preview's corner stages and the rail classification's rollover keep their errors as
+/// the failure's cause too, noting the same error info.
+#[test]
+fn the_preview_and_the_rollover_keep_the_stages_error() {
+    for (stage, comment) in [
+        ("topology", "Fillet Corner Error: Unable to Make Topology"),
+        (
+            "vertices",
+            "Fillet Corner Error: Unable to Compute Geometry",
+        ),
+    ] {
+        for cause in stage_errors() {
+            let mut executive = state();
+            executive.corners.push(Handle(7));
+            let mut access = Access {
+                corner_metadata: Some(corner()),
+                stage_errors: BTreeMap::from([(stage, cause.clone())]),
+                ..Access::default()
+            };
+            let e = executive
+                .preview_fillet_geometry(&mut Kernel::default(), &mut access)
+                .unwrap_err();
+            assert_failure_keeps(&e, &cause);
+            assert_eq!(executive.error.code, 3, "{stage}");
+            assert_eq!(executive.error.comment, comment, "{stage}");
+        }
+    }
+    // the scripted rollover test fails with the access's own error
+    let mut executive = state();
+    executive.solvers.push(Handle(3));
+    executive.options.classification = true;
+    let mut access = Access::default();
+    let e = executive
+        .classify_solver_rails(&mut Kernel::default(), &mut access)
+        .unwrap_err();
+    assert_failure_keeps(&e, &invalid("test handle has no geometry"));
+    assert_eq!(executive.error.code, 4);
+    assert_eq!(executive.error.status, 7);
+    assert_eq!(executive.error.edge, Some(Handle(5)));
+    assert_eq!(
+        executive.error.comment,
+        "Fillet Solver Error: Unable to Process Rollover"
+    );
 }
