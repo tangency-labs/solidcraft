@@ -12,6 +12,13 @@ The independent versions let document migrations evolve without changing blob en
 Existing serialized document fields are retained automatically, without a second copy
 of the document schema or a deep clone of embedded payloads.
 
+A drawing file's `container.json` adds `"content":"drawing"`. Experimentally (#6892,
+`io::DesignKind`), a design's kind is kept there the same way: `"content":"part"` (`.scp`),
+`"sheet_metal"` (`.scs`) or `"assembly"` (`.sca`). A single design (`.sc`) writes no `content`,
+so its file is what it always was. The kind never changes with the file's name. Releases
+since 0.45.0-rc.1 open such a file as a design from a newer SolidCraft and keep its
+`container.json` when saving it.
+
 Within `document.json`:
 
 - Import features have empty `step` and a `step_blob` reference.

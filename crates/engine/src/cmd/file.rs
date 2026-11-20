@@ -9,6 +9,9 @@ mod easyprint;
 #[path = "file_import.rs"]
 pub(crate) mod import;
 
+#[path = "file_kind.rs"]
+pub(crate) mod kind;
+
 #[path = "file_open_steps.rs"]
 pub(crate) mod open_steps;
 
@@ -1581,6 +1584,7 @@ fn reads_natively(path: &str) -> bool {
         || solidcraft_io::is_kicad_path(path)
         || solidcraft_io::formats::open_extensions(true).iter().any(|e| e.eq_ignore_ascii_case(&extension))
         || matches!(extension.as_str(), "sc" | "solidcraft" | "json")
+        || solidcraft_io::DesignKind::for_path(path).is_some()
 }
 
 /// Why a file read as a design could not be: with a design's own extension, what the reader said;
@@ -1622,6 +1626,8 @@ fn opened_design(
     s.replace_design(opened);
     s.disk = disk;
     s.read_only = read_only;
+    let (kind, kind_note) = kind::opened(path);
+    s.design_kind = kind;
     // Both from the reading the design came from (`read_design`): the signature check, when it
     // was asked for, is the check of these bytes.
     s.provenance_chain = chain;
@@ -1657,6 +1663,8 @@ fn opened_design(
         }),
         warnings: s.doc.newer_file.as_ref().map(|file| file.warnings()),
         signature: s.provenance.as_ref().map(signature_report),
+        kind: kind::reported(kind),
+        kind_note,
         param_warnings: Vec::new(),
     }))
 }
@@ -1870,14 +1878,18 @@ fn write(
     // Saving an unnamed or borrowed-named design to a new file names it after that file
     // (not an undoable edit); a name the user chose is kept (#4907).
     let renamed = saved_name(&s.doc.name, s.path.as_deref(), path, s.user_named).map(|stem| (s.doc.name.clone(), stem));
+    // The kind of design the file holds (experimental, #6892): checked before anything changes.
+    let kind = kind::for_save(s, cmd, path, format)?;
+    let kind_before = std::mem::replace(&mut s.design_kind, kind);
     if let Some((from, to)) = &renamed {
         rename_design(s, from, to);
     }
     let r = write_file(s, path, format, compression, preview, cache, sign, signing_key);
-    if r.is_err()
-        && let Some((from, to)) = &renamed
-    {
-        rename_design(s, to, from);
+    if r.is_err() {
+        s.design_kind = kind_before;
+        if let Some((from, to)) = &renamed {
+            rename_design(s, to, from);
+        }
     }
     r
 }
@@ -2016,6 +2028,7 @@ fn write_bytes(
         not_kept: None,
         param_warnings: Vec::new(),
         signature,
+        kind: (format == "container").then(|| kind::reported(s.design_kind)).flatten(),
     };
     if bytes_len > solidcraft_io::limits::max_design_bytes() {
         notes.push(format!(
@@ -2374,19 +2387,15 @@ impl Session {
         let geometry = cache.then(|| saved_geometry(self, &design)).flatten();
         let preview = preview.then(|| saved_preview(self)).flatten();
         let thumbnail = cache.then(|| thumbnail::saved(self)).flatten();
-        match provenance {
-            Some(save) => solidcraft_io::write_design_container_with_provenance(
-                &design,
-                compression,
-                preview.as_ref(),
-                geometry.as_ref(),
-                thumbnail.as_deref(),
-                save,
-            ),
-            None => {
-                solidcraft_io::write_design_container_with_thumbnail(&design, compression, preview.as_ref(), geometry.as_ref(), thumbnail.as_deref())
-            }
-        }
+        solidcraft_io::write_design_container_as(
+            &design,
+            self.design_kind,
+            compression,
+            preview.as_ref(),
+            geometry.as_ref(),
+            thumbnail.as_deref(),
+            provenance,
+        )
     }
 }
 
@@ -3284,6 +3293,58 @@ mod tests {
         };
         assert!(has_thumbnail(&mut s, "part.3mf"));
         assert!(!has_thumbnail(&mut s, "part.stl"), "STL has no place for a picture");
+    }
+
+    /// Experimental file kinds (#6892): a new design's first save takes the kind its extension
+    /// names and the header keeps it; a save as another kind is refused, a renamed file opens as
+    /// what its header says with a note, and a JSON save of a part is refused. Off, extensions
+    /// mean nothing and the kind a file holds is still kept. The switch is only ever turned on
+    /// here: a single design saves and opens the same either way, so other tests are unaffected.
+    #[test]
+    fn file_kinds_follow_the_header_and_refuse_a_save_as_another_kind() {
+        use solidcraft_io::DesignKind;
+        crate::set_experimental_file_kinds(true);
+        let dir = std::env::temp_dir().join(format!("solidcraft-file-kinds-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let at = |name: &str| dir.join(name).to_string_lossy().to_string();
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 10, "width": 20, "height": 30})).unwrap();
+        let saved = s.execute("file.save", &json!({"path": at("bracket.scp")})).unwrap();
+        assert_eq!(saved["kind"], "part", "{saved}");
+        assert_eq!(s.design_kind, DesignKind::Part);
+        assert_eq!(solidcraft_io::read_design_kind_file(&at("bracket.scp")), DesignKind::Part);
+        // Saved again, and as another part: still a part, and the reply says so.
+        assert_eq!(s.execute("file.save", &json!({})).unwrap()["kind"], "part");
+        assert_eq!(s.execute("file.save_as", &json!({"path": at("bracket-2.scp")})).unwrap()["kind"], "part");
+        // As an assembly, a single design or JSON: refused, and the file is not written.
+        for (name, says) in [("bracket.sca", "create a new assembly"), ("bracket.sc", "create a new single design"), ("bracket.json", "header")] {
+            let refused = s.execute("file.save_as", &json!({"path": at(name)})).unwrap_err().to_string();
+            assert!(refused.contains(says) && refused.contains("a part"), "{name}: {refused}");
+            assert!(!std::path::Path::new(&at(name)).exists(), "{name}");
+        }
+        assert_eq!(s.design_kind, DesignKind::Part, "a refused save changes nothing");
+        // Renamed on disk: the header wins, and the reply says so.
+        std::fs::copy(at("bracket.scp"), at("renamed.sca")).unwrap();
+        let mut o = Session::default();
+        let opened = o.execute("doc.open", &json!({"path": at("renamed.sca")})).unwrap();
+        assert_eq!(opened["kind"], "part", "{opened}");
+        assert!(opened["kind_note"].as_str().is_some_and(|note| note.contains("holds a part")), "{opened}");
+        assert!(opened.get("newer_file").is_none(), "this build knows its own kinds: {opened}");
+        assert_eq!(o.design_kind, DesignKind::Part);
+        // Opened from its own name: no note.
+        let plain = o.execute("doc.open", &json!({"path": at("bracket.scp")})).unwrap();
+        assert!(plain.get("kind_note").is_none(), "{plain}");
+        // Off: the extension means nothing and the kind is kept as it came.
+        assert_eq!(kind::checked(&o, "file.save_as", &at("x.sca"), "container", false).unwrap(), DesignKind::Part);
+        assert_eq!(kind::checked(&Session::default(), "file.save", &at("x.scp"), "container", false).unwrap(), DesignKind::Single);
+        assert_eq!(kind::opened_with(&at("renamed.sca"), false), (DesignKind::Part, None));
+        // A single design: no kind in any reply, and its file is as before.
+        let mut single = Session::default();
+        single.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5})).unwrap();
+        let plain = single.execute("file.save", &json!({"path": at("plain.sc")})).unwrap();
+        assert!(plain.get("kind").is_none(), "{plain}");
+        assert_eq!(solidcraft_io::read_design_kind_file(&at("plain.sc")), DesignKind::Single);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Three-digit hex colours expand one digit per channel, as CSS does: `#fff` is white.

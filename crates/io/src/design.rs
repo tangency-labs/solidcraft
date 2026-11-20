@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 mod drawing;
 mod import_cache;
+mod kind;
 mod native_cache;
 mod provenance;
 mod thumbnail;
@@ -27,6 +28,8 @@ pub use thumbnail::{THUMBNAIL_SIZE, read_design_thumbnail, read_design_thumbnail
 use serde_json::{Map, Value, json};
 use solidcraft_doc::{Document, FeatureKind, MeshData};
 use solidcraft_format::container::{Limits, Reader, Writer, digest};
+
+pub use kind::{DesignKind, design_kind, read_design_kind_file};
 
 use crate::{IoError, Result, design_metadata::replace};
 
@@ -278,7 +281,7 @@ pub fn write_design_container_with_thumbnail(
     thumbnail: Option<&[u8]>,
 ) -> Result<Vec<u8>> {
     let _span = solidcraft_profile::span("io", "write_design_container_with_thumbnail");
-    write_container(doc, compression, preview, geometry, thumbnail, max_design(), None)
+    write_container(doc, DesignKind::Single, compression, preview, geometry, thumbnail, max_design(), None)
 }
 
 /// Write a container with one signed provenance record appended to `save.chain` (see
@@ -293,13 +296,31 @@ pub fn write_design_container_with_provenance(
     save: &ProvenanceSave<'_>,
 ) -> Result<Vec<u8>> {
     let _span = solidcraft_profile::span("io", "write_design_container_with_provenance");
-    write_container(doc, compression, preview, geometry, thumbnail, max_design(), Some(save))
+    write_container(doc, DesignKind::Single, compression, preview, geometry, thumbnail, max_design(), Some(save))
+}
+
+/// Write a design of `kind` (experimental, #6892): its header names the kind ([`DesignKind`]); a
+/// single design's is the header every design had. `provenance` appends a signed record as
+/// [`write_design_container_with_provenance`] does.
+pub fn write_design_container_as(
+    doc: &Document,
+    kind: DesignKind,
+    compression: DesignCompression,
+    preview: Option<&DesignPreview>,
+    geometry: Option<&solidcraft_doc::SavedModel>,
+    thumbnail: Option<&[u8]>,
+    provenance: Option<&ProvenanceSave<'_>>,
+) -> Result<Vec<u8>> {
+    let _span = solidcraft_profile::span("io", "write_design_container_as");
+    write_container(doc, kind, compression, preview, geometry, thumbnail, max_design(), provenance)
 }
 
 /// The common container writer. `provenance` records a signed record when present; the budget
 /// bounds the optional caches (tests pass less).
+#[allow(clippy::too_many_arguments)]
 fn write_container(
     doc: &Document,
+    kind: DesignKind,
     compression: DesignCompression,
     preview: Option<&DesignPreview>,
     geometry: Option<&solidcraft_doc::SavedModel>,
@@ -432,7 +453,7 @@ fn write_container(
     let metadata = serde_json::to_vec(&metadata).map_err(invalid)?;
     writer.part("document.json", &metadata, true)?;
     // What a newer build's file holds beside the design goes back as it came.
-    let container = doc.newer_file.as_ref().and_then(|file| file.container.clone()).unwrap_or_else(|| json!({"format": VERSION}));
+    let container = doc.newer_file.as_ref().and_then(|file| file.container.clone()).unwrap_or_else(|| kind.header());
     let container_bytes = serde_json::to_vec(&container).map_err(invalid)?;
     writer.part("container.json", &container_bytes, false)?;
     for (name, bytes) in doc.newer_file.iter().flat_map(|file| &file.parts) {
@@ -1196,6 +1217,7 @@ fn is_known_container(container: &Value) -> bool {
     *container == json!({"format": VERSION})
         || *container == json!({"format": LEGACY_VERSION})
         || container.get("content").is_some_and(|c| c == "drawing")
+        || DesignKind::ALL.into_iter().any(|kind| *container == kind.header())
 }
 
 /// A container format of ours, this build's or a later one's: `solidcraft-container/N`.
@@ -1918,6 +1940,42 @@ mod tests {
         assert_eq!(unpacked, plain, "the same bodies, only packed tighter");
     }
 
+    /// A design's kind (#6892) is its header's `content`: written, read back from bytes and from a
+    /// file, known to this build (no newer-file notice), and named by each extension in any case.
+    /// A single design's file is byte for byte what every save wrote before.
+    #[test]
+    fn design_kinds_live_in_the_header_and_a_single_design_is_unchanged() {
+        let doc = document();
+        let single = write_design_container_as(&doc, DesignKind::Single, DesignCompression::Fast, None, None, None, None).unwrap();
+        assert_eq!(single, write_design_container(&doc).unwrap(), "a single design's file is as before");
+        assert_eq!(parts(&single)["container.json"], serde_json::to_vec(&json!({"format": VERSION})).unwrap());
+        for kind in DesignKind::ALL {
+            let bytes = write_design_container_as(&doc, kind, DesignCompression::Fast, None, None, None, None).unwrap();
+            assert_eq!(design_kind(&bytes), kind);
+            let header: Value = serde_json::from_slice(&parts(&bytes)["container.json"]).unwrap();
+            assert_eq!(header.get("content").and_then(Value::as_str), kind.content(), "{header}");
+            let read = crate::read_design(&bytes).unwrap();
+            assert!(read.newer_file.is_none(), "{kind:?}: this build knows its own kinds");
+            assert_eq!(read.to_json(), doc.to_json());
+            assert_eq!(file_kind(&bytes).unwrap(), FileKind::Design);
+            let path = std::env::temp_dir().join(format!("solidcraft-kind-{}-{}.{}", std::process::id(), kind.extension(), kind.extension()));
+            std::fs::write(&path, &bytes).unwrap();
+            assert_eq!(read_design_kind_file(&path.to_string_lossy()), kind);
+            std::fs::remove_file(&path).unwrap();
+            assert_eq!(DesignKind::for_path(&format!("a/b.{}", kind.extension().to_uppercase())), Some(kind));
+        }
+        for path in ["a.solidcraft", "a.json", "a.step", "a", "a.scd"] {
+            assert_eq!(DesignKind::for_path(path), None, "{path}");
+        }
+        assert_eq!(design_kind(b"{}"), DesignKind::Single, "plain JSON has no header");
+        assert_eq!(read_design_kind_file("no/such/file.scp"), DesignKind::Single);
+        // A header naming something this build doesn't know is a single design here, and the
+        // newer-file path keeps it as it came.
+        let mut entries = parts(&single);
+        entries.insert("container.json".into(), br#"{"format":"solidcraft-container/1","content":"weldment"}"#.to_vec());
+        assert_eq!(design_kind(&package(&entries)), DesignKind::Single);
+    }
+
     #[test]
     fn model_cache_stores_repeated_parts_once_and_keeps_placed_copies() {
         use solidcore_record::Vec3;
@@ -2118,13 +2176,15 @@ mod tests {
     #[test]
     fn a_model_cache_too_big_for_the_file_is_left_out_not_a_failed_save() {
         let doc = document();
-        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, 70_000, None).unwrap();
+        let bytes = write_container(&doc, DesignKind::Single, DesignCompression::Fast, None, Some(&native_geometry()), None, 70_000, None).unwrap();
         assert!(!parts(&bytes).contains_key("cache/model.json") && !parts(&bytes).contains_key("cache/bodies.bin"));
         assert!(!DesignContainerReader::new(Cursor::new(&bytes)).unwrap().has_model_cache(), "the omitted cache is observable without decoding");
         assert!(read_design_geometry(&bytes).is_none());
         assert_eq!(crate::read_design(&bytes).unwrap().to_json(), doc.to_json());
         // With room for it, the same model is kept.
-        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, crate::MAX_DESIGN_BYTES, None).unwrap();
+        let bytes =
+            write_container(&doc, DesignKind::Single, DesignCompression::Fast, None, Some(&native_geometry()), None, crate::MAX_DESIGN_BYTES, None)
+                .unwrap();
         assert!(read_design_geometry(&bytes).is_some());
         assert!(DesignContainerReader::new(Cursor::new(&bytes)).unwrap().has_model_cache());
     }

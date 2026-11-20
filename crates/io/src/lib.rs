@@ -32,6 +32,8 @@ pub use design::{
     write_design_container_with_cache, write_design_container_with_compression, write_design_container_with_preview,
     write_design_container_with_provenance, write_design_container_with_thumbnail, write_drawing_container,
 };
+// Experimental file kinds (#6892).
+pub use design::{DesignKind, design_kind, read_design_kind_file, write_design_container_as};
 pub use glb::{DEFAULT_COLOR as GLB_DEFAULT_COLOR, MAX_GLB_BYTES, export_glb};
 mod legacy_dir;
 pub mod library_files;

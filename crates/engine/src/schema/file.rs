@@ -745,6 +745,14 @@ pub struct OpenedDesign {
     /// With `verify: true`, when the file carries a signature: what verification found.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signature: Option<SignatureReport>,
+    /// Experimental (#6892): the kind of design the file's header says, when it isn't a single
+    /// design: `part`, `sheet metal part` or `assembly`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// With the experimental file kinds on: the file's extension names another kind than its
+    /// header, which wins.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind_note: Option<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

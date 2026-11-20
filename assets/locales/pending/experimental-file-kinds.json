@@ -1,0 +1,34 @@
+{
+  "en": {
+    "prefs.experimental_file_kinds": "Separate files for parts, sheet metal and assemblies (experimental)",
+    "prefs.experimental_file_kinds_help": "A new design saved as .scp is a part, .scs a sheet metal part, .sca an assembly, .sc a single design. The kind is kept in the file, so renaming it changes nothing, and saving a design as another kind is refused."
+  },
+  "ar": {
+    "prefs.experimental_file_kinds": "ملفات منفصلة للأجزاء والصفائح المعدنية والتجميعات (تجريبي)",
+    "prefs.experimental_file_kinds_help": "التصميم الجديد المحفوظ بامتداد .scp جزء، و.scs جزء صفائح معدنية، و.sca تجميع، و.sc تصميم واحد. يُحفظ النوع داخل الملف، فلا تغيّره إعادة التسمية، ويُرفض حفظ التصميم كنوع آخر."
+  },
+  "de": {
+    "prefs.experimental_file_kinds": "Getrennte Dateien für Teile, Blechteile und Baugruppen (experimentell)",
+    "prefs.experimental_file_kinds_help": "Eine neue Konstruktion, gespeichert als .scp, ist ein Teil, als .scs ein Blechteil, als .sca eine Baugruppe, als .sc eine Einzelkonstruktion. Die Art steht in der Datei, ein Umbenennen ändert also nichts, und das Speichern als andere Art wird abgelehnt."
+  },
+  "he": {
+    "prefs.experimental_file_kinds": "קבצים נפרדים לחלקים, לפח ולמכלולים (ניסיוני)",
+    "prefs.experimental_file_kinds_help": "תכן חדש שנשמר כ‑.scp הוא חלק, כ‑.scs חלק פח, כ‑.sca מכלול, וכ‑.sc תכן יחיד. הסוג נשמר בתוך הקובץ, כך ששינוי שם אינו משנה דבר, ושמירת תכן כסוג אחר נדחית."
+  },
+  "ja": {
+    "prefs.experimental_file_kinds": "部品・板金・アセンブリを別ファイルにする（試験的）",
+    "prefs.experimental_file_kinds_help": "新しいデザインを .scp で保存すると部品、.scs で板金部品、.sca でアセンブリ、.sc で単一デザインになります。種類はファイル内に保存されるため、名前を変えても変わらず、別の種類として保存することはできません。"
+  },
+  "ko": {
+    "prefs.experimental_file_kinds": "부품, 판금, 어셈블리를 별도 파일로 (실험적)",
+    "prefs.experimental_file_kinds_help": "새 디자인을 .scp로 저장하면 부품, .scs는 판금 부품, .sca는 어셈블리, .sc는 단일 디자인입니다. 종류는 파일 안에 저장되므로 이름을 바꿔도 바뀌지 않으며, 다른 종류로 저장하는 것은 거부됩니다."
+  },
+  "vi": {
+    "prefs.experimental_file_kinds": "Tệp riêng cho chi tiết, kim loại tấm và cụm lắp (thử nghiệm)",
+    "prefs.experimental_file_kinds_help": "Thiết kế mới lưu dạng .scp là chi tiết, .scs là chi tiết kim loại tấm, .sca là cụm lắp, .sc là thiết kế đơn. Loại được lưu trong tệp nên đổi tên không thay đổi gì, và việc lưu thiết kế thành loại khác sẽ bị từ chối."
+  },
+  "zh": {
+    "prefs.experimental_file_kinds": "零件、钣金和装配体使用独立文件（实验性）",
+    "prefs.experimental_file_kinds_help": "新设计保存为 .scp 是零件，.scs 是钣金零件，.sca 是装配体，.sc 是单一设计。类型保存在文件中，因此重命名不会改变它，且不能将设计另存为其他类型。"
+  }
+}

@@ -81,6 +81,8 @@ pub use cmd::{
     extrude_reach, find_command, normalize_command_id, resolve_design_links, shown_scope, standard_view, use_import_cache_dir,
 };
 pub use edit_start::{EditStart, RefreshedSketchModel, SketchDomain, SketchFinishEvent};
+// Experimental file kinds (#6892).
+pub use cmd::{experimental_file_kinds, set_experimental_file_kinds};
 pub use solidcraft_doc as doc;
 pub use solidcraft_doc::Visibility;
 pub use solidcraft_geom as geom;
@@ -781,6 +783,9 @@ pub struct Session {
     /// Opened read-only (`doc.open {read_only}`, the "open elsewhere" notice): saving to its own
     /// file is refused; Save As to another file is how its changes are kept.
     pub read_only: bool,
+    /// The kind of design its file holds (experimental, #6892; `cmd/file_kind.rs`): read from the
+    /// file's header on open and written back by every save. A new design is a single design.
+    pub design_kind: solidcraft_io::DesignKind,
     /// The provenance records the open file carries; a signed save appends one to them.
     pub provenance_chain: Option<solidcraft_io::ProvenanceChain>,
     /// The last provenance verification of this design, when one was asked for.
@@ -1332,6 +1337,7 @@ impl Session {
             uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             disk: None,
             read_only: false,
+            design_kind: solidcraft_io::DesignKind::Single,
             provenance_chain: None,
             provenance: None,
             signing_allowed: false,
@@ -3210,6 +3216,7 @@ impl Session {
             uid: self.uid,
             disk: self.disk,
             read_only: self.read_only,
+            design_kind: self.design_kind,
             provenance_chain: self.provenance_chain.clone(),
             provenance: self.provenance.clone(),
             signing_allowed: false,
