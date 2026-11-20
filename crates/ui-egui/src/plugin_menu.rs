@@ -909,6 +909,8 @@ pub(crate) struct EntryDialog {
     pub(crate) picks_cleared: bool,
     /// The dialog's Preview box: the host draws what Run would change while the fields are filled.
     pub(crate) preview: bool,
+    /// Its first result has been shown: later previews leave the user's camera alone.
+    preview_drawn: bool,
 }
 
 /// One bounded worker per dialog; generations invalidate replies before any field is touched.
@@ -1139,6 +1141,7 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
         picked_on: prefilled.then(|| app.session.doc.clone()),
         picks_cleared: false,
         preview: true,
+        preview_drawn: false,
     });
     // The new dialog's first selection field takes the viewport's picks, unless another tool is
     // picking: that tool keeps them until a field here is clicked.
@@ -1377,6 +1380,19 @@ pub(crate) fn preview_commands(app: &SolveApp) -> Option<(u64, String, Vec<(Stri
     let params = dialog.ready(app).ok()?;
     let run = json!({"path": dialog.plugin.path, "approval": dialog.plugin.approval, "entry": dialog.entry, "params": params});
     Some((dialog.id, dialog.plugin.id.clone(), vec![("plugin.run".to_owned(), run)]))
+}
+
+/// The first result drawn by this dialog follows its run's last Fit/Home command, as OK does.
+/// Even a run with no view command consumes the first preview: later edits never move the view.
+pub(crate) fn preview_drawn(app: &mut SolveApp, id: u64, view: Option<Value>) {
+    let Some(dialog) = app.plugin_menu.dialogs.iter_mut().find(|dialog| dialog.id == id) else { return };
+    if dialog.preview_drawn {
+        return;
+    }
+    dialog.preview_drawn = true;
+    if let Some(view) = view.filter(|view| matches!(view.get("kind").and_then(Value::as_str), Some("fit" | "home"))) {
+        app.apply_plugin_view(&json!({"view": view}), Some(app.preview.bounds));
+    }
 }
 
 /// Make `scratch` a dry run of plugin `id`: none of its folder or command-group grants, so a

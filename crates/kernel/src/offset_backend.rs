@@ -41,6 +41,11 @@ fn refused(op: &str, wall: Option<f64>, e: SmError) -> KernelError {
                  use a thinner or thicker wall, or move the feature"
             ))
         }
+        // A pad's or hole's corner on the edge of its face (#18568).
+        SmError::OutlineTouches { at: [x, y, z], .. } => KernelError::Invalid(format!(
+            "{op}: a corner of a pad or hole touches the edge of its face at ({x:.4}, {y:.4}, {z:.4}), so the walls offset from them would meet at a point, \
+             which the {op} does not build; move the feature clear of the edge"
+        )),
         // solidcore's one construction: a face curves tighter than the wall is thick.
         SmError::WallFolds { largest } => {
             let largest = largest.map(|w| format!("; the largest wall that works is {} mm", crate::blend::trimmed_mm(w))).unwrap_or_default();
