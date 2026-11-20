@@ -3839,3 +3839,72 @@ fn a_curve_chain_by_edge_index_starts_from_that_edge() {
     assert!(crate::curve_chain_of_edges(&b, &[count], solidcraft_geom::TANGENT_CHAIN).is_err());
     assert!(crate::curve_chain_of_edges(&b, &[], solidcraft_geom::TANGENT_CHAIN).is_err());
 }
+
+/// Whether a path of body edges lies in one plane is decided over each free-form span's whole
+/// length from its control points, not from its directions at sampled points. A degree 9 span
+/// along x whose height is the integral of `c (t - 1/8) (t - 2/8) … (t - 1)` runs level at eight
+/// of the nine points the old check sampled and rises 0.01 mm off the plane between them; it is
+/// refused. A rational span in a tilted plane with uneven weights, followed by a line in that
+/// plane, is accepted with the plane's normal, and refused once one control point is 0.001 mm
+/// off the plane.
+#[test]
+fn a_free_form_span_that_bows_out_of_plane_between_samples_has_no_plane() {
+    use crate::build::PathSeg;
+    use solidcraft_geom::bspline::HPoint;
+    const N: usize = 9;
+    let binomial = |n: usize, k: usize| (0..k).fold(1.0, |acc, i| acc * (n - i) as f64 / (i + 1) as f64);
+    // The height's derivative, power basis, lowest first: zero at t = 1/8 … 1.
+    let mut dz = vec![1.0];
+    for k in 1..=8 {
+        let mut next = vec![0.0; dz.len() + 1];
+        for (i, c) in dz.iter().enumerate() {
+            next[i] -= c * k as f64 / 8.0;
+            next[i + 1] += c;
+        }
+        dz = next;
+    }
+    let z: Vec<f64> = std::iter::once(0.0).chain(dz.iter().enumerate().map(|(i, c)| c / (i + 1) as f64)).collect();
+    // Bernstein coefficients of a power-basis polynomial of degree N or less.
+    let bernstein =
+        |a: &[f64]| -> Vec<f64> { (0..=N).map(|j| (0..=j.min(a.len() - 1)).map(|i| binomial(j, i) / binomial(N, i) * a[i]).sum()).collect() };
+    // The span bends in the plane z = 0 (`y = 10 t (1 - t)`), so that plane is the only one it
+    // can lie in, and the height lifts it off that plane.
+    let (sideways, heights) = (bernstein(&[0.0, 10.0, -10.0]), bernstein(&z));
+    let span = |scale: f64| {
+        let ctrl: Vec<HPoint> =
+            (0..=N).map(|i| HPoint::weighted(Vec3::new(40.0 * i as f64 / N as f64, sideways[i], heights[i] * scale), 1.0)).collect();
+        SpaceBezier::new(&ctrl).unwrap()
+    };
+    let flat = span(0.0);
+    let n = PathSeg::plane_normal(&[PathSeg::Bezier(flat)], 1e-6).unwrap();
+    assert!(n.cross(Vec3::Z).len() < 1e-9, "{n:?}");
+    let peak = (0..=4000).map(|i| flat.point(i as f64 / 4000.0).unwrap().z.abs()).fold(0.0, f64::max);
+    assert!(peak == 0.0);
+    let unit = span(1.0);
+    let rise = (0..=4000).map(|i| unit.point(i as f64 / 4000.0).unwrap().z.abs()).fold(0.0, f64::max);
+    let bowed = span(0.01 / rise);
+    let rise = (0..=4000).map(|i| bowed.point(i as f64 / 4000.0).unwrap().z.abs()).fold(0.0, f64::max);
+    assert!((rise - 0.01).abs() < 1e-6, "{rise}");
+    for k in 1..=8 {
+        let d = bowed.derivative(k as f64 / 8.0).unwrap();
+        assert!(d.z.abs() <= 1e-9 * d.len(), "level at {k}/8: {d:?}");
+    }
+    assert_eq!(PathSeg::plane_normal(&[PathSeg::Bezier(bowed)], 1e-6), None);
+
+    // A rational span in the plane through the origin tilted 30° about x, then a line in it.
+    let (s, c) = (30f64.to_radians().sin(), 30f64.to_radians().cos());
+    let normal = Vec3::new(0.0, -s, c);
+    let at = |u: f64, v: f64, lift: f64| Vec3::new(u, v * c, v * s) + normal * lift;
+    let tilted = |lift: f64| {
+        let pts = [at(0.0, 0.0, 0.0), at(5.0, 8.0, lift), at(15.0, -6.0, 0.0), at(20.0, 3.0, 0.0)];
+        let ctrl: Vec<HPoint> = pts.iter().zip([1.0, 3.0, 0.5, 1.0]).map(|(p, w)| HPoint::weighted(*p, w)).collect();
+        SpaceBezier::new(&ctrl).unwrap()
+    };
+    let path = |lift: f64| {
+        let b = tilted(lift);
+        vec![PathSeg::Bezier(b), PathSeg::Line { a: b.end(), b: at(30.0, 10.0, 0.0) }]
+    };
+    let n = PathSeg::plane_normal(&path(0.0), 1e-6).unwrap();
+    assert!(n.cross(normal).len() < 1e-9, "{n:?}");
+    assert_eq!(PathSeg::plane_normal(&path(1e-3), 1e-6), None);
+}
