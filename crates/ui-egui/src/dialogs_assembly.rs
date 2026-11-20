@@ -2155,12 +2155,24 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
         .map(|(_, r)| r.clone());
     // A constraint's reply: how free its part is with the constraint the preview shows.
     let placed = cmds.iter().zip(&preview.replies).find(|((c, _), _)| c.starts_with("assembly.constraint.")).map(|(_, r)| r.clone());
+    let plugin_view = cmds.iter().zip(&preview.replies).rev().find(|((c, _), _)| c == "plugin.run").and_then(|(_, reply)| reply.get("view")).cloned();
+    let before = preview.before.clone();
     // A moved component looks like itself (no new surface), with its old place as the ghost.
     // A plugin can both move and make bodies: the builder distinguishes them per body.
     let colors = if was_placed && !plugin { Colors { added: colors.body, new_body: colors.body, ..colors } } else { colors };
     Some(build_world_preview(preview, colors).map(|mut built| {
         built.stopped = stopped;
         built.placed = placed;
+        built.plugin_view = plugin_view;
+        if plugin {
+            // Sketch-only runs have no body bounds. Frame their preview geometry just as Fit
+            // frames sketches in the committed design, using the engine's same calculation.
+            built.bounds = built.sketches.iter().fold(built.bounds, |b, sketch| b.union(&solidcraft_engine::view::sketch_bounds(&sketch.sketch)));
+        }
+        // Deleting the last body still draws its removed-material ghost.
+        if plugin && built.bounds.is_empty() && !built.replaced.is_empty() {
+            built.bounds = before.bodies.iter().fold(Aabb3::EMPTY, |b, body| b.union(&body.mesh().bounds()));
+        }
         built
     }))
 }

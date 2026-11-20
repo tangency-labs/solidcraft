@@ -1849,6 +1849,20 @@ fn edits_after_a_canvas_share_its_image_with_every_undo_state() {
 }
 
 #[test]
+fn app_bar_reset_is_registered_and_only_requests_a_ui_reset() {
+    let mut s = Session::default();
+    let before = (s.doc.to_json(), s.revision, s.undo.len(), s.redo.len());
+    let spec = crate::find_command("ui.appBarReset").unwrap();
+    assert_eq!(spec.label, "Reset App Bar");
+    assert_eq!(spec.part, crate::cmd::Part::Any);
+    assert!((spec.enabled)(&s).is_ok());
+    assert!(!spec.undoable && !spec.reads_model);
+    assert_eq!(spec.tab, "", "palette command, without a ribbon placement");
+    assert_eq!(s.execute(spec.id, &json!({})).unwrap(), json!({"reset":true}));
+    assert_eq!((s.doc.to_json(), s.revision, s.undo.len(), s.redo.len()), before);
+}
+
+#[test]
 fn assistant_toggle_is_refused_headlessly_without_changing_the_document() {
     let mut s = Session::default();
     let before = (s.doc.to_json(), s.undo.len());

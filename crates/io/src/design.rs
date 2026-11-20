@@ -346,6 +346,18 @@ fn write_container(
     if let Some(object) = metadata.as_object_mut() {
         object.remove("drawings");
         object.remove("plugin_data");
+        // The parts the drawings' images are, named where a release that can't read the drawings'
+        // records (0.45.0) looks before it keeps a part, so its save keeps them.
+        let mut parts: Vec<String> = doc
+            .drawings
+            .iter()
+            .flat_map(|d| d.images.iter().map(|i| solidcraft_doc::blob::part_name(&i.data, &i.format)).collect::<Vec<_>>())
+            .collect();
+        parts.sort();
+        parts.dedup();
+        if !parts.is_empty() {
+            object.insert("drawing_parts".into(), json!(parts));
+        }
     }
     solidcraft_doc::newer_file::restore(doc, &mut metadata);
     let metadata = serde_json::to_vec(&metadata).map_err(invalid)?;
@@ -1089,6 +1101,9 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
     }
     let bytes = reader.document(max_design())?;
     let mut metadata: Value = serde_json::from_slice(&bytes).map_err(invalid)?;
+    // What the drawings' images are, for a release that can't read the drawings: this build reads
+    // them from the drawings and writes the list again on every save.
+    let named_drawing_parts = metadata.as_object_mut().and_then(|object| object.remove("drawing_parts")).is_some();
     // A newer build's file opens whatever it holds: what doesn't read here is kept (`newer_file`).
     let container: Value = serde_json::from_slice(&reader.limited_part("container.json", 4096)?).map_err(invalid)?;
     let newer_container = !is_known_container(&container);
@@ -1122,7 +1137,7 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
     // reads them as before: what doesn't read here is kept whole (`newer_file`), unknown fields too.
     let complexes = if newer { Vec::new() } else { take_cloud_complexes(&mut metadata) };
     let hydrated_text;
-    let text = if hydrated || !complexes.is_empty() {
+    let text = if hydrated || named_drawing_parts || !complexes.is_empty() {
         hydrated_text = serde_json::to_string(&metadata).map_err(invalid)?;
         &hydrated_text
     } else {

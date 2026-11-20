@@ -141,7 +141,9 @@ fn open_record<R: Read + Seek>(reader: &mut PackageReader<R>, bytes: &[u8]) -> R
     }
     let value: Value = serde_json::from_slice(bytes).map_err(|e| invalid(format!("not a SolidCraft drawing: {e}")))?;
     let mut parts = std::collections::BTreeMap::new();
-    let images = value.get("images").and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
+    // Set aside where a release that can't read them looks past them (`image_files`), or, as nightly
+    // builds saved them for a while, in `images`.
+    let images = value.get("image_files").or(value.get("images")).and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
     if images.len() > drawing::image::MAX_IMAGES {
         return Err(invalid(format!("a drawing has at most {} images", drawing::image::MAX_IMAGES)));
     }
