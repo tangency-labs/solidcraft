@@ -33,8 +33,8 @@ enum Choice {
     Template,
 }
 
-fn tr<'a>(key: impl solidcraft_ui_text::Key<'a>) -> &'a str {
-    solidcraft_ui_text::tr(key)
+fn tr(key: &str) -> &str {
+    solidcraft_ui_text::tr_by_id(key)
 }
 
 fn can_create(app: &SolveApp) -> bool {

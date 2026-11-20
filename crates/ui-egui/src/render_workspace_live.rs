@@ -608,7 +608,7 @@ pub(crate) fn controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     let state = &app.render_workspace.live;
     let status = if app.render_workspace.view.live_paused {
-        app.tr(if state.picture.as_ref().is_some_and(|picture| picture.generation != state.generation) {
+        app.tr_by_id(if state.picture.as_ref().is_some_and(|picture| picture.generation != state.generation) {
             "render.live.paused_outdated"
         } else {
             "render.live.paused"
@@ -642,7 +642,7 @@ pub(crate) fn controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         tr!(app, "render.live.updating").into()
     };
     let paused = app.render_workspace.view.live_paused;
-    let label = app.tr(if paused { "render.live.resume" } else { "render.live.pause" }).to_string();
+    let label = app.tr_by_id(if paused { "render.live.resume" } else { "render.live.pause" }).to_string();
     let response = ui_kit::button(ui, &label, ui_kit::Button::Normal);
     crate::scenario::publish_target("render:live:pause", response.rect);
     if response.clicked() {

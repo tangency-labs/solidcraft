@@ -278,7 +278,7 @@ mod tests {
         let shown = |h: &crate::scenario::Harness| {
             h.app.operations.rows(crate::operations::frame_ms(&h.ctx)).find(|(r, _)| r.key == "save:file.save_as").and_then(|(r, _)| r.status())
         };
-        assert_eq!(shown(&h), Some(solidcraft_ui_text::tr("operations.cancelling").to_string()), "drawn while it stops");
+        assert_eq!(shown(&h), Some(solidcraft_ui_text::tr_by_id("operations.cancelling").to_string()), "drawn while it stops");
         // The worker stops before replacing the file: cancelled, not an error, still unsaved.
         finish.send((h.app.session.scratch(), Err(format!("{}: save cancelled", path.display())), true)).unwrap();
         super::tick(&mut h.app, false);
@@ -288,7 +288,7 @@ mod tests {
         assert_eq!(listed["finished"][0]["outcome"], "cancelled", "{listed}");
         // Its row fades out saying it was cancelled, not still cancelling.
         h.frame();
-        assert_eq!(shown(&h), Some(solidcraft_ui_text::tr("operations.stopped").to_string()));
+        assert_eq!(shown(&h), Some(solidcraft_ui_text::tr_by_id("operations.stopped").to_string()));
     }
 
     /// A design holding binary data (here a plugin's file) can't be a plain JSON design: Save As

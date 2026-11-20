@@ -158,7 +158,7 @@ fn cell<R>(ui: &mut egui::Ui, width: f32, add: impl FnOnce(&mut egui::Ui) -> R) 
 
 /// The label of one of [`BOM_KEYS`].
 fn field_label(key: &str) -> &str {
-    metadata::key(key).map_or(key, |k| solidcraft_ui_text::tr(k.label))
+    metadata::key(key).map_or(key, |k| solidcraft_ui_text::tr_by_id(k.label))
 }
 
 /// Apply the picked row's fields to each of its definitions (one undo step each).

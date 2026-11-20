@@ -3574,7 +3574,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                         hint(inp).to_string()
                     }
                 } else if let Some(id) = inp.tip {
-                    solidcraft_ui_text::tr(id).to_string()
+                    solidcraft_ui_text::tr_by_id(id).to_string()
                 } else {
                     format!("{} (click to pick into this input)", hint(inp))
                 };
@@ -3742,7 +3742,7 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
     // Under the fold in a short window, a new note scrolls into view once, as a refusal does.
     let note_shown_id = egui::Id::unique("sc_dialog_pick_refused_shown");
     if let Some(id) = d.pick_refused.filter(|_| d.error.is_none() && app.preview.error.is_none()) {
-        let note = crate::ui_kit::text(ui, solidcraft_ui_text::tr(id), crate::ui_kit::Text::Hint("pick_refused"));
+        let note = crate::ui_kit::text(ui, solidcraft_ui_text::tr_by_id(id), crate::ui_kit::Text::Hint("pick_refused"));
         crate::scenario::publish_rect("dialog:pick_refused", note.rect);
         if ui.data(|m| m.get_temp::<&'static str>(note_shown_id)) != Some(id) {
             ui.scroll_to_rect(note.rect, None);
@@ -5790,7 +5790,7 @@ fn link_status(app: &SolveApp, cmd: &str, reply: &Value) -> Option<String> {
         None if curves.is_empty() => points.len(),
         None => 0,
     };
-    let command = solidcraft_ui_text::tr(if cmd == "sketch.intersect" { "ui.intersect" } else { "ui.project" });
+    let command = solidcraft_ui_text::tr_by_id(if cmd == "sketch.intersect" { "ui.intersect" } else { "ui.project" });
     let counted = |id: &str, n: usize| solidcraft_ui_text::format(id, &[("command", command), ("count", &n.to_string())]);
     let mut text = match (curves.len(), lone) {
         (0, 0) => return None,
@@ -5808,7 +5808,7 @@ fn link_status(app: &SolveApp, cmd: &str, reply: &Value) -> Option<String> {
     let linked = links.iter().any(|l| l.get("link").is_some_and(|l| !l.is_null()));
     if linked && sketch.is_some_and(|sk| sk.view.hide_projected) {
         text.push(' ');
-        text.push_str(&tr!("ui.sketch_links_hidden", option = solidcraft_ui_text::tr("ui.show_projected_geometries")));
+        text.push_str(&tr!("ui.sketch_links_hidden", option = solidcraft_ui_text::tr_by_id("ui.show_projected_geometries")));
     }
     Some(text)
 }

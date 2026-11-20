@@ -1569,7 +1569,7 @@ fn method_selector(app: &mut SolveApp, ui: &mut egui::Ui) {
 /// The same method authority in an aligned editor row or the legacy master form.
 fn method_dropdown(app: &mut SolveApp, ui: &mut egui::Ui) -> egui::Response {
     let current = app.render_workspace.view.method;
-    let label = app.tr(current.label()).to_string();
+    let label = app.tr_by_id(current.label()).to_string();
     let bounded =
         celestial_switch_active(app) || app.render_workspace.view.studio.volume.is_some() || app.render_workspace.view.studio.caustics.is_some();
     let width = ui.available_width().min(solidcraft_theme::Tokens::get().form_card_width);
@@ -1580,7 +1580,7 @@ fn method_dropdown(app: &mut SolveApp, ui: &mut egui::Ui) -> egui::Response {
             (ImageMethod::GpuRaytrace, "render:method-gpu"),
         ] {
             let capability = image_host(app, method).map(|_| ());
-            let label = app.tr(method.label()).to_string();
+            let label = app.tr_by_id(method.label()).to_string();
             let response = crate::ui_kit::list_picker(ui, handle, &label, method == current);
             crate::scenario::publish_handle(handle, response.rect.center());
             if response.clicked() {
@@ -1605,7 +1605,7 @@ fn method_dropdown(app: &mut SolveApp, ui: &mut egui::Ui) -> egui::Response {
                     ("seed", &sampling.seed.to_string()),
                 ],
             );
-            let short = app.tr(if volume_path { "render.cpu_volume_method_adopt" } else { "render.cpu_celestial_adopt_label" }).to_string();
+            let short = app.tr_by_id(if volume_path { "render.cpu_volume_method_adopt" } else { "render.cpu_celestial_adopt_label" }).to_string();
             let action = crate::ui_kit::list_picker(ui, "render:method-cpu-indirect", &short, false).backing_on_hover_text(detail);
             crate::scenario::publish_handle("render:method-cpu-indirect", action.rect.center());
             if volume_path {
@@ -1662,7 +1662,7 @@ fn cpu_lighting_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     ];
     let selected = app.render_workspace.view.raytrace.preset.unwrap_or(LightingPreset::Neutral);
     let label = app
-        .tr(match selected {
+        .tr_by_id(match selected {
             LightingPreset::Neutral => "render.cpu_neutral",
             LightingPreset::WarmCool => "render.cpu_warm_cool",
             LightingPreset::KeyRim => "render.cpu_key_rim",
@@ -1670,7 +1670,7 @@ fn cpu_lighting_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         .to_string();
     crate::ui_kit::dropdown_menu(ui, "render_cpu_lighting", &label, |ui| {
         for (preset, key) in presets {
-            if crate::ui_kit::list_picker(ui, key, app.tr(key), preset == selected).clicked() {
+            if crate::ui_kit::list_picker(ui, key, app.tr_by_id(key), preset == selected).clicked() {
                 app.render_workspace.view.raytrace.preset = Some(preset);
                 app.render_workspace.view.raytrace.lights = None;
                 ui.close();
@@ -1719,7 +1719,7 @@ fn image_edit_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui.small(tr!(app, "render.result_navigation"));
     }
     image_method_controls(app, ui);
-    ui.small(app.tr(match app.render_workspace.view.method {
+    ui.small(app.tr_by_id(match app.render_workspace.view.method {
         ImageMethod::Raster => "render.opaque_image_summary",
         ImageMethod::CpuRaytrace => "render.cpu_summary",
         ImageMethod::GpuRaytrace => "render.progressive_image_summary",
@@ -1750,7 +1750,7 @@ fn image_edit_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         } else {
             "render.image_too_large"
         };
-        ui.small(app.tr(limit));
+        ui.small(app.tr_by_id(limit));
         if crate::ui_kit::button(ui, format!("{} {w} × {h}", tr!(app, "render.image_use_largest")), crate::ui_kit::Button::Normal).clicked() {
             app.render_workspace.view.draft.width = u32::try_from(w).unwrap_or(1);
             app.render_workspace.view.draft.height = u32::try_from(h).unwrap_or(1);
@@ -1903,9 +1903,9 @@ fn job_controls(app: &mut SolveApp, ui: &mut egui::Ui, compact: bool) {
         }
     });
     let message = state.as_ref().map_or_else(
-        || app.tr(if params.is_ok() { "render.studio_ready" } else { "render.studio_needs_review" }).to_string(),
+        || app.tr_by_id(if params.is_ok() { "render.studio_ready" } else { "render.studio_needs_review" }).to_string(),
         |status| {
-            app.tr(match status["progress"]["phase"].as_str().unwrap_or("") {
+            app.tr_by_id(match status["progress"]["phase"].as_str().unwrap_or("") {
                 "queued" => "render.image_queued",
                 "preparing" => "render.image_preparing",
                 "running" => "render.image_running",
@@ -2455,7 +2455,7 @@ fn result_action_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     for (view, key) in [("model", "render.state_model"), ("fit", "render.output_fit"), ("actual", "render.result_actual")] {
         let enabled = view != "actual" || !reduced_display(app);
-        let response = result_action_button(ui, app.tr(key), enabled);
+        let response = result_action_button(ui, app.tr_by_id(key), enabled);
         crate::scenario::publish_target(&format!("render:result-{view}"), response.rect);
         crate::scenario::publish_target(&format!("render:result:view:{view}"), response.rect);
         if response.clicked() {
@@ -2496,7 +2496,7 @@ fn result_header(app: &mut SolveApp, ui: &mut egui::Ui) {
         None if ribbon::busy(app) => "render.state_in_progress",
         None => "render.result_title",
     };
-    crate::ui_kit::text(ui, app.tr(state), crate::ui_kit::Text::Inline);
+    crate::ui_kit::text(ui, app.tr_by_id(state), crate::ui_kit::Text::Inline);
     result_actions(app, ui);
     let Some((info, preview)) = display else {
         return;
@@ -2561,7 +2561,7 @@ fn result_header(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui.colored_label(t.warning, tr!(app, "render.result_reduced_display"));
     }
     let stale = info.scene_generation != app.session.revision;
-    ui.colored_label(if stale { t.warning } else { t.text_dim }, app.tr(if stale { "render.image_stale" } else { "render.result_current" }));
+    ui.colored_label(if stale { t.warning } else { t.text_dim }, app.tr_by_id(if stale { "render.image_stale" } else { "render.result_current" }));
     if app.render_workspace.view.job.is_some_and(|job| job != info.job) {
         ui.small(tr!(app, "render.result_retained"));
     }
@@ -3999,7 +3999,7 @@ pub(crate) fn progress_pill(app: &mut SolveApp, ui: &mut egui::Ui, key: &str) ->
     let fraction = (done as f64 / total as f64).clamp(0.0, 1.0) as f32;
     let phase_key = format!("render.image_{phase}");
     let name = app.render_workspace.view.job_shot.as_ref().unwrap_or(&app.render_workspace.view.name).clone();
-    let message = format!("· {} · {:.0}%", app.tr(&phase_key), fraction * 100.0);
+    let message = format!("· {} · {:.0}%", app.tr_by_id(&phase_key), fraction * 100.0);
     let cancel = crate::ui_kit::progress_action(ui, key, &name, &message, fraction, app.tr_label("Cancel"));
     crate::scenario::publish_target("render:progress-cancel", cancel.rect);
     if cancel.clicked() {

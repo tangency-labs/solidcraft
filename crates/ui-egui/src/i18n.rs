@@ -256,7 +256,7 @@ fn point_error_id<'a>(text: &'a str, reason: &str) -> Option<&'a str> {
 /// Translate known engine error messages using i18n keys.
 /// If the error message is not recognized, returns it unchanged.
 pub fn tr_engine_error(error: &str) -> String {
-    use solidcraft_ui_text::{format, tr};
+    use solidcraft_ui_text::{format, tr_by_id};
     // `EngineError::BadParams` carries `invalid parameters for `<command>`: ` in front.
     let text = error.strip_prefix("invalid parameters for `").and_then(|rest| rest.split_once("`: ")).map_or(error, |(_, text)| text);
     for (english, id) in [
@@ -265,7 +265,7 @@ pub fn tr_engine_error(error: &str) -> String {
         ("Boundary Fill did not produce a closed solid cell", "boundary_fill.error.open_cell"),
     ] {
         if text == english {
-            return tr(id).to_string();
+            return tr_by_id(id).to_string();
         }
     }
     if let Some((name, ids)) = text
@@ -527,7 +527,7 @@ mod tests {
             let _labels = resolved_labels();
             assert_eq!(tr_label("Profile"), "Profile");
             assert_eq!(tr_label("ui.cancel"), "ui.cancel");
-            assert_ne!(tr("ui.cancel"), "ui.cancel", "stable catalog messages remain translated");
+            assert_ne!(tr_by_id("ui.cancel"), "ui.cancel", "stable catalog messages remain translated");
             {
                 let _nested = resolved_labels();
                 assert_eq!(tr_label("Profile"), "Profile");
@@ -566,7 +566,7 @@ mod tests {
         assert_eq!(tr_name("לוח עליון קטן"), "קטן עליון לוח");
         assert_eq!(tr_name("לוח"), "לוח", "one word is shown as it is");
         assert_eq!(tr_name("Top plate"), "Top plate", "Latin is shown as it is");
-        assert_eq!(tr_name("Body2"), tr("browser.body_name").replace("{number}", "2"), "default names stay translated");
+        assert_eq!(tr_name("Body2"), tr_by_id("browser.body_name").replace("{number}", "2"), "default names stay translated");
         let _arabic = scope("ar");
         assert_eq!(tr_name("لوحة علوية صغيرة"), "صغيرة علوية لوحة");
     }
@@ -608,7 +608,7 @@ mod tests {
         assert_eq!(ENGLISH.messages().get(id).map(String::as_str), Some(english));
         for language in ["en", "ja", "zh", "de", "ko", "es"] {
             let _scope = scope(language);
-            let hint = tr(id);
+            let hint = tr_by_id(id);
             assert_eq!(hint, Locale::for_language(language).text(id));
             assert_ne!(hint, id);
             if ["ja", "zh", "de", "ko"].contains(&language) {
@@ -1207,7 +1207,7 @@ mod tests {
         let _scope = scope("ja");
         let message = "there is no sheet metal body: start one with Flange > Base, or turn a plate into sheet metal with Convert to Sheet Metal (pick its large flat face)";
         let error = format!("invalid parameters for `sheet.flange`: {message}");
-        let translated = tr("sheet.no_body");
+        let translated = tr_by_id("sheet.no_body");
         assert_ne!(translated, "sheet.no_body");
         assert_ne!(translated, message);
         assert_eq!(crate::friendly_error("sheet.flange", &error), format!("{}: {translated}", tr_label("Flange")));
@@ -1640,14 +1640,14 @@ mod tests {
         let _english = scope("en");
         {
             let _japanese = scope("ja");
-            assert_eq!(tr("ui.preferences"), "環境設定");
+            assert_eq!(tr_by_id("ui.preferences"), "環境設定");
             {
                 let _nested = scope("en");
-                assert_eq!(tr("ui.preferences"), "Preferences");
+                assert_eq!(tr_by_id("ui.preferences"), "Preferences");
             }
-            assert_eq!(tr("ui.preferences"), "環境設定");
+            assert_eq!(tr_by_id("ui.preferences"), "環境設定");
         }
-        assert_eq!(tr("ui.preferences"), "Preferences");
+        assert_eq!(tr_by_id("ui.preferences"), "Preferences");
     }
 
     /// Every `.rs` file under `dir` except test modules (`*_tests.rs`, `tests.rs`).
@@ -1950,7 +1950,7 @@ mod tests {
         let label_file = code.contains("fntr(text:&str)->&str")
             || code.contains("lettr=crate::i18n::tr_label;")
             || code.contains("lettr=solidcraft_ui_text::tr_label;");
-        let id_file = ["usecrate::i18n::tr;", "lettr=crate::i18n::tr;", "usesolidcraft_ui_text::tr;", "lettr=solidcraft_ui_text::tr;"]
+        let id_file = ["usecrate::i18n::tr;", "lettr=crate::i18n::tr;", "usesolidcraft_ui_text::tr;", "lettr=solidcraft_ui_text::tr_by_id;"]
             .iter()
             .any(|pattern| code.contains(pattern))
             || imports_i18n_tr(&code);

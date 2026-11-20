@@ -65,7 +65,7 @@ fn shape(s: &SnapPt) -> RefShape {
 
 /// A rule's name in the user's language.
 fn label(c: Constraint) -> &'static str {
-    solidcraft_ui_text::tr(match c {
+    solidcraft_ui_text::tr_by_id(match c {
         Constraint::Mate => "constrain.rule_mate",
         Constraint::Flush => "constrain.rule_flush",
         Constraint::Distance => "constrain.rule_distance",
@@ -215,7 +215,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut ConstrainForm, inputs
             _ => {}
         }
         crate::ui_kit::options(ui, "constrain_options", &mut [(tr!("constrain.flip"), &mut f.flip)]);
-        let apply_label = solidcraft_ui_text::tr(if editing(f, inputs).is_some() { "constrain.change" } else { "constrain.apply" });
+        let apply_label = solidcraft_ui_text::tr_by_id(if editing(f, inputs).is_some() { "constrain.change" } else { "constrain.apply" });
         let r = crate::ui_kit::button(ui, apply_label, crate::ui_kit::Button::Normal);
         crate::scenario::publish_handle("dialog:Apply", r.rect.center());
         if r.clicked()

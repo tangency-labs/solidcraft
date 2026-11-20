@@ -131,7 +131,7 @@ fn measure(session: &solidcraft_engine::Session, selection: &[Sel]) -> Option<Va
 /// circumference, or an arc's length and angle), a slot's sizes, a straight edge's length, a face's
 /// area and perimeter, a point's position. The Measure tool lists the same.
 pub(crate) fn item_lines(app: &SolveApp, it: &Value) -> Vec<String> {
-    use solidcraft_ui_text::tr;
+    use solidcraft_ui_text::tr_by_id;
     let mm = |v: &Value| v.as_f64().map(|x| crate::prefs::show_mm(app, x, 1)).unwrap_or_default();
     let mut lines: Vec<String> = Vec::new();
     if it.get("diameter").is_some() {
@@ -160,7 +160,7 @@ pub(crate) fn item_lines(app: &SolveApp, it: &Value) -> Vec<String> {
                 ("measure.perimeter_inner", "inner_perimeter_mm"),
             ] {
                 if it.get(key).is_some() {
-                    lines.push(format!("{}  {}", tr(id), mm(&it[key])));
+                    lines.push(format!("{}  {}", tr_by_id(id), mm(&it[key])));
                 }
             }
         }

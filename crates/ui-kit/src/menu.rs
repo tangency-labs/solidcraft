@@ -768,7 +768,7 @@ pub fn workspace_menu(ui: &mut egui::Ui, menu: &WorkspaceMenu<'_>, key_row: Opti
         ui.spacing_mut().item_spacing.y = 0.0;
         ui.add_space(t.space_4);
         ui.label(
-            egui::RichText::new(solidcraft_ui_text::tr("ui.ribbon_workspace").to_uppercase())
+            egui::RichText::new(solidcraft_ui_text::tr_by_id("ui.ribbon_workspace").to_uppercase())
                 .size(solidcraft_theme::Tokens::get().font_small)
                 .semibold()
                 .color(t.text_dim),
@@ -837,7 +837,7 @@ pub fn workspace_menu(ui: &mut egui::Ui, menu: &WorkspaceMenu<'_>, key_row: Opti
                 };
                 if let Some(badge) = badge {
                     let badge = ui.painter().layout_no_wrap(
-                        solidcraft_ui_text::tr(badge).to_string(),
+                        solidcraft_ui_text::tr_by_id(badge).to_string(),
                         FontId::proportional(solidcraft_theme::Tokens::get().font_small),
                         if current { t.on_accent } else { accent },
                     );
@@ -854,10 +854,10 @@ pub fn workspace_menu(ui: &mut egui::Ui, menu: &WorkspaceMenu<'_>, key_row: Opti
                     let galley = ui.painter().layout_job(job);
                     ui.painter().galley(pos2(x, y), galley, text);
                 };
-                line(solidcraft_ui_text::tr(description).to_string(), r.top() + 29.0);
+                line(solidcraft_ui_text::tr_by_id(description).to_string(), r.top() + 29.0);
                 if let Some(tabs) = tabs {
                     // Translate each tab even when this composed message falls back to English.
-                    let labels = solidcraft_ui_text::tr(tabs)
+                    let labels = solidcraft_ui_text::tr_by_id(tabs)
                         .split('·')
                         .map(|label| solidcraft_ui_text::tr_label(label.trim()))
                         .collect::<Vec<_>>()

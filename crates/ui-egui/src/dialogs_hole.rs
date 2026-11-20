@@ -130,7 +130,7 @@ pub(crate) fn clearance_rows(ui: &mut egui::Ui, opts: &mut HoleOpts) -> bool {
     crate::dialogs::form_row(ui, "ui.clearance_diameter", |ui| match clearance_table_diameter(opts) {
         Some(d) => {
             let default = format!("{d} mm");
-            let fit = CLEARANCE_FITS.get(opts.clearance_fit).map_or("", |f| solidcraft_ui_text::tr(f.0));
+            let fit = CLEARANCE_FITS.get(opts.clearance_fit).map_or("", |f| solidcraft_ui_text::tr_by_id(f.0));
             let mm = format!("{d}");
             let tip = tr!("hole.clearance_tip", size = opts.clearance_size.as_str(), fit = fit, diameter = mm.as_str());
             let mut text = opts.clearance_diameter.clone().unwrap_or_else(|| default.clone());

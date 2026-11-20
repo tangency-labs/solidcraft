@@ -3,7 +3,7 @@
 //! this question is the menu's.
 
 use serde_json::{Value, json};
-use solidcraft_ui_text::{format, tr};
+use solidcraft_ui_text::{format, tr_by_id};
 
 use crate::{SolveApp, ui_kit};
 
@@ -90,7 +90,7 @@ pub(crate) fn permission_lines(plugin: &Value) -> Vec<String> {
     let mut lines: Vec<String> = list(permissions.and_then(|p| p.get("command_groups")))
         .iter()
         .map(|group| match group.as_str() {
-            "app" | "doc" | "file" | "plugin" => tr(&std::format!("prefs.plugin_group_{group}")).to_string(),
+            "app" | "doc" | "file" | "plugin" => tr_by_id(&std::format!("prefs.plugin_group_{group}")).to_string(),
             other => other.to_string(),
         })
         .collect();
@@ -98,7 +98,7 @@ pub(crate) fn permission_lines(plugin: &Value) -> Vec<String> {
         let name = folder.get("name").and_then(Value::as_str).unwrap_or_default();
         let read = folder.get("read").and_then(Value::as_bool).unwrap_or(false);
         let write = folder.get("write").and_then(Value::as_bool).unwrap_or(false);
-        let access = tr(match (read, write) {
+        let access = tr_by_id(match (read, write) {
             (true, true) => "prefs.plugin_folder_read_write",
             (false, true) => "prefs.plugin_folder_write",
             _ => "prefs.plugin_folder_read",
@@ -157,7 +157,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     ui_kit::text(ui, &std::format!("• {line}"), ui_kit::Text::Hint("plugin_install_memory"));
                 }
                 for grant in &mut ask.grants.folders {
-                    let access = tr(match (grant.read, grant.write) {
+                    let access = tr_by_id(match (grant.read, grant.write) {
                         (true, true) => "prefs.plugin_folder_read_write",
                         (false, true) => "prefs.plugin_folder_write",
                         _ => "prefs.plugin_folder_read",

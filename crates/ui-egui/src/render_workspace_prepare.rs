@@ -591,7 +591,7 @@ mod native {
         } else {
             "render.image_preparing"
         };
-        crate::ui_kit::text(ui, app.tr(key), crate::ui_kit::Text::Inline);
+        crate::ui_kit::text(ui, app.tr_by_id(key), crate::ui_kit::Text::Inline);
         let cancel = crate::ui_kit::button(
             ui,
             tr!(app, "cmd.render_cancel"),
@@ -1234,7 +1234,7 @@ mod native {
                 Some(_) => "render.batch_preparing",
                 None => "render.batch_waiting_worker",
             };
-            crate::ui_kit::text(ui, app.tr(key), crate::ui_kit::Text::Inline);
+            crate::ui_kit::text(ui, app.tr_by_id(key), crate::ui_kit::Text::Inline);
             let cancel = crate::ui_kit::button(ui, tr!(app, "cmd.render_cancel"), crate::ui_kit::Button::Enabled(!unavailable(state)));
             crate::scenario::publish_target("render:preparation-cancel", cancel.rect);
             if cancel.clicked() {

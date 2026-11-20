@@ -13,7 +13,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         "prefs.export_name",
     ]
     .into_iter()
-    .map(|id| ui_kit::ContentWidth::label(ui, app.tr(id)))
+    .map(|id| ui_kit::ContentWidth::label(ui, app.tr_by_id(id)))
     .fold(0.0, f32::max)
         + t.space_16
         + t.space_4;
@@ -92,11 +92,11 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ),
             ] {
                 ui.horizontal_wrapped(|ui| {
-                    let response = setting(app, ui).backing_on_hover_text(app.tr(help));
+                    let response = setting(app, ui).backing_on_hover_text(app.tr_by_id(help));
                     crate::scenario::publish_target(&format!("prefs:{target}"), response.rect);
                     crate::scenario::publish_target(&format!("dialog:{legacy}"), response.rect);
                     if !crate::ui_kit::settings_search::suppress_chrome(ui) {
-                        ui_kit::help_icon(ui, app.tr(help));
+                        ui_kit::help_icon(ui, app.tr_by_id(help));
                     }
                 });
             }
@@ -109,7 +109,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 Validation::EachFeature => "prefs.validation.each_feature",
                 Validation::Off => "prefs.validation.off",
             };
-            let labels: Vec<String> = Validation::ALL.iter().map(|v| app.tr(label(v)).to_string()).collect();
+            let labels: Vec<String> = Validation::ALL.iter().map(|v| app.tr_by_id(label(v)).to_string()).collect();
             let options: Vec<&str> = labels.iter().map(String::as_str).collect();
             let mut selected = Validation::ALL.iter().position(|v| *v == app.preferences.validation).unwrap_or(1);
             ui_kit::row(ui, tr!(app, "prefs.validation.label"), |ui| {
@@ -140,7 +140,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let names: Vec<&str> = template::BUILT_INS.iter().copied().filter(|name| super::is_template_for(name, assembly)).collect();
                     let titles: Vec<String> = names.iter().filter_map(|name| template::title(name)).collect();
                     let titles: Vec<&str> = titles.iter().map(String::as_str).collect();
-                    ui_kit::row(ui, solidcraft_ui_text::tr(label), |ui| {
+                    ui_kit::row(ui, solidcraft_ui_text::tr_by_id(label), |ui| {
                         let mut selected = names.iter().position(|name| *name == chosen.as_str()).unwrap_or(0);
                         ui_kit::dropdown(ui, id, &mut selected, &titles);
                         if let Some(name) = names.get(selected) {
@@ -272,7 +272,7 @@ fn export_name(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
         ui_kit::settings_form(ui, label_width, |ui| {
             let tip = tr!("prefs.export_name_tip", placeholders = &crate::export_name::placeholder_list());
             ui_kit::settings_row_help(ui, tr!(app, "prefs.export_name"), &tip, |ui| {
-                let hint = app.tr("prefs.export_name_hint").to_string();
+                let hint = app.tr_by_id("prefs.export_name_hint").to_string();
                 let (_, response) = ui_kit::text_field_reserving(ui, &mut app.preferences.export_name, &hint, 0.0);
                 crate::scenario::publish_target("prefs:export_name", response.rect);
             });

@@ -268,7 +268,7 @@ pub fn details(ui: &mut Ui, id: &str, description: &Details, max_height: f32, fo
             .auto_shrink([false, true])
             .show(ui, |ui| {
                 if !description.settings.is_empty() {
-                    heading(ui, solidcraft_ui_text::tr("ui.details_settings"));
+                    heading(ui, solidcraft_ui_text::tr_by_id("ui.details_settings"));
                     super::settings_form(ui, t.form_label_width, |ui| {
                         for field in &description.settings {
                             ui.push_id(&field.id, |ui| {
@@ -280,7 +280,7 @@ pub fn details(ui: &mut Ui, id: &str, description: &Details, max_height: f32, fo
                     });
                 }
                 if !description.key.is_empty() {
-                    heading(ui, solidcraft_ui_text::tr("ui.details_key"));
+                    heading(ui, solidcraft_ui_text::tr_by_id("ui.details_key"));
                     for row in &description.key {
                         ui.horizontal(|ui| {
                             patterned_swatch(ui, row.colour, row.pattern, row.pattern_colour);
@@ -317,7 +317,7 @@ pub fn details(ui: &mut Ui, id: &str, description: &Details, max_height: f32, fo
                                         let (rect, _) = ui.allocate_exact_size(egui::vec2(t.control_height, t.control_height), egui::Sense::hover());
                                         let response = ui
                                             .push_id(&row.id, |ui| {
-                                                super::icon_button_at(ui, rect, "fit", solidcraft_ui_text::tr("ui.details_target"))
+                                                super::icon_button_at(ui, rect, "fit", solidcraft_ui_text::tr_by_id("ui.details_target"))
                                             })
                                             .inner;
                                         remember_control(ui, response.id);
@@ -344,7 +344,7 @@ pub fn details(ui: &mut Ui, id: &str, description: &Details, max_height: f32, fo
                         }
                     }
                 } else if !description.readout.is_empty() {
-                    heading(ui, solidcraft_ui_text::tr("ui.details_readout"));
+                    heading(ui, solidcraft_ui_text::tr_by_id("ui.details_readout"));
                     let expanded_id = ui.make_persistent_id((id, "all_readout"));
                     let expanded = ui.data(|data| data.get_temp::<bool>(expanded_id)).unwrap_or(false);
                     let columns = [super::Column::new("", 1.0).flex(), super::Column::new("", 1.0).flex()];

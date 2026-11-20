@@ -58,7 +58,7 @@ pub fn families(v: &Value) -> Vec<Family> {
 /// name for a family the catalogs don't know.
 pub(crate) fn family_name(f: &Family) -> String {
     let id = format!("parts.family.{}", f.id);
-    match solidcraft_ui_text::tr(&id) {
+    match solidcraft_ui_text::tr_by_id(&id) {
         shown if shown == id => f.name.clone(),
         shown => shown.to_string(),
     }
@@ -421,7 +421,7 @@ mod tests {
         for f in &l {
             for (size, row) in &f.sizes {
                 for key in row.as_object().into_iter().flat_map(|o| o.keys()).filter(|k| !matches!(k.as_str(), "size" | "default_length")) {
-                    let label = dimension_label(key).map(solidcraft_ui_text::tr);
+                    let label = dimension_label(key).map(solidcraft_ui_text::tr_by_id);
                     assert!(
                         label.is_some_and(|l| l.starts_with(char::is_uppercase) && !l.contains('_') && !l.starts_with("parts.")),
                         "{} {size}: {key} is labelled {label:?}",

@@ -1053,7 +1053,7 @@ fn held(d: &ParamsDialog, rows: &[Row]) -> serde_json::Map<String, Value> {
 
 /// The hint at the top of the dialog: when edits apply, as the check box under it says.
 fn hint(live: bool) -> &'static str {
-    solidcraft_ui_text::tr(if live { "manage.parameters_hint" } else { "parameters.held_hint" })
+    solidcraft_ui_text::tr_by_id(if live { "manage.parameters_hint" } else { "parameters.held_hint" })
 }
 
 /// The footer's note of the edits waiting for Apply, if any.
@@ -1970,7 +1970,7 @@ mod tests {
         crate::i18n::install();
         assert!(crate::prefs::Prefs::default().parameters_apply_live, "live updates stay the default");
         // The hint above the check box says when edits apply, whichever way it is set.
-        assert_eq!(hint(true), solidcraft_ui_text::tr("manage.parameters_hint"));
+        assert_eq!(hint(true), solidcraft_ui_text::tr_by_id("manage.parameters_hint"));
         assert_ne!(hint(false), hint(true));
         assert!(hint(false).contains("Apply") && !hint(false).contains("leaving"), "{}", hint(false));
         let mut h = held_dialog();

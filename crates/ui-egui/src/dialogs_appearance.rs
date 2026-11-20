@@ -437,7 +437,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [Sel
             ("appearance.roughness", "appearance:roughness", &mut roughness, 0.045..=1.0),
             ("appearance.dielectric_ior", "appearance:ior", &mut ior, 1.0..=3.0),
         ] {
-            let response = ui_kit::row(ui, app.tr(label), |ui| ui_kit::scalar_field(ui, value, range));
+            let response = ui_kit::row(ui, app.tr_by_id(label), |ui| ui_kit::scalar_field(ui, value, range));
             crate::scenario::publish_handle(handle, response.rect.center());
             if response.changed() {
                 detach_preset(k);

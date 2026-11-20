@@ -49,7 +49,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         .actions(ok, cancel, None)
         .show(ctx, true, |ui| {
             if picks {
-                ui_kit::text(ui, solidcraft_ui_text::tr(hint(&m)), ui_kit::Text::Note("calibrate_hint"));
+                ui_kit::text(ui, solidcraft_ui_text::tr_by_id(hint(&m)), ui_kit::Text::Note("calibrate_hint"));
                 for (label, p) in [("Point A", &mut m.a), ("Point B", &mut m.b)] {
                     ui_kit::row(ui, solidcraft_ui_text::tr_label(label), |ui| {
                         let [x, y] = p;
@@ -198,7 +198,7 @@ pub(crate) fn click(app: &mut SolveApp, proj: &Proj, screen: Pos2) -> bool {
         panel.next = 0;
         panel.picked_both = true;
     }
-    app.set_status(solidcraft_ui_text::tr(hint(&panel)), false);
+    app.set_status(solidcraft_ui_text::tr_by_id(hint(&panel)), false);
     app.tree.canvas_panel = Some(panel);
     true
 }
@@ -340,11 +340,11 @@ mod tests {
         let status = |h: &crate::scenario::Harness| h.app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default();
         assert!(super::click(&mut h.app, &proj, screen(c.center.x - 15.0, c.center.y - 5.0)));
         assert_eq!(super::hint(h.app.tree.canvas_panel.as_ref().unwrap()), "browser.straighten_click_b");
-        assert_eq!(status(&h), crate::i18n::tr_diagnostic(solidcraft_ui_text::tr("browser.straighten_click_b")));
+        assert_eq!(status(&h), crate::i18n::tr_diagnostic(solidcraft_ui_text::tr_by_id("browser.straighten_click_b")));
         assert!(super::click(&mut h.app, &proj, screen(c.center.x + 15.0, c.center.y + 5.0)));
         // With both points picked, the card and the status line ask for the direction, not Point A.
         assert_eq!(super::hint(h.app.tree.canvas_panel.as_ref().unwrap()), "browser.straighten_choose");
-        assert_eq!(status(&h), crate::i18n::tr_diagnostic(solidcraft_ui_text::tr("browser.straighten_choose")));
+        assert_eq!(status(&h), crate::i18n::tr_diagnostic(solidcraft_ui_text::tr_by_id("browser.straighten_choose")));
         let picked = h.app.tree.canvas_panel.clone().unwrap();
         let rise = (picked.b[1] - picked.a[1]).atan2(picked.b[0] - picked.a[0]).to_degrees();
         assert!((rise - 18.43).abs() < 1.0, "{picked:?}");

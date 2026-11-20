@@ -84,7 +84,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         if let Some(at) = crate::scenario::handle_at(&format!("dialog:{label}:{caption}")) {
                             let id = view.id();
                             crate::scenario::publish_handle(&format!("prefs:viewport_theme:{id}"), at);
-                            crate::scenario::publish_handle(&format!("dialog:{}:{}", tr!(app, "prefs.viewport"), app.tr(view.label_id())), at);
+                            crate::scenario::publish_handle(&format!("dialog:{}:{}", tr!(app, "prefs.viewport"), app.tr_by_id(view.label_id())), at);
                         }
                     }
                 });
@@ -184,7 +184,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             ui_kit::settings_form(ui, t.form_label_width, |ui| {
                 ui_kit::settings_row_help(ui, tr!(app, "ui.colour_vision_mode"), tr!(app, "prefs.appearance.colour_vision_help"), |ui| {
                     let modes = solidcraft_theme::ColorVision::ALL;
-                    let labels: Vec<_> = modes.iter().map(|m| solidcraft_ui_text::tr(m.label_id())).collect();
+                    let labels: Vec<_> = modes.iter().map(|m| solidcraft_ui_text::tr_by_id(m.label_id())).collect();
                     let mut selected = modes.iter().position(|m| *m == mode).unwrap_or(0);
                     if ui_kit::settings_segments(ui, tr!(app, "ui.colour_vision_mode"), &mut selected, &labels)
                         && let Some(mode) = modes.get(selected)
@@ -196,7 +196,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                     }
                     for mode in solidcraft_theme::ColorVision::ALL {
                         if let Some(at) =
-                            crate::scenario::handle_at(&format!("dialog:{}:{}", tr!(app, "ui.colour_vision_mode"), app.tr(mode.label_id())))
+                            crate::scenario::handle_at(&format!("dialog:{}:{}", tr!(app, "ui.colour_vision_mode"), app.tr_by_id(mode.label_id())))
                         {
                             crate::scenario::publish_handle(&format!("prefs:color_vision:{}", mode.id()), at);
                         }
@@ -280,7 +280,7 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                         });
                         let row = tr!(app, "prefs.toast_place");
                         for (label, key) in [("prefs.bottom_right", "corner"), ("prefs.bottom_centre", "centre")] {
-                            if let Some(at) = crate::scenario::handle_at(&format!("dialog:{row}:{}", app.tr(label))) {
+                            if let Some(at) = crate::scenario::handle_at(&format!("dialog:{row}:{}", app.tr_by_id(label))) {
                                 crate::scenario::publish_handle(&format!("prefs:toast_place:{key}"), at);
                             }
                         }
@@ -423,9 +423,21 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
             );
             let sizes = crate::library::ThumbnailSize::ALL;
             let options = [
-                ui_kit::PictureChoice { key: "small", label: app.tr(sizes[0].label()), figure: |p, rect| document_browser_preview(p, rect, 0.2) },
-                ui_kit::PictureChoice { key: "medium", label: app.tr(sizes[1].label()), figure: |p, rect| document_browser_preview(p, rect, 0.25) },
-                ui_kit::PictureChoice { key: "large", label: app.tr(sizes[2].label()), figure: |p, rect| document_browser_preview(p, rect, 0.3) },
+                ui_kit::PictureChoice {
+                    key: "small",
+                    label: app.tr_by_id(sizes[0].label()),
+                    figure: |p, rect| document_browser_preview(p, rect, 0.2),
+                },
+                ui_kit::PictureChoice {
+                    key: "medium",
+                    label: app.tr_by_id(sizes[1].label()),
+                    figure: |p, rect| document_browser_preview(p, rect, 0.25),
+                },
+                ui_kit::PictureChoice {
+                    key: "large",
+                    label: app.tr_by_id(sizes[2].label()),
+                    figure: |p, rect| document_browser_preview(p, rect, 0.3),
+                },
             ];
             let selected = sizes.iter().position(|size| *size == app.preferences.library_thumbnail_size).unwrap_or(2);
             if let Some(selected) =
@@ -448,14 +460,14 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                 });
                 for (key, label) in [("in_order", "prefs.history_sketches_in_order"), ("under_feature", "prefs.history_sketches_under_feature")] {
-                    if let Some(rect) = crate::scenario::rect_of(&format!("dialog:{}:{}", tr!(app, "prefs.history_sketches"), app.tr(label))) {
+                    if let Some(rect) = crate::scenario::rect_of(&format!("dialog:{}:{}", tr!(app, "prefs.history_sketches"), app.tr_by_id(label))) {
                         crate::scenario::publish_target(&format!("prefs:history_sketches:{key}"), rect);
-                        crate::scenario::publish_target(&format!("dialog:Sketches:{}", app.tr(label)), rect);
+                        crate::scenario::publish_target(&format!("dialog:Sketches:{}", app.tr_by_id(label)), rect);
                     }
                 }
                 ui_kit::row(ui, tr!(app, "prefs.bodies_folders"), |ui| {
                     let modes = BodiesFolders::ALL;
-                    let labels: Vec<_> = modes.iter().map(|m| app.tr(m.label_id())).collect();
+                    let labels: Vec<_> = modes.iter().map(|m| app.tr_by_id(m.label_id())).collect();
                     let mut selected = modes.iter().position(|m| *m == app.preferences.browser_bodies_folders).unwrap_or(0);
                     if ui_kit::segmented(ui, &mut selected, &labels, ui_kit::Segments { intrinsic: true, ..Default::default() })
                         && let Some(mode) = modes.get(selected)
@@ -570,9 +582,9 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 // Handles that don't depend on the language, by the saved value.
                 let row = tr!(app, "prefs.layout_page.ok_cancel");
                 for (label, key) in [("prefs.bottom", "bottom"), ("prefs.top", "top")] {
-                    if let Some(at) = crate::scenario::handle_at(&format!("dialog:{row}:{}", app.tr(label))) {
+                    if let Some(at) = crate::scenario::handle_at(&format!("dialog:{row}:{}", app.tr_by_id(label))) {
                         crate::scenario::publish_handle(&format!("prefs:dialog_buttons:{key}"), at);
-                        crate::scenario::publish_handle(&format!("dialog:{}:{}", tr!(app, "prefs.dialog_buttons"), app.tr(label)), at);
+                        crate::scenario::publish_handle(&format!("dialog:{}:{}", tr!(app, "prefs.dialog_buttons"), app.tr_by_id(label)), at);
                     }
                 }
             });

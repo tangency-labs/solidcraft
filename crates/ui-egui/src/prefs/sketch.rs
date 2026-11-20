@@ -26,7 +26,7 @@ fn snapping(app: &mut SolveApp, ui: &mut egui::Ui) {
             "prefs.sketch.snap_to_visible_grid",
         ]
         .into_iter()
-        .map(|id| check_width(ui, app.tr(id), true))
+        .map(|id| check_width(ui, app.tr_by_id(id), true))
         .fold(0.0, f32::max);
         let controls_width = if available >= figure_width + t.space_14 + labels_width { available - figure_width - t.space_14 } else { available };
         ui.with_layout(egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true), |ui| {
@@ -122,7 +122,7 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
             "prefs.sketch.cursor_coordinates",
         ];
         let natural = [left_labels.as_slice(), right_labels.as_slice()]
-            .map(|labels| labels.iter().map(|id| check_width(ui, app.tr(id), true)).fold(0.0, f32::max));
+            .map(|labels| labels.iter().map(|id| check_width(ui, app.tr_by_id(id), true)).fold(0.0, f32::max));
         let available = ui.available_width();
         let gap = t.space_24 + t.space_8;
         let two_columns = available >= t.space_24 * 20.0 + gap && !crate::ui_kit::settings_search::suppress_chrome(ui);
@@ -338,7 +338,7 @@ fn opening(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let response = ui_kit::picture_card(
                         ui,
                         &ui_kit::Card {
-                            label: app.tr(label_id),
+                            label: app.tr_by_id(label_id),
                             sub: Some(sub),
                             selected: app.preferences.sketch_exit_view == choice,
                             enabled: true,
@@ -356,7 +356,7 @@ fn opening(app: &mut SolveApp, ui: &mut egui::Ui) {
                         crate::scenario::publish_target("prefs:sketch_exit_view", response.rect);
                         crate::scenario::publish_target("dialog:When a sketch ends", response.rect);
                     }
-                    let option = app.tr(label_id);
+                    let option = app.tr_by_id(label_id);
                     if !indexed && crate::ui_kit::settings_search::texts_hit(ui, &[option]) {
                         crate::ui_kit::settings_search::remember(ui, option, response.rect);
                         indexed = true;
@@ -413,7 +413,7 @@ fn marks(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let response = ui_kit::toggle_tile(
                     ui,
                     &ui_kit::Card {
-                        label: solidcraft_ui_text::tr(label),
+                        label: solidcraft_ui_text::tr_by_id(label),
                         sub: None,
                         selected: *value,
                         enabled: true,
@@ -424,7 +424,7 @@ fn marks(app: &mut SolveApp, ui: &mut egui::Ui) {
                     },
                     width,
                 )
-                .backing_on_hover_text(solidcraft_ui_text::tr(help));
+                .backing_on_hover_text(solidcraft_ui_text::tr_by_id(help));
                 targets(key, &response);
                 if response.clicked() {
                     *value = !*value;
@@ -458,7 +458,7 @@ fn selecting(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let response = ui_kit::picture_card(
                         ui,
                         &ui_kit::Card {
-                            label: app.tr(label),
+                            label: app.tr_by_id(label),
                             sub: None,
                             selected: app.ui.pick_bodies == bodies,
                             enabled: true,
@@ -474,7 +474,7 @@ fn selecting(app: &mut SolveApp, ui: &mut egui::Ui) {
                         crate::scenario::publish_target("prefs:pick_bodies", response.rect);
                         crate::scenario::publish_target("dialog:Click selects whole bodies", response.rect);
                     }
-                    let option = app.tr(label);
+                    let option = app.tr_by_id(label);
                     if !indexed && crate::ui_kit::settings_search::texts_hit(ui, &[option]) {
                         crate::ui_kit::settings_search::remember(ui, option, response.rect);
                         indexed = true;
@@ -569,19 +569,19 @@ fn check_width(ui: &egui::Ui, label: &str, help: bool) -> f32 {
 
 /// Standard checkbox, its hover help, and its existing field target.
 fn check(ui: &mut egui::Ui, key: &str, label: &str, help: Option<&str>, value: &mut bool) -> egui::Response {
-    let help = help.map(solidcraft_ui_text::tr);
+    let help = help.map(solidcraft_ui_text::tr_by_id);
     ui.horizontal_top(|ui| {
         let t = Tokens::get();
         let show_help = help.is_some() && !crate::ui_kit::settings_search::suppress_chrome(ui);
         let width = (ui.available_width() - if show_help { t.space_8 + t.space_12 + 1.0 } else { 0.0 }).max(0.0).min(check_width(
             ui,
-            solidcraft_ui_text::tr(label),
+            solidcraft_ui_text::tr_by_id(label),
             false,
         ));
         ui.spacing_mut().item_spacing.x = t.space_8;
         let response = ui
             .allocate_ui_with_layout(egui::vec2(width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
-                ui_kit::checkbox(ui, solidcraft_ui_text::tr(label), value)
+                ui_kit::checkbox(ui, solidcraft_ui_text::tr_by_id(label), value)
             })
             .inner;
         targets(key, &response);

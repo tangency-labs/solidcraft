@@ -226,7 +226,7 @@ pub(super) fn rows(app: &SolveApp) -> Result<Vec<Light>, String> {
 
 pub(super) fn name(app: &SolveApp, light: &Light) -> String {
     if light.number <= 3 {
-        app.tr(&light.name_key).into()
+        app.tr_by_id(&light.name_key).into()
     } else {
         solidcraft_ui_text::format(&light.name_key, &[("number", &light.number.to_string())])
     }
@@ -647,10 +647,10 @@ pub(super) fn lighting(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui.add_enabled_ui(cpu && !custom, |ui| {
                 let label = tr!(app, "render.lighting_preset_row").to_string();
                 ui_kit::row(ui, &label, |ui| {
-                    let selected_label = app.tr(selected_label).to_string();
+                    let selected_label = app.tr_by_id(selected_label).to_string();
                     ui_kit::dropdown_menu(ui, "render:lighting:presets", &selected_label, |ui| {
                         for (preset, key) in presets {
-                            if ui_kit::list_picker(ui, key, app.tr(key), preset == selected).clicked() {
+                            if ui_kit::list_picker(ui, key, app.tr_by_id(key), preset == selected).clicked() {
                                 review_preset(app, preset);
                                 ui.close();
                             }
@@ -709,7 +709,7 @@ pub(super) fn lighting(app: &mut SolveApp, ui: &mut egui::Ui) {
                     .filter(|l| if kind == "point" { matches!(l.geometry.kind(), "point" | "spot") } else { l.geometry.kind() == kind })
                     .count();
                 let unsupported = raster;
-                let label = app.tr(key).to_string();
+                let label = app.tr_by_id(key).to_string();
                 ui.add_enabled_ui(!unsupported, |ui| {
                     ui_kit::row(ui, &label, |ui| {
                         ui.columns(2, |columns| {
@@ -763,7 +763,7 @@ pub(super) fn add_menu(app: &mut SolveApp, ui: &mut egui::Ui) {
                     )
                     .count();
                 let enabled = count < cap;
-                let response = ui.add_enabled_ui(enabled, |ui| ui_kit::list_picker(ui, kind, app.tr(key), false)).inner;
+                let response = ui.add_enabled_ui(enabled, |ui| ui_kit::list_picker(ui, kind, app.tr_by_id(key), false)).inner;
                 crate::scenario::publish_target(&format!("render:lighting:add:{kind}"), response.rect);
                 if response.backing_on_hover_text(tr!(app, "render.lighting_budget_help")).clicked() {
                     dispatch(app, "render.lights.add", None, Some(json!({"kind":kind})));
@@ -781,7 +781,11 @@ pub(super) fn add_menu(app: &mut SolveApp, ui: &mut egui::Ui) {
                     .inner;
                 crate::scenario::publish_target("render:lighting:add:sun", response.rect);
                 if response
-                    .backing_on_hover_text(app.tr(if compatible { "render.directional_sun_limit" } else { "render.cpu_celestial_path_required" }))
+                    .backing_on_hover_text(app.tr_by_id(if compatible {
+                        "render.directional_sun_limit"
+                    } else {
+                        "render.cpu_celestial_path_required"
+                    }))
                     .clicked()
                 {
                     let softness = (0.02 - 0.001) / (std::f64::consts::FRAC_PI_2 - 0.001);
@@ -950,7 +954,7 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, id: &str) {
         });
     ui_kit::scope(ui, |ui| {
         ui_kit::row(ui, &name(app, light), |ui| {
-            ui.add_enabled_ui(false, |ui| ui_kit::choice_chip(ui, "render:light:badge", app.tr(type_key), true));
+            ui.add_enabled_ui(false, |ui| ui_kit::choice_chip(ui, "render:light:badge", app.tr_by_id(type_key), true));
         });
         if blocked {
             note(app, ui, "render.method_limit_raster");
@@ -960,7 +964,7 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, id: &str) {
                 tr!(app, "render.light_type_area").to_string(),
                 tr!(app, "render.light_type_point").to_string(),
                 tr!(app, "render.light_type_spot").to_string(),
-                app.tr(if finite_sun { "render.light_type_sun" } else { "render.tree_directional" }).to_string(),
+                app.tr_by_id(if finite_sun { "render.light_type_sun" } else { "render.tree_directional" }).to_string(),
             ];
             let kinds = ["area", "point", "spot", "directional"];
             let mut selected = kinds.iter().position(|value| *value == kind).unwrap_or(1);
@@ -1048,8 +1052,9 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, id: &str) {
                 ui.add_enabled_ui(!sun, |ui| {
                     let label = tr!(app, "render.light_aim").to_string();
                     ui_kit::row(ui, &label, |ui| {
-                        let label =
-                            app.tr(if aim == product_centre(app) { "render.light_product_centre" } else { "render.lighting_point" }).to_string();
+                        let label = app
+                            .tr_by_id(if aim == product_centre(app) { "render.light_product_centre" } else { "render.lighting_point" })
+                            .to_string();
                         ui_kit::dropdown_menu(ui, "render:light:aim", &label, |ui| {
                             let bounds = solidcraft_engine::view::bounds(&app.session).unwrap_or(solidcraft_engine::geom::Aabb3::EMPTY);
                             let mut targets = vec![
@@ -1185,7 +1190,7 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, id: &str) {
                     )
                     .count();
                 if ui_kit::button(ui, tr!(app, "render.light_duplicate"), ui_kit::Button::Enabled(!blocked && !finite_sun && count < cap))
-                    .backing_on_hover_text(app.tr(if finite_sun { "render.directional_sun_limit" } else { "render.lighting_budget_help" }))
+                    .backing_on_hover_text(app.tr_by_id(if finite_sun { "render.directional_sun_limit" } else { "render.lighting_budget_help" }))
                     .clicked()
                 {
                     dispatch(app, "render.lights.duplicate", Some(id), None);
@@ -1209,7 +1214,7 @@ fn subject_size(app: &SolveApp) -> f64 {
     bounded(solidcraft_engine::view::bounds(&app.session).unwrap_or(solidcraft_engine::geom::Aabb3::EMPTY).diagonal(), 1.0, 1e6)
 }
 fn note(app: &SolveApp, ui: &mut egui::Ui, key: &'static str) {
-    ui_kit::text(ui, app.tr(key), ui_kit::Text::Note(key));
+    ui_kit::text(ui, app.tr_by_id(key), ui_kit::Text::Note(key));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1224,7 +1229,7 @@ fn slider_field(
     format: fn(f64) -> String,
     enabled: bool,
 ) {
-    let label = app.tr(label).to_string();
+    let label = app.tr_by_id(label).to_string();
     ui.add_enabled_ui(enabled, |ui| {
         ui_kit::row(ui, &label, |ui| {
             let response = ui_kit::slider(ui, value, range.clone(), ui_kit::Slider { format, ..Default::default() });
@@ -1252,7 +1257,7 @@ fn vector_field(
     range: std::ops::RangeInclusive<f64>,
     suffix: &str,
 ) {
-    let label = app.tr(label).to_string();
+    let label = app.tr_by_id(label).to_string();
     // Each coordinate needs the full control column: three content-sized
     // DragValues can extend beyond a narrow inspector as their text grows.
     // Separate axis rows retain the standard parser, focus and accessible label.
@@ -1290,7 +1295,7 @@ fn field(
     suffix: &str,
     enabled: bool,
 ) {
-    let label = app.tr(label).to_string();
+    let label = app.tr_by_id(label).to_string();
     ui.add_enabled_ui(enabled, |ui| {
         ui_kit::row(ui, &label, |ui| {
             let response = ui_kit::number_field(ui, value, range.clone(), speed, suffix);

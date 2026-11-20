@@ -872,7 +872,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         name: tr!(app, "ui.start_page").into(),
         interactive,
         back: Some(start_page::Back {
-            template: app.tr("home.back").into(),
+            template: app.tr_by_id("home.back").into(),
             document: app.session.doc.name.as_str().into(),
             shortcut: "Esc".into(),
             chosen: FileAction::Back,
@@ -886,7 +886,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             Section::Export => tr!(app, "home.export").into(),
         },
         hint: app
-            .tr(match app.home.section {
+            .tr_by_id(match app.home.section {
                 Section::Start => "home.start_hint",
                 Section::Recovery => "home.recovery_hint",
                 Section::Export => "home.export_hint",
@@ -948,7 +948,7 @@ fn rail(app: &SolveApp) -> Vec<start_page::RailItem<'_, FileAction>> {
     for link in crate::links::LINKS {
         rail.push(start_page::RailItem::Entry(start_page::RailEntry {
             id: format!("home:{}", link.id).into(),
-            label: solidcraft_ui_text::tr(link.label).into(),
+            label: solidcraft_ui_text::tr_by_id(link.label).into(),
             shortcut: String::new().into(),
             selected: false,
             enabled: true,
@@ -1053,8 +1053,8 @@ fn recent_entry<'a>(app: &'a SolveApp, index: usize, path: &'a str) -> start_pag
             .as_deref()
             .is_some_and(|fingerprint| crate::documents::trusted_fingerprint(&app.preferences.trusted_signing_keys, fingerprint));
         security = Some(match (trusted, &summary.signer, &summary.fingerprint) {
-            (true, Some(signer), _) => app.tr("home.signed_by").replace("{key}", signer),
-            (_, _, Some(fingerprint)) => app.tr("home.signed_by").replace("{key}", fingerprint),
+            (true, Some(signer), _) => app.tr_by_id("home.signed_by").replace("{key}", signer),
+            (_, _, Some(fingerprint)) => app.tr_by_id("home.signed_by").replace("{key}", fingerprint),
             _ => tr!(app, "home.signed_unchecked").to_string(),
         });
     }
@@ -1136,7 +1136,7 @@ fn recent_time_at(app: &SolveApp, time: u64, now: u64) -> String {
         let mut parts = date.rsplitn(3, '-');
         let day = parts.next().unwrap_or("").trim_start_matches('0');
         let month = parts.next().unwrap_or("");
-        return tr!("home.short_date", day = day, month = app.tr(&format!("home.month_{month}")));
+        return tr!("home.short_date", day = day, month = app.tr_by_id(&format!("home.month_{month}")));
     };
     solidcraft_ui_text::format(key, &[("count", &count.to_string())])
 }
@@ -1151,7 +1151,7 @@ fn recovery_body(app: &SolveApp) -> start_page::Reviews<'_, FileAction> {
             title: entry.name.as_str().into(),
             detail: tr!(
                 "recovery.detail",
-                file = entry.path.as_deref().unwrap_or(app.tr("recovery.never_saved")),
+                file = entry.path.as_deref().unwrap_or(app.tr_by_id("recovery.never_saved")),
                 features = &entry.features.to_string(),
                 when = &crate::recovery_ui::ago(entry.saved_at)
             )
@@ -1185,7 +1185,7 @@ fn export_tiles(app: &SolveApp) -> start_page::Tiles<'_, FileAction> {
             } else {
                 format!("{} {}…", tr!(app, "home.export"), app.tr_label(format)).into()
             },
-            hint: hint.map_or(format, |key| app.tr(key)).into(),
+            hint: hint.map_or(format, |key| app.tr_by_id(key)).into(),
             primary: false,
             chosen,
         })
@@ -2000,7 +2000,7 @@ mod tests {
     fn the_entry_that_opens_preferences_carries_the_windows_name() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.show(0);
-        assert_eq!(solidcraft_ui_text::tr("home.settings"), solidcraft_ui_text::tr("ui.preferences"), "one name for the window");
+        assert_eq!(solidcraft_ui_text::tr_by_id("home.settings"), solidcraft_ui_text::tr_by_id("ui.preferences"), "one name for the window");
         click_file(&mut h, "home:settings");
         assert!(h.app.prefs_window.shell.open, "the entry opens Preferences");
     }

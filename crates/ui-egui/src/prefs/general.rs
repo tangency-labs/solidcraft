@@ -44,10 +44,11 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::settings_section(ui, "startup", tr!(app, "ui.on_startup"), |ui| {
             ui_kit::settings_form(ui, labels, |ui| {
                 ui_kit::row(ui, tr!(app, "ui.on_startup"), |ui| {
-                    let selected = app.tr(if app.preferences.show_home_on_startup { "ui.home" } else { "ui.new_design" }).to_string();
+                    let selected = app.tr_by_id(if app.preferences.show_home_on_startup { "ui.home" } else { "ui.new_design" }).to_string();
                     let choice = ui_kit::dropdown_menu(ui, "pref_startup", &selected, |ui| {
                         for (home, key) in [(true, "ui.home"), (false, "ui.new_design")] {
-                            let response = ui_kit::list_picker(ui, key, solidcraft_ui_text::tr(key), app.preferences.show_home_on_startup == home);
+                            let response =
+                                ui_kit::list_picker(ui, key, solidcraft_ui_text::tr_by_id(key), app.preferences.show_home_on_startup == home);
                             crate::scenario::publish_rect(if home { "prefs:startup_home" } else { "prefs:startup_design" }, response.rect);
                             if response.clicked() {
                                 app.preferences.show_home_on_startup = home;

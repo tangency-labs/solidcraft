@@ -9,7 +9,7 @@
 
 use serde_json::Value;
 use solidcraft_engine::plugin::{LossReport, LossSeverity};
-use solidcraft_ui_text::tr;
+use solidcraft_ui_text::tr_by_id;
 
 use crate::{SolveApp, ui_kit};
 
@@ -294,7 +294,7 @@ const ORDER: [LossSeverity; 3] = [LossSeverity::Dropped, LossSeverity::Degraded,
 pub(crate) fn lines(report: &LossReport) -> Vec<(LossSeverity, String)> {
     let mut lines = Vec::new();
     for severity in ORDER {
-        let label = tr(severity_label(severity));
+        let label = tr_by_id(severity_label(severity));
         let mut titled: Vec<(&str, usize)> = Vec::new();
         let mut untitled = Vec::new();
         for item in report.items.iter().filter(|i| i.severity == severity) {
@@ -356,7 +356,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 ui_kit::text(ui, tr!("import_report.nothing_lost"), ui_kit::Text::Hint("import_report_nothing"));
             } else {
                 let tally: Vec<String> =
-                    counts.iter().filter(|(_, n)| *n > 0).map(|(severity, n)| std::format!("{} {n}", tr(severity_label(*severity)))).collect();
+                    counts.iter().filter(|(_, n)| *n > 0).map(|(severity, n)| std::format!("{} {n}", tr_by_id(severity_label(*severity)))).collect();
                 ui_kit::text(ui, &tally.join(" · "), ui_kit::Text::Hint("import_report_tally"));
             }
             if !shown.report.items.is_empty() || !shown.outline.is_empty() {

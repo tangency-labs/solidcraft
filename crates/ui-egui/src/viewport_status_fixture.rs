@@ -10,13 +10,13 @@ pub(crate) struct Fixture {
 }
 
 fn item(id: &str, kind: StatusKind, label: &str, setting: String, has_key: bool) -> StatusItem {
-    StatusItem { id: id.into(), kind, name: solidcraft_ui_text::tr(label).into(), setting, has_key, editable: false }
+    StatusItem { id: id.into(), kind, name: solidcraft_ui_text::tr_by_id(label).into(), setting, has_key, editable: false }
 }
 
 fn specimen(id: &str, readout: bool) -> crate::ui_kit::Details {
     use crate::ui_kit::{DetailFinding, DetailKey, DetailSetting, DetailValue, Details};
     let t = solidcraft_theme::Tokens::get();
-    let tr = |id| solidcraft_ui_text::tr(id).to_owned();
+    let tr = |msg| solidcraft_ui_text::tr(msg).to_owned();
     let mut description = Details { caption: Some(tr(msg!("ui.details_fixture_caption"))), ..Default::default() };
     description.key = t
         .analysis

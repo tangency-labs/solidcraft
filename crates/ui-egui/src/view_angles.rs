@@ -57,7 +57,7 @@ pub(crate) fn lines(app: &SolveApp) -> (String, String) {
     let d = app.preferences.angle_decimals;
     let angles = tr!("ui.view_angles_readout", pitch = &degrees(a.pitch, d), yaw = &degrees(a.yaw, d), roll = &degrees(a.roll, d));
     let projection = if app.perspective_view() { "ui.view_angles_persp" } else { "ui.view_angles_ortho" };
-    (angles, solidcraft_ui_text::tr(projection).to_string())
+    (angles, solidcraft_ui_text::tr_by_id(projection).to_string())
 }
 
 /// Whether the angle of `axis` (`"yaw"`, `"pitch"` or `"roll"`) is locked in the card (#4581).
@@ -173,7 +173,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
             ui.label(egui::RichText::new(tr!("ui.view_angles")).semibold().color(t.text).size(t.font_caption));
             for (id, axis) in [("ui.view_angles_pitch", "pitch"), ("ui.view_angles_yaw", "yaw"), ("ui.view_angles_roll", "roll")] {
                 let locked = locked_angle(app, axis);
-                let axis_name = solidcraft_ui_text::tr(id);
+                let axis_name = solidcraft_ui_text::tr_by_id(id);
                 let mut value = match axis {
                     "pitch" => typed.pitch,
                     "yaw" => typed.yaw,

@@ -17,8 +17,8 @@ use serde_json::json;
 use crate::SolveApp;
 
 #[cfg(test)]
-fn tr(id: impl solidcraft_ui_text::Key<'static>) -> &'static str {
-    solidcraft_ui_text::tr(id)
+fn tr(id: &'static str) -> &'static str {
+    solidcraft_ui_text::tr_by_id(id)
 }
 
 /// The PDF's file name: the drawing's name, or the design's.

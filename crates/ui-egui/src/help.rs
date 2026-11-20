@@ -182,7 +182,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context, anchor: egui::Pos2) {
                     // Support and community: always here, whether or not the status bar shows their buttons.
                     crate::ui_kit::Menu::separator(ui);
                     for link in crate::links::LINKS {
-                        let item = crate::ui_kit::Item::action(link.id, solidcraft_ui_text::tr(link.menu), link.icon);
+                        let item = crate::ui_kit::Item::action(link.id, solidcraft_ui_text::tr_by_id(link.menu), link.icon);
                         if crate::ui_kit::menu::list_row(ui, &item).is_some() {
                             pick = Some(link.id);
                         }
@@ -227,7 +227,7 @@ fn about(app: &mut SolveApp, ctx: &egui::Context) {
             crate::policy::note(app, ui, "about:managed");
             ui.horizontal(|ui| {
                 for link in crate::links::LINKS {
-                    let button = ui_kit::button(ui, solidcraft_ui_text::tr(link.label), ui_kit::Button::Normal).backing_on_hover_text(link.url);
+                    let button = ui_kit::button(ui, solidcraft_ui_text::tr_by_id(link.label), ui_kit::Button::Normal).backing_on_hover_text(link.url);
                     crate::scenario::publish_target(&format!("about:{}", link.id), button.rect);
                     if button.clicked() {
                         crate::links::run(ui.ctx(), link.id);
@@ -253,7 +253,7 @@ fn about(app: &mut SolveApp, ctx: &egui::Context) {
                         for (id, title, text) in
                             [("notice", "help.notice", NOTICE), ("mit", "help.mit", LICENSE_MIT), ("apache", "help.apache", LICENSE_APACHE)]
                         {
-                            ui_kit::section(ui, id, solidcraft_ui_text::tr(title), false, |ui| {
+                            ui_kit::section(ui, id, solidcraft_ui_text::tr_by_id(title), false, |ui| {
                                 ui_kit::text(ui, text, ui_kit::Text::Report(id, false));
                             });
                         }
@@ -306,7 +306,7 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         h.app.help.about = true;
         h.frames(2);
-        let key = |id: &str| format!("dialog:section:{}", solidcraft_ui_text::tr(id));
+        let key = |id: &str| format!("dialog:section:{}", solidcraft_ui_text::tr_by_id(id));
         h.step(&serde_json::json!({"click": {"handle": key("help.licences")}})).unwrap();
         h.frames(2);
         let left = |id: &str| solidcraft_ui_registry::rect_of(&key(id)).map(|r| r.left());

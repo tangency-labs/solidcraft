@@ -175,18 +175,19 @@ fn apply(app: &mut SolveApp, draft: &mut Draft) -> Result<(), String> {
 pub(in crate::render_workspace) fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut draft) = app.render_workspace.view.library.review.take() else { return };
     let current = draft.current(app);
-    let title = app.tr(&format!("render.stage_panels.review_{}", draft.variant)).to_string();
+    let title = app.tr_by_id(&format!("render.stage_panels.review_{}", draft.variant)).to_string();
     let subtitle = if draft.variant == "rig" {
         let emitters = draft.plan["lighting"]["area_lights"].as_array().map_or(0, Vec::len) + usize::from(!draft.plan["lighting"]["sun"].is_null());
         let cards = draft.plan["stage"].as_array().map_or(0, Vec::len);
         tr!("render.stage_panels.rig_summary", emitters = &emitters.to_string(), cards = &cards.to_string())
     } else {
-        app.tr(&format!("render.stage_panels.subtitle_{}", draft.variant)).to_string()
+        app.tr_by_id(&format!("render.stage_panels.subtitle_{}", draft.variant)).to_string()
     };
-    let replaces = app.tr(&format!("render.stage_panels.replaces_{}", draft.variant)).to_string();
-    let kept = app.tr(if draft.variant == "quality" { "render.stage_panels.kept_quality" } else { "render.stage_panels.kept_fields" }).to_string();
+    let replaces = app.tr_by_id(&format!("render.stage_panels.replaces_{}", draft.variant)).to_string();
+    let kept =
+        app.tr_by_id(if draft.variant == "quality" { "render.stage_panels.kept_quality" } else { "render.stage_panels.kept_fields" }).to_string();
     let acknowledgement = app
-        .tr(match draft.variant {
+        .tr_by_id(match draft.variant {
             "studio" => "render.stage_panels.studio_ack",
             "rig" => "render.library_replace_studio",
             "physical" => "render.physical_acknowledge",
@@ -197,7 +198,7 @@ pub(in crate::render_workspace) fn dialog(app: &mut SolveApp, ctx: &egui::Contex
         .to_string();
     let needs_indirect = draft.plan["requires_indirect"] == true;
     let apply_label = app
-        .tr(if needs_indirect {
+        .tr_by_id(if needs_indirect {
             "render.cpu_studio_enable_apply"
         } else {
             match draft.variant {
@@ -287,7 +288,7 @@ pub(in crate::render_workspace) fn dialog(app: &mut SolveApp, ctx: &egui::Contex
                     ui_kit::text(ui, &draft.plan["gpu_options"]["seed"].to_string(), ui_kit::Text::Inline);
                 });
                 let denoise = if draft.plan["gpu_options"]["denoise"] == true { "render.quality_denoise_on" } else { "render.quality_denoise_off" };
-                ui_kit::text(ui, app.tr(denoise), ui_kit::Text::Inline);
+                ui_kit::text(ui, app.tr_by_id(denoise), ui_kit::Text::Inline);
                 ui_kit::text(ui, tr!(app, "render.stage_panels.omits"), ui_kit::Text::Note("review:omits"));
                 ui_kit::text(ui, tr!(app, "render.stage_panels.quality_omissions"), ui_kit::Text::Note("review:omissions"));
             }
@@ -337,9 +338,9 @@ pub(in crate::render_workspace) fn confirmation(app: &mut SolveApp, ctx: &egui::
         return;
     }
     let stage = pending.command == "render.stage.clear";
-    let title = app.tr(if stage { "render.stage_panels.remove_stage_title" } else { "render.stage_panels.remove_optics_title" }).to_string();
-    let message = app.tr(if stage { "render.stage_panels.remove_stage_help" } else { "render.stage_panels.remove_optics_help" }).to_string();
-    let label = app.tr(if stage { "render.stage_panels.remove_stage" } else { "render.stage_panels.remove_optics" }).to_string();
+    let title = app.tr_by_id(if stage { "render.stage_panels.remove_stage_title" } else { "render.stage_panels.remove_optics_title" }).to_string();
+    let message = app.tr_by_id(if stage { "render.stage_panels.remove_stage_help" } else { "render.stage_panels.remove_optics_help" }).to_string();
+    let label = app.tr_by_id(if stage { "render.stage_panels.remove_stage" } else { "render.stage_panels.remove_optics" }).to_string();
     let (closed, answer) = ui_kit::Confirm::new(egui::Id::unique("render_resource_removal"), "delete", &title)
         .tone(ui_kit::Tone::Danger)
         .actions(&label, tr!(app, "render.stage_panels.keep"), None)

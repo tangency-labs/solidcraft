@@ -1223,7 +1223,7 @@ pub fn prefs_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         } else {
             let why = if policy == Some(false) { "policy.updates_off" } else { "update.check_unavailable" };
-            ui_kit::settings_inline_note(ui, solidcraft_ui_text::tr(why));
+            ui_kit::settings_inline_note(ui, solidcraft_ui_text::tr_by_id(why));
         }
         let busy = app.updater.status == Status::Checking;
         let r = ui_kit::button(ui, tr!("update.check_now"), ui_kit::Button::Enabled(can && !busy));

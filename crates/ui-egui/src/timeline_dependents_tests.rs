@@ -32,7 +32,7 @@ fn the_dependents_button_with_nothing_selected_says_what_to_pick() {
 
     let (text, _, error) = h.app.status.clone().expect("the button says what to pick");
     assert!(!error, "the button must not report a failure: {text}");
-    assert_eq!(text, h.app.tr("ui.dependents_select_first"));
+    assert_eq!(text, h.app.tr_by_id("ui.dependents_select_first"));
     assert!(!text.contains("must be an id or name"), "{text}");
 }
 

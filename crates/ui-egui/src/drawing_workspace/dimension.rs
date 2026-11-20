@@ -208,7 +208,7 @@ pub(super) fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     let picked = app.drawing_workspace.dimension.as_ref().is_some_and(|draft| !draft.picks.is_empty());
     let key = if picked { "ui.drawing_dimension_tool.place" } else { "ui.drawing_dimension_tool.pick" };
     let close = super::inset(ui, |ui| {
-        ui_kit::text(ui, solidcraft_ui_text::tr(key), ui_kit::Text::Note(key));
+        ui_kit::text(ui, solidcraft_ui_text::tr_by_id(key), ui_kit::Text::Note(key));
         ui.separator();
         ui_kit::button(ui, tr!("ui.cancel"), Button::Normal).clicked()
     });

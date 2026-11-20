@@ -154,7 +154,13 @@ impl<T> Starting<T> {
                 painter.rect_filled(egui::Rect::from_min_size(egui::pos2(x, bar.min.y), vec2(24.0, bar.height())), 2.0, t.accent_soft);
             }
             if !label.is_empty() {
-                painter.text(c + vec2(0.0, 20.0), Align2::CENTER_TOP, solidcraft_ui_text::tr(label), FontId::proportional(t.font_body), t.text_dim);
+                painter.text(
+                    c + vec2(0.0, 20.0),
+                    Align2::CENTER_TOP,
+                    solidcraft_ui_text::tr_by_id(label),
+                    FontId::proportional(t.font_body),
+                    t.text_dim,
+                );
             }
             painter.rect_stroke(rect, 0.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
         });
@@ -517,7 +523,7 @@ mod tests {
     fn a_view_whose_pipelines_still_compile_says_so() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
-        let message = h.app.tr("starting.view").to_owned();
+        let message = h.app.tr_by_id("starting.view").to_owned();
         let painted = |h: &crate::scenario::Harness| h.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.text() == message));
         h.frames(2);
         assert!(!painted(&h), "a view with no device and nothing compiling (the harness) says nothing");
@@ -536,7 +542,7 @@ mod tests {
     fn a_view_without_its_pipelines_says_it_cannot_draw() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
-        let message = h.app.tr("starting.view_unavailable").to_owned();
+        let message = h.app.tr_by_id("starting.view_unavailable").to_owned();
         let painted = |h: &crate::scenario::Harness| h.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.text() == message));
         h.frames(2);
         assert!(!painted(&h), "a view that only has no device yet (the harness) says nothing");

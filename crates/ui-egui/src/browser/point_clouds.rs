@@ -601,7 +601,7 @@ mod tests {
         }
         h.app.run("pointcloud.edit", json!({"cloud": id, "color_by": "height"})).unwrap();
         h.frames(2);
-        assert!(h.widget(solidcraft_ui_text::tr("ui.point_cloud_auto_range")).is_some());
+        assert!(h.widget(solidcraft_ui_text::tr_by_id("ui.point_cloud_auto_range")).is_some());
         h.step(&json!({"widget": "Close"})).unwrap();
         h.frames(2);
         assert!(h.app.tree.cloud_panel.is_none());

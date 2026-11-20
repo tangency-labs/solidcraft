@@ -271,7 +271,7 @@ pub(crate) fn show_warning(app: &mut SolveApp, ctx: &egui::Context) {
                     crate::ui_kit::text(ui, &blocked.part, crate::ui_kit::Text::Report("part", false));
                 }
                 crate::ui_kit::text(ui, &reason, crate::ui_kit::Text::Report("reason", false));
-                crate::ui_kit::text(ui, app.tr(hint), crate::ui_kit::Text::Hint("remedy"));
+                crate::ui_kit::text(ui, app.tr_by_id(hint), crate::ui_kit::Text::Hint("remedy"));
             });
     app.viewport.dialog_rect = crate::scenario::rect_of("dialog:window");
     if closed || action != crate::ui_kit::Action::None {
@@ -666,7 +666,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
                     };
                     ui.set_min_width(200.0);
                     ui.set_max_width(240.0);
-                    ui.label(app.tr(if d.axis.angular { "joint_move.rotation" } else { "joint_move.distance" }));
+                    ui.label(app.tr_by_id(if d.axis.angular { "joint_move.rotation" } else { "joint_move.distance" }));
                     ui.label(egui::RichText::new(value).strong());
                     if d.axis.angular {
                         let step = if d.fine { app.preferences.joint_rotation_fine } else { app.preferences.joint_rotation_coarse };
@@ -1110,7 +1110,7 @@ mod tests {
         assert_eq!(blocked.conflicts, conflicting);
         let reason = blocked.reason(&h.app);
         assert!(reason.contains("conflicts") && conflicting.iter().all(|n| reason.contains(n)), "{reason}");
-        assert_ne!(reason, h.app.tr("joint_move.fixed"));
+        assert_ne!(reason, h.app.tr_by_id("joint_move.fixed"));
         assert!(crate::scenario::rect_of("dialog:window").is_some());
         h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
         h.frames(2);

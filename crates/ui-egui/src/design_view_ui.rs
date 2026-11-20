@@ -268,7 +268,7 @@ fn open_new_window(app: &mut SolveApp, view: Option<&str>) {
             app.set_status(tr!("ui.new_window.opened", name = &name), false);
         }
         Err(error) => {
-            let reason = if error == "ui.new_window.unsupported" { solidcraft_ui_text::tr(&error).to_string() } else { error };
+            let reason = if error == "ui.new_window.unsupported" { solidcraft_ui_text::tr_by_id(&error).to_string() } else { error };
             app.set_status(tr!("ui.new_window.failed", error = &reason), true);
         }
     }

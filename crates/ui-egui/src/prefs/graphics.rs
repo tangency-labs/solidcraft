@@ -6,7 +6,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let help_label_width = ["prefs.graphics_page.supersampling", "prefs.graphics_card", "prefs.graphics_api", "ui.window_system"]
         .into_iter()
-        .map(|id| ui_kit::ContentWidth::label(ui, app.tr(id)))
+        .map(|id| ui_kit::ContentWidth::label(ui, app.tr_by_id(id)))
         .fold(0.0, f32::max)
         + t.space_16
         + t.space_4;
@@ -23,8 +23,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ] {
                     let response = ui_kit::preset_card(
                         ui,
-                        app.tr(label),
-                        app.tr(word),
+                        app.tr_by_id(label),
+                        app.tr_by_id(word),
                         graphics_preset(&app.preferences) == id,
                         true,
                         &|p, rect, ink| paint_preset_glyph(p, rect, id, ink),
@@ -55,13 +55,13 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui.spacing_mut().item_spacing = egui::vec2(t.space_10, t.space_10);
                 for ((q, figure), note) in DisplayQuality::ALL.into_iter().zip(figures).zip(notes) {
                     let label_id = format!("ui.display_quality_{}", q.id());
-                    let label = solidcraft_ui_text::tr(&label_id);
+                    let label = solidcraft_ui_text::tr_by_id(&label_id);
                     let width = (t.space_24 * 5.0 + t.space_10).max(ui_kit::ContentWidth::name(ui, label) + t.space_12).min(ui.max_rect().width());
                     let response = ui_kit::picture_card(
                         ui,
                         &ui_kit::Card {
                             label,
-                            sub: Some(app.tr(note)),
+                            sub: Some(app.tr_by_id(note)),
                             selected: current == q,
                             enabled: true,
                             options: None,
@@ -176,7 +176,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let response = ui_kit::toggle_tile(
                         ui,
                         &ui_kit::Card {
-                            label: app.tr(label),
+                            label: app.tr_by_id(label),
                             sub: None,
                             selected,
                             enabled: true,
@@ -253,8 +253,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(t.space_10, t.space_10);
                 for (id, label, help, selected, figure) in tiles {
-                    let label = if id == "vertex_markers" { app.tr_label(label) } else { app.tr(label) };
-                    let help = if id == "vertex_markers" { app.tr_label(help) } else { app.tr(help) };
+                    let label = if id == "vertex_markers" { app.tr_label(label) } else { app.tr_by_id(label) };
+                    let help = if id == "vertex_markers" { app.tr_label(help) } else { app.tr_by_id(help) };
                     let response = ui_kit::toggle_tile(
                         ui,
                         &ui_kit::Card {
@@ -316,10 +316,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let response = ui_kit::choice_chip(
                         ui,
                         id,
-                        if id == "viewport_section_status" { solidcraft_ui_text::tr_label(label) } else { solidcraft_ui_text::tr(label) },
+                        if id == "viewport_section_status" { solidcraft_ui_text::tr_label(label) } else { solidcraft_ui_text::tr_by_id(label) },
                         *value,
                     )
-                    .backing_on_hover_text(solidcraft_ui_text::tr(help));
+                    .backing_on_hover_text(solidcraft_ui_text::tr_by_id(help));
                     crate::scenario::publish_target(&format!("prefs:{id}"), response.rect);
                     if response.clicked() {
                         *value = !*value;

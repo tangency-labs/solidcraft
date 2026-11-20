@@ -68,8 +68,8 @@ impl Tool {
     }
 }
 
-fn tr(id: impl solidcraft_ui_text::Key<'static>) -> &'static str {
-    solidcraft_ui_text::tr(id)
+fn tr(id: &'static str) -> &'static str {
+    solidcraft_ui_text::tr_by_id(id)
 }
 
 fn text(ui: &mut egui::Ui, label: &str, value: &str) {

@@ -65,7 +65,8 @@ fn confirm_answers_the_first_letter_of_each_button_label() {
 fn confirm_first_letter_follows_the_translated_label() {
     let ctx = crate::test_support::context();
     let _language = solidcraft_ui_text::scope("de");
-    let labels = (solidcraft_ui_text::tr("ui.save"), solidcraft_ui_text::tr("ui.cancel"), Some(solidcraft_ui_text::tr("ui.don_t_save")));
+    let labels =
+        (solidcraft_ui_text::tr_by_id("ui.save"), solidcraft_ui_text::tr_by_id("ui.cancel"), Some(solidcraft_ui_text::tr_by_id("ui.don_t_save")));
     assert_eq!(labels, ("Speichern", "Abbrechen", Some("Nicht speichern")), "the catalog answers in German");
     assert_eq!(prompt_frame(&ctx, letter("s"), true, labels), Action::Ok, "Speichern");
     assert_eq!(prompt_frame(&ctx, letter("a"), true, labels), Action::Cancel, "Abbrechen");

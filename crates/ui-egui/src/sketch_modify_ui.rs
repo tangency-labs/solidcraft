@@ -694,7 +694,7 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document) -> bool {
             enter |= number(ui, "Tolerance", tolerance);
             ui_kit::checkbox_grid(ui, &mut [(tr!("ui.equation_variable_unit"), range_unit)], 1);
             let note = if *range_unit { "ui.equation_note_range" } else { "ui.equation_note" };
-            ui_kit::text(ui, solidcraft_ui_text::tr(note), ui_kit::Text::Note("equation"));
+            ui_kit::text(ui, solidcraft_ui_text::tr_by_id(note), ui_kit::Text::Note("equation"));
         }
         Mod::Corner { chamfer, ctype, size, distance2, angle, flip } => {
             if *chamfer {

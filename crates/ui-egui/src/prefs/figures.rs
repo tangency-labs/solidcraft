@@ -72,7 +72,7 @@ pub(crate) fn status_palette_sample(ui: &mut Ui, mode: ColorVision) {
             ("prefs.status_done", "finish", colours.form_success),
         ] {
             let ink = if solidcraft_theme::contrast_ratio(t.on_accent, fill) >= 4.5 { t.on_accent } else { t.tab_on_fill_dark };
-            let label = solidcraft_ui_text::tr(label);
+            let label = solidcraft_ui_text::tr_by_id(label);
             let galley = ui.painter().layout_no_wrap(label.to_owned(), ui_kit::type_face::semibold(t.font_small), ink);
             let (r, _) = ui.allocate_exact_size(vec2(galley.size().x + t.space_24 + t.space_16, t.space_24), Sense::hover());
             solidcraft_ui_registry::publish_rect(&format!("prefs:status_sample:{label}"), r);
@@ -115,7 +115,7 @@ pub(crate) fn colour_vision_sample(ui: &mut Ui, t: &Tokens) {
         ui_kit::centred_text(
             &p,
             Rect::from_min_size(cell.left_bottom() + vec2(0.0, t.space_3), vec2(cell.width(), t.space_16)),
-            solidcraft_ui_text::tr(name),
+            solidcraft_ui_text::tr_by_id(name),
             FontId::proportional(t.font_small),
             t.text_dim,
         );
@@ -152,7 +152,7 @@ pub(crate) fn autosave_timeline(ui: &mut Ui, minutes: f64) {
             } else {
                 egui::Align2::CENTER_TOP
             },
-            solidcraft_ui_text::tr(key),
+            solidcraft_ui_text::tr_by_id(key),
             FontId::proportional(t.font_small),
             t.form_dim,
         );
@@ -177,5 +177,9 @@ pub(crate) fn pointer_preview(ui: &mut Ui, visible: bool, speed: &str, follows_c
     let caption_rect = Rect::from_min_max(rect.min + vec2(t.space_8, t.space_4), pos2(rect.right() - t.space_8, rect.top() + t.space_24));
     ui_kit::paint_text(ui, caption_rect, &caption, FontId::proportional(t.font_small), t.form_dim, false);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), &caption));
-    response.backing_on_hover_text(solidcraft_ui_text::tr(if follows_camera { "ai.prefs.follow_camera_on" } else { "ai.prefs.follow_camera_off" }));
+    response.backing_on_hover_text(solidcraft_ui_text::tr_by_id(if follows_camera {
+        "ai.prefs.follow_camera_on"
+    } else {
+        "ai.prefs.follow_camera_off"
+    }));
 }

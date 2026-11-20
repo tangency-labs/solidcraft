@@ -157,5 +157,5 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
 /// Which saved ends could not be found, and what to do about it.
 fn unresolved(app: &SolveApp, c: &EndCap) -> String {
     let ends = c.unresolved.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ");
-    app.tr("error.end_cap_unresolved").replace("{ends}", &ends)
+    app.tr_by_id("error.end_cap_unresolved").replace("{ends}", &ends)
 }

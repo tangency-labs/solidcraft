@@ -609,7 +609,7 @@ pub(super) fn params(app: &SolveApp, params: &mut Value) -> Result<(), String> {
 }
 
 fn vector(app: &SolveApp, ui: &mut egui::Ui, key: &str, values: &mut [f64; 3], range: std::ops::RangeInclusive<f64>, suffix: &str) -> bool {
-    ui_kit::row(ui, app.tr(key), |ui| ui_kit::vector3_field(ui, values, range, suffix))
+    ui_kit::row(ui, app.tr_by_id(key), |ui| ui_kit::vector3_field(ui, values, range, suffix))
 }
 
 #[cfg(test)]
@@ -760,7 +760,8 @@ fn glass_controls(app: &mut SolveApp, ui: &mut egui::Ui, binding: &mut Binding) 
             Boundary::Box => 2,
         };
         ui_kit::row(ui, tr!(app, "render.appearance_editor.boundary"), |ui| {
-            let labels = ["render.appearance_editor.closed", "render.appearance_editor.thin", "render.appearance_editor.box"].map(|key| app.tr(key));
+            let labels =
+                ["render.appearance_editor.closed", "render.appearance_editor.thin", "render.appearance_editor.box"].map(|key| app.tr_by_id(key));
             if ui_kit::segmented(ui, &mut boundary, &labels, ui_kit::Segments { compact: true, small: true, ..Default::default() }) {
                 glass.boundary = match boundary {
                     1 => Boundary::Thin,
@@ -906,7 +907,7 @@ fn coat_controls(app: &mut SolveApp, ui: &mut egui::Ui, binding: &mut Binding) -
             ("render.appearance_editor.weight", &mut binding.coat.weight, 0.0..=1.0),
             ("appearance.roughness", &mut binding.coat.roughness, 0.045..=1.0),
         ] {
-            changed |= ui_kit::row(ui, app.tr(key), |ui| {
+            changed |= ui_kit::row(ui, app.tr_by_id(key), |ui| {
                 let response = ui_kit::mixed_slider(ui, value, range, None);
                 crate::scenario::publish_target(
                     if key == "render.appearance_editor.weight" { "render:coat:weight" } else { "render:coat:roughness" },
@@ -1048,7 +1049,7 @@ fn map_controls(app: &mut SolveApp, ui: &mut egui::Ui, binding: &mut Binding) {
     ui_kit::checkbox(ui, tr!(app, "render.material_maps_enable"), &mut binding.maps_enabled);
     ui.add_enabled_ui(binding.maps_enabled, |ui| {
         for slot in [MapSlot::Color, MapSlot::Normal, MapSlot::Metallic, MapSlot::Roughness] {
-            let label = app.tr(slot.key()).to_owned();
+            let label = app.tr_by_id(slot.key()).to_owned();
             ui_kit::row(ui, &label, |ui| {
                 let path = slot.field(&mut binding.maps);
                 let label = if path.is_empty() {
@@ -1249,7 +1250,7 @@ fn save_optics(app: &mut SolveApp, binding: &Binding) -> Result<(), String> {
     Ok(())
 }
 fn note(app: &SolveApp, ui: &mut egui::Ui, key: &'static str) {
-    ui_kit::text(ui, app.tr(key), ui_kit::Text::Note(key));
+    ui_kit::text(ui, app.tr_by_id(key), ui_kit::Text::Note(key));
 }
 
 /// The same body editor is used by the selection inspector and explicit-target page.
@@ -1468,7 +1469,8 @@ fn reflection_section(app: &mut SolveApp, ui: &mut egui::Ui, body: Option<&str>)
             .as_ref()
             .and_then(|r| r.bodies.iter().find(|b| b.body == name))
             .map_or(0, |b| if b.mode == ReflectionMode::Mirror { 1 } else { 2 });
-        let labels = ["render.cpu_reflection_off", "render.cpu_reflection_mirror", "render.cpu_reflection_rough"].map(|key| app.tr(key).to_owned());
+        let labels =
+            ["render.cpu_reflection_off", "render.cpu_reflection_mirror", "render.cpu_reflection_rough"].map(|key| app.tr_by_id(key).to_owned());
         let body_label = tr!(app, "render.inspector_this_body").to_owned();
         ui_kit::row(ui, &body_label, |ui| {
             if ui_kit::segmented(
@@ -1511,7 +1513,7 @@ pub(super) fn confirmation(app: &mut SolveApp, ctx: &egui::Context) {
         app.set_status(tr!(app, "render.review_stale").to_owned(), true);
         return;
     }
-    let title = app.tr(if pending.coat { "render.coat_remove_title" } else { "render.appearance_editor.remove_title" }).to_owned();
+    let title = app.tr_by_id(if pending.coat { "render.coat_remove_title" } else { "render.appearance_editor.remove_title" }).to_owned();
     let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("render_remove_optics"), "delete", &title)
         .tone(ui_kit::Tone::Danger)
         .actions(tr!(app, "render.appearance_editor.remove"), tr!(app, "render.keep_editing"), None)

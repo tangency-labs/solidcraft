@@ -223,7 +223,7 @@ fn ended(response: &egui::Response, ui: &egui::Ui) -> bool {
 }
 
 pub(in crate::render_workspace) fn scope_label(app: &SolveApp) -> &str {
-    app.tr(match app.session.selection.last() {
+    app.tr_by_id(match app.session.selection.last() {
         Some(Sel::Occurrence { .. }) => "render.pick_component",
         Some(Sel::Face { .. }) => "render.pick_face",
         _ => "render.pick_body",
@@ -454,7 +454,7 @@ fn draw(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, selected: &Targe
     }
     let mut draft = view.draft.clone().unwrap_or_else(|| from.clone());
     let name = if is_mixed { tr!(app, "render.tree_mixed").to_owned() } else { from.name.clone() };
-    let source = app.tr(if source_step == LookStep::Material { "render.inspector_material" } else { "render.library_in_design" }).to_owned();
+    let source = app.tr_by_id(if source_step == LookStep::Material { "render.inspector_material" } else { "render.library_in_design" }).to_owned();
     let used = tr!("render.inspector_used_by", count = &count.to_string());
     let replacements = &view.replacements;
     let ids: Vec<_> = (0..replacements.len()).map(|index| index.to_string()).collect();
@@ -509,7 +509,7 @@ fn draw(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, selected: &Targe
     let mut scope = usize::from(view.all_users);
     let all_label = tr!("render.inspector_all_users", count = &count.to_string());
     let this_label = app
-        .tr(match step {
+        .tr_by_id(match step {
             LookStep::Face => "render.inspector_this_face",
             LookStep::Component => "render.inspector_this_component",
             _ => "render.inspector_this_body",
@@ -545,8 +545,8 @@ fn draw(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, selected: &Targe
             let mut preset = finish_index(&draft);
             let states = if mixed(&looks, |l| l.pbr) { [false; 4] } else { std::array::from_fn(|i| i == preset) };
             ui_kit::row(ui, tr!(app, "render.inspector_finish"), |ui| {
-                let labels =
-                    ["render.inspector_matte", "render.inspector_satin", "render.inspector_gloss", "render.inspector_metal"].map(|key| app.tr(key));
+                let labels = ["render.inspector_matte", "render.inspector_satin", "render.inspector_gloss", "render.inspector_metal"]
+                    .map(|key| app.tr_by_id(key));
                 if ui_kit::segmented(
                     ui,
                     &mut preset,
@@ -570,7 +570,7 @@ fn draw(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, selected: &Targe
                 ("appearance.metallic", &mut metallic, 0.0..=1.0, mixed(&looks, |l| l.pbr.unwrap_or_default().metallic())),
                 ("appearance.roughness", &mut roughness, 0.045..=1.0, mixed(&looks, |l| l.pbr.unwrap_or_default().roughness())),
             ] {
-                ui_kit::row(ui, app.tr(key), |ui| {
+                ui_kit::row(ui, app.tr_by_id(key), |ui| {
                     let response = ui_kit::mixed_slider(ui, value, range, mixed.then(|| tr!(app, "render.tree_mixed")));
                     view.dirty |= response.changed();
                     optical_edit |= response.changed();

@@ -20,11 +20,11 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         (setting::hole_group, "prefs.design_tools.hole_group_help", "hole_group", "Group holes made together"),
                     ] {
                         ui.horizontal_wrapped(|ui| {
-                            let response = setting(app, ui).backing_on_hover_text(app.tr(help));
+                            let response = setting(app, ui).backing_on_hover_text(app.tr_by_id(help));
                             crate::scenario::publish_target(&format!("prefs:{key}"), response.rect);
                             crate::scenario::publish_target(&format!("dialog:{legacy}"), response.rect);
                             if !crate::ui_kit::settings_search::suppress_chrome(ui) {
-                                ui_kit::help_icon(ui, app.tr(help));
+                                ui_kit::help_icon(ui, app.tr_by_id(help));
                             }
                         });
                     }
@@ -40,10 +40,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         (setting::extrude_arrow_face_stops, "prefs.extrude_arrow_face_stops_note", "extrude_arrow_face_stops"),
                     ] {
                         ui.horizontal_wrapped(|ui| {
-                            let response = setting(app, ui).backing_on_hover_text(app.tr(help));
+                            let response = setting(app, ui).backing_on_hover_text(app.tr_by_id(help));
                             crate::scenario::publish_target(&format!("prefs:{key}"), response.rect);
                             if !crate::ui_kit::settings_search::suppress_chrome(ui) {
-                                ui_kit::help_icon(ui, app.tr(help));
+                                ui_kit::help_icon(ui, app.tr_by_id(help));
                             }
                         });
                     }
@@ -58,7 +58,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     extrude_start(app, ui);
                 });
                 // Found by the name of every feature that has the marker, as well as by the label.
-                let placed = PLACED_FEATURES.iter().map(|key| app.tr(key)).collect::<Vec<_>>().join(" ");
+                let placed = PLACED_FEATURES.iter().map(|key| app.tr_by_id(key)).collect::<Vec<_>>().join(" ");
                 create_row(ui, tr!(app, "prefs.design_tools.placement_group"), Some(&placed), &["rest", "boss", "snap_fit"], false, |ui| {
                     ui.horizontal_wrapped(|ui| {
                         let response = setting::placement_handles(app, ui).backing_on_hover_text(tr!(app, "ui.placement_handles_tip"));
@@ -98,10 +98,12 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         ui_kit::help_icon(ui, tip);
                     }
                 });
-                let label_width =
-                    ["joint_move.coarse", "joint_move.fine"].into_iter().map(|id| ui_kit::ContentWidth::label(ui, app.tr(id))).fold(0.0, f32::max)
-                        + t.space_16
-                        + t.space_4;
+                let label_width = ["joint_move.coarse", "joint_move.fine"]
+                    .into_iter()
+                    .map(|id| ui_kit::ContentWidth::label(ui, app.tr_by_id(id)))
+                    .fold(0.0, f32::max)
+                    + t.space_16
+                    + t.space_4;
                 ui_kit::settings_form(ui, label_width, |ui| {
                     ui_kit::settings_row_help(ui, tr!(app, "joint_move.coarse"), tr!(app, "joint_move.precision"), |ui| {
                         let response = ui_kit::named_control(ui, tr!(app, "prefs.design_tools.degrees"), |ui| {
@@ -291,7 +293,7 @@ fn extrude_start(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         ui_kit::settings_control_width(ui, t.space_24 * 6.0, |ui| {
             let mut selected = ExtrudeStart::ALL.iter().position(|v| *v == app.preferences.extrude_start).unwrap_or(0);
-            let options = ExtrudeStart::ALL.map(|choice| app.tr(choice.label_id()));
+            let options = ExtrudeStart::ALL.map(|choice| app.tr_by_id(choice.label_id()));
             let response = ui_kit::dropdown(ui, "pref_extrude_start", &mut selected, &options).backing_on_hover_text(help);
             crate::scenario::publish_target("prefs:extrude_start", response.rect);
             if let Some(choice) = ExtrudeStart::ALL.get(selected) {

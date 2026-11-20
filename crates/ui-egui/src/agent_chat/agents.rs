@@ -32,7 +32,7 @@ impl Mode {
         Mode::ALL.into_iter().find(|m| m.id() == s)
     }
     pub fn label(self) -> &'static str {
-        solidcraft_ui_text::tr(match self {
+        solidcraft_ui_text::tr_by_id(match self {
             Mode::Ask => "ui.ai_mode_ask",
             Mode::Edits => "ui.ai_mode_edits",
             Mode::All => "ui.ai_mode_all",

@@ -51,7 +51,7 @@ use context::Context;
 
 use crate::{ControlRequest, SolveApp};
 use backend::{ChatBackend, Event, PermissionOption, PromptPart, ToolStatus};
-use solidcraft_ui_text::{format as trf, tr};
+use solidcraft_ui_text::{format as trf, tr_by_id};
 
 pub(crate) use panel::{finish_shared, owns_keyboard_input, prepare_shared, request_new_chat, shared_content, tool_space};
 pub use panel::{show, tip as panel_tip, toggle, toggle_shortcut};
@@ -98,7 +98,7 @@ impl State {
         }
     }
     pub(crate) fn label(self) -> &'static str {
-        tr(match self {
+        tr_by_id(match self {
             State::Off => "ui.agent_chat_state_off",
             State::Starting => "ui.agent_chat_state_starting",
             State::Ready => "ui.agent_chat_state_ready",
@@ -2171,7 +2171,7 @@ fn on_permission(app: &mut SolveApp, key: u64, title: String, kind: Option<&str>
             if let Some(b) = app.agent_chat.backend.as_mut() {
                 b.answer_permission(key, Some(&option));
             }
-            app.agent_chat.push(Item::Notice { text: trf("ui.ai_auto_allowed", &[("title", &title), ("why", tr(why))]), error: false });
+            app.agent_chat.push(Item::Notice { text: trf("ui.ai_auto_allowed", &[("title", &title), ("why", tr_by_id(why))]), error: false });
         }
         _ => app.agent_chat.push(Item::Permission { key, title, options, answer: None }),
     }
@@ -2583,7 +2583,7 @@ pub fn custom_models_accepted(app: &SolveApp) -> bool {
 /// The model pickers' search hint: one that takes a typed model id says so (#14369), since
 /// the list holds only the models the agent reported.
 pub(crate) fn model_search_hint(custom: bool) -> &'static str {
-    tr(if custom { "ui.agent_chat_model_search_or_id" } else { "ui.agent_chat_model_search" })
+    tr_by_id(if custom { "ui.agent_chat_model_search_or_id" } else { "ui.agent_chat_model_search" })
 }
 
 /// A typed model (the pickers' custom row). A listed id goes the usual way, others by the agent's

@@ -80,7 +80,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             if let Some(message) =
                 state.notice.or_else(|| (app.preferences.navigation_bar.slots.len() >= navigation_bar::MAX_SLOTS).then_some("navbar.custom.full"))
             {
-                ui.label(egui::RichText::new(app.tr(message)).color(Tokens::get().warning));
+                ui.label(egui::RichText::new(app.tr_by_id(message)).color(Tokens::get().warning));
             }
         });
         if let Some(rect) = scenario::rect_of(&format!("dialog:section:{}", tr!(app, "navbar.custom.title"))) {
@@ -97,18 +97,18 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 fn segments(ui: &mut egui::Ui, key: &str, selected: &mut usize, options: &[&str], change: impl FnMut(usize)) {
     let label_key = format!("navbar.custom.{key}");
-    let label = solidcraft_ui_text::tr(&label_key);
+    let label = solidcraft_ui_text::tr_by_id(&label_key);
     ui_kit::row(ui, label, |ui| segment_control(ui, key, selected, options, change));
 }
 
 fn segment_control(ui: &mut egui::Ui, key: &str, selected: &mut usize, options: &[&str], mut change: impl FnMut(usize)) {
     ui.spacing_mut().item_spacing.x = Tokens::get().space_6;
     let label_key = format!("navbar.custom.{key}");
-    let label = solidcraft_ui_text::tr(&label_key);
+    let label = solidcraft_ui_text::tr_by_id(&label_key);
     let labels: Vec<_> = options
         .iter()
         .map(|key| {
-            solidcraft_ui_text::tr(match *key {
+            solidcraft_ui_text::tr_by_id(match *key {
                 "navbar.custom.labels" => "prefs.layout_page.icons_labels",
                 _ => key,
             })
@@ -129,7 +129,7 @@ fn segment_control(ui: &mut egui::Ui, key: &str, selected: &mut usize, options: 
         if let Some(rect) = scenario::rect_of(&format!("dialog:{label}:{option}")) {
             scenario::publish_target(&format!("prefs:navbar:{key}:{index}"), rect);
             if let Some(legacy) = options.get(index) {
-                scenario::publish_target(&format!("dialog:{label}:{}", solidcraft_ui_text::tr(legacy)), rect);
+                scenario::publish_target(&format!("dialog:{label}:{}", solidcraft_ui_text::tr_by_id(legacy)), rect);
             }
         }
     }
@@ -137,7 +137,7 @@ fn segment_control(ui: &mut egui::Ui, key: &str, selected: &mut usize, options: 
 
 fn option(ui: &mut egui::Ui, key: &str, selected: &mut usize, options: &[&str], change: impl FnMut(usize)) {
     let label_key = format!("navbar.custom.{key}");
-    let label = solidcraft_ui_text::tr(&label_key);
+    let label = solidcraft_ui_text::tr_by_id(&label_key);
     ui_kit::settings_compound_field(ui, label, label, |ui| segment_control(ui, key, selected, options, change));
 }
 
@@ -209,7 +209,7 @@ fn preview(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State, width: f32)
             ui_kit::navigation_context(&response, |ui| {
                 for (key, enabled) in [("left", index > 0), ("right", index + 1 < app.preferences.navigation_bar.slots.len()), ("remove", true)] {
                     let label = format!("navbar.custom.{key}");
-                    let mut item = ui_kit::NavigationMenuRow::new(key, app.tr(&label), "");
+                    let mut item = ui_kit::NavigationMenuRow::new(key, app.tr_by_id(&label), "");
                     item.enabled = enabled;
                     if item.show(ui).clicked() {
                         edit(app, state, index, key);
@@ -283,7 +283,7 @@ fn drop_on_preview(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State, tar
                 pointer,
                 ui_kit::NavigationButton {
                     id: slot.id,
-                    label: app.tr(slot.label),
+                    label: app.tr_by_id(slot.label),
                     icon: slot.current_icon(app.ui.visual_style),
                     selected: false,
                     kind: slot.kind,
@@ -367,9 +367,9 @@ fn inspector_header(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State, in
             let (icon, _) = ui.allocate_exact_size(vec2(t.form_icon_size, t.form_icon_size), Sense::hover());
             crate::icons::paint_ink(ui.painter(), icon, slot.current_icon(app.ui.visual_style), t.form_dim);
         }
-        ui_kit::text(ui, app.tr(slot.label), ui_kit::Text::NameCell(true));
+        ui_kit::text(ui, app.tr_by_id(slot.label), ui_kit::Text::NameCell(true));
     });
-    ui.interact(name, ui.make_persistent_id("slot_help"), Sense::hover()).backing_on_hover_text(app.tr(slot.description));
+    ui.interact(name, ui.make_persistent_id("slot_help"), Sense::hover()).backing_on_hover_text(app.tr_by_id(slot.description));
     scenario::publish_rect("prefs:navbar:inspector:name", name);
     scenario::publish_rect("prefs:navbar:inspector:header", bounds);
     let mut actions_ui = ui.new_child(egui::UiBuilder::new().id_salt("slot_actions").max_rect(bounds));
@@ -382,7 +382,7 @@ fn inspector_header(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State, in
     .zip(buttons)
     {
         let label_key = format!("navbar.custom.{key}");
-        let label = app.tr_label(app.tr(&label_key));
+        let label = app.tr_label(app.tr_by_id(&label_key));
         let response = actions_ui
             .scope_builder(egui::UiBuilder::new().id_salt(key).max_rect(rect), |ui| {
                 ui.add_enabled_ui(enabled, |ui| {
@@ -409,7 +409,7 @@ fn inspector_header(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State, in
 fn available(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State) {
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.y = Tokens::get().space_6;
-        let caption = tr!("navbar.custom.available", available = app.tr("ui.workspace_available"));
+        let caption = tr!("navbar.custom.available", available = app.tr_by_id("ui.workspace_available"));
         ui.horizontal(|ui| {
             ui_kit::settings_inline_note(ui, tr!(app, "ui.workspace_available"));
             ui_kit::help_icon(ui, &caption);
@@ -419,7 +419,7 @@ fn available(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State) {
                     let hint = tr!(app, "navbar.custom.separator_hint");
                     let dragging =
                         egui::DragAndDrop::payload::<Drag>(ui.ctx()).is_some_and(|payload| payload.from_menu && payload.id.slot == slot.id);
-                    let (tile, add) = ui_kit::navigation_separator_source(ui, slot.id, app.tr(slot.label), dragging);
+                    let (tile, add) = ui_kit::navigation_separator_source(ui, slot.id, app.tr_by_id(slot.label), dragging);
                     let tile = tile.backing_on_hover_text(hint);
                     scenario::publish_target(&format!("prefs:navbar:tile:{}", slot.id), tile.rect);
                     scenario::publish_target(&format!("prefs:navbar:add:{}", slot.id), add.rect);
@@ -446,7 +446,7 @@ fn available(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State) {
                     continue;
                 }
                 let dragging = egui::DragAndDrop::payload::<Drag>(ui.ctx()).is_some_and(|payload| payload.from_menu && payload.id.slot == slot.id);
-                let (tile, add) = ui_kit::navigation_tile(ui, slot.id, app.tr(slot.label), slot.current_icon(app.ui.visual_style), dragging);
+                let (tile, add) = ui_kit::navigation_tile(ui, slot.id, app.tr_by_id(slot.label), slot.current_icon(app.ui.visual_style), dragging);
                 let tile = tile.backing_on_hover_text(&caption);
                 scenario::publish_target(&format!("prefs:navbar:tile:{}", slot.id), tile.rect);
                 scenario::publish_target(&format!("prefs:navbar:add:{}", slot.id), add.rect);
@@ -544,7 +544,7 @@ fn anchor_option(bar: &mut NavigationBar, ui: &mut egui::Ui) {
         "navbar.custom.anchor.bottom_centre",
         "navbar.custom.anchor.bottom_right",
     ]
-    .map(solidcraft_ui_text::tr);
+    .map(solidcraft_ui_text::tr_by_id);
     if let Some(index) = ui_kit::settings_anchor_field(ui, tr!("navbar.custom.position"), selected, &names) {
         bar.edge = if index >= 3 { NavigationEdge::Bottom } else { NavigationEdge::Top };
         bar.position = match index % 3 {

@@ -216,12 +216,12 @@ impl HistoryTransport {
 
     pub fn label(self, playing: bool, play: PlayLabels<'_>) -> &str {
         match self {
-            Self::First => solidcraft_ui_text::tr("ui.history_first"),
-            Self::Back => solidcraft_ui_text::tr("ui.history_back"),
+            Self::First => solidcraft_ui_text::tr_by_id("ui.history_first"),
+            Self::Back => solidcraft_ui_text::tr_by_id("ui.history_back"),
             Self::Play if playing => play.stop,
             Self::Play => play.play,
-            Self::Forward => solidcraft_ui_text::tr("ui.history_forward"),
-            Self::Last => solidcraft_ui_text::tr("ui.history_last"),
+            Self::Forward => solidcraft_ui_text::tr_by_id("ui.history_forward"),
+            Self::Last => solidcraft_ui_text::tr_by_id("ui.history_last"),
         }
     }
 

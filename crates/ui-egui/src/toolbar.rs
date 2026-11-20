@@ -238,7 +238,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             // Save, Undo and Redo use the same actions as the File menu and shortcuts.
             let shown = design_shown(app) && idle;
             let tip = |id: &str, key: &str| {
-                let label = app.tr(id);
+                let label = app.tr_by_id(id);
                 if shown { format!("{label} ({key})") } else { tr!("ui.needs_design", command = label) }
             };
             let (save_tip, undo_tip, redo_tip) = (tip("ui.save", "Ctrl+S"), tip("ui.undo", "Ctrl+Z"), tip("ui.redo", "Ctrl+Y"));
@@ -2364,7 +2364,7 @@ fn reveal_tooltip(app: &SolveApp, ui: &egui::Ui, rect: Rect, command: &solidcraf
 
 /// A group heading's text: its name in the interface language, as written.
 fn group_heading_text(label: &str) -> String {
-    if label.starts_with("ui.") { solidcraft_ui_text::tr(label) } else { solidcraft_ui_text::tr_label(label) }.to_string()
+    if label.starts_with("ui.") { solidcraft_ui_text::tr_by_id(label) } else { solidcraft_ui_text::tr_label(label) }.to_string()
 }
 
 /// Take up what was done in a grid drop-down, as for a list row: start the command (and close

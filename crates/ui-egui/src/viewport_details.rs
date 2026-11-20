@@ -9,11 +9,11 @@ use solidcraft_engine::{
     status_items::{StatusItem, StatusSetting},
 };
 
-fn tr<'a>(id: impl solidcraft_ui_text::Key<'a>) -> String {
-    solidcraft_ui_text::tr(id).to_owned()
+fn tr(msg: solidcraft_ui_text::Msg) -> String {
+    solidcraft_ui_text::tr(msg).to_owned()
 }
 fn field(id: &str, label: &str, value: DetailValue) -> DetailSetting {
-    DetailSetting { id: id.into(), label: tr(label), value, enabled: true }
+    DetailSetting { id: id.into(), label: solidcraft_ui_text::tr_by_id(label).to_owned(), value, enabled: true }
 }
 fn length(app: &SolveApp, value: f64) -> DetailValue {
     DetailValue::Length { value, units: app.session.doc.units.clone(), decimals: app.preferences.length_decimals }
@@ -141,7 +141,7 @@ fn continuity_description(app: &SolveApp, details: &mut Details) {
         details.key.push(DetailKey {
             colour,
             pattern: label == "ui.details_sharp_gap",
-            label: tr(label),
+            label: solidcraft_ui_text::tr_by_id(label).to_owned(),
             value: count.to_string(),
             numeric: false,
             pattern_colour: (label == "ui.details_sharp_gap").then_some(t.continuity[3]),
@@ -303,7 +303,7 @@ pub(crate) fn legacy_legends(app: &SolveApp, ui: &mut egui::Ui, viewport: egui::
             .into_iter()
             .map(|order| DetailKey {
                 colour: crate::viewport::continuity_color(&t, order),
-                label: tr(crate::sketch_tools::order_class(order)),
+                label: solidcraft_ui_text::tr_by_id(crate::sketch_tools::order_class(order)).to_owned(),
                 pattern: order.is_none(),
                 value: String::new(),
                 numeric: false,

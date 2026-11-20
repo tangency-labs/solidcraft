@@ -585,7 +585,7 @@ fn rows(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
                     let tooltip =
                         if active { format!("{}\n{}", entry.path.display(), tr!(app, "home.open_now")) } else { entry.path.display().to_string() };
                     let tooltip = if let Some(highlight) = highlight {
-                        format!("{tooltip}\n{}: {}", tr!(app, "library.highlight"), app.tr(highlight.label()))
+                        format!("{tooltip}\n{}: {}", tr!(app, "library.highlight"), app.tr_by_id(highlight.label()))
                     } else {
                         tooltip
                     };
@@ -744,7 +744,7 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
             let pin_key = if pinned { "library.unpin_folder" } else { "library.pin_folder" };
             if crate::ui_kit::button(
                 ui,
-                solidcraft_ui_text::tr(pin_key),
+                solidcraft_ui_text::tr_by_id(pin_key),
                 crate::ui_kit::Button::Enabled(pinned || app.library.pinned_roots.len() < MAX_RECENT_FOLDERS),
             )
             .clicked()

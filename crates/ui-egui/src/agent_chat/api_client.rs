@@ -2711,7 +2711,7 @@ mod tests {
     /// picker says why and asks again later; a list with nothing in it is a list.
     #[test]
     fn an_answer_that_is_no_model_list_is_an_error() {
-        let expected = solidcraft_ui_text::tr("ui.agent_chat_models_not_a_list").to_string();
+        let expected = solidcraft_ui_text::tr_by_id("ui.agent_chat_models_not_a_list").to_string();
         let page: HttpFn = Arc::new(|_: &HttpRequest| Ok((200, b"<!doctype html><html><body>Control UI</body></html>".to_vec())));
         assert_eq!(model_list(&page, "http://localhost:18789/v1", None, false).unwrap_err(), expected);
         assert_eq!(anthropic_model_list(&page, "http://localhost:18789/v1", None).unwrap_err(), expected);

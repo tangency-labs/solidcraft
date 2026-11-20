@@ -1860,7 +1860,7 @@ mod tests {
             assert!(!coded(solidcraft_ui_text::tr_label(label)), "{label}: {}", solidcraft_ui_text::tr_label(label));
         }
         for (g, tip) in FILLET_CORNERS {
-            assert!(solidcraft_ui_text::tr(tip).contains(g.code()), "the hover text keeps the code for those who know it: {tip}");
+            assert!(solidcraft_ui_text::tr_by_id(tip).contains(g.code()), "the hover text keeps the code for those who know it: {tip}");
         }
         let tip = fillet_corner_tip();
         assert!(tip.contains("rolling") && tip.contains("1.5") && tip.contains("Setback"), "what each corner builds: {tip}");
@@ -1895,7 +1895,7 @@ mod tests {
         // A blend too large for its faces keeps its own words.
         assert_eq!(
             crate::dialogs::fillet_plain_error("the fillet is larger than the faces beside its edges allow", true),
-            Some(crate::dialogs::FilletRefusal::Plain(solidcraft_ui_text::tr("ui.fillet_error_too_large").to_string()))
+            Some(crate::dialogs::FilletRefusal::Plain(solidcraft_ui_text::tr_by_id("ui.fillet_error_too_large").to_string()))
         );
         // One that no smaller radius builds either is not told to try a smaller radius: the kernel
         // tried them down to its least.
@@ -1903,7 +1903,7 @@ mod tests {
                     (down to 0.001 mm: the operation failed: not supported yet: the fillet is larger than the faces beside its edges allow)";
         assert_eq!(
             crate::dialogs::fillet_plain_error(none, false),
-            Some(crate::dialogs::FilletRefusal::Plain(solidcraft_ui_text::tr("ui.fillet_error_no_radius").to_string()))
+            Some(crate::dialogs::FilletRefusal::Plain(solidcraft_ui_text::tr_by_id("ui.fillet_error_no_radius").to_string()))
         );
     }
 

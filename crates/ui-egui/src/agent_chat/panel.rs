@@ -571,7 +571,7 @@ fn context_chips(ui: &mut egui::Ui, context: &Context, gone: &[bool], handle: &s
         if items.is_empty() {
             continue;
         }
-        let mut parts = vec![ChipPart::Heading(format!("{} {}", tr(kind.heading()), items.len()))];
+        let mut parts = vec![ChipPart::Heading(format!("{} {}", tr_by_id(kind.heading()), items.len()))];
         parts.extend(items.iter().take(MAX_CHIPS).map(|(n, i)| ChipPart::Chip(*n, i)));
         if items.len() > MAX_CHIPS {
             parts.push(ChipPart::More(more(items.len() - MAX_CHIPS)));
@@ -1177,7 +1177,13 @@ fn composer(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: St
                     .min_scrolled_height(edit_max)
                     .auto_shrink([false, true])
                     .show(ui, |ui| {
-                        pill_input(chat, view, ui, focused, tr(if busy { "ui.agent_chat_placeholder_busy" } else { "ui.agent_chat_placeholder" }))
+                        pill_input(
+                            chat,
+                            view,
+                            ui,
+                            focused,
+                            tr_by_id(if busy { "ui.agent_chat_placeholder_busy" } else { "ui.agent_chat_placeholder" }),
+                        )
                     })
                     .inner;
                 solidcraft_ui_registry::publish_rect("agent_chat:input", r.rect);
@@ -1203,7 +1209,7 @@ fn composer(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: St
                                 ui_kit::dropdown_menu(
                                     ui,
                                     "sc_agent_permissions",
-                                    tr(match mode {
+                                    tr_by_id(match mode {
                                         agents::Mode::Ask => "ui.agent_chat_mode_ask",
                                         agents::Mode::Edits => "ui.agent_chat_mode_edits",
                                         agents::Mode::All => "ui.agent_chat_mode_all",
@@ -1228,7 +1234,7 @@ fn composer(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: St
                                 ui,
                                 busy || !reading,
                                 busy,
-                                tr(if busy { "ui.agent_chat_stop_turn_tip" } else { "ui.agent_chat_send" }),
+                                tr_by_id(if busy { "ui.agent_chat_stop_turn_tip" } else { "ui.agent_chat_send" }),
                             );
                             if busy {
                                 solidcraft_ui_registry::publish_handle("agent_chat:stopturn", action.rect.center());
@@ -1353,7 +1359,7 @@ fn switcher(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
     let modern = chat.config_options.is_some();
     ui.horizontal_wrapped(|ui| {
         let label = current.as_ref().map_or_else(
-            || tr(if chat.detecting.is_some() { "ui.agent_chat_detecting" } else { "ui.agent_chat_none_found_short" }).to_string(),
+            || tr_by_id(if chat.detecting.is_some() { "ui.agent_chat_detecting" } else { "ui.agent_chat_none_found_short" }).to_string(),
             |e| e.name.clone(),
         );
         let models = !modern && chat.models_shown();
@@ -1469,7 +1475,7 @@ fn switcher(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
             ui_kit::button(ui, tr!("ui.agent_chat_stop"), ui_kit::Button::Normal).backing_on_hover_text(tr!("ui.agent_chat_stop_tip"))
         } else {
             let label = if chat.state() == State::Failed { "ui.agent_chat_retry" } else { "ui.agent_chat_connect" };
-            ui_kit::button(ui, tr(label), ui_kit::Button::Normal)
+            ui_kit::button(ui, tr_by_id(label), ui_kit::Button::Normal)
         };
         solidcraft_ui_registry::publish_handle("agent_chat:connect", b.rect.center());
         if b.clicked() {
@@ -2080,7 +2086,7 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
                     let header = ui.push_id(id, |ui| {
                         ui.horizontal(|ui| {
                             let (rect, _) = ui.allocate_exact_size(vec2(t.control_height, t.control_height), Sense::hover());
-                            let label = tr(if open { "ui.agent_chat_thinking_hide" } else { "ui.agent_chat_thinking_show" });
+                            let label = tr_by_id(if open { "ui.agent_chat_thinking_hide" } else { "ui.agent_chat_thinking_show" });
                             let arrow = ui_kit::disclosure_button_at(ui, rect, open, label).backing_on_hover_text(label);
                             solidcraft_ui_registry::publish_handle(&format!("agent_chat:thought:{n}"), arrow.rect.center());
                             let title = RichText::new(tr!("ui.agent_chat_thinking")).italics().color(t.text_dim).size(t.font_small);
@@ -2280,7 +2286,7 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 let tag = if stopped && !busy { "ui.agent_chat_queued_stopped" } else { "ui.agent_chat_queued" };
-                ui.label(RichText::new(tr(tag)).color(t.accent).semibold().size(solidcraft_theme::Tokens::get().font_small));
+                ui.label(RichText::new(tr_by_id(tag)).color(t.accent).semibold().size(solidcraft_theme::Tokens::get().font_small));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let x = ui_kit::button(ui, "×", ui_kit::Button::Small).backing_on_hover_text(tr!("ui.agent_chat_remove"));
                     solidcraft_ui_registry::publish_handle(&format!("agent_chat:pending_remove:{n}"), x.rect.center());
@@ -2626,7 +2632,7 @@ fn attachment_chips(chat: &mut AgentChat, ui: &mut egui::Ui) {
 /// What a chip's × says: an imported part stays in the design when it comes off the message.
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) fn remove_tip(f: &attach::Attachment) -> &'static str {
-    tr(if matches!(f.content, attach::Content::Imported) { "ui.agent_chat_remove_imported" } else { "ui.agent_chat_remove_file" })
+    tr_by_id(if matches!(f.content, attach::Content::Imported) { "ui.agent_chat_remove_imported" } else { "ui.agent_chat_remove_file" })
 }
 
 /// The chip of a file still being read or imported: a spinner, the name, and a × that takes it
@@ -2647,7 +2653,7 @@ fn loading_chip(ui: &mut egui::Ui, name: &str, importing: bool, i: usize, w: f32
             ui.set_width(inner);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
-                let doing = tr(if importing { "ui.agent_chat_file_importing" } else { "ui.agent_chat_file_loading" });
+                let doing = tr_by_id(if importing { "ui.agent_chat_file_importing" } else { "ui.agent_chat_file_loading" });
                 let mark = ui.add(egui::Spinner::new().size(t.form_icon_size)).backing_on_hover_text(doing).rect.width();
                 let name_w = (inner - mark - 18.0 - 8.0).max(8.0);
                 ui.allocate_ui(vec2(name_w, 20.0), |ui| {
@@ -2662,8 +2668,9 @@ fn loading_chip(ui: &mut egui::Ui, name: &str, importing: bool, i: usize, w: f32
                 ui.painter().line_segment([c + vec2(-3.5, -3.5), c + vec2(3.5, 3.5)], s);
                 ui.painter().line_segment([c + vec2(-3.5, 3.5), c + vec2(3.5, -3.5)], s);
                 solidcraft_ui_registry::publish_handle(&format!("agent_chat:file_loading_remove:{i}"), c);
-                clicked =
-                    x.backing_on_hover_text(tr(if importing { "ui.agent_chat_remove_imported" } else { "ui.agent_chat_remove_file" })).clicked();
+                clicked = x
+                    .backing_on_hover_text(tr_by_id(if importing { "ui.agent_chat_remove_imported" } else { "ui.agent_chat_remove_file" }))
+                    .clicked();
             });
         },
     );
@@ -2811,7 +2818,7 @@ fn tool_card(ui: &mut egui::Ui, n: usize, call: &ToolCall) {
                 }
                 // A running call counts how long it has run ("running for 30 s").
                 let running = (call.live && status == Some(ToolStatus::InProgress)).then(|| times::running(&call.stamp, call.now)).flatten();
-                ui.label(RichText::new(running.as_deref().unwrap_or(tr(state))).size(t.font_small).color(color));
+                ui.label(RichText::new(running.as_deref().unwrap_or(tr_by_id(state))).size(t.font_small).color(color));
                 if !call.kind.is_empty() && call.kind != "other" {
                     ui.label(RichText::new(call.kind).size(t.font_small).color(t.text_dim));
                 }
@@ -2933,7 +2940,7 @@ mod tests {
             } else {
                 // #1458: the Snap can't start what the install list installs, so it says why instead.
                 let snap = case == "snap";
-                assert_eq!(message, tr(if snap { "ui.agent_chat_snap_none_found" } else { "ui.agent_chat_none_found" }));
+                assert_eq!(message, tr_by_id(if snap { "ui.agent_chat_snap_none_found" } else { "ui.agent_chat_none_found" }));
                 const INSTALL: &str = "npm install -g @example/agent";
                 let missing = discover::Missing { id: "example", name: "Example agent", install: INSTALL };
                 app.agent_chat.detection = Some(discover::Detection { missing: vec![missing], ..Default::default() });
@@ -3170,7 +3177,7 @@ mod tests {
             prepare_shared(&mut app, ui.ctx());
             shared_content(&mut app, ui, Flow::Tall);
         });
-        let detecting = tr("ui.agent_chat_detecting");
+        let detecting = tr_by_id("ui.agent_chat_detecting");
         let shown = crate::test_support::text_shapes(&output).any(|text| text.galley.text() == detecting);
         output.textures_delta.clear();
         assert!(shown, "the first frame says it is detecting");

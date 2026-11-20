@@ -1513,9 +1513,16 @@ fn page_list_sized<S>(
                     ui.add_space(t.space_8);
                     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.space_24), egui::Sense::hover());
                     let rect = rect.shrink2(vec2(t.space_10, 0.0));
-                    paint_text(ui, rect, &solidcraft_ui_text::tr(group).to_uppercase(), crate::type_face::semibold(t.font_small), t.form_dim, true);
+                    paint_text(
+                        ui,
+                        rect,
+                        &solidcraft_ui_text::tr_by_id(group).to_uppercase(),
+                        crate::type_face::semibold(t.font_small),
+                        t.form_dim,
+                        true,
+                    );
                 }
-                let label = solidcraft_ui_text::tr(page.label);
+                let label = solidcraft_ui_text::tr_by_id(page.label);
                 let (rect, response) =
                     ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.control_height + t.space_4), egui::Sense::click());
                 if response.clicked() {

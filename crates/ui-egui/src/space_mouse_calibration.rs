@@ -194,9 +194,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 ctx,
                 done,
                 |ui| {
-                    text(ui, app.tr(prompt), "prompt");
+                    text(ui, app.tr_by_id(prompt), "prompt");
                     if let Some(axis) = weak {
-                        crate::ui_kit::text(ui, app.tr(axis), crate::ui_kit::Text::Heading("weak_axis"));
+                        crate::ui_kit::text(ui, app.tr_by_id(axis), crate::ui_kit::Text::Heading("weak_axis"));
                     }
                     // The device doesn't behave like the kind picked: say so, and offer the other.
                     if let Some(other) = mismatch {
@@ -204,8 +204,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                             Kind::Trackball => ("ui.3d_mouse_looks_like_trackball", "ui.3d_mouse_switch_trackball"),
                             Kind::ReturnToCenter => ("ui.3d_mouse_looks_like_cap", "ui.3d_mouse_switch_cap"),
                         };
-                        crate::ui_kit::text(ui, app.tr(hint), crate::ui_kit::Text::Hint("space_mouse_kind_mismatch"));
-                        if crate::ui_kit::button(ui, app.tr(switch), crate::ui_kit::Button::Normal).clicked() {
+                        crate::ui_kit::text(ui, app.tr_by_id(hint), crate::ui_kit::Text::Hint("space_mouse_kind_mismatch"));
+                        if crate::ui_kit::button(ui, app.tr_by_id(switch), crate::ui_kit::Button::Normal).clicked() {
                             chosen = Some(other);
                         }
                     }
@@ -215,7 +215,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                             for (kind, label) in KINDS {
                                 ui.vertical(|ui| {
                                     crate::space_mouse_model::rest(ui, kind);
-                                    if crate::ui_kit::button(ui, app.tr(label), crate::ui_kit::Button::Normal).clicked() {
+                                    if crate::ui_kit::button(ui, app.tr_by_id(label), crate::ui_kit::Button::Normal).clicked() {
                                         chosen = Some(kind);
                                     }
                                 });

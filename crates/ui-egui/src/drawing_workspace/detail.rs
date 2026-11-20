@@ -31,8 +31,8 @@ pub(crate) struct Draft {
     pub(crate) sheet: Option<u64>,
 }
 
-fn tr(id: impl solidcraft_ui_text::Key<'static>) -> &'static str {
-    solidcraft_ui_text::tr(id)
+fn tr(id: &'static str) -> &'static str {
+    solidcraft_ui_text::tr_by_id(id)
 }
 
 /// The view whose region holds `point`, the topmost of those that do.

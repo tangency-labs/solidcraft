@@ -104,7 +104,7 @@ fn workspace_selector(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesV
     workspaces.sort_by_key(|workspace| {
         ["modelling", "sketch", "render", "review", "classic"].iter().position(|suffix| workspace.title_key.ends_with(*suffix)).unwrap_or(5)
     });
-    let labels: Vec<_> = workspaces.iter().map(|workspace| app.tr(&workspace.title_key).to_owned()).collect();
+    let labels: Vec<_> = workspaces.iter().map(|workspace| app.tr_by_id(&workspace.title_key).to_owned()).collect();
     let options: Vec<_> = labels.iter().map(String::as_str).collect();
     let current = workspaces.iter().position(|workspace| workspace.id == view.selected_workspace).unwrap_or(0);
     let mut selected = current;
@@ -348,7 +348,7 @@ fn preset_label<'a>(app: &'a SolveApp, view: &'a LayoutPreferencesView, entry: &
     if !entry.user
         && let Some(workspace) = view.workspaces.iter().find(|workspace| workspace.id == entry.layout.workspace)
     {
-        return app.tr(&workspace.title_key);
+        return app.tr_by_id(&workspace.title_key);
     }
     &entry.name
 }
@@ -754,10 +754,10 @@ fn validation_alert(app: &SolveApp, ui: &mut Ui, message: &str, color: egui::Col
         .horizontal(|ui| {
             let (rect, _) = ui.allocate_exact_size(vec2(t.space_14, t.space_14), Sense::hover());
             crate::icons::paint_ink(ui.painter(), rect, "status_warning", color);
-            ui.label(egui::RichText::new(app.tr(message)).size(t.font_caption).color(color))
+            ui.label(egui::RichText::new(app.tr_by_id(message)).size(t.font_caption).color(color))
         })
         .inner;
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Alert, true, app.tr(message)));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Alert, true, app.tr_by_id(message)));
     response
 }
 
@@ -787,7 +787,7 @@ fn run(app: &mut SolveApp, command: &str, params: serde_json::Value, applied: Op
                     .workspaces
                     .iter()
                     .find(|workspace| workspace.id == view.selected_workspace)
-                    .map(|workspace| app.tr(&workspace.title_key))
+                    .map(|workspace| app.tr_by_id(&workspace.title_key))
                     .unwrap_or_default();
                 app.set_status(tr!("ui.panel_layout.applied", name = name, workspace = workspace), false);
             }

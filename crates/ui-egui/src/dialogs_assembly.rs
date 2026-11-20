@@ -1293,7 +1293,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             let kind = f.joint_kind();
             if kind != JointKind::Rigid {
                 form_row(ui, "Animate", |ui| {
-                    let label = solidcraft_ui_text::tr(if f.animate { "ui.joint_stop" } else { "ui.joint_play" });
+                    let label = solidcraft_ui_text::tr_by_id(if f.animate { "ui.joint_stop" } else { "ui.joint_play" });
                     if crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal)
                         .backing_on_hover_text(solidcraft_ui_text::tr_label("Play the joint's motion in the view"))
                         .clicked()
@@ -1525,7 +1525,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 let stale = result.is_some() && *of != picked;
                 if crate::ui_kit::button(
                     ui,
-                    solidcraft_ui_text::tr(if stale { "dialog.compute_again" } else { "dialog.compute" }),
+                    solidcraft_ui_text::tr_by_id(if stale { "dialog.compute_again" } else { "dialog.compute" }),
                     crate::ui_kit::Button::Normal,
                 )
                 .clicked()
@@ -2039,7 +2039,7 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                     return Err(tr!(
                         "joint.rigid_group_one_component",
                         count = &items.len().to_string(),
-                        command = solidcraft_ui_text::tr("cmd.component_from_bodies")
+                        command = solidcraft_ui_text::tr_by_id("cmd.component_from_bodies")
                     ));
                 }
                 return Err(tr!("joint.rigid_group_select_components").into());
@@ -3258,7 +3258,7 @@ pub(crate) fn joint_glyph_at(plan: &[JointGlyph], pos: Pos2) -> Option<u64> {
 /// axis explain themselves (#6404).
 pub(crate) fn joint_glyph_tip(app: &SolveApp, id: u64) -> Option<String> {
     let j = app.session.doc.assembly.joints.iter().find(|j| j.id == id)?;
-    let kind = app.tr(kind_label(j.kind));
+    let kind = app.tr_by_id(kind_label(j.kind));
     // A name that already says the type ("Rigid 7") is enough on its own.
     Some(if j.name.to_lowercase().contains(&kind.to_lowercase()) { j.name.clone() } else { format!("{} ({kind})", j.name) })
 }

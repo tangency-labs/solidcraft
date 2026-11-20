@@ -249,7 +249,7 @@ pub(super) fn controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut super::
             ("render.surface_import.source", &mut view.imported.source, 2048),
             ("render.surface_import.license", &mut view.imported.license, 4096),
         ] {
-            ui_kit::row(ui, app.tr(key), |ui| {
+            ui_kit::row(ui, app.tr_by_id(key), |ui| {
                 let editor = ui_kit::bounded_cell_editor(ui, ui.scope_id().with(key), value, "", false, maximum);
                 crate::panel_runtime::register_content_focus(ui.ctx(), &editor);
             });
@@ -258,7 +258,7 @@ pub(super) fn controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut super::
             ui_kit::segmented(ui, &mut view.mapping_plane, &["xy", "yz", "zx"], ui_kit::Segments { compact: true, ..Default::default() });
         });
         for (key, value) in ["render.surface_import.repeat_u", "render.surface_import.repeat_v"].into_iter().zip(&mut view.imported.repeat_mm) {
-            ui_kit::row(ui, app.tr(key), |ui| {
+            ui_kit::row(ui, app.tr_by_id(key), |ui| {
                 ui_kit::number_field(ui, value, 0.001..=1e6, 1.0, " mm");
             });
         }

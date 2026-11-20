@@ -275,7 +275,7 @@ impl Product {
             .into_iter()
             .map(|(id, key, pressed)| RuntimeAction {
                 id: ControlId(id.into()),
-                label: solidcraft_ui_text::tr(key).into(),
+                label: solidcraft_ui_text::tr_by_id(key).into(),
                 enabled: true,
                 disabled_reason: None,
                 pressed: Some(pressed),
@@ -289,7 +289,7 @@ impl Product {
                         .enumerate()
                         .map(|(index, action)| RuntimeAction {
                             id: action.id,
-                            label: solidcraft_ui_text::tr(&action.label_key).into(),
+                            label: solidcraft_ui_text::tr_by_id(&action.label_key).into(),
                             enabled: true,
                             disabled_reason: None,
                             pressed: Some(mode == index),
@@ -320,7 +320,7 @@ impl Product {
                     .into_iter()
                     .map(|action| RuntimeAction {
                         id: action.id,
-                        label: solidcraft_ui_text::tr(&action.label_key).into(),
+                        label: solidcraft_ui_text::tr_by_id(&action.label_key).into(),
                         enabled: true,
                         disabled_reason: None,
                         pressed: None,
@@ -343,7 +343,7 @@ impl Product {
     }
     fn empty_presentation(self) -> PanelPresentation {
         PanelPresentation {
-            title: solidcraft_ui_text::tr(self.title_key()).into(),
+            title: solidcraft_ui_text::tr_by_id(self.title_key()).into(),
             icon: self.icon().into(),
             status: None,
             attention: false,

@@ -827,7 +827,7 @@ fn unavailable_preferences_show_disabled_update_controls_and_real_values() {
                     assert_eq!(controls[0].1.toggled(), Some(if checked { Toggled::True } else { Toggled::False }));
                 }
             }
-            let reason = solidcraft_ui_text::tr("update.check_unavailable");
+            let reason = solidcraft_ui_text::tr_by_id("update.check_unavailable");
             assert_eq!(tree.nodes.iter().filter(|(_, node)| node.role() == Role::Label && node.value() == Some(reason)).count(), 1);
             let texts: Vec<_> = h
                 .shapes
@@ -837,7 +837,7 @@ fn unavailable_preferences_show_disabled_update_controls_and_real_values() {
             assert!(texts.contains(&reason), "{kind:?}: the unavailable reason is painted");
             assert!(h.widget("Up to date").is_none(), "unavailability is not a successful check");
             let note = match &kind {
-                InstallKind::Web => solidcraft_ui_text::tr("update.prefs_web").to_string(),
+                InstallKind::Web => solidcraft_ui_text::tr_by_id("update.prefs_web").to_string(),
                 InstallKind::Flatpak(id) => solidcraft_ui_text::format(
                     "update.prefs_flatpak",
                     &[("version", current_version()), ("command", &format!("flatpak update {id}"))],

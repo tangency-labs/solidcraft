@@ -37,7 +37,7 @@ impl CrashUi {
 }
 
 fn kind_label(kind: &str) -> &'static str {
-    solidcraft_ui_text::tr(match kind {
+    solidcraft_ui_text::tr_by_id(match kind {
         "command_panic" => "crash.kind_command",
         "kernel_panic_recovered" => "crash.kind_kernel",
         "unclean_exit" => "crash.kind_unclean",
@@ -218,7 +218,7 @@ mod tests {
         assert!(status.contains("detected at startup"), "{status}");
         assert!(h.widget("Detected 2026-10-12 16:23:41 UTC  Closed unexpectedly  ×2").is_some());
         assert!(h.widget(report["message"].as_str().unwrap()).is_some(), "keep the original session start visible");
-        assert!(h.widget(solidcraft_ui_text::tr("crash.unclean_explanation")).is_some());
+        assert!(h.widget(solidcraft_ui_text::tr_by_id("crash.unclean_explanation")).is_some());
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -236,7 +236,7 @@ mod tests {
         h.frames(6);
         assert!(h.app.crashes.open);
         assert!(h.widget("2026-10-12 16:23:41 UTC  Internal error in a command  ×2").is_some());
-        assert!(h.widget(solidcraft_ui_text::tr("crash.unclean_explanation")).is_none());
+        assert!(h.widget(solidcraft_ui_text::tr_by_id("crash.unclean_explanation")).is_none());
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -336,7 +336,7 @@ mod tests {
                     .unwrap()
                     .nodes
                     .iter()
-                    .filter(|(_, node)| node.role() == egui::accesskit::Role::Button && node.label() == Some(h.app.tr("prefs.crash_reports")))
+                    .filter(|(_, node)| node.role() == egui::accesskit::Role::Button && node.label() == Some(h.app.tr_by_id("prefs.crash_reports")))
                     .collect();
                 assert_eq!(buttons.len(), 1);
                 assert!(!buttons[0].1.is_disabled(), "opening reports stays available even at zero");

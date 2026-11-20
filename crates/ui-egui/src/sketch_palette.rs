@@ -393,7 +393,7 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     let status = constraint_status(remaining, solved, geometry);
     let fraction = constrained_fraction(remaining, total, solved && geometry);
     let option_label =
-        |label: &'static str| if matches!(label, "ui.profile" | "ui.points") { solidcraft_ui_text::tr(label) } else { app.tr_label(label) };
+        |label: &'static str| if matches!(label, "ui.profile" | "ui.points") { solidcraft_ui_text::tr_by_id(label) } else { app.tr_label(label) };
     let more = tr!("ui.palette_more");
     let shown = |key: &str| match key {
         "grid" => !opts.hide_grid,

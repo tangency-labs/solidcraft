@@ -58,7 +58,7 @@ pub(super) fn supersampling_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     });
     app.render_workspace.view.dirty |= before != app.render_workspace.view.studio.supersampling;
     let key = if available { "render.supersampling_help" } else { "render.output_raytrace_only" };
-    ui_kit::text(ui, app.tr(key), ui_kit::Text::Note(key));
+    ui_kit::text(ui, app.tr_by_id(key), ui_kit::Text::Note(key));
     if available && app.render_workspace.view.studio.supersampling == 2 {
         let draft = &app.render_workspace.view.draft;
         let message = tr!(
@@ -118,7 +118,7 @@ pub(super) fn cpu_threads_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     });
     app.render_workspace.view.dirty |= before != app.render_workspace.view.raytrace.threads;
     let key = if cfg!(target_arch = "wasm32") { "render.cpu_threads_web" } else { "render.cpu_threads_help" };
-    ui_kit::text(ui, app.tr(key), ui_kit::Text::Note(key));
+    ui_kit::text(ui, app.tr_by_id(key), ui_kit::Text::Note(key));
 }
 
 pub(super) fn denoise_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
@@ -272,7 +272,7 @@ pub(super) fn diagnostics(app: &mut SolveApp, ui: &mut egui::Ui) {
             let (rect, _) = ui.allocate_exact_size(egui::vec2(t.space_12, t.space_12), egui::Sense::hover());
             let [r, g, b, a] = class.color();
             ui.painter().rect_filled(rect, 0.0, egui::Color32::from_rgba_unmultiplied(r, g, b, a));
-            ui.label(app.tr(diagnostic_class_label(class)));
+            ui.label(app.tr_by_id(diagnostic_class_label(class)));
             ui.label(count.to_string());
         });
     }

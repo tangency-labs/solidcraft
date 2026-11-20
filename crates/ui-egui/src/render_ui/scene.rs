@@ -68,8 +68,8 @@ fn look_color(app: &SolveApp, body: &ModelBody, look: Option<&Look>) -> Color32 
 fn section(app: &mut SolveApp, rows: &mut Rows<'_>, key: &str) -> bool {
     let id = format!("render:tree:{key}");
     let open = browser::is_open(app, &id, true);
-    let label = app.tr(&format!("render.tree_{key}")).to_string();
-    let add_label = app.tr(if key == "lights" { "render.tree_add_light" } else { "render.tree_add_shot" }).to_string();
+    let label = app.tr_by_id(&format!("render.tree_{key}")).to_string();
+    let add_label = app.tr_by_id(if key == "lights" { "render.tree_add_light" } else { "render.tree_add_shot" }).to_string();
     let pending = tr!(app, "render.method_limit_raster").to_string();
     let actions = [ui_kit::TreeAction {
         icon: "plus",
@@ -281,7 +281,7 @@ pub(crate) fn sections(app: &mut SolveApp, rows: &mut Rows<'_>) {
                         ("render.shot.duplicate", "render.shot_duplicate"),
                         ("render.shot.remove", "render.shot_remove"),
                     ] {
-                        let item = Item::action(command, app.tr(key), "");
+                        let item = Item::action(command, app.tr_by_id(key), "");
                         if crate::ui_kit::menu::list_row(ui, &item).is_some() {
                             if command == "render.settings.apply" {
                                 super::switch_shot(app, name.clone());
@@ -330,7 +330,7 @@ pub(crate) fn output(app: &mut SolveApp, rows: &mut Rows<'_>) {
             Spec { key: &child_key, ..Default::default() },
             Row {
                 depth: 1,
-                label: app.tr(key),
+                label: app.tr_by_id(key),
                 name: true,
                 subtitle: &subtitle,
                 selected: app.render_workspace.view.selection == selection,

@@ -376,7 +376,7 @@ pub(crate) fn pick_style(app: &mut SolveApp, style: NavigatorStyle) {
 fn set_body(app: &mut SolveApp, name: Option<&str>) -> Result<(), String> {
     let shape = match name {
         None => None,
-        Some(name) => Some(snapshot_of(&app.session, name).map_err(|reason| solidcraft_ui_text::tr(reason).to_string())?),
+        Some(name) => Some(snapshot_of(&app.session, name).map_err(|reason| solidcraft_ui_text::tr_by_id(reason).to_string())?),
     };
     app.view_gizmo.set(shape);
     Ok(())
@@ -503,7 +503,7 @@ pub(crate) fn rows(app: &SolveApp, ui: &mut egui::Ui, form: &mut Form, inputs: &
         form.preview = body.map(|name| (name.to_string(), snapshot_of(&app.session, name)));
     }
     if let Some((_, Err(reason))) = &form.preview {
-        ui_kit::text(ui, solidcraft_ui_text::tr(reason), ui_kit::Text::Error("view_gizmo_refused"));
+        ui_kit::text(ui, solidcraft_ui_text::tr_by_id(reason), ui_kit::Text::Error("view_gizmo_refused"));
     }
     ui_kit::row(ui, tr!("view_gizmo.texture"), |ui| {
         let mut texture = usize::from(form.texture == NavigatorTexture::Modeled);
@@ -527,7 +527,7 @@ pub(crate) fn rows(app: &SolveApp, ui: &mut egui::Ui, form: &mut Form, inputs: &
 /// OK: the custom navigator with the panel's body (or the one it has), texture, arrows and Home.
 pub(crate) fn run_dialog(app: &mut SolveApp, form: &Form, inputs: &[SelInput]) -> Result<(), String> {
     if let Some((_, Err(reason))) = &form.preview {
-        return Err(solidcraft_ui_text::tr(reason).to_string());
+        return Err(solidcraft_ui_text::tr_by_id(reason).to_string());
     }
     let mut params = json!({"style": NavigatorStyle::Custom, "texture": form.texture, "arrows": form.arrows, "home": form.home});
     if let (Some(body), Some(o)) = (picked(inputs), params.as_object_mut()) {

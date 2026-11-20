@@ -146,11 +146,11 @@ fn transport_view(app: &SolveApp) -> crate::timeline_fold::View {
 /// component out of the bar — shows or hides those components' entries (#10393).
 pub(crate) fn transport_items(app: &SolveApp) -> Vec<crate::ui_kit::Item> {
     let show = !app.preferences.history_play_button;
-    let label = solidcraft_ui_text::tr(if show { "ui.history_play_button_show" } else { "ui.history_play_button_hide" });
+    let label = solidcraft_ui_text::tr_by_id(if show { "ui.history_play_button_show" } else { "ui.history_play_button_hide" });
     let mut items = vec![crate::ui_kit::Item::action("ui.historyPlayButton", label, "timeline_play").with(json!({ "show": show }))];
     if app.session.doc.components.iter().any(|c| c.history_hidden) {
         let show_hidden = !app.tree.history_show_hidden;
-        let label = solidcraft_ui_text::tr(if show_hidden { "ui.history_show_hidden" } else { "ui.history_hide_hidden" });
+        let label = solidcraft_ui_text::tr_by_id(if show_hidden { "ui.history_show_hidden" } else { "ui.history_hide_hidden" });
         items.push(crate::ui_kit::Item::action("ui.historyShowHidden", label, "eye").with(json!({ "show": show_hidden })));
     }
     items
@@ -545,7 +545,7 @@ pub(crate) fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
         Item::action("ui.groupFeatures", "Group Features", "feature_group")
             .with(json!({ "features": targets, "parent": parent }))
             .off_because(app.session.group_refusal(&targets, parent)),
-        Item::action("timeline.suppress", solidcraft_ui_text::tr(suppress), "suppress").with(json!({ "feature": id })),
+        Item::action("timeline.suppress", solidcraft_ui_text::tr_by_id(suppress), "suppress").with(json!({ "feature": id })),
     ]);
     // An extra entry for the selection; the one above still acts on this feature alone.
     if let Some((label, params)) = suppress_selected(app, id) {
@@ -1205,7 +1205,7 @@ impl BarResults {
 /// "Play from the start" while Play starts over (#10798).
 pub(crate) fn play_labels(app: &SolveApp) -> crate::ui_kit::PlayLabels<'static> {
     let play = if play_starts_over(app) { "ui.history_play_from_start" } else { "cmd.timeline_play" };
-    crate::ui_kit::PlayLabels { play: solidcraft_ui_text::tr(play), stop: tr!("cmd.timeline_stop") }
+    crate::ui_kit::PlayLabels { play: solidcraft_ui_text::tr_by_id(play), stop: tr!("cmd.timeline_stop") }
 }
 
 /// The bar as SolidCraft describes it; the strip sets the marker's slot and the step count.
@@ -1884,19 +1884,19 @@ mod tests {
         let play = |h: &Harness| {
             crate::context_menu::items(&h.app, &folder).into_iter().find(|i| i.id == "ui.historyTransport" && i.icon == "timeline_play")
         };
-        assert_eq!(play(&h).map(|i| i.label).as_deref(), Some(solidcraft_ui_text::tr("ui.history_play_from_start")));
+        assert_eq!(play(&h).map(|i| i.label).as_deref(), Some(solidcraft_ui_text::tr_by_id("ui.history_play_from_start")));
         // The bar's controls menu follows a separator.
         let items = crate::context_menu::items(&h.app, &folder);
         assert!(items.iter().any(|i| i.is_sep()) && items.iter().any(|i| i.id == "ui.historyPlayButton"));
         // A right-click on the folder opens the menu; Go to beginning rolls to the start.
-        h.step(&json!({"click": {"browser": solidcraft_ui_text::tr("ui.history_title")}, "button": "right"})).unwrap();
+        h.step(&json!({"click": {"browser": solidcraft_ui_text::tr_by_id("ui.history_title")}, "button": "right"})).unwrap();
         assert_eq!(h.app.menu.target, folder);
-        h.call("ui.menuPick", json!({"item": solidcraft_ui_text::tr("ui.history_first")}));
+        h.call("ui.menuPick", json!({"item": solidcraft_ui_text::tr_by_id("ui.history_first")}));
         h.frames(4);
         assert_eq!(h.app.session.doc.marker, Some(0));
         assert_eq!(enabled(&h), state([("first", false), ("back", false), ("play", true), ("forward", true), ("last", true)]));
         // One step forward leaves every control something to do.
-        let forward = crate::context_menu::items(&h.app, &folder).into_iter().find(|i| i.label == solidcraft_ui_text::tr("ui.history_forward"));
+        let forward = crate::context_menu::items(&h.app, &folder).into_iter().find(|i| i.label == solidcraft_ui_text::tr_by_id("ui.history_forward"));
         crate::context_menu::run_item(&mut h.app, &forward.unwrap(), egui::Pos2::ZERO);
         h.frames(4);
         assert_eq!(h.app.session.doc.marker, Some(1));
@@ -2055,13 +2055,17 @@ mod tests {
     fn playback_at_the_end_starts_over_from_the_first_feature() {
         let mut h = two_boxes(false);
         assert_eq!(h.app.session.doc.marker, None);
-        assert_eq!(super::play_labels(&h.app).play, solidcraft_ui_text::tr("ui.history_play_from_start"));
+        assert_eq!(super::play_labels(&h.app).play, solidcraft_ui_text::tr_by_id("ui.history_play_from_start"));
         h.app.start("timeline.play");
         h.frames(2);
         assert_eq!(h.app.session.doc.marker, Some(0), "back to the start first");
         assert_eq!(h.app.session.model.state().bodies.len(), 0);
         assert!(h.app.timeline_playback.is_some());
-        assert_eq!(super::play_labels(&h.app).play, solidcraft_ui_text::tr("cmd.timeline_play"), "away from the end, Play is Play History again");
+        assert_eq!(
+            super::play_labels(&h.app).play,
+            solidcraft_ui_text::tr_by_id("cmd.timeline_play"),
+            "away from the end, Play is Play History again"
+        );
         h.frames(10);
         assert_eq!(h.app.session.doc.marker, Some(0), "leave time to see the start");
         h.frames(40);
@@ -2145,14 +2149,14 @@ mod tests {
             right_click(&mut h, "history:back");
             assert!(h.app.viewport.context_menu.is_some() && h.app.menu.target == Target::HistoryControls, "{dock} {width}");
             let items = crate::context_menu::items(&h.app, &Target::HistoryControls);
-            assert_eq!(items[0].label, solidcraft_ui_text::tr("ui.history_play_button_hide"));
+            assert_eq!(items[0].label, solidcraft_ui_text::tr_by_id("ui.history_play_button_hide"));
             crate::context_menu::run_item(&mut h.app, &items[0], egui::Pos2::ZERO);
             assert!(!h.app.preferences.history_play_button);
             h.frames(2);
             assert!(crate::scenario::handle_at("history:play").is_none(), "the four controls again; {dock} {width}");
 
             let items = crate::context_menu::items(&h.app, &Target::HistoryControls);
-            assert_eq!(items[0].label, solidcraft_ui_text::tr("ui.history_play_button_show"));
+            assert_eq!(items[0].label, solidcraft_ui_text::tr_by_id("ui.history_play_button_show"));
             crate::context_menu::run_item(&mut h.app, &items[0], egui::Pos2::ZERO);
             h.frames(2);
             assert!(crate::scenario::handle_at("history:play").is_some(), "and Play back; {dock} {width}");

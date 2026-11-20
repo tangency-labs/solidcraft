@@ -18,26 +18,6 @@ pub mod numbered;
 
 pub use numbered::{Filled, Msg};
 
-/// What names a message to a lookup: its id, or its place among the English ids ([`Msg`], which
-/// `msg!` writes), so that a call reads the same either way: `tr("ui.file")`, `tr(msg!("ui.file"))`.
-pub trait Key<'a>: Copy {
-    #[doc(hidden)]
-    fn read(self, locale: Locale) -> &'a str;
-}
-
-/// An id, however it is held: `&str`, `&String`, `&&str`, `&Cow<str>`.
-impl<'a, T: AsRef<str> + ?Sized> Key<'a> for &'a T {
-    fn read(self, locale: Locale) -> &'a str {
-        locale.text_by_id(self.as_ref())
-    }
-}
-
-impl<'a> Key<'a> for Msg {
-    fn read(self, locale: Locale) -> &'a str {
-        locale.message(self)
-    }
-}
-
 /// A catalog's messages: stable id → text.
 pub type Messages = BTreeMap<String, String>;
 
@@ -275,13 +255,6 @@ impl Locale {
         self.0.display_name()
     }
 
-    /// Stable message ID → translation → English → ID, in display order (see [`bidi`]).
-    /// The message named by `key`: its id (`"ui.file"`), or its place from `msg!`, which is the
-    /// same message without the id in the program.
-    pub fn text<'a>(self, key: impl Key<'a>) -> &'a str {
-        key.read(self)
-    }
-
     /// This catalog's own text for `id`, as it is shown: from its table when it has one, else from
     /// its JSON. No fall back to English.
     fn own(self, id: &str) -> Option<&'static str> {
@@ -291,7 +264,9 @@ impl Locale {
         numbered::lookup(self.0.table, Msg::of(id)?)
     }
 
-    fn text_by_id<'a>(self, id: &'a str) -> &'a str {
+    /// The message with the id `id`: in this language, then in English, then the id itself. For
+    /// an id built at run time; one written in the code is `tr!("id")`, which checks it.
+    pub fn text<'a>(self, id: &'a str) -> &'a str {
         self.own(id).or_else(|| english().messages().get(id).map(String::as_str)).unwrap_or(id)
     }
 
@@ -427,8 +402,15 @@ pub fn language() -> &'static str {
     locale().0.id
 }
 
-pub fn tr<'a>(key: impl Key<'a>) -> &'a str {
-    locale().text(key)
+/// The message `msg` (from `msg!`; `tr!("id")` says both) in this thread's language.
+pub fn tr(msg: Msg) -> &'static str {
+    locale().tr(msg)
+}
+
+/// The message with the id `id` in this thread's language, for an id built at run time. An id
+/// written in the code is `tr!("id")`, which checks it against the English catalog.
+pub fn tr_by_id(id: &str) -> &str {
+    locale().text(id)
 }
 
 pub fn tr_label(label: &str) -> &str {
@@ -499,7 +481,7 @@ mod tests {
         installed();
         assert_eq!(Locale::for_language("de").text("ui.no_such_message"), "ui.no_such_message");
         assert_eq!(Locale::for_language("de").label("original unknown caption"), "original unknown caption");
-        assert_eq!(tr("ui.no_such_message"), "ui.no_such_message");
+        assert_eq!(tr_by_id("ui.no_such_message"), "ui.no_such_message");
     }
 
     #[test]
@@ -534,12 +516,12 @@ mod tests {
         {
             let _de = scope("de");
             assert_eq!(language(), "de");
-            assert_eq!(tr("ui.cancel"), "Abbrechen");
+            assert_eq!(tr_by_id("ui.cancel"), "Abbrechen");
             assert_eq!(tr_label("Profile"), "Profil");
             {
                 let _labels = resolved_labels();
                 assert_eq!(tr_label("Profile"), "Profile");
-                assert_eq!(tr("ui.cancel"), "Abbrechen", "stable catalog messages remain translated");
+                assert_eq!(tr_by_id("ui.cancel"), "Abbrechen", "stable catalog messages remain translated");
             }
             assert_eq!(tr_label("Profile"), "Profil");
             {
@@ -550,7 +532,7 @@ mod tests {
             assert_eq!(format("dialog.selected_count", &[("count", "3")]), "3 ausgewählt");
         }
         assert_eq!(language(), "en");
-        assert_eq!(tr("ui.cancel"), "Cancel");
+        assert_eq!(tr_by_id("ui.cancel"), "Cancel");
     }
 
     #[test]

@@ -2516,7 +2516,7 @@ fn kind_word(kind: ViewKind) -> &'static str {
 
 /// A view's hover text: "Sketch 2 · Design workspace · Ctrl+2" (the key for the first nine views).
 fn view_tip(view: &DesignView, place: usize) -> String {
-    let workspace = solidcraft_ui_text::tr(match view.kind {
+    let workspace = solidcraft_ui_text::tr_by_id(match view.kind {
         ViewKind::Model | ViewKind::Sketch => "tab_strip.workspace_design",
         ViewKind::Sheet => "tab_strip.workspace_drawing",
         ViewKind::Render => "tab_strip.workspace_render",
@@ -2620,7 +2620,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         .zip(&view_tips)
         .map(|(views, tips)| views.iter().zip(tips).map(|((view, active, window), tip)| view_tab(view, *active, tip, *window)).collect())
         .collect();
-    let more_text = solidcraft_ui_text::tr("tab_strip.more");
+    let more_text = solidcraft_ui_text::tr_by_id("tab_strip.more");
     let plus_menu = crate::design_view_ui::plus_menu(solidcraft_theme::is_dark());
     let window_entries = crate::design_view_ui::window_menu_entries(app);
     let window_rows = crate::design_view_ui::window_menu_rows(app, &window_entries);
@@ -2892,7 +2892,7 @@ pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
         tr!("document.save_changes", name = &name_display)
     };
     let detail = if grouped { String::new() } else { crate::design_view_ui::closing_detail(view_counts(app).get(i).copied().unwrap_or(1)) };
-    let save_label = solidcraft_ui_text::tr(if grouped { "document.save_selected" } else { "ui.save" });
+    let save_label = solidcraft_ui_text::tr_by_id(if grouped { "document.save_selected" } else { "ui.save" });
     let mut show_tab = None;
     let mut row_action = None;
     let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_close_prompt"), "status_warning", &title)
@@ -2924,7 +2924,7 @@ pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
                                         ui.spacing_mut().item_spacing.x = t.space_8;
                                         for (key, save) in [("document.discard_row", false), ("document.save_row", true)] {
-                                            let button = ui_kit::button(ui, solidcraft_ui_text::tr(key), ui_kit::Button::Small);
+                                            let button = ui_kit::button(ui, solidcraft_ui_text::tr_by_id(key), ui_kit::Button::Small);
                                             let action = if save { "save" } else { "discard" };
                                             crate::scenario::publish_target(&format!("save_many:{action}:{index}"), button.rect);
                                             if button.clicked() {

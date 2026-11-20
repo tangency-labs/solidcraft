@@ -877,7 +877,7 @@ impl SheetBackdrop {
 
 /// Preferences' Sheet colour choice.
 pub(crate) fn colour_choice(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let labels: Vec<&str> = SheetColour::ALL.iter().map(|c| app.tr(c.label())).collect();
+    let labels: Vec<&str> = SheetColour::ALL.iter().map(|c| app.tr_by_id(c.label())).collect();
     let current = SheetColour::parse(&app.preferences.drawing_sheet_colour).unwrap_or(SheetColour::White);
     let mut selected = SheetColour::ALL.iter().position(|c| *c == current).unwrap_or(3);
     let response = ui_kit::dropdown(ui, "pref_drawing_sheet_colour", &mut selected, &labels);

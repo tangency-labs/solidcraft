@@ -201,7 +201,7 @@ pub fn hint(id: &str) -> String {
         "bisector" => "ui.construction.bisector_hint",
         _ => "ui.construction.point_hint",
     };
-    solidcraft_ui_text::tr(key).to_owned()
+    solidcraft_ui_text::tr_by_id(key).to_owned()
 }
 
 fn arg(point: &(Vec2, Option<String>), preview: bool) -> Value {

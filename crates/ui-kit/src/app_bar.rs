@@ -1339,7 +1339,7 @@ fn view_list(ui: &mut egui::Ui, views: &[ViewTab], prefix: &str, menu: &mut Opti
                 row.show(ui)
             })
             .inner
-            .backing_on_hover_text(solidcraft_ui_text::tr("multi_window.window_mark"))
+            .backing_on_hover_text(solidcraft_ui_text::tr_by_id("multi_window.window_mark"))
         } else {
             row.show(ui)
         };
@@ -1469,7 +1469,7 @@ fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: 
     solidcraft_ui_registry::publish_target(&format!("{}{k}", h.view), vr);
     resp.widget_info(|| {
         let name = if detached {
-            format!("{} — {}", view.name, solidcraft_ui_text::tr("multi_window.window_mark")).into()
+            format!("{} — {}", view.name, solidcraft_ui_text::tr_by_id("multi_window.window_mark")).into()
         } else {
             std::borrow::Cow::Borrowed(view.name)
         };

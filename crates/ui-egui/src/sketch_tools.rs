@@ -250,7 +250,7 @@ fn next_measure(order: Continuity) -> Option<(&'static str, &'static str, &'stat
 fn continuity_label(app: &SolveApp, seam: &Value) -> String {
     let deg = |key: &str| seam[key]["value"].as_f64().map(|x| format!("{x:.3}\u{b0}")).unwrap_or_default();
     let order = seam["order"].as_str().and_then(Continuity::parse);
-    let class = solidcraft_ui_text::tr(order_class(order));
+    let class = solidcraft_ui_text::tr_by_id(order_class(order));
     match order {
         None => format!("{class} {}", seam["gap_mm"]["value"].as_f64().map(|g| crate::prefs::show_mm(app, g, 1)).unwrap_or_default()),
         Some(g) => {
@@ -347,12 +347,15 @@ pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
         let Ok(v) = app.run(id, json!({})) else { return false };
         let summary = &v["summary"];
         // Each class in the legend's words, best first.
-        let gaps = summary["gap"].as_u64().filter(|n| *n > 0).map(|n| format!("{n} {}", solidcraft_ui_text::tr(order_class(None))));
+        let gaps = summary["gap"].as_u64().filter(|n| *n > 0).map(|n| format!("{n} {}", solidcraft_ui_text::tr_by_id(order_class(None))));
         let counts: Vec<String> = Continuity::ALL
             .into_iter()
             .rev()
             .filter_map(|g| {
-                summary["orders"][g.as_str()].as_u64().filter(|n| *n > 0).map(|n| format!("{n} {}", solidcraft_ui_text::tr(order_class(Some(g)))))
+                summary["orders"][g.as_str()]
+                    .as_u64()
+                    .filter(|n| *n > 0)
+                    .map(|n| format!("{n} {}", solidcraft_ui_text::tr_by_id(order_class(Some(g)))))
             })
             .chain(gaps)
             .collect();

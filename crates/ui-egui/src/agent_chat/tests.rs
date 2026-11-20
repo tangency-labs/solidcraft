@@ -1568,7 +1568,7 @@ fn an_unresponsive_cancel_exit_keeps_the_queue_and_completed_changes() {
     poll(&mut app, &ctx);
     send(&mut app, &ctx, "later".into());
     cancel(&mut app);
-    script.report(Event::Exited { tail: vec![tr("ui.agent_chat_cancel_timeout").to_string()] });
+    script.report(Event::Exited { tail: vec![tr_by_id("ui.agent_chat_cancel_timeout").to_string()] });
     poll(&mut app, &ctx);
     assert_eq!(app.agent_chat.state(), State::Exited);
     assert!(app.agent_chat.backend.is_none() && app.agent_chat.turn.is_none());
@@ -2035,7 +2035,7 @@ fn an_endpoints_vendor_named_listing_names_its_providers() {
         [
             ("GPT-6.1 Terra".to_string(), Some("OpenAI".to_string()), "openai/gpt-6.1-terra".to_string()),
             ("Qwen3.8 Flash".to_string(), Some("Qwen".to_string()), "qwen/qwen3.8-flash".to_string()),
-            ("free-model".to_string(), Some(tr("ui.agent_chat_provider_other").to_string()), String::new()),
+            ("free-model".to_string(), Some(tr_by_id("ui.agent_chat_provider_other").to_string()), String::new()),
         ]
     );
     let rows = model_rows(&[m("openai/gpt-6.1-terra", "OpenAI: GPT-6.1 Terra"), m("openai/gpt-5.6-luna", "OpenAI: GPT-5.6 Luna")]);
@@ -3482,9 +3482,9 @@ fn the_agent_list_keeps_the_panels_side_margin() {
         }
         let at = |label: &str| texts.iter().find(|(text, r)| text == label && panel.contains(r.center())).map(|(_, r)| *r);
         let margin = solidcraft_theme::Tokens::get().space_12 - 0.5;
-        let agent = at(tr("ui.agent_chat_pick")).expect("the Agent row");
+        let agent = at(tr_by_id("ui.agent_chat_pick")).expect("the Agent row");
         assert!(agent.left() >= panel.left() + margin, "{layout:?}: Agent at {agent:?} in {panel:?}");
-        let refresh = at(tr("ui.agent_chat_refresh")).expect("Refresh");
+        let refresh = at(tr_by_id("ui.agent_chat_refresh")).expect("Refresh");
         assert!(refresh.right() <= panel.right() - margin, "{layout:?}: Refresh at {refresh:?} in {panel:?}");
     }
 }
@@ -3510,8 +3510,8 @@ fn add_agent_and_refresh_are_the_same_size() {
         let frame = boxes.iter().filter(|b| b.contains_rect(text)).min_by(|a, b| a.area().total_cmp(&b.area())).copied();
         (text, frame.expect(label))
     };
-    let (add_text, add) = button(tr("ui.ai_add_agent"));
-    let (refresh_text, refresh) = button(tr("ui.agent_chat_refresh"));
+    let (add_text, add) = button(tr_by_id("ui.ai_add_agent"));
+    let (refresh_text, refresh) = button(tr_by_id("ui.agent_chat_refresh"));
     assert!((add.height() - refresh.height()).abs() < 0.5, "Add agent {add:?}, Refresh {refresh:?}");
     assert!((add_text.height() - refresh_text.height()).abs() < 0.5, "labels: Add agent {add_text:?}, Refresh {refresh_text:?}");
 }
@@ -3714,10 +3714,10 @@ fn a_cad_file_joins_the_message_once_its_import_is_in() {
 #[test]
 fn an_imported_parts_chip_says_the_part_stays() {
     crate::i18n::install();
-    assert_eq!(panel::remove_tip(&attach::Attachment::imported("motor.step".into())), tr("ui.agent_chat_remove_imported"));
-    assert!(tr("ui.agent_chat_remove_imported").contains("stays in the design"));
+    assert_eq!(panel::remove_tip(&attach::Attachment::imported("motor.step".into())), tr_by_id("ui.agent_chat_remove_imported"));
+    assert!(tr_by_id("ui.agent_chat_remove_imported").contains("stays in the design"));
     let picture = attach::from_rgba("a.png".into(), 2, 2, &[9; 16]).unwrap();
-    assert_eq!(panel::remove_tip(&picture), tr("ui.agent_chat_remove_file"));
+    assert_eq!(panel::remove_tip(&picture), tr_by_id("ui.agent_chat_remove_file"));
 }
 
 /// Files dropped on the chat attach to the next message, and the app doesn't open them as well
@@ -4004,32 +4004,32 @@ fn an_agent_without_the_design_tools_is_not_shown_as_ready() {
     h.app.agent_chat.tools_available = Some(true);
     h.frames(3);
     assert_eq!(assistant_mark(&h.app), AssistantMark::Ready);
-    assert!(h.widget(tr("ui.agent_chat_state_ready")).is_some(), "with the tools, the badge says Ready");
+    assert!(h.widget(tr_by_id("ui.agent_chat_state_ready")).is_some(), "with the tools, the badge says Ready");
 
     h.app.agent_chat.tools_available = Some(false);
     h.frames(3);
     assert_eq!(assistant_mark(&h.app), AssistantMark::NoDesign);
-    assert!(h.widget(tr("ui.agent_chat_state_no_design")).is_some(), "the badge says the design can't be reached");
-    assert!(h.widget(tr("ui.agent_chat_state_ready")).is_none(), "and not Ready");
+    assert!(h.widget(tr_by_id("ui.agent_chat_state_no_design")).is_some(), "the badge says the design can't be reached");
+    assert!(h.widget(tr_by_id("ui.agent_chat_state_ready")).is_none(), "and not Ready");
     let tip = assistant_tip(&h.app, AssistantMark::NoDesign);
-    assert!(tip.contains(tr("ui.agent_chat_state_no_design")), "{tip}");
-    assert!(tr("ui.agent_chat_no_design_hint").contains("SOLIDCRAFT_CLI"));
+    assert!(tip.contains(tr_by_id("ui.agent_chat_state_no_design")), "{tip}");
+    assert!(tr_by_id("ui.agent_chat_no_design_hint").contains("SOLIDCRAFT_CLI"));
     // The hint names the cause: the chat's endpoint that did not start, or the missing CLI;
     // the application bar's tooltip carries it too.
     h.app.agent_chat.tools_port = None;
-    assert_eq!(h.app.agent_chat.no_design_hint(), tr("ui.agent_chat_no_control"));
-    assert!(assistant_tip(&h.app, AssistantMark::NoDesign).contains(tr("ui.agent_chat_no_control")));
+    assert_eq!(h.app.agent_chat.no_design_hint(), tr_by_id("ui.agent_chat_no_control"));
+    assert!(assistant_tip(&h.app, AssistantMark::NoDesign).contains(tr_by_id("ui.agent_chat_no_control")));
     h.app.agent_chat.tools_port = Some(12345);
-    assert_eq!(h.app.agent_chat.no_design_hint(), tr("ui.agent_chat_no_design_hint"));
-    assert!(assistant_tip(&h.app, AssistantMark::NoDesign).contains(tr("ui.agent_chat_no_design_hint")));
+    assert_eq!(h.app.agent_chat.no_design_hint(), tr_by_id("ui.agent_chat_no_design_hint"));
+    assert!(assistant_tip(&h.app, AssistantMark::NoDesign).contains(tr_by_id("ui.agent_chat_no_design_hint")));
     // solidcraft-cli was found and handed to the agent, but its tools did not start (an endpoint
     // agent whose MCP start failed): the hint does not say the CLI is missing.
     h.app.agent_chat.tools_bridged = true;
-    assert_eq!(h.app.agent_chat.no_design_hint(), tr("ui.agent_chat_tools_not_started"));
-    assert!(!tr("ui.agent_chat_tools_not_started").contains("not found"));
-    assert!(assistant_tip(&h.app, AssistantMark::NoDesign).contains(tr("ui.agent_chat_tools_not_started")));
+    assert_eq!(h.app.agent_chat.no_design_hint(), tr_by_id("ui.agent_chat_tools_not_started"));
+    assert!(!tr_by_id("ui.agent_chat_tools_not_started").contains("not found"));
+    assert!(assistant_tip(&h.app, AssistantMark::NoDesign).contains(tr_by_id("ui.agent_chat_tools_not_started")));
     h.app.agent_chat.tools_bridged = false;
-    assert!(!assistant_tip(&h.app, AssistantMark::Ready).contains(tr("ui.agent_chat_no_design_hint")));
+    assert!(!assistant_tip(&h.app, AssistantMark::Ready).contains(tr_by_id("ui.agent_chat_no_design_hint")));
 
     // A turn in progress, or one waiting for approval, still shows what it is doing.
     h.app.agent_chat.set_state(State::Busy);
@@ -5214,7 +5214,7 @@ fn no_tool_turn_reports_empty_reply_and_unperformed_edit() {
         }
         app.agent_chat.on_event(Event::TurnEnded { reason: String::new() });
         end_turn(&mut app);
-        let expected = tr("ui.agent_chat_no_tool_call");
+        let expected = tr_by_id("ui.agent_chat_no_tool_call");
         assert!(app.agent_chat.items.iter().any(|i| matches!(i, Item::Notice { text, error: false } if text == expected)), "{prompt}");
         assert_eq!(status(&app)["turnWarning"], expected);
         assert!(app.session.undo.is_empty());
@@ -5264,7 +5264,7 @@ fn no_tool_turn_warning_leaves_answers_and_incomplete_turns_quiet() {
         end_turn(&mut app);
         assert!(status(&app).get("turnWarning").is_some());
         assert!(status(&app)["turnWarning"].is_null(), "{prompt}: {reason}");
-        assert!(!app.agent_chat.items.iter().any(|i| matches!(i, Item::Notice { text, .. } if text == tr("ui.agent_chat_no_tool_call"))));
+        assert!(!app.agent_chat.items.iter().any(|i| matches!(i, Item::Notice { text, .. } if text == tr_by_id("ui.agent_chat_no_tool_call"))));
     }
 }
 
@@ -5285,7 +5285,7 @@ fn a_cut_off_or_declined_reply_says_so_instead_of_blaming_tools() {
             .iter()
             .filter_map(|i| if let Item::Notice { text, error: false } = i { Some(text.as_str()) } else { None })
             .collect();
-        assert_eq!(notices, [tr(said)], "{reason}");
+        assert_eq!(notices, [tr_by_id(said)], "{reason}");
     }
 }
 
@@ -5524,7 +5524,7 @@ fn the_composer_hint_stays_on_one_row_at_the_narrowest_width() {
         let language = path.file_stem().unwrap().to_string_lossy().into_owned();
         let _scope = solidcraft_ui_text::scope(&language);
         for key in ["ui.agent_chat_placeholder", "ui.agent_chat_placeholder_busy"] {
-            let hint = solidcraft_ui_text::tr(key).to_owned();
+            let hint = solidcraft_ui_text::tr_by_id(key).to_owned();
             let mut rows = 0;
             let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
                 rows = crate::ui_kit::assistant_hint_galley(ui, &hint, width - 2.0 * solidcraft_theme::Tokens::get().form_inset).rows.len();

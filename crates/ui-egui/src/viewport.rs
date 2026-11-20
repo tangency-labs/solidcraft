@@ -8379,9 +8379,9 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
     }
     // The 3D mouse calibration offer: text and actions from its module, drawn by the shared toast.
     if let Some(offer) = crate::space_mouse_offer::due(app, ui.ctx()) {
-        let labels: Vec<String> = offer.actions.iter().map(|action| solidcraft_ui_text::tr(action.label()).to_string()).collect();
+        let labels: Vec<String> = offer.actions.iter().map(|action| solidcraft_ui_text::tr_by_id(action.label()).to_string()).collect();
         let labels: Vec<(&str, ToastKind)> = labels.iter().map(String::as_str).zip(offer.actions.iter().map(|action| action.kind())).collect();
-        let tips: Vec<&str> = offer.actions.iter().map(|action| action.tip().map_or("", solidcraft_ui_text::tr)).collect();
+        let tips: Vec<&str> = offer.actions.iter().map(|action| action.tip().map_or("", solidcraft_ui_text::tr_by_id)).collect();
         let extras = ToastExtras {
             close: Some("toast:space_mouse_offer:close"),
             countdown: Some((crate::space_mouse_offer::left(app, ui.ctx()), crate::space_mouse_offer::SHOW_SECONDS)),

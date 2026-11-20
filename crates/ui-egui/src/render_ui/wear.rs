@@ -26,7 +26,7 @@ fn layer_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         let add = ui_kit::dropdown_menu(ui, "render_aging_add", tr!(app, "render.aging_add"), |ui| {
             for kind in AgingKind::ALL {
                 let id = format!("aging-add-{}", kind.code());
-                if ui_kit::list_picker(ui, &id, app.tr(kind.key()), false).clicked() {
+                if ui_kit::list_picker(ui, &id, app.tr_by_id(kind.key()), false).clicked() {
                     match stack.push(AgingLayer::preset(kind)) {
                         Ok(()) => editor.selected_aging = stack.len() - 1,
                         Err(error) => app.set_status(error.to_string(), true),
@@ -42,7 +42,7 @@ fn layer_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         editor.selected_aging = editor.selected_aging.min(stack.len().saturating_sub(1));
         for index in 0..stack.len() {
             let Some(layer) = stack.get_mut(index) else { continue };
-            let label = format!("{} · {}", index + 1, app.tr(layer.kind.key()));
+            let label = format!("{} · {}", index + 1, app.tr_by_id(layer.kind.key()));
             let eye_target = format!("render:aging-layer:{index}:enabled");
             let actions = [ui_kit::TreeAction {
                 icon: if layer.enabled { "eye" } else { "suppress" },
@@ -98,13 +98,13 @@ fn layer_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
                 SurfaceClass::Metal => "render.aging_class_metal",
                 SurfaceClass::Dielectric => "render.aging_class_dielectric",
             };
-            let class = ui_kit::dropdown_menu(ui, "render_aging_class", app.tr(current), |ui| {
+            let class = ui_kit::dropdown_menu(ui, "render_aging_class", app.tr_by_id(current), |ui| {
                 for (value, key) in [
                     (SurfaceClass::AnyOpaque, "render.aging_class_any"),
                     (SurfaceClass::Metal, "render.aging_class_metal"),
                     (SurfaceClass::Dielectric, "render.aging_class_dielectric"),
                 ] {
-                    if ui_kit::list_picker(ui, key, app.tr(key), layer.surface_class == value).clicked() {
+                    if ui_kit::list_picker(ui, key, app.tr_by_id(key), layer.surface_class == value).clicked() {
                         layer.surface_class = value;
                         ui.close();
                     }

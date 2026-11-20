@@ -242,10 +242,10 @@ pub(super) fn environment_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         Environment::Sky => "render.studio_sky",
         Environment::Hdr => "render.studio_hdr",
     };
-    let label = app.tr(key).to_string();
+    let label = app.tr_by_id(key).to_string();
     ui_kit::dropdown_menu(ui, "render_environment_kind", &label, |ui| {
         for (value, key) in variants {
-            if ui_kit::list_picker(ui, key, app.tr(key), value == selected).clicked() {
+            if ui_kit::list_picker(ui, key, app.tr_by_id(key), value == selected).clicked() {
                 app.render_workspace.view.studio.environment = value;
                 ui.close();
             }
@@ -262,7 +262,7 @@ pub(super) fn environment_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     } else {
         ui.small(tr!(app, "render.studio_sky_help"));
         for (index, key) in [(0, "render.sky_zenith"), (1, "render.sky_horizon"), (2, "render.sky_ground")] {
-            let label = app.tr(key).to_string();
+            let label = app.tr_by_id(key).to_string();
             let gradient = &mut app.render_workspace.view.studio.gradient;
             let field = match index {
                 0 => &mut gradient.zenith,
@@ -313,7 +313,7 @@ pub(super) fn bloom_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     if enabled {
         for key in ["render.bloom_strength", "render.bloom_threshold", "render.bloom_radius"] {
-            let label = app.tr(key).to_string();
+            let label = app.tr_by_id(key).to_string();
             if let Some(bloom) = &mut app.render_workspace.view.studio.finishing.bloom {
                 let response = ui_kit::row(ui, &label, |ui| match key {
                     "render.bloom_strength" => ui_kit::number_field(ui, &mut bloom.strength, 0.0..=2.0, 0.01, ""),
@@ -336,7 +336,7 @@ pub(super) fn grading_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::section(ui, "render_post_filters", &title, false, |ui| {
         ui_kit::text(ui, tr!(app, "render.post_help"), ui_kit::Text::Note("render.post_help"));
         for (channel, key) in ["render.post_gain_r", "render.post_gain_g", "render.post_gain_b"].into_iter().enumerate() {
-            let label = app.tr(key).to_string();
+            let label = app.tr_by_id(key).to_string();
             let Some(value) = app.render_workspace.view.studio.finishing.rgb_gain.get_mut(channel) else {
                 continue;
             };
@@ -344,7 +344,7 @@ pub(super) fn grading_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::scenario::publish_target(key, r.rect);
         }
         for key in ["render.post_contrast", "render.post_saturation", "render.post_vignette"] {
-            let label = app.tr(key).to_string();
+            let label = app.tr_by_id(key).to_string();
             let finish = &mut app.render_workspace.view.studio.finishing;
             let (value, range) = match key {
                 "render.post_contrast" => (&mut finish.contrast, 0.25..=4.0),
@@ -412,10 +412,10 @@ pub(super) fn backdrop_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     ];
     let current = app.render_workspace.view.studio.backdrop.mode;
     let key = modes.iter().find(|(m, _)| *m == current).map_or("render.backdrop_vertical", |(_, key)| *key);
-    let label = app.tr(key).to_string();
+    let label = app.tr_by_id(key).to_string();
     let r = ui_kit::dropdown_menu(ui, "render_backdrop_mode", &label, |ui| {
         for (mode, key) in modes {
-            if ui_kit::list_picker(ui, key, app.tr(key), mode == current).clicked() {
+            if ui_kit::list_picker(ui, key, app.tr_by_id(key), mode == current).clicked() {
                 app.render_workspace.view.studio.backdrop.mode = mode;
                 ui.close();
             }
@@ -423,7 +423,7 @@ pub(super) fn backdrop_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     });
     crate::scenario::publish_target("render:backdrop-mode", r.rect);
     for (first, key) in [(true, "render.backdrop_first"), (false, "render.backdrop_second")] {
-        let label = app.tr(key).to_string();
+        let label = app.tr_by_id(key).to_string();
         ui.label(label);
         let backdrop = &mut app.render_workspace.view.studio.backdrop;
         let color = if first { &mut backdrop.first_srgb } else { &mut backdrop.second_srgb };
@@ -432,7 +432,7 @@ pub(super) fn backdrop_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     if current == BackdropMode::Radial {
         for (axis, key) in [(0, "render.backdrop_x"), (1, "render.backdrop_y")] {
-            let label = app.tr(key).to_string();
+            let label = app.tr_by_id(key).to_string();
             let Some(value) = app.render_workspace.view.studio.backdrop.center.get_mut(axis) else {
                 continue;
             };
@@ -450,7 +450,7 @@ pub(super) fn backdrop_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 pub(super) fn export_label(app: &SolveApp) -> &str {
-    app.tr(if app.render_workspace.view.studio.export_denoise_mask {
+    app.tr_by_id(if app.render_workspace.view.studio.export_denoise_mask {
         "render.denoise_export_mask"
     } else if app.render_workspace.view.studio.export_exr {
         "render.export_linear"

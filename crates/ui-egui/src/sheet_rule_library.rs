@@ -10,7 +10,7 @@
 use solidcraft_engine::doc::Document;
 use solidcraft_engine::doc::expr;
 use solidcraft_engine::doc::sheet_library::{self as library, BendMethod, PackRule, RulePack};
-use solidcraft_ui_text::tr;
+use solidcraft_ui_text::tr_by_id;
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
@@ -123,9 +123,9 @@ fn estimate(values: &mut [String], entry: &PackRule, doc: &Document, method: Ben
             *slot = format!("{k:.2}");
         }
         notes.push((
-            tr("sheet.library.k_estimate")
+            tr_by_id("sheet.library.k_estimate")
                 .replace("{k}", &format!("{k:.2}"))
-                .replace("{method}", tr(METHOD_KEYS.get(method_index(method)).copied().unwrap_or("")))
+                .replace("{method}", tr_by_id(METHOD_KEYS.get(method_index(method)).copied().unwrap_or("")))
                 .replace("{ratio}", &format!("{:.2}", r / thickness)),
             false,
         ));
@@ -134,7 +134,7 @@ fn estimate(values: &mut [String], entry: &PackRule, doc: &Document, method: Ben
         && r < min - 1e-9
     {
         let min = format!("{min:.2} mm");
-        notes.push((tr("sheet.library.under_minimum").replace("{material}", &entry.rule.material).replace("{min}", &min), true));
+        notes.push((tr_by_id("sheet.library.under_minimum").replace("{material}", &entry.rule.material).replace("{min}", &min), true));
     }
     notes
 }
@@ -155,7 +155,7 @@ fn picker(ui: &mut egui::Ui, id: &str, key: &str, display: &str, options: &[Stri
             }
         });
         response.widget_info(|| {
-            let mut info = egui::WidgetInfo::labeled(egui::Role::ComboBox, ui.is_enabled(), tr(key));
+            let mut info = egui::WidgetInfo::labeled(egui::Role::ComboBox, ui.is_enabled(), tr_by_id(key));
             info.current_text_value = Some(display.to_string());
             info
         });
@@ -186,7 +186,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, d: &mut Dialog, doc: &Document, can_export
             // Gauges or metric thicknesses: an inch design lists gauges first, any other metric.
             let inches = matches!(doc.units.trim(), "in" | "inch" | "ft");
             let series = state.series.unwrap_or(if inches { 0 } else { 1 });
-            let names: Vec<String> = SERIES_KEYS.iter().map(|k| tr(k).to_string()).collect();
+            let names: Vec<String> = SERIES_KEYS.iter().map(|k| tr_by_id(k).to_string()).collect();
             let mut chosen_series = None;
             picker(ui, "sheet_library_series", "sheet.library.series", names.get(series).map_or("", String::as_str), &names, &mut chosen_series);
             if let Some(index) = chosen_series {
@@ -207,7 +207,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, d: &mut Dialog, doc: &Document, can_export
                 state.picked.clone_from(&entry.rule.name);
                 state.notes = fill(sm, entry, doc, method);
             }
-            let methods: Vec<String> = METHOD_KEYS.iter().map(|k| tr(k).to_string()).collect();
+            let methods: Vec<String> = METHOD_KEYS.iter().map(|k| tr_by_id(k).to_string()).collect();
             let shown = methods.get(state.method).cloned().unwrap_or_default();
             let mut chosen = None;
             picker(ui, "sheet_library_method", "sheet.library.method", &shown, &methods, &mut chosen);
@@ -270,14 +270,14 @@ fn import(app: &mut SolveApp, path: &str) -> (String, bool) {
     };
     let rules: Vec<_> = read.pack.rules.iter().map(|r| r.rule.clone()).collect();
     let (added, left_out) = app.preferences.personal_sheet_rules.import(&rules);
-    let mut message = tr("sheet.library.imported").replace("{count}", &added.to_string());
+    let mut message = tr_by_id("sheet.library.imported").replace("{count}", &added.to_string());
     if !left_out.is_empty() {
         message.push(' ');
-        message.push_str(&tr("sheet.library.left_out").replace("{names}", &left_out.join(", ")));
+        message.push_str(&tr_by_id("sheet.library.left_out").replace("{names}", &left_out.join(", ")));
     }
     if !read.skipped.is_empty() {
         message.push(' ');
-        message.push_str(&tr("sheet.library.skipped").replace("{fields}", &read.skipped.join(", ")));
+        message.push_str(&tr_by_id("sheet.library.skipped").replace("{fields}", &read.skipped.join(", ")));
     }
     (message, false)
 }
@@ -287,16 +287,16 @@ fn export(app: &mut SolveApp, path: &str) -> (String, bool) {
     let count = rules.len();
     if count == 0 {
         // Every personal rule has values a newer version saved: nothing this version can write.
-        return (tr("sheet.library.export_newer").replace("{names}", &left_out.join(", ")), true);
+        return (tr_by_id("sheet.library.export_newer").replace("{names}", &left_out.join(", ")), true);
     }
     let pack = RulePack { rules: rules.into_iter().map(PackRule::of).collect(), ..RulePack::default() };
     let text = if path.to_lowercase().ends_with(".csv") { library::write_csv(&pack) } else { library::write_json(&pack) };
     match solidcraft_engine::io::vfs::write(path, text.as_bytes()) {
         Ok(()) => {
-            let mut message = tr("sheet.library.exported").replace("{count}", &count.to_string());
+            let mut message = tr_by_id("sheet.library.exported").replace("{count}", &count.to_string());
             if !left_out.is_empty() {
                 message.push(' ');
-                message.push_str(&tr("sheet.library.export_newer").replace("{names}", &left_out.join(", ")));
+                message.push_str(&tr_by_id("sheet.library.export_newer").replace("{names}", &left_out.join(", ")));
             }
             (message, false)
         }

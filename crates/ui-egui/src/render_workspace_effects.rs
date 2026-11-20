@@ -12,10 +12,10 @@ pub(super) struct View {
     pub(super) search: String,
 }
 pub(super) fn note(app: &SolveApp, ui: &mut egui::Ui, key: &'static str) {
-    ui_kit::text(ui, app.tr(key), ui_kit::Text::Note(key));
+    ui_kit::text(ui, app.tr_by_id(key), ui_kit::Text::Note(key));
 }
 pub(super) fn number(app: &SolveApp, ui: &mut egui::Ui, key: &str, value: &mut f64, range: std::ops::RangeInclusive<f64>, speed: f64, suffix: &str) {
-    let response = ui_kit::row(ui, app.tr(key), |ui| ui_kit::number_field(ui, value, range, speed, suffix));
+    let response = ui_kit::row(ui, app.tr_by_id(key), |ui| ui_kit::number_field(ui, value, range, speed, suffix));
     crate::scenario::publish_target(key, response.rect);
 }
 fn slider(app: &SolveApp, ui: &mut egui::Ui, key: &str, value: &mut f64, range: std::ops::RangeInclusive<f64>, speed: f64, suffix: &str) {
@@ -36,7 +36,7 @@ fn slider(app: &SolveApp, ui: &mut egui::Ui, key: &str, value: &mut f64, range: 
         _ => key,
     };
     let mut edited = if value.is_finite() { value.clamp(*range.start(), *range.end()) } else { *range.start() };
-    let response = ui_kit::row(ui, app.tr(label), |ui| {
+    let response = ui_kit::row(ui, app.tr_by_id(label), |ui| {
         if key == "render.chromatic_offset" {
             ui_kit::number_field(ui, &mut edited, range, speed, suffix)
         } else {
@@ -113,7 +113,7 @@ fn presentation_editor(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::section(ui, "render_creative_looks", &title, true, |ui| {
         let add = ui_kit::dropdown_menu(ui, "render_look_add", tr!(app, "render.look_add"), |ui| {
             for (index, kind) in LookKind::ALL.into_iter().enumerate() {
-                if ui_kit::list_picker(ui, &format!("look-add-{index}"), app.tr(kind.key()), false).clicked() {
+                if ui_kit::list_picker(ui, &format!("look-add-{index}"), app.tr_by_id(kind.key()), false).clicked() {
                     match finish.looks.push(LookLayer { kind, ..Default::default() }) {
                         Ok(()) => editor.selected_look = finish.looks.len() - 1,
                         Err(error) => app.set_status(error.to_string(), true),
@@ -137,7 +137,7 @@ fn presentation_editor(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         for index in 0..finish.looks.len() {
             if let Some(layer) = finish.looks.get(index) {
-                let label = format!("{} · {}", index + 1, app.tr(layer.kind.key()));
+                let label = format!("{} · {}", index + 1, app.tr_by_id(layer.kind.key()));
                 let response = ui_kit::list_picker(ui, &format!("look-layer-{index}"), &label, index == editor.selected_look);
                 crate::scenario::publish_target(&format!("render:look-layer:{index}"), response.rect);
                 if response.clicked() {

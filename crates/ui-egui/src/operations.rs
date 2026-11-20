@@ -763,7 +763,7 @@ mod tests {
         panel.finished.push(Finished { key: "f".into(), label: "f".into(), outcome: Outcome::Failed("no room".into()), at: 295.0 });
         panel.update(Vec::new(), 295.0 + FADE_MS);
         let failed = |panel: &Panel, at: f64| panel.rows(at).find(|(r, _)| r.key == "f").map(|(r, alpha)| (r.steps, r.status(), alpha));
-        let says = Some(solidcraft_ui_text::tr("operations.failed").to_string());
+        let says = Some(solidcraft_ui_text::tr_by_id("operations.failed").to_string());
         assert_eq!(failed(&panel, 295.0 + FADE_MS + FAILED_MS - 1.0), Some((Some((2, 5)), says, 1.0)), "shown in full while it holds");
         panel.update(Vec::new(), 300.0 + 2.0 * FADE_MS + FAILED_MS);
         assert!(failed(&panel, 300.0 + 2.0 * FADE_MS + FAILED_MS).is_none(), "then gone");
@@ -780,7 +780,7 @@ mod tests {
         let (b, _) = panel.rows(310.0 + FADE_MS).next().unwrap();
         assert_eq!(
             (b.steps, &b.ended, b.status()),
-            (Some((3, 9)), &Some(Outcome::Cancelled), Some(solidcraft_ui_text::tr("operations.stopped").to_string()))
+            (Some((3, 9)), &Some(Outcome::Cancelled), Some(solidcraft_ui_text::tr_by_id("operations.stopped").to_string()))
         );
         panel.update(Vec::new(), 400.0 + 2.0 * FADE_MS);
         assert!(panel.is_empty());
@@ -877,7 +877,7 @@ mod tests {
             .find(|(r, _)| r.key == key)
             .map(|(r, _)| r.clone())
             .expect("its row stays a while");
-        assert_eq!(row.status(), Some(solidcraft_ui_text::tr("operations.failed").to_string()));
+        assert_eq!(row.status(), Some(solidcraft_ui_text::tr_by_id("operations.failed").to_string()));
         // Done within the app's wait (never a row): not listed.
         h.app.apply_off_thread = Some(std::time::Duration::from_secs(60));
         h.app.run_heavy("edit.undo", json!({})).unwrap();

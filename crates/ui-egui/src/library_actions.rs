@@ -52,7 +52,7 @@ pub(super) fn context_menu(app: &mut SolveApp, ui: &egui::Ui, response: &egui::R
                     ui.set_min_width(140.0);
                     let current = app.library.highlights.get(&entry.path).copied();
                     for choice in std::iter::once(None).chain(Highlight::ALL.into_iter().map(Some)) {
-                        let label = app.tr(choice.map(Highlight::label).unwrap_or("library.highlight_none"));
+                        let label = app.tr_by_id(choice.map(Highlight::label).unwrap_or("library.highlight_none"));
                         let response = crate::ui_kit::list_picker(ui, label, label, current == choice);
                         if let Some(color) = choice {
                             let rect = response.rect;
@@ -420,7 +420,7 @@ mod tests {
             assert!(highlight_y < h.widget("Show in Folder").unwrap()[1]);
             h.step(&json!({"widget":"Highlight"})).unwrap();
             h.frames(3);
-            let label = solidcraft_ui_text::tr(choice.map(Highlight::label).unwrap_or("library.highlight_none"));
+            let label = solidcraft_ui_text::tr_by_id(choice.map(Highlight::label).unwrap_or("library.highlight_none"));
             assert!(h.widget(label).is_some(), "submenu must show {label}");
             h.step(&json!({"widget":label})).unwrap();
             h.frames(3);

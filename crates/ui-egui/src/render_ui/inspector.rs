@@ -171,5 +171,5 @@ fn title(app: &SolveApp, selection: &RenderSelection) -> (String, &'static str) 
         RenderSelection::Effects => ("render.page_effects", "camera"),
         RenderSelection::Check => ("render.children.check", "inspect"),
     };
-    (app.tr(key).to_owned(), icon)
+    (app.tr_by_id(key).to_owned(), icon)
 }

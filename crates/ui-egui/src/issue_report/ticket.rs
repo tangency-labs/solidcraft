@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use egui::{ColorImage, Id, Ui, vec2};
 use serde_json::{Value, json};
-use solidcraft_ui_text::tr;
+use solidcraft_ui_text::tr_by_id;
 
 use super::Draft;
 use crate::tickets::{self, Outcome, api, payload};
@@ -481,7 +481,7 @@ pub fn new_ticket(app: &mut SolveApp, draft: &Draft, ctx: Option<&egui::Context>
 }
 
 fn heading(ui: &mut Ui, id: &str) {
-    ui_kit::text(ui, tr(id), ui_kit::Text::Heading(id));
+    ui_kit::text(ui, tr_by_id(id), ui_kit::Text::Heading(id));
 }
 
 fn note(ui: &mut Ui, id: &str, text: &str) {
@@ -489,7 +489,7 @@ fn note(ui: &mut Ui, id: &str, text: &str) {
 }
 
 fn check(ui: &mut Ui, id: &str, value: &mut bool) {
-    let r = ui_kit::checkbox(ui, tr(id), value);
+    let r = ui_kit::checkbox(ui, tr_by_id(id), value);
     crate::scenario::publish_target(&format!("report:{id}"), r.rect);
 }
 
@@ -507,7 +507,7 @@ fn model_box(ticket: &mut TicketDraft, ui: &mut Ui) {
     let Some((name, bytes)) = ticket.evidence.design.clone() else {
         // Said rather than attaching the design open now, which is not the one it is about.
         if let Some(id) = ticket.evidence.design_from {
-            note(ui, "report.design_from", tr(id));
+            note(ui, "report.design_from", tr_by_id(id));
         }
         return;
     };
@@ -515,7 +515,7 @@ fn model_box(ticket: &mut TicketDraft, ui: &mut Ui) {
     note(ui, "report.design_note", tr!("report.design_note"));
     note(ui, "report.design_file", &tr!("report.design_file", name = &name, size = &payload::size_text(bytes.len())));
     if let Some(id) = ticket.evidence.design_from {
-        note(ui, "report.design_from", tr(id));
+        note(ui, "report.design_from", tr_by_id(id));
     }
     if !ticket.ticks.design {
         if ticket.from_failure {

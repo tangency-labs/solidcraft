@@ -50,7 +50,7 @@ pub(super) fn adaptive_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
                 "render.adaptive_absolute" => "render.children.absolute_floor",
                 _ => "render.children.coverage_error",
             };
-            let response = ui_kit::row(ui, app.tr(label), |ui| match key {
+            let response = ui_kit::row(ui, app.tr_by_id(label), |ui| match key {
                 "render.adaptive_pilots" => ui_kit::number_field_preserving(ui, &mut options.pilot_samples, 16..=MAX_PILOT_SAMPLES, 1.0, ""),
                 "render.adaptive_minimum" => {
                     ui_kit::number_field_preserving(ui, &mut options.min_samples, 16..=super::quality::MAX_UI_SAMPLES, 1.0, "")

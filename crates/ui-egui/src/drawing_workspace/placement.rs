@@ -98,11 +98,11 @@ impl Placement {
     }
 
     pub(super) fn fields(&mut self, ui: &mut egui::Ui, source: &str) {
-        use solidcraft_ui_text::tr;
+        use solidcraft_ui_text::tr_by_id;
         ui_kit::section_heading(ui, tr!("ui.drawing_panel.orientation"));
         ui_kit::text(
             ui,
-            tr(if self.parent.is_some() { "ui.drawing_placement.projected" } else { "ui.drawing_placement.base" }),
+            tr_by_id(if self.parent.is_some() { "ui.drawing_placement.projected" } else { "ui.drawing_placement.base" }),
             ui_kit::Text::Note("drawing_placement"),
         );
         if self.parent.is_none() {
@@ -112,7 +112,7 @@ impl Placement {
             ui.horizontal_wrapped(|ui| {
                 for (index, (orientation, label)) in ORIENTATIONS.iter().enumerate() {
                     let style = if index == self.orientation { ui_kit::Button::SmallSelected } else { ui_kit::Button::Small };
-                    let response = ui_kit::button(ui, tr(label), style);
+                    let response = ui_kit::button(ui, tr_by_id(label), style);
                     crate::scenario::publish_target(&format!("drawing:placement:orientation:{orientation}"), response.rect);
                     if response.clicked() {
                         self.orientation = index;
@@ -127,7 +127,7 @@ impl Placement {
                 ui_kit::choice_row(ui, tr!("ui.drawing_panel.model"), "base_view_model", &mut 0, &[source]);
             });
             ui_kit::choice_row(ui, tr!("ui.scale"), "base_view_scale", &mut self.scale, &SCALES);
-            let styles = ["ui.drawing_panel.visible", "ui.drawing_panel.hidden"].map(tr);
+            let styles = ["ui.drawing_panel.visible", "ui.drawing_panel.hidden"].map(tr_by_id);
             ui_kit::choice_row(ui, tr!("ui.drawing_panel.visual_style"), "base_view_style", &mut self.style, &styles);
         });
         if self.parent.is_none() {

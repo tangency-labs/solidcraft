@@ -275,7 +275,7 @@ pub(super) fn open_sources(app: &mut SolveApp) {
 }
 
 fn note(app: &SolveApp, ui: &mut egui::Ui, key: &str) {
-    ui_kit::text(ui, app.tr(key), ui_kit::Text::Note(key));
+    ui_kit::text(ui, app.tr_by_id(key), ui_kit::Text::Note(key));
 }
 
 pub(super) fn persist(app: &mut SolveApp) {
@@ -331,7 +331,7 @@ fn source(app: &mut SolveApp, ui: &mut egui::Ui) {
             let name = source_name(app, ui.ctx());
             ui_kit::banner(ui, ui_kit::AssistantTone::Neutral, |ui| {
                 ui_kit::text(ui, &name, ui_kit::Text::NameCell(true));
-                let kind = app.tr(if gpu { "render.environment.builtin" } else { "render.environment.hdr_file" });
+                let kind = app.tr_by_id(if gpu { "render.environment.builtin" } else { "render.environment.hdr_file" });
                 let detail = hdr::metadata(app, target).map_or_else(|| kind.to_string(), |info| format!("{kind} · {} × {}", info.width, info.height));
                 ui_kit::text(ui, &detail, ui_kit::Text::Inline);
                 note(app, ui, "render.environment.embedded");
@@ -347,11 +347,14 @@ fn source(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
 
                 ui.add_enabled_ui(method != ImageMethod::Raster, |ui| {
-                    let picker =
-                        ui_kit::dropdown_menu(ui, "render_environment_source_kind", app.tr(keys.get(selected).copied().unwrap_or(keys[0])), |ui| {
+                    let picker = ui_kit::dropdown_menu(
+                        ui,
+                        "render_environment_source_kind",
+                        app.tr_by_id(keys.get(selected).copied().unwrap_or(keys[0])),
+                        |ui| {
                             for (index, key) in keys.iter().enumerate() {
                                 let allowed = gpu || index != 4 || app.render_workspace.view.raytrace.path.is_some();
-                                let item = ui.add_enabled_ui(allowed, |ui| ui_kit::list_picker(ui, key, app.tr(key), index == selected)).inner;
+                                let item = ui.add_enabled_ui(allowed, |ui| ui_kit::list_picker(ui, key, app.tr_by_id(key), index == selected)).inner;
                                 crate::scenario::publish_target(&format!("render:environment:source:{index}"), item.rect);
                                 let item = if allowed { item } else { item.backing_on_hover_text(tr!(app, "render.cpu_celestial_path_required")) };
                                 if item.clicked() {
@@ -383,7 +386,8 @@ fn source(app: &mut SolveApp, ui: &mut egui::Ui) {
                                     ui.close();
                                 }
                             }
-                        });
+                        },
+                    );
                     crate::scenario::publish_target("render:environment:source", picker.rect);
                 });
             });
@@ -400,7 +404,7 @@ fn source(app: &mut SolveApp, ui: &mut egui::Ui) {
                     _ => gradient.ground,
                 }
                 .map(f64::from);
-                if ui_kit::row(ui, app.tr(key), |ui| ui_kit::linear_color_field(ui, &mut value, 1e6)).changed() {
+                if ui_kit::row(ui, app.tr_by_id(key), |ui| ui_kit::linear_color_field(ui, &mut value, 1e6)).changed() {
                     let gradient = if gpu { &mut app.render_workspace.view.studio.gradient } else { &mut app.render_workspace.view.cpu.gradient };
                     let field = match index {
                         0 => &mut gradient.zenith,
@@ -687,7 +691,9 @@ fn backdrop(app: &mut SolveApp, ui: &mut egui::Ui) {
                     _ => BackdropMode::Vertical,
                 };
                 for (key, value) in [("render.environment.start", &mut gradient.first_srgb), ("render.environment.end", &mut gradient.second_srgb)] {
-                    if let Some(color) = edit(app, ui, key, *value, |ui, value| ui_kit::row(ui, app.tr(key), |ui| ui_kit::color_field(ui, value))) {
+                    if let Some(color) =
+                        edit(app, ui, key, *value, |ui, value| ui_kit::row(ui, app.tr_by_id(key), |ui| ui_kit::color_field(ui, value)))
+                    {
                         *value = color;
                         changed = true;
                     }
@@ -696,7 +702,7 @@ fn backdrop(app: &mut SolveApp, ui: &mut egui::Ui) {
                     for (index, key) in [(0, "render.backdrop_x"), (1, "render.backdrop_y")] {
                         if let Some(value) = gradient.center.get_mut(index)
                             && let Some(number) = edit(app, ui, key, *value, |ui, value| {
-                                ui_kit::row(ui, app.tr(key), |ui| ui_kit::number_field(ui, value, 0.0..=1.0, 0.01, ""))
+                                ui_kit::row(ui, app.tr_by_id(key), |ui| ui_kit::number_field(ui, value, 0.0..=1.0, 0.01, ""))
                             })
                         {
                             *value = number;
@@ -860,7 +866,7 @@ fn ground(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ("render.environment.margin", &mut form.value.margin, 0.0..=10.0, 0.05, "×"),
                 ("render.environment.gap", &mut form.value.gap, 0.0001..=1000.0, 0.01, " mm"),
             ] {
-                ui_kit::row(ui, app.tr(key), |ui| ui_kit::number_field(ui, value, range, speed, unit));
+                ui_kit::row(ui, app.tr_by_id(key), |ui| ui_kit::number_field(ui, value, range, speed, unit));
             }
             vector_row(ui, tr!(app, "render.environment.reflectance"), &mut form.value.color, 0.0..=1.0, 0.01, "");
             ui_kit::checkbox(ui, tr!(app, "render.environment.replace"), &mut form.replace);
@@ -881,7 +887,7 @@ fn ground(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             ui.horizontal(|ui| {
                 for (kind, key) in [("floor_wall", "render.environment.floor_wall"), ("cyclorama", "render.environment.cyclorama")] {
-                    if ui_kit::button(ui, app.tr(key), ui_kit::Button::Enabled(ready)).clicked()
+                    if ui_kit::button(ui, app.tr_by_id(key), ui_kit::Button::Enabled(ready)).clicked()
                         && let Ok(set) = &snapshot
                     {
                         let request = json!({"name":app.render_workspace.view.name,"set":set,"kind":kind,"expected_revision":app.session.revision,
@@ -1043,7 +1049,7 @@ fn volume_vector_row(
 ) -> Option<[f64; 3]> {
     let mut value = current;
     let mut changed = false;
-    ui_kit::row(ui, app.tr(key), |ui| {
+    ui_kit::row(ui, app.tr_by_id(key), |ui| {
         ui.columns(3, |columns| {
             for (index, (ui, component)) in columns.iter_mut().zip(current).enumerate() {
                 let width = ui.available_width().max(0.0);

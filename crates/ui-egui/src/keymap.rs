@@ -749,7 +749,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             if app.keymap.capturing.is_some() {
                 let hint = ctx.input(|input| app.keymap.recorder.hint(input));
-                ui_kit::text(ui, app.tr(hint), ui_kit::Text::Hint("shortcut_capture_state"));
+                ui_kit::text(ui, app.tr_by_id(hint), ui_kit::Text::Hint("shortcut_capture_state"));
             }
         }
         let q = if filtering { app.prefs_window.shell.filter.trim().to_lowercase() } else { app.keymap.filter.to_lowercase() };
@@ -804,7 +804,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
                 if app.keymap.capturing.is_some() {
                     let hint = ctx.input(|input| app.keymap.recorder.hint(input));
-                    ui_kit::text(ui, app.tr(hint), ui_kit::Text::Hint("shortcut_capture_state"));
+                    ui_kit::text(ui, app.tr_by_id(hint), ui_kit::Text::Hint("shortcut_capture_state"));
                 }
             }
             if count == 0 {
@@ -1408,7 +1408,7 @@ mod tests {
         h.call("ui.key", json!({"key":"SuperLeft","pressed":false,"shift":true}));
         assert!(h.widget("Shift+…").is_some(), "remove released modifiers before an ordinary key");
         h.call("ui.key", json!({"key":"ShiftLeft","pressed":false}));
-        assert!(h.widget(h.app.tr("prefs.shortcuts_press")).is_some(), "the empty recorder explains the next step");
+        assert!(h.widget(h.app.tr_by_id("prefs.shortcuts_press")).is_some(), "the empty recorder explains the next step");
         assert_eq!(effective(&h.app, "solid.chamfer"), None);
         h.call("ui.key", json!({"key":"ShiftRight","pressed":true,"shift":true}));
         h.call("ui.key", json!({"key":"C","pressed":true,"shift":true}));
@@ -1908,7 +1908,7 @@ mod tests {
         // Nothing was started yet: Repeat says so and starts nothing.
         h.step(&json!({"key": "R", "shift": true})).unwrap();
         assert!(h.app.dialog.is_none() && h.app.tool.is_none());
-        assert_eq!(h.app.status.as_ref().map(|s| s.0.as_str()), Some(h.app.tr("ui.repeat_nothing")));
+        assert_eq!(h.app.status.as_ref().map(|s| s.0.as_str()), Some(h.app.tr_by_id("ui.repeat_nothing")));
         h.step(&json!({"start": "solid.box"})).unwrap();
         h.frames(2);
         assert!(h.app.dialog.is_some(), "Box opens its dialog");

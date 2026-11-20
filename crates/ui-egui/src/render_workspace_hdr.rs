@@ -218,7 +218,7 @@ pub(super) fn controls(app: &mut SolveApp, ui: &mut egui::Ui, target: Target) {
         } else {
             "render.hdr_primaries_undeclared"
         };
-        ui_kit::text(ui, app.tr(primaries), ui_kit::Text::Note(primaries));
+        ui_kit::text(ui, app.tr_by_id(primaries), ui_kit::Text::Note(primaries));
         let title = tr!(app, "render.hdr_details").to_string();
         ui_kit::section(ui, "hdr_source_details", &title, false, |ui| {
             ui_kit::text(ui, &format!("SHA-256: {}", metadata.sha256), ui_kit::Text::Inline);

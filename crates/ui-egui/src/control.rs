@@ -861,7 +861,7 @@ fn ui_blur(app: &mut SolveApp, ctx: &egui::Context, p: &Value) -> Outcome {
         ctx.request_repaint();
     }
     let availability = crate::prefs::blur_availability(app);
-    let reason = crate::prefs::theme_option_reason(availability).map(|reason| app.tr(reason));
+    let reason = crate::prefs::theme_option_reason(availability).map(|reason| app.tr_by_id(reason));
     ok(
         json!({"radius_px":app.blur.radius(), "max_radius_px":60, "capability":app.blur.capability_for(ctx.viewport_id()), "counters":app.blur.counters(),
             "available": availability == crate::theme_options::Availability::Available, "reason": reason,
@@ -2254,7 +2254,7 @@ pub(crate) mod tests {
             assert_eq!(interactive.enabled, enabled);
             assert_eq!(row["enabled"], enabled);
             assert_eq!(row["disabled_reason"], json!(interactive.disabled_reason));
-            assert_eq!(row["disabled_reason"], json!(reason_key.map(|key| app.tr(key))), "each context reports its exact localized refusal");
+            assert_eq!(row["disabled_reason"], json!(reason_key.map(|key| app.tr_by_id(key))), "each context reports its exact localized refusal");
             assert_eq!(crate::panel_runtime::inspect_host_specimen(app).unwrap(), before);
             assert!(std::sync::Arc::ptr_eq(&document, &app.session.doc));
             assert!(std::sync::Arc::ptr_eq(&model, &app.session.model.state()));

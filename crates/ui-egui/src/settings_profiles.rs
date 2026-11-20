@@ -728,8 +728,11 @@ pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ui.horizontal_wrapped(|ui| {
                         ui.spacing_mut().item_spacing = egui::vec2(t.space_6, t.space_6);
                         for (index, (chip, icon)) in chips.iter().enumerate() {
-                            let response =
-                                ui_kit::settings_chip(ui, app.tr(chip), ui_kit::SettingsChip { icon: Some(icon), accent, ..Default::default() });
+                            let response = ui_kit::settings_chip(
+                                ui,
+                                app.tr_by_id(chip),
+                                ui_kit::SettingsChip { icon: Some(icon), accent, ..Default::default() },
+                            );
                             if index == 0 {
                                 crate::scenario::publish_rect(&format!("prefs:profiles:{key}:first_chip"), response.rect);
                             }

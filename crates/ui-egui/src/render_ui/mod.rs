@@ -36,7 +36,7 @@ pub(crate) fn stage_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     use crate::render_workspace::Stage;
     crate::scenario::publish_rect("render:stage_bar", rect);
     ui.ctx().data_mut(|d| d.remove::<Rect>(egui::Id::unique("sc_ribbon_search")));
-    let labels: Vec<_> = Stage::ALL.iter().map(|stage| app.tr(stage.label()).to_string()).collect();
+    let labels: Vec<_> = Stage::ALL.iter().map(|stage| app.tr_by_id(stage.label()).to_string()).collect();
     let selected = Stage::ALL.iter().position(|s| *s == app.render_workspace.view.stage).unwrap_or(0);
     let ready = [crate::render_workspace::job_ready(app, "render.start"), crate::render_workspace::job_ready(app, "render.cancel")];
     let actions = [
@@ -127,7 +127,7 @@ fn stage_tools(app: &mut SolveApp, ui: &mut egui::Ui) {
             {
                 if let Some(command) = solidcraft_engine::find_command(id) {
                     let info = crate::render_workspace::interactive_command_info(app, command);
-                    let response = ui_kit::compact_icon_label_button(ui, app.tr(label), icon, info.enabled);
+                    let response = ui_kit::compact_icon_label_button(ui, app.tr_by_id(label), icon, info.enabled);
                     crate::scenario::publish_target(&format!("render:stage:{id}"), response.rect);
                     let hint = crate::keymap::display_for(app, id)
                         .map_or_else(|| app.tr_label(command.label).to_string(), |key| format!("{} ({key})", app.tr_label(command.label)));
@@ -146,7 +146,7 @@ fn stage_tools(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let (label, help) = crate::render_workspace::live::source_note(app);
                 let t = Tokens::get();
                 let available = (ui.available_width() - (t.control_height - t.space_2) - ui.spacing().item_spacing.x).max(0.0);
-                let note = ui_kit::StageBar::note_bounded(ui, &label, available).backing_on_hover_text(format!("{label}\n\n{}", app.tr(help)));
+                let note = ui_kit::StageBar::note_bounded(ui, &label, available).backing_on_hover_text(format!("{label}\n\n{}", app.tr_by_id(help)));
                 crate::scenario::publish_rect("render:preview_note", note.rect);
             }
             if ui_kit::StageBar::icon_action(ui, "camera", tr!(app, "render.preview_image_settings_help")).clicked() {

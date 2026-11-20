@@ -180,7 +180,7 @@ pub(crate) fn continuity_row_explained(
 
 /// The hover text of a continuity choice: each order's own line, which names its code.
 pub(crate) fn continuity_tip(allowed: &[Continuity]) -> String {
-    allowed.iter().map(|g| solidcraft_ui_text::tr(g.tip_id())).collect::<Vec<_>>().join("\n")
+    allowed.iter().map(|g| solidcraft_ui_text::tr_by_id(g.tip_id())).collect::<Vec<_>>().join("\n")
 }
 
 /// What each dialog's continuity rows offer: the orders its construction builds, from the

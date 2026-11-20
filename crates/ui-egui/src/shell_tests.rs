@@ -465,7 +465,7 @@ fn actual_tabs_preset_raw_widget_drag_retains_the_inactive_editor_identity_and_d
         let source_id = SectionId::new("specimen-section-0").unwrap();
         let destination_id = SectionId::new("specimen-section-1").unwrap();
         let body = h.app.universal_panel_frame().unwrap().layout.sections.iter().find(|section| section.instance == editor).unwrap().body.unwrap();
-        let draft_label = h.app.tr("ui.panel_fixture.draft").to_string();
+        let draft_label = h.app.tr_by_id("ui.panel_fixture.draft").to_string();
         let mut edit_at = None;
         for _ in 0..8 {
             let nodes = &h.output.accesskit_update.as_ref().unwrap().nodes;

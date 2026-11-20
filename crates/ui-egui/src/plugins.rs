@@ -659,7 +659,7 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
 /// What was approved at install for `plugin`'s current package, in plain words: command groups,
 /// folders with their access, and memory. Grants made for another version count for nothing.
 pub(crate) fn approved_text(app: &SolveApp, plugin: &Plugin) -> String {
-    use solidcraft_ui_text::tr;
+    use solidcraft_ui_text::tr_by_id;
     let Some(grants) = app.session.plugin_state.grants.get(&plugin.id).filter(|g| g.package_hash.as_deref() == Some(plugin.approval.as_str())) else {
         return tr!("prefs.plugin_approved_nothing").to_string();
     };
@@ -667,12 +667,12 @@ pub(crate) fn approved_text(app: &SolveApp, plugin: &Plugin) -> String {
         .command_groups
         .iter()
         .map(|group| match group.as_str() {
-            "app" | "doc" | "file" | "plugin" => tr(&std::format!("prefs.plugin_group_short_{group}")).to_string(),
+            "app" | "doc" | "file" | "plugin" => tr_by_id(&std::format!("prefs.plugin_group_short_{group}")).to_string(),
             other => other.to_string(),
         })
         .collect();
     for folder in &grants.folders {
-        let access = tr(match (folder.read, folder.write) {
+        let access = tr_by_id(match (folder.read, folder.write) {
             (true, true) => "prefs.plugin_folder_read_write",
             (false, true) => "prefs.plugin_folder_write",
             _ => "prefs.plugin_folder_read",

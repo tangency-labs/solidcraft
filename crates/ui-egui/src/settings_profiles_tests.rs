@@ -1072,7 +1072,7 @@ fn profile_sidebar_switches_saves_and_marks_edits_with_existing_commands() {
     assert_eq!(saved["profile"]["preferences"]["direct_interaction"], true);
     h.step(&json!({"click":{"handle":"prefs:profile"}})).unwrap();
     h.frames(2);
-    let profiles_label = h.app.tr("prefs.profiles").to_string();
+    let profiles_label = h.app.tr_by_id("prefs.profiles").to_string();
     h.step(&json!({"widget":profiles_label})).unwrap();
     h.frames(3);
     assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_GENERAL);

@@ -15,7 +15,7 @@ use solidcraft_engine::{Sel, Session};
 use crate::dialogs::{Dialog, Kind, combo, edge_sel, face_sel, form_row, object_point, plane_sel, put, set_object_accepting};
 use crate::selection::{Accept, EDGES, FACES, PLANES, SelInput};
 use crate::ui_kit::{choice_row, expr_row, hint_row, text_row};
-use solidcraft_ui_text::tr;
+use solidcraft_ui_text::tr_by_id;
 
 /// Common metric pitch presets besides the coarse one, not an exhaustive catalogue of standard
 /// diameter/pitch pairs; the current pitch is included separately, custom pairs remain editable.
@@ -499,7 +499,7 @@ pub(crate) fn rows(
             enter |= hint_row(ui, "Chamfer Angle", &mut o.chamfer_angle, tr!("ui.iso_4753"));
             // ISO 4753's depth is for ISO metric threads; the other forms give theirs.
             let depth = if f == ThreadForm::Metric { "ui.iso_4753" } else { "thread.chamfer_depth_needed" };
-            enter |= hint_row(ui, "Chamfer Depth", &mut o.chamfer_depth, tr(depth));
+            enter |= hint_row(ui, "Chamfer Depth", &mut o.chamfer_depth, tr_by_id(depth));
         }
         enter |= end_rows(ui, &mut o.ease_out);
     });

@@ -2262,7 +2262,7 @@ fn sketches_to_parts(app: &mut SolveApp, p: Value) {
     let mut why: Vec<String> = Vec::new();
     for kept in out.get("kept").and_then(Value::as_array).into_iter().flatten() {
         let code = kept.get("code").and_then(Value::as_str).unwrap_or_default();
-        let reason = solidcraft_ui_text::tr(&format!("browser.sketches_to_parts_{code}")).to_string();
+        let reason = solidcraft_ui_text::tr_by_id(&format!("browser.sketches_to_parts_{code}")).to_string();
         if !why.contains(&reason) {
             why.push(reason);
         }

@@ -105,7 +105,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let window = window.placed(pivot, at);
     let (closed, action) = window.show(ctx, true, |ui| {
         for (i, k) in keys(Owner::Design).enumerate() {
-            let (key, label) = (k.name, solidcraft_ui_text::tr(k.label));
+            let (key, label) = (k.name, solidcraft_ui_text::tr_by_id(k.label));
             let Some(field) = d.fields.get_mut(i) else { continue };
             if key == DESCRIPTION {
                 ui_kit::multiline_text_field(ui, label, egui::Id::unique(("sc_design_properties", key)), field);
@@ -351,7 +351,7 @@ fn inertia_rows(app: &SolveApp, total: &Value) -> Vec<(String, Vec<String>)> {
     let mut rows: Vec<(String, Vec<String>)> = ["x", "y", "z"]
         .iter()
         .zip(i)
-        .map(|(axis, r)| (app.tr(&format!("ui.properties.inertia_{axis}")).to_string(), r.map(|x| number_text(app, x)).to_vec()))
+        .map(|(axis, r)| (app.tr_by_id(&format!("ui.properties.inertia_{axis}")).to_string(), r.map(|x| number_text(app, x)).to_vec()))
         .collect();
     if let Some(moments) = total["principal_moments_g_mm2"].as_array() {
         let moments = moments.iter().map(|m| number_text(app, m.as_f64().unwrap_or(f64::NAN) * k * k)).collect();

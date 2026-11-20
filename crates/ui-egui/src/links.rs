@@ -98,12 +98,12 @@ pub fn pills(app: &SolveApp, wide: bool) -> Vec<solidcraft_ui_kit::app_bar::Pill
         .map(|l| solidcraft_ui_kit::app_bar::Pill {
             id: l.id,
             icon: l.icon,
-            label: if l.named { solidcraft_ui_text::tr(l.button) } else { "" },
+            label: if l.named { solidcraft_ui_text::tr_by_id(l.button) } else { "" },
             labelled: l.named && wide,
-            tip: solidcraft_ui_text::tr(l.tip),
-            hide_tip: solidcraft_ui_text::tr(l.hide_tip),
-            name: solidcraft_ui_text::tr(l.name),
-            hide_name: solidcraft_ui_text::tr(l.hide_name),
+            tip: solidcraft_ui_text::tr_by_id(l.tip),
+            hide_tip: solidcraft_ui_text::tr_by_id(l.hide_tip),
+            name: solidcraft_ui_text::tr_by_id(l.name),
+            hide_name: solidcraft_ui_text::tr_by_id(l.hide_name),
             fill: l.fill,
             ink: egui::Color32::WHITE,
         })
@@ -143,7 +143,7 @@ mod tests {
         crate::i18n::install();
         for link in LINKS {
             for id in [link.menu, link.button, link.label, link.tip, link.hide_tip, link.name, link.hide_name] {
-                assert_ne!(solidcraft_ui_text::tr(id), id, "{id} has no English text");
+                assert_ne!(solidcraft_ui_text::tr_by_id(id), id, "{id} has no English text");
             }
             assert!(solidcraft_look::icons::SET.has_master(link.icon), "{}", link.icon);
         }

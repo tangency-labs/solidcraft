@@ -118,7 +118,7 @@ fn guides(app: &mut SolveApp, ui: &mut egui::Ui, editor: bool) {
         ("safe_area", "render.frame_safe_area", current.safe_area),
         ("centre_mark", "render.frame_centre_mark", current.centre_mark),
     ] {
-        let response = ui_kit::checkbox(ui, app.tr(label), &mut checked);
+        let response = ui_kit::checkbox(ui, app.tr_by_id(label), &mut checked);
         crate::scenario::publish_target(&format!("render:{}:{key}", if editor { "shot" } else { "frame" }), response.rect);
         if response.changed() {
             let _ = app.run("view.render_frame", json!({key:checked}));
@@ -219,7 +219,7 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, shot: &str) {
             result(app, action);
         }
         for (id, icon, label, danger) in [("duplicate", "copy", "render.frame_duplicate", false), ("remove", "delete", "render.shot_remove", true)] {
-            let response = ui_kit::icon_action(ui, app.tr(label), icon, true, danger);
+            let response = ui_kit::icon_action(ui, app.tr_by_id(label), icon, true, danger);
             crate::scenario::publish_target(&format!("render:shot:{id}"), response.rect);
             if response.clicked() {
                 if danger {
@@ -241,7 +241,7 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, shot: &str) {
     ui_kit::section(ui, "render_shot_frame", &title, true, |ui| {
         let index = aspect_index(app, &saved);
         let mut chosen = None;
-        let labels: Vec<_> = ASPECTS.iter().map(|(_, _, _, key)| app.tr(key).to_string()).collect();
+        let labels: Vec<_> = ASPECTS.iter().map(|(_, _, _, key)| app.tr_by_id(key).to_string()).collect();
         ui_kit::row(ui, tr!(app, "render.frame_aspect"), |ui| {
             let response = ui_kit::dropdown_menu(ui, "render_shot_aspect", labels.get(index).map(String::as_str).unwrap_or_default(), |ui| {
                 for (choice, label) in labels.iter().enumerate() {
@@ -323,7 +323,8 @@ fn camera(app: &mut SolveApp, ui: &mut egui::Ui, shot: &str) {
     camera.target = solidcore_record::Vec3::new(target[0], target[1], target[2]);
     for (key, value) in [("camera.shot_yaw", &mut camera.yaw), ("camera.shot_pitch", &mut camera.pitch), ("camera.shot_roll", &mut camera.roll)] {
         let mut degrees = value.to_degrees();
-        if ui_kit::row(ui, app.tr(key), |ui| ui_kit::number_field(ui, &mut degrees, (-1e6f64).to_degrees()..=1e6f64.to_degrees(), 0.5, "°")).changed()
+        if ui_kit::row(ui, app.tr_by_id(key), |ui| ui_kit::number_field(ui, &mut degrees, (-1e6f64).to_degrees()..=1e6f64.to_degrees(), 0.5, "°"))
+            .changed()
         {
             *value = degrees.to_radians();
         }
@@ -460,7 +461,7 @@ fn lens(app: &mut SolveApp, ui: &mut egui::Ui, shot: &str, saved: &RenderSetup) 
         None
     };
     if let Some(key) = reason {
-        ui_kit::text(ui, app.tr(key), ui_kit::Text::Note(key));
+        ui_kit::text(ui, app.tr_by_id(key), ui_kit::Text::Note(key));
     }
     if changed {
         let action = set_lens(app, shot, on.then_some(value));

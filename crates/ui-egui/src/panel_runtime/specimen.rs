@@ -350,7 +350,7 @@ impl PanelController for VisibleSpecimen {
     fn presentation(&self) -> PanelPresentation {
         let snapshot = self.probe.state(&self.key).ok();
         PanelPresentation {
-            title: tr!("ui.panel_fixture.title", title = solidcraft_ui_text::tr(self.title_key), id = &self.key.instance.0),
+            title: tr!("ui.panel_fixture.title", title = solidcraft_ui_text::tr_by_id(self.title_key), id = &self.key.instance.0),
             icon: "list".into(),
             status: snapshot.map(|state| tr!("ui.panel_fixture.updates", count = &state.updates.to_string())),
             attention: self.editor,
@@ -360,7 +360,7 @@ impl PanelController for VisibleSpecimen {
                     .map(|(id, key)| RuntimeAction {
                         pressed: None,
                         id: ControlId(id.into()),
-                        label: solidcraft_ui_text::tr(key).into(),
+                        label: solidcraft_ui_text::tr_by_id(key).into(),
                         enabled: true,
                         disabled_reason: None,
                     })
@@ -432,7 +432,7 @@ impl PanelController for VisibleSpecimen {
                             }
                             ui.add_sized(
                                 [ui.available_width(), t.control_height],
-                                egui::Label::new(solidcraft_ui_text::tr(if state.transaction_live {
+                                egui::Label::new(solidcraft_ui_text::tr_by_id(if state.transaction_live {
                                     "ui.panel_fixture.live"
                                 } else {
                                     "ui.panel_fixture.finished"

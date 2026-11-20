@@ -24,7 +24,7 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, dashed: &mut bool, tolerance: &mu
     }
     crate::ui_kit::text(ui, tr!(app, "dxf.zero"), crate::ui_kit::Text::Note("zero"));
     for (value, key, label) in [(false, "zero_target", "dxf.zero_target"), (true, "zero_origin", "dxf.zero_origin")] {
-        let r = crate::ui_kit::list_picker(ui, key, app.tr(label), *zero_origin == value);
+        let r = crate::ui_kit::list_picker(ui, key, app.tr_by_id(label), *zero_origin == value);
         crate::scenario::publish_handle(&format!("dialog:dxf:{key}"), r.rect.center());
         if r.clicked() {
             *zero_origin = value;

@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use solidcraft_engine::doc::physical_material::{Family, MaterialCard, PropertyData, admit_card};
 
 use crate::{SolveApp, ui_kit};
-use solidcraft_ui_text::tr;
+use solidcraft_ui_text::tr_by_id;
 
 const MAX_BYTES: usize = 256 * 1024;
 const KINDS: &[&str] = &[
@@ -162,10 +162,10 @@ fn show_card(ui: &mut egui::Ui, card: &MaterialCard, report: &Value) {
     for &kind in KINDS {
         let label = format!("ui.material_review.{kind}");
         let Some(property) = card.properties.iter().find(|p| p.data.kind() == kind) else {
-            ui_kit::text(ui, &format!("{}: {}", tr(&label), tr!("ui.material_review.unknown")), ui_kit::Text::Report(kind, false));
+            ui_kit::text(ui, &format!("{}: {}", tr_by_id(&label), tr!("ui.material_review.unknown")), ui_kit::Text::Report(kind, false));
             continue;
         };
-        ui_kit::section(ui, kind, tr(&label), true, |ui| {
+        ui_kit::section(ui, kind, tr_by_id(&label), true, |ui| {
             show_data(ui, &property.data);
             if let Some(axes) = serde_json::to_value(&property.data)
                 .ok()

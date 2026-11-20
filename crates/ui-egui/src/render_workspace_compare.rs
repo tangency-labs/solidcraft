@@ -173,7 +173,7 @@ fn label(app: &SolveApp, side: Option<JobId>) -> String {
             tr!(
                 "render.compare_side",
                 number = &result.frame.job.serial.to_string(),
-                shot = result.shot.as_deref().unwrap_or_else(|| solidcraft_ui_text::tr("render.results_unnamed"))
+                shot = result.shot.as_deref().unwrap_or_else(|| solidcraft_ui_text::tr_by_id("render.results_unnamed"))
             )
         },
     )
@@ -183,10 +183,10 @@ pub(super) fn summary(app: &SolveApp, ui: &mut egui::Ui) {
     let Some(view) = &app.render_workspace.view.compare else { return };
     let Some(reference) = app.render_workspace.view.retained.iter().find(|result| result.frame.job == view.reference) else { return };
     let stale = app.render_workspace.view.retained.iter().any(|result| [view.left, view.right].contains(&Some(result.frame.job)) && result.stale);
-    ui_kit::completion_text(ui, app.tr(if stale { "render.image_stale" } else { "render.result_current" }), !stale);
+    ui_kit::completion_text(ui, app.tr_by_id(if stale { "render.image_stale" } else { "render.result_current" }), !stale);
     let summary = tr!(
         "render.compare_summary",
-        shot = reference.shot.as_deref().unwrap_or_else(|| solidcraft_ui_text::tr("render.results_unnamed")),
+        shot = reference.shot.as_deref().unwrap_or_else(|| solidcraft_ui_text::tr_by_id("render.results_unnamed")),
         width = &reference.frame.width.to_string(),
         height = &reference.frame.height.to_string(),
         seconds = &format!("{:.0}", reference.seconds),

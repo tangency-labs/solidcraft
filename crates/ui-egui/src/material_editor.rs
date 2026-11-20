@@ -7,7 +7,7 @@ use solidcraft_engine::doc::physical_material::{
 use solidcraft_engine::doc::{Document, UserMaterial, appearance::Look};
 
 use crate::{SolveApp, ui_kit};
-use solidcraft_ui_text::tr;
+use solidcraft_ui_text::tr_by_id;
 
 const KINDS: [&str; 9] = [
     "density",
@@ -385,7 +385,7 @@ fn property_rows(ui: &mut egui::Ui, property: &mut PropertyDraft, sources: &[Sou
         let labels = ["material.editor.temperature", "material.editor.moisture", "material.editor.strain_rate", "material.editor.state"];
         let units = ["K", "kg/kg", "s⁻¹", ""];
         for (i, value) in property.conditions.iter_mut().enumerate() {
-            field(ui, tr(labels.get(i).copied().unwrap_or("")), &format!("{kind}:condition:{i}"), value, units.get(i).copied().unwrap_or(""));
+            field(ui, tr_by_id(labels.get(i).copied().unwrap_or("")), &format!("{kind}:condition:{i}"), value, units.get(i).copied().unwrap_or(""));
         }
     });
 }
@@ -394,7 +394,7 @@ fn card_rows(ui: &mut egui::Ui, card: &mut CardDraft) {
     field(ui, tr!("material.editor.designation"), "designation", &mut card.designation, "");
     let mut family = FAMILIES.iter().position(|v| v == &card.family).unwrap_or(0);
     let labels =
-        ["material.editor.other", "material.editor.metal", "material.editor.polymer", "material.editor.wood", "material.editor.glass"].map(tr);
+        ["material.editor.other", "material.editor.metal", "material.editor.polymer", "material.editor.wood", "material.editor.glass"].map(tr_by_id);
     ui_kit::choice_row(ui, tr!("material.editor.family"), "physical:family", &mut family, &labels);
     card.family = FAMILIES.get(family).copied().unwrap_or(Family::Other);
     ui_kit::section_count(ui, "physical:sources", tr!("material.editor.sources"), false, Some(card.sources.len()), |ui| {
@@ -411,7 +411,7 @@ fn card_rows(ui: &mut egui::Ui, card: &mut CardDraft) {
                     "material.editor.public_reference",
                     "material.editor.illustrative",
                 ]
-                .map(tr);
+                .map(tr_by_id);
                 ui_kit::choice_row(ui, tr!("material.editor.source_kind"), &format!("source:{i}:kind"), &mut selected, &labels);
                 source.kind = SOURCE_KINDS.get(selected).copied().unwrap_or(SourceKind::UserSupplied);
                 optional_text(ui, tr!("ui.design_properties.license"), &format!("source:{i}:license"), &mut source.license);
@@ -433,7 +433,7 @@ fn card_rows(ui: &mut egui::Ui, card: &mut CardDraft) {
     let mut remove = None;
     for (i, property) in card.properties.iter_mut().enumerate() {
         let label = format!("ui.material_review.{}", property.kind);
-        ui_kit::section(ui, format!("physical:property:{}", property.kind), tr(&label), false, |ui| {
+        ui_kit::section(ui, format!("physical:property:{}", property.kind), tr_by_id(&label), false, |ui| {
             property_rows(ui, property, &card.sources);
             if ui_kit::button(ui, tr!("material.editor.remove"), ui_kit::Button::Normal).clicked() {
                 remove = Some(i);
@@ -443,7 +443,7 @@ fn card_rows(ui: &mut egui::Ui, card: &mut CardDraft) {
     if let Some(i) = remove {
         card.properties.remove(i);
     }
-    let labels: Vec<_> = KINDS.iter().map(|kind| tr(&format!("ui.material_review.{kind}")).to_string()).collect();
+    let labels: Vec<_> = KINDS.iter().map(|kind| tr_by_id(&format!("ui.material_review.{kind}")).to_string()).collect();
     let refs: Vec<_> = labels.iter().map(String::as_str).collect();
     ui_kit::choice_row(ui, tr!("material.editor.add_property"), "physical:add_kind", &mut card.add_kind, &refs);
     let kind = KINDS.get(card.add_kind).copied().unwrap_or("density");
@@ -456,7 +456,7 @@ pub(crate) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, index: &mut usize, edi
     let names = app.session.doc.material_names();
     if editor.draft.is_none() {
         let placeholder = if editor.mixed_materials { "material.selection.mixed" } else { "material.selection.choose" };
-        let current = names.get(*index).map(String::as_str).unwrap_or_else(|| tr(placeholder));
+        let current = names.get(*index).map(String::as_str).unwrap_or_else(|| tr_by_id(placeholder));
         ui_kit::row(ui, "Material", |ui| {
             ui_kit::dropdown_menu(ui, "mat", current, |ui| {
                 for (i, name) in names.iter().enumerate() {

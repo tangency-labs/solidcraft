@@ -76,7 +76,7 @@ const HELP: [&str; 7] = ["docs", "updates", "shortcuts", "messages", "report", "
 fn help_label<'a>(app: &'a SolveApp, item: &str) -> &'a str {
     match item {
         "docs" => app.tr_label("Documentation"),
-        "updates" => app.tr("update.check_for_updates"),
+        "updates" => app.tr_by_id("update.check_for_updates"),
         "shortcuts" => app.tr_label("Keyboard Shortcuts"),
         "messages" => app.tr_label("Messages\u{2026}"),
         "report" => app.tr_label("Report an Issue\u{2026}"),
@@ -159,39 +159,39 @@ fn submenu(id: &str, label: &str, children: Vec<Item>) -> Item {
 fn recent_items(app: &SolveApp, paths: &[String]) -> Vec<Item> {
     let mut items: Vec<Item> = paths.iter().map(|path| item(path, &FileAction::OpenRecent(path.clone()))).collect();
     items.push(Item::sep());
-    items.push(item(app.tr("ui.clear_recent"), &FileAction::ClearRecent));
+    items.push(item(app.tr_by_id("ui.clear_recent"), &FileAction::ClearRecent));
     items
 }
 
 fn menu_bar(app: &SolveApp, recent: &[String]) -> MenuBar {
-    let more = |key: &str| format!("{}\u{2026}", app.tr(key));
-    let mut file = vec![item(app.tr("ui.new_design"), &FileAction::New)];
-    file.push(item(app.tr("ui.new_drawing"), &FileAction::NewDrawing));
-    file.extend([item(&more("ui.open"), &FileAction::Open), submenu(RECENT, app.tr("ui.open_recent"), recent_items(app, recent)), Item::sep()]);
+    let more = |key: &str| format!("{}\u{2026}", app.tr_by_id(key));
+    let mut file = vec![item(app.tr_by_id("ui.new_design"), &FileAction::New)];
+    file.push(item(app.tr_by_id("ui.new_drawing"), &FileAction::NewDrawing));
+    file.extend([item(&more("ui.open"), &FileAction::Open), submenu(RECENT, app.tr_by_id("ui.open_recent"), recent_items(app, recent)), Item::sep()]);
     file.extend(INSERTS.iter().map(|(label, action)| item(app.tr_label(label), action)));
     file.extend([
         Item::sep(),
-        item(app.tr("ui.save"), &FileAction::Save),
+        item(app.tr_by_id("ui.save"), &FileAction::Save),
         item(&more("ui.save_as"), &FileAction::SaveAs),
         item(app.tr_label("Save As JSON\u{2026}"), &FileAction::SaveJson),
-        item(app.tr("cmd.file.verify"), &FileAction::VerifySignature),
+        item(app.tr_by_id("cmd.file.verify"), &FileAction::VerifySignature),
         Item::sep(),
     ]);
     file.extend(EXPORTS.iter().map(|(label, action)| item(app.tr_label(label), action)));
     file.extend([Item::sep(), item(app.tr_label("Design Properties"), &DESIGN_PROPERTIES)]);
-    let edit = vec![item(app.tr("ui.undo"), &FileAction::Undo), item(app.tr("ui.redo"), &FileAction::Redo)];
+    let edit = vec![item(app.tr_by_id("ui.undo"), &FileAction::Undo), item(app.tr_by_id("ui.redo"), &FileAction::Redo)];
     let window = vec![item(app.tr_label("Agent Chat"), &FileAction::AgentChat)];
     let help = HELP.iter().map(|h| Item::action(HELP_ID, help_label(app, h), "").with(json!({ "item": h }))).collect();
     MenuBar {
         title: "SolidCraft".into(),
         version: env!("CARGO_PKG_VERSION").into(),
         app: vec![item(&more("ui.preferences"), &FileAction::Settings), item(&more("ui.keyboard_shortcuts"), &FileAction::Shortcuts)],
-        quit: item(&format!("{} SolidCraft", app.tr("ui.quit")), &FileAction::Quit),
+        quit: item(&format!("{} SolidCraft", app.tr_by_id("ui.quit")), &FileAction::Quit),
         menus: vec![
-            submenu("menu.file", app.tr("ui.file"), file),
+            submenu("menu.file", app.tr_by_id("ui.file"), file),
             submenu("menu.edit", app.tr_label("Edit"), edit),
             submenu(native_menu::WINDOW, "Window", window),
-            submenu("menu.help", app.tr("ui.help"), help),
+            submenu("menu.help", app.tr_by_id("ui.help"), help),
         ],
     }
 }

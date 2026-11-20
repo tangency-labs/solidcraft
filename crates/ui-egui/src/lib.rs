@@ -1228,8 +1228,14 @@ impl SolveApp {
     }
 
     /// Translate text using the active language preference.
-    pub fn tr<'a>(&self, text: impl solidcraft_ui_text::Key<'a>) -> &'a str {
-        solidcraft_ui_text::Locale::for_language(&self.preferences.language).text(text)
+    pub fn tr(&self, msg: solidcraft_ui_text::Msg) -> &'static str {
+        solidcraft_ui_text::Locale::for_language(&self.preferences.language).tr(msg)
+    }
+
+    /// The message with the id `id` in the active language, for an id built at run time. An id
+    /// written in the code is `tr!(app, "id")`, which checks it against the English catalog.
+    pub fn tr_by_id<'a>(&self, id: &'a str) -> &'a str {
+        solidcraft_ui_text::Locale::for_language(&self.preferences.language).text(id)
     }
 
     /// A message with its placeholders' values (`msg!("id", name = value)`), in the active language.
@@ -1590,7 +1596,7 @@ impl SolveApp {
             || solidcraft_engine::plugin::resolve_call(&self.session, id, &params).map_err(|e| e.to_string())?.is_some()
         {
             let key = if cfg!(target_arch = "wasm32") { "ui.plugins_desktop" } else { "ui.plugin_standalone" };
-            return Err(self.tr(key).into());
+            return Err(self.tr_by_id(key).into());
         }
         if solidcraft_engine::panels::commands::is_command(id) {
             return self.run_panel_command(id, &params).map_err(solidcraft_engine::panels::commands::error_text);
@@ -2035,10 +2041,10 @@ impl SolveApp {
                                     .and_then(Value::as_str)
                                     .or_else(|| signature.get("fingerprint").and_then(Value::as_str))
                                     .unwrap_or("");
-                                self.tr("ui.design_saved_signed").replace("{path}", &p).replace("{key}", key)
+                                self.tr_by_id("ui.design_saved_signed").replace("{path}", &p).replace("{key}", key)
                             }
-                            None if earlier => self.tr("ui.design_saved_earlier_signature").replace("{path}", &p),
-                            None => self.tr("ui.design_saved").replace("{path}", &p),
+                            None if earlier => self.tr_by_id("ui.design_saved_earlier_signature").replace("{path}", &p),
+                            None => self.tr_by_id("ui.design_saved").replace("{path}", &p),
                         };
                         self.set_status(saved, false);
                     }

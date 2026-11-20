@@ -1999,7 +1999,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     } else if cancelled {
         tr!("file_load.waiting")
     } else {
-        solidcraft_ui_text::tr(match r.request.kind {
+        solidcraft_ui_text::tr_by_id(match r.request.kind {
             Kind::Insert | Kind::InsertDesign => "file_load.inserting",
             Kind::Open => "file_load.opening",
             Kind::Recover { .. } => "file_load.recovering",
@@ -2039,7 +2039,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 let cad = matches!(r.request.kind, Kind::Open | Kind::Insert)
                     && (solidcraft_engine::io::is_step_path(&r.request.path) || solidcraft_engine::io::is_iges_path(&r.request.path));
                 let (labels, current, detail) = load_steps(cad, phase, r.progress.work(), (done, total));
-                let labels = labels.map(solidcraft_ui_text::tr);
+                let labels = labels.map(solidcraft_ui_text::tr_by_id);
                 ui_kit::steps(ui, "file_load", &labels, current, detail.as_deref());
             } else {
                 let status = if cancelled && export {

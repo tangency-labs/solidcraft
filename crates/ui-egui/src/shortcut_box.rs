@@ -544,7 +544,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                     );
                                     row.enabled = result.is_ok();
                                     row.highlighted = true;
-                                    let badge = solidcraft_ui_text::tr(if result.is_ok() { "search.valid" } else { "search.invalid" });
+                                    let badge = solidcraft_ui_text::tr_by_id(if result.is_ok() { "search.valid" } else { "search.invalid" });
                                     row.shortcut = badge;
                                     if row
                                         .search_row(
@@ -614,7 +614,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                         let handle = format!("search:design:{index}");
                                         let mut item = ui_kit::MenuItem::new(&handle, &row.label, row.icon);
                                         item.highlighted = app.sbox.index == rows.len() + index;
-                                        let badge = solidcraft_ui_text::tr(match row.target {
+                                        let badge = solidcraft_ui_text::tr_by_id(match row.target {
                                             DesignTarget::Feature(_) => "search.feature",
                                             DesignTarget::Parameter(_) => "search.parameter",
                                         });

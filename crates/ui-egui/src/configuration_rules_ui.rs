@@ -334,7 +334,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut SolveApp, error: &mut Option<String>, 
 /// how to add one.
 fn columns_note(ui: &mut Ui, unlisted: bool, message: &'static str) {
     if unlisted {
-        ui_kit::text(ui, solidcraft_ui_text::tr(message), ui_kit::Text::Note(message));
+        ui_kit::text(ui, solidcraft_ui_text::tr_by_id(message), ui_kit::Text::Note(message));
     }
 }
 fn report(ui: &mut Ui, text: impl AsRef<str>) {

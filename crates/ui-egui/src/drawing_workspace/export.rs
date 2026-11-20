@@ -28,8 +28,8 @@ pub(crate) struct ExportForm {
     pub(crate) all_sheets: bool,
 }
 
-fn tr(id: impl solidcraft_ui_text::Key<'static>) -> &'static str {
-    solidcraft_ui_text::tr(id)
+fn tr(id: &'static str) -> &'static str {
+    solidcraft_ui_text::tr_by_id(id)
 }
 
 /// The `drawing.export` parameters for `form` on the sheet `sheet`, without the path.

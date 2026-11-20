@@ -42,24 +42,24 @@ pub(super) fn mapping_rows(app: &SolveApp) -> Vec<(Vec<String>, String)> {
             if binding.keys.alt {
                 keys.push("Alt/Option");
             }
-            keys.push(solidcraft_ui_text::tr(button));
+            keys.push(solidcraft_ui_text::tr_by_id(button));
             let action = match binding.mode {
                 NavMode::Orbit => "prefs.gesture_orbit",
                 NavMode::Pan => "prefs.gesture_pan",
                 NavMode::Zoom => "prefs.gesture_zoom",
             };
-            (keys.into_iter().map(str::to_owned).collect::<Vec<_>>(), solidcraft_ui_text::tr(action).to_string())
+            (keys.into_iter().map(str::to_owned).collect::<Vec<_>>(), solidcraft_ui_text::tr_by_id(action).to_string())
         })
         .collect();
     gestures.extend([
         (
             vec![tr!(app, "prefs.wheel").to_owned()],
-            app.tr(if app.preferences.zoom_to_cursor { "prefs.zoom_toward_cursor" } else { "prefs.gesture_zoom" }).to_owned(),
+            app.tr_by_id(if app.preferences.zoom_to_cursor { "prefs.zoom_toward_cursor" } else { "prefs.gesture_zoom" }).to_owned(),
         ),
         (vec![tr!(app, "prefs.left_click").to_owned()], tr!(app, "prefs.select").to_owned()),
         (
             vec![tr!(app, "prefs.right_click").to_owned()],
-            app.tr(if app.preferences.mouse_gestures.enabled && app.preferences.nav == crate::mouse_gesture::MOUSE_MODE {
+            app.tr_by_id(if app.preferences.mouse_gestures.enabled && app.preferences.nav == crate::mouse_gesture::MOUSE_MODE {
                 "prefs.context_menu_ring"
             } else {
                 "prefs.context_menu"
@@ -228,7 +228,7 @@ fn wheel(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             ["ui.zoom_to_the_cursor", "ui.reverse_zoom_direction", "ui.reverse_horizontal_pan_direction", "ui.reverse_vertical_pan_direction"],
             ["ui.smooth_wheel_zoom", "ui.two_finger_scroll_pans", "ui.reverse_trackpad_orbit_direction", "prefs.zoom_stop_at_model"],
         ]
-        .map(|labels| labels.into_iter().map(|id| ui_kit::ContentWidth::label(ui, app.tr(id)) + t.space_24).fold(0.0, f32::max));
+        .map(|labels| labels.into_iter().map(|id| ui_kit::ContentWidth::label(ui, app.tr_by_id(id)) + t.space_24).fold(0.0, f32::max));
         let beside = available >= natural[0] + natural[1] + gap;
         let left = if beside { (available - gap) * natural[0] / (natural[0] + natural[1]).max(1.0) } else { available };
         let right = if beside { available - gap - left } else { available };
@@ -256,7 +256,7 @@ fn wheel(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         });
         let label_width = ["ui.wheel_zoom_speed", "prefs.trackpad_zoom_modifier"]
             .into_iter()
-            .map(|id| ui_kit::ContentWidth::label(ui, app.tr(id)))
+            .map(|id| ui_kit::ContentWidth::label(ui, app.tr_by_id(id)))
             .fold(0.0, f32::max);
         ui_kit::settings_form(ui, label_width, |ui| {
             setting::wheel_zoom_speed(app, ui);
@@ -265,12 +265,12 @@ fn wheel(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 let choice = &mut app.preferences.trackpad_zoom_modifier;
                 ui_kit::settings_control_width(ui, t.space_24 * 7.0 + t.space_12, |ui| {
                     let response =
-                        ui_kit::dropdown_menu(ui, "pref_trackpad_zoom_modifier", solidcraft_ui_text::tr(choice.label_id(platform)), |ui| {
+                        ui_kit::dropdown_menu(ui, "pref_trackpad_zoom_modifier", solidcraft_ui_text::tr_by_id(choice.label_id(platform)), |ui| {
                             for (index, value) in TrackpadZoomModifier::ALL.into_iter().enumerate() {
                                 if ui_kit::list_picker(
                                     ui,
                                     &format!("trackpad_zoom_modifier_{index}"),
-                                    solidcraft_ui_text::tr(value.label_id(platform)),
+                                    solidcraft_ui_text::tr_by_id(value.label_id(platform)),
                                     *choice == value,
                                 )
                                 .clicked()
@@ -319,7 +319,7 @@ fn view(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         }
         setting::look_at_anim(app, ui);
         let width =
-            ["ui.animation_speed", "prefs.home_fit_size"].into_iter().map(|id| ui_kit::ContentWidth::label(ui, app.tr(id))).fold(0.0, f32::max);
+            ["ui.animation_speed", "prefs.home_fit_size"].into_iter().map(|id| ui_kit::ContentWidth::label(ui, app.tr_by_id(id))).fold(0.0, f32::max);
         ui_kit::settings_form(ui, width, |ui| {
             setting::look_at_speed(app, ui);
             let (label, note) = (tr!(app, "prefs.home_fit_size").to_owned(), tr!(app, "prefs.home_fit_size_note").to_owned());

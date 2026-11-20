@@ -144,7 +144,7 @@ fn show_objects(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, shee
         ("title-block", "ui.drawing_browser_title_block", "drawing_edit_table", sheet.title_block.is_some()),
     ] {
         if present {
-            let label = app.tr(label).to_string();
+            let label = app.tr_by_id(label).to_string();
             row(rows, &format!("{key}:{kind}"), Row { depth: 2, label: &label, icon, name: true, ..Row::default() }, NodeMenu::None);
         }
     }
@@ -271,7 +271,7 @@ fn view_name(app: &SolveApp, drawing: &Drawing, view: &View, number: usize) -> S
             NamedView::Right => "cmd.view_right",
             _ => "cmd.view_isometric",
         };
-        return app.tr(key).to_string();
+        return app.tr_by_id(key).to_string();
     }
     tr!("ui.drawing_browser_view", number = &number.to_string())
 }

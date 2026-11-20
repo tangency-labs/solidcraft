@@ -31,11 +31,11 @@ fn device(app: &mut SolveApp, ui: &mut egui::Ui) {
                         ui_kit::settings_state_badge(ui, tr!(app, "ui.nav_bridge_connected"), ui_kit::SettingsBadgeTone::Success);
                         ui_kit::settings_state_badge(
                             ui,
-                            app.tr(if saved { "ui.3d_mouse_calibrated" } else { "ui.3d_mouse_not_calibrated" }),
+                            app.tr_by_id(if saved { "ui.3d_mouse_calibrated" } else { "ui.3d_mouse_not_calibrated" }),
                             if saved { ui_kit::SettingsBadgeTone::Success } else { ui_kit::SettingsBadgeTone::Warning },
                         );
                     } else {
-                        let status = app.tr(if denied {
+                        let status = app.tr_by_id(if denied {
                             "ui.3d_mouse_denied_short"
                         } else if waiting_for_a_record(app.space_mouse.drivers) {
                             "ui.3d_mouse_calibrate_wait"
@@ -43,7 +43,7 @@ fn device(app: &mut SolveApp, ui: &mut egui::Ui) {
                             "ui.3d_mouse_none"
                         });
                         let response = ui_kit::text(ui, status, ui_kit::Text::Report("calibration_status", false))
-                            .backing_on_hover_text(app.tr(if denied { "ui.3d_mouse_denied" } else { "ui.3d_mouse_wiggle" }));
+                            .backing_on_hover_text(app.tr_by_id(if denied { "ui.3d_mouse_denied" } else { "ui.3d_mouse_wiggle" }));
                         crate::scenario::publish_target("prefs:space_mouse_status", response.rect);
                     }
                 },
@@ -65,7 +65,7 @@ fn device(app: &mut SolveApp, ui: &mut egui::Ui) {
                                     ui.add_enabled_ui(app.preferences.space_mouse_enabled && device.is_some(), |ui| {
                                         let response = ui_kit::button(ui, tr!(app, "ui.3d_mouse_calibrate"), ui_kit::Button::Normal)
                                             .backing_on_hover_text(tr!(app, "ui.3d_mouse_calibrate_tip"))
-                                            .backing_on_disabled_hover_text(app.tr(if device.is_none() {
+                                            .backing_on_disabled_hover_text(app.tr_by_id(if device.is_none() {
                                                 "ui.3d_mouse_calibrate_wait"
                                             } else {
                                                 "ui.3d_mouse_calibrate_tip"
@@ -121,7 +121,7 @@ fn device(app: &mut SolveApp, ui: &mut egui::Ui) {
         ];
         let label_width = ["prefs.overall_speed", "ui.3d_mouse_ghost_position"]
             .into_iter()
-            .map(|id| ui_kit::ContentWidth::label(ui, app.tr(id)))
+            .map(|id| ui_kit::ContentWidth::label(ui, app.tr_by_id(id)))
             .fold(0.0, f32::max);
         ui_kit::settings_form(ui, label_width, |ui| {
             ui_kit::row(ui, tr!(app, "prefs.overall_speed"), |ui| {
@@ -210,7 +210,7 @@ fn axes(app: &mut SolveApp, ui: &mut egui::Ui) {
             .collect();
         let driven_by = tr!(app, "ui.3d_mouse_driven_by").to_owned();
         let off_tip = tr!(app, "ui.3d_mouse_view_off_tip").to_owned();
-        let motions: Vec<String> = crate::space_mouse::MOTIONS.iter().map(|motion| app.tr(motion).to_owned()).collect();
+        let motions: Vec<String> = crate::space_mouse::MOTIONS.iter().map(|motion| app.tr_by_id(motion).to_owned()).collect();
         // The axes are a table of their own: each row is a live meter of the motion that drives that
         // view axis, then its Invert, Speed and the motion choice.
         let enabled = app.preferences.space_mouse_enabled;
@@ -299,7 +299,7 @@ fn advanced(app: &mut SolveApp, ui: &mut egui::Ui) {
             if let Some(present) = app.space_mouse.drivers.filter(|present| present.spacenavd || (present.direct && !present.denied)) {
                 let [label, auto, direct, only_spacenavd, only_direct] =
                     ["driver", "driver_auto", "driver_direct", "driver_only_spacenavd", "driver_only_direct"]
-                        .map(|key| app.tr(&format!("ui.3d_mouse_{key}")).to_owned());
+                        .map(|key| app.tr_by_id(&format!("ui.3d_mouse_{key}")).to_owned());
                 let driver = &mut app.preferences.space_mouse_driver;
                 ui_kit::row(ui, &label, |ui| match (present.spacenavd, present.direct) {
                     (true, true) => {

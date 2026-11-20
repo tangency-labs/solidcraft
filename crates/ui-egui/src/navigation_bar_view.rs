@@ -167,15 +167,15 @@ fn activate(app: &mut SolveApp, slot: &Slot) {
 /// The slot's hover text: a hidden slot's reason, the current style, the sketch's lock, or its name.
 fn tip(app: &SolveApp, slot: &Slot, hidden: Option<&str>, key: bool) -> String {
     if let Some(hidden) = hidden {
-        app.tr(hidden).to_owned()
+        app.tr_by_id(hidden).to_owned()
     } else if slot.id == "visual_style" {
-        tr!("navbar.value_tip", name = app.tr(slot.label), value = current_style(app))
+        tr!("navbar.value_tip", name = app.tr_by_id(slot.label), value = current_style(app))
     } else if slot.id == "projection" && projection_locked(app) {
         tr!(app, "nav.perspective.sketch").to_owned()
     } else if slot.id == "zoom" && key {
         tr!(app, "navbar.zoom_hold_tip").to_owned()
     } else {
-        app.tr(slot.label).to_owned()
+        app.tr_by_id(slot.label).to_owned()
     }
 }
 
@@ -192,7 +192,7 @@ fn slot_view(app: &SolveApp, bar: &BarLayout, slot: &'static Slot, index: usize,
         kind: slot.kind,
         icon: slot.current_icon(app.ui.visual_style),
         text: slot_text(app, slot).to_owned(),
-        name: app.tr(slot.label).to_owned(),
+        name: app.tr_by_id(slot.label).to_owned(),
         tip: tip(app, slot, hidden, key.is_some()),
         key,
         selected: editing.is_none() && selected(app, slot.id),
@@ -323,7 +323,7 @@ fn run(app: &mut SolveApp, ctx: &egui::Context, action: NavAction) {
 }
 
 pub(crate) fn current_style(app: &SolveApp) -> &str {
-    app.tr(match app.ui.visual_style {
+    app.tr_by_id(match app.ui.visual_style {
         1 => "navbar.style.shaded",
         2 => "navbar.style.wireframe",
         3 => "navbar.style.shaded_with_hidden_edges",
@@ -335,7 +335,7 @@ pub(crate) fn slot_text<'a>(app: &'a SolveApp, slot: &Slot) -> &'a str {
     if slot.id == "visual_style" && app.preferences.navigation_bar.menu_display(slot.id) == MenuDisplay::IconAndValue {
         current_style(app)
     } else {
-        app.tr(slot.label)
+        app.tr_by_id(slot.label)
     }
 }
 
@@ -382,7 +382,7 @@ fn style_menu(app: &SolveApp) -> Menu {
         .map(|(index, (style, _))| {
             let mut row = MenuRow::new(
                 *style,
-                app.tr(&format!("navbar.style.{style}")),
+                app.tr_by_id(&format!("navbar.style.{style}")),
                 crate::navigation_slots::visual_style_icon(index as u8),
                 format!("nav:style:{style}"),
             );
@@ -408,17 +408,17 @@ fn display_menu(app: &SolveApp) -> Menu {
     let mut entries = vec![MenuEntry::Heading(tr!(app, "navbar.graphics").to_owned())];
     let current = crate::prefs::graphics_preset(&app.preferences);
     let mut preset = MenuRow::new("preset", tr!(app, "navbar.preset"), "", "view:graphics_preset");
-    preset.detail = Some(app.tr(&format!("ui.graphics_{current}")).to_owned());
+    preset.detail = Some(app.tr_by_id(&format!("ui.graphics_{current}")).to_owned());
     preset.submenu = [("performance", "ui.graphics_performance"), ("quality", "ui.graphics_quality")]
         .into_iter()
-        .map(|(id, label)| row(id, app.tr(label), "", &format!("view:graphics_preset:{id}"), current == id))
+        .map(|(id, label)| row(id, app.tr_by_id(label), "", &format!("view:graphics_preset:{id}"), current == id))
         .collect();
     entries.extend([MenuEntry::Row(preset), MenuEntry::Separator, MenuEntry::Heading(tr!(app, "navbar.show").to_owned())]);
     for id in ["grid", "ground_shadow", "ambient_occlusion"] {
         let Some(slot) = navigation_bar::find(id) else { continue };
         entries.push(MenuEntry::Row(row(
             slot.id,
-            app.tr(slot.label),
+            app.tr_by_id(slot.label),
             slot.current_icon(app.ui.visual_style),
             &format!("view:{id}"),
             selected(app, slot.id),
@@ -437,7 +437,7 @@ fn display_menu(app: &SolveApp) -> Menu {
     for (perspective, key) in [(false, "navbar.orthographic"), (true, "navbar.perspective")] {
         let mut item = row(
             key,
-            app.tr(key),
+            app.tr_by_id(key),
             "perspective",
             if perspective { "view:projection" } else { "view:orthographic" },
             !app.ui.auto_ortho_faces && app.ui.perspective == perspective,

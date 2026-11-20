@@ -489,7 +489,7 @@ pub(crate) fn library_title(app: &SolveApp) -> String {
     } else {
         stage_title(stage)
     };
-    app.tr(key).to_string()
+    app.tr_by_id(key).to_string()
 }
 
 pub(crate) fn library_mode(app: &SolveApp) -> Option<usize> {
@@ -592,7 +592,7 @@ fn light_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     let top = ui.cursor().top();
     let mut view = std::mem::take(&mut app.render_workspace.view.library);
     let previous = view.light_scope;
-    let labels: Vec<_> = LIGHT_SCOPES.iter().map(|(_, key)| app.tr(key)).collect();
+    let labels: Vec<_> = LIGHT_SCOPES.iter().map(|(_, key)| app.tr_by_id(key)).collect();
     ui_kit::choice_row(ui, tr!(app, "render.stage_panels.scope"), "render_light_scope", &mut view.light_scope, &labels);
     let compatible = match view.light_scope {
         0 => view.kind == "native_scenes",
@@ -687,7 +687,7 @@ fn catalog_footer(layout: &ui_kit::CatalogLayout, ui: &mut egui::Ui, body_top: f
 }
 
 fn catalog_search(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, hint: &str) {
-    let search = ui_kit::search_field(ui, ui.scope_id().with("render_stage_catalog_search"), &mut view.query, app.tr(hint));
+    let search = ui_kit::search_field(ui, ui.scope_id().with("render_stage_catalog_search"), &mut view.query, app.tr_by_id(hint));
     crate::panel_runtime::register_content_focus(ui.ctx(), &search);
     crate::scenario::publish_target("render:library-search", search.rect);
     let end = view.query.char_indices().nth(128).map_or(view.query.len(), |(at, _)| at);
@@ -1108,7 +1108,7 @@ fn browse_contents(app: &mut SolveApp, ui: &mut egui::Ui, stage_card: bool) {
                 for (id, label) in
                     [("", "ui.all"), ("metal", "render.category_metal"), ("plastic", "render.category_plastic"), ("paint", "render.category_paint")]
                 {
-                    if ui_kit::choice_chip(ui, &format!("render-library-{id}"), app.tr(label), view.category == id).clicked() {
+                    if ui_kit::choice_chip(ui, &format!("render-library-{id}"), app.tr_by_id(label), view.category == id).clicked() {
                         view.category = id.into();
                     }
                 }
@@ -1236,7 +1236,7 @@ fn browse_contents(app: &mut SolveApp, ui: &mut egui::Ui, stage_card: bool) {
             let menu = ui_kit::dropdown_menu(ui, "render_library_filters", tr!(app, "render.library_filters"), |ui| {
                 if view.collection == 0 {
                     for &(kind, key) in KINDS {
-                        let r = ui_kit::list_picker(ui, kind, app.tr(key), view.kind == kind);
+                        let r = ui_kit::list_picker(ui, kind, app.tr_by_id(key), view.kind == kind);
                         crate::scenario::publish_target(&format!("render:library-kind:{kind}"), r.rect);
                         if r.clicked() {
                             switch_kind(&mut view, kind);
@@ -1251,7 +1251,7 @@ fn browse_contents(app: &mut SolveApp, ui: &mut egui::Ui, stage_card: bool) {
                     ("specification", "render.library_specs"),
                     ("blocked", "render.library_blocked"),
                 ] {
-                    if ui_kit::list_picker(ui, id, app.tr(key), view.availability == id).clicked() {
+                    if ui_kit::list_picker(ui, id, app.tr_by_id(key), view.availability == id).clicked() {
                         view.availability = id.into();
                         view.offset = 0;
                         view.loaded = false;
@@ -1376,7 +1376,7 @@ pub(super) fn inspect(app: &mut SolveApp, ui: &mut egui::Ui) {
         let favorite = app.preferences.render_library_favorites.contains(&key);
         if ui_kit::button(
             ui,
-            app.tr(if favorite { "render.library_unfavorite" } else { "render.library_favorite" }),
+            app.tr_by_id(if favorite { "render.library_unfavorite" } else { "render.library_favorite" }),
             ui_kit::Button::Enabled(favorite || app.preferences.render_library_favorites.len() < 256),
         )
         .clicked()
@@ -1663,7 +1663,7 @@ fn physical_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, id:
                 ));
                 ui.small(tr!(
                     "render.property_qualifier",
-                    value = property["qualifier"].as_str().unwrap_or(solidcraft_ui_text::tr("render.property_unknown"))
+                    value = property["qualifier"].as_str().unwrap_or(solidcraft_ui_text::tr_by_id("render.property_unknown"))
                 ));
                 ui.small(tr!("render.property_conditions", value = &property["conditions"].to_string()));
                 ui.small(tr!("render.property_uncertainty", value = &property["uncertainty"].to_string()));
@@ -1701,7 +1701,7 @@ fn physical_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, id:
 }
 
 fn short_availability<'a>(app: &'a SolveApp, status: Option<&str>) -> &'a str {
-    app.tr(match status {
+    app.tr_by_id(match status {
         Some("native_appearance") => "render.library_appearance_available",
         Some("native_composition") => "render.library_short_native",
         Some("implemented_pending_batch_validation") => "render.library_short_projection",
@@ -1712,7 +1712,7 @@ fn short_availability<'a>(app: &'a SolveApp, status: Option<&str>) -> &'a str {
 }
 
 fn tile_badge<'a>(app: &'a SolveApp, entry: &Value) -> &'a str {
-    app.tr(match entry.pointer("/projection/status").and_then(Value::as_str) {
+    app.tr_by_id(match entry.pointer("/projection/status").and_then(Value::as_str) {
         Some("native_appearance" | "native_composition") => "render.stage_panels.badge_native",
         Some("implemented_pending_batch_validation") => "render.stage_panels.badge_projection",
         Some("blocked") => "render.stage_panels.badge_blocked",
@@ -1723,7 +1723,7 @@ fn tile_badge<'a>(app: &'a SolveApp, entry: &Value) -> &'a str {
 }
 
 fn availability_label<'a>(app: &'a SolveApp, status: Option<&str>) -> &'a str {
-    app.tr(match status {
+    app.tr_by_id(match status {
         Some("native_appearance") => "render.library_appearance_available",
         Some("native_composition") => "render.availability_native",
         Some("implemented_pending_batch_validation") => "render.availability_projection",
@@ -2595,7 +2595,7 @@ mod studio_browser_tests {
             assert!(
                 controls.iter().any(|control| {
                     matches!(&control.target, HostControlTarget::Pointer(HostPointerTarget::Header { instance }) if *instance == library.instance)
-                        && control.accessible_name == h.app.tr(key)
+                        && control.accessible_name == h.app.tr_by_id(key)
                 }),
                 "missing library title for {stage}"
             );

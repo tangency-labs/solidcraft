@@ -123,7 +123,7 @@ pub(super) fn profile_for_size(app: &SolveApp, width: u64, height: u64) -> Optio
 
 /// The translated name of a profile, as the profile selector shows it.
 pub(super) fn budget_name(app: &SolveApp, budget: CpuBudget) -> &str {
-    app.tr(budget_key(budget))
+    app.tr_by_id(budget_key(budget))
 }
 
 fn budget_key(budget: CpuBudget) -> &'static str {
@@ -137,7 +137,7 @@ fn budget_key(budget: CpuBudget) -> &'static str {
 fn budget_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     let budgets = CpuBudget::ALL;
     let mut selected = budgets.iter().position(|b| *b == app.render_workspace.view.raytrace.budget).unwrap_or(0);
-    let labels = budgets.map(|b| app.tr(budget_key(b)).to_string());
+    let labels = budgets.map(|b| app.tr_by_id(budget_key(b)).to_string());
     let response = ui.scope(|ui| {
         ui_kit::segmented(
             ui,
@@ -203,7 +203,7 @@ pub(super) fn progressive_controls(app: &mut SolveApp, ui: &mut egui::Ui) -> boo
         } else {
             let key = if selected == 1 { "render.cpu_progressive_always" } else { "render.cpu_fixed_retained" };
             ui_kit::row(ui, tr!(app, "render.children.sampling"), |ui| {
-                ui_kit::text(ui, app.tr(key), ui_kit::Text::Inline);
+                ui_kit::text(ui, app.tr_by_id(key), ui_kit::Text::Inline);
             });
             if selected == 0 {
                 let reason = progressive_adoption_reason(app);
@@ -560,7 +560,7 @@ pub(super) fn params(app: &SolveApp, params: &mut Value) -> Result<(), String> {
         let maximum = if view.environment == Environment::Sky { 100.0 } else { 64.0 };
         if !view.intensity.is_finite() || !(0.0..=maximum).contains(&view.intensity) {
             return Err(app
-                .tr(if view.environment == Environment::Sky { "render.cpu_sky_bounds" } else { "render.cpu_environment_bounds" })
+                .tr_by_id(if view.environment == Environment::Sky { "render.cpu_sky_bounds" } else { "render.cpu_environment_bounds" })
                 .to_string());
         }
         match view.environment {
@@ -598,7 +598,7 @@ pub(super) fn controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         ("render_cpu_environment", "render.cpu_environment", 1),
         ("render_cpu_lights", "render.cpu_lights", 2),
     ] {
-        let title = app.tr(key).to_string();
+        let title = app.tr_by_id(key).to_string();
         ui_kit::section(ui, id, &title, false, |ui| match section {
             0 => reflection_controls(app, ui),
             1 => environment_controls(app, ui),
@@ -626,7 +626,7 @@ pub(super) fn reflection_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
             ReflectionMode::Mirror => "render.cpu_reflection_mirror",
             ReflectionMode::RoughSpecular => "render.cpu_reflection_rough",
         };
-        let label = app.tr(selected).to_string();
+        let label = app.tr_by_id(selected).to_string();
         let mode_control = ui_kit::dropdown_menu(ui, ("cpu_reflection_mode", &entry.body), &label, |ui| {
             for (mode, key) in [
                 (None, "render.cpu_reflection_off"),
@@ -634,7 +634,7 @@ pub(super) fn reflection_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
                 (Some(ReflectionMode::RoughSpecular), "render.cpu_reflection_rough"),
             ] {
                 let enabled = mode.is_none() || binding_current(app, &entry.body);
-                if ui.add_enabled_ui(enabled, |ui| ui_kit::list_picker(ui, key, app.tr(key), mode == Some(entry.mode))).inner.clicked() {
+                if ui.add_enabled_ui(enabled, |ui| ui_kit::list_picker(ui, key, app.tr_by_id(key), mode == Some(entry.mode))).inner.clicked() {
                     if let Err(error) = set_reflection(app, &entry.body, mode) {
                         app.set_status(error, true);
                     }
@@ -708,7 +708,7 @@ pub(super) fn environment_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         Environment::Sky => "render.studio_sky",
         Environment::Hdr => "render.studio_hdr",
     };
-    let label = app.tr(key).to_string();
+    let label = app.tr_by_id(key).to_string();
     ui_kit::dropdown_menu(ui, "cpu_environment_kind", &label, |ui| {
         for (value, key) in [
             (Environment::None, "render.cpu_environment_none"),
@@ -716,7 +716,7 @@ pub(super) fn environment_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
             (Environment::Sky, "render.studio_sky"),
             (Environment::Hdr, "render.studio_hdr"),
         ] {
-            if ui_kit::list_picker(ui, key, app.tr(key), value == selected).clicked() {
+            if ui_kit::list_picker(ui, key, app.tr_by_id(key), value == selected).clicked() {
                 app.render_workspace.view.cpu.environment = value;
                 ui.close();
             }

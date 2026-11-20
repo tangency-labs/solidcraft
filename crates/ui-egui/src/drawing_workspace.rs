@@ -352,7 +352,7 @@ pub(crate) fn edit_in_place(app: &mut SolveApp, object: u64, at: egui::Pos2) -> 
     if !placing_dimension(app) {
         close_panel(app);
     }
-    crate::dim_view::edit_sheet_text(target, solidcraft_ui_text::tr(title), text, at);
+    crate::dim_view::edit_sheet_text(target, solidcraft_ui_text::tr_by_id(title), text, at);
     true
 }
 
@@ -438,7 +438,7 @@ pub(crate) fn valid_sheets_visibility(value: &str) -> bool {
 }
 
 pub(crate) fn sheets_visibility_choice(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let choices = SHEETS_VISIBILITY.map(|(_, label)| app.tr(label).to_string());
+    let choices = SHEETS_VISIBILITY.map(|(_, label)| app.tr_by_id(label).to_string());
     let choices = choices.each_ref().map(String::as_str);
     let current = SHEETS_VISIBILITY.iter().position(|(key, _)| *key == app.preferences.drawing_sheets_visibility).unwrap_or_default();
     let mut selected = current;
@@ -1407,7 +1407,7 @@ mod tests {
             let spec = solidcraft_engine::find_command(id).unwrap();
             assert!(crate::toolbar::coming_soon(&h.app, spec), "{id} opens nothing yet: faded, coming soon");
         }
-        assert_eq!(h.app.tr("ui.drawing_ribbon.planned"), "Coming soon");
+        assert_eq!(h.app.tr_by_id("ui.drawing_ribbon.planned"), "Coming soon");
     }
 
     /// A drawing's views and notes are picked, selected all, cleared and deleted with the model's

@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use crate::dialogs::{Dialog, Kind};
 use crate::dialogs_sheet::{ANGLE_DISPLAYS, RELIEF_SHAPES, RULE_FIELDS, Sm, design_rules};
 use crate::ui_kit::{self, Text};
-use solidcraft_ui_text::tr;
+use solidcraft_ui_text::tr_by_id;
 
 const MAX_RULES: usize = 64;
 /// The longest rule name `sheet.manage_rules` takes.
@@ -480,7 +480,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, d: &mut Dialog, library: &mut Library, doc
         if state.prompt.is_none()
             && let Some(error) = state.error
         {
-            ui_kit::text(ui, tr(error), Text::Report("personal_sheet_rules_error", true));
+            ui_kit::text(ui, tr_by_id(error), Text::Report("personal_sheet_rules_error", true));
         }
     });
     ui.ctx().data_mut(|data| data.insert_temp(id, state));
@@ -500,7 +500,7 @@ pub(crate) fn name_prompt(ctx: &egui::Context, d: &mut Dialog, library: &mut Lib
     let id = panel_id();
     let mut state = ctx.data_mut(|data| data.get_temp::<PanelState>(id)).unwrap_or_default();
     let Some(mut prompt) = state.prompt.take() else { return false };
-    let title = tr(if prompt.renaming { "sheet.personal_rules.rename" } else { "sheet.personal_rules.save" });
+    let title = tr_by_id(if prompt.renaming { "sheet.personal_rules.rename" } else { "sheet.personal_rules.save" });
     let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("personal_sheet_rule_name"), "save", title)
         .actions(if prompt.renaming { tr!("sheet.personal_rules.rename") } else { solidcraft_ui_text::tr_label("Save") }, "Cancel", None)
         .show(ctx, true, |ui| {
@@ -513,7 +513,7 @@ pub(crate) fn name_prompt(ctx: &egui::Context, d: &mut Dialog, library: &mut Lib
                 prompt.name.truncate(end);
             }
             if let Some(error) = state.error {
-                ui_kit::text(ui, tr(error), Text::Report("personal_sheet_rules_name_error", true));
+                ui_kit::text(ui, tr_by_id(error), Text::Report("personal_sheet_rules_name_error", true));
             }
         });
     ctx.input_mut(|input| {
