@@ -661,22 +661,49 @@ fn a_pole_past_the_range_is_a_pole_within_the_reach() {
 }
 
 #[test]
-fn a_rational_net_past_the_range_is_refused() {
-    let mut rows = vec![
+fn a_rational_net_a_little_past_one_range_is_answered_and_past_both_or_far_past_refused() {
+    let rows = vec![
         vec![([0.0, 0.0, 0.0], 1.0), ([0.0, 1.0, 0.0], 1.0)],
         vec![([1.0, 0.0, 0.0], 1.0), ([1.0, 1.0, 0.0], 2.0)],
     ];
-    let s = spline([1, 1], &rows);
-    assert!(matches!(
-        collapse_near(&s, [1.1, 0.5], 1.0),
-        Err(EvalError::OffRange(_))
-    ));
-    rows[1][1].1 = 1.0;
     let s = spline([1, 1], &rows);
     assert_eq!(
         collapse_near(&s, [1.0 + 1e-3, 0.5], 1.0).unwrap(),
         Collapse::Neither
     );
+    // A hair past, as a file's trims end on a rational patch: a shift of its order.
+    let (near, delta) = onto_range(&s, [0.5, 1.0 + 1e-7]).unwrap().unwrap();
+    assert_eq!(near, [0.5, 1.0]);
+    assert!(delta > 0.0 && delta < 1e-5, "{delta}");
+    // Past both ranges the strip across is off its range too.
+    assert!(matches!(
+        collapse_near(&s, [1.0 + 1e-3, 1.0 + 1e-3], 1.0),
+        Err(EvalError::OffRange(_))
+    ));
+    // Far past, the shift is not under the reach.
+    assert!(collapse_near(&s, [3.0, 0.5], 1.0).is_err());
+}
+
+#[test]
+fn a_rational_overrun_shift_covers_a_circles_speed() {
+    // A quarter of the cylinder of radius 3 about z, height 2, as a rational quadratic: its
+    // speed along u at the end is 2 w 3 ≈ 4.24 (the end control leg times the degree and the
+    // weights' ratio).
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let s = spline(
+        [2, 1],
+        &[
+            vec![([3.0, 0.0, 0.0], 1.0), ([3.0, 0.0, 2.0], 1.0)],
+            vec![([3.0, 3.0, 0.0], w), ([3.0, 3.0, 2.0], w)],
+            vec![([0.0, 3.0, 0.0], 1.0), ([0.0, 3.0, 2.0], 1.0)],
+        ],
+    );
+    let o = 1e-4;
+    let (near, delta) = onto_range(&s, [1.0 + o, 0.5]).unwrap().unwrap();
+    assert_eq!(near, [1.0, 0.5]);
+    // At least twice the overrun times the circle's speed at its end, and not loose by much.
+    assert!(delta >= 2.0 * o * 2.0 * w * 3.0, "{delta}");
+    assert!(delta < 2.0 * o * 20.0, "{delta}");
 }
 
 #[test]

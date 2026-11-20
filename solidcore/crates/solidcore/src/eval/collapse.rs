@@ -861,7 +861,7 @@ pub fn collapse(s: &EvalSurface, uv: [f64; 2], reach: f64) -> Result<Collapse, E
 /// at most `reach − δ` there has one of at most `reach` at `uv` (the triangle inequality), and
 /// a pole answered is a pole within `reach`. A shift not under `reach` (at no reach, any shift)
 /// is refused ([`EvalError::OffRange`], `OffRangeBeyondReach`), never answered; so is a
-/// rational net off the range. Parameters on the range, a closed direction (wrapped by whole
+/// rational net off both ranges. Parameters on the range, a closed direction (wrapped by whole
 /// periods: the same point), and any other surface go to [`collapse`] unchanged.
 pub fn collapse_near(s: &EvalSurface, uv: [f64; 2], reach: f64) -> Result<Collapse, EvalError> {
     check(uv, reach)?;
@@ -894,8 +894,10 @@ pub fn collapse_near(s: &EvalSurface, uv: [f64; 2], reach: f64) -> Result<Collap
 /// `f`. Every point of an iso-line through `uv` along `f` is then within `o_e` times that of the
 /// line through the nearest point (moving across `e`), and the piece of an iso-line along `e`
 /// past the range within the same of its end; `δ` is twice the sum over the directions, rounded
-/// up. A strip with a weight other than the net's first, or not positive, is refused
-/// ([`EvalError::OffRange`]): a rational continuation is not bounded here.
+/// up. Where a strip has a weight other than the net's first and `uv` is off along one direction
+/// only, the shift is instead bounded on the strip between `uv` and the nearest point along it
+/// and the whole range across ([`rational_partial_bound`]); off both ranges, or with a weight
+/// not positive, it is refused ([`EvalError::OffRange`]).
 fn onto_range(s: &EvalSurface, uv: [f64; 2]) -> Result<Option<([f64; 2], f64)>, EvalError> {
     let EvalSurface::Nurbs(n) = s else {
         return Ok(None);
@@ -956,6 +958,49 @@ fn onto_range(s: &EvalSurface, uv: [f64; 2]) -> Result<Option<([f64; 2], f64)>, 
             uv[0], uv[1]
         ))
     };
+    // Whether a strip the bound below takes (each overrun direction's end span along it, the
+    // whole range across) has a weight other than the net's first.
+    let mut weighted = false;
+    for e in 0..2 {
+        if off.get(e).copied().unwrap_or(0.0) == 0.0 {
+            continue;
+        }
+        let (p, first) = (get(&deg, e), span.get(e).ok_or_else(bad)?.0);
+        for i in first..=first + p {
+            for j in 0..get(&count, 1 - e) {
+                let (iu, iv) = if e == 0 { (i, j) } else { (j, i) };
+                let at = iv.checked_mul(nu).and_then(|x| x.checked_add(iu));
+                let w = at.and_then(|x| ctrl.get(x)).ok_or_else(bad)?[3];
+                weighted |= w != w0;
+            }
+        }
+    }
+    if weighted {
+        // Off along one direction `e` only, the surface between `uv` and the nearest point moves
+        // by at most `o_e B + 2ε` over the strip between them along `e` and the whole range
+        // across ([`rational_partial_bound`]); twice that, rounded up. Off both ranges the strip
+        // across is off its range too, which the bound does not take: refused, as a pcurve past
+        // both ranges of a rational patch is.
+        let e = match off {
+            [o, 0.0] if o > 0.0 => 0,
+            [0.0, o] if o > 0.0 => 1,
+            _ => return Err(rational()),
+        };
+        let (o, x, t) = (
+            off.get(e).copied().ok_or_else(bad)?,
+            near.get(e).copied().ok_or_else(bad)?,
+            q.get(e).copied().ok_or_else(bad)?,
+        );
+        let along = if t < x { [x - o, x] } else { [x, x + o] };
+        let (pf, mf, kf) = (get(&deg, 1 - e), get(&count, 1 - e), kn(1 - e));
+        let across = [*kf.get(pf).ok_or_else(bad)?, *kf.get(mf).ok_or_else(bad)?];
+        let (bound, eps) = rational_partial_bound(s, e, along, across, f64::INFINITY)?;
+        let delta = 2.0 * (o * bound + 2.0 * eps) * (1.0 + gamma(4));
+        if !delta.is_finite() {
+            return Err(refused("a shift onto the knot range is not finite"));
+        }
+        return Ok(Some((near, delta)));
+    }
     // Control point `i` along e, `j` across, as a Euclidean point of the one weight w0.
     let point = |e: usize, i: usize, j: usize| -> Result<Vec3, EvalError> {
         let (iu, iv) = if e == 0 { (i, j) } else { (j, i) };
