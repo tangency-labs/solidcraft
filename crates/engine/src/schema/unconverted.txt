@@ -6,4 +6,3 @@ solid.draft
 solid.hole
 solid.loft
 solid.shell
-solid.thread

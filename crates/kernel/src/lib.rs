@@ -114,6 +114,7 @@ mod pinch_tests;
 mod planar_faces_tests;
 mod plane_fit;
 mod point_path;
+pub mod point_thread;
 mod polybool;
 mod polyhedron;
 mod prism;
@@ -214,7 +215,7 @@ pub use loft_blend::loft_blend;
 pub use matchsurf::{match_surface, seam_continuity};
 pub use measure::{BodyMeasure, MassMeasure, measure, measure_mass};
 pub use mesh_convert::convert_prismatic_mesh;
-pub use meshbody::{MAX_TRIANGLES, mesh_body, mesh_body_with_normals};
+pub use meshbody::{MAX_TRIANGLES, mesh_body, mesh_body_with_normals, triangle_edges_closed};
 pub use native::{body_from_smlib, smlib_body};
 pub use native::{brep_record, decode_native_body, encode_native_body, native_preview_mesh};
 pub use offset::with_same_surface;
@@ -263,7 +264,10 @@ pub use tolerance_heal::{
     HealFailure, HealPreferenceForTests, ToleranceHeal, heal_preference_for_tests, heal_tolerance_defects, heals_tolerance_defects,
     set_heals_tolerance_defects,
 };
-pub use topo::{CylinderFace, cylinder_between_rims, cylinder_end_at, cylinder_face, cylinder_face_at, material_in_ring};
+pub use topo::{
+    CylinderFace, ThreadFace, cylinder_between_rims, cylinder_end_at, cylinder_face, cylinder_face_at, has_thread_point, material_in_ring,
+    thread_face_at, thread_point,
+};
 pub use topo::{TopoCounts, merged_topology, seam_flags, whole_edge};
 pub use tspline::tspline_sheet;
 pub use validation::{CheckFailure, FailedTest, KeptCheck, Validation, check_kept, detach_kept, failing_check, validating};
