@@ -815,8 +815,13 @@ impl Body {
             Ok(b) => Ok(self.smlib.keep(b, releases)),
             Err(e) => {
                 let why = Refusal::of(&self.record, &e);
-                // A record that gave its form before is not refused by this failure.
-                Err(self.smlib.refuse(why.clone()).map_or_else(|| refused(&why), refused))
+                // A record that gave its form before is not refused by this failure. It says
+                // nothing of the record, so it is the kernel's own error: no feature keeps it
+                // as its result, and the next use makes the form again.
+                Err(self
+                    .smlib
+                    .refuse(why.clone())
+                    .map_or_else(|| KernelError::Internal(format!("SMLib: {} (the body's form was made before)", why.why)), refused))
             }
         }
     }
