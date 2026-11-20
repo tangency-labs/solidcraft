@@ -439,8 +439,12 @@ tolerance is at least twice the distance from its point to the end of each curve
 a distance between two computed points, exact to rounding, whatever the points lie on (a
 construction's bound, §8 there). After the imprint each vertex a definition made is given that
 tolerance (`certified_vertex_gaps`, `topology_intersector/p1.rs`), and only while its ball stays
-clear of the far vertex of each of its edges, that vertex taken at its own grown tolerance: a
-vertex cannot stand for both ends of an edge. For a definition placed exactly (each source a
+clear of the far vertex of each of its edges, that vertex taken at its own grown tolerance (or at
+the tolerance a growing edge of it passes on to its ends, whichever is larger): a vertex cannot
+stand for both ends of an edge. The tolerance a growing edge passes on is judged the same way at
+each end it raises and at every vertex that end becomes one with. The two operands' vertices of one definition become one, which
+takes the larger tolerance of the two, so each ball is judged at that one, about its own point,
+and the two are covered together or not at all. For a definition placed exactly (each source a
 vertex, a line edge or a plane face) the gap is all there is to cover, so its edges grow to their
 own ends' gaps too and a ball that is not clear is refused (`MergedVertexReaches`). Any other
 vertex keeps its tolerance where its ball is not clear (`covers_staying_clear`): the points of
@@ -468,7 +472,9 @@ the merges before (a sheet shelled by exactly two tolerances lost one of its fou
 A vertex's tolerance grows the same way, as the curves that end at it are imprinted, so each of the
 two vertices is read with the ball that covers the asked curve's own end there, twice its distance
 from the vertex's point (what the vertex has once that curve is an edge: "What a vertex stands
-for"), where that is more than its stored tolerance. `SmEdgeDefinition::Imprint` then takes the
+for"), where that is more than its stored tolerance and the ball stays clear of the vertex's far
+vertices, the curve's other end among them (two balls that hold a whole edge between them would
+prove any curve along it). A curve the proof cannot enclose (a composite curve) is no edge. `SmEdgeDefinition::Imprint` then takes the
 edge and makes no second one beside it, in either operand (`face_edge_proved_to_be`,
 `proto_topology/p2.rs`; `find_edge_proved_along`, `geom/tools.rs`). The proof is an enclosure, never
 samples (`Curve::proved_together`, `curve/proximity.rs`): each curve is cut into pieces, a piece is
@@ -491,6 +497,24 @@ lies in the vertex's ball (4.3e-5) or within 1.6e-5 of its half of the edge, and
 Read with the tolerance the vertex had when the circle was asked (1e-5), the two halves were
 second edges and the two slivers of the box face between them (5.5e-10 each) faces of the
 intersection and the difference, whose edges the face check takes for coincident.
+
+**An edge in a face, off it by more than the zone tolerance.** An edge of one operand can lie in
+a face of the other within its own tolerance but further than the system zone tolerance from it:
+a revolved tool's rim (radius 2.1000073) in a 2.1 mm hole's wall, the revolve axis 1.2e-5 off the
+hole's, so the rim is 4.6e-6 to 1.9e-5 from the wall (#17527). Both of the tool's faces at the rim
+meet the wall along it, each in a curve of its own (the disc's plane in the wall's circle, the
+cone's in a marched curve), and their proto edges overlap. `ResolveOverlappingProtoEdges` replaces
+the overlapping ones with the rim's own curve classified against the wall. Upstream classifies it
+within the proto topology's tolerance, half the zone tolerance, where the rim lies in the wall
+nowhere: the overlapping pieces were deleted, nothing replaced them, and the cut failed in
+`make_faceuse`. The rim is now classified within its own tolerance where that is the larger, as
+the face pairs classified it. The replacement then holds every piece of the rim in the wall, so
+a piece of the same rim and wall that the overlap test (ends dropped within the zone tolerance)
+did not find goes with the group too; left beside its replacement, it was imprinted twice and the
+rim was related to both copies ("another entity is already related to the other one";
+`absorb_pieces_of_edge_in_face`, `proto_topology/p3.rs`). A rim further off than its tolerance
+somewhere is still not one edge with the wall: with the axis 1.3e-5 off, the cut leaves a sliver
+face that fails the check.
 
 **Seams and poles.** A tolerance band says where a boundary of material may lie. A seam (an edge
 with the same face on both sides: `face_on_both_sides`, `topology/edge.rs`) and a pole (a vertex
@@ -529,6 +553,15 @@ reach counts: the seam edge that then stands for the curve has to hold it within
 A classification reads the reach of its two surfaces (`SetIntersectData`) the first time it meets
 a seam or a pole (`source_reach_in`); the face intersection sets it for its curves
 (`intersection_curve_reach`, `topology/face/p3.rs`).
+
+A face without a seam has no pole either: a pole's edges are all seams of the face. The face
+intersection finds once whether each face has a seam edge (`face_has_seam`, `query/face/p2.rs`)
+and keeps the answer while the face's B-rep is unchanged (`FaceIntersectCaches`); on a face
+without one, its curves' classifications ask no edge whether it is a seam and no vertex whether
+it is a pole (`face_known_seam_free`, `intersect/curve_class/p1.rs`). Asking for every curve
+grew with the curves times the face's edges, the square of a face that meets as many faces as it
+has edges (`WorkCounters::seam_tests`, counted in
+`a_plate_joined_onto_its_top_tests_each_face_for_a_seam_once`).
 
 A stretch of the curve along a seam is what the curve/edge intersector finds within the reach. It
 reports a stretch only where all of it lies within the distance it is given, and the seam's end is
@@ -595,7 +628,7 @@ What the port does today:
   outside), far beyond δ, while the circles stay within δ of each other between them; each
   crossing is fixed along the wall only to the tolerance over the crossing angle, so the two
   cannot be told apart. `circle_coplanar_circle_intersect_in_contact`
-  (`geom/geom_utility/p1.rs`) takes an overlap below a contact tolerance of its own as one
+  (`geom/geom_utility/p1.rs`) takes an overlap up to a contact tolerance of its own as one
   touching point midway between their nearest points, apart from the near-miss band in which
   circles that far apart touch. On the boolean's path every site that decides the contact
   passes the same contact tolerance, `contact_tol_3d` (`geom/tol.rs`: the system zone
@@ -612,8 +645,46 @@ What the port does today:
   it) cross in two lines at every site and are still refused as not a solid, as before; with
   the intersection tolerance as the contact tolerance they came out a valid solid that kept the
   second tool whole, as a void.
+  Two more sites read the same contact where a surface intersection meets such a lens. The
+  surface intersection of a curved face with a wall standing on the other face's flat (a
+  ball cut flat, or a half torus, under a boss a hair past its rim) finds the lens where it
+  meets the faces' boundaries, at its two crossings, as isolated points, each on an edge of
+  both faces; with no curve through it, a point classified onto an edge of each operand is
+  the crossing of those two edges, and where they are circles in one plane that touch by the
+  contact rule it is their touching point (`touch_of_edges`, `proto_topology/p3.rs`, before
+  the proto vertex is looked for). And a flat face's domain is the box of its trims, so a
+  side of it runs along the face's round edge where that edge reaches the box: the plane's
+  section of a cylinder or cone standing on the face, a circle a hair past the edge, was
+  cut at the side, its two ends the lens's half length off the touch; it now touches that
+  side when it overlaps it by up to the contact tolerance, where both surfaces are
+  faces' (`Plane::make_new_plane_ellipse_in_contact`, `surface/plane/p2.rs`, from
+  `surface/cone/p3.rs`). Either left the crossings as vertices of their own beside the
+  touch, or curves ending there, so the union of such a boss failed or kept a vertex a
+  crossing away (`boolean_api.rs`, `a_boss_a_hair_past_a_cut_balls_rim_joins`;
+  `solidcore-ops` `boolean.rs`, the half torus's seam).
   Parallel cones (drill points) are met by the marching intersection and are not decided this
   way, nor are coplanar faces bounded by such circles.
+- **A contact at the tolerance.** Each site decides the contact from its own copy of the two
+  curves (an edge's circle, a face pair's intersection curve, an osculating circle), the same
+  curves by different constructions, a few roundings of their coordinates apart. A boss placed
+  exactly the tolerance over a rim (stress corpus S0051) read its overlap as 9.99999999962e-6 at
+  some sites and 1.0000000000673e-5 at others: a touch at one, two crossings 0.0148 apart at
+  another, and the merge then related the operands' edges across the lens both ways. So the
+  contact is read once, by one predicate, `within_contact_tol` (`geom/tol.rs`): a distance is
+  within the contact tolerance unless proved past it by more than the rounding the copies can
+  differ by (γ₃₂ of the largest coordinate), as two points are one unless proved apart ("One
+  point or two", §5). Every site that decides a contact reads it: the circle/circle and
+  line/circle intersections in contact (`geom/geom_utility/p1.rs`), and through them the walls
+  of parallel cylinders, the edge/curve circles, the classifier's osculating circles and the
+  touching point of two edges (`touch_of_edges`); the plane's section touching a side of its
+  domain (`surface/plane/p2.rs`); and the plane's tangent line on a cylinder or a cone's
+  generator (`surface/cone/p3.rs`, with the faces' zone tolerance). A contact at the tolerance
+  is a touch at every site; one proved past it crosses at every site. What remains open (§10):
+  circles overlapping by more than the contact tolerance and up to the intersection tolerance
+  cross at every site, as above, and two such holes are refused as not a solid; and at a small
+  zone tolerance the marching intersection of a wall with the other face can trace a curve
+  inside the lens, from the touch to a crossing along both edges (a boss 5e-8 past a rim at a
+  zone tolerance of 1e-7), which the contact does not end.
 - **A curve ending tangent to an edge.** A curve that touches an edge in contact of high order
   (where a wall's intersection with a top tangent to the floor ends on the floor's arc, apart from
   it as the fourth power of the distance) stays within the scaled zero of the edge for a while
@@ -678,9 +749,13 @@ volume, the same edges on the round, and every such edge on S within its own tol
 - A traced SSI curve's UV curves are cubic Hermite interpolants, checked at samples and not certified
   ([ssi.md](ssi.md) §6.1); the imprint passes a copy of them to `MakeEdgeInFace`
   (`topology_intersector/p1.rs`, "Intersection trims").
-- A face B gives to A is built without B's own trims and gets new ones, unless
-  `keep_operand_uv_trims` copies them where the new edge runs on a copy of B's edge curve
-  (`merge/p2.rs`).
+- A face B gives to A is built without B's own trims; they are copied over where the new edge
+  runs on a copy of B's edge curve over the same interval (`merge/p2.rs`), and the other edge
+  uses get new ones. The copy is made only onto an edge `MergeEdge` copied from B's own edge
+  (an edge the intersection made keeps its dropped trim, unless B's trim ends at a
+  singularity of the surface, where the drop finds no parameter), only when the new edge's
+  tolerance is at least B's, never for a line edge on a plane (`Plane::drop_curve` is exact
+  there), and only when the surface copy keeps B's parameterisation.
 
 ## 8. Failure modes and refusals
 
@@ -747,8 +822,8 @@ A reviewer can check each of these on a change to the boolean.
 - The rig: 130 boolean cases in `solidcore/tests/kernel_cases/booleans/`, two listed in
   `known_failing.json` (the two 3012 sliver cases: the kernel absorbs the 1e-4 wide faces, so it
   returns 8 faces, 18 edges and 12 vertices instead of 10, 24 and 16; #15669).
-- Opt-in fix for the cases in §5, §6 and §8: `keep_operand_uv_trims`
-  (`solidcore/src/kernel.rs`). Always on: the union's solid-leak refusal (WR-619), a boolean
+- No opt-in fixes are left for the cases in §5, §6 and §8. Always on: the operand's exact trims on
+  a face B gives to A (WR-361), the union's solid-leak refusal (WR-619), a boolean
   vertex placed again by a later edge crossing with a smaller misplacement bound (gap over sine) only
   where a certificate proves the move stays one point (WR-410, §5), the outer shell first, the clean-up of slits and the split of a coincident
   definition across a split point (WR-533). Every boolean, 3D included, skips the face pairs
@@ -766,6 +841,12 @@ A reviewer can check each of these on a change to the boolean.
 - Exact pcurves for sphere, cone and torus sections, so that exact edges stop carrying fitted trims
   (§7).
 - Refusals that name the cause and the place in the body, in place of bare `SM_ERR`.
+- Circles overlapping past touching by more than the contact tolerance and up to the
+  intersection tolerance cross at every site, and two such holes are refused as not a solid
+  (§6, "Circles a hair less than tangent").
+- A curve the marching intersection traces inside a lens of two circles in contact, from the
+  touch to a crossing along both edges (a boss 5e-8 past a rim at a zone tolerance of 1e-7),
+  is kept as a curve; the contact makes it no event (§6).
 
 ## 11. If you're stuck
 

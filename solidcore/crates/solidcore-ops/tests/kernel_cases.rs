@@ -44,6 +44,13 @@
 //! - `KERNEL_CASES_REPORT_ONLY`: set, the test reports without failing;
 //! - `KERNEL_CASES_SMB`: a directory to write each run case's bodies to as `<case>.smb`, for
 //!   its render (`solidcore-diag`): the final bodies, or the inputs of the refusal that ends it.
+//!
+//! One entry from outside the corpus (a reported failure's case, `docs/failure-codes-and-reproduction.md`
+//! 3.4) replays with `KERNEL_CASES_ENTRY=<path to its .json>` (its records beside it) through
+//! the test `kernel_case_entry` (which does nothing without it): it prints the outcome as a JSON line, `same failure` when the
+//! call that fails fails with the entry's failure code (the failing call's `code`), `other
+//! failure`, `builds now`, or `unsupported`, and fails unless it is `same failure` (or
+//! `KERNEL_CASES_REPORT_ONLY` is set). `KERNEL_CASES_REPORT` writes the line to a file too.
 
 #![allow(
     clippy::unwrap_used,
@@ -78,7 +85,7 @@ use solidcore_ops::sweep::{
     Ends, SweepFrame,
 };
 use solidcore_ops::untrim::{untrim_face, Holes};
-use solidcore_ops::{make_sphere, offset, session, Body, Order};
+use solidcore_ops::{make_sphere, offset, session, Body, FailureCode, Order};
 use solidcore_record::brep::{Brep as Record, Frame, Surface as RecordSurface};
 
 fn corpus() -> PathBuf {
@@ -1383,14 +1390,29 @@ fn run_case_with_records(
                     bodies.insert(name.to_owned(), body);
                 }
             }
-            // A handled refusal is an attempt, not the case's outcome. Keep checking the
-            // later operations and final geometry; an unmarked refusal still ends the case.
-            (Err(_), Some(_)) if continued => {}
-            (Err(_), Some(_)) => {
-                write_smb(e, &ins);
-                return Ok(None);
+            (Err(x), Some(_)) => {
+                // what the call failed with, for a replay that compares failure codes
+                REFUSED.with(|r| r.set(session::take_failure_code()));
+                // An entry may name the refusal it expects (`refused_as`, a part of the
+                // error's text): any other error, such as a blend that fails inside instead of
+                // being refused, does not stand for it, whether the refusal was handled or not.
+                if let Some(kind) = c.get("refused_as").and_then(Value::as_str) {
+                    if !x.contains(kind) {
+                        write_smb(e, &ins);
+                        return Err(Stop::Fail(format!(
+                            "call {i} ({op}) failed where the rig's was refused as \"{kind}\": {x}"
+                        )));
+                    }
+                }
+                // A handled refusal is an attempt, not the case's outcome. Keep checking the
+                // later operations and final geometry; an unmarked refusal still ends the case.
+                if !continued {
+                    write_smb(e, &ins);
+                    return Ok(None);
+                }
             }
             (Err(x), None) => {
+                REFUSED.with(|r| r.set(session::take_failure_code()));
                 write_smb(e, &ins);
                 return Err(Stop::Fail(format!("call {i} ({op}) refused: {x}")));
             }
@@ -1486,30 +1508,35 @@ fn run_case_with_records(
 }
 
 /// The cases whose volume moved off the rig's when `brep_volume` began closing tolerant
-/// edges' gaps (#16735), with their volume now. The rig's records stay as measured (its
+/// edges' gaps (#16735), with their volume now. The three peg cases a second round runs along
+/// are at their volume since a round is fitted as finely as its edge is known: nearer the
+/// volume they converge to as the fit tightens than before (each listed with the sequence). The rig's records stay as measured (its
 /// integrator leaked through the gaps as this one did); each case is graded on its volume
 /// now, and the move from the rig's is checked within the old leak's bound on the result
 /// ([`moved_from_the_rig`]).
 const CLOSED_GAP_VOLUMES: [(&str, f64); 5] = [
-    // rig 9440.034329164451
+    // rig 9440.034329164451; the fit at 1/4, 1/10 and 3/100 of this one gives .0337164,
+    // .0337117, .0337089 (before: .0336361, farther from where they go)
     (
         "report-peg-concave-round-r3-then-front-round-r1-5",
-        9_440.033_636_074_577,
+        9_440.033_737_473_757,
     ),
     // rig 9404.790032915605
     (
         "report-peg-concave-round-then-front-round-r2",
         9_404.789_833_109_295,
     ),
-    // rig 9432.862095990427
+    // rig 9432.862095990427; the fit at 1/4, 1/10 and 3/100 of this one gives .862192,
+    // .862211, .862224 (before: .861780, farther from where they go)
     (
         "report-peg-front-round-r1-5-then-concave-round-r3",
-        9_432.861_779_882_673,
+        9_432.862_047_183_242,
     ),
-    // rig 9399.383292771683
+    // rig 9399.383292771683; the fit at 1/4, 1/10 and 3/100 of this one gives .383242,
+    // .383255, .383262 (before: .383030, farther from where they go)
     (
         "report-peg-front-round-then-concave-round-r2",
-        9_399.383_029_676_488,
+        9_399.383_180_752_53,
     ),
     // rig 112506.83949124035
     (
@@ -1947,6 +1974,36 @@ fn handled_refusal_case() -> Value {
         "expected": {"body_count": 1, "volume_mm3": 4.0 * std::f64::consts::PI / 3.0,
                      "tolerance": {"rel": 1e-9}}
     })
+}
+
+#[test]
+fn a_named_refusal_kind_must_match_the_replayed_error() {
+    let mut e = handled_refusal_case();
+    let calls = e["calls"].as_array_mut().unwrap();
+    calls.truncate(1);
+    calls[0].as_object_mut().unwrap().remove("continued");
+    e["result"] = serde_json::json!([]);
+    // without a kind, any error stands for the traced refusal
+    assert!(matches!(run_case(Path::new("unused.json"), &e), Ok(None)));
+    e["calls"][0]["refused_as"] = serde_json::json!("no room");
+    assert!(
+        matches!(run_case(Path::new("unused.json"), &e), Err(Stop::Fail(why)) if why.contains("refused as \"no room\""))
+    );
+}
+
+#[test]
+fn a_handled_refusal_checks_its_named_kind() {
+    let mut e = handled_refusal_case();
+    e["calls"][0]["refused_as"] = serde_json::json!("no room");
+    assert!(
+        matches!(run_case(Path::new("unused.json"), &e), Err(Stop::Fail(why)) if why.contains("refused as \"no room\""))
+    );
+    // a kind the replayed error does have lets the case go on to the final geometry
+    e["calls"][0]["refused_as"] = serde_json::json!("invalid argument");
+    assert!(matches!(
+        run_case(Path::new("unused.json"), &e),
+        Ok(Some(_))
+    ));
 }
 
 #[test]
@@ -4406,6 +4463,156 @@ fn kernel_cases() {
     }
 }
 
+thread_local! {
+    /// The failure code of the last call the replay on this thread saw refused.
+    static REFUSED: std::cell::Cell<Option<FailureCode>> = const { std::cell::Cell::new(None) };
+}
+
+/// A failure code as an entry writes it: `{"call", "kind", "operation"}`.
+fn code_json(c: &FailureCode) -> Value {
+    serde_json::json!({"call": c.call, "kind": c.kind, "operation": c.operation})
+}
+
+/// The outcome of replaying `e`, a single entry at `entry`, against the failure code its failing
+/// call records: `same failure`, `other failure`, `builds now` or `unsupported`, as a JSON object
+/// with the code the replay failed with and the entry's.
+fn replay_entry(entry: &Path, e: &Value) -> Value {
+    let expected = e["calls"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .rev()
+        .find(|c| {
+            c["error"].is_string() && c.get("continued").and_then(Value::as_bool) != Some(true)
+        })
+        .map_or(Value::Null, |c| c["code"].clone());
+    REFUSED.with(|r| r.set(None));
+    let ran = run_case(entry, e);
+    let got = REFUSED.with(std::cell::Cell::take).map(|c| code_json(&c));
+    let (outcome, note) = match &ran {
+        Err(Stop::Unsupported(why)) => ("unsupported", why.clone()),
+        // the replay ended at a refusal where the entry's run did
+        Ok(None) => match &got {
+            Some(g) if !expected.is_null() && *g == expected => ("same failure", String::new()),
+            Some(_) => ("other failure", "refused with another code".to_owned()),
+            None => ("other failure", "refused without a code".to_owned()),
+        },
+        Ok(Some(_)) if expected.is_null() => ("builds now", String::new()),
+        Ok(Some(_)) => ("builds now", "the entry's failing call builds".to_owned()),
+        Err(Stop::Fail(why))
+            if got.is_none()
+                && why.starts_with("call ")
+                && why.contains("ran where the rig's refused") =>
+        {
+            ("builds now", why.clone())
+        }
+        Err(Stop::Fail(why)) => ("other failure", why.clone()),
+    };
+    serde_json::json!({
+        "case": e["case"],
+        "outcome": outcome,
+        "code": got,
+        "expected": expected,
+        "note": note,
+    })
+}
+
+/// `KERNEL_CASES_ENTRY`: one entry from outside the corpus, replayed against its failure code
+/// ([`replay_entry`]). Without it, nothing runs.
+#[test]
+fn kernel_case_entry() {
+    let Some(path) = std::env::var_os("KERNEL_CASES_ENTRY") else {
+        return;
+    };
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
+    let path = PathBuf::from(path);
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|x| panic!("KERNEL_CASES_ENTRY: {}: {x}", path.display()));
+    let e: Value = serde_json::from_str(&text)
+        .unwrap_or_else(|x| panic!("KERNEL_CASES_ENTRY: {}: {x}", path.display()));
+    let line = replay_entry(&path, &e);
+    println!("{line}");
+    if let Ok(p) = std::env::var("KERNEL_CASES_REPORT") {
+        std::fs::write(p, format!("{line}\n")).unwrap();
+    }
+    if std::env::var_os("KERNEL_CASES_REPORT_ONLY").is_none() {
+        assert_eq!(line["outcome"], "same failure", "{line}");
+    }
+}
+
+/// A 30 x 2 x 10 wall's two top edges, by their record indices, and the wall's record.
+fn wall_and_top_edges() -> (Body, Order, solidcore_record::brep::Brep, Vec<usize>) {
+    let wall = solidcore_ops::make_box([0.0; 3], [30.0, 2.0, 10.0]).unwrap();
+    let (record, order) = wall.to_record().unwrap();
+    let at = |v: u32| record.vertices[v as usize].point;
+    let top: Vec<usize> = (0..record.edges.len())
+        .filter(|&i| {
+            let [a, b] = record.edges[i].vertices.map(at);
+            a[2] == 10.0 && b[2] == 10.0 && a[1] == b[1] && a[0] != b[0]
+        })
+        .collect();
+    assert_eq!(top.len(), 2, "the wall has two top edges along x");
+    (wall, order, record, top)
+}
+
+/// A single entry outside the corpus (a reported failure's case) replays to the failure code its
+/// failing call records: the wall's top edges rounded 1.5, past the 1 its 2 wide top allows, are
+/// refused with the code the same call gives run directly; another code is another failure; a
+/// round that fits builds now.
+#[test]
+fn a_single_entry_replays_to_its_failure_code() {
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
+    let (wall, order, record, top) = wall_and_top_edges();
+    let _ = session::take_failure_code();
+    let direct = blend_ordered(
+        &wall,
+        &order,
+        Blend::Round,
+        &top,
+        &[1.5, 1.5],
+        &[],
+        Corners::Filled,
+        BlendOptions::default(),
+    );
+    assert!(direct.is_err());
+    let code = session::take_failure_code().unwrap();
+
+    let dir = std::env::temp_dir().join(format!("kernel-case-entry-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let gz = std::fs::File::create(dir.join("wall.bodies.json.gz")).unwrap();
+    let mut w = flate2::write::GzEncoder::new(gz, flate2::Compression::default());
+    std::io::Write::write_all(
+        &mut w,
+        serde_json::json!({"b1": record}).to_string().as_bytes(),
+    )
+    .unwrap();
+    w.finish().unwrap();
+    let entry = |size: f64, code: Value| {
+        serde_json::json!({
+            "case": "report-wall", "area": "reports", "records": "wall.bodies.json.gz",
+            "bodies": {"b1": {"trusted": true, "keeping_splines": true}},
+            "calls": [{"op": "blend_dropping", "inputs": ["b1"],
+                "params": {"kind": "round", "sizes": [size],
+                    "edges": {"kind": "edge", "picked": top.iter().map(|i| serde_json::json!({"index": i})).collect::<Vec<_>>()}},
+                "error": "too large", "code": code}],
+            "result": [], "operation_expressible": true,
+        })
+    };
+    let path = dir.join("wall.json");
+    let same = replay_entry(&path, &entry(1.5, code_json(&code)));
+    assert_eq!(same["outcome"], "same failure", "{same}");
+    assert_eq!(same["code"], code_json(&code), "{same}");
+    let other = FailureCode {
+        operation: "another::routine",
+        ..code
+    };
+    let differs = replay_entry(&path, &entry(1.5, code_json(&other)));
+    assert_eq!(differs["outcome"], "other failure", "{differs}");
+    let fits = replay_entry(&path, &entry(0.5, code_json(&code)));
+    assert_eq!(fits["outcome"], "builds now", "{fits}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 /// Set, a run of this binary is a case process: the case's path under the corpus.
 const CHILD: &str = "KERNEL_CASES_CHILD";
 
@@ -4861,4 +5068,53 @@ fn report(graded: &[Graded], listed: &BTreeMap<String, Listed>, not_run: usize) 
         writeln!(s, "- {}/{} [{}]: {}", g.area, g.case, l.issue, g.note).unwrap();
     }
     s
+}
+
+/// solidcraft#2992 (#17896): the disk joined with its 36 twisted lofted blades passes
+/// solidcore's own check. Where a blade's lofted (free-form) face meets the disk, the edge
+/// keeps the intersector's UV curve on that face, the curve its 3D curve was fitted from.
+/// `MakeFace`'s drop of the edge onto the loft, a second fit, gave nine trims whose radii
+/// of curvature were under the check's bound (Test #13, offsets 2.9e-5 to 9.6e-5 against
+/// tolerances 1.0e-4 to 1.2e-4), and the join was refused.
+#[test]
+fn the_disk_joined_with_its_lofted_blades_passes_the_check() {
+    session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let entry = corpus().join("crashes/2992-join-disk-and-36-twisted-loft-blades.json");
+    let e: Value = serde_json::from_str(&std::fs::read_to_string(&entry).unwrap()).unwrap();
+    let recs = records(&entry, &e);
+    // each union_all input is a tagged copy of a copy of an operand record
+    let mut from: HashMap<String, String> = HashMap::new();
+    let mut inputs = Vec::new();
+    for call in e["calls"].as_array().unwrap() {
+        let input = call["inputs"][0].as_str().unwrap().to_owned();
+        match call["op"].as_str().unwrap() {
+            "union_all" => {
+                inputs = call["inputs"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|v| v.as_str().unwrap().to_owned())
+                    .collect();
+            }
+            _ => {
+                from.insert(call["outputs"][0].as_str().unwrap().to_owned(), input);
+            }
+        }
+    }
+    let bodies: Vec<Body> = inputs
+        .iter()
+        .map(|name| {
+            let mut name = name.clone();
+            while let Some(up) = from.get(&name) {
+                name.clone_from(up);
+            }
+            let record: Record = serde_json::from_value(recs[&name].clone()).unwrap();
+            let trusted = e["bodies"][&name]["trusted"].as_bool().unwrap_or(true);
+            Body::from_record(&record, trusted).unwrap().0
+        })
+        .collect();
+    assert_eq!(bodies.len(), 37);
+    let joined = union_all(bodies).unwrap();
+    let report = joined.check(solidcore_ops::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
 }

@@ -13,6 +13,8 @@
 //! | `open_setback_springs` (private)    | `TrimAtCreases`' open setback corners' spring curves and hole edges (ef57570) |
 //!
 //! Deviations:
+//! - **Bounded sheets before sewing.** Open ends are cut and capped before the first
+//!   stitch, so independent sheets never sew their coincident continuations together.
 //! - **The sheet leaves the session.** As in the removed `subtract_removal_region`, the
 //!   sheet (the intermediate body) is taken out of the session first and edited on its own; the
 //!   target is edited in place through the session's notifications, as the fork edits
@@ -51,13 +53,15 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{invalid, FilletBody, FilletObject, FilletSession, SessionObjects};
+use super::{invalid, FilletBody, FilletExecutive, FilletObject, FilletSession, SessionObjects};
 use crate::blend::fillet_cliff_overflow::{
     cut_fillet_at_open_end, section_edge, section_end, section_end_face, Refusal, SectionEnd,
 };
 use crate::blend::fillet_corner::p3::FilletCorner;
 use crate::blend::fillet_executive::p3::NoRoomReason;
-use crate::blend::fillet_geom::p1::{FilletEdgeType, FilletErrorType, FilletGeomId};
+use crate::blend::fillet_geom::p1::{
+    FilletEdgeType, FilletErrorType, FilletGeomId, FilletSurfaceStorage,
+};
 use crate::blend::fillet_overflow::{
     creases, edge_curve, edge_on_surface, extend, in_material, make_extension_face, ExtendOutcome,
     Extension, Rail,
@@ -1224,14 +1228,193 @@ const fn refusal(
     }
 }
 
+impl SessionObjects<'_> {
+    /// Whether the intermediate sheet has an open G1 setback hole.
+    fn has_open_setback(&self, executive: &FilletExecutive<FilletObject>) -> bool {
+        executive.corners.iter().any(|c| {
+            matches!(c, FilletObject::Corner(id)
+                if self.corners.get(id.0 as usize).is_some_and(FilletCorner::is_setback_open))
+        })
+    }
+
+    /// Bound every open-ended sheet before sewing: sheets on the same continuation
+    /// may overlap away from their own end planes, where they must never share topology.
+    /// The retained faces remain the owning faces of their fillet geometries.
+    #[allow(clippy::too_many_lines)] // the existing end cuts and section caps form one stage
+    pub(super) fn bound_open_fillet_ends(
+        &mut self,
+        k: &mut Kernel,
+        executive: &mut FilletExecutive<FilletObject>,
+    ) -> Result<()> {
+        if !executive.cliff_overflow
+            && !executive.open_ends.iter().any(|end| end.section)
+            && !self.has_open_setback(executive)
+        {
+            return Ok(());
+        }
+        let solvers = executive.solvers.clone();
+        for &solver in &solvers {
+            if !self.holds_its_law(k, solver)? {
+                executive.note_trim_refusal(refusal(
+                    FilletErrorType::NoRoom,
+                    Some(NoRoomReason::CliffLawNotHeld),
+                    "Fillet Error: a variable round traced on its faces' continuations does not hold its radius law",
+                ));
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "a variable round does not hold its radius law on its faces' continuations",
+                ));
+            }
+        }
+
+        let mut faces_of = BTreeMap::new();
+        let mut approx = Vec::new();
+        for &solver in &solvers {
+            let FilletObject::Solver(id) = solver else {
+                return Err(invalid("object is not a solver"));
+            };
+            approx.push(self.solver(id)?.base().approx_tol_3d);
+            faces_of.insert(solver, self.fillet_faces(solver)?);
+        }
+        let open_ends = executive.open_ends.clone();
+        let body = self.intermediate_identity(EntityRef::Brep(BrepId::from_index(0)))?;
+        let mut sheet = self
+            .intermediate
+            .take()
+            .ok_or_else(|| SolidError::blend(OP, BlendFailure::StageFailed))?;
+        let bounded = (|| {
+            // the ends the corners left uncut, cut off by their end faces' surfaces continued
+            // (an end's event: the end face cuts the blend whatever lies past it, a lip over a
+            // wall's top)
+            let mut note = None;
+            let mut section_ends: Vec<SectionEnd> = Vec::new();
+            // each section end's solver, whose round it ends (#2314)
+            let mut section_solvers: Vec<FilletObject> = Vec::new();
+            for end in &open_ends {
+                let FilletObject::Solver(id) = end.solver else {
+                    return Err(invalid("open end solver is not a solver"));
+                };
+                let (
+                    FilletObject::Topology(FilletBody::Target, EntityRef::Vertex(v)),
+                    FilletObject::Topology(FilletBody::Target, EntityRef::Face(end_face)),
+                ) = (end.vertex, end.end_face)
+                else {
+                    return Err(invalid("open end is not target topology"));
+                };
+                let base = self.solver(id)?.base();
+                let solver_tol = base.approx_tol_3d;
+                let target = &*self.target;
+                let eu = base
+                    .edgeuse(0)?
+                    .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
+                let fil_edge = eu1::edge(target, eu)?
+                    .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
+                let edge_mid = edge::curve(target, fil_edge)?
+                    .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?
+                    .evaluate_point(k, edge::interval(target, fil_edge)?.evaluate(0.5))?;
+                let vertex_point = vertex::point(target, v)?;
+                let end_surface = if end.section {
+                    // WR-706: a section end (WR-674) is cut by the section through the vertex,
+                    // normal to the filleted edge
+                    let section = section_end(k, target, fil_edge, v)?.ok_or_else(|| {
+                        SolidError::blend_failed(OP, "no section through the end vertex")
+                    })?;
+                    section_ends.push(section);
+                    section_solvers.push(end.solver);
+                    Surface::from(Plane::from_normal(vertex_point, section.normal))
+                } else {
+                    face::p2::surface(target, end_face)?
+                        .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?
+                        .clone_for_evaluation()?
+                };
+                let entry = faces_of
+                    .get_mut(&end.solver)
+                    .ok_or_else(|| SolidError::blend_missing(OP, "the solver's fillet faces"))?;
+                let mut faces: Vec<Option<FaceId>> = entry.iter().map(|&(_, f)| f).collect();
+                let cut = cut_fillet_at_open_end(
+                    k,
+                    &mut sheet,
+                    &mut faces,
+                    &end_surface,
+                    vertex_point,
+                    edge_mid,
+                    solver_tol,
+                    smos_min(solver_tol, self.target.tolerance()) * SECTION_FIT,
+                    &mut note,
+                );
+                for (slot, f) in entry.iter_mut().zip(faces) {
+                    if slot.1 != f {
+                        self.pseudo.geom_mut(slot.0)?.fillet_surface =
+                            f.map(|face| FilletSurfaceStorage::ManagedFace { body, face });
+                        slot.1 = f;
+                    }
+                }
+                // not the fork's (#2401, WR-696): an open end the end face does not cut is an
+                // overflow's, absent below the size at which the end's blend stays on its
+                // faces: that size (open)
+                if note.is_some() && cut.is_err() {
+                    executive.note_fit_on_its_faces(k, self, end.solver)?;
+                }
+                if let Some(refused) = note.take() {
+                    executive.note_trim_refusal(refused);
+                }
+                cut?;
+            }
+
+            // WR-706: each section end closed by its flat face, from the round's section to the
+            // vertex (WR-674's, as the subtraction closes it)
+            if !section_ends.is_empty() {
+                let mut tol = 0.0;
+                for &a in &approx {
+                    tol = smos_max(tol, a);
+                }
+                for (end, solver) in section_ends.iter().zip(&section_solvers) {
+                    // the end's own round's faces, as the cut left them
+                    let faces: Vec<FaceId> = faces_of
+                        .get(solver)
+                        .map_or(&[][..], Vec::as_slice)
+                        .iter()
+                        .filter_map(|&(_, f)| f)
+                        .collect();
+                    let Some(section) = section_edge(k, &sheet, end, &faces, 10.0 * tol)? else {
+                        executive.note_trim_refusal(refusal(
+                        FilletErrorType::NoRoom,
+                        Some(NoRoomReason::TangentContinuationEndUnsupported),
+                        "Fillet Error: a round ending where its edge runs on tangentially has no single section there",
+                    ));
+                        return Err(SolidError::blend_failed(OP, "a round that ends where its edge runs on tangentially has no single section there"));
+                    };
+                    section_end_face(k, &mut sheet, end, section, 10.0 * tol)?;
+                }
+            }
+
+            Ok(())
+        })();
+        // Standalone cuts return geometry under the body's naming scheme. The live
+        // session stitches and shrinks under its issued identities, including the
+        // retained faces recorded by ManagedFace above. Restore those identities on
+        // failure too, preserving the boundary construction's original error.
+        let rebound = (|| {
+            let serial = sheet
+                .notify_serial()
+                .ok_or_else(|| invalid("intermediate body has no kernel identity"))?;
+            let naming = sheet.naming();
+            p3::rebind_geometry_owners(
+                &mut sheet,
+                |e| crate::topology::scheme_owner_identity(naming, e),
+                |e| p3::topology_ref(serial, e),
+            )
+        })();
+        self.intermediate = Some(sheet);
+        bounded.and(rebound)
+    }
+}
+
 impl FilletSession<'_> {
     /// `SmFilletExecutive::HasOpenSetBack` (the fork's ef57570): whether a corner is an
     /// open G1 setback (its hole made by the trim's imprint, no patches).
     pub(super) fn has_open_setback(&self) -> bool {
-        self.executive.corners.iter().any(|c| {
-            matches!(c, FilletObject::Corner(id)
-                if self.objects.corners.get(id.0 as usize).is_some_and(FilletCorner::is_setback_open))
-        })
+        self.objects.has_open_setback(&self.executive)
     }
 
     /// The open G1 setback corners' spring curves (`SM_FE_PRECOMPUTED` edges with a
@@ -1576,8 +1759,9 @@ impl FilletSession<'_> {
     /// the target: the blends built on their faces' continuations, the sharp edges moved
     /// to where they meet the body.
     ///
-    /// Each variable round on planes must hold its law; each open end is cut by its end
-    /// face's plane ([`cut_fillet_at_open_end`]). Each sheet face is sectioned by every
+    /// Each variable round on planes holds its law and each open end is already bounded
+    /// by its end plane before sewing ([`SessionObjects::bound_open_fillet_ends`]).
+    /// Each sheet face is sectioned by every
     /// face of the target near it whose surface holds none of its boundary ([`creases`]); a
     /// crease is kept where it lies inside the face it is on and the sheet face
     /// ([`crate::blend::fillet_overflow::pieces_in_face`]), and the sheet face is split along all of them at once; a
@@ -1605,20 +1789,6 @@ impl FilletSession<'_> {
             return Err(SolidError::blend_missing(OP, "the intermediate body"));
         }
         let solvers = self.executive.solvers.clone();
-        for &solver in &solvers {
-            if !self.holds_its_law(k, solver)? {
-                self.note_refusal(refusal(
-                    FilletErrorType::NoRoom,
-                    Some(NoRoomReason::CliffLawNotHeld),
-                    "Fillet Error: a variable round traced on its faces' continuations does not hold its radius law",
-                ));
-                return Err(SolidError::blend_failed(
-                    OP,
-                    "a variable round does not hold its radius law on its faces' continuations",
-                ));
-            }
-        }
-
         // What the trim reads of the solvers, before the sheet leaves the session.
         let mut faces_of: BTreeMap<FilletObject, Vec<(FilletGeomId, Option<FaceId>)>> =
             BTreeMap::new();
@@ -1639,115 +1809,40 @@ impl FilletSession<'_> {
                 eu1::edge(self.objects.target, eu)?
                     .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?,
             );
-            faces_of.insert(solver, self.fillet_faces(solver)?);
+            faces_of.insert(solver, self.objects.fillet_faces(solver)?);
         }
-        let open_ends = self.executive.open_ends.clone();
 
-        let mut sheet = self
+        let sheet = self
             .objects
             .intermediate
             .take()
             .ok_or_else(|| SolidError::blend_missing(OP, "the intermediate body"))?;
 
-        // the ends the corners left uncut, cut off by their end faces' surfaces continued
-        // (an end's event: the end face cuts the blend whatever lies past it, a lip over a
-        // wall's top)
-        let mut note = None;
-        let mut section_ends: Vec<SectionEnd> = Vec::new();
-        // each section end's solver, whose round it ends (#2314)
-        let mut section_solvers: Vec<FilletObject> = Vec::new();
-        for end in &open_ends {
+        // These ends were already built and capped before sewing. Losing their solver
+        // topology or section here is a stage defect, not a geometric refusal.
+        let mut section_ends = Vec::new();
+        for end in self.executive.open_ends.iter().filter(|end| end.section) {
             let FilletObject::Solver(id) = end.solver else {
                 return Err(invalid("open end solver is not a solver"));
             };
-            let (
-                FilletObject::Topology(FilletBody::Target, EntityRef::Vertex(v)),
-                FilletObject::Topology(FilletBody::Target, EntityRef::Face(end_face)),
-            ) = (end.vertex, end.end_face)
+            let FilletObject::Topology(FilletBody::Target, EntityRef::Vertex(v)) = end.vertex
             else {
-                return Err(invalid("open end is not target topology"));
+                return Err(invalid("open end is not a target vertex"));
             };
-            let base = self.objects.solver(id)?.base();
-            let solver_tol = base.approx_tol_3d;
-            let target = &*self.objects.target;
-            let eu = base
+            let eu = self
+                .objects
+                .solver(id)?
+                .base()
                 .edgeuse(0)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
-            let fil_edge = eu1::edge(target, eu)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
-            let edge_mid = edge::curve(target, fil_edge)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?
-                .evaluate_point(k, edge::interval(target, fil_edge)?.evaluate(0.5))?;
-            let vertex_point = vertex::point(target, v)?;
-            let end_surface = if end.section {
-                // WR-706: a section end (WR-674) is cut by the section through the vertex,
-                // normal to the filleted edge
-                let section = section_end(k, target, fil_edge, v)?.ok_or_else(|| {
-                    SolidError::blend_failed(OP, "no section through the end vertex")
-                })?;
-                section_ends.push(section);
-                section_solvers.push(end.solver);
-                Surface::from(Plane::from_normal(vertex_point, section.normal))
-            } else {
-                face::p2::surface(target, end_face)?
-                    .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?
-                    .clone_for_evaluation()?
-            };
-            let entry = faces_of
-                .get_mut(&end.solver)
-                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's fillet faces"))?;
-            let mut faces: Vec<Option<FaceId>> = entry.iter().map(|&(_, f)| f).collect();
-            let cut = cut_fillet_at_open_end(
-                k,
-                &mut sheet,
-                &mut faces,
-                &end_surface,
-                vertex_point,
-                edge_mid,
-                solver_tol,
-                smos_min(solver_tol, self.objects.target.tolerance()) * SECTION_FIT,
-                &mut note,
+                .ok_or_else(|| SolidError::blend(OP, BlendFailure::StageFailed))?;
+            let edge = eu1::edge(self.objects.target, eu)?
+                .ok_or_else(|| SolidError::blend(OP, BlendFailure::StageFailed))?;
+            section_ends.push(
+                section_end(k, self.objects.target, edge, v)?
+                    .ok_or_else(|| SolidError::blend(OP, BlendFailure::StageFailed))?,
             );
-            for (slot, f) in entry.iter_mut().zip(faces) {
-                slot.1 = f;
-            }
-            // not the fork's (#2401, WR-696): an open end the end face does not cut is an
-            // overflow's, absent below the size at which the end's blend stays on its
-            // faces: that size (open)
-            if note.is_some() && cut.is_err() {
-                self.executive
-                    .note_fit_on_its_faces(k, &mut self.objects, end.solver)?;
-            }
-            self.noted(note.take(), cut)?;
         }
-
-        // WR-706: each section end closed by its flat face, from the round's section to the
-        // vertex (WR-674's, as the subtraction closes it)
-        if !section_ends.is_empty() {
-            let mut tol = 0.0;
-            for &a in &approx {
-                tol = smos_max(tol, a);
-            }
-            for (end, solver) in section_ends.iter().zip(&section_solvers) {
-                // the end's own round's faces, as the cut left them
-                let faces: Vec<FaceId> = faces_of
-                    .get(solver)
-                    .map_or(&[][..], Vec::as_slice)
-                    .iter()
-                    .filter_map(|&(_, f)| f)
-                    .collect();
-                let Some(section) = section_edge(k, &sheet, end, &faces, 10.0 * tol)? else {
-                    self.objects.intermediate = Some(sheet);
-                    self.note_refusal(refusal(
-                        FilletErrorType::NoRoom,
-                        Some(NoRoomReason::TangentContinuationEndUnsupported),
-                        "Fillet Error: a round ending where its edge runs on tangentially has no single section there",
-                    ));
-                    return Err(SolidError::blend_failed(OP, "a round that ends where its edge runs on tangentially has no single section there"));
-                };
-                section_end_face(k, &mut sheet, end, section, 10.0 * tol)?;
-            }
-        }
+        let mut note = None;
 
         // the target is trimmed in place; a failed trim puts it back as it was, from a
         // snapshot that keeps its geometry's owners (#2715: a clone's surfaces have none)
@@ -1846,6 +1941,8 @@ impl FilletSession<'_> {
             }
         }
         let mut kept_rounds: BTreeSet<usize> = BTreeSet::new();
+        // #18646: each kept piece of a round's face, with its round
+        let mut piece_round: BTreeMap<FaceId, usize> = BTreeMap::new();
 
         // each round's side of the body (the fork's ce748fa): a
         // convex blend's sheet lies in the material it takes off, a concave blend's (an open
@@ -2069,6 +2166,7 @@ impl FilletSession<'_> {
                     with_kernel_callbacks(k, &mut sheet, |k, b, env| delete(k, b, env, p))?;
                 } else if let Some(&i) = round_of.get(&s) {
                     kept_rounds.insert(i);
+                    piece_round.insert(p, i);
                 }
             }
         }
@@ -2126,12 +2224,36 @@ impl FilletSession<'_> {
             }
             lamina_edges = kept_lamina;
         }
+        // #18646: a rail on a face of its own blended edge extends only that edge's faces.
+        // Matching another face's surface does not make that face a support of this round,
+        // whether the faces share a surface or merely meet along the rail. Creases and
+        // section ends with no own-face match keep all the faces they lie on.
+        let mut on_faces: Vec<Vec<FaceId>> = Vec::new();
+        for &e in &lamina_edges {
+            let mut on = Vec::new();
+            for &f in &target_faces {
+                if edge_on_surface(k, &sheet, e, self.objects.target, f, on_tol)? {
+                    on.push(f);
+                }
+            }
+            let mut own: Vec<FaceId> = Vec::new();
+            for s in edge::faces(&sheet, e, None)? {
+                let round = piece_round.get(&s).or_else(|| round_of.get(&s));
+                if let Some(&be) = round.and_then(|&i| blended_edges.get(i)) {
+                    own.extend(edge::faces(self.objects.target, be, None)?);
+                }
+            }
+            if on.iter().any(|f| own.contains(f)) {
+                on.retain(|f| own.contains(f));
+            }
+            on_faces.push(on);
+        }
         let mut extensions: Vec<Extension> = Vec::new();
         let mut along: Vec<Curve> = Vec::new();
         for &f in &target_faces {
             let mut rails = Vec::new();
-            for &e in &lamina_edges {
-                if edge_on_surface(k, &sheet, e, self.objects.target, f, on_tol)? {
+            for (&e, on) in lamina_edges.iter().zip(&on_faces) {
+                if on.contains(&f) {
                     let start = edge::start_vertex(&sheet, e)?
                         .ok_or_else(|| SolidError::blend_missing(OP, "the edge's start vertex"))?;
                     let end = edge::end_vertex(&sheet, e)?

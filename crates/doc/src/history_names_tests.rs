@@ -79,6 +79,28 @@ fn pieces_nothing_tells_apart_are_numbered_and_unverified() {
     assert!(!names.verified(0) && !names.verified(1));
 }
 
+/// #7990, change 4: pieces nothing around them tells apart, whose feature says where each
+/// starts along its definition (a hole's wall's halves along its sketch circle), are numbered in
+/// that order, whatever order the faces come in, and the names are exact. Where two would share a
+/// place the order says nothing, and they are numbered as before.
+#[test]
+fn pieces_are_numbered_along_their_definition_where_the_feature_says() {
+    let ranked = |order: [usize; 2]| {
+        let mut faces = named(&["F3:side:c1", "F3:side:c1", "F1:top"]);
+        for (face, place) in faces.iter_mut().zip(order) {
+            face.ordinal = Some(place);
+        }
+        qualify(faces, &[(0, 2), (1, 2)])
+    };
+    let names = ranked([2, 1]);
+    assert_eq!((names.faces[0].as_str(), names.faces[1].as_str()), ("F3:side:c1#2", "F3:side:c1#1"));
+    assert!(names.verified(0) && names.verified(1));
+    let names = ranked([1, 2]);
+    assert_eq!((names.faces[0].as_str(), names.faces[1].as_str()), ("F3:side:c1#1", "F3:side:c1#2"));
+    let names = ranked([1, 1]);
+    assert!(!names.verified(0) && !names.verified(1));
+}
+
 /// #5860: a piece of a split face that is split again must not stack another qualifier on
 /// its name: the name grew with every split (728 characters after eleven splits).
 #[test]
@@ -290,7 +312,9 @@ fn two_pieces_told_apart_by_one_blend_both_answer_to_a_stored_name() {
 /// A face named only by its index (a thread's groove, `F7:face:12`, unverified) never tells its
 /// neighbours apart: the next evaluation can give that index to another face, so an exact piece
 /// qualified by it could change its name or take another's. Pieces only such faces tell apart
-/// are numbered and unverified, and a stored name qualified by an index finds nothing.
+/// are numbered and unverified, and a stored name qualified by an index finds no piece by its name
+/// alone (an edge saved with one is found only where its pick still lies beside such a face,
+/// #19455).
 #[test]
 fn a_face_named_by_its_index_never_qualifies_an_exact_piece() {
     let groove = |name: &str| Named { name: name.to_string(), verified: false, ..Named::default() };

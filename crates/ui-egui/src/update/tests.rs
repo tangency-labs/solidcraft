@@ -646,17 +646,21 @@ fn the_pill_shortens_in_a_narrow_title_bar() {
     for width in [1000.0, 800.0, 700.0, 600.0, 520.0, 440.0] {
         h.call("ui.resize", json!({"width": width, "height": 600}));
         h.frames(3);
-        let report = crate::scenario::rect_of("titlebar:report").unwrap();
+        // Report a bug itself may now sit behind the More menu in a very narrow bar.
+        let report = crate::scenario::rect_of("titlebar:report");
         // Icon alone, it keeps the full text for screen readers.
         let pill = crate::scenario::rect_of("titlebar:update").filter(|_| h.widget(&label).is_some() || h.widget("Update").is_some());
         if let Some(p) = pill {
             assert!(p.width() <= last + 0.5, "at {width}: {p:?} grew from {last}");
-            assert!(p.right() <= report.left(), "at {width}: {p:?} overlaps Report a bug {report:?}");
+            if let Some(report) = report {
+                assert!(p.right() <= report.left(), "at {width}: {p:?} overlaps Report a bug {report:?}");
+            }
             last = p.width();
         }
         shortened |= pill.is_none_or(|p| p.width() < wide.width());
         if width == 1000.0 {
-            assert!(h.widget("Update").is_some() && h.widget(&label).is_none(), "the short label keeps room for the tabs");
+            // The bar now gives parts up only when they do not fit: at 1000 the full label still has room.
+            assert!(h.widget(&label).is_some(), "the full label still fits at 1000");
         }
     }
     assert!(shortened, "the long label gives way in a narrow bar");

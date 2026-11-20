@@ -339,6 +339,8 @@ impl MovePreview {
             error: None,
             bounds,
             layer,
+            joints: Vec::new(),
+            plugin_view: None,
         };
         // One motion for every body that the GPU can take, in a view that draws a layer, of
         // bodies a layer draws as finely as building them does: nothing is built at this change
@@ -438,8 +440,14 @@ mod tests {
 
     /// `app` with its model drawn on a GPU: a Move's bodies are then a layer ([`layered`]).
     fn on_gpu(mut app: SolveApp) -> SolveApp {
-        app.viewport.gpu =
-            Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+        app.viewport.gpu = Some(crate::gpu::GpuTarget {
+            format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm,
+            depth: None,
+            samples: 1,
+            tess: false,
+            oit: false,
+            edges: false,
+        });
         app
     }
 

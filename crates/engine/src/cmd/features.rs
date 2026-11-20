@@ -13,6 +13,7 @@ use solidcraft_geom::prelude::*;
 
 use super::{CommandSpec, not_in_sketch};
 use crate::params::{UNKNOWN_COMMAND, bad, bool_, expr, expr_problem, req_expr, str_, string_list, string_list_or_default, vec2, vec3};
+use crate::schema::face_edits::{DeleteFaceParams, OffsetFaceParams};
 use crate::schema::features::SweepParams;
 use crate::schema::features::{
     AppliedRadius, BoundingSolidParams, BoxParams, ChamferParams, CombineParams, CombineResult, ConeParams, CylinderParams, ExtrudeParams,
@@ -47,6 +48,8 @@ const PATTERN_RECTANGULAR_CONTRACT: TypedContract<PatternRectangularParams> = Ty
 const PATTERN_PATH_CONTRACT: TypedContract<PatternPathParams> = TypedContract::new();
 const PRESS_PULL_CONTRACT: TypedContract<PressPullParams> = TypedContract::new();
 const MOVE_CONTRACT: TypedContract<MoveParams> = TypedContract::new();
+const DELETE_FACE_CONTRACT: TypedContract<DeleteFaceParams> = TypedContract::new();
+const OFFSET_FACE_CONTRACT: TypedContract<OffsetFaceParams> = TypedContract::new();
 const MIRROR_CONTRACT: TypedContract<MirrorParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
@@ -70,7 +73,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("sweep")
         .contract(&SWEEP_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("sketch: profile sketch; profiles?; path_sketch: sketch; path: [curve ids in order]; path_body?: body name; path_edges?: [points on its edges] (the path is a chain of that body's edges, instead of a sketch's curves); orientation?: perpendicular (default: square to the path, turning with it) | parallel (as drawn: the profile moves without turning; the path must keep crossing its plane) | [x,y,z] (square to the path, its turn about the path fixed by this direction); twist?: angle expr (the profile turns this much about the path over its length; within 4 turns); scale?: expr (the profile's scale at the end, linear along the path; 0.01…100); rails?: [{sketch?: sketch (default path_sketch), curves: [curve ids in order]}] (guide rails, one or two, each meeting every plane square to the path once along it, from the end nearest the path's start: one rail turns the profile so its point where the rail starts stays on the rail and scales it with the rail's distance from the path; two rails carry it between them, its points where they start staying on both; rails take the default orientation, no twist and no scale, and a path without sharp corners); rail_fit?: scale (default: the profile grows and shrinks evenly) | stretch (only across to the rail, between the rails); operation?, touching?, targets?, name?, body_name?"),
+        .params("sketch: profile sketch; profiles?; path_sketch: sketch; path: [curve ids in order; an entry {sketch, curve} is a curve of that sketch, so the path may join curves of several sketches (#16168)]; path_body?: body name; path_edges?: [points on its edges] (the path is a chain of that body's edges, instead of a sketch's curves); orientation?: perpendicular (default: square to the path, turning with it) | parallel (as drawn: the profile moves without turning; the path must keep crossing its plane) | [x,y,z] (square to the path, its turn about the path fixed by this direction); twist?: angle expr (the profile turns this much about the path over its length; within 4 turns); scale?: expr (the profile's scale at the end, linear along the path; 0.01…100); rails?: [{sketch?: sketch (default path_sketch), curves: [curve ids in order]}] (guide rails, one or two, each meeting every plane square to the path once along it, from the end nearest the path's start: one rail turns the profile so its point where the rail starts stays on the rail and scales it with the rail's distance from the path; two rails carry it between them, its points where they start staying on both; rails take the default orientation, no twist and no scale, and a path without sharp corners); rail_fit?: scale (default: the profile grows and shrinks evenly) | stretch (only across to the rail, between the rails); operation?, touching?, targets?, name?, body_name?"),
     CommandSpec::new("solid.loft", "Loft", loft).at("SOLID", "CREATE").icon("loft").params("sections: [{sketch, profiles?} | {sketch, point: id} (an apex)] (2…50, in order; matching hole counts, no holes at an apex); rails?: [{sketch, curves: [ids in order]}] (one or two guide rails from the first section to the last, through every section's outline: the loft follows them between the sections; not with sections that have holes); rail_fit?: scale|stretch (default scale: with one rail the sections grow evenly with the rail's distance from their middle, with two with the distance between the rails; stretch: only that way); operation?, touching?, targets? (Join excludes hidden bodies from automatic targets; explicit targets or participants may include them), name?, body_name?"),
     CommandSpec::new("solid.box", "Box", crate::checked!("solid.box", prim_box))
         .at("SOLID", "CREATE")
@@ -163,20 +166,24 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("bounding_solid")
         .contract(&BOUNDING_SOLID_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("bodies?: [names] (default: all); margin?: expr; margins?: [-X, +X, -Y, +Y, -Z, +Z] exprs (a margin per side instead of margin; negative sets a side into the bodies); name?, body_name?"),
+        .params("bodies?: [names] (default: all); margin?: expr; margins?: [-X, +X, -Y, +Y, -Z, +Z] exprs (a margin per side instead of margin; negative sets a side into the bodies); component?: id or name (instead of `bodies`: an envelope of that component, a box around every body placed inside it, its subcomponents' at any depth and every placement, in its own axes; the box is added to that component, so it moves with it, and is built again when a part inside it moves. inspect.clearance and inspect.interference leave envelopes out unless named, and `envelopes: true` there checks each envelope instead of its contents); name?, body_name?"),
     CommandSpec::new("solid.scale", "Scale", crate::checked!("solid.scale", scale))
         .at("SOLID", "MODIFY")
         .icon("scale")
         .contract(&SCALE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("bodies: [names]; factor: expr | factors: [x, y, z] exprs; origin?: [x,y,z]"),
-    CommandSpec::new("face.delete", "Delete Face", delete_face)
+    CommandSpec::new("face.delete", "Delete Face", crate::checked!("face.delete", delete_face))
         .at("SOLID", "MODIFY")
         .icon("delete_face")
+        .contract(&DELETE_FACE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("faces: [[x,y,z] points on the faces, or face names from model.faces]; body?; heal?: bool (default true: the neighbouring planes close the gap, as when a rounded edge, hole or boss is taken off; false: the gap stays open and the faces left are a surface body)"),
-    CommandSpec::new("solid.offset_face", "Offset Face", offset_face)
+    CommandSpec::new("solid.offset_face", "Offset Face", crate::checked!("solid.offset_face", offset_face))
         .at("SOLID", "MODIFY")
         .icon("offset_face")
+        .contract(&OFFSET_FACE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("faces: [[x,y,z] points on faces (planar or curved), or face names from model.faces]; distance: expr (positive: outward); body?"),
     CommandSpec::new("solid.thread", "Thread", thread)
         .at("SOLID", "CREATE")
@@ -297,7 +304,7 @@ impl Session {
     /// assembly's root cutting through its parts, #1234). The command and its preview both ask
     /// this, so the preview never refuses a cut the command makes (#3085).
     pub fn cut_takes_every_body(&self, st: &solidcraft_doc::ModelState) -> bool {
-        !st.bodies.is_empty() && !st.bodies.iter().any(|b| self.doc.model_body_component(b) == self.active_component)
+        !st.bodies.is_empty() && !st.bodies.iter().any(|b| !b.envelope && self.doc.model_body_component(b) == self.active_component)
     }
 }
 
@@ -355,11 +362,12 @@ fn auto_operation_in(s: &Session, p: &Value, st: &solidcraft_doc::ModelState) ->
     // wrong type (`add_feature`), so a wrong type cannot make this cut anything. This preview
     // cannot fail, so it reads the list leniently.
     let parts = string_list_or_default(p, "participants");
-    let implicit_all = grouped.is_some() && !st.bodies.iter().any(|body| s.doc.model_body_component(body) == s.active_component);
+    let implicit_all = grouped.is_some() && !st.bodies.iter().any(|body| !body.envelope && s.doc.model_body_component(body) == s.active_component);
     let mut bodies: Vec<_> = if !parts.is_empty() {
         st.bodies.iter().filter(|b| parts.contains(&b.name)).collect()
     } else if implicit_all {
-        st.bodies.iter().collect()
+        // As the evaluator's `*`: every body but the envelopes, which only stand in for checks.
+        st.bodies.iter().filter(|b| !b.envelope).collect()
     } else {
         active_scope(s, st)
     };
@@ -741,7 +749,48 @@ pub(super) fn check_count(s: &Session, e: &str, cmd: &str, what: &str) -> Result
     solidcraft_doc::expr::eval_count(e, &vals).map(|_| ()).map_err(|err| bad(cmd, format!("{what}: {err}")))
 }
 
-/// Add a feature, evaluate, and report its result (an evaluation error fails the command).
+/// Transform of `consumer` relative to the lowest common ancestor of `consumer` and the profile
+/// sketch's component at authoring time, when the two components differ and `consumer` is not an
+/// ancestor of the sketch's component. Stored on `Feature::profile_frame` so later moves or joints
+/// on `consumer` carry the built body rigidly with it while moves of the sketch's own component
+/// still propagate.
+pub(super) fn cross_component_profile_frame_for(s: &Session, consumer: u64, kind: &FeatureKind) -> Option<solidcraft_doc::Mat> {
+    let sketch = kind.constructor_profile_sketch()?;
+    let owner = s.doc.feature(sketch)?.component;
+    if owner == consumer {
+        return None;
+    }
+    let placed = s.placed_document();
+    let lca = placed.common_ancestor(consumer, owner);
+    if consumer == lca {
+        return None;
+    }
+    let (consumer_world, lca_world) = if consumer == s.active_component {
+        let cw = s.active_component_frame();
+        let lw = if lca == 0 {
+            solidcraft_doc::IDENTITY
+        } else if let Some(path) = &s.active_occurrence_path
+            && let Some(pos) = path.iter().position(|occ_id| s.doc.occurrences.iter().any(|o| o.id == *occ_id && o.component == lca))
+            && let Ok(p) = s.occurrence_placement(&path[..=pos])
+            && p.component == lca
+        {
+            p.world
+        } else {
+            placed.component_transform(lca)
+        };
+        (cw, lw)
+    } else {
+        (placed.component_transform(consumer), placed.component_transform(lca))
+    };
+    let lca_inv = solidcraft_doc::mat_inverse(&lca_world)?;
+    let consumer_in_lca = solidcraft_doc::mat_mul(&lca_inv, &consumer_world);
+    solidcraft_doc::is_placement(&consumer_in_lca).then_some(consumer_in_lca)
+}
+
+fn cross_component_profile_frame(s: &Session, kind: &FeatureKind) -> Option<solidcraft_doc::Mat> {
+    cross_component_profile_frame_for(s, s.active_component, kind)
+}
+
 pub(super) fn add_feature(s: &mut Session, p: &Value, kind: FeatureKind) -> Result<Value> {
     add_feature_in(s, p, kind, true)
 }
@@ -797,7 +846,11 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
             (Vec::new(), solidcraft_doc::hole_reference::cylinder_edge_names(&s.model.state(), base, references))
         }
         // A conversion's bend edges are edges of the body it converts.
-        FeatureKind::SheetConvert { body, bends, .. } if !bends.is_empty() => {
+        FeatureKind::SheetConvert { body, bends, .. }
+        | FeatureKind::SheetSurfaceConvert { body, bends, .. }
+        | FeatureKind::SheetRecognize { body, bends, .. }
+            if !bends.is_empty() =>
+        {
             (Vec::new(), solidcraft_doc::sheet::bend_edge_names(&s.model.state(), body, &solidcraft_doc::plain(bends)))
         }
         _ => (Vec::new(), Vec::new()),
@@ -873,6 +926,7 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
     {
         check_plane_name(n, "construct.plane")?;
     }
+    let profile_frame = cross_component_profile_frame(s, &kind);
     let id = s.doc_mut().add_feature(kind, name)?;
     if let Some(f) = s.doc_mut().feature_mut(id) {
         f.participants = participants;
@@ -880,6 +934,7 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
         f.edge_refs = refs;
         f.edge_names = names;
         f.face_names = face_names;
+        f.profile_frame = profile_frame;
     }
     s.doc_mut().name_feature_inputs(id);
     let comp = s.active_component;
@@ -916,6 +971,20 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
         && let Some(e) = r.error.clone()
     {
         return Err(EngineError::of_feature(r, e));
+    }
+    // A sheet metal body is rebuilt from its sheet features, so a change another feature made to
+    // it (a pad, a fillet) is lost when a later sheet feature runs (not supported yet). A new
+    // feature that would lose one is refused, naming it, instead of going on with a warning
+    // (#18292). Designs that already have such a feature open and evaluate as before.
+    let lost = before.surface_sheets.iter().find_map(|old| {
+        let lost = old.altered_by.as_ref()?;
+        s.model.state().surface_sheets.iter().any(|now| now.body == old.body && now.altered_by.is_none()).then(|| (old.body.clone(), lost.clone()))
+    });
+    if let Some((body, lost)) = lost {
+        return Err(EngineError::Other(format!(
+            "`{body}` is rebuilt from its sheet metal features, which would lose what {lost} changed (not supported yet): \
+             add {lost} after the sheet metal features, or remove it"
+        )));
     }
     let st = s.model.state();
     let bodies: Vec<&str> = st.bodies.iter().map(|b| b.name.as_str()).collect();
@@ -1289,7 +1358,8 @@ pub fn shown_scope(s: &Session) -> Option<Vec<String>> {
 /// part where it is shown (#3223).
 fn active_scope<'a>(s: &Session, st: &'a solidcraft_doc::ModelState) -> Vec<&'a solidcraft_doc::ModelBody> {
     let active = s.active_component;
-    let own: Vec<_> = st.bodies.iter().filter(|b| s.doc.model_body_component(b) == active).collect();
+    // A component's envelope stands in for its parts in checks only: it is never worked on.
+    let own: Vec<_> = st.bodies.iter().filter(|b| !b.envelope && s.doc.model_body_component(b) == active).collect();
     if !own.is_empty() {
         return own;
     }
@@ -1298,7 +1368,7 @@ fn active_scope<'a>(s: &Session, st: &'a solidcraft_doc::ModelState) -> Vec<&'a 
         .iter()
         .filter(|b| {
             let comp = s.doc.model_body_component(b);
-            if !s.doc.component_within(comp, active) {
+            if b.envelope || !s.doc.component_within(comp, active) {
                 return false;
             }
             let frame = s.doc.component_transform(comp);
@@ -1436,13 +1506,13 @@ fn fixed_param(p: &Value, cmd: &str) -> Result<bool> {
 fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.revolve";
     // A planar body face revolves like a profile (its edges projected into a sketch on it).
-    let (sketch, face_profile) = match p.get("face").and_then(vec3) {
+    let (sketch, face_profile, face_body) = match p.get("face").and_then(vec3) {
         Some(fp) => {
-            let (id, inside, _) = super::face::sketch_of_face(s, fp, cmd, str_(p, "face_body"), fixed_param(p, cmd)?)?;
+            let (id, inside, body) = super::face::sketch_of_face(s, fp, cmd, str_(p, "face_body"), fixed_param(p, cmd)?)?;
             s.active_sketch = None;
-            (id, Some(ProfileSel::Points { points: vec![inside] }))
+            (id, Some(ProfileSel::Points { points: vec![inside] }), Some(body))
         }
-        None => (feature_sketch(s, p, cmd)?, None),
+        None => (feature_sketch(s, p, cmd)?, None, None),
     };
     let axis = axis_param(s, sketch, p, cmd)?;
     let angle = expr(p, "angle").unwrap_or_else(|| "360 deg".into());
@@ -1466,11 +1536,15 @@ fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
         Some(value) => serde_json::from_value(value.clone()).map_err(|_| bad(cmd, "`convention` must be sketch_normal or legacy_axis_start"))?,
     };
     let operation = operation(p, cmd)?;
-    let targets = face_join_targets(s, p, operation, &[sketch], cmd)?;
+    let mut targets = face_join_targets(s, p, operation, &[sketch], cmd)?;
+    // A fixed plane keeps no attachment to the face, so its body is the one picked.
+    if targets.is_empty() && operation == Operation::Join && string_list(cmd, p, "participants")?.is_empty() {
+        targets.extend(face_body.clone().map(BodyName));
+    }
     // From a profile on a body's face in a component inside the active one, a cut changes that
     // body too, as an extrude's does (#5679).
     let mut p = std::borrow::Cow::Borrowed(p);
-    if let Some(parts) = cut_scope(s, &p, operation, sketch, None, cmd)? {
+    if let Some(parts) = cut_scope(s, &p, operation, sketch, face_body, cmd)? {
         p.to_mut()["participants"] = json!(parts);
     }
     let kind = FeatureKind::Revolve {
@@ -3724,6 +3798,10 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
             format!("`position` [{}, {}, {}] is not on a face of a body; pick a point on the face to drill", position.x, position.y, position.z),
         ));
     }
+    // The bodies a pick on the placed model met (#18057): another part with a face at the same
+    // point in its own frame only (two leaves of a hinge, one turned) is not the one picked, so
+    // neither its face nor its body is taken. Read before reference edges move the position.
+    let picked = if points.is_none() { picked_bodies(s, position) } else { None };
     let supplied_direction = p.get("direction").and_then(vec3);
     // Ordinary sketch-point holes use the sketch normal and ignore this input.
     if supplied_direction.is_none() && p.get("direction").is_some_and(|v| !v.is_null()) && points.as_ref().is_none_or(|(sp, _, _)| sp.single) {
@@ -3742,7 +3820,11 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
                     v if v.is_empty() => string_list(cmd, p, "targets")?,
                     v => v,
                 };
-                let scope: &[String] = if named.iter().any(|b| b == "*") { &[] } else { &named };
+                let scope: &[String] = match (named.iter().any(|b| b == "*"), &picked) {
+                    (true, _) => &[],
+                    (false, Some(under)) if named.is_empty() => under,
+                    _ => &named,
+                };
                 let st = s.model.state();
                 solidcraft_doc::hole_direction_at(&st, position, scope).ok_or_else(|| bad(cmd, "no face at `position`; give `direction`"))?
             }
@@ -3852,7 +3934,7 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
             // reopening keep the same scope.
             p["participants"] = json!([body]);
         } else if points.is_none()
-            && let Some(body) = body_of_other_component_at(s, position)
+            && let Some(body) = body_of_other_component_at(s, position, picked.as_deref())
         {
             // A hole picked on a body of another component (a moved one, shown where it is
             // placed) cuts that body: the pick is already in that body's frame, and the
@@ -3956,11 +4038,20 @@ fn hole_reference_params(s: &Session, p: &Value, cmd: &str) -> Result<Vec<solidc
 }
 
 /// The body whose face is nearest `p` (within its pick tolerance), when it belongs to another
-/// component than the active one.
-fn body_of_other_component_at(s: &Session, p: Vec3) -> Option<String> {
+/// component than the active one: among the bodies `picked` names, or any body when it is `None`.
+fn body_of_other_component_at(s: &Session, p: Vec3, picked: Option<&[String]>) -> Option<String> {
     let st = s.model.state();
-    let body = body_with_face_at(&st, p, |_| true)?;
+    let body = body_with_face_at(&st, p, |b| picked.is_none_or(|names| names.contains(&b.name)))?;
     (s.doc.model_body_component(body) != s.active_component).then(|| body.name.clone())
+}
+
+/// The bodies of the model a pick at `p` met, when the running command picked it on the placed
+/// model (as a face pick reads them, #419); `None` otherwise.
+fn picked_bodies(s: &Session, p: Vec3) -> Option<Vec<String>> {
+    let names = crate::frames::picked(p)?;
+    let st = s.model.state();
+    let bodies: Vec<String> = st.bodies.iter().filter(|b| names.iter().any(|n| n == b.definition_name())).map(|b| b.name.clone()).collect();
+    (!bodies.is_empty()).then_some(bodies)
 }
 
 /// The hidden body whose face holds `p`, when no shown body has a face there: a face shared by
@@ -4177,10 +4268,11 @@ fn sweep(s: &mut Session, p: &Value) -> Result<Value> {
     )
 }
 
-/// A sweep's path (#2216): a chain of a body's edges (`path_body` and `path_edges`) or the
-/// curves of a sketch (`path_sketch` and `path`). The body's edges are a point on each edge of
-/// the chain; the path runs from the end nearest the profile.
-pub(super) fn sweep_path(s: &Session, p: &Value, cmd: &str) -> Result<(u64, Vec<String>, Option<BodyName>, Vec<Position>)> {
+/// A sweep's path (#2216, #16168): a chain of a body's edges (`path_body` and `path_edges`) or
+/// a chain of sketch curves (`path_sketch` and `path`, whose entries may name the sketch each
+/// curve is in). The body's edges are a point on each edge of the chain; the path runs from the
+/// end nearest the profile.
+pub(super) fn sweep_path(s: &Session, p: &Value, cmd: &str) -> Result<(u64, Vec<solidcraft_doc::PathEntry>, Option<BodyName>, Vec<Position>)> {
     if p.get("path_body").is_some_and(|b| !b.is_null()) {
         let body = str_(p, "path_body").ok_or_else(|| bad(cmd, "`path_body` must be a body name"))?;
         if s.model.state().body(body).is_none() {
@@ -4190,10 +4282,31 @@ pub(super) fn sweep_path(s: &Session, p: &Value, cmd: &str) -> Result<(u64, Vec<
         return Ok((0, Vec::new(), Some(BodyName::from(body)), edges));
     }
     let path_sketch = sketch_id(s, p.get("path_sketch"), cmd, "path_sketch")?;
-    let path = string_list(cmd, p, "path")?;
-    if path.is_empty() {
-        return Err(bad(cmd, "`path` must list curve ids"));
+    // A bare string was and is one curve of the path's sketch (`string_list` accepted it).
+    let path_value = p.get("path").ok_or_else(|| bad(cmd, "`path` must list curve ids"))?;
+    let path: Vec<Value> = match path_value {
+        Value::String(_) => vec![path_value.clone()],
+        Value::Array(a) => a.clone(),
+        _ => return Err(bad(cmd, "`path` must list curve ids")),
+    };
+    if path.is_empty() || path.len() > 1000 {
+        return Err(bad(cmd, "the path needs 1…1000 curves"));
     }
+    // A curve of the path's sketch is its id; a curve of another sketch is saved with that
+    // sketch, so a path may join the curves of several sketches (#16168).
+    let path = path
+        .iter()
+        .map(|e| match e {
+            Value::String(id) => Ok(solidcraft_doc::PathEntry::OfPathSketch(id.clone())),
+            Value::Object(o) => {
+                let curve =
+                    o.get("curve").and_then(Value::as_str).ok_or_else(|| bad(cmd, "each `path` entry must be a curve id or {sketch, curve}"))?;
+                let sketch = sketch_id(s, o.get("sketch"), cmd, "path curve's sketch")?;
+                Ok(solidcraft_doc::PathEntry::OfSketch { sketch: solidcraft_doc::SketchId(sketch), curve: curve.to_string() })
+            }
+            _ => Err(bad(cmd, "each `path` entry must be a curve id or {sketch, curve}")),
+        })
+        .collect::<Result<Vec<_>>>()?;
     Ok((path_sketch, path, None, Vec::new()))
 }
 
@@ -4602,7 +4715,30 @@ fn bounding_solid(s: &mut Session, p: &Value) -> Result<Value> {
         Some(_) => return Err(bad(cmd, "`margins` must have six values: -X, +X, -Y, +Y, -Z, +Z")),
         None => None,
     };
-    add_feature(s, p, FeatureKind::BoundingSolid { bodies: string_list(cmd, p, "bodies")?.into_iter().map(BodyName).collect(), margin, margins })
+    let bodies: Vec<BodyName> = string_list(cmd, p, "bodies")?.into_iter().map(BodyName).collect();
+    if p.get("component").is_none_or(Value::is_null) {
+        return add_feature(s, p, FeatureKind::BoundingSolid { bodies, margin, contents: false, margins });
+    }
+    if !bodies.is_empty() {
+        return Err(bad(cmd, "give `bodies` or `component`, not both"));
+    }
+    let component = super::component::component(s, p, "component", cmd)?;
+    envelope_in(s, p, component, margin, margins)
+}
+
+/// Add an envelope of `component` (a Bounding Solid of its contents, grown by `margin`, or by
+/// `margins` per side) with the feature parameters `p` (`name`, `body_name`). It is made in the
+/// component it bounds, in its frame, as if that component were active.
+pub(crate) fn envelope_in(s: &mut Session, p: &Value, component: u64, margin: Expr, margins: Option<[Expr; 6]>) -> Result<Value> {
+    // Two envelopes of one component would each stand in for the other and its contents.
+    if s.doc.features.iter().any(|f| f.component == component && matches!(f.kind, FeatureKind::BoundingSolid { contents: true, .. })) {
+        return Err(bad("solid.bounding_solid", "the component already has an envelope"));
+    }
+    let active = (s.active_component, s.active_occurrence_path.take());
+    s.active_component = component;
+    let out = add_feature(s, p, FeatureKind::BoundingSolid { bodies: Vec::new(), margin, contents: true, margins });
+    (s.active_component, s.active_occurrence_path) = active;
+    out
 }
 
 fn scale(s: &mut Session, p: &Value) -> Result<Value> {

@@ -50,6 +50,10 @@ pub enum Target {
     OriginAxis {
         name: String,
     },
+    /// An origin point (O).
+    OriginPoint {
+        name: String,
+    },
     Component {
         id: u64,
     },
@@ -300,7 +304,7 @@ fn touched_bodies(app: &SolveApp) -> Vec<String> {
     for s in &app.session.selection {
         let b = match s {
             Sel::Body { name } => name,
-            Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => body,
+            Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } if !body.is_empty() => body,
             _ => continue,
         };
         if !v.contains(b) {
@@ -383,6 +387,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Plane { id } => plane_items(app, *id),
         Target::OriginPlane { name } => origin_plane_items(app, name),
         Target::OriginAxis { name } => origin_axis_items(app, name),
+        Target::OriginPoint { name } => origin_point_items(app, name),
         Target::Component { id } => component_items(app, *id),
         Target::Occurrence { path } => occurrence_items(app, path),
         Target::Group { id, scope } => crate::browser::group_items(app, *id, scope),
@@ -405,27 +410,23 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Workspace => {
             let rendering = crate::render_workspace::active(app);
             let drawing = crate::drawing_workspace::active(app);
-            let mut v = vec![
+            // Design, then Drawing (the owner's order), then Render: the workspaces there are. Ones still
+            // to come aren't listed.
+            vec![
                 act("ui.workspace.design", "Design", "ws_design").with(json!({"workspace":"design"})).key(if rendering || drawing {
                     ""
                 } else {
                     "current"
                 }),
-                act("ui.workspace.render", "Render", "ws_render")
-                    .with(json!({"workspace":"render"}))
-                    .key(if rendering { "current" } else { "" })
-                    .on(crate::render_workspace::entry_open(app)),
-            ];
-            for (w, icon) in [("Animation", "ws_animate"), ("Simulation", ""), ("Manufacture", "")] {
-                v.push(act("ui.workspace", w, icon).key("coming later").on(false));
-            }
-            v.push(
                 act("ui.workspace.drawing", "Drawing", "ws_drawing")
                     .with(json!({"workspace":"drawing"}))
                     .key(if drawing { "current" } else { "" })
                     .on(app.session.active_sketch.is_none() && app.tool.is_none() && app.dialog.is_none() && !app.file_load.busy()),
-            );
-            v
+                act("ui.workspace.render", "Render", "ws_render")
+                    .with(json!({"workspace":"render"}))
+                    .key(if rendering { "current" } else { "" })
+                    .on(crate::render_workspace::entry_open(app)),
+            ]
         }
         Target::Units => crate::prefs::UNITS
             .iter()
@@ -650,7 +651,62 @@ fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
 
 /// The canvas menus put Repeat on
 /// top, then what fits the selection, our extras after a separator.
+/// A Drawing tool's row: its icon and key from the registry, on when the ribbon's button for it
+/// opens the tool (the registry's entry for it only reserves its place, and reads as off).
+fn tool(app: &SolveApp, id: &str, label: &str, enabled: bool) -> Item {
+    let mut item = cmd(app, id, label);
+    item.enabled = enabled && crate::drawing_workspace::can_open_options(id);
+    item
+}
+
+/// The sheet's menu in the Drawing workspace, laid out as a sketch's: what the selection takes
+/// (Edit, Delete), the tools, then Undo and Redo.
+fn drawing_items(app: &SolveApp) -> Vec<Item> {
+    use solidcraft_engine::doc::ids::encode;
+    let mut v = Vec::new();
+    let drawing = app.session.drawing("drawing.inspect").ok();
+    let chosen: Vec<u64> = app
+        .session
+        .selection
+        .iter()
+        .filter_map(|s| match s {
+            Sel::Drawing { drawing: d, object } if drawing.is_some_and(|open| open.id == *d) => Some(*object),
+            _ => None,
+        })
+        .collect();
+    if let ([one], Some(drawing)) = (&chosen[..], drawing) {
+        let object = json!({"object": encode(*one)});
+        if drawing.view(*one).is_some() {
+            v.push(act("ui.drawingEdit", "Edit View", "edit").with(object.clone()));
+            v.push(
+                tool(app, "drawing.view.projected.planned", "Projected View", drawing.can_project_from(*one).is_ok())
+                    .with(json!({"parent": encode(*one)})),
+            );
+        } else if drawing.dimension(*one).is_some() {
+            v.push(act("ui.drawingEdit", "Edit Text", "edit").with(object));
+        } else if drawing.notes.by_id(*one).is_some() {
+            v.push(act("ui.drawingEdit", "Edit Note", "edit").with(object));
+        }
+    }
+    if !chosen.is_empty() {
+        v.push(act("ui.delete", "Delete", "delete").key("Del"));
+        v.push(Item::sep());
+    }
+    if drawing.is_some() {
+        for (id, label) in [("drawing.view.base.planned", "Base View"), ("drawing.dimension", "Dimension"), ("drawing.note", "Note")] {
+            v.push(tool(app, id, label, true));
+        }
+        v.push(Item::sep());
+    }
+    v.push(cmd(app, "edit.undo", "Undo").on(!app.session.undo.is_empty()));
+    v.push(cmd(app, "edit.redo", "Redo").on(!app.session.redo.is_empty()));
+    v
+}
+
 fn viewport_items(app: &SolveApp) -> Vec<Item> {
+    if crate::drawing_workspace::active(app) {
+        return drawing_items(app);
+    }
     let sel = &app.session.selection;
     let has = |f: fn(&Sel) -> bool| sel.iter().any(f);
     let mut v = Vec::new();
@@ -995,6 +1051,12 @@ fn origin_axis_items(app: &SolveApp, name: &str) -> Vec<Item> {
     vec![act("ui.originPart", "Show/Hide", "eye").key("V").with(json!({ "keys": [name], "show": !visible }))]
 }
 
+/// An origin point: Show/Hide, as on an axis (#14554).
+fn origin_point_items(app: &SolveApp, name: &str) -> Vec<Item> {
+    let visible = !app.session.visibility.hidden_origin.iter().any(|h| h == name);
+    vec![act("ui.originPart", "Show/Hide", "eye").key("V").with(json!({ "keys": [name], "show": !visible }))]
+}
+
 /// An assembly joint: edit, drive, suppress, delete.
 fn joint_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let Some(j) = app.session.doc.assembly.joints.iter().find(|j| j.id == id) else { return Vec::new() };
@@ -1194,7 +1256,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
                 .on(moved || joints.iter().any(|j| j.captured.is_some() && j.kind != solidcraft_engine::doc::joints::JointKind::Rigid)),
         ];
         // An imported assembly moves as one until its rigid group is released.
-        if !app.session.contents_joints(id).is_empty() {
+        if app.session.contents_held(id) {
             placement.push(cmd(app, "component.unlock", "Unlock Contents").with(json!({ "component": id })));
         }
         v.push(group("Placement", "move", placement));
@@ -1686,6 +1748,16 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 let _ = app.run("select.set", json!({"items": selection}));
             }
         }
+        "ui.drawingEdit" => {
+            if let Some(object) = p.get("object").and_then(Value::as_str).and_then(solidcraft_engine::doc::ids::decode) {
+                crate::drawing_workspace::edit(app, object, at);
+            }
+        }
+        "drawing.view.projected.planned" if item.params.is_some() => {
+            if let Some(parent) = p.get("parent").and_then(Value::as_str).and_then(solidcraft_engine::doc::ids::decode) {
+                crate::drawing_workspace::start_projected(app, parent);
+            }
+        }
         "ui.finishSketch" => app.finish_sketch(),
         "ui.cancelSketch" => app.cancel_sketch(),
         "ui.relinkSource" | "ui.relinkPlacement" => {
@@ -1820,7 +1892,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             let name = crate::export_name::offered(app, body, body.unwrap_or(&app.session.doc.name));
             app.pick_save_command(
                 &format!("{name}.step"),
-                &["step", "stp", "igs", "stl", "3mf", "obj", "glb"],
+                &["step", "stp", "igs", "stl", "3mf", "obj", "glb", "usd", "usda", "usdc", "usdz"],
                 "file.export",
                 json!({"bodies": bodies}),
             );
@@ -2309,6 +2381,7 @@ pub fn toggle_visibility(app: &mut SolveApp) {
         .iter()
         .filter_map(|s| match s {
             Sel::Plane { name } | Sel::Axis { name } | Sel::ConstructionPoint { name } => Some(name.clone()),
+            Sel::Vertex { body, .. } if body.is_empty() => Some("O".to_string()),
             _ => None,
         })
         .collect();
@@ -2490,6 +2563,10 @@ fn in_selection(app: &SolveApp, sel: &Sel) -> bool {
 /// multi-selection keeps the whole selection (#3733), as does one of a selected body (#5849). `held`: the keys held at that click.
 /// On the view gizmo it opens the gizmo's own menu and leaves the selection alone.
 pub fn open(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held) {
+    if crate::drawing_workspace::active(app) {
+        let under = crate::drawing_sheet_page::hovered(app);
+        return open_on_sheet(app, at, held, under);
+    }
     if crate::viewport::view_gizmo_at(app, at) {
         return open_for(app, at, Target::ViewGizmo);
     }
@@ -2507,10 +2584,7 @@ pub fn open(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held) {
     });
     crate::select_other::close(app);
     if let Some(sel) = crate::viewport::sketch_constraint_at(app, at, app.viewport.hover.as_ref()) {
-        if !in_selection(app, &sel) {
-            let _ = app.run("select.set", json!({ "items": [sel] }));
-            app.menu.picked = Some((at, before, app.session.selection.clone()));
-        }
+        select_under(app, at, before, sel);
     } else if app.session.active_sketch.is_none()
         && let Some(h) = app.viewport.hover.clone()
         && let Some((_, sel)) = crate::viewport::candidate(app, &[h])
@@ -2530,6 +2604,35 @@ pub fn open(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held) {
         app.menu.picked = Some((at, before, app.session.selection.clone()));
     }
     open_for(app, at, Target::Viewport);
+}
+
+/// A right-click on something not selected selects it first, so the menu is about what is under
+/// the cursor; something already in the selection keeps the whole selection.
+fn select_under(app: &mut SolveApp, at: Pos2, before: Vec<Sel>, sel: Sel) {
+    if !in_selection(app, &sel) {
+        let _ = app.run("select.set", json!({ "items": [sel] }));
+        app.menu.picked = Some((at, before, app.session.selection.clone()));
+    }
+}
+
+/// [`open`] in the Drawing workspace: `under` is what the sheet page found under the pointer, or
+/// the object whose row in the browser was right-clicked, selected first unless it is already part
+/// of the selection. Empty paper keeps the selection, as empty space does in a sketch.
+pub(crate) fn open_on_sheet(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held, under: Option<Sel>) {
+    app.menu.opened = Some((at, held));
+    app.menu.picked = None;
+    app.menu.over_geometry = false;
+    app.menu.section_plane = None;
+    app.menu.face = None;
+    app.menu.plane = None;
+    crate::select_other::close(app);
+    if let Some(sel) = under {
+        let before = app.session.selection.clone();
+        select_under(app, at, before, sel);
+    }
+    open_for(app, at, Target::Viewport);
+    // The ring holds the model's commands: the sheet's menu is the list.
+    app.menu.radial = false;
 }
 
 /// Open a menu for a target (the radial ring only for the viewport).
@@ -2608,6 +2711,7 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
         Target::Timeline { feature: id } => feature(*id),
         Target::OriginPlane { name } => crate::prefs::OriginPlaneNames::PLANES.contains(&name.as_str()),
         Target::OriginAxis { name } => ["X", "Y", "Z"].contains(&name.as_str()),
+        Target::OriginPoint { name } => name == "O" || solidcraft_engine::origins::item(name).is_some_and(|(_, item)| item == "O"),
         Target::Component { id } => component(*id),
         Target::Occurrence { path } => app.session.occurrence_placement(path).is_ok(),
         // The scope is the row it is under: the component's own, or one of its placements.
@@ -3157,7 +3261,6 @@ pub fn finish_rename(app: &mut SolveApp, text: Option<&str>, commit: bool) -> Re
 fn workspace_style(item: &Item) -> Option<crate::ui_kit::WorkspaceStyle> {
     use crate::ui_kit::WorkspaceStyle;
     use solidcraft_theme::AccentRamp;
-    let planned = |slug, description| WorkspaceStyle { slug, description, tabs: None, ramp: None };
     Some(match item.label.as_str() {
         "Design" => {
             WorkspaceStyle { slug: "design", description: "ui.workspace_design_description", tabs: Some("ui.workspace_design_tabs"), ramp: None }
@@ -3168,10 +3271,9 @@ fn workspace_style(item: &Item) -> Option<crate::ui_kit::WorkspaceStyle> {
             tabs: Some("ui.workspace_render_tabs"),
             ramp: Some(AccentRamp::Render),
         },
-        "Animation" => planned("animation", "ui.workspace_animation_description"),
-        "Simulation" => planned("simulation", "ui.workspace_simulation_description"),
-        "Manufacture" => planned("manufacture", "ui.workspace_manufacture_description"),
-        "Drawing" => planned("drawing", "ui.workspace_drawing_description"),
+        "Drawing" => {
+            WorkspaceStyle { slug: "drawing", description: "ui.workspace_drawing_description", tabs: Some("ui.workspace_drawing_tabs"), ramp: None }
+        }
         _ => return None,
     })
 }
@@ -3870,17 +3972,13 @@ mod workspace_menu_tests {
         h.call("ui.resize", json!({"width":1200,"height":1000}));
         h.step(&json!({"click":{"handle":"ribbon:workspace"}})).unwrap();
         let opener = rect_of("ribbon:workspace").unwrap();
-        let rows: Vec<_> = ["design", "render", "animation", "simulation", "manufacture", "drawing"]
-            .iter()
-            .map(|slug| rect_of(&format!("workspace:menu:{slug}")).unwrap())
-            .collect();
+        // Design, Drawing (the owner's order), Render: no planned workspaces are listed.
+        let rows: Vec<_> = ["design", "drawing", "render"].iter().map(|slug| rect_of(&format!("workspace:menu:{slug}")).unwrap()).collect();
         assert!(rows.windows(2).all(|pair| pair[0].bottom() <= pair[1].top()));
         assert!(rows[0].top() > opener.bottom());
         assert_eq!(rows[0].width(), 450.0);
-        assert!(items(&h.app, &Target::Workspace).iter().skip(2).filter(|item| item.id != "ui.workspace.drawing").all(|item| !item.enabled));
-        h.step(&json!({"click":{"handle":"workspace:menu:animation"}})).unwrap();
-        assert!(!crate::render_workspace::active(&h.app));
-        assert!(h.app.viewport.context_menu.is_some());
+        assert_eq!(items(&h.app, &Target::Workspace).len(), 3, "only the workspaces there are");
+        assert!(rect_of("workspace:menu:animation").is_none(), "a planned workspace has no row");
         h.step(&json!({"click":{"handle":"workspace:menu:render"}})).unwrap();
         assert!(crate::render_workspace::active(&h.app));
         h.step(&json!({"click":{"handle":"ribbon:workspace"}})).unwrap();

@@ -114,6 +114,9 @@ pub struct Request {
     pub(crate) auto_verify: bool,
     /// Open the file with an importer plugin (`file.import`) even when SolidCraft reads it too.
     pub plugin_import: bool,
+    /// An export written to be printed: once written it opens in the system's PDF viewer
+    /// ([`crate::drawing_workspace::print::written`]).
+    pub print: bool,
 }
 
 impl Request {
@@ -136,6 +139,7 @@ impl Request {
             tries: 0,
             auto_verify: false,
             plugin_import: false,
+            print: false,
         }
     }
     /// It adds what it reads to the active design.
@@ -167,6 +171,8 @@ impl Request {
             Kind::InsertDesign => ("component.insert_design", self.params()),
             Kind::Recover { id, dir } => ("doc.recover", json!({"id": id, "dir": dir})),
             Kind::ExportDxf => ("file.export_view_dxf", Value::Object(self.options.clone())),
+            // Printing writes the whole drawing's PDF that asks for actual size.
+            Kind::ExportSheet if self.print => ("drawing.print", Value::Object(self.options.clone())),
             Kind::ExportSheet => ("drawing.export", Value::Object(self.options.clone())),
             Kind::UpdateLinks => ("component.update_links", Value::Object(self.options.clone())),
             Kind::ReloadCloud => ("pointcloud.reload", Value::Object(self.options.clone())),
@@ -772,6 +778,7 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         tries: 0,
         auto_verify: false,
         plugin_import: id == "file.import",
+        print: false,
     };
     let _ = begin_request(app, request);
     None
@@ -1709,6 +1716,10 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
     {
         let request = &running.request;
         match job {
+            Ok(made) if request.kind.exports() && request.print => {
+                crate::drawing_workspace::print::written(app, &request.path);
+                request.answer(Ok(made.result));
+            }
             Ok(made) if request.kind.exports() => {
                 if !request.path.is_empty() {
                     app.set_status(solidcraft_ui_text::format("ui.saved_to", &[("path", &request.path)]), false);
@@ -1784,17 +1795,14 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                     crate::stand_up::offer(app, &request.path, &running.before, Some(&made.result));
                 }
                 crate::frame_watch::step(app, "stand-up offer");
-                let warnings = made.result.get("warnings").and_then(Value::as_array);
                 if let Kind::Recover { .. } = request.kind {
                     recovered(app, request);
                 } else {
                     app.set_status(
                         if made.result.get("read_only").and_then(Value::as_bool) == Some(true) {
                             solidcraft_ui_text::tr("document.opened_read_only").to_string()
-                        } else if let Some(summary) = crate::timeline::import_status(app, &made.result) {
+                        } else if let Some(summary) = crate::timeline::import_warning_status(app, &made.result) {
                             summary
-                        } else if let Some(w) = warnings.filter(|w| !w.is_empty()) {
-                            format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or(""))
                         } else {
                             // Built here, outside the window's language scope: in the language
                             // chosen, as the other statuses of this file are.

@@ -22,6 +22,7 @@ mod mesh_decisions;
 mod parallel;
 mod params;
 mod pending;
+mod plugin_examples;
 mod render_assets;
 mod rustfmt;
 mod shared;
@@ -52,6 +53,10 @@ commands:
   assets          check that every non-code asset file is attributed in ATTRIBUTION.md
   app-icons       regenerate shared app-icon exports for Linux, FreeBSD and Windows
   icons           validate UI icon standards, discovery and review-tool behavior (Python 3.11+)
+  plugin-examples [--run]
+                  check that the plugin guide's examples (docs/book/plugin-examples) match the guide
+                  and build them for wasm32-unknown-unknown; --run also wraps each as a component
+                  and runs solidcraft-cli plugin test --require-cases on its package
   features        list SolidCraft's commands by area in docs/features.md (from the registry)
   i18n [--check | --add-missing] [--no-registry | --cli <solidcraft-cli>]
                   report how complete the message catalogs in assets/locales are:
@@ -123,7 +128,7 @@ commands:
   lists [--fix]   check that files many changes add to are sorted one item per line (the
                   message catalogs in assets/locales, tests/KNOWN_FAILING_TESTS); --fix sorts
                   the catalogs
-  skills          check that AGENTS.md and skills/*/SKILL.md cite files, `cargo xtask` commands and skills
+  skills          check that AGENTS.md, skills/ and .agents/skills/ cite files, `cargo xtask` commands and skills
                   that exist, that the router table lists exactly the skills there are, and that
                   AGENTS.md and new skills stay short
   mesh-decisions  check that model decisions in crates/doc, crates/engine and crates/kernel use exact
@@ -202,6 +207,7 @@ fn main() -> ExitCode {
         }
         Some("ci") => cmd_ci(),
         Some("fast") => fast::run(&root(), &rest),
+        Some("plugin-examples") => plugin_examples::run(&root(), rest.contains(&"--run")),
         Some("wasm") => cmd_wasm(),
         Some("web-offline") => web_offline::run(&root(), rest.first().copied()),
         Some("web-offline-test") => {

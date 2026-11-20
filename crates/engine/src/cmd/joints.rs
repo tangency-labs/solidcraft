@@ -19,9 +19,9 @@ use crate::schema::joints::{
     AsBuiltJointParams, BudgetStop, CamLift, CamParams, CamResult, ContactStop, CouplingResult, CreateJointParams, DeleteJointParams,
     DeleteJointResult, DriveJointParams, DriveJointResult, EditJointResult, FloatingChain, GearParams, HeldValue, InspectJointParams,
     InspectJointResult, JointAddedResult, JointDeleted, JointFrame, JointLimitsParams, JointProblem, LimitSide, LimitStop, LinkInfo,
-    ListJointsParams, ListJointsResult, ListedJoint, ListedOrigin, LoopStop, MakeJointOriginParams, MakeJointOriginResult, MotionLinkParams,
-    MotionLinkResult, NamedValue, OccurrenceDof, Omitted, RackPinionParams, ReachLoopStop, ReachParams, ReachResult, ReachedJoint, RigidGroupParams,
-    RigidGroupResult, ScrewParams, SolveJointsParams, SolveReport, SolveResult, ValueUnit,
+    ListJointsParams, ListJointsResult, ListedJoint, ListedOrigin, ListedRigidGroup, LoopStop, MakeJointOriginParams, MakeJointOriginResult,
+    MotionLinkParams, MotionLinkResult, NamedValue, OccurrenceDof, Omitted, RackPinionParams, ReachLoopStop, ReachParams, ReachResult, ReachedJoint,
+    RigidGroupParams, RigidGroupResult, ScrewParams, SolveJointsParams, SolveReport, SolveResult, ValueUnit,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -224,7 +224,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("interference")
         .noundo()
         .params(
-        "bodies?: [names] (default: all, in world placement; a name that is no body is refused); budget_s?: seconds (default 240, at most 86400: pairs not finished by then are listed in unchecked as \"not checked: the time budget … ran out\" and the call returns); exclude_pairs?: [[a, b]] (pairs left out, such as a pin in its hole: each side a body's world name or an occurrence id|name, matching every body under it; pairs_excluded counts them) → interferences: pairs that overlap with the overlap volume, area, bounding box and centre, and a_part, b_part: {component, path: [occurrence names], path_ids} where each body sits (also on unchecked pairs); unchecked: [{a, b, reason}], the pairs that could not be checked, with the reason, and each mesh body (STL, 3MF or OBJ import: not intersected) as {a: name, b: null, reason: \"mesh body: not checked\"}, so count: 0 is not read as no overlap (checked counts the solid bodies). Bodies are pruned by bounding box first, then by their display meshes (pairs whose meshes stay apart by more than their chord tolerances, neither inside the other, are clear without a boolean), so any number of bodies is fine; the pairs left are intersected exactly, in parallel on desktop, the slowest first; at most 20000 pairs whose boxes overlap are intersected per call (truncated: true and skipped_pairs: n say when more were left out). Also: pairs_candidate (boxes overlap), pairs_cleared (by the meshes), pairs_intersected, pairs_not_checked, pairs_excluded, budget_exceeded, threads (worker threads; 0: on the calling thread), boolean_ms and tessellate_ms (kernel time summed over the pairs), slowest: [{a, b, ms, boolean_ms, tessellate_ms}] and ms",
+        "bodies?: [names] (default: all, in world placement; a name that is no body is refused); budget_s?: seconds (default 240, at most 86400: pairs not finished by then are listed in unchecked as \"not checked: the time budget … ran out\" and the call returns); exclude_pairs?: [[a, b]] (pairs left out, such as a pin in its hole: each side a body's world name or an occurrence id|name, matching every body under it; pairs_excluded counts them); envelopes?: bool (default false: component envelopes, solid.bounding_solid with `component`, are left out unless named; true: each is checked instead of the bodies inside it, and a body named inside one means it; an envelope and a body inside it are never paired, counted in pairs_excluded) → interferences: pairs that overlap with the overlap volume, area, bounding box and centre, and a_part, b_part: {component, path: [occurrence names], path_ids} where each body sits (also on unchecked pairs); unchecked: [{a, b, reason}], the pairs that could not be checked, with the reason, and each mesh body (STL, 3MF or OBJ import: not intersected) as {a: name, b: null, reason: \"mesh body: not checked\"}, so count: 0 is not read as no overlap (checked counts the solid bodies). Bodies are pruned by bounding box first, then by their display meshes (pairs whose meshes stay apart by more than their chord tolerances, neither inside the other, are clear without a boolean), so any number of bodies is fine; the pairs left are intersected exactly, in parallel on desktop, the slowest first; at most 20000 pairs whose boxes overlap are intersected per call (truncated: true and skipped_pairs: n say when more were left out). Also: pairs_candidate (boxes overlap), pairs_cleared (by the meshes), pairs_intersected, pairs_not_checked, pairs_excluded, budget_exceeded, threads (worker threads; 0: on the calling thread), boolean_ms and tessellate_ms (kernel time summed over the pairs), slowest: [{a, b, ms, boolean_ms, tessellate_ms}] and ms",
     ),
 ];
 
@@ -416,6 +416,25 @@ fn effective_value_list(s: &Session, id: u64) -> Option<Vec<NamedValue>> {
     Some(named_value_list(j, vals.get(&id).map(Vec::as_slice).unwrap_or(&j.values)))
 }
 
+/// The joints a preview posed: the ones its commands drove, and the ones whose values the
+/// commands changed (a motion link's follower, a joint a closed loop moved). Their values are
+/// as the solver placed them, after motion links and limits, as `joint.inspect` and
+/// `joint.drive` give them.
+pub(crate) fn posed_joints(before: &Session, after: &Session, replies: &[Value]) -> Vec<ReachedJoint> {
+    let was = joints::joint_values(&before.doc.assembly);
+    let now = joints::joint_values(&after.doc.assembly);
+    let mut ids: std::collections::BTreeSet<u64> = replies.iter().filter_map(|r| r.get("joint").and_then(Value::as_u64)).collect();
+    ids.extend(after.doc.assembly.joints.iter().filter(|j| was.get(&j.id) != now.get(&j.id)).map(|j| j.id));
+    after
+        .doc
+        .assembly
+        .joints
+        .iter()
+        .filter(|j| ids.contains(&j.id))
+        .map(|j| ReachedJoint { joint: j.id, name: j.name.clone(), values: named_value_list(j, now.get(&j.id).unwrap_or(&j.values)) })
+        .collect()
+}
+
 fn occurrence_name(s: &Session, id: u64) -> String {
     s.doc.occurrences.iter().find(|o| o.id == id).map(|o| o.name.clone()).unwrap_or_else(|| id.to_string())
 }
@@ -456,28 +475,41 @@ pub(crate) fn cannot_move(s: &Session, sol: &joints::Solution, id: u64) -> Optio
 fn floating_chains(s: &Session, sol: &joints::Solution) -> Vec<(BTreeSet<u64>, FloatingChain)> {
     let placed = |o: u64| o == 0 || sol.world.contains_key(&o);
     let errors: BTreeSet<u64> = sol.errors.iter().map(|e| e.0).collect();
+    // A rigid group's parts join the chains through them, as its joints do in the solve; only
+    // the design's own joints and the parts at their ends are listed.
+    let held = s.doc.rigid_group_joints();
+    let held_ids: BTreeSet<u64> = held.iter().map(|h| h.id).collect();
+    let own = |j: &Joint| !held_ids.contains(&j.id);
     let mut next: BTreeMap<u64, Vec<(u64, &Joint)>> = BTreeMap::new();
-    for j in s.doc.assembly.joints.iter().filter(|j| !j.suppressed && !errors.contains(&j.id)) {
+    for j in s.doc.assembly.joints.iter().chain(&held).filter(|j| !j.suppressed && !errors.contains(&j.id)) {
         if !placed(j.a.occurrence) && !placed(j.b.occurrence) {
             next.entry(j.a.occurrence).or_default().push((j.b.occurrence, j));
             next.entry(j.b.occurrence).or_default().push((j.a.occurrence, j));
         }
     }
+    let ends: BTreeSet<u64> = s.doc.assembly.joints.iter().flat_map(|j| [j.a.occurrence, j.b.occurrence]).collect();
     let mut seen = BTreeSet::new();
     let mut out = Vec::new();
     for &start in next.keys() {
-        if !seen.insert(start) {
+        if !ends.contains(&start) || !seen.insert(start) {
             continue;
         }
         let (mut occs, mut js, mut todo) = (vec![start], BTreeSet::new(), vec![start]);
         while let Some(o) = todo.pop() {
             for (other, j) in next.get(&o).into_iter().flatten() {
-                js.insert((j.id, j.name.as_str()));
+                if own(j) {
+                    js.insert((j.id, j.name.as_str()));
+                }
                 if seen.insert(*other) {
-                    occs.push(*other);
+                    if ends.contains(other) {
+                        occs.push(*other);
+                    }
                     todo.push(*other);
                 }
             }
+        }
+        if js.is_empty() {
+            continue;
         }
         out.push((
             js.iter().map(|(id, _)| *id).collect(),
@@ -2495,6 +2527,13 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
         floating,
         omitted: omitted.some(),
         summary: want_summary.then(|| filter::summary(&s.doc, &groups)),
+        rigid_groups: s
+            .doc
+            .assembly
+            .rigid_groups
+            .iter()
+            .map(|g| ListedRigidGroup { id: g.id, name: g.name.clone(), component: g.component, members: s.doc.rigid_group_members(g).len() })
+            .collect(),
         param_warnings: Vec::new(),
     };
     reply(cmd, out)

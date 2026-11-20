@@ -141,49 +141,7 @@ pub fn conic_polyline(a: Vec2, apex: Vec2, b: Vec2, rho: f64) -> Vec<Vec2> {
 /// Natural cubic interpolation through `p` (chord-length parameters): per span the cubic
 /// Hermite data (start, end, start tangent, end tangent) in span-parameter units.
 fn fit_spans(p: &[Vec2]) -> Vec<(Vec2, Vec2, Vec2, Vec2)> {
-    let n = p.len();
-    if n < 2 {
-        return Vec::new();
-    }
-    let h: Vec<f64> = p.windows(2).map(|w| w[0].dist(w[1]).max(1e-9)).collect();
-    if n == 2 {
-        let d = p[1] - p[0];
-        return vec![(p[0], p[1], d, d)];
-    }
-    // Second derivatives M (natural ends: M0 = Mn = 0) by the tridiagonal (Thomas) solve.
-    let m = n - 2;
-    let mut diag = vec![0.0; m];
-    let mut up = vec![0.0; m];
-    let mut low = vec![0.0; m];
-    let mut rhs = vec![Vec2::ZERO; m];
-    for i in 0..m {
-        let (h0, h1) = (h[i], h[i + 1]);
-        diag[i] = 2.0 * (h0 + h1);
-        low[i] = h0;
-        up[i] = h1;
-        rhs[i] = ((p[i + 2] - p[i + 1]) / h1 - (p[i + 1] - p[i]) / h0) * 6.0;
-    }
-    for i in 1..m {
-        let w = low[i] / diag[i - 1];
-        diag[i] -= w * up[i - 1];
-        rhs[i] = rhs[i] - rhs[i - 1] * w;
-    }
-    let mut sol = vec![Vec2::ZERO; m];
-    for i in (0..m).rev() {
-        let next = if i + 1 < m { sol[i + 1] * up[i] } else { Vec2::ZERO };
-        sol[i] = (rhs[i] - next) / diag[i];
-    }
-    let mm = |i: usize| if i == 0 || i == n - 1 { Vec2::ZERO } else { sol[i - 1] };
-    (0..n - 1)
-        .map(|i| {
-            let hi = h[i];
-            let slope = (p[i + 1] - p[i]) / hi;
-            // First derivatives (per unit chord parameter) at both ends of the span.
-            let d0 = slope - (mm(i) * 2.0 + mm(i + 1)) * (hi / 6.0);
-            let d1 = slope + (mm(i) + mm(i + 1) * 2.0) * (hi / 6.0);
-            (p[i], p[i + 1], d0 * hi, d1 * hi)
-        })
-        .collect()
+    solidcore_ops::fit_projection::natural_spans(p).unwrap_or_default()
 }
 
 fn hermite(p0: Vec2, p1: Vec2, t0: Vec2, t1: Vec2, s: f64) -> Vec2 {
@@ -262,12 +220,16 @@ pub fn end_curvature(f: &dyn Fn(f64) -> Vec2, at_end: bool) -> Vec2 {
 
 /// The cubic Bézier pieces of a fit spline (exact: each span is a cubic Hermite).
 pub fn fit_beziers(p: &[Vec2]) -> Vec<[Vec2; 4]> {
-    fit_spans(p).into_iter().map(|(p0, p1, t0, t1)| [p0, p0 + t0 / 3.0, p1 - t1 / 3.0, p1]).collect()
+    solidcore_ops::fit_projection::fit_beziers(p, false).unwrap_or_default()
 }
 
 /// Fit pieces in the explicitly selected interpolation mode.
 pub fn fit_beziers_mode(p: &[Vec2], periodic: bool) -> crate::model::Result<Vec<[Vec2; 4]>> {
-    if periodic { crate::periodic_beziers(p) } else { Ok(fit_beziers(p)) }
+    if periodic {
+        crate::periodic_beziers(p)
+    } else {
+        solidcore_ops::fit_projection::fit_beziers(p, false).map_err(|e| crate::SketchError::Invalid(e.to_string()))
+    }
 }
 /// Tangent endpoints for one editable handle at each fit point. Each handle stores the natural
 /// tangent derivative per unit chord length times [`handle_unit`]; evaluation divides it back
@@ -427,6 +389,9 @@ pub fn spline_point_mode(p: &[Vec2], control: bool, degree: u8, periodic: bool, 
     if let Some(nurbs) = nurbs {
         return nurbs.point(p, degree, t).unwrap_or_else(|| p.first().copied().unwrap_or_default());
     }
+    if periodic && control {
+        return closed_control_point(p, degree, t);
+    }
     if !periodic {
         return spline_point(p, control, degree, t);
     }
@@ -452,6 +417,9 @@ pub fn spline_polyline_mode(p: &[Vec2], control: bool, degree: u8, periodic: boo
     if let Some(nurbs) = nurbs {
         return nurbs.polyline(p, degree);
     }
+    if periodic && control {
+        return closed_control_polyline(p, degree);
+    }
     if !periodic {
         return spline_polyline(p, control, degree);
     }
@@ -470,7 +438,43 @@ pub fn spline_polyline_mode(p: &[Vec2], control: bool, degree: u8, periodic: boo
     }
     out
 }
+/// Point of a closed control spline at `t` in [0, 1], over its pieces in turn.
+fn closed_control_point(p: &[Vec2], degree: u8, t: f64) -> Vec2 {
+    let Some(pieces) = crate::nurbs::closed_control_beziers(p, degree) else {
+        return p.first().copied().unwrap_or_default();
+    };
+    let x = t.clamp(0.0, 1.0) * pieces.len() as f64;
+    let i = (x.floor() as usize).min(pieces.len().saturating_sub(1));
+    let Some(seg) = pieces.get(i).and_then(|piece| solidcraft_geom::bezier(piece)) else {
+        return Vec2::ZERO;
+    };
+    seg.point_at((x - i as f64).clamp(0.0, 1.0))
+}
+
+/// Polyline of a closed control spline, its pieces sampled in turn; the last point is the first.
+fn closed_control_polyline(p: &[Vec2], degree: u8) -> Vec<Vec2> {
+    let Some(pieces) = crate::nurbs::closed_control_beziers(p, degree) else {
+        return Vec::new();
+    };
+    let mut out: Vec<Vec2> = Vec::new();
+    for seg in pieces.iter().filter_map(|piece| solidcraft_geom::bezier(piece)) {
+        for q in seg.polyline(CLOSED_SPLINE_TOL) {
+            if out.last().is_none_or(|l| l.dist(q) > 1e-12) {
+                out.push(q);
+            }
+        }
+    }
+    out
+}
+
+/// Sampling tolerance (mm) of a closed control spline's polyline.
+const CLOSED_SPLINE_TOL: f64 = 1e-3;
+
 pub fn spline_end_tangent_mode(p: &[Vec2], control: bool, periodic: bool, at_end: bool) -> Option<Vec2> {
+    if periodic && control {
+        // A closed control spline has no end, and its control points lie off the curve.
+        return None;
+    }
     if !periodic {
         return spline_end_tangent(p, control, at_end);
     }

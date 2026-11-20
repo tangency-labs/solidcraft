@@ -60,10 +60,11 @@ fn end_room(r: kernel::EndRoom) -> EndRoom {
 /// The kernel's round refusal in `e` as an [`Error`], its vertex as `b`'s record index and its
 /// station measured from the edge's end when `reversed`; any other kernel error by its type.
 pub(crate) fn refusal(b: &Brep, e: SolidError, reversed: bool) -> Error {
+    let (kind, operation) = (e.kind().code(), e.operation());
     let SolidError::RoundRefused { refusal, .. } = e else {
         return status(e);
     };
-    match refusal {
+    let typed = match refusal {
         RoundRefusal::RoundsCross { at, fit } => Error::RoundsCross {
             at: at.iter().map(|p| [p.x, p.y, p.z]).collect(),
             fit,
@@ -84,7 +85,8 @@ pub(crate) fn refusal(b: &Brep, e: SolidError, reversed: bool) -> Error {
             largest,
         },
         _ => Error::Exception,
-    }
+    };
+    crate::session::noted_as(kind, operation, typed)
 }
 
 /// Whether `start` (a vertex) is the end vertex of edge `e` of `b`: `None` when it is neither

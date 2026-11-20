@@ -44,6 +44,19 @@
 //!   to the face at either point (`COINCIDENT_TANGENT_SINE`, the coincidence check's angle) runs in
 //!   the face there: those two points are the ends of a stretch the edge and the face share and
 //!   stay two.
+//! - **An edge lying in a face, off it by more than the system zone tolerance** (not
+//!   upstream, #17527). Two face pairs at an edge of one B-rep that lies within its tolerance
+//!   of a face of the other (a revolved tool's rim in a hole's wall, its axis 1.2e-5 off the
+//!   hole's) each give their own curve along the edge, and the proto edges of the two overlap.
+//!   `ResolveOverlappingProtoEdges` replaces such a group with the edge's curve classified
+//!   against the face. Upstream classifies it within the manager's tolerance (half the zone
+//!   tolerance), where the edge lies in the face nowhere: the group was deleted and nothing
+//!   replaced it, and the loop stayed open. Here the curve is classified within the edge's own
+//!   tolerance where that is the larger, as the face pairs classified it, and the group takes in
+//!   every other proto edge all of whose definitions come from the same edge and face
+//!   ([`ProtoTopologyManager::absorb_pieces_of_edge_in_face`]): the replacement holds every
+//!   piece of the edge in the face, so a piece left out was imprinted twice and related to one
+//!   edge of the other B-rep twice ("another entity is already related to the other one").
 //! - **Removed proto edges** (SolidCraft fix, tangency-labs/smlib 93efd6d, UB-239).
 //!   Upstream's `SplitIntersectingProtoEdges` deletes the combined-away proto edge while
 //!   other proto edges (overlap lists) still name it (`CombineProtoEdge` hands its
@@ -99,6 +112,12 @@
 //!   allocated `rpNewPE` through the out-parameter; the port returns `None` there (the
 //!   failing paths are not reachable from the callers ported so far).
 //! - The `SM_DEBUG_CODE` blocks are not ported.
+//! - **Circles in contact** (not upstream): `FindOrCreateProtoVertex(PC, PC)` with no curve
+//!   takes a point classified onto an edge of each B-rep, where the two edges are circles in
+//!   one plane that touch by the contact rule (`circle_coplanar_circle_intersect_in_contact`
+//!   at `contact_tol_3d`), for their touching point (`touch_of_edges`): the surface
+//!   intersection met their lens at its two crossings, which became vertices beside the
+//!   touch (docs/booleans.md §6).
 //! - **Vertex identity** (not upstream): `FindOrCreateProtoVertex(PC, PC)` makes no proto
 //!   vertex for two classifications onto vertices farther apart than the intersection
 //!   tolerance of the two (a distance upstream's `sm_FindPositionFromPCs` only reports and
@@ -124,16 +143,19 @@ use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::CurveKind;
 use crate::error::{passed_on, EntityRef, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
+use crate::geom::geom_utility::p1::{circle_coplanar_circle_intersect_in_contact, CircleCircle};
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::solution_array::{ObjectKind, SolutionObject, SolutionType};
-use crate::geom::tol::{xsect_tol3d, xsect_tol_3d_from_zones, zone_tol3d, USE_DEFAULT};
+use crate::geom::tol::{
+    contact_tol_3d, xsect_tol3d, xsect_tol_3d_from_zones, zone_tol3d, USE_DEFAULT,
+};
 use crate::intersect::curve_class::p5::ExtractOptions;
 use crate::intersect::curve_class::{ClassificationInit, CurveClassification, CurveInterval};
 use crate::intersect::point_class::{
     ClassGeometry, ClassObject, ClassObjectKind, PointClassType, PointClassification,
 };
 use crate::kernel::Kernel;
-use crate::math::{max2, min2, Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO};
+use crate::math::{max2, min2, Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::knots::Side;
 use crate::query::face::p2 as face_p2;
@@ -384,6 +406,15 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     return Ok((None, false));
                 }
             }
+        }
+
+        // Not upstream: with no curve, two classifications onto edges are the crossing of
+        // those two edges, and two coplanar circles a hair less than tangent cross nowhere
+        // but touch at one point (docs/booleans.md §6, "Circles a hair less than tangent"):
+        // a point the surface intersection found where their lens meets the other face, one
+        // of the two crossings `2√(2δ r1 r2 / (r1 ± r2))` apart, is that touching point.
+        if crossing.is_none() {
+            touch_of_edges(k, geometry, pc1, pc2)?;
         }
 
         // sm_FindPositionFromPCs, status ignored; the position stays SM_UNDEF on failure
@@ -1832,7 +1863,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             .saturating_add(MAX_OVERLAP_GROUPS_BASE);
         // repeat the index when the list was changed by removing a group
         while let Some(&pe) = self.proto_edges().get(ii) {
-            let group = self.overlapping_pe_group(pe)?;
+            let mut group = self.overlapping_pe_group(pe)?;
             let found_group = !group.is_empty();
 
             // skip PEs not in a Overlapping PE Group
@@ -1880,6 +1911,12 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     topo2 = t2;
                 }
             }
+
+            // Not upstream (#17527): a group on an edge of one B-rep and a face of the other
+            // is replaced by the edge's curve classified against that face, every piece of the
+            // edge that lies in the face. Every other proto edge all of whose definitions lie on
+            // that edge and in that face is one of those pieces again, and goes with the group.
+            self.absorb_pieces_of_edge_in_face(&mut group, topo1, topo2)?;
 
             // PFs keep a list of coincident PEs. Check every ProtoFace: the group can be
             // coincident with more than one, and its PEs are deleted below.
@@ -2081,8 +2118,14 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 let ivl = geometry
                     .edge_interval(edge)
                     .ok_or(dangling("edge is unknown"))?;
-                let mut cc1 = new_curve_classification(k, handle, ivl, tol)?;
-                let mut cc2 = new_curve_classification(k, handle, ivl, tol)?;
+                // Not upstream (#17527): the edge's curve is classified within the edge's
+                // own tolerance where that is the larger (see the module's Deviations).
+                let edge_tol = geometry
+                    .topology_tolerance(edge)
+                    .ok_or(dangling("edge is unknown"))?;
+                let curve_tol = max2(tol, edge_tol);
+                let mut cc1 = new_curve_classification(k, handle, ivl, curve_tol)?;
+                let mut cc2 = new_curve_classification(k, handle, ivl, curve_tol)?;
 
                 // Pick a SrcFace object for the SrcEdge object
                 let faces = geometry.edge_faces(edge)?;
@@ -2167,6 +2210,67 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         }
 
         Ok(deleted_curves)
+    }
+}
+
+impl<O: ClassObject> ProtoTopologyManager<O> {
+    /// Not upstream (#17527): adds to an overlapping proto edge `group` whose lowest source
+    /// topology is an edge in one B-rep and a face in the other (`topo1`, `topo2`, either
+    /// way round) every other listed proto edge that has definitions and all of whose
+    /// definitions come from that edge and that face. Each such definition was classified
+    /// on the edge and in the face; [`Self::resolve_overlapping_proto_edges`] replaces the
+    /// group with every piece of the edge that lies in the face, so a piece left out would
+    /// stand beside its own replacement, and the two would be related to one edge of the
+    /// other B-rep. Overlap is found by the ends of one piece dropped on the other within the
+    /// zone tolerance, so where the edge lies further than that from the face's own curve
+    /// (an edge within its tolerance of the face, off it by more than the system zone
+    /// tolerance) a piece can share the edge and the face with the group without being
+    /// found overlapping it. Groups of any other kind are left as they are.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for a deleted proto edge or edge definition.
+    fn absorb_pieces_of_edge_in_face(
+        &self,
+        group: &mut Vec<ProtoEdgeId>,
+        topo1: Option<O>,
+        topo2: Option<O>,
+    ) -> Result<()> {
+        let (Some(t1), Some(t2)) = (topo1, topo2) else {
+            return Ok(());
+        };
+        let kinds = (t1.class_kind(), t2.class_kind());
+        if kinds != (ClassObjectKind::Edge, ClassObjectKind::Face)
+            && kinds != (ClassObjectKind::Face, ClassObjectKind::Edge)
+        {
+            return Ok(());
+        }
+        for &pe in self.proto_edges() {
+            if group.contains(&pe) {
+                continue;
+            }
+            let eds = self
+                .proto_edge(pe)
+                .ok_or(dangling("proto edge is deleted"))?
+                .edge_definitions();
+            if eds.is_empty() {
+                continue;
+            }
+            let mut all = true;
+            for &ed in eds {
+                let d = self
+                    .edge_def(ed)
+                    .ok_or(dangling("edge definition is deleted"))?;
+                if as_topology(d.src_topo(1)) != topo1 || as_topology(d.src_topo(2)) != topo2 {
+                    all = false;
+                    break;
+                }
+            }
+            if all {
+                group.push(pe);
+            }
+        }
+        Ok(())
     }
 }
 
@@ -2693,6 +2797,75 @@ fn crossing_sine<O: ClassObject>(
         return Ok(sine1);
     }
     Ok(sine1.min(sine2))
+}
+
+/// Not upstream: moves `pc1` and `pc2`, a point classified onto an edge of each B-rep, to
+/// where those two edges touch when they are circles in one plane that the contact rule
+/// takes for touching (`circle_coplanar_circle_intersect_in_contact` at `contact_tol_3d`,
+/// as the edge/curve intersections of the boolean read them), and the touching point lies
+/// on both edges within their intersection tolerance. Any other pair is left as it is.
+///
+/// # Errors
+///
+/// Those of the circles' intersection; an unported or cancelled drop of the touching point.
+fn touch_of_edges<O: ClassObject>(
+    k: &Kernel,
+    geometry: &impl ClassGeometry<O>,
+    pc1: &mut PointClassification<O>,
+    pc2: &mut PointClassification<O>,
+) -> Result<()> {
+    if pc1.point_class() != PointClassType::Edge || pc2.point_class() != PointClassType::Edge {
+        return Ok(());
+    }
+    // an edge's circle: centre, unit normal, radius
+    let circle = |pc: &PointClassification<O>| -> Result<Option<(Point3, Vec3, f64)>> {
+        let Some((b, EntityRef::Edge(e))) = pc.object().and_then(|o| geometry.topology_entity(o))
+        else {
+            return Ok(None);
+        };
+        let Some(curve) = b.edge(e)?.curve.as_ref() else {
+            return Ok(None);
+        };
+        let CurveKind::Ellipse(c) = curve.kind() else {
+            return Ok(None);
+        };
+        if !c.is_circle() {
+            return Ok(None);
+        }
+        let place = c.position();
+        Ok(Some((place.origin(), place.z_axis(), c.x_radius())))
+    };
+    let (Some((c1, n1, r1)), Some((c2, n2, r2))) = (circle(pc1)?, circle(pc2)?) else {
+        return Ok(());
+    };
+    let tol = xsect_tol_3d_from_zones(
+        k,
+        pc1.obj_zone_tol_3d(k, geometry)?,
+        pc2.obj_zone_tol_3d(k, geometry)?,
+    );
+    // one plane: parallel normals (the angle test of the circles' own intersection) and
+    // the second centre on the first plane within the tolerance
+    if n1.cross(n2).length() > EFF_ZERO_SQRT || (c2 - c1).dot(n1).abs() > tol {
+        return Ok(());
+    }
+    let CircleCircle::Tangent(touch) =
+        circle_coplanar_circle_intersect_in_contact(n1, c1, r1, c2, r2, tol, contact_tol_3d(k))?
+    else {
+        return Ok(());
+    };
+    // the touching point on both edges' arcs: dropped onto each edge's interval within
+    // their tolerance (a drop that fails leaves the point where it was)
+    let (mut q1, mut q2) = (*pc1, *pc2);
+    for q in [&mut q1, &mut q2] {
+        match q.compute_point_parameters(k, geometry, touch) {
+            Ok(()) if q.deviation() <= tol => {}
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Ok(()) | Err(_) => return Ok(()),
+        }
+    }
+    *pc1 = q1;
+    *pc2 = q2;
+    Ok(())
 }
 
 #[cfg(test)]

@@ -25,7 +25,7 @@ fn recent_step_lookups_survive_more_than_four_live_imports() {
     let mut held = Vec::new();
     for i in 0..6 {
         let imp = empty();
-        remember_in(&mut cache, (i, 200), &imp, false);
+        remember_in(&mut cache, (i, 200), false, &imp, false);
         held.push(imp);
     }
     assert_eq!(cache.len(), 6, "all six externally owned imports remain findable");
@@ -34,14 +34,14 @@ fn recent_step_lookups_survive_more_than_four_live_imports() {
     }
     drop(held);
     let next = empty();
-    remember_in(&mut cache, (6, 200), &next, false);
+    remember_in(&mut cache, (6, 200), false, &next, false);
     assert_eq!(cache.len(), 1, "dead weak entries are removed on the next import");
 
     let mut held = Vec::new();
     let mut small_cache = Vec::new();
     for i in 0..6 {
         let imp = empty();
-        remember_in(&mut small_cache, (i, 100), &imp, true);
+        remember_in(&mut small_cache, (i, 100), false, &imp, true);
         held.push(imp);
     }
     assert_eq!(small_cache.len(), 6, "small imports still owned externally retain their lookups");
@@ -50,7 +50,7 @@ fn recent_step_lookups_survive_more_than_four_live_imports() {
     assert!(small_cache[..2].iter().all(|r| r.import.upgrade().is_none()), "the oldest small imports are released");
     assert!(small_cache[2..].iter().all(|r| r.import.upgrade().is_some()), "the four newest small imports remain cached");
     let seventh = empty();
-    remember_in(&mut small_cache, (6, 100), &seventh, true);
+    remember_in(&mut small_cache, (6, 100), false, &seventh, true);
     assert_eq!(small_cache.len(), 4, "a new import prunes dead lookups and caps the retained small imports");
     assert_eq!(small_cache.iter().filter(|r| r._small.is_some()).count(), 4);
 }
@@ -336,6 +336,73 @@ fn a_torus_written_as_a_patch_and_the_rest_round_it_imports_whole() {
     }
 }
 
+/// A 5 mm ball written as two faces on its sphere that share one loop off the sphere's axis
+/// (#15046): a cap beyond the circle x = 3 (radius 4 about +x) and the rest of the sphere round
+/// it, as some exporters write a ball (SolidCraft 0.30.1 re-exporting an inserted one among
+/// them). The rest runs clockwise round the cap: it is the outside of its loop, and was read as
+/// the cap turned over, both faces on the cap, no mass, and the cap drawn twice. Also with the
+/// loop's senses the other way round (the face named Cap is then the outside), and with the rest
+/// on a sphere of its own about +y. Each reads as the closed ball: two faces; the loop's circle
+/// and the rest's seam from it to the pole the rest covers as its edges; the circle's vertex and
+/// that pole; one shell.
+/// Its area is 4πr² and its volume 4πr³/3, and each face's display mesh covers its own zone of
+/// the ball: inscribed within a chord deviation δ, a zone's mesh area is short of its exact
+/// area by at most a factor (1 − δ/r)².
+#[test]
+fn a_ball_written_as_a_cap_and_the_rest_round_it_imports_whole() {
+    use std::f64::consts::PI;
+    let r = 5.0_f64;
+    let (area, volume) = (4.0 * PI * r * r, 4.0 / 3.0 * PI * r * r * r);
+    let own =
+        "#24=DIRECTION('',(0.,1.,0.));\n#25=DIRECTION('',(0.,0.,1.));\n#26=AXIS2_PLACEMENT_3D('',#1,#24,#25);\n#27=SPHERICAL_SURFACE('',#26,5.);\n";
+    for (what, cap, rest, rest_on, extra) in [
+        ("as the issue writes it", ".T.", ".F.", "#5", ""),
+        ("the loop's senses the other way round", ".F.", ".T.", "#5", ""),
+        ("the rest on its own sphere about +y", ".T.", ".F.", "#27", own),
+    ] {
+        let mut t = String::from(HEAD);
+        t += "#1=CARTESIAN_POINT('',(0.,0.,0.));\n#2=DIRECTION('',(0.,0.,1.));\n#3=DIRECTION('',(1.,0.,0.));\n#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);\n#5=SPHERICAL_SURFACE('',#4,5.);\n";
+        t += "#6=CARTESIAN_POINT('',(3.,0.,0.));\n#7=DIRECTION('',(0.,1.,0.));\n#8=AXIS2_PLACEMENT_3D('',#6,#3,#7);\n#9=CIRCLE('',#8,4.);\n";
+        t += "#10=CARTESIAN_POINT('',(3.,4.,0.));\n#11=VERTEX_POINT('',#10);\n#12=EDGE_CURVE('',#11,#11,#9,.T.);\n";
+        t += &format!(
+            "#13=ORIENTED_EDGE('',*,*,#12,{cap});\n#14=EDGE_LOOP('',(#13));\n#15=FACE_OUTER_BOUND('',#14,.T.);\n#16=ADVANCED_FACE('Cap',(#15),#5,.T.);\n"
+        );
+        t += &format!(
+            "#17=ORIENTED_EDGE('',*,*,#12,{rest});\n#18=EDGE_LOOP('',(#17));\n#19=FACE_OUTER_BOUND('',#18,.T.);\n#20=ADVANCED_FACE('Rest',(#19),{rest_on},.T.);\n"
+        );
+        t += extra;
+        t += "#21=CLOSED_SHELL('',(#16,#20));\n#22=MANIFOLD_SOLID_BREP('Ball',#21);\n#23=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#22),#70);\n";
+        t += &context(70, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+        t += TAIL;
+        let imp = step_import(&t).unwrap_or_else(|e| panic!("{what}: {e}"));
+        assert_eq!(imp.bodies.len(), 1, "{what}: {:?}", imp.warnings);
+        assert!(
+            !imp.warnings.iter().any(|w| w.contains("turned over") || w.contains("left out") || w.contains("surfaces")),
+            "{what}: {:?}",
+            imp.warnings
+        );
+        assert!(imp.bodies[0].closed, "{what}: {:?}", imp.warnings);
+        let m = measure(&imp.bodies[0].body).unwrap_or_else(|e| panic!("{what}: {e}"));
+        assert_eq!((m.faces, m.edges, m.vertices, m.shells), (2, 2, 2, 1), "{what}");
+        assert!(rel(m.area, area) < 1e-6, "{what}: area {} vs {area}", m.area);
+        assert!(rel(m.volume, volume) < 1e-6, "{what}: volume {} vs {volume}", m.volume);
+        // Each face's own triangles: the cap's zone of height r − 3 has area 2πr·2, the rest the
+        // other 2πr·8 (whichever face the file names Cap).
+        let chord = 0.01;
+        let mesh = imp.bodies[0].body.mesh(&crate::MeshTolerance::chord(chord)).unwrap();
+        let mut shown = [0.0_f64; 2];
+        for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
+            let [a, b, c] = t.map(|i| mesh.positions[i as usize]);
+            shown[*f as usize] += 0.5 * (b - a).cross(c - a).len();
+        }
+        shown.sort_by(f64::total_cmp);
+        for (s, exact) in shown.into_iter().zip([2.0 * PI * r * 2.0, 2.0 * PI * r * 8.0]) {
+            let floor = exact * (1.0 - chord / r).powi(2);
+            assert!(s >= floor && s <= exact * (1.0 + 1e-9), "{what}: a face's display mesh area {s}, its zone's {exact}");
+        }
+    }
+}
+
 /// A 30 × 30 × 10 block with a Ø14 hole through it, its top edge rounded at 1 mm, as SolidCraft
 /// 0.30.1 wrote it after reading its own file (#17929): the round on a SURFACE_OF_REVOLUTION of
 /// a rational circle, which got no pcurves, so the block came in open. The round reads as a
@@ -597,6 +664,32 @@ fn round_trip_features() {
     let ring = Region2 { outer: Loop2::circle(Vec2::new(10.0, 0.0), 3.0), holes: vec![] };
     let donut = revolve(&Plane::XZ, &[ring], Vec2::ZERO, Vec2::Y, 1.5).unwrap();
     round_trip(&donut[0]);
+}
+
+/// A sphere whose face has other faces cut or joined into it keeps that face through a STEP
+/// round trip (#16872): its seam loop, a meridian up to the pole and back down, is no sliver of
+/// no area, and a bore across the seam does not turn the face over. Each came back an open sheet,
+/// or no body at all, or short of volume.
+#[test]
+fn round_trip_spheres_with_faces_cut_or_joined_into_them() {
+    let ball = || sphere(Vec3::ZERO, 5.0).unwrap();
+    // A bore beside the seam, from the centre's plane out.
+    let off = cylinder(Vec3::new(0.0, 2.0, 0.0), Vec3::X, 1.0, 10.0).unwrap();
+    let bored = boolean(&ball(), &off, BoolOp::Cut).unwrap().unwrap();
+    assert!(rel(measure(&bored).unwrap().volume, 509.392) < 1e-4);
+    round_trip(&bored);
+    // A bore through the centre, across the seam.
+    let through = cylinder(Vec3::ZERO, Vec3::X, 3.0, 10.0).unwrap();
+    round_trip(&boolean(&ball(), &through, BoolOp::Cut).unwrap().unwrap());
+    // A rod with a ball on its end.
+    let rod = cylinder(Vec3::new(-20.0, 0.0, 0.0), Vec3::X, 3.0, 20.0).unwrap();
+    round_trip(&boolean(&rod, &ball(), BoolOp::Union).unwrap().unwrap());
+    // A ring with a ball on it.
+    let ring = torus(Vec3::ZERO, 20.0, 3.0).unwrap();
+    let knob = sphere(Vec3::new(20.0, 0.0, 0.0), 5.0).unwrap();
+    let joined = boolean(&ring, &knob, BoolOp::Union).unwrap().unwrap();
+    assert!(rel(measure(&joined).unwrap().volume, 3820.759) < 1e-4);
+    round_trip(&joined);
 }
 
 /// Robustness seed 17: a thin three-quarter tube shelled with its bottom open reads back whole
@@ -918,7 +1011,7 @@ fn a_micro_edge_on_a_bezier_with_a_tiny_knot_span_keeps_the_block() {
     // At 1.283 nm the micro edge lies on [0, 6.549e-15], below SMLib's knot resolution (1e-12):
     // the solid is refused with that interval named, not taken as a body SMLib's check fails.
     let e = step_import(&bezier_block("1.020781457822E-07", 1.283e-6)).map(|i| i.bodies.len()).unwrap_err().to_string();
-    assert!(e.contains("knot resolution is 1e-12"), "{e}");
+    assert!(e.contains("no longer than SMLib's knot resolution (1e-12)"), "{e}");
 }
 
 /// [`bezier_block`] (split at 1 µm) with its first edge's curve, which the micro edge and the
@@ -933,6 +1026,29 @@ pub(super) fn lifted_bezier_block(lift: f64) -> String {
             _ => format!("{l}\n"),
         })
         .collect()
+}
+
+/// A tetrahedron whose spline face's control net steps back 0.5 µm along each of its sides
+/// (tests/step-regressions/net_steps_back_within_tolerance.step): the steps are taken out when it
+/// is read, so SMLib's check takes the part. As written the check failed it on "Bad NonMonotonic
+/// CPts", and every cut, join or fillet on it was refused (a Fusion 360 export's surface and edge
+/// curve did the same, by 0.4 to 0.9 µm).
+#[test]
+fn a_spline_face_whose_control_net_steps_back_within_the_tolerance_imports_checked() {
+    let text = include_str!("../../../../tests/step-regressions/net_steps_back_within_tolerance.step");
+    let imp = step_import(text).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert!(
+        imp.warnings.iter().any(|w| w.contains("2 control points of spline curves and surfaces whose polygon turned back")),
+        "{:?}",
+        imp.warnings
+    );
+    assert!(!imp.warnings.iter().any(|w| w.contains("needs repair")), "{:?}", imp.warnings);
+    let body = &imp.bodies[0].body;
+    assert!(imp.bodies[0].closed);
+    assert_eq!(crate::validation::failing_check(body).unwrap().map(|c| c.to_string()), None);
+    let m = measure(body).unwrap();
+    assert!(rel(m.volume, 1000.0 / 6.0) < 1e-6, "volume {}", m.volume);
 }
 
 #[test]
@@ -1051,7 +1167,64 @@ fn a_placement_that_scales_a_part_is_checked_as_placed() {
 
 /// A check job for `body`, as the reader makes one (part `name`, `times` instances).
 fn check_job(body: &Body, name: &str, times: usize) -> checks::Job {
-    checks::Job { item: 101, part: name.into(), what: format!("solid '{name}'"), body: body.clone(), times }
+    let n = body.face_count();
+    let source = Arc::new(parallel::Part { body: body.clone(), closed: true, file_faces: n, face_origin: (0..n as u64).collect(), refused: None });
+    checks::Job {
+        item: 101,
+        part: name.into(),
+        what: format!("solid '{name}'"),
+        body: body.clone(),
+        times,
+        label: format!("solid '{name}'"),
+        m: IDENTITY,
+        source,
+    }
+}
+
+/// The check jobs and heal input the reader makes of one part (item 7, `Hair`, its faces file
+/// faces 0, 1, …) placed at each of `placements` in turn: one job per class of placement, at its
+/// first instance.
+fn part_jobs(body: &Body, placements: &[M4]) -> (Vec<checks::Job>, checks::Heals) {
+    let n = body.face_count();
+    let part = Arc::new(parallel::Part { body: body.clone(), closed: true, file_faces: n, face_origin: (0..n as u64).collect(), refused: None });
+    let mut jobs: Vec<checks::Job> = Vec::new();
+    let mut of: HashMap<Option<[u64; 16]>, usize> = HashMap::new();
+    for m in placements {
+        let class = check_class(m);
+        if let Some(job) = of.get(&class).and_then(|k| jobs.get_mut(*k)) {
+            job.times += 1;
+            continue;
+        }
+        of.insert(class, jobs.len());
+        let body = parallel::placed(&part.body, m).expect("placed");
+        let what = if class.is_some() { "solid 'Hair' as its placement scales, shears or mirrors it" } else { "solid 'Hair'" };
+        jobs.push(checks::Job {
+            item: 7,
+            part: "Hair".into(),
+            what: what.into(),
+            body,
+            times: 1,
+            label: "solid 'Hair'".into(),
+            m: *m,
+            source: part.clone(),
+        });
+    }
+    let heals = checks::Heals {
+        as_read: false,
+        instances: placements.iter().map(|m| (7, *m)).collect(),
+        paints: checks::Paints::default(),
+        uses: [(7, placements.len())].into_iter().collect(),
+    };
+    (jobs, heals)
+}
+
+/// The checks and heal of one part placed at `placements` ([`part_jobs`]) on `workers`
+/// threads, waited for: what they found and what they healed.
+fn heal_run(body: &Body, placements: &[M4], workers: usize) -> (Vec<ImportIssue>, Option<Arc<ImportHeals>>) {
+    let (jobs, heals) = part_jobs(body, placements);
+    let checks = ImportChecks::start(jobs, heals, workers, None);
+    let issues = checks.wait().expect("not stopped");
+    ((*issues).clone(), checks.heals())
 }
 
 /// The one body of the lifted block (failing SMLib's check when `fails`) and of the block as
@@ -1071,9 +1244,9 @@ fn a_stopped_import_stops_in_the_check() {
     let stop = solidcraft_smlib::stop::Stop::new();
     stop.stop();
     assert!(stop.within(|| jobs().iter().all(|j| matches!(checks::check(j), checks::Outcome::Stopped))), "the check stops with the work");
-    assert_eq!(ImportChecks::start(jobs(), 2, Some(stop)).wait(), None, "checks stopped by the caller's token say so");
+    assert_eq!(ImportChecks::start(jobs(), checks::Heals::default(), 2, Some(stop)).wait(), None, "checks stopped by the caller's token say so");
     assert!(jobs().iter().all(|j| matches!(checks::check(j), checks::Outcome::NeedsRepair(_))), "unstopped, the lifted block fails the check");
-    let found = ImportChecks::start(jobs(), 2, None).wait().expect("unstopped, they end");
+    let found = ImportChecks::start(jobs(), checks::Heals::default(), 2, None).wait().expect("unstopped, they end");
     assert_eq!(found.len(), 2);
 }
 
@@ -1125,10 +1298,139 @@ fn the_checks_report_in_read_order_whatever_the_threads() {
     let want: Vec<String> = (0..12).filter(|k| k % 3 != 1).map(|k| format!("p{k}")).collect();
     for workers in [1, 2, 4, 8] {
         for _ in 0..3 {
-            let found = ImportChecks::start(jobs(), workers, None).wait().unwrap();
+            let found = ImportChecks::start(jobs(), checks::Heals::default(), workers, None).wait().unwrap();
             assert_eq!(found.iter().map(|i| i.part.clone()).collect::<Vec<_>>(), want, "{workers} workers");
         }
     }
+}
+
+/// A prism 4 mm high (in mm) whose section is bounded by the cubic Bézier through the control
+/// points (0, 0), (6, 1), (6, 9), (0, 10) and by the line x = 0 back to its start: two planes at
+/// z = 0 and z = 4, a flat wall on x = 0 and a curved wall, a B-spline of degree (3, 1). The
+/// rims of the curved wall are that Bézier on the knots `knots`; each starts at the vertex at the
+/// curve's parameter `knots[0] + lead`, not at its first knot.
+fn bezier_prism(knots: [f64; 2], lead: f64) -> String {
+    const H: f64 = 4.0;
+    const P: [[f64; 2]; 4] = [[0.0, 0.0], [6.0, 1.0], [6.0, 9.0], [0.0, 10.0]];
+    let [k0, k1] = knots;
+    let bezier = |s: f64| {
+        let t = (s - k0) / (k1 - k0);
+        let b = [(1.0 - t).powi(3), 3.0 * t * (1.0 - t).powi(2), 3.0 * t * t * (1.0 - t), t.powi(3)];
+        [0, 1].map(|c| (0..4).map(|i| b[i] * P[i][c]).sum::<f64>())
+    };
+    let f = |x: f64| format!("{x:.17E}");
+    let xyz = |p: [f64; 3]| format!("({},{},{})", f(p[0]), f(p[1]), f(p[2]));
+    let mut s = String::from(HEAD);
+    let start = bezier(k0 + lead);
+    // V0, V3 at z = 0, then V0, V3 at z = H.
+    let vertices = [[start[0], start[1], 0.0], [0.0, 10.0, 0.0], [start[0], start[1], H], [0.0, 10.0, H]];
+    for (i, p) in vertices.iter().enumerate() {
+        s += &format!("#{}=CARTESIAN_POINT('',{});\n#{}=VERTEX_POINT('',#{});\n", 100 + i, xyz(*p), 110 + i, 100 + i);
+    }
+    // The rims (#300 at z = 0, #301 at z = H) and the curved wall (#330).
+    let mut rows = Vec::new();
+    for (k, z) in [0.0, H].into_iter().enumerate() {
+        let cps: Vec<String> = (0..4)
+            .map(|j| {
+                s += &format!("#{}=CARTESIAN_POINT('',{});\n", 200 + 10 * k + j, xyz([P[j][0], P[j][1], z]));
+                format!("#{}", 200 + 10 * k + j)
+            })
+            .collect();
+        s += &format!(
+            "#{}=B_SPLINE_CURVE_WITH_KNOTS('',3,({}),.UNSPECIFIED.,.F.,.F.,(4,4),({},{}),.PIECEWISE_BEZIER_KNOTS.);\n",
+            300 + k,
+            cps.join(","),
+            f(k0),
+            f(k1)
+        );
+        rows.push(cps);
+    }
+    let rows: Vec<String> = (0..4).map(|j| format!("({},{})", rows[0][j], rows[1][j])).collect();
+    s += &format!(
+        "#330=B_SPLINE_SURFACE_WITH_KNOTS('',3,1,({}),.UNSPECIFIED.,.F.,.F.,.F.,(4,4),(2,2),(0.,1.),(0.,1.),.UNSPECIFIED.);\n",
+        rows.join(",")
+    );
+    // The straight edges' lines: V3 → V0 and V3' → V0' (on x = 0), then V0 → V0' and V3 → V3'.
+    for (k, (a, b)) in [(1, 0), (3, 2), (0, 2), (1, 3)].into_iter().enumerate() {
+        let (p, q) = (vertices[a], vertices[b]);
+        let d = [q[0] - p[0], q[1] - p[1], q[2] - p[2]];
+        let len = d.iter().map(|c| c * c).sum::<f64>().sqrt();
+        let base = 340 + 10 * k;
+        s += &format!(
+            "#{base}=CARTESIAN_POINT('',{});\n#{}=DIRECTION('',{});\n#{}=VECTOR('',#{},{});\n#{}=LINE('',#{base},#{});\n",
+            xyz(p),
+            base + 1,
+            xyz(d.map(|c| c / len)),
+            base + 2,
+            base + 1,
+            f(len),
+            base + 3,
+            base + 2
+        );
+    }
+    // The edges, #500 on: the rims, then the straight edges.
+    let edges = [(0, 1, 300), (2, 3, 301), (1, 0, 343), (3, 2, 353), (0, 2, 363), (1, 3, 373)];
+    for (e, (a, b, geometry)) in edges.into_iter().enumerate() {
+        s += &format!("#{}=EDGE_CURVE('',#{},#{},#{geometry},.T.);\n", 500 + e, 110 + a, 110 + b);
+    }
+    // Each face's loop counter-clockwise seen from outside: the top, the bottom (its rim used
+    // against the rim's direction), the curved wall, the flat wall.
+    let planes = [([0.0, 0.0, H], [0.0, 0.0, 1.0]), ([0.0; 3], [0.0, 0.0, -1.0]), ([0.0; 3], [-1.0, 0.0, 0.0])];
+    let faces: [(&[(usize, bool)], Option<usize>); 4] = [
+        (&[(1, true), (3, true)], Some(0)),
+        (&[(2, false), (0, false)], Some(1)),
+        (&[(0, true), (5, true), (1, false), (4, false)], None),
+        (&[(2, true), (4, true), (3, false), (5, false)], Some(2)),
+    ];
+    let mut face_ids = Vec::new();
+    for (fi, (uses, plane)) in faces.iter().enumerate() {
+        let base = 600 + 20 * fi;
+        let oes: Vec<String> = uses
+            .iter()
+            .enumerate()
+            .map(|(j, (e, forward))| {
+                s += &format!("#{}=ORIENTED_EDGE('',*,*,#{},{});\n", base + j, 500 + e, if *forward { ".T." } else { ".F." });
+                format!("#{}", base + j)
+            })
+            .collect();
+        s += &format!("#{}=EDGE_LOOP('',({}));\n#{}=FACE_OUTER_BOUND('',#{},.T.);\n", base + 5, oes.join(","), base + 6, base + 5);
+        let surface = match plane.and_then(|p| planes.get(p)) {
+            Some((o, n)) => {
+                s += &format!("#{}=CARTESIAN_POINT('',{});\n#{}=DIRECTION('',{});\n", base + 7, xyz(*o), base + 8, xyz(*n));
+                s += &format!("#{}=AXIS2_PLACEMENT_3D('',#{},#{},$);\n#{}=PLANE('',#{});\n", base + 9, base + 7, base + 8, base + 10, base + 9);
+                base + 10
+            }
+            None => 330,
+        };
+        s += &format!("#{}=ADVANCED_FACE('',(#{}),#{surface},.T.);\n", base + 11, base + 6);
+        face_ids.push(format!("#{}", base + 11));
+    }
+    s += &format!("#80=CLOSED_SHELL('',({}));\n#81=MANIFOLD_SOLID_BREP('Prism',#80);\n", face_ids.join(","));
+    s += "#60=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#81),#20);\n";
+    s += &context(20, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    s += TAIL;
+    s
+}
+
+/// A spline edge whose knots run from 5e-12 to 2.5e-4 (a file may write knots in metres) and whose
+/// start vertex lies 4e-12 past the first knot, 0.29 nm along the curve, between a plane that
+/// uses it against its direction and a B-spline face. SMLib starts the plane's trim on the curve's
+/// first knot; the trim, reversed onto the edge as t ↦ a + b − t, came back with its start
+/// (a + b) − b rounded 2e-20 below that knot, off the curve, so it was not found at a point of the
+/// edge and the solid came in as no body. It imports as the closed prism it is: section 171/5 mm²
+/// (∫ x dy along the Bézier), 4 mm high.
+#[test]
+fn a_spline_edge_starting_just_past_its_first_knot_near_zero_keeps_the_solid() {
+    let (k0, k1) = (5e-12, 2.5e-4);
+    assert!((k0 + k1) - k1 < k0, "the rounding this case is about");
+    let imp = step_import(&bezier_prism([k0, k1], 4e-12)).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let b = &imp.bodies[0];
+    assert!(b.closed && b.refused.is_none(), "{:?}", imp.warnings);
+    crate::validation::check_kept(&b.body).unwrap_or_else(|e| panic!("{e}"));
+    let m = measure(&b.body).unwrap();
+    assert!(rel(m.volume, 4.0 * 171.0 / 5.0) < 1e-9, "volume {}", m.volume);
+    assert_eq!(m.faces, 4);
 }
 
 fn context(id: u64, unit: &str) -> String {
@@ -1412,6 +1714,28 @@ fn hand_written_assembly() {
     assert_eq!(imp.bodies[1].path, vec!["Assembly".to_string(), "Block".to_string()]);
     assert_eq!([imp.bodies[0].instance.as_deref(), imp.bodies[1].instance.as_deref()], [Some("Block:0"), Some("Block:1")]);
     assert!((root.children[1].transform[3][0] - 100.0).abs() < 1e-9);
+}
+
+/// Writers disagree on the order of a placement's two items: the part's own origin first (the
+/// fixture), the assembly's placement first though the part's representation comes first
+/// (HOOPS Exchange), or both items listed in the assembly. Each places the part the same way,
+/// with each item read in the units of the representation that lists it.
+#[test]
+fn assembly_placement_items_in_any_order() {
+    let usual = two_instance_assembly();
+    let expected = step_import(&usual).unwrap().tree[0].children[1].transform;
+    for items in ["#84,#65", "#81,#84"] {
+        let t = usual.replace("ITEM_DEFINED_TRANSFORMATION('','',#65,#84)", &format!("ITEM_DEFINED_TRANSFORMATION('','',{items})"));
+        assert_ne!(t, usual);
+        let imp = step_import(&t).unwrap();
+        assert!(imp.warnings.is_empty(), "{items}: {:?}", imp.warnings);
+        let got = imp.tree[0].children[1].transform;
+        for (a, b) in got.iter().flatten().zip(expected.iter().flatten()) {
+            assert!((a - b).abs() < 1e-9, "{items}: {got:?} instead of {expected:?}");
+        }
+        let m = measure(&imp.bodies[1].body).unwrap();
+        assert!(m.bbox.min.dist(Vec3::new(90.0, 0.0, 0.0)) < 1e-6, "{items}: {:?}", m.bbox);
+    }
 }
 
 /// The cube part (in cm) placed `n` times in a millimetre assembly, each instance moved along X
@@ -3022,6 +3346,109 @@ fn a_cylinder_whose_rim_lies_a_little_off_its_wall_keeps_its_wall() {
     assert!(m.volume > low * (1.0 - 1e-6) && m.volume < high * (1.0 + 1e-6), "volume {} outside {low}..{high}", m.volume);
 }
 
+/// A cylinder of radius 5 and height 4 as a general placement writes one (#18779): its wall an
+/// exact rational spline closed round u whose knots start at angle `start`, bounded by the
+/// file's own seam (a line at angle 0) and by rims that are rational spline circles starting at
+/// their vertex there.
+fn spline_band_step(start: f64) -> String {
+    use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, FRAC_PI_4, SQRT_2, TAU};
+    let (r, h) = (5.0, 4.0);
+    let mut out: Vec<String> = Vec::new();
+    let mut add = |s: String| {
+        out.push(format!("#{}={s};", out.len() + 1));
+        out.len()
+    };
+    let point = |p: [f64; 3]| format!("CARTESIAN_POINT('',({:.16},{:.16},{:.16}))", p[0], p[1], p[2]);
+    // Four quarter arcs from angle `a0` at height `z`: on the circle at the quarters, at the
+    // corners of their square between, weighted 1/√2 there.
+    let quarters = |a0: f64, z: f64| -> Vec<([f64; 3], f64)> {
+        (0..9)
+            .map(|k| {
+                let a = a0 + f64::from(k) * FRAC_PI_4;
+                let (d, w) = if k % 2 == 0 { (r, 1.0) } else { (r * SQRT_2, FRAC_1_SQRT_2) };
+                ([d * a.cos(), d * a.sin(), z], w)
+            })
+            .collect()
+    };
+    let quarter_knots = format!("(0.,{FRAC_PI_2:.16},{:.16},{:.16},{TAU:.16})", 2.0 * FRAC_PI_2, 3.0 * FRAC_PI_2);
+    let knots = format!("(3,2,2,2,3),{quarter_knots}");
+    let ids = |v: &[usize]| v.iter().map(|i| format!("#{i}")).collect::<Vec<_>>().join(",");
+    let mut rim = |z: f64| {
+        let pts = quarters(0.0, z);
+        let p: Vec<usize> = pts.iter().map(|(p, _)| add(point(*p))).collect();
+        let w: Vec<String> = pts.iter().map(|(_, w)| format!("{w:.16}")).collect();
+        let curve = add(format!(
+            "( BOUNDED_CURVE() B_SPLINE_CURVE(2,({}),.UNSPECIFIED.,.T.,.F.) B_SPLINE_CURVE_WITH_KNOTS({knots},.UNSPECIFIED.) CURVE() GEOMETRIC_REPRESENTATION_ITEM() RATIONAL_B_SPLINE_CURVE(({})) REPRESENTATION_ITEM('') )",
+            ids(&p),
+            w.join(",")
+        ));
+        let v = add(point([r, 0.0, z]));
+        let v = add(format!("VERTEX_POINT('',#{v})"));
+        (add(format!("EDGE_CURVE('',#{v},#{v},#{curve},.T.)")), v)
+    };
+    let ((bottom, v0), (top, v1)) = (rim(0.0), rim(h));
+    let o = add(point([r, 0.0, 0.0]));
+    let d = add("DIRECTION('',(0.,0.,1.))".into());
+    let d = add(format!("VECTOR('',#{d},{h:.16})"));
+    let line = add(format!("LINE('',#{o},#{d})"));
+    let seam = add(format!("EDGE_CURVE('',#{v0},#{v1},#{line},.T.)"));
+    let (lo, hi) = (quarters(start, 0.0), quarters(start, h));
+    let rows: Vec<String> = lo.iter().zip(&hi).map(|((a, _), (b, _))| format!("(#{},#{})", add(point(*a)), add(point(*b)))).collect();
+    let weights: Vec<String> = lo.iter().map(|(_, w)| format!("({w:.16},{w:.16})")).collect();
+    let wall = add(format!(
+        "( BOUNDED_SURFACE() B_SPLINE_SURFACE(2,1,({}),.UNSPECIFIED.,.T.,.F.,.F.) B_SPLINE_SURFACE_WITH_KNOTS((3,2,2,2,3),(2,2),{quarter_knots},(0.,{h:.16}),.UNSPECIFIED.) GEOMETRIC_REPRESENTATION_ITEM() RATIONAL_B_SPLINE_SURFACE(({})) REPRESENTATION_ITEM('') SURFACE() )",
+        rows.join(","),
+        weights.join(",")
+    ));
+    let mut plane = |z: f64| {
+        let (o, n, x) = (add(point([0.0, 0.0, z])), add("DIRECTION('',(0.,0.,1.))".into()), add("DIRECTION('',(1.,0.,0.))".into()));
+        let a = add(format!("AXIS2_PLACEMENT_3D('',#{o},#{n},#{x})"));
+        add(format!("PLANE('',#{a})"))
+    };
+    let (pb, pt) = (plane(0.0), plane(h));
+    let mut face = |uses: &[(usize, bool)], surface: usize, sense: bool| {
+        let oes: Vec<usize> = uses.iter().map(|(e, o)| add(format!("ORIENTED_EDGE('',*,*,#{e},{})", if *o { ".T." } else { ".F." }))).collect();
+        let l = add(format!("EDGE_LOOP('',({}))", ids(&oes)));
+        let b = add(format!("FACE_OUTER_BOUND('',#{l},.T.)"));
+        add(format!("ADVANCED_FACE('',(#{b}),#{surface},{})", if sense { ".T." } else { ".F." }))
+    };
+    // Round the bottom counter-clockwise about +z, up the seam, back round the top and down the
+    // seam: the wall's normal points out.
+    let side = face(&[(bottom, true), (seam, true), (top, false), (seam, false)], wall, true);
+    let cap_b = face(&[(bottom, false)], pb, false);
+    let cap_t = face(&[(top, true)], pt, true);
+    let shell = add(format!("CLOSED_SHELL('',(#{side},#{cap_b},#{cap_t}))"));
+    let solid = add(format!("MANIFOLD_SOLID_BREP('Band',#{shell})"));
+    add(format!("SHAPE_REPRESENTATION('',(#{solid}),$)"));
+    format!("{HEAD}{}\n{TAIL}", out.join("\n"))
+}
+
+/// A cylinder whose wall is a spline closed round u with the file's own seam a little off the
+/// knots' start, as a general (non-rigid) placement writes every round face. Both of the seam's
+/// uses were given its one u inside the knots, a turn short: the wall enclosed no (u, v) area, was
+/// left out, and the part read as surfaces. A vendor's motor plate came in as 229 loose faces for
+/// one such band (#18779). The wall is started at its seam, and the part reads whole.
+#[test]
+fn a_band_round_a_closed_spline_with_its_seam_off_the_knots_start_reads_whole() {
+    use std::f64::consts::{PI, TAU};
+    // On the knots' start, the issue's 0.0376 rad off it, well inside, half a turn, just short of
+    // the end.
+    for start in [0.0, 0.037_592_7, 0.3, 1.0, 3.0, TAU - 0.05] {
+        let imp = step_import(&spline_band_step(start)).unwrap_or_else(|e| panic!("start {start}: {e}"));
+        assert!(
+            !imp.warnings.iter().any(|w| w.contains("left out") || w.contains("not imported") || w.contains("as surfaces")),
+            "start {start}: {:?}",
+            imp.warnings
+        );
+        assert_eq!(imp.bodies.len(), 1, "start {start}");
+        assert!(imp.bodies[0].closed, "start {start}");
+        let m = measure(&imp.bodies[0].body).unwrap();
+        assert_eq!(m.faces, 3, "start {start}");
+        assert!(rel(m.volume, 100.0 * PI) < 1e-6, "start {start}: volume {}", m.volume);
+        assert!(rel(m.area, 90.0 * PI) < 1e-6, "start {start}: area {}", m.area);
+    }
+}
+
 /// The volume of the one solid `solidcore_step::topology` reads from `text` into schema 4,
 /// measured as the body of that record.
 pub(super) fn schema_4_volume(text: &str) -> f64 {
@@ -4478,4 +4905,678 @@ fn a_solid_with_edges_shorter_than_the_stated_tolerance_is_read_at_its_own() {
     let imp = step_import(&coarse).unwrap_or_else(|e| panic!("{e}"));
     assert!(imp.warnings.is_empty(), "{:?}", imp.warnings);
     assert_eq!(imp.bodies[0].body.record().tolerance, 0.01);
+}
+
+/// A closed polyhedron record from its corners and its faces (cycles of corner indices,
+/// counter-clockwise seen from outside): planar faces, straight edges and pcurves, every edge
+/// and vertex at `tol` and the body at a fiftieth of it.
+fn polyhedron_record(corners: &[[f64; 3]], cycles: &[&[usize]], tol: f64) -> solidcore_record::brep::Brep {
+    use solidcore_record::brep::{Curve, Curve2, Edge, EdgeUseRef, Face, Loop, OrientedEdge, OrientedFace, Region, Shell, Surface, Vertex};
+    let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let cross = |a: [f64; 3], b: [f64; 3]| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    let unit = |a: [f64; 3]| {
+        let n = dot(a, a).sqrt();
+        [a[0] / n, a[1] / n, a[2] / n]
+    };
+    let mut edge_of = std::collections::HashMap::new();
+    let mut ends: Vec<(usize, usize)> = Vec::new();
+    let mut uses: Vec<Vec<EdgeUseRef>> = Vec::new();
+    let mut faces = Vec::new();
+    for (fi, cycle) in cycles.iter().enumerate() {
+        let o = corners[cycle[0]];
+        let x = unit(sub(corners[cycle[1]], o));
+        let z = unit(cross(x, sub(corners[cycle[cycle.len() - 1]], o)));
+        let y = cross(z, x);
+        let uv = |p: [f64; 3]| [dot(sub(p, o), x), dot(sub(p, o), y)];
+        let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+        let mut edges = Vec::new();
+        for k in 0..cycle.len() {
+            let (a, b) = (cycle[k], cycle[(k + 1) % cycle.len()]);
+            let (e, forward) = match edge_of.get(&(b, a)) {
+                Some(&e) => (e, false),
+                None => {
+                    edge_of.insert((a, b), ends.len() as u32);
+                    ends.push((a, b));
+                    uses.push(Vec::new());
+                    (ends.len() as u32 - 1, true)
+                }
+            };
+            uses[e as usize].push(EdgeUseRef { face: fi as u32, r#loop: 0, position: k as u32, upper: !forward });
+            let (s, t) = ends[e as usize];
+            for p in [uv(corners[s]), uv(corners[t])] {
+                for i in 0..2 {
+                    lo[i] = lo[i].min(p[i]);
+                    hi[i] = hi[i].max(p[i]);
+                }
+            }
+            edges.push(OrientedEdge {
+                edge: e,
+                forward,
+                pcurve: Curve2::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![uv(corners[s]), uv(corners[t])] },
+            });
+        }
+        faces.push(Face {
+            nurbs: None,
+            surface: Surface::Plane { origin: o, u_axis: x, v_axis: y },
+            domain: [[lo[0], hi[0]], [lo[1], hi[1]]],
+            loops: vec![Loop::Edges { edges }],
+        });
+    }
+    let mut vertex_of = std::collections::HashMap::new();
+    let mut vertices = Vec::new();
+    let edges = ends
+        .iter()
+        .zip(uses)
+        .map(|(&(s, t), uses)| {
+            let mut number = |c: usize| {
+                *vertex_of.entry(c).or_insert_with(|| {
+                    vertices.push(Vertex { point: corners[c], tolerance: tol });
+                    vertices.len() as u32 - 1
+                })
+            };
+            let vs = [number(s), number(t)];
+            Edge { nurbs: None, curve: Curve::Line { start: corners[s], end: corners[t] }, interval: [0.0, 1.0], vertices: vs, tolerance: tol, uses }
+        })
+        .collect();
+    solidcore_record::brep::Brep {
+        version: solidcore_record::brep::VERSION,
+        tolerance: tol / 50.0,
+        regions: vec![Region { shells: vec![0], void: false }, Region { shells: vec![0], void: false }],
+        shells: vec![Shell::Faces { faces: (0..cycles.len() as u32).map(|face| OrientedFace { face, forward: true }).collect(), wires: vec![] }],
+        faces,
+        edges,
+        vertices,
+    }
+}
+
+/// A 10 mm box whose top steps up by `step` along y = 5 (a riser `step` high between the two
+/// halves of the top), as a STEP file whose stated accuracy is `accuracy`, with the corner at
+/// (10, 0, 0) written `gap` off its three edges.
+fn hair_step_step_file(step: f64, gap: f64, accuracy: f64) -> String {
+    let h = 10.0 + step;
+    let corners = [
+        [0.0, 0.0, 0.0],
+        [10.0, 0.0, 0.0],
+        [10.0, 10.0, 0.0],
+        [0.0, 10.0, 0.0],
+        [0.0, 0.0, 10.0],
+        [10.0, 0.0, 10.0],
+        [10.0, 5.0, 10.0],
+        [0.0, 5.0, 10.0],
+        [0.0, 5.0, h],
+        [10.0, 5.0, h],
+        [10.0, 10.0, h],
+        [0.0, 10.0, h],
+    ];
+    let cycles: [&[usize]; 8] =
+        [&[0, 3, 2, 1], &[4, 5, 6, 7], &[7, 6, 9, 8], &[8, 9, 10, 11], &[0, 1, 5, 4], &[2, 3, 11, 10], &[1, 2, 10, 9, 6, 5], &[0, 4, 7, 8, 11, 3]];
+    let mut rec = polyhedron_record(&corners, &cycles, accuracy);
+    if let Some(v) = rec.vertices.iter_mut().find(|v| v.point == [10.0, 0.0, 0.0]) {
+        v.point = [10.0, 0.0, gap];
+    }
+    let body = Body::from_record(rec).unwrap();
+    let text = step_export(&[&body], "Stepped").unwrap();
+    let stated = format!("UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE({accuracy:.17E}");
+    let at = text.find("UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(").expect("the export states its accuracy");
+    let end = at + text[at..].find(')').unwrap();
+    format!("{}{stated}{}", &text[..at], &text[end..])
+}
+
+/// The heal at import is honest about what it cannot do: the hair step itself is read at a
+/// finer tolerance (the reader's own answer to edges shorter than the stated tolerance), so it
+/// imports clean and nothing is healed; with a corner off its edges past the edges'
+/// tolerance (SMLib's pointer stage fails it, which no tolerance-scale heal reaches) it still
+/// needs repair, and no heal is claimed.
+#[test]
+fn a_hair_step_file_imports_clean_and_a_real_gap_still_needs_repair() {
+    let healed = |imp: &StepImport| imp.warnings.iter().any(|w| w.contains("healed SMLib's check failures"));
+    let needs = |imp: &StepImport| imp.report.issues.iter().any(|i| matches!(i.kind, IssueKind::NeedsRepair));
+    let clean = step_import(&hair_step_step_file(3e-4, 0.0, 1e-3)).unwrap();
+    assert_eq!(clean.bodies.len(), 1);
+    assert!(!needs(&clean) && !healed(&clean), "{:?}", clean.warnings);
+    assert_eq!(crate::validation::failing_check(&clean.bodies[0].body).unwrap(), None);
+    for (gap, accuracy) in [(4e-4, 1e-3), (4e-4, 5e-4), (6e-4, 1e-3)] {
+        let imp = step_import(&hair_step_step_file(3e-4, gap, accuracy)).unwrap();
+        assert!(needs(&imp) && !healed(&imp), "{gap} {accuracy}: {:?}", imp.warnings);
+        assert!(crate::validation::failing_check(&imp.bodies[0].body).unwrap().is_some());
+    }
+}
+
+/// The hair-step box as a body (no gap, every tolerance `tol`).
+fn hair_step_body(step: f64, tol: f64) -> Body {
+    let h = 10.0 + step;
+    let corners = [
+        [0.0, 0.0, 0.0],
+        [10.0, 0.0, 0.0],
+        [10.0, 10.0, 0.0],
+        [0.0, 10.0, 0.0],
+        [0.0, 0.0, 10.0],
+        [10.0, 0.0, 10.0],
+        [10.0, 5.0, 10.0],
+        [0.0, 5.0, 10.0],
+        [0.0, 5.0, h],
+        [10.0, 5.0, h],
+        [10.0, 10.0, h],
+        [0.0, 10.0, h],
+    ];
+    let cycles: [&[usize]; 8] =
+        [&[0, 3, 2, 1], &[4, 5, 6, 7], &[7, 6, 9, 8], &[8, 9, 10, 11], &[0, 1, 5, 4], &[2, 3, 11, 10], &[1, 2, 10, 9, 6, 5], &[0, 4, 7, 8, 11, 3]];
+    Body::from_record(polyhedron_record(&corners, &cycles, tol)).unwrap()
+}
+
+/// The import's heal step on a part whose check fails (the reader itself reads the synthetic
+/// hair-step file at a finer tolerance, so the file never reaches it): the riser goes, the
+/// part's check passes, every face left keeps its own file face, and the import notes the heal.
+#[test]
+fn an_imported_part_whose_check_fails_is_healed_where_it_is_read() {
+    use super::parallel::{Healed, Part, heal};
+    let body = hair_step_body(3e-4, 1e-3);
+    let source = body.record().clone();
+    assert!(crate::validation::failing_check(&body).unwrap().is_some());
+    let faces = body.face_count();
+    assert_eq!(faces, 8);
+    let origin: Vec<u64> = (100..100 + faces as u64).collect();
+    let part = Part { body, closed: true, file_faces: faces, face_origin: origin.clone(), refused: None };
+    let read = heal(&part, 7);
+    assert_eq!(part.body.record(), &source, "the part read stays as it was");
+    let Healed::Kept(part, note, check, face_source) = read else { panic!("kept") };
+    assert_eq!(part.body.face_count(), 7);
+    // each face says which face of the part as read it was, as its file face does
+    assert_eq!(face_source.iter().map(|&f| origin[f]).collect::<Vec<_>>(), part.face_origin);
+    assert!(!face_source.contains(&2), "the riser is gone");
+    assert_eq!(crate::validation::failing_check(&part.body).unwrap(), None);
+    // the riser (the record's third face, file face 102) is the one face gone
+    let mut kept = part.face_origin.clone();
+    kept.sort_unstable();
+    assert_eq!(kept, [100, 101, 103, 104, 105, 106, 107]);
+    // each face keeps its own file face: it lies on that face's plane (the heal moves no
+    // surface; the two tops are parallel planes 3e-4 apart, so a swap is caught)
+    let plane = |f: &solidcore_record::brep::Face| match f.surface {
+        solidcore_record::brep::Surface::Plane { origin, u_axis, v_axis } => {
+            let n = [
+                u_axis[1] * v_axis[2] - u_axis[2] * v_axis[1],
+                u_axis[2] * v_axis[0] - u_axis[0] * v_axis[2],
+                u_axis[0] * v_axis[1] - u_axis[1] * v_axis[0],
+            ];
+            let l = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+            ([n[0] / l, n[1] / l, n[2] / l], origin)
+        }
+        _ => panic!("not a plane: {:?}", f.surface),
+    };
+    let healed = part.body.record();
+    for (i, &o) in part.face_origin.iter().enumerate() {
+        let ((n0, o0), (n1, o1)) = (plane(&source.faces[(o - 100) as usize]), plane(&healed.faces[i]));
+        let dot = n0[0] * n1[0] + n0[1] * n1[1] + n0[2] * n1[2];
+        let off = (o1[0] - o0[0]) * n0[0] + (o1[1] - o0[1]) * n0[1] + (o1[2] - o0[2]) * n0[2];
+        assert!(dot.abs() >= 1.0 - 1e-12 && off.abs() <= 1e-9, "face {i} from file face {o}: {dot} {off}");
+    }
+    assert_eq!(check, None, "the kept body passes SMLib's check as kept");
+    assert!(note.contains("2 edges shorter than their tolerance collapsed") && note.contains("1 sliver faces"), "{note}");
+
+    // a part whose check passes is left as it is, with no note
+    let clean = hair_step_body(3e-3, 1e-3);
+    assert_eq!(crate::validation::failing_check(&clean).unwrap(), None);
+    let part = Part { body: clean, closed: true, file_faces: 8, face_origin: origin.clone(), refused: None };
+    assert!(matches!(heal(&part, 7), Healed::NotKept));
+}
+
+/// Repair heals a part's tolerance-scale defects first: the hair step's riser, its end edges
+/// shorter than their tolerance, goes, and the part passes SMLib's full check (#17689).
+#[test]
+fn repair_heals_a_hair_step_that_fails_the_check() {
+    let body = hair_step_body(3e-4, 1e-3);
+    assert!(crate::validation::failing_check(&body).unwrap().is_some());
+    let (out, report) = crate::repair(&body, &crate::RepairOptions { gap: 0.01, patch_holes: false, heal_first: true }).unwrap();
+    let healed = report.healed.as_ref().expect("the heal ran");
+    assert_eq!((healed.squeezed_edges, healed.collapsed_faces), (2, 1), "{healed:?}");
+    assert_eq!(healed.failed, [7, 0]);
+    assert!(report.changed());
+    assert_eq!(out.face_count(), 7);
+    assert_eq!(crate::validation::failing_check(&out).unwrap(), None);
+    let (v0, v1) = (measure(&body).unwrap().volume, measure(&out).unwrap().volume);
+    assert!((v1 - v0).abs() <= 601.0 * healed.largest_bound, "{v0} {v1}");
+}
+
+/// #17689: the heal changes the part every instance shares, so it is decided by the part's own
+/// check, never by a placement that scales it. The block with its edge lifted 0.2 µm passes the
+/// check as the file defines it and fails it stretched 100 times along z: whichever instance
+/// the import reads the part at, the stretched one is reported as placed, nothing is healed, and
+/// the rigid instance is the part exactly as read. Read at the stretched instance, the part's
+/// own check decides (it passes: no heal) and the job's check is of the body as placed.
+#[test]
+fn a_scaled_instance_that_fails_as_placed_heals_nothing() {
+    let block = lifted_bezier_block(2e-4);
+    let alone = step_import(&block).unwrap();
+    assert_eq!(alone.bodies.len(), 1);
+    let read = alone.bodies[0].body.record().clone();
+    assert_eq!(crate::validation::failing_check(&alone.bodies[0].body).unwrap(), None);
+    let z_extent = |b: &Body| {
+        let m = measure(b).unwrap();
+        m.bbox.max.z - m.bbox.min.z
+    };
+    let label = "solid 'Bloco' as its placement scales, shears or mirrors it: needs repair before it can be modelled: SMLib's check fails it: ";
+    let rigid_first = with_scaled_instance(&block, (1.0, 1.0, 100.0));
+    // The same assembly with the two placements swapped: the stretched instance comes first.
+    let scaled_first = rigid_first.replace("#602=", "#699=").replace("#612=", "#602=").replace("#699=", "#612=");
+    for (text, stretched_at) in [(rigid_first, 1), (scaled_first, 0)] {
+        let imp = step_import(&text).unwrap();
+        assert_eq!(imp.bodies.len(), 2, "{:?}", imp.warnings);
+        let (stretched, rigid) = (&imp.bodies[stretched_at].body, &imp.bodies[1 - stretched_at].body);
+        assert!((z_extent(stretched) - 1000.0).abs() < 1e-6 && (z_extent(rigid) - 10.0).abs() < 1e-9, "instance {stretched_at} is the stretched one");
+        assert!(imp.warnings.iter().all(|w| !w.contains("healed")), "{:?}", imp.warnings);
+        assert_eq!(rigid.record(), &read, "the rigid instance is the part as read");
+        assert_eq!((rigid.face_count(), rigid.edge_count(), rigid.vertex_count()), (6, 13, 9));
+        assert_eq!(crate::validation::failing_check(rigid).unwrap(), None);
+        let failure = crate::validation::failing_check(stretched).unwrap().expect("stretched, it fails the check");
+        let checked: Vec<&String> = imp.warnings.iter().filter(|w| w.contains("SMLib's check")).collect();
+        assert_eq!(checked, [&format!("{label}{failure}")]);
+    }
+
+    // The part read at the stretched placement alone: the stretched body fails as placed, so
+    // the part's own check is run, as the file defines it; it passes, so nothing is healed, and
+    // the warning is the stretched body's.
+    let stretch: M4 = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 100.0, 0.0], [100.0, 0.0, 0.0, 1.0]];
+    assert!(check_class(&stretch).is_some());
+    let part = alone.bodies[0].body.clone();
+    for workers in [1, 4] {
+        let (issues, heals) = heal_run(&part, &[stretch], workers);
+        assert!(heals.is_none(), "the part's own check passes: nothing healed");
+        let stretched = parallel::placed(&part, &stretch).unwrap();
+        let failure = crate::validation::failing_check(&stretched).unwrap().expect("the stretched body fails as placed");
+        let details: Vec<&str> = issues.iter().map(|i| i.detail.as_str()).collect();
+        assert_eq!(
+            details,
+            [format!(
+                "solid 'Hair' as its placement scales, shears or mirrors it: needs repair before it can be modelled: SMLib's check fails it: {failure}"
+            )]
+        );
+    }
+
+    // A part whose own check fails is healed even when its only instance is stretched: the
+    // part's check decides, and the instance is the healed part placed, checked again as placed.
+    // This section shows the heal kept at a stretched instance; it does not by itself tell the
+    // part's check from the placed one: a placement scales the tolerances by its largest
+    // factor, so the hair step fails as placed too (at every scale, shear and mirror tried).
+    // `the_instance_a_part_is_read_at_never_decides_its_heal` is the case where the two differ.
+    let hair = hair_step_body(3e-4, 1e-3);
+    let stretched = crate::ops::transform_matrix(&hair, stretch).unwrap().without_history();
+    assert!(crate::validation::failing_check(&stretched).unwrap().is_some(), "stretched, the hair step fails as placed too");
+    let (issues, heals) = heal_run(&hair, &[stretch], 2);
+    let heals = heals.expect("healed");
+    let healed = &heals.body(0).expect("the instance is healed").body;
+    assert_eq!(healed.face_count(), 7);
+    assert!((z_extent(healed) - 100.0 * z_extent(&hair)).abs() < 1e-6, "the healed part, placed");
+    let recheck = crate::validation::failing_check(healed).unwrap();
+    assert!(
+        matches!(&issues[0], ImportIssue { kind: IssueKind::Repaired, detail, .. } if detail.contains("healed SMLib's check failures")),
+        "{issues:?}"
+    );
+    // the healed hair step passes as placed at the stretch: the Repaired note is the one issue
+    assert!(recheck.is_none(), "the healed part passes as placed: {recheck:?}");
+    assert_eq!(issues.len(), 1, "{issues:?}");
+}
+
+/// #17689: a heal is stopped by the token over the import's work (solidcore-ops' calls run under
+/// it), and a stopped heal changes nothing: the part stays as read, and the import's checks,
+/// stopped, heal nothing and say they were stopped. Repair stops with it too.
+#[test]
+fn a_stopped_heal_changes_nothing() {
+    use super::parallel::{Healed, Part, heal};
+    let hair = hair_step_body(3e-4, 1e-3);
+    let source = hair.record().clone();
+    assert!(crate::validation::failing_check(&hair).unwrap().is_some());
+    let stop = solidcraft_smlib::stop::Stop::new();
+    stop.stop();
+    assert_eq!(stop.within(|| crate::heal_tolerance_defects(&hair)).err(), Some(KernelError::Heal(crate::HealFailure::Stopped)));
+    let part = Part { closed: true, file_faces: 8, face_origin: (0..8).collect(), refused: None, body: hair.clone() };
+    assert!(matches!(stop.within(|| heal(&part, 7)), Healed::Stopped));
+    assert_eq!(part.body.record(), &source);
+    // In the import's checks: a stopped run heals nothing and says it was stopped.
+    for m in [IDENTITY, translation([10.0, 0.0, 0.0])] {
+        let (jobs, heals) = part_jobs(&hair, &[m]);
+        let checks = ImportChecks::start(jobs, heals, 2, Some(stop.clone()));
+        assert_eq!(checks.wait(), None);
+        assert!(checks.stopped() && checks.heals().is_none());
+    }
+    let repaired = stop.within(|| crate::repair(&hair, &crate::RepairOptions { gap: 0.01, patch_holes: false, heal_first: true }));
+    assert_eq!(repaired.err(), Some(KernelError::Heal(crate::HealFailure::Stopped)));
+    // Not stopped, the same heal is kept.
+    let Healed::Kept(healed, ..) = heal(&part, 7) else { panic!("kept") };
+    assert_eq!(healed.body.face_count(), 7);
+}
+
+/// #17708 review: the healed part keeps the part's regularization protection (the sticky veto
+/// that keeps authored face boundaries), in the heal and in Repair healing first; a part with
+/// none gets none.
+#[test]
+fn a_healed_part_keeps_its_regularization_protection() {
+    for protected in [false, true] {
+        let mut hair = hair_step_body(3e-4, 1e-3);
+        hair.regularization_protected = protected;
+        let (healed, _) = crate::heal_tolerance_defects(&hair).unwrap().expect("healed");
+        assert_eq!(healed.regularization_protected, protected);
+        let (repaired, report) = crate::repair(&hair, &crate::RepairOptions { gap: 0.01, patch_holes: false, heal_first: true }).unwrap();
+        assert!(report.healed.is_some(), "Repair healed first");
+        assert_eq!(repaired.regularization_protected, protected);
+    }
+}
+
+/// #17689: a part whose only instance is at a rigid placement away from the identity is decided
+/// by its own check and healed like any other; the instance is the healed part placed, checked
+/// again, and that check passes. At the identity the heal's own check of the body it kept is the
+/// job's check.
+#[test]
+fn a_translated_part_is_healed_on_its_own_check_and_checked_again() {
+    let to = translation([10.0, -20.0, 30.0]);
+    let hair = hair_step_body(3e-4, 1e-3);
+    let placed = |b: &Body| crate::ops::transform_matrix(b, to).unwrap().without_history();
+    assert!(crate::validation::failing_check(&placed(&hair)).unwrap().is_some(), "translated, it fails too");
+    for m in [to, IDENTITY] {
+        let (issues, heals) = heal_run(&hair, &[m], 2);
+        let heals = heals.expect("healed");
+        let healed = &heals.body(0).expect("its one instance").body;
+        assert_eq!(healed.face_count(), 7);
+        assert_eq!(crate::validation::failing_check(healed).unwrap(), None, "the healed part as placed passes");
+        assert_eq!(issues.len(), 1, "only the heal is noted: the check again passes: {issues:?}");
+        assert!(issues[0].kind == IssueKind::Repaired && issues[0].detail.starts_with("solid 'Hair': healed SMLib's check failures"), "{issues:?}");
+    }
+}
+
+/// #17689: whichever instance the import reads a part at, the heal is decided on the part's own
+/// check, never on a placed one: at the knife edge where a far translation changes the check's
+/// verdict (the riser at half its edges' tolerance), a rigid and a stretched first instance
+/// find the same, and nothing the heal keeps. A rigid placement's check never stands in for the
+/// part's.
+#[test]
+fn the_instance_a_part_is_read_at_never_decides_its_heal() {
+    let stretch: M4 = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 100.0, 0.0], [100.0, 0.0, 0.0, 1.0]];
+    let verdict = |b: &Body| crate::validation::failing_check(b).unwrap().map(|f| f.failures);
+    let placed = |b: &Body, m: M4| crate::ops::transform_matrix(b, m).unwrap().without_history();
+    // (riser, far translation): the part passes and fails placed, then fails and passes placed.
+    for (step, far) in [(5e-4, [0.0, 0.0, 1000.0]), (4.999999999e-4, [0.0, 1e4, 1e4])] {
+        let hair = hair_step_body(step, 1e-3);
+        let far = translation(far);
+        assert_ne!(verdict(&hair).is_some(), verdict(&placed(&hair, far)).is_some(), "{step}: the far translation changes the verdict");
+        let mut decided = Vec::new();
+        for order in [[far, stretch], [stretch, far]] {
+            let (mut issues, heals) = heal_run(&hair, &order, 2);
+            issues.sort_by(|a, b| a.detail.cmp(&b.detail));
+            assert!(issues.iter().all(|i| i.kind != IssueKind::Repaired), "{step}: nothing the heal keeps: {issues:?}");
+            assert!(heals.is_none(), "{step}");
+            decided.push(issues.into_iter().map(|i| i.detail).collect::<Vec<_>>());
+        }
+        assert_eq!(decided[0], decided[1], "{step}: both orders decide the same");
+    }
+}
+
+/// #17689: a stop met in the import's checks is the import's stop at every placement: a part
+/// placed through SMLib's transform (a torus stretched along its axis) and the exact hair step
+/// both end stopped, with nothing healed, never as a part refused.
+#[test]
+fn a_stopped_heal_at_a_stretched_placement_stops_the_import() {
+    let stretch: M4 = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 3.0, 0.0], [100.0, 0.0, 0.0, 1.0]];
+    let ring = torus(Vec3::new(0.0, 0.0, 0.0), 10.0, 2.0).unwrap();
+    let stop = solidcraft_smlib::stop::Stop::new();
+    stop.stop();
+    for part in [ring, hair_step_body(3e-4, 1e-3)] {
+        let (jobs, heals) = part_jobs(&part, &[stretch]);
+        let checks = ImportChecks::start(jobs, heals, 2, Some(stop.clone()));
+        assert_eq!(checks.wait(), None, "stopped, not refused");
+        assert!(checks.stopped() && checks.heals().is_none());
+    }
+}
+
+/// #17689: a part checked once (its rigid instances are one class) and healed is every one of its
+/// instances healed: each is the healed part at its own placement, all showing one mesh, and the
+/// import notes the heal once.
+#[test]
+fn a_part_checked_once_heals_every_instance() {
+    let hair = hair_step_body(3e-4, 1e-3);
+    let at = [IDENTITY, translation([20.0, 0.0, 0.0]), translation([0.0, 30.0, 0.0]), translation([0.0, 0.0, -40.0])];
+    let (jobs, _) = part_jobs(&hair, &at);
+    assert_eq!(jobs.len(), 1, "one check for the four rigid instances");
+    let (issues, heals) = heal_run(&hair, &at, 4);
+    let heals = heals.expect("healed");
+    assert_eq!(heals.bodies().iter().map(|b| b.index).collect::<Vec<_>>(), [0, 1, 2, 3]);
+    for (k, m) in at.iter().enumerate() {
+        let healed = &heals.body(k).unwrap().body;
+        assert_eq!(healed.face_count(), 7);
+        let want = parallel::placed(&heals.body(0).unwrap().body, m).unwrap();
+        assert_eq!(healed.record(), want.record(), "instance {k} is the healed part at its placement");
+        assert_eq!(heals.body(k).unwrap().face_origin, heals.body(0).unwrap().face_origin);
+    }
+    assert_eq!(issues.len(), 1, "{issues:?}");
+    assert_eq!(issues[0].kind, IssueKind::Repaired);
+}
+
+/// #17689: the heal in the import's checks is the same whatever the number of threads: the same
+/// bodies healed, the same digest, and the same notes and warnings in the same order.
+#[test]
+fn the_background_heal_is_the_same_whatever_the_threads() {
+    let hair = hair_step_body(3e-4, 1e-3);
+    let stretch: M4 = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 2.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+    let at = [translation([5.0, 0.0, 0.0]), stretch, IDENTITY, translation([0.0, 7.0, 0.0])];
+    let run = |workers| {
+        let (issues, heals) = heal_run(&hair, &at, workers);
+        let heals = heals.expect("healed");
+        let bodies: Vec<_> = heals.bodies().iter().map(|b| (b.index, b.body.record().clone(), b.face_origin.clone())).collect();
+        (issues, heals.digest(), bodies)
+    };
+    let first = run(1);
+    assert_eq!(first.2.len(), 4);
+    for workers in [2, 4, 8] {
+        for _ in 0..2 {
+            assert!(run(workers) == first, "{workers} workers");
+        }
+    }
+}
+
+/// #17689: an import's checks heal in the background and say so when they end: a waiting import
+/// has the healed bodies, a shared one has them in its checks once they end, and both report
+/// the same.
+#[test]
+fn the_checks_heal_a_shared_import_once_they_end() {
+    let hair = hair_step_body(3e-4, 1e-3);
+    let (jobs, heals) = part_jobs(&hair, &[IDENTITY, translation([20.0, 0.0, 0.0])]);
+    let checks = ImportChecks::start(jobs, heals, 2, None);
+    let issues = checks.wait().expect("ended");
+    assert!(!checks.is_running());
+    let heals = checks.heals().expect("the heal is in the checks once they end");
+    let mut bodies: Vec<ImportedBody> = (0..2)
+        .map(|k| ImportedBody {
+            source_item: 7,
+            face_origin: (0..8).collect(),
+            name: "Hair".into(),
+            body: hair.clone(),
+            color: None,
+            path: Vec::new(),
+            instance: None,
+            closed: true,
+            file_faces: 8,
+            refused: None,
+            hidden: k > 1,
+        })
+        .collect();
+    heals.apply(&mut bodies);
+    assert!(bodies.iter().all(|b| b.body.face_count() == 7 && b.face_origin.len() == 7));
+    assert_eq!(issues.iter().filter(|i| i.kind == IssueKind::Repaired).count(), 1);
+    let (_, again) = heal_run(&hair, &[IDENTITY, translation([20.0, 0.0, 0.0])], 1);
+    assert_eq!(again.map(|h| h.digest()), Some(heals.digest()), "the same heal every time");
+}
+
+/// #17708 review: the heal is the part every instance shares, so a placement whose check passed
+/// on the part as read and fails (or cannot run) on the healed part keeps the part as read for
+/// all of them: no heal, and the part's own check still says it needs repair.
+#[test]
+fn a_placement_the_healed_part_fails_keeps_the_part_as_read() {
+    let hair = hair_step_body(3e-4, 1e-3);
+    // No real placement is known to fail the healed hair step (rigid, scaled, mirrored, sheared
+    // and far placements all pass it), so the second job's check stands in for one: as read it
+    // passed, and on the healed part it cannot run (a placement that is not finite).
+    let (mut jobs, heals) = part_jobs(&hair, &[IDENTITY, translation([20.0, 0.0, 0.0])]);
+    let first = &jobs[0];
+    let mut m = translation([20.0, 0.0, 0.0]);
+    m[3][0] = f64::NAN;
+    let second = checks::Job {
+        item: first.item,
+        part: first.part.clone(),
+        what: first.what.clone(),
+        body: first.body.clone(),
+        times: 1,
+        label: first.label.clone(),
+        m,
+        source: first.source.clone(),
+    };
+    jobs.push(second);
+    let outcomes = vec![checks::Outcome::NeedsRepair("as read".into()), checks::Outcome::Passes];
+    let run = ImportChecks::ran(&jobs, outcomes, &heals);
+    assert!(!run.stopped());
+    assert!(run.heals().is_none(), "the heal is not kept");
+    let issues = run.issues().expect("ended");
+    assert!(issues.iter().all(|i| i.kind != IssueKind::Repaired), "{issues:?}");
+    assert!(issues.iter().any(|i| i.kind == IssueKind::NeedsRepair && i.detail.contains("as read")), "{issues:?}");
+    // The same part at the identity alone heals: the placement is what kept it as read.
+    let (jobs, heals) = part_jobs(&hair, &[IDENTITY]);
+    let run = ImportChecks::ran(&jobs, vec![checks::Outcome::NeedsRepair("as read".into())], &heals);
+    assert!(run.heals().is_some());
+}
+
+/// #17708 review: a token stopped by the time the heals end stops the run, even when no heal saw
+/// it (here no part is healed at all): the run says it was stopped, with no heals, so nothing
+/// holds a stopped run as finished.
+#[test]
+fn a_token_stopped_after_the_heals_stops_the_run() {
+    let hair = hair_step_body(3e-4, 1e-3);
+    let (jobs, heals) = part_jobs(&hair, &[IDENTITY]);
+    let outcomes = || vec![checks::Outcome::CouldNotRun("SMLib's check could not run".into())];
+    let stop = solidcraft_smlib::stop::Stop::new();
+    stop.stop();
+    let run = stop.within(|| ImportChecks::ran(&jobs, outcomes(), &heals));
+    assert!(run.stopped());
+    assert!(run.heals().is_none());
+    let run = ImportChecks::ran(&jobs, outcomes(), &heals);
+    assert!(!run.stopped(), "not stopped without the token");
+}
+
+/// #17708 review (#7167 with one worker, as in the browser): a heal the caller's token stops
+/// at the read's last step stops the import, so no stopped run is cached for the next read of
+/// the same text; the same read unstopped is cached.
+#[test]
+fn a_heal_stopped_with_one_worker_fails_the_import_uncached() {
+    // what the cache holds is asserted below: no other test's read pushes ours out meanwhile
+    let _cache = super::recent_for_tests::hold();
+    let hair = hair_step_body(3e-4, 1e-3);
+    let reading = |name: &str| {
+        let text = boxes_step(1, name);
+        let mut reading = StepReading::with_workers(&text, 1).expect("parsed");
+        assert!(reading.single);
+        while reading.step() {}
+        // The part the read checks is the hair step, failing its check.
+        let (jobs, heals) = part_jobs(&hair, &[IDENTITY]);
+        reading.rd.check_jobs = jobs;
+        reading.rd.check_outcomes = vec![checks::Outcome::NeedsRepair("as read".into())];
+        reading.rd.instances = heals.instances;
+        reading.rd.uses = heals.uses;
+        (text_key(&text), reading)
+    };
+    let cached = |key: (u64, usize)| RECENT.lock().unwrap().iter().any(|r| r.key == key && r.import.strong_count() > 0);
+    let (key, read) = reading("stopped heal, one worker");
+    let stop = solidcraft_smlib::stop::Stop::new();
+    stop.stop();
+    let err = stop.within(|| read.finish_shared()).expect_err("the stopped heal stops the import");
+    assert!(err.to_string().contains("cancelled"), "{err}");
+    assert!(!cached(key), "a stopped import is not cached");
+    let (key, read) = reading("unstopped heal, one worker");
+    let imp = read.finish_shared().expect("read");
+    assert!(imp.report.checks.heals().is_some(), "healed");
+    assert!(cached(key));
+}
+
+/// #17708 review: with the heal preference off ([`crate::heals_tolerance_defects`]), a read keeps
+/// a part its check fails as read, as before the heal: the check's warning, no heal and no note
+/// of one, on one worker (the checks at the read's last steps) or several (in the background).
+/// The cache of recent reads keeps such a read apart from one of the same text with the
+/// preference on, which heals the part.
+#[test]
+fn with_the_heal_preference_off_a_failing_part_stays_as_read() {
+    // what the cache holds is asserted below: no other test's read pushes ours out meanwhile
+    let _cache = super::recent_for_tests::hold();
+    let hair = hair_step_body(3e-4, 1e-3);
+    for workers in [1, 2] {
+        let name = format!("heal preference, {workers} workers");
+        let text = boxes_step(1, &name);
+        let read = |heal: bool| {
+            let mut reading = StepReading::with_workers(&text, workers).expect("parsed");
+            assert_eq!(reading.single, workers == 1);
+            assert!(reading.heal, "on by default");
+            reading.heal = heal;
+            while reading.step() {}
+            // The part the read checks is the hair step, failing its check.
+            let (jobs, heals) = part_jobs(&hair, &[IDENTITY]);
+            reading.rd.check_jobs = jobs;
+            if reading.single {
+                reading.rd.check_outcomes = vec![checks::Outcome::NeedsRepair("SMLib's check fails it: as read".into())];
+            }
+            reading.rd.instances = heals.instances;
+            reading.rd.uses = heals.uses;
+            reading.finish_shared().expect("read")
+        };
+        let cached = |heal: bool| RECENT.lock().unwrap().iter().any(|r| r.key == text_key(&text) && r.heal == heal && r.import.strong_count() > 0);
+        let as_read = read(false);
+        let issues = as_read.report.checks.wait().expect("ended");
+        assert!(as_read.report.checks.heals().is_none(), "nothing healed");
+        assert!(issues.iter().all(|i| i.kind != IssueKind::Repaired), "{issues:?}");
+        let needs: Vec<&ImportIssue> = issues.iter().filter(|i| i.kind == IssueKind::NeedsRepair).collect();
+        assert!(
+            matches!(needs[..], [i] if i.detail.starts_with("solid 'Hair': needs repair before it can be modelled: SMLib's check fails it: ")),
+            "{issues:?}"
+        );
+        assert!(cached(false) && !cached(true));
+        // The same text with the preference on (as the read below asks): healed, and cached beside it.
+        let healed = read(true);
+        healed.report.checks.wait().expect("ended");
+        let heals = healed.report.checks.heals().expect("healed");
+        assert_eq!(heals.body(0).map(|b| b.body.face_count()), Some(7));
+        assert!(cached(false) && cached(true));
+        let shared = step_import_shared(&text).expect("cached");
+        assert!(Arc::ptr_eq(&shared, &healed) && !Arc::ptr_eq(&shared, &as_read), "a read with the preference on finds the healed read");
+    }
+}
+
+/// #17708 review: Repair with `heal_first` off (the heal preference off) is the repair before the
+/// heal: the hair step, which SMLib takes whole, is refused with the tests its check fails, the
+/// part unchanged; with it on, the part is healed.
+#[test]
+fn repair_without_heal_first_is_the_repair_before_the_heal() {
+    let hair = hair_step_body(3e-4, 1e-3);
+    let failure = crate::validation::failing_check(&hair).unwrap().expect("the hair step fails the check");
+    let off = crate::repair(&hair, &crate::RepairOptions { gap: 0.01, patch_holes: false, heal_first: false });
+    assert_eq!(off.err(), Some(KernelError::Repair(crate::RepairRefusal::CheckFails(failure))));
+    let (out, report) = crate::repair(&hair, &crate::RepairOptions { gap: 0.01, patch_holes: false, heal_first: true }).unwrap();
+    assert!(report.healed.is_some() && out.face_count() == 7);
+}
+
+/// #18539: a face whose one boundary loop is a whole turn written as a single closed edge (the
+/// way Onshape writes a parallel circle: one `EDGE_CURVE` whose two ends are the same vertex, no
+/// pcurves) reads with the loop inside its face's parameter domain, so the solid measures its
+/// true volume and its whole box. Read before the fix, the pcurve maker followed the rim a whole
+/// turn off the face's form range, the face's domain covered only part of it and the body
+/// measured a fraction of its volume with a box clipped at its rim's edge vertices.
+#[test]
+fn a_cap_whose_rim_is_one_closed_edge_measures_its_whole_volume() {
+    let mut e = Entities::default();
+    let sphere_axis = e.axis([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let sphere = e.add(format!("SPHERICAL_SURFACE('',#{sphere_axis},100.0)"));
+    let rim_axis = e.axis([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let rim = e.add(format!("CIRCLE('',#{rim_axis},100.0)"));
+    let v = e.vertex([6.12323e-15, 100.0, 0.0]);
+    let edge = e.add(format!("EDGE_CURVE('',#{v},#{v},#{rim},.T.)"));
+    let cap = e.face(&[(edge, true)], sphere);
+    let bottom_axis = e.axis([0.0, 0.0, 0.0], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]);
+    let bottom = e.add(format!("PLANE('',#{bottom_axis})"));
+    let base = e.face(&[(edge, false)], bottom);
+    let text = e.solid(&[cap, base]);
+    // The hemisphere: 2 pi R^3 / 3.
+    assert_closed_solid(&text, 2, 2.0 * std::f64::consts::PI * 100.0_f64.powi(3) / 3.0);
 }

@@ -1,3 +1,4 @@
+use solidcraft_doc::canvas::base64_decode;
 use std::sync::Arc;
 
 use serde_json::{Value, json};

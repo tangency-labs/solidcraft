@@ -8,6 +8,7 @@
 pub mod appearance;
 pub mod appearance_pack;
 mod assembly;
+pub mod blob;
 mod body_transfer;
 mod body_transfer_sheet;
 pub mod bom;
@@ -31,6 +32,7 @@ pub mod drafting_profile;
 pub mod drawing;
 pub mod drawing_view;
 pub mod end_cap;
+mod envelope;
 mod eval;
 pub mod expr;
 pub mod face_anchor;
@@ -44,6 +46,7 @@ pub mod gpu_plan;
 mod history_names;
 pub mod hole_reference;
 pub mod ids;
+pub mod import_defects;
 mod inline_params;
 pub use format_offsets::whole_profile_selection_from_value;
 pub use inline_params::Defined;
@@ -68,6 +71,7 @@ pub mod plugin_data;
 pub mod point_cloud;
 mod point_cloud_complex;
 pub mod point_cloud_distribution;
+mod point_expr;
 mod points;
 mod profile_refs;
 pub mod progress;
@@ -76,7 +80,9 @@ pub use thread_catalog::{
     DRILL_ALLOWANCE, TaperDrill, TappedThread, TappedThreadFamily, metric_tap_drill, parse_tapped_thread, tapped_thread_sizes, untabulated_taper_tap,
 };
 mod walk;
-pub use profile_refs::{capture_profile_selection, profile_fallback_notes, profile_selection_indices, profile_selection_indices_lenient};
+pub use profile_refs::{
+    WHOLE_PROFILE_TOO_MANY_CURVES, capture_profile_selection, profile_fallback_notes, profile_selection_indices, profile_selection_indices_lenient,
+};
 pub mod plastic;
 mod print_face;
 pub use print_face::PrintFace;
@@ -91,7 +97,20 @@ pub mod render_settings;
 pub mod render_surface;
 pub mod render_texture_resources;
 pub mod sheet;
+pub mod sheet_library;
+mod sheet_surface;
+mod sheet_surface_convert;
+mod sheet_surface_cuts;
+mod sheet_surface_features;
+mod sheet_surface_fold;
+mod sheet_surface_perforation;
+mod sheet_surface_shadow;
 pub mod sketch_equation;
+pub use sheet_surface_convert::{
+    ConvertRule, RollEdge, RollInfo, RollLine, SheetFaces, SheetMeasure, SurfaceBendLine, SurfaceConversion, SurfaceSheet, convert_surfaces,
+    measure_sheet_body,
+};
+pub use sheet_surface_cuts::{Loose, Recess};
 pub mod text_params;
 pub mod thread_forms;
 pub mod tolerance;
@@ -104,8 +123,8 @@ pub use assembly::{
 pub use document::*;
 pub use eval::cell_grid::{MAX_CUT_CELLS, SLOW_CUT_CELLS};
 pub use eval::{
-    EdgeRef, FeatureResult, KeptSeparate, Model, ModelBody, ModelState, PendingChecks, PlacedBodies, RevolveExtent, SavedModel, SolvedSketch,
-    ThreadInfo, blend_target, curve_pick_error, draft_corner_options, edge_names_for, edge_refs, face_point_names, face_point_state,
+    EdgeRef, FeatureResult, KeptSeparate, Model, ModelBody, ModelState, PendingChecks, PlacedBodies, PreparedMeshImport, RevolveExtent, SavedModel,
+    SolvedSketch, ThreadInfo, blend_target, curve_pick_error, draft_corner_options, edge_names_for, edge_refs, face_point_names, face_point_state,
     from_slope_height, hole_direction_at, hole_on_surface, hole_start, import_body_names, join_pieces_added, keep_one_sided_direction, map_wire,
     metric_thread_sizes, object_height, parse_metric_thread, pattern_matrices, revolve_extent, revolve_extent_for_handle,
     revolve_extent_with_convention, same_extrude_from_face, select_profiles, sketch_hole_direction, sketch_line_plane, state_in_frame,
@@ -118,6 +137,7 @@ pub use feature_geometry::restored_thread_pick;
 pub use names::{BodyName, FeatureId, FeatureName, SketchId, copy_name};
 pub use params::{ParamRow, ParamUser, cycles, name_words_match};
 pub use points::{Dir, FacePick, Position, plain};
+pub use solidcraft_develop as develop;
 pub use solidcraft_kernel as kernel;
 pub use solidcraft_sketch as sketch;
 
@@ -138,6 +158,11 @@ pub enum DocError {
     /// empty until the evaluation of the feature fills it in ([`DocError::in_feature`]).
     #[error("{}", reselect_message(feature, reference))]
     Reselect { feature: String, reference: String },
+    /// An id or index read from a body's record or a sheet's own lists names no entry there:
+    /// `what` (say "face") number `index`, where the list holds `count`. The data naming it is
+    /// stale or corrupt; the operation fails instead of reading past the list.
+    #[error("{what} {index} doesn't exist (there are {count}): the data naming it is stale or corrupt")]
+    Missing { what: &'static str, index: usize, count: usize },
     /// A sketch's projections whose face or edge, kept by its persistent name, finds nothing any
     /// more: the sketch fails, naming them as the user sees them. `feature` as for `Reselect`.
     #[error("{}", lost_projections_message(feature, links))]
@@ -275,6 +300,8 @@ mod feature_walk_tests;
 mod named_projection_tests;
 #[cfg(test)]
 mod old_cap_anchor_tests;
+#[cfg(test)]
+mod saved_text_font_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

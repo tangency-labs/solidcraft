@@ -559,7 +559,7 @@ pub(crate) fn prepare(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpos
             fs
         })
         .collect();
-    let rules = size::Rules::new(tol, size::extent(b.vertices.iter().map(|v| Vec3::new(v.point[0], v.point[1], v.point[2]))), turn);
+    let rules = size::Rules::new(tol, size::extent(b), turn);
     // Each face's surface and target side length, then every edge once at the smaller size of
     // its faces; faces then read their nodes. A planar face costs microseconds and a curved
     // one about a hundred, so the pool is used only where curved faces (or intersection

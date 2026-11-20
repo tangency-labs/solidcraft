@@ -432,6 +432,16 @@ fn surface_sweep(s: &mut Session, p: &Value) -> Result<Value> {
     let sketch = feature_sketch(s, p, cmd)?;
     let (profiles, curves) = sheet_inputs(p, cmd)?;
     let (path_sketch, path, path_body, path_edges) = super::features::sweep_path(s, p, cmd)?;
+    // A surface sweep's path is the curves of one sketch (its own format keeps plain ids);
+    // a curve of another sketch is refused.
+    let path = path
+        .into_iter()
+        .map(|e| match e {
+            solidcraft_doc::PathEntry::OfPathSketch(id) => Ok(id),
+            solidcraft_doc::PathEntry::OfSketch { sketch, curve } if sketch.0 == path_sketch => Ok(curve),
+            _ => Err(bad(cmd, "the surface sweep's path curves must be in one sketch")),
+        })
+        .collect::<Result<Vec<_>>>()?;
     if path_body.is_none() && (path.is_empty() || path.len() > 1000) {
         return Err(bad(cmd, "`path` must list 1…1000 curve ids"));
     }
@@ -2078,7 +2088,7 @@ mod tests {
             run(&mut s, "solid.pattern.rectangular", json!({"features": ["Half"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 10}));
             let state = s.world_state().unwrap();
             assert!(state.body("Plate").is_none());
-            assert!(state.sheets.is_empty());
+            assert!(state.surface_sheets.is_empty());
             assert_eq!(state.bodies.len(), usize::from(with_surface));
             assert_eq!(state.body("Sheet").map(|b| b.body.record()), surface.as_ref());
         }
@@ -2181,6 +2191,39 @@ mod tests {
                 assert_eq!(state.body("Other").unwrap().body.record(), other.record());
             }
         }
+    }
+
+    /// #12326: a Thicken join that names no target joins the solid it meets. The surface it
+    /// thickens and every other surface body are no solids to join, and stay as they were.
+    #[test]
+    fn automatic_thicken_joins_skip_surface_bodies() {
+        for targets in [json!([]), json!(["*"])] {
+            let mut s = Session::default();
+            run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+            // The slab is 16 x 6 x 2 = 192, half of it (8 x 6 x 2 = 96) inside the block.
+            sheet(&mut s, "XY", "Sheet", [2.0, 2.0], [18.0, 8.0]);
+            sheet(&mut s, "XY", "Other", [12.0, 3.0], [16.0, 7.0]);
+            let surface = s.world_state().unwrap().body("Sheet").unwrap().body.clone();
+            let other = s.world_state().unwrap().body("Other").unwrap().body.clone();
+            run(&mut s, "surface.thicken", json!({"bodies": ["Sheet"], "thickness": 2, "operation": "join", "targets": targets}));
+            assert!((volume(&s, "Block") - 1096.0).abs() < 1e-6, "{targets}: {}", volume(&s, "Block"));
+            let state = s.world_state().unwrap();
+            assert_eq!(state.bodies.len(), 3, "{targets}");
+            assert_eq!(state.body("Sheet").unwrap().body.record(), surface.record());
+            assert_eq!(state.body("Other").unwrap().body.record(), other.record());
+        }
+        // With surfaces only there is nothing to join: the slab is a new body, as it is in an
+        // empty design.
+        let mut s = Session::default();
+        sheet(&mut s, "XY", "Sheet", [2.0, 2.0], [18.0, 8.0]);
+        let surface = s.world_state().unwrap().body("Sheet").unwrap().body.clone();
+        run(&mut s, "surface.thicken", json!({"bodies": ["Sheet"], "thickness": 2, "operation": "join"}));
+        let state = s.world_state().unwrap();
+        assert_eq!(state.body("Sheet").unwrap().body.record(), surface.record());
+        let solids: Vec<_> = state.bodies.iter().filter(|b| b.is_closed()).collect();
+        assert_eq!((state.bodies.len(), solids.len()), (2, 1));
+        let made = solidcraft_kernel::measure(&solids[0].body).unwrap().volume;
+        assert!((made - 192.0).abs() < 1e-6, "{made}");
     }
 
     /// A 10 mm box and, through it, a surface tube (an open cylinder wall).

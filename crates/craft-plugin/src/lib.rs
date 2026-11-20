@@ -33,8 +33,9 @@ pub const MAX_MEMORY_MIB: usize = 4096;
 
 pub type Result<T> = std::result::Result<T, HostError>;
 
+pub mod conditions;
 mod input;
-pub use input::{check_input, strict_input_schema};
+pub use input::{check_input, prepare_input, strict_input_schema};
 
 /// The host imports that change something outside the design. A `read` entry is refused every
 /// one of them, whatever folders its plugin was granted, as it is refused edit commands.
@@ -535,6 +536,7 @@ impl RuntimeManifest {
                 return Err(invalid(&field, "entry inputs must be an object schema"));
             }
             validate_list_inputs(&entry.input_schema, &field)?;
+            conditions::validate_conditions(&entry.input_schema)?;
             if entry.slots.len() > 16
                 || entry.slots.iter().any(|slot| match slot {
                     UiSlot::Menu { name } | UiSlot::Ribbon { name } => !plain(name, 80),
@@ -741,7 +743,13 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
         return Err(invalid("id", "must match its lowercase package folder"));
     }
     if manifest.id != folder {
-        return Err(invalid("id", format!("package id `{}` does not match the folder `{folder}`", manifest.id)));
+        return Err(invalid(
+            "id",
+            format!(
+                "package id `{}` does not match the folder `{folder}`: a package folder is named after its plugin's id, so rename the folder to `{}`",
+                manifest.id, manifest.id
+            ),
+        ));
     }
     if !plain(&manifest.name, 80) {
         return Err(invalid("name", "requires 1..80 printable characters"));

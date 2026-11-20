@@ -1297,10 +1297,22 @@ fn wr_647_a_run_within_the_zero_resolved_by_the_tolerance_stays_a_range() {
         ),
         (0.05, 0.0, 2.2e-4, &[0.2, 0.45, 0.55, 0.8], 1e-5),
     ];
+    // near the cut (review r9): runs within the zero of 4.0e-3 (h 1e-3) and 1.015e-3
+    // (h 2.5e-4), 4 and 1.015 times the tolerance 1e-3, which a cut loosened to a few
+    // tolerances would take for points
+    let mut rows: Vec<(f64, f64, f64, Vec<f64>, f64)> = rows
+        .iter()
+        .map(|&(h, dr, e, inner, tol)| (h, dr, e, inner.to_vec(), tol))
+        .collect();
+    for h in [1e-3, 2.5e-4] {
+        for dr in [1e-13, 0.0] {
+            rows.push((h, dr, 2.2e-2, vec![0.2, 0.5 - h, 0.5 + h, 0.8], 1e-3));
+        }
+    }
     let mut lost = Vec::new();
     for (h, dr, e, inner, tol) in rows {
         let c = (0.85e-12 - dr) / (h * h);
-        let curve = flat_then_bending(h, dr, c, e, inner);
+        let curve = flat_then_bending(h, dr, c, e, &inner);
         for (order, all, on_curve) in [
             ("line, curve", intersect_at(&line, &curve, tol), 1),
             ("curve, line", intersect_at(&curve, &line, tol), 0),
@@ -1313,6 +1325,47 @@ fn wr_647_a_run_within_the_zero_resolved_by_the_tolerance_stays_a_range() {
             });
             if !covered {
                 lost.push(format!("h {h} dr {dr:e} tol {tol:e} ({order}): {all:?}"));
+            }
+        }
+    }
+    // the other side of the cut: a run within the zero of 1.07e-4 (h 2.5e-5), a tenth of
+    // the tolerance 1e-3, is a contact the tolerance does not resolve, one point
+    for dr in [1e-13, 0.0] {
+        let h = 2.5e-5;
+        let c = (0.85e-12 - dr) / (h * h);
+        let curve = flat_then_bending(h, dr, c, 2.2e-2, &[0.2, 0.5 - h, 0.5 + h, 0.8]);
+        let k = kernel(false);
+        for (order, all, on_curve, first, second) in [
+            (
+                "line, curve",
+                intersect_at(&line, &curve, 1e-3),
+                1,
+                &line,
+                &curve,
+            ),
+            (
+                "curve, line",
+                intersect_at(&curve, &line, 1e-3),
+                0,
+                &curve,
+                &line,
+            ),
+        ] {
+            // both parameters must give the contact at the origin: a wrong line parameter
+            // with the right curve parameter is a point 3 |dt| away
+            let near_origin = |c: &Curve, t: f64| {
+                c.evaluate_point(&k, t)
+                    .is_ok_and(|p| p.distance(Point3::new(0.0, 0.0, 0.0)) <= 1e-3)
+            };
+            let point = matches!(all.as_slice(), [s]
+                if s.solution_type == SolutionType::SingleValue
+                    && (s.start.parameters[on_curve] - 0.5).abs() <= 1e-3
+                    && near_origin(first, s.start.parameters[0])
+                    && near_origin(second, s.start.parameters[1]));
+            if !point {
+                lost.push(format!(
+                    "h {h} dr {dr:e} tol 1e-3 ({order}), not one point: {all:?}"
+                ));
             }
         }
     }
