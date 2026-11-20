@@ -1212,3 +1212,15 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
 #[cfg(test)]
 #[path = "scenario_publication_tests.rs"]
 mod publication_tests;
+
+/// Writes `bytes` to an image file of its own for a test and returns its path: an image is given
+/// to `canvas.insert` and `canvas.decal` as a file, never as text.
+#[cfg(test)]
+pub(crate) fn image_file(bytes: &[u8]) -> String {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let dir = std::env::temp_dir().join(format!("solidcraft-ui-test-images-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(format!("{}.img", NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+    std::fs::write(&path, bytes).unwrap();
+    path.to_string_lossy().into_owned()
+}

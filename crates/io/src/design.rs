@@ -288,16 +288,16 @@ fn write_container(
     }
     let mut canvases = Vec::with_capacity(doc.canvases.len());
     for canvas in &doc.canvases {
-        if canvas.data.len() > solidcraft_doc::canvas::MAX_CANVAS_BYTES.div_ceil(3) * 4 {
-            return Err(invalid("canvas too large"));
-        }
-        let bytes = canvas.bytes().ok_or_else(|| invalid("invalid canvas base64"))?;
+        let bytes = canvas.bytes();
         if !matches!(canvas.format.as_str(), "png" | "jpeg") || bytes.len() > solidcraft_doc::canvas::MAX_CANVAS_BYTES {
             return Err(invalid("invalid canvas format or size"));
         }
-        let blob = writer.blob(&bytes, &canvas.format, false)?;
-        let mut value = replace(canvas, fields([("data", json!(""))])).map_err(invalid)?;
-        value.as_object_mut().ok_or_else(|| invalid("canvas metadata"))?.insert("image_blob".into(), blob);
+        let blob = writer.blob(bytes, &canvas.format, false)?;
+        let mut value = serde_json::to_value(canvas).map_err(invalid)?;
+        let object = value.as_object_mut().ok_or_else(|| invalid("canvas metadata"))?;
+        // The bytes are the blob; an empty `data` keeps the record readable by older releases.
+        object.insert("data".into(), json!(""));
+        object.insert("image_blob".into(), blob);
         canvases.push(value);
     }
     let mut clouds = Vec::with_capacity(doc.point_clouds.len());
@@ -1122,7 +1122,7 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
         if bytes.len() > solidcraft_doc::canvas::MAX_CANVAS_BYTES {
             return Err(invalid("canvas too large"));
         }
-        canvas.data = solidcraft_doc::canvas::base64_encode(bytes).into();
+        canvas.data = bytes.into();
     }
     for (index, cloud) in doc.point_clouds.iter_mut().enumerate() {
         if !cloud.points.is_empty() || !cloud.colors.is_empty() {
@@ -2427,7 +2427,7 @@ mod tests {
             id,
             name: "Reference".into(),
             format: "png".into(),
-            data: solidcraft_doc::canvas::base64_encode(b"original image bytes").into(),
+            data: b"original image bytes".into(),
             pixels: [1, 1],
             plane: solidcraft_doc::PlaneRef::Origin { name: "XY".into() },
             center: Vec2::new(0.0, 0.0),
@@ -2441,6 +2441,13 @@ mod tests {
             anchor: None,
         });
         doc
+    }
+
+    /// `doc` without its canvases, for the plain JSON design, which can't hold their images.
+    fn without_images(doc: &Document) -> Document {
+        let mut plain = doc.clone();
+        plain.canvases.clear();
+        plain
     }
 
     /// A newer build's container: its feature this build can't read, that feature's blob, a part
@@ -2628,6 +2635,38 @@ mod tests {
         let from_json = Document::from_json(&older.to_string()).unwrap();
         assert_eq!(from_json.plugin_data, opened.plugin_data);
         assert_eq!(parts(&write_design_container(&from_json).unwrap())["plugins/gear-maker/cache/table.bin"], binary);
+    }
+
+    /// A canvas's image is its bytes: a container keeps them as a part of their own (its record
+    /// has an empty `data`, as older releases read it), a plain JSON design refuses to save it,
+    /// and an older design's base64 image (JSON, or inline in a container) still opens.
+    #[test]
+    fn canvas_images_are_bytes_in_a_part_and_older_base64_still_opens() {
+        let doc = document();
+        assert_eq!(doc.canvases[0].bytes(), b"original image bytes");
+        let entries = parts(&write_design_container(&doc).unwrap());
+        let metadata: Value = serde_json::from_slice(&entries["document.json"]).unwrap();
+        let record = &metadata["canvases"][0];
+        assert_eq!(record["data"], "", "older releases read an empty `data` and take the blob");
+        assert_eq!(entries[record["image_blob"].as_str().unwrap()], b"original image bytes");
+        assert_eq!(crate::read_design(&package(&entries)).unwrap(), doc);
+
+        let refused = crate::write_design(&doc).unwrap_err().to_string();
+        assert!(refused.contains("images") && refused.contains(".sc"), "{refused}");
+        assert!(!doc.to_json().contains(&solidcraft_doc::canvas::base64_encode(b"original image bytes")), "never written as text");
+
+        // An older plain JSON design kept the image as base64 in `data`.
+        let mut older: Value = serde_json::from_str(&without_images(&doc).to_json()).unwrap();
+        let mut canvas = serde_json::to_value(&doc.canvases[0]).unwrap();
+        canvas["data"] = json!(solidcraft_doc::canvas::base64_encode(b"original image bytes"));
+        older["canvases"] = json!([canvas]);
+        let opened = Document::from_json(&older.to_string()).unwrap();
+        assert_eq!(opened.canvases, doc.canvases);
+        assert_eq!(parts(&write_design_container(&opened).unwrap())[record["image_blob"].as_str().unwrap()], b"original image bytes");
+        canvas["data"] = json!("not base64!");
+        older["canvases"] = json!([canvas]);
+        let damaged = Document::from_json(&older.to_string()).unwrap();
+        assert!(damaged.canvases[0].bytes().is_empty(), "a damaged image reads as none; the design still opens");
     }
 
     /// A newer build's point cloud with numbers, an edge and a face (#14572): a field this build
@@ -3231,7 +3270,10 @@ mod tests {
                 "environment":{"kind":"sky","rotation_rad":0.25,"intensity":0.5,"gradient":{"zenith":[0.4,0.2,0.1],"horizon":[0.7,0.6,0.3],"ground":[0.2,0.1,0.05]}}}}}
         }})).unwrap());
         assert!(doc.differs_only_in_render(&before));
-        for bytes in [crate::write_design(&doc).unwrap(), write_design_container(&doc).unwrap()] {
+        // A plain JSON design holds no images: the same design without its canvas goes that way.
+        for (doc, bytes) in
+            [(without_images(&doc), crate::write_design(&without_images(&doc)).unwrap()), (doc.clone(), write_design_container(&doc).unwrap())]
+        {
             let reopened = crate::read_design(&bytes).unwrap();
             assert_eq!(reopened, doc);
             assert_eq!(reopened.render, doc.render);
@@ -3262,7 +3304,7 @@ mod tests {
         doc.render = Arc::new(render);
         let bytes = write_design_container(&doc).unwrap();
         assert_eq!(crate::read_design(&bytes).unwrap(), doc);
-        assert_eq!(crate::read_design(&crate::write_design(&doc).unwrap()).unwrap(), doc);
+        assert_eq!(crate::read_design(&crate::write_design(&without_images(&doc)).unwrap()).unwrap(), without_images(&doc));
         let original = parts(&bytes);
         let blob = format!("blobs/{id}.hdr");
         assert_eq!(original.keys().filter(|name| name.ends_with(".hdr")).count(), 1);
@@ -3344,7 +3386,7 @@ mod tests {
         render.setups.insert("Wood".into(), setup);
         let bytes = write_design_container(&doc).unwrap();
         assert_eq!(crate::read_design(&bytes).unwrap(), doc);
-        assert_eq!(crate::read_design(&crate::write_design(&doc).unwrap()).unwrap(), doc);
+        assert_eq!(crate::read_design(&crate::write_design(&without_images(&doc)).unwrap()).unwrap(), without_images(&doc));
         let original = parts(&bytes);
         let blob = format!("blobs/{id}.texture");
         assert_eq!(original.keys().filter(|name| name.ends_with(".texture")).count(), 1);
