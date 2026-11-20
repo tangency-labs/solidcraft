@@ -81,13 +81,11 @@ fn invalid(reason: &'static str) -> SolidError {
 }
 
 /// Whether `e` is the closed-solid orientation's "face uses gathered from both sides"
-/// failure ([`crate::topology::brep::p3::GATHERED_BOTH_SIDES`]).
+/// failure ([`crate::error::topology::TopologyFailure::GatheredBothSides`]).
 fn gathered_both_sides(e: &SolidError) -> bool {
     matches!(
-        e.failure().map(|f| &f.reason),
-        Some(crate::error::Reason::Topology(
-            crate::error::topology::TopologyFailure::Inconsistent(reason)
-        )) if *reason == crate::topology::brep::p3::GATHERED_BOTH_SIDES
+        e.topology_failure(),
+        Some(crate::error::topology::TopologyFailure::GatheredBothSides)
     )
 }
 
