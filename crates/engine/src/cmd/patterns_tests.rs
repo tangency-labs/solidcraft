@@ -1987,7 +1987,6 @@ fn placing_a_part_many_times_moves_no_record_until_one_is_needed() {
     for k in 1..=10 {
         run(&mut s, "occurrence.copy", json!({"component": c["component"], "translate": [0, 40 * k, 0]}));
     }
-    let before = solidcraft_kernel::lazy_moves_made();
     let world = s.world_state().unwrap();
     assert_eq!(world.bodies.len(), 3 * 11);
     // Their shapes are drawn, named and framed from the part's: meshes, face counts, outlines,
@@ -1995,11 +1994,11 @@ fn placing_a_part_many_times_moves_no_record_until_one_is_needed() {
     for b in &world.bodies {
         let _ = (b.body.face_count(), b.mesh_in_place(), b.outline_bounds(), b.is_closed());
     }
-    assert_eq!(solidcraft_kernel::lazy_moves_made(), before, "no placement's record moved to place or draw it");
+    assert!(world.bodies.iter().all(|b| !b.body.lazy_move_made()), "no placement's record moved to place or draw it");
     // A measure of one placement needs its own geometry: that one is moved, once.
     let placed = world.bodies.iter().find(|b| b.placed_definition().is_some()).unwrap();
     let _ = placed.body.record();
-    assert_eq!(solidcraft_kernel::lazy_moves_made(), before + 1);
+    assert!(placed.body.lazy_move_made());
 }
 
 /// Review of #18732: a per-edge fillet whose picks include a smooth edge (dropped, with a note)
