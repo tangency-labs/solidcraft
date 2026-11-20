@@ -2164,6 +2164,11 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
         built.stopped = stopped;
         built.placed = placed;
         built.plugin_view = plugin_view;
+        if plugin {
+            // Sketch-only runs have no body bounds. Frame their preview geometry just as Fit
+            // frames sketches in the committed design, using the engine's same calculation.
+            built.bounds = built.sketches.iter().fold(built.bounds, |b, sketch| b.union(&solidcraft_engine::view::sketch_bounds(&sketch.sketch)));
+        }
         // Deleting the last body still draws its removed-material ghost.
         if plugin && built.bounds.is_empty() && !built.replaced.is_empty() {
             built.bounds = before.bodies.iter().fold(Aabb3::EMPTY, |b, body| b.union(&body.mesh().bounds()));

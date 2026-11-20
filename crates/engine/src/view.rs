@@ -150,17 +150,7 @@ fn bounds_by(s: &Session, of: impl Fn(&solidcraft_doc::ModelBody) -> Aabb3) -> R
         b = b.union(&of(body));
     }
     for ss in st.sketches.iter().filter(|x| sketch_shown(s, x.feature)) {
-        // All four corners: on a tilted plane two opposite ones don't span the rectangle.
-        if let Some((lo, hi)) = ss.sketch.bounds() {
-            for p in [lo, hi, solidcore_record::Vec2::new(lo.x, hi.y), solidcore_record::Vec2::new(hi.x, lo.y)] {
-                b.add(ss.plane.to_world(p));
-            }
-        }
-        for w in ss.sketch.wires.iter().filter(|w| !w.fit.is_empty() || !ss.sketch.view.hide_projected) {
-            for p in &w.pts {
-                b.add(*p);
-            }
-        }
+        b = b.union(&sketch_bounds(ss));
     }
     for c in shown_point_clouds(s) {
         for p in c.world_corners().into_iter().flatten() {
@@ -168,6 +158,23 @@ fn bounds_by(s: &Session, of: impl Fn(&solidcraft_doc::ModelBody) -> Aabb3) -> R
         }
     }
     Ok(b)
+}
+
+/// World bounds of a sketch's visible geometry, shared by Home/Fit and scratch previews.
+pub fn sketch_bounds(ss: &solidcraft_doc::SolvedSketch) -> Aabb3 {
+    let mut b = Aabb3::EMPTY;
+    // All four corners: on a tilted plane two opposite ones don't span the rectangle.
+    if let Some((lo, hi)) = ss.sketch.bounds() {
+        for p in [lo, hi, solidcore_record::Vec2::new(lo.x, hi.y), solidcore_record::Vec2::new(hi.x, lo.y)] {
+            b.add(ss.plane.to_world(p));
+        }
+    }
+    for w in ss.sketch.wires.iter().filter(|w| !w.fit.is_empty() || !ss.sketch.view.hide_projected) {
+        for p in &w.pts {
+            b.add(*p);
+        }
+    }
+    b
 }
 
 /// The origin plane a grid lies on.
