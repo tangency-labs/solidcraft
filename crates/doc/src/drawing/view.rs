@@ -740,7 +740,7 @@ impl Drawing {
             }
             ViewKind::Detail { parent, boundary } => {
                 self.chain_of(view.id)?;
-                self.can_project_from(*parent)?;
+                self.can_detail(*parent)?;
                 boundary.geometry()?;
                 require(view.settings.scale.is_some(), || "a detail view has a scale of its own".into())?;
                 require(matches!(view.place, ViewPlace::At(_)), || "a detail view is placed at a point: it isn't lined up with its parent".into())
@@ -761,6 +761,14 @@ impl Drawing {
         require(!flat, || "not supported yet: a view made from a flat pattern view".into())?;
         let detail = matches!(chain.first().map(|view| &view.kind), Some(ViewKind::Detail { .. }));
         require(!detail, || "not supported yet: a view made from a detail view".into())
+    }
+
+    /// Whether a detail view can be made of view `parent`: one a view can be made from
+    /// ([`Self::can_project_from`]), but not a section view yet, whose cut a detail doesn't keep.
+    pub fn can_detail(&self, parent: u64) -> Result<()> {
+        self.can_project_from(parent)?;
+        let section = matches!(self.view(parent).map(|view| &view.kind), Some(ViewKind::Section { .. }));
+        require(!section, || "not supported yet: a detail of a section view".into())
     }
 
     /// The rules of a view that ends a chain, a base or flat pattern view: it draws one of the

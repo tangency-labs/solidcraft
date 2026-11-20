@@ -176,7 +176,7 @@ pub(crate) fn counterpart(command: &'static str) -> Option<&'static str> {
 }
 
 pub fn can_open_options(id: &str) -> bool {
-    Tool::for_command(id).is_some() || matches!(id, "drawing.sheet.add" | "drawing.sheet.set" | "drawing.print.planned")
+    Tool::for_command(id).is_some() || matches!(id, "drawing.sheet.add" | "drawing.sheet.set")
 }
 
 /// Dismiss the current Drawing inspector without touching source or drawing data.
@@ -266,7 +266,7 @@ pub fn start(app: &mut SolveApp, id: &str) -> bool {
         }
         return true;
     }
-    if matches!(id, "drawing.print" | "drawing.print.planned") && active(app) && app.session.open_drawing.is_some() {
+    if id == "drawing.print" && active(app) && app.session.open_drawing.is_some() {
         print::start(app);
         return true;
     }
@@ -1967,5 +1967,22 @@ mod tests {
             );
             assert_eq!(h.app.preferences.drawing_sheet_dock, "top");
         }
+    }
+
+    /// A template asked for as .json goes beside it as .scdwg, and the status line says so.
+    #[test]
+    fn a_json_template_name_is_saved_as_scdwg_and_says_so() {
+        use serde_json::json;
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":60,"width":35,"height":12})).unwrap();
+        enter(&mut h.app, true).unwrap();
+        h.app.run("drawing.create", json!({})).unwrap();
+        let path = h.dir.join("Shop.json");
+        let saved = h.app.run("drawing.template.save", json!({"path": path.to_string_lossy()})).unwrap();
+        assert!(saved["path"].as_str().is_some_and(|p| p.ends_with("Shop.scdwg")), "{saved}");
+        let (text, _, error) = h.app.status.clone().unwrap();
+        assert!(!error && text.contains("Shop.scdwg") && text.contains(".scdwg"), "{text}");
+        assert!(!path.exists() && h.dir.join("Shop.scdwg").is_file());
     }
 }
