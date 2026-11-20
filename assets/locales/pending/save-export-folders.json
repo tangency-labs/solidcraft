@@ -1,0 +1,74 @@
+{
+  "en": {
+    "prefs.designs_folder": "Designs folder",
+    "prefs.designs_folder_help": "Save and Save As open in this folder for a design that has never been saved. Save As for a saved design opens beside it. Leave empty to open in the folder last used.",
+    "prefs.exports_folder": "Exports folder",
+    "prefs.exports_folder_help": "Export dialogs (STEP, STL, 3MF, drawings and other saved files) open in this folder, until you choose another folder in one of them. Leave empty to open in the folder last used.",
+    "prefs.folder_browse": "Browse…",
+    "prefs.folder_hint": "Folder last used",
+    "prefs.folders": "Folders"
+  },
+  "ar": {
+    "prefs.designs_folder": "مجلد التصاميم",
+    "prefs.designs_folder_help": "يفتح الحفظ والحفظ باسم في هذا المجلد للتصميم الذي لم يُحفظ من قبل. أما الحفظ باسم لتصميم محفوظ فيفتح بجانبه. اتركه فارغاً للفتح في آخر مجلد مستخدم.",
+    "prefs.exports_folder": "مجلد التصدير",
+    "prefs.exports_folder_help": "تفتح نوافذ التصدير (STEP وSTL و3MF والرسومات وغيرها من الملفات المحفوظة) في هذا المجلد، حتى تختار مجلداً آخر في إحداها. اتركه فارغاً للفتح في آخر مجلد مستخدم.",
+    "prefs.folder_browse": "استعراض…",
+    "prefs.folder_hint": "آخر مجلد مستخدم",
+    "prefs.folders": "المجلدات"
+  },
+  "de": {
+    "prefs.designs_folder": "Ordner für Designs",
+    "prefs.designs_folder_help": "Speichern und Speichern unter öffnen diesen Ordner für ein Design, das noch nie gespeichert wurde. Speichern unter für ein gespeichertes Design öffnet dessen Ordner. Leer lassen, um den zuletzt verwendeten Ordner zu öffnen.",
+    "prefs.exports_folder": "Ordner für Exporte",
+    "prefs.exports_folder_help": "Exportdialoge (STEP, STL, 3MF, Zeichnungen und andere gespeicherte Dateien) öffnen diesen Ordner, bis Sie in einem davon einen anderen Ordner wählen. Leer lassen, um den zuletzt verwendeten Ordner zu öffnen.",
+    "prefs.folder_browse": "Durchsuchen…",
+    "prefs.folder_hint": "Zuletzt verwendeter Ordner",
+    "prefs.folders": "Ordner"
+  },
+  "he": {
+    "prefs.designs_folder": "תיקיית עיצובים",
+    "prefs.designs_folder_help": "שמירה ושמירה בשם נפתחות בתיקייה זו עבור עיצוב שמעולם לא נשמר. שמירה בשם של עיצוב שמור נפתחת לצידו. השאירו ריק כדי לפתוח בתיקייה האחרונה שבה השתמשתם.",
+    "prefs.exports_folder": "תיקיית ייצוא",
+    "prefs.exports_folder_help": "חלונות הייצוא (STEP, STL, 3MF, שרטוטים וקבצים שמורים אחרים) נפתחים בתיקייה זו, עד שתבחרו תיקייה אחרת באחד מהם. השאירו ריק כדי לפתוח בתיקייה האחרונה שבה השתמשתם.",
+    "prefs.folder_browse": "עיון…",
+    "prefs.folder_hint": "התיקייה האחרונה שבה השתמשתם",
+    "prefs.folders": "תיקיות"
+  },
+  "ja": {
+    "prefs.designs_folder": "デザインのフォルダー",
+    "prefs.designs_folder_help": "一度も保存していないデザインの保存と名前を付けて保存は、このフォルダーで開きます。保存済みのデザインの名前を付けて保存は、そのデザインのフォルダーで開きます。空にすると、最後に使ったフォルダーで開きます。",
+    "prefs.exports_folder": "エクスポートのフォルダー",
+    "prefs.exports_folder_help": "エクスポートのダイアログ (STEP、STL、3MF、図面、その他の保存ファイル) は、いずれかで別のフォルダーを選ぶまで、このフォルダーで開きます。空にすると、最後に使ったフォルダーで開きます。",
+    "prefs.folder_browse": "参照…",
+    "prefs.folder_hint": "最後に使ったフォルダー",
+    "prefs.folders": "フォルダー"
+  },
+  "ko": {
+    "prefs.designs_folder": "디자인 폴더",
+    "prefs.designs_folder_help": "한 번도 저장하지 않은 디자인의 저장 및 다른 이름으로 저장은 이 폴더에서 열립니다. 저장된 디자인의 다른 이름으로 저장은 그 디자인의 폴더에서 열립니다. 비워 두면 마지막으로 사용한 폴더에서 열립니다.",
+    "prefs.exports_folder": "내보내기 폴더",
+    "prefs.exports_folder_help": "내보내기 대화 상자(STEP, STL, 3MF, 도면 및 기타 저장 파일)는 그중 하나에서 다른 폴더를 선택할 때까지 이 폴더에서 열립니다. 비워 두면 마지막으로 사용한 폴더에서 열립니다.",
+    "prefs.folder_browse": "찾아보기…",
+    "prefs.folder_hint": "마지막으로 사용한 폴더",
+    "prefs.folders": "폴더"
+  },
+  "vi": {
+    "prefs.designs_folder": "Thư mục thiết kế",
+    "prefs.designs_folder_help": "Lưu và Lưu thành mở thư mục này cho thiết kế chưa từng được lưu. Lưu thành cho thiết kế đã lưu mở ngay bên cạnh nó. Để trống để mở thư mục dùng gần nhất.",
+    "prefs.exports_folder": "Thư mục xuất",
+    "prefs.exports_folder_help": "Các hộp thoại xuất (STEP, STL, 3MF, bản vẽ và các tệp lưu khác) mở thư mục này, cho đến khi bạn chọn thư mục khác trong một hộp thoại. Để trống để mở thư mục dùng gần nhất.",
+    "prefs.folder_browse": "Duyệt…",
+    "prefs.folder_hint": "Thư mục dùng gần nhất",
+    "prefs.folders": "Thư mục"
+  },
+  "zh": {
+    "prefs.designs_folder": "设计文件夹",
+    "prefs.designs_folder_help": "从未保存过的设计，保存和另存为会在此文件夹中打开。已保存设计的另存为会在其所在文件夹中打开。留空则在上次使用的文件夹中打开。",
+    "prefs.exports_folder": "导出文件夹",
+    "prefs.exports_folder_help": "导出对话框（STEP、STL、3MF、图纸及其他保存的文件）会在此文件夹中打开，直到你在其中一个对话框中选择其他文件夹。留空则在上次使用的文件夹中打开。",
+    "prefs.folder_browse": "浏览…",
+    "prefs.folder_hint": "上次使用的文件夹",
+    "prefs.folders": "文件夹"
+  }
+}

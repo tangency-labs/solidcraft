@@ -82,12 +82,12 @@ impl SolveApp {
         self.begin_picker(future, Box::new(complete));
     }
 
-    /// Choose a library folder without blocking the event loop or changing a design.
-    pub(crate) fn pick_folder(&mut self, complete: impl FnOnce(&mut SolveApp, Option<String>) + 'static) {
+    /// Ask for a folder, starting in `current`. Without a host dialog, the answer is a cancel.
+    pub(crate) fn pick_folder(&mut self, current: &str, complete: impl FnOnce(&mut SolveApp, Option<String>) + 'static) {
         if self.file_picker_busy() {
             return;
         }
-        let future = self.services.pick_folder.as_ref().map(|pick| pick());
+        let future = self.services.pick_folder.as_ref().map(|pick| pick(current));
         self.begin_picker(future, Box::new(complete));
     }
 
