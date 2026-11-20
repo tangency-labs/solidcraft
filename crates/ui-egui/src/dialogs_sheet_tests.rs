@@ -551,7 +551,8 @@ fn rules_dialog_unfolds_from_a_press_brake_charts_90_degree_value() {
         h.step(&json!({"click": {"handle": "dialog:Unfold"}})).unwrap();
         h.step(&json!({"click": {"handle": "dialog:Unfold:K Factor"}})).unwrap();
         h.step(&json!({"widget": "OK"})).unwrap();
-        assert_eq!(h.app.session.doc.sheet_rule(None).unfold_method, "k_factor");
+        let back = h.app.session.doc.sheet_rule(None);
+        assert_eq!((back.unfold_method.as_str(), back.unfold_value.as_str()), ("k_factor", ""), "a K Factor rule keeps no 90° value");
         assert!((allowance(&mut h.app).unwrap_or(f64::NAN) - std::f64::consts::PI).abs() < 1e-9);
     }
 }
@@ -586,6 +587,8 @@ fn the_rule_managers_card_fits_its_90_degree_labels() {
         assert!(drawn.iter().any(|t| t == label), "{label} drawn whole: {drawn:?}");
         let wide = card(&h).unwrap_or(plain);
         assert!(wide > plain && wide <= plain * 1.5, "{label}: card {wide} from {plain}");
+        // Wider, it is still a manager card: its header keeps the collapse arrow.
+        assert!(crate::scenario::handle_at("dialog:collapse").is_some(), "{label}: the header's collapse arrow");
         // Back on K Factor the card is the width it was.
         if let Some(Kind::Sheet(Sm::Rules { unfold, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
             *unfold = 0;
