@@ -37,6 +37,17 @@ pub struct ConfigRowParams {
     pub row: RowRef,
 }
 
+/// Take the design's current values into a configuration row: each of its cells becomes what the
+/// design has now for that column. Only the table's columns are taken; changes to features and
+/// parameters the table has no column for are listed, not added. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ConfigUpdateParams {
+    /// The row, by name or id; the active row when left out.
+    #[serde(default, deserialize_with = "some_row", skip_serializing_if = "Option::is_none")]
+    pub row: Option<RowRef>,
+}
+
 /// A configuration row, as the commands name one: its name (text) or its fixed id (a whole
 /// number, as `config.table` lists it). A row named `"17"` is not row 17.
 #[derive(Clone, Debug, PartialEq)]
@@ -402,6 +413,14 @@ fn from_row<'de, D: Deserializer<'de>>(d: D) -> Result<Option<RowRef>, D::Error>
     }
 }
 
+/// An optional `row`: a row by name or id; `null` is left out, as the handler reads it.
+fn some_row<'de, D: Deserializer<'de>>(d: D) -> Result<Option<RowRef>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        v => RowRef::read(&v).map(Some).ok_or_else(|| D::Error::custom(whole("`row` must be a row's name or id"))),
+    }
+}
+
 fn is_row_name(name: &str) -> bool {
     let name = name.trim();
     !name.is_empty() && name.len() <= 128
@@ -590,6 +609,27 @@ pub struct ConfigTableRow {
 pub struct ConfigTableReply {
     #[serde(flatten)]
     pub table: ConfigTable,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// What `config.update_from_design` returns: the table after the update, and what it took.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ConfigUpdate {
+    #[serde(flatten)]
+    pub table: ConfigTable,
+    /// The row that was updated, by name.
+    pub row: String,
+    /// The columns whose cell changed, by column key.
+    pub updated: Vec<String>,
+    /// Columns a configuration rule drives: the design's value comes from the rule, so the cell
+    /// keeps what it had.
+    pub driven_by_rule: Vec<String>,
+    /// Changes the table has no column for, since a row was last activated or updated in this
+    /// session (or else since the design was opened or saved), as the column key that would hold each (`suppress:<feature>`,
+    /// `param:<name>`). Every configuration shares them.
+    pub not_captured: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

@@ -1121,3 +1121,25 @@ fn configuration_card_and_columns_resize_and_remember() {
         scenario::rect_of("dialog:table:configuration_table:Default:cell:Configuration").unwrap().x_range()
     );
 }
+
+/// When the design no longer matches the active configuration, Update sits beside Apply and takes
+/// the design's values into the row; a change the table has no column for is named below it
+/// ([T-686](https://tickets.solidcraft.io/t/686)).
+#[test]
+fn configuration_update_takes_the_designs_values_into_the_active_row() {
+    let mut h = fixture();
+    h.app.run("config.configure", json!({"params":["width"]})).unwrap();
+    h.app.start("config.table");
+    h.frames(4);
+    assert!(scenario::handle_at("config:update:Default").is_none(), "nothing to update while the design matches the row");
+    h.app.run("parameters.change", json!({"name":"width","expression":"25 mm"})).unwrap();
+    let feature = h.app.session.doc.features[0].id;
+    h.app.run("timeline.suppress", json!({"feature":feature,"suppressed":true})).unwrap();
+    h.frames(4);
+    h.step(&json!({"click":{"handle":"config:update:Default"}})).unwrap();
+    h.frames(3);
+    assert_eq!(config_cell(&h, "Default", 0), "25 mm");
+    assert!(h.app.session.doc.configuration_matches());
+    assert!(scenario::handle_at("config:update:Default").is_none(), "the design matches the row again");
+    assert!(scenario::rect_of("dialog:report:not_captured").is_some(), "the suppression without a column is named");
+}
