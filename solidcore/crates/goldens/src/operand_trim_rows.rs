@@ -1543,10 +1543,9 @@ mod trim_blocks {
 ///   vertex or edge tolerance against its need ([`vertex_need`], [`edge_need`], from the
 ///   body's trims certified on their edges); a moved edge interval or face domain bound is
 ///   classed as the most distant of its edge's or face's moved samples, or, where none
-///   moved, by its exact distance to the bound's closed form (`DOMAIN_BOUNDS`). The one
-///   exception is MEASURED, not certified: `MEASURED_VERTICES` lists a vertex point that is
-///   really farther (its cause and why no certificate exists are documented there). It
-///   stays listed only while it is farther and within its vertex need.
+///   moved, by its exact distance to the bound's closed form (`DOMAIN_BOUNDS`). A vertex point
+///   that is really farther with no certificate could only be MEASURED, listed in
+///   `MEASURED_VERTICES` while it is farther and within its vertex need; none is listed.
 /// * **Mass.** A moved volume with main's or this branch's value outside the enclosure is
 ///   classed by its distance to the true volume, enclosed by the enclosure ([`class_of`]);
 ///   with both inside it, neither is known nearer and the kernel's volume carries no
@@ -1750,19 +1749,10 @@ mod fillet_p3 {
     /// Moved vertex points that are MEASURED, not certified: (case, vertex). Each is really
     /// farther from the faces it lies on than main's, and stays listed only while it is
     /// farther and its enclosed distance to each of those faces is within its
-    /// [`vertex_need`].
-    ///
-    /// `real-box-fillet4v-r3-shell-closed` vertex 18 `(27, 18, 8)`: it lies only on face
-    /// 26 (`y = 18`); it is 5.9e-7 off it (main 2.9e-7), within its need 9.8e-6. The cause
-    /// is upstream of this branch: the inner offset curve's end is computed with an error
-    /// `e = 1.17e-6` (the offset vertex at `y = 18 - e`, from the curve end
-    /// `(2.0000011711969, 17)`), on main as on this branch. The boolean merge averages the
-    /// vertex with that point. With exact shared coordinates (`CPoint::affine2` at
-    /// `crv_trim`'s left-knot insertion), an input vertex moves by 6.5e-12, which makes the
-    /// merge take the `18 - e` point as its source, so the vertex lands at `18 - e / 2`
-    /// (main: `18 - e / 4`). No certificate exists: the face at `18 - e` is not incident to
-    /// the vertex. Curing `e` moves main too.
-    const MEASURED_VERTICES: &[(&str, usize)] = &[("real-box-fillet4v-r3-shell-closed", 18)];
+    /// [`vertex_need`]. None now: `real-box-fillet4v-r3-shell-closed` vertex 18 was listed
+    /// while the table's main values came from before `CPoint::affine2`'s exact shared
+    /// coordinates (#17896); against main ee673a19bf it moves by rounding only and is `Equal`.
+    const MEASURED_VERTICES: &[(&str, usize)] = &[];
 
     /// Classes `row`'s moved geometry values (in the relabeled array `g`, key `key`) on this
     /// branch's body `b`.
