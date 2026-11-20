@@ -663,7 +663,8 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
         let needs = if want_results { "--results needs a script" } else { "--timings needs a script" };
         let script = path.ok_or(needs)?;
         let v = read_json(script)?;
-        let run = s.run_script_kept(&v, timings.then_some(profile), &mut |step, r| print_param_warnings(script, step, r)).map_err(|e| e.to_string())?;
+        let run =
+            s.run_script_kept(&v, timings.then_some(profile), &mut |step, r| print_param_warnings(script, step, r)).map_err(|e| e.to_string())?;
         let mut out = match run.timings {
             Some(mut t) => {
                 if want_results && let Some(o) = t.as_object_mut() {

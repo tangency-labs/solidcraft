@@ -192,17 +192,20 @@ fn run_results_keep_the_steps_before_a_failing_step_and_its_error() {
     let script = dir.failing_step_script();
     let on_stdout = cli().arg("run").arg(&script).arg("--results").output().unwrap();
     assert_eq!(on_stdout.status.code(), Some(1));
-    let printed: Value = serde_json::from_slice(&on_stdout.stdout).unwrap();
+    let mut printed: Value = serde_json::from_slice(&on_stdout.stdout).unwrap();
+    without_timings(&mut printed);
     for (name, extra) in [("plain", &[][..]), ("allow-errors", &["--allow-errors"][..])] {
         let file = dir.0.join(format!("results-{name}.json"));
         let part = dir.0.join(format!("part-{name}.stl"));
-        let output = cli().arg("run").arg(&script).arg("--results").args(extra).arg("--out").arg(&part).arg("--json-out").arg(&file).output().unwrap();
+        let output =
+            cli().arg("run").arg(&script).arg("--results").args(extra).arg("--out").arg(&part).arg("--json-out").arg(&file).output().unwrap();
         assert_eq!(output.status.code(), Some(1), "{name}");
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains("step 3 (solid.extrude)"), "{name}: {stderr}");
         assert!(output.stdout.is_empty(), "{name}: the JSON goes to the file");
         assert!(!part.exists(), "{name}: no part is written from a script that stopped");
-        let written: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        let mut written: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        without_timings(&mut written);
         assert_eq!(written, printed, "{name}: the file is what stdout carried");
         let results = written["results"].as_array().unwrap();
         assert_eq!(results.len(), 2, "{name}: the two steps before the failure");
@@ -227,7 +230,8 @@ fn run_timings_keep_the_failing_step_and_a_step_without_a_command() {
     assert_eq!(printed["error"]["step"], 3);
 
     let nameless = dir.0.join("nameless.json");
-    std::fs::write(&nameless, json!([{"command": "solid.box", "params": {"length": 1, "width": 1, "height": 1}}, {"params": {}}]).to_string()).unwrap();
+    std::fs::write(&nameless, json!([{"command": "solid.box", "params": {"length": 1, "width": 1, "height": 1}}, {"params": {}}]).to_string())
+        .unwrap();
     let output = cli().arg("run").arg(&nameless).arg("--results").output().unwrap();
     assert_eq!(output.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&output.stderr).contains("script step 2: missing `command`"));
