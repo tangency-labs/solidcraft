@@ -2032,16 +2032,16 @@ pub(crate) fn cover_joined_faces(
         else {
             continue;
         };
-        // UNPROVED fallback (#18166): a bound the B-rep check refuses as an edge tolerance is
-        // taken only where the edge is seen that far from the face: at least
+        // Past the limit (#18166): a bound the B-rep check refuses as an edge tolerance is a
+        // proved raise taken only where the edge is seen that far from the face: at least
         // `1 / COVER_CONVERGED` (half) of it at a sample ([`sampled_face_gap`]; a stitch
         // over a real gap, `heal.stitch_p1` `cube2_into_shell`, 0.17; the edge then covers
         // the face, and fails the B-rep check's test 59 as
-        // [`within_edge_tolerance_limit`] says). Otherwise it is the enclosure not
-        // converging (`create_cylindrical_box` at radius 1e4, thickness 1e-3: 3.49 for a
-        // joined arc whose samples lie within rounding of the cylinder, B-rep tolerance
-        // 1e-5), and the edge is left as upstream leaves it, not proved to cover the face.
-        // The sample never stands in for a proof: it only chooses between the proved bound
+        // [`within_edge_tolerance_limit`] says). Otherwise (the UNPROVED fallback) it is the
+        // enclosure not converging (`create_cylindrical_box` at radius 1e4, thickness 1e-3:
+        // 3.49 for a joined arc whose samples lie within rounding of the cylinder, B-rep
+        // tolerance 1e-5), and the edge is left as upstream leaves it, not proved to cover the
+        // face. The sample never stands in for a proof: it only chooses between the proved bound
         // and upstream's value, and the tolerance is set to one of those, never to a sample.
         // It may choose because the distance from a point of the curve to the surface is a
         // lower bound on the greatest gap, which the proved bound encloses: a bound within
