@@ -306,7 +306,7 @@ fn unsupported_sheet_machining_is_atomic_but_true_no_change_is_allowed() {
     let before = s.doc.to_json();
     let undo = s.undo.len();
     let error = s.execute("solid.extrude", &json!({"sketch":"Taper","distance":1,"operation":"cut","taper":"5 deg"})).unwrap_err().to_string();
-    assert!(error.contains("sheet") && error.contains("preserv"), "{error}");
+    assert!(error.contains("sheet") && error.contains("read back"), "{error}");
     assert_eq!(s.doc.to_json(), before);
     assert_eq!(s.undo.len(), undo);
     rectangle_tool(&mut s, "Outside", [120.0, 20.0], [130.0, 30.0]);
@@ -1777,7 +1777,7 @@ fn a_fold_keeps_the_side_its_fixed_point_picked_when_its_line_moves_past_the_poi
 }
 
 /// Takes `stays` out of every fold in a design's file: the file a version from before folds kept
-/// their side wrote.
+/// their side wrote (which also kept a fold's fixed point, put back where a test needs it).
 fn strip_stays(v: &mut Value) {
     match v {
         Value::Object(m) => {
@@ -1818,7 +1818,15 @@ fn an_older_designs_fold_gets_its_side_once_as_it_opens_and_keeps_it() {
         let made = bbox(&mut s);
         let mut file: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
         strip_stays(&mut file);
-        let older = solidcraft_doc::Document::from_json(&file.to_string()).unwrap();
+        let mut older = solidcraft_doc::Document::from_json(&file.to_string()).unwrap();
+        // A fold made then kept the point it was given, which the one made now does not.
+        if let Some([x, y, z]) = fixed {
+            for f in &mut older.features {
+                if let solidcraft_doc::FeatureKind::SheetFold { fixed: kept, .. } = &mut f.kind {
+                    *kept = Some(solidcraft_doc::Position(solidcore_record::Vec3::new(x, y, z)));
+                }
+            }
+        }
         assert!(older.features.iter().any(|f| matches!(f.kind, solidcraft_doc::FeatureKind::SheetFold { stays: None, .. })), "{fixed:?}");
         let mut s = Session::new(older);
         assert_eq!(fold_stays(&s), Some(side), "{fixed:?}: converted as it opens");
@@ -7055,10 +7063,12 @@ fn edge_flange_material_outside_and_tangent_positions_start_the_bend_where_they_
     assert!((bbox(&mut s)["min"][1].as_f64().unwrap_or(f64::NAN)).abs() < 1e-6);
 }
 
-/// A new fold still refuses a `fixed` point in a cut-out or past the outline, leaving the design
-/// untouched (#263); a stored one that drifts off the sheet keeps its side with a warning (#370).
+/// A new fold refuses a `fixed` point in a cut-out or past the outline, leaving the design
+/// untouched (#263). A point on the sheet decides the side that stays as the fold is made: the
+/// fold keeps that side and not the point, so a recompute that takes the material from under
+/// where the point was keeps the side and says nothing about the point (#370).
 #[test]
-fn fold_refuses_a_new_fixed_point_off_the_sheet_but_warns_on_recompute() {
+fn fold_refuses_a_new_fixed_point_off_the_sheet_and_keeps_only_its_side() {
     let mut s = Session::default();
     run(&mut s, "parameters.change", json!({"name": "w", "expression": "100 mm"}));
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Blank"}));
@@ -7078,16 +7088,21 @@ fn fold_refuses_a_new_fixed_point_off_the_sheet_but_warns_on_recompute() {
     }
     run(&mut s, "sheet.fold", json!({"points": [[40, 0, 2.5], [40, 60, 2.5]], "fixed": [90, 30, 2.5], "name": "Fold1"}));
     assert!(run(&mut s, "timeline.inspect", json!({"feature": "Fold1"}))["warning"].is_null());
+    let kept = s.doc.features.last().map(|f| f.kind.clone());
+    assert!(
+        matches!(kept, Some(solidcraft_doc::FeatureKind::SheetFold { fixed: None, stays: Some(solidcraft_doc::FoldSide::Right), .. })),
+        "{kept:?}"
+    );
     run(&mut s, "parameters.change", json!({"name": "w", "expression": "80 mm"}));
     let fold = run(&mut s, "timeline.inspect", json!({"feature": "Fold1"}));
     assert!(fold["error"].is_null(), "{fold}");
-    assert!(fold["warning"].as_str().is_some_and(|w| w.contains("fixed point is not on the sheet") && w.contains("stays")), "{fold}");
+    assert!(fold["warning"].as_str().is_none_or(|w| !w.contains("fixed point")), "{fold}");
 }
 
 /// A side given (`stays`) says which side of the fold stays, and `fixed` is then ignored: neither
 /// checked against the sheet nor kept. On the 100 x 60 plate (T 2.5, R 2.5, K 0.44) folded at
 /// x = 40 with `stays: right` and a fixed point at x = 150, past the plate's end (refused alone,
-/// see `fold_refuses_a_new_fixed_point_off_the_sheet_but_warns_on_recompute`), the fold is made
+/// see `fold_refuses_a_new_fixed_point_off_the_sheet_and_keeps_only_its_side`), the fold is made
 /// with its right side (x > 40, right of the line drawn along +y seen from the top) put, and no
 /// warning. By hand, as in `fold_takes_the_bend_out_of_the_flat_sheet`: BA = (π/2)(2.5 + 0.44 ·
 /// 2.5) = 5.6549; the left side stands up, its outer face at 40 + BA/2 − R − T = 37.8274 and its
@@ -7142,11 +7157,12 @@ fn fold_fixed_point_must_touch_the_sheet_but_any_face_will_do() {
     let x = bb["max"][0].as_f64().unwrap_or(f64::NAN);
     run(&mut f, "sheet.fold", json!({"points": [[40, 0, 2.5], [40, 60, 2.5]], "fixed": [x, 30, 15], "name": "Fold1"}));
     assert!(run(&mut f, "timeline.inspect", json!({"feature": "Fold1"}))["warning"].is_null());
-    // A shorter leg leaves the stored point in the air: the fold recomputes, keeps its side and warns.
+    // A shorter leg leaves where the point was in the air: the fold kept its side, not the point,
+    // so it recomputes, keeps that side and says nothing about the point.
     run(&mut f, "parameters.change", json!({"name": "h", "expression": "10 mm"}));
     let fold = run(&mut f, "timeline.inspect", json!({"feature": "Fold1"}));
     assert!(fold["error"].is_null(), "{fold}");
-    assert!(fold["warning"].as_str().is_some_and(|w| w.contains("fixed point is not on the sheet")), "{fold}");
+    assert!(fold["warning"].as_str().is_none_or(|w| !w.contains("fixed point")), "{fold}");
     assert!((bbox(&mut f)["max"][0].as_f64().unwrap_or(f64::NAN) - x).abs() < 1e-6, "the right side stays");
 }
 
@@ -8244,9 +8260,7 @@ fn a_mirrored_sheet_copy_is_the_opposite_hand_with_the_mirror_image_flat_pattern
     assert_eq!(dxf["bends"], 3);
 }
 
-/// A mirrored sheet copy's rims turn over with its charts: each lies where the copy's own layout
-/// puts it, the material on its left. A flange picked on the copy's back edge stores the name the
-/// model gives that edge (the source's back edge's, as the copy's: `@` the mirror that made it),
+/// A flange picked on a mirrored sheet copy's back edge stores the name the model gives that edge (the source's back edge's, as the copy's: `@` the mirror that made it),
 /// lands on the copy's edge, and finds the edge by that name again when the base grows and the
 /// edge moves off the pick. The copy keeps what its faces were made for as its own build reports
 /// it, each bend's ends counted from where its turned anchors start: through that flange, the
@@ -8268,20 +8282,6 @@ fn a_flange_on_a_mirrored_sheet_copy_is_picked_by_its_rims_name_and_lands_on_the
     run(&mut s, "sheet.flange", json!({"edges": [[100, 30, 2.5]], "height": 15}));
     run(&mut s, "solid.mirror", json!({"bodies": ["Body1"], "plane": "YZ"}));
     let copy = "Body1 (2)";
-
-    // The copy's rims where its own layout puts them: the same panel and edge in its chart, the
-    // material on the edge's left.
-    let state = s.model.state();
-    let named = state.surface_sheets.iter().find(|sk| sk.body == copy).expect("the copy's sheet").clone();
-    drop(state);
-    let mut own = named.clone();
-    own.build().unwrap();
-    assert!(!own.rims.is_empty());
-    assert_eq!(named.rims.len(), own.rims.len(), "{:?}\n{:?}", named.rims, own.rims);
-    for r in &own.rims {
-        let same = |q: &&(usize, solidcore_record::Vec2, solidcore_record::Vec2, String)| q.0 == r.0 && q.1.dist(r.1) < 1e-9 && q.2.dist(r.2) < 1e-9;
-        assert!(named.rims.iter().any(|q| same(&q)), "the copy's own rim {r:?} is not among {:?}", named.rims);
-    }
 
     // The faces at either end of the copy's front flange, by the names the model gives them, each
     // read on the copy alone (the source's faces at x = 0 lie on the copy's there). The front

@@ -1716,9 +1716,9 @@ pub enum FeatureKind {
         flip: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<BodyName>,
-        /// The relief cut where two of this feature's bends meet at a corner of the base, in place
-        /// of the rule's: `corner_relief_shape` (notch | round | rectangular | tear) and
-        /// `corner_relief`, the size across. Either one left out follows the rule.
+        /// The relief cut where two of this feature's bends meet at a corner of the panel they
+        /// stand on, in place of the rule's: `corner_relief_shape` (notch | round | rectangular |
+        /// tear) and `corner_relief`, the size across. Either one left out follows the rule.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         corner_relief_shape: Option<String>,
         /// Walked last, after the edges' values, so the inputs before it keep their names.
@@ -1769,8 +1769,8 @@ pub enum FeatureKind {
         #[walk(profiles_of = sketch)]
         profiles: Option<ProfileSel>,
     },
-    /// Fold a sheet along a line on its base face: a sketch line (followed when the sketch
-    /// changes), else the points `a`, `b`.
+    /// Fold a sheet along a line on one of its flat faces: a sketch line (followed when the
+    /// sketch changes), else the points `a`, `b`.
     SheetFold {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         sketch: Option<SketchId>,
@@ -1787,9 +1787,11 @@ pub enum FeatureKind {
         position: String,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         flip: bool,
-        /// The point the side that stays was picked by, kept as it was given: the fold made
-        /// with it stores that side in `stays` (and a design saved before `stays` gets it when
-        /// opened), so the point no longer decides; a point off the sheet is still said.
+        /// The point the side that stays is picked by, as it was given. The `sheet.fold` command
+        /// refuses a point off the sheet, decides the side by it once, stores that side in
+        /// `stays` and keeps no point. A fold it could not decide then keeps its point, and a fold
+        /// saved before `stays` keeps the point it was made with: its side is decided by it as
+        /// the design opens (see `Document::with_fold_sides`).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         fixed: Option<Position>,
         /// The side of the line that stays put (see [`FoldSide`]), decided once when the fold is
