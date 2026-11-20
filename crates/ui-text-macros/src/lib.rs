@@ -80,7 +80,8 @@ pub fn msg(input: TokenStream) -> TokenStream {
     match check(&input) {
         Ok(order) => {
             let (place, ids) = order.0;
-            let msg = quote!(::solidcraft_ui_text::Msg::checked(#place, #ids));
+            let id = &input.id;
+            let msg = quote!(::solidcraft_ui_text::Msg::checked(#place, #ids, ::solidcraft_ui_text::debug_id!(#id)));
             let order = order.1;
             match order {
                 None => msg.into(),

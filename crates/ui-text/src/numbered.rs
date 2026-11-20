@@ -30,19 +30,53 @@ pub fn fingerprint<'a>(ids: impl IntoIterator<Item = &'a str>) -> u32 {
 }
 
 /// A message, by its place among the English catalog's sorted ids.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug)]
 pub struct Msg {
     place: u32,
     /// The [`fingerprint`] of the ids the place was counted in.
     ids: u32,
+    /// The id, in a build with debug assertions (development and tests), where a message no
+    /// catalog has reads as its id, as a message looked up by id does. Empty in a release build,
+    /// which is how the ids stay out of it (see [`debug_id`](crate::debug_id)).
+    id: &'static str,
+}
+
+impl PartialEq for Msg {
+    fn eq(&self, other: &Self) -> bool {
+        (self.place, self.ids) == (other.place, other.ids)
+    }
+}
+
+impl Eq for Msg {}
+
+impl std::hash::Hash for Msg {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        (self.place, self.ids).hash(state);
+    }
+}
+
+/// `$id` in a build with debug assertions, empty otherwise: what `msg!` gives [`Msg::checked`]
+/// for the id. The choice is made where `msg!` is used, and a release build never refers to the
+/// literal, so it is not in the program.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! debug_id {
+    ($id:literal) => {
+        if cfg!(debug_assertions) { $id } else { "" }
+    };
 }
 
 impl Msg {
     /// The message at `place` among the ids with the fingerprint `ids`. `msg!` writes this after
     /// finding the id in the English catalog; nothing else should.
     #[doc(hidden)]
-    pub const fn checked(place: u32, ids: u32) -> Self {
-        Self { place, ids }
+    pub const fn checked(place: u32, ids: u32, id: &'static str) -> Self {
+        Self { place, ids, id }
+    }
+
+    /// What stands for the message when no catalog has it: its id where the build kept it.
+    pub(crate) const fn unread(self) -> &'static str {
+        self.id
     }
 
     /// The message with the id `id`, for an id built at run time (a command's label): its place
@@ -52,6 +86,7 @@ impl Msg {
         let english = crate::english();
         let messages = english.messages();
         messages.contains_key(id).then(|| Self {
+            id: "",
             place: messages.range::<str, _>((std::ops::Bound::Unbounded, std::ops::Bound::Excluded(id))).count() as u32,
             ids: table_fingerprint(english.table),
         })
@@ -217,7 +252,7 @@ mod tests {
     const IDS: [&str; 4] = ["ui.cancel", "ui.empty", "ui.file", "ui.only_english"];
 
     fn msg(id: &str) -> Msg {
-        Msg::checked(IDS.iter().position(|i| *i == id).unwrap() as u32, fingerprint(IDS))
+        Msg::checked(IDS.iter().position(|i| *i == id).unwrap() as u32, fingerprint(IDS), "")
     }
 
     #[test]
@@ -245,9 +280,9 @@ mod tests {
         assert_eq!(lookup(table, msg("ui.empty")), Some(""));
         assert_eq!(lookup(table, msg("ui.only_english")), None);
         // A place beyond the table, and a message counted in another list of ids.
-        assert_eq!(lookup(table, Msg::checked(4, fingerprint(IDS))), None);
-        assert_eq!(lookup(table, Msg::checked(0, fingerprint(["ui.cancel"]))), None);
-        assert_eq!(lookup(leak(encode(&[], |_| None).unwrap()), Msg::checked(0, fingerprint([]))), None);
+        assert_eq!(lookup(table, Msg::checked(4, fingerprint(IDS), "")), None);
+        assert_eq!(lookup(table, Msg::checked(0, fingerprint(["ui.cancel"]), "")), None);
+        assert_eq!(lookup(leak(encode(&[], |_| None).unwrap()), Msg::checked(0, fingerprint([]), "")), None);
     }
 
     /// A table that is cut short, or is not a table, gives nothing and never panics.
@@ -261,7 +296,7 @@ mod tests {
             }
         }
         for hostile in [&[][..], &[0xff; 3], &[0xff; 64]] {
-            assert_eq!(lookup(leak(hostile.to_vec()), Msg::checked(7, 0xffff_ffff)), None);
+            assert_eq!(lookup(leak(hostile.to_vec()), Msg::checked(7, 0xffff_ffff, "")), None);
         }
     }
 

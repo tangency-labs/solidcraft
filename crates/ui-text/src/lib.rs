@@ -303,15 +303,16 @@ impl Locale {
         interpolate(self.text(id), args)
     }
 
-    /// The message `msg` in this language, then in English, then empty (a table has no ids to
-    /// show in its place). Its placeholders are marks: fill them with [`Filled::tr`].
     /// A message with its placeholders' values (`msg!("id", name = value)`), in this language.
     pub fn fill<const N: usize>(self, filled: Filled<'_, N>) -> String {
         filled.fill_in(self)
     }
 
+    /// The message `msg` in this language, then in English, then its id where the build kept it
+    /// (development and tests; a release build has no ids to show, and shows nothing). Its
+    /// placeholders are marks: fill them with [`Filled::tr`].
     pub fn message(self, msg: Msg) -> &'static str {
-        numbered::lookup(self.0.table, msg).or_else(|| numbered::lookup(english().table, msg)).unwrap_or_default()
+        numbered::lookup(self.0.table, msg).or_else(|| numbered::lookup(english().table, msg)).unwrap_or(msg.unread())
     }
 }
 
