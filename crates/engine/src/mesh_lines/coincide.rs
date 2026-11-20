@@ -20,6 +20,11 @@ const GRID_CELLS: f64 = 64.;
 /// `reach` of a body line running the same way goes; a visible sketch stretch only goes under a
 /// visible body line, a hidden one under any. `reach` covers both curves' chord tolerance, as each
 /// is sampled on its own.
+///
+/// Stretches are judged along the whole run, not per segment: one goes only when each of its ends
+/// is an end of the run or lies at an end of a body line. A sketch polyline crossing a body line at
+/// a shallow angle can have a short segment wholly within reach, but that stretch ends in the
+/// middle of the run on both sides, so the run keeps it.
 pub(crate) fn sketch_off_lines(sketch: Vec<Path>, lines: &[Line], reach: f64) -> Vec<Path> {
     if sketch.is_empty() || lines.is_empty() || !(reach > 0.) {
         return sketch;
@@ -29,37 +34,60 @@ pub(crate) fn sketch_off_lines(sketch: Vec<Path>, lines: &[Line], reach: f64) ->
     let mut stamp = 0usize;
     let mut result = Vec::new();
     for path in sketch {
-        let mut run: Vec<Vec2> = Vec::new();
-        for pair in path.points.windows(2) {
+        // Spans along the run, as segment index plus 0..1 within it.
+        let mut spans: Vec<Span> = Vec::new();
+        for (i, pair) in path.points.windows(2).enumerate() {
             let (p, q) = (pair[0], pair[1]);
-            let mut drawn: Vec<(f64, f64)> = Vec::new();
-            if p.dist(q) > 0. {
-                for i in grid.near(p, q) {
-                    if seen[i] == stamp {
-                        continue;
-                    }
-                    seen[i] = stamp;
-                    let line = &lines[i];
-                    if line.hidden && !path.hidden {
-                        continue;
-                    }
-                    if let Some(span) = within(p, q, line.a, line.b, reach) {
-                        drawn.push(span);
-                    }
+            let at = i as f64;
+            if p.dist(q) <= 0. {
+                // A repeated point neither breaks nor ends a drawn stretch.
+                spans.push(Span { lo: at, hi: at + 1., lo_fixed: false, hi_fixed: false });
+                continue;
+            }
+            for line in grid.near(p, q) {
+                if seen[line] == stamp {
+                    continue;
+                }
+                seen[line] = stamp;
+                let line = &lines[line];
+                if line.hidden && !path.hidden {
+                    continue;
+                }
+                if let Some(span) = within(p, q, line.a, line.b, reach) {
+                    spans.push(Span { lo: at + span.lo, hi: at + span.hi, ..span });
                 }
             }
             stamp += 1;
+        }
+        let last = path.points.len().saturating_sub(1) as f64;
+        let drawn: Vec<(f64, f64)> =
+            union(spans).into_iter().filter(|s| (s.lo_fixed || s.lo <= 0.) && (s.hi_fixed || s.hi >= last)).map(|s| (s.lo, s.hi)).collect();
+        let mut run: Vec<Vec2> = Vec::new();
+        for (i, pair) in path.points.windows(2).enumerate() {
+            let (p, q, at) = (pair[0], pair[1], i as f64);
             let mut cursor = 0.;
-            for (lo, hi) in union(drawn) {
-                keep(&mut run, &mut result, path.hidden, p, q, cursor, lo);
-                end(&mut run, &mut result, path.hidden);
-                cursor = hi;
+            for &(lo, hi) in drawn.iter().filter(|(lo, hi)| *hi > at && *lo < at + 1.) {
+                keep(&mut run, &mut result, path.hidden, p, q, cursor, (lo - at).max(0.));
+                if lo >= at {
+                    end(&mut run, &mut result, path.hidden);
+                }
+                cursor = (hi - at).min(1.);
             }
             keep(&mut run, &mut result, path.hidden, p, q, cursor, 1.);
         }
         end(&mut run, &mut result, path.hidden);
     }
     result
+}
+
+/// A stretch of a sketch run a body line draws, and whether each end lies at a body line's end
+/// (otherwise it is where the run leaves that line, or an end of the segment).
+#[derive(Clone, Copy, Debug)]
+struct Span {
+    lo: f64,
+    hi: f64,
+    lo_fixed: bool,
+    hi_fixed: bool,
 }
 
 /// Add the stretch of `p`..`q` from `lo` to `hi` to the open run, starting one where it doesn't join.
@@ -84,14 +112,20 @@ fn end(run: &mut Vec<Vec2>, result: &mut Vec<Path>, hidden: bool) {
     }
 }
 
-/// Sorted, joined spans.
-fn union(mut spans: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
-    spans.sort_by(|a, b| a.0.total_cmp(&b.0));
-    let mut out: Vec<(f64, f64)> = Vec::new();
-    for (lo, hi) in spans {
+/// Sorted, joined spans; a joined end is fixed when the span that reaches furthest there is.
+fn union(mut spans: Vec<Span>) -> Vec<Span> {
+    spans.sort_by(|a, b| a.lo.total_cmp(&b.lo).then(b.lo_fixed.cmp(&a.lo_fixed)));
+    let mut out: Vec<Span> = Vec::new();
+    for span in spans {
         match out.last_mut() {
-            Some(last) if lo <= last.1 => last.1 = last.1.max(hi),
-            _ => out.push((lo, hi)),
+            Some(last) if span.lo <= last.hi => {
+                if span.hi > last.hi {
+                    (last.hi, last.hi_fixed) = (span.hi, span.hi_fixed);
+                } else if span.hi == last.hi {
+                    last.hi_fixed |= span.hi_fixed;
+                }
+            }
+            _ => out.push(span),
         }
     }
     out
@@ -106,7 +140,7 @@ fn union(mut spans: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
 /// other for a short stretch whose ends lie away from both lines' ends; there the sketch line is
 /// another line, so it keeps that stretch. Two chords of one curve stay within reach of each other
 /// over their common length, so their span ends at a chord's end.
-fn within(p: Vec2, q: Vec2, a: Vec2, b: Vec2, reach: f64) -> Option<(f64, f64)> {
+fn within(p: Vec2, q: Vec2, a: Vec2, b: Vec2, reach: f64) -> Option<Span> {
     let (d, e) = (q - p, b - a);
     let (dl, el) = (d.len(), e.len());
     if dl <= 0. {
@@ -140,8 +174,9 @@ fn within(p: Vec2, q: Vec2, a: Vec2, b: Vec2, reach: f64) -> Option<(f64, f64)> 
     if !(lo.is_finite() && hi.is_finite()) || (lo > 0. && !at_end(lo)) || (hi < 1. && !at_end(hi)) {
         return None;
     }
+    let (lo_fixed, hi_fixed) = (lo > 0. || at_end(0.), hi < 1. || at_end(1.));
     let (lo, hi) = (lo.max(0.), hi.min(1.));
-    (hi > lo).then_some((lo, hi))
+    (hi > lo).then_some(Span { lo, hi, lo_fixed, hi_fixed })
 }
 
 /// Where `x0 + t·dx` lies in `lo..hi`.
@@ -292,6 +327,16 @@ mod tests {
     #[test]
     fn a_shallow_crossing_keeps_the_whole_sketch_line() {
         let kept = sketch_off_lines(vec![path(&[(0., 0.), (20., 0.)], false)], &[line((0., -1.), (20., 1.), false)], 0.02);
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        assert!((length(&kept) - 20.).abs() < 1e-9, "{kept:?}");
+    }
+
+    /// A sketch polyline whose short middle segment lies wholly within reach of a crossing line
+    /// keeps that segment: the stretch starts and ends mid-run, away from the body line's ends.
+    #[test]
+    fn a_shallow_crossing_keeps_a_short_segment_of_a_polyline() {
+        let sketch = vec![path(&[(0., 0.), (9.9, 0.), (10.1, 0.), (20., 0.)], false)];
+        let kept = sketch_off_lines(sketch, &[line((0., -1.), (20., 1.), false)], 0.02);
         assert_eq!(kept.len(), 1, "{kept:?}");
         assert!((length(&kept) - 20.).abs() < 1e-9, "{kept:?}");
     }
