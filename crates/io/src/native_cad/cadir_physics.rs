@@ -20,9 +20,9 @@
 use std::collections::HashMap;
 
 use cadmpeg_ir::features::FinitePoint3;
-use cadmpeg_ir::ids::{MassPropertiesId, OccurrenceId, PhysicsSceneId, ProductDefinitionId, RigidBodyId};
+use cadmpeg_ir::ids::{ArticulationId, MassPropertiesId, OccurrenceId, PhysicsSceneId, ProductDefinitionId, RigidBodyId};
 use cadmpeg_ir::math::Point3;
-use cadmpeg_ir::physics::{MassProperties, PhysicsScene, PhysicsTarget, PrincipalInertia, RigidBody};
+use cadmpeg_ir::physics::{Articulation, MassProperties, PhysicsScene, PhysicsTarget, PrincipalInertia, RigidBody};
 use cadmpeg_ir::products::{AssemblyJoint, JointConnector, JointId, JointLimits, JointOperand, PairedJointKind, PlaneSense};
 use cadmpeg_ir::scalar::{NonNegativeReal, PositiveReal};
 use cadmpeg_ir::transform::Transform;
@@ -37,6 +37,7 @@ pub(super) struct Physics {
     pub joints: Vec<AssemblyJoint>,
     pub masses: Vec<MassProperties>,
     pub rigid_bodies: Vec<RigidBody>,
+    pub articulations: Vec<Articulation>,
     pub scenes: Vec<PhysicsScene>,
     pub warnings: Vec<String>,
 }
@@ -65,13 +66,21 @@ pub(super) fn build(
     masses: &HashMap<u64, Vec<BodyMass>>,
 ) -> Result<Physics, String> {
     let mut out = Physics::default();
-    let operand = |occurrence: u64| -> Option<JointOperand> {
+    // A side's written placement: `Some(None)` for the design itself (the world).
+    let end = |occurrence: u64| -> Option<Option<OccurrenceId>> {
         if occurrence == 0 {
-            return Some(JointOperand::root("design", Vec::new()));
+            return Some(None);
         }
-        let path = crate::urdf::canonical(doc, occurrence);
-        placed.get(&path).map(|id| JointOperand::occurrence(id.clone(), "placement", Vec::new()))
+        placed.get(&crate::urdf::canonical(doc, occurrence)).map(|id| Some(id.clone()))
     };
+    let operand = |occurrence: u64| -> Option<JointOperand> {
+        end(occurrence).map(|id| match id {
+            None => JointOperand::root("design", Vec::new()),
+            Some(id) => JointOperand::occurrence(id, "placement", Vec::new()),
+        })
+    };
+    // The written joints' ends, for the articulations.
+    let mut edges: Vec<(Option<OccurrenceId>, Option<OccurrenceId>, String)> = Vec::new();
     let all = doc.joints_with_rigid_groups();
     for j in all.iter() {
         if j.suppressed {
@@ -94,6 +103,9 @@ pub(super) fn build(
         let mut joint = AssemblyJoint::paired(id::<JointId>("joint", out.joints.len())?, kind, connectors, None);
         joint.native_ref = Some(format!("solidcraft:design:joint/{}", j.name.replace('/', "_")));
         out.joints.push(joint);
+        if let (Some(a), Some(b)) = (end(j.a.occurrence), end(j.b.occurrence)) {
+            edges.push((a, b, j.name.clone()));
+        }
     }
     if !doc.assembly.links.is_empty() {
         out.warnings
@@ -104,8 +116,10 @@ pub(super) fn build(
     let grounded: HashMap<u64, &str> = doc.occurrences.iter().filter(|o| o.grounded).map(|o| (o.id, o.name.as_str())).collect();
     let mut paths: Vec<(&Vec<u64>, &OccurrenceId)> = placed.iter().collect();
     paths.sort();
+    let mut anchored: Vec<OccurrenceId> = Vec::new();
     for (path, occurrence) in &paths {
         let Some(name) = path.last().and_then(|o| grounded.get(o)) else { continue };
+        anchored.push((*occurrence).clone());
         let operand = JointOperand::occurrence((*occurrence).clone(), "placement", Vec::new());
         let connector = JointConnector { operand, frame: Transform::identity(), detached: false };
         let mut joint = AssemblyJoint::grounded(id::<JointId>("joint", out.joints.len())?, connector, None);
@@ -131,6 +145,7 @@ pub(super) fn build(
             native_ref: None,
         });
     }
+    out.articulations = articulations(&edges, &anchored, &mut out.warnings)?;
     let mut components: Vec<(&u64, &Vec<BodyMass>)> = masses.iter().filter(|(c, _)| **c != 0).collect();
     components.sort_by_key(|(c, _)| **c);
     for (component, bodies) in components {
@@ -160,6 +175,96 @@ pub(super) fn build(
         gravity_magnitude: None,
         native_ref: None,
     });
+    Ok(out)
+}
+
+/// The articulations of the joints `edges` (each joint's two ends: a placement, or `None` for the
+/// world) with the placements `anchored` fixed to the world: one for each group of placements the
+/// joints connect that forms a tree. Its root is the group's anchor (a placement fixed to the world
+/// or jointed to it), else the first joint's A side, as URDF export anchors a floating group. A
+/// group with a closed loop, through two anchors and the world included, has no articulation, with
+/// a warning: PhysX would solve its joints apart.
+pub(super) fn articulations(
+    edges: &[(Option<OccurrenceId>, Option<OccurrenceId>, String)],
+    anchored: &[OccurrenceId],
+    warnings: &mut Vec<String>,
+) -> Result<Vec<Articulation>, String> {
+    // Union-find over the placements the joints touch, in the order the joints first touch them,
+    // halving each path it walks, so a long chain of unions is walked once.
+    let mut order: Vec<OccurrenceId> = Vec::new();
+    let mut parent: HashMap<OccurrenceId, OccurrenceId> = HashMap::new();
+    fn find(parent: &mut HashMap<OccurrenceId, OccurrenceId>, mut x: OccurrenceId) -> OccurrenceId {
+        while let Some(p) = parent.get(&x).filter(|p| **p != x).cloned() {
+            let up = parent.get(&p).cloned().unwrap_or_else(|| p.clone());
+            parent.insert(x, up.clone());
+            x = up;
+        }
+        x
+    }
+    for (a, b, _) in edges {
+        for id in [a, b].into_iter().flatten() {
+            if !parent.contains_key(id) {
+                parent.insert(id.clone(), id.clone());
+                order.push(id.clone());
+            }
+        }
+        if let (Some(a), Some(b)) = (a, b) {
+            let (ra, rb) = (find(&mut parent, a.clone()), find(&mut parent, b.clone()));
+            if ra != rb {
+                parent.insert(rb, ra);
+            }
+        }
+    }
+    // Each group's members, joints and world joints, gathered in one pass over the placements
+    // and one over the joints, the groups in the order of their first placements.
+    struct Group<'e> {
+        first: OccurrenceId,
+        members: Vec<OccurrenceId>,
+        joints: Vec<&'e str>,
+        internal: usize,
+        to_world: Vec<OccurrenceId>,
+    }
+    let mut groups: Vec<Group> = Vec::new();
+    let mut group_of: HashMap<OccurrenceId, usize> = HashMap::new();
+    for o in &order {
+        let root = find(&mut parent, o.clone());
+        let k = *group_of.entry(root).or_insert_with(|| {
+            groups.push(Group { first: o.clone(), members: Vec::new(), joints: Vec::new(), internal: 0, to_world: Vec::new() });
+            groups.len() - 1
+        });
+        if let Some(g) = groups.get_mut(k) {
+            g.members.push(o.clone());
+        }
+    }
+    for (a, b, name) in edges {
+        let Some(side) = a.as_ref().or(b.as_ref()) else { continue };
+        let root = find(&mut parent, side.clone());
+        let Some(g) = group_of.get(&root).and_then(|k| groups.get_mut(*k)) else { continue };
+        g.joints.push(name.as_str());
+        match (a, b) {
+            (Some(_), Some(_)) => g.internal += 1,
+            (Some(o), None) | (None, Some(o)) => g.to_world.push(o.clone()),
+            (None, None) => {}
+        }
+    }
+    let anchored: std::collections::HashSet<&OccurrenceId> = anchored.iter().collect();
+    let mut out = Vec::new();
+    for g in groups {
+        let fixed: Vec<&OccurrenceId> = g.members.iter().filter(|m| anchored.contains(m)).collect();
+        if g.internal + 1 != g.members.len() || g.to_world.len() + fixed.len() > 1 {
+            warnings.push(format!(
+                "joints `{}` close a loop (two fixed or world-jointed parts close one through the world): written without an articulation, so PhysX solves them as separate joints",
+                g.joints.join("`, `")
+            ));
+            continue;
+        }
+        let root = fixed.first().map(|m| (*m).clone()).or_else(|| g.to_world.first().cloned()).unwrap_or(g.first);
+        out.push(Articulation {
+            id: id::<ArticulationId>("articulation", out.len())?,
+            root: PhysicsTarget::Occurrence { occurrence: root },
+            native_ref: None,
+        });
+    }
     Ok(out)
 }
 
@@ -219,6 +324,76 @@ pub(super) fn principal(t: [[f64; 3]; 3]) -> Option<([f64; 3], Option<Transform>
 
 #[cfg(test)]
 mod tests {
+    use super::articulations;
+    use cadmpeg_ir::ids::OccurrenceId;
+    use cadmpeg_ir::physics::PhysicsTarget;
+
+    fn occ(name: &str) -> OccurrenceId {
+        OccurrenceId::try_from(format!("test:physics:occurrence#{name}")).unwrap()
+    }
+
+    fn edge(a: Option<&str>, b: Option<&str>, name: &str) -> (Option<OccurrenceId>, Option<OccurrenceId>, String) {
+        (a.map(occ), b.map(occ), name.to_string())
+    }
+
+    fn roots(edges: &[(Option<OccurrenceId>, Option<OccurrenceId>, String)], anchored: &[&str]) -> (Vec<OccurrenceId>, Vec<String>) {
+        let anchored: Vec<OccurrenceId> = anchored.iter().map(|a| occ(a)).collect();
+        let mut warnings = Vec::new();
+        let found = articulations(edges, &anchored, &mut warnings).unwrap();
+        let roots = found
+            .into_iter()
+            .map(|a| match a.root {
+                PhysicsTarget::Occurrence { occurrence } => occurrence,
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        (roots, warnings)
+    }
+
+    /// A chain fixed at one end is one articulation rooted there; a floating chain is rooted at
+    /// its first joint's A side; a part jointed to the world anchors its group.
+    #[test]
+    fn a_tree_is_one_articulation_rooted_at_its_anchor() {
+        let chain = [edge(Some("b"), Some("a"), "j1"), edge(Some("b"), Some("c"), "j2")];
+        assert_eq!(roots(&chain, &["a"]), (vec![occ("a")], vec![]));
+        assert_eq!(roots(&chain, &[]), (vec![occ("b")], vec![]));
+        let to_world = [edge(Some("a"), Some("b"), "j1"), edge(None, Some("b"), "j0")];
+        assert_eq!(roots(&to_world, &[]), (vec![occ("b")], vec![]));
+    }
+
+    /// Two groups are two articulations.
+    #[test]
+    fn separate_groups_are_separate_articulations() {
+        let edges = [edge(Some("a"), Some("b"), "j1"), edge(Some("c"), Some("d"), "j2")];
+        assert_eq!(roots(&edges, &["d"]), (vec![occ("a"), occ("d")], vec![]));
+    }
+
+    /// Many groups, and a long chain, take one pass each: 50,000 separate pairs are 50,000
+    /// articulations in their order, and a chain of 50,000 joints one, rooted at its anchor.
+    #[test]
+    fn many_groups_and_a_long_chain_are_grouped_in_one_pass() {
+        let pairs: Vec<_> = (0..50_000).map(|k| edge(Some(&format!("a{k}")), Some(&format!("b{k}")), &format!("j{k}"))).collect();
+        let (found, warnings) = roots(&pairs, &[]);
+        assert_eq!(found.len(), 50_000);
+        assert!(warnings.is_empty() && found[0] == occ("a0") && found[49_999] == occ("a49999"));
+        let chain: Vec<_> = (0..50_000).map(|k| edge(Some(&format!("c{}", k + 1)), Some(&format!("c{k}")), &format!("j{k}"))).collect();
+        assert_eq!(roots(&chain, &["c0"]), (vec![occ("c0")], vec![]));
+    }
+
+    /// A closed loop has no articulation, with a warning naming its joints; two anchors close one
+    /// through the world.
+    #[test]
+    fn a_loop_has_no_articulation() {
+        let triangle = [edge(Some("a"), Some("b"), "j1"), edge(Some("b"), Some("c"), "j2"), edge(Some("c"), Some("a"), "j3")];
+        let (found, warnings) = roots(&triangle, &[]);
+        assert!(found.is_empty());
+        assert!(warnings[0].contains("`j1`, `j2`, `j3`"), "{warnings:?}");
+        let (found, warnings) = roots(&[edge(Some("a"), Some("b"), "j1")], &["a", "b"]);
+        assert!(found.is_empty() && warnings.len() == 1, "{warnings:?}");
+        let (found, _) = roots(&[edge(Some("a"), Some("b"), "j1"), edge(None, Some("b"), "j0")], &["a"]);
+        assert!(found.is_empty());
+    }
+
     use super::principal;
 
     /// `R · diag(moments) · Rᵀ` from the rotation's rows.

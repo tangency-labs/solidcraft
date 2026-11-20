@@ -510,6 +510,12 @@ fn physics_writes_joints_grounding_and_mass() {
     let text = std::fs::read_to_string(&path).unwrap();
     assert_eq!(text.matches("def PhysicsRevoluteJoint").count(), 1, "{text}");
     assert_eq!(text.matches("def PhysicsFixedJoint").count(), 1, "the grounded A:\n{text}");
+    // The grounded A roots the articulation of A and B, jointed by the hinge; C's joint has no
+    // OpenUSD form, so C is in none.
+    let a_prim = text.find("\"A_1\"").unwrap_or_else(|| panic!("no A_1 prim:\n{text}"));
+    let a_head = &text[a_prim..a_prim + text[a_prim..].find('{').unwrap_or(0)];
+    assert!(a_head.contains("PhysicsArticulationRootAPI"), "{text}");
+    assert_eq!(text.matches("PhysicsArticulationRootAPI").count(), 1, "{text}");
     let hinge = text.find("def PhysicsRevoluteJoint").unwrap();
     let lower = value_after(&text, hinge, "float physics:lowerLimit = ");
     let upper = value_after(&text, hinge, "float physics:upperLimit = ");
