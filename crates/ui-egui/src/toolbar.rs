@@ -3784,7 +3784,11 @@ mod header_report_tests {
         let version = h.ctx.fonts_mut(|f| f.layout_no_wrap(version, FontId::proportional(t.font_small), t.app_bar_text).size().x);
         assert_eq!(
             report.right(),
-            1400.0 - crate::window_chrome::WIDTH - (version + ui_kit::app_bar_layout::application::VERSION_PADDING * 2.0) - HEADER_SEARCH_GAP
+            1400.0
+                - crate::window_chrome::WIDTH
+                - ui_kit::app_bar_layout::application::GAP
+                - (version + ui_kit::app_bar_layout::application::VERSION_PADDING * 2.0)
+                - HEADER_SEARCH_GAP
         );
         assert_eq!(report.height(), app_bar::PILL_HEIGHT);
         assert!(report.width() > 100.0, "Report a bug carries its label: {report:?}");
@@ -3816,7 +3820,11 @@ mod header_report_tests {
         // Report a bug: an icon the size of Settings and Help, still named for assistive tools.
         let report = rect("titlebar:report");
         assert_eq!(report.size(), vec2(app_bar::PILL_HEIGHT, app_bar::PILL_HEIGHT));
-        assert_eq!(report.right(), 1400.0 - crate::window_chrome::WIDTH, "no room is kept for the version");
+        assert_eq!(
+            report.right(),
+            1400.0 - crate::window_chrome::WIDTH - ui_kit::app_bar_layout::application::GAP,
+            "one gap precedes the window buttons; no room is kept for the version"
+        );
         assert_eq!(rect("appbar:help").size(), vec2(app_bar::ITEM_HEIGHT, app_bar::ITEM_HEIGHT));
         assert!(h.widget("Report a bug").is_some(), "the icon keeps its accessible name");
         assert!(crate::scenario::handle_at("titlebar:version").is_none(), "the version left the bar");
@@ -3902,7 +3910,7 @@ mod header_report_tests {
                     if let Some(version) = g.version {
                         assert!((version.right - version.left - version_width - VERSION_PADDING * 2.0).abs() < 0.01);
                         assert!((version.left - g.report.right - GAP).abs() < 0.01);
-                        assert_eq!(version.right, width - captions);
+                        assert_eq!(version.right, width - captions - GAP);
                     }
                 }
             }
@@ -4964,45 +4972,6 @@ mod app_bar_tests {
     use super::*;
 
     #[test]
-    fn toolbar_hand_cursor_pixels_are_original_cached_bounded_and_outlined() {
-        use std::sync::Arc;
-        let t = Tokens::dark();
-        let fill = t.on_accent.to_opaque().to_array();
-        let outline = t.app_bar.to_opaque().to_array();
-        for held in [false, true] {
-            let icon = app_bar::drag_cursor(held);
-            let (image, fallback) = crate::hand_cursor::request(icon).unwrap();
-            assert_eq!(image.size, [32, 32]);
-            assert_eq!(image.rgba.len(), 32 * 32 * 4);
-            assert!(image.hotspot.into_iter().all(|coordinate| coordinate < 32));
-            assert!(image.rgba.chunks_exact(4).any(|p| p == fill.as_slice()));
-            assert!(image.rgba.chunks_exact(4).any(|p| p == outline.as_slice()));
-            assert!(image.rgba.chunks_exact(4).any(|p| p[3] == 0));
-            let pixel = (usize::from(image.hotspot[1]) * 32 + usize::from(image.hotspot[0])) * 4;
-            assert_eq!(image.rgba.get(pixel..pixel + 4), Some(fill.as_slice()));
-            let (again, _) = crate::hand_cursor::request(icon).unwrap();
-            assert!(Arc::ptr_eq(&image.rgba, &again.rgba));
-            assert_eq!(fallback, if held { egui::CursorIcon::Grabbing } else { egui::CursorIcon::PointingHand });
-        }
-        assert_ne!(crate::hand_cursor::generate(false).rgba, crate::hand_cursor::generate(true).rgba);
-        assert!(crate::hand_cursor::request(egui::CursorIcon::Default).is_none());
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn toolbar_hand_cursor_output_sets_bitmaps_and_clears_sticky_artwork() {
-        let ctx = ui_kit::test_support::context();
-        for icon in [egui::CursorIcon::Grab, egui::CursorIcon::Grabbing, egui::CursorIcon::Text] {
-            let output = ui_kit::test_support::raw_frame(&ctx, egui::RawInput::default(), |_| {
-                ctx.set_cursor_icon(icon);
-                crate::hand_cursor::apply(&ctx);
-            });
-            assert_eq!(output.platform_output.cursor_image.is_some(), icon != egui::CursorIcon::Text);
-            assert_eq!(output.platform_output.cursor_icon, if icon == egui::CursorIcon::Grab { egui::CursorIcon::PointingHand } else { icon });
-        }
-    }
-
-    #[test]
     fn toolbar_focus_rings_hug_bar_bodies_and_follow_lifted_tile_cells() {
         use crate::scenario::{Harness, rect_of};
         let mut h = Harness::new();
@@ -5084,12 +5053,7 @@ mod app_bar_tests {
         let at = resting.center();
         h.step(&json!({"move":[at.x,at.y]})).unwrap();
         h.frames(8);
-        if cfg!(windows) {
-            assert_eq!(h.output.cursor_icon, egui::CursorIcon::PointingHand, "fallback for the requested bitmap");
-            assert!(h.output.cursor_image.is_some());
-        } else {
-            assert_eq!(h.output.cursor_icon, app_bar::drag_cursor(false));
-        }
+        assert_eq!(h.output.cursor_icon, app_bar::drag_cursor(false));
         assert_eq!(rect_of("appbar:edit:separator:1"), Some(resting), "hover lift cannot move the hit target");
         let press =
             |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
@@ -5117,7 +5081,7 @@ mod app_bar_tests {
     }
 
     #[test]
-    fn app_bar_edit_cards_reserve_padding_and_keep_report_version_item_sizes() {
+    fn app_bar_edit_cards_paint_full_padding_and_keep_report_version_item_sizes() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.call("ui.resize", json!({"width":1280,"height":720}));
@@ -5144,7 +5108,6 @@ mod app_bar_tests {
         }
         for (zone, ids) in [("start", &["file", "home", "save"][..]), ("end", &["settings", "help", "report", "version"][..])] {
             let card = crate::scenario::rect_of(&format!("appbar:zone:{zone}")).unwrap();
-            let mut last = f32::NEG_INFINITY;
             for id in ids {
                 let item = crate::scenario::handle_at(&format!("appbar:edit:{id}")).unwrap();
                 assert!(card.contains(item), "{id} is inside its section card");
@@ -5155,13 +5118,23 @@ mod app_bar_tests {
                     _ => format!("appbar:{id}"),
                 };
                 let body = crate::scenario::rect_of(&key).unwrap();
-                last = last.max(body.right());
                 assert!(
                     (body.top() - card.top() - ui_kit::app_bar_layout::application::CARD_PADDING).abs() < 0.1
                         || body.height() == app_bar::PILL_HEIGHT
                 );
             }
-            assert!(last <= card.right() + 0.1);
+            let zone_id = if zone == "start" { ui_kit::app_bar_items::Zone::Start } else { ui_kit::app_bar_items::Zone::End };
+            let last = h
+                .app
+                .toolbar_custom
+                .app_bar
+                .items
+                .iter()
+                .filter(|item| item.zone == zone_id)
+                .filter_map(|item| crate::scenario::rect_of(&format!("appbar:edit:{}", item.id)))
+                .map(|rect| rect.right())
+                .fold(f32::NEG_INFINITY, f32::max);
+            assert!((last + ui_kit::app_bar_layout::application::CARD_PADDING - card.right()).abs() < 0.1);
             let captions = if h.app.custom_titlebar { crate::window_chrome::WIDTH } else { 0.0 };
             assert!(card.right() <= 1280.0 - captions + 0.1);
             if let Some(tab) = crate::scenario::rect_of("tab:close:0") {

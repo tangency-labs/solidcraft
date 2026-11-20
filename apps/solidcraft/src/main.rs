@@ -436,32 +436,6 @@ impl eframe::App for App {
             });
         }
         content_ui(&mut self.solve, ui);
-        // The existing egui-winit hook applies a requested bitmap after App::ui. Install
-        // its standard fallback first, only on transitions, so an OS allocation failure
-        // preserves the expected cursor rather than the previously selected artwork.
-        #[cfg(windows)]
-        if let Some(window) = frame.winit_window() {
-            let requested = ui.ctx().output(|o| {
-                o.cursor_image.as_ref().and_then(|_| match o.cursor_icon {
-                    egui::CursorIcon::PointingHand => Some(egui::CursorIcon::PointingHand),
-                    egui::CursorIcon::Grabbing => Some(egui::CursorIcon::Grabbing),
-                    _ => None,
-                })
-            });
-            let key = egui::Id::unique(("sc_bitmap_cursor_fallback", window.id()));
-            let changed = ui.ctx().data_mut(|data| {
-                let previous = data.get_temp::<Option<egui::CursorIcon>>(key).flatten();
-                data.insert_temp(key, requested);
-                previous != requested
-            });
-            if changed && let Some(cursor) = requested {
-                window.set_cursor(if cursor == egui::CursorIcon::PointingHand {
-                    winit::window::CursorIcon::Pointer
-                } else {
-                    winit::window::CursorIcon::Grabbing
-                });
-            }
-        }
         // After the frame's UI, so a setting changed in it (Preferences' OK) is written now.
         let now = std::time::Instant::now();
         if self.prefs_writer.due(ui.input(|i| i.events.iter().any(changes_settings)), now)

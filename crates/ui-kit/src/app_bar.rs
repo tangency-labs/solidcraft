@@ -277,10 +277,15 @@ pub fn icon_control(control: Control<'_>) -> bool {
     matches!(control, Control::Icon { .. } | Control::Command { .. } | Control::Documents | Control::Assistant { .. })
 }
 
-/// One native/web request for movable controls and tabs. The app's Windows output hook
-/// supplies original bitmap hands and a fallback without changing feature code.
+/// One mapping for movable bar controls, tray tiles and draggable document/view tabs.
 pub fn drag_cursor(dragging: bool) -> egui::CursorIcon {
-    if dragging { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Grab }
+    if dragging {
+        egui::CursorIcon::Grabbing
+    } else if cfg!(target_os = "windows") {
+        egui::CursorIcon::PointingHand
+    } else {
+        egui::CursorIcon::Grab
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -400,21 +405,9 @@ pub fn paint_hover<R>(ui: &mut egui::Ui, id: &str, rect: Rect, radius: u8, hover
     result
 }
 
-/// Strong primary fill, rather than the softer workspace button surface.
+/// The same primary component used by tool-panel confirm/apply actions.
 pub fn tray_done(ui: &mut egui::Ui, rect: Rect, label: &str) -> egui::Response {
-    let t = Tokens::get();
-    let response = ui.interact(rect, ui.scope_id().with("tray_done"), Sense::click());
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
-    let (fill, ink) = tray_accent();
-    ui.painter().rect_filled(rect, t.control_radius, fill);
-    ui.painter().text(rect.center(), Align2::CENTER_CENTER, label, FontId::proportional(t.font_label), ink);
-    if response.hovered() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-    }
-    if response.has_focus() {
-        ui.painter().rect_stroke(rect.expand(2.0), t.control_radius, Stroke::new(1.0, fill), egui::StrokeKind::Outside);
-    }
-    response
+    crate::button_at(ui, "tray_done", rect, label, crate::Button::Primary)
 }
 
 /// The strong primary accent used by File chrome remains distinct from muted workspace

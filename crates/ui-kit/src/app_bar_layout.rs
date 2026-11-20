@@ -183,7 +183,10 @@ pub fn layout(spec: &Spec) -> Placed {
 fn layout_row(spec: &Spec) -> Placed {
     let (width, left, right) = (clean(spec.width), clean(spec.captions_left), clean(spec.captions_right));
     let (gap, button) = (clean(spec.gap), clean(spec.overflow_button_width));
-    let room = (width - left - right).max(0.0);
+    // Application chrome is the next neighbour of the End stack. Its boundary uses
+    // the same gap as logo/items/tabs; this is independent of edit-card painting.
+    let boundary_gap = if spec.application.is_some() { gap } else { 0.0 };
+    let room = (width - left - right - boundary_gap).max(0.0);
 
     let mut seen = std::collections::HashSet::new();
     // A saved list is bounded to 64 movable objects. Application chrome has its own
@@ -550,7 +553,7 @@ pub mod application {
             .map(|b| b.0)
             .into_iter()
             .chain(spec.items.iter().zip(&p.placements).filter(|(i, _)| i.zone == Zone::End).filter_map(|(_, p)| p.map(|p| p.x)))
-            .fold(clean(spec.width) - clean(spec.captions_right), f32::min);
+            .fold((clean(spec.width) - clean(spec.captions_right) - clean(spec.gap)).max(clean(spec.captions_left)), f32::min);
         let tabs = span("tabs").unwrap_or(Span::new(end, 0.0));
         let quick_slots: Vec<_> = (0..policy.quick_count).filter_map(|i| at(&format!("quick:{i}")).map(|p| (i, p.x + p.width / 2.0))).collect();
         let quick = quick_slots.first().map(|&(_, x)| (x, ICON_WIDTH + GAP));
