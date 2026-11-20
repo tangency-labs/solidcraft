@@ -757,10 +757,10 @@ fn the_built_in_block_draws_its_symbol_in_the_drawings_projection() {
     assert_eq!(cell.symbol_mm, Some(3.5));
     assert_eq!(layout.cells.iter().filter(|c| c.symbol_mm.is_some()).count(), 1);
     let [first, third] = [Projection::First, Projection::Third].map(|projection| layout.paper(7, projection));
-    assert_eq!(first.items[..9], third.items[..9]);
-    assert_ne!(first.items[9..], third.items[9..]);
+    assert_eq!(first.items[..15], third.items[..9]);
+    assert_ne!(first.items[15..], third.items[15..]);
     for (group, projection) in [(first, Projection::First), (third, Projection::Third)] {
-        assert_eq!(group.items[9..], projection_symbol(projection, 3.5, cell.value_box.center()));
+        assert_eq!(group.items[15..], projection_symbol(projection, 3.5, cell.value_box.center()));
         crate::paper::Scene::new(Vec2::new(420.0, 297.0), vec![group]).validate().unwrap();
     }
     assert_eq!(serde_json::to_value(&block.cells[11].kind).unwrap(), json!("projection_symbol"));
