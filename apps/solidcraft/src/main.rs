@@ -2334,9 +2334,18 @@ mod tickets_http_tests {
         let port = listener.local_addr().unwrap().port();
         let server = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
+            // The whole request, body too: a connection closed with part of the request unread is
+            // reset, and the client then gets an error instead of the reply (os error 22 on macOS)
+            // whenever the body arrives after the headers were read.
             let mut request = Vec::new();
             let mut buf = [0u8; 4096];
-            while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+            let whole = |request: &[u8]| {
+                let Some(head) = request.windows(4).position(|w| w == b"\r\n\r\n") else { return false };
+                let headers = String::from_utf8_lossy(&request[..head]).to_ascii_lowercase();
+                let length = headers.lines().find_map(|l| l.strip_prefix("content-length:")).and_then(|v| v.trim().parse::<usize>().ok());
+                request.len() >= head + 4 + length.unwrap_or(0)
+            };
+            while !whole(&request) {
                 let n = stream.read(&mut buf).unwrap();
                 assert!(n > 0, "the request ended early");
                 request.extend_from_slice(&buf[..n]);

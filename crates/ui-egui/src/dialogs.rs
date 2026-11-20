@@ -3583,9 +3583,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                 } else {
                     format!("{} (click to pick into this input)", hint(inp))
                 };
-                // Plugin descriptions are optional: an undescribed field has no tooltip.
-                let chip = if matches!(d.kind, Kind::PluginPick { .. }) && inp.tip.is_none() { chip } else { chip.backing_on_hover_text(tooltip) };
-                if chip.clicked() {
+                if chip.backing_on_hover_text(tooltip).clicked() {
                     activate = Some(i);
                     surrender_keyboard_focus(ui);
                 }
