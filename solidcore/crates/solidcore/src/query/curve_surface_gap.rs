@@ -816,10 +816,6 @@ fn bisect(
                         continue;
                     }
                     if bottom || out_of_pieces || closed {
-                        // (a NaN bound encloses nothing: `max` would drop it)
-                        if bound.is_nan() {
-                            return Ok(None);
-                        }
                         if bound > over {
                             return Ok(Some(f64::INFINITY));
                         }
@@ -1163,10 +1159,6 @@ pub fn curve_face_gap_bound_within(
                     let closed =
                         bound <= enough || bound <= seen || p.closes(parent, relative, at_least);
                     if last || closed {
-                        // (a NaN bound encloses nothing: `max` would drop it)
-                        if bound.is_nan() {
-                            return Ok(None);
-                        }
                         if bound > over {
                             return Ok(Some(f64::INFINITY));
                         }
@@ -2951,6 +2943,32 @@ mod tests {
             run(CLOSE_RELATIVE, f64::NEG_INFINITY, Some(1 << 11)).map(f64::to_bits),
             run(CLOSE_RELATIVE, f64::NEG_INFINITY, None).map(f64::to_bits)
         );
+    }
+
+    /// A piece whose end values are NaN (a non-finite control point) leaves the gap not
+    /// enclosed, with or without a budget: its bound's interval sum is the whole line
+    /// (`Ivl::checked`), so it is never dropped by the `max` of the closed pieces' bounds while
+    /// the rest pass as the gap's bound (#18166).
+    #[test]
+    fn a_nan_piece_bound_is_not_enclosed() {
+        for budget in [None, Some(64)] {
+            let gap = bisect(
+                [0.0, 1.0],
+                32,
+                &[],
+                CLOSE_RELATIVE,
+                0.0,
+                [f64::NEG_INFINITY, f64::INFINITY],
+                budget,
+                |a, b| {
+                    let h = b - a;
+                    let ends = if (0.25..0.5).contains(&a) { f64::NAN } else { 1.0 };
+                    Ok(PieceBound::with(ends, Ivl::from(0.1 * h * h), 0.0))
+                },
+            )
+            .unwrap();
+            assert_eq!(gap, None, "budget {budget:?}");
+        }
     }
 
     /// With a budget, a gap whose end values pass `enough` is bounded with every piece, not the
