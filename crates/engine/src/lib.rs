@@ -764,6 +764,11 @@ pub struct Session {
     /// `config.update_from_design` compares the design with to name the changes the table has no
     /// column for. The session's only, never saved.
     pub(crate) config_baseline: Option<(String, Arc<Document>)>,
+    /// The model each of the last two configuration rows left built, by row id
+    /// (`config.activate`): going back to one offers its results to the evaluation
+    /// ([`solidcraft_doc::Model::prime`]), which takes each whose feature has the same inputs,
+    /// instead of computing what the cache has dropped meanwhile. The session's only, never saved.
+    pub(crate) row_models: Vec<(u64, Model)>,
     /// Stops the work computing off the window thread for this design, shared with its copies.
     stop: solidcraft_kernel::Stop,
     /// A copy of a design ([`Session::scratch`]), sharing its token.
@@ -1222,6 +1227,7 @@ impl Session {
             pending_moves: Default::default(),
             exploded: Default::default(),
             config_baseline: None,
+            row_models: Vec::new(),
             world_cache: Default::default(),
             joints_settled: None,
             occurrence_visibility_cache: Default::default(),
@@ -2790,6 +2796,7 @@ impl Session {
         self.doc = c.doc;
         // A row put on the design after the checkpoint is gone with it.
         self.config_baseline = None;
+        self.row_models.clear();
         self.active_sketch = c.active_sketch;
         self.active_sheet_sketch = c.active_sheet_sketch;
         self.open_drawing = c.open_drawing;
@@ -2872,6 +2879,7 @@ impl Session {
             pending_moves: self.pending_moves.clone(),
             exploded: self.exploded.clone(),
             config_baseline: self.config_baseline.clone(),
+            row_models: self.row_models.clone(),
             world_cache: std::sync::Mutex::new(self.world_cache.lock().ok().and_then(|cache| cache.clone())),
             joints_settled: self.joints_settled.clone(),
             // Read again by the copy: handing it these references measured more peak memory on a
@@ -3217,6 +3225,7 @@ impl Session {
         self.pending_moves = computed.pending_moves;
         self.exploded = computed.exploded;
         self.config_baseline = computed.config_baseline;
+        self.row_models = computed.row_models;
         // Joints the computation hid (an import's rigid group) stay hidden.
         for j in computed.visibility.hidden_joints {
             if !self.visibility.hidden_joints.contains(&j) {
