@@ -3373,21 +3373,34 @@ pub fn fix_uv_trim_curves_notified(
     // Vertex/SurfVertex and EdgeEnd/SurfVertex gaps (the out-of-tolerance branch only
     // warns upstream)
     let _vertex_gap = surf_vertex.distance(vertex_point);
-    let curr_edge_gap = surf_vertex.distance(curr_edge_point);
-    let prev_edge_gap = surf_vertex.distance(prev_edge_point);
+    let _curr_edge_gap = surf_vertex.distance(curr_edge_point);
+    let _prev_edge_gap = surf_vertex.distance(prev_edge_point);
     let _ = tol_3d;
 
-    // Not upstream (#18166): an edge whose curve ends farther from the vertex's point than
-    // its own tolerance meets the vertex only by the vertex's tolerance (upstream's corner
-    // test above takes the largest of the vertex's and the edges' tolerances). Its trim ends
-    // on its curve's end, which is where it belongs: pulling it to the vertex's UV point
-    // would set it off its edge's curve by that gap, past the edge's tolerance (upstream
-    // leaves the edge so, uncovered; raising the edge to the gap instead would hand a gap
-    // that only the vertex's tolerance holds to every check that reads edge tolerances,
-    // as `blend::round_room` does for two rounds' crossing, #19792). The trims' UV gap is
-    // left as it is, as upstream leaves a large one: in 3D their ends lie on their curves,
-    // each within the vertex's tolerance of it.
-    if curr_edge_gap > b.edge(curr_edge)?.tolerance || prev_edge_gap > b.edge(prev_edge)?.tolerance
+    // Not upstream (#18166): a trim that ends on its edge's curve's end (within the edge's
+    // tolerance) and within the vertex's tolerance of the vertex, but farther than the edge's
+    // tolerance from the surface point at the vertex's UV (`surf_vertex`), meets the vertex
+    // only by the vertex's tolerance: its edge's curve does not reach the vertex. Pulling it
+    // to the vertex's UV point sets it off its edge's curve by that distance, past the
+    // edge's tolerance (upstream leaves the edge so, uncovered; raising the edge to it
+    // instead hands a gap that only the vertex's tolerance holds to every check that reads
+    // edge tolerances, as `blend::round_room` does for two rounds' crossing, #19792). Such a
+    // corner is left unedited: each trim's end lies on its curve's end in 3D, within the
+    // vertex's tolerance of the vertex, so the corner is as valid as the vertex's tolerance
+    // makes it, and its UV gap stays as the trims were built (upstream's own exits above
+    // leave a gap, at a pole or past a twentieth of the domain, unedited too). A trim that
+    // is off its curve's end, the overshoot this function repairs, is still pulled.
+    let vertex_tolerance = b.vertex(vertex)?.tolerance;
+    let held_off = |uv: Point3, edge_point: Point3, edge_tolerance: f64| -> bool {
+        let Ok(end) = surf.evaluate_point(k, Point2::new(uv.x, uv.y)) else {
+            return false;
+        };
+        end.distance(edge_point) <= edge_tolerance
+            && end.distance(vertex_point) <= vertex_tolerance
+            && end.distance(surf_vertex) > edge_tolerance
+    };
+    if held_off(uv_curr, curr_edge_point, b.edge(curr_edge)?.tolerance)
+        || held_off(uv_prev, prev_edge_point, b.edge(prev_edge)?.tolerance)
     {
         return Ok(false);
     }
@@ -3575,8 +3588,9 @@ const KEEP_COVERED_PIECES: usize = 64;
 /// ([`within_edge_tolerance_limit`](crate::topology::edgeuse::p3::within_edge_tolerance_limit))
 /// raises nothing: the edit would be refused with the body.
 ///
-/// A corner where an edge's curve ends farther from the vertex than the edge's tolerance is
-/// not edited at all ([`fix_uv_trim_curves_notified`]), so there is nothing to cover there.
+/// A corner whose trim ends on its edge's curve's end, which the vertex's tolerance alone
+/// joins to the vertex, is not edited at all ([`fix_uv_trim_curves_notified`]), so there is
+/// nothing to cover there.
 ///
 /// A trim the edit left as it was (its geometry the same, bit for bit) at a tolerance not
 /// lowered is not bounded at all: it is covered after the edit exactly where it was before.

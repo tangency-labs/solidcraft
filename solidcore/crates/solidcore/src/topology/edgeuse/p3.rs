@@ -1883,8 +1883,10 @@ fn lowered_covers_rounding(b: &Brep, e: EdgeId, bound: f64, lowered: f64) -> Res
 /// Not upstream (#18166): whether `tolerance` is one the B-rep check accepts for an edge of
 /// `b`: below [`LARGE_SMALL_SIZE_RATIO`](crate::geom::tol::LARGE_SMALL_SIZE_RATIO) times the
 /// B-rep's tolerance (`ValidatePointers` test 59, the limit the validation's own tolerance
-/// growth keeps under). A raise past it leaves a body the check refuses; the stitch's cover
-/// raises past it on purpose where the gap is seen that wide ([`cover_joined_faces`]).
+/// growth keeps under). A raise past it leaves a body the check refuses. The stitch's cover
+/// raises past it on purpose where the gap is seen that wide ([`cover_joined_faces`]): the
+/// edge then covers its face, and the body is one the check refuses for that edge, where
+/// upstream's is accepted with the face uncovered.
 pub(crate) fn within_edge_tolerance_limit(b: &Brep, tolerance: f64) -> bool {
     tolerance < crate::geom::tol::LARGE_SMALL_SIZE_RATIO * b.tolerance()
 }
@@ -2027,8 +2029,10 @@ pub(crate) fn cover_joined_faces(
         };
         // UNPROVED fallback (#18166): a bound the B-rep check refuses as an edge tolerance is
         // taken only where the edge is seen that far from the face: at least
-        // `1 / COVER_CONVERGED` (half) of it at a sample ([`sampled_face_gap`]; a stitch over
-        // a real gap, `heal.stitch_p2` `cube2_into_shell`, 0.17). Otherwise it is the enclosure not
+        // `1 / COVER_CONVERGED` (half) of it at a sample ([`sampled_face_gap`]; a stitch
+        // over a real gap, `heal.stitch_p1` `cube2_into_shell`, 0.17; the edge then covers
+        // the face, and fails the B-rep check's test 59 as
+        // [`within_edge_tolerance_limit`] says). Otherwise it is the enclosure not
         // converging (`create_cylindrical_box` at radius 1e4, thickness 1e-3: 3.49 for a
         // joined arc whose samples lie within rounding of the cylinder, B-rep tolerance
         // 1e-5), and the edge is left as upstream leaves it, not proved to cover the face.
@@ -2039,7 +2043,7 @@ pub(crate) fn cover_joined_faces(
         // twice it has converged. A sample as computed is that distance only when the
         // surface's drop finds the nearest point, which it does not certify; otherwise it is
         // larger (see [`sampled_face_gap`]). An overstated sample can only take the proved
-        // bound (sound, if loose), never an unproved value.
+        // bound (covering the face, if loosely), never an unproved value.
         // (the settling's re-bound, at the coarser fit of the raised tolerance, is held to the
         // same rule: under the limit for a bound taken under it, within the sampled gate's
         // reach for one taken past it)
@@ -2369,7 +2373,8 @@ const SETTLE_ROUNDS: usize = 8;
 /// both fit and target), at which a bound can come out a rounding above the one found before
 /// (the bisection stops at a coarser floor). Raised again to such a bound (below the
 /// face's cap: for a joined face the B-rep check's edge tolerance limit, or past it the
-/// sampled gate's reach, [`cover_joined_faces`]; the one [`keep_trimless_faces_covered`] gives) for at most
+/// sampled gate's reach, [`cover_joined_faces`]; the one [`keep_trimless_faces_covered`]
+/// gives) for at most
 /// [`SETTLE_ROUNDS`] rounds; each bound is proved, so each raise covers a proved distance.
 ///
 /// # Errors
