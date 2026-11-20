@@ -698,16 +698,21 @@ impl DropPt {
         // when m_bDegenCurve != TRUE
         if self.degen_curve != Some(true) {
             // can't drop Crv1stDeriv vectors parallel to m_SrfNormal (degenerate case)
-            // (no angle: a zero tangent or normal, which upstream reads as 0 degrees)
-            let cause = match self.srf_normal.angle_between(self.crv_pd[1]) {
+            // (no angle: a zero tangent or normal, which upstream reads as 0 degrees; the
+            // angle's error stays the cause, rule 6)
+            let stop = match self.srf_normal.angle_between(self.crv_pd[1]) {
                 Ok(rad) => Some(rad_to_deg(rad))
                     .filter(|degrees| *degrees < 3.0)
-                    .map(|degrees| IntersectFailure::TangentAlongNormal { degrees }),
-                Err(_) => Some(IntersectFailure::DegenerateTangent),
+                    .map(|degrees| {
+                        Failure::new(OP_SET, IntersectFailure::TangentAlongNormal { degrees })
+                    }),
+                Err(e) => {
+                    Some(Failure::new(OP_SET, IntersectFailure::DegenerateTangent).caused_by(e))
+                }
             };
-            if let Some(cause) = cause {
+            if let Some(stop) = stop {
                 self.good_drop = Some(false);
-                return Err(SolidError::intersect(OP_SET, cause));
+                return Err(stop.into_error());
             }
         }
 
