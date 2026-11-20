@@ -65,15 +65,6 @@ pub(crate) struct LazyMove {
     made: std::sync::OnceLock<std::sync::Arc<Brep>>,
 }
 
-/// How many lazily moved records have been moved ([`RecordCell::Moved`]), for diagnostics.
-static LAZY_MOVES_MADE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-/// How many records placed lazily have been moved since the process started: a placement's
-/// geometry needed exactly ([`crate::ops::transform_matrix`]).
-pub fn lazy_moves_made() -> usize {
-    LAZY_MOVES_MADE.load(std::sync::atomic::Ordering::Relaxed)
-}
-
 impl LazyMove {
     pub(crate) fn new(source: std::sync::Arc<Brep>, motion: solidcraft_geom::brep::placement::Rigid, matrix: [[f64; 4]; 4]) -> LazyMove {
         LazyMove { source, motion, matrix, made: std::sync::OnceLock::new() }
@@ -81,7 +72,6 @@ impl LazyMove {
 
     fn record(&self) -> &std::sync::Arc<Brep> {
         self.made.get_or_init(|| {
-            LAZY_MOVES_MADE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             // The record was checked to move exactly before it was placed this way; should that
             // fail after all, it is mapped, and as a last resort kept where it is (logged).
             let moved = solidcraft_geom::brep::placement::moved(&self.source, &self.motion)
@@ -665,6 +655,13 @@ impl std::fmt::Debug for OutlinePrep {
 pub const OUTLINE_TRIM_SAMPLES: usize = 1024;
 
 impl Body {
+    /// Whether this body's lazily placed record has been moved: a placement's geometry was
+    /// needed exactly ([`crate::ops::transform_matrix`]). Derived from the move's own state, so
+    /// a body's answer is its own, whatever else the process moves beside it (#19922).
+    pub fn lazy_move_made(&self) -> bool {
+        matches!(&self.record, RecordCell::Moved(m) if m.made.get().is_some())
+    }
+
     /// The record prepared for hidden lines ([`solidcraft_geom::hlr::prepare`] with
     /// [`OUTLINE_TRIM_SAMPLES`] on one thread), as a whole-body projection traces its outline:
     /// made the first time it is asked for and shared by clones, which share the record. None
