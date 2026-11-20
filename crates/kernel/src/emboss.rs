@@ -1,17 +1,17 @@
 //! Radial embossing of profiles wrapped round cylindrical walls, outside or inside (a bore, where
 //! raised is towards the axis), built on the body's schema 4 record: the wall's face
 //! loses the profiles' footprints, and each profile adds its walls and its raised or sunk cap
-//! (the wall's cylinder at the new radius). On a wall whose form is on its frame's quarter grid,
-//! a segment along the axis or round the wall keeps an exact line or arc and a planar wall; any
-//! other segment (a curve, a diagonal, or any segment at all on a wall stored on arcs of its own,
-//! as an extruded sketch arc is) is fitted: cubic B-spline edges and a ruled spline wall within
+//! (the wall's cylinder at the new radius). A segment along the axis or round the wall keeps an
+//! exact line or arc and a planar wall, unless the wall's form, as read, runs on arcs other than
+//! a quarter turn (as an extruded sketch arc's often does): then it is fitted, as any other
+//! segment (a curve, a diagonal) always is: cubic B-spline edges and a ruled spline wall within
 //! a quarter of the body's tolerance of the true wrap, with fitted pcurves on the wall's and the
 //! cap's forms (the record's pcurve routine makes only exact ones). On a complete cylinder or
 //! coaxial sleeve the profiles keep between its endcaps and walls; on any other body (a partial
-//! wall) they keep inside the picked face, a rectangle in angle and height, and an exact boolean
-//! of the body with an annular sector over the mapped profiles' angles and heights (a hundredth
-//! of the depth off the wall) checks that the raised or sunk material meets nothing else of the
-//! body (#12029).
+//! wall) they keep inside the picked face, a rectangle in angle and height, and exact booleans
+//! check that the raised or sunk material meets nothing else of the body: first an annular
+//! sector over the profiles' angles and heights standing on the wall, then, where that meets the
+//! body, each profile's own raised or sunk solid (#12029). Touching along the wall is not meeting.
 use crate::assemble::{AFace, AUse, Assembly};
 use crate::body::Body;
 use crate::history::Change;
@@ -593,8 +593,12 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
             let at = o + axis * p.y + (radial * (p.x / r).cos() + tangent * (p.x / r).sin()) * r;
             return Ok(EmbossOutcome::Anchor(fi, at));
         }
+        // On a partial wall: whether the sector over every profile meets the rest of the body (a
+        // first check, after which each profile's own solid is checked once it is built).
+        let raised = depth > 0.0;
+        let mut broad = false;
         if whole.is_none() {
-            clear_of_body(body, &wall_sector(o, axis, radial, tangent, r, rr, &mapped)?, depth > 0.0)?;
+            broad = meets(body, &wall_sector(o, axis, radial, tangent, r, rr, &mapped)?, raised)?;
         }
         let mut asm = Assembly::from_record(&rec)?;
         let selected = asm.faces.get_mut(fi).and_then(Option::take).ok_or_else(|| fail("face"))?;
@@ -651,7 +655,12 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
         // History of the faces added (walls from their profile segments, the raised or sunk
         // region the profile's end cap), in the order added.
         let mut added_history = Vec::new();
+        // Each profile's footprint (its loops as the wall's pieces take them) and its faces in
+        // `added`: the solid it raises or sinks, for the clearance check.
+        let mut swept_pieces: Vec<(Vec<Vec<AUse>>, std::ops::Range<usize>)> = Vec::new();
         for reg in &numbered {
+            let start = added.len();
+            let mut footprint = Vec::new();
             let mut cap = Vec::new();
             for (li, numbered_loop) in reg.loops().enumerate() {
                 let lp = &numbered_loop.lp;
@@ -659,6 +668,7 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
                 // One wall per segment, in order.
                 added_history.extend((0..walls.len()).map(|j| crate::record::profile(numbered_loop.numbers(j))));
                 let hole = reversed(&base);
+                footprint.push(hole.clone());
                 if li == 0 {
                     footprints.push((lp, hole));
                 } else {
@@ -679,6 +689,18 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
             };
             added.push(AFace { surface: wall.cylinder(rr), nurbs, natural_out: cap_out, loops: cap, shell: selected.shell, domain });
             added_history.push(crate::record::cap(true));
+            swept_pieces.push((footprint, start..added.len()));
+        }
+        // The sector over every profile met the body: each profile's own solid, exactly as raised
+        // or sunk, must not (so text either side of a post, clear of it, is kept).
+        if broad {
+            for (footprint, range) in swept_pieces {
+                let faces = added.get(range).ok_or_else(|| fail("profile faces"))?;
+                let solid = swept(&asm, &selected, footprint, faces, raised).map_err(|_| refusal(raised))?;
+                if meets(body, &solid, raised)? {
+                    return Err(refusal(raised));
+                }
+            }
         }
         // An island inside a profile hole cuts that hole's original-radius patch,
         // rather than adding another hole to the already-cut exterior patch.
@@ -796,15 +818,14 @@ fn rectangular_wall(rec: &Brep, face: usize, axis: Vec3) -> bool {
 }
 
 /// The solid the mapped profiles raise or sink, enlarged to their box: the annular sector between
-/// the wall's radius `r` and the cap's `rr` over the profiles' angles and heights, kept off the
-/// wall itself by a hundredth of the depth so that it shares no surface with the body.
+/// the wall's radius `r` and the cap's `rr` over the profiles' angles and heights (the boxes of
+/// their outer loops), from the wall itself: it meets the body along the wall, which the exact
+/// booleans of [`meets`] take as contact, not overlap.
 fn wall_sector(o: Vec3, axis: Vec3, radial: Vec3, tangent: Vec3, r: f64, rr: f64, mapped: &[Region2]) -> Result<Body> {
     let mut boxes = mapped.iter().flat_map(|m| &m.outer.segs).map(seg_box);
     let first = boxes.next().ok_or_else(|| fail("empty profile"))?;
     let (lo, hi) = boxes.fold(first, |(l, h), (bl, bh)| (Vec2::new(l.x.min(bl.x), l.y.min(bl.y)), Vec2::new(h.x.max(bh.x), h.y.max(bh.y))));
-    let gap = 0.01 * (rr - r).abs();
-    let (near, far) = if rr > r { (r + gap, rr) } else { (r - gap, rr) };
-    let (inner, outer) = (near.min(far), near.max(far));
+    let (inner, outer) = (r.min(rr), r.max(rr));
     let (t0, t1) = (lo.x / r, hi.x / r);
     let at = |rho: f64, t: f64| Vec2::new(rho * t.cos(), rho * t.sin());
     let ring = Loop2 {
@@ -821,18 +842,58 @@ fn wall_sector(o: Vec3, axis: Vec3, radial: Vec3, tangent: Vec3, r: f64, rr: f64
     crate::extrude(&plane, &[Region2 { outer: ring, holes: vec![] }], a, b)?.into_iter().next().ok_or_else(|| fail("sector"))
 }
 
-/// On a partial wall the rest of the body is anything: raised material must not run into it
-/// (`raised`: the sector and the body share nothing) and sunk material must not break out of it
-/// (the sector lies inside the body). Both are exact booleans with `sector` ([`wall_sector`]).
-fn clear_of_body(body: &Body, sector: &Body, raised: bool) -> Result<()> {
+/// On a partial wall the rest of the body is anything: raised material must not run into it and
+/// sunk material must not break out of it. Whether `solid`, standing on the wall, does: raised,
+/// it shares volume with the body; sunk, part of it lies outside the body. Both are exact
+/// booleans; touching along the wall is neither.
+fn meets(body: &Body, solid: &Body, raised: bool) -> Result<bool> {
+    Ok(if raised {
+        crate::boolean(body, solid, crate::BoolOp::Intersect)?.is_some()
+    } else {
+        crate::boolean(solid, body, crate::BoolOp::Cut)?.is_some()
+    })
+}
+
+/// The refusal of a profile that [`meets`] the rest of the body.
+fn refusal(raised: bool) -> KernelError {
     if raised {
-        if crate::boolean(body, sector, crate::BoolOp::Intersect)?.is_some() {
-            return Err(fail("the raised profile runs into another part of the body"));
-        }
-    } else if crate::boolean(sector, body, crate::BoolOp::Cut)?.is_some() {
-        return Err(fail("the sunk profile breaks through another face of the body"));
+        fail("the raised profile runs into another part of the body")
+    } else {
+        fail("the sunk profile breaks through another face of the body")
     }
-    Ok(())
+}
+
+/// The solid one profile raises or sinks, from the emboss's own pieces in `asm`: its footprint on
+/// the wall face `selected` (its loops as the wall's pieces use them), its side walls and its cap
+/// (`faces`, as the result has them). Raised, those bound the material added; sunk, the cavity,
+/// so the solid is turned inside out.
+fn swept(asm: &Assembly, selected: &AFace, footprint: Vec<Vec<AUse>>, faces: &[AFace], raised: bool) -> Result<Body> {
+    let mut a = asm.clone();
+    a.faces.fill(None);
+    // The footprint faces away from the material it bounds, as the wall's pieces face away from
+    // the body: the other side of the wall's surface.
+    a.face(AFace {
+        surface: selected.surface.clone(),
+        nurbs: selected.nurbs.clone(),
+        natural_out: !selected.natural_out,
+        loops: footprint,
+        shell: selected.shell,
+        domain: None,
+    });
+    for f in faces {
+        a.face(f.clone());
+    }
+    if !raised {
+        for f in a.faces.iter_mut().flatten() {
+            f.natural_out = !f.natural_out;
+            f.loops = f.loops.iter().map(|l| reversed(l)).collect();
+        }
+    }
+    let solid = Body::from_record(a.finish()?.record)?;
+    if !solid.validity().is_empty() {
+        return Err(fail("a profile's solid is not closed"));
+    }
+    Ok(solid)
 }
 
 /// A loop's uses the other way round.
@@ -1123,8 +1184,9 @@ impl Wrap {
     /// A profile loop wrapped onto the wall: its footprint at the wall's radius and its cap's
     /// loop at `rr`, both running as the loop does, and one side wall per segment between them
     /// (each loop seen from outside the body). A segment along the axis or round the wall keeps
-    /// its exact line or arc and a planar wall where [`Wrap::exact`] allows (a wall on its
-    /// frame's quarter grid); any other is fitted ([`Wrap::fitted`]).
+    /// its exact line or arc and a planar wall where [`Wrap::exact`] allows (unless the wall's
+    /// form, as read, runs on arcs other than a quarter turn); any other is fitted
+    /// ([`Wrap::fitted`]).
     fn wrapped_loop(&self, asm: &mut Assembly, lp: &Loop2, rr: f64, shell: usize) -> Result<(Vec<AUse>, Vec<AUse>, Vec<AFace>)> {
         let corners: Vec<Vec2> = lp.segs.iter().map(Seg2::start).collect();
         let base: Vec<u32> = corners.iter().map(|p| asm.vertex(self.at(*p, self.r))).collect::<Result<_>>()?;
@@ -1175,8 +1237,9 @@ impl Wrap {
     }
 
     /// Whether segment `seg` (wall coordinates) wraps exactly: a line along the axis or round
-    /// the wall, on a wall whose form is on its frame's quarter grid (a circle labelled there
-    /// then shares the form's parameter). Any other is fitted, with its pcurves.
+    /// the wall, unless the wall's form was read ([`OnForm::on`]) with arcs other than a quarter
+    /// turn (a circle labelled on the frame then does not share the form's parameter). Any other
+    /// is fitted, with its pcurves.
     fn exact(&self, seg: &Seg2) -> bool {
         let d = seg.end() - seg.start();
         matches!(seg, Seg2::Line { .. }) && (d.x.abs() <= self.tol || d.y.abs() <= self.tol) && self.wall_form.is_none_or(|w| w.on_grid())
@@ -2340,6 +2403,59 @@ mod tests {
         assert!(raised.validity().is_empty());
         let e = emboss_cylinder(&cup, &bore, &[low], 3.).unwrap_err();
         assert!(e.to_string().contains("runs into"), "{e}");
+        let rect = |x0: f64, x1: f64, y0: f64, y1: f64| Region2 {
+            outer: Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)]),
+            holes: vec![],
+        };
+        let sides = [rect(-6., -3., 10., 15.), rect(3., 6., 10., 15.)];
+        // A pin standing in a cup's bore near its wall: text raised either side of it, clear of
+        // it though the box round both profiles holds it, is kept; text over it is refused.
+        let pinned = crate::boolean(
+            &crate::cylinder(Vec3::ZERO, Vec3::Z, 20., 20.).unwrap(),
+            &crate::cylinder(Vec3::Z * 5., Vec3::Z, 12., 16.).unwrap(),
+            crate::BoolOp::Cut,
+        )
+        .unwrap()
+        .unwrap();
+        let pinned =
+            crate::boolean(&pinned, &crate::cylinder(Vec3::new(0., 10.5, 4.), Vec3::Z, 1., 16.).unwrap(), crate::BoolOp::Union).unwrap().unwrap();
+        assert_eq!(pinned.shell_count(), 1);
+        let either_side = emboss_cylinder(&pinned, &bore, &sides, 1.5).unwrap();
+        assert!(either_side.validity().is_empty());
+        let want = 30. * (144. - 10.5 * 10.5) / 24.;
+        assert!((volume(&either_side) - volume(&pinned) - want).abs() < 1e-6 * 30., "{}", volume(&either_side) - volume(&pinned));
+        let e = emboss_cylinder(&pinned, &bore, &[rect(-1., 1., 10., 15.)], 1.5).unwrap_err();
+        assert!(e.to_string().contains("runs into"), "{e}");
+        // Material a fiftieth of a millimetre off the wall, inside the footprint: a raise of 5
+        // runs into it (a check kept off the wall by a hundredth of the depth missed it).
+        let at = |rho: f64, t: f64| Vec2::new(rho * t.cos(), rho * t.sin());
+        let (t0, t1) = (1.2, 1.9);
+        let film = Loop2 {
+            segs: vec![
+                Seg2::Arc { center: Vec2::ZERO, radius: 10.03, start: t0, sweep: t1 - t0 },
+                Seg2::Line { a: at(10.03, t1), b: at(10.02, t1) },
+                Seg2::Arc { center: Vec2::ZERO, radius: 10.02, start: t1, sweep: t0 - t1 },
+                Seg2::Line { a: at(10.02, t0), b: at(10.03, t0) },
+            ],
+        };
+        let film = crate::extrude(&Plane::XY, &[Region2 { outer: film, holes: vec![] }], 5., 10.).unwrap().remove(0);
+        let filmed = crate::boolean(&half, &film, crate::BoolOp::Union).unwrap().unwrap();
+        assert!(emboss_cylinder(&half, &plane(), &[profile()], 5.).is_ok());
+        let e = emboss_cylinder(&filmed, &plane(), &[profile()], 5.).unwrap_err();
+        assert!(e.to_string().contains("runs into"), "{e}");
+        // A slot from the bore into the half tube's wall, short of its outside: text sunk either
+        // side of it is kept; text over it breaks into it.
+        let slotted_bore = crate::boolean(&half, &crate::box_solid(Vec3::new(-0.5, 0., 4.), Vec3::new(0.5, 9.5, 16.)).unwrap(), crate::BoolOp::Cut)
+            .unwrap()
+            .unwrap();
+        assert_eq!(slotted_bore.shell_count(), 1);
+        let low_sides = [rect(-6., -3., 5., 10.), rect(3., 6., 5., 10.)];
+        let sunk = emboss_cylinder(&slotted_bore, &plane(), &low_sides, -1.).unwrap();
+        assert!(sunk.validity().is_empty());
+        let want = -30. * (100. - 81.) / 20.;
+        assert!((volume(&sunk) - volume(&slotted_bore) - want).abs() < 1e-6 * 30., "{}", volume(&sunk) - volume(&slotted_bore));
+        let e = emboss_cylinder(&slotted_bore, &plane(), &[rect(-1., 1., 5., 10.)], -1.).unwrap_err();
+        assert!(e.to_string().contains("breaks through"), "{e}");
         // Two walls of radius 10 either side of a groove: the pick chooses.
         let ring = crate::boolean(
             &crate::cylinder(Vec3::Z * 14., Vec3::Z, 11., 2.).unwrap(),
