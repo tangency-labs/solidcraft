@@ -1808,6 +1808,43 @@ fn a_copied_untargeted_join_after_a_copied_body_joins_the_part() {
     assert!(rel(v, 16000.0 + 2.0 * 150.0) < 1e-9 && tops.len() == 2 && tops.iter().zip(want).all(|((_, at), w)| near(*at, w)), "{v} {tops:?}");
 }
 
+/// #19451: a root mirror across XZ of a mirror made in the part copies that mirror's copies at
+/// their world images: the inner mirror's transform is the part's, taken into the root's frame
+/// first. A third boss at x 0..6, y 5..10, its top at x 3, y 7.5, and a third round about x 8,
+/// y 18.
+#[test]
+fn a_root_mirror_of_a_mirror_in_a_turned_part_copies_its_copies_at_their_world_images() {
+    let mut s = part_with_a_boss_and_a_round(&["Base"]);
+    run(&mut s, "component.activate", json!({"component": "Part"}));
+    let plane = json!({"origin": [-10, 0, 0], "normal": [1, 0, 0]});
+    run(&mut s, "solid.mirror", json!({"features": ["Boss", "Round"], "plane": plane, "name": "PartMirror"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let r = run(&mut s, "solid.mirror", json!({"features": ["PartMirror"], "plane": "XZ"}));
+    assert!(r["warning"].is_null(), "{r}");
+    let v = pockets(&mut s, "Base").0;
+    let tops = ends_at(&mut s, "Base", 35.0);
+    let axes = round_axes(&mut s, "Base", 2.0);
+    assert!(rel(v, 16000.0 + 3.0 * 150.0 - 3.0 * ROUND) < 1e-9, "{v}");
+    let want = [[-23.0, -7.5], [3.0, -7.5], [3.0, 7.5]];
+    assert!(tops.len() == 3 && tops.iter().zip(want).all(|(a, w)| near2(*a, w)), "{tops:?}");
+    let want = [[-28.0, -18.0], [8.0, -18.0], [8.0, 18.0]];
+    assert!(axes.len() == 3 && axes.iter().zip(want).all(|(a, w)| near2(*a, w)), "{axes:?}");
+}
+
+/// #19451: a root mirror of a round in a part placed turned and lifted rounds the image of its
+/// edge on the body there, a root body: Twin, at x 20..60 where Base's image across x = 15 is,
+/// is rounded at its upright edge at x 60, y −20.
+#[test]
+fn a_mirrored_round_in_a_turned_part_rounds_a_root_body_at_its_image() {
+    let mut s = part_with_a_boss_and_a_round(&["Base"]);
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [20, -20, 20], "operation": "new", "body_name": "Twin"}));
+    let r = run(&mut s, "solid.mirror", json!({"features": ["Round"], "plane": {"origin": [15, 0, 0], "normal": [1, 0, 0]}}));
+    assert!(r["warning"].is_null(), "{r}");
+    let v = pockets(&mut s, "Twin").0;
+    let axes = round_axes(&mut s, "Twin", 2.0);
+    assert!(rel(v, 16000.0 - ROUND) < 1e-9 && axes.len() == 1 && near2(axes[0], [58.0, -18.0]), "{v} {axes:?}");
+}
+
 /// #19451: a root mirror of a hole placed at a point picked on B's top, kept in BoxB's frame,
 /// drills the world image of the hole: bores ending at x 2 and x 8, y 7.5, z 25. The copy was
 /// drilled at the image in BoxB's own frame, x −12 where it is shown.

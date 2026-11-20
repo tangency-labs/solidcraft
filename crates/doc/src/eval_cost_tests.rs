@@ -1584,6 +1584,34 @@ fn mirror_of(doc: &mut Document, features: &[u64], plane: PlaneRef) -> u64 {
     doc.add_feature(kind, None).unwrap()
 }
 
+/// #19451: a mirror of a mirror made in another part reads where that part is placed, though
+/// what it copies is the root's: the inner mirror's copies are composed in the outer one's frame
+/// through the part's placement. Another part moved changes nothing it reads.
+#[test]
+fn a_mirror_of_a_mirror_in_another_part_reads_where_that_part_is_placed() {
+    let mut doc = Document::new("mirror");
+    let part = doc.add_component(Some("Part"), 0).unwrap();
+    let other = doc.add_component(Some("Other"), 0).unwrap();
+    plate_with_holes(&mut doc, 0, 0, 1);
+    let cut = doc.features.last().unwrap().id;
+    let plane = PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "YZ".into() }), distance: "3 mm".into() };
+    let inner = mirror_of(&mut doc, &[cut], plane);
+    doc.feature_mut(inner).unwrap().component = part;
+    let outer = mirror_of(&mut doc, &[inner], PlaneRef::Origin { name: "XZ".into() });
+    let digest = |doc: &Document| {
+        let mut model = Model::new();
+        model.evaluate(doc);
+        placement_digest(doc, doc.feature(outer).unwrap(), Some(&model.state_before(outer)))
+    };
+    place(&mut doc, part, rigid(Vec3::new(0.0, 0.0, 20.0), Vec3::ZERO, Vec3::Z, std::f64::consts::PI));
+    let before = digest(&doc);
+    assert_ne!(before, 0);
+    place(&mut doc, other, rigid(Vec3::new(0.0, 0.0, 50.0), Vec3::ZERO, Vec3::Z, 0.0));
+    assert_eq!(digest(&doc), before, "another part moved");
+    place(&mut doc, part, rigid(Vec3::new(0.0, 0.0, 20.0), Vec3::ZERO, Vec3::Z, std::f64::consts::FRAC_PI_2));
+    assert_ne!(digest(&doc), before, "the inner mirror's part turned");
+}
+
 /// #19451: a mirror of a round in a design with nothing placed copies it as before, without the
 /// exact box of any body: those found the frame the round's edges are kept in, which is the
 /// mirror's own when nothing is placed.
