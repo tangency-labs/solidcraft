@@ -2805,11 +2805,10 @@ fn shown_decals(doc: &solidcraft_doc::Document, st: &solidcraft_doc::ModelState,
     let (vals, _) = doc.param_values();
     let mut decals = Vec::new();
     for c in doc.canvases.iter().filter(|c| c.visible) {
-        let image = c.bytes().to_vec();
-        if image.is_empty() {
+        let Some(image) = exported_image(c) else {
             warnings.push(format!("decal `{}`: its image is damaged: left out", c.name));
             continue;
-        }
+        };
         let corners = match doc.canvas_corners(&vals, c, st) {
             Ok(corners) => corners,
             Err(e) => {
@@ -2828,6 +2827,23 @@ fn shown_decals(doc: &solidcraft_doc::Document, st: &solidcraft_doc::ModelState,
         decals.push(ShownDecal { name: c.name.clone(), component: c.component, corners, image });
     }
     decals
+}
+
+/// `c`'s picture as an export writes it: its own bytes, or, when its orientation turns or mirrors
+/// it, the pixels as it shows them, as a PNG. A reader that ignores the EXIF tag would show the
+/// bytes on their side on a quad of the shape SolidCraft shows (#19112). `None` when it is damaged.
+fn exported_image(c: &solidcraft_doc::canvas::Canvas) -> Option<Vec<u8>> {
+    let bytes = c.bytes();
+    if bytes.is_empty() {
+        return None;
+    }
+    if !(2..=8).contains(&c.orientation) {
+        return Some(bytes.to_vec());
+    }
+    let shown = super::canvas_sketch::shown_picture(bytes, c.orientation)?;
+    let mut png = std::io::Cursor::new(Vec::new());
+    shown.write_to(&mut png, image::ImageFormat::Png).ok()?;
+    Some(png.into_inner())
 }
 
 /// The design's shown decals for a URDF export, each in its component's frame.

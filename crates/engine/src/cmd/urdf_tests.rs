@@ -177,6 +177,38 @@ fn urdf_writes_decals_as_textured_visuals() {
     assert!(corners[..4].iter().all(|p| (p[2] - 10.2).abs() < 1e-9) && corners[4..].iter().all(|p| (p[2] - 9.8).abs() < 1e-9), "{corners:?}");
 }
 
+/// A photo stored on its side with an EXIF orientation is exported as SolidCraft shows it
+/// (#19112): its picture is written upright, as a PNG, on a quad of the upright shape, so a reader
+/// that ignores the tag shows it as SolidCraft does.
+#[test]
+fn urdf_writes_a_turned_photo_decal_upright() {
+    let mut s = two_cubes();
+    run(&mut s, "component.activate", json!({"component": "B"}));
+    // 32 x 16 as stored with orientation 6: it shows 16 x 32, 8 mm wide and 16 high.
+    let photo = crate::tests::image_file(&crate::drawing_pictures::tests::photo(6, true));
+    run(&mut s, "canvas.insert", json!({"path": photo, "plane": "XY", "width": 8, "name": "Tag"}));
+    let d = temp("turned-decal");
+    let r = run(&mut s, "file.export", json!({"path": d.join("t.urdf").to_string_lossy(), "images": true}));
+    let written = image::open(d.join("t-B-Tag.png")).unwrap_or_else(|e| panic!("{e}: {r}")).to_rgb8();
+    assert_eq!(written.dimensions(), (16, 32), "upright");
+    // The stored quarters as orientation 6 shows them: top-left, top-right, bottom-left, bottom-right.
+    use crate::drawing_pictures::tests::QUARTERS;
+    let corners = [(0, 0), (15, 0), (0, 31), (15, 31)].map(|(x, y)| written.get_pixel(x, y).0);
+    assert_eq!(corners, [QUARTERS[2], QUARTERS[0], QUARTERS[3], QUARTERS[1]]);
+    let dae = std::fs::read_to_string(d.join("t-B-Tag.dae")).unwrap();
+    let positions: Vec<f64> = dae
+        .split(r#"<float_array id="decal-positions-array" count="24">"#)
+        .nth(1)
+        .and_then(|x| x.split('<').next())
+        .map(|x| x.split_whitespace().filter_map(|v| v.parse().ok()).collect())
+        .unwrap_or_default();
+    let span = |axis: usize| {
+        let values: Vec<f64> = positions.chunks(3).take(4).map(|p| p[axis] * 1e3).collect();
+        values.iter().copied().fold(f64::NEG_INFINITY, f64::max) - values.iter().copied().fold(f64::INFINITY, f64::min)
+    };
+    assert!((span(0) - 8.0).abs() < 1e-6 && (span(1) - 16.0).abs() < 1e-6, "8 mm wide, 16 high: {positions:?}");
+}
+
 fn names(m: &UrdfModel) -> (Vec<&str>, Vec<&str>) {
     (m.links.iter().map(|l| l.name.as_str()).collect(), m.joints.iter().map(|j| j.name.as_str()).collect())
 }

@@ -593,7 +593,7 @@ pub struct CanvasPlaced {
     pub canvas: u64,
     /// Its name.
     pub name: String,
-    /// The image's size in pixels, [width, height].
+    /// The image's size in pixels as it shows, [width, height]: a photo's EXIF orientation applied.
     pub pixels: [u32; 2],
     /// With `frame`: the rectangle the image follows.
     #[serde(default, skip_serializing_if = "Option::is_none")]

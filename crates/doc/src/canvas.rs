@@ -5,6 +5,7 @@
 use serde::{Deserialize, Serialize};
 use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_geom::prelude::*;
+use solidcraft_render::image_orientation;
 
 use crate::PlaneRef;
 
@@ -24,8 +25,14 @@ pub struct Canvas {
     /// decoded as it opens.
     #[serde(default, skip_serializing, deserialize_with = "crate::blob::lenient")]
     pub data: crate::blob::Blob,
-    /// Pixel size of the image.
+    /// Pixel size of the image, as the file stores it.
     pub pixels: [u32; 2],
+    /// The EXIF orientation the canvas shows its picture by, 1 to 8 (#19112): the file's, read when
+    /// it was inserted, so a photo a phone stored on its side shows upright. A canvas from a design
+    /// saved before has none and shows its picture as stored, as it always did. A value outside 1
+    /// to 8 shows it as stored too ([`image_orientation::shown`]).
+    #[serde(default = "as_stored", skip_serializing_if = "is_as_stored")]
+    pub orientation: u8,
     pub plane: PlaneRef,
     /// Centre of the image on the plane (plane coordinates, mm).
     pub center: Vec2,
@@ -74,6 +81,14 @@ fn is_root(c: &u64) -> bool {
     *c == 0
 }
 
+fn as_stored() -> u8 {
+    1
+}
+
+fn is_as_stored(o: &u8) -> bool {
+    *o == 1
+}
+
 fn half() -> f64 {
     0.5
 }
@@ -82,8 +97,12 @@ fn yes() -> bool {
 }
 
 impl Canvas {
+    /// Its width and height in pixels as it shows, its orientation applied: what it is shaped by.
+    pub fn shown_pixels(&self) -> [u32; 2] {
+        image_orientation::shown(self.pixels, self.orientation)
+    }
     pub fn height(&self) -> f64 {
-        let [w, h] = self.pixels;
+        let [w, h] = self.shown_pixels();
         if w == 0 { self.width } else { self.width * f64::from(h) / f64::from(w) }
     }
     /// The four corners on the plane (plane coordinates): bottom-left, bottom-right, top-right,
@@ -104,7 +123,7 @@ impl Canvas {
     /// image's shape makes it, its top to the left of the bottom edge's direction. Mirrored left
     /// to right like the canvas. `None` for a frame with no area.
     pub fn frame_corners(&self, bl: Vec2, br: Vec2, tl: Option<Vec2>) -> Option<[Vec2; 4]> {
-        let [pw, ph] = self.pixels;
+        let [pw, ph] = self.shown_pixels();
         let aspect = if pw == 0 { 1.0 } else { f64::from(ph) / f64::from(pw) };
         // The kernel's frame: both edges long enough and not along one line.
         let xy = |p: Vec2| [p.x, p.y];
@@ -206,9 +225,9 @@ impl crate::Document {
 }
 
 /// Image kind and pixel size from the file header (PNG or JPEG), as the file stores them: before its
-/// EXIF orientation ([`solidcraft_render::image_orientation`], which reads the header).
+/// EXIF orientation ([`image_orientation`], which reads the header).
 pub fn image_info(b: &[u8]) -> Option<(&'static str, [u32; 2])> {
-    solidcraft_render::image_orientation::header(b).map(|header| (header.format, header.stored))
+    image_orientation::header(b).map(|header| (header.format, header.stored))
 }
 
 const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -279,6 +298,7 @@ mod tests {
             format: "png".into(),
             data: b"bytes".into(),
             pixels,
+            orientation: 1,
             plane: PlaneRef::Origin { name: "XY".into() },
             center: Vec2::new(0.0, 0.0),
             width: 10.0,
