@@ -3219,6 +3219,56 @@ fn hash_placement(m: &Mat, h: &mut impl Hasher) {
     }
 }
 
+/// [`placement_digest`] of a pattern's or mirror's copies of sources kept in another frame than
+/// its own ([`kept_in`], #19451): each copy's transform as it acts there, where that is not the
+/// transform itself, and for picks where every body is placed, which decides the body a copy lands
+/// on. Whether there was such a source.
+fn copy_frames_digest(doc: &Document, f: &Feature, features: &[FeatureId], st: &ModelState, reads: &mut PlacementReads, h: &mut impl Hasher) -> bool {
+    let own = f.component;
+    let sources = replayed_sources(doc, features);
+    if (doc.occurrences.is_empty() && doc.body_offsets.is_empty()) || !sources.iter().any(|g| kept_in(doc, st, own, g).is_some()) {
+        return false;
+    }
+    let vals = evaluation_values(doc).0;
+    let Ok(plan) = own_copies(doc, &vals, st, f).and_then(|mats| copy_plan(doc, &vals, st, own, features, &mats)) else {
+        reads.all = true;
+        return true;
+    };
+    /// Each of `mats` as it acts in the frame at `at`, where it acts otherwise there.
+    fn moved(id: u64, mats: &[Mat], at: &Mat, h: &mut impl Hasher) -> Result<()> {
+        let placed = |m: &Mat| {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            hash_placement(m, &mut h);
+            h.finish()
+        };
+        for (k, m) in mats.iter().enumerate() {
+            let there = moved_in(m, at)?;
+            if placed(&there) != placed(m) {
+                (id, k).hash(h);
+                hash_placement(&there, h);
+            }
+        }
+        Ok(())
+    }
+    for (src, mats, _) in &plan {
+        if let Some(at) = kept_in(doc, st, own, src) {
+            reads.all |= moved(src.id, mats, &at, h).is_err();
+        }
+    }
+    // A pattern's or mirror's own copies are composed in this one's frame (see `copy_plan`).
+    for g in &sources {
+        if let (Some(back), Ok(Some((_, inner)))) =
+            (component_in(doc, own, g.component).and_then(|at| crate::mat_inverse(&at)), copied_features(doc, &vals, st, g))
+        {
+            reads.all |= moved(g.id, &inner, &back, h).is_err();
+        }
+    }
+    if plan.iter().any(|(src, _, _)| tools_component(doc, src).is_none() && kept_in(doc, st, own, src).is_some()) {
+        reads.components.extend(doc.body_owners(st));
+    }
+    true
+}
+
 /// [`placement_digest`] of a mirror of placed bodies: each placement it was picked at (the copy's
 /// component, that component's frame and the frame it was picked in, both in its own component's
 /// frame as [`mirror_copy_frame`] gives them) and the offsets of the bodies it mirrors (#1938).
@@ -3574,6 +3624,10 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
                 }
                 reads.all |= each.all;
                 reads.unlisted |= each.unlisted;
+            }
+            match st {
+                Some(st) => copied |= copy_frames_digest(doc, f, features, st, &mut reads, &mut h),
+                None => reads.all |= replayed_sources(doc, features).iter().any(|g| component_in(doc, f.component, g.component).is_some()),
             }
         }
         // Joins, cuts and intersects meet their targets where those are placed (#3383), and so
@@ -4605,22 +4659,15 @@ impl Model {
                 let error = match r {
                     Ok(()) => {
                         // Copies are named after their sources through the instance transforms.
-                        let mats = match &f.kind {
-                            FeatureKind::Pattern { pattern, .. } => pattern_transforms(doc, &vals, &state, f.component, pattern).unwrap_or_default(),
-                            FeatureKind::Mirror { plane, .. } => doc
-                                .resolve_plane_in(&vals, plane, 0, f.component, Some(&state))
-                                .map(|pl| vec![mirror_matrix(&pl)])
-                                .unwrap_or_default(),
-                            _ => Vec::new(),
-                        };
+                        let mats = own_copies(doc, &vals, &state, f).unwrap_or_default();
                         // Copies made through a pattern or mirror among the sources come after (#395).
                         // A Pattern of components places occurrences in reconcile, not here (#12116).
                         let mats = match &f.kind {
                             FeatureKind::Pattern { features, bodies, components, .. } if bodies.is_empty() && components.is_empty() => {
-                                copy_instances(doc, &vals, &state, features, &mats).unwrap_or(mats)
+                                copy_instances(doc, &vals, &state, f, features, &mats).unwrap_or(mats)
                             }
                             FeatureKind::Mirror { features, bodies, .. } if bodies.is_empty() => {
-                                copy_instances(doc, &vals, &state, features, &mats).unwrap_or(mats)
+                                copy_instances(doc, &vals, &state, f, features, &mats).unwrap_or(mats)
                             }
                             _ => mats,
                         };
@@ -6433,19 +6480,18 @@ fn body_at(st: &ModelState, body: &Option<crate::BodyName>, points: &[Vec3]) -> 
     st.bodies
         .iter()
         .enumerate()
-        .map(|(i, b)| {
-            let dist = match b.body.exact_bounds() {
-                Ok(bb) if !bb.is_empty() => {
-                    let q = Vec3::new(p.x.clamp(bb.min.x, bb.max.x), p.y.clamp(bb.min.y, bb.max.y), p.z.clamp(bb.min.z, bb.max.z));
-                    q.dist(*p)
-                }
-                _ => f64::INFINITY,
-            };
-            (i, dist)
-        })
+        .map(|(i, b)| (i, box_dist(b, *p)))
         .min_by(|a, b| a.1.total_cmp(&b.1))
         .map(|(i, _)| i)
         .ok_or_else(|| DocError::Invalid("there is no body".into()))
+}
+
+/// How far `p` is from body `b`'s exact box (0 inside it).
+fn box_dist(b: &ModelBody, p: Vec3) -> f64 {
+    match b.body.exact_bounds() {
+        Ok(bb) if !bb.is_empty() => Vec3::new(p.x.clamp(bb.min.x, bb.max.x), p.y.clamp(bb.min.y, bb.max.y), p.z.clamp(bb.min.z, bb.max.z)).dist(p),
+        _ => f64::INFINITY,
+    }
 }
 
 /// Whether the whole line through `p` along `dir` (both ways) meets the box (slab test). A zero
@@ -6869,18 +6915,17 @@ fn named_body(st: &ModelState, name: &str, p: Vec3) -> Option<usize> {
 
 /// The body (index) an edge picked at `p` lies on: the body with an edge through it.
 fn body_on_edge(st: &ModelState, p: Vec3) -> Option<usize> {
-    let mut best: Option<(usize, f64)> = None;
-    for (i, b) in st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()) {
-        let size = b.body.size();
-        let tight = (size * 2e-3).max(1e-3);
-        if let Ok(Some((_, d))) = b.body.nearest_edge(p, (size * 1e-3).max(1e-3))
-            && d <= tight
-            && best.is_none_or(|(_, bd)| d < bd)
-        {
-            best = Some((i, d));
-        }
+    st.bodies.iter().enumerate().filter_map(|(i, b)| Some((i, edge_through(b, p)?))).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(i, _)| i)
+}
+
+/// How far `p` is from the edge of `b` that runs through it, when one does.
+fn edge_through(b: &ModelBody, p: Vec3) -> Option<f64> {
+    if b.body.is_mesh() {
+        return None;
     }
-    best.map(|(i, _)| i)
+    let size = b.body.size();
+    let (_, d) = b.body.nearest_edge(p, (size * 1e-3).max(1e-3)).ok()??;
+    (d <= (size * 2e-3).max(1e-3)).then_some(d)
 }
 
 /// The body (index) each edge of a blend is on: the named body; else, for each edge, the body
@@ -10303,6 +10348,35 @@ fn frame_in_own(doc: &Document, component: u64, path: &[u64]) -> Option<Mat> {
     }
 }
 
+/// Component `c`'s frame in the frame of component `own` ([`frame_in_own`]); `None` when the two
+/// are one frame, so a copy made in `own`'s frame needs no change there (#19451).
+fn component_in(doc: &Document, own: u64, c: u64) -> Option<Mat> {
+    if c == own {
+        return None;
+    }
+    let m = match first_placement_path(doc, c) {
+        Some(path) => frame_in_own(doc, own, &path)?,
+        None => crate::mat_mul(&crate::mat_inverse(&doc.component_transform(own))?, &doc.component_transform(c)),
+    };
+    (m != crate::IDENTITY).then_some(m)
+}
+
+/// The frame body `b`'s geometry is in, in component `own`'s frame: [`component_in`] with the
+/// body's offset. `None` when it is `own`'s frame.
+fn body_in(doc: &Document, own: u64, b: &ModelBody) -> Option<Mat> {
+    let frame = component_in(doc, own, doc.model_body_component(b));
+    match doc.model_body_offset(b) {
+        Some(offset) => Some(crate::mat_mul(&frame.unwrap_or(crate::IDENTITY), offset)).filter(|m| *m != crate::IDENTITY),
+        None => frame,
+    }
+}
+
+/// Copy transform `m` as it acts in the frame placed at `at` in the frame `m` is in.
+fn moved_in(m: &Mat, at: &Mat) -> Result<Mat> {
+    let back = crate::mat_inverse(at).ok_or_else(|| DocError::Invalid("a placement the copies are made through is singular".into()))?;
+    Ok(crate::mat_mul(&crate::mat_mul(&back, m), at))
+}
+
 /// The occurrences of `component`'s first placement from the root, as
 /// [`Document::component_transform`] walks them. `None` when a component on the way has no
 /// occurrence or the walk is deeper than any placement.
@@ -11107,10 +11181,13 @@ fn with_named_face_points(doc: &Document, vals: &BTreeMap<String, Value>, state:
     Ok(Some((g, notes)))
 }
 
+/// The sources a pattern or mirror in component `own` copies, each with its copies' transforms
+/// in `own`'s frame and its first instance.
 fn copy_plan<'a>(
     doc: &'a Document,
     vals: &BTreeMap<String, Value>,
     st: &ModelState,
+    own: u64,
     features: &[FeatureId],
     mats: &[Mat],
 ) -> Result<Vec<(&'a Feature, Vec<Mat>, usize)>> {
@@ -11119,6 +11196,7 @@ fn copy_plan<'a>(
         doc: &'a Document,
         vals: &BTreeMap<String, Value>,
         st: &ModelState,
+        own: u64,
         features: &[FeatureId],
         mats: &[Mat],
         first: usize,
@@ -11135,6 +11213,11 @@ fn copy_plan<'a>(
                 out.push((src, mats.to_vec(), first));
                 continue;
             };
+            // Made in the inner pattern's component's frame, composed in `own`'s (#19451).
+            let inner_mats = match component_in(doc, own, src.component).and_then(|at| crate::mat_inverse(&at)) {
+                Some(back) => inner_mats.iter().map(|m| moved_in(m, &back)).collect::<Result<Vec<_>>>()?,
+                None => inner_mats,
+            };
             if depth >= MAX_NESTING {
                 return Err(DocError::Invalid(format!("patterns and mirrors of patterns and mirrors nest at most {MAX_NESTING} deep")));
             }
@@ -11146,21 +11229,37 @@ fn copy_plan<'a>(
             let moved: Vec<Mat> = mats.iter().flat_map(|m| inner_mats.iter().map(move |mi| crate::mat_mul(m, mi))).collect();
             let block = *next;
             *next += moved.len();
-            walk(doc, vals, st, &inner, &moved, block, next, depth + 1, out)?;
+            walk(doc, vals, st, own, &inner, &moved, block, next, depth + 1, out)?;
         }
         Ok(())
     }
     let mut next = mats.len();
     let mut out = Vec::new();
-    walk(doc, vals, st, features, mats, 0, &mut next, 0, &mut out)?;
+    walk(doc, vals, st, own, features, mats, 0, &mut next, 0, &mut out)?;
     Ok(out)
+}
+
+/// The transforms of a pattern's or mirror's own copies, in its component's frame.
+fn own_copies(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature) -> Result<Vec<Mat>> {
+    match &f.kind {
+        FeatureKind::Pattern { pattern, .. } => pattern_transforms(doc, vals, st, f.component, pattern),
+        FeatureKind::Mirror { plane, .. } => Ok(vec![mirror_matrix(&doc.resolve_plane_in(vals, plane, 0, f.component, Some(st))?)]),
+        _ => Ok(Vec::new()),
+    }
 }
 
 /// The transforms of a pattern's or mirror's copies in their instance order (instance `k + 1`
 /// is the `k`-th): `mats`, then those of the copies made through patterns and mirrors among
 /// `features` ([`copy_plan`]). Naming finds a copy's faces through them.
-fn copy_instances(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, features: &[FeatureId], mats: &[Mat]) -> Result<Vec<Mat>> {
-    let plan = copy_plan(doc, vals, st, features, mats)?;
+fn copy_instances(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    st: &ModelState,
+    f: &Feature,
+    features: &[FeatureId],
+    mats: &[Mat],
+) -> Result<Vec<Mat>> {
+    let plan = copy_plan(doc, vals, st, f.component, features, mats)?;
     let len = plan.iter().map(|(_, ms, first)| first + ms.len()).max().unwrap_or(0).max(mats.len());
     let mut all = vec![crate::IDENTITY; len];
     for (slot, m) in all.iter_mut().zip(mats) {
@@ -11221,7 +11320,8 @@ fn replay(
     kept.sort_by_key(at);
     kept.dedup();
     let (mut missed, mut total) = (0usize, 0usize);
-    let plan = copy_plan(doc, vals, st, &kept, mats)?;
+    let own = f.component;
+    let plan = copy_plan(doc, vals, st, own, &kept, mats)?;
     // A source's named faces are looked up in the model as it was before any copy was made: the
     // copy of an earlier source (a boss joined to the body) changes the faces a later source (a cut
     // starting on the boss) names, though the later source means the original's (#11792).
@@ -11242,12 +11342,15 @@ fn replay(
             // The edges the feature blended in this evaluation (found by name), falling back to
             // its picked points.
             let found = st.blend_edges.get(&src.id).cloned().unwrap_or_else(|| crate::plain(edges));
+            let picks = PickFrames::new(doc, st, own, src);
             for m in mats {
-                let moved_all: Vec<Vec3> = found.iter().map(|p| crate::apply_point(m, *p)).collect();
+                // Each edge's copy, in the frame of the body it lands on.
+                let each: Vec<(Mat, Option<usize>)> = found.iter().map(|p| picks.copy(st, m, *p, edge_through)).collect::<Result<_>>()?;
+                let moved_all: Vec<Vec3> = found.iter().zip(&each).map(|(p, (m, _))| crate::apply_point(m, *p)).collect();
                 // The copies of a blend over several bodies blend each body's own edges.
                 let mut groups: Vec<(usize, Vec<usize>)> = Vec::new();
                 for (i, p) in moved_all.iter().enumerate() {
-                    let ti = match body_on_edge(st, *p) {
+                    let ti = match each.get(i).and_then(|(_, on)| *on).or_else(|| body_on_edge(st, *p)) {
                         Some(ti) => ti,
                         None => blend_target(st, &None, &moved_all)?,
                     };
@@ -11258,6 +11361,7 @@ fn replay(
                 }
                 for (ti, idx) in groups {
                     let moved: Vec<Vec3> = idx.iter().filter_map(|i| moved_all.get(*i).copied()).collect();
+                    let m = idx.first().and_then(|i| each.get(*i)).map_or(m, |(m, _)| m);
                     let Some(mb) = st.bodies.get(ti).cloned() else { continue };
                     let nb = match (&src.kind, st.fitted.get(&src.id)) {
                         // A copy is congruent to the original: the radius it was reduced to first.
@@ -11300,10 +11404,19 @@ fn replay(
         // An Offset Face repeats at the copied faces of the body they lie on.
         if let FeatureKind::OffsetFace { faces, distance, body } = &src.kind {
             let d = val(vals, distance, Kind::Length)?;
-            let picked = crate::plain(faces);
+            let picked: Vec<Vec3> = crate::plain(faces);
+            let picks = PickFrames::new(doc, st, own, src);
+            let named = |b: &ModelBody, q: Vec3| body.as_ref().is_none_or(|n| *n == b.name).then(|| box_dist(b, q));
             for m in mats {
-                let moved: Vec<Vec3> = picked.iter().map(|p| crate::apply_point(m, *p)).collect();
-                let i = body_at(st, body, &moved)?;
+                let (m, on) = match picked.first() {
+                    Some(p) => picks.copy(st, m, *p, named)?,
+                    None => (*m, None),
+                };
+                let moved: Vec<Vec3> = picked.iter().map(|p| crate::apply_point(&m, *p)).collect();
+                let i = match on {
+                    Some(i) => i,
+                    None => body_at(st, body, &moved)?,
+                };
                 // A distance of 0 leaves the faces where they are (#20496).
                 if d.abs() < 1e-9 {
                     continue;
@@ -11325,10 +11438,13 @@ fn replay(
                 let what = if matches!(src.kind, FeatureKind::FrameMember { .. }) { "member" } else { "copy" };
                 return Err(DocError::Invalid(format!("{} made no {what} to repeat", src.name)));
             }
+            // Each copy is a body of the pattern's, in its frame: the source taken there first.
+            let made_in: Vec<Option<Mat>> = made.iter().map(|b| body_in(doc, own, b)).collect();
             let mut output = 0;
             for (k, m) in mats.iter().enumerate() {
-                for mb in &made {
-                    let moved = moved_copy(mb, kernel::transform_matrix(&mb.body, *m)?, first + k + 1);
+                for (mb, at) in made.iter().zip(&made_in) {
+                    let m = at.map_or(*m, |at| crate::mat_mul(m, &at));
+                    let moved = moved_copy(mb, kernel::transform_matrix(&mb.body, m)?, first + k + 1);
                     let name = copy_body_name(st, f, output, &mb.name);
                     st.bodies.push(ModelBody::traced_new(name, moved, f.id));
                     output += 1;
@@ -11338,8 +11454,12 @@ fn replay(
         }
         // A thread is cut again on the copy of its face. A copy keeps the thread's hand: the
         // mirror of a right-hand M8 hole is a right-hand M8 hole, not a left-hand one.
-        if matches!(src.kind, FeatureKind::Thread { .. }) {
+        if let FeatureKind::Thread { face, target_bodies, .. } = &src.kind {
+            let picks = PickFrames::new(doc, st, own, src);
+            let named = |b: &ModelBody, q: Vec3| target_bodies.first().is_none_or(|n| *n == b.name).then(|| box_dist(b, q));
             for m in mats {
+                let (m, _) = picks.copy(st, m, face.0, named)?;
+                let m = &m;
                 let mut copy = (*src).clone();
                 copy.id = f.id;
                 copy.face_names.clear();
@@ -11367,6 +11487,14 @@ fn replay(
         // Copies are made in their source's tools' frame and meet each target where it is shown,
         // as the source's own tools do (#3383).
         let _frames = ToolFrames::install(doc, src, st);
+        let in_tools: Vec<Mat>;
+        let mats: &[Mat] = match tools_component(doc, src).and_then(|c| component_in(doc, own, c)) {
+            Some(at) => {
+                in_tools = mats.iter().map(|m| moved_in(m, &at)).collect::<Result<_>>()?;
+                &in_tools
+            }
+            None => mats,
+        };
         let (op, targets, scoped) = copy_targets(st, f, src);
         let f: &Feature = &scoped;
         // A join that merged its targets left only the first of them (the others now live in
@@ -11406,7 +11534,16 @@ fn replay(
                 HoleKind::Simple | HoleKind::Counterbore { tip_angle: None, bridge: None, .. } | HoleKind::Countersink { tip_angle: None, .. }
             );
             let mut built: Option<HoleBuilt> = None;
+            // A hole at a picked spot is kept in the frame of the body it lies on.
+            let picks = PickFrames::new(doc, st, own, src);
+            let scope = hole_drill_scope(src);
+            let named = |b: &ModelBody, q: Vec3| (scope.is_empty() || scope.contains(&b.name)).then(|| box_dist(b, q));
             for (k, m) in mats.iter().enumerate() {
+                let (m, _) = match spots.first() {
+                    Some(p) => picks.copy(st, m, *p, named)?,
+                    None => (*m, None),
+                };
+                let m = &m;
                 let d = match sketch_side {
                     Some((n, flip)) => {
                         let moved: Vec<Vec3> = spots.iter().map(|p| crate::apply_point(m, *p)).collect();
@@ -11527,6 +11664,96 @@ fn copy_targets<'a>(st: &ModelState, f: &'a Feature, src: &Feature) -> (Operatio
         && !st.bodies.iter().any(|b| b.in_default_scope(f));
     let scope = if own { std::borrow::Cow::Owned(Feature { component: src.component, ..f.clone() }) } else { std::borrow::Cow::Borrowed(f) };
     (op, targets, scope)
+}
+
+/// The frame `src`'s geometry is kept in, in component `own`'s frame, when it is another
+/// (#19451): its tools' component's ([`tools_component`]), a pattern's or mirror's own
+/// component's (its copies' transforms), else that of the body it picked on or made.
+fn kept_in(doc: &Document, st: &ModelState, own: u64, src: &Feature) -> Option<Mat> {
+    match (&src.kind, tools_component(doc, src)) {
+        (_, Some(c)) => component_in(doc, own, c),
+        (FeatureKind::Pattern { bodies, .. } | FeatureKind::Mirror { bodies, .. }, None) if bodies.is_empty() => {
+            component_in(doc, own, src.component)
+        }
+        _ => body_in(doc, own, st.bodies.get(picked_body(doc, st, src)?)?),
+    }
+}
+
+/// The body `src`'s picks are kept in the frame of: the body it names; else, by box from its
+/// first pick, the nearest of the bodies holding it (its own component's first), else of all. The
+/// first body it made for a moved copy or a frame member.
+fn picked_body(doc: &Document, st: &ModelState, src: &Feature) -> Option<usize> {
+    let (named, p) = match &src.kind {
+        FeatureKind::Fillet { edges, body, .. } | FeatureKind::Chamfer { edges, body, .. } => {
+            (body.as_deref(), st.blend_edges.get(&src.id).and_then(|e| e.first().copied()).or(edges.first().map(|e| e.0)))
+        }
+        FeatureKind::OffsetFace { faces, body, .. } => (body.as_deref(), faces.first().map(|q| q.0)),
+        FeatureKind::Hole { position, points: None, .. } => (
+            match src.participants.as_slice() {
+                [one] if one != "*" => Some(one.as_str()),
+                _ => None,
+            },
+            Some(position.0),
+        ),
+        FeatureKind::Thread { face, target_bodies, .. } => (target_bodies.first().map(|n| &**n), Some(face.0)),
+        FeatureKind::Move { copy: true, .. } | FeatureKind::FrameMember { .. } => return st.bodies.iter().position(|b| b.feature == src.id),
+        _ => return None,
+    };
+    if let Some(n) = named {
+        return st.bodies.iter().position(|b| b.name == n);
+    }
+    let p = p?;
+    let rank = |b: &ModelBody, owner: u64| {
+        let d = box_dist(b, p);
+        (d > (b.body.size() * 1e-3).max(1e-6), owner != src.component, d)
+    };
+    let ranked = st.bodies.iter().zip(doc.model_body_components(st)).enumerate().filter(|(_, (b, _))| !b.envelope);
+    ranked.map(|(i, (b, owner))| (i, rank(b, owner))).min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)).map(|(i, _)| i)
+}
+
+/// Where a pattern's or mirror's copies of a source's picks are made (#19451): the frame the picks
+/// are kept in, in the pattern's ([`kept_in`]), and each body's ([`body_in`]). Nothing when that
+/// is the pattern's own frame: the copies are made as they were.
+struct PickFrames {
+    at: Option<Mat>,
+    bodies: Vec<Option<Mat>>,
+}
+
+impl PickFrames {
+    /// For `src`'s copies by a pattern in component `own`; none for a source with drawn tools,
+    /// whose copies' transforms are taken into its tools' frame before.
+    fn new(doc: &Document, st: &ModelState, own: u64, src: &Feature) -> PickFrames {
+        let at = if tools_component(doc, src).is_some() { None } else { kept_in(doc, st, own, src) };
+        let bodies = if at.is_some() { st.bodies.iter().map(|b| body_in(doc, own, b)).collect() } else { Vec::new() };
+        PickFrames { at, bodies }
+    }
+
+    /// Copy `m` of the pick `p`: moved in the pick's frame, it lands on the body `lands` finds
+    /// nearest, each body measured in its own frame (one in the pick's frame wins a tie). `m` on
+    /// into that body's frame, with the body; `m` itself for picks kept in the pattern's frame.
+    fn copy(&self, st: &ModelState, m: &Mat, p: Vec3, lands: impl Fn(&ModelBody, Vec3) -> Option<f64>) -> Result<(Mat, Option<usize>)> {
+        let Some(at) = &self.at else { return Ok((*m, None)) };
+        let m = moved_in(m, at)?;
+        let q = crate::apply_point(&m, p);
+        let mut best: Option<((f64, bool), usize, Option<Mat>)> = None;
+        for (i, (b, frame)) in st.bodies.iter().zip(&self.bodies).enumerate() {
+            let to = match frame {
+                Some(f) if f == at => None,
+                f => match crate::mat_inverse(&f.unwrap_or(crate::IDENTITY)) {
+                    Some(back) => Some(crate::mat_mul(&back, at)),
+                    None => continue,
+                },
+            };
+            let Some(d) = lands(b, to.map_or(q, |t| crate::apply_point(&t, q))) else { continue };
+            if best.as_ref().is_none_or(|(k, _, _)| (d, to.is_some()) < *k) {
+                best = Some(((d, to.is_some()), i, to));
+            }
+        }
+        Ok(match best {
+            Some((_, i, to)) => (to.map_or(m, |to| crate::mat_mul(&to, &m)), Some(i)),
+            None => (m, None),
+        })
+    }
 }
 
 #[path = "model_cache.rs"]

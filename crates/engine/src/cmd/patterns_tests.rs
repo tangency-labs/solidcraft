@@ -1503,6 +1503,109 @@ fn a_mirrored_rib_on_a_turned_and_lifted_part_stands_on_it_where_it_is_shown() {
     assert!(rel(b, 16000.0 + 2.0 * 30.0) < 1e-9, "{b}");
 }
 
+/// [`part_with_a_boss_and_a_round`] and MirrorPlane at x = −10, made in the root: where it is
+/// shown, Base is its own image across it, Boss at x −26..−20, y −10..−5.
+fn part_and_mirror_plane() -> Session {
+    let mut s = part_with_a_boss_and_a_round();
+    run(&mut s, "construct.plane.offset", json!({"base": "YZ", "offset": -10, "name": "MirrorPlane"}));
+    s
+}
+
+/// #19451: a root mirror or pattern of a join drawn in a part placed turned and lifted adds the
+/// world copy of the boss: its top at x 0..6 across x = −10, at x −6..0 20 along x. The copy was
+/// made as if the part had no placement, turned with it, off Base.
+#[test]
+fn a_copied_join_in_a_turned_and_lifted_part_lands_at_its_world_copy() {
+    for (command, params, x) in [
+        ("solid.mirror", json!({"features": ["Boss"], "plane": "MirrorPlane"}), 3.0),
+        ("solid.pattern.rectangular", json!({"features": ["Boss"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 20}), -3.0),
+    ] {
+        let mut s = part_and_mirror_plane();
+        let r = run(&mut s, command, params);
+        assert!(r["warning"].is_null(), "{command}: {r}");
+        let (v, _, tops) = pockets(&mut s, "Base");
+        let case = format!("{command}: {v} {tops:?}");
+        assert!(rel(v, 16000.0 + 2.0 * 150.0 - ROUND) < 1e-9, "{case}");
+        let want = [[-23.0, -7.5, 35.0], [x, -7.5, 35.0]];
+        assert!(tops.len() == 2 && tops.iter().zip(want).all(|((area, at), w)| rel(*area, 30.0) < 1e-9 && near(*at, w)), "{case}");
+    }
+}
+
+/// #19451: moving the part after the mirror moves the copied boss to the new world image: with
+/// Part 4 further along x, Boss's top is at x −19 and its image across x = −10 at x −1.
+#[test]
+fn a_mirrored_join_follows_its_part_moved_later() {
+    let mut s = part_and_mirror_plane();
+    run(&mut s, "solid.mirror", json!({"features": ["Boss"], "plane": "MirrorPlane"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "translate": [4, 0, 0]}));
+    run(&mut s, "component.capture_position", json!({}));
+    let (_, _, tops) = pockets(&mut s, "Base");
+    let want = [[-19.0, -7.5, 35.0], [-1.0, -7.5, 35.0]];
+    assert!(tops.len() == 2 && tops.iter().zip(want).all(|((_, at), w)| near(*at, w)), "{tops:?}");
+}
+
+/// #19451: a root mirror of a round in a part placed turned and lifted rounds the image of its
+/// edge where the part is shown, the upright edge at x 10, y −20, taking off what the round does.
+/// The copy looked for the edge where the image would be in the part's own frame, off Base.
+#[test]
+fn a_mirrored_round_in_a_turned_and_lifted_part_rounds_the_image_of_its_edge() {
+    let mut s = part_and_mirror_plane();
+    let before = pockets(&mut s, "Base").0;
+    assert!(rel(before, 16150.0 - ROUND) < 1e-9, "{before}");
+    let r = run(&mut s, "solid.mirror", json!({"features": ["Round"], "plane": "MirrorPlane"}));
+    assert!(r["warning"].is_null(), "{r}");
+    let v = pockets(&mut s, "Base").0;
+    let axes = round_axes(&mut s, "Base", 2.0);
+    assert!(rel(before - v, ROUND) < 1e-9, "{before} -> {v}");
+    assert!(axes.len() == 2 && near2(axes[0], [-28.0, -18.0]) && near2(axes[1], [8.0, -18.0]), "{axes:?}");
+}
+
+/// #19451: a root mirror across XZ of that mirror rounds the image of its copy, the edge at x 10,
+/// y 20. It looked for the edge where the image would be in the part's own frame.
+#[test]
+fn a_mirror_of_a_mirrored_round_in_a_turned_part_rounds_the_image_of_its_copy() {
+    let mut s = part_and_mirror_plane();
+    run(&mut s, "solid.mirror", json!({"features": ["Round"], "plane": "MirrorPlane", "name": "Mirror"}));
+    let r = run(&mut s, "solid.mirror", json!({"features": ["Mirror"], "plane": "XZ"}));
+    assert!(r["warning"].is_null(), "{r}");
+    let v = pockets(&mut s, "Base").0;
+    let axes = round_axes(&mut s, "Base", 2.0);
+    assert!(rel(v, 16150.0 - 3.0 * ROUND) < 1e-9, "{v}");
+    let want = [[-28.0, -18.0], [8.0, -18.0], [8.0, 18.0]];
+    assert!(axes.len() == 3 && axes.iter().zip(want).all(|(a, w)| near2(*a, w)), "{axes:?}");
+}
+
+/// The same mirror made in the part, across x = −10 where it is shown (its own x = 10), copies
+/// the boss and the round in the part's frame, as before: the same copies.
+#[test]
+fn a_mirror_in_a_turned_part_of_its_own_features_copies_them_in_its_frame() {
+    let mut s = part_and_mirror_plane();
+    run(&mut s, "component.activate", json!({"component": "Part"}));
+    let r = run(&mut s, "solid.mirror", json!({"features": ["Boss", "Round"], "plane": {"origin": [-10, 0, 0], "normal": [1, 0, 0]}}));
+    assert!(r["warning"].is_null(), "{r}");
+    let (v, _, tops) = pockets(&mut s, "Base");
+    let axes = round_axes(&mut s, "Base", 2.0);
+    assert!(rel(v, 16000.0 + 2.0 * 150.0 - 2.0 * ROUND) < 1e-9, "{v}");
+    let want = [[-23.0, -7.5, 35.0], [3.0, -7.5, 35.0]];
+    assert!(tops.len() == 2 && tops.iter().zip(want).all(|((_, at), w)| near(*at, w)), "{tops:?}");
+    assert!(axes.len() == 2 && near2(axes[0], [-28.0, -18.0]) && near2(axes[1], [8.0, -18.0]), "{axes:?}");
+}
+
+/// #19451: a root mirror of a hole placed at a point picked on B's top, kept in BoxB's frame,
+/// drills the world image of the hole: bores ending at x 2 and x 8, y 7.5, z 25. The copy was
+/// drilled at the image in BoxB's own frame, x −12 where it is shown.
+#[test]
+fn a_mirrored_picked_hole_in_a_turned_and_lifted_part_lands_at_its_world_image() {
+    let mut s = placed_parts(180.0, 20.0);
+    run(&mut s, "solid.hole", json!({"position": [-2, -7.5, 10], "diameter": 2, "depth": 5, "targets": ["BoxB"], "name": "Hole"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "YZ", "offset": 5, "name": "MirrorPlane"}));
+    let r = run(&mut s, "solid.mirror", json!({"features": ["Hole"], "plane": "MirrorPlane"}));
+    assert!(r["warning"].is_null(), "{r}");
+    let (b, _, ends) = pockets(&mut s, "BoxB");
+    let want = [[2.0, 7.5, 25.0], [8.0, 7.5, 25.0]];
+    assert!(rel(b, 16000.0 - 10.0 * PI) < 1e-6 && ends.len() == 2 && ends.iter().zip(want).all(|((_, at), w)| near(*at, w)), "{b} {ends:?}");
+}
+
 /// A disc with an off-centre hole whose top and bottom edges are chamfered.
 fn disc_with_chamfered_hole() -> Session {
     let mut s = Session::default();
