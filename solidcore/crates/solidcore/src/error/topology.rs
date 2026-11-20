@@ -16,6 +16,7 @@
 //! | [`TopologyFailure::OutOfMemory`]     | `SM_ERR_OUT_OF_MEMORY`        |
 //! | [`TopologyFailure::DropFailed`]      | the drop's own recorded status |
 //! | [`TopologyFailure::JoinedVertexReaches`] | `SM_ERR` (not upstream, #15718) |
+//! | [`TopologyFailure::VoidOwnerUndecided`]  | `SM_ERR` (not upstream, #17678) |
 //! | [`TopologyFailure::Defect`]              | `SM_ERR` (or the site's, through `with_status`) |
 //! | the named causes, from [`TopologyFailure::EditingDisabled`] on | the status of the phrase each replaced (`comparison_status`), or the site's through `with_status` |
 //!
@@ -124,6 +125,11 @@ pub enum TopologyFailure {
     /// orientable, or it is an open sheet the closed-solid orientation does not take. Class
     /// `failed`.
     GatheredBothSides,
+    /// A void part of a shell the Boolean split lies in a region with more than one solid,
+    /// lies directly inside none of them, and a nesting test against one of them was
+    /// unsure: which solid the cavity bounds is not decided, so the region is not
+    /// regrouped on a guess. [`ErrorKind::Unsupported`]; not upstream (#17678).
+    VoidOwnerUndecided,
 }
 
 impl TopologyFailure {
@@ -139,7 +145,8 @@ impl TopologyFailure {
             | Self::ClosedEdge
             | Self::FaceWithoutEdges
             | Self::WireEndSqueezed
-            | Self::NoFootOnSurface => SM_ERR,
+            | Self::NoFootOnSurface
+            | Self::VoidOwnerUndecided => SM_ERR,
             Self::Missing(_)
             | Self::CurveNotBSpline { .. }
             | Self::SurfaceWithoutNurbs { .. }
@@ -170,7 +177,8 @@ impl TopologyFailure {
             Self::CurveNotBSpline { .. }
             | Self::SurfaceWithoutNurbs { .. }
             | Self::FaceWithoutEdges
-            | Self::WireEndSqueezed => ErrorKind::Unsupported,
+            | Self::WireEndSqueezed
+            | Self::VoidOwnerUndecided => ErrorKind::Unsupported,
             Self::CurveNotApproximated => ErrorKind::Failed,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
@@ -232,6 +240,9 @@ impl core::fmt::Display for TopologyFailure {
             Self::GatheredBothSides => {
                 f.write_str("more face uses are connected than faces remain to be oriented")
             }
+            Self::VoidOwnerUndecided => f.write_str(
+                "a cavity touches more than one solid, and the nesting tests do not decide                  which solid it belongs to",
+            ),
         }
     }
 }
@@ -470,6 +481,7 @@ mod tests {
                 SM_ERR_ASSERT_FAILURE,
                 K::Failed,
             ),
+            (TopologyFailure::VoidOwnerUndecided, SM_ERR, K::Unsupported),
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::topology(op, failure);
