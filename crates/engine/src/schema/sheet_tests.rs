@@ -4,8 +4,8 @@ use serde_json::{Value, json};
 use super::{
     BendTableFormatParam, BendTableParams, BendTableResult, ConvertParams, DxfCurvesParam, DxfLayersParam, DxfNoteHeight, DxfTextParam,
     ExportDxfParams, ExportDxfResult, FixedPoint, FlangeEdges, FlangeParams, FlangePosition, FlangeTypeParam, FlatPatternParams, FlatPatternResult,
-    FoldParams, FoldPoints, FoldPosition, FoldStays, HeightFromParam, HemParams, JogMeasure, JogParams, JogPosition, MaterialSide, MeasureBodyParams, PathFlangeParams, PerforateParams,
-    PerforationPattern, RecognizeParams, ReliefShapeParam, SheetEdgePoint, SheetPoints, ThenSteps, UnfoldParams,
+    FoldParams, FoldPoints, FoldPosition, FoldStays, HeightFromParam, HemParams, JogMeasure, JogParams, JogPosition, MaterialSide, MeasureBodyParams,
+    PathFlangeParams, PerforateParams, PerforationPattern, RecognizeParams, ReliefShapeParam, SheetEdgePoint, SheetPoints, ThenSteps, UnfoldParams,
 };
 use crate::Session;
 use crate::schema::features::FeatureResult;
@@ -204,8 +204,12 @@ fn the_value_types_match_the_readers() {
     );
     words(&["outer", " Inner ", "TANGENT"], &[json!("sharp"), json!(""), json!(5)], &|v| parse::<HeightFromParam>(v).is_some());
     words(&["centerline", "Start", "END", "mould", "Mold"], &[json!("center"), json!("side"), json!(null)], &|v| parse::<FoldPosition>(v).is_some());
-    words(&["outside", "Inside", "FACES"], &[json!("across"), json!(" inside"), json!(""), json!(42), json!(null)], &|v| parse::<JogMeasure>(v).is_some());
-    words(&["start", "Middle", "END"], &[json!("centerline"), json!(" end"), json!(""), json!(1), json!(null)], &|v| parse::<JogPosition>(v).is_some());
+    words(&["outside", "Inside", "FACES"], &[json!("across"), json!(" inside"), json!(""), json!(42), json!(null)], &|v| {
+        parse::<JogMeasure>(v).is_some()
+    });
+    words(&["start", "Middle", "END"], &[json!("centerline"), json!(" end"), json!(""), json!(1), json!(null)], &|v| {
+        parse::<JogPosition>(v).is_some()
+    });
     words(&["left", "Right", "LEFT"], &[json!("up"), json!(" left"), json!(""), json!(5), json!(null)], &|v| parse::<FoldStays>(v).is_some());
     words(&["notch", " Round ", "rectangular", "TEAR"], &[json!("oval"), json!(""), json!(5)], &|v| parse::<ReliefShapeParam>(v).is_some());
     words(&["inside", "Outside", "INSIDE"], &[json!("both"), json!(""), json!(5)], &|v| parse::<MaterialSide>(v).is_some());
