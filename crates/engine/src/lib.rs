@@ -185,6 +185,12 @@ pub struct FeatureFailure {
     /// The kernel call's stable code.
     pub code: solidcraft_kernel::ErrorCode,
 }
+impl From<serde_json::Error> for EngineError {
+    fn from(e: serde_json::Error) -> Self {
+        EngineError::Other(e.to_string())
+    }
+}
+
 impl From<solidcraft_io::IoError> for EngineError {
     fn from(e: solidcraft_io::IoError) -> Self {
         EngineError::Other(e.to_string())
@@ -238,7 +244,7 @@ pub enum Sel {
     Feature {
         id: u64,
     },
-    /// A view, dimension or balloon of the drawing open.
+    /// A selectable object of the drawing open.
     Drawing {
         #[serde(with = "solidcraft_doc::ids")]
         drawing: u64,
