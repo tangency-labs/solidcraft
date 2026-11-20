@@ -725,7 +725,6 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     if app.preview.shown_key == Some(key)
         && app.preview.active
         && app.preview.error.is_none()
-        && !app.preview.bounds.is_empty()
         && let Some((id, _, _)) = &plugin
     {
         let view = app.preview.plugin_view.take();

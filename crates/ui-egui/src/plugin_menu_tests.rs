@@ -1154,10 +1154,15 @@ mod native {
             "length":{"type":"number","exclusiveMinimum":0,"default":20},
             "width":{"type":"number","exclusiveMinimum":0,"default":10},
             "height":{"type":"number","exclusiveMinimum":0,"default":3}}});
+        let mut sketch = entry("sketch", "Sketch");
+        sketch["input_schema"] = json!({"type":"object","required":["solid"],"properties":{
+            "solid":{"type":"boolean","default":false}}});
+        let mut zero = sketch.clone();
+        zero["name"] = json!("zero");
         let manifest = json!({"id":"frames","name":"Frames","version":"0.1.0","capabilities":["commands@0.1"],"runtime":{
             "module":"plugin.wasm",
-            "entries":[entry("home", "Home"), entry("edit", "Edit"), entry("fail", "Fail"), entry("place", "Place"), entry("move", "Move"), entry("both", "Both"), fit],
-            "commands":["solid.box", "view.fit", "view.home", "component.create", "occurrence.move"]}});
+            "entries":[entry("home", "Home"), entry("edit", "Edit"), entry("fail", "Fail"), entry("place", "Place"), entry("move", "Move"), entry("both", "Both"), fit, sketch, zero],
+            "commands":["solid.box", "view.fit", "view.home", "component.create", "occurrence.move", "sketch.create", "sketch.rectangle.two_point", "sketch.finish"]}});
         std::fs::write(dir.join("plugin.json"), manifest.to_string()).unwrap();
         root
     }
@@ -1402,6 +1407,72 @@ mod native {
         iso.set_view(solidcraft_viewport::StandardView::Iso);
         assert_eq!((h.app.cam.yaw, h.app.cam.pitch), (iso.yaw, iso.pitch), "Home turns to the home direction");
         assert!(h.app.cam.distance < parked.distance, "Home fits the previewed box");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_sketch_only_first_plugin_preview_fits_once_and_a_later_solid_keeps_the_camera() {
+        let root = view_package("preview-sketch-fit");
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.look_at_anim = false;
+        h.app.plugin_menu.loaded = true;
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        let sketch = h.app.plugin_menu.listed[0].entries.iter().position(|e| e.name == "sketch").unwrap();
+        h.app.cam.set_view(solidcraft_viewport::StandardView::Top);
+        h.app.cam.distance = 800.0;
+        let parked = h.app.cam;
+        open_entry(&mut h.app, 0, sketch);
+        previewed(&mut h);
+        assert!(h.app.preview.active, "the sketch preview is ready: {:?}", h.app.preview.error);
+        assert_eq!(h.app.preview.sketches.len(), 1);
+        assert_eq!(h.app.preview.bounds.max.z, 0.0, "the first result is a planar sketch");
+        // The rectangle spans (100,20)..(120,30) in the XY plane, away from the origin.
+        let bounds =
+            solidcraft_engine::geom::Aabb3 { min: solidcore_record::Vec3::new(100.0, 20.0, 0.0), max: solidcore_record::Vec3::new(120.0, 30.0, 0.0) };
+        let expected = h.app.fitted_bounds(parked, &bounds);
+        assert!(same_camera(&expected, &h.app.cam), "Fit frames the preview's sketch geometry");
+        assert!(h.app.plugin_menu.dialogs[0].preview_drawn, "the first sketch result consumes the view action");
+        assert!(h.app.session.doc.features.is_empty(), "the sketch is only previewed");
+
+        h.step(&json!({"call":"ui.scroll","params":{"x":800,"y":600,"delta":-100}})).unwrap();
+        h.frames(20);
+        let moved = h.app.cam;
+        assert!(!same_camera(&expected, &moved), "navigation is available after the sketch preview");
+        let key = h.app.preview.key;
+        h.app.plugin_menu.dialogs[0].fields.as_mut().unwrap().iter_mut().find(|(f, _)| f.key == "solid").unwrap().1 = Input::Boolean(true);
+        previewed(&mut h);
+        assert_ne!(h.app.preview.key, key);
+        assert!(h.app.preview.active, "the solid preview is ready: {:?}", h.app.preview.error);
+        assert_eq!(h.app.preview.bounds.max.z.round(), 10.0, "the field change produces a solid");
+        assert!(same_camera(&moved, &h.app.cam), "a later solid leaves the user's camera alone");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn an_empty_first_plugin_preview_applies_home_once_and_a_later_solid_keeps_the_camera() {
+        let root = view_package("preview-empty-home");
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.look_at_anim = false;
+        h.app.plugin_menu.loaded = true;
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        let zero = h.app.plugin_menu.listed[0].entries.iter().position(|e| e.name == "zero").unwrap();
+        h.app.cam.set_view(solidcraft_viewport::StandardView::Front);
+        h.app.cam.distance = 800.0;
+        let mut iso = h.app.cam;
+        iso.set_view(solidcraft_viewport::StandardView::Iso);
+        open_entry(&mut h.app, 0, zero);
+        previewed(&mut h);
+        assert!(h.app.preview.active, "the empty result is ready: {:?}", h.app.preview.error);
+        assert!(h.app.preview.bounds.is_empty());
+        assert!(h.app.plugin_menu.dialogs[0].preview_drawn, "an empty result consumes the first preview");
+        assert_eq!((h.app.cam.yaw, h.app.cam.pitch), (iso.yaw, iso.pitch), "Home needs no bounds");
+        h.step(&json!({"call":"ui.scroll","params":{"x":800,"y":600,"delta":-100}})).unwrap();
+        h.frames(20);
+        let moved = h.app.cam;
+        h.app.plugin_menu.dialogs[0].fields.as_mut().unwrap().iter_mut().find(|(f, _)| f.key == "solid").unwrap().1 = Input::Boolean(true);
+        previewed(&mut h);
+        assert!(!h.app.preview.bounds.is_empty(), "the later preview contains a solid");
+        assert!(same_camera(&moved, &h.app.cam), "the later solid does not apply Home again");
         let _ = std::fs::remove_dir_all(root);
     }
 
