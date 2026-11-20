@@ -1670,11 +1670,7 @@ fn exact_curve_data(c: &Curve, is_2d: bool) -> Result<Option<(NurbsCurve, f64)>>
 /// Not upstream (#18166): it carries a UV line's evaluation slack ([`line_evaluation_slack`])
 /// to the plane, for a trim that is a line.
 #[must_use]
-pub fn plane_uv_lipschitz(
-    s: &Surface,
-    ends: &[crate::nurbs::math::CPoint],
-    d: f64,
-) -> Option<f64> {
+pub fn plane_uv_lipschitz(s: &Surface, ends: &[crate::nurbs::math::CPoint], d: f64) -> Option<f64> {
     use crate::nurbs::math::{CPoint, NOW};
     use crate::surface::surface::p2::SurfaceKind;
     let SurfaceKind::Plane(plane) = s.kind() else {
@@ -1704,9 +1700,9 @@ pub fn plane_uv_lipschitz(
         if !polynomial(c) {
             return None;
         }
-        for (k, x) in [c.x, c.y].into_iter().enumerate() {
-            lo[k] = lo[k].min(x - d);
-            hi[k] = hi[k].max(x + d);
+        for ((l, h), x) in lo.iter_mut().zip(hi.iter_mut()).zip([c.x, c.y]) {
+            *l = l.min(x - d);
+            *h = h.max(x + d);
         }
     }
     // the fraction of `x` in `[a, b]`, moved out by its rounding (`lower` toward -inf)
@@ -1722,7 +1718,13 @@ pub fn plane_uv_lipschitz(
     let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
     // `|(1 - t) a + t b|` rounded up: each term within `(|a| + |b|)(1 + |t|) 4 ε` of exact
     let norm_at = |a: [f64; 3], b: [f64; 3], t: f64| {
-        let v = [0, 1, 2].map(|k| (1.0 - t) * a[k] + t * b[k]);
+        let [a0, a1, a2] = a;
+        let [b0, b1, b2] = b;
+        let v = [
+            (1.0 - t) * a0 + t * b0,
+            (1.0 - t) * a1 + t * b1,
+            (1.0 - t) * a2 + t * b2,
+        ];
         let m = a.iter().chain(&b).fold(0.0_f64, |m, x| m.max(x.abs()));
         ((v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
             + m * (1.0 + t.abs()) * 16.0 * f64::EPSILON)
@@ -2307,47 +2309,44 @@ pub fn trim_image_gap_bound_within(
     let trim_kinks = kinks(&wn, r0, r1);
     // (the bound of the curve data `cn` against the net `net` through the reparametrisation
     // `psi`, the curve's slack added, with the pieces closing at `enough`)
-    let run = |psi: &NurbsCurve,
-               cn: &NurbsCurve,
-               net: &NetSurface,
-               enough: f64|
-     -> Result<Option<f64>> {
-        let sides = Sides {
-            curve: cn,
-            trim: &wn,
-            psi,
-            curve_kinks: curve_kinks.clone(),
-            trim_kinks: trim_kinks.clone(),
-            range,
+    let run =
+        |psi: &NurbsCurve, cn: &NurbsCurve, net: &NetSurface, enough: f64| -> Result<Option<f64>> {
+            let sides = Sides {
+                curve: cn,
+                trim: &wn,
+                psi,
+                curve_kinks: curve_kinks.clone(),
+                trim_kinks: trim_kinks.clone(),
+                range,
+            };
+            // (the bound adds the curve's slack, at least 0, to the gap: a gap above `over` is
+            // enough; a piece across a corner is bounded to first order by
+            // `piece_reparametrised`, so the first pieces need no cut there)
+            // (a gap at most `enough` less the curve's slack, rounded down, has a bound at most
+            // `enough`: the sum's exact value is at most `enough`, so rounding it up stays there)
+            let enough_gap = (Ivl::from(enough) - Ivl::from(c_slack)).lo;
+            let Some(gap) = bisect(
+                range,
+                FIRST_PIECES,
+                &[],
+                CLOSE_RELATIVE,
+                floor,
+                [enough_gap, over],
+                budget,
+                |a, b| {
+                    k.check_cancelled(OP)?;
+                    piece_reparametrised(&sides, net, a, b)
+                },
+            )?
+            else {
+                return Ok(None);
+            };
+            if gap == f64::INFINITY {
+                return Ok(Some(gap));
+            }
+            let bound = (Ivl::from(gap) + Ivl::from(c_slack)).hi;
+            Ok(bound.is_finite().then_some(bound))
         };
-        // (the bound adds the curve's slack, at least 0, to the gap: a gap above `over` is
-        // enough; a piece across a corner is bounded to first order by
-        // `piece_reparametrised`, so the first pieces need no cut there)
-        // (a gap at most `enough` less the curve's slack, rounded down, has a bound at most
-        // `enough`: the sum's exact value is at most `enough`, so rounding it up stays there)
-        let enough_gap = (Ivl::from(enough) - Ivl::from(c_slack)).lo;
-        let Some(gap) = bisect(
-            range,
-            FIRST_PIECES,
-            &[],
-            CLOSE_RELATIVE,
-            floor,
-            [enough_gap, over],
-            budget,
-            |a, b| {
-                k.check_cancelled(OP)?;
-                piece_reparametrised(&sides, net, a, b)
-            },
-        )?
-        else {
-            return Ok(None);
-        };
-        if gap == f64::INFINITY {
-            return Ok(Some(gap));
-        }
-        let bound = (Ivl::from(gap) + Ivl::from(c_slack)).hi;
-        Ok(bound.is_finite().then_some(bound))
-    };
     let with_psi = |psi: &NurbsCurve| -> Result<Option<f64>> {
         let first = run(psi, &cn, &net, enough)?;
         recentred_retry(first, [enough, over], &cn, &net, |cn, net, enough| {

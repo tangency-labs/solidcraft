@@ -1191,7 +1191,8 @@ impl<'c> Stitch<'c> {
                 }
             }
         }
-        // (a cover that fails leaves the tolerance as upstream leaves it)
+        // (a cover that fails keeps the raises it made before the failure, each to a proved
+        // bound, and leaves the rest as upstream leaves it)
         for (e, faces) in &edges {
             ignored(crate::topology::edgeuse::p3::cover_joined_faces(
                 k, b, *e, faces,

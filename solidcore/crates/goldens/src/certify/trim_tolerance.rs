@@ -18,7 +18,14 @@
 //!   points, which is the line's geometry up to the slack [`line_evaluation_slack`] bounds,
 //!   added to `B`; see `use_bound`);
 //! - a vertex: its point is within `n` of the end of every edge curve that ends there, the
-//!   rounding of each distance counted against it.
+//!   evaluation's error bound (`Curve::point_error_bound`, from the curve's data) and the
+//!   distance's rounding counted against it.
+//!
+//! Trust base: the enclosures are the kernel's (`trim_image_gap_bound`,
+//! `curve_face_gap_bound_within`, `line_evaluation_slack`, `plane_uv_lipschitz`,
+//! `Curve::point_error_bound`), which the stitch cover (`topology::edgeuse::p3`) also raises
+//! with; this checks that each final tolerance covers its bounds on the final body, not those
+//! enclosures themselves (their own tests do).
 //!
 //! So every lowered tolerance still covers what it is the tolerance for, and it is lower than
 //! before: a tighter tolerance that is still valid.
@@ -32,7 +39,6 @@
 use solidcore::curve::curve::p2::CurveKind;
 use solidcore::curve::curve::Curve;
 use solidcore::kernel::Kernel;
-use solidcore::nurbs::math::gamma;
 use solidcore::query::curve_surface_gap::{
     curve_face_gap_bound_within, line_evaluation_slack, plane_uv_lipschitz, trim_image_gap_bound,
 };
@@ -617,7 +623,7 @@ fn edge_bounds(k: &Kernel, b: &Brep, e: EdgeId, n: f64) -> (Vec<Option<f64>>, us
 }
 
 /// Whether the point of `v` is within `n` of the end of every edge curve of `v` that ends
-/// there, the rounding of each distance counted against it (as [`super::tolerance_covers`]).
+/// there, the evaluation's error bound and the distance's rounding counted against it.
 fn vertex_covers_its_ends(k: &Kernel, b: &Brep, v: VertexId, n: f64) -> bool {
     let at = b.vertex(v).expect("vertex").point;
     for e in solidcore::topology::vertex::edges(b, v, None).expect("edges") {
@@ -633,9 +639,15 @@ fn vertex_covers_its_ends(k: &Kernel, b: &Brep, v: VertexId, n: f64) -> bool {
             if end != Some(v) {
                 continue;
             }
+            // The evaluation's error per coordinate, bounded from the curve's data (its
+            // control points), not from the size of the point it returns; no bound, not
+            // covered.
             let p = curve.evaluate_point(k, t).expect("end point");
-            let size = at.max_dimension().max(p.max_dimension());
-            if at.distance(p) + gamma(8) * size * 3.0_f64.sqrt() > n {
+            let Some(error) = curve.point_error_bound(t) else {
+                return false;
+            };
+            let up = |x: f64| x * (1.0 + 4.0 * f64::EPSILON);
+            if up(up(at.distance(p)) + up(error * up(3.0_f64.sqrt()))) > n {
                 return false;
             }
         }
@@ -1399,6 +1411,55 @@ fn stitched_bodies(unit: &str, name: &str) -> Vec<Brep> {
     let bodies = super::take_written();
     out.expect("the case runs");
     bodies
+}
+
+/// #18166 regression: `primitive.api_primitives` `gen1108` builds a pyramid whose stitch
+/// cover raises edges 6, 9 and 15 (lines 5.5e8 long, given a tolerance of 1e-5) for their
+/// trimless faces, while their UV line trims are bounded at 2.5e-5 to 2.8e-5. The cover now
+/// bounds a UV line trim on a plane (`topology::edgeuse::p3` `raised_trim_bound`) and raises
+/// once to the largest trim bound (`cover_raised_trims`; bounding again at each raised
+/// tolerance climbed to 5.8e-5). Every raised edge covers its trims and faces, and is no
+/// looser than the largest of those bounds (within 1%).
+#[test]
+fn a_stitch_cover_raises_its_edges_to_their_trims_bounds() {
+    let bodies = stitched_bodies("primitive.api_primitives", "gen1108");
+    let k = Kernel::default();
+    let mut bad = Vec::new();
+    let mut raised = 0;
+    for (i, b) in bodies.iter().enumerate() {
+        for (e, rec) in b.edges().iter() {
+            let tol = rec.tolerance;
+            if tol <= 1.0e-5 {
+                continue;
+            }
+            raised += 1;
+            let mut bounds = trim_bounds(&k, b, e);
+            for f in edge::faces(b, e, None).expect("faces") {
+                let trimmed = rec.edgeuses.iter().any(|&eu| {
+                    eu1::face(b, eu).expect("face") == Some(f)
+                        && b.edgeuse(eu).expect("edgeuse").uv_trim_curve.is_some()
+                });
+                if !trimmed {
+                    bounds.push(face_bound(&k, b, e, f, tol));
+                }
+            }
+            let Some(most) = bounds
+                .iter()
+                .map(|x| x.unwrap_or(f64::INFINITY))
+                .reduce(f64::max)
+            else {
+                continue;
+            };
+            if !(most <= tol && tol <= 1.01 * most) {
+                bad.push(format!(
+                    "body {i} edge {}: tol {tol:e} bounds {bounds:?}",
+                    e.index()
+                ));
+            }
+        }
+    }
+    assert!(raised >= 3, "the cover raised {raised} edges");
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
 }
 
 /// #18166 regression: `heal.stitch_p1` `cov_tjunc9_into_shell` raises vertex 22 with an edge

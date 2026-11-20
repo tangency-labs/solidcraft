@@ -1938,8 +1938,8 @@ pub(crate) fn cover_joined_faces(
         }
         let tol = b.edge(e)?.tolerance;
         let fit = fit_tolerance(k, b, e)?;
-        let Some(gap) = edge_face_gap_bound(k, b, e, f, fit, [tol, f64::INFINITY])?
-            .filter(|g| g.is_finite())
+        let Some(gap) =
+            edge_face_gap_bound(k, b, e, f, fit, [tol, f64::INFINITY])?.filter(|g| g.is_finite())
         else {
             continue;
         };
@@ -2013,7 +2013,10 @@ fn raised_trim_bound(
     let CurveKind::Line(l) = trim.kind() else {
         return trim_deviation_bound(k, b, eu, trim, tol, over, None);
     };
-    let Some(f) = faceuse(b, eu)?.and_then(|fu| faceuse_face(b, fu).ok().flatten()) else {
+    let Some(fu) = faceuse(b, eu)? else {
+        return Ok(None);
+    };
+    let Some(f) = faceuse_face(b, fu)? else {
         return Ok(None);
     };
     let Some(surface) = b.face(f)?.surface.as_ref() else {
@@ -2028,7 +2031,11 @@ fn raised_trim_bound(
         return Ok(None);
     };
     let slack = lip * d * (1.0 + 4.0 * f64::EPSILON);
-    let Some(x) = trim_deviation_bound(k, b, eu, &Curve::from(nurb), tol, over, None)? else {
+    // (the NURB's bound is shown within the tolerance less the slack, so that a bound found
+    // within `enough` still leaves the line within the tolerance)
+    let enough = ((tol - slack) * (1.0 - 4.0 * f64::EPSILON)).max(0.0);
+    let Some(x) = trim_deviation_bound(k, b, eu, &Curve::from(nurb), tol, [enough, over[1]], None)?
+    else {
         return Ok(None);
     };
     let bound = if slack == 0.0 {
@@ -2044,14 +2051,16 @@ fn raised_trim_bound(
 /// ends of its edges, and the stitch's joins can leave an edge's end farther from its vertex
 /// than the vertex's tolerance (`heal.stitch_p1` `cov_tjunc9_into_shell`: a vertex 1.02 from
 /// the end of an edge the stitch joined, under a tolerance of 1.1e-3). Each distance is the
-/// end point's distance plus the evaluation's rounding, `gamma(8)` of the larger coordinate
-/// in each of three coordinates, rounded up.
+/// evaluated end point's distance plus the evaluation's error, bounded per coordinate from
+/// the curve's own data ([`Curve::point_error_bound`]: its control points, not the size of
+/// the point it returns) times `√3`, each step rounded up. An end not evaluated, or with no
+/// such bound, raises nothing.
 ///
 /// # Errors
 ///
-/// [`SolidError::NotFound`] for a dangling id; those of the curves' evaluation.
+/// [`SolidError::NotFound`] for a dangling id.
 fn cover_vertex_ends(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
-    use crate::blend::fillet_section::interval::Ivl;
+    let up = |x: f64| x * (1.0 + 4.0 * f64::EPSILON);
     let (v0, v1) = crate::topology::edge::start_end_vertices(b, e)?;
     let mut vertices: Vec<crate::topology::VertexId> = Vec::new();
     for v in [v0, v1].into_iter().flatten() {
@@ -2075,12 +2084,15 @@ fn cover_vertex_ends(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
                 if end != Some(v) {
                     continue;
                 }
-                let p = curve.evaluate_point(k, t)?;
-                let size = at.max_dimension().max(p.max_dimension());
-                let rounding = Ivl::from(crate::nurbs::math::gamma(8))
-                    * Ivl::from(size)
-                    * Ivl::from(3.0_f64.sqrt());
-                let far = (Ivl::from(at.distance(p)) + rounding).hi;
+                // (an end not evaluated, or with no bound on its evaluation's error, raises
+                // nothing: the vertex is left as upstream leaves it for that end)
+                let Ok(p) = curve.evaluate_point(k, t) else {
+                    continue;
+                };
+                let Some(error) = curve.point_error_bound(t) else {
+                    continue;
+                };
+                let far = up(up(at.distance(p)) + up(error * up(3.0_f64.sqrt())));
                 if far.is_finite() {
                     reach = reach.max(far);
                 }
