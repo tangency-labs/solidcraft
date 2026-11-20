@@ -2569,6 +2569,9 @@ pub(crate) fn cancel_unfinished(app: &mut SolveApp) -> bool {
 
 /// Global keyboard shortcuts (when no text field has focus).
 pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
+    if crate::view_window_drag::keyboard_active(app, ctx) {
+        return;
+    }
     crate::viewport_status::reconcile(app, ctx);
     crate::browser::update_folder_pick(app, ctx);
     let chat_owner = crate::agent_chat::owns_keyboard_input(app, ctx);
@@ -2749,7 +2752,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 Key::N | Key::O | Key::S | Key::W | Key::Comma if app.embed_editor => {}
                 Key::N => crate::documents::new_design(app),
                 Key::Comma => crate::prefs::open_at(app, 0),
-                Key::O => {
+                Key::O if !mods.alt => {
                     app.pick_open(|app, path| {
                         if let Some(path) = path {
                             app.open_chosen_file(&path);
@@ -2772,6 +2775,8 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                     let key = crate::keymap::key_name(k, mods);
                     if mods.shift && !crate::keymap::commands_for(app, &key).is_empty() {
                         crate::keymap::press(app, &key, repeat);
+                    } else if !mods.shift && app.docs.views.len() < 2 && app.view_windows.close_current() {
+                        continue;
                     } else if mods.shift || app.docs.views.len() < 2 {
                         crate::documents::close(app, app.docs.active, false);
                     } else {

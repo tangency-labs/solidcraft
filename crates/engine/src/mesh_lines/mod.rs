@@ -8,11 +8,13 @@
 //!
 //! When the lines can't be made, [`Refused`] says what happened, and each caller adds what to do
 //! about it in its own terms: a DXF's tolerance and camera, a drawing view's chord and scale.
+mod coincide;
 mod meshes;
 mod progress;
 mod projection;
 mod scene;
 
+pub(crate) use coincide::sketch_off_lines;
 pub(crate) use meshes::{Ask, Placed, Scene, WORKERS, drawn_edges, placed, prepare};
 pub(crate) use progress::Stage;
 pub(crate) use projection::{Origin, Owner, Part, Path, View, clip};

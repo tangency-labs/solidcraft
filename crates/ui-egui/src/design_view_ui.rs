@@ -17,6 +17,8 @@ pub const VIEW_RENAME: &str = "view.rename";
 pub const VIEW_DUPLICATE: &str = "view.duplicate";
 pub const VIEW_BESIDE: &str = "view.beside";
 pub const VIEW_NEW_WINDOW: &str = "view.new_window";
+pub const VIEW_MOVE_TO_WINDOW: &str = "view.move_to_window";
+const WINDOW_PREFIX: &str = "view.window.";
 pub const VIEW_CLOSE: &str = "view.close";
 pub const VIEW_CLOSE_OTHERS: &str = "view.close_others";
 pub const VIEW_CLOSE_RIGHT: &str = "view.close_right";
@@ -34,19 +36,54 @@ pub const SWITCHER_OPEN: &str = "switcher.open";
 pub const SWITCHER_REOPEN: &str = "switcher.reopen";
 pub const SWITCHER_AS_TABS: &str = "switcher.as_tabs";
 
+pub const MOVE_TO_WINDOW_MENU: TabMenuRow<'static> = TabMenuRow::new(VIEW_MOVE_TO_WINDOW, "multi_window.move_to_window", "")
+    .with_icon("window", None)
+    .for_local_view()
+    .with_children(&[TabMenuRow::new(VIEW_NEW_WINDOW, "multi_window.new_window", "").with_icon("window", None)]);
+
 /// A view's right-click menu in three groups set apart by lines: rename, copy and move; close
 /// views; close the design.
 pub const VIEW_MENU: [TabMenuRow<'static>; 9] = [
-    TabMenuRow::new(VIEW_RENAME, "Rename view", "F2").with_icon("rename", None),
-    TabMenuRow::new(VIEW_DUPLICATE, "Duplicate view", "").with_icon("duplicate", None),
-    TabMenuRow::new(VIEW_BESIDE, "Show beside", "").with_icon("tiles", None),
-    TabMenuRow::new("view.place", "design_view.place", "").with_icon("tiles", None).needing_others(),
-    TabMenuRow::new(VIEW_NEW_WINDOW, "Open in new window", "").with_icon("window", None),
+    TabMenuRow::new(VIEW_RENAME, "Rename view", "F2").with_icon("rename", None).for_local_view(),
+    TabMenuRow::new(VIEW_DUPLICATE, "Duplicate view", "").with_icon("duplicate", None).for_local_view(),
+    TabMenuRow::new(VIEW_BESIDE, "Show beside", "").with_icon("tiles", None).for_local_view(),
+    TabMenuRow::new("view.place", "design_view.place", "").with_icon("tiles", None).needing_others().for_local_view(),
+    MOVE_TO_WINDOW_MENU,
     TabMenuRow::new(VIEW_CLOSE, "Close view", "Ctrl+W").with_icon("close", None).separated(),
-    TabMenuRow::new(VIEW_CLOSE_OTHERS, "Close other views", "").needing_others(),
-    TabMenuRow::new(VIEW_CLOSE_RIGHT, "Close views to the right", "").needing_others(),
+    TabMenuRow::new(VIEW_CLOSE_OTHERS, "Close other views", "").needing_others().for_local_view(),
+    TabMenuRow::new(VIEW_CLOSE_RIGHT, "Close views to the right", "").needing_others().for_local_view(),
     TabMenuRow::new(DESIGN_CLOSE, "Close design", "Ctrl+Shift+W").with_icon("close", None).separated(),
 ];
+
+pub(crate) fn window_menu_entries(app: &SolveApp) -> Vec<(String, String)> {
+    crate::view_windows::window_choices(app).iter().map(|choice| (format!("{WINDOW_PREFIX}{}", choice.id), choice.label.clone())).collect()
+}
+
+pub(crate) fn window_menu_rows<'a>(app: &SolveApp, entries: &'a [(String, String)]) -> Vec<TabMenuRow<'a>> {
+    let current = app.view_windows.current_window();
+    let mut new = MOVE_TO_WINDOW_MENU.children[0];
+    if !crate::view_windows::can_create(app) {
+        new.disabled_tip = Some(app.tr("multi_window.too_many"));
+    }
+    [new, TabMenuRow::heading(app.tr("multi_window.open_windows")).separated()]
+        .into_iter()
+        .chain(entries.iter().map(|(id, label)| TabMenuRow { checked: window_menu_target(id) == Some(current), ..TabMenuRow::new(id, label, "") }))
+        .collect()
+}
+
+pub(crate) fn window_menu_target(id: &str) -> Option<u32> {
+    id.strip_prefix(WINDOW_PREFIX)?.parse().ok()
+}
+
+pub(crate) fn view_menu_rows<'a>(app: &SolveApp, window_rows: &'a [TabMenuRow<'a>]) -> Vec<TabMenuRow<'a>> {
+    let pop_out = app.view_windows.is_child();
+    let can_move = crate::view_windows::supports_pop_out(app);
+    VIEW_MENU
+        .into_iter()
+        .filter(|row| (row.id != VIEW_MOVE_TO_WINDOW || can_move) && (row.id != DESIGN_CLOSE || !pop_out))
+        .map(|row| if row.id == VIEW_MOVE_TO_WINDOW { row.with_children(window_rows) } else { row })
+        .collect()
+}
 
 /// The "+" menu: a header, one row per view kind with its icon in the kind's accent (`dark` picks
 /// the accent for the menu's ground), then copy the shown view and bring back the last closed one.
@@ -81,11 +118,11 @@ pub fn layout_menu() -> Vec<TabMenuRow<'static>> {
 
 /// The id of the shown design's view at place `index`.
 fn view_id(app: &SolveApp, index: usize) -> Option<u64> {
-    app.docs.views.views().get(index).map(|view| view.id)
+    documents::strip_view_id(app, index)
 }
 
 /// Carry out one of the strip's view actions. False for an action that is not a view action.
-pub fn handle(app: &mut SolveApp, ctx: &egui::Context, action: TabAction) -> bool {
+pub fn handle(app: &mut SolveApp, _ctx: &egui::Context, action: TabAction) -> bool {
     match action {
         TabAction::SelectView(i) => {
             if let Some(id) = view_id(app, i) {
@@ -101,11 +138,6 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, action: TabAction) -> boo
             documents::view_open(app, ViewKind::Model, None, false);
         }
         TabAction::ReorderView { from, to } => documents::view_move(app, from, to),
-        TabAction::DockView { view, pointer, released } => {
-            if let Some(id) = view_id(app, view) {
-                crate::view_tiles::tab_drag(app, ctx, id, pointer, released);
-            }
-        }
         TabAction::ViewMenu { view, id } => return view_menu(app, view, &id),
         TabAction::PlusMenu { id } | TabAction::LayoutMenu { id } => return plus_row(app, &id),
         TabAction::SwitcherMenu { id } => return switcher_menu(app, &id),
@@ -138,10 +170,8 @@ fn view_menu(app: &mut SolveApp, index: usize, id: &str) -> bool {
         "view.place" => {
             app.docs.view_placement = Some((app.docs.active_tab(), view));
         }
-        VIEW_NEW_WINDOW => {
-            let kind = app.docs.views.get(view).map(|v| v.kind.key());
-            open_new_window(app, kind);
-        }
+        VIEW_NEW_WINDOW => move_to_window(app, view, serde_json::json!("new")),
+        id if let Some(window) = window_menu_target(id) => move_to_window(app, view, serde_json::json!(window)),
         VIEW_CLOSE => {
             documents::view_close(app, view);
         }
@@ -193,10 +223,33 @@ fn switcher_menu(app: &mut SolveApp, id: &str) -> bool {
         SWITCHER_REOPEN => {
             documents::view_reopen(app);
         }
+        VIEW_NEW_WINDOW => {
+            let view = app.docs.views.active().id;
+            move_to_window(app, view, serde_json::json!("new"));
+        }
+        id if let Some(window) = window_menu_target(id) => {
+            move_to_window(app, app.docs.views.active().id, serde_json::json!(window));
+        }
         SWITCHER_AS_TABS => app.preferences.design_views_as_tabs = true,
         _ => return false,
     }
     true
+}
+
+pub(crate) fn move_to_window(app: &mut SolveApp, view: u64, window: serde_json::Value) {
+    if let Err(reason) = app.run("tab.view.move_to_window", serde_json::json!({"view": view, "window": window})) {
+        show_move_error(app, reason);
+    }
+}
+
+pub(crate) fn show_move_error(app: &mut SolveApp, reason: String) {
+    let message = match reason.as_str() {
+        "last_view_of_main_window" => app.tr("multi_window.last_view").to_owned(),
+        "too_many_windows" => app.tr("multi_window.too_many").to_owned(),
+        "windows_unavailable" => app.tr("multi_window.unavailable").to_owned(),
+        _ => reason,
+    };
+    app.set_status(message, true);
 }
 
 /// Move the shown design to a new window (on the view named `view`, a [`ViewKind::key`]). A design
