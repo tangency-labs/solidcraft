@@ -21,8 +21,6 @@
 //! | [`Plane::make_new_plane_ellipse`]          | `MakeNewPlaneEllipse`                             |
 //!
 //! Deviations:
-//! - Pure translations retain the analytic placement, domain and scales rather
-//!   than recognising a new plane from its rounded, transformed control net.
 //! - **Analytic contacts.** A clipped line or ellipse whose whole extent is below
 //!   the geometric tolerance is returned as a point curve at the interval midpoint,
 //!   including a trailing interval at the source curve's end. The extent bound
@@ -302,33 +300,10 @@ impl Plane {
             return Ok(());
         }
 
-        // A translation acts on the defining plane's origin alone. Refitting the
-        // transformed net would change S through homogeneous rounding, notably
-        // during the temporary translations used by Boolean operations.
-        let translation = rotate_n_move.x_axis() == Vec3::X
-            && rotate_n_move.y_axis() == Vec3::Y
-            && scale.is_none_or(|s| s == identity_scale);
-        let translated_origin = self.position.origin() + rotate_n_move.origin();
-        if translation
-            && !(translated_origin.x.is_finite()
-                && translated_origin.y.is_finite()
-                && translated_origin.z.is_finite())
-        {
-            return Err(SolidError::surface_failed(
-                OP_XFORM,
-                "the translated plane origin is not finite",
-            ));
-        }
-
         // apply m_pNurb (SmBSplineSurface::Transform makes a missing NURB)
         self.ensure_nurb();
         self.base
             .transform_notifying(rotate_n_move, scale, notify)?;
-
-        if translation {
-            self.position.set_origin(translated_origin);
-            return Ok(());
-        }
 
         // when scaling
         if let Some(s) = scale {
@@ -1779,38 +1754,6 @@ mod tests {
         let p = rect().create_offset_surface(k, 2.0).unwrap();
         assert_eq!(p.position().origin(), Vec3::new(0.0, 0.0, 2.0));
         assert_eq!(p.step_uv_domain(), dom());
-    }
-
-    #[test]
-    fn translations_retain_the_defining_plane() {
-        let k = Kernel::default();
-        // Stored analytic frames are retained verbatim, including their last
-        // rounding bit. A recogniser would instead unitise this axis and move
-        // its length into the UV scale.
-        let y = Vec3::new(0.0, f64::from_bits(1.0_f64.to_bits() + 1), 0.0);
-        let mut plane = Plane::from_stored(
-            Axis2Placement::from_stored(Vec3::new(0.0, 0.0, 2400.0), Vec3::X, y),
-            Vec2::new(1.0, 1.0),
-            Extent2d::from_bounds(-660.0, -660.0, 660.0, 660.0),
-            BSplineSurface::new(),
-        );
-        plane.make_nurb().unwrap();
-        let domain = plane.step_uv_domain();
-        let scale = plane.uv_scale();
-        for (shift, height) in [(-1200.0, 1200.0), (1200.0, 2400.0)] {
-            plane
-                .transform(
-                    &k,
-                    &Axis2Placement::from_stored(Vec3::new(0.0, 0.0, shift), Vec3::X, Vec3::Y),
-                    None,
-                )
-                .unwrap();
-            assert_eq!(plane.position().origin(), Vec3::new(0.0, 0.0, height));
-            assert_eq!(plane.position().x_axis(), Vec3::X);
-            assert_eq!(plane.position().y_axis(), y);
-            assert_eq!(plane.step_uv_domain(), domain);
-            assert_eq!(plane.uv_scale(), scale);
-        }
     }
 
     #[test]

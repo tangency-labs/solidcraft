@@ -144,7 +144,7 @@ pub(crate) fn contract_complete_cylinder(
         .try_fold(0_usize, |n, r| {
             Ok::<_, SolidError>(n.saturating_add(usize::from(b.region(r)?.is_void() == 0)))
         })?;
-    if !complete_cylinder_boundary(k, b, *f, domain, c)?
+    if !complete_cylinder_boundary(k, b, *f, domain)?
         || !p2::is_manifold_solid(b)?
         || material_regions != 1
         || d.bot_height() != c.bot_height()
@@ -202,13 +202,19 @@ pub(crate) fn contract_complete_cylinder(
     Ok(Some(()))
 }
 
-/// The four exact box sides and fixed perpendicular supports of both circular rims.
+/// The four exact box sides, and bare planar faces across both circular rims.
+///
+/// The exact UV box proves each rim is the cylinder's own iso circle at its stored
+/// end height, which is where the tool's caps lie. The face across a rim shares that
+/// edge, so a bare plane there is an end plane of the slab within the body's own
+/// validity; it stays the result's support, trimmed by the cone. Its fitted frame is
+/// not compared with the cylinder: the body's construction rounds it, and the
+/// removal volume is defined by the cylinder alone.
 fn complete_cylinder_boundary(
     k: &Kernel,
     b: &Brep,
     f: FaceId,
     domain: crate::geom::extent2d::Extent2d,
-    cylinder: &crate::surface::cone::Cone,
 ) -> Result<bool> {
     use crate::topology::edgeuse::p1 as eu;
     let Some(fu) = face_ops::outer_faceuse(b, f)? else {
@@ -263,16 +269,8 @@ fn complete_cylinder_boundary(
                 let Some(s) = face_ops::surface(b, neighbor)? else {
                     return Ok(false);
                 };
-                let Some(AnalyticSupport::Plane { placement, .. }) = AnalyticSupport::of(s) else {
-                    return Ok(false);
-                };
-                let height = if side == 2 {
-                    cylinder.bot_height()
-                } else {
-                    cylinder.top_height()
-                };
                 if s.procedural_definition().is_some()
-                    || !fixed_rim_plane(&placement, cylinder, height)
+                    || !matches!(AnalyticSupport::of(s), Some(AnalyticSupport::Plane { .. }))
                 {
                     return Ok(false);
                 }
@@ -283,7 +281,8 @@ fn complete_cylinder_boundary(
 }
 
 /// A perpendicular rim plane through the exact axial endpoint, before rounding a
-/// point or a cross product. A gap tolerated by the input is not an exact fixed rim.
+/// point or a cross product: the tool's own cap support, built from the defining
+/// circles, must be exactly the cylinder's end plane.
 fn fixed_rim_plane(p: &Axis2Placement, cylinder: &crate::surface::cone::Cone, h: f64) -> bool {
     let (x, y) = (p.x_axis(), p.y_axis());
     let frame = cylinder.rev.position;

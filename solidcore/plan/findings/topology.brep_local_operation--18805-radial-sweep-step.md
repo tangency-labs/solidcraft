@@ -33,8 +33,8 @@ can re-recognize its joined net as a zero-angle cone
 The current step requires exactly equal source and target
 frames, natural UV boxes, and axial intervals. It proves the actual UV
 boundary is the four box sides using positive-weight control hulls and
-exact endpoint equalities, and checks both circular rims meet fixed
-perpendicular planes at their exact axial positions. No sampled rectangle
+exact endpoint equalities, and checks the face across each circular rim
+is a bare plane (see "The body's rim planes" below). No sampled rectangle
 or bounding box establishes this event. Expansion arithmetic proves the
 affine radius positive and its displacement nonpositive at both axial
 ends, hence throughout the slab.
@@ -78,53 +78,29 @@ and cell selection. Partial cylindrical faces, other supports, different
 source/neutral frames, outward or mixed-sign edits, and multiple material
 regions continue to use the existing construction.
 
-## Exact cap foundation
+## The body's rim planes
 
-The second kernel diagnostic run found all four natural UV trims exact,
-net sense +1, Same orientation, and matching supports and domains. The
-selector correctly declined because the primitive's top cap was a fitted
-plane through z = 20.000000000000004 with a y-axis z component of
--2.2837708489945816e-16, while the cylindrical rim is exactly z = 20.
-The unchanged 57 local-operation/draft tests passed in that run
-(`1795007682.217617-76c8aea0`); the new construction test failed.
+The selector does not compare the body's end planes with the cylinder.
+The exact UV box already proves each rim is the cylinder's own iso circle
+at its stored end height, and the tool's caps are built on exactly those
+circles (`plane_on_ellipses` plus `fixed_rim_plane`, both local to this
+construction). The face across a rim shares that edge in a body that the
+standing validation accepts, so a bare plane there is the slab's end
+plane up to the body's own validity; it stays the result's support and
+the Boolean trims it by the cone. No tolerance is introduced: the
+Boolean's coincident-face handling merges the tool cap with that face.
 
-`Surface::create_plane_with_3d_curves` now selects the all-ellipse class
-before loop ordering. Expansion determinants prove every ellipse's origin
-and both axes lie in the first ellipse's stored plane; a different plane
-is refused rather than fitted within the input tolerance. The output
-plane retains that stored frame, so normal averaging and bilinear-plane
-recognition cannot tilt its support. Existing loop ordering and nesting
-are retained. The existing 10% bounding canvas expansion only bounds the
-plane parameter domain; it is not a planarity or acceptance tolerance.
-For stored in-plane axes x and y, let n = x cross y and let D bound the
-distance from the frame origin to the boundary's bounding sphere. The
-dual-basis inequalities |u| <= D*|y|/|n| and |v| <= D*|x|/|n| bound the
-canvas without assuming perfectly orthonormal floating axes. Existing
-rounded interval arithmetic encloses these bounds; a nonfinite bound or
-unproved positive normal length is a typed error, never a fitted support.
-The disk and annulus test use circles at exactly z = 20; their cap support
-must have origin z = 20 and both in-plane axes' z coordinates exactly 0.
-Two circle planes one representable value apart must be refused even
-when that gap is below the input tolerance.
-
-The next S8075 diagnostic (`1795014338.505242-7e328bba`) still found its
-top support at z = 2399.9999999999995, so the exact event correctly did
-not select it and the old executive returned `LoopsCross(Unmerged)`.
-`cone_iso_curve` had averaged projected NURB sample heights before
-constructing the circle; preserving that circle's plane alone was not
-sufficient. Circular cone isos now obtain height from the analytic axial
-parameter map shared with NURB-to-STEP conversion. A stored NURB interval
-endpoint selects the corresponding stored STEP height exactly; interior
-parameters use the affine map, including swap and inside-out conventions.
-No polar inversion or sampled projection establishes the cap plane.
-`iso_circles_retain_the_cones_exact_axial_heights` checks all four flag
-combinations at the two ends and midpoint of the R=600, H=2400 case,
-whose heights are exactly 0, 1200 and 2400 (reversed when inside out).
-It also requests the next representable parameter above the full and
-quarter-trimmed upper endpoints. The base extractor has already accepted
-and clamped those requests; the analytic height uses that same effective
-parameter. The planes remain at the stored full endpoint or at 1800
-(600 when inside out), with no new boundary allowance.
+An earlier version demanded the body's end planes be bit-exact. On main
+they are not: a primitive cylinder's top cap is fitted through
+z = 20.000000000000004 with a y-axis z component of -2.28e-16, its iso
+rims average projected sample heights, and the Boolean's temporary
+translation refits planes from their rounded nets. Making those exact
+meant changing `cone_iso_curve`, `Cone::transform`,
+`Surface::create_plane_with_3d_curves` and `Plane::transform` for every
+caller, which moved 270 golden rows in 17 units (primitives, offsets,
+fillets, cones, planes, `topology.api_files`) and a sweep rig case. Those
+shared routines are now exactly as on main; the exact plane construction
+from ellipses is `plane_on_ellipses`, called only by `radial_sweep`.
 
 ## Independent geometric checks
 
@@ -172,26 +148,6 @@ Outside Surface Natural Boundary`. The clean rerun after the exact-cap and iso-h
 `Argument` at the draft input-solid precondition. It remains ignored;
 repairing the joined input is separate from the complete-wall removal
 construction, and no validity gate is relaxed.
-
-## Preserving the fixed rims through Boolean translations
-
-S8075's bounding-box center is approximately (0, 0, 1200). Its squared
-length exceeds the Boolean temporary-translation threshold (1e6), unlike
-the small construction control. `temporary_brep_transform` translates and
-restores the operands before returning their Boolean result.
-`Plane::transform_notifying` previously recognised a new analytic plane
-from the transformed homogeneous control net. That refit changes the
-stored support even for a pure translation, defeating the exact rim proof
-after the three blind-hole subtractions.
-
-For an identity rotation and identity scale, translation acts on the
-stored plane definition by O' = O + t, X' = X and Y' = Y. The analytic
-domain and scales do not change. This geometric event now retains that
-definition while transforming the NURB through the same notification
-path. A non-finite translated origin is a typed error. No tolerance is
-introduced into the event or the fixed-rim proof. The existing plane test
-module includes `translations_retain_the_defining_plane`, checking both
-1200-unit shifts and exact retention of the frame, domain and scales.
 
 ## Verification
 
@@ -317,3 +273,23 @@ changed-crate clippy, wasm and goldens remain for CI. The newly added
 plane and ellipse-support unit tests were compiled but not selected by
 the final focused run. No golden or kernel-case expectations changed.
 All source changes and COMMIT_MSG.txt remain unstaged.
+
+## Narrowed to the draft path
+
+CI's goldens showed the shared changes above moving 270 rows in 17 units.
+`cone_iso_curve`, `Cone::transform`, `Surface::create_plane_with_3d_curves`
+and `Plane::transform` are back to main; the selector takes the body's
+rim faces as bare planes (see "The body's rim planes"). All through
+buildq, from the worktree:
+
+- Focused tests (`radial_sweeps_close_at_the_hinge_or_on_two_annular_caps`,
+  S8075 `a_cylinder_with_three_blind_holes_drafts_through_the_hole_walls`,
+  `a_drafted_cylinder_keeps_its_boss_and_loses_a_hole_beyond_the_new_wall`,
+  `circular_boundaries_keep_their_exact_common_plane`,
+  `nearby_ellipse_planes_are_not_one_exact_plane`): 5 passed, 0 failed.
+- Goldens, 0 changed, 0 broken each: surface.cone_p1 (20736 cases),
+  primitive.api_primitives (2245), offset.offset_executive_p2 (594),
+  blend.fillet_executive_p3 (798), topology.api_files (339).
+- `error::phrase_sites`, `error::blend`, cone part-1 and plane part-2
+  tests: 46 passed. Clippy `-p solidcore -p solidcore-ops --all-targets
+  -D warnings`: clean. Solidcore `cargo fmt --all -- --check`: clean.

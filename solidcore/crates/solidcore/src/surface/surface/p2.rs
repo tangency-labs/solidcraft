@@ -65,8 +65,6 @@
 //! | [`IsoCurveLengthIntegrand`]                       | `SmIsoCurveLengthIFEO` (constructor)             |
 //!
 //! Deviations:
-//! - **Exact ellipse planes.** An all-ellipse boundary keeps its exactly proved
-//!   common analytic plane; sampling and bilinear recognition do not replace S.
 //! - **`SwapUV` keeps an analytic's definition (WR-701).** As the fork's
 //!   tangency-labs/smlib@0c00de7 (`SwapUVDefinition`), a cone, sphere, torus or surface
 //!   of revolution swapped by [`Surface::swap_uv`] keeps its frame, generator and
@@ -4439,8 +4437,7 @@ impl Surface {
     }
 
     /// A plane containing a set of coplanar 3D curves, with the curves ordered into
-    /// loops (`CreatePlaneWith3DCurves`). An all-ellipse boundary retains its proved
-    /// common analytic plane. Other boundaries use a bilinear surface over the
+    /// loops (`CreatePlaneWith3DCurves`): the plane is a bilinear surface over the
     /// curves' bounding sphere grown by 10%, centred on the projection of the sphere
     /// centre, copied with analytics.
     ///
@@ -4455,9 +4452,6 @@ impl Surface {
         curves: &[Curve],
         tol_3d: f64,
     ) -> Result<PlaneWith3dCurves> {
-        // Analytic ellipses already define their plane. Prove that common support
-        // before loop ordering; sampled normals do not replace its definition.
-        let exact_frame = common_ellipse_plane(curves)?;
         // order curves into loops - clean up curves, build plane, check planarity
         let r = trimming_tools::order_curves_into_loops(k, curves, tol_3d)?;
         r.status()?;
@@ -4470,10 +4464,6 @@ impl Surface {
             curves_box: face_extent,
             ..
         } = r;
-
-        if let Some(frame) = exact_frame {
-            plane_normal = frame.x_axis().cross(frame.y_axis()).unitize()?;
-        }
 
         let mut outer_loop_counts = trimming_tools::find_outer_loops(
             k,
@@ -4526,17 +4516,11 @@ impl Surface {
         let pt11 = center_pt + plane_x_vect + plane_y_vect;
         let pt01 = center_pt - plane_x_vect + plane_y_vect;
 
-        let plane = if let Some(mut frame) = exact_frame {
-            if frame.x_axis().cross(frame.y_axis()).dot(plane_normal) < 0.0 {
-                frame =
-                    Axis2Placement::from_stored(frame.origin(), frame.x_axis(), -frame.y_axis());
-            }
-            ellipse_plane_canvas(frame, face_extent)?
-        } else {
-            // make a bilinear BSpline planar surface from the 4 plane corner points
-            let bs = BSplineSurface::create_bilinear_surface(pt00, pt10, pt01, pt11)?;
-            bs.copy_and_add_analytics(k)?
-        };
+        // make a bilinear BSpline planar surface from the 4 plane corner points
+        let bs = BSplineSurface::create_bilinear_surface(pt00, pt10, pt01, pt11)?;
+
+        // Copy pBS, when possible as an analytic surface (the SmBSplineSurface override)
+        let plane = bs.copy_and_add_analytics(k)?;
 
         Ok(PlaneWith3dCurves {
             plane,
@@ -4581,8 +4565,9 @@ fn ellipse_plane_canvas(
     let sphere = extent.sphere_bound();
     let (face_center, face_radius) = (sphere.center, sphere.radius);
     let box_expansion = 1.1;
-    // The old bounding canvas expansion is retained; only the support S
-    // changes. Its origin and axes are the analytic curve's stored ones.
+    // The canvas grows the curves' bounding sphere by 10%, as
+    // `Surface::create_plane_with_3d_curves` does; the support S is the
+    // analytic curve's stored origin and axes.
     let components = |v: Vec3| [Ivl::from(v.x), Ivl::from(v.y), Ivl::from(v.z)];
     let norm = |v: [Ivl; 3]| {
         v.into_iter()
@@ -4604,7 +4589,7 @@ fn ellipse_plane_canvas(
     let v = (radius * norm([xx, xy, xz]) / normal_length).hi;
     if !(normal_length.lo > 0.0 && u.is_finite() && u > 0.0 && v.is_finite() && v > 0.0) {
         return Err(SolidError::surface_failed(
-            "surface::create_plane_with_3d_curves",
+            "surface::plane_on_ellipses",
             "the analytic plane's bounding canvas is not finite",
         ));
     }
@@ -4616,8 +4601,9 @@ fn ellipse_plane_canvas(
     )))
 }
 
-/// The exact plane of an all-ellipse boundary. Once that class is selected,
-/// noncoplanar supports are refused rather than fitted within a tolerance.
+/// The exact plane of an all-ellipse boundary (`None` when a curve is not an
+/// ellipse). Ellipses off the first one's stored plane are refused rather than
+/// fitted within a tolerance.
 fn common_ellipse_plane(curves: &[Curve]) -> Result<Option<Axis2Placement>> {
     use crate::curve::curve::CurveKind;
     use crate::geom::expansion as exact;
@@ -4634,7 +4620,7 @@ fn common_ellipse_plane(curves: &[Curve]) -> Result<Option<Axis2Placement>> {
     let (x, y) = (frame.x_axis(), frame.y_axis());
     let bad = || {
         SolidError::surface_failed(
-            "surface::create_plane_with_3d_curves",
+            "surface::plane_on_ellipses",
             "the ellipse boundaries do not have one exact plane",
         )
     };
@@ -7925,16 +7911,13 @@ mod tests {
                     )
                 })
                 .collect();
-            let result = Surface::create_plane_with_3d_curves(&k, &curves, 1e-6).unwrap();
-            assert_eq!(result.outer_loop_counts, vec![radii.len()]);
-            for plane in [result.plane, plane_on_ellipses(&k, &curves).unwrap()] {
-                let SurfaceKind::Plane(p) = plane.kind() else {
-                    panic!("the boundary defines a plane");
-                };
-                assert_eq!(p.position().origin().z, 20.0);
-                assert_eq!(p.position().x_axis().z, 0.0);
-                assert_eq!(p.position().y_axis().z, 0.0);
-            }
+            let plane = plane_on_ellipses(&k, &curves).unwrap();
+            let SurfaceKind::Plane(p) = plane.kind() else {
+                panic!("the boundary defines a plane");
+            };
+            assert_eq!(p.position().origin().z, 20.0);
+            assert_eq!(p.position().x_axis().z, 0.0);
+            assert_eq!(p.position().y_axis().z, 0.0);
         }
     }
 
@@ -7960,7 +7943,6 @@ mod tests {
                 )
             })
             .collect();
-        assert!(Surface::create_plane_with_3d_curves(&k, &curves, 1e-6).is_err());
         assert!(plane_on_ellipses(&k, &curves).is_err());
     }
 
