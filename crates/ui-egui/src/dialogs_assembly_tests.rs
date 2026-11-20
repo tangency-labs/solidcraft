@@ -943,6 +943,77 @@ fn picks_on_two_grounded_parts_say_the_joint_moves_neither_and_offer_to_unground
     assert!(text_at(&out, &why).is_none(), "nothing left to say");
 }
 
+/// #12867: the Joint dialog's note covers every pick a joint takes, not only faces: a grounded
+/// component's plane or axis is a side on that part. The root's own bodies never move, so a
+/// grounded part picked against them gets the note too, and the button ungrounds the part,
+/// whichever was picked first. Editing a joint that doesn't hold says why in Messages too.
+#[test]
+fn grounded_note_covers_datum_picks_the_root_and_edits() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        s.execute("component.activate", &json!({"component": "root"})).unwrap();
+        s.execute("component.create", &json!({"name": name})).unwrap();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]})).unwrap();
+    }
+    // A body of the root's own, away from both parts.
+    s.execute("component.activate", &json!({"component": "root"})).unwrap();
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [0, 40, 0]})).unwrap();
+    let mut app = SolveApp::new(s, Services::default());
+    for name in ["A", "B"] {
+        let o = occ(&app, name);
+        app.run("occurrence.ground", json!({"occurrence": o, "grounded": true})).unwrap();
+    }
+    let note = |app: &mut SolveApp, a: Sel, b: Sel| {
+        app.start("joint.create");
+        let mut d = app.dialog.take().unwrap();
+        d.pick(&app.session, a);
+        d.pick(&app.session, b);
+        let Kind::Assembly(Asm::Joint(f)) = &d.kind else { panic!("{:?}", d.kind) };
+        let held = grounded_sides(app, f, &d.inputs);
+        app.dialog = None;
+        held
+    };
+    let face = |app: &SolveApp, x: f64, y: f64| face_sel(&app.session, Vec3::new(x, y, 10.0)).unwrap();
+    let both = solidcraft_ui_text::format("joint.moves_neither", &[("joint", "Rigid Joint1"), ("a", "A:1"), ("b", "B:1")]);
+
+    // A component plane or axis of a grounded part is a side on that part, as a face is.
+    for (a, b) in [
+        (Sel::Plane { name: "A/XY".into() }, face(&app, 25.0, 5.0)),
+        (face(&app, 5.0, 5.0), Sel::Axis { name: "B/Z".into() }),
+        (Sel::Plane { name: "A/XZ".into() }, Sel::Axis { name: "B/X".into() }),
+    ] {
+        let held = note(&mut app, a.clone(), b.clone()).unwrap_or_else(|| panic!("{a:?} and {b:?} are both on grounded parts"));
+        assert_eq!((held.why.as_str(), held.occurrence), (both.as_str(), occ(&app, "B")), "{a:?}, {b:?}");
+    }
+
+    // The root against a grounded part, in either order: the button frees the part.
+    let root_note = solidcraft_ui_text::format("joint.moves_neither_root", &[("joint", "Rigid Joint1"), ("occurrence", "B:1")]);
+    for (a, b) in [(face(&app, 5.0, 45.0), face(&app, 25.0, 5.0)), (face(&app, 25.0, 5.0), face(&app, 5.0, 45.0))] {
+        let held = note(&mut app, a, b).expect("the root never moves");
+        assert_eq!((held.why.as_str(), held.occurrence, held.name.as_str()), (root_note.as_str(), occ(&app, "B"), "B:1"));
+    }
+    // A part that can move gets no note.
+    let a = occ(&app, "A");
+    app.run("occurrence.ground", json!({"occurrence": a, "grounded": false})).unwrap();
+    let (root_face, a_face, b_face) = (face(&app, 5.0, 45.0), face(&app, 5.0, 5.0), face(&app, 25.0, 5.0));
+    assert_eq!(note(&mut app, root_face, a_face), None);
+    assert_eq!(note(&mut app, Sel::Plane { name: "A/XY".into() }, b_face), None);
+    app.run("occurrence.ground", json!({"occurrence": a, "grounded": true})).unwrap();
+
+    // An edit that leaves the joint not holding says why in Messages, as a new joint does.
+    let texts = |app: &SolveApp| app.messages.iter().filter(|m| m.error).map(|m| m.text.clone()).collect::<Vec<_>>();
+    app.run(
+        "joint.create",
+        json!({"type": "rigid", "name": "Rigid1", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "B", "face": [25, 5, 10]}}),
+    )
+    .unwrap();
+    app.messages.clear();
+    let r = app.run("joint.edit", json!({"joint": "Rigid1", "offset": 2})).unwrap();
+    assert!(r["joint"].as_u64().is_some(), "the edit names its joint: {r}");
+    let why = solidcraft_ui_text::format("joint.moves_neither", &[("joint", "Rigid1"), ("a", "A:1"), ("b", "B:1")]);
+    assert!(texts(&app).contains(&why), "{:?}", texts(&app));
+}
+
 #[test]
 fn rigid_group_bodies_in_one_component_explain_how_to_separate_them() {
     for component in [None, Some("Part")] {

@@ -2413,7 +2413,13 @@ pub(super) fn edit_joint(s: &mut Session, p: &Value, plain: bool) -> Result<Valu
     if placed && sol.conflicts.iter().any(|(c, ..)| *c == id) && close_by_half_turn(s, id, &sol) {
         sol = resolve(s);
     }
-    Ok(sol_json(&sol, p))
+    // The reply names the joint, as joint.create's does, so the app can say why an edited joint
+    // doesn't hold (#12867).
+    let mut reply = sol_json(&sol, p);
+    if let Some(o) = reply.as_object_mut() {
+        o.insert("joint".into(), json!(id));
+    }
+    Ok(reply)
 }
 
 /// Shared mutation for individual joints and timeline folders; the caller resolves once.

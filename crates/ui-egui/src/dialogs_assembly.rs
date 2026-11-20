@@ -1938,10 +1938,9 @@ pub(crate) struct GroundedSides {
     pub name: String,
 }
 
-/// The Joint dialog's note when both picks are on grounded parts (#12867): a joint between them
-/// moves neither. `None` while editing, before both sides are picked, or when either side is on
-/// a part that can move (the root's bodies can't be ungrounded, so they get no note here; the
-/// joint's reply still says why).
+/// The Joint dialog's note when both picks are on parts that can't move (#12867): grounded
+/// parts, or the root's own bodies, which never move. A joint between them moves neither. `None`
+/// while editing, before both sides are picked, or when either side is on a part that can move.
 pub(crate) fn grounded_sides(app: &SolveApp, f: &JointForm, inputs: &[SelInput]) -> Option<GroundedSides> {
     if f.editing.is_some() {
         return None;
@@ -1950,18 +1949,37 @@ pub(crate) fn grounded_sides(app: &SolveApp, f: &JointForm, inputs: &[SelInput])
         if f.as_built { sel_items(inputs, 0).iter().collect() } else { (0..2).filter_map(|i| sel_items(inputs, i).first()).collect() };
     let doc = &app.session.doc;
     let mut occs: Vec<u64> = Vec::new();
-    for body in picks.iter().map(|p| body_of(p)) {
-        let occ = placement_of_body(&app.session, body?).map(|path| solidcraft_engine::doc::joints::origin_anchor(doc, &path).0)?;
+    for pick in picks {
+        let occ = side_occurrence(&app.session, pick)?;
         if !occs.contains(&occ) {
             occs.push(occ);
         }
     }
     let [a, b] = occs.as_slice() else { return None };
     let grounded = |o: u64| doc.occurrences.iter().find(|x| x.id == o && x.grounded);
-    let (oa, ob) = (grounded(*a)?, grounded(*b)?);
     let joint = if f.name.trim().is_empty() { default_joint_name(doc, f.joint_kind()) } else { f.name.trim().to_string() };
-    let why = solidcraft_ui_text::format("joint.moves_neither", &[("joint", &joint), ("a", &oa.name), ("b", &ob.name)]);
-    Some(GroundedSides { why, occurrence: ob.id, name: ob.name.clone() })
+    // The Unground button frees the second part, or the one that isn't the root.
+    let (why, free) = match (*a, *b) {
+        (0, o) | (o, 0) => {
+            let free = grounded(o)?;
+            (solidcraft_ui_text::format("joint.moves_neither_root", &[("joint", &joint), ("occurrence", &free.name)]), free)
+        }
+        (a, b) => {
+            let (oa, ob) = (grounded(a)?, grounded(b)?);
+            (solidcraft_ui_text::format("joint.moves_neither", &[("joint", &joint), ("a", &oa.name), ("b", &ob.name)]), ob)
+        }
+    };
+    Some(GroundedSides { why, occurrence: free.id, name: free.name.clone() })
+}
+
+/// The occurrence a joint side picked on `pick` holds (0: the root). A face, edge, vertex or body
+/// is held through the placement it was picked on; a component's plane or axis names its
+/// occurrence as the joint command does ([`snap_of`]). `None` for a pick no part owns here.
+fn side_occurrence(s: &Session, pick: &Sel) -> Option<u64> {
+    match pick {
+        Sel::Plane { .. } | Sel::Axis { .. } => snap_of(s, pick)?.param.get("occurrence")?.as_u64(),
+        _ => placement_of_body(s, body_of(pick)?).map(|path| solidcraft_engine::doc::joints::origin_anchor(&s.doc, &path).0),
+    }
 }
 
 /// The occurrences of picked bodies (deduplicated, in pick order).

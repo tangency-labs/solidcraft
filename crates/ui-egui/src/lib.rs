@@ -4615,8 +4615,8 @@ fn unground_joint_status(app: &mut SolveApp, language: solidcraft_ui_text::Local
 }
 
 /// A joint just made or changed that doesn't hold says why in Messages, as an error: the joint
-/// is kept, but nothing moved (#12867). Between two grounded parts it says so, and how to let
-/// it place one; any other conflict gives the solver's reason.
+/// is kept, but nothing moved (#12867). Between two grounded parts, or a grounded part and the
+/// root, it says so, and how to let it place one; any other conflict gives the solver's reason.
 fn joint_conflict_status(app: &mut SolveApp, language: solidcraft_ui_text::Locale, v: &Value) {
     use i18n::LocaleNames;
 
@@ -4630,10 +4630,11 @@ fn joint_conflict_status(app: &mut SolveApp, language: solidcraft_ui_text::Local
     let Some(joint) = doc.assembly.joints.iter().find(|j| j.id == id) else { return };
     let grounded = |o: u64| doc.occurrences.iter().find(|x| x.id == o && x.grounded).map(|x| language.given_name(&x.name));
     let name = language.given_name(&joint.name);
-    let msg = match (grounded(joint.a.occurrence), grounded(joint.b.occurrence)) {
-        (Some(a), Some(b)) if joint.a.occurrence != joint.b.occurrence => {
-            language.format("joint.moves_neither", &[("joint", &name), ("a", &a), ("b", &b)])
-        }
+    let (a, b) = (joint.a.occurrence, joint.b.occurrence);
+    let msg = match (grounded(a), grounded(b)) {
+        (Some(ga), Some(gb)) if a != b => language.format("joint.moves_neither", &[("joint", &name), ("a", &ga), ("b", &gb)]),
+        // The root's own bodies never move: a grounded part joined to them is held the same way.
+        (Some(g), None) | (None, Some(g)) if a == 0 || b == 0 => language.format("joint.moves_neither_root", &[("joint", &name), ("occurrence", &g)]),
         _ => {
             let reason = conflict.get("why").and_then(Value::as_str).unwrap_or_default();
             language.format("joint.does_not_hold", &[("joint", &name), ("reason", &language.diagnostic(reason))])
