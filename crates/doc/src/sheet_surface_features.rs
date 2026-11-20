@@ -1051,7 +1051,10 @@ impl SurfaceSheet {
         // A round-ended notch can connect the zone while separating the material beyond it
         // (#18560). Close its mouth for the panel/joint recipe, then keep the original notch
         // as a cross-joint cut: the rebuilt surface model cuts it from panels and bends alike.
-        if !matches!(&planned, Err(DocError::Invalid(m)) if m == "not supported yet: a fold whose bend zone holds two pieces beyond it") {
+        // A notch whose round end lies inside the zone leaves a chord with a piece on each side
+        // of it beyond the line, joined through the zone under the notch's end: the chord rule
+        // refuses that as material running round, which is the case this path closes.
+        if !matches!(&planned, Err(DocError::Invalid(m)) if m == FOLD_ROUND_MATERIAL) {
             return planned;
         }
         let ba = bend.allowance(self.sheet.thickness, self.sheet.k_factor);
