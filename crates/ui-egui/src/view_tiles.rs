@@ -389,7 +389,8 @@ pub(crate) fn placement_overlay(app: &mut SolveApp, ctx: &egui::Context) {
             .fade_in(false)
             .show(ctx, |ui| {
                 let rect = Rect::from_min_size(ui.next_widget_position(), size);
-                let response = crate::ui_kit::button_at(ui, "view_placement_zone", rect, solidcraft_ui_text::tr(label), crate::ui_kit::Button::Normal);
+                let response =
+                    crate::ui_kit::button_at(ui, "view_placement_zone", rect, solidcraft_ui_text::tr(label), crate::ui_kit::Button::Normal);
                 if response.hovered() || response.has_focus() {
                     let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::unique("view_tile_preview")));
                     paint_preview(&painter, zone.preview);
