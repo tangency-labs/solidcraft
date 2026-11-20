@@ -24,7 +24,7 @@ pub fn declarative(schema: &Value, values: &Value, protected: &BTreeSet<String>)
     let rules = InputConditions::parse(schema)?;
     for key in &rules.order {
         let Some(rule) = rules.fields.get(key) else { continue };
-        let controls = rules.visible_values(&values);
+        let controls = rules.visible_values(&values)?;
         if !rule.visible(&controls) {
             values.remove(key);
         } else if !protected.contains(key)
@@ -129,7 +129,7 @@ fn patch(schema: &Value, baseline: &Value, protected: &BTreeSet<String>, reply: 
     // Re-evaluate declarative constraints on the proposed values; the hook cannot relax them.
     let rules = InputConditions::parse(schema)?;
     let object = values.as_object().ok_or_else(|| bad("", "expected an object"))?;
-    let controls = rules.visible_values(object);
+    let controls = rules.visible_values(object)?;
     for (key, field) in &fields {
         let rule = rules.fields.get(key).cloned().unwrap_or_default();
         if field.get("visible") == Some(&Value::Bool(true)) && !rule.visible(&controls)
