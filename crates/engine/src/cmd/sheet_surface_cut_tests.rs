@@ -1144,3 +1144,34 @@ fn a_cut_out_with_a_corner_on_the_sheets_edge_at_a_bend_folds_with_the_sheet() {
     run(&mut s, "sheet.refold", json!({}));
     check(&s, whole - 3.0, "folded again");
 }
+
+/// #19690: a hole cut into a folded sheet whose outline is a closed spline with a notch
+/// 0.00002 mm from the spline's seam is cut. The notch leaves an edge of the body finer than the
+/// body's own tolerance, and the sheet reads the body back onto its flat panels as it does any
+/// other cut.
+#[test]
+fn a_hole_in_a_folded_spline_sheet_with_a_notch_at_its_seam_is_cut() {
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "Stock", "thickness": "1.0 mm", "k_factor": 0.44, "bend_radius": "1.0 mm", "active": true}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    let points = [[500.0, 0.0], [379.0, 75.7], [0.0, 90.0], [-379.0, 75.7], [-500.0, 0.0], [-329.0, -65.7], [-0.0, -110.0], [329.0, -65.7]];
+    run(&mut s, "sketch.spline.fit_point", json!({"points": points, "periodic": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base", "type": "base", "body_name": "Part"}));
+    // A notch whose wall passes 0.00002 mm from the corner where the spline closes.
+    run(
+        &mut s,
+        "solid.cylinder",
+        json!({"radius": 0.24, "height": 0.5, "base": [499.97444631152314, 0.2386534453952397, 0.5], "axis": "Z", "operation": "cut", "targets": ["Part"]}),
+    );
+    run(&mut s, "sheet.fold", json!({"points": [[200.0, -200.0, 1.0], [200.0, 200.0, 1.0]], "angle": "90 deg", "radius": "1.0 mm"}));
+    let before = volume(&mut s);
+    run(
+        &mut s,
+        "solid.cylinder",
+        json!({"radius": 0.2, "height": 0.4, "base": [-300.0, -0.6, 0.6], "axis": "Z", "operation": "cut", "targets": ["Part"], "name": "Hole1"}),
+    );
+    // The hole is a pocket 0.4 mm deep in the sheet's surface, so it takes that much of it.
+    let want = before - PI * 0.04 * 0.4;
+    assert!((volume(&mut s) - want).abs() < 1e-6 * want, "{} vs {want}", volume(&mut s));
+}
