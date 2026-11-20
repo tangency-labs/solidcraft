@@ -447,19 +447,16 @@ impl JsonSchema for CreateParams {
     }
 }
 
-/// How a new sketch is attached to its plane: `exact_face`, `sheet_face`, `internal_legacy_face`
-/// or `fixed`.
+/// How a new sketch is attached to its plane: `exact_face`, `internal_legacy_face` or `fixed`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Attachment {
     // `exact_face`: a planar face of a body, exactly, so the sketch follows the face;
-    // `sheet_face`: the panel of a sheet metal body's flat pattern;
     // `internal_legacy_face`: a face picked by a command that starts a sketch on a face
     // (Extrude, Revolve, Press Pull);
     // `fixed`: where the plane is (an origin, construction or explicit plane, or a face kept
     // with `fixed`).
     ExactFace,
-    SheetFace,
     InternalLegacyFace,
     Fixed,
 }

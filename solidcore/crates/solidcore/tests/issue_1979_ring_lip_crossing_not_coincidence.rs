@@ -4,11 +4,12 @@
 //! the curve/curve global solver on the two circles, whose span ends lie within 1e-9 of the
 //! other circle: `SmCurve::SimpleCoincidenceChecker` takes the span pair as a coincidence
 //! range, although the circles cross inside it, and the range becomes a tiny edge. Upstream
-//! was then non-manifold at e = 1e-4 (`SmTrimmingTools` #0/#2/#3/#4, as the fork reports; the
-//! default union there is now valid, see below) and gives no solid (volume 0) at e = 1e-3,
-//! which the union's WR-619 guard now refuses; with
-//! `Kernel::fixes.simple_coincidence_crossing_is_point` the range is the crossing and every
-//! offset is a valid manifold solid of the analytic volume.
+//! was then non-manifold at e = 1e-4 (`SmTrimmingTools` #0/#2/#3/#4, as the fork reports)
+//! and gives no solid (volume 0) at e = 1e-3. `GlobalCurveIntersect` now takes a merged
+//! range that ends where the circles part on both sides, and across which they change
+//! sides, for their crossing, so every offset is a valid manifold solid of the analytic
+//! volume, by default and with `Kernel::fixes.simple_coincidence_crossing_is_point`
+//! (whose crossing half this retired; its nearest-point half stays behind it).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -18,8 +19,6 @@
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::curve::curve::Curve;
 use solidcore::curve::ellipse::Ellipse;
-use solidcore::error::boolean::BooleanFailure;
-use solidcore::error::Reason;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
@@ -101,26 +100,18 @@ fn issue_1979_ring_lip_union_is_valid_at_every_offset_with_the_fix() {
     assert!(report.is_empty(), "want {}: {report:#?}", want());
 }
 
-/// Upstream (the default) is non-manifold at 1e-4 (`SmTrimmingTools` #4) and gives no
-/// solid at 1e-3. The tiny edge's two ends at 1e-4 are one point: each is fixed along its
-/// circle only to its tolerance over the sine of the angle at which the circles cross
-/// (docs/booleans.md, "One point or two"), so the default union there is now the valid
-/// solid too. At 1e-3 its face deletion still leaves no solid region (volume 0, against
-/// the 355 of `want`): a union of two non-empty solids always has one, so the union's
-/// WR-619 guard refuses that body (`BooleanFailure::SolidLeaks`).
+/// The default kernel. Upstream was non-manifold at 1e-4 and left no solid region at 1e-3
+/// (which the union's WR-619 guard refused, `BooleanFailure::SolidLeaks`); the crossing is
+/// now decided on the merged range by default, so every offset is the valid solid too.
 #[test]
-fn issue_1979_ring_lip_union_by_default() {
-    let (manifold, lines, v) = union_at(1e-4, false).unwrap();
-    assert!(
-        manifold && lines.is_empty() && (v - want()).abs() <= 1e-5 * want(),
-        "e = 1e-4: {manifold} {lines:?} {v}"
-    );
-    let e = union_at(1e-3, false).unwrap_err();
-    assert!(
-        matches!(
-            e.failure().map(|f| &f.reason),
-            Some(Reason::Boolean(BooleanFailure::SolidLeaks { .. }))
-        ),
-        "e = 1e-3: {e:?}"
-    );
+fn issue_1979_ring_lip_union_is_valid_at_every_offset_by_default() {
+    let mut report = Vec::new();
+    for e in [0.0, 1e-4, 1e-3, 1e-2] {
+        let got = union_at(e, false).unwrap();
+        let ok = got.0 && got.1.is_empty() && (got.2 - want()).abs() <= 1e-5 * want();
+        if !ok {
+            report.push(format!("e = {e}: {got:?}"));
+        }
+    }
+    assert!(report.is_empty(), "want {}: {report:#?}", want());
 }

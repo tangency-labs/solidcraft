@@ -2957,7 +2957,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let mut crashed = Session::default();
         crashed.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
-        let bytes = solidcraft_engine::io::write_design(&crashed.doc);
+        let bytes = solidcraft_engine::io::write_design(&crashed.doc).unwrap();
         let design = dir.join("design.sc");
         std::fs::write(&design, &bytes).unwrap();
         let report = json!({
@@ -2976,7 +2976,7 @@ mod tests {
         let t = ticket::new_ticket(&mut app, &draft, None);
         let ev = &t.evidence;
         assert_eq!(ev.design.as_ref().map(|(n, b)| (n.as_str(), b.as_slice())), Some(("Vent Panel.sc", bytes.as_slice())));
-        assert_ne!(ev.design.as_ref().unwrap().1, solidcraft_engine::io::write_design(&app.session.doc), "not the design open now");
+        assert_ne!(ev.design.as_ref().unwrap().1, solidcraft_engine::io::write_design(&app.session.doc).unwrap(), "not the design open now");
         assert_eq!(ev.design_from, Some("report.design_from_crash"));
         assert_eq!(ev.session["session_start"], "crashed");
         assert_eq!(ev.session["design_sha256"], json!(tickets::api::sha256_hex(&bytes)));
@@ -3030,7 +3030,8 @@ mod tests {
         let draft = draft_for(&app, None, None);
         let t = ticket::new_ticket(&mut app, &draft, None);
         assert_eq!(t.evidence.design_from, None);
-        assert_eq!(t.evidence.design.unwrap().1, solidcraft_engine::io::write_design(&app.session.doc));
+        let attached = solidcraft_engine::io::read_design(&t.evidence.design.unwrap().1).unwrap();
+        assert_eq!(attached.features, app.session.doc.features);
         if let Some(a) = app.autosave.take() {
             drop(a);
         }

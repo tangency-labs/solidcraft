@@ -5,13 +5,13 @@ use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
 use solidcraft_doc::DEFAULT_MATERIAL;
-use solidcraft_doc::config::{Column, MAX_COLUMNS, RowKey, RuleTrace};
+use solidcraft_doc::config::{Column, MAX_COLUMNS, RowKey, RuleEffect, RuleTrace};
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, str_, string_list};
 use crate::schema::config::{
     ConfigActivation, ConfigColumnParams, ConfigConfigureParams, ConfigRowEditParams, ConfigRowParams, ConfigRuleParams, ConfigTable,
-    ConfigTableParams, ConfigTableReply, ConfigTableRow, ConfigTarget,
+    ConfigTableParams, ConfigTableReply, ConfigTableRow, ConfigTarget, ConfigUpdate, ConfigUpdateParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -22,6 +22,7 @@ const CONFIGURE_CONTRACT: TypedContract<ConfigConfigureParams> = TypedContract::
 const COLUMN_CONTRACT: TypedContract<ConfigColumnParams> = TypedContract::new();
 const ROW_EDIT_CONTRACT: TypedContract<ConfigRowEditParams> = TypedContract::new();
 const RULE_CONTRACT: TypedContract<ConfigRuleParams> = TypedContract::new();
+const UPDATE_CONTRACT: TypedContract<ConfigUpdateParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("config.configure", "Configure", crate::checked!("config.configure", configure))
@@ -56,6 +57,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&ROW_CONTRACT)
         .output(output_schema_for::<ConfigActivation>)
         .params("row: a row's name, or its id from config.table — sets its parameter values and suppressions"),
+    CommandSpec::new("config.update_from_design", "Update Configuration from Design", crate::checked!("config.update_from_design", update_from_design))
+        .icon("configuration_table")
+        .contract(&UPDATE_CONTRACT)
+        .output(output_schema_for::<ConfigUpdate>)
+        .params(
+            "row?: a row's name, or its id from config.table (default: the active row) — sets its cells to the design's current values and makes it the active row; only the table's columns, other changes are listed in not_captured",
+        ),
     CommandSpec::new("config.preview", "Preview Configuration", crate::checked!("config.preview", preview))
         .icon("eye")
         .noundo()
@@ -210,6 +218,7 @@ fn configure(s: &mut Session, p: &Value) -> Result<Value> {
         let cells = s.doc.configs.columns.iter().map(|c| s.doc.config_current(c).unwrap_or_default()).collect();
         s.doc_mut().add_configuration_row("Default".into(), cells).map_err(|e| bad(cmd, e.to_string()))?;
         s.doc_mut().configs.active = Some("Default".into());
+        s.config_baseline = Some((s.document_id.clone(), s.doc.clone()));
     }
     show(s, p)
 }
@@ -530,6 +539,7 @@ fn activation(s: &mut Session, p: &Value) -> Result<ConfigActivation> {
     let solved = s.solved_sketches();
     s.doc = trial.doc;
     s.settle_value_edit(&solved)?;
+    s.config_baseline = Some((s.document_id.clone(), s.doc.clone()));
     let errors: Vec<String> = s.model.results.iter().filter_map(|x| x.error.clone()).collect();
     let trace = put.trace.iter().map(|t| serde_json::to_value(t).map_err(|e| bad(cmd, e.to_string()))).collect::<Result<Vec<_>>>()?;
     Ok(ConfigActivation { table: table(s, cmd)?, errors, trace, styles, preview: None, parameters: None, param_warnings: Vec::new() })
@@ -560,6 +570,119 @@ pub(crate) fn put_row(s: &mut Session, key: RowKey<'_>, cmd: &str) -> Result<Put
         .filter_map(|r| r.error.as_ref().filter(|error| failing.get(&r.id) != Some(*error)).map(|error| format!("{}: {error}", r.name)))
         .collect();
     Ok(PutRow { trace, new_errors })
+}
+
+/// Take the design's current values into a row (T-686): each cell becomes
+/// [`solidcraft_doc::Document::config_current`] for its column, the same value a new column
+/// starts with. A parameter cell takes the parameter's expression, not its number, so a cell that
+/// says `base * 2` keeps saying it until the parameter's own expression is edited. A column a
+/// rule drives in this row keeps its cell: activating the row gives the rule's value anyway.
+fn update_from_design(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "config.update_from_design";
+    let key = match p.get("row") {
+        None | Some(Value::Null) => RowKey::Name(s.doc.configs.active.as_deref().ok_or_else(|| bad(cmd, "no configuration is active; give `row`"))?),
+        Some(given) => RowKey::read(given).ok_or_else(|| bad(cmd, "`row` must be a row's name or id"))?,
+    };
+    let t = &s.doc.configs;
+    let index = t
+        .rows
+        .iter()
+        .position(|r| match key {
+            RowKey::Id(id) => r.id == id,
+            RowKey::Name(name) => r.name == name,
+        })
+        .ok_or_else(|| bad(cmd, format!("no row `{key}`")))?;
+    let row = t.rows[index].clone();
+    if row.cells.len() != t.columns.len() {
+        return Err(bad(cmd, format!("row `{}` has the wrong number of cells", row.name)));
+    }
+    // A column whose target is gone keeps its cell; activating the row reports it.
+    let mut cells: Vec<String> =
+        t.columns.iter().zip(&row.cells).map(|(column, cell)| s.doc.config_current(column).unwrap_or_else(|| cell.clone())).collect();
+    let mut driven_by_rule = Vec::new();
+    if !t.rules.is_empty() {
+        let mut trial = (*s.doc).clone();
+        if let Some(r) = trial.configs.rows.get_mut(index) {
+            r.cells = cells.clone();
+        }
+        let trace = trial.apply_configuration_with_trace(row.id).map_err(|e| bad(cmd, e.to_string()))?;
+        let driven: Vec<Column> = trace
+            .iter()
+            .filter(|rule| rule.matched)
+            .filter_map(|rule| match &rule.effect {
+                RuleEffect::DriveParameter { parameter, .. } => Some(Column::Param(parameter.clone())),
+                RuleEffect::DriveSuppression { feature, .. } => Some(Column::Suppress(*feature)),
+                _ => None,
+            })
+            .collect();
+        for ((column, cell), old) in t.columns.iter().zip(cells.iter_mut()).zip(&row.cells) {
+            if driven.contains(column) {
+                *cell = old.clone();
+                driven_by_rule.push(s.doc.config_key(column));
+            }
+        }
+    }
+    let updated: Vec<String> =
+        t.columns.iter().zip(cells.iter().zip(&row.cells)).filter(|(_, (new, old))| new != old).map(|(column, _)| s.doc.config_key(column)).collect();
+    let not_captured = not_captured(s);
+    let name = row.name.clone();
+    let configs = &mut s.doc_mut().configs;
+    if let Some(r) = configs.rows.get_mut(index) {
+        r.cells = cells;
+    }
+    configs.active = Some(name.clone());
+    if !s.doc.configs.rules.is_empty() {
+        validate_rows(s, cmd)?;
+    }
+    s.config_baseline = Some((s.document_id.clone(), s.doc.clone()));
+    to_reply(cmd, ConfigUpdate { table: table(s, cmd)?, row: name, updated, driven_by_rule, not_captured, param_warnings: Vec::new() })
+}
+
+/// The changes to features and parameters the configuration table has no column for, since a row
+/// was last put on the design or took the design's values in this session (or else since the
+/// design was opened or saved): each as the column key that would hold it.
+fn not_captured(s: &Session) -> Vec<String> {
+    // Before any row was put on the design in this session: the design as it was opened or last saved.
+    // A row put on the design and undone since (another active row) falls back the same way.
+    let baseline = match &s.config_baseline {
+        Some((id, baseline)) if *id == s.document_id && baseline.configs.active == s.doc.configs.active => baseline,
+        _ => &s.saved,
+    };
+    let columns = &s.doc.configs.columns;
+    let mut out = Vec::new();
+    for feature in &s.doc.features {
+        if !columns.contains(&Column::Suppress(feature.id))
+            && baseline.feature(feature.id).is_some_and(|before| before.suppressed != feature.suppressed)
+        {
+            out.push(format!("suppress:{}", feature.name));
+        }
+    }
+    // Parameters, numeric and text: a changed one, and a user parameter added since. A new
+    // feature's own inputs come with the feature and aren't listed.
+    let before: BTreeMap<String, String> = baseline
+        .all_param_exprs()
+        .into_iter()
+        .map(|(name, expr, _)| (name, expr))
+        .chain(baseline.text_params.iter().map(|p| (p.name.clone(), p.text.clone())))
+        .collect();
+    let user: std::collections::BTreeSet<&str> =
+        s.doc.params.iter().map(|p| p.name.as_str()).chain(s.doc.text_params.iter().map(|p| p.name.as_str())).collect();
+    let now = s
+        .doc
+        .all_param_exprs()
+        .into_iter()
+        .map(|(name, expr, _)| (name, expr))
+        .chain(s.doc.text_params.iter().map(|p| (p.name.clone(), p.text.clone())));
+    for (name, expr) in now {
+        let changed = match before.get(&name) {
+            Some(old) => *old != expr,
+            None => user.contains(name.as_str()),
+        };
+        if changed && !columns.contains(&Column::Param(name.clone())) {
+            out.push(format!("param:{name}"));
+        }
+    }
+    out
 }
 
 fn preview(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1311,5 +1434,83 @@ mod tests {
         assert!(!reopened.doc.appearances.bodies.contains_key("Block"));
         assert!((volume(&mut reopened) - 6000.0).abs() < 1e-6);
         assert!(reopened.doc.configuration_matches());
+    }
+
+    /// Update from design (T-686) writes the design's current value of each column into the
+    /// active row as one undo step, lists a change the table has no column for, keeps a parameter
+    /// cell's expression rather than its number, and leaves a rule-driven cell alone.
+    #[test]
+    fn update_from_design_takes_the_designs_values_into_the_row() {
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name":"base","expression":"10 mm"}));
+        run(&mut s, "parameters.add", json!({"name":"width","expression":"20 mm"}));
+        run(&mut s, "solid.box", json!({"length":"width","width":10,"height":10}));
+        run(&mut s, "solid.box", json!({"length":5,"width":5,"height":5,"base":[0,0,20]}));
+        run(&mut s, "solid.box", json!({"length":4,"width":4,"height":4,"base":[0,0,40]}));
+        let (tower, cap) = (s.doc.features[1].id, s.doc.features[2].id);
+        let names = [s.doc.features[0].name.clone(), s.doc.features[1].name.clone()];
+        run(&mut s, "config.configure", json!({"params":["width"],"features":names}));
+        run(&mut s, "config.row", json!({"name":"Short","values":{"param:width":"12 mm"}}));
+        assert!((volume(&mut s) - (2000.0 + 125.0 + 64.0)).abs() < 1e-6, "20×10×10 + 5³ + 4³");
+        // Edit the design by hand: a new width, the tower suppressed, and the cap too (no column).
+        run(&mut s, "parameters.change", json!({"name":"width","expression":"30 mm"}));
+        run(&mut s, "timeline.suppress", json!({"feature": tower, "suppressed": true}));
+        run(&mut s, "timeline.suppress", json!({"feature": cap, "suppressed": true}));
+        assert!(!s.doc.configuration_matches());
+        let undo = s.undo.len();
+        let reply = run(&mut s, "config.update_from_design", json!({}));
+        assert_eq!(reply["row"], "Default");
+        let tower_key = format!("suppress:{}", names[1]);
+        assert_eq!(reply["updated"], json!(["param:width", tower_key]));
+        assert_eq!(reply["not_captured"], json!([format!("suppress:{}", s.doc.feature(cap).unwrap().name)]));
+        assert_eq!(s.doc.configs.rows[0].cells, ["30 mm", "false", "true"]);
+        assert!(s.doc.configuration_matches(), "the design now is the row");
+        assert_eq!(s.undo.len(), undo + 1, "one undo step");
+        // The other row is untouched, and activating back and forth keeps both.
+        assert_eq!(s.doc.configs.rows[1].cells, ["12 mm", "false", "false"]);
+        run(&mut s, "config.activate", json!({"row":"Short"}));
+        run(&mut s, "config.activate", json!({"row":"Default"}));
+        assert!((volume(&mut s) - 3000.0).abs() < 1e-6, "30×10×10, tower and cap suppressed");
+        run(&mut s, "edit.undo", json!({}));
+        run(&mut s, "edit.undo", json!({}));
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(s.doc.configs.rows[0].cells, ["20 mm", "false", "false"], "undo puts the row back");
+        run(&mut s, "edit.redo", json!({}));
+
+        // A parameter cell takes the expression: it keeps `base * 3` when `base` changes.
+        run(&mut s, "parameters.change", json!({"name":"width","expression":"base * 3"}));
+        run(&mut s, "config.update_from_design", json!({"row":"Default"}));
+        assert_eq!(s.doc.configs.rows[0].cells[0], "base * 3");
+        run(&mut s, "parameters.change", json!({"name":"base","expression":"12 mm"}));
+        let reply = run(&mut s, "config.update_from_design", json!({}));
+        assert_eq!(reply["updated"], json!([]));
+        assert_eq!(reply["not_captured"], json!(["param:base"]), "base has no column");
+        run(&mut s, "parameters.add", json!({"name":"spare","expression":"5 mm"}));
+        let reply = run(&mut s, "config.update_from_design", json!({}));
+        assert_eq!(reply["not_captured"], json!(["param:spare"]), "a parameter added since is listed too");
+        assert_eq!(s.doc.configs.rows[0].cells[0], "base * 3");
+
+        // A row by name that isn't active takes the design's values and becomes the active row.
+        run(&mut s, "config.update_from_design", json!({"row":"Short"}));
+        assert_eq!(s.doc.configs.active.as_deref(), Some("Short"));
+        assert_eq!(s.doc.configs.rows[1].cells[0], "base * 3");
+
+        // A rule that drives the tower's suppression keeps the tower's cell.
+        let rule = json!({"id":"tower","name":"tower","enabled":true,"condition":{"type":"always"},
+            "effect":{"type":"drive_suppression","feature":tower,"value":true}});
+        run(&mut s, "config.rule", json!({"rule":rule}));
+        run(&mut s, "config.activate", json!({"row":"Short"}));
+        assert!(s.doc.feature(tower).unwrap().suppressed);
+        let reply = run(&mut s, "config.update_from_design", json!({}));
+        assert_eq!(reply["driven_by_rule"], json!([tower_key]));
+        assert_eq!(s.doc.configs.rows[1].cells[1], "false", "the rule's value isn't written into the cell");
+
+        for (p, message) in [(json!({"row":"Nope"}), "no row `Nope`"), (json!({"row":true}), "`row` must be a row's name or id")] {
+            let err = s.execute("config.update_from_design", &p).unwrap_err().to_string();
+            assert!(err.contains(message), "{p}: {err}");
+        }
+        let mut empty = Session::default();
+        let err = empty.execute("config.update_from_design", &json!({})).unwrap_err().to_string();
+        assert!(err.contains("no configuration is active"), "{err}");
     }
 }

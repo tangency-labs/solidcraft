@@ -96,7 +96,7 @@ pub(crate) fn history_folder_items(app: &SolveApp) -> Vec<Item> {
                 _ => format!("timeline_{}", control.id()),
             };
             let effect = transport_effect(app, control);
-            Item::action("ui.historyTransport", control.label(playing, play_labels()), &icon)
+            Item::action("ui.historyTransport", control.label(playing, play_labels(app)), &icon)
                 .with(json!({ "control": control.id() }))
                 .on(effect.is_ok())
                 .off_because(effect.err().flatten())
@@ -218,6 +218,8 @@ impl TimelineKind {
         match kind {
             FeatureKind::Sketch { .. } => Self::Sketch,
             FeatureKind::Extrude { sketch, .. } | FeatureKind::Revolve { sketch, .. } | FeatureKind::Sweep { sketch, .. } => Self::Profile(*sketch),
+            // Sheet metal drawn from a sketch: the base flange's outline and the contour flange's chain.
+            FeatureKind::SheetBase { sketch, .. } | FeatureKind::SheetContour { sketch, .. } => Self::Profile(*sketch),
             _ => Self::Other,
         }
     }
@@ -295,6 +297,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Pipe { .. } => "pipe",
         FeatureKind::FrameEndCap { .. } => "end_cap",
         FeatureKind::FrameMember { .. } => "frame_member",
+        FeatureKind::FrameMemberTurn { .. } => "rotate_member",
         FeatureKind::Emboss { .. } => "emboss",
         FeatureKind::ReplaceFace { .. } => "replace_face",
         FeatureKind::Align { .. } => "align",
@@ -746,12 +749,23 @@ pub(crate) fn import_status(app: &SolveApp, reply: &Value) -> Option<String> {
     result.import_report.as_deref().map(import_summary)
 }
 
+/// The status line after an open or an import that warns: the import's summary
+/// ([`import_status`]), else how many warnings the reply has and the first of them. `None` without
+/// warnings. The desktop's open, the web's open and an insert all say it the same way.
+pub(crate) fn import_warning_status(app: &SolveApp, reply: &Value) -> Option<String> {
+    import_status(app, reply).or_else(|| {
+        let w = reply.get("warnings").and_then(Value::as_array).filter(|w| !w.is_empty())?;
+        Some(format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or("")))
+    })
+}
+
 /// SMLib's check of an import's parts runs on after the design shows (#17697). When it ends,
 /// what it found joins the import's result, so its History chip warns, and a part to repair is
 /// said on the status line, once per import, in history order. While a check runs the window
 /// looks again a few times a second.
 pub(crate) fn tick_import_checks(app: &mut SolveApp, ctx: &egui::Context) {
-    app.session.model.settle_import_checks();
+    // Parts the checks healed: the import is its healed bodies from now on.
+    app.session.settle_import_checks();
     for id in app.session.model.take_import_notices() {
         if let Some(summary) = app.session.model.result(id).and_then(|r| r.import_report.as_deref()).map(import_summary) {
             app.set_status(summary, false);
@@ -944,10 +958,17 @@ fn playback_ready(app: &SolveApp) -> Result<(), String> {
         return Err(solidcraft_ui_text::tr("ui.history_play_finish_action").into());
     }
     let n = app.session.doc.features.len();
-    if app.session.doc.marker.unwrap_or(n) >= n {
+    if app.session.doc.marker.unwrap_or(n) >= n && !play_starts_over(app) {
         return Err(solidcraft_ui_text::tr("ui.history_play_roll_back").into());
     }
     Ok(())
+}
+
+/// Whether Play History starts over: the marker is at the end of a History that has features
+/// (#10798).
+fn play_starts_over(app: &SolveApp) -> bool {
+    let n = app.session.doc.features.len();
+    n > 0 && app.session.doc.marker.unwrap_or(n) >= n
 }
 
 pub(crate) fn request_playback(app: &mut SolveApp, action: PlaybackAction) -> Result<(), String> {
@@ -959,6 +980,14 @@ pub(crate) fn request_playback(app: &mut SolveApp, action: PlaybackAction) -> Re
         return Ok(());
     }
     playback_ready(app)?;
+    if play_starts_over(app) {
+        // Back to the start first, shown like any step; the next step shows the first feature
+        // (#10798).
+        let revision = app.session.revision;
+        app.run_heavy("timeline.roll_to", json!({"position": 0}))?;
+        app.timeline_playback = Some(Playback { revision, position: 0, waiting: true, next_at: 0.0 });
+        return Ok(());
+    }
     let n = app.session.doc.features.len();
     let position = app.session.doc.marker.unwrap_or(n);
     app.timeline_playback = Some(Playback { revision: app.session.revision, position, waiting: false, next_at: 0.0 });
@@ -1172,9 +1201,11 @@ impl BarResults {
     }
 }
 
-/// The History Play control's names: SolidCraft's commands that play and stop History.
-pub(crate) fn play_labels() -> crate::ui_kit::PlayLabels<'static> {
-    crate::ui_kit::PlayLabels { play: solidcraft_ui_text::tr("cmd.timeline_play"), stop: solidcraft_ui_text::tr("cmd.timeline_stop") }
+/// The History Play control's names: SolidCraft's commands that play and stop History, and
+/// "Play from the start" while Play starts over (#10798).
+pub(crate) fn play_labels(app: &SolveApp) -> crate::ui_kit::PlayLabels<'static> {
+    let play = if play_starts_over(app) { "ui.history_play_from_start" } else { "cmd.timeline_play" };
+    crate::ui_kit::PlayLabels { play: solidcraft_ui_text::tr(play), stop: solidcraft_ui_text::tr("cmd.timeline_stop") }
 }
 
 /// The bar as SolidCraft describes it; the strip sets the marker's slot and the step count.
@@ -1614,8 +1645,15 @@ mod tests {
         crate::i18n::install();
         use solidcraft_engine::doc::kernel::{ImportIssue, ImportReport, IssueKind};
         let _english = solidcraft_ui_text::scope("en");
-        let issue =
-            |kind, item: Option<u64>, faces, detail: &str| ImportIssue { kind, item, part: String::new(), faces, times: 1, detail: detail.into() };
+        let issue = |kind, item: Option<u64>, faces, detail: &str| ImportIssue {
+            kind,
+            item,
+            part: String::new(),
+            paths: Vec::new(),
+            faces,
+            times: 1,
+            detail: detail.into(),
+        };
         let report = ImportReport {
             parts: 43,
             solids: 40,
@@ -1640,6 +1678,7 @@ mod tests {
                 issue(IssueKind::Repaired, Some(4), 0, "solid #4: 1 faces turned over: their loops disagree with their same_sense"),
                 issue(IssueKind::File, None, 0, "component placement #77: … (placed at the origin)"),
             ],
+            single_root: true,
             ..Default::default()
         };
         let summary = super::import_summary(&report);
@@ -1652,8 +1691,13 @@ mod tests {
         );
         assert!(!summary.contains('#') && !summary.contains("SMLib"), "{summary}");
         // Only repairs: no advice, and a part alone has no "of" count.
-        let repaired =
-            ImportReport { parts: 1, solids: 1, issues: vec![issue(IssueKind::Repaired, Some(3), 0, "solid #3: …")], ..Default::default() };
+        let repaired = ImportReport {
+            parts: 1,
+            solids: 1,
+            issues: vec![issue(IssueKind::Repaired, Some(3), 0, "solid #3: …")],
+            single_root: true,
+            ..Default::default()
+        };
         assert_eq!(super::import_summary(&repaired), "Small flaws were repaired in 1 part.");
     }
 
@@ -1741,7 +1785,7 @@ mod tests {
             cases.push((format!("construct.point.{id}"), FeatureKind::ConstructionPoint { def }));
         }
         for (id, plane) in [
-            ("midplane", PlaneRef::Midplane { a: reference(), b: reference() }),
+            ("midplane", PlaneRef::Midplane { a: reference(), b: reference(), old_frame: false }),
             ("axis_point", PlaneRef::AxisPoint { axis: reference(), point: reference() }),
             ("two_edges", PlaneRef::TwoEdges { a: reference(), b: reference() }),
             ("three_points", PlaneRef::ThreePoints { a: reference(), b: reference(), c: reference() }),
@@ -1835,10 +1879,12 @@ mod tests {
                 .collect()
         };
         let state = |pairs: [(&str, bool); 5]| pairs.map(|(c, on)| (c.to_owned(), on)).to_vec();
-        // At the end: only the steps back are on, and Play has nothing left to play.
-        assert_eq!(enabled(&h), state([("first", true), ("back", true), ("play", false), ("forward", false), ("last", false)]));
-        let play = crate::context_menu::items(&h.app, &folder).into_iter().find(|i| i.id == "ui.historyTransport" && i.label == "Play History");
-        assert_eq!(play.and_then(|i| i.tip).as_deref(), Some(solidcraft_ui_text::tr("ui.history_play_roll_back")), "Play says why it is off");
+        // At the end: only the steps back are on, and Play plays from the start (#10798).
+        assert_eq!(enabled(&h), state([("first", true), ("back", true), ("play", true), ("forward", false), ("last", false)]));
+        let play = |h: &Harness| {
+            crate::context_menu::items(&h.app, &folder).into_iter().find(|i| i.id == "ui.historyTransport" && i.icon == "timeline_play")
+        };
+        assert_eq!(play(&h).map(|i| i.label).as_deref(), Some(solidcraft_ui_text::tr("ui.history_play_from_start")));
         // The bar's controls menu follows a separator.
         let items = crate::context_menu::items(&h.app, &folder);
         assert!(items.iter().any(|i| i.is_sep()) && items.iter().any(|i| i.id == "ui.historyPlayButton"));
@@ -2003,17 +2049,49 @@ mod tests {
         assert_eq!(h.app.session.model.state().bodies.len(), 1);
     }
 
+    /// Play with the marker at the end goes back to the start, shows the design before its first
+    /// feature, then plays every feature at the usual pace (#10798).
     #[test]
-    fn playback_at_the_end_or_in_an_empty_design_leaves_history_unchanged() {
-        for mut h in [Harness::new(), two_boxes(false)] {
-            h.frames(2);
-            let revision = h.app.session.revision;
-            h.app.start("timeline.play");
-            h.frames(2);
-            h.frames(60);
-            assert_eq!(h.app.session.revision, revision);
-            assert!(h.app.timeline_playback.is_none());
-        }
+    fn playback_at_the_end_starts_over_from_the_first_feature() {
+        let mut h = two_boxes(false);
+        assert_eq!(h.app.session.doc.marker, None);
+        assert_eq!(super::play_labels(&h.app).play, solidcraft_ui_text::tr("ui.history_play_from_start"));
+        h.app.start("timeline.play");
+        h.frames(2);
+        assert_eq!(h.app.session.doc.marker, Some(0), "back to the start first");
+        assert_eq!(h.app.session.model.state().bodies.len(), 0);
+        assert!(h.app.timeline_playback.is_some());
+        assert_eq!(super::play_labels(&h.app).play, solidcraft_ui_text::tr("cmd.timeline_play"), "away from the end, Play is Play History again");
+        h.frames(10);
+        assert_eq!(h.app.session.doc.marker, Some(0), "leave time to see the start");
+        h.frames(40);
+        assert_eq!(h.app.session.doc.marker, Some(1));
+        assert_eq!(h.app.session.model.state().bodies.len(), 1);
+        h.frames(60);
+        assert_eq!(h.app.session.doc.marker, None, "played to the end");
+        assert_eq!(h.app.session.model.state().bodies.len(), 2);
+        assert!(h.app.timeline_playback.is_none());
+
+        // Escape stops a playback that started over where it is.
+        h.app.start("timeline.play");
+        h.frames(2);
+        assert_eq!(h.app.session.doc.marker, Some(0));
+        h.step(&json!({"key": "Escape"})).unwrap();
+        h.frames(80);
+        assert!(h.app.timeline_playback.is_none());
+        assert_eq!(h.app.session.doc.marker, Some(0), "stopped at the start");
+    }
+
+    #[test]
+    fn playback_in_an_empty_design_leaves_history_unchanged() {
+        let mut h = Harness::new();
+        h.frames(2);
+        let revision = h.app.session.revision;
+        h.app.start("timeline.play");
+        h.frames(2);
+        h.frames(60);
+        assert_eq!(h.app.session.revision, revision);
+        assert!(h.app.timeline_playback.is_none());
     }
 
     #[test]
@@ -3457,11 +3535,9 @@ mod tests {
         assert!(folder_names(&h, &[("Mid", &["B", "A", "C"])]), "dropped inside the open folder, it joins it: {:?}", folders(&h));
     }
 
-    /// A STEP file that brings more than one item into the history (here one cylinder placed
-    /// twice) shows as one folded chip named Group #1, holding its Import feature and the rigid
-    /// joints that keep its parts in place (grouped as one button, which shows each joint); the
-    /// joints chip after the history leaves them out. A file with one object shows its Import
-    /// feature as before.
+    /// An assembly's STEP file (here one cylinder placed twice) shows as one folded chip named
+    /// Group #1, holding its Import feature; one rigid group keeps its parts in place, so there
+    /// are no joints to show. A file with one object shows its Import feature as before.
     #[test]
     fn a_multi_object_step_insert_shows_as_one_chip() {
         use crate::scenario::{handle_at, handles};
@@ -3478,21 +3554,16 @@ mod tests {
         assert_eq!(handles("timeline-folder-chip:").len(), 1, "only the second insert is a folder");
         assert!(handle_at("timeline-folder-chip:Group #1").is_some(), "{two}");
         assert!(handle_at(&format!("timeline:{}", feature(&two))).is_none(), "the Import feature is folded into the chip");
-        let joints = h.app.session.doc.assembly.joints.len();
-        assert_eq!(joints, 2, "a rigid joint per placement");
-        assert!(handles("timeline-joint:").is_empty() && handle_at("timeline:joints").is_none(), "its joints are in its chip");
+        // One rigid group holds its parts: no joints, so nothing to show after the feature.
+        assert!(h.app.session.doc.assembly.joints.is_empty() && h.app.session.doc.assembly.rigid_groups.len() == 1);
+        assert!(handles("timeline-joint:").is_empty() && handle_at("timeline:joints").is_none());
 
         h.step(&json!({"click": {"handle": "timeline-folder-chip:Group #1"}})).unwrap();
-        let import = handle_at(&format!("timeline:{}", feature(&two))).expect("open, the Import feature shows");
-        let group = handle_at("timeline-folder-joints:Group #1").expect("and its two joints after it, as one button");
-        assert!(group.x > import.x && handles("timeline-joint:").is_empty());
-        h.step(&json!({"click": {"handle": "timeline-folder-joints:Group #1"}})).unwrap();
-        let shown = handles("timeline-joint:");
-        assert_eq!(shown.len(), joints, "the button shows each joint");
-        assert!(shown.iter().all(|(_, at)| at.x > import.x));
+        assert!(handle_at(&format!("timeline:{}", feature(&two))).is_some(), "open, the Import feature shows");
+        assert!(handle_at("timeline-folder-joints:Group #1").is_none(), "and no joints button");
     }
 
-    /// A STEP folder's joints, shown one by one, stay shown in their own design only: another
+    /// A folder's joints, shown one by one, stay shown in their own design only: another
     /// design's `Group #1`, numbered the same, keeps its joints grouped, and the first design
     /// shows them again when its tab comes back.
     #[test]
@@ -3502,12 +3573,21 @@ mod tests {
         let mut h = Harness::new();
         assert_eq!(h.call("ui.prefs", json!({"history_group_joints": true}))["ok"], true);
         assert_eq!(h.call("ui.prefs", json!({"history_bar_groups": true}))["ok"], true);
+        // An assembly's import, unlocked and held instead by two rigid joints of a folder with its
+        // Import feature.
         let insert = |h: &mut Harness| {
-            let reply = h.app.run("file.insert_step", json!({"path": corpus("cylinder_twice"), "folder": true})).unwrap();
+            let reply = h.app.run("file.insert_step", json!({"path": corpus("cylinder_twice")})).unwrap();
+            let component = reply["component"].as_u64().unwrap();
+            h.app.run("component.unlock", json!({"component": component})).unwrap();
+            let doc = &h.app.session.doc;
+            let occurrences: Vec<u64> =
+                doc.occurrences.iter().filter(|o| o.component == component || doc.component_within(o.parent, component)).map(|o| o.id).collect();
+            let joints = h.app.run("joint.rigid_group", json!({"occurrences": occurrences})).unwrap()["joints"].clone();
+            let group = h.app.run("timeline.group", json!({"name": "Group #1", "features": [reply["feature"]], "joints": joints})).unwrap();
             h.app.run("component.activate", json!({"component": "root"})).unwrap();
             h.frames(4);
             h.step(&json!({"click": {"handle": "timeline-folder-chip:Group #1"}})).unwrap();
-            reply["group"].clone()
+            group["group"].clone()
         };
         let first = insert(&mut h);
         h.step(&json!({"click": {"handle": "timeline-folder-joints:Group #1"}})).unwrap();
@@ -3555,7 +3635,7 @@ mod tests {
         assert_eq!(v["ok"], true, "{v}");
         let names: Vec<&str> = h.app.session.doc.timeline_groups.iter().map(|g| g.name.as_str()).collect();
         assert_eq!(names, ["Pair"], "neither insert made a folder");
-        assert_eq!(h.app.session.doc.assembly.joints.len(), 4, "their rigid joints are there all the same");
+        assert_eq!(h.app.session.doc.assembly.rigid_groups.len(), 2, "their rigid groups are there all the same");
 
         assert_eq!(h.call("ui.prefs", json!({"history_bar_groups": true}))["ok"], true);
         h.app.run("component.activate", json!({"component": "root"})).unwrap();
@@ -3991,8 +4071,18 @@ mod tests {
         use solidcraft_engine::doc::kernel::{ImportIssue, ImportReport, IssueKind};
         let h = two_boxes(false);
         let plain = h.app.session.model.results[0].clone();
-        let issue = ImportIssue { kind: IssueKind::Repaired, item: Some(3), part: String::new(), faces: 0, times: 1, detail: "solid #3: …".into() };
-        let report = |issues: Vec<ImportIssue>| Some(std::sync::Arc::new(ImportReport { parts: 1, solids: 1, issues, ..Default::default() }));
+        let issue = ImportIssue {
+            kind: IssueKind::Repaired,
+            item: Some(3),
+            part: String::new(),
+            paths: Vec::new(),
+            faces: 0,
+            times: 1,
+            detail: "solid #3: …".into(),
+        };
+        let report = |issues: Vec<ImportIssue>| {
+            Some(std::sync::Arc::new(ImportReport { parts: 1, solids: 1, issues, single_root: true, ..Default::default() }))
+        };
         let with = |warning: Option<&str>, import_report| {
             let mut result = plain.clone();
             result.warning = warning.map(str::to_string);

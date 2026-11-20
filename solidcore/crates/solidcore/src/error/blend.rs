@@ -18,11 +18,12 @@
 //! | [`BlendFailure::RemovalRefused`]       | the reason's ([`removal_class`]), 130 or 131  |
 //! | [`BlendFailure::StationDidNotConverge`]| [`ErrorKind::StationDidNotConverge`] (125)    |
 //! | [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`] | [`ErrorKind::TrimLeaks`] (126) |
-//! | [`BlendFailure::StageFailed`], [`BlendFailure::SkinMeasureNotFinite`] | [`ErrorKind::StageFailed`] (127) |
+//! | [`BlendFailure::StageFailed`], [`BlendFailure::Defect`], [`BlendFailure::SkinMeasureNotFinite`] | [`ErrorKind::StageFailed`] (127) |
 //! | [`BlendFailure::SkinPastStationCap`]   | [`ErrorKind::NotWithinTolerance`] (9)         |
 //! | [`BlendFailure::BallsNest`]            | [`ErrorKind::BallsFold`] (105)                |
 //! | [`BlendFailure::CreasePieceEndUnbuildable`] | [`ErrorKind::Unsupported`] (5)           |
 //! | [`BlendFailure::NotCertified`]         | [`ErrorKind::NotWithinTolerance`] (9): neither defect nor refusal |
+//! | [`BlendFailure::BandInputMissing`]     | [`ErrorKind::Missing`]: neither defect nor refusal |
 //! | the phrase causes ([`BlendFailure::Failed`], [`BlendFailure::Missing`], ...) | their status's kind, as before the record; neither defect nor refusal |
 //!
 //! **Statuses.** Each failure also records, for difftest and the goldens only, the status
@@ -32,10 +33,10 @@
 //!
 //! | Rust                                   | Status difftest compares          |
 //! |----------------------------------------|-----------------------------------|
-//! | [`BlendFailure::NoRoom`], [`BlendFailure::RemovalRefused`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`], [`BlendFailure::SkinPastStationCap`], [`BlendFailure::SkinMeasureNotFinite`], [`BlendFailure::BallsNest`], [`BlendFailure::CreasePieceEndUnbuildable`] | `SM_ERR` |
+//! | [`BlendFailure::NoRoom`], [`BlendFailure::RemovalRefused`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`], [`BlendFailure::Defect`], [`BlendFailure::SkinPastStationCap`], [`BlendFailure::SkinMeasureNotFinite`], [`BlendFailure::BallsNest`], [`BlendFailure::CreasePieceEndUnbuildable`] | `SM_ERR` |
 //! | [`BlendFailure::Failed`]               | `SM_ERR`                          |
-//! | [`BlendFailure::Missing`]              | `SM_ERR_NULL_POINTER`             |
-//! | [`BlendFailure::InvalidValue`]         | `SM_ERR_INVALID_INPUT`            |
+//! | [`BlendFailure::Missing`], [`BlendFailure::BandInputMissing`] | `SM_ERR_NULL_POINTER` |
+//! | [`BlendFailure::InvalidValue`]        | `SM_ERR_INVALID_INPUT`            |
 //! | [`BlendFailure::Inconsistent`]         | `SM_ERR_ASSERT_FAILURE`           |
 //! | [`BlendFailure::BadIntersections`]     | `SM_ERR_BAD_INTERSECTIONS`        |
 //! | [`BlendFailure::NotConverged`]         | `SM_ERR_NOT_CONVERGING`           |
@@ -49,8 +50,10 @@
 //! moved onto it. Each keeps the kind of its status, as before the record, and reads as
 //! neither a defect nor a refusal ([`BlendFailure::is_phrase`]); its phrase stays in its
 //! message. They go class by class: a site that has a finer cause moves to it, and one that
-//! has none to [`BlendFailure::StageFailed`], built on purpose. A test counts the library
-//! sites that build a phrase cause, per file, and lets the count only fall.
+//! is the kernel's fault to [`BlendFailure::Defect`], with its reason. A test counts the
+//! library sites that build a phrase cause, per file, and lets the count only fall.
+//! [`BlendFailure::StageFailed`] is the form of a defect not yet reviewed, also counted per
+//! file. The conversion guide: `docs/failure-codes-and-reproduction.md` §6.
 //!
 //! Deviations: not upstream. The failure's `operation` path says which routine. No cause
 //! names an entity of its own: a failure is at the entity the site it replaces named
@@ -103,8 +106,17 @@ pub enum BlendFailure {
     TrimLoopDoesNotSeparate,
     /// A stage of the blend failed with no reason the kernel names: a defect. The failure
     /// holds the operation, the status (for the goldens only) and where in solidcore's source
-    /// it was built ([`Failure::origin`]).
+    /// it was built ([`Failure::origin`]). The form not yet reviewed: new code builds
+    /// [`BlendFailure::Defect`], a named cause or a refusal instead.
     StageFailed,
+    /// A failure that is the kernel's fault, reviewed at its site, with the written reason:
+    /// `why` names the step that failed and why that is the kernel's fault, not the
+    /// geometry's. A defect ([`ErrorKind::StageFailed`]); status `SM_ERR` unless its site
+    /// says otherwise.
+    Defect {
+        /// The step that failed, and why that is the kernel's fault.
+        why: &'static str,
+    },
     /// A variable round's skin of balls' touch circles was still measured farther than
     /// `asked` from its balls when its refinement reached its most rounds or stations
     /// (#15256): the worst distance measured was `reached` (infinite where a span's section
@@ -215,6 +227,77 @@ pub enum BlendFailure {
         /// The certificate's stations when it was refused.
         stations: usize,
     },
+    /// An input the planar-band contact query reads is not there (a support, an edge use, an
+    /// offset, a foot of a drop, ...): the input named. Status `SM_ERR_NULL_POINTER` and the
+    /// kind of that status ([`ErrorKind::Missing`]), as the phrase cause it replaces; typed,
+    /// so not a phrase cause ([`BlendFailure::is_phrase`]).
+    BandInputMissing(BandInput),
+}
+
+/// Which input of the planar-band contact query is missing ([`BlendFailure::BandInputMissing`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum BandInput {
+    /// The extrusion's control point in its stored net.
+    ExtrusionControlPoint,
+    /// The exact product of the extrusion's translation.
+    ExtrusionTranslationProduct,
+    /// A solver's edge use.
+    EdgeUse,
+    /// The face the two bands share.
+    SharedFace,
+    /// The planar support.
+    PlanarSupport,
+    /// The support on the other side of the blended edge.
+    OtherSupport,
+    /// The chamfer's setback.
+    ChamferSetback,
+    /// The other offset of the chamfer.
+    OtherOffset,
+    /// The first offset of the chamfer.
+    FirstOffset,
+    /// The blended edge.
+    BlendedEdge,
+    /// The blended edge's curve.
+    BlendedEdgeCurve,
+    /// The selected edge.
+    SelectedEdge,
+    /// The foot of a drop on the other support.
+    FootOnOtherSupport,
+    /// An endpoint of the blended edge.
+    BlendedEdgeEndpoint,
+    /// The closest feet of the two bands.
+    ClosestBandFeet,
+    /// An endpoint of the line.
+    LineEndpoint,
+    /// The edge of an edge use.
+    EdgeUseEdge,
+}
+
+impl BandInput {
+    /// What is missing, as a phrase ("the shared face").
+    #[must_use]
+    pub const fn what(self) -> &'static str {
+        match self {
+            Self::ExtrusionControlPoint => "the extrusion control point",
+            Self::ExtrusionTranslationProduct => "the exact extrusion translation product",
+            Self::EdgeUse => "the edge use",
+            Self::SharedFace => "the shared face",
+            Self::PlanarSupport => "the planar support",
+            Self::OtherSupport => "the other support",
+            Self::ChamferSetback => "the chamfer setback",
+            Self::OtherOffset => "the other offset",
+            Self::FirstOffset => "the first offset",
+            Self::BlendedEdge => "the blended edge",
+            Self::BlendedEdgeCurve => "the blended edge's curve",
+            Self::SelectedEdge => "the selected edge",
+            Self::FootOnOtherSupport => "the foot on the other support",
+            Self::BlendedEdgeEndpoint => "the blended edge's endpoint",
+            Self::ClosestBandFeet => "the closest band feet",
+            Self::LineEndpoint => "the line endpoint",
+            Self::EdgeUseEdge => "the edge use's edge",
+        }
+    }
 }
 
 /// The class of a blend larger than its faces allow, for `reason`: one of the blend's
@@ -257,7 +340,8 @@ pub const fn no_room_class(reason: NoRoomReason) -> ErrorKind {
         R::JoinOffsetsDiffer => ErrorKind::JoinOffsetsDiffer,
         R::StripBelowResolution => ErrorKind::StripBelowResolution,
         R::EndPastSideEdge => ErrorKind::EndPastSideEdge,
-        R::EndOverflowsSideEdge => ErrorKind::EndOverflowsSideEdge,
+        // an End the round overflows: past its side edge, or over its end face whole
+        R::EndOverflowsSideEdge | R::EndPassesOverEndFace => ErrorKind::EndOverflowsSideEdge,
         R::EndRollsIntoSmoothEnd => ErrorKind::EndRollsIntoSmoothEnd,
         R::EndAtSeamVertex => ErrorKind::EndAtSeamVertex,
         R::TangentContinuationEndUnsupported => ErrorKind::TangentContinuationEnd,
@@ -368,13 +452,14 @@ impl BlendFailure {
             | Self::TrimLoopOpen
             | Self::TrimLoopDoesNotSeparate
             | Self::StageFailed
+            | Self::Defect { .. }
             | Self::SkinPastStationCap { .. }
             | Self::SkinMeasureNotFinite { .. }
             | Self::BallsNest { .. }
             | Self::CreasePieceEndUnbuildable { .. }
             | Self::NotCertified { .. }
             | Self::Failed(_) => SM_ERR,
-            Self::Missing(_) => SM_ERR_NULL_POINTER,
+            Self::Missing(_) | Self::BandInputMissing(_) => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
             Self::BadIntersections(_) => SM_ERR_BAD_INTERSECTIONS,
@@ -389,8 +474,8 @@ impl BlendFailure {
     /// class for [`BlendFailure::NoRoom`] ([`no_room_class`]) and
     /// [`BlendFailure::RemovalRefused`] ([`removal_class`]),
     /// [`ErrorKind::StationDidNotConverge`], [`ErrorKind::TrimLeaks`] for an open or leaking
-    /// trim loop, [`ErrorKind::StageFailed`] for [`BlendFailure::StageFailed`] and
-    /// [`BlendFailure::SkinMeasureNotFinite`], [`ErrorKind::NotWithinTolerance`] for
+    /// trim loop, [`ErrorKind::StageFailed`] for [`BlendFailure::StageFailed`],
+    /// [`BlendFailure::Defect`] and [`BlendFailure::SkinMeasureNotFinite`], [`ErrorKind::NotWithinTolerance`] for
     /// [`BlendFailure::SkinPastStationCap`] and for a surface not certified within its
     /// tolerance in its work budget ([`BlendFailure::NotCertified`]), and
     /// [`ErrorKind::BallsFold`] for [`BlendFailure::BallsNest`], and
@@ -404,12 +489,15 @@ impl BlendFailure {
             Self::RemovalRefused(reason) => removal_class(*reason),
             Self::StationDidNotConverge { .. } => ErrorKind::StationDidNotConverge,
             Self::TrimLoopOpen | Self::TrimLoopDoesNotSeparate => ErrorKind::TrimLeaks,
-            Self::StageFailed | Self::SkinMeasureNotFinite { .. } => ErrorKind::StageFailed,
+            Self::StageFailed | Self::Defect { .. } | Self::SkinMeasureNotFinite { .. } => {
+                ErrorKind::StageFailed
+            }
             Self::SkinPastStationCap { .. } | Self::NotCertified { .. } => {
                 ErrorKind::NotWithinTolerance
             }
             Self::BallsNest { .. } => ErrorKind::BallsFold,
             Self::CreasePieceEndUnbuildable { .. } => ErrorKind::Unsupported,
+            Self::BandInputMissing(_) => ErrorKind::Missing,
             Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -436,10 +524,12 @@ impl BlendFailure {
             | Self::TrimLoopOpen
             | Self::TrimLoopDoesNotSeparate
             | Self::StageFailed
+            | Self::Defect { .. }
             | Self::SkinPastStationCap { .. }
             | Self::SkinMeasureNotFinite { .. }
             | Self::BallsNest { .. }
             | Self::CreasePieceEndUnbuildable { .. }
+            | Self::BandInputMissing(_)
             | Self::NotCertified { .. } => false,
             Self::Failed(_)
             | Self::Missing(_)
@@ -469,10 +559,12 @@ impl BlendFailure {
             | Self::TrimLoopOpen
             | Self::TrimLoopDoesNotSeparate
             | Self::StageFailed
+            | Self::Defect { .. }
             | Self::SkinPastStationCap { .. }
             | Self::SkinMeasureNotFinite { .. }
             | Self::BallsNest { .. }
             | Self::CreasePieceEndUnbuildable { .. }
+            | Self::BandInputMissing(_)
             | Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -515,6 +607,7 @@ impl core::fmt::Display for BlendFailure {
                 write!(f, "{}: the trim loop does not separate", self.class())
             }
             Self::StageFailed => write!(f, "{}", self.class()),
+            Self::Defect { why } => write!(f, "{}: {why}", self.class()),
             Self::SkinPastStationCap {
                 asked,
                 reached,
@@ -549,6 +642,7 @@ impl core::fmt::Display for BlendFailure {
             | Self::NotWithinTolerance(what)
             | Self::PassedOn { what, .. } => f.write_str(what),
             Self::Missing(what) => write!(f, "{what} is missing"),
+            Self::BandInputMissing(input) => write!(f, "{} is missing", input.what()),
             Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
             Self::NotCertified { halvings, stations } => write!(
                 f,
@@ -595,6 +689,14 @@ impl crate::SolidError {
     #[track_caller]
     pub(crate) fn blend_missing(operation: &'static str, what: &'static str) -> Self {
         Self::blend(operation, BlendFailure::Missing(what))
+    }
+
+    /// [`crate::SolidError::Failed`] for an input of the planar-band contact query that is
+    /// not there ([`BlendFailure::BandInputMissing`]), with status [`SM_ERR_NULL_POINTER`].
+    #[must_use]
+    #[track_caller]
+    pub(crate) fn blend_band_input_missing(operation: &'static str, input: BandInput) -> Self {
+        Self::blend(operation, BlendFailure::BandInputMissing(input))
     }
 
     /// [`crate::SolidError::Failed`] for a value a blend routine is given or computes with
@@ -883,6 +985,10 @@ mod tests {
                 ErrorKind::EndOverflowsSideEdge,
             ),
             (
+                BlendFailure::NoRoom(R::EndPassesOverEndFace),
+                ErrorKind::EndOverflowsSideEdge,
+            ),
+            (
                 BlendFailure::NoRoom(R::EndRollsIntoSmoothEnd),
                 ErrorKind::EndRollsIntoSmoothEnd,
             ),
@@ -911,6 +1017,7 @@ mod tests {
             (BlendFailure::TrimLoopOpen, ErrorKind::TrimLeaks),
             (BlendFailure::TrimLoopDoesNotSeparate, ErrorKind::TrimLeaks),
             (BlendFailure::StageFailed, ErrorKind::StageFailed),
+            (BlendFailure::Defect { why: "x" }, ErrorKind::StageFailed),
         ];
         for (cause, class) in cases {
             assert_eq!(cause.class(), class, "{cause:?}");
@@ -1001,6 +1108,34 @@ mod tests {
         assert_eq!(stage.kind(), ErrorKind::StageFailed);
         assert_eq!(stage.kind().code(), 127);
         assert!(stage.is_defect() && !stage.is_refusal() && !stage.sized());
+    }
+
+    /// A reviewed defect is of class 127 with the stage failure's status, and says why.
+    #[test]
+    fn a_reviewed_defect_is_class_127_with_its_reason() {
+        let why =
+            "the station solve was started off its own previous station, which it never leaves";
+        let defect = BlendFailure::Defect { why };
+        assert!(!defect.is_phrase() && defect.replaces_upstream_status());
+        for status in [SM_ERR, SM_ERR_NULL_POINTER] {
+            let e = Failure::new("blend::op", defect)
+                .with_status(status)
+                .into_error();
+            super::super::tests::assert_defect(
+                &e,
+                &Failure::new("blend::op", BlendFailure::StageFailed)
+                    .with_status(status)
+                    .into_error(),
+                "blend::op",
+                status,
+                &format!("blend::op: stage_failed: {why}"),
+            );
+            assert_eq!(e.blend_failure(), Some(&defect));
+        }
+        assert_eq!(
+            SolidError::blend("blend::op", defect).sm_status(),
+            Some(SM_ERR)
+        );
     }
 
     #[test]
@@ -1218,10 +1353,12 @@ mod tests {
             | BlendFailure::TrimLoopDoesNotSeparate
             | BlendFailure::RemovalRefused(_)
             | BlendFailure::StageFailed
+            | BlendFailure::Defect { .. }
             | BlendFailure::SkinPastStationCap { .. }
             | BlendFailure::SkinMeasureNotFinite { .. }
             | BlendFailure::BallsNest { .. }
             | BlendFailure::CreasePieceEndUnbuildable { .. }
+            | BlendFailure::BandInputMissing(_)
             | BlendFailure::NotCertified { .. } => None,
             BlendFailure::Failed(_) => Some("BlendFailure::Failed("),
             BlendFailure::Missing(_) => Some("BlendFailure::Missing("),
@@ -1242,7 +1379,7 @@ mod tests {
     /// sites lowers the pin to the new count, and a new site builds a typed cause.
     #[test]
     fn the_phrase_cause_sites_only_go_down() {
-        const PHRASE_CAUSE_SITES: usize = 1335;
+        const PHRASE_CAUSE_SITES: usize = 897;
         use crate::blend::fillet_executive::NoRoomReason as R;
         let causes = [
             BlendFailure::NoRoom(R::BallDoesNotFit),
@@ -1270,10 +1407,12 @@ mod tests {
                 at_end: true,
                 t: 0.0,
             },
+            BlendFailure::BandInputMissing(BandInput::SharedFace),
             BlendFailure::TrimLoopOpen,
             BlendFailure::TrimLoopDoesNotSeparate,
             BlendFailure::RemovalRefused(RemovalRefusal::FaceGrowsPastDomain),
             BlendFailure::StageFailed,
+            BlendFailure::Defect { why: "x" },
             BlendFailure::NotCertified {
                 halvings: 0,
                 stations: 0,

@@ -452,7 +452,7 @@ fn read_at<'a>(
         skipped |= any;
         shells.push(faces);
     }
-    b.finish(item, name, shells, if skipped || sheets { Kind::Open { voids: kind == Kind::Voids } } else { kind })
+    b.finish(item, name, shells, if skipped || sheets { Kind::Open { voids: kind == Kind::Voids, outer: true } } else { kind })
 }
 
 /// A face of a solid read on its own ([`read_faces_with`]).
@@ -655,7 +655,14 @@ impl<'b, 'a> Builder<'b, 'a> {
         }
         let p = e.params();
         let (vs_id, ve_id) = (rid(p.get(1), "edge start")?, rid(p.get(2), "edge end")?);
-        let (vs, ve) = (self.vertex(vs_id)?, self.vertex(ve_id)?);
+        let (mut vs, mut ve) = (self.vertex(vs_id)?, self.vertex(ve_id)?);
+        // Two VERTEX_POINTs written at one point are the one vertex of a closed edge, as when the
+        // file writes that vertex once: joined here, the edge is read as that edge on any curve.
+        // The join is `meet`'s, which still keeps apart the two ends of any other EDGE_CURVE.
+        if vs != ve && self.at_one_point(vs_id, ve_id) && self.meet(vs, ve)? {
+            vs = self.find(vs);
+            ve = vs;
+        }
         let same_sense = flag(p.get(4), "edge same_sense")?;
         let curve = self.edge_geometry(rid(p.get(3), "edge geometry")?, 0)?;
         let (ps, pe) = (self.asm.point(vs)?, self.asm.point(ve)?);
@@ -664,7 +671,13 @@ impl<'b, 'a> Builder<'b, 'a> {
         // the arc between them, however short: a 20.4 um arc between vertices a 20.5 um uncertainty
         // does not tell apart is that arc, not a turn around its face.
         let full = closed || ps == pe;
-        let mapped = map_edge(&curve, ps, pe, same_sense, closed, full, self.asm.tol).map_err(|m| format!("edge #{id}: {m}"))?;
+        let mut mapped = map_edge(&curve, ps, pe, same_sense, closed, full, self.asm.tol).map_err(|m| format!("edge #{id}: {m}"))?;
+        // A control polygon that turns back on itself within the tolerance is a wiggle of the
+        // file's, taken out before anything is measured on the curve.
+        if let Some((unfolded, moved)) = unfolded_curve(&mapped.curve, self.asm.tol) {
+            self.asm.points_unfolded += moved;
+            mapped.curve = unfolded;
+        }
         if mapped.sense_mismatch {
             self.asm.sense_mismatches += 1;
         }
@@ -774,18 +787,29 @@ impl<'b, 'a> Builder<'b, 'a> {
         self.vertex_members.get(&root).map_or(1, Vec::len)
     }
 
+    /// Whether VERTEX_POINTs `a` and `z` of the file are written at one point (their
+    /// CARTESIAN_POINTs' coordinates equal). An EDGE_CURVE between two such vertices is a closed
+    /// edge written with two vertices: [`Builder::edge`] reads it as the edge with one.
+    fn at_one_point(&self, a: u64, z: u64) -> bool {
+        let at = |v: u64| entity(self.ex, v).ok().and_then(|e| rid(e.params().get(1), "vertex point").ok()).and_then(|p| self.reader.point(p).ok());
+        matches!((at(a), at(z)), (Some(pa), Some(pz)) if pa == pz)
+    }
+
     /// Whether an EDGE_CURVE of the file, read yet or not, runs from a VERTEX_POINT of `small`'s
-    /// set to one of `other`'s (both roots).
+    /// set to one of `other`'s (both roots). An EDGE_CURVE whose two ends are at one point
+    /// ([`Builder::at_one_point`]) does not count: its ends are one vertex, not apart.
     fn edge_between(&mut self, small: u32, other: u32) -> bool {
         if self.edge_partners.is_none() {
+            let ex = self.ex;
             let mut partners: HashMap<u64, Vec<u64>> = HashMap::new();
-            for e in self.ex.entities.values() {
+            for e in ex.entities.values() {
                 if e.name() != "EDGE_CURVE" {
                     continue;
                 }
                 let p = e.params();
                 if let (Some(a), Some(z)) = (p.get(1).and_then(Param::as_ref_id), p.get(2).and_then(Param::as_ref_id))
                     && a != z
+                    && !self.at_one_point(a, z)
                 {
                     partners.entry(a).or_default().push(z);
                     partners.entry(z).or_default().push(a);
@@ -809,7 +833,8 @@ impl<'b, 'a> Builder<'b, 'a> {
     /// file may write one corner as two VERTEX_POINTs at one point). Coincident ones are joined
     /// into one set, its root's tolerance covering both, so the faces and the edges they share
     /// meet at one vertex. Two vertices that are the two ends of one EDGE_CURVE of the file are
-    /// never joined, whether that edge is read yet or not: its own ends are apart.
+    /// never joined, whether that edge is read yet or not: its own ends are apart. The exception is
+    /// an edge whose two VERTEX_POINTs are at one point ([`Builder::edge_between`]).
     fn meet(&mut self, a: u32, b: u32) -> R<bool> {
         let (a, b) = (self.find(a), self.find(b));
         if a == b {
@@ -1288,6 +1313,269 @@ pub(crate) fn closed_within(s: &BSurface, tol: f64) -> Option<BSurface> {
     } else {
         BSurface::Spline { u_knots, v_knots, points: rows.iter().map(|r| r.iter().map(|h| [h[0], h[1], h[2]]).collect()).collect() }
     })
+}
+
+/// The angle (degrees) past which the kernel's check takes a control polygon's step as turning
+/// back on the one before it (its B-spline surface test 5, "NonMonotonic CPts").
+const TURNS_BACK_DEGREES: f64 = 170.0;
+
+/// A step no longer than this times its two points' magnitudes is within their rounding, as the
+/// kernel's check bounds it: `2u + gamma_3`, `u` half the machine epsilon, `gamma_3 = 3u / (1 - 3u)`.
+const ROUNDING: f64 = f64::EPSILON + 3.0 * (0.5 * f64::EPSILON) / (1.0 - 3.0 * (0.5 * f64::EPSILON));
+
+/// A line of homogeneous control points with its steps that turn back on themselves by no more
+/// than `tol` (mm) taken out, `original` being the line as the file wrote it. A step turns back
+/// when it points more than [`TURNS_BACK_DEGREES`] away from the last step before it that has a
+/// length (more than the rounding of its points). Such a step no longer than `tol`, and shorter
+/// than the step it turns back on, is a wiggle of the file's, not a shape:
+///
+/// - inside the line, its inner end is moved onto its start;
+/// - where it reaches the line's last point (which the curve or surface passes through, as it
+///   does its first), the end is kept and the run back to it is the wiggle: every point from the
+///   end of the last forward step to the one before the last is moved onto the last.
+///
+/// Each point keeps its weight, and a move is made only when it leaves the point within `tol` of
+/// where `original` has it. With positive weights every point of the curve or surface is a convex
+/// combination of its control points, so it moves by at most `tol`, however many passes moved
+/// its points. A line with a weight that is not positive, or not the length of `original`, is left
+/// as it is.
+fn unfold_line(line: &mut [[f64; 4]], original: &[[f64; 4]], tol: f64) {
+    if line.len() != original.len() || !line.iter().chain(original).all(|h| h[3] > 0.0 && h.iter().all(|x| x.is_finite())) {
+        return;
+    }
+    let point = |h: &[f64; 4]| Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]);
+    let within = |i: usize, p: Vec3| original.get(i).map(point).is_some_and(|o| o.dist(p) <= tol);
+    let cos_back = TURNS_BACK_DEGREES.to_radians().cos();
+    let origin = Vec3::new(0.0, 0.0, 0.0);
+    let last = line.len().saturating_sub(1);
+    // The last step that had a direction, and the point it ended at.
+    let mut before: Option<(Vec3, usize)> = None;
+    for k in 0..last {
+        let (Some(a), Some(b)) = (line.get(k).map(point), line.get(k + 1).map(point)) else { break };
+        let step = Vec3::new(b.x - a.x, b.y - a.y, b.z - a.z);
+        let length = step.dist(origin);
+        // A step within the rounding of its two points carries no direction, as the check takes
+        // it (`step_within_rounding`: 2u and gamma_3 of their magnitudes): a pole row one ulp
+        // apart, or a rational form's points divided by their weights, is no step.
+        if length <= ROUNDING * (a.dist(origin) + b.dist(origin)) {
+            continue;
+        }
+        // Back on the step before it, and shorter than that step: a wiggle on the way, not the
+        // polygon running back (a curve that turns round, or one written back and forth).
+        let turn = before.filter(|(d, _)| {
+            let dl = d.dist(origin);
+            length <= tol && length < dl && (d.x * step.x + d.y * step.y + d.z * step.z) < cos_back * dl * length
+        });
+        if let Some((_, from)) = turn {
+            // The points that move, and where to.
+            let (run, onto) = if k + 1 < last { (k + 1..=k + 1, a) } else { (from..=k, b) };
+            if run.clone().all(|i| within(i, onto)) {
+                for i in run {
+                    if let Some(h) = line.get_mut(i) {
+                        let w = h[3];
+                        *h = [onto.x * w, onto.y * w, onto.z * w, w];
+                    }
+                }
+                continue;
+            }
+        }
+        before = Some((step, k + 1));
+    }
+}
+
+/// How many of `line`'s points differ from `original`'s.
+fn moved_points(line: &[[f64; 4]], original: &[[f64; 4]]) -> usize {
+    line.iter().zip(original).filter(|(a, b)| a != b).count()
+}
+
+/// A spline surface whose control lines (each row and each column) turn back on themselves by
+/// no more than `tol`, with those steps taken out ([`unfold_line`]), and how many control points
+/// were moved; `None` when none was. Every move is bounded against the net as the file wrote it,
+/// so a point a row and its column both move stays within `tol` of where it was.
+pub(crate) fn unfolded_surface(s: &BSurface, tol: f64) -> Option<(BSurface, usize)> {
+    let (u_knots, v_knots, original, rational): (&Vec<f64>, &Vec<f64>, Vec<Vec<[f64; 4]>>, bool) = match s {
+        BSurface::Spline { u_knots, v_knots, points } => {
+            (u_knots, v_knots, points.iter().map(|r| r.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect()).collect(), false)
+        }
+        BSurface::RationalSpline { u_knots, v_knots, homogeneous } => (u_knots, v_knots, homogeneous.clone(), true),
+        _ => return None,
+    };
+    let nv = original.first().map_or(0, Vec::len);
+    if original.iter().any(|r| r.len() != nv) {
+        return None;
+    }
+    let mut rows = original.clone();
+    for (row, was) in rows.iter_mut().zip(&original) {
+        unfold_line(row, was, tol);
+    }
+    for j in 0..nv {
+        let mut column: Vec<[f64; 4]> = rows.iter().filter_map(|r| r.get(j).copied()).collect();
+        let was: Vec<[f64; 4]> = original.iter().filter_map(|r| r.get(j).copied()).collect();
+        unfold_line(&mut column, &was, tol);
+        for (r, h) in rows.iter_mut().zip(column) {
+            if let Some(slot) = r.get_mut(j) {
+                *slot = h;
+            }
+        }
+    }
+    let moved: usize = rows.iter().zip(&original).map(|(r, o)| moved_points(r, o)).sum();
+    if moved == 0 {
+        return None;
+    }
+    let (u_knots, v_knots) = (u_knots.clone(), v_knots.clone());
+    Some((
+        if rational {
+            BSurface::RationalSpline { u_knots, v_knots, homogeneous: rows }
+        } else {
+            BSurface::Spline { u_knots, v_knots, points: rows.iter().map(|r| r.iter().map(|h| [h[0], h[1], h[2]]).collect()).collect() }
+        },
+        moved,
+    ))
+}
+
+/// A spline curve whose control polygon turns back on itself by no more than `tol`, with those
+/// steps taken out ([`unfold_line`]), and how many control points were moved; `None` when none
+/// was. Its ends stay where they are.
+pub(crate) fn unfolded_curve(c: &BCurve, tol: f64) -> Option<(BCurve, usize)> {
+    let (knots, original): (&Vec<f64>, Vec<[f64; 4]>) = match c {
+        BCurve::Spline { knots, points } => (knots, points.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect()),
+        BCurve::RationalSpline { knots, homogeneous } => (knots, homogeneous.clone()),
+        _ => return None,
+    };
+    let mut line = original.clone();
+    unfold_line(&mut line, &original, tol);
+    let moved = moved_points(&line, &original);
+    (moved > 0).then(|| {
+        let knots = knots.clone();
+        let curve = match c {
+            BCurve::RationalSpline { .. } => BCurve::RationalSpline { knots, homogeneous: line },
+            _ => BCurve::Spline { knots, points: line.iter().map(|h| [h[0], h[1], h[2]]).collect() },
+        };
+        (curve, moved)
+    })
+}
+
+/// A spline surface with sides that collapse to a point to within `tol` (mm) but not exactly,
+/// each such side made an exact pole, and how many sides were. A side is the control line at a
+/// clamped end of the knots (elsewhere the end line is not the surface's boundary). It collapses
+/// within `tol` of a point when every one of its control points does. That point, the pole,
+/// is the vertex among `vertices` (the face's own) that lies nearest the farthest of them, when
+/// it is within `tol` of all of them: the face's loop then reaches its pole at its vertex
+/// exactly. Otherwise it is their centroid. The pole becomes every point of that line, each
+/// keeping its weight. With positive weights every point of the surface is a convex combination
+/// of its control points, so it moves by at most the farthest any of them moved: `tol` at most.
+/// The side is then one point exactly, a pole the kernel takes as one, not a boundary only close
+/// to singular.
+///
+/// A side is made a pole only where the surface narrows to it: some control line parallel to
+/// the side has a point more than `10 tol` from that line's centroid. A surface no wider than
+/// that anywhere (a sliver) is thin, not collapsed, and stays as it is. So does a side the
+/// kernel already takes as a pole (its points one to their rounding), and a surface with a
+/// weight that is not positive. `None` when
+/// no side is made a pole.
+pub(crate) fn poles_within(s: &BSurface, tol: f64, vertices: &[Vec3]) -> Option<(BSurface, usize)> {
+    let (u_knots, v_knots, mut rows, rational): (&Vec<f64>, &Vec<f64>, Vec<Vec<[f64; 4]>>, bool) = match s {
+        BSurface::Spline { u_knots, v_knots, points } => {
+            (u_knots, v_knots, points.iter().map(|r| r.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect()).collect(), false)
+        }
+        BSurface::RationalSpline { u_knots, v_knots, homogeneous } => (u_knots, v_knots, homogeneous.clone(), true),
+        _ => return None,
+    };
+    if !(tol > 0.0 && tol.is_finite()) || !rows.iter().flatten().all(|h| h[3] > 0.0 && h.iter().all(|x| x.is_finite())) {
+        return None;
+    }
+    let nu = rows.len();
+    let nv = rows.first().map_or(0, Vec::len);
+    if nu < 2 || nv < 2 || rows.iter().any(|r| r.len() != nv) {
+        return None;
+    }
+    // Whether each end of `knots` (for `count` control points) is clamped: its knot repeated
+    // degree + 1 times.
+    let clamped = |knots: &[f64], count: usize| -> [bool; 2] {
+        let Some(p) = knots.len().checked_sub(count + 1) else { return [false; 2] };
+        let (Some(head), Some(tail)) = (knots.get(..=p), knots.len().checked_sub(p + 1).and_then(|at| knots.get(at..))) else {
+            return [false; 2];
+        };
+        [head.windows(2).all(|w| w.first() == w.last()), tail.windows(2).all(|w| w.first() == w.last())]
+    };
+    let ends = [clamped(u_knots, nu), clamped(v_knots, nv)];
+    let point = |h: &[f64; 4]| Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]);
+    // The (row, column) of the `k`-th control point of a line: along v at row `i` (d = 0, a
+    // side at an end of u), or along u at column `i` (d = 1).
+    let at = |d: usize, i: usize, k: usize| if d == 0 { (i, k) } else { (k, i) };
+    let line = |rows: &Vec<Vec<[f64; 4]>>, d: usize, i: usize| -> Vec<[f64; 4]> {
+        let n = if d == 0 { nv } else { nu };
+        (0..n)
+            .filter_map(|k| {
+                let (r, c) = at(d, i, k);
+                rows.get(r).and_then(|row| row.get(c)).copied()
+            })
+            .collect()
+    };
+    // A line's centroid and the farthest of its points from it.
+    let spread = |l: &[[f64; 4]]| -> (Vec3, f64) {
+        let n = l.len().max(1) as f64;
+        let sum = l.iter().map(point).fold(Vec3::new(0.0, 0.0, 0.0), |a, p| Vec3::new(a.x + p.x, a.y + p.y, a.z + p.z));
+        let c = Vec3::new(sum.x / n, sum.y / n, sum.z / n);
+        (c, l.iter().map(|h| point(h).dist(c)).fold(0.0, f64::max))
+    };
+    // The kernel's pole classifier, at no reach: whether a side is a pole already, its points
+    // one to their rounding (as a sphere's rational pole rows are, read back from a file).
+    let eval = SurfaceEval::new(s).ok()?;
+    let range = eval.domain().range;
+    let is_pole = |d: usize, end: usize| -> bool {
+        let (Some(Some(across)), Some(Some(along))) = (range.get(d), range.get(1 - d)) else { return false };
+        let at = if end == 0 { across.0 } else { across.1 };
+        let mid = 0.5 * (along.0 + along.1);
+        let uv = if d == 0 { [at, mid] } else { [mid, at] };
+        eval.pole_within(uv, 0.0).is_ok_and(|flags| flags.get(1 - d).copied().unwrap_or(false))
+    };
+    let mut made = 0;
+    for d in 0..2 {
+        let n = if d == 0 { nu } else { nv };
+        let width = (0..n).map(|i| spread(&line(&rows, d, i)).1).fold(0.0, f64::max);
+        if width <= 10.0 * tol {
+            continue;
+        }
+        for (end, i) in [(0, 0), (1, n - 1)] {
+            if !ends.get(d).and_then(|e| e.get(end)).copied().unwrap_or(false) {
+                continue;
+            }
+            if is_pole(d, end) {
+                continue;
+            }
+            let side = line(&rows, d, i);
+            // The farthest of the side's control points from `p`.
+            let farthest = |p: Vec3| side.iter().map(|h| point(h).dist(p)).fold(0.0, f64::max);
+            let (centroid, _) = spread(&side);
+            let at_vertex = vertices.iter().map(|&v| (v, farthest(v))).min_by(|a, b| a.1.total_cmp(&b.1));
+            let (c, far) = match at_vertex {
+                Some((v, far)) if far <= tol => (v, far),
+                _ => (centroid, farthest(centroid)),
+            };
+            if far > tol {
+                continue;
+            }
+            for k in 0..side.len() {
+                let (r, col) = at(d, i, k);
+                if let Some(h) = rows.get_mut(r).and_then(|row| row.get_mut(col)) {
+                    let w = h[3];
+                    *h = if rational { [c.x * w, c.y * w, c.z * w, w] } else { [c.x, c.y, c.z, 1.0] };
+                }
+            }
+            made += 1;
+        }
+    }
+    if made == 0 {
+        return None;
+    }
+    let (u_knots, v_knots) = (u_knots.clone(), v_knots.clone());
+    let surface = if rational {
+        BSurface::RationalSpline { u_knots, v_knots, homogeneous: rows }
+    } else {
+        BSurface::Spline { u_knots, v_knots, points: rows.iter().map(|r| r.iter().map(|h| [h[0], h[1], h[2]]).collect()).collect() }
+    };
+    Some((surface, made))
 }
 
 /// A CURVE_REPLICA's curve: the parent (under its SURFACE_CURVE and TRIMMED_CURVE wrappers)

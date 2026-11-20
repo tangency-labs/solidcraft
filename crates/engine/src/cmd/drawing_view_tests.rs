@@ -903,8 +903,6 @@ fn hostile_snapshots_are_refused() {
         (json!({"view": {"direction": [0, 0, 0], "up": [0, 0, 1]}}), "direction"),
         (json!({"view": {"direction": [1e308, 1e308, 0], "up": [0, 0, 1]}}), "direction"),
         (json!({"view": {"direction": [0, 0, 1], "up": [0, 0, 2]}}), "along the view direction"),
-        (json!({"visual_style": "shaded_visible_hidden"}), "not supported yet"),
-        (json!({"reference_style": "shaded_visible"}), "not supported yet: shaded views with lines need the view's exact lines (W06)"),
         (json!({"visual_style": "Shaded"}), "unknown variant"),
         (json!({"tangent_edges": "thin"}), "thin"),
         (json!({"sheet": {"dpi": 24.9}}), "dpi"),
@@ -4012,8 +4010,8 @@ fn flat_view(s: &mut Session, p: Value) -> (u64, Value) {
     (ids::decode(reply["view"].as_str().unwrap()).unwrap(), reply)
 }
 
-/// `sheet.flat_pattern`'s reply. It's a model command, so while a drawing is open it runs with the
-/// drawing closed.
+/// `sheet.flat_pattern`'s reply, read with the drawing closed while one is open, as these tests
+/// have always read it.
 fn flat_pattern(s: &mut Session) -> Value {
     if s.open_drawing.is_none() {
         return run(s, "sheet.flat_pattern", json!({}));

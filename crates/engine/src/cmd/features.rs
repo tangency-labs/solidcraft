@@ -70,7 +70,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("sweep")
         .contract(&SWEEP_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("sketch: profile sketch; profiles?; path_sketch: sketch; path: [curve ids in order]; path_body?: body name; path_edges?: [points on its edges] (the path is a chain of that body's edges, instead of a sketch's curves); orientation?: perpendicular (default: square to the path, turning with it) | parallel (as drawn: the profile moves without turning; the path must keep crossing its plane) | [x,y,z] (square to the path, its turn about the path fixed by this direction); twist?: angle expr (the profile turns this much about the path over its length; within 4 turns); scale?: expr (the profile's scale at the end, linear along the path; 0.01…100); rails?: [{sketch?: sketch (default path_sketch), curves: [curve ids in order]}] (guide rails, one or two, each meeting every plane square to the path once along it, from the end nearest the path's start: one rail turns the profile so its point where the rail starts stays on the rail and scales it with the rail's distance from the path; two rails carry it between them, its points where they start staying on both; rails take the default orientation, no twist and no scale, and a path without sharp corners); rail_fit?: scale (default: the profile grows and shrinks evenly) | stretch (only across to the rail, between the rails); operation?, touching?, targets?, name?, body_name?"),
+        .params("sketch: profile sketch; profiles?; path_sketch: sketch; path: [curve ids in order; an entry {sketch, curve} is a curve of that sketch, so the path may join curves of several sketches (#16168)]; path_body?: body name; path_edges?: [points on its edges] (the path is a chain of that body's edges, instead of a sketch's curves); orientation?: perpendicular (default: square to the path, turning with it) | parallel (as drawn: the profile moves without turning; the path must keep crossing its plane) | [x,y,z] (square to the path, its turn about the path fixed by this direction); twist?: angle expr (the profile turns this much about the path over its length; within 4 turns); scale?: expr (the profile's scale at the end, linear along the path; 0.01…100); rails?: [{sketch?: sketch (default path_sketch), curves: [curve ids in order]}] (guide rails, one or two, each meeting every plane square to the path once along it, from the end nearest the path's start: one rail turns the profile so its point where the rail starts stays on the rail and scales it with the rail's distance from the path; two rails carry it between them, its points where they start staying on both; rails take the default orientation, no twist and no scale, and a path without sharp corners); rail_fit?: scale (default: the profile grows and shrinks evenly) | stretch (only across to the rail, between the rails); operation?, touching?, targets?, name?, body_name?"),
     CommandSpec::new("solid.loft", "Loft", loft).at("SOLID", "CREATE").icon("loft").params("sections: [{sketch, profiles?} | {sketch, point: id} (an apex)] (2…50, in order; matching hole counts, no holes at an apex); rails?: [{sketch, curves: [ids in order]}] (one or two guide rails from the first section to the last, through every section's outline: the loft follows them between the sections; not with sections that have holes); rail_fit?: scale|stretch (default scale: with one rail the sections grow evenly with the rail's distance from their middle, with two with the distance between the rails; stretch: only that way); operation?, touching?, targets? (Join excludes hidden bodies from automatic targets; explicit targets or participants may include them), name?, body_name?"),
     CommandSpec::new("solid.box", "Box", crate::checked!("solid.box", prim_box))
         .at("SOLID", "CREATE")
@@ -163,7 +163,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("bounding_solid")
         .contract(&BOUNDING_SOLID_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("bodies?: [names] (default: all); margin?: expr; margins?: [-X, +X, -Y, +Y, -Z, +Z] exprs (a margin per side instead of margin; negative sets a side into the bodies); name?, body_name?"),
+        .params("bodies?: [names] (default: all); margin?: expr; margins?: [-X, +X, -Y, +Y, -Z, +Z] exprs (a margin per side instead of margin; negative sets a side into the bodies); component?: id or name (instead of `bodies`: an envelope of that component, a box around every body placed inside it, its subcomponents' at any depth and every placement, in its own axes; the box is added to that component, so it moves with it, and is built again when a part inside it moves. inspect.clearance and inspect.interference leave envelopes out unless named, and `envelopes: true` there checks each envelope instead of its contents); name?, body_name?"),
     CommandSpec::new("solid.scale", "Scale", crate::checked!("solid.scale", scale))
         .at("SOLID", "MODIFY")
         .icon("scale")
@@ -297,7 +297,7 @@ impl Session {
     /// assembly's root cutting through its parts, #1234). The command and its preview both ask
     /// this, so the preview never refuses a cut the command makes (#3085).
     pub fn cut_takes_every_body(&self, st: &solidcraft_doc::ModelState) -> bool {
-        !st.bodies.is_empty() && !st.bodies.iter().any(|b| self.doc.model_body_component(b) == self.active_component)
+        !st.bodies.is_empty() && !st.bodies.iter().any(|b| !b.envelope && self.doc.model_body_component(b) == self.active_component)
     }
 }
 
@@ -355,11 +355,12 @@ fn auto_operation_in(s: &Session, p: &Value, st: &solidcraft_doc::ModelState) ->
     // wrong type (`add_feature`), so a wrong type cannot make this cut anything. This preview
     // cannot fail, so it reads the list leniently.
     let parts = string_list_or_default(p, "participants");
-    let implicit_all = grouped.is_some() && !st.bodies.iter().any(|body| s.doc.model_body_component(body) == s.active_component);
+    let implicit_all = grouped.is_some() && !st.bodies.iter().any(|body| !body.envelope && s.doc.model_body_component(body) == s.active_component);
     let mut bodies: Vec<_> = if !parts.is_empty() {
         st.bodies.iter().filter(|b| parts.contains(&b.name)).collect()
     } else if implicit_all {
-        st.bodies.iter().collect()
+        // As the evaluator's `*`: every body but the envelopes, which only stand in for checks.
+        st.bodies.iter().filter(|b| !b.envelope).collect()
     } else {
         active_scope(s, st)
     };
@@ -797,7 +798,11 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
             (Vec::new(), solidcraft_doc::hole_reference::cylinder_edge_names(&s.model.state(), base, references))
         }
         // A conversion's bend edges are edges of the body it converts.
-        FeatureKind::SheetConvert { body, bends, .. } if !bends.is_empty() => {
+        FeatureKind::SheetConvert { body, bends, .. }
+        | FeatureKind::SheetSurfaceConvert { body, bends, .. }
+        | FeatureKind::SheetRecognize { body, bends, .. }
+            if !bends.is_empty() =>
+        {
             (Vec::new(), solidcraft_doc::sheet::bend_edge_names(&s.model.state(), body, &solidcraft_doc::plain(bends)))
         }
         _ => (Vec::new(), Vec::new()),
@@ -916,6 +921,20 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
         && let Some(e) = r.error.clone()
     {
         return Err(EngineError::of_feature(r, e));
+    }
+    // A sheet metal body is rebuilt from its sheet features, so a change another feature made to
+    // it (a pad, a fillet) is lost when a later sheet feature runs (not supported yet). A new
+    // feature that would lose one is refused, naming it, instead of going on with a warning
+    // (#18292). Designs that already have such a feature open and evaluate as before.
+    let lost = before.surface_sheets.iter().find_map(|old| {
+        let lost = old.altered_by.as_ref()?;
+        s.model.state().surface_sheets.iter().any(|now| now.body == old.body && now.altered_by.is_none()).then(|| (old.body.clone(), lost.clone()))
+    });
+    if let Some((body, lost)) = lost {
+        return Err(EngineError::Other(format!(
+            "`{body}` is rebuilt from its sheet metal features, which would lose what {lost} changed (not supported yet): \
+             add {lost} after the sheet metal features, or remove it"
+        )));
     }
     let st = s.model.state();
     let bodies: Vec<&str> = st.bodies.iter().map(|b| b.name.as_str()).collect();
@@ -1289,7 +1308,8 @@ pub fn shown_scope(s: &Session) -> Option<Vec<String>> {
 /// part where it is shown (#3223).
 fn active_scope<'a>(s: &Session, st: &'a solidcraft_doc::ModelState) -> Vec<&'a solidcraft_doc::ModelBody> {
     let active = s.active_component;
-    let own: Vec<_> = st.bodies.iter().filter(|b| s.doc.model_body_component(b) == active).collect();
+    // A component's envelope stands in for its parts in checks only: it is never worked on.
+    let own: Vec<_> = st.bodies.iter().filter(|b| !b.envelope && s.doc.model_body_component(b) == active).collect();
     if !own.is_empty() {
         return own;
     }
@@ -1298,7 +1318,7 @@ fn active_scope<'a>(s: &Session, st: &'a solidcraft_doc::ModelState) -> Vec<&'a 
         .iter()
         .filter(|b| {
             let comp = s.doc.model_body_component(b);
-            if !s.doc.component_within(comp, active) {
+            if b.envelope || !s.doc.component_within(comp, active) {
                 return false;
             }
             let frame = s.doc.component_transform(comp);
@@ -2785,7 +2805,8 @@ fn finish_pattern(
     (bodies, placements): (Vec<String>, Vec<Vec<u64>>),
 ) -> Result<Value> {
     let comps = string_list(UNKNOWN_COMMAND, p, "components")?;
-    if comps.is_empty() {
+    let paths = pattern_occurrences(p, "pattern (components)")?;
+    if comps.is_empty() && paths.is_empty() {
         let copied = bodies.clone();
         let reply = add_feature(s, p, FeatureKind::Pattern { features, pattern, bodies: bodies.into_iter().map(BodyName).collect(), placements })?;
         // The pattern is added either way: when it made no copies (the feature failed to
@@ -2811,18 +2832,56 @@ fn finish_pattern(
             made.push(s.doc_mut().add_occurrence(id, src.parent, solidcraft_doc::mat_mul(m, &src.transform))?);
         }
     }
+    // A placement picked by its path is placed again beside itself, in the component holding it,
+    // moved as the pattern moves it in the world: so a part placed several times, or inside a
+    // subassembly, is patterned from the placement picked, not from its first one.
+    shown_as_placed(s, paths.iter().map(|path| (format!("{path:?}"), path.as_slice())), cmd)?;
+    for path in &paths {
+        let lost = || bad(cmd, format!("no placement {path:?}"));
+        let (last, parent_path) = path.split_last().ok_or_else(lost)?;
+        let (parent, frame) = s.doc.path_placement(parent_path).ok_or_else(lost)?;
+        let o = s.doc.occurrences.iter().find(|o| o.id == *last && o.parent == parent).cloned().ok_or_else(lost)?;
+        let inverse = solidcraft_doc::mat_inverse(&frame).ok_or_else(|| bad(cmd, format!("the placement {path:?} is held in a singular frame")))?;
+        for m in &mats {
+            let moved = solidcraft_doc::mat_mul(&inverse, &solidcraft_doc::mat_mul(m, &frame));
+            made.push(s.doc_mut().add_occurrence(o.component, parent, solidcraft_doc::mat_mul(&moved, &o.transform))?);
+        }
+    }
     Ok(json!({"occurrences": made}))
+}
+
+/// The placements a pattern places again (`occurrences`: occurrence paths from the root, each a
+/// list of occurrence ids), empty when it names none.
+fn pattern_occurrences(p: &Value, cmd: &str) -> Result<Vec<Vec<u64>>> {
+    let list = match p.get("occurrences") {
+        None | Some(Value::Null) => return Ok(Vec::new()),
+        Some(list) => list,
+    };
+    // Anything but a list is refused, not read as no placements: that would copy the bodies instead.
+    let want = || bad(cmd, "`occurrences` must list occurrence paths, each a list of occurrence ids");
+    let paths: Vec<Vec<u64>> = list
+        .as_array()
+        .ok_or_else(want)?
+        .iter()
+        .map(|path| path.as_array().and_then(|ids| ids.iter().map(Value::as_u64).collect::<Option<Vec<u64>>>()).filter(|ids| !ids.is_empty()))
+        .collect::<Option<_>>()
+        .ok_or_else(want)?;
+    if paths.len() > 1000 {
+        return Err(bad(cmd, "`occurrences` must list at most 1000 occurrence paths"));
+    }
+    Ok(paths)
 }
 
 /// The bodies a pattern copies and the placement each was picked at.
 type PatternBodies = (Vec<String>, Vec<Vec<u64>>);
 
 /// What a pattern copies: features (replayed), bodies (`bodies: [names]`), or components
-/// (`components: [names]`, placed again as occurrences). A body may be named as a placement of
-/// its part shows it (its world name, as the view and the Browser name it): it is copied where
-/// that placement shows it, as a mirror copies it.
+/// (`components: [names]`, or `occurrences: [paths]` for particular placements, placed again as
+/// occurrences). A body may be named as a placement of its part shows it (its world name, as the
+/// view and the Browser name it): it is copied where that placement shows it, as a mirror copies
+/// it.
 fn pattern_sources(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<solidcraft_doc::FeatureId>, PatternBodies)> {
-    if !string_list(cmd, p, "components")?.is_empty() {
+    if !string_list(cmd, p, "components")?.is_empty() || !pattern_occurrences(p, cmd)?.is_empty() {
         return Ok((Vec::new(), (Vec::new(), Vec::new())));
     }
     let bodies = string_list(cmd, p, "bodies")?;
@@ -3106,14 +3165,25 @@ fn placed_bodies(s: &Session, names: Vec<String>, cmd: &str) -> Result<(Vec<Stri
     if !crate::frames::placed(s) && picked.iter().all(|(_, component, _)| *component == s.active_component) {
         return Ok((names, Vec::new()));
     }
-    let uncaptured = s.uncaptured_moves();
-    if let Some((name, ..)) = picked.iter().find(|(_, _, path)| path.iter().any(|id| uncaptured.contains_key(id))) {
-        return Err(bad(cmd, format!("`{name}` has a position that is not captured yet: Capture Position (component.capture_position) first")));
-    }
-    if let Some((name, ..)) = picked.iter().find(|(_, _, path)| path.iter().any(|id| s.pending_moves.contains_key(id))) {
-        return Err(bad(cmd, format!("`{name}` is shown in an exploded view: show it assembled (explode.show with no view) first")));
-    }
+    shown_as_placed(s, picked.iter().map(|(own, _, path)| (own.clone(), path.as_slice())), cmd)?;
     Ok(picked.into_iter().map(|(own, _, path)| (own, path)).unzip())
+}
+
+/// Refuses a picked placement (`what` names it, with its occurrence path from the root) that the
+/// view shows elsewhere than the design places it: moved and not captured yet, or in an exploded
+/// view. A body copied where a placement shows it and a placement patterned again both go by the
+/// design's placement, so they are refused alike.
+fn shown_as_placed<'a>(s: &Session, picked: impl IntoIterator<Item = (String, &'a [u64])>, cmd: &str) -> Result<()> {
+    let uncaptured = s.uncaptured_moves();
+    for (what, path) in picked {
+        if path.iter().any(|id| uncaptured.contains_key(id)) {
+            return Err(bad(cmd, format!("`{what}` has a position that is not captured yet: Capture Position (component.capture_position) first")));
+        }
+        if path.iter().any(|id| s.pending_moves.contains_key(id)) {
+            return Err(bad(cmd, format!("`{what}` is shown in an exploded view: show it assembled (explode.show with no view) first")));
+        }
+    }
+    Ok(())
 }
 
 /// The other name of an origin plane (`Top` for `XY`, `XY` for `Top`...), if `name` is one.
@@ -4127,10 +4197,11 @@ fn sweep(s: &mut Session, p: &Value) -> Result<Value> {
     )
 }
 
-/// A sweep's path (#2216): a chain of a body's edges (`path_body` and `path_edges`) or the
-/// curves of a sketch (`path_sketch` and `path`). The body's edges are a point on each edge of
-/// the chain; the path runs from the end nearest the profile.
-pub(super) fn sweep_path(s: &Session, p: &Value, cmd: &str) -> Result<(u64, Vec<String>, Option<BodyName>, Vec<Position>)> {
+/// A sweep's path (#2216, #16168): a chain of a body's edges (`path_body` and `path_edges`) or
+/// a chain of sketch curves (`path_sketch` and `path`, whose entries may name the sketch each
+/// curve is in). The body's edges are a point on each edge of the chain; the path runs from the
+/// end nearest the profile.
+pub(super) fn sweep_path(s: &Session, p: &Value, cmd: &str) -> Result<(u64, Vec<solidcraft_doc::PathEntry>, Option<BodyName>, Vec<Position>)> {
     if p.get("path_body").is_some_and(|b| !b.is_null()) {
         let body = str_(p, "path_body").ok_or_else(|| bad(cmd, "`path_body` must be a body name"))?;
         if s.model.state().body(body).is_none() {
@@ -4140,10 +4211,31 @@ pub(super) fn sweep_path(s: &Session, p: &Value, cmd: &str) -> Result<(u64, Vec<
         return Ok((0, Vec::new(), Some(BodyName::from(body)), edges));
     }
     let path_sketch = sketch_id(s, p.get("path_sketch"), cmd, "path_sketch")?;
-    let path = string_list(cmd, p, "path")?;
-    if path.is_empty() {
-        return Err(bad(cmd, "`path` must list curve ids"));
+    // A bare string was and is one curve of the path's sketch (`string_list` accepted it).
+    let path_value = p.get("path").ok_or_else(|| bad(cmd, "`path` must list curve ids"))?;
+    let path: Vec<Value> = match path_value {
+        Value::String(_) => vec![path_value.clone()],
+        Value::Array(a) => a.clone(),
+        _ => return Err(bad(cmd, "`path` must list curve ids")),
+    };
+    if path.is_empty() || path.len() > 1000 {
+        return Err(bad(cmd, "the path needs 1…1000 curves"));
     }
+    // A curve of the path's sketch is its id; a curve of another sketch is saved with that
+    // sketch, so a path may join the curves of several sketches (#16168).
+    let path = path
+        .iter()
+        .map(|e| match e {
+            Value::String(id) => Ok(solidcraft_doc::PathEntry::OfPathSketch(id.clone())),
+            Value::Object(o) => {
+                let curve =
+                    o.get("curve").and_then(Value::as_str).ok_or_else(|| bad(cmd, "each `path` entry must be a curve id or {sketch, curve}"))?;
+                let sketch = sketch_id(s, o.get("sketch"), cmd, "path curve's sketch")?;
+                Ok(solidcraft_doc::PathEntry::OfSketch { sketch: solidcraft_doc::SketchId(sketch), curve: curve.to_string() })
+            }
+            _ => Err(bad(cmd, "each `path` entry must be a curve id or {sketch, curve}")),
+        })
+        .collect::<Result<Vec<_>>>()?;
     Ok((path_sketch, path, None, Vec::new()))
 }
 
@@ -4552,7 +4644,30 @@ fn bounding_solid(s: &mut Session, p: &Value) -> Result<Value> {
         Some(_) => return Err(bad(cmd, "`margins` must have six values: -X, +X, -Y, +Y, -Z, +Z")),
         None => None,
     };
-    add_feature(s, p, FeatureKind::BoundingSolid { bodies: string_list(cmd, p, "bodies")?.into_iter().map(BodyName).collect(), margin, margins })
+    let bodies: Vec<BodyName> = string_list(cmd, p, "bodies")?.into_iter().map(BodyName).collect();
+    if p.get("component").is_none_or(Value::is_null) {
+        return add_feature(s, p, FeatureKind::BoundingSolid { bodies, margin, contents: false, margins });
+    }
+    if !bodies.is_empty() {
+        return Err(bad(cmd, "give `bodies` or `component`, not both"));
+    }
+    let component = super::component::component(s, p, "component", cmd)?;
+    envelope_in(s, p, component, margin, margins)
+}
+
+/// Add an envelope of `component` (a Bounding Solid of its contents, grown by `margin`, or by
+/// `margins` per side) with the feature parameters `p` (`name`, `body_name`). It is made in the
+/// component it bounds, in its frame, as if that component were active.
+pub(crate) fn envelope_in(s: &mut Session, p: &Value, component: u64, margin: Expr, margins: Option<[Expr; 6]>) -> Result<Value> {
+    // Two envelopes of one component would each stand in for the other and its contents.
+    if s.doc.features.iter().any(|f| f.component == component && matches!(f.kind, FeatureKind::BoundingSolid { contents: true, .. })) {
+        return Err(bad("solid.bounding_solid", "the component already has an envelope"));
+    }
+    let active = (s.active_component, s.active_occurrence_path.take());
+    s.active_component = component;
+    let out = add_feature(s, p, FeatureKind::BoundingSolid { bodies: Vec::new(), margin, contents: true, margins });
+    (s.active_component, s.active_occurrence_path) = active;
+    out
 }
 
 fn scale(s: &mut Session, p: &Value) -> Result<Value> {

@@ -25,6 +25,9 @@ pub struct Editor {
     /// takes focus when the menu opens and is cleared when it closes).
     pub(super) column_filter: String,
     pub(super) column_menu_open: bool,
+    /// After Update: the changes the table has no column for (`config.update_from_design`'s
+    /// `not_captured`), at the design revision the update made.
+    pub(super) not_captured: Option<(u64, Vec<String>)>,
 }
 impl Default for Editor {
     fn default() -> Self {
@@ -49,6 +52,7 @@ impl Default for Editor {
             table: None,
             column_filter: String::new(),
             column_menu_open: false,
+            not_captured: None,
         }
     }
 }

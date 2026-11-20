@@ -84,6 +84,9 @@ pub const EXTERNAL_POINTS: Accept = 16384;
 pub const CONSTRUCTION_POINTS: Accept = 32768;
 /// Snap points: an edge or face hovered wakes its centre, middle and ends (`snap_wake`).
 pub const SNAP_POINTS: Accept = 65536;
+/// Placements of components (a pattern of components): a pick in the view or the Browser takes
+/// the placement under the active component, as Align's Components do.
+pub const OCCURRENCES: Accept = 131072;
 /// What a 3D axis input takes (Revolve, Circular Pattern, Plane at Angle, Move's Rotate): an
 /// origin or construction axis, a straight sketch line, and an edge or face of the model that
 /// has an axis (a straight or circular edge, a cylinder, cone or torus face; the dialog takes
@@ -150,6 +153,11 @@ impl SelInput {
             Hit::Plane { name, .. } if a & PLANES != 0 => Some(Sel::Plane { name: name.clone() }),
             Hit::Axis { name } if a & AXES != 0 => Some(Sel::Axis { name: name.clone() }),
             Hit::ConstructionPoint { name } if a & CONSTRUCTION_POINTS != 0 => Some(Sel::ConstructionPoint { name: name.clone() }),
+            Hit::ConstructionPoint { name }
+                if solidcraft_engine::origins::item(name).is_some_and(|(_, item)| item == "O") && a & (ORIGIN | SNAP_POINTS) != 0 =>
+            {
+                Some(Sel::ConstructionPoint { name: name.clone() })
+            }
             Hit::SketchPoint3d { sketch, id, .. } if a & POINTS != 0 => Some(Sel::SketchPoint { id: format!("{sketch}:{id}") }),
             // A straight sketch line stands for an axis only in an input that takes axes for
             // what they are: an input that takes curves too (Measure) takes the line as its curve.

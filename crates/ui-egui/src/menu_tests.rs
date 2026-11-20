@@ -1455,6 +1455,77 @@ fn v_with_a_menu_open_shows_or_hides_what_the_menu_is_for() {
     assert!(h.app.session.visibility.hidden_bodies.contains(&b), "V without a menu acts on the selection");
 }
 
+/// #14554: V with an origin plane, axis, or point selected in the browser toggles its visibility.
+#[test]
+fn v_on_selected_origin_plane_axis_or_point_toggles_visibility() {
+    let mut h = crate::scenario::Harness::new();
+    h.settle();
+
+    // Ensure the Origin folder is open so its items are present.
+    if !crate::browser::is_open(&h.app, "origin", false) {
+        h.step(&json!({"click": {"handle": "row:Origin"}})).unwrap();
+    }
+
+    // Toggle plane XY
+    h.step(&json!({"click": {"handle": "row:XY"}})).unwrap();
+    assert_eq!(h.app.session.selection, vec![solidcraft_engine::Sel::Plane { name: "XY".into() }]);
+    h.step(&json!({"key": "V"})).unwrap();
+    assert!(h.app.session.visibility.hidden_origin.iter().any(|h| h == "XY"), "V hides XY plane");
+    h.step(&json!({"key": "V"})).unwrap();
+    assert!(!h.app.session.visibility.hidden_origin.iter().any(|h| h == "XY"), "V shows XY plane again");
+
+    // Toggle axis Z
+    h.step(&json!({"click": {"handle": "row:Z"}})).unwrap();
+    assert_eq!(h.app.session.selection, vec![solidcraft_engine::Sel::Axis { name: "Z".into() }]);
+    h.step(&json!({"key": "V"})).unwrap();
+    assert!(h.app.session.visibility.hidden_origin.iter().any(|h| h == "Z"), "V hides Z axis");
+    h.step(&json!({"key": "V"})).unwrap();
+    assert!(!h.app.session.visibility.hidden_origin.iter().any(|h| h == "Z"), "V shows Z axis again");
+
+    // Toggle origin point O
+    h.step(&json!({"click": {"handle": "row:O"}})).unwrap();
+    assert_eq!(h.app.session.selection, vec![solidcraft_engine::Sel::Vertex { body: String::new(), point: solidcore_record::Vec3::ZERO }]);
+    h.step(&json!({"key": "V"})).unwrap();
+    assert!(h.app.session.visibility.hidden_origin.iter().any(|h| h == "O"), "V hides origin point O");
+    h.step(&json!({"key": "V"})).unwrap();
+    assert!(!h.app.session.visibility.hidden_origin.iter().any(|h| h == "O"), "V shows origin point O again");
+
+    // Context menu on OriginPoint has Show/Hide bound to V
+    let items = context_menu::items(&h.app, &Target::OriginPoint { name: "O".into() });
+    assert_eq!(find(&items, "Show/Hide").shortcut, "V");
+}
+
+/// #14554: Clicking origin point O in the Browser sends a pick that SNAP_POINTS inputs accept (e.g. Offset Plane).
+#[test]
+fn origin_point_in_browser_picks_into_snap_points_input() {
+    let mut h = crate::scenario::Harness::new();
+    h.settle();
+
+    // Start Offset Plane dialog: input 0 is Plane (PLANES), input 1 is "Through point" (SNAP_POINTS).
+    h.app.start("construct.plane.offset");
+    h.frames(1);
+    assert!(h.app.dialog.is_some(), "Offset Plane dialog is open");
+
+    // Activate the "Through point" input which accepts SNAP_POINTS
+    let d = h.app.dialog.as_mut().unwrap();
+    d.active = 1;
+
+    // Ensure the Origin folder is open
+    if !crate::browser::is_open(&h.app, "origin", false) {
+        h.step(&json!({"click": {"handle": "row:Origin"}})).unwrap();
+    }
+
+    // Clicking O row in the Browser picks into the Through point input
+    h.step(&json!({"click": {"handle": "row:O"}})).unwrap();
+
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(
+        d.inputs[1].items,
+        vec![solidcraft_engine::Sel::Vertex { body: String::new(), point: solidcore_record::Vec3::ZERO }],
+        "Through point input (SNAP_POINTS) takes the origin point O"
+    );
+}
+
 #[test]
 fn view_ribbon_save_view_keeps_the_screen_camera() {
     use solidcraft_viewport::UpAxis;
@@ -1770,13 +1841,16 @@ fn the_old_construct_layout_is_kept_with_the_toolbar_preference() {
 }
 
 #[test]
-fn the_workspace_menu_lists_design_and_render_and_greys_future_workspaces() {
+fn the_workspace_menu_lists_design_drawing_and_render_only() {
     let app = sample_app();
     let items = context_menu::items(&app, &Target::Workspace);
     assert!(find(&items, "Design").enabled);
     assert!(find(&items, "Render").enabled);
-    assert!(!find(&items, "Animation").enabled);
     assert!(!items.iter().any(|i| i.label.contains("Generative")));
+    // Drawing comes second, right after Design (the owner's order), then Render; workspaces still to
+    // come (Animation, Simulation, Manufacture) aren't listed.
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).filter(|l| !l.is_empty()).collect();
+    assert_eq!(labels, ["Design", "Drawing", "Render"], "{labels:?}");
 }
 
 /// A right-click on a construction plane's browser row opens its menu, like a body's or a
@@ -2945,4 +3019,30 @@ fn a_menu_taller_than_the_window_scrolls_its_last_rows_into_view() {
     let menu = area(&h);
     let last_row = crate::scenario::rect_of(&format!("menu:{last}")).unwrap();
     assert!(menu.contains_rect(last_row), "and shows its last row: {last_row:?} in {menu:?}");
+}
+
+/// A base flange and a contour flange are drawn from a sketch: their History bar menu offers
+/// Edit Profile Sketch on it, as an extrude's does.
+#[test]
+fn sheet_flanges_from_a_sketch_offer_edit_profile_sketch() {
+    let mut app = crate::SolveApp::new(Session::default(), Services::default());
+    app.run("sheet.manage_rules", json!({"name": "AL2", "thickness": "2 mm", "k_factor": 0.5, "bend_radius": "1 mm", "active": true})).unwrap();
+    app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    app.run("sketch.create", json!({"plane": "XZ", "name": "Chain"})).unwrap();
+    app.run("sketch.line", json!({"points": [[200, 0], [240, 0], [240, 30]], "ids": ["c1", "c2"]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("sheet.flange", json!({"sketch": "Chain", "curves": ["c1", "c2"], "distance": 20})).unwrap();
+    let doc = &app.session.doc;
+    let id_of = |name: &str| doc.find_feature(name).map(|f| f.id).unwrap_or_else(|| panic!("no {name}"));
+    let of = |ty: &str| doc.features.iter().find(|f| f.kind.type_name() == ty).map(|f| f.id).unwrap_or_else(|| panic!("no {ty}"));
+    let flanges = [of("BaseFlangeFeature"), of("ContourFlangeFeature")];
+    for (flange, sketch) in flanges.into_iter().zip([id_of("Base"), id_of("Chain")]) {
+        let items = crate::timeline::feature_items(&app, flange);
+        let edit = find(&items, "Edit Profile Sketch");
+        assert!(edit.enabled);
+        assert_eq!(edit.params, Some(json!({"sketch": sketch})));
+    }
 }

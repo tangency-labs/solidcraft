@@ -46,14 +46,12 @@ use solidcore::topology::face::p2 as face2;
 use solidcore::topology::{edge, Brep, EdgeId, FaceId};
 use std::f64::consts::PI;
 
-/// Every opt-in fix on but `geometric_g2_continuity`.
+/// Every opt-in fix on.
 fn kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     k.fixes = f;
     // (the log changes no result: issue_2489_blend_faces_are_definitions)

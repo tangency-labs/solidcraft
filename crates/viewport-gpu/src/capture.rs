@@ -34,8 +34,6 @@ const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 /// The viewport's pipelines on one device, drawing pictures offscreen. Pictures are drawn one at
 /// a time (callers on several threads take turns).
 pub struct Capturer {
-    device: wgpu::Device,
-    queue: wgpu::Queue,
     adapter: String,
     /// The adapter is a GPU driver running on the CPU (llvmpipe, lavapipe, WARP).
     software: bool,
@@ -50,14 +48,22 @@ pub struct Capturer {
 }
 
 struct State {
-    renderer: Renderer,
-    background: wgpu::RenderPipeline,
+    /// The device and what draws on it; `None` once closed ([`Capturer::close`]).
+    gpu: Option<Gpu>,
     /// The last picture's scene key and accessibility map version (each picture uploads anew).
     key: u64,
     access_version: u64,
     /// The resolve textures cleared before their first resolve (tests count them).
     #[cfg(test)]
     resolve_clears: u32,
+}
+
+/// A capturer's device, with its queue and the pipelines built on it.
+struct Gpu {
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    renderer: Renderer,
+    background: wgpu::RenderPipeline,
 }
 
 impl Capturer {
@@ -80,7 +86,7 @@ impl Capturer {
         let samples =
             if samples > 1 && flags(FORMAT).sample_count_supported(samples) && flags(depth).sample_count_supported(samples) { samples } else { 1 };
         let scopes = error_scopes(&device);
-        let renderer = Renderer::new(&device, GpuTarget { format: FORMAT, depth: Some(depth), samples, tess: false, oit: false }, None);
+        let renderer = Renderer::new(&device, GpuTarget { format: FORMAT, depth: Some(depth), samples, tess: false, oit: false, edges: false }, None);
         let background = background_pipeline(&device, samples, depth);
         caught(scopes).map_or(Ok(()), |e| Err(GpuError::Pipeline(e)))?;
         let max_side = device.limits().max_texture_dimension_2d.min(MAX_SIDE);
@@ -91,15 +97,12 @@ impl Capturer {
             depth,
             max_side,
             state: Mutex::new(State {
-                renderer,
-                background,
+                gpu: Some(Gpu { device, queue, renderer, background }),
                 key: 0,
                 access_version: 0,
                 #[cfg(test)]
                 resolve_clears: 0,
             }),
-            device,
-            queue,
             lost: Arc::default(),
         })
     }
@@ -121,14 +124,22 @@ impl Capturer {
     /// meets a loss the driver reports and marks it, where the picture's first upload would
     /// panic inside wgpu. As `egui_wgpu::DeviceLost::probe`: an empty submission only signals a
     /// fence, which a reset D3D12 device let through (#6528).
-    fn probe_lost(&self) -> bool {
+    fn probe_lost(&self, gpu: &Gpu) -> bool {
         if self.is_lost() {
             return true;
         }
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("device lost probe") });
+        let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("device lost probe") });
         encoder.insert_debug_marker("device lost probe");
-        self.queue.submit([encoder.finish()]);
+        gpu.queue.submit([encoder.finish()]);
         self.is_lost()
+    }
+
+    /// Close the device: it, its queue and its pipelines are dropped, once a picture being drawn
+    /// has ended. Pictures asked for afterwards fail and say so.
+    pub fn close(&self) {
+        // Also after a picture panicked: the device closes whatever that picture left.
+        let gpu = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner).gpu.take();
+        drop(gpu);
     }
 
     /// A device of its own, without a window (native only): the adapter `policy` picks
@@ -218,11 +229,11 @@ impl Capturer {
         if !(1..=self.max_side).contains(&width) || !(1..=self.max_side).contains(&height) {
             return Err(GpuError::Render(format!("a picture is 1 to {} pixels a side, not {width} × {height}", self.max_side)));
         }
-        if self.probe_lost() {
-            return Err(GpuError::DeviceLost);
-        }
         let mut state = self.state.lock().map_err(|_| GpuError::Render("an earlier picture failed on this device".into()))?;
         let state = &mut *state;
+        if self.probe_lost(state.gpu.as_ref().ok_or_else(closed)?) {
+            return Err(GpuError::DeviceLost);
+        }
         state.key = state.key.wrapping_add(1);
         let mode = scene.analysis.map(|a| a.mode);
         let access = match mode {
@@ -245,7 +256,8 @@ impl Capturer {
     /// `frame` drawn over the `background` gradient, read back as straight RGBA, and what it
     /// drew (read while the caller holds `state`).
     fn picture(&self, state: &mut State, frame: &Frame, (top, bottom): (Rgb, Rgb), [width, height]: [u32; 2]) -> Result<(Vec<u8>, DrawStats)> {
-        let (device, queue) = (&self.device, &self.queue);
+        let Gpu { device, queue, renderer, background: background_pipeline } = state.gpu.as_mut().ok_or_else(closed)?;
+        let (device, queue) = (&*device, &*queue);
         let scopes = error_scopes(device);
         let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
         let texture = |label: &str, format: wgpu::TextureFormat, samples: u32, usage: wgpu::TextureUsages| {
@@ -281,8 +293,8 @@ impl Capturer {
         {
             state.resolve_clears += _cleared;
         }
-        state.renderer.prepare(device, queue, &mut encoder, frame);
-        if let Some(reason) = state.renderer.take_refused_upload() {
+        renderer.prepare(device, queue, &mut encoder, frame);
+        if let Some(reason) = renderer.take_refused_upload() {
             let _ = caught(scopes);
             return Err(GpuError::Render(reason));
         }
@@ -314,10 +326,10 @@ impl Capturer {
                 })
                 .forget_lifetime();
             // The background first, as the viewport paints it before the model.
-            pass.set_pipeline(&state.background);
+            pass.set_pipeline(background_pipeline);
             pass.set_vertex_buffer(0, background.slice(..));
             pass.draw(0..6, 0..1);
-            state.renderer.paint(frame, &mut pass, [0.0, 0.0, width as f32, height as f32]);
+            renderer.paint(frame, &mut pass, [0.0, 0.0, width as f32, height as f32]);
         }
         let row = width * 4;
         let padded = row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
@@ -360,7 +372,7 @@ impl Capturer {
         if rgba.len() != (row as usize) * (height as usize) {
             return Err(GpuError::Render("the picture read back short".into()));
         }
-        let stats = state.renderer.stats().lock().map(|s| *s).unwrap_or_default();
+        let stats = renderer.stats().lock().map(|s| *s).unwrap_or_default();
         Ok((rgba, stats))
     }
 
@@ -371,13 +383,34 @@ impl Capturer {
     }
 }
 
+/// What a picture asked of a closed capturer fails with ([`Capturer::close`]).
+fn closed() -> GpuError {
+    GpuError::Render("the GPU device for pictures is closed".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+static SHARED: std::sync::OnceLock<Result<Capturer>> = std::sync::OnceLock::new();
+
 /// The process's headless capturer (native only), opened on first use on the adapter `policy`
 /// picks and kept, whatever later calls pass; the error when no adapter qualifies or the device
 /// fails (not retried). A host passes the same policy every time.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn shared(policy: crate::select::Policy) -> std::result::Result<&'static Capturer, &'static GpuError> {
-    static SHARED: std::sync::OnceLock<Result<Capturer>> = std::sync::OnceLock::new();
     SHARED.get_or_init(|| Capturer::headless(policy)).as_ref()
+}
+
+/// For a process about to exit on Linux with NVIDIA's own driver: close the device of [`shared`],
+/// if one was opened ([`Capturer::close`]). Without a display that driver's Vulkan runs on its EGL
+/// library, whose exit handler unloads `libnvidia-eglcore` while an open device's threads still
+/// run in it, and the process then ends with a segmentation fault after its work is done (#19431).
+/// Every other system and driver exits with the device open, as before.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn close_shared_before_exit() {
+    if crate::select::nvidia_linux_driver()
+        && let Some(Ok(capturer)) = SHARED.get()
+    {
+        capturer.close();
+    }
 }
 
 /// What draws this process's headless pictures (native only): the shared headless device, or the
@@ -738,6 +771,25 @@ mod tests {
         }
     }
 
+    /// A closed capturer has dropped its device and everything it drew with, and a picture asked
+    /// of it afterwards fails and says so. A host on NVIDIA's Linux driver closes the shared
+    /// capturer before it exits ([`close_shared_before_exit`]).
+    #[test]
+    fn a_closed_capturer_drops_its_device_and_draws_no_more_pictures() {
+        let Ok(capturer) = Capturer::headless(crate::test_env::policy()) else {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        capturer.rgba(&Scene::default(), &Camera::default(), 32, 24).unwrap();
+        capturer.close();
+        assert!(capturer.state.lock().unwrap().gpu.is_none(), "the device, its queue and its pipelines are dropped");
+        let after = capturer.rgba(&Scene::default(), &Camera::default(), 32, 24);
+        assert!(matches!(&after, Err(GpuError::Render(why)) if why.contains("closed")), "{:?}", after.err());
+        // Closing again changes nothing.
+        capturer.close();
+        assert!(capturer.rgba(&Scene::default(), &Camera::default(), 32, 24).is_err());
+    }
+
     /// Bodies dragged as a layer of their own ([`crate::view::MovingLayer`]) are drawn moved by
     /// its transform: the picture is the one of the bodies built where they were moved to, and
     /// the bodies go back to the model scene when the drag ends (on this machine's GPU, skipped
@@ -838,6 +890,7 @@ mod tests {
                     look: crate::view::InstanceLook::Opaque,
                     levels: Vec::new(),
                     closed: true,
+                    edges: None,
                 };
                 let mut sc = GpuScene::default();
                 let red = sc.color([200, 30, 30, 255]);

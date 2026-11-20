@@ -342,7 +342,7 @@ pub const SECTIONS: &[Section] = &[
         promoted: 3,
         ids: &["drawing.revision", "drawing.revise.planned", "drawing.revision.tag.add.planned"],
     },
-    Section { tab: "DRAWING REVIEW", panel: "OUTPUT", promoted: 2, ids: &["drawing.export.planned", "drawing.print"] },
+    Section { tab: "DRAWING REVIEW", panel: "OUTPUT", promoted: 2, ids: &["drawing.export", "drawing.print"] },
     Section {
         tab: "MODEL",
         panel: "SKETCH",
@@ -560,7 +560,7 @@ pub const SECTIONS: &[Section] = &[
         tab: "SHEET METAL",
         panel: "CREATE",
         promoted: 4,
-        ids: &["sheet.flange", "sheet.path_flange", "sheet.hem", "sheet.fold", "sheet.perforate", "sheet.convert"],
+        ids: &["sheet.flange", "sheet.path_flange", "sheet.hem", "sheet.fold", "sheet.perforate", "sheet.convert", "sheet.recognize"],
     },
     Section { tab: "SHEET METAL", panel: "FLAT", promoted: 3, ids: &["sheet.unfold", "sheet.refold", "sheet.flat_pattern"] },
     Section { tab: "SHEET METAL", panel: "OUTPUT", promoted: 2, ids: &["sheet.export_dxf", "sheet.export_bend_table"] },
@@ -569,6 +569,7 @@ pub const SECTIONS: &[Section] = &[
     // A frame starts from a sketch of its lines; its profile sizes are often parameters.
     Section { tab: "WELDMENTS", panel: "SKETCH", promoted: 1, ids: &["sketch.create"] },
     Section { tab: "WELDMENTS", panel: "CREATE", promoted: 2, ids: &["frame.member", "frame.end_cap"] },
+    Section { tab: "WELDMENTS", panel: "MODIFY", promoted: 1, ids: &["frame.rotate_member"] },
     Section { tab: "WELDMENTS", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
 ];
 
@@ -666,7 +667,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("drawing.check.planned", "Check Drawing"),
     ("drawing.dimension", "Dimension"),
     ("drawing.dimension.from_model.planned", "Model Dims."),
-    ("drawing.export.planned", "Export"),
+    ("drawing.export", "Export"),
     ("drawing.hole_callout", "Hole Callout"),
     ("drawing.image", "Image"),
     ("drawing.leader", "Leader Note"),
@@ -682,6 +683,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("drawing.view.flat_pattern", "Flat Pattern"),
     ("drawing.view.section.planned", "Section View"),
     ("document.units", "Units"),
+    ("frame.rotate_member", "Rotate"),
     ("inspect.accessibility", "Access"),
     ("inspect.center_of_mass", "Mass Center"),
     ("inspect.curvature_comb", "Curv. Comb"),
@@ -842,7 +844,7 @@ pub fn feature_icon(k: &FeatureKind) -> Option<&'static str> {
         FeatureKind::SheetPath { .. } => "path_flange",
         FeatureKind::SheetUnfold { refold: false, .. } => "unfold",
         FeatureKind::SheetUnfold { .. } => "refold",
-        FeatureKind::SheetConvert { .. } => "convert_sheet",
+        FeatureKind::SheetConvert { .. } | FeatureKind::SheetSurfaceConvert { .. } | FeatureKind::SheetRecognize { .. } => "convert_sheet",
         FeatureKind::Boss { .. } => "boss",
         FeatureKind::Lip { .. } => "lip",
         FeatureKind::SnapFit { .. } => "snap_fit",
@@ -874,7 +876,7 @@ fn active_body<'a>(app: &'a crate::SolveApp, state: &'a solidcraft_engine::doc::
 pub fn sheet_body(app: &crate::SolveApp) -> Option<String> {
     let state = app.session.model.state();
     let body = active_body(app, &state)?;
-    state.sheets.iter().find(|s| s.body == body).map(|s| s.body.clone())
+    state.surface_sheets.iter().any(|s| s.body == body).then(|| body.to_string())
 }
 
 /// The active body when a Frame Member feature made it.
@@ -1262,6 +1264,56 @@ mod tests {
         assert_eq!(h.app.session.revision, revision);
     }
 
+    /// Ctrl+Z and Ctrl+Y (Cmd on macOS) undo and redo the open drawing's steps and leave the
+    /// model's steps alone; a focused text field keeps the keys for itself. With no drawing open
+    /// they do nothing, so the design behind the empty Drawing page never changes.
+    #[test]
+    fn drawing_undo_and_redo_keys_act_on_the_open_drawing_only() {
+        fn sheets(h: &mut crate::scenario::Harness) -> usize {
+            h.app.run("drawing.inspect", json!({})).unwrap()["sheets"].as_array().map_or(0, Vec::len)
+        }
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
+        h.call("ui.workspace", json!({"workspace":"drawing"}));
+        h.frames(3);
+        let model = h.app.session.doc.clone();
+        let steps = h.app.session.undo.len();
+        // One key at a time: Ctrl+Y after a wrong Ctrl+Z would put the design back.
+        for key in ["Z", "Y"] {
+            h.step(&json!({"key":key,"cmd":true})).unwrap();
+            h.frames(2);
+            assert_eq!(h.app.session.doc, model, "Ctrl+{key} on the empty Drawing page leaves the design alone");
+            assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), (steps, 0), "Ctrl+{key}");
+        }
+
+        h.app.run("drawing.create", json!({})).unwrap();
+        h.app.run("drawing.sheet.add", json!({"name":"Second sheet"})).unwrap();
+        h.frames(3);
+        let added = sheets(&mut h);
+        h.step(&json!({"key":"S"})).unwrap();
+        h.step(&json!({"text":"x"})).unwrap();
+        h.step(&json!({"key":"Z","cmd":true})).unwrap();
+        h.frames(2);
+        assert_eq!(sheets(&mut h), added, "Ctrl+Z in the search field stays the field's");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(!h.app.ui.palette_open);
+
+        h.step(&json!({"key":"Z","cmd":true})).unwrap();
+        h.frames(2);
+        assert_eq!(sheets(&mut h), added - 1, "Ctrl+Z undoes the drawing's last step");
+        h.step(&json!({"key":"Y","cmd":true})).unwrap();
+        h.frames(2);
+        assert_eq!(sheets(&mut h), added, "Ctrl+Y redoes it");
+        for _ in 0..2 {
+            h.step(&json!({"key":"Z","cmd":true})).unwrap();
+            h.frames(2);
+        }
+        assert_eq!(sheets(&mut h), added - 1, "the drawing has no older step");
+        assert_eq!(h.app.session.undo.len(), steps + 1, "the model's steps stay, New Drawing's too");
+        assert!(h.app.session.open_drawing.is_some());
+    }
+
     #[test]
     fn modify_groups_order_commands_and_keep_unlisted_commands_at_the_end() {
         let specs = solidcraft_engine::command_specs();
@@ -1450,13 +1502,23 @@ mod tests {
         assert_eq!(h.app.ui.tab, "SHEET METAL");
     }
 
+    /// Rotate Member sits in Weldments' MODIFY panel, after CREATE, as a button of its own.
+    #[test]
+    fn weldments_modify_panel_lists_rotate_member() {
+        let specs = solidcraft_engine::command_specs();
+        let (modify, n) = layout("WELDMENTS", "MODIFY", &specs).unwrap();
+        assert_eq!(modify.iter().take(n).map(|c| c.id).collect::<Vec<_>>(), ["frame.rotate_member"]);
+        let at = |p: &str| panels("WELDMENTS").iter().position(|q| *q == p);
+        assert_eq!(at("MODIFY"), at("CREATE").map(|i| i + 1));
+    }
+
     /// Weldments is there in a fresh document (a frame starts from a sketch of its lines), holds
     /// Frame Member, and selects itself while a member is the active body, as Sheet Metal does for
     /// a sheet body, but keeps the ordinary tab look.
     #[test]
     fn weldments_tab_holds_frame_member_and_follows_a_member_body() {
         let specs = solidcraft_engine::command_specs();
-        assert_eq!(panels("WELDMENTS"), ["SKETCH", "CREATE", "CONFIGURE"]);
+        assert_eq!(panels("WELDMENTS"), ["SKETCH", "CREATE", "MODIFY", "CONFIGURE"]);
         let (create, n) = layout("WELDMENTS", "CREATE", &specs).unwrap();
         assert_eq!(create.iter().take(n).map(|c| c.id).collect::<Vec<_>>(), ["frame.member", "frame.end_cap"]);
         assert!(!panel_ids("MODEL", &specs).contains(&"frame.member"), "Frame Member's home is Weldments");

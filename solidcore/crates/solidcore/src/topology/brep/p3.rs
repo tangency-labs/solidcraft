@@ -698,6 +698,16 @@ pub fn copy_brep(
     add_analytics: bool,
 ) -> Result<Brep> {
     let _ = copy_attributes;
+    // (not upstream) a source whose read raised tolerances to cover its kept trims passes
+    // that record to the copy: the copy's entities come from the source-to-copy map, a
+    // local one when the caller gives none
+    let mut own_reverse = CopyBrepMap::new();
+    let carry = !src.trim_cover_raises().is_empty();
+    let mut reverse_map = match reverse_map {
+        Some(m) => Some(m),
+        None if carry => Some(&mut own_reverse),
+        None => None,
+    };
     let mut b = Brep::new();
     b.set_key((env.key_of)(brep_entity()).key);
     // (not upstream) the copy's geometry is owned by `env.key_of`'s identities
@@ -729,7 +739,7 @@ pub fn copy_brep(
                 context: None,
             },
             copy_map,
-            reverse_map,
+            reverse_map.as_deref_mut(),
             add_analytics,
         ) {
             if e.is_unported_or_cancelled() {
@@ -749,7 +759,44 @@ pub fn copy_brep(
             ],
         ))
     })?;
+    if carry {
+        if let Some(map) = reverse_map.as_deref() {
+            copy_trim_cover_raises(src, &mut b, map)?;
+        }
+    }
     Ok(b)
+}
+
+/// (not upstream) The part of `src`'s kept-trim cover record ([`Brep::trim_cover_raises`])
+/// that holds on the copy `b`: each raised edge or vertex whose copy (`reverse_map`,
+/// source to copy) still holds the raised value, so the copy fits along it as the source
+/// does (`topology::edgeuse::p3::fit_tolerance`).
+///
+/// # Errors
+///
+/// Those of [`CopyBrepMap::get_at`] and of reading the copy's entities.
+fn copy_trim_cover_raises(
+    src: &Brep,
+    b: &mut Brep,
+    reverse_map: &CopyBrepMap<EntityRef>,
+) -> Result<()> {
+    let mut record = crate::topology::TrimCoverRaises::default();
+    for (&e, &(before, after)) in &src.trim_cover_raises().edges {
+        if let Some(EntityRef::Edge(c)) = reverse_map.get_at(Some(EntityRef::Edge(e)))? {
+            if b.edge(c)?.tolerance.to_bits() == after.to_bits() {
+                record.edges.insert(c, (before, after));
+            }
+        }
+    }
+    for (&v, &(before, after)) in &src.trim_cover_raises().vertices {
+        if let Some(EntityRef::Vertex(c)) = reverse_map.get_at(Some(EntityRef::Vertex(v)))? {
+            if b.vertex(c)?.tolerance.to_bits() == after.to_bits() {
+                record.vertices.insert(c, (before, after));
+            }
+        }
+    }
+    b.set_trim_cover_raises(record);
+    Ok(())
 }
 
 /// A default `SmTopology` record (flags, user value, marks) for every object of `b`
@@ -3620,8 +3667,28 @@ pub fn collapse_zero_area_two_edge_faces(
     b: &mut Brep,
     env: &mut NotifyEnv<'_>,
 ) -> Result<bool> {
+    let faces = p1::faces(b, None)?;
+    collapse_zero_area_two_edge_faces_among(k, b, env, &faces)
+}
+
+/// [`collapse_zero_area_two_edge_faces`] over `faces` only (in their order): a caller that
+/// has proved which faces are slivers (`crate::heal::tolerance_defects`) collapses those and
+/// leaves every other face as it is. A face of `faces` already gone is skipped.
+///
+/// # Errors
+///
+/// As [`collapse_zero_area_two_edge_faces`].
+pub fn collapse_zero_area_two_edge_faces_among(
+    k: &mut Kernel,
+    b: &mut Brep,
+    env: &mut NotifyEnv<'_>,
+    faces: &[FaceId],
+) -> Result<bool> {
     let mut collapsed = false;
-    for f in p1::faces(b, None)? {
+    for &f in faces {
+        if b.face(f).is_err() {
+            continue;
+        }
         let loops = face2::loops(b, f, false, None)?;
         let [l] = loops[..] else {
             continue;
