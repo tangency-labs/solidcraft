@@ -421,9 +421,10 @@ The dialog has a **Preview** box, on when it opens; with it off, nothing runs un
   memory and deadline limits, off the window's thread. A run left behind by newer inputs is
   dropped.
 - When the first successful preview is drawn, the app applies that run's last view command once
-  if it is `view.fit` or `view.home`. Later field changes leave the camera alone, so you can move it
-  freely. A run with no view command leaves the camera unchanged. Reopening the dialog starts
-  fresh: its first preview applies its view command again.
+  if it is `view.fit` or `view.home`. Fit includes previewed sketch geometry when there are no
+  bodies; even an empty result consumes this first-preview action. Later field changes leave the
+  camera alone, so you can move it freely. A run with no view command leaves the camera unchanged.
+  Reopening the dialog starts fresh: its first preview applies its view command again.
 - The most recently opened dialog on the design is previewed (the one picking in the viewport,
   when one is). While a native tool is open, its own preview is the one shown. Read entries and
   importers are not previewed.

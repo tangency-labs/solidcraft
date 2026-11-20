@@ -1170,7 +1170,9 @@ pub(crate) fn preview_drawn(app: &mut SolveApp, id: u64, view: Option<Value>) {
     }
     dialog.preview_drawn = true;
     if let Some(view) = view.filter(|view| matches!(view.get("kind").and_then(Value::as_str), Some("fit" | "home"))) {
-        app.apply_plugin_view(&json!({"view": view}), Some(app.preview.bounds));
+        // Home also works for an empty result; without preview geometry use the normal view path.
+        let bounds = (!app.preview.bounds.is_empty()).then_some(app.preview.bounds);
+        app.apply_plugin_view(&json!({"view": view}), bounds);
     }
 }
 
