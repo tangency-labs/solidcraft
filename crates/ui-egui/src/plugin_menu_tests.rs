@@ -1558,6 +1558,45 @@ mod native {
     }
 
     #[test]
+    fn an_unchanged_visible_sketch_is_included_in_the_first_plugin_preview_fit() {
+        let root = view_package("preview-unchanged-sketch-fit");
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.look_at_anim = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[100,20],"p1":[120,30]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let sketch = h.app.session.world_state().unwrap().sketches[0].feature;
+        assert!(solidcraft_engine::view::sketch_shown(&h.app.session, sketch));
+        h.app.plugin_menu.loaded = true;
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        let fit = h.app.plugin_menu.listed[0].entries.iter().position(|e| e.name == "fit").unwrap();
+        h.app.cam.set_view(solidcraft_viewport::StandardView::Top);
+        h.app.cam.distance = 800.0;
+        let parked = h.app.cam;
+        let (doc, undo) = (h.app.session.doc.clone(), h.app.session.undo.len());
+        open_entry(&mut h.app, 0, fit);
+        previewed(&mut h);
+        assert!(h.app.preview.active, "the preview is ready: {:?}", h.app.preview.error);
+        assert!(h.app.preview.sketches.is_empty(), "the existing sketch is unchanged by the run");
+        // The new box spans (0,0,0)..(20,10,3); the shown rectangle extends to (120,30,0).
+        let bounds = solidcraft_engine::geom::Aabb3 { min: solidcore_record::Vec3::ZERO, max: solidcore_record::Vec3::new(120.0, 30.0, 3.0) };
+        assert_eq!(h.app.preview.bounds, bounds, "framing includes the unchanged shown sketch");
+        let expected = h.app.fitted_bounds(parked, &bounds);
+        assert!(same_camera(&expected, &h.app.cam), "the first preview fits all shown geometry");
+        assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc));
+        assert_eq!(h.app.session.undo.len(), undo);
+
+        h.app.cam = parked;
+        run(&mut h.app).unwrap();
+        settle(&mut h);
+        h.frames(2);
+        assert!(solidcraft_engine::view::sketch_shown(&h.app.session, sketch));
+        assert_eq!(solidcraft_engine::view::bounds(&h.app.session).unwrap(), bounds);
+        assert!(same_camera(&expected, &h.app.cam), "preview and committed Fit frame the same geometry");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn a_sketch_a_plugin_consumes_does_not_widen_its_first_preview_fit() {
         let root = view_package("preview-consumed-sketch-fit");
         let mut h = crate::scenario::Harness::new();
