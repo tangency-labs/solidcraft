@@ -14,11 +14,11 @@
 //! close) is refused, naming the faces and the way out.
 
 use solidcraft_geom::prelude::*;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use solidcore_ops::cap::{is_face_on_plane, is_point_on_plane};
 use solidcore_record::Vec3;
-use solidcore_record::brep::{Brep, Curve, Loop};
+use solidcore_record::brep::{Brep, Curve, Frame, Loop, Surface};
 use solidcraft_geom::Aabb3;
 
 use crate::assemble::{AFace, AUse, Assembly};
@@ -46,8 +46,8 @@ fn surface_kind(rec: &solidcore_record::brep::Brep, f: usize) -> &'static str {
     }
 }
 
-/// The lowest curved neighbour `f` of a chosen face `by` across an edge, as `(f, by)`.
-fn curved_neighbour(rec: &Brep, del: &BTreeSet<usize>) -> Option<(usize, usize)> {
+/// The lowest curved neighbour `f` of a chosen face `by` that `takes` does not take, as `(f, by)`.
+fn curved_neighbour(rec: &Brep, del: &BTreeSet<usize>, takes: impl Fn(usize) -> bool) -> Option<(usize, usize)> {
     let mut found: BTreeSet<(usize, usize)> = BTreeSet::new();
     for &d in del {
         let Some(face) = rec.faces.get(d) else { continue };
@@ -56,7 +56,7 @@ fn curved_neighbour(rec: &Brep, del: &BTreeSet<usize>) -> Option<(usize, usize)>
             for oe in edges {
                 let Some(e) = rec.edges.get(oe.edge as usize) else { continue };
                 for f in faces_of(e) {
-                    if !del.contains(&f) && !matches!(surf_of(rec, f), Some(Surf::Plane { .. })) {
+                    if !del.contains(&f) && !matches!(surf_of(rec, f), Some(Surf::Plane { .. })) && !takes(f) {
                         found.insert((f, d));
                     }
                 }
@@ -86,6 +86,7 @@ struct Shared {
     q: f64,
     vertices: HashMap<Key, u32>,
     lines: HashMap<(Key, Key), u32>,
+    arcs: HashMap<(Key, Key, Key), u32>,
 }
 
 impl Shared {
@@ -113,6 +114,38 @@ impl Shared {
         self.lines.insert((ka, kb), e);
         Ok(AUse { edge: e, forward: true, given: None })
     }
+
+    /// The arc from `a` to `b` about `c` normal to `axis`, on `out`'s side of the chord (where the
+    /// deleted face's material lay), made once and used both ways.
+    fn arc(&mut self, asm: &mut Assembly, a: Vec3, b: Vec3, c: Vec3, axis: Vec3, out: Vec3) -> Result<AUse> {
+        let (ka, kb, kc) = (key(a, self.q), key(b, self.q), key(c, self.q));
+        if let Some(e) = self.arcs.get(&(ka, kb, kc)) {
+            return Ok(AUse { edge: *e, forward: true, given: None });
+        }
+        if let Some(e) = self.arcs.get(&(kb, ka, kc)) {
+            return Ok(AUse { edge: *e, forward: false, given: None });
+        }
+        let arc = solidcore_ops::cylinder_circle::arc_toward(arr(a), arr(b), arr(c), arr(axis), arr(out), self.q * 10.0)
+            .ok_or_else(|| fail("an arc with no side to go round"))?;
+        let (va, vb) = (self.vertex(asm, a)?, self.vertex(asm, b)?);
+        let frame = Frame { origin: arr(c), x_axis: arc.x_axis, y_axis: arc.y_axis };
+        let e = asm.edge(Curve::Circle { frame, radius: arc.radius }, [0.0, arc.sweep], va, vb)?;
+        self.arcs.insert((ka, kb, kc), e);
+        Ok(AUse { edge: e, forward: true, given: None })
+    }
+}
+
+/// A cylinder neighbour that closes round over the gap: axis point, unit axis and radius.
+type Wrap = solidcore_ops::cylinder_circle::Cylinder;
+
+/// The circle where plane `n·x = d` cuts a cylinder of `wraps` square to it, if `a` and `b`
+/// both lie on it: its centre and axis.
+fn wrap_circle(wraps: &BTreeMap<usize, Wrap>, n: Vec3, d: f64, a: Vec3, b: Vec3, tol: f64) -> Option<(Vec3, Vec3)> {
+    wraps.values().find_map(|w| Some((Vec3::from(w.plane_circle(arr(n), d, arr(a), arr(b), tol)?), Vec3::from(w.axis))))
+}
+
+fn arr(p: Vec3) -> [f64; 3] {
+    [p.x, p.y, p.z]
 }
 
 /// The corners along a gap stretch, closed to `a`: straight edges between them, with corners
@@ -135,6 +168,28 @@ fn close(pts: Vec<Vec3>, a: Vec3, q: f64) -> Vec<(Vec3, Vec3)> {
     c.windows(2).filter_map(|w| Some((*w.first()?, *w.get(1)?))).collect()
 }
 
+/// The edges closing a gap stretch through `pts` back to `a` on a plane neighbour: one arc on a
+/// wrapping cylinder's circle (its ends stay), else straight edges ([`close`]).
+#[allow(clippy::too_many_arguments)]
+fn closing(
+    shared: &mut Shared,
+    asm: &mut Assembly,
+    pts: Vec<Vec3>,
+    a: Vec3,
+    plane: Option<(Vec3, f64)>,
+    out: Option<Vec3>,
+    wraps: &BTreeMap<usize, Wrap>,
+) -> Result<Vec<AUse>> {
+    let q = shared.q;
+    if let (Some((n, d)), Some(out), Some(&first)) = (plane, out, pts.first())
+        && key(first, q) != key(a, q)
+        && let Some((c, ax)) = wrap_circle(wraps, n, d, first, a, q * 100.0)
+    {
+        return Ok(vec![shared.arc(asm, first, a, c, ax, out)?]);
+    }
+    close(pts, a, q).into_iter().map(|(x, y)| shared.line(asm, x, y)).collect()
+}
+
 /// Whether the use's edge has a corner that moves.
 fn corner_moves(asm: &Assembly, moved: &HashMap<u32, Vec3>, u: &AUse) -> bool {
     asm.ends(u).is_some_and(|(a, b)| moved.contains_key(&a) || moved.contains_key(&b))
@@ -143,10 +198,6 @@ fn corner_moves(asm: &Assembly, moved: &HashMap<u32, Vec3>, u: &AUse) -> bool {
 /// Where vertex `v` is after the corners move.
 fn position(asm: &Assembly, moved: &HashMap<u32, Vec3>, v: u32) -> Result<Vec3> {
     moved.get(&v).copied().or_else(|| asm.point(v)).ok_or_else(|| fail("vertex"))
-}
-
-fn arr(v: Vec3) -> [f64; 3] {
-    [v.x, v.y, v.z]
 }
 
 /// Whether face `g` lies on `plane` within `tol`: its own plane points the same way and every
@@ -334,17 +385,366 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
     if del.len() >= n {
         return Err(fail("that would delete every face"));
     }
-    if let Some((f, by)) = curved_neighbour(&rec, &del) {
-        // SMLib's fillet removal extends the fillet's two tangent neighbours whatever they are.
+    let size = body.size().max(1e-9);
+    // Classified before any healing: a curved neighbour the healer cannot take goes to fillet
+    // removal. A record the healer cannot assemble takes none, so its error stands only when
+    // every neighbour is planar.
+    let gap = guard("delete face", || Gap::new(&rec, &del, size));
+    let takes = |f: usize| gap.as_ref().is_ok_and(|g| g.takes(f));
+    if let Some((f, by)) = curved_neighbour(&rec, &del, takes) {
         let chosen: Vec<usize> = del.iter().copied().collect();
         return crate::offset_backend::delete_fillet_faces(body, &chosen).map_err(|e| {
             log::debug!(target: "smlib", "delete face: fillet removal refused too: {e}");
             curved_refusal(&rec, by, f)
         });
     }
-    let size = body.size().max(1e-9);
-    guard("delete face", || {
-        let mut asm = Assembly::from_record(&rec)?;
+    guard("delete face", || heal(gap?, &rec, &del, size, body))
+}
+
+/// The planar healer: the body rebuilt with the deleted faces gone and their neighbours closing
+/// the gap, over the neighbours [`Gap::new`] classified.
+fn heal(gap: Gap, rec: &Brep, del: &BTreeSet<usize>, size: f64, body: &Body) -> Result<Body> {
+    let n = rec.faces.len();
+    let Gap { mut asm, efaces, vfaces, neighbours, planes, kept_whole, wraps, .. } = gap;
+    let gap_edge = |e: u32| on_gap(&efaces, del, e);
+    let outward = |f: usize| match surf_of(rec, f) {
+        Some(Surf::Plane { n, .. }) => Some(n),
+        _ => None,
+    };
+    // The surface a wrap face takes: its cylinder's frame starts at the kept seam.
+    let mut seams: HashMap<usize, Surface> = HashMap::new();
+    // The deleted faces' vertices.
+    let gap_vertices: BTreeSet<u32> = vfaces.iter().filter(|(_, fs)| fs.iter().any(|f| del.contains(f))).map(|(v, _)| *v).collect();
+    // Corners across the gap: three neighbour planes meeting near the deleted faces.
+    let gap: Aabb3 = gap_vertices.iter().filter_map(|v| asm.point(*v)).collect();
+    let near_gap = gap.inflated(gap.diagonal().max(size * 1e-3));
+    let on = |p: Vec3, f: usize| planes.get(&f).is_some_and(|(n, d)| (n.dot(p) - d).abs() <= size * 1e-6);
+    let nb: Vec<(Vec3, f64)> = neighbours.iter().filter_map(|f| planes.get(f).copied()).collect();
+    let mut corners: Vec<Vec3> = Vec::new();
+    for (i, a) in nb.iter().enumerate() {
+        for (j, b) in nb.iter().enumerate().skip(i + 1) {
+            for c in nb.iter().skip(j + 1) {
+                let den = a.0.dot(b.0.cross(c.0));
+                if den.abs() < 1e-9 {
+                    continue;
+                }
+                let x = (b.0.cross(c.0) * a.1 + c.0.cross(a.0) * b.1 + a.0.cross(b.0) * c.1) / den;
+                if x.is_finite() && near_gap.contains(x) {
+                    corners.push(x);
+                }
+            }
+        }
+    }
+    // Where each vertex on the gap goes: the nearest corner on all of its remaining planes.
+    let mut moved: HashMap<u32, Vec3> = HashMap::new();
+    // Corners on a single neighbour with no corner to go to (a V notch's apex): the
+    // neighbour's gap stretch closes straight past them.
+    let mut dropped: HashSet<u32> = HashSet::new();
+    // The plane of a face that keeps a gap vertex: a neighbour's, or (a face meeting the gap
+    // only at a corner) its own where it is planar.
+    let kept_plane = |f: usize| -> Option<(Vec3, f64)> {
+        planes.get(&f).copied().or_else(|| match surf_of(rec, f) {
+            Some(Surf::Plane { n, d }) => Some((n, d)),
+            _ => None,
+        })
+    };
+    for v in &gap_vertices {
+        let Some(fs) = vfaces.get(v) else { continue };
+        let keep: Vec<usize> = fs.iter().copied().filter(|x| !del.contains(x)).collect();
+        if keep.is_empty() {
+            continue;
+        }
+        if keep.len() >= 3 {
+            // Three or more remaining faces hold the vertex where they meet, unless their
+            // planes all run through one line (a ridge whose round is deleted at its end):
+            // then it slides along that line to the corner the gap closes at, as a vertex of
+            // two faces does.
+            let Some(kp) = keep.iter().map(|f| kept_plane(*f)).collect::<Option<Vec<_>>>() else { continue };
+            let pinned = kp
+                .iter()
+                .enumerate()
+                .any(|(i, a)| kp.iter().enumerate().skip(i + 1).any(|(j, b)| kp.iter().skip(j + 1).any(|c| a.0.dot(b.0.cross(c.0)).abs() >= 1e-9)));
+            if pinned {
+                continue;
+            }
+            let p = asm.point(*v).ok_or_else(|| fail("vertex"))?;
+            let on_all = |c: Vec3| kp.iter().all(|(n, d)| (n.dot(c) - d).abs() <= size * 1e-6);
+            if let Some(c) = corners.iter().filter(|c| on_all(**c)).min_by(|a, b| a.dist(p).total_cmp(&b.dist(p))) {
+                moved.insert(*v, *c);
+            }
+            continue;
+        }
+        // A corner of a loop that goes whole goes with it.
+        if keep.iter().all(|x| kept_whole.contains(x)) {
+            continue;
+        }
+        // A corner on a cylinder that closes round stays where it is (the arcs meet there).
+        if keep.iter().any(|x| wraps.contains_key(x)) && keep.iter().all(|x| planes.contains_key(x) || wraps.contains_key(x)) {
+            continue;
+        }
+        if keep.iter().any(|x| !planes.contains_key(x)) {
+            let f = fs.iter().find(|x| del.contains(x)).copied().unwrap_or(0);
+            return Err(fail(format!("a corner of face {f} touches a face that cannot move")));
+        }
+        let p = asm.point(*v).ok_or_else(|| fail("vertex"))?;
+        let best = corners.iter().filter(|c| keep.iter().all(|x| on(**c, *x))).min_by(|a, b| a.dist(p).total_cmp(&b.dist(p)));
+        if let Some(c) = best {
+            moved.insert(*v, *c);
+        } else if keep.len() == 1 {
+            dropped.insert(*v);
+        }
+    }
+    let q = size * 1e-7;
+    let mut shared = Shared { q, vertices: HashMap::new(), lines: HashMap::new(), arcs: HashMap::new() };
+    // The deleted face each closing edge stands in for, to name it if the gap cannot close.
+    let mut closed_by: HashMap<u32, usize> = HashMap::new();
+    for (i, v) in asm.vertices.iter().enumerate() {
+        if !moved.contains_key(&(i as u32)) {
+            shared.vertices.insert(key(Vec3::from(v.point), q), i as u32);
+        }
+    }
+    let mut history: Vec<(usize, FaceProv)> = Vec::new();
+    let mut rebuilt: Vec<(usize, AFace)> = Vec::new();
+    for fi in 0..n {
+        if del.contains(&fi) {
+            continue;
+        }
+        let f = asm.faces.get(fi).and_then(Option::as_ref).ok_or_else(|| fail("face"))?.clone();
+        if !neighbours.contains(&fi) {
+            // Untouched, unless a corner moves: a plane meeting the gap only at a corner sliding along
+            // its edge (a ridge) follows it when every moved corner stays on it; no other face can.
+            if f.loops.iter().flatten().any(|u| corner_moves(&asm, &moved, u)) {
+                let follows = match surf_of(rec, fi) {
+                    Some(Surf::Plane { n, d }) => f
+                        .loops
+                        .iter()
+                        .flatten()
+                        .filter_map(|u| asm.ends(u))
+                        .flat_map(|(a, b)| [a, b])
+                        .filter_map(|v| moved.get(&v))
+                        .all(|c| (n.dot(*c) - d).abs() <= size * 1e-6),
+                    _ => false,
+                };
+                if !follows {
+                    return Err(fail(format!("face {fi} meets the gap only at a corner; it cannot follow")));
+                }
+            } else {
+                history.push((fi, crate::record::from_face(0, fi, Change::Kept)));
+                continue;
+            }
+        }
+        let mut loops: Vec<Vec<AUse>> = Vec::new();
+        for l in &f.loops {
+            let gaps = l.iter().filter(|u| gap_edge(u.edge)).count();
+            if gaps == 0 && !l.iter().any(|u| corner_moves(&asm, &moved, u)) {
+                loops.push(l.clone());
+                continue;
+            }
+            if let Some(w) = wraps.get(&fi).copied()
+                && gaps == 2
+            {
+                // A cylinder closing round: the gap's first ruling gives way to two arcs.
+                let on: Vec<usize> = (0..l.len()).filter(|k| l.get(*k).is_some_and(|u| gap_edge(u.edge))).collect();
+                let (Some(&i), Some(&j)) = (on.first(), on.get(1)) else { return Err(fail("edge")) };
+                let (Some(ui), Some(uj)) = (l.get(i), l.get(j)) else { return Err(fail("edge")) };
+                let (vp, vq) = asm.ends(ui).ok_or_else(|| fail("edge"))?;
+                let (vr, vs) = asm.ends(uj).ok_or_else(|| fail("edge"))?;
+                let pt = |v: u32| asm.point(v).ok_or_else(|| fail("vertex"));
+                let (p, pq, r, ps) = (pt(vp)?, pt(vq)?, pt(vr)?, pt(vs)?);
+                let (ax, centre) = (Vec3::from(w.axis), |x: Vec3| Vec3::from(w.centre_at(arr(x))));
+                let (c1, c2) = (centre(p), centre(r));
+                let (x_axis, y_axis) = w.frame_at(arr(r));
+                seams.insert(fi, Surface::Cylinder { frame: Frame { origin: w.origin, x_axis, y_axis }, radius: w.radius });
+                let by = efaces.get(&ui.edge).and_then(|fs| fs.iter().find(|x| del.contains(x)).copied());
+                let out = by.and_then(outward).ok_or_else(|| fail(format!("face {fi}: the gap over it is not flat")))?;
+                let top = shared.arc(&mut asm, p, ps, c1, ax, out)?;
+                let bottom = shared.arc(&mut asm, r, pq, c2, ax, out)?;
+                // Every use's pcurve is made again on the face's new form (the record's
+                // pcurves are on its old, narrower one).
+                let mut edges = Vec::with_capacity(l.len() + 2);
+                for (k, u) in l.iter().enumerate() {
+                    if k == i {
+                        edges.push(top.clone());
+                        edges.push(AUse { edge: uj.edge, forward: !uj.forward, given: None });
+                        edges.push(bottom.clone());
+                    } else {
+                        edges.push(AUse { given: None, ..u.clone() });
+                    }
+                }
+                if let Some(d) = by {
+                    closed_by.entry(top.edge).or_insert(d);
+                    closed_by.entry(bottom.edge).or_insert(d);
+                }
+                loops.push(edges);
+                continue;
+            }
+            if gaps == l.len() {
+                // A hole or boss footprint disappears with its walls. A face ringed by rounds does
+                // not: its boundary moves back to the remaining planes' intersections (#1557).
+                if !l.iter().any(|u| corner_moves(&asm, &moved, u)) {
+                    continue;
+                }
+                let mut boundary = Vec::new();
+                for u in l {
+                    let (a, b) = asm.ends(u).ok_or_else(|| fail("edge"))?;
+                    let (Some(pa), Some(pb)) = (moved.get(&a).copied(), moved.get(&b).copied()) else {
+                        return Err(fail(format!("face {fi} has a closed gap boundary that cannot be restored completely")));
+                    };
+                    if pa.dist(pb) > q * 10.0 {
+                        let restored = shared.line(&mut asm, pa, pb)?;
+                        asm.piece(restored.edge, u.edge);
+                        boundary.push(restored);
+                    }
+                }
+                if !boundary.is_empty() {
+                    loops.push(boundary);
+                }
+                continue;
+            }
+            // Start after a gap stretch so stretches don't wrap around.
+            let m = l.len();
+            let is_gap = |k: usize| l.get(k).is_some_and(|u| gap_edge(u.edge));
+            let start = (0..m).find(|i| is_gap((i + m - 1) % m) && !is_gap(*i)).unwrap_or(0);
+            let mut edges: Vec<AUse> = Vec::new();
+            let mut pending: Option<Vec<Vec3>> = None;
+            let mut pending_by: Option<usize> = None;
+            for k in 0..m {
+                let Some(u) = l.get((start + k) % m) else { continue };
+                let (va, vb) = asm.ends(u).ok_or_else(|| fail("edge"))?;
+                let (a, b) = (position(&asm, &moved, va)?, position(&asm, &moved, vb)?);
+                if gap_edge(u.edge) {
+                    let stretch = pending.get_or_insert_with(Vec::new);
+                    stretch.extend([(va, a), (vb, b)].into_iter().filter(|(v, _)| !dropped.contains(v)).map(|(_, p)| p));
+                    pending_by = pending_by.or_else(|| efaces.get(&u.edge).and_then(|fs| fs.iter().find(|x| del.contains(x)).copied()));
+                    continue;
+                }
+                if let Some(p) = pending.take() {
+                    let by = pending_by.take();
+                    for line in closing(&mut shared, &mut asm, p, a, planes.get(&fi).copied(), by.and_then(outward), &wraps)? {
+                        if let Some(d) = by {
+                            closed_by.entry(line.edge).or_insert(d);
+                        }
+                        edges.push(line);
+                    }
+                }
+                if !corner_moves(&asm, &moved, u) {
+                    edges.push(u.clone());
+                } else if matches!(asm.edges.get(u.edge as usize).map(|e| &e.curve), Some(Curve::Line { .. })) {
+                    if a.dist(b) > q * 10.0 {
+                        let stretched = shared.line(&mut asm, a, b)?;
+                        asm.piece(stretched.edge, u.edge);
+                        edges.push(stretched);
+                    }
+                } else {
+                    return Err(fail(format!("face {fi} has a curved edge that would have to stretch")));
+                }
+            }
+            // A gap stretch at the end closes back to the first edge.
+            if let (Some(p), Some(first)) = (pending, edges.first()) {
+                let (v0, _) = asm.ends(first).ok_or_else(|| fail("edge"))?;
+                let a = asm.point(v0).ok_or_else(|| fail("vertex"))?;
+                for line in closing(&mut shared, &mut asm, p, a, planes.get(&fi).copied(), pending_by.and_then(outward), &wraps)? {
+                    if let Some(d) = pending_by {
+                        closed_by.entry(line.edge).or_insert(d);
+                    }
+                    edges.push(line);
+                }
+            }
+            if edges.is_empty() {
+                return Err(fail(format!("face {fi} would lose its boundary")));
+            }
+            loops.push(edges);
+        }
+        if loops.is_empty() {
+            return Err(fail(format!("face {fi} would lose its boundary")));
+        }
+        // The face keeps its plane: every moved corner lies on it.
+        // A curved neighbour only lost whole loops: its parameter box stands.
+        let domain = if kept_whole.contains(&fi) { f.domain } else { None };
+        let (nurbs, surface) = if wraps.contains_key(&fi) {
+            let seam = seams.get(&fi).cloned().ok_or_else(|| fail(format!("face {fi}: its seam is not known")))?;
+            (None, seam)
+        } else {
+            (f.nurbs.clone(), f.surface.clone())
+        };
+        rebuilt.push((fi, AFace { loops, domain, nurbs, surface, ..f }));
+        history.push((fi, crate::record::from_face(0, fi, Change::Modified)));
+    }
+    // A wrap face's kept circles go on its new frame's form: each is relabelled as the arc
+    // between its ends through its middle, and the pcurves about it are made again.
+    let rims: HashMap<u32, Wrap> = rebuilt
+        .iter()
+        .filter_map(|(fi, f)| Some((wraps.get(fi).copied()?, f)))
+        .flat_map(|(w, f)| f.loops.iter().flatten().map(move |u| (u.edge, w)))
+        .filter(|(e, _)| asm.edges.get(*e as usize).is_some_and(|e| e.source.is_some() && matches!(e.curve, Curve::Circle { .. })))
+        .collect();
+    for (e, w) in &rims {
+        let edge = asm.edges.get(*e as usize).ok_or_else(|| fail("edge"))?;
+        let [va, vb] = edge.vertices;
+        let (a, b) = (asm.point(va).ok_or_else(|| fail("vertex"))?, asm.point(vb).ok_or_else(|| fail("vertex"))?);
+        let [t0, t1] = edge.interval;
+        let mid = solidcraft_geom::brep::eval::CurveEval::new(edge.nurbs.as_ref().unwrap_or(&edge.curve))
+            .ok()
+            .and_then(|ev| ev.point(0.5 * (t0 + t1)))
+            .ok_or_else(|| fail("a kept circle that cannot be evaluated"))?;
+        let centre = w.centre_at(arr(a));
+        let arc = solidcore_ops::cylinder_circle::circle_arc_through(arr(a), arr(mid), arr(b), centre, w.axis, q * 10.0)
+            .ok_or_else(|| fail("a kept circle with no side to go round"))?;
+        if let Some(edge) = asm.edges.get_mut(*e as usize) {
+            edge.curve = Curve::Circle { frame: Frame { origin: centre, x_axis: arc.x_axis, y_axis: arc.y_axis }, radius: arc.radius };
+            edge.nurbs = None;
+            edge.interval = [0.0, arc.sweep];
+        }
+    }
+    for u in rebuilt
+        .iter_mut()
+        .flat_map(|(_, f)| f.loops.iter_mut().flatten())
+        .chain(asm.faces.iter_mut().flatten().flat_map(|f| f.loops.iter_mut().flatten()))
+    {
+        if rims.contains_key(&u.edge) {
+            u.given = None;
+        }
+    }
+    for &fi in del {
+        if let Some(slot) = asm.faces.get_mut(fi) {
+            *slot = None;
+        }
+    }
+    for (fi, face) in rebuilt {
+        if let Some(slot) = asm.faces.get_mut(fi) {
+            *slot = Some(face);
+        }
+    }
+    let fallback = del.first().copied().unwrap_or(0);
+    fill_on_planes(&mut asm, &planes, size * 1e-6, &mut history, &closed_by, fallback)?;
+    history.sort_by_key(|(fi, _)| *fi);
+    let finished = asm.finish().map_err(|e| fail(format!("the neighbouring faces do not close the gap ({e})")))?;
+    crate::assemble::body_with_history(finished, &asm, body, history.into_iter().map(|(_, h)| h).collect())
+}
+
+fn on_gap(efaces: &HashMap<u32, Vec<usize>>, del: &BTreeSet<usize>, e: u32) -> bool {
+    efaces.get(&e).is_some_and(|fs| fs.iter().any(|x| del.contains(x)))
+}
+
+/// The neighbours of the chosen faces, classified before the healer runs: planes extend across
+/// the gap, a cylinder closes round over it (`wraps`), a curved neighbour only loses whole loops
+/// (`kept_whole`). Any other curved neighbour is left out, and fillet removal takes it.
+struct Gap {
+    asm: Assembly,
+    efaces: HashMap<u32, Vec<usize>>,
+    vfaces: HashMap<u32, Vec<usize>>,
+    neighbours: BTreeSet<usize>,
+    planes: HashMap<usize, (Vec3, f64)>,
+    kept_whole: HashSet<usize>,
+    wraps: BTreeMap<usize, Wrap>,
+    /// Curved neighbours at a corner the healer would refuse (a corner it cannot move shared with
+    /// faces that are not all kept whole, or all planes or wraps).
+    mixed: HashSet<usize>,
+}
+
+impl Gap {
+    fn new(rec: &Brep, del: &BTreeSet<usize>, size: f64) -> Result<Gap> {
+        let asm = Assembly::from_record(rec)?;
         // Edge and vertex → faces.
         let mut efaces: HashMap<u32, Vec<usize>> = HashMap::new();
         let mut vfaces: HashMap<u32, Vec<usize>> = HashMap::new();
@@ -363,8 +763,8 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
                 }
             }
         }
-        let gap_edge = |e: u32| efaces.get(&e).is_some_and(|fs| fs.iter().any(|x| del.contains(x)));
-        // Neighbours: faces sharing an edge with a deleted face; they must be planar.
+        let gap_edge = |e: u32| on_gap(&efaces, del, e);
+        // Neighbours: faces sharing an edge with a deleted face.
         let mut neighbours: BTreeSet<usize> = BTreeSet::new();
         for fs in efaces.values() {
             if fs.iter().any(|f| del.contains(f)) {
@@ -374,235 +774,104 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
         if neighbours.is_empty() {
             return Err(fail("the faces don't border the rest of the body"));
         }
-        let mut planes: HashMap<usize, (Vec3, f64)> = HashMap::new();
-        for &f in &neighbours {
-            let Some(Surf::Plane { n, d }) = surf_of(&rec, f) else { return Err(fail("a neighbour is not planar")) };
-            planes.insert(f, (n, d));
-        }
-        // The deleted faces' vertices.
-        let gap_vertices: BTreeSet<u32> = vfaces.iter().filter(|(_, fs)| fs.iter().any(|f| del.contains(f))).map(|(v, _)| *v).collect();
-        // Corners across the gap: three neighbour planes meeting near the deleted faces.
-        let gap: Aabb3 = gap_vertices.iter().filter_map(|v| asm.point(*v)).collect();
-        let near_gap = gap.inflated(gap.diagonal().max(size * 1e-3));
-        let on = |p: Vec3, f: usize| planes.get(&f).is_some_and(|(n, d)| (n.dot(p) - d).abs() <= size * 1e-6);
-        let nb: Vec<(Vec3, f64)> = neighbours.iter().filter_map(|f| planes.get(f).copied()).collect();
-        let mut corners: Vec<Vec3> = Vec::new();
-        for (i, a) in nb.iter().enumerate() {
-            for (j, b) in nb.iter().enumerate().skip(i + 1) {
-                for c in nb.iter().skip(j + 1) {
-                    let den = a.0.dot(b.0.cross(c.0));
-                    if den.abs() < 1e-9 {
-                        continue;
-                    }
-                    let x = (b.0.cross(c.0) * a.1 + c.0.cross(a.0) * b.1 + a.0.cross(b.0) * c.1) / den;
-                    if x.is_finite() && near_gap.contains(x) {
-                        corners.push(x);
-                    }
-                }
-            }
-        }
-        // Where each vertex on the gap goes: the nearest corner on all of its remaining planes.
-        let mut moved: HashMap<u32, Vec3> = HashMap::new();
-        // Corners on a single neighbour with no corner to go to (a V notch's apex): the
-        // neighbour's gap stretch closes straight past them.
-        let mut dropped: HashSet<u32> = HashSet::new();
-        // The plane of a face that keeps a gap vertex: a neighbour's, or (a face meeting the gap
-        // only at a corner) its own where it is planar.
-        let kept_plane = |f: usize| -> Option<(Vec3, f64)> {
-            planes.get(&f).copied().or_else(|| match surf_of(&rec, f) {
-                Some(Surf::Plane { n, d }) => Some((n, d)),
-                _ => None,
+        let ruling = |u: &AUse, w: &Wrap, tol: f64| {
+            asm.edges.get(u.edge as usize).is_some_and(|e| match &e.curve {
+                Curve::Line { start, end } => w.is_ruling(arr(Vec3::from(*start)), arr(Vec3::from(*end)), tol),
+                _ => false,
             })
         };
-        for v in &gap_vertices {
-            let Some(fs) = vfaces.get(v) else { continue };
+        // Whether edge `e` is the cylinder's circle at height `h`.
+        let on_circle = |e: u32, w: &Wrap, h: f64, tol: f64| {
+            asm.edges.get(e as usize).is_some_and(|edge| match &edge.curve {
+                Curve::Circle { frame, radius } => w.is_circle_at(frame.origin, frame.x_axis, frame.y_axis, *radius, h, tol),
+                _ => false,
+            })
+        };
+        let wraps_round = |f: usize, w: &Wrap| {
+            let tol = size * 1e-6;
+            let Some(face) = asm.faces.get(f).and_then(Option::as_ref) else { return false };
+            let mut ends: Option<(f64, f64)> = None;
+            for l in &face.loops {
+                let on: Vec<usize> = (0..l.len()).filter(|k| l.get(*k).is_some_and(|u| gap_edge(u.edge))).collect();
+                match on[..] {
+                    [] => continue,
+                    [i, j] if j - i != 1 && !(i == 0 && j + 1 == l.len()) => {}
+                    _ => return false,
+                }
+                let (Some(ui), Some(uj)) = (on.first().and_then(|k| l.get(*k)), on.get(1).and_then(|k| l.get(*k))) else { return false };
+                if !(ruling(ui, w, tol) && ruling(uj, w, tol)) || ends.is_some() {
+                    return false;
+                }
+                let Some((a, b)) = asm.ends(ui).and_then(|(a, b)| Some((asm.point(a)?, asm.point(b)?))) else { return false };
+                let Some((r, s)) = asm.ends(uj).and_then(|(r, s)| Some((asm.point(r)?, asm.point(s)?))) else { return false };
+                // One deleted plane borders both rulings, and the rulings end on the same circles.
+                let borders =
+                    |u: &AUse| -> BTreeSet<usize> { efaces.get(&u.edge).into_iter().flatten().copied().filter(|x| del.contains(x)).collect() };
+                let shared: Vec<usize> = borders(ui).intersection(&borders(uj)).copied().collect();
+                let [by] = shared[..] else { return false };
+                if !matches!(surf_of(rec, by), Some(Surf::Plane { .. })) || !w.same_circle(arr(a), arr(s), tol) || !w.same_circle(arr(r), arr(b), tol)
+                {
+                    return false;
+                }
+                let (h1, h2) = (w.height(arr(a)), w.height(arr(b)));
+                // Every other edge of the loop runs along one of those two circles (no tiny
+                // edge or step between the rulings).
+                if !l.iter().filter(|u| !gap_edge(u.edge)).all(|u| on_circle(u.edge, w, h1, tol) || on_circle(u.edge, w, h2, tol)) {
+                    return false;
+                }
+                ends = Some((h1.min(h2), h1.max(h2)));
+            }
+            // The cylinder ends at those circles: none of its vertices lies past them (a flat
+            // pocketed into the middle of a shaft, its end walls inside the solid, is not one).
+            let Some((lo, hi)) = ends else { return false };
+            face.loops.iter().flatten().all(|u| {
+                asm.ends(u)
+                    .is_some_and(|(a, b)| [a, b].iter().all(|v| asm.point(*v).is_some_and(|p| (lo - tol..=hi + tol).contains(&w.height(arr(p))))))
+            })
+        };
+        let loses_whole_loops = |f: usize| {
+            asm.faces
+                .get(f)
+                .and_then(Option::as_ref)
+                .is_some_and(|face| face.loops.iter().all(|l| l.iter().all(|u| gap_edge(u.edge)) || !l.iter().any(|u| gap_edge(u.edge))))
+        };
+        let mut planes: HashMap<usize, (Vec3, f64)> = HashMap::new();
+        let mut kept_whole: HashSet<usize> = HashSet::new();
+        let mut wraps: BTreeMap<usize, Wrap> = BTreeMap::new();
+        for &f in &neighbours {
+            match surf_of(rec, f) {
+                Some(Surf::Plane { n, d }) => {
+                    planes.insert(f, (n, d));
+                }
+                Some(Surf::Cylinder { o, a, r, .. }) if wraps_round(f, &Wrap { origin: arr(o), axis: arr(a), radius: r }) => {
+                    wraps.insert(f, Wrap { origin: arr(o), axis: arr(a), radius: r });
+                }
+                _ if loses_whole_loops(f) => {
+                    kept_whole.insert(f);
+                }
+                _ => {}
+            }
+        }
+        let mut mixed: HashSet<usize> = HashSet::new();
+        for fs in vfaces.values().filter(|fs| fs.iter().any(|f| del.contains(f))) {
             let keep: Vec<usize> = fs.iter().copied().filter(|x| !del.contains(x)).collect();
-            if keep.is_empty() {
+            if keep.is_empty() || keep.len() >= 3 {
                 continue;
             }
-            if keep.len() >= 3 {
-                // Three or more remaining faces hold the vertex where they meet, unless their
-                // planes all run through one line (a ridge whose round is deleted at its end):
-                // then it slides along that line to the corner the gap closes at, as a vertex of
-                // two faces does.
-                let Some(kp) = keep.iter().map(|f| kept_plane(*f)).collect::<Option<Vec<_>>>() else { continue };
-                let pinned = kp.iter().enumerate().any(|(i, a)| {
-                    kp.iter().enumerate().skip(i + 1).any(|(j, b)| kp.iter().skip(j + 1).any(|c| a.0.dot(b.0.cross(c.0)).abs() >= 1e-9))
-                });
-                if pinned {
-                    continue;
-                }
-                let p = asm.point(*v).ok_or_else(|| fail("vertex"))?;
-                let on_all = |c: Vec3| kp.iter().all(|(n, d)| (n.dot(c) - d).abs() <= size * 1e-6);
-                if let Some(c) = corners.iter().filter(|c| on_all(**c)).min_by(|a, b| a.dist(p).total_cmp(&b.dist(p))) {
-                    moved.insert(*v, *c);
-                }
-                continue;
-            }
-            if keep.iter().any(|x| !planes.contains_key(x)) {
-                let f = fs.iter().find(|x| del.contains(x)).copied().unwrap_or(0);
-                return Err(fail(format!("a corner of face {f} touches a face that cannot move")));
-            }
-            let p = asm.point(*v).ok_or_else(|| fail("vertex"))?;
-            let best = corners.iter().filter(|c| keep.iter().all(|x| on(**c, *x))).min_by(|a, b| a.dist(p).total_cmp(&b.dist(p)));
-            if let Some(c) = best {
-                moved.insert(*v, *c);
-            } else if keep.len() == 1 {
-                dropped.insert(*v);
+            let whole = keep.iter().all(|x| kept_whole.contains(x));
+            let planar = keep.iter().all(|x| planes.contains_key(x) || wraps.contains_key(x));
+            if !whole && !planar {
+                mixed.extend(keep.iter().copied().filter(|x| kept_whole.contains(x) || wraps.contains_key(x)));
             }
         }
-        let q = size * 1e-7;
-        let mut shared = Shared { q, vertices: HashMap::new(), lines: HashMap::new() };
-        // The deleted face each closing edge stands in for, to name it if the gap cannot close.
-        let mut closed_by: HashMap<u32, usize> = HashMap::new();
-        for (i, v) in asm.vertices.iter().enumerate() {
-            if !moved.contains_key(&(i as u32)) {
-                shared.vertices.insert(key(Vec3::from(v.point), q), i as u32);
-            }
-        }
-        let mut history: Vec<(usize, FaceProv)> = Vec::new();
-        let mut rebuilt: Vec<(usize, AFace)> = Vec::new();
-        for fi in 0..n {
-            if del.contains(&fi) {
-                continue;
-            }
-            let f = asm.faces.get(fi).and_then(Option::as_ref).ok_or_else(|| fail("face"))?.clone();
-            if !neighbours.contains(&fi) {
-                // Untouched, unless one of its corners moves: a plane meeting the gap only at a
-                // corner that slides along its edge (a ridge) follows it with its straight edges
-                // when every moved corner stays on it; any other face cannot.
-                if f.loops.iter().flatten().any(|u| corner_moves(&asm, &moved, u)) {
-                    let follows = match surf_of(&rec, fi) {
-                        Some(Surf::Plane { n, d }) => f
-                            .loops
-                            .iter()
-                            .flatten()
-                            .filter_map(|u| asm.ends(u))
-                            .flat_map(|(a, b)| [a, b])
-                            .filter_map(|v| moved.get(&v))
-                            .all(|c| (n.dot(*c) - d).abs() <= size * 1e-6),
-                        _ => false,
-                    };
-                    if !follows {
-                        return Err(fail(format!("face {fi} meets the gap only at a corner; it cannot follow")));
-                    }
-                } else {
-                    history.push((fi, crate::record::from_face(0, fi, Change::Kept)));
-                    continue;
-                }
-            }
-            let mut loops: Vec<Vec<AUse>> = Vec::new();
-            for l in &f.loops {
-                let gaps = l.iter().filter(|u| gap_edge(u.edge)).count();
-                if gaps == 0 && !l.iter().any(|u| corner_moves(&asm, &moved, u)) {
-                    loops.push(l.clone());
-                    continue;
-                }
-                if gaps == l.len() {
-                    // A hole or boss footprint disappears when its walls are removed. A face
-                    // surrounded by rounds does not: its whole boundary moves back to the
-                    // intersections of the remaining planes (#1557), its restored edges shared
-                    // with the adjacent rebuilt faces.
-                    if !l.iter().any(|u| corner_moves(&asm, &moved, u)) {
-                        continue;
-                    }
-                    let mut boundary = Vec::new();
-                    for u in l {
-                        let (a, b) = asm.ends(u).ok_or_else(|| fail("edge"))?;
-                        let (Some(pa), Some(pb)) = (moved.get(&a).copied(), moved.get(&b).copied()) else {
-                            return Err(fail(format!("face {fi} has a closed gap boundary that cannot be restored completely")));
-                        };
-                        if pa.dist(pb) > q * 10.0 {
-                            let restored = shared.line(&mut asm, pa, pb)?;
-                            asm.piece(restored.edge, u.edge);
-                            boundary.push(restored);
-                        }
-                    }
-                    if !boundary.is_empty() {
-                        loops.push(boundary);
-                    }
-                    continue;
-                }
-                // Start after a gap stretch so stretches don't wrap around.
-                let m = l.len();
-                let is_gap = |k: usize| l.get(k).is_some_and(|u| gap_edge(u.edge));
-                let start = (0..m).find(|i| is_gap((i + m - 1) % m) && !is_gap(*i)).unwrap_or(0);
-                let mut edges: Vec<AUse> = Vec::new();
-                // The moved corners along a gap stretch.
-                let mut pending: Option<Vec<Vec3>> = None;
-                let mut pending_by: Option<usize> = None;
-                for k in 0..m {
-                    let Some(u) = l.get((start + k) % m) else { continue };
-                    let (va, vb) = asm.ends(u).ok_or_else(|| fail("edge"))?;
-                    let (a, b) = (position(&asm, &moved, va)?, position(&asm, &moved, vb)?);
-                    if gap_edge(u.edge) {
-                        let stretch = pending.get_or_insert_with(Vec::new);
-                        stretch.extend([(va, a), (vb, b)].into_iter().filter(|(v, _)| !dropped.contains(v)).map(|(_, p)| p));
-                        pending_by = pending_by.or_else(|| efaces.get(&u.edge).and_then(|fs| fs.iter().find(|x| del.contains(x)).copied()));
-                        continue;
-                    }
-                    if let Some(p) = pending.take() {
-                        let by = pending_by.take();
-                        for (x, y) in close(p, a, q) {
-                            let line = shared.line(&mut asm, x, y)?;
-                            if let Some(d) = by {
-                                closed_by.entry(line.edge).or_insert(d);
-                            }
-                            edges.push(line);
-                        }
-                    }
-                    if !corner_moves(&asm, &moved, u) {
-                        edges.push(u.clone());
-                    } else if matches!(asm.edges.get(u.edge as usize).map(|e| &e.curve), Some(Curve::Line { .. })) {
-                        if a.dist(b) > q * 10.0 {
-                            let stretched = shared.line(&mut asm, a, b)?;
-                            asm.piece(stretched.edge, u.edge);
-                            edges.push(stretched);
-                        }
-                    } else {
-                        return Err(fail(format!("face {fi} has a curved edge that would have to stretch")));
-                    }
-                }
-                // A gap stretch at the end closes back to the first edge.
-                if let (Some(p), Some(first)) = (pending, edges.first()) {
-                    let (v0, _) = asm.ends(first).ok_or_else(|| fail("edge"))?;
-                    let a = asm.point(v0).ok_or_else(|| fail("vertex"))?;
-                    for (x, y) in close(p, a, q) {
-                        let line = shared.line(&mut asm, x, y)?;
-                        if let Some(d) = pending_by {
-                            closed_by.entry(line.edge).or_insert(d);
-                        }
-                        edges.push(line);
-                    }
-                }
-                if edges.is_empty() {
-                    return Err(fail(format!("face {fi} would lose its boundary")));
-                }
-                loops.push(edges);
-            }
-            if loops.is_empty() {
-                return Err(fail(format!("face {fi} would lose its boundary")));
-            }
-            // The face keeps its plane: every moved corner lies on it.
-            rebuilt.push((fi, AFace { loops, domain: None, ..f }));
-            history.push((fi, crate::record::from_face(0, fi, Change::Modified)));
-        }
-        for &fi in &del {
-            if let Some(slot) = asm.faces.get_mut(fi) {
-                *slot = None;
-            }
-        }
-        for (fi, face) in rebuilt {
-            if let Some(slot) = asm.faces.get_mut(fi) {
-                *slot = Some(face);
-            }
-        }
-        let fallback = del.first().copied().unwrap_or(0);
-        fill_on_planes(&mut asm, &planes, size * 1e-6, &mut history, &closed_by, fallback)?;
-        history.sort_by_key(|(fi, _)| *fi);
-        let finished = asm.finish().map_err(|e| fail(format!("the neighbouring faces do not close the gap ({e})")))?;
-        crate::assemble::body_with_history(finished, &asm, body, history.into_iter().map(|(_, h)| h).collect())
-    })
+        Ok(Gap { asm, efaces, vfaces, neighbours, planes, kept_whole, wraps, mixed })
+    }
+
+    /// Whether the planar healer takes curved neighbour `f`: a cylinder that closes round over the
+    /// gap, or one that only loses whole loops, unless it shares a corner the healer cannot move.
+    fn takes(&self, f: usize) -> bool {
+        (self.wraps.contains_key(&f) || self.kept_whole.contains(&f)) && !self.mixed.contains(&f)
+    }
 }
 
 #[cfg(test)]
@@ -1073,5 +1342,47 @@ mod tests {
                 _ => true,
             })
             .collect()
+    }
+
+    /// `delete_faces` gives fillet removal's result, or its curved-neighbour refusal, never a healer error.
+    fn is_fillet_removal(b: &crate::Body, faces: &[usize]) {
+        let direct = crate::offset_backend::delete_fillet_faces(b, faces).ok();
+        match (delete_faces(b, faces), direct) {
+            (Ok(back), Some(direct)) => {
+                let (v, w) = (back.volume_at(1e-3).unwrap(), direct.volume_at(1e-3).unwrap());
+                assert!((v - w).abs() < 1e-6 * w.abs().max(1.0), "{v} vs {w}");
+                assert_eq!(back.face_count(), direct.face_count());
+            }
+            // Only the fillet-removal dispatch gives the curved-neighbour refusal; the healer's errors never do.
+            (Err(e), None) => {
+                let e = e.to_string();
+                assert!(e.contains("borders face") && e.contains("in the timeline"), "{e}");
+            }
+            (got, direct) => panic!("{:?} vs fillet removal {}", got.map(|b| b.face_count()), direct.is_some()),
+        }
+    }
+
+    /// Two rounds on the shaft flat, both picked: no one deleted plane borders both rulings, so the wrap is not taken.
+    #[test]
+    fn two_rounds_on_a_shaft_flat_go_to_fillet_removal() {
+        let shaft = cylinder(Vec3::ZERO, Vec3::Z, 10.0, 40.0).unwrap();
+        let cut = box_solid(Vec3::new(8.0, -11.0, -1.0), Vec3::new(13.0, 11.0, 41.0)).unwrap();
+        let flatted = boolean(&shaft, &cut, BoolOp::Cut).unwrap().unwrap();
+        let rounded = fillet(&flatted, &[Vec3::new(8.0, 6.0, 20.0), Vec3::new(8.0, -6.0, 20.0)], 1.0).unwrap();
+        let rounds = shaft_rims(&rounded);
+        assert_eq!(rounds.len(), 2, "{rounds:?}");
+        is_fillet_removal(&rounded, &rounds);
+    }
+
+    /// Two chamfers on the shaft flat, both picked: each borders one ruling only, so the wrap is not taken.
+    #[test]
+    fn two_chamfers_on_a_shaft_flat_go_to_fillet_removal() {
+        let shaft = cylinder(Vec3::ZERO, Vec3::Z, 10.0, 40.0).unwrap();
+        let cut = box_solid(Vec3::new(8.0, -11.0, -1.0), Vec3::new(13.0, 11.0, 41.0)).unwrap();
+        let flatted = boolean(&shaft, &cut, BoolOp::Cut).unwrap().unwrap();
+        let chamfered = chamfer(&flatted, &[Vec3::new(8.0, 6.0, 20.0), Vec3::new(8.0, -6.0, 20.0)], 0.5).unwrap();
+        let chamfers = shaft_rims(&chamfered);
+        assert_eq!(chamfers.len(), 2, "{chamfers:?}");
+        is_fillet_removal(&chamfered, &chamfers);
     }
 }
