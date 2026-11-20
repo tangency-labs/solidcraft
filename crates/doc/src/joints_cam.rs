@@ -324,8 +324,10 @@ fn cam_turned_occurrence(doc: &Document, cam: &super::Joint) -> u64 {
     }
 }
 
-/// The occurrence that slides along a slider joint (the moving side of the joint).
-fn slider_moving_occurrence(doc: &Document, j: &super::Joint) -> u64 {
+/// The occurrence that moves on joint `j` (slides along a slider, turns on a hinge): the side
+/// that is not grounded (the design itself is), else the side farther from the design through
+/// the other joints, else B.
+pub fn moving_occurrence(doc: &Document, j: &super::Joint) -> u64 {
     let a_grounded = j.a.occurrence == 0 || doc.occurrences.iter().any(|o| o.id == j.a.occurrence && o.grounded);
     let b_grounded = j.b.occurrence == 0 || doc.occurrences.iter().any(|o| o.id == j.b.occurrence && o.grounded);
     if a_grounded && !b_grounded {
@@ -356,7 +358,7 @@ fn part_slides(doc: &Document, occ: Option<u64>, comp: Option<u64>) -> bool {
         if j.suppressed || j.kind != JointKind::Slider {
             return false;
         }
-        let moving = slider_moving_occurrence(doc, j);
+        let moving = moving_occurrence(doc, j);
         if occ.is_some_and(|o| moving == o) {
             return true;
         }
@@ -374,7 +376,7 @@ fn part_slides(doc: &Document, occ: Option<u64>, comp: Option<u64>) -> bool {
             if cost == 0
                 && other_occ != o
                 && other_occ != u64::MAX
-                && doc.assembly.joints.iter().any(|j| !j.suppressed && j.kind == JointKind::Slider && slider_moving_occurrence(doc, j) == other_occ)
+                && doc.assembly.joints.iter().any(|j| !j.suppressed && j.kind == JointKind::Slider && moving_occurrence(doc, j) == other_occ)
             {
                 return true;
             }
