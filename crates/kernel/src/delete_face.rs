@@ -912,18 +912,22 @@ mod tests {
         assert_eq!(back.face_count(), 8);
     }
 
-    /// A chamfer beside a curved neighbour is refused with the curved-neighbour text.
+    /// A hole's chamfer (a cone between the top and the wall) is removed: the plain hole returns.
     #[test]
-    fn a_chamfer_beside_a_cylinder_is_still_refused() {
+    fn deleting_a_hole_chamfer_gives_the_plain_hole() {
         let plate = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 5.0)).unwrap();
         let pin = cylinder(Vec3::new(20.0, 15.0, -1.0), Vec3::Z, 3.0, 7.0).unwrap();
         let holed = boolean(&plate, &pin, BoolOp::Cut).unwrap().unwrap();
+        let plain = holed.volume_at(1e-3).unwrap();
         let chamfered = chamfer(&holed, &[Vec3::new(23.0, 15.0, 5.0)], 1.0).unwrap();
         let record = crate::brep_record(&chamfered).unwrap();
         let cone: Vec<usize> =
             (0..record.faces.len()).filter(|i| matches!(crate::offset::surf_of(&record, *i), Some(crate::offset::Surf::Cone { .. }))).collect();
         assert_eq!(cone.len(), 1, "{cone:?}");
-        let e = delete_faces(&chamfered, &cone).unwrap_err().to_string();
-        assert!(e.contains("only planar neighbours can extend"), "{e}");
+        let back = delete_faces(&chamfered, &cone).unwrap();
+        let v = back.volume_at(1e-3).unwrap();
+        assert!((v - plain).abs() < 1e-6 * plain, "{v} vs {plain}");
+        assert_eq!(back.face_count(), holed.face_count());
+        assert_eq!(back.unmeshed_faces(), 0);
     }
 }
