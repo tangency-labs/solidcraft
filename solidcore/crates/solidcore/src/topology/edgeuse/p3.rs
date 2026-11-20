@@ -1749,25 +1749,26 @@ pub fn get_or_create_uv_trim_curve(
 
 /// Not upstream (#18162, #18009): the distance `SetUVTrimCurve` raises an edge's tolerance to
 /// cover (to twice it) for the new trim `trim` of `eu`, given upstream's distance `upstream`
-/// (the drop's reported error, or what the caller passes): the smaller of `upstream` and the
-/// trim's proved distance from the edge curve ([`trim_deviation_bound`], `B`). The drop's
-/// error counts its fit tolerance, which is the edge's own tolerance, so upstream raises the
-/// edge from its own tolerance on every refit, whatever the trim's real distance; `B` bounds
-/// that distance, so the edge is never raised past twice it. Where `B` is not enclosed, or
-/// `upstream` raises nothing (the tolerance already covers twice it), `upstream`, as
-/// upstream.
+/// (the drop's reported error, or what the caller passes): the trim's proved distance from
+/// the edge curve ([`trim_deviation_bound`], `B`) wherever it is enclosed. The drop's error
+/// counts its fit tolerance, which is the edge's own tolerance, so upstream raises the edge
+/// from its own tolerance on every refit, whatever the trim's real distance; `B` bounds that
+/// distance, so the raise covers the trim by proof. Where `B` is not enclosed, or `upstream`
+/// raises nothing (the tolerance already covers twice it), `upstream`, as upstream.
 ///
-/// `B` is taken only where the tolerance it leaves still covers the proved distance of every
-/// other UV trim of the edge, and the edge curve's proved distance to the surface of every
-/// other face of the edge that holds no trim (`other_trims_bound`); otherwise, or where one
-/// of them is not enclosed, `upstream`. A trim set without a raise (read from a file, or attached by an
-/// operation that does not raise) may be covered by upstream's larger raise only, and a
-/// smaller raise must not uncover it. Such a trim is not covered by raising further: its
-/// bound can be loose by orders of magnitude, and a tolerance raised to it changes what
-/// later operations accept.
+/// Where `B` is above `upstream` the trim lies farther from the edge than its drop reported,
+/// and the raise covers `B`: a tolerance below the trim's real distance is invalid, one above
+/// it only loose. The bound is the whole bisection's (to its piece and depth limits, not
+/// stopped at `upstream`), so a loose enclosure is tightened as far as it goes before the
+/// edge is raised to it; it is still a proved bound.
 ///
-/// Where `B` is larger than `upstream` the trim lies farther from the edge than its drop
-/// reported, and the raise is upstream's.
+/// A `B` below `upstream` is taken only where the tolerance it leaves still covers the proved
+/// distance of every other UV trim of the edge, and the edge curve's proved distance to the
+/// surface of every other face of the edge that holds no trim (`other_trims_bound`);
+/// otherwise, or where one of them is not enclosed, `upstream`. A trim set without a raise
+/// (read from a file, or attached by an operation that does not raise) may be covered by
+/// upstream's larger raise only, and a smaller raise must not uncover it. A raise to a `B`
+/// at least `upstream` leaves the edge at least as far as upstream's.
 ///
 /// # Errors
 ///
@@ -1791,13 +1792,17 @@ pub(crate) fn trim_raise_distance(
     // (the bounds are as tight as the tolerance the trim is fitted at asks: a tolerance the
     // healer raised to cover a gap leaves them as they are, as it leaves the fit)
     let fit = fit_tolerance(k, b, e)?;
-    // (a bound not below `upstream` is not taken)
     // (a bound at most half the tolerance raises nothing, whatever its value: the bisection
-    // stops tightening it there)
-    let raise_by = match trim_deviation_bound(k, b, eu, trim, fit, [0.5 * tol, upstream], None)? {
-        Some(bound) if bound < upstream => bound,
-        _ => return Ok(upstream),
-    };
+    // stops tightening it there; any other is the whole bisection's, not stopped at a cutoff,
+    // so a loose enclosure is tightened as far as it goes before the edge is raised to it)
+    let raise_by =
+        match trim_deviation_bound(k, b, eu, trim, fit, [0.5 * tol, f64::INFINITY], None)? {
+            Some(bound) if bound.is_finite() => bound,
+            _ => return Ok(upstream),
+        };
+    if raise_by >= upstream {
+        return Ok(raise_by);
+    }
     // A smaller raise than upstream's must still leave the edge covering its other trims:
     // a trim set without a raise (read from a file, or attached by an operation that does
     // not raise) may be covered by upstream's larger raise only, and the smaller one must

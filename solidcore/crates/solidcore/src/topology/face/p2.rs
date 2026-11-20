@@ -80,9 +80,9 @@
 //!   3D on a face whose surface moves 100 per unit of UV). Where the edge's tolerance
 //!   provably covered a trim before the edit (`trim_deviation_bound` at most the
 //!   tolerance), it is raised to the edited trim's proved distance from the edge curve
-//!   when that is larger and at most twice the tolerance (`keep_trim_covered`: a larger
-//!   bound is the enclosure's slack as often as the trim's move, and stays upstream's);
-//!   it is never lowered. The edited trim's bound may stop at `KEEP_COVERED_PIECES` (64)
+//!   when that is larger, however far (`keep_trim_covered`: a tolerance below the trim's
+//!   real distance is invalid, one above it only loose; the bound is the whole bisection's
+//!   past the tolerance, so a loose enclosure is tightened first); it is never lowered. The edited trim's bound may stop at `KEEP_COVERED_PIECES` (64)
 //!   pieces only while it may still show the trim within the tolerance (then nothing is
 //!   raised); a trim an end value shows past it is bounded with every piece it needs.
 //! - **Not upstream (#14257): the end move is spread.** Upstream moves each trim's end
@@ -3548,11 +3548,10 @@ const KEEP_COVERED_PIECES: usize = 64;
 /// the tolerance then; a bound that does not certify the tolerance before an edit is not
 /// one to raise the tolerance to after it). Never lowers it.
 ///
-/// Only a bound up to twice the tolerance is taken. The enclosure can be loose by orders of
-/// magnitude (0.03 and 0.27 over a tolerance of 1e-5 on read corpus bodies), and a
-/// tolerance raised to such a bound fails the B-rep's own tolerance checks; there the
-/// tolerance stays upstream's. Twice is `SetUVTrimCurve`'s own allowance: it raises an edge
-/// to twice the distance its trim reports.
+/// The raise is to the whole bound, however far past the tolerance: a tolerance below the
+/// trim's real distance is invalid, one above it only loose. Past the tolerance the bound is
+/// the whole bisection's (to its piece and depth limits), so a loose enclosure is tightened
+/// as far as it goes before the edge is raised to it.
 ///
 /// A trim the edit left as it was (its geometry the same, bit for bit) at a tolerance not
 /// lowered is not bounded at all: it is covered after the edit exactly where it was before.
@@ -3597,21 +3596,21 @@ fn keep_trim_covered(
     let fit = crate::topology::edgeuse::p3::fit_tolerance(k, b, e)?;
     let bound = {
         let trim = held_curve(b, holder)?;
-        // (a bound past twice the tolerance is not taken; one within it raises nothing)
+        // (a bound within the tolerance raises nothing)
         crate::topology::edgeuse::p3::trim_deviation_bound(
             k,
             b,
             eu,
             trim,
             fit,
-            [tolerance, 2.0 * tolerance],
+            [tolerance, f64::INFINITY],
             Some(KEEP_COVERED_PIECES),
         )?
     };
     let Some(bound) = bound else {
         return Ok(());
     };
-    if !(bound.is_finite() && bound > tolerance && bound <= 2.0 * tolerance) {
+    if !(bound.is_finite() && bound > tolerance) {
         return Ok(());
     }
     // (whether the tolerance before the edit provably covered the trim before it)
