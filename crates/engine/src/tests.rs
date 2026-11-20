@@ -6071,6 +6071,77 @@ fn combine_cut_offset_round_edges() {
     assert_eq!(saved["offset_edges"], "round", "{saved}");
 }
 
+/// A 40 × 40 × 20 block, a 10 mm square pin from z 5 to 35 standing in it (its pocket is 15
+/// deep), and the block's volume after `params` (a Combine cut of the pin, kept) from 32000 mm³.
+fn pin_pocket(extra: &[(&str, [f64; 3], [f64; 3])], params: Value) -> (Session, f64) {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 20, "body_name": "Block"}));
+    run(&mut s, "solid.box", json!({"corner": [15, 15, 5], "length": 10, "width": 10, "height": 30, "body_name": "Pin"}));
+    for (name, corner, size) in extra {
+        run(&mut s, "solid.box", json!({"corner": corner, "length": size[0], "width": size[1], "height": size[2], "body_name": name}));
+    }
+    let mut p = json!({"target": "Block", "operation": "cut", "keep_tools": true});
+    if let (Some(o), Some(extra)) = (p.as_object_mut(), params.as_object()) {
+        o.extend(extra.clone());
+    }
+    run(&mut s, "solid.combine", p);
+    let v = solidcraft_kernel::measure(&s.model.state().body("Block").unwrap().body).unwrap().volume;
+    (s, v)
+}
+
+/// Only the picked faces move: the pin's two sides at x 15 and 25 grown 0.5 make its pocket
+/// 11 × 10 × 15; the other faces stay where they are.
+#[test]
+fn combine_cut_offset_of_picked_faces() {
+    let (s, v) = pin_pocket(&[], json!({"tools": ["Pin"], "offset": 0.5, "offset_faces": [[15, 20, 10], [25, 20, 10]]}));
+    assert!(rel(v, 32000.0 - 11.0 * 10.0 * 15.0) < 1e-9, "{v}");
+    let pin = solidcraft_kernel::measure(&s.model.state().body("Pin").unwrap().body).unwrap().volume;
+    assert!(rel(pin, 3000.0) < 1e-9, "the tool is not changed: {pin}");
+}
+
+/// Two adjacent sides grown 1 and rounded: the edge between them becomes a quarter cylinder of
+/// radius 1 about the old edge, the edges to the faces that don't move stay sharp. The pocket's
+/// section is 11 × 11 less the corner's 1 − π/4, 15 deep.
+#[test]
+fn combine_cut_offset_of_picked_faces_rounds_the_edge_between_them() {
+    let (_, v) = pin_pocket(&[], json!({"tools": ["Pin"], "offset": 1, "offset_edges": "round", "offset_faces": [[25, 20, 10], [20, 25, 10]]}));
+    let pocket = 15.0 * (121.0 - (1.0 - PI / 4.0));
+    assert!(rel(v, 32000.0 - pocket) < 1e-9, "{v} vs {}", 32000.0 - pocket);
+}
+
+/// Every face grown 1 with rounds of 0.5: the 12 × 12 × 32 box from z 4 with its edges rounded
+/// 0.5 and its corners balls of 0.5. Below z 20: the bottom layer (z 4 to 4.5),
+/// 11² · 0.5 + 22 · π 0.5² / 2 + (2/3) π 0.5³, and the rest (z 4.5 to 20) of section
+/// 144 − (4 − π) 0.5², 15.5 high.
+#[test]
+fn combine_cut_offset_with_its_own_rounding_radius() {
+    let (_, v) = pin_pocket(&[], json!({"tools": ["Pin"], "offset": 1, "offset_edges": "round", "offset_radius": "0.5 mm"}));
+    let r: f64 = 0.5;
+    let bottom = 11.0 * 11.0 * r + 22.0 * PI * r * r / 2.0 + 2.0 / 3.0 * PI * r.powi(3);
+    let rest = 15.5 * (144.0 - (4.0 - PI) * r * r);
+    assert!(rel(v, 32000.0 - bottom - rest) < 1e-6, "{v} vs {}", 32000.0 - bottom - rest);
+}
+
+/// A tool none of whose faces is picked cuts as it is: the 5 mm post's pocket 5 × 5 × 15 beside
+/// the pin's, whose side at x 25 alone grows 1 (11 × 10 × 15).
+#[test]
+fn combine_cut_offset_leaves_a_tool_without_picked_faces_as_it_is() {
+    let (_, v) =
+        pin_pocket(&[("Post", [2.0, 2.0, 5.0], [5.0, 5.0, 30.0])], json!({"tools": ["Pin", "Post"], "offset": 1, "offset_faces": [[25, 20, 10]]}));
+    assert!(rel(v, 32000.0 - 11.0 * 10.0 * 15.0 - 5.0 * 5.0 * 15.0) < 1e-9, "{v}");
+}
+
+/// A picked point on no tool face is named.
+#[test]
+fn combine_cut_offset_refusals_of_picked_faces() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 20, "body_name": "Block"}));
+    run(&mut s, "solid.box", json!({"corner": [15, 15, 5], "length": 10, "width": 10, "height": 30, "body_name": "Pin"}));
+    let p = json!({"target": "Block", "tools": ["Pin"], "operation": "cut", "offset": 1, "offset_faces": [[0, 20, 10]]});
+    let said = s.execute("solid.combine", &p).expect_err(&p.to_string()).to_string();
+    assert!(said.contains("no tool face"), "{said}");
+}
+
 /// An offset is a cut's only, and `offset_edges` needs one.
 #[test]
 fn combine_offset_refusals() {
@@ -6083,6 +6154,9 @@ fn combine_offset_refusals() {
         (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset_edges": "round"}), "needs an `offset`"),
         (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_edges": "wavy"}), "sharp or round"),
         (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": "2 deg"}), "offset"),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset_faces": [[0, 0, 0]]}), "needs an `offset`"),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_radius": 2}), "needs `offset_edges: round`"),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_edges": "round", "offset_radius": -2}), "must be positive"),
     ] {
         let e = s.execute("solid.combine", &p).expect_err(&p.to_string()).to_string();
         assert!(e.contains(says), "{p}: {e}");

@@ -190,6 +190,8 @@ fn combine_schema_and_the_key_check_agree() {
             "new_component",
             "offset",
             "offset_edges",
+            "offset_faces",
+            "offset_radius",
             "operation",
             "participants",
             "target",
@@ -380,6 +382,13 @@ fn combine_check_takes_what_the_schema_allows() {
         (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": [1]}), false),
         (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_edges": "wavy"}), false),
         (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_edges": true}), false),
+        (
+            json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_edges": "round", "offset_radius": "2 mm", "offset_faces": [[1, 2, 3]]}),
+            true,
+        ),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_faces": []}), false),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_faces": [[1, 2]]}), false),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_radius": [2]}), false),
     ] {
         let issues = crate::schema::issues("solid.combine", &p);
         assert_eq!(issues.is_empty(), takes, "{p}: {issues:?}");

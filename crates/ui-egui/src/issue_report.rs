@@ -1013,7 +1013,14 @@ mod tests {
     fn combine(app: &mut SolveApp) {
         app.start("solid.combine");
         let dialog = app.dialog.as_mut().unwrap();
-        dialog.kind = dialogs::Kind::Combine { operation: 2, keep_tools: true, offset: "0 mm".into(), round_edges: false };
+        dialog.kind = dialogs::Kind::Combine {
+            operation: 2,
+            keep_tools: true,
+            offset: "0 mm".into(),
+            round_edges: false,
+            picked_faces: false,
+            radius: String::new(),
+        };
         dialog.inputs.get_mut(0).unwrap().items = vec![Sel::Body { name: "Stock".into() }];
         dialog.inputs.get_mut(1).unwrap().items = vec![Sel::Body { name: "Cutter".into() }];
     }

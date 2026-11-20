@@ -3492,6 +3492,8 @@ fn boxes_joined(n: usize, pitch: f64) -> (Model, u64, Counts) {
                 keep_tools: false,
                 offset: None,
                 offset_edges: OffsetEdges::Sharp,
+                offset_faces: Vec::new(),
+                offset_radius: None,
             },
             None,
         )

@@ -710,6 +710,35 @@ impl JsonSchema for TouchingParam {
     }
 }
 
+/// Combine's `offset_faces`: 1 to 1000 points on tool faces, as the handler reads them, with
+/// its message.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ToolFacesParam(pub Vec<Vec3>);
+
+/// Combine's message for `offset_faces` it can't read.
+const TOOL_FACES_MESSAGE: &str = "`offset_faces` must list 1…1000 points on tool faces";
+
+impl<'de> Deserialize<'de> for ToolFacesParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        let faces = v.as_array().filter(|a| !a.is_empty() && a.len() <= 1000).ok_or_else(|| D::Error::custom(whole(TOOL_FACES_MESSAGE)))?;
+        faces.iter().map(params::vec3).collect::<Option<Vec<_>>>().map(ToolFacesParam).ok_or_else(|| D::Error::custom(whole(TOOL_FACES_MESSAGE)))
+    }
+}
+
+impl JsonSchema for ToolFacesParam {
+    fn schema_name() -> Cow<'static, str> {
+        "ToolFaces".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let point = generator.subschema_for::<Point3>();
+        json_schema!({
+            "description": "Points in mm, one on each tool face that moves.",
+            "type": "array", "items": point, "minItems": 1, "maxItems": 1000
+        })
+    }
+}
+
 /// What a grown tool's convex edges become, as `OffsetEdges::parse` reads it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct OffsetEdgesParam(pub OffsetEdges);

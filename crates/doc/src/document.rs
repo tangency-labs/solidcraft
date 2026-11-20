@@ -1113,6 +1113,15 @@ pub enum FeatureKind {
         /// With `offset`: what the grown tool's convex edges become.
         #[serde(default, skip_serializing_if = "OffsetEdges::is_sharp")]
         offset_edges: OffsetEdges,
+        /// With `offset`: only the tool faces at these points move; the other faces, and tools
+        /// with none of them, cut as they are. Empty: every face of every tool moves.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        offset_faces: Vec<FacePick>,
+        /// With `offset_edges: round`: the radius the edges between moved faces are rounded with.
+        /// None: the offset's size.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Offset radius")]
+        offset_radius: Option<Expr>,
     },
     /// Copies of other features' results, of bodies, or of components (rectangular, circular or
     /// along a path). The copied features are named by id (#1134). Component copies are named by

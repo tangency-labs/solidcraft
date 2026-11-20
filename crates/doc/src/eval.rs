@@ -13611,7 +13611,7 @@ fn eval_feature_kind(
             let tool = more::cone(point(vals, base)?, axis.0, radius, top_radius, height)?;
             apply_traced(doc, st, f, vec![tool], *operation, &[])
         }
-        FeatureKind::Combine { target, tools, operation, keep_tools, offset, offset_edges } => {
+        FeatureKind::Combine { target, tools, operation, keep_tools, offset, offset_edges, offset_faces, offset_radius } => {
             if tools.iter().any(|t| t == target) {
                 return Err(DocError::Invalid("a body cannot be combined with itself".into()));
             }
@@ -13727,12 +13727,40 @@ fn eval_feature_kind(
             let tb = if offset == 0.0 {
                 tb
             } else {
-                let round = *offset_edges == crate::OffsetEdges::Round;
+                let round = match (offset_edges, offset_radius) {
+                    (crate::OffsetEdges::Sharp, None) => None,
+                    (crate::OffsetEdges::Sharp, Some(_)) => {
+                        return Err(DocError::Invalid("a rounding radius is only for an offset with round edges".into()));
+                    }
+                    (crate::OffsetEdges::Round, None) => Some(offset.abs()),
+                    (crate::OffsetEdges::Round, Some(e)) => Some(val(vals, e, Kind::Length)?),
+                };
+                // Each picked face goes to the tool it lies on (exactly: its nearest face).
+                let mut picked: Vec<Vec<Vec3>> = vec![Vec::new(); tb.len()];
+                for p in offset_faces.iter().map(|p| p.0) {
+                    let nearest = tb
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, t)| t.body.nearest_face(p).map(|(d, _)| (d, i, t.body.size())))
+                        .min_by(|a, b| a.0.total_cmp(&b.0));
+                    match nearest {
+                        Some((d, i, size)) if d <= size * 1e-3 + 1e-6 => {
+                            if let Some(slot) = picked.get_mut(i) {
+                                slot.push(p);
+                            }
+                        }
+                        _ => return Err(DocError::Invalid(format!("no tool face at ({:.3}, {:.3}, {:.3}) to offset", p.x, p.y, p.z))),
+                    }
+                }
                 tb.into_iter()
-                    .map(|t| {
-                        kernel::offset_solid(&t.body, offset, round)
-                            .map(|grown| Traced::step(grown, &[&t]))
-                            .map_err(|e| DocError::Invalid(format!("a tool could not be offset by {offset} mm: {e}")))
+                    .zip(picked)
+                    .map(|(t, at)| match (offset_faces.is_empty(), at.is_empty()) {
+                        // Faces are picked, none of this tool's: it cuts as it is.
+                        (false, true) => Ok(t),
+                        (all, _) => {
+                            let faces = if all { None } else { Some(at.as_slice()) };
+                            Ok(Traced::step(kernel::offset_tool(&t.body, faces, offset, round)?, &[&t]))
+                        }
                     })
                     .collect::<Result<Vec<_>>>()?
             };
