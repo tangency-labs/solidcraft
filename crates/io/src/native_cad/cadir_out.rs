@@ -805,6 +805,7 @@ impl<'a> Builder<'a> {
             self.ir.model.assembly_joints.extend(physics.joints);
             self.ir.model.mass_properties.extend(physics.masses);
             self.ir.model.rigid_bodies.extend(physics.rigid_bodies);
+            self.ir.model.articulations.extend(physics.articulations);
             self.ir.model.physics_scenes.extend(physics.scenes);
         }
         Ok(())
