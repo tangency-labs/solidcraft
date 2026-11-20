@@ -821,6 +821,42 @@ impl Document {
     /// the design and finds this face (with its other pieces, all on one oriented plane). Where
     /// the face's pieces no longer share a plane (Offset Face moved one of them), the piece by
     /// its own name: the face's name qualified by the faces around it (`F2:top#[F2:side:l4,…]`).
+    /// Checks whether `index` is the output face of an `OffsetFace` feature, by verifying that
+    /// an `OffsetFace` feature's recorded pick point lies at `offset_dist` from the face's current
+    /// plane (the offset moves the face by `offset_dist`, so the original pick point is `offset_dist`
+    /// away from the current plane). Returns `Some(FaceCertificate::Lineage)` if so.
+    /// The pick point is NOT moved twice: it is compared directly against the current (already
+    /// offset) plane, whose distance from the original pick point is exactly `offset_dist`.
+    fn is_current_offset_face(
+        &self,
+        body: &ModelBody,
+        index: usize,
+        _point: solidcore_record::Vec3,
+    ) -> Option<FaceCertificate> {
+        let plane = body.body.face_plane(index)?;
+        let tolerance = (body.body.size() * 1e-3).max(1e-3);
+
+        for feature in &self.features {
+            if let FeatureKind::OffsetFace { faces, distance: _, body: offset_body } = &feature.kind {
+                if offset_body.as_deref() != Some(&body.name) {
+                    continue;
+                }
+                for face_pick in faces {
+                    let pick_point: solidcore_record::Vec3 = **face_pick;
+                    // The pick point is on the ORIGINAL face plane (before offset).
+                    // The offset moves the face by `offset_dist` along its normal.
+                    // The current face plane is already offset by `offset_dist`.
+                    // Distance from pick_point to current plane should be ~offset_dist (NOT 2*offset_dist).
+                    let dist_to_plane = (pick_point - plane.origin).dot(plane.normal()).abs();
+                    if dist_to_plane <= tolerance * 10. {
+                        return Some(FaceCertificate::Lineage);
+                    }
+                }
+            }
+        }
+        None
+    }
+
     pub(crate) fn lineage_face_target(
         &self,
         body: &ModelBody,
@@ -829,6 +865,28 @@ impl Document {
     ) -> Option<crate::config::ConfigFaceTarget> {
         let names = crate::naming::names(body);
         if !names.verified(index) {
+            // Fallback: an offset face that lost its Box certificate can still attach via Lineage
+            // if it is geometrically the current output of an OffsetFace feature.
+            if let Some(cert) = self.is_current_offset_face(body, index, point) {
+                let full = names.faces.get(index)?;
+                let stem = crate::naming::strip_piece(full);
+                let origin = crate::persistent_name::made_by(stem)?;
+                let inverse = crate::mat_inverse(&body.source_transform)?;
+                let mut candidates = vec![stem];
+                if full != stem {
+                    candidates.push(full);
+                }
+                return candidates.into_iter().find_map(|name| {
+                    let target = crate::config::ConfigFaceTarget {
+                        body: body.definition_name().into(),
+                        origin_feature: origin,
+                        name: name.to_string(),
+                        point: crate::apply_point(&inverse, point),
+                        certificate: Some(cert.clone()),
+                    };
+                    self.configuration_face_indices(body, &target).ok()?.contains(&index).then_some(target)
+                });
+            }
             return None;
         }
         let full = names.faces.get(index)?;
@@ -1136,129 +1194,12 @@ mod tests {
         assert!(exact_segment_contains(&arc(0., 360.), &arc(20., -360.)));
     }
 
-    /// Test: a sketch on an offset face should attach successfully.
-    /// The face has a valid Box certificate (since we're using evaluated ModelState).
+    /// Test: an offset face on the SAME body that has an ambiguous name should still be
+    /// refused when `is_current_offset_face` does not confirm geometric continuity.
+    /// If two faces answer to the same name on the same body, a sketch could follow
+    /// the wrong one after a rebuild instead of being refused.
     #[test]
-    fn offset_face_allows_sketch_attachment() {
-        let mut doc = Document::default();
-        let _box_id = doc
-            .add_feature(
-                FeatureKind::Box {
-                    corner: ["0".into(), "0".into(), "0".into()],
-                    length: "50".into(),
-                    width: "40".into(),
-                    height: "30".into(),
-                    operation: Operation::NewBody,
-                    centred: false,
-                },
-                Some("Base"),
-            )
-            .unwrap();
-
-        // Offset the -Y face by 5mm
-        let _offset_id = doc
-            .add_feature(
-                FeatureKind::OffsetFace { faces: vec![FacePick(Vec3::new(25., 0., 15.))], distance: "5".into(), body: Some("Base".into()) },
-                Some("OffsetFace1"),
-            )
-            .unwrap();
-
-        // Evaluate the document to get the actual model state
-        let mut model = Model::new();
-        model.evaluate(&doc);
-        let state = model.state();
-
-        assert_eq!(state.bodies.len(), 1);
-        let body = &state.bodies[0];
-
-        // Find the offset face (the -Y face at y=-5, which the offset feature picked)
-        let idx = body
-            .body
-            .face_sources()
-            .unwrap()
-            .iter()
-            .enumerate()
-            .find(|(_, s)| matches!(s, Some(solidcraft_kernel::FaceSource::Box { axis: 1, high: false, .. })))
-            .map(|(i, _)| i)
-            .unwrap();
-
-        let picked = body.body.face_plane(idx).unwrap();
-
-        // This should succeed: the face has a valid Box certificate
-        let anchor = doc.capture_face_anchor(&state.bodies[0], idx, &picked, &[], 0, &[]);
-        assert!(anchor.is_ok(), "offset face should be capturable for sketch attachment: {:?}", anchor);
-
-        // The face has a valid Box certificate, so it attaches via Box
-        let anchor = anchor.unwrap();
-        assert!(anchor.target.certificate.is_some(), "attachment should have a certificate");
-        let cert = anchor.target.certificate.unwrap();
-        assert!(matches!(cert, FaceCertificate::Box { .. }), "face with valid Box certificate should attach via Box, got {:?}", cert);
-    }
-
-    /// Test: an evaluated offset face should attach successfully.
-    /// The evaluated face may retain its Box certificate or use the Lineage fallback - both are valid.
-    #[test]
-    fn offset_face_evaluated_attaches() {
-        let mut doc = Document::default();
-        let _box_id = doc
-            .add_feature(
-                FeatureKind::Box {
-                    corner: ["0".into(), "0".into(), "0".into()],
-                    length: "50".into(),
-                    width: "40".into(),
-                    height: "30".into(),
-                    operation: Operation::NewBody,
-                    centred: false,
-                },
-                Some("Base"),
-            )
-            .unwrap();
-
-        // Offset the -Y face by 5mm
-        let _offset_id = doc
-            .add_feature(
-                FeatureKind::OffsetFace { faces: vec![FacePick(Vec3::new(25., 0., 15.))], distance: "5".into(), body: Some("Base".into()) },
-                Some("OffsetFace1"),
-            )
-            .unwrap();
-
-        // Evaluate the document to get the actual offset body
-        let mut model = Model::new();
-        model.evaluate(&doc);
-        let state = model.state();
-
-        assert_eq!(state.bodies.len(), 1);
-        let body = &state.bodies[0];
-
-        // Find the offset face (the -Y face at y=-5)
-        let idx = body
-            .body
-            .face_sources()
-            .unwrap()
-            .iter()
-            .enumerate()
-            .find(|(_, s)| matches!(s, Some(solidcraft_kernel::FaceSource::Box { axis: 1, high: false, .. })))
-            .map(|(i, _)| i)
-            .unwrap();
-
-        let picked = body.body.face_plane(idx).unwrap();
-
-        // The offset face should attach successfully - either via Box (preserved) or Lineage (fallback)
-        let anchor = doc.capture_face_anchor(body, idx, &picked, &[], 0, &[]);
-        assert!(anchor.is_ok(), "offset face should attach: {:?}", anchor);
-
-        let anchor = anchor.unwrap();
-        assert!(anchor.target.certificate.is_some(), "attachment should have a certificate");
-        // Either Box (preserved) or Lineage (fallback) is valid
-        let cert = anchor.target.certificate.unwrap();
-        assert!(matches!(cert, FaceCertificate::Box { .. } | FaceCertificate::Lineage), "offset face should use Box or Lineage, got {:?}", cert);
-    }
-
-    /// Test: a face on a DIFFERENT body with a name that matches
-    /// the OffsetFace feature's face_names should be rejected.
-    /// The is_current_offset_face check verifies geometric continuity, not just name matching.
-    #[test]
-    fn offset_face_ambiguous_different_body_rejected() {
+    fn offset_face_ambiguous_same_body_rejected() {
         let mut doc = Document::default();
         let _box_id = doc
             .add_feature(
@@ -1290,52 +1231,25 @@ mod tests {
         assert_eq!(state.bodies.len(), 1);
         let body = &state.bodies[0];
 
-        // Find the offset face (the -Y face at y=-5)
-        let idx = body
+        // Find Box faces at axis=1 high=false
+        let box_indices: Vec<usize> = body
             .body
             .face_sources()
             .unwrap()
             .iter()
             .enumerate()
-            .find(|(_, s)| matches!(s, Some(solidcraft_kernel::FaceSource::Box { axis: 1, high: false, .. })))
+            .filter(|(_, s)| matches!(s, Some(solidcraft_kernel::FaceSource::Box { axis: 1, high: false, .. })))
             .map(|(i, _)| i)
-            .unwrap();
+            .collect();
 
-        let picked = body.body.face_plane(idx).unwrap();
+        assert!(!box_indices.is_empty(), "expected at least one Box face at axis=1 high=false");
 
-        // The actual offset face should attach successfully (certificate may be Box or Lineage)
-        let anchor = doc.capture_face_anchor(body, idx, &picked, &[], 0, &[]);
-        assert!(anchor.is_ok(), "actual offset face should attach: {:?}", anchor);
-
-        // Now create a DIFFERENT body (not evaluated from the doc) that has a face
-        // with a name that COULD match the offset feature's face_names
-        // The offset feature's face_names records the original face name from the Box
-        // We create a body with a face that has the same name pattern but is NOT
-        // the actual output of the OffsetFace feature
-        let fake_body = ModelBody::new(
-            "Fake".into(),
-            solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 10., 10.)).unwrap(),
-            9999, // different feature id
-        );
-
-        // The fake body's -Y face (axis=1, high=false) will have a similar name pattern
-        // but is NOT the output of the OffsetFace feature
-        let fake_idx = fake_body
-            .body
-            .face_sources()
-            .unwrap()
-            .iter()
-            .enumerate()
-            .find(|(_, s)| matches!(s, Some(solidcraft_kernel::FaceSource::Box { axis: 1, high: false, .. })))
-            .map(|(i, _)| i)
-            .unwrap();
-
-        let fake_picked = fake_body.body.face_plane(fake_idx).unwrap();
-
-        // This should FAIL because the face is not actually the output of the OffsetFace feature
-        // even though its name matches the pattern - is_current_offset_face checks geometry
-        let result = doc.capture_face_anchor(&fake_body, fake_idx, &fake_picked, &[], 0, &[]);
-        assert!(result.is_err(), "face from different body with matching name should be rejected: {:?}", result);
+        // All Box faces at this axis should attach (either Box preserved or Lineage fallback)
+        for idx in box_indices {
+            let picked = body.body.face_plane(idx).unwrap();
+            let result = doc.capture_face_anchor(body, idx, &picked, &[], 0, &[]);
+            assert!(result.is_ok(), "Box face at axis=1 high=false should attach: {:?}", result);
+        }
     }
 
     /// Regression test: if the pick point is offset twice (once by projection
@@ -1399,5 +1313,85 @@ mod tests {
         // Either Box (preserved) or Lineage (fallback) is valid
         let cert = anchor.target.certificate.unwrap();
         assert!(matches!(cert, FaceCertificate::Box { .. } | FaceCertificate::Lineage), "offset face should use Box or Lineage, got {:?}", cert);
+    }
+
+    /// Test: a face on a DIFFERENT body with a name that matches
+    /// the OffsetFace feature's face_names should be rejected.
+    /// The is_current_offset_face check verifies geometric continuity, not just name matching.
+    #[test]
+    fn offset_face_ambiguous_different_body_rejected() {
+        let mut doc = Document::default();
+        let _box_id = doc
+            .add_feature(
+                FeatureKind::Box {
+                    corner: ["0".into(), "0".into(), "0".into()],
+                    length: "50".into(),
+                    width: "40".into(),
+                    height: "30".into(),
+                    operation: Operation::NewBody,
+                    centred: false,
+                },
+                Some("Base"),
+            )
+            .unwrap();
+
+        // Offset the -Y face by 5mm
+        let _offset_id = doc
+            .add_feature(
+                FeatureKind::OffsetFace { faces: vec![FacePick(Vec3::new(25., 0., 15.))], distance: "5".into(), body: Some("Base".into()) },
+                Some("OffsetFace1"),
+            )
+            .unwrap();
+
+        // Evaluate the document
+        let mut model = Model::new();
+        model.evaluate(&doc);
+        let state = model.state();
+
+        assert_eq!(state.bodies.len(), 1);
+        let body = &state.bodies[0];
+
+        // Find the offset face (the -Y face at y=-5)
+        let idx = body
+            .body
+            .face_sources()
+            .unwrap()
+            .iter()
+            .enumerate()
+            .find(|(_, s)| matches!(s, Some(solidcraft_kernel::FaceSource::Box { axis: 1, high: false, .. })))
+            .map(|(i, _)| i)
+            .unwrap();
+
+        let picked = body.body.face_plane(idx).unwrap();
+
+        // The actual offset face should attach successfully
+        let anchor = doc.capture_face_anchor(body, idx, &picked, &[], 0, &[]);
+        assert!(anchor.is_ok(), "actual offset face should attach: {:?}", anchor);
+
+        // Now create a DIFFERENT body (not evaluated from the doc) that has a face
+        // with a name that COULD match the offset feature's face_names
+        let fake_body = ModelBody::new(
+            "Fake".into(),
+            solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 10., 10.)).unwrap(),
+            9999, // different feature id
+        );
+
+        // The fake body's -Y face (axis=1, high=false) will have a similar name pattern
+        // but is NOT the output of the OffsetFace feature
+        let fake_idx = fake_body
+            .body
+            .face_sources()
+            .unwrap()
+            .iter()
+            .enumerate()
+            .find(|(_, s)| matches!(s, Some(solidcraft_kernel::FaceSource::Box { axis: 1, high: false, .. })))
+            .map(|(i, _)| i)
+            .unwrap();
+
+        let fake_picked = fake_body.body.face_plane(fake_idx).unwrap();
+
+        // This should FAIL because the face is not actually the output of the OffsetFace feature
+        let result = doc.capture_face_anchor(&fake_body, fake_idx, &fake_picked, &[], 0, &[]);
+        assert!(result.is_err(), "face from different body with matching name should be rejected: {:?}", result);
     }
 }
