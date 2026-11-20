@@ -294,3 +294,102 @@ fn extrude_to_a_named_face_keeps_it_when_another_part_touches_it() {
     let v = leg_volume(&mut s);
     assert!(rel(v, 36.0 * 20.0) < 1e-6, "the extrude ended at the plate: {v}");
 }
+
+/// An extrude in a child component from a shared root sketch captures the relative sketch frame
+/// at creation time, so joining or moving that component later moves the extruded body rigidly
+/// with the component instead of pulling it back to the root sketch's world placement.
+#[test]
+fn extrude_from_root_sketch_moves_with_component_after_joint() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "20 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
+    run(
+        &mut s,
+        "sketch.draw.dimensioned",
+        json!({"command": "sketch.rectangle.center", "params": {"center": [0, 0], "corner": [10, 10]}, "dimensions": {"width": "w", "height": "w"}}),
+    );
+    run(&mut s, "sketch.finish", json!({}));
+
+    run(&mut s, "component.create", json!({"name": "Post", "parent": "root", "grounded": true, "activate": true}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Profile", "distance": "500 mm", "operation": "new", "body_name": "PostBody"}));
+
+    run(&mut s, "component.create", json!({"name": "RailX", "parent": "root", "grounded": false, "activate": true}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Profile", "distance": "400 mm", "operation": "new", "body_name": "RailXBody"}));
+
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "rigid",
+            "name": "Corner",
+            "a": {"occurrence": "RailX:1", "point": [0, 0, 0], "z": [0, 0, -1]},
+            "b": {"occurrence": "Post:1", "point": [0, 0, 10], "z": [1, 0, 0]},
+            "offset": "10 mm"
+        }),
+    );
+
+    let b = s.world_state().unwrap().body("RailXBody").unwrap().mesh().bounds();
+    let near = |a: f64, e: f64| (a - e).abs() < 1e-5;
+    assert!(
+        near(b.min.x, 10.0) && near(b.max.x, 410.0) && near(b.min.y, -10.0) && near(b.max.y, 10.0) && near(b.min.z, 0.0) && near(b.max.z, 20.0),
+        "RailXBody must move with its joint, not snap back to root Profile: {b:?}"
+    );
+
+    // Editing the shared root sketch updates both components while RailX stays along +X.
+    run(&mut s, "parameters.change", json!({"name": "w", "expression": "24 mm"}));
+    let b2 = s.world_state().unwrap().body("RailXBody").unwrap().mesh().bounds();
+    assert!(
+        near(b2.min.x, 10.0)
+            && near(b2.max.x, 410.0)
+            && near(b2.min.y, -12.0)
+            && near(b2.max.y, 12.0)
+            && near(b2.min.z, -2.0)
+            && near(b2.max.z, 22.0),
+        "RailXBody must reflect updated root profile while staying joined along +X: {b2:?}"
+    );
+}
+
+/// When both the sketch component and the extruding component live under a shared subassembly,
+/// moving the subassembly moves the extruded body once (no double transform), moving the
+/// extruding component moves its body rigidly, and moving the sketch's component still propagates.
+#[test]
+fn extrude_from_sibling_sketch_in_subassembly_moves_once_with_parent() {
+    let mut s = Session::default();
+    let sub = run(&mut s, "component.create", json!({"name": "Sub", "parent": "root", "grounded": false, "activate": true}));
+    let sub_occ = sub["occurrence"].as_u64().unwrap();
+
+    let master = run(&mut s, "component.create", json!({"name": "Master", "parent": "Sub", "grounded": false, "activate": true}));
+    let master_occ = master["occurrence"].as_u64().unwrap();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    let rail = run(&mut s, "component.create", json!({"name": "Rail", "parent": "Sub", "grounded": false, "activate": true}));
+    let rail_occ = rail["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.extrude", json!({"sketch": "Profile", "distance": 20, "operation": "new", "body_name": "RailBody"}));
+
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let near = |a: f64, e: f64| (a - e).abs() < 1e-5;
+
+    // Move Sub by +100 X: RailBody moves once (+100 X, not +200 X).
+    run(&mut s, "occurrence.move", json!({"occurrence": sub_occ, "translate": [100, 0, 0]}));
+    let b = s.world_state().unwrap().body("RailBody").unwrap().mesh().bounds();
+    assert!(near(b.min.x, 100.0) && near(b.min.y, 0.0) && near(b.min.z, 0.0), "subassembly move must apply once: {b:?}");
+
+    // Move Rail by +50 Y inside Sub: RailBody moves rigidly with Rail.
+    run(&mut s, "occurrence.move", json!({"occurrence": rail_occ, "translate": [0, 50, 0]}));
+    let b = s.world_state().unwrap().body("RailBody").unwrap().mesh().bounds();
+    assert!(near(b.min.x, 100.0) && near(b.min.y, 50.0) && near(b.min.z, 0.0), "consumer move must carry body: {b:?}");
+
+    // Move Master by +30 Z inside Sub: RailBody follows the source sketch's component.
+    run(&mut s, "occurrence.move", json!({"occurrence": master_occ, "translate": [0, 0, 30]}));
+    let b = s.world_state().unwrap().body("RailBody").unwrap().mesh().bounds();
+    assert!(near(b.min.x, 100.0) && near(b.min.y, 50.0) && near(b.min.z, 30.0), "sketch owner move must propagate: {b:?}");
+
+    // Round-trip through JSON preserves the exact same placement.
+    let mut reopened = Session { doc: solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap().into(), ..Session::default() };
+    reopened.refresh();
+    let b2 = reopened.world_state().unwrap().body("RailBody").unwrap().mesh().bounds();
+    assert!(near(b2.min.x, 100.0) && near(b2.min.y, 50.0) && near(b2.min.z, 30.0), "reopened placement must match: {b2:?}");
+}

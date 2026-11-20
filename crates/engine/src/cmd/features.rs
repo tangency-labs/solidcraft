@@ -742,7 +742,38 @@ pub(super) fn check_count(s: &Session, e: &str, cmd: &str, what: &str) -> Result
     solidcraft_doc::expr::eval_count(e, &vals).map(|_| ()).map_err(|err| bad(cmd, format!("{what}: {err}")))
 }
 
-/// Add a feature, evaluate, and report its result (an evaluation error fails the command).
+/// Transform of `consumer` relative to the lowest common ancestor of `consumer` and the profile
+/// sketch's component at authoring time, when the two components differ and `consumer` is not an
+/// ancestor of the sketch's component. Stored on `Feature::profile_frame` so later moves or joints
+/// on `consumer` carry the built body rigidly with it while moves of the sketch's own component
+/// still propagate.
+pub(super) fn cross_component_profile_frame_for(s: &Session, consumer: u64, kind: &FeatureKind) -> Option<solidcraft_doc::Mat> {
+    let sketch = match kind {
+        FeatureKind::Extrude { sketch, .. }
+        | FeatureKind::Revolve { sketch, .. }
+        | FeatureKind::SurfaceExtrude { sketch, .. }
+        | FeatureKind::SurfaceRevolve { sketch, .. } => *sketch,
+        _ => return None,
+    };
+    let owner = s.doc.feature(sketch.0)?.component;
+    if owner == consumer {
+        return None;
+    }
+    let placed = s.placed_document();
+    let lca = placed.common_ancestor(consumer, owner);
+    if consumer == lca {
+        return None;
+    }
+    let consumer_world = if consumer == s.active_component { s.active_component_frame() } else { placed.component_transform(consumer) };
+    let lca_inv = solidcraft_doc::mat_inverse(&placed.component_transform(lca))?;
+    let consumer_in_lca = solidcraft_doc::mat_mul(&lca_inv, &consumer_world);
+    solidcraft_doc::is_placement(&consumer_in_lca).then_some(consumer_in_lca)
+}
+
+fn cross_component_profile_frame(s: &Session, kind: &FeatureKind) -> Option<solidcraft_doc::Mat> {
+    cross_component_profile_frame_for(s, s.active_component, kind)
+}
+
 pub(super) fn add_feature(s: &mut Session, p: &Value, kind: FeatureKind) -> Result<Value> {
     add_feature_in(s, p, kind, true)
 }
@@ -878,6 +909,7 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
     {
         check_plane_name(n, "construct.plane")?;
     }
+    let profile_frame = cross_component_profile_frame(s, &kind);
     let id = s.doc_mut().add_feature(kind, name)?;
     if let Some(f) = s.doc_mut().feature_mut(id) {
         f.participants = participants;
@@ -885,6 +917,7 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
         f.edge_refs = refs;
         f.edge_names = names;
         f.face_names = face_names;
+        f.profile_frame = profile_frame;
     }
     s.doc_mut().name_feature_inputs(id);
     let comp = s.active_component;

@@ -77,6 +77,27 @@ pub(super) fn move_features(s: &mut Session, p: &Value) -> Result<Value> {
             }
             f.kind.transform_geometry(&delta);
         }
+        if let Some(m) = f.profile_frame {
+            let sketch_id = f.kind.profile_sels().into_iter().next().map(|(id, _)| id);
+            let sketch_moved = sketch_id.is_some_and(|id| moving.contains(&id));
+            let old_owner = sketch_id.and_then(|id| s.doc.feature(id).map(|g| g.component));
+            let new_owner = if sketch_moved { Some(dest) } else { old_owner };
+            f.profile_frame = match (old_owner, new_owner) {
+                (_, Some(o)) if o == dest => None,
+                (Some(old_o), Some(new_o)) => {
+                    let old_lca = s.doc.common_ancestor(old.component, old_o);
+                    let new_lca = s.doc.common_ancestor(dest, new_o);
+                    let old_owner_in_lca = s.doc.component_transform_in(old_o, old_lca);
+                    let new_owner_in_lca = s.doc.component_transform_in(new_o, new_lca);
+                    let updated = mat_inverse(&old_owner_in_lca)
+                        .and_then(|inv_old_o| mat_inverse(&delta).map(|inv_d| mat_mul(&mat_mul(&new_owner_in_lca, &inv_old_o), &mat_mul(&m, &inv_d))))
+                        .filter(solidcraft_doc::is_placement)
+                        .unwrap_or(m);
+                    Some(updated)
+                }
+                _ => Some(m),
+            };
+        }
     }
     // Attached sketches and embossed faces carry the placement of the body they sit on and of
     // the component they were authored in: those that moved are rewritten, nothing else changes.

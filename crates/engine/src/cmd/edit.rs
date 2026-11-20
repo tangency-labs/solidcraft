@@ -1608,6 +1608,11 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     if nf.kind.clone().profile_sels_mut() != f.kind.clone().profile_sels_mut() {
         super::features::stable_profiles(s, &mut nf.kind, false)?;
     }
+    let old_sketches: Vec<u64> = f.kind.profile_sels().into_iter().map(|(id, _)| id).collect();
+    let new_sketches: Vec<u64> = nf.kind.profile_sels().into_iter().map(|(id, _)| id).collect();
+    if new_sketches != old_sketches {
+        nf.profile_frame = super::features::cross_component_profile_frame_for(s, nf.component, &nf.kind);
+    }
     // A body Pattern's copy names move with the bodies they copy (#12114). Names the edit gives
     // are in the order the copies are made, as they always were: they are read that way, not
     // moved by source, and stored source by source once the pattern has run. A pattern of several

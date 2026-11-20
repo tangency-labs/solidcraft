@@ -528,6 +528,13 @@ pub(super) fn build(
             f.body_names = outputs.get(&old.id).cloned().unwrap_or_default();
         }
         f.remap_clone(&features, &names, &bodies, &parameters, &occurrences, &scratch.doc)?;
+        if f.profile_frame.is_some()
+            && let Some((old_sketch, _)) = old.kind.profile_sels().into_iter().next()
+            && features.contains_key(&old_sketch)
+            && source.feature(old_sketch).and_then(|g| components.get(&g.component)).copied() == Some(f.component)
+        {
+            f.profile_frame = None;
+        }
         for (name, original) in f.face_names.iter_mut().chain(&mut f.edge_names).zip(old.face_names.iter().chain(&old.edge_names)) {
             *name = solidcraft_doc::remap_topology_faces(original, &features, &bodies, &frozen_faces)?;
         }
