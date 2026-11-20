@@ -605,12 +605,11 @@ impl AppPanelRuntime {
                             }
                             desktop.observe(ui.ctx(), &host, active);
                             let _blur = content.app.blur.begin(ui.ctx());
+                            // The app's host has what the panel's docked header has: its menu,
+                            // its own content in the title's place and its hidden actions.
                             let root = self.host.as_ref();
-                            let menu = |runtime: &PanelRuntime, instance: &InstanceId| {
-                                root.map_or_else(Vec::new, |root| root.window_menu(runtime, instance))
-                            };
                             let painted = solidcraft_ui_registry::isolated(|| {
-                                super::native_ui::paint(&mut self.runtime, &mut services, &mut content, &host, &section, ui, enabled, &menu, card)
+                                super::native_ui::paint(&mut self.runtime, &mut services, &mut content, &host, &section, ui, enabled, root, card)
                             });
                             // A window dropped before its panel measured its content fits
                             // it once measured, as the app's side cards do.

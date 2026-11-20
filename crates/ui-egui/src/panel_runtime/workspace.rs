@@ -378,6 +378,18 @@ impl WorkspacePanelHost {
         }
     }
 
+    /// The panel's content takes its title's place (`set_header_content`).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn has_header_content(&self, instance: &InstanceId) -> bool {
+        self.options.geometry.header_content.contains_key(instance)
+    }
+
+    /// The panel's header action is hidden (`set_header_action_visible`).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn header_action_hidden(&self, instance: &InstanceId, action: &ControlId) -> bool {
+        self.options.geometry.hidden_header_actions.get(instance).is_some_and(|actions| actions.contains(action))
+    }
+
     pub(crate) fn set_live_drag(&mut self, enabled: bool) {
         self.live_drag = enabled;
         self.interaction.set_live_drag(enabled);
@@ -3160,6 +3172,33 @@ fn render_slot(
     if let Err(reason) = result {
         *failure = Some(reason);
     }
+}
+
+/// A panel's `ContentSlot::Title` in the title bar of its desktop window, in
+/// `bounds`: drawn as the docked header draws it, before the panel's body.
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn render_window_title(
+    ui: &mut egui::Ui,
+    bounds: egui::Rect,
+    context: &PanelContext,
+    content: &mut dyn PanelController,
+    services: &mut ContentServices<'_>,
+    frame_content: &mut dyn FramePanelContent,
+) -> PanelResult<()> {
+    let mut failure = None;
+    render_slot(
+        ui,
+        ContentSlot::Title,
+        logical_rect(bounds),
+        context,
+        content,
+        services,
+        frame_content,
+        &mut egui::IdMap::default(),
+        None,
+        &mut failure,
+    );
+    failure.map_or(Ok(()), Err)
 }
 
 /// The render call supplies provenance directly; no previous-pass widget lookup

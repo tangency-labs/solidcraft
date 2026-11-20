@@ -14647,16 +14647,32 @@ fn frame_buttons(output: &egui::FullOutput) -> Vec<(String, egui::Rect)> {
         .collect()
 }
 
-/// One frame of a panel's desktop window, as the app paints it: where the
-/// panel's body drew, and the window's buttons by accessible name.
+/// What one frame of a panel's desktop window drew, as the app paints it.
+struct PaintedWindow {
+    /// Where the panel's body drew.
+    body: egui::Rect,
+    /// Where the panel's own content drew in the title's place, if it did; it
+    /// draws before the body.
+    title: Option<egui::Rect>,
+    /// The window's buttons by accessible name.
+    buttons: Vec<(String, egui::Rect)>,
+}
+
+/// One frame of a panel's desktop window, as the app paints it. `root` is the
+/// app's panel host.
 fn paint_panel_window(
     h: &mut PanelMountHarness,
     host: &HostId,
     window: egui::Rect,
+    root: Option<&WorkspacePanelHost>,
     card: Option<super::native_ui::CardWindow>,
-) -> (egui::Rect, Vec<(String, egui::Rect)>) {
-    struct Body(Option<egui::Rect>);
-    impl FramePanelContent for Body {
+) -> PaintedWindow {
+    #[derive(Default)]
+    struct Slots {
+        body: Option<egui::Rect>,
+        title: Option<egui::Rect>,
+    }
+    impl FramePanelContent for Slots {
         fn render(
             &mut self,
             slot: ContentSlot,
@@ -14665,8 +14681,13 @@ fn paint_panel_window(
             _content: &mut dyn PanelController,
             _services: &mut ContentServices<'_>,
         ) -> PanelResult<()> {
-            if slot == ContentSlot::Body {
-                self.0 = Some(ui.max_rect());
+            match slot {
+                ContentSlot::Title => {
+                    assert!(self.body.is_none(), "the title's place draws before the body");
+                    self.title = Some(ui.max_rect());
+                }
+                ContentSlot::Body => self.body = Some(ui.max_rect()),
+                _ => {}
             }
             Ok(())
         }
@@ -14674,13 +14695,13 @@ fn paint_panel_window(
     let section = h.runtime.layout().layout().containing(&id("editor")).unwrap().clone();
     let ctx = crate::fonts::test_context();
     ctx.enable_accesskit();
-    let mut body = Body(None);
+    let mut slots = Slots::default();
     let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(window), focused: true, ..Default::default() }, |ui| {
         let mut services = ContentServices { models: &h.models, commands: &mut h.commands, local: &mut h.local };
-        super::native_ui::paint(&mut h.runtime, &mut services, &mut body, host, &section, ui, true, &|_, _| Vec::new(), card).unwrap();
+        super::native_ui::paint(&mut h.runtime, &mut services, &mut slots, host, &section, ui, true, root, card).unwrap();
     });
     output.textures_delta.clear();
-    (body.0.expect("the window mounts the panel's body"), frame_buttons(&output))
+    PaintedWindow { body: slots.body.expect("the window mounts the panel's body"), title: slots.title, buttons: frame_buttons(&output) }
 }
 
 /// One frame of the window a drag shows for a panel: its buttons by accessible name.
@@ -14735,7 +14756,7 @@ fn panel_windows_have_the_app_title_bar_and_card_layout_unless_the_preference_ke
     // With the preference off, the window is the system's: its content has no title
     // bar, grip or menu, the actions are in a row from the leading edge at its top, in
     // their declared order, and the body runs from that row to the window's edges.
-    let (body, buttons) = paint_panel_window(&mut h, &host, window, None);
+    let PaintedWindow { body, buttons, .. } = paint_panel_window(&mut h, &host, window, None, None);
     assert!(named(&buttons, menu).is_none() && named(&buttons, &title).is_none(), "{buttons:?}");
     let (apply, cancel) = (named(&buttons, "apply").unwrap(), named(&buttons, "cancel").unwrap());
     assert!(apply.left() < window.center().x && apply.right() <= cancel.left() && cancel.right() < window.center().x, "{apply:?} {cancel:?}");
@@ -14752,7 +14773,8 @@ fn panel_windows_have_the_app_title_bar_and_card_layout_unless_the_preference_ke
     // and above the footer's reserve.
     let card = super::native_ui::CardWindow::of(crate::window_chrome::TitleBar::default(), None);
     let metrics = card.metrics;
-    let (inset, buttons) = paint_panel_window(&mut h, &host, window, Some(card));
+    let PaintedWindow { body: inset, title: none, buttons } = paint_panel_window(&mut h, &host, window, None, Some(card));
+    assert_eq!(none, None, "the panel asked for nothing in the title's place");
     let grip = named(&buttons, &title).expect("the title bar has the panel's title and grip");
     assert!(grip.bottom() <= bar && grip.right() < window.center().x, "{grip:?}");
     let button = named(&buttons, menu).expect("the title bar has the panel's menu");
@@ -14771,6 +14793,29 @@ fn panel_windows_have_the_app_title_bar_and_card_layout_unless_the_preference_ke
     // The window a drag shows has that same title bar, so it is the window kept on release.
     let shown = paint_drop_window(window, Some(card), &title);
     assert_eq!((named(&shown, &title), named(&shown, menu)), (Some(grip), Some(button)), "{shown:?}");
+
+    // As in the docked header, the panel's own content takes the title's place when
+    // the app's host says so (a search box): the title bar keeps the grip alone, the
+    // content draws between it and the menu, before the body, and the header action
+    // the host hides (the one that opened the box) is left out.
+    let mut root = WorkspacePanelHost::new(HostOptions::default()).unwrap();
+    root.set_header_content(id("editor"), Some(120.0));
+    root.set_header_action_visible(id("editor"), ControlId::new("apply").unwrap(), false);
+    let searching = paint_panel_window(&mut h, &host, window, Some(&root), Some(card));
+    let only_grip = named(&searching.buttons, &title).expect("the grip stays, named as the panel");
+    assert!(only_grip.width() < grip.width() && only_grip.left() == grip.left(), "{only_grip:?} {grip:?}");
+    let slot = searching.title.expect("the panel's content draws in the title's place");
+    assert!(slot.left() >= only_grip.right() && slot.right() <= button.left() && slot.top() >= 0.0 && slot.bottom() <= bar, "{slot:?}");
+    assert!(slot.width() >= 120.0, "{slot:?}");
+    assert!(named(&searching.buttons, "apply").is_none() && named(&searching.buttons, "cancel").is_some(), "{:?}", searching.buttons);
+    assert_eq!(named(&searching.buttons, menu), Some(button));
+    assert_eq!(searching.body, inset, "the body keeps its place");
+    // The system's window has no title's place: the panel keeps that content in its
+    // body, and its actions stay as they are there.
+    let system = paint_panel_window(&mut h, &host, window, Some(&root), None);
+    assert_eq!(system.title, None);
+    assert!(named(&system.buttons, "apply").is_some() && named(&system.buttons, "cancel").is_some(), "{:?}", system.buttons);
+    assert_eq!(system.body, body);
 
     // What a dragged-out window has in place of its card's header: the title bar, or
     // in the system's window the row of actions, which a side card has in its paint.

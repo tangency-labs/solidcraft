@@ -1,7 +1,7 @@
 use solidcraft_engine::panels::*;
 
 use super::drag_paint::WindowCard;
-use super::workspace::{WindowDragEvent, WindowMenuEntry};
+use super::workspace::{WindowDragEvent, WindowMenuEntry, WorkspacePanelHost};
 use super::{ContentServices, ContentSlot, FramePanelContent, PanelContext, PanelController, PanelHost, PanelPresentation, PanelRuntime};
 use crate::ui_kit::{self, BackingTooltipExt as _, Container, Edge, HostChrome, Surface};
 use crate::window_chrome::TitleBar;
@@ -38,14 +38,13 @@ impl CardWindow {
     }
 }
 
-/// The entries of a window's menu for its active panel, asked for only while
-/// the menu is open.
-pub(super) type WindowMenu<'a> = &'a dyn Fn(&PanelRuntime, &InstanceId) -> Vec<Vec<WindowMenuEntry>>;
-
 /// With `card`, the window has the app's own look: the app's title bar, whose
-/// grip drags the panel back into the app and whose menu (`menu`) docks it there,
-/// and the layout of the panel's docked card. Without, it is the system's
-/// window: its title bar, and the earlier layout.
+/// grip drags the panel back into the app and whose menu docks it there, and
+/// the layout of the panel's docked card. The app's host (`root`) gives what the
+/// docked header has: the menu's entries, the panel's own content in the
+/// title's place (`ContentSlot::Title`) and the header actions it hides.
+/// Without `card`, it is the system's window: its title bar, and the earlier
+/// layout.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn paint(
     runtime: &mut PanelRuntime,
@@ -55,7 +54,7 @@ pub(super) fn paint(
     section: &Section,
     ui: &mut egui::Ui,
     enabled: bool,
-    menu: WindowMenu<'_>,
+    root: Option<&WorkspacePanelHost>,
     card: Option<CardWindow>,
 ) -> PanelResult<Option<WindowAction>> {
     if ui.input(|input| input.viewport().close_requested()) {
@@ -69,12 +68,17 @@ pub(super) fn paint(
     let mut action = None;
     let availability = section.tabs.iter().map(|id| (id.clone(), runtime.layout().availability(id))).collect();
     let active = presented_tab(section, &availability);
+    let mut title_slot = None;
     if let Some(card) = card {
         if let Some(active) = active {
             let title = runtime.instance_presentation(active)?.title;
             let rtl = runtime.environment().direction == Direction::Rtl;
-            let (bar_action, caption) = window_bar(ui, card, host, active, &title, rtl, enabled, &|| menu(runtime, active));
+            // As in the docked header, the panel's own content may take the title's place.
+            let title_content = root.is_some_and(|root| root.has_header_content(active));
+            let menu = || root.map_or_else(Vec::new, |root| root.window_menu(runtime, active));
+            let (bar_action, caption, slot) = window_bar(ui, card, host, active, &title, rtl, enabled, title_content, &menu);
             action = bar_action;
+            title_slot = slot;
             if let Some(caption) = caption {
                 caption.send(ui.ctx());
             }
@@ -99,9 +103,12 @@ pub(super) fn paint(
             let environment = runtime.environment();
             let tabs = section.tabs.iter().filter(|id| availability.get(*id) == Some(&Availability::Available));
             let rtl = environment.direction == Direction::Rtl;
+            // As the panel's card, the window leaves out the actions its docked header hides.
+            let hidden = |action: &ControlId| as_card && root.is_some_and(|root| root.header_action_hidden(active, action));
             let declared: Vec<_> = spec
                 .header_actions
                 .iter()
+                .filter(|declared| !hidden(&declared.id))
                 .filter_map(|declared| Some((declared, presentation.actions.iter().find(|entry| entry.id == declared.id)?)))
                 .collect();
             if section.tabs.len() > 1 || section.collapsed || (!as_card && !presentation.actions.is_empty()) {
@@ -172,7 +179,7 @@ pub(super) fn paint(
             runtime.mount_native(
                 host,
                 &ResolvedLayout { panels: vec![geometry], ..Default::default() },
-                &mut NativeContent { ui, content, inset: as_card },
+                &mut NativeContent { ui, content, inset: as_card, title: title_slot },
                 services,
             )
         })
@@ -279,7 +286,7 @@ pub(super) fn paint_drop(
 ) {
     if let Some(look) = look {
         // The pointer passes through this window: its menu never opens.
-        window_bar(ui, look, "drop", active, title, rtl, true, &Vec::new);
+        window_bar(ui, look, "drop", active, title, rtl, true, false, &Vec::new);
     }
     // The title bar is an edge of the window, outside the content below it.
     let chrome = if look.is_some() { 0.0 } else { chrome };
@@ -297,6 +304,8 @@ pub(super) fn paint_drop(
 /// The window's own title bar, as the app window has: the OS's window controls,
 /// the panel's title with its grip, which drags the panel back over the app, and
 /// at the trailing end the menu (`menu`) of places in the app the panel can dock.
+/// With `title_content`, only the grip is drawn, and the title's place is
+/// returned for the panel's own content (`ContentSlot::Title`).
 #[allow(clippy::too_many_arguments)]
 fn window_bar(
     ui: &mut egui::Ui,
@@ -306,8 +315,9 @@ fn window_bar(
     title: &str,
     rtl: bool,
     enabled: bool,
+    title_content: bool,
     menu: &dyn Fn() -> Vec<Vec<WindowMenuEntry>>,
-) -> (Option<WindowAction>, Option<crate::window_chrome::WindowAction>) {
+) -> (Option<WindowAction>, Option<crate::window_chrome::WindowAction>, Option<egui::Rect>) {
     let edge = Container::new(ui.ctx(), Surface::ApplicationBar).edge(("sc_panel_window_bar", id), Edge::Top);
     let frame = Container::new(ui.ctx(), Surface::ApplicationBar).edge_frame(Tokens::get().app_bar);
     let height = crate::toolbar::APP_BAR_HEIGHT;
@@ -317,6 +327,7 @@ fn window_bar(
                 ui.disable();
             }
             let mut action = None;
+            let mut title_slot = None;
             let rect = ui.max_rect();
             let caption = card.title_bar.show(ui, rect, |ui, content| {
                 // As far from the window's edge as the docked card's menu button is
@@ -329,11 +340,16 @@ fn window_bar(
                 let bounds = egui::Rect::from_min_size(egui::pos2(x, content.center().y - extent / 2.0), egui::Vec2::splat(extent));
                 let title_area = if rtl { content.with_min_x(bounds.right()) } else { content.with_max_x(bounds.left()) };
                 action = menu_button(ui, bounds, active, rtl, menu).map(WindowAction::Layout);
-                if let Some(drag) = title_grip(ui, title_area, active, title, rtl) {
+                // The grip that stands in for the title before the panel's own content, as wide
+                // as in the docked header.
+                let grip = title_content.then(|| metrics.control_extent.min(Tokens::get().space_10 + Tokens::get().space_8));
+                let (drag, slot) = title_grip(ui, title_area, active, title, rtl, grip);
+                title_slot = slot;
+                if let Some(drag) = drag {
                     action = Some(WindowAction::Drag(drag));
                 }
             });
-            (action, caption)
+            (action, caption, title_slot)
         })
         .inner
 }
@@ -384,13 +400,29 @@ fn menu_button(
 
 /// The panel's title with the section grip a docked header has, here dragging
 /// the panel back over the app. Positions are screen points; Escape cancels.
-fn title_grip(ui: &mut egui::Ui, content: egui::Rect, active: &InstanceId, title: &str, rtl: bool) -> Option<WindowDragEvent> {
+/// With `grip_only` (the grip's width), the title is left out, and what is left
+/// of `content` after the grip is returned.
+fn title_grip(
+    ui: &mut egui::Ui,
+    content: egui::Rect,
+    active: &InstanceId,
+    title: &str,
+    rtl: bool,
+    grip_only: Option<f32>,
+) -> (Option<WindowDragEvent>, Option<egui::Rect>) {
     let t = Tokens::get();
-    let text = ui.painter().layout_no_wrap(title.to_owned(), ui_kit::type_face::semibold(t.font_heading), t.form_ink).size().x;
-    // As the kit lays out a title control: insets, the grip and its gap, the text.
-    let width = (2.0 * t.space_12 + t.space_10 + t.space_8 + text).min(content.width());
+    let width = match grip_only {
+        Some(grip) => grip,
+        None => {
+            let text = ui.painter().layout_no_wrap(title.to_owned(), ui_kit::type_face::semibold(t.font_heading), t.form_ink).size().x;
+            // As the kit lays out a title control: insets, the grip and its gap, the text.
+            2.0 * t.space_12 + t.space_10 + t.space_8 + text
+        }
+    }
+    .min(content.width());
     let x = if rtl { content.right() - width } else { content.left() };
     let bounds = egui::Rect::from_min_size(egui::pos2(x, content.top()), egui::vec2(width, content.height()));
+    let rest = grip_only.map(|_| if rtl { content.with_max_x(bounds.left()) } else { content.with_min_x(bounds.right()) });
     let id = ui.make_persistent_id(("panel-window-title", active));
     let chrome = HostChrome {
         label: title,
@@ -401,7 +433,7 @@ fn title_grip(ui: &mut egui::Ui, content: egui::Rect, active: &InstanceId, title
         enabled: true,
         drag: true,
         title: true,
-        grip_only: false,
+        grip_only: grip_only.is_some(),
         rtl,
     };
     let response = ui_kit::panel_host_control(ui, id, bounds, chrome);
@@ -411,19 +443,16 @@ fn title_grip(ui: &mut egui::Ui, content: egui::Rect, active: &InstanceId, title
         let origin = input.viewport().inner_rect?.min;
         Some(Point { x: origin.x + pointer.x, y: origin.y + pointer.y }).filter(|at| at.validate().is_ok())
     });
-    if response.drag_started() {
-        return at.map(|at| WindowDragEvent::Begin { instance: active.clone(), at });
-    }
-    if response.drag_stopped() {
-        return Some(at.map_or(WindowDragEvent::Cancel, |at| WindowDragEvent::Release { at }));
-    }
-    if response.dragged() {
-        if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
-            return Some(WindowDragEvent::Cancel);
-        }
-        return at.map(|at| WindowDragEvent::Move { at });
-    }
-    None
+    let drag = if response.drag_started() {
+        at.map(|at| WindowDragEvent::Begin { instance: active.clone(), at })
+    } else if response.drag_stopped() {
+        Some(at.map_or(WindowDragEvent::Cancel, |at| WindowDragEvent::Release { at }))
+    } else if response.dragged() {
+        if ui.input(|input| input.key_pressed(egui::Key::Escape)) { Some(WindowDragEvent::Cancel) } else { at.map(|at| WindowDragEvent::Move { at }) }
+    } else {
+        None
+    };
+    (drag, rest)
 }
 
 struct NativeContent<'a> {
@@ -431,6 +460,8 @@ struct NativeContent<'a> {
     content: &'a mut dyn FramePanelContent,
     /// The content keeps the docked card's inset.
     inset: bool,
+    /// The title's place in the window's title bar, for the panel's own content there.
+    title: Option<egui::Rect>,
 }
 
 impl PanelHost for NativeContent<'_> {
@@ -442,6 +473,13 @@ impl PanelHost for NativeContent<'_> {
         controller: &mut dyn PanelController,
         services: &mut ContentServices<'_>,
     ) -> PanelResult<()> {
+        if let Some(title) = self.title {
+            // Before the body, as in the docked header: the body then leaves out what
+            // the title's place holds. The title bar is outside this content's area.
+            let mut bar = self.ui.new_child(egui::UiBuilder::new().id_salt(("panel-window-title-content", &geometry.instance)).max_rect(title));
+            bar.set_clip_rect(title);
+            super::workspace::render_window_title(&mut bar, title, context, controller, services, self.content)?;
+        }
         if let Some(body) = geometry.body {
             let rect = super::workspace::egui_rect(body);
             let rect = if self.inset { super::workspace::content_inset(rect) } else { rect };
