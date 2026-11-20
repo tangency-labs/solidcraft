@@ -119,10 +119,11 @@ impl SurfaceSheet {
             return err(PROFILE_OFF_PLANE);
         }
         // How deep in the panel's material the sketch's plane lies: on its face on the sheet's
-        // surface (0) or on its other face (the thickness).
+        // surface (0) or on its other face (the thickness). A plane anywhere else, parallel to
+        // them, would build the same flange from a sketch that is not on it.
         let z = back.point(plane.origin).z;
         let near_plane = 1e-6 * (1.0 + plane.origin.len());
-        if !(-near_plane..=t + near_plane).contains(&z) {
+        if z.abs() > near_plane && (z - t).abs() > near_plane {
             return err(PROFILE_OFF_PLANE);
         }
         // The profile's frame: the chart's, its x along the bend from the anchor's start and its

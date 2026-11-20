@@ -1297,18 +1297,20 @@ pub(super) fn sheet_eval(
                     let ss = st.sketch(sk.0).ok_or_else(|| DocError::Unknown(format!("sketch {sk}")))?;
                     // The outline is the largest profile; a circle drawn inside it is also a
                     // profile of its own (the disc filling the hole), which is no second outline.
+                    // A region is such a disc only where its boundary is one of the outline's
+                    // holes, the same pieces in the same place: a loop anywhere else, of whatever
+                    // size, is a second profile.
                     let regions = select_profiles(ss, &ProfileSel::All)?;
                     let area = |lp: &Loop2| lp.signed_area().abs();
                     let main = regions
                         .iter()
                         .max_by(|a, b| area(&a.outer).total_cmp(&area(&b.outer)))
                         .ok_or_else(|| DocError::Invalid("the flange's profile sketch has no closed profile".into()))?;
+                    let tol = 1e-7 * crate::sheet_surface_cuts::loop_box(&main.outer).size().len().max(1.0);
+                    let filling =
+                        |r: &Region2| r.holes.is_empty() && main.holes.iter().any(|h| crate::sheet_surface_cuts::same_loop(h, &r.outer, tol));
                     let others = regions.iter().filter(|r| !std::ptr::eq(*r, main)).count();
-                    let fills = regions
-                        .iter()
-                        .filter(|r| !std::ptr::eq(*r, main))
-                        .filter(|r| main.holes.iter().any(|h| (area(h) - area(&r.outer)).abs() < 1e-6 * area(h).max(1.0)))
-                        .count();
+                    let fills = regions.iter().filter(|r| !std::ptr::eq(*r, main)).filter(|r| filling(r)).count();
                     if fills != others {
                         return Err(DocError::Invalid(format!(
                             "the flange's profile sketch must hold one closed profile (holes inside it are fine), not {}",

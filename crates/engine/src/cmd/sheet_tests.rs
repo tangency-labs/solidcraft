@@ -11259,3 +11259,45 @@ fn a_profile_flange_with_what_it_cannot_take_is_refused() {
         assert_eq!(s.doc.to_json(), before, "{p}");
     }
 }
+
+/// A profile sketch is read where it is drawn: one on a plane parallel to the flange's faces but
+/// on neither of them (in front of the flange, or inside its material), one whose bottom line lies
+/// above the edge (the flange would reach below it, down to the edge), and one with a second closed
+/// loop outside the outline the size of a hole inside it are each refused, saying why. The hole
+/// alone is fine.
+#[test]
+fn a_profile_sketch_off_the_flange_or_with_a_loose_loop_is_refused() {
+    let square = [[20.0, 0.0], [80.0, 0.0], [80.0, 20.0], [20.0, 20.0]];
+    let flange = json!({"edges": [[50, 0, 2.5]], "height": 1, "profile": "Shape"});
+    // The flange's outer face is the plane y = 0 and its other face y = 2.5 (inside).
+    for (y, ok) in [(-10.0, false), (1.25, false), (2.5, true)] {
+        let mut s = Session::default();
+        base(&mut s, 100.0, 60.0);
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [0, y, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Shape"}));
+        run(&mut s, "sketch.line", json!({"points": square, "closed": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        let before = s.doc.to_json();
+        match s.execute("sheet.flange", &flange) {
+            Ok(_) => assert!(ok, "y = {y}: built"),
+            Err(e) => {
+                assert!(!ok, "y = {y}: {e}");
+                assert!(e.to_string().contains(solidcraft_doc::PROFILE_OFF_PLANE), "y = {y}: {e}");
+                assert_eq!(s.doc.to_json(), before, "y = {y}");
+            }
+        }
+    }
+    let mut s = Session::default();
+    profile_on_front(&mut s, &[[20.0, 2.0], [80.0, 2.0], [80.0, 20.0], [20.0, 20.0]], None);
+    let e = s.execute("sheet.flange", &flange).unwrap_err();
+    assert!(e.to_string().contains("must start on the edge: its bottom line lies 2.000 mm above it"), "{e}");
+    // A hole of radius 3 inside, and a loop of radius 3 outside the outline, beside the flange.
+    let mut s = Session::default();
+    profile_on_front(&mut s, &square, Some(([50.0, 13.0], 3.0)));
+    run(&mut s, "sketch.edit", json!({"sketch": "Shape"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [90, 13], "radius": 3}));
+    run(&mut s, "sketch.finish", json!({}));
+    let before = s.doc.to_json();
+    let e = s.execute("sheet.flange", &flange).unwrap_err();
+    assert!(e.to_string().contains("must hold one closed profile (holes inside it are fine), not 2"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
