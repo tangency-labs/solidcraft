@@ -9547,7 +9547,13 @@ fn feature_op(f: &Feature) -> (Operation, Vec<String>) {
         FeatureKind::Pipe { operation, targets, .. } => (*operation, crate::plain(targets)),
         FeatureKind::Loft { operation, targets, .. } | FeatureKind::Sweep { operation, targets, .. } => (*operation, crate::plain(targets)),
         FeatureKind::Coil { operation, targets, .. } => (*operation, crate::plain(targets)),
-        FeatureKind::CellGrid { targets, .. } => (Operation::Cut, crate::plain(targets)),
+        FeatureKind::CellGrid { targets, mode, .. } => (
+            match mode {
+                crate::CellGridMode::Cut => Operation::Cut,
+                crate::CellGridMode::Raised => Operation::Join,
+            },
+            crate::plain(targets),
+        ),
         FeatureKind::Rib { .. } => (Operation::Join, Vec::new()),
         _ => (Operation::NewBody, Vec::new()),
     }
@@ -11781,12 +11787,22 @@ fn eval_feature_kind(
             unchanged(st, warning);
             Ok(())
         }
-        FeatureKind::CellGrid { targets, .. } => {
+        FeatureKind::CellGrid { targets, mode, .. } => {
             let tools = cell_grid::tools(doc, vals, f, st, warning)?;
             // A grid beside the body, or cut the wrong way, changes nothing: say so, as a cut does.
+            // Raised cells are joined, as a join extrude's tool is: with no body to join they are
+            // a new body, and one that stands inside the body changes nothing, with no warning.
             let before: Vec<Body> = st.bodies.iter().map(|b| b.body.clone()).collect();
-            apply_traced(doc, st, f, tools, Operation::Cut, &crate::plain(targets))?;
-            if !before.is_empty() && st.bodies.len() == before.len() && st.bodies.iter().zip(&before).all(|(b, old)| old.same(&b.body)) {
+            let op = match mode {
+                crate::CellGridMode::Cut => Operation::Cut,
+                crate::CellGridMode::Raised => Operation::Join,
+            };
+            apply_traced(doc, st, f, tools, op, &crate::plain(targets))?;
+            if op == Operation::Cut
+                && !before.is_empty()
+                && st.bodies.len() == before.len()
+                && st.bodies.iter().zip(&before).all(|(b, old)| old.same(&b.body))
+            {
                 append_warning(warning, "the cut removes no material; check where its profile lies, the direction and the depth".into());
             }
             Ok(())

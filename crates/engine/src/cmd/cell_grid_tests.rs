@@ -290,12 +290,66 @@ fn bad_parameters_are_refused_before_a_feature_is_made() {
         json!({"depth": 1, "web": 0}),
         json!({"depth": 1, "shape": "polygon", "sides": 2}),
         json!({"depth": 1, "shape": "blob"}),
-        json!({"depth": 1, "mode": "raised"}),
+        json!({"depth": 1, "mode": "flat"}),
+        json!({"through_all": true, "mode": "raised"}),
         json!({"depth": 1, "clip": "x"}),
     ] {
         assert!(cut(&mut s, p.clone()).is_err(), "{p}");
     }
     assert!(s.doc.features.iter().all(|f| !matches!(f.kind, solidcraft_doc::FeatureKind::CellGrid { .. })));
+}
+
+#[test]
+fn raised_cells_add_the_volume_a_cut_of_the_same_field_removes() {
+    // Same field and plan: the cut goes up into the plate, the raised cells stand below it.
+    let mut s = plate(62.0, 3.0);
+    let r = cut(&mut s, json!({"mode": "raised", "depth": 1.5, "direction": "negative"})).unwrap();
+    assert!(r["warning"].is_null(), "{r}");
+    assert!((volume(&s) - (62.0 * 62.0 * 3.0 + 25.0 * 100.0 * 1.5)).abs() < 1e-6, "{}", volume(&s));
+    assert_eq!(s.model.state().bodies.len(), 1, "the cells join the plate");
+}
+
+#[test]
+fn raised_and_cut_cells_have_the_same_shape_and_count_in_every_clip() {
+    for (shape, clip) in [("hexagon", "snap"), ("hexagon", "free"), ("circle", "whole"), ("triangle", "snap")] {
+        let mut a = plate(62.0, 3.0);
+        cut(&mut a, json!({"shape": shape, "clip": clip, "depth": 1.5})).unwrap();
+        let removed = 62.0 * 62.0 * 3.0 - volume(&a);
+        let mut b = plate(62.0, 3.0);
+        cut(&mut b, json!({"shape": shape, "clip": clip, "mode": "raised", "depth": 1.5, "direction": "negative"})).unwrap();
+        let added = volume(&b) - 62.0 * 62.0 * 3.0;
+        assert!(removed > 1.0, "{shape} {clip}");
+        assert!((removed - added).abs() < 1e-6 * removed, "{shape} {clip}: cut {removed} raised {added}");
+    }
+}
+
+#[test]
+fn raised_cells_with_no_body_to_join_are_a_new_body() {
+    let field = || {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Field"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [62, 62]}));
+        run(&mut s, "sketch.finish", json!({}));
+        s
+    };
+    let mut s = field();
+    cut(&mut s, json!({"mode": "raised", "depth": 2})).unwrap();
+    assert_eq!(s.model.state().bodies.len(), 1);
+    assert!((volume(&s) - 25.0 * 100.0 * 2.0).abs() < 1e-6, "{}", volume(&s));
+    // A cut has nothing to cut there.
+    assert!(cut(&mut field(), json!({"depth": 2})).is_err());
+}
+
+#[test]
+fn raised_cells_stand_as_deep_as_depth_and_never_through_all() {
+    let mut s = plate(62.0, 3.0);
+    let e = cut(&mut s, json!({"mode": "raised", "through_all": true})).unwrap_err().to_string();
+    assert!(e.contains("through_all") && e.contains("depth"), "{e}");
+    assert!(cut(&mut s, json!({"mode": "raised"})).is_err(), "raised needs a depth");
+    assert!(s.doc.features.iter().all(|f| !matches!(f.kind, solidcraft_doc::FeatureKind::CellGrid { .. })));
+    // Symmetric: half the depth each side of the plane, so half of it stands outside the plate.
+    cut(&mut s, json!({"mode": "raised", "depth": 2, "direction": "symmetric"})).unwrap();
+    assert!((volume(&s) - (62.0 * 62.0 * 3.0 + 25.0 * 100.0)).abs() < 1e-6, "{}", volume(&s));
 }
 
 /// Cuts hexagons of 5 mm through a 3 mm plate, from a few to about 300, and prints what it took.

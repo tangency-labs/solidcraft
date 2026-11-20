@@ -243,13 +243,16 @@ impl Touching {
     }
 }
 
-/// What a cell grid does with its cells. Only `cut` is built so far.
+/// What a cell grid does with its cells.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CellGridMode {
     /// Cut the cells out of the targets.
     #[default]
     Cut,
+    /// Add the cells as material standing on the sketch plane, joined to the targets. A design
+    /// with this mode is written with the next format number.
+    Raised,
 }
 
 /// The smallest cell size and web of a cell grid, in mm.
@@ -1550,7 +1553,8 @@ pub enum FeatureKind {
     },
     /// A cell grid (#14044): the cells of one shape that fill the closed profiles of a sketch (an
     /// outer loop is the field, a loop inside it a keep-out), cut from the targets `depth` deep
-    /// (or through all) along the sketch normal. The cells are planned by solidcore
+    /// (or through all) along the sketch normal, or with `mode: raised` standing `depth` high
+    /// from the sketch plane and joined to the targets. The cells are planned by solidcore
     /// (`solidcore_ops::cell_grid`) and cut in one boolean.
     CellGrid {
         /// Feature id of the sketch.
