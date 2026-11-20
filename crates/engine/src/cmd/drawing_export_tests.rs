@@ -820,8 +820,9 @@ fn a_sheet_exports_as_dxf_with_a_layer_for_each_kind_of_line() {
     assert_eq!(shaded["report"]["pictures_left_out"], json!(1), "{}", shaded["report"]);
 }
 
-/// `drawing.print` is the whole drawing's PDF, as `drawing.export` makes it with no sheet named:
-/// the same bytes, every sheet a page, asking to print at actual size; with a path, written there.
+/// `drawing.print` is the whole drawing's PDF, as `drawing.export` makes it with no sheet named,
+/// every sheet a page, asking to print at actual size (an export doesn't); with a path, written
+/// there.
 #[test]
 fn print_is_the_whole_drawings_pdf() {
     let (mut s, first, _) = front_and_top();
@@ -829,7 +830,8 @@ fn print_is_the_whole_drawings_pdf() {
     let second = added["sheet"].clone();
     let printed = run(&mut s, "drawing.print", json!({}));
     let exported = run(&mut s, CMD, json!({"format": "pdf"}));
-    assert_eq!(printed["data"], exported["data"]);
+    let exported = base64_decode(exported["data"].as_str().unwrap()).unwrap();
+    assert!(!String::from_utf8_lossy(&exported).contains("PrintScaling"), "an export leaves printing to the viewer");
     assert_eq!(printed["pages"], json!([ids::encode(first), second]), "{printed}");
     let bytes = base64_decode(printed["data"].as_str().unwrap()).unwrap();
     assert!(String::from_utf8_lossy(&bytes).contains("/PrintScaling /None"));

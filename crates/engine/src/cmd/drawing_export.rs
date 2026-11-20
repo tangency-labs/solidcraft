@@ -149,17 +149,24 @@ fn chosen_sheets(d: &Drawing, request: &ExportParams) -> Result<Vec<u64>> {
     }
 }
 
-/// `drawing.print`: the whole drawing's PDF, as `drawing.export` writes it.
+/// `drawing.print`: the whole drawing's PDF, as `drawing.export` writes it, asking a viewer to
+/// print it at actual size.
 fn print(s: &mut Session, p: &Value) -> Result<Value> {
     let request: PrintParams = crate::schema::read(PRINT, p)?;
     let mut params = serde_json::json!({"format": "pdf"});
     if let Some(path) = request.path {
         params["path"] = Value::String(path);
     }
-    export(s, &params)
+    written(s, &params, true)
 }
 
 fn export(s: &mut Session, p: &Value) -> Result<Value> {
+    written(s, p, false)
+}
+
+/// The export `p` asks for; a PDF asks a viewer to print it at actual size when `actual_size`
+/// (Print), and leaves the viewer its own choice otherwise (Export), as it always has.
+fn written(s: &mut Session, p: &Value, actual_size: bool) -> Result<Value> {
     let request: ExportParams = crate::schema::read(CMD, p)?;
     let d = s.drawing(CMD)?.clone();
     let sheets = chosen_sheets(&d, &request)?;
@@ -233,8 +240,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         }
         (ExportFormat::Pdf, _) => {
             let sources: Vec<&dyn Pictures> = pictures.iter().map(|p| p as &dyn Pictures).collect();
-            let options =
-                PdfOptions { title: Some(d.name.clone()).filter(|name| !name.is_empty()), output_time: None, layers: true, actual_size: true };
+            let options = PdfOptions { title: Some(d.name.clone()).filter(|name| !name.is_empty()), output_time: None, layers: true, actual_size };
             let (pdf, reports) =
                 solidcraft_io::paper::paper_pdf_pages_with(&scenes, &options, Some(PdfPictures { pages: &sources, dpi: DEFAULT_DPI }))
                     .map_err(|e| bad(CMD, e.to_string()))?;
