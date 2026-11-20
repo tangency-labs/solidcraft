@@ -41,6 +41,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::offset::OffsetFailure;
+use crate::error::topology::TopologyFailure;
 use crate::error::{EntityRef, Failure, Result, SolidError};
 use crate::geom::attribute::ObjectKey;
 use crate::geom::axis2_placement::Axis2Placement;
@@ -314,9 +315,9 @@ fn radial_sweep(
     use crate::curve::curve::CurveKind;
     use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
     let (SurfaceKind::Cone(cylinder), SurfaceKind::Cone(target)) = (old.kind(), new.kind()) else {
-        return Err(SolidError::topology_failed(
+        return Err(SolidError::topology(
             OP,
-            "the radial sweep requires two conical supports",
+            TopologyFailure::RadialSweepNeedsCones,
         ));
     };
     let domain = old.natural_uv_domain_with_nurb(k)?;
@@ -361,9 +362,9 @@ fn radial_sweep(
         let curves = [rim(cylinder, height)?, rim(target, target_height)?];
         let [outer, inner] = &curves;
         let (CurveKind::Ellipse(a), CurveKind::Ellipse(z)) = (outer.kind(), inner.kind()) else {
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP,
-                "the radial rims are not ellipses",
+                TopologyFailure::RadialRimsNotEllipses,
             ));
         };
         if a.position() != z.position()
@@ -373,22 +374,22 @@ fn radial_sweep(
             || z.x_radius() != z.y_radius()
             || !(z.x_radius() > 0.0 && a.x_radius() > z.x_radius())
         {
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP,
-                "the radial rims do not define a concentric annulus",
+                TopologyFailure::RadialRimsNotAnnulus,
             ));
         }
         let plane = crate::surface::surface::p2::plane_on_ellipses(k, &curves)?;
         let SurfaceKind::Plane(support) = plane.kind() else {
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP,
-                "the radial cap has no plane",
+                TopologyFailure::RadialCapWithoutPlane,
             ));
         };
         if !fixed_rim_plane(support.position(), cylinder, height) {
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP,
-                "the radial circles leave the exact end plane",
+                TopologyFailure::RadialRimsOffEndPlane,
             ));
         }
         let cap_domain = plane.natural_uv_domain_with_nurb(k)?;
@@ -437,9 +438,9 @@ fn radial_sweep(
     )?;
     tool.refresh_cached_topology();
     if !crate::topology::brep::is_outward_solid(k, &mut tool)? {
-        return Err(SolidError::topology_failed(
+        return Err(SolidError::topology(
             OP,
-            "the radial sweep is not an outward solid",
+            TopologyFailure::RadialSweepNotOutward,
         ));
     }
     Ok((tool, inner))

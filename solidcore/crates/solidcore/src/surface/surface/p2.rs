@@ -4543,18 +4543,14 @@ impl Surface {
 /// A missing common ellipse support, unavailable certified curve bounds, or a
 /// degenerate or nonfinite canvas; errors from the curve bounds.
 pub(crate) fn plane_on_ellipses(k: &Kernel, curves: &[Curve]) -> Result<Surface> {
-    let bad = || {
-        SolidError::surface_failed(
-            "surface::plane_on_ellipses",
-            "the boundary lacks a common ellipse plane or certified bounds",
-        )
-    };
-    let frame = common_ellipse_plane(curves)?.ok_or_else(bad)?;
+    const OP: &str = "surface::plane_on_ellipses";
+    let frame = common_ellipse_plane(curves)?
+        .ok_or_else(|| SolidError::surface(OP, SurfaceFailure::NoCommonEllipsePlane))?;
     let mut bounds = crate::geom::extent3d::Extent3d::new();
     for curve in curves {
         let extent = curve
             .certified_bounding_box(k, &curve.natural_interval())?
-            .ok_or_else(bad)?;
+            .ok_or_else(|| SolidError::surface(OP, SurfaceFailure::EllipseBoundsNotCertified))?;
         bounds = bounds.union(&extent);
     }
     ellipse_plane_canvas(frame, bounds)
@@ -4591,9 +4587,9 @@ fn ellipse_plane_canvas(
     let u = (radius * norm([yx, yy, yz]) / normal_length).hi;
     let v = (radius * norm([xx, xy, xz]) / normal_length).hi;
     if !(normal_length.lo > 0.0 && u.is_finite() && u > 0.0 && v.is_finite() && v > 0.0) {
-        return Err(SolidError::surface_failed(
+        return Err(SolidError::surface(
             "surface::plane_on_ellipses",
-            "the analytic plane's bounding canvas is not finite",
+            SurfaceFailure::PlaneCanvasNotFinite,
         ));
     }
     Ok(Surface::from(Plane::from_stored(
@@ -4622,9 +4618,9 @@ fn common_ellipse_plane(curves: &[Curve]) -> Result<Option<Axis2Placement>> {
     let frame = *first.position();
     let (x, y) = (frame.x_axis(), frame.y_axis());
     let bad = || {
-        SolidError::surface_failed(
+        SolidError::surface(
             "surface::plane_on_ellipses",
-            "the ellipse boundaries do not have one exact plane",
+            SurfaceFailure::EllipsesNotOnOneExactPlane,
         )
     };
     let origin = exact::det3(x, y, frame.origin()).ok_or_else(bad)?;

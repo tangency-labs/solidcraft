@@ -124,6 +124,25 @@ pub enum TopologyFailure {
     /// orientable, or it is an open sheet the closed-solid orientation does not take. Class
     /// `failed`.
     GatheredBothSides,
+    /// A radial sweep between two supports was asked for supports that are not both cones
+    /// (a cylinder is a cone). [`ErrorKind::Unsupported`], status `SM_ERR`.
+    RadialSweepNeedsCones,
+    /// The two rim curves of a radial sweep's cap are not both ellipses. Class `failed`,
+    /// status `SM_ERR`.
+    RadialRimsNotEllipses,
+    /// The two rims of a radial sweep's cap are not concentric circles in one stored plane
+    /// with the outer one the larger, so they bound no annulus. Class `failed`, status
+    /// `SM_ERR`.
+    RadialRimsNotAnnulus,
+    /// The plane through a radial sweep's rims is not a plane. Class `failed`, status
+    /// `SM_ERR`.
+    RadialCapWithoutPlane,
+    /// The plane through a radial sweep's rims is not exactly the plane of the support's
+    /// fixed end. Class `failed`, status `SM_ERR`.
+    RadialRimsOffEndPlane,
+    /// The closed body a radial sweep stitched is not an outward solid. Class `failed`,
+    /// status `SM_ERR`.
+    RadialSweepNotOutward,
 }
 
 impl TopologyFailure {
@@ -139,7 +158,13 @@ impl TopologyFailure {
             | Self::ClosedEdge
             | Self::FaceWithoutEdges
             | Self::WireEndSqueezed
-            | Self::NoFootOnSurface => SM_ERR,
+            | Self::NoFootOnSurface
+            | Self::RadialSweepNeedsCones
+            | Self::RadialRimsNotEllipses
+            | Self::RadialRimsNotAnnulus
+            | Self::RadialCapWithoutPlane
+            | Self::RadialRimsOffEndPlane
+            | Self::RadialSweepNotOutward => SM_ERR,
             Self::Missing(_)
             | Self::CurveNotBSpline { .. }
             | Self::SurfaceWithoutNurbs { .. }
@@ -170,7 +195,8 @@ impl TopologyFailure {
             Self::CurveNotBSpline { .. }
             | Self::SurfaceWithoutNurbs { .. }
             | Self::FaceWithoutEdges
-            | Self::WireEndSqueezed => ErrorKind::Unsupported,
+            | Self::WireEndSqueezed
+            | Self::RadialSweepNeedsCones => ErrorKind::Unsupported,
             Self::CurveNotApproximated => ErrorKind::Failed,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
@@ -232,6 +258,18 @@ impl core::fmt::Display for TopologyFailure {
             Self::GatheredBothSides => {
                 f.write_str("more face uses are connected than faces remain to be oriented")
             }
+            Self::RadialSweepNeedsCones => {
+                f.write_str("the radial sweep requires two conical supports")
+            }
+            Self::RadialRimsNotEllipses => f.write_str("the radial rims are not ellipses"),
+            Self::RadialRimsNotAnnulus => {
+                f.write_str("the radial rims do not define a concentric annulus")
+            }
+            Self::RadialCapWithoutPlane => f.write_str("the radial cap has no plane"),
+            Self::RadialRimsOffEndPlane => {
+                f.write_str("the radial circles leave the exact end plane")
+            }
+            Self::RadialSweepNotOutward => f.write_str("the radial sweep is not an outward solid"),
         }
     }
 }
@@ -470,6 +508,16 @@ mod tests {
                 SM_ERR_ASSERT_FAILURE,
                 K::Failed,
             ),
+            (
+                TopologyFailure::RadialSweepNeedsCones,
+                SM_ERR,
+                K::Unsupported,
+            ),
+            (TopologyFailure::RadialRimsNotEllipses, SM_ERR, K::Failed),
+            (TopologyFailure::RadialRimsNotAnnulus, SM_ERR, K::Failed),
+            (TopologyFailure::RadialCapWithoutPlane, SM_ERR, K::Failed),
+            (TopologyFailure::RadialRimsOffEndPlane, SM_ERR, K::Failed),
+            (TopologyFailure::RadialSweepNotOutward, SM_ERR, K::Failed),
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::topology(op, failure);
