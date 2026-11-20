@@ -116,6 +116,10 @@ pub(super) fn configurations_rows(
             crate::scenario::publish_handle("config:as_columns", toggle.rect.center());
             if toggle.changed() {
                 ui.ctx().data_mut(|m| m.insert_persisted(swapped_id(), swapped));
+                // An edit in progress is kept, as leaving its cell would keep it.
+                for ((row, column), text) in std::mem::take(&mut rule_editor.drafts) {
+                    *error = app.run("config.row", json!({"name":row,"values":{&column:cell_value(&column,&text)}})).err();
+                }
             }
             swapped
         })
@@ -838,6 +842,9 @@ fn swapped_table(
                     let active = tb.active.as_deref() == Some(*name);
                     status_controls(app, ui, name, active, matches, error, rule_editor);
                     if ui_kit::bin_button(ui, solidcraft_ui_text::tr("config.delete_configuration")).clicked() {
+                        // Its cells are drawn after this one: an edit in one of them goes with it,
+                        // rather than making the configuration again as the cell is left.
+                        rule_editor.drafts.retain(|(row, _), _| row.as_str() != *name);
                         *error = app.run("config.row", json!({"name":name,"delete":true})).err();
                     }
                 });
