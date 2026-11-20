@@ -1876,6 +1876,65 @@ mod exporters {
         assert_eq!(files(&root), ["sheets", "sheets.ZIP"]);
     }
 
+    fn conditional_exporter(name: &str) -> (Session, Fixture) {
+        let (session, root) = installed(name);
+        let mut manifest = exporter_manifest(json!(["document.inspect"]));
+        for entry in manifest["runtime"]["entries"].as_array_mut().unwrap() {
+            entry["input_schema"] = json!({"type":"object","properties":{
+                "mode":{"type":"boolean"},
+                "count":{"type":"integer","x-solidcraft-visible-when":{"field":"mode","eq":true}},
+                "size":{"type":"string","oneOf":[
+                    {"const":"small","x-solidcraft-when":{"field":"mode","eq":true}},
+                    {"const":"large","x-solidcraft-when":{"field":"mode","eq":false}}]}
+            }});
+        }
+        std::fs::write(root.join("plugins/smp/plugin.json"), manifest.to_string()).unwrap();
+        (session, root)
+    }
+
+    #[test]
+    fn exporter_options_omit_hidden_fields_before_entering_wasm() {
+        let (mut s, root) = conditional_exporter("conditional-hidden");
+        // As with the importer fixture, trap unless the options contain only {"mode":false}.
+        let (package, version) = API.split_once('@').unwrap();
+        let fixture = include_str!("exporter_fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version);
+        let locals = "(local $c i32)";
+        assert_eq!(fixture.matches(locals).count(), 1);
+        let fixture = fixture.replacen(
+            locals,
+            &format!("{locals}\n      local.get 3\n      i32.const 14\n      i32.ne\n      if\n        unreachable\n      end"),
+            1,
+        );
+        std::fs::write(root.join("plugins/smp/exporter.wasm"), wat::parse_str(fixture).unwrap()).unwrap();
+        let before = s.doc.to_json();
+        for (slot, name) in [("copy", "copy.smp"), ("zip", "sheets"), ("zip", "sheets.zip")] {
+            let reply = s
+                .execute("file.export", &json!({"path":at(&root,name),"format":format!("smp.{slot}"),"options":{"mode":false,"count":"hidden"}}))
+                .unwrap();
+            for file in reply["files"].as_array().unwrap() {
+                assert!(Path::new(file.as_str().unwrap()).is_file());
+            }
+        }
+        assert_eq!(s.doc.to_json(), before);
+    }
+
+    #[test]
+    fn exporter_options_reject_unavailable_choices_before_entering_wasm() {
+        let (mut s, root) = conditional_exporter("conditional-choice");
+        let targets = [("copy", "copy.smp"), ("zip", "sheets"), ("zip", "sheets.zip")];
+        for (slot, name) in targets {
+            let error = s
+                .execute("file.export", &json!({"path":at(&root,name),"format":format!("smp.{slot}"),"options":{"mode":false,"size":"small"}}))
+                .unwrap_err();
+            assert!(matches!(error.host_error(), Some(HostError::InvalidInput { field, .. }) if field == "params.size"), "{error}");
+            assert!(files(&root).is_empty(), "invalid options leave no files or folders");
+        }
+        for (slot, name) in targets {
+            s.execute("file.export", &json!({"path":at(&root,name),"format":format!("smp.{slot}"),"options":{"mode":false,"size":"large"}}))
+                .unwrap();
+        }
+    }
+
     fn install_archive(root: &Path, bytes: &[u8]) {
         let source = include_str!("exporter_fixture.wat");
         let escaped: String = bytes.iter().map(|b| format!("\\{b:02x}")).collect();

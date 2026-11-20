@@ -1364,12 +1364,18 @@ pub struct EvalCache {
     /// What a feature changed, by what it read ([`EvalKey::reads`]): made again on the model as
     /// it is now.
     changes: Store<CachedEval<Change>>,
+    /// The bodies of the states the models sharing this cache evaluated, to let go of their
+    /// kernel forms ([`Model::release_left`]).
+    noted: release::Noted,
     pub hits: usize,
+    /// How many times kernel forms were let go here ([`Model::release_left`] found it due): for
+    /// tests and diagnostics, as `hits` is.
+    pub release_passes: usize,
 }
 
 impl Default for EvalCache {
     fn default() -> Self {
-        EvalCache { states: Store::new(CACHE_BYTES), changes: Store::new(CHANGE_BYTES), hits: 0 }
+        EvalCache { states: Store::new(CACHE_BYTES), changes: Store::new(CHANGE_BYTES), noted: release::Noted::default(), hits: 0, release_passes: 0 }
     }
 }
 
@@ -3993,6 +3999,7 @@ impl Model {
         self.held = None;
         self.import_heals_owed = false;
         let _span = solidcraft_profile::span("doc", "evaluate");
+        self.note_states();
         self.placement_inputs = None;
         self.fingerprinted = None;
         self.placement_local = true;
@@ -4548,6 +4555,7 @@ impl Model {
         self.placement_local = self.placement_local && out.iter().all(|r| !r.skipped && !r.stale && !r.unkept && r.error.is_none());
         self.poses = poses;
         self.results = out;
+        self.note_states();
         // A cached import's result is as its check left it, not as the import first showed.
         self.settle_import_checks();
         self.last_recomputed = recomputed;
@@ -10965,6 +10973,8 @@ pub use model_cache::{PendingChecks, SavedModel};
 pub mod cell_grid;
 #[path = "eval_frame.rs"]
 pub(crate) mod frame_member;
+#[path = "eval_release.rs"]
+mod release;
 #[path = "eval_surface.rs"]
 mod surface;
 #[path = "eval_thread.rs"]
