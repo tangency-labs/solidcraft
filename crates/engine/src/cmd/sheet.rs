@@ -783,7 +783,10 @@ fn settle_side(s: &Session, kind: &mut FeatureKind, cmd: &str) -> Result<()> {
     {
         return Err(bad(
             cmd,
-            format!("the fixed point ({:.3}, {:.3}, {:.3}) is not on the sheet: pick a point on the face of the side that stays", f.0.x, f.0.y, f.0.z),
+            format!(
+                "the fixed point ({:.3}, {:.3}, {:.3}) is not on the sheet: pick a point on the face of the side that stays",
+                f.0.x, f.0.y, f.0.z
+            ),
         ));
     }
     if let Ok(Some(side)) = s.doc.fold_side_at(&st, &authored)
