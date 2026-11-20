@@ -1640,70 +1640,14 @@ pub const LOD_PX: f32 = 0.75;
 /// `size` pixels. Infinite when a corner of it is at or behind the eye, or for a box that is not
 /// finite: such a placement is drawn in full.
 pub fn placement_scale(rows: &[[f32; 4]; 3], bounds: &[[f32; 3]; 2], vp: &[[f32; 4]; 4], size: [f32; 2]) -> f32 {
-    let Some(axes) = placement_axes(rows, bounds, vp, size) else { return f32::INFINITY };
-    let scale = axes.iter().map(|[x, y]| (x * x + y * y).sqrt()).fold(0.0f32, f32::max);
-    if scale.is_finite() { scale } else { f32::INFINITY }
+    PlacedBox::new(*rows, bounds, vp).scale(size)
 }
 
 /// [`placement_scale`] along whichever direction shows largest, not only the box's axes: the
 /// most pixels a millimetre of the part covers there (a step across the axes, seen from along
 /// a diagonal, shows larger than any one axis). Infinite where [`placement_scale`] is.
 pub fn placement_stretch(rows: &[[f32; 4]; 3], bounds: &[[f32; 3]; 2], vp: &[[f32; 4]; 4], size: [f32; 2]) -> f32 {
-    let Some(axes) = placement_axes(rows, bounds, vp, size) else { return f32::INFINITY };
-    // The largest singular value of the map from the part's millimetres to pixels: the square
-    // root of the larger eigenvalue of its 2 × 2 Gram matrix.
-    let (mut a, mut b, mut c) = (0.0f32, 0.0f32, 0.0f32);
-    for [x, y] in axes {
-        a += x * x;
-        b += x * y;
-        c += y * y;
-    }
-    let half = (a - c) * 0.5;
-    let stretch = ((a + c) * 0.5 + (half * half + b * b).sqrt()).sqrt();
-    if stretch.is_finite() { stretch } else { f32::INFINITY }
-}
-
-/// Pixels a millimetre along each axis of a placement's box covers where it is nearest the eye
-/// (see [`placement_scale`]); `None` when it is drawn in full.
-fn placement_axes(rows: &[[f32; 4]; 3], bounds: &[[f32; 3]; 2], vp: &[[f32; 4]; 4], size: [f32; 2]) -> Option<[[f32; 2]; 3]> {
-    let [lo, hi] = bounds;
-    if !lo.iter().chain(hi).all(|x| x.is_finite()) {
-        return None;
-    }
-    let clip = |p: [f32; 3]| -> [f32; 4] {
-        let w = rows.map(|r| r[0] * p[0] + r[1] * p[1] + r[2] * p[2] + r[3]);
-        std::array::from_fn(|k| vp[0][k] * w[0] + vp[1][k] * w[1] + vp[2][k] * w[2] + vp[3][k])
-    };
-    let corners: [[f32; 3]; 8] = std::array::from_fn(|i| {
-        [if i & 1 == 0 { lo[0] } else { hi[0] }, if i & 2 == 0 { lo[1] } else { hi[1] }, if i & 4 == 0 { lo[2] } else { hi[2] }]
-    });
-    let mut nearest = (f32::INFINITY, corners[0]);
-    for c in corners {
-        let w = clip(c)[3];
-        if !(w > 1e-6) {
-            return None;
-        }
-        if w < nearest.0 {
-            nearest = (w, c);
-        }
-    }
-    let screen = |c: [f32; 4]| [c[0] / c[3] * size[0] * 0.5, c[1] / c[3] * size[1] * 0.5];
-    let (_, c) = nearest;
-    let at = screen(clip(c));
-    let mut axes = [[0.0f32; 2]; 3];
-    for (k, axis) in axes.iter_mut().enumerate() {
-        // A step of a hundredth of the box (at least a micrometre) along each axis.
-        let step = ((hi[k] - lo[k]) * 0.01).max(1e-3);
-        let mut q = c;
-        q[k] += step;
-        let qc = clip(q);
-        if !(qc[3] > 1e-6) {
-            return None;
-        }
-        let s = screen(qc);
-        *axis = [(s[0] - at[0]) / step, (s[1] - at[1]) / step];
-    }
-    Some(axes)
+    PlacedBox::new(*rows, bounds, vp).stretch(size)
 }
 
 /// The coarsest level whose error (mm; level 0, the full triangles, has none) stays under
@@ -1718,22 +1662,126 @@ pub fn level_for(errors: &[f32], scale: f32) -> usize {
 /// before the near plane or past the far one). Tested on the clip-space corners, so it holds for
 /// corners behind the eye too.
 pub fn placed_box_in_view(rows: &[[f32; 4]; 3], bounds: &[[f32; 3]; 2], vp: &[[f32; 4]; 4]) -> bool {
-    let [lo, hi] = bounds;
-    if !lo.iter().chain(hi).all(|x| x.is_finite()) {
-        return true;
-    }
-    // Per plane, whether every corner so far is outside it: x > w, -x > w, y > w, -y > w, z < 0, z > w.
-    let mut out = [true; 6];
-    for i in 0..8 {
-        let p = [if i & 1 == 0 { lo[0] } else { hi[0] }, if i & 2 == 0 { lo[1] } else { hi[1] }, if i & 4 == 0 { lo[2] } else { hi[2] }];
-        let w = rows.map(|r| r[0] * p[0] + r[1] * p[1] + r[2] * p[2] + r[3]);
-        let c: [f32; 4] = std::array::from_fn(|k| vp[0][k] * w[0] + vp[1][k] * w[1] + vp[2][k] * w[2] + vp[3][k]);
-        let outside = [c[0] > c[3], -c[0] > c[3], c[1] > c[3], -c[1] > c[3], c[2] < 0.0, c[2] > c[3]];
-        for (o, x) in out.iter_mut().zip(outside) {
-            *o &= x;
+    PlacedBox::new(*rows, bounds, vp).in_view()
+}
+
+/// A placement (`rows`, see [`INSTANCE_SIZE`]) of a box (`bounds`) in the view `vp`, with its
+/// corners taken to clip space once: whether it is in view ([`placed_box_in_view`]) and how
+/// finely to draw it ([`placement_scale`], [`placement_stretch`]) all read the same corners, so
+/// a frame's cull takes each placement's corners through the view once, not once per question.
+pub(crate) struct PlacedBox<'a> {
+    rows: [[f32; 4]; 3],
+    bounds: &'a [[f32; 3]; 2],
+    vp: &'a [[f32; 4]; 4],
+    /// The corners in clip space (corner `i` takes the high end along axis `k` where bit `k` of
+    /// `i` is set); `None` for a box that is not finite.
+    corners: Option<[[f32; 4]; 8]>,
+}
+
+impl<'a> PlacedBox<'a> {
+    pub(crate) fn new(rows: [[f32; 4]; 3], bounds: &'a [[f32; 3]; 2], vp: &'a [[f32; 4]; 4]) -> Self {
+        let [lo, hi] = bounds;
+        let finite = lo.iter().chain(hi).all(|x| x.is_finite());
+        let mut placed = PlacedBox { rows, bounds, vp, corners: None };
+        if finite {
+            placed.corners = Some(std::array::from_fn(|i| placed.clip(placed.corner(i))));
         }
+        placed
     }
-    !out.iter().any(|o| *o)
+
+    /// Corner `i` of the box, in the part's millimetres.
+    fn corner(&self, i: usize) -> [f32; 3] {
+        let [lo, hi] = self.bounds;
+        [if i & 1 == 0 { lo[0] } else { hi[0] }, if i & 2 == 0 { lo[1] } else { hi[1] }, if i & 4 == 0 { lo[2] } else { hi[2] }]
+    }
+
+    /// A point of the part (millimetres) in clip space.
+    fn clip(&self, p: [f32; 3]) -> [f32; 4] {
+        let (rows, vp) = (&self.rows, self.vp);
+        let w = rows.map(|r| r[0] * p[0] + r[1] * p[1] + r[2] * p[2] + r[3]);
+        std::array::from_fn(|k| vp[0][k] * w[0] + vp[1][k] * w[1] + vp[2][k] * w[2] + vp[3][k])
+    }
+
+    /// See [`placed_box_in_view`]: a box that is not finite is always in view.
+    pub(crate) fn in_view(&self) -> bool {
+        let Some(corners) = &self.corners else { return true };
+        // Per plane, whether every corner so far is outside it: x > w, -x > w, y > w, -y > w, z < 0, z > w.
+        let mut out = [true; 6];
+        for c in corners {
+            let outside = [c[0] > c[3], -c[0] > c[3], c[1] > c[3], -c[1] > c[3], c[2] < 0.0, c[2] > c[3]];
+            for (o, x) in out.iter_mut().zip(outside) {
+                *o &= x;
+            }
+        }
+        !out.iter().any(|o| *o)
+    }
+
+    /// Pixels a millimetre along each axis of the box covers where it is nearest the eye, in a
+    /// view of `size` pixels (see [`placement_scale`]); `None` when it is drawn in full.
+    pub(crate) fn axes(&self, size: [f32; 2]) -> Option<[[f32; 2]; 3]> {
+        let corners = self.corners.as_ref()?;
+        let mut nearest = (f32::INFINITY, 0);
+        for (i, c) in corners.iter().enumerate() {
+            let w = c[3];
+            if !(w > 1e-6) {
+                return None;
+            }
+            if w < nearest.0 {
+                nearest = (w, i);
+            }
+        }
+        let screen = |c: [f32; 4]| [c[0] / c[3] * size[0] * 0.5, c[1] / c[3] * size[1] * 0.5];
+        let [lo, hi] = self.bounds;
+        let c = self.corner(nearest.1);
+        let at = screen(corners[nearest.1]);
+        let mut axes = [[0.0f32; 2]; 3];
+        for (k, axis) in axes.iter_mut().enumerate() {
+            // A step of a hundredth of the box (at least a micrometre) along each axis.
+            let step = ((hi[k] - lo[k]) * 0.01).max(1e-3);
+            let mut q = c;
+            q[k] += step;
+            let qc = self.clip(q);
+            if !(qc[3] > 1e-6) {
+                return None;
+            }
+            let s = screen(qc);
+            *axis = [(s[0] - at[0]) / step, (s[1] - at[1]) / step];
+        }
+        Some(axes)
+    }
+
+    /// See [`placement_scale`].
+    pub(crate) fn scale(&self, size: [f32; 2]) -> f32 {
+        Self::scale_of(self.axes(size))
+    }
+
+    /// See [`placement_stretch`].
+    pub(crate) fn stretch(&self, size: [f32; 2]) -> f32 {
+        Self::stretch_of(self.axes(size))
+    }
+
+    /// [`placement_scale`] from the box's [`axes`](Self::axes).
+    pub(crate) fn scale_of(axes: Option<[[f32; 2]; 3]>) -> f32 {
+        let Some(axes) = axes else { return f32::INFINITY };
+        let scale = axes.iter().map(|[x, y]| (x * x + y * y).sqrt()).fold(0.0f32, f32::max);
+        if scale.is_finite() { scale } else { f32::INFINITY }
+    }
+
+    /// [`placement_stretch`] from the box's [`axes`](Self::axes).
+    pub(crate) fn stretch_of(axes: Option<[[f32; 2]; 3]>) -> f32 {
+        let Some(axes) = axes else { return f32::INFINITY };
+        // The largest singular value of the map from the part's millimetres to pixels: the square
+        // root of the larger eigenvalue of its 2 × 2 Gram matrix.
+        let (mut a, mut b, mut c) = (0.0f32, 0.0f32, 0.0f32);
+        for [x, y] in axes {
+            a += x * x;
+            b += x * y;
+            c += y * y;
+        }
+        let half = (a - c) * 0.5;
+        let stretch = ((a + c) * 0.5 + (half * half + b * b).sqrt()).sqrt();
+        if stretch.is_finite() { stretch } else { f32::INFINITY }
+    }
 }
 
 /// One level of an [`InstancedDraw`]: its triangles and the placements drawn from it.
@@ -2655,41 +2703,33 @@ impl Batches {
         let f = |b: &[u8], i: usize| b.get(i..i + 4).and_then(|x| x.try_into().ok()).map_or(0.0, f32::from_le_bytes);
         let mut edges_changed = false;
         for (n, d) in self.instanced.iter_mut().enumerate() {
-            if self.edges.is_some()
-                && let Some(e) = d.edges.clone()
-            {
-                let shown: Vec<(u32, u8)> = d
-                    .placements
-                    .as_chunks::<INSTANCE_SIZE>()
-                    .0
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, p)| {
-                        let rows = [0, 1, 2].map(|r| [f(&p[..], 16 * r), f(&p[..], 16 * r + 4), f(&p[..], 16 * r + 8), f(&p[..], 16 * r + 12)]);
-                        placed_box_in_view(&rows, &d.bounds, vp).then(|| (i as u32, edges::level_for(&e, &rows, &d.bounds, vp, size)))
-                    })
-                    .collect();
-                if d.edges_shown.as_ref() != Some(&shown) {
-                    d.edges_shown = Some(shown);
-                    edges_changed = true;
-                }
-            }
+            let edge_levels = if self.edges.is_some() { d.edges.clone() } else { None };
             let batched = self.indirect.as_ref().is_some_and(|x| x.batches(n));
             let errors: Vec<f32> = d.levels.iter().map(|l| l.error).collect();
-            let mut shown: Vec<(u32, u8)> = d
-                .placements
-                .as_chunks::<INSTANCE_SIZE>()
-                .0
-                .iter()
-                .enumerate()
-                .filter_map(|(i, p)| {
-                    let rows = [0, 1, 2].map(|r| [f(&p[..], 16 * r), f(&p[..], 16 * r + 4), f(&p[..], 16 * r + 8), f(&p[..], 16 * r + 12)]);
-                    placed_box_in_view(&rows, &d.bounds, vp).then(|| {
-                        let level = if errors.len() > 1 { level_for(&errors, placement_scale(&rows, &d.bounds, vp, size)) } else { 0 };
-                        (i as u32, u8::try_from(level).unwrap_or(0))
-                    })
-                })
-                .collect();
+            // Each placement's corners go through the view once, for whether it is in view and
+            // for both its triangles' and its edges' level.
+            let finer = errors.len() > 1 || edge_levels.as_ref().is_some_and(|e| e.levels.len() > 1);
+            let mut shown: Vec<(u32, u8)> = Vec::new();
+            let mut edges_shown: Option<Vec<(u32, u8)>> = edge_levels.as_ref().map(|_| Vec::new());
+            for (i, p) in d.placements.as_chunks::<INSTANCE_SIZE>().0.iter().enumerate() {
+                let rows = [0, 1, 2].map(|r| [f(&p[..], 16 * r), f(&p[..], 16 * r + 4), f(&p[..], 16 * r + 8), f(&p[..], 16 * r + 12)]);
+                let placed = PlacedBox::new(rows, &d.bounds, vp);
+                if !placed.in_view() {
+                    continue;
+                }
+                let axes = if finer { placed.axes(size) } else { None };
+                if let (Some(list), Some(e)) = (edges_shown.as_mut(), edge_levels.as_ref()) {
+                    list.push((i as u32, edges::level_for(e, PlacedBox::stretch_of(axes))));
+                }
+                let level = if errors.len() > 1 { level_for(&errors, PlacedBox::scale_of(axes)) } else { 0 };
+                shown.push((i as u32, u8::try_from(level).unwrap_or(0)));
+            }
+            if let Some(list) = edges_shown
+                && d.edges_shown.as_ref() != Some(&list)
+            {
+                d.edges_shown = Some(list);
+                edges_changed = true;
+            }
             // See-through placements back to front (by their box's centre), so each blends over
             // what lies behind it.
             if d.look != InstanceLook::Opaque {
@@ -5989,6 +6029,101 @@ mod tests {
         assert_eq!(level_for(&errors, LOD_PX / 0.2), 2);
         assert_eq!(level_for(&errors, 0.5), 3);
         assert_eq!(level_for(&[0.0], 0.001), 0);
+    }
+
+    /// The cull takes each placement's corners through the view once and asks them everything
+    /// (in view, pixels per millimetre along the axes and in any direction): the answers are the
+    /// very ones taking the corners through the view again for each question gives, bit for bit,
+    /// for turned, stretched, near, far, behind-the-eye and not finite placements, in
+    /// perspective and orthographic views.
+    #[test]
+    fn a_placements_corners_go_through_the_view_once_for_every_answer() {
+        use super::PlacedBox;
+        fn clip(rows: &[[f32; 4]; 3], vp: &[[f32; 4]; 4], p: [f32; 3]) -> [f32; 4] {
+            let w = rows.map(|r| r[0] * p[0] + r[1] * p[1] + r[2] * p[2] + r[3]);
+            std::array::from_fn(|k| vp[0][k] * w[0] + vp[1][k] * w[1] + vp[2][k] * w[2] + vp[3][k])
+        }
+        fn corners(b: &[[f32; 3]; 2]) -> [[f32; 3]; 8] {
+            let [lo, hi] = b;
+            std::array::from_fn(|i| {
+                [if i & 1 == 0 { lo[0] } else { hi[0] }, if i & 2 == 0 { lo[1] } else { hi[1] }, if i & 4 == 0 { lo[2] } else { hi[2] }]
+            })
+        }
+        // Each question asked on its own, every corner through the view each time.
+        fn in_view(rows: &[[f32; 4]; 3], b: &[[f32; 3]; 2], vp: &[[f32; 4]; 4]) -> bool {
+            if !b.iter().flatten().all(|x| x.is_finite()) {
+                return true;
+            }
+            let mut out = [true; 6];
+            for p in corners(b) {
+                let c = clip(rows, vp, p);
+                for (o, x) in out.iter_mut().zip([c[0] > c[3], -c[0] > c[3], c[1] > c[3], -c[1] > c[3], c[2] < 0.0, c[2] > c[3]]) {
+                    *o &= x;
+                }
+            }
+            !out.iter().any(|o| *o)
+        }
+        fn axes(rows: &[[f32; 4]; 3], b: &[[f32; 3]; 2], vp: &[[f32; 4]; 4], size: [f32; 2]) -> Option<[[f32; 2]; 3]> {
+            if !b.iter().flatten().all(|x| x.is_finite()) {
+                return None;
+            }
+            let mut nearest = (f32::INFINITY, [0.0; 3]);
+            for p in corners(b) {
+                let w = clip(rows, vp, p)[3];
+                if !(w > 1e-6) {
+                    return None;
+                }
+                if w < nearest.0 {
+                    nearest = (w, p);
+                }
+            }
+            let screen = |c: [f32; 4]| [c[0] / c[3] * size[0] * 0.5, c[1] / c[3] * size[1] * 0.5];
+            let at = screen(clip(rows, vp, nearest.1));
+            let mut out = [[0.0f32; 2]; 3];
+            for (k, axis) in out.iter_mut().enumerate() {
+                let step = ((b[1][k] - b[0][k]) * 0.01).max(1e-3);
+                let mut q = nearest.1;
+                q[k] += step;
+                let qc = clip(rows, vp, q);
+                if !(qc[3] > 1e-6) {
+                    return None;
+                }
+                let s = screen(qc);
+                *axis = [(s[0] - at[0]) / step, (s[1] - at[1]) / step];
+            }
+            Some(out)
+        }
+        let mut seed = 0x2545_f491_4f6c_dd1du64;
+        let mut r = move |lo: f32, hi: f32| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            lo + (hi - lo) * ((seed >> 40) as f32 / (1u64 << 24) as f32)
+        };
+        let persp = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, -1.0, -1.0], [0.0, 0.0, -1.0, 0.0]];
+        let ortho = [[0.1, 0.0, 0.0, 0.0], [0.0, 0.1, 0.0, 0.0], [0.0, 0.0, 0.005, 0.0], [0.0, 0.0, 0.5, 1.0]];
+        let size = [1600.0, 1000.0];
+        let (mut seen, mut hidden, mut full) = (0, 0, 0);
+        for i in 0..4000 {
+            let vp = if i % 2 == 0 { &persp } else { &ortho };
+            let (a, t) = (r(0.0, 6.3), r(-1.0, 1.0));
+            let (c, s) = (a.cos(), a.sin());
+            let k = r(0.2, 3.0);
+            let rows = [[k * c, -s, t, r(-40.0, 40.0)], [s, k * c, 0.0, r(-40.0, 40.0)], [0.0, t, k, r(-120.0, 5.0)]];
+            let lo = [r(-5.0, 5.0), r(-5.0, 5.0), r(-5.0, 5.0)];
+            let mut b = [lo, [lo[0] + r(0.0, 9.0), lo[1] + r(0.0, 9.0), lo[2] + r(0.0, 9.0)]];
+            if i % 97 == 0 {
+                b[1][i % 3] = f32::NAN;
+            }
+            let placed = PlacedBox::new(rows, &b, vp);
+            assert_eq!(placed.in_view(), in_view(&rows, &b, vp), "{rows:?} {b:?}");
+            let want = axes(&rows, &b, vp, size);
+            assert_eq!(placed.axes(size).map(|a| a.map(|x| x.map(f32::to_bits))), want.map(|a| a.map(|x| x.map(f32::to_bits))));
+            seen += usize::from(placed.in_view());
+            hidden += usize::from(!placed.in_view());
+            full += usize::from(want.is_none());
+        }
+        assert!(seen > 400 && hidden > 400 && full > 100, "every case met: {seen} {hidden} {full}");
     }
 
     /// Shared vertices: a flat mesh's by position alone (an STL's facets: one normal per
