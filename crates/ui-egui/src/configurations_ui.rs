@@ -48,14 +48,21 @@ pub(super) fn configurations_rows(
     let name_width = tb.rows.iter().map(|(name, _)| ui_kit::ContentWidth::name(ui, name)).fold(0.0, f32::max);
     let status_width = (ui_kit::ContentWidth::label(ui, "Active") + gap + ui_kit::ContentWidth::button(ui, "Apply"))
         .max(ui_kit::ContentWidth::button(ui, "Activate"));
+    // Widths the user dragged a column's header divider to, by column key, so a column keeps its
+    // width when others are added or removed (T-693). The shared table stores them by index.
+    let keys: Vec<&str> = std::iter::once(NAME_KEY).chain(tb.columns.iter().map(String::as_str)).collect();
+    let dragged = column_widths(ui.ctx(), &keys);
+    let t = solidcraft_theme::Tokens::get();
     let columns: Vec<_> = labels
         .iter()
         .enumerate()
         .map(|(index, label)| {
             let min_width = if index == 0 {
-                name_width + gap + status_width + solidcraft_theme::Tokens::get().space_24
+                name_width + gap + status_width + t.space_24
             } else {
-                ui_kit::row_height() * 2.0 + solidcraft_theme::Tokens::get().space_24
+                // Room for the whole heading where it fits, so long feature and parameter names
+                // read without hovering; a longer one elides and shows in full on hover.
+                (ui_kit::row_height() * 2.0 + t.space_24).max((ui_kit::ContentWidth::label(ui, label) + t.space_24).min(t.form_card_width))
             };
             if index == labels.len() - 1 {
                 ui_kit::Column::new(label, 0.0)
@@ -72,7 +79,10 @@ pub(super) fn configurations_rows(
                         _ => 1.3,
                     }
                 };
-                ui_kit::Column::new(label, weight).flex().min_content_width(min_width)
+                let column =
+                    ui_kit::Column::new(label, weight).flex().min_content_width(min_width).manual_width(dragged.get(index).copied().flatten());
+                // The configuration names stay in view while the other columns scroll sideways.
+                if index == 0 { column.frozen() } else { column }
             }
         })
         .collect();
@@ -95,7 +105,7 @@ pub(super) fn configurations_rows(
     column_menu(app, ui, error, &tb.columns, rule_editor);
     ui.add_space(solidcraft_theme::Tokens::get().space_6);
     ui_kit::table_custom(ui, "configuration_table", &columns, solidcraft_ui_text::tr("manage.empty"), |ui, table| {
-        table.headers(ui, |ui, index| {
+        table.headers_resizable(ui, widths_by_index(), |ui, index| {
             if index == labels.len() - 1 {
                 true
             } else if index > 0 {
@@ -146,6 +156,27 @@ pub(super) fn configurations_rows(
                 for (column_index, (column, value)) in tb.columns.iter().zip(values).enumerate() {
                     row.cell(|ui| {
                         let (kind, _) = column_parts(column);
+                        if kind == "suppress" {
+                            let (response, toggled) = suppress_box(ui, column, value);
+                            crate::scenario::publish_handle(&format!("config:cell:{name}:{column}"), response.rect.center());
+                            if let Some(on) = toggled {
+                                run(app, error, "config.row", json!({"name":name,"values":{column:on}}));
+                            }
+                            // Enter, Tab and their Shift forms move on as from a value cell.
+                            let landed = ui_kit::landing(ui, cells, name, column, &response, "");
+                            let focused = response.has_focus() && !landed;
+                            if [ui_kit::CellKey::Next, ui_kit::CellKey::Previous]
+                                .into_iter()
+                                .any(|key| target(row_index, column_index, key).is_some())
+                            {
+                                ui_kit::keep_tab_in_cell(ui, &response);
+                            }
+                            if let Some((row, column)) = ui_kit::cell_key(ui, focused).and_then(|key| target(row_index, column_index, key)) {
+                                ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+                                ui_kit::land_in_cell(ui.ctx(), cells, &row, &column);
+                            }
+                            return;
+                        }
                         let shown = display_cell(kind, value);
                         let key = (name.clone(), column.clone());
                         let mut text = rule_editor.drafts.get(&key).cloned().unwrap_or_else(|| shown.clone());
@@ -222,6 +253,18 @@ pub(super) fn configurations_rows(
                                         .unwrap_or_default()
                                 });
                                 let (kind, _) = column_parts(column);
+                                if kind == "suppress" {
+                                    let (response, toggled) = suppress_box(ui, column, &value);
+                                    crate::scenario::publish_handle(&format!("config:new:cell:{column}"), response.rect.center());
+                                    if let Some(on) = toggled {
+                                        rule_editor.new_values.insert(column.clone(), on.to_string());
+                                    }
+                                    // Enter in the box adds the row, as it does from the draft's value cells.
+                                    let focused = response.has_focus() || response.lost_focus();
+                                    left |= response.lost_focus();
+                                    commit |= focused && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+                                    return;
+                                }
                                 let (response, choice) = value_control(ui, ui.scope_id().with(column), &mut value, kind, &material_names);
                                 let picked = choice.is_some();
                                 if let Some(choice) = choice {
@@ -279,6 +322,7 @@ pub(super) fn configurations_rows(
             rule_editor.focus_new_row = true;
         }
     });
+    remember_column_widths(ui.ctx(), &keys);
     configuration_rules_ui::show(ui, app, error, rule_editor);
     if let Some(styles) = v["style_status"].as_array() {
         for style in styles.iter().filter(|style| style["dormant"].as_bool() == Some(true)) {
@@ -331,6 +375,54 @@ fn with_units(app: &SolveApp, mut tb: super::Table) -> super::Table {
         }
     }
     tb
+}
+
+/// The key the Configuration (name) column's width is kept under.
+const NAME_KEY: &str = "configuration";
+
+/// Where the dragged widths are kept by column key, across designs and sessions.
+fn widths_by_key() -> egui::Id {
+    egui::Id::unique("sc_configuration_column_widths")
+}
+
+/// Where the shared table reads and writes this frame's dragged widths, by column index.
+fn widths_by_index() -> egui::Id {
+    egui::Id::unique("sc_configuration_column_widths_shown")
+}
+
+/// The dragged width of each column of `keys`, in order, handed to the table by index.
+fn column_widths(ctx: &egui::Context, keys: &[&str]) -> Vec<Option<f32>> {
+    let kept: std::collections::BTreeMap<String, f32> = ctx.data_mut(|m| m.get_persisted(widths_by_key())).unwrap_or_default();
+    let widths: Vec<Option<f32>> = keys.iter().map(|key| kept.get(*key).copied().filter(|w| w.is_finite() && *w > 0.0)).collect();
+    ctx.data_mut(|m| m.insert_persisted(widths_by_index(), widths.clone()));
+    widths
+}
+
+/// Keep a width the user dragged (or reset with a double-click) this frame under its column key.
+fn remember_column_widths(ctx: &egui::Context, keys: &[&str]) {
+    let shown: Vec<Option<f32>> = ctx.data_mut(|m| m.get_persisted(widths_by_index())).unwrap_or_default();
+    ctx.data_mut(|m| {
+        let mut kept: std::collections::BTreeMap<String, f32> = m.get_persisted(widths_by_key()).unwrap_or_default();
+        let before = kept.clone();
+        for (key, width) in keys.iter().zip(&shown) {
+            match width {
+                Some(width) if width.is_finite() && *width > 0.0 => {
+                    kept.insert((*key).to_owned(), *width);
+                }
+                _ => {
+                    kept.remove(*key);
+                }
+            }
+        }
+        // A design with hundreds of columns must not grow the kept list without bound.
+        while kept.len() > 512 {
+            let Some(first) = kept.keys().next().cloned() else { break };
+            kept.remove(&first);
+        }
+        if kept != before {
+            m.insert_persisted(widths_by_key(), kept);
+        }
+    });
 }
 
 fn column_menu(
@@ -506,6 +598,22 @@ fn display_cell(kind: &str, value: &str) -> String {
     } else {
         value.to_owned()
     }
+}
+
+/// A suppression cell is a check box, ticked while the feature is suppressed, so the table reads
+/// at a glance and one click or Space changes it. The `toggled` value is the new suppression;
+/// Enter is left to move between cells, as it does from a value cell, rather than toggling.
+fn suppress_box(ui: &mut egui::Ui, column: &str, value: &str) -> (egui::Response, Option<bool>) {
+    let mut on = cell_value(column, value) == json!(true);
+    let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+    let response = ui_kit::checkbox(ui, "", &mut on);
+    // A clicked box keeps the keyboard, as a clicked value cell does, so Space, Tab and Enter
+    // carry on from it.
+    if response.clicked() {
+        response.request_focus();
+    }
+    let toggled = response.changed() && !enter;
+    (response, toggled.then_some(on))
 }
 
 fn value_control(ui: &mut egui::Ui, id: egui::Id, text: &mut String, kind: &str, material_names: &[String]) -> (egui::Response, Option<String>) {

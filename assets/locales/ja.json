@@ -5339,7 +5339,6 @@
   "sketch_panel.plane_offset": "{plane}、{distance} オフセット",
   "sketch_panel.plane_origin": "{plane} 平面",
   "sketch_panel.redefine_title": "{command}：{name}",
-  "sketch_panel.sheet_attachment": "板金ボディの平面に接続されています。板金が変更されると、そのパネルに追従します。",
   "sketch_panel.text_hint": "テキストと配置を編集し、OK を押してください。",
   "sketch_panel.use_plane": "{plane} 平面を使用",
   "sketch_text.align_center": "中央",

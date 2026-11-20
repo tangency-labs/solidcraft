@@ -5339,7 +5339,6 @@
   "sketch_panel.plane_offset": "{plane}، بإزاحة {distance}",
   "sketch_panel.plane_origin": "المستوى {plane}",
   "sketch_panel.redefine_title": "{command}: {name}",
-  "sketch_panel.sheet_attachment": "مرتبط بوجه مسطح لجسم صفائح معدنية، ويتبع تلك اللوحة عندما تتغير الصفيحة.",
   "sketch_panel.text_hint": "عدّل النص وموضعه، ثم اضغط موافق.",
   "sketch_panel.use_plane": "استخدام المستوى {plane}",
   "sketch_text.align_center": "توسيط",

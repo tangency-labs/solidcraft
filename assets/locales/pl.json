@@ -4914,7 +4914,6 @@
   "sketch_panel.plane_offset": "{plane}, odsunięta o {distance}",
   "sketch_panel.plane_origin": "Płaszczyzna {plane}",
   "sketch_panel.redefine_title": "{command}: {name}",
-  "sketch_panel.sheet_attachment": "Dołączony do płaskiej ściany bryły blaszanej; przy zmianach blachy przesuwa się razem z tym panelem.",
   "sketch_panel.text_hint": "Edytuj tekst i jego położenie, a następnie naciśnij OK.",
   "sketch_panel.use_plane": "Użyj płaszczyzny {plane}",
   "sketch_text.align_center": "Do środka",

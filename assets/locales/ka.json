@@ -4914,7 +4914,6 @@
   "sketch_panel.plane_offset": "{plane}, წანაცვლებული {distance}-ით",
   "sketch_panel.plane_origin": "სიბრტყე {plane}",
   "sketch_panel.redefine_title": "{command}: {name}",
-  "sketch_panel.sheet_attachment": "მიმაგრებულია ფურცლოვანი ლითონის სხეულის ბრტყელ წახნაგზე; ფურცლის შეცვლისას იმ პანელს მიჰყვება.",
   "sketch_panel.text_hint": "შეცვალეთ ტექსტი და მისი განლაგება, შემდეგ დააჭირეთ OK-ს.",
   "sketch_panel.use_plane": "სიბრტყის {plane} გამოყენება",
   "sketch_text.align_center": "ცენტრში",

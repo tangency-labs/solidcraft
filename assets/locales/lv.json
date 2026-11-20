@@ -5049,7 +5049,6 @@
   "sketch_panel.plane_offset": "{plane}, nobīdīta par {distance}",
   "sketch_panel.plane_origin": "Plakne {plane}",
   "sketch_panel.redefine_title": "{command}: {name}",
-  "sketch_panel.sheet_attachment": "Piesaistīts lokšņu metāla ķermeņa plakanai skaldnei; tas seko šim panelim, kad lokšņu metāls mainās.",
   "sketch_panel.text_hint": "Rediģējiet tekstu un tā novietojumu, tad nospiediet Labi.",
   "sketch_panel.use_plane": "Izmantot {plane} plakni",
   "sketch_text.align_center": "Centrā",

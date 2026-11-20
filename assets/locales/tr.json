@@ -3782,7 +3782,6 @@
   "sketch_panel.plane_offset": "{plane}, {distance} ötelenmiş",
   "sketch_panel.plane_origin": "{plane} düzlemi",
   "sketch_panel.redefine_title": "{command}: {name}",
-  "sketch_panel.sheet_attachment": "Sac gövdenin düz bir yüzüne bağlıdır; sac değiştiğinde bu paneli izler.",
   "sketch_panel.text_hint": "Metni ve yerleşimini düzenleyip Tamam’a basın.",
   "sketch_panel.use_plane": "{plane} düzlemini kullan",
   "sketch_text.align_center": "Orta",

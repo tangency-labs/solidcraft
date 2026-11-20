@@ -5284,7 +5284,6 @@
   "sketch_panel.plane_offset": "{plane}, amb un desplaçament de {distance}",
   "sketch_panel.plane_origin": "El pla {plane}",
   "sketch_panel.redefine_title": "{command}: {name}",
-  "sketch_panel.sheet_attachment": "Vinculat a una cara plana d'un cos de full metàl·lic; segueix aquell panell quan el full canvia.",
   "sketch_panel.text_hint": "Editeu el text i la seva col·locació i premeu D'acord.",
   "sketch_panel.use_plane": "Fer servir el pla {plane}",
   "sketch_text.align_center": "Centrar",

@@ -5285,7 +5285,6 @@
   "sketch_panel.plane_offset": "{plane}, зсунута на {distance}",
   "sketch_panel.plane_origin": "Площина {plane}",
   "sketch_panel.redefine_title": "{command}: {name}",
-  "sketch_panel.sheet_attachment": "Прив’язано до плоскої грані листового тіла; слідує за цією панеллю під час зміни листа.",
   "sketch_panel.text_hint": "Змініть текст і його розміщення, потім натисніть OK.",
   "sketch_panel.use_plane": "Використати площину {plane}",
   "sketch_text.align_center": "По центру",

@@ -3781,7 +3781,6 @@
   "sketch_panel.plane_offset": "{plane}, eltolás: {distance}",
   "sketch_panel.plane_origin": "{plane} sík",
   "sketch_panel.redefine_title": "{command}: {name}",
-  "sketch_panel.sheet_attachment": "Egy lemeztest sík lapjához rögzítve; követi azt a panelt, ha a lemez megváltozik.",
   "sketch_panel.text_hint": "Szerkessze a szöveget és az elhelyezését, majd nyomja meg az OK gombot.",
   "sketch_panel.use_plane": "{plane} sík használata",
   "sketch_text.align_center": "Középre",
