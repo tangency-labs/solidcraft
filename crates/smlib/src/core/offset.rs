@@ -331,11 +331,27 @@ pub(crate) fn shell(body: &Body, points: &[[f64; 3]], tolerance: f64, thickness:
         if thickness < 0.0 && solid_in && !leaves_cavity(k, &mut w, &picked, -thickness)? {
             return Ok(Err(Error::NoRoom));
         }
-        match called(shell_brep_full(k, &w, thickness, &picked))? {
-            Ok(r) => finish(r, solid_in),
-            Err(e) => Ok(Err(e)),
+        let shelled = match called(shell_brep_full(k, &w, thickness, &picked))? {
+            Ok(r) => finish(r, solid_in)?,
+            Err(e) => Err(e),
+        };
+        match shelled {
+            Err(e) if is_bare_failure(&e) => match solidcore_ops::offset::outline_touch(k, &w)? {
+                Some(at) => Ok(Err(Error::OutlineTouches { at, detail: e.to_string() })),
+                None => Ok(Err(e)),
+            },
+            r => Ok(r),
         }
     })
+}
+
+/// (#18568) A failure that does not say why: a bare status, solidcore's text, a result that is
+/// not a solid, or an offset refused as unsound.
+fn is_bare_failure(e: &Error) -> bool {
+    matches!(
+        e,
+        Error::Status(_) | Error::Solidcore(_) | Error::NotSolid | Error::Exception | Error::Refused(solidcore_ops::Error::OffsetRefused { .. })
+    )
 }
 
 /// `smlib_offset_faces`: its checks, the pick, the solid check, (moving faces in) the cavity

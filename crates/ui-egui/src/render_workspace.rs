@@ -3612,10 +3612,19 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             || app.viewport.axis_drag.is_some()
             || app.viewport.spin
             || app.cam_anim.is_some();
+        // A material dragged from the shelf is dropped on primary release without a canvas click.
+        let primary_released = ui.input(|i| i.pointer.button_released(egui::PointerButton::Primary));
         let hits = input
             .hover
             .filter(|_| image_inside && !navigating && geometry_current)
-            .map(|p| crate::viewport::pick_cached(app, &crate::viewport::projection(app, rect), p))
+            .map(|p| {
+                let proj = crate::viewport::projection(app, rect);
+                if input.primary_down || primary_released || response.clicked() || response.secondary_clicked() {
+                    crate::viewport::pick_cached(app, &proj, p)
+                } else {
+                    crate::viewport::pick_hover(app, &proj, p, ui.ctx())
+                }
+            })
             .unwrap_or_default();
         let candidate = assign::candidate(app, &hits, input.mods);
         // The view moved under a still pointer: the highlight under it stays on the face

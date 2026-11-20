@@ -41,6 +41,77 @@ fn each_schema_type_becomes_its_field_with_limits_labels_and_defaults() {
 }
 
 #[test]
+fn described_field_labels_and_values_show_the_same_tooltip() {
+    field_tooltips(true);
+}
+
+#[test]
+fn fields_without_descriptions_have_no_label_or_value_tooltip() {
+    field_tooltips(false);
+}
+
+fn field_tooltips(described: bool) {
+    for mut property in [
+        json!({"type":"number","default":2}),
+        json!({"type":"number"}),
+        json!({"type":"integer","default":3}),
+        json!({"type":"integer"}),
+        json!({"type":"boolean"}),
+        json!({"type":"string","enum":["one","two"]}),
+        json!({"type":"string"}),
+        json!({"type":"array","x-solidcraft-selection":{"version":1,"accept":["edge"]}}),
+    ] {
+        property["title"] = json!("Saw kerf");
+        if described {
+            property["description"] = json!("Width removed by the saw blade");
+        }
+        let mut h = crate::scenario::Harness::new();
+        let mut command = entry("cut", "edit", json!([]));
+        command.input_schema = json!({"type":"object","required":["kerf"],"properties":{"kerf":property}});
+        h.app.plugin_menu.listed = vec![listed("saw", vec![command])];
+        h.app.plugin_menu.loaded = true;
+        h.app.home.open = false;
+        open_entry(&mut h.app, 0, 0);
+        h.app.plugin_menu.dialogs.last_mut().unwrap().preview = false;
+        h.ctx.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
+        h.frames(4);
+        // Selection fields have both an active native picker and an idle pick control.
+        let selection = property["type"] == "array";
+        for idle in 0..=usize::from(selection) {
+            if idle == 1 {
+                h.app.dialog = None;
+                h.frames(3);
+            }
+            for label in [true, false] {
+                h.frame_with(vec![egui::Event::PointerGone]);
+                h.frames(3);
+                let at = if label && property["type"] != "boolean" {
+                    crate::scenario::rect_of("dialog:label:Saw kerf *").expect("field label").center()
+                } else {
+                    crate::scenario::handle_at("plugin_dialog:field:kerf").expect("field value")
+                };
+                h.frame_with(vec![egui::Event::PointerMoved(at)]);
+                h.frames(4);
+                let context = format!("{property}: label={label}, idle={idle}");
+                if described {
+                    let mut found = false;
+                    for shape in &h.shapes {
+                        crate::test_support::each_shape(&shape.shape, &mut |shape| {
+                            if let egui::Shape::Text(text) = shape {
+                                found |= text.galley.text() == "Width removed by the saw blade";
+                            }
+                        });
+                    }
+                    assert!(found, "description is painted on hover: {context}");
+                } else {
+                    assert!(egui::Tooltip::seconds_since_last_tooltip(&h.ctx) > 0.0, "no tooltip on hover: {context}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn choice_options_show_their_titles_and_send_their_values() {
     let schema = json!({"type":"object","properties":{"up":{"type":"string","title":"Up axis","default":"as_is","oneOf":[
         {"const":"as_is","title":"As in the file"},{"const":"stand_up","title":"Stand up (Y-up to Z-up)","description":"Turns the design"},{"const":"raw"}
@@ -1068,7 +1139,8 @@ mod native {
 
     /// A package with `home` (a box, then view.home), `edit` (a box and no view command),
     /// `fail`, `place` (a new component moved 100 mm along X), `move` (only the move), and
-    /// `both` (move the existing component, then make another box).
+    /// `both` (move the existing component, then make another box), and `fit` (a box from the
+    /// fields, then view.home followed by view.fit).
     fn view_package(tag: &str) -> std::path::PathBuf {
         let root = std::env::temp_dir().join(format!("solidcraft-plugin-view-{}-{tag}", std::process::id()));
         let dir = root.join("frames");
@@ -1077,10 +1149,15 @@ mod native {
         let wat = include_str!("plugin_view_fixture.wat").replace("PLUGIN_PACKAGE", name).replace("PLUGIN_VERSION", version);
         std::fs::write(dir.join("plugin.wasm"), wat::parse_str(&wat).unwrap()).unwrap();
         let entry = |entry_name: &str, label: &str| json!({"name": entry_name, "effect": "edit", "input_schema": {"type": "object"}, "slots": [{"kind": "menu", "name": label}]});
+        let mut fit = entry("fit", "Fit");
+        fit["input_schema"] = json!({"type":"object","required":["length","width","height"],"properties":{
+            "length":{"type":"number","exclusiveMinimum":0,"default":20},
+            "width":{"type":"number","exclusiveMinimum":0,"default":10},
+            "height":{"type":"number","exclusiveMinimum":0,"default":3}}});
         let manifest = json!({"id":"frames","name":"Frames","version":"0.1.0","capabilities":["commands@0.1"],"runtime":{
             "module":"plugin.wasm",
-            "entries":[entry("home", "Home"), entry("edit", "Edit"), entry("fail", "Fail"), entry("place", "Place"), entry("move", "Move"), entry("both", "Both")],
-            "commands":["solid.box", "view.home", "component.create", "occurrence.move"]}});
+            "entries":[entry("home", "Home"), entry("edit", "Edit"), entry("fail", "Fail"), entry("place", "Place"), entry("move", "Move"), entry("both", "Both"), fit],
+            "commands":["solid.box", "view.fit", "view.home", "component.create", "occurrence.move"]}});
         std::fs::write(dir.join("plugin.json"), manifest.to_string()).unwrap();
         root
     }
@@ -1246,6 +1323,86 @@ mod native {
         let near =
             |p: solidcore_record::Vec3, q: solidcore_record::Vec3| (p.x - q.x).abs() < 1e-6 && (p.y - q.y).abs() < 1e-6 && (p.z - q.z).abs() < 1e-6;
         near(a.target, b.target) && (a.distance - b.distance).abs() < 1e-6 && (a.yaw - b.yaw).abs() < 1e-9 && (a.pitch - b.pitch).abs() < 1e-9
+    }
+
+    #[test]
+    fn the_first_plugin_preview_fits_once_and_reopening_fits_again() {
+        let root = view_package("preview-fit");
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.look_at_anim = false;
+        h.app.plugin_menu.loaded = true;
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        let fit = h.app.plugin_menu.listed[0].entries.iter().position(|e| e.name == "fit").unwrap();
+        h.app.cam.set_view(solidcraft_viewport::StandardView::Front);
+        h.app.cam.distance = 800.0;
+        let parked = h.app.cam;
+        let (doc, undo) = (h.app.session.doc.clone(), h.app.session.undo.len());
+        open_entry(&mut h.app, 0, fit);
+        previewed(&mut h);
+        assert!(h.app.preview.active, "the box is drawn: {:?}", h.app.preview.error);
+        let bounds = solidcraft_engine::geom::Aabb3 { min: solidcore_record::Vec3::ZERO, max: solidcore_record::Vec3::new(20.0, 10.0, 3.0) };
+        let expected = h.app.fitted_bounds(parked, &bounds);
+        assert!(!same_camera(&parked, &h.app.cam), "the first preview moves the camera to its result");
+        assert!(same_camera(&expected, &h.app.cam), "the last command is Fit, retaining the Front direction");
+        assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc));
+        assert_eq!(h.app.session.undo.len(), undo);
+
+        // Navigation stays available while the dialog is open, through the shared camera path.
+        h.step(&json!({"call":"ui.scroll","params":{"x":800,"y":600,"delta":-100}})).unwrap();
+        h.frames(20);
+        let moved = h.app.cam;
+        assert!(!same_camera(&expected, &moved), "the user can zoom the preview");
+        let key = h.app.preview.key;
+        h.app.plugin_menu.dialogs[0].fields.as_mut().unwrap().iter_mut().find(|(f, _)| f.key == "length").unwrap().1 = Input::Number(30.0);
+        previewed(&mut h);
+        assert_ne!(h.app.preview.key, key, "the changed field produced a new preview");
+        assert_eq!(h.app.preview.bounds.max.x.round(), 30.0);
+        assert!(same_camera(&moved, &h.app.cam), "later previews preserve the user's view");
+
+        h.step(&json!({"click":{"handle":"plugin_dialog:cancel"}})).unwrap();
+        h.frames(2);
+        assert!(h.app.plugin_menu.dialogs.is_empty());
+        open_entry(&mut h.app, 0, fit);
+        previewed(&mut h);
+        assert!(!same_camera(&moved, &h.app.cam), "a reopened dialog fits its first preview again");
+        assert!(same_camera(&h.app.fitted_bounds(moved, &bounds), &h.app.cam));
+
+        // OK still applies the last view command even after the preview already applied it.
+        h.app.cancel_view_animation();
+        h.app.cam = parked;
+        run(&mut h.app).unwrap();
+        settle(&mut h);
+        h.frames(2);
+        assert_eq!(h.app.session.doc.features.len(), 1);
+        assert!(!same_camera(&parked, &h.app.cam));
+        assert!(same_camera(&h.app.fitted(parked), &h.app.cam), "OK still fits the committed result");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn the_first_plugin_preview_applies_home_and_a_preview_without_a_view_command_leaves_the_camera() {
+        let root = view_package("preview-home");
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.look_at_anim = false;
+        h.app.plugin_menu.loaded = true;
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        let home = h.app.plugin_menu.listed[0].entries.iter().position(|e| e.name == "home").unwrap();
+        let edit = h.app.plugin_menu.listed[0].entries.iter().position(|e| e.name == "edit").unwrap();
+        h.app.cam.set_view(solidcraft_viewport::StandardView::Front);
+        h.app.cam.distance = 800.0;
+        let parked = h.app.cam;
+        open_entry(&mut h.app, 0, edit);
+        previewed(&mut h);
+        assert!(h.app.preview.active);
+        assert!(same_camera(&parked, &h.app.cam), "a preview with no view command changes nothing");
+        open_entry(&mut h.app, 0, home);
+        previewed(&mut h);
+        assert!(h.app.preview.active);
+        let mut iso = parked;
+        iso.set_view(solidcraft_viewport::StandardView::Iso);
+        assert_eq!((h.app.cam.yaw, h.app.cam.pitch), (iso.yaw, iso.pitch), "Home turns to the home direction");
+        assert!(h.app.cam.distance < parked.distance, "Home fits the previewed box");
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

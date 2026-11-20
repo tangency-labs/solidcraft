@@ -210,7 +210,7 @@ pub struct Assembly<'t> {
     /// Spline surfaces whose first and last control lines met within the tolerance, closed.
     pub(crate) splines_closed: usize,
     /// Control points of spline curves and surfaces whose polygon turned back on itself within
-    /// the tolerance, moved onto their neighbours ([`crate::topology::unfolded_curve`],
+    /// the tolerance, moved to take the turn out ([`crate::topology::unfolded_curve`],
     /// [`crate::topology::unfolded_surface`]).
     pub(crate) points_unfolded: usize,
     /// Sides of spline surfaces that collapsed to within the tolerance of a point, made exact
@@ -660,7 +660,7 @@ impl<'t> Assembly<'t> {
         }
         if self.points_unfolded > 0 {
             notes.push(format!(
-                "{} control points of spline curves and surfaces whose polygon turned back on itself by less than {} mm moved onto their neighbours",
+                "{} control points of spline curves and surfaces whose polygon turned back on itself by less than {} mm moved to take the turn out",
                 self.points_unfolded, self.tol
             ));
         }

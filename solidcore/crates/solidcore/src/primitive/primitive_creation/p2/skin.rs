@@ -6,6 +6,7 @@
 //! |------|----------|
 //! | [`PrimitiveCreation::create_skin_primitive`], [`PrimitiveCreation::create_skin_primitive_traced`] | nine-argument `CreateSkinPrimitive` |
 //! | `skin_primitive_internal` (private) | `sm_CreateSkinPrimitiveInternal` |
+//! | [`PrimitiveCreation::create_skin_primitive_with_ends`] | (none: the skin with [`SkinEnd`]s) |
 //!
 //! Deviations: only the ownership-reporting overload is in scope, so the internal
 //! function always reports. A curve is transferred when its slot is consumed:
@@ -27,6 +28,7 @@ use crate::math::{max2, min2, BIG_DOUBLE, EFF_ZERO_DEG, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::primitive::primitive_creation::p1::PrimitiveCreation;
 use crate::primitive::primitive_creation::p3::skin_sources::{LoopSpans, Segment, SkinTrace};
+use crate::sweep::skin_ends::SkinEnd;
 use crate::sweep::topology_sweep::access::FaceRef;
 use crate::topology::{BrepId, FaceId};
 
@@ -110,6 +112,7 @@ impl PrimitiveCreation {
             cap_ends,
             [start_faces, side_faces, end_faces],
             transferred,
+            [SkinEnd::Free; 2],
             None,
         )
     }
@@ -148,7 +151,50 @@ impl PrimitiveCreation {
             cap_ends,
             [start_faces, side_faces, end_faces],
             transferred,
+            [SkinEnd::Free; 2],
             Some(trace),
+        )
+    }
+
+    /// [`PrimitiveCreation::create_skin_primitive`] with how the skin leaves its first
+    /// profile and arrives at its last (`ends`, not upstream: [`crate::sweep::skin_ends`]),
+    /// tracing into `trace` when given as
+    /// [`PrimitiveCreation::create_skin_primitive_traced`] does. With both ends
+    /// [`SkinEnd::Free`] the B-rep and faces are those `create_skin_primitive` makes.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`PrimitiveCreation::create_skin_primitive`]; for a [`SkinEnd::Square`] end,
+    /// `InvalidInput` for profiles that are not closed planar loops and for an end with no
+    /// side to leave to ([`crate::sweep::skin_ends::end_tangents_of`]).
+    #[allow(clippy::too_many_arguments)] // upstream's arguments, the ends and the trace
+    pub fn create_skin_primitive_with_ends(
+        &mut self,
+        a: &mut impl PrimitiveCreationAccess,
+        brep: BrepId,
+        curves_in_each_profile: &[usize],
+        curves: &mut [Option<Curve>],
+        approx_tol: f64,
+        degree: usize,
+        cap_ends: bool,
+        [start_faces, side_faces, end_faces]: [&mut Vec<FaceId>; 3],
+        transferred: &mut Vec<bool>,
+        ends: [SkinEnd; 2],
+        trace: Option<&mut SkinTrace>,
+    ) -> Result<()> {
+        skin_primitive_internal(
+            self,
+            a,
+            brep,
+            curves_in_each_profile,
+            curves,
+            approx_tol,
+            degree,
+            cap_ends,
+            [start_faces, side_faces, end_faces],
+            transferred,
+            ends,
+            trace,
         )
     }
 }
@@ -165,6 +211,7 @@ fn skin_primitive_internal(
     cap_ends: bool,
     [start_faces, side_faces, end_faces]: [&mut Vec<FaceId>; 3],
     transferred: &mut Vec<bool>,
+    ends: [SkinEnd; 2],
     trace: Option<&mut SkinTrace>,
 ) -> Result<()> {
     // empty entity maps
@@ -211,6 +258,7 @@ fn skin_primitive_internal(
             cap_ends,
             [start_faces, side_faces, end_faces],
             transferred,
+            ends,
             trace,
         );
         a.delete_brep(scratch);
@@ -234,6 +282,7 @@ fn skin_with_scratch(
     mut cap_ends: bool,
     [start_faces, side_faces, end_faces]: [&mut Vec<FaceId>; 3],
     transferred: &mut [bool],
+    ends: [SkinEnd; 2],
     mut trace: Option<&mut SkinTrace>,
 ) -> Result<()> {
     a.set_editing(scratch, true)?;
@@ -404,7 +453,7 @@ fn skin_with_scratch(
 
     // loft the loops on a sequence of faces or a sequence of loft curves
     primitive.create_skin_from_faces_traced(
-        a, brep, &faces, &nurbs, approx_tol, degree, side_faces, trace,
+        a, brep, &faces, &nurbs, approx_tol, degree, ends, side_faces, trace,
     )?;
 
     // A planar loft (all profiles coplanar) has no depth to cap. A nonplanar
