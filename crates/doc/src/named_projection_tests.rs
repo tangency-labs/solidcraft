@@ -1139,6 +1139,7 @@ fn a_projected_plane_of_another_component_lands_where_the_two_planes_meet() {
                 plane: PlaneRef::Midplane {
                     a: Box::new(crate::construct::GeoRef::Face { at: face_at(0.), name: None }),
                     b: Box::new(crate::construct::GeoRef::Face { at: face_at(20.), name: None }),
+                    old_frame: false,
                 },
             },
             Some("Mid"),

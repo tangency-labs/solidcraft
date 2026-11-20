@@ -660,6 +660,63 @@ fn rectangle_boxes_sit_beside_it_between_the_panels_too() {
     }
 }
 
+/// #19669: crossing a window border must not reflect an edge's dimension through the
+/// pointer to a distant part of the view. The field stays beside the edge it measures.
+#[test]
+fn rectangle_boxes_stay_near_their_edges_at_window_borders() {
+    for command in ["sketch.rectangle.two_point", "sketch.rectangle.center", "sketch.rectangle.rounded"] {
+        for (a, b, dimension) in
+            [(egui::pos2(400.0, 170.0), egui::pos2(900.0, 450.0), 0usize), (egui::pos2(450.0, 650.0), egui::pos2(10.0, 850.0), 1usize)]
+        {
+            let mut h = Harness::new();
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            h.call("ui.view", json!({"view":"top"}));
+            h.step(&json!({"start":command})).unwrap();
+            let first = if command == "sketch.rectangle.center" { a + (b - a) * 0.5 } else { a };
+            h.step(&json!({"click":[first.x, first.y]})).unwrap();
+            h.step(&json!({"move":[b.x, b.y]})).unwrap();
+            h.frames(3);
+            let field = h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", dimension)))).expect("dimension is visible");
+            let edge = if dimension == 0 { egui::pos2((a.x + b.x) * 0.5, a.y) } else { egui::pos2(b.x, (a.y + b.y) * 0.5) };
+            // A border may move the box inward by its own size, but not along the edge
+            // by half the rectangle's width or height as a pointer reflection does.
+            assert!(field.distance_to_pos(edge) <= 40.0, "{command}: {field:?} is far from its edge midpoint {edge:?}");
+            assert!(in_open_view(&h, field), "{command}: {field:?} leaves the open view");
+            assert!(!field.expand(2.0).contains(b), "{command}: {field:?} covers the next corner {b:?}");
+        }
+    }
+}
+
+#[test]
+fn small_rounded_rectangle_boxes_at_borders_fit_without_overlap() {
+    for [width, height] in [[1280, 720], [800, 600]] {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":width,"height":height}));
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.step(&json!({"start":"sketch.rectangle.rounded"})).unwrap();
+        // Keep the corners left of the axes navigator in the narrow window.
+        for point in [egui::pos2(300.0, 170.0), egui::pos2(380.0, 210.0)] {
+            assert!(in_open_view(&h, egui::Rect::from_center_size(point, egui::vec2(1.0, 1.0))), "{width}x{height}: {point:?} is drawable");
+        }
+        h.step(&json!({"click":[300,170]})).unwrap();
+        h.step(&json!({"move":[380,210]})).unwrap();
+        h.frames(3);
+        let fields: Vec<_> =
+            (0..3usize).map(|i| h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i)))).expect("dimension is visible")).collect();
+        for (i, field) in fields.iter().enumerate() {
+            assert!(in_open_view(&h, *field), "{width}x{height}: {field:?} leaves the open view");
+            assert!(!field.expand(2.0).contains(egui::pos2(380.0, 210.0)), "{width}x{height}: {field:?} covers the next corner");
+            assert!(fields[..i].iter().all(|previous| !previous.intersects(*field)), "{width}x{height}: fields overlap: {fields:?}");
+        }
+        // The preview's final click must still reach the sketch.
+        h.step(&json!({"click":[380,210]})).unwrap();
+        let state = h.app.session.world_state().unwrap();
+        let sketch = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+        assert_eq!(sketch.profiles.len(), 1, "{width}x{height}: the click finishes the rectangle");
+    }
+}
+
 /// Whether `rect` is in the open view: the layout's free region, clear of the panels and the view's
 /// controls, or the drawing area without one (#17992).
 fn in_open_view(h: &Harness, rect: egui::Rect) -> bool {

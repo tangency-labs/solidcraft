@@ -803,7 +803,12 @@ impl<R: Read + Seek> DesignContainerReader<R> {
 
     /// [`Self::geometry`] when [`Self::read_document`] follows: it validates the document.
     fn geometry_before_document(&mut self) -> Option<solidcraft_doc::SavedModel> {
-        let document = self.reader.document(16 << 20).ok()?;
+        if !self.has_model_cache() {
+            return None;
+        }
+        // Opening needs these same bytes for the authoritative document anyway. Point cloud
+        // properties can exceed the metadata budget of a standalone preview.
+        let document = self.reader.document(max_design()).ok()?;
         native_cache::read_geometry_before_document(&mut self.reader, &document).ok()
     }
 }
@@ -1864,6 +1869,67 @@ mod tests {
             let _ = reader.geometry_before_document();
             assert_eq!(reader.read_document().unwrap_err().to_string(), expected);
         }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn opening_adopts_the_model_with_large_point_cloud_metadata() {
+        use solidcore_record::Vec3;
+        use solidcraft_doc::point_cloud::{ColorBy, Colors, Column, Complex, Floats, On, PointCloud, Points};
+
+        let mut doc = Document::new("With a scan");
+        doc.add_feature(FeatureKind::MeshImport { file: "reference.obj".into(), meshes: vec![mesh()] }, None).unwrap();
+        // Three packed f32 columns put over 16 MiB of base64 in the metadata, even though the
+        // point coordinates themselves live in a separate binary part.
+        let count = 1_100_000;
+        let values = Floats(vec![1.0; count].into());
+        let id = doc.allocate_id().unwrap();
+        doc.point_clouds.push(PointCloud {
+            id,
+            name: "Scan".into(),
+            file: "scan.ply".into(),
+            origin: Vec3::ZERO,
+            points: Points::new(vec![0.0; 3 * count].into()),
+            colors: Colors::default(),
+            source_points: count as u64,
+            units: "mm".into(),
+            transform: solidcraft_doc::IDENTITY,
+            point_size: 2.0,
+            color_by: ColorBy::File,
+            color: None,
+            height_range: None,
+            visible: true,
+            complex: Complex {
+                columns: ["nx", "ny", "nz"]
+                    .into_iter()
+                    .map(|name| Column { name: name.into(), on: On::Point, integer: false, values: values.clone() })
+                    .collect(),
+                ..Complex::default()
+            },
+            color_property: None,
+            filters: Vec::new(),
+            source: String::new(),
+            max_points: None,
+        });
+        let mut evaluated = solidcraft_doc::Model::new();
+        evaluated.evaluate(&doc);
+        let saved = evaluated.saved(&doc).expect("the evaluated model can be kept");
+        let bytes = write_design_container_with_cache(&doc, DesignCompression::Fast, None, Some(&saved)).unwrap();
+        {
+            let mut reader = DesignContainerReader::new(Cursor::new(&bytes)).unwrap();
+            assert!(reader.has_model_cache(), "the cache was written");
+            assert!(reader.reader.document(max_design()).unwrap().len() > 16 << 20);
+            assert!(reader.preview().is_none(), "the standalone preview has a smaller metadata budget");
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scan.sc");
+        std::fs::write(&path, bytes).unwrap();
+        let (opened, cached) = read_design_file(path.to_str().unwrap(), None::<fn(DesignPreview)>).unwrap();
+        assert!(opened.point_clouds == doc.point_clouds, "the cloud and its properties round trip");
+        let adopted = solidcraft_doc::Model::adopt(&opened, &cached.expect("normal Open reads the saved model")).unwrap();
+        assert_eq!(adopted.last_recomputed, 0);
+        assert_eq!(adopted.state().bodies[0].body.triangle_mesh(), evaluated.state().bodies[0].body.triangle_mesh());
     }
 
     /// A saved model of four features (5, 50, 20 and 1 ms) whose states each hold the eight

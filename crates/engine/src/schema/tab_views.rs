@@ -7,7 +7,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Longest view name, in characters.
-pub const MAX_NAME: usize = 64;
+pub const MAX_NAME: usize = solidcraft_views::MAX_NAME;
 
 /// What a view shows of its design.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]

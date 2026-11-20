@@ -25,6 +25,7 @@ pub mod browser_search;
 #[cfg(test)]
 mod browser_search_tests;
 pub mod canvas;
+mod card_resize;
 pub mod cli_link;
 #[cfg(test)]
 mod colour_tokens_tests;
@@ -44,7 +45,6 @@ pub mod delete;
 pub mod design_properties;
 pub mod design_tab_prefs;
 pub mod design_view_ui;
-pub mod design_views;
 mod dialog_descriptor;
 pub mod dialogs;
 pub mod dialogs_appearance;

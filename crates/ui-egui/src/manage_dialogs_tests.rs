@@ -1075,3 +1075,49 @@ fn configuration_suppression_cells_are_check_boxes() {
         .unwrap();
     assert_eq!(suppressed(&h, first), "true", "Tab lands in the box");
 }
+
+/// The Configurations card resizes by its edges and remembers it; a column's header divider sets
+/// that column's width, kept by its column so adding another column doesn't move it; and long
+/// headings get room for their names ([T-693](https://tickets.solidcraft.io/t/693)).
+#[test]
+fn configuration_card_and_columns_resize_and_remember() {
+    let mut h = fixture();
+    h.app.run("parameters.add", json!({"name":"a_rather_long_parameter_name","expression":"5 mm"})).unwrap();
+    h.app.run("config.configure", json!({"params":["width","a_rather_long_parameter_name"]})).unwrap();
+    h.app.start("config.table");
+    h.frames(4);
+    let long = scenario::rect_of("dialog:column:configuration_table:a_rather_long_parameter_name").unwrap();
+    let output = painted_frame(&mut h);
+    assert!(!painted_text(&output, "a_rather_long_parameter_name", long).galley.elided, "a long heading has room for its name");
+
+    // The card's free (left) edge widens it, and the width is kept.
+    let card = scenario::rect_of("dialog:outer").unwrap();
+    let side = scenario::rect_of("config:resize:side").unwrap();
+    h.step(&json!({"drag":[[side.center().x, side.center().y],[side.center().x - 120.0, side.center().y]]})).unwrap();
+    h.frames(3);
+    let wider = scenario::rect_of("dialog:outer").unwrap();
+    assert!(wider.width() > card.width() + 60.0, "{card:?} -> {wider:?}");
+    h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
+    h.app.start("config.table");
+    h.frames(4);
+    assert!((scenario::rect_of("dialog:outer").unwrap().width() - wider.width()).abs() < 1.0, "the card opens at the width it was given");
+
+    // A column divider sets the width column's width, which stays when a column is added.
+    let width = scenario::rect_of("dialog:column:configuration_table:width").unwrap();
+    let divider = scenario::rect_of("dialog:column_divider:configuration_table:1").unwrap();
+    h.step(&json!({"drag":[[divider.center().x, divider.center().y],[divider.center().x + 80.0, divider.center().y]]})).unwrap();
+    h.frames(3);
+    let dragged = scenario::rect_of("dialog:column:configuration_table:width").unwrap();
+    assert!(dragged.width() > width.width() + 40.0, "{width:?} -> {dragged:?}");
+    let feature = h.app.session.doc.features[0].name.clone();
+    h.app.run("config.column", json!({"feature":feature})).unwrap();
+    h.frames(4);
+    let kept = scenario::rect_of("dialog:column:configuration_table:width").unwrap();
+    assert!((kept.width() - dragged.width()).abs() < 1.0, "{dragged:?} -> {kept:?}");
+
+    // The configuration names are held at the left while the table scrolls sideways.
+    assert_eq!(
+        scenario::rect_of("dialog:column:configuration_table:Configuration").unwrap().x_range(),
+        scenario::rect_of("dialog:table:configuration_table:Default:cell:Configuration").unwrap().x_range()
+    );
+}

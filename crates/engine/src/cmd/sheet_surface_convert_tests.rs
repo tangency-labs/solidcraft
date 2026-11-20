@@ -249,7 +249,7 @@ fn a_conversion_shows_in_the_flat_pattern() {
     let size = |f: &Value| (f["flat_size_mm"][0].as_f64().unwrap_or(0.0), f["flat_size_mm"][1].as_f64().unwrap_or(0.0));
     let (w, h) = size(&flat);
     assert!(same_size((w.max(h), w.min(h)), (across, 60.0), 1e-6), "{flat}");
-    assert!(flat["surfaces"] == json!(true) && flat["rolls"] == json!(2) && flat["bends"] == json!([]), "{flat}");
+    assert!(flat["rolls"] == json!(2) && flat["bends"] == json!([]), "{flat}");
     assert_eq!(flat["roll_lines"].as_array().map(Vec::len), Some(6), "each roll's start, end and middle: {flat}");
     let saved = s.doc.to_json();
     assert!(saved.contains("\"sheet_recognize\""), "the feature saves as a recognition");

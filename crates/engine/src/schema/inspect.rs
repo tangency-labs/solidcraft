@@ -196,11 +196,6 @@ pub struct ModelFace {
     /// For a cylindrical face: its axis and radius.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cylinder: Option<FaceCylinder>,
-    /// For a flat-model sheet's face: `sheet:<body>:<panel>:<side>`, the side `top`, `bottom`,
-    /// `rim.<edge>`, `bend.inner` or `bend.outer`. It is taken wherever a face name is. A sheet
-    /// made from surfaces has none: its faces' names are the model's, after what made each.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sheet_face: Option<String>,
 }
 
 /// A cylindrical face's axis and radius.
