@@ -689,7 +689,15 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
         if let Some(q) = quality {
             params["quality"] = json!(q);
         }
-        s.execute("file.export", &params).map_err(|e| e.to_string())?;
+        let reply = s.execute("file.export", &params).map_err(|e| e.to_string())?;
+        // What the export noted (a mesh that is not a clean closed surface, a face short of its
+        // shape) goes to stderr, as a newer file's warnings do, unless --quiet: the file is
+        // written, but not silently.
+        if !args.iter().any(|a| a == "--quiet") {
+            for w in reply.get("warnings").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
+                eprintln!("{out}: warning: {w}");
+            }
+        }
     }
     if let Some(p) = flag(args, "--save") {
         warn_if_open_elsewhere(p);
