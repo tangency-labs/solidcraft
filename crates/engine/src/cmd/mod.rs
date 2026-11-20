@@ -194,6 +194,8 @@ mod surface_analysis;
 mod surface_boundary;
 mod surface_match;
 mod tab_views;
+#[cfg(not(target_arch = "wasm32"))]
+mod vcs;
 mod view_dxf;
 mod view_navigation;
 mod view_pick;
@@ -557,6 +559,8 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(drawing_view::COMMANDS.iter());
     v.extend(settings::COMMANDS.iter());
     v.extend(diagnostics::COMMANDS.iter());
+    #[cfg(not(target_arch = "wasm32"))]
+    v.extend(vcs::COMMANDS.iter());
     v.extend(drawing_ui::COMMANDS.iter());
     v.extend(render::COMMANDS.iter());
     v.extend(render_ui::COMMANDS.iter());

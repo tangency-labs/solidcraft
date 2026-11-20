@@ -31,6 +31,7 @@ solidcraft-doc = { path = "crates/doc" }
 # Versioned file formats: the format tag, the version registry and its upgrade, a newer file told
 solidcraft-format = { path = "crates/format" }
 solidcraft-io = { path = "crates/io" }
+solidcraft-vcs = { path = "crates/vcs" }
 solidcraft-engine = { path = "crates/engine" }
 solidcraft-ui-egui = { path = "crates/ui-egui" }
 solidcraft-ui-kit = { path = "crates/ui-kit" }
@@ -117,6 +118,9 @@ gltf = { version = "1.4", default-features = false, features = ["names"] }
 # The computer's name in a design's "open elsewhere" lock file (MIT OR Apache-2.0; already in the
 # tree through x11rb).
 gethostname = "1"
+# Pure-Rust git implementation (MIT OR Apache-2.0). Used by solidcraft-vcs on non-wasm targets.
+# libgit2 (LGPL-2.1) is not permitted, so gix is the only option.
+gix = { version = "0.68", default-features = false, features = ["revision"] }
 
 # FreeCAD and Rhino import (Apache-2.0, pure Rust; native and browser builds).
 # Pinned: its IR and codec APIs change between minor versions. Open formats only: no default

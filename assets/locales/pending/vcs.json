@@ -1,0 +1,50 @@
+{
+  "en": {
+    "cmd.vcs.commit": "Commit Design",
+    "cmd.vcs.init": "Initialize History",
+    "cmd.vcs.log": "Design History Log",
+    "cmd.vcs.status": "Design History Status"
+  },
+  "ar": {
+    "cmd.vcs.commit": "حفظ التصميم في السجل",
+    "cmd.vcs.init": "تهيئة السجل",
+    "cmd.vcs.log": "سجل تاريخ التصميم",
+    "cmd.vcs.status": "حالة سجل التصميم"
+  },
+  "de": {
+    "cmd.vcs.commit": "Design festschreiben",
+    "cmd.vcs.init": "Verlauf initialisieren",
+    "cmd.vcs.log": "Design-Verlaufsprotokoll",
+    "cmd.vcs.status": "Status des Design-Verlaufs"
+  },
+  "he": {
+    "cmd.vcs.commit": "שמירת עיצוב בהיסטוריה",
+    "cmd.vcs.init": "אתחול היסטוריה",
+    "cmd.vcs.log": "יומן היסטוריית עיצוב",
+    "cmd.vcs.status": "סטטוס היסטוריית עיצוב"
+  },
+  "ja": {
+    "cmd.vcs.commit": "デザインをコミット",
+    "cmd.vcs.init": "履歴を初期化",
+    "cmd.vcs.log": "デザイン履歴ログ",
+    "cmd.vcs.status": "デザイン履歴の状態"
+  },
+  "ko": {
+    "cmd.vcs.commit": "디자인 커밋",
+    "cmd.vcs.init": "히스토리 초기화",
+    "cmd.vcs.log": "디자인 히스토리 로그",
+    "cmd.vcs.status": "디자인 히스토리 상태"
+  },
+  "vi": {
+    "cmd.vcs.commit": "Xác nhận bản thiết kế",
+    "cmd.vcs.init": "Khởi tạo lịch sử",
+    "cmd.vcs.log": "Nhật ký lịch sử thiết kế",
+    "cmd.vcs.status": "Trạng thái lịch sử thiết kế"
+  },
+  "zh": {
+    "cmd.vcs.commit": "提交设计",
+    "cmd.vcs.init": "初始化历史记录",
+    "cmd.vcs.log": "设计历史日志",
+    "cmd.vcs.status": "设计历史状态"
+  }
+}

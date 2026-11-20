@@ -171,6 +171,8 @@ pub mod surface_ruled;
 pub mod tab_views;
 pub mod timeline_clipboard;
 pub mod ui_prefs;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod vcs;
 pub mod view_navigation;
 pub mod view_pick;
 
