@@ -33,7 +33,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(not_in_sketch)
         .contract(&SECTION_STACK_CONTRACT)
         .output(output_schema_for::<MeshSectionStackResult>)
-        .params("body?: mesh body name (default: the selected mesh body); plane: as sketch.create's plane; spacing: length expression (> 0); from?, to?: length expressions, distances along the plane's normal (default: the body's reach along it); max_sections?: 1…1000 (default 100); extrude?: bool (default false: extrude each section's material to the next plane and join the slabs into one body); name? (default \"Section\"): a sketch of fitted lines, arcs and circles on each plane that meets the mesh, in one timeline folder, as one undo step → sketches, planes, empty, slabs, bodies, skipped?, group"),
+        .params("body?: mesh body name (default: the selected mesh body); plane: as sketch.create's plane; spacing: length expression (> 0); from?, to?: length expressions, distances along the plane's normal (default: the body's reach along it); max_sections?: 1…1000 (default 100); extrude?: bool (default false: extrude each section's material to the next plane, each slab a body of its own); name? (default \"Section\"): a sketch of fitted lines, arcs and circles on each plane that meets the mesh, in one timeline folder, as one undo step → sketches, planes, empty, slabs, bodies, skipped?, group"),
 ];
 
 /// How far inside the body's reach along the normal the first and last planes stay: a plane
@@ -335,23 +335,14 @@ fn section_stack(s: &mut Session, p: &Value) -> Result<Value> {
             }
             let profiles: Vec<Value> = outlines.iter().map(|ids| json!({ "curves": ids })).collect();
             let mut call = json!({"sketch": sketch, "profiles": profiles, "distance": format!("{height} mm")});
-            if bodies.is_empty() {
-                call["operation"] = json!("new");
-                call["body_name"] = json!(format!("{body} slabs"));
-            } else {
-                call["operation"] = json!("join");
-                call["targets"] = json!(bodies);
-            }
+            // Each slab is a body of its own. Neighbouring slabs meet on faces whose outlines,
+            // fitted section by section, differ by a hair: joining them asks the boolean to
+            // merge nearly coincident faces, which fails on ordinary parts.
+            call["operation"] = json!("new");
+            call["body_name"] = json!(format!("{body} slab {}", slabs.len() + 1));
             let r = run(s, "solid.extrude", &call)?;
-            let names = |k: &str| -> Vec<String> {
-                r.get(k).and_then(Value::as_array).map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default()
-            };
-            let removed = names("removed_bodies");
-            bodies.retain(|b| !removed.contains(b));
-            for b in names("created_bodies") {
-                if !bodies.contains(&b) {
-                    bodies.push(b);
-                }
+            for b in r.get("created_bodies").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
+                bodies.push(b.to_string());
             }
             if let Some(f) = r.get("feature").and_then(Value::as_u64) {
                 slabs.push(f);

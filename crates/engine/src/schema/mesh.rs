@@ -38,8 +38,8 @@ pub struct MeshConvertParams {
 
 /// Cut a mesh body with a row of parallel planes and put one sketch on each plane, holding the
 /// lines, arcs and circles fitted to the mesh's section there (as Fit Curves to Mesh Section
-/// fits one). Optionally extrude each section to the next plane and join the slabs into one
-/// stepped body that stands in for the mesh. One undo step; the sketches and extrudes go into
+/// fits one). Optionally extrude each section to the next plane, each slab a body of its own,
+/// so the stack of slabs stands in for the mesh. One undo step; the sketches and extrudes go into
 /// one timeline folder. A plane that misses the mesh makes no sketch.
 ///
 /// The planes run along the normal of `plane`, from `from` to `to` every `spacing`, always
@@ -76,8 +76,9 @@ pub struct MeshSectionStackParams {
     #[serde(default)]
     pub max_sections: Option<u32>,
     /// Extrude each section's material (its outlines, not the holes in them) to the next
-    /// plane, the last one a spacing on but never past the body, and join the slabs into one
-    /// new body named after the mesh body. Default: false.
+    /// plane, the last one a spacing on but never past the body, each slab a new body named
+    /// after the mesh body (`<body> slab 1`, …). They are not joined: neighbouring slabs meet on
+    /// outlines fitted section by section, which a boolean would have to merge. Default: false.
     #[serde(default)]
     pub extrude: Option<bool>,
     /// The start of the sketches' names, at most 100 characters. Default: `Section`.
@@ -105,7 +106,7 @@ pub struct MeshSectionStackResult {
     pub empty: usize,
     /// The extrude features made, in order.
     pub slabs: Vec<u64>,
-    /// The bodies the slabs make (empty without `extrude`).
+    /// The bodies the slabs make, one each (empty without `extrude`).
     pub bodies: Vec<String>,
     /// Sections that made no slab, and why.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

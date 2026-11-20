@@ -329,12 +329,16 @@ fn slabs_of_a_box_add_up_to_its_height_between_the_planes() {
     let mut s = box_mesh();
     let r = run(&mut s, "mesh.section_stack", json!({"body": "Mesh", "plane": "XY", "from": 5, "to": 11, "spacing": 2, "extrude": true}));
     assert_eq!(ids(&r["slabs"]).len(), 4, "{r}");
-    assert_eq!(r["bodies"], json!(["Mesh slabs"]), "{r}");
+    assert_eq!(r["bodies"], json!(["Mesh slab 1", "Mesh slab 2", "Mesh slab 3", "Mesh slab 4"]), "{r}");
     assert!((slab_volume(&mut s, &r) - 200.0 * 8.0).abs() < 1e-6, "{r}");
-    // Upward from each plane along the normal: the slabs fill z = 5…13 over the whole section.
-    let b = s.model.state().body("Mesh slabs").unwrap().body.exact_bounds().unwrap();
-    let (lo, hi) = ([b.min.x, b.min.y, b.min.z], [b.max.x, b.max.y, b.max.z]);
-    assert!(close(&lo, &[0.0, 0.0, 5.0]) && close(&hi, &[10.0, 20.0, 13.0]), "{lo:?} {hi:?}");
+    // Upward from each plane along the normal: slab k fills z = 5 + 2k … 7 + 2k over the whole
+    // section.
+    for k in 0..4 {
+        let b = s.model.state().body(&format!("Mesh slab {}", k + 1)).unwrap().body.exact_bounds().unwrap();
+        let (lo, hi) = ([b.min.x, b.min.y, b.min.z], [b.max.x, b.max.y, b.max.z]);
+        let z = 5.0 + 2.0 * k as f64;
+        assert!(close(&lo, &[0.0, 0.0, z]) && close(&hi, &[10.0, 20.0, z + 2.0]), "{lo:?} {hi:?}");
+    }
     assert!(s.model.state().body("Mesh").unwrap().body.is_mesh());
 
     // 24, 26, 28 and the end at 29.5: 2, 2, 1.5, then 0.499 up to 0.001 mm under the top.
@@ -342,8 +346,9 @@ fn slabs_of_a_box_add_up_to_its_height_between_the_planes() {
     let r = run(&mut s, "mesh.section_stack", json!({"body": "Mesh", "plane": "XY", "from": 24, "to": 29.5, "spacing": 2, "extrude": true}));
     assert_eq!(ids(&r["slabs"]).len(), 4, "{r}");
     assert!((slab_volume(&mut s, &r) - 200.0 * 5.999).abs() < 1e-6, "{r}");
-    let b = s.model.state().body("Mesh slabs").unwrap().body.exact_bounds().unwrap();
-    assert!((b.min.z - 24.0).abs() < 1e-9 && (b.max.z - 29.999).abs() < 1e-9, "{b:?}");
+    let first = s.model.state().body("Mesh slab 1").unwrap().body.exact_bounds().unwrap();
+    let last = s.model.state().body("Mesh slab 4").unwrap().body.exact_bounds().unwrap();
+    assert!((first.min.z - 24.0).abs() < 1e-9 && (last.max.z - 29.999).abs() < 1e-9, "{first:?} {last:?}");
 }
 
 #[test]
@@ -531,4 +536,68 @@ fn an_inserted_mesh_is_cut_where_it_is_placed() {
     run(&mut s, "occurrence.ground", json!({"occurrence": occurrence, "grounded": false}));
     run(&mut s, "occurrence.move", json!({"occurrence": occurrence, "translate": [100, 0, 50]}));
     check(&mut s, 50.0);
+}
+
+/// Every section of a sphere is a different circle. Each slab is a body of its own, and their volumes add
+/// up to the stepped sphere: a radius-10 sphere cut every 4 mm from -8 to 8, each slab the disc
+/// of its plane (radius √(100 − z²)) run 4 mm up, the last 1.999 mm to just under the top.
+#[test]
+fn slabs_of_a_sphere_whose_sections_all_differ_are_built() {
+    let sphere = solidcraft_kernel::sphere(Vec3::ZERO, 10.0).unwrap();
+    let mut s = mesh_session(&[sphere]);
+    let r = run(&mut s, "mesh.section_stack", json!({"body": "Mesh", "plane": "XY", "from": -8, "to": 8, "spacing": 4, "extrude": true}));
+    let sketches = ids(&r["sketches"]);
+    assert_eq!((sketches.len(), ids(&r["slabs"]).len()), (5, 5), "{r}");
+    let zs = [-8.0, -4.0, 0.0, 4.0, 8.0];
+    let heights = [4.0, 4.0, 4.0, 4.0, 1.999];
+    let want: f64 = zs.iter().zip(heights).map(|(z, h)| std::f64::consts::PI * (100.0 - z * z) * h).sum();
+    // Each fitted circle is within the fitter's tolerance (0.002 of the mesh's 34.6 mm diagonal)
+    // of its section: its area within 2πr·tol + πtol².
+    let tol = (3.0f64 * 400.0).sqrt() * 2e-3;
+    let slack: f64 =
+        zs.iter().zip(heights).map(|(z, h)| (2.0 * std::f64::consts::PI * (100.0 - z * z).sqrt() * tol + std::f64::consts::PI * tol * tol) * h).sum();
+    let got = slab_volume(&mut s, &r);
+    assert!((got - want).abs() <= slack, "{got} vs {want} ± {slack}");
+    assert!(s.model.results.iter().all(|x| x.error.is_none()), "{:?}", s.model.results);
+}
+
+/// A 60 x 40 x 12 mm mount with rounded corners (radius 10), a boss of radius 12 up to z = 30,
+/// a bore of radius 7 through it and two bolt holes of radius 3, inserted as a mesh and stacked
+/// every 3 mm with slabs. Joining its slabs broke the boolean (neighbouring slabs meet on outlines
+/// fitted section by section, which differ by a hair): each slab is a body of its own.
+#[test]
+fn slabs_of_a_mount_with_a_boss_are_built() {
+    let dir = crate::tests::Folder::new("section-stack-mount");
+    let stl = dir.path("mount.stl");
+    let mut src = Session::default();
+    for (id, p) in [
+        ("solid.box", json!({"length": 60, "width": 40, "height": 12, "body_name": "Mount"})),
+        ("solid.fillet", json!({"edges": [[0, 0, 6], [60, 0, 6], [0, 40, 6], [60, 40, 6]], "radius": 10})),
+        ("solid.cylinder", json!({"base": [30, 20, 12], "radius": 12, "height": 18, "operation": "join"})),
+        ("solid.cylinder", json!({"base": [30, 20, -1], "radius": 7, "height": 40, "operation": "cut"})),
+        ("solid.cylinder", json!({"base": [10, 20, -1], "radius": 3, "height": 20, "operation": "cut"})),
+        ("solid.cylinder", json!({"base": [50, 20, -1], "radius": 3, "height": 20, "operation": "cut"})),
+    ] {
+        run(&mut src, id, p);
+    }
+    run(&mut src, "file.export_stl", json!({ "path": stl }));
+    let mut s = Session::default();
+    run(&mut s, "file.insert_mesh", json!({ "path": stl }));
+    let body = s.model.state().bodies[0].name.clone();
+    let r = run(&mut s, "mesh.section_stack", json!({"body": body, "plane": "XY", "spacing": 3, "extrude": true}));
+    assert_eq!(ids(&r["sketches"]).len(), 11, "{r}");
+    assert!(s.model.results.iter().all(|x| x.error.is_none()), "{:?}", s.model.results);
+    // The slabs step the mount: 0.001 to 29.999 high, so within a few percent of its volume.
+    // Each slab is its section's material (the outlines whose holes stay open) run up to the next
+    // plane: its volume is that area times its height, whatever the fit made of the section.
+    let heights = [3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 2.998];
+    let names: Vec<String> = r["bodies"].as_array().unwrap().iter().map(|b| b.as_str().unwrap().to_string()).collect();
+    assert_eq!(names.len(), 10, "{r}");
+    for ((id, h), name) in ids(&r["sketches"]).into_iter().zip(heights).zip(&names) {
+        let profiles = crate::cmd::sketch_store::read(&s.doc, id).map(solidcraft_sketch::find_profiles).unwrap();
+        let area: f64 =
+            super::material_outlines(&profiles).iter().filter_map(|outer| profiles.iter().find(|p| &p.outer_curves == outer)).map(|p| p.area).sum();
+        let got = body_volume(&mut s, name);
+        assert!((got - area * h).abs() < 1e-6 * area * h + 1e-6, "{name}: {got} vs {area} × {h}");
+    }
 }
