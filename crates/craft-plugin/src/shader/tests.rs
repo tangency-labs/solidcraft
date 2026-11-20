@@ -243,6 +243,12 @@ fn the_documented_examples_compile() {
             include_str!("../../../../docs/plugin-examples/trails/plugin.json"),
             include_str!("../../../../docs/plugin-examples/trails/trails.wgsl"),
         ),
+        (
+            "galaxy",
+            include_str!("../../../../docs/plugin-examples/galaxy/plugin.json"),
+            include_str!("../../../../docs/plugin-examples/galaxy/galaxy.wgsl"),
+        ),
+        ("rain", include_str!("../../../../docs/plugin-examples/rain/plugin.json"), include_str!("../../../../docs/plugin-examples/rain/rain.wgsl")),
     ] {
         let manifest = crate::parse_manifest(manifest_text.as_bytes(), folder).unwrap();
         compile(&manifest.shaders[0], source).unwrap_or_else(|e| panic!("{folder}: {e}"));

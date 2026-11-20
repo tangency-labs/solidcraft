@@ -106,6 +106,14 @@ fn background(px: ScPixel) -> vec4<f32> {
 The texture's `name` is the name the shader uses. The host loads the picture, scales it down to at
 most 8192 pixels on a side (or the graphics card's limit), and builds its mipmaps.
 
+## More examples
+
+[`plugin-examples/galaxy/`](plugin-examples/galaxy/) draws a night sky of stars and a band of glowing
+dust, fixed to the world so it turns with the view; it is not animated, so it costs nothing while
+the view stands still. [`plugin-examples/rain/`](plugin-examples/rain/) is animated: drops run down a
+window over a misted copy of the theme's background, near and far drops from two grids of cells.
+Neither needs a picture.
+
 ## The manifest
 
 `capabilities` must list `"shaders@0.1"`. Each entry of `shaders`:
