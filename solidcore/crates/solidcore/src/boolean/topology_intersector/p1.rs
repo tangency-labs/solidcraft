@@ -5540,6 +5540,11 @@ pub struct Relations {
     pub edges: MateMap<EdgeId>,
     /// Vertex mates in both directions.
     pub vertices: MateMap<VertexId>,
+    /// Not upstream (WR-361): the primary edges `MergeEdge` made as copies of an
+    /// other-operand edge with no mate (that operand's own edges), as against edges the
+    /// intersection related. Only an edge here takes the other face's UV trim over
+    /// (`boolean.merge_p2`'s `MakeFaceuse`).
+    pub copied_edges: BTreeSet<EdgeId>,
 }
 
 impl Relations {

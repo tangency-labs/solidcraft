@@ -452,7 +452,8 @@ pub(crate) fn tagged(name: &str, body: &Body) -> Result<(solidcraft_smlib::Brep,
 }
 
 /// Split the given faces (indices in `body`'s face order) where the tool meets them. The solid
-/// is unchanged. A listed face the tool misses is an error naming it. The result's history is
+/// is unchanged. A listed face the tool misses is an error naming it; a tool that runs into the
+/// faces and ends inside them, cutting none through, is an error saying so. The result's history is
 /// over `[body]`: each piece of a split face is Split from it, every other face Kept.
 pub fn split_faces(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<Body> {
     split_faces_with_map(body, faces, tool).map(|(b, _)| b)
@@ -468,8 +469,9 @@ pub fn split_faces_with_map(body: &Body, faces: &[usize], tool: &SplitTool) -> R
     Ok((b, map))
 }
 
-/// Split where the tool meets the listed faces (missing some is fine; missing all is an error),
-/// with the body face each face of the result came from.
+/// Split where the tool meets the listed faces (missing some is fine; missing all is an error,
+/// and so is stopping inside them without cutting any through), with the body face each face of
+/// the result came from.
 pub(crate) fn split_any(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<(Body, Vec<usize>)> {
     split(body, faces, tool).map(|(b, map, _)| (b, map))
 }
@@ -500,7 +502,10 @@ fn split(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<(Body, Vec<us
             .collect::<Option<_>>()
             .ok_or_else(|| failed(NAME, "a listed face is not in SMLib's body"))?;
         let refs: Vec<&solidcraft_smlib::ssi::Surface> = tools.iter().collect();
-        let (r, made) = sb.split_faces(&at, &refs).map_err(|e| failed(NAME, e))?.ok_or_else(missed)?;
+        let (r, made) = sb
+            .split_faces(&at, &refs)
+            .map_err(|e| if matches!(e, solidcraft_smlib::Error::ToolStopsShort) { stops_short(tool) } else { failed(NAME, e) })?
+            .ok_or_else(missed)?;
         let (out, h) = brought_back(NAME, body, &ob, &r)?;
         let map = h
             .faces
@@ -515,6 +520,17 @@ fn split(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<(Body, Vec<us
         // An authored boundary: later rebuilds keep it.
         out.regularization_protected = true;
         Ok((out, map, made))
+    })
+}
+
+/// The refusal for a tool that runs into the faces and ends inside them, so it cuts nothing off.
+/// A face tool is already taken over its surface's whole extent ([`face_patch`]) and an open
+/// sketch curve past its ends, so extending them is no help.
+fn stops_short(tool: &SplitTool) -> KernelError {
+    invalid(match tool {
+        SplitTool::Face { .. } => "the tool face doesn't reach across the surface, even extended",
+        SplitTool::Curves { .. } => "the sketch curves don't reach across the surface, even extended",
+        SplitTool::Plane(_) => "the plane doesn't reach across the surface",
     })
 }
 

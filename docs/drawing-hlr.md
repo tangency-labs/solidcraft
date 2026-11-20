@@ -212,7 +212,7 @@ Other limits:
 
 ## Fixtures
 
-`crates/geom/src/hlr_tests.rs` builds bodies from records and checks analytic positions
+`solidcore/crates/solidcore/src/hlr/tests.rs` builds kernel bodies and checks analytic positions
 and intervals:
 
 - a cube in an isometric view hides its three back edges; a box in front hides the

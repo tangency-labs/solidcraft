@@ -5,6 +5,7 @@ use solidcraft_theme::Tokens;
 
 const SHEET_ROWS: &[&str] = &[
     "Rule",
+    "Material",
     "Thickness",
     "K Factor",
     "Bend Radius",

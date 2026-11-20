@@ -13,7 +13,6 @@ use std::cell::OnceCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use solidcore_record::Vec2;
-use solidcraft_doc::canvas::base64_decode;
 use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::drawing::image::{ImageFile, SheetImage};
 use solidcraft_doc::ids;
@@ -121,8 +120,7 @@ impl<'a> Provider<'a> {
 }
 
 fn decode(file: &ImageFile) -> Decoded {
-    let bytes = base64_decode(&file.data).ok_or("its file isn't base64")?;
-    sheet_image::SheetImage::decode(&bytes)
+    sheet_image::SheetImage::decode(file.data.as_bytes())
 }
 
 impl Pictures for Provider<'_> {
