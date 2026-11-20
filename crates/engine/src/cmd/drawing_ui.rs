@@ -83,7 +83,6 @@ pub static COMMANDS: &[CommandSpec] = &[
     planned!("drawing.update.planned", "Update Drawing", "4892").at("DRAWING REVIEW", "CHANGES").icon("drawing_update"),
     planned!("drawing.check.planned", "Check Drawing", "4894").at("DRAWING REVIEW", "CHANGES").icon("drawing_check"),
     planned!("drawing.revision", "Add Drawing Revision", "4894").at("DRAWING REVIEW", "REVISION").icon("drawing_revision"),
-    planned!("drawing.print", "Print Drawing", "4890").at("DRAWING REVIEW", "OUTPUT").icon("drawing_print"),
     planned!("drawing.view.break", "Break View", "7578").at("DRAWING LAYOUT", "VIEWS").icon("drawing_view_break"),
     planned!("drawing.view.auxiliary.planned", "Auxiliary View", "13044").at("DRAWING LAYOUT", "VIEWS").icon("drawing_view_auxiliary"),
     planned!("drawing.view.pictorial", "Pictorial View", "13044").at("DRAWING LAYOUT", "VIEWS").icon("drawing_view_pictorial"),

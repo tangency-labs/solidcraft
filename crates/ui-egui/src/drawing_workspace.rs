@@ -18,6 +18,7 @@ mod first_sheet;
 pub(crate) mod note;
 mod panels;
 pub(crate) mod placement;
+pub(crate) mod print;
 
 use panels::Tool;
 
@@ -256,6 +257,10 @@ pub fn start(app: &mut SolveApp, id: &str) -> bool {
         if let Err(error) = app.run("select.all", serde_json::json!({"sheet": sheet})) {
             app.set_status(error, true);
         }
+        return true;
+    }
+    if id == "drawing.print" && active(app) && app.session.open_drawing.is_some() {
+        print::start(app);
         return true;
     }
     if !active(app) || !can_open_options(id) {
