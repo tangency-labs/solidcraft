@@ -15,8 +15,9 @@
 //! The file is printed as it is stored. Nothing is upgraded, evaluated or followed (links), so a
 //! design saved by a newer build or with a damaged part still prints. A file that is neither a
 //! container nor JSON, or a container that does not open, prints one line saying so, with its size
-//! and SHA-256. So does JSON nested deeper than [`MAX_DEPTH`], because laying it out would take
-//! memory that grows with the square of its depth. When a part does not read, the text ends with
+//! and SHA-256. So does JSON nested deeper than [`MAX_DEPTH`], or JSON that would lay out to more
+//! than [`budget`] bytes, because the layout indents every line two spaces a level and would take
+//! memory that grows with the size times the depth. When a part does not read, the text ends with
 //! the SHA-256 of the whole file, so a change inside that part still shows.
 
 use std::fmt::Write as _;
@@ -24,13 +25,19 @@ use std::io::{Cursor, Read};
 
 use serde::de::IgnoredAny;
 use sha2::{Digest, Sha256};
-use solidcraft_doc::json_layout::{compact, depth, pretty};
+use solidcraft_doc::json_layout::{compact, depth, pretty_within};
 use solidcraft_format::container::digest;
 
 use super::{PackageReader, is_design_container, part_limit};
 
-/// The deepest nesting laid out, as deep as serde_json reads a design.
-const MAX_DEPTH: usize = 128;
+/// The deepest nesting laid out, the 127 levels serde_json reads in a design.
+const MAX_DEPTH: usize = 127;
+
+/// The most bytes JSON text of `length` bytes may lay out to. That is 8 times its size, or 64 MiB
+/// for small text. A real design lays out to about twice its size.
+fn budget(length: usize) -> usize {
+    length.saturating_mul(8).max(64 << 20)
+}
 
 /// Whether a part is printed as laid-out JSON. These are the design or drawing itself and a
 /// design's drawings.
@@ -50,13 +57,16 @@ fn summary(what: &str, bytes: &[u8]) -> String {
     format!("# {what} ({} bytes, SHA-256 {})\n", bytes.len(), digest(bytes))
 }
 
-/// JSON text laid out as a `.json` save lays it out, with a final line feed. Text nested too deeply
-/// is summed up in one line instead.
+/// JSON text laid out as a `.json` save lays it out, with a final line feed. Text nested too deeply,
+/// or that would lay out past its [`budget`], is summed up in one line instead.
 fn laid_out(text: &str) -> String {
     if depth(text) > MAX_DEPTH {
         return summary(&format!("JSON nested more than {MAX_DEPTH} levels deep"), text.as_bytes());
     }
-    let mut out = pretty(&compact(text));
+    let budget = budget(text.len());
+    let Some(mut out) = pretty_within(&compact(text), budget) else {
+        return summary(&format!("JSON that would lay out to more than {budget} bytes"), text.as_bytes());
+    };
     out.push('\n');
     out
 }
