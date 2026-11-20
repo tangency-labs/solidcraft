@@ -1347,7 +1347,7 @@ mod tests {
                     operation: crate::Operation::NewBody,
                     centred: false,
                 },
-                Some("Box 1".into()),
+                Some("Box 1"),
             )
             .unwrap();
         doc.feature_mut(id).unwrap().profile_frame = Some(crate::IDENTITY);
