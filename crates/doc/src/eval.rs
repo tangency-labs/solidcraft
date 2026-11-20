@@ -11045,13 +11045,10 @@ fn source_label(doc: &Document, id: FeatureId) -> String {
 /// or mirror of bodies (its copies are bodies, which a pattern or mirror of features can't take).
 fn copied_features(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, src: &Feature) -> Result<Option<(Vec<FeatureId>, Vec<Mat>)>> {
     match &src.kind {
-        FeatureKind::Pattern { features, pattern, bodies, components, .. } if bodies.is_empty() && components.is_empty() => {
-            Ok(Some((features.clone(), pattern_transforms(doc, vals, st, src.component, pattern)?)))
+        FeatureKind::Pattern { features, bodies, components, .. } if bodies.is_empty() && components.is_empty() => {
+            Ok(Some((features.clone(), own_copies(doc, vals, st, src)?)))
         }
-        FeatureKind::Mirror { features, plane, bodies, .. } if bodies.is_empty() => {
-            let pl = doc.resolve_plane_in(vals, plane, 0, src.component, Some(st))?;
-            Ok(Some((features.clone(), vec![mirror_matrix(&pl)])))
-        }
+        FeatureKind::Mirror { features, bodies, .. } if bodies.is_empty() => Ok(Some((features.clone(), own_copies(doc, vals, st, src)?))),
         _ => Ok(None),
     }
 }
@@ -13500,7 +13497,7 @@ fn eval_feature_kind(
                 let _ = pattern_transforms(doc, vals, st, f.component, pattern)?;
                 return Ok(());
             }
-            let mats = pattern_transforms(doc, vals, st, f.component, pattern)?;
+            let mats = own_copies(doc, vals, st, f)?;
             if bodies.is_empty() {
                 return replay(doc, vals, f, st, features, &mats, warning);
             }
@@ -13533,12 +13530,12 @@ fn eval_feature_kind(
                 None => Ok(()),
             }
         }
-        FeatureKind::Mirror { features, plane, bodies, combine, placements } => {
-            let pl = doc.resolve_plane_in(vals, plane, 0, f.component, Some(st))?;
+        FeatureKind::Mirror { features, bodies, combine, placements, .. } => {
+            let mats = own_copies(doc, vals, st, f)?;
             if bodies.is_empty() {
-                return replay(doc, vals, f, st, features, &[mirror_matrix(&pl)], warning);
+                return replay(doc, vals, f, st, features, &mats, warning);
             }
-            let m = mirror_matrix(&pl);
+            let &[m] = mats.as_slice() else { return Err(DocError::Invalid("a mirror makes one copy".into())) };
             let mut output = 0;
             // Copies evaluated on each frame a placement is dragged, which nothing cuts or joins:
             // searching their revolved faces again was nearly all that took.
