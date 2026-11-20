@@ -18,10 +18,15 @@
 //! | [`BlendFailure::RemovalRefused`]       | the reason's ([`removal_class`]), 130 or 131  |
 //! | [`BlendFailure::StationDidNotConverge`]| [`ErrorKind::StationDidNotConverge`] (125)    |
 //! | [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`] | [`ErrorKind::TrimLeaks`] (126) |
-//! | [`BlendFailure::StageFailed`], [`BlendFailure::SkinMeasureNotFinite`] | [`ErrorKind::StageFailed`] (127) |
-//! | [`BlendFailure::SkinPastStationCap`]   | [`ErrorKind::NotWithinTolerance`] (9)         |
+//! | [`BlendFailure::StageFailed`], [`BlendFailure::Defect`], [`BlendFailure::SkinMeasureNotFinite`], [`BlendFailure::PlaneCurveStepVanished`] | [`ErrorKind::StageFailed`] (127) |
+//! | [`BlendFailure::SkinPastStationCap`], [`BlendFailure::PlaneCurveFitCap`] | [`ErrorKind::NotWithinTolerance`] (9) |
+//! | [`BlendFailure::PlaneCurveTouches`]    | [`ErrorKind::Degenerate`] (3)                |
+//! | [`BlendFailure::PlaneCurveEndOff`]     | [`ErrorKind::NotFound`] (2)                  |
+//! | [`BlendFailure::PlaneCurveLeavesDomain`] | [`ErrorKind::OutsideDomain`] (8)           |
 //! | [`BlendFailure::BallsNest`]            | [`ErrorKind::BallsFold`] (105)                |
+//! | [`BlendFailure::CreasePieceEndUnbuildable`] | [`ErrorKind::Unsupported`] (5)           |
 //! | [`BlendFailure::NotCertified`]         | [`ErrorKind::NotWithinTolerance`] (9): neither defect nor refusal |
+//! | [`BlendFailure::BandInputMissing`]     | [`ErrorKind::Missing`]: neither defect nor refusal |
 //! | the phrase causes ([`BlendFailure::Failed`], [`BlendFailure::Missing`], ...) | their status's kind, as before the record; neither defect nor refusal |
 //!
 //! **Statuses.** Each failure also records, for difftest and the goldens only, the status
@@ -31,10 +36,10 @@
 //!
 //! | Rust                                   | Status difftest compares          |
 //! |----------------------------------------|-----------------------------------|
-//! | [`BlendFailure::NoRoom`], [`BlendFailure::RemovalRefused`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`], [`BlendFailure::SkinPastStationCap`], [`BlendFailure::SkinMeasureNotFinite`], [`BlendFailure::BallsNest`] | `SM_ERR` |
+//! | [`BlendFailure::NoRoom`], [`BlendFailure::RemovalRefused`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`], [`BlendFailure::Defect`], [`BlendFailure::SkinPastStationCap`], [`BlendFailure::SkinMeasureNotFinite`], [`BlendFailure::BallsNest`], [`BlendFailure::CreasePieceEndUnbuildable`], [`BlendFailure::PlaneCurveTouches`], [`BlendFailure::PlaneCurveEndOff`], [`BlendFailure::PlaneCurveLeavesDomain`], [`BlendFailure::PlaneCurveStepVanished`], [`BlendFailure::PlaneCurveFitCap`] | `SM_ERR` |
 //! | [`BlendFailure::Failed`]               | `SM_ERR`                          |
-//! | [`BlendFailure::Missing`]              | `SM_ERR_NULL_POINTER`             |
-//! | [`BlendFailure::InvalidValue`]         | `SM_ERR_INVALID_INPUT`            |
+//! | [`BlendFailure::Missing`], [`BlendFailure::BandInputMissing`] | `SM_ERR_NULL_POINTER` |
+//! | [`BlendFailure::InvalidValue`]        | `SM_ERR_INVALID_INPUT`            |
 //! | [`BlendFailure::Inconsistent`]         | `SM_ERR_ASSERT_FAILURE`           |
 //! | [`BlendFailure::BadIntersections`]     | `SM_ERR_BAD_INTERSECTIONS`        |
 //! | [`BlendFailure::NotConverged`]         | `SM_ERR_NOT_CONVERGING`           |
@@ -48,8 +53,10 @@
 //! moved onto it. Each keeps the kind of its status, as before the record, and reads as
 //! neither a defect nor a refusal ([`BlendFailure::is_phrase`]); its phrase stays in its
 //! message. They go class by class: a site that has a finer cause moves to it, and one that
-//! has none to [`BlendFailure::StageFailed`], built on purpose. A test counts the library
-//! sites that build a phrase cause, per file, and lets the count only fall.
+//! is the kernel's fault to [`BlendFailure::Defect`], with its reason. A test counts the
+//! library sites that build a phrase cause, per file, and lets the count only fall.
+//! [`BlendFailure::StageFailed`] is the form of a defect not yet reviewed, also counted per
+//! file. The conversion guide: `docs/failure-codes-and-reproduction.md` §6.
 //!
 //! Deviations: not upstream. The failure's `operation` path says which routine. No cause
 //! names an entity of its own: a failure is at the entity the site it replaces named
@@ -102,8 +109,17 @@ pub enum BlendFailure {
     TrimLoopDoesNotSeparate,
     /// A stage of the blend failed with no reason the kernel names: a defect. The failure
     /// holds the operation, the status (for the goldens only) and where in solidcore's source
-    /// it was built ([`Failure::origin`]).
+    /// it was built ([`Failure::origin`]). The form not yet reviewed: new code builds
+    /// [`BlendFailure::Defect`], a named cause or a refusal instead.
     StageFailed,
+    /// A failure that is the kernel's fault, reviewed at its site, with the written reason:
+    /// `why` names the step that failed and why that is the kernel's fault, not the
+    /// geometry's. A defect ([`ErrorKind::StageFailed`]); status `SM_ERR` unless its site
+    /// says otherwise.
+    Defect {
+        /// The step that failed, and why that is the kernel's fault.
+        why: &'static str,
+    },
     /// A variable round's skin of balls' touch circles was still measured farther than
     /// `asked` from its balls when its refinement reached its most rounds or stations
     /// (#15256): the worst distance measured was `reached` (infinite where a span's section
@@ -140,6 +156,68 @@ pub enum BlendFailure {
         rate: f64,
         /// `|c'|`: how fast the balls' centres move along the trace.
         speed: f64,
+    },
+    /// The crease trim (#17673) has no construction to end a crease piece of curve kind
+    /// `kind` exactly on the meet at its start or end (`at_end`), at parameter `t` of the
+    /// crease: a curve with no control polygon (an offset, projected, composite, ...
+    /// curve). Unsupported
+    /// ([`ErrorKind::Unsupported`]): never a piece left ending short of its meet.
+    CreasePieceEndUnbuildable {
+        /// The piece's curve kind.
+        kind: &'static str,
+        /// True for the piece's end, false for its start.
+        at_end: bool,
+        /// The end's parameter on the crease.
+        t: f64,
+    },
+    /// Tracing a surface/plane crossing found a station where the surface touches the
+    /// plane: its tangent along the crossing has no length, so the crossing has no direction.
+    /// Degenerate ([`ErrorKind::Degenerate`]); status `SM_ERR`.
+    PlaneCurveTouches {
+        /// The station's surface parameter u.
+        u: f64,
+        /// The station's surface parameter v.
+        v: f64,
+    },
+    /// An end given to a surface/plane crossing could not be put on the crossing within
+    /// tolerance. An empty search ([`ErrorKind::NotFound`]); status `SM_ERR`.
+    PlaneCurveEndOff {
+        /// True for the crossing's end, false for its start.
+        at_end: bool,
+        /// The larger of the distance from the given end to the crossing point found and
+        /// its distance to the plane; `None` when the drop or projection found no point.
+        distance: Option<f64>,
+    },
+    /// The crossing's trace leaves the surface's parameter domain in a direction it is not
+    /// closed in, before reaching its end. Outside the domain ([`ErrorKind::OutsideDomain`]);
+    /// status `SM_ERR`.
+    PlaneCurveLeavesDomain {
+        /// The station's surface parameter u.
+        u: f64,
+        /// The station's surface parameter v.
+        v: f64,
+    },
+    /// A surface/plane trace's step was halved below its minimum at a station without a
+    /// step being accepted: the march stopped. A defect ([`ErrorKind::StageFailed`]);
+    /// status `SM_ERR`.
+    PlaneCurveStepVanished {
+        /// The last accepted station's surface parameter u.
+        u: f64,
+        /// The last accepted station's surface parameter v.
+        v: f64,
+        /// The step after halving.
+        step: f64,
+        /// The minimum step allowed.
+        minimum: f64,
+    },
+    /// The crossing's Hermite fit still has spans farther than a tenth of the tolerance
+    /// from the exact curve when its station cap or its 20 refinement passes ran out.
+    /// Not within tolerance ([`ErrorKind::NotWithinTolerance`]); status `SM_ERR`.
+    PlaneCurveFitCap {
+        /// The stations held when fitting stopped.
+        stations: usize,
+        /// The refinement passes completed.
+        passes: usize,
     },
     /// The routine could not continue, as the phrase says (for example "the fillet's law
     /// has no value at the base"). Upstream `return SE(SM_ERR)`. A phrase cause
@@ -201,6 +279,77 @@ pub enum BlendFailure {
         /// The certificate's stations when it was refused.
         stations: usize,
     },
+    /// An input the planar-band contact query reads is not there (a support, an edge use, an
+    /// offset, a foot of a drop, ...): the input named. Status `SM_ERR_NULL_POINTER` and the
+    /// kind of that status ([`ErrorKind::Missing`]), as the phrase cause it replaces; typed,
+    /// so not a phrase cause ([`BlendFailure::is_phrase`]).
+    BandInputMissing(BandInput),
+}
+
+/// Which input of the planar-band contact query is missing ([`BlendFailure::BandInputMissing`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum BandInput {
+    /// The extrusion's control point in its stored net.
+    ExtrusionControlPoint,
+    /// The exact product of the extrusion's translation.
+    ExtrusionTranslationProduct,
+    /// A solver's edge use.
+    EdgeUse,
+    /// The face the two bands share.
+    SharedFace,
+    /// The planar support.
+    PlanarSupport,
+    /// The support on the other side of the blended edge.
+    OtherSupport,
+    /// The chamfer's setback.
+    ChamferSetback,
+    /// The other offset of the chamfer.
+    OtherOffset,
+    /// The first offset of the chamfer.
+    FirstOffset,
+    /// The blended edge.
+    BlendedEdge,
+    /// The blended edge's curve.
+    BlendedEdgeCurve,
+    /// The selected edge.
+    SelectedEdge,
+    /// The foot of a drop on the other support.
+    FootOnOtherSupport,
+    /// An endpoint of the blended edge.
+    BlendedEdgeEndpoint,
+    /// The closest feet of the two bands.
+    ClosestBandFeet,
+    /// An endpoint of the line.
+    LineEndpoint,
+    /// The edge of an edge use.
+    EdgeUseEdge,
+}
+
+impl BandInput {
+    /// What is missing, as a phrase ("the shared face").
+    #[must_use]
+    pub const fn what(self) -> &'static str {
+        match self {
+            Self::ExtrusionControlPoint => "the extrusion control point",
+            Self::ExtrusionTranslationProduct => "the exact extrusion translation product",
+            Self::EdgeUse => "the edge use",
+            Self::SharedFace => "the shared face",
+            Self::PlanarSupport => "the planar support",
+            Self::OtherSupport => "the other support",
+            Self::ChamferSetback => "the chamfer setback",
+            Self::OtherOffset => "the other offset",
+            Self::FirstOffset => "the first offset",
+            Self::BlendedEdge => "the blended edge",
+            Self::BlendedEdgeCurve => "the blended edge's curve",
+            Self::SelectedEdge => "the selected edge",
+            Self::FootOnOtherSupport => "the foot on the other support",
+            Self::BlendedEdgeEndpoint => "the blended edge's endpoint",
+            Self::ClosestBandFeet => "the closest band feet",
+            Self::LineEndpoint => "the line endpoint",
+            Self::EdgeUseEdge => "the edge use's edge",
+        }
+    }
 }
 
 /// The class of a blend larger than its faces allow, for `reason`: one of the blend's
@@ -243,7 +392,8 @@ pub const fn no_room_class(reason: NoRoomReason) -> ErrorKind {
         R::JoinOffsetsDiffer => ErrorKind::JoinOffsetsDiffer,
         R::StripBelowResolution => ErrorKind::StripBelowResolution,
         R::EndPastSideEdge => ErrorKind::EndPastSideEdge,
-        R::EndOverflowsSideEdge => ErrorKind::EndOverflowsSideEdge,
+        // an End the round overflows: past its side edge, or over its end face whole
+        R::EndOverflowsSideEdge | R::EndPassesOverEndFace => ErrorKind::EndOverflowsSideEdge,
         R::EndRollsIntoSmoothEnd => ErrorKind::EndRollsIntoSmoothEnd,
         R::EndAtSeamVertex => ErrorKind::EndAtSeamVertex,
         R::TangentContinuationEndUnsupported => ErrorKind::TangentContinuationEnd,
@@ -354,12 +504,19 @@ impl BlendFailure {
             | Self::TrimLoopOpen
             | Self::TrimLoopDoesNotSeparate
             | Self::StageFailed
+            | Self::Defect { .. }
             | Self::SkinPastStationCap { .. }
             | Self::SkinMeasureNotFinite { .. }
             | Self::BallsNest { .. }
+            | Self::CreasePieceEndUnbuildable { .. }
+            | Self::PlaneCurveTouches { .. }
+            | Self::PlaneCurveEndOff { .. }
+            | Self::PlaneCurveLeavesDomain { .. }
+            | Self::PlaneCurveStepVanished { .. }
+            | Self::PlaneCurveFitCap { .. }
             | Self::NotCertified { .. }
             | Self::Failed(_) => SM_ERR,
-            Self::Missing(_) => SM_ERR_NULL_POINTER,
+            Self::Missing(_) | Self::BandInputMissing(_) => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
             Self::BadIntersections(_) => SM_ERR_BAD_INTERSECTIONS,
@@ -374,11 +531,17 @@ impl BlendFailure {
     /// class for [`BlendFailure::NoRoom`] ([`no_room_class`]) and
     /// [`BlendFailure::RemovalRefused`] ([`removal_class`]),
     /// [`ErrorKind::StationDidNotConverge`], [`ErrorKind::TrimLeaks`] for an open or leaking
-    /// trim loop, [`ErrorKind::StageFailed`] for [`BlendFailure::StageFailed`] and
-    /// [`BlendFailure::SkinMeasureNotFinite`], [`ErrorKind::NotWithinTolerance`] for
-    /// [`BlendFailure::SkinPastStationCap`] and for a surface not certified within its
-    /// tolerance in its work budget ([`BlendFailure::NotCertified`]), and
-    /// [`ErrorKind::BallsFold`] for [`BlendFailure::BallsNest`]. A phrase
+    /// trim loop, [`ErrorKind::StageFailed`] for [`BlendFailure::StageFailed`],
+    /// [`BlendFailure::Defect`], [`BlendFailure::SkinMeasureNotFinite`] and
+    /// [`BlendFailure::PlaneCurveStepVanished`], [`ErrorKind::NotWithinTolerance`] for
+    /// [`BlendFailure::SkinPastStationCap`], [`BlendFailure::PlaneCurveFitCap`] and for a
+    /// surface not certified within its tolerance in its work budget
+    /// ([`BlendFailure::NotCertified`]), [`ErrorKind::Degenerate`] for
+    /// [`BlendFailure::PlaneCurveTouches`], [`ErrorKind::NotFound`] for
+    /// [`BlendFailure::PlaneCurveEndOff`], [`ErrorKind::OutsideDomain`] for
+    /// [`BlendFailure::PlaneCurveLeavesDomain`], [`ErrorKind::BallsFold`] for
+    /// [`BlendFailure::BallsNest`], and
+    /// [`ErrorKind::Unsupported`] for [`BlendFailure::CreasePieceEndUnbuildable`]. A phrase
     /// cause keeps the kind of its status ([`ErrorKind::Failed`], [`ErrorKind::Missing`],
     /// [`ErrorKind::InvalidInput`], ...), as before the record ([`BlendFailure::is_phrase`]).
     #[must_use]
@@ -388,11 +551,19 @@ impl BlendFailure {
             Self::RemovalRefused(reason) => removal_class(*reason),
             Self::StationDidNotConverge { .. } => ErrorKind::StationDidNotConverge,
             Self::TrimLoopOpen | Self::TrimLoopDoesNotSeparate => ErrorKind::TrimLeaks,
-            Self::StageFailed | Self::SkinMeasureNotFinite { .. } => ErrorKind::StageFailed,
-            Self::SkinPastStationCap { .. } | Self::NotCertified { .. } => {
-                ErrorKind::NotWithinTolerance
-            }
+            Self::StageFailed
+            | Self::Defect { .. }
+            | Self::SkinMeasureNotFinite { .. }
+            | Self::PlaneCurveStepVanished { .. } => ErrorKind::StageFailed,
+            Self::SkinPastStationCap { .. }
+            | Self::NotCertified { .. }
+            | Self::PlaneCurveFitCap { .. } => ErrorKind::NotWithinTolerance,
+            Self::PlaneCurveTouches { .. } => ErrorKind::Degenerate,
+            Self::PlaneCurveEndOff { .. } => ErrorKind::NotFound,
+            Self::PlaneCurveLeavesDomain { .. } => ErrorKind::OutsideDomain,
             Self::BallsNest { .. } => ErrorKind::BallsFold,
+            Self::CreasePieceEndUnbuildable { .. } => ErrorKind::Unsupported,
+            Self::BandInputMissing(_) => ErrorKind::Missing,
             Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -419,9 +590,17 @@ impl BlendFailure {
             | Self::TrimLoopOpen
             | Self::TrimLoopDoesNotSeparate
             | Self::StageFailed
+            | Self::Defect { .. }
             | Self::SkinPastStationCap { .. }
             | Self::SkinMeasureNotFinite { .. }
             | Self::BallsNest { .. }
+            | Self::CreasePieceEndUnbuildable { .. }
+            | Self::PlaneCurveTouches { .. }
+            | Self::PlaneCurveEndOff { .. }
+            | Self::PlaneCurveLeavesDomain { .. }
+            | Self::PlaneCurveStepVanished { .. }
+            | Self::PlaneCurveFitCap { .. }
+            | Self::BandInputMissing(_)
             | Self::NotCertified { .. } => false,
             Self::Failed(_)
             | Self::Missing(_)
@@ -451,9 +630,17 @@ impl BlendFailure {
             | Self::TrimLoopOpen
             | Self::TrimLoopDoesNotSeparate
             | Self::StageFailed
+            | Self::Defect { .. }
             | Self::SkinPastStationCap { .. }
             | Self::SkinMeasureNotFinite { .. }
             | Self::BallsNest { .. }
+            | Self::CreasePieceEndUnbuildable { .. }
+            | Self::PlaneCurveTouches { .. }
+            | Self::PlaneCurveEndOff { .. }
+            | Self::PlaneCurveLeavesDomain { .. }
+            | Self::PlaneCurveStepVanished { .. }
+            | Self::PlaneCurveFitCap { .. }
+            | Self::BandInputMissing(_)
             | Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -496,6 +683,7 @@ impl core::fmt::Display for BlendFailure {
                 write!(f, "{}: the trim loop does not separate", self.class())
             }
             Self::StageFailed => write!(f, "{}", self.class()),
+            Self::Defect { why } => write!(f, "{}: {why}", self.class()),
             Self::SkinPastStationCap {
                 asked,
                 reached,
@@ -516,6 +704,44 @@ impl core::fmt::Display for BlendFailure {
                 "{}: at s = {s} the balls' radius changes at {rate}, as fast as their centres move ({speed}): no rolling-ball surface exists there",
                 self.class()
             ),
+            Self::CreasePieceEndUnbuildable { kind, at_end, t } => write!(
+                f,
+                "{}: the crease piece's {} at t = {t} cannot be ended on its meet: no construction for a {kind} curve there",
+                self.class(),
+                if *at_end { "end" } else { "start" },
+            ),
+            Self::PlaneCurveTouches { u, v } => write!(
+                f,
+                "{}: the surface touches the plane at (u, v) = ({u}, {v}): the crossing has no direction",
+                self.class()
+            ),
+            Self::PlaneCurveEndOff { at_end, distance } => {
+                write!(
+                    f,
+                    "{}: the crossing's {} is off the surface or the plane",
+                    self.class(),
+                    if *at_end { "end" } else { "start" },
+                )?;
+                match distance {
+                    Some(distance) => write!(f, " by {distance}"),
+                    None => f.write_str(": the drop or projection found no point"),
+                }
+            }
+            Self::PlaneCurveLeavesDomain { u, v } => write!(
+                f,
+                "{}: the crossing leaves the surface's domain at (u, v) = ({u}, {v}) before its end",
+                self.class()
+            ),
+            Self::PlaneCurveStepVanished { u, v, step, minimum } => write!(
+                f,
+                "{}: the crossing's step at (u, v) = ({u}, {v}) was halved to {step}, below its minimum {minimum}, without an accepted step",
+                self.class()
+            ),
+            Self::PlaneCurveFitCap { stations, passes } => write!(
+                f,
+                "{}: the crossing's Hermite fit is still off the exact curve by more than a tenth of the tolerance with {stations} stations after {passes} passes",
+                self.class()
+            ),
             Self::Failed(what)
             | Self::InvalidValue(what)
             | Self::BadIntersections(what)
@@ -524,6 +750,7 @@ impl core::fmt::Display for BlendFailure {
             | Self::NotWithinTolerance(what)
             | Self::PassedOn { what, .. } => f.write_str(what),
             Self::Missing(what) => write!(f, "{what} is missing"),
+            Self::BandInputMissing(input) => write!(f, "{} is missing", input.what()),
             Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
             Self::NotCertified { halvings, stations } => write!(
                 f,
@@ -570,6 +797,14 @@ impl crate::SolidError {
     #[track_caller]
     pub(crate) fn blend_missing(operation: &'static str, what: &'static str) -> Self {
         Self::blend(operation, BlendFailure::Missing(what))
+    }
+
+    /// [`crate::SolidError::Failed`] for an input of the planar-band contact query that is
+    /// not there ([`BlendFailure::BandInputMissing`]), with status [`SM_ERR_NULL_POINTER`].
+    #[must_use]
+    #[track_caller]
+    pub(crate) fn blend_band_input_missing(operation: &'static str, input: BandInput) -> Self {
+        Self::blend(operation, BlendFailure::BandInputMissing(input))
     }
 
     /// [`crate::SolidError::Failed`] for a value a blend routine is given or computes with
@@ -858,6 +1093,10 @@ mod tests {
                 ErrorKind::EndOverflowsSideEdge,
             ),
             (
+                BlendFailure::NoRoom(R::EndPassesOverEndFace),
+                ErrorKind::EndOverflowsSideEdge,
+            ),
+            (
                 BlendFailure::NoRoom(R::EndRollsIntoSmoothEnd),
                 ErrorKind::EndRollsIntoSmoothEnd,
             ),
@@ -886,6 +1125,7 @@ mod tests {
             (BlendFailure::TrimLoopOpen, ErrorKind::TrimLeaks),
             (BlendFailure::TrimLoopDoesNotSeparate, ErrorKind::TrimLeaks),
             (BlendFailure::StageFailed, ErrorKind::StageFailed),
+            (BlendFailure::Defect { why: "x" }, ErrorKind::StageFailed),
         ];
         for (cause, class) in cases {
             assert_eq!(cause.class(), class, "{cause:?}");
@@ -978,6 +1218,34 @@ mod tests {
         assert!(stage.is_defect() && !stage.is_refusal() && !stage.sized());
     }
 
+    /// A reviewed defect is of class 127 with the stage failure's status, and says why.
+    #[test]
+    fn a_reviewed_defect_is_class_127_with_its_reason() {
+        let why =
+            "the station solve was started off its own previous station, which it never leaves";
+        let defect = BlendFailure::Defect { why };
+        assert!(!defect.is_phrase() && defect.replaces_upstream_status());
+        for status in [SM_ERR, SM_ERR_NULL_POINTER] {
+            let e = Failure::new("blend::op", defect)
+                .with_status(status)
+                .into_error();
+            super::super::tests::assert_defect(
+                &e,
+                &Failure::new("blend::op", BlendFailure::StageFailed)
+                    .with_status(status)
+                    .into_error(),
+                "blend::op",
+                status,
+                &format!("blend::op: stage_failed: {why}"),
+            );
+            assert_eq!(e.blend_failure(), Some(&defect));
+        }
+        assert_eq!(
+            SolidError::blend("blend::op", defect).sm_status(),
+            Some(SM_ERR)
+        );
+    }
+
     #[test]
     fn typed_causes_are_worded_from_their_numbers() {
         use crate::blend::fillet_executive::NoRoomReason as R;
@@ -1040,6 +1308,75 @@ mod tests {
         assert!(sited.sized());
     }
 
+    fn assert_plane_curve_cause(cause: BlendFailure, class: ErrorKind, message: &str) {
+        assert_eq!(cause.class(), class);
+        assert!(!cause.is_phrase());
+        assert!(cause.replaces_upstream_status());
+        assert_eq!(variant_index_and_phrase_name(&cause).1, None);
+        assert_eq!(cause.comparison_status(), SM_ERR);
+        let e = SolidError::blend("blend::op", cause);
+        assert_eq!(e.kind(), class);
+        assert_eq!(e.operation(), "blend::op");
+        assert_eq!(e.blend_failure(), Some(&cause));
+        assert_eq!(e.sm_status(), Some(SM_ERR));
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.is_defect(), class.is_defect());
+        assert!(!e.is_refusal() && !e.sized());
+        assert_eq!(e.to_string(), format!("blend::op: {class}: {message}"));
+    }
+
+    #[test]
+    fn a_plane_curve_touch_names_its_station() {
+        assert_plane_curve_cause(
+            BlendFailure::PlaneCurveTouches { u: 0.25, v: 0.5 },
+            ErrorKind::Degenerate,
+            "the surface touches the plane at (u, v) = (0.25, 0.5): the crossing has no direction",
+        );
+    }
+
+    #[test]
+    fn a_plane_curve_end_off_names_the_end_and_distance_when_found() {
+        for (at_end, end) in [(false, "start"), (true, "end")] {
+            for (distance, detail) in [
+                (Some(0.125), " by 0.125"),
+                (None, ": the drop or projection found no point"),
+            ] {
+                assert_plane_curve_cause(
+                    BlendFailure::PlaneCurveEndOff { at_end, distance },
+                    ErrorKind::NotFound,
+                    &format!("the crossing's {end} is off the surface or the plane{detail}"),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_plane_curve_leaving_the_domain_names_its_station() {
+        assert_plane_curve_cause(
+            BlendFailure::PlaneCurveLeavesDomain { u: -0.25, v: 0.5 },
+            ErrorKind::OutsideDomain,
+            "the crossing leaves the surface's domain at (u, v) = (-0.25, 0.5) before its end",
+        );
+    }
+
+    #[test]
+    fn a_plane_curve_vanished_step_is_a_defect_with_its_numbers() {
+        assert_plane_curve_cause(
+            BlendFailure::PlaneCurveStepVanished { u: 0.25, v: 0.5, step: 0.0000000005, minimum: 0.000000001 },
+            ErrorKind::StageFailed,
+            "the crossing's step at (u, v) = (0.25, 0.5) was halved to 0.0000000005, below its minimum 0.000000001, without an accepted step",
+        );
+    }
+
+    #[test]
+    fn a_plane_curve_fit_cap_names_its_stations_and_passes() {
+        assert_plane_curve_cause(
+            BlendFailure::PlaneCurveFitCap { stations: 128, passes: 20 },
+            ErrorKind::NotWithinTolerance,
+            "the crossing's Hermite fit is still off the exact curve by more than a tenth of the tolerance with 128 stations after 20 passes",
+        );
+    }
+
     #[test]
     fn a_stage_failure_keeps_its_operation_status_and_origin_but_shows_neither() {
         let before = line!();
@@ -1047,8 +1384,10 @@ mod tests {
             Failure::new("blend::op", BlendFailure::StageFailed).with_status(SM_ERR_NULL_POINTER);
         let after = line!();
         assert!((before..after).contains(&f.origin().line()));
+        // the path is written with the host's separator (`\` on Windows), so compare its
+        // components, not its text
         assert!(
-            f.origin().file().ends_with("error/blend.rs"),
+            std::path::Path::new(f.origin().file()).ends_with("error/blend.rs"),
             "{}",
             f.origin().file()
         );
@@ -1180,42 +1519,61 @@ mod tests {
         );
     }
 
-    /// What builds a phrase cause in source: the helpers, and each phrase cause by name. A
-    /// new cause is placed here (the match has no wildcard), so the ratchet below counts
-    /// every phrase cause there is.
-    fn phrase_needle(cause: &BlendFailure) -> Option<&'static str> {
+    /// The number of `BlendFailure` variants. Adding a variant means adding an arm to
+    /// `variant_index_and_phrase_name` (the compiler asks for it), with the next index, and
+    /// raising this number; the test below then fails until `causes` holds the new variant.
+    const VARIANTS: usize = 27;
+
+    /// Each variant's distinct index in `0..VARIANTS`, and the variant name of a phrase cause
+    /// (`None` for any other cause). The match has no wildcard, so it is the inventory of
+    /// every variant there is.
+    fn variant_index_and_phrase_name(cause: &BlendFailure) -> (usize, Option<&'static str>) {
         match cause {
-            BlendFailure::NoRoom(_)
-            | BlendFailure::StationDidNotConverge { .. }
-            | BlendFailure::TrimLoopOpen
-            | BlendFailure::TrimLoopDoesNotSeparate
-            | BlendFailure::RemovalRefused(_)
-            | BlendFailure::StageFailed
-            | BlendFailure::SkinPastStationCap { .. }
-            | BlendFailure::SkinMeasureNotFinite { .. }
-            | BlendFailure::BallsNest { .. }
-            | BlendFailure::NotCertified { .. } => None,
-            BlendFailure::Failed(_) => Some("BlendFailure::Failed("),
-            BlendFailure::Missing(_) => Some("BlendFailure::Missing("),
-            BlendFailure::InvalidValue(_) => Some("BlendFailure::InvalidValue("),
-            BlendFailure::Inconsistent(_) => Some("BlendFailure::Inconsistent("),
-            BlendFailure::BadIntersections(_) => Some("BlendFailure::BadIntersections("),
-            BlendFailure::NotConverged(_) => Some("BlendFailure::NotConverged("),
-            BlendFailure::OutsideDomain(_) => Some("BlendFailure::OutsideDomain("),
-            BlendFailure::NotWithinTolerance(_) => Some("BlendFailure::NotWithinTolerance("),
-            BlendFailure::PassedOn { .. } => Some("BlendFailure::PassedOn {"),
+            BlendFailure::NoRoom(_) => (0, None),
+            BlendFailure::StationDidNotConverge { .. } => (1, None),
+            BlendFailure::TrimLoopOpen => (2, None),
+            BlendFailure::TrimLoopDoesNotSeparate => (3, None),
+            BlendFailure::RemovalRefused(_) => (4, None),
+            BlendFailure::StageFailed => (5, None),
+            BlendFailure::Defect { .. } => (6, None),
+            BlendFailure::SkinPastStationCap { .. } => (7, None),
+            BlendFailure::SkinMeasureNotFinite { .. } => (8, None),
+            BlendFailure::BallsNest { .. } => (9, None),
+            BlendFailure::CreasePieceEndUnbuildable { .. } => (10, None),
+            BlendFailure::BandInputMissing(_) => (11, None),
+            BlendFailure::NotCertified { .. } => (12, None),
+            BlendFailure::Failed(_) => (13, Some("Failed")),
+            BlendFailure::Missing(_) => (14, Some("Missing")),
+            BlendFailure::InvalidValue(_) => (15, Some("InvalidValue")),
+            BlendFailure::Inconsistent(_) => (16, Some("Inconsistent")),
+            BlendFailure::BadIntersections(_) => (17, Some("BadIntersections")),
+            BlendFailure::NotConverged(_) => (18, Some("NotConverged")),
+            BlendFailure::OutsideDomain(_) => (19, Some("OutsideDomain")),
+            BlendFailure::NotWithinTolerance(_) => (20, Some("NotWithinTolerance")),
+            BlendFailure::PassedOn { .. } => (21, Some("PassedOn")),
+            BlendFailure::PlaneCurveTouches { .. } => (22, None),
+            BlendFailure::PlaneCurveEndOff { .. } => (23, None),
+            BlendFailure::PlaneCurveLeavesDomain { .. } => (24, None),
+            BlendFailure::PlaneCurveStepVanished { .. } => (25, None),
+            BlendFailure::PlaneCurveFitCap { .. } => (26, None),
         }
     }
 
-    /// The blend sites not yet converted to a typed cause: the library code of the blend
-    /// routines builds exactly this many phrase causes (read by the scanner the bare-status
-    /// ratchet uses). A phrase cause is neither a defect nor a refusal, so this is the set of
-    /// blend failures nobody has classed yet, and it may only shrink: a change that converts
-    /// sites lowers the pin to the new count, and a new site builds a typed cause.
+    /// `causes` holds every variant once, `variant_index_and_phrase_name` names a cause exactly when it is a phrase cause, and the
+    /// `BlendFailure` variants the per-file scan (`phrase_sites::BLEND`) counts are exactly
+    /// those names, so the per-file pins in `error/phrase_sites.rs` see every phrase cause.
     #[test]
-    fn the_phrase_cause_sites_only_go_down() {
-        const PHRASE_CAUSE_SITES: usize = 1392;
+    fn the_phrase_scan_lists_exactly_the_phrase_variants() {
+        use super::super::site_scan::Builder;
         use crate::blend::fillet_executive::NoRoomReason as R;
+        let scanned: Vec<&str> = super::super::phrase_sites::BLEND
+            .builders
+            .iter()
+            .filter_map(|b| match b {
+                Builder::Variant("BlendFailure", v) => Some(*v),
+                _ => None,
+            })
+            .collect();
         let causes = [
             BlendFailure::NoRoom(R::BallDoesNotFit),
             BlendFailure::StationDidNotConverge {
@@ -1237,10 +1595,33 @@ mod tests {
                 rate: 0.0,
                 speed: 0.0,
             },
+            BlendFailure::CreasePieceEndUnbuildable {
+                kind: "offset",
+                at_end: true,
+                t: 0.0,
+            },
+            BlendFailure::PlaneCurveTouches { u: 0.0, v: 0.0 },
+            BlendFailure::PlaneCurveEndOff {
+                at_end: false,
+                distance: None,
+            },
+            BlendFailure::PlaneCurveLeavesDomain { u: 0.0, v: 0.0 },
+            BlendFailure::PlaneCurveStepVanished {
+                u: 0.0,
+                v: 0.0,
+                step: 0.0,
+                minimum: 0.0,
+            },
+            BlendFailure::PlaneCurveFitCap {
+                stations: 0,
+                passes: 0,
+            },
+            BlendFailure::BandInputMissing(BandInput::SharedFace),
             BlendFailure::TrimLoopOpen,
             BlendFailure::TrimLoopDoesNotSeparate,
             BlendFailure::RemovalRefused(RemovalRefusal::FaceGrowsPastDomain),
             BlendFailure::StageFailed,
+            BlendFailure::Defect { why: "x" },
             BlendFailure::NotCertified {
                 halvings: 0,
                 stations: 0,
@@ -1258,31 +1639,26 @@ mod tests {
                 status: SM_ERR,
             },
         ];
-        let mut needles = vec![
-            "SolidError::blend_failed(",
-            "SolidError::blend_missing(",
-            "SolidError::blend_invalid_value(",
-        ];
+        let mut names = Vec::new();
+        let mut indices = Vec::new();
         for cause in &causes {
-            let needle = phrase_needle(cause);
-            assert_eq!(needle.is_some(), cause.is_phrase(), "{cause:?}");
-            needles.extend(needle);
+            let (index, name) = variant_index_and_phrase_name(cause);
+            indices.push(index);
+            assert_eq!(name.is_some(), cause.is_phrase(), "{cause:?}");
+            names.extend(name);
         }
-        let per_file: Vec<(String, usize)> = super::super::bare_scan::library_files("blend", 100)
-            .into_iter()
-            .filter_map(|(relative, text)| {
-                let code = super::super::bare_scan::library_code(&text);
-                let n: usize = needles.iter().map(|n| code.matches(n).count()).sum();
-                (n > 0).then_some((relative, n))
-            })
-            .collect();
-        let found: usize = per_file.iter().map(|(_, n)| n).sum();
+        indices.sort_unstable();
         assert_eq!(
-            found, PHRASE_CAUSE_SITES,
-            "the blend routines build {found} phrase causes, pinned at {PHRASE_CAUSE_SITES}: \
-             the number may only go down. Converting sites to a typed cause lowers the pin to \
-             the new count; a new site builds a typed cause, not a phrase. Per file: \
-             {per_file:?}"
+            indices,
+            (0..VARIANTS).collect::<Vec<_>>(),
+            "`causes` must hold each BlendFailure variant exactly once"
+        );
+        names.sort_unstable();
+        let mut scanned = scanned;
+        scanned.sort_unstable();
+        assert_eq!(
+            scanned, names,
+            "phrase_sites::BLEND must list exactly the phrase variants of BlendFailure"
         );
     }
 }

@@ -766,7 +766,14 @@ pub fn popup_list(
                             inner.min,
                             egui::pos2((inner.right() - kind_width - t.space_8).max(inner.left()), inner.bottom()),
                         );
-                        super::text::paint_text(ui, text_rect, option.text, mono.clone(), if picked { t.form_primary } else { option.color }, false);
+                        super::text::paint_text(
+                            ui,
+                            text_rect,
+                            option.text,
+                            mono.clone(),
+                            if picked { crate::layout::ink_on(&t, t.selected_bg, t.form_primary, 4.5) } else { option.color },
+                            false,
+                        );
                         ui.painter().text(inner.right_center(), egui::Align2::RIGHT_CENTER, kind, kind_font.clone(), t.form_dim);
                         response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), picked, option.text));
                         // Tip the full name first: long identifiers still clip inside a capped popup.

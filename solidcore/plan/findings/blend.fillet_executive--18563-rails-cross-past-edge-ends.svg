@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="820" height="800" viewBox="0 0 820 800">
+  <title>18563-rails-cross</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect id="background" x="0" y="0" width="820" height="800" fill="#ffffff"/>
+    <path id="top_face" data-name="top face" d="M40 680 L520 680 L520 528.53 C448.815 385.138 364.923 248.415 269.33 120 L40 120 Z" fill="#f0f0f0"/>
+    <path id="band_A" data-name="band A" d="M360 680 L520 680 L520 528.53 C472.298 432.441 418.869 339.303 360 249.62 Z" fill="#dce9f5" opacity="0.75"/>
+    <path id="band_B" data-name="band B" d="M40 280 L379.65 280 C344.824 225.35 308.026 171.982 269.33 120 L40 120 Z" fill="#dce9f5" opacity="0.75"/>
+    <polyline id="box_corner__cut_off" data-name="box corner, cut off" points="520,528.53 520,120 269.33,120" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="6 4"/>
+    <path id="sphere_edge" data-name="sphere edge" d="M520 528.53 C448.815 385.138 364.923 248.415 269.33 120" fill="none" stroke="#555555" stroke-width="2" stroke-miterlimit="10"/>
+    <line id="edge_A" data-name="edge A" x1="520" y1="680" x2="520" y2="528.53" fill="none" stroke="#000000" stroke-width="2" stroke-miterlimit="10"/>
+    <line id="edge_B" data-name="edge B" x1="40" y1="120" x2="269.33" y2="120" fill="none" stroke="#000000" stroke-width="2" stroke-miterlimit="10"/>
+    <line id="rail_A" data-name="rail A" x1="360" y1="680" x2="360" y2="249.62" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <line id="rail_B" data-name="rail B" x1="40" y1="280" x2="379.65" y2="280" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <circle id="crossing" cx="360" cy="280" r="6" fill="#000000"/>
+    <circle id="end_A" data-name="end A" cx="520" cy="528.53" r="5" fill="#555555"/>
+    <circle id="end_B" data-name="end B" cx="269.33" cy="120" r="5" fill="#555555"/>
+    <text transform="matrix(1 0 0 1 532 640)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#555555"><tspan x="0" y="0">edge x = 30</tspan></text>
+    <text transform="matrix(1 0 0 1 60 106)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#555555"><tspan x="0" y="0">edge y = 20</tspan></text>
+    <text transform="matrix(1 0 0 1 250 640)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#555555"><tspan x="0" y="0">rail x = 30 − r</tspan></text>
+    <text transform="matrix(1 0 0 1 60 306)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#555555"><tspan x="0" y="0">rail y = 20 − r</tspan></text>
+    <text transform="matrix(1 0 0 1 532 534)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#555555"><tspan x="0" y="0">edge&apos;s end</tspan></text>
+    <text transform="matrix(1 0 0 1 230 96)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#555555"><tspan x="0" y="0">edge&apos;s end</tspan></text>
+    <text transform="matrix(1 0 0 1 450 300)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#555555"><tspan x="0" y="0">sphere</tspan></text>
+    <text transform="matrix(1 0 0 1 532 112)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555"><tspan x="0" y="0">box corner, cut off</tspan></text>
+    <text transform="matrix(1 0 0 1 40 735)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" fill="#555555"><tspan x="0" y="0">Top face at one trimmed corner, round r = 2 (#18563)</tspan></text>
+    <text transform="matrix(1 0 0 1 40 765)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555"><tspan x="0" y="0">Shaded: the bands the two rounds take off the top face, run on past the edges&apos; ends to the sphere.</tspan></text>
+    <line id="leader" x1="352" y1="288" x2="250" y2="420" fill="none" stroke="#555555" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 140 440)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#555555"><tspan x="0" y="0">rails cross inside the top face</tspan></text>
+  </g>
+</svg>

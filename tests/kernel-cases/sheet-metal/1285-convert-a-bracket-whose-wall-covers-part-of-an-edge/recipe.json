@@ -43,7 +43,7 @@
    }
   },
   {
-   "command": "sheet.convert",
+   "command": "sheet.recognize",
    "params": {
     "body": "Bracket",
     "face": [
@@ -69,4 +69,4 @@
    "params": {}
   }
  ]
-}
+}

@@ -7,9 +7,11 @@
 
 use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
+use std::sync::LazyLock;
 
 use serde::Serialize;
 use solidcore_record::{Plane, Vec2, Vec3};
+use solidcraft_color::srgb;
 use solidcraft_geom::pixel_grid::{MAX_SIDE_PX, PixelGrid};
 
 use super::{CancelToken, ErrorCode, ImageRequest, JobError, Phase, Progress, Result};
@@ -24,8 +26,9 @@ pub const MAX_TRIANGLES: u64 = 262_144;
 pub const MAX_GEOMETRY_BYTES: u64 = 128 * 1024 * 1024;
 pub const MAX_JOB_BYTES: u64 = 384 * 1024 * 1024;
 pub const MAX_PIXEL_TESTS: u64 = 128_000_000;
-/// A picture's, however large: a fixed bound on its time, about a minute at worst on one thread.
-pub const MAX_PICTURE_PIXEL_TESTS: u64 = 400_000_000;
+/// A picture's, however large: a fixed bound on its time, about a minute at worst on one thread, when
+/// every test paints a surface.
+pub const MAX_PICTURE_PIXEL_TESTS: u64 = 250_000_000;
 /// Each tile of a picture looks at every triangle again, projecting it to find its part in the tile: at most this
 /// many looks in all, a bound on that part of its time (1024 tiles at [`MAX_TRIANGLES`]).
 pub const MAX_PICTURE_TILE_VISITS: u64 = 1 << 28;
@@ -145,8 +148,8 @@ pub(crate) fn admit_base(scene: &ProductScene, request: &ImageRequest) -> Result
     let mut admission = admit_raster(admit_source(scene, request, MAX_TRIANGLES)?)?;
     let projection = Projection::Camera { camera: request.camera, width: request.width, height: request.height };
     let view = projection.view(scene, Supersample::Two.factor())?;
-    let whole = tile_samples(&[PixelWindow { x0: 0, y0: 0, x1: request.width, y1: request.height }], Supersample::Two.factor());
-    admission.projected_pixel_tests = Some(projected_pixel_tests(scene, &view, &[], &whole, MAX_PIXEL_TESTS)?);
+    let whole = [PixelWindow { x0: 0, y0: 0, x1: request.width, y1: request.height }];
+    admission.projected_pixel_tests = Some(projected_pixel_tests(scene, &view, &[], &whole, Supersample::Two.factor(), MAX_PIXEL_TESTS)?);
     Ok(admission)
 }
 
@@ -367,12 +370,19 @@ fn admit_raster(source: Source) -> Result<Admission> {
     Ok(a)
 }
 
-fn add_pixel_tests(sum: &mut u64, triangle: &Triangle, within: [usize; 4], max: u64) -> Result<()> {
-    let Some([x0, x1, y0, y1]) = narrowed(triangle.bounds, within) else {
-        return Ok(());
-    };
-    let tests = ((x1 - x0 + 1) as u64).checked_mul((y1 - y0 + 1) as u64).ok_or_else(|| limit("pixel work overflow"))?;
-    *sum = sum.checked_add(tests).ok_or_else(|| limit("pixel work overflow"))?;
+/// Adds a triangle's work on `tiles` at `ss` samples a pixel each way to `sum`, refused over `max`:
+/// each row of its bounds in each tile costs its span's samples, or one unit for an empty span, as
+/// the raster's own walk does ([`Triangle::start_row`]).
+fn add_pixel_tests(sum: &mut u64, placed: &Placed, tiles: &[PixelWindow], ss: usize, max: u64) -> Result<()> {
+    for tile in tiles {
+        let Some([x0, x1, y0, y1]) = narrowed(placed.bounds, tile_samples(tile, ss)) else {
+            continue;
+        };
+        for y in y0..=y1 {
+            let tests = row_span(&placed.points, placed.area, [x0, x1], y).map_or(1, |[from, to]| (to - from + 1) as u64);
+            *sum = sum.checked_add(tests).ok_or_else(|| limit("pixel work overflow"))?;
+        }
+    }
     if *sum > max {
         return Err(limit(&format!("projected product exceeds {max} pixel tests; reduce image dimensions or visible geometry")));
     }
@@ -392,18 +402,68 @@ fn narrowed([x0, x1, y0, y1]: [usize; 4], [from_x, to_x, from_y, to_y]: [usize; 
     (bounds[0] <= bounds[1] && bounds[2] <= bounds[3]).then_some(bounds)
 }
 
-/// Each tile's sample bounds, each non-empty, at `ss` samples a pixel each way: only these are drawn,
-/// so only these are counted, however large the canvas is.
-fn tile_samples(tiles: &[PixelWindow], ss: usize) -> Vec<[usize; 4]> {
-    tiles.iter().map(|t| [t.x0 as usize * ss, t.x1 as usize * ss - 1, t.y0 as usize * ss, t.y1 as usize * ss - 1]).collect()
+/// A non-empty tile's sample bounds, at `ss` samples a pixel each way.
+fn tile_samples(tile: &PixelWindow, ss: usize) -> [usize; 4] {
+    [tile.x0 as usize * ss, tile.x1 as usize * ss - 1, tile.y0 as usize * ss, tile.y1 as usize * ss - 1]
 }
 
-/// A triangle's pixel tests in every tile: overlapping or repeated tiles each draw it again.
-fn add_tile_tests(sum: &mut u64, triangle: &Triangle, tiles: &[[usize; 4]], max: u64) -> Result<()> {
-    tiles.iter().try_for_each(|&tile| add_pixel_tests(sum, triangle, tile, max))
+/// The weights of whole-canvas sample `(x, y)` in a triangle, if the sample is the triangle's. Its
+/// position comes from its whole-canvas index, so it is the same number in every tile and tiles side
+/// by side give the whole picture exactly.
+fn sample_weights([a, b, c]: &[[f64; 3]; 3], area: f64, x: usize, y: usize) -> Option<[f64; 3]> {
+    let (x, y) = (x as f64 + 0.5, y as f64 + 0.5);
+    let w0 = ((b[0] - x) * (c[1] - y) - (b[1] - y) * (c[0] - x)) / area;
+    let w1 = ((c[0] - x) * (a[1] - y) - (c[1] - y) * (a[0] - x)) / area;
+    let w2 = 1.0 - w0 - w1;
+    // A shared triangle edge belongs to exactly one raster triangle, including glass.
+    for (w, mut p, mut q) in [(w0, b, c), (w1, c, a), (w2, a, b)] {
+        if w < -1e-9 {
+            return None;
+        }
+        if w.abs() <= 1e-9 {
+            if area < 0.0 {
+                std::mem::swap(&mut p, &mut q);
+            }
+            let (dx, dy) = (q[0] - p[0], q[1] - p[1]);
+            if !(dy < 0.0 || (dy == 0.0 && dx > 0.0)) {
+                return None;
+            }
+        }
+    }
+    Some([w0, w1, w2])
 }
 
-fn projected_pixel_tests(scene: &ProductScene, view: &View, roles: &[BodyRole], tiles: &[[usize; 4]], max: u64) -> Result<u64> {
+/// The samples of row `y` within `[x0, x1]` that [`sample_weights`] can take, inclusive; `None` when
+/// it can take none. Never short: along a row each edge's weight is `(constant + slope x) / area`, and
+/// its bound on `x` allows for the test's tolerance and the rounding of that arithmetic. A sample it
+/// lets through wrongly is refused by the test, so pixels don't depend on it.
+fn row_span([a, b, c]: &[[f64; 3]; 3], area: f64, [x0, x1]: [usize; 2], y: usize) -> Option<[usize; 2]> {
+    let row = y as f64 + 0.5;
+    let (mut from, mut to) = (x0 as f64, x1 as f64);
+    for (p, q) in [(b, c), (c, a), (a, b)] {
+        let slope = (p[1] - q[1]) * area.signum();
+        let constant = (p[0] * (q[1] - row) - q[0] * (p[1] - row)) * area.signum();
+        let size = (p[0].abs() + q[0].abs() + to.abs() + 1.0) * (p[1].abs() + q[1].abs() + row);
+        let margin = 1e-9 * area.abs() + 64.0 * f64::EPSILON * size;
+        if slope == 0.0 {
+            if constant < -margin {
+                return None;
+            }
+            continue;
+        }
+        // Where the weight reaches the margin, as a sample index (its centre is at index + 0.5).
+        let at = (-margin - constant) / slope - 0.5;
+        if slope > 0.0 {
+            from = from.max(at.ceil());
+        } else {
+            to = to.min(at.floor());
+        }
+    }
+    (from <= to).then_some([from as usize, to as usize])
+}
+
+/// A request's pixel tests, counted before a job starts as its raster will count them.
+fn projected_pixel_tests(scene: &ProductScene, view: &View, roles: &[BodyRole], tiles: &[PixelWindow], ss: usize, max: u64) -> Result<u64> {
     let mut tests = 0;
     for (role, body) in scene.meshes.iter().enumerate() {
         let mut looks = BTreeMap::new();
@@ -413,9 +473,12 @@ fn projected_pixel_tests(scene: &ProductScene, view: &View, roles: &[BodyRole], 
             looks.insert(face.face, face);
         }
         for index in 0..body.mesh.triangles.len() {
-            let look = body.mesh.tri_face.get(index).and_then(|face| looks.get(face)).copied();
-            if let Some(triangle) = view.project(body, index, look, paints(roles, role))? {
-                add_tile_tests(&mut tests, &triangle, tiles, max)?;
+            let (world, normals) = corners(body, index)?;
+            let face = body.mesh.tri_face.get(index).and_then(|face| looks.get(face)).copied();
+            if look(body, face, paints(roles, role), normals)?.is_some()
+                && let Some(placed) = view.place(world)?
+            {
+                add_pixel_tests(&mut tests, &placed, tiles, ss, max)?;
             }
         }
     }
@@ -628,8 +691,8 @@ pub fn admit_picture(scene: &ProductScene, request: &PictureRequest) -> Result<A
         )));
     }
     let view = request.projection.view(scene, request.supersample.factor())?;
-    let tiles = tile_samples(&request.tiles, request.supersample.factor());
-    admission.projected_pixel_tests = Some(projected_pixel_tests(scene, &view, &request.roles, &tiles, MAX_PICTURE_PIXEL_TESTS)?);
+    let ss = request.supersample.factor();
+    admission.projected_pixel_tests = Some(projected_pixel_tests(scene, &view, &request.roles, &request.tiles, ss, MAX_PICTURE_PIXEL_TESTS)?);
     Ok(admission)
 }
 
@@ -647,49 +710,61 @@ struct View {
     sh: usize,
 }
 
+/// Triangle `triangle` of `body`: its corners and their normals, checked.
+fn corners(body: &crate::ProductMesh, triangle: usize) -> Result<([Vec3; 3], [Vec3; 3])> {
+    let mesh = &body.mesh;
+    let indices = mesh.triangles.get(triangle).ok_or_else(|| invalid("missing product triangle"))?;
+    let vertices = indices.map(|i| mesh.positions.get(i as usize).copied());
+    let normals = indices.map(|i| mesh.normals.get(i as usize).copied());
+    let ([Some(a), Some(b), Some(c)], [Some(na), Some(nb), Some(nc)]) = (vertices, normals) else {
+        return Err(invalid("invalid triangle index or missing normal"));
+    };
+    let (world, normals) = ([a, b, c], [na, nb, nc]);
+    if world.iter().chain(normals.iter()).any(|v| !v.is_finite()) {
+        return Err(invalid("non-finite product triangle"));
+    }
+    Ok((world, normals))
+}
+
+/// How a triangle of `body` is painted, in `look` where its face has one (`paint` off: depth only);
+/// `None` for one that is wholly transparent.
+fn look(body: &crate::ProductMesh, look: Option<&FaceAppearance>, paint: bool, [na, nb, nc]: [Vec3; 3]) -> Result<Option<Look>> {
+    // Transmission is physical optical data, never a request to change CPU preview.
+    // Keep the existing scalar sorted-alpha shading for glass previews.
+    let (colour, opacity, surface) = if !paint {
+        // A depth-only body is solid, whatever it is made of, and is never shaded.
+        (body.color, 1.0, None)
+    } else {
+        look.map_or((body.color, body.opacity, body.surface.filter(|_| body.transmission.is_none())), |look| {
+            (look.color, look.opacity, look.surface.filter(|_| look.transmission.is_none()))
+        })
+    };
+    if surface.is_some() && opacity != 1.0 {
+        return Err(invalid("opaque PBR requires opacity 1"));
+    }
+    let normals = if surface.is_some() {
+        [
+            solidcraft_viewport::surface::unit_direction(na),
+            solidcraft_viewport::surface::unit_direction(nb),
+            solidcraft_viewport::surface::unit_direction(nc),
+        ]
+        .map(|n| n.map_err(|e| invalid(&e.to_string())))
+    } else {
+        [Ok(na), Ok(nb), Ok(nc)]
+    };
+    let [na, nb, nc] = normals;
+    let normals = [na?, nb?, nc?];
+    if opacity <= 0.0 {
+        return Ok(None);
+    }
+    Ok(Some(Look { colour, opacity, surface, paint, normals }))
+}
+
 /// The same clipping, supersampling and bounds govern admission and raster work.
 impl View {
-    fn project(&self, body: &crate::ProductMesh, triangle: usize, look: Option<&FaceAppearance>, paint: bool) -> Result<Option<Triangle>> {
-        let mesh = &body.mesh;
-        let indices = mesh.triangles.get(triangle).ok_or_else(|| invalid("missing product triangle"))?;
-        let vertices = indices.map(|i| mesh.positions.get(i as usize).copied());
-        let normals = indices.map(|i| mesh.normals.get(i as usize).copied());
-        let ([Some(a), Some(b), Some(c)], [Some(na), Some(nb), Some(nc)]) = (vertices, normals) else {
-            return Err(invalid("invalid triangle index or missing normal"));
-        };
-        let world = [a, b, c];
-        let normals = [na, nb, nc];
-        if world.iter().chain(normals.iter()).any(|v| !v.is_finite()) {
-            return Err(invalid("non-finite product triangle"));
-        }
-        // Transmission is physical optical data, never a request to change CPU preview.
-        // Keep the existing scalar sorted-alpha shading for glass previews.
-        let (colour, opacity, surface) = if !paint {
-            // A depth-only body is solid, whatever it is made of, and is never shaded.
-            (body.color, 1.0, None)
-        } else {
-            look.map_or((body.color, body.opacity, body.surface.filter(|_| body.transmission.is_none())), |look| {
-                (look.color, look.opacity, look.surface.filter(|_| look.transmission.is_none()))
-            })
-        };
-        if surface.is_some() && opacity != 1.0 {
-            return Err(invalid("opaque PBR requires opacity 1"));
-        }
-        let normals = if surface.is_some() {
-            [
-                solidcraft_viewport::surface::unit_direction(na),
-                solidcraft_viewport::surface::unit_direction(nb),
-                solidcraft_viewport::surface::unit_direction(nc),
-            ]
-            .map(|n| n.map_err(|e| invalid(&e.to_string())))
-        } else {
-            [Ok(normals[0]), Ok(normals[1]), Ok(normals[2])]
-        };
-        let [na, nb, nc] = normals;
-        let normals = [na?, nb?, nc?];
-        if opacity <= 0.0 {
-            return Ok(None);
-        }
+    /// Where a triangle lands on the whole canvas; `None` when it misses it, reaches behind the
+    /// eye or has no area.
+    fn place(&self, world: [Vec3; 3]) -> Result<Option<Placed>> {
         let clip = world.map(|p| self.vp.apply(p));
         if clip.iter().flatten().any(|v| !v.is_finite()) {
             return Err(invalid("non-finite product projection"));
@@ -712,25 +787,7 @@ impl View {
         if !area.is_finite() {
             return Err(invalid("invalid projected area"));
         }
-        let centre_depth = (world[0] / 3.0 + world[1] / 3.0 + world[2] / 3.0 - self.reference).dot(self.back);
-        if !centre_depth.is_finite() {
-            return Err(invalid("invalid triangle depth"));
-        }
-        Ok(Some(Triangle {
-            points,
-            world,
-            normals,
-            inv_w,
-            colour: colour.map(decode),
-            opacity,
-            surface,
-            paint,
-            centre_depth,
-            area,
-            bounds: [x0 as usize, x1 as usize, y0 as usize, y1 as usize],
-            x: x0 as usize,
-            y: y0 as usize,
-        }))
+        Ok(Some(Placed { points, inv_w, area, bounds: [x0 as usize, x1 as usize, y0 as usize, y1 as usize] }))
     }
 }
 
@@ -762,12 +819,49 @@ struct Triangle {
     surface: Option<solidcraft_viewport::surface::OpaqueSurface>,
     /// Off for a depth-only body.
     paint: bool,
-    centre_depth: f64,
     area: f64,
     /// Whole-canvas sample bounds `[x0, x1, y0, y1]` (inclusive), narrowed to the tile drawn.
     bounds: [usize; 4],
     x: usize,
     y: usize,
+    /// The last sample of the current row's span.
+    end: usize,
+}
+
+impl Triangle {
+    /// Its cursor at the first row of its bounds.
+    fn new(world: [Vec3; 3], look: Look, placed: Placed) -> Self {
+        let Look { colour, opacity, surface, paint, normals } = look;
+        let Placed { points, inv_w, area, bounds } = placed;
+        let mut triangle =
+            Self { points, world, normals, inv_w, colour: colour.map(decode), opacity, surface, paint, area, bounds, x: 0, y: 0, end: 0 };
+        triangle.start_row(bounds[2]);
+        triangle
+    }
+
+    /// Its cursor at the start of row `y`'s span. A row with an empty span is one pass with no sample.
+    fn start_row(&mut self, y: usize) {
+        [self.x, self.end] = row_span(&self.points, self.area, [self.bounds[0], self.bounds[1]], y).unwrap_or([1, 0]);
+        self.y = y;
+    }
+}
+
+/// How a triangle is painted.
+struct Look {
+    colour: [u8; 3],
+    opacity: f64,
+    surface: Option<solidcraft_viewport::surface::OpaqueSurface>,
+    paint: bool,
+    normals: [Vec3; 3],
+}
+
+/// Where a triangle lands on the whole canvas.
+struct Placed {
+    points: [[f64; 3]; 3],
+    inv_w: [f64; 3],
+    area: f64,
+    /// Sample bounds `[x0, x1, y0, y1]` (inclusive).
+    bounds: [usize; 4],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -832,9 +926,6 @@ struct Raster {
     depth: Vec<f32>,
     pixel_tests: u64,
     max_pixel_tests: u64,
-    /// Each tile's sample bounds ([`tile_samples`]), and all their samples, overlapping ones too: each is drawn.
-    samples_in: Vec<[usize; 4]>,
-    drawn_samples: u64,
     pixel_done: u64,
     draw: usize,
     triangle: Option<Triangle>,
@@ -858,9 +949,6 @@ impl Raster {
         let PictureRequest { projection, tiles, supersample, roles, background } = request;
         let ss = supersample.factor();
         let view = projection.view(&scene, ss)?;
-        let samples_in = tile_samples(&tiles, ss);
-        // In u64: a large picture's canvas outgrows a 32-bit usize.
-        let drawn_samples = samples_in.iter().map(|&[x0, x1, y0, y1]| (x1 - x0 + 1) as u64 * (y1 - y0 + 1) as u64).sum();
         let samples = tiles.iter().map(|t| t.width() * t.height()).max().unwrap_or(0) * ss * ss;
         let pixels = tiles.iter().map(|t| t.width() * t.height()).max().unwrap_or(0);
         let looks = reserve(scene.meshes.len())?;
@@ -897,8 +985,6 @@ impl Raster {
             sort_dst: 0,
             pixel_tests: 0,
             max_pixel_tests,
-            samples_in,
-            drawn_samples,
             pixel_done: 0,
             draw: 0,
             triangle: None,
@@ -922,7 +1008,8 @@ impl Raster {
                 total: self.admission.face_appearances + self.admission.triangles + self.scene.meshes.len() as u64 + self.glass.len() as u64 * 19,
             },
             Stage::Clear | Stage::Opaque | Stage::Glass | Stage::Downsample | Stage::Encode => {
-                let samples = self.drawn_samples;
+                // In u64: a large picture's canvas outgrows a 32-bit usize.
+                let samples: u64 = self.tiles.iter().map(|t| (t.width() * t.height() * self.ss * self.ss) as u64).sum();
                 let total = self.pixel_tests + samples + samples / (self.ss * self.ss) as u64;
                 Progress { phase: Phase::Running, done: self.pixel_done.min(total), total }
             }
@@ -932,21 +1019,23 @@ impl Raster {
 
     /// At most `units` simple units, or up to the end of a tile.
     fn step(&mut self, units: usize) -> Result<RasterPoll> {
-        for _ in 0..units.clamp(1, MAX_STEP) {
+        let mut budget = units.clamp(1, MAX_STEP);
+        while budget > 0 {
             self.cancel.check()?;
-            match self.stage {
-                Stage::Looks => self.look_step()?,
-                Stage::Prepare => self.prepare_step()?,
-                Stage::Sort => self.sort_step()?,
-                Stage::Clear => self.clear_step()?,
-                Stage::Opaque | Stage::Glass => self.draw_step()?,
-                Stage::Downsample => {
-                    if let Some(tile) = self.downsample_step()? {
-                        return Ok(tile);
-                    }
-                }
+            // Preparation takes one unit a call; a tile's passes loop on their own, up to the budget.
+            let used = match self.stage {
+                Stage::Looks => self.look_step().map(|()| 1)?,
+                Stage::Prepare => self.prepare_step().map(|()| 1)?,
+                Stage::Sort => self.sort_step().map(|()| 1)?,
+                Stage::Clear => self.clear_run(budget)?,
+                Stage::Opaque | Stage::Glass => self.draw_run(budget)?,
+                Stage::Downsample => match self.downsample_run(budget)? {
+                    Some(tile) => return Ok(tile),
+                    None => budget,
+                },
                 Stage::Encode | Stage::Done => return Err(JobError::new(ErrorCode::NotCompleted, "render result already consumed")),
-            }
+            };
+            budget = budget.saturating_sub(used);
         }
         Ok(RasterPoll::Pending)
     }
@@ -975,11 +1064,21 @@ impl Raster {
         Ok(())
     }
 
-    fn project(&self, draw: Draw) -> Result<Option<Triangle>> {
-        let body = self.scene.meshes.get(draw.body as usize).ok_or_else(|| invalid("missing product body"))?;
-        let look =
+    fn body(&self, draw: Draw) -> Result<&crate::ProductMesh> {
+        self.scene.meshes.get(draw.body as usize).ok_or_else(|| invalid("missing product body"))
+    }
+
+    fn corners(&self, draw: Draw) -> Result<([Vec3; 3], [Vec3; 3])> {
+        corners(self.body(draw)?, draw.triangle as usize)
+    }
+
+    /// How a triangle is painted, in its body's role and its face's appearance.
+    fn look(&self, draw: Draw, normals: [Vec3; 3]) -> Result<Option<Look>> {
+        let body = self.body(draw)?;
+        let paint = paints(&self.roles, draw.body as usize);
+        let face =
             self.looks.get(draw.body as usize).and_then(|looks| body.mesh.tri_face.get(draw.triangle as usize).and_then(|face| looks.get(face)));
-        self.view.project(body, draw.triangle as usize, look, paints(&self.roles, draw.body as usize))
+        look(body, face, paint, normals)
     }
 
     fn prepare_step(&mut self) -> Result<()> {
@@ -995,10 +1094,16 @@ impl Raster {
             return Ok(());
         }
         let mut draw = Draw { body: self.body as u32, triangle: self.item as u32, depth: 0.0 };
-        if let Some(triangle) = self.project(draw)? {
-            add_tile_tests(&mut self.pixel_tests, &triangle, &self.samples_in, self.max_pixel_tests)?;
-            draw.depth = triangle.centre_depth;
-            if triangle.opacity >= 1.0 {
+        let (world, normals) = self.corners(draw)?;
+        if let Some(look) = self.look(draw, normals)?
+            && let Some(placed) = self.view.place(world)?
+        {
+            add_pixel_tests(&mut self.pixel_tests, &placed, &self.tiles, self.ss, self.max_pixel_tests)?;
+            draw.depth = (world[0] / 3.0 + world[1] / 3.0 + world[2] / 3.0 - self.view.reference).dot(self.view.back);
+            if !draw.depth.is_finite() {
+                return Err(invalid("invalid triangle depth"));
+            }
+            if look.opacity >= 1.0 {
                 self.opaque.push(draw);
             } else {
                 self.glass.push(draw);
@@ -1056,64 +1161,87 @@ impl Raster {
         Ok(())
     }
 
-    fn clear_step(&mut self) -> Result<()> {
+    /// Up to `budget` samples of the tile's canvas cleared, a unit each; the units used.
+    fn clear_run(&mut self, budget: usize) -> Result<usize> {
         let window = self.window()?;
-        if self.pixels.len() >= window.width() * window.height() * self.ss * self.ss {
+        let left = (window.width() * window.height() * self.ss * self.ss).saturating_sub(self.pixels.len()).min(budget);
+        if left == 0 {
             self.stage = Stage::Opaque;
             self.draw = 0;
-            return Ok(());
+            return Ok(1);
         }
-        self.pixels.push(self.clear());
-        self.depth.push(f32::INFINITY);
-        self.pixel_done += 1;
-        Ok(())
+        let clear = self.clear();
+        self.pixels.resize(self.pixels.len() + left, clear);
+        self.depth.resize(self.depth.len() + left, f32::INFINITY);
+        self.pixel_done += left as u64;
+        Ok(left)
     }
 
-    fn draw_step(&mut self) -> Result<()> {
+    /// Up to `budget` units of the tile's opaque or glass pass, each placing a triangle or testing
+    /// one of its samples; the units used.
+    fn draw_run(&mut self, budget: usize) -> Result<usize> {
         let window = self.window()?;
         // The tile's canvas samples, in whole-canvas coordinates.
         let (cx0, cx1) = (window.x0 as usize * self.ss, window.x1 as usize * self.ss - 1);
         let (cy0, cy1) = (window.y0 as usize * self.ss, window.y1 as usize * self.ss - 1);
-        if self.triangle.is_none() {
-            let list = if self.stage == Stage::Opaque { &self.opaque } else { &self.glass };
-            let Some(draw) = list.get(self.draw).copied() else {
-                self.stage = if self.stage == Stage::Opaque { Stage::Glass } else { Stage::Downsample };
-                self.draw = 0;
-                return Ok(());
+        let (clear, tile) = (self.clear(), (cx0, cy0, cx1 - cx0 + 1));
+        for used in 1..=budget {
+            let Some(triangle) = self.triangle.as_mut() else {
+                let list = if self.stage == Stage::Opaque { &self.opaque } else { &self.glass };
+                let Some(draw) = list.get(self.draw).copied() else {
+                    self.stage = if self.stage == Stage::Opaque { Stage::Glass } else { Stage::Downsample };
+                    self.draw = 0;
+                    return Ok(used);
+                };
+                // Only the part of the triangle's bounds inside this tile; one outside it is passed
+                // over before it is painted.
+                let (world, normals) = self.corners(draw)?;
+                let inside = self.view.place(world)?.and_then(|mut placed| {
+                    placed.bounds = narrowed(placed.bounds, [cx0, cx1, cy0, cy1])?;
+                    Some(placed)
+                });
+                self.triangle = match inside {
+                    Some(placed) => self.look(draw, normals)?.map(|look| Triangle::new(world, look, placed)),
+                    None => None,
+                };
+                if self.triangle.is_none() {
+                    self.draw += 1;
+                }
+                continue;
             };
-            // Only the part of the triangle's bounds inside this tile.
-            self.triangle = self.project(draw)?.and_then(|mut t| {
-                narrowed(t.bounds, [cx0, cx1, cy0, cy1]).map(|bounds| {
-                    (t.bounds, t.x, t.y) = (bounds, bounds[0], bounds[2]);
-                    t
-                })
-            });
-            if self.triangle.is_none() {
-                self.draw += 1;
+            if triangle.x <= triangle.end {
+                raster_pixel(triangle, tile, &self.view, self.studio_weights, clear, &mut self.pixels, &mut self.depth)?;
             }
-            return Ok(());
+            triangle.x += 1;
+            if triangle.x > triangle.end {
+                if triangle.y < triangle.bounds[3] {
+                    let next = triangle.y + 1;
+                    triangle.start_row(next);
+                } else {
+                    self.triangle = None;
+                    self.draw += 1;
+                }
+            }
+            self.pixel_done += 1;
         }
-        let clear = self.clear();
-        let triangle = self.triangle.as_mut().ok_or_else(|| invalid("missing raster triangle"))?;
-        let tile = (cx0, cy0, cx1 - cx0 + 1);
-        raster_pixel(triangle, tile, self.view.back, self.view.eye, self.studio_weights, clear, &mut self.pixels, &mut self.depth)?;
-        triangle.x += 1;
-        if triangle.x > triangle.bounds[1] {
-            triangle.x = triangle.bounds[0];
-            triangle.y += 1;
+        Ok(budget)
+    }
+
+    /// Up to `budget` output pixels of the tile, a unit each; the tile's rows once its last pixel
+    /// is in.
+    fn downsample_run(&mut self, budget: usize) -> Result<Option<RasterPoll>> {
+        let window = self.window()?;
+        let (width, ss) = (window.width(), self.ss);
+        for _ in 0..budget {
+            if let Some(rows) = self.downsample_pixel(window, width, ss)? {
+                return Ok(Some(RasterPoll::Tile(window, rows)));
+            }
         }
-        if triangle.y > triangle.bounds[3] {
-            self.triangle = None;
-            self.draw += 1;
-        }
-        self.pixel_done += 1;
-        Ok(())
+        Ok(None)
     }
 
     /// One output pixel of the tile; the tile's rows once its last pixel is in.
-    fn downsample_step(&mut self) -> Result<Option<RasterPoll>> {
-        let window = self.window()?;
-        let (width, ss) = (window.width(), self.ss);
+    fn downsample_pixel(&mut self, window: PixelWindow, width: usize, ss: usize) -> Result<Option<Vec<u8>>> {
         let index = self.output.len() / 4;
         if index >= width * window.height() {
             let rows = std::mem::take(&mut self.output);
@@ -1134,7 +1262,7 @@ impl Raster {
                 self.scene.meshes.clear();
                 self.stage = Stage::Done;
             }
-            return Ok(Some(RasterPoll::Tile(window, rows)));
+            return Ok(Some(rows));
         }
         let (x, y) = (index % width, index / width);
         let (mut colour, mut alpha) = ([0.0; 3], 0.0);
@@ -1164,8 +1292,12 @@ impl PictureTask {
     pub fn new(scene: ProductScene, request: PictureRequest, cancel: CancelToken) -> Result<Self> {
         cancel.check()?;
         let admission = admit_picture(&scene, &request)?;
-        let max_tests = MAX_PICTURE_PIXEL_TESTS;
-        Ok(Self { raster: Raster::new(scene, request, None, admission, max_tests, cancel)? })
+        Ok(Self { raster: Raster::new(scene, request, None, admission, MAX_PICTURE_PIXEL_TESTS, cancel)? })
+    }
+
+    /// The pixel tests admission counted for this request.
+    pub fn projected_pixel_tests(&self) -> u64 {
+        self.raster.admission.projected_pixel_tests.unwrap_or(0)
     }
 
     pub fn progress(&self) -> Progress {
@@ -1256,39 +1388,19 @@ impl ImageTask {
 /// Shades and stores one sample: the triangle's at its cursor `(t.x, t.y)`, in a tile whose
 /// canvas starts at whole-canvas sample `(x0, y0)` and is `width` samples wide. A depth-only
 /// triangle in front puts back `clear`, so it hides what was drawn behind it in either order.
-#[allow(clippy::too_many_arguments)]
 fn raster_pixel(
     t: &Triangle,
     (x0, y0, width): (usize, usize, usize),
-    back: Vec3,
-    eye: Option<Vec3>,
+    view: &View,
     studio_weights: Option<[f64; 3]>,
     clear: [u8; 4],
     pixels: &mut [[u8; 4]],
     depth: &mut [f32],
 ) -> Result<()> {
     let [a, b, c] = t.points;
-    // The sample's position from its whole-canvas integer index, so it is the same number in
-    // every tile and tiles side by side give the whole picture exactly.
-    let (x, y) = (t.x as f64 + 0.5, t.y as f64 + 0.5);
-    let w0 = ((b[0] - x) * (c[1] - y) - (b[1] - y) * (c[0] - x)) / t.area;
-    let w1 = ((c[0] - x) * (a[1] - y) - (c[1] - y) * (a[0] - x)) / t.area;
-    let w2 = 1.0 - w0 - w1;
-    // A shared triangle edge belongs to exactly one raster triangle, including glass.
-    for (w, mut p, mut q) in [(w0, b, c), (w1, c, a), (w2, a, b)] {
-        if w < -1e-9 {
-            return Ok(());
-        }
-        if w.abs() <= 1e-9 {
-            if t.area < 0.0 {
-                std::mem::swap(&mut p, &mut q);
-            }
-            let (dx, dy) = (q[0] - p[0], q[1] - p[1]);
-            if !(dy < 0.0 || (dy == 0.0 && dx > 0.0)) {
-                return Ok(());
-            }
-        }
-    }
+    let Some([w0, w1, w2]) = sample_weights(&t.points, t.area, t.x, t.y) else {
+        return Ok(());
+    };
     let z = (w0 * a[2] + w1 * b[2] + w2 * c[2]) as f32;
     let index = (t.y - y0) * width + (t.x - x0);
     let old_depth = depth.get_mut(index).ok_or_else(|| invalid("missing pixel depth"))?;
@@ -1308,18 +1420,18 @@ fn raster_pixel(
     let n = t.normals.iter().zip(weights).fold(Vec3::ZERO, |v, (n, w)| v + *n * (w / sum)).normalized().unwrap_or(Vec3::Z);
     let colour = if let Some(surface) = t.surface {
         let world = t.world.iter().zip(weights).fold(Vec3::ZERO, |p, (v, w)| p + *v * (w / sum));
-        let view = eye.map_or(back, |eye| eye - world);
-        let radiance = crate::studio::shade_weighted(surface, n, view, studio_weights.unwrap_or([1.0; 3])).map_err(|e| invalid(&e.to_string()))?;
+        let to_eye = view.eye.map_or(view.back, |eye| eye - world);
+        let radiance = crate::studio::shade_weighted(surface, n, to_eye, studio_weights.unwrap_or([1.0; 3])).map_err(|e| invalid(&e.to_string()))?;
         let mapped = crate::studio::tone_map(radiance).map_err(|e| invalid(&e.to_string()))?;
         [mapped.x, mapped.y, mapped.z]
     } else if let Some(weights) = studio_weights {
         let [r, g, b] = t.colour;
         let surface = solidcraft_viewport::surface::OpaqueSurface::new(Vec3::new(r, g, b), 0.0, 1.0, 1.5).map_err(|e| invalid(&e.to_string()))?;
-        let radiance = crate::studio::shade_weighted(surface, n, back, weights).map_err(|e| invalid(&e.to_string()))?;
+        let radiance = crate::studio::shade_weighted(surface, n, view.back, weights).map_err(|e| invalid(&e.to_string()))?;
         let mapped = crate::studio::tone_map(radiance).map_err(|e| invalid(&e.to_string()))?;
         [mapped.x, mapped.y, mapped.z]
     } else {
-        solidcraft_viewport::shade(n, back, t.colour)
+        solidcraft_viewport::shade(n, view.back, t.colour)
     };
     if colour.iter().any(|v| !v.is_finite()) {
         return Err(invalid("non-finite shaded colour"));
@@ -1339,12 +1451,25 @@ fn raster_pixel(
     Ok(())
 }
 
+/// Each sRGB code's linear value, as [`srgb::decode8`] gives it.
+static DECODED: LazyLock<[f64; 256]> = LazyLock::new(|| std::array::from_fn(|code| srgb::decode8(code as u8)));
+
+/// Where each sRGB code from 1 up starts: the linear value of the sRGB value halfway between it
+/// and the code below.
+static CODE_STARTS: LazyLock<[f64; 255]> = LazyLock::new(|| std::array::from_fn(|code| srgb::decode((code as f64 + 0.5) / 255.0)));
+
 fn decode(v: u8) -> f64 {
-    let s = f64::from(v) / 255.0;
-    if s <= 0.04045 { s / 12.92 } else { ((s + 0.055) / 1.055).powf(2.4) }
+    // A u8 always indexes 256 entries.
+    DECODED[usize::from(v)]
 }
+
+/// The sRGB code of a linear value, as [`srgb::encode8`] gives it, without its power: the code is
+/// the number of code starts at or below the value. Within a billionth of a start, where the
+/// formula's own rounding (about 1e-15) could fall either way, the formula decides.
 fn encode(v: f64) -> u8 {
     let l = v.clamp(0.0, 1.0);
-    let s = if l <= 0.0031308 { l * 12.92 } else { 1.055 * l.powf(1.0 / 2.4) - 0.055 };
-    (s * 255.0).round() as u8
+    let starts = &*CODE_STARTS;
+    let code = starts.partition_point(|&start| start <= l);
+    let near = |i: usize| starts.get(i).is_some_and(|&start| (l - start).abs() <= start * 1e-9);
+    if !l.is_finite() || near(code) || code.checked_sub(1).is_some_and(near) { srgb::encode8(l) } else { code as u8 }
 }

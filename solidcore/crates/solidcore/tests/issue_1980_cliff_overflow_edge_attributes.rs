@@ -1,7 +1,7 @@
-//! tangency-labs/solidcore#1980: the cliff overflow's subtraction keeps the attributes of
-//! the target edges it replaces. The session keeps the target's attributes in its own
-//! store, and `subtract_removal_region` ran its Boolean on the target's empty store, so
-//! a shortened edge lost them (the fork's ride on the objects, `SM_AB_COPY`).
+//! tangency-labs/solidcore#1980: the cliff overflow keeps the attributes of the target
+//! edges it replaces (the fork's ride on the objects, `SM_AB_COPY`). Found on the removed
+//! subtraction (`fillet_overflow_trim_at_creases` off), whose Boolean ran on the target's
+//! empty store, so a shortened edge lost them; the trim at creases (WR-695) keeps them.
 
 #![allow(clippy::unwrap_used, clippy::panic)] // test helpers
 

@@ -27,8 +27,8 @@ pub struct MeshSpec {
     /// (mm), as [`MeshTolerance::chord`]: never finer than a millionth of the body.
     pub chord: f64,
     /// The longest triangle side asked (mm). `None`: a fifth of the body's extent (twice the
-    /// largest distance of a vertex from the vertices' centroid), the longest side the display
-    /// allows. A curved face takes less where its curvature asks for less.
+    /// largest distance of a vertex or an edge's point from their centroid), the longest side the
+    /// display allows. A curved face takes less where its curvature asks for less.
     pub size: Option<f64>,
     /// The smallest angle Ruppert refinement aims for (degrees, more than 0 and at most
     /// [`MAX_MESH_MIN_ANGLE`]). A corner of the boundary sharper than it keeps its angle.
@@ -70,8 +70,8 @@ impl MeshSpec {
 /// What the plan's stats name: [`PlanStats::unshaped`], each face left short of its shape (a
 /// triangle sharper than `spec.min_angle`, or a bound that stopped the shaping: its points, the
 /// rounds of splitting sides, a side on no edge kept whole), with its smallest angle in
-/// 3D; [`PlanStats::over_tolerance`], each face whose sag refinement stopped at its bound, with
-/// whether its triangles are still within `spec.chord` (`within`), as on the display path; and
+/// 3D; [`PlanStats::over_tolerance`], faces limited by a bound or measured outside the chord
+/// tolerance with a displaced shared boundary, as on the display path; and
 /// [`PlanStats::edges_capped`], each edge a bound of its sampling stopped. Faces are planned in
 /// parallel where there are several, each on its own, and collected in the record's order: the
 /// plan is the same for any number of threads.
