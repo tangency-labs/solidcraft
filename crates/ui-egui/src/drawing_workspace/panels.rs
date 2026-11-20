@@ -325,7 +325,7 @@ pub(super) fn dimension_editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: 
         let labels = ["0", "1", "2", "3", "4", "5", "6"];
         edit.decimals = edit.decimals.min(labels.len() - 1);
         ui_kit::choice_row(ui, tr("ui.drawing_panel.decimals"), "drawing:dimension:decimals", &mut edit.decimals, &labels);
-        ui_kit::text_row(ui, tr("ui.drawing_panel.text"), &mut edit.text, "<dim>");
+        ui_kit::text_row(ui, tr("ui.drawing_panel.text"), &mut edit.text, solidcraft_engine::doc::drawing::dimension::VALUE_TOKEN);
         let valid = offset_mm(&edit.offset).is_some();
         ui.separator();
         ui.horizontal(|ui| {
@@ -388,7 +388,11 @@ fn dimension(ui: &mut egui::Ui, drawing: Option<&Drawing>, sheet: Option<u64>, s
         let decimals = [tr("ui.drawing_panel.default"), "0", "1", "2", "3", "4", "5", "6"];
         let precision = selected.map_or(0, |item| usize::from(item.decimals).saturating_add(1).min(decimals.len() - 1));
         choice(ui, tr("ui.drawing_panel.decimals"), precision, &decimals);
-        text(ui, tr("ui.drawing_panel.text"), selected.and_then(|item| item.override_text.as_deref()).unwrap_or("<dim>"));
+        text(
+            ui,
+            tr("ui.drawing_panel.text"),
+            selected.and_then(|item| item.override_text.as_deref()).unwrap_or(solidcraft_engine::doc::drawing::dimension::VALUE_TOKEN),
+        );
     });
     if let Some(drawing) = drawing {
         ui_kit::section_heading(ui, tr("ui.drawing_panel.dimensions"));
@@ -789,7 +793,6 @@ pub(super) fn sheet_settings(app: &mut SolveApp, ui: &mut egui::Ui) {
 
             next_sheet_section(ui, "ui.drawing_panel.screen");
             ui_kit::row(ui, tr("ui.sheet_page.colour"), |ui| crate::drawing_sheet_page::colour_choice(app, ui));
-            ui_kit::row(ui, tr("ui.drawing_backdrop.label"), |ui| crate::drawing_sheet_page::backdrop_choice(app, ui));
         });
         ui.add_space(t.space_8);
         ui.separator();

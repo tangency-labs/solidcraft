@@ -416,11 +416,6 @@ fn carried_on_round(body: &Body, pick: Vec3, reach: f64, blend: impl Fn(&Body) -
     // the blend itself fails with the face carried on, so carrying it on does not apply.
     let carry = |c: &solidcore_ops::CarriedFace| -> std::result::Result<Body, Option<FailedStep>> {
         let plane = Plane { origin: v(c.origin), x: v(c.along), y: v(c.across) };
-        // The slab's ends in the face's plane: from the edge's start it runs `s0` along the edge
-        // for each unit across it, and from the edge's end `s1` (both 0 between square ends).
-        let [p0, p1, p2, p3] = c.outline;
-        let (s0, s1) = ((p3[0] - p0[0]) / (p3[1] - p0[1]), (p2[0] - p1[0]) / (p2[1] - p1[1]));
-        let length = p1[0] - s1 * p1[1];
         let rect = Loop2::polygon(&c.outline.map(|p| Vec2::new(p[0], p[1])));
         let what = "building the slab that carries the face on";
         let slab = crate::build::extrude(&plane, &[Region2 { outer: rect, holes: vec![] }], c.depth[0], c.depth[1]).map_err(failed(what))?;
@@ -439,11 +434,9 @@ fn carried_on_round(body: &Body, pick: Vec3, reach: f64, blend: impl Fn(&Body) -
         let prism = crate::thicken(&sheet, 2.0 * room, true).map_err(failed("thickening the flat face's sheet"))?;
         // Past the edge's line the fill stands over the other face, not over the flat face's
         // outline, and is kept whole: between the slab's two ends, as far as the slab reaches.
-        let (from, to) = if c.other_side > 0.0 { (0.0, room.min(p2[1])) } else { (-room.min(-p0[1]), 0.0) };
-        // (exactly 0 and `length` between square ends)
-        let (start, end) = (|across: f64| 0.0 + s0 * across, |across: f64| length + s1 * across);
-        let beyond = Loop2::polygon(&[Vec2::new(start(from), from), Vec2::new(end(from), from), Vec2::new(end(to), to), Vec2::new(start(to), to)]);
         let what = "building the box past the edge's line";
+        let beyond = c.past_edge(room).map_err(|e| failed(what)(KernelError::Failed(e.to_string())))?;
+        let beyond = Loop2::polygon(&beyond.map(|p| Vec2::new(p[0], p[1])));
         let beyond = crate::build::extrude(&plane, &[Region2 { outer: beyond, holes: vec![] }], -room, room).map_err(failed(what))?;
         let beyond = beyond.into_iter().next().ok_or_else(|| nothing(what))?;
         let what = "joining the face's prism and the box past the edge's line";
@@ -2098,6 +2091,52 @@ mod tests {
         ] {
             assert!(has_vertex(&rounded, v, 1e-6), "no vertex at {v:?}");
         }
+    }
+
+    /// A wall on a plate of two tiles with rounded rims (#19454): two 20 x 20 x 10 tiles side by
+    /// side, each with its four top edges rounded 5, and on them the box from (3, 3, 5) to
+    /// (37, 17, 15) with its upright edges rounded 1. Six faces of each tile less the two that
+    /// meet and the two tops under the wall, their eight rounds, and the wall's top, four sides
+    /// and four corners: 24 faces. The foot of the wall's front on the second tile, picked at
+    /// (25, 3, 9.6), with its tangent chain: the line from that tile's ridge at x = 23 and the
+    /// half of the wall's corner arc it runs on into, up to the ridge of the plate's corner.
+    ///
+    /// The round ends on that ridge on the plate's next round, which falls away under it. Its
+    /// contact line on the wall reaches that round's surface only up to the radius 1/2 (the
+    /// kernel's test of it derives that): under it the round builds, and from it on the round
+    /// is refused as too large, saying why and naming a radius under 1/2, where it failed
+    /// with status 1001 before ("Fillet Face Creation Error" at 0.5, "Vertex Computation
+    /// Failure" at 1 and 2).
+    #[test]
+    fn a_round_passing_over_the_face_it_ends_on_names_the_radius_that_fits() {
+        let tile = |x: f64| {
+            let b = crate::build::box_solid(Vec3::new(x, 0.0, 0.0), Vec3::new(x + 20.0, 20.0, 10.0)).unwrap();
+            let rim = [(x + 10.0, 0.0), (x + 10.0, 20.0), (x, 10.0), (x + 20.0, 10.0)].map(|(x, y)| Vec3::new(x, y, 10.0));
+            fillet(&b, &rim, 5.0).unwrap()
+        };
+        let plate = crate::boolean(&tile(0.0), &tile(20.0), crate::BoolOp::Union).unwrap().unwrap();
+        let wall = crate::build::box_solid(Vec3::new(3.0, 3.0, 5.0), Vec3::new(37.0, 17.0, 15.0)).unwrap();
+        let uprights = [(3.0, 3.0), (37.0, 3.0), (37.0, 17.0), (3.0, 17.0)].map(|(x, y)| Vec3::new(x, y, 10.0));
+        let wall = fillet(&wall, &uprights, 1.0).unwrap();
+        let body = crate::boolean(&plate, &wall, crate::BoolOp::Union).unwrap().unwrap();
+        let before = crate::measure(&body).unwrap();
+        assert_eq!((before.faces, before.shells), (24, 1));
+        let picks = tangent_chain(&body, &[Vec3::new(25.0, 3.0, 9.6)]).unwrap();
+        assert_eq!(picks.len(), 2, "the line and the corner arc's half: {picks:?}");
+        for r in [0.5, 1.0, 2.0] {
+            match fillet(&body, &picks, r) {
+                Err(KernelError::TooLarge(why)) => {
+                    assert!(why.contains("the round passes over the face it ends on"), "{r}: {why}");
+                    let fits = named_fit(&why).unwrap_or_else(|| panic!("{r}: no radius named: {why}"));
+                    assert!(fits < 0.5 && fits > 0.45, "{r}: {why}");
+                }
+                other => panic!("{r}: not refused as too large: {:?}", other.map(|b| crate::measure(&b).map(|m| m.volume))),
+            }
+        }
+        let rounded = fillet(&body, &picks, 0.4).unwrap();
+        let m = crate::measure(&rounded).unwrap();
+        assert!(m.shells == 1 && m.volume > before.volume, "{} against {}", m.volume, before.volume);
+        assert!(rounded.validity().is_empty(), "{:?}", rounded.validity());
     }
 
     /// What carrying the face on leaves out of a chamfer with contacts `p` on the plate and `q`

@@ -190,7 +190,7 @@ fn case(name: &str) -> Case {
                     vec![[10.0 - d, 5.0 + d, 20.0], [10.0 + d, 5.0 - d, 20.0], [5.0, 0.0, 20.0], [15.0, 0.0, 20.0]],
                     3.0,
                 ),
-                Expect::Fails(Error::CornerUnsupported),
+                Expect::Fails(Error::CornerUnsupported { why: None, at: None }),
             )
         }
         // √3 from all three edges at the corner (0, 0, 10).
@@ -257,7 +257,11 @@ type Got = std::result::Result<Measured, Error>;
 /// `e` without the size solidcore names for a blend too large ([`Error::TooLarge`]): the C++
 /// kernel's [`Error::NoRoom`], which the capi here does not size.
 fn without_size(e: Error) -> Error {
-    if matches!(e, Error::TooLarge { .. }) { Error::NoRoom } else { e }
+    match e {
+        Error::TooLarge { .. } => Error::NoRoom,
+        Error::CornerUnsupported { .. } => Error::CornerUnsupported { why: None, at: None },
+        e => e,
+    }
 }
 
 /// Checks a kernel's result against the case's closed form; what it measured, or its error.

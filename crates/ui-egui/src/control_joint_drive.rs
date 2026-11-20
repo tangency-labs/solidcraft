@@ -193,7 +193,8 @@ fn show(app: &mut SolveApp, req: &ControlRequest, start: f64, prepared: Prepared
     }
     let movement = app.control_joint_drive.movement.as_mut().ok_or("the joint drive movement ended")?;
     movement.prepared = Some(prepared.command);
-    app.preview.show_joint_drive(req.serial, start, prepared.scene);
+    let revision = app.session.design_revision();
+    app.preview.show_joint_drive(req.serial, start, prepared.scene, METHOD, revision);
     Ok(prepared.reply)
 }
 

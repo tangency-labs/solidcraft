@@ -2,8 +2,8 @@
 //! document rebuilds on load and optional display caches remain provisional. Bodies export
 //! as STL (binary or ASCII), OBJ, STEP and 3MF, and assemblies as URDF ([`urdf()`]); STEP, IGES,
 //! FreeCAD and Rhino files import as a base feature (see [`step_import_feature`]), 3MF and
-//! STL files as mesh bodies (see [`mesh_import_feature`]), PLY and XYZ files as point clouds
-//! (see [`read_point_cloud`]), and KiCad boards as a mesh substrate with referenced STEP
+//! STL files as mesh bodies (see [`mesh_import_feature`]), PLY, PCD and XYZ files as point
+//! clouds (see [`read_point_cloud`]), and KiCad boards as a mesh substrate with referenced STEP
 //! component models.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
@@ -39,10 +39,11 @@ mod mutate;
 mod native_cad;
 pub use native_cad::{
     NATIVE_CAD_EXTS, NativeDesign, USD_EXTS, cadmpeg_step_records, detects_freecad, is_freecad_path, is_native_cad_path, is_usd_path,
-    native_cad_design, native_cad_records, native_cad_to_step, read_usd, usd_from_step,
+    native_cad_design, native_cad_records, native_cad_to_step, read_usd, usd_from_step, usd_records,
 };
 pub mod paper;
 mod pat;
+mod pcd;
 mod ply;
 mod ply_complex;
 pub use ply::{ply_counts, read_ply_mesh};
@@ -408,6 +409,40 @@ pub fn step_import_feature_read(bytes: &[u8], file: &str, names: StepNames, read
         warnings: iges_warnings.into_iter().chain(imp.warnings.iter().cloned()).collect(),
         import: imp,
     })
+}
+
+/// What an OpenUSD file's import brings in.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum UsdGeometry {
+    /// Its meshes, as mesh bodies ([`read_usd`]): how OpenUSD files have always been read, and
+    /// what most of them hold. A B-rep with no mesh is left out.
+    #[default]
+    Meshes,
+    /// Its exact geometry where it has it ([`usd_records`]): each B-rep (a `BrepArray`'s solids
+    /// and shells) a B-rep body of an Import feature, and each mesh with
+    /// no B-rep beside it a mesh body of that feature.
+    Exact,
+}
+
+impl UsdGeometry {
+    /// `meshes` or `exact` (any case); `None` for anything else.
+    pub fn parse(s: &str) -> Option<UsdGeometry> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "meshes" => Some(UsdGeometry::Meshes),
+            "exact" => Some(UsdGeometry::Exact),
+            _ => None,
+        }
+    }
+}
+
+/// An OpenUSD file (`file` is its name) read for its exact geometry ([`UsdGeometry::Exact`]) into
+/// an Import feature keeping records, as a FreeCAD or Rhino file read by cadmpeg is, with the
+/// bodies named after `names`; and whether the file says Y is up.
+pub fn usd_import_feature(bytes: &[u8], file: &str, names: StepNames) -> Result<(StepFeature, bool)> {
+    let _span = solidcraft_profile::span("import", "usd_import_feature");
+    limits::check(limits::Kind::Step, bytes.len() as u64).map_err(IoError::Invalid)?;
+    let (records, warnings, y_up) = usd_records(bytes, file).map_err(IoError::Invalid)?;
+    Ok((records_import_feature((records, warnings, false), file, names)?, y_up))
 }
 
 /// A file read with [`StepReader::Cadmpeg`] (FreeCAD, Rhino or STEP) into an Import feature that

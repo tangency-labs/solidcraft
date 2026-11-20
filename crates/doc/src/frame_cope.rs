@@ -44,7 +44,7 @@ impl From<ops::Box3> for Bounds {
     }
 }
 
-/// Local datum at an original path endpoint; positive station goes into the member.
+/// Local datum at an uncoped stock end's section centre; positive station goes into the member.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Terminal {
     pub origin: Vec3,

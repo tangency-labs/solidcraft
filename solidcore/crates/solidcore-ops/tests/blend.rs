@@ -48,6 +48,88 @@ fn top_front(b: &Body) -> usize {
     edge_at(b, [15.0, 0.0, 10.0])
 }
 
+/// Closed forms recorded in
+/// `plan/findings/blend.fillet_solver_p5--neighbouring-chamfers-closed-forms.md`.
+/// The overlap of the two removed triangular prisms is integrated over depth w.
+fn neighbouring_chamfer_measures(l: f64, a: f64, b: f64, c: f64, d: f64) -> (f64, f64) {
+    let m = b.min(d);
+    let overlap = a * c * (m - m * m * (1.0 / b + 1.0 / d) / 2.0 + m * m * m / (3.0 * b * d));
+    let volume = l * l * l - l * a * b / 2.0 - l * c * d / 2.0 + overlap;
+    let area = l * l + (l - c) * (l - a) + l * (l - b) - c * (d - b).max(0.0).powi(2) / (2.0 * d)
+        + l * l
+        - c * d / 2.0
+        + l * l
+        - a * b / 2.0
+        + l * (l - d)
+        - a * (b - d).max(0.0).powi(2) / (2.0 * b)
+        + a.hypot(b) * (l - c / b * (m - m * m / (2.0 * d)))
+        + c.hypot(d) * (l - a / d * (m - m * m / (2.0 * b)));
+    (volume, area)
+}
+
+#[test]
+fn neighbouring_unequal_chamfers_build_in_either_history_order() {
+    all_fixes();
+    let mut failures = Vec::new();
+    for scale in [1.0, 0.5, 2.0] {
+        for flip_angle in [true, false] {
+            for flip_distances in [false, true] {
+                for reverse in [false, true] {
+                    let case = (scale, flip_angle, flip_distances, reverse);
+                    let b = make_box([0.0; 3], [10.0 * scale; 3]).unwrap();
+                    let angle = || {
+                        chamfer_sides_facing(
+                            &b,
+                            &[edge_at(&b, [5.0 * scale, 0.0, 10.0 * scale])],
+                            scale,
+                            ChamferSecond::Angle(PI / 6.0),
+                            [0.0, 0.0, if flip_angle { -1.0 } else { 1.0 }],
+                        )
+                    };
+                    let distances = || {
+                        chamfer_sides_facing(
+                            &b,
+                            &[edge_at(&b, [10.0 * scale, 5.0 * scale, 10.0 * scale])],
+                            scale,
+                            ChamferSecond::Distance(3.0 * scale),
+                            [0.0, 0.0, if flip_distances { -1.0 } else { 1.0 }],
+                        )
+                    };
+                    let result = if reverse {
+                        distances().unwrap();
+                        angle()
+                    } else {
+                        angle().unwrap();
+                        distances()
+                    };
+                    if let Err(error) = result {
+                        failures.push((case, error));
+                        continue;
+                    }
+                    let depth = scale * (PI / 6.0).tan();
+                    let (a, front) = if flip_angle {
+                        (depth, scale)
+                    } else {
+                        (scale, depth)
+                    };
+                    let (c, right) = if flip_distances {
+                        (3.0 * scale, scale)
+                    } else {
+                        (scale, 3.0 * scale)
+                    };
+                    let (want_volume, want_area) =
+                        neighbouring_chamfer_measures(10.0 * scale, a, front, c, right);
+                    assert!(b.check(CheckLevel::All).unwrap().is_valid(), "{case:?}");
+                    assert_eq!(b.counts().unwrap()[0], 8, "{case:?}");
+                    assert!(rel(volume(&b), want_volume) < 1e-9, "{case:?}");
+                    assert!(rel(b.area(1e-8).unwrap(), want_area) < 1e-9, "{case:?}");
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:?}");
+}
+
 #[test]
 fn rounds_and_chamfers_take_their_closed_forms() {
     all_fixes();
@@ -2501,6 +2583,20 @@ fn a_round_is_carried_on_between_a_flat_end_and_a_sloped_one() {
         "{corners:?}"
     );
     assert_eq!(c.depth, [-c.reach, 0.0]);
+    // past the edge's line, 5 out on the other face's side, between the same two ends
+    let past = c
+        .past_edge(5.0)
+        .unwrap()
+        .map(|[a, x]| v(c.origin) + along * a + across * x);
+    let x = 20.0 + 5.0 * c.other_side * across.dot(Vec3::new(1.0, 0.0, 0.0));
+    for (px, pz) in [(20.0, 0.0), (20.0, 20.0), (x, 0.0), (x, 15.0 + x / 4.0)] {
+        assert!(
+            past.iter()
+                .any(|p| (*p - Vec3::new(px, 20.0, pz)).length() < 1e-6),
+            "({px}, {pz}) in {past:?}"
+        );
+    }
+    assert!(matches!(c.past_edge(f64::NAN), Err(Error::Argument)));
     assert_eq!(
         solidcore_ops::carried_faces(&b, inner, 79.0).unwrap().len(),
         1
@@ -3349,6 +3445,149 @@ fn a_pocket_floor_round_past_its_walls_keeps_its_refusal() {
         other => panic!("not the too-large refusal: {other:?}"),
     }
     assert_eq!(b.volume(1e-12).unwrap().to_bits(), before.to_bits());
+}
+
+/// A plate of `tiles` 20 x 20 x 10 tiles side by side along x, each with its four top edges
+/// rounded 5 before they are joined, and a wall standing on it: the box from (3, 3, 5) to
+/// (20 tiles - 3, 17, 15) with its four upright edges rounded 1, joined on.
+///
+/// The rounds are mitred at a tile's sharp upright edges, so two of them meet in a ridge
+/// at each corner (in the plane x = y at the origin's), and between two tiles the rounds
+/// leave a valley down to z = 5 at x = 20. The wall's front (y = 3) meets the front rounds
+/// (their axis y = 5, z = 5) along z = 5 + sqrt 21. Its foot crosses a ridge on each
+/// corner arc of the wall and, with two tiles, where its front runs down into the valley
+/// (at x = 17 and x = 23).
+fn wall_on_rounded_tiles(tiles: usize) -> Body {
+    let mut plate: Option<Body> = None;
+    for i in 0..tiles {
+        let x = 20.0 * i as f64;
+        let tile = make_box([x, 0.0, 0.0], [20.0, 20.0, 10.0]).unwrap();
+        let rim: Vec<usize> = [
+            [x + 10.0, 0.0],
+            [x + 10.0, 20.0],
+            [x, 10.0],
+            [x + 20.0, 10.0],
+        ]
+        .iter()
+        .map(|p| nearest_edge(&tile, [p[0], p[1], 10.0]))
+        .collect();
+        blend(&tile, Blend::Round, &rim, &[5.0], &[], Corners::Filled).unwrap();
+        plate = Some(match plate {
+            None => tile,
+            Some(joined) => {
+                solidcore_ops::boolean::boolean(joined, tile, solidcore_ops::BooleanOp::Union)
+                    .unwrap()
+                    .unwrap()
+            }
+        });
+    }
+    let far = 20.0 * tiles as f64 - 3.0;
+    let wall = make_box([3.0, 3.0, 5.0], [far - 3.0, 14.0, 10.0]).unwrap();
+    let uprights: Vec<usize> = [[3.0, 3.0], [far, 3.0], [far, 17.0], [3.0, 17.0]]
+        .iter()
+        .map(|p| nearest_edge(&wall, [p[0], p[1], 10.0]))
+        .collect();
+    blend(&wall, Blend::Round, &uprights, &[1.0], &[], Corners::Filled).unwrap();
+    solidcore_ops::boolean::boolean(plate.unwrap(), wall, solidcore_ops::BooleanOp::Union)
+        .unwrap()
+        .unwrap()
+}
+
+/// The refusal of a round that passes over the face it ends on, as `blend` gives it: its
+/// size, which lies under `limit` by the fit margin, a thousand tolerances of the edge
+/// `ending` whose round ends there.
+fn passes_over_its_end_face<T: std::fmt::Debug>(
+    b: &Body,
+    got: Result<T, Error>,
+    limit: f64,
+    ending: usize,
+) -> f64 {
+    let (_, brep) = kernel_copy(b);
+    let margin = 1000.0 * edge::tolerance(&brep, brep.edge_list()[ending]).unwrap();
+    match got {
+        Err(Error::TooLarge {
+            size,
+            kind: FitKind::Radius,
+            why: Some(solidcore_ops::RoomReason::EndPassesOverEndFace),
+            ..
+        }) => {
+            assert!(margin > 0.0 && margin < 0.1 * limit, "{margin}");
+            assert!(
+                (size - (limit - margin)).abs() < 1e-6,
+                "{size} under {limit} by {margin}"
+            );
+            size
+        }
+        other => panic!("not the too-large refusal: {other:?}"),
+    }
+}
+
+/// The foot of the wall's front, rounded as a tangent chain: the front's line and the two
+/// corner arcs' halves it runs on into, each up to the ridge of the plate's corner. The round
+/// ends there on the next plate round E (its axis x = 5, z = 5), which falls away under it:
+/// E's surface crosses the wall's corner cylinder below the round's contact line, and that
+/// line ends on E only where a ball touching the cylinder on that crossing also touches the
+/// front round G. The crossing rises from the ridge to the corner arc's end, the tangent
+/// line x = 4, y = 3, where it is 5 + sqrt 24 up. The ball touching the wall there, centre
+/// (4, 3 - rho, 5 + sqrt 24), touches G where (2 + rho)^2 + 24 = (5 + rho)^2: rho = 1/2.
+/// So a round under 1/2 builds, and one over it is refused as too large, naming the radius
+/// that fits under 1/2, where it failed with a bare status before. At 1/2 itself the round's
+/// end takes its whole corner arc and its edges fail: refused the same way. The body is left
+/// as it was, and the size named builds a valid body.
+#[test]
+fn a_round_passing_over_the_face_it_ends_on_is_refused_naming_the_radius_that_fits() {
+    rig_fixes();
+    let b = wall_on_rounded_tiles(1);
+    let before = b.volume(1e-12).unwrap();
+    let foot = 5.0 + 21.0_f64.sqrt();
+    // a corner arc's half, an eighth of a turn from the front's line about the corner's axis
+    let (s, c) = (PI / 8.0).sin_cos();
+    let on_arc = 5.0 + (25.0 - (1.0 + c) * (1.0 + c)).sqrt();
+    let chain = [
+        nearest_edge(&b, [10.0, 3.0, foot]),
+        nearest_edge(&b, [4.0 - s, 4.0 - c, on_arc]),
+        nearest_edge(&b, [16.0 + s, 4.0 - c, on_arc]),
+    ];
+    let mut fits = 0.0;
+    for r in [1.0, 0.5] {
+        let got = blend(&b, Blend::Round, &chain, &[r], &[], Corners::Filled);
+        fits = passes_over_its_end_face(&b, got, 0.5, chain[1]);
+        assert_eq!(b.volume(1e-12).unwrap().to_bits(), before.to_bits());
+    }
+    blend(&b, Blend::Round, &chain, &[fits], &[], Corners::Filled).unwrap();
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    assert!(b.volume(1e-12).unwrap() > before);
+}
+
+/// On two tiles the wall's front runs down into the valley between them, and the line of its
+/// foot on the second tile ends on that tile's ridge at x = 23, where the wall's front goes
+/// on down the tile's valley round E (its axis x = 25, z = 5). Rounded alone, the line's
+/// round ends there on E, which crosses the wall's front along z = 5 + sqrt(25 - (x - 25)^2):
+/// highest, 10 up, at x = 25. The ball touching the front there, centre (25, 3 - rho, 10),
+/// touches the front round where (2 + rho)^2 + 25 = (5 + rho)^2: rho = 2/3, the largest
+/// along the crossing (an inner one). So a round over 2/3 is refused naming a radius under
+/// 2/3, which builds. Rounded with the corner arc it runs on into at its other end, the limit
+/// is that end's 1/2, and at 1/2 itself the arc's round has no extent, so its face fails:
+/// refused the same way.
+#[test]
+fn a_round_ending_on_a_ridge_names_the_largest_ball_along_its_end_faces_crossing() {
+    rig_fixes();
+    let b = wall_on_rounded_tiles(2);
+    let before = b.volume(1e-12).unwrap();
+    let foot = 5.0 + 21.0_f64.sqrt();
+    let line = nearest_edge(&b, [29.5, 3.0, foot]);
+    let got = blend(&b, Blend::Round, &[line], &[1.0], &[], Corners::Filled);
+    let fits = passes_over_its_end_face(&b, got, 2.0 / 3.0, line);
+    assert_eq!(b.volume(1e-12).unwrap().to_bits(), before.to_bits());
+    let (s, c) = (PI / 8.0).sin_cos();
+    let on_arc = 5.0 + (25.0 - (1.0 + c) * (1.0 + c)).sqrt();
+    let chain = [line, nearest_edge(&b, [36.0 + s, 4.0 - c, on_arc])];
+    let got = blend(&b, Blend::Round, &chain, &[0.5], &[], Corners::Filled);
+    passes_over_its_end_face(&b, got, 0.5, chain[1]);
+    assert_eq!(b.volume(1e-12).unwrap().to_bits(), before.to_bits());
+    blend(&b, Blend::Round, &[line], &[fits], &[], Corners::Filled).unwrap();
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    assert!(b.volume(1e-12).unwrap() > before);
 }
 
 /// In the Roll-over's second pass only the corner at V (where the concave chain meets the
@@ -5308,4 +5547,53 @@ fn a_hex_rim_rounded_at_its_corner_rounds_radius_closes_on_six_spheres() {
         "removed {}, the closed form {removed}",
         before - after
     );
+}
+
+/// #19502: a 1 thick wall (x 0…50, z 9…10) joined on a 1 thick plate (x −1…0, z 0…10), the
+/// wall's end flush with the plate's side (y = 0) and its top with the plate's top (z = 10).
+/// Both long edges of the wall's end, rounded half its thickness, are a full round: the two
+/// rounds' rails meet along z = 9.5 from x = 0 to 50, where the lower round ends on the
+/// plate, while the top round runs on over the plate's top to x = −1. Each round takes
+/// (1 − π/4) r² of the section along its edge (51 and 50 long), so the volume is
+/// 1200 − (1 − π/4) r² · 101 at every r up to 0.5, the full round included.
+///
+/// With a second plate at the wall's other end (x 50…51) the top round runs 52 long and its
+/// rail meets the lower one's in its middle third: 1400 − (1 − π/4) r² · 102. Both in either
+/// order of the edges.
+#[test]
+fn a_full_round_whose_rails_meet_along_part_of_one_of_them() {
+    solidcore_ops::session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
+    // (plates' corners in x, volume before rounding, top edge's length)
+    let parts: [(&[f64], f64, f64); 2] = [(&[-1.0], 1200.0, 51.0), (&[-1.0, 50.0], 1400.0, 52.0)];
+    for (plates, volume, top) in parts {
+        for reversed in [false, true] {
+            for r in [0.25, 0.4999, 0.5] {
+                let case = format!("plates {plates:?}, reversed {reversed}, r {r}");
+                let mut b = make_box([0.0, 0.0, 9.0], [50.0, 20.0, 1.0]).unwrap();
+                for &x in plates {
+                    let plate = make_box([x, 0.0, 0.0], [1.0, 20.0, 10.0]).unwrap();
+                    b = solidcore_ops::boolean::boolean(b, plate, solidcore_ops::BooleanOp::Union)
+                        .unwrap()
+                        .unwrap();
+                }
+                let mut edges = [
+                    edge_at(&b, [25.0, 0.0, 10.0]),
+                    edge_at(&b, [25.0, 0.0, 9.0]),
+                ];
+                if reversed {
+                    edges.reverse();
+                }
+                blend(&b, Blend::Round, &edges, &[r, r], &[], Corners::Filled)
+                    .unwrap_or_else(|e| panic!("{case}: {e:?}"));
+                let report = b.check(CheckLevel::All).unwrap();
+                assert!(report.is_valid(), "{case}: {report}");
+                let want = volume - (1.0 - PI / 4.0) * r * r * (top + 50.0);
+                let got = b.volume(1e-11).unwrap();
+                assert!(
+                    (got - want).abs() <= 1e-9 * want,
+                    "{case}: {got} vs closed form {want}"
+                );
+            }
+        }
+    }
 }

@@ -11,9 +11,9 @@ use solidcraft_kernel as kernel;
 use solidcraft_sketch::CurveKind;
 
 use super::{ModelBody, ModelState, SolvedSketch, new_name, path_in_frame, select_profiles, sketch_in_feature_frame, val};
-use crate::expr::{Kind, Value};
+use crate::expr::{Expr, Kind, Value};
 use crate::frame::{self, MAX_MEMBERS, MemberProfile};
-use crate::{DocError, Document, Feature, FeatureKind, ProfileSel, Result};
+use crate::{DocError, Document, Feature, FeatureId, FeatureKind, ProfileSel, Result};
 
 /// Most profiles a profile sketch may have for its material to be worked out.
 const MAX_PROFILE_PIECES: usize = 256;
@@ -24,27 +24,33 @@ pub(super) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Featu
     let FeatureKind::FrameMember { body_name, names, continuous, profile, .. } = &f.kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
-    let Layout { paths, regions, description, at, turn } = layout(doc, vals, f, st)?;
+    let Layout { paths, regions, description, at, turn, turns, centre } = layout(doc, vals, f, st)?;
+    let ids = path_keys(&paths, *continuous);
     let mut made = Vec::with_capacity(paths.len());
     let mut round = Vec::with_capacity(paths.len());
-    for path in &paths {
+    for (id, path) in ids.iter().zip(&paths) {
         let first = path.first().ok_or_else(|| DocError::Invalid("a member path is empty".into()))?;
-        let plane = stock::section_plane(&first.geometry, at, turn).map_err(|e| path_error(path, e))?;
+        let mut straight_frame = None;
         let body = if let [piece] = path.as_slice()
             && let Some(length) = piece.geometry.line_length().map_err(|e| path_error(path, e))?
         {
+            let data = piece.geometry.data();
+            let plane = member_plane(data.a, data.b, turn, at, centre, turns.get(id).copied())
+                .ok_or_else(|| DocError::Invalid(format!("line `{id}`: no plane square to it")))?;
+            straight_frame = Some((plane, length));
             let mut bodies = kernel::extrude(&plane, &regions, 0.0, length)?;
             match (bodies.pop(), bodies.is_empty()) {
                 (Some(body), true) => body,
                 _ => return Err(DocError::Invalid("the member is not one solid".into())),
             }
         } else {
+            let plane = stock::section_plane(&first.geometry, at, turn).map_err(|e| path_error(path, e))?;
             let region = regions.first().ok_or_else(|| DocError::Invalid("the member profile has no area".into()))?;
             let geometry: Vec<_> = path.iter().map(|p| p.geometry).collect();
             stock::check_bend_clearance(&geometry, region, at, turn).map_err(|e| path_error(path, e))?;
             kernel::sweep(&plane, region, &path.iter().map(path_segment).collect::<Vec<_>>())?
         };
-        round.push(round_record(vals, profile, at, turn, path)?);
+        round.push(round_record(vals, profile, at, turn, path, straight_frame)?);
         made.push(crate::lineage::numbered_tool(body));
     }
     if !f.body_names.is_empty() {
@@ -61,7 +67,6 @@ pub(super) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Featu
         return Ok(());
     }
     let base = body_name.as_deref().map(str::trim).filter(|n| !n.is_empty()).map_or(description, str::to_string);
-    let ids = path_keys(&paths, *continuous);
     for ((name, t), record) in member_names(st, &ids, names, &base).into_iter().zip(made).zip(round) {
         let mut body = ModelBody::traced_new(name, t, f.id);
         if let Some(record) = record {
@@ -73,12 +78,15 @@ pub(super) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Featu
 }
 
 /// The feature's path selection and section settings, shared by evaluation and end caps.
+/// Rotate steps use member-name keys and turn straight stock about its profile's box centre.
 struct Layout {
     paths: Vec<Vec<Piece>>,
     regions: Vec<Region2>,
     description: String,
     at: Vec2,
     turn: f64,
+    turns: BTreeMap<String, f64>,
+    centre: Vec2,
 }
 
 /// Resolve `f`'s path sketch, selected curves, profile regions, anchor point and turn angle.
@@ -113,7 +121,21 @@ fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &Mode
         Some(e) => val(vals, e, Kind::Angle)?,
         None => 0.0,
     };
-    Ok(Layout { paths, regions, description, at, turn })
+    let turns = member_turns(doc, vals, FeatureId(f.id)).into_iter().map(|(line, (_, a))| (line, a)).collect();
+    let centre = frame::anchor_point(&regions, frame::Anchor::Center);
+    Ok(Layout { paths, regions, description, at, turn, turns, centre })
+}
+
+/// The plane a member's profile is laid in at `a`, square to the line on to `b`: profile point
+/// `at` on the line, the profile turned `turn` about it. A Rotate step's turn `own` turns it on
+/// about the profile point `centre`, which stays where it was.
+fn member_plane(a: Vec3, b: Vec3, turn: f64, at: Vec2, centre: Vec2, own: Option<f64>) -> Option<Plane> {
+    let (x, y) = frame::member_axes(b - a, turn)?;
+    let origin = a - x * at.x - y * at.y;
+    let Some(t) = own else { return Plane::new(origin, x, y) };
+    let pivot = origin + x * centre.x + y * centre.y;
+    let (x, y) = frame::member_axes(b - a, turn + t.rem_euclid(std::f64::consts::TAU))?;
+    Plane::new(pivot - x * centre.x - y * centre.y, x, y)
 }
 
 /// The section of a straight member, used by the existing end-cap command.
@@ -128,7 +150,7 @@ pub(crate) fn member_section(
     let FeatureKind::FrameMember { continuous, .. } = &f.kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
-    let Layout { paths, regions, at, turn, .. } = layout(doc, vals, f, st)?;
+    let Layout { paths, regions, at, turn, turns, centre, .. } = layout(doc, vals, f, st)?;
     let keys = path_keys(&paths, *continuous);
     let path = keys
         .iter()
@@ -143,9 +165,36 @@ pub(crate) fn member_section(
         .line_length()
         .map_err(|e| path_error(path, e))?
         .ok_or_else(|| DocError::Invalid("not supported yet: end caps on curved frame members".into()))?;
-    let plane = stock::section_plane(&piece.geometry, at, turn).map_err(|e| path_error(path, e))?;
+    let data = piece.geometry.data();
+    let plane = member_plane(data.a, data.b, turn, at, centre, turns.get(line).copied())
+        .ok_or_else(|| DocError::Invalid(format!("line `{line}`: no plane square to it")))?;
     let region = regions.into_iter().next().ok_or_else(|| DocError::Invalid("the member profile has no area".into()))?;
     Ok((plane, length, region))
+}
+
+/// The point member `line` of `f` turns about, halfway along it: the centre of the profile's
+/// bounding box, which a Rotate step's turn leaves where it is ([`member_plane`]).
+pub(crate) fn member_pivot(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState, line: &str) -> Result<Vec3> {
+    let FeatureKind::FrameMember { continuous, .. } = &f.kind else {
+        return Err(DocError::Invalid("not a frame member feature".into()));
+    };
+    let Layout { paths, at, turn, centre, .. } = layout(doc, vals, f, st)?;
+    let keys = path_keys(&paths, *continuous);
+    let path = keys
+        .iter()
+        .zip(&paths)
+        .find_map(|(key, path)| (key == line).then_some(path))
+        .ok_or_else(|| DocError::Unknown(format!("line `{line}` of the member feature")))?;
+    let [piece] = path.as_slice() else {
+        return Err(DocError::Invalid("not supported yet: rotation on curved frame members".into()));
+    };
+    if piece.geometry.line_length().map_err(|e| path_error(path, e))?.is_none() {
+        return Err(DocError::Invalid("not supported yet: rotation on curved frame members".into()));
+    }
+    let data = piece.geometry.data();
+    let plane =
+        member_plane(data.a, data.b, turn, at, centre, None).ok_or_else(|| DocError::Invalid(format!("line `{line}`: no plane square to it")))?;
+    Ok(plane.origin + plane.x * centre.x + plane.y * centre.y + (data.b - data.a) * 0.5)
 }
 
 /// Nominal section and terminal datums, from the same transport the sweep uses.
@@ -155,6 +204,7 @@ fn round_record(
     at: Vec2,
     turn: f64,
     path: &[Piece],
+    straight_frame: Option<(Plane, f64)>,
 ) -> Result<Option<crate::frame_cope::RoundMember>> {
     use crate::frame_cope::{Bounds, RoundMember, Terminal};
     use solidcore_ops::frame_member::Segment;
@@ -162,7 +212,8 @@ fn round_record(
     let MemberProfile::Library { profile } = profile else { return Ok(None) };
     let frame::Profile::RoundTube { diameter, wall } = profile.resolve(|_, e, kind| val(vals, e, kind))? else { return Ok(None) };
     // An off-centre circular profile sweeps about a different centreline at a bend.
-    if at.x.abs() > 1e-9 || at.y.abs() > 1e-9 {
+    // Straight stock uses the actual extrusion frame, including its centre-pivot translation.
+    if straight_frame.is_none() && (at.x.abs() > 1e-9 || at.y.abs() > 1e-9) {
         return Ok(None);
     }
     let radius = diameter / 2.0;
@@ -179,7 +230,12 @@ fn round_record(
         (Some(f), Some(l)) => [f, l],
         _ => return Err(DocError::Invalid("empty member path".into())),
     };
-    let [start_plane, end_plane] = solidcore_ops::frame_member::terminal_planes(&pieces, Vec2::ZERO, turn).map_err(|e| fail(&e))?;
+    let [start_plane, end_plane] = match straight_frame {
+        // Reuse the very plane extruded above: recomputing from the path and global turn
+        // would lose both the Rotate step's seam direction and the profile-centre pivot.
+        Some((plane, length)) => [plane, plane.offset(length)],
+        None => stock::terminal_planes(&pieces, Vec2::ZERO, turn).map_err(|e| fail(&e))?,
+    };
     let start = match first.line_length().map_err(|e| fail(&e))? {
         Some(length) => {
             Some(Terminal::new(tube_cope::terminal_at(&start_plane, length, false).map_err(|e| fail(&e))?, bounds.iter().skip(1).copied().collect()))
@@ -278,6 +334,56 @@ pub fn member_names(st: &ModelState, lines: &[String], pinned: &BTreeMap<String,
         }
     }
     out.into_iter().map(|n| n.unwrap_or_else(|| base.to_string())).collect()
+}
+
+/// The angle each line of the frame member `frame` is turned to by active Rotate steps after
+/// it: line id to the angle's expression and its value (radians), a later step replacing an
+/// earlier one. A step whose angle doesn't evaluate with `vals` turns nothing (it reports why
+/// itself, `check_turn`): an earlier step for the line, if any, stands.
+pub fn member_turns(doc: &Document, vals: &BTreeMap<String, Value>, frame: FeatureId) -> BTreeMap<String, (Expr, f64)> {
+    turn_steps(doc, frame).filter_map(|(line, e)| Some((line.to_string(), (e.clone(), turn_angle(vals, e).ok()?)))).collect()
+}
+
+/// The active Rotate steps of the frame member `frame`, in timeline order: each one's line id and
+/// angle, whether it evaluates or not. Active: after the frame, before the marker, not suppressed.
+pub(super) fn turn_steps(doc: &Document, frame: FeatureId) -> impl Iterator<Item = (&str, &Expr)> {
+    let at = doc.feature_index(frame.0);
+    let end = doc.marker.unwrap_or(doc.features.len()).min(doc.features.len());
+    let after = at.map_or(end, |at| at.saturating_add(1));
+    doc.features.iter().take(end).skip(after).filter_map(move |f| match &f.kind {
+        FeatureKind::FrameMemberTurn { member, angle } if !f.suppressed && member.feature == frame => Some((member.line.as_str(), angle)),
+        _ => None,
+    })
+}
+
+/// A Rotate step's angle (radians), refused unless it evaluates to a finite number.
+fn turn_angle(vals: &BTreeMap<String, Value>, angle: &Expr) -> Result<f64> {
+    let a = val(vals, angle, Kind::Angle)?;
+    if !a.is_finite() {
+        return Err(DocError::Invalid("The angle must be a finite number".into()));
+    }
+    Ok(a)
+}
+
+/// A Rotate step's checks: its frame member is there, earlier, and still has the line, and its
+/// angle evaluates.
+pub(super) fn check_turn(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -> Result<()> {
+    let FeatureKind::FrameMemberTurn { member, angle } = &f.kind else {
+        return Err(DocError::Invalid("not a rotate member feature".into()));
+    };
+    let gone = || DocError::Invalid("Its frame member is gone".into());
+    let source = doc.feature(member.feature.0).filter(|m| !m.suppressed && matches!(m.kind, FeatureKind::FrameMember { .. })).ok_or_else(gone)?;
+    let (Some(from), Some(here)) = (doc.feature_index(source.id), doc.feature_index(f.id)) else { return Err(gone()) };
+    if from >= here {
+        return Err(DocError::Invalid("Its frame member must come earlier in the timeline".into()));
+    }
+    if !member_line_ids(st, &source.kind)?.contains(&member.line) {
+        return Err(DocError::Invalid(format!("Line `{}` of its frame member is gone", member.line)));
+    }
+    // A bent path has no single straight axis to rotate about. Report that on the
+    // Rotate step instead of silently accepting a turn the swept member cannot use.
+    member_pivot(doc, vals, source, st, &member.line)?;
+    turn_angle(vals, angle).map(|_| ())
 }
 
 /// Body-name keys for a `FrameMember` feature in `st`, in the order its members are made:
