@@ -95,7 +95,8 @@ pub struct ModelBody {
     pub(crate) sketch_frames: Option<Arc<Vec<Option<Plane>>>>,
     /// The component the body belongs to (set after each feature).
     pub component: u64,
-    /// A timeline transfer has converted this body into its evaluated owner's frame.
+    /// Its owner is `component`, not looked up by name or feature: a timeline transfer has
+    /// converted it into that owner's frame, or it was split off a body there.
     pub transferred: bool,
     /// For a piece a cut or intersect split off a body (past its first, which keeps the body's
     /// name): that body's name, so the piece can take its material and look.
@@ -5824,7 +5825,8 @@ fn apply_traced_with(
             // The exact box of the body is measured only when it can show a tool apart of it: a
             // tool inside the body is not apart from it, and measuring the box of a body with
             // many faces costs the kernel minutes (#18821: 347 s for the cup of the report,
-            // against 30 s for the cut the box was measured for).
+            // against 30 s for the cut the box was measured for). Nor is a tool that meets the
+            // box of the body's vertices, which lies inside its exact box.
             let reach: Option<Vec<Option<solidcraft_geom::Aabb3>>> =
                 (op == Operation::Cut && !tools.iter().any(|t| t.body.is_mesh())).then(|| tools.iter().map(|t| more::exact_box(&t.body)).collect());
             for &ti in &target_idx {
@@ -5836,6 +5838,7 @@ fn apply_traced_with(
                     && !reach.is_empty()
                     && !target.body.is_mesh()
                     && !more::tools_inside(target, reach)
+                    && !more::tools_meet_vertices(target, reach)
                     && let Some(tb) = more::exact_box(&target.body)
                     && reach.iter().all(|tool| more::boxes_apart(&Some(tb), tool))
                 {
@@ -12416,7 +12419,13 @@ fn eval_feature_kind(
                 while st.body(&name).is_some() {
                     name.push('\'');
                 }
-                st.bodies.push(ModelBody::traced_new(name, b, f.id));
+                // A piece stays with the body, in its component and its frame (as the first piece,
+                // which keeps the body's name, does), wherever the split was made.
+                let mut piece = ModelBody::traced_new(name, b, f.id);
+                piece.component = mb.component;
+                piece.transferred = true;
+                piece.source_transform = mb.source_transform;
+                st.bodies.push(piece);
             }
             Ok(())
         }

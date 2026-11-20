@@ -22,13 +22,14 @@ const TABS_KEPT: f32 = 124.0;
 /// The least width of a document tab before the tabs scroll behind the » list.
 const MIN_TAB: f32 = 90.0;
 /// The expanded design tab (option A): its height and corner radius.
-const DESIGN_PILL_HEIGHT: f32 = 34.0;
+const DESIGN_PILL_HEIGHT: f32 = 30.0;
+const DESIGN_GROUP_BACKING_HEIGHT: f32 = 27.0;
 const PILL_RADIUS: u8 = 8;
 /// The room a pill keeps right of its views: the +, a separator, the close button and its padding.
 const PILL_AFTER: f32 = 63.0;
 /// A view's sub-tab: its height, corner radius, label size, the gap between sub-tabs and the
 /// longest label drawn before it is cut.
-const VIEW_HEIGHT: f32 = 24.0;
+const VIEW_HEIGHT: f32 = 22.0;
 const VIEW_RADIUS: u8 = 5;
 const VIEW_FONT: f32 = 12.5;
 const VIEW_GAP: f32 = 2.0;
@@ -372,6 +373,18 @@ fn icon_button(ui: &mut egui::Ui, bar: Rect, at: f32, b: &BarButton, compact: bo
     b.enabled && clicked
 }
 
+/// Draws the app mark and optional title at the leading edge of a window's bar.
+/// Returns the right edge of the brand so the window can place its next control.
+pub fn paint_brand(painter: &Painter, content: Rect, mark: &dyn Fn(&Painter, Pos2), name: Option<&str>) -> f32 {
+    let left = content.left();
+    let y = content.center().y;
+    mark(painter, pos2(left + 20.0, y));
+    name.map_or(left + 32.0, |name| {
+        let t = Tokens::get();
+        painter.text(pos2(left + 36.0, y), Align2::LEFT_CENTER, name, crate::type_face::semibold(t.font_heading), t.app_bar_text).right()
+    })
+}
+
 /// Draws the bar in `bar`, its controls within `content` (the title bar's room between the
 /// window's own buttons).
 pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOut {
@@ -406,16 +419,8 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
         Rect::from_min_max(pos2(r.left() + span.left, r.center().y - height / 2.0), pos2(r.left() + span.right, r.center().y + height / 2.0))
     };
     let mut actions = Vec::new();
-    (data.mark)(ui.painter(), pos2(r.left() + geometry.mark, r.center().y));
-    if !compact {
-        ui.painter().text(
-            pos2(r.left() + geometry.name, r.center().y),
-            Align2::LEFT_CENTER,
-            data.name,
-            crate::type_face::semibold(t.font_heading),
-            t.app_bar_text,
-        );
-    }
+    let brand = Rect::from_min_max(pos2(r.left() + geometry.mark - 20.0, r.top()), r.right_bottom());
+    paint_brand(ui.painter(), brand, data.mark, (!compact).then_some(data.name));
     let leading = geometry.leading.zip(data.leading).map(|(span, size)| rect(span, size.y));
     // Home.
     let home = rect(geometry.home, 32.0);
@@ -676,6 +681,8 @@ pub struct TabMenuRow<'a> {
     pub separator_before: bool,
     /// The rows of this item's flyout.
     pub children: &'a [TabMenuRow<'a>],
+    pub checked: bool,
+    pub disabled_tip: Option<&'a str>,
 }
 
 impl<'a> TabMenuRow<'a> {
@@ -692,6 +699,8 @@ impl<'a> TabMenuRow<'a> {
             heading: false,
             separator_before: false,
             children: &[],
+            checked: false,
+            disabled_tip: None,
         }
     }
 
@@ -841,9 +850,15 @@ pub enum TabAction {
         from: usize,
         to: usize,
     },
-    /// A view tab dragged from the strip over the workspace.
+    /// The focused view tab was lifted with Space.
+    LiftView {
+        view: usize,
+        origin: Rect,
+    },
+    /// A view tab being dragged. The app decides whether to dock, reorder or move it.
     DockView {
         view: usize,
+        origin: Rect,
         pointer: Pos2,
         released: bool,
     },
@@ -878,6 +893,8 @@ struct TabDrag {
 struct ViewDrag {
     from: usize,
     grab: f32,
+    origin: Rect,
+    cancelled: bool,
 }
 
 /// How the selected design's tab is drawn.
@@ -1050,6 +1067,7 @@ struct Pen<'a> {
     close_design: bool,
     /// The bar's bottom, where the menus open.
     below: f32,
+    view_centres: Vec<(usize, f32)>,
 }
 
 /// How the selected design's tab is laid out: what [`measure`] decided.
@@ -1146,7 +1164,11 @@ fn measure(ui: &egui::Ui, strip: &TabStrip, tab: &DocTab, name: &str, view_typed
     let shown = tab.views.get(active).map_or("", |v| v.name);
     let switch_w = 8.0 + 15.0 + 6.0 + text_width(ui, shown, view_font(true)).min(VIEW_LABEL_MAX) + 6.0 + badge_width(ui, n) + 6.0 + 13.0 + 4.0;
     let switcher = 13.0 + dot + name_w + 8.0 + SLASH + 8.0 + switch_w + 8.0 + 22.0 + 4.0;
-    let width = if kind == SelectedLayout::Pill { pill.min(room) } else { switcher.min(room.max(MIN_TAB)) };
+    let incoming = ui.ctx().data(|data| {
+        let lifted_here = data.get_temp::<ViewDrag>(strip.id.with("view_drag")).is_some_and(|drag| !drag.cancelled);
+        if lifted_here { 0.0 } else { data.get_temp::<(usize, f32)>(strip.id.with("view_drag_slot")).map_or(0.0, |(_, width)| width + VIEW_GAP) }
+    });
+    let width = if kind == SelectedLayout::Pill { (pill + incoming).min(room) } else { switcher.min(room.max(MIN_TAB)) };
     let (name_w, switch_w) = if kind == SelectedLayout::Switcher {
         // The tab's painted frame is two points narrower than its allocation. Keep the
         // switcher and close targets inside it before giving the design name any room.
@@ -1254,10 +1276,14 @@ fn menu_rows<'a>(
         if keys && !row.key_on_selected.is_empty() {
             item = item.key(row.key_on_selected);
         }
-        item.enabled = (!row.needs_others || others) && row.id != off;
+        item.enabled = (!row.needs_others || others) && row.id != off && row.disabled_tip.is_none();
         let mut control = crate::MenuItem::from_item(&item, flyout.as_ref().is_some_and(|f| f.open == Some(i)));
+        control.checked = row.checked.then_some(true);
         control.submenu = !row.children.is_empty();
         let response = control.show(ui);
+        if let Some(tip) = row.disabled_tip {
+            response.clone().backing_on_hover_text(tip);
+        }
         solidcraft_ui_registry::publish_target(&format!("{prefix}{}", row.id), response.rect);
         if let Some(flyout) = flyout.as_deref_mut() {
             if control.submenu {
@@ -1403,6 +1429,32 @@ fn more_button(ui: &mut egui::Ui, strip: &TabStrip, rect: Rect, hidden: usize, p
     }
 }
 
+/// Starts a drag while the primary press still belongs to this tab. Touch needs a dwell
+/// while a mouse uses a movement threshold.
+fn start_view_drag(ui: &egui::Ui, response: &egui::Response, tab: Rect, from: usize) -> Option<ViewDrag> {
+    if !response.is_pointer_button_down_on() {
+        return None;
+    }
+    const MOUSE_TRAVEL: f32 = 4.0;
+    const TOUCH_HOLD: f64 = 0.250;
+    let (origin, dwell) = ui.input(|input| {
+        if !input.pointer.primary_down() || input.key_pressed(egui::Key::Escape) {
+            return (None, None);
+        }
+        let Some(origin) = input.pointer.press_origin() else { return (None, None) };
+        if input.any_touches() {
+            let elapsed = input.pointer.press_start_time().map_or(0.0, |started| input.time - started);
+            return if elapsed >= TOUCH_HOLD { (Some(origin), None) } else { (None, Some(TOUCH_HOLD - elapsed)) };
+        }
+        let moved = input.pointer.interact_pos().is_some_and(|point| origin.distance_sq(point) >= MOUSE_TRAVEL * MOUSE_TRAVEL);
+        (moved.then_some(origin), None)
+    });
+    if let Some(delay) = dwell.and_then(|dwell| std::time::Duration::try_from_secs_f64(dwell).ok()) {
+        ui.ctx().request_repaint_after(delay);
+    }
+    origin.map(|point| ViewDrag { from, grab: point.x - tab.left(), origin: tab, cancelled: false })
+}
+
 /// One view's sub-tab in `vr`: icon, label, the shown view's underline and close button; a click
 /// shows it, a middle click closes it, a right click opens its menu, a drag starts a move.
 fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: Rect, pen: &mut Pen) {
@@ -1413,7 +1465,7 @@ fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: 
     let close = view.active || detached;
     let opacity = if detached { DETACHED_VIEW_OPACITY } else { 1.0 };
     let main = if close { Rect::from_min_max(vr.min, pos2(vr.right() - 20.0, vr.bottom())) } else { vr };
-    let resp = ui.interact(main, ui.scope_id().with(("doc_view", k)), Sense::click_and_drag()).backing_on_hover_text(view.tip);
+    let resp = ui.interact(main, ui.scope_id().with(("doc_view", k)), Sense::click_and_drag());
     solidcraft_ui_registry::publish_target(&format!("{}{k}", h.view), vr);
     resp.widget_info(|| {
         let name = if detached {
@@ -1423,10 +1475,20 @@ fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: 
         };
         egui::WidgetInfo::selected(egui::Role::Tab, true, view.active, name)
     });
+    if !detached && pen.drag.is_none() && !pen.rename.as_ref().is_some_and(|(index, _)| *index == k) {
+        pen.drag = start_view_drag(ui, &resp, vr, k);
+    }
+    let dragged = pen.drag.is_some_and(|drag| drag.from == k);
+    if dragged && pen.drag.is_some_and(|drag| !drag.cancelled) {
+        let dash = Stroke::new(1.0, t.accent);
+        painter.extend(crate::dashed_line(&outline(vr.shrink(0.5)), vr.expand(2.0), dash, 3.0, 2.0));
+        return;
+    }
+    let resp = resp.backing_on_hover_text(view.tip);
     let deleted = view.state == ViewState::Deleted;
     if view.active {
         painter.rect_filled(vr, VIEW_RADIUS, t.app_bar_hover_strong);
-    } else if resp.hovered() || pen.drag.is_some_and(|d| d.from == k) {
+    } else if resp.hovered() {
         painter.rect_filled(vr, VIEW_RADIUS, t.app_bar_hover);
     }
     if deleted {
@@ -1434,7 +1496,7 @@ fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: 
         painter.extend(crate::dashed_line(&outline(vr.shrink(0.5)), vr.expand(2.0), dash, 3.0, 2.0));
     }
     if resp.has_focus() {
-        painter.rect_stroke(vr.expand(1.0), VIEW_RADIUS + 1, Stroke::new(2.0, t.accent), egui::StrokeKind::Outside);
+        painter.rect_stroke(vr, VIEW_RADIUS, Stroke::new(2.0, t.accent), egui::StrokeKind::Inside);
     }
     let dim = t.app_bar_text.gamma_multiply(0.55);
     let ink = if deleted {
@@ -1496,17 +1558,24 @@ fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: 
             return;
         }
     }
-    if resp.middle_clicked() {
+    if !detached
+        && !dragged
+        && resp.has_focus()
+        && ui.input_mut(|i| i.modifiers == egui::Modifiers::NONE && i.consume_key(egui::Modifiers::NONE, egui::Key::Space))
+    {
+        pen.actions.push(TabAction::LiftView { view: k, origin: vr });
+    } else if resp.middle_clicked() {
         pen.actions.push(TabAction::CloseView(k));
     } else if resp.secondary_clicked() {
         pen.popup = Some((Popup::View(k), pos2(vr.left(), pen.below), vr, ui.ctx().cumulative_frame_nr()));
-    } else if resp.clicked() {
+    } else if resp.clicked() && !dragged {
+        resp.request_focus();
         pen.actions.push(TabAction::SelectView(k));
     }
-    if !detached && resp.drag_started_by(egui::PointerButton::Primary) {
-        let origin = ui.input(|i| i.pointer.press_origin()).unwrap_or(vr.center());
-        pen.drag = Some(ViewDrag { from: k, grab: origin.x - vr.left() });
-    }
+}
+
+fn group_backing(rect: Rect) -> Rect {
+    rect.shrink2(vec2(0.0, (rect.height() - DESIGN_GROUP_BACKING_HEIGHT).max(0.0) * 0.5))
 }
 
 /// The selected design's tab as a pill (option A) in `pr`: its frame and separator, the views that
@@ -1518,8 +1587,9 @@ fn draw_pill(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g: &Ge
     let painter = ui.painter().clone();
     let line = Stroke::new(1.0, line_colour(&t));
     let cy = pr.center().y;
-    painter.rect_filled(pr, PILL_RADIUS, t.app_bar_tab_active);
-    painter.rect_stroke(pr, PILL_RADIUS, line, egui::StrokeKind::Inside);
+    let backing = group_backing(pr);
+    painter.rect_filled(backing, PILL_RADIUS, t.app_bar_tab_active);
+    painter.rect_stroke(backing, PILL_RADIUS, line, egui::StrokeKind::Inside);
     let separator = |x: f32| painter.line_segment([pos2(x, cy - 9.0), pos2(x, cy + 9.0)], line);
     let name_end = pr.left() + 13.0 + g.dot + g.name_w + 10.0;
     separator(name_end + 0.5);
@@ -1533,28 +1603,88 @@ fn draw_pill(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g: &Ge
     let plus = if has_layout { layout.translate(vec2(-LAYOUT_BUTTON, 0.0)) } else { layout };
     let start = name_end + 1.0 + 8.0 + VIEW_GAP;
     let active = tab.views.iter().position(|v| v.active).unwrap_or(0);
-    let (first, count) = view_window(&g.view_ws, active, pr.right() - pill_after(strip) - start, g.more_w + VIEW_GAP);
+    let right = (pr.right() - pill_after(strip)).max(start);
+    let (first, count) = view_window(&g.view_ws, active, right - start, g.more_w + VIEW_GAP);
+    let more = (count < tab.views.len()).then_some((right - g.more_w).max(start));
+    let right = more.map_or(right, |left| (left - VIEW_GAP).max(start));
+    let slot = ui.ctx().data(|data| data.get_temp::<(usize, f32)>(strip.id.with("view_drag_slot")));
+    let source = pen.drag.filter(|drag| !drag.cancelled);
+    let gap = slot.map(|(index, width)| {
+        let width = width.min((right - start).max(0.0));
+        let mut x = start;
+        let mut local = tab.views.iter().take(first).filter(|view| view.to_window.is_none()).count();
+        for (k, view) in tab.views.iter().enumerate().skip(first).take(count) {
+            if local >= index {
+                break;
+            }
+            if source.is_none_or(|drag| drag.from != k) {
+                x += g.view_ws[k] + VIEW_GAP;
+            }
+            if view.to_window.is_none() {
+                local += 1;
+            }
+        }
+        (index, Rect::from_min_size(pos2(x.min(right - width), cy - VIEW_HEIGHT * 0.5), vec2(width, VIEW_HEIGHT)))
+    });
+    ui.ctx().data_mut(|data| {
+        let id = strip.id.with("view_drag_gap");
+        if let Some(gap) = gap {
+            data.insert_temp(id, gap);
+        } else {
+            data.remove::<(usize, Rect)>(id);
+        }
+    });
+    let slide_time = if slot.is_some() && ui.ctx().global_style().animation_time > 0.0 { 0.14 } else { 0.0 };
+    let clip = ui.clip_rect();
+    ui.set_clip_rect(clip.intersect(Rect::from_min_max(pos2(start, pr.top()), pos2(right, pr.bottom()))));
     let mut x = start;
+    let mut local = tab.views.iter().take(first).filter(|view| view.to_window.is_none()).count();
     for (k, view) in tab.views.iter().enumerate().skip(first).take(count) {
         let w = g.view_ws.get(k).copied().unwrap_or(0.0);
-        draw_view(ui, strip, k, view, Rect::from_min_size(pos2(x, cy - VIEW_HEIGHT / 2.0), vec2(w, VIEW_HEIGHT)), pen);
+        let rect = Rect::from_min_size(pos2(x, cy - VIEW_HEIGHT / 2.0), vec2(w, VIEW_HEIGHT));
+        let opening_after = gap.is_some_and(|(index, _)| local >= index);
+        let open = gap.filter(|_| opening_after).map_or(0.0, |(_, rect)| rect.width() + VIEW_GAP);
+        let close = source.filter(|drag| slot.is_some() && k > drag.from).map_or(0.0, |drag| drag.origin.width() + VIEW_GAP);
+        let offset = ui.ctx().animate_value_with_time(strip.id.with(("view_slide", k)), open - close, slide_time);
+        if view.to_window.is_none() {
+            // A moving neighbour cannot move the zone that chose the move.
+            pen.view_centres.push((local, rect.center().x));
+            local += 1;
+        }
+        let rect = rect.translate(vec2(offset, 0.0));
+        if gap.is_none() || source.is_none_or(|drag| drag.from != k) {
+            let region = ui.clip_rect();
+            if let Some((_, gap)) = gap {
+                let mut side = region;
+                if opening_after {
+                    side.min.x = side.min.x.max(gap.right());
+                } else {
+                    side.max.x = side.max.x.min(gap.left());
+                }
+                ui.set_clip_rect(side);
+            }
+            if ui.clip_rect().is_positive() {
+                draw_view(ui, strip, k, view, rect, pen);
+            }
+            ui.set_clip_rect(region);
+        }
         x += w + VIEW_GAP;
     }
-    if count < tab.views.len() {
+    ui.set_clip_rect(clip);
+    if let Some(x) = more {
         more_button(ui, strip, Rect::from_min_size(pos2(x, cy - VIEW_HEIGHT / 2.0), vec2(g.more_w, VIEW_HEIGHT)), tab.views.len() - count, pen);
     }
-    let pointer = ui.input(|i| i.pointer.interact_pos());
+    let pointer = ui.ctx().pointer_interact_pos();
     let released = ui.input(|i| i.pointer.primary_released());
-    if let Some((d, pointer)) = pen.drag.zip(pointer).filter(|(_, p)| p.y > pen.below + 6.0) {
-        pen.actions.push(TabAction::DockView { view: d.from, pointer, released });
-    } else if let Some(d) = pen.drag.filter(|d| (first..first + count).contains(&d.from)) {
-        let widths: Vec<f32> = (first..first + count).map(|k| g.view_ws.get(k).copied().unwrap_or(0.0) + VIEW_GAP).collect();
-        let left = ui.ctx().pointer_latest_pos().map_or(start, |p| p.x) - d.grab;
-        let slot = drop_slot(left, start, &widths, first, d.from);
-        let at = slot_left(start, &widths, first, d.from, slot) - 1.0;
-        painter.line_segment([pos2(at, cy - 10.0), pos2(at, cy + 10.0)], Stroke::new(2.0, t.accent));
-        if released && slot != d.from {
-            pen.actions.push(TabAction::ReorderView { from: d.from, to: slot });
+    let viewport = ui.ctx().viewport_rect();
+    if let Some((drag, pointer)) = pen.drag.filter(|drag| !drag.cancelled).zip(pointer) {
+        pen.actions.push(TabAction::DockView { view: drag.from, origin: drag.origin, pointer, released });
+        if released && (first..first + count).contains(&drag.from) && pointer.y <= pen.below + 6.0 && viewport.contains(pointer) {
+            let widths: Vec<f32> = (first..first + count).map(|k| g.view_ws.get(k).copied().unwrap_or(0.0) + VIEW_GAP).collect();
+            let slot = drop_slot(pointer.x - drag.grab, start, &widths, first, drag.from);
+            if slot != drag.from {
+                pen.actions.push(TabAction::ReorderView { from: drag.from, to: slot });
+            }
         }
     }
     if released {
@@ -1696,7 +1826,7 @@ fn draw_switcher(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g:
     let t = Tokens::get();
     let painter = ui.painter().clone();
     let cy = pr.center().y;
-    painter.rect_filled(pr, PILL_RADIUS, t.app_bar_tab_active);
+    painter.rect_filled(group_backing(pr), t.radius_md, t.app_bar_tab_active);
     let slash_x = pr.left() + 13.0 + g.dot + g.name_w + 8.0;
     painter.text(pos2(slash_x, cy), Align2::LEFT_CENTER, "/", FontId::proportional(t.font_button), t.app_bar_text.gamma_multiply(0.5));
     let shown =
@@ -1834,13 +1964,60 @@ pub fn clear_view_popup(ctx: &egui::Context, strip: egui::Id) {
     });
 }
 
+/// The selected design strip can receive a view from another window.
+#[derive(Debug)]
+pub struct ViewDropZone {
+    pub document: usize,
+    pub rect: Rect,
+    pub view_centres: Vec<(usize, f32)>,
+}
+
+/// The laid-out opening, shared by the strip and the drag preview.
+pub fn view_drag_gap(ctx: &egui::Context, strip: egui::Id, index: usize) -> Option<Rect> {
+    ctx.data(|data| data.get_temp::<(usize, Rect)>(strip.with("view_drag_gap")))
+        .filter(|(current, rect)| *current == index && rect.is_positive())
+        .map(|(_, rect)| rect)
+}
+
+/// Leave room for an insertion before the given local index. Clear it when the pointer leaves.
+pub fn set_view_drag_slot(ctx: &egui::Context, strip: egui::Id, index: Option<usize>, width: f32) {
+    let id = strip.with("view_drag_slot");
+    let target = index.filter(|_| width.is_finite() && width > 0.0).map(|index| (index, width));
+    let changed = ctx.data_mut(|data| {
+        if data.get_temp::<(usize, f32)>(id) == target {
+            return false;
+        }
+        if let Some(slot) = target {
+            data.insert_temp(id, slot);
+        } else {
+            data.remove::<(usize, f32)>(id);
+        }
+        true
+    });
+    if changed {
+        ctx.request_repaint();
+    }
+}
+
+/// The strip owns this drag until the user releases the pointer or cancels it.
+pub fn view_drag_active(ctx: &egui::Context, strip: egui::Id) -> bool {
+    ctx.data(|d| d.get_temp::<ViewDrag>(strip.with("view_drag")).is_some_and(|drag| !drag.cancelled))
+        && ctx.input(|i| i.pointer.primary_down() || i.pointer.primary_released())
+}
+
 /// Draws the document tabs in `r` from `x0` to `x1`: click to select, × to close, drag to
 /// reorder, a right-click for the tab's menu, » for every tab when they don't all fit, + for a
 /// new one. The selected design with several views expands to show them (see [`DocTab::views`]).
 pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) -> Vec<TabAction> {
+    tabs_with_view_drop_zones(ui, strip, r, x0, x1).0
+}
+
+/// Draw the strip and report the current drop geometry in window coordinates.
+pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) -> (Vec<TabAction>, Vec<ViewDropZone>) {
     let t = Tokens::get();
     let h = strip.handles;
     let n = strip.tabs.len();
+    let mut view_drop_zones = Vec::new();
     let mut actions = Vec::new();
     // Each tab fits its name (up to MAX_FIT) while all of them fit; otherwise they share the room.
     const MAX_FIT: f32 = 200.0;
@@ -1887,9 +2064,13 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
         rename: strip.view_rename.take(),
         actions: Vec::new(),
         popup: ui.ctx().data(|d| d.get_temp::<PopupState>(popup_id)).flatten(),
-        drag: ui.ctx().data(|d| d.get_temp::<ViewDrag>(vdrag_id)).filter(|_| (held_down || released) && !escape),
+        drag: ui.ctx().data(|d| d.get_temp::<ViewDrag>(vdrag_id)).filter(|_| held_down || released).map(|mut drag| {
+            drag.cancelled |= escape;
+            drag
+        }),
         close_design: false,
         below: r.bottom(),
+        view_centres: Vec::new(),
     };
     // The shown tabs' widths, in strip order.
     let widths: Vec<f32> = (first..first + shown)
@@ -1940,7 +2121,7 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
         let plain = kind == SelectedLayout::Plain;
         let height = match kind {
             SelectedLayout::Plain => r.height() - 8.0,
-            SelectedLayout::Pill => DESIGN_PILL_HEIGHT.min(r.height() - 2.0),
+            SelectedLayout::Pill => DESIGN_PILL_HEIGHT.min(r.height() - 4.0),
             SelectedLayout::Switcher => 30.0_f32.min(r.height() - 4.0),
         };
         let tr = Rect::from_center_size(pos2(left + (w - 2.0) / 2.0, r.center().y), vec2(w - 2.0, height));
@@ -1989,6 +2170,7 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
             (SelectedLayout::Switcher, Some(g)) => draw_switcher(ui, strip, &tab, tr, g, &mut pen),
             _ => {}
         }
+        view_drop_zones.push(ViewDropZone { document: i, rect: tr, view_centres: std::mem::take(&mut pen.view_centres) });
         let lit = resp.hovered() || held.is_some_and(|(from, _)| from == i);
         if plain {
             tab_shape(ui.painter(), &t, tr, active, lit || resp.has_focus());
@@ -2139,7 +2321,7 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
     actions.append(&mut pen.actions);
     // A new tab.
     if strip.pop_out {
-        return actions;
+        return (actions, view_drop_zones);
     }
     let pr = Rect::from_center_size(pos2(x + 14.0, r.center().y), vec2(22.0, 22.0));
     let presp = ui.interact(pr, ui.scope_id().with("doc_new"), Sense::click());
@@ -2158,7 +2340,7 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
     }
     actions.extend(dropped.map(|(from, to)| TabAction::Reorder { from, to }));
     actions.extend(torn.map(TabAction::TearOff));
-    actions
+    (actions, view_drop_zones)
 }
 
 /// A row of the File menu: what it runs (its `id`), its label, shortcut and kit icon.

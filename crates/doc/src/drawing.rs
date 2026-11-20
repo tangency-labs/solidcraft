@@ -241,6 +241,10 @@ const RECORD_FIELDS: &[&str] = &[
     "tables",
     "notes",
     "revisions",
+    // Where image files, placements and logos are set aside (`image::set_aside`).
+    "image_files",
+    "placed_images",
+    "logo_cells",
 ];
 
 /// Move the elements of the list `key` that don't read as `T` out of a newer build's drawing.
@@ -541,6 +545,7 @@ impl Drawing {
     fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> Result<Drawing> {
         DRAWING.check_numbers(&v, "properties")?;
         DRAWING.upgrade(&mut v, version, applied)?;
+        image::take_back(&mut v);
         sketch::check_raw(&v).map_err(damaged)?;
         fill::check_raw(&v).map_err(damaged)?;
         let mut d: Drawing = serde_json::from_value(v).map_err(damaged)?;
@@ -615,14 +620,12 @@ impl Drawing {
     pub fn to_json(&self) -> Result<String> {
         self.validate()?;
         let unsaved = |e: serde_json::Error| DocError::Invalid(format!("drawing not saved: {e}"));
-        let text = match &self.newer_file {
-            None => serde_json::to_string_pretty(self).map_err(unsaved)?,
-            Some(file) => {
-                let mut value = serde_json::to_value(self).map_err(unsaved)?;
-                file.restore(&mut value);
-                serde_json::to_string_pretty(&value).map_err(unsaved)?
-            }
-        };
+        let mut value = serde_json::to_value(self).map_err(unsaved)?;
+        image::set_aside(&mut value);
+        if let Some(file) = &self.newer_file {
+            file.restore(&mut value);
+        }
+        let text = serde_json::to_string_pretty(&value).map_err(unsaved)?;
         require(text.len() <= MAX_DRAWING_BYTES, || format!("drawing too large to save (at most {} MiB)", MAX_DRAWING_BYTES >> 20))?;
         Ok(text)
     }
