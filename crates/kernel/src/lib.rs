@@ -228,6 +228,7 @@ pub use prism_measure::{PrismSection, certified_prism_equivalent, certified_pris
 pub use repair::{Hole, RebuiltFace, RefusedFace, RepairOptions, RepairRefusal, RepairReport, SewnGap, repair};
 pub use sew::{EdgeSpec, FaceSpec, MAX_CHAIN_POINTS, SurfSpec, sew, sew_touching, sew_touching_traced};
 pub use solidcore_ops::dome::{DomeRefusal, DomeShape};
+pub use solidcore_ops::member_turn::{ParallelTurnError, parallel_turn};
 pub use solidcraft_smlib::hold_a_kernel;
 pub use solidcraft_smlib::start;
 pub use solidcraft_smlib::stop::Stop;

@@ -822,6 +822,9 @@ pub enum RoomReason {
     /// A blend past its faces keeps none of its edge, no corner taking any of it: a knife
     /// edge's chamfer wider than the part takes all of it.
     OverflowKeepsNothing,
+    /// A round passes over the face it ends on: that face falls away under it, so nothing
+    /// ends the round there.
+    EndPassesOverEndFace,
 }
 
 /// What the largest size that builds a refused blend ([`Error::TooLarge`]) sizes.
@@ -861,6 +864,9 @@ impl RoomReason {
             RoomReason::RunsIntoMaterial => "the blend runs off a face into the material",
             RoomReason::OverflowKeepsNothing => {
                 "the round or chamfer runs past its faces and keeps none of its edge"
+            }
+            RoomReason::EndPassesOverEndFace => {
+                "the round passes over the face it ends on, which falls away under it, so nothing ends the round there"
             }
         }
     }

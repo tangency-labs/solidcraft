@@ -329,7 +329,8 @@ pub const fn no_room_class(reason: NoRoomReason) -> ErrorKind {
         R::JoinOffsetsDiffer => ErrorKind::JoinOffsetsDiffer,
         R::StripBelowResolution => ErrorKind::StripBelowResolution,
         R::EndPastSideEdge => ErrorKind::EndPastSideEdge,
-        R::EndOverflowsSideEdge => ErrorKind::EndOverflowsSideEdge,
+        // an End the round overflows: past its side edge, or over its end face whole
+        R::EndOverflowsSideEdge | R::EndPassesOverEndFace => ErrorKind::EndOverflowsSideEdge,
         R::EndRollsIntoSmoothEnd => ErrorKind::EndRollsIntoSmoothEnd,
         R::EndAtSeamVertex => ErrorKind::EndAtSeamVertex,
         R::TangentContinuationEndUnsupported => ErrorKind::TangentContinuationEnd,
@@ -967,6 +968,10 @@ mod tests {
                 ErrorKind::EndOverflowsSideEdge,
             ),
             (
+                BlendFailure::NoRoom(R::EndPassesOverEndFace),
+                ErrorKind::EndOverflowsSideEdge,
+            ),
+            (
                 BlendFailure::NoRoom(R::EndRollsIntoSmoothEnd),
                 ErrorKind::EndRollsIntoSmoothEnd,
             ),
@@ -1327,7 +1332,7 @@ mod tests {
     /// sites lowers the pin to the new count, and a new site builds a typed cause.
     #[test]
     fn the_phrase_cause_sites_only_go_down() {
-        const PHRASE_CAUSE_SITES: usize = 930;
+        const PHRASE_CAUSE_SITES: usize = 903;
         use crate::blend::fillet_executive::NoRoomReason as R;
         let causes = [
             BlendFailure::NoRoom(R::BallDoesNotFit),
