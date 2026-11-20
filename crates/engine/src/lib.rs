@@ -3307,16 +3307,28 @@ impl Session {
     }
 
     fn run_script_with(&mut self, script: &Value, profile: Option<bool>, each: &mut dyn FnMut(usize, &Value)) -> Result<(Vec<Value>, Option<Value>)> {
+        let run = self.run_script_kept(script, profile, each)?;
+        match run.failure {
+            Some(f) => Err(f.into_error()),
+            None => Ok((run.results, run.timings)),
+        }
+    }
+
+    /// [`Session::run_script_each`], timing each command as [`Session::run_script_timed`] does
+    /// when `profile` is given, that keeps what ran when a step fails (#19964): the results of
+    /// the steps before it, the timings of those and of the failing one, and the failure. Only a
+    /// script that is not a list of steps is an error.
+    pub fn run_script_kept(&mut self, script: &Value, profile: Option<bool>, each: &mut dyn FnMut(usize, &Value)) -> Result<ScriptRun> {
         let list = script_steps(script)?;
-        let mut out = Vec::new();
+        let mut results = Vec::new();
         let mut steps = Vec::new();
+        let mut failure = None;
         let clock = timing::Clock::start();
         for (i, c) in list.iter().enumerate() {
-            let id = c
-                .get("command")
-                .or_else(|| c.get("id"))
-                .and_then(Value::as_str)
-                .ok_or_else(|| EngineError::Other(format!("script step {}: missing `command`", i + 1)))?;
+            let Some(id) = c.get("command").or_else(|| c.get("id")).and_then(Value::as_str) else {
+                failure = Some(StepFailure { index: i, command: None, error: EngineError::Other("missing `command`".into()) });
+                break;
+            };
             let p = c.get("params").cloned().unwrap_or(Value::Null);
             let r = match profile {
                 Some(profile) => {
@@ -3326,12 +3338,61 @@ impl Session {
                 }
                 None => self.execute(id, &p),
             };
-            let r = r.map_err(|e| EngineError::Other(format!("step {} ({id}): {e}", i + 1)))?;
-            each(i, &r);
-            out.push(r);
+            match r {
+                Ok(r) => {
+                    each(i, &r);
+                    results.push(r);
+                }
+                Err(error) => {
+                    failure = Some(StepFailure { index: i, command: Some(id.to_string()), error });
+                    break;
+                }
+            }
         }
         let timings = profile.map(|_| serde_json::json!({"timings": steps, "total_ms": timing::round_ms(clock.ms())}));
-        Ok((out, timings))
+        Ok(ScriptRun { results, timings, failure })
+    }
+}
+
+/// What [`Session::run_script_kept`] ran.
+#[derive(Debug)]
+pub struct ScriptRun {
+    /// The result of each step that worked, in order.
+    pub results: Vec<Value>,
+    /// When timed: `{"timings": [{"index", "command", "ms", "profile"?}], "total_ms"}`, the
+    /// failing step's time included.
+    pub timings: Option<Value>,
+    /// The step that failed, which ended the run; `None` when every step worked.
+    pub failure: Option<StepFailure>,
+}
+
+/// The step a script stopped at.
+#[derive(Debug)]
+pub struct StepFailure {
+    /// The step's index, from 0.
+    pub index: usize,
+    /// The command it named; `None` when it named none.
+    pub command: Option<String>,
+    /// Its error.
+    pub error: EngineError,
+}
+
+impl StepFailure {
+    /// `{"step": its number from 1, "command"?, "error": the error's words}`.
+    pub fn to_json(&self) -> Value {
+        let mut v = serde_json::json!({"step": self.index + 1, "error": self.error.to_string()});
+        if let (Some(o), Some(c)) = (v.as_object_mut(), &self.command) {
+            o.insert("command".into(), Value::String(c.clone()));
+        }
+        v
+    }
+
+    /// The error a script that stops here returns, named after the step, as it always was.
+    pub fn into_error(self) -> EngineError {
+        match self.command {
+            Some(id) => EngineError::Other(format!("step {} ({id}): {}", self.index + 1, self.error)),
+            None => EngineError::Other(format!("script step {}: {}", self.index + 1, self.error)),
+        }
     }
 }
 
