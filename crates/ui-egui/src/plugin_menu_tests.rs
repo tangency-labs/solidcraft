@@ -1592,7 +1592,9 @@ mod native {
         h.frames(2);
         assert!(solidcraft_engine::view::sketch_shown(&h.app.session, sketch));
         assert_eq!(solidcraft_engine::view::bounds(&h.app.session).unwrap(), bounds);
-        assert!(same_camera(&expected, &h.app.cam), "preview and committed Fit frame the same geometry");
+        // The bounds above are the preview's; the dialog has closed, so Fit has the whole viewport.
+        let committed = h.app.fitted_bounds(parked, &bounds);
+        assert!(same_camera(&committed, &h.app.cam), "preview and committed Fit frame the same geometry");
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -1634,7 +1636,9 @@ mod native {
         assert!(solidcraft_engine::view::sketch_consumed(&h.app.session, sketch), "the extrusion consumes the sketch");
         assert!(!solidcraft_engine::view::sketch_shown(&h.app.session, sketch), "the consumed sketch is hidden");
         assert_eq!(solidcraft_engine::view::bounds(&h.app.session).unwrap(), bounds);
-        assert!(same_camera(&expected, &h.app.cam), "preview and committed Fit frame the same geometry");
+        // The bounds above are the preview's; the dialog has closed, so Fit has the whole viewport.
+        let committed = h.app.fitted_bounds(parked, &bounds);
+        assert!(same_camera(&committed, &h.app.cam), "preview and committed Fit frame the same geometry");
         let _ = std::fs::remove_dir_all(root);
     }
 
