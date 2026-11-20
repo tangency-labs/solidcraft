@@ -390,20 +390,17 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
     let rt = package.manifest.runtime.as_ref().ok_or_else(|| error("no executable runtime"))?;
     host_limits_for(session, &package.manifest.id, &package.approval).check(&rt.limits)?;
     let declared = rt.entries.iter().find(|e| e.name == entry).ok_or_else(|| error("unknown entry"))?;
-    let hooked = if declared.dialog_hook {
+    let prepared = if declared.dialog_hook {
         let protected = params.as_object().map(|v| v.keys().cloned().collect()).unwrap_or_default();
         let update = update_dialog(session, &package, entry, params, &protected, true)?;
         if let Some(warning) = &update.warning {
             session.echo(warning);
         }
         Some(craft_plugin::prepare_input(&declared.input_schema, &update.values)?)
-    } else {
-        None
-    };
-    let prepared = if hooked.is_none() && conditions::has_conditions(&declared.input_schema) {
+    } else if conditions::has_conditions(&declared.input_schema) {
         Some(craft_plugin::prepare_input(&declared.input_schema, params)?)
     } else {
-        hooked
+        None
     };
     let params = prepared.as_ref().unwrap_or(params);
     #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]

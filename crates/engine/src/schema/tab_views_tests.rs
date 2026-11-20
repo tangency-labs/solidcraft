@@ -36,12 +36,16 @@ fn the_view_commands_check_and_echo_without_editing_the_design() {
         ("tab.view.rename", json!({"id": 4}), json!({"id": 4})),
         ("tab.view.duplicate", json!({"id": 1}), json!({"id": 1})),
         ("tab.view.move", json!({"from": 0, "to": 2}), json!({"from": 0, "to": 2})),
+        ("tab.view.layout", json!({"layout": "grid"}), json!({"layout": "grid"})),
+        ("tab.view.layout", json!({"layout": "single"}), json!({"layout": "single"})),
+        ("tab.view.beside", json!({}), json!({"edge": "right"})),
+        ("tab.view.beside", json!({"id": 2, "edge": "bottom"}), json!({"id": 2, "edge": "bottom"})),
         ("tab.view.list", json!({}), json!({})),
     ] {
         let r = s.execute(id, &params).unwrap_or_else(|e| panic!("{id} {params}: {e}"));
         assert_eq!(r, echo, "{id} {params}");
         assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
-        assert_eq!(s.execute(id, &Value::Null).is_ok(), !matches!(id, "tab.view.activate" | "tab.view.move"), "{id}: null");
+        assert_eq!(s.execute(id, &Value::Null).is_ok(), !matches!(id, "tab.view.activate" | "tab.view.move" | "tab.view.layout"), "{id}: null");
     }
     assert_eq!((s.doc.to_json(), s.undo.len()), (before, undo), "nothing in the design changes");
 }
@@ -69,6 +73,10 @@ fn bad_view_requests_are_refused() {
         ("tab.view.rename", json!({"name": 5})),
         ("tab.view.move", json!({"from": 0})),
         ("tab.view.move", json!({"from": 0, "to": 1.5})),
+        ("tab.view.layout", json!({})),
+        ("tab.view.layout", json!({"layout": "triple"})),
+        ("tab.view.beside", json!({"edge": "diagonal"})),
+        ("tab.view.beside", json!({"id": "2"})),
         ("tab.view.list", json!({"all": true})),
     ] {
         assert!(s.execute(id, &params).is_err(), "{id} {params}");

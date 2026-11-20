@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
 use serde_json::json;
-use solidcraft_doc::canvas::base64_decode;
 use solidcraft_geom::paper::MAX_IMAGE_PIXELS;
 use solidcraft_io::vfs::{self, PathScope};
 
@@ -55,7 +54,7 @@ fn an_image_is_read_saved_without_its_path_and_one_undo_step() {
     std::fs::remove_dir_all(&dir).unwrap();
     let record = s.drawing("test").unwrap().clone();
     let id = ids::decode(reply["image"].as_str().unwrap()).unwrap();
-    assert_eq!(base64_decode(&record.images.by_id(record.sheet_images.by_id(id).unwrap().image).unwrap().data).unwrap(), bytes);
+    assert_eq!(record.images.by_id(record.sheet_images.by_id(id).unwrap().image).unwrap().data.to_vec(), bytes);
     assert!(!record.to_json().unwrap().contains("logo.png"));
 
     s.execute("edit.undo", &json!({})).unwrap();
@@ -92,8 +91,8 @@ fn the_same_bytes_are_one_file_on_each_sheet() {
     s.execute("edit.undo", &json!({})).unwrap();
     assert_eq!(s.drawing("test").unwrap().images.len(), 2, "an undo brings it back");
     s.execute("edit.redo", &json!({})).unwrap();
-    let again = s.drawing("test").unwrap().to_json().unwrap();
-    assert!(solidcraft_doc::drawing::Drawing::from_json(&again).is_ok());
+    let saved = solidcraft_io::write_design_container(&s.doc).unwrap();
+    assert_eq!(solidcraft_io::read_design(&saved).unwrap().drawings, s.doc.drawings);
     for d in [dir, other_dir] {
         std::fs::remove_dir_all(d).unwrap();
     }
@@ -152,7 +151,7 @@ fn a_file_outside_the_allowed_folders_is_refused() {
 /// Under the images' own cap, with another tool's properties filling the rest of the record: the
 /// save's limit is what refuses the image, and the drawing as it stands still saves.
 #[test]
-fn an_image_that_would_stop_the_drawing_saving_is_refused() {
+fn images_never_make_the_drawing_too_large_to_save() {
     let sized = |w: u32| {
         let mut file = png(w, 4);
         file.resize(MAX_IMAGE_BYTES, 0);
@@ -167,9 +166,14 @@ fn an_image_that_would_stop_the_drawing_saving_is_refused() {
     })
     .unwrap();
     let p = |file: &str| json!({"sheet": sheet, "file": file, "rect_mm": RECT});
+    // Images are parts of the container, never text in the record: two of the largest add nothing
+    // to a record that is already close to its limit, and it still saves.
     s.execute(ADD, &p(&file)).unwrap();
-    assert!(refused(&mut s, p(&file_b)).contains("too large to save"));
-    s.drawing("test").unwrap().to_json().unwrap();
+    s.execute(ADD, &p(&file_b)).unwrap();
+    let record = s.drawing("test").unwrap().to_json().unwrap();
+    assert!(record.len() < 7 << 20, "{}", record.len());
+    let saved = solidcraft_io::write_design_container(&s.doc).unwrap();
+    assert_eq!(solidcraft_io::read_design(&saved).unwrap().drawings, s.doc.drawings);
     for d in [dir, dir_b] {
         std::fs::remove_dir_all(d).unwrap();
     }
@@ -219,7 +223,7 @@ fn a_logo_by_command() {
     std::fs::remove_dir_all(&dir).unwrap();
     let record = s.drawing("test").unwrap().clone();
     let id = ids::decode(reply["image"].as_str().unwrap()).unwrap();
-    assert_eq!((record.images.iter().count(), base64_decode(&record.images.by_id(id).unwrap().data).unwrap()), (1, bytes));
+    assert_eq!((record.images.iter().count(), record.images.by_id(id).unwrap().data.to_vec()), (1, bytes));
     assert!(!record.to_json().unwrap().contains("cell-logo"));
 
     s.execute("edit.undo", &json!({})).unwrap();
@@ -288,16 +292,21 @@ fn a_logo_goes_with_its_block() {
 fn a_logo_travels_in_a_template_file() {
     let bytes = png(16, 16);
     let (dir, file) = on_disk("logo-template", &bytes);
-    let template = dir.join("mine.json").to_string_lossy().into_owned();
+    let template = dir.join("mine.scdwg").to_string_lossy().into_owned();
     let (mut s, _) = titled();
     s.execute(LOGO, &json!({"cell": "legal_owner", "file": file})).unwrap();
+    // A .json template can't hold the logo's file: saving one is refused and names the way that can.
+    let json = dir.join("mine.json").to_string_lossy().into_owned();
+    let refused = s.execute("drawing.template.save", &json!({"path": json})).unwrap_err().to_string();
+    assert!(refused.contains("logo") && refused.contains(".scdwg"), "{refused}");
+    assert!(!std::path::Path::new(&json).exists());
     s.execute("drawing.template.save", &json!({"path": template})).unwrap();
     std::fs::remove_file(&file).unwrap();
 
     let shows = |s: &Session| {
         let d = s.drawing("test").unwrap();
         let logo = d.sheets[0].title_block.as_ref().unwrap().logos().next().unwrap();
-        base64_decode(&d.images.by_id(logo).unwrap().data).unwrap()
+        d.images.by_id(logo).unwrap().data.to_vec()
     };
     s.execute("drawing.close", &json!({})).unwrap();
     s.execute("drawing.create", &json!({"template": template})).unwrap();
