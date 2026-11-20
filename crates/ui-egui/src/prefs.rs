@@ -1542,7 +1542,7 @@ preference_settings! {
     ribbon_menus_follow_hover: bool = false, PAGE_LAYOUT;
     /// Leave the commands the ribbon shows as buttons (pinned ones) out of its panel drop-downs,
     /// which then list only the rest (#4739).
-    ribbon_menus_skip_pinned: bool = false, PAGE_LAYOUT => check_tr("ui.ribbon_menus_skip_pinned");
+    ribbon_menus_skip_pinned: bool = false, PAGE_LAYOUT;
     /// Group sketch chamfer modes into a submenu in Modify.
     sketch_chamfer_submenu: bool = true, PAGE_LAYOUT => check_id("prefs.sketch_chamfer_submenu");
     /// Interface scale (1 = 100 %).
@@ -7285,8 +7285,6 @@ mod tests {
             ("ribbon_menus_follow_hover", json!(true), PAGE_LAYOUT),
             ("ribbon_menus_skip_pinned", json!(true), PAGE_LAYOUT),
             ("sketch_chamfer_submenu", json!(false), PAGE_LAYOUT),
-            ("timeline_left", json!(true), PAGE_LAYOUT),
-            ("timeline_under_browser", json!(true), PAGE_LAYOUT),
             ("history_sketches", json!("under_feature"), PAGE_LAYOUT),
             ("history_play_button", json!(false), PAGE_LAYOUT),
             ("history_folder_kind_icon", json!(true), PAGE_LAYOUT),

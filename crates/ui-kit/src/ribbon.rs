@@ -1612,8 +1612,14 @@ pub fn grid_step(cells: &[(usize, usize)], enabled: &[usize], at: Option<usize>,
     }
 }
 
-/// Arrow keys move the keyboard focus through a grid menu's enabled icons ([`grid_step`]).
-fn grid_keys(ui: &egui::Ui, entries: &[MenuEntry], cells: &[(usize, usize)], style: &MenuStyle) {
+/// A submenu row immediately above the grid, drawn by the caller.
+pub struct GridHeader {
+    pub id: egui::Id,
+    pub submenu_open: bool,
+}
+
+/// Arrow keys move the keyboard focus through the header and enabled icons ([`grid_step`]).
+fn grid_keys(ui: &egui::Ui, entries: &[MenuEntry], cells: &[(Rect, (usize, usize))], style: &MenuStyle, header: Option<GridHeader>) {
     let key = ui.input(|i| {
         [
             (egui::Key::ArrowLeft, GridKey::Left),
@@ -1626,12 +1632,20 @@ fn grid_keys(ui: &egui::Ui, entries: &[MenuEntry], cells: &[(usize, usize)], sty
         .map(|(_, key)| key)
     });
     let Some(key) = key else { return };
-    let enabled: Vec<usize> = entries.iter().enumerate().filter(|(_, e)| e.enabled).map(|(i, _)| i).collect();
+    if header.as_ref().is_some_and(|row| row.submenu_open) {
+        ui.ctx().memory_mut(|m| m.move_focus(egui::FocusDirection::None));
+        return;
+    }
+    let header_id = header.map(|row| row.id);
+    let ids: Vec<_> = header_id.into_iter().map(Some).chain(entries.iter().map(|e| e.enabled.then(|| style.focus_id(e.id)))).collect();
+    let enabled: Vec<_> = ids.iter().enumerate().filter_map(|(i, id)| id.map(|_| i)).collect();
+    let row_offset = usize::from(header_id.is_some());
+    let cells: Vec<_> = header_id.into_iter().map(|_| (0, 0)).chain(cells.iter().map(|&(_, (row, column))| (row + row_offset, column))).collect();
     let focused = ui.ctx().memory(|m| m.focused());
-    let at = enabled.iter().position(|i| entries.get(*i).is_some_and(|e| focused == Some(style.focus_id(e.id))));
-    if let Some(e) = grid_step(cells, &enabled, at, key).and_then(|k| enabled.get(k)).and_then(|i| entries.get(*i)) {
+    let at = enabled.iter().position(|i| ids.get(*i).is_some_and(|id| *id == focused));
+    if let Some(id) = grid_step(&cells, &enabled, at, key).and_then(|k| enabled.get(k)).and_then(|i| ids.get(*i)).copied().flatten() {
         ui.ctx().memory_mut(|m| {
-            m.request_focus(style.focus_id(e.id));
+            m.request_focus(id);
             m.move_focus(egui::FocusDirection::None);
         });
     }
@@ -1685,7 +1699,7 @@ fn pin_armed(ui: &egui::Ui, key: egui::Id, id: &str, on: bool) -> bool {
 
 /// A group's menu drawn as a grid of large icons (#4739): the same entries, headings (translated)
 /// and actions as the list, the names in the tooltips. `loose` as for [`grid_layout`].
-pub fn grid(ui: &mut egui::Ui, entries: &[(Option<&str>, MenuEntry)], loose: &[&str], style: &MenuStyle) -> GridOut {
+pub fn grid(ui: &mut egui::Ui, entries: &[(Option<&str>, MenuEntry)], loose: &[&str], style: &MenuStyle, header: Option<GridHeader>) -> GridOut {
     // Wide enough for groups side by side, short of the window's edge.
     let room = ui.ctx().content_rect().right() - ui.cursor().left() - 24.0;
     let grouped: Vec<(Option<&str>, &str)> = entries.iter().map(|(heading, e)| (*heading, e.id)).collect();
@@ -1695,8 +1709,7 @@ pub fn grid(ui: &mut egui::Ui, entries: &[(Option<&str>, MenuEntry)], loose: &[&
     let inset = ((width - layout.size.x) / 2.0).max(0.0);
     ui.set_width(width);
     let plain: Vec<MenuEntry> = entries.iter().map(|(_, e)| *e).collect();
-    let keys: Vec<(usize, usize)> = layout.cells.iter().map(|(_, at)| *at).collect();
-    grid_keys(ui, &plain, &keys, style);
+    grid_keys(ui, &plain, &layout.cells, style, header);
     // Like the list, the grid scrolls when it would run past the window's bottom (#874).
     let height = (ui.ctx().content_rect().bottom() - ui.cursor().top() - 64.0).max(GRID_CELL * 2.0);
     let mut out = GridOut { action: None, cells: Vec::new() };

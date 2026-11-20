@@ -223,12 +223,7 @@ impl Menu {
     }
 
     /// Keep a flyout visible while a command-search result previews one of its rows.
-    pub fn item_button_preview<R>(
-        ui: &mut Ui,
-        item: &MenuItem<'_>,
-        preview: bool,
-        add: impl FnOnce(&mut Ui) -> R,
-    ) -> egui::InnerResponse<Option<R>> {
+    pub fn item_button_preview<R>(ui: &mut Ui, item: &MenuItem<'_>, preview: bool, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<Option<R>> {
         Self::button_at(ui, |ui, _| item.show(ui), add, true, preview)
     }
 
