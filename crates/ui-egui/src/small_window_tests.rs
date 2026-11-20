@@ -166,6 +166,48 @@ fn a_feature_card_too_wide_for_a_small_view_lies_along_its_bottom() {
     assert!(window.contains_rect(card), "{card:?} in {window:?}");
     assert!(card.width() > window.width() * 0.8, "as wide as the view: {card:?}");
     assert!(card.top() >= window.center().y - 1.0, "in the lower half: {card:?}");
+    // Its fields have room: all of them show, or the card takes the whole lower half and its
+    // body scrolls (it used to keep only its header and footer, #19180 review).
+    let body = crate::scenario::rect_of("dialog:body:viewport").expect("the card's body");
+    let content = crate::scenario::count_of("dialog:body:content_height").expect("the body's height") as f32;
+    let view = h.app.viewport.rect.unwrap();
+    assert!(body.height() > 0.0 && (body.height() + 0.5 >= content || card.top() <= view.center().y + 1.0), "{body:?} for {content}: {card:?}");
+}
+
+#[test]
+fn reveal_buttons_take_as_few_columns_as_fit() {
+    // A pitch of 36 and an inset of 4: a column of four buttons is 40 wide and 148 tall.
+    let fits = |height: f32| move |size: Vec2| (size.y <= height).then_some(size);
+    assert_eq!(button_grid(4, 36.0, 4.0, fits(148.0)), Some((4, vec2(40.0, 148.0))));
+    assert_eq!(button_grid(4, 36.0, 4.0, fits(147.0)), Some((2, vec2(76.0, 76.0))));
+    assert_eq!(button_grid(3, 36.0, 4.0, fits(100.0)), Some((2, vec2(76.0, 76.0))));
+    assert_eq!(button_grid(4, 36.0, 4.0, fits(40.0)), Some((1, vec2(148.0, 40.0))));
+    assert_eq!(button_grid(4, 36.0, 4.0, fits(39.0)), None);
+    assert_eq!(button_grid(0, 36.0, 4.0, fits(1000.0)), None);
+}
+
+/// The smallest window with the status bar on, every side panel and the History hidden: the view
+/// is too short for a column of four buttons, and each panel still has its button, which shows it
+/// and hides it again (#19180 review).
+#[test]
+fn the_smallest_window_has_a_button_for_every_hidden_panel() {
+    let mut h = sample(1280.0, 720.0);
+    h.call("ui.prefs", json!({"status_bar": true}));
+    h.call("ui.agent_chat", json!({"open": true, "picker": false}));
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    resize(&mut h, 320.0, 240.0);
+    let hidden: Vec<&'static str> = h.app.shell.small_window.hidden.iter().map(|panel| panel.id).collect();
+    assert_eq!(hidden.len(), 4, "{hidden:?}");
+    let buttons = crate::scenario::rect_of("small_window:panels").expect("the buttons");
+    let view = h.app.viewport.rect.unwrap();
+    assert!(view.contains_rect(buttons), "{buttons:?} in {view:?}");
+    // A panel shown again leaves no room beside it: the buttons go over its corner, and hide it again.
+    for id in hidden {
+        click(&mut h, &format!("small_window:{id}"));
+        assert!(h.app.shell.small_window.revealed.contains(id), "{id} shown again");
+        click(&mut h, &format!("small_window:{id}"));
+        assert!(!h.app.shell.small_window.revealed.contains(id), "{id} hidden again");
+    }
 }
 
 #[test]

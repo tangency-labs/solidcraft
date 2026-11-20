@@ -212,9 +212,23 @@ pub(crate) fn update(app: &mut SolveApp, ctx: &egui::Context) {
 /// Each button's side: as large as a navigation bar button.
 const TARGET: f32 = 32.0;
 
-/// One button for each panel the window's size hides, in a column at the view's top left. A
-/// click shows the panel again where it was docked, a second click hides it again. The column is
-/// one of the shell's covered rects, so a click on it never picks or navigates.
+/// The fewest columns, from one up to one per button, that `count` buttons can be laid out in
+/// with `fits` accepting the grid's size, and the place `fits` gives it: each column `rows` tall,
+/// the last one holding what is left.
+fn button_grid<T>(count: usize, pitch: f32, inset: f32, mut fits: impl FnMut(Vec2) -> Option<T>) -> Option<(usize, T)> {
+    (1..=count).find_map(|columns| {
+        let rows = count.div_ceil(columns);
+        let columns = count.div_ceil(rows);
+        fits(vec2(columns as f32 * pitch + inset, rows as f32 * pitch + inset)).map(|at| (rows, at))
+    })
+}
+
+/// One button for each panel the window's size hides, in a column at the view's top left; in a
+/// view too short for the column, in as few columns as fit its height. A click shows the panel
+/// again where it was docked, a second click hides it again. Where the panels shown again leave
+/// no room for the buttons, they go over those panels' corner, so a panel shown again can always
+/// be hidden again. The buttons are one of the shell's covered rects, so a click on them never
+/// picks or navigates.
 pub(crate) fn show_buttons(app: &mut SolveApp, ctx: &egui::Context) {
     app.shell.small_window.buttons = None;
     let count = app.shell.small_window.hidden.len();
@@ -222,26 +236,32 @@ pub(crate) fn show_buttons(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let t = Tokens::get();
-    let size = vec2(TARGET + 2.0 * t.space_4, count as f32 * (TARGET + t.space_4) + t.space_4);
+    let pitch = TARGET + t.space_4;
     let Some(content) = app.viewport.layout.as_ref().map(|layout| layout.content).filter(|r| r.is_finite() && r.is_positive()) else { return };
     let Ok(region) = crate::shell::host_usable(app) else { return };
-    let preferred = content.left_top() + vec2(t.space_4, t.space_4) + size / 2.0;
-    let footprint = solidcraft_engine::panels::Size { width: size.x, height: size.y };
-    let Some(at) = region.place_footprint(footprint, solidcraft_engine::panels::Point { x: preferred.x, y: preferred.y }, t.space_4) else {
-        return;
-    };
-    let rect = crate::panel_runtime::egui_rect(at);
+    let corner = content.left_top() + vec2(t.space_4, t.space_4);
+    let beside = button_grid(count, pitch, t.space_4, |size| {
+        let preferred = corner + size / 2.0;
+        let footprint = solidcraft_engine::panels::Size { width: size.x, height: size.y };
+        region.place_footprint(footprint, solidcraft_engine::panels::Point { x: preferred.x, y: preferred.y }, t.space_4)
+    });
+    let placed = beside.map(|(rows, at)| (rows, crate::panel_runtime::egui_rect(at), egui::Order::Middle)).or_else(|| {
+        let over = button_grid(count, pitch, t.space_4, |size| Some(Rect::from_min_size(corner, size)).filter(|r| content.contains_rect(*r)));
+        over.map(|(rows, rect)| (rows, rect, egui::Order::Foreground))
+    });
+    let Some((rows, rect, order)) = placed else { return };
     let panels = app.shell.small_window.hidden.clone();
     let container = Container::new(ctx, Surface::Navigation);
     let frame = container.frame(ctx, t.overlay, crate::frame::Side::Left);
     let mut clicked = None;
     let mut painted = false;
-    container.area(egui::Id::unique("sc_small_window_panels")).order(egui::Order::Middle).fixed_pos(rect.min).fade_in(false).show(ctx, |ui| {
+    container.area(egui::Id::unique("sc_small_window_panels")).order(order).fixed_pos(rect.min).fade_in(false).show(ctx, |ui| {
         painted = ui.is_visible() && !ui.is_sizing_pass();
         let (outer, _) = ui.allocate_exact_size(rect.size(), Sense::hover());
         Container::paint_frame(ui.painter(), frame, outer.shrink(frame.stroke.width));
         for (index, panel) in panels.iter().enumerate() {
-            let at = Rect::from_min_size(outer.min + vec2(t.space_4, t.space_4 + index as f32 * (TARGET + t.space_4)), vec2(TARGET, TARGET));
+            let (column, row) = (index / rows, index % rows);
+            let at = Rect::from_min_size(outer.min + vec2(t.space_4 + column as f32 * pitch, t.space_4 + row as f32 * pitch), vec2(TARGET, TARGET));
             let key = format!("small_window:{}", panel.id);
             let response = ui.interact(at, ui.scope_id().with(&key), Sense::click());
             if app.shell.small_window.revealed.contains(panel.id) {

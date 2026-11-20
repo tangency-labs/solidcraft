@@ -252,6 +252,12 @@ impl Harness {
     pub fn frame_with_taps(&mut self, events: Vec<egui::Event>, taps: crate::pencil::PlatformTaps) {
         let mut raw = self.input(events);
         self.app.raw_input_hook_with_taps(&self.ctx, &mut raw, taps);
+        self.run_frame(raw);
+    }
+
+    /// Lay out and draw one frame from `raw`, and keep what it gives: its output, the URLs it
+    /// opened, and its shapes and textures for [`Harness::picture`].
+    fn run_frame(&mut self, raw: egui::RawInput) {
         let app = &mut self.app;
         let mut out = self.ctx.run_ui(raw, |ui| {
             app.logic(ui.ctx());
@@ -269,11 +275,12 @@ impl Harness {
         self.shapes = out.shapes;
     }
 
-    /// The last frame as a picture of the whole window, drawn on the CPU. The 3D view is drawn
-    /// on the GPU, so it shows as its backdrop.
+    /// The last frame as a picture of the whole window, drawn on the CPU: the rect egui laid it
+    /// out in, in UI points, at its pixels per point. The 3D view is drawn on the GPU, so it shows
+    /// as its backdrop.
     #[cfg(test)]
     pub fn picture(&self) -> image::RgbaImage {
-        let window = egui::Rect::from_min_size(egui::Pos2::ZERO, self.size);
+        let window = self.ctx.input(|i| i.viewport_rect());
         crate::ui_kit::test_raster(&self.ctx, self.shapes.clone(), self.ctx.pixels_per_point(), window, &self.textures)
     }
 
@@ -314,13 +321,7 @@ impl Harness {
     /// last seen at `at`.
     pub fn drag_files(&mut self, at: egui::Pos2, hovered: Vec<egui::HoveredFile>, dropped: Vec<egui::DroppedFileHandle>) {
         let raw = egui::RawInput { hovered_files: hovered, dropped_files: dropped, ..self.input(vec![egui::Event::PointerMoved(at)]) };
-        let app = &mut self.app;
-        let mut out = self.ctx.run_ui(raw, |ui| {
-            app.logic(ui.ctx());
-            app.ui(ui);
-        });
-        out.textures_delta.clear();
-        self.output = out.platform_output;
+        self.run_frame(raw);
     }
 
     /// Frames until the queued input is used up (and the view has settled).
