@@ -32,7 +32,9 @@ solidcraft-doc = { path = "crates/doc" }
 solidcraft-format = { path = "crates/format" }
 solidcraft-io = { path = "crates/io" }
 solidcraft-engine = { path = "crates/engine" }
-solidcraft-ui-egui = { path = "crates/ui-egui" }
+# Without its default features, so an app built with `--no-default-features` leaves out what
+# they bring (usage statistics); each app turns them on in its own defaults.
+solidcraft-ui-egui = { path = "crates/ui-egui", default-features = false }
 solidcraft-ui-kit = { path = "crates/ui-kit" }
 # The app-neutral panel placement core: panels by id, dock, floating and window placement, saved layout values
 solidcraft-panel-layout = { path = "crates/panel-layout" }
