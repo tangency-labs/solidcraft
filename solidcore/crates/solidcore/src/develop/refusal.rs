@@ -84,6 +84,10 @@ pub enum JointRefusal {
     /// A torn end of the zone that no spline of the most spans keeps within its tolerance of
     /// the curve it follows.
     TornEnd,
+    /// A zone's end that follows its panels' outlines (`Relief::Outline`) where an outline is
+    /// not found crossing its tangent line at the end, leaves the band under the bend before it
+    /// reaches the sharp, or carried into the zone keeps within no spline's tolerance.
+    OutlineEnd,
     /// An anchor with no frame on its panel's surface.
     NoFrame,
 }
