@@ -222,7 +222,7 @@ fn an_importers_cases_open_their_files_and_check_the_loss_report() {
     // The fixture copies the file into the design: give it a design's bytes. A file starting with T traps.
     let mut made = solidcraft_engine::Session::new(solidcraft_engine::doc::Document::new("Bracket"));
     made.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
-    std::fs::write(Path::new(&path).join("tests/bracket.smp"), solidcraft_engine::io::write_design(&made.doc)).unwrap();
+    std::fs::write(Path::new(&path).join("tests/bracket.smp"), solidcraft_engine::io::write_design(&made.doc).unwrap()).unwrap();
     std::fs::write(Path::new(&path).join("tests/trap.smp"), b"T").unwrap();
     std::fs::write(Path::new(&path).join("tests/sketch.smp"), b"U").unwrap();
     let output = cli(&["plugin", "test", &path]);

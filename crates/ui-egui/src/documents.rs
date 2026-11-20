@@ -1111,7 +1111,7 @@ pub fn adopt(app: &mut SolveApp, session: Session) -> bool {
 pub fn export(app: &mut SolveApp) -> Result<Value, String> {
     let revision = app.session.design_revision();
     let design = app.session.design();
-    let text = String::from_utf8(solidcraft_engine::io::write_design(&design)).map_err(|e| e.to_string())?;
+    let text = String::from_utf8(solidcraft_engine::io::write_design(&design).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     Ok(json!({"name": design.name, "revision": revision, "dirty": app.session.is_dirty(), "format": "json", "text": text}))
 }
 
