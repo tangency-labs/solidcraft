@@ -478,6 +478,28 @@ fn a_click_picks_the_sketchs_own_curve_over_a_projected_one_under_it() {
     assert_eq!(curves(&h), [projected]);
 }
 
+/// While a sketch is being edited, a click inside the closed zone of ANOTHER sketch of the same
+/// design must not select that zone: the zone keeps its pale tint instead of turning into a
+/// solid blue shape (#16197).
+#[test]
+fn a_click_in_sketch_mode_does_not_select_the_closed_zone_of_another_sketch() {
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Other"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let other = h.app.session.doc.find_feature("Other").unwrap().id;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Editing"})).unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h.step(&json!({"click":{"world":[20,15,0]}})).unwrap();
+    assert!(
+        !h.app.session.selection.contains(&Sel::Profile { sketch: other, index: 0 }),
+        "a click in sketch mode must not select the closed zone of another sketch: {:?}",
+        h.app.session.selection
+    );
+}
+
 /// Three plates stacked along Z (made bottom, top, middle, so model order isn't depth order),
 /// the top one smallest, held over the top plate's edge from above.
 fn stacked_plates() -> Harness {
@@ -954,9 +976,10 @@ fn hidden_edge_mode_is_scoped_and_invalidates_hover_without_pointer_motion() {
     assert!(!pick_cached(&mut h.app, &proj, pos).iter().any(target));
     h.app.session.visibility.hidden_bodies.clear();
     // The section removes the target entirely: even hidden-edge mode must exclude it.
-    h.app.session.section = Some((solidcore_record::Vec3::new(0.0, 0.0, -5.0), solidcore_record::Vec3::Z));
+    h.app.session.section =
+        vec![solidcraft_engine::SectionPlane { id: 1, origin: solidcore_record::Vec3::new(0.0, 0.0, -5.0), normal: solidcore_record::Vec3::Z }];
     assert!(!pick_all(&h.app, &proj, pos).iter().any(target));
-    h.app.session.section = None;
+    h.app.session.section = Vec::new();
     h.call("ui.prefs", json!({"select_hidden_edges":false}));
     assert!(!pick_cached(&mut h.app, &proj, pos).iter().any(target));
 }
@@ -971,11 +994,13 @@ fn hidden_edge_mode_keeps_section_caps_as_occluders() {
     let target = |hit: &Hit| matches!(hit, Hit::Edge { body, .. } if body == "Target");
     assert!(pick_all(&h.app, &proj, pos).iter().any(target), "an ordinary face permits hidden edges");
     // The target remains below the cut, but the section cap through the cover hides it.
-    h.app.session.section = Some((solidcore_record::Vec3::new(0.0, 0.0, 25.0), solidcore_record::Vec3::Z));
+    h.app.session.section =
+        vec![solidcraft_engine::SectionPlane { id: 1, origin: solidcore_record::Vec3::new(0.0, 0.0, 25.0), normal: solidcore_record::Vec3::Z }];
     assert!(!pick(&h.app, &proj, pos).iter().any(target), "ordinary picking must respect the cap");
     assert!(!pick_all(&h.app, &proj, pos).iter().any(target), "Select Other must respect the cap");
     // A plane between the bodies removes the cover without making a cap over the target.
-    h.app.session.section = Some((solidcore_record::Vec3::new(0.0, 0.0, 15.0), solidcore_record::Vec3::Z));
+    h.app.session.section =
+        vec![solidcraft_engine::SectionPlane { id: 1, origin: solidcore_record::Vec3::new(0.0, 0.0, 15.0), normal: solidcore_record::Vec3::Z }];
     assert!(pick_all(&h.app, &proj, pos).iter().any(target));
 }
 
@@ -995,7 +1020,8 @@ fn hidden_edge_mode_keeps_caps_behind_a_nearer_kept_face() {
     let pos = proj.to_screen(solidcore_record::Vec3::new(5.0, 0.02, 10.0)).unwrap();
     let target = |hit: &Hit| matches!(hit, Hit::Edge { body, .. } if body == "Target");
     assert!(pick_all(&h.app, &proj, pos).iter().any(target), "ordinary faces permit hidden edges");
-    h.app.session.section = Some((solidcore_record::Vec3::new(0.0, 0.0, 25.0), solidcore_record::Vec3::Z));
+    h.app.session.section =
+        vec![solidcraft_engine::SectionPlane { id: 1, origin: solidcore_record::Vec3::new(0.0, 0.0, 25.0), normal: solidcore_record::Vec3::Z }];
     for enabled in [false, true] {
         h.app.preferences.select_hidden_edges = enabled;
         for hits in [pick(&h.app, &proj, pos), pick_all(&h.app, &proj, pos)] {

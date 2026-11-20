@@ -124,3 +124,76 @@ impl UnitDiff for Runner {
         shared::run_rust(&case.parse()?)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// WR-56 (#17467), the moved rows `degen_props_sliver_w2e-05_*` (and `..._s10_a0.7`,
+    /// whose raw output moved under an unchanged digest): a 1 x 2e-5 sliver face whose
+    /// edges are its bilinear surface's boundary isos, so every edge-face gap is 0 by
+    /// construction. Before WR-56 two edges recorded gaps of the sliver's width (2e-5, or
+    /// about half of it), and the healer flagged them; each edge-face gap is now certified
+    /// ([`shared::certificates::moved_row`]) inside an enclosure below 1e-11, a millionth
+    /// of the width. The problem flags, histogram counts and report text that moved
+    /// follow from the gaps.
+    #[test]
+    fn wr56_sliver_edge_face_gaps_are_enclosed() {
+        let rows: [(&str, [(f64, f64); 2]); 4] = [
+            (
+                "degen_props_sliver_w2e-05_s10_a0",
+                [(2e-5, 3.388_131_789_017_201_4e-21), (2e-5, 3.388_131_789_017_201_4e-21)],
+            ),
+            (
+                "degen_props_sliver_w2e-05_s1_a0",
+                [(2e-5, 3.388_131_789_017_201_4e-21), (2e-5, 3.388_131_789_017_201_4e-21)],
+            ),
+            (
+                "degen_props_sliver_w2e-05_s1_a0.7",
+                [
+                    (2e-5, 2.395_770_963_567_772e-21),
+                    (9.111_111_111_127_546e-6, 1.110_223_024_625_156_5e-16),
+                ],
+            ),
+            (
+                "degen_props_sliver_w2e-05_s10_a0.7",
+                [
+                    (9.999_999_999_999_999e-6, 2.395_770_963_567_772e-21),
+                    (8.888_888_888_645_883e-6, 1.986_027_322_597_818_5e-15),
+                ],
+            ),
+        ];
+        for (name, moved) in rows {
+            let gaps = shared::certificates::moved_row(&Runner, name, &moved);
+            for g in &gaps {
+                assert!(g.enclosure.hi < 1e-11, "{name}: {g:?}");
+            }
+        }
+    }
+
+    /// WR-57 (#17856), the moved rows `degen_props_*` with a 1e-5 sliver: the sliver's far
+    /// vertex is its bilinear surface's corner, so its vertex-face gap is 0. Main recorded
+    /// 7.4e-6 or 1e-5 there (its drop answered the parameters of the opposite corner);
+    /// every cached vertex-face gap is now certified ([`shared::certificates::vertex_face_gaps`]) in an enclosure of
+    /// the vertex's distance to its surface, and each below 1e-11 (main's values lie
+    /// above it). The problem flags and histogram counts that moved follow
+    /// from the gaps.
+    #[test]
+    fn wr57_sliver_vertex_face_gaps_are_enclosed() {
+        for name in [
+            "degen_props_curved_sliver",
+            "degen_props_sliver_w1e-05_s10_a0",
+            "degen_props_sliver_w1e-05_s10_a0.7",
+            "degen_props_sliver_w1e-05_s1_a0",
+            "degen_props_sliver_w1e-05_s1_a0.7",
+        ] {
+            let case = crate::case::regression_case(&Runner, name);
+            let script: Inputs = case.parse().expect("a heal script");
+            // (the state after the property caching, the script's second step: its next
+            // step ends the script with a status, before any dump)
+            let gaps = shared::certificates::vertex_face_gaps(name, &script, 2);
+            assert!(!gaps.is_empty(), "{name}: no cached vertex-face gap");
+            assert!(gaps.iter().all(|g| g.gap < 1e-11 && g.enclosure.hi < 1e-11), "{name}: {gaps:?}");
+        }
+    }
+}

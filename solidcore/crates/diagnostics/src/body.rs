@@ -5,6 +5,7 @@ use std::path::Path;
 
 use solidcore::boolean::api_brep::tessellate_boundaries;
 use solidcore::geom::attribute::AttributeStore;
+use solidcore::kernel::UpstreamFixes;
 use solidcore::query::edge::edge_faces;
 use solidcore::surface::surface::SurfaceKind;
 use solidcore::topology::brep::{p1, p10::TopologyEnv, p7};
@@ -48,10 +49,14 @@ pub struct Mesh {
 }
 
 /// Reads `path` as `SmBrep::ReadFromFile` does, into a B-rep that names its geometry by
-/// arena identity, as a kernel-built one does.
+/// arena identity, as a kernel-built one does. The kernel runs with the app's fixes, so a body
+/// the app reads is read here too (#17756).
 pub fn read(path: &Path, binary: bool, rebuild: bool) -> Result<Body, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let mut kernel = Kernel::default();
+    let mut kernel = Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Kernel::default()
+    };
     let fail = |e: solidcore::SolidError| format!("reading {}: {e}", path.display());
     let mut brep = Brep::new_with_infinite_region().map_err(fail)?;
     let mut attributes = AttributeStore::default();
@@ -197,5 +202,29 @@ fn surface_name(kind: &SurfaceKind) -> &'static str {
         SurfaceKind::SurfOfExtrusion(_) => "surface of extrusion",
         SurfaceKind::ProceduralBlend(_) => "procedural blend",
         SurfaceKind::BallPatch(_) => "ball patch",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A body is read with the fixes the app, the kernel rig and solidcore's tests run with
+    /// (every fix on), not with every fix off: the tool sees a body as the app does (#17756).
+    #[test]
+    fn a_body_is_read_with_the_apps_fixes() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/topology.brep_p4/island_swap.smb");
+        let body = read(&path, false, false).unwrap();
+        let on: Vec<&str> = body
+            .kernel
+            .fixes
+            .flags()
+            .filter(|(_, on)| *on)
+            .map(|(name, _)| name)
+            .collect();
+        let preset: Vec<&str> = UpstreamFixes::NAMES.to_vec();
+        assert!(!preset.is_empty());
+        assert_eq!(on, preset);
     }
 }

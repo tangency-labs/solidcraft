@@ -40,6 +40,23 @@ Number measuring optical dispersion as `(nd - 1) / (nF - nC)` at the Fraunhofer 
 - **In SolidCraft:** Glass `model.dispersion.abbe_number`; larger values give less chromatic dispersion.
 - **For translators:** an optical material quantity, not a sample or photon count.
 
+### airfoil
+
+The cross-section shape of a wing, blade or fin, published as points along its outline with the
+chord running from 0 to 1.
+
+A file of those points (`.dat`, in the Selig or the Lednicer layout) is inserted into a sketch as
+one fit point spline through every point, scaled to the chord. The *chord* is the straight line
+from the leading edge (the nose) to the trailing edge; the *trailing edge* is open when the file's
+first and last point are apart, and a line then closes the profile.
+
+- **In SolidCraft:** `sketch.insert_airfoil`; its `chord`, `pivot`, `flip` and `format` keys; the
+  reply's `trailing_edge`, `te_gap`, `deviation` and `bulge`.
+- **Don't use:** profile (a sketch's closed region), section (a loft's or a view's), wing shape.
+- **Elsewhere:** aerofoil (UK), airfoil section, foil.
+- **For translators:** the aerodynamic shape, not a sketch profile and not a loft section; UK
+  English says aerofoil.
+
 ### appearance
 
 How a body, face or component looks on screen and in renders.
@@ -81,8 +98,12 @@ There are five:
 - *inseparable*, something made as one piece (welded, glued, riveted and so on): one row; of
   what it holds, only the purchased components are listed, and only in a list of every part.
 
+One occurrence can have a type of its own, which replaces its component's for that occurrence
+only.
+
 - **In SolidCraft:** the `bom_type` part property, which `component.metadata.set` changes and
-  `component.metadata` reads; the `bom_type` of each `assembly.bom` row.
+  `component.metadata` reads; `occurrence.bom_type` and an occurrence's `bom_type` design-file
+  key; the `bom_type` of each `assembly.bom` row.
 - **Don't use:** BOM structure, item type, kind; made (for *normal*: it reads as "already
   made").
 - **Elsewhere:** BOM structure, BOM type.
@@ -299,6 +320,32 @@ features are computed.
 - **Elsewhere:** folder, group.
 - **For translators:** not a rigid group (a joint) and not a fixed browser *folder*.
 
+### item number
+
+The number that names a row of a bill of materials, the one a parts list and a balloon show.
+
+Until a bill of materials view is numbered, it is the row's place in the list and can change.
+Once the view is numbered it is saved with the row, kept when the row's part number changes, and
+a new row takes the next number at its level. A row listed under another reads as both numbers
+(2.1).
+
+- **In SolidCraft:** each `assembly.bom` row's `item`, with `provisional`, `locked` and
+  `duplicate`; `assembly.bom.renumber` and `assembly.bom.item.set`; the design file's
+  `assembly.item_numbers`.
+- **Don't use:** position, balloon number, find number; index.
+- **Elsewhere:** item number, item, find number, balloon number.
+- **For translators:** a label, not a quantity or a count; not a part number.
+
+### leader
+
+The line from a note to what it points at on the model. It is worked out from where that thing is
+now and is never saved: if the thing is lost, the note stays and has no leader.
+
+- **In SolidCraft:** `drawing.note.inspect`'s `point`, where the leader ends.
+- **Don't use:** arrow (the end of the line, on a balloon or a dimension); pointer.
+- **Elsewhere:** leader, leader line.
+- **For translators:** a drawn line; not a person who leads.
+
 ### material
 
 The physical substance of a body, which sets its density and mechanical properties.
@@ -328,6 +375,18 @@ them. The *first moments* are the mass times the centre of mass.
 - **Elsewhere:** moment of inertia, inertia tensor, mass moment of inertia.
 - **For translators:** not the second moment of area of a cross-section, a different quantity.
 
+### note
+
+Text on a sheet or a view of a drawing, in its fields and its words, that may point at the model
+with a leader. A note on a view moves with the view.
+
+- **In SolidCraft:** `drawing.note.add`, `drawing.note.edit` and `drawing.note.inspect`; a drawing's
+  `notes`.
+- **Don't use:** comment (that is for people working on a design); annotation (the wider kind of
+  thing that includes dimensions and symbols).
+- **Elsewhere:** note, general note, text.
+- **For translators:** text printed on the drawing; not a remark to a colleague.
+
 ### occurrence
 
 One placed copy of a component inside its parent component.
@@ -336,7 +395,8 @@ A component can have several occurrences. Moving an occurrence moves only that c
 component changes every copy. The browser names occurrences with a number, such as `Bolt M20:3`.
 
 - **In SolidCraft:** `occurrence.copy`, `occurrence.move`, `occurrence.drag`, `occurrence.ground`,
-  `occurrence.properties`; the `occurrences` design-file key; the `path` of occurrence ids.
+  `occurrence.properties`, `occurrence.bom_type`; the `occurrences` design-file key; the `path` of
+  occurrence ids.
 - **Don't use:** instance, placement.
 - **Elsewhere:** occurrence, instance, component instance.
 - **For translators:** not a *pattern instance*.
@@ -419,6 +479,20 @@ at Z = 0, with the centre of mass over the origin; the design itself does not mo
 - **Elsewhere:** place on face, lay flat, bed face.
 - **For translators:** the face the part stands on while it prints, not the printer's bed.
 
+### quantity
+
+What one placement of a component means in a bill of materials: a number of pieces or a length.
+
+Without one, a placement is one piece and its row's count says it all. With one, a row adds up its
+placements: a 2.5 m cable placed three times is 7.5 m. It is an expression, so it can follow the
+design's parameters.
+
+- **In SolidCraft:** the `bom_quantity` part property, which `component.metadata.set` and
+  `component.create` set; each `assembly.bom` row's `quantity` and `quantity_unit`.
+- **Don't use:** amount, count (for a quantity).
+- **Elsewhere:** quantity, BOM quantity, base quantity.
+- **For translators:** not a count of placements (`count`).
+
 ### reference edge
 
 A straight edge of a flat face that a Single hole's centre or a cylinder's base centre keeps a
@@ -447,6 +521,21 @@ are kept, not deleted.
 - **Elsewhere:** rollback bar, rollback marker, end-of-part marker.
 - **For translators:** "history" is the undo history, not the timeline. French had three names
   for this marker while English did.
+
+### section plane
+
+A plane of a Section Analysis; the view hides what lies beyond any section plane.
+
+One section plane hides its normal's side, and the view keeps what every plane keeps: two square
+to each other keep a quarter, three an eighth. A section has at most six.
+
+- **In SolidCraft:** `inspect.section` (`plane`, `add`, `replace`, `remove`, `hide`, `show`, `folder`, `clear`); the
+  `section_plane` of a `view.pick` hit on a cut face; the viewport menu's Section View, Edit Section View
+  and Turn Off Section View; the Analysis folder's Section 1, Section 2 rows.
+- **Don't use:** cutting plane, clip plane, section view (for the plane).
+- **Elsewhere:** section plane, cutting plane, clipping plane.
+- **For translators:** a view-only cut that changes no geometry, not a Split Body or a Plane
+  feature.
 
 ### settings profile
 
@@ -498,6 +587,20 @@ a standard size.
 - **Elsewhere:** standard part, library part, fastener, catalogue part.
 - **For translators:** see *Words with more than one meaning*, "part".
 
+### standard steel size
+
+A named steel section from a published standard, such as the channel `RSC 203x89` or the hollow
+section `SHS 100x100x5`, that a frame member can be made of without typing its dimensions.
+
+Its frame profile carries the standard's dimensions; a taper flange channel's flanges slope by its
+flange slope.
+
+- **In SolidCraft:** `frame.profile.list` (`sizes`), `profile: {"size": …}` in `frame.member`,
+  `frame.profile.properties` and `frame.profile.insert`; a channel's `flange_slope`.
+- **Don't use:** catalogue profile, library profile (for the size).
+- **Elsewhere:** standard section, section size, section designation.
+- **For translators:** a steel section's size by name, not a dimension and not a standard part.
+
 ### thin-film interference
 
 Interference between coherent optical waves reflected at the interfaces of a thin layer.
@@ -542,6 +645,18 @@ and the MCP camera take in radians.
 - **Elsewhere:** view orientation, azimuth and elevation.
 - **For translators:** the view's pitch is a tilt, not a thread's or a pattern's pitch.
 
+### virtual component
+
+A component with no geometry, listed in bills of materials with its quantity: grease, paint, a
+label, packaging.
+
+It holds no bodies, sketches or components and can't be the active component.
+
+- **In SolidCraft:** the `virtual` part property; `component.create {virtual: true}`.
+- **Don't use:** phantom (a phantom has no row), reference, empty component.
+- **Elsewhere:** virtual component, virtual part, non-geometric part.
+- **For translators:** not a *bill of materials type*.
+
 ### web browser
 
 A program that shows web pages, such as the one that runs SolidCraft's web build.
@@ -574,6 +689,9 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | | an open end in the sketch continuity legend | open end | the sketch continuity legend |
 | Clearance | the Clearance command | clearance check | `inspect.clearance` |
 | | a minimum distance field | clearance | the Interference and plastic rules dialogs |
+| | a hole sized for a bolt to pass through | clearance (hole) | the Hole dialog's Hole Tap Type, `ui.hole_clearance` |
+| Fit | fit the view to the model | fit (view) | the view's Fit action, `ui.fit` |
+| | how much room a clearance hole leaves around the bolt | clearance fit | the Hole dialog's Fit, `ui.clearance_fit` |
 | Flat | a hole's flat bottom | flat bottom | the Hole dialog's tip |
 | | a hem that lies flat on the sheet | flat hem | the Hem dialog's type |
 | Round | a round relief or corner shape | round (shape) | relief shapes, plastic rests, ruled surface corners |

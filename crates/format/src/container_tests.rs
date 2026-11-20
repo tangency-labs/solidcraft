@@ -6,6 +6,7 @@ const LIMITS: Limits = Limits {
     part_limit: |name| if name.ends_with(".big") { 1 << 20 } else { 1024 },
     level: |_, _| 1,
     check_size: |length| if length <= 1 << 20 { Ok(()) } else { Err("too large".into()) },
+    cancelled: None,
 };
 
 /// Parts and blobs written are read back as they were; a blob is stored once, named by its hash,

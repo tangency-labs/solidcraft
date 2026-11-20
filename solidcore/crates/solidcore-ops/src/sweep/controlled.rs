@@ -188,13 +188,14 @@ fn indices(order: &[FaceId], ids: &[FaceId]) -> Option<Vec<usize>> {
 ///
 /// # Errors
 /// [`Error::Argument`] for no path pieces, a profile or rail the curves refuse, or more than
-/// two rails; the kernel's refusal ([`Error::Status`]) of a twist or end scale past
+/// two rails; the kernel's refusal ([`Error::Refused`]) of a twist or end scale past
 /// SolidCraft's limits ([`MAX_TWIST`], [`MIN_SCALE`], [`MAX_SCALE`], passed to it);
 /// [`Error::Unsupported`] for a path with corners or a closed path, and for a skin the kernel
 /// does not trace to its profile curves (a controlled sweep's sections are affine images of
 /// one profile, so it always is: `create_skin_primitive_with_sources`) or a wall not swept
 /// from one curve of each section; the kernel's refusals of the path, the laws and
-/// the rails ([`Error::Status`]), with SolidCraft's least crossing angle and sine
+/// the rails ([`Error::Refused`] for input it refuses, else [`Error::Status`]), with
+/// SolidCraft's least crossing angle and sine
 /// ([`MIN_PARALLEL_CROSSING`], [`MIN_DIRECTION_ACROSS`]); those of `finish`.
 pub fn sweep_controlled(
     profile: &[Curve],
@@ -360,9 +361,6 @@ fn build(
 fn not_traced(why: NotTraced) -> &'static str {
     match why {
         NotTraced::OpenProfiles => "a skin not traced to its profile curves: open profiles",
-        NotTraced::SectionsNotKnotIdentical => {
-            "a skin not traced to its profile curves: sections whose knots differ"
-        }
         NotTraced::SkinMovedKnots => {
             "a skin not traced to its profile curves: its knots are not the sections'"
         }
@@ -372,8 +370,11 @@ fn not_traced(why: NotTraced) -> &'static str {
         NotTraced::EdgeUntraced => {
             "a skin not traced to its profile curves: a profile edge with no recorded curve"
         }
-        NotTraced::JoinedCurveUnreadable => {
-            "a skin not traced to its profile curves: a section's curve could not be read"
+        NotTraced::SegmentMerged => {
+            "a skin not traced to its profile curves: a curve merged into one knot"
+        }
+        NotTraced::KnotMapBroken => {
+            "a skin not traced to its profile curves: where a section's knots went is not known"
         }
         NotTraced::SurfaceKnotsUnreadable => {
             "a skin not traced to its profile curves: its knots could not be read"

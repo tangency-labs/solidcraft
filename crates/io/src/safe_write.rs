@@ -21,9 +21,53 @@ fn temp_beside(path: &Path, tag: &str) -> PathBuf {
     path.with_file_name(format!(".{name}.{tag}.{}.{nanos}.tmp", std::process::id()))
 }
 
-fn write_synced(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let mut f = OpenOptions::new().write(true).create_new(true).open(path)?;
-    f.write_all(bytes)?;
+/// Bytes written between checks for Cancel and reports of how far the write is.
+const CHUNK: usize = 1 << 20;
+
+/// What a write its watch cancelled returns: the file it was to replace, and its backup, are as
+/// they were.
+pub fn cancelled_error() -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::Interrupted, "save cancelled")
+}
+
+/// The watch over this thread's work asked it to stop.
+pub(crate) fn cancelled() -> bool {
+    solidcraft_kernel::watch::current().is_some_and(|w| w.cancelled())
+}
+
+/// Write `bytes` to a new file at `path` and flush it, a piece at a time: a watched write
+/// ([`solidcraft_kernel::watch`]) reports how far it is (`report`) and stops when cancelled.
+/// `like`: the permissions of the file it will replace. The new file takes them before a byte is
+/// written (on Unix it is created no more open than they are), so a private design is never
+/// readable by others part way through a save; failing to set them fails the write.
+fn write_synced(path: &Path, bytes: &[u8], report: bool, like: Option<&fs::Permissions>) -> std::io::Result<()> {
+    let watch = solidcraft_kernel::watch::current();
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    if let Some(p) = like {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        options.mode(p.mode() & 0o777);
+    }
+    let mut f = options.open(path)?;
+    // Unix: exactly the old mode (the umask may have narrowed it), through the open handle.
+    #[cfg(unix)]
+    if let Some(p) = like {
+        f.set_permissions(p.clone())?;
+    }
+    #[cfg(not(unix))]
+    let _ = like;
+    let mut done = 0usize;
+    for chunk in bytes.chunks(CHUNK) {
+        if watch.as_ref().is_some_and(|w| w.cancelled()) {
+            return Err(cancelled_error());
+        }
+        f.write_all(chunk)?;
+        done = done.saturating_add(chunk.len());
+        if report && let Some(w) = &watch {
+            w.progress("writing", done, bytes.len());
+        }
+    }
     flush(&f)
 }
 
@@ -83,10 +127,13 @@ fn resolve_links(path: &Path) -> std::io::Result<PathBuf> {
 }
 
 /// Give the file that replaces `old` the permissions `old` had (a private `0600` design must not
-/// come back readable by everyone, a group's `0664` must not lose the group's write access).
-fn keep_permissions(old: &Option<fs::Permissions>, new: &Path) {
-    if let Some(p) = old {
-        let _ = fs::set_permissions(new, p.clone());
+/// come back readable by everyone, a group's `0664` must not lose the group's write access). On
+/// Unix [`write_synced`] already gave them; elsewhere (a read-only attribute) they are set once the
+/// file is written. An error fails the save, which then replaces nothing.
+fn keep_permissions(old: &Option<fs::Permissions>, new: &Path) -> std::io::Result<()> {
+    match old {
+        Some(p) if cfg!(not(unix)) => fs::set_permissions(new, p.clone()),
+        _ => Ok(()),
     }
 }
 
@@ -188,13 +235,19 @@ fn open_to_flush(path: &Path) -> std::io::Result<fs::File> {
 fn write_steps(path: &Path, bytes: &[u8], backup: bool, stop: Option<Step>) -> std::io::Result<()> {
     let permissions = fs::metadata(path).ok().filter(|m| m.is_file()).map(|m| m.permissions());
     let tmp = temp_beside(path, "new");
-    if let Err(e) = write_synced(&tmp, bytes) {
+    if let Err(e) = write_synced(&tmp, bytes, true, permissions.as_ref()).and_then(|_| keep_permissions(&permissions, &tmp)) {
         let _ = fs::remove_file(&tmp);
         return Err(e);
     }
-    keep_permissions(&permissions, &tmp);
     if stop == Some(Step::TempWritten) {
         return Ok(());
+    }
+    // The temp file is written; nothing has been replaced yet. The write's flush can take a while
+    // on a slow disk, so Cancel gets its last check here, before the backup (and the target) go:
+    // a cancelled save refreshes neither.
+    if cancelled() {
+        let _ = fs::remove_file(&tmp);
+        return Err(cancelled_error());
     }
     let linked = if backup && path.is_file() { link_backup(path) } else { Ok(false) };
     let linked = match linked {
@@ -208,9 +261,11 @@ fn write_steps(path: &Path, bytes: &[u8], backup: bool, stop: Option<Step>) -> s
         // Copy (not move) the old file, so the target exists at every moment.
         let old = fs::read(path);
         let bak_tmp = temp_beside(path, "bak");
+        // The last moment Cancel stops it: nothing has been replaced yet.
         let r = old
-            .and_then(|old| write_synced(&bak_tmp, &old))
-            .map(|_| keep_permissions(&permissions, &bak_tmp))
+            .and_then(|old| write_synced(&bak_tmp, &old, false, permissions.as_ref()))
+            .and_then(|_| keep_permissions(&permissions, &bak_tmp))
+            .and_then(|_| if cancelled() { Err(cancelled_error()) } else { Ok(()) })
             .and_then(|_| replace_synced(&bak_tmp, &backup_path(path)));
         if let Err(e) = r {
             let _ = fs::remove_file(&bak_tmp);
@@ -220,6 +275,12 @@ fn write_steps(path: &Path, bytes: &[u8], backup: bool, stop: Option<Step>) -> s
     }
     if stop == Some(Step::BackupWritten) {
         return Ok(());
+    }
+    // Without a backup to keep, the last moment Cancel stops it; once the backup is replaced the
+    // save goes through to the end.
+    if !(backup && path.is_file()) && cancelled() {
+        let _ = fs::remove_file(&tmp);
+        return Err(cancelled_error());
     }
     if let Err(e) = replace_synced(&tmp, path) {
         let _ = fs::remove_file(&tmp);
@@ -265,11 +326,11 @@ pub fn write_atomic_no_follow(path: &Path, bytes: &[u8]) -> std::io::Result<()> 
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("{}: not a regular file", path.display())));
     }
     let tmp = temp_beside(path, "new");
-    if let Err(e) = write_synced(&tmp, bytes) {
+    let permissions = there.map(|m| m.permissions());
+    if let Err(e) = write_synced(&tmp, bytes, false, permissions.as_ref()).and_then(|_| keep_permissions(&permissions, &tmp)) {
         let _ = fs::remove_file(&tmp);
         return Err(e);
     }
-    keep_permissions(&there.map(|m| m.permissions()), &tmp);
     // A rename replaces the name itself, so a link put there since the check above goes, and the
     // file it pointed to stays as it was.
     if let Err(e) = replace_synced(&tmp, path) {
@@ -585,6 +646,91 @@ mod tests {
         d
     }
 
+    /// A watch for the tests: how far the write said it is, and Cancel once `cancel_at` bytes are
+    /// reported written.
+    struct TestWatch {
+        reported: std::sync::Mutex<Vec<(&'static str, usize, usize)>>,
+        cancel_at: usize,
+        cancelled: std::sync::atomic::AtomicBool,
+    }
+
+    impl solidcraft_kernel::watch::Watch for TestWatch {
+        fn cancelled(&self) -> bool {
+            self.cancelled.load(std::sync::atomic::Ordering::Relaxed)
+        }
+        fn progress(&self, stage: &'static str, done: usize, total: usize) {
+            if done >= self.cancel_at {
+                self.cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            if let Ok(mut r) = self.reported.lock() {
+                r.push((stage, done, total));
+            }
+        }
+    }
+
+    fn watched(cancel_at: usize) -> std::sync::Arc<TestWatch> {
+        std::sync::Arc::new(TestWatch { reported: Default::default(), cancel_at, cancelled: Default::default() })
+    }
+
+    /// A watched save reports how far it has written, a piece at a time, up to the whole file;
+    /// cancelled part way, it stops: the file and its backup are as they were, and no temporary
+    /// file is left behind.
+    #[test]
+    fn a_watched_write_reports_its_progress_and_cancelled_leaves_the_file_and_its_backup() {
+        let d = dir("watched");
+        let path = d.join("Plate.solidcraft");
+        fs::write(&path, b"version one").unwrap();
+        write_atomic(&path, b"version two", true).unwrap();
+        let big = vec![7u8; 3 * CHUNK + 5];
+        // Written to the end: each piece reported, the last the whole file.
+        let watch = watched(usize::MAX);
+        solidcraft_kernel::watch::watching(watch.clone(), || write_atomic(&path, &big, true)).unwrap();
+        let reported = watch.reported.lock().unwrap().clone();
+        assert_eq!(reported.len(), 4, "{reported:?}");
+        assert_eq!(reported.last(), Some(&("writing", big.len(), big.len())));
+        assert_eq!(fs::read(&path).unwrap(), big);
+        assert_eq!(fs::read(backup_path(&path)).unwrap(), b"version two");
+        // Cancelled after the first piece: refused as cancelled, nothing replaced.
+        let watch = watched(1);
+        let newer = vec![9u8; 3 * CHUNK];
+        let e = solidcraft_kernel::watch::watching(watch.clone(), || write_atomic(&path, &newer, true)).unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::Interrupted);
+        assert_eq!(watch.reported.lock().unwrap().len(), 1, "stopped at the next piece");
+        assert_eq!(fs::read(&path).unwrap(), big, "the file is as it was");
+        assert_eq!(fs::read(backup_path(&path)).unwrap(), b"version two", "and its backup");
+        assert!(stale_temps(&path).is_empty(), "no temporary file left");
+        // A new file (nothing to back up) cancelled is never created.
+        let fresh = d.join("New.solidcraft");
+        let e = solidcraft_kernel::watch::watching(watched(1), || write_atomic(&fresh, &newer, true)).unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::Interrupted);
+        assert!(!fresh.exists() && stale_temps(&fresh).is_empty());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// Cancelled after its temporary file is written, a save stops before the backup and the
+    /// target change: the last moment before anything is replaced is honoured, even when the
+    /// backup would be linked rather than copied.
+    #[test]
+    fn cancelled_between_the_temp_write_and_the_backup_changes_nothing() {
+        for refused in [false, true] {
+            LINKS_REFUSED.with(|r| r.set(refused));
+            let d = fresh_dir(if refused { "cancel-before-bak-copied" } else { "cancel-before-bak-linked" });
+            let path = d.join("a.solidcraft");
+            fs::write(&path, b"old").unwrap();
+            write_atomic(&path, b"backed up", true).unwrap();
+            // The watch asks to stop exactly when the temp file's last piece is reported: after
+            // its write and before the backup is linked or copied.
+            let bytes = b"new file";
+            let e = solidcraft_kernel::watch::watching(watched(bytes.len()), || write_atomic(&path, bytes, true)).unwrap_err();
+            assert_eq!(e.kind(), std::io::ErrorKind::Interrupted);
+            assert_eq!(fs::read(&path).unwrap(), b"backed up", "the target is as it was, refused {refused}");
+            assert_eq!(fs::read(backup_path(&path)).unwrap(), b"old", "and the backup was not refreshed, refused {refused}");
+            assert!(stale_temps(&path).is_empty(), "no temporary file left, refused {refused}");
+            let _ = fs::remove_dir_all(&d);
+        }
+        LINKS_REFUSED.with(|r| r.set(false));
+    }
+
     /// A network share (SMB on macOS) refuses the drive flush `sync_all` asks for with "Operation
     /// not supported" (os error 45). The file is then flushed the plain way and the save goes on;
     /// any other failure still fails the save.
@@ -762,6 +908,36 @@ mod tests {
             LINKS_REFUSED.with(|r| r.set(false));
         }
 
+        /// The temporary copy a save writes is never more open than the design it replaces, even
+        /// while it is being written: it is created with the design's mode, whatever the umask.
+        #[test]
+        fn the_temporary_copy_is_never_more_open_than_the_design() {
+            let d = dir("tempmode");
+            for want in [0o600, 0o640, 0o664, 0o444] {
+                let p = d.join(format!("t{want:o}.solidcraft"));
+                write_atomic(&p, b"one", false).unwrap();
+                fs::set_permissions(&p, fs::Permissions::from_mode(want)).unwrap();
+                // The moment the temporary file exists, before anything else is done to it.
+                let tmp = d.join(format!("t{want:o}.tmp"));
+                write_synced(&tmp, b"two", false, Some(&fs::metadata(&p).unwrap().permissions())).unwrap();
+                assert_eq!(mode(&tmp), want, "temp {want:o}");
+                assert_eq!(fs::read(&tmp).unwrap(), b"two");
+                let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o644));
+                let _ = fs::remove_file(&tmp);
+                write_atomic(&p, b"three", true).unwrap();
+                assert_eq!((mode(&p), mode(&backup_path(&p))), (want, want), "saved {want:o}");
+                // The same for the app's own small files beside a design.
+                let q = d.join(format!("n{want:o}.json"));
+                write_atomic_no_follow(&q, b"one").unwrap();
+                fs::set_permissions(&q, fs::Permissions::from_mode(want)).unwrap();
+                write_atomic_no_follow(&q, b"two").unwrap();
+                assert_eq!(mode(&q), want, "no-follow {want:o}");
+                let _ = fs::set_permissions(&p, fs::Permissions::from_mode(0o644));
+                let _ = fs::set_permissions(&q, fs::Permissions::from_mode(0o644));
+            }
+            let _ = fs::remove_dir_all(&d);
+        }
+
         #[test]
         fn a_save_through_a_link_keeps_the_targets_permissions() {
             let d = dir("linkmode");
@@ -849,7 +1025,7 @@ mod rename_retry_tests {
         let old = directory.join("image.png");
         let pending = directory.join("completed.tmp");
         fs::write(&old, b"old complete image").unwrap();
-        write_synced(&pending, b"new complete image").unwrap();
+        write_synced(&pending, b"new complete image", false, None).unwrap();
         let mut reader = Some(OpenOptions::new().read(true).share_mode(1).open(&old).unwrap());
         let error = fs::rename(&pending, &old).unwrap_err();
         assert!(matches!(error.raw_os_error(), Some(5 | 32)), "{error}");

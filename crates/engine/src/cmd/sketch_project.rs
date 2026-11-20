@@ -173,6 +173,19 @@ fn source(s: &Session, v: &Value, cmd: &str) -> Result<LinkSource> {
             if Some(f.id) == s.active_sketch {
                 return Err(bad(cmd, "a sketch cannot project its own geometry"));
             }
+            if let Some(target) = sketch_store::active(s)
+                && let (Some(source_index), Some(target_index)) = (s.doc.feature_index(f.id), s.doc.feature_index(target))
+                && source_index > target_index
+            {
+                return Err(bad(
+                    cmd,
+                    format!(
+                        "sketch `{}` comes after this sketch in the timeline, so its geometry cannot be used here. \
+                         Move the source sketch earlier if its dependencies allow, or use a sketch after it.",
+                        f.name
+                    ),
+                ));
+            }
             if let Some(c) = curve {
                 return Ok(LinkSource::SketchCurve { sketch: f.id, curve: c.to_string() });
             }
@@ -197,10 +210,14 @@ fn point_source(s: &Session, name: &str, cmd: &str) -> Result<LinkSource> {
     }
 }
 
-/// An origin axis (`X`, `Y` or `Z`, in any case), or a construction axis by its name (#9324).
+/// An origin axis (`X`, `Y` or `Z`, in any case), a construction axis by its name (#9324), or the
+/// origin axis of a component by its Browser key (`o:2/origin/Z`, #15086).
 fn axis_source(s: &Session, name: &str, cmd: &str) -> Result<LinkSource> {
     if ["X", "Y", "Z"].iter().any(|axis| name.eq_ignore_ascii_case(axis)) {
         return Ok(LinkSource::Axis { name: name.to_ascii_uppercase() });
+    }
+    if s.origin_axis(name).is_some() {
+        return Ok(LinkSource::Axis { name: name.to_string() });
     }
     match s.doc.find_feature(name) {
         Some(f) if matches!(f.kind, FeatureKind::ConstructionAxis { .. }) => Ok(LinkSource::Axis { name: f.name.clone() }),
@@ -475,15 +492,25 @@ fn add_link_unless_present(
     } else {
         None
     };
-    // The link is the edge that was picked, not whichever is nearest the picked point later.
+    // The link is the edge or vertex that was picked, not whichever is nearest the picked point later.
     let edge_name = solidcraft_doc::project::resolved_edge_name(&st, &r);
+    let vertex_name = solidcraft_doc::project::resolved_vertex_name(&st, &r);
+    let sketch_placements = match frame {
+        Some((author, frame)) => solidcraft_doc::project::capture_link_sketch_placements(&doc, author, &frame, &r.source)?,
+        None => Vec::new(),
+    };
     let link = sk.add_link_with_wires(kind, r.source, &r.geom, &r.wires)?;
+    // A face's curves keep the names of the edges they stand for, which find them again when
+    // the face is read in another order (#18711).
+    sk.set_link_curve_edges(&link, &r.geom, &r.edge_names);
     // The wires' exact curves, as a refresh of the link gives them (an included edge's record
     // curve): a link made now is the one its sketch would resolve.
     sk.set_link_wire_curves(&link, &r.exact)?;
     if let Some(l) = sk.links.iter_mut().find(|l| l.id == link) {
         l.face_name = name;
         l.edge_name = edge_name;
+        l.vertex_name = vertex_name;
+        l.sketch_placements = sketch_placements;
     }
     Ok(Some(link))
 }
@@ -599,10 +626,16 @@ fn include_cmd(s: &mut Session, p: &Value) -> Result<Value> {
 /// `{vertex: [x,y,z], body?}` under one of `keys` is projected into the sketch first, as
 /// Project does, and stands for the projected curve (or point) in the parameters returned.
 /// Any body's edges work, a mirrored or patterned copy's too; the link keeps the edge's
-/// persistent name, so the constraint follows the edge through rebuilds.
+/// persistent name, so the constraint follows the edge through rebuilds. An edge's middle,
+/// `{midpoint: {edge: [x,y,z], body?}}`, projects the edge and becomes `{midpoint: <its curve>}`,
+/// the middle of the projected line (#17920).
 pub(super) fn project_operands(s: &mut Session, p: &Value, cmd: &str, keys: &[&str]) -> Result<Value> {
-    if !keys.iter().any(|k| p.get(*k).is_some_and(model_ref)) {
+    let middle_of = |v: &Value| v.get("midpoint").filter(|m| m.get("edge").is_some() && model_ref(m)).cloned();
+    if !keys.iter().any(|k| p.get(*k).is_some_and(|v| model_ref(v) || middle_of(v).is_some())) {
         return Ok(p.clone());
+    }
+    if s.sheet_sketching() {
+        return Err(bad(cmd, "not supported yet: model projection in a sheet sketch; use exact sheet-local geometry"));
     }
     let id = sketch_store::target(s, p, cmd)?;
     let mut doc = (*s.doc).clone();
@@ -610,8 +643,12 @@ pub(super) fn project_operands(s: &mut Session, p: &Value, cmd: &str, keys: &[&s
     refresh(s, &doc, id, &mut sk);
     let mut out = p.clone();
     for key in keys {
-        let Some(v) = p.get(*key).filter(|v| model_ref(v)) else { continue };
-        out[*key] = json!(project_ref(s, &doc, id, &mut sk, v, cmd)?);
+        let Some(v) = p.get(*key) else { continue };
+        if let Some(m) = middle_of(v) {
+            out[*key] = json!({"midpoint": project_ref(s, &doc, id, &mut sk, &m, cmd)?});
+        } else if model_ref(v) {
+            out[*key] = json!(project_ref(s, &doc, id, &mut sk, v, cmd)?);
+        }
     }
     sketch_store::write(&mut doc, id, sk)?;
     *s.doc_mut() = doc;
@@ -657,6 +694,9 @@ pub(super) fn project_entities(s: &mut Session, p: &Value, cmd: &str) -> Result<
     }
     if !entities.iter().any(model_ref) {
         return Ok(p.clone());
+    }
+    if s.sheet_sketching() {
+        return Err(bad(cmd, "not supported yet: model projection in a sheet sketch; use exact sheet-local geometry"));
     }
     let id = sketch_store::target(s, p, cmd)?;
     let mut doc = (*s.doc).clone();
@@ -849,10 +889,25 @@ fn curve_intersection_arg(v: &Value, cmd: &str) -> Result<Option<(String, String
 /// two lines, circles or arcs (and `"vertex:x,y,z"` is the vertex form). Everything else is left
 /// as it is. The links are added to the active sketch in the session's document.
 pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
-    let Some(id) = sketch_store::active(s) else { return Ok(p.clone()) };
+    // A sheet may be open while the model retains its own active sketch. Never
+    // project into that model or reinterpret its new local ids as sheet points.
+    let sheet = s.sheet_sketching();
+    let target = if sheet { None } else { sketch_store::active(s) };
+    if !sheet && target.is_none() {
+        return Ok(p.clone());
+    }
     let mut out = p.clone();
     let mut doc: Option<(Document, Sketch)> = None;
     let fix = |v: &mut Value, s: &Session, doc: &mut Option<(Document, Sketch)>| -> Result<()> {
+        // These spellings denote automatic projection/snap operations, not an
+        // authored 2D point. Reject even malformed values with an `at` fallback.
+        if sheet
+            && (v.get("vertex").is_some()
+                || v.get("on_edge").is_some()
+                || v.as_str().is_some_and(|text| ["vertex:", "mid:", "on:", "x:"].iter().any(|prefix| text.starts_with(prefix))))
+        {
+            return Err(bad(cmd, "not supported yet: automatic snap or projection in a sheet sketch; use a 2D point or exact local point id"));
+        }
         let (vertex, edge) = (v.get("vertex").and_then(vec3), v.get("on_edge").and_then(vec3));
         // String forms from interactive snapping: "vertex:x,y,z" and "mid:<line>".
         let vertex = vertex.or_else(|| {
@@ -877,6 +932,7 @@ pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value
         if vertex.is_none() && edge.is_none() && mid.is_none() && on.is_none() && crossing.is_none() {
             return Ok(());
         }
+        let id = target.ok_or_else(|| bad(cmd, "no model sketch is being edited"))?;
         if doc.is_none() {
             let d = (*s.doc).clone();
             let mut sk = sketch_store::read(&d, id)?.clone();
@@ -947,6 +1003,7 @@ pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value
         }
     }
     if let Some((mut d, sk)) = doc {
+        let id = target.ok_or_else(|| bad(cmd, "no model sketch is being edited"))?;
         sketch_store::write(&mut d, id, sk)?;
         *s.doc_mut() = d;
     }
@@ -976,6 +1033,7 @@ pub(super) fn project_internal_faces(s: &mut Session, id: u64, body: &str, indic
     for &index in indices {
         let resolved = solidcraft_doc::project::resolve_face_indices(&state, &plane, LinkKind::Project, body, &[index])?;
         let link = sk.add_link_with_wires(LinkKind::Project, resolved.source, &resolved.geom, &resolved.wires)?;
+        sk.set_link_curve_edges(&link, &resolved.geom, &resolved.edge_names);
         if let Some(entry) = sk.links.iter_mut().find(|entry| entry.id == link) {
             entry.face_name = names.get(index).cloned();
         }
@@ -1006,6 +1064,7 @@ pub(super) fn auto_project_face(s: &mut Session, id: u64, _at: Vec3) -> Result<O
     let resolved = solidcraft_doc::project::resolve_anchored_face(&doc, &state, &plane, LinkKind::Project, &anchor)?;
     let mut sk = sketch_store::read(&doc, id)?.clone();
     let link = sk.add_link_with_wires(LinkKind::Project, resolved.source, &resolved.geom, &resolved.wires)?;
+    sk.set_link_curve_edges(&link, &resolved.geom, &resolved.edge_names);
     if let Some(link) = sk.links.iter_mut().find(|entry| entry.id == link) {
         link.face_name = Some(anchor.target.name.clone());
         link.auto_face = true;

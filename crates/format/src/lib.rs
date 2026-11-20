@@ -31,12 +31,15 @@ pub mod newer;
 pub enum FormatError {
     /// The file isn't one of the family's, or it is damaged.
     Invalid(String),
+    /// The work was cancelled (a save the person stopped): nothing more was written.
+    Cancelled,
 }
 
 impl std::fmt::Display for FormatError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             FormatError::Invalid(why) => f.write_str(why),
+            FormatError::Cancelled => f.write_str("cancelled"),
         }
     }
 }

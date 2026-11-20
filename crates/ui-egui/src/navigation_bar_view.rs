@@ -12,7 +12,7 @@ use solidcraft_theme::Tokens;
 /// What the current canvas lets the camera do: a flat sheet page or a finished render cannot
 /// orbit or pick, the Render workspace has its own caps, and the model has the full set.
 pub(crate) fn canvas_caps(app: &SolveApp) -> NavCaps {
-    if crate::dialogs_sheet::flat_active(app) || crate::render_workspace::result_active(app) {
+    if crate::dialogs_sheet::flat_active(app) || crate::render_workspace::result_active(app) || crate::drawing_workspace::active(app) {
         NavCaps { orbit: false, pick: false }
     } else if crate::render_workspace::active(app) {
         NavCaps::RENDER
@@ -21,16 +21,34 @@ pub(crate) fn canvas_caps(app: &SolveApp) -> NavCaps {
     }
 }
 
+const SHEET_ZOOM: &str = "sheet_zoom";
+
+fn live_preferences(app: &SolveApp) -> std::borrow::Cow<'_, NavigationBar> {
+    let prefs = &app.preferences.navigation_bar;
+    if !crate::drawing_workspace::active(app)
+        || crate::drawing_sheet_page::active_sheet(app).is_none()
+        || prefs.slots.iter().any(|id| id == SHEET_ZOOM)
+    {
+        return std::borrow::Cow::Borrowed(prefs);
+    }
+    let mut prefs = prefs.clone();
+    let position = prefs.slots.iter().position(|id| id == "fit").unwrap_or(prefs.slots.len());
+    prefs.slots.insert(position.min(navigation_bar::MAX_SLOTS - 1), SHEET_ZOOM.into());
+    std::borrow::Cow::Owned(prefs)
+}
+
 pub(crate) fn measured(app: &SolveApp, ctx: &egui::Context, content: Rect) -> BarLayout {
     let t = Tokens::get();
+    let prefs = live_preferences(app);
+    let zoom = format!("{} %", crate::drawing_sheet_page::zoom_percent(app, ctx));
     let label_width = |slot: &Slot| {
-        ctx.fonts_mut(|fonts| {
-            fonts.layout_no_wrap(slot_text(app, slot).to_owned(), crate::ui_kit::type_face::medium(ui_kit::NAV_TEXT), t.form_ink).size().x
-        })
+        let label = if slot.id == SHEET_ZOOM { &zoom } else { slot_text(app, slot) };
+        ctx.fonts_mut(|fonts| fonts.layout_no_wrap(label.to_owned(), crate::ui_kit::type_face::medium(ui_kit::NAV_TEXT), t.form_ink).size().x)
     };
     let caps = canvas_caps(app);
-    let shown = |slot: &Slot| caps.shows(slot);
-    let mut bar = measure(content, &app.preferences.navigation_bar, shown, label_width);
+    let has_sheet = crate::drawing_workspace::active(app) && crate::drawing_sheet_page::active_sheet(app).is_some();
+    let shown = |slot: &Slot| caps.shows(slot) && (slot.id != SHEET_ZOOM || has_sheet);
+    let mut bar = measure(content, &prefs, shown, label_width);
     let Some(_) = app.universal_panel_frame() else {
         return bar;
     };
@@ -63,7 +81,7 @@ pub(crate) fn measured(app: &SolveApp, ctx: &egui::Context, content: Rect) -> Ba
             .map(|bounds| (bounds.size.width - 2.0 * t.space_4).max(0.0))
             .max_by(f32::total_cmp)
             .unwrap_or(0.0);
-        bar = measure(Rect::from_min_size(content.min, vec2(width, content.height())), &app.preferences.navigation_bar, shown, label_width);
+        bar = measure(Rect::from_min_size(content.min, vec2(width, content.height())), &prefs, shown, label_width);
         if bar.rect.is_positive() {
             location = place(&bar);
         }
@@ -73,7 +91,7 @@ pub(crate) fn measured(app: &SolveApp, ctx: &egui::Context, content: Rect) -> Ba
         // free piece is tall enough. Validate that measured footprint directly.
         let metrics = ui_kit::NavigationMetrics::for_size(app.preferences.navigation_bar.size);
         let width = metrics.button + 2.0 * (ui_kit::NAV_BORDER + ui_kit::NAV_PADDING + ui_kit::NAV_EDGE);
-        bar = measure(Rect::from_min_size(content.min, vec2(width, content.height())), &app.preferences.navigation_bar, shown, label_width);
+        bar = measure(Rect::from_min_size(content.min, vec2(width, content.height())), &prefs, shown, label_width);
         if bar.rect.is_positive() {
             location = place(&bar);
         }
@@ -185,6 +203,10 @@ fn slot_views(app: &SolveApp, bar: &BarLayout, editing: Option<(NavCaps, bool)>)
     let mut cursor = 0;
     let mut views = Vec::new();
     for (slot, rect) in &bar.slots {
+        if slot.id == SHEET_ZOOM && editing.is_none() && !app.preferences.navigation_bar.slots.iter().any(|id| id == SHEET_ZOOM) {
+            views.push(slot_view(app, bar, slot, usize::MAX, *rect, editing));
+            continue;
+        }
         let Some((index, _)) = app.preferences.navigation_bar.slots.iter().enumerate().skip(cursor).find(|(_, id)| id.as_str() == slot.id) else {
             continue;
         };
@@ -211,7 +233,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         || app.viewport.modifier_nav.is_some()
         || app.viewport.spin;
     let prefs = &app.preferences.navigation_bar;
-    let bar = Bar {
+    let mut bar = Bar {
         rect: measured.rect,
         size: prefs.size,
         edge: prefs.edge,
@@ -221,7 +243,16 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         overflow: measured
             .overflow
             .iter()
-            .filter_map(|slot| Some(slot_view(app, &measured, slot, prefs.slots.iter().position(|id| id == slot.id)?, Rect::NOTHING, None)))
+            .filter_map(|slot| {
+                Some(slot_view(
+                    app,
+                    &measured,
+                    slot,
+                    prefs.slots.iter().position(|id| id == slot.id).or((slot.id == SHEET_ZOOM).then_some(usize::MAX))?,
+                    Rect::NOTHING,
+                    None,
+                ))
+            })
             .collect(),
         more: measured.more,
         labels: BarLabels {
@@ -232,16 +263,21 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
             remove: app.tr("navbar.custom.remove_bar").to_owned(),
         },
     };
-    let action = nav_bar::show(ui, &bar, |id| menu(app, id));
+    let zoom = crate::drawing_sheet_page::zoom_percent(app, ui.ctx());
+    for slot in bar.slots.iter_mut().chain(&mut bar.overflow).filter(|slot| slot.id == SHEET_ZOOM) {
+        slot.text = format!("{zoom} %");
+        slot.name = format!("{} ({zoom} %)", slot.name);
+    }
+    let action = nav_bar::show(ui, &bar, |id| menu(app, id, zoom));
     if let Some(action) = action {
-        run(app, action);
+        run(app, ui.ctx(), action);
         // Rows of a menu that stays open show the new state on the next frame, without new input.
         ui.ctx().request_repaint();
     }
 }
 
 /// Run what the bar returned.
-fn run(app: &mut SolveApp, action: NavAction) {
+fn run(app: &mut SolveApp, ctx: &egui::Context, action: NavAction) {
     match action {
         NavAction::Slot(id) => {
             if let Some(slot) = navigation_bar::find(&id) {
@@ -264,7 +300,17 @@ fn run(app: &mut SolveApp, action: NavAction) {
         NavAction::Item { menu, item } if menu == "visual_style" => {
             let _ = app.run("view.visual_style", json!({"style":item}));
         }
+        NavAction::Item { menu, item } if menu == SHEET_ZOOM => match item.as_str() {
+            "actual" => crate::drawing_sheet_page::actual_size(app, ctx),
+            "fit" => crate::drawing_sheet_page::fit(app),
+            _ => {}
+        },
         NavAction::Item { item, .. } => display_pick(app, &item),
+        NavAction::Percent { menu, tenths } => {
+            if menu == SHEET_ZOOM {
+                crate::drawing_sheet_page::set_zoom(app, ctx, f64::from(tenths) / 1000.0);
+            }
+        }
     }
 }
 
@@ -304,8 +350,16 @@ pub(crate) fn paint_row(
 }
 
 /// The rows of the menu slot `id` opens (none for an unknown one, which closes it).
-fn menu(app: &SolveApp, id: &str) -> Menu {
+fn menu(app: &SolveApp, id: &str, zoom: f32) -> Menu {
     match id {
+        SHEET_ZOOM => Menu {
+            entries: vec![
+                MenuEntry::Percent { value: (zoom * 10.0).round() as u32, label: app.tr("ui.sheet_page.zoom").into(), target: "sheet:zoom".into() },
+                MenuEntry::Row(MenuRow::new("actual", app.tr("ui.sheet_page.actual_size"), "zoom", "sheet:actual_size")),
+                MenuEntry::Row(MenuRow::new("fit", app.tr("ui.sheet_page.fit"), "fit", "sheet:fit")),
+            ],
+            close_on_pick: true,
+        },
         "visual_style" => style_menu(app),
         "display" => display_menu(app),
         _ => Menu::default(),
@@ -362,6 +416,15 @@ fn display_menu(app: &SolveApp) -> Menu {
             selected(app, slot.id),
         )));
     }
+    let mut axes = row(
+        "origin_axes_across_view",
+        app.tr("prefs.origin_axes_across_view"),
+        "origin",
+        "view:origin_axes_across_view",
+        app.preferences.origin_axes_across_view,
+    );
+    axes.tip = Some(app.tr("prefs.origin_axes_across_view_help").to_owned());
+    entries.push(MenuEntry::Row(axes));
     entries.extend([MenuEntry::Separator, MenuEntry::Heading(app.tr("navbar.projection_heading").to_owned())]);
     for (perspective, key) in [(false, "navbar.orthographic"), (true, "navbar.perspective")] {
         let mut item = row(
@@ -409,10 +472,12 @@ fn display_pick(app: &mut SolveApp, item: &str) {
         "view_angles" => {
             let _ = app.run("view.angle_readout", json!({"enabled": !app.preferences.show_view_angles}));
         }
+        "origin_axes_across_view" => {
+            let _ = app.run("view.origin_axes_across_view", json!({"enabled": !app.preferences.origin_axes_across_view}));
+        }
         "agent_cursor" => app.ui.agent_cursor.show = !app.ui.agent_cursor.show,
         "agent_chat" => {
             app.agent_chat.open = !app.agent_chat.open;
-            app.preferences.agent_chat_minimized &= !app.agent_chat.open;
         }
         id => {
             if let Some(slot) = navigation_bar::find(id) {

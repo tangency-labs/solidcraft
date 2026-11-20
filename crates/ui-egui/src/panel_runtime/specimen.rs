@@ -22,14 +22,14 @@ fn preset(value: &str) -> PanelResult<()> {
 }
 
 /// The caller explicitly opts into original synthetic content at the actual
-/// workspace composition point. An existing runtime is never replaced.
+/// workspace composition point. Explicit fixture mode can replace the production host.
 pub fn enable_host_specimen(app: &mut crate::SolveApp, name: &str) -> PanelResult<()> {
     enable_host_specimen_remembered(app, name, false, None)
 }
 
 fn enable_host_specimen_remembered(app: &mut crate::SolveApp, name: &str, remember: bool, requested_opacity: Option<f32>) -> PanelResult<()> {
     preset(name)?;
-    if app.panel_runtime().is_some() {
+    if app.panel_runtime.as_ref().is_some_and(|runtime| runtime.production.is_none()) {
         return Err(error(Rule::Lifecycle, "panel specimen cannot take over an existing runtime"));
     }
     let (layout, registry) = specimen_layout(name)?;
@@ -106,6 +106,7 @@ fn enable_host_specimen_remembered(app: &mut crate::SolveApp, name: &str, rememb
     } else {
         false
     };
+    app.disable_panel_runtime()?;
     app.panel_runtime = Some(integration);
     if repaired {
         super::preferences::report_notice(app);
@@ -456,6 +457,8 @@ impl PanelController for VisibleSpecimen {
             ContentSlot::Inline => {
                 self.render_inline(ui, context, services)?;
             }
+            // The specimen never asks for header content.
+            ContentSlot::Title => {}
         }
         Ok(())
     }
@@ -785,6 +788,7 @@ fn target_observation(target: &HostControlTarget) -> Value {
                 HostSharedAction::Focus => json!({"type":"focus"}),
                 HostSharedAction::Close => json!({"type":"close"}),
                 HostSharedAction::Collapse => json!({"type":"collapse"}),
+                HostSharedAction::ResetHeight => json!({"type":"reset_height"}),
                 HostSharedAction::Move(zone) => json!({"type":"move","zone":zone}),
                 HostSharedAction::Join(section) => json!({"type":"join","section":section}),
                 HostSharedAction::Popout => json!({"type":"popout"}),

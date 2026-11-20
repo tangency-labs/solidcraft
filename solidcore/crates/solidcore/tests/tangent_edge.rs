@@ -34,7 +34,7 @@ use solidcore::primitive::api_curves::{create_arc, create_line_segment};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::query::api_queries::{edge_closest_point, get_edges};
 use solidcore::query::edge::edge_faces;
-use solidcore::query::edge_turn::{convex_at, turn_at};
+use solidcore::query::edge_turn::{convex_at, joint_turn, turn_at};
 use solidcore::query::tangent_edge::{tangent_all_along, Tangency};
 use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::sweep::api_brep::create_linear_sweep;
@@ -301,7 +301,6 @@ fn walls_three_tenths_of_a_degree_apart() {
 /// root.
 fn procedural_round(k: &mut Kernel) -> (Brep, Vec<EdgeId>) {
     use solidcore::boolean::api_brep::boolean_union;
-    k.fixes.fillet_round_as_definition = true;
     let plate = create_box(k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 10.0).unwrap();
     let mut pipe = create_cylinder(k, Point3::new(0.0, 0.0, 0.0), 10.0, 60.0).unwrap();
     let phi = 4.0_f64.to_radians();
@@ -357,27 +356,29 @@ fn procedural_round(k: &mut Kernel) -> (Brep, Vec<EdgeId>) {
 }
 
 /// The procedural round's edges along the root, decided on its net with its definition's
-/// margin: today's verdict, exactly, on each: Undecided with no bound (pi, pi) at `s` = 87.04,
-/// where the pipe's foot crosses its net's C1 quarter knot (u = 15.708, multiplicity 2) and the
-/// definition's partials over the feet's box are refused (`FEET_BOX_CONTINUITY`). w2949's
-/// C1-knot follow-up encloses that box: then this test fails, and is to say Tangent (the
-/// module's unit test `a_procedural_round_s_edges_carry_its_margin` pins the parts).
+/// margin: Tangent on each. Where the pipe's foot crosses its net's C1 quarter knot (u =
+/// 15.708, multiplicity 2) the definition's feet box is taken cell by cell
+/// (tangency-labs/solidcraft#14284's C1-knot follow-up, and #15183 where the foot sits on the
+/// knot just outside the guesses' box); before them both edges were Undecided (pi, pi) at
+/// `s` = 87.04 (#15005). The module's unit test `a_procedural_round_s_edges_carry_its_margin`
+/// checks every piece.
 #[test]
 fn a_procedural_round_is_smooth() {
     let mut k = Kernel::default();
     let (mut b, edges) = procedural_round(&mut k);
-    for e in edges {
-        let verdict = tangent_all_along(&k, &mut b, e, SMOOTH).unwrap();
-        let Some(Tangency::Undecided { angle, margin, at }) = verdict else {
-            panic!("{e:?}: {verdict:?} (the C1 knot enclosed? then this test is to say Tangent)");
-        };
-        let unbounded = angle.to_bits() == PI.to_bits() && margin.to_bits() == PI.to_bits();
-        assert!(unbounded, "{e:?}: {verdict:?}");
-        // 87.04 is read off a run: the middle of the first part noted undecided there, where
-        // the pipe's foot crosses its quarter knot at s = 87.22 (the foot's map s -> u is the
-        // definition's solve, not redone here)
-        assert!((at - 87.04).abs() < 0.01, "{e:?}: {verdict:?}");
-    }
+    // every edge measured before anything is asserted, so a failure names them all
+    let seen: Vec<_> = edges
+        .into_iter()
+        .map(|e| (e, tangent_all_along(&k, &mut b, e, SMOOTH).unwrap()))
+        .collect();
+    eprintln!("procedural round edges: {seen:?}");
+    assert!(
+        seen.len() == 2
+            && seen
+                .iter()
+                .all(|(_, verdict)| *verdict == Some(Tangency::Tangent)),
+        "{seen:?}"
+    );
 }
 
 /// The edge use of `e` on a face that is not a plane, and that face.
@@ -530,4 +531,25 @@ fn a_pcurve_1e_15_off_a_knot_line_is_on_its_own_side() {
         format!("{err:?}").contains("leaving its face's net"),
         "{err:?}"
     );
+}
+
+#[test]
+fn joint_turn_is_the_angle_between_the_directions() {
+    let close = |a: f64, b: f64| (a - b).abs() < 1e-12;
+    assert!(close(joint_turn([1.0, 0.0], [2.0, 0.0]).unwrap(), 0.0));
+    assert!(close(
+        joint_turn([1.0, 0.0], [0.0, 3.0]).unwrap(),
+        FRAC_PI_2
+    ));
+    assert!(close(
+        joint_turn([0.0, 1.0], [1.0, 0.0]).unwrap(),
+        FRAC_PI_2
+    ));
+    assert!(close(joint_turn([1.0, 0.0], [-1.0, 0.0]).unwrap(), PI));
+}
+
+#[test]
+fn a_zero_or_non_finite_joint_direction_is_refused() {
+    assert!(joint_turn([0.0, 0.0], [1.0, 0.0]).is_err());
+    assert!(joint_turn([f64::NAN, 0.0], [1.0, 0.0]).is_err());
 }

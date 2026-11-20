@@ -76,6 +76,31 @@ fn the_picture_shows_the_device_as_it_is() {
     assert!(leaned[1] < -0.1, "the cap's top leans toward the user");
 }
 
+/// The picture shows the device, not the view: a driver that turns a row over for the view does
+/// not turn the cap over in the picture, and the assignment of which motion drives which row
+/// still says so.
+#[test]
+fn the_picture_shows_the_device_where_the_driver_turns_the_row_over() {
+    // A driver that turns the row over, as a 3DxWare profile can.
+    let mut mapping = crate::space_mouse::DriverMapping::default();
+    mapping.axes[0] = crate::space_mouse::AxisRule { output: 0, enabled: true, reversed: true, scale: 1.0 };
+    // The cap is pulled up, and the user drives the view's first axis with the pull.
+    let raw = [0, 350, 0, 0, 0, 0];
+    let source = [1usize, 0, 2, 3, 4, 5];
+    let (_, picture, moving) = corner_reading(None, raw, source, Some(mapping));
+    let view = view_axes_under(raw, source, [false; 6], mapping);
+    // The view turns the row over, as the driver says.
+    assert_eq!(view.translation[0], -1.0, "the view pulls the other way round");
+    // The picture shows the device: the pull, the way the user pulled it, on the row that reads it.
+    assert_eq!(picture[0], 1.0, "the picture shows the pull the way the device pulled it");
+    assert!(moving[0], "and its marker lights");
+    // The assignment still says which motion drives which row: with the rows as they are, the
+    // pull would show on the second axis.
+    let (_, plain, _) = corner_reading(None, raw, crate::space_mouse::SAME_AXES, Some(mapping));
+    assert_eq!(plain[1], 1.0, "the default assignment shows the pull on the second axis");
+    assert_eq!(plain[0], 0.0, "and nothing on the first");
+}
+
 #[test]
 fn the_picture_shows_the_motion_the_row_reads() {
     // The user drives the view's first axis with the device's second motion.

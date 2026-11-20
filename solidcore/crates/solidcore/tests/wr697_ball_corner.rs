@@ -30,7 +30,7 @@ use solidcore::blend::definition_check::{
 use solidcore::blend::fillet_executive::api::{chamfer_fillet, fillet_edges_per_edge};
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_executive::{FitKind, FitSize};
-use solidcore::blend::fillet_geom::p1::FilletCornerType;
+use solidcore::blend::fillet_geom::p1::{FilletCornerType, FilletErrorType};
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
 use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::curve::curve::{Curve, CurveKind};
@@ -57,14 +57,12 @@ use solidcore::topology::{edge, EdgeId, FaceId, VertexId};
 use solidcore::{Brep, Kernel};
 use std::f64::consts::PI;
 
-/// Every fix but `geometric_g2_continuity`.
+/// Every fix.
 fn all_fixes() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     k.fixes = f;
     k
@@ -331,6 +329,62 @@ fn half_space(k: &mut Kernel, at: Vec3, n: Vec3) -> Brep {
     prism(k, &c, n, 400.0)
 }
 
+/// Two small creases meet on the rounded outline: the side wall and the bottom both
+/// turn by three degrees, with a one-unit flat between the bends. The selected edges
+/// lie on x + z = 20, with z = tan(3 degrees) max(|y| - 1/2, 0).
+#[test]
+fn rounds_follow_a_three_degree_crease_in_both_supports() {
+    let slope = 3.0_f64.to_radians().tan();
+    for reverse in [false, true] {
+        let mut k = all_fixes();
+        let mut b = create_box(&mut k, Point3::new(0.0, -10.0, 0.0), 20.0, 20.0, 20.0).unwrap();
+        for side in [-1.0, 1.0] {
+            for normal in [
+                Vec3::new(1.0, side * slope, 0.0),
+                Vec3::new(0.0, side * slope, -1.0),
+            ] {
+                let tool = half_space(&mut k, Point3::new(20.0, side * 0.5, 0.0), unit(normal));
+                b = boolean_difference(&mut k, b, tool).unwrap();
+            }
+        }
+        let z = slope * 4.5;
+        let mut at = [[20.0 - z, -5.0, z], [20.0, 0.0, 0.0], [20.0 - z, 5.0, z]];
+        if reverse {
+            at.reverse();
+        }
+        round(&mut k, &mut b, &at, 2.0).unwrap();
+        // The inclined wall rail is (20-u, y, r cos(a)+u), y=1/2+u/m.
+        // On the flat round (x-(20-r))^2+(z-r)^2=r^2, its near crossing
+        // satisfies 2u^2-2r(1+d)u+r^2 d^2=0, d=1-cos(a).
+        let r = 2.0;
+        let cos = 3.0_f64.to_radians().cos();
+        let d = 1.0 - cos;
+        let u = r * d * d / (1.0 + d + (1.0 + 2.0 * d - d * d).sqrt());
+        for side in [-1.0, 1.0] {
+            let y = side * (0.5 + u / slope);
+            for want in [
+                Point3::new(20.0 - u, y, r * cos + u),
+                Point3::new(20.0 - r * cos - u, y, u),
+            ] {
+                assert!(
+                    b.vertices().ids().any(|v| {
+                        solidcore::topology::vertex::point(&b, v)
+                            .unwrap()
+                            .distance(want)
+                            <= solidcore::topology::vertex::tolerance(&b, v).unwrap()
+                    }),
+                    "reverse {reverse}: missing rail/fillet crossing {want:?}"
+                );
+            }
+        }
+        assert!(solidcore::topology::brep::p2::is_manifold_solid(&b).unwrap());
+        let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+            .unwrap()
+            .lines();
+        assert!(lines.is_empty(), "reverse {reverse}: {lines:?}");
+    }
+}
+
 /// capi `ball prism_corner`: a kite prism 10 tall, its corner V = (0, 0) of 120 degrees
 /// between sides square at their far ends to the sides on to (20, 0); the three edges at
 /// the top of V rounded r 2. The ball about (2 r / sqrt 3, 0, 10 - r). Removed: the
@@ -540,12 +594,12 @@ fn a_set_back_vertex_is_no_ball() {
 // Facet. The plane through X_u, X_v, X_w cuts off, beyond the mitre, the tetrahedron
 // M X_u X_v X_w: |det(X_u - M, X_v - M, X_w - M)| / 6 more.
 
-// Every fix but `geometric_g2_continuity`, with or without `fillet_chamfer_corner`.
+// Every fix, with or without `fillet_chamfer_corner`.
 fn chamfer_fixes(on: bool) -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" && (on || name != "fillet_chamfer_corner") {
+        if on || name != "fillet_chamfer_corner" {
             *f.flag_mut(name).unwrap() = true;
         }
     }
@@ -1242,6 +1296,70 @@ fn a_mitre_point_outside_the_corner_is_refused_with_its_fit() {
 // faces are +-x + z = 10 and +-y + z = 10, 120 degrees apart across each apex edge
 // (normals (1, 0, 1) and (0, 1, 1) at 60 degrees). The apex edges, from (0, 0, 10) to
 // (+-10, +-10, 0), at their midpoints.
+// The L block: the 40 x 30 x 20 box less [20, 41] x [15, 31] x [-1, 21]. Its inner top vertex
+// (20, 15, 20): the upright edge (concave), the top edges along +x and along +y (convex).
+fn l_block() -> (Kernel, Brep, Vec<EdgeId>) {
+    let mut k = chamfer_fixes(true);
+    let block = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
+    let cut = create_box(&mut k, Point3::new(20.0, 15.0, -1.0), 21.0, 16.0, 22.0).unwrap();
+    let b = boolean_difference(&mut k, block, cut).unwrap();
+    let edges = [[20.0, 15.0, 10.0], [30.0, 15.0, 20.0], [20.0, 22.0, 20.0]]
+        .iter()
+        .map(|&p| pick(&k, &b, p))
+        .collect();
+    (k, b, edges)
+}
+
+// Chamfers of both convexities at a vertex of three, as bevels: the event declines them, and the
+// pinned bevel cannot find their common point, so the refusal must name the vertex. Today it
+// fails with code 3, "Vertex Computation Failure".
+#[test]
+fn chamfers_of_both_convexities_at_a_vertex_are_refused_as_bevels_naming_the_vertex() {
+    for d in [[2.0; 3], [3.0, 1.0, 2.0]] {
+        let (mut k, mut b, edges) = l_block();
+        let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+        let xs = [FilletSurfaceGeneratorType::Linear; 3];
+        s.prepare_per_edge_constant_radius(&mut k, &edges, &d, &xs, 1, 1.0)
+            .unwrap();
+        s.create_corners(&k, None).unwrap();
+        for id in s.fillet_corners().unwrap() {
+            s.set_corner_bevel(id, true).unwrap();
+        }
+        let done = s.do_filleting(&mut k, None);
+        let info = s.error_info();
+        assert!(done.is_err(), "{d:?}: built");
+        assert_eq!(
+            info.code,
+            FilletErrorType::CornerUnsupported as i32,
+            "{d:?}: {}",
+            info.comment
+        );
+        let at = info.location.unwrap();
+        assert!(
+            (at.x - 20.0).abs() <= 1e-12
+                && (at.y - 15.0).abs() <= 1e-12
+                && (at.z - 20.0).abs() <= 1e-12,
+            "{d:?}: refused at {at:?}"
+        );
+        assert!(
+            info.comment
+                .contains("chamfers of convex and of concave edges meet at the vertex"),
+            "{d:?}: {}",
+            info.comment
+        );
+    }
+}
+
+// Without bevels the same three chamfers keep the pinned corner patch: it builds, 12 faces, clean.
+#[test]
+fn chamfers_of_both_convexities_without_bevels_keep_the_pinned_corner() {
+    let (mut k, mut b, edges) = l_block();
+    chamfer(&mut k, &mut b, &edges, &[2.0; 3], BlendChamferCorner::Mitre).unwrap();
+    let (n, lines, _) = report(&mut k, &mut b);
+    assert!(lines.is_empty(), "{lines:?}");
+    assert_eq!(n.0, 12);
+}
+
 fn pyramid() -> (Kernel, Brep, Vec<EdgeId>) {
     let mut k = chamfer_fixes(true);
     let b = create_pyramid(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 10.0).unwrap();
@@ -1759,8 +1877,8 @@ fn low_apex(eps: f64) -> (Kernel, Brep, Vec<EdgeId>) {
     (k, b, edges)
 }
 
-// The kernel blends no edge whose faces turn by less than half a degree (`GetBlendEdgeuse`,
-// with `fillet_half_degree_crease`; 2 degrees without), and here the faces turn by about
+// The kernel blends no edge whose faces turn by less than half a degree (`GetBlendEdgeuse`;
+// upstream 2 degrees, WR-621), and here the faces turn by about
 // sqrt 3 eps, so the flattest apex that can be chamfered is at eps = 5.0e-3. At
 // eps = 1/100 (0.99 degrees), r = 400: s = 2 sqrt 3 / N = 3.46, rho = 4 / sqrt(1 + eps^2),
 // |z_M| = 0.03. M's bound is 8 EPSILON (3.46 + 0.03)(400) = 2.5e-12 and X's
