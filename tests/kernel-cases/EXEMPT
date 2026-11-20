@@ -62,6 +62,7 @@ component.replace_with_link       component links
 component.show_history            the History bar: which features it lists
 component.unlock                  component locking
 component.update_links            component links
+config.update_from_design         configuration table bookkeeping; tested in crates/engine/src/cmd/config.rs
 construct.axis                    builds with the first construct.axis.* method that takes the references; that method's own feature (crates/engine/src/construct_tests.rs)
 construct.plane                   builds with the first construct.plane.* method that takes the references; that method's own feature (crates/engine/src/construct_tests.rs)
 construct.point                   builds with the first construct.point.* method that takes the references; that method's own feature (crates/engine/src/construct_tests.rs)
@@ -187,6 +188,7 @@ file.verify                       signature checks: tested in crates/io/src/desi
 frame.end_cap                     plates on member ends; tested in crates/engine/src/cmd/frame_tests.rs
 frame.profile.list                a listing of the profile library
 frame.profile.properties          a profile's section properties from the library
+frame.rotate_member               turns a member about its own axis; tested in crates/engine/src/cmd/frame_tests.rs
 inspect.accessibility             display analysis: shading
 inspect.analysis                  display analysis: which one is on
 inspect.colored_components        display: component colours

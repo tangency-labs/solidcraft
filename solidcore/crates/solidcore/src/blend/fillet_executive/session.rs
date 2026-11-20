@@ -122,6 +122,12 @@ pub use original_trim::{OriginalSurfaceDeletion, OriginalSurfaceSelection};
 
 const OP: &str = "blend::fillet_executive::session";
 
+/// The session's note at a bevel corner of three chamfers of both convexities.
+const MIXED_CHAMFER_CORNER: &str = "Fillet Error: chamfers of convex and of concave edges meet at the vertex; their mitre is not built yet";
+/// The same, as the refusing step's reason.
+const MIXED_CHAMFER_CORNER_REASON: &str =
+    "chamfers of convex and of concave edges meet at the vertex";
+
 /// The tangency within which the band check takes two blended edges for one tangent chain
 /// (`chains_among`), radians: 10 degrees, as a chamfer's chain (`two_offsets`) and an
 /// edge's continuation (`edge_refusals`) take it.
@@ -1026,6 +1032,151 @@ fn live_corner_vert_geom(
         // the fork's SM_FV_PRECOMPUTED (61547af): placed by its corner's own build
         | FilletVertexType::Precomputed => Ok(()),
     }
+}
+
+/// Not the fork's (SolidCraft #19454): the vertices, the edges or a face of the blend of
+/// corner `failed` failed with `error`. Where that corner is an End on its end face whose
+/// contact line passes over that face
+/// ([`crate::blend::blend_corner::end::largest_ball_ending_on_end_face`]: the largest ball
+/// whose rail still ends on the end face is smaller than the round), the round is refused as
+/// too large: `SM_FILERR_NO_ROOM` noted at the vertex, the fit on the blended edge (that
+/// largest ball less the fork's `FitMargin`, a thousand of the edge's tolerances, as the
+/// other open fits: at that radius the rail's end only touches the end face's surface), and
+/// the returned error the typed [`crate::error::blend::BlendFailure::NoRoom`]
+/// ([`super::NoRoomReason::EndPassesOverEndFace`]) carrying that fit. Anything else returns
+/// `error` as it is. Asked only after the failure, so it never refuses an End that builds.
+/// A round within the margin of that largest ball is refused with the larger ones: its End
+/// takes all of its blend, and its edges or its face fail. With `missed` (the vertices'
+/// failure) only a rail is judged whose end the vertices did not find on the end face. The
+/// refusal keeps `error`'s operation, the step that failed. A judgement that itself fails
+/// establishes no fit, and `error` stands.
+///
+/// The fit named is the least over every such End of the session (the other corners are
+/// judged the same way, on their topology, whether or not their vertices are computed yet),
+/// at its vertex and on its edge: a size under one End's limit and over another's builds
+/// neither.
+///
+/// # Errors
+/// Those of the judgement and of the topology queries.
+#[allow(clippy::too_many_arguments)] // the session's borrowed object stores
+fn end_passing_over_end_face(
+    k: &Kernel,
+    target: &mut Brep,
+    pseudo: &FilletBrep,
+    solvers: &[Option<SolverObject>],
+    extended_surfaces: &BTreeMap<FaceId, Surface>,
+    corners: &[FilletCorner],
+    failed: usize,
+    missed: bool,
+    executive: &mut FilletExecutive<FilletObject>,
+    error: SolidError,
+) -> Result<SolidError> {
+    use crate::blend::blend_corner::end::{
+        describe_end_passing_over_end_face, largest_ball_ending_on_end_face,
+    };
+    use crate::blend::fillet_executive::NoRoomReason;
+    // the refusal keeps the operation of the failure it stands for: the step that failed
+    let operation = error.operation();
+    let lookup = SweptSessionSolvers {
+        solvers,
+        executive: None,
+    };
+    // the fit of one corner, with its blended edge: `None` where it is not such an End.
+    // `missed`: only of a rail whose end the corner's vertices did not find on the end face
+    let judge = |target: &mut Brep,
+                 corner: &FilletCorner,
+                 missed: bool|
+     -> Result<Option<(f64, Option<EdgeId>)>> {
+        let Some(first) = corner
+            .solver_eus
+            .as_deref()
+            .and_then(|eus| eus.first().copied())
+        else {
+            return Ok(None);
+        };
+        let edge = crate::topology::edgeuse::p1::edge(target, first)?;
+        // FitMargin: a thousand of the blended edge's tolerances
+        let margin = match edge {
+            Some(e) => 1000.0 * crate::topology::edge::tolerance(target, e)?,
+            None => 0.0,
+        };
+        let largest = largest_ball_ending_on_end_face(
+            k,
+            target,
+            pseudo,
+            corner,
+            &lookup,
+            extended_surfaces,
+            margin,
+            missed,
+        )?;
+        Ok(largest.map(|largest| (largest - margin, edge)))
+    };
+    let Some(this) = corners.get(failed) else {
+        return Ok(error);
+    };
+    // a judgement that fails establishes no fit: the construction's own failure stands
+    let mut least = match judge(target, this, missed) {
+        Ok(Some(found)) => found,
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Ok(None) | Err(_) => return Ok(error),
+    };
+    let mut at = this;
+    for (i, other) in corners.iter().enumerate() {
+        if i == failed {
+            continue;
+        }
+        // another corner's judgement that fails proves nothing of this one's
+        let judged = match judge(target, other, false) {
+            Ok(judged) => judged,
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Err(_) => None,
+        };
+        if let Some(found) = judged {
+            if found.0 < least.0 {
+                least = found;
+                at = other;
+            }
+        }
+    }
+    let (fit, edge) = least;
+    if fit <= 0.0 {
+        return Ok(error);
+    }
+    let vertex = at.filleted_vertex();
+    let location = match vertex {
+        Some(v) => crate::topology::vertex::point(target, v).ok(),
+        None => None,
+    };
+    executive.error.note_vertex_error(
+        vertex.map(|v| FilletObject::Topology(FilletBody::Target, EntityRef::Vertex(v))),
+        location,
+        crate::blend::fillet_geom::p1::FilStatus::Failure,
+        crate::blend::fillet_geom::p1::FilletErrorType::NoRoom,
+        Some(&describe_end_passing_over_end_face(fit)),
+    );
+    executive.error.no_room = Some(NoRoomReason::EndPassesOverEndFace);
+    let edge_object = edge.map(|e| FilletObject::Topology(FilletBody::Target, EntityRef::Edge(e)));
+    executive.note_fit_radius(
+        fit,
+        edge_object,
+        crate::blend::fillet_executive::p3::FitKind::Radius,
+    );
+    let mut failure = crate::error::Failure::new(
+        operation,
+        crate::error::blend::BlendFailure::NoRoom(NoRoomReason::EndPassesOverEndFace),
+    )
+    .with_fit(crate::error::Fit::new(
+        fit,
+        crate::error::FitMeasure::Radius,
+        edge_object
+            .as_ref()
+            .and_then(crate::error::TargetEdge::of_fillet_object),
+    ));
+    if let Some(v) = vertex {
+        failure = failure.at(EntityRef::Vertex(v));
+    }
+    Ok(failure.into_error())
 }
 
 /// `SmFilletCorner::CalcCornerVertGeom` of the ordinary Nx1, Nx2 (the blend corners, the
@@ -2304,6 +2455,9 @@ impl<'target> FilletSession<'target> {
                                 fit: refusal.fit,
                             });
                         }
+                        ChamferClass::MixedConvexity => {
+                            corner.chamfer_mixed_convexity = true;
+                        }
                         ChamferClass::Declined(_) => {}
                     }
                 }
@@ -3457,7 +3611,7 @@ impl CornerEdgeAccess<FilletObject> for SessionObjects<'_> {
             }
         }
         let mut context = SessionCornerEdgeContext {
-            k,
+            k: &mut *k,
             target,
             pseudo,
             lookup: SessionEdgeLookup {
@@ -3468,7 +3622,7 @@ impl CornerEdgeAccess<FilletObject> for SessionObjects<'_> {
             do_global_merge: executive.options.global_merge,
             error: &mut executive.error,
         };
-        corner.calc_corner_edge_geom_with(
+        let built = corner.calc_corner_edge_geom_with(
             &mut context,
             |context, corner, edge| {
                 let corners = CornerLookup {
@@ -3496,7 +3650,24 @@ impl CornerEdgeAccess<FilletObject> for SessionObjects<'_> {
             |context| context.do_global_merge,
             |context| &mut *context.pseudo,
             |context, edge| context.pseudo.delete_wire_fillet_edge(context.k, edge),
-        )
+        );
+        match built {
+            // an End whose contact line passes over its end face is refused as too large,
+            // naming the radius that fits (noted, so the executive keeps it)
+            Err(e) if !e.is_unported_or_cancelled() => Err(end_passing_over_end_face(
+                k,
+                target,
+                pseudo,
+                solvers.as_slice(),
+                extended_surfaces,
+                corners.as_slice(),
+                id.0 as usize,
+                false,
+                executive,
+                e,
+            )?),
+            built => built,
+        }
     }
 }
 
@@ -3637,6 +3808,71 @@ impl EdgeMapAccess<FilletObject> for SessionObjects<'_> {
             .ok_or_else(|| invalid("intermediate body is not allocated"))?;
         self.pseudo
             .find_fillet_brep_edge(k, edge, body, &candidates, multiple)
+    }
+    fn mapping_split_rail(
+        &mut self,
+        k: &mut Kernel,
+        geom: FilletObject,
+        rail: FilletObject,
+        candidates: &[FilletObject],
+    ) -> Result<()> {
+        let FilletObject::Geometry(g) = geom else {
+            return Err(invalid("mapping geometry is not retained"));
+        };
+        let FilletObject::Topology(FilletBody::Pseudo, EntityRef::Edge(rail)) = rail else {
+            return Err(invalid("mapping edge is not actual pseudo topology"));
+        };
+        let candidates = candidates
+            .iter()
+            .map(|object| {
+                let FilletObject::IntermediateTopology(EntityRef::Edge(edge)) = *object else {
+                    return Err(invalid(
+                        "mapping candidate is not actual intermediate topology",
+                    ));
+                };
+                Ok(edge)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let record = self.pseudo.geom(g)?;
+        let Some(side) = record.rails.iter().position(|r| *r == Some(rail)) else {
+            return Err(invalid("mapping rail is not the geometry's"));
+        };
+        // a rail already split (a cliff's) keeps its pieces
+        let others = if side == 0 {
+            &record.other_rails1
+        } else {
+            &record.other_rails2
+        };
+        if !others.is_empty() {
+            return Ok(());
+        }
+        let body = self
+            .intermediate
+            .as_ref()
+            .ok_or_else(|| invalid("intermediate body is not allocated"))?;
+        let Some(pieces) = self
+            .pseudo
+            .fillet_brep_pieces_along(k, rail, body, &candidates)?
+        else {
+            return Ok(());
+        };
+        let pieces = crate::blend::fillet_solver::p1::RetainedRailOwnership::with_context(
+            k,
+            &mut self.pseudo,
+            &mut self.attributes,
+            |k, pseudo, ownership| {
+                crate::blend::fillet_solver::p1::split_rail_along(
+                    k, pseudo, ownership, g, rail, &pieces,
+                )
+            },
+        )?;
+        let record = self.pseudo.geom_mut(g)?;
+        if side == 0 {
+            record.other_rails1.extend(pieces);
+        } else {
+            record.other_rails2.extend(pieces);
+        }
+        Ok(())
     }
 }
 
@@ -5444,7 +5680,7 @@ impl FaceConstructionAccess<FilletObject> for SessionObjects<'_> {
         k: &mut Kernel,
         geom: FilletObject,
         body: FilletObject,
-        _executive: &mut FilletExecutive<FilletObject>,
+        executive: &mut FilletExecutive<FilletObject>,
     ) -> Result<()> {
         let FilletObject::Geometry(id) = geom else {
             return Err(invalid("face geometry is not actually retained"));
@@ -5452,6 +5688,83 @@ impl FaceConstructionAccess<FilletObject> for SessionObjects<'_> {
         if body != FilletObject::IntermediateBrep {
             return Err(invalid("face destination is not the intermediate body"));
         }
+        let made = self.make_solver_face(k, id);
+        let error = match made {
+            Err(e) if !e.is_unported_or_cancelled() => e,
+            made => return made,
+        };
+        // an End of this blend whose contact line passes over its end face takes all of the
+        // blend at the size where its rail only just ends on that face: the face then has no
+        // extent. Refused as too large, naming the radius that fits (noted, so the executive
+        // keeps it)
+        // (a lookup that fails, or a geometry without a live solver, shows no such End: the
+        // face's failure stands)
+        let ends = || -> Result<[Option<VertexId>; 2]> {
+            let Some(sid) = self.pseudo.geom(id)?.fillet_solver() else {
+                return Ok([None, None]);
+            };
+            let Some(solver) = self.solvers.get(sid.0 as usize).and_then(Option::as_ref) else {
+                return Ok([None, None]);
+            };
+            let Some(eu) = solver.base().edgeuse(0)? else {
+                return Ok([None, None]);
+            };
+            let Some(e) = crate::topology::edgeuse::p1::edge(self.target, eu)? else {
+                return Ok([None, None]);
+            };
+            Ok([
+                crate::topology::edge::start_vertex(self.target, e)?,
+                crate::topology::edge::end_vertex(self.target, e)?,
+            ])
+        };
+        let ends = match ends() {
+            Ok(ends) => ends,
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Err(_) => return Err(error),
+        };
+        let mut error = error;
+        for v in ends.into_iter().flatten() {
+            let Some(corner) = session_corner_of_vertex(executive, v) else {
+                continue;
+            };
+            let SessionObjects {
+                target,
+                pseudo,
+                solvers,
+                corners,
+                extended_surfaces,
+                ..
+            } = self;
+            error = end_passing_over_end_face(
+                k,
+                target,
+                pseudo,
+                solvers.as_slice(),
+                extended_surfaces,
+                corners.as_slice(),
+                corner.0 as usize,
+                false,
+                executive,
+                error,
+            )?;
+            if executive.error.no_room_reason()
+                == Some(crate::blend::fillet_executive::NoRoomReason::EndPassesOverEndFace)
+            {
+                break;
+            }
+        }
+        Err(error)
+    }
+}
+
+impl SessionObjects<'_> {
+    /// The face of fillet geometry `id` in the intermediate body
+    /// (`SmFilletGeom::MakeFaceBrep`), with its solver.
+    fn make_solver_face(
+        &mut self,
+        k: &mut Kernel,
+        id: crate::blend::fillet_geom::p1::FilletGeomId,
+    ) -> Result<()> {
         let sid = self
             .pseudo
             .geom(id)?
@@ -7864,6 +8177,29 @@ impl SessionObjects<'_> {
                 corner.bevel = event.definition.is_mitre();
             }
         }
+        // Chamfers of both convexities at a vertex of three, as a bevel: the bevel looks for
+        // the chamfers' common point from a rails' crossing towards the vertex, and here it
+        // lies across the vertex's faces. Refused, at the vertex, until the chamfer event
+        // builds their mitre.
+        if let Some(corner) = self.corners.get(id.0 as usize) {
+            if corner.bevel && corner.chamfer_mixed_convexity {
+                let vertex = corner.filleted_vertex();
+                let location =
+                    vertex.and_then(|v| crate::topology::vertex::point(self.target, v).ok());
+                executive.error.note_vertex_error(
+                    vertex
+                        .map(|v| FilletObject::Topology(FilletBody::Target, EntityRef::Vertex(v))),
+                    location,
+                    crate::blend::fillet_geom::p1::FilStatus::Failure,
+                    crate::blend::fillet_geom::p1::FilletErrorType::CornerUnsupported,
+                    Some(MIXED_CHAMFER_CORNER),
+                );
+                return Err(SolidError::Unsupported {
+                    operation: NATIVE,
+                    reason: MIXED_CHAMFER_CORNER_REASON,
+                });
+            }
+        }
         let edgeuses = self
             .corners
             .get(id.0 as usize)
@@ -8139,7 +8475,27 @@ impl CornerVertexAccess<FilletObject> for SessionObjects<'_> {
         };
         match self.calc_nx1_corner_vert_geom_rolling(k, id, rolled_end) {
             Err(e) if !e.is_unported_or_cancelled() => {
-                Err(self.join_rail_missing_side_edge(k, id, executive, e)?)
+                let e = self.join_rail_missing_side_edge(k, id, executive, e)?;
+                let SessionObjects {
+                    target,
+                    pseudo,
+                    solvers,
+                    corners,
+                    extended_surfaces,
+                    ..
+                } = self;
+                Err(end_passing_over_end_face(
+                    k,
+                    target,
+                    pseudo,
+                    solvers.as_slice(),
+                    extended_surfaces,
+                    corners.as_slice(),
+                    id.0 as usize,
+                    true,
+                    executive,
+                    e,
+                )?)
             }
             result => result,
         }
