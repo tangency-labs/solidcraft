@@ -71,17 +71,26 @@ An `edges` entry is `[x,y,z]` on a top or bottom edge, `{x,y,z}`, or
   the table's minimum is a `warning` in the reply (the hole is still cut); a bend is measured to where the
   bend starts. A later change of gauge warns instead of failing the timeline.
 - Redefine with `timeline.redefine {"command":"sheet.hardware"}`, never `solid.hole`.
+- `sheet.flat_pattern` lists each hardware hole under `hardware`: `kind`, `thread`, `length` (null for a
+  nut), `part`, `position` (the hole's centre in the flat) and `hole_diameter`. The key is left out when
+  the sheet has none, and a hole a later cut took away is not listed.
+- `sheet.export_dxf` puts a note beside each hardware hole, `M3 nut` or `M4 stud 10 mm`, on layer
+  `HARDWARE` (as high as `note_height`), with `layers: roles`; `layers: single` leaves the notes out.
+- In the app: the Press-in Hardware button of the Sheet Metal tab opens a window with the kind, the thread
+  (only the sizes the table has for the kind), a stud's or standoff's length and the place picked on a
+  face or at sketch points. It shows the table's numbers, the preview's refusal and its warnings. Edit
+  Feature on the hole opens the same window.
 
 ### `sheet.flat_pattern`, `sheet.export_dxf`, `sheet.export_bend_table`
 - `sheet.flat_pattern {"body":"..."}` answers `flat_size_mm` (`[x,y,thickness]`), `outline`,
   `cutouts`, `cutout_shapes`, `pockets`, `bends` (`bend`, `angle_deg`, `included_angle_deg`,
   `radius`, `direction`, `allowance`, `length`, `start`, `end` in flat coordinates),
-  `bend_zones`, `perforations`, `bores` (holes drilled along a panel into its rim) and the unfolded
+  `bend_zones`, `perforations`, `hardware`, `bores` (holes drilled along a panel into its rim) and the unfolded
   body.
 - `sheet.export_dxf`: `body?`, `path?`, `curves?` (`exact`|`arcs`), `text?` (`cut`|`etch`),
   `bend_notes?`, `note_height?`, `bend_lines?`, `layers?` (`roles`|`single`), `per_body?`.
   Layers: `OUTLINE`, `CUT`, `TEXT`/`ETCH`, `BEND_UP`/`BEND_DOWN`, `BEND_NOTES`,
-  `POCKET_<BOTTOM|TOP|INTERNAL>_Z<from>_TO_<to>_MM`, `PERFORATION`.
+  `POCKET_<BOTTOM|TOP|INTERNAL>_Z<from>_TO_<to>_MM`, `PERFORATION`, `HARDWARE`.
 - `sheet.export_bend_table`: `body?`, `format?` (`csv`|`json`), `path?`. Each row gives the bend's
   angle, direction, radius, allowance, length and its flat centre line, so an agent can check
   where a bend landed.
