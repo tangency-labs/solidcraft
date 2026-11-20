@@ -106,6 +106,7 @@
 //!   consumers must build the kernel optimised (`opt-level >= 1`) or raise the stack
 //!   (`-C link-arg=-zstack-size=<bytes>`, at least 2 MiB for an unoptimised build).
 
+use crate::error::topology::TopologyFailure;
 use crate::error::{Result, SolidError};
 
 /// `SM_MAXSIZE`: characters `GoToNextLine` skips at most before the newline, and
@@ -907,9 +908,10 @@ impl DatabaseReader {
 
     /// Reads exactly `N` raw bytes.
     fn read_raw<const N: usize>(&mut self, operation: &'static str) -> Result<[u8; N]> {
-        let s = self.stream.as_mut().ok_or_else(|| {
-            SolidError::topology_missing(operation, "the database's input stream")
-        })?;
+        let s = self
+            .stream
+            .as_mut()
+            .ok_or_else(|| SolidError::topology(operation, TopologyFailure::NoInputStream))?;
         let bytes = s.read_bytes(N);
         <[u8; N]>::try_from(bytes).map_err(|_| short_read(operation))
     }
@@ -920,9 +922,10 @@ impl DatabaseReader {
         n: usize,
         operation: &'static str,
     ) -> Result<Vec<[u8; N]>> {
-        let s = self.stream.as_mut().ok_or_else(|| {
-            SolidError::topology_missing(operation, "the database's input stream")
-        })?;
+        let s = self
+            .stream
+            .as_mut()
+            .ok_or_else(|| SolidError::topology(operation, TopologyFailure::NoInputStream))?;
         let total = n.checked_mul(N).ok_or_else(|| short_read(operation))?;
         let bytes = s.read_bytes(total);
         if bytes.len() != total {
@@ -1079,7 +1082,7 @@ impl DatabaseReader {
             let s = self
                 .stream
                 .as_mut()
-                .ok_or_else(|| SolidError::topology_missing(OP, "the database's input stream"))?;
+                .ok_or_else(|| SolidError::topology(OP, TopologyFailure::NoInputStream))?;
             // `char sBuff[SM_MAXSIZE]`: words longer than 255 bytes are split.
             let _ = s.extract_word_limited(MAX_LINE);
             let _ = s.extract_word_limited(MAX_LINE);

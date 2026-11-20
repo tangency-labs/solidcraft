@@ -208,6 +208,32 @@ pub enum TopologyFailure {
     NothingToLink,
     /// The object to remove is not on this owner's list. [`ErrorKind::InvalidInput`].
     NotOnOwnerList,
+    /// An edge of the caller's body has no curve. [`ErrorKind::InvalidInput`].
+    EdgeWithoutCurve,
+    /// A face of the caller's body has no surface. [`ErrorKind::InvalidInput`].
+    FaceWithoutSurface,
+    /// A surface of revolution or extrusion has no generator curve, which its record
+    /// needs. [`ErrorKind::Unsupported`].
+    SurfaceWithoutGenerator,
+    /// A B-rep cache was asked for a type that is neither a B-rep nor a poly B-rep.
+    /// [`ErrorKind::InvalidInput`].
+    CacheTargetNotBrep,
+    /// The database reader has no input stream: nothing was opened for reading.
+    /// [`ErrorKind::InvalidInput`].
+    NoInputStream,
+    /// The file holds a curve or surface record of a type the read does not take.
+    /// [`ErrorKind::InvalidInput`].
+    RecordTypeUnknown {
+        /// The record's type code.
+        type_code: i64,
+    },
+    /// The file names an attribute whose slot in the attribute table is empty.
+    /// [`ErrorKind::InvalidInput`].
+    AttributeSlotEmpty,
+    /// A procedural blend read from the file is not proved within its bound of its
+    /// definition; the proof's failure is the cause. Class `failed`; whether it is a
+    /// defect or a refusal is its cause's.
+    BlendRecordNotProved,
 }
 
 /// What a B-rep constructor call works in ([`TopologyFailure::ConstructorNotOpen`],
@@ -273,12 +299,20 @@ impl TopologyFailure {
             | Self::OwnerListBroken
             | Self::OwnerListOverCount { .. }
             | Self::NothingToLink
-            | Self::NotOnOwnerList => SM_ERR,
+            | Self::NotOnOwnerList
+            | Self::CacheTargetNotBrep
+            | Self::RecordTypeUnknown { .. }
+            | Self::BlendRecordNotProved => SM_ERR,
             Self::Missing(_)
             | Self::CurveNotBSpline { .. }
             | Self::SurfaceWithoutNurbs { .. }
             | Self::CurveNotApproximated
-            | Self::NoSurfaceGiven => SM_ERR_NULL_POINTER,
+            | Self::NoSurfaceGiven
+            | Self::EdgeWithoutCurve
+            | Self::FaceWithoutSurface
+            | Self::SurfaceWithoutGenerator
+            | Self::NoInputStream
+            | Self::AttributeSlotEmpty => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_)
             | Self::NoBrepGiven
             | Self::NoDataGiven
@@ -323,7 +357,13 @@ impl TopologyFailure {
             | Self::OwnerListBroken
             | Self::OwnerListOverCount { .. }
             | Self::NothingToLink
-            | Self::NotOnOwnerList => ErrorKind::InvalidInput,
+            | Self::NotOnOwnerList
+            | Self::EdgeWithoutCurve
+            | Self::FaceWithoutSurface
+            | Self::CacheTargetNotBrep
+            | Self::NoInputStream
+            | Self::RecordTypeUnknown { .. }
+            | Self::AttributeSlotEmpty => ErrorKind::InvalidInput,
             Self::CurveNotBSpline { .. }
             | Self::SurfaceWithoutNurbs { .. }
             | Self::FaceWithoutEdges
@@ -331,11 +371,13 @@ impl TopologyFailure {
             | Self::EdgeNotDeletable
             | Self::InnerLoopsOnBothSides
             | Self::LaminaEdgeIsStrut
-            | Self::NoPlaneProjection => ErrorKind::Unsupported,
+            | Self::NoPlaneProjection
+            | Self::SurfaceWithoutGenerator => ErrorKind::Unsupported,
             Self::CurveNotApproximated
             | Self::AllocationFailed
             | Self::NoProjectedCurves
-            | Self::NoFootOnCurve => ErrorKind::Failed,
+            | Self::NoFootOnCurve
+            | Self::BlendRecordNotProved => ErrorKind::Failed,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -450,6 +492,26 @@ impl core::fmt::Display for TopologyFailure {
             }
             Self::NothingToLink => f.write_str("an object to link is missing"),
             Self::NotOnOwnerList => f.write_str("the object is not on this list"),
+            Self::EdgeWithoutCurve => f.write_str("an edge has no curve"),
+            Self::FaceWithoutSurface => f.write_str("a face has no surface"),
+            Self::SurfaceWithoutGenerator => {
+                f.write_str("the swept surface has no generator curve")
+            }
+            Self::CacheTargetNotBrep => {
+                f.write_str("a B-rep cache is only for a B-rep or a poly B-rep")
+            }
+            Self::NoInputStream => f.write_str("the database has no input stream"),
+            Self::RecordTypeUnknown { type_code } => write!(
+                f,
+                "the file holds a record of type {type_code}, which the read does not take"
+            ),
+            Self::AttributeSlotEmpty => {
+                f.write_str("the file names an attribute whose table slot is empty")
+            }
+            Self::BlendRecordNotProved => f.write_str(
+                "a procedural blend read from the file is not proved within its bound of its \
+                 definition",
+            ),
         }
     }
 }
@@ -802,6 +864,50 @@ mod tests {
         );
     }
 
+    /// The named causes of the B-rep cache and the file reads and writes keep the status of
+    /// the phrase each replaced, and have their class.
+    #[test]
+    fn the_cache_and_file_causes_keep_their_status_and_have_their_class() {
+        use ErrorKind as K;
+        use TopologyFailure as T;
+        let op = "topology::op";
+        let cases = [
+            (T::EdgeWithoutCurve, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (T::FaceWithoutSurface, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (
+                T::SurfaceWithoutGenerator,
+                SM_ERR_NULL_POINTER,
+                K::Unsupported,
+            ),
+            (T::CacheTargetNotBrep, SM_ERR, K::InvalidInput),
+            (T::NoInputStream, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (
+                T::RecordTypeUnknown { type_code: 7 },
+                SM_ERR,
+                K::InvalidInput,
+            ),
+            (T::AttributeSlotEmpty, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (T::BlendRecordNotProved, SM_ERR, K::Failed),
+        ];
+        for (failure, status, kind) in cases {
+            let e = SolidError::topology(op, failure);
+            assert_eq!(e.upstream_status(), Some(status), "{failure:?}");
+            assert_eq!(super::super::upstream_status(&e), Some(status));
+            assert_eq!(e.kind(), kind, "{failure:?}");
+            assert_eq!(e.topology_failure(), Some(&failure));
+            assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
+        }
+        // the blend proof's failure stays the cause, and decides defect or refusal
+        let why = "a step the kernel got wrong";
+        let cause = SolidError::topology(op, T::Defect { why });
+        let e = Failure::new(op, T::BlendRecordNotProved)
+            .caused_by(cause.clone())
+            .into_error();
+        assert_eq!(e.cause(), Some(&cause));
+        assert!(e.is_defect());
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
+    }
+
     /// The topology routines describe their failures: their library code builds no bare
     /// `Upstream` status, except the file listed (with the bare sites it may still hold).
     #[test]
@@ -881,19 +987,13 @@ mod tests {
             ("solidcore/src/topology/brep/validation/assert_valid/seams.rs", 1),
             ("solidcore/src/topology/brep/validation/pointers.rs", 2),
             ("solidcore/src/topology/brep/vertex_fans.rs", 6),
-            ("solidcore/src/topology/brep_cache.rs", 17),
-            ("solidcore/src/topology/brep_data.rs", 5),
-            ("solidcore/src/topology/brep_data_write.rs", 5),
-            ("solidcore/src/topology/database_io.rs", 3),
             ("solidcore/src/topology/edge.rs", 7),
             ("solidcore/src/topology/edgeuse/p1.rs", 2),
             ("solidcore/src/topology/edgeuse/p2.rs", 4),
             ("solidcore/src/topology/edgeuse/p3.rs", 12),
             ("solidcore/src/topology/face/p1.rs", 24),
             ("solidcore/src/topology/face/p2.rs", 10),
-            ("solidcore/src/topology/geometry_write.rs", 2),
             ("solidcore/src/topology/loopuse.rs", 9),
-            ("solidcore/src/topology/part_file.rs", 1),
             ("solidcore/src/topology/proto_topology/p1/proto.rs", 16),
             ("solidcore/src/topology/proto_topology/p2.rs", 8),
             ("solidcore/src/topology/proto_topology/p3.rs", 6),
