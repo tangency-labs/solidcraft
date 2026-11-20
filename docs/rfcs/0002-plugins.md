@@ -82,7 +82,7 @@ World `craft:plugin@0.1.0`. The interface stays thin: a few typed functions plus
 
 **Binary-size trade-off.** wasmtime with Cranelift adds several MB to the app. wasmi is much smaller but runs core modules, not components. Options are wasmtime with Winch or Pulley, or accepting the size. Not decided.
 
-**Component size.** #4980 caps components at 16 MiB. A real converter measured 28 MB (built for size) to 42 MB. Compiling happens in the app's process with no sandbox limit on the compiler, and the project forbids `unsafe`, so compiled code cannot be cached (`Component::deserialize` is `unsafe`). One plugin per format avoids most of this.
+**Component size.** #4980 originally capped components at 16 MiB. A real converter measured 28 MB (built for size) to 42 MB. Compiling happens in the app's process with no sandbox limit on the compiler. Directly loading compiled code with `Component::deserialize` requires `unsafe`, which the project forbids. The host now keeps compiled components on disk through Wasmtime's safe cache API, and importers may be up to 64 MiB; see [Importers](../plugins.md#importers) for cache behavior and limits. One plugin per format reduces component size.
 
 Rhai was proposed instead. The comments favour one runtime, WebAssembly, for isolation and language choice.
 

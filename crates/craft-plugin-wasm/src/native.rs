@@ -921,9 +921,30 @@ pub(super) fn check_component(manifest: &Manifest, bytes: &[u8], options: Runtim
 
 type Compiled = (Arc<[u8]>, usize, Engine, Component);
 /// The most recently compiled component. Compiling a large importer takes tens of seconds; keeping
-/// the compiled code in memory (never on disk, which would need unsafe deserialization) lets the
-/// next file open at once. Every call still gets a fresh instance and store.
+/// the compiled code in memory lets the next file open at once, and the app's compile cache on disk
+/// (see [`crate::CompileCache`]) lets the next run of the app skip compiling too. Every call still
+/// gets a fresh instance and store.
 static COMPILED: Mutex<Option<Compiled>> = Mutex::new(None);
+
+fn engine_config(stack_bytes: usize) -> Config {
+    let mut config = Config::new();
+    config.consume_fuel(true).epoch_interruption(true).wasm_memory64(false).wasm_multi_memory(false).max_wasm_stack(stack_bytes);
+    // Wasmtime refuses a Wasm stack larger than its async stack, even for synchronous calls.
+    config.async_stack_size(stack_bytes.saturating_add(1 << 20));
+    config
+}
+
+/// Compiles `bytes`, or loads it from the app's compile cache, without looking in memory.
+fn compile_uncached(bytes: &[u8], stack_bytes: usize, disk: Option<&crate::CompileCache>) -> Result<(Engine, Component, cache::Source)> {
+    check_outer_interfaces(bytes)?;
+    let config = engine_config(stack_bytes);
+    if let Some(disk) = disk {
+        return cache::compile(&config, bytes, stack_bytes, disk);
+    }
+    let engine = Engine::new(&config).map_err(|e| trap(e.to_string()))?;
+    let component = cache::from_binary(&engine, bytes)?;
+    Ok((engine, component, cache::Source::Compiled))
+}
 
 fn compile(bytes: &[u8], stack_bytes: usize) -> Result<(Engine, Component)> {
     if let Ok(cache) = COMPILED.lock()
@@ -933,7 +954,7 @@ fn compile(bytes: &[u8], stack_bytes: usize) -> Result<(Engine, Component)> {
     {
         return Ok((engine.clone(), component.clone()));
     }
-    let (engine, component) = compile_with(bytes, stack_bytes)?;
+    let (engine, component, _) = compile_uncached(bytes, stack_bytes, crate::compile_cache().as_ref())?;
     if let Ok(mut cache) = COMPILED.lock() {
         *cache = Some((Arc::from(bytes), stack_bytes, engine.clone(), component.clone()));
     }
@@ -989,21 +1010,9 @@ fn check_outer_interfaces(bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
-/// Compiles `bytes` under the host's configuration, without the cache.
+/// Compiles `bytes` under the host's configuration, without either cache.
 fn compile_with(bytes: &[u8], stack_bytes: usize) -> Result<(Engine, Component)> {
-    check_outer_interfaces(bytes)?;
-    let mut config = Config::new();
-    config.consume_fuel(true).epoch_interruption(true).wasm_memory64(false).wasm_multi_memory(false).max_wasm_stack(stack_bytes);
-    // Wasmtime refuses a Wasm stack larger than its async stack, even for synchronous calls.
-    config.async_stack_size(stack_bytes.saturating_add(1 << 20));
-    let engine = Engine::new(&config).map_err(|e| trap(e.to_string()))?;
-    let component = Component::from_binary(&engine, bytes).map_err(|e| {
-        // Inspect the parser error itself, not plugin names in the compilation context.
-        if let Some(error) = e.downcast_ref::<wasmtime::wasmparser::BinaryReaderError>() {
-            return component_parse_error(error);
-        }
-        trap(format!("component compilation failed: {e:#}"))
-    })?;
+    let (engine, component, _) = compile_uncached(bytes, stack_bytes, None)?;
     Ok((engine, component))
 }
 
@@ -1134,6 +1143,7 @@ pub(super) fn run_import<H: PluginHost + 'static>(
     (state.host, outcome.map_err(|error| with_limits(error, limits)))
 }
 
+mod cache;
 #[cfg(test)]
 mod tests;
 mod v0_1;

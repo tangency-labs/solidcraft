@@ -151,6 +151,7 @@ fn convert(session: &mut Session, importer: &Importer, path: &str, options: &Val
         && Path::new(path).parent().is_some_and(|folder| solidcraft_io::vfs::check(&folder.to_string_lossy()).is_ok());
     #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
+        super::use_compile_cache();
         let request = craft_plugin_wasm::ImportRequest { path: PathBuf::from(path), input_folder };
         let host = SolidCraftHost {
             session: Session::default(),

@@ -35,6 +35,25 @@ pub fn configure_process_host_limits(limits: HostLimits) -> Result<()> {
 pub(crate) fn default_host_limits() -> HostLimits {
     PROCESS_HOST_LIMITS.get().copied().unwrap_or_default()
 }
+/// Room for compiled plugin components on disk. A large importer compiles to a few hundred MiB.
+#[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
+const COMPILE_CACHE_BYTES: u64 = 2 << 30;
+
+/// Keeps compiled components in `<cache>/plugins/compiled` (see [`crate::recovery::cache_dir`]),
+/// so a large plugin compiles once rather than once per run of the app. Unit tests never touch the
+/// user's folder.
+#[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
+pub(crate) fn use_compile_cache() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        if cfg!(test) {
+            return;
+        }
+        let dir = crate::recovery::cache_dir().map(|dir| dir.join("plugins").join("compiled"));
+        craft_plugin_wasm::set_compile_cache(dir.map(|dir| craft_plugin_wasm::CompileCache { dir, max_bytes: COMPILE_CACHE_BYTES }));
+    });
+}
+
 fn error(s: impl Into<String>) -> EngineError {
     EngineError::Other(format!("plugin: {}", s.into()))
 }
@@ -336,6 +355,7 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
     let params = prepared.as_ref().unwrap_or(params);
     #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
+        use_compile_cache();
         // What this call may reach: the groups both the manifest asks for and the user granted,
         // and for `file` commands the granted folders the manifest may both read and write.
         let grants = session.plugin_state.grants.get(&package.manifest.id).cloned().unwrap_or_default();

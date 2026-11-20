@@ -4,6 +4,7 @@
 use craft_plugin::{LossReport, Manifest, PluginHost, Result};
 use serde_json::Value;
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 mod native;
@@ -17,6 +18,34 @@ impl Default for RuntimeOptions {
     fn default() -> Self {
         Self { stack_bytes: 512 * 1024 }
     }
+}
+
+/// Where compiled components are kept between runs of the app, and how much room they may take.
+/// Compiling a large component takes tens of seconds and gigabytes of memory; loading it from here
+/// takes about a second. Entries are keyed by the component's content and the runtime's version and
+/// settings, checked before every load, and the least recently used go first when over `max_bytes`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CompileCache {
+    /// A folder only this user can write, such as `<app cache>/plugins/compiled`.
+    pub dir: PathBuf,
+    /// Room for every entry together. The newest entry is kept even when it alone is larger, until
+    /// the next one is written.
+    pub max_bytes: u64,
+}
+
+static COMPILE_CACHE: Mutex<Option<CompileCache>> = Mutex::new(None);
+
+/// Keep compiled components in `cache` from now on; `None` keeps them in memory only. A build
+/// without a component runtime (the browser) ignores it.
+pub fn set_compile_cache(cache: Option<CompileCache>) {
+    if let Ok(mut current) = COMPILE_CACHE.lock() {
+        *current = cache;
+    }
+}
+
+/// The folder set by [`set_compile_cache`], if any.
+pub fn compile_cache() -> Option<CompileCache> {
+    COMPILE_CACHE.lock().ok().and_then(|cache| cache.clone())
 }
 
 /// Runs with an owned host because Wasmtime store data must be `'static`.
