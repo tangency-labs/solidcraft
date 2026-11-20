@@ -74,20 +74,17 @@ struct Effort {
     settle: f64,
     /// A step that gets nowhere is tried once more, kicked off where it stands.
     kick: bool,
-    /// A step that would run past a limit is cut, every value alike, to end on it: clamped alone,
-    /// that value leaves the loops open, and the damped tries that would save it are few here.
-    to_limit: bool,
 }
 
 /// The nearest pose there is.
-const THOROUGH: Effort = Effort { steps: MAX_REACH_STEPS, tries: usize::MAX, settle: 0.0, kick: true, to_limit: false };
+const THOROUGH: Effort = Effort { steps: MAX_REACH_STEPS, tries: usize::MAX, settle: 0.0, kick: true };
 /// Enough for one frame of a drag, which the next frame goes on from. A loop that has run into a
 /// limit can get no closer, and proving that took each frame up to 300 ms (every damped try of a
 /// step closes the loops again). The few tries start from the damping the frame before ended with
 /// ([`FrameCarry`]): started over at every frame, a pose that needs more damping than three tries
 /// reach (a hinge whose pointer is more than twice as far from its axis as the point grabbed)
 /// took no step until the part trailed the pointer by a whole capped step.
-const FRAME: Effort = Effort { steps: 16, tries: 3, settle: 1e-4, kick: true, to_limit: true };
+const FRAME: Effort = Effort { steps: 16, tries: 3, settle: 1e-4, kick: true };
 
 /// The damping a reach starts with.
 const START_DAMPING: f64 = 1e-3;
@@ -647,26 +644,8 @@ fn approach(
             }
             if let Some(d) = bounded_step(&a, &g, x, bounds) {
                 let full: Vec<f64> = x.iter().zip(&d).map(|(v, dv)| v + dv).collect();
-                let mut over = d.iter().zip(cap).map(|(d, c)| d.abs() / c).fold(1.0f64, f64::max).max(stride(x, &full));
-                // The value whose limit cuts the step (`to_limit`), when one does.
-                let mut cut_at = None;
-                if effort.to_limit {
-                    for (k, ((v, dv), (lo, hi))) in x.iter().zip(&d).zip(bounds).enumerate() {
-                        let room = if *dv > 0.0 { hi - v } else { v - lo };
-                        if room > 0.0 && dv.abs() / room > over {
-                            over = dv.abs() / room;
-                            cut_at = Some(k);
-                        }
-                    }
-                }
+                let over = d.iter().zip(cap).map(|(d, c)| d.abs() / c).fold(1.0f64, f64::max).max(stride(x, &full));
                 let mut next: Vec<f64> = x.iter().zip(&d).zip(bounds).map(|((v, dv), (lo, hi))| (v + dv / over).max(*lo).min(*hi)).collect();
-                // A step cut to end on a limit ends on it exactly. The division can leave the value
-                // a rounding short: not on its limit, it is not held, and with no room left it cuts
-                // every later step of all the values to nothing. Only that value: another one near
-                // its own limit, going toward a target inside it, keeps its step.
-                if let Some((nv, (dv, (lo, hi)))) = cut_at.and_then(|k| Some((next.get_mut(k)?, (d.get(k)?, bounds.get(k)?)))) {
-                    *nv = if *dv > 0.0 { *hi } else { *lo };
-                }
                 // Checked again once taken: a link held at a limit or the loops closed again may
                 // move it further than foreseen (joint.drive halves such steps too).
                 if (!loops || close(f, &mut next))
