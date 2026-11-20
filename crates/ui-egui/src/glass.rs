@@ -21,11 +21,6 @@ enum Build<T> {
 }
 
 impl<T> Build<T> {
-    #[cfg(test)]
-    fn is_built(&self) -> bool {
-        matches!(self, Build::Ready(_))
-    }
-
     fn ready(&self) -> Option<&T> {
         match self {
             Build::Ready(built) => Some(built),
@@ -449,10 +444,10 @@ mod tests {
         assert!(flat.glass.is_none());
         let mut build = Build::Idle;
         assert_eq!(ensure_built(&mut build, &flat, || panic!("built for a theme without glass")), None);
-        assert!(!build.is_built());
+        assert!(build.ready().is_none());
         let glassy = Tokens { glass: Some(Glass { blur: 30.0, refraction: 4.0, see_through: 0.5, reach: 1.0 }), ..flat };
         assert_eq!(ensure_built(&mut build, &glassy, || Ok(Default::default())), None);
-        assert!(build.is_built());
+        assert!(build.ready().is_some());
     }
 
     /// A build the device refuses leaves the panels flat, says why once, and is not tried again.
@@ -460,11 +455,21 @@ mod tests {
     fn a_glass_build_error_falls_back_to_flat_panels_and_says_so_once() {
         let mut build: Build<u8> = Build::Idle;
         assert_eq!(build.ensure(true, || Err("pipeline refused".into())).as_deref(), Some("pipeline refused"));
-        assert!(build.ready().is_none() && !build.is_built());
+        assert!(build.ready().is_none());
         assert_eq!(build.ensure(true, || panic!("retried every frame")), None);
         let mut good: Build<u8> = Build::Idle;
         assert_eq!(good.ensure(true, || Ok(7)), None);
-        assert_eq!((good.is_built(), good.ready().copied()), (true, Some(7)));
+        assert_eq!(good.ready().copied(), Some(7));
         assert_eq!(good.ensure(true, || panic!("built twice")), None);
+    }
+
+    /// A saved glass setting out of range loads as its default, and the rest of the file is kept.
+    #[test]
+    fn out_of_range_glass_settings_load_as_their_defaults() {
+        for (key, invalid) in [("glass_blur", 2.01), ("glass_see_through", -0.1), ("glass_refraction", 1e30), ("glass_reach", 1.01)] {
+            let loaded = crate::prefs::lenient(&serde_json::json!({ key: invalid, "zoom_reverse": true }));
+            assert!(loaded.zoom_reverse, "{key}");
+            assert_eq!(serde_json::to_value(&loaded).unwrap()[key], 1.0, "{key}");
+        }
     }
 }

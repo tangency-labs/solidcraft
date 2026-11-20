@@ -4525,6 +4525,18 @@ pub fn migrate(mut p: Prefs) -> Prefs {
     if !accepted::wheel_zoom_speed(&p) {
         p.wheel_zoom_speed = Prefs::default().wheel_zoom_speed;
     }
+    if !accepted::glass_blur(&p) {
+        p.glass_blur = Prefs::default().glass_blur;
+    }
+    if !accepted::glass_see_through(&p) {
+        p.glass_see_through = Prefs::default().glass_see_through;
+    }
+    if !accepted::glass_refraction(&p) {
+        p.glass_refraction = Prefs::default().glass_refraction;
+    }
+    if !accepted::glass_reach(&p) {
+        p.glass_reach = Prefs::default().glass_reach;
+    }
     if !accepted::home_fit_size(&p) {
         p.home_fit_size = Prefs::default().home_fit_size;
     }
