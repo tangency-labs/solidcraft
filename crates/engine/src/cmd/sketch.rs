@@ -1171,9 +1171,18 @@ pub(crate) fn custom_plane_form(v: &Value) -> std::result::Result<Plane, &'stati
         None | Some(Value::Null) => Vec3::ZERO,
         Some(o) => vec3(o).ok_or("plane `origin` must be three numbers [x, y, z] in mm")?,
     };
-    let x = v.get("x_dir").and_then(vec3).ok_or("plane needs x_dir")?;
-    let y = v.get("y_dir").and_then(vec3).ok_or("plane needs y_dir")?;
+    let x = plane_direction(v, "x_dir", "plane needs x_dir", "plane `x_dir` must be three numbers [x, y, z]: only `origin` takes expressions")?;
+    let y = plane_direction(v, "y_dir", "plane needs y_dir", "plane `y_dir` must be three numbers [x, y, z]: only `origin` takes expressions")?;
     Plane::new(origin, x, y).ok_or("degenerate plane")
+}
+
+/// A plane's `x_dir` or `y_dir`: three numbers. Absent, it is `missing`; given as something else
+/// (an expression), `not_numbers`, so the message names what is wrong rather than "needs" it (#19965).
+fn plane_direction(v: &Value, key: &str, missing: &'static str, not_numbers: &'static str) -> std::result::Result<Vec3, &'static str> {
+    match v.get(key) {
+        None | Some(Value::Null) => Err(missing),
+        Some(d) => vec3(d).ok_or(not_numbers),
+    }
 }
 
 /// An explicit plane whose origin has length expressions (`{origin: ["0 mm", "station", 0], x_dir,
