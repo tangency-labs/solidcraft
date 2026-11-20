@@ -1438,6 +1438,20 @@ fn look_part(mesh: &solidcraft_engine::geom::Mesh, group: &[u32], look: u32) -> 
 /// triangles: a large imported mesh. Smaller ones are drawn so only when placed more than once.
 pub(crate) const INSTANCE_ALONE: usize = 50_000;
 
+/// Pack a complete imported mesh from its indexed geometry when the facets supply their own
+/// normals. B-reps, authored normals and subsets for individual looks use the shared vertex weld.
+fn build_shared_tris(
+    mesh: &solidcraft_engine::geom::Mesh,
+    body: Option<&solidcraft_engine::doc::ModelBody>,
+) -> std::sync::Arc<crate::gpu::SharedTris> {
+    let tris = body
+        .and_then(solidcraft_engine::doc::ModelBody::flat_mesh_in_place)
+        .filter(|(_, triangles)| triangles.len() == mesh.triangles.len())
+        .and_then(|(positions, triangles)| crate::gpu::SharedTris::from_flat_indexed(positions, triangles))
+        .unwrap_or_else(|| crate::gpu::SharedTris::new(mesh));
+    std::sync::Arc::new(tris)
+}
+
 /// Shared vertices made ahead, off the window thread ([`warm_shared_tris`]), by mesh address
 /// (the mesh held, so its address stays its own), until a scene takes them.
 static WARMED: std::sync::Mutex<Vec<(std::sync::Arc<solidcraft_engine::geom::Mesh>, std::sync::Arc<crate::gpu::SharedTris>)>> =
@@ -1446,14 +1460,13 @@ static WARMED: std::sync::Mutex<Vec<(std::sync::Arc<solidcraft_engine::geom::Mes
 const MAX_WARMED: usize = 8;
 
 /// Make a large mesh's shared vertices ahead of its first scene, on the caller's thread (the
-/// background mesher, after a file is opened or inserted): welding a scanned part takes a
-/// noticeable part of a second, which the window thread would otherwise spend on the first frame
-/// that shows it.
-pub(crate) fn warm_shared_tris(mesh: &std::sync::Arc<solidcraft_engine::geom::Mesh>) {
+/// background mesher, after a file is opened or inserted), to keep packing geometry off the
+/// first frame that shows it.
+pub(crate) fn warm_shared_tris(mesh: &std::sync::Arc<solidcraft_engine::geom::Mesh>, body: &solidcraft_engine::doc::ModelBody) {
     if mesh.triangles.len() < INSTANCE_ALONE || WARMED.lock().map_or(true, |w| w.iter().any(|(m, _)| std::sync::Arc::ptr_eq(m, mesh))) {
         return;
     }
-    let tris = std::sync::Arc::new(crate::gpu::SharedTris::new(mesh));
+    let tris = build_shared_tris(mesh, Some(body));
     if let Ok(mut warmed) = WARMED.lock() {
         if warmed.len() >= MAX_WARMED {
             warmed.remove(0);
@@ -1499,7 +1512,12 @@ impl WarmedParts {
 /// design is open: a placement that finds the part being made waits for it, and one that finds
 /// it taken makes nothing. The map is locked only to find or claim the part's slot, never while
 /// a part is made.
-pub(crate) fn warm_part(parts: &WarmedParts, mesh: &std::sync::Arc<solidcraft_engine::geom::Mesh>, edges: bool) {
+pub(crate) fn warm_part(
+    parts: &WarmedParts,
+    mesh: &std::sync::Arc<solidcraft_engine::geom::Mesh>,
+    edges: bool,
+    body: Option<&solidcraft_engine::doc::ModelBody>,
+) {
     let key = std::sync::Arc::as_ptr(mesh) as usize;
     let once = {
         let Ok(mut p) = parts.0.lock() else { return };
@@ -1515,7 +1533,7 @@ pub(crate) fn warm_part(parts: &WarmedParts, mesh: &std::sync::Arc<solidcraft_en
             }
         }
     };
-    once.get_or_init(|| (std::sync::Arc::new(crate::gpu::SharedTris::new(mesh)), edges.then(|| make_shared_edges(mesh))));
+    once.get_or_init(|| (build_shared_tris(mesh, body), edges.then(|| make_shared_edges(mesh))));
 }
 
 /// `mesh`'s part made ahead, if the design being opened has it made, taken: the scenes keep it
@@ -1964,7 +1982,7 @@ impl Instances {
         if !lod_eligible && matches!(look, crate::gpu::InstanceLook::Glass | crate::gpu::InstanceLook::Faded) && !oit {
             return None;
         }
-        self.add_placement(&mesh, &m, true, b.is_closed(), col, edge, look, true)?;
+        self.add_placement(&mesh, &m, true, b.is_closed(), col, edge, look, true, Some(b))?;
         Some((mesh, m))
     }
 
@@ -2009,7 +2027,7 @@ impl Instances {
         for (part, (col, look)) in parts.iter().zip(looks) {
             if !part.triangles.is_empty() {
                 // Levels of detail would merge triangles across faces of different looks.
-                self.add_placement(part, &m, false, closed, *col, edge, *look, false)?;
+                self.add_placement(part, &m, false, closed, *col, edge, *look, false, None)?;
             }
         }
         Some((mesh, m))
@@ -2030,6 +2048,7 @@ impl Instances {
         edge: (crate::gpu::PaletteIndex, crate::gpu::PaletteIndex),
         look: crate::gpu::InstanceLook,
         shared_edges_too: bool,
+        body: Option<&solidcraft_engine::doc::ModelBody>,
     ) -> Option<()> {
         let mesh = mesh.clone();
         let wants_levels = levels;
@@ -2046,7 +2065,7 @@ impl Instances {
                     None => (
                         match (self.kept.get(&key).filter(|(k, _)| std::sync::Arc::ptr_eq(k, &mesh)), &warmed) {
                             (Some((_, t)), _) | (None, Some((_, t, _))) => t.clone(),
-                            (None, None) => taken_shared_tris(&mesh).unwrap_or_else(|| std::sync::Arc::new(crate::gpu::SharedTris::new(&mesh))),
+                            (None, None) => taken_shared_tris(&mesh).unwrap_or_else(|| build_shared_tris(&mesh, body)),
                         },
                         if levels { self.lods.levels(&mesh).map(|l| l.as_ref().clone()).unwrap_or_default() } else { Vec::new() },
                     ),
@@ -12626,11 +12645,14 @@ mod tests {
         let mut app = SolveApp::new(solidcraft_engine::Session::new(doc), crate::Services::default());
         app.viewport.gpu =
             Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false, edges: false });
-        let (mesh, _) = crate::open_meshing::session_world(&app.session).bodies[0].mesh_in_place();
+        let world = crate::open_meshing::session_world(&app.session);
+        let body = &world.bodies[0];
+        let (mesh, _) = body.mesh_in_place();
         assert!(mesh.triangles.len() >= INSTANCE_ALONE);
-        warm_shared_tris(&mesh);
+        warm_shared_tris(&mesh, body);
         let warmed = WARMED.lock().unwrap().iter().find(|(m, _)| std::sync::Arc::ptr_eq(m, &mesh)).map(|(_, t)| t.clone()).unwrap();
         assert_eq!(warmed.vertices.len() / crate::gpu::SHARED_SIZE, 161 * 161, "the grid's corners shared");
+        assert_eq!(warmed.indices.as_slice(), body.flat_mesh_in_place().unwrap().1.as_flattened());
         let scene = build_scene(&app);
         assert_eq!(scene.instanced.len(), 1, "a large mesh alone is drawn from shared vertices");
         assert!(std::sync::Arc::ptr_eq(&scene.instanced[0].tris, &warmed), "the ones made ahead");
@@ -12667,7 +12689,7 @@ mod tests {
         assert!(parts.ready().is_empty(), "taken by the scene");
         // Another placement reaching the part after a scene took it makes none again.
         let (mesh, _, _) = &warmed[0];
-        warm_part(&parts, mesh, true);
+        warm_part(&parts, mesh, true, None);
         assert!(parts.ready().is_empty(), "made once while the design is open");
         let again = build_scene(&app);
         assert!(again.instanced.iter().filter_map(|m| m.edges.as_ref()).all(|e| std::sync::Arc::ptr_eq(e, edges)), "and kept");

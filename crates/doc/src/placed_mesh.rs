@@ -161,6 +161,16 @@ fn same_triangles(a: &Body, b: &Body) -> bool {
 }
 
 impl ModelBody {
+    /// Indexed geometry underlying `mesh_in_place` for a mesh body without authored shading
+    /// normals. A rigid occurrence uses the definition's triangles in the definition's frame.
+    pub fn flat_mesh_in_place(&self) -> Option<(&[Vec3], &[[u32; 3]])> {
+        let body = self.mesh_placement.as_deref().map_or(&self.body, |placed| &placed.body);
+        if !body.triangle_corner_normals()?.is_empty() {
+            return None;
+        }
+        body.triangle_mesh()
+    }
+
     /// Keep the meshes `old` holds when this body is the same shape: a feature evaluated again
     /// that gives the same solids (an import, from its shared file) doesn't mesh them again.
     pub(super) fn keep_meshes_of(&mut self, old: &ModelBody) {

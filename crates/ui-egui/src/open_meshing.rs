@@ -351,7 +351,7 @@ pub(crate) fn warm(
     let (mesh, _) = b.mesh_in_place();
     // A part placed more than once has its shared vertices made with its part ([`warm_part`]).
     if shared && b.placed_definition().is_none_or(|id| !repeated.contains(&id)) {
-        crate::viewport::warm_shared_tris(&mesh);
+        crate::viewport::warm_shared_tris(&mesh, b);
     }
     // Its box, which framing the view reads for every body once they are all shown: worked out
     // there, on the window thread, it moved every point of every placement (a second for a
@@ -370,7 +370,7 @@ pub(crate) fn warm(
 fn warm_part(b: &ModelBody, parts: &crate::viewport::WarmedParts, edges: bool, q: solidcraft_engine::doc::display_quality::DisplayQuality) {
     use solidcraft_engine::doc::display_quality::DisplayQuality;
     let mesh = if q == DisplayQuality::Normal { b.mesh_in_place().0 } else { b.plan_mesh_in_place_at(q).unwrap_or_else(|| b.mesh_in_place()).0 };
-    crate::viewport::warm_part(parts, &mesh, edges);
+    crate::viewport::warm_part(parts, &mesh, edges, Some(b));
 }
 
 /// The parts the design being opened made ahead, while it is the one shown.
