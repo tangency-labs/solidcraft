@@ -1,6 +1,6 @@
 # SolidCraft: instructions for agents
 
-SolidCraft is a clean-room, pure-Rust parametric 3D CAD app. This file routes agents to the hard rules and skills. Humans: CONTRIBUTING.md.
+SolidCraft is a clean-room, pure-Rust parametric 3D CAD app (sketch solver, feature timeline, B-rep kernel, egui UI). This file routes agents to the hard rules and skills. Humans: CONTRIBUTING.md.
 
 ## Start here
 Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelled `help wanted`, `good first issue`, `needs-triage`; architecture in `docs/architecture.md`.
@@ -55,7 +55,7 @@ Dev skills: `.agents/skills/` (`.claude/skills` links there; Windows: Developer 
 | `.agents/skills/solidcraft-agent-tools/SKILL.md` | running the app, MCP |
 | `skills/solidcraft-modeling/SKILL.md` | building a part over MCP |
 | `skills/solidcraft-editing/SKILL.md` | changing an existing design |
-| `skills/solidcraft-plugins/SKILL.md` | authoring, packaging and testing plugins |
+| `skills/solidcraft-plugins/SKILL.md` | plugins |
 | `skills/solidcraft-reporting/SKILL.md` | a bug report |
 | `skills/solidcraft-checking/SKILL.md` | checking, porting, designs in git |
 | `skills/solidcraft-mechanisms/SKILL.md` | assemblies, joints, motion |
