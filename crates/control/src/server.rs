@@ -124,8 +124,9 @@ impl Hub {
             // Dropped when this thread ends, after `accept` has dropped the listener: `Stop::stop`
             // waits for that.
             let _closed = closed_tx;
+            let connections = Arc::clone(&shared);
             accept(listener, open, MAX_CONNECTIONS, max_line, REFUSAL_DRAIN, &shared, move |stream| {
-                hub.serve(stream, &token, requests.clone(), patient)
+                hub.serve_inner(stream, &token, requests.clone(), patient, Some(Arc::clone(&connections)))
             });
         });
         Ok(stop)
@@ -200,7 +201,7 @@ fn accept(
             open.fetch_sub(1, Ordering::Relaxed);
             if let Ok(socket) = stream.try_clone() {
                 let mut out = stream;
-                let mut reader = BufReader::new(ClientInput { socket, deadline: None });
+                let mut reader = BufReader::new(ClientInput { socket, deadline: None, stopped: None });
                 refuse(&mut out, &mut reader, &json!({"ok": false, "error": TOO_MANY_CONNECTIONS}), max_line, drain);
             }
             continue;
@@ -340,9 +341,14 @@ fn refuse(out: &mut TcpStream, reader: &mut BufReader<ClientInput>, reply: &Valu
 struct ClientInput {
     socket: TcpStream,
     deadline: Option<Instant>,
+    stopped: Option<Arc<Accepted>>,
 }
 
 impl ClientInput {
+    fn stop_requested(&self) -> bool {
+        cfg!(windows) && self.stopped.as_ref().is_some_and(|connections| connections.stopped.load(Ordering::SeqCst))
+    }
+
     /// No deadline any more: the client showed the token.
     fn admit(&mut self) -> std::io::Result<()> {
         self.deadline = None;
@@ -363,6 +369,9 @@ impl ClientInput {
                 Err(RecvTimeoutError::Timeout) => {}
             }
 
+            if self.stop_requested() {
+                return Err(std::io::ErrorKind::UnexpectedEof.into());
+            }
             self.socket.set_read_timeout(Some(PEEK_WAIT))?;
             let probe = self.socket.peek(&mut [0u8; 1]);
             self.socket.set_read_timeout(None)?;
@@ -381,6 +390,34 @@ impl ClientInput {
 
 impl std::io::Read for ClientInput {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        // On Windows, shutdown can leave an already-blocked receive waiting even
+        // on the same socket handle. Only a stoppable listener needs these bounded
+        // waits: their timeouts stay internal while it is live, including idle
+        // authenticated clients. The token still has its one absolute deadline.
+        #[cfg(windows)]
+        if self.stopped.is_some() && !buf.is_empty() {
+            const STOP_POLL: Duration = Duration::from_millis(100);
+            loop {
+                if self.stop_requested() {
+                    return Ok(0);
+                }
+                let wait = match self.deadline {
+                    Some(deadline) => {
+                        let left = deadline.saturating_duration_since(Instant::now());
+                        if left.is_zero() {
+                            return Err(std::io::ErrorKind::TimedOut.into());
+                        }
+                        left.min(STOP_POLL)
+                    }
+                    None => STOP_POLL,
+                };
+                self.socket.set_read_timeout(Some(wait))?;
+                match self.socket.read(buf) {
+                    Err(e) if matches!(e.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock) => continue,
+                    result => return result,
+                }
+            }
+        }
         if let Some(deadline) = self.deadline {
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() {
@@ -732,12 +769,16 @@ impl Hub {
     /// Serve one connection until it closes: the token first, then one request per line, each
     /// sent to the window on `requests` and its reply written back.
     pub fn serve(&self, stream: TcpStream, token: &str, requests: Sender<ControlRequest>, patient: bool) {
+        self.serve_inner(stream, token, requests, patient, None);
+    }
+
+    fn serve_inner(&self, stream: TcpStream, token: &str, requests: Sender<ControlRequest>, patient: bool, stopped: Option<Arc<Accepted>>) {
         let (waits, running, documents, tx) = (self.waits, &self.running, self.watch, requests);
         let connection = running.connections.fetch_add(1, Ordering::Relaxed) + 1;
         let Ok(read) = stream.try_clone() else { return };
         let connection_owner = Arc::new(());
         let mut out = stream;
-        let mut reader = BufReader::new(ClientInput { socket: read, deadline: Some(Instant::now() + waits.token) });
+        let mut reader = BufReader::new(ClientInput { socket: read, deadline: Some(Instant::now() + waits.token), stopped });
         let mut bad = 0usize;
         let mut authenticated = false;
         let mut pending: Option<Pending> = None;
@@ -745,7 +786,12 @@ impl Hub {
         loop {
             // A first `control.subscribe` on its way to the window (#6985).
             let mut joining = None;
-            let line = match read_line(&mut reader, self.max_line) {
+            let input = read_line(&mut reader, self.max_line);
+            // A stop-induced EOF must not turn a buffered partial line into a request.
+            if reader.get_ref().stop_requested() {
+                break;
+            }
+            let line = match input {
                 Ok(Some(l)) => String::from_utf8_lossy(&l).into_owned(),
                 Ok(None) => break,
                 // Closed without a word: a client that connected early and only now sends its first
@@ -839,6 +885,9 @@ impl Hub {
                         req.connection = Some(Arc::downgrade(&connection_owner));
                         let job = Arc::clone(&req.ticket);
                         let ticket = running.add(connection, &id, &req, command, steps);
+                        if reader.get_ref().stop_requested() {
+                            break;
+                        }
                         if tx.send(req).is_err() {
                             break;
                         }

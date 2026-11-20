@@ -44,12 +44,65 @@ pub enum TabViewEdge {
     Bottom,
 }
 
-/// `tab.view.layout`: show the Model views of the design together.
+/// The destination of a view within the window showing the design.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TabViewPlacement {
+    /// An empty cell, numbered from zero in reading order.
+    Empty { index: usize },
+    /// Replace the view in this cell or swap positions if both views are shown.
+    Replace { target: u64 },
+    /// Split this cell and place the view on the given edge.
+    Split { target: u64, edge: TabViewEdge },
+}
+
+impl From<TabViewPlacement> for solidcraft_views::Placement {
+    fn from(placement: TabViewPlacement) -> Self {
+        use solidcraft_views::Edge;
+        match placement {
+            TabViewPlacement::Empty { index } => Self::Empty(index),
+            TabViewPlacement::Replace { target } => Self::Replace(target),
+            TabViewPlacement::Split { target, edge } => {
+                let edge = match edge {
+                    TabViewEdge::Left => Edge::Left,
+                    TabViewEdge::Right => Edge::Right,
+                    TabViewEdge::Top => Edge::Top,
+                    TabViewEdge::Bottom => Edge::Bottom,
+                };
+                Self::Split { target, edge }
+            }
+        }
+    }
+}
+
+impl From<solidcraft_views::Placement> for TabViewPlacement {
+    fn from(placement: solidcraft_views::Placement) -> Self {
+        use solidcraft_views::{Edge, Placement};
+        match placement {
+            Placement::Empty(index) => Self::Empty { index },
+            Placement::Replace(target) => Self::Replace { target },
+            Placement::Split { target, edge } => {
+                let edge = match edge {
+                    Edge::Left => TabViewEdge::Left,
+                    Edge::Right => TabViewEdge::Right,
+                    Edge::Top => TabViewEdge::Top,
+                    Edge::Bottom => TabViewEdge::Bottom,
+                };
+                Self::Split { target, edge }
+            }
+        }
+    }
+}
+
+/// `tab.view.layout`: show the Model and Render views of the design together.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct TabViewLayoutParams {
     /// How to lay them out. `single` shows one view at a time again.
     pub layout: TabViewLayout,
+    /// The target window. Defaults to the last focused window.
+    #[serde(default)]
+    pub window: Option<u32>,
 }
 
 /// `tab.view.beside`: show another view beside the active one.
@@ -63,6 +116,12 @@ pub struct TabViewBesideParams {
     /// The side of the active view it goes on. Default: right.
     #[serde(default)]
     pub edge: Option<TabViewEdge>,
+    /// An explicit cell and position. Requires `id` and replaces the top-level `edge` option.
+    #[serde(default)]
+    pub placement: Option<TabViewPlacement>,
+    /// The target window. Defaults to the last focused window.
+    #[serde(default)]
+    pub window: Option<u32>,
 }
 
 /// `tab.view.open`: open a view of the shown design and make it the active one.
@@ -79,6 +138,9 @@ pub struct TabViewOpenParams {
     /// Default: true when a subject is given, else false.
     #[serde(default)]
     pub reuse: Option<bool>,
+    /// The target window. Defaults to the last focused window.
+    #[serde(default)]
+    pub window: Option<u32>,
 }
 
 /// `tab.view.close`, `tab.view.duplicate`: act on one view.
@@ -100,6 +162,9 @@ pub struct TabViewActivateParams {
     /// The view's place in tab order, 0 first. Give this or `id`.
     #[serde(default)]
     pub index: Option<u64>,
+    /// The window containing the view. Defaults to the last focused window.
+    #[serde(default)]
+    pub window: Option<u32>,
 }
 
 /// `tab.view.rename`: give a view a new name.
@@ -165,6 +230,9 @@ pub struct TabViewReply {
     /// The place asked for (`tab.view.activate`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub index: Option<u64>,
+    /// The window asked for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub window: Option<u32>,
     /// The name asked for, trimmed (`tab.view.rename`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -180,6 +248,9 @@ pub struct TabViewReply {
     /// The side asked for (`tab.view.beside`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub edge: Option<TabViewEdge>,
+    /// An explicit cell and position asked for by `tab.view.beside`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub placement: Option<TabViewPlacement>,
     /// How many views the window shows together after the call (from the window).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shown: Option<u64>,

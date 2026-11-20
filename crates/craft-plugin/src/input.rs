@@ -34,32 +34,61 @@ pub fn check_input(schema: &Value, value: &Value) -> Result<()> {
 /// Validate and omit hidden fields before passing input to plugin code.
 pub fn prepare_input(schema: &Value, value: &Value) -> Result<Value> {
     check_input(schema, value)?;
-    fn visible(schema: &Value, value: &Value, depth: usize, steps: &mut usize) -> Result<Value> {
+    // Select against the original input, before any scope removes keys. Load validation proves
+    // conditional branches unambiguous; ordinary scalar choice filters remain field rules.
+    fn scopes<'a>(schema: &'a Value, value: &Value, depth: usize, steps: &mut usize, out: &mut Vec<&'a Value>) -> Result<()> {
         *steps += 1;
         if depth > MAX_DEPTH || *steps > MAX_STEPS {
             return Err(bad("params", "is nested too deeply to check"));
         }
+        out.push(schema);
+        for key in ["oneOf", "anyOf"] {
+            if let Some(options) = schema.get(key).and_then(Value::as_array) {
+                for option in options.iter().take(256) {
+                    if check(option, value, "params", depth + 1, steps, false, true).is_ok() {
+                        scopes(option, value, depth + 1, steps, out)?;
+                        break;
+                    }
+                    if *steps > MAX_STEPS {
+                        return Err(bad("params", "is nested too deeply to check"));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+    fn visible(schemas: &[&Value], value: &Value, depth: usize, steps: &mut usize) -> Result<Value> {
+        *steps += 1;
+        if depth > MAX_DEPTH || *steps > MAX_STEPS {
+            return Err(bad("params", "is nested too deeply to check"));
+        }
+        let mut applicable = Vec::new();
+        for schema in schemas {
+            scopes(schema, value, depth, steps, &mut applicable)?;
+        }
         if let Some(object) = value.as_object() {
-            let conditions = crate::conditions::InputConditions::parse(schema)?;
-            let controls = conditions.visible_values(object);
+            let conditions = applicable.iter().map(|s| crate::conditions::InputConditions::parse(s)).collect::<Result<Vec<_>>>()?;
+            let controls: Vec<_> = conditions.iter().map(|c| c.visible_values(object)).collect();
             let mut out = Map::new();
             for (key, value) in object {
-                if conditions.fields.get(key).is_some_and(|f| !f.visible(&controls)) {
+                if conditions.iter().zip(&controls).any(|(c, values)| c.fields.get(key).is_some_and(|f| !f.visible(values))) {
                     continue;
                 }
-                let property =
-                    schema.get("properties").and_then(|p| p.get(key)).or_else(|| schema.get("additionalProperties")).unwrap_or(&Value::Null);
-                out.insert(key.clone(), visible(property, value, depth + 1, steps)?);
+                let properties: Vec<_> = applicable
+                    .iter()
+                    .filter_map(|s| s.get("properties").and_then(|p| p.get(key)).or_else(|| s.get("additionalProperties")))
+                    .collect();
+                out.insert(key.clone(), visible(&properties, value, depth + 1, steps)?);
             }
             return Ok(Value::Object(out));
         }
         if let Some(values) = value.as_array() {
-            let items = schema.get("items").unwrap_or(&Value::Null);
-            return values.iter().map(|v| visible(items, v, depth + 1, steps)).collect::<Result<Vec<_>>>().map(Value::Array);
+            let items: Vec<_> = applicable.iter().filter_map(|s| s.get("items")).collect();
+            return values.iter().map(|v| visible(&items, v, depth + 1, steps)).collect::<Result<Vec<_>>>().map(Value::Array);
         }
         Ok(value.clone())
     }
-    visible(schema, value, 0, &mut 0)
+    visible(&[schema], value, 0, &mut 0)
 }
 
 // The base schema constraints, without conditions (used to validate condition literals).
