@@ -70,9 +70,10 @@ CommandSpec::new("view.status_items", "Viewport Status Items", crate::checked!("
     .contract(&STATUS_ITEMS_CONTRACT).output(output_schema_for::<crate::status_items::StatusItems>)
     .params("no parameters → {items}; persistent viewport effects, oldest slot first, with structured settings and executable clear requests; read-only, no model evaluation"),
 CommandSpec::new("view.fit", "Fit", fit)
-    .icon("fit").key("F6").noundo().doc_only().any_part().params("no parameters → frame the active canvas or selection (with a drawing open, its sheet); display only"),
+    // F6 also fits: the window handles it itself (`keymap::RESERVED`), so End is the key that can change.
+    .icon("fit").key("End").noundo().doc_only().any_part().params("no parameters → frame the active canvas or selection (with a drawing open, its sheet); display only"),
 CommandSpec::new("view.home", "Home View", home)
-    .icon("home").noundo().doc_only().any_part().params("no parameters → home orientation framing the active canvas (with a drawing open, its whole sheet); display only"),
+    .icon("home").key("Home").noundo().doc_only().any_part().params("no parameters → home orientation framing the active canvas (with a drawing open, its whole sheet); display only"),
 CommandSpec::new("view.tool", "Navigation Tool", crate::checked!("view.tool", tool))
     .icon("orbit").noundo().doc_only().any_part()
     .contract(&TOOL_CONTRACT).output(output_schema_for::<ToolResult>)
