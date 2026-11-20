@@ -86,6 +86,13 @@ impl InputConditions {
 
     pub(crate) fn from_properties(properties: Option<&Map<String, Value>>) -> Result<Self> {
         let Some(properties) = properties else { return Ok(Self::default()) };
+        let annotated = properties.values().any(|property| {
+            [VISIBLE_WHEN, ENABLED_WHEN, DEFAULTS].iter().any(|key| property.get(*key).is_some())
+                || property.get("oneOf").and_then(Value::as_array).is_some_and(|options| options.iter().any(|o| o.get(OPTION_WHEN).is_some()))
+        });
+        if !annotated {
+            return Ok(Self::default());
+        }
         if properties.len() > 1024 {
             return Err(invalid("input_schema.properties", "too many conditional fields"));
         }
@@ -209,58 +216,131 @@ fn parse_condition(
 /// retain the existing direct-call pass-through contract. A schema exceeding the walk limit
 /// is treated as conditional so validation reports it rather than bypassing the check.
 pub fn has_conditions(schema: &Value) -> bool {
-    fn visit(schema: &Value, depth: usize, budget: &mut usize) -> bool {
+    contains_conditions(schema, true)
+}
+
+// At composition boundaries, scalar choice-option annotations belong to the enclosing field,
+// not to an object branch. Conditions below properties/items still need branch projection.
+fn contains_conditions(schema: &Value, choice_filters: bool) -> bool {
+    fn visit(schema: &Value, depth: usize, budget: &mut usize, choice_filters: bool) -> bool {
         if depth > 32 || *budget == 0 {
             return true;
         }
         *budget -= 1;
-        if [VISIBLE_WHEN, ENABLED_WHEN, OPTION_WHEN, DEFAULTS].iter().any(|key| schema.get(*key).is_some()) {
+        if [VISIBLE_WHEN, ENABLED_WHEN, DEFAULTS].iter().any(|key| schema.get(*key).is_some())
+            || (choice_filters && schema.get(OPTION_WHEN).is_some())
+        {
             return true;
         }
-        if schema.get("properties").and_then(Value::as_object).is_some_and(|p| p.values().any(|v| visit(v, depth + 1, budget))) {
+        if schema.get("properties").and_then(Value::as_object).is_some_and(|p| p.values().any(|v| visit(v, depth + 1, budget, true))) {
             return true;
         }
         for key in ["items", "additionalProperties"] {
-            if schema.get(key).is_some_and(|v| visit(v, depth + 1, budget)) {
+            if schema.get(key).is_some_and(|v| visit(v, depth + 1, budget, true)) {
                 return true;
             }
         }
         for key in ["oneOf", "anyOf", "allOf"] {
-            if schema.get(key).and_then(Value::as_array).is_some_and(|options| options.iter().any(|v| visit(v, depth + 1, budget))) {
+            if schema.get(key).and_then(Value::as_array).is_some_and(|options| options.iter().any(|v| visit(v, depth + 1, budget, choice_filters))) {
                 return true;
             }
         }
         false
     }
-    visit(schema, 0, &mut 100_000)
+    visit(schema, 0, &mut 100_000, choice_filters)
+}
+
+// A required, unconditional finite scalar discriminator proves that two branches cannot both
+// match. The same numeric comparison as input checking avoids rounding integer discriminators.
+fn disjoint_branches(a: &Value, b: &Value, objects_only: bool, path: &str, budget: &mut usize) -> Result<bool> {
+    fn domain(property: &Value) -> Option<&[Value]> {
+        let values = property.get("const").map(std::slice::from_ref).or_else(|| property.get("enum").and_then(Value::as_array).map(Vec::as_slice))?;
+        (!values.is_empty() && values.len() <= 256 && values.iter().all(|v| !v.is_object() && !v.is_array())).then_some(values)
+    }
+    let object_branches = a.get("type").and_then(Value::as_str) == Some("object") && b.get("type").and_then(Value::as_str) == Some("object");
+    if !(objects_only || object_branches) {
+        return Ok(false);
+    }
+    let (Some(required), Some(other)) = (a.get("required").and_then(Value::as_array), b.get("required").and_then(Value::as_array)) else {
+        return Ok(false);
+    };
+    if required.len() > 1024 || other.len() > 1024 {
+        return Err(invalid(path, "conditional composition is too large"));
+    }
+    let other: BTreeSet<&str> = other.iter().filter_map(Value::as_str).collect();
+    for name in required.iter().filter_map(Value::as_str) {
+        *budget = budget.checked_sub(1).ok_or_else(|| invalid(path, "conditional composition is too large"))?;
+        if !other.contains(name) {
+            continue;
+        }
+        let (Some(a), Some(b)) = (a.get("properties").and_then(|p| p.get(name)), b.get("properties").and_then(|p| p.get(name))) else { continue };
+        if has_conditions(a) || has_conditions(b) {
+            continue;
+        }
+        let (Some(a), Some(b)) = (domain(a), domain(b)) else { continue };
+        let mut overlap = false;
+        for left in a {
+            for right in b {
+                *budget = budget.checked_sub(1).ok_or_else(|| invalid(path, "conditional composition is too large"))?;
+                if scalar_equal(left, right) {
+                    overlap = true;
+                    break;
+                }
+            }
+            if overlap {
+                break;
+            }
+        }
+        if !overlap {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Validate every object scope at load, including schemas the GUI does not draw.
 pub fn validate_conditions(schema: &Value) -> Result<()> {
-    fn visit(schema: &Value, depth: usize, budget: &mut usize) -> Result<()> {
+    fn visit(schema: &Value, path: &str, depth: usize, budget: &mut usize) -> Result<()> {
         if depth > 32 || *budget == 0 {
             return Err(invalid("input_schema", "schema is too large or deeply nested"));
         }
         *budget -= 1;
         InputConditions::parse(schema)?;
         if let Some(properties) = schema.get("properties").and_then(Value::as_object) {
-            for property in properties.values() {
-                visit(property, depth + 1, budget)?;
+            for (name, property) in properties {
+                visit(property, &format!("{path}.properties.{name}"), depth + 1, budget)?;
             }
         }
         for key in ["items", "additionalProperties"] {
             if let Some(child) = schema.get(key) {
-                visit(child, depth + 1, budget)?;
+                visit(child, &format!("{path}.{key}"), depth + 1, budget)?;
             }
         }
         for key in ["oneOf", "anyOf", "allOf"] {
             if let Some(options) = schema.get(key).and_then(Value::as_array) {
-                for option in options {
-                    visit(option, depth + 1, budget)?;
+                let location = format!("{path}.{key}");
+                if options.iter().any(|option| contains_conditions(option, false)) {
+                    if key == "allOf" || options.len() > 256 {
+                        return Err(invalid(
+                            &location,
+                            "conditional object rules require a supported oneOf/anyOf composition with at most 256 branches",
+                        ));
+                    }
+                    for (i, a) in options.iter().enumerate() {
+                        for b in options.iter().skip(i + 1) {
+                            *budget = budget.checked_sub(1).ok_or_else(|| invalid(&location, "conditional composition is too large"))?;
+                            if !disjoint_branches(a, b, schema.get("type").and_then(Value::as_str) == Some("object"), &location, budget)? {
+                                return Err(invalid(&location, "conditional branches need disjoint required scalar const/enum discriminators"));
+                            }
+                        }
+                    }
+                }
+                for (i, option) in options.iter().enumerate() {
+                    visit(option, &format!("{location}[{i}]"), depth + 1, budget)?;
                 }
             }
         }
         Ok(())
     }
-    visit(schema, 0, &mut 100_000)
+    visit(schema, "input_schema", 0, &mut 100_000)
 }

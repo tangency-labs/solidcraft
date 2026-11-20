@@ -121,17 +121,24 @@ impl OidnTask {
     /// retires cancelled work outside that step; completed output is never published.
     pub fn poll(&mut self) -> PassResult<Option<Vec<[f32; 4]>>> {
         #[cfg(all(feature = "denoise-oidn", not(target_arch = "wasm32")))]
+        if self.worker.as_ref().is_some_and(|worker| !worker.is_finished()) {
+            // The native host immediately steps pending jobs again; yielding alone can
+            // burn a core throughout inference. Back off without waiting for the pass.
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            return Ok(None);
+        }
+        self.wait().map(Some)
+    }
+
+    /// Wait for retirement and take the result once. Bounded render steps must use `poll`.
+    pub fn wait(&mut self) -> PassResult<Vec<[f32; 4]>> {
+        #[cfg(all(feature = "denoise-oidn", not(target_arch = "wasm32")))]
         {
-            let worker = self.worker.as_ref().ok_or_else(|| invalid("Open Image Denoise task already completed"))?;
-            if !worker.is_finished() {
-                std::thread::yield_now();
-                return Ok(None);
-            }
-            let worker = self.worker.take().ok_or_else(|| invalid("Open Image Denoise worker disappeared"))?;
+            let worker = self.worker.take().ok_or_else(|| invalid("Open Image Denoise task already completed"))?;
             let result = worker.join();
             self.cancel.check()?;
             // A worker panic has no trustworthy native execution result.
-            result.map_err(|_| JobError::new(ErrorCode::Internal, "Open Image Denoise worker failed"))?.map(Some)
+            result.map_err(|_| JobError::new(ErrorCode::Internal, "Open Image Denoise worker failed"))?
         }
         #[cfg(not(all(feature = "denoise-oidn", not(target_arch = "wasm32"))))]
         {

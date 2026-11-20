@@ -1299,6 +1299,19 @@ fn packed_mesh_winding_repairs_pairs_and_leaves_non_manifold_edges_alone() {
 }
 
 #[test]
+fn a_flat_scan_keeps_its_welded_source_and_rebuilds_the_same_winding() {
+    // Two triangles of an open square, sharing a side that runs in the same direction.
+    let positions = std::sync::Arc::from([0., 0., 0., 1., 0., 0., 0., 1., 0., 1., 1., 0., 1., 0., 0., 0., 1., 0.]);
+    let facets = std::sync::Arc::from([0, 1, 2, 4, 5, 3]);
+    let (ready, packed, indexed) = crate::Body::from_packed_flat_mesh_indexed(positions, facets).unwrap();
+    assert_eq!(packed.as_chunks::<3>().0, &[[0., 0., 0.], [1., 0., 0.], [0., 1., 0.], [1., 1., 0.]]);
+    assert_eq!(indexed, [0, 1, 2, 1, 2, 3], "source order is kept for shading");
+    let reopened = crate::Body::from_packed_mesh(packed.as_chunks::<3>().0, indexed.as_chunks::<3>().0, &[]).unwrap();
+    assert_eq!(ready.triangle_mesh(), reopened.triangle_mesh());
+    assert_eq!(reopened.triangle_mesh().unwrap().1, &[[0, 1, 2], [1, 3, 2]]);
+}
+
+#[test]
 fn mesh_winding_cannot_close_a_nonorientable_surface() {
     // Six-vertex projective plane. Each side belongs to two triangles, but their
     // directions cannot all be made opposite in one consistent winding.

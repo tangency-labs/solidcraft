@@ -400,28 +400,7 @@ fn oidn_cancelled_poll_keeps_active_worker_pending_until_retirement() {
     // the deliberately blocked worker joined by Drop during assertion unwinding.
     release.send(()).unwrap();
     assert!(matches!(first, Ok(None)), "cancellation cannot return an error while native work is active: {first:?}");
-    for _ in 0..1_000_000 {
-        match task.poll() {
-            Ok(None) => {}
-            Ok(Some(_)) => panic!("cancelled native work must never publish pixels"),
-            Err(error) => {
-                assert_eq!(not_native(error).code, ErrorCode::Cancelled);
-                return;
-            }
-        }
-    }
-    panic!("released worker did not retire within poll watchdog");
-}
-
-#[cfg(all(feature = "denoise-oidn", not(target_arch = "wasm32")))]
-fn finish_oidn_adapter(task: &mut denoise_oidn::OidnTask) -> std::result::Result<Vec<[f32; 4]>, denoise_oidn::OidnFailure> {
-    // Deadlock watchdog only, not an inference speed assertion. Each pending poll yields.
-    for _ in 0..1_000_000 {
-        if let Some(pixels) = task.poll()? {
-            return Ok(pixels);
-        }
-    }
-    Err(JobError::new(ErrorCode::TimedOut, "Open Image Denoise adapter did not finish within the poll watchdog").into())
+    assert_eq!(not_native(task.wait().unwrap_err()).code, ErrorCode::Cancelled);
 }
 
 #[cfg(all(feature = "denoise-oidn", not(target_arch = "wasm32")))]
@@ -453,7 +432,7 @@ fn oidn_adapter_filters_noisy_rgb_and_keeps_internal_coverage_bits_without_mutat
         CancelToken::default(),
     )
     .unwrap();
-    let filtered = finish_oidn_adapter(&mut task).unwrap();
+    let filtered = task.wait().unwrap();
     assert_eq!(filtered.len(), 32 * 32);
     assert!(filtered.iter().flatten().all(|value| value.is_finite() && *value >= 0.0));
     assert!(filtered.iter().zip(&source).all(|(filtered, original)| filtered[3].to_bits() == original[3].to_bits()));
@@ -486,7 +465,7 @@ fn oidn_adapter_rejects_invalid_radiance_and_coverage_without_output() {
             CancelToken::default(),
         )
         .unwrap();
-        let error = not_native(finish_oidn_adapter(&mut task).unwrap_err());
+        let error = not_native(task.wait().unwrap_err());
         assert_eq!(error.code, ErrorCode::InvalidRequest, "{pixel:?}: {error}");
         assert!(error.message.contains("invalid radiance or coverage"), "{error}");
         assert!(task.poll().is_err(), "invalid input cannot later produce output");

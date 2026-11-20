@@ -402,6 +402,99 @@ fn conditional_inputs_hide_required_fields_and_reject_filtered_choices() {
 }
 
 #[test]
+fn plain_object_scopes_skip_the_conditional_property_limit() {
+    let mut properties: serde_json::Map<String, Value> = (0..1025).map(|i| (format!("p{i}"), json!({"type":"boolean"}))).collect();
+    let mut value = manifest();
+    value["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","properties":properties}}]);
+    assert!(parse(&value).is_ok(), "plain schemas keep their existing limits");
+    properties["p2"] = json!({"type":"object","properties":{
+        "mode":{"type":"boolean"},"count":{"type":"integer","x-solidcraft-visible-when":{"field":"mode","eq":true}}
+    }});
+    value["runtime"]["entries"][0]["input_schema"]["properties"] = json!(properties);
+    assert!(parse(&value).is_ok(), "nested annotations do not limit the unannotated parent scope");
+    properties["p1"]["x-solidcraft-visible-when"] = json!({"field":"p0","eq":true});
+    value["runtime"]["entries"][0]["input_schema"]["properties"] = json!(properties);
+    assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field == "input_schema.properties"));
+    properties.remove("p1024");
+    value["runtime"]["entries"][0]["input_schema"]["properties"] = json!(properties);
+    assert!(parse(&value).is_ok(), "1,024 conditional properties remain supported");
+}
+
+#[test]
+fn conditional_preparation_projects_applicable_composition_branches() {
+    let branch = json!({"properties":{
+        "mode":{"type":"boolean"},
+        "secret":{"type":"integer","x-solidcraft-visible-when":{"field":"mode","eq":true}},
+        "kept":{"type":"integer","x-solidcraft-enabled-when":{"field":"mode","eq":true}},
+        "rows":{"type":"array","items":{"type":"object","properties":{
+            "mode":{"type":"boolean"},"secret":{"type":"integer","x-solidcraft-visible-when":{"field":"mode","eq":true}}
+        }}},
+        "nested":{"type":"object","properties":{
+            "mode":{"type":"boolean"},"secret":{"type":"integer","x-solidcraft-visible-when":{"field":"mode","eq":true}}
+        }}
+    }});
+    for keyword in ["oneOf", "anyOf"] {
+        let mut schema = json!({"type":"object","additionalProperties":true});
+        schema[keyword] = json!([branch]);
+        let input = json!({"mode":false,"secret":"must not reach Wasm","kept":3,"rows":[{"mode":false,"secret":"private"}],"nested":{"mode":false,"secret":"private"},"extra":7});
+        assert_eq!(check_input(&schema, &input), Ok(()));
+        assert_eq!(
+            prepare_input(&schema, &input),
+            Ok(json!({"mode":false,"kept":3,"rows":[{"mode":false}],"nested":{"mode":false},"extra":7})),
+            "{keyword}"
+        );
+        let mut first = branch.clone();
+        first["required"] = json!(["kind"]);
+        first["properties"]["kind"] = json!({"type":"string","const":"private"});
+        schema[keyword] = json!([first,{"required":["kind"],"properties":{"kind":{"type":"string","enum":["public"]},"secret":{"type":"string"}}}]);
+        assert_eq!(prepare_input(&schema, &json!({"kind":"private","mode":false,"secret":"hidden"})), Ok(json!({"kind":"private","mode":false})));
+        assert_eq!(prepare_input(&schema, &json!({"kind":"public","secret":"kept"})), Ok(json!({"kind":"public","secret":"kept"})));
+        // Choose the branch before an enclosing scope hides its discriminator.
+        schema["properties"] = json!({"mode":{"type":"boolean"},"kind":{"type":"string","x-solidcraft-visible-when":{"field":"mode","eq":true}}});
+        assert_eq!(prepare_input(&schema, &json!({"kind":"private","mode":false,"secret":"hidden"})), Ok(json!({"mode":false})));
+    }
+}
+
+#[test]
+fn conditional_composition_rejects_ambiguous_branches_at_their_manifest_location() {
+    let branch = json!({"properties":{"mode":{"type":"boolean"},"secret":{"type":"integer","x-solidcraft-visible-when":{"field":"mode","eq":true}}}});
+    for keyword in ["oneOf", "anyOf", "allOf"] {
+        let mut nested = json!({"type":"object"});
+        nested[keyword] = if keyword == "allOf" { json!([branch]) } else { json!([branch, {}]) };
+        let mut value = manifest();
+        value["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","properties":{"nested":nested}}}]);
+        let result = parse(&value);
+        assert!(
+            matches!(&result, Err(HostError::InvalidManifest { field, .. }) if field == &format!("input_schema.properties.nested.{keyword}")),
+            "{result:?}"
+        );
+    }
+    for (left, right, required) in [(json!(1), json!(1.0), true), (json!("a"), json!("b"), false)] {
+        let branches: Vec<_> = [left, right]
+            .into_iter()
+            .map(|kind| {
+                let mut option = branch.clone();
+                option["properties"]["kind"] = json!({"const":kind});
+                if required {
+                    option["required"] = json!(["kind"]);
+                }
+                option
+            })
+            .collect();
+        let mut value = manifest();
+        value["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","oneOf":branches}}]);
+        assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field == "input_schema.oneOf"));
+    }
+    // Object discriminators cannot distinguish array branches: required/properties do not
+    // constrain arrays, whose item rules could otherwise hide different keys.
+    let branches: Vec<_> =
+        ["a", "b"].iter().map(|kind| json!({"type":"array","required":["kind"],"properties":{"kind":{"const":kind}},"items":branch})).collect();
+    let mut value = manifest();
+    value["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","properties":{"nested":{"type":"array","oneOf":branches}}}}]);
+    assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field == "input_schema.properties.nested.oneOf"));
+}
+
+#[test]
 fn conditional_schemas_reject_missing_non_scalar_impossible_and_cyclic_references() {
     for properties in [
         json!({"a":{"type":"number","x-solidcraft-visible-when":{"field":"missing","eq":true}}}),

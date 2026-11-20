@@ -10,6 +10,7 @@ use std::path::Path;
 mod check;
 mod core;
 pub mod export;
+pub mod failure;
 pub mod flat;
 pub mod history;
 pub mod import;
@@ -88,6 +89,9 @@ pub enum Error {
     /// SMLib reported success but the operation did nothing: a blend that made no face, a face
     /// move or draft that moved no face.
     NoEffect,
+    /// A split tool runs into a face and ends inside it, leaving a crack, and no tool cuts any
+    /// face through: the tool, taken over its whole surface, does not reach across.
+    ToolStopsShort,
     /// The answer is not exact in the input's geometry (a box that would wrap round its
     /// surface, an analytic surface whose speed across a side varies along it).
     NotExact,
@@ -104,6 +108,10 @@ pub enum Error {
     /// (an offset refused with its reason, [`solidcore_ops::Error::OffsetRefused`]; a fillet or
     /// chamfer failed with the kernel's statement of why, [`solidcore_ops::Error::BlendFailed`]).
     Refused(solidcore_ops::Error),
+    /// SMLib rejected its input and solidcore said why (`SM_ERR_INVALID_INPUT` with its reason:
+    /// `SolidError::InvalidInput`, or solidcore-ops' `Refused`): the routine that rejected it and
+    /// what was wrong, rather than the bare status.
+    Rejected { operation: &'static str, reason: &'static str },
     /// A typed refusal together with the kernel's complete diagnostic, including its
     /// operation, entities and nested causes. The refusal remains available as data.
     RefusedWithDiagnostic { refusal: solidcore_ops::Error, diagnostic: String },
@@ -188,6 +196,7 @@ impl std::fmt::Display for Error {
                 corner + 1
             ),
             Error::NoEffect => write!(f, "SMLib made no change: it reported success, but the operation did nothing"),
+            Error::ToolStopsShort => write!(f, "the tool runs into the face but ends inside it, so it cuts nothing off"),
             Error::NotExact => write!(f, "SMLib cannot build this exactly in the input's geometry"),
             Error::Corner { why, at } => {
                 let at = format!("({:.4}, {:.4}, {:.4})", at[0], at[1], at[2]);
@@ -205,6 +214,7 @@ impl std::fmt::Display for Error {
             Error::Record(u) => write!(f, "{u}"),
             Error::Solidcore(e) => write!(f, "solidcore: {e}"),
             Error::Refused(e) => write!(f, "{e}"),
+            Error::Rejected { operation, reason } => write!(f, "SMLib rejected the input: {reason} ({operation})"),
             Error::RefusedWithDiagnostic { refusal, diagnostic } => write!(f, "{refusal}: {diagnostic}"),
             Error::Internal(e) => write!(f, "solidcore failed internally in {e}"),
             Error::Unported(what) => write!(f, "not supported yet: {what}"),
@@ -261,6 +271,8 @@ pub fn crash_test() -> Result<()> {
 /// A B-rep. Immutable: operations return new bodies.
 pub struct Brep {
     body: core::Body,
+    /// Every bounded region with more than one shell had its outer shell confirmed on import.
+    enclosing_shell_order_proven: bool,
     /// The body's number in a trace ([`trace`]).
     id: u64,
 }
@@ -274,7 +286,7 @@ impl std::fmt::Debug for Brep {
 impl Brep {
     /// A body solidcore made.
     fn made_core(body: core::Body) -> Brep {
-        Brep { body, id: trace::next_id() }
+        Brep { body, enclosing_shell_order_proven: false, id: trace::next_id() }
     }
 
     /// solidcore's body.

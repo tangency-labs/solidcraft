@@ -6194,16 +6194,8 @@ fn oidn_gpu_executes_on_raw_trace_grid_and_preserves_accumulator_at_x2() {
         task.complete_sample().unwrap();
     }
     let raw = task.read_linear().unwrap();
-    let expected =
+    let mut expected =
         solidcraft_render::job::denoise_oidn::OidnTask::new(64, 64, raw.clone(), options.denoise_settings, CancelToken::default()).unwrap();
-    let finish = |worker: &mut solidcraft_render::job::denoise_oidn::OidnTask| {
-        for _ in 0..1_000_000 {
-            if let Some(pixels) = worker.poll().unwrap() {
-                return pixels;
-            }
-        }
-        panic!("native denoiser did not finish within poll watchdog");
-    };
     let resolved_raw = task.resolve_output(raw.clone()).unwrap();
     let mut exr = solidcraft_render::job::linear_exr::ExrTask::new(32, 32, resolved_raw, CancelToken::default()).unwrap();
     while !exr.step(4).unwrap() {}
@@ -6214,15 +6206,12 @@ fn oidn_gpu_executes_on_raw_trace_grid_and_preserves_accumulator_at_x2() {
     assert_eq!(task.exr.as_ref().unwrap(), &expected_exr, "GPU raw EXR is encoded before any OIDN processing");
     // Finish the first worker before starting an independent output invocation.
     // A live worker cannot be detached from this task's admission lifetime.
-    drop(finish(task.oidn_work.as_mut().unwrap()));
-    task.oidn_work = None;
+    drop(task.oidn_work.take().unwrap().wait().unwrap());
     // Deliberately unrelated resolved pixels prove the filter reacquires the full
     // trace grid rather than denoising the already resolved argument.
     assert!(matches!(task.finish_output(vec![[99.0, 99.0, 99.0, 1.0]; 32 * 32]).unwrap(), TaskPoll::Pending(_)));
-    let actual = finish(task.oidn_work.as_mut().unwrap());
-    task.oidn_work = None;
-    let mut expected = expected;
-    let expected = finish(&mut expected);
+    let actual = task.oidn_work.take().unwrap().wait().unwrap();
+    let expected = expected.wait().unwrap();
     assert_eq!(actual, expected, "GPU integration must use the raw 64x64 source");
     assert_eq!(task.read_linear().unwrap(), raw, "OIDN never writes GPU accumulation");
     let resolved = task.resolve_output(actual).unwrap();
@@ -6251,14 +6240,6 @@ fn oidn_gpu_adaptive_preview_filters_normalized_pilot_and_production_trace_grids
     };
     let mut task = Task::new(executor.context.clone(), sphere(white()), request(16), options, CancelToken::default()).unwrap();
     assert_eq!((task.request.width, task.request.height), (32, 32));
-    let finish = |worker: &mut OidnTask| {
-        for _ in 0..1_000_000 {
-            if let Some(pixels) = worker.poll().unwrap() {
-                return pixels;
-            }
-        }
-        panic!("native denoiser did not finish within poll watchdog");
-    };
     for completed in [16, 18] {
         while task.sample < completed {
             task.complete_sample().unwrap();
@@ -6276,11 +6257,10 @@ fn oidn_gpu_adaptive_preview_filters_normalized_pilot_and_production_trace_grids
             assert!(raw.iter().zip(&checkpoint).all(|(sum, mean)| sum.iter().zip(mean).all(|(sum, mean)| *sum == *mean * 2.0)));
         }
         let mut expected = OidnTask::new(32, 32, checkpoint.clone(), options.denoise_settings, CancelToken::default()).unwrap();
-        let expected = finish(&mut expected);
+        let expected = expected.wait().unwrap();
         task.encoding_preview = true;
         assert!(matches!(task.finish_output(vec![[99.0, 99.0, 99.0, 1.0]; 16 * 16]).unwrap(), TaskPoll::Pending(_)));
-        let actual = finish(task.oidn_work.as_mut().unwrap());
-        task.oidn_work = None;
+        let actual = task.oidn_work.take().unwrap().wait().unwrap();
         assert_eq!(actual, expected, "OIDN preview must filter the normalized trace-grid checkpoint at iteration {completed}");
         let resolved = task.resolve_output(actual).unwrap();
         assert_eq!(resolved.len(), 16 * 16);

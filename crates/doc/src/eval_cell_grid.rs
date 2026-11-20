@@ -5,9 +5,13 @@
 use super::*;
 use solidcore_record::cell_grid::CellGridSpec;
 
-/// The most cells one grid cuts. The kernel's boolean and its check take time that grows with the
-/// square of the faces they meet, so the cap stays low until cells are cut without them.
-pub const MAX_CUT_CELLS: usize = 250;
+/// The most cells one grid cuts. The cut still takes time that grows faster than the cell count
+/// (release, i7-8809G, square cells through a 3 mm plate: 256 cells 6 s, 506 cells 22 s, 992 cells
+/// 83 s), so a large grid is slow but finishes. The tool holds one shell per cell and the kernel's
+/// record takes at most 1024 shells, so a bigger grid fails whatever the time: 1482 cells ended in
+/// "shell count". The cap stays under that limit, so the refusal names the count and the cap.
+pub const MAX_CUT_CELLS: usize = 1000;
+const _: () = assert!(MAX_CUT_CELLS < solidcore_record::brep::MAX_SHELLS, "one shell per cell must fit the record");
 
 /// Past this many cells the cut takes noticeable time, and the feature says so.
 pub const SLOW_CUT_CELLS: usize = 100;

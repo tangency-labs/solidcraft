@@ -1042,6 +1042,25 @@ fn far_side(dirs: &[Vec3; 3], pole: usize) -> Result<Option<FarSide>> {
     }))
 }
 
+/// The point a ball's triangle `dirs` is fanned about where it is not one patch: the point of
+/// the sphere equally far from its three corners, on their side. `None` where that point is
+/// not inside the triangle: about a point outside it (an obtuse triangle's) or on a side, the
+/// three triangles (centre, i, i + 1) would overlap or fold, not cover it once; and where the
+/// corners lie on one great circle, which has no such point. Inside means on the triangle's
+/// side of each of its three great circles.
+fn fan_centre(dirs: &[Vec3; 3]) -> Option<Vec3> {
+    let [d0, d1, d2] = *dirs;
+    let (_, mut mid) = (d1 - d0).cross(d2 - d0).length_and_unit()?;
+    if mid.dot(d0) < 0.0 {
+        mid = -mid;
+    }
+    let turn = d0.dot(d1.cross(d2));
+    let inside = [(d0, d1), (d1, d2), (d2, d0)]
+        .iter()
+        .all(|&(a, b)| mid.dot(a.cross(b)) * turn > EFF_ZERO);
+    inside.then_some(mid)
+}
+
 /// `sm_BallTrianglePatch` (the fork's a6243fa): the ball's triangle between the
 /// contacts as one rational patch of degree `(4, 2)` on the sphere about `centre`
 /// (`dirs` the unit contact directions), the pole at contact `pole`: `t = 0` the pole,
@@ -1218,18 +1237,18 @@ pub fn ball_corner_edge_geom(
     // Not the fork's (SolidCraft #19583): three contacts whose triangle is not one patch (a
     // side too long, at a corner as sharp as a regular tetrahedron's or sharper) are fanned
     // about the point of the ball equally far from the three, which faces the vertex: the
-    // three triangles (centre, i, i + 1), on the same sphere, each far side a shorter arc
+    // three triangles (centre, i, i + 1), on the same sphere, each far side a shorter arc.
+    // Only where that point lies inside the triangle (`fan_centre`): otherwise the triangle
+    // stays one, and its patch refuses it as before
     if let ([first], [d0, d1, d2]) = (triangles.as_slice(), dirs.as_slice()) {
         if far_side(&first.0, 0)?.is_some_and(|far| !far.is_one_arc()) {
-            let mut mid = (*d1 - *d0).cross(*d2 - *d0).unitize()?;
-            if mid.dot(*d0) < 0.0 {
-                mid = -mid;
+            if let Some(mid) = fan_centre(&[*d0, *d1, *d2]) {
+                let fan = [(*d0, *d1, 0, 1), (*d1, *d2, 1, 2), (*d2, *d0, 2, 0)];
+                triangles = fan
+                    .iter()
+                    .map(|&(a, b, i, j)| ([mid, a, b], [None, Some(i), Some(j)]))
+                    .collect();
             }
-            let fan = [(*d0, *d1, 0, 1), (*d1, *d2, 1, 2), (*d2, *d0, 2, 0)];
-            triangles = fan
-                .iter()
-                .map(|&(a, b, i, j)| ([mid, a, b], [None, Some(i), Some(j)]))
-                .collect();
         }
     }
     let mut ball = BallCorner::default();
@@ -1507,7 +1526,8 @@ mod tests {
         let k = Kernel::default();
         let dirs = equal_sides(116.0_f64.to_radians());
         let c = Point3::new(1.0, 2.0, 3.0);
-        let mid = Vec3::new(0.0, 0.0, 1.0);
+        let mid = fan_centre(&dirs).unwrap();
+        assert!((mid - Vec3::new(0.0, 0.0, 1.0)).length() < 1e-15);
         for i in 0..3 {
             let tri = [mid, dirs[i], dirs[(i + 1) % 3]];
             assert!(far_side(&tri, 0).unwrap().unwrap().is_one_arc());
@@ -1529,6 +1549,37 @@ mod tests {
             assert!((at(lo.x, hi.y) - (c + tri[1] * 2.0)).length() < 1e-13);
             assert!((at(hi.x, hi.y) - (c + tri[2] * 2.0)).length() < 1e-13);
         }
+    }
+
+    /// A fan's centre has to lie inside its triangle. Three corners nearly on one great circle,
+    /// the middle one 0.05 off it (40 degrees between neighbours along the equator): the circle
+    /// through them is nearly that great circle, and the point equally far from the three is
+    /// near its pole, far outside the thin triangle. About it the three triangles would
+    /// overlap, so no centre is given. Three corners on one great circle have none either.
+    #[test]
+    fn a_fan_centre_outside_its_triangle_is_not_taken() {
+        let on_equator = |degrees: f64| {
+            let a = degrees.to_radians();
+            Vec3::new(a.cos(), a.sin(), 0.0)
+        };
+        let lifted = (on_equator(40.0) + Vec3::new(0.0, 0.0, 0.05))
+            .unitize()
+            .unwrap();
+        let thin = [on_equator(0.0), lifted, on_equator(80.0)];
+        // the point equally far from the three is within 26 degrees of the pole: not in the triangle
+        let pole = (thin[1] - thin[0])
+            .cross(thin[2] - thin[0])
+            .unitize()
+            .unwrap();
+        assert!(pole.z.abs() > 0.9, "{pole:?}");
+        assert_eq!(fan_centre(&thin), None);
+        let flat = [on_equator(0.0), on_equator(120.0), on_equator(240.0)];
+        assert_eq!(fan_centre(&flat), None);
+        // and the same corners turned the other way round
+        assert_eq!(fan_centre(&[thin[2], thin[1], thin[0]]), None);
+        assert!(fan_centre(&equal_sides(116.0_f64.to_radians())).is_some());
+        let turned = equal_sides(116.0_f64.to_radians());
+        assert!(fan_centre(&[turned[2], turned[1], turned[0]]).is_some());
     }
 
     /// The octant of the unit sphere (contacts +x, +y, +z, pole at +x): every net point's

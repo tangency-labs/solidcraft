@@ -4242,6 +4242,587 @@ fn fold_at_a_tab_root_names_the_real_cause() {
     }
 }
 
+/// The U-shaped slot around a tongue: a 40 x 50 slot open toward -x, leaving a 35 x 40 tongue
+/// (x -10 .. 25, y -20 .. 20) joined to the plate along x = -10.
+const TONGUE_SLOT: [[f64; 2]; 8] =
+    [[-10.0, -25.0], [30.0, -25.0], [30.0, 25.0], [-10.0, 25.0], [-10.0, 20.0], [25.0, 20.0], [25.0, -20.0], [-10.0, -20.0]];
+
+/// The 120 x 80 plate of the folds below, centred on the origin, its top face z = 2.
+const AL2_PLATE: [[f64; 2]; 4] = [[-60.0, -40.0], [60.0, -40.0], [60.0, 40.0], [-60.0, 40.0]];
+
+/// A plate of 2 mm aluminium (T 2, R 2, K 0.43) on XY with the outline `outline`, less the
+/// closed loops `slots` and the round holes `holes` (centre, diameter) drawn in its sketch.
+fn al2_plate(s: &mut Session, outline: Value, slots: &[Value], holes: &[([f64; 2], f64)]) {
+    run(s, "sheet.manage_rules", json!({"name": "AL2", "thickness": "2", "bend_radius": "2", "k_factor": "0.43", "active": true}));
+    run(s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(s, "sketch.line", json!({"points": outline, "closed": true}));
+    for slot in slots {
+        run(s, "sketch.line", json!({"points": slot, "closed": true}));
+    }
+    for (center, d) in holes {
+        run(s, "sketch.circle.center", json!({"center": center, "diameter": d}));
+    }
+    run(s, "sketch.finish", json!({}));
+    // Profile 0 is the plate less its slots and holes: with no profile named, the flange would
+    // take a slot's own region too and fill it.
+    run(s, "sheet.flange", json!({"sketch": "Base", "profiles": [0]}));
+}
+
+/// [`AL2_PLATE`] with a tongue cut free on three sides by [`TONGUE_SLOT`]: as an inner loop of
+/// the base sketch (`in_sketch`), or by an extrude cut after the base flange. `rivet` adds a
+/// 3.3 mm hole in the tongue to the base sketch.
+fn tongue_plate(s: &mut Session, in_sketch: bool, rivet: bool) {
+    let slots = if in_sketch { vec![json!(TONGUE_SLOT)] } else { Vec::new() };
+    let holes: &[([f64; 2], f64)] = if rivet { &[([15.0, 0.0], 3.3)] } else { &[] };
+    al2_plate(s, json!(AL2_PLATE), &slots, holes);
+    if !in_sketch {
+        run(s, "sketch.create", json!({"plane": {"origin": [0, 0, 2], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Slot"}));
+        run(s, "sketch.line", json!({"points": TONGUE_SLOT, "closed": true}));
+        run(s, "sketch.finish", json!({}));
+        run(s, "solid.extrude", json!({"sketch": "Slot", "distance": "2", "direction": "reverse", "operation": "cut"}));
+    }
+}
+
+/// The tongue's root, 2 mm into the tongue: the 45° bend zone (2.246 mm wide at R 2, K 0.43)
+/// stays clear of the slot's corners.
+fn tongue_fold(flip: bool) -> Value {
+    json!({"points": [[-8, -15, 2], [-8, 15, 2]], "angle": "45 deg", "flip": flip})
+}
+
+/// A tongue cut free by a U-shaped slot folds alone: the fold bends the tongue at its root and
+/// leaves the plate around the slot flat, whichever way it turns and however the slot was cut.
+#[test]
+fn fold_a_tongue_cut_free_by_a_slot_folds_only_the_tongue() {
+    for in_sketch in [true, false] {
+        for flip in [false, true] {
+            let name = format!("slot in the sketch {in_sketch}, flip {flip}");
+            let mut s = Session::default();
+            tongue_plate(&mut s, in_sketch, false);
+            let (before, flat_before) = (volume(&mut s), flat(&mut s));
+            run(&mut s, "sheet.fold", tongue_fold(flip));
+            assert!(rel(volume(&mut s), before) < 1e-3, "{name}: a fold keeps the material");
+            let bb = bbox(&mut s);
+            let (lo, hi) = (&bb["min"], &bb["max"]);
+            // The plate keeps its whole length: the strip beyond the line (x 25 .. 60) stays flat.
+            assert!((hi[0].as_f64().unwrap() - 60.0).abs() < 1e-6, "{name}: the plate's far end stays: {bb}");
+            assert!((lo[0].as_f64().unwrap() + 60.0).abs() < 1e-6, "{name}: {bb}");
+            // The tongue (33 mm beyond the bend) rises or drops about 33 sin 45° = 23 mm.
+            let (zlo, zhi) = (lo[2].as_f64().unwrap(), hi[2].as_f64().unwrap());
+            if flip {
+                assert!(zlo < -20.0 && (zhi - 2.0).abs() < 1e-6, "{name}: the tongue drops: {bb}");
+            } else {
+                assert!(zhi > 20.0 && zlo.abs() < 1e-6, "{name}: the tongue rises: {bb}");
+            }
+            let f = flat(&mut s);
+            assert_eq!(f["bends"].as_array().map(Vec::len), Some(1), "{name}: {f}");
+            assert_eq!(f["flat_size_mm"], flat_before["flat_size_mm"], "{name}: the flat keeps its size");
+        }
+    }
+}
+
+/// With an edge flange on the plate, the tongue's fold doesn't run into the flange's bend.
+#[test]
+fn fold_a_tongue_cut_free_by_a_slot_beside_an_edge_flange() {
+    let mut s = Session::default();
+    tongue_plate(&mut s, true, false);
+    run(&mut s, "sheet.flange", json!({"type": "edge", "edges": [[0, 40, 2]], "height": "15", "angle": "90 deg"}));
+    let before = volume(&mut s);
+    run(&mut s, "sheet.fold", tongue_fold(false));
+    assert!(rel(volume(&mut s), before) < 1e-3, "a fold keeps the material");
+    let f = flat(&mut s);
+    assert_eq!(f["bends"].as_array().map(Vec::len), Some(2), "{f}");
+}
+
+/// A hole drawn inside the tongue stays a hole once the tongue is folded: the folded part has
+/// exactly the hole's volume (pi 1.65² x 2 = 17.1 mm³) less than the same part without it, and
+/// the flat pattern keeps it.
+#[test]
+fn fold_a_tongue_keeps_the_hole_in_it() {
+    let mut with = Session::default();
+    tongue_plate(&mut with, true, true);
+    let flat_before = flat(&mut with);
+    run(&mut with, "sheet.fold", tongue_fold(false));
+    let mut without = Session::default();
+    tongue_plate(&mut without, true, false);
+    run(&mut without, "sheet.fold", tongue_fold(false));
+    let hole = PI * 1.65 * 1.65 * 2.0;
+    let gone = volume(&mut without) - volume(&mut with);
+    assert!((gone - hole).abs() < 0.05, "the folded tongue has its hole: {gone} vs {hole}");
+    let f = flat(&mut with);
+    assert_eq!(f["cutouts"].as_array().map(Vec::len), flat_before["cutouts"].as_array().map(Vec::len), "{f}");
+}
+
+/// The folded tongue unfolds to the flat plate and folds back to the same part.
+#[test]
+fn fold_a_tongue_unfolds_and_refolds() {
+    let mut s = Session::default();
+    tongue_plate(&mut s, true, false);
+    let before = volume(&mut s);
+    run(&mut s, "sheet.fold", tongue_fold(false));
+    let (folded, folded_box) = (volume(&mut s), bbox(&mut s));
+    run(&mut s, "sheet.unfold", json!({}));
+    let flat_box = bbox(&mut s);
+    assert!(rel(volume(&mut s), before) < 1e-3, "unfolded: {}", volume(&mut s));
+    assert!((flat_box["max"][2].as_f64().unwrap() - 2.0).abs() < 1e-6, "unfolded flat: {flat_box}");
+    run(&mut s, "sheet.refold", json!({}));
+    assert!(rel(volume(&mut s), folded) < 1e-9, "refolded: {}", volume(&mut s));
+    assert_eq!(bbox(&mut s), folded_box, "refolded");
+}
+
+/// Two tongues one past the other along x, the same width (#9245): folding the far one, then the
+/// near one, gives the part folding them the other way round does. The far tongue's bend lies
+/// past the near one's zone, inside its reach along the line, and stays on the plate.
+#[test]
+fn fold_two_tongues_one_past_the_other_in_either_order() {
+    let near = json!([[-45, -15], [-20, -15], [-20, 15], [-45, 15], [-45, 10], [-25, 10], [-25, -10], [-45, -10]]);
+    let far = json!([[0, -15], [25, -15], [25, 15], [0, 15], [0, 10], [20, 10], [20, -10], [0, -10]]);
+    let (near_line, far_line) = (json!([[-43, -5, 2], [-43, 5, 2]]), json!([[2, -5, 2], [2, 5, 2]]));
+    let fold_both = |lines: [&Value; 2]| {
+        let mut s = Session::default();
+        al2_plate(&mut s, json!(AL2_PLATE), &[near.clone(), far.clone()], &[]);
+        let before = volume(&mut s);
+        for points in lines {
+            run(&mut s, "sheet.fold", json!({"points": points, "fixed": [-55, 30, 2], "angle": "45 deg"}));
+        }
+        assert!(rel(volume(&mut s), before) < 1e-3, "a fold keeps the material");
+        let bends = flat(&mut s)["bends"].as_array().map_or(0, Vec::len);
+        (bbox(&mut s), bends)
+    };
+    let (a, bends_a) = fold_both([&near_line, &far_line]);
+    let (b, bends_b) = fold_both([&far_line, &near_line]);
+    assert_eq!((bends_a, bends_b), (2, 2));
+    // The plate stays flat to its far end, each tongue rising about 18 sin 45° above it.
+    assert!(at(coord(&a, "max", 0), 60.0) && coord(&a, "max", 2) > 12.0, "{a}");
+    assert!(same_box(&a, &b), "the order of the folds changes nothing: {a} vs {b}");
+}
+
+/// Two tongues facing each other (card guides in a tray): the first one's bend, on the plate at
+/// the corner of its slot, lies within the second one's reach along its line, past its zone. It
+/// stays with the plate, held by the plate's material there, and doesn't turn with the second.
+#[test]
+fn fold_two_tongues_facing_each_other_in_either_order() {
+    // Sizes where the bend's anchor lies exactly on the plate's corner by the slot (the tongues
+    // 24 wide on a plate 100 deep), so that no nudge along the line or across it lands in material.
+    let near = json!([[-45, -17], [-20, -17], [-20, 17], [-45, 17], [-45, 12], [-25, 12], [-25, -12], [-45, -12]]);
+    let far = json!([[45, -17], [20, -17], [20, 17], [45, 17], [45, 12], [25, 12], [25, -12], [45, -12]]);
+    let (near_line, far_line) = (json!([[-43, -5, 2], [-43, 5, 2]]), json!([[43, -5, 2], [43, 5, 2]]));
+    let fold_both = |lines: [&Value; 2]| {
+        let mut s = Session::default();
+        al2_plate(&mut s, json!([[-60, -50], [60, -50], [60, 50], [-60, 50]]), &[near.clone(), far.clone()], &[]);
+        for points in lines {
+            run(&mut s, "sheet.fold", json!({"points": points, "fixed": [0, 30, 2], "angle": "45 deg"}));
+        }
+        bbox(&mut s)
+    };
+    let (a, b) = (fold_both([&near_line, &far_line]), fold_both([&far_line, &near_line]));
+    // The plate stays flat to both ends, each tongue rising about 18 sin 45° above it.
+    for x in [&a, &b] {
+        assert!(at(coord(x, "min", 0), -60.0) && at(coord(x, "max", 0), 60.0), "{x}");
+        assert!(coord(x, "max", 2) > 12.0 && coord(x, "max", 2) < 18.0, "{x}");
+    }
+    assert!(same_box(&a, &b), "the order of the folds changes nothing: {a} vs {b}");
+}
+
+/// A fold line at the tongue slot's open end puts the slot's corners inside the bend zone: the
+/// fold is refused, naming a corner and how far to move the line, and the sheet is unchanged.
+#[test]
+fn fold_at_a_tongue_slots_end_names_its_corner() {
+    let mut s = Session::default();
+    tongue_plate(&mut s, true, false);
+    let before = s.doc.to_json();
+    let e =
+        s.execute("sheet.fold", &json!({"points": [[-10, -15, 2], [-10, 15, 2]], "fixed": [-40, 0, 2], "angle": "45 deg"})).unwrap_err().to_string();
+    assert!(e.contains("reaches a corner") && e.contains("move the fold line"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+/// A row of slots on the fold's line (a perforated bend line, 11 chords), the line drawn across
+/// the first chord only: the plate runs round every slot, so no fewer chords part it, and the
+/// plate's whole width folds.
+#[test]
+fn fold_drawn_partway_along_a_perforated_line_bends_it_all() {
+    let slots: Vec<Value> = (0..10)
+        .map(|k| {
+            let c = -36.0 + 8.0 * k as f64;
+            json!([[-3.0, c - 1.5], [3.0, c - 1.5], [3.0, c + 1.5], [-3.0, c + 1.5]])
+        })
+        .collect();
+    let (bb, _) = al2_fold(json!(AL2_PLATE), &slots, &[], json!([[0, -40, 2], [0, -38, 2]]), json!([-30, 0, 2]));
+    assert!(coord(&bb, "max", 0) < 59.0 && at(coord(&bb, "min", 1), -40.0) && at(coord(&bb, "max", 1), 40.0), "{bb}");
+}
+
+/// A hole cut by an extrude on the side that folds, clear of the bend, goes with the panel that
+/// folds as a hole drawn in the base sketch does: the same part, and the flat keeps its cut-outs.
+#[test]
+fn fold_carries_a_hole_cut_after_the_base_flange() {
+    let fold = json!({"points": [[0, -40, 2], [0, 40, 2]], "fixed": [-30, 0, 2], "angle": "45 deg"});
+    let mut drawn = Session::default();
+    al2_plate(&mut drawn, json!(AL2_PLATE), &[], &[([30.0, 0.0], 10.0)]);
+    run(&mut drawn, "sheet.fold", fold.clone());
+    let mut cut = Session::default();
+    al2_plate(&mut cut, json!(AL2_PLATE), &[], &[]);
+    run(&mut cut, "sketch.create", json!({"plane": {"origin": [0, 0, 2], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Hole"}));
+    run(&mut cut, "sketch.circle.center", json!({"center": [30, 0], "diameter": 10}));
+    run(&mut cut, "sketch.finish", json!({}));
+    run(&mut cut, "solid.extrude", json!({"sketch": "Hole", "distance": "2", "direction": "reverse", "operation": "cut"}));
+    let cutouts_before = flat(&mut cut)["cutouts"].as_array().map(Vec::len);
+    run(&mut cut, "sheet.fold", fold);
+    assert!(rel(volume(&mut cut), volume(&mut drawn)) < 1e-6, "{} vs {}", volume(&mut cut), volume(&mut drawn));
+    assert!(same_box(&bbox(&mut cut), &bbox(&mut drawn)));
+    assert_eq!(flat(&mut cut)["cutouts"].as_array().map(Vec::len), cutouts_before, "the flat keeps the hole");
+}
+
+/// A fold drawn wholly along a slit on its line (a relieved bend: the plate bends at the bridges
+/// past the slit's ends) bends the whole line, as it did before chords (#9245), and a rectangular
+/// hole ending inside the zone is cut from it rather than refused.
+#[test]
+fn fold_along_a_slit_or_past_a_square_holes_end_bends_the_whole_line() {
+    let slit = [json!([[-1, -30], [1, -30], [1, 30], [-1, 30]])];
+    let (bb, _) = al2_fold(json!(AL2_PLATE), &slit, &[], json!([[0, -20, 2], [0, 20, 2]]), json!([-30, 0, 2]));
+    assert!(coord(&bb, "max", 0) < 59.0 && at(coord(&bb, "min", 1), -40.0) && at(coord(&bb, "max", 1), 40.0), "along the slit: {bb}");
+    let hole = [json!([[-10, -5], [0.5, -5], [0.5, 5], [-10, 5]])];
+    let (bb, _) = al2_fold(json!(AL2_PLATE), &hole, &[], json!([[0, -40, 2], [0, 40, 2]]), json!([-30, 0, 2]));
+    assert!(coord(&bb, "max", 0) < 59.0, "past the hole's end: {bb}");
+}
+
+/// A fold drawn wholly inside a hole on its line takes the stretches either side of the hole: the
+/// plate's whole width folds, as for the line drawn across it.
+#[test]
+fn fold_drawn_inside_a_hole_bends_either_side_of_it() {
+    let hole: &[([f64; 2], f64)] = &[([0.0, 0.0], 20.0)];
+    let (inside, _) = al2_fold(json!(AL2_PLATE), &[], hole, json!([[0, -5, 2], [0, 5, 2]]), json!([-30, 0, 2]));
+    let (across, _) = al2_fold(json!(AL2_PLATE), &[], hole, json!([[0, -15, 2], [0, 15, 2]]), json!([-30, 0, 2]));
+    assert!(same_box(&inside, &across), "{inside} vs {across}");
+}
+
+/// The fixed point on the tongue a fold frees: the tongue can't stay still while the plate round
+/// it runs back across the line, so the fold is refused, naming the fixed point.
+#[test]
+fn fold_with_its_fixed_point_on_the_tongue_is_refused() {
+    let mut s = Session::default();
+    tongue_plate(&mut s, true, false);
+    let e = s.execute("sheet.fold", &json!({"points": [[-8, -15, 2], [-8, 15, 2]], "fixed": [10, 0, 2], "angle": "45 deg"})).unwrap_err().to_string();
+    assert!(e.contains("fixed point lies on a piece the fold frees"), "{e}");
+    // The fixed point on the tongue just past the line, inside the tongue's bend zone (x -9.12 …
+    // -6.88 at 45°): the bend would turn the material there, so it is refused the same way.
+    let e =
+        s.execute("sheet.fold", &json!({"points": [[-8, -15, 2], [-8, 15, 2]], "fixed": [-7.5, 0, 2], "angle": "45 deg"})).unwrap_err().to_string();
+    assert!(e.contains("fixed point lies on a piece the fold frees"), "{e}");
+}
+
+/// A plate cut by a sketch drawn on its top face after the base flange: each closed loop of
+/// `loops` is cut through.
+fn al2_cut_after(s: &mut Session, loops: &[Value]) {
+    for (k, l) in loops.iter().enumerate() {
+        let name = format!("Cut{k}");
+        run(s, "sketch.create", json!({"plane": {"origin": [0, 0, 2], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": name}));
+        run(s, "sketch.line", json!({"points": l, "closed": true}));
+        run(s, "sketch.finish", json!({}));
+        run(s, "solid.extrude", json!({"sketch": name, "distance": "2", "direction": "reverse", "operation": "cut"}));
+    }
+}
+
+/// Folds the chords of the line no longer refuse (#9245): a small tongue in the tab beside the one
+/// folded, its tip inside the zone (material only one side of the zone holds, on a stretch the
+/// line doesn't bend), and two diamond cut-outs meeting at a point on the line (slivers between
+/// them that cross no stretch of it). Both folded before chords.
+#[test]
+fn fold_past_zone_material_one_side_holds() {
+    let tabs =
+        json!([[-60, -40], [60, -40], [60, 40], [40, 40], [40, 60], [20, 60], [20, 40], [-20, 40], [-20, 60], [-40, 60], [-40, 40], [-60, 40]]);
+    let tip = json!([[26, 42], [26, 51], [34, 51], [34, 42], [33, 42], [33, 50], [27, 50], [27, 42]]);
+    let (bb, bends) = al2_fold(tabs, &[tip], &[], json!([[-40, 50, 2], [-20, 50, 2]]), json!([0, 0, 2]));
+    assert!(bends == 1 && at(coord(&bb, "max", 1), 60.0) && coord(&bb, "max", 2) > 5.0, "tab A alone: {bends}: {bb}");
+    let mut s = Session::default();
+    al2_plate(&mut s, json!(AL2_PLATE), &[], &[]);
+    al2_cut_after(&mut s, &[json!([[0, -10], [5, -5], [0, 0], [-5, -5]]), json!([[0, 0], [5, 5], [0, 10], [-5, 5]])]);
+    let before = volume(&mut s);
+    run(&mut s, "sheet.fold", json!({"points": [[0, -40, 2], [0, 40, 2]], "angle": "45 deg", "fixed": [-30, 0, 2]}));
+    assert!(rel(volume(&mut s), before) < 1e-3 && coord(&bbox(&mut s), "max", 0) < 59.0, "the diamonds' plate folds");
+}
+
+/// A fold line drawn off the plate (past its edge on the line's continuation, or in the gap
+/// between two tabs) crosses no material: refused, as before chords, and the sheet unchanged.
+#[test]
+fn fold_drawn_off_the_panel_is_refused() {
+    let tabs =
+        json!([[-60, -40], [60, -40], [60, 40], [40, 40], [40, 60], [20, 60], [20, 40], [-20, 40], [-20, 60], [-40, 60], [-40, 40], [-60, 40]]);
+    for (outline, points, fixed) in
+        [(json!(AL2_PLATE), json!([[0, 50, 2], [0, 70, 2]]), json!([-30, 0, 2])), (tabs, json!([[-10, 50, 2], [10, 50, 2]]), json!([0, 0, 2]))]
+    {
+        let mut s = Session::default();
+        al2_plate(&mut s, outline, &[], &[]);
+        let before = s.doc.to_json();
+        assert!(s.execute("sheet.fold", &json!({"points": points, "fixed": fixed, "angle": "45 deg"})).is_err(), "{points}");
+        assert_eq!(s.doc.to_json(), before, "{points}");
+    }
+}
+
+/// Two folds that would lose material are refused, and the sheet left as it was: three tabs on
+/// the top edge, the middle one short so its tip ends inside the zone, the line across all three
+/// (the tip lies between the outer tabs' bends, in neither's zone); and the plate folded across
+/// the slot of a tongue folded before (the gap in the new zone is cut from the flat, where the
+/// tongue lies in its slot).
+#[test]
+fn fold_that_would_lose_material_is_refused() {
+    let tabs = json!([
+        [-60, -40],
+        [60, -40],
+        [60, 40],
+        [50, 40],
+        [50, 60],
+        [30, 60],
+        [30, 40],
+        [10, 40],
+        [10, 50.5],
+        [-10, 50.5],
+        [-10, 40],
+        [-30, 40],
+        [-30, 60],
+        [-50, 60],
+        [-50, 40],
+        [-60, 40]
+    ]);
+    let mut s = Session::default();
+    al2_plate(&mut s, tabs, &[], &[]);
+    let before = s.doc.to_json();
+    let e = s.execute("sheet.fold", &json!({"points": [[-50, 50, 2], [50, 50, 2]], "fixed": [0, 0, 2], "angle": "45 deg"})).unwrap_err().to_string();
+    assert!(e.contains("only one side of the bend holds"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+
+    let mut s = Session::default();
+    tongue_plate(&mut s, true, false);
+    run(&mut s, "sheet.fold", json!({"points": [[-8, -15, 2], [-8, 15, 2]], "fixed": [-40, 0, 2], "angle": "45 deg"}));
+    let before = s.doc.to_json();
+    let e =
+        s.execute("sheet.fold", &json!({"points": [[10, -40, 2], [10, 40, 2]], "fixed": [-50, 0, 2], "angle": "45 deg"})).unwrap_err().to_string();
+    assert!(e.contains("where a part folded before lies in the flat pattern"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+/// A slit cut slanting in from the top edge to past the fold's line (it crosses the line at
+/// x 10 .. 10.5): drawn from the left edge up to the slit, or short of it, the line takes the
+/// flap left of it alone, by where the slit crosses the line itself; drawn across the plate, the
+/// flap and the plate right of it would bend on zones lying beside each other along the line,
+/// which is refused.
+#[test]
+fn fold_beside_a_slanted_slit() {
+    let slit = json!([[-60, -40], [60, -40], [60, 40], [50.5, 40], [0.5, -10], [0, -10], [50, 40], [-60, 40]]);
+    for to in [10.0, 9.3] {
+        let (bb, bends) = al2_fold(slit.clone(), &[], &[], json!([[-60, 0, 2], [to, 0, 2]]), json!([0, -30, 2]));
+        assert!(bends == 1 && at(coord(&bb, "max", 1), 40.0) && coord(&bb, "max", 2) > 20.0, "to {to}, the flap alone: {bends}: {bb}");
+    }
+    let mut s = Session::default();
+    al2_plate(&mut s, slit, &[], &[]);
+    let e = s.execute("sheet.fold", &json!({"points": [[-60, 0, 2], [60, 0, 2]], "fixed": [0, -30, 2], "angle": "45 deg"})).unwrap_err().to_string();
+    assert!(e.contains("lie beside each other along it"), "{e}");
+    // A fold at its `start` or `end` puts the line on an edge of the zone, where the slit is not
+    // where it is in the zone's middle: drawn from the right edge to just right of the slit on
+    // the line (x 10.5), it takes the plate right of the slit alone.
+    for position in ["start", "end"] {
+        let mut s = Session::default();
+        al2_plate(&mut s, json!([[-60, -40], [60, -40], [60, 40], [50.5, 40], [0.5, -10], [0, -10], [50, 40], [-60, 40]]), &[], &[]);
+        let before = volume(&mut s);
+        run(&mut s, "sheet.fold", json!({"points": [[60, 0, 2], [10.6, 0, 2]], "fixed": [0, -30, 2], "angle": "45 deg", "position": position}));
+        assert!(rel(volume(&mut s), before) < 1e-3, "{position}: a fold keeps the material");
+        let bends = flat(&mut s)["bends"].as_array().map_or(0, Vec::len);
+        let bb = bbox(&mut s);
+        assert!(
+            bends == 1 && at(coord(&bb, "min", 0), -60.0) && coord(&bb, "max", 2) > 20.0,
+            "{position}: the plate right of the slit alone: {bends}: {bb}"
+        );
+    }
+}
+
+/// A bar held to the plate by two bridges across the fold's line, with 16 tabs off the plate
+/// beside the drawn bridge, nearer it than the far bridge: more chords than are tried in every
+/// combination. The line drawn on the near bridge bends the two bridges alone; the tabs, which
+/// part nothing the bar needs, stay flat.
+#[test]
+fn fold_past_many_tabs_bends_only_the_chords_that_part_the_panel() {
+    let mut outline =
+        vec![json!([-110, -30]), json!([110, -30]), json!([110, 20]), json!([-110, 20]), json!([-110, 3]), json!([-38, 3]), json!([-38, -3])];
+    for i in (0..16).rev() {
+        let x = -104.0 + 4.0 * f64::from(i);
+        outline.extend([json!([x + 2.0, -3]), json!([x + 2.0, 2]), json!([x, 2]), json!([x, -3])]);
+    }
+    outline.push(json!([-110, -3]));
+    let slot = json!([[-32, -3], [96, -3], [96, 3], [-32, 3]]);
+    let (bb, bends) = al2_fold(json!(outline), &[slot], &[], json!([[-37, 0, 2], [-33, 0, 2]]), json!([0, -20, 2]));
+    assert!(bends == 2 && coord(&bb, "max", 2) > 10.0, "the two bridges alone: {bends}: {bb}");
+}
+
+/// A round hole reaching into a straight-ended bend's zone leaves the zone's ends on the plate's
+/// edges: the bend runs the plate's width exactly, as before chords.
+#[test]
+fn fold_by_a_hole_in_its_zone_keeps_the_zones_ends() {
+    let mut s = Session::default();
+    al2_plate(&mut s, json!(AL2_PLATE), &[], &[([45.0, 0.0], 6.0)]);
+    run(&mut s, "sheet.fold", json!({"points": [[40, -40, 2], [40, 40, 2]], "angle": "90 deg", "fixed": [-30, 0, 2]}));
+    let f = flat(&mut s);
+    let zone = f["bend_zones"][0].clone();
+    let ys: Vec<f64> = zone.as_array().map(|v| v.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
+    assert!(ys.len() == 4 && at(ys[2], -40.0) && at(ys[3], 40.0), "{zone}");
+}
+
+/// The flat of #11903's collar: a 200 x 150 plate of 0.8 mm GI (T 0.8, R 0.5, K 0.44) with a
+/// 70 x 50 opening and four 0.5 mm slits running diagonally from its corners to the corners of
+/// the 100 x 80 bend-line rectangle, and `past` mm on beyond them. Its top face is z = 0.8.
+fn collar_plate(s: &mut Session, past: f64) {
+    run(s, "sheet.manage_rules", json!({"name": "GI_0.8T", "thickness": "0.8", "bend_radius": "0.5", "k_factor": "0.44", "active": true}));
+    run(s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(s, "sketch.line", json!({"points": [[-100, -75], [100, -75], [100, 75], [-100, 75]], "closed": true}));
+    // One loop: the opening, each corner running out along its slit and back.
+    let mut opening = Vec::new();
+    for (cx, cy) in [(-35.0_f64, -25.0_f64), (35.0, -25.0), (35.0, 25.0), (-35.0, 25.0)] {
+        let (sx, sy) = (cx.signum(), cy.signum());
+        let (dx, dy) = (sx / 2f64.sqrt(), sy / 2f64.sqrt());
+        let (px, py) = (-dy * 0.25, dx * 0.25);
+        let reach = 15.0 * 2f64.sqrt() + past;
+        let (ex, ey) = (cx + dx * reach, cy + dy * reach);
+        opening.extend([[cx - px, cy - py], [ex - px, ey - py], [ex + px, ey + py], [cx + px, cy + py]]);
+    }
+    run(s, "sketch.line", json!({"points": opening, "closed": true}));
+    run(s, "sketch.finish", json!({}));
+    run(s, "sheet.flange", json!({"sketch": "Base", "profiles": [0]}));
+}
+
+/// #11903's Fold route: with its slits running on past the bend lines, each of the four tabs
+/// round the opening folds up alone on its own line, the fixed point on the plate beside it, and
+/// the four make the collar while the plate stays flat.
+#[test]
+fn fold_raises_a_collar_round_an_opening_tab_by_tab() {
+    let mut s = Session::default();
+    collar_plate(&mut s, 2.0);
+    let before = volume(&mut s);
+    for points in [
+        json!([[-50, -40, 0.8], [50, -40, 0.8]]),
+        json!([[-50, 40, 0.8], [50, 40, 0.8]]),
+        json!([[-50, -40, 0.8], [-50, 40, 0.8]]),
+        json!([[50, -40, 0.8], [50, 40, 0.8]]),
+    ] {
+        run(&mut s, "sheet.fold", json!({"points": points, "angle": "90 deg", "fixed": [-80, 0, 0.8]}));
+    }
+    // Each 90° bend holds π/4 ((R + T)² − R²) = 1.131 mm³ per mm of its length where the flat
+    // strip it came from, (R + K T) π/2 long, held 1.071: 0.060 mm³ more per mm, over the four
+    // lines' 2 x 100 + 2 x 80 mm (each a slit's width less, inside the 3 %).
+    let (r, t, k) = (0.5, 0.8, 0.44);
+    let quarter = std::f64::consts::FRAC_PI_2;
+    let per_mm = quarter / 2.0 * ((r + t) * (r + t) - r * r) - (r + k * t) * quarter * t;
+    let grown = volume(&mut s) - before;
+    assert!(rel(grown, per_mm * 360.0) < 0.03, "the folds keep the material: {grown} mm³ more");
+    let bb = bbox(&mut s);
+    // The plate flat to its edges; each tab about 15 mm (its flat width) up.
+    assert!(at(coord(&bb, "min", 0), -100.0) && at(coord(&bb, "max", 0), 100.0), "{bb}");
+    assert!(at(coord(&bb, "min", 1), -75.0) && at(coord(&bb, "max", 1), 75.0), "{bb}");
+    assert!(coord(&bb, "max", 2) > 14.0 && coord(&bb, "max", 2) < 17.0, "{bb}");
+    assert_eq!(flat(&mut s)["bends"].as_array().map_or(0, Vec::len), 4);
+}
+
+/// The collar as #11903 draws it, each slit ending on the bend line: the slit's end lies in the
+/// bend zone, so the fold is refused naming that corner and how far to move the line, whichever
+/// side the fixed point lies on (on the tab's side, the other side's own reason, not that the
+/// fixed side falls apart), and the sheet is unchanged.
+#[test]
+fn fold_of_a_collar_tab_whose_slits_end_on_its_line_names_the_slits_end() {
+    for fixed in [json!([-80, 0, 0.8]), json!([0, -60, 0.8])] {
+        let mut s = Session::default();
+        collar_plate(&mut s, 0.0);
+        let before = s.doc.to_json();
+        let e = s
+            .execute("sheet.fold", &json!({"points": [[-50, -40, 0.8], [50, -40, 0.8]], "angle": "90 deg", "fixed": fixed}))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("reaches a corner of a cut-out") && e.contains("move the fold line"), "{fixed}: {e}");
+        assert_eq!(s.doc.to_json(), before);
+    }
+}
+
+/// A 45° fold on an AL2 plate drawn as `al2_plate` takes it: the material is kept, and the
+/// part's bounding box and its flat's bend count are returned.
+fn al2_fold(outline: Value, slots: &[Value], holes: &[([f64; 2], f64)], points: Value, fixed: Value) -> (Value, usize) {
+    let mut s = Session::default();
+    al2_plate(&mut s, outline, slots, holes);
+    let before = volume(&mut s);
+    run(&mut s, "sheet.fold", json!({"points": points, "fixed": fixed, "angle": "45 deg"}));
+    assert!(rel(volume(&mut s), before) < 1e-3, "a fold keeps the material: {points}");
+    let bends = flat(&mut s)["bends"].as_array().map_or(0, Vec::len);
+    (bbox(&mut s), bends)
+}
+
+fn coord(bb: &Value, end: &str, axis: usize) -> f64 {
+    bb[end][axis].as_f64().unwrap_or(f64::NAN)
+}
+
+/// Whether `x` is `to`, to a rounding.
+fn at(x: f64, to: f64) -> bool {
+    (x - to).abs() < 1e-6
+}
+
+/// Whether two bounding boxes are the same, to a rounding.
+fn same_box(a: &Value, b: &Value) -> bool {
+    ["min", "max"].iter().all(|e| (0..3).all(|k| at(coord(a, e, k), coord(b, e, k))))
+}
+
+/// Which stretches of a fold's line bend, as the line meets the plate's cut-outs (#9245): the
+/// line drawn partway across a plain plate, or across a hole on it, bends the plate's whole
+/// width; drawn from the edge up to that hole it carries on across the hole, as the material
+/// runs round it; drawn up to a slot from the plate's edge, it bends the flap beside the slot
+/// alone.
+#[test]
+fn fold_bends_the_stretches_of_its_line_the_cut_outs_part() {
+    let fixed = json!([-30, 0, 2]);
+    // The +x half folds: the plate no longer reaches x = 60.
+    let (bb, bends) = al2_fold(json!(AL2_PLATE), &[], &[], json!([[0, -10, 2], [0, 10, 2]]), fixed.clone());
+    assert!(bends == 1 && coord(&bb, "max", 0) < 59.0 && at(coord(&bb, "min", 1), -40.0) && at(coord(&bb, "max", 1), 40.0), "{bends}: {bb}");
+    let hole: &[([f64; 2], f64)] = &[([0.0, 0.0], 20.0)];
+    let (across, bends) = al2_fold(json!(AL2_PLATE), &[], hole, json!([[0, -15, 2], [0, 15, 2]]), fixed.clone());
+    // One bend, its zone in two stretches beside the hole: the flat lists each stretch's line.
+    assert!(bends == 2 && coord(&across, "max", 0) < 59.0, "across the hole: {bends}: {across}");
+    let (up_to, bends) = al2_fold(json!(AL2_PLATE), &[], hole, json!([[0, -40, 2], [0, -12, 2]]), fixed);
+    assert!(bends == 2 && same_box(&up_to, &across), "from the edge up to the hole, the bend carries on across it: {bends}: {up_to} vs {across}");
+    // A 4 mm slot in from the top edge down to y = -10; the line y = 0 from the left edge up to
+    // it. The flap x -60 .. 10 folds, the plate right of the slot stays flat up to y = 40.
+    let notched = json!([[-60, -40], [60, -40], [60, 40], [14, 40], [14, -10], [10, -10], [10, 40], [-60, 40]]);
+    let (bb, bends) = al2_fold(notched, &[], &[], json!([[-60, 0, 2], [8, 0, 2]]), json!([0, -30, 2]));
+    assert!(bends == 1 && at(coord(&bb, "max", 1), 40.0) && coord(&bb, "max", 2) > 20.0, "the flap beside the slot: {bends}: {bb}");
+    // Two tabs on the top edge, the line across one: the other stays flat (#264).
+    let tabs =
+        json!([[-60, -40], [60, -40], [60, 40], [40, 40], [40, 60], [20, 60], [20, 40], [-20, 40], [-20, 60], [-40, 60], [-40, 40], [-60, 40]]);
+    let (bb, bends) = al2_fold(tabs, &[], &[], json!([[-40, 50, 2], [-20, 50, 2]]), json!([0, 0, 2]));
+    assert!(bends == 1 && at(coord(&bb, "max", 1), 60.0) && coord(&bb, "max", 2) > 5.0, "one of two tabs: {bends}: {bb}");
+}
+
+/// A fold line across the tongue's slot (#9245): drawn across the tongue's root only, the tongue
+/// folds alone. Drawn the plate's full length, or across the tongue and the strip past one side of
+/// the slot (that strip can't part from the plate, which runs round the slot, so the bend carries
+/// on across the other strip), the tongue and the ring of plate round the slot should fold, each
+/// on its own bend: not supported yet, so refused for now (see `FOLD_ROUND_MATERIAL`).
+#[test]
+fn fold_across_a_tongue_slot_folds_the_tongue_and_refuses_the_ring_round_it_for_now() {
+    let slot = [json!(TONGUE_SLOT)];
+    let fixed = json!([-40, 0, 2]);
+    let (bb, bends) = al2_fold(json!(AL2_PLATE), &slot, &[], json!([[-8, -15, 2], [-8, 15, 2]]), fixed.clone());
+    assert!(bends == 1 && at(coord(&bb, "max", 0), 60.0) && coord(&bb, "max", 2) > 20.0, "the tongue alone: {bends}: {bb}");
+    // The ring hangs from the chords either side of the tongue's root, which bends on its own:
+    // one bend over all three would lie over the tongue's, two would close a ring of bends.
+    // Refused for now, the same for the full-length line and for the line the bend carries on
+    // from, and the sheet left as it was.
+    for (points, in_sketch) in [
+        (json!([[-8, -40, 2], [-8, 40, 2]]), true),
+        (json!([[-8, -15, 2], [-8, 40, 2]]), true),
+        (json!([[-8, -40, 2], [-8, 40, 2]]), false),
+        (json!([[-8, -15, 2], [-8, 40, 2]]), false),
+    ] {
+        let mut s = Session::default();
+        tongue_plate(&mut s, in_sketch, false);
+        let before = s.doc.to_json();
+        let e = s.execute("sheet.fold", &json!({"points": points, "fixed": fixed, "angle": "45 deg"})).unwrap_err().to_string();
+        assert!(e.contains("runs round another piece"), "{points}, slot in the sketch {in_sketch}: {e}");
+        assert_eq!(s.doc.to_json(), before, "{points}");
+    }
+}
+
 /// Two tabs on a 100 x 50 base's top edge, case 262's sheet (0.8 thick, R 0.8, K 0.44), the fold
 /// line y = 60 drawn across tab A (x 10…30, y 50…70) only. Tab B beside it on the same line steps
 /// in at y = 60 (x 60…90 below the step, 55…90 above), so the zone, y = 60 ± BA/2, holds two of
