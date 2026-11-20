@@ -1573,7 +1573,7 @@ impl Body {
                 let mut segs = Vec::new();
                 for u in edges {
                     let e = self.record.edges.get(u.edge as usize).ok_or_else(|| KernelError::Invalid("edge reference".into()))?;
-                    let pts = edge_points(e, chord)?;
+                    let pts = edge_points(e, edge_chord(e, chord))?;
                     segs.extend(pts.windows(2).filter_map(|q| Some((flat(*q.first()?), flat(*q.get(1)?)))));
                 }
                 total = total.saturating_add(segs.len());
@@ -2086,6 +2086,18 @@ impl Body {
         }
         Ok(contacts)
     }
+}
+
+/// `chord`, or a thousandth of the edge's own extent where that is finer: the body's size says
+/// nothing of how finely a small edge on a large body must be followed (a 1 mm chord on a 1 m body
+/// draws a Ø0.9 mm circle as two segments over its diameter, which cross a notch beside it, #19687).
+fn edge_chord(e: &brep::Edge, chord: f64) -> f64 {
+    let mut b = Aabb3::EMPTY;
+    curve_hull(e.parameters(), e.interval, &mut b);
+    if b.is_empty() {
+        return chord;
+    }
+    chord.min((b.diagonal() * 1e-3).max(1e-9))
 }
 
 /// Points of an edge's curve over its interval, within `chord` of it: lines by their ends, the
