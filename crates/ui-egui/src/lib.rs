@@ -3551,6 +3551,14 @@ impl SolveApp {
     }
 
     /// Say what a design's signature check found (a `doc.open {verify: true}` or `file.verify`).
+    /// With the experimental file kinds on (#6892): an opened file whose extension names another
+    /// kind of design than its header, which wins. `doc.open` words the note.
+    pub(crate) fn say_kind_note(&mut self, result: &serde_json::Value) {
+        if let Some(note) = result.get("kind_note").and_then(serde_json::Value::as_str) {
+            self.set_status(note.to_string(), false);
+        }
+    }
+
     pub(crate) fn say_signature(&mut self, result: &serde_json::Value) {
         let Some(signature) = result.get("signature") else { return };
         let status = signature.get("status").and_then(serde_json::Value::as_str).unwrap_or("");
@@ -3637,6 +3645,7 @@ impl SolveApp {
         self.say_newer_file();
         self.say_plugin_data();
         self.say_signature(&r);
+        self.say_kind_note(&r);
         Ok(())
     }
 

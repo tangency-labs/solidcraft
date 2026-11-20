@@ -688,8 +688,13 @@ fn reuse_open(app: &mut SolveApp, request: &Request) -> bool {
                 crate::verify_job::start_after_reuse(app);
             }
             let s = &app.session;
-            request.answer(Ok(json!({"path": request.path, "features": s.doc.features.len(),
-                "errors": s.model.results.iter().filter(|r| r.error.is_some()).count(), "name": s.doc.name})));
+            let mut reply = json!({"path": request.path, "features": s.doc.features.len(),
+                "errors": s.model.results.iter().filter(|r| r.error.is_some()).count(), "name": s.doc.name});
+            // The kind of design its file holds, as `doc.open` says it (#6892).
+            if s.design_kind != solidcraft_engine::io::DesignKind::Single {
+                reply["kind"] = json!(s.design_kind.name());
+            }
+            request.answer(Ok(reply));
             true
         }
         Err(e) => {
@@ -1850,6 +1855,7 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                         app.say_newer_file();
                         app.say_plugin_data();
                         app.say_signature(&made.result);
+                        app.say_kind_note(&made.result);
                     } else if request.note.is_none()
                         && let Some(note) = linked_signing_note(&request.path)
                     {

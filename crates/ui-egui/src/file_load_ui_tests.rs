@@ -1537,3 +1537,26 @@ fn an_opened_files_import_warnings_are_said_on_the_web_as_on_the_desktop() {
     assert_eq!(desktop.app.status.as_ref().map(|s| (s.0.as_str(), s.2)), Some((warned, false)));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A renamed file opens as the kind its header says, and with the experimental file kinds on the
+/// status line says so (#6892).
+#[test]
+fn a_renamed_kind_file_opens_with_a_note_on_its_kind() {
+    solidcraft_engine::set_experimental_file_kinds(true);
+    let dir = scratch("renamed_kind");
+    let mut part = Session::default();
+    part.execute("solid.box", &json!({"length": 2, "width": 3, "height": 4})).unwrap();
+    let saved = dir.join("bracket.scprt");
+    part.execute("file.save", &json!({"path": saved.to_string_lossy()})).unwrap();
+    let renamed = dir.join("bracket.scasm");
+    std::fs::copy(&saved, &renamed).unwrap();
+    let mut app = SolveApp::new(Session::default(), Default::default());
+
+    app.open_path(&renamed.to_string_lossy());
+
+    let (text, _, error) = app.status.clone().unwrap();
+    assert!(text.contains("holds a part: it opened as a part"), "{text}");
+    assert!(!error);
+    assert_eq!(app.session.design_kind, solidcraft_engine::io::DesignKind::Part);
+    let _ = std::fs::remove_dir_all(&dir);
+}
