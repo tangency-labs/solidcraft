@@ -36,7 +36,9 @@ pub enum Error {
 
 /// The checked relative path of an entry name: `a/b/c`, never absolute, never `..`, `.` or empty
 /// parts, no backslashes, drive letters or control characters. Directory names keep no trailing `/`.
-fn checked_path(name: &str) -> Result<String, &'static str> {
+/// A package folder read as its `.zip` would be (`plugin.check`) goes through it too, so a folder
+/// and its `.zip` get the same answer.
+pub fn checked_path(name: &str) -> Result<String, &'static str> {
     if name.is_empty() {
         return Err("an empty name");
     }

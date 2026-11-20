@@ -627,6 +627,7 @@ impl Camera {
             && self.roll.is_finite()
             && self.distance.is_finite()
             && self.distance > 0.0
+            && (0.0..std::f64::consts::PI).contains(&self.fov)
     }
     /// The view's orientation in degrees, as the viewport's View angles readout shows it (#6032).
     /// These are the camera's own angles: yaw in (−180, 180], pitch in [−90, 90], roll in
@@ -691,6 +692,16 @@ fn wrap_half_turn(a: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn camera_validation_refuses_nonfinite_and_inverted_perspective_lenses() {
+        for fov in [0.0, 0.6, std::f64::consts::PI - 1e-6] {
+            assert!(Camera { fov, ..Default::default() }.is_valid());
+        }
+        for fov in [-0.1, std::f64::consts::PI, 4.0, f64::NAN, f64::INFINITY] {
+            assert!(!Camera { fov, ..Default::default() }.is_valid());
+        }
+    }
 
     /// With the eye inside a large assembly's box the near plane is tiny beside the scene. The
     /// depth turned round in f64 still tells a nearer point from a farther one in f32; turned

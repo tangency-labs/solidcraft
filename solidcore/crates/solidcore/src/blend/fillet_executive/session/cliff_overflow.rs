@@ -9,11 +9,11 @@
 //!
 //! | Rust                                       | Fork                                      |
 //! |--------------------------------------------|-------------------------------------------|
-//! | `FilletSession::holds_its_law` (private)   | `sm_HoldsItsLaw`                          |
+//! | `SessionObjects::holds_its_law` (private)   | `sm_HoldsItsLaw`                          |
 //!
 //! Deviations: none.
 
-use super::{invalid, FilletObject, FilletSession, SolverObject};
+use super::{invalid, FilletExecutive, FilletObject, FilletSession, SessionObjects, SolverObject};
 use crate::blend::fillet_cliff_overflow::Refusal;
 use crate::blend::fillet_geom::p1::{FilletGeomId, FilletSurfaceStorage};
 use crate::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
@@ -47,20 +47,21 @@ fn smos_min(a: f64, b: f64) -> f64 {
 impl FilletSession<'_> {
     /// `GetFilletErrorInfo()->NoteError(code, comment)` of a [`Refusal`].
     pub(super) fn note_refusal(&mut self, refusal: Refusal) {
-        self.executive.error.code = refusal.code as i32;
-        self.executive.error.comment = refusal.comment.into();
-        self.executive.error.no_room = refusal.reason;
-        self.executive.error.no_room_without_site = true;
+        self.executive.note_trim_refusal(refusal);
     }
+}
 
-    /// Note `note`'s refusal, if any, and pass `result` on.
-    pub(super) fn noted<T>(&mut self, note: Option<Refusal>, result: Result<T>) -> Result<T> {
-        if let Some(refusal) = note {
-            self.note_refusal(refusal);
-        }
-        result
+impl FilletExecutive<FilletObject> {
+    /// Preserve the cause and fit metadata of the sheet boundary construction.
+    pub(super) fn note_trim_refusal(&mut self, refusal: Refusal) {
+        self.error.code = refusal.code as i32;
+        self.error.comment = refusal.comment.into();
+        self.error.no_room = refusal.reason;
+        self.error.no_room_without_site = true;
     }
+}
 
+impl SessionObjects<'_> {
     /// The fork's `sm_HoldsItsLaw`: whether a variable round on planar faces holds its
     /// radius law between the filleted edge's ends.
     ///
@@ -82,7 +83,7 @@ impl FilletSession<'_> {
         let FilletObject::Solver(id) = solver else {
             return Err(invalid("object is not a solver"));
         };
-        let object = self.objects.solver(id)?;
+        let object = self.solver(id)?;
         let SolverObject::VariableRadius(vr) = object else {
             return Ok(true);
         };
@@ -109,14 +110,14 @@ impl FilletSession<'_> {
         let [geom] = base.fillet_geoms[..] else {
             return Ok(true);
         };
-        let Some(fillet) = self.objects.fillet_surface(geom)? else {
+        let Some(fillet) = self.fillet_surface(geom)? else {
             return Ok(true);
         };
         let fillet = fillet.clone_for_evaluation()?;
         let eu = base
             .edgeuse(0)?
             .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
-        let target = &*self.objects.target;
+        let target = &*self.target;
         let e = eu1::edge(target, eu)?
             .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
         let curve = edge::curve(target, e)?
@@ -204,12 +205,11 @@ impl FilletSession<'_> {
         let FilletObject::Solver(id) = solver else {
             return Err(invalid("object is not a solver"));
         };
-        let body = self
-            .objects
-            .intermediate_identity(EntityRef::Brep(crate::topology::BrepId::from_index(0)))?;
+        let body =
+            self.intermediate_identity(EntityRef::Brep(crate::topology::BrepId::from_index(0)))?;
         let mut out = Vec::new();
-        for &g in &self.objects.solver(id)?.base().fillet_geoms {
-            let face = match self.objects.pseudo.geom(g)?.fillet_surface {
+        for &g in &self.solver(id)?.base().fillet_geoms {
+            let face = match self.pseudo.geom(g)?.fillet_surface {
                 Some(FilletSurfaceStorage::ManagedFace { body: owner, face }) if owner == body => {
                     Some(face)
                 }

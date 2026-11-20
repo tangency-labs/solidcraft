@@ -587,6 +587,26 @@ impl PackedPlans {
     }
 }
 
+/// Check that the GPU evaluator supports every face without packing the plan's vertices.
+/// Hosts call this before choosing GPU tessellation, so unsupported plans keep their CPU mesh.
+pub fn validate_plan(plan: &TessPlan) -> Result<()> {
+    for face in &plan.faces {
+        face_surface(plan, face)?;
+    }
+    Ok(())
+}
+
+fn face_surface(plan: &TessPlan, face: &solidcore_tess::FacePlan) -> Result<u32> {
+    if !face.poles.is_empty() {
+        return Err(GpuError::PoleNodes { face: face.face });
+    }
+    let surface = face.surface.ok_or_else(|| GpuError::Unsupported("a face without an evaluable surface".into()))?;
+    if surface as usize >= plan.surfaces.len() {
+        return Err(GpuError::Failed("surface index out of range".into()));
+    }
+    Ok(surface)
+}
+
 fn word(x: usize) -> Result<u32> {
     u32::try_from(x).map_err(|_| GpuError::Failed("plan too large".into()))
 }
@@ -659,16 +679,7 @@ fn pack(plans: &[&TessPlan]) -> Result<PackedPlans> {
     let mut base = 0u32;
     for plan in plans {
         for f in &plan.faces {
-            if !f.poles.is_empty() {
-                return Err(GpuError::PoleNodes { face: f.face });
-            }
-            let Some(surface) = f.surface else {
-                return Err(GpuError::Unsupported("a face without an evaluable surface".into()));
-            };
-            if surface as usize >= plan.surfaces.len() {
-                return Err(GpuError::Failed("surface index out of range".into()));
-            }
-            let surface = base + surface;
+            let surface = base + face_surface(plan, f)?;
             for (k, uv) in f.uv.iter().enumerate() {
                 let pinned = f.fixed.get(k).copied();
                 let flags = u32::from(f.flip) | if pinned.is_some() { 2 } else { 0 };

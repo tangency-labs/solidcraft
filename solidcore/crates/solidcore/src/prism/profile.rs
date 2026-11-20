@@ -37,6 +37,23 @@ use crate::nurbs::crv_common::DEFAULT_ANGLE_TOL;
 const OP_CURVE: &str = "prism::profile::curve_on_frame";
 const OP_AREA: &str = "prism::profile::Loop2::signed_area";
 
+/// Counter-clockwise angle from the ray `center`–`start` to `center`–`end`, in
+/// radians modulo one turn. Equal rays give zero; this does not infer a full circle.
+/// Returns `None` for a nonfinite or zero ray. The angle is measured by the
+/// difference of the two polar angles, retaining tiny sweeps across atan2's seam.
+#[must_use]
+pub fn counterclockwise_sweep(center: Point2, start: Point2, end: Point2) -> Option<f64> {
+    let (ax, ay) = (start.x - center.x, start.y - center.y);
+    let (bx, by) = (end.x - center.x, end.y - center.y);
+    if ![ax, ay, bx, by].iter().all(|v| v.is_finite())
+        || (ax == 0.0 && ay == 0.0)
+        || (bx == 0.0 && by == 0.0)
+    {
+        return None;
+    }
+    Some((by.atan2(bx) - ay.atan2(ax)).rem_euclid(TAU))
+}
+
 /// The margin (degrees) kept from the circle builder's angle windows ([`CONIC_ANGLE_TOL_DEG`],
 /// [`DEFAULT_ANGLE_TOL`]): the kernel's circle builder
 /// re-derives the arc's end angle (`atan2` of its end point, in degrees), which rounds by a few

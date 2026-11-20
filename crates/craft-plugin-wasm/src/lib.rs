@@ -44,6 +44,23 @@ pub fn run_with_options<H: PluginHost + 'static>(
     }
 }
 
+/// Checks `component` against `manifest` the way a call would, without running any of its code:
+/// the runtime declaration, the component's size, that it is a component (not a core module) that
+/// compiles, imports nothing but this host's interfaces at its version (never WASI or the network),
+/// and exports the entry interface of its world (`command-plugin`, or `importer-plugin` for an
+/// importer). The error names what is wrong; `plugin check` adds how to fix it.
+pub fn check_component(manifest: &Manifest, component: &[u8]) -> Result<()> {
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    {
+        native::check_component(manifest, component, RuntimeOptions::default())
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        let _ = (manifest, component);
+        Err(craft_plugin::HostError::Trap { reason: "checking a component requires an x86-64 or AArch64 native build".into() })
+    }
+}
+
 /// One file for an importer to convert. The app has already checked that it may read `path`.
 #[derive(Clone, Debug)]
 pub struct ImportRequest {

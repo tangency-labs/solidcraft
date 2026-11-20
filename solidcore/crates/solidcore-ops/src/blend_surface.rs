@@ -49,7 +49,7 @@ use crate::error::status;
 use crate::order::{self, Order};
 use crate::session::{read_body, run_on, with_body};
 use crate::sweep::railed::Continuity;
-use crate::{Error, Result};
+use crate::{Contract, Error, Result};
 
 /// One side of a blend: a sheet, its record order, the record edge the blend meets, and the
 /// continuity it meets it with.
@@ -530,8 +530,8 @@ pub fn fillet_crossing(a: &Body, b: &Body, how: &FilletCrossing) -> Result<Fille
             ));
         }
     }
-    let (cut_a, _) = crate::boolean::imprint(a.copy()?, b.copy()?)?;
-    let (cut_b, _) = crate::boolean::imprint(b.copy()?, a.copy()?)?;
+    let (cut_a, _) = crate::boolean::imprint_with(a.copy()?, b.copy()?, Contract::Proved)?;
+    let (cut_b, _) = crate::boolean::imprint_with(b.copy()?, a.copy()?, Contract::Proved)?;
     let [side_a, side_b] = how.sides;
     let half_a = half(&cut_a, b, side_b, tol)?;
     let half_b = half(&cut_b, a, side_a, tol)?;

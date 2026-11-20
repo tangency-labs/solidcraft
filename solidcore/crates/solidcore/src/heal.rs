@@ -8,3 +8,4 @@ pub mod face_props;
 pub mod gap;
 pub mod heal_data;
 pub mod stitch;
+pub mod tolerance_defects;

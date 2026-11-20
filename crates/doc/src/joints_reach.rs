@@ -11,8 +11,8 @@ use solidcore_record::Vec3;
 use solidcraft_sketch::linalg;
 
 use super::{
-    Assembly, Held, JointKind, MAX_LOOP_VALUES, MAX_LOOP_WORK, MAX_LOOPS, Solution, Tree, Values, apply_links, build, close_within, jacobian,
-    joint_values, largest, limit_bounds, link_chains, loop_groups, loop_scale, loose_gap, unknowns,
+    Assembly, Held, JointKind, MAX_LOOP_VALUES, MAX_LOOP_WORK, MAX_LOOPS, Solution, Tree, Values, apply_links, bounded_step, build, close_within,
+    jacobian, joint_values, largest, limit_bounds, link_chains, loop_groups, loop_scale, loose_gap, unknowns,
 };
 use crate::{Document, ModelState, apply_point, apply_vector, mat_mul};
 
@@ -46,6 +46,9 @@ pub struct Reached {
     /// Short of the target: the closing joint of a loop that stopped it (the chain alone, the
     /// loop left open, gets closer).
     pub stopped_by_loop: Option<u64>,
+    /// How many times it placed the chain and its loops to measure the misses: the work it took,
+    /// out of the solver's budget for one solve (`MAX_LOOP_WORK`).
+    pub work: usize,
 }
 
 /// How much a loop's gap (mm) outweighs a miss of the target (mm) in a step: enough to keep the
@@ -65,7 +68,8 @@ const STEP_SHARE: f64 = 0.1;
 pub fn reach(doc: &Document, st: &ModelState, r: &Reach) -> Result<Reached, String> {
     let asm = &doc.assembly;
     let vals = joint_values(asm);
-    let built = build(doc, st, &vals, &mut Solution::default());
+    let held_contents = doc.rigid_group_joints();
+    let built = build(doc, st, &held_contents, &vals, &mut Solution::default());
     let tree = &built.tree;
     if tree.fixed.contains_key(&r.occurrence) {
         return Err("it is fixed in place (grounded, or the part its joints are placed from)".into());
@@ -263,6 +267,7 @@ pub fn reach(doc: &Document, st: &ModelState, r: &Reach) -> Result<Reached, Stri
             }
         }
     }
+    out.work = spent.get();
     // The stored values that changed, when that got it closer (by more than the solver's noise:
     // a held part doesn't creep).
     let gained = before - miss(&res) > 1e-7;
@@ -478,8 +483,8 @@ fn stride(asm: &Assembly, vals: &Values, vars: &[(u64, usize)], paced: &[((u64, 
 
 /// Levenberg-Marquardt that stays on the loops: move `x` (within `bounds`, at most `cap` per value
 /// and a step of every value `stride` measures, links included, a step) to bring the first `mt` values of `f` (the target's misses) toward zero, the rest (the
-/// loops' weighted gaps) at zero. Each step is solved over all the rows, values on a limit the
-/// step pushes past held, then put back on the loops (`close_within` on their gaps) and taken
+/// loops' weighted gaps) at zero. Each step is solved over all the rows, values the step would
+/// take past a limit held there (`bounded_step`), then put back on the loops (`close_within` on their gaps) and taken
 /// when it gets closer. It ends at the target, or as close as the limits and loops let it get.
 /// Returns `f` there, or `None` when the loops don't close at the start (within `loose`).
 fn approach(
@@ -538,30 +543,13 @@ fn approach(
         }
         let mut stepped = false;
         while lambda < 1e12 && !stepped {
-            let mut held = vec![false; n];
-            // Solved, then again with the values held that it pushes past their limits.
-            for _ in 0..=n {
-                let mut a = jtj.clone();
-                let mut b = g.clone();
-                for p in 0..n {
-                    a.add(p, p, lambda * (1.0 + diag.get(p).copied().unwrap_or(0.0)));
-                    if held.get(p).copied().unwrap_or(false) {
-                        for q in 0..n {
-                            a.set(p, q, if p == q { 1.0 } else { 0.0 });
-                            a.set(q, p, if p == q { 1.0 } else { 0.0 });
-                        }
-                        if let Some(bp) = b.get_mut(p) {
-                            *bp = 0.0;
-                        }
-                    }
-                }
-                let Some(d) = linalg::solve(a, b) else { break };
-                let past: Vec<bool> =
-                    x.iter().zip(&d).zip(bounds).map(|((v, dv), (lo, hi))| (*dv > 0.0 && *v >= *hi) || (*dv < 0.0 && *v <= *lo)).collect();
-                if past.iter().zip(&held).any(|(p, h)| *p && !*h) {
-                    held = held.iter().zip(&past).map(|(h, p)| *h || *p).collect();
-                    continue;
-                }
+            // Solved with the values the step would take past their limits held there (and let go
+            // where moving back inside does better), as the loops are solved (`bounded_step`).
+            let mut a = jtj.clone();
+            for p in 0..n {
+                a.add(p, p, lambda * (1.0 + diag.get(p).copied().unwrap_or(0.0)));
+            }
+            if let Some(d) = bounded_step(&a, &g, x, bounds) {
                 let full: Vec<f64> = x.iter().zip(&d).map(|(v, dv)| v + dv).collect();
                 let over = d.iter().zip(cap).map(|(d, c)| d.abs() / c).fold(1.0f64, f64::max).max(stride(x, &full));
                 let mut next: Vec<f64> = x.iter().zip(&d).zip(bounds).map(|((v, dv), (lo, hi))| (v + dv / over).max(*lo).min(*hi)).collect();
@@ -578,7 +566,6 @@ fn approach(
                     lambda = if over > 1.0 { (lambda * over).min(1e6) } else { (lambda / 3.0).max(1e-9) };
                     stepped = true;
                 }
-                break;
             }
             if !stepped {
                 lambda *= 4.0;

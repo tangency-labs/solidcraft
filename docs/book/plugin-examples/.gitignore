@@ -1,0 +1,5 @@
+# The WIT each crate builds against is copied in from crates/craft-plugin/wit, as the guide says;
+# the built components go into the package folders.
+*/wit/
+*/target/
+*.wasm

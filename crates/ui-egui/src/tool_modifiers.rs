@@ -176,6 +176,8 @@ thread_local! {
     static MANIPULATOR_FREE: Cell<bool> = const { Cell::new(false) };
     /// Shift while sketching forces midpoint targeting (see [`ModAction::TargetMidpoint`]).
     static TARGET_MIDPOINT: Cell<bool> = const { Cell::new(false) };
+    /// Shift while drawing a rectangle makes it a square (see [`ModAction::SquareRectangle`]).
+    static SQUARE_RECTANGLE: Cell<bool> = const { Cell::new(false) };
     /// True while a canvas / gizmo manipulator drag is active this frame (or last frame until cleared).
     static MANIPULATOR_DRAGGING: Cell<bool> = const { Cell::new(false) };
 }
@@ -201,6 +203,16 @@ pub fn set_target_midpoint(on: bool) {
 /// Whether sketch refine-snap is in midpoint-only mode.
 pub fn target_midpoint() -> bool {
     TARGET_MIDPOINT.with(Cell::get)
+}
+
+/// Set whether the rectangle being drawn is forced to a square this frame.
+pub fn set_square_rectangle(on: bool) {
+    SQUARE_RECTANGLE.with(|c| c.set(on));
+}
+
+/// Whether the rectangle being drawn is forced to a square (see [`set_square_rectangle`]).
+pub fn square_rectangle() -> bool {
+    SQUARE_RECTANGLE.with(Cell::get)
 }
 
 /// Set whether a manipulator (arrow / gizmo) drag is active.
@@ -229,6 +241,7 @@ pub enum ModAction {
     IsoCurveAlternate = 9,
     ExtendPair = 10,
     KeepSnapPoints = 11,
+    SquareRectangle = 12,
 }
 
 impl ModAction {
@@ -245,6 +258,7 @@ impl ModAction {
         Self::IsoCurveAlternate,
         Self::ExtendPair,
         Self::KeepSnapPoints,
+        Self::SquareRectangle,
     ];
 
     pub const fn id(self) -> &'static str {
@@ -261,6 +275,7 @@ impl ModAction {
             Self::IsoCurveAlternate => "isocurve_alternate",
             Self::ExtendPair => "extend_pair",
             Self::KeepSnapPoints => "keep_snap_points",
+            Self::SquareRectangle => "square_rectangle",
         }
     }
 
@@ -661,6 +676,21 @@ mod tests {
         assert!(!live.contains(ModAction::TargetMidpoint));
         let drawing = resolve(&[Scope::SketchDraw, Scope::SketchDrag], descriptor("sketch.line"), held, Trigger::Live);
         assert!(drawing.contains(ModAction::TargetMidpoint));
+    }
+
+    #[test]
+    fn rectangle_shift_is_the_square_action_and_not_a_midpoint_snap() {
+        let held = Held { shift: true, ..Default::default() };
+        let scopes = [Scope::SketchDraw, Scope::SketchDrag];
+        for tool in ["sketch.rectangle.two_point", "sketch.rectangle.center"] {
+            let live = resolve(&scopes, descriptor(tool), held, Trigger::Live);
+            assert!(live.contains(ModAction::SquareRectangle), "{tool}");
+            assert!(!live.contains(ModAction::TargetMidpoint), "{tool}");
+            let plain = resolve(&scopes, descriptor(tool), Held::default(), Trigger::Live);
+            assert!(!plain.contains(ModAction::SquareRectangle), "{tool}");
+        }
+        let line = resolve(&scopes, descriptor("sketch.line"), held, Trigger::Live);
+        assert!(!line.contains(ModAction::SquareRectangle));
     }
 
     #[test]

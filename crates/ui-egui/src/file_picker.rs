@@ -133,8 +133,9 @@ impl SolveApp {
         }
     }
 
-    /// Choose a folder (the library folder, or one the agent chat attaches) without blocking the
-    /// event loop or changing a design.
+    /// Ask for a folder: a plugin field's Browse button, the document library's folder, or one
+    /// the agent chat attaches. The plugin dialog shows Browse only when this service is set.
+    /// Without a host dialog, the answer is a cancel and nothing is changed.
     pub(crate) fn pick_folder(&mut self, complete: impl FnOnce(&mut SolveApp, Option<String>) + 'static) {
         if self.file_picker_busy() {
             return;
@@ -473,8 +474,8 @@ mod tests {
             ("sketch.insert_svg", vec!["svg"]),
             ("sketch.insert_dxf", vec!["dxf"]),
             ("file.insert_step", vec![]),
-            ("canvas.insert", vec!["png", "jpg", "jpeg"]),
-            ("canvas.decal", vec!["png", "jpg", "jpeg"]),
+            ("canvas.insert", vec!["png", "jpg", "jpeg", "svg"]),
+            ("canvas.decal", vec!["png", "jpg", "jpeg", "svg"]),
         ] {
             h.app.start(command);
             tick(&mut h.app, &h.ctx);
@@ -545,7 +546,7 @@ mod tests {
         h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
         h.app.start("canvas.insert");
         h.frames(2);
-        assert_eq!(*asked.borrow(), [vec!["csv", "json"], vec!["png", "jpg", "jpeg"]]);
+        assert_eq!(*asked.borrow(), [vec!["csv", "json"], vec!["png", "jpg", "jpeg", "svg"]]);
     }
 
     /// #4717: a canvas placed with a click on the origin of a sketch on XY, seen from the top,

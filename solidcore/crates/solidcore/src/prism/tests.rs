@@ -46,6 +46,45 @@ fn p(x: f64, y: f64) -> Point2 {
     Vec2::new(x, y)
 }
 
+#[test]
+fn chord_coordinates_preserve_aspect_ratio_and_refuse_unrepresentable_inputs() {
+    use super::import_geometry::chord_coordinates;
+
+    // c = 1.5 - 0.25 = 1.25; 0.625/c = 0.5, 0.15625/c = 0.125.
+    assert_eq!(
+        chord_coordinates(p(0.875, 0.15625), 0.25, 1.5).unwrap(),
+        p(0.5, 0.125)
+    );
+    assert_eq!(
+        chord_coordinates(p(0.25, 0.0), 0.25, 1.5).unwrap(),
+        Vec2::ZERO
+    );
+    assert_eq!(
+        chord_coordinates(p(1.5, 0.0), 0.25, 1.5).unwrap(),
+        p(1.0, 0.0)
+    );
+    assert_eq!(
+        chord_coordinates(p(0.5, -0.125), 0.0, 1.0).unwrap(),
+        p(0.5, -0.125)
+    );
+    for (point, leading, trailing) in [
+        (p(0.0, 0.0), 0.0, 0.0),
+        (p(0.0, 0.0), 1.0, 0.0),
+        (p(f64::NAN, 0.0), 0.0, 1.0),
+        (p(0.0, f64::INFINITY), 0.0, 1.0),
+        (p(0.0, 0.0), f64::NEG_INFINITY, 1.0),
+        (p(0.0, 0.0), 0.0, f64::INFINITY),
+        (p(0.0, 0.0), -f64::MAX, f64::MAX),
+        (p(f64::MAX, 0.0), -f64::MAX, 0.0),
+        (p(0.0, 1.0), 0.0, f64::from_bits(1)),
+    ] {
+        assert!(
+            chord_coordinates(point, leading, trailing).is_err(),
+            "{point:?}, {leading}, {trailing}"
+        );
+    }
+}
+
 fn polygon(pts: &[Point2]) -> Loop2 {
     Loop2 {
         segs: pts
@@ -1307,6 +1346,28 @@ fn a_tapered_flange_changes_by_half_its_length_times_the_slope_tangent() {
     assert!(((toe + root) / 2.0 - 14.2).abs() < 1e-12);
     // A non-finite input gives a non-finite answer, never a panic.
     assert!(tapered_flange_ends(f64::NAN, 1.0, 5.0).0.is_nan());
+}
+
+#[test]
+fn directed_planar_sweep_keeps_quadrants_and_tiny_seam_angles() {
+    let sweep = super::profile::counterclockwise_sweep;
+    let center = Point2::new(0.0, 0.0);
+    let x = Point2::new(1.0, 0.0);
+    let y = Point2::new(0.0, 1.0);
+    assert_eq!(sweep(center, x, y), Some(FRAC_PI_2));
+    assert_eq!(sweep(center, y, x), Some(3.0 * FRAC_PI_2));
+    assert_eq!(sweep(center, x, x), Some(0.0));
+    for delta in [0.5e-12_f64, 1e-12, 2e-12] {
+        let end = Point2::new(delta.cos(), delta.sin());
+        assert_eq!(sweep(center, x, end), Some(delta));
+        let start = Point2::new(-1.0, delta / 2.0);
+        let end = Point2::new(-1.0, -delta / 2.0);
+        let expected = (end.y.atan2(end.x) - start.y.atan2(start.x)).rem_euclid(TAU);
+        assert_eq!(sweep(center, start, end), Some(expected));
+        assert!(expected > 0.0 && expected < 3e-12);
+    }
+    assert_eq!(sweep(center, center, x), None);
+    assert_eq!(sweep(center, x, Point2::new(f64::NAN, 0.0)), None);
 }
 
 mod recognition {

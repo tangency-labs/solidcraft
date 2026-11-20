@@ -383,11 +383,8 @@ fn an_extruded_plate_walks_each_hole_a_fixed_number_of_times() {
 /// shell traversals marked and the point solves it ran of a proto vertex against a proto
 /// edge.
 fn plate_cut_counts(n: u32) -> (u64, u64) {
-    let mut fixes = UpstreamFixes::all();
-    fixes.fillet_refuse_rounds_breaking_through = false;
-    fixes.fillet_round_ends_on_outline = false;
     let mut k = Kernel {
-        fixes,
+        fixes: UpstreamFixes::all(),
         ..Kernel::default()
     };
     let (w, thick, radius) = (PITCH * f64::from(n), 12.0, 4.0);
@@ -501,4 +498,95 @@ fn solid_plate_vertex_drops(n: u32) -> u64 {
 fn a_solid_plate_cut_a_group_at_a_time_drops_only_its_own_vertices() {
     assert_eq!(solid_plate_vertex_drops(4), 32);
     assert_eq!(solid_plate_vertex_drops(6), 72);
+}
+
+// ---- a plate joined onto its own top: one face meeting many ------------------------------
+
+/// The plate with `n` x `n` holes extruded from `z0` to `z1` (as [`plate_extruded_walks`]'
+/// plate, with every fix on as SolidCraft runs).
+fn plate_prism(k: &mut Kernel, n: u32, z0: f64, z1: f64) -> Brep {
+    use solidcore::eval::Frame;
+    use solidcore::math::Point2;
+    use solidcore::prism::extrude::extrude_region;
+    use solidcore::prism::profile::{Loop2, Region2, Seg2};
+
+    let w = PITCH * f64::from(n + 1);
+    let q = Point2::new;
+    let corners = [q(0.0, 0.0), q(w, 0.0), q(w, w), q(0.0, w)];
+    let outer = Loop2 {
+        segs: (0..4)
+            .map(|i| Seg2::Line {
+                a: corners[i],
+                b: corners[(i + 1) % 4],
+            })
+            .collect(),
+    };
+    let holes = (0..n * n)
+        .map(|i| {
+            let center = q(PITCH * f64::from(i % n + 1), PITCH * f64::from(i / n + 1));
+            Loop2 {
+                segs: vec![Seg2::Arc {
+                    center,
+                    radius: RADIUS,
+                    start: 0.0,
+                    sweep: 2.0 * PI,
+                }],
+            }
+            .reversed()
+        })
+        .collect();
+    let frame = Frame {
+        origin: [0.0; 3],
+        x_axis: [1.0, 0.0, 0.0],
+        y_axis: [0.0, 1.0, 0.0],
+    };
+    extrude_region(k, &frame, &Region2 { outer, holes }, z0, z1).unwrap()
+}
+
+/// The plate with `n` x `n` holes, 12 thick, and the same plate stacked on its top, 12
+/// more, joined in one boolean (as an extrude of the top face that joins): checks the
+/// join's exact volume and returns the seam and pole tests it ran
+/// ([`solidcore::kernel::WorkCounters::seam_tests`]).
+///
+/// The face the two plates share has an edge for each hole and no seam: each plate's side
+/// of it is scanned for one once, not once for every face it meets, and the curves on it
+/// ask nothing more. The count left grows as the holes, 47 for each hole and 40 more: 228
+/// and 792 for 4 and 16 holes (a hole's wall closes on itself across a seam, so the curves
+/// on it still ask about its edges and vertices). Asking, for every curve on the shared
+/// face, about every edge and vertex of it ran 14 N^2 + 163 N + 416 tests for N holes:
+/// 1292 and 6608, and 24428 for 36 (#18705).
+fn stacked_plate_seam_tests(n: u32) -> u64 {
+    let mut k = Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Kernel::default()
+    };
+    let below = plate_prism(&mut k, n, 0.0, 12.0);
+    let above = plate_prism(&mut k, n, 12.0, 24.0);
+    let t0 = Instant::now();
+    k.work_counters.reset();
+    let mut joined = boolean_union(&mut k, below, above).unwrap();
+    let seconds = t0.elapsed().as_secs_f64();
+    let tests = k.work_counters.seam_tests();
+    let pairs = k.work_counters.face_pairs();
+    let w = PITCH * f64::from(n + 1);
+    let holes = n * n;
+    let volume = brep_volume_default(&k, &mut joined, 1e-9).unwrap();
+    let exact = 24.0 * (w * w - f64::from(holes) * PI * RADIUS * RADIUS);
+    println!(
+        "plate with {holes} holes joined onto its top: {seconds:.3} s, {pairs} face pairs, \
+         {tests} seam and pole tests, faces {}, edges {}",
+        joined.face_list().len(),
+        joined.edge_list().len()
+    );
+    assert!(
+        (volume - exact).abs() <= 1e-7 * exact,
+        "volume {volume}, exact {exact}"
+    );
+    tests
+}
+
+#[test]
+fn a_plate_joined_onto_its_top_tests_each_face_for_a_seam_once() {
+    let counts = [2, 4].map(stacked_plate_seam_tests);
+    assert_eq!(counts, [47 * 4 + 40, 47 * 16 + 40]);
 }

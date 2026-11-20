@@ -1543,7 +1543,7 @@ pub const ELEMENTS: &[Element] = &[
         slider(ui, &mut 12.0, 0.0..=100.0, Slider { show_value: false, integer: true, ..Default::default() });
     }),
     element!("canvas_value_field", |ui, s| {
-        canvas_value_field(ui, ui.scope_id().with("canvas_value"), &mut s.value, false);
+        canvas_value_field(ui, ui.scope_id().with("canvas_value"), &mut s.value, false, "");
     }),
     element!("placement_field", |ui, s| {
         placement_field(ui, ui.scope_id().with("placement"), &mut s.value, "Distance");
