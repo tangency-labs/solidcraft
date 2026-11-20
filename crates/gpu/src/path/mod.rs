@@ -1035,6 +1035,7 @@ struct Task {
     exr_work: Option<solidcraft_render::job::linear_exr::ExrTask>,
     bloom_work: Option<solidcraft_render::job::bloom::BloomTask>,
     exr: Option<Vec<u8>>,
+    native_denoise_failed: bool,
     started: Instant,
     // Uniform environment is used only by the numerical furnace test, never advertised as HDRI.
     environment: f32,
@@ -1265,6 +1266,7 @@ impl Task {
             exr_work: None,
             bloom_work: None,
             exr: None,
+            native_denoise_failed: false,
             started: Instant::now(),
             environment: 0.0,
             environment_bottom_only: false,
@@ -1720,6 +1722,9 @@ impl ImageWork for Task {
     fn take_linear_exr(&mut self) -> Option<Vec<u8>> {
         self.exr.take()
     }
+    fn take_failed_linear_exr(&mut self) -> Option<Vec<u8>> {
+        if self.native_denoise_failed { self.exr.take() } else { None }
+    }
     fn step(&mut self, units: usize) -> Result<TaskPoll> {
         self.cancel.check()?;
         self.context.ensure_available()?;
@@ -1728,7 +1733,7 @@ impl ImageWork for Task {
         // takes every publication immediately after this quantum.
         self.preview = None;
         if let Some(mut task) = self.oidn_work.take() {
-            if let Some(linear) = task.poll()? {
+            if let Some(linear) = task.poll().map_err(|failure| failure.record(&mut self.native_denoise_failed))? {
                 let linear = self.resolve_output(linear)?;
                 return self.finish_filtered_output(linear);
             }
@@ -1862,13 +1867,16 @@ impl Task {
                     // Adaptive checkpoints normalize pilot/production counts differently
                     // from final output. Keep the same complete-pass source as raw preview.
                     let raw = if self.encoding_preview { self.read_checkpoint()? } else { self.read_linear()? };
-                    self.oidn_work = Some(solidcraft_render::job::denoise_oidn::OidnTask::new(
-                        self.request.width,
-                        self.request.height,
-                        raw,
-                        self.options.denoise_settings,
-                        self.cancel.clone(),
-                    )?);
+                    self.oidn_work = Some(
+                        solidcraft_render::job::denoise_oidn::OidnTask::new(
+                            self.request.width,
+                            self.request.height,
+                            raw,
+                            self.options.denoise_settings,
+                            self.cancel.clone(),
+                        )
+                        .map_err(|failure| failure.record(&mut self.native_denoise_failed))?,
+                    );
                     return Ok(TaskPoll::Pending(Progress { phase: Phase::Encoding, done: 0, total: 1 }));
                 }
             }

@@ -56,6 +56,7 @@ pub(crate) struct OutputTask {
     supersampling: u32,
     denoise_settings: DenoiseSettings,
     retain_exr: bool,
+    native_denoise_failed: bool,
     original: Option<Vec<[f32; 4]>>,
     resolved_alpha: Vec<u8>,
     diagnostics: Option<DenoiseDiagnostics>,
@@ -120,6 +121,7 @@ impl OutputTask {
             supersampling,
             denoise_settings,
             retain_exr,
+            native_denoise_failed: false,
             original: None,
             resolved_alpha: Vec::new(),
             diagnostics: diagnostics.then(|| DenoiseDiagnostics::new(trace_width, trace_height)),
@@ -153,6 +155,9 @@ impl OutputTask {
         self.mask_png.take()
     }
 
+    pub(crate) fn take_failed_linear_exr(&mut self) -> Option<Vec<u8>> {
+        if self.native_denoise_failed { self.exr.take() } else { None }
+    }
     fn prepare_raw(&mut self, linear: Vec<[f32; 4]>, charge: &mut impl FnMut(u64) -> Result<()>) -> Result<()> {
         if self.retain_exr {
             if self.supersampling == 2 {
@@ -202,8 +207,9 @@ impl OutputTask {
                     // Work units are pixel visits, not bytes. Admission already prepaid
                     // the RGB/native workspace before transport started.
                     charge(u64::from(self.trace_width) * u64::from(self.trace_height))?;
-                    self.stage =
-                        Some(Stage::Oidn(OidnTask::new(self.trace_width, self.trace_height, linear, self.denoise_settings, self.cancel.clone())?));
+                    let task = OidnTask::new(self.trace_width, self.trace_height, linear, self.denoise_settings, self.cancel.clone())
+                        .map_err(|failure| failure.record(&mut self.native_denoise_failed))?;
+                    self.stage = Some(Stage::Oidn(task));
                 }
             }
             Ok(())
@@ -355,7 +361,7 @@ impl OutputTask {
                 }
             }
             Stage::Oidn(mut task) => {
-                if let Some(linear) = task.poll()? {
+                if let Some(linear) = task.poll().map_err(|failure| failure.record(&mut self.native_denoise_failed))? {
                     self.prepare_resolve(linear, charge)?;
                 } else {
                     self.stage = Some(Stage::Oidn(task));

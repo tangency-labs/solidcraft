@@ -60,8 +60,8 @@ pub use denoise_diagnostics::{DenoiseDiagnostics, DenoiseGuideClass, resolve_den
 pub(crate) use host::FRAME_METADATA_BYTES;
 pub(crate) use host::Reservation;
 pub use host::{
-    CaptureLease, CaptureProfile, CpuHost, DenoiseMaskInfo, HostKind, ImageHost, JobEnvironmentInfo, JobHandle, JobStatus, LinearAlphaConvention,
-    LinearColourEncoding, LinearMasterInfo, PreparedSubmission, PreviewInfo, RenderFrame, RenderPreview, RetainedMetadata,
+    CaptureLease, CaptureProfile, CpuHost, DenoiseMaskInfo, FailedLinearMaster, HostKind, ImageHost, JobEnvironmentInfo, JobHandle, JobStatus,
+    LinearAlphaConvention, LinearColourEncoding, LinearMasterInfo, PreparedSubmission, PreviewInfo, RenderFrame, RenderPreview, RetainedMetadata,
 };
 pub use host_memory::{HostMemoryAdmission, HostMemorySource, NativeMemoryPolicy};
 pub use image::{
@@ -317,6 +317,11 @@ pub trait ImageWork: Send {
     /// Optional raw linear companion, moved exactly once after PNG completion.
     /// The host validates intent, bounds, hashes and retains its memory lease.
     fn take_linear_exr(&mut self) -> Option<Vec<u8>> {
+        None
+    }
+    /// Called only after a failed step, never for provisional results. The executor
+    /// may hand off its already encoded final master only for a native OIDN failure.
+    fn take_failed_linear_exr(&mut self) -> Option<Vec<u8>> {
         None
     }
     fn step(&mut self, units: usize) -> Result<TaskPoll>;

@@ -32,11 +32,19 @@ Both ray-traced renderers pass normalized scene-linear trace-grid RGB to the
 CPU RT filter with HDR enabled, sRGB disabled and no auxiliary guides. OIDN runs
 before supersampling resolve, bloom, exposure/tone mapping and photographic
 finishing. The GPU remains the renderer; validated HDR readback supplies its
-OIDN input. The raw film stays unfiltered, and successful jobs retain an
-unfiltered raw EXR when requested. A failed OIDN job currently publishes neither
-its display image nor an independently exportable raw EXR; its internal raw
-buffers are released with the failed task. Retry with denoising disabled to obtain
-a raw result. Failure-path raw export remains a shipping requirement.
+OIDN input. The raw film stays unfiltered. To keep an EXR, set `linear_exr: true`
+under `job.options.output` for a saved CPU job or `job.options` for a saved GPU job.
+If native OIDN fails **after the final raw EXR is encoded**, `render.status` reports
+`failed`, the original error and `linear_master`, but no display frame. In the same
+session, call `render.export` with the full failed job ID, `format: "exr"` and an
+`.exr` path. This writes the original bytes without retracing. Export promptly:
+failed masters share the four-entry terminal history and are not selectable images.
+
+This recovery is available through a persistent command session (for example,
+`solidcraft-cli mcp --headless`), not the one-shot PNG CLI or the completed-image
+picker. Cancellation, a failed nonfinal pass, or a job without a retained final
+master has nothing to export. Nothing is written automatically.
+
 Coverage alpha is copied unchanged, but transparent-background output is explicitly refused: preserving
 alpha alone does not qualify RGB reconstruction at transparent silhouettes.
 Opaque antialiased silhouettes still need image-quality comparisons.

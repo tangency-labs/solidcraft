@@ -365,13 +365,20 @@ fn oidn_admission_bounds_and_supersampling_bytes_are_checked_without_allocations
     );
 }
 
+fn not_native(failure: denoise_oidn::OidnFailure) -> JobError {
+    let mut native_failed = true;
+    let error = failure.record(&mut native_failed);
+    assert!(!native_failed, "preflight, bad source data or cancellation cannot authorize raw recovery");
+    error
+}
+
 #[cfg(not(all(feature = "denoise-oidn", not(target_arch = "wasm32"))))]
 #[test]
 fn unavailable_oidn_refuses_execution_without_rewriting_parseable_intent() {
     let settings: DenoiseSettings = serde_json::from_value(serde_json::json!({"method":"oidn","oidn_quality":"balanced"})).unwrap();
     settings.validate().unwrap();
     assert_eq!(denoise_oidn::validate_request(1, 1, false, false).unwrap_err().code, ErrorCode::HostUnavailable);
-    let error = denoise_oidn::OidnTask::new(1, 1, vec![[0.5, 0.25, 0.1, 1.0]], settings, CancelToken::default()).err().unwrap();
+    let error = denoise_oidn::OidnTask::new(1, 1, vec![[0.5, 0.25, 0.1, 1.0]], settings, CancelToken::default()).err().map(not_native).unwrap();
     assert_eq!(error.code, ErrorCode::HostUnavailable);
     assert_eq!(settings.method, DenoiseMethod::Oidn, "unavailable OIDN never silently runs Spatial");
     assert_eq!(settings.oidn_quality, OidnQuality::Balanced);
@@ -398,7 +405,7 @@ fn oidn_cancelled_poll_keeps_active_worker_pending_until_retirement() {
             Ok(None) => {}
             Ok(Some(_)) => panic!("cancelled native work must never publish pixels"),
             Err(error) => {
-                assert_eq!(error.code, ErrorCode::Cancelled);
+                assert_eq!(not_native(error).code, ErrorCode::Cancelled);
                 return;
             }
         }
@@ -407,14 +414,14 @@ fn oidn_cancelled_poll_keeps_active_worker_pending_until_retirement() {
 }
 
 #[cfg(all(feature = "denoise-oidn", not(target_arch = "wasm32")))]
-fn finish_oidn_adapter(task: &mut denoise_oidn::OidnTask) -> Result<Vec<[f32; 4]>> {
+fn finish_oidn_adapter(task: &mut denoise_oidn::OidnTask) -> std::result::Result<Vec<[f32; 4]>, denoise_oidn::OidnFailure> {
     // Deadlock watchdog only, not an inference speed assertion. Each pending poll yields.
     for _ in 0..1_000_000 {
         if let Some(pixels) = task.poll()? {
             return Ok(pixels);
         }
     }
-    Err(JobError::new(ErrorCode::TimedOut, "Open Image Denoise adapter did not finish within the poll watchdog"))
+    Err(JobError::new(ErrorCode::TimedOut, "Open Image Denoise adapter did not finish within the poll watchdog").into())
 }
 
 #[cfg(all(feature = "denoise-oidn", not(target_arch = "wasm32")))]
@@ -479,7 +486,7 @@ fn oidn_adapter_rejects_invalid_radiance_and_coverage_without_output() {
             CancelToken::default(),
         )
         .unwrap();
-        let error = finish_oidn_adapter(&mut task).unwrap_err();
+        let error = not_native(finish_oidn_adapter(&mut task).unwrap_err());
         assert_eq!(error.code, ErrorCode::InvalidRequest, "{pixel:?}: {error}");
         assert!(error.message.contains("invalid radiance or coverage"), "{error}");
         assert!(task.poll().is_err(), "invalid input cannot later produce output");
@@ -490,12 +497,12 @@ fn oidn_adapter_rejects_invalid_radiance_and_coverage_without_output() {
 #[test]
 fn oidn_adapter_refuses_bad_shape_and_already_cancelled_work_before_starting() {
     let settings = DenoiseSettings { method: DenoiseMethod::Oidn, ..Default::default() };
-    let error = denoise_oidn::OidnTask::new(3, 1, vec![[0.0; 4]; 2], settings, CancelToken::default()).err().unwrap();
+    let error = denoise_oidn::OidnTask::new(3, 1, vec![[0.0; 4]; 2], settings, CancelToken::default()).err().map(not_native).unwrap();
     assert_eq!(error.code, ErrorCode::InvalidRequest);
     assert!(error.message.contains("trace grid"));
     let cancel = CancelToken::default();
     cancel.cancel();
-    let error = denoise_oidn::OidnTask::new(1, 1, vec![[0.5, 0.25, 0.1, 1.0]], settings, cancel).err().unwrap();
+    let error = denoise_oidn::OidnTask::new(1, 1, vec![[0.5, 0.25, 0.1, 1.0]], settings, cancel).err().map(not_native).unwrap();
     assert_eq!(error.code, ErrorCode::Cancelled);
 }
 

@@ -1188,6 +1188,9 @@ impl ImageTask {
     pub fn take_linear_exr(&mut self) -> Option<Vec<u8>> {
         self.linear_exr.take()
     }
+    pub(crate) fn take_failed_linear_exr(&mut self) -> Option<Vec<u8>> {
+        self.output.first_mut()?.take_failed_linear_exr()
+    }
     fn preserves_display(&self) -> bool {
         !self.options.denoise && self.options.supersampling == 1 && self.options.output.as_deref().is_none_or(|o| o.identity_display())
     }
