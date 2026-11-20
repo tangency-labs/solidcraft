@@ -1800,3 +1800,53 @@ fn move_drawn_curve_that_breaks_a_3d_constraint_is_refused() {
     assert!(e.contains("cannot hold"), "{e}");
     assert_eq!(s.doc.to_json(), before);
 }
+
+/// `z` lifts drawn picks along the sketch normal, drawn-only: a drawn point and a whole drawn
+/// curve, each in one undo step.
+#[test]
+fn move_z_lifts_drawn_picks_along_the_normal() {
+    let (mut s, _, _, _) = second_frame();
+    let sketch = s.active_sketch.unwrap();
+    let point = run(&mut s, "sketch.point3d", json!({"point":[17,32,45]}))["point"].as_str().unwrap().to_string();
+    let line = run(&mut s, "sketch.line3d", json!({"points":[[10,30,40],[10,30,50]]}))["curves"][0].as_str().unwrap().to_string();
+    let plane = s.world_state().unwrap().sketch(sketch).unwrap().plane;
+    let (x, n) = (plane.x, plane.normal());
+    let shown = |s: &Session, w: &str| s.world_state().unwrap().sketch(sketch).unwrap().sketch.wires.iter().find(|q| q.id == w).unwrap().fit.clone();
+    let undo = s.undo.len();
+    run(&mut s, "sketch.move", json!({"entities":[format!("{point}@0")],"translate":[3,0],"z":2}));
+    near(shown(&s, &point)[0], Vec3::new(17.0, 32.0, 45.0) + x * 3.0 + n * 2.0);
+    assert_eq!(s.undo.len(), undo + 1, "one undo step");
+    run(&mut s, "sketch.move", json!({"entities":[line.clone()],"translate":[0,0],"z":-5}));
+    let fit = shown(&s, &line);
+    near(fit[0], Vec3::new(10.0, 30.0, 40.0) - n * 5.0);
+    near(fit[1], Vec3::new(10.0, 30.0, 50.0) - n * 5.0);
+    assert_eq!(s.undo.len(), undo + 2, "one undo step per move");
+    let r = run(&mut s, "sketch.line3d", json!({"points":[[30,30,40],[30,30,50],[40,30,50]]}));
+    let (a, b) = (r["curves"][0].as_str().unwrap().to_string(), r["curves"][1].as_str().unwrap().to_string());
+    run(&mut s, "sketch.move", json!({"entities":[a.clone(), b.clone()],"translate":[0,0],"z":2}));
+    near(shown(&s, &a)[1], Vec3::new(30.0, 30.0, 50.0) + n * 2.0);
+    near(shown(&s, &b)[0], Vec3::new(30.0, 30.0, 50.0) + n * 2.0);
+    near(shown(&s, &b)[1], Vec3::new(40.0, 30.0, 50.0) + n * 2.0);
+}
+
+/// `z` on a plane line and a drawn point picked together: both move along the normal in one
+/// command, and the plane line becomes a drawn line lifted by `z`.
+#[test]
+fn move_z_mixed_plane_and_drawn_picks_lift_together() {
+    let (mut s, _, _, _) = second_frame();
+    let sketch = s.active_sketch.unwrap();
+    let point = run(&mut s, "sketch.point3d", json!({"point":[17,32,45]}))["point"].as_str().unwrap().to_string();
+    let plane_line = run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0]]}))["curves"][0].as_str().unwrap().to_string();
+    let plane = s.world_state().unwrap().sketch(sketch).unwrap().plane;
+    let (x, y, n) = (plane.x, plane.y, plane.normal());
+    let undo = s.undo.len();
+    run(&mut s, "sketch.move", json!({"entities":[format!("{point}@0"), plane_line.clone()],"translate":[0,2],"z":3}));
+    assert_eq!(s.undo.len(), undo + 1, "one undo step");
+    let wires = s.world_state().unwrap().sketch(sketch).unwrap().sketch.wires.clone();
+    let shown = wires.iter().find(|q| q.id == point).unwrap().fit.clone();
+    near(shown[0], Vec3::new(17.0, 32.0, 45.0) + y * 2.0 + n * 3.0);
+    let a = plane.origin + y * 2.0 + n * 3.0;
+    let b = a + x * 10.0;
+    let lifted = wires.iter().any(|w| w.fit.len() == 2 && w.fit[0].dist(a) < 1e-7 && w.fit[1].dist(b) < 1e-7);
+    assert!(lifted, "the plane line is lifted 3 along the normal: {:?}", wires.iter().map(|w| &w.fit).collect::<Vec<_>>());
+}
