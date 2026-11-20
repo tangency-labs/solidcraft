@@ -3,9 +3,7 @@
 # type, remove its line. Never add one: a new command comes with both schemas. Sorted, one id
 # per line.
 face.delete
-solid.draft
 solid.hole
 solid.loft
 solid.offset_face
-solid.shell
 solid.thread
