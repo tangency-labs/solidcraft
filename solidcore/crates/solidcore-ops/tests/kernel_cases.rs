@@ -5180,7 +5180,7 @@ fn tangent_cliff_chamfers_keep_the_walls_and_upper_rail() {
         let result = call(&case["calls"][0], &mut input).unwrap().unwrap();
         let body = result.body;
         body.check_solid().unwrap();
-        let diagonal = 3.0 / 2.0_f64.sqrt();
+        let diagonal = 3.0 * std::f64::consts::FRAC_1_SQRT_2;
         assert!(pick::edges(&body, &[[diagonal, diagonal, 0.75]], 1e-5)
             .unwrap()
             .is_ok());
