@@ -567,3 +567,33 @@ fn a_note_on_an_exploded_view_ends_where_the_view_draws_its_edge() {
     leader_ends_near(&added, [140.0, 0.0, 50.0]);
     leader_ends_near(&run(&mut s, INSPECT, json!({"note": added["note"]})), [140.0, 0.0, 50.0]);
 }
+
+/// A new note starts at its place: left unless it says otherwise, kept in its record, and an edit sets
+/// it in one undo step, none when it is as it was. Centre, spelt either way, is saved as no `align`, as a
+/// note from before alignments, and inspect always says which.
+#[test]
+fn a_new_note_is_left_aligned_and_an_edit_sets_it() {
+    let (mut s, _, _, _) = placed();
+    let anchor = json!({"sheet": "Sheet 1"});
+    let plain = run(&mut s, ADD, json!({"anchor": anchor, "at": [15, 60], "content": "2 x 8.5mm Holes - Smooth Bore"}));
+    assert_eq!((&plain["align"], &plain["record"]["align"]), (&json!("left"), &json!("left")), "{plain}");
+    let right = run(&mut s, ADD, json!({"anchor": anchor, "at": [15, 60], "content": "x", "align": "right"}));
+    assert_eq!(right["align"], json!("right"));
+    let centred = run(&mut s, ADD, json!({"anchor": anchor, "at": [15, 60], "content": "x", "align": "center"}));
+    assert_eq!((&centred["align"], centred["record"].get("align")), (&json!("centre"), None), "{centred}");
+    let id = plain["note"].clone();
+    let steps = |s: &Session| s.drawing("test").unwrap().notes.len();
+    assert_eq!(steps(&s), 3);
+    let reply = run(&mut s, EDIT, json!({"note": id, "set": {"align": "right"}}));
+    assert_eq!(reply["changed"], json!(["align"]));
+    assert_eq!(run(&mut s, INSPECT, json!({"note": id}))["align"], json!("right"));
+    let before = saved(&s);
+    assert_eq!(run(&mut s, EDIT, json!({"note": id, "set": {"align": "right"}}))["changed"], json!([]));
+    assert_eq!(saved(&s), before, "no change, no step");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(run(&mut s, INSPECT, json!({"note": id}))["align"], json!("left"));
+    for bad in [json!("middle"), json!(1), json!(["left"])] {
+        refused(&mut s, EDIT, json!({"note": id, "set": {"align": bad}}));
+        refused(&mut s, ADD, json!({"anchor": anchor, "at": [0, 0], "content": "x", "align": bad}));
+    }
+}

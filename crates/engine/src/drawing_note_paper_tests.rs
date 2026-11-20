@@ -1,4 +1,4 @@
-use solidcraft_doc::drawing::note::Anchor;
+use solidcraft_doc::drawing::note::{Align, Anchor};
 use solidcraft_geom::cell::{Content, Part};
 use solidcraft_geom::paper::text::TextRun;
 use solidcraft_geom::prelude::*;
@@ -9,7 +9,15 @@ use super::*;
 const LINE_MM: f64 = 0.25;
 
 fn note(at: [f64; 2], cap_mm: Option<f64>) -> Note {
-    Note { id: 9, anchor: Anchor::Sheet(1), at, content: Content(vec![Part::Text("ROUND".into())]), cap_mm, branches: Vec::new() }
+    Note {
+        id: 9,
+        anchor: Anchor::Sheet(1),
+        at,
+        content: Content(vec![Part::Text("ROUND".into())]),
+        cap_mm,
+        align: Align::Centre,
+        branches: Vec::new(),
+    }
 }
 
 /// `note` reading `text`, in the built-in font, in English.
@@ -51,6 +59,62 @@ fn a_notes_text_is_centred_on_its_place() {
         assert_eq!(texts.len(), 1);
         assert!(close(texts[0].origin.x + width("ROUND", cap) / 2.0, at[0]), "{:?}", texts[0].origin);
         assert!(leader_of(&on.group).is_none());
+    }
+}
+
+/// `note` aligned as `align`.
+fn aligned(at: [f64; 2], align: Align) -> Note {
+    Note { align, ..note(at, None) }
+}
+
+/// A note starts at its place, is centred on it, or ends at it, by its alignment, level with it either
+/// way: the one line's first glyph is at the place for left, its last for right.
+#[test]
+fn a_note_starts_at_is_centred_on_or_ends_at_its_place() {
+    let text = "2 x 8.5mm Holes - Smooth Bore";
+    let w = width(text, TEXT_MM);
+    for (align, start) in [(Align::Left, 15.0), (Align::Centre, 15.0 - w / 2.0), (Align::Right, 15.0 - w)] {
+        let on = drawn(&aligned([15.0, 60.0], align), text, None);
+        let texts = runs(&on.group);
+        assert_eq!(texts.len(), 1, "{align:?}");
+        assert!(close(texts[0].origin.x, start), "{align:?}: {:?} wants {start}", texts[0].origin);
+    }
+}
+
+/// Each line of a note with several stands as the note does: starting at the place, centred on it or
+/// ending at it, the shorter line against the longer, in the same block whatever the alignment.
+#[test]
+fn each_line_of_a_note_stands_as_the_note_does() {
+    let (long, short) = ("TAPPED M8 THROUGH", "M8");
+    let text = format!("{long}\n{short}");
+    let (wl, ws) = (width(long, TEXT_MM), width(short, TEXT_MM));
+    let line = |align: Align| {
+        let on = drawn(&aligned([100.0, 60.0], align), &text, None);
+        let mut lines: Vec<(f64, f64)> = runs(&on.group).iter().map(|run| (run.origin.y, run.origin.x)).collect();
+        lines.sort_by(|a, b| b.0.total_cmp(&a.0));
+        assert_eq!(lines.len(), 2, "{align:?}");
+        (lines[0].1, lines[1].1)
+    };
+    let (l_long, l_short) = line(Align::Left);
+    assert!(close(l_long, 100.0) && close(l_short, 100.0), "{l_long} {l_short}");
+    let (c_long, c_short) = line(Align::Centre);
+    assert!(close(c_long, 100.0 - wl / 2.0) && close(c_short, 100.0 - ws / 2.0), "{c_long} {c_short}");
+    let (r_long, r_short) = line(Align::Right);
+    assert!(close(r_long + wl, 100.0) && close(r_short + ws, 100.0), "{r_long} {r_short}");
+}
+
+/// A leader meets the text where it is, not where its place is: from the left of a note that starts at its
+/// place it ends beside its first letter.
+#[test]
+fn a_leader_follows_an_aligned_notes_text() {
+    let w = width("ROUND", TEXT_MM);
+    let tip = Vec2::new(-40.0, 0.0);
+    for (align, left_edge) in [(Align::Left, 0.0), (Align::Right, -w)] {
+        let on = drawn(&aligned([0.0, 0.0], align), "ROUND", Some(tip));
+        let (line, _) = leader_of(&on.group).unwrap();
+        let end = line.last().unwrap();
+        assert!(end.x < left_edge && end.x > tip.x, "{align:?}: {line:?}");
+        assert!(left_edge - end.x < w, "{align:?}: {line:?}");
     }
 }
 
@@ -145,8 +209,10 @@ fn hostile_places_never_panic() {
     let odd = [f64::NAN, f64::INFINITY, -f64::INFINITY, 1e300, -1e300, 0.0, f64::MIN_POSITIVE];
     for x in odd {
         for y in odd {
-            let on = drawn(&note([x, y], Some(x.abs())), "ROUND", Some(Vec2::new(x, y)));
-            assert_eq!(on.group.kind, ObjectKind::Note);
+            for align in [Align::Left, Align::Centre, Align::Right] {
+                let on = drawn(&Note { align, ..note([x, y], Some(x.abs())) }, "ROUND\nTWO", Some(Vec2::new(x, y)));
+                assert_eq!(on.group.kind, ObjectKind::Note);
+            }
         }
     }
     let empty = drawn(&note([0.0, 0.0], None), "", Some(Vec2::new(-50.0, 0.0)));
