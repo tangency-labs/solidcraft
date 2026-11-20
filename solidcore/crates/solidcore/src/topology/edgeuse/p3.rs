@@ -1970,8 +1970,13 @@ fn other_trims_bound(
 /// face joined 2.43e-4 from the kept curve under a tolerance of 2.18e-4). A face with no
 /// finite bound, or whose bound is within the tolerance, is left as upstream leaves it, and
 /// so is one whose bound is past the B-rep check's edge tolerance limit
-/// ([`within_edge_tolerance_limit`]) and more than [`COVER_CONVERGED`] times the largest
-/// distance sampled from the edge to its surface ([`sampled_face_gap`]): UNPROVED, below.
+/// ([`within_edge_tolerance_limit`]) and either more than [`COVER_CONVERGED`] times the largest
+/// distance sampled from the edge to its surface ([`sampled_face_gap`]) or not sampled at all
+/// (no curve or surface, or a sample not evaluated or dropped): UNPROVED, below. A bound past
+/// the limit within that factor of the samples is still a proved raise: the tolerance goes to
+/// the proved bound, which covers the face whatever the samples say, and the samples only rule
+/// out a bound so loose it is an enclosure that did not converge (a bound the samples let
+/// through is still a proved cover, at worst a loose one).
 ///
 /// The tolerance is raised to the face's proved bound only, never to a sample (a raise covers a
 /// proved distance, never an assumed one: `primitive.api_primitives` gen0353, an ellipse at
