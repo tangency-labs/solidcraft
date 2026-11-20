@@ -634,8 +634,15 @@ fn short_rib_rounded(sweep: f64) -> (Kernel, Brep, f64, [usize; 3]) {
             .map(|(a, b)| Curve::from(create_line_segment(*a, *b).unwrap()))
             .collect();
         let refs: Vec<Option<&Curve>> = cs.iter().map(Some).collect();
-        create_rotational_sweep(k, &refs, Point3::ZERO, Vec3::new(1.0, 0.0, 0.0), sweep, true)
-            .unwrap()
+        create_rotational_sweep(
+            k,
+            &refs,
+            Point3::ZERO,
+            Vec3::new(1.0, 0.0, 0.0),
+            sweep,
+            true,
+        )
+        .unwrap()
     }
     let cone =
         [[0.0, 0.0], [0.0, 24.0], [48.0, 36.0], [48.0, 0.0]].map(|p| Vec3::new(p[0], p[1], 0.0));
@@ -721,7 +728,11 @@ fn a_round_on_a_short_rib_s_cone_reads_back_from_its_record() {
         // two round faces; the two root edges become four rails, with an arc on each of the
         // rib's end planes and one across the seam; the three root vertices become six
         let [f, e, v] = counts;
-        assert_eq!(topology_counts(&b), [f + 2, e + 5, v + 3], "{sweep} degrees");
+        assert_eq!(
+            topology_counts(&b),
+            [f + 2, e + 5, v + 3],
+            "{sweep} degrees"
+        );
         let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
         assert!(check.is_valid(), "{sweep} degrees: {:?}", check.lines());
         // the round's closed form; a 0.8 mm round would add a third less

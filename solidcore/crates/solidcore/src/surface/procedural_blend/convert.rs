@@ -305,18 +305,17 @@ fn from_record_at(k: &Kernel, rec: &ProceduralBlendRecord, depth: u32) -> Result
                 match kind_of(*kind) {
                     None => Surface::from(form),
                     // the analytic surface derived from the form, the form checked on it
-                    Some(kind) => labelled(k, kind, form)
-                        .map_err(|e| match e {
-                            SolidError::InvalidInput { .. } => SolidError::invalid_input(
-                                OP_FROM,
-                                if i == 0 {
-                                    "support 1's NURBS form is not of its kind"
-                                } else {
-                                    "support 2's NURBS form is not of its kind"
-                                },
-                            ),
-                            other => other,
-                        })?,
+                    Some(kind) => labelled(k, kind, form).map_err(|e| match e {
+                        SolidError::InvalidInput { .. } => SolidError::invalid_input(
+                            OP_FROM,
+                            if i == 0 {
+                                "support 1's NURBS form is not of its kind"
+                            } else {
+                                "support 2's NURBS form is not of its kind"
+                            },
+                        ),
+                        other => other,
+                    })?,
                 }
             }
             SupportRecord::Blend(b) => Surface::from(from_record_at(k, b, depth + 1)?),
