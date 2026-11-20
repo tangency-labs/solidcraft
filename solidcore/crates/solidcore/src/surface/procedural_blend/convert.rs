@@ -141,8 +141,7 @@ fn nurbs_record(k: &Kernel, s: &Surface, depth: u32, proved: bool) -> Result<Sup
     let form = surface_record(&b)?;
     // the reader's own steps on the form as it reads it
     let reads_back = |kind: SupportKind| -> Result<bool> {
-        let read = surface_of(&form)?;
-        match AnalyticSupport::derive(k, kind, &read).and_then(|a| a.build(k, read)) {
+        match labelled(k, kind, surface_of(&form)?) {
             Ok(_) => Ok(true),
             Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
             Err(_) => Ok(false),
@@ -161,6 +160,13 @@ fn nurbs_record(k: &Kernel, s: &Surface, depth: u32, proved: bool) -> Result<Sup
         Some(SupportKind::Torus) => SupportKindRecord::Torus,
     };
     Ok(SupportRecord::Nurbs { kind, form })
+}
+
+/// A labelled form's analytic surface, as every reader of a record makes it and
+/// [`support_record`] proves it before it writes the label: derived from the form
+/// ([`AnalyticSupport::derive`]) and proved its parametrisation ([`AnalyticSupport::build`]).
+fn labelled(k: &Kernel, kind: SupportKind, form: BSplineSurface) -> Result<Surface> {
+    AnalyticSupport::derive(k, kind, &form).and_then(|a| a.build(k, form))
 }
 
 /// The kernel's kind a record's label names.
@@ -299,8 +305,7 @@ fn from_record_at(k: &Kernel, rec: &ProceduralBlendRecord, depth: u32) -> Result
                 match kind_of(*kind) {
                     None => Surface::from(form),
                     // the analytic surface derived from the form, the form checked on it
-                    Some(kind) => AnalyticSupport::derive(k, kind, &form)
-                        .and_then(|a| a.build(k, form))
+                    Some(kind) => labelled(k, kind, form)
                         .map_err(|e| match e {
                             SolidError::InvalidInput { .. } => SolidError::invalid_input(
                                 OP_FROM,
@@ -558,9 +563,7 @@ pub fn exact_from_record(k: &Kernel, rec: &ExactRoundRecord) -> Result<Surface> 
                 let form = surface_of(form)?;
                 match kind_of(*kind) {
                     None => Surface::from(form),
-                    Some(kind) => {
-                        AnalyticSupport::derive(k, kind, &form).and_then(|a| a.build(k, form))?
-                    }
+                    Some(kind) => labelled(k, kind, form)?,
                 }
             }
             SupportRecord::Blend(_) => {
@@ -572,9 +575,7 @@ pub fn exact_from_record(k: &Kernel, rec: &ExactRoundRecord) -> Result<Surface> 
         });
     }
     let form = surface_of(&rec.net.form)?;
-    let analytic = |kind: SupportKind, form: BSplineSurface| {
-        AnalyticSupport::derive(k, kind, &form).and_then(|a| a.build(k, form))
-    };
+    let analytic = |kind: SupportKind, form: BSplineSurface| labelled(k, kind, form);
     let mut net = match rec.net.kind {
         ExactNetKindRecord::Plane => analytic(SupportKind::Plane, form)?,
         ExactNetKindRecord::Cylinder => analytic(SupportKind::Cylinder, form)?,
@@ -1039,9 +1040,7 @@ fn corner_surface_of(k: &Kernel, s: &SupportRecord) -> Result<Surface> {
             let form = surface_of(form)?;
             match kind_of(*kind) {
                 None => Ok(Surface::from(form)),
-                Some(kind) => {
-                    AnalyticSupport::derive(k, kind, &form).and_then(|a| a.build(k, form))
-                }
+                Some(kind) => labelled(k, kind, form),
             }
         }
         SupportRecord::Blend(_) => Err(SolidError::invalid_input(
