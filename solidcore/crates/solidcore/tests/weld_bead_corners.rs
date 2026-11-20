@@ -18,7 +18,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::{Kernel, KernelOptions, UpstreamFixes};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point3, Vec3};
-use solidcore::primitive::api_curves::create_line_segment;
+use solidcore::primitive::api_curves::{create_arc, create_line_segment};
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::query::api_queries::edge_closest_point;
 use solidcore::surface::procedural_blend::chamfer::ChamferSize;
@@ -105,6 +105,14 @@ fn walls(k: &mut Kernel, pts: &[(f64, f64)]) -> Brep {
             )
         })
         .collect();
+    let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
+    let w = create_linear_sweep(k, &refs, Vec3::new(0.0, 0.0, 1.0), HIGH, true).unwrap();
+    let f = create_box(k, Point3::new(-25.0, -25.0, -4.0), 50.0, 50.0, 4.0).unwrap();
+    boolean_union(k, f, w).unwrap()
+}
+
+/// Upright walls swept from a closed plan of lines and arcs, united with the floor.
+fn curved_walls(k: &mut Kernel, curves: &[Curve]) -> Brep {
     let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
     let w = create_linear_sweep(k, &refs, Vec3::new(0.0, 0.0, 1.0), HIGH, true).unwrap();
     let f = create_box(k, Point3::new(-25.0, -25.0, -4.0), 50.0, 50.0, 4.0).unwrap();
@@ -306,4 +314,54 @@ fn different_beads_round_an_outside_corner_are_refused() {
         .unwrap();
     assert!(err.site().and_then(|s| s.vertex).is_some(), "{err:?}");
     assert!(smb(&k, &part) == before, "the part changed");
+}
+
+/// A D-shaped boss has a straight edge and an arc sharing both end vertices. Each vertex is
+/// its own corner: choosing an end by proximity to the other edge's ends confuses the two.
+#[test]
+fn two_edges_sharing_both_vertices_take_each_corner_from_its_vertex() {
+    let mut k = kernel();
+    let line = Curve::from(
+        create_line_segment(Point3::new(-8.0, 0.0, 0.0), Point3::new(8.0, 0.0, 0.0)).unwrap(),
+    );
+    let arc = Curve::from(create_arc(Point3::ZERO, 8.0, 0.0, 180.0).unwrap());
+    let mut part = curved_walls(&mut k, &[line, arc]);
+    let edges = [
+        pick(&k, &part, Point3::new(0.0, 0.0, 0.0)),
+        pick(&k, &part, Point3::new(0.0, 8.0, 0.0)),
+    ];
+    let mut body = beads(&mut k, &mut part, &edges, 0.0);
+    assert!(volume(&k, &mut body) > 0.0);
+}
+
+/// At a tangent line-to-arc vertex the two bead ends already coincide. It is a smooth
+/// continuation, not an outside corner requiring a zero-angle revolution piece.
+#[test]
+fn a_tangent_line_and_arc_join_without_a_corner_piece() {
+    let mut k = kernel();
+    let curves = [
+        Curve::from(create_arc(Point3::new(10.0, 0.0, 0.0), 5.0, 0.0, 90.0).unwrap()),
+        Curve::from(
+            create_line_segment(Point3::new(10.0, 5.0, 0.0), Point3::new(-10.0, 5.0, 0.0)).unwrap(),
+        ),
+        Curve::from(
+            create_line_segment(Point3::new(-10.0, 5.0, 0.0), Point3::new(-10.0, -5.0, 0.0))
+                .unwrap(),
+        ),
+        Curve::from(
+            create_line_segment(Point3::new(-10.0, -5.0, 0.0), Point3::new(15.0, -5.0, 0.0))
+                .unwrap(),
+        ),
+        Curve::from(
+            create_line_segment(Point3::new(15.0, -5.0, 0.0), Point3::new(15.0, 0.0, 0.0)).unwrap(),
+        ),
+    ];
+    let mut part = curved_walls(&mut k, &curves);
+    let edges = [
+        pick(&k, &part, Point3::new(0.0, 5.0, 0.0)),
+        pick(&k, &part, Point3::new(13.5, 3.5, 0.0)),
+    ];
+    assert_ne!(edges[0], edges[1], "the two tangent joint edges");
+    let mut body = beads(&mut k, &mut part, &edges, 0.0);
+    assert!(volume(&k, &mut body) > 0.0);
 }

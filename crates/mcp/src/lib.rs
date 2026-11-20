@@ -12,6 +12,7 @@
 
 mod backend;
 mod options;
+mod plugin_tools;
 mod server;
 mod skill_reference;
 mod tools;

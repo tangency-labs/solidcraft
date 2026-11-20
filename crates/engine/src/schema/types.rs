@@ -1426,10 +1426,11 @@ fn model_axis_problem(v: &Value) -> Option<String> {
     })
 }
 
-/// The line `construct.plane.at_angle` turns about, as `features::axis_line` reads it: an edge or
-/// face of the model (as `construct::model_axis_param` reads it), else X, Y, Z, a construction
-/// axis's name or `{origin?, dir}`. Kept as given, for the handler. Whether a picked edge or face
-/// gives a line, or a name names an axis, is checked by the handler, which has the design.
+/// The line `construct.plane.at_angle` turns about, as `features::axis_line_exprs` reads it: an
+/// edge or face of the model (as `construct::model_axis_param` reads it), else X, Y, Z, a
+/// construction axis's name or `{origin?, dir}`, whose origin may be length expressions. Kept as
+/// given, for the handler. Whether a picked edge or face gives a line, a name names an axis, or an
+/// origin's expressions evaluate, is checked by the handler, which has the design.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AxisLine(pub Value);
 
@@ -1441,6 +1442,15 @@ impl<'de> Deserialize<'de> for AxisLine {
         } else {
             match &v {
                 Value::String(_) => None,
+                Value::Object(o) if o.contains_key("origin") => {
+                    if serde_json::from_value::<PointExpr3>(o.get("origin").cloned().unwrap_or(Value::Null)).is_err() {
+                        Some(whole("`axis.origin` must be a point [x, y, z] of numbers or length expressions"))
+                    } else if v.get("dir").and_then(params::vec3).and_then(solidcraft_geom::Vec3Geom::normalized).is_none() {
+                        Some(whole("axis needs a non-zero `dir`"))
+                    } else {
+                        None
+                    }
+                }
                 Value::Object(_) => crate::cmd::axis_line_object(&v).err().map(whole),
                 _ => Some(whole("`axis` is required")),
             }
@@ -1458,14 +1468,15 @@ impl JsonSchema for AxisLine {
     }
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         let point = generator.subschema_for::<Point3>();
+        let origin = generator.subschema_for::<PointExpr3>();
         let saved = json!({"required": ["type"], "properties": {"type": {"enum": ["edge", "face"]}}});
         json_schema!({
-            "description": "An axis: X, Y or Z (any case), a construction axis's name (the plane follows it as it moves), {\"origin\"?: [x, y, z] in mm (default: the origin; fixed), \"dir\": [x, y, z] that isn't zero}, or a straight or circular edge, or a cylinder, cone or torus face, of a body ({\"edge\": [x, y, z]} or {\"face\": [x, y, z]}, a point on it, or as saved: {\"type\": \"edge\" or \"face\", \"at\", \"name\"?}), whose axis the plane follows as the model changes.",
+            "description": "An axis: X, Y or Z (any case), a construction axis's name (the plane follows it as it moves), {\"origin\"?: [x, y, z] of numbers in mm or length expressions such as \"r - 2 mm\" (default: the origin; the plane follows the expressions as the parameters change), \"dir\": [x, y, z] that isn't zero}, or a straight or circular edge, or a cylinder, cone or torus face, of a body ({\"edge\": [x, y, z]} or {\"face\": [x, y, z]}, a point on it, or as saved: {\"type\": \"edge\" or \"face\", \"at\", \"name\"?}), whose axis the plane follows as the model changes.",
             "anyOf": [
                 {"type": "string"},
                 {
                     "type": "object",
-                    "properties": {"origin": point, "dir": point},
+                    "properties": {"origin": origin, "dir": point},
                     "required": ["dir"],
                     "not": {"anyOf": [{"required": ["edge"]}, {"required": ["face"]}, saved]}
                 },
@@ -1477,24 +1488,15 @@ impl JsonSchema for AxisLine {
     }
 }
 
-/// Circular Pattern's `axis`, as `features::pattern_axis` reads it: an [`AxisLine`], except that
-/// the coordinates of `{origin, dir}`'s origin may be expressions. Kept as given, for the handler.
+/// Circular Pattern's `axis`, as `features::axis_line_exprs` reads it: an [`AxisLine`], under its
+/// own name so the commands that build an axis from a pick do not take it for one. Kept as given,
+/// for the handler.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PatternAxis(pub Value);
 
 impl<'de> Deserialize<'de> for PatternAxis {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let v = Value::deserialize(d)?;
-        let Some(origin) = v.get("origin").filter(|_| v.is_object() && !crate::cmd::is_model_axis(&v)) else {
-            return AxisLine::deserialize(v).map(|axis| PatternAxis(axis.0)).map_err(D::Error::custom);
-        };
-        if serde_json::from_value::<PointExpr3>(origin.clone()).is_err() {
-            return Err(D::Error::custom(whole("`axis.origin` must be a point [x, y, z] of numbers or length expressions")));
-        }
-        if v.get("dir").and_then(params::vec3).and_then(solidcraft_geom::Vec3Geom::normalized).is_none() {
-            return Err(D::Error::custom(whole("axis needs a non-zero `dir`")));
-        }
-        Ok(PatternAxis(v))
+        AxisLine::deserialize(d).map(|axis| PatternAxis(axis.0))
     }
 }
 
@@ -1503,13 +1505,7 @@ impl JsonSchema for PatternAxis {
         "PatternAxis".into()
     }
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        let origin = generator.subschema_for::<PointExpr3>();
-        let mut schema = AxisLine::json_schema(generator);
-        let slot = schema.as_object_mut().and_then(|o| o.get_mut("anyOf")).and_then(|forms| forms.pointer_mut("/1/properties/origin"));
-        if let Some(slot) = slot {
-            *slot = json!(origin);
-        }
-        schema
+        AxisLine::json_schema(generator)
     }
 }
 
@@ -1744,4 +1740,10 @@ pub struct FeatureCommon {
 pub fn feature_common<'de, D: Deserializer<'de>, T: serde::de::DeserializeOwned>(d: D) -> Result<T, D::Error> {
     let v = Value::deserialize(d)?;
     serde_path_to_error::deserialize(&v).map_err(|e| D::Error::custom(super::check::located(&e)))
+}
+
+/// Deserializes any flattened part of a contract as [`feature_common`] does `FeatureCommon`:
+/// its problems name their keys as the parent's own would.
+pub fn flattened<'de, D: Deserializer<'de>, T: serde::de::DeserializeOwned>(d: D) -> Result<T, D::Error> {
+    feature_common(d)
 }

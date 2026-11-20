@@ -1122,6 +1122,27 @@ fn a_blend_found_by_a_world_pick_keeps_its_part() {
     assert_eq!(blend_body(&s).as_deref(), Some("Cap block"));
 }
 
+/// Edit Feature of a Delete Face in a moved component sends its face picks in the world, as
+/// the dialog shows them; they map into the component's frame like Offset Faces' (#17120).
+#[test]
+fn a_delete_face_in_a_moved_part_redefines_from_world_picks() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Part"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "Block"}));
+    run(&mut s, "solid.cylinder", json!({"base": [10, 10, -1], "radius": 3, "height": 12, "body_name": "Drill"}));
+    run(&mut s, "solid.combine", json!({"target": "Block", "tools": ["Drill"], "operation": "cut"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.ground", json!({"occurrence": "Part:1", "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "translate": [0, 40, 0]}));
+    run(&mut s, "component.activate", json!({"component": "Part"}));
+    run(&mut s, "face.delete", json!({"faces": [[13, 50, 5]], "body": "Block", "name": "Unhole"}));
+    let solid = 20.0 * 20.0 * 10.0;
+    assert!((body_volume(&s, "Block") - solid).abs() < 1e-6 * solid, "made: {}", body_volume(&s, "Block"));
+    run(&mut s, "timeline.redefine", json!({"feature": "Unhole", "command": "face.delete", "params": {"faces": [[13, 50, 5]], "body": "Block"}}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    assert!((body_volume(&s, "Block") - solid).abs() < 1e-6 * solid, "redefined: {}", body_volume(&s, "Block"));
+}
+
 /// A corner of a moved part is refused at the point picked, in the world.
 #[test]
 fn a_corner_of_a_moved_part_is_refused_where_it_was_picked() {

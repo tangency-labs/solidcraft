@@ -1431,14 +1431,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             edges.push(edge_id);
             shares_edge_curve.push(shares);
         }
-
-        let pass_on = k.fixes.fillet_statuses_pass_on;
         let mut bs_curves = access.smooth_with_target_mut(&edges, |target| {
             // fork 873c7c9 passes this on (SER)
-            crate::error::ignore_status(crate::error::passed_on(
-                topo_edge::orient_edge_sequence(k, target, &edges),
-                pass_on,
-            )?)?;
+            topo_edge::orient_edge_sequence(k, target, &edges)?;
 
             let mut prev_ivl = Extent1d::new();
             let mut curves = Vec::new();
@@ -1461,14 +1456,11 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     .as_mut()
                     .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
                 // fork 873c7c9 passes this on (SER)
-                crate::error::ignore_status(crate::error::passed_on(
-                    crv.trim(
-                        &tk,
-                        &mut trim_ivl,
-                        crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
-                    ),
-                    pass_on,
-                )?)?;
+                crv.trim(
+                    &tk,
+                    &mut trim_ivl,
+                    crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
+                )?;
 
                 if ii > 0 {
                     let prev_edge_id = *edges
@@ -1485,8 +1477,8 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                         .as_ref()
                         .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
                     // fork 873c7c9 passes these on (SER)
-                    let prev_deriv = eval_first_deriv_ignored(k, prev_crv, prev_param1, pass_on)?;
-                    let curr_deriv = eval_first_deriv_ignored(k, curr_crv, curr_param0, pass_on)?;
+                    let prev_deriv = eval_first_deriv(k, prev_crv, prev_param1)?;
+                    let curr_deriv = eval_first_deriv(k, curr_crv, curr_param0)?;
                     let prev_len = prev_deriv.length();
                     let curr_len = curr_deriv.length();
 
@@ -1494,10 +1486,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     let scale = curr_len / prev_len;
                     let scaled_end = edge_ivl.min() + scale * edge_ivl.length();
                     // fork 873c7c9 passes this on (SER)
-                    crate::error::ignore_status(crate::error::passed_on(
-                        edge_ivl.set_min_max(edge_ivl.min(), scaled_end),
-                        pass_on,
-                    )?)?;
+                    edge_ivl.set_min_max(edge_ivl.min(), scaled_end)?;
 
                     // Domains are the right lengths, make sure they're consecutive.
                     if !crate::geom::tol::are_same(edge_ivl.min(), prev_ivl.max()) {
@@ -1510,10 +1499,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                         .as_mut()
                         .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
                     // fork 873c7c9 passes this on (SER)
-                    crate::error::ignore_status(crate::error::passed_on(
-                        crv.edit_parameterization(k, &edge_ivl),
-                        pass_on,
-                    )?)?;
+                    crv.edit_parameterization(k, &edge_ivl)?;
                     target.edge_mut(edge_id)?.interval = edge_ivl;
                 }
 
@@ -1536,15 +1522,8 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             }
         }
 
-        // fork 873c7c9 passes this on (SER) before the NER
-        let comp_curve = match crate::error::passed_on(
-            BSplineCurve::create_by_joining(&mut bs_curves, None),
-            pass_on,
-        )? {
-            Ok(c) => c,
-            Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => return Err(SolidError::blend_missing(OP, "the joined curve")),
-        };
+        // fork 873c7c9 passes this on (SER) before the NER (WR-661)
+        let comp_curve = BSplineCurve::create_by_joining(&mut bs_curves, None)?;
 
         for (ii, ((&fs, &edge_id), &shares)) in sequence
             .iter()
@@ -1569,17 +1548,15 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     }
 }
 
-fn eval_first_deriv_ignored(
+/// The first derivative of `crv` at `param`; a failed evaluation is returned (upstream
+/// ignores it and reads `SM_UNDEF_DOUBLE`; fork 873c7c9 passes it on, WR-661).
+fn eval_first_deriv(
     k: &Kernel,
     crv: &crate::curve::curve::Curve,
     param: f64,
-    pass_on: bool,
 ) -> Result<crate::math::Vec3> {
-    match crate::error::passed_on(crv.evaluate(k, param, 1, false, true), pass_on)? {
-        Ok(vals) => Ok(vals.get(1).copied().unwrap_or(crate::math::Vec3::UNDEF)),
-        Err(e) if e.is_unported_or_cancelled() => Err(e),
-        Err(_) => Ok(crate::math::Vec3::UNDEF),
-    }
+    let vals = crv.evaluate(k, param, 1, false, true)?;
+    Ok(vals.get(1).copied().unwrap_or(crate::math::Vec3::UNDEF))
 }
 
 fn curve_as_bspline(crv: &crate::curve::curve::Curve, op: &'static str) -> Result<BSplineCurve> {

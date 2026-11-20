@@ -1,10 +1,10 @@
 //! Physical properties of an assembly placement, with original body material assignments.
 use solidcraft_geom::prelude::*;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use serde_json::Value;
 use solidcore_record::Vec3;
-use solidcraft_doc::{Document, Mat};
+use solidcraft_doc::{BomType, Document, Mat};
 use solidcraft_geom::Aabb3;
 use solidcraft_geom::inertia::{self, Tensor3};
 
@@ -53,28 +53,11 @@ pub(in crate::cmd) fn placements(doc: &Document, cmd: &str) -> Result<Vec<(u64, 
 /// The occurrences are grouped by parent once: searching all of them at every placement made a
 /// large assembly's traversal quadratic.
 fn subtree(doc: &Document, root: (u64, Vec<u64>, Mat), descendants: bool, cmd: &str) -> Result<Vec<(u64, Vec<u64>, Mat)>> {
-    let mut out = vec![root.clone()];
     if !descendants {
-        return Ok(out);
+        return Ok(vec![root]);
     }
-    let mut stack = vec![root];
-    let mut children: std::collections::BTreeMap<u64, Vec<_>> = std::collections::BTreeMap::new();
-    for occurrence in &doc.occurrences {
-        children.entry(occurrence.parent).or_default().push(occurrence);
-    }
-    while let Some((component, path, transform)) = stack.pop() {
-        for occurrence in children.get(&component).into_iter().flatten() {
-            if path.len() >= 64 || out.len() >= 100_000 {
-                return Err(bad(cmd, "assembly exceeds physical-properties traversal limits (64 levels or 100000 placements)"));
-            }
-            let mut child_path = path.clone();
-            child_path.push(occurrence.id);
-            let world = solidcraft_doc::mat_mul(&transform, &occurrence.transform);
-            out.push((occurrence.component, child_path.clone(), world));
-            stack.push((occurrence.component, child_path, world));
-        }
-    }
-    Ok(out)
+    let (component, path, world) = root;
+    doc.placements_below(component, &path, world).map_err(|e| bad(cmd, e.to_string()))
 }
 
 pub(super) fn component(s: &mut Session, p: &Value) -> Result<Value> {
@@ -213,6 +196,10 @@ fn measure(s: &Session, doc: &Document, selected: &[u64], descendants: bool, abo
         let placement = s.occurrence_placement_with(selected, &s.uncaptured_moves()).map_err(|e| bad(cmd, e.to_string()))?;
         subtree(doc, (placement.component, selected.to_vec(), placement.world), descendants, cmd)?
     };
+    // As in the bill of materials, a placement that counts as a reference adds nothing, nor does
+    // anything inside it; the one measured counts whatever its type.
+    let reference: HashSet<u64> =
+        doc.occurrences.iter().zip(doc.occurrence_bom_types()).filter(|(_, t)| *t == BomType::Reference).map(|(o, _)| o.id).collect();
     // Each component's bodies (with their index in the model), the timeline looked up once rather
     // than for every body at every placement.
     let mut by_component: std::collections::HashMap<u64, Vec<(usize, &solidcraft_doc::ModelBody)>> = std::collections::HashMap::new();
@@ -247,6 +234,9 @@ fn measure(s: &Session, doc: &Document, selected: &[u64], descendants: bool, abo
     // Closed bodies' (mass, centre of mass, inertia about it), all in world axes.
     let mut parts: Vec<(f64, Vec3, Option<Tensor3>)> = Vec::new();
     for (component, path, transform) in selected_placements {
+        if path.iter().skip(selected.len()).any(|id| reference.contains(id)) {
+            continue;
+        }
         placement_count += 1;
         for &(index, body) in by_component.get(&component).into_iter().flatten() {
             if let Some(w) = &watch {
@@ -258,6 +248,9 @@ fn measure(s: &Session, doc: &Document, selected: &[u64], descendants: bool, abo
             done += 1;
             let transform: Mat = doc.model_body_offset(body).map(|offset| solidcraft_doc::mat_mul(&transform, offset)).unwrap_or(transform);
             let mut measured = measure_placed(body, transform)?;
+            // The volume the bill of materials weighs too, measured once for the model; the area,
+            // the centre, the box and the counts are the placed body's.
+            let mut body_volume = body.volume().map_or(measured.volume, |v| v * solidcraft_doc::mat_volume_scale(&transform));
             if let Some(sheet) = state.sheets.iter().find(|sheet| sheet.body == body.definition_name() && !sheet.perforations.is_empty()) {
                 let mut corrected = body.measure()?;
                 corrected.volume = measured.volume;
@@ -267,9 +260,11 @@ fn measure(s: &Session, doc: &Document, selected: &[u64], descendants: bool, abo
                 measured.volume = corrected.volume;
                 measured.area = corrected.area;
                 measured.centroid = corrected.centroid;
+                // A perforated sheet's holes are not in the model's volume.
+                body_volume = measured.volume;
             }
             let density = doc.density(&body.name);
-            let body_mass = measured.volume * density / 1000.0;
+            let body_mass = body_volume * density / 1000.0;
             let closed = measured.closed;
             // The mesh's spread with the exact mass, so the tensor agrees with the mass shown.
             let body_inertia = spread
@@ -278,7 +273,7 @@ fn measure(s: &Session, doc: &Document, selected: &[u64], descendants: bool, abo
                 .map(|g| inertia::from_gyration(&inertia::transformed(g, &linear(&transform)), body_mass))
                 .filter(|i| i.iter().flatten().all(|x| x.is_finite()));
             if closed {
-                volume += measured.volume;
+                volume += body_volume;
                 mass += body_mass;
                 moment += measured.centroid * body_mass;
                 parts.push((body_mass, measured.centroid, body_inertia));
@@ -298,7 +293,7 @@ fn measure(s: &Session, doc: &Document, selected: &[u64], descendants: bool, abo
                 closed,
                 density_g_cm3: closed.then_some(density),
                 mass_g: closed.then_some(body_mass),
-                volume_mm3: closed.then_some(measured.volume),
+                volume_mm3: closed.then_some(body_volume),
                 area_mm2: measured.area,
                 center_of_mass: closed.then_some(measured.centroid),
                 inertia_g_mm2: body_inertia,

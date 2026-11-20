@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.drawing_dimension_from_model": "Model Dimensions"
+  },
+  "ar": {
+    "cmd.drawing_dimension_from_model": "أبعاد النموذج"
+  },
+  "de": {
+    "cmd.drawing_dimension_from_model": "Modellmaße"
+  },
+  "he": {
+    "cmd.drawing_dimension_from_model": "מידות המודל"
+  },
+  "ja": {
+    "cmd.drawing_dimension_from_model": "モデル寸法"
+  },
+  "ko": {
+    "cmd.drawing_dimension_from_model": "모델 치수"
+  },
+  "vi": {
+    "cmd.drawing_dimension_from_model": "Kích thước mô hình"
+  },
+  "zh": {
+    "cmd.drawing_dimension_from_model": "模型尺寸"
+  }
+}

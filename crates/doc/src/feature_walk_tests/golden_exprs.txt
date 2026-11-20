@@ -6,13 +6,13 @@ frame_end_cap
     Thickness = cap.thickness (Length)
     Inset Ratio = cap.ratio (Unitless)
     Corner Chamfer = cap.chamfer (Length)
-  expressions: cap1.angle, cap1.offset, cap.thickness, cap.ratio, cap.chamfer
+  expressions: cap1.angle, cap1.offset, cap.thickness, cap.ratio, cap.chamfer, 0, 0, 0
 body_transfer
 sketch
   inputs:
     Angle = sketch.angle (Angle)
     Offset = sketch.offset (Length)
-  expressions: sketch.angle, sketch.offset
+  expressions: sketch.angle, sketch.offset, 0, 0, 0
 sketch_along_path
   inputs:
     Distance (0 to 1) = sketch.t (Unitless)
@@ -126,7 +126,7 @@ mirror
   inputs:
     Angle = mirror.angle (Angle)
     Offset = mirror.offset (Length)
-  expressions: mirror.angle, mirror.offset
+  expressions: mirror.angle, mirror.offset, 0, 0, 0
 hole_simple
   inputs:
     Diameter = hole.diameter (Length)
@@ -179,29 +179,29 @@ draft
     Angle = draft.angle (Angle)
     Angle = draft_neutral.angle (Angle)
     Offset = draft_neutral.offset (Length)
-  expressions: draft.angle, draft_neutral.angle, draft_neutral.offset
+  expressions: draft.angle, draft_neutral.angle, draft_neutral.offset, 0, 0, 0
 construction_plane
   inputs:
     Angle = cplane.angle (Angle)
     Offset = cplane.offset (Length)
-  expressions: cplane.angle, cplane.offset
+  expressions: cplane.angle, cplane.offset, 0, 0, 0
 split
   inputs:
     Angle = split.angle (Angle)
     Offset = split.offset (Length)
-  expressions: split.angle, split.offset
+  expressions: split.angle, split.offset, 0, 0, 0
 split_line
   inputs:
     Angle = split_line.angle (Angle)
     Offset = split_line.offset (Length)
-  expressions: split_line.angle, split_line.offset
+  expressions: split_line.angle, split_line.offset, 0, 0, 0
 construction_axis
   inputs:
     Angle = axis_a.angle (Angle)
     Offset = axis_a.offset (Length)
     Angle = axis_b.angle (Angle)
     Offset = axis_b.offset (Length)
-  expressions: axis_a.angle, axis_a.offset, axis_b.angle, axis_b.offset
+  expressions: axis_a.angle, axis_a.offset, axis_b.angle, axis_b.offset, 0, 0, 0, 0, 0, 0
 construction_point_planes
   inputs:
     Angle = pt_a.angle (Angle)
@@ -210,7 +210,7 @@ construction_point_planes
     Offset = pt_b.offset (Length)
     Angle = pt_c.angle (Angle)
     Offset = pt_c.offset (Length)
-  expressions: pt_a.angle, pt_a.offset, pt_b.angle, pt_b.offset, pt_c.angle, pt_c.offset
+  expressions: pt_a.angle, pt_a.offset, pt_b.angle, pt_b.offset, pt_c.angle, pt_c.offset, 0, 0, 0, 0, 0, 0, 0, 0, 0
 construction_point_along
   inputs:
     Distance (0 to 1) = pt.t (Unitless)
@@ -219,7 +219,7 @@ split_face
   inputs:
     Angle = split_face.angle (Angle)
     Offset = split_face.offset (Length)
-  expressions: split_face.angle, split_face.offset
+  expressions: split_face.angle, split_face.offset, 0, 0, 0
 scale
   inputs:
     Scale factor = scale.factor (Unitless)
@@ -262,7 +262,7 @@ replace_face
   inputs:
     Angle = replace_face.angle (Angle)
     Offset = replace_face.offset (Length)
-  expressions: replace_face.angle, replace_face.offset
+  expressions: replace_face.angle, replace_face.offset, 0, 0, 0
 align
 coil
   inputs:
@@ -415,7 +415,7 @@ surface_extend_to_plane
     Distance = extend.distance (Length)
     Angle = extend.angle (Angle)
     Offset = extend.offset (Length)
-  expressions: extend.distance, extend.angle, extend.offset
+  expressions: extend.distance, extend.angle, extend.offset, 0, 0, 0
 surface_extend_to_face
   inputs:
     Distance = extend.distance (Length)
@@ -429,17 +429,17 @@ surface_trim
   inputs:
     Angle = trim.angle (Angle)
     Offset = trim.offset (Length)
-  expressions: trim.angle, trim.offset
+  expressions: trim.angle, trim.offset, 0, 0, 0
 surface_trim_curves
   inputs:
     Angle = trim.angle (Angle)
     Offset = trim.offset (Length)
-  expressions: trim.angle, trim.offset
+  expressions: trim.angle, trim.offset, 0, 0, 0
 surface_trim_mutual
   inputs:
     Angle = trim.angle (Angle)
     Offset = trim.offset (Length)
-  expressions: trim.angle, trim.offset
+  expressions: trim.angle, trim.offset, 0, 0, 0
 move
   inputs:
     X distance = move.x (Length)

@@ -1,0 +1,74 @@
+{
+  "ar": {
+    "ui.drawing_settings.immediate": "تُطبّق تغييرات الورقة فورًا. كل تعديل خطوة تراجع واحدة.",
+    "ui.drawing_settings.outside": "المساقط خارج منطقة الرسم ({count})",
+    "ui.drawing_settings.picture": "الصورة",
+    "ui.drawing_settings.picture_help": "دقة تصدير هذه الورقة كصورة.",
+    "ui.drawing_settings.template_help": "ستتوفر القوالب عبر تصفح موارد الرسم.",
+    "ui.drawing_settings.unmoved": "بقيت المساقط في مواضعها.",
+    "ui.drawing_settings.view": "مسقط {number}"
+  },
+  "de": {
+    "ui.drawing_settings.immediate": "Blattänderungen gelten sofort. Jede Änderung ist ein Rückgängig-Schritt.",
+    "ui.drawing_settings.outside": "Ansichten außerhalb des Zeichenbereichs ({count})",
+    "ui.drawing_settings.picture": "Bild",
+    "ui.drawing_settings.picture_help": "Auflösung beim Export dieses Blatts als Bild.",
+    "ui.drawing_settings.template_help": "Vorlagen werden über die Zeichnungsressourcen verfügbar.",
+    "ui.drawing_settings.unmoved": "Die Ansichten blieben an ihrer Position.",
+    "ui.drawing_settings.view": "Ansicht {number}"
+  },
+  "en": {
+    "ui.drawing_settings.immediate": "Sheet changes apply immediately. Each edit is one drawing undo step.",
+    "ui.drawing_settings.outside": "Views outside the drawing area ({count})",
+    "ui.drawing_settings.picture": "Picture",
+    "ui.drawing_settings.picture_help": "Resolution used when exporting this sheet as an image.",
+    "ui.drawing_settings.template_help": "Templates will be available through Browse Drawing Resources.",
+    "ui.drawing_settings.unmoved": "The views kept their positions.",
+    "ui.drawing_settings.view": "View {number}"
+  },
+  "he": {
+    "ui.drawing_settings.immediate": "שינויים בגיליון חלים מיד. כל עריכה היא צעד ביטול אחד.",
+    "ui.drawing_settings.outside": "מבטים מחוץ לאזור השרטוט ({count})",
+    "ui.drawing_settings.picture": "תמונה",
+    "ui.drawing_settings.picture_help": "הרזולוציה לייצוא גיליון זה כתמונה.",
+    "ui.drawing_settings.template_help": "תבניות יהיו זמינות בעיון במשאבי השרטוט.",
+    "ui.drawing_settings.unmoved": "המבטים נשארו במקומם.",
+    "ui.drawing_settings.view": "מבט {number}"
+  },
+  "ja": {
+    "ui.drawing_settings.immediate": "シートの変更はすぐに適用されます。編集ごとに元に戻せます。",
+    "ui.drawing_settings.outside": "図面領域外のビュー（{count}）",
+    "ui.drawing_settings.picture": "画像",
+    "ui.drawing_settings.picture_help": "このシートを画像として書き出すときの解像度です。",
+    "ui.drawing_settings.template_help": "テンプレートは図面リソースの参照から利用できるようになります。",
+    "ui.drawing_settings.unmoved": "ビューの位置は維持されました。",
+    "ui.drawing_settings.view": "ビュー {number}"
+  },
+  "ko": {
+    "ui.drawing_settings.immediate": "시트 변경은 즉시 적용됩니다. 각 편집은 한 번에 실행 취소할 수 있습니다.",
+    "ui.drawing_settings.outside": "도면 영역을 벗어난 뷰 ({count})",
+    "ui.drawing_settings.picture": "이미지",
+    "ui.drawing_settings.picture_help": "이 시트를 이미지로 내보낼 때 사용하는 해상도입니다.",
+    "ui.drawing_settings.template_help": "템플릿은 도면 리소스 찾아보기에서 사용할 수 있게 됩니다.",
+    "ui.drawing_settings.unmoved": "뷰의 위치가 유지되었습니다.",
+    "ui.drawing_settings.view": "뷰 {number}"
+  },
+  "vi": {
+    "ui.drawing_settings.immediate": "Thay đổi tờ được áp dụng ngay. Mỗi chỉnh sửa là một bước hoàn tác.",
+    "ui.drawing_settings.outside": "Hình chiếu ngoài vùng vẽ ({count})",
+    "ui.drawing_settings.picture": "Ảnh",
+    "ui.drawing_settings.picture_help": "Độ phân giải khi xuất tờ này dưới dạng ảnh.",
+    "ui.drawing_settings.template_help": "Mẫu sẽ có trong phần duyệt tài nguyên bản vẽ.",
+    "ui.drawing_settings.unmoved": "Các hình chiếu giữ nguyên vị trí.",
+    "ui.drawing_settings.view": "Hình chiếu {number}"
+  },
+  "zh": {
+    "ui.drawing_settings.immediate": "图纸更改立即生效。每次编辑都是一个撤销步骤。",
+    "ui.drawing_settings.outside": "绘图区域外的视图（{count}）",
+    "ui.drawing_settings.picture": "图像",
+    "ui.drawing_settings.picture_help": "将此图纸导出为图像时使用的分辨率。",
+    "ui.drawing_settings.template_help": "模板将在浏览工程图资源中提供。",
+    "ui.drawing_settings.unmoved": "视图保留原有位置。",
+    "ui.drawing_settings.view": "视图 {number}"
+  }
+}

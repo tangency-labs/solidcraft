@@ -71,6 +71,19 @@ pub fn selection_ink(t: &Tokens) -> egui::Color32 {
     if solidcraft_theme::contrast_ratio(t.form_primary, t.selected_bg) >= SELECTION_INK_MIN_CONTRAST { t.form_primary } else { t.selected_ink }
 }
 
+/// The ink to draw on `fill`: `preferred` where it reads there (at least `floor`:1, 3 for icons,
+/// bold labels and marks, 4.5 for body text), else whichever of the theme's selected and body
+/// inks reads better. Themes whose own ink reads keep it; SolidCraft 95, CGA and the 1-bit pair,
+/// whose primary colour is their selection colour, and themes whose primary sits too close to
+/// it get an ink that reads. Tokens: `selected_ink, form_ink`.
+pub fn ink_on(t: &Tokens, fill: egui::Color32, preferred: egui::Color32, floor: f64) -> egui::Color32 {
+    use solidcraft_theme::contrast_ratio;
+    if contrast_ratio(preferred, fill) >= floor {
+        return preferred;
+    }
+    if contrast_ratio(t.selected_ink, fill) >= contrast_ratio(t.form_ink, fill) { t.selected_ink } else { t.form_ink }
+}
+
 /// Below this contrast with `selected_bg`, a form's primary colour counts as the selection's own
 /// colour (`selection_ink`).
 const SELECTION_INK_MIN_CONTRAST: f64 = 1.5;

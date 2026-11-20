@@ -20,6 +20,7 @@ pub mod catmull_rom;
 pub mod cell;
 mod chain;
 pub mod compare;
+pub mod drawing_measure;
 pub mod drawing_sheet;
 pub mod drawing_view;
 pub mod env;
@@ -29,6 +30,7 @@ pub mod fill_iso;
 pub mod fill_matched;
 mod grid;
 pub mod hlr;
+pub mod ids;
 pub mod inertia;
 pub mod linkage;
 mod mesh;
@@ -38,10 +40,12 @@ pub mod paper;
 pub mod pixel_grid;
 mod plane;
 mod profile;
+pub mod revision;
 pub mod section;
 pub mod simplify;
 pub mod spline_space;
 pub mod stderr;
+pub mod table;
 /// The plan evaluator, now the kernel's (`solidcore::eval::plan`), and the display plan, now
 /// solidcore-tess's (RFC 0003, item 1.1), under their old path.
 pub mod tess {
@@ -117,7 +121,7 @@ pub use chain::{Chain, Closed, Ends, Open, Path, Planar, Ring};
 pub use grid::Grid;
 pub use mesh::{Aabb3, BoxedTriangle, InsideIndex, MassProperties, Mesh, MeshGeom, MeshMeasure, TANGENT_CHAIN, find_close_pair};
 pub use plane::PlaneGeom;
-pub use profile::{Loop2Geom, MAX_DERIVATIVE_ORDER, Region2Geom, Seg2Geom, Similarity2, bezier, regions_apart};
+pub use profile::{ArcMap, Loop2Geom, MAX_DERIVATIVE_ORDER, Region2Geom, Seg2Geom, Similarity2, bezier, regions_apart};
 pub use unit_vec3::UnitVec3;
 pub use vec::{Vec2Geom, Vec3Geom};
 

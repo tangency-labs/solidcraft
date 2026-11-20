@@ -743,14 +743,13 @@ fn d_prism_unequal_corner_is_a_setback_beside_the_cylinder() {
     springs_are_the_fills(&k, &b, &r, case.name, 3);
 }
 
-/// With `fillet_round_as_definition` on (as here), a Setback's fill patches keep the fill's
+/// A Setback's fill patches keep the fill's
 /// definition (#2488). Beside a curved face its faces are the quadrics they are: each patch is
 /// its definition, with its bound, re-certified from it; its record keeps the cylinder as a
 /// cylinder and rebuilds the same patch; and moved, the definition's cylinder moves with it.
 #[test]
 fn beside_a_curved_face_the_fill_is_its_definition() {
     let (mut k, mut b, edges, case) = d_prism_case();
-    assert!(k.fixes.fillet_round_as_definition);
     let r = round_each(&mut k, &mut b, &edges, &[2.0, 2.5, 3.0], case.v);
     assert_eq!(r.event, Some(BlendCornerEvent::Setback), "{}", r.reason);
     assert!(r.ok, "{}", r.reason);

@@ -33,7 +33,7 @@ pub fn diagnostics(app: &SolveApp) -> String {
     let renderer = if app.viewport.gpu.is_some() { "GPU" } else { "CPU" };
     let count = |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
     format!(
-        "SolidCraft {VERSION} ({COMMIT}, built {BUILD_DATE})\nOS: {} {}\nRenderer: {renderer}{}\nWindow: {}\nDesign: {} ({}, {})",
+        "SolidCraft {VERSION} ({COMMIT}, built {BUILD_DATE})\nOS: {} {}\nRenderer: {renderer}{}\nWindow: {}\nDesign: {} ({}, {}){}",
         std::env::consts::OS,
         std::env::consts::ARCH,
         app.help.gpu.as_ref().map(|g| format!(", {g}")).unwrap_or_default(),
@@ -41,7 +41,17 @@ pub fn diagnostics(app: &SolveApp) -> String {
         app.session.doc.name,
         count(app.session.doc.features.len(), "feature", "features"),
         count(crate::open_meshing::session_world(&app.session).bodies.len(), "body", "bodies"),
+        policy_line(app),
     )
+}
+
+/// The diagnostics' Policy line while an organization's policy is set: what it locks, not its name.
+fn policy_line(app: &SolveApp) -> String {
+    if !app.policy.managed() {
+        return String::new();
+    }
+    let locked = app.policy.locked();
+    format!("\nPolicy: managed; locks {}", if locked.is_empty() { "nothing".to_string() } else { locked.join(", ") })
 }
 
 /// Whether a Help menu item can run now: behind an open bug report, the items that open a
@@ -218,6 +228,7 @@ fn about(app: &mut SolveApp, ctx: &egui::Context) {
                 solidcraft_ui_text::tr_label("Open-source parametric 3D CAD in Rust. Licensed MIT OR Apache-2.0."),
                 ui_kit::Text::Note("description"),
             );
+            crate::policy::note(app, ui, "about:managed");
             ui.horizontal(|ui| {
                 for link in crate::links::LINKS {
                     let button = ui_kit::button(ui, solidcraft_ui_text::tr(link.label), ui_kit::Button::Normal).backing_on_hover_text(link.url);

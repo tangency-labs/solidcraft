@@ -4,6 +4,7 @@
 //! solidcraft-cli run <script.json|design.sc|part.step|mesh.3mf> [--in design|part.step|mesh.3mf] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--json-out FILE] [--allow-errors]
 //!                    [--param-check off|warn|strict] [--script-relative]
 //! solidcraft-cli eval <script.json|design.sc|part.step> [--in design.sc|part.step] [--json-out FILE] (alias: inspect) measurements as JSON
+//! solidcraft-cli check <design.sc|script.json> [--drawing ID|NAME] [--sheet ID|NAME] [--json-out FILE] Check Drawing on its drawings; exit 1 on findings
 //! solidcraft-cli script <design.sc> [--out script.json]     the design's history as a command script
 //! solidcraft-cli bench-open <design.sc | part.step> [--parse-only] [--save OUT.sc] [--display LEVEL [--edit NAME EXPR]] [--ops script.json] loading timings as JSON lines
 //! solidcraft-cli bench-agent [--scale F] [--save F] [--script-out F] a ~1,300-body design built command by command, timed
@@ -21,10 +22,14 @@
 //!                    [--param-check off|warn|strict] [--compact]
 //!                                                             MCP server on stdio (docs/mcp.md)
 //! solidcraft-cli mcp setup [--dry-run] [--client NAME] [--live] (alias: mcp install) add it to OpenCode, Claude Desktop, Claude Code, Cursor
+//! solidcraft-cli plugin check <folder|plugin.zip> [--json]    what Install and a call would refuse, with fixes
+//! solidcraft-cli plugin test <folder|plugin.zip> [--json] [--out DIR] run the plugin's tests/*.json on the real host
 //! solidcraft-cli licences                                     SolidCraft's licence and the third-party licences
 //! solidcraft-cli icon --out F.png|F.ico [--size N]             the app icon (packaging; drawn, not a file)
 //!
 //! --plugin-limits FILE.json (local sessions only)              user fuel/memory ceilings; connected desktops use their own preferences
+//! --plugins-dir DIR (local sessions only)                     installed plugins (default: the app's own)
+//! --keep-plugin-approvals (local sessions only)               keep plugin approvals between runs, in the plugins folder's grant store
 //! --debug (with any command)                                  SolidCraft's debug log on stderr (or RUST_LOG=LEVEL)
 //! --max-file-size SIZE (with any command)                     read STEP and design files up to SIZE (2GB, 1500MB; at most 16GB)
 //! ```
@@ -33,12 +38,14 @@
 
 mod bench_agent;
 mod bench_assistant;
+mod check;
 mod crashes;
 mod fuzz;
 mod kernel_cases;
 mod kernel_cases_export;
 mod logger;
 mod oracle;
+mod plugin;
 mod preview;
 mod profiling;
 mod recipe;
@@ -66,6 +73,8 @@ struct Command {
 const USAGE_RUN: &str = "  solidcraft-cli run <script.json|design.sc|part.step> [--in design.sc|part.step] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--profile-out trace.json] [--json-out FILE] [--allow-errors] [--validation each_step|each_feature|off]\n                     [--param-check off|warn|strict] [--quality standard|fine|finest] [--script-relative]\n  solidcraft-cli run --in <design.sc|part.step> [--out FILE]...\n      (a timeline feature that fails fails the run and nothing is written; --allow-errors writes anyway)\n      (--quality: how closely an STL, OBJ or 3MF --out follows curved faces, as file.export's quality: a chord of\n       2e-4, 5e-5 or 1e-5 of each body's size, never under 1 µm, default standard)\n      (--validation: when SMLib's full check runs on the features computed (diagnostics.validation), default each_feature)\n      (--param-check checks each step against its command's contract: warn reports on stderr, strict stops the run)\n      (--script-relative runs command file paths from the positional script's folder; command-line file paths\n       stay relative to the caller's folder, which remains the default for scripts without this option)\n      (--timings prints {timings: [{index, command, ms}], total_ms} for a script, with --results its results too;\n       --profile adds each command's profile: {boolean_ms, tessellate_ms, other_ms}, the kernel's share)\n      (--profile also records where the time goes, SMLib's calls, kernel operations, features, commands and import stages,\n       and prints the table to stderr: count, total, self time and longest per span; --profile-out FILE writes the spans\n       as a Chrome trace for chrome://tracing or ui.perfetto.dev; SOLIDCRAFT_PROFILE=1 does the same for any command)\n";
 /// `eval`'s lines in the usage.
 const USAGE_EVAL: &str = "  solidcraft-cli eval <script.json|design.sc|part.step> [--in design.sc|part.step] [--json-out FILE] [--profile] [--profile-out trace.json] [--validation each_step|each_feature|off]     (alias: inspect)\n  solidcraft-cli eval --in <script.json|design.sc|part.step> [--json-out FILE]\n      (with both inputs, runs the positional script on --in before measuring; does not automatically save the modified design)\n      (--json-out FILE writes the JSON that run (with --results, else the measurement) and eval print to FILE instead of stdout,\n       as plain UTF-8: a shell's > can re-encode it, e.g. Windows PowerShell adds a byte-order mark)\n      (--profile, --profile-out and --validation as for run)\n";
+/// `check`'s lines in the usage.
+const USAGE_CHECK: &str = "  solidcraft-cli check <design.sc|script.json> [--drawing ID|NAME] [--sheet ID|NAME] [--json-out FILE]\n      (Check Drawing, drawing.check, on each drawing of the design, or the one --drawing names, by id or name: prints\n       {drawings: [{id, name, check: drawing.check's reply}], findings: the total}, or writes it to --json-out FILE;\n       --sheet checks that sheet only; exits with 1 when anything is found, after the report, and on an error, with none)\n";
 /// `script`'s lines in the usage.
 const USAGE_SCRIPT: &str = "  solidcraft-cli script <design.sc|script.json> [--out script.json]\n      (the design's history as a command script that eval and run replay)\n";
 /// `bench-open`'s lines in the usage.
@@ -94,6 +103,8 @@ const USAGE_FUZZ: &str =
 /// `mcp`'s lines in the usage.
 const USAGE_MCP: &str = "  solidcraft-cli mcp [--headless] [--in design.sc|script.json] [--connect 127.0.0.1:PORT [--token T]] [--allow-path DIR]... [--allow-any-path] [--require-allow-path]\n                     [--param-check off|warn|strict] [--render-gpu] [--compact]\n      (--compact, SOLIDCRAFT_MCP_COMPACT=1 or the app's Preferences › AI (with --connect): compact tool output for\n       agents: inspect_design summarises sketches and takes `sketches` by name and a `bodies` filter, and tool JSON\n       is not pretty-printed; off by default)\n  solidcraft-cli mcp setup [--dry-run] [--client opencode|claude-desktop|claude-code|cursor] [--live]\n      (adds a `solidcraft` server, with this program's path, to each installed AI client; --live adds `solidcraft-live` for the running app; alias: mcp install)\n";
 /// `crashes`'s lines in the usage.
+const USAGE_PLUGIN: &str = "  solidcraft-cli plugin check <folder|plugin.zip> [--json]\n  solidcraft-cli plugin test <folder|plugin.zip> [--json] [--out DIR]\n      (check: what Install and a call would refuse, without running the plugin: the manifest and its size, permissions\n       (net is refused), limits, the component's WIT world and version; each problem with how to fix it; exits non-zero on an error;\n       a folder is checked without its tests folder and hidden files)\n      (test: installs the package in a scratch folder and runs its test cases, tests/*.json, on the real host and limits;\n       an entry with no case runs once with its defaults when it can; --json prints pass or fail per case; --out DIR keeps\n       each case's resulting design and log; exits non-zero when a case fails; see the plugin guide in the docs)\n";
+
 const USAGE_CRASHES: &str = "  solidcraft-cli crashes [list [--json] | show <id> | replay <id> | dir | clear [<id>]]\n";
 /// `licences`'s lines in the usage.
 const USAGE_LICENCES: &str = "  solidcraft-cli licences\n";
@@ -112,11 +123,14 @@ const USAGE_DEBUG: &str = "  --debug, with any command: what SolidCraft logs (wh
 
 const USAGE_PLUGIN_LIMITS: &str = "  --plugin-limits FILE.json, with local commands: user ceilings {max_fuel, max_memory_mib}; defaults 100000000000 / 128, invocation defaults remain 10000000 / 64 MiB. With mcp use --headless; connected desktops keep their own preferences.\n";
 
+const USAGE_PLUGINS_DIR: &str = "  --plugins-dir DIR, with local commands: the folder plugin.install installs to and importers are found in;\n      default: the desktop app's plugins folder.\n  --keep-plugin-approvals, with local commands: keep plugin approvals between runs, in the plugins folder's grant\n      store (DIR/.grants), shared with the desktop app, so a plugin installed and approved there or in an earlier run\n      is used here; list them with plugin.grants and take one back with plugin.revoke. Without it, approvals last for\n      the run.\n";
+
 /// The commands the CLI takes, in the order the top-level usage lists them.
 const COMMANDS: &[Command] = &[
     Command { name: "run", usage: USAGE_RUN, listed: true },
     Command { name: "eval", usage: USAGE_EVAL, listed: true },
     Command { name: "inspect", usage: USAGE_EVAL, listed: false },
+    Command { name: "check", usage: USAGE_CHECK, listed: true },
     Command { name: "script", usage: USAGE_SCRIPT, listed: true },
     Command { name: "bench-open", usage: USAGE_BENCH_OPEN, listed: true },
     Command { name: "bench-agent", usage: USAGE_BENCH_AGENT, listed: true },
@@ -131,6 +145,7 @@ const COMMANDS: &[Command] = &[
     Command { name: "fuzz", usage: USAGE_FUZZ, listed: true },
     Command { name: "fuzz-one", usage: USAGE_FUZZ_ONE, listed: false },
     Command { name: "mcp", usage: USAGE_MCP, listed: true },
+    Command { name: "plugin", usage: USAGE_PLUGIN, listed: true },
     Command { name: "crashes", usage: USAGE_CRASHES, listed: true },
     Command { name: "licences", usage: USAGE_LICENCES, listed: true },
     Command { name: "licenses", usage: USAGE_LICENCES, listed: false },
@@ -143,6 +158,8 @@ const COMMANDS: &[Command] = &[
 fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     logger::init(&mut args);
+    // The kernel's fix set, named to solidcore-ops before any call runs on it.
+    solidcraft_engine::kernel::start();
     // `--profile` / `--profile-out` (run, eval, bench-open) or SOLIDCRAFT_PROFILE (any command):
     // record from here, and print the table when the command ends.
     let profiling = match args.first().map(String::as_str) {
@@ -164,6 +181,10 @@ fn main() -> ExitCode {
         eprintln!("error: {e}");
         return ExitCode::FAILURE;
     }
+    if let Err(e) = plugins_dir(&mut args) {
+        eprintln!("error: {e}");
+        return ExitCode::FAILURE;
+    }
     let r = match args.first().map(String::as_str) {
         // Asked-for help is not an error: the command's usage on stdout, exit 0. It is read
         // before the command runs, so `--help` never starts a run (a fuzz run, a server).
@@ -174,6 +195,7 @@ fn main() -> ExitCode {
         }
         Some("run") => cmd_run(&args[1..]),
         Some("eval" | "inspect") => cmd_eval(&args[1..]),
+        Some("check") => check::run(&args[1..]),
         Some("script") => cmd_script(&args[1..]),
         Some("snapshot") => cmd_snapshot(&args[1..]),
         Some("render") => render::run(&args[1..]),
@@ -205,6 +227,7 @@ fn main() -> ExitCode {
             solidcraft_mcp::cleanup_scratch_dir();
             result
         }
+        Some("plugin") => plugin::run(&args[1..]),
         Some("crashes") => crashes::run(&args[1..]),
         Some("icon") => cmd_icon(&args[1..]),
         Some("licences" | "licenses") => {
@@ -307,6 +330,61 @@ fn plugin_limits(args: &mut Vec<String>) -> Result<(), String> {
     solidcraft_engine::plugin::configure_process_host_limits(limits).map_err(|e| e.to_string())
 }
 
+/// `--plugins-dir DIR` (or `--plugins-dir=DIR`): the local sessions' plugins folder.
+/// `--keep-plugin-approvals`: local sessions keep plugin approvals between runs in that folder's
+/// grant store. Without it, approvals last for the session, as they always did.
+fn plugins_dir(args: &mut Vec<String>) -> Result<(), String> {
+    let mut dir = None;
+    let mut keep = false;
+    let mut i = 0;
+    while let Some(arg) = args.get(i) {
+        let value = if arg == "--plugins-dir" {
+            let value = args.get(i + 1).filter(|v| !v.starts_with("--")).cloned().ok_or("--plugins-dir needs a folder")?;
+            args.drain(i..i + 2);
+            Some(value)
+        } else if let Some(value) = arg.strip_prefix("--plugins-dir=") {
+            let value = value.to_string();
+            args.remove(i);
+            Some(value)
+        } else if arg == "--keep-plugin-approvals" {
+            args.remove(i);
+            keep = true;
+            None
+        } else {
+            i += 1;
+            None
+        };
+        if let Some(value) = value
+            && (value.is_empty() || dir.replace(value).is_some())
+        {
+            return Err("provide one --plugins-dir folder".into());
+        }
+    }
+    if (dir.is_some() || keep)
+        && (args.iter().any(|v| v == "--connect" || v.starts_with("--connect="))
+            || (args.first().map(String::as_str) == Some("mcp") && !args.iter().any(|v| v == "--headless")))
+    {
+        return Err(
+            "--plugins-dir and --keep-plugin-approvals control local sessions; use mcp --headless, or the connected desktop's own plugins".into()
+        );
+    }
+    let dir = match dir {
+        Some(dir) => {
+            let dir = std::path::PathBuf::from(dir);
+            let dir = if dir.is_absolute() { dir } else { std::env::current_dir().map_err(|e| format!("--plugins-dir: {e}"))?.join(dir) };
+            if dir.exists() && !dir.is_dir() {
+                return Err(format!("--plugins-dir: {} is not a folder", dir.display()));
+            }
+            Some(dir)
+        }
+        None => None,
+    };
+    if dir.is_none() && !keep {
+        return Ok(());
+    }
+    solidcraft_engine::plugin::configure_process_plugins(dir, keep).map_err(|e| e.to_string())
+}
+
 fn pretty(v: &Value) -> String {
     serde_json::to_string_pretty(v).unwrap_or_default()
 }
@@ -320,6 +398,7 @@ fn usage() -> String {
     }
     s.push_str(USAGE_DEBUG);
     s.push_str(USAGE_PLUGIN_LIMITS);
+    s.push_str(USAGE_PLUGINS_DIR);
     s
 }
 
@@ -863,7 +942,7 @@ fn cmd_snapshot(args: &[String]) -> Result<(), String> {
         None => solidcraft_engine::view::home_camera(&s).map_err(|e| e.to_string())?,
     };
     let guides = Guides { grid: !args.iter().any(|a| a == "--no-grid"), axes: !args.iter().any(|a| a == "--no-axes") };
-    let scene = solidcraft_engine::view::scene_with_guides(&s, &cam, s.section, guides).map_err(|e| e.to_string())?;
+    let scene = solidcraft_engine::view::scene_with_guides(&s, &cam, &s.section, guides).map_err(|e| e.to_string())?;
     let png = solidcraft_engine::capture::png(&scene, &cam, w, h)?;
     std::fs::write(out, &png.bytes).map_err(|e| format!("{out}: {e}"))?;
     let mut reply = json!({"path": out, "width": w, "height": h, "bytes": png.bytes.len(), "renderer": png.renderer});

@@ -1,0 +1,1 @@
+| crates/look/icons/design/svg/flat/find_kinds.svg | Nathan-Dane (SolidCraft contributor) | original icon master (64 grid), the Browser search's kind filter from the contributor's compact search design (#1634) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |

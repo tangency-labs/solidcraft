@@ -14,7 +14,9 @@ use solidcraft_viewport::{Camera, Rgb, Scene, SceneAnalysis, SceneLine, SceneMes
 /// The grid's spacing and reach for a view, shared with the other apps that draw a grid.
 pub use solidcraft_viewport::grid::{grid_ext, grid_step};
 
-use crate::{Result, Sel, Session};
+pub use solidcraft_viewport::MAX_SECTION_PLANES;
+
+use crate::{Result, SectionPlane, Sel, Session};
 
 /// Colours (shared with the GPU viewport).
 pub mod colors {
@@ -844,13 +846,13 @@ pub fn component_color(s: &Session, component: u64) -> Option<[u8; 3]> {
 /// The scene for a headless render, cut by the session's section. A model that cannot be placed
 /// is the error.
 pub fn scene(s: &Session, cam: &Camera) -> Result<Scene> {
-    scene_with_section(s, cam, s.section)
+    scene_with_section(s, cam, &s.section)
 }
 
-/// The scene for a headless render, cut by `section` (origin, normal) instead of the session's:
+/// The scene for a headless render, cut by `section` (its planes) instead of the session's:
 /// the app passes the cut its viewport shows (an open Section Analysis dialog's preview, a
 /// sketch's Slice), so model renders match the window.
-pub fn scene_with_section(s: &Session, cam: &Camera, section: Option<(Vec3, Vec3)>) -> Result<Scene> {
+pub fn scene_with_section(s: &Session, cam: &Camera, section: &[SectionPlane]) -> Result<Scene> {
     scene_with_guides(s, cam, section, Guides::default())
 }
 
@@ -886,7 +888,7 @@ impl Default for Guides {
 }
 
 /// [`scene_with_section`] with the grid and the axes shown or left out.
-pub fn scene_with_guides(s: &Session, cam: &Camera, section: Option<(Vec3, Vec3)>, guides: Guides) -> Result<Scene> {
+pub fn scene_with_guides(s: &Session, cam: &Camera, section: &[SectionPlane], guides: Guides) -> Result<Scene> {
     scene_with_palette_and_guides(s, cam, section, world_curve_parts, &Palette::DEFAULT, guides)
 }
 
@@ -894,14 +896,14 @@ pub fn scene_with_guides(s: &Session, cam: &Camera, section: Option<(Vec3, Vec3)
 /// Callers can use the same pixel sampler as a GPU viewport without changing the
 /// body, grid, appearance, section or sketch styling policies of [`scene`].
 pub fn scene_with_sketch_sampler(s: &Session, cam: &Camera, sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>) -> Result<Scene> {
-    scene_with_section_and_sketch_sampler(s, cam, s.section, sampler)
+    scene_with_section_and_sketch_sampler(s, cam, &s.section, sampler)
 }
 
 /// A headless scene with an explicit section and supplied sketch display paths.
 pub fn scene_with_section_and_sketch_sampler(
     s: &Session,
     cam: &Camera,
-    section: Option<(Vec3, Vec3)>,
+    section: &[SectionPlane],
     sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
 ) -> Result<Scene> {
     scene_with_palette(s, cam, section, sampler, &Palette::DEFAULT)
@@ -911,7 +913,7 @@ pub fn scene_with_section_and_sketch_sampler(
 pub fn scene_with_palette(
     s: &Session,
     cam: &Camera,
-    section: Option<(Vec3, Vec3)>,
+    section: &[SectionPlane],
     sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
     p: &Palette,
 ) -> Result<Scene> {
@@ -922,7 +924,7 @@ pub fn scene_with_palette(
 pub fn scene_with_palette_and_guides(
     s: &Session,
     cam: &Camera,
-    section: Option<(Vec3, Vec3)>,
+    section: &[SectionPlane],
     sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
     p: &Palette,
     guides: Guides,
@@ -935,7 +937,7 @@ pub fn scene_with_palette_and_guides(
 pub fn scene_with_thread_markings(
     s: &Session,
     cam: &Camera,
-    section: Option<(Vec3, Vec3)>,
+    section: &[SectionPlane],
     sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
     p: &Palette,
     guides: Guides,
@@ -947,17 +949,19 @@ pub fn scene_with_thread_markings(
 fn build_scene(
     s: &Session,
     cam: &Camera,
-    section: Option<(Vec3, Vec3)>,
+    section: &[SectionPlane],
     guides: Guides,
     mut sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
     p: &Palette,
     cosmetic_threads: bool,
 ) -> Result<Scene> {
     let st = s.world_state()?;
-    let section = section.filter(|(o, n)| o.is_finite() && n.is_finite() && n.len() > 1e-9);
+    let section: Vec<SectionPlane> =
+        section.iter().filter(|c| c.origin.is_finite() && c.normal.is_finite() && c.normal.len() > 1e-9).take(MAX_SECTION_PLANES).copied().collect();
     let mut sc = Scene {
         background: Some(p.background),
-        clip: section.map(|(o, n)| (n, n.dot(o))),
+        clip: section.iter().map(|c| c.clip()).collect(),
+        clip_hatch: section.iter().map(SectionPlane::hatch).collect(),
         cap: Some(p.cap),
         plain_cap: !s.section_hatch,
         part_hatch: Some([p.cap, p.hatch[0], p.hatch[1]]),
@@ -1058,7 +1062,7 @@ fn build_scene(
         // A see-through appearance is drawn see-through, as the viewport draws it; a selected
         // body is drawn solid, so the selection colour reads.
         let opacity = if selected { 1.0 } else { s.doc.model_body_opacity(body) as f32 };
-        let cut_solid = section.is_some() && body.is_closed() && opacity >= solidcraft_viewport::SEE_THROUGH;
+        let cut_solid = !section.is_empty() && body.is_closed() && opacity >= solidcraft_viewport::SEE_THROUGH;
         sc.meshes.push(SceneMesh {
             mesh: Arc::clone(&mesh),
             color,
@@ -1084,18 +1088,23 @@ fn build_scene(
             }
             sc.lines.push(SceneLine { points: e.clone(), color: p.edge, alpha: 1.0, width: 1.2, on_top: false });
         }
-        // The outline of the body where the section cuts it.
-        if let Some((o, n)) = section {
-            let segments = section_segments(&mesh, o, n);
-            for (a, b) in &segments {
-                sc.lines.push(SceneLine { points: vec![*a, *b], color: p.edge, alpha: 1.0, width: 1.6, on_top: false });
-            }
-            if cut_solid && !segments.is_empty() {
-                cuts.push((at, solidcraft_viewport::hatch::seed(&body.name), segments));
+        // The outline of the body where each section plane cuts what the section keeps, and
+        // where two planes' cuts meet.
+        let mut segments = Vec::new();
+        for (i, c) in section.iter().enumerate() {
+            let cut = section_segments(&mesh, c.origin, c.normal);
+            let creases = if section.len() > 1 { section_creases(&cut, &section, i, section_nudge(&mesh)) } else { Vec::new() };
+            for (a, b) in cut.into_iter().filter_map(|(a, b)| outline_part(a, b, &section, i)).chain(creases) {
+                sc.lines.push(SceneLine { points: vec![a, b], color: p.edge, alpha: 1.0, width: 1.6, on_top: false });
+                segments.push((a, b));
             }
         }
+        if cut_solid && !segments.is_empty() {
+            cuts.push((at, solidcraft_viewport::hatch::seed(&body.name), segments));
+        }
     }
-    if let Some((_, n)) = section {
+    // Parts are told apart on the first plane: a cut by another plane is seen along it there.
+    if let Some(n) = section.first().map(|c| c.normal) {
         let parts: Vec<solidcraft_viewport::hatch::CutPart> =
             cuts.iter().map(|(_, seed, segments)| solidcraft_viewport::hatch::CutPart { seed: *seed, segments }).collect();
         for ((at, _, _), hatch) in cuts.iter().zip(solidcraft_viewport::hatch::hatches(&parts, n)) {
@@ -1121,25 +1130,141 @@ fn build_scene(
 }
 
 /// Where the plane through `o` with normal `n` cuts a mesh: one segment per crossed triangle,
-/// nudged a hair to the kept side (so the clip leaves them drawn).
+/// nudged a hair to the kept side (so the clip leaves them drawn), and running so that
+/// `(b - a) × n` points into the body. A vertex on the plane counts as kept, so a plane lying on
+/// a face the body is behind cuts nothing.
 pub fn section_segments(m: &solidcraft_geom::Mesh, o: Vec3, n: Vec3) -> Vec<(Vec3, Vec3)> {
-    let eps = section_nudge(m);
+    let (eps, tol) = (section_nudge(m), section_tol(m));
     let mut out = Vec::new();
     for t in &m.triangles {
-        cut_triangle(m, t, o, n, eps, &mut out);
+        cut_triangle(m, t, o, n, eps, tol, &mut out);
     }
     out
 }
 
-/// How far [`section_segments`] nudges the cut to the kept side.
-fn section_nudge(m: &solidcraft_geom::Mesh) -> f64 {
+/// The part of a cut outline segment `a`–`b` of plane `own` (from [`section_segments`]) that
+/// bounds what the section keeps: where every other plane keeps it too (the section hides what
+/// lies on the positive side of any of its planes). On another plane, the side of the cut face
+/// the body is on decides.
+pub fn outline_part(a: Vec3, b: Vec3, planes: &[SectionPlane], own: usize) -> Option<(Vec3, Vec3)> {
+    let c = planes.get(own)?;
+    let onto = |p: Vec3| p - c.normal * c.normal.dot(p - c.origin);
+    let inward = (b - a).cross(c.normal).normalized().unwrap_or(Vec3::ZERO) * (1e-6 * (1.0 + a.len().max(b.len())));
+    let (pa, pb) = (onto(a) + inward, onto(b) + inward);
+    let (mut lo, mut hi) = (0.0f64, 1.0f64);
+    for (_, c) in planes.iter().enumerate().filter(|(i, _)| *i != own) {
+        let (da, db) = (c.normal.dot(pa - c.origin), c.normal.dot(pb - c.origin));
+        match (da > 0.0, db > 0.0) {
+            (false, false) => {}
+            (true, true) => return None,
+            (true, false) => lo = lo.max(da / (da - db)),
+            (false, true) => hi = hi.min(da / (da - db)),
+        }
+    }
+    (lo < hi).then(|| (a + (b - a) * lo, a + (b - a) * hi))
+}
+
+/// Where plane `own`'s cut face meets a later plane's inside the body: on the line the two
+/// planes cross on, where `segments` (plane `own`'s cut of a mesh, from [`section_segments`] or
+/// [`SectionIndex::segments`]) enclose material on both sides of the later plane (one that only
+/// touches the material cuts no face there) and every other plane keeps it. Nudged `eps` to the
+/// kept side of both, as the cut outline is ([`section_nudge`]).
+pub fn section_creases(segments: &[(Vec3, Vec3)], planes: &[SectionPlane], own: usize, eps: f64) -> Vec<(Vec3, Vec3)> {
+    let Some(c) = planes.get(own) else { return Vec::new() };
+    let mut out = Vec::new();
+    for (j, d) in planes.iter().enumerate().skip(own + 1) {
+        let Some(dir) = c.normal.cross(d.normal).normalized() else { continue };
+        let k = c.normal.dot(d.normal);
+        let det = 1.0 - k * k;
+        if det < 1e-12 {
+            continue;
+        }
+        let (h1, h2) = (c.normal.dot(c.origin), d.normal.dot(d.origin));
+        let base = c.normal * ((h1 - h2 * k) / det) + d.normal * ((h2 - h1 * k) / det);
+        let through = |off: f64| material_along(segments, c.normal, d, off, base, dir);
+        for (mut lo, mut hi) in overlap(&through(2.0 * eps), &through(-2.0 * eps)) {
+            for (_, e) in planes.iter().enumerate().filter(|(i, _)| *i != own && *i != j) {
+                let (f, slope) = (e.normal.dot(base - e.origin), e.normal.dot(dir));
+                if slope.abs() < 1e-12 {
+                    if f > 0.0 {
+                        hi = lo;
+                    }
+                } else if slope > 0.0 {
+                    hi = hi.min(-f / slope);
+                } else {
+                    lo = lo.max(-f / slope);
+                }
+            }
+            if lo < hi {
+                let nudge = (c.normal + d.normal) * eps;
+                out.push((base + dir * lo - nudge, base + dir * hi - nudge));
+            }
+        }
+    }
+    out
+}
+
+/// The stretches `t` of the line `base + dir * t` (on plane `d` moved `off` along its normal)
+/// that the cut loops `segments` of the plane with `normal` enclose, in order.
+fn material_along(segments: &[(Vec3, Vec3)], normal: Vec3, d: &SectionPlane, off: f64, base: Vec3, dir: Vec3) -> Vec<(f64, f64)> {
+    // Where the loops cross the line: +1 going into the material.
+    let mut crossings: Vec<(f64, i32)> = segments
+        .iter()
+        .filter_map(|&(a, b)| {
+            let (da, db) = (d.normal.dot(a - d.origin) - off, d.normal.dot(b - d.origin) - off);
+            if (da < 0.0) == (db < 0.0) {
+                return None;
+            }
+            let at = a + (b - a) * (da / (da - db));
+            let into = (b - a).cross(normal).dot(dir) > 0.0;
+            Some((dir.dot(at - base), if into { 1 } else { -1 }))
+        })
+        .collect();
+    crossings.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let (mut inside, mut start, mut out) = (0, 0.0, Vec::new());
+    for (t, step) in crossings {
+        let was = inside;
+        inside += step;
+        if was <= 0 && inside > 0 {
+            start = t;
+        } else if was > 0 && inside <= 0 {
+            out.push((start, t));
+        }
+    }
+    out
+}
+
+/// Where two lists of ordered, separate stretches overlap.
+fn overlap(a: &[(f64, f64)], b: &[(f64, f64)]) -> Vec<(f64, f64)> {
+    let (mut i, mut j, mut out) = (0, 0, Vec::new());
+    while let (Some(&(a0, a1)), Some(&(b0, b1))) = (a.get(i), b.get(j)) {
+        let (lo, hi) = (a0.max(b0), a1.min(b1));
+        if lo < hi {
+            out.push((lo, hi));
+        }
+        if a1 < b1 {
+            i += 1;
+        } else {
+            j += 1;
+        }
+    }
+    out
+}
+
+/// How far [`section_segments`] nudges the cut of `m` to the kept side.
+pub fn section_nudge(m: &solidcraft_geom::Mesh) -> f64 {
     1e-4 * (1.0 + m.bounds().diagonal())
 }
 
+/// How far beyond the plane a vertex must lie for [`section_segments`] to count it hidden.
+fn section_tol(m: &solidcraft_geom::Mesh) -> f64 {
+    1e-9 * (1.0 + m.bounds().diagonal())
+}
+
 /// The segment where the plane through `o` with normal `n` crosses triangle `t`, if it does.
-fn cut_triangle(m: &solidcraft_geom::Mesh, t: &[u32; 3], o: Vec3, n: Vec3, eps: f64, out: &mut Vec<(Vec3, Vec3)>) {
+fn cut_triangle(m: &solidcraft_geom::Mesh, t: &[u32; 3], o: Vec3, n: Vec3, eps: f64, tol: f64, out: &mut Vec<(Vec3, Vec3)>) {
     let Some(p) = m.tri(t) else { return };
-    let d = p.map(|q| n.dot(q - o));
+    let d = p.map(|q| n.dot(q - o) - tol);
     let mut pts = Vec::with_capacity(2);
     for (i, j) in [(0, 1), (1, 2), (2, 0)] {
         if (d[i] < 0.0) != (d[j] < 0.0) {
@@ -1148,7 +1273,8 @@ fn cut_triangle(m: &solidcraft_geom::Mesh, t: &[u32; 3], o: Vec3, n: Vec3, eps: 
         }
     }
     if let [a, b] = pts[..] {
-        out.push((a, b));
+        let outward = (p[1] - p[0]).cross(p[2] - p[0]);
+        out.push(if (b - a).cross(n).dot(outward) > 0.0 { (b, a) } else { (a, b) });
     }
 }
 
@@ -1168,6 +1294,7 @@ pub struct SectionIndex {
     /// The largest coordinate of the mesh, for the cell test's rounding margin.
     reach: f64,
     eps: f64,
+    tol: f64,
 }
 
 /// How many mean triangle widths a [`SectionIndex`] cell is wide, and most cells of its grid.
@@ -1258,7 +1385,12 @@ impl SectionIndex {
                 _ => None,
             })
             .collect();
-        SectionIndex { cells, tris, always, reach, eps: section_nudge(m) }
+        SectionIndex { cells, tris, always, reach, eps: section_nudge(m), tol: section_tol(m) }
+    }
+
+    /// How far its segments are nudged to the kept side ([`section_nudge`]).
+    pub fn nudge(&self) -> f64 {
+        self.eps
     }
 
     /// [`section_segments`] of `m` (the mesh this index was made from) at the plane through
@@ -1271,13 +1403,13 @@ impl SectionIndex {
         // Rounding in `cut_triangle`'s heights is far below this margin, so a cell left out
         // holds no triangle it would cut.
         let margin = 1e-9 * (an.x + an.y + an.z) * (self.reach + o.x.abs().max(o.y.abs()).max(o.z.abs()) + 1.0);
-        let at = n.dot(o);
+        let at = n.dot(o) + self.tol;
         // The cut triangles' segments, by triangle, then in mesh order.
         let mut found: Vec<(u32, (Vec3, Vec3))> = Vec::new();
         let mut out = Vec::with_capacity(1);
         let mut cut = |i: u32| {
             if let Some(t) = m.triangles.get(i as usize) {
-                cut_triangle(m, t, o, n, self.eps, &mut out);
+                cut_triangle(m, t, o, n, self.eps, self.tol, &mut out);
                 found.extend(out.pop().map(|seg| (i, seg)));
             }
         };
@@ -1539,8 +1671,8 @@ mod tests {
         let (grid_lines, edges) = (count(&all, &grid), count(&all, &[colors::EDGE]));
         assert!(grid_lines > 20 && edges >= 12, "{grid_lines} grid lines, {edges} edges");
         assert_eq!(count(&all, &axes), 3);
-        assert_eq!(all.lines.len(), scene_with_guides(&s, &cam, s.section, Guides::default()).unwrap().lines.len());
-        let render = |g: Guides| scene_with_guides(&s, &cam, s.section, g).unwrap();
+        assert_eq!(all.lines.len(), scene_with_guides(&s, &cam, &s.section, Guides::default()).unwrap().lines.len());
+        let render = |g: Guides| scene_with_guides(&s, &cam, &s.section, g).unwrap();
         let no_grid = render(Guides { grid: false, axes: true });
         assert_eq!((count(&no_grid, &grid), count(&no_grid, &axes), count(&no_grid, &[colors::EDGE])), (0, 3, edges));
         let no_axes = render(Guides { grid: true, axes: false });
@@ -1566,7 +1698,7 @@ mod tests {
         assert_eq!(shown(&s), [colors::AXIS_X, colors::AXIS_Z]);
         s.execute("browser.visibility", &json!({"folder": "origin", "visible": false})).unwrap();
         assert!(shown(&s).is_empty());
-        let sc = scene_with_guides(&s, &cam, None, Guides { grid: true, axes: true }).unwrap();
+        let sc = scene_with_guides(&s, &cam, &[], Guides { grid: true, axes: true }).unwrap();
         assert!(sc.grid.iter().any(|l| l.color == colors::GRID), "the grid is not part of the origin");
         s.execute("browser.visibility", &json!({"folder": "origin", "visible": true})).unwrap();
         assert_eq!(shown(&s), axes);
@@ -1579,13 +1711,50 @@ mod tests {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
         let cam = home_camera(&s).unwrap();
-        assert!(scene(&s, &cam).unwrap().clip.is_none());
+        assert!(scene(&s, &cam).unwrap().clip.is_empty());
         s.execute("inspect.section", &json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}})).unwrap();
         let sc = scene(&s, &cam).unwrap();
-        let (n, d) = sc.clip.unwrap();
+        let [(n, d)] = sc.clip[..] else { panic!("one plane: {:?}", sc.clip) };
         assert!((n - Vec3::new(0.0, -1.0, 0.0)).len() < 1e-12 && (d + 15.0).abs() < 1e-12, "{n:?} {d}");
         assert_eq!(sc.cap, Some(colors::SECTION_CAP));
         assert!(!section_segments(&s.world_state().unwrap().bodies[0].mesh(), Vec3::new(0.0, 15.0, 0.0), -Vec3::Y).is_empty());
+        // A second plane clips too. Each plane hides its own side (x > 20, y < 15), and each
+        // plane's outline runs only along what is kept: the first's at y 15 where x < 20, the
+        // second's at x 20 where y > 15.
+        s.execute("inspect.section", &json!({"plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}, "add": true})).unwrap();
+        let sc = scene(&s, &cam).unwrap();
+        assert_eq!(sc.clip.len(), 2);
+        assert!((sc.clip[1].0 - Vec3::X).len() < 1e-12 && (sc.clip[1].1 - 20.0).abs() < 1e-12, "{:?}", sc.clip);
+        let outline: Vec<&SceneLine> = sc.lines.iter().filter(|l| l.width == 1.6 && l.color == colors::EDGE).collect();
+        let on = |l: &SceneLine, f: fn(&Vec3) -> bool| l.points.iter().all(f);
+        assert!(outline.iter().any(|l| on(l, |p| (p.y - 15.0).abs() < 1e-2)) && outline.iter().any(|l| on(l, |p| (p.x - 20.0).abs() < 1e-2)));
+        for l in &outline {
+            assert!(on(l, |p| p.x < 20.0 + 1e-2 && p.y > 15.0 - 1e-2), "outside what is kept: {:?}", l.points);
+        }
+        // A plane lying on the front face with the box behind it hides nothing of the box, so
+        // the first plane's cut stays as it was: its outline all round, the front edge included.
+        let outline = |s: &Session| -> Vec<SceneLine> {
+            scene(s, &cam).unwrap().lines.into_iter().filter(|l| l.width == 1.6 && l.color == colors::EDGE).collect()
+        };
+        let sides: [fn(&Vec3) -> bool; 4] =
+            [|p| p.x.abs() < 1e-2, |p| (p.x - 40.0).abs() < 1e-2, |p| p.y.abs() < 1e-2, |p| (p.y - 30.0).abs() < 1e-2];
+        s.execute("inspect.section", &json!({"plane": {"origin": [0, 0, 10], "normal": [0, 0, 1]}})).unwrap();
+        let top = outline(&s);
+        s.execute("inspect.section", &json!({"plane": {"origin": [0, 0, 0], "normal": [0, -1, 0]}, "add": true})).unwrap();
+        let kept = outline(&s);
+        for (i, side) in sides.into_iter().enumerate() {
+            assert!(kept.iter().any(|l| on(l, side) && on(l, |p| (p.z - 10.0).abs() < 1e-2)), "side {i} of the cut lost its outline");
+        }
+        assert_eq!(kept.len(), top.len(), "a plane that hides nothing changes the outline");
+        // Facing into the box and moved 10 mm in, it cuts its own side away as well: both
+        // outlines run only round what is left (y < 10, z < 10).
+        s.execute("inspect.section", &json!({"plane": {"origin": [0, 0, 10], "normal": [0, 0, 1]}})).unwrap();
+        s.execute("inspect.section", &json!({"plane": {"origin": [0, 10, 0], "normal": [0, 1, 0]}, "add": true})).unwrap();
+        let both = outline(&s);
+        assert!(both.iter().any(|l| on(l, |p| (p.z - 10.0).abs() < 1e-2)) && both.iter().any(|l| on(l, |p| (p.y - 10.0).abs() < 1e-2)));
+        for l in &both {
+            assert!(on(l, |p| p.y < 10.0 + 1e-2 && p.z < 10.0 + 1e-2), "outside what is kept: {:?}", l.points);
+        }
     }
 
     /// The surface analysis shades the headless scene too, in the palette's colours.
@@ -1621,10 +1790,33 @@ mod tests {
         let whole = solidcraft_viewport::render(&scene(&s, &cam).unwrap(), &cam, 200, 140).rgba;
         s.execute("inspect.section", &json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}})).unwrap();
         let sc = scene(&s, &cam).unwrap();
-        assert!(sc.clip.is_some());
+        assert_eq!(sc.clip.len(), 1);
         let cut = solidcraft_viewport::render(&sc, &cam, 200, 140).rgba;
         let changed = whole.chunks(4).zip(cut.chunks(4)).filter(|(a, b)| a != b).count();
         assert!(changed > 500, "{changed} pixels changed");
+    }
+
+    /// The CPU rasterizer: two planes each cut their own side away, and both cut faces show in
+    /// the cap colour.
+    #[test]
+    fn cpu_pictures_cut_with_two_planes() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        let cam = home_camera(&s).unwrap();
+        let warm = |s: &Session| {
+            let mut sc = scene(s, &cam).unwrap();
+            // The cap in the cap colour: a part's hatch colour is the one its name picks (#8529).
+            sc.part_hatch = None;
+            let img = solidcraft_viewport::render(&sc, &cam, 300, 220);
+            img.rgba.chunks(4).filter(|p| p[0] as i32 - p[2] as i32 > 20).count()
+        };
+        s.execute("inspect.section", &json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}})).unwrap();
+        let one = warm(&s);
+        s.execute("inspect.section", &json!({"plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}, "add": true})).unwrap();
+        let two = warm(&s);
+        // One plane shows its whole cut face; two show what the second keeps of it and the
+        // second's.
+        assert!(one > 500 && two > 300 && two != one, "cap pixels: one plane {one}, two {two}");
     }
 
     /// The section's cut face hides what lies inside the body behind it (it is drawn at the

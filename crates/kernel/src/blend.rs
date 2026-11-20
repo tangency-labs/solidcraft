@@ -33,6 +33,12 @@ pub fn largest_fit_note(size: &str, largest: f64) -> String {
     format!("the largest {size} that fits is {} mm", trimmed_mm(largest))
 }
 
+/// The note naming the largest scale of a two-sided chamfer's distances that fits: "the largest
+/// that fits is 0.6 times the distances given".
+pub fn scale_fit_note(scale: f64) -> String {
+    format!("the largest that fits is {} times the distances given", trimmed_mm(scale))
+}
+
 /// Whether a refusal already names the largest size that fits ([`largest_fit_note`]).
 pub fn names_largest_fit(why: &str) -> bool {
     why.contains("that fits is ")
@@ -813,6 +819,23 @@ pub fn chamfer_max(body: &Body, edges: &[Vec3], distance: f64) -> Result<Option<
 pub fn chamfer_max_why(body: &Body, edges: &[Vec3], distance: f64, hint: Option<f64>) -> Result<FitSearch> {
     let _span = solidcraft_profile::span("kernel", "chamfer_max");
     largest_that_fits(distance, hint, |d| chamfer(body, edges, d))
+}
+
+/// The largest scale below 1 (to three significant digits) of both of a two-sided chamfer's
+/// sizes at which [`chamfer_sides_carrying_face`] builds, with its result: by distance and
+/// distance both scale, by angle the distance does (the angle stays). Each candidate is a real
+/// chamfer of the edges, as for [`chamfer_max_why`]: where SMLib fails a chamfer too large for
+/// the faces beside its edges inside the blend (status 1001) instead of refusing it as too large,
+/// a candidate that builds says it was its size (#18545).
+pub fn chamfer_sides_max_why(body: &Body, edges: &[Vec3], d1: f64, side: ChamferSide, flip: bool) -> Result<FitSearch> {
+    let _span = solidcraft_profile::span("kernel", "chamfer_sides_max");
+    largest_that_fits(1.0, None, |scale| {
+        let side = match side {
+            ChamferSide::Distance(d2) => ChamferSide::Distance(d2 * scale),
+            angle => angle,
+        };
+        chamfer_sides_carrying_face(body, edges, d1 * scale, side, flip)
+    })
 }
 
 /// The largest size in mm a refusal names ([`largest_fit_note`]): 3 for "...; the largest radius

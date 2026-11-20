@@ -46,7 +46,7 @@ use solidcore::nurbs::b_spline_curve::p1::{
 };
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::query::api_queries::edge_closest_point;
-use solidcore::surface::surface::Surface;
+use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::edge;
@@ -820,14 +820,41 @@ fn on_the_default_kernel_the_variable_round_lies_on_its_cone() {
 }
 
 /// Upstream traces a chord round a circle: 3.07e-5 off the cone it should lie on, where the
-/// fork builds the cone (`fillet_chamfer_cone_on_arc`).
+/// fork builds the cone (`fillet_chamfer_cone_on_arc`). The default kernel builds the chord
+/// as its definition: each station's chord runs between the feet on the plane and on the
+/// boss, at the same offsets all round the circle, so it is a ruling of that cone and the
+/// chamfer passes the case's grade (on the cone to 1e-9, its volume and seams).
 #[test]
-fn the_boss_root_s_chord_is_exact_only_with_the_cone_on_the_arc() {
+fn the_boss_root_s_chord_is_exact_as_its_definition_and_with_the_cone_on_the_arc() {
     let case = named(BOSS_CHAMFER);
-    let g = grade(&case, &mut Kernel::default());
-    println!("{BOSS_CHAMFER}: {g:?}");
-    assert!((g.off - 3.07e-5).abs() <= 0.01 * 3.07e-5, "{g:?}");
-    assert_eq!(g.problems.len(), 1, "{g:?}");
+    assert_passes(&case, &mut Kernel::default());
+    // the chamfer face is a chamfer by its definition, its net proved within its bound
+    let mut k = Kernel::default();
+    let mut b = (case.build)(&mut k).unwrap();
+    let before = b.face_list().to_vec();
+    let e = pick(&k, &b, case.pick);
+    let Blend::Chord(d) = case.blend else {
+        panic!("the boss root's chamfer is a chord")
+    };
+    chord(&mut k, &mut b, e, d).unwrap();
+    let mut chamfers = 0;
+    for &f in b.face_list() {
+        if before.contains(&f) {
+            continue;
+        }
+        let s = b.face(f).unwrap().surface.clone().unwrap();
+        if let SurfaceKind::ProceduralBlend(pb) = s.kind() {
+            assert!(pb.chamfer().is_some(), "{f:?} is not a chamfer");
+            let proved = pb.recertify(&k).unwrap();
+            assert!(
+                proved <= pb.bound(),
+                "{f:?}: {proved:e} past {:e}",
+                pb.bound()
+            );
+            chamfers += 1;
+        }
+    }
+    assert!(chamfers >= 1, "no chamfer by its definition");
     let mut k = Kernel::default();
     k.fixes.fillet_chamfer_cone_on_arc = true;
     assert_passes(&case, &mut k);

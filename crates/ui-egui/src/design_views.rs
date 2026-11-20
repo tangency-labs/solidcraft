@@ -181,6 +181,29 @@ impl ViewSet {
         true
     }
 
+    /// Drop every view, open or closed, that `keep` refuses: views of something the design no
+    /// longer has. A dropped view does not go onto the closed stack, so Reopen cannot bring it
+    /// back. The set keeps one view: when none would be left, a Model view takes their place. When
+    /// the active view goes, the one left of it takes over (else the first). True when any went.
+    pub fn drop_views(&mut self, keep: impl Fn(&DesignView) -> bool) -> bool {
+        let closed = self.closed.len();
+        self.closed.retain(|(_, view)| keep(view));
+        let Some(first_gone) = self.views.iter().position(|view| !keep(view)) else {
+            return self.closed.len() != closed;
+        };
+        let left = self.index_of(self.active).unwrap_or(first_gone);
+        let fallback = self.views.iter().take(left).rev().find(|view| keep(view)).map(|view| view.id);
+        self.views.retain(&keep);
+        if self.views.is_empty() {
+            let id = self.take_id();
+            self.views.push(DesignView { id, kind: ViewKind::Model, name: ViewKind::Model.label().into(), subject: None });
+        }
+        if self.get(self.active).is_none() {
+            self.active = fallback.or_else(|| self.views.first().map(|view| view.id)).unwrap_or(self.active);
+        }
+        true
+    }
+
     /// Close every view but the one with `id`, which becomes the active one.
     pub fn close_others(&mut self, id: u64) {
         if self.get(id).is_none() {
@@ -432,6 +455,24 @@ mod tests {
         assert_eq!(set.active().id, a, "the first view closing hands over to the right");
         assert!(!set.close(only) && !set.close(12345), "unknown ids close nothing");
         assert!(!set.close(a), "the last one stays");
+    }
+
+    #[test]
+    fn drop_views_removes_open_and_closed_views_and_never_empties_the_set() {
+        let mut set = sketches(3);
+        let ids: Vec<u64> = set.views().iter().map(|view| view.id).collect();
+        assert!(set.close(ids[2]));
+        assert!(set.activate(ids[3]));
+        let keep = |view: &DesignView| view.subject.as_deref() != Some("s0") && view.subject.as_deref() != Some("s2");
+        assert!(set.drop_views(keep));
+        assert_eq!(names(&set), ["Model"], "s1 stays closed, s0 and s2 go");
+        assert_eq!(set.active().id, ids[0], "the active view went, the kept view left of it takes over");
+        assert_eq!(set.reopen(), Some(ids[2]), "a closed view that is kept can still come back");
+        assert!(set.drop_views(|view| view.kind == ViewKind::Model));
+        assert!(!set.can_reopen(), "a dropped view never comes back");
+        assert!(!set.drop_views(|view| view.kind == ViewKind::Model), "nothing to drop");
+        assert!(set.drop_views(|_| false));
+        assert_eq!((set.len(), set.active().kind), (1, ViewKind::Model), "with nothing kept a Model view stays");
     }
 
     #[test]

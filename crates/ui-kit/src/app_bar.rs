@@ -145,6 +145,8 @@ pub struct AppBar<'a> {
     /// The app's mark, painted centred at the point given, and its name beside it.
     pub mark: &'a dyn Fn(&Painter, Pos2),
     pub name: &'a str,
+    /// Optional space for an app-owned control before Home.
+    pub leading: Option<egui::Vec2>,
     pub home: BarButton<'a>,
     /// The File button's label; it is enabled with `home`, and drawn held while its menu is open.
     pub file: &'a str,
@@ -217,6 +219,8 @@ pub enum BarAction {
 /// The bar drawn: what was chosen, and the places it leaves to the app.
 #[derive(Debug)]
 pub struct BarOut {
+    /// Space reserved for the app-owned control before Home.
+    pub leading: Option<Rect>,
     pub actions: Vec<BarAction>,
     /// The File button, where its menu opens.
     pub file: Rect,
@@ -408,6 +412,11 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
         // Home's button starts 20 before its place (32 wide, centred 4 before it).
         (left + HOME_MIN).max(name.right() + NAME_GAP + 20.0)
     };
+    let leading = data.leading.map(|size| {
+        let rect = Rect::from_center_size(pos2(x, r.center().y), size);
+        x += size.x + 8.0;
+        rect
+    });
     // Home.
     let home = Rect::from_center_size(pos2(x - 4.0, r.center().y), vec2(32.0, 32.0));
     let idle = data.home.enabled;
@@ -562,7 +571,7 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
             actions.push(BarAction::Version);
         }
     }
-    BarOut { actions, file, quick, offer, offer_labeled, tabs_start, controls_left, search, assistant }
+    BarOut { leading, actions, file, quick, offer, offer_labeled, tabs_start, controls_left, search, assistant }
 }
 
 /// Where the tab strip publishes its parts: each prefix is followed by the tab's place.
@@ -758,6 +767,9 @@ pub struct TabStrip<'a> {
     /// The selected design's views are sub-tabs in its tab (option A); off, its tab has a view
     /// switcher (option B). Option A also falls back to B where the bar has no room for it.
     pub views_as_tabs: bool,
+    /// The selected design's tab has a view switcher even with its one view (off: a design with one
+    /// view is a plain tab). Ignored while `views_as_tabs` is on.
+    pub switcher_always: bool,
     pub view_text: ViewText<'a>,
     /// The rows of a view's right-click menu, of the menu of the + and of the switcher's footer.
     pub view_menu: &'a [TabMenuRow<'a>],
@@ -849,7 +861,7 @@ struct ViewDrag {
 /// How the selected design's tab is drawn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SelectedLayout {
-    /// A plain tab (a design with one view, or none).
+    /// A plain tab (a design with one view unless the switcher is asked for always, or none).
     Plain,
     /// Expanded into a pill with its views as sub-tabs.
     Pill,
@@ -857,10 +869,13 @@ pub enum SelectedLayout {
     Switcher,
 }
 
-/// How the selected design's tab is drawn: `views` views, the app asks for sub-tabs (`as_tabs`),
-/// the pill needs `pill_min` points at the least and the bar leaves it `room`.
-pub fn selected_layout(views: usize, as_tabs: bool, pill_min: f32, room: f32) -> SelectedLayout {
-    if views < 2 {
+/// How the selected design's tab is drawn: `views` views, the app asks for sub-tabs (`as_tabs`)
+/// or for a switcher even with one view (`switcher_always`, ignored with `as_tabs`), the pill needs
+/// `pill_min` points at the least and the bar leaves it `room`.
+pub fn selected_layout(views: usize, as_tabs: bool, switcher_always: bool, pill_min: f32, room: f32) -> SelectedLayout {
+    if views == 1 && switcher_always && !as_tabs {
+        SelectedLayout::Switcher
+    } else if views < 2 {
         SelectedLayout::Plain
     } else if as_tabs && pill_min <= room {
         SelectedLayout::Pill
@@ -1058,9 +1073,10 @@ fn more_label(strip: &TabStrip, hidden: usize) -> String {
     strip.view_text.more.replace("{n}", &hidden.to_string())
 }
 
-/// Whether tab `i` is the shown, selected design with a single view: its tab carries a small + after its name.
+/// Whether tab `i` is the shown, selected design with a single view while views are sub-tabs: its
+/// tab carries a small + after its name. With a switcher the tab stays as it was before views.
 fn small_plus(strip: &TabStrip, i: usize) -> bool {
-    i == strip.selected && strip.shown_selected == Some(i) && strip.tabs.get(i).is_some_and(|tab| tab.views.len() == 1)
+    strip.views_as_tabs && i == strip.selected && strip.shown_selected == Some(i) && strip.tabs.get(i).is_some_and(|tab| tab.views.len() == 1)
 }
 
 fn line_colour(t: &Tokens) -> egui::Color32 {
@@ -1088,7 +1104,7 @@ fn measure(ui: &egui::Ui, strip: &TabStrip, tab: &DocTab, name: &str, view_typed
     let before = pill_before(dot, name_w);
     let pill = before + view_ws.iter().map(|w| w + VIEW_GAP).sum::<f32>() + PILL_AFTER + TAB_MARGIN;
     let pill_min = before + active_w + VIEW_GAP + more_w + VIEW_GAP + PILL_AFTER + TAB_MARGIN;
-    let kind = selected_layout(n, strip.views_as_tabs, pill_min, room);
+    let kind = selected_layout(n, strip.views_as_tabs, strip.switcher_always, pill_min, room);
     let shown = tab.views.get(active).map_or("", |v| v.name);
     let switch_w = 8.0 + 15.0 + 6.0 + text_width(ui, shown, view_font(true)).min(VIEW_LABEL_MAX) + 6.0 + badge_width(ui, n) + 6.0 + 13.0 + 4.0;
     let switcher = 13.0 + dot + name_w + 8.0 + SLASH + 8.0 + switch_w + 8.0 + 22.0 + 4.0;
@@ -1513,8 +1529,11 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
     // The selected tab grows with a name being typed into it.
     let typed = strip.rename.as_ref().map(|r| r.text.clone());
     let view_typed = strip.view_rename.as_ref().map(|(k, r)| (*k, r.text.clone()));
-    // The selected design's several views: a pill or a switcher, as far as the bar has room.
-    let geom = strip.tabs.get(strip.selected).copied().filter(|tab| strip.shown_selected == Some(strip.selected) && tab.views.len() > 1).map(|tab| {
+    // The selected design's several views: a pill or a switcher, as far as the bar has room (one
+    // view gets a switcher only when the app asks for it always).
+    let min_views = if strip.switcher_always && !strip.views_as_tabs { 1 } else { 2 };
+    let expands = |tab: &DocTab| strip.shown_selected == Some(strip.selected) && tab.views.len() >= min_views;
+    let geom = strip.tabs.get(strip.selected).copied().filter(expands).map(|tab| {
         let room = (x1 - x0 - 34.0 - MIN_TAB * n.saturating_sub(1) as f32).max(0.0);
         measure(ui, strip, &tab, typed.as_deref().unwrap_or(tab.name), view_typed.as_ref().map(|(k, text)| (*k, text.as_str())), room)
     });

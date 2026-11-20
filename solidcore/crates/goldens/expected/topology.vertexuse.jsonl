@@ -1300,7 +1300,7 @@
 {"case":"face3_vu0_sector0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[96.00000000000001,98.00000000000001,1385.9000000000003]],"n":21}}}
 {"case":"face3_vu0_sector1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[96.00000000000001,98.00000000000001,1385.9000000000003]],"n":21}}}
 {"case":"face3_vu0_uvpt0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,0.1,0.8999999999999997]}}
-{"case":"face3_vu0_uvpt1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,0.1,0.8999999999999995]}}
+{"case":"face3_vu0_uvpt1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,0.1,0.9]}}
 {"case":"face3_vu3_conn16004","deferred":null,"error":null,"ints":{"q":[1]},"topology":null,"values":{}}
 {"case":"face3_vu3_conn16012","deferred":null,"error":null,"ints":{"q":[1]},"topology":null,"values":{}}
 {"case":"face3_vu3_conn16021","deferred":null,"error":null,"ints":{"q":[1]},"topology":null,"values":{}}
@@ -1316,7 +1316,7 @@
 {"case":"face3_vu3_seam","deferred":null,"error":null,"ints":{"q":[0,0,0]},"topology":null,"values":{}}
 {"case":"face3_vu3_seam_nouv","deferred":null,"error":null,"ints":{"q":[0,-1,0]},"topology":null,"values":{}}
 {"case":"face3_vu3_sector0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[100.8,104.8,1384.3]],"n":21}}}
-{"case":"face3_vu3_sector1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[100.79999999999997,104.79999999999997,1384.2999999999995]],"n":21}}}
+{"case":"face3_vu3_sector1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[100.8,104.8,1384.3]],"n":21}}}
 {"case":"face3_vu3_uvpt0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,0.7,0.9]}}
 {"case":"face3_vu3_uvpt1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,0.7,0.9]}}
 {"case":"face4_vu0_conn16003","deferred":null,"error":null,"ints":{"q":[1]},"topology":null,"values":{}}

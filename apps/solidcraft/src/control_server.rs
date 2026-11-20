@@ -58,9 +58,10 @@ impl Protocol for SolidCraft {
     }
 
     /// `param_check`: the levels `engine.execute`, `engine.batch` and `engine.script` take as a
-    /// request's own parameter check (#9184).
+    /// request's own parameter check (#9184). `plugin_tools`: installed plugins can be queried
+    /// with the `plugin.tools` command.
     fn capabilities(&self) -> Value {
-        json!({"param_check": solidcraft_engine::schema::ParamCheck::ALL.map(|l| l.name())})
+        json!({"param_check": solidcraft_engine::schema::ParamCheck::ALL.map(|l| l.name()), "plugin_tools": true})
     }
 }
 

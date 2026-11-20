@@ -74,7 +74,9 @@ fn plate_doc() -> (Document, u64) {
                 to_offset: None,
                 from: None,
                 to_body_apart: false,
+                from_level: false,
                 picked_placements: Vec::new(),
+                one_sided_direction: None,
             },
             operation: Operation::NewBody,
             targets: vec![],
@@ -181,7 +183,9 @@ fn an_outline_closed_by_point_on_curve_tangent_joints_extrudes() {
                 to_offset: None,
                 from: None,
                 to_body_apart: false,
+                from_level: false,
                 picked_placements: Vec::new(),
+                one_sided_direction: None,
             },
             operation: Operation::NewBody,
             targets: vec![],
@@ -912,6 +916,7 @@ fn box_fillet_cut_timeline() {
             setbacks: Vec::new(),
             turn: Default::default(),
             tangent_chain: true,
+            edge_radii: Vec::new(),
         },
         None,
     )
@@ -938,7 +943,9 @@ fn box_fillet_cut_timeline() {
                 to_offset: None,
                 from: None,
                 to_body_apart: false,
+                from_level: false,
                 picked_placements: Vec::new(),
+                one_sided_direction: None,
             },
             operation: Operation::Cut,
             targets: vec![],
@@ -990,6 +997,7 @@ fn errors_are_reported_not_fatal() {
             setbacks: Vec::new(),
             turn: Default::default(),
             tangent_chain: true,
+            edge_radii: Vec::new(),
         },
         None,
     )
@@ -1466,6 +1474,32 @@ fn construction_plane_name_collisions_leave_the_document_unchanged() {
 }
 
 #[test]
+fn a_second_sketch_cannot_take_an_existing_sketch_name() {
+    let sketch = || FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: Sketch::new() };
+    let mut doc = Document::new("names");
+    doc.add_feature(sketch(), Some("Sketch2")).unwrap();
+    let before = doc.clone();
+    let error = doc.add_feature(sketch(), Some("Sketch2")).unwrap_err().to_string();
+    assert!(error.contains("another feature is called `Sketch2`"), "{error}");
+    assert_eq!(doc, before);
+    // Automatic names skip the taken one.
+    let auto = doc.add_feature(sketch(), None).unwrap();
+    assert_ne!(doc.feature(auto).unwrap().name, "Sketch2");
+    // Lookup ignores case, so a name that differs only in case is the same name.
+    let error = doc.add_feature(sketch(), Some("sketch2")).unwrap_err().to_string();
+    assert!(error.contains("another feature is called `sketch2`"), "{error}");
+    assert_eq!(doc.find_feature("SKETCH2").unwrap().name, "Sketch2");
+    // A free name for a sketch skips the taken ones.
+    assert_eq!(doc.free_sketch_name("Sketch2"), "Sketch2 (2)");
+    assert_eq!(doc.free_sketch_name("Other"), "Other");
+    // Planes keep matching on the exact name, so two planes may differ only in case.
+    let plane = |base: &str| FeatureKind::ConstructionPlane { plane: PlaneRef::Origin { name: base.into() } };
+    doc.add_feature(plane("XY"), Some("Angled x")).unwrap();
+    doc.add_feature(plane("XY"), Some("Angled X")).unwrap();
+    assert!(doc.add_feature(plane("XY"), Some("Angled X")).is_err());
+}
+
+#[test]
 fn empty_boolean_targets_name_overlapping_component() {
     for (operation, offset) in [(Operation::Cut, 0.0), (Operation::Intersect, 0.0), (Operation::Cut, 40.0)] {
         let (mut doc, sketch) = plate_doc();
@@ -1646,7 +1680,9 @@ fn a_split_of_a_body_of_two_pieces_gives_the_halves_of_both() {
                 to_offset: None,
                 from: None,
                 to_body_apart: false,
+                from_level: false,
                 picked_placements: Vec::new(),
+                one_sided_direction: None,
             },
             operation: Operation::NewBody,
             targets: vec![],
@@ -1666,6 +1702,7 @@ fn a_split_of_a_body_of_two_pieces_gives_the_halves_of_both() {
                 body: "Body1".into(),
                 plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: "5".into() },
                 tool: None,
+                tool_plane: false,
                 sketch: None,
                 line: None,
             },
@@ -1737,6 +1774,7 @@ fn fillet_setbacks_default_to_none_and_round_trip() {
         setbacks: vec![CornerSetback { vertex: Position(Vec3::new(60.0, 40.0, 20.0)), distance: "8 mm".into() }],
         turn: Default::default(),
         tangent_chain: true,
+        edge_radii: Vec::new(),
     };
     let back: FeatureKind = serde_json::from_value(serde_json::to_value(&set).unwrap()).unwrap();
     assert_eq!(back, set);
@@ -1766,6 +1804,71 @@ fn fillet_turn_defaults_to_mitre_round_trips_and_refuses_unknown_turns() {
     unknown["turn"] = serde_json::json!("round");
     let e = serde_json::from_value::<FeatureKind>(unknown).unwrap_err().to_string();
     assert!(e.contains("unknown variant `round`") && e.contains("mitre") && e.contains("swept"), "{e}");
+}
+
+/// A fillet saved before per-edge radii reads with none and writes no `edge_radii`; one with them
+/// keeps them through a save and an open, each an expression, and evaluates each picked edge at its
+/// own radius. A file whose radii do not match its edges, or that asks for them with another
+/// option, is refused at evaluation, saying why.
+#[test]
+fn fillet_edge_radii_default_to_none_round_trip_and_are_checked() {
+    let old = serde_json::json!({"type": "fillet", "edges": [[20.0, 0.0, 10.0]], "radius": "1"});
+    let kind: FeatureKind = serde_json::from_value(old).unwrap();
+    let FeatureKind::Fillet { edge_radii, .. } = &kind else { panic!("{kind:?}") };
+    assert!(edge_radii.is_empty());
+    assert!(serde_json::to_value(&kind).unwrap().get("edge_radii").is_none());
+    let fillet = |radii: &[&str], tangent_chain: bool, fit: crate::FilletFit| FeatureKind::Fillet {
+        edges: vec![Position(Vec3::new(20.0, 0.0, 10.0)), Position(Vec3::new(20.0, 30.0, 10.0))],
+        radius: "1".into(),
+        body: None,
+        style: Default::default(),
+        fit,
+        corner: Default::default(),
+        setbacks: Vec::new(),
+        turn: Default::default(),
+        tangent_chain,
+        edge_radii: radii.iter().map(|r| (*r).into()).collect(),
+    };
+    let each = fillet(&["1", "2 mm"], false, Default::default());
+    let mut doc = Document::new("edge radii");
+    doc.add_feature(
+        FeatureKind::Box {
+            corner: point_expr(Vec3::ZERO),
+            length: "40".into(),
+            width: "30".into(),
+            height: "10".into(),
+            centred: false,
+            operation: Operation::NewBody,
+        },
+        None,
+    )
+    .unwrap();
+    let mut at = doc.clone();
+    at.add_feature(each.clone(), None).unwrap();
+    let saved = at.to_json();
+    assert!(saved.contains("\"edge_radii\""), "{saved}");
+    let opened = Document::from_json(&saved).unwrap();
+    assert_eq!(opened.features.last().map(|f| &f.kind), Some(&each));
+    assert_eq!(opened.to_json(), saved);
+    let mut m = Model::new();
+    m.evaluate(&opened);
+    assert!(m.results.iter().all(|r| r.error.is_none()), "{:?}", m.results.iter().map(|r| &r.error).collect::<Vec<_>>());
+    let spandrel = |r: f64| (1.0 - std::f64::consts::PI / 4.0) * r * r;
+    let v = measure(&m.state().bodies[0].body).unwrap().volume;
+    let want = 12000.0 - 40.0 * (spandrel(1.0) + spandrel(2.0));
+    assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
+    for (bad, says) in [
+        (fillet(&["1"], false, Default::default()), "gives 1 radii for 2 picked edges"),
+        (fillet(&["1", "2"], true, Default::default()), crate::EDGE_RADII_TAKE),
+        (fillet(&["1", "2"], false, crate::FilletFit::Reduce), crate::EDGE_RADII_TAKE),
+    ] {
+        let mut d = doc.clone();
+        d.add_feature(bad, None).unwrap();
+        let mut m = Model::new();
+        m.evaluate(&d);
+        let e = m.results.last().and_then(|r| r.error.clone()).unwrap_or_default();
+        assert!(e.contains(says), "{e}");
+    }
 }
 
 #[test]
@@ -1846,6 +1949,7 @@ fn browser_pruning_cuts_bad_parents_and_drops_stale_and_repeated_entries() {
         transform: IDENTITY,
         grounded: false,
         expressed_moves: Vec::new(),
+        bom_type: None,
     });
     let deep = MAX_GROUP_NESTING as u64 + 2;
     doc.browser_groups = vec![
@@ -1919,6 +2023,7 @@ fn browser_data_survives_a_save_and_old_designs_read_unchanged() {
             name: format!("P{id}"),
             transform: IDENTITY,
             grounded: false,
+            bom_type: None,
             expressed_moves: Vec::new(),
         });
     }
@@ -1990,7 +2095,9 @@ fn an_extruded_ellipse_or_spline_is_one_wall_named_by_its_curve() {
             to_offset: None,
             from: None,
             to_body_apart: false,
+            from_level: false,
             picked_placements: Vec::new(),
+            one_sided_direction: None,
         },
         operation: Operation::NewBody,
         targets: vec![],

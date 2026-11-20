@@ -114,6 +114,46 @@ to keep them. A cloud holds at most 20,000,000 segments and as many triangles. F
 double precision), so a scan far from the origin keeps its detail; they travel inside the design
 file as a binary part (12 bytes a point, 3 more with colours).
 
+## Deviation from a body
+
+`pointcloud.deviation` measures how far each point of a cloud lies from a body. It reads the
+cloud and the body where they are placed now and changes nothing: no placement, no colour, no undo
+step. It does not align the cloud, scale it or leave points out as outliers.
+
+- **Exact geometry.** Each distance is the kernel's closest-point solve on the body's faces as they
+  are trimmed, with their edges and vertices. A point past a face's edge is measured to that edge,
+  not to the face's unbounded surface. The display mesh plays no part, so a finer or coarser view
+  gives the same result. A mesh body is refused.
+- **Sign.** For a body that encloses a volume, measured on all its faces, each distance has a sign:
+  positive outside the material, negative inside it, zero on the boundary within the body's own
+  tolerance. The kernel's exact point classification decides the side. A face set (`faces`) or an
+  open body has no inside, so its distances are unsigned and `signed: true` is refused.
+- **Sampling.** At most `max_samples` points are measured (100,000 unless asked). A larger cloud is
+  sampled at every *n*-th point, from the first point, with *n* the smallest whole number that keeps
+  the count within the limit. The result gives `cloud_points`, `sample_step`, `sampled`, `measured`
+  and `failed`, and `sampled` = `measured` + `failed`. A point the kernel cannot measure is listed in
+  `failures` and left out of the statistics; it never counts as 0.
+- **Statistics.** `mean_abs_mm`, `rms_mm`, `max_abs_mm`, `mean_signed_mm` (signed only) and
+  `within_tolerance` count each measured point once; they are not weighted by area.
+  `within_tolerance_fraction` is `within_tolerance` / `measured`. With no measured point, each is
+  `null`, not 0. `worst` lists the farthest points with their closest point on the body, and
+  `per_point: true` adds every distance in sampling order.
+- **Filters and visibility** change only what the view shows. Every point of the cloud is a
+  candidate to measure.
+
+What the numbers do and do not say:
+
+- **Numerical accuracy.** The kernel solves each distance on the exact geometry;
+  `body_tolerance_mm` is the body's own tolerance. The cloud stores its coordinates as 32-bit floats,
+  and `point_precision_mm` says how far a stored point may lie from the value in its file.
+- **Sampling error.** `max_abs_mm` is the largest distance among the measured points, not a
+  certified maximum. A point the cloud does not have, or that sampling skipped, may lie farther.
+- **Coverage.** The distances go from the points to the body only. A part of the body with no
+  points near it does not show up, so a missing feature or a gap in the scan can go unseen.
+- **Scanner uncertainty.** The scanner's own noise and errors are in the points, and the command
+  cannot tell them apart from a real difference in shape. The result is a sampled geometric
+  comparison, not a check of conformity to a specification.
+
 ## Commands
 
 - `pointcloud.insert` — `path`; `name?`, `units?`, `max_points?`, `center?` (move the middle of
@@ -127,6 +167,8 @@ file as a binary part (12 bytes a point, 3 more with colours).
   `occurrence.move` takes it).
 - `pointcloud.reload` — `cloud`; reads its file again (see [Reloading](#reloading)).
 - `pointcloud.delete`.
+- `pointcloud.deviation` — `cloud`, `body`; `faces?`, `tolerance?` (mm, default 0.1),
+  `max_samples?`, `signed?`, `worst?`, `per_point?` (see [Deviation from a body](#deviation-from-a-body)).
 - `pointcloud.list` — each cloud with its `source`, its segment and triangle counts, its properties (name, whole-numbered or not, span, named
   values), its filters and its ramp's range as drawn (`color_range`).
 - `doc.open` opens a point cloud file as a new design holding it; dropping one on the window

@@ -615,7 +615,7 @@ fn canvas_value_fields_grow_with_an_expression_up_to_three_times_their_width() {
                     ui.horizontal(|ui| {
                         let id = ui.scope_id().with(case);
                         rect = match case {
-                            "canvas" => canvas_value_field(ui, id, &mut value, false).rect,
+                            "canvas" => canvas_value_field(ui, id, &mut value, false, "").rect,
                             _ => placement_field(ui, id, &mut value, "").rect,
                         };
                     });
@@ -632,6 +632,38 @@ fn canvas_value_fields_grow_with_an_expression_up_to_three_times_their_width() {
         assert!(long > formula && long <= number * 3.0 + 1.0, "{case}: {long} capped at three times {number}");
         assert!((width("4") - number).abs() < 0.5, "{case}: and back to a number's width");
     }
+}
+
+/// A canvas value field's hint is shown in the field while it is empty, and not beside a value.
+#[test]
+fn a_canvas_value_field_shows_its_hint_only_while_it_is_empty() {
+    fn walk(shape: &egui::Shape, out: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Text(t) => out.push(t.galley.job.text.clone()),
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, out)),
+            _ => {}
+        }
+    }
+    let ctx = crate::test_support::context();
+    let painted = |value: &str, hint: &str| {
+        let mut value = value.to_owned();
+        let mut texts = Vec::new();
+        // An area paints nothing in the frame it is first sized in.
+        for _ in 0..2 {
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                egui::Area::new(egui::Id::unique("hinted")).fixed_pos(egui::pos2(10.0, 10.0)).show(ui.ctx(), |ui| {
+                    canvas_value_field(ui, ui.scope_id().with("canvas"), &mut value, false, hint);
+                });
+            });
+            output.textures_delta.clear();
+            texts.clear();
+            output.shapes.iter().for_each(|s| walk(&s.shape, &mut texts));
+        }
+        texts
+    };
+    assert!(painted("", "All").iter().any(|t| t == "All"), "an empty field shows its hint");
+    assert!(!painted("12 mm", "All").iter().any(|t| t == "All"), "a value takes the hint's place");
+    assert!(!painted("", "").iter().any(|t| t == "All"), "no hint, no text");
 }
 
 #[test]
@@ -732,6 +764,39 @@ fn count_steps_stay_within_limits_and_keep_expressions() {
     assert_eq!(super::step_count("1e16", 1, &wide), None, "values past what counts can be are refused");
     assert_eq!(super::step_count("5", i64::MAX, &wide).as_deref(), Some("9223372036854775807"), "steps saturate rather than overflow");
     assert_eq!(super::step_count("5", i64::MIN, &wide).as_deref(), Some("-9223372036854775803"));
+}
+
+/// The same quantity editor is used by solid and sketch pattern dialogs. Up/Down steps
+/// its value only when focused, leaving limits and expression values intact.
+#[test]
+fn count_keyboard_arrows_step_only_a_focused_count_within_limits() {
+    for (initial, arrow, expected) in [
+        ("5", egui::Key::ArrowUp, "6"),
+        ("5", egui::Key::ArrowDown, "4"),
+        ("1", egui::Key::ArrowDown, "1"),
+        ("10", egui::Key::ArrowUp, "10"),
+        ("n", egui::Key::ArrowUp, "n + 1"),
+    ] {
+        let ctx = crate::test_support::context();
+        let eval = |text: &str| match text.trim() {
+            "n" => Some(4.0),
+            "n + 1" => Some(5.0),
+            text => text.parse::<f64>().ok(),
+        };
+        let mut count = initial.to_string();
+        let mut draw = |ui: &mut Ui| {
+            count_row(ui, "Instances", &mut count, &Count { min: 1, max: 10, eval: &eval });
+        };
+        frame(&ctx, vec![], &mut draw);
+        // A key outside the field does nothing, even with the dialog visible.
+        frame(&ctx, key(egui::Key::ArrowUp), &mut draw);
+        let field = registry::rect_of("dialog:widget:Instances").expect("count field has a rect");
+        let at = field.left_center() + egui::vec2(16.0, 0.0);
+        frame(&ctx, pointer(at, true), &mut draw);
+        frame(&ctx, pointer(at, false), &mut draw);
+        frame(&ctx, key(arrow), &mut draw);
+        assert_eq!(count, expected, "{initial} with {arrow:?}");
+    }
 }
 
 /// A count's step arrows stand inside the editor, which asks for the text cursor across its
@@ -847,7 +912,7 @@ fn a_right_click_on_every_kind_of_text_field_opens_its_menu() {
                 "expression" | "plain" => super::editor(ui, value, "", case == "expression").2.rect,
                 "cell" => cell_editor(ui, id, value, "", false).rect,
                 "placement" => placement_field(ui, id, value, "").rect,
-                "canvas" => canvas_value_field(ui, id, value, false).rect,
+                "canvas" => canvas_value_field(ui, id, value, false, "").rect,
                 "password" => password_field(ui, id, value, "").rect,
                 "multiline" => multiline_text_field(ui, "Text", id, value).rect,
                 "area" => text_area(ui, "Text", id, value, 3, 100).rect,
@@ -999,7 +1064,7 @@ fn a_right_click_on_a_value_box_over_the_canvas_does_not_reach_the_canvas() {
         let ctx = ui.ctx().clone();
         let area = Container::new(&ctx, Surface::Canvas).area(egui::Id::unique("canvas_box_area"));
         area.fixed_pos(egui::pos2(60.0, 60.0)).order(egui::Order::Foreground).show(&ctx, |ui| {
-            field.set(canvas_value_field(ui, id, &mut value.borrow_mut(), false).rect);
+            field.set(canvas_value_field(ui, id, &mut value.borrow_mut(), false, "").rect);
         });
     };
     menu_frame(&ctx, vec![], &mut draw);

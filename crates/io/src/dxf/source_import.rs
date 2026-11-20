@@ -217,8 +217,9 @@ fn records(entities: Vec<Ent>, k: f64, file: &mut DxfFile<DxfShape>, budget: &mu
                     fit: budget.points(&entity, 11, 21, k)?,
                     weights: budget.numbers(&entity, 41)?,
                 },
-                "TEXT" | "MTEXT" => match (entity.get(10), entity.get(20), entity.get(40), entity.text(1)) {
+                "TEXT" | "MTEXT" => match (entity.get(10), entity.get(20), entity.get(40), raw_text_value(&entity)?) {
                     (Some(x), Some(y), Some(height), Some(text)) => {
+                        let text = text.trim();
                         budget.charge(text.len(), 1)?;
                         budget.copied(text.len())?;
                         DxfShape::Text { at: pt(x, y), height: height * k, angle_deg: entity.get(50).unwrap_or(0.0), text: paragraph_text(text)? }

@@ -530,7 +530,7 @@ In order of how much they'd help users:
 2. **Boolean robustness.** A random-design fuzzer currently gets about half of its designs
    through without a kernel error. Each failing seed is a reproducible bug.
 3. **Drawings, CAM and mesh tools.** These are out of scope for now (see
-   [ROADMAP.md](docs/roadmap-detail.md)), but anyone who wants to own one is welcome.
+   [docs/roadmap-detail.md](docs/roadmap-detail.md)), but anyone who wants to own one is welcome.
 
 ## Updating the generated feature list
 

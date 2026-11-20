@@ -58,6 +58,7 @@ impl BarRig {
         let bar = AppBar {
             mark: &|_, _| {},
             name: self.name,
+            leading: None,
             home: BarButton { id: "home", icon: "home", tip: "Home", enabled: true, narrow: false, wide_only: false },
             file: "File",
             file_open: false,
@@ -270,6 +271,7 @@ impl TabsRig {
             id: egui::Id::unique("test_tabs"),
             handles: TAB_HANDLES,
             views_as_tabs: self.views == Some(true),
+            switcher_always: false,
             view_text: ViewText {
                 close_view: "Close view",
                 close_design: "Close design",
@@ -452,14 +454,20 @@ fn press(pos: Pos2, pressed: bool) -> egui::Event {
 }
 
 /// A design with several views is a pill where the app asks for sub-tabs and the bar has room for
-/// the active view and the "N more" button; otherwise a switcher. One view or none is a plain tab.
+/// the active view and the "N more" button; otherwise a switcher. One view or none is a plain tab,
+/// unless the app asks for the switcher always: then one view has it too, but never with sub-tabs.
 #[test]
 fn the_selected_tab_falls_back_to_a_switcher_where_the_pill_has_no_room() {
-    assert_eq!(selected_layout(0, true, 300.0, 900.0), SelectedLayout::Plain);
-    assert_eq!(selected_layout(1, true, 300.0, 900.0), SelectedLayout::Plain);
-    assert_eq!(selected_layout(3, true, 300.0, 300.0), SelectedLayout::Pill);
-    assert_eq!(selected_layout(3, true, 300.0, 299.0), SelectedLayout::Switcher);
-    assert_eq!(selected_layout(3, false, 300.0, 900.0), SelectedLayout::Switcher);
+    assert_eq!(selected_layout(0, true, false, 300.0, 900.0), SelectedLayout::Plain);
+    assert_eq!(selected_layout(1, true, false, 300.0, 900.0), SelectedLayout::Plain);
+    assert_eq!(selected_layout(1, false, false, 300.0, 900.0), SelectedLayout::Plain);
+    assert_eq!(selected_layout(3, true, false, 300.0, 300.0), SelectedLayout::Pill);
+    assert_eq!(selected_layout(3, true, false, 300.0, 299.0), SelectedLayout::Switcher);
+    assert_eq!(selected_layout(3, false, false, 300.0, 900.0), SelectedLayout::Switcher);
+    assert_eq!(selected_layout(1, false, true, 300.0, 900.0), SelectedLayout::Switcher);
+    assert_eq!(selected_layout(1, true, true, 300.0, 900.0), SelectedLayout::Plain);
+    assert_eq!(selected_layout(0, false, true, 300.0, 900.0), SelectedLayout::Plain);
+    assert_eq!(selected_layout(3, true, true, 300.0, 300.0), SelectedLayout::Pill);
 }
 
 /// The sub-tabs all show when they fit; otherwise a run of neighbours that holds the shown view

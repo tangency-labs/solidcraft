@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.drawing_scene_hit": "What Is Under a Point"
+  },
+  "ar": {
+    "cmd.drawing_scene_hit": "ما يقع تحت نقطة"
+  },
+  "de": {
+    "cmd.drawing_scene_hit": "Was unter einem Punkt liegt"
+  },
+  "he": {
+    "cmd.drawing_scene_hit": "מה נמצא מתחת לנקודה"
+  },
+  "ja": {
+    "cmd.drawing_scene_hit": "点の下にあるもの"
+  },
+  "ko": {
+    "cmd.drawing_scene_hit": "점 아래에 있는 항목"
+  },
+  "vi": {
+    "cmd.drawing_scene_hit": "Thứ nằm dưới một điểm"
+  },
+  "zh": {
+    "cmd.drawing_scene_hit": "点下方的对象"
+  }
+}

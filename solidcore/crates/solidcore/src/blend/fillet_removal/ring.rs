@@ -3,8 +3,8 @@
 //!
 //! Port of the SolidCraft fork's `SmRingFilletRemoval` (tangency-labs/smlib 52bfef0,
 //! `SmFilletRemoval.cpp` / `.h`, and `SmBrep::JoinShellsAtVertex`, `SmBrep.cpp`), as
-//! amended by 661f79c. WR-605; used by [`super::delete_fillet_face`] only with
-//! `Kernel::fixes.fillet_removal_takes_ring_fillets`.
+//! amended by 661f79c. WR-605; used by [`super::delete_fillet_face`] for every ring
+//! fillet (formerly only with `Kernel::fixes.fillet_removal_takes_ring_fillets`).
 //!
 //! | Rust                                    | Fork                                           |
 //! |-----------------------------------------|------------------------------------------------|

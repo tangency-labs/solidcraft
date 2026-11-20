@@ -1114,6 +1114,31 @@ fn a_newer_design_opens_with_a_notice_and_no_dialog() {
     assert!(app.dialog.is_none() && !app.ui.palette_open);
 }
 
+/// A design with the data of a plugin that isn't installed opens as usual: the status line names
+/// the plugin, and the data is kept as it came.
+#[test]
+fn a_design_with_a_missing_plugins_data_opens_and_names_the_plugin() {
+    let mut app = SolveApp::new(Session::default(), Default::default());
+    let dir = scratch("missing_plugin_data");
+    app.session.plugin_state.plugins_dir = Some(dir.join("plugins"));
+    let mut design = Session::default();
+    design.execute("solid.box", &json!({"length": 2, "width": 3, "height": 4})).unwrap();
+    let b64 = solidcraft_engine::doc::canvas::base64_encode;
+    let meta = b64(br#"{"plugin":"manufacture","name":"Manufacture","plugin_version":"1.4","format":3}"#);
+    let data = design.doc_mut();
+    data.plugin_data.insert("manufacture/meta.json".into(), meta.into());
+    data.plugin_data.insert("manufacture/data.json".into(), b64(br#"{"setups":[]}"#).into());
+    let path = dir.join("with-data.json");
+    std::fs::write(&path, design.doc.to_json()).unwrap();
+
+    app.open_path(&path.to_string_lossy());
+
+    let (text, _, error) = app.status.clone().unwrap();
+    assert_eq!(text, "Contains Manufacture data (plugin 1.4). Install it to edit.");
+    assert!(!error && app.dialog.is_none());
+    assert_eq!(app.session.doc.plugin_data, design.doc.plugin_data);
+}
+
 /// Imported STEP bodies have no editor. Both edit entry points explain this without opening
 /// the palette, changing its text, or leaving the timeline rolled back.
 #[test]

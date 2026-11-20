@@ -1,0 +1,34 @@
+{
+  "ar": {
+    "ui.drawing_placement.base": "اختر اتجاهًا، ثم انقر على الورقة لوضع المسقط الأساسي.",
+    "ui.drawing_placement.projected": "حرّك المؤشر حول المسقط الأساسي وانقر لوضع المساقط المشتقة. اضغط على Esc أو إنهاء عند الانتهاء."
+  },
+  "de": {
+    "ui.drawing_placement.base": "Wählen Sie eine Ausrichtung und klicken Sie auf das Blatt, um die Grundansicht zu platzieren.",
+    "ui.drawing_placement.projected": "Bewegen Sie den Zeiger um die Grundansicht und klicken Sie, um Projektionsansichten zu platzieren. Beenden Sie mit Esc oder Fertig."
+  },
+  "en": {
+    "ui.drawing_placement.base": "Choose an orientation, then click the sheet to place the base view.",
+    "ui.drawing_placement.projected": "Move around the base view and click to place projected views. Press Esc or Finish when done."
+  },
+  "he": {
+    "ui.drawing_placement.base": "בחרו כיוון, ואז לחצו על הגיליון כדי למקם את מבט הבסיס.",
+    "ui.drawing_placement.projected": "הזיזו את הסמן סביב מבט הבסיס ולחצו כדי למקם מבטים מוקרנים. לסיום לחצו על Esc או על סיום."
+  },
+  "ja": {
+    "ui.drawing_placement.base": "向きを選び、シートをクリックして基本ビューを配置します。",
+    "ui.drawing_placement.projected": "基本ビューの周りでポインターを動かし、クリックして投影ビューを配置します。終わったら Esc キーか「完了」を押します。"
+  },
+  "ko": {
+    "ui.drawing_placement.base": "방향을 선택한 다음 시트를 클릭하여 기본 뷰를 배치합니다.",
+    "ui.drawing_placement.projected": "기본 뷰 주변에서 포인터를 움직이고 클릭하여 투영 뷰를 배치합니다. 끝나면 Esc 키를 누르거나 완료를 선택합니다."
+  },
+  "vi": {
+    "ui.drawing_placement.base": "Chọn hướng, rồi bấm vào tờ vẽ để đặt hình chiếu cơ sở.",
+    "ui.drawing_placement.projected": "Di chuyển con trỏ quanh hình chiếu cơ sở và bấm để đặt các hình chiếu. Nhấn Esc hoặc chọn Hoàn tất khi xong."
+  },
+  "zh": {
+    "ui.drawing_placement.base": "选择方向，然后单击图纸以放置基础视图。",
+    "ui.drawing_placement.projected": "在基础视图周围移动指针并单击以放置投影视图。完成后按 Esc 或选择“完成”。"
+  }
+}

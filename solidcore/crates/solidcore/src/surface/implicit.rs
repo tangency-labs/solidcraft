@@ -1653,6 +1653,34 @@ fn evaluates_as(k: &Kernel, surface: &Surface, form: &BSplineSurface) -> Result<
     Ok(evaluation_margin(k, surface, form)?.is_some_and(|m| m <= 1.0))
 }
 
+/// [`evaluates_as`]'s ratio of distance to bound between the analytic surface's STEP point
+/// at `step_uv` and the point `f` a caller says the form `form` has there (infinite for a
+/// distance that is not a number): at most 1 where the two agree within the rounding
+/// [`evaluates_as`] derives at that STEP parameter. `None` for a surface the bound does not
+/// cover. A certificate of one parameter pair, for checking an evaluation or a conversion
+/// a caller made (`f` the form's point at the NURB parameter the conversion pairs with
+/// `step_uv`).
+///
+/// # Errors
+///
+/// Those of the STEP evaluation and of the form's net.
+pub fn evaluation_ratio_of(
+    k: &Kernel,
+    surface: &Surface,
+    form: &BSplineSurface,
+    step_uv: Vec2,
+    f: Vec3,
+) -> Result<Option<f64>> {
+    let (net, p, q) = euclidean_net(form)?;
+    let size = net.iter().flatten().fold(0.0_f64, |a, x| a.max(x.length()));
+    let Some(r) = Rounding::of(surface, form.is_rational(), p, q, size, &net)? else {
+        return Ok(None);
+    };
+    let s = surface.evaluate_step_point(k, step_uv)?;
+    let ratio = (s - f).length() / r.at(step_uv, s, f);
+    Ok(Some(if ratio.is_nan() { f64::INFINITY } else { ratio }))
+}
+
 /// [`evaluates_as`]'s largest ratio of distance to bound over the Greville points (infinite
 /// for a distance that is not a number); `None` for a surface the bound does not cover.
 fn evaluation_margin(k: &Kernel, surface: &Surface, form: &BSplineSurface) -> Result<Option<f64>> {

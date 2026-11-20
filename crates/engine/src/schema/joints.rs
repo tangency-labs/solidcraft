@@ -84,7 +84,8 @@ pub struct EditJointParams {
     /// Suppress the joint (true) or bring it back (false).
     #[serde(default, deserialize_with = "present")]
     pub suppressed: Option<bool>,
-    /// The joint's new name.
+    /// The joint's new name, at most 128 characters once surrounding spaces are cut (the joint's
+    /// own name is taken whatever its length). Blank text changes nothing.
     #[serde(default, deserialize_with = "present")]
     pub name: Option<String>,
     /// Leave out the degrees of freedom and the fixed occurrences in the reply.
@@ -679,7 +680,8 @@ pub struct EditConstraintParams {
     /// True turns b over: from the new rule's way after a type change, else from how it faces now.
     #[serde(default, deserialize_with = "present")]
     pub flip: Option<bool>,
-    /// The constraint's new name.
+    /// The constraint's new name, at most 128 characters once surrounding spaces are cut (the
+    /// constraint's own name is taken whatever its length). Blank text changes nothing.
     #[serde(default, deserialize_with = "present")]
     pub name: Option<String>,
     /// Suppress the constraint (true) or bring it back (false).

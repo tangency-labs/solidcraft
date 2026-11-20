@@ -370,7 +370,7 @@ fn turning_off_automatic_checks_stops_the_launch_check() {
 
 /// A computer whose administrator set `CheckForUpdates` to `on` (#10260).
 fn update_policy(on: bool) -> crate::policy::Policy {
-    crate::policy::Policy { mandatory: crate::policy::Layer { check_for_updates: Some(on) }, ..Default::default() }
+    crate::policy::Policy { mandatory: crate::policy::Layer { check_for_updates: Some(on), ..Default::default() }, ..Default::default() }
 }
 
 #[test]

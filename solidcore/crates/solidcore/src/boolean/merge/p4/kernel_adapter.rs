@@ -63,6 +63,7 @@ fn cache_kernel(k: &Kernel, context: &Context) -> Kernel {
         caches: crate::kernel::Caches::default(),
         context: context.metadata_copy(),
         fillet_point_step: core::cell::Cell::new(k.fillet_point_step.get()),
+        process_fillet_point_step: k.process_fillet_point_step,
         upstream_ub_passed: Vec::new(),
         memoize_curve_caches: k.memoize_curve_caches,
         fixes: k.fixes,
@@ -88,6 +89,8 @@ fn cache_kernel(k: &Kernel, context: &Context) -> Kernel {
         work_counters: crate::kernel::WorkCounters::default(),
         // (building cache trees makes no blend faces)
         blend_face_log: None,
+        // (building cache trees makes no corner patches)
+        coons_tangency_log: core::cell::RefCell::new(None),
         // (the caller's profiler: the copy's scopes record into its tree)
         #[cfg(feature = "profile")]
         profiler: k.profiler.clone(),

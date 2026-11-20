@@ -1,5 +1,5 @@
 //! Regression test for WR-649 (the fork's tangency-labs/smlib@d548305): with
-//! `fillet_refuse_overlapping_bands` (WR-542) and `fillet_mitre_concave_face_corners`
+//! `fillet_refuse_overlapping_bands` (WR-542) and the mitre at a concave face corner
 //! (WR-642), a blend's band on a face is its rail between the rail's end vertices. The
 //! rails are not trimmed yet when the bands are checked, and run on past the corners that end
 //! them; sampled over the whole curve, the rail of SolidCraft's #871 part's plate-top round
@@ -105,7 +105,6 @@ fn edge_through(k: &Kernel, b: &Brep, q: Point3) -> EdgeId {
 
 fn round_the_ends(r: f64, fixed: bool) -> Result<(usize, f64), String> {
     let mut k = Kernel::default();
-    k.fixes.fillet_mitre_concave_face_corners = true;
     k.fixes.fillet_refuse_overlapping_bands = fixed;
     let mut b = part(&mut k);
     let mut ids = Vec::new();

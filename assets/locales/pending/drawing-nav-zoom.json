@@ -1,0 +1,26 @@
+{
+  "en": {
+    "navbar.description.sheet_zoom": "Displays the drawing zoom and opens Fit sheet and Actual size."
+  },
+  "de": {
+    "navbar.description.sheet_zoom": "Zeigt den Zeichnungszoom und öffnet Blatt einpassen und Originalgröße."
+  },
+  "ja": {
+    "navbar.description.sheet_zoom": "図面のズーム率を表示し、用紙に合わせる操作と実寸表示を開きます。"
+  },
+  "zh": {
+    "navbar.description.sheet_zoom": "显示图纸缩放比例，并打开适合图纸和实际尺寸选项。"
+  },
+  "ko": {
+    "navbar.description.sheet_zoom": "도면 확대율을 표시하고 시트 맞춤 및 실제 크기 옵션을 엽니다."
+  },
+  "ar": {
+    "navbar.description.sheet_zoom": "يعرض تكبير الرسم ويفتح خياري ملاءمة الورقة والحجم الفعلي."
+  },
+  "he": {
+    "navbar.description.sheet_zoom": "מציג את זום השרטוט ופותח את האפשרויות התאמה לגיליון וגודל ממשי."
+  },
+  "vi": {
+    "navbar.description.sheet_zoom": "Hiển thị mức thu phóng bản vẽ và mở các tùy chọn Vừa trang và Kích thước thực."
+  }
+}

@@ -128,6 +128,25 @@ impl Turns {
     }
 }
 
+/// The middle of the widest stretch of angle `k` (0: longitude, 1: tube angle) that no sample
+/// of `samples` lies in, when it is clear of them by more than four times `tol` at `radius`
+/// (the smallest radius that angle is measured at); `None` otherwise.
+fn widest_free(samples: &[[f64; 2]], k: usize, radius: f64, tol: f64) -> Option<f64> {
+    let mut angles: Vec<f64> = samples.iter().filter_map(|q| q.get(k)).map(|a| a.rem_euclid(TAU)).collect();
+    angles.sort_by(f64::total_cmp);
+    let (first, last) = (*angles.first()?, *angles.last()?);
+    let mut best = (first + TAU - last, last);
+    for pair in angles.windows(2) {
+        if let [a, b] = pair
+            && b - a > best.0
+        {
+            best = (b - a, *a);
+        }
+    }
+    let (gap, from) = best;
+    (0.5 * gap * radius > 4.0 * tol).then(|| wrap(from + 0.5 * gap))
+}
+
 /// The path a slit runs out along: a loop that runs out along a chain of edges and straight back
 /// along it, each edge used once each way, started at one of its two turns; `None` for any
 /// other loop.
@@ -873,6 +892,224 @@ impl Assembly<'_> {
         Ok(completed)
     }
 
+    /// Complete every face on a torus that is the outside of its loops into the torus less what
+    /// they enclose (#17930). A loop runs counter-clockwise about the face's normal round the
+    /// region it bounds; on a torus, which is closed both ways, a loop that winds round neither
+    /// way (it encloses a patch) and runs clockwise bounds all the rest of the torus. A full
+    /// torus written as two faces sharing one loop, a patch and the rest round it, has the
+    /// rest so: read as the patch turned over, the solid came in with both faces on the patch
+    /// and no volume. Turning such a face over is still right where the file has its loop the
+    /// wrong way round, so a face is completed only where a face it shares an edge with lies on
+    /// the same torus facing the same way: then the patch is that face's, and this one is the
+    /// rest. The face gets the torus's two seams (a circle round the axis and one round the
+    /// tube, through a new vertex, in the middle of the widest stretches of longitude and tube
+    /// angle its loops keep clear of, where its torus is turned to start) as its outer bound,
+    /// and its loops become its holes. Returns how many faces were completed.
+    pub(crate) fn complete_outsides(&mut self) -> R<usize> {
+        let mut completed = 0;
+        for fi in 0..self.faces.len() {
+            let Some(face) = self.faces.get(fi) else { continue };
+            let BSurface::Torus { frame, major_radius, minor_radius, tube_start } = face.surface.clone() else { continue };
+            let loops: Vec<Vec<(u32, bool)>> = face
+                .loops
+                .iter()
+                .map(|l| match l {
+                    Bound::Edges(es) if !es.is_empty() && !super::seam_only(es) => Some(es.clone()),
+                    _ => None,
+                })
+                .collect::<Option<_>>()
+                .unwrap_or_default();
+            if loops.is_empty() {
+                continue;
+            }
+            let o = Vec3::from(frame.origin);
+            let (x, y) = (Vec3::from(frame.x_axis), Vec3::from(frame.y_axis));
+            let z = x.cross(y);
+            // Each loop's samples as (longitude, tube angle) about the torus, unwrapped along it.
+            let angles = |p: Vec3| -> [f64; 2] {
+                let d = p - o;
+                let h = d.dot(z);
+                let rho = (d - z * h).len();
+                [d.dot(y).atan2(d.dot(x)), h.atan2(rho - major_radius)]
+            };
+            let mut samples: Vec<[f64; 2]> = Vec::new();
+            let mut outside = true;
+            for l in &loops {
+                let mut path: Vec<[f64; 2]> = Vec::new();
+                for &(e, forward) in l {
+                    let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+                    let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
+                    let [lo, hi] = edge.interval;
+                    for k in 0..SAMPLES {
+                        let s = k as f64 / SAMPLES as f64;
+                        let t = if forward { lo + (hi - lo) * s } else { hi - (hi - lo) * s };
+                        let q = angles(c.point(t).ok_or("edge point")?);
+                        samples.push(q);
+                        let q = match path.last() {
+                            Some(l) => [l[0] + wrap(q[0] - l[0]), l[1] + wrap(q[1] - l[1])],
+                            None => q,
+                        };
+                        path.push(q);
+                    }
+                }
+                let (Some(first), Some(last)) = (path.first(), path.last()) else { continue };
+                // Back to the start: a loop that winds round the torus doesn't enclose a patch.
+                let back = [last[0] + wrap(first[0] - last[0]), last[1] + wrap(first[1] - last[1])];
+                if (back[0] - first[0]).abs() > PI || (back[1] - first[1]).abs() > PI {
+                    outside = false;
+                    break;
+                }
+                // Twice the signed area in (longitude, tube angle): the torus's natural normal is
+                // ∂u × ∂v, out of the tube, and the loops are kept about it.
+                let mut twice = 0.0;
+                for (a, b) in path.iter().zip(path.iter().skip(1).chain(std::iter::once(&back))) {
+                    twice += a[0] * b[1] - b[0] * a[1];
+                }
+                if !(twice < 0.0) {
+                    outside = false;
+                    break;
+                }
+            }
+            if !outside || !self.patch_beside(fi, &loops, o, z, major_radius, minor_radius)? {
+                continue;
+            }
+            // The seams go through the middle of the widest stretch of longitude and of tube
+            // angle the loops leave free (each clear of them by more than the tolerance), and
+            // the torus is turned to start there, as a whole torus starts at its seams.
+            let (Some(u), Some(w)) =
+                (widest_free(&samples, 0, major_radius - minor_radius, self.tol), widest_free(&samples, 1, minor_radius, self.tol))
+            else {
+                continue;
+            };
+            let Some(turned) = crate::kernel::form::turned(&face.surface, u).and_then(|s| crate::kernel::form::tube_turned(&s, w - tube_start))
+            else {
+                continue;
+            };
+            let radial = x * u.cos() + y * u.sin();
+            let ring_radius = major_radius + minor_radius * w.cos();
+            let p = o + radial * ring_radius + z * (minor_radius * w.sin());
+            let v = index(self.vertices.len())?;
+            self.vertices.push(Vertex { point: arr(p), tolerance: self.tol });
+            // Round the axis the way u runs, round the tube the way v runs: the torus's whole
+            // (u, v) box, counter-clockwise.
+            let ring = BCurve::Circle {
+                frame: Frame { origin: arr(o + z * (minor_radius * w.sin())), x_axis: arr(radial), y_axis: arr(z.cross(radial)) },
+                radius: ring_radius,
+            };
+            let tube_x = radial * w.cos() + z * w.sin();
+            let tube_y = z * w.cos() - radial * w.sin();
+            let tube = BCurve::Circle {
+                frame: Frame { origin: arr(o + radial * major_radius), x_axis: arr(tube_x), y_axis: arr(tube_y) },
+                radius: minor_radius,
+            };
+            let ring = self.new_edge(ring, [0.0, TAU], [v, v])?;
+            let tube = self.new_edge(tube, [0.0, TAU], [v, v])?;
+            let Some(face) = self.faces.get_mut(fi) else { continue };
+            face.surface = turned;
+            face.loops.insert(0, Bound::Edges(vec![(ring, true), (tube, true), (ring, false), (tube, false)]));
+            face.outer = Some(0);
+            face.extent = None;
+            completed += 1;
+        }
+        Ok(completed)
+    }
+
+    /// Turn each torus face whose bounds hold a seam round the axis (a full circle about it,
+    /// used both ways) off its tube start so the tube starts there, and one whose bounds hold a
+    /// seam round the tube off its frame's x axis so the frame starts there: a face's (u, v) box
+    /// on its form is read from its seams, and a seam away from where the torus starts in that
+    /// direction gave a box short of the whole torus, so a torus written whole round a hole
+    /// read back with part of it missing. STEP's torus starts its tube at the outer equator, so
+    /// a file's seam round the axis elsewhere is common. Returns how many faces were turned.
+    pub(crate) fn seat_torus_seams(&mut self) -> R<usize> {
+        let mut seated = 0;
+        for fi in 0..self.faces.len() {
+            let Some(face) = self.faces.get(fi) else { continue };
+            let BSurface::Torus { frame, major_radius, tube_start, .. } = &face.surface else { continue };
+            let (major_radius, tube_start) = (*major_radius, *tube_start);
+            let o = Vec3::from(frame.origin);
+            let (x, y) = (Vec3::from(frame.x_axis), Vec3::from(frame.y_axis));
+            let z = x.cross(y);
+            let mut ways: std::collections::HashMap<u32, [bool; 2]> = std::collections::HashMap::new();
+            for l in &face.loops {
+                if let Bound::Edges(es) = l {
+                    for (e, forward) in es {
+                        if let Some(w) = ways.entry(*e).or_default().get_mut(usize::from(*forward)) {
+                            *w = true;
+                        }
+                    }
+                }
+            }
+            let (mut u_at, mut w_at) = (None, None);
+            for (e, used) in &ways {
+                if *used != [true, true] {
+                    continue;
+                }
+                let Some(edge) = self.edges.get(*e as usize) else { continue };
+                let BCurve::Circle { frame: cf, radius } = &edge.curve else { continue };
+                if !((edge.interval[1] - edge.interval[0]) >= TAU * (1.0 - 1e-9)) {
+                    continue;
+                }
+                let (c, cx) = (Vec3::from(cf.origin), Vec3::from(cf.x_axis));
+                let n = cx.cross(Vec3::from(cf.y_axis));
+                let p = c + cx * *radius;
+                let d = p - o;
+                if n.cross(z).len() <= 1e-9 {
+                    // Round the axis: its tube angle.
+                    let h = d.dot(z);
+                    w_at = Some(h.atan2((d - z * h).len() - major_radius));
+                } else if n.dot(z).abs() <= 1e-9 {
+                    // Round the tube: its longitude.
+                    let dc = c - o;
+                    u_at = Some(dc.dot(y).atan2(dc.dot(x)));
+                }
+            }
+            let mut surface = face.surface.clone();
+            let mut turned = false;
+            if let Some(u) = u_at.filter(|u| wrap(*u).abs() > 1e-12)
+                && let Some(s) = crate::kernel::form::turned(&surface, u)
+            {
+                surface = s;
+                turned = true;
+            }
+            if let Some(w) = w_at.filter(|w| wrap(*w - tube_start).abs() > 1e-12)
+                && let Some(s) = crate::kernel::form::tube_turned(&surface, wrap(w - tube_start))
+            {
+                surface = s;
+                turned = true;
+            }
+            if turned && let Some(f) = self.faces.get_mut(fi) {
+                f.surface = surface;
+                f.extent = None;
+                seated += 1;
+            }
+        }
+        Ok(seated)
+    }
+
+    /// A face sharing an edge with one of `loops` (of face `fi`) lies on the torus about `o`
+    /// and `z` of radii `major` and `minor`, and faces the same way as face `fi`.
+    fn patch_beside(&self, fi: usize, loops: &[Vec<(u32, bool)>], o: Vec3, z: Vec3, major: f64, minor: f64) -> R<bool> {
+        let Some(forward) = self.faces.get(fi).map(|f| f.forward) else { return Ok(false) };
+        let edges: std::collections::HashSet<u32> = loops.iter().flatten().map(|u| u.0).collect();
+        for (gi, g) in self.faces.iter().enumerate() {
+            if gi == fi || g.forward != forward {
+                continue;
+            }
+            let BSurface::Torus { frame, major_radius, minor_radius, .. } = &g.surface else { continue };
+            let (go, gz) = (Vec3::from(frame.origin), Vec3::from(frame.x_axis).cross(Vec3::from(frame.y_axis)));
+            let same = go.dist(o) <= self.tol
+                && gz.cross(z).len() * (major + minor) <= self.tol
+                && (major_radius - major).abs() <= self.tol
+                && (minor_radius - minor).abs() <= self.tol;
+            let shares = g.loops.iter().any(|l| matches!(l, Bound::Edges(es) if es.iter().any(|u| edges.contains(&u.0))));
+            if same && shares {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     /// The slit made the meridian seam of `surface` when it is a surface of revolution closed
     /// at both poles ([`Assembly::meridian_slit`]); `None` for any other surface.
     fn closed_at_poles(&mut self, path: &[(u32, bool)], surface: &BSurface) -> R<Option<Option<Vec<(u32, bool)>>>> {
@@ -1323,8 +1560,13 @@ impl Assembly<'_> {
     /// between then meets no loop, so it lies in the face: the regions off the face beyond a loop
     /// are bounded by that loop alone. A piece whose angle is not monotone, or one that comes within
     /// its pad of the ruling's angle without crossing it between its ends, may meet the ruling
-    /// anywhere over its hull's heights, none of which may be on the seam. Vertices are tried in
-    /// loop order, `la`'s first.
+    /// anywhere over the heights [`meets`] gives it, none of which may be on the seam. A ruling
+    /// that crosses the other loop within a piece's pad of a joint between two of its pieces (a knot
+    /// of a helix, the next quarter of a circle) has the piece across the joint come that near
+    /// without crossing: where both run one way round the axis the loop passes the ruling once
+    /// there, and that piece is the loop going on from the seam's end, no matter unless it reaches
+    /// back along the seam from there by more than the tolerance. Vertices are tried in loop order,
+    /// `la`'s first.
     fn wound_band_seam(&mut self, fi: usize, la: usize, lb: usize, ax: &Axis, eval: &SurfaceEval, splits: &mut usize) -> R<()> {
         let frame = Perpendicular::new(ax);
         let height = |p: Vec3| (p - ax.origin).dot(ax.z);
@@ -1386,6 +1628,12 @@ impl Assembly<'_> {
             // reach of anything else along the ruling (from the vertex on, or straddling it).
             let mut nearest: Option<(f64, u32, Vec3, f64)> = None;
             let mut other = f64::INFINITY;
+            // The other loop's pieces counted along it: the place and way of the one its nearest
+            // crossing is on, those that may meet the ruling without crossing it (place, way,
+            // reach), and how many it has.
+            let mut crossed: Option<(usize, Option<i8>)> = None;
+            let mut doubtful: Vec<(usize, Option<i8>, f64)> = Vec::new();
+            let mut count = 0usize;
             for &p in &points {
                 let d = along(height(p));
                 if !(Blocked { arcs: vec![frame.point_arc(p, self.tol)] }).clear(theta) && d > -self.tol {
@@ -1393,9 +1641,12 @@ impl Assembly<'_> {
                 }
             }
             for (li, luses) in &loops {
+                let mut place = 0usize;
                 for (ui, w) in luses.iter().enumerate() {
                     let last = w.pieces.len().saturating_sub(1);
                     for (pi, piece) in w.pieces.iter().enumerate() {
+                        let here = place;
+                        place += 1;
                         // The vertex's own pieces meet the ruling there only (monotone, under half
                         // a turn).
                         if *li == from && ((ui == k && pi == 0) || (ui == before && pi == last)) {
@@ -1408,6 +1659,7 @@ impl Assembly<'_> {
                                 if d > 0.0 {
                                     if nearest.is_none_or(|(n, ..)| d < n) {
                                         nearest = Some((d, w.edge, p, x));
+                                        crossed = Some((here, piece.runs));
                                     }
                                 } else if d > -self.tol {
                                     other = 0.0;
@@ -1417,12 +1669,30 @@ impl Assembly<'_> {
                             Meets::Once { d, .. } => {
                                 other = other.min(if d > -self.tol { d.max(0.0) } else { f64::INFINITY });
                             }
+                            // The other loop's own: judged once its nearest crossing is known.
+                            Meets::Hull(Some(reach)) if *li == onto => doubtful.push((here, piece.runs, reach)),
                             Meets::Hull(reach) => other = other.min(reach.unwrap_or(f64::INFINITY)),
                         }
                     }
                 }
+                if *li == onto {
+                    count = place;
+                }
             }
             let Some((d, e, p, x)) = nearest else { continue };
+            for (place, runs, reach) in doubtful {
+                // The piece next along the loop to the one crossed, both running one way round
+                // the axis: their angle is monotone through the joint between them, so the loop
+                // passes the ruling once, at the crossing, and this piece is the loop going on
+                // from there. It is on the seam only where it reaches back along it.
+                let goes_on = crossed.is_some_and(|(at, way)| {
+                    let apart = at.abs_diff(place);
+                    way.is_some() && way == runs && (apart == 1 || apart.checked_add(1) == Some(count))
+                });
+                if !(goes_on && reach > d - self.tol) {
+                    other = other.min(reach);
+                }
+            }
             // Anything else at the crossing or before it: another loop, a doubtful piece, or a
             // crossing of the other loop's own short of where the seam would end.
             if !(d > self.tol) || other <= d + self.tol {
@@ -1752,7 +2022,8 @@ impl Perpendicular {
     /// runs, a piece that reaches half a turn in halves ([`MAX_HALVINGS`]); the whole turn where a
     /// hull is still not clear of the axis.
     pub(crate) fn pieces(&self, curve: &BCurve, interval: [f64; 2], tol: f64) -> Vec<Piece> {
-        let whole = || vec![Piece { arc: [0.0, TAU], pad: 0.0, runs: None, on: interval, heights: [f64::NEG_INFINITY, f64::INFINITY] }];
+        let whole =
+            || vec![Piece { arc: [0.0, TAU], pad: 0.0, runs: None, on: interval, heights: [f64::NEG_INFINITY, f64::INFINITY], points: Vec::new() }];
         let Some((form, [a, b])) = nurbs_form(curve, interval) else { return whole() };
         let (knots, homogeneous): (&Vec<f64>, Vec<[f64; 4]>) = match &form {
             BCurve::Spline { knots, points } => (knots, points.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect()),
@@ -1802,7 +2073,7 @@ impl Perpendicular {
             let z = self.x.cross(self.y);
             let height = |p: &Vec3| (*p - self.origin).dot(z);
             let heights = points.iter().fold([f64::INFINITY, f64::NEG_INFINITY], |[lo, hi], p| [lo.min(height(p)), hi.max(height(p))]);
-            out.push(Piece { arc, pad, runs: angular_sign(&flat), on: [s, t], heights });
+            out.push(Piece { arc, pad, runs: angular_sign(&flat), on: [s, t], heights, points: piece });
         }
         out
     }
@@ -1856,8 +2127,9 @@ pub(crate) enum Meets {
     Clear,
     /// At one point, `d` along the ruling from the vertex: `p`, at parameter `x` of the edge's form.
     Once { d: f64, p: Vec3, x: f64 },
-    /// Anywhere over the piece's hull's heights, from this far along the ruling (none where the
-    /// whole hull lies behind the vertex by more than the tolerance).
+    /// Anywhere over the heights of the piece's hull, or of the hull of the part of it that comes
+    /// within its pad of the ruling's angle, from this far along the ruling (none where that hull
+    /// lies behind the vertex by more than the tolerance).
     Hull(Option<f64>),
 }
 
@@ -1866,7 +2138,11 @@ pub(crate) enum Meets {
 /// piece under half a turn meets it once where its angle reaches `theta` between its ends. One
 /// within its pad of the ruling's angle without crossing it between its ends (a near miss), and
 /// one whose angle is not monotone, may meet it anywhere over the heights of their hull: the
-/// angle of the nearer end says nothing of where in between the piece comes near.
+/// angle of the nearer end says nothing of where in between the piece comes near. A near miss
+/// whose angle is monotone comes within its pad only between its nearer end and where its angle
+/// is the pad away, past which it runs farther off: it may meet the ruling over the heights of
+/// that part's hull alone ([`Piece::heights_between`]), the whole piece's where the part cannot
+/// be cut out or the piece stays within its pad.
 pub(crate) fn meets(
     frame: &Perpendicular,
     form: &Option<CurveEval>,
@@ -1885,8 +2161,19 @@ pub(crate) fn meets(
     };
     Ok(match crossing {
         Some((true, p, x)) => Meets::Once { d: along(height(p)), p, x },
-        Some((false, ..)) | None => {
-            let [lo, hi] = piece.heights.map(along);
+        near => {
+            let within = match (near, form) {
+                (Some((false, end, x)), Some(c)) => {
+                    // Where the angle is the pad away from the ruling's, on the nearer end's side.
+                    let side = wrap(frame.angle(end) - theta);
+                    match ruling_crossing(frame, c, piece.on, theta + piece.pad.copysign(side))? {
+                        Some((true, _, leaves)) => piece.heights_between(x, leaves, &height),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            };
+            let [lo, hi] = within.unwrap_or(piece.heights).map(along);
             let (lo, hi) = (lo.min(hi), lo.max(hi));
             Meets::Hull((hi > -tol).then_some(lo.max(0.0)))
         }
@@ -1922,12 +2209,39 @@ pub(crate) struct Piece {
     on: [f64; 2],
     /// The heights along the axis its control points reach (its hull's), lowest first.
     heights: [f64; 2],
+    /// Its Bézier control points on `on`, homogeneous with positive weights (none for an edge
+    /// taken to reach the whole turn).
+    points: Vec<[f64; 4]>,
 }
 
 impl Piece {
     /// The arc the piece blocks: its own, widened by its pad.
     pub(crate) fn blocked(&self) -> [f64; 2] {
         padded(self.arc, self.pad)
+    }
+
+    /// The heights (`height` of a point, lowest first) the part of the piece between parameters
+    /// `a` and `b` of its form reaches: those of that part's own control points, the piece cut
+    /// there as the kernel cuts a spline ([`solidcore::eval::pcurve::segment`], the piece being
+    /// a Bézier curve on `on`). `None` where the piece has no control points or the part is
+    /// empty or cannot be cut out.
+    fn heights_between(&self, a: f64, b: f64, height: impl Fn(Vec3) -> f64) -> Option<[f64; 2]> {
+        let degree = self.points.len().checked_sub(1).filter(|d| *d > 0)?;
+        let [s, t] = self.on;
+        let (a, b) = (a.min(b).max(s), a.max(b).min(t));
+        if !(a < b) {
+            return None;
+        }
+        let knots: Vec<f64> = std::iter::repeat_n(s, degree + 1).chain(std::iter::repeat_n(t, degree + 1)).collect();
+        let (_, part) = solidcore::eval::pcurve::segment(degree, &knots, &self.points, a, b).ok()?;
+        if part.len() != degree + 1 || part.iter().any(|h| !(h[3] > 0.0)) {
+            return None;
+        }
+        let heights = part.iter().fold([f64::INFINITY, f64::NEG_INFINITY], |[lo, hi], h| {
+            let z = height(Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]));
+            [lo.min(z), hi.max(z)]
+        });
+        heights.iter().all(|z| z.is_finite()).then_some(heights)
     }
 }
 

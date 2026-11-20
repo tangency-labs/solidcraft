@@ -10,6 +10,12 @@ fn dxf_has_layer(text: &str, name: &str) -> bool {
     solidcraft_io::read_dxf_file(text).unwrap().layers().iter().any(|layer| layer.name() == name)
 }
 
+/// How many entities the file puts on the layer `name`.
+fn dxf_on_layer(text: &str, name: &str) -> usize {
+    let file = solidcraft_io::read_dxf_file(text).unwrap();
+    file.entities().iter().filter(|entity| file.layer(entity.layer()).unwrap().name() == name).count()
+}
+
 fn dxf_count(text: &str, predicate: impl Fn(&DxfShape) -> bool) -> usize {
     solidcraft_io::read_dxf_file(text).unwrap().entities().iter().filter(|entity| predicate(entity.geometry())).count()
 }
@@ -2384,7 +2390,9 @@ fn flat_dxf_preserves_exact_cutout_entities() {
     let dxf = super::flat_dxf(&sh, &super::DxfOptions::default()).unwrap();
     assert_eq!(dxf_count(&dxf, |shape| matches!(shape, DxfShape::Line(..))), 5, "four outline lines and one exact cutout line");
     assert_eq!(dxf_count(&dxf, |shape| matches!(shape, DxfShape::Arc { .. })), 1);
-    assert!(dxf.contains(" 50\n0.0\n 51\n180.0\n"), "{dxf}");
+    let half =
+        |shape: &DxfShape| matches!(shape, DxfShape::Arc { c, r, a0, a1 } if *c == Vec2::new(20.0, 10.0) && *r == 10.0 && (*a0, *a1) == (0.0, 180.0));
+    assert_eq!(dxf_count(&dxf, half), 1, "the half circle from 0° to 180°: {dxf}");
     let read = solidcraft_io::read_dxf(&dxf).unwrap();
     assert_eq!(read.len(), 6);
     assert!(read.iter().any(|g| matches!(g, solidcraft_io::Geom2::Arc { c, a, b } if *c == Vec2::new(20.0, 10.0) && a.dist(Vec2::new(30.0, 10.0)) < 1e-9 && b.dist(Vec2::new(10.0, 10.0)) < 1e-9)));
@@ -7163,8 +7171,11 @@ fn flange_segments_take_their_own_angles() {
     let table: Value = serde_json::from_str(table["text"].as_str().unwrap_or_default()).unwrap_or(Value::Null);
     let rows = table["bends"].as_array().cloned().unwrap_or_default();
     assert_eq!(rows.len(), 2, "{table}");
-    let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
-    assert!(dxf.contains("BEND_UP") && dxf.contains("OUTLINE"), "{dxf}");
+    let out = run(&mut s, "sheet.export_dxf", json!({}));
+    let dxf = out["dxf"].as_str().unwrap_or_default();
+    // Both segments bend up: a bend line each on BEND_UP, as many as the export reports.
+    assert_eq!((dxf_on_layer(dxf, "BEND_UP"), out["bends"].as_u64()), (2, Some(2)), "{dxf}");
+    assert!(dxf_on_layer(dxf, "OUTLINE") > 0, "{dxf}");
 }
 
 /// Each segment takes its own side: one bend up, one down, and the two still sew into one solid

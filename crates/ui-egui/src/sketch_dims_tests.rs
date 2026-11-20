@@ -3,7 +3,7 @@
 use serde_json::json;
 use solidcraft_engine::geom::prelude::*;
 
-use super::{BOX, apart, in_view};
+use super::{BOX, Room, apart, in_view};
 use crate::scenario::Harness;
 
 fn drawing(command: &str) -> Harness {
@@ -586,6 +586,20 @@ fn a_palette_linetype_click_leaves_the_dimension_box_focused() {
     assert_eq!(crate::sketch_palette::mode(&h.app), 1, "the click still switched the drawing line type");
 }
 
+/// A box moved into the free region keeps its margin on every side (#17992): the region's
+/// placement already sets the box in by the margin at its own size.
+#[test]
+fn a_box_moved_into_the_free_region_keeps_its_margin() {
+    let domain = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+    let free = crate::panel_runtime::resolve_usable_region(crate::panel_runtime::logical_rect(domain), &[]).unwrap();
+    let room = Room::new(domain, Some(&free)).inset(4.0);
+    let moved = room.clamp(egui::Rect::from_min_size(egui::pos2(740.0, 300.0), egui::vec2(100.0, 24.0)));
+    assert_eq!(moved, egui::Rect::from_min_size(egui::pos2(696.0, 300.0), egui::vec2(100.0, 24.0)));
+    // One already clear of the edges stays where it is.
+    let clear = egui::Rect::from_min_size(egui::pos2(200.0, 300.0), egui::vec2(100.0, 24.0));
+    assert_eq!(room.clamp(clear), clear);
+}
+
 /// A value box set off the cursor stays in the drawing area (#2201): past an edge it goes to the
 /// cursor's other side, still clear of it; with no room either side it is pushed inside.
 #[test]
@@ -594,18 +608,63 @@ fn value_boxes_stay_in_view_and_off_the_cursor() {
     let cursor = egui::pos2(565.0, 142.0);
     // 50 px above the cursor: over the ribbon.
     let above = cursor + egui::vec2(-34.0, -11.0 - 50.0);
-    let p = in_view(above, Some(view), Some(cursor));
+    let p = in_view(above, Some(Room::new(view, None)), Some(cursor));
     let rect = egui::Rect::from_min_size(p, BOX);
     assert!(view.contains_rect(rect), "{rect:?} in {view:?}");
     assert!(!rect.expand(2.0).contains(cursor), "{rect:?} clear of {cursor:?}");
     assert!(rect.min.y > cursor.y, "below the cursor now");
     // A box that fits stays where it is; without a view nothing moves.
     let inside = egui::pos2(700.0, 500.0);
-    assert_eq!(in_view(inside, Some(view), Some(cursor)), inside);
+    assert_eq!(in_view(inside, Some(Room::new(view, None)), Some(cursor)), inside);
     assert_eq!(in_view(above, None, Some(cursor)), above);
     // No room on either side: inside the view all the same.
     let tiny = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(80.0, 30.0));
-    assert!(tiny.contains_rect(egui::Rect::from_min_size(in_view(egui::pos2(-200.0, -200.0), Some(tiny), Some(egui::pos2(40.0, 15.0))), BOX)));
+    assert!(tiny.contains_rect(egui::Rect::from_min_size(
+        in_view(egui::pos2(-200.0, -200.0), Some(Room::new(tiny, None)), Some(egui::pos2(40.0, 15.0))),
+        BOX
+    )));
+}
+
+/// #17992: a rectangle's Width and Height boxes sit in the same place beside it wherever it is
+/// drawn in the open view. Drawn in the space between the Browser and the panel on the right,
+/// which the largest free rectangle (`drawable`) leaves out, they were moved away from it: the
+/// Width box from above the top edge to inside the rectangle, the Height box below it.
+#[test]
+fn rectangle_boxes_sit_beside_it_between_the_panels_too() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.settle();
+    let layout = h.app.viewport.layout.clone().unwrap();
+    let mut offsets = Vec::new();
+    for top in [250.0f32, 650.0] {
+        let (a, b) = (egui::pos2(400.0, top), egui::pos2(900.0, top + 200.0));
+        let rect = egui::Rect::from_two_pos(a, b);
+        // Both are in the open view; only the lower one is inside `drawable`.
+        let open = layout.usable.as_ref().is_some_and(|u| u.contains_rect(crate::panel_runtime::logical_rect(rect.expand(30.0))));
+        assert!(open, "{rect:?} is in the open view");
+        assert_eq!(layout.drawable.contains_rect(rect), top > 600.0, "{rect:?} against {:?}", layout.drawable);
+        h.step(&json!({"start":"sketch.rectangle.two_point"})).unwrap();
+        h.step(&json!({"click": [a.x, a.y]})).unwrap();
+        h.step(&json!({"move": [b.x, b.y]})).unwrap();
+        h.frames(3);
+        let boxes: Vec<egui::Vec2> =
+            (0..2usize).map(|i| h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i)))).expect("value box shown").min - a).collect();
+        offsets.push(boxes);
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+    }
+    for (high, low) in offsets[0].iter().zip(&offsets[1]) {
+        assert!((*high - *low).length() < 6.0, "the boxes sit the same way beside both rectangles: {offsets:?}");
+    }
+}
+
+/// Whether `rect` is in the open view: the layout's free region, clear of the panels and the view's
+/// controls, or the drawing area without one (#17992).
+fn in_open_view(h: &Harness, rect: egui::Rect) -> bool {
+    let layout = h.app.viewport.layout.as_ref().unwrap();
+    layout.usable.as_ref().map_or(layout.drawable.contains_rect(rect), |u| u.contains_rect(crate::panel_runtime::logical_rect(rect)))
 }
 
 // Independent slab clipping grades the rendered rectangles, not the placement algorithm.
@@ -644,7 +703,7 @@ fn assert_live_line_inputs_are_clear(h: &Harness) {
     assert!(!boxes[0].intersects(boxes[1]), "{}: inputs overlap: {boxes:?}", tool.cmd);
     for rect in boxes {
         assert!(!segment_intersects_input(segment, rect), "{}: {rect:?} covers {segment:?}", tool.cmd);
-        assert!(h.app.viewport.layout.as_ref().unwrap().drawable.contains_rect(rect), "{rect:?} outside drawing area");
+        assert!(in_open_view(h, rect), "{rect:?} outside the open view");
     }
     assert_focus(h, 0);
 }
@@ -714,7 +773,7 @@ fn line_input_placement_measures_each_field_and_handles_tiny_views() {
         [egui::pos2(780.0, 580.0), egui::pos2(766.0, 566.0)],
         [egui::pos2(400.0, 300.0), egui::pos2(400.0, 300.0)],
     ] {
-        let positions = super::line_input_positions(segment, &sizes, Some(view), 8.0);
+        let positions = super::line_input_positions(segment, &sizes, Some(Room::new(view, None)), 8.0);
         let rects: Vec<_> = positions.iter().zip(sizes).map(|(p, size)| egui::Rect::from_min_size(*p, size)).collect();
         assert!(!rects[0].intersects(rects[1]), "{rects:?}");
         for rect in rects {
@@ -723,7 +782,7 @@ fn line_input_placement_measures_each_field_and_handles_tiny_views() {
         }
     }
     let tiny = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(3.0, 3.0));
-    let positions = super::line_input_positions([egui::pos2(1.0, 1.0); 2], &sizes, Some(tiny), 8.0);
+    let positions = super::line_input_positions([egui::pos2(1.0, 1.0); 2], &sizes, Some(Room::new(tiny, None)), 8.0);
     assert_eq!(positions.len(), 2);
     assert!(positions.iter().all(|p| p.is_finite()));
 }
@@ -740,7 +799,7 @@ fn line_inputs_retry_the_first_position_when_both_fit_in_a_shallow_view() {
         assert!(view.contains_rect(rect));
         assert!(!segment_intersects_input(segment, rect.expand(4.0)));
     }
-    let positions = super::line_input_positions(segment, &sizes, Some(view), 8.0);
+    let positions = super::line_input_positions(segment, &sizes, Some(Room::new(view, None)), 8.0);
     let rects: Vec<_> = positions.iter().zip(sizes).map(|(p, size)| egui::Rect::from_min_size(*p, size)).collect();
     assert!(!rects[0].intersects(rects[1].expand(4.0)), "fields overlap: {rects:?}");
     for rect in rects {
@@ -870,7 +929,7 @@ fn line_inputs_slide_clear_of_slanted_previews_in_small_views() {
             assert!(view.contains_rect(rect));
             assert!(!segment_intersects_input(segment, rect.expand(4.0)));
         }
-        let positions = super::line_input_positions(segment, &sizes, Some(view), 8.0);
+        let positions = super::line_input_positions(segment, &sizes, Some(Room::new(view, None)), 8.0);
         let rects: Vec<_> = positions.iter().map(|p| egui::Rect::from_min_size(*p, size)).collect();
         assert!(!rects[0].intersects(rects[1].expand(4.0)), "fields overlap: {segment:?}, {rects:?}");
         for rect in rects {
@@ -917,7 +976,7 @@ fn polygon_inputs_clear_each_other_and_the_preview() {
             let bounds = egui::Rect::from_points(&points);
             for rect in boxes {
                 assert!(!rect.intersects(bounds), "{command}: input {rect:?} covers polygon {bounds:?}");
-                assert!(h.app.viewport.layout.as_ref().unwrap().drawable.contains_rect(rect));
+                assert!(in_open_view(&h, rect), "{command}: input {rect:?} outside the open view");
             }
             assert_focus(&h, 0);
             type_value(&mut h, "2");
@@ -1085,16 +1144,16 @@ fn a_definition_in_a_box_that_is_not_a_dimension_is_refused() {
 fn overlapping_value_boxes_are_moved_apart_on_the_screen() {
     let view = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
     let first = egui::pos2(300.0, 200.0);
-    let out = apart(&[Some(first), Some(egui::pos2(310.0, 205.0))], Some(view));
+    let out = apart(&[Some(first), Some(egui::pos2(310.0, 205.0))], Some(Room::new(view, None)));
     let (a, b) = (out[0].unwrap(), out[1].unwrap());
     assert_eq!(a, first);
     assert_eq!(b, egui::pos2(310.0, 200.0 + BOX.y + 2.0));
     // Already apart: untouched. A box not shown stays absent.
     let apart_already = [Some(egui::pos2(100.0, 100.0)), None, Some(egui::pos2(300.0, 300.0))];
-    assert_eq!(apart(&apart_already, Some(view)), apart_already.to_vec());
+    assert_eq!(apart(&apart_already, Some(Room::new(view, None))), apart_already.to_vec());
     // At the bottom edge the second box goes above instead of leaving the view.
     let low = egui::pos2(300.0, 600.0 - BOX.y);
-    let out = apart(&[Some(low), Some(egui::pos2(305.0, low.y + 3.0))], Some(view));
+    let out = apart(&[Some(low), Some(egui::pos2(305.0, low.y + 3.0))], Some(Room::new(view, None)));
     assert_eq!(out[1].unwrap(), egui::pos2(305.0, low.y - BOX.y - 2.0));
 }
 

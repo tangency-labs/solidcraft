@@ -59,14 +59,14 @@ impl Shape {
                 let c = Curve::from(create_line_segment(v3(a), v3(b))?);
                 create_linear_sweep(k, &[Some(&c)], v3(dir), dist, false)
             })
-            .map(Body::new)
+            .map(Body::from_kernel)
             .unwrap(),
             Shape::ArcSheet(o, r, degrees, h) => run("sheet", |k| {
                 let frame = Axis2Placement::new(v3(o), Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
                 let c = Curve::from(Ellipse::create_canonical_circle(k, &frame, r, Some(&Extent1d::from_min_max(0.0, degrees)), None)?);
                 create_linear_sweep(k, &[Some(&c)], Vec3::new(0.0, 0.0, 1.0), h, false)
             })
-            .map(Body::new)
+            .map(Body::from_kernel)
             .unwrap(),
             Shape::Notched => {
                 let block = make_box([0.0; 3], [60.0, 40.0, 10.0]).unwrap();

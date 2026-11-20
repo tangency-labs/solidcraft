@@ -832,6 +832,17 @@ form_case!(offset_faces, "solid.offset_face", ["Distance"]);
 form_case!(section, "inspect.section", ["Distance"]);
 form_case!(move_copy, "solid.move", ["Move Type", "X Distance", "Y Distance", "Z Distance", "X Angle", "Y Angle", "Z Angle"]);
 form_case!(rib, "solid.rib", ["Direction", "Thickness", "Depth"]);
+
+/// Extend ends is opt-in (#13019): a new Rib or Web starts with it off, so it builds as before
+/// unless it is ticked.
+#[test]
+fn a_new_rib_starts_with_extend_ends_off() {
+    let h = Harness::new();
+    for command in ["solid.rib", "solid.web"] {
+        let d = Dialog::for_command(&h.app, command).unwrap();
+        assert!(matches!(&d.kind, Kind::Rib { extend: false, .. }), "{command}");
+    }
+}
 form_case!(web, "solid.web", ["Direction", "Thickness", "Depth"]);
 form_case!(emboss, "solid.emboss", ["Depth", "Type"]);
 form_case!(replace_face, "solid.replace_face", []);
@@ -1560,6 +1571,85 @@ fn extrude_focus_fixture() -> Harness {
     h.step(&json!({"start":"solid.extrude"})).unwrap();
     h.frames(8);
     h
+}
+
+fn extrude_control_focused(h: &Harness, target: &str) -> bool {
+    let focused = h.ctx.memory(|m| m.focused()).and_then(|id| h.ctx.read_response(id));
+    focused.zip(scenario::handle_at(target)).is_some_and(|(response, at)| response.interact_rect.contains(at))
+}
+
+/// Move focus through the real dialog controls, as a keyboard user does.
+fn tab_to_extrude_control(h: &mut Harness, target: &str, shift: bool) {
+    for _ in 0..32 {
+        h.step(&json!({"key": "Tab", "shift": shift})).unwrap();
+        if extrude_control_focused(h, target) {
+            return;
+        }
+    }
+    panic!("{}Tab did not reach {target}; focus is {:?}", if shift { "Shift+" } else { "" }, h.ctx.memory(|m| m.focused()));
+}
+
+fn extrude_dialog_with_typed_distance() -> Harness {
+    let mut h = extrude_focus_fixture();
+    assert_eq!(h.call("ui.prefs", json!({"value_boxes_in_view": false}))["ok"], true);
+    if h.app.dialog.as_ref().unwrap().items().is_empty() {
+        h.step(&json!({"click": {"world": [15, 10, 0]}})).unwrap();
+    }
+    assert_eq!(h.app.dialog.as_ref().unwrap().items().len(), 1);
+    crate::test_support::click(&mut h, "dialog:Distance");
+    h.step(&json!({"key": "A", "cmd": true})).unwrap();
+    h.step(&json!({"text": "30 mm"})).unwrap();
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Extrude { distance, direction: 0, .. } if distance == "30 mm"));
+    h
+}
+
+#[test]
+fn extrude_dialog_keyboard_selects_symmetric_and_applies() {
+    let mut h = extrude_dialog_with_typed_distance();
+    let direction = "dialog:Direction";
+    let options = ["dialog:Direction:One Side", "dialog:Direction:Two Sides", "dialog:Direction:Symmetric"];
+    tab_to_extrude_control(&mut h, direction, true);
+    h.step(&json!({"key": "Space"})).unwrap();
+    assert!(scenario::handle_at(options[0]).is_some(), "Space on Direction opens its choices");
+
+    h.step(&json!({"key": "ArrowDown"})).unwrap();
+    assert!(extrude_control_focused(&h, options[0]), "Arrow Down enters the open menu");
+    h.step(&json!({"key": "Enter"})).unwrap();
+    assert!(h.app.dialog.is_some(), "Enter on a menu choice must leave Extrude open");
+    assert!(scenario::handle_at(options[0]).is_none(), "Reselecting the current choice closes the popup");
+    assert!(extrude_control_focused(&h, direction), "Direction regains focus after Enter");
+
+    h.step(&json!({"key": "Space"})).unwrap();
+    for option in options {
+        h.step(&json!({"key": "ArrowDown"})).unwrap();
+        assert!(extrude_control_focused(&h, option), "Arrow Down should focus {option}");
+    }
+    h.step(&json!({"key": "Space"})).unwrap();
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Extrude { distance, direction: 2, .. } if distance == "30 mm"));
+    assert!(scenario::handle_at(options[2]).is_none(), "Selecting Symmetric closes the popup");
+    assert!(extrude_control_focused(&h, direction), "Direction regains focus after Space");
+
+    tab_to_extrude_control(&mut h, "dialog:Distance", false);
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none(), "Enter from Distance applies Extrude");
+    let bounds = solidcraft_engine::view::bounds(&h.app.session).unwrap();
+    assert!((bounds.min.z + 15.0).abs() < 1e-7 && (bounds.max.z - 15.0).abs() < 1e-7, "{bounds:?}");
+}
+
+#[test]
+fn extrude_dialog_keyboard_reverses_and_applies() {
+    let mut h = extrude_dialog_with_typed_distance();
+    tab_to_extrude_control(&mut h, "dialog:Reverse Direction", false);
+    h.step(&json!({"key": "Space"})).unwrap();
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Extrude { distance, direction: 1, .. } if distance == "30 mm"));
+
+    tab_to_extrude_control(&mut h, "dialog:Distance", true);
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none(), "Enter from Distance applies Extrude");
+    let bounds = solidcraft_engine::view::bounds(&h.app.session).unwrap();
+    assert!((bounds.min.z + 30.0).abs() < 1e-7 && bounds.max.z.abs() < 1e-7, "{bounds:?}");
 }
 
 #[test]

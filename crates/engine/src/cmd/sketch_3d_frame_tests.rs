@@ -224,6 +224,7 @@ fn wire_frame_wide_owner_graph_has_bounded_indexed_traversal() {
             name: format!("Sibling{i}"),
             transform: solidcraft_doc::IDENTITY,
             grounded: false,
+            bom_type: None,
             expressed_moves: Vec::new(),
         });
     }

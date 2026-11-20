@@ -204,7 +204,7 @@ fn read_layered(parsed: ParsedDxf) -> Result<DxfFile<DxfShape>> {
         }
         let layer = selected.ok_or_else(|| IoError::Invalid("DXF entity references an undeclared layer".into()))?;
         let geometry = if matches!(entity.kind.as_str(), "TEXT" | "MTEXT") {
-            text_entity::read_text_entity(&entity, k, 1750, 750, &mut geometry_bytes, &mut work)?
+            text_entity::read_text_entity(&entity, k, MAX_DRAWING_BYTES, MAX_DRAWING_BYTES, &mut geometry_bytes, &mut work)?
         } else {
             layered_geometry(&entity, k, file.layer(layer)?.linetype(), &mut geometry_bytes, &mut work)?
         };
@@ -222,16 +222,29 @@ fn layered_source_text(entity: Ent, k: f64, bytes: &mut usize) -> Result<Option<
         _ => return Ok(None),
     };
     let first_anchor_mm = entity.get(10).zip(entity.get(20)).map(|(x, y)| scale_point(Vec2::new(x, y), k));
-    // Move the actual parsed string rather than allocate a duplicate raw model.
     // Decoder work already charged these bytes; retained payload charges them
     // separately before adopting the record into the returned file.
-    let raw_group1 = entity.s.into_iter().find_map(|(code, value)| (code == 1).then_some(value));
+    let raw_group1 = raw_text_value(&entity)?;
     let retained = raw_group1.as_ref().map_or(0, String::len);
     *bytes = bytes
         .checked_add(retained)
         .filter(|total| *total <= MAX_DRAWING_BYTES)
         .ok_or_else(|| IoError::Invalid("DXF retained text-source byte budget exceeded".into()))?;
     Ok(Some(crate::DxfTextSource::parsed_owned(kind, first_anchor_mm, raw_group1)?))
+}
+
+/// A text record's value as the file stores it: TEXT's group 1; MTEXT's group 3 chunks and its
+/// group 1 tail, joined in order, since an escape may straddle two chunks. `None` without group 1.
+fn raw_text_value(entity: &Ent) -> Result<Option<String>> {
+    let Some(tail) = entity.s.iter().position(|(code, _)| *code == 1) else {
+        return Ok(None);
+    };
+    let mtext = entity.kind == "MTEXT";
+    let parts = entity.s.iter().take(tail + 1).filter(|(code, _)| *code == 1 || (mtext && *code == 3)).map(|(_, value)| value.as_str());
+    let mut joined = String::new();
+    joined.try_reserve_exact(parts.clone().map(str::len).sum()).map_err(|_| IoError::Invalid("DXF text value allocation failed".into()))?;
+    joined.extend(parts);
+    Ok(Some(joined))
 }
 
 fn layered_work(work: &mut usize) -> Result<()> {
@@ -406,9 +419,10 @@ fn layered_entity_underflow_fields(body: &[(i32, String)]) -> Result<()> {
                     "LWPOLYLINE" => matches!(code, 10 | 20 | 38 | 42 | 43),
                     "SPLINE" => matches!(code, 10 | 20 | 40 | 41),
                     "TEXT" => matches!(code, 10 | 20 | 11 | 21 | 40 | 41 | 50 | 51),
+                    "MTEXT" => matches!(code, 10 | 20 | 11 | 21 | 40 | 41 | 44 | 50),
                     _ => false,
                 };
-                let neutral = matches!(kind.as_str(), "POINT" | "LINE" | "CIRCLE" | "ARC" | "ELLIPSE" | "LWPOLYLINE" | "SPLINE" | "TEXT")
+                let neutral = matches!(kind.as_str(), "POINT" | "LINE" | "CIRCLE" | "ARC" | "ELLIPSE" | "LWPOLYLINE" | "SPLINE" | "TEXT" | "MTEXT")
                     && matches!(code, 30 | 31 | 39 | 210 | 220 | 230);
                 if (represented || neutral) && layered_nonzero_underflows(value) {
                     return Err(IoError::Invalid(format!("nonzero layered DXF {kind} group {code} underflows to zero")));
@@ -2235,21 +2249,22 @@ mod tests {
 
     #[test]
     fn layered_read_does_not_return_a_partial_file_for_unsupported_geometry() {
-        for kind in ["INSERT", "POINT", "LWPOLYLINE", "POLYLINE", "ELLIPSE", "SPLINE", "MTEXT", "UNKNOWN"] {
+        for kind in ["INSERT", "POINT", "LWPOLYLINE", "POLYLINE", "ELLIPSE", "SPLINE", "UNKNOWN"] {
             let text = format!("0\nSECTION\n2\nENTITIES\n0\nLINE\n10\n0\n20\n0\n11\n1\n21\n0\n0\n{kind}\n0\nENDSEC\n0\nEOF\n");
             let saved = text.clone();
             let error = read_dxf_file(&text).unwrap_err().to_string();
             assert!(error.contains("not supported yet") && error.contains(kind), "{error}");
             assert_eq!(text, saved);
         }
-        // TEXT is now implemented; preserve this exact empty input as
-        // malformed TEXT, rather than inventing an unsupported dispatch.
-        let kind = "TEXT";
-        let text = format!("0\nSECTION\n2\nENTITIES\n0\nLINE\n10\n0\n20\n0\n11\n1\n21\n0\n0\n{kind}\n0\nENDSEC\n0\nEOF\n");
-        let saved = text.clone();
-        let error = read_dxf_file(&text).unwrap_err().to_string();
-        assert!(error.contains("missing layered DXF group 10"), "{error}");
-        assert_eq!(text, saved);
+        // TEXT and MTEXT are implemented; preserve this exact empty input as
+        // malformed text, rather than inventing an unsupported dispatch.
+        for kind in ["TEXT", "MTEXT"] {
+            let text = format!("0\nSECTION\n2\nENTITIES\n0\nLINE\n10\n0\n20\n0\n11\n1\n21\n0\n0\n{kind}\n0\nENDSEC\n0\nEOF\n");
+            let saved = text.clone();
+            let error = read_dxf_file(&text).unwrap_err().to_string();
+            assert!(error.contains("missing layered DXF group 10"), "{kind}: {error}");
+            assert_eq!(text, saved);
+        }
     }
 
     #[test]
@@ -2448,7 +2463,7 @@ mod tests {
 
     #[test]
     fn legacy_geometry_units_section_names_and_text_paragraph_policy_stay_current() {
-        let text = "0\n SECTION \n2\n HEADER \n9\n $INSUNITS \n70\n 1 \n0\n ENDSEC \n0\n SECTION \n2\n ENTITIES \n0\n LINE \n8\n CUT \n10\n 1 \n20\n 2 \n11\n 2 \n21\n 1 \n0\n MTEXT \n10\n 1 \n20\n 2 \n40\n 3 \n3\n ignored prefix \n1\n  a\\Pb  \n0\n ENDSEC \n0\n EOF \n";
+        let text = "0\n SECTION \n2\n HEADER \n9\n $INSUNITS \n70\n 1 \n0\n ENDSEC \n0\n SECTION \n2\n ENTITIES \n0\n LINE \n8\n CUT \n10\n 1 \n20\n 2 \n11\n 2 \n21\n 1 \n0\n MTEXT \n10\n 1 \n20\n 2 \n40\n 3 \n3\n first chunk \n1\n  a\\Pb  \n0\n ENDSEC \n0\n EOF \n";
         let parsed = pairs(text);
         assert_eq!(units_scale(&parsed), 25.4);
         let start = parsed.iter().position(|(code, value)| *code == 2 && value == "ENTITIES").unwrap();
@@ -2461,7 +2476,8 @@ mod tests {
         assert_eq!(geometry.len(), 2);
         assert!(matches!(&geometry[0], Geom2::Line(a, b) if *a == Vec2::new(25.4, 50.8) && *b == Vec2::new(50.8, 25.4)));
         assert!(
-            matches!(&geometry[1], Geom2::Text { text, at, height, angle } if text == "a\nb" && *at == Vec2::new(25.4, 50.8) && (*height - 76.2).abs() < 1e-12 && *angle == 0.0)
+            matches!(&geometry[1], Geom2::Text { text, at, height, angle } if text == "first chunk   a\nb" && *at == Vec2::new(25.4, 50.8) && (*height - 76.2).abs() < 1e-12 && *angle == 0.0),
+            "MTEXT's group 3 chunks come before its group 1 tail: {geometry:?}"
         );
     }
 
@@ -3208,15 +3224,13 @@ mod tests {
     }
 
     #[test]
-    fn parent_text_exact_cif_caps_allow_250_bmp_and_refuse_251_without_truncation() {
-        let encoded = "\\U+4E2D".repeat(250);
-        let text = format!("0\nSECTION\n2\nENTITIES\n0\nTEXT\n10\n0\n20\n0\n11\n1\n21\n2\n40\n1\n72\n1\n1\n{encoded}\n0\nENDSEC\n0\nEOF\n");
-        assert_eq!(encoded.len(), 1750);
-        let file = read_dxf_file(&text).unwrap();
-        assert_eq!(file.entities()[0].geometry(), &DxfShape::Text { at: Vec2::new(1., 2.), height: 1., angle_deg: 0., text: "中".repeat(250) });
-        for too_many in ["\\U+4E2D".repeat(251), "A".repeat(251)] {
-            let hostile = text.replacen(&encoded, &too_many, 1);
-            assert!(read_dxf_file(&hostile).is_err());
+    fn parent_text_reads_every_character_with_no_count_cap_and_no_truncation() {
+        for (encoded, decoded) in
+            [("\\U+4E2D".repeat(250), "中".repeat(250)), ("\\U+4E2D".repeat(251), "中".repeat(251)), ("A".repeat(2_000), "A".repeat(2_000))]
+        {
+            let text = format!("0\nSECTION\n2\nENTITIES\n0\nTEXT\n10\n0\n20\n0\n11\n1\n21\n2\n40\n1\n72\n1\n1\n{encoded}\n0\nENDSEC\n0\nEOF\n");
+            let file = read_dxf_file(&text).unwrap();
+            assert_eq!(file.entities()[0].geometry(), &DxfShape::Text { at: Vec2::new(1., 2.), height: 1., angle_deg: 0., text: decoded });
         }
     }
 
@@ -3263,7 +3277,6 @@ mod tests {
             ("73\n0\n", "73\n1\n"),
             ("1\nA\n", "1\nA\n1\nB\n"),
             ("1\nA\n", "1\n\\U+D800\n"),
-            ("1\nA\n", "1\n\\U+0025\\U+0025d\n"),
         ] {
             assert!(read_dxf_file(&base.replacen(from, to, 1)).is_err(), "{to}");
         }
@@ -3598,12 +3611,24 @@ mod tests {
 
     #[test]
     fn shared_tokens_preserve_current_legacy_text_tail_trim_and_paragraph_contract() {
-        let text = "0\nSECTION\n2\nENTITIES\n0\nMTEXT\n10\n2\n20\n3\n40\n4\n3\nignored prefix\n1\n  tail\\Pnext  \n0\nENDSEC\n0\nEOF\n";
+        let text = "0\nSECTION\n2\nENTITIES\n0\nMTEXT\n10\n2\n20\n3\n40\n4\n3\nfirst chunk\n1\n  tail\\Pnext  \n0\nENDSEC\n0\nEOF\n";
         let geometry = read_dxf(text).unwrap();
-        assert!(matches!(&geometry[..],[Geom2::Text{text,at,height,..}] if text=="tail\nnext" && *at==Vec2::new(2.0,3.0) && *height==4.0));
+        assert!(
+            matches!(&geometry[..],[Geom2::Text{text,at,height,..}] if text=="first chunk  tail\nnext" && *at==Vec2::new(2.0,3.0) && *height==4.0)
+        );
         let parsed = ParsedDxf::read(text).unwrap();
         assert!(parsed.pairs.iter().any(|(code, value)| *code == 1 && value == "  tail\\Pnext  "));
-        assert!(read_dxf_file(text).unwrap_err().to_string().contains("MTEXT"));
+        // The strict reader keeps the untrimmed value; its insertion point is the top-left attachment.
+        let strict = read_dxf_file(text).unwrap();
+        let expected = DxfShape::AlignedText {
+            at: Vec2::new(2.0, 3.0),
+            height: 4.0,
+            angle_deg: 0.0,
+            text: "first chunk  tail\nnext  ".into(),
+            horizontal: crate::DxfTextHorizontalAlignment::Left,
+            vertical: crate::DxfTextVerticalAlignment::Top,
+        };
+        assert_eq!(strict.entities()[0].geometry(), &expected);
     }
     #[test]
     fn sketch_profile_keeps_unresolved_source_layers_owned_without_invented_styles() {
@@ -3725,7 +3750,8 @@ mod tests {
         assert_eq!(entities[0].kind, "TEXT");
         assert_eq!((entities[0].get(10), entities[0].get(20)), (Some(1.0), Some(2.0)));
         assert_eq!((entities[0].get(11), entities[0].get(21)), (Some(100.0), Some(200.0)));
-        assert!(entities[0].s.iter().any(|(code, value)| *code == 1 && value == "  C\\U+00B0  "));
+        // The decoded degree sign is written back as the bytes it was read from.
+        assert!(entities[0].s.iter().any(|(code, value)| *code == 1 && value == "  C%%d  "));
         let reopened = read_dxf_file(&text).unwrap();
         assert_eq!(reopened.entities()[0].geometry(), file.entities()[0].geometry());
         assert_eq!(reopened.entities()[0].source_text().unwrap().first_anchor_mm(), Some(Vec2::new(1.0, 2.0)));
