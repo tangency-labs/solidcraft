@@ -60,23 +60,53 @@ const NO_READ_BACK: &[&str] = &["tests/step-regressions/thread_crest_band.step"]
 /// is written as that circle (#17929).
 /// Entries whose export's bytes differ only on macOS's math functions, beside the pinned values
 /// above: the reader's seam split now lands on the edge's own knot, and the pcurves made beside it
-/// carry macOS libm's rounding for this one fixture. When #15405 (one pure-Rust libm) lands, macOS
-/// writes Linux's bytes and this set should go, as #19284 expects of the engine's export set.
+/// carry macOS libm's rounding for these fixtures (on Linux the split solves within the export's
+/// written precision of the knot already, so the pinned values are unchanged). When #15405 (one
+/// pure-Rust libm) lands, macOS writes Linux's bytes and this set should go, as #19284 expects of
+/// the engine's export set.
 #[cfg(target_os = "macos")]
 #[rustfmt::skip]
 const DIGESTS_MACOS: &[(&str, &str)] = &[
     ("solidcore/crates/solidcore-step/tests/fixtures/discord-2026-10-30-fillet.step", "710ec80508bae43a"),
+    ("solidcore/crates/solidcore-step/tests/fixtures/rod_doubled_edge.step", "ef5f1b70be16e528"),
+    ("tests/kernel-cases/import/258-cone-point-vertex/input.step", "4bcaf00c71d3beca"),
+    ("tests/kernel-cases/import/258-cone-to-point/input.step", "e9765615a698856d"),
+    ("tests/kernel-cases/import/4005-cylinder-written-as-near-zero-cone/input.step", "ace0f6500312d1e1"),
+    ("tests/step-conformance/cone_point.step", "0345ac19b0d17681"),
+    ("tests/step-conformance/cone_point_vertex.step", "96c735326c578395"),
+    ("tests/step-conformance/grooved_shaft.step", "e08ae1efaaae2696"),
+    ("tests/step-regressions/hole_round_revolved.step", "1749e03c3c2f194a"),
+    ("tests/step-regressions/rod_doubled_edge.step", "ef5f1b70be16e528"),
+    ("tests/step-regressions/thread_crest_band.step", "2053d57556b7dafa"),
+    ("(assembly)", "4256f9f7676566de"),
 ];
+
+/// The expected digests with macOS's entries in place of the pinned ones.
+#[cfg(target_os = "macos")]
+fn with_macos_digests(mut expected: Vec<(String, String)>) -> Vec<(String, String)> {
+    for (n, d) in DIGESTS_MACOS {
+        if let Some(entry) = expected.iter_mut().find(|(m, _)| m == n) {
+            entry.1 = (*d).to_string();
+        }
+    }
+    expected
+}
+
+/// The pinned digests, where the export's bytes are the platform's.
+#[cfg(not(target_os = "macos"))]
+fn with_macos_digests(expected: Vec<(String, String)>) -> Vec<(String, String)> {
+    expected
+}
 
 #[rustfmt::skip]
 const DIGESTS: &[(&str, &str)] = &[
     ("solidcore/crates/solidcore-step/tests/fixtures/closed-spline-cylinder.step", "2b7d457b87394f2c"),
     ("solidcore/crates/solidcore-step/tests/fixtures/discord-2026-10-30-fillet.step", "5545d4ee93431803"),
-    ("solidcore/crates/solidcore-step/tests/fixtures/rod_doubled_edge.step", "ef5f1b70be16e528"),
+    ("solidcore/crates/solidcore-step/tests/fixtures/rod_doubled_edge.step", "7e5ec3041433853c"),
     ("tests/kernel-cases/import/1721-closed-bspline-tube-face/input.step", "30a183e14f3b58b3"),
     ("tests/kernel-cases/import/2043-outer-bound-opposing-surface-sense/input.step", "d8c5f6b3ce4ea3cf"),
-    ("tests/kernel-cases/import/258-cone-point-vertex/input.step", "4bcaf00c71d3beca"),
-    ("tests/kernel-cases/import/258-cone-to-point/input.step", "e9765615a698856d"),
+    ("tests/kernel-cases/import/258-cone-point-vertex/input.step", "be8c91bead2f5a20"),
+    ("tests/kernel-cases/import/258-cone-to-point/input.step", "112fb1ed128b8863"),
     ("tests/kernel-cases/import/258-tiny-pin/input.step", "7b4b8437f83a83a3"),
     ("tests/kernel-cases/import/3098-bspline-edges-over-tiny-knot-span/input.step", "b570b62268740b6a"),
     ("tests/kernel-cases/import/3208-extruded-ellipse-face-over-parameter-seam/input.step", "ec8784dcbe789ac8"),
@@ -85,10 +115,10 @@ const DIGESTS: &[(&str, &str)] = &[
     ("tests/kernel-cases/import/3880-cylinder-seam-edge/input.step", "183935caa3bdda17"),
     ("tests/kernel-cases/import/3880-nurbs-hemisphere-dome/input.step", "2800a82d4a03a926"),
     ("tests/kernel-cases/import/3963-closed-spline-edge-vertex-past-start/input.step", "3bc30242fa9c3a3f"),
-    ("tests/kernel-cases/import/4005-cylinder-written-as-near-zero-cone/input.step", "ace0f6500312d1e1"),
+    ("tests/kernel-cases/import/4005-cylinder-written-as-near-zero-cone/input.step", "6f13fdd4ff99c151"),
     ("tests/kernel-cases/import/4006-plane-written-as-cone-of-nearly-right-angle/input.step", "05c07f99a56d82c1"),
-    ("tests/step-conformance/cone_point.step", "0345ac19b0d17681"),
-    ("tests/step-conformance/cone_point_vertex.step", "96c735326c578395"),
+    ("tests/step-conformance/cone_point.step", "f8011a27d4b1fa9f"),
+    ("tests/step-conformance/cone_point_vertex.step", "bc4c5fab88085533"),
     ("tests/step-conformance/cylinder.step", "e4e777124e084560"),
     ("tests/step-conformance/cylinder_inch.step", "11564eb93051bc70"),
     ("tests/step-conformance/cylinder_nurbs.step", "6927d8cc4a4aca60"),
@@ -98,7 +128,7 @@ const DIGESTS: &[(&str, &str)] = &[
     ("tests/step-conformance/dome.step", "054949758cf68925"),
     ("tests/step-conformance/dome_nurbs.step", "400aef72aa5eead4"),
     ("tests/step-conformance/far_cylinder.step", "dcaaaadcc9f0ef04"),
-    ("tests/step-conformance/grooved_shaft.step", "e08ae1efaaae2696"),
+    ("tests/step-conformance/grooved_shaft.step", "83cb26c7776bcf55"),
     ("tests/step-conformance/plate_100_holes.step", "414bd143a34716e6"),
     ("tests/step-conformance/sheet_disc.step", "a88c4d5661255edc"),
     ("tests/step-conformance/tiny_pin.step", "e86130e9cc19deff"),
@@ -107,14 +137,14 @@ const DIGESTS: &[(&str, &str)] = &[
     ("tests/step-regressions/block_edge_off_its_face.step", "8e25cc9a701de87d"),
     ("tests/step-regressions/cylinder_rim_off_its_wall.step", "e07c2fdbef7cc0c6"),
     ("tests/step-regressions/cylinder_spline_rims.step", "ed34ee7908eddf1d"),
-    ("tests/step-regressions/hole_round_revolved.step", "1749e03c3c2f194a"),
+    ("tests/step-regressions/hole_round_revolved.step", "260e07ac4dec005d"),
     ("tests/step-regressions/net_steps_back_within_tolerance.step", "687c36e89ffe679a"),
-    ("tests/step-regressions/rod_doubled_edge.step", "ef5f1b70be16e528"),
-    ("tests/step-regressions/thread_crest_band.step", "2053d57556b7dafa"),
+    ("tests/step-regressions/rod_doubled_edge.step", "7e5ec3041433853c"),
+    ("tests/step-regressions/thread_crest_band.step", "30923bc03bcfd757"),
     ("tests/step-regressions/tiny_rounds_coarse_tolerance.step", "0909a2e6b030bd2c"),
     ("tests/step-regressions/torus_patch_and_rest.step", "a82c8cbad7038460"),
     ("tests/step-regressions/torus_patch_and_rest_revolved.step", "6b2f15c1dc602029"),
-    ("(assembly)", "4256f9f7676566de"),
+    ("(assembly)", "45b6ef6cf64529e2"),
 ];
 
 /// Each body's (face count, volume) as read.
@@ -197,13 +227,7 @@ fn step_export_keeps_its_bytes_and_reads_back() {
         }
         return;
     }
-    let mut expected: Vec<(String, String)> = DIGESTS.iter().map(|(n, d)| ((*n).to_string(), (*d).to_string())).collect();
-    #[cfg(target_os = "macos")]
-    for (n, d) in DIGESTS_MACOS {
-        if let Some(entry) = expected.iter_mut().find(|(m, _)| m == n) {
-            entry.1 = (*d).to_string();
-        }
-    }
+    let expected = with_macos_digests(DIGESTS.iter().map(|(n, d)| ((*n).to_string(), (*d).to_string())).collect());
     assert_eq!(table, expected, "the export's bytes changed");
     assert!(failures.is_empty(), "round trips: {failures:#?}");
 }
