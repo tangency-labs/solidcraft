@@ -614,13 +614,54 @@ fn a_piece_longer_than_its_edge_tolerance_is_not_cut() {
     assert_eq!(knots(&b), before);
 }
 
-/// A body the check passes is given back as it is.
+/// A body the check passes is given back as it is: it has nothing the heal takes, so it is not
+/// checked either.
 #[test]
 fn a_body_that_passes_is_not_healed() {
     let (body, order) = Body::from_record(&hair_step_box(3e-3, TOLS), true).unwrap();
+    assert!(body.check(CheckLevel::All).unwrap().is_valid());
     let (healed, report) = solidcore_ops::heal::heal_tolerance_defects(&body, &order).unwrap();
     assert!(healed.is_none() && !report.kept);
-    assert_eq!(report.why_not.as_deref(), Some("the body passes the check"));
+    assert_eq!(
+        report.why_not.as_deref(),
+        Some("nothing the heal takes could be proved")
+    );
+    assert_eq!((report.before, report.after), (None, None));
+}
+
+/// A body the check fails for a defect the heal cannot prove away (a spline piece the check
+/// calls one point, on an edge whose tolerance is far smaller than the piece) is given back as
+/// it is without its full check: with no edit proved there is nothing to compare, and the full
+/// check is the costliest step of the heal. The refusal says why the piece stays.
+#[test]
+fn a_body_with_nothing_the_heal_takes_is_given_back_unchecked() {
+    let tols = Tols {
+        body: 1e-9,
+        edge: 1e-8,
+        vertex: 1e-8,
+    };
+    let rec = box_with_a_short_spline_span(tols, 1e-8);
+    let (body, order) = Body::from_record(&rec, true).unwrap();
+    assert!(failed(&body).contains(&15), "{:?}", failed(&body));
+    let (healed, report) = solidcore_ops::heal::heal_tolerance_defects(&body, &order).unwrap();
+    assert!(healed.is_none() && !report.kept);
+    assert_eq!(
+        report.why_not.as_deref(),
+        Some("nothing the heal takes could be proved")
+    );
+    assert_eq!((report.before, report.after), (None, None));
+    assert_eq!(
+        report.cut_pieces + report.squeezed_edges + report.collapsed_faces,
+        0
+    );
+    assert!(
+        report
+            .refused
+            .iter()
+            .any(|r| r.starts_with("short edge left:")),
+        "{:?}",
+        report.refused
+    );
 }
 
 /// The real-defect side of the squeeze's certificate: the riser's end edge, a hair shorter than

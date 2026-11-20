@@ -3,11 +3,10 @@
 //! from inside its own run; anyone reads it. Data whose plugin is missing, off or older is kept and
 //! saved back byte for byte.
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
 use serde_json::Value;
 use solidcraft_doc::Document;
-use solidcraft_doc::canvas::{base64_decode, base64_encode};
+use solidcraft_doc::blob::Blob;
 use solidcraft_doc::plugin_data::{self, BLOBS, CACHE, DATA, META, Meta};
 
 use crate::schema::plugin_storage::{BlobInfo, DataStatus, StorageData, StoredPlugin};
@@ -41,12 +40,6 @@ fn limit(what: impl Into<String>) -> EngineError {
     HostError::LimitExceeded { limit: what.into() }.into()
 }
 
-/// The decoded size of a base64 text, without decoding it.
-fn decoded_len(text: &str) -> u64 {
-    let padding = text.bytes().rev().take_while(|&b| b == b'=').count();
-    ((text.len() / 4) * 3).saturating_sub(padding) as u64
-}
-
 /// The plugin a read is for: the caller's own inside a plugin's run, else the one named.
 pub(crate) fn reader(s: &Session, cmd: &str, named: Option<&str>) -> Result<String> {
     match (&s.plugin_state.storage_caller, named) {
@@ -78,26 +71,26 @@ pub(crate) fn writer(s: &Session) -> Result<StorageCaller> {
 }
 
 /// A plugin's files, by name, with whether each is a cache file and its size.
-fn blobs(data: &BTreeMap<String, Arc<str>>, id: &str) -> Vec<BlobInfo> {
+fn blobs(data: &BTreeMap<String, Blob>, id: &str) -> Vec<BlobInfo> {
     let prefix = format!("{id}/");
     data.iter()
         .filter(|(key, _)| key.starts_with(&prefix))
-        .filter_map(|(key, text)| {
+        .filter_map(|(key, bytes)| {
             let path = &key[prefix.len()..];
             let (name, cache) = match (path.strip_prefix(BLOBS), path.strip_prefix(CACHE)) {
                 (Some(name), _) => (name, false),
                 (_, Some(name)) => (name, true),
                 _ => return None,
             };
-            Some(BlobInfo { name: name.to_string(), cache, bytes: decoded_len(text) })
+            Some(BlobInfo { name: name.to_string(), cache, bytes: bytes.len() as u64 })
         })
         .collect()
 }
 
 /// Every byte a plugin keeps in the design.
-fn plugin_bytes(data: &BTreeMap<String, Arc<str>>, id: &str) -> u64 {
+fn plugin_bytes(data: &BTreeMap<String, Blob>, id: &str) -> u64 {
     let prefix = format!("{id}/");
-    data.iter().filter(|(key, _)| key.starts_with(&prefix)).map(|(_, text)| decoded_len(text)).sum()
+    data.iter().filter(|(key, _)| key.starts_with(&prefix)).map(|(_, bytes)| bytes.len() as u64).sum()
 }
 
 /// A plugin's data in `doc`, for a reader. `caller` is the running plugin, when there is one.
@@ -106,7 +99,7 @@ pub fn read(doc: &Document, id: &str, caller: Option<&StorageCaller>) -> Storage
     let data = &doc.plugin_data;
     let stored = data.contains_key(&format!("{id}/{META}")) || data.contains_key(&format!("{id}/{DATA}")) || !blobs(data, id).is_empty();
     let meta = plugin_data::meta(data, id);
-    let document = plugin_data::file(data, id, DATA).and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or(Value::Null);
+    let document = plugin_data::file(data, id, DATA).and_then(|bytes| serde_json::from_slice(bytes).ok()).unwrap_or(Value::Null);
     let plugin_format = caller.filter(|caller| caller.id == id).map(|caller| caller.data_format);
     StorageData {
         plugin: id.to_string(),
@@ -142,17 +135,17 @@ pub(crate) fn put_replacing(s: &mut Session, caller: &StorageCaller, path: &str,
     }
     match bytes {
         Some(bytes) => {
-            data.insert(key, base64_encode(bytes).into());
+            data.insert(key, bytes.into());
         }
         None => {
             data.remove(&key);
         }
     }
-    data.insert(meta_key, base64_encode(&meta).into());
+    data.insert(meta_key, meta.into());
     if data.len() > plugin_data::MAX_FILES {
         return Err(limit(format!("a design keeps at most {} files of plugin data", plugin_data::MAX_FILES)));
     }
-    let total: u64 = data.values().map(|text| decoded_len(text)).sum();
+    let total: u64 = data.values().map(|bytes| bytes.len() as u64).sum();
     if total > MAX_TOTAL_BYTES {
         return Err(limit("plugin data in one design is at most 256 MiB, all plugins together"));
     }
@@ -203,8 +196,8 @@ pub fn blob_path(doc: &Document, id: &str, name: &str) -> Option<(String, bool)>
 }
 
 /// The bytes of one of a plugin's files, by its full name (`blobs/<name>` or `cache/<name>`).
-pub fn blob(doc: &Document, id: &str, path: &str) -> Option<Vec<u8>> {
-    doc.plugin_data.get(&format!("{id}/{path}")).and_then(|text| base64_decode(text))
+pub fn blob<'a>(doc: &'a Document, id: &str, path: &str) -> Option<&'a [u8]> {
+    plugin_data::file(&doc.plugin_data, id, path)
 }
 
 /// The installed plugin with this id, when there is one: its manifest alone (not its component, so

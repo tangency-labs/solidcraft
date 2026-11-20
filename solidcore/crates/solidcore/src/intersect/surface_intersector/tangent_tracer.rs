@@ -5,8 +5,8 @@
 //!
 //! Not upstream: the fork's `SmTangentCurveTracer.cpp` (tangency-labs/smlib@ef4ab25,
 //! @e9fde8f, @d8c61db, @1693c9d), its anonymous namespace. The pass that uses it,
-//! `SmSurfaceIntersector::FindTangentCurves`, runs only with
-//! `Kernel::fixes.ssi_tangent_curve_tracer` (WR-75).
+//! `SmSurfaceIntersector::FindTangentCurves` (WR-75), runs on every intersection but a
+//! self intersection whose two domains overlap or touch.
 //!
 //! | Rust                          | Fork                         |
 //! |-------------------------------|------------------------------|
@@ -43,11 +43,16 @@
 use std::cell::Cell;
 
 use crate::error::{Result, SolidError};
+use crate::geom::certified::next_up;
 use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
 use crate::math::{Point2, Vec3, BIG_DOUBLE, PI};
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
+use crate::nurbs::math::gamma;
+use crate::surface::plane::Plane;
+use crate::surface::surface::p2::SurfaceKind;
+use crate::surface::surface::p8::point_rounding;
 use crate::surface::surface::Surface;
 
 const OP: &str = "intersect::surface_intersector::tangent_tracer";
@@ -334,6 +339,57 @@ impl<'a> TangentTracer<'a> {
         let (su, sv) = (g(1, 0)?, g(0, 1)?);
         let d_len = len(su.cross(sv));
         Ok(d_len > 1e-12 * (su.dot(su) + sv.dot(sv)) && d_len > 1e-300)
+    }
+
+    /// Not the fork's (#18930): whether the two surfaces meet at `x`: their points, as
+    /// [`Surface::evaluate_point`] gives them, within the counted rounding of those two
+    /// evaluations ([`point_rounding`]; a plane's here; a curve bounded surface's that
+    /// of its basis, which evaluates it) plus one ulp step of each parameter, and at
+    /// least the gap at which [`Self::solve`] stops (cost `1e-34`). The test is of `x`
+    /// as the solver leaves it: a solution farther from the surfaces' meeting than that
+    /// reads as not meeting (on the tracer's tests the accepted ones lie within 0.055 of
+    /// the bound, WR-75 addendum of 2026-11-19). Surfaces closer than the rounding of
+    /// their evaluations read as meeting; the bound grows with the coordinates, as that
+    /// rounding does. `None` where a surface has no counted bound (a cone, offset,
+    /// procedural or STEP surface, a surface in a volume, a power-basis net) or cannot be
+    /// evaluated.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] from the evaluations.
+    pub(crate) fn meets(&self, k: &Kernel, x: &[f64; 4]) -> Result<Option<bool>> {
+        let mut pts = [Vec3::ZERO; 2];
+        let mut bound = 0.0;
+        for (s, pt) in pts.iter_mut().enumerate() {
+            let mut srf = *self.surfaces.get(s).ok_or_else(oob)?;
+            let (u, v) = (at(x, 2 * s)?, at(x, 2 * s + 1)?);
+            let uv = Point2::new(u, v);
+            let p = match srf.evaluate_point(k, uv) {
+                Ok(p) => p,
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                Err(_) => return Ok(None),
+            };
+            // a curve bounded surface evaluates by its basis (nested ones end at one)
+            while let SurfaceKind::CurveBounded(c) = srf.kind() {
+                srf = c.basis();
+            }
+            let rounding = match srf.kind() {
+                SurfaceKind::Plane(plane) => Some(plane_point_rounding(plane, p)),
+                _ => point_rounding(k, srf, uv)?,
+            };
+            let Some(rounding) = rounding else {
+                return Ok(None);
+            };
+            let Some(e) = self.eval(k, s, u, v)? else {
+                return Ok(None);
+            };
+            let ulp = |t: f64| next_up(t) - t;
+            bound += rounding + len(e.su) * ulp(u) + len(e.sv) * ulp(v);
+            *pt = p;
+        }
+        // the difference and its length round by at most `gamma(4)` of the gap
+        let gap = len(pts[0] - pts[1]);
+        Ok(Some(gap <= smax(bound * (1.0 + gamma(4)), 1e-17)))
     }
 
     /// `Clamp`: both parameter pairs clamped to their domains.
@@ -794,7 +850,8 @@ impl<'a> TangentTracer<'a> {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] from the evaluations.
+    /// [`SolidError::Unported`] from the evaluations; [`SolidError::Cancelled`], polled
+    /// at every step (not the fork's: the pass runs on every intersection, #18930).
     pub fn march(
         &self,
         k: &Kernel,
@@ -816,6 +873,7 @@ impl<'a> TangentTracer<'a> {
         let mut cur_is_node = p0.ang < deg2rad(0.01);
         let mut iter = 0;
         while iter < 20000 && pts.len() < 5000 {
+            k.check_cancelled(OP)?;
             iter += 1;
             crate::profile::profile_count!(k, MarchSteps, 1);
             let (res, nxt) = self.step(k, &cur, t, h)?;
@@ -875,7 +933,9 @@ impl<'a> TangentTracer<'a> {
                     let cc = nxt.ang;
                     if b < a && b <= cc && b < deg2rad(3.0) {
                         if let Some(m) = self.solve_node(k, &cur)? {
-                            if len(m.p - cur.p) < 2.0 * d_len {
+                            // a node is where the surfaces meet (#18930)
+                            if len(m.p - cur.p) < 2.0 * d_len && self.meets(k, &m.x)? != Some(false)
+                            {
                                 if (m.p - cur.p).dot(t) > 0.0 {
                                     pts.push(m);
                                 } else if let Some(last) = pts.last_mut() {
@@ -979,6 +1039,16 @@ impl<'a> TangentTracer<'a> {
     /// from 24 sampled directions, not from a certificate; the crossing mode
     /// (`tangent` false) uses the same test.
     ///
+    /// Not the fork's either (#18930): in the crossing mode a direction's solution counts
+    /// only where the surfaces meet ([`Self::meets`]), not where they are only within
+    /// tolerance of each other, as the fork's acceptance (a gap of a tenth of the
+    /// tolerance) lets them. Two touching points closer than the probe's radius, with the
+    /// surfaces within tolerance between them, gave the crossing mode three or four such
+    /// directions; the contact became a node, and a crossing branch was traced through
+    /// both points. A surface with no counted rounding bound is judged as the fork
+    /// judges, and so is the tangential mode, whose solutions also have parallel normals
+    /// and whose curves may lie within tolerance (a surface fitted to another).
+    ///
     /// # Errors
     ///
     /// [`SolidError::Unported`] from the evaluations.
@@ -1027,6 +1097,11 @@ impl<'a> TangentTracer<'a> {
             if off > 0.35 * r {
                 continue;
             }
+            // a point where the surfaces are only within tolerance of each other is on no
+            // crossing to continue along (#18930)
+            if !self.tangent && self.meets(k, &q.x)? == Some(false) {
+                continue;
+            }
             let h = q.p - p.p;
             let h_t = h - n * n.dot(h);
             *along_jj = h_t.dot(d) > cos_half_step * len(h_t);
@@ -1049,6 +1124,19 @@ impl<'a> TangentTracer<'a> {
         }
         i32::try_from(dirs.len()).map_err(|_| oob())
     }
+}
+
+/// Not the fork's (#18930): a bound on `|computed - exact|` of [`Plane::evaluate_point`]'s
+/// point `p` (the evaluated point). Each coordinate is `o + (u su) x + (v sv) y` (`o`
+/// the origin, `x`, `y` the unit axes, `su`, `sv` the uv scales): two products per
+/// term and two sums, so within `gamma(4) (|o| + |u su x| + |v sv y|)`. The axes are
+/// orthonormal, so `|u su|` and `|v sv|` are at most `|p - o|`, with room for `p`'s own
+/// rounding; the coordinate bound times 2 (above `sqrt 3`) bounds the point.
+fn plane_point_rounding(plane: &Plane, p: Vec3) -> f64 {
+    let o = plane.position().origin();
+    let o_max = o.x.abs().max(o.y.abs()).max(o.z.abs());
+    let reach = len(p - o) * (1.0 + gamma(8)) + gamma(4) * o_max;
+    2.0 * gamma(4) * (o_max + 2.0 * reach) * (1.0 + gamma(8))
 }
 
 /// `sm_TcUVDer`: the uv derivatives (per unit 3D arc length) at point `i` of a traced
@@ -1258,6 +1346,81 @@ mod tests {
         assert!(len(p.p - Vec3::new(0.0, 0.0, -1.0)) < 1e-6, "{:?}", p.p);
         let mut dirs = Vec::new();
         assert_eq!(tr.probe(&k, &p, &mut dirs).unwrap(), 0);
+    }
+
+    /// A bilinear patch over `[cx - 1, cx + 1] x [cy - 1, cy + 1]` at height
+    /// `z + slope (x - cx)`.
+    fn tilted(cx: f64, cy: f64, z: f64, slope: f64) -> Surface {
+        let at = |dx: f64, dy: f64| Vec3::new(cx + dx, cy + dy, z + slope * dx);
+        Surface::from(
+            BSplineSurface::create_bilinear_surface(
+                at(-1.0, -1.0),
+                at(1.0, -1.0),
+                at(-1.0, 1.0),
+                at(1.0, 1.0),
+            )
+            .unwrap(),
+        )
+    }
+
+    /// The crossing mode's probe at the middle of two patches, from the contact the free
+    /// solve finds there.
+    fn crossing_probe(a: &Surface, b: &Surface) -> (i32, Vec<Vec3>) {
+        let k = Kernel::default();
+        let doms = [
+            a.natural_uv_domain_with_nurb(&k).unwrap(),
+            b.natural_uv_domain_with_nurb(&k).unwrap(),
+        ];
+        let mut tr = TangentTracer::new([a, b], doms, 1e-6, 2.0);
+        tr.tangent = false;
+        let mut x = [0.5; 4];
+        let p = tr
+            .solve(
+                &k,
+                &mut x,
+                SolveMode::Free,
+                Vec3::ZERO,
+                Vec3::ZERO,
+                None,
+                0.0,
+            )
+            .unwrap()
+            .unwrap();
+        let mut dirs = Vec::new();
+        let n = tr.probe(&k, &p, &mut dirs).unwrap();
+        (n, dirs)
+    }
+
+    /// The plane `z = 0` over `[cx - 1, cx + 1] x [cy - 1, cy + 1]`, as a plane.
+    fn plane_at(cx: f64, cy: f64) -> Surface {
+        Surface::from(Plane::new(
+            Vec3::new(cx, cy, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Point2::new(1.0, 1.0),
+            &Extent2d::from_bounds(-1.0, -1.0, 1.0, 1.0),
+        ))
+    }
+
+    /// #18930: two parallel patches 1e-9 apart, within the tolerance 1e-6 but not
+    /// meeting, give the crossing probe no direction (it took every direction, and
+    /// called them coincident); a patch crossing the plane `z = 0` at 1e-3 rad along
+    /// x = cx gives it the two directions of their crossing line, at the origin and 1e6
+    /// from it, with the plane as a B-spline patch and as a plane.
+    #[test]
+    fn the_probe_continues_only_where_the_surfaces_meet() {
+        let (n, dirs) = crossing_probe(&tilted(0.0, 0.0, 0.0, 0.0), &tilted(0.0, 0.0, 1e-9, 0.0));
+        assert_eq!((n, dirs.len()), (0, 0), "{dirs:?}");
+        for c in [0.0, 1e6] {
+            for flat in [tilted(c, c, 0.0, 0.0), plane_at(c, c)] {
+                let (n, dirs) = crossing_probe(&flat, &tilted(c, c, 0.0, 1e-3));
+                assert_eq!(n, 2, "at {c}: {dirs:?}");
+                for d in &dirs {
+                    assert!(d.y.abs() > 1.0 - 1e-6, "at {c}: {dirs:?}");
+                }
+                assert!(dirs[0].y * dirs[1].y < 0.0, "at {c}: {dirs:?}");
+            }
+        }
     }
 
     /// The parabola tangents of three points, the polyline distance and the near test.

@@ -16,7 +16,7 @@ pub trait Record {
 }
 
 /// The records of one kind, by id. It reads as the `Vec` it is, and a file holds them as one.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ById<T>(Vec<Arc<T>>);
 
@@ -78,10 +78,23 @@ impl<T: Record> ById<T> {
     }
 
     /// The list's rules, each named by `word`: at most `most` records, by id, each keeping `rule`.
-    pub(super) fn check(&self, most: usize, word: &str, rule: impl Fn(&T) -> Result<()>) -> Result<()> {
+    pub(super) fn check(&self, most: usize, word: &str, mut rule: impl FnMut(&T) -> Result<()>) -> Result<()> {
         require(self.0.len() <= most, || format!("a drawing has at most {most} {word}s"))?;
         require(self.0.is_sorted_by_key(|record| record.id()), || format!("a drawing lists its {word}s by id"))?;
         self.0.iter().try_for_each(|record| rule(record).map_err(|e| DocError::Invalid(format!("{word} {}: {e}", ids::encode(record.id())))))
+    }
+}
+
+/// A sheet or sheet set is named by id first, else by a name only one item has.
+pub(super) fn named_index<T>(items: &[T], named: &str, word: &str, id: impl Fn(&T) -> u64, name: impl Fn(&T) -> &str) -> Result<usize> {
+    if let Some(i) = ids::decode(named).and_then(|wanted| items.iter().position(|item| id(item) == wanted)) {
+        return Ok(i);
+    }
+    let mut called = items.iter().enumerate().filter(|(_, item)| name(item) == named).map(|(i, _)| i);
+    match (called.next(), called.next()) {
+        (Some(i), None) => Ok(i),
+        (Some(_), Some(_)) => Err(DocError::Invalid(format!("more than one {word} is called `{named}`: give its id"))),
+        (None, _) => Err(DocError::Invalid(format!("no {word} `{named}`"))),
     }
 }
 
