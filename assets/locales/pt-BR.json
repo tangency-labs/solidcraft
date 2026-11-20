@@ -6300,7 +6300,6 @@
   "web.open_full": "Abrir no SolidCraft",
   "web.open_link": "Abrir projeto vinculado?",
   "web.open_link_confirm": "Há alterações não salvas. Abrir o projeto vinculado em uma nova aba?",
-  "↑ ↓ choose · Enter / Tab complete · Esc dismiss": "↑ ↓ escolher · Enter / Tab completar · Esc fechar",
   "Add column": "Adicionar coluna",
   "Animation": "Animação",
   "Board colour": "Cor da placa",
@@ -6888,5 +6887,6 @@
   "ui.view_compass_tip_snap": "Vista de {axis}. Clique de novo para inverter. Arraste para orbitar; segure Shift para encaixar.",
   "↑ ↓ choose · Enter applies this value": "↑ ↓ escolher · Enter aplica este valor",
   "↑ ↓ choose · Enter applies what you typed · Esc dismiss": "↑ ↓ escolher · Enter aplica o que você digitou · Esc dispensa",
-  "⌘Enter continues on GitHub.": "⌘Enter continua no GitHub."
+  "↑ ↓ choose · Enter / Tab complete · Esc dismiss": "↑ ↓ escolher · Enter / Tab completar · Esc fechar",
+  "⌘Enter continues on GitHub.": "⌘Enter continua no GitHub.",
 }
