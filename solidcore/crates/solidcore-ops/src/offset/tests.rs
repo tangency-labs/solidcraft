@@ -176,6 +176,55 @@ fn a_half_torus_keeps_a_periodic_seam_when_its_offsets_still_meet() {
     assert_eq!(query.edge_faces(seam_edges[0]), [cavity, cavity]);
 }
 
+/// A 30 x 30 x 20 block with a conical recess from its bottom (radius 7.2 at z = 0, falling
+/// 0.4 per mm), in which a 12 x 12 post stands from z = 1 up: the post's sides poke into the
+/// recess between z = 1 and z = 3, each through a lens whose hyperbola has its apex on the
+/// cone's seam.
+fn block_with_a_post_in_a_conical_recess() -> Body {
+    let block = make_box([-15.0, -15.0, 0.0], [30.0, 30.0, 20.0]).unwrap();
+    let cone = crate::make_cone([0.0; 3], 7.2, 3.2, 10.0).unwrap();
+    let post = make_box([-6.0, -6.0, 1.0], [12.0, 12.0, 20.0]).unwrap();
+    let recess = crate::boolean::boolean(cone, post, crate::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    crate::boolean::boolean(block, recess, crate::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap()
+}
+
+/// #19714: shelled open at the post's bottom, the cone's seam still ends on each lens's
+/// hyperbola. The piece of the hyperbola beyond the open face, down to the recess's rim, is
+/// not the edge's image, so the seam is kept and the body is hollow.
+///
+/// The hollow is the body less its core. With no change of topology the core is the same
+/// solid with every face's surface moved t into the material and the open face left in
+/// place: the block inset by t, less the cone r(z) = 7.2 + t sqrt(1.16) - 0.4 z outside the
+/// post of half side 6 - t from z = 1. Its volume is a frustum plus the integral, from z = 1
+/// to where r(z) = 6 - t, of the disc's area outside the square,
+/// 4 (r^2 acos(s / r) - s sqrt(r^2 - s^2)); the values are in the finding
+/// `offset.offset_geometry_creation--periodic-end-leaves-far-support-19714.md`.
+#[test]
+fn a_post_in_a_conical_recess_shells_open_at_its_bottom() {
+    crate::test_corpus::rig_fixes();
+    let whole = 17_835.098_082_931_83;
+    for (t, hollow) in [(0.4, 1_631.138_823_196_25), (0.2, 822.872_121_654_74)] {
+        let body = block_with_a_post_in_a_conical_recess();
+        assert!(rel(volume(&body), whole) < 1e-9, "body {}", volume(&body));
+        let o = order(&body);
+        let bottom = face(&body, &o, |bx| {
+            (bx.min().z - 1.0).abs() < 1e-9 && (bx.max().z - 1.0).abs() < 1e-9
+        });
+        shell(&body, &o, &[bottom], -t).unwrap_or_else(|e| panic!("t {t}: {e:?}"));
+        let report = body.check(crate::CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "t {t}: {}", report.text);
+        let actual = volume(&body);
+        assert!(
+            rel(actual, hollow) < 1e-9,
+            "t {t}: shell volume {actual:.17}"
+        );
+    }
+}
+
 /// The Dutchman stress corpus's Shell family (S0003, S0012, S0061): a feature no wider than
 /// twice the wall holds no cavity. A cylinder r 1.5, h 4 with a
 /// pin r 0.15, 1.2 high on its top, and a 30 x 20 x 10 block with a 2 x 2 x 3 boss on its

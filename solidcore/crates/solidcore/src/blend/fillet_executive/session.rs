@@ -1046,7 +1046,10 @@ fn live_corner_vert_geom(
 /// ([`super::NoRoomReason::EndPassesOverEndFace`]) carrying that fit. Anything else returns
 /// `error` as it is. Asked only after the failure, so it never refuses an End that builds.
 /// A round within the margin of that largest ball is refused with the larger ones: its End
-/// takes all of its blend, and its edges or its face fail.
+/// takes all of its blend, and its edges or its face fail. With `missed` (the vertices'
+/// failure) only a rail is judged whose end the vertices did not find on the end face. The
+/// refusal keeps `error`'s operation, the step that failed. A judgement that itself fails
+/// establishes no fit, and `error` stands.
 ///
 /// The fit named is the least over every such End of the session (the other corners are
 /// judged the same way, on their topology, whether or not their vertices are computed yet),
@@ -1064,6 +1067,7 @@ fn end_passing_over_end_face(
     extended_surfaces: &BTreeMap<FaceId, Surface>,
     corners: &[FilletCorner],
     failed: usize,
+    missed: bool,
     executive: &mut FilletExecutive<FilletObject>,
     error: SolidError,
 ) -> Result<SolidError> {
@@ -1071,43 +1075,51 @@ fn end_passing_over_end_face(
         describe_end_passing_over_end_face, largest_ball_ending_on_end_face,
     };
     use crate::blend::fillet_executive::NoRoomReason;
-    const OP_END: &str = "SmBlendCorner::CalcCornerVertGeom";
+    // the refusal keeps the operation of the failure it stands for: the step that failed
+    let operation = error.operation();
     let lookup = SweptSessionSolvers {
         solvers,
         executive: None,
     };
-    // the fit of one corner, with its blended edge: `None` where it is not such an End
-    let judge =
-        |target: &mut Brep, corner: &FilletCorner| -> Result<Option<(f64, Option<EdgeId>)>> {
-            let Some(first) = corner
-                .solver_eus
-                .as_deref()
-                .and_then(|eus| eus.first().copied())
-            else {
-                return Ok(None);
-            };
-            let edge = crate::topology::edgeuse::p1::edge(target, first)?;
-            // FitMargin: a thousand of the blended edge's tolerances
-            let margin = match edge {
-                Some(e) => 1000.0 * crate::topology::edge::tolerance(target, e)?,
-                None => 0.0,
-            };
-            let largest = largest_ball_ending_on_end_face(
-                k,
-                target,
-                pseudo,
-                corner,
-                &lookup,
-                extended_surfaces,
-                margin,
-            )?;
-            Ok(largest.map(|largest| (largest - margin, edge)))
+    // the fit of one corner, with its blended edge: `None` where it is not such an End.
+    // `missed`: only of a rail whose end the corner's vertices did not find on the end face
+    let judge = |target: &mut Brep,
+                 corner: &FilletCorner,
+                 missed: bool|
+     -> Result<Option<(f64, Option<EdgeId>)>> {
+        let Some(first) = corner
+            .solver_eus
+            .as_deref()
+            .and_then(|eus| eus.first().copied())
+        else {
+            return Ok(None);
         };
+        let edge = crate::topology::edgeuse::p1::edge(target, first)?;
+        // FitMargin: a thousand of the blended edge's tolerances
+        let margin = match edge {
+            Some(e) => 1000.0 * crate::topology::edge::tolerance(target, e)?,
+            None => 0.0,
+        };
+        let largest = largest_ball_ending_on_end_face(
+            k,
+            target,
+            pseudo,
+            corner,
+            &lookup,
+            extended_surfaces,
+            margin,
+            missed,
+        )?;
+        Ok(largest.map(|largest| (largest - margin, edge)))
+    };
     let Some(this) = corners.get(failed) else {
         return Ok(error);
     };
-    let Some(mut least) = judge(target, this)? else {
-        return Ok(error);
+    // a judgement that fails establishes no fit: the construction's own failure stands
+    let mut least = match judge(target, this, missed) {
+        Ok(Some(found)) => found,
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Ok(None) | Err(_) => return Ok(error),
     };
     let mut at = this;
     for (i, other) in corners.iter().enumerate() {
@@ -1115,7 +1127,7 @@ fn end_passing_over_end_face(
             continue;
         }
         // another corner's judgement that fails proves nothing of this one's
-        let judged = match judge(target, other) {
+        let judged = match judge(target, other, false) {
             Ok(judged) => judged,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => None,
@@ -1151,7 +1163,7 @@ fn end_passing_over_end_face(
         crate::blend::fillet_executive::p3::FitKind::Radius,
     );
     let mut failure = crate::error::Failure::new(
-        OP_END,
+        operation,
         crate::error::blend::BlendFailure::NoRoom(NoRoomReason::EndPassesOverEndFace),
     )
     .with_fit(crate::error::Fit::new(
@@ -3650,6 +3662,7 @@ impl CornerEdgeAccess<FilletObject> for SessionObjects<'_> {
                 extended_surfaces,
                 corners.as_slice(),
                 id.0 as usize,
+                false,
                 executive,
                 e,
             )?),
@@ -5684,23 +5697,30 @@ impl FaceConstructionAccess<FilletObject> for SessionObjects<'_> {
         // blend at the size where its rail only just ends on that face: the face then has no
         // extent. Refused as too large, naming the radius that fits (noted, so the executive
         // keeps it)
-        // (a geometry without a live solver has failed for that: its error stands)
-        let blended = match self.pseudo.geom(id)?.fillet_solver() {
-            Some(sid) => match self.solvers.get(sid.0 as usize).and_then(Option::as_ref) {
-                Some(solver) => solver.base().edgeuse(0)?,
-                None => None,
-            },
-            None => None,
+        // (a lookup that fails, or a geometry without a live solver, shows no such End: the
+        // face's failure stands)
+        let ends = || -> Result<[Option<VertexId>; 2]> {
+            let Some(sid) = self.pseudo.geom(id)?.fillet_solver() else {
+                return Ok([None, None]);
+            };
+            let Some(solver) = self.solvers.get(sid.0 as usize).and_then(Option::as_ref) else {
+                return Ok([None, None]);
+            };
+            let Some(eu) = solver.base().edgeuse(0)? else {
+                return Ok([None, None]);
+            };
+            let Some(e) = crate::topology::edgeuse::p1::edge(self.target, eu)? else {
+                return Ok([None, None]);
+            };
+            Ok([
+                crate::topology::edge::start_vertex(self.target, e)?,
+                crate::topology::edge::end_vertex(self.target, e)?,
+            ])
         };
-        let ends = match blended {
-            Some(eu) => match crate::topology::edgeuse::p1::edge(self.target, eu)? {
-                Some(e) => [
-                    crate::topology::edge::start_vertex(self.target, e)?,
-                    crate::topology::edge::end_vertex(self.target, e)?,
-                ],
-                None => [None, None],
-            },
-            None => [None, None],
+        let ends = match ends() {
+            Ok(ends) => ends,
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Err(_) => return Err(error),
         };
         let mut error = error;
         for v in ends.into_iter().flatten() {
@@ -5723,6 +5743,7 @@ impl FaceConstructionAccess<FilletObject> for SessionObjects<'_> {
                 extended_surfaces,
                 corners.as_slice(),
                 corner.0 as usize,
+                false,
                 executive,
                 error,
             )?;
@@ -8471,6 +8492,7 @@ impl CornerVertexAccess<FilletObject> for SessionObjects<'_> {
                     extended_surfaces,
                     corners.as_slice(),
                     id.0 as usize,
+                    true,
                     executive,
                     e,
                 )?)

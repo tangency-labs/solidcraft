@@ -50,7 +50,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&ROW_EDIT_CONTRACT)
         .output(output_schema_for::<ConfigTableReply>)
         .params(
-        "name (a row's name, or its id from config.table); from? (row to copy, by name or id; default current values); values?: {column key: expression, suppression, material name, appearance name or Look object}; rename?; delete?: bool",
+        "name (a row's name, or its id from config.table); from? (row to copy, by name or id; default current values); values?: {column key: expression, suppression, material name, appearance name or Look object}; rename?; index? (move the row to this place, 0 = first); delete?: bool"
     ),
     CommandSpec::new("config.activate", "Activate Configuration", crate::checked!("config.activate", activate))
         .icon("activate")
@@ -322,6 +322,20 @@ fn row(s: &mut Session, p: &Value) -> Result<Value> {
         if t.active.as_deref() == Some(name.as_str()) {
             t.active = None;
         }
+        return show(s, p);
+    }
+    if p.get("index").is_some() {
+        // Only moves the row: the others keep their order, and the active row stays active.
+        let i = idx.ok_or_else(|| bad(cmd, format!("no row `{name}` to move")))?;
+        let rows = &mut s.doc_mut().configs.rows;
+        let position = p
+            .get("index")
+            .and_then(Value::as_u64)
+            .and_then(|v| usize::try_from(v).ok())
+            .filter(|v| *v < rows.len())
+            .ok_or_else(|| bad(cmd, "valid index required"))?;
+        let row = rows.remove(i);
+        rows.insert(position, row);
         return show(s, p);
     }
     let from = match p.get("from") {
@@ -845,6 +859,42 @@ mod tests {
         assert_eq!(replacement, id);
         assert_ne!(s.doc.configs.row_identity(replacement), Some(identity));
         assert!(s.doc.configs.row_identity(replacement).is_some());
+    }
+
+    /// A row moves to the place `index` gives (#17287): the others keep their order, ids and the
+    /// active row stay, and an index off the table, a row that isn't there, or a move together with
+    /// nothing else to do is refused with the table as it was. One undo step.
+    #[test]
+    fn a_row_moves_to_a_place_in_the_table() {
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name": "W", "expression": "10 mm"}));
+        run(&mut s, "solid.box", json!({"length": "W", "width": 10, "height": 10}));
+        run(&mut s, "config.configure", json!({"params": ["W"]}));
+        for (name, w) in [("10 mm", "10 mm"), ("12 mm", "12 mm"), ("20 mm", "20 mm"), ("16 mm", "16 mm")] {
+            run(&mut s, "config.row", json!({"name": name, "values": {"W": w}}));
+        }
+        run(&mut s, "config.row", json!({"name": "Default", "delete": true}));
+        run(&mut s, "config.activate", json!({"row": "20 mm"}));
+        let names = |s: &mut Session| -> Vec<String> {
+            run(s, "config.table", json!({}))["rows"]
+                .as_array()
+                .map(|rows| rows.iter().filter_map(|r| r["name"].as_str().map(str::to_string)).collect())
+                .unwrap_or_default()
+        };
+        assert_eq!(names(&mut s), ["10 mm", "12 mm", "20 mm", "16 mm"]);
+        let t = run(&mut s, "config.row", json!({"name": "16 mm", "index": 2}));
+        assert_eq!(names(&mut s), ["10 mm", "12 mm", "16 mm", "20 mm"], "16 mm goes above 20 mm");
+        assert_eq!(t["active"], json!("20 mm"), "the active row stays active");
+        run(&mut s, "config.row", json!({"name": "10 mm", "index": 3}));
+        assert_eq!(names(&mut s), ["12 mm", "16 mm", "20 mm", "10 mm"], "the first row goes last");
+        run(&mut s, "config.row", json!({"name": "10 mm", "index": 0}));
+        assert_eq!(names(&mut s), ["10 mm", "12 mm", "16 mm", "20 mm"]);
+        for p in [json!({"name": "12 mm", "index": 4}), json!({"name": "Nope", "index": 0}), json!({"name": "12 mm", "index": -1})] {
+            assert!(s.execute("config.row", &p).is_err(), "{p}");
+        }
+        assert_eq!(names(&mut s), ["10 mm", "12 mm", "16 mm", "20 mm"], "a refused move changes nothing");
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(names(&mut s), ["12 mm", "16 mm", "20 mm", "10 mm"], "one undo step undoes one move");
     }
 
     #[test]

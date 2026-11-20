@@ -385,6 +385,7 @@ mod view_confirm;
 pub mod view_gizmo;
 mod view_memory;
 pub mod view_pick;
+mod view_tiles;
 pub mod viewport;
 mod viewport_details;
 mod viewport_layout;
@@ -4305,6 +4306,9 @@ impl SolveApp {
         if let Some(rect) = self.viewport.rect.filter(|rect| rect.is_positive() && rect.is_finite()) {
             let mut controls = ui.new_child(egui::UiBuilder::new().id_salt("universal_panel_controls").max_rect(rect));
             controls.set_clip_rect(controls.clip_rect().intersect(rect));
+            if view_tiles::shown(self) {
+                view_tiles::card_controls(self, ui);
+            }
             render_workspace::host_result_overlays(self, &mut controls);
             viewport::show_host_controls(self, &mut controls, rect);
         }
@@ -4326,6 +4330,8 @@ impl SolveApp {
             // The model view is not drawn, so no shown dimension can be double-clicked.
             dim_view::set_model_drawn(Vec::new());
             render_workspace::show(self, ui);
+        } else if view_tiles::shown(self) {
+            view_tiles::show(self, ui);
         } else {
             viewport::show(self, ui);
         }
