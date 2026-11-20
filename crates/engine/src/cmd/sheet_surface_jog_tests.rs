@@ -354,3 +354,19 @@ fn a_jog_given_a_side_ignores_its_fixed_point() {
     assert_eq!(kind(&s), kind(&o));
     assert_eq!(bbox(&mut s), bbox(&mut o));
 }
+
+/// As for a fold, a new jog refuses a fixed point that touches no material of the sheet and
+/// leaves the design as it was (#263). A point on the sheet decides the side that stays as the
+/// jog is made: the jog keeps that side, not the point.
+#[test]
+fn a_jog_refuses_a_fixed_point_off_the_sheet_and_keeps_only_its_side() {
+    let mut s = Session::default();
+    jog_plate(&mut s);
+    let before = s.doc.features.len();
+    let e = jog(&mut s, json!({"offset": 20, "fixed": [100, 30, 50]})).unwrap_err().to_string();
+    assert!(e.contains("not on the sheet"), "{e}");
+    assert_eq!(s.doc.features.len(), before, "nothing was added");
+    jog(&mut s, json!({"offset": 20})).unwrap();
+    let kept = s.doc.features.last().map(|f| f.kind.clone());
+    assert!(matches!(kept, Some(solidcraft_doc::FeatureKind::SheetJog { fixed: None, stays: Some(_), .. })), "{kept:?}");
+}
