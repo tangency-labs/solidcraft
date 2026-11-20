@@ -71,6 +71,33 @@ fn choice_options_show_their_titles_and_send_their_values() {
 }
 
 #[test]
+fn a_computed_dropdown_queries_with_just_the_other_inputs() {
+    let schema = json!({"type":"object","required":["style"],"x-solidcraft-options":{"field":"fit","query":"@options"},
+        "properties":{"fit":{"type":"string","title":"Tooth pair"},"style":{"type":"string","default":"spur"}}});
+    let fields = form(&schema).expect("drawn");
+    assert_eq!(fields[1].0.kind, Kind::Options { query: "@options".into() });
+    assert_eq!(fields[1].1, Input::Options);
+    assert_eq!(params(&fields), Ok(json!({"style":"spur"})));
+    let mut legacy = schema.clone();
+    legacy.as_object_mut().unwrap().remove("x-solidcraft-options");
+    assert_eq!(params(&form(&legacy).expect("optional fit works on older hosts")), Ok(json!({"style":"spur"})));
+
+    for (path, value) in [
+        ("/required", json!(["style", "fit"])),
+        ("/properties/fit", json!({"type":"integer"})),
+        ("/properties/fit", json!({"type":"string","default":"a"})),
+        ("/properties/fit", json!({"type":"string","minLength":1})),
+        ("/x-solidcraft-options/field", json!("missing")),
+        ("/x-solidcraft-options/query", json!("")),
+        ("/x-solidcraft-options", json!({"field":"fit","query":"@options","unknown":true})),
+    ] {
+        let mut unsupported = schema.clone();
+        *unsupported.pointer_mut(path).unwrap() = value;
+        assert!(form(&unsupported).is_none(), "{unsupported}");
+    }
+}
+
+#[test]
 fn other_lists_and_nested_objects_are_not_guessed() {
     for property in [
         // A target list of strings: not body names (only `bodies` and `body_ids` send those).
@@ -709,10 +736,46 @@ mod native {
         run(&mut h.app).unwrap();
         settle(&mut h);
         assert!(h.app.plugin_menu.dialogs.is_empty(), "an edit closes the dialog");
+        assert!(h.app.status.as_ref().is_some_and(|(text, _, error)| !error && text.ends_with("Box dimensions accepted")));
         assert_eq!(h.app.session.doc.as_ref(), reference.doc.as_ref(), "same document as plugin.run");
         assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
         h.app.run("edit.undo", json!({})).unwrap();
         assert_eq!(h.app.session.doc.as_ref(), before.as_ref(), "undo takes back the whole run");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn default_and_selected_options_feed_preview_and_run_even_with_preview_off() {
+        let root = package("computed-options");
+        let path = root.join("boxes/plugin.json");
+        let mut manifest: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        manifest["runtime"]["entries"][0] = json!({"name":"options","effect":"edit","slots":[{"kind":"menu","name":"Options"}],
+            "input_schema":{"type":"object","x-solidcraft-options":{"field":"fit","query":"@options"},"properties":{
+                "fit":{"type":"string"},"style":{"type":"string","default":"spur"}}}});
+        std::fs::write(&path, manifest.to_string()).unwrap();
+        let mut h = crate::scenario::Harness::new();
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        open_entry(&mut h.app, 0, 0);
+        let mut dialog = h.app.plugin_menu.dialogs.pop().unwrap();
+        dialog.preview = false;
+        assert!(dialog.ready(&h.app).is_err());
+        dialog.sync_options(&h.app);
+        dialog.choices.wait();
+        assert_eq!(dialog.ready(&h.app), Ok(json!({"style":"spur","fit":"fine"})));
+        dialog.choices.choose(1);
+        let coarse = json!({"style":"spur","fit":"coarse"});
+        assert_eq!(dialog.ready(&h.app), Ok(coarse.clone()));
+        h.app.plugin_menu.dialogs.push(dialog);
+        assert!(preview_commands(&h.app).is_none());
+        h.app.plugin_menu.dialogs[0].preview = true;
+        assert_eq!(preview_commands(&h.app).unwrap().2[0].1["params"], coarse);
+
+        // An edit before the next lookup frame must block both commands immediately.
+        let (_, input) = h.app.plugin_menu.dialogs[0].fields.as_mut().unwrap().iter_mut().find(|(f, _)| f.key == "style").unwrap();
+        *input = Input::Text("helical".into());
+        assert!(preview_commands(&h.app).is_none());
+        assert!(run(&mut h.app).is_err());
+        assert!(h.app.control_held.is_empty());
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -838,6 +901,7 @@ mod native {
             ((b.max.x - b.min.x).round(), (b.max.y - b.min.y).round(), (b.max.z - b.min.z).round())
         };
         assert_eq!(size(&h), (20.0, 10.0, 3.0), "the defaults");
+        assert!(crate::scenario::rect_of("dialog:report:plugin_feedback").is_some(), "the successful result is visible in the open form");
         assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc), "the design is untouched");
         assert_eq!(h.app.session.undo.len(), undo, "no undo step");
         // A changed value is previewed again.
@@ -848,6 +912,7 @@ mod native {
         h.app.plugin_menu.dialogs[0].preview = false;
         previewed(&mut h);
         assert!(!h.app.preview.active);
+        assert!(crate::scenario::rect_of("dialog:report:plugin_feedback").is_none(), "switching Preview off clears the result");
         h.app.plugin_menu.dialogs[0].preview = true;
         h.step(&json!({"start":"solid.fillet"})).unwrap();
         assert!(preview_commands(&h.app).is_none(), "the open tool's preview is the one shown");

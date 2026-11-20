@@ -117,6 +117,8 @@ pub struct Built {
     pub outlines: Vec<(String, Arc<Mesh>)>,
     /// Why the feature failed, when the scene only shows its tool body.
     pub error: Option<String>,
+    /// The optional, plain-text summary returned by a previewed plugin entry.
+    pub(crate) plugin_summary: Option<String>,
     /// Extent of what the preview shows (the view's depth range must cover it).
     pub bounds: Aabb3,
     /// The smallest and largest radius a fillet used when it reduced one too large for its edges
@@ -183,10 +185,42 @@ const DETACHED: usize = 2;
 /// it, the pose is cancelled and the latest value starts, so only the latest keeps solving.
 const STALE_MOTION_MS: f64 = 500.0;
 
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum PluginFeedback {
+    Building(Option<String>),
+    Ready(Option<String>),
+    Failed(String),
+}
+
+/// The form whose inputs the viewport currently wants. A different job can still be running
+/// or drawn while those inputs wait for the worker.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct PluginRequest {
+    dialog: u64,
+    revision: u64,
+    run: u64,
+    key: u64,
+}
+
+fn fingerprint(value: impl Hash) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    value.hash(&mut h);
+    h.finish()
+}
+
+impl PluginRequest {
+    fn new(dialog: u64, revision: u64, run: &Value, key: u64) -> Self {
+        Self { dialog, revision, run: fingerprint(run), key: fingerprint((key, dialog)) }
+    }
+}
+
 #[derive(Default)]
 pub struct PreviewState {
     /// Key of the commands whose result (or error) is shown.
     shown_key: Option<u64>,
+    plugin_request: Option<PluginRequest>,
+    /// The summary of `shown_key`, available only to the form that requested it.
+    plugin_summary: Option<String>,
     running: Option<(u64, Receiver<Job>)>,
     /// Asks the running job to stop between features once it is obsolete.
     running_progress: Option<Arc<Progress>>,
@@ -196,6 +230,8 @@ pub struct PreviewState {
     detached: Vec<Receiver<Job>>,
     /// The running job builds a tool alone (for a join, cut or intersect).
     running_tool: bool,
+    /// A plugin run for stale inputs can be cancelled as soon as another worker slot is free.
+    running_plugin: bool,
     /// Inputs of a joint or distance preview, excluding only its driven values.
     running_stream_key: Option<u64>,
     /// The running job is a joint pose (see [`motion_key`]): once obsolete, it gets
@@ -263,6 +299,33 @@ pub struct PreviewState {
 }
 
 impl PreviewState {
+    fn set_plugin_request(&mut self, request: Option<PluginRequest>) {
+        if self.plugin_request != request && self.plugin_request.is_some_and(|p| self.shown_key == Some(p.key)) {
+            // poll drops obsolete errors. Revisiting the old inputs before another job finishes
+            // must recompute them, or an old failure could look like a successful preview.
+            self.shown_key = None;
+            self.plugin_summary = None;
+        }
+        self.plugin_request = request;
+    }
+
+    pub(crate) fn plugin_feedback(&self, dialog: u64, revision: u64, run: &Value) -> Option<PluginFeedback> {
+        let request = self.plugin_request.filter(|p| p.dialog == dialog && p.revision == revision && p.run == fingerprint(run))?;
+        if self.shown_key == Some(request.key) {
+            return Some(match &self.error {
+                Some(error) => PluginFeedback::Failed(error.clone()),
+                None => PluginFeedback::Ready(self.plugin_summary.clone()),
+            });
+        }
+        let message = self
+            .running
+            .as_ref()
+            .filter(|(key, _)| *key == request.key)
+            .and_then(|_| self.running_progress.as_ref()?.item())
+            .and_then(|(text, _, _)| feedback_line(&text));
+        Some(PluginFeedback::Building(message))
+    }
+
     /// Bodies the model scene should hide for the preview (empty while rolled back).
     pub fn effective_replaced(&self) -> &[String] {
         if self.rolled_back { &[] } else { &self.replaced }
@@ -347,6 +410,8 @@ impl PreviewState {
         self.running_tool = false;
         self.running_stream_key = None;
         self.shown_key = None;
+        self.plugin_request = None;
+        self.plugin_summary = None;
         self.error = None;
         self.applied = None;
         self.stopped = None;
@@ -428,6 +493,7 @@ impl PreviewState {
                 self.bounds = b.bounds;
                 self.active = true;
                 self.error = b.error;
+                self.plugin_summary = b.plugin_summary;
                 self.applied = b.applied;
                 self.stopped = b.stopped;
                 self.placed = b.placed;
@@ -465,6 +531,7 @@ impl PreviewState {
                 self.hide_scene();
                 self.sketches.clear();
                 self.error = Some(e);
+                self.plugin_summary = None;
                 self.applied = None;
                 self.stopped = None;
                 self.placed = None;
@@ -500,10 +567,12 @@ impl PreviewState {
             };
             if let Some(job) = job {
                 self.running = None;
+                self.running_progress = None;
                 let good = matches!(&job, Ok(b) if b.error.is_none());
                 let intermediate = good && (self.running_tool || stream_key.is_some() && self.running_stream_key == stream_key);
                 self.running_stream_key = None;
                 self.running_tool = false;
+                self.running_plugin = false;
                 self.running_motion = false;
                 // A held slider, a dragged arrow or an animation may advance faster than the
                 // worker. Show completed joint/distance results from the same setup, and tools built for
@@ -526,7 +595,10 @@ impl PreviewState {
         // A joint pose for a value the slider has left, still running after `STALE_MOTION_MS`:
         // stop it and start the latest value (#14264).
         let stale_motion = self.running_motion && stream_key.is_some() && now - self.started >= STALE_MOTION_MS;
-        if self.running.as_ref().is_some_and(|(k, _)| *k != key) && (other_setup || stale_motion) && self.detached.len() < DETACHED {
+        if self.running.as_ref().is_some_and(|(k, _)| *k != key)
+            && (self.running_plugin || other_setup || stale_motion)
+            && self.detached.len() < DETACHED
+        {
             self.detach();
         }
     }
@@ -542,6 +614,7 @@ impl PreviewState {
             self.detached.push(rx);
         }
         self.running_tool = false;
+        self.running_plugin = false;
         self.running_stream_key = None;
         self.running_motion = false;
     }
@@ -675,6 +748,12 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
         (key, crate::move_preview::layered(app)).hash(&mut h);
         key = h.finish();
     }
+    let request = match (plugin.as_ref(), cmds.as_slice()) {
+        (Some((dialog, _, _)), [(command, run)]) if command == "plugin.run" => Some(PluginRequest::new(*dialog, app.session.revision, run, key)),
+        _ => None,
+    };
+    let key = request.map_or(key, |p| p.key);
+    app.preview.set_plugin_request(request);
     let stream_key = stream_key(&cmds, app.session.revision, colors);
     let tool = as_new_body(&cmds).is_some();
     // What poses the preview, and the design it was computed against: a reader of the pose knows
@@ -742,6 +821,7 @@ fn spawn(pv: &mut PreviewState, key: u64, scratch: Session, cmds: Vec<(String, V
             pv.running = Some((key, rx));
             pv.running_progress = Some(progress);
             pv.running_tool = tool;
+            pv.running_plugin = pv.plugin_request.is_some_and(|p| p.key == key);
         }
         Err(e) => pv.apply(key, Err(e.to_string())),
     }
@@ -805,6 +885,7 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
             let combine = combine_of(cmds);
             let mut b = guard(&|| build_as(&p.before, &p.after, colors, combine.as_ref()))?;
             b.bounds = state_bounds(&p.after);
+            b.plugin_summary = plugin_summary(cmds, &p.replies);
             // The radius a previewed fillet used when it reduced the one asked for (a new
             // fillet or an edited one: the feature the replies name).
             let features = || p.replies.iter().filter_map(|r| r.get("feature").and_then(Value::as_u64));
@@ -813,6 +894,22 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
             Ok(b)
         }
     }
+}
+
+/// A plugin can return arbitrary JSON. Only its optional summary string goes in the form.
+fn plugin_summary(commands: &[(String, Value)], replies: &[Value]) -> Option<String> {
+    let [(command, _)] = commands else { return None };
+    if command != "plugin.run" {
+        return None;
+    }
+    feedback_line(replies.first()?.get("result")?.get("summary")?.as_str()?)
+}
+
+pub(crate) fn feedback_line(message: &str) -> Option<String> {
+    let line: String =
+        message.trim().chars().filter(|c| !c.is_control() || c.is_whitespace()).map(|c| if c.is_whitespace() { ' ' } else { c }).take(240).collect();
+    let line = line.trim();
+    (!line.is_empty()).then(|| line.to_owned())
 }
 
 /// The tool body of a feature that adds or removes one, built on its own (as a new body): what
@@ -992,6 +1089,7 @@ fn build_copies(before: &ModelState, after: &ModelState, sources: &[String], c: 
         replaced: Vec::new(),
         outlines: Vec::new(),
         error: None,
+        plugin_summary: None,
         bounds: Aabb3::EMPTY,
         applied: None,
         tapered: Vec::new(),
@@ -1045,6 +1143,7 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
         replaced: Vec::new(),
         outlines: Vec::new(),
         error: None,
+        plugin_summary: None,
         bounds: Aabb3::EMPTY,
         applied: None,
         tapered: Vec::new(),
@@ -1312,6 +1411,7 @@ fn build_as(before: &ModelState, after: &ModelState, c: Colors, combine: Option<
         replaced,
         outlines,
         error: None,
+        plugin_summary: None,
         bounds: Aabb3::EMPTY,
         applied: None,
         tapered: Vec::new(),
@@ -1747,6 +1847,7 @@ mod tests {
             replaced: vec!["Lid".into()],
             outlines: Vec::new(),
             error: None,
+            plugin_summary: None,
             bounds: Aabb3::EMPTY,
             applied: None,
             tapered: Vec::new(),
@@ -1757,6 +1858,90 @@ mod tests {
             layer: None,
             joints: Vec::new(),
         }
+    }
+
+    #[test]
+    fn plugin_feedback_follows_only_the_requested_form_and_job() {
+        use PluginFeedback::{Building, Failed, Ready};
+        use solidcraft_engine::doc::progress::{item, watch};
+
+        let run = json!({"entry":"gear", "params":{"teeth":20}});
+        let edit = json!({"entry":"gear", "params":{"teeth":21}});
+        let request = |dialog, revision, run: &Value| {
+            let key = job_key(&[("plugin.run".into(), run.clone())], revision, colors());
+            PluginRequest::new(dialog, revision, run, key)
+        };
+        let first = request(4, 7, &run);
+        let mut pv = PreviewState::default();
+        pv.set_plugin_request(Some(first));
+        let (tx, rx) = std::sync::mpsc::channel();
+        pv.running = Some((first.key, rx));
+        pv.running_plugin = true;
+        let progress = Arc::new(Progress::default());
+        pv.running_progress = Some(progress.clone());
+        assert_eq!(pv.plugin_feedback(4, 7, &run), Some(Building(None)));
+        watch(progress.clone(), || {
+            item(Some(("Choosing tooth counts", 0, 100)));
+            item(Some(("20 teeth", 25, 100)));
+        });
+        assert_eq!(pv.plugin_feedback(4, 7, &run), Some(Building(Some("20 teeth".into()))));
+        assert_eq!(pv.plugin_feedback(4, 7, &edit), None, "an edit in the frame before update");
+        assert_eq!(pv.plugin_feedback(4, 8, &run), None, "the design changed");
+        assert_eq!(pv.plugin_feedback(5, 7, &run), None, "another open form");
+
+        let next = request(5, 7, &run);
+        assert_ne!(first.key, next.key, "even identical commands have distinct dialog jobs");
+        let occupied: Vec<_> = (0..DETACHED)
+            .map(|_| {
+                let (tx, rx) = std::sync::mpsc::channel();
+                pv.detached.push(rx);
+                tx
+            })
+            .collect();
+        pv.set_plugin_request(Some(next));
+        pv.poll_at(next.key, None, 0.0);
+        assert!(pv.running.is_some() && !progress.is_cancelled(), "the limit on detached workers is respected");
+        assert_eq!(pv.plugin_feedback(5, 7, &run), Some(Building(None)), "no progress from the occupied worker");
+        drop(occupied);
+        pv.poll_at(next.key, None, 0.0);
+        assert!(pv.running.is_none() && progress.is_cancelled(), "the latest inputs can start as soon as a slot frees");
+        tx.send(Err("previous run failed".into())).unwrap();
+        pv.poll_at(next.key, None, 0.0);
+        assert_eq!(pv.plugin_feedback(5, 7, &run), Some(Building(None)), "no error from the occupied worker");
+        pv.apply(next.key, Ok(Built { plugin_summary: Some("20 teeth ready".into()), ..pose() }));
+        assert_eq!(pv.plugin_feedback(5, 7, &run), Some(Ready(Some("20 teeth ready".into()))));
+        assert_eq!(pv.plugin_feedback(4, 7, &run), None);
+
+        let changed = request(5, 7, &edit);
+        pv.set_plugin_request(Some(changed));
+        pv.poll_at(changed.key, None, 0.0);
+        assert_eq!(pv.plugin_feedback(5, 7, &edit), Some(Building(None)), "no old summary");
+        pv.apply(changed.key, Err("cannot build".into()));
+        assert_eq!(pv.plugin_feedback(5, 7, &edit), Some(Failed("cannot build".into())));
+        pv.set_plugin_request(Some(next));
+        pv.poll_at(next.key, None, 0.0);
+        pv.set_plugin_request(Some(changed));
+        assert_eq!(pv.plugin_feedback(5, 7, &edit), Some(Building(None)), "revisiting a cleared error requires a fresh result");
+        pv.apply(changed.key, Ok(pose()));
+        assert_eq!(pv.plugin_feedback(5, 7, &edit), Some(Ready(None)), "an entry without a summary");
+        pv.clear();
+        assert_eq!(pv.plugin_feedback(5, 7, &edit), None, "the preview was switched off");
+        pv.set_plugin_request(Some(changed));
+        pv.reset();
+        assert_eq!(pv.plugin_feedback(5, 7, &edit), None, "the design tab changed");
+    }
+
+    #[test]
+    fn plugin_summary_displays_only_the_bounded_text_of_the_entry_reply() {
+        let cmds = [("plugin.run".into(), json!({}))];
+        let reply = |value: Value| json!({"result": {"summary": value, "teeth": [19, 47]}});
+        assert_eq!(plugin_summary(&cmds, &[reply(json!("  19\n+\u{0} 47 teeth  "))]).as_deref(), Some("19 + 47 teeth"));
+        assert_eq!(plugin_summary(&cmds, &[reply(json!("歯".repeat(300)))]), Some("歯".repeat(240)));
+        for value in [Value::Null, json!(4), json!({"message":"private data"}), json!(" \u{0}\n ")] {
+            assert_eq!(plugin_summary(&cmds, &[reply(value)]), None);
+        }
+        assert_eq!(plugin_summary(&cmds, &[json!({"summary":"outside the result"}), reply(json!("another command"))]), None);
+        assert_eq!(plugin_summary(&[("solid.box".into(), json!({}))], &[reply(json!("another command"))]), None);
     }
 
     /// A result drawn as a layer of scenes `key`, handed over when `scenes`, moved `x` along X.

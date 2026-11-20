@@ -1,0 +1,34 @@
+{
+  "en": {
+    "ui.plugin_dialog_finding_options": "Finding compatible options…",
+    "ui.plugin_dialog_invalid_choices": "The plug-in returned an empty or invalid list of options."
+  },
+  "ar": {
+    "ui.plugin_dialog_finding_options": "جارٍ البحث عن الخيارات المتوافقة…",
+    "ui.plugin_dialog_invalid_choices": "أعاد الملحق قائمة خيارات فارغة أو غير صالحة."
+  },
+  "de": {
+    "ui.plugin_dialog_finding_options": "Passende Optionen werden ermittelt…",
+    "ui.plugin_dialog_invalid_choices": "Das Plug-in hat eine leere oder ungültige Optionsliste zurückgegeben."
+  },
+  "he": {
+    "ui.plugin_dialog_finding_options": "מתבצע חיפוש אחר אפשרויות מתאימות…",
+    "ui.plugin_dialog_invalid_choices": "התוסף החזיר רשימת אפשרויות ריקה או לא תקינה."
+  },
+  "ja": {
+    "ui.plugin_dialog_finding_options": "適合する選択肢を検索中…",
+    "ui.plugin_dialog_invalid_choices": "プラグインが返した選択肢の一覧が空か無効です。"
+  },
+  "ko": {
+    "ui.plugin_dialog_finding_options": "호환되는 옵션을 찾는 중…",
+    "ui.plugin_dialog_invalid_choices": "플러그인이 비어 있거나 유효하지 않은 옵션 목록을 반환했습니다."
+  },
+  "vi": {
+    "ui.plugin_dialog_finding_options": "Đang tìm các lựa chọn phù hợp…",
+    "ui.plugin_dialog_invalid_choices": "Phần bổ trợ trả về danh sách lựa chọn trống hoặc không hợp lệ."
+  },
+  "zh": {
+    "ui.plugin_dialog_finding_options": "正在查找兼容选项…",
+    "ui.plugin_dialog_invalid_choices": "插件返回的选项列表为空或无效。"
+  }
+}

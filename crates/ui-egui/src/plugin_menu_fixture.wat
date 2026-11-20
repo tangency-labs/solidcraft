@@ -1,5 +1,5 @@
 ;; Original test component, derived from the engine's plugin fixture: its entry passes its
-;; parameters straight to `solid.box` and returns that command's reply.
+;; parameters to `solid.box` and supplies a summary when the box succeeds.
 (component
   (type $ty-PLUGIN_PACKAGE/types@PLUGIN_VERSION (;0;)
     (instance
@@ -53,15 +53,46 @@
       local.get $at
     )
     (func $execute (;2;) (type 1) (param i32 i32 i32 i32) (result i32)
+      ;; The seven-byte "options" entry supplies two ranked choices for dialog tests.
+      local.get 1
+      i32.const 7
+      i32.eq
+      if
+        i32.const 0
+        i32.const 0
+        i32.store
+        i32.const 4
+        i32.const 720
+        i32.store
+        i32.const 8
+        i32.const 129
+        i32.store
+        i32.const 0
+        return
+      end
       i32.const 512
       i32.const 9
       local.get 2
       local.get 3
       i32.const 0
       call $run
+      ;; Preserve the command's error. On success, put a summary in the returned JSON string.
+      i32.const 0
+      i32.load8_u
+      i32.eqz
+      if
+        i32.const 4
+        i32.const 640
+        i32.store
+        i32.const 8
+        i32.const 37
+        i32.store
+      end
       i32.const 0
     )
     (data (;0;) (i32.const 512) "solid.box")
+    (data (i32.const 640) "{\"summary\":\"Box dimensions accepted\"}")
+    (data (i32.const 720) "{\"options\":[{\"value\":\"fine\",\"label\":\"Fine\",\"summary\":\"Fine pitch\"},{\"value\":\"coarse\",\"label\":\"Coarse\",\"summary\":\"Coarse pitch\"}]}")
     (@producers
       (processed-by "wit-component" "0.254.0")
     )

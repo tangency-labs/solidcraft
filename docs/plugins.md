@@ -255,7 +255,7 @@ key is the argument the plugin receives. The design follows the
   Escape and Cancel close the dialog and stop the picking.
 - **References stay true.** The picks belong to the design they were made on. Any change to the
   design while the dialog is open (an edit, an undo) clears them and the dialog says so; turning
-  the view or changing the selection does not. Picking runs no plugin code; Run sends the picks
+  the view or changing the selection does not. Run sends the picks
   through the same `plugin.run` request. Programs calling `plugin.run` pass the same references
   themselves; nothing fills them from the selection.
 
@@ -266,6 +266,41 @@ field. Call `parts.seats` with those references in `picks` before creating hardw
 supplies a world-space point and outward normal, and an `origin` that can be passed directly
 as side A of `joint.create`. Place the screw with its head facing outward, then use a rigid
 joint to attach its seating point to the bore. Declare both commands in the plugin manifest.
+
+### Choices that depend on the design
+
+A command can offer a ranked dropdown for one optional string field. For example, a gear
+command can look up the tooth pairs that fit the two selected cylinders. Declare the field
+on the input schema and point to it with the following object-level annotation.
+
+```json
+{
+  "type": "object",
+  "x-solidcraft-options": {"field": "fit", "query": "@options"},
+  "properties": {"fit": {"type": "string", "title": "Tooth pair"}}
+}
+```
+
+Once the other fields are valid, the dialog calls this same entry on a scratch design with
+the other inputs and `"fit":"@options"`. Return the choices in preference order. The dialog
+selects the first one and displays its optional summary.
+
+```json
+{"options":[
+  {"value":"19-47","label":"19 / 47 teeth · Best fit","summary":"2.474:1 reduction · Module 1.572 mm"},
+  {"value":"18-45","label":"18 / 45 teeth","summary":"2.500:1 reduction · Module 1.647 mm"}
+]}
+```
+
+Use a stable, unique value for each option. Both Preview and Run send that value in `fit`.
+The lookup runs with the preview's restricted grants. Results belong to the current inputs and
+design revision. Switching options reuses the list. Changing the other inputs obtains a new
+list and selects its first option. A failed query keeps Run disabled and shows the reason.
+
+Supply 1–64 options. Values and labels can each use up to 256 UTF-8 bytes, and summaries up
+to 1,024. Each string must contain visible text and be free of control characters. The query
+token is reserved. The field has no schema default or length constraints. Callers may omit it
+to accept the entry's own default, including on hosts that draw it as an ordinary text field.
 
 ### Icons and pictures
 
@@ -303,7 +338,7 @@ relative path to an `.svg` file inside the package:
 A command entry that edits the design is previewed the way native tools are: while its dialog's
 fields make parameters, the host runs the entry on a scratch copy of the design and draws what
 it would change in the viewport (new material tinted, removed material as a see-through ghost).
-The dialog has a **Preview** box, on when it opens; with it off, nothing runs until Run.
+The dialog opens with **Preview** on. Switching it off stops geometry previews. A command that declares a computed dropdown can still look up the choices for that field.
 
 - The preview is a dry run of the same `plugin.run`: the plugin's code is unchanged and declares
   nothing new. It runs on a scratch session that is thrown away, so the design, the undo history
@@ -316,6 +351,18 @@ The dialog has a **Preview** box, on when it opens; with it off, nothing runs un
 - The most recently opened dialog on the design is previewed (the one picking in the viewport,
   when one is). While a native tool is open, its own preview is the one shown. Read entries and
   importers are not previewed.
+
+An editing command can tell the person what it has calculated before the geometry is ready.
+Call the existing `control.progress(fraction, message)` with a short message. The dialog shows
+the latest message while building its preview or running the command. For example, a gear
+plugin can report the tooth counts as soon as its solver chooses them.
+
+To keep a result visible after a successful preview, return an object with an optional
+plain-text `summary` string alongside the entry's usual result fields. For example,
+`{"summary":"47 and 19 teeth, 51.881 mm between shafts","teeth":[47,19]}`.
+Only feedback for the current dialog, inputs and design is shown. A failure replaces the
+summary with the preview error. A successful Run applies the edit, closes the dialog, and
+includes the returned summary in the status message. Inline messages use up to 240 characters.
 
 ## Versions
 

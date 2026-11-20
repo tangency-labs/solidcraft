@@ -229,6 +229,7 @@ enum Work {
     Answer { inspection: Option<(u64, usize)> },
     /// External code executes once on its worker. Stale/cancelled results are discarded.
     Plugin {
+        progress: Arc<Progress>,
         prepared: Receiver<Result<solidcraft_engine::ComputedCommands, String>>,
         disabled: std::collections::BTreeSet<String>,
         grants: std::collections::BTreeMap<String, solidcraft_engine::plugin::Grants>,
@@ -252,6 +253,15 @@ pub struct ControlJob {
 }
 
 impl ControlJob {
+    /// The current progress message for the dialog that submitted this operation.
+    pub(crate) fn plugin_message(&self, ticket: &Arc<Ticket>) -> Option<String> {
+        let Work::Plugin { progress, .. } = &self.work else { return None };
+        if !Arc::ptr_eq(&self.req.ticket, ticket) || ticket.is_cancelled() {
+            return None;
+        }
+        progress.item().and_then(|(message, _, _)| crate::preview::feedback_line(&message))
+    }
+
     fn poll(&self) -> Option<Option<Value>> {
         match self.done.try_recv() {
             Ok(r) => Some(r),
@@ -608,7 +618,7 @@ impl SolveApp {
             let gate = self.apply_gate.clone();
             let progress = progress_of(&req.ticket);
             let warm_progress = progress.clone();
-            let Some(done) = spawn(scope, progress, move || {
+            let Some(done) = spawn(scope, progress.clone(), move || {
                 #[cfg(test)]
                 if let Some(gate) = gate {
                     let _ = gate.lock().ok()?.recv();
@@ -631,6 +641,7 @@ impl SolveApp {
                 label: label(self, "plugin.run"),
                 req,
                 work: Work::Plugin {
+                    progress,
                     prepared,
                     disabled: self.preferences.disabled_plugins.clone(),
                     grants: self.preferences.plugin_grants.clone(),
@@ -821,7 +832,7 @@ impl SolveApp {
         }
         let Some(job) = self.control_job.take() else { return };
         ctx.request_repaint();
-        if let Work::Plugin { prepared, disabled, grants, limits, level } = &job.work {
+        if let Work::Plugin { prepared, disabled, grants, limits, level, .. } = &job.work {
             if !job.req.ticket.back() {
                 let _ = job.req.reply.send(stopped_reply(&job.label, true));
                 return;
