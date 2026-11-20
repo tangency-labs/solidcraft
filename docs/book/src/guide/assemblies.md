@@ -507,6 +507,20 @@ a checkout. The parts it reads come in as one step, so one **Undo** takes them a
 that cannot be read keeps its bodies, is tried again the next time, and holds up no other.
 **Update changed linked designs when a tab comes back** (Preferences, Design,
 `update_changed_links`) turns this off.
+
+Linked files from other folders load after you allow them. When an assembly opens, the parts in
+its own folder, or below it, are read again by themselves as above. If a changed part is in
+another folder, SolidCraft asks once, naming the folders: **Load** reads those parts now and
+remembers the folders, so designs that link files from them load them as they open from then
+on; **Not now** leaves them out of date, and **Update Links** reads them whenever you choose.
+The folders you allowed are kept in your own settings, never in a design, and are listed under
+Preferences › General › Files, where you can remove one or forget them all.
+A design opened by a program (the command line, an MCP client, the control channel or the
+assistant) never asks: its parts in other folders stay out of date unless you allowed their
+folder, and running `component.update_links` (all links, or `components: [ids]`) reads them.
+The command line and a headless MCP session don't read links by themselves when a design
+opens, so there `component.update_links` is the way to bring in changed parts.
+
 To edit the source, right-click a linked component or occurrence in the Browser and choose
 **Open Linked Design**. It opens the part in another tab and reports if its file is missing.
 **Break Link** (`component.break_link`) keeps the bodies and forgets the file, and

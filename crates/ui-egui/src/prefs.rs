@@ -1727,6 +1727,10 @@ preference_settings! {
     network_locations: bool = false, PAGE_GENERAL => check_tr("prefs.network_locations");
     /// The servers the files a design names may be on ("Always allow this server").
     network_hosts: Vec<String> = Vec::new(), PAGE_GENERAL;
+    /// Folders linked files are loaded from when a design opens, besides the design's own folder
+    /// (`link_folders_prompt`): those the user answered Load for. Kept in the user's settings,
+    /// never in a design.
+    linked_file_folders: Vec<String> = Vec::new(), PAGE_GENERAL;
     /// What a middle-button double-click in the view does: `home`, `fit` or `off`.
     middle_double_click: String = "home".into(), PAGE_NAVIGATION;
     /// A view chosen on the navigator (a face, corner or arrow, an axis tip) also frames the
@@ -7348,6 +7352,7 @@ mod tests {
             ("signing_key", json!("0123456789ABCDEF0123456789ABCDEF01234567"), PAGE_SECURITY),
             ("trusted_signing_keys", json!("0123456789ABCDEF0123456789ABCDEF01234567"), PAGE_SECURITY),
             ("verify_opened_designs", json!(true), PAGE_SECURITY),
+            ("linked_file_folders", json!(["/work/parts"]), PAGE_GENERAL),
         ];
         let defaults = serde_json::to_value(Prefs::default()).unwrap();
         for (field, value, owner) in fields {

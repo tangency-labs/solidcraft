@@ -129,6 +129,7 @@ mod kit_gallery_tests;
 mod kit_host_tests;
 mod length_input;
 pub mod library;
+pub mod link_folders_prompt;
 mod linked_source;
 pub mod links;
 #[cfg(test)]
@@ -836,6 +837,8 @@ pub struct SolveApp {
     pub disk_prompt: bool,
     /// Update Links, Open Linked Design or Reload from file waiting for a network server to be allowed.
     pub network_prompt: Option<network_prompt::NetworkPrompt>,
+    /// A design just opened whose out-of-date links are in other folders, asking whether to load them.
+    pub link_folders_prompt: Option<link_folders_prompt::LinkFoldersPrompt>,
     /// Designs left by crashed apps, offered for recovery.
     pub recoverable: Vec<solidcraft_engine::recovery::Entry>,
     /// The recovery folder holding this launch's reopen-guard marker (#5064); `None` when
@@ -1143,6 +1146,7 @@ impl SolveApp {
             lock_prompts: Vec::new(),
             disk_prompt: false,
             network_prompt: None,
+            link_folders_prompt: None,
             recoverable: Vec::new(),
             reopen_guard_dir: None,
             recovery_discard_all: false,
@@ -4312,6 +4316,7 @@ impl SolveApp {
         documents::prompt(self, ui.ctx());
         open_elsewhere::show(self, ui.ctx());
         network_prompt::show(self, ui.ctx());
+        link_folders_prompt::show(self, ui.ctx());
         update::show(self, ui.ctx());
         install::show(self, ui.ctx());
         // Settings › AI's Add agent dialog: Settings opens over Home too (#3483).

@@ -1,6 +1,7 @@
 //! Explicitly choose a linked component's source, for all its placements or for one of them.
 //! Extract makes a component that is not linked the source of its own design file.
 
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use serde_json::{Value, json};
@@ -174,6 +175,13 @@ fn changed_since_read(session: &mut solidcraft_engine::Session) -> Vec<u64> {
     links["links"].as_array().into_iter().flatten().filter(|l| l["changed"].as_bool() == Some(true)).filter_map(|l| l["component"].as_u64()).collect()
 }
 
+/// The shown design's linked components with the files they read, as the engine resolves them
+/// (`component.links` `file`).
+fn read_files(session: &mut solidcraft_engine::Session) -> Vec<(u64, PathBuf)> {
+    let Ok(links) = session.execute("component.links", &json!({})) else { return Vec::new() };
+    links["links"].as_array().into_iter().flatten().filter_map(|l| Some((l["component"].as_u64()?, PathBuf::from(l["file"].as_str()?)))).collect()
+}
+
 /// The links of the shown design it holds no record of yet (it was just opened, a link was just
 /// made) are taken as their files are now, except a file that changed since the design last read
 /// it (#9739): that one counts as not read yet, so [`update_changed`] reads it.
@@ -199,31 +207,72 @@ pub(crate) fn update_changed(app: &mut SolveApp) {
     // Links met here for the first time: those whose files changed since the design last read
     // them (#9739) are read again too.
     let first: Vec<u64> = now.iter().map(|(c, _)| *c).filter(|c| !app.docs.link_stamps.iter().any(|(k, _)| k == c)).collect();
-    let mut stale = if first.is_empty() { Vec::new() } else { changed_since_read(&mut app.session) };
-    // Only links inside the design's own folder are read unasked when it is met: a design received
-    // from someone else names what it likes as "changed since last read", and one reaching out of
-    // its folder would copy another design of the user's into it. Those stay marked out of date
-    // until the user runs Update Links.
+    let stale = if first.is_empty() { Vec::new() } else { changed_since_read(&mut app.session) };
+    // Only links inside the design's own folder, or in a folder the user allowed linked files from
+    // (`linked_file_folders`), are read unasked when it is met: a design received from someone else
+    // names what it likes as "changed since last read", and one reaching out of its folder would
+    // copy another design of the user's into it. The others stay marked out of date: the user is
+    // asked once whether to load them (`link_folders_prompt`), and Update Links reads them anyway.
     let design = app.session.path.clone();
-    stale.retain(|c| app.session.doc.links.get(c).is_some_and(|l| inside_design_folder(design.as_deref(), &l.path)));
+    let (mut stale, outside): (Vec<u64>, Vec<u64>) =
+        stale.into_iter().partition(|c| app.session.doc.links.get(c).is_some_and(|l| inside_design_folder(design.as_deref(), &l.path)));
+    let files = if outside.is_empty() { Vec::new() } else { read_files(&mut app.session) };
+    let mut ask: Vec<(u64, String)> = Vec::new();
+    for c in outside {
+        // The folder of the file the engine reads for the link, as it resolves it.
+        let Some(folder) = files.iter().find(|(k, _)| *k == c).and_then(|(_, f)| lexical(f).parent().map(Path::to_path_buf)) else { continue };
+        if app.preferences.linked_file_folders.iter().any(|f| folder_within(&folder, Path::new(f))) {
+            stale.push(c);
+        } else {
+            ask.push((c, folder.to_string_lossy().into_owned()));
+        }
+    }
     let changed: Vec<u64> = now
         .iter()
         .filter(|(c, s)| s.is_some() && (app.docs.link_stamps.iter().any(|(k, was)| k == c && was != s) || (first.contains(c) && stale.contains(c))))
         .map(|(c, _)| *c)
         .collect();
+    // Only a file that is there to read is asked about (a missing one, or one on a server not
+    // allowed, has no stamp).
+    ask.retain(|(c, _)| now.iter().any(|(k, s)| k == c && s.is_some()));
     for (c, s) in now {
         if !app.docs.link_stamps.iter().any(|(k, _)| *k == c) {
             app.docs.link_stamps.push((c, s));
         }
     }
+    // A design opened through the control channel or by the assistant never asks.
+    if !app.docs.quiet_open {
+        crate::link_folders_prompt::ask(app, ask);
+    }
     // No room to wait: they are still changed when the tab next comes back.
     if changed.is_empty() || app.file_load.room() == 0 {
         return;
     }
+    read(app, changed);
+}
+
+/// Read `components`, links of the shown design, again off the window thread (Update Links for
+/// those alone).
+pub(crate) fn read(app: &mut SolveApp, components: Vec<u64>) {
     let mut request = crate::file_load::Request::new("", crate::file_load::Kind::UpdateLinks);
-    request.options.insert("components".into(), json!(changed));
+    request.options.insert("components".into(), json!(components));
     request.design.clone_from(&app.session.path);
     let _ = crate::file_load::begin_request(app, request);
+}
+
+/// `p` with `.` and `..` taken out, judged from the text alone.
+fn lexical(p: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for c in p.components() {
+        match c {
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::CurDir => {}
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// Whether `link`, as the design saved at `design` keeps it, names a file in the design's own
@@ -252,6 +301,25 @@ fn inside_design_folder(design: Option<&str>, link: &str) -> bool {
     let dir = lexical(&dir);
     let target = lexical(&dir.join(link));
     target.starts_with(&dir) || std::fs::canonicalize(&dir).is_ok_and(|real| target.starts_with(real))
+}
+
+/// Whether `folder` is `allowed` or below it. Windows paths compare without case, as Windows does.
+fn folder_within(folder: &Path, allowed: &Path) -> bool {
+    let allowed = lexical(allowed);
+    if allowed.as_os_str().is_empty() || !allowed.is_absolute() {
+        return false;
+    }
+    if cfg!(windows) {
+        let (mut f, mut a) = (folder.components(), allowed.components());
+        loop {
+            match (f.next(), a.next()) {
+                (_, None) => return true,
+                (Some(x), Some(y)) if x.as_os_str().eq_ignore_ascii_case(y.as_os_str()) => {}
+                _ => return false,
+            }
+        }
+    }
+    folder.starts_with(&allowed)
 }
 
 /// Update Links (`options` as it was asked) read the shown design's links again: those it read
@@ -854,6 +922,141 @@ mod tests {
         let design = through.to_string_lossy().into_owned();
         assert!(app.session.doc.links.values().all(|l| !inside_design_folder(Some(&design), &l.path)), "{:?}", app.session.doc.links);
         let _ = std::fs::remove_dir_all(top);
+    }
+
+    /// A received design in `<root>/received` linking `<root>/parts/housing.solidcraft`, whose file
+    /// changed after the design last read it (6000 mm³ when read, 6250 now).
+    fn outside_link(name: &str) -> (std::path::PathBuf, std::path::PathBuf, String) {
+        let root = std::env::temp_dir().join(format!("solidcraft-link-folders-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("received")).unwrap();
+        std::fs::create_dir_all(root.join("parts")).unwrap();
+        let housing = root.join("parts").join("housing.solidcraft");
+        save_part(&housing, [10.0, 20.0, 30.0], false);
+        let case = root.join("received").join("case.solidcraft");
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        app.run("component.insert_design", json!({"path": housing})).unwrap();
+        app.run("file.save", json!({"path": case})).unwrap();
+        drop(app);
+        save_part(&housing, [10.0, 20.0, 30.0], true);
+        // The folder as the engine reads it, symlinks in it resolved.
+        let folder = root.join("parts").canonicalize().unwrap().to_string_lossy().into_owned();
+        (root, case, folder)
+    }
+
+    /// Open `case` as File › Open does, or (`program`) as a control-channel caller does.
+    fn open(app: &mut SolveApp, case: &std::path::Path, program: bool) {
+        let mut request = crate::file_load::Request::new(&case.to_string_lossy(), crate::file_load::Kind::Open);
+        if program {
+            request.reply = Some(std::sync::mpsc::channel().0);
+        }
+        crate::file_load::begin_request(app, request).unwrap();
+        settle(app);
+    }
+
+    fn out_of_date(app: &mut SolveApp) -> bool {
+        app.session.execute("component.links", &json!({})).unwrap()["links"][0]["changed"] == true
+    }
+
+    /// Opening a design whose changed link is in another folder asks once, naming the folder, and
+    /// reads nothing meanwhile; Load reads it and remembers the folder in the user's preferences.
+    #[test]
+    fn a_link_in_another_folder_asks_once_and_load_reads_it_and_remembers_the_folder() {
+        let (root, case, folder) = outside_link("load");
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        open(&mut app, &case, false);
+        let prompt = app.link_folders_prompt.clone().expect("asked");
+        assert_eq!(prompt.folders, std::slice::from_ref(&folder));
+        assert_eq!(prompt.session, app.session.uid);
+        assert!((volume(&app) - 6000.0).abs() < 1e-6, "nothing is read before the answer: {}", volume(&app));
+        assert!(out_of_date(&mut app));
+        // Coming back to the tab doesn't ask again.
+        app.link_folders_prompt = None;
+        update_changed(&mut app);
+        assert!(app.link_folders_prompt.is_none(), "asked once");
+        app.link_folders_prompt = Some(prompt);
+        crate::link_folders_prompt::answer(&mut app, crate::link_folders_prompt::Answer::Load);
+        settle(&mut app);
+        assert!(app.link_folders_prompt.is_none());
+        assert!((volume(&app) - 6250.0).abs() < 1e-6, "Load reads the link: {}", volume(&app));
+        assert!(!out_of_date(&mut app));
+        assert_eq!(app.preferences.linked_file_folders, [folder]);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Not now leaves the link out of date and remembers nothing; Update Links still reads it.
+    #[test]
+    fn not_now_keeps_a_link_in_another_folder_out_of_date_until_update_links() {
+        let (root, case, _) = outside_link("not-now");
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        open(&mut app, &case, false);
+        assert!(app.link_folders_prompt.is_some());
+        crate::link_folders_prompt::answer(&mut app, crate::link_folders_prompt::Answer::NotNow);
+        settle(&mut app);
+        assert!(app.link_folders_prompt.is_none() && app.file_load.idle());
+        assert!((volume(&app) - 6000.0).abs() < 1e-6, "{}", volume(&app));
+        assert!(out_of_date(&mut app));
+        assert!(app.preferences.linked_file_folders.is_empty());
+        let mut request = crate::file_load::Request::new("", crate::file_load::Kind::UpdateLinks);
+        request.design.clone_from(&app.session.path);
+        crate::file_load::begin_request(&mut app, request).unwrap();
+        settle(&mut app);
+        assert!((volume(&app) - 6250.0).abs() < 1e-6, "Update Links reads it: {}", volume(&app));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A folder the user allowed (or one below it) loads as it opens, with no question.
+    #[test]
+    fn a_link_in_an_allowed_folder_loads_without_asking() {
+        let (root, case, folder) = outside_link("allowed");
+        for allowed in [folder.clone(), root.canonicalize().unwrap().to_string_lossy().into_owned()] {
+            let mut app = SolveApp::new(Session::default(), Default::default());
+            app.preferences.linked_file_folders = vec![allowed];
+            open(&mut app, &case, false);
+            assert!(app.link_folders_prompt.is_none(), "no question for an allowed folder");
+            assert!((volume(&app) - 6250.0).abs() < 1e-6, "{}", volume(&app));
+        }
+        // A sibling folder that only starts with the same letters is not inside it.
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        app.preferences.linked_file_folders = vec![format!("{folder}-old"), "parts".into()];
+        open(&mut app, &case, false);
+        assert!(app.link_folders_prompt.is_some(), "a relative or neighbouring folder allows nothing");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// What a design holds never allows a folder: a design naming the folder list, or saved with
+    /// keys of the preferences, still asks, and opening it changes no preference.
+    #[test]
+    fn a_design_cannot_allow_a_folder_itself() {
+        let (root, case, folder) = outside_link("design");
+        // The same design as plain JSON beside it, with the folder named in it.
+        let mut read = Session::default();
+        read.execute("doc.open", &json!({"path": case})).unwrap();
+        let mut text = serde_json::to_value(&*read.doc).unwrap();
+        text["linked_file_folders"] = json!([folder]);
+        text["preferences"] = json!({"linked_file_folders": [folder]});
+        let case = case.with_extension("json");
+        std::fs::write(&case, serde_json::to_string(&text).unwrap()).unwrap();
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        let before = serde_json::to_value(&app.preferences).unwrap();
+        open(&mut app, &case, false);
+        assert!(app.link_folders_prompt.is_some(), "still asks");
+        assert_eq!(serde_json::to_value(&app.preferences).unwrap(), before, "the design changed no preference");
+        assert!(out_of_date(&mut app));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A design opened through the control channel never asks; its link stays out of date.
+    #[test]
+    fn a_design_opened_by_a_program_never_asks() {
+        let (root, case, _) = outside_link("program");
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        open(&mut app, &case, true);
+        assert!(app.link_folders_prompt.is_none() && app.file_load.idle());
+        assert!(!app.docs.quiet_open, "only that open is quiet");
+        assert!((volume(&app) - 6000.0).abs() < 1e-6, "{}", volume(&app));
+        assert!(out_of_date(&mut app));
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

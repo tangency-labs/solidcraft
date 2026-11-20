@@ -252,6 +252,9 @@ pub struct Documents {
     /// the link (opened, adopted in place, the link just made).
     /// Coming back to its tab reads again those that differ (`linked_source::update_changed`).
     pub(crate) link_stamps: Vec<(u64, crate::linked_source::Stamp)>,
+    /// The design being shown was opened through the control channel or by the assistant: it
+    /// never asks whether to load linked files from other folders (`link_folders_prompt`).
+    pub(crate) quiet_open: bool,
     /// The shown tab's number ([`DocSlot::tab`]); 0 until it is first asked for ([`active_tab`]).
     active_tab: u64,
     /// The shown design's views ([`DocSlot::views`] for the others); see [`apply_view`].
