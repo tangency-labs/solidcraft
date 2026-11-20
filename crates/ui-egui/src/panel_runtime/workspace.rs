@@ -275,6 +275,8 @@ pub struct WorkspacePanelHost {
     observed_focus: Option<InstanceId>,
     focus_request: Option<InstanceId>,
     egui_context: Option<egui::Context>,
+    /// The renderer's captured surface style, cached with `geometry.surfaces` (its readability).
+    surface_style: Option<HostSurfaceStyle>,
     owned_focus: Option<egui::Id>,
     content_focus: Option<ContentFocus>,
     content_bookmarks: BTreeMap<ControllerKey, ContentFocus>,
@@ -318,6 +320,7 @@ impl WorkspacePanelHost {
             self.invalidate_geometry();
             self.options.geometry.requested_opacity = opacity;
             self.options.geometry.surfaces = None;
+            self.surface_style = None;
             self.options.geometry.surface_alpha = None;
         }
         Ok(())
@@ -401,6 +404,7 @@ impl WorkspacePanelHost {
             observed_focus: None,
             focus_request: None,
             egui_context: None,
+            surface_style: None,
             owned_focus: None,
             content_focus: None,
             content_bookmarks: BTreeMap::new(),
@@ -737,14 +741,15 @@ impl WorkspacePanelHost {
 
     pub(crate) fn note_egui_context(&mut self, ctx: &egui::Context, force_opaque: bool) {
         self.egui_context = Some(ctx.clone());
-        let surfaces = HostSurfaceStyle::capture(ctx, force_opaque, self.options.geometry.requested_opacity, self.options.geometry.surfaces.as_ref());
+        let surfaces = HostSurfaceStyle::capture(ctx, force_opaque, self.options.geometry.requested_opacity, self.surface_style.as_ref());
         let surface_alpha = Some(HostSurfaceAlpha {
             docked: surfaces.appearance(PanelSurface::FollowZone, false).fill.a(),
             floating: surfaces.appearance(PanelSurface::FollowZone, true).fill.a(),
         });
-        if self.options.geometry.surfaces.as_ref() != Some(&surfaces) || self.options.geometry.surface_alpha != surface_alpha {
+        if self.surface_style.as_ref() != Some(&surfaces) || self.options.geometry.surface_alpha != surface_alpha {
             self.invalidate_geometry();
-            self.options.geometry.surfaces = Some(surfaces);
+            self.options.geometry.surfaces = Some(surfaces.readabilities());
+            self.surface_style = Some(surfaces);
             self.options.geometry.surface_alpha = surface_alpha;
         }
     }
@@ -1045,6 +1050,7 @@ impl WorkspacePanelHost {
             open_menu: self.menu.as_ref(),
             controls: &mut frame.controls,
             metadata: &metadata,
+            surface_style: self.surface_style.as_ref(),
             header_icons: &header_icons,
             scope: &scope,
             window: &window,
@@ -2378,6 +2384,7 @@ struct WorkspaceContentHost<'a> {
     open_menu: Option<&'a HostMenu>,
     controls: &'a mut Vec<HostFrameControl>,
     metadata: &'a BTreeMap<InstanceId, PanelPresentation>,
+    surface_style: Option<&'a HostSurfaceStyle>,
     header_icons: &'a BTreeMap<(InstanceId, ControlId), String>,
     scope: &'a LocalScope,
     window: &'a HostId,
@@ -2423,7 +2430,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
             .get(&ControllerKey { instance: context.instance.clone(), owner: context.owner.clone() })
             .map(|bookmark| bookmark.id);
         let fallback;
-        let style = if let Some(style) = self.layout.geometry_policy.surfaces.as_ref() {
+        let style = if let Some(style) = self.surface_style {
             style
         } else {
             fallback = HostSurfaceStyle::capture(self.ui.ctx(), false, self.layout.geometry_policy.requested_opacity, None);

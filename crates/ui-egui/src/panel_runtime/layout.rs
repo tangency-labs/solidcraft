@@ -5,7 +5,6 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use solidcraft_engine::panels::*;
 
-use super::HostSurfaceStyle;
 use super::interaction::{HostPointerTarget, HostProposalSnapshot, HostResizeEdge};
 
 /// Compatibility constant only; the host never allocates rails.
@@ -566,11 +565,39 @@ pub struct HostSurfaceAlpha {
     pub floating: u8,
 }
 
+/// Paint readability of one surface kind as the host captured it: the fill's alpha and the
+/// contrast outcome. Plain data, so the geometry never reads the renderer's colours.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HostSurfaceReadability {
+    pub alpha: u8,
+    pub contrast: Option<ContrastOutcome>,
+}
+
+/// The surface kinds a section can paint with. A host that forces opaque surfaces passes the
+/// opaque readability for all three.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HostSurfaceReadabilities {
+    pub opaque: HostSurfaceReadability,
+    pub docked: HostSurfaceReadability,
+    pub floating: HostSurfaceReadability,
+}
+impl HostSurfaceReadabilities {
+    pub fn appearance(&self, surface: PanelSurface, floating: bool) -> &HostSurfaceReadability {
+        if surface == PanelSurface::Opaque {
+            &self.opaque
+        } else if floating {
+            &self.floating
+        } else {
+            &self.docked
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct HostGeometryPolicy {
     pub surface_alpha: Option<HostSurfaceAlpha>,
     /// Captured renderer state; never written into a layout envelope.
-    pub surfaces: Option<HostSurfaceStyle>,
+    pub surfaces: Option<HostSurfaceReadabilities>,
     /// Runtime normalized opacity override; None retains authored theme opacity.
     pub requested_opacity: Option<f32>,
     pub default_opaque: bool,
@@ -1513,9 +1540,9 @@ fn append_section(
         );
     }
     let floating = section.location.zone() == Zone::Floating;
-    let appearance = policy.surfaces.as_ref().map(|style| style.appearance(surface, floating));
+    let appearance = policy.surfaces.as_ref().map(|readabilities| readabilities.appearance(surface, floating));
     let paint_alpha = appearance
-        .map(|appearance| appearance.fill.a())
+        .map(|appearance| appearance.alpha)
         .or_else(|| policy.surface_alpha.map(|alpha| if floating { alpha.floating } else { alpha.docked }));
     let contrast = appearance.and_then(|appearance| appearance.contrast.clone());
     out.sections.push(HostSection {

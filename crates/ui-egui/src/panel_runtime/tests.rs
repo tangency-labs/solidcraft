@@ -12760,13 +12760,13 @@ fn captured_renderer_alpha_reaches_new_sections_and_alpha_only_drift_invalidates
         let painted = h.app.universal_panel_frame().unwrap().layout.clone();
         let captured_style = painted.geometry_policy.surfaces.as_ref().unwrap();
         let alpha = HostSurfaceAlpha {
-            docked: captured_style.appearance(PanelSurface::FollowZone, false).fill.a(),
-            floating: captured_style.appearance(PanelSurface::FollowZone, true).fill.a(),
+            docked: captured_style.appearance(PanelSurface::FollowZone, false).alpha,
+            floating: captured_style.appearance(PanelSurface::FollowZone, true).alpha,
         };
         assert_eq!(painted.geometry_policy.surface_alpha, Some(alpha), "the actual app captures the shared renderer policy before allocation");
         for card in &painted.sections {
             let appearance = captured_style.appearance(card.surface, card.peek || card.zone == Zone::Floating);
-            assert_eq!(card.paint_alpha, Some(appearance.fill.a()));
+            assert_eq!(card.paint_alpha, Some(appearance.alpha));
             assert_eq!(card.contrast, appearance.contrast);
             assert_eq!(card.paint_alpha, Some(255), "Classic's default opaque policy is preserved");
         }
@@ -12814,11 +12814,11 @@ fn captured_renderer_alpha_reaches_new_sections_and_alpha_only_drift_invalidates
         let reference = resolve(&policy);
         let mut styled_policy = policy.clone();
         styled_policy.default_opaque = false;
-        styled_policy.surfaces = Some(HostSurfaceStyle::capture(&h.ctx, false, Some(0.5), None));
+        styled_policy.surfaces = Some(HostSurfaceStyle::capture(&h.ctx, false, Some(0.5), None).readabilities());
         let styled = resolve(&styled_policy);
         for card in &styled.sections {
             let appearance = styled_policy.surfaces.as_ref().unwrap().appearance(card.surface, card.peek || card.zone == Zone::Floating);
-            assert_eq!(card.paint_alpha, Some(appearance.fill.a()));
+            assert_eq!(card.paint_alpha, Some(appearance.alpha));
             assert_eq!(card.contrast, appearance.contrast);
         }
         assert_eq!(styled.render_domain, reference.render_domain);
