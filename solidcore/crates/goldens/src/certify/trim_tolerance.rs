@@ -81,13 +81,19 @@ const ROWS: &str = include_str!("trim_tolerance_rows.jsonl");
 /// - `invalid-input`: a vertex of `gen0195`, whose input holds a non-finite coordinate
 ///   (`y = -inf`), so no tolerance covers its edge ends with their error bounds;
 /// - `no-estimate`: the trim's image could not be sampled;
-/// - `line-trim`: an edge with a UV trim that is a line on a B-spline surface, which is not
-///   enclosed (the line's own rounding moves its parameter, and only a plane carries that
-///   to the surface: [`plane_uv_lipschitz`]), its other trims enclosed within the new
-///   tolerance; the one class a raise may be open in (`topology.brep_local_operation`'s
-///   `fc0000`, `fc0006`, `fc0008` and `fc0025`: edge 89, lowered to 1e-5, its other trim's
-///   `B` 4.1e-8; edge 93, raised to 1.7e-3 by the bound of a trim as it stood before a later
-///   refit, its trim on face 39 now at `B` 1.7e-6);
+/// - `line-trim`: a lowered edge with a UV trim that is a line on a B-spline surface, which
+///   is not enclosed (the line's own rounding moves its parameter, and only a plane carries
+///   that to the surface: [`plane_uv_lipschitz`]), its other trims enclosed within the new
+///   tolerance (`topology.brep_local_operation`'s `fc0000`, `fc0006`, `fc0008` and `fc0025`:
+///   edge 89, lowered to 1e-5, its other trim's `B` 4.1e-8);
+/// - `loose-raise`: the one class a raise may be open in: an edge raised to the kernel's
+///   bound of a trim at the raise, where that bound is loose (its reparametrisation off the
+///   correspondence over a short stretch, #19784's trim 3), so this test's enclosure of the
+///   trims as kept shows none past the old tolerance; every enclosed trim is within the new
+///   one, and a line trim on a B-spline surface stays open as in `line-trim` (the same edge
+///   of `Solids/nurb_fillet.smb`, raised to 1.7e-3: `topology.brep_local_operation`'s four
+///   `fc` cases, edge 93, its trim on face 39 enclosed at 1.7e-6; `topology.brep_mirror`'s
+///   `mat0019`, `mat0049` and `mat0094`, edge 46);
 /// - `face-bound-loose`: an edge whose B-rep keeps no UV trim, whose face-gap enclosure
 ///   exceeds the new tolerance.
 /// - `blend-surface`: an edge with a trim on a procedural blend surface, which has no exact
@@ -974,13 +980,12 @@ fn certify(unit: &str) -> Tally {
                 let key = (row.case.clone(), body, index.to_string());
                 if raised {
                     // a raise: the new tolerance covers every trim, and one trim's bound is
-                    // above the old tolerance (in OPEN only as a `line-trim`, its every
+                    // above the old tolerance (in OPEN only as a `loose-raise`, its every
                     // enclosed trim within the new tolerance: counted open, never proved)
                     let past = bounds.iter().flatten().any(|x| *x > old);
                     if bad.is_empty() && past {
                         tally.raised += 1;
-                    } else if open.get(&key).is_some_and(|c| c == "line-trim")
-                        && bounds.iter().any(Option::is_none)
+                    } else if open.get(&key).is_some_and(|c| c == "loose-raise")
                         && bounds.iter().flatten().all(|x| *x <= new)
                     {
                         open_seen.insert(key);
