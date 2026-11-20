@@ -1393,7 +1393,7 @@ pub(super) fn sheet_eval(
             let before = sk.clone();
             let mut found = Vec::with_capacity(edges.len());
             for (k, p) in edges.iter().enumerate() {
-                found.push(surface_edge_pick(st, &before, f.edge_names.get(k), p.0)?);
+                found.push(before.edge_left_by_cuts(surface_edge_pick(st, &before, f.edge_names.get(k), p.0)?, p.0)?);
             }
             let n0 = sk.sheet.panels.len();
             for edge in found {
