@@ -2086,10 +2086,14 @@ mod tests {
         // (with topology.brep_p3 ported, this is a null pointer, not a deferral)
         // a stage failure (#15034) that keeps the bare `Upstream`'s status (#13790)
         assert_eq!(
-            (e.operation(), e.blend_failure(), code(&e)),
+            (
+                e.operation(),
+                e.kind() == crate::error::ErrorKind::StageFailed && e.is_defect(),
+                code(&e)
+            ),
             (
                 "blend::fillet_geom::p5::FilletBrep::make_rail_edgeuse",
-                Some(&BlendFailure::StageFailed),
+                true,
                 Some(SM_ERR_NULL_POINTER)
             ),
             "{e:?}"
