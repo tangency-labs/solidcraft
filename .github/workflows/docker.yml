@@ -9,6 +9,9 @@
 # passed to the Dockerfile as its `site` stage. Pull requests that touch the image build and
 # smoke-test it without publishing. Releases published by an agent or maintainer trigger this;
 # the nightly pre-releases (made with GITHUB_TOKEN) do not.
+# A release whose image is missing can be published again from Actions › Docker › Run workflow, with
+# `tag` set to its tag (and `latest` ticked for the newest release only); the run builds that tag with this
+# workflow and checks that its version reached the registry.
 name: Docker
 
 on:
@@ -24,14 +27,24 @@ on:
   pull_request:
     paths: ["packaging/docker/**", ".github/workflows/docker.yml"]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "A release tag to build and publish with this workflow (for example v0.45.0); empty builds the chosen branch"
+        required: false
+        default: ""
+      latest:
+        description: "Also move :latest to this tag (only for the newest release)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
   # A re-run (attempt 2 or later, often of an older commit) gets a group of its own, so it never cancels the live run for the PR's current head.
-  group: docker-${{ github.ref }}${{ github.run_attempt > 1 && format('-rerun-{0}', github.run_id) || '' }}
-  cancel-in-progress: true
+  # A release, or a tag published by hand, is never cancelled: a newer push to main must not stop it.
+  group: docker-${{ inputs.tag || github.ref }}${{ github.run_attempt > 1 && format('-rerun-{0}', github.run_id) || '' }}
+  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -40,13 +53,22 @@ env:
 jobs:
   image:
     if: ${{ !github.event.repository.private }}
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 60
+    # The web app's release build takes about 55 minutes from cold on 2 vCPUs, past a 60-minute limit:
+    # build it on the runner and with the time the Pages build has.
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 120
     permissions:
       contents: read
       packages: write
     steps:
+      - name: Refuse latest without a release tag
+        if: github.event_name == 'workflow_dispatch' && inputs.latest && inputs.tag == ''
+        run: |
+          echo "::error::latest moves only to a release: set tag (for example v0.45.0), or untick latest"
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - uses: dtolnay/rust-toolchain@1.99.1
         with:
           targets: wasm32-unknown-unknown
@@ -70,10 +92,15 @@ jobs:
         id: meta
         with:
           images: ${{ steps.image.outputs.name }}
+          flavor: |
+            latest=${{ github.event_name == 'workflow_dispatch' && (inputs.latest && inputs.tag != '' && 'true' || 'false') || 'auto' }}
+          # With a hand-given tag, that tag is the only version source, whichever ref the run started from.
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=edge,branch=main
+            type=semver,pattern={{version}},enable=${{ inputs.tag == '' }}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ inputs.tag == '' }}
+            type=semver,pattern={{version}},value=${{ inputs.tag }},enable=${{ inputs.tag != '' }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.tag }},enable=${{ inputs.tag != '' }}
+            type=edge,branch=main,enable=${{ inputs.tag == '' }}
             type=ref,event=pr
           labels: |
             org.opencontainers.image.title=SolidCraft (web)
@@ -109,3 +136,12 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
+      - name: Check the release's version is in the registry
+        if: github.event_name == 'release' || inputs.tag != ''
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          if [ -z "$VERSION" ]; then echo "::error::no version tag was computed for this release"; exit 1; fi
+          docker buildx imagetools inspect "$IMAGE:$VERSION" > /dev/null || { echo "::error::$IMAGE:$VERSION is not in the registry after publishing"; exit 1; }
+          echo "$IMAGE:$VERSION is published"

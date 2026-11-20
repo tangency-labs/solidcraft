@@ -24,6 +24,9 @@
 //! | [`FilletLaw::bspline`] | `SmBSplineFilletLaw::SmBSplineFilletLaw(SmBSplineCurve*, const SmExtent1d&)` |
 //!
 //! Deviations:
+//! - **Split rails** (WR-19502, not upstream). Before `SetFilletBrepEdgeMap` maps a
+//!   geometry's rails, [`EdgeMapAccess::mapping_split_rail`] splits any rail that the
+//!   stitched fillet B-rep splits and no one edge matches. The pieces join its other rails.
 //! - **Solver approximation tolerance.** `SetFilletParameters` takes `TOL_FACTOR` times
 //!   the edge's fit tolerance (`topology::edgeuse::p3::fit_tolerance`), not times an edge
 //!   tolerance the healer raised only to cover the edge's edge/face gap; elsewhere the
@@ -145,6 +148,18 @@ pub trait EdgeMapAccess<O: ClassObject + SolutionObject + Ord> {
         candidates: &[O],
         multiple: bool,
     ) -> Result<()>;
+    /// (Not upstream; #19502) Split rail `rail` of geometry `geom` where the candidate
+    /// edges split it end to end and none matches it whole, the pieces after the first
+    /// joining the geometry's other rails on that side; nothing otherwise.
+    /// # Errors
+    /// Invalid or missing object; those of the lookup and the split.
+    fn mapping_split_rail(
+        &mut self,
+        k: &mut Kernel,
+        geom: O,
+        rail: O,
+        candidates: &[O],
+    ) -> Result<()>;
 }
 impl<O, A> EdgeMapAccess<O> for A
 where
@@ -189,6 +204,11 @@ where
         multiple: bool,
     ) -> Result<()> {
         ExecutiveAccess::find_fillet_brep_edge(self, k, edge, candidates, multiple)
+    }
+    /// The executive's access has no pseudo B-rep of its own to split: its rails map as
+    /// upstream's do.
+    fn mapping_split_rail(&mut self, _: &mut Kernel, _: O, _: O, _: &[O]) -> Result<()> {
+        Ok(())
     }
 }
 
@@ -458,6 +478,12 @@ pub trait FilletParametersAccess<O: ClassObject + SolutionObject + Ord>:
     /// # Errors
     /// Object resolution, tolerance query or edge/face gap failures.
     fn parameters_edge_tolerance(&mut self, k: &Kernel, edge: O) -> Result<f64>;
+    /// How far the edge lies from its faces: its largest measured edge/face gap. The stored
+    /// tolerance (an upper bound on that gap) where nothing can be measured.
+    ///
+    /// # Errors
+    /// Object resolution or gap query failures.
+    fn parameters_edge_gap(&mut self, k: &Kernel, edge: O) -> Result<f64>;
     /// Construct and retain the concrete solver selected by its native spec.
     ///
     /// # Errors
@@ -546,6 +572,10 @@ where
         // (an adapter's edge has no edge/face gaps to tell apart: its tolerance)
         ExecutiveAccess::edge_tolerance(self, edge)
     }
+    /// An executive adapter measures no gaps: its edge's tolerance, which bounds the gap.
+    fn parameters_edge_gap(&mut self, _k: &Kernel, edge: O) -> Result<f64> {
+        ExecutiveAccess::edge_tolerance(self, edge)
+    }
     fn parameters_new_solver(&mut self, k: &mut Kernel, spec: &SolverSpec<'_, O>) -> Result<O> {
         ExecutiveAccess::new_fillet_solver(self, k, spec)
     }
@@ -593,7 +623,7 @@ pub struct FilletParameters<'a, O> {
     pub second_radii: Option<&'a [f64]>,
 }
 
-/// `SetFilletParameters`' factor from an edge's tolerance to its solver's
+/// `SetFilletParameters`' factor from how accurately an edge is known to its solver's
 /// approximation tolerance (`TOL_FACTOR`, "works well in practice").
 const TOL_FACTOR: f64 = 4.0;
 
@@ -856,10 +886,30 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     .ok_or_else(|| first("radius list too short"))?;
             }
 
-            // Note, this works well in practice.  [B332]
-            // (not upstream: of the edge's fit tolerance, not of a tolerance raised to cover
-            // its edge/face gap)
-            let approx_tol = TOL_FACTOR * access.parameters_edge_tolerance(k, edge)?;
+            // The round is approximated TOL_FACTOR times as finely as its edge is known [B332]:
+            // how far the edge actually lies from its faces, at least the B-rep's tolerance, and
+            // never more than the edge's stored tolerance (so no tolerance is widened). Upstream
+            // took the stored tolerance, an upper bound that rounds compound: each made its new
+            // edges at 4 times its edge's, and a round of those took 4 times again. An exact edge
+            // carrying 2.6e-3 on a B-rep of 1e-5 gave the round's edges and vertices about 1e-2,
+            // past the B-rep's bound on them (1000 times its tolerance), and the full check
+            // refused the result.
+            // the tolerance geometry is fitted at along the edge (not one raised to cover its
+            // edge/face gap)
+            let stored = access.parameters_edge_tolerance(k, edge)?;
+            let brep_tol = access.parameters_tolerance(k, brep, false)?;
+            // An edge stored at the B-rep's tolerance or finer keeps it whatever its gap
+            // measures, so the gap (which evaluates the faces' surfaces, a reopened round's
+            // definition among them) is measured only where it can change the result.
+            let accuracy = if stored <= brep_tol {
+                stored
+            } else {
+                access
+                    .parameters_edge_gap(k, edge)?
+                    .max(brep_tol)
+                    .min(stored)
+            };
+            let approx_tol = TOL_FACTOR * accuracy;
 
             let spec = match radius_type {
                 FilletSolverType::ConstRadius => {
@@ -1178,6 +1228,18 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         while let Some(solver) = self.solvers.get(index).copied() {
             index += 1;
             for geom in access.mapping_solver_geoms(solver)? {
+                // (not upstream; #19502) a rail the stitch split, where another round's
+                // rail meets it along part of it, is split there too, each piece mapping
+                // to its own edge
+                for rail in access
+                    .mapping_geom_rails(geom)?
+                    .into_iter()
+                    .take(2)
+                    .flatten()
+                {
+                    access.mapping_split_rail(k, geom, rail, &edges)?;
+                }
+
                 // set every rail's fillet B-rep edge
                 for rail in access.mapping_geom_rails(geom)? {
                     let rail = rail.ok_or_else(|| null!("the rail"))?;

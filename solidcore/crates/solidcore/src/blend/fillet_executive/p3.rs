@@ -255,6 +255,13 @@ pub enum NoRoomReason {
     /// Named for the typed failure record ([`crate::error::ErrorKind::EndOverflowsSideEdge`]);
     /// its refusal notes it once it moves onto the record.
     EndOverflowsSideEdge,
+    /// An End on its end face whose rail passes over that face: the face falls away under
+    /// the round (a ridge between the round's other face and it), so the rail on a face of
+    /// the blended edge never reaches its surface and no section of it ends the round. Noted
+    /// only after the End's vertices or edges failed. The fit is the largest ball whose rail
+    /// still ends on the end face, less the fit margin, on the blended edge (not the fork's,
+    /// SolidCraft #19454).
+    EndPassesOverEndFace,
     /// An End's rail rolls over its face's tangent edge where the round ends at a smooth
     /// vertex. Named for the typed failure record
     /// ([`crate::error::ErrorKind::EndRollsIntoSmoothEnd`]); its refusal notes it once it moves
@@ -833,6 +840,12 @@ pub struct FilletExecutive<O> {
     /// smooth vertex that waited for the rails' rollover is built in. An End that would wait
     /// again then has no later pass to build its edges, so it fails instead.
     pub rollover_adjusting: bool,
+    /// Not upstream (#19242; `false` from the constructor, cleared before each rollover
+    /// decision): a round taken as apart rolled over a smooth edge onto a face another round
+    /// of the blend stands on. Only the bands' check compares that round's band with the
+    /// rolled rail, so [`Self::refuse_overlapping_bands`] runs it whatever
+    /// `fixes.fillet_refuse_overlapping_bands` says.
+    pub rolled_beside_band: bool,
 }
 
 /// What a refusal's fit sizes (the fork's `SM_FIT_RADIUS`, `SM_FIT_SCALE`, `SM_FIT_CHORD`).
@@ -3430,6 +3443,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     /// trims them (not upstream; opt-in `fixes.fillet_refuse_overlapping_bands`, WR-542:
     /// the fork's tangency-labs/smlib@c0d74ee, `SmFilletExecutive::BandsClearOtherRails`,
     /// called right after `FacesOutlastTheirBlends`). Fails with `FilletErrorType::NoRoom`.
+    /// Runs with the fix off too where [`Self::rolled_beside_band`] is set.
     ///
     /// # Errors
     /// The refusal as `SM_ERR`, noted in the error info; those of the check.
@@ -3438,7 +3452,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         k: &mut Kernel,
         access: &mut impl BrepCreationAccess<O>,
     ) -> Result<()> {
-        if k.fixes.fillet_refuse_overlapping_bands
+        if (k.fixes.fillet_refuse_overlapping_bands || self.rolled_beside_band)
             && !access.geometry_bands_clear_other_rails(k, &self.solvers)?
         {
             let solvers = self.solvers.clone();
@@ -3687,6 +3701,11 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 let edges = ignore(access.edges_calculate(k, corner, self));
                 self.rollover_adjusting = false;
                 if edges?.is_none() {
+                    // an End refused as passing over its end face keeps that reason and
+                    // its fit (noted by the corner's edges)
+                    if self.error.no_room_reason() == Some(NoRoomReason::EndPassesOverEndFace) {
+                        return Err(failure());
+                    }
                     self.corner_vertex_failure(
                         access,
                         corner,
@@ -3744,6 +3763,11 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             let mut geom_index = 0;
             while let Some(geom) = access.faces_solver_geom(solver, geom_index)? {
                 if ignore(access.faces_make_face(k, geom, fillet, self))?.is_none() {
+                    // an End refused as passing over its end face keeps that reason and
+                    // its fit (noted by the face's blend's corner)
+                    if self.error.no_room_reason() == Some(NoRoomReason::EndPassesOverEndFace) {
+                        return Err(failure());
+                    }
                     self.record_solver_failure(
                         access.geometry_edge(solver)?,
                         2,

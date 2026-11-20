@@ -93,7 +93,7 @@ pub(crate) fn finish(app: &mut SolveApp, ctx: &Context) {
 }
 
 pub(super) fn inspect(app: &SolveApp) -> Option<Receipt> {
-    if !super::active(app) || app.home.open || super::comparison_active(app) {
+    if (!super::active(app) && !super::tiled(app)) || app.home.open || app.render_workspace.view.compare.is_some() {
         return None;
     }
     let receipt = app.render_workspace.displayed.completed?;

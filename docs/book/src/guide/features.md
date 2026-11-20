@@ -164,11 +164,13 @@ To Object follows that same direction for each selected profile, including curve
 Pick a target away from the axis so its angular position is defined.
 
 For cylindrical **Emboss**, select a supported cylinder face (outside, or a bore) and a tangent sketch
-profile. **Deboss** cuts radially into the wall (outwards from a bore, which an Emboss raises towards the axis; a Deboss that would break through the outer wall is refused). Orthogonal line profiles, including holes and
-concave outlines, wrap with exact radial walls; the profile must stay clear of seams and ends.
+profile. **Deboss** cuts radially into the wall (outwards from a bore, which an Emboss raises towards the axis; a Deboss that would break through the outer wall is refused). Every profile wraps
+round the wall by arc length: straight edges along the axis and round the circumference keep exact
+radial walls, and curves, diagonals and text wrap too, their edges and walls fitted within the
+part's tolerance. Profiles may have holes and concave outlines, and must stay clear of seams and ends.
 Complete cylinders and coaxial sleeves are supported. Capture pending component positions
 before applying. The feature stores the selected target and author occurrence paths, so edits
-and reopening retain the chosen instances. Other curved surfaces and free-form profiles remain
+and reopening retain the chosen instances. Other curved surfaces remain
 unsupported. A new Emboss without an explicit face infers a unique eligible supported cylinder;
 select the face when the target is ambiguous. Older saved features without a face retain their
 planar placement.

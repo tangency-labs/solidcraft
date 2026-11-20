@@ -41,13 +41,11 @@ tangent, so that their contact lines cross before the corner (https://github.com
 /// The capi's statuses as SolidCraft errors: an operation's own result.
 type Out<T> = std::result::Result<T, Error>;
 
-/// `SM_ERR_INVALID_INPUT`.
-const INVALID_INPUT: i32 = 1007;
-
 /// An SMLib status as the capi passes it on (`status`, smlib_shim.h): solidcore's upstream
 /// status codes as they are; its refusals of code it has not ported as not supported; a refusal
 /// or a blend failure solidcore-ops types as that ([`Error::Refused`]: an offset refused with
-/// its reason, a blend failed with the kernel's statement of why); the rest as solidcore's text.
+/// its reason, a blend failed with the kernel's statement of why); a rejected input with solidcore's
+/// reason ([`Error::Rejected`]); the rest as solidcore's text.
 pub(super) fn status(e: SolidError) -> Error {
     if let Some(failed) = solidcore_ops::blend::failure(&e) {
         return Error::Refused(failed);
@@ -55,7 +53,7 @@ pub(super) fn status(e: SolidError) -> Error {
     match e {
         SolidError::Upstream { code, .. } => Error::Status(code),
         e if stands_for_status(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
-        SolidError::InvalidInput { .. } => Error::Status(INVALID_INPUT),
+        SolidError::InvalidInput { operation, reason } => Error::Rejected { operation, reason },
         SolidError::Unsupported { reason, .. } if reason == MIXED_CORNER_RAILS_CROSS => Error::Unported(MIXED_CORNER_UNSUPPORTED),
         e if is_boolean_failure(&e) => boolean_status(e),
         e if e.is_unported() => Error::Unsupported,
@@ -240,12 +238,12 @@ fn refused(call: &'static str, e: solidcore_ops::Error, detail: Option<String>) 
     use solidcore_ops::Error as Ops;
     match e {
         Ops::Status(code) => Error::Status(code),
-        // the kernel's refusal of its input (`SM_ERR_INVALID_INPUT`)
-        Ops::Refused { .. } => Error::Status(INVALID_INPUT),
+        // the kernel's refusal of its input (`SM_ERR_INVALID_INPUT`), with its reason
+        Ops::Refused { operation, reason } => Error::Rejected { operation, reason },
         Ops::NoRoom | Ops::SetbackTooLong { .. } => Error::NoRoom,
         Ops::TooLarge { size, kind, at, face, why } => Error::TooLarge { size, kind, at, face, why },
         Ops::SetbackTooShort { least, at, builds, .. } => Error::SetbackTooShort { least, at, builds },
-        Ops::CornerUnsupported => Error::CornerUnsupported,
+        Ops::CornerUnsupported { why, at } => Error::CornerUnsupported { why, at },
         Ops::CornerRefused { corner } => Error::CornerRefused { corner },
         Ops::TurnRefused { room, why, at } => Error::TurnRefused { room, why, at },
         Ops::NoEffect => Error::NoEffect,
@@ -761,6 +759,18 @@ mod tests {
         assert!(matches!(status(surface(SurfaceFailure::InvalidValue("the line direction is the zero vector"))), Error::Status(1007)));
         assert!(matches!(status(surface(SurfaceFailure::OutsideDomain("the point is outside the sweep"))), Error::Status(1020)));
         assert!(matches!(status(surface(SurfaceFailure::OffSurface("the point is off the surface"))), Error::Status(1021)));
+    }
+
+    /// SMLib's rejection of its input reaches SolidCraft with solidcore's reason, not as the bare
+    /// `SM_ERR_INVALID_INPUT` (#18570: an Offset Face that the enclosure check rejected; #18568: a
+    /// shell whose input had a loop gap), and so does solidcore-ops' typed refusal of its input.
+    #[test]
+    fn rejected_input_says_why() {
+        let e = status(SolidError::invalid_input("mass::enclosure", "a face whose sides are not one material region and one void"));
+        assert_eq!(e, Error::Rejected { operation: "mass::enclosure", reason: "a face whose sides are not one material region and one void" });
+        assert_eq!(e.to_string(), "SMLib rejected the input: a face whose sides are not one material region and one void (mass::enclosure)");
+        let ops = refused("shell", solidcore_ops::Error::Refused { operation: "topology::brep::p7", reason: "loop gap larger than tolerance" }, None);
+        assert_eq!(ops.to_string(), "SMLib rejected the input: loop gap larger than tolerance (topology::brep::p7)");
     }
 
     /// An offset routine's failure passes on as the status it replaced, as the `Upstream` it

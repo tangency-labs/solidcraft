@@ -12,7 +12,8 @@ impl Brep {
     /// `self` with faces `faces` (indices in SMLib's face order, distinct) cut where each of
     /// `tools` meets them, the tools in turn, each cutting the pieces the earlier ones left; and
     /// for each face how many faces it became besides itself (0: no tool split it). `None` when
-    /// no face is split. Tagged operands ([`Brep::tagged`]) give the pieces' history.
+    /// no face is split, and [`Error::ToolStopsShort`] when none is but a tool ran into a face and
+    /// ended inside it. Tagged operands ([`Brep::tagged`]) give the pieces' history.
     pub fn split_faces(&self, faces: &[usize], tools: &[&Surface]) -> Result<Option<(Brep, Vec<usize>)>> {
         if faces.is_empty() || faces.len() > core::split::MAX_FACES || tools.is_empty() || tools.len() > core::split::MAX_TOOLS {
             return Err(Error::Argument);
