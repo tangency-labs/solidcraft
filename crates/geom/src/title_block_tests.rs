@@ -48,7 +48,7 @@ fn inside(cell: &Cell, corner: Vec2) -> Aabb2 {
     let half = |outline: bool| if outline { 0.35 } else { 0.175 };
     Aabb2 {
         min: corner + Vec2::new(x0 + half(x0 == -180.0), y0 + half(y0 == 0.0)),
-        max: corner + Vec2::new(x1 - half(x1 == 0.0), y1 - half(y1 == 49.0)),
+        max: corner + Vec2::new(x1 - half(x1 == 0.0), y1 - half(y1 == 59.0)),
     }
 }
 
@@ -63,9 +63,9 @@ fn text_of(cell: &Cell) -> &TextCell {
 fn the_default_geometry_validates_and_its_cells_tile_the_block() {
     let block = default_block();
     block.validate().unwrap();
-    assert_eq!(block.cells.len(), 12);
+    assert_eq!(block.cells.len(), 18);
     let area: f64 = block.cells.iter().map(|c| c.rect(Vec2::ZERO).size()).map(|s| s.x * s.y).sum();
-    assert_eq!((area, 180.0 * 49.0), (8820.0, 8820.0));
+    assert_eq!((area, 180.0 * 59.0), (10620.0, 10620.0));
     // Each text cell's value box holds one line of its cap height, centred, its descenders above the
     // lines' inner edge.
     for cell in &block.cells {
@@ -77,14 +77,50 @@ fn the_default_geometry_validates_and_its_cells_tile_the_block() {
     }
 }
 
+/// ISO 7200's fields for a drawing sent to a shop (#20121): scale, document type, status, language,
+/// revision and department, in a row above the rest. The scale, the language and the revision are
+/// read, the other three are the shop's own text; each cell keeps its label's room, on A4 and A3.
+#[test]
+fn the_default_block_has_the_iso_7200_cells_above_the_rest() {
+    let block = default_block();
+    let content = |name: &str| text_of(block.cells.iter().find(|c| c.name == name).unwrap()).content.0.clone();
+    assert_eq!(content("scale"), [field(Source::Sheet, "scale")]);
+    assert_eq!(content("language"), [field(Source::Drawing, "language")]);
+    assert_eq!(content("revision"), [field(Source::Revision, "revision")]);
+    for typed in ["document_type", "document_status", "department"] {
+        assert!(content(typed).is_empty(), "{typed}");
+    }
+    let labels: Vec<_> = ["scale", "document_type", "document_status", "language", "revision", "department"]
+        .map(|name| block.cells.iter().find(|c| c.name == name).and_then(|c| c.label.as_ref()).map(|l| l.text.clone()))
+        .into_iter()
+        .collect();
+    let expected = ["Scale", "Document type", "Document status", "Language", "Revision", "Department"].map(|t| Some(t.to_string()));
+    assert_eq!(labels, expected);
+    // All six lie in the row from 49 to 59 mm, side by side across the block.
+    let mut row: Vec<[f64; 4]> = block.cells.iter().filter(|c| c.rect_mm[1] == 49.0).map(|c| c.rect_mm).collect();
+    row.sort_by(|a, b| a[0].total_cmp(&b[0]));
+    assert_eq!(row.len(), 6);
+    assert!(row.iter().all(|r| r[3] == 59.0));
+    assert_eq!((row[0][0], row[5][2]), (-180.0, 0.0));
+    assert!(row.windows(2).all(|w| w[0][2] == w[1][0]));
+    // Each lays out on A4 upright and A3 flat, with its label above a value box of its own.
+    for sheet in [iso(PaperSize::A4, Orientation::Portrait), iso(PaperSize::A3, Orientation::Landscape)] {
+        let layout = block.layout(&sheet).unwrap();
+        for name in ["scale", "document_type", "document_status", "language", "revision", "department"] {
+            let placed = cell_named(&block, &layout, name);
+            assert!(placed.label_at.is_some() && placed.value_box.size().x >= 8.0, "{name}: {placed:?}");
+        }
+    }
+}
+
 #[test]
 fn on_a3_landscape_the_block_sits_on_the_drawing_borders_lower_right_corner() {
     let (block, sheet) = (default_block(), iso(PaperSize::A3, Orientation::Landscape));
     let layout = block.layout(&sheet).unwrap();
-    assert_eq!(layout.outline, rect(230.0, 10.0, 410.0, 59.0));
+    assert_eq!(layout.outline, rect(230.0, 10.0, 410.0, 69.0));
     assert_eq!(layout.outline.size().x, 180.0);
     assert_eq!((layout.outline_line_mm, layout.cell_line_mm), (0.7, 0.35));
-    assert_eq!(layout.cells.len(), 12);
+    assert_eq!(layout.cells.len(), 18);
     // The title cell, on the outline at its left and bottom (0.35 mm in), a cell line at its right
     // and top (0.175 in): its label's baseline 1 + 2.5 mm below its top's inner edge, its value box
     // 1 mm in from the lines' inner edges and 1 mm under the label.
@@ -94,11 +130,11 @@ fn on_a3_landscape_the_block_sits_on_the_drawing_borders_lower_right_corner() {
     assert!(near(title.value_box, rect(231.35, 11.35, 340.825, 19.325)), "{:?}", title.value_box);
     let (at, warning) = place_lines(title.value_box, 1, 5.0, 8.0, HAlign::Left, false).unwrap();
     assert!(at.dist(Vec2::new(231.35, 12.8375)) < 1e-9 && warning.is_none(), "{at:?}");
-    // The projection cell, on the outline at its right and top.
+    // The projection cell, on the outline at its right, a cell line at its top.
     let projection = cell_named(&block, &layout, "projection");
     assert_eq!(projection.rect, rect(380.0, 44.0, 410.0, 59.0));
-    assert!(projection.label_at.is_some_and(|at| at.dist(Vec2::new(381.175, 55.15)) < 1e-9), "{:?}", projection.label_at);
-    assert!(near(projection.value_box, rect(381.175, 45.175, 408.65, 54.15)), "{:?}", projection.value_box);
+    assert!(projection.label_at.is_some_and(|at| at.dist(Vec2::new(381.175, 55.325)) < 1e-9), "{:?}", projection.label_at);
+    assert!(near(projection.value_box, rect(381.175, 45.175, 408.65, 54.325)), "{:?}", projection.value_box);
     // A cell without a label gives its value the whole cell inside its lines, padded.
     let mut bare = block.clone();
     bare.cells[0].label = None;
@@ -137,7 +173,7 @@ fn a_drawing_border_line_wider_than_the_outline_pads_the_right_and_bottom_cells(
     let [title, number, projection] = boxes(&block, 2.0);
     assert!(near(title, rect(231.35, 12.0, 340.825, 19.325)), "{title:?}");
     assert!(near(number, rect(343.175, 12.0, 408.0, 19.325)), "{number:?}");
-    assert!(near(projection, rect(381.175, 45.175, 408.0, 54.15)), "{projection:?}");
+    assert!(near(projection, rect(381.175, 45.175, 408.0, 54.325)), "{projection:?}");
     // A 5 mm line's inner edge is at y = 12.5 and x = 407.5: the title's 5 mm line no longer fits
     // above it, so the block that validates on its own is refused on this sheet. With 3.5 mm values,
     // the boxes keep 1 mm from it.
@@ -152,15 +188,15 @@ fn a_drawing_border_line_wider_than_the_outline_pads_the_right_and_bottom_cells(
     let [title, number, _] = boxes(&smaller, 5.0);
     assert!(near(title, rect(231.35, 13.5, 340.825, 19.325)) && near(number, rect(343.175, 13.5, 406.5, 19.325)), "{title:?} {number:?}");
     // A block that fills the drawing border has its left and top edges on the border's line too:
-    // on a 200 x 69 sheet the border is (10, 10)-(190, 59), and a 2 mm line's inner edge is at x = 11
-    // and y = 58.
+    // on a 200 x 79 sheet the border is (10, 10)-(190, 69), and a 2 mm line's inner edge is at x = 11
+    // and y = 68.
     let sheet = |sides_mm| Sheet { size: SheetSize::Custom { sides_mm }, orientation: Orientation::Landscape };
-    let filled = SheetLayout { drawing_border_line_mm: 2.0, ..DrawingBorderProfile::iso().layout(&sheet([200.0, 69.0])).unwrap() };
+    let filled = SheetLayout { drawing_border_line_mm: 2.0, ..DrawingBorderProfile::iso().layout(&sheet([200.0, 79.0])).unwrap() };
     let layout = block.layout(&filled).unwrap();
-    let (title, projection) = (cell_named(&block, &layout, "title"), cell_named(&block, &layout, "projection"));
+    let (title, scale) = (cell_named(&block, &layout, "title"), cell_named(&block, &layout, "scale"));
     assert!(near(title.value_box, rect(12.0, 12.0, 120.825, 19.325)), "{:?}", title.value_box);
-    assert!(projection.label_at.is_some_and(|at| at.dist(Vec2::new(161.175, 54.5)) < 1e-9), "{:?}", projection.label_at);
-    assert!(near(projection.value_box, rect(161.175, 45.175, 188.0, 53.5)), "{:?}", projection.value_box);
+    assert!(scale.label_at.is_some_and(|at| at.dist(Vec2::new(12.0, 64.5)) < 1e-9), "{:?}", scale.label_at);
+    assert!(near(scale.value_box, rect(12.0, 60.175, 30.825, 63.5)), "{:?}", scale.value_box);
 }
 
 /// A cell with a few ulps of room at the origin, where a definition is checked on its own, has none
@@ -184,33 +220,33 @@ fn the_block_follows_the_drawing_border_on_a2_and_a4() {
     // A4 upright: 10 mm to spare on the left of the 190 mm drawing border, none with the filing margin.
     let a4 = iso(PaperSize::A4, Orientation::Portrait);
     assert_eq!(a4.drawing_border, rect(10.0, 10.0, 200.0, 287.0));
-    assert_eq!(block.layout(&a4).unwrap().outline, rect(20.0, 10.0, 200.0, 59.0));
+    assert_eq!(block.layout(&a4).unwrap().outline, rect(20.0, 10.0, 200.0, 69.0));
     let a4 = filing(PaperSize::A4, Orientation::Portrait);
     let outline = block.layout(&a4).unwrap().outline;
-    assert_eq!((outline.min.x, outline), (a4.drawing_border.min.x, rect(20.0, 10.0, 200.0, 59.0)));
+    assert_eq!((outline.min.x, outline), (a4.drawing_border.min.x, rect(20.0, 10.0, 200.0, 69.0)));
 }
 
 #[test]
 fn a5_landscape_holds_the_block_and_a5_portrait_is_too_narrow() {
     const TOO_BIG: Invalid = Invalid("a title block fits inside the drawing border");
     let block = default_block();
-    assert_eq!(block.layout(&iso(PaperSize::A5, Orientation::Landscape)).unwrap().outline, rect(20.0, 10.0, 200.0, 59.0));
+    assert_eq!(block.layout(&iso(PaperSize::A5, Orientation::Landscape)).unwrap().outline, rect(20.0, 10.0, 200.0, 69.0));
     // With the filing margin, the drawing border is exactly the block's width.
     let a5 = filing(PaperSize::A5, Orientation::Landscape);
     assert_eq!(a5.drawing_border.size().x, 180.0);
-    assert_eq!(block.layout(&a5).unwrap().outline, rect(20.0, 10.0, 200.0, 59.0));
+    assert_eq!(block.layout(&a5).unwrap().outline, rect(20.0, 10.0, 200.0, 69.0));
     // Upright, the drawing border is 128 mm wide, or 118 with the filing margin.
     for sheet in [iso(PaperSize::A5, Orientation::Portrait), filing(PaperSize::A5, Orientation::Portrait)] {
         assert!(sheet.drawing_border.size().x < 180.0);
         assert_eq!(block.layout(&sheet), Err(TOO_BIG));
     }
-    // A drawing border of exactly 180 x 49 holds it; a hair less either way doesn't.
+    // A drawing border of exactly 180 x 59 holds it; a hair less either way doesn't.
     let custom = |a: f64, b: f64| {
         DrawingBorderProfile::iso().layout(&Sheet { size: SheetSize::Custom { sides_mm: [a, b] }, orientation: Orientation::Landscape })
     };
-    let exact = custom(200.0, 69.0).unwrap();
+    let exact = custom(200.0, 79.0).unwrap();
     assert_eq!(block.layout(&exact).unwrap().outline, exact.drawing_border);
-    for sheet in [custom(199.999, 69.0), custom(200.0, 68.999)] {
+    for sheet in [custom(199.999, 79.0), custom(200.0, 78.999)] {
         assert_eq!(block.layout(&sheet.unwrap()), Err(TOO_BIG));
     }
 }
@@ -227,12 +263,12 @@ fn on_every_sheet_each_cell_keeps_its_place_from_the_corner() {
             for sheet in [iso(size, orientation), filing(size, orientation)] {
                 let border = sheet.drawing_border;
                 let Ok(layout) = block.layout(&sheet) else {
-                    assert!(border.size().x < 180.0 || border.size().y < 49.0, "{size:?} {orientation:?}");
+                    assert!(border.size().x < 180.0 || border.size().y < 59.0, "{size:?} {orientation:?}");
                     refused.push((size, orientation));
                     continue;
                 };
                 let corner = Vec2::new(border.max.x, border.min.y);
-                assert_eq!(layout.outline, Aabb2 { min: corner - Vec2::new(180.0, 0.0), max: corner + Vec2::new(0.0, 49.0) });
+                assert_eq!(layout.outline, Aabb2 { min: corner - Vec2::new(180.0, 0.0), max: corner + Vec2::new(0.0, 59.0) });
                 for (cell, placed) in block.cells.iter().zip(&layout.cells) {
                     let [x0, y0, x1, y1] = cell.rect_mm;
                     let expected = Aabb2 { min: corner + Vec2::new(x0, y0), max: corner + Vec2::new(x1, y1) };
@@ -298,7 +334,7 @@ fn hostile_definitions_are_refused() {
         [-180.0, 0.0, 0.001, 14.0],
         [-180.0, -0.001, -68.0, 14.0],
         [-180.001, 0.0, -68.0, 14.0],
-        [-180.0, 40.0, -68.0, 49.001],
+        [-180.0, 50.0, -68.0, 59.001],
         [-68.0, 0.0, -68.0, 14.0],
         [-180.0, 14.0, -68.0, 0.0],
         [f64::NAN, 0.0, -68.0, 14.0],
@@ -408,7 +444,7 @@ fn hostile_definitions_are_refused() {
 fn a_block_round_trips_through_json_and_unknown_fields_are_refused() {
     let block = default_block();
     let value = serde_json::to_value(&block).unwrap();
-    assert_eq!(value["size_mm"], json!([180.0, 49.0]));
+    assert_eq!(value["size_mm"], json!([180.0, 59.0]));
     assert_eq!((value["outline_line_mm"].clone(), value["cell_line_mm"].clone()), (json!(0.7), json!(0.35)));
     assert_eq!(
         value["cells"][5],
@@ -483,7 +519,7 @@ fn fuzzed_definitions_never_panic_and_an_accepted_one_lays_out_inside_its_outlin
     for _ in 0..4000 {
         let mut block = default_block();
         for _ in 0..1 + (rng.unit() * 3.0) as usize {
-            let i = (rng.unit() * 12.0) as usize % 12;
+            let i = (rng.unit() * 18.0) as usize % 18;
             let n = if rng.unit() < 0.3 { NUMBERS[(rng.unit() * 9.0) as usize % 9] } else { (rng.unit() - 0.5) * 20.0 };
             let cell = &mut block.cells[i];
             match (rng.unit() * 8.0) as usize {
@@ -535,8 +571,9 @@ fn fuzzed_definitions_never_panic_and_an_accepted_one_lays_out_inside_its_outlin
     assert!(accepted > 400 && laid_out > 200, "{accepted} accepted, {laid_out} laid out");
 }
 
-/// The built-in block's twelve cells, by name: no type, status or scale cell. The legal owner is the
-/// drawing's `organization`, and the general tolerances start empty, for a shop's own.
+/// The built-in block's eighteen cells, by name: the twelve of the layout approved on #3875, then
+/// ISO 7200's six (#20121). The legal owner is the drawing's `organization`, and the general
+/// tolerances start empty, for a shop's own.
 #[test]
 fn the_built_in_blocks_cells() {
     let block = default_block();
@@ -554,6 +591,12 @@ fn the_built_in_blocks_cells() {
         "legal_owner",
         "general_tolerances",
         "projection",
+        "scale",
+        "document_type",
+        "document_status",
+        "language",
+        "revision",
+        "department",
     ];
     assert_eq!(names, expected);
     let content = |name: &str| text_of(block.cells.iter().find(|c| c.name == name).unwrap()).content.clone();
@@ -562,11 +605,12 @@ fn the_built_in_blocks_cells() {
 }
 
 /// The built-in block's lines on A3 landscape, worked out by hand: the outline (230, 10) to
-/// (410, 59), then the three lines across the whole block at y 44, 34 and 24, then the five up and
-/// down: x 289 and 348 between the second and third lines, 310 from the third line to the top, 380
-/// from the second line to the top, cells' edges joined where they meet, and 342 between the bottom
-/// and the first line. Each shared edge is drawn once, 22 records, and the scene takes them. The
-/// projection symbol is the drawing's to draw.
+/// (410, 69), then the four lines across the whole block at y 59, 44, 34 and 24, then the ten up and
+/// down, cells' edges joined where they meet: x 252, 294, 324 and 362 across the top row, x 342 in
+/// the top row and again between the bottom and the first line, 289 and 348 between the second and
+/// third lines, 310 from the third line to the top row's line and 380 from the second line to it.
+/// Each shared edge is drawn once, 34 records, and the scene takes them. The projection symbol is the
+/// drawing's to draw.
 #[test]
 fn the_built_in_blocks_lines_on_a3() {
     let sheet = iso(PaperSize::A3, Orientation::Landscape);
@@ -575,7 +619,7 @@ fn the_built_in_blocks_lines_on_a3() {
     let drawn: Vec<(Vec<[f64; 4]>, bool, f64)> = group
         .items
         .iter()
-        .take(9)
+        .take(15)
         .map(|item| match item {
             Item::Stroke { path, closed, width_mm, .. } => {
                 (path.iter().map(|s| [s.start().x, s.start().y, s.end().x, s.end().y]).collect(), *closed, *width_mm)
@@ -584,20 +628,26 @@ fn the_built_in_blocks_lines_on_a3() {
         })
         .collect();
     let line = |x0: f64, y0: f64, x1: f64, y1: f64| (vec![[x0, y0, x1, y1]], false, 0.35);
-    let outline = vec![[230.0, 10.0, 410.0, 10.0], [410.0, 10.0, 410.0, 59.0], [410.0, 59.0, 230.0, 59.0], [230.0, 59.0, 230.0, 10.0]];
+    let outline = vec![[230.0, 10.0, 410.0, 10.0], [410.0, 10.0, 410.0, 69.0], [410.0, 69.0, 230.0, 69.0], [230.0, 69.0, 230.0, 10.0]];
     let expected = vec![
         (outline, true, 0.7),
+        line(230.0, 59.0, 410.0, 59.0),
         line(230.0, 44.0, 410.0, 44.0),
         line(230.0, 34.0, 410.0, 34.0),
         line(230.0, 24.0, 410.0, 24.0),
+        line(252.0, 59.0, 252.0, 69.0),
         line(289.0, 24.0, 289.0, 34.0),
+        line(294.0, 59.0, 294.0, 69.0),
         line(310.0, 34.0, 310.0, 59.0),
+        line(324.0, 59.0, 324.0, 69.0),
         line(342.0, 10.0, 342.0, 24.0),
+        line(342.0, 59.0, 342.0, 69.0),
         line(348.0, 24.0, 348.0, 34.0),
+        line(362.0, 59.0, 362.0, 69.0),
         line(380.0, 24.0, 380.0, 59.0),
     ];
     assert_eq!(drawn, expected);
-    assert_eq!(group.records(), 22);
+    assert_eq!(group.records(), 34);
     let size_mm = Vec2::new(420.0, 297.0);
     crate::paper::Scene::new(size_mm, vec![group]).validate().unwrap();
 }

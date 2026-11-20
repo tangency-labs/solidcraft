@@ -7,6 +7,7 @@ use solidcraft_doc::drawing::projection_symbol::title_block_paper;
 use solidcraft_doc::drawing::view::{View, ViewKind, ViewPlace};
 use solidcraft_doc::drawing_view::{Exploded, ViewDirection, ViewOverrides};
 use solidcraft_geom::cell::Projection;
+use solidcraft_geom::drawing_sheet::DrawingBorderProfile;
 use solidcraft_geom::drawing_view::{NamedView, ProjectedSide};
 use solidcraft_geom::paper::line::{LineGroup, LineKind};
 use solidcraft_geom::paper::{NoPictures, ObjectKind};
@@ -643,7 +644,42 @@ fn a_sheet_with_no_views_is_its_border() {
     let (mut s, _, _) = front_and_top();
     let second = run(&mut s, "drawing.sheet.add", json!({}))["sheet"].as_str().and_then(ids::decode).unwrap();
     let SheetScene { scene, views, .. } = built(&s, second);
-    assert_eq!((serde_json::to_string(&scene.groups).unwrap(), views.len()), (serde_json::to_string(&border(&s, second)).unwrap(), 0));
+    // Its frame's labels aside (`a_sheets_frame_prints_its_zone_labels_and_size`).
+    let lines: Vec<Group> = scene.groups.iter().map(without_text).filter(|group| !group.items.is_empty()).collect();
+    assert_eq!((serde_json::to_string(&lines).unwrap(), views.len()), (serde_json::to_string(&border(&s, second)).unwrap(), 0));
+}
+
+/// The text a scene's border groups print, run by run.
+fn frame_text(scene: &Scene) -> Vec<String> {
+    let border = scene.groups.iter().filter(|group| group.kind == ObjectKind::DrawingBorder);
+    border.flat_map(|group| group.items.iter()).filter_map(|item| if let Item::Text(run) = item { Some(run.text.clone()) } else { None }).collect()
+}
+
+/// A sheet's frame prints its zones' numbers and letters and its size as text of the border (#20121),
+/// in a font the scene holds, on a scene that still validates; a border saved before, whose profile
+/// asked for none, prints none.
+#[test]
+fn a_sheets_frame_prints_its_zone_labels_and_size() {
+    let (mut s, sheet, _) = front_and_top();
+    let SheetScene { scene, .. } = built(&s, sheet);
+    scene.validate().unwrap();
+    let mut texts = frame_text(&scene);
+    texts.sort();
+    // A3 flat: columns 1 to 8 above and below, rows A to F left and right, and the size.
+    let mut expected: Vec<String> =
+        ["1", "2", "3", "4", "5", "6", "7", "8"].iter().chain(&["A", "B", "C", "D", "E", "F"]).map(|t| t.to_string()).collect();
+    expected = expected.iter().cloned().chain(expected.iter().cloned()).chain(["A3".to_string()]).collect();
+    expected.sort();
+    assert_eq!(texts, expected);
+    assert!(!scene.fonts.is_empty());
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    for record in &mut d.sheets {
+        let record = Arc::make_mut(record);
+        record.border = record.border.map(|border| DrawingBorderProfile { zone_labels: false, ..border });
+    }
+    s.doc_mut().put_drawing(Arc::new(d));
+    let SheetScene { scene, .. } = built(&s, sheet);
+    assert_eq!(frame_text(&scene), Vec::<String>::new());
 }
 
 /// A view in `visible_hidden` is drawn as its snapshot is, its hidden lines dashed under its outline,

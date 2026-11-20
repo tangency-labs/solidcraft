@@ -590,6 +590,7 @@ fn fields_tile_every_drawing_border_exactly() {
                     grid,
                     skip_i_and_o: true,
                     label_sides: LabelSides::Fixed(Sides::ALL),
+                    zone_labels: true,
                     grid_border_mm: 0.0,
                     centring_mark_mm: None,
                     centring_mark_start: CentringMarkStart::SheetEdge,
@@ -597,6 +598,7 @@ fn fields_tile_every_drawing_border_exactly() {
                 };
                 let Ok(layout) = profile.layout(sheet) else { continue };
                 accepted += 1;
+                assert!(layout.frame_labels().len() <= MAX_FRAME_LABELS + 1, "{sheet:?} {profile:?}");
                 let (drawing, size_mm) = (layout.drawing_border, layout.sheet_border.max);
                 assert!(drawing.min.x >= 0.0 && drawing.min.y >= 0.0 && drawing.max.x <= size_mm.x && drawing.max.y <= size_mm.y);
                 let check = |fields: &[Field], lo: f64, hi: f64, falling: bool| {
@@ -763,4 +765,107 @@ fn alternate_letter_alphabets_share_the_bijective_sequence_and_reject_unbounded_
     assert_eq!(letters_from_alphabet(23, b"ABCDEFGHJKLMNPRSTUVWXYZ").as_deref(), Some("AA"));
     assert_eq!(letters_from_alphabet(usize::MAX, b""), None);
     assert_eq!(letters_from_alphabet(usize::MAX, b"A"), None);
+}
+
+fn labels(layout: &SheetLayout, text: &[&str]) -> Vec<FrameLabel> {
+    layout.frame_labels().into_iter().filter(|l| text.contains(&l.text.as_str())).collect()
+}
+
+/// A3 lies with 8 columns and 6 rows and labels every side: each column's number above and below its
+/// field's middle, each row's letter left and right of its field's middle, all in the 5 mm strip
+/// between the drawing border (10 mm in) and the grid reference border (5 mm in), 3.5 mm high.
+#[test]
+fn a_labelled_frame_prints_each_zones_number_and_letter_in_its_strip() {
+    let a3 = iso_layout(PaperSize::A3, Orientation::Landscape);
+    let all = a3.frame_labels();
+    // 8 columns and 6 rows, each on two sides, and the size.
+    assert_eq!(all.len(), 2 * 8 + 2 * 6 + 1);
+    let zone = |text: &str| labels(&a3, &[text]);
+    let one = zone("1");
+    // The first column runs from the drawing border's left edge, 10, to 60: its middle is 35.
+    assert_eq!(one.len(), 2);
+    assert!(one.iter().all(|l| (l.at.x - 35.0).abs() < EPS && l.cap_mm == 3.5 && l.align == LabelAlign::Centre), "{one:?}");
+    let ys: Vec<f64> = one.iter().map(|l| l.at.y).collect();
+    // The top strip is from 287 to 292, the bottom from 5 to 10.
+    assert_eq!(ys, [289.5, 7.5]);
+    // The top row, A, is centred in its field, in the strip left of the drawing border (5 to 10 mm)
+    // and in the one right of it (410 to 415 mm).
+    let a = zone("A");
+    assert_eq!(a.len(), 2);
+    assert!(a.iter().all(|l| (l.at.y - (a3.rows[0].from_mm + a3.rows[0].to_mm) / 2.0).abs() < EPS));
+    let xs: Vec<f64> = a.iter().map(|l| l.at.x).collect();
+    assert_eq!(xs, [7.5, 412.5]);
+    // Rows are A to F, columns 1 to 8.
+    let mut seen: Vec<String> = all.iter().filter(|l| l.align == LabelAlign::Centre).map(|l| l.text.clone()).collect();
+    seen.sort();
+    seen.dedup();
+    assert_eq!(seen, ["1", "2", "3", "4", "5", "6", "7", "8", "A", "B", "C", "D", "E", "F"]);
+}
+
+/// ISO 5457 labels the top and right of an A4 sheet only: numbers above, letters on the right.
+#[test]
+fn a_labelled_a4_sheet_prints_its_numbers_on_top_and_its_letters_on_the_right() {
+    let a4 = iso_layout(PaperSize::A4, Orientation::Portrait);
+    let all = a4.frame_labels();
+    assert_eq!(all.len(), 4 + 6 + 1);
+    let numbers: Vec<&FrameLabel> = all.iter().filter(|l| l.text.parse::<u32>().is_ok()).collect();
+    assert!(numbers.iter().all(|l| l.at.y > a4.drawing_border.max.y), "{numbers:?}");
+    let letters: Vec<&FrameLabel> = all.iter().filter(|l| l.text.len() == 1 && l.text.chars().all(|c| c.is_ascii_uppercase())).collect();
+    assert!(letters.iter().all(|l| l.at.x > a4.drawing_border.max.x), "{letters:?}");
+}
+
+/// The sheet's size is written under the grid reference border at its lower left, 2.5 mm high; a
+/// custom sheet is written by its sides, short first.
+#[test]
+fn the_frame_writes_the_sheets_size_below_its_grid_reference_border() {
+    let a3 = iso_layout(PaperSize::A3, Orientation::Landscape);
+    let size = labels(&a3, &["A3"]);
+    assert_eq!(size.len(), 1);
+    assert_eq!((size[0].at, size[0].cap_mm, size[0].align), (Vec2::new(12.0, 2.5), 2.5, LabelAlign::Left));
+    let custom = |a: f64, b: f64| {
+        let sheet = Sheet { size: SheetSize::Custom { sides_mm: [a, b] }, orientation: Orientation::Landscape };
+        DrawingBorderProfile::iso().layout(&sheet).unwrap().size_label
+    };
+    assert_eq!(custom(300.0, 200.0), "200 x 300 mm");
+    assert_eq!(custom(200.04, 300.25), "200 x 300.3 mm");
+    assert_eq!(Sheet::standard(PaperSize::AnsiB, Orientation::Landscape).size_label(), "ANSI B");
+    for size in PaperSize::ALL {
+        assert!(!size.label().is_empty() && size.label().len() <= 7, "{size:?}");
+    }
+}
+
+/// A profile saved before had no labels and keeps printing none; the built-in one asks for them.
+#[test]
+fn a_profile_without_labels_prints_none_and_the_built_in_one_prints_them() {
+    let mut value = serde_json::to_value(DrawingBorderProfile::iso()).unwrap();
+    assert_eq!(value["zone_labels"], serde_json::json!(true));
+    value.as_object_mut().unwrap().remove("zone_labels");
+    let old: DrawingBorderProfile = serde_json::from_value(value).unwrap();
+    assert!(!old.zone_labels);
+    let layout = old.layout(&Sheet::standard(PaperSize::A3, Orientation::Landscape)).unwrap();
+    assert!(layout.frame_labels().is_empty());
+    assert!(!iso_layout(PaperSize::A3, Orientation::Landscape).frame_labels().is_empty());
+}
+
+/// A frame left without room, or cut into more zones than a drawing needs, is left unlabelled:
+/// never a label across a line, never a sheet full of text.
+#[test]
+fn a_frame_without_room_or_cut_into_too_many_zones_labels_what_it_can() {
+    let a3 = Sheet::standard(PaperSize::A3, Orientation::Landscape);
+    let with = |profile: DrawingBorderProfile| profile.layout(&a3).unwrap().frame_labels();
+    let iso = DrawingBorderProfile::iso;
+    let texts = |labels: &[FrameLabel]| labels.iter().map(|l| l.text.clone()).collect::<Vec<_>>();
+    // No grid reference border, no strip, and a 2 mm strip has no room for capitals 2 mm high with a
+    // clearance each side: no zones, only the size.
+    assert_eq!(texts(&with(DrawingBorderProfile { grid_border_mm: 0.0, ..iso() })), ["A3"]);
+    assert_eq!(texts(&with(DrawingBorderProfile { grid_border_mm: 2.0, ..iso() })), ["A3"]);
+    // A 3 mm strip: capitals 2 mm high, the least, and the zones are labelled.
+    let thin = with(DrawingBorderProfile { grid_border_mm: 3.0, ..iso() });
+    assert!(thin.len() > 1 && thin.iter().filter(|l| l.align == LabelAlign::Centre).all(|l| l.cap_mm == 2.0), "{thin:?}");
+    // 200 x 200 equal fields: none, but the size.
+    let many = with(DrawingBorderProfile { grid: GridRule::Equal { columns: 200, rows: 200 }, ..iso() });
+    assert_eq!(many.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(), ["A3"]);
+    // No grid at all: nothing to number, the size remains.
+    let none = with(DrawingBorderProfile { grid: GridRule::None, ..iso() });
+    assert_eq!(none.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(), ["A3"]);
 }
