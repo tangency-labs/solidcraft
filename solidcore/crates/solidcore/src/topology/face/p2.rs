@@ -3373,9 +3373,24 @@ pub fn fix_uv_trim_curves_notified(
     // Vertex/SurfVertex and EdgeEnd/SurfVertex gaps (the out-of-tolerance branch only
     // warns upstream)
     let _vertex_gap = surf_vertex.distance(vertex_point);
-    let _curr_edge_gap = surf_vertex.distance(curr_edge_point);
-    let _prev_edge_gap = surf_vertex.distance(prev_edge_point);
+    let curr_edge_gap = surf_vertex.distance(curr_edge_point);
+    let prev_edge_gap = surf_vertex.distance(prev_edge_point);
     let _ = tol_3d;
+
+    // Not upstream (#18166): an edge whose curve ends farther from the vertex's point than
+    // its own tolerance meets the vertex only by the vertex's tolerance (upstream's corner
+    // test above takes the largest of the vertex's and the edges' tolerances). Its trim ends
+    // on its curve's end, which is where it belongs: pulling it to the vertex's UV point
+    // would set it off its edge's curve by that gap, past the edge's tolerance (upstream
+    // leaves the edge so, uncovered; raising the edge to the gap instead would hand a gap
+    // that only the vertex's tolerance holds to every check that reads edge tolerances,
+    // as `blend::round_room` does for two rounds' crossing, #19792). The trims' UV gap is
+    // left as it is, as upstream leaves a large one: in 3D their ends lie on their curves,
+    // each within the vertex's tolerance of it.
+    if curr_edge_gap > b.edge(curr_edge)?.tolerance || prev_edge_gap > b.edge(prev_edge)?.tolerance
+    {
+        return Ok(false);
+    }
 
     // Not upstream (#18162): the two trims and their edges' tolerances before they are
     // edited, to ask after the edits whether the tolerance provably covered the trim
