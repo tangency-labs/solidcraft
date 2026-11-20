@@ -299,6 +299,20 @@ pub trait PluginHost {
     }
     fn log(&mut self, message: &str);
     fn progress(&mut self, fraction: f32, message: &str);
+    /// Writes the running plugin's file `name` in the open design from its bytes, as they are
+    /// (`storage@0.1`, the `storage` interface's `put-blob`); `append` adds them to its end. The
+    /// file's size. An app that keeps no plugin data refuses, as here.
+    fn storage_put_blob(&mut self, _name: &str, _data: &[u8], _cache: bool, _append: bool) -> Result<u64> {
+        Err(HostError::PermissionDenied { permission: "storage: this app keeps no plugin data".into() })
+    }
+    /// Up to `len` bytes of a plugin's file from `offset` (`get-blob`).
+    fn storage_get_blob(&mut self, _plugin: Option<&str>, _name: &str, _offset: u64, _len: u32) -> Result<Vec<u8>> {
+        Err(HostError::PermissionDenied { permission: "storage: this app keeps no plugin data".into() })
+    }
+    /// Up to `len` bytes of a plugin's main document, its saved JSON, from `offset` (`get-document`).
+    fn storage_get_document(&mut self, _plugin: Option<&str>, _offset: u64, _len: u32) -> Result<Vec<u8>> {
+        Err(HostError::PermissionDenied { permission: "storage: this app keeps no plugin data".into() })
+    }
     fn is_cancelled(&self) -> bool {
         false
     }
