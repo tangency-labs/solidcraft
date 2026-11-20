@@ -143,6 +143,8 @@ pub struct Built {
     /// ones it moved (a motion link's follower, a joint a closed loop moved). Empty when the
     /// preview posed no joint.
     pub joints: Vec<solidcraft_engine::schema::joints::ReachedJoint>,
+    /// The last view command from a previewed plugin run, applied with its first drawn result.
+    pub plugin_view: Option<Value>,
 }
 
 /// The solved joint pose a preview shows: the joints it posed, with what posed them and the
@@ -217,6 +219,8 @@ pub struct PreviewState {
     pub busy: bool,
     /// Extent of the preview scene.
     pub bounds: Aabb3,
+    /// The view command belonging to the currently shown plugin result.
+    plugin_view: Option<Value>,
     /// Time the last preview took (ms), for `ui.inspect`.
     pub ms: f64,
     started: f64,
@@ -348,6 +352,7 @@ impl PreviewState {
         self.running_stream_key = None;
         self.shown_key = None;
         self.error = None;
+        self.plugin_view = None;
         self.applied = None;
         self.stopped = None;
         self.placed = None;
@@ -426,6 +431,7 @@ impl PreviewState {
                 self.replaced = b.replaced;
                 self.outlines = b.outlines;
                 self.bounds = b.bounds;
+                self.plugin_view = b.plugin_view;
                 self.active = true;
                 self.error = b.error;
                 self.applied = b.applied;
@@ -463,6 +469,7 @@ impl PreviewState {
             // them (a 1 mm extrusion still drawn at 0 mm), so nothing is drawn.
             Err(e) => {
                 self.hide_scene();
+                self.plugin_view = None;
                 self.sketches.clear();
                 self.error = Some(e);
                 self.applied = None;
@@ -668,6 +675,12 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     colors.tint_new = app.preferences.preview_tint_new_faces;
     colors.cut_tint = app.preferences.cut_preview_tint;
     let mut key = job_key(&cmds, app.session.revision, colors);
+    // A reopened dialog must not inherit a result (or an in-flight run) from the old dialog.
+    if let Some((id, _, _)) = &plugin {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (key, id).hash(&mut h);
+        key = h.finish();
+    }
     // A Move is drawn as a layer where the view allows it (`move_preview::layered`), and built
     // where it lands where not: when the view changes between the two, it is computed again.
     if crate::move_preview::is_move(&cmds) {
@@ -708,6 +721,16 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
         spawn(&mut app.preview, key, scratch, cmds, colors, tool, Arc::new(Progress::default()));
     }
     app.preview.busy = app.preview.running.is_some();
+    // Both worker results and the web's synchronous results are ready before their first draw.
+    if app.preview.shown_key == Some(key)
+        && app.preview.active
+        && app.preview.error.is_none()
+        && !app.preview.bounds.is_empty()
+        && let Some((id, _, _)) = &plugin
+    {
+        let view = app.preview.plugin_view.take();
+        crate::plugin_menu::preview_drawn(app, *id, view);
+    }
     if app.preview.busy {
         ctx.request_repaint_after(std::time::Duration::from_millis(16));
     }
@@ -1001,6 +1024,7 @@ fn build_copies(before: &ModelState, after: &ModelState, sources: &[String], c: 
         placed: None,
         layer: None,
         joints: Vec::new(),
+        plugin_view: None,
     }
 }
 
@@ -1054,6 +1078,7 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
         placed: None,
         layer: None,
         joints: Vec::new(),
+        plugin_view: None,
     }
 }
 
@@ -1325,6 +1350,7 @@ fn build_as(before: &ModelState, after: &ModelState, c: Colors, combine: Option<
         placed: None,
         layer: None,
         joints: Vec::new(),
+        plugin_view: None,
     }
 }
 
@@ -1760,6 +1786,7 @@ mod tests {
             placed: None,
             layer: None,
             joints: Vec::new(),
+            plugin_view: None,
         }
     }
 

@@ -866,7 +866,7 @@ impl SolveApp {
                 crate::render_workspace::apply_command(self, "plugin.run", &reply)?;
                 // After the new geometry is in the live session, including a run that did not
                 // change the document. `accept_computed` does not copy the camera.
-                self.apply_plugin_view(&reply);
+                self.apply_plugin_view(&reply, None);
                 Ok(reply)
             });
             let result = self.command_completed("plugin.run", result);
@@ -952,12 +952,16 @@ impl SolveApp {
     }
 
     /// Move the camera the way the matching button does, for the last view command the plugin called.
-    fn apply_plugin_view(&mut self, reply: &Value) {
+    pub(crate) fn apply_plugin_view(&mut self, reply: &Value, preview_bounds: Option<solidcraft_engine::geom::Aabb3>) {
         let Some(kind) = reply.get("view").and_then(|view| view.get("kind")).and_then(Value::as_str) else { return };
         match kind {
             "fit" | "home" => {
-                let id = if kind == "home" { "view.home" } else { "view.fit" };
-                let _ = self.command_completed(id, Ok(json!({})));
+                if let Some(bounds) = preview_bounds {
+                    self.frame_view_bounds(kind == "home", Some(bounds));
+                } else {
+                    let id = if kind == "home" { "view.home" } else { "view.fit" };
+                    let _ = self.command_completed(id, Ok(json!({})));
+                }
             }
             "camera" => {
                 let Some(value) = reply.pointer("/view/camera").filter(|value| !value.is_null()) else { return };

@@ -1,4 +1,5 @@
-;; Original test component. `home` inserts a box and calls view.home. `edit` inserts a box
+;; Original test component. `fit` passes its parameters to solid.box, then calls view.home and
+;; view.fit (the last view command wins). `home` inserts a box and calls view.home. `edit` inserts a box
 ;; farther away and calls no view command. `place` makes a component with a box in it and moves
 ;; the component 100 mm along X. `move` only moves an existing component.
 ;; `both` moves the existing component and makes a box. Any other entry calls view.home and then traps.
@@ -78,6 +79,14 @@
       i32.const 0
       call $run
     )
+    (func $fit (type 2)
+      i32.const 660
+      i32.const 8
+      i32.const 1400
+      i32.const 2
+      i32.const 0
+      call $run
+    )
     (func $place (;5;) (type 2)
       i32.const 700
       i32.const 16
@@ -103,6 +112,21 @@
     )
     (func $execute (;6;) (type 1) (param i32 i32 i32 i32) (result i32)
       (local i32)
+      local.get 1
+      i32.const 3
+      i32.eq
+      if
+        i32.const 512
+        i32.const 9
+        local.get 2
+        local.get 3
+        i32.const 0
+        call $run
+        call $home
+        call $fit
+        i32.const 0
+        return
+      end
       local.get 0
       i32.load8_u
       local.tee 4
@@ -148,6 +172,7 @@
     )
     (data (;0;) (i32.const 512) "solid.box")
     (data (;1;) (i32.const 640) "view.home")
+    (data (i32.const 660) "view.fit")
     (data (;2;) (i32.const 1024) "{\22length\22:10,\22width\22:10,\22height\22:10,\22corner\22:[0,0,0],\22operation\22:\22new_body\22}")
     (data (;3;) (i32.const 1200) "{\22length\22:10,\22width\22:10,\22height\22:10,\22corner\22:[20,0,0],\22operation\22:\22new_body\22}")
     (data (;4;) (i32.const 1400) "{}")
