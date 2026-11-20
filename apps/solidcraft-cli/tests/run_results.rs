@@ -282,7 +282,9 @@ fn unknown_pending_concepts_preserve_the_open_design_and_output_files() {
         let mut experimental = doc::Document::new("Experimental");
         experimental.format = doc::format::format_string(version);
         experimental.format_pending.push("experimental-card".into());
-        for (extension, bytes) in [("json", io::write_design(&experimental)), ("solidcraft", io::write_design_container(&experimental).unwrap())] {
+        for (extension, bytes) in
+            [("json", io::write_design(&experimental).unwrap()), ("solidcraft", io::write_design_container(&experimental).unwrap())]
+        {
             let source = dir.0.join(format!("experimental-{version}.{extension}"));
             std::fs::write(&source, &bytes).unwrap();
             let mut session = Session::default();
@@ -325,7 +327,7 @@ fn the_cli_opens_a_newer_design_and_saving_keeps_what_it_cant_read() {
     let dir = Scratch::new();
     let mut session = Session::default();
     session.execute("solid.box", &json!({"length": 2, "width": 3, "height": 4})).unwrap();
-    let mut file: Value = serde_json::from_slice(&io::write_design(&session.doc)).unwrap();
+    let mut file: Value = serde_json::from_slice(&io::write_design(&session.doc).unwrap()).unwrap();
     let newer = doc::format::format_string(doc::format::FORMAT + 1);
     file["format"] = json!(newer);
     let future = json!({"id": 900, "name": "Lattice1", "type": "gyroid_lattice", "cell": 2.5});
@@ -348,7 +350,7 @@ fn the_cli_opens_a_newer_design_and_saving_keeps_what_it_cant_read() {
         assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
         let saved = io::read_design(&std::fs::read(&destination).unwrap()).unwrap();
         assert_eq!(saved.format, newer, "never a lower number");
-        let again: Value = serde_json::from_slice(&io::write_design(&saved)).unwrap();
+        let again: Value = serde_json::from_slice(&io::write_design(&saved).unwrap()).unwrap();
         assert_eq!(again["features"].as_array().unwrap().last().unwrap(), &future);
     }
 }
@@ -366,7 +368,7 @@ fn known_pending_concepts_and_released_files_round_trip_with_inert_metadata() {
     experimental.format_pending.push("reserved-body-names".into());
     for (index, mut document) in [current, released, experimental].into_iter().enumerate() {
         document.metadata.0.insert("com.example.tool".into(), json!({"format_pending": ["experimental-card"], "physical_card": {"density": 700}}));
-        for (extension, bytes) in [("json", io::write_design(&document)), ("solidcraft", io::write_design_container(&document).unwrap())] {
+        for (extension, bytes) in [("json", io::write_design(&document).unwrap()), ("solidcraft", io::write_design_container(&document).unwrap())] {
             let source = dir.0.join(format!("supported-{index}.{extension}"));
             let destination = dir.0.join(format!("resaved-{index}.{extension}"));
             std::fs::write(&source, &bytes).unwrap();
@@ -975,7 +977,10 @@ fn explicit_plugin_host_settings_allow_reviewed_larger_requests_and_reject_bad_p
     let run = json!({"path":package,"approval":inspected["approval"],"entry":"make"}).to_string();
     let refused = cli().args(["exec", "plugin.run", &run]).output().unwrap();
     assert!(!refused.status.success());
-    assert!(String::from_utf8_lossy(&refused.stderr).contains("user host limits"));
+    // The refusal names the plugin, gives both numbers and the CLI setting that raises the ceiling.
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    assert!(stderr.contains("Sample: it asks for 200000000000 fuel, and plugins may use 100000000000."), "{stderr}");
+    assert!(stderr.contains("max_fuel in the --plugin-limits file"), "{stderr}");
     let policy = scratch.0.join("limits.json");
     std::fs::write(&policy, json!({"max_fuel":u64::MAX,"max_memory_mib":512}).to_string()).unwrap();
     let high = json_output(cli().arg("--plugin-limits").arg(&policy).args(["exec", "plugin.inspect", &args]).output().unwrap());

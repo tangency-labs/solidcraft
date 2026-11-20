@@ -499,10 +499,28 @@ const NURBS_EXPORT: EdgeExport = EdgeExport {
 /// along the STEP parameter; anything else NURBS. A curve whose STEP parameter runs against its
 /// NURBS one goes with its axis reversed and its range negated. A call that returns a status
 /// other than success makes the edge NURBS, as there ([`answer`]); any other solidcore error
-/// fails the export.
+/// fails the export. A circle also needs its NURBS to pass the import's circle test
+/// ([`circle_test_finds`]), so the import's circle test does not refuse an edge written as a
+/// circle; a circle the test cannot find, such as an arc under about 1e-6 of its radius, goes as
+/// its NURBS.
 fn classify_edge_curve(k: &Kernel, c: Option<&Curve>, ivl: &Extent1d) -> Result<EdgeExport> {
     let Some(c) = c else { return Ok(NURBS_EXPORT) };
-    Ok(classify(k, c, ivl).map_err(sc("ClassifyEdgeCurve"))?.unwrap_or(NURBS_EXPORT))
+    let e = classify(k, c, ivl).map_err(sc("ClassifyEdgeCurve"))?.unwrap_or(NURBS_EXPORT);
+    if e.ty == CURVE_CIRCLE_I {
+        let part = bspline_curve_part(k, c)?.ok_or_else(|| bad("a conic that is not a B-spline"))?;
+        if !circle_test_finds(k, &part)? {
+            return Ok(NURBS_EXPORT);
+        }
+    }
+    Ok(e)
+}
+
+/// Whether SMLib's own circle test (`SmCircle::IsNurbCurveCircle`) finds a circle in `nurbs`. The
+/// import refuses a circle edge whose NURBS fails it ([`make_edge_curve`]); the export writes such
+/// an edge as its NURBS ([`classify_edge_curve`]).
+fn circle_test_finds(k: &Kernel, nurbs: &BSplineCurve) -> Result<bool> {
+    let test = Curve::from(nurbs.clone_exact());
+    Ok(answer(Ellipse::is_nurb_curve_circle(k, &test, None)).map_err(sc("SmCircle::IsNurbCurveCircle"))?.flatten().is_some())
 }
 
 fn classify(k: &Kernel, c: &Curve, ivl: &Extent1d) -> std::result::Result<Option<EdgeExport>, SolidError> {
@@ -592,7 +610,7 @@ fn classify(k: &Kernel, c: &Curve, ivl: &Extent1d) -> std::result::Result<Option
         let Some(x) = answer(c.evaluate_point(k, ivl.max()))? else { return Ok(None) };
         x
     };
-    let tol = 1e-9 * (1.0 + e.r1 + e.r2 + a.max_dimension() + b.max_dimension());
+    let tol = conic_match_tol(e.r1, e.r2, a, b);
     let mut affine = true;
     for step in 0..=8 {
         let f = f64::from(step) / 8.0;
@@ -2045,12 +2063,8 @@ fn make_edge_curve(k: &Kernel, ty: i64, d_min: f64, d_max: f64, e: &EdgeIn<'_>, 
         } else {
             (get3(e.ellipse_center, i)?, get3(e.ellipse_axis, i)?, get3(e.ellipse_ref, i)?, get(e.ellipse_x, i)?, get(e.ellipse_y, i)?)
         };
-        if circle {
-            let test = Curve::from(nurbs.clone_exact());
-            let is_circle = answer(Ellipse::is_nurb_curve_circle(k, &test, None)).map_err(sc("SmCircle::IsNurbCurveCircle"))?.flatten();
-            if is_circle.is_none() {
-                return Err(bad("a circle NURBS SMLib's circle test rejects"));
-            }
+        if circle && !circle_test_finds(k, &nurbs)? {
+            return Err(bad("a circle NURBS SMLib's circle test rejects"));
         }
         let domain = conic_domain_of_nurbs(&nurbs, o, &mut z, &mut x, rx, ry).ok_or_else(|| bad("a conic NURBS off its conic"))?;
         let opts = EllipseOptions { dim: 3, nurb: Some(&nurbs), inside_out: false };
@@ -2095,9 +2109,17 @@ fn make_edge_curve(k: &Kernel, ty: i64, d_min: f64, d_max: f64, e: &EdgeIn<'_>, 
     )
 }
 
+/// How far a conic edge's NURBS may lie from the conic its record names, export and import alike:
+/// 1e-9 of the radii plus the edge's distance from the origin (its ends `a` and `b`), so the
+/// rounding of coordinates far from the origin counts as it does at the export's check. An edge the
+/// export writes as a conic is read back as one, wherever it lies.
+fn conic_match_tol(r1: f64, r2: f64, a: Point3, b: Point3) -> f64 {
+    1e-9 * (1.0 + r1 + r2 + a.max_dimension() + b.max_dimension())
+}
+
 /// `ConicDomainOfNurbs`: the domain in degrees of the conic (centre `o`, axis `z`, reference `x`,
 /// radii `rx`, `ry`) the NURBS traces, `z` and `x` made an orthonormal frame; `None` when a point
-/// is off that conic or the NURBS turns clockwise about `z`.
+/// is off that conic by more than [`conic_match_tol`] or the NURBS turns clockwise about `z`.
 fn conic_domain_of_nurbs(nurbs: &BSplineCurve, o: Point3, z: &mut Vec3, x: &mut Vec3, rx: f64, ry: f64) -> Option<Extent1d> {
     *z = z.unitize().ok()?;
     *x = (*x - *z * x.dot(*z)).unitize().ok()?;
@@ -2106,11 +2128,13 @@ fn conic_domain_of_nurbs(nurbs: &BSplineCurve, o: Point3, z: &mut Vec3, x: &mut 
     }
     let y = z.cross(*x);
     let ivl = nurbs.natural_interval();
+    let tol = conic_match_tol(rx, ry, nurbs.evaluate_point(ivl.min()).ok()?, nurbs.evaluate_point(ivl.max()).ok()?);
     let angle = |t: f64| -> Option<f64> {
         let p = nurbs.evaluate_point(t).ok()?;
         let d = p - o;
         let (u, v) = (d.dot(*x) / rx, d.dot(y) / ry);
-        let on = ((u.hypot(v)) - 1.0).abs() <= 1e-9 && d.dot(*z).abs() <= 1e-9 * (1.0 + rx + ry);
+        // (hypot - 1) scaled by the larger radius bounds the point's distance off the conic in its plane
+        let on = ((u.hypot(v)) - 1.0).abs() * rx.max(ry) <= tol && d.dot(*z).abs() <= tol;
         on.then(|| v.atan2(u) * 180.0 / std::f64::consts::PI)
     };
     let n = 16;

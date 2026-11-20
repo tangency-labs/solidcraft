@@ -445,6 +445,51 @@ fn exact_class(k: &Kernel, surface: &Surface, tolerance: f64) -> Result<Option<E
     })
 }
 
+/// How far the plane `old` of a moved face could move and still meet the quadric `q` beside
+/// it, when its new plane `new` (parallel to it) passes the quadric's extent along their
+/// normal and `old` cut the quadric at an angle (strictly inside that extent, by more than
+/// `tolerance`): the distance from `old` to the extent on the side the plane moved to.
+/// `None` where the plane still meets the quadric, where `old` touched it (a plane moved off
+/// a round it was tangent to: a wall closes that gap), or where the quadric has no extent
+/// along the normal: a cone, or a cylinder whose axis is not parallel to the plane.
+///
+/// A sphere about `c` of radius `r` spans `n.c ± r` along a unit `n`; a cylinder about an
+/// axis through `o` square to `n`, `n.o ± r`. The heights are measured against these closed
+/// forms with `tolerance` (the B-rep's, far above their rounding) on either side, so a plane
+/// within the tolerance of the extent is not decided here (the pieces' bounds decide it).
+fn past_extent(old: Tangent, new: Tangent, q: &Implicit, tolerance: f64) -> Option<f64> {
+    let n = new.normal;
+    // the move keeps the plane's direction
+    if old.normal.cross(n).length() > EFF_ZERO {
+        return None;
+    }
+    let (middle, half) = match *q {
+        Implicit::Sphere { centre, radius } => (n.dot(centre), radius.abs()),
+        Implicit::Cone {
+            origin,
+            axis,
+            radius,
+            tan_angle,
+        } if tan_angle.abs() <= EFF_ZERO && n.dot(axis).abs() <= EFF_ZERO => {
+            (n.dot(origin), radius.abs())
+        }
+        _ => return None,
+    };
+    let (lo, hi) = (middle - half, middle + half);
+    let (was, now) = (n.dot(old.point), n.dot(new.point));
+    // the old plane must cut the quadric at an angle
+    if was <= lo + tolerance || was >= hi - tolerance {
+        return None;
+    }
+    if now > hi + tolerance {
+        Some(hi - was)
+    } else if now < lo - tolerance {
+        Some(was - lo)
+    } else {
+        None
+    }
+}
+
 /// A certified upper bound on the distance from `x` to the surface of class `c` at a point
 /// (a moved surface's move at a vertex); `None` for a net, whose move is bounded by the
 /// meetings on it.
@@ -2407,9 +2452,12 @@ fn line_meets_plane(
 /// ([`straight_edge_meets_plane`]), whether the two kept surfaces are one (a round drawn
 /// as two faces, split along a ruling: their meeting with the plane is no one point) or
 /// two that cross along the line. Each such edge is taken, the largest meeting kept;
-/// nowhere near where every line runs past the plane. `None` means no kept pair
-/// shares a straight edge: a different topology event. `Some(Uncertified)` means
-/// such an edge exists but its third surface or meeting is not certified.
+/// nowhere near where every line runs past the plane. A pair whose third's new surface is
+/// a quadric is left to the surfaces' classes' own constructions (a [`corner`]'s arms
+/// below: [`parallel_quadrics`], [`quadric::Radical`] or [`quadric::meet`]), which decide
+/// the same three surfaces' meeting without a plane's closed form. `None` means no kept
+/// pair shares a straight edge with a plane third: a different construction decides the
+/// corner. `Some(Uncertified)` means such an edge exists but its meeting is not certified.
 ///
 /// # Errors
 ///
@@ -2443,8 +2491,11 @@ fn kept_straight_edge_corner(
         if lines.is_empty() {
             continue;
         }
+        // the third's new surface is not a plane: this closed form is the plane's; a
+        // quadric third is decided by the surfaces' classes' own constructions (`corner`),
+        // where this pair's straight edge does not take it
         let Exact::Plane(plane) = *z else {
-            return Ok(Some(CornerMeeting::Uncertified));
+            continue;
         };
         for line in lines {
             any = true;
@@ -2547,7 +2598,9 @@ fn kept_straight_edge_corner(
 /// quadrics are kept and share a straight edge at the vertex (a round drawn as two faces split along a ruling, or two surfaces
 /// crossing along a line), and the third's new surface a plane: faces that keep their
 /// surfaces keep their edges, so the three meet where that edge's line crosses the plane
-/// ([`kept_straight_edge_corner`]). A surface at the vertex moved adds its distance from the
+/// ([`kept_straight_edge_corner`]); a quadric third is decided by the constructions above
+/// (the quadrics' parallel, radical plane or certificate arms), not by that closed form. A
+/// surface at the vertex moved adds its distance from the
 /// vertex to the move.
 ///
 /// A plane and a bare B-spline net ([`net::Net`]: a B-spline surface, extrusion or surface
@@ -2741,6 +2794,39 @@ pub fn local_extension_reach(
                 }
                 (&Exact::Plane(plane), Exact::Quadric(q))
                 | (Exact::Quadric(q), &Exact::Plane(plane)) => {
+                    // a moved plane past where the kept quadric beside it ends meets it
+                    // nowhere: refused, naming how far it could move
+                    let plane_face = if matches!(own, Exact::Plane(_)) {
+                        own_face
+                    } else {
+                        other_face
+                    };
+                    let quadric_face = if plane_face == own_face {
+                        other_face
+                    } else {
+                        own_face
+                    };
+                    if let (Some(face), Some(side)) = (plane_face, quadric_face) {
+                        if is_moved(Some(face)) && !is_moved(Some(side)) {
+                            let old = match crate::topology::face::p2::surface(b, face)? {
+                                Some(s) => exact_class(k, s, tolerance)?,
+                                None => None,
+                            };
+                            if let Some(Exact::Plane(old)) = old {
+                                if let Some(largest) = past_extent(old, plane, q, tolerance) {
+                                    return Err(Failure::new(
+                                        LOCAL_OP,
+                                        OffsetFailure::PastSide {
+                                            face,
+                                            side,
+                                            largest,
+                                        },
+                                    )
+                                    .into_error());
+                                }
+                            }
+                        }
+                    }
                     let piece = |over: (Dv, Dv), mid: (Dv, Dv), dt: Ivl| {
                         Ok(plane_quadric_piece(over, mid, dt, plane, q, tolerance))
                     };
@@ -3031,9 +3117,10 @@ struct Corner {
 /// there moves, every face there must be of a class (`class_of`), and the meetings of the
 /// face's surface with every two others (three planes; two planes and a quadric or a net; a
 /// plane, a quadric and a net; a plane and two nets; a plane and two quadrics, on a kept
-/// straight edge where present, nowhere for parallel quadrics, on the radical plane of two
+/// straight edge where present and its third's new surface a plane, nowhere for parallel
+/// quadrics, on the radical plane of two
 /// cylinders on one axis direction ([`quadric::Radical`]), otherwise by [`quadric::meet`];
-/// three quadrics on a kept straight edge, or nowhere where every two are parallel;
+/// three quadrics nowhere where every two are parallel;
 /// anything else, or a meeting with a net not proved, is `refuse`d), and each moved
 /// surface's distance from the vertex (a moved net's: the farthest meeting found on it
 /// there), are taken into `found`; the balls near-parallel quadrics' decisions hold in into
@@ -3124,7 +3211,8 @@ fn corner(
                     let meeting = net::plane_and_nets_meet(m, n, x.point, x.raw, p)?;
                     Some(meeting.ok_or_else(refuse)?)
                 }
-                // two or more quadrics: the kept straight edge's meeting, if any
+                // two or more quadrics: the kept straight edge's meeting, if any (its third
+                // a plane); a quadric third falls through to the surfaces' own constructions
                 (_, [_, _, ..], []) => {
                     let faces = [at.own, Some(*fc), Some(*fd)];
                     match kept_straight_edge_corner(b, at, p, is_moved, faces, three)? {
@@ -3685,6 +3773,52 @@ mod tests {
                     .any(|u| eu::face(b, u).unwrap() == Some(g))
             })
             .unwrap()
+    }
+
+    /// A plane `z = h` moved off a sphere r 50 about the origin, which it cut at an angle,
+    /// is past the sphere above z = 50 or below z = -50: the room is 50 ∓ h (#18564). Within
+    /// the sphere, or from a plane that touched it, nothing is decided here; nor for a cone,
+    /// whose extent is unbounded. A cylinder r 20 along x spans z = ±20.
+    #[test]
+    #[allow(clippy::float_cmp)] // exact differences of short decimals
+    fn a_plane_moved_past_a_quadrics_extent_names_its_room() {
+        let at = |z: f64| Tangent {
+            point: Vec3::new(0.0, 0.0, z),
+            normal: Vec3::Z,
+            raw: Vec3::Z,
+        };
+        let ball = Implicit::Sphere {
+            centre: Vec3::new(0.0, 0.0, 0.0),
+            radius: 50.0,
+        };
+        let tol = 1e-5;
+        assert_eq!(past_extent(at(30.0), at(55.0), &ball, tol), Some(20.0));
+        assert_eq!(past_extent(at(30.0), at(-60.0), &ball, tol), Some(80.0));
+        assert_eq!(past_extent(at(30.0), at(49.0), &ball, tol), None);
+        // a plane that touched the sphere at its top, moved off it: a wall closes that gap
+        assert_eq!(past_extent(at(50.0), at(51.0), &ball, tol), None);
+        let rod = Implicit::Cone {
+            origin: Vec3::new(0.0, 0.0, 0.0),
+            axis: Vec3::X,
+            radius: 20.0,
+            tan_angle: 0.0,
+        };
+        assert_eq!(past_extent(at(10.0), at(25.0), &rod, tol), Some(10.0));
+        assert_eq!(past_extent(at(20.0), at(25.0), &rod, tol), None);
+        let upright = Implicit::Cone {
+            origin: Vec3::new(0.0, 0.0, 0.0),
+            axis: Vec3::Z,
+            radius: 20.0,
+            tan_angle: 0.0,
+        };
+        assert_eq!(past_extent(at(10.0), at(1e4), &upright, tol), None);
+        let cone = Implicit::Cone {
+            origin: Vec3::new(0.0, 0.0, 0.0),
+            axis: Vec3::X,
+            radius: 20.0,
+            tan_angle: 0.2,
+        };
+        assert_eq!(past_extent(at(10.0), at(1e4), &cone, tol), None);
     }
 
     fn plane_at_x(x: f64) -> Surface {

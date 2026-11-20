@@ -38,6 +38,8 @@
 # solidcore/, on a pull request (once approved), merge group or push to main that changes
 # solidcore/** (main saves their caches), with SolidCore's cargo-deny (licences, bans, sources,
 # advisories): solidcore/ is outside the workspace, so the workspace's cargo-deny never sees it.
+# The kernel rig (kernel-rig.yml, called as a reusable workflow) runs on approved pull requests and
+# merge groups, for the rig areas the diff reaches, and `ci` requires it.
 # Cross-compilation is opt-in through Run workflow; release builds remain in release.yml.
 # The release gate (release-gate.yml) calls this workflow (workflow_call) as a Run workflow with
 # cross-compilation on.
@@ -232,13 +234,14 @@ jobs:
           # crates below the apps, the web app, the vendored crates, the manifests and lockfile, the
           # toolchain and cargo config, and this workflow. #8227 put a native-only call in
           # crates/ui-egui and the merge queue passed it, because nothing built for wasm there.
+          # The plugin guide and its example crates count too: the wasm job builds the examples.
           deps_wasm_paths() {
             while IFS= read -r -d '' path; do
               case "$path" in
                 Cargo.lock|Cargo.toml|*/Cargo.toml) deps=true ;;
               esac
               case "$path" in
-                crates/*|apps/solidcraft-web/*|vendor/*|solidcore/*|Cargo.lock|Cargo.toml|rust-toolchain*|.cargo/*|.github/workflows/ci.yml) wasm=true ;;
+                crates/*|apps/solidcraft-web/*|vendor/*|solidcore/*|Cargo.lock|Cargo.toml|rust-toolchain*|.cargo/*|.github/workflows/ci.yml|docs/book/plugin-examples/*|docs/book/src/dev/plugins.md) wasm=true ;;
               esac
             done < "$1"
           }
@@ -1168,12 +1171,29 @@ jobs:
         run: tools/windows-resize-smoke.ps1 -Exe target/ci/solidcraft.exe
 
   # Preserve the existing check name for branch protection, including docs-only PRs.
+  # The kernel rig (kernel-rig.yml) on pull requests and merge groups, so `ci` fails when it does
+  # (#19208 merged with its rig failing while the rig was a check of its own that nothing
+  # required). Its plan picks the areas the diff reaches; a change that reaches none runs only the
+  # plan and the summary. Like the other heavy checks it waits for approved-for-ci on a pull
+  # request and is not repeated for a push that only merges main into a change that passed.
+  # Pushes to main and develop, the release gate and a run by hand run kernel-rig.yml directly.
+  kernel-rig:
+    name: Kernel rig
+    needs: changes
+    if: >-
+      ${{ !cancelled() && needs.changes.result == 'success' && (github.event_name == 'merge_group' ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'approved-for-ci') &&
+      needs.changes.outputs.carried == '')) }}
+    uses: ./.github/workflows/kernel-rig.yml
+    permissions:
+      contents: read
+
   ci:
     # On a run another label starts (every other job skipped), this job reports the result of the
     # commit's real run instead: the merge queue reads `ci` from the newest run of a commit, so a
     # run without a passing `ci` would block a pull request that passed (#1850, #3182, #3252).
     name: ci
-    needs: [changes, checks, quick-compile, clippy, build-tests, tests, gpu-path-tests, doc-tests, oracle, windows-fxc, windows-build, windows-startup, dependency-advisories, wasm, solidcore, solidcore-standalone]
+    needs: [changes, checks, quick-compile, clippy, build-tests, tests, gpu-path-tests, doc-tests, oracle, windows-fxc, windows-build, windows-startup, dependency-advisories, wasm, solidcore, solidcore-standalone, kernel-rig]
     if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-2vcpu-ubuntu-2404' }}
     permissions:
@@ -1259,6 +1279,12 @@ jobs:
           SOLIDCORE_RUN: ${{ needs.changes.outputs.solidcore }}
           SOLIDCORE: ${{ needs.solidcore.result }}
           SOLIDCORE_STANDALONE: ${{ needs.solidcore-standalone.result }}
+          # The same condition as the kernel-rig job's `if` (after Select checks passed, which is
+          # tested first).
+          RIG_RUN: >-
+            ${{ github.event_name == 'merge_group' || (github.event_name == 'pull_request' &&
+            contains(github.event.pull_request.labels.*.name, 'approved-for-ci') && needs.changes.outputs.carried == '') }}
+          RIG: ${{ needs.kernel-rig.result }}
         run: |
           test "$CHANGES" = success
           test "$CHECKS" = success
@@ -1302,6 +1328,10 @@ jobs:
             test "$SOLIDCORE" = success
             test "$SOLIDCORE_STANDALONE" = success
           fi
+          # The kernel rig: its own summary passes when the plan selected no area.
+          if [ "$RIG_RUN" = true ]; then
+            test "$RIG" = success
+          fi
       - name: Note a carried result
         if: needs.changes.outputs.carried != ''
         env:
@@ -1310,7 +1340,8 @@ jobs:
           echo "This push only merges main into a change that already passed; the heavy checks were not repeated. Passing run: $CARRIED" >> "$GITHUB_STEP_SUMMARY"
 
   # Every crate below the apps and the web app must build for the browser (`cargo xtask wasm`, a
-  # cargo check, no tests). In the merge queue for a group that reaches the wasm build (Select
+  # cargo check, no tests), and the plugin guide's example plugins must match the guide and build
+  # (`cargo xtask plugin-examples`). In the merge queue for a group that reaches the wasm build (Select
   # checks' `wasm`), where `ci` requires it; by hand with cross_compile.
   wasm:
     name: Compile WebAssembly
@@ -1328,6 +1359,7 @@ jobs:
           key: wasm
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
       - run: cargo xtask wasm
+      - run: cargo xtask plugin-examples
 
   # SolidCore's own checks (its required fmt, clippy, test, kernel-rig, goldens and wasm, and its
   # deny and publish-dry-run, in solidcore/.github/workflows/ci.yml, which GitHub does not run from

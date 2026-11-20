@@ -590,6 +590,7 @@ impl AppPanelRuntime {
                                 return Err(error(Rule::Capability, "desktop viewport became unavailable"));
                             }
                             desktop.observe(ui.ctx(), &host, active);
+                            let _blur = content.app.blur.begin(ui.ctx());
                             solidcraft_ui_registry::isolated(|| {
                                 super::native_ui::paint(&mut self.runtime, &mut services, &mut content, &host, &section, ui, enabled)
                             })
@@ -1217,6 +1218,8 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
         integration.last_error = Some(reason);
     }
     let direction = crate::i18n::panel_direction(&app.preferences.language);
+    // The Browser's search field takes its title's place while it is open (#1634).
+    let browser_header = crate::browser_search::bar_shown(app).then(crate::browser_search::header_min_width);
     if let Some(integration) = &mut app.panel_runtime {
         let frame = ctx.cumulative_frame_nr();
         if integration.last_tick_frame == Some(frame) {
@@ -1228,6 +1231,9 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
             && let Some(host) = &mut integration.host
         {
             host.set_header_action_visible(InstanceId("history".into()), ControlId("play".into()), app.preferences.history_play_button);
+            host.set_header_content(InstanceId("browser".into()), browser_header);
+            // The open search box holds the magnifier.
+            host.set_header_action_visible(InstanceId("browser".into()), ControlId("magnifier".into()), browser_header.is_none());
             host.set_live_drag(app.preferences.live_panel_drag_preview);
         }
         let result = (|| {

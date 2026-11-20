@@ -2543,6 +2543,43 @@ mod tests {
         assert!(out.files.iter().all(|f| f.kind != "design"));
     }
 
+    /// A failed importer reads a separate file; the report must never suggest the unrelated
+    /// design that happens to be open. Keep the filename and explicit importer, but never
+    /// expose option values or full local paths in recent steps (#18760).
+    #[test]
+    fn failed_plugin_import_report_omits_unrelated_design_and_keeps_safe_context() {
+        let mut app = app();
+        app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"PrivateWidget"})).unwrap();
+        let params = json!({
+            "path":"/Users/testuser/private/part.xyz",
+            "format":"example.import",
+            "options":{"scale":10,"api_key":"private-secret-123"}
+        });
+        ticket::record_step(&mut app, "file.import", &Err("importer refused the file".into()));
+        ticket::step_params(&mut app, "file.import", &params);
+        let ev = ticket::evidence(&app, None, None, None);
+        assert!(ev.design.is_none(), "an unrelated design cannot replay a failed importer");
+        assert_eq!(ev.design_from, Some("report.design_unrelated_import"));
+        assert_eq!(ev.session["session_start"], "new", "an unrelated design did not come from recovery");
+        assert!(ev.session.get("design_sha256").is_none(), "do not hash an unrelated design");
+        let step = ev.steps.last().unwrap();
+        assert_eq!(step["command"], "file.import");
+        assert_eq!(step["file"], "part.xyz");
+        assert_eq!(step["importer"], "example.import");
+        assert_eq!(step["option_keys"], json!(["api_key", "scale"]));
+        let text = step.to_string();
+        assert!(!text.contains("private-secret-123") && !text.contains("/Users/testuser/") && !text.contains("PrivateWidget"), "{text}");
+        let out = payload::build(&form(), payload::Ticks { design: true, repro: true, ..Default::default() }, &ev, "test");
+        assert!(out.files.iter().all(|file| file.kind != "design"), "even ticking Design cannot send an unrelated file");
+
+        // A failed modeling command still offers its design. A successful import step
+        // also does not suppress design attachments to a later report.
+        let failed = payload::Failing { command: Some("solid.fillet".into()), params: None, error: "too large".into(), origin: None, code: None };
+        assert!(ticket::evidence(&app, None, Some(failed), None).design.is_some());
+        app.issue_report.steps.back_mut().unwrap()["ok"] = json!(true);
+        assert!(ticket::evidence(&app, None, None, None).design.is_some());
+    }
+
     /// Frames until `done` says stop, collecting the addresses opened in the browser.
     fn frames_until(app: &mut SolveApp, ctx: &egui::Context, mut done: impl FnMut(&SolveApp) -> bool) -> Vec<String> {
         let mut opened = Vec::new();
@@ -2920,7 +2957,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let mut crashed = Session::default();
         crashed.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
-        let bytes = solidcraft_engine::io::write_design(&crashed.doc);
+        let bytes = solidcraft_engine::io::write_design(&crashed.doc).unwrap();
         let design = dir.join("design.sc");
         std::fs::write(&design, &bytes).unwrap();
         let report = json!({
@@ -2939,7 +2976,7 @@ mod tests {
         let t = ticket::new_ticket(&mut app, &draft, None);
         let ev = &t.evidence;
         assert_eq!(ev.design.as_ref().map(|(n, b)| (n.as_str(), b.as_slice())), Some(("Vent Panel.sc", bytes.as_slice())));
-        assert_ne!(ev.design.as_ref().unwrap().1, solidcraft_engine::io::write_design(&app.session.doc), "not the design open now");
+        assert_ne!(ev.design.as_ref().unwrap().1, solidcraft_engine::io::write_design(&app.session.doc).unwrap(), "not the design open now");
         assert_eq!(ev.design_from, Some("report.design_from_crash"));
         assert_eq!(ev.session["session_start"], "crashed");
         assert_eq!(ev.session["design_sha256"], json!(tickets::api::sha256_hex(&bytes)));
@@ -2993,7 +3030,8 @@ mod tests {
         let draft = draft_for(&app, None, None);
         let t = ticket::new_ticket(&mut app, &draft, None);
         assert_eq!(t.evidence.design_from, None);
-        assert_eq!(t.evidence.design.unwrap().1, solidcraft_engine::io::write_design(&app.session.doc));
+        let attached = solidcraft_engine::io::read_design(&t.evidence.design.unwrap().1).unwrap();
+        assert_eq!(attached.features, app.session.doc.features);
         if let Some(a) = app.autosave.take() {
             drop(a);
         }
