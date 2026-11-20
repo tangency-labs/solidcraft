@@ -70,6 +70,7 @@ pub mod construct;
 pub mod delete;
 pub mod diagnostics;
 pub mod drawing;
+pub mod drawing_auto_mark;
 pub mod drawing_balloon;
 pub mod drawing_break;
 pub mod drawing_centre_line;
