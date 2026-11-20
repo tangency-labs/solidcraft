@@ -2205,7 +2205,7 @@ impl<O: ClassObject> CurveClassification<O> {
     /// Not upstream: an end the edge
     /// intersections left unclassified counts as on `E` when its point is within the intersection tolerance of `E`, farther than that from both
     /// vertices of `E`, the curve is tangent to `E` at both ends of the interval
-    /// ([`tangent_to_edge`]), and the whole curve over the interval is proved within that
+    /// ([`tangent_to_edge_at_ends`]), and the whole curve over the interval is proved within that
     /// tolerance of `E` on control points ([`piece_within_band`]); it is then classified to
     /// `E` with its parameter on `E`. The tangency keeps out a curve that crosses `E` at the
     /// interval's classified end and stops a hair past it: a piece that short lies within the
@@ -2325,7 +2325,7 @@ impl<O: ClassObject> CurveClassification<O> {
     /// when neither end is classified, when an unclassified end is within the intersection
     /// tolerance of a vertex of `edge` (it would be on that vertex, not inside the edge), or
     /// when with an unclassified end the curve is not tangent to `edge` at both ends of the
-    /// interval ([`tangent_to_edge`]) or not proved within that tolerance of `edge` as a
+    /// interval ([`tangent_to_edge_at_ends`]) or not proved within that tolerance of `edge` as a
     /// whole ([`piece_within_band`]).
     fn ends_on_edge(
         &self,
@@ -2403,29 +2403,48 @@ impl<O: ClassObject> CurveClassification<O> {
         // A curve that crosses the edge at one end of a short interval keeps the whole piece
         // within the band too, so the piece runs along the edge only when it leaves neither
         // end across it: tangent to the edge at both
-        for (t, s) in [(t0, params[0]), (t1, params[1])] {
-            if !tangent_to_edge(k, curve, t, edge_crv, s)? {
-                return Ok(None);
-            }
+        if !tangent_to_edge_at_ends(k, (curve, [t0, t1]), (edge_crv, params))? {
+            return Ok(None);
         }
         let proved = piece_within_band(curve, &ivl.interval, edge_crv, params, xsect_tol_3d);
         Ok(proved.then_some(unclassified))
     }
 }
 
-/// Not upstream: whether `curve` at `t` runs parallel to `edge_curve` at `s`, either way,
+/// Not upstream: whether `curve` at both ends `[t0, t1]` (`t0 < t1`) of a piece runs
+/// parallel to `edge_curve` at the parameters `[s0, s1]` its ends drop onto, either way,
 /// within the angle tolerance ([`are_parallel`]); never for a zero or non-finite tangent.
-fn tangent_to_edge(k: &Kernel, curve: &Curve, t: f64, edge_curve: &Curve, s: f64) -> Result<bool> {
-    let tangent = |c: &Curve, u: f64| -> Result<Option<Vec3>> {
-        let d = c.evaluate(k, u, 1, false, true)?;
+///
+/// Each tangent is read from inside the piece, which differs from the other side only at
+/// a knot: on `curve` the span starting at `t0` and the span ending at `t1`, on
+/// `edge_curve` the span from each drop towards the other. `from_left` picks the span
+/// `[U[i], U[i+1])` holding the parameter ([`Side::Left`](crate::nurbs::knots::Side::Left)),
+/// so at a knot `true` reads the span starting there and `false` the span ending there.
+///
+/// # Errors
+///
+/// Those of the derivative evaluations.
+fn tangent_to_edge_at_ends(
+    k: &Kernel,
+    (curve, [t0, t1]): (&Curve, [f64; 2]),
+    (edge_curve, [s0, s1]): (&Curve, [f64; 2]),
+) -> Result<bool> {
+    let tangent = |c: &Curve, u: f64, from_left: bool| -> Result<Option<Vec3>> {
+        let d = c.evaluate(k, u, 1, from_left, true)?;
         Ok(d.get(1)
             .copied()
             .filter(|v| v.x.is_finite() && v.y.is_finite() && v.z.is_finite()))
     };
-    Ok(match (tangent(curve, t)?, tangent(edge_curve, s)?) {
-        (Some(a), Some(b)) => are_parallel(a, b, None),
-        _ => false,
-    })
+    for (t, t_left, s, s_left) in [(t0, true, s0, s0 < s1), (t1, false, s1, s1 < s0)] {
+        let parallel = match (tangent(curve, t, t_left)?, tangent(edge_curve, s, s_left)?) {
+            (Some(a), Some(b)) => are_parallel(a, b, None),
+            _ => false,
+        };
+        if !parallel {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// Not upstream: whether `curve` over `interval` lies within `band` of `edge_curve` as a
@@ -2621,7 +2640,7 @@ fn drop_onto_edge<O: ClassObject>(
 
 /// Not upstream (WR-305): whether `curve` over `interval` runs along edge handle `edge`
 /// within `tol`: the curve is tangent to the edge's curve at both ends of `interval`
-/// ([`tangent_to_edge`], at the drops of its end points), and the piece of the edge's curve
+/// ([`tangent_to_edge_at_ends`], at the drops of its end points), and the piece of the edge's curve
 /// between those drops and the curve over `interval` are proved within `tol` of each other
 /// as wholes on control points ([`curve_runs_along`]), never on samples. The drops only
 /// choose that edge piece: its ends' gaps to the interval's ends are part of the bound, so
@@ -2662,10 +2681,14 @@ fn curve_piece_runs_along_edge<O: ClassObject>(
     // vertex is not one that runs along it. Like an unclassified end
     // (`CurveClassification::ends_on_edge`), the piece must leave neither end across the edge: tangent
     // to it at both. This only refuses (the interval stays as the edge intersections left it).
-    for (t, s) in [(interval.min(), s0), (interval.max(), s1)] {
-        if !tangent_to_edge(k, curve, t, edge_crv, s)? {
-            return Ok(false);
-        }
+    // Each tangent is read from inside the piece, so a piece leaving or meeting a knot at
+    // an angle to the edge is not passed by a neighbouring span's direction.
+    if !tangent_to_edge_at_ends(
+        k,
+        (curve, [interval.min(), interval.max()]),
+        (edge_crv, params),
+    )? {
+        return Ok(false);
     }
     let runs = curve_runs_along(
         k,
@@ -3250,6 +3273,87 @@ mod tests {
         cc.classify_edge_interval(&k, &geo, 0).expect("classify");
         let ivl = cc.at(0).expect("interval");
         assert_eq!(ivl.mid.point_class(), PointClassType::Unknown);
+        assert_ne!(ivl.mid.object(), Some(edge));
+        assert_eq!(k.work_counters.curved_edge_runs(), 0);
+    }
+
+    /// A polyline (degree 1) along the top edge ending at `x_end`, by a knot at 0.25 up 4e-6
+    /// at 45 degrees, down again and along the edge, over [0.25, 1] with its start on the
+    /// edge: the whole piece lies in the band (1e-5) and meets its end along the edge, but
+    /// at its start the piece's own direction (the span after the knot) crosses the edge,
+    /// and only the span before it, outside the piece, runs along it.
+    fn piece_leaving_a_knot_across_the_edge(
+        x_end: f64,
+    ) -> (Kernel, BoxGeo, CurveClassification<H>, H) {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+        let pw = [
+            (x_end - 2e-5, 0.0),
+            (x_end - 1.5e-5, 0.0),
+            (x_end - 1.1e-5, 4e-6),
+            (x_end - 7e-6, 0.0),
+            (x_end, 0.0),
+        ]
+        .into_iter()
+        .map(|(x, y)| CPoint::new(x, y, 1.0, NOW))
+        .collect();
+        let knots = vec![0.0, 0.0, 0.25, 0.5, 0.75, 1.0, 1.0];
+        let polyline =
+            BSplineCurve::from_nurb(NurbCurve::new(pw, 1, knots).expect("curve"), 3, false);
+        let (k, geo, mut cc, edge) = along_top_edge_by(Curve::from(polyline));
+        let ivl = cc.at_mut(0).expect("interval");
+        ivl.interval = Extent1d::from_min_max(0.25, 1.0);
+        ivl.start.set_class_object(PointClassType::Edge, Some(edge));
+        let curve = geo
+            .curve(H(geo.entities.len(), ClassObjectKind::Curve))
+            .expect("curve");
+        // `from_left` picks the knot span `[U[i], U[i+1])` holding `t` (`Side::Left`), so
+        // at a knot `true` reads the span starting there and `false` the span ending there
+        let dir = |t: f64, from_left: bool| {
+            let d = curve
+                .evaluate(&k, t, 1, from_left, true)
+                .expect("derivative")[1];
+            d.y / d.x
+        };
+        assert!(
+            (dir(0.25, true) - 1.0).abs() < 1e-6,
+            "leaves the knot at 45 degrees"
+        );
+        assert!(
+            dir(0.25, false).abs() < 1e-12,
+            "the span before runs along the edge"
+        );
+        assert!(
+            dir(1.0, false).abs() < 1e-12,
+            "meets its end along the edge"
+        );
+        (k, geo, cc, edge)
+    }
+
+    #[test]
+    fn a_piece_leaving_a_knot_across_the_edge_is_left_alone() {
+        // ending on the edge's corner vertex: the curved piece's certificate refuses
+        let (k, geo, mut cc, edge) = piece_leaving_a_knot_across_the_edge(1.0);
+        cc.classify_edge_interval(&k, &geo, 0).expect("classify");
+        let ivl = cc.at(0).expect("interval");
+        assert_eq!(ivl.mid.point_class(), PointClassType::Unknown);
+        assert_ne!(ivl.mid.object(), Some(edge));
+        assert_eq!(k.work_counters.curved_edge_runs(), 0);
+    }
+
+    #[test]
+    fn an_unclassified_end_of_a_piece_leaving_a_knot_across_the_edge_is_left_alone() {
+        // ending unclassified halfway along the edge: the unclassified end's check refuses
+        let (k, geo, mut cc, edge) = piece_leaving_a_knot_across_the_edge(0.5);
+        cc.at_mut(0)
+            .expect("interval")
+            .end
+            .set_class_object(PointClassType::Unknown, None);
+        cc.classify_edge_interval(&k, &geo, 0).expect("classify");
+        let ivl = cc.at(0).expect("interval");
+        assert_eq!(ivl.mid.point_class(), PointClassType::Unknown);
+        assert_eq!(ivl.end.point_class(), PointClassType::Unknown);
         assert_ne!(ivl.mid.object(), Some(edge));
         assert_eq!(k.work_counters.curved_edge_runs(), 0);
     }
