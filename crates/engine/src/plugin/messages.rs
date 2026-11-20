@@ -143,7 +143,8 @@ fn named_for(plugin: &str, file: Option<&str>, exporting: bool) -> impl Fn(crate
         crate::EngineError::Plugin(error) => {
             crate::EngineError::PluginFailed(Box::new(PluginFailure { plugin: plugin.into(), file: file.map(String::from), exporting, error }))
         }
-        crate::EngineError::Other(text) => {
+        e @ (crate::EngineError::Other(_) | crate::EngineError::Feature(_)) => {
+            let text = e.to_string();
             let text = text.strip_prefix("plugin: ").unwrap_or(&text);
             match file {
                 Some(file) => crate::EngineError::Other(say(

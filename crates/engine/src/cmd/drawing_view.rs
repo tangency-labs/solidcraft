@@ -1711,7 +1711,7 @@ fn detail(s: &mut Session, p: &Value) -> Result<Value> {
     let request: DetailParams = crate::schema::read(DETAIL, p)?;
     let record = s.drawing(DETAIL)?.clone();
     let (parent, sheet) = find(&record, request.parent.0, DETAIL).map(|v| (v.id, v.sheet))?;
-    record.can_project_from(parent).map_err(|e| bad(DETAIL, e.to_string()))?;
+    record.can_detail(parent).map_err(|e| bad(DETAIL, e.to_string()))?;
     let resolved = record.resolve_view(parent).map_err(|e| bad(DETAIL, e.to_string()))?;
     let on = crate::drawing_view::on_sheet(s, &record, parent, DETAIL)?;
     let parent_centre = record.view_centre(parent).map_err(|e| bad(DETAIL, e.to_string()))?;

@@ -141,12 +141,22 @@ fn open_record<R: Read + Seek>(reader: &mut PackageReader<R>, bytes: &[u8]) -> R
     }
     let value: Value = serde_json::from_slice(bytes).map_err(|e| invalid(format!("not a SolidCraft drawing: {e}")))?;
     let mut parts = std::collections::BTreeMap::new();
-    for image in value.get("images").and_then(Value::as_array).into_iter().flatten() {
+    // Set aside where a release that can't read them looks past them (`image_files`), or, as nightly
+    // builds saved them for a while, in `images`.
+    let images = value.get("image_files").or(value.get("images")).and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
+    if images.len() > drawing::image::MAX_IMAGES {
+        return Err(invalid(format!("a drawing has at most {} images", drawing::image::MAX_IMAGES)));
+    }
+    // The drawing's own budget, kept while the parts are read, before any is held.
+    let mut total = 0usize;
+    for image in images {
         let (Some(name), Some(format)) = (image.get("part").and_then(Value::as_str), image.get("format").and_then(Value::as_str)) else { continue };
         if !matches!(format, "png" | "jpeg") || parts.contains_key(name) {
             continue;
         }
-        let blob = reader.limited_blob(image, "part", format, drawing::image::MAX_IMAGE_BYTES)?;
+        let room = drawing::image::MAX_IMAGES_BYTES.saturating_sub(total).min(drawing::image::MAX_IMAGE_BYTES);
+        let blob = reader.limited_blob(image, "part", format, room)?;
+        total += blob.len();
         parts.insert(name.to_string(), solidcraft_doc::blob::Blob::from(blob));
     }
     Ok(solidcraft_doc::blob::with_parts(parts, || Drawing::from_value(value))?)
