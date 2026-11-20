@@ -1412,6 +1412,72 @@ fn design_notifications_coalesce_a_burst_and_preserve_the_latest_token() {
 }
 
 #[test]
+fn design_notifications_retry_a_failed_worker_spawn_after_the_interval() {
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let ctx = egui::Context::default();
+    crate::plugin_events::observe(&mut app);
+    let token = app.session.design_token();
+    app.now = 0.11;
+    crate::plugin_events::tick_with_spawner_for_test(&mut app, &ctx, |_, event| {
+        assert_eq!(event, Some(token.clone()));
+        None
+    });
+    assert!(app.plugin_events.take_due(0.209).is_none());
+    assert_eq!(app.plugin_events.take_due(0.211), Some(Some(token)));
+    assert!(app.plugin_events.take_due(1.0).is_none(), "the failed spawn retains one invalidation");
+}
+
+#[test]
+fn design_notifications_retry_a_disconnected_worker_after_the_interval() {
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let ctx = egui::Context::default();
+    crate::plugin_events::observe(&mut app);
+    let token = app.session.design_token();
+    app.now = 0.11;
+    crate::plugin_events::tick_with_spawner_for_test(&mut app, &ctx, |_, _| {
+        let (send, done) = std::sync::mpsc::channel();
+        drop(send);
+        Some(done)
+    });
+    app.now = 0.12;
+    let mut spawned = false;
+    crate::plugin_events::tick_with_spawner_for_test(&mut app, &ctx, |_, _| {
+        spawned = true;
+        None
+    });
+    assert!(!spawned, "a disconnected worker waits before retrying");
+    assert!(app.plugin_events.take_due(0.219).is_none());
+    assert_eq!(app.plugin_events.take_due(0.221), Some(Some(token)));
+}
+
+#[test]
+fn design_notifications_preserve_a_newer_pending_token_when_a_worker_disconnects() {
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let ctx = egui::Context::default();
+    crate::plugin_events::observe(&mut app);
+    let initial = app.session.design_token();
+    app.now = 0.11;
+    crate::plugin_events::tick_with_spawner_for_test(&mut app, &ctx, |_, _| {
+        let (send, done) = std::sync::mpsc::channel();
+        drop(send);
+        Some(done)
+    });
+    app.now = 0.12;
+    app.run("document.metadata.set", json!({"key":"description","value":"Newer state"})).unwrap();
+    let latest = app.session.design_token();
+    assert_ne!(latest, initial);
+    app.now = 0.15;
+    let mut spawned = false;
+    crate::plugin_events::tick_with_spawner_for_test(&mut app, &ctx, |_, _| {
+        spawned = true;
+        None
+    });
+    assert!(!spawned);
+    assert!(app.plugin_events.take_due(0.219).is_none());
+    assert_eq!(app.plugin_events.take_due(0.221), Some(Some(latest)), "a newer invalidation keeps its token and deadline");
+}
+
+#[test]
 fn design_notifications_fire_after_visibility_undo_redo_but_not_failed_history_actions() {
     let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
     crate::plugin_events::observe(&mut app);
@@ -1671,8 +1737,14 @@ fn a_plugin_result_is_discarded_after_design_or_selection_changes() {
             let error = reply["error"].as_str().unwrap();
             assert!(error.contains(&expected.to_string()), "{reply}");
             assert!(error.contains(&h.app.session.design_token().to_string()), "{reply}");
+            assert_eq!(reply["kind"], "stale_revision", "{reply}");
+            assert_eq!(reply["expected"], json!(expected), "{reply}");
+            assert_eq!(reply["actual"], json!(h.app.session.design_token()), "{reply}");
         } else {
             assert_eq!(reply["error"], language.text("ui.plugin_context_changed"), "{context}: {reply}");
+            for key in ["kind", "expected", "actual"] {
+                assert!(reply.get(key).is_none(), "{context}: {reply}");
+            }
         }
         assert_eq!(h.app.session.doc.to_json(), before);
         assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);

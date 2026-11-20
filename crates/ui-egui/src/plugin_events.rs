@@ -38,6 +38,12 @@ impl State {
         self.pending = Some((token, due));
     }
 
+    fn retry(&mut self, token: Option<DesignToken>, now: f64) {
+        if self.pending.is_none() {
+            self.pending = Some((token, now + INTERVAL));
+        }
+    }
+
     pub(crate) fn take_due(&mut self, now: f64) -> Option<Option<DesignToken>> {
         if self.pending.as_ref().is_some_and(|(_, due)| now >= *due) { self.pending.take().map(|(token, _)| token) } else { None }
     }
@@ -104,6 +110,29 @@ pub(crate) fn drain(app: &mut SolveApp) -> Result<(), String> {
 }
 
 pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
+    tick_with_spawner(app, ctx, |mut scratch, event| {
+        let progress = Arc::new(solidcraft_engine::doc::progress::Progress::default());
+        crate::control_job::spawn(None, progress, move || {
+            solidcraft_engine::plugin::design_changed(&mut scratch, event);
+            scratch.plugin_state
+        })
+    });
+}
+
+#[cfg(test)]
+pub(crate) fn tick_with_spawner_for_test(
+    app: &mut SolveApp,
+    ctx: &egui::Context,
+    spawn: impl FnOnce(solidcraft_engine::Session, Option<DesignToken>) -> Option<mpsc::Receiver<AppState>>,
+) {
+    tick_with_spawner(app, ctx, spawn);
+}
+
+fn tick_with_spawner(
+    app: &mut SolveApp,
+    ctx: &egui::Context,
+    spawn: impl FnOnce(solidcraft_engine::Session, Option<DesignToken>) -> Option<mpsc::Receiver<AppState>>,
+) {
     // Preferences can change during this frame, and another tab may hold an older policy.
     // Only synchronize when needed: the frame's normal policy refresh already ran in logic.
     if app.session.disabled_plugins != app.preferences.disabled_plugins
@@ -116,7 +145,10 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
         match job.done.try_recv() {
             Ok(state) => completed(app, job.uid, job.token, state),
             Err(mpsc::TryRecvError::Empty) => app.plugin_events.job = Some(job),
-            Err(mpsc::TryRecvError::Disconnected) => log::error!("design-changed command worker disconnected"),
+            Err(mpsc::TryRecvError::Disconnected) => {
+                log::error!("design-changed command worker disconnected");
+                app.plugin_events.retry(job.token, app.now);
+            }
         }
     }
     // The live design remains owned by the window. Evaluation and file loads still under way
@@ -130,13 +162,10 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
             // Only this dispatch's results can be published. Cached outputs from removed or
             // newly unapproved packages must not return with an unrelated listener's result.
             scratch.plugin_state.listener_data = Default::default();
-            let event = token.clone();
-            let progress = Arc::new(solidcraft_engine::doc::progress::Progress::default());
-            if let Some(done) = crate::control_job::spawn(None, progress, move || {
-                solidcraft_engine::plugin::design_changed(&mut scratch, event);
-                scratch.plugin_state
-            }) {
+            if let Some(done) = spawn(scratch, token.clone()) {
                 app.plugin_events.job = Some(Job { uid: app.session.uid, token, done });
+            } else {
+                app.plugin_events.retry(token, app.now);
             }
         }
     }

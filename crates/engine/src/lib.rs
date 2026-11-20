@@ -1421,12 +1421,12 @@ impl Session {
         if Arc::ptr_eq(&self.doc, &self.saved) {
             return false;
         }
-        let Ok(mut answer) = self.dirty_cache.lock() else { return *self.doc != *self.saved };
+        let Ok(mut answer) = self.dirty_cache.lock() else { return !same_but_design_revision(&self.doc, &self.saved) };
         let same = |a: &DirtyAnswer| a.revision == self.revision && Arc::ptr_eq(&a.doc, &self.doc) && Arc::ptr_eq(&a.saved, &self.saved);
         if let Some(a) = answer.as_ref().filter(|a| same(a)) {
             return a.differs;
         }
-        let differs = *self.doc != *self.saved;
+        let differs = !same_but_design_revision(&self.doc, &self.saved);
         *answer = Some(DirtyAnswer { revision: self.revision, doc: self.doc.clone(), saved: self.saved.clone(), differs });
         differs
     }
@@ -3568,6 +3568,13 @@ fn image_host_availability(host: Option<&render::job::ImageHost>, expected: &ren
         Some(Err(error)) => render::Availability::Unavailable { reason: format!("image executor status unavailable: {error}") },
         None => render::Availability::Unavailable { reason: "image host is unavailable".into() },
     }
+}
+
+/// A fresh history token alone is not an unsaved change. Reuse the exhaustive
+/// model-input comparison without cloning a design, restoring every other field
+/// it omits so identity, features and newer-file data still affect dirtiness.
+fn same_but_design_revision(a: &Document, b: &Document) -> bool {
+    a.document_id == b.document_id && a.newer_file == b.newer_file && a.features == b.features && same_but_features(a, b)
 }
 
 /// Whether two designs differ at most in their features. Every field is named, so a new one has

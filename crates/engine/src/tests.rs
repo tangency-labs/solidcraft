@@ -5994,6 +5994,34 @@ fn design_tokens_distinguish_composite_drawing_history() {
     assert_ne!(s.design_token(), composite);
 }
 
+/// Drawing history creates fresh whole-design tokens even when undo restores
+/// exactly the saved authored content. Those tokens are not unsaved changes.
+#[test]
+fn design_tokens_drawing_undo_restores_saved_content_without_dirtying() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1}));
+    run(&mut s, "drawing.create", json!({}));
+    s.mark_saved();
+    let saved = s.design_token();
+    assert!(!s.is_dirty());
+    run(&mut s, "drawing.set", json!({"name": "Detail"}));
+    let edited = s.design_token();
+    assert_ne!(edited, saved);
+    assert!(s.is_dirty());
+    run(&mut s, "edit.undo", json!({}));
+    let undone = s.design_token();
+    assert_ne!(undone, saved, "drawing undo retains a fresh whole-design token");
+    assert_ne!(undone, edited);
+    assert_eq!(s.doc.drawings, s.saved.drawings);
+    assert!(!s.is_dirty(), "undo restored the saved content despite its new token");
+    run(&mut s, "edit.redo", json!({}));
+    let redone = s.design_token();
+    assert_ne!(redone, saved);
+    assert_ne!(redone, edited);
+    assert_ne!(redone, undone);
+    assert!(s.is_dirty(), "redo restored the drawing edit");
+}
+
 #[test]
 fn design_tokens_computed_save_preserves_the_saved_token() {
     let folder = Folder::new("computed-save-token");
