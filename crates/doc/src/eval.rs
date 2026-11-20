@@ -10849,7 +10849,13 @@ fn copy_plan<'a>(
         depth: usize,
         out: &mut Vec<(&'a Feature, Vec<Mat>, usize)>,
     ) -> Result<()> {
-        for id in features {
+        // The copies are made in timeline order, whatever order the features were picked in, a
+        // pattern's or mirror's own too: a chamfer picked before the hole it blends would
+        // otherwise find no edge to copy.
+        let mut features = features.to_vec();
+        features.sort_by_cached_key(|id| doc.features.iter().position(|x| x.id == id.0).unwrap_or(usize::MAX));
+        features.dedup();
+        for id in &features {
             if doc.feature(id.0).is_some_and(|x| x.suppressed) {
                 continue;
             }
@@ -10958,15 +10964,9 @@ fn replay(
             format!("{list} suppressed and not copied")
         });
     }
-    // The copies are made in timeline order, whatever order the features were picked in: a
-    // chamfer picked before the hole it blends would otherwise find no edge to copy.
-    let mut kept: Vec<FeatureId> = features.iter().copied().filter(|n| !suppressed.contains(n)).collect();
-    let at = |id: &FeatureId| doc.features.iter().position(|x| x.id == id.0).unwrap_or(usize::MAX);
-    kept.sort_by_key(at);
-    kept.dedup();
     let (mut missed, mut total) = (0usize, 0usize);
     let own = f.component;
-    let plan = copy_plan(doc, vals, st, own, &kept, mats)?;
+    let plan = copy_plan(doc, vals, st, own, features, mats)?;
     // A source's named faces are looked up in the model as it was before any copy was made: the
     // copy of an earlier source (a boss joined to the body) changes the faces a later source (a cut
     // starting on the boss) names, though the later source means the original's (#11792).
