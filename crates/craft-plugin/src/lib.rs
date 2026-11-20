@@ -34,6 +34,7 @@ pub const MAX_MEMORY_MIB: usize = 4096;
 pub type Result<T> = std::result::Result<T, HostError>;
 
 mod input;
+pub mod swatches;
 pub use input::{check_input, strict_input_schema};
 
 /// The host imports that change something outside the design. A `read` entry is refused every

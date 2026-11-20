@@ -159,6 +159,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     );
                     ui_kit::text(ui, &std::format!("• {line}"), ui_kit::Text::Hint("plugin_install_memory"));
                 }
+                for warning in list(plugin.get("param_warnings")) {
+                    ui_kit::status_line(ui, &warning, ui_kit::StatusTone::Warning);
+                }
                 for grant in &mut ask.grants.folders {
                     let access = tr(match (grant.read, grant.write) {
                         (true, true) => "prefs.plugin_folder_read_write",
@@ -275,6 +278,31 @@ mod tests {
                         image.save(std::path::Path::new(&directory).join(filename)).unwrap();
                     }
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn install_review_shows_swatch_warnings_and_keeps_install_available() {
+        let mut h = crate::scenario::Harness::new();
+        let warning = "x-solidcraft-swatch bad.png: invalid image; swatch omitted";
+        described(&mut h.app, "test.zip".into(), json!({"name":"Finishes","version":"1","param_warnings":[warning]}));
+        let ctx = crate::fonts::test_context();
+        for frame in 0..6 {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0))),
+                    time: Some(frame as f64 / 60.0),
+                    ..Default::default()
+                },
+                |ui| ui_kit::scope(ui, |ui| show(&mut h.app, ui.ctx())),
+            );
+            output.textures_delta.clear();
+            if frame == 5 {
+                let text = crate::test_support::text_shapes(&output).map(|shape| shape.galley.text().to_owned()).collect::<Vec<_>>().join("\n");
+                assert!(text.contains(warning), "{text}");
+                assert!(crate::plugins::valid_grants(&h.app.plugin_install.ask.as_ref().unwrap().grants));
+                assert!(crate::scenario::handle_at("dialog:ok").is_some());
             }
         }
     }

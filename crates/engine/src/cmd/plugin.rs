@@ -155,7 +155,7 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
         replaces,
         installed,
         folder: folder.to_string_lossy().into_owned(),
-        param_warnings: vec![],
+        param_warnings: plugin.swatch_warnings(),
     })
     .map_err(|e| bad("plugin.install", e.to_string()))
 }

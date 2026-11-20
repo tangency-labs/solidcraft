@@ -55,6 +55,21 @@ pub struct Unpacked {
     pub files: Vec<safe_zip::File>,
 }
 
+impl Unpacked {
+    /// Optional artwork never prevents installation. Uses exactly the bytes being reviewed.
+    pub fn swatch_warnings(&self) -> Vec<String> {
+        let Some(runtime) = &self.manifest.runtime else { return Vec::new() };
+        craft_plugin::swatches::check(&runtime.entries, |path| {
+            let file = self.files.iter().find(|file| file.path == path).ok_or_else(|| "not found in the package".to_string())?;
+            if file.bytes.len() > craft_plugin::swatches::MAX_BYTES {
+                return Err("file is larger than 64 KiB".into());
+            }
+            Ok(file.bytes.clone())
+        })
+        .warnings
+    }
+}
+
 /// Files a desktop zip tool adds that are not part of the plugin.
 fn is_junk(path: &str) -> bool {
     path.starts_with("__MACOSX/") || path.rsplit('/').next().is_some_and(|name| name == ".DS_Store" || name == "Thumbs.db")

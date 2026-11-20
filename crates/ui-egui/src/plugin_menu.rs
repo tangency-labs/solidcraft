@@ -85,6 +85,8 @@ pub(crate) struct Field {
     /// A choice's pictures, one package image path (`x-solidcraft-icon`) per option in order;
     /// empty unless every option names one.
     pub(crate) images: Vec<String>,
+    /// Optional package raster per option, including partially illustrated lists.
+    pub(crate) swatches: Vec<Option<String>>,
 }
 
 /// What a field holds, with its schema limits.
@@ -229,6 +231,7 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
     let unit = text("unit").or_else(|| text("x-unit")).or_else(|| text("units"));
     let default = p.get("default");
     let mut images = Vec::new();
+    let mut swatches = Vec::new();
     let (kind, input) = match kind {
         "number" if !choice => {
             // `exclusiveMinimum` as a number (draft 6+); a boolean beside `minimum` (draft 4).
@@ -274,6 +277,13 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
         "string" if choice => {
             let (values, titles, pictures) = choices(p)?;
             images = pictures;
+            swatches = p
+                .get("oneOf")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .map(|option| option.get(solidcraft_engine::plugin::swatches::KEY).and_then(Value::as_str).map(str::to_owned))
+                .collect();
             let chosen = default.and_then(Value::as_str).and_then(|d| values.iter().position(|o| o == d));
             (Kind::Choice { values, titles }, Input::Choice(chosen))
         }
@@ -285,7 +295,7 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
         _ => return None,
     };
     let label = text("title").unwrap_or_else(|| key.to_owned());
-    Some((Field { key: key.to_owned(), label, tip: text("description"), required, kind, images }, input))
+    Some((Field { key: key.to_owned(), label, tip: text("description"), required, kind, images, swatches }, input))
 }
 
 /// An array property as a selection field: one annotated with [`SELECTION_KEY`]
@@ -329,7 +339,7 @@ fn selection_field(key: &str, p: &Map<String, Value>, required: bool) -> Option<
     let (title, tip) = (text("title")?, text("description")?);
     let kind = Kind::Selection { accept, min: min.unwrap_or(0), max, names };
     Some((
-        Field { key: key.to_owned(), label: title.unwrap_or_else(|| key.to_owned()), tip, required, kind, images: Vec::new() },
+        Field { key: key.to_owned(), label: title.unwrap_or_else(|| key.to_owned()), tip, required, kind, images: Vec::new(), swatches: Vec::new() },
         Input::Selection(Vec::new()),
     ))
 }
@@ -375,7 +385,9 @@ fn choices(p: &Map<String, Value>) -> Option<(Vec<String>, Vec<String>, Vec<Stri
             .iter()
             .map(|option| {
                 let option = option.as_object()?;
-                if option.keys().any(|k| !matches!(k.as_str(), "const" | "title" | "description" | crate::plugin_images::KEY)) {
+                if option.keys().any(|k| {
+                    !matches!(k.as_str(), "const" | "title" | "description" | crate::plugin_images::KEY | solidcraft_engine::plugin::swatches::KEY)
+                }) {
                     return None;
                 }
                 let value = option.get("const")?.as_str()?.to_owned();
@@ -1214,7 +1226,7 @@ fn body(
                         selection_row(app, ui, id, picks, field, items, picker, claim);
                         picks += 1;
                     } else {
-                        field_row(app, ui, &plugin.images, field, input);
+                        field_row(app, ui, plugin, field, input);
                     }
                 }
             });
@@ -1288,7 +1300,7 @@ fn selection_row(
     }
 }
 
-fn field_row(app: &SolveApp, ui: &mut egui::Ui, images: &std::collections::BTreeMap<String, String>, field: &Field, input: &mut Input) {
+fn field_row(app: &SolveApp, ui: &mut egui::Ui, plugin: &Listed, field: &Field, input: &mut Input) {
     let label = if field.required { format!("{} *", field.label) } else { field.label.clone() };
     let suffix = |unit: &Option<String>| unit.as_ref().map(|u| format!(" {u}")).unwrap_or_default();
     let response = match (&field.kind, input) {
@@ -1323,19 +1335,36 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, images: &std::collections::BTree
             let id = format!("plugin_field_{}", field.key);
             // Every option's picture from the package, when each has one that passed the check.
             let pictures: Option<Vec<&str>> = (!field.images.is_empty())
-                .then(|| field.images.iter().map(|rel| images.get(rel).map(String::as_str)).collect::<Option<Vec<&str>>>())
+                .then(|| field.images.iter().map(|rel| plugin.images.get(rel).map(String::as_str)).collect::<Option<Vec<&str>>>())
                 .flatten();
-            let response = match pictures {
-                Some(pictures) => {
-                    // "Choose…" has the generic plugin icon.
-                    let lead_icon = lead.then_some(crate::plugin_images::GENERIC);
-                    let options: Vec<(&str, &str)> = shown.iter().copied().zip(lead_icon.into_iter().chain(pictures)).collect();
-                    ui_kit::row(ui, &label, |ui| ui_kit::dropdown_icons(ui, &id, &mut index, &options))
-                }
-                None => ui_kit::row(ui, &label, |ui| ui_kit::dropdown(ui, &id, &mut index, &shown)),
-            };
-            *chosen = if lead { index.checked_sub(1) } else { Some(index) };
-            response
+            let swatches = plugin.swatches.get();
+            if swatches.is_none() && field.swatches.iter().any(Option::is_some) {
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+            }
+            let tiles: Vec<_> =
+                field.swatches.iter().map(|rel| rel.as_ref().and_then(|rel| swatches?.get(rel)).map(|image| image.texture(ui.ctx()))).collect();
+            if tiles.iter().any(Option::is_some) {
+                ui_kit::row(ui, &label, |ui| {
+                    ui_kit::swatch_picker(
+                        ui,
+                        &id,
+                        chosen,
+                        ui_kit::SwatchPicker { titles, textures: &tiles, choose: &choose, search_hint: app.tr("ui.plugin_swatch_search") },
+                    )
+                })
+            } else {
+                let response = match pictures {
+                    Some(pictures) => {
+                        // "Choose…" has the generic plugin icon.
+                        let lead_icon = lead.then_some(crate::plugin_images::GENERIC);
+                        let options: Vec<(&str, &str)> = shown.iter().copied().zip(lead_icon.into_iter().chain(pictures)).collect();
+                        ui_kit::row(ui, &label, |ui| ui_kit::dropdown_icons(ui, &id, &mut index, &options))
+                    }
+                    None => ui_kit::row(ui, &label, |ui| ui_kit::dropdown(ui, &id, &mut index, &shown)),
+                };
+                *chosen = if lead { index.checked_sub(1) } else { Some(index) };
+                response
+            }
         }
         (Kind::Text { .. }, Input::Text(text)) => {
             let hint = if field.required { app.tr("ui.plugin_dialog_required_hint") } else { "" };
