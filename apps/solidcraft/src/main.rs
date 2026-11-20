@@ -43,6 +43,7 @@ mod native_menu;
 mod nav_bridge;
 #[cfg(target_os = "macos")]
 mod open_documents;
+mod open_with;
 mod single_instance;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 mod space_mouse;
@@ -910,49 +911,8 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
             }
             let _ = command.spawn();
         })),
-        open_path: Some(Box::new(open_with_default_app)),
+        open_path: Some(Box::new(open_with::open_with_default_app)),
         open_bytes: None,
-    }
-}
-
-/// Opens `path` in the program the system opens its kind with: `open` on macOS, `xdg-open` on
-/// Linux and the BSDs, and on Windows the file's own association through `explorer`. Fails when no
-/// program could be started, or when the opener says nothing opens such a file.
-fn open_with_default_app(path: &str) -> Result<(), String> {
-    let opener = if cfg!(target_os = "windows") {
-        "explorer"
-    } else if cfg!(target_os = "macos") {
-        "open"
-    } else {
-        "xdg-open"
-    };
-    let mut command = std::process::Command::new(opener);
-    command.arg(path);
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x08000000);
-    }
-    let mut child = command.spawn().map_err(|e| format!("{opener}: {e}"))?;
-    // explorer's exit code says nothing, and the window never waits on an opener: `xdg-open` can
-    // stay until the viewer it started closes. One that fails does so at once (nothing opens the
-    // file), so it is watched briefly; one still running has started a viewer.
-    if cfg!(target_os = "windows") {
-        std::thread::spawn(move || child.wait());
-        return Ok(());
-    }
-    let until = std::time::Instant::now() + std::time::Duration::from_millis(400);
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) if status.success() => return Ok(()),
-            Ok(Some(_)) => return Err(solidcraft_ui_text::tr("ui.drawing_print.no_viewer").to_string()),
-            Ok(None) if std::time::Instant::now() < until => std::thread::sleep(std::time::Duration::from_millis(20)),
-            Ok(None) => {
-                std::thread::spawn(move || child.wait());
-                return Ok(());
-            }
-            Err(e) => return Err(format!("{opener}: {e}")),
-        }
     }
 }
 

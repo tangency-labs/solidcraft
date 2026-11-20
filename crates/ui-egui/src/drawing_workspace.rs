@@ -176,7 +176,7 @@ pub(crate) fn counterpart(command: &'static str) -> Option<&'static str> {
 }
 
 pub fn can_open_options(id: &str) -> bool {
-    Tool::for_command(id).is_some() || matches!(id, "drawing.sheet.add" | "drawing.sheet.set" | "drawing.print.planned")
+    Tool::for_command(id).is_some() || matches!(id, "drawing.sheet.add" | "drawing.sheet.set")
 }
 
 /// Dismiss the current Drawing inspector without touching source or drawing data.
@@ -266,7 +266,7 @@ pub fn start(app: &mut SolveApp, id: &str) -> bool {
         }
         return true;
     }
-    if matches!(id, "drawing.print" | "drawing.print.planned") && active(app) && app.session.open_drawing.is_some() {
+    if id == "drawing.print" && active(app) && app.session.open_drawing.is_some() {
         print::start(app);
         return true;
     }
