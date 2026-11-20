@@ -1,0 +1,8 @@
+Updates: WR-512
+
+#### WR-512 (update, 2026-11-15). `ssi_singular_start_inside_direction` is removed
+
+The fix is the default and its flag is gone (tangency-labs/solidcraft#14246, batch intersect). `adv_compute_singularity_point` (`intersect/adv_surface_intersector.rs`) always starts a curve at a singularity along the first singular direction that points into both domains, whose angle is the search's `dAngleMin`, before the later inside directions are searched for the one nearest the previous direction. Upstream leaves the output at `aSingDirections[0]`, which need not point into either domain. Removed: the field `UpstreamFixes::ssi_singular_start_inside_direction`, the `SurfaceIntersector::singular_start_inside_direction` snapshot, SolidCraft's preset line, its entries in `fixes.json` and `issue_2260`'s list, its row in `docs/ssi.md`'s table of the fork's fixes, and the test settings in `wr650_tabbed_plate_mitred_rounds.rs`, `issue_1945_fork_1207_step4.rs` and `issue_2020_offset_mitred_below_depth.rs`.
+
+- **Tests:** the four `singular_start_*` unit tests in `adv_surface_intersector.rs` (the only inside direction, the nearest first one, a later nearer one, all inside) and `tests/wr512_singular_start_inside_direction.rs` (`the_default_kernel_builds_the_arc_round`: one manifold solid, check Level 2 clean, the C++ volume with the fork's line and WR-568's span to 1e-9; `the_blend_corner_runs_the_arc_round_on_as_the_pinned_with_wr512`) run on the default kernel. Removed are the tests' upstream halves and `default_kernel_refuses_the_arc_round`, which pinned upstream's 1001.
+- **Results:** no goldens row moves (leave-one-out run of the batch: every unit passes against main's goldens with this flag off).

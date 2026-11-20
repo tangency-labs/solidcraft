@@ -865,12 +865,15 @@ fn an_occurrence_type_is_one_undo_step_is_saved_and_evaluates_nothing() {
         assert_eq!(occurrence_type(&back, "Gearbox:1"), Some(solidcraft_doc::BomType::Purchased), "{format}");
         assert_eq!(typed(&run(&mut back, "assembly.bom", json!({}))), typed(&run(&mut s, "assembly.bom", json!({}))), "{format}");
     }
-    // In the file: on that occurrence only, with the change listed as pending.
+    // In the file: on that occurrence only. The change is part of design format 59 (folded for
+    // 0.45.0-rc.1), so the file is written at 59 or later and no longer lists it as pending.
     let saved: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("machine.json")).unwrap()).unwrap();
     let occurrences = saved["occurrences"].as_array().unwrap();
     let with_type: Vec<&str> = occurrences.iter().filter(|o| o.get("bom_type").is_some()).map(|o| o["name"].as_str().unwrap()).collect();
     assert_eq!(with_type, ["Gearbox:1"]);
-    assert!(saved["format_pending"].as_array().unwrap().contains(&json!("occurrence-bom-type")), "{}", saved["format_pending"]);
+    let format = saved["format"].as_str().and_then(solidcraft_doc::format::version_of);
+    assert!(format.is_some_and(|n| n >= 59), "{}", saved["format"]);
+    assert!(!saved["format_pending"].as_array().is_some_and(|names| names.contains(&json!("occurrence-bom-type"))), "{}", saved["format_pending"]);
     // A damaged word is refused as the design opens, never read as another type.
     let mut damaged = saved.clone();
     let i = occurrences.iter().position(|o| o.get("bom_type").is_some()).unwrap();
@@ -1365,8 +1368,9 @@ fn the_bill_of_materials_and_the_physical_properties_weigh_one_measurement() {
     assert_eq!(body.volume().map(f64::to_bits), body.clone().volume().map(f64::to_bits), "a clone shares the measurement");
 }
 
-/// One pin modelled two ways, as a cylinder and as a revolved rectangle: tessellated differently,
-/// measured a little apart, still one part with one mass. A pin 0.1% wider is another part.
+/// One pin modelled two ways, as a cylinder and as a revolved rectangle: one part with one mass.
+/// The kernel measures a body on its exact surfaces (`smlib::measure`), and both pins have the same
+/// cylinder and planes, so they measure exactly alike. A pin 0.1% wider is another part.
 #[test]
 fn equal_parts_modelled_apart_have_one_mass() {
     let mut s = Session::default();
@@ -1386,8 +1390,7 @@ fn equal_parts_modelled_apart_have_one_mass() {
         run(s, "component.properties", json!({"component": name}))["total"]["mass_g"].as_f64().unwrap()
     };
     let (cylinder, revolved) = (pin(&mut s, "Pin A", false, 7.0), pin(&mut s, "Pin B", true, 7.0));
-    let apart = (cylinder - revolved).abs() / cylinder;
-    assert!(apart > 0.0 && apart <= bom::MEASURE_ACCURACY, "measured {apart} apart");
+    assert_eq!(cylinder.to_bits(), revolved.to_bits(), "{cylinder} g as a cylinder, {revolved} g revolved");
     let r = run(&mut s, "assembly.bom", json!({"mass": true}));
     assert_eq!(r["rows"].as_array().map(Vec::len), Some(1), "{r}");
     assert!(r["rows"][0]["mass_g"].as_f64().is_some(), "one mass for both: {r}");

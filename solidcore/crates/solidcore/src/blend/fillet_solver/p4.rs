@@ -14,6 +14,14 @@
 //! | `get_or_create_uv_trim_curve`, `evaluate_binormal` (private) | `SmEdgeuse::GetOrCreateUVTrimCurve` and `SmEdgeuse::EvaluateBinormal` with the defaults `CalcFilletGeom` passes (unit `topology.edgeuse_p3`) |
 //!
 //! Deviations:
+//! - **Unmade fillet geometry (not upstream, tangency-labs/solidcraft#16686).** A trace
+//!   whose flush could not make its fillet geometry (its surface not skinned, or its
+//!   self-intersection not smoothed) fails with that pass's error: before a cusp recovery
+//!   that would read the geometry's stale centre line, or at the end unless a later flush
+//!   made the geometry (`UnmadeGeometry`, judged on the intersector's own flush flags, not
+//!   on a pass's outcome). Upstream only notes it in the solver's
+//!   sticky status and returns success, leaving the geometry without curves (or with an
+//!   earlier pass's).
 //! - **Object model.** The solver's virtuals are the [`FilletSolverOps`] trait object
 //!   passed in (`this`); `SmContext` arguments are the [`Kernel`]. The filleted edge,
 //!   its edge uses and their UV trim curves belong to the *target* [`Brep`]; rails,
@@ -32,8 +40,9 @@
 //!   a snapshot that is written back point by point.
 //! - **Function static.** `ComputePointValues`' `static double sdStaticStep` (set once
 //!   per process by the first finite-difference evaluation) is the
-//!   [`Kernel::fillet_point_step`] latch: per kernel instead of per process. Difftest
-//!   runners seed it from the C++ process's value.
+//!   [`Kernel::fillet_point_step`] latch: per kernel, or per process for kernels that
+//!   share one ([`Kernel::process_fillet_point_step`]). Difftest runners seed it from the
+//!   C++ process's value.
 //! - **Intersector.** `SmFilletIntersector sFI(*pOffsetSrf1, ..)` traces copies of the
 //!   solver's offset surfaces seen as [`Surface`]s (the intersector borrows its
 //!   surfaces while the solver stays mutable). Upstream they are the solver's own
@@ -1434,22 +1443,13 @@ fn c2_insert_index(proj_params: &[f64], t: f64, d_scale: f64) -> Option<usize> {
     Some(index_of_insert)
 }
 
-/// `pOffsetSrf1->EvaluatePoint(uv, sPnt)` with its status ignored: a failed
-/// evaluation leaves the fresh `SmPoint3d` at `SM_UNDEF_DOUBLE` ([`Vec3::UNDEF`]);
-/// `Unported` still propagates. A missing `GetSurface(0)` (a `NULL` dereference
+/// `pOffsetSrf1->EvaluatePoint(uv, sPnt)`: a failed evaluation is returned, as the fork
+/// does (WR-661; upstream ignores it and reads the fresh `SmPoint3d` at `SM_UNDEF_DOUBLE`). A missing `GetSurface(0)` (a `NULL` dereference
 /// upstream, ruled out by setup) is `invalid`, not ignored.
-fn c2_offset_point_ignored(
-    k: &Kernel,
-    ops: &mut dyn FilletSolverOps,
-    uv: Point2,
-) -> Result<Point3> {
+fn c2_offset_point(k: &Kernel, ops: &mut dyn FilletSolverOps, uv: Point2) -> Result<Point3> {
     let surface = offset_surface_mut(ops, 0)?;
     // fork 66b02de passes this on (SER)
-    Ok(crate::error::ignored(crate::error::passed_on(
-        surface.surface.evaluate_point_extending(k, uv),
-        k.fixes.fillet_statuses_pass_on,
-    )?)?
-    .unwrap_or(Vec3::UNDEF))
+    surface.surface.evaluate_point_extending(k, uv)
 }
 
 /// From smlib#82 (the fork's cc0e23f, 47b5471; WR-697): a rail
@@ -1702,11 +1702,11 @@ fn c2_clean_ends(ops: &mut dyn FilletSolverOps, cx: &mut Cx<'_>, st: &mut CalcSt
         let uv1 = st
             .point(cx.fillets, total_tsects - 1)?
             .uv_pos(SrfIndex::First);
-        let pnt1 = c2_offset_point_ignored(cx.k, ops, uv1)?;
+        let pnt1 = c2_offset_point(cx.k, ops, uv1)?;
         let uv2 = st
             .point(cx.fillets, total_tsects - 2)?
             .uv_pos(SrfIndex::First);
-        let pnt2 = c2_offset_point_ignored(cx.k, ops, uv2)?;
+        let pnt2 = c2_offset_point(cx.k, ops, uv2)?;
         let v = pnt1 - pnt2;
         let len = v.length();
 
@@ -1728,9 +1728,9 @@ fn c2_clean_ends(ops: &mut dyn FilletSolverOps, cx: &mut Cx<'_>, st: &mut CalcSt
     // the first two points very close to each other: remove the second one
     if total_tsects > 2 {
         let uv1 = st.point(cx.fillets, 0)?.uv_pos(SrfIndex::First);
-        let pnt1 = c2_offset_point_ignored(cx.k, ops, uv1)?;
+        let pnt1 = c2_offset_point(cx.k, ops, uv1)?;
         let uv2 = st.point(cx.fillets, 1)?.uv_pos(SrfIndex::First);
-        let pnt2 = c2_offset_point_ignored(cx.k, ops, uv2)?;
+        let pnt2 = c2_offset_point(cx.k, ops, uv2)?;
         let v = pnt1 - pnt2;
         let len = v.length();
 
@@ -1973,11 +1973,8 @@ fn c3_try_analytic(
         Err(_) => {}
     }
 
-    // WR-420 (fork addition, opt-in): where the centre line collapses to a point, the
-    // corner ball's patch
-    if !cx.k.fixes.fillet_corner_ball_patch {
-        return Ok(false);
-    }
+    // WR-420 (fork addition): where the centre line collapses to a point, the corner
+    // ball's patch
     let tsects = st.store.snapshot(cx.fillets, &st.tsect_pnts)?;
     match FilletSolver::calc_sphere_fillet_geom(ops, cx.k, cx.target, cx.fillets, &tsects, None) {
         Ok(()) => Ok(true),
@@ -2119,9 +2116,33 @@ fn c3_trace_start(
     // Check the last TsectPnt to see if it is degenerate (at a surf/surf tangency
     // point). If so, reverse the tracing to avoid its early termination.
     st.trace.reverse_tracing = false;
-    if let Some(&last) = st.tsect_pnts.last() {
-        if st.store.get(cx.fillets, last)?.point_type == IntersectionPointType::TangentPoint {
-            // sTsectPnts.ReverseArray(0, lTotalTsects)
+    let mut start_from = st.tsect_pnts.last();
+    if matches!(solver.fsg, Some(super::p1::FilletSurfaceGenerator::Linear)) {
+        if let [first, .., last] = st.tsect_pnts.as_slice() {
+            let tangent = |r| -> Result<bool> {
+                Ok(st.store.get(cx.fillets, r)?.point_type == IntersectionPointType::TangentPoint)
+            };
+            let first_tangent = tangent(*first)?;
+            if first_tangent != tangent(*last)? {
+                let tip = if first_tangent { first } else { last };
+                if let TsRef::Vertexuse(vu) = tip {
+                    let vertex = cx.fillets.brep().vertexuse(*vu)?.vertex;
+                    if let Some(vertex) = vertex {
+                        if cx.fillets.fillet_vertex(vertex)?.fillet_vertex_type()
+                            == crate::blend::fillet_geom::p1::FilletVertexType::OnVertex
+                        {
+                            // The rails meet at the original vertex. At this contact the
+                            // offsets admit multiple intersection directions. The regular
+                            // end and its edge tangent identify the intended branch.
+                            start_from = Some(first);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if let Some(&end) = start_from {
+        if st.store.get(cx.fillets, end)?.point_type == IntersectionPointType::TangentPoint {
             st.tsect_pnts.reverse();
             st.trace.dir = -st.pv_end[1];
             st.trace.reverse_tracing = true;
@@ -2535,6 +2556,9 @@ fn c4_trace(
     // ULONG lMaxLoopCount = 10; ULONG lLoopCount = 0; (:2081-2082)
     let max_loop_count: u32 = 10;
     let mut loop_count: u32 = 0;
+    // not upstream (#16686): a pass whose flush could not make its geometry
+    // (`fi` is this solve's own: no flush has set its flags yet)
+    let mut unmade = UnmadeGeometry::default();
 
     // while (!bFoundAllPoints): the flag starts FALSE, and the only assignment that
     // can leave it TRUE is followed by the `break` at :2278.
@@ -2587,7 +2611,8 @@ fn c4_trace(
         if stat.is_err() && ops.solver().status == FilStatus::Unprocessed {
             ops.solver_mut().set_status(FilStatus::SurfTracingFailure);
         }
-
+        let flushed = fi.take_flush_outcome();
+        unmade.after_pass(flushed.unmade, flushed.made, stat);
         // Check all points, after the first one, to make sure
         // that they were properly processed by DoPointIntersection().
         let Some(ii) = c4_first_missed_point(&st.store, cx.fillets, &st.tsect_pnts)? else {
@@ -2623,11 +2648,64 @@ fn c4_trace(
             // The newly created fillet did not trace to surface end - probably a
             // surface cusp: step past where the solver stopped, insert a new TsectPnt
             // and re-trace.
+            unmade.before_cusp_recovery()?;
             c4_cusp_recovery(ops, cx, st, fi)?;
         }
     }
 
-    Ok(())
+    unmade.finish()
+}
+
+/// Not upstream (tangency-labs/solidcraft#16686): the trace's account of a flush that
+/// could not make its fillet geometry (its surface not skinned, or its self-intersection
+/// not smoothed). Such a flush returns before the geometry gets its surface, centre line
+/// and rails; upstream only notes the solver's (sticky, never reset) status, and with
+/// every point processed returns success, leaving the geometry without curves (or with
+/// an earlier pass's) for later steps to dereference or merge.
+///
+/// Every pass flushes into the same geometry (the solver's last), so a later flush that
+/// makes it overwrites it whole, as upstream: the failure is then spent. That is judged
+/// on the intersector's own flags, not on the pass's outcome: a pass whose trace fails
+/// skips its flush and can still return success, and a pass that flushes and then fails
+/// (joining its curves) did make the geometry. The cusp recovery that follows a missed
+/// point reads the geometry's centre line for where the pass ran into trouble, and while
+/// a failure is pending that centre line is an earlier pass's, or missing: the next pass
+/// would start from where an earlier pass stopped. So a pending failure is returned
+/// before such a recovery, and at the end. After the boundary branch (no centre line
+/// read) a later pass may still make the geometry. Two failures in a row (the boundary
+/// branch between them): the latest is returned, as the one whose geometry is left.
+#[derive(Debug, Default)]
+struct UnmadeGeometry {
+    /// The failure of the latest pass whose flush left the geometry unmade, until a
+    /// later flush makes it.
+    pending: Option<SolidError>,
+}
+
+impl UnmadeGeometry {
+    /// After a pass: `unmade` and `made` are the intersector's flags (a flush could not
+    /// make the geometry; a flush made it), `stat` the pass's outcome. A failed flush
+    /// ends its pass, so with both flags the failure came last.
+    fn after_pass(&mut self, unmade: bool, made: bool, stat: Result<()>) {
+        if unmade {
+            if let Err(e) = stat {
+                self.pending = Some(e);
+                return;
+            }
+        }
+        if made {
+            self.pending = None;
+        }
+    }
+
+    /// Before the cusp recovery, which would read the unmade geometry's stale centre line.
+    fn before_cusp_recovery(&mut self) -> Result<()> {
+        self.pending.take().map_or(Ok(()), Err)
+    }
+
+    /// Once the passes are done.
+    fn finish(self) -> Result<()> {
+        self.pending.map_or(Ok(()), Err)
+    }
 }
 
 /// The `RecordFilletError` message at :2103 and :2332.
@@ -2922,6 +3000,176 @@ mod tests_c4 {
         assert_eq!(st.tsect_pnts.len(), 2);
         assert!(fi.self_intersect());
     }
+
+    /// tangency-labs/solidcraft#16686, two passes through `c4_trace`: the first pass's
+    /// flush left its geometry unmade and point 1 is missed, so the next pass would start
+    /// from the cusp recovery, which reads that geometry's (stale or missing) centre line.
+    /// The trace fails with the first pass's error before the recovery runs.
+    #[test]
+    fn an_unmade_geometry_is_refused_before_the_cusp_recovery() {
+        use crate::blend::fillet_geom::p1::FilletGeom;
+        use crate::blend::fillet_intersector::FlushOutcome;
+
+        let k = Kernel::default();
+        let mut solver = FilletSolver::new(1.0e-5, 0.01, 0.01);
+        solver.extend_before = true;
+        solver.extend_after = false;
+        let mut target = Brep::new();
+        let mut fillets = FilletBrep::new();
+        let g = fillets.add_geom(FilletGeom::new(&k, None, FilletGeomType::Default).unwrap());
+        solver.fillet_geoms.push(g);
+        let mut cx = Cx {
+            k: &k,
+            target: &mut target,
+            fillets: &mut fillets,
+            solvers: GeometrySolvers::Indexed(&[]),
+            error_info: None,
+        };
+        let mut st = state(&[0.0, -1.0, 1.0]);
+        st.trace.reverse_tracing = true;
+        st.trace.extend_before = true;
+        st.trace.extend_after = false;
+        let s = surfaces();
+        let d = Extent2d::from_bounds(-1.0, -1.0, 2.0, 2.0);
+        let mut fi: TraceIntersector<'_> =
+            FilletIntersector::new(&k, &s[0], &d, &s[1], &d, None).unwrap();
+        // as the first pass's flush would leave it
+        fi.set_flush_outcome(FlushOutcome {
+            unmade: true,
+            made: false,
+        });
+        let e = c4_trace(&mut solver, &mut cx, &mut st, &mut fi).unwrap_err();
+        // the pass's own error, not the recovery's missing centre line
+        assert_ne!(e, SolidError::blend_missing(OP, "the fillet surface"));
+        assert!(!e.is_unported_or_cancelled(), "{e:?}");
+        // the missed point was dropped (RemoveAt(0, 1)), the recovery never ran
+        assert_eq!(st.tsect_pnts.len(), 2);
+        assert!(!fi.self_intersect());
+    }
+
+    /// The pass sequences of `UnmadeGeometry` (the coverage of the multi-pass cases: no
+    /// `c4_trace` fixture here makes a pass that returns Ok without flushing, or a flush
+    /// that succeeds). tangency-labs/solidcraft#16686: a failed flush is spent only when a later flush
+    /// makes the geometry (each pass flushes into the same one), and is refused before a
+    /// cusp recovery would read its stale centre line, or at the end.
+    #[test]
+    fn an_unmade_geometry_fails_unless_a_later_flush_makes_it() {
+        let skin = || SolidError::blend_failed(OP, "skin");
+        let skin2 = || SolidError::blend_failed(OP, "skin again");
+        let traced = || SolidError::blend_failed(OP, "traced");
+        // a failed flush, then a final pass whose flush makes the geometry: success
+        let mut u = UnmadeGeometry::default();
+        u.after_pass(true, false, Err(skin()));
+        u.after_pass(false, true, Ok(()));
+        assert!(u.finish().is_ok());
+        // a failed flush, then an Ok pass that never flushed (its trace failed): kept
+        let mut u = UnmadeGeometry::default();
+        u.after_pass(true, false, Err(skin()));
+        u.after_pass(false, false, Ok(()));
+        assert_eq!(u.finish().unwrap_err(), skin());
+        let mut u = UnmadeGeometry::default();
+        u.after_pass(true, false, Err(skin()));
+        u.after_pass(false, false, Ok(()));
+        assert_eq!(u.before_cusp_recovery().unwrap_err(), skin());
+        // a failed flush, then a pass that flushes and fails later (joining): spent
+        let mut u = UnmadeGeometry::default();
+        u.after_pass(true, false, Err(skin()));
+        u.after_pass(false, true, Err(traced()));
+        assert!(u.finish().is_ok());
+        // a failed flush followed by a cusp recovery: refused before it
+        let mut u = UnmadeGeometry::default();
+        u.after_pass(true, false, Err(skin()));
+        assert_eq!(u.before_cusp_recovery().unwrap_err(), skin());
+        // fail, then a made geometry, then a cusp recovery: the recovery may run
+        let mut u = UnmadeGeometry::default();
+        u.after_pass(true, false, Err(skin()));
+        u.after_pass(false, true, Ok(()));
+        assert!(u.before_cusp_recovery().is_ok());
+        assert!(u.finish().is_ok());
+        // two failed flushes in a row: the latest, whose geometry is left
+        let mut u = UnmadeGeometry::default();
+        u.after_pass(true, false, Err(skin()));
+        u.after_pass(true, false, Err(skin2()));
+        assert_eq!(u.finish().unwrap_err(), skin2());
+        // a flush made, then another failed in the same pass: the failure came last
+        let mut u = UnmadeGeometry::default();
+        u.after_pass(true, true, Err(skin()));
+        assert_eq!(u.finish().unwrap_err(), skin());
+        // the last pass's flush fails after a good pass: refused
+        let mut u = UnmadeGeometry::default();
+        u.after_pass(false, true, Ok(()));
+        u.after_pass(true, false, Err(skin()));
+        assert_eq!(u.finish().unwrap_err(), skin());
+        // a later tracing failure (no flush) does not spend it
+        let mut u = UnmadeGeometry::default();
+        u.after_pass(true, false, Err(skin()));
+        u.after_pass(false, false, Err(traced()));
+        assert_eq!(u.finish().unwrap_err(), skin());
+        // tracing failures alone: success, as upstream
+        let mut u = UnmadeGeometry::default();
+        u.after_pass(false, false, Err(traced()));
+        assert!(u.before_cusp_recovery().is_ok());
+        assert!(u.finish().is_ok());
+    }
+
+    /// tangency-labs/solidcraft#16686, through `c4_trace`: with every point processed, a
+    /// failed `DoPointIntersection` that left no unmade geometry is success, as upstream,
+    /// and a failure status left by an earlier solve does not fail the trace; the pass's
+    /// flush flags do (`tests/issue_16686_fillet_surface_not_skinned.rs` runs a real
+    /// skinning failure).
+    #[test]
+    fn a_trace_fails_only_for_its_own_unmade_geometry() {
+        use super::super::p1::FilStatus;
+        use crate::blend::fillet_geom::p1::FilletGeom;
+
+        // `flags`: the intersector's flush flags as the pass's flush would leave them
+        let run = |status: FilStatus, flags: (bool, bool)| {
+            let k = Kernel::default();
+            let mut solver = FilletSolver::new(1.0e-5, 0.01, 0.01);
+            solver.status = status;
+            let mut target = Brep::new();
+            let mut fillets = FilletBrep::new();
+            let g = fillets.add_geom(FilletGeom::new(&k, None, FilletGeomType::Default).unwrap());
+            solver.fillet_geoms.push(g);
+            let mut cx = Cx {
+                k: &k,
+                target: &mut target,
+                fillets: &mut fillets,
+                solvers: GeometrySolvers::Indexed(&[]),
+                error_info: None,
+            };
+            // no point missed: the loop ends after its first pass
+            let mut st = state(&[0.0, 0.5, 1.0]);
+            let s = surfaces();
+            let d = Extent2d::from_bounds(-1.0, -1.0, 2.0, 2.0);
+            let mut fi: TraceIntersector<'_> =
+                FilletIntersector::new(&k, &s[0], &d, &s[1], &d, None).unwrap();
+            fi.set_flush_outcome(crate::blend::fillet_intersector::FlushOutcome {
+                unmade: flags.0,
+                made: flags.1,
+            });
+            let result = c4_trace(&mut solver, &mut cx, &mut st, &mut fi);
+            (result, solver.status)
+        };
+        // a tracing failure that left no unmade geometry: success, as upstream
+        let (result, status) = run(FilStatus::Unprocessed, (false, false));
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(status, FilStatus::SurfTracingFailure);
+        // a stale failure status alone does not fail it
+        let (result, status) = run(FilStatus::SurfSkinningFailure, (false, false));
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(status, FilStatus::SurfSkinningFailure);
+        // the pass's flush left its geometry unmade: the trace fails with the pass's error
+        let (result, _) = run(FilStatus::Unprocessed, (true, false));
+        let (traced, _) = run(FilStatus::Unprocessed, (false, false));
+        assert!(traced.is_ok());
+        let error = result.unwrap_err();
+        assert!(!error.is_unported_or_cancelled(), "{error:?}");
+        // a flush that made it first, then the failing one: still fails
+        assert!(run(FilStatus::Unprocessed, (true, true)).0.is_err());
+        // a flush that made it: success
+        assert!(run(FilStatus::Unprocessed, (false, true)).0.is_ok());
+    }
 }
 
 // P4-CHUNK(C4) END
@@ -3022,7 +3270,6 @@ fn c5_split_rail(
     split_at_param: f64,
 ) -> Result<f64> {
     use crate::blend::fillet_geom::p1::{FilStatus, FilletEdgeType};
-    use crate::error::ignore_status;
     use crate::intersect::surface_intersector::p1::SrfIndex;
     use crate::nurbs::b_spline_curve_n_lib::TrimMode;
     use crate::topology::{edge as edge_unit, vertex as vertex_unit, vertexuse as vu_unit};
@@ -3100,10 +3347,7 @@ fn c5_split_rail(
     };
 
     // fork 66b02de passes this on (SER)
-    ignore_status(crate::error::passed_on(
-        trim_ivl.set_min_max(trim_ivl.min(), split_at_param),
-        cx.k.fixes.fillet_statuses_pass_on,
-    )?)?;
+    trim_ivl.set_min_max(trim_ivl.min(), split_at_param)?;
     cx.fillets
         .brep_mut()
         .edge_mut(rail)?
@@ -3113,10 +3357,7 @@ fn c5_split_rail(
         .trim(cx.k, &mut trim_ivl, TrimMode::Notify)?; // may snap sIvl by tol to existing knots
 
     // fork 66b02de passes this on (SER)
-    ignore_status(crate::error::passed_on(
-        new_trim_ivl.set_min_max(split_at_param, new_trim_ivl.max()),
-        cx.k.fixes.fillet_statuses_pass_on,
-    )?)?;
+    new_trim_ivl.set_min_max(split_at_param, new_trim_ivl.max())?;
     cx.fillets
         .brep_mut()
         .edge_mut(new_rail)?
@@ -3246,21 +3487,18 @@ fn c5_undo_reversal(ops: &mut dyn FilletSolverOps, cx: &mut Cx<'_>) -> Result<()
                 .ok_or_else(|| invalid("reverse: rail without primary edge use"))?;
             let mate_eu = eu::mate(b, prim_eu)?
                 .ok_or_else(|| invalid("reverse: rail edge use without mate"))?;
-            // pMateEU->GetOrCreateUVTrimCurve(pUVCurve) (defaults): status ignored; the
+            // pMateEU->GetOrCreateUVTrimCurve(pUVCurve) (defaults): status ignored upstream; the
             // curve attached to the edge use or its mate is reversed in place
             // fork 66b02de passes this on (SER)
-            let _ = crate::error::passed_on(
-                edgeuse_p3::get_or_create_uv_trim_curve(
-                    cx.k,
-                    cx.fillets.brep_mut(),
-                    mate_eu,
-                    false,
-                    false,
-                    true,
-                )?
-                .status,
-                cx.k.fixes.fillet_statuses_pass_on,
-            )?;
+            edgeuse_p3::get_or_create_uv_trim_curve(
+                cx.k,
+                cx.fillets.brep_mut(),
+                mate_eu,
+                false,
+                false,
+                true,
+            )?
+            .status?;
             let (uv_curve, uv_owner) = eu::uv_trim_curve(cx.fillets.brep(), mate_eu)?;
             let (Some(_), Some(uv_owner)) = (uv_curve, uv_owner) else {
                 return Err(SolidError::blend_missing(
@@ -3561,18 +3799,25 @@ mod tests_c5 {
     }
 
     #[test]
-    fn reversed_trace_ignores_a_failed_uv_trim_curve_creation() {
+    fn reversed_trace_returns_a_failed_uv_trim_curve_creation() {
         let mut f = Fixture::new();
         f.st.trace.reverse_tracing = true;
         f.fb.brep_mut()
             .edgeuse_mut(f.mates[0])
             .unwrap()
             .uv_trim_curve = None;
-        // the creation's status is ignored; NER(pUVCurve) then fails
+        // the creation's status is passed on (fork 66b02de `SER`, WR-661; upstream
+        // ignores it and fails later at NER(pUVCurve)): the edge use has no face use
         let e = f.run().unwrap_err();
-        assert_eq!(
-            e,
-            SolidError::blend_missing(OP, "the mate edge use's uv trim curve")
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER), "{e:?}");
+        assert!(
+            matches!(
+                e.failure().map(|f| &f.reason),
+                Some(crate::error::Reason::Topology(
+                    crate::error::topology::TopologyFailure::Missing("the edge use's face use")
+                ))
+            ),
+            "{e:?}"
         );
     }
 
@@ -3620,10 +3865,15 @@ mod tests_c5 {
         f.add_geom(FilletGeomType::Blends);
         let e = f.run().unwrap_err();
         assert_eq!(
-            e,
-            SolidError::blend_missing(
+            (
+                e.operation(),
+                e.kind() == crate::error::ErrorKind::StageFailed && e.is_defect(),
+                e.upstream_status()
+            ),
+            (
                 "blend::fillet_geom::p4::FilletBrep::calc_blending_geom",
-                "the geometry's fillet solver"
+                true,
+                Some(SM_ERR_NULL_POINTER)
             )
         );
 
@@ -3636,13 +3886,16 @@ mod tests_c5 {
             .set_fillet_edge_type(FilletEdgeType::CrossSection);
         f.fb.geom_mut(f.g).unwrap().edges.push(rail);
         // CalcCrossSection (blend.fillet_geom_p5) runs: the edge has no original face,
-        // a typed blend failure that keeps SM_ERR_NULL_POINTER (#13790)
+        // a stage failure (#15034) that keeps SM_ERR_NULL_POINTER (#13790)
         let e = f.run().unwrap_err();
         assert_eq!(
-            e,
-            SolidError::blend_missing(
+            (
+                e.operation(),
+                e.kind() == crate::error::ErrorKind::StageFailed && e.is_defect()
+            ),
+            (
                 "blend::fillet_geom::p5::FilletBrep::calc_cross_section",
-                "the edge's original face"
+                true
             )
         );
         assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
@@ -3696,7 +3949,6 @@ fn c6_compute_point_values(
     previous: Option<&TsectPnt>,
 ) -> Result<()> {
     use super::p1::compute_uv_vectors;
-    use crate::error::ignore_status;
     use crate::intersect::surface_intersector::p1::{IntersectionPointType, SrfIndex};
     use crate::math::EFF_ZERO_SQ;
 
@@ -3869,10 +4121,7 @@ fn c6_compute_point_values(
 
     // :3764 ComputeUVVectors, status ignored
     // fork 66b02de passes this on (SER)
-    ignore_status(crate::error::passed_on(
-        compute_uv_vectors(point),
-        k.fixes.fillet_statuses_pass_on,
-    )?)?;
+    compute_uv_vectors(point)?;
 
     Ok(())
 }
@@ -4808,7 +5057,10 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
         points: &[TsectPnt],
         uv1: &mut BSplineCurve,
         uv2: &mut BSplineCurve,
-    ) -> Result<Option<Surface>> {
+    ) -> Result<(
+        Option<Surface>,
+        Option<crate::blend::law_corners::LawCornerPieces>,
+    )> {
         // the virtual m_pFSG->CreateSurface(*this, pCenterLine, pCurve1, pCurve2,
         // sPnts, pSur[0], pUV1, pSur[1], pUV2, ..) with pSur[i] = GetSurface(i)
         let solver_type = self.ops.solver_type()?;
@@ -4818,24 +5070,23 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
         let radii = self.ops.constant_radii();
         // (a variable round between NURBS faces is its definition too, the fork's 0d43b4c;
         // read only where the circle generator may take it)
-        let law = if k.fixes.fillet_round_as_definition
-            && solver_type == crate::blend::fillet_solver::p1::FilletSolverType::VariableRadius
-        {
-            let has_edgeuse = matches!(self.ops.solver().edgeuse(0), Ok(Some(_)));
-            match self.ops.variable_radius_mut() {
-                Some(v) => Some(crate::blend::fillet_standard_solver::p2::LawBall {
-                    has_edgeuse,
-                    edge: v.curve_based.base_b_spline_curve()?,
-                    law: v.fillet_law().clone(),
-                    interval: v.fillet_law_interval(),
-                    reverse: v.fillet_law_orientation(),
-                    span: None,
-                }),
-                None => None,
-            }
-        } else {
-            None
-        };
+        let law =
+            if solver_type == crate::blend::fillet_solver::p1::FilletSolverType::VariableRadius {
+                let has_edgeuse = matches!(self.ops.solver().edgeuse(0), Ok(Some(_)));
+                match self.ops.variable_radius_mut() {
+                    Some(v) => Some(crate::blend::fillet_standard_solver::p2::LawBall {
+                        has_edgeuse,
+                        edge: v.curve_based.base_b_spline_curve()?,
+                        law: v.fillet_law().clone(),
+                        interval: v.fillet_law_interval(),
+                        reverse: v.fillet_law_orientation(),
+                        span: None,
+                    }),
+                    None => None,
+                }
+            } else {
+                None
+            };
         // a chamfer's chord and sizes, for the linear generator's definition (#2486)
         let chord = if solver_type == crate::blend::fillet_solver::p1::FilletSolverType::ConstDist {
             self.ops.constant_distance().ok()
@@ -4872,11 +5123,27 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
             [uv1, uv2],
             Some(&ball),
         )?;
+        // (the fork's `rFilletSolver.AddLawCornerPieces`, 7babe17, is `FlushCurve`'s, once
+        // its stations are final: `keep_law_corner_pieces`)
+        Ok((Some(surface), kept))
+    }
+
+    fn keep_law_corner_pieces(
+        &mut self,
+        pieces: crate::blend::law_corners::LawCornerPieces,
+    ) -> Result<()> {
         // the fork's `rFilletSolver.AddLawCornerPieces` (7babe17)
-        if let Some(kept) = kept {
-            self.ops.solver_mut().law_corner_pieces.push(kept);
-        }
-        Ok(Some(surface))
+        self.ops.solver_mut().law_corner_pieces.push(pieces);
+        Ok(())
+    }
+
+    fn skins_varying_balls(&self) -> Result<bool> {
+        let exact_circles = matches!(
+            self.ops.solver().fillet_surface_generator(),
+            Some(crate::blend::fillet_solver::p1::FilletSurfaceGenerator::Circular(g))
+                if !g.approximate_arcs && !g.mirror
+        );
+        Ok(exact_circles && self.ops.solver_type()?.ball_radius_varies())
     }
 
     fn set_fillet_surface(

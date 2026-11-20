@@ -59,13 +59,11 @@
     <!-- The app and desktop ids of earlier releases (docs/compatibility.md). -->
     <id>ai.storyteller.solidcraft</id>
     <id>ai.storyteller.solidcraft.desktop</id>
-    <id>ai.storyteller.solvecraft.desktop</id>
   </provides>
   <!-- Earlier app ids (docs/compatibility.md): ai.storyteller.solidcraft from 0.8 until the move
-       to Tangency Labs, ai.storyteller.solvecraft before 0.8. -->
+       to Tangency Labs. -->
   <replaces>
     <id>ai.storyteller.solidcraft</id>
-    <id>ai.storyteller.solvecraft</id>
   </replaces>
   <content_rating type="oars-1.1"/>
   <releases>

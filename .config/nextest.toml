@@ -89,6 +89,7 @@ filter = """
     | test(=preselect_tests::variable_fillet_round_trip)
     | test(=dialogs::dense::tests::a_saved_smooth_patch_reopens_with_its_setback)
     | test(=dialogs::dense::tests::no_reachable_fillet_option_state_is_refused_for_its_options)
+    | binary(icon_audit)
 ))
 """
 priority = 99

@@ -91,3 +91,55 @@ fn a_flat_skin_has_a_net_and_a_moved_cv_crowns_it() {
         );
     }
 }
+
+/// Each record edge's end points, by index.
+fn edge_ends(r: &Brep) -> Vec<[[f64; 3]; 2]> {
+    r.edges
+        .iter()
+        .map(|e| e.vertices.map(|v| r.vertices[v as usize].point))
+        .collect()
+}
+
+fn same(a: [f64; 3], b: [f64; 3]) -> bool {
+    (0..3).all(|i| (a[i] - b[i]).abs() <= 1e-9)
+}
+
+/// A CV edit changes no topology, so the record lists the sheet's edges as it did: a client
+/// that names an edge by its index (a skin from it, an align's master) keeps the same edge. An
+/// interior CV moved leaves every edge's ends where they were, edge by edge; a corner CV moved
+/// moves that corner of the two edges at it, and only that.
+#[test]
+fn a_cv_edit_keeps_the_records_edge_order() {
+    let skin = flat_skin();
+    let was = edge_ends(&skin);
+    assert_eq!(was.len(), 4);
+    let net = control_net(&skin).unwrap();
+
+    let p = net.points[net.cols + 1];
+    let crowned = move_cvs(&skin, &[((1, 1), [p[0], p[1], p[2] + 2.0])]).unwrap();
+    let now = edge_ends(&crowned);
+    assert_eq!(now.len(), was.len());
+    for (i, (w, n)) in was.iter().zip(&now).enumerate() {
+        let kept = (same(w[0], n[0]) && same(w[1], n[1])) || (same(w[0], n[1]) && same(w[1], n[0]));
+        assert!(kept, "edge {i}: {w:?} became {n:?}");
+    }
+
+    // the net's corner (0, 0) is a corner of the sheet: lift it
+    let corner = net.points[0];
+    let lifted = [corner[0], corner[1], corner[2] + 1.5];
+    let moved = move_cvs(&skin, &[((0, 0), lifted)]).unwrap();
+    let now = edge_ends(&moved);
+    assert_eq!(now.len(), was.len());
+    let at = |p: [f64; 3]| if same(p, corner) { lifted } else { p };
+    for (i, (w, n)) in was.iter().zip(&now).enumerate() {
+        let w = [at(w[0]), at(w[1])];
+        let kept = (same(w[0], n[0]) && same(w[1], n[1])) || (same(w[0], n[1]) && same(w[1], n[0]));
+        assert!(kept, "edge {i}: {w:?} became {n:?}");
+    }
+    // and again: the edited sheet edited keeps its order too
+    let again = move_cvs(&moved, &[((1, 1), [p[0], p[1], p[2] + 2.0])]).unwrap();
+    for (i, (w, n)) in edge_ends(&moved).iter().zip(&edge_ends(&again)).enumerate() {
+        let kept = (same(w[0], n[0]) && same(w[1], n[1])) || (same(w[0], n[1]) && same(w[1], n[0]));
+        assert!(kept, "edge {i}: {w:?} became {n:?}");
+    }
+}

@@ -34,7 +34,7 @@ pub const MAX_ROWS: usize = 1000;
 /// The most entries the issued history may hold, and the most tags.
 pub const MAX_ISSUED: usize = 10_000;
 const TAG_SIZES_MM: std::ops::RangeInclusive<f64> = 1.0..=50.0;
-const DEFAULT_TAG_MM: f64 = 5.0;
+const DEFAULT_TAG_MM: f64 = 8.3;
 
 /// A drawing's revision record.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

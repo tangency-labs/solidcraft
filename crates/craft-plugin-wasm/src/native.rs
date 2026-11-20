@@ -1,11 +1,17 @@
-use crate::RuntimeOptions;
+use crate::{ImportRequest, Imported, RuntimeOptions};
+#[cfg(unix)]
+use cap_std::fs::OpenOptionsExt;
 use cap_std::fs::{Dir, OpenOptions};
-use craft_plugin::{CommandSchema, Effect, HostError, Limits, MAX_COMPONENT_BYTES, MAX_JSON_BYTES, Manifest, PluginHost, Result};
+use craft_plugin::{
+    CommandSchema, Effect, HostError, Limits, LossReport, MAX_IMPORT_CHUNK_BYTES, MAX_IMPORT_DESIGN_BYTES, MAX_IMPORT_INPUT_BYTES, MAX_JSON_BYTES,
+    Manifest, PluginHost, Result,
+};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
 use std::path::{Component as PathComponent, Path, PathBuf};
 use std::sync::{
+    Arc, Mutex,
     atomic::{AtomicU64, Ordering},
     mpsc,
 };
@@ -17,14 +23,35 @@ mod bindings {
     wasmtime::component::bindgen!({ path: "../craft-plugin/wit", world: "command-plugin" });
 }
 include!(concat!(env!("OUT_DIR"), "/aliases.rs"));
+include!(concat!(env!("OUT_DIR"), "/importer.rs"));
 
 const MAX_CALLS: usize = 256;
+/// An importer streams its file in chunks and reports progress as it goes.
+const MAX_IMPORT_CALLS: usize = 1 << 20;
+/// Files an importer may look at beside the one it imports, and names a folder listing reads.
+const MAX_IMPORT_FILES: usize = 4096;
+/// `O_NONBLOCK` for the platforms the runtime targets (the flag is not in `std`).
+#[cfg(all(unix, any(target_os = "linux", target_os = "android")))]
+const O_NONBLOCK: i32 = 0o4000;
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
+const O_NONBLOCK: i32 = 0x4;
 const MAX_LOG_BYTES: usize = 64 * 1024;
 const EPOCH_POLL: Duration = Duration::from_millis(10);
 static NEXT_FILE: AtomicU64 = AtomicU64::new(0);
 
 fn limit(name: &str) -> HostError {
     HostError::LimitExceeded { limit: name.into() }
+}
+/// The deadline passed. [`with_limits`] fills in the manifest's number.
+fn deadline() -> HostError {
+    HostError::Exhausted { limit: "deadline_ms".into(), allowed: 0 }
+}
+/// Fills in the budget a [`deadline`] or other placeholder left out, once the call is over.
+fn with_limits(error: HostError, limits: &Limits) -> HostError {
+    match error {
+        HostError::Exhausted { limit, allowed: 0 } if limit == "deadline_ms" => HostError::Exhausted { limit, allowed: limits.deadline_ms },
+        error => error,
+    }
 }
 fn trap(reason: impl Into<String>) -> HostError {
     HostError::Trap { reason: reason.into() }
@@ -39,6 +66,8 @@ fn wit_error(error: HostError) -> PluginError {
         HostError::Trap { reason } => PluginError::Trap(reason),
         HostError::Cancelled => PluginError::Cancelled,
         HostError::UnsupportedCapability { reason, .. } => PluginError::InvalidManifest(types::FieldFailure { field: "capabilities".into(), reason }),
+        HostError::Unsupported { reason } => PluginError::Unsupported(reason),
+        error @ (HostError::OverCeiling { .. } | HostError::Exhausted { .. }) => PluginError::LimitExceeded(error.to_string()),
     }
 }
 fn host_error(error: PluginError) -> HostError {
@@ -50,6 +79,7 @@ fn host_error(error: PluginError) -> HostError {
         PluginError::InvalidInput(types::FieldFailure { field, reason }) => HostError::InvalidInput { field, reason },
         PluginError::Trap(reason) => trap(reason),
         PluginError::Cancelled => HostError::Cancelled,
+        PluginError::Unsupported(reason) => HostError::Unsupported { reason },
     }
 }
 struct Folder {
@@ -74,8 +104,25 @@ struct State<H> {
     limits: StoreLimits,
     failed: Option<HostError>,
     calls: usize,
+    max_calls: usize,
     log_bytes: usize,
     deadline: Instant,
+    /// The file an importer reads and the design it writes; `None` for a command.
+    import: Option<ImportState>,
+}
+struct ImportState {
+    /// The folder of the file being imported, opened by the app's authority.
+    dir: Dir,
+    name: String,
+    input_folder: bool,
+    read_bytes: u64,
+    files: BTreeSet<PathBuf>,
+    design: Vec<u8>,
+    /// The manifest asks for `evaluate@0.1`.
+    evaluate: bool,
+    /// The design staged for `evaluate`, and whether the host has it open.
+    scratch: Vec<u8>,
+    evaluating: bool,
 }
 impl<H: PluginHost> State<H> {
     fn fail(&mut self, error: HostError) -> PluginError {
@@ -90,10 +137,10 @@ impl<H: PluginHost> State<H> {
             return Err(self.fail(HostError::Cancelled));
         }
         if Instant::now() >= self.deadline {
-            return Err(self.fail(limit("deadline")));
+            return Err(self.fail(deadline()));
         }
         self.calls = self.calls.saturating_add(1);
-        if self.calls > MAX_CALLS {
+        if self.calls > self.max_calls {
             return Err(self.fail(limit("host call count")));
         }
         Ok(())
@@ -207,24 +254,38 @@ impl<H: PluginHost> clock::Host for State<H> {
 impl<H: PluginHost> files::Host for State<H> {
     fn read_file(&mut self, grant: String, path: String) -> std::result::Result<Vec<u8>, PluginError> {
         self.file_path(&grant, &path, false)?;
-        let read = (|| -> std::io::Result<Vec<u8>> {
+        // `None`: the path is allowed and nothing is there (and no write of this call is staged for it).
+        let read = (|| -> std::io::Result<Option<Vec<u8>>> {
             let folder = self.folders.get(&grant).ok_or_else(|| std::io::Error::other("grant disappeared"))?;
             let staged = self.staged.get(&(grant.clone(), Path::new(&path).components().collect()));
-            let file = folder.dir.open(staged.map(|pending| pending.temporary.as_path()).unwrap_or(Path::new(&path)))?;
+            let file = match folder.dir.open(staged.map(|pending| pending.temporary.as_path()).unwrap_or(Path::new(&path))) {
+                Err(error) if staged.is_none() && error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                opened => opened?,
+            };
             if !file.metadata()?.is_file() {
                 return Err(std::io::Error::other("only regular files are supported"));
             }
             let mut bytes = Vec::new();
             file.take(MAX_JSON_BYTES as u64 + 1).read_to_end(&mut bytes)?;
-            Ok(bytes)
+            Ok(Some(bytes))
         })();
         let bytes = read.map_err(|e| self.fail(HostError::PermissionDenied { permission: format!("files.read:{grant}: {e}") }))?;
+        // A file that is not there yet is an answer, not a failed run (#17899): the entry gets the
+        // error and goes on, so a plugin can make its own file on its first run.
+        let Some(bytes) = bytes else {
+            return Err(wit_error(HostError::InvalidInput { field: "path".into(), reason: "no such file".into() }));
+        };
         if bytes.len() > MAX_JSON_BYTES {
             return Err(self.fail(limit("file read size")));
         }
         Ok(bytes)
     }
     fn write_file(&mut self, grant: String, path: String, data: Vec<u8>) -> std::result::Result<(), PluginError> {
+        // A read entry stays read-only in every way: no file write, whatever folders are granted.
+        if self.effect == Effect::Read {
+            self.check()?;
+            return Err(self.fail(craft_plugin::read_entry_refusal("write-file")));
+        }
         self.file_path(&grant, &path, true)?;
         let path: PathBuf = Path::new(&path).components().collect();
         if data.len() > MAX_JSON_BYTES {
@@ -257,6 +318,207 @@ impl<H: PluginHost> files::Host for State<H> {
     }
 }
 
+impl<H: PluginHost> State<H> {
+    /// The file `path` names for an importer: "" is the file being imported; anything else is a
+    /// plain relative path in its folder, with no hidden names or links, and needs `input_folder`.
+    fn source_path(&mut self, path: &str) -> std::result::Result<PathBuf, PluginError> {
+        self.check()?;
+        let Some(import) = self.import.as_ref() else {
+            return Err(self.fail(HostError::PermissionDenied { permission: "source: this call is not an import".into() }));
+        };
+        if path.is_empty() {
+            return Ok(PathBuf::from(&import.name));
+        }
+        if !import.input_folder {
+            let permission = format!("input_folder: reading {path} beside the imported file needs the input_folder permission");
+            return Err(self.fail(HostError::PermissionDenied { permission }));
+        }
+        let relative: PathBuf = Path::new(path).components().collect();
+        let plain = path.len() <= 4096
+            && !relative.as_os_str().is_empty()
+            && relative.components().count() <= 64
+            && relative.components().all(|c| matches!(c, PathComponent::Normal(name) if !name.to_string_lossy().starts_with('.')));
+        if !plain {
+            return Err(self.fail(HostError::PermissionDenied { permission: format!("input_folder: {path} is not a plain path inside the folder") }));
+        }
+        if let Err(error) = refuse_links(&import.dir, &relative) {
+            return Err(self.fail(HostError::PermissionDenied { permission: format!("input_folder: {error}") }));
+        }
+        Ok(relative)
+    }
+    fn count_file(&mut self, path: &Path) -> std::result::Result<(), PluginError> {
+        let Some(import) = self.import.as_mut() else { return Ok(()) };
+        if import.files.len() >= MAX_IMPORT_FILES && !import.files.contains(path) {
+            return Err(self.fail(limit("input_folder: more than 4096 files")));
+        }
+        import.files.insert(path.to_path_buf());
+        Ok(())
+    }
+}
+impl<H: PluginHost> source::Host for State<H> {
+    fn read(&mut self, path: String, offset: u64, len: u32) -> std::result::Result<Vec<u8>, PluginError> {
+        let target = self.source_path(&path)?;
+        let len = len as usize;
+        if len == 0 || len > MAX_IMPORT_CHUNK_BYTES {
+            return Err(self.fail(limit("source.read chunk (1 byte to 1 MiB)")));
+        }
+        self.count_file(&target)?;
+        let read = (|| -> std::io::Result<Vec<u8>> {
+            use std::io::{Seek, SeekFrom};
+            let import = self.import.as_ref().ok_or_else(|| std::io::Error::other("not an import"))?;
+            // Non-blocking, so a named pipe in the folder cannot hold the import in `open`; the
+            // opened handle is then checked, not the path.
+            let mut options = OpenOptions::new();
+            options.read(true);
+            #[cfg(unix)]
+            options.custom_flags(O_NONBLOCK);
+            let mut file = import.dir.open_with(&target, &options)?;
+            if !file.metadata()?.is_file() {
+                return Err(std::io::Error::other("only regular files are read"));
+            }
+            file.seek(SeekFrom::Start(offset))?;
+            let mut bytes = Vec::with_capacity(len);
+            file.take(len as u64).read_to_end(&mut bytes)?;
+            Ok(bytes)
+        })();
+        let bytes = read.map_err(|e| self.fail(HostError::PermissionDenied { permission: format!("source.read {path}: {e}") }))?;
+        if let Some(import) = self.import.as_mut() {
+            import.read_bytes = import.read_bytes.saturating_add(bytes.len() as u64);
+            if import.read_bytes > MAX_IMPORT_INPUT_BYTES {
+                return Err(self.fail(limit("source: more than 1 GiB read in one import")));
+            }
+        }
+        Ok(bytes)
+    }
+    fn size(&mut self, path: String) -> std::result::Result<Option<u64>, PluginError> {
+        let target = self.source_path(&path)?;
+        let import = self.import.as_ref().ok_or_else(|| PluginError::Trap("not an import".into()))?;
+        match import.dir.metadata(&target) {
+            Ok(metadata) if metadata.is_file() => Ok(Some(metadata.len())),
+            Ok(_) => Ok(None),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(self.fail(HostError::PermissionDenied { permission: format!("source.size {path}: {error}") })),
+        }
+    }
+    fn resolve(&mut self, path: String) -> std::result::Result<Option<String>, PluginError> {
+        let target = self.source_path(&path)?;
+        if path.is_empty() {
+            return Ok(Some(String::new()));
+        }
+        let import = self.import.as_ref().ok_or_else(|| PluginError::Trap("not an import".into()))?;
+        if import.dir.metadata(&target).is_ok_and(|m| m.is_file()) {
+            return Ok(Some(target.to_string_lossy().replace('\\', "/")));
+        }
+        // The one file in that folder whose name matches ignoring case: a part an assembly
+        // spelled differently from the disk (made on a case-insensitive system).
+        let (Some(parent), Some(wanted)) = (target.parent(), target.file_name().map(|n| n.to_string_lossy().to_lowercase())) else {
+            return Ok(None);
+        };
+        let listing = if parent.as_os_str().is_empty() { import.dir.entries() } else { import.dir.read_dir(parent) };
+        let Ok(listing) = listing else { return Ok(None) };
+        let mut found = None;
+        let mut scanned = 0;
+        for entry in listing.flatten() {
+            scanned += 1;
+            if scanned > MAX_IMPORT_FILES {
+                // A partial scan cannot show the match is the only one.
+                return Ok(None);
+            }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') || name.to_lowercase() != wanted || !entry.file_type().is_ok_and(|t| t.is_file()) {
+                continue;
+            }
+            if found.is_some() {
+                return Ok(None);
+            }
+            found = Some(parent.join(name).to_string_lossy().replace('\\', "/"));
+        }
+        Ok(found)
+    }
+}
+impl<H: PluginHost> design::Host for State<H> {
+    fn write(&mut self, bytes: Vec<u8>) -> std::result::Result<(), PluginError> {
+        self.check()?;
+        if bytes.len() > MAX_IMPORT_CHUNK_BYTES {
+            return Err(self.fail(limit("design.write chunk (at most 1 MiB)")));
+        }
+        let Some(import) = self.import.as_mut() else {
+            return Err(self.fail(HostError::PermissionDenied { permission: "design: this call is not an import".into() }));
+        };
+        if import.design.len().saturating_add(bytes.len()) > MAX_IMPORT_DESIGN_BYTES {
+            let allowed = (MAX_IMPORT_DESIGN_BYTES >> 20) as u64;
+            return Err(self.fail(HostError::Exhausted { limit: "design_mib".into(), allowed }));
+        }
+        import.design.extend_from_slice(&bytes);
+        Ok(())
+    }
+}
+
+impl<H: PluginHost> State<H> {
+    /// The import, when its manifest asks for `evaluate`.
+    fn evaluation(&mut self) -> std::result::Result<&mut ImportState, PluginError> {
+        self.check()?;
+        match self.import.as_mut() {
+            Some(import) if import.evaluate => Ok(import),
+            _ => Err(wit_error(HostError::PermissionDenied { permission: "evaluate: the manifest does not ask for evaluate@0.1".into() })),
+        }
+    }
+    fn close_evaluation(&mut self) {
+        if let Some(import) = self.import.as_mut()
+            && std::mem::take(&mut import.evaluating)
+        {
+            self.host.evaluate_close();
+        }
+    }
+}
+impl<H: PluginHost> evaluate::Host for State<H> {
+    fn stage(&mut self, bytes: Vec<u8>) -> std::result::Result<(), PluginError> {
+        if bytes.len() > MAX_IMPORT_CHUNK_BYTES {
+            self.check()?;
+            return Err(self.fail(limit("evaluate.stage chunk (at most 1 MiB)")));
+        }
+        if self.evaluation()?.evaluating {
+            self.close_evaluation();
+            if let Some(import) = self.import.as_mut() {
+                import.scratch.clear();
+            }
+        }
+        let import = self.evaluation()?;
+        if import.scratch.len().saturating_add(bytes.len()) > MAX_IMPORT_DESIGN_BYTES {
+            return Err(self.fail(limit("evaluate: a staged design of more than 256 MiB")));
+        }
+        import.scratch.extend_from_slice(&bytes);
+        Ok(())
+    }
+    fn run(&mut self, command: String, args: String) -> std::result::Result<String, PluginError> {
+        if args.len() > MAX_JSON_BYTES || command.len() > 128 {
+            self.check()?;
+            return Err(self.fail(limit("evaluate.run arguments exceed 1 MiB")));
+        }
+        let args: Value =
+            serde_json::from_str(&args).map_err(|e| wit_error(HostError::InvalidInput { field: "args".into(), reason: e.to_string() }))?;
+        if !self.evaluation()?.evaluating {
+            let design = std::mem::take(&mut self.evaluation()?.scratch);
+            // The plugin's own design not opening is an answer about it, not a failed import.
+            self.host.evaluate_open(&design).map_err(wit_error)?;
+            self.evaluation()?.evaluating = true;
+        }
+        let result = self.host.evaluate_run(&command, &args).map_err(wit_error)?;
+        let text = serde_json::to_string(&result).map_err(|e| wit_error(trap(e.to_string())))?;
+        if text.len() > MAX_JSON_BYTES {
+            // Too large to check this way: an answer, not a failed import.
+            return Err(wit_error(limit("evaluate.run result exceeds 1 MiB")));
+        }
+        Ok(text)
+    }
+    fn reset(&mut self) {
+        self.close_evaluation();
+        if let Some(import) = self.import.as_mut() {
+            import.scratch = Vec::new();
+        }
+    }
+}
+
 /// Refuses `path` inside a granted folder when any part of it is a symbolic link (or, on Windows,
 /// a junction). Authorization looks at the path as spelled, so a link would let a visible name
 /// reach what the spelling hides: `public -> .hidden` made `public/secret.txt` readable and
@@ -279,7 +541,7 @@ fn refuse_links(dir: &Dir, path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-fn execution_error(failure: &wasmtime::Error, remaining: Option<u64>, limits: &Limits) -> HostError {
+fn execution_error(failure: &wasmtime::Error, remaining: Option<u64>, limits: &Limits, stack_bytes: usize) -> HostError {
     let trap_name = failure.downcast_ref::<wasmtime::Trap>().map(|t| format!("{t:?}")).unwrap_or_else(|| "none".into());
     let fuel = remaining.map(|n| format!("fuel_consumed={}, fuel_remaining={n}", limits.fuel.saturating_sub(n))).unwrap_or_default();
     let reason = format!(
@@ -289,47 +551,102 @@ fn execution_error(failure: &wasmtime::Error, remaining: Option<u64>, limits: &L
         limits.memory_mib,
         limits.deadline_ms
     );
+    // A budget the plugin ran into is said plainly; the engine's details are for its author.
+    let exhausted = |limit: &str, allowed: u64| {
+        ::log::debug!(target: "craft_plugin_wasm", "plugin stopped: {reason}");
+        HostError::Exhausted { limit: limit.into(), allowed }
+    };
     match failure.downcast_ref::<wasmtime::Trap>() {
-        Some(wasmtime::Trap::OutOfFuel) => limit(&format!("fuel: {reason}")),
-        Some(wasmtime::Trap::StackOverflow) => limit(&format!("stack: {reason}")),
-        _ if reason.contains("growing memory") => limit(&format!("memory: {reason}")),
+        Some(wasmtime::Trap::OutOfFuel) => exhausted("fuel", limits.fuel),
+        Some(wasmtime::Trap::StackOverflow) => exhausted("stack_kib", (stack_bytes / 1024) as u64),
+        _ if reason.contains("growing memory") => exhausted("memory_mib", limits.memory_mib as u64),
         _ => trap(reason),
     }
 }
 
-/// Refuse reserved network imports even when Wasmtime elides an unused import instance.
-fn reject_network_imports(engine: &Engine, component: &Component) -> Result<()> {
+/// The WIT a component was built against: the current [`craft_plugin::API`] or the frozen 0.1.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Wit {
+    Current,
+    V0_1,
+}
+
+/// Record an interface version before compilation can fail on a validator limit.
+fn note_version(name: &str, found: &mut BTreeSet<String>) -> Result<()> {
+    let package = craft_plugin::API.split_once('@').map(|(package, _)| package).unwrap_or(craft_plugin::API);
+    let version_of = |name: &str| -> Option<String> {
+        name.strip_prefix(&format!("{package}/")).and_then(|rest| rest.split_once('@')).map(|(_, version)| version.chars().take(32).collect())
+    };
+    let Some(version) = version_of(name) else { return Ok(()) };
+    if !craft_plugin::WIT_VERSIONS.contains(&version.as_str()) {
+        return Err(HostError::UnsupportedCapability {
+            capability: format!("{package}@{version}"),
+            reason: format!(
+                "built against {package}@{version}, and this host runs {package} {}; update the app or the plugin",
+                craft_plugin::WIT_VERSIONS.join(" and ")
+            ),
+        });
+    }
+    found.insert(version);
+    Ok(())
+}
+
+/// Refuse reserved network imports even when Wasmtime elides an unused import instance, and read
+/// the WIT version the component's imports and exports name: one the host runs, and only one.
+fn check_imports(engine: &Engine, component: &Component) -> Result<Wit> {
     use wasmtime::component::types::ComponentItem;
-    fn check(engine: &Engine, name: &str, item: ComponentItem, depth: usize, remaining: &mut usize) -> Result<()> {
+    let package = craft_plugin::API.split_once('@').map(|(package, _)| package).unwrap_or(craft_plugin::API);
+    let mut found = BTreeSet::new();
+    /// One import (`import`) or export and everything in it, at most `remaining` items in all.
+    #[allow(clippy::too_many_arguments)]
+    fn check(
+        engine: &Engine,
+        package: &str,
+        import: bool,
+        name: &str,
+        item: ComponentItem,
+        depth: usize,
+        remaining: &mut usize,
+        note: &mut dyn FnMut(&str) -> Result<()>,
+    ) -> Result<()> {
         if depth > 64 || *remaining == 0 {
-            return Err(limit("plugin import interface count or depth"));
+            return Err(limit(if import { "plugin import interface count or depth" } else { "plugin export interface count or depth" }));
         }
         *remaining -= 1;
-        let package = craft_plugin::API.split_once('@').map(|(package, _)| package).unwrap_or(craft_plugin::API);
-        if let Some(version) = name.strip_prefix(&format!("{package}/")).and_then(|rest| rest.split_once('@')).map(|(_, version)| version)
-            && Some(version) != craft_plugin::API.split_once('@').map(|(_, version)| version)
+        note(name)?;
+        // Only an import reaches the network; an export named like one is the plugin's own.
+        if import
+            && (name == "fetch"
+                || name.starts_with("wasi:sockets/")
+                || name.starts_with("wasi:http/")
+                || name.starts_with(&format!("{package}/fetch")))
         {
-            let version: String = version.chars().take(32).collect();
-            return Err(HostError::UnsupportedCapability {
-                capability: format!("{package}@{version}"),
-                reason: format!("built against {package}@{version}, and this host runs {}; update the app or the plugin", craft_plugin::API),
-            });
-        }
-        if name == "fetch" || name.starts_with("wasi:sockets/") || name.starts_with("wasi:http/") || name.starts_with(&format!("{package}/fetch")) {
             return Err(HostError::PermissionDenied { permission: format!("network import is forbidden: {name}") });
         }
         if let ComponentItem::ComponentInstance(instance) = item {
             for (name, export) in instance.exports(engine) {
-                check(engine, name, export.ty, depth + 1, remaining)?;
+                check(engine, package, import, name, export.ty, depth + 1, remaining, note)?;
             }
         }
         Ok(())
     }
     let mut remaining = 4096;
     for (name, import) in component.component_type().imports(engine) {
-        check(engine, name, import.ty, 0, &mut remaining)?;
+        check(engine, package, true, name, import.ty, 0, &mut remaining, &mut |name| note_version(name, &mut found))?;
     }
-    Ok(())
+    // Exports are read the same way, members of exported instances too, with a budget of their own.
+    let mut remaining = 4096;
+    for (name, export) in component.component_type().exports(engine) {
+        check(engine, package, false, name, export.ty, 0, &mut remaining, &mut |name| note_version(name, &mut found))?;
+    }
+    if found.len() > 1 {
+        let versions = found.iter().map(String::as_str).collect::<Vec<_>>().join(" and ");
+        return Err(HostError::UnsupportedCapability {
+            capability: package.into(),
+            reason: format!("mixes {package} {versions}; build the plugin against one version"),
+        });
+    }
+    Ok(if found.first().is_some_and(|version| version == "0.1.0") { Wit::V0_1 } else { Wit::Current })
 }
 
 pub(super) fn run<H: PluginHost + 'static>(
@@ -341,30 +658,28 @@ pub(super) fn run<H: PluginHost + 'static>(
     options: RuntimeOptions,
 ) -> (H, Result<Value>) {
     let prepared = (|| {
-        if bytes.len() > MAX_COMPONENT_BYTES {
-            return Err(limit("component size"));
-        }
         let runtime = manifest
             .runtime
             .as_ref()
             .ok_or_else(|| HostError::InvalidManifest { field: "runtime".into(), reason: "no executable runtime".into() })?;
         runtime.validate()?;
+        if runtime.is_importer() {
+            return Err(HostError::InvalidInput { field: "entry".into(), reason: "an importer converts a file; open the file instead".into() });
+        }
+        if bytes.len() > runtime.max_component_bytes() {
+            return Err(limit("component size"));
+        }
         let entry = runtime
             .entries
             .iter()
             .find(|e| e.name == entry)
             .ok_or_else(|| HostError::InvalidInput { field: "entry".into(), reason: "unknown entry".into() })?;
-        if !(64 * 1024..=64 * 1024 * 1024).contains(&options.stack_bytes) {
-            return Err(HostError::InvalidInput { field: "stack_bytes".into(), reason: "must be 64 KiB..64 MiB".into() });
-        }
         let params = serde_json::to_string(params).map_err(|e| trap(e.to_string()))?;
         if params.len() > MAX_JSON_BYTES {
             return Err(limit("parameters exceed 1 MiB"));
         }
-        let mut config = Config::new();
-        config.consume_fuel(true).epoch_interruption(true).wasm_memory64(false).wasm_multi_memory(false).max_wasm_stack(options.stack_bytes);
-        let engine = Engine::new(&config).map_err(|e| trap(e.to_string()))?;
-        let component = Component::from_binary(&engine, bytes).map_err(|e| trap(format!("component compilation failed: {e:#}")))?;
+        let stack = stack_bytes(&runtime.limits, options, false)?;
+        let (engine, component) = compile(bytes, stack)?;
         let commands = host.command_catalog().into_iter().filter(|s| runtime.commands.contains(&s.name)).map(|s| (s.name.clone(), s)).collect();
         let groups: BTreeSet<String> = host.granted_command_groups().intersection(&runtime.permissions.command_groups).cloned().collect();
         let mut folders = BTreeMap::new();
@@ -382,13 +697,13 @@ pub(super) fn run<H: PluginHost + 'static>(
             return Err(HostError::Cancelled);
         }
         host.begin_transaction()?;
-        Ok((runtime, entry, params, engine, component, (commands, groups), folders))
+        Ok((runtime, entry, params, (engine, component, stack), (commands, groups), folders))
     })();
-    let (runtime, entry, params, engine, component, commands, folders) = match prepared {
+    let (runtime, entry, params, compiled, commands, folders) = match prepared {
         Ok(prepared) => prepared,
         Err(error) => return (host, Err(error)),
     };
-    let (mut state, outcome) = execute(host, runtime, entry, params, engine, component, commands, folders);
+    let (mut state, outcome) = execute(host, runtime, entry, params, compiled, commands, folders);
     let result = (|| match outcome {
         Ok(value) => match state.host.commit_transaction() {
             Ok(()) => state.publish_writes().map(|()| value),
@@ -412,8 +727,7 @@ fn execute<H: PluginHost + 'static>(
     runtime: &craft_plugin::RuntimeManifest,
     entry: &craft_plugin::Entry,
     params: String,
-    engine: Engine,
-    component: Component,
+    (engine, component, stack): (Engine, Component, usize),
     (commands, groups): (BTreeMap<String, CommandSchema>, BTreeSet<String>),
     folders: BTreeMap<String, Folder>,
 ) -> (State<H>, Result<Value>) {
@@ -428,68 +742,38 @@ fn execute<H: PluginHost + 'static>(
         clock: runtime.permissions.clock,
         failed: None,
         calls: 0,
+        max_calls: MAX_CALLS,
         log_bytes: 0,
         deadline: Instant::now() + Duration::from_millis(limits.deadline_ms),
-        limits: StoreLimitsBuilder::new()
-            .memory_size(limits.memory_mib.saturating_mul(1024 * 1024))
-            .instances(8)
-            .memories(1)
-            .tables(2)
-            .table_elements(10_000)
-            .trap_on_grow_failure(true)
-            .build(),
+        limits: store_limits(limits, 10_000),
+        import: None,
     };
     let mut store = Store::new(&engine, state);
     let outcome = (|| {
-        store.limiter(|s| &mut s.limits);
-        store.set_fuel(limits.fuel).map_err(|e| trap(e.to_string()))?;
-        store.set_epoch_deadline(1);
-        store.epoch_deadline_callback(|mut context| {
-            let state = context.data_mut();
-            if state.host.is_cancelled() {
-                state.failed.get_or_insert(HostError::Cancelled);
-                return Err(wasmtime::Error::msg("plugin cancelled"));
+        prepare_store(&mut store, limits)?;
+        let wit = check_imports(&engine, &component)?;
+        let response = with_interrupts(&engine, || match wit {
+            Wit::V0_1 => v0_1::call_entry(&engine, &mut store, &component, &entry.name, &params),
+            Wit::Current => {
+                let mut linker = Linker::new(&engine);
+                bindings::CommandPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
+                let guest = bindings::CommandPlugin::instantiate(&mut store, &component, &linker)?;
+                Ok(call_entry!(guest, &mut store, &entry.name, &params)?.map_err(host_error))
             }
-            if Instant::now() >= state.deadline {
-                state.failed.get_or_insert_with(|| limit("deadline"));
-                return Err(wasmtime::Error::msg("plugin deadline exceeded"));
-            }
-            Ok(UpdateDeadline::Continue(1))
-        });
-        reject_network_imports(&engine, &component)?;
-        let mut linker = Linker::new(&engine);
-        bindings::CommandPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(|e| trap(e.to_string()))?;
-        let (stop, stopped) = mpsc::channel::<()>();
-        let timer_engine = engine.clone();
-        let clock = std::thread::Builder::new()
-            .name("plugin-interrupt".into())
-            .spawn(move || {
-                while matches!(stopped.recv_timeout(EPOCH_POLL), Err(mpsc::RecvTimeoutError::Timeout)) {
-                    timer_engine.increment_epoch();
-                }
-            })
-            .map_err(|e| trap(format!("could not start interrupt worker: {e}")))?;
-        let response = (|| {
-            let guest = bindings::CommandPlugin::instantiate(&mut store, &component, &linker)?;
-            call_entry!(guest, &mut store, &entry.name, &params)
-        })();
-        let _ = stop.send(());
-        if clock.join().is_err() {
-            return Err(trap("interrupt worker failed"));
-        }
+        })?;
         if let Some(error) = store.data().failed.clone() {
             return Err(error);
         }
-        let response = response.map_err(|e| execution_error(&e, store.get_fuel().ok(), limits))?;
-        let text = response.map_err(host_error)?;
+        let response = response.map_err(|e| execution_error(&e, store.get_fuel().ok(), limits, stack))?;
+        let text = response?;
         if text.len() > MAX_JSON_BYTES {
-            return Err(limit("entry result exceeds 1 MiB"));
+            return Err(limit("the entry's result is larger than 1 MiB"));
         }
         if store.data().host.is_cancelled() {
             return Err(HostError::Cancelled);
         }
         if Instant::now() >= store.data().deadline {
-            return Err(limit("deadline"));
+            return Err(deadline());
         }
         let value = serde_json::from_str(&text)
             .map_err(|e| HostError::InvalidInput { field: "result".into(), reason: format!("entry result is not JSON: {e}") })?;
@@ -504,8 +788,352 @@ fn execute<H: PluginHost + 'static>(
         }
         Ok(value)
     })();
-    (store.into_data(), outcome)
+    (store.into_data(), outcome.map_err(|error| with_limits(error, limits)))
+}
+
+fn store_limits(limits: &Limits, table_elements: usize) -> StoreLimits {
+    StoreLimitsBuilder::new()
+        .memory_size(limits.memory_mib.saturating_mul(1024 * 1024))
+        .instances(8)
+        .memories(1)
+        .tables(2)
+        .table_elements(table_elements)
+        .trap_on_grow_failure(true)
+        .build()
+}
+
+/// Fuel, memory and the deadline and cancellation checks every epoch tick.
+fn prepare_store<H: PluginHost + 'static>(store: &mut Store<State<H>>, limits: &Limits) -> Result<()> {
+    store.limiter(|s| &mut s.limits);
+    store.set_fuel(limits.fuel).map_err(|e| trap(e.to_string()))?;
+    store.set_epoch_deadline(1);
+    store.epoch_deadline_callback(|mut context| {
+        let state = context.data_mut();
+        if state.host.is_cancelled() {
+            state.failed.get_or_insert(HostError::Cancelled);
+            return Err(wasmtime::Error::msg("plugin cancelled"));
+        }
+        if Instant::now() >= state.deadline {
+            state.failed.get_or_insert_with(deadline);
+            return Err(wasmtime::Error::msg("plugin deadline exceeded"));
+        }
+        Ok(UpdateDeadline::Continue(1))
+    });
+    Ok(())
+}
+
+/// Runs `call` while a worker ticks the engine's epoch, so a loop that never calls the host still
+/// meets the deadline and Cancel.
+fn with_interrupts<T>(engine: &Engine, call: impl FnOnce() -> wasmtime::Result<T>) -> Result<wasmtime::Result<T>> {
+    let (stop, stopped) = mpsc::channel::<()>();
+    let timer_engine = engine.clone();
+    let clock = std::thread::Builder::new()
+        .name("plugin-interrupt".into())
+        .spawn(move || {
+            while matches!(stopped.recv_timeout(EPOCH_POLL), Err(mpsc::RecvTimeoutError::Timeout)) {
+                timer_engine.increment_epoch();
+            }
+        })
+        .map_err(|e| trap(format!("could not start interrupt worker: {e}")))?;
+    let response = call();
+    let _ = stop.send(());
+    if clock.join().is_err() {
+        return Err(trap("interrupt worker failed"));
+    }
+    Ok(response)
+}
+
+/// The most stack a command's manifest may ask for: a command runs on the caller's own thread.
+/// An importer runs on a thread sized for its request, so it may ask for more.
+const COMMAND_STACK_MAX_BYTES: usize = 1024 * 1024;
+
+/// The guest stack: the manifest's `stack_kib` when it asks for one, else the app's default.
+fn stack_bytes(limits: &Limits, options: RuntimeOptions, importer: bool) -> Result<usize> {
+    let bytes = limits.stack_kib.map_or(options.stack_bytes, |kib| kib as usize * 1024);
+    if !(64 * 1024..=64 * 1024 * 1024).contains(&bytes) {
+        return Err(HostError::InvalidInput { field: "stack_bytes".into(), reason: "must be 64 KiB..64 MiB".into() });
+    }
+    if !importer && bytes > COMMAND_STACK_MAX_BYTES.max(options.stack_bytes) {
+        return Err(limit("stack_kib: a command may ask for at most 1 MiB"));
+    }
+    Ok(bytes)
+}
+
+/// The first eight bytes of a core WebAssembly module; a component's header names layer 1 instead.
+const CORE_MODULE_HEADER: [u8; 8] = *b"\0asm\x01\0\0\0";
+
+/// A host that answers nothing: [`check_component`] links against it and never instantiates.
+struct Inert;
+impl PluginHost for Inert {
+    fn command_catalog(&self) -> Vec<CommandSchema> {
+        Vec::new()
+    }
+    fn run_command(&mut self, name: &str, _args: &Value) -> Result<Value> {
+        Err(HostError::PermissionDenied { permission: format!("command {name} is not granted") })
+    }
+    fn begin_transaction(&mut self) -> Result<()> {
+        Ok(())
+    }
+    fn commit_transaction(&mut self) -> Result<()> {
+        Ok(())
+    }
+    fn rollback_transaction(&mut self) -> Result<()> {
+        Ok(())
+    }
+    fn granted_folders(&self) -> Vec<craft_plugin::FileGrant> {
+        Vec::new()
+    }
+    fn log(&mut self, _message: &str) {}
+    fn progress(&mut self, _fraction: f32, _message: &str) {}
+}
+
+fn component_error(reason: impl Into<String>) -> HostError {
+    HostError::InvalidInput { field: "component".into(), reason: reason.into() }
+}
+
+pub(super) fn check_component(manifest: &Manifest, bytes: &[u8], options: RuntimeOptions) -> Result<()> {
+    let runtime =
+        manifest.runtime.as_ref().ok_or_else(|| HostError::InvalidManifest { field: "runtime".into(), reason: "no executable runtime".into() })?;
+    runtime.validate()?;
+    if bytes.len() > runtime.max_component_bytes() {
+        return Err(limit(&format!("component size: {} bytes is over {} MiB", bytes.len(), runtime.max_component_bytes() >> 20)));
+    }
+    if bytes.starts_with(&CORE_MODULE_HEADER) {
+        return Err(component_error("this is a core WebAssembly module, not a component"));
+    }
+    let importer = runtime.is_importer();
+    let (engine, component) = compile_with(bytes, stack_bytes(&runtime.limits, options, importer)?)?;
+    let wit = check_imports(&engine, &component)?;
+    let link = |e: wasmtime::Error| component_error(format!("{e:#}"));
+    if wit == Wit::V0_1 {
+        return v0_1::check_link::<Inert>(&engine, &component, importer).map_err(link);
+    }
+    let mut linker = Linker::<State<Inert>>::new(&engine);
+    if importer {
+        importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
+        importer_bindings::ImporterPluginPre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
+    } else {
+        bindings::CommandPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
+        bindings::CommandPluginPre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
+    }
+    Ok(())
+}
+
+type Compiled = (Arc<[u8]>, usize, Engine, Component);
+/// The most recently compiled component. Compiling a large importer takes tens of seconds; keeping
+/// the compiled code in memory (never on disk, which would need unsafe deserialization) lets the
+/// next file open at once. Every call still gets a fresh instance and store.
+static COMPILED: Mutex<Option<Compiled>> = Mutex::new(None);
+
+fn compile(bytes: &[u8], stack_bytes: usize) -> Result<(Engine, Component)> {
+    if let Ok(cache) = COMPILED.lock()
+        && let Some((cached, stack, engine, component)) = cache.as_ref()
+        && *stack == stack_bytes
+        && cached.as_ref() == bytes
+    {
+        return Ok((engine.clone(), component.clone()));
+    }
+    let (engine, component) = compile_with(bytes, stack_bytes)?;
+    if let Ok(mut cache) = COMPILED.lock() {
+        *cache = Some((Arc::from(bytes), stack_bytes, engine.clone(), component.clone()));
+    }
+    Ok((engine, component))
+}
+
+/// The parser exposes limit failures as messages rather than a public error kind.
+fn component_parse_error(error: &wasmtime::wasmparser::BinaryReaderError) -> HostError {
+    if error.message().contains("exceeds limit") {
+        limit(&format!("component validation: {}", error.message()))
+    } else {
+        trap(format!("component parsing failed: {error}"))
+    }
+}
+
+/// Read the outer interface before Wasmtime validation. Exporting an instance creates another
+/// instance index, so its 1000-instance limit can precede our 4096-interface limit. The typed scan
+/// still checks nested interfaces after compilation; this pass does not interpret private names.
+fn check_outer_interfaces(bytes: &[u8]) -> Result<()> {
+    use wasmtime::wasmparser::{Parser, Payload};
+    let mut depth = 0usize;
+    let mut imports = 0usize;
+    let mut exports = 0usize;
+    let mut found = BTreeSet::new();
+    for payload in Parser::new(0).parse_all(bytes) {
+        let payload = payload.map_err(|e| component_parse_error(&e))?;
+        match payload {
+            Payload::Version { .. } => depth += 1,
+            Payload::End(_) => depth = depth.saturating_sub(1),
+            Payload::ComponentImportSection(section) if depth == 1 => {
+                for import in section {
+                    let import = import.map_err(|e| component_parse_error(&e))?;
+                    imports += 1;
+                    note_version(import.name.name, &mut found)?;
+                }
+            }
+            Payload::ComponentExportSection(section) if depth == 1 => {
+                for export in section {
+                    let export = export.map_err(|e| component_parse_error(&e))?;
+                    exports += 1;
+                    note_version(export.name.name, &mut found)?;
+                }
+            }
+            _ => {}
+        }
+    }
+    if imports > 4096 {
+        return Err(limit("plugin import interface count or depth"));
+    }
+    if exports > 4096 {
+        return Err(limit("plugin export interface count or depth"));
+    }
+    Ok(())
+}
+
+/// Compiles `bytes` under the host's configuration, without the cache.
+fn compile_with(bytes: &[u8], stack_bytes: usize) -> Result<(Engine, Component)> {
+    check_outer_interfaces(bytes)?;
+    let mut config = Config::new();
+    config.consume_fuel(true).epoch_interruption(true).wasm_memory64(false).wasm_multi_memory(false).max_wasm_stack(stack_bytes);
+    // Wasmtime refuses a Wasm stack larger than its async stack, even for synchronous calls.
+    config.async_stack_size(stack_bytes.saturating_add(1 << 20));
+    let engine = Engine::new(&config).map_err(|e| trap(e.to_string()))?;
+    let component = Component::from_binary(&engine, bytes).map_err(|e| {
+        // Inspect the parser error itself, not plugin names in the compilation context.
+        if let Some(error) = e.downcast_ref::<wasmtime::wasmparser::BinaryReaderError>() {
+            return component_parse_error(error);
+        }
+        trap(format!("component compilation failed: {e:#}"))
+    })?;
+    Ok((engine, component))
+}
+
+pub(super) fn run_import<H: PluginHost + 'static>(
+    host: H,
+    manifest: &Manifest,
+    bytes: &[u8],
+    entry: &str,
+    options: &Value,
+    request: &ImportRequest,
+    runtime_options: RuntimeOptions,
+) -> (H, Result<Imported>) {
+    let prepared = (|| {
+        let runtime = manifest
+            .runtime
+            .as_ref()
+            .ok_or_else(|| HostError::InvalidManifest { field: "runtime".into(), reason: "no executable runtime".into() })?;
+        runtime.validate()?;
+        if !runtime.is_importer() {
+            return Err(HostError::InvalidInput { field: "entry".into(), reason: "this plugin is not an importer".into() });
+        }
+        if bytes.len() > runtime.max_component_bytes() {
+            return Err(limit("component size"));
+        }
+        let entry = runtime
+            .entries
+            .iter()
+            .find(|e| e.name == entry)
+            .ok_or_else(|| HostError::InvalidInput { field: "entry".into(), reason: "unknown entry".into() })?;
+        let options = serde_json::to_string(options).map_err(|e| trap(e.to_string()))?;
+        if options.len() > MAX_JSON_BYTES {
+            return Err(limit("options exceed 1 MiB"));
+        }
+        let name = request.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        if name.is_empty() || name.len() > 255 || name.chars().any(char::is_control) || name.starts_with('.') {
+            return Err(HostError::InvalidInput { field: "path".into(), reason: "choose a named, visible file".into() });
+        }
+        let folder = request.path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+        let dir = Dir::open_ambient_dir(folder, cap_std::ambient_authority())
+            .map_err(|e| HostError::PermissionDenied { permission: format!("source: {}: {e}", folder.display()) })?;
+        let size = match dir.symlink_metadata(&name) {
+            Ok(metadata) if metadata.is_file() => metadata.len(),
+            Ok(_) => return Err(HostError::InvalidInput { field: "path".into(), reason: "not a regular file".into() }),
+            Err(e) => return Err(HostError::InvalidInput { field: "path".into(), reason: e.to_string() }),
+        };
+        if size > MAX_IMPORT_INPUT_BYTES {
+            return Err(limit("source: the file is larger than 1 GiB"));
+        }
+        let stack = stack_bytes(&runtime.limits, runtime_options, true)?;
+        let (engine, component) = compile(bytes, stack)?;
+        let import = ImportState {
+            dir,
+            name: name.clone(),
+            input_folder: request.input_folder && runtime.permissions.input_folder,
+            read_bytes: 0,
+            files: BTreeSet::new(),
+            design: Vec::new(),
+            evaluate: manifest.capabilities.iter().any(|capability| capability.starts_with("evaluate@")),
+            scratch: Vec::new(),
+            evaluating: false,
+        };
+        Ok((runtime, entry, options, (engine, component, stack), import, source::FileInfo { name, size }))
+    })();
+    let (runtime, entry, options, (engine, component, stack), import, file) = match prepared {
+        Ok(prepared) => prepared,
+        Err(error) => return (host, Err(error)),
+    };
+    if host.is_cancelled() {
+        return (host, Err(HostError::Cancelled));
+    }
+    let limits = &runtime.limits;
+    let state = State {
+        host,
+        commands: BTreeMap::new(),
+        groups: BTreeSet::new(),
+        effect: Effect::Open,
+        folders: BTreeMap::new(),
+        staged: BTreeMap::new(),
+        clock: runtime.permissions.clock,
+        failed: None,
+        calls: 0,
+        max_calls: MAX_IMPORT_CALLS,
+        log_bytes: 0,
+        deadline: Instant::now() + Duration::from_millis(limits.deadline_ms),
+        // A large converter has a large indirect-call table.
+        limits: store_limits(limits, 1_000_000),
+        import: Some(import),
+    };
+    let mut store = Store::new(&engine, state);
+    let outcome = (|| {
+        prepare_store(&mut store, limits)?;
+        let wit = check_imports(&engine, &component)?;
+        let response = with_interrupts(&engine, || match wit {
+            Wit::V0_1 => v0_1::call_import(&engine, &mut store, &component, &entry.name, &file, &options),
+            Wit::Current => {
+                let mut linker = Linker::new(&engine);
+                importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
+                let guest = importer_bindings::ImporterPlugin::instantiate(&mut store, &component, &linker)?;
+                Ok(call_import!(guest, &mut store, &entry.name, &file, &options)?.map_err(host_error))
+            }
+        })?;
+        if let Some(error) = store.data().failed.clone() {
+            return Err(error);
+        }
+        let response = response.map_err(|e| execution_error(&e, store.get_fuel().ok(), limits, stack))?;
+        let text = response?;
+        if text.len() > MAX_JSON_BYTES {
+            return Err(limit("the importer's loss report is larger than 1 MiB"));
+        }
+        if store.data().host.is_cancelled() {
+            return Err(HostError::Cancelled);
+        }
+        let report: LossReport = serde_json::from_str(&text)
+            .map_err(|e| HostError::InvalidInput { field: "loss_report".into(), reason: format!("the importer's loss report is not valid: {e}") })?;
+        report.validate()?;
+        let design = store.data_mut().import.as_mut().map(|import| std::mem::take(&mut import.design)).unwrap_or_default();
+        if design.is_empty() {
+            return Err(HostError::InvalidInput { field: "design".into(), reason: "the importer wrote no design".into() });
+        }
+        // A last host call can finish after the deadline, before the next epoch tick sees it.
+        if Instant::now() >= store.data().deadline {
+            return Err(deadline());
+        }
+        Ok(Imported { design, report })
+    })();
+    let mut state = store.into_data();
+    state.close_evaluation();
+    (state.host, outcome.map_err(|error| with_limits(error, limits)))
 }
 
 #[cfg(test)]
 mod tests;
+mod v0_1;

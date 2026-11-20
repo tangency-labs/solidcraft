@@ -1,0 +1,542 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b17": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b22": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b6": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "distance": 40.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                -1.0,
+                0.0
+              ],
+              "center": [
+                0.0,
+                -60.0,
+                0.0
+              ],
+              "end": 6.896285307179586,
+              "radius": 15.0,
+              "reference": [
+                1.0,
+                0.0,
+                -0.0
+              ],
+              "start": 0.6131
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          -0.5000000000000001,
+          0.8660254037844387
+        ],
+        "distance": 50.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                -0.5000000000000001,
+                0.8660254037844387
+              ],
+              "center": [
+                0.0,
+                -72.5,
+                -4.330127018922193
+              ],
+              "end": 6.896285307179586,
+              "radius": 15.0,
+              "reference": [
+                1.0,
+                0.0,
+                -0.0
+              ],
+              "start": 0.6131
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "union"
+      }
+    },
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "split_faces",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "faces": [
+          4
+        ],
+        "tools": [
+          {
+            "plane": {
+              "origin": [
+                0.0,
+                -66.33974596215562,
+                15.0
+              ],
+              "u": [
+                -134.5123722093663,
+                134.5123722093663
+              ],
+              "v": [
+                -216.79597579852387,
+                179.75327517780272
+              ],
+              "xaxis": [
+                1.0,
+                0.0,
+                -0.0
+              ],
+              "yaxis": [
+                0.0,
+                0.8660254037844387,
+                0.5000000000000001
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b18"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b19"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b19"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b20"
+      ],
+      "op": "split_faces",
+      "outputs": [
+        "b21"
+      ],
+      "params": {
+        "faces": [
+          4
+        ],
+        "tools": [
+          {
+            "plane": {
+              "origin": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "u": [
+                -229.95246995119948,
+                55.35331230240647
+              ],
+              "v": [
+                -135.9384516908495,
+                164.4600413205131
+              ],
+              "xaxis": [
+                0.0,
+                1.0,
+                0.0
+              ],
+              "yaxis": [
+                0.0,
+                0.0,
+                1.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b22"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b23"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b23"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b24"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b24"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b25"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b25"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b26"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  2.9152132961212795e-6,
+                  -66.33974596215576,
+                  14.999999999999712
+                ],
+                [
+                  12.26802289736966,
+                  -70.01684122302552,
+                  8.631084183902608
+                ]
+              ],
+              "index": 17
+            },
+            {
+              "at": [
+                [
+                  -15.0,
+                  -75.00000000000001,
+                  -2.1371793224034263e-15
+                ],
+                [
+                  2.9152132961212795e-6,
+                  -66.33974596215576,
+                  14.999999999999712
+                ]
+              ],
+              "index": 16
+            },
+            {
+              "at": [
+                [
+                  12.26802289736966,
+                  -70.01684122302552,
+                  8.631084183902608
+                ],
+                [
+                  15.000000000000002,
+                  -75.0,
+                  1.4377388168895777e-14
+                ]
+              ],
+              "index": 19
+            }
+          ],
+          "points": [
+            [
+              7.086392313792641,
+              -67.3721398567018,
+              13.21184132122207
+            ],
+            [
+              -10.934992501649553,
+              -69.11683313617377,
+              10.189943917552707
+            ],
+            [
+              14.312164862865279,
+              -72.41491001634907,
+              4.477507193820853
+            ]
+          ],
+          "tolerance": 4.232312299556699
+        },
+        "kind": "round",
+        "sizes": [
+          4.0,
+          4.0,
+          4.0
+        ],
+        "turn": "mitre"
+      }
+    }
+  ],
+  "case": "16654-fillet-tube-joint-through-its-cylinders-own-splits-r4",
+  "expected": {
+    "bbox": {
+      "max": [
+        15,
+        -59.50961894323342,
+        46.47114317029974
+      ],
+      "min": [
+        -15,
+        -110.49038105676658,
+        -15
+      ]
+    },
+    "body_count": 1,
+    "method": "a R15 cylinder along -Y from y=-60 for 40 and a R15 tube from (0,-72.5,-4.330127) along (0,-1/2,sqrt3/2) for 50 joined; the tube's outer face split by the plane through the joint's top point (0,-66.339746,15) normal to the tube's axis, then by the YZ plane, so the joint's top point is a vertex of five edges: the two joint edges, the split circle's two halves and the seam. The two joint edges rounded r4 (tangent chain on). The splits lie on the tube's one surface, so they are no corner: the round runs through. A concave round adds material inside the joint only, so the box is the unrounded body's: x and the crank's z +-15; y from the tube's end disc, -97.5 - 15 sqrt3/2 = -110.490381, to its base disc, -72.5 + 15 sqrt3/2 = -59.509619; z up to the end disc, -4.330127 + 50 sqrt3/2 + 15/2 = 46.471143; graded to 4e-5, the blends' approximation tolerance.",
+    "outcome": "solid",
+    "source": "invariants",
+    "sources": [
+      "tangency-labs/solidcraft#16654"
+    ],
+    "tolerance": {
+      "abs_mm": 0.00004
+    },
+    "what": "a 4 mm round along the joint of two R15 cylinders whose axes cross at 60 degrees, where the tube's cylinder is split on its own surface through the joint's top point (a circle across it and its seam), builds instead of being refused as a corner no blend handles"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 35,
+      "faces": 16,
+      "vertices": 22
+    }
+  },
+  "records": "16654-fillet-tube-joint-through-its-cylinders-own-splits-r4.bodies.json.gz",
+  "result": [
+    {
+      "body": "Crank",
+      "made": "b26"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 8067.631472693202,
+      "body_count": 1,
+      "edges": 23,
+      "faces": 13,
+      "vertices": 14,
+      "volume_mm3": 49728.911277091196
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#16654"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "split_faces",
+    "copy",
+    "copy",
+    "tagged",
+    "split_faces",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "a 4 mm round along the joint of two R15 cylinders whose axes cross at 60 degrees, where the tube's cylinder is split on its own surface through the joint's top point (a circle across it and its seam), builds instead of being refused as a corner no blend handles",
+  "why_not": []
+}

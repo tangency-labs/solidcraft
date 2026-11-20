@@ -172,7 +172,7 @@ fn convert(geometry: &[Geom2], fields: &[(usize, String)], low: Vec2) -> Importe
                 out.strokes.push(stroke(vec![Seg2::Conic { a: on(*a), apex: on(*apex), b: on(*b), w: rho / (1.0 - rho) }], false));
             }
             Geom2::Conic { .. } => out.skipped.push("curve"),
-            Geom2::Spline { pts, .. } => {
+            Geom2::Spline { pts, .. } | Geom2::Nurbs { pts, .. } => {
                 let path: Vec<Seg2> = pts.windows(2).map(|w| Seg2::Line { a: on(w[0]), b: on(w[1]) }).collect();
                 if path.is_empty() {
                     out.skipped.push("curve");

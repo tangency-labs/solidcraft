@@ -33,7 +33,7 @@ const RECOVERY: &str = "recovery.sc";
 /// The autosaves earlier releases kept, newest first, one per entry of
 /// `solidcraft_engine::io::LEGACY_DESIGN_EXTS` (compatibility shim, docs/compatibility.md): the
 /// newest is recovered when there is no current one.
-const LEGACY_RECOVERY: [&str; 2] = ["recovery.solidcraft", "recovery.solvecraft"];
+const LEGACY_RECOVERY: [&str; 1] = ["recovery.solidcraft"];
 const RECOVERY_META: &str = "recovery.json";
 
 /// What to do with a file brought in from the computer.
@@ -126,9 +126,6 @@ thread_local! {
 
 /// Local storage keys of stored files (under the channel's name, see `channel.rs`).
 const LOCAL_PREFIX: &str = "solidcraft.file.";
-/// Local-storage files kept by earlier releases (compatibility shim, docs/compatibility.md):
-/// still listed and opened; removing one removes either key.
-const LEGACY_LOCAL_PREFIX: &str = "solvecraft.file.";
 
 fn local() -> Result<web_sys::Storage, String> {
     web_sys::window().and_then(|w| w.local_storage().ok().flatten()).ok_or_else(|| "this browser keeps no local storage".to_string())
@@ -229,7 +226,6 @@ async fn write_file(name: &str, bytes: &[u8]) -> Result<(), String> {
 async fn remove_file(name: &str) -> Result<(), String> {
     if local_only() {
         let st = local()?;
-        st.remove_item(&format!("{LEGACY_LOCAL_PREFIX}{name}")).map_err(err)?;
         return st.remove_item(&crate::channel::key(&format!("{LOCAL_PREFIX}{name}"))).map_err(err);
     }
     let dir = root().await?;
@@ -244,9 +240,7 @@ fn read_local() -> Result<Vec<(String, Vec<u8>, f64)>, String> {
     for i in 0..st.length().unwrap_or(0).min(10_000) {
         let Some(k) = st.key(i).ok().flatten() else { continue };
         let own = crate::channel::key(LOCAL_PREFIX);
-        // The old names belong to stable; a pre-release channel has none.
-        let legacy = crate::channel::current().is_empty().then_some(LEGACY_LOCAL_PREFIX);
-        let Some(name) = k.strip_prefix(own.as_str()).or_else(|| legacy.and_then(|l| k.strip_prefix(l))) else { continue };
+        let Some(name) = k.strip_prefix(own.as_str()) else { continue };
         if let Some(v) = st.get_item(&k).ok().flatten() {
             out.push((name.to_string(), decode(&v), 0.0));
         }
@@ -403,6 +397,29 @@ pub fn download(name: &str, bytes: &[u8]) -> Result<(), String> {
     if let Some(w) = web_sys::window() {
         let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(revoke.unchecked_ref(), 10_000);
     }
+    Ok(())
+}
+
+/// Open a document made in memory (`name`, of media type `kind`) in a new tab, where the browser
+/// shows it with its own viewer (a PDF, to print). Refused when the browser blocks the new tab.
+pub fn open_in_tab(name: &str, kind: &str, bytes: &[u8]) -> Result<(), String> {
+    let window = web_sys::window().ok_or("no window")?;
+    let parts = Array::new();
+    parts.push(&Uint8Array::from(bytes));
+    let opts = web_sys::BlobPropertyBag::new();
+    opts.set_type(kind);
+    let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(&parts, &opts).map_err(err)?;
+    let url = web_sys::Url::create_object_url_with_blob(&blob).map_err(err)?;
+    let opened = window.open_with_url_and_target(&url, "_blank").map_err(err)?;
+    if opened.is_none() {
+        let _ = web_sys::Url::revoke_object_url(&url);
+        return Err(format!("the browser blocked a new tab for {name}: allow pop-ups for this site"));
+    }
+    // The tab keeps what it loaded; the URL goes once it has had time to.
+    let revoke = Closure::once_into_js(move || {
+        let _ = web_sys::Url::revoke_object_url(&url);
+    });
+    let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(revoke.unchecked_ref(), 60_000);
     Ok(())
 }
 

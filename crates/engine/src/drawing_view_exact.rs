@@ -325,7 +325,7 @@ fn clipped(path: &[Seg2], area: &Aabb2, chord: f64) -> Vec<(Vec<Seg2>, bool)> {
             }
             ends = q.dist(b) <= EPS;
         }
-        let near = |radius: f64| 2.0 * chord + radius * 1e-9;
+        let near = |radius: f64| super::lines::near(chord, radius);
         for (points, starts) in kept {
             let part = match seg {
                 Seg2::Arc { .. } => on_arc(seg, &points, false, near, 0.0).map(|(arc, _)| vec![arc]),

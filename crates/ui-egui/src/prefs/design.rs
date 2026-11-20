@@ -150,8 +150,6 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
                 let label = app.tr("ui.sheet_page.colour").to_owned();
                 ui_kit::row(ui, &label, |ui| crate::drawing_sheet_page::colour_choice(app, ui));
-                let label = app.tr("ui.drawing_backdrop.label").to_owned();
-                ui_kit::row(ui, &label, |ui| crate::drawing_sheet_page::backdrop_choice(app, ui));
                 let label = app.tr("ui.drawing_sheets.visibility").to_string();
                 ui_kit::row(ui, &label, |ui| crate::drawing_workspace::sheets_visibility_choice(app, ui));
                 setting::drawing_calibration(app, ui);
@@ -231,6 +229,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                 }
             });
+            let heal = setting::heal_tolerance_defects(app, ui).on_hover_text(app.tr("prefs.heal_tolerance_defects_note"));
+            crate::scenario::publish_target("prefs:heal_tolerance_defects", heal.rect);
         });
         export_name(app, ui, label_width);
         origin_plane_names(app, ui, label_width);
@@ -325,5 +325,7 @@ fn origin_plane_names(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
         crate::scenario::publish_target("dialog:Hide origin by default", response.rect);
         let response = setting::origin_axes_across_view(app, ui).backing_on_hover_text(app.tr("prefs.origin_axes_across_view_help"));
         crate::scenario::publish_target("prefs:origin_axes_across_view", response.rect);
+        let response = setting::browser_hover_shows_origin(app, ui).backing_on_hover_text(app.tr("prefs.browser_hover_shows_origin_help"));
+        crate::scenario::publish_target("prefs:browser_hover_shows_origin", response.rect);
     });
 }

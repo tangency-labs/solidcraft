@@ -1,0 +1,85 @@
+{
+  "date": "2026-11-15",
+  "toolchain": "Rust 1.99.1",
+  "main": "c71236a40de9f36713194df624663a252d0f71a3",
+  "independent_main_control": "be6ecb06420d501a8362d6de3d0de7ef324dafb9",
+  "kernel_trees_equal": true,
+  "reference_data_pin": "3fd5b9548d19aa8c12c29bc9637a96d42a06f8a5",
+  "reference_cpp_built_or_run": false,
+  "kernel_nextest": {
+    "passed": 8390,
+    "failed": 0,
+    "skipped": 100,
+    "note": "Complete paired suite before the test-only transform classification guard; that guard then passes with the complete goldens library."
+  },
+  "goldens_library": {
+    "passed": 436,
+    "failed": 0,
+    "ignored": 29
+  },
+  "kernel_ignored_rig": {
+    "passed": 3,
+    "failed": 0,
+    "timeout_override": null
+  },
+  "kernel_fmt": "pass",
+  "kernel_strict_clippy": "pass",
+  "kernel_wasm": "pass",
+  "kernel_doctests": "pass",
+  "panic_inventory": "pass",
+  "record_ids": "pass",
+  "goldens": {
+    "units": 283,
+    "cases": 592175,
+    "known_failing": 249,
+    "full_sweep_units_passed": 279,
+    "reviewed_unit_reruns_passed": [
+      "curve.curve_p1",
+      "curve.curve_p8",
+      "surface.plane_p2",
+      "topology.brep_mirror"
+    ],
+    "changed": 0,
+    "added": 0,
+    "removed": 0,
+    "broken": 0
+  },
+  "golden_delta_against_main": {
+    "serialized_changed_rows": 1396,
+    "serialized_changed_units": 32,
+    "significant_changed_rows": 1332,
+    "significant_changed_units": 31,
+    "removed_expected_rows_still_executed_as_known": 7,
+    "main_known_reasons_preserved_verbatim": 242
+  },
+  "app_ci": {
+    "command": "nice -n 10 cargo xtask ci",
+    "exit_code": 1,
+    "native_run": {
+      "passed": 16506,
+      "failed": 14,
+      "skipped": 73
+    },
+    "official_classifier": {
+      "ran": 16515,
+      "pass": 16501,
+      "registered_failures": 13,
+      "unexpected_failures": [
+        "solidcraft-ui-egui::gpu::tests::blur_full_egui_composition"
+      ],
+      "exit_code": 1
+    },
+    "wasm_30_crates": "pass",
+    "doctests": "pass",
+    "gpu_baseline_comparison": {
+      "main": "be6ecb06420d501a8362d6de3d0de7ef324dafb9",
+      "command": "nice -n 10 cargo test --offline --locked --profile ci -p solidcraft-ui-egui --lib gpu::tests::blur_full_egui_composition -- --exact --nocapture --test-threads=1",
+      "exit_code": 101,
+      "failure": "gpu.rs:1406 resting source: 1 -> 2",
+      "ui_sources_identical_on_c712_and_pr": true,
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/17280",
+      "diagnostic_refinement_disabled": "passes; not a gate setting or substitute for failed default run"
+    }
+  },
+  "browser_offline": "Chrome unavailable locally; no browser pass claimed"
+}

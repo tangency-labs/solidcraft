@@ -5,8 +5,7 @@
 //! (10, 0, 0), up at (5, 0, 5), or at the origin. Upstream's
 //! `SmRotationalSweepGeometry::CheckCurveSweep` refuses a curve that meets the axis
 //! anywhere but at its ends (`SM_SC_ROT_ON_CURVE`), so the first two starts fail with
-//! `SM_ERR`. With `revolve_splits_curves_on_axis` the sweep splits the circle at the
-//! origin first (and joins its last piece back onto its first), and every start gives
+//! `SM_ERR`. The sweep splits the circle at the origin first (and joins its last piece back onto its first), and every start gives
 //! one turned face and two end discs of volume turn * 2 pi 5 * pi 25 (Pappus).
 
 #![allow(
@@ -45,9 +44,8 @@ fn disc(k: &Kernel, reference: Vec3) -> Curve {
 }
 
 /// The capped turn of the disc about Z by `turn` of a whole turn.
-fn revolve(fix: bool, reference: Vec3, turn: f64) -> (Kernel, solidcore::Result<solidcore::Brep>) {
+fn revolve(reference: Vec3, turn: f64) -> (Kernel, solidcore::Result<solidcore::Brep>) {
     let mut k = Kernel::default();
-    k.fixes.revolve_splits_curves_on_axis = fix;
     let c = disc(&k, reference);
     let r = create_rotational_sweep(
         &mut k,
@@ -87,47 +85,12 @@ fn check_volume(k: &Kernel, b: &mut solidcore::Brep, reference: Vec3, turn: f64)
 fn wr_590_on_every_start_turns_into_three_faces_of_the_pappus_volume() {
     for reference in REFS {
         for turn in TURNS {
-            let (k, r) = revolve(true, reference, turn);
+            let (k, r) = revolve(reference, turn);
             let mut b = r.unwrap_or_else(|e| panic!("ref {reference:?} turn {turn}: {e}"));
             solidcore::topology::integrity::check(&b).unwrap();
             assert_eq!(b.face_list().len(), 3, "ref {reference:?} turn {turn}");
             assert!(solidcore::topology::brep::p2::is_manifold_solid(&b).unwrap());
             check_volume(&k, &mut b, reference, turn);
         }
-    }
-}
-
-#[test]
-fn wr_590_off_a_circle_meeting_the_axis_inside_itself_fails() {
-    for reference in REFS {
-        for turn in TURNS {
-            let (k, r) = revolve(false, reference, turn);
-            if reference.x < 0.0 {
-                // the seam on the axis: the circle meets it only at its ends
-                let mut b = r.unwrap_or_else(|e| panic!("ref {reference:?} turn {turn}: {e}"));
-                assert_eq!(b.face_list().len(), 3, "ref {reference:?} turn {turn}");
-                check_volume(&k, &mut b, reference, turn);
-            } else {
-                let e = r.expect_err("upstream refuses the turn");
-                assert!(
-                    solidcore::error::upstream_status(&e) == Some(1001),
-                    "ref {reference:?} turn {turn}: {e}"
-                );
-            }
-        }
-    }
-}
-
-/// With the seam on the axis there is nothing to split: the turn is the same with the
-/// fix on and off.
-#[test]
-fn wr_590_seam_on_the_axis_is_unchanged() {
-    for turn in TURNS {
-        let (_, on) = revolve(true, REFS[2], turn);
-        let (_, off) = revolve(false, REFS[2], turn);
-        let (on, off) = (on.unwrap(), off.unwrap());
-        assert_eq!(on.face_list().len(), off.face_list().len());
-        assert_eq!(on.edge_list().len(), off.edge_list().len());
-        assert_eq!(on.vertex_list().len(), off.vertex_list().len());
     }
 }

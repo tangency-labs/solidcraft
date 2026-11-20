@@ -391,8 +391,10 @@ impl Default for View {
     }
 }
 
+/// A body name the CPU render targets take: at most `MAX_BODY_NAME_BYTES` (512) bytes, which every
+/// name a rename gives (128 characters) fits.
 fn valid_name(name: &str) -> bool {
-    !name.is_empty() && name.len() <= 128 && !name.chars().any(char::is_control)
+    !name.is_empty() && name.len() <= solidcraft_engine::render::job::MAX_BODY_NAME_BYTES && !name.chars().any(char::is_control)
 }
 
 fn target(app: &SolveApp, name: &str) -> Option<Target> {

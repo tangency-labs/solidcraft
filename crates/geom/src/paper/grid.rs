@@ -62,8 +62,8 @@ impl Grid {
     /// Whole nanometres, six decimals of a millimetre: SVG's numbers.
     pub const NANOMETRE: Grid = Grid { per_mm: 1e6 };
 
-    /// A grid of `per_mm` steps a millimetre, from 1 to 1e9. A power of two keeps every number
-    /// exact in binary floating point, as a writer of 32-bit numbers (PDF) wants.
+    /// A grid of `per_mm` steps a millimetre, from 1 to 1e9. A writer of decimal numbers takes a
+    /// power of ten, so a step is its last decimal (SVG's 1e6, PDF's 1e5).
     pub fn new(per_mm: f64) -> Option<Grid> {
         (1.0..=1e9).contains(&per_mm).then_some(Grid { per_mm })
     }
@@ -96,8 +96,8 @@ pub enum Piece {
     Line {
         to: GridPoint,
     },
-    /// A circular arc of at most a quarter turn, of `radius` steps, turning clockwise (y up) when
-    /// `clockwise`.
+    /// A circular arc of about a quarter turn (a little more once its ends are rounded onto the
+    /// grid or a sliver merged in; never a half), of `radius` steps, clockwise (y up) when `clockwise`.
     Arc {
         radius: i64,
         clockwise: bool,

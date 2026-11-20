@@ -83,7 +83,7 @@ impl View {
         Ok(projected)
     }
 
-    /// The direction from `p` toward the eye: `back` itself in an orthographic view.
+    /// The direction from `p` toward the eye, not normalised: `back` itself in an orthographic view.
     pub(super) fn toward(&self, p: Vec3) -> Vec3 {
         self.perspective.map_or(self.back, |distance| self.origin + self.back * distance - p)
     }
