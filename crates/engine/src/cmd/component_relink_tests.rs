@@ -1434,3 +1434,71 @@ fn insert_design_accepts_matrix_and_rotation_placement() {
 
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// What a link stores and what survives a moved job folder (#6892, slice 2 of the separate-files
+/// plan). A link keeps its path relative to the folder of the design that links it, written with
+/// `/`: a part beside it, a part in a folder below, a sub-assembly that links its own part
+/// relative to itself, and a part in a library folder beside the job (`../lib`). Moving the job
+/// folder whole keeps every link inside it, the sub-assembly's own included; a library left
+/// behind is lost by a link that climbs out of the job (`..`), and found again once it moves
+/// along. Nothing here needs the experimental preference: relative links are how links work.
+#[test]
+fn a_job_folder_moved_whole_keeps_its_links_and_loses_a_library_left_behind() {
+    let root = folder("job-moves");
+    let (job, lib) = (root.join("job"), root.join("lib"));
+    for dir in [job.join("parts"), job.join("sub"), lib.clone()] {
+        std::fs::create_dir_all(dir).unwrap();
+    }
+    part(&job.join("plate.sc"), 20);
+    part(&job.join("parts").join("bracket.sc"), 30);
+    part(&lib.join("bolt.sc"), 10);
+    let mut hinge = Session::default();
+    run(&mut hinge, "file.save", json!({"path": job.join("sub").join("hinge.sc")}));
+    run(&mut hinge, "component.insert_design", json!({"path": job.join("parts").join("bracket.sc")}));
+    run(&mut hinge, "file.save", json!({}));
+    let mut top = Session::default();
+    run(&mut top, "file.save", json!({"path": job.join("top.sc")}));
+    for (file, x) in
+        [(job.join("plate.sc"), 0), (job.join("parts").join("bracket.sc"), 20), (lib.join("bolt.sc"), 40), (job.join("sub").join("hinge.sc"), 60)]
+    {
+        run(&mut top, "component.insert_design", json!({"path": file, "translate": [x, 0, 0]}));
+    }
+    run(&mut top, "file.save", json!({}));
+    let links = |path: &Path| -> Vec<(String, bool)> {
+        let mut s = Session::default();
+        run(&mut s, "doc.open", json!({"path": path}));
+        let links = run(&mut s, "component.links", json!({}));
+        let mut found: Vec<(String, bool)> =
+            links["links"].as_array().unwrap().iter().map(|l| (l["path"].as_str().unwrap().to_string(), l["found"] == true)).collect();
+        found.sort();
+        found
+    };
+    let stored = |found: &[(&str, bool)]| found.iter().map(|(p, f)| ((*p).to_string(), *f)).collect::<Vec<_>>();
+    // What the files keep: paths relative to each design's own folder.
+    assert_eq!(
+        links(&job.join("top.sc")),
+        stored(&[("../lib/bolt.sc", true), ("parts/bracket.sc", true), ("plate.sc", true), ("sub/hinge.sc", true)])
+    );
+    assert_eq!(links(&job.join("sub").join("hinge.sc")), stored(&[("../parts/bracket.sc", true)]));
+    // The job folder moves one level down, the library stays: links inside the job are found,
+    // the library's is not; the sub-assembly still finds its part, relative to itself.
+    let moved = root.join("archive").join("job");
+    std::fs::create_dir_all(moved.parent().unwrap()).unwrap();
+    std::fs::rename(&job, &moved).unwrap();
+    assert_eq!(
+        links(&moved.join("top.sc")),
+        stored(&[("../lib/bolt.sc", false), ("parts/bracket.sc", true), ("plate.sc", true), ("sub/hinge.sc", true)])
+    );
+    assert_eq!(links(&moved.join("sub").join("hinge.sc")), stored(&[("../parts/bracket.sc", true)]));
+    // Update Links stops at the file it can't find, names it, and changes nothing.
+    let mut s = Session::default();
+    run(&mut s, "doc.open", json!({"path": moved.join("top.sc")}));
+    let before = serde_json::to_value(&*s.doc).unwrap();
+    let refused = s.execute("component.update_links", &json!({})).unwrap_err().to_string();
+    assert!(refused.contains("bolt") && refused.contains("not found"), "{refused}");
+    assert_eq!(serde_json::to_value(&*s.doc).unwrap(), before);
+    // The library moves along, beside the job again: found.
+    std::fs::rename(&lib, root.join("archive").join("lib")).unwrap();
+    assert!(links(&moved.join("top.sc")).iter().all(|(_, found)| *found));
+    let _ = std::fs::remove_dir_all(root);
+}
