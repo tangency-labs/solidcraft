@@ -16,9 +16,9 @@
 //! it the focused one. Every view reaches the GPU as a tile of its own
 //! ([`solidcraft_viewport_egui::TileCallback`]).
 
-use egui::{CornerRadius, Rect, Sense, Stroke, StrokeKind, UiBuilder, pos2, vec2};
+use egui::{CornerRadius, Pos2, Rect, Sense, Stroke, StrokeKind, UiBuilder, pos2, vec2};
 use solidcraft_theme::Tokens;
-use solidcraft_views::{Axis, Rect as TileRect, ViewKind};
+use solidcraft_views::{Axis, Edge, Placement, Rect as TileRect, Tiles, ViewKind};
 
 use crate::SolveApp;
 use crate::ui_kit::BackingTooltipExt as _;
@@ -108,18 +108,22 @@ fn lay_under(ctx: &egui::Context, layer: egui::LayerId, slots: &[egui::layers::S
     });
 }
 
-pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let area = ui.max_rect();
-    let Some(tiles) = app.docs.views.tiles().cloned() else { return };
-    let focus = app.docs.views.active().id;
-    let render_ground = app.docs.views.active().kind == ViewKind::Render;
+fn free_area(app: &SolveApp, area: Rect) -> Rect {
     // Below the ribbon and above the bottom strip: they float over the ground, but a card is never put under them.
     let free = crate::shell::bottom_readout_rect(
         app,
         crate::shell::panel_bounds(app, crate::shell::workspace_content(app, crate::shell::content_rect(app, area))),
     )
     .shrink(MARGIN);
-    let free = if free.is_positive() { free } else { area };
+    if free.is_positive() { free } else { area }
+}
+
+pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let area = ui.max_rect();
+    let Some(tiles) = app.docs.views.tiles().cloned() else { return };
+    let focus = app.docs.views.active().id;
+    let render_ground = app.docs.views.active().kind == ViewKind::Render;
+    let free = free_area(app, area);
     let mut places: Vec<(u64, Rect)> = tiles.rects(to_tile(free), GUTTER).into_iter().map(|(id, r)| (id, from_tile(r))).collect();
     // The focused view is drawn last: what it leaves in the app (the viewport's rectangle, its
     // projection for the panels) is what the rest of the frame reads.
@@ -130,7 +134,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // A foreground popover (such as a card's display menu) owns presses over the canvas.
     let press = ui
         .input(|i| i.pointer.any_pressed().then(|| i.pointer.interact_pos()).flatten())
-        .filter(|p| ui.is_enabled() && ui.rect_contains_pointer(area) && !crate::shell::covered(app, *p));
+        .filter(|p| app.docs.view_placement.is_none() && ui.is_enabled() && ui.rect_contains_pointer(area) && !crate::shell::covered(app, *p));
     app.viewport.pending_tile_focus = None;
     let mut cards = Vec::new();
     let mut ground = free;
@@ -239,6 +243,200 @@ pub(crate) fn focus_pressed(app: &mut SolveApp) -> bool {
     true
 }
 
+#[derive(Clone, Copy)]
+struct TabDrag {
+    frame: u64,
+    view: u64,
+    pointer: Pos2,
+    released: bool,
+}
+
+fn drag_key(ctx: &egui::Context) -> egui::Id {
+    egui::Id::unique(("view_tile_drag", ctx.viewport_id()))
+}
+
+pub(crate) fn cancel_placement_on_escape(app: &mut SolveApp, ctx: &egui::Context) -> bool {
+    if !ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        return false;
+    }
+    // Leave the key available to the app bar so it also cancels the drag held by its tab strip.
+    let key = drag_key(ctx);
+    let drag = ctx.data_mut(|data| {
+        let drag = data.get_temp::<TabDrag>(key);
+        data.remove::<TabDrag>(key);
+        drag
+    });
+    let dragging = drag.is_some_and(|drag| ctx.cumulative_frame_nr().saturating_sub(drag.frame) <= 1)
+        && ctx.input(|i| i.pointer.primary_down() || i.pointer.primary_released());
+    app.docs.view_placement.take().is_some() || dragging
+}
+
+pub(crate) fn tab_drag(app: &mut SolveApp, ctx: &egui::Context, view: u64, pointer: Pos2, released: bool) {
+    app.docs.view_placement = None;
+    let drag = TabDrag { frame: ctx.cumulative_frame_nr(), view, pointer, released };
+    let key = drag_key(ctx);
+    ctx.data_mut(|data| data.insert_temp(key, drag));
+}
+
+struct Zone {
+    placement: Placement,
+    rect: Rect,
+    preview: Rect,
+}
+
+fn zones(app: &SolveApp, view: u64, area: Rect, covers: &[Rect]) -> Vec<Zone> {
+    let single = Tiles::Leaf(app.docs.views.active().id);
+    let tiles = app.docs.views.tiles().filter(|_| app.docs.views.is_tiled()).unwrap_or(&single);
+    let mut zones = Vec::new();
+    let mut add = |placement: Placement, rect: Rect| {
+        let Some(tiles) = app.docs.views.preview_placement(view, placement) else { return };
+        if let Some((_, result)) = tiles.rects(to_tile(area), GUTTER).into_iter().find(|(id, _)| *id == view) {
+            zones.push(Zone { placement, rect, preview: from_tile(result) });
+        }
+    };
+    let mut empty = 0;
+    for (id, rect) in tiles.rects(to_tile(area), GUTTER) {
+        let cell = from_tile(rect);
+        if id == solidcraft_views::EMPTY {
+            if let Some(cell) = target_area(cell, covers) {
+                add(Placement::Empty(empty), cell);
+            }
+            empty += 1;
+            continue;
+        }
+        let Some(cell) = target_area(cell, covers) else { continue };
+        let dx = cell.width() * 0.24;
+        let dy = cell.height() * 0.24;
+        let middle = cell.shrink2(vec2(dx, dy));
+        for (edge, rect) in [
+            (Edge::Left, Rect::from_min_max(cell.min, pos2(middle.left(), cell.bottom()))),
+            (Edge::Right, Rect::from_min_max(pos2(middle.right(), cell.top()), cell.max)),
+            (Edge::Top, Rect::from_min_max(pos2(middle.left(), cell.top()), middle.right_top())),
+            (Edge::Bottom, Rect::from_min_max(middle.left_bottom(), pos2(middle.right(), cell.bottom()))),
+        ] {
+            add(Placement::Split { target: id, edge }, rect);
+        }
+        add(Placement::Replace(id), middle);
+    }
+    zones
+}
+
+fn place(app: &mut SolveApp, view: u64, placement: Placement) {
+    use solidcraft_engine::schema::tab_views::TabViewPlacement;
+    let _ = app.run("tab.view.beside", serde_json::json!({ "id": view, "placement": TabViewPlacement::from(placement) }));
+}
+
+/// Paint workspace targets for a dragged tab or the view menu's click placement.
+pub(crate) fn placement_overlay(app: &mut SolveApp, ctx: &egui::Context) {
+    let Some(area) = app.shell.content.filter(|r| r.is_finite() && r.is_positive()) else { return };
+    let drag_key = drag_key(ctx);
+    let drag = ctx.data(|data| data.get_temp::<TabDrag>(drag_key)).filter(|drag| drag.frame == ctx.cumulative_frame_nr());
+    if drag.is_none() && app.docs.view_placement.is_none() {
+        return;
+    }
+    let free = free_area(app, area);
+    let covers = crate::shell::covered_rects(app);
+    if let Some(drag) = drag {
+        if drag.released {
+            ctx.data_mut(|data| data.remove::<TabDrag>(drag_key));
+        }
+        let hit = (!crate::shell::covered(app, drag.pointer))
+            .then(|| zones(app, drag.view, free, &covers).into_iter().find(|zone| zone.rect.contains(drag.pointer)))
+            .flatten();
+        if let Some(zone) = hit {
+            let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("view_tile_drop")));
+            paint_preview(&painter, zone.preview);
+            ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+            if drag.released {
+                place(app, drag.view, zone.placement);
+            }
+        } else if !drag.released && free.contains(drag.pointer) {
+            ctx.set_cursor_icon(egui::CursorIcon::NotAllowed);
+        }
+        return;
+    }
+    let Some((tab, view)) = app.docs.view_placement else { return };
+    let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+    if escape || tab != app.docs.active_tab() {
+        app.docs.view_placement = None;
+        return;
+    }
+    let mut chosen = None;
+    let mut buttons = 0;
+    let container = crate::ui_kit::Container::new(ctx, crate::ui_kit::Surface::Navigation);
+    for (i, zone) in zones(app, view, free, &covers).into_iter().enumerate() {
+        let button = zone.rect.shrink(2.0);
+        if button.width() < 58.0 || button.height() < 20.0 {
+            continue;
+        }
+        buttons += 1;
+        let size = button.size().min(vec2(132.0, 30.0));
+        let anchor = egui::Id::unique(("view_placement", ctx.viewport_id(), tab, view, i));
+        let label = match zone.placement {
+            Placement::Empty(_) => "design_view.place_empty",
+            Placement::Replace(_) => "design_view.place_center",
+            Placement::Split { edge: Edge::Left, .. } => "design_view.place_left",
+            Placement::Split { edge: Edge::Right, .. } => "design_view.place_right",
+            Placement::Split { edge: Edge::Top, .. } => "design_view.place_top",
+            Placement::Split { edge: Edge::Bottom, .. } => "design_view.place_bottom",
+        };
+        container
+            .area(anchor)
+            .order(egui::Order::Foreground)
+            .fixed_pos(button.center() - size / 2.0)
+            .default_size(size)
+            .movable(false)
+            .fade_in(false)
+            .show(ctx, |ui| {
+                let rect = Rect::from_min_size(ui.next_widget_position(), size);
+                let response =
+                    crate::ui_kit::button_at(ui, "view_placement_zone", rect, solidcraft_ui_text::tr(label), crate::ui_kit::Button::Normal);
+                if response.hovered() || response.has_focus() {
+                    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::unique("view_tile_preview")));
+                    paint_preview(&painter, zone.preview);
+                }
+                if response.clicked() {
+                    chosen = Some(zone.placement);
+                }
+            });
+    }
+    if let Some(placement) = chosen {
+        app.docs.view_placement = None;
+        place(app, view, placement);
+    } else if buttons == 0 || ctx.input(|i| i.pointer.secondary_clicked()) {
+        app.docs.view_placement = None;
+    }
+}
+
+fn paint_preview(painter: &egui::Painter, rect: Rect) {
+    let tokens = Tokens::get();
+    painter.rect_filled(rect, CARD_RADIUS, tokens.accent_soft.gamma_multiply(0.58));
+    painter.rect_stroke(rect, CARD_RADIUS, Stroke::new(2.0, tokens.accent), StrokeKind::Inside);
+}
+
+fn safe_region(rect: Rect, covers: &[Rect]) -> Option<crate::panel_runtime::HostUsableRegion> {
+    use crate::panel_runtime::{logical_rect, resolve_usable_region};
+    if !rect.is_positive() {
+        return None;
+    }
+    let covers: Vec<_> = covers.iter().copied().map(|cover| cover.intersect(rect)).filter(Rect::is_positive).map(logical_rect).collect();
+    resolve_usable_region(logical_rect(rect), &covers).ok()
+}
+
+fn target_area(cell: Rect, covers: &[Rect]) -> Option<Rect> {
+    if covers.iter().all(|cover| !cover.intersect(cell).is_positive()) {
+        cell.is_positive().then_some(cell)
+    } else {
+        safe_region(cell, covers)?.largest_rect().map(crate::panel_runtime::egui_rect)
+    }
+}
+
+fn unobstructed(rect: Rect, covers: &[Rect], aspect: f32) -> Option<Rect> {
+    use solidcraft_engine::panels::Point;
+    let center = rect.center();
+    safe_region(rect, covers)?.fit_rect_with_clearance(aspect, Point { x: center.x, y: center.y }, MARGIN).map(crate::panel_runtime::egui_rect)
+}
+
 /// Where the header button in `slot` (0 the rightmost) of the card `card` lies.
 fn button_rect(card: Rect, slot: f32) -> Rect {
     Rect::from_center_size(pos2(card.right() - 16.0 - slot * 24.0, card.top() + HEADER / 2.0), vec2(22.0, 22.0))
@@ -264,21 +462,61 @@ fn empty_picker(app: &SolveApp, ui: &mut egui::Ui, ordinal: usize, cell: Rect) -
     let edge = [cell.left_top(), cell.right_top(), cell.right_bottom(), cell.left_bottom(), cell.left_top()];
     painter.extend(egui::Shape::dashed_line(&edge, Stroke::new(1.5, t.border), 6.0, 4.0));
     let mut action = None;
+    let open: Vec<(u64, &str)> =
+        app.docs.views.views().iter().filter(|view| app.docs.views.can_show_beside(view.id)).map(|view| (view.id, view.name.as_str())).collect();
+    let height = 22.0 + 2.0 * 34.0 + if open.is_empty() { 0.0 } else { 6.0 + open.len().min(4) as f32 * 34.0 };
     let width = (cell.width() - 48.0).clamp(120.0, 300.0);
-    let left = cell.center().x - width / 2.0;
-    let open: Vec<(u64, String)> = app
-        .docs
-        .views
-        .views()
-        .iter()
-        .filter(|view| app.docs.views.can_show_beside(view.id))
-        .take(4)
-        .map(|view| (view.id, view.name.clone()))
-        .collect();
-    let height = 22.0 + 2.0 * 34.0 + if open.is_empty() { 0.0 } else { 6.0 + open.len() as f32 * 34.0 };
-    let mut y = (cell.center().y - height / 2.0).max(cell.top() + 8.0);
     let title = solidcraft_ui_text::tr_label("Show a view here");
-    painter.text(pos2(cell.center().x, y + 8.0), egui::Align2::CENTER_CENTER, title, egui::FontId::proportional(t.font_body), t.text);
+    let covers = crate::shell::covered_rects(app);
+    let ideal = Rect::from_center_size(cell.center(), vec2(width, height));
+    let close = Rect::from_center_size(cell.right_top() + vec2(-18.0, 18.0), vec2(22.0, 22.0));
+    let angles = [(StandardView::Front, "Front"), (StandardView::Right, "Right"), (StandardView::Top, "Top"), (StandardView::Iso, "Iso")];
+    let room = if cell.contains_rect(ideal) && covers.iter().all(|cover| !cover.intersects(ideal)) {
+        Some(ideal)
+    } else {
+        unobstructed(cell, &covers, width / height).filter(|room| room.width() >= width && room.height() >= height)
+    };
+    let Some(room) = room.filter(|_| open.len() <= 4 && covers.iter().all(|cover| !cover.intersects(close))) else {
+        let button = unobstructed(cell, &covers, 4.0)?;
+        let button = Rect::from_center_size(button.center(), button.size().min(vec2(160.0, 30.0)));
+        let mut child = ui.new_child(UiBuilder::new().id_salt(("empty_cell_menu", ordinal)).max_rect(button));
+        let mut chosen = None;
+        crate::ui_kit::Menu::button_with(
+            &mut child,
+            |ui, _| {
+                let rect = Rect::from_min_size(ui.next_widget_position(), button.size());
+                crate::ui_kit::button_at(ui, "empty_cell_open", rect, title, crate::ui_kit::Button::Normal)
+            },
+            |ui| {
+                for (angle, label) in angles {
+                    if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr_label(label), "").clicked() {
+                        chosen = Some(EmptyAction::Angle(angle));
+                        ui.close();
+                    }
+                }
+                if !open.is_empty() {
+                    ui.separator();
+                    egui::ScrollArea::vertical().max_height(210.0).show(ui, |ui| {
+                        for (id, name) in &open {
+                            if crate::ui_kit::menu::button(ui, name, "").clicked() {
+                                chosen = Some(EmptyAction::Open(*id));
+                                ui.close();
+                            }
+                        }
+                    });
+                }
+                ui.separator();
+                if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr_label("Close this cell"), "").clicked() {
+                    chosen = Some(EmptyAction::Close);
+                    ui.close();
+                }
+            },
+        );
+        return chosen;
+    };
+    let left = room.center().x - width / 2.0;
+    let mut y = room.center().y - height / 2.0;
+    painter.text(pos2(room.center().x, y + 8.0), egui::Align2::CENTER_CENTER, title, egui::FontId::proportional(t.font_body), t.text);
     y += 22.0;
     let button = |ui: &mut egui::Ui, rect: Rect, key: (usize, u64), label: &str| -> bool {
         let resp = ui.interact(rect, ui.scope_id().with(("empty_cell", ordinal, key)), Sense::click());
@@ -289,10 +527,10 @@ fn empty_picker(app: &SolveApp, ui: &mut egui::Ui, ordinal: usize, cell: Rect) -
         resp.clicked()
     };
     let half = (width - 6.0) / 2.0;
-    for (i, angle) in [StandardView::Front, StandardView::Right, StandardView::Top, StandardView::Iso].into_iter().enumerate() {
+    for (i, (angle, label)) in angles.into_iter().enumerate() {
         let (col, row) = (i % 2, i / 2);
         let rect = Rect::from_min_size(pos2(left + col as f32 * (half + 6.0), y + row as f32 * 34.0), vec2(half, 28.0));
-        let label = solidcraft_ui_text::tr_label(["Front", "Right", "Top", "Iso"][i]);
+        let label = solidcraft_ui_text::tr_label(label);
         if button(ui, rect, (0, i as u64), label) {
             action = Some(EmptyAction::Angle(angle));
         }
@@ -305,7 +543,6 @@ fn empty_picker(app: &SolveApp, ui: &mut egui::Ui, ordinal: usize, cell: Rect) -
         }
         y += 34.0;
     }
-    let close = Rect::from_center_size(cell.right_top() + vec2(-18.0, 18.0), vec2(22.0, 22.0));
     let resp = ui
         .interact(close, ui.scope_id().with(("empty_cell_close", ordinal)), Sense::click())
         .backing_on_hover_text(solidcraft_ui_text::tr_label("Close this cell"));
@@ -519,6 +756,18 @@ mod tests {
         assert!(!slots.contains(&0), "the ordinary root viewport has its own slot");
     }
     #[test]
+    fn escape_dismisses_view_placement() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let view = h.app.docs.views.active().id;
+        let copy = crate::documents::view_duplicate(&mut h.app, view).unwrap();
+        let tab = h.app.docs.active_tab();
+        h.app.docs.view_placement = Some((tab, copy));
+        h.call("ui.key", json!({"key":"Escape"}));
+        assert!(h.app.docs.view_placement.is_none());
+    }
+
+    #[test]
     fn tiled_navigation_controls_only_change_their_own_view() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
@@ -633,5 +882,15 @@ mod tests {
         let frame = frame_of(cell);
         // The same rectangle for both roles: a header's height below the cell's top, the rest of the cell.
         assert_eq!(frame, Rect::from_min_max(pos2(10.0, 40.0 + HEADER), pos2(500.0, 600.0)));
+    }
+
+    #[test]
+    fn placement_controls_find_room_beside_a_floating_panel() {
+        let cell = Rect::from_min_max(pos2(0.0, 0.0), pos2(400.0, 200.0));
+        let browser = Rect::from_min_max(pos2(24.0, 4.0), pos2(230.0, 197.0));
+        let controls = unobstructed(cell, &[browser], 4.0).unwrap();
+        assert!(cell.contains_rect(controls));
+        assert!(!browser.intersects(controls));
+        assert!(controls.width() > 120.0, "{controls:?}");
     }
 }
