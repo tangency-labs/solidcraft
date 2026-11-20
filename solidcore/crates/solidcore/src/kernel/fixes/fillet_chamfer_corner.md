@@ -19,7 +19,7 @@ their end sections, G0 to each other and to each chamfer (at four, the one bilin
 patch of the crossings), within the crossings' convex hull and so in the corner.
 Chamfer planes so nearly coplanar that the points where they
 meet are not determined to the part's rounding are refused with
-`FilletErrorType::CornerUnsupported`, naming that. The pinned corner marches the
+`FilletErrorType::CornerUnsupported`, naming that. Three chamfers of both convexities between planes are refused as bevels, naming the vertex, until the event builds their mitre. The pinned corner marches the
 mitre's edges as surface intersections, refuses a mitre of four or more chamfers with
 no reason, and builds its corner face as a Coons patch where the chamfers are unequal
 (WR-716, #2345; own design, smlib#89's brief, the owner's answers on #2345). For the

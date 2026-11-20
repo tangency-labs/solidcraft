@@ -37,8 +37,6 @@ fn input_from_bytes(bytes: &[u8]) -> (Kernel, Brep) {
         fixes: UpstreamFixes::all(),
         ..Kernel::default()
     };
-    k.fixes.fillet_refuse_rounds_breaking_through = false;
-    k.fixes.fillet_round_ends_on_outline = false;
     let mut attributes = AttributeStore::default();
     let mut records = NotifyRecords::new();
     let mut env = TopologyEnv {

@@ -203,9 +203,9 @@ fn a_large_cylinder_resting_on_a_box_edge_unions() {
 /// circle at the circle's vertex, a hair inside it. The sector test at that vertex read the
 /// line inside the cap from secants a tolerance long, while the samples were still within
 /// tolerance of each other, so the line was kept as two edges across the cap and the union
-/// failed (status 1001) for d from about 7e-7 to 1e-5. Below the contact tolerance the two
-/// solids touch along the line; at it, they are one solid less a sliver of
-/// (4/3)·√(2r)·d^1.5 per unit length (5.4e-6 mm³ here, inside the volume check's 2.4e-4).
+/// failed (status 1001) for d from about 7e-7 to 1e-5. Up to the contact tolerance, at it
+/// too, the two solids touch along the line; past it (2e-5) they are one solid less a sliver
+/// of (4/3)·√(2r)·d^1.5 per unit length (1.5e-5 mm³ here, inside the volume check's 2.4e-4).
 #[test]
 fn a_cylinder_sunk_a_hair_into_a_flat_face_joins_it() {
     let (r, len) = (9.0, 30.0);
@@ -214,7 +214,7 @@ fn a_cylinder_sunk_a_hair_into_a_flat_face_joins_it() {
         if fixes {
             all_fixes();
         }
-        for (d, solids) in [(1e-6, 2), (5e-6, 2), (1e-5, 1)] {
+        for (d, solids) in [(1e-6, 2), (5e-6, 2), (1e-5, 2), (2e-5, 1)] {
             let b = make_box([-20.0, -20.0, -10.0], [40.0, 40.0, 10.0]).unwrap();
             let c = solidcore_ops::make_cylinder([0.0; 3], r, len).unwrap();
             // rows: the images of x, y, z; row 3 the translation (p' = p·A + t)
@@ -1247,6 +1247,92 @@ fn a_ball_with_its_poles_on_a_plane_or_a_cone_is_cut() {
         "cone",
     ));
     assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// SolidCraft's cone (#18546): a frustum revolved about +z, radius 3 at z = 0 to 0.5 at
+/// z = 1000, its seam in the half plane y = 0, x > 0. A round notch, r 0.06, centred on the top
+/// rim and extruded from z = 999.5 to the top, crosses the rim 9.2e-5 rad past the seam. The
+/// curve where the notch's wall meets the cone crosses the seam at a slant of about 2e-4 rad,
+/// so the two lie within tolerance of each other along a short piece of the seam: two proto
+/// edges overlapping there, running opposite ways. The boolean combined them and then
+/// removed the second at proto vertices that no longer listed it, refused as "the proto edge
+/// is not listed". It is one valid solid of 5 faces (side, base, top, notch wall, notch
+/// floor), 10 edges and 7 vertices: the base circle, the seam below the overlap, the overlap
+/// shared by the seam and the wall's curve, the wall's curve before and after it, the floor's
+/// arcs on the cone and on the wall, the wall's curve on the cone's far side, the rim and the
+/// top's arc on the wall; a vertex at the seam's foot, at each end of the overlap, and where
+/// the floor and the top each meet the cone on either side. V = the frustum less the notch,
+/// the notch the integral over z of the area the r 0.06 disc shares with the cone's circle
+/// there (two circles' lens, in closed form), by Simpson's rule.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn a_round_notch_overlapping_a_cones_seam_backwards_is_cut() {
+    all_fixes();
+    let (r_base, r_top, height, r, depth) = (3.0, 0.5, 1000.0_f64, 0.06, 0.5);
+    let section = [
+        [0.0, 0.0, 0.0],
+        [r_base, 0.0, 0.0],
+        [r_top, 0.0, height],
+        [0.0, 0.0, height],
+    ];
+    let profile: Vec<Curve> = (0..4)
+        .map(|i| Curve::Line {
+            start: section[i],
+            end: section[(i + 1) % 4],
+        })
+        .collect();
+    let cone = || revolve(&profile, [0.0; 3], [0.0, 0.0, 1.0], TAU, true).unwrap();
+    let notch = |c: [f64; 2]| {
+        let circle = [Curve::Arc {
+            center: [c[0], c[1], height - depth],
+            axis: [0.0, 0.0, 1.0],
+            reference: [1.0, 0.0, 0.0],
+            radius: r,
+            start: 0.0,
+            end: TAU,
+        }];
+        extrude(
+            &circle,
+            [0.0, 0.0, 1.0],
+            depth,
+            0.0,
+            DraftCorner::Curvature,
+            true,
+        )
+        .unwrap()
+    };
+    let c: [f64; 2] = [0.496_405_514_95, 0.059_846_175_546_1];
+    let d = c[0].hypot(c[1]);
+    // the area the disc of radius `r` about `c` shares with the disc of radius `big` about the
+    // axis, `big` - r < d < `big` + r
+    let lens = |big: f64| {
+        let a = big * big * ((d * d + big * big - r * r) / (2.0 * d * big)).acos();
+        let b = r * r * ((d * d + r * r - big * big) / (2.0 * d * r)).acos();
+        let k = (-d + big + r) * (d + big - r) * (d - big + r) * (d + big + r);
+        a + b - 0.5 * k.sqrt()
+    };
+    let radius_at = |z: f64| r_top + (r_base - r_top) * (height - z) / height;
+    let n = 2000;
+    let h = depth / f64::from(n);
+    let removed = (0..=n)
+        .map(|i| {
+            let w = if i == 0 || i == n {
+                1.0
+            } else if i % 2 == 1 {
+                4.0
+            } else {
+                2.0
+            };
+            w * lens(radius_at(height - depth + f64::from(i) * h))
+        })
+        .sum::<f64>()
+        * h
+        / 3.0;
+    let frustum = PI * height / 3.0 * (r_base * r_base + r_base * r_top + r_top * r_top);
+    let cut = boolean(cone(), notch(c), BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    one_valid_solid_of_volume(&cut, [5, 10, 7], frustum - removed, 1e-9);
 }
 
 /// The half roll less the r 6 ball about (0, 50 + δ, 20), its poles δ off the roll's outside:
@@ -3076,14 +3162,22 @@ fn seam_vertex_gap(r: &Body, corner: [f64; 3], off_seam: impl Fn([f64; 3]) -> f6
 /// tolerance over that sine, so the two crossings and the seam's vertex between them are one
 /// point. The vertex the merge kept was a crossing's, 1.2e-3 off the seam, so the seam edge
 /// ended off the seam and the check refused the join (face test 36) for d 1e-5 and 2e-5. The
-/// seam's vertex now stays. The join is one valid solid of the two volumes added,
-/// π²·1.8·0.6² + π·0.07²·0.14: they share only part of a face.
+/// seam's vertex now stays. Below the contact tolerance (d up to 9e-6) the boss's top circle
+/// and the edge touch at one point (docs/booleans.md §6, "Circles a hair less than
+/// tangent"), the seam's vertex; the surface intersection of the torus with the boss's wall
+/// met the lens at its two crossings as well, and the flat face's plane cut the boss's
+/// circle at the side of its domain, 8.4e-4 off the seam for d 5e-6: for d from 3e-6 to
+/// 9.9e-6 the check refused the join ("partially coincident edges", face test 34), and below
+/// it one of the crossings (1.2e-4 off the seam for d 1e-7) was kept as a vertex of its
+/// own, an edge and a vertex more. The join is one
+/// valid solid of the two volumes added, π²·1.8·0.6² + π·0.07²·0.14: they share only part of
+/// a face.
 #[test]
 #[allow(clippy::disallowed_methods)] // the test's own measure, not ops geometry
 fn a_boss_overhanging_a_half_torus_flat_face_by_a_tolerance_at_its_seam_joins() {
     all_fixes();
     let want = PI * PI * 1.8 * 0.36 + PI * 0.07 * 0.07 * 0.14;
-    for d in [1e-5, 1.5e-5, 2e-5] {
+    for d in [1e-7, 1e-6, 3e-6, 5e-6, 7e-6, 9e-6, 1e-5, 1.5e-5, 2e-5] {
         let boss = round_tripped(&rod([2.33 + d, 0.0, -0.14], 0.07, 0.14));
         let r = boolean(round_tripped(&half_torus()), boss, BooleanOp::Union)
             .unwrap_or_else(|e| panic!("d {d}: {e:?}"))
@@ -3276,6 +3370,38 @@ fn a_notch_beside_a_half_torus_seam_keeps_its_boundary_on_the_seam() {
             }
         }
     }
+}
+
+/// Stress corpus S2170: a boss of radius 0.12 and height 0.24 joined on the top face (z = 3,
+/// a rim of radius 1) of a frustum of radii 2 and 1, at x = 0.88001, so that it overhangs the
+/// rim by exactly the contact tolerance (1e-5); the operands through their records, as
+/// SolidCraft hands them on, the boss's seam where SolidCraft puts a cylinder's (`rod`).
+/// The boolean met the rim and the boss's bottom circle as the edges' own circles and as
+/// the faces' intersection curves, a few roundings apart, and read the overlap below the
+/// tolerance at some sites (a touch) and above it at others (two crossings 0.0033 apart),
+/// and the join failed (status 1001; relating the operands, in the corpus item). The
+/// contact is now read once, at the tolerance within it, and the boss touches the rim at
+/// one point. The join is one
+/// valid solid (Level 2) of the volumes added: the frustum π·3·(2² + 2·1 + 1²)/3 and the
+/// boss π·0.12²·0.24, which stands on the top face, overhanging it only in the air.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's operands and closed form, not ops geometry
+fn a_boss_overhanging_a_frustums_rim_by_exactly_the_tolerance_joins() {
+    all_fixes();
+    let frustum = round_tripped(&make_cone([0.0; 3], 2.0, 1.0, 3.0).unwrap());
+    let boss = round_tripped(&rod([0.88001, 0.0, 3.0], 0.12, 0.24));
+    let joined = boolean(frustum, boss, BooleanOp::Union)
+        .unwrap_or_else(|e| panic!("{e:?}"))
+        .unwrap();
+    let report = joined.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(joined.solid_count().unwrap(), 1);
+    let want = PI * 3.0 * (4.0 + 2.0 + 1.0) / 3.0 + PI * 0.12 * 0.12 * 0.24;
+    assert!(
+        near(volume(&joined), want),
+        "{}, closed form {want}",
+        volume(&joined)
+    );
 }
 
 /// #18274: the r 2 ball cut flat at z 1.2 (a cap edge of radius 1.6), less a notch of radius
