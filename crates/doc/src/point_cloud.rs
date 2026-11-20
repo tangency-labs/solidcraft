@@ -261,12 +261,8 @@ impl PointCloud {
         }
         let turn = |p: [f64; 3]| up.stand(self.up.lay(p));
         let o = turn([self.origin.x, self.origin.y, self.origin.z]);
-        let points: Vec<f32> = self
-            .points
-            .values()
-            .chunks_exact(3)
-            .flat_map(|p| turn([f64::from(p[0]), f64::from(p[1]), f64::from(p[2])]).map(|v| v as f32))
-            .collect();
+        let points: Vec<f32> =
+            self.points.values().chunks_exact(3).flat_map(|p| turn([f64::from(p[0]), f64::from(p[1]), f64::from(p[2])]).map(|v| v as f32)).collect();
         self.origin = Vec3::new(o[0], o[1], o[2]);
         self.points = Points::new(points.into());
         self.up = up;
