@@ -188,6 +188,8 @@ fn length_mm(s: &str) -> Option<f64> {
 struct Out {
     g: Vec<Geom2>,
     warnings: Vec<CurveWarning>,
+    /// The texts marked as fields: each one's place in `g` and its field's name.
+    fields: Vec<(usize, String)>,
 }
 
 /// A cubic of an imported drawing that is kept as drawn although SolidCraft's curve check
@@ -681,7 +683,7 @@ impl SvgReader<'_> {
         // The viewport the elements of this range stand in, in user units: the one the reference
         // that points at them stands in, else the one the root element establishes.
         let mut containing = target.map(|r| r.containing).unwrap_or_default();
-        let mut pending_text: Option<(Tf, Vec2, f64)> = None;
+        let mut pending_text: Option<(Tf, Vec2, f64, Option<String>)> = None;
         // The depth of the element whose contents are not drawn (#11039), while inside one.
         let mut skip_from: Option<usize> = None;
         // Whether the element being read is the one a reference points at.
@@ -700,12 +702,15 @@ impl SvgReader<'_> {
                     continue;
                 }
                 Event::Text(tx) => {
-                    if let Some((tf, at, h)) = pending_text.take() {
+                    if let Some((tf, at, h, field)) = pending_text.take() {
                         let s = String::from_utf8_lossy(tx.as_ref()).trim().to_string();
                         if !s.is_empty() {
                             let k = tf.uniform().unwrap_or(1.0);
                             let dir = tf.vec(Vec2::X);
                             self.out.push(Geom2::Text { text: s, at: tf.apply(at), height: h * 0.7 * k, angle: dir.angle() })?;
+                            if let Some(field) = field {
+                                self.out.fields.push((self.out.g.len() - 1, field));
+                            }
                         }
                     }
                     buf.clear();
@@ -811,7 +816,12 @@ impl SvgReader<'_> {
                 }
                 "text" => {
                     let size = attr(&a, "font-size").map(numbers).and_then(|v| v.first().copied()).unwrap_or(16.0);
-                    pending_text = Some((tf, Vec2::new(num_attr(&a, "x"), num_attr(&a, "y")), size));
+                    let field = ["data-field", "editable", "EditableText"]
+                        .iter()
+                        .find_map(|key| attr(&a, key))
+                        .map(|name| name.trim().chars().take(MAX_FIELD_CHARS).collect::<String>())
+                        .filter(|name| !name.is_empty());
+                    pending_text = Some((tf, Vec2::new(num_attr(&a, "x"), num_attr(&a, "y")), size, field));
                 }
                 "use" => {
                     // A reference draws the element it points at, where the reference stands
@@ -875,13 +885,30 @@ pub fn read_svg(text: &str) -> Result<Vec<Geom2>> {
 /// drawn that the curve check refuses. A reference (a `use` element) is followed: the element it
 /// points at is read where the reference stands (#15538).
 pub fn read_svg_drawing(text: &str) -> Result<SvgDrawing> {
+    let out = read_svg_out(text)?;
+    Ok(SvgDrawing { geometry: out.g, warnings: out.warnings })
+}
+
+/// [`read_svg`], with the texts a template marks as fields that fill in: each one's place in the
+/// geometry and its field's name, from a `data-field` attribute or FreeCAD's documented
+/// `freecad:editable` (`freecad:EditableText` in older files) on the `text` element.
+pub fn read_svg_with_fields(text: &str) -> Result<(Vec<Geom2>, Vec<(usize, String)>)> {
+    let out = read_svg_out(text)?;
+    Ok((out.g, out.fields))
+}
+
+/// The most characters of a field's name a template's text keeps.
+const MAX_FIELD_CHARS: usize = 64;
+
+/// Read an SVG document: its geometry, the warnings about its curves and the texts marked as fields.
+fn read_svg_out(text: &str) -> Result<Out> {
     if text.len() > MAX_DRAWING_BYTES {
         return Err(IoError::Invalid("the SVG file is too large".into()));
     }
-    let mut reader =
-        SvgReader { text, ids: HashMap::new(), indexed: false, out: Out { g: Vec::new(), warnings: Vec::new() }, chain: Vec::new(), work: 0 };
+    let out = Out { g: Vec::new(), warnings: Vec::new(), fields: Vec::new() };
+    let mut reader = SvgReader { text, ids: HashMap::new(), indexed: false, out, chain: Vec::new(), work: 0 };
     reader.read_span(0..text.len(), Tf::ID, 0, None)?;
-    Ok(SvgDrawing { geometry: reader.out.g, warnings: reader.out.warnings })
+    Ok(reader.out)
 }
 
 /// The elements a file names with `id`, and where each one is in the file, so that a reference
