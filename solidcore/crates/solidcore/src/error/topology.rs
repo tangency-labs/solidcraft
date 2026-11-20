@@ -97,9 +97,15 @@ pub enum TopologyFailure {
     ClosedEdge,
     /// A curve the routine needs as a B-spline is of a kind with no B-spline form here.
     /// [`ErrorKind::Unsupported`].
-    CurveNotBSpline,
+    CurveNotBSpline {
+        /// The curve's owner, in the B-rep the routine read it from, where it has one.
+        entity: Option<EntityRef>,
+    },
     /// A surface has no NURBS form. [`ErrorKind::Unsupported`].
-    SurfaceWithoutNurbs,
+    SurfaceWithoutNurbs {
+        /// The face the surface belongs to, where it has one.
+        entity: Option<EntityRef>,
+    },
     /// The face's upward face use has no edge use (its loops are vertex loops, or it has
     /// none), so no edge gives a direction to vote with. [`ErrorKind::Unsupported`].
     FaceWithoutEdges,
@@ -135,8 +141,8 @@ impl TopologyFailure {
             | Self::WireEndSqueezed
             | Self::NoFootOnSurface => SM_ERR,
             Self::Missing(_)
-            | Self::CurveNotBSpline
-            | Self::SurfaceWithoutNurbs
+            | Self::CurveNotBSpline { .. }
+            | Self::SurfaceWithoutNurbs { .. }
             | Self::CurveNotApproximated => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_) | Self::NoBrepGiven => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) | Self::GatheredBothSides => SM_ERR_ASSERT_FAILURE,
@@ -161,8 +167,8 @@ impl TopologyFailure {
             | Self::NotInBrep
             | Self::VertexNotOnEdge
             | Self::ClosedEdge => ErrorKind::InvalidInput,
-            Self::CurveNotBSpline
-            | Self::SurfaceWithoutNurbs
+            Self::CurveNotBSpline { .. }
+            | Self::SurfaceWithoutNurbs { .. }
             | Self::FaceWithoutEdges
             | Self::WireEndSqueezed => ErrorKind::Unsupported,
             Self::CurveNotApproximated => ErrorKind::Failed,
@@ -203,8 +209,16 @@ impl core::fmt::Display for TopologyFailure {
             Self::NotInBrep => f.write_str("the entity given is not one of the B-rep's"),
             Self::VertexNotOnEdge => f.write_str("the surviving vertex is not on the edge"),
             Self::ClosedEdge => f.write_str("the edge starts and ends at one vertex"),
-            Self::CurveNotBSpline => f.write_str("a curve has no B-spline form"),
-            Self::SurfaceWithoutNurbs => f.write_str("a surface has no NURBS form"),
+            Self::CurveNotBSpline { entity: None } => f.write_str("a curve has no B-spline form"),
+            Self::CurveNotBSpline { entity: Some(e) } => {
+                write!(f, "a curve has no B-spline form ({e})")
+            }
+            Self::SurfaceWithoutNurbs { entity: None } => {
+                f.write_str("a surface has no NURBS form")
+            }
+            Self::SurfaceWithoutNurbs { entity: Some(e) } => {
+                write!(f, "a surface has no NURBS form ({e})")
+            }
             Self::FaceWithoutEdges => f.write_str("the face has no edges"),
             Self::WireEndSqueezed => {
                 f.write_str("the edge to squeeze ends its wire at the vertex to delete")
@@ -434,12 +448,12 @@ mod tests {
             (TopologyFailure::VertexNotOnEdge, SM_ERR, K::InvalidInput),
             (TopologyFailure::ClosedEdge, SM_ERR, K::InvalidInput),
             (
-                TopologyFailure::CurveNotBSpline,
+                TopologyFailure::CurveNotBSpline { entity: None },
                 SM_ERR_NULL_POINTER,
                 K::Unsupported,
             ),
             (
-                TopologyFailure::SurfaceWithoutNurbs,
+                TopologyFailure::SurfaceWithoutNurbs { entity: None },
                 SM_ERR_NULL_POINTER,
                 K::Unsupported,
             ),

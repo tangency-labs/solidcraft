@@ -2605,7 +2605,12 @@ fn merge_brep_in(
                     let new_curve = c.copy(k)?;
                     // m_pUVTrimCurve = SM_CAST_PTR(SmBSplineCurve, pNewCurve); NER(..)
                     if curve_bspline_base(&new_curve).is_none() {
-                        return Err(SolidError::topology(OP, TopologyFailure::CurveNotBSpline));
+                        return Err(SolidError::topology(
+                            OP,
+                            TopologyFailure::CurveNotBSpline {
+                                entity: Some(EntityRef::Edgeuse(eu)),
+                            },
+                        ));
                     }
                     Some(new_curve)
                 }
@@ -4702,8 +4707,14 @@ fn turn_to_nurbs_in(
 
             // it is an offset surface (ApproximateOffsetSurface's
             // GetOrCreateGwNurbPointer makes a missing NURB; NER there without one)
-            let base = with_nurb(k, offset.base_surface())?
-                .ok_or_else(|| SolidError::topology(OP, TopologyFailure::SurfaceWithoutNurbs))?;
+            let base = with_nurb(k, offset.base_surface())?.ok_or_else(|| {
+                SolidError::topology(
+                    OP,
+                    TopologyFailure::SurfaceWithoutNurbs {
+                        entity: Some(EntityRef::Face(f)),
+                    },
+                )
+            })?;
 
             // offset tolerance should be quite large compared to brep tol
             let approx_tol_3d = b.tolerance() * 10.0;
