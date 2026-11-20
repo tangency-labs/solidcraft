@@ -207,6 +207,31 @@ fn png_has_alpha(bytes: &[u8]) -> bool {
     false
 }
 
+/// The `MaterialX` OpenPBR shader cadmpeg writes beside the preview surface: an appearance
+/// property `<shader>/<input>` is that shader's input.
+const OPEN_PBR: &str = "ND_open_pbr_surface_surfaceshader";
+/// The depth at which a transmission colour is reached, in the layer's units (metres): 1 mm.
+const TRANSMISSION_DEPTH_M: f64 = 1e-3;
+
+/// The appearance properties of `optics`: its index of refraction (the preview surface's `ior`,
+/// which cadmpeg also gives OpenPBR as `specular_ior`), and OpenPBR's transmission: full, with the
+/// colour the absorption leaves after 1 mm (Beer–Lambert, e^(−absorption · 1 mm)) at a depth of
+/// 1 mm, thin-walled for a thin sheet. OpenPBR's metalness is 0, as a metal does not transmit:
+/// cadmpeg would otherwise give it the look's `metallic`, and base metalness takes the
+/// transmission away (the preview surface, which has no transmission, keeps the look's).
+pub(super) fn optics_properties(optics: &crate::OpticsPlan) -> Vec<(String, f64)> {
+    let mut out =
+        vec![("ior".to_string(), optics.ior), (format!("{OPEN_PBR}/transmission_weight"), 1.0), (format!("{OPEN_PBR}/base_metalness"), 0.0)];
+    for (channel, a) in ["r", "g", "b"].iter().zip(optics.absorption_per_mm) {
+        out.push((format!("{OPEN_PBR}/transmission_color.{channel}"), (-a).exp()));
+    }
+    out.push((format!("{OPEN_PBR}/transmission_depth"), TRANSMISSION_DEPTH_M));
+    if optics.thin_sheet {
+        out.push((format!("{OPEN_PBR}/geometry_thin_walled"), 1.0));
+    }
+    out
+}
+
 /// The normal map `plan` writes: only one the file shows as the renderer does (full strength,
 /// the image's v flipped as the built-in surfaces have it).
 fn written_normal(plan: &SurfacePlan) -> Option<&crate::SurfaceMap> {
@@ -269,6 +294,34 @@ mod tests {
         let got = coordinates(&points, &plan(true), &moved).unwrap();
         let p = got.values[0].get();
         assert_eq!([p.u, p.v], [1.0, 0.5]);
+    }
+
+    /// Optics as properties: the index, full transmission, the colour 1 mm of absorption leaves
+    /// (e^(−a)), and thin walls for a thin sheet only.
+    #[test]
+    fn optics_become_ior_and_openpbr_transmission() {
+        let mut optics = crate::OpticsPlan {
+            setup: "Glass".into(),
+            definition: "Body1".into(),
+            component: 0,
+            path: Vec::new(),
+            world: "Body1".into(),
+            ior: 1.52,
+            absorption_per_mm: [0.0, 0.1, 2.0],
+            thin_sheet: false,
+        };
+        let get = |p: &[(String, f64)], k: &str| p.iter().find(|(n, _)| n.ends_with(k)).map(|(_, v)| *v);
+        let p = optics_properties(&optics);
+        assert_eq!(get(&p, "ior"), Some(1.52));
+        assert_eq!(get(&p, "transmission_weight"), Some(1.0));
+        assert_eq!(get(&p, "base_metalness"), Some(0.0));
+        assert_eq!(get(&p, "transmission_color.r"), Some(1.0));
+        assert!((get(&p, "transmission_color.g").unwrap() - (-0.1f64).exp()).abs() < 1e-15);
+        assert!((get(&p, "transmission_color.b").unwrap() - (-2.0f64).exp()).abs() < 1e-15);
+        assert_eq!(get(&p, "transmission_depth"), Some(1e-3));
+        assert_eq!(get(&p, "geometry_thin_walled"), None);
+        optics.thin_sheet = true;
+        assert_eq!(get(&optics_properties(&optics), "geometry_thin_walled"), Some(1.0));
     }
 
     /// A decal's quad: eight points, two lifted 0.2 mm each side of the corners' plane, with the

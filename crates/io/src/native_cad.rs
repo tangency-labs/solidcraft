@@ -519,6 +519,33 @@ pub struct CadmpegOptions {
     pub surfaces: Vec<SurfacePlan>,
     /// OpenUSD: the pictures shown on the model (decals), written into a `.usdz` package.
     pub decals: Vec<DecalPlan>,
+    /// OpenUSD: the optics a render setup gives bodies (glass).
+    pub optics: Vec<OpticsPlan>,
+}
+
+/// The optics a render setup gives one placement of a body: a dielectric (glass) of index `ior`
+/// absorbing `absorption_per_mm` (red, green, blue, per mm) inside, its surface a thin sheet or
+/// the boundary of a closed volume.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OpticsPlan {
+    /// The render setup's name.
+    pub setup: String,
+    /// The body as the design holds it: its definition name and the component holding it (0:
+    /// the design itself). An export with the design's components matches these and `path`.
+    pub definition: String,
+    pub component: u64,
+    /// The placement bound: its occurrence path from the design (empty for a body of the design
+    /// itself).
+    pub path: Vec<u64>,
+    /// The body's world name, which an export of bodies where the design shows them (no
+    /// components) matches.
+    pub world: String,
+    /// The index of refraction.
+    pub ior: f64,
+    /// How much of red, green and blue the inside absorbs, per mm.
+    pub absorption_per_mm: [f64; 3],
+    /// The surface is a thin sheet, not the boundary of a closed volume.
+    pub thin_sheet: bool,
 }
 
 /// A picture shown on the model: its image on a quad.

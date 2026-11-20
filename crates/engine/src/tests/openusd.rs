@@ -656,3 +656,46 @@ fn images_write_the_shown_pictures_into_a_package() {
     assert!(warnings.iter().any(|w| w.contains("written only in a .usdz package")), "{warnings:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// With `render_setup`, a body the setup gives optics is written as glass: the preview surface's
+/// index of refraction, and the MaterialX shader's full transmission, with the colour 1 mm of the
+/// absorption leaves (e^(−a)) at a depth of 1 mm; a warning says a reader of the preview surface
+/// alone shows it opaque.
+#[test]
+fn render_setup_optics_are_written_as_transmission() {
+    let dir = temp_dir("optics");
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 3, "body_name": "Pane"}));
+    run(
+        &mut s,
+        "render.settings.set",
+        json!({"name": "Glass", "set": {"width": 4, "height": 4, "job": {"method": "cpu_raytrace", "options": {"lights": [],
+               "environment": {"color": [1, 1, 1], "intensity": 1}, "progressive": {"samples_per_pixel": 1, "seed": 1}}}}}),
+    );
+    let revision = s.revision;
+    run(
+        &mut s,
+        "render.optics.bind",
+        json!({"name": "Glass", "body_index": 0, "body_name": "Pane", "expected_revision": revision,
+               "optics": {"ior": 1.52, "absorption_per_mm": [0.1, 0.0, 2.0], "boundary": "closed_mesh"}}),
+    );
+    let path = dir.join("glass.usda");
+    let reply = run(&mut s, "file.export", json!({"path": path.to_string_lossy(), "render_setup": "Glass"}));
+    let warnings: Vec<String> = serde_json::from_value(reply["warnings"].clone()).unwrap_or_default();
+    assert!(
+        warnings.iter().any(|w| w.starts_with("Pane: the optics of render setup `Glass` are written as the MaterialX shader's transmission")),
+        "{warnings:?}"
+    );
+    let text = std::fs::read_to_string(&path).unwrap();
+    let preview = text.find("info:id = \"UsdPreviewSurface\"").unwrap_or_else(|| panic!("no preview surface:\n{text}"));
+    assert!((value_after(&text, preview, "float inputs:ior = ")[0] - 1.52).abs() < 1e-6, "{text}");
+    let pbr = text.find("info:id = \"ND_open_pbr_surface_surfaceshader\"").unwrap_or_else(|| panic!("no OpenPBR shader:\n{text}"));
+    assert_eq!(value_after(&text, pbr, "float inputs:transmission_weight = "), [1.0]);
+    let colour = value_after(&text, pbr, "color3f inputs:transmission_color = ");
+    assert_eq!(colour.len(), 3, "{colour:?}");
+    for (got, want) in colour.iter().zip([(-0.1f64).exp(), 1.0, (-2.0f64).exp()]) {
+        assert!((got - want).abs() < 1e-6, "{colour:?}");
+    }
+    assert!((value_after(&text, pbr, "float inputs:transmission_depth = ")[0] - 0.001).abs() < 1e-9, "{text}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

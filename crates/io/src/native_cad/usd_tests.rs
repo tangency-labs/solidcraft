@@ -1096,3 +1096,102 @@ fn chosen_bodies_leave_the_pictures_out() {
     assert!(!logo(&chosen));
     assert!(chosen.warnings.iter().any(|w| w.contains("pictures shown on the model are not written")), "{:?}", chosen.warnings);
 }
+
+/// `plan`'s optics for body `body`: glass of index `ior`, without absorption.
+fn glass(body: &str, ior: f64) -> crate::OpticsPlan {
+    crate::OpticsPlan {
+        setup: "Glass".into(),
+        definition: body.into(),
+        component: 0,
+        path: Vec::new(),
+        world: body.into(),
+        ior,
+        absorption_per_mm: [0.0; 3],
+        thin_sheet: false,
+    }
+}
+
+/// The OpenPBR transmission properties of the appearances of `built` with optics, by index.
+fn optical(built: &super::super::cadir_out::Built) -> Vec<(Option<f64>, Option<[f32; 4]>)> {
+    built
+        .ir
+        .model
+        .appearances
+        .iter()
+        .filter(|a| a.properties.keys().any(|k| k.as_str().ends_with("transmission_weight")))
+        .map(|a| {
+            let ior = a.properties.iter().find(|(k, _)| k.as_str() == "ior").map(|(_, v)| v.get());
+            (ior, a.base_color.map(|c| [c.r(), c.g(), c.b(), c.a()]))
+        })
+        .collect()
+}
+
+/// A hidden placement's optics do not count: the needle's shown placement is glass of index
+/// 1.52, its hidden one 1.33, and 1.52 is written with no warning.
+#[test]
+fn the_shown_placements_optics_are_written_when_a_hidden_one_differs() {
+    let (doc, model) = galvanometer();
+    let (paths, body) = needles(&doc, &model);
+    let needle = doc.components.iter().find(|c| c.name == "Needle").unwrap().id;
+    let plan = |path: &Vec<u64>, ior: f64| {
+        let mut p = glass(&body, ior);
+        p.component = needle;
+        p.path = path.clone();
+        p
+    };
+    let world = solidcraft_doc::world_state(&doc, &model.state()).unwrap();
+    let options = crate::CadmpegOptions {
+        hidden: crate::Hidden { placements: vec![paths[0].clone()], ..Default::default() },
+        optics: vec![plan(&paths[0], 1.33), plan(&paths[1], 1.52)],
+        ..Default::default()
+    };
+    let built = built_with(&doc, &model, &world, &options);
+    assert!(!built.warnings.iter().any(|w| w.contains("different optics")), "{:?}", built.warnings);
+    let iors: Vec<Option<f64>> = optical(&built).into_iter().map(|(ior, _)| ior).collect();
+    assert_eq!(iors, [Some(1.52)], "{:?}", built.warnings);
+}
+
+/// Two bodies with no look of their own, one imported red and one blue, given the same optics,
+/// keep their own colours: two glass appearances, not one.
+#[test]
+fn bodies_of_different_colours_with_one_glass_keep_their_colours() {
+    let mut doc = Document::new("Pair");
+    add_box(&mut doc, Vec3::ZERO, 0);
+    add_box(&mut doc, Vec3::new(50.0, 0.0, 0.0), 0);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let mut world = solidcraft_doc::world_state(&doc, &model.state()).unwrap();
+    for (b, colour) in world.bodies.iter_mut().zip([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]) {
+        b.imported = Some(std::sync::Arc::new(solidcraft_doc::appearance::ImportedLook { color: Some(colour), ..Default::default() }));
+    }
+    let optics = world.bodies.iter().map(|b| glass(&b.name, 1.5)).collect();
+    let options = crate::CadmpegOptions { optics, ..Default::default() };
+    let built = built_with(&doc, &model, &world, &options);
+    let colours: Vec<Option<[f32; 4]>> = optical(&built).into_iter().map(|(_, c)| c).collect();
+    assert_eq!(colours.len(), 2, "{colours:?}");
+    assert_ne!(colours[0], colours[1], "{colours:?}");
+}
+
+/// A metallic look on a glass body is written with OpenPBR's metalness 0 beside its transmission
+/// in the glass material, so the file's glass transmits; that material's preview surface keeps
+/// the look's metallic 1.
+#[test]
+fn a_metallic_look_on_glass_is_written_transmitting() {
+    let (mut doc, model) = one_box();
+    let body = model.state().bodies[0].name.clone();
+    let mut steel = Look::custom([128, 128, 128], 1.0);
+    steel.name = "Steel".into();
+    steel.pbr = Some(solidcraft_doc::pbr_appearance::PbrParameters::new(1.0, 0.25, 1.5).unwrap());
+    doc.appearances.bodies.insert(body.clone(), steel);
+    let world = solidcraft_doc::world_state(&doc, &model.state()).unwrap();
+    let options = crate::CadmpegOptions { optics: vec![glass(&body, 1.52)], ..Default::default() };
+    let (bytes, _) = crate::usd_from_design(&doc, &model.state(), &world, &[], &options, "glass.usda", crate::MeshQuality::Standard).unwrap();
+    let text = String::from_utf8(bytes).unwrap();
+    // The glass material: from the `def Material` before its transmission to the next one.
+    let at = text.find("float inputs:transmission_weight = 1").unwrap_or_else(|| panic!("no transmission:\n{text}"));
+    let start = text[..at].rfind("def Material").unwrap();
+    let end = text[at..].find("def Material").map_or(text.len(), |n| at + n);
+    let glass = &text[start..end];
+    assert!(glass.contains("float inputs:base_metalness = 0") && !glass.contains("float inputs:base_metalness = 1"), "{glass}");
+    assert!(glass.contains("float inputs:metallic = 1"), "{glass}");
+}

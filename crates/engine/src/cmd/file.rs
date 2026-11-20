@@ -3331,39 +3331,30 @@ fn export_cadmpeg(
         placements: s.visibility.hidden_occurrences.clone(),
     };
     let mut warnings = Vec::new();
-    let surfaces = match setup {
-        Some(name) => super::render::surface_bindings::export_plans(s, name, cmd, &mut warnings)?,
-        None => Vec::new(),
+    let (surfaces, optics) = match setup {
+        Some(name) => (
+            super::render::surface_bindings::export_plans(s, name, cmd, &mut warnings)?,
+            super::render::surface_bindings::optics_plans(s, name, cmd, &mut warnings)?,
+        ),
+        None => (Vec::new(), Vec::new()),
     };
     let decals = if images { usd_decals(&doc, &s.model.state(), &mut warnings) } else { Vec::new() };
-    let options = solidcraft_io::CadmpegOptions { hidden, physics, surfaces, decals };
+    let options = solidcraft_io::CadmpegOptions { hidden, physics, surfaces, decals, optics };
     let (bytes, written) =
         solidcraft_io::cadmpeg_export(&doc, &s.model.state(), &world, bodies, &options, path, quality, format).map_err(EngineError::Other)?;
     warnings.extend(written);
     warnings.extend(held.iter().map(|name| held_warning(name)));
     let label = if format == Format::Usd { "OpenUSD" } else { "Rhino" };
     let chosen = |b: &str| bodies.is_empty() || bodies.iter().any(|x| x == b);
-    match setup {
-        // The chosen setup's images are written (or their absence is a warning already): its
-        // optics are what remains.
-        Some(name) => match super::render::optics_bodies(s, cmd, name) {
-            Ok(optics) => {
-                for b in optics.iter().filter(|b| chosen(b)) {
-                    warnings
-                        .push(format!("{b}: render setup `{name}` gives it optics, which {label} export does not write yet: written with its look"));
-                }
-            }
-            Err(e) => warnings.push(format!("render setup `{name}`: its optics are not written: {e}")),
-        },
-        None => {
-            let bound = super::render::bound_bodies(s, cmd)?;
-            for b in world.bodies.iter().filter(|b| chosen(&b.name)) {
-                if let Some((setup, what)) = bound.get(&b.name) {
-                    warnings.push(format!(
-                        "{}: render setup `{setup}` gives it {what}, which {label} export does not write yet: written with its look",
-                        b.name
-                    ));
-                }
+    // The chosen setup's images and optics are written (or what is not is a warning already).
+    if setup.is_none() {
+        let bound = super::render::bound_bodies(s, cmd)?;
+        for b in world.bodies.iter().filter(|b| chosen(&b.name)) {
+            if let Some((setup, what)) = bound.get(&b.name) {
+                warnings.push(format!(
+                    "{}: render setup `{setup}` gives it {what}, which {label} export does not write yet: written with its look",
+                    b.name
+                ));
             }
         }
     }
