@@ -134,7 +134,7 @@ pub fn read_bodies(ir: &CadIr, trims: Option<&dyn Trims>) -> Bodies {
                     region.as_str(),
                     kind,
                     name.clone(),
-                    tolerance(ir),
+                    model.region_tolerance(region.as_str(), tolerance(ir)),
                     trims,
                     &none,
                     &mut budget,
@@ -144,7 +144,7 @@ pub fn read_bodies(ir: &CadIr, trims: Option<&dyn Trims>) -> Bodies {
                         region.as_str(),
                         kind,
                         name,
-                        tolerance(ir),
+                        model.region_tolerance(region.as_str(), tolerance(ir)),
                         trims,
                         message,
                         &mut budget,
@@ -334,6 +334,27 @@ impl<'a> Model<'a> {
             let id = rest.split_whitespace().next()?.trim_end_matches(':');
             self.faces.get(id).map(|(i, _)| *i as u64)
         })
+    }
+
+    /// The tolerance region `id` is built at: the largest its faces carry (a STEP file states
+    /// each part's uncertainty, which CADIR gives every face of the part, overriding the
+    /// document's), else `document`, within the range the STEP reader takes a file's. An edge's
+    /// or vertex's own tolerance (one off its curve) is that entity's alone, never the region's:
+    /// one loose edge does not loosen every face.
+    fn region_tolerance(&self, id: &str, document: f64) -> f64 {
+        let Some(region) = self.regions.get(id) else {
+            return document;
+        };
+        let most = region
+            .shells
+            .iter()
+            .filter_map(|s| self.shells.get(s.as_str()))
+            .flat_map(|shell| shell.faces())
+            .filter_map(|f| self.faces.get(f.as_str()))
+            .filter_map(|(_, face)| face.tolerance.map(|t| t.get()))
+            .filter(|t| t.is_finite())
+            .fold(None, |m: Option<f64>, t| Some(m.map_or(t, |m| m.max(t))));
+        most.map_or(document, |t| t.clamp(MIN_TOLERANCE, MAX_FIT_TOLERANCE))
     }
 
     /// The model indices of region `id`'s faces (what a refusal names a face by).
