@@ -10892,9 +10892,14 @@ fn copy_plan<'a>(
 fn own_copies(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature) -> Result<Vec<Mat>> {
     match &f.kind {
         FeatureKind::Pattern { pattern, .. } => pattern_transforms(doc, vals, st, f.component, pattern),
-        FeatureKind::Mirror { plane, .. } => Ok(vec![mirror_matrix(&doc.resolve_plane_in(vals, plane, 0, f.component, Some(st))?)]),
+        FeatureKind::Mirror { plane, .. } => Ok(vec![mirror_copy(doc, vals, st, f, plane)?]),
         _ => Ok(Vec::new()),
     }
+}
+
+/// The transform of mirror `f`'s one copy, across `plane`, in its component's frame.
+fn mirror_copy(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature, plane: &PlaneRef) -> Result<Mat> {
+    Ok(mirror_matrix(&doc.resolve_plane_in(vals, plane, 0, f.component, Some(st))?))
 }
 
 /// The transforms of a pattern's or mirror's copies in their instance order (instance `k + 1`
@@ -13082,12 +13087,11 @@ fn eval_feature_kind(
                 None => Ok(()),
             }
         }
-        FeatureKind::Mirror { features, bodies, combine, placements, .. } => {
-            let mats = own_copies(doc, vals, st, f)?;
+        FeatureKind::Mirror { features, plane, bodies, combine, placements } => {
+            let m = mirror_copy(doc, vals, st, f, plane)?;
             if bodies.is_empty() {
-                return replay(doc, vals, f, st, features, &mats, warning);
+                return replay(doc, vals, f, st, features, &[m], warning);
             }
-            let &[m] = mats.as_slice() else { return Err(DocError::Invalid("a mirror makes one copy".into())) };
             let mut output = 0;
             // Copies evaluated on each frame a placement is dragged, which nothing cuts or joins:
             // searching their revolved faces again was nearly all that took.
