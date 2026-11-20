@@ -741,6 +741,8 @@ pub struct GpuScene {
     pub hover_faces: Vec<u8>,
     /// An opaque imported mesh's single display face, tinted using the model's indexed buffers.
     pub hover_face_instanced: Vec<InstancedMesh>,
+    /// Selected imported mesh faces using the model's indexed buffers and the selection colour.
+    pub selected_face_instanced: Vec<InstancedMesh>,
     /// Whole highlighted bodies the model builds in its blocks but does not draw opaque (faded
     /// context, see-through): every one of their vertices drawn again, in this scene's palette,
     /// whose entries for their faces hold the highlight colour. No triangle is copied.
@@ -2197,6 +2199,7 @@ struct Batches {
     /// [`GpuScene::hover_faces`].
     hover_faces: Option<Batch>,
     hover_face_instanced: Vec<InstancedDraw>,
+    selected_face_instanced: Vec<InstancedDraw>,
     ground_ao: Option<Batch>,
     ground_input: Option<GroundAo>,
     pbr: Option<Batch>,
@@ -2401,6 +2404,11 @@ impl Batches {
                 Vec::new()
             } else {
                 self.instanced(device, &sc.hover_face_instanced, model, arena.as_deref())
+            };
+            self.selected_face_instanced = if sc.selected_face_instanced.is_empty() {
+                Vec::new()
+            } else {
+                self.instanced(device, &sc.selected_face_instanced, model, arena.as_deref())
             };
             let mut kept = std::mem::take(&mut self.blocks);
             let mut order = Vec::with_capacity(sc.blocks.len());
@@ -4635,7 +4643,7 @@ impl Renderer {
         // The highlight evaluates plans of its own where the model has none to draw again (in
         // Wireframe, a whole lit body's faces).
         let tess = res.tess.as_ref().map(|t| (t, &mut *encoder));
-        // Lit edges and a mesh body's hovered face reuse the model's buffers.
+        // Lit edges and a mesh body's highlighted face reuse the model's buffers.
         uploads.push(res.highlight.take_sharing(
             device,
             queue,
@@ -5066,6 +5074,7 @@ impl Renderer {
                 block.draw(pass, TriClass::Opaque, tally);
             }
         }
+        tinted_instanced(pass, &res.tri_hl_instanced, &res.tri_hl_instanced_flat, &h.selected_face_instanced);
         tris(pass, &res.tri_hl, &h.tris);
         // Hovered faces of opaque bodies: their own colour and finish, tinted as a whole hovered
         // body is.
@@ -6911,6 +6920,74 @@ mod glass_tests {
         scene.tri([5.0, -5.0, 0.0], [0.0, 0.0, 1.0], red);
         scene.tri([0.0, 5.0, 0.0], [0.0, 0.0, 1.0], red);
         scene
+    }
+
+    #[test]
+    fn selected_mesh_face_draws_as_the_copied_triangles_and_uploads_no_geometry() {
+        let (_, device, queue) = match crate::open_headless(crate::test_env::policy()) {
+            Ok(opened) => opened,
+            Err(error) if crate::test_env::skip_unless_required(crate::test_env::required(), &error) => return,
+            Err(error) => panic!("required GPU unavailable: {error}"),
+        };
+        let target = GpuTarget {
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            depth: Some(crate::depth_format(&device, true)),
+            samples: 1,
+            tess: false,
+            oit: false,
+            edges: false,
+        };
+        let mut renderer = Renderer::new(&device, target, None);
+        for flat in [false, true] {
+            let mesh = solidcore_tess::Mesh {
+                positions: vec![Vec3::new(-8.0, -8.0, 0.0), Vec3::new(8.0, -8.0, 0.0), Vec3::new(0.0, 8.0, 0.0)],
+                normals: if flat { vec![Vec3::Z; 3] } else { vec![Vec3::Z, Vec3::new(0.6, 0.0, 0.8), Vec3::new(-0.6, 0.0, 0.8)] },
+                triangles: vec![[0, 1, 2]],
+                ..Default::default()
+            };
+            let mut instance = InstancedMesh {
+                key: 1,
+                tris: Arc::new(SharedTris::new(&mesh)),
+                instances: Vec::new(),
+                look: InstanceLook::Opaque,
+                levels: Vec::new(),
+                closed: false,
+                edges: None,
+            };
+            let rows = [[1.0, 0.0, 0.0, 1.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
+            let mut scene = GpuScene::default();
+            instance.place(rows, scene.color([210, 120, 80, 255]));
+            scene.instanced.push(instance.clone());
+            let mut frame = test_frame(scene, 1.0);
+            frame.key += u64::from(flat);
+            frame.clip[0] = [1.0, 0.0, 0.0, 0.0];
+            frame.hl_key = 10 + 3 * u64::from(flat);
+            frame.hl_slot = Arc::new(Mutex::new(Some(GpuScene::default())));
+            let unselected = render_frame(&mut renderer, &device, &queue, &frame, true);
+
+            let mut copied = GpuScene::default();
+            let color = copied.color([76, 127, 203, 255]);
+            for (p, n) in mesh.positions.iter().zip(&mesh.normals) {
+                copied.tri((*p + Vec3::X).to_f32(), n.to_f32(), color);
+            }
+            frame.hl_key += 1;
+            frame.hl_slot = Arc::new(Mutex::new(Some(copied)));
+            let expected = render_frame(&mut renderer, &device, &queue, &frame, true);
+            assert_ne!(unselected, expected, "the selected face visibly tints the model");
+
+            let mut shared = GpuScene::default();
+            instance.instances.clear();
+            instance.place(rows, shared.color([76, 127, 203, 255]));
+            shared.selected_face_instanced.push(instance);
+            frame.hl_key += 1;
+            frame.hl_slot = Arc::new(Mutex::new(Some(shared)));
+            let actual = render_frame(&mut renderer, &device, &queue, &frame, true);
+            assert_eq!(renderer.highlight_uploads().geometry, 0);
+            assert_eq!(renderer.highlight_uploads().placements, INSTANCE_SIZE as u64);
+            assert_eq!(actual.len(), expected.len());
+            let error = actual.iter().zip(&expected).map(|(a, b)| a.abs_diff(*b)).max().unwrap_or_default();
+            assert!(error <= 1, "shared and copied feedback match for flat={flat}, max channel difference {error}");
+        }
     }
 
     #[test]
