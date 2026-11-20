@@ -325,6 +325,49 @@ fn searchable_dropdown_filters_selects_and_accepts_custom_values() {
 }
 
 #[test]
+fn searchable_dropdown_default_keys_keep_enter_and_close_on_escape_without_focus() {
+    for kind in ["text", "custom", "icon", "fitting"] {
+        for focused in [true, false] {
+            let ctx = crate::test_support::context();
+            let mut filter = "tw".to_owned();
+            let picked = std::cell::RefCell::new(None);
+            let widget = std::cell::Cell::new(egui::Id::NULL);
+            let enter_reaches_host = std::cell::Cell::new(false);
+            let options = [SearchOption { value: "two", label: "Two", handle: None }];
+            let mut draw = |ui: &mut Ui| {
+                row(ui, "Font", |ui| {
+                    let id = if kind == "icon" { "icon_search_menu" } else { "default_keys" };
+                    widget.set(ui.make_persistent_id(egui::IdSalt::new(id)));
+                    let value = match kind {
+                        "icon" => searchable_icon_dropdown(ui, "settings", "Two", &mut filter, &options),
+                        "fitting" => searchable_dropdown_fitting(ui, id, "Two", &mut filter, &options, None, false),
+                        _ => searchable_dropdown(ui, id, "Two", &mut filter, &options, (kind == "custom").then_some("Use typed value"), None),
+                    };
+                    if value.is_some() {
+                        *picked.borrow_mut() = value;
+                    }
+                });
+                enter_reaches_host.set(ui.input(|input| input.key_pressed(egui::Key::Enter)));
+            };
+            frame(&ctx, vec![], &mut draw);
+            let at = registry::handle_at("dialog:Font").unwrap();
+            frame(&ctx, pointer(at, true), &mut draw);
+            frame(&ctx, pointer(at, false), &mut draw);
+            frame(&ctx, vec![], &mut draw);
+            frame(&ctx, key(egui::Key::ArrowDown), &mut draw);
+            frame(&ctx, key(egui::Key::Enter), &mut draw);
+            assert!(picked.borrow().is_none(), "{kind}: Enter must not choose a value without opting in");
+            assert!(enter_reaches_host.get(), "{kind}: Enter remains available to the enclosing dialog");
+            assert!(egui::ComboBox::is_open(&ctx, widget.get()), "{kind}: Enter leaves the popup open");
+            let focus = if focused { widget.get().with("search_keyboard").with("editor") } else { egui::Id::unique("elsewhere") };
+            ctx.memory_mut(|memory| memory.request_focus(focus));
+            frame(&ctx, key(egui::Key::Escape), &mut draw);
+            assert!(!egui::ComboBox::is_open(&ctx, widget.get()), "{kind}: Escape closes the popup with editor focus={focused}");
+        }
+    }
+}
+
+#[test]
 fn searchable_dropdown_fits_rows_and_keeps_loading_status_inside_popup() {
     let ctx = crate::test_support::context();
     let count = std::cell::Cell::new(3);
@@ -344,6 +387,7 @@ fn searchable_dropdown_fits_rows_and_keeps_loading_status_inside_popup() {
                 &mut filter,
                 &options,
                 pending.get().then_some("Looking for installed fonts…"),
+                false,
             );
         });
     };
@@ -412,7 +456,7 @@ fn searchable_dropdown_keyboard_picks_the_filtered_full_value() {
     ];
     let mut draw = |ui: &mut Ui| {
         row(ui, "Font", |ui| {
-            if let Some(value) = searchable_dropdown(ui, "keyboard_fonts", "", &mut filter, &options, None, None) {
+            if let Some(value) = searchable_dropdown_fitting(ui, "keyboard_fonts", "", &mut filter, &options, None, true) {
                 picked = Some(value);
             }
         });
@@ -440,7 +484,7 @@ fn searchable_dropdown_keyboard_starts_at_the_current_family() {
     let options = [SearchOption { value: "one", label: "One", handle: None }, SearchOption { value: "two", label: "Two", handle: None }];
     let mut draw = |ui: &mut Ui| {
         row(ui, "Font", |ui| {
-            if let Some(value) = searchable_dropdown(ui, "current_font", "Two", &mut filter, &options, None, None) {
+            if let Some(value) = searchable_dropdown_fitting(ui, "current_font", "Two", &mut filter, &options, None, true) {
                 picked.borrow_mut().push(value);
             }
         });
@@ -460,6 +504,50 @@ fn searchable_dropdown_keyboard_starts_at_the_current_family() {
 }
 
 #[test]
+fn searchable_dropdown_discovery_refreshes_current_family_until_arrow_navigation() {
+    for navigated in [false, true] {
+        let ctx = crate::test_support::context();
+        let mut filter = String::new();
+        let picked = std::cell::RefCell::new(None);
+        let loaded = std::cell::Cell::new(false);
+        let mut draw = |ui: &mut Ui| {
+            row(ui, "Font", |ui| {
+                let names = if !loaded.get() {
+                    vec!["Liberation Sans"]
+                } else if navigated {
+                    vec!["Arial", "Liberation Sans"]
+                } else {
+                    vec!["Liberation Sans", "Arial"]
+                };
+                let options: Vec<_> = names.iter().map(|name| SearchOption { value: name, label: name, handle: None }).collect();
+                if let Some(value) = searchable_dropdown_fitting(ui, "discovered_fonts", "Arial", &mut filter, &options, None, true) {
+                    *picked.borrow_mut() = Some(value);
+                }
+            });
+        };
+        frame(&ctx, vec![], &mut draw);
+        let at = registry::handle_at("dialog:Font").unwrap();
+        frame(&ctx, pointer(at, true), &mut draw);
+        frame(&ctx, pointer(at, false), &mut draw);
+        frame(&ctx, vec![], &mut draw);
+        if navigated {
+            frame(&ctx, key(egui::Key::ArrowDown), &mut draw);
+            frame(&ctx, vec![], &mut draw);
+        }
+        loaded.set(true);
+        for _ in 0..4 {
+            frame(&ctx, vec![], &mut draw);
+        }
+        frame(&ctx, key(egui::Key::Enter), &mut draw);
+        assert_eq!(
+            picked.borrow().as_deref(),
+            Some(if navigated { "Liberation Sans" } else { "Arial" }),
+            "discovery updates the automatic highlight and preserves an arrow choice even when rows move"
+        );
+    }
+}
+
+#[test]
 fn searchable_dropdown_empty_match_keeps_enter_and_escape_in_the_popup() {
     let ctx = crate::test_support::context();
     let mut filter = String::new();
@@ -468,7 +556,7 @@ fn searchable_dropdown_empty_match_keeps_enter_and_escape_in_the_popup() {
     let escaped = std::cell::Cell::new(false);
     let mut draw = |ui: &mut Ui| {
         row(ui, "Font", |ui| {
-            if let Some(value) = searchable_dropdown(ui, "empty_fonts", "", &mut filter, &options, None, None) {
+            if let Some(value) = searchable_dropdown_fitting(ui, "empty_fonts", "", &mut filter, &options, None, true) {
                 picked = Some(value);
             }
         });

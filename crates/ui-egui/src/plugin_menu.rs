@@ -1668,6 +1668,7 @@ fn font_field_row(ui: &mut egui::Ui, field: &Field, text: &mut String) -> egui::
         &mut filter,
         &options,
         families.is_none().then(|| solidcraft_ui_text::tr("sketch_text.loading_fonts")),
+        true, // Keep font selection keys inside the popup.
     ) {
         *text = chosen;
         filter.clear();
