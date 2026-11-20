@@ -1,4 +1,5 @@
 # main ee673a19bf
+# boolean.topology_intersector_p2: #18065 moves gen0433 (WR-305, two curved pieces certified on their edges; gen0433_puts_two_certified_curved_pieces_on_their_edges); the digest is the branch file
 blend.feature_executive	9ca7c0200e1392d9
 blend.fillet_corner_p1	b2b709c01153c4b4
 blend.fillet_corner_p2	6d62684209753123
@@ -31,7 +32,7 @@ boolean.merge_p3	0a6b36b7967dcf31
 boolean.merge_p4	bf8ba2db8a9be781
 boolean.merge_p5	bdfc40139f7e400b
 boolean.topology_intersector_p1	d480c2ec4731fa77
-boolean.topology_intersector_p2	a5adff2d8d1aa348
+boolean.topology_intersector_p2	35e1425fea2f8feb
 boolean.topology_intersector_p3	6047fab1fddd550d
 corpus.parity	446a9aa2553dd78d
 curve.composite_curve_p1	1b0a64a4a148983b
