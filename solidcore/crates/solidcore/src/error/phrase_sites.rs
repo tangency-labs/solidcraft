@@ -102,7 +102,6 @@ const PINNED: &[(&str, usize)] = &[
     ("solidcore/src/blend/fillet_corner/topology/nx1_end.rs", 1),
     ("solidcore/src/blend/fillet_corner/topology/swept_turn.rs", 8),
     ("solidcore/src/blend/fillet_custom_solver.rs", 20),
-    ("solidcore/src/blend/fillet_exact/rational.rs", 23),
     ("solidcore/src/blend/fillet_executive/api.rs", 2),
     ("solidcore/src/blend/fillet_executive/p1.rs", 16),
     ("solidcore/src/blend/fillet_executive/p2.rs", 35),
