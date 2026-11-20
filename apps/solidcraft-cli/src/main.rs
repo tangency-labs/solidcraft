@@ -6,7 +6,7 @@
 //! solidcraft-cli eval <script.json|design.sc|part.step> [--in design.sc|part.step] [--json-out FILE] (alias: inspect) measurements as JSON
 //! solidcraft-cli check <design.sc|script.json> [--drawing ID|NAME] [--sheet ID|NAME] [--json-out FILE] Check Drawing on its drawings; exit 1 on findings
 //! solidcraft-cli script <design.sc> [--out script.json]     the design's history as a command script
-//! solidcraft-cli textconv <design.sc|design.json>             a design file as text, for git diff
+//! solidcraft-cli textconv <design.sc|design.json|drawing.scdwg> a design or drawing file as text, for git diff
 //! solidcraft-cli bench-open <design.sc | part.step> [--parse-only] [--save OUT.sc] [--display LEVEL [--edit NAME EXPR]] [--ops script.json] loading timings as JSON lines
 //! solidcraft-cli bench-agent [--scale F] [--save F] [--script-out F] a ~1,300-body design built command by command, timed
 //! solidcraft-cli bench-assistant --connect 127.0.0.1:PORT [--token T] --base-url URL --model NAME [--tasks 1,2,5] [--repeat N]
@@ -80,7 +80,7 @@ const USAGE_CHECK: &str = "  solidcraft-cli check <design.sc|script.json> [--dra
 /// `script`'s lines in the usage.
 const USAGE_SCRIPT: &str = "  solidcraft-cli script <design.sc|script.json> [--out script.json]\n      (the design's history as a command script that eval and run replay)\n";
 /// `textconv`'s lines in the usage.
-const USAGE_TEXTCONV: &str = "  solidcraft-cli textconv <design.sc|design.json>\n      (prints a design file as text for git diff. The design comes first, laid out as a .json save lays it out. Then each\n       other file a .sc container holds gets one line with its size and SHA-256. Caches, previews and the signature log\n       are left out, since they change on every save. A file it cannot show prints one line and still exits 0. The user\n       guide's Designs in Git section has the git setup.)\n";
+const USAGE_TEXTCONV: &str = "  solidcraft-cli textconv <design.sc|design.json|drawing.scdwg>\n      (prints a design or drawing file as text for git diff. The design or drawing comes first, laid out as a .json save\n       lays it out. Then each other file a container holds gets one line with its size and SHA-256. The model cache, the\n       preview and plugin caches are left out, since a save or a plugin writes them afresh. A file it cannot show prints\n       one line with its size and SHA-256 and still exits 0. The user guide's Designs in Git section has the git setup.)\n";
 /// `bench-open`'s lines in the usage.
 const USAGE_BENCH_OPEN: &str = "  solidcraft-cli bench-open <design.sc | part.step> [--parse-only] [--save OUT.sc] [--display LEVEL [--edit NAME EXPR]] [--ops script.json] [--profile] [--profile-out trace.json]\n      (--profile and --profile-out as for run)\n      (--ops: after opening, run each command of the script and undo it, timing the command, the\n       evaluations it caused and the view it leaves: placing and meshing what changed)\n";
 /// `bench-agent`'s lines in the usage.
