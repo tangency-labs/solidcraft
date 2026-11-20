@@ -633,6 +633,9 @@ enum Surfaces {
 /// the plane of the face it meets stays at 1e-14 for over a millimetre and then parts
 /// where the wall turns, far from the edge: read there, the side of a coincident face
 /// came out of a feature the edge does not touch (rig sweeps/5037, status 1001).
+/// [`EFF_ZERO`] is absolute, as upstream's coincidence tests: far from the origin a step
+/// point's own rounding can exceed it, and a coincidence such as sweeps/5037's would be held
+/// there. Scaling it by the points' magnitude is a known limit, not done here.
 fn holds_coincidence(surfaces: Surfaces, gap: f64) -> bool {
     match surfaces {
         Surfaces::Same => false,

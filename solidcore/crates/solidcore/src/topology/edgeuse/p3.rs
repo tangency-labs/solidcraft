@@ -1760,7 +1760,10 @@ pub fn get_or_create_uv_trim_curve(
 /// edge below a trim it is proved to be farther from: a tolerance below the trim's real
 /// distance is invalid, one above it only loose. The raise is then to `B` itself (the distance
 /// returned is `B / 2`, which `SetUVTrimCurve` doubles): the tightest tolerance the proof
-/// gives. The bound is the whole bisection's wherever it is above half the tolerance (to its
+/// gives. It adds no margin for the edge curve's evaluation rounding: the tolerance it leaves
+/// is above upstream's, which counts none either, so it uncovers nothing upstream covers. A
+/// lowering below upstream's raise is what must not uncover it, hence the rounding check
+/// there (`lowered_covers_rounding`). The bound is the whole bisection's wherever it is above half the tolerance (to its
 /// piece and depth limits, not stopped at `upstream`), so a loose enclosure is tightened as
 /// far as it goes before the edge is raised to it; it is still a proved bound. Where `B` is
 /// from `upstream` to twice it, upstream's raise already covers it, and stays.
