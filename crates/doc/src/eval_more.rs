@@ -1353,6 +1353,11 @@ pub(super) fn sheet_eval(
                 }
                 None => None,
             };
+            // An outline that reaches none of the sheet's panels holds no holes. A recompute keeps the
+            // field, so an edit that moves the outline off the sheet still builds: it says so (#19631).
+            if outline.as_ref().is_some_and(Vec::is_empty) {
+                append_warning(warning, "the perforation's outline does not overlap the sheet, so it holds no holes".into());
+            }
             let sh = st.surface_sheets.get_mut(i).ok_or_else(|| DocError::Invalid("sheet".into()))?;
             sh.perforations.push(crate::sheet::SheetPerforation { feature: f.id, diameter: d, pitch, margin, square, from_right: false, outline });
             // It keeps clear of the bends the sheet has now; a bend made later runs through it.
