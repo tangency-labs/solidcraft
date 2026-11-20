@@ -256,10 +256,8 @@ fn dialog_preserves_declared_property_order_when_visibility_changes() {
         }
         h.frames(4);
         let visible: &[&str] = if show { &declared } else { &["zeta", "mode", "alpha"] };
-        let positions: Vec<f32> = visible
-            .iter()
-            .map(|key| crate::scenario::handle_at(&format!("plugin_dialog:field:{key}")).expect("visible field").y)
-            .collect();
+        let positions: Vec<f32> =
+            visible.iter().map(|key| crate::scenario::handle_at(&format!("plugin_dialog:field:{key}")).expect("visible field").y).collect();
         assert!(positions.windows(2).all(|pair| pair[0] < pair[1]), "fields are drawn in declared order: {visible:?} at {positions:?}");
         for key in ["extra", "another_extra"] {
             assert_eq!(crate::scenario::handle_at(&format!("plugin_dialog:field:{key}")).is_some(), show);
