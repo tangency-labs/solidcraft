@@ -6559,6 +6559,28 @@ fn an_unequal_chamfer_too_large_for_a_notch_names_the_scale_that_fits() {
     assert_eq!(chamfer(4.0 * scale, 2.0 * scale), Ok(()), "the scale named builds");
 }
 
+/// #19691: a 1 mm extrusion of a closed spline with a 0.48 mm notch in its top rim 0.0001 mm
+/// from the spline's seam, its top loop chamfered 0.4 by 0.2 mm, failed with a bare "status
+/// 1007: the chamfer size": the notch's rim was taken to open to a half turn, where an unequal
+/// chamfer folds. Its faces meet square; no scale of the sizes builds beside the sliver the
+/// notch leaves, so it is refused as too large, saying the smaller scales tried do not build.
+#[test]
+fn an_unequal_chamfer_beside_a_notch_at_a_spline_s_seam_is_refused_by_its_size() {
+    let mut s = Session::default();
+    let points = [[500.0, 0.0], [379.0, 75.7], [0.0, 90.0], [-379.0, 75.7], [-500.0, 0.0], [-329.0, -65.7], [-0.0, -110.0], [329.0, -65.7]];
+    run(&mut s, "sketch.create", json!({"name": "Outline", "plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(&mut s, "sketch.spline.fit_point", json!({"periodic": true, "points": points}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Outline", "distance": 1.0, "operation": "new", "body_name": "Part"}));
+    let notch = json!({"radius": 0.24, "height": 0.5, "base": [499.97443718225014, 0.23873292279060757, 0.5], "axis": "Z", "operation": "cut", "targets": ["Part"]});
+    run(&mut s, "solid.cylinder", notch);
+    let edges = json!([[0.0, -110.0, 1.0], [499.7360050660453, 0.2113444952693031, 1.0]]);
+    let e = s.execute("solid.chamfer", &json!({"edges": edges, "distance": 0.4, "distance2": 0.2})).unwrap_err().to_string();
+    assert!(!e.contains("1007"), "{e}");
+    assert!(e.contains("larger than the faces beside its edges allow"), "{e}");
+    assert!(e.contains("scales of its sizes tried builds"), "{e}");
+}
+
 /// #18823: a block whose front half slopes at 45 degrees, a groove down the slope (a cylinder of
 /// radius 3, its axis 2.5 above the slope) with both edges rounded 1 mm, and a slot slanted 65
 /// degrees in plan whose inner wall runs into the round and the groove. The wall's top edge, where
