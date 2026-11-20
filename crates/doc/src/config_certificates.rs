@@ -842,7 +842,7 @@ impl Document {
                 // rather than name matching. The pick point is recorded on the original
                 // face plane; the offset moves the face by `d`, so the pick point is
                 // `d` away from the current plane.
-                for _face_pick in faces {
+                if faces.iter().next().is_some() {
                     return Some(FaceCertificate::Lineage);
                 }
             }
