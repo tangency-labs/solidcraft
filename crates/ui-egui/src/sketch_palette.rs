@@ -416,6 +416,7 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut construction = false;
     let mut look = false;
     let mut finish = false;
+    let mut cancel = false;
     let mut slice_changed = false;
     let mut tie = false;
     let mut start = None;
@@ -551,6 +552,14 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
         );
         look = at;
         slice_changed = slice;
+        // Its own row, so Finish Sketch keeps its look; the same discard as the ribbon's X (#19961).
+        // "Cancel Sketch", not "Cancel": an open dialog's Cancel stays the only one.
+        let [cancel_clicked] = crate::ui_kit::button_row_in_card(
+            ui,
+            "sketch_palette",
+            [crate::ui_kit::PairButton { key: "cancel", label: solidcraft_ui_text::tr("cmd.sketch_cancel"), icon: None }],
+        );
+        cancel = cancel_clicked;
     };
     let at_top = crate::ui_kit::DialogButtons::current(&ctx) == crate::ui_kit::DialogButtons::Top;
     crate::ui_kit::scope(ui, |ui| {
@@ -558,7 +567,7 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
             draw_footer(ui);
             0.0
         } else {
-            crate::ui_kit::Panel::pinned_footer(ui, "shared_sketch_palette_footer", 2, draw_footer).response.rect.height()
+            crate::ui_kit::Panel::pinned_footer(ui, "shared_sketch_palette_footer", 4, draw_footer).response.rect.height()
         };
         let top = ui.cursor().top();
         let options =
@@ -620,6 +629,8 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     if finish {
         app.finish_sketch();
+    } else if cancel {
+        app.cancel_sketch();
     }
 }
 
@@ -742,6 +753,30 @@ mod tests {
         assert!(crate::scenario::handle_at("button:sketch.finish").is_some(), "and so does the ribbon's Finish");
         h.call("ui.click", json!({"x":at.x,"y":at.y}));
         assert!(h.app.session.active_sketch.is_none());
+    }
+
+    #[test]
+    fn palette_cancel_discards_the_sketch_like_sketch_cancel() {
+        let features = |h: &crate::scenario::Harness| h.app.session.doc.features.iter().map(|f| f.name.clone()).collect::<Vec<_>>();
+        let mut left = Vec::new();
+        for panel in [true, false] {
+            let mut h = crate::scenario::Harness::new();
+            let before = features(&h);
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            h.app.run("sketch.line", json!({"points": [[0, 0], [30, 10]]})).unwrap();
+            h.settle();
+            if panel {
+                let at = crate::scenario::handle_at("sketch_palette:cancel").expect("the palette has Cancel");
+                h.call("ui.click", json!({"x":at.x,"y":at.y}));
+            } else {
+                h.app.run("sketch.cancel", json!({})).unwrap();
+            }
+            h.settle();
+            assert!(h.app.session.active_sketch.is_none(), "panel {panel}: the sketch is left");
+            assert_eq!(features(&h), before, "panel {panel}: the sketch is discarded");
+            left.push(features(&h));
+        }
+        assert_eq!(left[0], left[1], "the panel's Cancel does what sketch.cancel does");
     }
 
     #[test]
