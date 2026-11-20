@@ -194,6 +194,12 @@ frame.end_cap                     plates on member ends; tested in crates/engine
 frame.profile.list                a listing of the profile library
 frame.profile.properties          a profile's section properties from the library
 frame.rotate_member               turns a member about its own axis; tested in crates/engine/src/cmd/frame_tests.rs
+geometry.copies                   geometry copies of a public geometry, no geometry built here; tested in crates/engine/src/cmd/public_geometry_tests.rs
+geometry.import                   copies a design file's public geometry as plain features; tested in crates/engine/src/cmd/public_geometry_tests.rs
+geometry.publications             a listing of public geometries; tested in crates/engine/src/cmd/public_geometry_tests.rs
+geometry.publish                  groups a skeleton's references, no geometry built; tested in crates/engine/src/cmd/occurrence_tests.rs
+geometry.unpublish                removes a group of references, no geometry built; tested in crates/engine/src/cmd/occurrence_tests.rs
+geometry.update                   reads the source file again and refreshes the copies; tested in crates/engine/src/cmd/public_geometry_tests.rs
 inspect.accessibility             display analysis: shading
 inspect.analysis                  display analysis: which one is on
 inspect.colored_components        display: component colours
