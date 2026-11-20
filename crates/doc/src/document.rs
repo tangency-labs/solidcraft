@@ -4707,6 +4707,9 @@ impl Document {
         if self.point_clouds.iter().any(|c| !c.points.is_empty()) {
             kinds.push("point clouds");
         }
+        if !self.render.resources.is_empty() || !self.render.texture_resources.is_empty() {
+            kinds.push("render environments and textures");
+        }
         if !self.plugin_data.is_empty() {
             kinds.push("plugin files");
         }

@@ -653,7 +653,6 @@ fn embedded_hdr_capture_is_offline_atomic_deduplicated_and_undoable_after_source
         s.doc.render.resources.required(&id).unwrap().bytes().as_ptr()
     ));
     assert!(!s.doc.to_json().contains(path.to_str().unwrap()));
-    assert_eq!(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap(), *s.doc);
     let container = solidcraft_io::write_design_container(&s.doc).unwrap();
     assert_eq!(solidcraft_io::read_design(&container).unwrap(), *s.doc);
     assert!(Arc::ptr_eq(&model, &s.model.state()));

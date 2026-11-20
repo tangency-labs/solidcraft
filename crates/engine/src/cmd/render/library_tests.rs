@@ -94,7 +94,7 @@ fn imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resour
     std::fs::remove_file(&path).unwrap();
     let saved = s.doc.to_json();
     assert!(!saved.contains(path.to_str().unwrap()));
-    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+    let mut reopened = Session::new(solidcraft_io::read_design(&solidcraft_io::write_design_container(&s.doc).unwrap()).unwrap());
     reopened.execute("render.scene", &json!({})).unwrap();
     let scene = crate::product_scene::extract(&reopened).unwrap();
     let bindings = &reopened.doc.render.setups["Wood"].surfaces;
