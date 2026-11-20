@@ -35,8 +35,6 @@ fn assembled_box_as(kind: Kind) -> R<(Solid, Vec<bool>)> {
     assembled_box_with(kind, |from, to| Ok(BCurve::Line { start: corner(from), end: corner(to) }))
 }
 
-/// [`assembled_box_as`] with each edge's curve from corner `from` to corner `to` on [0, 1] given
-/// by `curve`.
 fn assembled_box_with(kind: Kind, curve: impl Fn(usize, usize) -> R<BCurve>) -> R<(Solid, Vec<bool>)> {
     let mut asm = Assembly::new(1e-6, None);
     let mut vertices = Vec::new();
@@ -91,10 +89,7 @@ fn a_box_assembled_from_its_parts_is_a_closed_solid_record() {
     assert!(solid.turned.is_empty(), "no face disagrees with its loops: {:?}", solid.turned);
 }
 
-/// A cubic edge on the box's top face (z = 30) that lies off its plane by up to 0.67 µm only
-/// between the 16 even samples, where its knots crowd towards its end: the gap is measured where
-/// the plane's pcurve is checked too, so the closed-form pcurve is taken and the box stays a
-/// closed solid.
+/// The top face's cubic edge lies off its plane only between the 16 even gap samples (#11652).
 #[test]
 fn a_spline_edge_off_its_plane_between_the_even_samples_keeps_its_face() {
     let knots = vec![0.0, 0.0, 0.0, 0.0, 0.95, 0.96, 0.97, 0.98, 0.99, 1.0, 1.0, 1.0, 1.0];
