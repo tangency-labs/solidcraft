@@ -210,10 +210,14 @@ fn renumbered() -> Failure {
 fn smlib_body(record: &solidcore_record::brep::Brep) -> std::result::Result<(Body, Vec<usize>), Failure> {
     let failed = |e: KernelError| Failure { read: false, msg: e.to_string().trim_start_matches("the operation failed: ").to_string() };
     let (brep, smlib_order) = crate::native::smlib_record_ordered(record).map_err(failed)?;
-    let (body, body_order) = crate::native::body_from_smlib_ordered(&brep).map_err(failed)?;
+    let (canonical, body_order, prepared) = brep.to_native_prepared().map_err(|e| failed(KernelError::Failed(e.to_string())))?;
+    let body = Body::from_smlib_record(canonical).map_err(failed)?;
+    if let Some(prepared) = prepared {
+        // Kept as the body's SMLib form, as its first use would make it.
+        body.smlib.keep(prepared, body.smlib.releases());
+    }
     // SMLib's face i is the record's `smlib_order` face and the body's `body_order` face (an
     // empty order is the same one).
-    let Some(body_order) = body_order else { return Err(renumbered()) };
     // SMLib's export may number the edges and vertices otherwise than the record (a surface model
     // whose open shell uses faces against their surfaces beside closed shells: SMLib walks those
     // faces as their surfaces face). An import still lists SMLib's faces in the record's order;

@@ -33,6 +33,7 @@ carry into a worker thread.
 | `effective_language(preference)` | The catalog id a preference resolves to |
 | `pin_system_language()` | Make the system language English, for tests outside this crate |
 | `each_english_message(f)` | Every English `(id, text)` |
+| `SHARED_ENGLISH` | The English shared catalogue (`locales/en.json`) as JSON, for a shared crate's tests of the ids it names |
 | `bidi::visual`, `bidi::visual_template`, `bidi::has_rtl`, `bidi::screen_order` | Right-to-left text in the order a left-to-right layout draws correctly |
 
 ## Installing catalogs

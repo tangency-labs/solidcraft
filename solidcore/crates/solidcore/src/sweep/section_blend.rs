@@ -1254,89 +1254,85 @@ fn frame_at(
     leave: Vec3,
 ) -> Result<SectionFrame> {
     use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
+    use crate::nurbs::knots::Side;
     let foot = crate::query::api_queries::surface_closest_point(k, surf, p)?;
     let uv = *foot
         .uvs
         .first()
         .ok_or_else(|| frames_invalid("a station with no foot on the support face"))?;
-    let d = surf.evaluate(
-        k,
-        uv,
-        3,
-        3,
-        EvaluateFlags {
-            non_zero_tangents: false,
-            ..EvaluateFlags::default()
-        },
-    )?;
-    let at = |i: usize, j: usize| -> Result<Vec3> {
-        d.get(i)
-            .and_then(|r| r.get(j))
-            .copied()
-            .ok_or_else(|| frames_invalid("a surface's derivatives"))
-    };
-    let (su, sv) = (at(1, 0)?, at(0, 1)?);
-    let n = su
-        .cross(sv)
-        .unitize()
-        .map_err(|_| frames_invalid("a support surface singular at a station"))?;
-    let w = (leave - n * leave.dot(n))
-        .unitize()
-        .map_err(|_| frames_invalid("a leave direction normal to the support face at a station"))?;
-    // S_u du + S_v dv = w, by its normal equations
-    let (a, bb, c) = (su.dot(su), su.dot(sv), sv.dot(sv));
-    let det = a * c - bb * bb;
-    #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
-    if !(det > 0.0) {
-        return Err(frames_invalid("a support surface singular at a station"));
-    }
-    let du = (c * w.dot(su) - bb * w.dot(sv)) / det;
-    let dv = (a * w.dot(sv) - bb * w.dot(su)) / det;
-    // the higher derivatives on the spans the line runs into: at a knot (a rational circle's
-    // quarter) a surface's second and third derivatives differ from one span to the next, and
-    // the line leaves along `w`, as SolidCraft's samples read it
-    let side = |d: f64| {
-        if d < 0.0 {
-            crate::nurbs::knots::Side::Right
-        } else {
-            crate::nurbs::knots::Side::Left
+    // A geometrically smooth knot may change parameter speed. Choose the outgoing span
+    // with its own Jacobian, then use that same span for all three derivatives.
+    let mut sides = (Side::Left, Side::Left);
+    for _ in 0..4 {
+        let d = surf.evaluate(
+            k,
+            uv,
+            3,
+            3,
+            EvaluateFlags {
+                u_side: sides.0,
+                v_side: sides.1,
+                non_zero_tangents: false,
+                ..EvaluateFlags::default()
+            },
+        )?;
+        let at = |i: usize, j: usize| -> Result<Vec3> {
+            d.get(i)
+                .and_then(|r| r.get(j))
+                .copied()
+                .ok_or_else(|| frames_invalid("a surface's derivatives"))
+        };
+        let (su, sv) = (at(1, 0)?, at(0, 1)?);
+        let n = su
+            .cross(sv)
+            .unitize()
+            .map_err(|_| frames_invalid("a support surface singular at a station"))?;
+        let w = (leave - n * leave.dot(n)).unitize().map_err(|_| {
+            frames_invalid("a leave direction normal to the support face at a station")
+        })?;
+        // S_u du + S_v dv = w, by its normal equations
+        let (a, bb, c) = (su.dot(su), su.dot(sv), sv.dot(sv));
+        let det = a * c - bb * bb;
+        #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
+        if !(det > 0.0) {
+            return Err(frames_invalid("a support surface singular at a station"));
         }
-    };
-    let sided = surf.evaluate(
-        k,
-        uv,
-        3,
-        3,
-        EvaluateFlags {
-            u_side: side(du),
-            v_side: side(dv),
-            non_zero_tangents: false,
-            ..EvaluateFlags::default()
-        },
-    )?;
-    let at = |i: usize, j: usize| -> Result<Vec3> {
-        sided
-            .get(i)
-            .and_then(|r| r.get(j))
-            .copied()
-            .ok_or_else(|| frames_invalid("a surface's derivatives"))
-    };
-    let c1 = at(1, 0)? * du + at(0, 1)? * dv;
-    let c2 = at(2, 0)? * (du * du) + at(1, 1)? * (2.0 * du * dv) + at(0, 2)? * (dv * dv);
-    let c3 = at(3, 0)? * (du * du * du)
-        + at(2, 1)? * (3.0 * du * du * dv)
-        + at(1, 2)? * (3.0 * du * dv * dv)
-        + at(0, 3)? * (dv * dv * dv);
-    let (bend, bend_change) = shape(c1, c2, c3)?;
-    if !(finite(bend) && finite(bend_change)) {
-        return Err(frames_invalid("a station's shape is not finite"));
+        let du = (c * w.dot(su) - bb * w.dot(sv)) / det;
+        let dv = (a * w.dot(sv) - bb * w.dot(su)) / det;
+        let side = |d: f64, current| {
+            if d < 0.0 {
+                Side::Right
+            } else if d > 0.0 {
+                Side::Left
+            } else {
+                current
+            }
+        };
+        let outgoing = (side(du, sides.0), side(dv, sides.1));
+        if outgoing != sides {
+            sides = outgoing;
+            continue;
+        }
+        let c1 = at(1, 0)? * du + at(0, 1)? * dv;
+        let c2 = at(2, 0)? * (du * du) + at(1, 1)? * (2.0 * du * dv) + at(0, 2)? * (dv * dv);
+        let c3 = at(3, 0)? * (du * du * du)
+            + at(2, 1)? * (3.0 * du * du * dv)
+            + at(1, 2)? * (3.0 * du * dv * dv)
+            + at(0, 3)? * (dv * dv * dv);
+        let (bend, bend_change) = shape(c1, c2, c3)?;
+        if !(finite(bend) && finite(bend_change)) {
+            return Err(frames_invalid("a station's shape is not finite"));
+        }
+        return Ok(SectionFrame {
+            p,
+            leave: w,
+            bend,
+            bend_change,
+        });
     }
-    Ok(SectionFrame {
-        p,
-        leave: w,
-        bend,
-        bend_change,
-    })
+    Err(frames_invalid(
+        "no consistent outgoing span for the support frame",
+    ))
 }
 
 /// The curvature vector of a curve with derivatives `c1`, `c2`, `c3`, and its arc-length
