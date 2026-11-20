@@ -81,6 +81,113 @@ pub struct DesignView {
     pub spec: Option<ViewSpec>,
 }
 
+// This slice shows one pop-out. The collection and ids are ready for more windows.
+const MAX_POPOUTS: usize = 1;
+
+/// A design's window id. Zero names its main window.
+pub type WindowId = u32;
+
+/// Which application controls a window shows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum WindowLevel {
+    #[default]
+    ViewsOnly,
+    Clean,
+    Full,
+}
+
+impl WindowLevel {
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::ViewsOnly => "views_only",
+            Self::Clean => "clean",
+            Self::Full => "full",
+        }
+    }
+
+    fn from_key(key: &str) -> Option<Self> {
+        [Self::ViewsOnly, Self::Clean, Self::Full].into_iter().find(|level| level.key() == key)
+    }
+}
+
+/// Logical window coordinates relative to the selected display.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WindowPlacement {
+    pub display: Option<String>,
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    pub maximised: bool,
+    pub fullscreen: bool,
+}
+
+impl WindowPlacement {
+    fn is_valid(&self) -> bool {
+        [self.x, self.y, self.w, self.h].into_iter().all(f32::is_finite) && self.w > 0.0 && self.h > 0.0
+    }
+
+    pub fn to_json(&self) -> Value {
+        json!({"display": self.display, "x": self.x, "y": self.y, "w": self.w, "h": self.h, "maximised": self.maximised, "fullscreen": self.fullscreen})
+    }
+
+    fn from_json(value: &Value) -> Option<Self> {
+        let number = |key| value.get(key)?.as_f64().map(|v| v as f32);
+        let placement = Self {
+            display: value.get("display").and_then(Value::as_str).filter(|name| name.len() <= MAX_SUBJECT).map(str::to_owned),
+            x: number("x")?,
+            y: number("y")?,
+            w: number("w")?,
+            h: number("h")?,
+            maximised: value.get("maximised").and_then(Value::as_bool).unwrap_or(false),
+            fullscreen: value.get("fullscreen").and_then(Value::as_bool).unwrap_or(false),
+        };
+        placement.is_valid().then_some(placement)
+    }
+}
+
+/// A pop-out holds its own strip, active view and layout for this design.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PopOut {
+    pub id: WindowId,
+    pub level: WindowLevel,
+    pub placement: Option<WindowPlacement>,
+    pub views: ViewSet,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum WindowTarget {
+    New { placement: Option<WindowPlacement> },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Moved {
+    pub view: u64,
+    pub window: WindowId,
+    pub created: bool,
+    pub from: WindowId,
+    pub closed_source: bool,
+    pub placement: Option<WindowPlacement>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MoveError {
+    NoSuchView,
+    TooManyWindows,
+    LastViewOfMainWindow,
+    BadGeometry,
+}
+
+impl MoveError {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::NoSuchView => "no_such_view",
+            Self::TooManyWindows => "too_many_windows",
+            Self::LastViewOfMainWindow => "last_view_of_main_window",
+            Self::BadGeometry => "bad_geometry",
+        }
+    }
+}
 /// The views of a design in tab order, the active one, and the views closed lately.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ViewSet {
@@ -89,6 +196,11 @@ pub struct ViewSet {
     /// Closed views with the place each had, the latest last.
     closed: Vec<(usize, DesignView)>,
     next_id: u64,
+    window_id: WindowId,
+    windows: Vec<PopOut>,
+    next_window: WindowId,
+    /// Open views belonging to another window of the same design.
+    elsewhere: usize,
     /// How the window lays its views out side by side. Dormant while the active view is outside it.
     tiles: Option<Tiles>,
 }
@@ -103,7 +215,228 @@ impl ViewSet {
     /// A design's first views: one Model view, active.
     pub fn new() -> Self {
         let model = DesignView { id: 1, kind: ViewKind::Model, name: ViewKind::Model.label().into(), subject: None, spec: None };
-        ViewSet { views: vec![model], active: 1, closed: Vec::new(), next_id: 2, tiles: None }
+        Self::strip(vec![model], 1, 2, 0)
+    }
+
+    fn strip(views: Vec<DesignView>, active: u64, next_id: u64, window_id: WindowId) -> Self {
+        Self { views, active, closed: Vec::new(), next_id, window_id, windows: Vec::new(), next_window: 1, elsewhere: 0, tiles: None }
+    }
+
+    /// The open pop-outs in this design. The main strip is this ViewSet itself.
+    pub fn windows(&self) -> &[PopOut] {
+        &self.windows
+    }
+
+    pub fn window(&self, id: WindowId) -> Option<&PopOut> {
+        self.windows.iter().find(|window| window.id == id)
+    }
+
+    pub fn window_mut(&mut self, id: WindowId) -> Option<&mut PopOut> {
+        let next_id = self.allocation_watermark();
+        let window = self.windows.iter_mut().find(|window| window.id == id)?;
+        // A caller may allocate directly through the mutable strip, without a take/put cycle.
+        window.views.next_id = window.views.next_id.max(next_id);
+        Some(window)
+    }
+
+    pub fn views_of(&self, id: WindowId) -> Option<&ViewSet> {
+        if id == self.window_id { Some(self) } else { self.window(id).map(|window| &window.views) }
+    }
+
+    pub fn window_of(&self, view: u64) -> Option<WindowId> {
+        if self.get(view).is_some() {
+            return Some(self.window_id);
+        }
+        self.windows.iter().find(|window| window.views.get(view).is_some()).map(|window| window.id)
+    }
+
+    /// Move an open view into a new window without changing its camera or active source layout.
+    pub fn move_to_window(&mut self, view: u64, target: WindowTarget) -> Result<Moved, MoveError> {
+        let WindowTarget::New { placement } = target;
+        let at = self.index_of(view).ok_or(MoveError::NoSuchView)?;
+        if self.window_id == 0 && self.len() == 1 {
+            return Err(MoveError::LastViewOfMainWindow);
+        }
+        if self.window_id != 0 || self.windows.len() >= MAX_POPOUTS {
+            return Err(MoveError::TooManyWindows);
+        }
+        if placement.as_ref().is_some_and(|placement| !placement.is_valid()) {
+            return Err(MoveError::BadGeometry);
+        }
+        let id = self.next_window;
+        self.next_window = self.next_window.checked_add(1).unwrap_or(1);
+        let moved = self.views.remove(at);
+        if self.active == view
+            && let Some(neighbour) = self.views.get(at.saturating_sub(1))
+        {
+            self.active = neighbour.id;
+        }
+        self.prune_tiles();
+        let views = Self::strip(vec![moved], view, self.next_id, id);
+        self.windows.push(PopOut { id, level: WindowLevel::ViewsOnly, placement: placement.clone(), views });
+        Ok(Moved { view, window: id, created: true, from: 0, closed_source: false, placement })
+    }
+
+    /// Record usable logical geometry for a pop-out.
+    pub fn set_placement(&mut self, id: WindowId, placement: WindowPlacement) -> bool {
+        if !placement.is_valid() {
+            return false;
+        }
+        let Some(window) = self.window_mut(id) else { return false };
+        window.placement = Some(placement);
+        true
+    }
+
+    /// Temporarily borrow the window's strip for the UI, sharing the design id sequence and cap.
+    pub fn take_window(&mut self, id: WindowId) -> Option<PopOut> {
+        let at = self.windows.iter().position(|window| window.id == id)?;
+        let mut window = self.windows.remove(at);
+        let elsewhere = self.len() + self.windows.iter().map(|other| other.views.len()).sum::<usize>();
+        window.views.share_window_limits(self.next_id, elsewhere);
+        Some(window)
+    }
+
+    /// Return the window strip after its UI frame.
+    pub fn put_window(&mut self, window: PopOut) {
+        self.next_id = self.next_id.max(window.views.next_id);
+        self.next_window = self.next_window.max(window.id.saturating_add(1));
+        self.windows.push(window);
+    }
+
+    /// Close a pop-out and append its open views to the main strip in their existing order.
+    pub fn close_window(&mut self, id: WindowId) -> Option<Vec<u64>> {
+        let window = self.take_window(id)?;
+        let returned: Vec<_> = window.views.views().iter().map(|view| view.id).collect();
+        self.reattach(window.views);
+        if let Some(first) = returned.first() {
+            self.fill_empty(0, *first);
+        }
+        Some(returned)
+    }
+
+    /// Undo a pop-out close. Reuse each current view so newer edits and camera changes survive.
+    pub fn restore_window(&mut self, mut window: PopOut) -> bool {
+        if self.window_id != 0 || window.id == 0 || self.windows.len() >= MAX_POPOUTS || self.window(window.id).is_some() {
+            return false;
+        }
+        let ids: Vec<_> = window.views.views.iter().map(|view| view.id).collect();
+        if ids.is_empty() || ids.len() >= self.views.len() || ids.iter().any(|id| self.get(*id).is_none()) {
+            return false;
+        }
+        window.views.views = ids.iter().filter_map(|id| self.get(*id).cloned()).collect();
+        self.views.retain(|view| !ids.contains(&view.id));
+        if self.get(self.active).is_none()
+            && let Some(first) = self.views.first()
+        {
+            self.active = first.id;
+        }
+        self.prune_tiles();
+        // Bring back only still-closed views, retaining their latest state and avoiding copies.
+        let old_closed: Vec<_> = window.views.closed.iter().map(|(_, view)| view.id).collect();
+        window.views.closed.clear();
+        self.closed.retain(|entry| {
+            if old_closed.contains(&entry.1.id) {
+                window.views.closed.push(entry.clone());
+                false
+            } else {
+                true
+            }
+        });
+        window.views.prune_tiles();
+        self.put_window(window);
+        true
+    }
+
+    /// Close a view. When it was the only view of a pop-out, the window closes too and its
+    /// closed-view history can be reopened on the main strip.
+    pub fn close_in_window(&mut self, window: WindowId, view: u64) -> bool {
+        if window == self.window_id {
+            return self.close(view);
+        }
+        let Some(mut child) = self.take_window(window) else { return false };
+        if child.views.len() == 1 && child.views.get(view).is_some() {
+            child.views.remove_closed(0);
+            self.reattach(child.views);
+            return true;
+        }
+        let closed = child.views.close(view);
+        self.put_window(child);
+        closed
+    }
+
+    pub fn reopen_in_window(&mut self, window: WindowId) -> Option<u64> {
+        if window == self.window_id {
+            return self.reopen();
+        }
+        let mut child = self.take_window(window)?;
+        let reopened = child.views.reopen();
+        self.put_window(child);
+        reopened
+    }
+
+    /// The ownership, active views and tiled cells all agree.
+    pub fn check(&self) -> bool {
+        let strip_valid = |strip: &Self| {
+            strip.get(strip.active).is_some() && strip.tiles.as_ref().is_none_or(|tiles| tiles.views().into_iter().all(|id| strip.get(id).is_some()))
+        };
+        let mut ids: Vec<_> = self.ids().collect();
+        ids.sort_unstable();
+        let mut windows: Vec<_> = self.windows.iter().map(|window| window.id).collect();
+        windows.sort_unstable();
+        strip_valid(self)
+            && self.len() + self.windows.iter().map(|window| window.views.len()).sum::<usize>() <= MAX_VIEWS
+            && windows.len() <= MAX_POPOUTS
+            && windows.windows(2).all(|pair| pair[0] != pair[1])
+            && ids.windows(2).all(|pair| pair[0] != pair[1])
+            && self
+                .windows
+                .iter()
+                .all(|window| window.id != 0 && window.views.window_id == window.id && window.views.windows.is_empty() && strip_valid(&window.views))
+    }
+
+    /// Move a view intact into its own window, keeping a Model view in the source window.
+    pub fn detach(&mut self, id: u64) -> Option<Self> {
+        let i = self.index_of(id)?;
+        if self.views.len() == 1 {
+            if self.at_capacity() {
+                return None;
+            }
+            self.open(ViewKind::Model, None, false);
+            if self.views.len() == 1 {
+                return None;
+            }
+        }
+        let view = self.views.remove(i);
+        if self.active == id {
+            self.active = self.views[i.saturating_sub(1)].id;
+        }
+        self.prune_tiles();
+        Some(Self::strip(vec![view], id, self.next_id, 0))
+    }
+
+    /// Keep one id sequence and one open-view limit across the design's windows.
+    pub fn share_window_limits(&mut self, next_id: u64, elsewhere: usize) {
+        self.next_id = self.next_id.max(next_id);
+        self.elsewhere = elsewhere;
+    }
+
+    /// Open and recently closed views, including those kept when a presentation is parked.
+    pub fn ids(&self) -> impl Iterator<Item = u64> + '_ {
+        self.strip_ids().chain(self.windows.iter().flat_map(|window| window.views.strip_ids()))
+    }
+
+    /// The next unused view id for this design.
+    pub fn next_id(&self) -> u64 {
+        self.allocation_watermark()
+    }
+
+    /// Return the views of a closed window to this window's tab strip.
+    pub fn reattach(&mut self, mut other: Self) {
+        self.next_id = self.next_id.max(other.next_id);
+        self.views.append(&mut other.views);
+        self.closed.append(&mut other.closed);
+        let excess = self.closed.len().saturating_sub(CLOSED_CAP);
+        self.closed.drain(..excess);
     }
 
     /// The views in tab order (never empty).
@@ -143,7 +476,7 @@ impl ViewSet {
 
     /// Whether a view can still be shown, including by reopening it.
     pub fn has_open_or_closed(&self, id: u64) -> bool {
-        self.get(id).is_some() || self.closed.iter().any(|(_, view)| view.id == id)
+        self.ids().any(|known| known == id)
     }
 
     /// Open a view of `kind` showing `subject` and make it the active one. With `reuse`, a view
@@ -159,7 +492,7 @@ impl ViewSet {
             self.active = view.id;
             return view.id;
         }
-        if self.views.len() >= MAX_VIEWS {
+        if self.at_capacity() || self.next_id > MAX_ID {
             return self.active;
         }
         let Some(id) = self.take_id() else { return self.active };
@@ -209,9 +542,34 @@ impl ViewSet {
     /// back. The set keeps one view: when none would be left, a Model view takes their place. When
     /// the active view goes, the one left of it takes over (else the first). True when any went.
     pub fn drop_views(&mut self, keep: impl Fn(&DesignView) -> bool) -> bool {
-        // A replacement needs a fresh identity. Refuse before changing anything if the saved
-        // allocation watermark is exhausted, rather than emptying the set or reusing an id.
-        let replacement = if self.views.iter().any(&keep) {
+        let next_id = self.allocation_watermark();
+        // Main must retain a view even when all of its subjects disappear. Check that its
+        // replacement can have a fresh identity before removing any windows or closed history.
+        if !self.views.iter().any(&keep) && next_id > MAX_ID {
+            return false;
+        }
+        // Closing a window must not forget identities its strip has already allocated.
+        self.next_id = next_id;
+        let mut changed = false;
+        let mut returned_closed = Vec::new();
+        self.windows.retain_mut(|window| {
+            if !window.views.views().iter().any(&keep) {
+                returned_closed.append(&mut window.views.closed);
+                changed = true;
+                return false;
+            }
+            changed |= window.views.drop_local_views(&keep);
+            true
+        });
+        self.closed.append(&mut returned_closed);
+        changed |= self.drop_local_views(&keep);
+        let excess = self.closed.len().saturating_sub(CLOSED_CAP);
+        self.closed.drain(..excess);
+        changed
+    }
+
+    fn drop_local_views(&mut self, keep: &impl Fn(&DesignView) -> bool) -> bool {
+        let replacement = if self.views.iter().any(keep) {
             None
         } else {
             let Some(id) = self.take_id() else { return false };
@@ -224,13 +582,14 @@ impl ViewSet {
         };
         let left = self.index_of(self.active).unwrap_or(first_gone);
         let fallback = self.views.iter().take(left).rev().find(|view| keep(view)).map(|view| view.id);
-        self.views.retain(&keep);
+        self.views.retain(keep);
         if let Some(id) = replacement {
             self.views.push(DesignView { id, kind: ViewKind::Model, name: ViewKind::Model.label().into(), subject: None, spec: None });
         }
         if self.get(self.active).is_none() {
             self.active = fallback.or_else(|| self.views.first().map(|view| view.id)).unwrap_or(self.active);
         }
+        self.prune_tiles();
         true
     }
 
@@ -261,7 +620,7 @@ impl ViewSet {
     /// Bring back the view closed last, in its old place, and make it active. None when no view
     /// was closed (or the set is full).
     pub fn reopen(&mut self) -> Option<u64> {
-        if self.views.len() >= MAX_VIEWS {
+        if self.at_capacity() {
             return None;
         }
         let (at, view) = self.closed.pop()?;
@@ -299,7 +658,7 @@ impl ViewSet {
     /// default name) and make it active. None when there is no such view or the set is full.
     pub fn duplicate(&mut self, id: u64) -> Option<u64> {
         let i = self.index_of(id)?;
-        if self.views.len() >= MAX_VIEWS {
+        if self.at_capacity() || self.next_id > MAX_ID {
             return None;
         }
         let (kind, subject, spec) = (self.views[i].kind, self.views[i].subject.clone(), self.views[i].spec);
@@ -502,62 +861,135 @@ impl ViewSet {
         }
     }
 
-    /// The set as saved with the design.
+    /// The set as saved with the design. Window ids on the flat view list maintain compatibility
+    /// with older readers, which ignore them and show all the views in their main window.
     pub fn to_json(&self) -> Value {
-        let view_json =
-            |view: &DesignView| json!({"id": view.id, "kind": view.kind.key(), "name": view.name, "subject": view.subject, "spec": view.spec});
+        let view_json = |view: &DesignView, window| json!({"id": view.id, "kind": view.kind.key(), "name": view.name, "subject": view.subject, "spec": view.spec, "window": window});
+        let strips = std::iter::once(self).chain(self.windows.iter().map(|window| &window.views));
         json!({
             "active": self.active,
             "next_id": self.next_id,
-            "views": self.views.iter().map(view_json).collect::<Vec<_>>(),
-            "closed": self.closed.iter().map(|(at, view)| json!({"at": at, "view": view_json(view)})).collect::<Vec<_>>(),
+            "next_window": self.next_window,
+            "views": strips.clone().flat_map(|strip| strip.views.iter().map(move |view| view_json(view, strip.window_id))).collect::<Vec<_>>(),
+            "closed": strips.flat_map(|strip| strip.closed.iter().map(move |(at, view)| json!({"at": at, "view": view_json(view, strip.window_id)}))).collect::<Vec<_>>(),
             "tiles": self.tiles.as_ref().map(Tiles::to_json),
+            "windows": self.windows.iter().map(|window| json!({
+                "id": window.id,
+                "level": window.level.key(),
+                "active": window.views.active,
+                "tiles": window.views.tiles().map(Tiles::to_json),
+                "placement": window.placement.as_ref().map(WindowPlacement::to_json),
+            })).collect::<Vec<_>>(),
         })
     }
 
-    /// A set from [`Self::to_json`]. Anything else, or a set that breaks its rules (no views,
-    /// too many, a repeated id, a bad name or kind), gives None; a closed view that does is
-    /// dropped, and an active id that names no view falls back to the first view.
+    /// Read a saved set. Keep the original validation on view identities and names. Broken
+    /// window references fall back to the main strip and empty windows are ignored.
     pub fn from_json(value: &Value) -> Option<ViewSet> {
         let views = value.get("views")?.as_array()?;
         if views.is_empty() || views.len() > MAX_VIEWS {
             return None;
         }
-        let views: Vec<DesignView> = views.iter().map(view_from_json).collect::<Option<_>>()?;
-        let mut used: Vec<u64> = views.iter().map(|view| view.id).collect();
-        used.sort_unstable();
-        if used.windows(2).any(|pair| pair[0] == pair[1]) {
-            return None;
+        let window_id = |item: &Value, key: &str| item.get(key)?.as_u64().and_then(|id| WindowId::try_from(id).ok());
+        let mut window_records = Vec::new();
+        for item in value.get("windows").and_then(Value::as_array).into_iter().flatten().take(MAX_VIEWS) {
+            if let Some(id) = window_id(item, "id").filter(|id| *id != 0)
+                && !window_records.iter().any(|(known, _)| *known == id)
+                && views.iter().any(|view| window_id(view, "window") == Some(id))
+            {
+                window_records.push((id, item));
+            }
+            if window_records.len() >= MAX_POPOUTS {
+                break;
+            }
+        }
+        let mut used = Vec::new();
+        let mut placed: Vec<_> = views
+            .iter()
+            .map(|item| {
+                let view = view_from_json(item)?;
+                if used.contains(&view.id) {
+                    return None;
+                }
+                used.push(view.id);
+                let id = window_id(item, "window").filter(|id| window_records.iter().any(|(known, _)| known == id)).unwrap_or(0);
+                Some((id, view))
+            })
+            .collect::<Option<_>>()?;
+        if placed.iter().all(|(id, _)| *id != 0)
+            && let Some((id, _)) = placed.first_mut()
+        {
+            *id = 0;
         }
         let mut closed = Vec::new();
-        // Normal history is capped on write. Hostile histories cannot make loading allocate
-        // or compare an unbounded collection of discarded entries.
-        for entry in value.get("closed").and_then(Value::as_array).into_iter().flatten().rev().take(CLOSED_CAP) {
+        let saved_closed = value.get("closed").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+        let oldest = saved_closed.len().saturating_sub(CLOSED_CAP * (1 + MAX_POPOUTS));
+        for entry in saved_closed.iter().skip(oldest) {
             let at = entry.get("at").and_then(Value::as_u64).and_then(|at| usize::try_from(at).ok());
-            let view = entry.get("view").and_then(view_from_json);
-            if let (Some(at), Some(view)) = (at, view)
+            let parsed = entry.get("view").and_then(|item| Some((window_id(item, "window").unwrap_or(0), view_from_json(item)?)));
+            if let (Some(at), Some((id, view))) = (at, parsed)
                 && !used.contains(&view.id)
             {
                 used.push(view.id);
-                closed.push((at.min(MAX_VIEWS), view));
+                closed.push((id, (at.min(MAX_VIEWS), view)));
             }
         }
-        closed.reverse();
         let highest = used.iter().copied().max().unwrap_or(0);
         let next_id = value.get("next_id").and_then(Value::as_u64).unwrap_or(0).clamp(highest + 1, MAX_ID + 1);
-        let active = value.get("active").and_then(Value::as_u64).filter(|id| views.iter().any(|view| view.id == *id)).unwrap_or(views[0].id);
-        let tiles = value.get("tiles").and_then(Tiles::from_json);
-        let mut set = ViewSet { views, active, closed, next_id, tiles };
-        set.prune_tiles();
+        let mut read_strip = |id, data: &Value| {
+            let mut views = Vec::new();
+            placed.retain(|(owner, view)| {
+                if *owner == id {
+                    views.push(view.clone());
+                    false
+                } else {
+                    true
+                }
+            });
+            let first = views.first()?.id;
+            let active = data.get("active").and_then(Value::as_u64).filter(|active| views.iter().any(|view| view.id == *active)).unwrap_or(first);
+            let mut strip = Self::strip(views, active, next_id, id);
+            strip.tiles = data.get("tiles").and_then(Tiles::from_json);
+            strip.prune_tiles();
+            Some(strip)
+        };
+        let mut set = read_strip(0, value)?;
+        for (id, item) in window_records {
+            let Some(views) = read_strip(id, item) else { continue };
+            let level = item.get("level").and_then(Value::as_str).and_then(WindowLevel::from_key).unwrap_or_default();
+            let placement = item.get("placement").and_then(WindowPlacement::from_json);
+            set.put_window(PopOut { id, level, placement, views });
+        }
+        for (owner, entry) in closed {
+            let strip = set.windows.iter_mut().find(|window| window.id == owner).map_or(&mut set.closed, |window| &mut window.views.closed);
+            strip.push(entry);
+            if strip.len() > CLOSED_CAP {
+                strip.remove(0);
+            }
+        }
+        let highest_window = set.windows.iter().map(|window| window.id).max().unwrap_or(0);
+        set.next_window = window_id(value, "next_window").filter(|id| *id > highest_window).unwrap_or(highest_window.checked_add(1).unwrap_or(1));
         Some(set)
     }
 
+    fn strip_ids(&self) -> impl Iterator<Item = u64> + '_ {
+        self.views.iter().map(|view| view.id).chain(self.closed.iter().map(|(_, view)| view.id))
+    }
+
+    fn at_capacity(&self) -> bool {
+        self.len().saturating_add(self.elsewhere).saturating_add(self.windows.iter().map(|window| window.views.len()).sum::<usize>()) >= MAX_VIEWS
+    }
+
+    fn allocation_watermark(&self) -> u64 {
+        self.windows.iter().map(|window| window.views.next_id).fold(self.next_id, u64::max)
+    }
+
     fn take_id(&mut self) -> Option<u64> {
-        if self.next_id > MAX_ID {
+        let id = self.allocation_watermark();
+        if id > MAX_ID {
             return None;
         }
-        let id = self.next_id;
-        self.next_id += 1;
+        self.next_id = id + 1;
         Some(id)
     }
 
@@ -622,6 +1054,171 @@ mod tests {
             set.open(ViewKind::Sketch, Some(format!("s{i}")), false);
         }
         set
+    }
+
+    #[test]
+    fn detached_view_preserves_identity_and_reattaches_without_id_collisions() {
+        let mut main = ViewSet::new();
+        let model = main.active().id;
+        let second = main.duplicate(model).unwrap();
+        assert!(main.rename(second, "Side"));
+        assert_eq!(main.set_layout(Preset::SideBySide), 2);
+        let mut child = main.detach(second).unwrap();
+        assert_eq!(main.active().id, model);
+        assert!(!main.is_tiled());
+        assert_eq!(child.active().id, second);
+        assert_eq!(child.active().name, "Side");
+
+        child.share_window_limits(main.next_id(), main.len());
+        let new_child_view = child.open(ViewKind::Model, None, false);
+        main.share_window_limits(child.next_id(), child.len());
+        let new_main_view = main.open(ViewKind::Model, None, false);
+        assert_ne!(new_child_view, new_main_view);
+        main.reattach(child);
+        assert_eq!(main.len(), 4);
+        assert!(main.get(second).is_some());
+        assert!(main.get(new_child_view).is_some());
+    }
+
+    #[test]
+    fn detaching_the_only_view_leaves_a_model_and_obeys_the_shared_limit() {
+        let mut main = ViewSet::new();
+        let model = main.active().id;
+        main.share_window_limits(main.next_id(), MAX_VIEWS - 1);
+        assert!(main.detach(model).is_none());
+        main.share_window_limits(main.next_id(), 0);
+        let child = main.detach(model).unwrap();
+        assert_eq!(child.active().id, model);
+        assert_ne!(main.active().id, model);
+        assert_eq!(main.active().kind, ViewKind::Model);
+    }
+
+    fn new_window() -> WindowTarget {
+        WindowTarget::New { placement: None }
+    }
+
+    #[test]
+    fn moving_the_last_view_out_of_main_is_refused() {
+        let mut set = ViewSet::new();
+        assert_eq!(set.move_to_window(1, new_window()), Err(MoveError::LastViewOfMainWindow));
+        assert_eq!(set.move_to_window(u64::MAX, new_window()), Err(MoveError::NoSuchView));
+        assert_eq!(set, ViewSet::new());
+    }
+
+    #[test]
+    fn a_view_is_in_exactly_one_window_and_keeps_its_spec() {
+        let mut set = models(3);
+        let spec = ViewSpec::new(solidcraft_viewport::Camera { yaw: 0.5, ..Default::default() });
+        assert!(set.set_spec(3, spec));
+        set.set_layout(Preset::LargeAndTwo);
+        let moved = set.move_to_window(3, new_window()).unwrap();
+        assert!(set.check());
+        assert_eq!((moved.view, moved.from, moved.created, moved.closed_source), (3, 0, true, false));
+        let child = set.views_of(moved.window).unwrap();
+        assert_eq!(child.active().spec, Some(spec));
+        assert_eq!(child.active().id, 3);
+        assert!(child.tiles().is_none());
+        assert!(set.get(3).is_none());
+        assert_eq!(set.window_of(3), Some(moved.window));
+        assert!(!set.tiles().unwrap().contains(3));
+        assert_eq!(set.move_to_window(2, new_window()), Err(MoveError::TooManyWindows));
+    }
+
+    #[test]
+    fn closing_a_window_returns_its_views_in_order_and_undo_uses_current_views() {
+        let mut set = models(2);
+        let id = set.move_to_window(2, new_window()).unwrap().window;
+        let mut child = set.take_window(id).unwrap();
+        let other = child.views.open(ViewKind::Model, None, false);
+        assert_eq!(child.views.set_layout(Preset::SideBySide), 2);
+        set.put_window(child);
+        set.set_layout_padded(Preset::SideBySide);
+        let child = set.window(id).unwrap().clone();
+        assert_eq!(set.close_window(id), Some(vec![2, other]));
+        assert_eq!(set.views().iter().map(|view| view.id).collect::<Vec<_>>(), [1, 2, other]);
+        assert_eq!(set.tiles().unwrap().views(), [1, 2]);
+        assert!(set.rename(2, "Returned name"));
+        assert!(set.restore_window(child));
+        assert_eq!(set.views_of(id).unwrap().get(2).unwrap().name, "Returned name");
+        assert_eq!(set.views_of(id).unwrap().tiles().unwrap().views(), [2, other]);
+        assert!(set.check());
+    }
+
+    #[test]
+    fn closing_the_last_popout_view_keeps_it_reopenable_in_main() {
+        let mut set = models(2);
+        let id = set.move_to_window(2, new_window()).unwrap().window;
+        assert!(!set.close_in_window(id, 1));
+        assert!(set.close_in_window(id, 2));
+        assert_eq!(set.window_of(2), None);
+        assert!(set.window(id).is_none());
+        assert_eq!(set.reopen_in_window(id), None);
+        assert!(set.has_open_or_closed(2));
+        assert_eq!(set.reopen_in_window(0), Some(2));
+        assert_eq!(set.window_of(2), Some(0));
+        assert!(set.check());
+    }
+
+    #[test]
+    fn a_window_round_trips_and_unknown_membership_and_geometry_are_repaired() {
+        let mut set = models(3);
+        let placement =
+            WindowPlacement { display: Some("Display 2".into()), x: -25.0, y: 16.0, w: 700.0, h: 500.0, maximised: false, fullscreen: false };
+        let id = set.move_to_window(2, WindowTarget::New { placement: Some(placement) }).unwrap().window;
+        let mut saved = set.to_json();
+        assert_eq!(ViewSet::from_json(&saved).unwrap().to_json(), saved);
+        saved["windows"][0]["active"] = json!(5);
+        saved["windows"][0]["level"] = json!("unknown future mode");
+        saved["windows"][0]["placement"]["h"] = json!(-5);
+        saved["views"][0]["window"] = json!(9000);
+        let repaired = ViewSet::from_json(&saved).unwrap();
+        assert_eq!(repaired.window_of(1), Some(0));
+        assert_eq!(repaired.views_of(id).unwrap().active().id, 2);
+        assert_eq!(repaired.window(id).unwrap().level, WindowLevel::ViewsOnly);
+        assert_eq!(repaired.window(id).unwrap().placement, None);
+        assert!(repaired.check());
+    }
+
+    #[test]
+    fn moving_closing_and_reopening_keep_window_membership_consistent() {
+        let mut set = models(3);
+        let mut step = 42_u64;
+        for _ in 0..300 {
+            step = step.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            let window = set.windows().first().map(|window| window.id);
+            let active = set.active().id;
+            match (step >> 16) % 8 {
+                0 => {
+                    set.open(ViewKind::Model, None, false);
+                }
+                1 => {
+                    let _ = set.move_to_window(active, new_window());
+                }
+                2 if let Some(window) = window => {
+                    set.close_window(window);
+                }
+                3 if let Some(window) = window => {
+                    let view = set.views_of(window).unwrap().active().id;
+                    set.close_in_window(window, view);
+                }
+                4 => {
+                    set.close(active);
+                }
+                5 => {
+                    set.reopen();
+                }
+                6 if let Some(window) = window => {
+                    let mut child = set.take_window(window).unwrap();
+                    child.views.open(ViewKind::Model, None, false);
+                    set.put_window(child);
+                }
+                _ => {
+                    set.set_layout_padded(Preset::SideBySide);
+                }
+            }
+            assert!(set.check());
+            assert!(ViewSet::from_json(&set.to_json()).unwrap().check());
+        }
     }
 
     #[test]
@@ -816,6 +1413,101 @@ mod tests {
     }
 
     #[test]
+    fn a_mutable_child_borrow_observes_the_roots_final_allocated_id() {
+        let mut set = models(2);
+        let remote = set.active().id;
+        let window = set.move_to_window(remote, new_window()).unwrap().window;
+        set.next_id = MAX_ID;
+        assert_eq!(set.open(ViewKind::Model, None, false), MAX_ID);
+        let child = set.window_mut(window).unwrap();
+        assert_eq!(child.views.next_id(), MAX_ID + 1);
+        assert_eq!(child.views.open(ViewKind::Model, None, false), remote);
+        assert_eq!(child.views.duplicate(remote), None);
+        assert_eq!(set.window_of(MAX_ID), Some(0));
+        assert_eq!(set.window_of(remote), Some(window));
+        assert_eq!(ViewSet::from_json(&set.to_json()).unwrap().to_json(), set.to_json());
+    }
+    #[test]
+    fn exhausted_global_ids_refuse_fallback_before_windows_or_history_change() {
+        let mut set = models(3);
+        let remote = set.active().id;
+        let window = set.move_to_window(remote, new_window()).unwrap().window;
+        assert!(set.close(2));
+        let mut saved = set.to_json();
+        saved["next_id"] = json!(MAX_ID + 1);
+        let mut set = ViewSet::from_json(&saved).unwrap();
+        let before = set.clone();
+        for keep_remote in [false, true] {
+            assert!(!set.drop_views(|view| keep_remote && view.id == remote));
+            assert_eq!(set, before, "a refused fallback keeps windows and closed histories intact");
+            assert_eq!(set.window_of(remote), Some(window));
+        }
+        assert_eq!(ViewSet::from_json(&set.to_json()).unwrap().to_json(), set.to_json());
+    }
+
+    #[test]
+    fn exhausted_global_ids_still_allow_cleanup_that_keeps_a_main_view() {
+        let mut set = models(2);
+        let main = set.views()[0].id;
+        let remote = set.active().id;
+        set.move_to_window(remote, new_window()).unwrap();
+        let mut saved = set.to_json();
+        saved["next_id"] = json!(MAX_ID + 1);
+        let mut set = ViewSet::from_json(&saved).unwrap();
+        assert!(set.drop_views(|view| view.id == main));
+        assert_eq!(set.views().iter().map(|view| view.id).collect::<Vec<_>>(), [main]);
+        assert!(set.windows().is_empty());
+        assert_eq!(set.next_id(), MAX_ID + 1);
+        assert_eq!(set.open(ViewKind::Model, None, false), main);
+        assert_eq!(set.duplicate(main), None);
+        assert_eq!(ViewSet::from_json(&set.to_json()).unwrap(), set);
+    }
+
+    #[test]
+    fn a_maximum_id_loaded_in_another_window_exhausts_all_allocators() {
+        let mut set = models(2);
+        let main = set.views()[0].id;
+        let remote = set.active().id;
+        let window = set.move_to_window(remote, new_window()).unwrap().window;
+        let mut saved = set.to_json();
+        saved["views"][1]["id"] = json!(MAX_ID);
+        saved["windows"][0]["active"] = json!(MAX_ID);
+        saved["next_id"] = json!(0);
+        let mut set = ViewSet::from_json(&saved).unwrap();
+        let before = set.to_json();
+        assert_eq!(set.next_id(), MAX_ID + 1);
+        assert_eq!(set.open(ViewKind::Model, None, false), main);
+        assert_eq!(set.duplicate(main), None);
+        let mut child = set.take_window(window).unwrap();
+        assert_eq!(child.views.open(ViewKind::Model, None, false), MAX_ID);
+        assert_eq!(child.views.duplicate(MAX_ID), None);
+        assert_eq!(child.views.detach(MAX_ID), None, "failed fallback creation cannot empty a detached strip");
+        assert!(!child.views.drop_views(|_| false));
+        set.put_window(child);
+        assert_eq!(set.to_json(), before);
+        assert_eq!(ViewSet::from_json(&set.to_json()).unwrap().to_json(), before);
+    }
+
+    #[test]
+    fn last_legal_fallback_uses_the_highest_window_allocation_watermark() {
+        let mut set = models(2);
+        let remote = set.active().id;
+        let window = set.move_to_window(remote, new_window()).unwrap().window;
+        set.next_id = MAX_ID - 1;
+        set.window_mut(window).unwrap().views.next_id = MAX_ID;
+        assert_eq!(set.next_id(), MAX_ID);
+        assert!(set.drop_views(|view| view.id == remote));
+        assert_eq!(set.active().id, MAX_ID);
+        assert_eq!(set.active().kind, ViewKind::Model);
+        assert_eq!(set.active().spec, None);
+        assert_eq!(set.window_of(remote), Some(window));
+        assert_eq!(set.next_id(), MAX_ID + 1);
+        assert_eq!(set.open(ViewKind::Model, None, false), MAX_ID);
+        assert_eq!(set.duplicate(MAX_ID), None);
+        assert_eq!(ViewSet::from_json(&set.to_json()).unwrap().to_json(), set.to_json());
+    }
+
+    #[test]
     fn exhausted_saved_ids_never_allocate_an_unsaveable_view_or_empty_the_set() {
         let mut saved = ViewSet::new().to_json();
         saved["next_id"] = json!(MAX_ID);
@@ -860,14 +1552,15 @@ mod tests {
         let mut saved = ViewSet::new().to_json();
         let entry = |id| json!({"at": 1, "view": {"id": id, "kind": "model", "name": "Closed"}});
         let mut history = vec![entry(MAX_ID); 4096];
-        history.extend((2..=CLOSED_CAP as u64 + 1).map(entry));
+        let history_limit = (CLOSED_CAP * (1 + MAX_POPOUTS)) as u64;
+        history.extend((2..=history_limit + 1).map(entry));
         saved["closed"] = json!(history);
         saved["next_id"] = json!(0);
         let mut set = ViewSet::from_json(&saved).unwrap();
         assert_eq!(set.closed.len(), CLOSED_CAP);
-        assert_eq!(set.next_id, CLOSED_CAP as u64 + 2, "discarded history cannot affect allocation");
+        assert_eq!(set.next_id, history_limit + 2, "discarded history cannot affect allocation");
         assert_eq!(ViewSet::from_json(&set.to_json()).unwrap(), set);
-        for id in (2..=CLOSED_CAP as u64 + 1).rev() {
+        for id in (history_limit + 2 - CLOSED_CAP as u64..=history_limit + 1).rev() {
             assert_eq!(set.reopen(), Some(id), "the latest valid history keeps its original order");
         }
         assert_eq!(set.reopen(), None);

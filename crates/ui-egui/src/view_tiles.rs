@@ -150,7 +150,8 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let frame = frame_of(cell);
         let Some(kind) = app.docs.views.get(id).map(|view| view.kind) else { continue };
         // A press on a header button is the button's: focusing the card first would take its buttons away before the click ends.
-        let on_button = press.is_some_and(|p| !is_ground && (0..3).any(|slot| button_rect(cell, slot as f32).contains(p)));
+        let header_slots = if crate::view_windows::supports_pop_out(app) { 4 } else { 3 };
+        let on_button = press.is_some_and(|p| !is_ground && (0..header_slots).any(|slot| button_rect(cell, slot as f32).contains(p)));
         let mut tile = ui.new_child(UiBuilder::new().id_salt(("view_tile", app.session.uid, id)).max_rect(frame));
         tile.set_clip_rect(ui.clip_rect().intersect(if is_ground && !render_ground { area } else { frame }));
         app.viewport.tile = Some(slot(id));
@@ -227,6 +228,9 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         Some((id, CardAction::Close)) => {
             crate::documents::view_close(app, id);
+        }
+        Some((id, CardAction::PopOut)) => {
+            crate::design_view_ui::move_to_new_window(app, id);
         }
         None => {}
     }
@@ -563,6 +567,7 @@ enum CardAction {
     /// Stop showing this view in the window; it stays open, reached from the bar.
     Remove,
     Close,
+    PopOut,
 }
 
 /// The controls of the cards, each acting on its own view. The focused view's are
@@ -639,6 +644,7 @@ fn card_chrome(app: &SolveApp, ui: &mut egui::Ui, id: u64, card: Rect) -> Option
             CardAction::Maximise => solidcraft_ui_text::tr_label("Maximise this view"),
             CardAction::Remove => solidcraft_ui_text::tr_label("Remove from this window"),
             CardAction::Close => solidcraft_ui_text::tr_label("Close view"),
+            CardAction::PopOut => solidcraft_ui_text::tr("multi_window.move_to_window"),
         };
         let resp = resp.backing_on_hover_text(tip);
         if resp.hovered() {
@@ -662,6 +668,7 @@ fn card_chrome(app: &SolveApp, ui: &mut egui::Ui, id: u64, card: Rect) -> Option
                 painter.line_segment([c + vec2(-4.5, -4.5), c + vec2(4.5, 4.5)], ink);
                 painter.line_segment([c + vec2(-4.5, 4.5), c + vec2(4.5, -4.5)], ink);
             }
+            CardAction::PopOut => {}
         }
         if resp.clicked() {
             action = Some(kind);
@@ -670,6 +677,29 @@ fn card_chrome(app: &SolveApp, ui: &mut egui::Ui, id: u64, card: Rect) -> Option
     button(0.0, CardAction::Close);
     button(1.0, CardAction::Maximise);
     button(2.0, CardAction::Remove);
+    if crate::view_windows::supports_pop_out(app) {
+        let rect = button_rect(card, 3.0);
+        let mut child = ui.new_child(UiBuilder::new().id_salt(("card_window_menu", id)).max_rect(rect));
+        let result = crate::ui_kit::Menu::button_with(
+            &mut child,
+            |ui, _| {
+                let response = ui.interact(rect, ui.scope_id().with("pop_out"), Sense::click());
+                ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "⋯", egui::FontId::proportional(t.font_body), t.text_dim);
+                response.backing_on_hover_text(app.tr("multi_window.move_to_window"))
+            },
+            |ui| {
+                crate::ui_kit::Menu::text(ui, app.tr("multi_window.move_to_window"), |ui| {
+                    crate::ui_kit::menu::button(ui, app.tr("multi_window.new_window"), "").clicked()
+                })
+                .inner
+                .unwrap_or(false)
+            },
+        );
+        if result.inner == Some(true) {
+            child.close();
+            action = Some(CardAction::PopOut);
+        }
+    }
     action
 }
 
@@ -740,6 +770,36 @@ mod tests {
     use super::*;
 
     use serde_json::json;
+
+    #[test]
+    fn native_window_picture_slots_are_disjoint_from_saved_view_ids_and_other_windows() {
+        let ids = [(1_u64 << 40) + 1, (1_u64 << 40) + 2, 1_u64 << 53];
+        let mut main = crate::viewport::ViewportState::default();
+        for id in ids {
+            main.tile = Some(slot(id));
+            assert_eq!(main.scene_slot(), Some(id));
+        }
+        let mut first = crate::viewport::ViewportState::default();
+        let mut second = crate::viewport::ViewportState::default();
+        first.isolate_window_scenes();
+        second.isolate_window_scenes();
+        let mut expected = Vec::new();
+        for tile in std::iter::once(None).chain(ids.into_iter().map(Some)) {
+            first.tile = tile;
+            second.tile = tile;
+            let first_slot = first.scene_slot().unwrap();
+            let second_slot = second.scene_slot().unwrap();
+            assert!(first_slot >= 1_u64 << 63 && second_slot >= 1_u64 << 63);
+            assert_ne!(first_slot, second_slot, "the same view id in different native hosts has separate pictures");
+            assert_eq!(first.scene_slot(), Some(first_slot), "a host keeps its slot across frames");
+            assert!(!ids.contains(&first_slot) && !ids.contains(&second_slot));
+            expected.push(first_slot);
+        }
+        let mut retained: Vec<_> = first.window_scene_slots().collect();
+        retained.sort_unstable();
+        expected.sort_unstable();
+        assert_eq!(retained, expected, "closing a host can retire precisely its own pictures");
+    }
 
     #[test]
     fn saved_view_ids_above_32_bits_keep_distinct_gpu_picture_slots() {

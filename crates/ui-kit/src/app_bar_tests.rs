@@ -265,7 +265,8 @@ const TAB_HANDLES: TabHandles<'static> = TabHandles {
     switcher: "t:switcher",
 };
 
-const VIEW_MENU: [TabMenuRow<'static>; 3] = [
+const VIEW_MENU: [TabMenuRow<'static>; 4] = [
+    TabMenuRow::new("move_to_window", "Move to window", "").for_local_view().with_children(&[TabMenuRow::new("move_new", "New window", "")]),
     TabMenuRow::new("vclose", "Close view", "Ctrl+W"),
     TabMenuRow::new("vothers", "Close other views", "").needing_others().separated(),
     TabMenuRow::new("vright", "Close views to the right", "").needing_others(),
@@ -286,6 +287,7 @@ const VIEWS: [ViewTab<'static>; 3] = [
         underline: egui::Color32::BLUE,
         state: ViewState::Normal,
         active: true,
+        to_window: None,
         tip: "Model",
     },
     ViewTab {
@@ -295,6 +297,7 @@ const VIEWS: [ViewTab<'static>; 3] = [
         underline: egui::Color32::GREEN,
         state: ViewState::SourceChanged,
         active: false,
+        to_window: None,
         tip: "Sketch 2",
     },
     ViewTab {
@@ -304,6 +307,7 @@ const VIEWS: [ViewTab<'static>; 3] = [
         underline: egui::Color32::RED,
         state: ViewState::Deleted,
         active: false,
+        to_window: None,
         tip: "Sheet 1",
     },
 ];
@@ -320,6 +324,8 @@ struct TabsRig {
     room: Option<f32>,
     single_view: bool,
     name: &'static str,
+    detached: bool,
+    pop_out: bool,
     /// The + has a menu.
     plus: bool,
     /// The name of this view is being typed: its place, and the text and focus the strip edits.
@@ -347,6 +353,8 @@ impl TabsRig {
             room: None,
             single_view: false,
             name: "One",
+            detached: false,
+            pop_out: false,
             plus,
             rename: rename.map(|(k, _)| k),
             text: std::cell::RefCell::new(text),
@@ -367,21 +375,24 @@ impl TabsRig {
             ..Default::default()
         };
         let tab = |name: &'static str| DocTab { name, list_name: name, dirty: false, place: "Not saved yet", security: None, views: &[] };
-        let first = DocTab {
-            views: if self.single_view {
-                &VIEWS[..1]
-            } else if self.views.is_some() {
-                &VIEWS
-            } else {
-                &[]
-            },
-            ..tab(self.name)
+        let mut views = VIEWS;
+        if self.detached {
+            views[1].to_window = Some(1);
+        }
+        let views = if self.single_view || self.pop_out {
+            &views[..1]
+        } else if self.views.is_some() {
+            &views[..]
+        } else {
+            &[]
         };
+        let first = DocTab { views, ..tab(self.name) };
         let (mut text, mut focused) = (self.text.borrow().clone(), self.focused.get());
         let mut strip = TabStrip {
-            tabs: vec![first, tab("Two"), tab("Three")],
+            tabs: if self.pop_out { vec![first] } else { vec![first, tab("Two"), tab("Three")] },
             selected: 0,
             shown_selected: Some(0),
+            pop_out: self.pop_out,
             title_bar: false,
             double_click_renames: true,
             rename: None,
@@ -755,6 +766,54 @@ fn a_view_menu_opens_under_its_view_and_turns_off_rows_that_do_not_apply() {
     rig.frame(Vec::new());
     rig.frame(Vec::new());
     assert_eq!(rig.press(rig.at("t:menu:vothers"), egui::PointerButton::Primary), vec![TabAction::ViewMenu { view: 2, id: "vothers".into() }]);
+}
+
+#[test]
+fn detached_view_has_a_window_mark_and_retains_its_own_click_targets() {
+    let mut rig = TabsRig::with(Some(true));
+    let normal = solidcraft_ui_registry::rect_of("t:view:1").expect("view is drawn");
+    rig.detached = true;
+    rig.frame(Vec::new());
+    let detached = solidcraft_ui_registry::rect_of("t:view:1").expect("detached view stays in the strip");
+    let mark = solidcraft_ui_registry::rect_of("t:view:1:window").expect("detached view has a window mark");
+    let close = solidcraft_ui_registry::rect_of("t:vclose:1").expect("detached view can still be closed");
+    assert!(detached.width() > normal.width());
+    assert!(detached.contains_rect(mark) && detached.contains_rect(close));
+    assert!(mark.right() < close.left(), "the window mark does not cover the close button");
+    assert_eq!(rig.press(mark.center(), egui::PointerButton::Primary), vec![TabAction::SelectView(1)]);
+    assert_eq!(rig.press(close.center(), egui::PointerButton::Primary), vec![TabAction::CloseView(1)]);
+    rig.press(mark.center(), egui::PointerButton::Secondary);
+    rig.frame(Vec::new());
+    rig.frame(Vec::new());
+    assert!(solidcraft_ui_registry::handle_at("t:menu:vclose").is_some());
+    assert!(solidcraft_ui_registry::handle_at("t:menu:move_to_window").is_none());
+}
+
+#[test]
+fn pop_out_pill_keeps_one_visible_view_with_no_design_close() {
+    let mut rig = TabsRig::with(Some(false));
+    rig.pop_out = true;
+    rig.frame(Vec::new());
+    assert!(solidcraft_ui_registry::rect_of("t:view:0").is_some());
+    assert!(solidcraft_ui_registry::rect_of("t:vclose:0").is_some());
+    assert!(solidcraft_ui_registry::rect_of("t:vnew").is_some());
+    assert!(solidcraft_ui_registry::rect_of("t:close:0").is_none());
+    assert!(solidcraft_ui_registry::handle_at("t:new").is_none());
+}
+
+#[test]
+fn view_window_submenu_returns_the_child_action() {
+    let rig = TabsRig::with(Some(true));
+    rig.press(rig.at("t:view:1"), egui::PointerButton::Secondary);
+    rig.frame(Vec::new());
+    rig.frame(Vec::new());
+    let row = rig.at("t:menu:move_to_window");
+    assert!(rig.press(row, egui::PointerButton::Primary).is_empty());
+    rig.frame(Vec::new());
+    rig.frame(Vec::new());
+    let child = rig.at("t:menu:move_new");
+    assert!(child.x > row.x, "the submenu opens beside the parent row");
+    assert_eq!(rig.press(child, egui::PointerButton::Primary), vec![TabAction::ViewMenu { view: 1, id: "move_new".into() }]);
 }
 
 /// A view being renamed shows its name field in its sub-tab: Enter keeps the name (cut to the
