@@ -100,7 +100,17 @@ fn to_record_at(k: &Kernel, pb: &ProceduralBlend, depth: u32) -> Result<Procedur
 }
 
 /// A support's record: a nested blend's own record, or the NURBS form its stations are
-/// solved on ([`as_b_spline`]: an analytic support is evaluated as its net).
+/// solved on ([`as_b_spline`]: an analytic support is evaluated as its net), labelled with
+/// its analytic kind only where reading the record derives that surface back from the form
+/// ([`AnalyticSupport::derive`], then [`AnalyticSupport::build`], as [`exact_from_record`],
+/// [`from_record`] and [`corner_from_record`] do). The record holds no numbers for the
+/// label: reading it takes them off the form's control rows, and a form that lies on the
+/// support's surface only to more than the evaluation's rounding (one short span, such as a
+/// cone's 12 degree arc, whose control points carry the rounding of the conversions that
+/// made them) does not prove the cone read off it, though the support's own numbers prove
+/// the form. Such a support goes unlabelled, as its form, as a face whose form does not
+/// prove its label does (`face_surface::record_face`, owner 22254), and the record reads
+/// back.
 fn support_record(k: &Kernel, s: &Surface, depth: u32) -> Result<SupportRecord> {
     if let SurfaceKind::ProceduralBlend(inner) = s.kind() {
         return Ok(SupportRecord::Blend(Box::new(to_record_at(
@@ -115,7 +125,19 @@ fn support_record(k: &Kernel, s: &Surface, depth: u32) -> Result<SupportRecord> 
             reason: "a support that is not a NURBS surface has no record",
         });
     };
-    let kind = match AnalyticSupport::of(s).map(|a| a.kind()) {
+    let reads_back = |kind: SupportKind| -> Result<bool> {
+        let made = AnalyticSupport::derive(k, kind, &b).and_then(|a| a.build(k, b.copy()));
+        match made {
+            Ok(_) => Ok(true),
+            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
+            Err(_) => Ok(false),
+        }
+    };
+    let label = match AnalyticSupport::of(s).map(|a| a.kind()) {
+        Some(kind) => reads_back(kind)?.then_some(kind),
+        None => None,
+    };
+    let kind = match label {
         None => SupportKindRecord::Free,
         Some(SupportKind::Plane) => SupportKindRecord::Plane,
         Some(SupportKind::Cylinder) => SupportKindRecord::Cylinder,
