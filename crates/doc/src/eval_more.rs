@@ -2313,6 +2313,20 @@ pub(super) fn tools_inside(mb: &ModelBody, reach: &[Option<Aabb3>]) -> bool {
     reach.iter().flatten().all(|tool| b.contains(tool.min) && b.contains(tool.max))
 }
 
+/// Whether some tool of `reach` meets the box of `mb`'s vertices, grown as [`exact_box`] grows
+/// the exact box. Every vertex lies in the body's exact box, so such a tool meets the exact box
+/// too and the exact box cannot show it apart of the body: it need not be measured. A tool cut
+/// through a wall of a rounded spline body reaches out of its mesh box ([`tools_inside`]), and
+/// measuring that body's exact box took the kernel over a minute for each of its holes.
+pub(super) fn tools_meet_vertices(mb: &ModelBody, reach: &[Option<Aabb3>]) -> bool {
+    let b: Aabb3 = mb.body.record().vertices.iter().map(|v| Vec3::new(v.point[0], v.point[1], v.point[2])).collect();
+    if b.is_empty() || !b.min.is_finite() || !b.max.is_finite() {
+        return false;
+    }
+    let b = b.inflated(2.0 * mb.body.record().tolerance + 1e-6);
+    reach.iter().flatten().any(|tool| b.meets(tool))
+}
+
 /// Whether the line through `at` along `dir` is known to pass farther than `reach` from the
 /// exact box of `mb` ([`exact_box`]) everywhere, and so from every point of the body. Unknown is
 /// never.
