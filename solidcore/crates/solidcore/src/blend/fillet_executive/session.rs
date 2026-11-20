@@ -2406,7 +2406,10 @@ impl<'target> FilletSession<'target> {
                     // The vertex's point feeds the opt-in vertex error note, as the
                     // fork's corrected overload reads it from the vertex itself.
                     let location = crate::topology::vertex::point(target, vertex).ok();
-                    return Ok(CornerCreation::Unsupported { location });
+                    return Ok(CornerCreation::Unsupported {
+                        location,
+                        cause: None,
+                    });
                 };
                 // the Roll-over's second pass (#10876): its corner at V, where the concave
                 // chain meets the cliff, looks for rail ends across the cliff's tangent seam;
@@ -2464,7 +2467,8 @@ impl<'target> FilletSession<'target> {
                 // The fork's (WR-697, 79d4763): three equal rounds of one convexity, every
                 // edge there blended, are the blend corner's Ball
                 // (SmBlendCorner::ClassifyBall, in SmFilletCorner::Create's three-solver
-                // case before the 3x3 corner); a failed classification builds no corner.
+                // case before the 3x3 corner); a failed classification builds no corner and
+                // its error stays with the note of the vertex.
                 // Since smlib#125 (278bf77) four or more rounds that one ball touches are
                 // the Ball too (ClassifyBall in the NxN case, before ClassifySetBack, where
                 // every edge use is a solver's). A chamfer corner's rounds are not
@@ -2502,9 +2506,12 @@ impl<'target> FilletSession<'target> {
                         &lookup,
                     );
                     match event {
-                        Err(_) => {
+                        Err(cause) => {
                             let location = crate::topology::vertex::point(target, vertex).ok();
-                            return Ok(CornerCreation::Unsupported { location });
+                            return Ok(CornerCreation::Unsupported {
+                                location,
+                                cause: Some(cause),
+                            });
                         }
                         Ok(crate::blend::blend_corner::BlendCornerEvent::Ball) => {
                             let mut ball = FilletCorner::new(
@@ -2528,8 +2535,8 @@ impl<'target> FilletSession<'target> {
                 // The fork's (smlib#104 61547af): a corner where every edge is blended,
                 // three or more, that the blend corner sets back and fills
                 // (SmBlendCorner::ClassifySetBack, in SmFilletCorner::Create's NxN case,
-                // after the Ball); a failed classification builds no corner. The others as
-                // before.
+                // after the Ball); a failed classification builds no corner and its error
+                // stays with the note of the vertex. The others as before.
                 if corner.blend.is_none()
                     && matches!(
                         corner.kind,
@@ -2553,9 +2560,12 @@ impl<'target> FilletSession<'target> {
                         set_back_fills,
                     );
                     match classified {
-                        Err(_) => {
+                        Err(cause) => {
                             let location = crate::topology::vertex::point(target, vertex).ok();
-                            return Ok(CornerCreation::Unsupported { location });
+                            return Ok(CornerCreation::Unsupported {
+                                location,
+                                cause: Some(cause),
+                            });
                         }
                         Ok(class)
                             if class.event

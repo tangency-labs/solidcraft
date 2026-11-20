@@ -585,6 +585,8 @@ impl<O: Copy + PartialEq> ErrorInfo<O> {
         self.location = location;
         self.code = code as i32;
         self.no_room_without_site = false;
+        // (not upstream: an earlier vertex's cause is not this one's)
+        self.corner_cause = None;
         self.status = status as i32;
         if comment.is_some() {
             self.comment = tblock_text(comment);
@@ -1215,6 +1217,10 @@ pub enum CornerCreation<O> {
     Unsupported {
         /// The vertex's point when the owner resolved it.
         location: Option<Point3>,
+        /// The error of the blend corner's classification that failed at the vertex, where
+        /// one did (not the fork's): the executive keeps it with its note of the vertex
+        /// ([`ErrorInfo::unsupported_corner_cause`]).
+        cause: Option<SolidError>,
     },
     /// The fork's (WR-697, tangency-labs/smlib e647dac): a corner the blend corner
     /// refuses with its reason (`SmBlendCorner::Classify`: a Swept turn the ball cannot
@@ -1266,7 +1272,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             |k, executive, vertex, pending| {
                 Ok(match create(k, executive, vertex, pending)? {
                     Some(corner) => CornerCreation::Created(corner),
-                    None => CornerCreation::Unsupported { location: None },
+                    None => CornerCreation::Unsupported {
+                        location: None,
+                        cause: None,
+                    },
                 })
             },
             error_info,
@@ -1281,7 +1290,8 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     /// the executive records the vertex, its location, `SM_FIL_FAILURE`,
     /// `FilletErrorType::CornerUnsupported` and `"Corner case not implemented"` (the
     /// fork's note) and still keeps the pending entry: retaining the note does not change
-    /// the operation's result or topology.
+    /// the operation's result or topology. A corner whose classification failed keeps that
+    /// error with the note ([`ErrorInfo::unsupported_corner_cause`]; not the fork's).
     ///
     /// A [`CornerCreation::Refused`] corner (the fork's) is noted at its vertex with its own error and
     /// reason, no later unsupported corner's note replaces it, and the operation fails
@@ -1339,8 +1349,8 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     );
                     refused = true;
                 }
-                CornerCreation::Unsupported { location } => {
-                    if !refused {
+                CornerCreation::Unsupported { location, cause } => {
+                    if !refused && vertex.is_some() {
                         self.error.note_vertex_error(
                             vertex,
                             location,
@@ -1348,6 +1358,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                             FilletErrorType::CornerUnsupported,
                             Some("Corner case not implemented"),
                         );
+                        self.error.corner_cause = cause;
                     }
                 }
             }
@@ -2225,6 +2236,7 @@ mod tests {
                     assert_eq!(vertex, Some(H(3)));
                     Ok(CornerCreation::Unsupported {
                         location: Some(point),
+                        cause: None,
                     })
                 },
                 Some(&mut info),
@@ -2247,6 +2259,56 @@ mod tests {
             executive.vertex_corner_map.get(&Some(H(3))),
             Some(&VertexEntry::SolverEdgeuses(vec![H(20)]))
         );
+    }
+
+    #[test]
+    fn an_unsupported_corner_keeps_the_error_of_its_failed_classification() {
+        use crate::blend::fillet_executive::p3::VertexEntry;
+
+        let k = Kernel::default();
+        let mut executive = corner_creation_executive();
+        executive.filleted_vertices = vec![Some(H(3))];
+        executive
+            .vertex_corner_map
+            .insert(Some(H(3)), VertexEntry::SolverEdgeuses(vec![H(20)]));
+        let classification =
+            SolidError::invalid_input("corner_creation_test", "classification failure");
+        let mut info = ErrorInfo::new(None);
+        executive
+            .create_fillet_corners_recording_vertex_errors(
+                &k,
+                |_, _, _, _| {
+                    Ok(CornerCreation::Unsupported {
+                        location: None,
+                        cause: Some(classification.clone()),
+                    })
+                },
+                Some(&mut info),
+            )
+            .unwrap();
+        // The corner stays unsupported, noted with the same code and status as before.
+        assert!(executive.corners.is_empty());
+        assert_eq!(
+            (executive.error.code, executive.error.status),
+            (
+                FilletErrorType::CornerUnsupported as i32,
+                FilStatus::Failure as i32
+            )
+        );
+        assert_eq!(
+            executive.error.unsupported_corner_cause(),
+            Some(&classification)
+        );
+        assert_eq!(info.unsupported_corner_cause(), Some(&classification));
+        // Another vertex's note is not that classification's.
+        executive.error.note_vertex_error(
+            Some(H(4)),
+            None,
+            FilStatus::Failure,
+            FilletErrorType::CornerUnsupported,
+            None,
+        );
+        assert_eq!(executive.error.unsupported_corner_cause(), None);
     }
 
     #[test]
