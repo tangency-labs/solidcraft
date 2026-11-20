@@ -167,6 +167,7 @@ const OP_ANGLE: &str = "curve::ellipse::p2::PolarConversion::angle_param_to_nurb
 const OP_EVAL_STEP: &str = "curve::ellipse::p2::Ellipse::evaluate_step";
 const OP_DROP: &str = "curve::ellipse::p2::Ellipse::drop_point_fast";
 const OP_TRANSFORM: &str = "curve::ellipse::p2::Ellipse::transform";
+const OP_MIRROR: &str = "curve::ellipse::p2::Ellipse::create_mirror_curve";
 
 /// `SM_SINE_10DEG`: the sine of 10 degrees (near-parallel checks).
 const SINE_10DEG: f64 = 0.173_648_177_666_930_35;
@@ -2430,6 +2431,47 @@ impl Ellipse {
             self.notify_post_edit(k)?;
         }
         Ok(())
+    }
+
+    /// A copy mirrored about the XY plane of `mirror_plane`, still an ellipse (a circle
+    /// stays a circle): its origin, X axis and Y axis mirrored, its radii, angular domain
+    /// and `inside_out` as they were, an existing NURB mirrored with it. The mirrored axes
+    /// are a right-handed placement whose normal `X × Y` is the reverse of the mirrored
+    /// normal, so each angle (and each NURB parameter) is the mirror of the same point and
+    /// the edge intervals stay valid. Not upstream (WR-21139, after WR-784 for lines):
+    /// `SmBSplineCurve::CreateMirrorCurve`, which an ellipse inherits, gives the plain
+    /// rational B-spline of the ellipse's NURB.
+    ///
+    /// # Errors
+    ///
+    /// [`CurveFailure::Defect`] (`SM_ERR`) when the mirrored placement cannot be set; those of
+    /// [`Ellipse::copy`] and [`BSplineCurve::create_mirror_curve`].
+    pub fn create_mirror_curve(&self, k: &Kernel, mirror_plane: &Axis2Placement) -> Result<Self> {
+        let mut ellipse = self.copy(k)?;
+        let mut position = Axis2Placement::IDENTITY;
+        position
+            .set_canonical(
+                mirror_plane.mirror_point(self.position.origin()),
+                mirror_plane.mirror_vector(self.position.x_axis()),
+                mirror_plane.mirror_vector(self.position.y_axis()),
+            )
+            .map_err(|e| {
+                Failure::new(
+                    OP_MIRROR,
+                    CurveFailure::Defect {
+                        why: "the mirror of the ellipse's placement was refused as a placement, \
+                              though a reflection keeps its axes unit and perpendicular",
+                    },
+                )
+                .caused_by(e)
+                .into_error()
+            })?;
+        ellipse.position = position;
+        if self.base.nurb.is_some() {
+            ellipse.base = self.base.create_mirror_curve(mirror_plane)?;
+            ellipse.notify_post_edit(k)?;
+        }
+        Ok(ellipse)
     }
 }
 
