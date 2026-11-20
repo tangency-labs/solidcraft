@@ -1,6 +1,8 @@
 //! Rounds that overlap where a wall is thinner than both (SolidCraft #871): a plate with a
 //! narrower block on top and a window through both, rounded along every edge of both end faces.
 //! And rounds whose bands never meet, one of them ending at a crease (SolidCraft #16729).
+//! And rounds on the top edges of a block whose corners a sphere trims, whose rails cross past
+//! the edges' ends (SolidCraft #18563).
 #![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::panic)] // test helpers
 
 mod common;
@@ -370,5 +372,91 @@ fn a_round_ending_at_a_crease_is_not_refused_over_rounds_it_never_reaches() {
             ..
         }) => {}
         other => panic!("crease at 0.5, A with C: {other:?}"),
+    }
+}
+
+/// SolidCraft #18563: a 60 x 40 x 25 block (`s` times as large) and a sphere of radius 35.75
+/// about its centre, intersected, so the sphere trims every vertical edge and the top face is
+/// the rectangle less the corners outside the circle of radius `rho` with
+/// `rho^2 = 35.75^2 - 12.5^2` about its centre. The four top edges end on the sphere and share
+/// no vertex.
+fn sphere_trimmed_block(s: f64) -> (Body, [usize; 4]) {
+    all_fixes();
+    let block = make_box([-30.0 * s, -20.0 * s, 0.0], [60.0 * s, 40.0 * s, 25.0 * s]).unwrap();
+    let ball = make_sphere([0.0, 0.0, 12.5 * s], 35.75 * s).unwrap();
+    let part = boolean(block, ball, BooleanOp::Intersect).unwrap().unwrap();
+    let top = [
+        [30.0, -10.0, 25.0],
+        [-30.0, 10.0, 25.0],
+        [-15.0, -20.0, 25.0],
+        [15.0, 20.0, 25.0],
+    ]
+    .map(|p| edge_at(&part, p.map(|c| c * s)));
+    (part, top)
+}
+
+/// Rounding the four top edges of [`sphere_trimmed_block`]: past the edges' ends, the rails of
+/// two neighbouring rounds on the top face run on as the lines `x = 30 - r` and `y = 20 - r`
+/// until they meet the sphere. They cross at `(30 - r, 20 - r)`, inside the top face while
+/// `(30 - r)^2 + (20 - r)^2 < rho^2`, so the largest round that fits solves
+/// `2 r^2 - 100 r + 1300 - rho^2 = 0`: `r = 25 - sqrt(625 - (1300 - rho^2) / 2)`, about 1.850.
+/// (At that radius the rounds' surfaces meet only at that point: their mitre's other points lie
+/// outside the sphere.) A larger round, on all four edges or on two neighbours alone, is refused
+/// for want of room and leaves the part as it was (the band check finds the overlap past the
+/// edges' ends; the largest size that fits is not named there). A smaller one builds a valid
+/// closed body of 14 faces, 38 edges and 26 vertices: the part's 10 faces, 26 edges and 18
+/// vertices (six planes and the four sphere faces between them; eight vertices round the top
+/// face, eight round the bottom, and two that split the side circles on the faces x = 30 and
+/// y = -20 at z = 12.5), and each round adds a face, three edges and two vertices.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn rounds_whose_rails_cross_past_their_edges_ends_on_a_sphere_are_refused() {
+    let rho2 = 35.75_f64.powi(2) - 12.5_f64.powi(2);
+    let fit = 25.0 - (625.0 - (1300.0 - rho2) / 2.0).sqrt();
+    assert!((fit - 1.850).abs() < 1e-3, "{fit}");
+    for s in [1.0, 40.0] {
+        let (part, top) = sphere_trimmed_block(s);
+        assert_eq!(part.counts().unwrap(), [10, 26, 18], "part at scale {s}");
+        let before = volume(&part);
+        // all four edges, and the two neighbours at one corner alone; the body is left as it was
+        for edges in [&top[..], &[top[0], top[3]][..]] {
+            for r in [2.0, fit + 0.01] {
+                let c = part.copy().unwrap();
+                match blend(&c, Blend::Round, edges, &[r * s], &[], Corners::Filled) {
+                    Err(Error::NoRoom) => {}
+                    other => panic!("scale {s}, {} edges, round {r}: {other:?}", edges.len()),
+                }
+                assert_eq!(c.counts().unwrap(), [10, 26, 18], "scale {s}, round {r}");
+                assert!(rel(volume(&c), before) < 1e-12, "scale {s}, round {r}");
+            }
+        }
+        // two opposite edges share the top face but their bands lie apart: they build at 2, two
+        // faces, six edges and four vertices more than the part
+        let c = part.copy().unwrap();
+        blend(
+            &c,
+            Blend::Round,
+            &[top[0], top[1]],
+            &[2.0 * s],
+            &[],
+            Corners::Filled,
+        )
+        .unwrap_or_else(|e| panic!("scale {s}, opposite edges: {e:?}"));
+        assert_eq!(
+            c.counts().unwrap(),
+            [12, 32, 22],
+            "scale {s}, opposite edges"
+        );
+        assert!(c.check(CheckLevel::All).unwrap().is_valid(), "scale {s}");
+        for r in [1.0, fit - 0.01] {
+            let c = part.copy().unwrap();
+            blend(&c, Blend::Round, &top, &[r * s], &[], Corners::Filled)
+                .unwrap_or_else(|e| panic!("scale {s}, round {r}: {e:?}"));
+            assert_eq!(c.counts().unwrap(), [14, 38, 26], "scale {s}, round {r}");
+            assert!(
+                c.check(CheckLevel::All).unwrap().is_valid(),
+                "scale {s}, round {r}"
+            );
+        }
     }
 }

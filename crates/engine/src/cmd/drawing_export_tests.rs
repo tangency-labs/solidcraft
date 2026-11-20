@@ -163,11 +163,12 @@ fn a_failed_view_is_named_and_nothing_is_written() {
     let (mut s, sheet, [front, top]) = front_and_top();
     let folder = Folder::new("drawing-export-failed");
     let path = folder.path("sheet.svg");
-    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"visual_style": "shaded_visible"}}));
+    crate::drawing_scene::tests::not_drawable_yet(&mut s, top);
     let why = refused(&mut s, json!({"sheet": ids::encode(sheet), "path": path}));
-    assert!(why.contains(&format!("views on the sheet failed: {} (not supported yet: shaded views with lines", ids::encode(top))), "{why}");
+    let reason = crate::drawing_scene::tests::NOT_DRAWABLE_YET;
+    assert!(why.contains(&format!("views on the sheet failed: {} ({reason}", ids::encode(top))), "{why}");
     assert!(!why.contains(&ids::encode(front)) && !std::path::Path::new(&path).exists(), "{why}");
-    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"visual_style": "visible"}}));
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"visual_style": "visible", "pose": null}}));
     for level in 0..=MAX_PLACEMENT_DEPTH as u64 + 1 {
         nest(&mut s, level);
     }
@@ -277,7 +278,7 @@ fn a_sheet_exports_on_its_paper() {
             let why = refused(&mut s, json!({"sheet": id, "format": "png", "paper": name, "colour": colour}));
             assert!(why.contains("a blue `paper` is rgb") && why.contains(colour), "{name}, {colour}: {why}");
         }
-        assert!(refused(&mut s, json!({"sheet": id, "format": "dxf", "paper": name})).contains("not supported yet: DXF"), "{name}");
+        assert!(refused(&mut s, json!({"sheet": id, "format": "dxf", "paper": name})).contains("a dxf has no paper"), "{name}");
     }
     assert!(refused(&mut s, json!({"sheet": id, "paper": "cyan"})).contains("paper"));
     assert!(refused(&mut s, json!({"sheet": id, "paper": null})).contains("paper"));
@@ -339,8 +340,9 @@ fn what_it_cant_write_is_refused() {
     let id = ids::encode(sheet);
     let long = format!("{}.svg", "a".repeat(MAX_PATH_BYTES));
     for (p, why) in [
-        (json!({"sheet": id, "format": "dxf"}), "not supported yet: DXF"),
-        (json!({"sheet": id, "format": "dxf", "path": folder.path("sheet.dxf")}), "not supported yet: DXF"),
+        (json!({"sheet": id, "format": "dxf", "path": folder.path("sheet.svg")}), "path must be a .dxf file"),
+        (json!({"sheet": id, "format": "dxf", "dpi": 300}), "`dpi` and `colour` are for png only"),
+        (json!({"format": "dxf", "sheets": [id]}), "`sheets` is for pdf only"),
         (json!({"sheet": id, "format": "pdf", "paper": "blueprint"}), "a pdf is on white paper"),
         (json!({"sheet": id, "format": "pdf", "dpi": 300}), "`dpi` and `colour` are for png only"),
         (json!({"sheet": id, "format": "pdf", "path": folder.path("sheet.svg")}), "path must be a .pdf file"),
@@ -497,7 +499,7 @@ fn failed_sheet_sketches_are_named_before_any_file_is_written() {
     assert_eq!(std::fs::read(&existing).unwrap(), b"existing drawing bytes");
     assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
     assert_eq!((s.evaluations, s.undo.len(), s.redo.len()), (evaluations, undo, redo));
-    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"visual_style": "shaded_visible"}}));
+    crate::drawing_scene::tests::not_drawable_yet(&mut s, top);
     let why = refused(&mut s, json!({"sheet": ids::encode(sheet), "path": missing}));
     assert!(why.contains(&format!("views on the sheet failed: {} (", ids::encode(top))), "{why}");
     assert!(why.contains(&format!("sketches on the sheet failed: {bad} (")), "{why}");
@@ -732,4 +734,111 @@ fn a_shaded_view_is_embedded_in_the_pdf() {
     let pages = pdf_pages(&bytes);
     assert_eq!(pages[0].1.matches(" Do").count(), 2, "the front view's picture, and the top view's, which follows it");
     assert_eq!(run(&mut s, CMD, json!({"sheet": ids::encode(sheet), "format": "pdf"}))["data"], reply["data"], "the same bytes twice");
+}
+
+/// A DXF read back: each entity's type, its layer (group 8) and its own weight (group 370), in
+/// file order, and each layer's name, linetype and weight from the LAYER table.
+fn dxf_entities(text: &str) -> (Vec<(String, String, Option<i32>)>, Vec<(String, String, i32)>) {
+    let lines: Vec<&str> = text.lines().map(str::trim).collect();
+    let pairs: Vec<(&str, &str)> = lines.chunks(2).filter_map(|c| Some((c[0], *c.get(1)?))).collect();
+    let (mut entities, mut layers) = (Vec::new(), Vec::new());
+    let mut section = "";
+    let mut i = 0;
+    while i < pairs.len() {
+        let (code, value) = pairs[i];
+        if code == "2" && i > 0 && pairs[i - 1] == ("0", "SECTION") {
+            section = value;
+        }
+        if pairs[i] == ("0", "ENDSEC") {
+            section = "";
+        }
+        if code == "0" && (section == "ENTITIES" && value != "ENDSEC" || section == "TABLES" && value == "LAYER") {
+            let kind = value.to_string();
+            let mut j = i + 1;
+            let (mut name, mut layer, mut linetype, mut weight) = (String::new(), String::new(), String::new(), None);
+            while j < pairs.len() && pairs[j].0 != "0" {
+                match pairs[j] {
+                    ("2", v) => name = v.to_string(),
+                    ("8", v) => layer = v.to_string(),
+                    ("6", v) => linetype = v.to_string(),
+                    ("370", v) => weight = v.parse().ok(),
+                    _ => {}
+                }
+                j += 1;
+            }
+            if section == "ENTITIES" {
+                entities.push((kind, layer, weight));
+            } else if !name.is_empty() {
+                layers.push((name, linetype, weight.unwrap_or(-3)));
+            }
+            i = j;
+            continue;
+        }
+        i += 1;
+    }
+    (entities, layers)
+}
+
+/// A sheet's DXF: its views' visible edges on VISIBLE at the wide line's weight (0.5 mm, 50), its
+/// hidden edges on HIDDEN with the HIDDEN linetype at the narrow line's (0.25 mm, 25), the title
+/// block's lines and text on their layers, the borders too. In the reply as text, or written to a
+/// path, the same bytes; a shaded view's picture is left out and counted.
+#[test]
+fn a_sheet_exports_as_dxf_with_a_layer_for_each_kind_of_line() {
+    let (mut s, sheet, [front, top]) = front_and_top();
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 10, "height": 10, "corner": [30, 40, 5], "operation": "cut", "targets": ["Block"]}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"visual_style": "visible_hidden"}}));
+    let block = serde_json::to_value(solidcraft_geom::title_block::default_block()).unwrap();
+    run(&mut s, "drawing.sheet.set", json!({"sheet": ids::encode(sheet), "title_block": block}));
+    let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet), "format": "dxf"}));
+    let schema = output_schema_for::<ExportResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+    assert_eq!((&reply["format"], reply.get("svg"), reply.get("data")), (&json!("dxf"), None, None), "{reply}");
+    assert_eq!(reply["report"]["pictures_left_out"], json!(0));
+    let text = reply["dxf"].as_str().unwrap();
+    assert!(text.contains("$INSUNITS") && text.ends_with("EOF\n"), "a whole DXF in millimetres");
+    let (entities, layers) = dxf_entities(text);
+    let on = |layer: &str| entities.iter().filter(|(_, l, _)| l == layer).count();
+    let layer = |name: &str| layers.iter().find(|(n, ..)| n == name).cloned();
+    assert_eq!(layer("VISIBLE"), Some(("VISIBLE".into(), "Continuous".into(), 50)), "{layers:?}");
+    assert_eq!(layer("HIDDEN"), Some(("HIDDEN".into(), "HIDDEN".into(), 25)), "{layers:?}");
+    assert!(layer("TEXT").is_some() && layer("THIN").is_some(), "{layers:?}");
+    assert!(on("VISIBLE") > 8 && on("HIDDEN") > 0 && on("TEXT") > 12 && on("THIN") > 0, "{:?}", layers);
+    assert!(entities.iter().filter(|(_, l, _)| l == "HIDDEN").all(|(_, _, w)| *w == Some(25)), "hidden edges at the narrow line");
+    assert!(entities.iter().all(|(_, l, _)| !l.is_empty() && l != "0"), "everything on a named layer");
+    let folder = Folder::new("drawing-export-dxf");
+    let path = folder.path("Sheet 1.DXF");
+    let written = run(&mut s, CMD, json!({"sheet": ids::encode(sheet), "format": "dxf", "path": path}));
+    assert_eq!((written["path"].as_str(), written.get("dxf")), (Some(path.as_str()), None), "{written}");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+    // A shaded view's lines become its picture, which a DXF can't hold.
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"visual_style": "shaded"}}));
+    let shaded = run(&mut s, CMD, json!({"sheet": ids::encode(sheet), "format": "dxf"}));
+    assert_eq!(shaded["report"]["pictures_left_out"], json!(1), "{}", shaded["report"]);
+}
+
+/// `drawing.print` is the whole drawing's PDF, as `drawing.export` makes it with no sheet named:
+/// the same bytes, every sheet a page, asking to print at actual size; with a path, written there.
+#[test]
+fn print_is_the_whole_drawings_pdf() {
+    let (mut s, first, _) = front_and_top();
+    let added = run(&mut s, "drawing.sheet.add", json!({}));
+    let second = added["sheet"].clone();
+    let printed = run(&mut s, "drawing.print", json!({}));
+    let exported = run(&mut s, CMD, json!({"format": "pdf"}));
+    assert_eq!(printed["data"], exported["data"]);
+    assert_eq!(printed["pages"], json!([ids::encode(first), second]), "{printed}");
+    let bytes = base64_decode(printed["data"].as_str().unwrap()).unwrap();
+    assert!(String::from_utf8_lossy(&bytes).contains("/PrintScaling /None"));
+    let folder = Folder::new("drawing-print");
+    let path = folder.path("Drawing.pdf");
+    run(&mut s, "drawing.print", json!({"path": path}));
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    for (p, why) in [(json!({"path": folder.path("Drawing.svg")}), "path must be a .pdf file"), (json!({"sheet": "Sheet 1"}), "sheet")] {
+        let message = s.execute("drawing.print", &p).unwrap_err().to_string();
+        assert!(message.contains(why), "{p}: {message}");
+    }
 }
