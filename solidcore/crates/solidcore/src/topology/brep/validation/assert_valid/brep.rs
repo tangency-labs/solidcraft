@@ -20,8 +20,9 @@
 //! `CollectRegions`' linear stack and result searches use companion sets (same order).
 //! `AssertValid` does not run `ContainsCoincidentTopology`, which is not ported: upstream
 //! folds in a result that is always true and leaves its report (test 15) commented out, so
-//! the search never changed a check's result (it did edit the body: its queries created the
-//! faces' UV trim curves). It cannot be a validity test: the bodies solidcore builds keep
+//! the search's own answer never counted (it did edit the body: its queries created the
+//! faces' missing UV trim curves and moved the ends of existing ones, which the later tests
+//! then saw). It cannot be a validity test: the bodies solidcore builds keep
 //! coincident topology on purpose (a pinch where a hole is tangent to a face, solids
 //! touching along an edge, a sweep's glued lamina edges). A face's own coincident vertices
 //! and edges are its tests 32, 33 and 34.
